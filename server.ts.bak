@@ -1,0 +1,408 @@
+import express from 'express';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { GoogleGenAI, Type } from '@google/genai';
+import { createServer as createViteServer } from 'vite';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const app = express();
+const PORT = 3000;
+
+app.use(express.json({ limit: '20mb' }));
+
+// Helper to initialize Gemini API safely
+function getAiClient() {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    console.warn('GEMINI_API_KEY environment variable is not set!');
+  }
+  return new GoogleGenAI({
+    apiKey: apiKey || '',
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      },
+    },
+  });
+}
+
+// Health Check API
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    geminiKeyPresent: !!process.env.GEMINI_API_KEY,
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// 1. Exam Generator API Endpoint
+app.post('/api/generate-exam', async (req, res) => {
+  try {
+    const { subject, topic, gradeLevel, difficulty, questionTypes, totalMarks, durationMinutes, additionalInstructions } = req.body;
+
+    if (!subject || !topic) {
+      return res.status(400).json({ error: 'Subject and topic are required.' });
+    }
+
+    const ai = getAiClient();
+    const prompt = `Generate a high-quality exam paper and matching marking rubric based on the following specs:
+Subject: ${subject}
+Topic: ${topic}
+Grade/Year Level: ${gradeLevel || 'Secondary / High School'}
+Difficulty Level: ${difficulty || 'Intermediate'}
+Requested Question Types: ${(questionTypes || ['short_answer', 'essay', 'calculation']).join(', ')}
+Total Marks Target: ${totalMarks || 30}
+Duration Target: ${durationMinutes || 45} minutes
+Additional Instructions: ${additionalInstructions || 'Ensure clear cognitive levels and unambiguous mark allocations.'}
+
+Return JSON with:
+- title: string
+- subject: string
+- topic: string
+- gradeLevel: string
+- totalMarks: number (sum of question maxMarks must equal totalMarks)
+- durationMinutes: number
+- questions: array of { id, number (e.g. Q1, Q2), questionText, maxMarks, questionType ("short_answer" | "essay" | "mcq" | "calculation"), modelAnswer, options (optional array for MCQ) }
+- rubrics: array of { questionId, questionNumber, maxMarks, criteria: array of { id, criterion, marksAvailable, description } }`;
+
+    const systemInstruction = `You are Marker AI's Exam Prep engine for schools and universities.
+You create rigorous, curriculum-aligned exam papers with matching detailed marking rubrics.
+RULES:
+1. The sum of maxMarks across all questions MUST EXACTLY EQUAL totalMarks requested (${totalMarks || 30}).
+2. For every question, the sum of criteria marksAvailable in its rubric MUST EXACTLY EQUAL that question's maxMarks.
+3. Include model answers for every question.
+4. Return valid JSON only.`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.6-flash',
+      contents: prompt,
+      config: {
+        systemInstruction,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            title: { type: Type.STRING },
+            subject: { type: Type.STRING },
+            topic: { type: Type.STRING },
+            gradeLevel: { type: Type.STRING },
+            totalMarks: { type: Type.INTEGER },
+            durationMinutes: { type: Type.INTEGER },
+            questions: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  id: { type: Type.STRING },
+                  number: { type: Type.STRING },
+                  questionText: { type: Type.STRING },
+                  maxMarks: { type: Type.INTEGER },
+                  questionType: { type: Type.STRING },
+                  modelAnswer: { type: Type.STRING },
+                  options: { type: Type.ARRAY, items: { type: Type.STRING } },
+                },
+                required: ['id', 'number', 'questionText', 'maxMarks', 'questionType', 'modelAnswer'],
+              },
+            },
+            rubrics: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  questionId: { type: Type.STRING },
+                  questionNumber: { type: Type.STRING },
+                  maxMarks: { type: Type.INTEGER },
+                  criteria: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        id: { type: Type.STRING },
+                        criterion: { type: Type.STRING },
+                        marksAvailable: { type: Type.INTEGER },
+                        description: { type: Type.STRING },
+                      },
+                      required: ['id', 'criterion', 'marksAvailable'],
+                    },
+                  },
+                },
+                required: ['questionId', 'questionNumber', 'maxMarks', 'criteria'],
+              },
+            },
+          },
+          required: ['title', 'subject', 'topic', 'gradeLevel', 'totalMarks', 'durationMinutes', 'questions', 'rubrics'],
+        },
+      },
+    });
+
+    const generatedJson = JSON.parse(response.text || '{}');
+    generatedJson.id = 'exam-' + Date.now();
+    generatedJson.createdAt = new Date().toISOString();
+
+    res.json({ success: true, examPaper: generatedJson });
+  } catch (error: any) {
+    console.error('Error generating exam:', error);
+    res.status(500).json({ error: error.message || 'Failed to generate exam paper.' });
+  }
+});
+
+// 2. Marking Engine API Endpoint
+app.post('/api/mark-script', async (req, res) => {
+  try {
+    const { examPaper, studentScript } = req.body;
+
+    if (!examPaper || !studentScript) {
+      return res.status(400).json({ error: 'examPaper and studentScript are required.' });
+    }
+
+    const ai = getAiClient();
+
+    const systemInstruction = `You are Marker AI, an exam-marking assistant for schools and universities.
+
+ROLE
+Grade student answers strictly against the provided rubric/answer key. Be consistent, fair, and evidence-based.
+
+WHAT TO DO FOR EACH QUESTION
+1. Read the question and its rubric criteria.
+2. Read the student's answer for that question only.
+3. Match answer content against each rubric criterion.
+4. Award partial marks where partially correct — never all-or-nothing unless rubric says so.
+5. Ignore spelling/grammar unless the rubric specifically grades language.
+6. Flag (do not silently penalize) illegible, blank, or off-topic answers or possible plagiarism (e.g. word-for-word copy of model answer).
+
+FLAG OPTIONS:
+- "none": Answer is legible and evaluates normally.
+- "illegible": Handwriting or text is unreadable.
+- "blank": Student left question blank or explicitly wrote blank/N/A.
+- "off_topic": Answer is completely irrelevant to the question asked.
+- "possible_plagiarism": Answer appears copied word-for-word from external material or model answer without reasoning.
+- "needs_teacher_review": Low confidence or highly ambiguous student response requiring human eyes.
+
+OUTPUT RULES
+- Return an array of results, one per question.
+- Feedback to student must be 1-2 constructive, encouraging, evidence-based sentences.
+- Total awarded_marks for a question must never exceed its max_marks.`;
+
+    const prompt = `Evaluate the following student answer script against the exam paper and rubric.
+
+STUDENT NAME: ${studentScript.studentName} (ID: ${studentScript.studentId})
+
+EXAM PAPER & RUBRIC:
+${JSON.stringify(examPaper, null, 2)}
+
+STUDENT ANSWERS:
+${JSON.stringify(studentScript.answers, null, 2)}
+
+Return a JSON array where each item represents the mark evaluation for a question:
+- questionNumber: string (e.g. Q1)
+- questionId: string
+- maxMarks: number
+- awardedMarks: number
+- criteriaBreakdown: array of { criterion: string, marksAvailable: number, marksAwarded: number, reason: string }
+- feedbackToStudent: string
+- flag: "none" | "illegible" | "blank" | "off_topic" | "possible_plagiarism" | "needs_teacher_review"`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.6-flash',
+      contents: prompt,
+      config: {
+        systemInstruction,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              questionNumber: { type: Type.STRING },
+              questionId: { type: Type.STRING },
+              maxMarks: { type: Type.INTEGER },
+              awardedMarks: { type: Type.NUMBER },
+              criteriaBreakdown: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    criterion: { type: Type.STRING },
+                    marksAvailable: { type: Type.NUMBER },
+                    marksAwarded: { type: Type.NUMBER },
+                    reason: { type: Type.STRING },
+                  },
+                  required: ['criterion', 'marksAvailable', 'marksAwarded', 'reason'],
+                },
+              },
+              feedbackToStudent: { type: Type.STRING },
+              flag: { type: Type.STRING },
+            },
+            required: ['questionNumber', 'questionId', 'maxMarks', 'awardedMarks', 'criteriaBreakdown', 'feedbackToStudent', 'flag'],
+          },
+        },
+      },
+    });
+
+    const results = JSON.parse(response.text || '[]');
+
+    // Calculate totals
+    let totalAwarded = 0;
+    let totalMax = 0;
+    const flagsDetected: string[] = [];
+
+    results.forEach((r: any) => {
+      totalAwarded += r.awardedMarks || 0;
+      totalMax += r.maxMarks || 0;
+      if (r.flag && r.flag !== 'none' && !flagsDetected.includes(r.flag)) {
+        flagsDetected.push(r.flag);
+      }
+    });
+
+    const percentage = totalMax > 0 ? Math.round((totalAwarded / totalMax) * 100) : 0;
+
+    const markedScript = {
+      ...studentScript,
+      status: 'marked',
+      results,
+      totalAwardedMarks: Math.round(totalAwarded * 10) / 10,
+      maxTotalMarks: totalMax,
+      percentage,
+      flags: flagsDetected,
+      teacherApproved: false,
+    };
+
+    res.json({ success: true, markedScript });
+  } catch (error: any) {
+    console.error('Error marking script:', error);
+    res.status(500).json({ error: error.message || 'Failed to mark student script.' });
+  }
+});
+
+// 3. Auto-draft / Refine Rubric API
+app.post('/api/generate-rubric', async (req, res) => {
+  try {
+    const { questionText, maxMarks, modelAnswer } = req.body;
+
+    const ai = getAiClient();
+    const prompt = `Create a granular marking rubric for this exam question:
+Question: "${questionText}"
+Max Marks: ${maxMarks}
+Model Answer: "${modelAnswer || 'N/A'}"
+
+Break down into specific criteria whose total points sum to ${maxMarks}.`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.6-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            criteria: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  id: { type: Type.STRING },
+                  criterion: { type: Type.STRING },
+                  marksAvailable: { type: Type.NUMBER },
+                  description: { type: Type.STRING },
+                },
+                required: ['id', 'criterion', 'marksAvailable'],
+              },
+            },
+          },
+          required: ['criteria'],
+        },
+      },
+    });
+
+    const data = JSON.parse(response.text || '{}');
+    res.json({ success: true, criteria: data.criteria || [] });
+  } catch (error: any) {
+    console.error('Error generating rubric:', error);
+    res.status(500).json({ error: error.message || 'Failed to generate rubric.' });
+  }
+});
+
+// 4. Summarize AI Endpoint
+app.post('/api/ai/summarize', async (req, res) => {
+  try {
+    const { text } = req.body;
+    if (!text) return res.status(400).json({ error: 'Text required' });
+
+    const ai = getAiClient();
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.6-flash',
+      contents: `Summarize the following text into 1 concise, high-impact bullet point insight for academic study:\n\n"${text}"`,
+    });
+
+    res.json({ success: true, summary: response.text?.trim() || 'Key insight summarized.' });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Summarization failed' });
+  }
+});
+
+// 5. Translate AI Endpoint
+app.post('/api/ai/translate', async (req, res) => {
+  try {
+    const { text, targetLanguage } = req.body;
+    if (!text || !targetLanguage) return res.status(400).json({ error: 'Text and targetLanguage required' });
+
+    const ai = getAiClient();
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.6-flash',
+      contents: `Translate the following academic text accurately into ${targetLanguage}:\n\n"${text}"`,
+    });
+
+    res.json({ success: true, translation: response.text?.trim() || 'Translation complete.' });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Translation failed' });
+  }
+});
+
+// 6. Claude Assistant Chat Endpoint
+app.post('/api/ai/chat', async (req, res) => {
+  try {
+    const { query, documentContext } = req.body;
+    if (!query) return res.status(400).json({ error: 'Query required' });
+
+    const ai = getAiClient();
+    const prompt = `You are Claude AI Assistant inside AI Marker Hub.
+Answer the user's question concisely, accurately, and professionally.
+Document Context: ${documentContext || 'IB Physics and Computer Science Exam Documents'}
+
+User Query: "${query}"`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.6-flash',
+      contents: prompt,
+    });
+
+    res.json({ success: true, answer: response.text?.trim() || 'Answer generated.' });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Chat failed' });
+  }
+});
+
+// Vite Middleware Integration
+async function startServer() {
+  if (process.env.NODE_ENV !== 'production') {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+  }
+
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Marker AI server running on http://0.0.0.0:${PORT}`);
+  });
+}
+
+startServer();

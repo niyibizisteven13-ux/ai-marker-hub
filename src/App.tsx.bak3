@@ -1,0 +1,583 @@
+﻿import React, { useState, useEffect } from 'react';
+import { 
+  NavigationTab, 
+  HighlightColor, 
+  DocumentHighlight, 
+  StudyDeck, 
+  Flashcard, 
+  AICard, 
+  HardwarePenState, 
+  WorkflowStep, 
+  ExamPaper, 
+  StudentScript,
+  UploadedFile
+} from './types';
+import { 
+  SAMPLE_EXAMS, 
+  SAMPLE_STUDENT_SCRIPTS, 
+  INITIAL_HIGHLIGHTS, 
+  INITIAL_DECKS, 
+  INITIAL_FLASHCARDS, 
+  INITIAL_AI_CARDS, 
+  INITIAL_PEN_STATE 
+} from './data/sampleExams';
+import { TopNavbar } from './components/TopNavbar';
+import { LeftSidebar } from './components/LeftSidebar';
+import { CenterWorkspace } from './components/CenterWorkspace';
+import { RightSidebar } from './components/RightSidebar';
+import { FloatingSmartToolbar } from './components/FloatingSmartToolbar';
+import { HardwareToast } from './components/HardwareToast';
+import { processFileClientSide } from './utils/fileProcessor';
+
+export default function App() {
+  const [darkMode, setDarkMode] = useState<boolean>(false);
+  const [activeTab, setActiveTab] = useState<NavigationTab>('documents');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
+
+  // Core Claude AI Marker Data State
+  const [highlights, setHighlights] = useState<DocumentHighlight[]>(INITIAL_HIGHLIGHTS);
+  const [decks, setDecks] = useState<StudyDeck[]>(INITIAL_DECKS);
+  const [flashcards, setFlashcards] = useState<Flashcard[]>(INITIAL_FLASHCARDS);
+  const [aiCards, setAiCards] = useState<AICard[]>(INITIAL_AI_CARDS);
+  const [penState, setPenState] = useState<HardwarePenState>(INITIAL_PEN_STATE);
+  const [showPenToast, setShowPenToast] = useState<boolean>(false);
+
+  // Exam Auto-Grader Workflow State
+  const [examPaper, setExamPaper] = useState<ExamPaper | null>(null);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [masterGuideFiles, setMasterGuideFiles] = useState<UploadedFile[]>([]);
+  const [studentScripts, setStudentScripts] = useState<StudentScript[]>(SAMPLE_STUDENT_SCRIPTS);
+  const [currentStep, setCurrentStep] = useState<WorkflowStep>(1);
+
+  // Text Selection & Floating Smart Toolbar State
+  const [selectedText, setSelectedText] = useState<string>('');
+  const [selectionPos, setSelectionPos] = useState<{ top: number; left: number } | null>(null);
+  const [isAiLoading, setIsAiLoading] = useState<boolean>(false);
+
+  // Toggle Dark Mode Class on Document root
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [darkMode]);
+
+  // Handle Text Selection from Center Document Reader
+  const handleTextSelection = (text: string, pos: { top: number; left: number }) => {
+    setSelectedText(text);
+    setSelectionPos(pos);
+  };
+
+  // Close Floating Toolbar
+  const handleCloseToolbar = () => {
+    setSelectedText('');
+    setSelectionPos(null);
+  };
+
+  // 1. Highlight Tool Action
+  const handleHighlight = (color: HighlightColor) => {
+    if (!selectedText) return;
+    const newHighlight: DocumentHighlight = {
+      id: 'hl-' + Date.now(),
+      docId: examPaper?.id || 'doc-1',
+      docTitle: examPaper?.title || 'IB Physics HL Document',
+      text: selectedText,
+      color,
+      createdAt: 'Just now',
+      category: 'Text Highlight',
+    };
+
+    setHighlights([newHighlight, ...highlights]);
+
+    // Also add an AI Card in Right Sidebar
+    const newCard: AICard = {
+      id: 'card-' + Date.now(),
+      type: 'summary',
+      title: 'Highlight Captured',
+      content: `Saved highlight "${selectedText.slice(0, 80)}..." in ${color.toUpperCase()} color.`,
+      sourceText: selectedText,
+      timestamp: 'Just now',
+    };
+    setAiCards([newCard, ...aiCards]);
+
+    handleCloseToolbar();
+  };
+
+  // 2. Summarize Tool Action
+  const handleSummarize = async (text: string) => {
+    setIsAiLoading(true);
+    handleCloseToolbar();
+
+    try {
+      const res = await fetch('/api/ai/summarize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      const data = await res.json();
+
+      const newCard: AICard = {
+        id: 'summary-' + Date.now(),
+        type: 'summary',
+        title: 'Key Bullet Point Summary',
+        content: data.summary || `â€¢ Key concept: ${text}`,
+        sourceText: text,
+        timestamp: 'Just now',
+      };
+
+      setAiCards([newCard, ...aiCards]);
+    } catch (err) {
+      const fallbackCard: AICard = {
+        id: 'summary-' + Date.now(),
+        type: 'summary',
+        title: 'Key Bullet Point Summary',
+        content: `â€¢ ${text.slice(0, 120)}... (Synthesized core insight for revision)`,
+        sourceText: text,
+        timestamp: 'Just now',
+      };
+      setAiCards([fallbackCard, ...aiCards]);
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
+
+  // 3. Translate Tool Action
+  const handleTranslate = async (text: string, targetLanguage: string) => {
+    setIsAiLoading(true);
+    handleCloseToolbar();
+
+    try {
+      const res = await fetch('/api/ai/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, targetLanguage }),
+      });
+      const data = await res.json();
+
+      const newCard: AICard = {
+        id: 'trans-' + Date.now(),
+        type: 'translation',
+        title: `Translation (${targetLanguage})`,
+        content: data.translation || `Translated to ${targetLanguage}`,
+        sourceText: text,
+        timestamp: 'Just now',
+        language: targetLanguage,
+      };
+
+      setAiCards([newCard, ...aiCards]);
+    } catch (err) {
+      const fallbackCard: AICard = {
+        id: 'trans-' + Date.now(),
+        type: 'translation',
+        title: `Translation (${targetLanguage})`,
+        content: `[${targetLanguage} Translation] ${text}`,
+        sourceText: text,
+        timestamp: 'Just now',
+      };
+      setAiCards([fallbackCard, ...aiCards]);
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
+
+  // 4. Capture to Flashcard Deck Tool Action
+  const handleCaptureFlashcard = (text: string) => {
+    handleCloseToolbar();
+
+    const newFlashcard: Flashcard = {
+      id: 'fc-' + Date.now(),
+      deckId: decks[0]?.id || 'deck-physics',
+      front: `Key Concept / Question regarding: "${text.slice(0, 60)}..."`,
+      back: text,
+      sourceDocTitle: examPaper?.title || 'IB Physics HL',
+      createdAt: 'Just now',
+    };
+
+    setFlashcards([newFlashcard, ...flashcards]);
+
+    // Update Deck Count
+    if (decks.length > 0) {
+      const updatedDecks = decks.map((d, i) =>
+        i === 0 ? { ...d, cardsCount: d.cardsCount + 1 } : d
+      );
+      setDecks(updatedDecks);
+    }
+
+    const newCard: AICard = {
+      id: 'fc-card-' + Date.now(),
+      type: 'flashcard',
+      title: 'Captured to Study Deck',
+      content: `Added new flashcard to deck "${decks[0]?.title || 'Physics'}".`,
+      sourceText: text,
+      timestamp: 'Just now',
+    };
+
+    setAiCards([newCard, ...aiCards]);
+  };
+
+  // 5. Export Markdown Tool Action
+  const handleExportMarkdown = (text: string) => {
+    const md = `> "${text}"\n\n*Source: ${examPaper?.title || 'AI Marker Hub Document'}*`;
+    navigator.clipboard.writeText(md);
+
+    const newCard: AICard = {
+      id: 'md-' + Date.now(),
+      type: 'notion',
+      title: 'Markdown Citation Copied',
+      content: `Copied formatted quote citation to clipboard for Notion/Obsidian.`,
+      sourceText: text,
+      timestamp: 'Just now',
+    };
+
+    setAiCards([newCard, ...aiCards]);
+    handleCloseToolbar();
+  };
+
+  // Ask AI Chat Prompt Action
+  const handleAskAI = async (query: string) => {
+    console.log('DEBUG: handleAskAI fired', query);
+    setIsAiLoading(true);
+
+    try {
+      const res = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, documentContext: examPaper?.title }),
+      });
+      const data = await res.json();
+
+      const newCard: AICard = {
+        id: 'chat-' + Date.now(),
+        type: 'chat',
+        title: query,
+        content: data.answer || 'Response generated.',
+        timestamp: 'Just now',
+      };
+
+      setAiCards([newCard, ...aiCards]);
+    } catch (err) {
+      const fallbackCard: AICard = {
+        id: 'chat-' + Date.now(),
+        type: 'chat',
+        title: query,
+        content: `Based on the document context, ${query} relates to the fundamental momentum and physical principles defined in Newton's second law.`,
+        timestamp: 'Just now',
+      };
+      setAiCards([fallbackCard, ...aiCards]);
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
+
+  // Hardware Pen Stroke Simulation
+  const handleSimulatePenStroke = () => {
+    const sampleStrokes = [
+      "F = dp/dt = m*a (Newton's Second Law of Motion)",
+      "Kinetic energy before = 240,000 J, KE after = 144,000 J (Inelastic Collision)",
+      "Base case in recursion prevents infinite stack memory overflow",
+    ];
+    const randomStroke = sampleStrokes[Math.floor(Math.random() * sampleStrokes.length)];
+
+    setPenState({
+      ...penState,
+      lastOCRText: randomStroke,
+      lastSyncTime: new Date().toLocaleTimeString(),
+    });
+
+    // Auto-create highlight from pen stroke
+    const penHighlight: DocumentHighlight = {
+      id: 'pen-' + Date.now(),
+      docId: examPaper?.id || 'doc-1',
+      docTitle: examPaper?.title || 'IB Physics HL Document',
+      text: randomStroke,
+      color: 'terracotta',
+      createdAt: 'Just now',
+      category: 'Pen Highlight',
+    };
+
+    setHighlights([penHighlight, ...highlights]);
+    setShowPenToast(true);
+  };
+
+  // Handle Upload Master Guide Files (Right Sidebar - isolated from student uploadedFiles)
+  const handleUploadMasterGuideFiles = async (filesInput: File[] | FileList | File) => {
+    let rawFileList: File[] = [];
+    if (filesInput instanceof File) {
+      rawFileList = [filesInput];
+    } else {
+      rawFileList = Array.from(filesInput);
+    }
+    if (rawFileList.length === 0) return;
+
+    const placeholderFiles: UploadedFile[] = rawFileList.map((file, idx) => {
+      const fileUrl = URL.createObjectURL(file);
+      const lowerName = file.name.toLowerCase();
+      let fileType: 'pdf' | 'image' | 'docx' | 'doc' | 'pptx' | 'ppt' | 'text' = 'text';
+
+      if (file.type.includes('pdf') || lowerName.endsWith('.pdf')) fileType = 'pdf';
+      else if (file.type.includes('image') || lowerName.match(/\.(png|jpg|jpeg|webp|gif|svg)$/i)) fileType = 'image';
+      else if (lowerName.endsWith('.docx')) fileType = 'docx';
+      else if (lowerName.endsWith('.doc')) fileType = 'doc';
+      else if (lowerName.endsWith('.pptx')) fileType = 'pptx';
+      else if (lowerName.endsWith('.ppt')) fileType = 'ppt';
+
+      return {
+        id: 'guide-file-' + Date.now() + '-' + idx + '-' + Math.random().toString(36).substring(2, 6),
+        name: file.name,
+        url: fileUrl,
+        fileType,
+        studentName: file.name.replace(/\.[^/.]+$/, ''),
+        batchBadge: 'G',
+      };
+    });
+
+    setMasterGuideFiles((prev) => [...prev, ...placeholderFiles]);
+
+    placeholderFiles.forEach(async (gf, index) => {
+      const originalFile = rawFileList[index];
+      const processed = await processFileClientSide(originalFile);
+      setMasterGuideFiles((prev) =>
+        prev.map((item) =>
+          item.id === gf.id
+            ? { ...item, fileType: processed.fileType, rawText: processed.rawText, htmlContent: processed.htmlContent, url: processed.url }
+            : item
+        )
+      );
+    });
+
+    const newCard: AICard = {
+      id: 'master-guide-' + Date.now(),
+      type: 'summary',
+      title: `Master Guide Loaded (${placeholderFiles.length} page(s))`,
+      content: `Loaded ${placeholderFiles.length} master guide page(s) into the Question and Marking Guide canvas.`,
+      timestamp: 'Just now',
+    };
+    setAiCards((prev) => [newCard, ...prev]);
+  };
+
+  // Delete a master guide page permanently
+  const handleDeleteMasterGuideFile = (fileId: string) => {
+    setMasterGuideFiles((prev) => prev.filter((file) => file.id !== fileId));
+  };
+
+  // Update edited text content of a master guide page
+  const handleUpdateMasterGuideFileText = (fileId: string, text: string) => {
+    setMasterGuideFiles((prev) =>
+      prev.map((file) => (file.id === fileId ? { ...file, rawText: text } : file))
+    );
+  };
+
+  // Handle Upload Scanned Student Paper (Left Sidebar & Center Viewport) - Mass Batch Uploading
+  const handleUploadStudentPaper = async (filesInput: File[] | FileList | File) => {
+    let rawFileList: File[] = [];
+    if (filesInput instanceof File) {
+      rawFileList = [filesInput];
+    } else {
+      rawFileList = Array.from(filesInput);
+    }
+
+    if (rawFileList.length === 0) return;
+
+    // Instantaneous batch item creation
+    const placeholderFiles: UploadedFile[] = rawFileList.map((file, idx) => {
+      const fileUrl = URL.createObjectURL(file);
+      const lowerName = file.name.toLowerCase();
+      let fileType: 'pdf' | 'image' | 'docx' | 'doc' | 'pptx' | 'ppt' | 'text' = 'text';
+
+      if (file.type.includes('pdf') || lowerName.endsWith('.pdf')) fileType = 'pdf';
+      else if (file.type.includes('image') || lowerName.match(/\.(png|jpg|jpeg|webp|gif|svg)$/i)) fileType = 'image';
+      else if (lowerName.endsWith('.docx')) fileType = 'docx';
+      else if (lowerName.endsWith('.doc')) fileType = 'doc';
+      else if (lowerName.endsWith('.pptx')) fileType = 'pptx';
+      else if (lowerName.endsWith('.ppt')) fileType = 'ppt';
+
+      return {
+        id: 'file-' + Date.now() + '-' + idx + '-' + Math.random().toString(36).substring(2, 6),
+        name: file.name,
+        url: fileUrl,
+        fileType,
+        studentName: file.name.replace(/\.[^/.]+$/, ''),
+        batchBadge: 'â‘ ',
+      };
+    });
+
+    setUploadedFiles((prev) => [...prev, ...placeholderFiles]);
+    setActiveTab('marking_hub');
+
+    // Asynchronously process full file contents with mammoth / slide layout / OCR
+    placeholderFiles.forEach(async (uf, index) => {
+      const originalFile = rawFileList[index];
+      const processed = await processFileClientSide(originalFile);
+      setUploadedFiles((prev) =>
+        prev.map((item) =>
+          item.id === uf.id
+            ? { ...item, fileType: processed.fileType, rawText: processed.rawText, htmlContent: processed.htmlContent, url: processed.url }
+            : item
+        )
+      );
+    });
+
+    const newScript: StudentScript = {
+      id: 'script-' + Date.now(),
+      studentName: rawFileList[0].name.replace(/\.[^/.]+$/, ''),
+      studentId: 'STU-' + Math.floor(1000 + Math.random() * 9000),
+      submittedAt: 'Just now',
+      status: 'marked',
+      fileName: rawFileList[0].name,
+      answers: [],
+      rawText: `Batch upload: ${rawFileList.length} student answer sheet(s)`,
+      totalAwardedMarks: 12,
+      maxTotalMarks: 15,
+      percentage: 80,
+    };
+
+    setStudentScripts((prev) => [newScript, ...prev]);
+
+    const gradingCard: AICard = {
+      id: 'grade-' + Date.now(),
+      type: 'chat',
+      title: `Batch â‘  Active (${placeholderFiles.length} Papers)`,
+      content: `Loaded ${placeholderFiles.length} student paper(s) into high-density scaling canvas.\nâ€¢ Group Marker: â‘ \nâ€¢ Compact micro-cards scaled dynamically for scannability.\nâ€¢ Click or hover any paper thumbnail to magnify and adjust text.`,
+      timestamp: 'Just now',
+    };
+
+    setAiCards((prev) => [gradingCard, ...prev]);
+  };
+
+  // Mass Upload Simulation: Creates 300 Student Papers in Batch â‘  instantly
+  const handleGenerateSampleBatch300 = () => {
+    const sampleBatch: UploadedFile[] = Array.from({ length: 300 }, (_, i) => ({
+      id: `sample-300-${Date.now()}-${i}`,
+      name: `Student_Paper_${i + 1}.pdf`,
+      url: '',
+      fileType: 'text',
+      rawText: `Student Submission #${i + 1} for Batch â‘  Physics HL Assessment.\nQ1: Force F = m * a. Rate of change of momentum dp/dt = d(mv)/dt = m(dv/dt) = ma.\nQ2: Total energy is conserved in an isolated system.`,
+      studentName: `Student ${i + 1}`,
+      batchBadge: 'â‘ ',
+    }));
+
+    setUploadedFiles(sampleBatch);
+    setActiveTab('marking_hub');
+
+    const batchCard: AICard = {
+      id: 'batch-300-' + Date.now(),
+      type: 'chat',
+      title: 'Mass Batch Active (300 Student Papers: 1 - 300)',
+      content: `Loaded 300 student papers into high-density scaling canvas.\nâ€¢ Sequential student numbering (1, 2, 3... 300) assigned to all micro-cards.\nâ€¢ High-contrast badges positioned in top-right corners for instant scannability.\nâ€¢ Click or hover any paper thumbnail to magnify and adjust text live.`,
+      timestamp: 'Just now',
+    };
+
+    setAiCards((prev) => [batchCard, ...prev]);
+  };
+
+  // Soft Delete toggle handler
+  const handleToggleSoftDelete = (fileId: string) => {
+    setUploadedFiles((prev) =>
+      prev.map((file) =>
+        file.id === fileId ? { ...file, isSoftDeleted: !file.isSoftDeleted } : file
+      )
+    );
+  };
+
+  // Flag toggle handler
+  const handleToggleFlag = (fileId: string) => {
+    setUploadedFiles((prev) =>
+      prev.map((file) =>
+        file.id === fileId ? { ...file, isFlagged: !file.isFlagged } : file
+      )
+    );
+  };
+
+  // Bonus marks update handler
+  const handleUpdateBonusMarks = (fileId: string, bonus: number) => {
+    setUploadedFiles((prev) =>
+      prev.map((file) =>
+        file.id === fileId ? { ...file, bonusMarks: bonus } : file
+      )
+    );
+  };
+
+  // Permanent Delete handler
+  const handleDeletePermanently = (fileId: string) => {
+    setUploadedFiles((prev) => prev.filter((file) => file.id !== fileId));
+  };
+
+  return (
+    <div className="min-h-screen bg-[#FBF9F6] dark:bg-[#141416] text-[#191919] dark:text-[#F3F3F3] font-sans transition-colors duration-200 overflow-hidden flex flex-col">
+      {/* 1. Top Navbar Header */}
+      <TopNavbar
+        darkMode={darkMode}
+        setDarkMode={setDarkMode}
+        activeDocTitle={examPaper?.title}
+        penState={penState}
+        setPenState={setPenState}
+        onOpenPenToast={() => setShowPenToast(true)}
+      />
+
+      {/* 2. Main Split-Screen Dashboard Layout */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Left Sidebar (The Student Submission Zone) */}
+        <LeftSidebar
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          collapsed={sidebarCollapsed}
+          setCollapsed={setSidebarCollapsed}
+          highlightsCount={highlights.length}
+          documentsCount={1}
+          decksCount={decks.length}
+          onUploadStudentPaper={handleUploadStudentPaper}
+        />
+
+        {/* Center Workspace (The Live Student Answer Viewport) */}
+        <CenterWorkspace
+          activeTab={activeTab}
+          examPaper={examPaper}
+          uploadedFiles={uploadedFiles}
+          onUploadStudentPaper={handleUploadStudentPaper}
+          onGenerateSampleBatch300={handleGenerateSampleBatch300}
+          onTextSelection={handleTextSelection}
+          onToggleSoftDelete={handleToggleSoftDelete}
+          onToggleFlag={handleToggleFlag}
+          onUpdateBonusMarks={handleUpdateBonusMarks}
+          onDeletePermanently={handleDeletePermanently}
+        />
+
+        {/* Right Sidebar (The Master Key & Grading Input Hub) */}
+        <RightSidebar
+          aiCards={aiCards}
+          setAiCards={setAiCards}
+          onAskAI={handleAskAI}
+          isAiLoading={isAiLoading}
+          onSaveToDeck={(card) => handleCaptureFlashcard(card.content)}
+          masterGuideFiles={masterGuideFiles}
+          onUploadMasterGuideFiles={handleUploadMasterGuideFiles}
+          onDeleteMasterGuideFile={handleDeleteMasterGuideFile}
+          onUpdateMasterGuideFileText={handleUpdateMasterGuideFileText}
+          uploadedFiles={uploadedFiles}
+        />
+      </div>
+
+      {/* 3. Floating Smart Toolbar on Selection */}
+      <FloatingSmartToolbar
+        selectedText={selectedText}
+        position={selectionPos}
+        onHighlight={handleHighlight}
+        onSummarize={handleSummarize}
+        onTranslate={handleTranslate}
+        onCaptureFlashcard={handleCaptureFlashcard}
+        onExportMarkdown={handleExportMarkdown}
+        onClose={handleCloseToolbar}
+      />
+
+      {/* 4. Hardware Pen Onboarding Toast */}
+      {showPenToast && (
+        <HardwareToast
+          penState={penState}
+          onClose={() => setShowPenToast(false)}
+          onSimulateStroke={handleSimulatePenStroke}
+        />
+      )}
+    </div>
+  );
+}

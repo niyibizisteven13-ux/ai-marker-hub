@@ -1,0 +1,152 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    background-color: #FBF9F6;
+    color: #191919;
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  }
+  
+  .dark body {
+    background-color: #141416;
+    color: #F3F3F3;
+  }
+}
+
+/* Claude AI Custom Styles */
+.claude-bg {
+  background-color: #FBF9F6;
+}
+
+.dark .claude-bg {
+  background-color: #141416;
+}
+
+.claude-sidebar {
+  background-color: #F4F0E8;
+  border-color: #E8E4DC;
+}
+
+.dark .claude-sidebar {
+  background-color: #1C1C1F;
+  border-color: #2D2D32;
+}
+
+.claude-card {
+  background-color: #FFFFFF;
+  border: 1px solid #E8E4DC;
+  border-radius: 12px;
+}
+
+.dark .claude-card {
+  background-color: #202024;
+  border: 1px solid #2D2D32;
+  border-radius: 12px;
+}
+
+.claude-accent-btn {
+  background-color: #D97757;
+  color: #FFFFFF;
+  transition: all 0.2s ease;
+}
+
+.claude-accent-btn:hover {
+  background-color: #C05A3E;
+}
+
+.claude-glass {
+  background: rgba(251, 249, 246, 0.88);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(232, 228, 220, 0.8);
+}
+
+.dark .claude-glass {
+  background: rgba(32, 32, 36, 0.88);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(45, 45, 50, 0.8);
+}
+
+/* Text Highlights */
+.hl-terracotta { background-color: rgba(217, 119, 87, 0.25); color: inherit; padding: 2px 4px; border-radius: 3px; }
+.hl-yellow { background-color: rgba(245, 208, 97, 0.35); color: inherit; padding: 2px 4px; border-radius: 3px; }
+.hl-sage { background-color: rgba(136, 176, 75, 0.25); color: inherit; padding: 2px 4px; border-radius: 3px; }
+.hl-blue { background-color: rgba(91, 146, 229, 0.25); color: inherit; padding: 2px 4px; border-radius: 3px; }
+.hl-lilac { background-color: rgba(179, 136, 255, 0.25); color: inherit; padding: 2px 4px; border-radius: 3px; }
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(180, 175, 165, 0.4);
+  border-radius: 9999px;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(100, 100, 110, 0.4);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(180, 175, 165, 0.7);
+}
+
+/* ============================================================
+   MARKER HUB CUSTOM UTILITIES
+   (referenced throughout Step1–5 components)
+   ============================================================ */
+
+/* Blueprint Grid — dark navy background with subtle dot grid */
+.blueprint-grid {
+  background-image:
+    radial-gradient(circle, rgba(76, 201, 240, 0.12) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* Marker Card — used for step panels, adds a subtle left accent line on hover */
+.marker-card {
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.marker-card:hover {
+  box-shadow: 0 0 0 1px rgba(76, 201, 240, 0.15), 0 4px 24px -4px rgba(76, 201, 240, 0.08);
+}
+
+/* Label Tag — tiny ALL-CAPS monospaced category badge */
+.label-tag {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-family: ui-monospace, 'Cascadia Code', 'Fira Mono', monospace;
+  color: #4CC9F0;
+  opacity: 0.8;
+}
+
+/* Animate-in utilities (used in CenterWorkspace magnified view) */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes slide-in-from-bottom-2 {
+  from { transform: translateY(8px); opacity: 0; }
+  to   { transform: translateY(0);   opacity: 1; }
+}
+@keyframes slitMove {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(0%); }
+  100% { transform: translateX(100%); }
+}
+@keyframes zoom-in-95 {
+  from { transform: scale(0.95); opacity: 0; }
+  to   { transform: scale(1);    opacity: 1; }
+}
+
+.animate-in { animation-fill-mode: both; }
+.fade-in { animation-name: fade-in; }
+.slide-in-from-bottom-2 { animation-name: slide-in-from-bottom-2; }
+.zoom-in-95 { animation-name: zoom-in-95; }
+.duration-200 { animation-duration: 200ms; }
+.duration-150 { animation-duration: 150ms; }
+

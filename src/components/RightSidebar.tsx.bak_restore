@@ -1,0 +1,187 @@
+import React, { useState, useRef } from 'react';
+import { 
+  Sparkles, 
+  Send, 
+  Copy, 
+  Check, 
+  RefreshCw, 
+  Layers, 
+  Trash2, 
+  Globe, 
+  Quote,
+  Paperclip,
+  Camera,
+  Mic,
+  MicOff,
+  FileCheck,
+  X,
+  FileText,
+  ScrollText,
+  CheckCircle2,
+  Clock
+} from 'lucide-react';
+import { AICard, UploadedFile, ExamPaper } from '../types';
+import { processFileClientSide } from '../utils/fileProcessor';
+
+interface RightSidebarProps {
+  aiCards: AICard[];
+  setAiCards: React.Dispatch<React.SetStateAction<AICard[]>>;
+  onAskAI: (query: string) => void;
+  isAiLoading: boolean;
+  onSaveToDeck: (card: AICard) => void;
+  onUploadMasterExam?: (file: File) => void;
+  uploadedFiles?: UploadedFile[];
+  examPaper?: ExamPaper | null;
+}
+
+export const RightSidebar: React.FC<RightSidebarProps> = ({
+  aiCards,
+  setAiCards,
+  onAskAI,
+  isAiLoading,
+  onSaveToDeck,
+  onUploadMasterExam,
+  uploadedFiles = [],
+  examPaper = null,
+}) => {
+  const [activeRightTab, setActiveRightTab] = useState<'exam_questions' | 'marking_log'>('exam_questions');
+  const [chatInput, setChatInput] = useState('');
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // Editable Exam Questions Canvas State
+  const initialExamText = examPaper?.content || `# Master Exam Questions
+
+### Question 1: Classical Mechanics & Dynamics (10 Marks)
+a) State Newton's Second Law in terms of rate of change of momentum. Derive F = ma for constant mass. [3 Marks]
+b) A 1500 kg rocket accelerates vertically from rest. Calculate net force required to achieve 12 m/s² acceleration. [3 Marks]
+c) Demonstrate conservation of total linear momentum in an isolated two-body elastic collision. [4 Marks]
+
+### Question 2: Thermodynamics & Ideal Gases (10 Marks)
+a) Define internal energy of an ideal gas and state the First Law of Thermodynamics ΔU = Q - W. [3 Marks]
+b) A gas sample expands at constant pressure 1.01 × 10⁵ Pa from 0.02 m³ to 0.05 m³. Calculate work done. [3 Marks]
+c) Differentiate between reversible isothermal and adiabatic processes with appropriate P-V diagrams. [4 Marks]
+
+### Question 3: Wave Optics & Interference (10 Marks)
+a) Explain the principle of superposition and condition for constructive interference. [3 Marks]
+b) Light of wavelength λ = 632.8 nm passes through double slits 0.20 mm apart. Screen distance D = 1.5 m. Find fringe width. [4 Marks]
+c) State Rayleigh's criterion for optical resolution of two point sources. [3 Marks]`;
+
+  const [examText, setExamText] = useState<string>(initialExamText);
+  const [examHtml, setExamHtml] = useState<string | null>(null);
+  
+  // Multi-Modal state
+  const [attachedFile, setAttachedFile] = useState<File | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [modalFeedback, setModalFeedback] = useState<string | null>(null);
+
+  const masterFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleSend = (e: React.FormEvent) => {
+    e.preventDefault();
+    if ((!chatInput.trim() && !attachedFile && !isRecording) || isAiLoading) return;
+
+    let queryText = chatInput.trim();
+    if (attachedFile) {
+      queryText = `[Attached Master Answer Key: ${attachedFile.name}] ${queryText}`;
+    }
+    if (isRecording) {
+      queryText = `[Voice Grading Rules] ${queryText || 'Analyze audio dictation and evaluate student script response against rules.'}`;
+    }
+
+    onAskAI(queryText);
+    setChatInput('');
+    setAttachedFile(null);
+    setIsRecording(false);
+    setIsCameraActive(false);
+  };
+
+  const handleMasterFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      setAttachedFile(file);
+      if (onUploadMasterExam) {
+        onUploadMasterExam(file);
+      }
+      
+      const processed = await processFileClientSide(file);
+      if (processed.htmlContent) {
+        setExamHtml(processed.htmlContent);
+      } else {
+        setExamHtml(null);
+      }
+      setExamText(processed.rawText);
+      setModalFeedback(`Loaded & Processed Master File: ${file.name}`);
+      setTimeout(() => setModalFeedback(null), 3000);
+    }
+  };
+
+  const handleDropOnExamCanvas = async (e: React.DragEvent) => {
+    e.preventDefault();
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      const file = e.dataTransfer.files[0];
+      setAttachedFile(file);
+      if (onUploadMasterExam) {
+        onUploadMasterExam(file);
+      }
+      const processed = await processFileClientSide(file);
+      if (processed.htmlContent) {
+        setExamHtml(processed.htmlContent);
+      } else {
+        setExamHtml(null);
+      }
+      setExamText(processed.rawText);
+      setModalFeedback(`Loaded & Processed Master Key: ${file.name}`);
+      setTimeout(() => setModalFeedback(null), 3000);
+    }
+  };
+
+  const handleToggleVoice = () => {
+    if (!isRecording) {
+      setIsRecording(true);
+      setModalFeedback('Voice dictation for grading rules active...');
+    } else {
+      setIsRecording(false);
+      setModalFeedback('Voice grading rules saved to prompt.');
+      setTimeout(() => setModalFeedback(null), 2500);
+    }
+  };
+
+  const handleTriggerCamera = () => {
+    setIsCameraActive(true);
+    setModalFeedback('Camera Scanner ready. Captured master key rules.');
+    setTimeout(() => {
+      setModalFeedback('Master rules scanned via Camera OCR');
+      setTimeout(() => setModalFeedback(null), 2500);
+    }, 1200);
+  };
+
+  const handleCopyCitation = (card: AICard) => {
+    const citation = `"${card.sourceText || card.content}" — Synthesized via AI Marker Hub (${card.timestamp})`;
+    navigator.clipboard.writeText(citation);
+    setCopiedId(card.id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const handleRemoveCard = (id: string) => {
+    setAiCards(aiCards.filter((c) => c.id !== id));
+  };
+
+  return (
+    <aside className="w-80 lg:w-96 h-[calc(100vh-61px)] bg-[#FBF9F6] dark:bg-[#141416] border-l border-[#E8E4DC] dark:border-[#2D2D32] flex flex-col justify-between shrink-0 select-none">
+      {/* 1. Upper Header Zone: Dual-Tab Configuration */}
+      <div className="p-2 border-b border-[#E8E4DC] dark:border-[#2D2D32] bg-[#F4F0E8]/60 dark:bg-[#1C1C1F]/80 flex items-center gap-1.5 shrink-0">
+        <button
+          type="button"
+          onClick={() => setActiveRightTab('exam_questions')}
+          className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
+            activeRightTab === 'exam_questions'
+              ? 'bg-[#FFFFFF] dark:bg-[#202024] text-[#191919] dark:text-[#F3F3F3] shadow-xs border border-[#E8E4DC] dark:border-[#2D2D32]'
+              : 'text-[#66635B] dark:text-[#A0A0AA] hover:bg-[#E8E4DC]/50 dark:hover:bg-[#252529]'
+          }`}
+        >
+          <FileText className="w-3.5 h-3.5 text-[#D97757]" />
+          <span>Exam Questions</span>
+        </button>
+
+*** End Patch

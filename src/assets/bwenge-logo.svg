@@ -1,0 +1,13 @@
+<svg width="220" height="220" viewBox="0 0 220 220" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>Bwenge icon</title>
+<desc>An abstract owl-inspired glyph formed by two overlapping curved shapes suggesting eyes and a wing/body shape.</desc>
+
+<rect x="0" y="0" width="220" height="220" rx="12" fill="#E1F5EE"/>
+<g transform="translate(110,110)">
+<circle cx="-32" cy="-10" r="26" fill="#0F6E56"/>
+<circle cx="32" cy="-10" r="26" fill="#0F6E56"/>
+<circle cx="-32" cy="-10" r="10" fill="#E1F5EE"/>
+<circle cx="32" cy="-10" r="10" fill="#E1F5EE"/>
+<path d="M -50 10 Q 0 55 50 10 Q 50 40 0 60 Q -50 40 -50 10 Z" fill="#04342C"/>
+</g>
+</svg>

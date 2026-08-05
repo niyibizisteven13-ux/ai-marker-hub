@@ -1,0 +1,6 @@
+{
+  "name": "Bwenge AI Marking Studio",
+  "description": "Bwenge AI is a modern marking and assessment platform for rubric-based review, AI-assisted feedback, and critical academic analysis.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

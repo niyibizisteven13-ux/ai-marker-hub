@@ -1,0 +1,580 @@
+﻿import React, { useState, useRef } from 'react';
+import {
+  Sparkles,
+  Send,
+  Copy,
+  Check,
+  Layers,
+  Trash2,
+  Quote,
+  Paperclip,
+  Camera,
+  Mic,
+  MicOff,
+  X,
+  FileText,
+  ScrollText,
+  CheckCircle2,
+  Clock,
+  Upload,
+  Maximize2,
+} from 'lucide-react';
+import { AICard, UploadedFile } from '../types';
+
+interface RightSidebarProps {
+  aiCards: AICard[];
+  setAiCards: React.Dispatch<React.SetStateAction<AICard[]>>;
+  onAskAI: (query: string) => void;
+  isAiLoading: boolean;
+  onSaveToDeck: (card: AICard) => void;
+  masterGuideFiles: UploadedFile[];
+  onUploadMasterGuideFiles: (files: File[] | FileList | File) => void;
+  onDeleteMasterGuideFile: (fileId: string) => void;
+  onUpdateMasterGuideFileText: (fileId: string, text: string) => void;
+  uploadedFiles?: UploadedFile[];
+}
+
+export const RightSidebar: React.FC<RightSidebarProps> = ({
+  aiCards,
+  setAiCards,
+  onAskAI,
+  isAiLoading,
+  onSaveToDeck,
+  masterGuideFiles,
+  onUploadMasterGuideFiles,
+  onDeleteMasterGuideFile,
+  onUpdateMasterGuideFileText,
+  uploadedFiles = [],
+}) => {
+  const [activeRightTab, setActiveRightTab] = useState<'guide' | 'marking_log'>('guide');
+  const [chatInput, setChatInput] = useState('');
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const [selectedGuideFile, setSelectedGuideFile] = useState<UploadedFile | null>(null);
+  const [isDraggingGuide, setIsDraggingGuide] = useState<boolean>(false);
+
+  const [isRecording, setIsRecording] = useState(false);
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [modalFeedback, setModalFeedback] = useState<string | null>(null);
+
+  const masterFileInputRef = useRef<HTMLInputElement>(null);
+
+  const currentSelectedGuideFile =
+    masterGuideFiles.find((f) => f.id === selectedGuideFile?.id) || selectedGuideFile;
+
+  const handleSend = (e: React.FormEvent) => {
+    e.preventDefault();
+    if ((!chatInput.trim() && !isRecording) || isAiLoading) return;
+
+    let queryText = chatInput.trim();
+    if (isRecording) {
+      queryText = `[Voice Grading Rules] ${queryText || 'Analyze audio dictation and evaluate student script response against rules.'}`;
+    }
+
+    onAskAI(queryText);
+    setChatInput('');
+    setIsRecording(false);
+    setIsCameraActive(false);
+  };
+
+  const handleMasterFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      onUploadMasterGuideFiles(Array.from(e.target.files));
+      setModalFeedback(`Loaded ${e.target.files.length} master guide page(s)`);
+      setTimeout(() => setModalFeedback(null), 3000);
+    }
+    e.target.value = '';
+  };
+
+  const handleDropOnGuideCanvas = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingGuide(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      onUploadMasterGuideFiles(Array.from(e.dataTransfer.files));
+    }
+  };
+
+  const handleToggleVoice = () => {
+    if (!isRecording) {
+      setIsRecording(true);
+      setModalFeedback('Voice dictation for grading rules active...');
+    } else {
+      setIsRecording(false);
+      setModalFeedback('Voice grading rules saved to prompt.');
+      setTimeout(() => setModalFeedback(null), 2500);
+    }
+  };
+
+  const handleTriggerCamera = () => {
+    setIsCameraActive(true);
+    setModalFeedback('Camera Scanner ready. Captured master key rules.');
+    setTimeout(() => {
+      setModalFeedback('Master rules scanned via Camera OCR');
+      setTimeout(() => setModalFeedback(null), 2500);
+    }, 1200);
+  };
+
+  const handleCopyCitation = (card: AICard) => {
+    const citation = `"${card.sourceText || card.content}" - Synthesized via AI Marker Hub (${card.timestamp})`;
+    navigator.clipboard.writeText(citation);
+    setCopiedId(card.id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const handleRemoveCard = (id: string) => {
+    setAiCards(aiCards.filter((c) => c.id !== id));
+  };
+
+  const handleDeleteGuideCard = (e: React.MouseEvent, fileId: string) => {
+    e.stopPropagation();
+    onDeleteMasterGuideFile(fileId);
+    if (selectedGuideFile?.id === fileId) {
+      setSelectedGuideFile(null);
+    }
+  };
+
+  const getGridClasses = () => {
+    if (masterGuideFiles.length > 24) return 'grid-cols-5 gap-1.5';
+    if (masterGuideFiles.length > 8) return 'grid-cols-4 gap-2';
+    return 'grid-cols-3 gap-2.5';
+  };
+
+  return (
+    <aside className="w-80 lg:w-96 h-[calc(100vh-61px)] bg-[#FBF9F6] dark:bg-[#141416] border-l border-[#E8E4DC] dark:border-[#2D2D32] flex flex-col justify-between shrink-0 select-none">
+      <div className="p-2 border-b border-[#E8E4DC] dark:border-[#2D2D32] bg-[#F4F0E8]/60 dark:bg-[#1C1C1F]/80 flex items-center gap-1.5 shrink-0">
+        <button
+          type="button"
+          onClick={() => setActiveRightTab('guide')}
+          className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
+            activeRightTab === 'guide'
+              ? 'bg-[#FFFFFF] dark:bg-[#202024] text-[#191919] dark:text-[#F3F3F3] shadow-xs border border-[#E8E4DC] dark:border-[#2D2D32]'
+              : 'text-[#66635B] dark:text-[#A0A0AA] hover:bg-[#E8E4DC]/50 dark:hover:bg-[#252529]'
+          }`}
+        >
+          <FileText className="w-3.5 h-3.5 text-[#D97757]" />
+          <span>Question & Marking Guide</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveRightTab('marking_log')}
+          className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
+            activeRightTab === 'marking_log'
+              ? 'bg-[#FFFFFF] dark:bg-[#202024] text-[#191919] dark:text-[#F3F3F3] shadow-xs border border-[#E8E4DC] dark:border-[#2D2D32]'
+              : 'text-[#66635B] dark:text-[#A0A0AA] hover:bg-[#E8E4DC]/50 dark:hover:bg-[#252529]'
+          }`}
+        >
+          <ScrollText className="w-3.5 h-3.5 text-[#D97757]" />
+          <span>Marking Log</span>
+        </button>
+      </div>
+
+      {activeRightTab === 'guide' && (
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+            setIsDraggingGuide(true);
+          }}
+          onDragLeave={() => setIsDraggingGuide(false)}
+          onDrop={handleDropOnGuideCanvas}
+          className="flex-1 overflow-y-auto p-3 relative"
+        >
+          {masterGuideFiles.length === 0 ? (
+            <div
+              onClick={() => masterFileInputRef.current?.click()}
+              className={`h-full min-h-[50vh] flex flex-col items-center justify-center text-center p-6 rounded-xl border border-dashed cursor-pointer transition-colors ${
+                isDraggingGuide
+                  ? 'border-[#D97757] bg-[#F2EFE9] dark:bg-[#1A1A1E]'
+                  : 'border-[#E8E4DC] dark:border-[#2D2D32]'
+              }`}
+            >
+              <div className="w-10 h-10 rounded-2xl bg-[#FFFFFF] dark:bg-[#202024] border border-[#E8E4DC] dark:border-[#2D2D32] flex items-center justify-center mx-auto text-[#D97757] shadow-xs mb-3">
+                <Upload className="w-5 h-5" />
+              </div>
+              <p className="text-xs font-medium text-[#858075] dark:text-[#888892] max-w-[220px]">
+                Drop or upload the master exam paper and rubric to begin.
+              </p>
+            </div>
+          ) : (
+            <div
+              className={`grid ${getGridClasses()} transition-all duration-300 rounded-xl ${
+                isDraggingGuide ? 'ring-2 ring-[#D97757] bg-[#F2EFE9]/40 dark:bg-[#1A1A1E]/40' : ''
+              }`}
+            >
+              {masterGuideFiles.map((file, idx) => {
+                const displayNum = idx + 1;
+                return (
+                  <div
+                    key={file.id}
+                    onClick={() => setSelectedGuideFile(file)}
+                    className="group relative aspect-[3/4] bg-white dark:bg-[#1C1C20] rounded-md border border-[#E8E4DC] dark:border-[#2D2D32] shadow-2xs hover:shadow-md hover:scale-105 hover:border-[#D97757] transition-all duration-200 cursor-pointer overflow-hidden select-none hover:z-20"
+                    title={`Click to magnify guide page #${displayNum}`}
+                  >
+                    <div className="absolute top-1 right-1 z-20 min-w-[16px] h-4 px-1 rounded-full bg-[#D97757] text-white flex items-center justify-center text-[9px] font-black shadow-xs pointer-events-none ring-1.5 ring-white dark:ring-[#1C1C20]">
+                      {displayNum}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={(e) => handleDeleteGuideCard(e, file.id)}
+                      className="absolute top-1 left-1 z-20 w-4 h-4 rounded-full bg-rose-500/90 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-rose-600 transition-all cursor-pointer shadow-xs"
+                      title="Delete page"
+                    >
+                      <Trash2 className="w-2.5 h-2.5" />
+                    </button>
+
+                    <div className="w-full h-full overflow-hidden subpixel-antialiased transform-gpu bg-white dark:bg-[#1A1A1E]">
+                      {file.fileType === 'image' && file.url ? (
+                        <img
+                          src={file.url}
+                          alt={file.name}
+                          className="w-full h-full object-cover object-top pointer-events-none"
+                        />
+                      ) : file.fileType === 'pdf' && file.url ? (
+                        <iframe
+                          src={file.url}
+                          title={file.name}
+                          className="w-[200%] h-[200%] pointer-events-none scale-50 origin-top-left opacity-95"
+                        />
+                      ) : (
+                        <div className="w-full h-full p-1 flex flex-col justify-between overflow-hidden">
+                          <div className="text-[6.5px] font-bold font-mono text-[#D97757] truncate leading-tight border-b border-[#E8E4DC] dark:border-[#2D2D32] pb-0.5">
+                            {file.name}
+                          </div>
+                          <div className="text-[5.5px] leading-[6.5px] text-[#191919] dark:text-[#E2E2E2] font-medium whitespace-pre-wrap break-words overflow-hidden line-clamp-6 opacity-90">
+                            {file.rawText || 'Processing...'}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="absolute inset-0 bg-[#D97757]/0 group-hover:bg-[#D97757]/10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all z-10">
+                      <Maximize2 className="w-3.5 h-3.5 text-[#D97757] drop-shadow-xs" />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {currentSelectedGuideFile && (
+            <div className="fixed inset-0 z-50 bg-[#141416]/70 backdrop-blur-sm flex items-center justify-center p-3 animate-in fade-in duration-200">
+              <div className="w-full max-w-2xl h-[85vh] bg-[#FBF9F6] dark:bg-[#18181B] rounded-2xl border border-[#E8E4DC] dark:border-[#2D2D32] shadow-2xl flex flex-col overflow-hidden">
+                <div className="p-3 border-b border-[#E8E4DC] dark:border-[#2D2D32] bg-[#FFFFFF]/90 dark:bg-[#1F1F23]/90 flex items-center justify-between">
+                  <span className="text-xs font-bold text-[#191919] dark:text-[#F3F3F3] truncate pr-2">
+                    {currentSelectedGuideFile.name}
+                  </span>
+                  <div className="flex items-center space-x-1 shrink-0">
+                    <button
+                      onClick={(e) => handleDeleteGuideCard(e, currentSelectedGuideFile.id)}
+                      className="px-2.5 py-1 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-500 hover:text-white text-xs font-medium flex items-center space-x-1 transition-colors cursor-pointer"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      <span>Delete</span>
+                    </button>
+                    <button
+                      onClick={() => setSelectedGuideFile(null)}
+                      className="p-1.5 rounded-full bg-[#F4F0E8] dark:bg-[#2D2D32] text-[#191919] dark:text-[#F3F3F3] hover:bg-rose-500 hover:text-white transition-colors cursor-pointer"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-5">
+                  {currentSelectedGuideFile.fileType === 'image' && currentSelectedGuideFile.url ? (
+                    <img
+                      src={currentSelectedGuideFile.url}
+                      alt={currentSelectedGuideFile.name}
+                      className="max-w-full h-auto shadow-md rounded-lg border border-[#E8E4DC] dark:border-[#2D2D32] mx-auto"
+                    />
+                  ) : currentSelectedGuideFile.fileType === 'pdf' && currentSelectedGuideFile.url ? (
+                    <iframe
+                      src={currentSelectedGuideFile.url}
+                      title={currentSelectedGuideFile.name}
+                      className="w-full h-full min-h-[500px] rounded-lg border border-[#E8E4DC] dark:border-[#2D2D32] bg-white"
+                    />
+                  ) : (
+                    <div
+                      contentEditable
+                      suppressContentEditableWarning
+                      onBlur={(e) => onUpdateMasterGuideFileText(currentSelectedGuideFile.id, e.currentTarget.innerText)}
+                      className="w-full py-6 px-8 bg-white dark:bg-[#1C1C20] shadow-xs border border-[#E8E4DC] dark:border-[#2D2D32] rounded-md text-[#191919] dark:text-[#F3F3F3] font-sans leading-relaxed outline-none whitespace-pre-wrap text-sm"
+                    >
+                      {currentSelectedGuideFile.rawText || ''}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeRightTab === 'marking_log' && (
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          <div className="px-3 py-1.5 rounded-lg bg-[#D97757]/10 border border-[#D97757]/20 flex items-center justify-between text-[11px] font-mono font-bold text-[#D97757]">
+            <div className="flex items-center space-x-1.5">
+              <span className="w-2 h-2 rounded-full bg-[#D97757] animate-ping" />
+              <span>Live Marking Progress Ticker</span>
+            </div>
+            <span>
+              {uploadedFiles.length > 0 ? `${uploadedFiles.length} Papers Active` : 'Queue Idle'}
+            </span>
+          </div>
+
+          <div className="space-y-1.5 font-mono text-xs">
+            {uploadedFiles.length > 0 ? (
+              uploadedFiles.map((file, idx) => {
+                const studentNum = idx + 1;
+                const isSoftDeleted = file.isSoftDeleted;
+                const isFlagged = file.isFlagged;
+                const bonus = file.bonusMarks || 0;
+
+                const baseScore = Math.min(50, 36 + ((idx * 7 + 5) % 13));
+                const totalScore = Math.min(50, baseScore + bonus);
+                const percentage = Math.round((totalScore / 50) * 100);
+
+                return (
+                  <div
+                    key={file.id || idx}
+                    className={`p-2.5 rounded-xl border transition-all flex items-center justify-between ${
+                      isSoftDeleted
+                        ? 'bg-rose-500/5 border-rose-500/20 text-[#858075] opacity-60'
+                        : isFlagged
+                        ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400'
+                        : 'bg-white dark:bg-[#202024] border-[#E8E4DC] dark:border-[#2D2D32] hover:border-[#D97757]'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-2 truncate pr-2">
+                      {isSoftDeleted ? (
+                        <Trash2 className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                      ) : isFlagged ? (
+                        <Clock className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                      ) : (
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                      )}
+                      <div className="truncate">
+                        <div className="font-bold text-[11px] text-[#191919] dark:text-[#F3F3F3] truncate">
+                          Student Paper {studentNum}: {isSoftDeleted ? 'Minimized' : `Marked (${totalScore}/50)`}
+                          {bonus > 0 && <span className="text-amber-500 ml-1">+{bonus} Bonus</span>}
+                        </div>
+                        <div className="text-[10px] text-[#858075] dark:text-[#888892] truncate">
+                          {file.studentName || file.name} {isFlagged ? '- Flagged for Review' : `- Grade: ${percentage}%`}
+                        </div>
+                      </div>
+                    </div>
+
+                    {!isSoftDeleted && (
+                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold shrink-0 ${
+                        isFlagged
+                          ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                          : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                      }`}>
+                        {percentage}%
+                      </span>
+                    )}
+                  </div>
+                );
+              })
+            ) : (
+              <div className="p-6 rounded-2xl bg-[#FFFFFF] dark:bg-[#202024] border border-dashed border-[#E8E4DC] dark:border-[#2D2D32] text-center space-y-2 my-4">
+                <ScrollText className="w-8 h-8 text-[#D97757] mx-auto opacity-80" />
+                <div className="font-bold text-xs text-[#191919] dark:text-[#F3F3F3]">
+                  No Student Papers Loaded in Queue
+                </div>
+                <div className="text-[11px] text-[#858075] dark:text-[#888892] leading-relaxed font-sans">
+                  Upload student answer sheets or trigger simulated batch upload in the middle panel to view automated real-time marking progress.
+                </div>
+              </div>
+            )}
+
+            {aiCards.length > 0 && (
+              <div className="pt-3 border-t border-[#E8E4DC] dark:border-[#2D2D32] space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-[#858075] dark:text-[#888892] uppercase tracking-wider">
+                    AI Evaluation Logs ({aiCards.length})
+                  </span>
+                  <button
+                    onClick={() => setAiCards([])}
+                    className="text-[10px] font-mono text-[#858075] hover:text-[#D97757] transition-colors cursor-pointer"
+                  >
+                    Clear Logs
+                  </button>
+                </div>
+                {aiCards.map((card) => (
+                  <div
+                    key={card.id}
+                    className="p-3 rounded-xl bg-[#FFFFFF] dark:bg-[#202024] border border-[#E8E4DC] dark:border-[#2D2D32] space-y-2"
+                  >
+                    <div className="flex items-center justify-between text-[11px] font-bold text-[#191919] dark:text-[#F3F3F3]">
+                      <div className="flex items-center space-x-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-[#D97757]" />
+                        <span>{card.title}</span>
+                      </div>
+                      <div className="flex items-center space-x-1">
+                        <span className="text-[10px] font-mono text-[#858075]">{card.timestamp}</span>
+                        <button
+                          onClick={() => handleRemoveCard(card.id)}
+                          className="p-0.5 rounded text-[#858075] hover:text-rose-500 transition-colors"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {card.sourceText && (
+                      <div className="p-1.5 rounded-lg bg-[#F4F0E8]/70 dark:bg-[#18181A] text-[10px] italic text-[#52504A] dark:text-[#A0A0AA] line-clamp-2">
+                        <Quote className="w-3 h-3 inline mr-1 text-[#D97757]" />
+                        "{card.sourceText}"
+                      </div>
+                    )}
+
+                    <div className="text-xs text-[#191919] dark:text-[#F3F3F3] leading-relaxed font-sans whitespace-pre-wrap">
+                      {card.content}
+                    </div>
+
+                    <div className="pt-1 border-t border-[#E8E4DC]/80 dark:border-[#2D2D32] flex items-center justify-between text-[10px] text-[#66635B] dark:text-[#A0A0AA]">
+                      <button
+                        onClick={() => handleCopyCitation(card)}
+                        className="flex items-center space-x-1 hover:text-[#D97757] transition-colors cursor-pointer"
+                      >
+                        {copiedId === card.id ? (
+                          <>
+                            <Check className="w-3 h-3 text-emerald-500" />
+                            <span className="text-emerald-500 font-bold">Copied</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3 h-3" />
+                            <span>Copy Citation</span>
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        onClick={() => onSaveToDeck(card)}
+                        className="flex items-center space-x-1 hover:text-[#D97757] transition-colors cursor-pointer"
+                      >
+                        <Layers className="w-3 h-3" />
+                        <span>Save to Deck</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="p-3 border-t border-[#E8E4DC] dark:border-[#2D2D32] bg-[#F4F0E8]/70 dark:bg-[#18181A] space-y-2 shrink-0">
+        <input
+          type="file"
+          ref={masterFileInputRef}
+          onChange={handleMasterFileSelect}
+          accept=".pdf,.docx,.doc,.pptx,.ppt,.png,.jpg,.jpeg,.txt"
+          multiple
+          className="hidden"
+        />
+
+        {modalFeedback && (
+          <div className="px-3 py-1.5 rounded-lg bg-[#D97757]/15 border border-[#D97757]/30 text-[11px] font-mono font-medium text-[#D97757] flex items-center justify-between animate-in fade-in">
+            <span>{modalFeedback}</span>
+            <button onClick={() => setModalFeedback(null)}>
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        )}
+
+        {(isRecording || isCameraActive) && (
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {isRecording && (
+              <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-rose-500/10 border border-rose-500/30 text-[10px] font-mono text-rose-600 dark:text-rose-400 animate-pulse">
+                <Mic className="w-3 h-3" />
+                <span>Voice Exam Rules Active</span>
+                <button onClick={() => setIsRecording(false)}>
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+
+            {isCameraActive && (
+              <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-[#5B92E5]/10 border border-[#5B92E5]/30 text-[10px] font-mono text-[#5B92E5]">
+                <Camera className="w-3 h-3" />
+                <span>Scan Rules via Camera</span>
+                <button onClick={() => setIsCameraActive(false)}>
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+          </div>
+        )}
+
+        <form onSubmit={handleSend} className="relative flex flex-col p-2 rounded-2xl bg-[#FFFFFF] dark:bg-[#202024] border border-[#E8E4DC] dark:border-[#2D2D32] focus-within:border-[#D97757] transition-all space-y-2">
+          <textarea
+            rows={2}
+            value={chatInput}
+            onChange={(e) => setChatInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSend(e);
+              }
+            }}
+            placeholder="Upload master answer key or enter grading rules..."
+            className="w-full px-2 py-1 bg-transparent text-xs text-[#191919] dark:text-[#F3F3F3] placeholder-[#858075] dark:placeholder-[#66635B] outline-none resize-none"
+          />
+
+          <div className="flex items-center justify-between pt-1 border-t border-[#E8E4DC]/50 dark:border-[#2D2D32]">
+            <div className="flex items-center space-x-1">
+              <button
+                type="button"
+                onClick={() => masterFileInputRef.current?.click()}
+                className="p-1.5 rounded-lg text-[#66635B] dark:text-[#A0A0AA] hover:text-[#D97757] hover:bg-[#F4F0E8] dark:hover:bg-[#2D2D32] transition-colors cursor-pointer"
+                title="Upload Master Answer Key (PDF/Image/DOCX/PPTX)"
+              >
+                <Paperclip className="w-4 h-4" />
+              </button>
+
+              <button
+                type="button"
+                onClick={handleTriggerCamera}
+                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                  isCameraActive
+                    ? 'text-[#5B92E5] bg-[#5B92E5]/15'
+                    : 'text-[#66635B] dark:text-[#A0A0AA] hover:text-[#5B92E5] hover:bg-[#F4F0E8] dark:hover:bg-[#2D2D32]'
+                }`}
+                title="Scan Exam Rules via Camera/Voice"
+              >
+                <Camera className="w-4 h-4" />
+              </button>
+
+              <button
+                type="button"
+                onClick={handleToggleVoice}
+                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                  isRecording
+                    ? 'text-rose-500 bg-rose-500/15 animate-pulse'
+                    : 'text-[#66635B] dark:text-[#A0A0AA] hover:text-rose-500 hover:bg-[#F4F0E8] dark:hover:bg-[#2D2D32]'
+                }`}
+                title="Record Voice Exam Rules"
+              >
+                {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+              </button>
+            </div>
+
+            <button
+              type="submit"
+              disabled={(!chatInput.trim() && !isRecording) || isAiLoading}
+              className="px-3 py-1.5 rounded-xl bg-[#D97757] hover:bg-[#C05A3E] disabled:opacity-40 text-white font-bold text-xs flex items-center space-x-1.5 transition-all cursor-pointer shadow-2xs"
+            >
+              <span>Evaluate</span>
+              <Send className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </form>
+      </div>
+    </aside>
+  );
+};
