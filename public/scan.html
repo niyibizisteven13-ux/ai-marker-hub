@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bwenge AI Mobile Web Scanner</title>
+  <style>
+    :root {
+      --bg-color: #0f172a;
+      --card-bg: #1e293b;
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --success: #10b981;
+      --error: #ef4444;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text);
+      margin: 0;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .card {
+      background: var(--card-bg);
+      border-radius: 12px;
+      padding: 20px;
+      width: 100%;
+      max-width: 480px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+      box-sizing: border-box;
+    }
+    h1 {
+      font-size: 1.4rem;
+      margin-top: 0;
+      color: var(--text);
+      text-align: center;
+    }
+    p {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      text-align: center;
+    }
+    .file-input-wrapper {
+      margin: 20px 0;
+      text-align: center;
+    }
+    input[type="file"] {
+      display: none;
+    }
+    .btn {
+      background: var(--primary);
+      color: white;
+      padding: 14px 20px;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+      box-sizing: border-box;
+      display: inline-block;
+      text-align: center;
+      transition: background 0.2s;
+    }
+    .btn:hover {
+      background: var(--primary-hover);
+    }
+    .preview-container {
+      margin: 20px 0;
+      display: none;
+      text-align: center;
+    }
+    canvas {
+      max-width: 100%;
+      border-radius: 8px;
+      border: 2px solid #334155;
+    }
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin: 15px 0;
+    }
+    .status {
+      margin-top: 15px;
+      padding: 12px;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      display: none;
+      text-align: center;
+    }
+    .status.success { background: rgba(16, 185, 129, 0.2); color: var(--success); }
+    .status.error { background: rgba(239, 68, 68, 0.2); color: var(--error); }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>📸 Bwenge AI Scanner</h1>
+    <p>Capture or upload exam pages directly. High-contrast enhancement will automatically clean your scan before submission.</p>
+
+    <div class="file-input-wrapper">
+      <label for="cameraInput" class="btn">📷 Open Camera / Choose File</label>
+      <input type="file" id="cameraInput" accept="image/*" capture="environment">
+    </div>
+
+    <div class="preview-container" id="previewContainer">
+      <canvas id="canvasPreview"></canvas>
+
+      <div class="controls">
+        <button type="button" class="btn" id="contrastBtn" style="background:#475569;">Contrast Boost</button>
+        <button type="button" class="btn" id="grayscaleBtn" style="background:#475569;">B&W Scan</button>
+      </div>
+
+      <button type="button" class="btn" id="uploadBtn" style="margin-top:10px;">🚀 Upload Document</button>
+    </div>
+
+    <div class="status" id="statusBox"></div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const chatId = params.get('chatId') || '';
+
+    const cameraInput = document.getElementById('cameraInput');
+    const previewContainer = document.getElementById('previewContainer');
+    const canvas = document.getElementById('canvasPreview');
+    const ctx = canvas.getContext('2d');
+    const contrastBtn = document.getElementById('contrastBtn');
+    const grayscaleBtn = document.getElementById('grayscaleBtn');
+    const uploadBtn = document.getElementById('uploadBtn');
+    const statusBox = document.getElementById('statusBox');
+
+    let originalImageData = null;
+
+    cameraInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const img = new Image();
+        img.onload = () => {
+          // Scale down if image is huge
+          const maxDim = 1600;
+          let w = img.width;
+          let h = img.height;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
+            else { w = Math.round((w * maxDim) / h); h = maxDim; }
+          }
+
+          canvas.width = w;
+          canvas.height = h;
+          ctx.drawImage(img, 0, 0, w, h);
+          originalImageData = ctx.getImageData(0, 0, w, h);
+          previewContainer.style.display = 'block';
+        };
+        img.src = event.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+
+    contrastBtn.addEventListener('click', () => {
+      if (!originalImageData) return;
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const d = imgData.data;
+      const factor = 1.3; // Contrast factor
+      for (let i = 0; i < d.length; i += 4) {
+        d[i] = Math.min(255, Math.max(0, factor * (d[i] - 128) + 128));
+        d[i+1] = Math.min(255, Math.max(0, factor * (d[i+1] - 128) + 128));
+        d[i+2] = Math.min(255, Math.max(0, factor * (d[i+2] - 128) + 128));
+      }
+      ctx.putImageData(imgData, 0, 0);
+    });
+
+    grayscaleBtn.addEventListener('click', () => {
+      if (!originalImageData) return;
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const d = imgData.data;
+      for (let i = 0; i < d.length; i += 4) {
+        const avg = (d[i] + d[i+1] + d[i+2]) / 3;
+        d[i] = avg;
+        d[i+1] = avg;
+        d[i+2] = avg;
+      }
+      ctx.putImageData(imgData, 0, 0);
+    });
+
+    uploadBtn.addEventListener('click', () => {
+      statusBox.style.display = 'block';
+      statusBox.className = 'status';
+      statusBox.textContent = '⏳ Processing and uploading document...';
+
+      canvas.toBlob(async (blob) => {
+        const formData = new FormData();
+        formData.append('file', blob, 'web_scan.jpg');
+        if (chatId) formData.append('chatId', chatId);
+
+        try {
+          const res = await fetch('/api/files/upload', {
+            method: 'POST',
+            body: formData,
+          });
+
+          const data = await res.json();
+          if (res.ok && data.success) {
+            statusBox.className = 'status success';
+            statusBox.textContent = '✅ Document uploaded successfully! Return to Telegram chat.';
+          } else {
+            statusBox.className = 'status error';
+            statusBox.textContent = '❌ Upload failed: ' + (data.error || 'Server error');
+          }
+        } catch (err) {
+          statusBox.className = 'status error';
+          statusBox.textContent = '❌ Upload failed: ' + err.message;
+        }
+      }, 'image/jpeg', 0.9);
+    });
+  </script>
+</body>
+</html>

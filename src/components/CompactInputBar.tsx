@@ -10,6 +10,8 @@ interface CompactInputBarProps {
   stagedAttachments: Array<File | ChatAttachment>;
   onRemoveAttachment: (index: number) => void;
   onClearAttachments: () => void;
+  selectedProvider: string;
+  onProviderChange: (provider: string) => void;
 }
 
 export const CompactInputBar: React.FC<CompactInputBarProps> = ({
@@ -21,6 +23,8 @@ export const CompactInputBar: React.FC<CompactInputBarProps> = ({
   stagedAttachments,
   onRemoveAttachment,
   onClearAttachments,
+  selectedProvider,
+  onProviderChange,
 }) => {
   return (
     <div className="rounded-3xl border border-slate-800/90 bg-slate-900/95 p-3 shadow-[0_12px_30px_-20px_rgba(0,0,0,0.8)]">
@@ -81,6 +85,17 @@ export const CompactInputBar: React.FC<CompactInputBarProps> = ({
               <span className="text-sm transition-transform duration-200 group-hover:scale-110">📷</span>
               <span>Scanner</span>
             </button>
+
+            <select
+              value={selectedProvider}
+              onChange={(e) => onProviderChange(e.target.value)}
+              className="bg-slate-800/60 text-slate-300 text-[10px] border border-slate-700/50 rounded-lg px-2 py-1.5 outline-none focus:border-orange-500/40 transition-all cursor-pointer hover:bg-slate-700/80"
+            >
+              <option value="auto">Auto (Default)</option>
+              <option value="gemini">Gemini Flash</option>
+              <option value="nvidianim">NVIDIA NIM</option>
+              <option value="ollama">Ollama (Local)</option>
+            </select>
           </div>
 
           <button

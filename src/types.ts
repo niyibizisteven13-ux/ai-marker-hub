@@ -7,6 +7,9 @@ export interface UserSettings {
   autoSummarize: boolean;
   preferredLanguage: string;
   theme: 'dark' | 'light';
+  longTermMemory: boolean;
+  agentTone: 'PROFESSIONAL' | 'ENCOURAGING' | 'STRICT' | 'ACADEMIC';
+  customInstructions?: string;
 }
 
 export interface User {
@@ -15,6 +18,10 @@ export interface User {
   email: string;
   avatarUrl?: string;
   settings?: UserSettings;
+  subscription?: {
+    planType: 'BUSINESS' | 'PRO' | 'ORGANIZATION';
+    status: 'ACTIVE' | 'EXPIRED' | 'CANCELED';
+  };
 }
 
 export type HighlightColor = 'terracotta' | 'yellow' | 'sage' | 'blue' | 'lilac';
@@ -66,6 +73,8 @@ export interface AICard {
 
 export interface ChatAttachment {
   id: string;
+  serverId?: string;
+  status?: 'uploading' | 'ready' | 'failed';
   name: string;
   size?: string;
   type?: string;
@@ -82,9 +91,13 @@ export interface Message {
   id: string;
   sender: 'user' | 'assistant';
   text: string;
+  thinkingText?: string;
+  isThinking?: boolean;
   attachment?: ChatAttachment;
   attachments?: ChatAttachment[];
   timestamp: string;
+  isStreaming?: boolean;
+  rating?: 'up' | 'down';
   actions?: Array<{
     label: string;
     value: string;
@@ -93,13 +106,16 @@ export interface Message {
   }>;
 }
 
+
 export interface ChatSession {
   id: string;
   title: string;
   date: string;
   messageCount: number;
   messages: Message[];
+  lastInteractionId?: string;
 }
+
 
 export interface HardwarePenState {
   connected: boolean;

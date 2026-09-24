@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useStore } from './store/useStore';
 import {
   NavigationTab,
   HighlightColor,
@@ -36,7 +37,14 @@ import { processFileClientSide } from './utils/fileProcessor';
 import { authFetch } from './utils/authFetch';
 import { buildExamPaperContext } from './utils/contentAwarePrompt';
 import { classifyIntent, localGreetingReply } from './utils/messageIntent';
+import CreateStudio from './components/CreateStudio';
+import { Menu, X, Plus, Sparkles } from 'lucide-react';
+import UpgradePage from './pages/UpgradePage';
+
 const LoginModal = React.lazy(() => import('./components/LoginModal'));
+const UpgradeModal = React.lazy(() => import('./components/UpgradeModal'));
+
+
 import { Suspense } from 'react';
 
 const CHAT_HISTORY_KEY = 'bwenge_chat_history';
@@ -62,11 +70,46 @@ Use one of the quick actions below to get started immediately.`
 };
 
 export default function App() {
+  const {
+    user: authenticatedUser,
+    setUser: setAuthenticatedUser,
+    token: authToken,
+    setToken: setAuthToken,
+    logout: logoutStore,
+    messages,
+    setMessages,
+    addMessage,
+    sessions: chatSessions,
+    setSessions: setChatSessions,
+    clearChat: clearChatStore,
+
+    examPaper,
+    setExamPaper,
+    uploadedFiles,
+    setUploadedFiles,
+    studentScripts,
+    setStudentScripts,
+    activeTab,
+    setActiveTab,
+    activeFormId,
+    setActiveFormId,
+    isAiLoading,
+
+    setIsAiLoading,
+    lastInteractionId,
+    setLastInteractionId,
+    abortController,
+    setAbortController,
+  } = useStore();
+
+
+
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     try { return localStorage.getItem('darkMode') === 'true'; } catch { return false; }
   });
-  const [activeTab, setActiveTab] = useState<NavigationTab>('documents');
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
+
 
   const [highlights, setHighlights] = useState<DocumentHighlight[]>(INITIAL_HIGHLIGHTS);
   const [decks, setDecks] = useState<StudyDeck[]>(INITIAL_DECKS);
@@ -75,65 +118,24 @@ export default function App() {
   const [penState, setPenState] = useState<HardwarePenState>(INITIAL_PEN_STATE);
   const [showPenToast, setShowPenToast] = useState<boolean>(false);
 
-  const [examPaper, setExamPaper] = useState<ExamPaper | null>(SAMPLE_EXAMS[0]);
-  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
-  const [masterGuideFiles, setMasterGuideFiles] = useState<UploadedFile[]>([]);
-  const [studentScripts, setStudentScripts] = useState<StudentScript[]>([]);
   const [excelDownloadUrl, setExcelDownloadUrl] = useState<string | null>(null);
   const [isGeneratingExcel, setIsGeneratingExcel] = useState(false);
 
   const [selectedText, setSelectedText] = useState<string>('');
   const [selectionPos, setSelectionPos] = useState<{ top: number; left: number } | null>(null);
-  const [isAiLoading, setIsAiLoading] = useState<boolean>(false);
   const [isAiThinking, setIsAiThinking] = useState<boolean>(false);
   const [aiServiceState, setAiServiceState] = useState<'ready' | 'degraded' | 'offline'>('ready');
   const [scannerOpen, setScannerOpen] = useState<boolean>(false);
   const [aiStatus, setAiStatus] = useState<{ type: 'info' | 'warning'; message: string } | null>(null);
   const [loginModalOpen, setLoginModalOpen] = useState<boolean>(false);
+  const [upgradeModalOpen, setUpgradeModalOpen] = useState<boolean>(false);
+  const [upgradeContext, setUpgradeContext] = useState<{ jobId?: string; service?: string; targetPlan?: string; amount?: number } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
-  const [authenticatedUser, setAuthenticatedUser] = useState<User | null>(() => {
-    try {
-      const saved = localStorage.getItem('bwenge_user');
-      return saved ? (JSON.parse(saved) as User) : null;
-    } catch {
-      return null;
-    }
-  });
-  const [authToken, setAuthToken] = useState<string | null>(() => {
-    try {
-      return localStorage.getItem('bwenge_auth_token');
-    } catch {
-      return null;
-    }
-  });
-  const [messages, setMessages] = useState<Message[]>(() => {
-    try {
-      const saved = localStorage.getItem(CHAT_HISTORY_KEY);
-      if (!saved) return [];
-      const parsed = JSON.parse(saved) as Message[];
-      return normalizeInitialMessages(parsed);
-    } catch {
-      return [];
-    }
-  });
-  const [chatSessions, setChatSessions] = useState<ChatSession[]>(() => {
-    try {
-      const saved = localStorage.getItem(CHAT_SESSIONS_KEY);
-      return saved ? (JSON.parse(saved) as ChatSession[]) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [selectedProvider, setSelectedProvider] = useState<string>('auto');
+
   const [activeDocument, setActiveDocument] = useState<any>(null);
   const [stagedAttachments, setStagedAttachments] = useState<Array<File | ChatAttachment>>([]);
 
-  const persistSessions = (sessions: ChatSession[]) => {
-    try {
-      localStorage.setItem(CHAT_SESSIONS_KEY, JSON.stringify(sessions));
-    } catch {
-      // ignore localStorage errors
-    }
-  };
 
   const saveCurrentChatSession = () => {
     if (!messages || messages.length === 0) return;
@@ -145,39 +147,34 @@ export default function App() {
       date: new Date().toLocaleString(),
       messageCount: messages.length,
       messages,
+      lastInteractionId,
     };
 
     const nextSessions = [session, ...chatSessions].slice(0, 20);
     setChatSessions(nextSessions);
-    persistSessions(nextSessions);
   };
+
+
 
   const handleLoadChatSession = (sessionId: string) => {
     const session = chatSessions.find((item) => item.id === sessionId);
     if (session) {
       setMessages(session.messages);
+      setLastInteractionId(session.lastInteractionId || null);
     }
   };
+
 
   const handleLoginSuccess = (user: User, token: string) => {
     setAuthenticatedUser(user);
     setAuthToken(token);
-    try {
-      localStorage.setItem('bwenge_user', JSON.stringify(user));
-      localStorage.setItem('bwenge_auth_token', token);
-    } catch {
-      // ignore localStorage failures
-    }
   };
 
   const handleUpdateUser = (updatedUser: User) => {
     setAuthenticatedUser(updatedUser);
-    try {
-      localStorage.setItem('bwenge_user', JSON.stringify(updatedUser));
-    } catch {
-      // ignore localStorage failures
-    }
   };
+
+
 
   const fetchCurrentUser = async () => {
     try {
@@ -205,22 +202,80 @@ export default function App() {
   }, [authToken]);
 
   const handleLogout = () => {
-    setAuthenticatedUser(null);
-    setAuthToken(null);
+    logoutStore();
     setLoginModalOpen(false);
     setSettingsOpen(false);
-    try {
-      localStorage.removeItem('bwenge_user');
-      localStorage.removeItem('bwenge_auth_token');
-    } catch {
-      // ignore localStorage failures
+  };
+
+  const handleUpgrade = async (plan: string) => {
+    if (plan === 'individual') {
+      setUpgradeModalOpen(false);
+      showAiStatus('info', 'Individual batch pricing is applied automatically when marking.');
+    } else if (plan === 'business') {
+      setUpgradeModalOpen(false);
+      setUpgradeContext({ targetPlan: 'business' });
+    } else if (plan === 'organisation') {
+      setUpgradeModalOpen(false);
+      const amountStr = window.prompt("Enter Institution Top-up amount ($):", "50");
+      if (amountStr && !isNaN(parseFloat(amountStr))) {
+        setUpgradeContext({ targetPlan: 'organisation', amount: parseFloat(amountStr) });
+      }
     }
   };
 
-  const handleStageAttachments = (attachments: Array<File | ChatAttachment>) => {
-    setStagedAttachments((prev) => [...prev, ...attachments]);
-    if (attachments.length > 0) {
-      setActiveDocument(attachments[0]);
+  const uploadAttachmentToServer = async (file: File, tempId: string) => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const response = await fetch('/api/files/upload', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${authToken}` },
+        body: formData,
+      });
+      const data = await response.json();
+      if (data.success) {
+        setStagedAttachments((prev) =>
+          prev.map((att) => att.id === tempId ? { ...att, serverId: data.fileId, status: 'ready' } as ChatAttachment : att)
+        );
+      } else {
+        throw new Error(data.error);
+      }
+    } catch (error) {
+      console.error('Upload failed', error);
+      setStagedAttachments((prev) =>
+        prev.map((att) => att.id === tempId ? { ...att, status: 'failed' } as ChatAttachment : att)
+      );
+    }
+  };
+
+  const handleStageAttachments = async (attachments: Array<File | ChatAttachment>) => {
+    const newAttachments: ChatAttachment[] = await Promise.all(attachments.map(async (att) => {
+      if (att instanceof File) {
+        const processed = await processFileClientSide(att);
+        const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+        // Trigger background upload
+        uploadAttachmentToServer(att, tempId);
+
+        return {
+          id: tempId,
+          name: att.name,
+          size: `${Math.round(att.size / 1024)} KB`,
+          type: att.type,
+          fileType: processed.fileType as any,
+          url: processed.url,
+          rawText: processed.rawText,
+          htmlContent: processed.htmlContent,
+          status: 'uploading'
+        };
+      }
+      return att;
+    }));
+
+    setStagedAttachments((prev) => [...prev, ...newAttachments]);
+    if (newAttachments.length > 0) {
+      setActiveDocument(newAttachments[0]);
     }
   };
 
@@ -238,10 +293,52 @@ export default function App() {
     handleClearStagedAttachments();
   };
 
+  const handleShare = async () => {
+    if (!activeFormId) return;
+
+    // USSD Instruction according to Master Plan (Product B collects via USSD only)
+    const ussdMessage = `Apply to this program via USSD: Dial *801*11# and enter code: ${activeFormId}`;
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'Application Instructions',
+          text: ussdMessage,
+        });
+      } catch (err) {
+        console.log('Web Share aborted or failed:', err);
+      }
+    } else {
+      navigator.clipboard.writeText(ussdMessage);
+      showAiStatus('info', 'USSD instructions copied to clipboard!');
+    }
+  };
+
+  const handleExportChat = () => {
+    if (messages.length === 0) return;
+    const chatText = messages
+      .map((msg) => `${msg.sender.toUpperCase()}: ${msg.text}`)
+      .join('\n\n');
+    navigator.clipboard.writeText(chatText);
+    showAiStatus('info', 'Conversation exported to clipboard');
+  };
+
   const handleClearCurrentChat = () => {
-    setMessages([]);
+    clearChatStore();
     handleClearStagedAttachments();
   };
+
+  const handleInsightAction = async (action: string, insight: any) => {
+    if (action === 'DRAFT REMEDIATION') {
+      const prompt = `Based on the critical gap detected: "${insight.content}", please draft a 15-minute remediation lesson plan. Focus on correcting the specific student misconceptions mentioned. Use the active assessment context.`;
+      handleSendMessage(prompt);
+      // Automatically switch to chat view to see the result
+      setActiveTab('marking_hub');
+    } else {
+      console.log('Unhandled insight action:', action, insight);
+    }
+  };
+
 
   const convertFileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -312,9 +409,11 @@ export default function App() {
       timestamp: 'Just now',
     };
 
-    setMessages((prev) => [...prev, newUserMessage]);
+    setMessages((prev: any) => [...prev, newUserMessage]);
 
-    if (intent === 'greeting') {
+    // Only short-circuit very basic greetings if it's the start of a chat.
+    // More complex greetings or conversational greetings go to the LLM.
+    if (intent === 'greeting' && (messages.length === 0 || normalizedUserText.length < 5)) {
       const greetingReply: Message = {
         id: `assistant-${Date.now()}`,
         sender: 'assistant',
@@ -322,10 +421,11 @@ export default function App() {
         timestamp: 'Just now',
       };
 
-      setMessages((prev) => [...prev, greetingReply]);
+      setMessages((prev: any) => [...prev, greetingReply]);
       setAiServiceState('ready');
       return;
     }
+
 
     const buildContextAwarePayload = () => {
       const examContext = buildExamPaperContext(examPaper);
@@ -333,19 +433,43 @@ export default function App() {
       const submissionName = docToMark?.name || 'Active submission';
       const selectedEvidence = selectedText?.trim() ? selectedText : '';
 
+      const serverAttachments = stagedAttachments.filter(att => (att as ChatAttachment).serverId);
+      const attachmentIds = serverAttachments.map(att => (att as ChatAttachment).serverId);
+
+      // HYBRID CONTEXT SYNTHESIS (Pillar 5)
+      // If we have a summary, prepend it to the history.
+      const summary = useStore.getState().chatSummary;
+      const pinnedId = useStore.getState().pinnedSyllabusId;
+      const pinnedFile = pinnedId ? uploadedFiles.find(f => f.id === pinnedId) : null;
+
+      const historyPrefix = summary ? [{ role: 'system', text: `CONVERSATION SUMMARY (Memory): ${summary}` }] : [];
+
       return {
         query: userPrompt,
-        fileContext: submissionText || null,
+        fileContext: attachmentIds.length > 0 ? null : (submissionText || null),
         documentContext: submissionName || null,
         examContext: examContext || null,
+        pinnedSyllabus: pinnedFile ? `PINNED SYLLABUS/RUBRIC: ${pinnedFile.rawText || pinnedFile.name}` : null,
         selectedEvidence: selectedEvidence || null,
         replyTo: null,
-        attachmentBase64: docToMark?.base64Data || null,
+        // Only send base64 if not yet uploaded to server
+        attachmentBase64: attachmentIds.length > 0 ? null : (docToMark?.base64Data || null),
         attachmentMimeType: docToMark?.mimeType || null,
         attachmentName: docToMark?.name || null,
-        attachmentText: docToMark?.rawText || null,
+        attachmentText: attachmentIds.length > 0 ? null : (docToMark?.rawText || null),
+        previousInteractionId: lastInteractionId,
+        history: [...historyPrefix, ...messages.slice(-4)].map(m => ({
+           role: m.sender === 'user' ? 'user' : 'assistant',
+           text: m.text
+        })),
+        activeFormId,
+        provider: (selectedProvider && selectedProvider !== 'auto') ? selectedProvider : undefined,
+        attachmentIds: attachmentIds.length > 0 ? attachmentIds : undefined,
       };
     };
+
+
+
 
     if (attachmentsData) {
       setUploadedFiles((prev) => [
@@ -362,59 +486,246 @@ export default function App() {
       setActiveDocument(attachmentData);
     }
 
+    const { setAiDesignBuffer, addVisualAnnotation, setAgentStatus } = useStore.getState();
+
     try {
+      setIsAiThinking(true);
+      const controller = new AbortController();
+      setAbortController(controller);
+
       const payload = buildContextAwarePayload();
+      const formData = new FormData();
 
-      const res = await authFetch('/api/ai/chat', {
-        method: 'POST',
-        body: JSON.stringify(payload),
+      // Add text fields
+      Object.entries(payload).forEach(([key, value]) => {
+        if (value !== null && key !== 'history') {
+          formData.append(key, typeof value === 'object' ? JSON.stringify(value) : String(value));
+        }
       });
-      const data = await res.json();
-      const isFallback = !res.ok || data.success === false || data.provider === 'Fallback' || data.error;
-      const assistantMessage: Message = {
-        id: `assistant-${Date.now()}`,
-        sender: 'assistant',
-        text: isFallback
-          ? buildOfflineMockResponse(userPrompt, attachmentData || activeDocument)
-          : data.answer?.trim() || 'AI did not return a valid answer. Please check the backend logs.',
-        timestamp: 'Just now',
-        actions: isFallback
-          ? [
-              { label: '🔄 Retry Marking', value: userPrompt, actionType: 'retry', attachment: attachmentData },
-              { label: '📥 Save to Review Queue', value: 'Save this submission for later review', actionType: 'text' },
-            ]
-          : undefined,
-      };
 
-      if (isFallback) {
-        setAiServiceState('degraded');
-        showAiStatus('warning', 'Offline mock response active. Retry when the AI backend reconnects.');
-      } else {
-        setAiServiceState('ready');
-        showAiStatus('info', 'AI assistant is ready for structured analysis.');
+      if (payload.history) {
+        formData.append('history', JSON.stringify(payload.history));
       }
 
-      setMessages((prev) => [...prev, assistantMessage]);
-    } catch (error: any) {
-      setAiServiceState('degraded');
-      showAiStatus('warning', 'Offline mock response is active while AI service is unreachable.');
-      setMessages((prev) => [
-        ...prev,
-        {
+      // Add actual file if present in stagedAttachments or attachment data
+      if (attachmentsArray && attachmentsArray.length > 0) {
+        attachmentsArray.forEach((att) => {
+          if (att instanceof File) {
+            formData.append('attachment', att);
+          }
+        });
+      }
+
+      const response = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${authToken}`,
+        },
+        body: formData,
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          setMessages((prev: any) => [...prev, {
+            id: `assistant-${Date.now()}`,
+            sender: 'assistant',
+            text: "🔒 **Authentication Required**: Please Log In or Register using the button in the sidebar to talk with Bwenge AI.",
+            timestamp: 'Just now',
+          }]);
+          setAbortController(null);
+          return;
+        }
+
+        const errorData = await response.json().catch(() => ({}));
+        setMessages((prev: any) => [...prev, {
           id: `assistant-${Date.now()}`,
           sender: 'assistant',
-          text: buildOfflineMockResponse(userPrompt, attachmentData || activeDocument),
+          text: `❌ **Error**: ${errorData.error || response.statusText || 'Failed to connect to AI server.'}`,
           timestamp: 'Just now',
-          actions: [
-            { label: '🔄 Retry Marking', value: userPrompt, actionType: 'retry', attachment: attachmentData },
-            { label: '📥 Save to Review Queue', value: 'Save this submission for later review', actionType: 'text' },
-          ],
-        },
-      ]);
+        }]);
+        setAiServiceState('offline');
+        return;
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('Failed to start stream reader');
+
+      const decoder = new TextDecoder();
+      let assistantText = '';
+      let assistantThinkingText = '';
+      const assistantMsgId = `assistant-${Date.now()}`;
+      let buffer = '';
+
+      // Initialize assistant message with streaming state
+      setMessages((prev: any) => [...prev, {
+        id: assistantMsgId,
+        sender: 'assistant',
+        text: '',
+        thinkingText: '',
+        timestamp: 'Just now',
+        isStreaming: true,
+      }]);
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmedLine = line.trim();
+          if (trimmedLine.startsWith('data: ')) {
+            const dataStr = trimmedLine.slice(6).trim();
+            if (!dataStr || dataStr === '[DONE]') continue;
+
+            try {
+              const data = JSON.parse(dataStr);
+
+              // 1. Handle specialized tool/agent events
+              if (data.type === 'tool_call') {
+                const toolName = data.name || 'System Tool';
+                const statusIcon = data.status === 'started' ? '🏗️' : '🔄';
+                assistantThinkingText += `\n> ${statusIcon} **Tool**: \`${toolName}\`...\n`;
+                if (data.agent) setAgentStatus(`Agent: ${data.agent} is using ${toolName}`);
+              } else if (data.type === 'tool_result') {
+                assistantThinkingText += `\n> ✅ **Result**: \`${data.name || 'Task'}\` completed.\n`;
+              } else if (data.text) {
+                if (data.isThinking) {
+                  assistantThinkingText += data.text;
+                } else {
+                  assistantText += data.text;
+                }
+
+                // --- STREAMING JSON PARSER (Partial Schema) ---
+                const formTag = '<form_schema>';
+                const endTag = '</form_schema>';
+                const startIdx = assistantText.indexOf(formTag);
+
+                if (startIdx !== -1) {
+                  let rawJson = '';
+                  const endIdx = assistantText.indexOf(endTag, startIdx);
+
+                  if (endIdx !== -1) {
+                    rawJson = assistantText.slice(startIdx + formTag.length, endIdx);
+                  } else {
+                    rawJson = assistantText.slice(startIdx + formTag.length);
+                  }
+
+                  if (rawJson.trim()) {
+                    try {
+                      // Attempt to parse partial JSON by closing open braces/brackets
+                      let cleanJson = rawJson.trim();
+                      const openBraces = (cleanJson.match(/\{/g) || []).length;
+                      const closeBraces = (cleanJson.match(/\}/g) || []).length;
+                      const openBrackets = (cleanJson.match(/\[/g) || []).length;
+                      const closeBrackets = (cleanJson.match(/\]/g) || []).length;
+
+                      cleanJson += '}'.repeat(Math.max(0, openBraces - closeBraces));
+                      cleanJson += ']'.repeat(Math.max(0, openBrackets - closeBrackets));
+
+                      const schema = JSON.parse(cleanJson);
+                      setAiDesignBuffer(schema);
+                      if (activeTab !== 'marking_hub') setActiveTab('marking_hub');
+                    } catch (e) { /* silent fail on partial json */ }
+                  }
+                }
+
+                // Intercept Visual Annotations
+                const annotationMatch = assistantText.match(/<visual_annotation>([\s\S]*?)<\/visual_annotation>/);
+                if (annotationMatch) {
+                   try {
+                     const anno = JSON.parse(annotationMatch[1]);
+                     addVisualAnnotation(anno);
+                     assistantText = assistantText.replace(/<visual_annotation>[\s\S]*?<\/visual_annotation>/g, '');
+                   } catch (e) {}
+                }
+
+                // Detect Sub-Agent Status
+                const statusMatch = assistantText.match(/> (🕵️|🏗️|🔍|🏗️|🚀) \*\*(.*?)\*\*: (.*)/);
+                if (statusMatch) {
+                   setAgentStatus(`${statusMatch[2]}: ${statusMatch[3]}`.slice(0, 50));
+                }
+              }
+
+              // 2. Handle Proactive Insights (SSE event type)
+              if (data.type === 'insight') {
+                 useStore.getState().addOracleInsight(data.insight);
+              }
+
+              // Update messages state
+              setMessages((prev: any) =>
+                prev.map((msg: any) =>
+                  msg.id === assistantMsgId ? {
+                    ...msg,
+                    text: assistantText,
+                    thinkingText: assistantThinkingText,
+                    isThinking: data.isThinking ?? msg.isThinking,
+                    gated: data.gated || msg.gated,
+                    provider: data.provider || msg.provider,
+                    taskId: data.taskId || msg.taskId,
+                  } : msg
+                )
+              );
+              setAiServiceState('ready');
+
+              if (data.error) {
+                assistantText = `❌ **Error**: ${data.error}`;
+                setMessages((prev: any) =>
+                  prev.map((msg: any) =>
+                    msg.id === assistantMsgId ? { ...msg, text: assistantText, isStreaming: false } : msg
+                  )
+                );
+              }
+            } catch (e) {
+              // Ignore partial JSON
+            }
+          }
+        }
+      }
+
+      // Mark streaming as complete
+      setMessages((prev: any) =>
+        prev.map((msg: any) =>
+          msg.id === assistantMsgId ? { ...msg, isStreaming: false } : msg
+        )
+      );
+
+      // ROLLING CONTEXT SUMMARIZATION (Trigger every 5 messages)
+      if (messages.length > 0 && messages.length % 5 === 0) {
+        const { chatSummary, setChatSummary } = useStore.getState();
+        const convoToSummarize = messages.slice(-10).map(m => `${m.sender.toUpperCase()}: ${m.text}`).join('\n');
+
+        fetch('/api/ai/chat', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: `Summarize this conversation segment concisely. Current Summary: ${chatSummary || 'None'}\n\nNEW CONVERSATION:\n${convoToSummarize}`,
+            extractSchema: '{"summary": "string"}',
+            service: 'general'
+          })
+        }).then(res => res.json()).then(data => {
+           if (data.summary) setChatSummary(data.summary);
+        }).catch(e => console.error('Silent summarization failed', e));
+      }
+
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.log('Stream aborted by user');
+      } else {
+        console.error('Streaming failed', error);
+        setAiServiceState('degraded');
+        showAiStatus('warning', 'AI service is unreachable.');
+      }
     } finally {
       setIsAiThinking(false);
       setIsAiLoading(false);
+      setAbortController(null);
     }
+
+
   };
 
   const buildOfflineMockResponse = (query: string, document: any) => {
@@ -439,17 +750,15 @@ This is a demo response while the AI service is unavailable. Retry when the engi
   };
 
   useEffect(() => {
-    try {
-      localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(messages));
-    } catch {
-      // Ignore localStorage write failures in private mode.
-    }
-  }, [messages]);
+    (window as any).openUpgradeModal = () => setUpgradeModalOpen(true);
+    return () => { delete (window as any).openUpgradeModal; };
+  }, []);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', darkMode);
     try { localStorage.setItem('darkMode', String(darkMode)); } catch {}
   }, [darkMode]);
+
 
   const addAiCard = (card: AICard) => {
     setAiCards((prev) => [card, ...prev]);
@@ -926,8 +1235,46 @@ This is a demo response while the AI service is unavailable. Retry when the engi
     setExcelDownloadUrl(null);
   }, [studentScripts]);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const jobId = params.get('jobId');
+    const service = params.get('service');
+    if (window.location.pathname === '/upgrade' && jobId && service) {
+      setUpgradeContext({ jobId, service });
+    }
+  }, []);
+
+  if (upgradeContext) {
+    return (
+      <UpgradePage
+        jobId={upgradeContext.jobId}
+        service={upgradeContext.service}
+        targetPlan={upgradeContext.targetPlan}
+        customPrice={upgradeContext.amount}
+        onBack={() => {
+          setUpgradeContext(null);
+          window.history.pushState({}, '', '/');
+        }}
+        onSuccess={() => {
+          setUpgradeContext(null);
+          window.history.pushState({}, '', '/');
+          showAiStatus('info', 'Upgrade successful! Your content is now available.');
+        }}
+      />
+    );
+  }
+
+  const handleDeleteSession = (sessionId: string) => {
+    setChatSessions((prev) => prev.filter(s => s.id !== sessionId));
+    // If the deleted session was the active one, clear current workspace
+    if (activeSessionId === sessionId) {
+      handleClearCurrentChat();
+    }
+  };
+
   return (
-    <div className="h-screen w-screen bg-[#FBF9F6] dark:bg-[#141416] text-[#191919] dark:text-[#F3F3F3] font-sans transition-colors duration-200 overflow-hidden flex flex-col">
+    <div className="h-[100dvh] w-screen bg-[#191919] text-[#D1D1D0] font-sans antialiased transition-colors duration-200 overflow-hidden flex flex-col">
+
       {scannerOpen && (
         <div className="fixed inset-0 z-[70] bg-black/30 backdrop-blur-sm p-3 sm:p-4">
           <div className="absolute inset-0" onClick={() => setScannerOpen(false)} />
@@ -961,115 +1308,162 @@ This is a demo response while the AI service is unavailable. Retry when the engi
         </div>
       )}
 
-      <TopNavbar
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-      />
-
       <div className="flex-1 flex flex-col overflow-hidden lg:flex-row min-h-0">
-        <div className="hidden md:flex">
-          <LeftSidebar
-            activeTab={activeTab}
-            setActiveTab={setActiveTab}
-            collapsed={sidebarCollapsed}
-            setCollapsed={setSidebarCollapsed}
-            highlightsCount={highlights.length}
-            documentsCount={1}
-            decksCount={decks.length}
-            onUploadStudentPaper={handleUploadStudentPaper}
-            onOpenScanner={() => setScannerOpen(true)}
-            user={authenticatedUser}
-            onOpenLoginModal={() => setLoginModalOpen(true)}
-            onOpenSettings={() => setSettingsOpen(true)}
-            onLogout={handleLogout}
-          />
-        </div>
 
-        <div className="hidden md:flex flex-1 min-h-0">
-          <CenterWorkspace
-            activeTab={activeTab}
-            examPaper={examPaper}
-            setExamPaper={setExamPaper}
-            uploadedFiles={uploadedFiles}
-            studentScripts={studentScripts}
-            setStudentScripts={setStudentScripts}
-            onUploadStudentPaper={handleUploadStudentPaper}
-            onOpenScanner={() => setScannerOpen(true)}
-            onGenerateSampleBatch300={() => {
-              const sampleBatch: UploadedFile[] = Array.from({ length: 5 }, (_, i) => ({
-                id: `sample-${Date.now()}-${i}`,
-                name: `Student_Paper_${i + 1}.txt`,
-                url: '',
-                fileType: 'text',
-                rawText: `Sample student answer ${i + 1}`,
-                studentName: `Student ${i + 1}`,
-                batchBadge: '1',
-              }));
-              setUploadedFiles((prev) => [...sampleBatch, ...prev]);
-            }}
-            scannerOpen={scannerOpen}
-            onCloseScanner={() => setScannerOpen(false)}
-            onSaveScannedPages={handleSaveScannedPages}
-            onTextSelection={(text: string, pos: { top: number; left: number }) => {
-              setSelectedText(text);
-              setSelectionPos(pos);
-            }}
-            onToggleSoftDelete={handleToggleSoftDelete}
-            onToggleFlag={handleToggleFlag}
-            onUpdateBonusMarks={handleUpdateBonusMarks}
-            onDeletePermanently={handleDeletePermanently}
-            activeDocument={activeDocument}
-          />
-        </div>
+        <LeftSidebar
+          activeTab={activeTab as NavigationTab}
+          setActiveTab={(t) => setActiveTab(t as string)}
+          collapsed={sidebarCollapsed}
+          setCollapsed={setSidebarCollapsed}
+          user={authenticatedUser}
+          onOpenLoginModal={() => setLoginModalOpen(true)}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onLogout={handleLogout}
+          sessions={chatSessions}
+          onLoadSession={handleLoadChatSession}
+          onNewChat={handleNewChat}
+          onDeleteSession={handleDeleteSession}
+        />
 
-        <div className="w-full md:w-[460px] h-full flex flex-col">
-          {activeTab !== 'results' ? (
-            <RightChatSidebar
+        {activeTab === 'documents' ? (
+          <div className="flex-1 h-full overflow-hidden">
+            <CreateStudio
               messages={messages}
-              chatSessions={chatSessions}
+              sessions={chatSessions}
               onSendMessage={handleSendMessage}
+              onNewChat={handleNewChat}
+              onLoadSession={handleLoadChatSession}
+              onOpenSettings={() => setSettingsOpen(true)}
+              onDeleteChat={handleClearCurrentChat}
+              onExportChat={handleExportChat}
+              onShare={handleShare}
+              activeFormId={activeFormId}
+              isTyping={isAiThinking}
+              onAbort={() => abortController?.abort()}
+              selectedProvider={selectedProvider}
+              onProviderChange={setSelectedProvider}
               stagedAttachments={stagedAttachments}
               onStageAttachments={handleStageAttachments}
               onRemoveStagedAttachment={handleRemoveStagedAttachment}
-              onClearStagedAttachments={handleClearStagedAttachments}
-              activeDocument={activeDocument}
-              setActiveDocument={setActiveDocument}
-              onOpenScanner={() => setScannerOpen(true)}
+            />
+          </div>
+
+        ) : (
+          <div className="flex-1 flex flex-col min-w-0">
+            <TopNavbar
+              activeTab={activeTab as NavigationTab}
+              setActiveTab={(t) => setActiveTab(t as string)}
               onNewChat={handleNewChat}
-              onLoadSession={handleLoadChatSession}
-              onClearChat={handleClearCurrentChat}
-              isDegraded={aiServiceState === 'degraded'}
-              isTyping={isAiThinking}
+              onOpenSettings={() => setSettingsOpen(true)}
+              onDeleteChat={handleClearCurrentChat}
+              onExportChat={handleExportChat}
+              onShare={handleShare}
+              activeFormId={activeFormId}
+              user={authenticatedUser}
             />
-          ) : (
-            <SidebarResultsPanel
-              batchTitle={examPaper?.title || 'Batch Results'}
-              excelDownloadUrl={excelDownloadUrl}
-              isGenerating={isGeneratingExcel}
-              results={studentScripts.map((script) => ({
-                id: script.studentId,
-                name: script.studentName,
-                score: script.totalAwardedMarks ?? 0,
-                maxScore: script.maxTotalMarks ?? 0,
-                status:
-                  script.flags && script.flags.length > 0
-                    ? 'Needs Review'
-                    : (script.percentage ?? 0) >= 50
-                    ? 'Passed'
-                    : 'Failed',
-              }))}
-              onClose={() => setActiveTab('marking_hub')}
-              onGenerateExcel={handleGenerateExcelExport}
-            />
-          )}
-        </div>
+
+            <div className="flex-1 flex overflow-hidden lg:flex-row min-h-0">
+              <div className="hidden md:flex flex-1 min-h-0 border-r border-white/5">
+                <CenterWorkspace
+                  activeTab={activeTab}
+                  examPaper={examPaper}
+                  setExamPaper={setExamPaper}
+                  uploadedFiles={uploadedFiles}
+                  studentScripts={studentScripts}
+                  setStudentScripts={setStudentScripts}
+                  onUploadStudentPaper={handleUploadStudentPaper}
+                  onOpenScanner={() => setScannerOpen(true)}
+                  onGenerateSampleBatch300={() => {
+                    const sampleBatch: UploadedFile[] = Array.from({ length: 5 }, (_, i) => ({
+                      id: `sample-${Date.now()}-${i}`,
+                      name: `Student_Paper_${i + 1}.txt`,
+                      url: '',
+                      fileType: 'text',
+                      rawText: `Sample student answer ${i + 1}`,
+                      studentName: `Student ${i + 1}`,
+                      batchBadge: '1',
+                    }));
+                    setUploadedFiles((prev) => [...sampleBatch, ...prev]);
+                  }}
+                  scannerOpen={scannerOpen}
+                  onCloseScanner={() => setScannerOpen(false)}
+                  onSaveScannedPages={handleSaveScannedPages}
+                  onTextSelection={(text: string, pos: { top: number; left: number }) => {
+                    setSelectedText(text);
+                    setSelectionPos(pos);
+                  }}
+                  onToggleSoftDelete={handleToggleSoftDelete}
+                  onToggleFlag={handleToggleFlag}
+                  onUpdateBonusMarks={handleUpdateBonusMarks}
+                  onDeletePermanently={handleDeletePermanently}
+                  activeDocument={activeDocument}
+                  pinnedSyllabusId={useStore.getState().pinnedSyllabusId}
+                  onPinSyllabus={(id) => useStore.getState().setPinnedSyllabusId(id)}
+                />
+              </div>
+
+              <div className="w-full md:w-[460px] h-full flex flex-col border-l border-white/5">
+                {activeTab !== 'results' ? (
+                  <RightChatSidebar
+                    messages={messages}
+                    chatSessions={chatSessions}
+                    onSendMessage={handleSendMessage}
+                    stagedAttachments={stagedAttachments}
+                    onStageAttachments={handleStageAttachments}
+                    onRemoveStagedAttachment={handleRemoveStagedAttachment}
+                    onClearStagedAttachments={handleClearStagedAttachments}
+                    activeDocument={activeDocument}
+                    setActiveDocument={setActiveDocument}
+                    onOpenScanner={() => setScannerOpen(true)}
+                    onNewChat={handleNewChat}
+                    onLoadSession={handleLoadChatSession}
+                    onClearChat={handleClearCurrentChat}
+                    onInsightAction={handleInsightAction}
+                    isDegraded={aiServiceState === 'degraded'}
+                    isTyping={isAiThinking}
+                    onUpgradeClick={(jobId, service) => setUpgradeContext({ jobId, service })}
+                    selectedProvider={selectedProvider}
+                    onProviderChange={setSelectedProvider}
+                  />
+                ) : (
+                  <SidebarResultsPanel
+                    batchTitle={examPaper?.title || 'Batch Results'}
+                    excelDownloadUrl={excelDownloadUrl}
+                    isGenerating={isGeneratingExcel}
+                    results={studentScripts.map((script) => ({
+                      id: script.studentId,
+                      name: script.studentName,
+                      score: script.totalAwardedMarks ?? 0,
+                      maxScore: script.maxTotalMarks ?? 0,
+                      status:
+                        script.flags && script.flags.length > 0
+                          ? 'Needs Review'
+                          : (script.percentage ?? 0) >= 50
+                          ? 'Passed'
+                          : 'Failed',
+                    }))}
+                    onClose={() => setActiveTab('marking_hub')}
+                    onGenerateExcel={handleGenerateExcelExport}
+                  />
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
+
 
       <Suspense fallback={null}>
         <LoginModal
           isOpen={loginModalOpen}
           onClose={() => setLoginModalOpen(false)}
           onLoginSuccess={handleLoginSuccess}
+        />
+        <UpgradeModal
+          isOpen={upgradeModalOpen}
+          onClose={() => setUpgradeModalOpen(false)}
+          onUpgrade={handleUpgrade}
         />
       </Suspense>
       <SettingsModal

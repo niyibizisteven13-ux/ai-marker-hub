@@ -1,0 +1,9 @@
+<svg width="220" height="220" viewBox="0 0 680 340" xmlns="http://www.w3.org/2000/svg" role="img">
+  <title>Bwenge AI</title>
+  <circle cx="340" cy="170" r="130" fill="#0D2B24"/>
+  <path d="M 281 208 Q 340 273 399 208 Q 399 244 340 268 Q 281 244 281 208 Z" fill="#9FE1CB"/>
+  <circle cx="302" cy="158" r="30.7" fill="#5DCAA5"/>
+  <circle cx="378" cy="158" r="30.7" fill="#5DCAA5"/>
+  <circle cx="302" cy="158" r="11.8" fill="#0D2B24"/>
+  <circle cx="378" cy="158" r="11.8" fill="#0D2B24"/>
+</svg>

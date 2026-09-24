@@ -1,0 +1,7 @@
+- [ ] **Backend Fixes**
+    - [ ] Add `try-catch` to `AnalyticsWorker.aggregateBatchPerformance`
+    - [ ] Add `.catch()` to analytics call in `server.ts`
+    - [ ] Restore missing endpoints in `server.ts`
+- [ ] **Verification**
+    - [ ] Check if server starts and responds to health check
+    - [ ] Verify endpoints work

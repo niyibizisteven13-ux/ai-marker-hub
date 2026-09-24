@@ -150,3 +150,20 @@
 .duration-200 { animation-duration: 200ms; }
 .duration-150 { animation-duration: 150ms; }
 
+/* Custom Utility Class to Hide Scrollbars cross-browser */
+.scrollbar-hidden {
+  /* 1. Internet Explorer and Legacy Edge Engines */
+  -ms-overflow-style: none;
+
+  /* 2. Mozilla Firefox Native Support */
+  scrollbar-width: none;
+}
+/* 3. Safari, Google Chrome, Brave, and Chromium Opera Engines (WebKit) */
+.scrollbar-hidden::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  background: transparent !important;
+}
+
+

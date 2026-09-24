@@ -1,8 +1,11 @@
 import React, { useRef, useState } from 'react';
 import { NavigationTab, ExamPaper, UploadedFile, StudentScript } from '../types';
 import { ResultsView } from './ResultsView';
-import { Plus, Check, X, Type, Maximize2, Sparkles, Trash2, RotateCcw, Award, Flag, Paperclip } from 'lucide-react';
+import { Plus, Check, X, Type, Maximize2, Sparkles, Trash2, RotateCcw, Award, Flag, Paperclip, Wrench, Clock, BookOpen, Layout } from 'lucide-react';
 import DocumentScanner from './DocumentScanner';
+import { useStore } from '../store/useStore';
+import DynamicForm from './DynamicForm';
+import { BwengeLoader } from './BwengeLoader';
 
 interface ScannedPage {
   id: string;
@@ -29,6 +32,8 @@ interface CenterWorkspaceProps {
   onCloseScanner?: () => void;
   onSaveScannedPages?: (pages: ScannedPage[]) => void;
   activeDocument?: any;
+  pinnedSyllabusId?: string | null;
+  onPinSyllabus?: (id: string | null) => void;
 }
 
 interface Annotation {
@@ -58,8 +63,140 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
   onCloseScanner,
   onSaveScannedPages,
   activeDocument,
+  pinnedSyllabusId,
+  onPinSyllabus,
 }) => {
-  const documentContainerRef = useRef<HTMLDivElement>(null);
+  const [zoomLevel, setZoomLevel] = useState<number>(1);
+  const [zoomTarget, setZoomTarget] = useState<{ x: number, y: number } | null>(null);
+
+  const aiDesignBuffer = useStore((state) => state.aiDesignBuffer);
+  const setAiDesignBuffer = useStore((state) => state.setAiDesignBuffer);
+  const agentStatus = useStore((state) => state.agentStatus);
+  const isAiLoading = useStore((state) => state.isAiLoading);
+
+  const AssessmentDraftView = ({ schema }: { schema: any }) => {
+    const questions = schema.questions || [];
+    const isDrafting = isAiLoading && !schema.questions;
+    return (
+      <div className="w-full max-w-4xl bg-white dark:bg-[#1C1C20] rounded-[32px] shadow-2xl overflow-hidden border border-[#E8E4DC] dark:border-[#2D2D32] animate-in fade-in zoom-in-95 duration-500">
+        <div className="bg-[#D97757] p-8 text-white relative overflow-hidden">
+          <div className="absolute top-0 right-0 p-8 opacity-10">
+            <Award size={120} />
+          </div>
+          <div className="relative z-10 space-y-2">
+            <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] opacity-80">
+              {isAiLoading ? (
+                <BwengeLoader variant="compact" />
+              ) : (
+                <Sparkles size={12} />
+              )}
+              {isAiLoading ? 'Bwenge is drafting assessment...' : 'AI Drafted Assessment'}
+            </div>
+            <h2 className="text-3xl font-black tracking-tight">{schema.title || (isAiLoading ? 'Generating Title...' : 'Untitled Assessment')}</h2>
+            <div className="flex flex-wrap items-center gap-4 text-xs font-medium opacity-90 pt-2">
+              <div className="flex items-center gap-1.5 bg-black/10 px-2 py-1 rounded-md">
+                <BookOpen size={14} />
+                {schema.subject || 'General'}
+              </div>
+              <div className="flex items-center gap-1.5 bg-black/10 px-2 py-1 rounded-md">
+                <Clock size={14} />
+                {schema.durationMinutes || 60} mins
+              </div>
+              <div className="flex items-center gap-1.5 bg-black/10 px-2 py-1 rounded-md">
+                <Layout size={14} />
+                {questions.length} Questions
+              </div>
+              <div className="flex items-center gap-1.5 bg-black/10 px-2 py-1 rounded-md font-bold">
+                Total: {schema.totalMarks || 0} Marks
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-8 space-y-8 max-h-[60vh] overflow-y-auto custom-scrollbar">
+          {schema.description && (
+            <div className="text-sm text-[#66635B] dark:text-[#A0A0AA] italic leading-relaxed border-l-4 border-[#D97757]/30 pl-4 py-1">
+              {schema.description}
+            </div>
+          )}
+
+          <div className="space-y-6">
+            {questions.map((q: any, idx: number) => (
+              <div key={q.id || idx} className="group space-y-3 p-4 rounded-2xl hover:bg-[#F4F0E8]/50 dark:hover:bg-[#202024]/50 transition-all border border-transparent hover:border-[#E8E4DC] dark:hover:border-[#2D2D32]">
+                <div className="flex items-start justify-between">
+                  <div className="flex gap-3">
+                    <span className="flex-shrink-0 w-6 h-6 rounded-lg bg-[#D97757]/10 text-[#D97757] flex items-center justify-center text-xs font-bold border border-[#D97757]/20">
+                      {q.number || idx + 1}
+                    </span>
+                    <div className="space-y-2">
+                      <p className="text-[15px] font-bold text-[#191919] dark:text-[#F3F3F3] leading-snug">
+                        {q.questionText || q.text || 'No question text provided'}
+                      </p>
+                      {q.options && q.options.length > 0 && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                          {q.options.map((opt: string, i: number) => (
+                            <div key={i} className="text-xs px-3 py-2 rounded-xl bg-white dark:bg-[#141416] border border-[#E8E4DC] dark:border-[#2D2D32] text-[#66635B] dark:text-[#A0A0AA] flex items-center gap-2">
+                              <span className="w-4 h-4 rounded-full border border-[#D97757]/30 flex items-center justify-center text-[8px] font-bold text-[#D97757]">
+                                {String.fromCharCode(65 + i)}
+                              </span>
+                              {opt}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex-shrink-0 text-[10px] font-black text-[#D97757] bg-[#D97757]/10 px-2 py-1 rounded-md uppercase tracking-wider">
+                    {q.maxMarks || 0} Marks
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="p-8 bg-[#F4F0E8]/30 dark:bg-[#18181B]/30 border-t border-[#E8E4DC] dark:border-[#2D2D32] flex flex-col sm:flex-row items-center gap-4">
+          <button
+            onClick={() => {
+              if (setExamPaper) setExamPaper(schema);
+              setAiDesignBuffer(null);
+            }}
+            disabled={isAiLoading}
+            className={`w-full sm:w-auto px-8 py-3.5 rounded-2xl font-black text-sm transition-all shadow-xl flex items-center justify-center gap-2 active:scale-95 ${
+              isAiLoading
+                ? 'bg-slate-400 cursor-not-allowed opacity-50'
+                : 'bg-[#D97757] hover:bg-[#C56648] text-white shadow-[#D97757]/20'
+            }`}
+          >
+            <Check size={18} />
+            {isAiLoading ? 'Drafting in progress...' : 'Approve & Deploy Assessment'}
+          </button>
+          <button
+            onClick={() => setAiDesignBuffer(null)}
+            className="w-full sm:w-auto px-8 py-3.5 bg-white dark:bg-[#202024] hover:bg-[#F4F0E8] dark:hover:bg-[#2D2D32] text-[#191919] dark:text-[#F3F3F3] rounded-2xl font-bold text-sm transition-all border border-[#E8E4DC] dark:border-[#2D2D32] active:scale-95"
+          >
+            Discard Draft
+          </button>
+          <div className="flex-1 text-center sm:text-right text-[9px] font-bold text-[#858075] uppercase tracking-widest">
+            {agentStatus || 'Ready for refinement'}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const handleAnnotationClick = (anno: any) => {
+    setZoomLevel(zoomLevel === 1 ? 2.5 : 1); // Toggle zoom
+    setZoomTarget({ x: anno.x, y: anno.y });
+
+    // Auto-reset zoom after 5 seconds
+    if (zoomLevel === 1) {
+       setTimeout(() => {
+         setZoomLevel(1);
+         setZoomTarget(null);
+       }, 5000);
+    }
+  };
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [activePreviewUrl, setActivePreviewUrl] = useState<string | null>(null);
@@ -71,6 +208,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [toolMode, setToolMode] = useState<'select' | 'text' | 'check' | 'score'>('select');
   const [isDragging, setIsDragging] = useState<boolean>(false);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
   // AI-Grading Action Toolbar Local States
   const [showBonusInput, setShowBonusInput] = useState<boolean>(false);
@@ -212,7 +350,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
     setActivePreviewUrl(url);
   }, [activeDocument]);
 
-  const hasDocument = uploadedFiles.length > 0 || !!examPaper || !!activeDocument;
+  const hasDocument = uploadedFiles.length > 0 || !!examPaper || !!activeDocument || !!aiDesignBuffer;
 
   const renderActiveDocumentPreview = () => {
     if (!activeDocument) return null;
@@ -274,7 +412,30 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
 
   return (
     <div className="flex-1 min-h-[50vh] h-auto lg:h-[calc(100vh-61px)] flex flex-col bg-[#FBF9F6] dark:bg-[#141416] overflow-y-auto select-text relative">
-      {/* file input removed — uploads are handled via RightSidebar only */}
+      {/* AI Draft Priority Layer */}
+      {aiDesignBuffer && (
+        <div className="absolute inset-0 z-[100] bg-[#FBF9F6]/95 dark:bg-[#141416]/95 backdrop-blur-sm flex flex-col items-center justify-center p-4 lg:p-8 overflow-y-auto">
+          <AssessmentDraftView schema={aiDesignBuffer} />
+
+          <div className="mt-8 flex items-center gap-3 text-[10px] font-black uppercase tracking-[0.3em] text-[#858075]">
+            <BwengeLoader variant="compact" />
+            Bwenge AI Architecture Suite Active
+          </div>
+        </div>
+      )}
+
+      {/* Persistent AI Agent Status Bar */}
+      {agentStatus && !aiDesignBuffer && (
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-40 animate-in slide-in-from-bottom-4 duration-500">
+          <div className="px-6 py-3 rounded-full bg-[#191919] dark:bg-[#F3F3F3] text-white dark:text-[#191919] text-[10px] font-bold shadow-2xl flex items-center gap-4 border border-white/10">
+            <BwengeLoader variant="compact" />
+            <div className="flex flex-col">
+              <span className="opacity-70 uppercase tracking-widest text-[8px]">Bwenge Status</span>
+              <span>{agentStatus}</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {!hasDocument ? (
         /* Default State (When No Student File is Uploaded) */
@@ -285,22 +446,28 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
           }}
           onDragLeave={() => setIsDragging(false)}
           onDrop={handleFileDrop}
-          className={`flex-1 w-full h-full min-h-[60vh] lg:min-h-[80vh] flex flex-col items-center justify-center p-6 sm:p-8 text-center select-none transition-colors ${
+          className={`flex-1 w-full h-full min-h-[60vh] lg:min-h-[80vh] flex flex-col items-center justify-center p-6 sm:p-8 text-center select-none transition-all duration-500 ${
             isDragging ? 'bg-[#F2EFE9] dark:bg-[#1A1A1E]' : ''
           }`}
         >
-          <div className="max-w-md w-full space-y-6">
-            <div className="w-16 h-16 rounded-2xl bg-orange-500/10 border border-orange-500/20 text-orange-400 flex items-center justify-center text-2xl font-bold mx-auto shadow-inner">
-              📄
+          <div className="max-w-md w-full space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+            <div className="relative">
+              <div className="w-20 h-20 rounded-[28px] bg-[#D97757] text-white flex items-center justify-center text-3xl font-bold mx-auto shadow-2xl shadow-[#D97757]/30 transform rotate-3 hover:rotate-0 transition-transform cursor-default">
+                <BookOpen size={32} />
+              </div>
+              <div className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-emerald-500 border-4 border-[#FBF9F6] dark:border-[#141416] animate-pulse" />
             </div>
-            <div className="space-y-2">
-              <h2 className="text-xl font-semibold text-[#191919] dark:text-[#F3F3F3]">Bwenge AI Workspace</h2>
-              <p className="text-sm text-[#6B7280] dark:text-[#9CA3AF]">
-                Open a student submission or scan a paper booklet to begin automated grading.
+
+            <div className="space-y-3">
+              <h2 className="text-2xl font-black tracking-tight text-[#191919] dark:text-[#F3F3F3]">
+                Bwenge AI <span className="text-[#D97757]">Workspace</span>
+              </h2>
+              <p className="text-sm text-[#66635B] dark:text-[#A0A0AA] font-medium leading-relaxed">
+                Connect your assessment infrastructure. Upload student scripts, scan paper booklets, or let AI draft your next rubric.
               </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 pt-2">
+            <div className="grid grid-cols-2 gap-4 pt-4">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -316,13 +483,17 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                   e.stopPropagation();
                   handleUploadClick();
                 }}
-                className="p-4 rounded-xl bg-slate-900 hover:bg-slate-800/80 border border-slate-800 hover:border-orange-500/40 text-left transition group shadow-lg"
+                className="group p-5 rounded-2xl bg-white dark:bg-[#202024] hover:bg-[#F4F0E8] dark:hover:bg-[#2D2D32] border border-[#E8E4DC] dark:border-[#2D2D32] hover:border-[#D97757] text-left transition-all shadow-sm hover:shadow-xl hover:-translate-y-1 active:translate-y-0"
               >
-                <span className="text-lg block mb-1">📁</span>
-                <span className="text-xs font-medium text-slate-200 block group-hover:text-orange-400">
-                  Upload Submission
+                <div className="w-10 h-10 rounded-xl bg-[#D97757]/10 text-[#D97757] flex items-center justify-center mb-3 group-hover:bg-[#D97757] group-hover:text-white transition-colors">
+                  <Plus size={20} />
+                </div>
+                <span className="text-sm font-bold text-[#191919] dark:text-[#F3F3F3] block">
+                  Upload Paper
                 </span>
-                <span className="text-[10px] text-slate-500">PDF, PNG, JPEG</span>
+                <span className="text-[10px] text-[#858075] font-medium mt-1 block">
+                  PDF, PNG, JPEG
+                </span>
               </button>
 
               <button
@@ -331,13 +502,17 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                   e.stopPropagation();
                   onOpenScanner?.();
                 }}
-                className="p-4 rounded-xl bg-slate-900 hover:bg-slate-800/80 border border-slate-800 hover:border-orange-500/40 text-left transition group shadow-lg"
+                className="group p-5 rounded-2xl bg-white dark:bg-[#202024] hover:bg-[#F4F0E8] dark:hover:bg-[#2D2D32] border border-[#E8E4DC] dark:border-[#2D2D32] hover:border-[#D97757] text-left transition-all shadow-sm hover:shadow-xl hover:-translate-y-1 active:translate-y-0"
               >
-                <span className="text-lg block mb-1">📷</span>
-                <span className="text-xs font-medium text-slate-200 block group-hover:text-orange-400">
-                  Open BwengeScan
+                <div className="w-10 h-10 rounded-xl bg-[#D97757]/10 text-[#D97757] flex items-center justify-center mb-3 group-hover:bg-[#D97757] group-hover:text-white transition-colors">
+                  <Maximize2 size={20} />
+                </div>
+                <span className="text-sm font-bold text-[#191919] dark:text-[#F3F3F3] block">
+                  Live Scanner
                 </span>
-                <span className="text-[10px] text-slate-500">Live Camera / Phone</span>
+                <span className="text-[10px] text-[#858075] font-medium mt-1 block">
+                  Phone / Camera
+                </span>
               </button>
             </div>
 
@@ -363,10 +538,32 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
             <div>
               <p className="text-sm font-semibold text-[#191919] dark:text-[#F3F3F3]">Student papers</p>
               <p className="text-xs text-[#858075] dark:text-[#888892]">
-                {activeFiles.length} uploaded • desktop view uses this workspace
+                {activeFiles.length} uploaded • {viewMode === 'grid' ? 'Grid' : 'List'} view active
               </p>
             </div>
-            {/* Attach button removed — uploads are handled via RightSidebar */}
+
+            <div className="flex items-center gap-2 bg-[#F4F0E8] dark:bg-[#202024] p-1 rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32]">
+              <button
+                onClick={() => setViewMode('grid')}
+                className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+                  viewMode === 'grid'
+                    ? 'bg-white dark:bg-[#2D2D32] text-[#D97757] shadow-sm'
+                    : 'text-[#858075] hover:text-[#D97757]'
+                }`}
+              >
+                Grid
+              </button>
+              <button
+                onClick={() => setViewMode('list')}
+                className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+                  viewMode === 'list'
+                    ? 'bg-white dark:bg-[#2D2D32] text-[#D97757] shadow-sm'
+                    : 'text-[#858075] hover:text-[#D97757]'
+                }`}
+              >
+                List
+              </button>
+            </div>
           </div>
 
           {/* Main Active Grid Area */}
@@ -394,6 +591,45 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
               </div>
             ) : activeFiles.length === 0 && activeDocument ? (
               renderActiveDocumentPreview()
+            ) : viewMode === 'list' ? (
+              <div className="w-full max-w-4xl space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                {activeFiles.map((file, idx) => {
+                  const studentNum = uploadedFiles.findIndex((f) => f.id === file.id) + 1;
+                  return (
+                    <div
+                      key={file.id || idx}
+                      onClick={() => setSelectedFile(file)}
+                      className="group flex items-center justify-between p-4 bg-white dark:bg-[#1C1C20] rounded-2xl border border-[#E8E4DC] dark:border-[#2D2D32] hover:border-[#D97757] transition-all cursor-pointer shadow-sm hover:shadow-md"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-xl bg-[#D97757]/10 text-[#D97757] flex items-center justify-center text-xs font-black">
+                          {studentNum}
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-[#191919] dark:text-[#F3F3F3]">
+                            {file.studentName || `Student ${studentNum}`}
+                          </p>
+                          <p className="text-[10px] text-[#858075] uppercase tracking-wider font-bold">
+                            {file.name}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {file.isFlagged && <Flag className="w-4 h-4 text-amber-500 fill-current" />}
+                        <div className="text-[10px] font-mono text-emerald-600 bg-emerald-500/10 px-2 py-1 rounded-md">
+                          READY
+                        </div>
+                        <button
+                          onClick={(e) => handleSoftDeleteCard(e, file.id)}
+                          className="p-2 rounded-lg hover:bg-rose-500/10 text-[#858075] hover:text-rose-500 transition-colors"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             ) : (
               <div
                 onDragOver={(e) => {
@@ -415,6 +651,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                     <div
                       key={file.id || idx}
                       onClick={() => setSelectedFile(file)}
+                      style={{ contentVisibility: 'auto', containIntrinsicSize: '150px 200px' } as any}
                       className={`group relative ${cardSizeClass} bg-white dark:bg-[#1C1C20] rounded-md border ${
                         file.isFlagged
                           ? 'border-amber-500 ring-2 ring-amber-500/80 shadow-sm'
@@ -555,16 +792,37 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
 
             return (
               <div className="fixed inset-0 z-50 bg-[#141416]/70 backdrop-blur-sm flex items-center justify-center p-2 sm:p-6 animate-in fade-in duration-200">
-                <div className="w-full max-w-4xl h-[92vh] bg-[#FBF9F6] dark:bg-[#18181B] rounded-2xl border border-[#E8E4DC] dark:border-[#2D2D32] shadow-2xl flex flex-col overflow-hidden relative">
+                <div className="w-full max-w-5xl h-[92vh] bg-[#FBF9F6] dark:bg-[#18181B] rounded-[32px] border border-[#E8E4DC] dark:border-[#2D2D32] shadow-2xl flex flex-col overflow-hidden relative animate-in zoom-in-95 duration-300">
                   {/* Floating Tool Ribbon in Magnified View */}
-                  <div className="p-3 border-b border-[#E8E4DC] dark:border-[#2D2D32] bg-[#FFFFFF]/90 dark:bg-[#1F1F23]/90 backdrop-blur-md flex items-center justify-between z-20">
-                    <div className="flex items-center space-x-2">
-                      <span className="min-w-[24px] h-6 px-1.5 rounded-full bg-[#D97757] text-white flex items-center justify-center text-xs font-bold shadow-xs">
-                        {displayNum}
-                      </span>
-                      <span className="text-xs font-bold text-[#191919] dark:text-[#F3F3F3]">
-                        Magnified Viewport â€” Student Paper #{displayNum}
-                      </span>
+                  <div className="p-4 border-b border-[#E8E4DC] dark:border-[#2D2D32] bg-[#FFFFFF]/90 dark:bg-[#1F1F23]/90 backdrop-blur-md flex items-center justify-between z-20">
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center space-x-2">
+                        <span className="w-8 h-8 rounded-xl bg-[#D97757] text-white flex items-center justify-center text-xs font-black shadow-lg shadow-[#D97757]/20">
+                          {displayNum}
+                        </span>
+                        <div>
+                          <span className="text-xs font-black uppercase tracking-widest text-[#D97757] block leading-none mb-1">
+                            Script Viewer
+                          </span>
+                          <span className="text-[10px] font-bold text-[#66635B] dark:text-[#A0A0AA] block">
+                            Student Paper #{displayNum}
+                          </span>
+                        </div>
+                      </div>
+
+                      {onPinSyllabus && (
+                        <button
+                          onClick={() => onPinSyllabus(pinnedSyllabusId === selectedFile.id ? null : selectedFile.id)}
+                          className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                            pinnedSyllabusId === selectedFile.id
+                              ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/20'
+                              : 'bg-[#F4F0E8] dark:bg-[#202024] text-[#858075] hover:text-amber-600'
+                          }`}
+                        >
+                          <Paperclip size={14} className={pinnedSyllabusId === selectedFile.id ? 'rotate-45' : ''} />
+                          {pinnedSyllabusId === selectedFile.id ? 'Pinned as Syllabus' : 'Pin as Syllabus'}
+                        </button>
+                      )}
                     </div>
 
                   {/* Tool Controls */}
@@ -786,7 +1044,11 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                 <div
                   ref={documentContainerRef}
                   onMouseUp={handleMouseUpInMagnified}
-                  className="flex-1 overflow-y-auto p-6 relative select-text"
+                  className="flex-1 overflow-y-auto p-6 relative select-text transition-transform duration-700 ease-in-out"
+                  style={zoomTarget ? {
+                    transform: `scale(${zoomLevel}) translate(${50 - zoomTarget.x}%, ${50 - zoomTarget.y}%)`,
+                    transformOrigin: '0 0'
+                  } : {}}
                 >
                   {selectedFile.fileType === 'pdf' ? (
                     <iframe
@@ -849,6 +1111,43 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                       >
                         <X className="w-3 h-3" />
                       </button>
+                    </div>
+                  ))}
+
+                  {/* AI-Generated Visual Annotations */}
+                  {visualAnnotations.map((anno) => (
+                    <div
+                      key={anno.id}
+                      onClick={() => handleAnnotationClick(anno)}
+                      style={anno.coordinates ? {
+                        top: `${anno.coordinates.y}%`,
+                        left: `${anno.coordinates.x}%`,
+                        width: `${anno.coordinates.width}%`,
+                        height: `${anno.coordinates.height}%`,
+                        transform: 'none'
+                      } : {
+                        top: `${anno.y}%`,
+                        left: `${anno.x}%`,
+                        transform: 'translate(-50%, -50%)'
+                      }}
+                      className={`absolute z-40 px-3 py-1.5 rounded-xl shadow-xl text-[10px] font-bold border-2 animate-in zoom-in-50 duration-300 cursor-pointer hover:scale-110 transition-all ${
+                        anno.type === 'error'
+                          ? 'bg-rose-600/90 text-white border-rose-400'
+                          : 'bg-emerald-600/90 text-white border-emerald-400'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <Sparkles size={10} className="animate-pulse" />
+                        <span>AI: {anno.label}</span>
+                      </div>
+
+                      {/* Evidence Tooltip on Hover */}
+                      <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 w-48 p-2 bg-slate-900 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50 text-[9px] font-medium leading-tight shadow-2xl">
+                         {anno.reason || "Vision evidence extracted for rubric verification."}
+                      </div>
+
+                      {/* Pulse ring */}
+                      <div className="absolute inset-0 rounded-xl border-2 border-white/50 animate-ping opacity-20" />
                     </div>
                   ))}
                 </div>

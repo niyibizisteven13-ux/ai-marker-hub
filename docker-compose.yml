@@ -1,0 +1,19 @@
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DATABASE_URL=file:./dev.db
+    depends_on:
+      - redis
+    volumes:
+      - .env:/app/.env
+      - ./prisma/dev.db:/app/prisma/dev.db
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"

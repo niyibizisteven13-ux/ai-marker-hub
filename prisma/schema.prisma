@@ -18,6 +18,26 @@ model User {
   updatedAt    DateTime     @updatedAt
 
   settings     UserSettings?
+  sessions     AgentSession[]
+  forms        ApplicationForm[]
+  orgMemberships OrganizationMember[]
+  subscription Subscription?
+  files        FileRecord[]
+  memory       MemoryVector[]
+  batchJobs    BatchJob[]
+  telegramSessions TelegramSession[]
+}
+
+model Subscription {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id])
+  planType  String   // 'BUSINESS' | 'PRO' | 'ORGANIZATION'
+  status    String   // 'ACTIVE' | 'EXPIRED' | 'CANCELED'
+  startDate DateTime @default(now())
+  endDate   DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model UserSettings {
@@ -28,5 +48,287 @@ model UserSettings {
   autoSummarize     Boolean  @default(true)
   preferredLanguage String   @default("en")
   theme             String   @default("dark")
+  longTermMemory    Boolean  @default(false)
+  agentTone         String   @default("PROFESSIONAL")
+  customInstructions String?
   updatedAt         DateTime @updatedAt
 }
+
+model AgentSession {
+  id                String         @id @default(uuid())
+  userId            String
+  user              User           @relation(fields: [userId], references: [id])
+  status            String         @default("PENDING") // PENDING, RUNNING, PAUSED_HITL, COMPLETED, FAILED
+  globalBudget      Float          @default(5.0) // USD
+  spentBudget       Float          @default(0.0)
+  maxIterations     Int            @default(30)
+  currentIteration  Int            @default(0)
+  activeTokens      Int            @default(0)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  tasks             TaskDAG[]
+  logs              ExecutionLog[]
+}
+
+model TaskDAG {
+  id               String         @id @default(uuid())
+  sessionId        String
+  session          AgentSession   @relation(fields: [sessionId], references: [id])
+  parentId         String?
+  parent           TaskDAG?       @relation("TaskHierarchy", fields: [parentId], references: [id])
+  children         TaskDAG[]      @relation("TaskHierarchy")
+  title            String
+  description      String?
+  status           String         @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED, FAILED
+  dependencies     String?        // JSON array of task IDs
+  result           String?        // Serialized output
+  executionOrder   Int            @default(0)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+}
+
+model ExecutionLog {
+  id               String         @id @default(uuid())
+  sessionId        String
+  session          AgentSession   @relation(fields: [sessionId], references: [id])
+  iteration        Int
+  agentName        String
+  actionType       String         // TOOL_CALL, REASONING, VALIDATION, ERROR
+  input            String?        // JSON serialized
+  output           String?        // JSON serialized
+  tokenUsage       Int            @default(0)
+  stateDelta       Float          @default(0.0)
+  summary          String?        // High-density compression
+  createdAt        DateTime       @default(now())
+}
+
+model ApplicationForm {
+  id                String           @id @default(uuid())
+  title             String
+  schema            String           // JSON Schema definition
+  rubric            String?          // JSON Scoring Rubric
+  selectionSettings String?          // JSON selection logic (e.g. top N)
+  userId            String
+  user              User             @relation(fields: [userId], references: [id])
+  submissions       FormSubmission[]
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+}
+
+model FormSubmission {
+  id               String           @id @default(uuid())
+  formId           String
+  form             ApplicationForm  @relation(fields: [formId], references: [id])
+  data             String           // JSON student response
+  extractedInsights ExtractedInsight?
+  createdAt        DateTime         @default(now())
+}
+
+model ExtractedInsight {
+  id               String           @id @default(uuid())
+  submissionId     String           @unique
+  submission       FormSubmission   @relation(fields: [submissionId], references: [id])
+  skills           String?          // JSON array
+  experienceYears  Float?
+  sentiment        String?
+  topPassion       String?
+  atRisk           Boolean          @default(false)
+  summary          String?
+  score            Float?           // Calculated score
+  selected         Boolean          @default(false)
+  scoringFeedback  String?          // AI feedback on score
+  scoringDetails   String?          // JSON breakdown of criteria and reasoning
+  createdAt        DateTime         @default(now())
+}
+
+model Payment {
+  id           String   @id @default(uuid())
+  userId       String
+  batchId      String   @unique
+  amountRwf    Int
+  status       String   @default("PENDING") // PENDING, SUCCESS, FAILED
+  provider     String   @default("MTN_MOMO")
+  externalRef  String?  @unique
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model JobCostLog {
+  id              String   @id @default(cuid())
+  jobId           String
+  jobType         String   // 'grading' | 'scoring'
+  model           String
+  inputTokens     Int
+  outputTokens    Int
+  actualCostUsd   Float
+  chargedUsd      Float
+  marginRealized  Float
+  createdAt       DateTime @default(now())
+
+  @@index([jobType, createdAt])
+}
+
+model FailedJob {
+  id           String   @id @default(cuid())
+  jobId        String
+  jobType      String
+  payload      String   // JSON snapshot of the input
+  errorMessage String
+  attempts     Int
+  status       String   @default("needs_review") // needs_review | resolved
+  createdAt    DateTime @default(now())
+}
+
+model UsageQuota {
+  id           String   @id @default(uuid())
+  userId       String
+  service      String   // 'grading' | 'scoring'
+  freeUsed     Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([userId, service])
+}
+
+model UnlockedResult {
+  id         String   @id @default(uuid())
+  userId     String
+  jobId      String   // the specific batch/submission this unlocks
+  service    String
+  paidUsd    Float
+  createdAt  DateTime @default(now())
+}
+
+model Plan {
+  id              String   @id @default(uuid())
+  type            String   // 'individual' | 'organization'
+  name            String
+  freeTrialCount  Int?
+  perWorkerCapUsd Float?
+  features        String?  // JSON string e.g. { "auditReports": true }
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Organization {
+  id               String   @id @default(uuid())
+  name             String
+  creditBalanceUsd Float    @default(0)
+  perWorkerCapUsd  Float?
+  members          OrganizationMember[]
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model OrganizationMember {
+  id             String       @id @default(uuid())
+  organizationId String
+  userId         String
+  role           String       @default("TEACHER") // ADMIN, TEACHER
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  user           User         @relation(fields: [userId], references: [id])
+
+  @@unique([organizationId, userId])
+}
+
+model AuditLog {
+  id           String   @id @default(uuid())
+  actorId      String
+  action       String
+  resourceType String
+  resourceId   String?
+  details      String?  // JSON string
+  createdAt    DateTime @default(now())
+
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+}
+
+model FileRecord {
+  id          String   @id @default(uuid())
+  name        String
+  mimeType    String
+  size        Int
+  url         String?
+  path        String?
+  extractedText String?
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model MemoryVector {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  content   String
+  embedding String   // JSON stringified float array
+  metadata  String?  // JSON string
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model BatchJob {
+  id            String   @id @default(uuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  telegramChatId String?
+  paperType     String   @default("mcq") // 'mcq' | 'essay' | 'short_answer' | 'single'
+  status        String   @default("PENDING") // 'PENDING' | 'PROCESSING' | 'DONE' | 'FAILED'
+  detectedCount Int?
+  excelUrl      String?
+  summary       String?  // JSON stringified
+  errorMessage  String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  results       BatchJobResult[]
+
+  @@index([userId])
+  @@index([telegramChatId])
+}
+
+model BatchJobResult {
+  id              String   @id @default(uuid())
+  jobId           String
+  job             BatchJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  studentId       String?
+  studentName     String?
+  totalScore      Float
+  maxScore        Float
+  gradedQuestions String   // JSON stringified question breakdown
+  confidence      String?  // 'high' | 'medium' | 'low'
+  createdAt       DateTime @default(now())
+
+  @@index([jobId])
+}
+
+model TelegramSession {
+  id                 String   @id @default(uuid())
+  chatId             String   @unique
+  userId             String?
+  user               User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  provider           String   @default("gemini") // 'gemini' | 'claude' | 'nvidianim' | 'ollama'
+  language           String   @default("en") // 'en' | 'rw'
+  stagedPaperFileId  String?
+  stagedPaperLocalPath String?
+  stagedPaperName    String?
+  stagedRubricFileId String?
+  stagedRubricLocalPath String?
+  stagedRubricName   String?
+  stagedRubricText   String?
+  stagedMode         String?  // 'batch' | 'markphoto' | 'form'
+  activeDiscussJobId String?
+  lastActiveAt       DateTime @default(now())
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([chatId])
+}
+
+
+
+

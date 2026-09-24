@@ -7,7 +7,8 @@
 
 export type MessageIntent = 'greeting' | 'grading_request' | 'general';
 
-const GREETING_PATTERN = /^(hey(\s+(you|there|budd?y))?|hi(\s+there)?|hello|yo+|sup|good\s(morning|afternoon|evening)|how\sare\syou|how\sare\syou\sdoing|what('?s| is)\sup)[.! ]*$/i;
+const GREETING_PATTERN = /^(hey|hi|hello|yo|sup|how are you|who are you|how's it going|good morning|good afternoon|good evening)[.! ]*$/i;
+
 
 const GRADING_KEYWORDS = /\b(grade|mark|marking|score|evaluate|assess|review|feedback|rubric|submission)\b/i;
 
@@ -19,12 +20,18 @@ export function classifyIntent(userText: string, hasActiveDocument: boolean): Me
     return 'greeting';
   }
 
-  if (hasActiveDocument || GRADING_KEYWORDS.test(trimmed)) {
+  // Only auto-route to grading if the query is long enough or contains keywords.
+  // This allows short questions like "who is you" to stay in general chat mode.
+  const isExplicitGrading = GRADING_KEYWORDS.test(trimmed);
+  const isLikelyAnalysis = hasActiveDocument && (trimmed.length > 25 || /\?$/.test(trimmed));
+
+  if (isExplicitGrading || isLikelyAnalysis) {
     return 'grading_request';
   }
 
   return 'general';
 }
+
 
 /**
  * Optional, non-fabricating UX nicety: a short local reply for pure small
@@ -33,8 +40,16 @@ export function classifyIntent(userText: string, hasActiveDocument: boolean): Me
  * intent — everything else must go through the real backend.
  */
 export function localGreetingReply(activeDocumentName?: string): string {
+  const greetings = [
+    "Hello! I'm Bwenge AI, your expert pedagogical assistant.",
+    "Greetings! I'm ready to help you with grading or academic analysis.",
+    "Hey there! How can I assist you in your teaching today?"
+  ];
+  const randomGreeting = greetings[Math.floor(Math.random() * greetings.length)];
+
   if (activeDocumentName) {
-    return `Hey! **${activeDocumentName}** is loaded — want me to grade it against a rubric, or just summarize it first?`;
+    return `${randomGreeting} **${activeDocumentName}** is currently loaded. Would you like me to grade it, or shall we discuss the content first?`;
   }
-  return 'Hey! Attach a student paper or launch the scanner whenever you’re ready to grade something.';
+  return `${randomGreeting} Simply upload a student paper or launch the scanner to get started.`;
 }
+

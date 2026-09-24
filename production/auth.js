@@ -2,7 +2,9 @@ import fs from 'fs/promises';
 import path from 'path';
 import jwt from 'jsonwebtoken';
 import { fileURLToPath } from 'url';
+import { PrismaClient } from '@prisma/client';
 
+const prisma = new PrismaClient();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const AUDIT_LOG_PATH = path.join(__dirname, '..', 'exports', 'audit.log.jsonl');
@@ -61,15 +63,31 @@ export function requireAuth(req, res, next) {
 }
 
 export async function writeAuditLog(actorId, action, resourceType, resourceId, details = {}) {
-  const entry = {
-    timestamp: new Date().toISOString(),
-    actorId: actorId || 'system',
-    action,
-    resourceType,
-    resourceId,
-    details,
-  };
+  try {
+    const entry = {
+      timestamp: new Date().toISOString(),
+      actorId: actorId || 'system',
+      action,
+      resourceType,
+      resourceId,
+      details,
+    };
 
-  await fs.mkdir(path.dirname(AUDIT_LOG_PATH), { recursive: true });
-  await fs.appendFile(AUDIT_LOG_PATH, `${JSON.stringify(entry)}\n`, 'utf8');
+    // 1. Write to Database (Centralized)
+    await prisma.auditLog.create({
+      data: {
+        actorId: actorId || 'system',
+        action,
+        resourceType,
+        resourceId: resourceId || null,
+        details: JSON.stringify(details),
+      }
+    });
+
+    // 2. Write to JSONL (Local Forensic Backup)
+    await fs.mkdir(path.dirname(AUDIT_LOG_PATH), { recursive: true });
+    await fs.appendFile(AUDIT_LOG_PATH, `${JSON.stringify(entry)}\n`, 'utf8');
+  } catch (err) {
+    console.error('Audit Log failed:', err);
+  }
 }

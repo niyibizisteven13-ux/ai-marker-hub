@@ -9,7 +9,10 @@ import {
   Sparkles, 
   Eye, 
   RotateCcw,
-  Layers
+  Layers,
+  BarChart3,
+  Download,
+  Coins
 } from 'lucide-react';
 import DocumentScanner from './DocumentScanner';
 
@@ -18,6 +21,7 @@ export default function ModernBwengeStudio() {
   const [prompt, setPrompt] = useState('');
   const [activeDocument, setActiveDocument] = useState<any>(null);
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [botStatusMessage, setBotStatusMessage] = useState<string | null>(null);
 
   // Trigger inline upload simulation
   const handleUpload = () => {
@@ -129,8 +133,53 @@ export default function ModernBwengeStudio() {
 
       </main>
 
-      {/* 3. GEMINI-STYLE CAPSULE INPUT BAR */}
-      <div className="fixed bottom-0 inset-x-0 bg-gradient-to-t from-[#121316] via-[#121316]/95 to-transparent pt-3 pb-4 px-3 z-40">
+      {/* 3. TELEGRAM BOT PERSISTENT ACTION BAR & GEMINI INPUT CAPSULE */}
+      <div className="fixed bottom-0 inset-x-0 bg-gradient-to-t from-[#121316] via-[#121316]/95 to-transparent pt-3 pb-4 px-3 z-40 space-y-2">
+
+        {/* Telegram Bot Persistent Action Keyboard */}
+        <div className="max-w-lg mx-auto flex items-center justify-center gap-1.5 overflow-x-auto pb-1 px-1">
+          <button
+            onClick={() => {
+              handleUpload();
+              setBotStatusMessage('✨ Grade Batch triggered for 800 students / 1600 pages.');
+              setTimeout(() => setBotStatusMessage(null), 4000);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1e2025] hover:bg-amber-500/15 border border-white/10 hover:border-amber-500/30 text-[11px] font-medium text-neutral-200 hover:text-amber-400 rounded-xl transition shadow-sm shrink-0"
+          >
+            <Sparkles className="w-3 h-3 text-amber-400" /> Grade Batch
+          </button>
+
+          <button
+            onClick={() => {
+              setBotStatusMessage('📊 Status: Queue idle. 800 students ready for scanning.');
+              setTimeout(() => setBotStatusMessage(null), 4000);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1e2025] hover:bg-amber-500/15 border border-white/10 hover:border-amber-500/30 text-[11px] font-medium text-neutral-200 hover:text-amber-400 rounded-xl transition shadow-sm shrink-0"
+          >
+            <BarChart3 className="w-3 h-3 text-cyan-400" /> Check Status
+          </button>
+
+          <button
+            onClick={() => {
+              setBotStatusMessage('📤 Export Excel: No completed batches yet.');
+              setTimeout(() => setBotStatusMessage(null), 4000);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1e2025] hover:bg-amber-500/15 border border-white/10 hover:border-amber-500/30 text-[11px] font-medium text-neutral-200 hover:text-amber-400 rounded-xl transition shadow-sm shrink-0"
+          >
+            <Download className="w-3 h-3 text-emerald-400" /> Export Excel
+          </button>
+
+          <div className="flex items-center gap-1 px-3 py-1.5 bg-amber-500/10 border border-amber-500/30 text-[11px] font-semibold text-amber-400 rounded-xl shrink-0">
+            <Coins className="w-3 h-3" /> Quota: 800/800
+          </div>
+        </div>
+
+        {botStatusMessage && (
+          <div className="max-w-lg mx-auto bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[10px] px-3 py-1 rounded-lg text-center animate-in fade-in">
+            {botStatusMessage}
+          </div>
+        )}
+
         <div className="max-w-lg mx-auto">
           <div className="relative flex items-center bg-[#1e2025] border border-white/10 rounded-full shadow-2xl px-3 py-1.5">
             

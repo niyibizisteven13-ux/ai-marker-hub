@@ -1,5 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Plus, Bell, Sparkles, Brain, Cpu, ShieldCheck, Database, Search } from 'lucide-react';
 import type { ChatAttachment, ChatSession, Message } from '../types';
+
+import ChatMessage from './ChatMessage';
+import BwengeLoader from './BwengeLoader';
+import { useStore } from '../store/useStore';
 
 interface RightChatSidebarProps {
   messages: Message[];
@@ -19,6 +24,32 @@ interface RightChatSidebarProps {
   isDegraded?: boolean;
   /** Set while a real request to the AI backend is in flight. */
   isTyping?: boolean;
+}
+
+
+
+interface RightChatSidebarProps {
+  messages: Message[];
+  chatSessions?: ChatSession[];
+  onSendMessage: (userText: string, attachment?: File | ChatAttachment | Array<File | ChatAttachment>) => void | Promise<void>;
+  stagedAttachments?: Array<File | ChatAttachment>;
+  onStageAttachments?: (attachments: Array<File | ChatAttachment>) => void;
+  onRemoveStagedAttachment?: (index: number) => void;
+  onClearStagedAttachments?: () => void;
+  activeDocument?: unknown;
+  setActiveDocument?: React.Dispatch<React.SetStateAction<unknown>>;
+  onOpenScanner?: () => void;
+  onNewChat?: () => void;
+  onLoadSession?: (sessionId: string) => void;
+  onClearChat?: () => void;
+  onAttachClick?: () => void;
+  isDegraded?: boolean;
+  /** Set while a real request to the AI backend is in flight. */
+  isTyping?: boolean;
+  onUpgradeClick?: (jobId: string, service: string) => void;
+  selectedProvider?: string;
+  onProviderChange?: (provider: string) => void;
+  onInsightAction?: (action: string, context: any) => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -45,6 +76,7 @@ function describeAttachment(att: File | ChatAttachment, previewUrl?: string) {
       sizeLabel: formatFileSize(att.size),
       isImage: att.type.startsWith('image/'),
       previewUrl,
+      status: 'ready'
     };
   }
   const a: any = att;
@@ -56,6 +88,7 @@ function describeAttachment(att: File | ChatAttachment, previewUrl?: string) {
     sizeLabel: typeof a.size === 'number' ? formatFileSize(a.size) : undefined,
     isImage: mime.startsWith('image/') || (!mime && IMAGE_EXT.test(name)),
     previewUrl: url,
+    status: a.status || 'ready'
   };
 }
 
@@ -75,10 +108,15 @@ export default function RightChatSidebar({
   onAttachClick,
   isDegraded = false,
   isTyping = false,
+  onUpgradeClick,
+  selectedProvider = 'auto',
+  onProviderChange,
+  onInsightAction,
 }: RightChatSidebarProps) {
   const [inputValue, setInputValue] = useState('');
   const [showMenu, setShowMenu] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showInsights, setShowInsights] = useState(false);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [previewFile, setPreviewFile] = useState<File | ChatAttachment | null>(null);
@@ -196,91 +234,33 @@ export default function RightChatSidebar({
     if (files.length) onStageAttachments?.(files);
   };
 
+  const submitFeedback = useStore((state) => state.submitFeedback);
+  const agentStatus = useStore((state) => state.agentStatus);
+  const oracleInsights = useStore((state) => state.oracleInsights);
+
   return (
-    // FULL SIDEBAR CONTAINER (Locks to right edge, contains everything cleanly)
+    // FULL SIDEBAR CONTAINER (Glassmorphism theme, respect parent width)
     <aside
-      className="fixed top-0 right-0 h-screen w-[420px] bg-[#0A0D14] border-l border-slate-800/80 flex flex-col z-30 shadow-2xl font-sans text-slate-100"
+      className="relative h-full w-full bg-[#0D2B24]/40 backdrop-blur-md flex flex-col z-30 font-sans text-slate-100 overflow-hidden"
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
+      {/* 1. REMOVED INTERNAL HEADER - Controls now in TopNavbar */}
+
       {/* Full-sidebar drop overlay */}
       {isDraggingFiles && (
-        <div className="absolute inset-0 z-40 m-3 flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-orange-500/60 bg-[#0A0D14]/95 backdrop-blur-sm">
+        <div className="absolute inset-0 z-40 m-3 flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-emerald-500/30 bg-[#0A0D14]/95 backdrop-blur-sm">
           <span className="text-2xl">📎</span>
           <div className="text-xs font-medium text-slate-200">Drop files to attach</div>
           <div className="text-[10px] text-slate-500">PDF, Word, or image files</div>
         </div>
       )}
 
-      {/* 1. HEADER (Contained inside the sidebar) */}
-      <header className="h-14 px-4 border-b border-slate-800/80 flex items-center justify-between bg-[#0D111A] shrink-0">
-        <div className="flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-orange-500 animate-pulse motion-reduce:animate-none" />
-          <span className="text-orange-500 text-sm font-bold">✦</span>
-          <span className="text-xs font-semibold tracking-wide text-slate-200">Bwenge AI</span>
-        </div>
+      {/* 2. CHAT MESSAGES STREAM - No top header, flows to top */}
+      <main className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 scrollbar-thin scrollbar-thumb-emerald-500/10">
 
-        <div className="flex items-center gap-2">
-          {isDegraded && (
-            <span className="text-[10px] font-medium text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2.5 py-0.5 rounded-full">
-              Degraded Mode
-            </span>
-          )}
-
-          <button
-            type="button"
-            onClick={() => onNewChat?.()}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/60 transition w-7 h-7 flex items-center justify-center"
-            title="New Chat"
-            aria-label="New chat"
-          >
-            +
-          </button>
-
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setShowMenu((v) => !v)}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/60 transition w-7 h-7 flex items-center justify-center"
-              aria-label="More options"
-            >
-              ⋮
-            </button>
-
-            {showMenu && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowMenu(false)} />
-                <div className="absolute right-0 top-9 w-40 bg-[#121722] border border-slate-800 rounded-xl p-1 text-xs shadow-xl z-50">
-                  <button
-                    onClick={() => {
-                      setShowMenu(false);
-                      setShowHistory(true);
-                    }}
-                    className="w-full text-left px-3 py-1.5 text-slate-300 hover:bg-slate-800/60 rounded-lg flex items-center gap-2"
-                  >
-                    📜 Chat History
-                  </button>
-                  <div className="my-1 border-t border-slate-800/80" />
-                  <button
-                    onClick={() => {
-                      setShowMenu(false);
-                      onClearChat?.();
-                    }}
-                    className="w-full text-left px-3 py-1.5 text-rose-400 hover:bg-slate-800/60 rounded-lg flex items-center gap-2"
-                  >
-                    🗑️ Clear Chat
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      </header>
-
-      {/* 2. CHAT MESSAGES STREAM */}
-      <main className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-slate-800">
         {messages.length === 0 && (
           <div className="space-y-4">
             {/* Quick Actions Card Block */}
@@ -324,90 +304,31 @@ export default function RightChatSidebar({
           </div>
         )}
 
-        {messages.map((msg: any, idx: number) => {
-          const isUser = msg.sender === 'user';
-          const text: string = msg.text ?? msg.content ?? '';
-          const attachments: any[] = msg.attachments ?? [];
+        {messages.map((msg: any, idx: number) => (
+          <ChatMessage
+            key={msg.id ?? idx}
+            message={msg}
+            onPreviewDoc={setActiveDocument ? (doc) => setActiveDocument(doc) : undefined}
+            onFeedback={submitFeedback}
+            onUpgradeClick={onUpgradeClick}
+          />
+        ))}
 
-          return (
-            <div key={msg.id ?? idx} className={`flex gap-2.5 text-xs ${isUser ? 'justify-end' : 'justify-start'}`}>
-              {!isUser && (
-                <div className="w-6 h-6 rounded-lg bg-orange-500/20 border border-orange-500/30 flex items-center justify-center text-orange-400 font-bold text-[10px] shrink-0 mt-0.5">
-                  ✦
-                </div>
-              )}
-              <div className={`max-w-[85%] space-y-1.5 ${isUser ? 'items-end' : 'items-start'} flex flex-col`}>
-                {text && (
-                  <div
-                    className={`p-3 rounded-2xl leading-relaxed whitespace-pre-wrap ${
-                      isUser
-                        ? 'bg-slate-800 text-slate-100 rounded-tr-xs shadow-sm'
-                        : 'bg-[#121722]/90 text-slate-200 border border-slate-800/80 rounded-tl-xs shadow-md'
-                    }`}
-                  >
-                    {text}
-                  </div>
-                )}
-
-                {attachments.length > 0 && (
-                  <div className="flex flex-col gap-2 w-full">
-                    {attachments.map((att: any, aIdx: number) => {
-                      const meta = describeAttachment(att);
-                      const fileUrl = isFileObject(att)
-                        ? URL.createObjectURL(att)
-                        : att.url || att.previewUrl || att;
-                      const fileName = meta.name || 'WhatsApp_Image_2026.jpeg';
-
-                      return (
-                        <div
-                          key={aIdx}
-                          className="my-2 flex items-center justify-between p-2.5 rounded-xl bg-[#0D111A] border border-slate-700/60 hover:border-orange-500/50 transition group"
-                        >
-                          <div className="flex items-center gap-2.5 min-w-0 pr-2">
-                            <div className="w-9 h-9 rounded-lg bg-orange-500/10 border border-orange-500/20 flex items-center justify-center shrink-0 overflow-hidden">
-                              {meta.isImage ? (
-                                <img src={fileUrl} alt="Thumbnail" className="w-full h-full object-cover" />
-                              ) : (
-                                <span className="text-orange-400 font-bold text-xs">📄</span>
-                              )}
-                            </div>
-
-                            <div className="flex flex-col min-w-0">
-                              <span className="text-xs font-medium text-slate-200 truncate group-hover:text-orange-400 transition">
-                                {fileName}
-                              </span>
-                              <span className="text-[10px] text-slate-500">Tap to inspect submission</span>
-                            </div>
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={() => setPreviewFile(att)}
-                            className="px-3 py-1.5 rounded-lg bg-orange-500/10 hover:bg-orange-500 text-orange-400 hover:text-white border border-orange-500/30 text-[11px] font-semibold flex items-center gap-1 shrink-0 transition active:scale-95"
-                          >
-                            <span>👁️</span> View
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
         {isTyping && (
-          <div className="flex gap-2.5 justify-start text-xs">
-            <div className="w-6 h-6 rounded-lg bg-orange-500/20 border border-orange-500/30 flex items-center justify-center text-orange-400 font-bold text-[10px] shrink-0 mt-0.5">
-              ✦
-            </div>
-            <div className="bg-[#121722]/90 border border-slate-800/80 px-3 py-2.5 rounded-2xl rounded-tl-xs flex items-center gap-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-orange-500 animate-bounce motion-reduce:animate-none" />
-              <span className="h-1.5 w-1.5 rounded-full bg-orange-500 animate-bounce [animation-delay:0.15s] motion-reduce:animate-none" />
-              <span className="h-1.5 w-1.5 rounded-full bg-orange-500 animate-bounce [animation-delay:0.3s] motion-reduce:animate-none" />
-            </div>
+          <div className="flex flex-col gap-2">
+            <BwengeLoader label={agentStatus || undefined} />
+            {agentStatus && (
+              <div className="flex justify-center gap-3 animate-in fade-in duration-500">
+                <Search size={12} className={agentStatus.includes('NVIDIA') ? 'text-emerald-400 animate-pulse' : 'text-slate-700'} />
+                <Brain size={12} className={agentStatus.includes('Claude') || agentStatus.includes('Orchestrator') ? 'text-amber-400 animate-pulse' : 'text-slate-700'} />
+                <Cpu size={12} className={agentStatus.includes('Engine') || agentStatus.includes('NVIDIA') ? 'text-blue-400 animate-pulse' : 'text-slate-700'} />
+                <ShieldCheck size={12} className={agentStatus.includes('Adversary') || agentStatus.includes('Critic') ? 'text-rose-400 animate-pulse' : 'text-slate-700'} />
+                <Database size={12} className={agentStatus.includes('Memory') || agentStatus.includes('Registry') ? 'text-purple-400 animate-pulse' : 'text-slate-700'} />
+              </div>
+            )}
           </div>
         )}
+
         <div ref={chatEndRef} />
       </main>
 
@@ -420,100 +341,128 @@ export default function RightChatSidebar({
         onChange={handleFileChange}
         className="hidden"
       />
-      {/* 3. INPUT DOCK */}
-      <footer className="p-3 pb-5 shrink-0 bg-[#0A0D14]">
-        <div className="bg-[#121722]/95 border border-slate-800 rounded-2xl p-3 shadow-xl focus-within:border-slate-700 transition">
-          {attachmentPreviews.length > 0 && (
-            <div className="mb-2 flex flex-wrap gap-2 border-b border-slate-800/80 pb-2">
-              {attachmentPreviews.map((meta, idx) => (
-                <div
-                  key={idx}
-                  className="group flex items-center gap-2 rounded-xl border border-slate-700/70 bg-slate-800/80 py-1 pl-1.5 pr-2 text-[11px] text-slate-200 shadow-sm"
-                >
-                  {meta.isImage && meta.previewUrl ? (
-                    <img
-                      src={meta.previewUrl}
-                      alt=""
-                      className="h-6 w-6 cursor-pointer rounded-md object-cover"
-                      onClick={() => setLightboxUrl(meta.previewUrl!)}
-                    />
-                  ) : (
-                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-slate-700 text-[10px]">
-                      📄
-                    </span>
-                  )}
-                  <div className="leading-tight">
-                    <div className="max-w-[110px] truncate font-medium">{meta.name}</div>
-                    {meta.sizeLabel && <div className="text-[9.5px] text-slate-500">{meta.sizeLabel}</div>}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => onRemoveStagedAttachment?.(idx)}
-                    aria-label={`Remove ${meta.name}`}
-                    className="ml-0.5 text-slate-500 opacity-0 transition group-hover:opacity-100 hover:text-rose-400"
+      {/* 3. IMMERSIVE FLOATING INPUT DOCK */}
+      <footer className="p-4 sm:p-6 shrink-0 bg-[#0D2B24]/60 backdrop-blur-xl border-t border-white/5">
+        <div className="max-w-[900px] mx-auto relative group/dock">
+          {/* Subtle Glow Backdrop */}
+          <div className="absolute inset-0 bg-emerald-500/5 blur-xl rounded-full opacity-0 group-focus-within/dock:opacity-100 transition-opacity duration-500" />
+
+          <div className="relative bg-[#0D111A]/90 backdrop-blur-xl border border-white/5 rounded-[28px] p-2.5 shadow-2xl focus-within:ring-2 focus-within:ring-emerald-500/20 focus-within:border-emerald-500/30 transition-all duration-300">
+            {attachmentPreviews.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-2 px-2 pb-2 border-b border-white/5">
+                {attachmentPreviews.map((meta, idx) => (
+                  <div
+                    key={idx}
+                    className={`group flex items-center gap-2 rounded-xl border py-1.5 pl-2 pr-2.5 text-[11px] shadow-sm transition-all ${
+                      meta.status === 'uploading'
+                        ? 'border-amber-500/30 bg-amber-500/5 text-amber-200/70'
+                        : meta.status === 'failed'
+                        ? 'border-rose-500/30 bg-rose-500/5 text-rose-300'
+                        : 'border-white/5 bg-white/5 text-slate-200'
+                    }`}
                   >
-                    ✕
-                  </button>
-                </div>
-              ))}
+                    {meta.status === 'uploading' ? (
+                      <div className="h-4 w-4 border-2 border-amber-500/30 border-t-amber-500 rounded-full animate-spin mr-1" />
+                    ) : meta.isImage && meta.previewUrl ? (
+                      <img
+                        src={meta.previewUrl}
+                        alt=""
+                        className="h-6 w-6 cursor-pointer rounded-lg object-cover"
+                        onClick={() => setLightboxUrl(meta.previewUrl!)}
+                      />
+                    ) : (
+                      <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-white/5 text-[10px]">
+                        {meta.status === 'failed' ? '⚠️' : '📄'}
+                      </span>
+                    )}
+                    <div className="max-w-[140px] truncate font-medium">
+                      {meta.name}
+                      {meta.status === 'uploading' && <span className="ml-1 text-[9px] opacity-60">...</span>}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onRemoveStagedAttachment?.(idx)}
+                      className="ml-1 text-slate-500 hover:text-rose-400 transition-colors"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex items-end gap-2">
+              <div className="flex-1 flex flex-col min-w-0">
+                <textarea
+                  ref={textareaRef}
+                  rows={1}
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSend();
+                    }
+                  }}
+                  onPaste={handlePaste}
+                  placeholder="Type a message or build a form..."
+                  className="max-h-[300px] w-full bg-transparent text-sm text-slate-100 placeholder-slate-500 outline-none resize-none px-3 py-3 leading-relaxed"
+                />
+              </div>
+
+              <div className="flex items-center gap-1.5 pb-1 pr-1">
+                <button
+                  type="button"
+                  onClick={() => setShowInsights(!showInsights)}
+                  className={`p-2 rounded-xl transition-all group relative ${showInsights ? 'bg-amber-500/20 text-amber-400' : 'text-amber-500 hover:bg-amber-500/10'}`}
+                  title="Oracle Insights"
+                >
+                  <Bell className="w-4 h-4" />
+                  <span className="absolute top-1 right-1 w-2 h-2 bg-rose-500 rounded-full border-2 border-[#0D111A] animate-bounce" />
+                </button>
+
+                <select
+                  value={selectedProvider}
+                  onChange={(e) => onProviderChange?.(e.target.value)}
+                  className="bg-white/5 text-slate-400 text-[10px] border border-white/5 rounded-lg px-2 py-1 outline-none focus:border-emerald-500/30 transition-all cursor-pointer hover:bg-white/10 mr-1"
+                >
+                  <option value="auto">Auto</option>
+                  <option value="gemini">Gemini</option>
+                  <option value="nvidianim">NVIDIA</option>
+                  <option value="ollama">Ollama</option>
+                </select>
+
+                <button
+                  type="button"
+                  onClick={handleAttachClick}
+                  className="p-2.5 rounded-xl text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-all active:scale-90"
+                  title="Attach files"
+                >
+                  <Plus className="w-5 h-5" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleSend}
+                  disabled={!canSend}
+                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-all active:scale-95 ${
+                    canSend
+                      ? 'bg-emerald-500 hover:bg-emerald-400 text-white shadow-lg shadow-emerald-500/20'
+                      : 'bg-white/5 text-slate-600 cursor-not-allowed'
+                  }`}
+                >
+                  <span className="font-bold text-lg leading-none">➔</span>
+                </button>
+              </div>
             </div>
-          )}
-
-          <textarea
-            ref={textareaRef}
-            rows={1}
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleSend();
-              }
-            }}
-            onPaste={handlePaste}
-            placeholder="Ask Bwenge to review a submission, attach a rubric, or process a scan…"
-            className="max-h-[200px] w-full bg-transparent text-xs text-slate-100 placeholder-slate-500 outline-none resize-none px-1 py-1 leading-relaxed"
-          />
-
-          <div className="flex items-center justify-between pt-2 mt-1 border-t border-slate-800/60">
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleAttachClick}
-                className="inline-flex h-8 items-center gap-1.5 px-3 rounded-lg text-xs font-medium leading-none text-slate-300 bg-slate-800/60 hover:bg-slate-800 border border-slate-700/40 transition active:scale-95"
-              >
-                📎 Attach
-              </button>
-
-              <button
-                type="button"
-                onClick={() => onOpenScanner?.()}
-                className="inline-flex h-8 items-center gap-1.5 px-3 rounded-lg text-xs font-medium leading-none text-slate-300 bg-slate-800/60 hover:bg-slate-800 border border-slate-700/40 transition active:scale-95"
-              >
-                📷 Scanner
-              </button>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleSend}
-              disabled={!canSend}
-              aria-label="Send message"
-              className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg font-bold text-xs transition active:scale-95 ${
-                canSend
-                  ? 'bg-orange-500 hover:bg-orange-600 text-white shadow-md'
-                  : 'bg-slate-800 text-slate-600 cursor-not-allowed'
-              }`}
-            >
-              ➔
-            </button>
           </div>
         </div>
 
-        <div className="text-[10px] text-slate-500 text-center mt-2">
-          Enter to send · Shift + Enter for a new line
+        <div className="text-[10px] text-slate-600 text-center mt-3 tracking-widest uppercase font-medium">
+          Powered by Bwenge Autonomous Agentic System
         </div>
       </footer>
+
 
       {/* History Drawer */}
       {showHistory && (
@@ -576,6 +525,77 @@ export default function RightChatSidebar({
           >
             ✕
           </button>
+        </div>
+      )}
+
+      {/* Oracle Insight Feed (V4) */}
+      {showInsights && (
+        <div className="absolute inset-0 z-50 flex flex-col bg-[#0A0D14]/98 p-4 backdrop-blur-md animate-in slide-in-from-right duration-300">
+           <div className="flex items-center justify-between border-b border-white/5 pb-3">
+            <div>
+              <h3 className="text-sm font-bold text-amber-500 flex items-center gap-2">
+                <Sparkles className="w-4 h-4 animate-pulse" /> Oracle Insights
+              </h3>
+              <p className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold mt-0.5">Autonomous Pattern Detection</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowInsights(false)}
+              className="text-slate-400 hover:text-white transition"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div className="mt-6 space-y-4 overflow-y-auto">
+             {oracleInsights.length === 0 && (
+                <div className="text-center py-10 opacity-30">
+                   <div className="text-4xl mb-2">👁️</div>
+                   <p className="text-[10px] font-bold uppercase tracking-widest">Watching for patterns...</p>
+                </div>
+             )}
+
+             {oracleInsights.map((insight) => (
+                <div key={insight.id} className={`p-4 rounded-2xl border animate-in slide-in-from-right duration-500 ${
+                  insight.priority === 'high' ? 'bg-rose-500/5 border-rose-500/20' : 'bg-amber-500/5 border-amber-500/20'
+                }`}>
+                  <div className={`flex items-center gap-2 text-[10px] font-bold uppercase tracking-tighter mb-2 ${
+                    insight.priority === 'high' ? 'text-rose-400' : 'text-amber-400'
+                  }`}>
+                    <div className={`w-1.5 h-1.5 rounded-full animate-ping ${
+                      insight.priority === 'high' ? 'bg-rose-500' : 'bg-amber-500'
+                    }`} />
+                    {insight.title}
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed mb-3">
+                    {insight.content}
+                  </p>
+                  <div className="flex items-center justify-between gap-2">
+                    <button
+                      onClick={() => onInsightAction?.(insight.action || 'VIEW DETAILS', insight)}
+                      className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold transition ${
+                        insight.priority === 'high' ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-400' : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-400'
+                      }`}
+                    >
+                      {insight.action || 'VIEW DETAILS'}
+                    </button>
+                    <span className="text-[9px] font-mono text-slate-600">{insight.timestamp}</span>
+                  </div>
+                </div>
+             ))}
+
+             {/* Legacy Static Example (Kept for visual density if feed is short) */}
+             {oracleInsights.length < 2 && (
+               <div className="p-4 rounded-2xl bg-emerald-500/5 border border-emerald-500/20 opacity-50 grayscale hover:grayscale-0 transition-all">
+                  <div className="flex items-center gap-2 text-emerald-400 text-[10px] font-bold uppercase tracking-tighter mb-2">
+                     Interdisciplinary Opportunity
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                     Bwenge detected a strong overlap between your current **Physics Waves** rubric and **Math Trigonometry**.
+                  </p>
+               </div>
+             )}
+          </div>
         </div>
       )}
 
