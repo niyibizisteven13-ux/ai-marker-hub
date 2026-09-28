@@ -8,7 +8,11 @@ const prisma = new PrismaClient();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const AUDIT_LOG_PATH = path.join(__dirname, '..', 'exports', 'audit.log.jsonl');
-const JWT_SECRET = process.env.JWT_SECRET || 'bwenge_auth_secret_2026';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error('[FATAL] JWT_SECRET environment variable is not set. Set it in your .env file before starting the server.');
+  process.exit(1);
+}
 
 function getTeacherId(req) {
   const fromHeader = req.get?.('x-teacher-id') || req.headers?.['x-teacher-id'];

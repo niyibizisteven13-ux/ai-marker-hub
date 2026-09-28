@@ -1,10 +1,6 @@
 import rateLimit from 'express-rate-limit';
 
-/**
- * DEVELOPMENT MODE: All rate limits are disabled to prevent HMR and
- * rapid testing from triggering "Too Many Requests" errors.
- */
-const isDev = true; // Hardcoded to true to solve user's immediate blocker
+const isDev = process.env.NODE_ENV !== 'production';
 
 export const generalLimiter = isDev
   ? (req, res, next) => next()

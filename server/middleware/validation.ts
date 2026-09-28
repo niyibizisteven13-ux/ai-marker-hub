@@ -44,7 +44,41 @@ export const batchGradeSchema = z.object({
   }).passthrough()).min(1),
 });
 
-export const validate = (schema: z.ZodObject<any, any>) => (req: Request, res: Response, next: NextFunction) => {
+/** Validation schema for the main /api/ai/chat endpoint. */
+const normalizeOptionalSentinel = (value: unknown) => {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed === '' || trimmed === 'undefined' || trimmed === 'null') {
+      return undefined;
+    }
+  }
+  return value;
+};
+
+export const chatSchema = z.object({
+  query: z.string().max(32_000).optional(),
+  fileContext: z.string().max(500_000).optional(),
+  documentContext: z.string().max(500).optional(),
+  attachmentText: z.string().max(500_000).optional(),
+  attachmentName: z.string().max(500).optional(),
+  attachmentMimeType: z.string().max(100).optional(),
+  attachmentBase64: z.string().max(10_000_000).optional(), // ~7.5 MB base64
+  examContext: z.any().optional(),
+  pinnedSyllabus: z.string().max(200_000).optional(),
+  selectedEvidence: z.any().optional(),
+  replyTo: z.string().max(200).optional(),
+  previousInteractionId: z.string().max(200).optional(),
+  // history is JSON-stringified on the client, or a plain array
+  history: z.union([z.string(), z.array(z.any())]).optional(),
+  activeFormId: z.preprocess(normalizeOptionalSentinel, z.string().uuid().optional()),
+  jobId: z.preprocess(normalizeOptionalSentinel, z.string().max(200).optional()),
+  service: z.preprocess(normalizeOptionalSentinel, z.string().max(50).optional()),
+  extractSchema: z.preprocess(normalizeOptionalSentinel, z.string().max(10_000).optional()),
+  provider: z.preprocess(normalizeOptionalSentinel, z.string().max(50).optional()),
+  attachmentIds: z.preprocess(normalizeOptionalSentinel, z.union([z.string(), z.array(z.string())]).optional()),
+}).strict();
+
+export const validate = (schema: z.ZodObject<any, any> | z.ZodEffects<any>) => (req: Request, res: Response, next: NextFunction) => {
   try {
     schema.parse(req.body);
     next();

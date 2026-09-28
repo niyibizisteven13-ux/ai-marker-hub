@@ -6,9 +6,13 @@ import { HighVolumeBatchService } from '../services/HighVolumeBatchService.js';
 import { FormOrchestrator } from '../services/FormOrchestrator.js';
 import { DocumentQualityService } from '../services/DocumentQualityService.js';
 import { PaywallService } from '../services/PaywallService.js';
+import { MemoryService } from '../services/MemoryService.js';
 import { upload } from '../middleware/upload.js';
 import { generalTools } from '../services/generalTools.js';
 import { generateBatchExcelReportFromGradedResults } from '../../src/services/excelExporter.ts';
+import { classifyIntent } from '../services/intentRouter.js';
+import { buildPromptForIntent } from '../services/prompts/promptRouter.js';
+import { stripThinkingTags } from '../utils/textSanitizers.js';
 import logger from '../utils/logger.js';
 import crypto from 'crypto';
 import { PDFParse } from 'pdf-parse';
@@ -20,16 +24,13 @@ const prisma = new PrismaClient();
 const botService = TelegramBotService.getInstance();
 const aiService = AiService.getInstance();
 const paywallService = PaywallService.getInstance();
+const memoryService = MemoryService.getInstance();
 
 // Scan Tokens for /scan signed single-use URLs.
-// NOTE: same caveat as contextCache/batchJobs elsewhere in this codebase —
-// in-memory only, so it won't survive multi-instance deploys or a restart
-// mid-session. Swap for a Prisma table or Redis before scaling out.
+// NOTE: in-memory only — won't survive multi-instance deploys or a
+// restart mid-session. Swap for a Prisma table or Redis before scaling out.
 const scanTokens = new Map<string, { chatId: string; expires: number }>();
 
-// Without a sweep, a token that's generated and never redeemed (teacher
-// opens /scan, then abandons it) stays in memory forever. Same pattern as
-// the contextCache sweep in server.ts.
 const SCAN_TOKEN_SWEEP_MS = 5 * 60 * 1000;
 setInterval(() => {
   const now = Date.now();
@@ -42,12 +43,44 @@ setInterval(() => {
 // by checkAndTriggerBatchGrading, alongside Telegram-native uploads.
 const SCAN_UPLOADS_DIR = path.join(process.cwd(), 'uploads', 'telegram-scans');
 
+// Lightweight per-chat recent-turn cache for multi-turn conversational
+// context. In-memory, same caveats as scanTokens above (not
+// multi-instance safe, lost on restart) — if that matters before a
+// proper persisted history table is built, this is the piece to swap
+// for a Prisma-backed store first, since losing conversational context
+// mid-session is more user-visible than losing a scan token.
+const MAX_HISTORY_TURNS = 6;
+const HISTORY_TTL_MS = 60 * 60 * 1000; // 1 hour of inactivity clears history
+const conversationHistory = new Map<string, { turns: Array<{ role: 'user' | 'assistant'; text: string }>; lastUsed: number }>();
+
+const HISTORY_SWEEP_MS = 15 * 60 * 1000;
+setInterval(() => {
+  const now = Date.now();
+  for (const [chatId, entry] of conversationHistory.entries()) {
+    if (now - entry.lastUsed > HISTORY_TTL_MS) conversationHistory.delete(chatId);
+  }
+}, HISTORY_SWEEP_MS).unref();
+
+function getHistory(chatId: string): Array<{ role: 'user' | 'assistant'; text: string }> {
+  return conversationHistory.get(chatId)?.turns || [];
+}
+
+function appendHistory(chatId: string, role: 'user' | 'assistant', text: string) {
+  const entry = conversationHistory.get(chatId) || { turns: [], lastUsed: Date.now() };
+  entry.turns.push({ role, text });
+  if (entry.turns.length > MAX_HISTORY_TURNS) {
+    entry.turns = entry.turns.slice(-MAX_HISTORY_TURNS);
+  }
+  entry.lastUsed = Date.now();
+  conversationHistory.set(chatId, entry);
+}
+
 /**
  * Secret token middleware verifying incoming Telegram webhooks.
  */
 function verifyTelegramSecret(req: Request, res: Response, next: () => void) {
   const secret = process.env.TELEGRAM_BOT_SECRET_TOKEN;
-  if (!secret) return next(); // Skip verification if not configured
+  if (!secret) return next();
 
   const headerSecret = req.get('X-Telegram-Bot-Api-Secret-Token');
   if (headerSecret !== secret) {
@@ -60,17 +93,11 @@ function verifyTelegramSecret(req: Request, res: Response, next: () => void) {
 /**
  * Paywall Access Control Helper.
  *
- * NOTE: 'general_assist' and 'research' are passed through here as
- * distinct service keys, separate from 'grading' — this fixes the
- * previous version, which billed every conversational chat message and
- * /research call against the same 'grading' credit pool a teacher was
- * shown as "20 free papers." VERIFY these two keys are recognized by
- * PaywallService.checkAccess before deploying: if they are not, either
- * add policy for them there, or map them to whatever bucket the product
- * intends free-form chat to draw from (server.ts's web chat route
- * skips the paywall entirely for its 'general' service — confirm
- * whether the bot should match that, rather than silently inventing a
- * new paid bucket here).
+ * NOTE: 'general_assist' and 'research' are distinct service keys from
+ * 'grading' — verify PaywallService.checkAccess recognizes them before
+ * deploying (see prior review notes: server.ts's web chat route skips
+ * the paywall entirely for its 'general' service — confirm whether the
+ * bot's free-form chat should match that instead of a paid bucket here).
  */
 async function ensurePaywallAccess(
   chatId: string,
@@ -92,13 +119,8 @@ async function ensurePaywallAccess(
 }
 
 /**
- * Reads the bytes for a staged file regardless of where it came from —
- * a Telegram file_id (bot-native upload) or a local path (web-scanner
- * upload). This is the piece that was missing before: the web scanner
- * quality-checked and staged a *name* but never gave
- * checkAndTriggerBatchGrading anything it could actually download, so
- * scanned batches silently went nowhere. Both paths now resolve to the
- * same buffer shape.
+ * Reads the bytes for a staged file regardless of source — Telegram
+ * file_id or a local path from the web scanner.
  */
 async function resolveStagedBuffer(
   fileId: string | null | undefined,
@@ -119,10 +141,6 @@ async function resolveStagedBuffer(
   return null;
 }
 
-/**
- * Deletes a locally-staged scan file after it's been read into memory,
- * so /scan uploads don't accumulate on disk indefinitely.
- */
 async function cleanupLocalScanFile(localPath: string | null | undefined) {
   if (!localPath) return;
   try {
@@ -133,20 +151,104 @@ async function cleanupLocalScanFile(localPath: string | null | undefined) {
 }
 
 /**
+ * Safe arithmetic evaluator backing the conversational `calculate` tool.
+ *
+ * DUPLICATION NOTE: this is the same recursive-descent parser already
+ * defined in server.ts for its /api/ai/chat tool executor. Duplicated
+ * here rather than imported because server.ts's copy is a local,
+ * unexported function. If this bot file and server.ts's tool executor
+ * keep growing, extract this (and the tool-dispatch switch generally)
+ * into a shared module the same way buildPromptForIntent was — flagged
+ * here rather than done silently, since it touches server.ts too.
+ */
+function safeEvaluate(expression: string): number {
+  const tokens = expression.match(/\d+(\.\d+)?|[+\-*/()]/g);
+  if (!tokens || tokens.join('') !== expression.replace(/\s+/g, '')) {
+    throw new Error('Expression contains unsupported characters.');
+  }
+
+  let pos = 0;
+  const peek = () => tokens[pos];
+  const next = () => tokens[pos++];
+
+  function parseExpr(): number {
+    let value = parseTerm();
+    while (peek() === '+' || peek() === '-') {
+      const op = next();
+      const rhs = parseTerm();
+      value = op === '+' ? value + rhs : value - rhs;
+    }
+    return value;
+  }
+
+  function parseTerm(): number {
+    let value = parseFactor();
+    while (peek() === '*' || peek() === '/') {
+      const op = next();
+      const rhs = parseFactor();
+      if (op === '/' && rhs === 0) throw new Error('Division by zero.');
+      value = op === '*' ? value * rhs : value / rhs;
+    }
+    return value;
+  }
+
+  function parseFactor(): number {
+    if (peek() === '(') {
+      next();
+      const value = parseExpr();
+      if (next() !== ')') throw new Error('Mismatched parentheses.');
+      return value;
+    }
+    if (peek() === '-') {
+      next();
+      return -parseFactor();
+    }
+    const token = next();
+    const value = Number(token);
+    if (token === undefined || Number.isNaN(value)) throw new Error('Malformed expression.');
+    return value;
+  }
+
+  const result = parseExpr();
+  if (pos !== tokens.length) throw new Error('Malformed expression.');
+  return result;
+}
+
+/**
+ * Tool executor for conversational bot chat (Gonka path). Deliberately
+ * covers only the tools that make sense in a text-only Telegram
+ * conversation — build_form, generate_visual_annotation,
+ * cross_reference_visuals, and generate_browser_extension from
+ * server.ts's fuller tool set either need a UI surface or an attached
+ * image this handler doesn't have, and are left unhandled with an
+ * explicit message rather than silently pretending to support them.
+ */
+async function executeBotConversationalTool(chatId: string, userId: string, name: string, input: any): Promise<string> {
+  switch (name) {
+    case 'calculate': {
+      try {
+        return String(safeEvaluate(String(input.expression)));
+      } catch (e: any) {
+        return `Error evaluating expression: ${e.message}`;
+      }
+    }
+    case 'translate_text': {
+      const translated = await aiService.sendClaudeChat(
+        `Translate the following text into ${input.target_language}, preserving tone and meaning:\n\n${input.text}`,
+        { system: 'You are a precise translator. Respond with only the translated text, no explanation.' }
+      );
+      return translated.text;
+    }
+    case 'research_memory': {
+      return await memoryService.searchMemory(userId, input.query);
+    }
+    default:
+      return `Tool "${name}" is not available in Telegram chat yet — this works in the full Bwenge web assistant.`;
+  }
+}
+
+/**
  * Web Scanner Signed Upload Endpoint.
- *
- * FIX: previously this only recorded the uploaded file's *name* on the
- * session and never gave checkAndTriggerBatchGrading a way to actually
- * fetch the bytes — a file uploaded here was quality-checked and then
- * silently discarded, so /scan never triggered grading. This now
- * persists the corrected buffer to disk, stages a local path (the
- * Telegram-upload equivalent of stagedPaperFileId/stagedRubricFileId),
- * and explicitly triggers the same grading check both upload paths share.
- *
- * SCHEMA NOTE: this requires two additive columns on TelegramSession —
- * `stagedPaperLocalPath` and `stagedRubricLocalPath` (both nullable
- * String) — alongside the existing stagedPaperFileId/stagedRubricFileId.
- * Add the migration before deploying this route.
  */
 router.post('/scan-upload/:sessionToken', upload.single('file'), async (req: Request, res: Response) => {
   try {
@@ -195,12 +297,12 @@ router.post('/scan-upload/:sessionToken', upload.single('file'), async (req: Req
       await botService.sendMessage(chatId, `📥 **Web Scanner**: Received document \`${filename}\`.`);
     }
 
-    // This is the call that was missing before — without it, a web-scanned
-    // file just sat staged forever with nothing checking whether its pair
-    // had also arrived.
     checkAndTriggerBatchGrading(chatId).catch((err) => {
       logger.error(`Post-scan-upload grading trigger failed for chat ${chatId}`, err);
     });
+
+    // Single-use token cleanup
+    scanTokens.delete(req.params.sessionToken);
 
     res.json({ success: true, message: 'File processed and staged successfully.' });
   } catch (err: any) {
@@ -209,9 +311,6 @@ router.post('/scan-upload/:sessionToken', upload.single('file'), async (req: Req
   }
 });
 
-/**
- * Build interactive reply keyboard markup.
- */
 function buildTelegramKeyboard(lang: string = 'en') {
   const gradeLabel = lang === 'rw' ? '✨ Kosora Ibizamini' : '✨ Grade Batch';
   const statusLabel = lang === 'rw' ? '📊 Reba Uko Bihagaze' : '📊 Check Status';
@@ -229,7 +328,6 @@ function buildTelegramKeyboard(lang: string = 'en') {
 }
 
 router.post('/webhook', verifyTelegramSecret, async (req: Request, res: Response) => {
-  // Always respond 200 OK immediately to Telegram to prevent retry floods
   res.status(200).json({ ok: true });
 
   try {
@@ -246,6 +344,18 @@ router.post('/webhook', verifyTelegramSecret, async (req: Request, res: Response
         session = await prisma.telegramSession.create({
           data: { chatId, provider: 'gemini', language: 'en' },
         });
+
+        // Initialize 20 free newcomer credits ONCE for first-time onboarding
+        const userId = `telegram-${chatId}`;
+        try {
+          await prisma.usageQuota.upsert({
+            where: { userId_service: { userId, service: 'grading' } },
+            create: { userId, service: 'grading', freeUsed: 0 },
+            update: {}, // do not modify if already existing
+          });
+        } catch (e) {
+          logger.warn('Failed to initialize newcomer quota:', e);
+        }
       }
 
       if (msg.voice) {
@@ -265,9 +375,6 @@ router.post('/webhook', verifyTelegramSecret, async (req: Request, res: Response
       }
 
       if (!userText) {
-        // Previously unsupported types (video, sticker, location, etc.)
-        // fell through here with zero reply — silent from the teacher's
-        // point of view, indistinguishable from the bot being broken.
         await botService.sendMessage(chatId,
           session.language === 'rw'
             ? '🤔 Ntabwo nashoboye gusoma ubu bwoko bw\'ubutumwa. Ohereza inyandiko, ifoto, cyangwa PDF.'
@@ -309,9 +416,6 @@ router.post('/webhook', verifyTelegramSecret, async (req: Request, res: Response
   }
 });
 
-/**
- * Command Handler
- */
 async function handleBotCommand(chatId: string, session: any, text: string) {
   try {
     const parts = text.split(' ');
@@ -319,243 +423,281 @@ async function handleBotCommand(chatId: string, session: any, text: string) {
     const arg = parts.slice(1).join(' ');
 
     switch (cmd) {
-    case '/start':
-    case '/help': {
-      const lang = session.language;
-      const welcome = lang === 'rw'
-        ? `👋 Muraho neza! Ndi **Bwenge AI Bot**.\n\n` +
-          `⚙️ **AI Provider**: *${session.provider.toUpperCase()}*\n` +
-          `🗣️ **Ururimi**: *Kinyarwanda*\n\n` +
-          `📌 **Ibyo nshobora gukora**:\n` +
-          `- Kosora ibizamini by'abanyeshuri na rubric (Upload PDF/Photo)\n` +
-          `- Kosora ifoto imwe y'umunyeshuri (/markphoto)\n` +
-          `- Mbaza ku birimo ibizamini byakozwe (/discuss)\n` +
-          `- Kora form y'ubusabe (/form)\n` +
-          `- Reba quota yo gukosora (/quota)\n` +
-          `- Kora ibizamini n'amanota (/exam)\n` +
-          `- Ubushakashatsi bwitondewe (/research)\n` +
-          `- Hindura AI (/model gemini/claude/nvidianim)\n` +
-          `- Hindura ururimi (/english)`
-        : `👋 Welcome to **Bwenge AI Assistant Bot**!\n\n` +
-          `⚙️ **Active Model**: *${session.provider.toUpperCase()}*\n` +
-          `🗣️ **Language**: *English*\n\n` +
-          `📌 **Key Capabilities**:\n` +
-          `- Batch grade exam papers against rubric (Upload PDF/Photo)\n` +
-          `- Single-script handwritten photo grading (/markphoto)\n` +
-          `- Post-grading Q&A & student performance analysis (/discuss)\n` +
-          `- Check quota & plan details (/quota)\n` +
-          `- Create online application/assessment forms (/form)\n` +
-          `- Generate exam papers and marking rubrics (/exam)\n` +
-          `- Perform Deep Web Research (/research)\n` +
-          `- Voice Note speech queries (Send voice note)\n` +
-          `- Switch AI Model (/model gemini/claude/nvidianim)\n` +
-          `- Switch language (/kinyarwanda)`;
-
-      await botService.sendMessage(chatId, welcome, {
-        reply_markup: buildTelegramKeyboard(lang),
-      });
-      break;
-    }
-
-    case '/model': {
-      const selected = arg.toLowerCase().trim();
-      if (['gemini', 'claude', 'nvidianim', 'ollama'].includes(selected)) {
-        await prisma.telegramSession.update({
-          where: { chatId },
-          data: { provider: selected },
+      case '/start':
+      case '/help': {
+        const lang = session.language;
+        const userId = session.userId || `telegram-${chatId}`;
+        const quota = await prisma.usageQuota.findUnique({
+          where: { userId_service: { userId, service: 'grading' } },
         });
-        await botService.sendMessage(chatId, `🚀 AI Provider switched to **${selected.toUpperCase()}**!`);
-      } else {
+        const freeRemaining = Math.max(0, 20 - (quota?.freeUsed || 0));
+
+        const welcome = lang === 'rw'
+          ? `👋 **Muraho neza! Ndi Bwenge AI Assistant Bot.**\n\n` +
+            `⚙️ **AI Model**: *${session.provider.toUpperCase()}*\n` +
+            `🗣️ **Ururimi**: *Kinyarwanda*\n` +
+            `🎁 **Ibizamini by'Asuba**: *${freeRemaining} free credits*\n\n` +
+            `📌 **Ibyo nshobora kugufasha**:\n` +
+            `- 📸 **/scan** - Fungura mobile web scanner ugemure inyandiko\n` +
+            `- 📝 **/form** - Kora ifomu y'ubusabe/isuzuma (yemwe na USSD *182*8*1#)\n` +
+            `- 📄 **/exam** - Kora igizamini gipfunyitse n'amanota (rubric)\n` +
+            `- 🌐 **/research** - Kora ubushakashatsi bwimbitse\n` +
+            `- 📊 **/grade** - Kosora ibizamini kuri batch (PDF/Photo)\n` +
+            `- 👁️ **/markphoto** - Kosora ifoto imwe y'urupapuro rw'umunyeshuri\n` +
+            `- 🗣️ **/discuss** - Mbaza ibibazo kuri batch yakosowe\n` +
+            `- 🤖 **/model** - Hindura AI (Gemini, Claude, Llama, Gonka)\n` +
+            `- 🇬🇧 **/english** / 🇷🇼 **/kinyarwanda** - Hindura ururimi`
+          : `👋 **Welcome to Bwenge AI Assistant Bot!**\n\n` +
+            `⚙️ **Active Model**: *${session.provider.toUpperCase()}*\n` +
+            `🗣️ **Language**: *English*\n` +
+            `🎁 **Free Credits**: *${freeRemaining} remaining*\n\n` +
+            `📌 **Key Assistant Capabilities**:\n` +
+            `- 📸 **/scan** - Open mobile web scanner for high-resolution uploads\n` +
+            `- 📝 **/form** - Create interactive application/assessment forms (Web & USSD *182*8*1#)\n` +
+            `- 📄 **/exam** - Generate full exam papers & marking rubrics\n` +
+            `- 🌐 **/research** - Perform deep web research on any subject\n` +
+            `- 📊 **/grade** - Batch grade student answer scripts against rubric\n` +
+            `- 👁️ **/markphoto** - Grade single handwritten student photo\n` +
+            `- 🗣️ **/discuss** - Post-grading Q&A & student performance analysis\n` +
+            `- 🤖 **/model** - Switch AI Provider (Gemini, Claude, Llama, Gonka)\n` +
+            `- 🇷🇼 **/kinyarwanda** / 🇬🇧 **/english** - Toggle bot language`;
+
+        await botService.sendMessage(chatId, welcome, {
+          reply_markup: buildTelegramKeyboard(lang),
+        });
+        break;
+      }
+
+      case '/model': {
+        const selected = arg.toLowerCase().trim();
+        if (['gemini', 'claude', 'nvidianim', 'ollama', 'gonkarouter'].includes(selected)) {
+          await prisma.telegramSession.update({
+            where: { chatId },
+            data: { provider: selected },
+          });
+          await botService.sendMessage(chatId, `🚀 AI Provider switched to **${selected.toUpperCase()}**!`);
+        } else {
+          await botService.sendMessage(chatId,
+            `🤖 **Current Provider**: *${session.provider.toUpperCase()}*\n\n` +
+            `To switch providers, run:\n` +
+            `- \`/model gonkarouter\` (GonkaRouter Decentralized Gateway — GLM-5.3-Flash, high speed / low cost)\n` +
+            `- \`/model gemini\` (Google Gemini 3.8 Flash - Fast)\n` +
+            `- \`/model claude\` (Anthropic Claude Sonnet - Deep Reasoning)\n` +
+            `- \`/model nvidianim\` (NVIDIA NIM Llama 4 - High Throughput)`
+          );
+        }
+        break;
+      }
+
+      case '/kinyarwanda': {
+        await prisma.telegramSession.update({ where: { chatId }, data: { language: 'rw' } });
         await botService.sendMessage(chatId,
-          `🤖 **Current Provider**: *${session.provider.toUpperCase()}*\n\n` +
-          `To switch providers, run:\n` +
-          `- \`/model gemini\` (Google Gemini 2.0 Flash - Fast)\n` +
-          `- \`/model claude\` (Anthropic Claude Sonnet - Deep Reasoning)\n` +
-          `- \`/model nvidianim\` (NVIDIA NIM Llama 4 - High Throughput)`
+          '🇷🇼 **Ururimi ruhinduwe mu Kinyarwanda!**\n\nUbu Bwenge AI iragusubiza mu Kinyarwanda mu ibizamini, form, na scanner zose.',
+          { reply_markup: buildTelegramKeyboard('rw') }
         );
-      }
-      break;
-    }
-
-    case '/kinyarwanda': {
-      await prisma.telegramSession.update({ where: { chatId }, data: { language: 'rw' } });
-      await botService.sendMessage(chatId, '🇷🇼 Ururimi ruhinduwe mu Kinyarwanda', {
-        reply_markup: buildTelegramKeyboard('rw'),
-      });
-      break;
-    }
-
-    case '/english': {
-      await prisma.telegramSession.update({ where: { chatId }, data: { language: 'en' } });
-      await botService.sendMessage(chatId, '🇬🇧 Language switched to English!', {
-        reply_markup: buildTelegramKeyboard('en'),
-      });
-      break;
-    }
-
-    case '/status': {
-      await handleStatusCommand(chatId, session);
-      break;
-    }
-
-    case '/quota': {
-      await handleQuotaCommand(chatId, session);
-      break;
-    }
-
-    case '/grade': {
-      // If both files are already staged (e.g. teacher hit a paywall
-      // block last time and just topped up), re-trigger the check
-      // directly instead of re-showing the generic instructions —
-      // otherwise a denied-then-paid teacher has no way to resume
-      // without re-uploading both files from scratch.
-      const existing = await prisma.telegramSession.findUnique({ where: { chatId } });
-      const hasPaper = !!(existing?.stagedPaperFileId || existing?.stagedPaperLocalPath);
-      const hasRubric = !!(existing?.stagedRubricFileId || existing?.stagedRubricLocalPath);
-      if (hasPaper && hasRubric) {
-        await checkAndTriggerBatchGrading(chatId);
-      } else {
-        await handleGradeCommand(chatId, session);
-      }
-      break;
-    }
-
-    case '/exam': {
-      if (!(await ensurePaywallAccess(chatId, session, 'grading'))) return;
-
-      if (!arg) {
-        await botService.sendMessage(chatId, '⚠️ Please specify subject and topic. Example: `/exam Physics Newton_Laws 30`');
-        return;
-      }
-      await botService.sendChatAction(chatId, 'typing');
-      await botService.sendMessage(chatId, `📝 Generating exam paper for: *${arg}*...`);
-
-      try {
-        const prompt = `Generate an exam paper with rubrics for: ${arg}. Return clear structured sections for Questions and Rubrics.`;
-        const result = await aiService.generateContent({ contents: prompt });
-        await botService.sendMessage(chatId, `✨ **Exam Paper Generated**:\n\n${result.text?.slice(0, 3500)}`);
-      } catch (err: any) {
-        await botService.sendMessage(chatId, `❌ Exam generation failed: ${err.message}`);
-      }
-      break;
-    }
-
-    case '/markphoto': {
-      await prisma.telegramSession.update({
-        where: { chatId },
-        data: { stagedMode: 'markphoto' },
-      });
-
-      const msg = session.language === 'rw'
-        ? `📸 **Single-Script Photo Grading Mode**:\n1. Ohereza rubric cyangwa text y'amanota (optional)\n2. Ohereza ifoto y'urupapuro rw'umunyeshuri`
-        : `📸 **Single-Script Photo Grading Mode**:\n1. Optionally send rubric criteria or text key\n2. Upload the photo of the student's handwritten answer sheet`;
-
-      await botService.sendMessage(chatId, msg);
-      break;
-    }
-
-    case '/discuss': {
-      const targetJobId = arg === 'last' || !arg
-        ? (await prisma.batchJob.findFirst({
-            where: { telegramChatId: chatId, status: 'DONE' },
-            orderBy: { createdAt: 'desc' },
-          }))?.id
-        : arg;
-
-      if (!targetJobId) {
-        await botService.sendMessage(chatId, '⚠️ No recent completed batch grading jobs found for this chat to discuss.');
-        return;
+        break;
       }
 
-      await prisma.telegramSession.update({
-        where: { chatId },
-        data: { activeDiscussJobId: targetJobId },
-      });
+      case '/english': {
+        await prisma.telegramSession.update({ where: { chatId }, data: { language: 'en' } });
+        await botService.sendMessage(chatId,
+          '🇬🇧 **Language switched to English!**\n\nAll subsequent AI responses and workspace outputs will be generated in English.',
+          { reply_markup: buildTelegramKeyboard('en') }
+        );
+        break;
+      }
 
-      const msg = session.language === 'rw'
-        ? `🗣️ **Ibiganiro kuri Job \`${targetJobId.slice(0, 8)}\`**:\nUbu ushobora kubaza ibibazo ku banyeshuri mu kizamini. Ohereza /done kugira ngo usoze.`
-        : `🗣️ **Discussing Batch Job \`${targetJobId.slice(0, 8)}\`**:\nYou can now ask questions about specific students or overall class performance (e.g. 'Why did student #3 lose marks on Q2?'). Send /done to exit discuss mode.`;
+      case '/status': {
+        await handleStatusCommand(chatId, session);
+        break;
+      }
 
-      await botService.sendMessage(chatId, msg);
-      break;
-    }
+      case '/quota': {
+        await handleQuotaCommand(chatId, session);
+        break;
+      }
 
-    case '/done': {
-      await prisma.telegramSession.update({
-        where: { chatId },
-        data: { activeDiscussJobId: null, stagedMode: null },
-      });
+      case '/grade': {
+        const existing = await prisma.telegramSession.findUnique({ where: { chatId } });
+        const hasPaper = !!(existing?.stagedPaperFileId || existing?.stagedPaperLocalPath);
+        const hasRubric = !!(existing?.stagedRubricFileId || existing?.stagedRubricLocalPath);
+        if (hasPaper && hasRubric) {
+          await checkAndTriggerBatchGrading(chatId);
+        } else {
+          await handleGradeCommand(chatId, session);
+        }
+        break;
+      }
 
-      await botService.sendMessage(chatId, session.language === 'rw'
-        ? '✅ Ibiganiro birahagaritswe. Ubu wakomeza gukoresha AI nka bisanzwe.'
-        : '✅ Discuss session closed. Resuming standard AI assistant chat.');
-      break;
-    }
+      case '/exam': {
+        if (!(await ensurePaywallAccess(chatId, session, 'grading'))) return;
 
-    case '/form': {
-      if (!(await ensurePaywallAccess(chatId, session, 'selection_scoring'))) return;
+        const lang = session.language;
+        if (!arg || arg.trim().length === 0) {
+          const usageMsg = lang === 'rw'
+            ? `⚠️ Nyamuneka andika isomo n'igice. Urugero: \`/exam Physics Newton_Laws 30\``
+            : `⚠️ Please specify subject and topic. Example: \`/exam Physics Newton_Laws 30\``;
+          await botService.sendMessage(chatId, usageMsg);
+          return;
+        }
 
-      if (arg) {
-        await handleFormCreationStep2(chatId, session, arg);
-      } else {
+        await botService.sendChatAction(chatId, 'typing');
+        await botService.sendMessage(chatId, lang === 'rw'
+          ? `📝 Birimo gukora igizamini na rubric kuri: *${arg}*...`
+          : `📝 Generating exam paper and marking rubric for: *${arg}*...`);
+
+        try {
+          const prompt = `You are a World-Class Assessment Architect. Generate a complete exam paper with a matching rubric for: ${arg}.
+Respond strictly in ${lang === 'rw' ? 'Kinyarwanda' : 'English'}. Include:
+1. Title, Subject, Duration (minutes), Total Marks.
+2. Section A: Questions with assigned marks.
+3. Section B: Marking Rubric & Model Answer Key.`;
+
+          const result = await aiService.generateContent({ contents: prompt });
+          await botService.sendMessage(chatId, `✨ **${lang === 'rw' ? 'Igizamini cyarakozwe' : 'Exam Paper & Rubric Generated'}**:\n\n${result.text?.slice(0, 3800)}`);
+        } catch (err: any) {
+          await botService.sendMessage(chatId, `❌ Exam generation failed: ${err.message}`);
+        }
+        break;
+      }
+
+      case '/markphoto': {
         await prisma.telegramSession.update({
           where: { chatId },
-          data: { stagedMode: 'form' },
+          data: { stagedMode: 'markphoto' },
         });
+
+        const msg = session.language === 'rw'
+          ? `📸 **Single-Script Photo Grading Mode**:\n1. Ohereza rubric cyangwa text y'amanota (optional)\n2. Ohereza ifoto y'urupapuro rw'umunyeshuri`
+          : `📸 **Single-Script Photo Grading Mode**:\n1. Optionally send rubric criteria or text key\n2. Upload the photo of the student's handwritten answer sheet`;
+
+        await botService.sendMessage(chatId, msg);
+        break;
+      }
+
+      case '/discuss': {
+        const targetJobId = arg === 'last' || !arg
+          ? (await prisma.batchJob.findFirst({
+              where: { telegramChatId: chatId, status: 'DONE' },
+              orderBy: { createdAt: 'desc' },
+            }))?.id
+          : arg;
+
+        if (!targetJobId) {
+          await botService.sendMessage(chatId, '⚠️ No recent completed batch grading jobs found for this chat to discuss.');
+          return;
+        }
+
+        await prisma.telegramSession.update({
+          where: { chatId },
+          data: { activeDiscussJobId: targetJobId },
+        });
+
+        const msg = session.language === 'rw'
+          ? `🗣️ **Ibiganiro kuri Job \`${targetJobId.slice(0, 8)}\`**:\nUbu ushobora kubaza ibibazo ku banyeshuri mu kizamini. Ohereza /done kugira ngo usoze.`
+          : `🗣️ **Discussing Batch Job \`${targetJobId.slice(0, 8)}\`**:\nYou can now ask questions about specific students or overall class performance (e.g. 'Why did student #3 lose marks on Q2?'). Send /done to exit discuss mode.`;
+
+        await botService.sendMessage(chatId, msg);
+        break;
+      }
+
+      case '/done': {
+        await prisma.telegramSession.update({
+          where: { chatId },
+          data: { activeDiscussJobId: null, stagedMode: null },
+        });
+
         await botService.sendMessage(chatId, session.language === 'rw'
-          ? '📝 **Form Builder**: Ohereza umutwe cyangwa intego y\'iyi form (urugero: `Scholarship Application Form`)'
-          : '📝 **Form Builder**: Please type the title or purpose of this application form (e.g. `Scholarship Application Form`).');
+          ? '✅ Ibiganiro birahagaritswe. Ubu wakomeza gukoresha AI nka bisanzwe.'
+          : '✅ Discuss session closed. Resuming standard AI assistant chat.');
+        break;
       }
-      break;
-    }
 
-    case '/scan': {
-      const sessionToken = crypto.randomUUID().slice(0, 12);
-      scanTokens.set(sessionToken, { chatId, expires: Date.now() + 30 * 60 * 1000 });
+      case '/form': {
+        if (!(await ensurePaywallAccess(chatId, session, 'selection_scoring'))) return;
 
-      const baseUrl = process.env.APP_BASE_URL || 'http://localhost:3000';
-      const scanUrl = `${baseUrl}/scan.html?token=${sessionToken}`;
+        const lang = session.language;
+        if (arg && arg.trim().length > 0) {
+          await handleFormCreationStep2(chatId, session, arg.trim());
+        } else {
+          await prisma.telegramSession.update({
+            where: { chatId },
+            data: { stagedMode: 'form' },
+          });
+          const promptMsg = lang === 'rw'
+            ? `📝 **Bwenge Form Builder**\n\n` +
+              `Nyamuneka andika umutwe cyangwa intego y'ifomu y'ubusabe ushaka gukora.\n\n` +
+              `*Urugero*: \`Ifomu y'Ubusabe bw'Buruse y'Abanyeshuri 2026\``
+            : `📝 **Bwenge Form Builder**\n\n` +
+              `Please type the title or purpose of the application/assessment form you want to create.\n\n` +
+              `*Example*: \`Scholarship Application Form 2026 for Secondary Schools\``;
 
-      await botService.sendMessage(chatId,
-        `📸 **Bwenge Mobile Web Scanner**\n\n` +
-        `Use our web scanner for enhanced document capture, contrast correction, or large file uploads (>20MB):\n\n` +
-        `🔗 [Open Bwenge Web Scanner](${scanUrl})\n\n` +
-        `⏱️ This link expires in 30 minutes.`
-      );
-      break;
-    }
-
-    case '/research': {
-      if (!(await ensurePaywallAccess(chatId, session, 'grading'))) return;
-
-      if (!arg) {
-        await botService.sendMessage(chatId, '⚠️ Please specify topic to research. Example: `/research Latest developments in AI grading`');
-        return;
+          await botService.sendMessage(chatId, promptMsg);
+        }
+        break;
       }
-      await botService.sendChatAction(chatId, 'typing');
-      await botService.sendMessage(chatId, `🌐 Initiating Deep Research for: *${arg}*...`);
 
-      try {
-        const report = await aiService.runDeepResearch({
-          query: arg,
-          userId: chatId,
-          onEvent: (event) => {
-            if (event.type === 'text' && event.data.isThinking) {
-              botService.sendChatAction(chatId, 'typing').catch(() => {});
-            }
-          },
-        });
-        await botService.sendMessage(chatId, `📑 **Deep Research Report**:\n\n${report.slice(0, 3800)}`);
-      } catch (err: any) {
-        await botService.sendMessage(chatId, `❌ Research failed: ${err.message}`);
+      case '/scan': {
+        const sessionToken = crypto.randomUUID().slice(0, 12);
+        scanTokens.set(sessionToken, { chatId, expires: Date.now() + 30 * 60 * 1000 });
+
+        const baseUrl = process.env.APP_BASE_URL || 'http://localhost:3000';
+        const scanUrl = `${baseUrl}/scan.html?token=${sessionToken}`;
+        const lang = session.language;
+
+        const msg = lang === 'rw'
+          ? `📸 **Bwenge Mobile Web Scanner**\n\n` +
+            `Fungura web scanner ku telefone yawe kugira ngo ufate amapaji y'ibizamini afite umweru n'icyerekezo cyiza.\n\n` +
+            `🔗 **[Fungura Mobile Web Scanner](${scanUrl})**\n\n` +
+            `💡 *Uko bikora*:\n` +
+            `1. Kanda kuri uyu murongo wa web scanner.\n` +
+            `2. Fotora amapaji y'ibizamini cyangwa rubric.\n` +
+            `3. Inyandiko zizahita zoherezwa muri iyi chat za Telegram!\n\n` +
+            `⏱️ *Uyu murongo uraza kurangira mu minota 30.*`
+          : `📸 **Bwenge Mobile Web Scanner**\n\n` +
+            `Use our mobile web scanner for enhanced document capture, auto-cropping, and high-volume uploads (>20MB).\n\n` +
+            `🔗 **[Open Mobile Web Scanner](${scanUrl})**\n\n` +
+            `💡 *How to use*:\n` +
+            `1. Tap the link above to open camera capture in browser.\n` +
+            `2. Scan student answer sheets or marking rubrics.\n` +
+            `3. Scanned pages auto-sync directly into this Telegram chat session!\n\n` +
+            `⏱️ *This link expires in 30 minutes.*`;
+
+        await botService.sendMessage(chatId, msg);
+        break;
       }
-      break;
-    }
 
-    default: {
-      await botService.sendMessage(chatId, `Unknown command \`${cmd}\`. Use /help to view available commands.`);
+      case '/research': {
+        if (!(await ensurePaywallAccess(chatId, session, 'research'))) return;
+
+        if (!arg) {
+          await botService.sendMessage(chatId, '⚠️ Please specify topic to research. Example: `/research Latest developments in AI grading`');
+          return;
+        }
+        await botService.sendChatAction(chatId, 'typing');
+        await botService.sendMessage(chatId, `🌐 Initiating Deep Research for: *${arg}*...`);
+
+        try {
+          const report = await aiService.runDeepResearch({
+            query: arg,
+            userId: chatId,
+            onEvent: (event) => {
+              if (event.type === 'text' && event.data.isThinking) {
+                botService.sendChatAction(chatId, 'typing').catch(() => {});
+              }
+            },
+          });
+          await botService.sendMessage(chatId, `📑 **Deep Research Report**:\n\n${stripThinkingTags(report as any).slice(0, 3800)}`);
+        } catch (err: any) {
+          await botService.sendMessage(chatId, `❌ Research failed: ${err.message}`);
+        }
+        break;
+      }
+
+      default: {
+        await botService.sendMessage(chatId, `Unknown command \`${cmd}\`. Use /help to view available commands.`);
+      }
     }
-  }
   } catch (err: any) {
     logger.error(`Error handling bot command "${text}" for chat ${chatId}:`, err);
     const lang = session?.language || 'en';
@@ -566,17 +708,17 @@ async function handleBotCommand(chatId: string, session: any, text: string) {
   }
 }
 
-/**
- * Conversational Form Creation Step 2
- */
 async function handleFormCreationStep2(chatId: string, session: any, intentText: string) {
   await prisma.telegramSession.update({
     where: { chatId },
     data: { stagedMode: null },
   });
 
+  const lang = session.language;
   await botService.sendChatAction(chatId, 'typing');
-  await botService.sendMessage(chatId, `📝 Generating application form schema for: *${intentText}*...`);
+  await botService.sendMessage(chatId, lang === 'rw'
+    ? `📝 **Bwenge Form Builder**: Birimo gukora ifomu kuri: *${intentText}*...`
+    : `📝 **Bwenge Form Builder**: Generating application form schema for: *${intentText}*...`);
 
   try {
     const formOrchestrator = FormOrchestrator.getInstance();
@@ -585,28 +727,24 @@ async function handleFormCreationStep2(chatId: string, session: any, intentText:
     const baseUrl = process.env.APP_BASE_URL || 'http://localhost:3000';
     const formUrl = `${baseUrl}/forms/${form.id}`;
 
-    await botService.sendMessage(chatId,
-      `🎉 **Application Form Created!**\n\n` +
-      `📋 **Title**: ${form.title || intentText}\n` +
-      `📱 **USSD Application Code**: \`*182*8*1#\`\n` +
-      `🔗 **Shareable Web Link**: ${formUrl}\n\n` +
-      `Pricing tier: $0.20 USD per scored application.`
-    );
+    const msg = lang === 'rw'
+      ? `🎉 **Ifomu Yarakozwe Neza!**\n\n` +
+        `📋 **Umutwe**: ${form.title || intentText}\n` +
+        `📱 **Kusaba binyuze kuri USSD**: \`*182*8*1#\`\n` +
+        `🔗 **Umurongo wa Web**: ${formUrl}\n\n` +
+        `💡 Usangize abasaba iyi link cyangwa ikode ya USSD.`
+      : `🎉 **Application Form Created!**\n\n` +
+        `📋 **Title**: ${form.title || intentText}\n` +
+        `📱 **USSD Application Shortcode**: \`*182*8*1#\`\n` +
+        `🔗 **Shareable Web Link**: ${formUrl}\n\n` +
+        `💡 Share this public web link or USSD code with applicants!`;
+
+    await botService.sendMessage(chatId, msg);
   } catch (err: any) {
-    await botService.sendMessage(chatId, `❌ Form creation failed: ${err.message}`);
+    await botService.sendMessage(chatId, `❌ ${lang === 'rw' ? 'Kurema ifomu byanze' : 'Form creation failed'}: ${err.message}`);
   }
 }
 
-/**
- * Post-Grading Discuss Queries.
- *
- * FIX: single-photo (/markphoto) jobs never write BatchJobResult rows —
- * only batch jobs do. Previously, /discuss on a markphoto job silently
- * sent an empty-context prompt to the model with no indication anything
- * was missing. Now it falls back to the job's stored summary text and
- * tells the teacher explicitly that no per-question breakdown exists for
- * this job type, rather than pretending it has detail it doesn't.
- */
 async function handleDiscussQuery(chatId: string, session: any, queryText: string) {
   const jobId = session.activeDiscussJobId;
   const results = await prisma.batchJobResult.findMany({
@@ -630,17 +768,6 @@ async function handleDiscussQuery(chatId: string, session: any, queryText: strin
   await handleConversationalQuery(chatId, session, contextPrompt);
 }
 
-/**
- * Quota & Subscription Command Handler.
- *
- * NOTE: this reads Prisma directly rather than through a PaywallService
- * method, which risks drifting from whatever logic actually gates access
- * in ensurePaywallAccess/paywallService.checkAccess. If PaywallService
- * exposes (or is given) a getUsageSummary()/getQuotaStatus()-style method,
- * prefer that here so this display can never disagree with what actually
- * blocks a request. Left as direct reads for now since that method's
- * existence/shape wasn't confirmed.
- */
 async function handleQuotaCommand(chatId: string, session: any) {
   const userId = session.userId || `telegram-${chatId}`;
   const subscription = await prisma.subscription.findUnique({ where: { userId } });
@@ -664,9 +791,6 @@ async function handleQuotaCommand(chatId: string, session: any) {
   await botService.sendMessage(chatId, msg, { reply_markup: buildTelegramKeyboard(session.language) });
 }
 
-/**
- * Handles incoming document uploads (PDF exam papers or rubrics)
- */
 async function handleIncomingDocument(chatId: string, session: any, doc: any) {
   const fileId = doc.file_id;
   const fileName = doc.file_name || 'document.pdf';
@@ -690,9 +814,6 @@ async function handleIncomingDocument(chatId: string, session: any, doc: any) {
   await checkAndTriggerBatchGrading(chatId);
 }
 
-/**
- * Handles incoming Telegram voice notes (Speech-to-Text via Whisper API)
- */
 async function handleIncomingVoiceNote(chatId: string, session: any, fileId: string) {
   await botService.sendChatAction(chatId, 'typing');
   await botService.sendMessage(chatId, '🎙️ *Transcribing voice note...*');
@@ -713,9 +834,6 @@ async function handleIncomingVoiceNote(chatId: string, session: any, fileId: str
   await handleConversationalQuery(chatId, session, transcription);
 }
 
-/**
- * Handles incoming photo uploads (Rubric images or Single-Script Vision Grading)
- */
 async function handleIncomingPhoto(chatId: string, session: any, fileId: string, caption?: string) {
   const isMarkPhoto = session.stagedMode === 'markphoto' ||
     caption?.toLowerCase().startsWith('/markphoto') ||
@@ -795,21 +913,6 @@ async function handleIncomingPhoto(chatId: string, session: any, fileId: string,
   await checkAndTriggerBatchGrading(chatId);
 }
 
-/**
- * Atomic Staging Claim & Batch Grading Trigger.
- *
- * Handles staged files from EITHER source — Telegram file_id or a local
- * path from the web scanner — so this is the single place both upload
- * paths converge, instead of the web scanner having its own dead-end
- * logic as before.
- *
- * FIX: paywall access is now checked BEFORE the atomic claim clears the
- * staged fields. Previously a denied teacher had both files silently
- * wiped and had to re-upload everything from scratch after topping up.
- * Now a denial leaves the staged files in place, and re-running /grade
- * (see the /grade case above) or sending /buy then retrying will pick
- * them back up.
- */
 async function checkAndTriggerBatchGrading(chatId: string) {
   const session = await prisma.telegramSession.findUnique({ where: { chatId } });
   if (!session) return;
@@ -832,13 +935,8 @@ async function checkAndTriggerBatchGrading(chatId: string) {
     return;
   }
 
-  // Paywall check happens BEFORE clearing staged fields — see fix note above.
   if (!(await ensurePaywallAccess(chatId, session, 'grading'))) return;
 
-  // Atomic claim: verify both staged refs are still present (from either
-  // source) and clear all four fields in one conditional update. If
-  // another concurrent webhook already claimed them, claim.count will be
-  // 0 and this invocation backs off instead of double-triggering.
   const claim = await prisma.telegramSession.updateMany({
     where: {
       chatId,
@@ -867,7 +965,6 @@ async function checkAndTriggerBatchGrading(chatId: string) {
   const papersFile = await resolveStagedBuffer(stagedPaperFileId, stagedPaperLocalPath);
   const rubricFile = await resolveStagedBuffer(stagedRubricFileId, stagedRubricLocalPath);
 
-  // Clean up any local scan files now that they're read into memory.
   await cleanupLocalScanFile(stagedPaperLocalPath);
   await cleanupLocalScanFile(stagedRubricLocalPath);
 
@@ -1007,30 +1104,104 @@ async function handleStatusCommand(chatId: string, session: any) {
 /**
  * Conversational Q&A Handler with Real-Time Token Editing.
  *
- * NOTE: previously gated behind ensurePaywallAccess(..., 'grading'),
- * meaning every ordinary chat message silently drew from the same
- * limited credit pool a teacher was told was "20 free papers." That gate
- * has been removed here to avoid draining grading credits on unrelated
- * chat, matching how server.ts's own web chat route skips the paywall
- * for its 'general' service. CONFIRM this is the intended product
- * behavior — if free-form bot chat should still be cost-limited, add a
- * lighter rate limiter (e.g. N messages/hour per chatId) here instead of
- * reinstating the grading-credit paywall.
+ * Routes on session.provider (the field the /model command actually
+ * writes to — NOT a "preferredModel" field, which does not exist
+ * anywhere in this schema). Two paths:
+ *
+ * 1. session.provider === 'gonkarouter' (and GONKA_API_KEY configured):
+ *    routes through aiService.runGonkaAgentLoop, using the same
+ *    buildPromptForIntent routing + classifyIntent the web chat route
+ *    uses, with reasoning tags stripped both mid-stream and on the final
+ *    message, and recent per-chat turn history included for multi-turn
+ *    context.
+ * 2. Everything else: falls back to the existing Claude-based
+ *    generalAssist path (unchanged from before), with stripThinkingTags
+ *    applied defensively before any message is sent — cheap insurance in
+ *    case a future model swap on that path also emits reasoning tags.
+ *
+ * NOTE (pre-existing, not introduced here): before this change, this
+ * handler ALWAYS used the Claude path regardless of session.provider —
+ * a teacher who ran /model nvidianim still got Claude-generated
+ * conversational replies. This fix only wires up the Gonka branch
+ * explicitly; gemini/nvidianim conversational routing parity is a
+ * separate, pre-existing gap worth its own follow-up.
  */
 async function handleConversationalQuery(chatId: string, session: any, userQuery: string) {
   await botService.sendChatAction(chatId, 'typing');
 
-  const initialMsg = await botService.sendMessage(chatId, '✨ *Thinking...*');
+  const lang = session.language || 'en';
+  const thinkingMsg = lang === 'rw' ? '✨ *Bwenge AI irimo gutekereza...*' : '✨ *Bwenge AI is thinking...*';
+  const initialMsg = await botService.sendMessage(chatId, thinkingMsg);
   if (!initialMsg) return;
 
   const initialMsgId = initialMsg.message_id;
+  const userId = session.userId || `telegram-${chatId}`;
+  const useGonka = session.provider === 'gonkarouter' && Boolean(process.env.GONKA_API_KEY);
+
   let accumulatedText = '';
   let lastEditTime = Date.now();
 
+  const assistantSystemPrompt = `You are Bwenge AI Assistant, a friendly, creative, and highly capable AI assistant for teachers, students, and institutions on Telegram.
+You MUST respond strictly in ${lang === 'rw' ? 'Kinyarwanda (Ururimi rw\'Ikinyarwanda)' : 'English'}.
+Even if the user sends nonsense, gibberish, off-topic, or random text, ALWAYS respond politely, maintain a helpful persona, and guide them back to Bwenge AI capabilities:
+- Batch grading student papers (/grade)
+- Mobile web document scanner (/scan)
+- Online form creation (Web & USSD *182*8*1#) (/form)
+- Exam paper and marking rubric generation (/exam)
+- Deep research briefing (/research)
+Offer actionable next steps and invite them to run commands or upload documents!`;
+
   try {
+    if (useGonka) {
+      const intent = await classifyIntent(userQuery, false);
+      const { system, prompt } = buildPromptForIntent(intent, userQuery, { hydratedContext: assistantSystemPrompt });
+      const history = getHistory(chatId);
+
+      await aiService.runGonkaAgentLoop({
+        prompt,
+        system,
+        history,
+        tools: generalTools,
+        executeTool: (name, input) => executeBotConversationalTool(chatId, userId, name, input),
+        onEvent: async (event) => {
+          if (event.type === 'text') {
+            if (event.data.replaceFullText) {
+              accumulatedText = event.data.text || '';
+            } else {
+              accumulatedText += event.data.text || '';
+            }
+            const now = Date.now();
+            if (now - lastEditTime > 1500 && accumulatedText.trim().length > 0) {
+              lastEditTime = now;
+              await botService.editMessageText(chatId, initialMsgId, accumulatedText.slice(0, 4000));
+            }
+          } else if (event.type === 'tool_call') {
+            accumulatedText += `\n> 🛠️ *Executing tool*: \`${event.data.name}\`...\n`;
+            const now = Date.now();
+            if (now - lastEditTime > 1500) {
+              lastEditTime = now;
+              await botService.editMessageText(chatId, initialMsgId, accumulatedText.slice(0, 4000));
+            }
+          }
+        },
+      });
+
+      const finalText = stripThinkingTags(accumulatedText);
+      if (finalText.trim().length > 0) {
+        await botService.editMessageText(chatId, initialMsgId, finalText.slice(0, 4000));
+      }
+
+      appendHistory(chatId, 'user', userQuery);
+      appendHistory(chatId, 'assistant', String(finalText));
+      return;
+    }
+
+    // Default Claude / Gemini / AI path
     await aiService.generalAssist({
       userId: chatId,
-      messages: [{ role: 'user', content: userQuery }],
+      messages: [
+        { role: 'user', content: `${assistantSystemPrompt}\n\nUSER MESSAGE: ${userQuery}` }
+      ],
       tools: generalTools,
       onEvent: async (event) => {
         if (event.type === 'text') {
@@ -1038,25 +1209,37 @@ async function handleConversationalQuery(chatId: string, session: any, userQuery
           const now = Date.now();
           if (now - lastEditTime > 1500 && accumulatedText.trim().length > 0) {
             lastEditTime = now;
-            await botService.editMessageText(chatId, initialMsgId, accumulatedText.slice(0, 4000));
+            await botService.editMessageText(chatId, initialMsgId, stripThinkingTags(accumulatedText).slice(0, 4000));
           }
         } else if (event.type === 'tool_call') {
           accumulatedText += `\n> 🛠️ *Executing tool*: \`${event.data.name}\`...\n`;
           const now = Date.now();
           if (now - lastEditTime > 1500) {
             lastEditTime = now;
-            await botService.editMessageText(chatId, initialMsgId, accumulatedText.slice(0, 4000));
+            await botService.editMessageText(chatId, initialMsgId, stripThinkingTags(accumulatedText).slice(0, 4000));
           }
         }
       },
     });
 
-    if (accumulatedText.trim().length > 0) {
-      await botService.editMessageText(chatId, initialMsgId, accumulatedText.slice(0, 4000));
+    const finalText = stripThinkingTags(accumulatedText);
+    if (finalText.trim().length > 0) {
+      await botService.editMessageText(chatId, initialMsgId, finalText.slice(0, 4000));
+    } else {
+      const fallbackGuidedText = lang === 'rw'
+        ? `👋 Muraho! Ndi **Bwenge AI Assistant**.\n\nNshobora kugufasha gukora ibizamini, gukosora, kurema ifomu, gukora scanner, cyangwa gukora ubushakashatsi.\n\nAndika /help cyangwa koresha icyo ushaka mu buryo bwa menu!`
+        : `👋 Hello! I am **Bwenge AI Assistant**.\n\nI can help you grade exams, scan documents, create application forms, generate exam papers, or conduct research.\n\nType /help or select an option from the menu below!`;
+      await botService.editMessageText(chatId, initialMsgId, fallbackGuidedText);
     }
+
+    appendHistory(chatId, 'user', userQuery);
+    appendHistory(chatId, 'assistant', String(finalText));
   } catch (err: any) {
     logger.error('Telegram conversational AI error:', err);
-    await botService.editMessageText(chatId, initialMsgId, `Sorry, an error occurred processing your request: ${err.message}`);
+    const errorGuide = lang === 'rw'
+      ? `👋 **Bwenge AI Assistant**\n\nUmbabarire, habaye akabazo mu gutunganya ubutumwa bwawe. Nshobora kugufasha binyuze mu gukoresha amakomande:\n- /scan (Mobile Scanner)\n- /form (Ifomu y'ubusabe)\n- /exam (Kora Igizamini)\n- /grade (Kosora Ibizamini)`
+      : `👋 **Bwenge AI Assistant**\n\nI apologize, I encountered a minor issue processing that message. How can I assist you today?\n- /scan (Mobile Scanner)\n- /form (Create Application Form)\n- /exam (Generate Exam & Rubric)\n- /grade (Batch Grading)`;
+    await botService.editMessageText(chatId, initialMsgId, errorGuide).catch(() => {});
   }
 }
 

@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -14,6 +14,7 @@ model User {
   passwordHash String
   avatarUrl    String?
   role         String       @default("INSTRUCTOR")
+  institutionId String?
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
 
@@ -274,12 +275,14 @@ model MemoryVector {
 
 model BatchJob {
   id            String   @id @default(uuid())
+  institutionId String?
   userId        String
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   telegramChatId String?
   paperType     String   @default("mcq") // 'mcq' | 'essay' | 'short_answer' | 'single'
   status        String   @default("PENDING") // 'PENDING' | 'PROCESSING' | 'DONE' | 'FAILED'
   detectedCount Int?
+  pageGroupingMeta String? // JSON stringified page grouping & confidence mapping
   excelUrl      String?
   summary       String?  // JSON stringified
   errorMessage  String?
@@ -289,6 +292,7 @@ model BatchJob {
 
   @@index([userId])
   @@index([telegramChatId])
+  @@index([institutionId])
 }
 
 model BatchJobResult {
@@ -301,6 +305,9 @@ model BatchJobResult {
   maxScore        Float
   gradedQuestions String   // JSON stringified question breakdown
   confidence      String?  // 'high' | 'medium' | 'low'
+  flaggedForReview Boolean @default(false)
+  reviewedBy      String?
+  reviewedAt      DateTime?
   createdAt       DateTime @default(now())
 
   @@index([jobId])
@@ -328,6 +335,34 @@ model TelegramSession {
 
   @@index([chatId])
 }
+
+model ClassProfile {
+  id               String   @id @default(uuid())
+  institutionId    String?
+  classId          String
+  subject          String
+  rollingMetrics   String   // JSON stringified aggregate performance metrics & weaknesses
+  updatedAt        DateTime @updatedAt
+  createdAt        DateTime @default(now())
+
+  @@unique([institutionId, classId, subject])
+}
+
+model StudentProfile {
+  id               String   @id @default(uuid())
+  institutionId    String?
+  studentId        String
+  studentName      String?
+  scoreHistory     String   // JSON stringified longitudinal score history across batches
+  consentGiven     Boolean  @default(false)
+  consentCapturedAt DateTime?
+  guardianContact  String?
+  updatedAt        DateTime @updatedAt
+  createdAt        DateTime @default(now())
+
+  @@unique([institutionId, studentId])
+}
+
 
 
 

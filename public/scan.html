@@ -1,226 +1,1199 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Bwenge AI Mobile Web Scanner</title>
-  <style>
-    :root {
-      --bg-color: #0f172a;
-      --card-bg: #1e293b;
-      --primary: #3b82f6;
-      --primary-hover: #2563eb;
-      --text: #f8fafc;
-      --text-muted: #94a3b8;
-      --success: #10b981;
-      --error: #ef4444;
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>DocuScan — Bwenge Mobile Batch Exam Scanner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script>
+  if (window.Telegram && window.Telegram.WebApp) {
+    window.Telegram.WebApp.ready();
+    window.Telegram.WebApp.expand();
+  }
+</script>
+<style>
+  :root {
+    --bg: #F5F3EE;
+    --surface: #FFFFFF;
+    --surface-2: #EDEAE2;
+    --text: #10172A;
+    --text-muted: #6B7286;
+    --accent: #D98A1F;
+    --accent-ink: #10172A;
+    --accent-2: #1E9E82;
+    --border: rgba(16,23,42,0.14);
+    --danger: #C24B3F;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #10172A;
+      --surface: #182136;
+      --surface-2: #202B47;
+      --text: #F5F3EE;
+      --text-muted: #8B93A7;
+      --accent: #F2A93B;
+      --accent-ink: #10172A;
+      --accent-2: #2FBF9F;
+      --border: rgba(255,255,255,0.10);
+      --danger: #E0685A;
     }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background-color: var(--bg-color);
-      color: var(--text);
-      margin: 0;
-      padding: 16px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-    .card {
-      background: var(--card-bg);
-      border-radius: 12px;
-      padding: 20px;
-      width: 100%;
-      max-width: 480px;
-      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
-      box-sizing: border-box;
-    }
-    h1 {
-      font-size: 1.4rem;
-      margin-top: 0;
-      color: var(--text);
-      text-align: center;
-    }
-    p {
-      color: var(--text-muted);
-      font-size: 0.9rem;
-      text-align: center;
-    }
-    .file-input-wrapper {
-      margin: 20px 0;
-      text-align: center;
-    }
-    input[type="file"] {
-      display: none;
-    }
-    .btn {
-      background: var(--primary);
-      color: white;
-      padding: 14px 20px;
-      border: none;
-      border-radius: 8px;
-      font-size: 1rem;
-      font-weight: 600;
-      cursor: pointer;
-      width: 100%;
-      box-sizing: border-box;
-      display: inline-block;
-      text-align: center;
-      transition: background 0.2s;
-    }
-    .btn:hover {
-      background: var(--primary-hover);
-    }
-    .preview-container {
-      margin: 20px 0;
-      display: none;
-      text-align: center;
-    }
-    canvas {
-      max-width: 100%;
-      border-radius: 8px;
-      border: 2px solid #334155;
-    }
-    .controls {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-      margin: 15px 0;
-    }
-    .status {
-      margin-top: 15px;
-      padding: 12px;
-      border-radius: 6px;
-      font-size: 0.9rem;
-      display: none;
-      text-align: center;
-    }
-    .status.success { background: rgba(16, 185, 129, 0.2); color: var(--success); }
-    .status.error { background: rgba(239, 68, 68, 0.2); color: var(--error); }
-  </style>
+  }
+  :root[data-theme="dark"] {
+    --bg: #10172A;
+    --surface: #182136;
+    --surface-2: #202B47;
+    --text: #F5F3EE;
+    --text-muted: #8B93A7;
+    --accent: #F2A93B;
+    --accent-ink: #10172A;
+    --accent-2: #2FBF9F;
+    --border: rgba(255,255,255,0.10);
+    --danger: #E0685A;
+  }
+
+  * { box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    margin: 0;
+  }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', 'Segoe UI', sans-serif;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    -webkit-tap-highlight-color: transparent;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { transition-duration: 0.001ms !important; animation-duration: 0.001ms !important; }
+  }
+
+  h1, h2, h3, .display { font-family: 'Manrope', 'Segoe UI', sans-serif; }
+
+  #app {
+    max-width: 480px;
+    margin: 0 auto;
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding: 20px 20px 10px;
+  }
+  .topbar .brand {
+    font-family: 'Manrope', sans-serif;
+    font-weight: 800;
+    font-size: 22px;
+    letter-spacing: -0.01em;
+  }
+  .topbar .brand span { color: var(--accent); }
+  .topbar .counter {
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+
+  .telegram-badge {
+    margin: 0 20px 12px;
+    padding: 8px 14px;
+    border-radius: 12px;
+    background: rgba(30, 158, 130, 0.12);
+    border: 1px solid var(--accent-2);
+    color: var(--accent-2);
+    font-size: 12px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .subtitle {
+    padding: 0 20px 16px;
+    color: var(--text-muted);
+    font-size: 14px;
+    line-height: 1.5;
+    max-width: 34ch;
+  }
+
+  .student-list {
+    flex: 1;
+    padding: 4px 20px 140px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .student-row {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 14px 14px 16px;
+  }
+  .student-row-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .student-initial {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: var(--surface-2);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700;
+    font-size: 13px;
+    flex-shrink: 0;
+    color: var(--text);
+  }
+  .student-name {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-family: 'Manrope', sans-serif;
+    font-weight: 700;
+    font-size: 16px;
+    padding: 4px 0;
+    outline: none;
+    border-bottom: 1px solid transparent;
+  }
+  .student-name:focus { border-bottom: 1px solid var(--accent); }
+  .page-count-pill {
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .delete-student {
+    background: none; border: none; color: var(--text-muted);
+    font-size: 18px; line-height: 1; cursor: pointer; padding: 4px 6px;
+  }
+  .delete-student:hover { color: var(--danger); }
+
+  .filmstrip {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+  .page-tile {
+    position: relative;
+    flex-shrink: 0;
+    width: 72px; height: 96px;
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+  }
+  .page-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .page-tile .page-num {
+    position: absolute; bottom: 4px; left: 5px;
+    font-size: 10px; color: #fff;
+    background: rgba(0,0,0,0.55);
+    padding: 1px 5px; border-radius: 6px;
+  }
+  .page-tile .remove-page {
+    position: absolute; top: 3px; right: 3px;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: rgba(0,0,0,0.55); color: #fff;
+    border: none; font-size: 11px; line-height: 1;
+    cursor: pointer;
+  }
+  .add-page-tile {
+    flex-shrink: 0;
+    width: 72px; height: 96px;
+    border-radius: 10px;
+    border: 1.5px dashed var(--border);
+    background: transparent;
+    color: var(--text-muted);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 4px;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .add-page-tile svg { width: 20px; height: 20px; }
+  .add-page-tile:active { transform: scale(0.96); }
+
+  .add-student-row {
+    display: flex; justify-content: center;
+  }
+  .add-student-btn {
+    background: none;
+    border: 1.5px dashed var(--border);
+    color: var(--text-muted);
+    border-radius: 14px;
+    padding: 14px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    width: 100%;
+    cursor: pointer;
+  }
+  .add-student-btn:active { transform: scale(0.99); }
+
+  .empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text-muted);
+  }
+  .empty-state .display { font-size: 18px; margin-bottom: 6px; color: var(--text); }
+
+  .bottom-bar {
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+    width: calc(100% - 40px);
+    max-width: 440px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    box-shadow: 0 12px 30px rgba(0,0,0,0.18);
+  }
+  .bottom-bar-info { font-size: 12px; color: var(--text-muted); line-height: 1.35; }
+  .export-btn {
+    background: var(--accent);
+    color: var(--accent-ink);
+    border: none;
+    border-radius: 12px;
+    padding: 12px 18px;
+    font-weight: 700;
+    font-size: 14px;
+    font-family: 'Manrope', sans-serif;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .export-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .export-btn:not(:disabled):active { transform: scale(0.97); }
+
+  /* Overlays */
+  .overlay {
+    position: fixed; inset: 0;
+    background: #0A0F1C;
+    z-index: 50;
+    display: flex; flex-direction: column;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .overlay[hidden] { display: none; }
+  .overlay-header {
+    padding: 18px 20px 6px;
+    color: #F5F3EE;
+    font-family: 'Manrope', sans-serif;
+    font-weight: 700;
+    font-size: 15px;
+  }
+  .overlay-hint {
+    text-align: center;
+    color: rgba(245,243,238,0.6);
+    font-size: 13px;
+    padding: 0 30px;
+  }
+  .stage {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  .crop-stage {
+    position: relative;
+    width: min(92vw, 420px);
+    touch-action: none;
+  }
+  .crop-stage img { width: 100%; display: block; border-radius: 4px; }
+  .crop-stage svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .corner-handle {
+    position: absolute;
+    width: 26px; height: 26px;
+    margin-left: -13px; margin-top: -13px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 3px solid #fff;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    touch-action: none;
+  }
+  #previewCanvas { max-width: min(92vw, 420px); max-height: 55dvh; border-radius: 4px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
+
+  .filter-row {
+    display: flex; justify-content: center; gap: 8px;
+    padding: 14px 20px;
+  }
+  .filter-chip {
+    background: rgba(255,255,255,0.08);
+    color: rgba(245,243,238,0.75);
+    border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 999px;
+    padding: 7px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .filter-chip.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+  .overlay-controls {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 26px 26px;
+  }
+  .ghost-btn {
+    background: none; border: none;
+    color: rgba(245,243,238,0.8);
+    font-size: 14px; font-weight: 600;
+    padding: 12px;
+    cursor: pointer;
+  }
+  .primary-btn {
+    background: var(--accent);
+    color: var(--accent-ink);
+    border: none;
+    border-radius: 12px;
+    padding: 13px 22px;
+    font-weight: 700;
+    font-family: 'Manrope', sans-serif;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .primary-btn:active, .ghost-btn:active { transform: scale(0.97); }
+
+  .toast {
+    position: fixed;
+    bottom: calc(90px + env(safe-area-inset-bottom, 0px));
+    left: 50%; transform: translateX(-50%);
+    background: var(--text);
+    color: var(--bg);
+    padding: 10px 18px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    z-index: 80;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+  }
+  .toast.show { opacity: 1; }
+
+  input[type="file"] { display: none; }
+
+  /* Source-choice sheet: "Scan with camera" vs "Attach from gallery" */
+  .sheet-backdrop {
+    background: rgba(6,9,18,0.55);
+    justify-content: flex-end;
+    z-index: 60;
+  }
+  .source-sheet {
+    width: 100%;
+    max-width: 480px;
+    margin: 0 auto;
+    background: var(--surface);
+    border-radius: 22px 22px 0 0;
+    padding: 10px 18px calc(20px + env(safe-area-inset-bottom, 0px));
+    transform: translateY(100%);
+    transition: transform 0.28s cubic-bezier(.2,.8,.2,1);
+  }
+  .source-sheet.open { transform: translateY(0); }
+  .sheet-handle {
+    width: 36px; height: 4px;
+    background: var(--border);
+    border-radius: 999px;
+    margin: 4px auto 14px;
+  }
+  .sheet-title {
+    font-family: 'Manrope', sans-serif;
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--text);
+    padding: 0 4px 10px;
+  }
+  .sheet-option {
+    width: 100%;
+    display: flex; align-items: center; gap: 14px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 13px 14px;
+    margin-bottom: 10px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .sheet-option:active { transform: scale(0.98); }
+  .sheet-icon { font-size: 22px; flex-shrink: 0; }
+  .sheet-option-title { display: block; font-weight: 700; font-size: 14px; color: var(--text); }
+  .sheet-option-sub { display: block; font-size: 12px; color: var(--text-muted); margin-top: 1px; }
+  .sheet-cancel {
+    width: 100%;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-weight: 600;
+    font-size: 14px;
+    padding: 12px;
+    cursor: pointer;
+  }
+
+  /* Auto-detect status pill on the crop stage */
+  .detecting-badge {
+    position: absolute;
+    top: -34px; left: 50%;
+    transform: translateX(-50%);
+    background: rgba(255,255,255,0.12);
+    color: #F5F3EE;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 12px;
+    border-radius: 999px;
+    display: flex; align-items: center; gap: 6px;
+    white-space: nowrap;
+  }
+  .detecting-badge .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent);
+    animation: pulse 1s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 0.3; } 50% { opacity: 1; } }
+
+  .corner-handle.animate-move {
+    transition: left 0.35s cubic-bezier(.2,.8,.2,1), top 0.35s cubic-bezier(.2,.8,.2,1);
+  }
+
+  #magnifier {
+    position: fixed;
+    width: 96px; height: 96px;
+    border-radius: 50%;
+    border: 3px solid var(--accent);
+    box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 90;
+  }
+  #magnifier[hidden] { display: none; }
+</style>
 </head>
 <body>
-  <div class="card">
-    <h1>📸 Bwenge AI Scanner</h1>
-    <p>Capture or upload exam pages directly. High-contrast enhancement will automatically clean your scan before submission.</p>
 
-    <div class="file-input-wrapper">
-      <label for="cameraInput" class="btn">📷 Open Camera / Choose File</label>
-      <input type="file" id="cameraInput" accept="image/*" capture="environment">
+<div id="app">
+  <div class="topbar">
+    <div class="brand" style="display:flex;align-items:center;gap:10px;">
+      <svg width="28" height="28" viewBox="0 0 528 536" style="border-radius:6px;overflow:hidden;">
+        <rect width="528" height="536" fill="#0B1420"/>
+        <defs>
+          <linearGradient id="goldGradTop" x1="10%" y1="0%" x2="90%" y2="100%">
+            <stop offset="0%" stop-color="#F6B94A"/>
+            <stop offset="100%" stop-color="#E08C1E"/>
+          </linearGradient>
+          <linearGradient id="tealGradTop" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#4CE5D6"/>
+            <stop offset="100%" stop-color="#1FB3A6"/>
+          </linearGradient>
+        </defs>
+        <g transform="translate(0,536) scale(0.1,-0.1)">
+          <path d="M2455 4433 c-22 -2 -134 -20 -250 -39 -192 -32 -218 -38 -315 -83 -58 -26 -125 -56 -150 -66 -69 -29 -235 -143 -335 -231 -193 -168 -263 -255 -405 -499 -12 -22 -39 -63 -58 -92 -34 -50 -55 -115 -116 -353 -51 -196 -59 -467 -21 -709 34 -220 146 -516 245 -647 21 -27 50 -75 65 -105 31 -60 224 -267 290 -310 22 -15 51 -39 65 -53 13 -15 40 -37 60 -48 19 -12 65 -41 102 -65 65 -42 269 -130 353 -152 77 -19 271 -60 370 -77 122 -21 297 -14 413 16 42 10 119 26 171 35 89 16 285 81 360 119 68 35 217 146 281 208 36 35 82 75 101 90 20 15 51 50 69 77 26 42 37 51 61 51 20 0 34 -8 46 -27 15 -23 19 -59 23 -238 8 -303 1 -297 283 -297 200 -1 226 6 249 69 10 31 12 200 11 860 -2 886 -1 865 -53 893 -14 7 -288 10 -867 10 l-846 0 -41 -23 c-63 -35 -67 -49 -64 -242 3 -143 6 -175 21 -198 34 -52 47 -54 397 -60 361 -6 475 -19 516 -58 33 -31 32 -84 -2 -130 -14 -19 -39 -61 -54 -95 -63 -138 -245 -301 -445 -398 -207 -101 -206 -101 -455 -100 -256 1 -301 9 -490 87 -169 71 -241 127 -370 287 -24 30 -59 71 -77 90 -29 32 -67 92 -124 195 -43 78 -99 309 -109 454 -12 164 -5 235 49 444 57 223 102 303 265 468 221 225 295 275 503 338 160 49 208 55 392 47 161 -6 293 -27 526 -81 121 -29 132 -30 145 -6 17 34 23 112 11 156 -9 32 -44 73 -175 207 -180 181 -273 250 -361 267 -60 12 -204 19 -260 14z" fill="url(#goldGradTop)"/>
+          <path d="M3440 4423 c-143 -6 -165 -39 -84 -128 53 -58 147 -212 176 -287 17 -44 22 -90 29 -258 5 -113 15 -227 22 -255 11 -46 15 -50 50 -58 52 -13 78 1 119 61 18 27 93 115 167 196 74 80 151 172 172 204 20 31 78 99 129 151 93 94 182 216 194 267 9 34 -19 75 -57 85 -95 25 -521 35 -917 22z" fill="url(#tealGradTop)"/>
+        </g>
+      </svg>
+      <span>Docu<span>Scan</span></span>
     </div>
-
-    <div class="preview-container" id="previewContainer">
-      <canvas id="canvasPreview"></canvas>
-
-      <div class="controls">
-        <button type="button" class="btn" id="contrastBtn" style="background:#475569;">Contrast Boost</button>
-        <button type="button" class="btn" id="grayscaleBtn" style="background:#475569;">B&W Scan</button>
-      </div>
-
-      <button type="button" class="btn" id="uploadBtn" style="margin-top:10px;">🚀 Upload Document</button>
-    </div>
-
-    <div class="status" id="statusBox"></div>
+    <div class="counter" id="pageCounter">0 pages</div>
   </div>
+  <div class="telegram-badge" id="telegramBadge" style="display:none;">
+    <span>⚡</span> <span id="telegramStatusText">Connected to Telegram Session</span>
+  </div>
+  <div class="subtitle">Scan each student's script page by page, then export every student as one combined PDF for grading.</div>
 
-  <script>
-    const params = new URLSearchParams(window.location.search);
-    const chatId = params.get('chatId') || '';
+  <main class="student-list" id="studentList"></main>
 
-    const cameraInput = document.getElementById('cameraInput');
-    const previewContainer = document.getElementById('previewContainer');
-    const canvas = document.getElementById('canvasPreview');
-    const ctx = canvas.getContext('2d');
-    const contrastBtn = document.getElementById('contrastBtn');
-    const grayscaleBtn = document.getElementById('grayscaleBtn');
-    const uploadBtn = document.getElementById('uploadBtn');
-    const statusBox = document.getElementById('statusBox');
+  <div class="bottom-bar">
+    <div class="bottom-bar-info" id="bottomInfo">0 students · 0 pages</div>
+    <button class="export-btn" id="exportBtn" disabled>Export combined PDF</button>
+  </div>
+</div>
 
-    let originalImageData = null;
+<!-- Crop overlay -->
+<div class="overlay" id="cropOverlay" hidden>
+  <div class="overlay-header">Adjust page edges</div>
+  <div class="stage">
+    <div class="crop-stage" id="cropStage">
+      <img id="cropImage" alt="" />
+      <svg id="cropSvg" viewBox="0 0 100 100" preserveAspectRatio="none">
+        <polygon id="cropPoly" points="" fill="rgba(242,169,59,0.18)" stroke="#F2A93B" stroke-width="0.6" />
+      </svg>
+      <div class="corner-handle" id="handle-0"></div>
+      <div class="corner-handle" id="handle-1"></div>
+      <div class="corner-handle" id="handle-2"></div>
+      <div class="corner-handle" id="handle-3"></div>
+      <div class="detecting-badge" id="detectingBadge" hidden><span class="dot"></span>Detecting page edges…</div>
+    </div>
+  </div>
+  <div class="overlay-hint">Fine-tune the corners if needed</div>
+  <div class="overlay-controls">
+    <button class="ghost-btn" id="retakeCropBtn">Retake</button>
+    <button class="primary-btn" id="applyCropBtn">Apply</button>
+  </div>
+</div>
 
-    cameraInput.addEventListener('change', (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
+<!-- Preview / filter overlay -->
+<div class="overlay" id="previewOverlay" hidden>
+  <div class="overlay-header">Choose a look</div>
+  <div class="stage">
+    <canvas id="previewCanvas"></canvas>
+  </div>
+  <div class="filter-row" id="filterRow">
+    <button class="filter-chip" data-filter="auto">Auto</button>
+    <button class="filter-chip" data-filter="color">Original</button>
+    <button class="filter-chip" data-filter="gray">Grayscale</button>
+    <button class="filter-chip" data-filter="bw">B &amp; W</button>
+  </div>
+  <div class="overlay-controls">
+    <button class="ghost-btn" id="retakePreviewBtn">Retake</button>
+    <button class="primary-btn" id="savePageBtn">Save page</button>
+  </div>
+</div>
 
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const img = new Image();
-        img.onload = () => {
-          // Scale down if image is huge
-          const maxDim = 1600;
-          let w = img.width;
-          let h = img.height;
-          if (w > maxDim || h > maxDim) {
-            if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
-            else { w = Math.round((w * maxDim) / h); h = maxDim; }
-          }
+<input type="file" id="fileInputCamera" accept="image/*" capture="environment" />
+<input type="file" id="fileInputGallery" accept="image/*" />
+<canvas id="hiddenCanvas" style="display:none"></canvas>
+<div class="toast" id="toast"></div>
+<div id="magnifier" hidden><canvas id="magCanvas" width="96" height="96"></canvas></div>
 
-          canvas.width = w;
-          canvas.height = h;
-          ctx.drawImage(img, 0, 0, w, h);
-          originalImageData = ctx.getImageData(0, 0, w, h);
-          previewContainer.style.display = 'block';
-        };
-        img.src = event.target.result;
-      };
-      reader.readAsDataURL(file);
-    });
+<!-- Source-choice sheet -->
+<div class="overlay sheet-backdrop" id="sourceSheetBackdrop" hidden>
+  <div class="source-sheet" id="sourceSheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">Add a page</div>
+    <button class="sheet-option" id="sheetScanBtn">
+      <span class="sheet-icon">📷</span>
+      <span>
+        <span class="sheet-option-title">Scan with camera</span>
+        <span class="sheet-option-sub">Take a new photo now</span>
+      </span>
+    </button>
+    <button class="sheet-option" id="sheetGalleryBtn">
+      <span class="sheet-icon">🖼️</span>
+      <span>
+        <span class="sheet-option-title">Attach from gallery</span>
+        <span class="sheet-option-sub">Use a photo you already have</span>
+      </span>
+    </button>
+    <button class="sheet-cancel" id="sheetCancelBtn">Cancel</button>
+  </div>
+</div>
 
-    contrastBtn.addEventListener('click', () => {
-      if (!originalImageData) return;
-      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const d = imgData.data;
-      const factor = 1.3; // Contrast factor
-      for (let i = 0; i < d.length; i += 4) {
-        d[i] = Math.min(255, Math.max(0, factor * (d[i] - 128) + 128));
-        d[i+1] = Math.min(255, Math.max(0, factor * (d[i+1] - 128) + 128));
-        d[i+2] = Math.min(255, Math.max(0, factor * (d[i+2] - 128) + 128));
-      }
-      ctx.putImageData(imgData, 0, 0);
-    });
+<script>
+(function () {
+  "use strict";
 
-    grayscaleBtn.addEventListener('click', () => {
-      if (!originalImageData) return;
-      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const d = imgData.data;
-      for (let i = 0; i < d.length; i += 4) {
-        const avg = (d[i] + d[i+1] + d[i+2]) / 3;
-        d[i] = avg;
-        d[i+1] = avg;
-        d[i+2] = avg;
-      }
-      ctx.putImageData(imgData, 0, 0);
-    });
+  /* ---------------------------------------------------------------
+   * State & Telegram Session Sync
+   * ------------------------------------------------------------- */
+  let students = [];
+  let activeStudentId = null;
+  let rawImageEl = null;
+  let corners = [];
+  let draggingIndex = null;
+  let warpedCanvas = null;
+  let currentFilter = 'auto';
+  let pendingStudentId = null;
 
-    uploadBtn.addEventListener('click', () => {
-      statusBox.style.display = 'block';
-      statusBox.className = 'status';
-      statusBox.textContent = '⏳ Processing and uploading document...';
+  const urlParams = new URLSearchParams(window.location.search);
+  const sessionToken = urlParams.get('token') || urlParams.get('sessionToken');
 
-      canvas.toBlob(async (blob) => {
-        const formData = new FormData();
-        formData.append('file', blob, 'web_scan.jpg');
-        if (chatId) formData.append('chatId', chatId);
+  const el = (id) => document.getElementById(id);
+  const uid = () => Math.random().toString(36).slice(2, 10);
 
-        try {
-          const res = await fetch('/api/files/upload', {
-            method: 'POST',
-            body: formData,
-          });
+  if (sessionToken) {
+    el('telegramBadge').style.display = 'flex';
+    el('telegramStatusText').textContent = `Connected to Telegram Session (${sessionToken.slice(0, 6)}…)`;
+  }
 
-          const data = await res.json();
-          if (res.ok && data.success) {
-            statusBox.className = 'status success';
-            statusBox.textContent = '✅ Document uploaded successfully! Return to Telegram chat.';
-          } else {
-            statusBox.className = 'status error';
-            statusBox.textContent = '❌ Upload failed: ' + (data.error || 'Server error');
-          }
-        } catch (err) {
-          statusBox.className = 'status error';
-          statusBox.textContent = '❌ Upload failed: ' + err.message;
+  function showToast(msg) {
+    const t = el('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(showToast._timer);
+    showToast._timer = setTimeout(() => t.classList.remove('show'), 2200);
+  }
+
+  /* ---------------------------------------------------------------
+   * Rendering the student grid
+   * ------------------------------------------------------------- */
+  function initials(name) {
+    return (name || '').trim().split(/\s+/).slice(0, 2).map(w => w[0] || '').join('').toUpperCase() || '?';
+  }
+
+  function renderStudents() {
+    const list = el('studentList');
+    if (students.length === 0) {
+      list.innerHTML = `
+        <div class="empty-state">
+          <div class="display">No students yet</div>
+          <div>Add a student, then scan their pages one by one.</div>
+        </div>
+        <div class="add-student-row">
+          <button class="add-student-btn" id="addStudentBtn">+ Add student</button>
+        </div>`;
+      el('addStudentBtn').addEventListener('click', addStudent);
+      updateCounters();
+      return;
+    }
+
+    list.innerHTML = students.map((s, si) => `
+      <div class="student-row" data-id="${s.id}">
+        <div class="student-row-head">
+          <div class="student-initial">${initials(s.name)}</div>
+          <input class="student-name" data-id="${s.id}" value="${s.name.replace(/"/g, '&quot;')}" placeholder="Student name" />
+          <div class="page-count-pill">${s.pages.length} pg</div>
+          <button class="delete-student" data-id="${s.id}" title="Remove student">×</button>
+        </div>
+        <div class="filmstrip">
+          ${s.pages.map((p, pi) => `
+            <div class="page-tile">
+              <img src="${p.dataUrl}" alt="Page ${pi + 1}" />
+              <div class="page-num">${pi + 1}</div>
+              <button class="remove-page" data-sid="${s.id}" data-pidx="${pi}" title="Remove page">×</button>
+            </div>
+          `).join('')}
+          <button class="add-page-tile" data-sid="${s.id}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            Add page
+          </button>
+        </div>
+      </div>
+    `).join('') + `
+      <div class="add-student-row">
+        <button class="add-student-btn" id="addStudentBtn">+ Add student</button>
+      </div>
+    `;
+
+    el('addStudentBtn').addEventListener('click', addStudent);
+    list.querySelectorAll('.add-page-tile').forEach(btn =>
+      btn.addEventListener('click', () => startCapture(btn.dataset.sid)));
+    list.querySelectorAll('.remove-page').forEach(btn =>
+      btn.addEventListener('click', () => removePage(btn.dataset.sid, Number(btn.dataset.pidx))));
+    list.querySelectorAll('.delete-student').forEach(btn =>
+      btn.addEventListener('click', () => removeStudent(btn.dataset.id)));
+    list.querySelectorAll('.student-name').forEach(input =>
+      input.addEventListener('input', (e) => {
+        const st = students.find(s => s.id === e.target.dataset.id);
+        if (st) st.name = e.target.value;
+      }));
+
+    updateCounters();
+  }
+
+  function updateCounters() {
+    const totalPages = students.reduce((n, s) => n + s.pages.length, 0);
+    el('pageCounter').textContent = `${totalPages} page${totalPages === 1 ? '' : 's'}`;
+    el('bottomInfo').textContent = `${students.length} student${students.length === 1 ? '' : 's'} · ${totalPages} page${totalPages === 1 ? '' : 's'}`;
+    el('exportBtn').disabled = totalPages === 0;
+  }
+
+  function addStudent() {
+    students.push({ id: uid(), name: `Student ${students.length + 1}`, pages: [] });
+    renderStudents();
+  }
+
+  function removeStudent(id) {
+    students = students.filter(s => s.id !== id);
+    renderStudents();
+  }
+
+  function removePage(sid, pidx) {
+    const st = students.find(s => s.id === sid);
+    if (st) st.pages.splice(pidx, 1);
+    renderStudents();
+  }
+
+  /* ---------------------------------------------------------------
+   * Source-choice sheet
+   * ------------------------------------------------------------- */
+  function startCapture(studentId) {
+    pendingStudentId = studentId;
+    el('sourceSheetBackdrop').hidden = false;
+    requestAnimationFrame(() => el('sourceSheet').classList.add('open'));
+  }
+
+  function closeSheet() {
+    el('sourceSheet').classList.remove('open');
+    setTimeout(() => { el('sourceSheetBackdrop').hidden = true; }, 250);
+  }
+
+  el('sheetCancelBtn').addEventListener('click', closeSheet);
+  el('sourceSheetBackdrop').addEventListener('click', (e) => {
+    if (e.target === el('sourceSheetBackdrop')) closeSheet();
+  });
+  el('sheetScanBtn').addEventListener('click', () => {
+    activeStudentId = pendingStudentId;
+    closeSheet();
+    el('fileInputCamera').value = '';
+    el('fileInputCamera').click();
+  });
+  el('sheetGalleryBtn').addEventListener('click', () => {
+    activeStudentId = pendingStudentId;
+    closeSheet();
+    el('fileInputGallery').value = '';
+    el('fileInputGallery').click();
+  });
+
+  function handleFileSelected(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => openCropStep(reader.result);
+    reader.readAsDataURL(file);
+  }
+  el('fileInputCamera').addEventListener('change', handleFileSelected);
+  el('fileInputGallery').addEventListener('change', handleFileSelected);
+
+  /* ---------------------------------------------------------------
+   * Crop step: auto-detect edges, then fine-tune
+   * ------------------------------------------------------------- */
+  const DEFAULT_INSET_CORNERS = [
+    { x: 6, y: 6 }, { x: 94, y: 6 }, { x: 94, y: 94 }, { x: 6, y: 94 },
+  ];
+
+  function openCropStep(dataUrl) {
+    rawImageEl = new Image();
+    rawImageEl.onload = () => {
+      el('cropImage').src = dataUrl;
+      corners = DEFAULT_INSET_CORNERS.map(c => ({ ...c }));
+      renderHandles(false);
+      el('cropOverlay').hidden = false;
+      el('detectingBadge').hidden = false;
+
+      requestAnimationFrame(() => setTimeout(() => {
+        const detected = safeDetectDocumentCorners(rawImageEl);
+        el('detectingBadge').hidden = true;
+        if (detected) {
+          corners = detected;
+          renderHandles(true);
         }
-      }, 'image/jpeg', 0.9);
+      }, 20));
+    };
+    rawImageEl.src = dataUrl;
+  }
+
+  function renderHandles(animate) {
+    corners.forEach((c, i) => {
+      const h = el(`handle-${i}`);
+      h.classList.toggle('animate-move', !!animate);
+      h.style.left = c.x + '%';
+      h.style.top = c.y + '%';
     });
-  </script>
+    const pts = corners.map(c => `${c.x},${c.y}`).join(' ');
+    el('cropPoly').setAttribute('points', pts);
+  }
+
+  function attachDrag(index) {
+    const handle = el(`handle-${index}`);
+    handle.addEventListener('pointerdown', (e) => {
+      draggingIndex = index;
+      handle.classList.remove('animate-move');
+      handle.setPointerCapture(e.pointerId);
+      updateMagnifier(e.clientX, e.clientY);
+    });
+    handle.addEventListener('pointermove', (e) => {
+      if (draggingIndex !== index) return;
+      const stage = el('cropStage').getBoundingClientRect();
+      let x = ((e.clientX - stage.left) / stage.width) * 100;
+      let y = ((e.clientY - stage.top) / stage.height) * 100;
+      x = Math.max(0, Math.min(100, x));
+      y = Math.max(0, Math.min(100, y));
+      corners[index] = { x, y };
+      renderHandles(false);
+      updateMagnifier(e.clientX, e.clientY);
+    });
+    handle.addEventListener('pointerup', () => { draggingIndex = null; hideMagnifier(); });
+  }
+  [0, 1, 2, 3].forEach(attachDrag);
+
+  function updateMagnifier(clientX, clientY) {
+    const stage = el('cropStage').getBoundingClientRect();
+    const size = 96, zoom = 2.5;
+    const mag = el('magnifier');
+    mag.hidden = false;
+    mag.style.left = (clientX - size / 2) + 'px';
+    mag.style.top = (clientY - size - 34) + 'px';
+    const relX = (clientX - stage.left) / stage.width;
+    const relY = (clientY - stage.top) / stage.height;
+    const nx = relX * rawImageEl.naturalWidth;
+    const ny = relY * rawImageEl.naturalHeight;
+    const srcSize = size / zoom;
+    const mctx = el('magCanvas').getContext('2d');
+    mctx.imageSmoothingEnabled = true;
+    mctx.clearRect(0, 0, size, size);
+    mctx.drawImage(rawImageEl, nx - srcSize / 2, ny - srcSize / 2, srcSize, srcSize, 0, 0, size, size);
+    mctx.strokeStyle = '#F2A93B';
+    mctx.lineWidth = 1;
+    mctx.beginPath();
+    mctx.moveTo(size / 2, 0); mctx.lineTo(size / 2, size);
+    mctx.moveTo(0, size / 2); mctx.lineTo(size, size / 2);
+    mctx.stroke();
+  }
+  function hideMagnifier() { el('magnifier').hidden = true; }
+
+  el('retakeCropBtn').addEventListener('click', () => {
+    el('cropOverlay').hidden = true;
+    startCapture(activeStudentId);
+  });
+
+  /* ---------------------------------------------------------------
+   * Edge detection algorithms
+   * ------------------------------------------------------------- */
+  function safeDetectDocumentCorners(img) {
+    try { return detectDocumentCorners(img); }
+    catch (e) { console.warn('Edge detection failed, using default corners.', e); return null; }
+  }
+
+  function detectDocumentCorners(img) {
+    const maxDim = 500;
+    const scale = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.max(1, Math.round(img.naturalWidth * scale));
+    const h = Math.max(1, Math.round(img.naturalHeight * scale));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, w, h);
+    const data = ctx.getImageData(0, 0, w, h).data;
+
+    const gray = new Float32Array(w * h);
+    for (let i = 0; i < w * h; i++) {
+      gray[i] = 0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2];
+    }
+
+    const mag = new Float32Array(w * h);
+    let maxMag = 0;
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        const gx =
+          -gray[(y - 1) * w + (x - 1)] + gray[(y - 1) * w + (x + 1)]
+          - 2 * gray[y * w + (x - 1)] + 2 * gray[y * w + (x + 1)]
+          - gray[(y + 1) * w + (x - 1)] + gray[(y + 1) * w + (x + 1)];
+        const gy =
+          -gray[(y - 1) * w + (x - 1)] - 2 * gray[(y - 1) * w + x] - gray[(y - 1) * w + (x + 1)]
+          + gray[(y + 1) * w + (x - 1)] + 2 * gray[(y + 1) * w + x] + gray[(y + 1) * w + (x + 1)];
+        const m = Math.sqrt(gx * gx + gy * gy);
+        mag[y * w + x] = m;
+        if (m > maxMag) maxMag = m;
+      }
+    }
+    if (maxMag < 1e-6) return null;
+
+    const threshold = maxMag * 0.35;
+    const points = [];
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (mag[y * w + x] >= threshold) points.push({ x, y });
+      }
+    }
+    if (points.length < 20) return null;
+
+    const hull = convexHull(points);
+    if (hull.length < 4) return null;
+
+    const pick = (scoreFn) => hull.reduce((best, p) => (scoreFn(p) > scoreFn(best) ? p : best), hull[0]);
+    const tl = pick(p => -(p.x + p.y));
+    const tr = pick(p => (p.x - p.y));
+    const br = pick(p => (p.x + p.y));
+    const bl = pick(p => -(p.x - p.y));
+
+    const area = Math.abs(polygonArea([tl, tr, br, bl]));
+    if (area < (w * h) * 0.12) return null;
+
+    const toPercent = (p) => ({
+      x: Math.max(0, Math.min(100, (p.x / scale) / img.naturalWidth * 100)),
+      y: Math.max(0, Math.min(100, (p.y / scale) / img.naturalHeight * 100)),
+    });
+    return [toPercent(tl), toPercent(tr), toPercent(br), toPercent(bl)];
+  }
+
+  function convexHull(points) {
+    const pts = points.slice().sort((a, b) => (a.x === b.x ? a.y - b.y : a.x - b.x));
+    const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+    const lower = [];
+    for (const p of pts) {
+      while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+      lower.push(p);
+    }
+    const upper = [];
+    for (let i = pts.length - 1; i >= 0; i--) {
+      const p = pts[i];
+      while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+      upper.push(p);
+    }
+    upper.pop(); lower.pop();
+    return lower.concat(upper);
+  }
+
+  function polygonArea(pts) {
+    let area = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const j = (i + 1) % pts.length;
+      area += pts[i].x * pts[j].y - pts[j].x * pts[i].y;
+    }
+    return area / 2;
+  }
+
+  /* ---------------------------------------------------------------
+   * Perspective warp
+   * ------------------------------------------------------------- */
+  function squareToQuad(x0, y0, x1, y1, x2, y2, x3, y3) {
+    const dx1 = x1 - x2, dx2 = x3 - x2, dx3 = x0 - x1 + x2 - x3;
+    const dy1 = y1 - y2, dy2 = y3 - y2, dy3 = y0 - y1 + y2 - y3;
+    if (Math.abs(dx3) < 1e-9 && Math.abs(dy3) < 1e-9) {
+      return [x1 - x0, x2 - x1, x0, y1 - y0, y2 - y1, y0, 0, 0, 1];
+    }
+    const denom = dx1 * dy2 - dx2 * dy1;
+    const a13 = (dx3 * dy2 - dx2 * dy3) / denom;
+    const a23 = (dx1 * dy3 - dx3 * dy1) / denom;
+    return [
+      x1 - x0 + a13 * x1, x3 - x0 + a23 * x3, x0,
+      y1 - y0 + a13 * y1, y3 - y0 + a23 * y3, y0,
+      a13, a23, 1,
+    ];
+  }
+  function adjugate3x3(m) {
+    const [a, b, c, d, e, f, g, h, i] = m;
+    return [
+      e * i - f * h, c * h - b * i, b * f - c * e,
+      f * g - d * i, a * i - c * g, c * d - a * f,
+      d * h - e * g, b * g - a * h, a * e - b * d,
+    ];
+  }
+  function multiply3x3(a, b) {
+    const r = new Array(9);
+    for (let row = 0; row < 3; row++)
+      for (let col = 0; col < 3; col++)
+        r[row * 3 + col] = a[row * 3] * b[col] + a[row * 3 + 1] * b[3 + col] + a[row * 3 + 2] * b[6 + col];
+    return r;
+  }
+  function outputSizeFromCorners(pts) {
+    const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+    const w = Math.round(Math.max(dist(pts[0], pts[1]), dist(pts[3], pts[2])));
+    const h = Math.round(Math.max(dist(pts[0], pts[3]), dist(pts[1], pts[2])));
+    return { w: Math.max(w, 240), h: Math.max(h, 240) };
+  }
+  function warpPerspective(img, pts, outW, outH) {
+    const sw = img.naturalWidth, sh = img.naturalHeight;
+    const srcCanvas = document.createElement('canvas');
+    srcCanvas.width = sw; srcCanvas.height = sh;
+    const sctx = srcCanvas.getContext('2d');
+    sctx.drawImage(img, 0, 0, sw, sh);
+    const srcData = sctx.getImageData(0, 0, sw, sh).data;
+
+    const outCanvas = document.createElement('canvas');
+    outCanvas.width = outW; outCanvas.height = outH;
+    const octx = outCanvas.getContext('2d');
+    const outImgData = octx.createImageData(outW, outH);
+    const outData = outImgData.data;
+
+    const rectToSquare = adjugate3x3(squareToQuad(0, 0, outW, 0, outW, outH, 0, outH));
+    const squareToQuadSrc = squareToQuad(pts[0].x, pts[0].y, pts[1].x, pts[1].y, pts[2].x, pts[2].y, pts[3].x, pts[3].y);
+    const destToSrc = multiply3x3(squareToQuadSrc, rectToSquare);
+
+    for (let y = 0; y < outH; y++) {
+      for (let x = 0; x < outW; x++) {
+        const X = destToSrc[0] * x + destToSrc[1] * y + destToSrc[2];
+        const Y = destToSrc[3] * x + destToSrc[4] * y + destToSrc[5];
+        const W = destToSrc[6] * x + destToSrc[7] * y + destToSrc[8];
+        const sx = X / W, sy = Y / W;
+        const outIdx = (y * outW + x) * 4;
+        if (sx >= 0 && sx < sw - 1 && sy >= 0 && sy < sh - 1) {
+          const x0 = Math.floor(sx), y0 = Math.floor(sy);
+          const fx = sx - x0, fy = sy - y0;
+          for (let c = 0; c < 4; c++) {
+            const p00 = srcData[(y0 * sw + x0) * 4 + c];
+            const p10 = srcData[(y0 * sw + x0 + 1) * 4 + c];
+            const p01 = srcData[((y0 + 1) * sw + x0) * 4 + c];
+            const p11 = srcData[((y0 + 1) * sw + x0 + 1) * 4 + c];
+            const top = p00 + (p10 - p00) * fx;
+            const bottom = p01 + (p11 - p01) * fx;
+            outData[outIdx + c] = top + (bottom - top) * fy;
+          }
+        } else {
+          outData[outIdx] = 255; outData[outIdx + 1] = 255; outData[outIdx + 2] = 255; outData[outIdx + 3] = 255;
+        }
+      }
+    }
+    octx.putImageData(outImgData, 0, 0);
+    return outCanvas;
+  }
+
+  el('applyCropBtn').addEventListener('click', () => {
+    const nw = rawImageEl.naturalWidth, nh = rawImageEl.naturalHeight;
+    const naturalPts = corners.map(c => ({ x: (c.x / 100) * nw, y: (c.y / 100) * nh }));
+    const { w, h } = outputSizeFromCorners(naturalPts);
+    warpedCanvas = warpPerspective(rawImageEl, naturalPts, w, h);
+    currentFilter = 'auto';
+    el('cropOverlay').hidden = true;
+    el('previewOverlay').hidden = false;
+    renderPreview();
+  });
+
+  /* ---------------------------------------------------------------
+   * Filters
+   * ------------------------------------------------------------- */
+  function applyFilter(sourceCanvas, filter) {
+    const w = sourceCanvas.width, h = sourceCanvas.height;
+    const out = document.createElement('canvas');
+    out.width = w; out.height = h;
+    const octx = out.getContext('2d');
+    if (filter === 'color') {
+      octx.drawImage(sourceCanvas, 0, 0);
+      return out;
+    }
+    if (filter === 'auto') {
+      octx.filter = 'contrast(1.12) brightness(1.06) saturate(1.08)';
+      octx.drawImage(sourceCanvas, 0, 0);
+      octx.filter = 'none';
+      return out;
+    }
+    if (filter === 'gray') {
+      octx.filter = 'grayscale(1) contrast(1.15) brightness(1.05)';
+      octx.drawImage(sourceCanvas, 0, 0);
+      octx.filter = 'none';
+      return out;
+    }
+    octx.drawImage(sourceCanvas, 0, 0);
+    const imgData = octx.getImageData(0, 0, w, h);
+    const d = imgData.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      const v = lum > 165 ? 255 : 0;
+      d[i] = d[i + 1] = d[i + 2] = v;
+    }
+    octx.putImageData(imgData, 0, 0);
+    return out;
+  }
+
+  function renderPreview() {
+    const filtered = applyFilter(warpedCanvas, currentFilter);
+    const canvas = el('previewCanvas');
+    canvas.width = filtered.width;
+    canvas.height = filtered.height;
+    canvas.getContext('2d').drawImage(filtered, 0, 0);
+    document.querySelectorAll('#filterRow .filter-chip').forEach(chip =>
+      chip.classList.toggle('active', chip.dataset.filter === currentFilter));
+  }
+
+  el('filterRow').addEventListener('click', (e) => {
+    const chip = e.target.closest('.filter-chip');
+    if (!chip) return;
+    currentFilter = chip.dataset.filter;
+    renderPreview();
+  });
+
+  el('retakePreviewBtn').addEventListener('click', () => {
+    el('previewOverlay').hidden = true;
+    startCapture(activeStudentId);
+  });
+
+  el('savePageBtn').addEventListener('click', () => {
+    // Client-side haptic vibration feedback
+    if (navigator.vibrate) navigator.vibrate([15]);
+    if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.HapticFeedback) {
+      window.Telegram.WebApp.HapticFeedback.impactOccurred('medium');
+    }
+
+    const filtered = applyFilter(warpedCanvas, currentFilter);
+    // 0.8 JPEG quality compression reduces bandwidth by ~70%
+    const dataUrl = filtered.toDataURL('image/jpeg', 0.8);
+    const st = students.find(s => s.id === activeStudentId);
+    if (st) st.pages.push({ dataUrl });
+    el('previewOverlay').hidden = true;
+    activeStudentId = null;
+    warpedCanvas = null;
+    renderStudents();
+    showToast('Page saved');
+  });
+
+  /* ---------------------------------------------------------------
+   * Combined PDF export & Telegram Session Upload
+   * ------------------------------------------------------------- */
+  el('exportBtn').addEventListener('click', async () => {
+    const btn = el('exportBtn');
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Building PDF…';
+    try {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+      let first = true;
+      for (const student of students) {
+        if (student.pages.length === 0) continue;
+        if (!first) doc.addPage();
+        first = false;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(26);
+        doc.text(student.name || 'Unnamed student', 48, 110);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(12);
+        doc.setTextColor(110);
+        doc.text(`${student.pages.length} scanned page${student.pages.length === 1 ? '' : 's'} follow`, 48, 134);
+        doc.setTextColor(0);
+
+        for (const page of student.pages) {
+          doc.addPage();
+          const props = doc.getImageProperties(page.dataUrl);
+          const pw = doc.internal.pageSize.getWidth();
+          const ph = doc.internal.pageSize.getHeight();
+          const ratio = Math.min(pw / props.width, ph / props.height);
+          const w = props.width * ratio, h = props.height * ratio;
+          doc.addImage(page.dataUrl, 'JPEG', (pw - w) / 2, (ph - h) / 2, w, h);
+        }
+      }
+
+      const pdfFileName = `batch-scan-${Date.now()}.pdf`;
+      doc.save(pdfFileName);
+
+      if (sessionToken) {
+        btn.textContent = 'Uploading to Telegram…';
+        const pdfBlob = doc.output('blob');
+        const formData = new FormData();
+        formData.append('file', pdfBlob, pdfFileName);
+
+        const response = await fetch(`/api/telegram/scan-upload/${encodeURIComponent(sessionToken)}`, {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (response.ok) {
+          if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.HapticFeedback) {
+            window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
+          }
+          showToast('Sent to Telegram bot! Check Telegram for results.');
+        } else {
+          const errData = await response.json().catch(() => ({}));
+          showToast(`Telegram upload: ${errData.error || 'Server error'}`);
+        }
+      } else {
+        showToast('PDF exported successfully');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Could not build or upload PDF — see console');
+    } finally {
+      btn.disabled = students.reduce((n, s) => n + s.pages.length, 0) === 0;
+      btn.textContent = original;
+    }
+  });
+
+  /* ---------------------------------------------------------------
+   * Init
+   * ------------------------------------------------------------- */
+  renderStudents();
+})();
+</script>
 </body>
 </html>

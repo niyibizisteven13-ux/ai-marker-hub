@@ -73,6 +73,14 @@ EXAM & RUBRIC: ${JSON.stringify(examPaper, null, 2)}
 STUDENT ANSWERS: ${JSON.stringify(studentScript.answers, null, 2)}`;
 
     try {
+      // Smart Hybrid Routing for NISR Hackathon: Use GonkaRouter for batch grading (90% cheaper), Gemini/Anthropic for single papers
+      if (batchId !== 'unknown' && await this.aiService.providerAvailable('gonkarouter')) {
+        logger.info(`[GradingService] Smart Routing: using GonkaRouter (GLM-5.3-Flash) for batch ${batchId}`);
+        const rawResult = await this.aiService.sendGonkaChat(prompt, { system: draftSystemInstruction });
+        const results = this.aiService.parseModelJson(typeof rawResult === 'string' ? rawResult : (rawResult as any).text || '');
+        return this.processResults(results, studentScript);
+      }
+
       // Prioritize Ollama if configured as primary provider
       if (process.env.AI_PROVIDER === 'ollama' && (await this.aiService.providerAvailable('ollama'))) {
         const rawResult = await this.aiService.sendOllamaChat(prompt, { system: draftSystemInstruction, json: true });
@@ -132,7 +140,7 @@ STUDENT ANSWERS: ${JSON.stringify(studentScript.answers, null, 2)}`;
       const bestResult = providerRun.successes[0]?.value || [];
       if (providerRun.successes.length === 0) {
         logger.warn(`All race providers failed for batch ${batchId}`, {
-          failures: providerRun.failures?.map((f: any) => f?.message || String(f)),
+          failures: providerRun.errors,
         });
       }
       return this.processResults(bestResult, studentScript);

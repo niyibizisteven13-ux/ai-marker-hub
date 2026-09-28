@@ -74,7 +74,7 @@ ${philosophy}
   private async getUserPreferences(userId: string): Promise<string> {
     const settings = await prisma.userSettings.findUnique({ where: { userId } });
     if (!settings) return "No specific style preferences set.";
-    return `Preferred Language: ${settings.language || 'English'}. Communication Style: ${settings.communicationStyle || 'Professional'}.`;
+    return `Preferred Language: ${settings.preferredLanguage || 'English'}. Communication Style: ${settings.agentTone || 'Professional'}.`;
   }
 
   private async getTeachingPhilosophy(userId: string): Promise<string> {

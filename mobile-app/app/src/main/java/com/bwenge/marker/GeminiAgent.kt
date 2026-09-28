@@ -6,7 +6,7 @@ import kotlinx.coroutines.withContext
 
 class GeminiAgent(apiKey: String) {
     private val model: GenerativeModel = GenerativeModel(
-        modelName = "gemini-1.5-flash",
+        modelName = "gemini-3.8-flash",
         apiKey = apiKey
     )
 

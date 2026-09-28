@@ -28,9 +28,8 @@ import { classifyIntent } from './server/services/intentRouter.js';
 import { generalTools } from './server/services/generalTools.js';
 import logger from './server/utils/logger.js';
 
-import { validate, examSchema, markScriptSchema, batchGradeSchema } from './server/middleware/validation.js';
+import { validate, examSchema, markScriptSchema, batchGradeSchema, chatSchema } from './server/middleware/validation.js';
 
-import fileRoutes from './routes/files.ts';
 import { requireAuth, writeAuditLog } from './production/auth.js';
 import { generalLimiter, gradingLimiter } from './production/rateLimiter.js';
 import authRoutes from './server/routes/authRoutes.ts';
@@ -43,7 +42,8 @@ import ollamaRoutes from './server/routes/ollamaRoutes.ts';
 import telegramBotRoutes from './server/routes/telegramBotRoutes.ts';
 import { TelegramBotService } from './server/services/TelegramBotService.ts';
 import { buildFallbackChatReply } from './src/utils/aiFallback.ts';
-import { BWENGE_SYSTEM_PROMPT, buildBwengeGradingPrompt } from './src/services/geminiService.ts';
+import { buildPromptForIntent } from './server/services/prompts/promptRouter.ts';
+import { stripThinkingTags } from './server/services/AiService.ts';
 import { generateBatchExcelReport, generateBatchExcelReportFromGradedResults } from './src/services/excelExporter.ts';
 import { uploadBufferToCloud } from './src/services/cloudStorage.ts';
 import { extractTextFromUpload } from './src/services/documentService.ts';
@@ -57,6 +57,26 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const prisma = new PrismaClient();
+
+// ── Startup environment validation ────────────────────────────────────────
+// Catch missing/invalid configuration at boot time rather than inside a
+// request handler where the failure is harder to trace.
+const REQUIRED_ENV = ['DATABASE_URL', 'JWT_SECRET'] as const;
+for (const key of REQUIRED_ENV) {
+  if (!process.env[key]) {
+    console.error(`[FATAL] Required environment variable "${key}" is not set. Check your .env file.`);
+    process.exit(1);
+  }
+}
+if (process.env.NODE_ENV === 'production' && /^file:/i.test(process.env.DATABASE_URL || '')) {
+  console.error('[FATAL] Production requires a non-SQLite DATABASE_URL. SQLite is not safe for concurrent production writes. Configure PostgreSQL or another production-grade database.');
+  process.exit(1);
+}
+const AI_PROVIDERS = ['GEMINI_API_KEY', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'NVIDIA_NIM_API_KEY', 'GONKA_API_KEY', 'OLLAMA_BASE_URL'];
+if (!AI_PROVIDERS.some(k => process.env[k])) {
+  console.warn('[WARN] No AI provider API key is configured. All AI endpoints will fail. Set at least one of: ' + AI_PROVIDERS.join(', '));
+}
+// ──────────────────────────────────────────────────────────────────────────
 
 const aiService = AiService.getInstance();
 const queueService = QueueService.getInstance();
@@ -140,6 +160,46 @@ setInterval(() => {
   }
 }, CONTEXT_CACHE_SWEEP_MS).unref();
 
+// ── Security headers (replaces the 'helmet' npm package) ─────────────────
+// Sets the same headers helmet would set, with no external dependency.
+app.use((_req: express.Request, res: express.Response, next: express.NextFunction) => {
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-XSS-Protection', '0'); // Modern browsers ignore this; CSP is the real defence
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (process.env.NODE_ENV === 'production') {
+    res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
+  }
+  next();
+});
+
+// ── CORS ──────────────────────────────────────────────────────────────────
+// Allow requests from the configured frontend origin only. In production
+// this must match the exact deployed domain (APP_URL env var).
+const allowedOrigin = process.env.APP_URL || 'http://localhost:5173';
+app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const origin = req.headers.origin as string | undefined;
+  const isAllowed =
+    process.env.NODE_ENV !== 'production' ||
+    !origin ||
+    origin === allowedOrigin;
+
+  if (isAllowed) {
+    if (origin) res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key, x-teacher-id');
+  }
+
+  if (req.method === 'OPTIONS') {
+    res.status(204).end();
+    return;
+  }
+  next();
+});
+// ──────────────────────────────────────────────────────────────────────────
+
 app.use(express.json({ limit: '20mb' }));
 
 // Public, unauthenticated, and deliberately mounted before the rate
@@ -169,9 +229,11 @@ app.use('/api/forms', formRoutes);
 app.use('/api/admin', requireAuth, adminRoutes);
 app.use('/api/ollama', requireAuth, ollamaRoutes);
 app.use('/api/telegram', telegramBotRoutes);
-app.use('/exports', express.static(path.join(__dirname, 'exports')));
+// /exports serves generated Excel reports — gate it so only the owning
+// authenticated user (or admin) can download them. Anonymous access would
+// allow anyone to enumerate and download batch grading results.
+app.use('/exports', requireAuth, express.static(path.join(__dirname, 'exports')));
 app.use(express.static(path.join(__dirname, 'public')));
-app.use('/api/files', fileRoutes);
 
 // Authenticated, detailed provider status for internal/admin debugging.
 // Behind requireAuth and the standard rate limit, since it's not a
@@ -204,10 +266,12 @@ app.post('/api/files/upload', requireAuth, upload.single('file'), async (req, re
     // "../../.env" or one containing null bytes could write outside uploads/.
     const safeExt = path.extname(req.file.originalname).replace(/[^a-zA-Z0-9.]/g, '').slice(0, 10);
     const uploadsDir = path.join(process.cwd(), 'uploads');
-    tempPath = path.join(uploadsDir, `temp-${Date.now()}-${crypto.randomUUID()}${safeExt}`);
+    const savedPath = path.join(uploadsDir, `file-${Date.now()}-${crypto.randomUUID()}${safeExt}`);
 
     await fs.mkdir(uploadsDir, { recursive: true });
-    await fs.writeFile(tempPath, req.file.buffer);
+    await fs.writeFile(savedPath, req.file.buffer);
+
+    const storedUrl = await uploadBufferToCloud(req.file.buffer, `uploads/${Date.now()}-${crypto.randomUUID()}-${path.basename(req.file.originalname)}`, req.file.mimetype);
 
     const record = await prisma.fileRecord.create({
       data: {
@@ -215,7 +279,8 @@ app.post('/api/files/upload', requireAuth, upload.single('file'), async (req, re
         mimeType: req.file.mimetype,
         size: req.file.size,
         userId,
-        path: tempPath,
+        path: null,
+        url: storedUrl,
       },
     });
 
@@ -224,7 +289,7 @@ app.post('/api/files/upload', requireAuth, upload.single('file'), async (req, re
       size: req.file.size,
     }).catch((err) => logger.warn('Audit log write failed for file upload', err));
 
-    extractTextFromUpload(tempPath, req.file.originalname, req.file.mimetype)
+    extractTextFromUpload(savedPath, req.file.originalname, req.file.mimetype)
       .then(async (result) => {
         await prisma.fileRecord.update({
           where: { id: record.id },
@@ -232,12 +297,7 @@ app.post('/api/files/upload', requireAuth, upload.single('file'), async (req, re
         });
         logger.info(`Extracted text from ${req.file?.originalname}`);
       })
-      .catch((err) => logger.error(`Extraction failed for ${record.id}`, err))
-      .finally(() => {
-        if (tempPath) {
-          fs.unlink(tempPath).catch((err) => logger.warn(`Failed to clean up temp file ${tempPath}`, err));
-        }
-      });
+      .catch((err) => logger.error(`Extraction failed for ${record.id}`, err));
 
     res.json({ success: true, fileId: record.id });
   } catch (error: any) {
@@ -348,49 +408,7 @@ function safeEvaluate(expression: string): number {
   return result;
 }
 
-// Helper: build the right prompt/system-instruction per intent
-function buildPromptForIntent(
-  intent: string,
-  query: string,
-  opts: {
-    attachmentText?: string;
-    attachmentName?: string;
-    examContext?: any;
-    selectedEvidence?: any;
-    hydratedContext: string;
-  }
-) {
-  switch (intent) {
-    case 'grading':
-      return {
-        system: `${BWENGE_SYSTEM_PROMPT}\n\n${opts.hydratedContext}`,
-        prompt: buildBwengeGradingPrompt(query, opts.attachmentText, opts.attachmentName, opts.examContext, opts.selectedEvidence),
-      };
-    case 'farming_advice':
-      return {
-        system: `You are an agricultural advisor for Rwandan farmers. Give practical, actionable advice
-          for common crops (maize, beans, cassava, coffee, tea, potatoes, bananas). Keep answers short
-          and specific. If symptoms suggest a serious disease/pest outbreak, recommend contacting a
-          local agronomist or RAB extension officer.`,
-        prompt: query,
-      };
-    case 'selection_scoring':
-      return {
-        system: `You are an application/selection scoring assistant. Score submissions against the
-          provided rubric and explain your reasoning per criterion.`,
-        prompt: query,
-      };
-    default: {
-      const fullPrompt = opts.attachmentText
-        ? `ATTACHED DOCUMENT CONTENT:\n${opts.attachmentText}\n\nUSER QUERY:\n${query}`
-        : query;
-      return {
-        system: `You are Bwenge, a helpful assistant.\n\n${opts.hydratedContext}`,
-        prompt: fullPrompt,
-      };
-    }
-  }
-}
+
 
 // Unified SSE event writer. Every provider path below funnels through this
 // so the client always receives the same event shape — {type, ...} — no
@@ -424,7 +442,7 @@ function makeEmitter(res: express.Response) {
 }
 
 // Claude Assistant Chat Endpoint (Streaming SSE with File Support)
-app.post('/api/ai/chat', requireAuth, upload.single('attachment'), async (req, res) => {
+app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chatSchema), async (req, res) => {
   const {
     query,
     attachmentText,
@@ -471,8 +489,8 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), async (req, r
 
   if (intent === 'grading' || (Array.isArray(attachmentIds) && attachmentIds.length > 3)) {
     const analytics = AnalyticsWorker.getInstance();
-    analytics.aggregateBatchPerformance(userId, jobId).then((insight) => {
-      if (insight) {
+    analytics.aggregateBatchPerformance(userId, jobId).then((insight: { title?: string } | null) => {
+      if (insight?.title) {
         // Future: push this to the specific user's open SSE stream via
         // Redis pub/sub or a websocket channel keyed on userId/jobId.
         logger.info(`Proactive Insight Generated for ${userId}: ${insight.title}`);
@@ -497,28 +515,38 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), async (req, r
   if (Array.isArray(finalAttachmentIds) && finalAttachmentIds.length > 0) {
     const files = await prisma.fileRecord.findMany({
       where: { id: { in: finalAttachmentIds } },
-      select: { extractedText: true, path: true, mimeType: true },
+      select: { extractedText: true, path: true, url: true, mimeType: true },
     });
 
     serverAttachmentText = files.map((f) => f.extractedText).filter(Boolean).join('\n\n');
 
     for (const file of files) {
-      if (!file.path) continue;
       const isImage = file.mimeType.startsWith('image/');
       const isPdf = file.mimeType === 'application/pdf';
 
-      if (isImage || isPdf) {
-        try {
-          const buffer = await fs.readFile(file.path);
-          serverVisualFiles.push({
-            type: isImage ? 'image' : 'document',
-            base64: buffer.toString('base64'),
-            mediaType: file.mimeType,
-          });
+      if (!isImage && !isPdf) continue;
+
+      try {
+        let buffer: Buffer;
+        if (file.url) {
+          const response = await fetch(file.url);
+          if (!response.ok) throw new Error(`Requested file URL returned ${response.status}`);
+          buffer = Buffer.from(await response.arrayBuffer());
+          logger.info(`Loaded visual context from cloud URL: ${file.url}`);
+        } else if (file.path) {
+          buffer = await fs.readFile(file.path);
           logger.info(`Loaded visual context from disk: ${file.path}`);
-        } catch (err) {
-          logger.error(`Failed to read file from disk for AI vision: ${file.path}`, err);
+        } else {
+          continue;
         }
+
+        serverVisualFiles.push({
+          type: isImage ? 'image' : 'document',
+          base64: buffer.toString('base64'),
+          mediaType: file.mimeType,
+        });
+      } catch (err) {
+        logger.error(`Failed to read file for AI vision: ${file.url || file.path}`, err);
       }
     }
   }
@@ -849,40 +877,30 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), async (req, r
     });
 
     const isOllama = cleanProvider === 'ollama' || (process.env.AI_PROVIDER === 'ollama' && !cleanProvider);
-    const isNvidiaNim = cleanProvider === 'nvidianim' || (process.env.AI_PROVIDER === 'nvidianim' && !cleanProvider);
     const hasOllama = await aiService.providerAvailable('ollama');
-    const hasNvidiaNim = await aiService.providerAvailable('nvidianim');
 
-    if (isNvidiaNim && hasNvidiaNim) {
-      logger.info('Using NVIDIA NIM for chat...');
-      if (intent === 'general_assist') {
-        await aiService.runNvidiaAgentLoop({
-          prompt,
-          system: systemWithContext,
-          history: parsedHistory,
-          tools: generalTools,
-          executeTool: async (name, input) => {
-            if (name === 'build_form') return `<form_schema>${JSON.stringify(input)}</form_schema>`;
-            return `Tool ${name} executed.`;
-          },
-          onEvent: (event) => {
-            if (emitter.isClosed()) return;
-            const baseData = { provider: 'NVIDIA' };
-            if (event.type === 'text') emitter.send('text', { ...baseData, text: event.data.text });
-            else if (event.type === 'tool_call')
-              emitter.send('tool_call', { ...baseData, name: event.data.name, input: event.data.input, status: 'started' });
-            else if (event.type === 'tool_result') emitter.send('tool_result', { ...baseData, text: event.data.output, name: event.data.name });
-          },
-        });
-      } else {
-        await aiService.streamNvidiaNimChat(prompt, {
-          system: systemWithContext,
-          history: parsedHistory,
-          onToken: (text) => emitter.send('text', { text, provider: 'NVIDIA' }),
-          tools: undefined,
-        });
+    // Provider routing — evaluated in priority order. A provider only runs
+    // if it is explicitly requested OR if it is available and no higher-
+    // priority provider has already handled the request.
+    // GonkaRouter is opt-in (requires GONKA_API_KEY) because its API shape
+    // is unverified; it must not silently swallow requests meant for Gemini.
+    const hasGonka = await aiService.providerAvailable('gonkarouter');
+    if (cleanProvider === 'gonkarouter' || (hasGonka && !cleanProvider && !isOllama)) {
+      logger.info('Using GonkaRouter (GLM-5.3-Flash) for web chat...');
+      try {
+        const gonkaReply = await aiService.sendGonkaChat(prompt, { system: systemWithContext });
+        const { text: cleanGonka, thinkingText } = stripThinkingTags(gonkaReply as any);
+        emitter.send('text', { provider: 'GonkaRouter', text: cleanGonka, thinkingText });
+        clearInterval(keepAlive);
+        emitter.done();
+        return;
+      } catch (gonkaErr: any) {
+        logger.warn(`GonkaRouter chat failed, falling through to next provider: ${gonkaErr.message}`);
+        // Fall through to Gemini / Ollama / OpenRouter below
       }
-    } else if (await aiService.providerAvailable('gemini')) {
+    }
+
+    if (await aiService.providerAvailable('gemini')) {
       logger.info('Attempting Gemini streaming...');
 
       const geminiContents: any[] = [
@@ -911,23 +929,27 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), async (req, r
       });
       for await (const chunk of stream) {
         if (emitter.isClosed()) break;
-        const text = (chunk as any).text;
-        emitter.send('text', { text, provider: 'Gemini' });
+        const rawText = (chunk as any).text;
+        const { text: cleanChunk } = stripThinkingTags(rawText);
+        if (cleanChunk) {
+          emitter.send('text', { text: cleanChunk, provider: 'Gemini' });
+        }
       }
     } else if (isOllama && hasOllama) {
       logger.info('Using Ollama for chat streaming...');
       await aiService.streamOllamaChat(prompt, {
         system: systemWithContext,
-        onToken: (text) => emitter.send('text', { text, provider: 'Ollama' }),
+        onToken: (rawText) => {
+          const { text: cleanChunk } = stripThinkingTags(rawText);
+          if (cleanChunk) emitter.send('text', { text: cleanChunk, provider: 'Ollama' });
+        },
       });
     } else if (await aiService.providerAvailable('openrouter')) {
-      // NOTE: this path still isn't real token streaming — sendOpenRouterChat
-      // returns one complete string, sent as a single SSE event. Left as-is
-      // structurally (fixing that needs an OpenRouter streaming call this
-      // file doesn't have access to), but it now goes through the same
-      // typed `text` event as every other provider instead of a bespoke shape.
-      const answer = await aiService.sendOpenRouterChat(prompt, { system: systemWithContext, history: parsedHistory });
-      emitter.send('text', { text: answer, provider: 'Claude' });
+      const openRouterRes = await aiService.sendOpenRouterChat(prompt, { system: systemWithContext, history: parsedHistory });
+      const rawText = typeof openRouterRes === 'string' ? openRouterRes : openRouterRes.text;
+      const thinkingText = typeof openRouterRes === 'string' ? undefined : openRouterRes.thinkingText;
+      const { text: cleanText, thinkingText: parsedThinking } = stripThinkingTags(rawText);
+      emitter.send('text', { text: cleanText, thinkingText: thinkingText || parsedThinking, provider: 'Claude' });
     } else {
       // Previously this just threw "No AI provider available," which the
       // catch block below turns into a bare error event and nothing else.
@@ -949,6 +971,34 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), async (req, r
     clearInterval(keepAlive);
     emitter.send('error', { error: process.env.NODE_ENV === 'production' ? 'Internal Streaming Error' : (err.message || 'Internal Streaming Error') });
     res.end();
+  }
+});
+
+app.get('/api/forms/:id', async (req, res) => {
+  try {
+    const form = await prisma.applicationForm.findUnique({
+      where: { id: req.params.id },
+    });
+    if (!form) {
+      return res.status(404).json({ error: 'Form not found.' });
+    }
+    let schemaObj = {};
+    try {
+      schemaObj = JSON.parse(form.schema || '{}');
+    } catch {
+      schemaObj = { title: form.title };
+    }
+    res.json({
+      success: true,
+      form: {
+        id: form.id,
+        title: form.title,
+        schema: schemaObj,
+        createdAt: form.createdAt,
+      },
+    });
+  } catch (error: any) {
+    respondError(res, error, 'Failed to retrieve form.');
   }
 });
 
@@ -1300,8 +1350,9 @@ async function startServer() {
     });
   }
 
+  let vite: any = null;
   if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
+    vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
@@ -1320,6 +1371,12 @@ async function startServer() {
   const server = app.listen(PORT, '0.0.0.0', () => {
     logger.info(`Marker AI server running on http://0.0.0.0:${PORT}`);
   });
+
+  if (vite && vite.ws && typeof vite.ws.handleUpgrade === 'function') {
+    server.on('upgrade', (req, socket, head) => {
+      vite.ws.handleUpgrade(req, socket, head);
+    });
+  }
 
   // Graceful shutdown: a deploy/restart sending SIGTERM (Render, Docker,
   // most orchestrators) should stop accepting new connections and let

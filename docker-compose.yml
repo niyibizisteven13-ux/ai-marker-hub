@@ -4,16 +4,32 @@ services:
     ports:
       - "3000:3000"
     environment:
+      - NODE_ENV=development
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - DATABASE_URL=file:./dev.db
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/ai_marker_hub?schema=public
     depends_on:
+      - postgres
       - redis
     volumes:
       - .env:/app/.env
-      - ./prisma/dev.db:/app/prisma/dev.db
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ai_marker_hub
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
 
   redis:
     image: redis:alpine
     ports:
       - "6379:6379"
+
+volumes:
+  postgres_data:

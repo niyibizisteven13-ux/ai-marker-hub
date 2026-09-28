@@ -13,7 +13,8 @@ export async function ensureExportsDirectory() {
 }
 
 function buildSignedExportUrl(objectKey: string) {
-  const baseUrl = `/exports/${encodeURIComponent(objectKey)}`;
+  const appOrigin = (process.env.APP_URL || 'http://localhost:3000').replace(/\/$/, '');
+  const baseUrl = `${appOrigin}/exports/${encodeURIComponent(objectKey)}`;
   const expiresAt = Date.now() + SIGNED_URL_TTL_MS;
   const query = new URLSearchParams({ expires: String(expiresAt) });
   return `${baseUrl}?${query.toString()}`;
@@ -22,6 +23,7 @@ function buildSignedExportUrl(objectKey: string) {
 export async function uploadBufferToCloud(buffer: Buffer, objectKey: string, contentType: string) {
   const exportsPath = await ensureExportsDirectory();
   const targetFile = path.join(exportsPath, objectKey);
+  await fs.mkdir(path.dirname(targetFile), { recursive: true });
   await fs.writeFile(targetFile, buffer);
   return buildSignedExportUrl(objectKey);
 }

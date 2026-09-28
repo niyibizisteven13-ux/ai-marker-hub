@@ -20,7 +20,7 @@ class NvidiaNimAgent(private val apiKey: String, private val model: String = "me
                 put("messages", JSONArray().apply {
                     put(JSONObject().apply {
                         put("role", "system")
-                        put("content", "You are Bwenge AI, powered by NVIDIA NIM Llama.")
+                        put("content", "You are Bwenge — wisdom and intelligence. You are an AI assistant built to be useful, accurate, grounded, warm, clear, and competent, powered by NVIDIA NIM.")
                     })
                     put(JSONObject().apply {
                         put("role", "user")

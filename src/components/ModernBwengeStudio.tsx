@@ -219,25 +219,22 @@ export default function ModernBwengeStudio() {
       </div>
 
       {scannerOpen && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="absolute inset-0" onClick={() => setScannerOpen(false)} />
-          <div className="relative w-full max-w-3xl h-[80vh] rounded-3xl overflow-hidden border border-white/10 shadow-2xl bg-[#101113]">
-            <DocumentScanner
-              onClose={() => setScannerOpen(false)}
-              onSavePages={(pages) => {
-                if (!pages || pages.length === 0) {
-                  setScannerOpen(false);
-                  return;
-                }
-                setActiveDocument({
-                  name: `Scan_${pages.length}_pages.jpg`,
-                  size: `${(pages.length * 1.8).toFixed(1)} MB`,
-                  pages: pages.length,
-                });
+        <div className="fixed inset-0 z-50 bg-[#101113] flex flex-col w-screen h-[100dvh] overflow-hidden animate-in fade-in duration-200">
+          <DocumentScanner
+            onClose={() => setScannerOpen(false)}
+            onSavePages={(pages) => {
+              if (!pages || pages.length === 0) {
                 setScannerOpen(false);
-              }}
-            />
-          </div>
+                return;
+              }
+              setActiveDocument({
+                name: `Scan_${pages.length}_pages.jpg`,
+                size: `${(pages.length * 1.8).toFixed(1)} MB`,
+                pages: pages.length,
+              });
+              setScannerOpen(false);
+            }}
+          />
         </div>
       )}
 

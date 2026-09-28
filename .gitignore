@@ -3,6 +3,40 @@ build/
 dist/
 coverage/
 .DS_Store
+
+# Logs
 *.log
+combined.log
+error.log
+
+# Environment secrets
 .env*
 !.env.example
+
+# SQLite databases (never commit)
+prisma/*.db
+prisma/*.db-journal
+prisma/*.db-shm
+prisma/*.db-wal
+*.sqlite
+*.sqlite3
+
+# Backup & temp files
+*.bak
+*.bak2
+*.bak3
+*.bak4
+.tmp_*
+tsc-server-errors.txt
+server-output*.txt
+output.log
+startup_log.txt
+
+# Orphaned compiled root file (real server is in dist/)
+server.js
+
+# Upload storage (runtime files — should live in cloud storage)
+uploads/
+
+# Exports at runtime
+exports/audit.log.jsonl

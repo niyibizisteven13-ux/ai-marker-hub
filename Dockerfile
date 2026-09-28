@@ -14,8 +14,11 @@ COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/prisma ./prisma
 RUN npm install --omit=dev
 
-# Install prisma client
+# Generate Prisma client
 RUN npx prisma generate
 
 EXPOSE 3000
-CMD ["npm", "start"]
+
+# Run database migrations then start the server.
+# prisma migrate deploy applies any pending migrations without resetting data.
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/server.js"]

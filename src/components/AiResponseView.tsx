@@ -1,10 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { atomDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import MarkdownRenderer from './MarkdownRenderer';
 import { Check, Copy, MoreHorizontal, RefreshCw, Share2, ThumbsDown, ThumbsUp, Volume2 } from 'lucide-react';
 
 interface AiResponseViewProps {
@@ -123,87 +118,8 @@ export function AiResponseView({ content, messageId, onCopy, onRegenerate, onFee
 
   return (
     <div className="space-y-2.5">
-      <div className="prose prose-invert max-w-none text-[13.5px] leading-relaxed text-stone-200 prose-p:my-2.5 prose-headings:font-semibold prose-headings:text-stone-100 prose-strong:text-stone-100 prose-li:my-0.5 prose-hr:border-stone-800">
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm, remarkMath]}
-          rehypePlugins={[rehypeKatex]}
-          components={{
-            code({ className, children, ...props }: any) {
-              const inline = 'inline' in props && Boolean(props.inline);
-              const match = /language-(\w+)/.exec(className || '');
-              const language = match?.[1] || '';
-              const codeContent = String(children).replace(/\n$/, '');
-
-              return !inline ? (
-                <div className="my-3.5 overflow-hidden rounded-xl border border-stone-800 bg-stone-900 shadow-sm">
-                  <div className="flex items-center justify-between border-b border-stone-800 bg-stone-950/60 px-3 py-1.5 text-[10.5px] font-mono uppercase tracking-[0.15em] text-stone-500">
-                    <span>{language || 'code'}</span>
-                    <button
-                      type="button"
-                      onClick={() => navigator.clipboard.writeText(codeContent)}
-                      className="flex items-center gap-1 rounded px-1.5 py-0.5 text-stone-400 transition hover:bg-stone-800 hover:text-stone-100"
-                    >
-                      <Copy className="h-3 w-3" />
-                      Copy
-                    </button>
-                  </div>
-                  <SyntaxHighlighter
-                    PreTag="div"
-                    language={language || 'text'}
-                    style={atomDark as never}
-                    customStyle={{ margin: 0, background: 'transparent', padding: '0.85rem 1rem', fontSize: '12.5px' }}
-                    {...props}
-                  >
-                    {codeContent}
-                  </SyntaxHighlighter>
-                </div>
-              ) : (
-                <code className="rounded bg-stone-800/80 px-1.5 py-0.5 font-mono text-[12.5px] text-[#E38B67]" {...props}>
-                  {children}
-                </code>
-              );
-            },
-            pre({ children }) {
-              return <div className="my-0">{children}</div>;
-            },
-            table({ children }) {
-              return (
-                <div className="my-3.5 overflow-x-auto rounded-xl border border-stone-800">
-                  <table className="min-w-full border-collapse text-[12.5px]">{children}</table>
-                </div>
-              );
-            },
-            th({ children }) {
-              return (
-                <th className="border-b border-stone-800 bg-stone-900/80 px-3 py-2 text-left font-semibold text-stone-200">
-                  {children}
-                </th>
-              );
-            },
-            td({ children }) {
-              return <td className="border-b border-stone-800/70 px-3 py-2 text-stone-300">{children}</td>;
-            },
-            blockquote({ children }) {
-              return (
-                <blockquote className="my-3 border-l-2 border-[#D97757]/60 pl-3 text-stone-400">{children}</blockquote>
-              );
-            },
-            a({ children, href }) {
-              return (
-                <a
-                  className="text-[#E38B67] underline decoration-[#D97757]/40 underline-offset-2 hover:decoration-[#D97757]"
-                  href={href}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {children}
-                </a>
-              );
-            },
-          }}
-        >
-          {visibleText}
-        </ReactMarkdown>
+      <div>
+        <MarkdownRenderer content={visibleText} />
         {isStreaming && (
           <span className="ml-0.5 inline-block h-3.5 w-1.5 -translate-y-0.5 animate-pulse rounded-sm bg-stone-500 motion-reduce:animate-none" />
         )}

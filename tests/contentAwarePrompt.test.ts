@@ -1,56 +1,116 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
-import { buildContentAwarePrompt, buildExamPaperContext } from '../src/utils/contentAwarePrompt.ts';
-import { BWENGE_SYSTEM_PROMPT, buildBwengeGradingPrompt } from '../src/services/geminiService.ts';
+// src/utils/contentAwarePrompt.ts
+//
+// Assembles context (exam paper + rubric, student submission, teacher-highlighted
+// evidence) into prompt-ready text blocks. Kept deliberately separate from the
+// system-prompt / persona logic in geminiService.ts so context assembly can be
+// unit-tested and reused across providers (Gemini today, Claude once migrated).
 
-test('buildExamPaperContext captures the exam structure', () => {
-  const context = buildExamPaperContext({
-    id: 'exam-1',
-    title: 'Physics Midterm',
-    subject: 'Physics',
-    topic: 'Mechanics',
-    gradeLevel: 'Grade 12',
-    difficulty: 'Intermediate',
-    totalMarks: 50,
-    durationMinutes: 60,
-    questions: [
-      { id: 'q1', number: '1', questionText: 'State Newton\'s second law', maxMarks: 10, questionType: 'short_answer' },
-    ],
-    rubrics: [
-      {
-        questionId: 'q1',
-        questionNumber: '1',
-        maxMarks: 10,
-        criteria: [{ id: 'c1', criterion: 'Definition', marksAvailable: 5, description: 'Correct law' }],
-      },
-    ],
-    createdAt: 'now',
-  } as any);
+export interface RubricCriterion {
+  id: string;
+  criterion: string;
+  marksAvailable: number;
+  description?: string;
+}
 
-  assert.match(context || '', /Physics Midterm/);
-  assert.match(context || '', /State Newton's second law/);
-  assert.match(context || '', /Definition/);
-});
+export interface QuestionRubric {
+  questionId: string;
+  questionNumber: string;
+  maxMarks: number;
+  criteria: RubricCriterion[];
+}
 
-test('buildContentAwarePrompt combines submission and exam context', () => {
-  const prompt = buildContentAwarePrompt({
-    userQuery: 'Grade this response',
-    submissionText: 'The student wrote Newton\'s law accurately.',
-    submissionName: 'student-response.txt',
-    examPaperContext: 'Exam Paper: Physics Midterm',
-    selectedTextContext: 'The answer includes Newton\'s second law.',
-  });
+export interface ExamQuestion {
+  id: string;
+  number: string;
+  questionText: string;
+  maxMarks: number;
+  questionType: 'short_answer' | 'long_answer' | 'multiple_choice' | 'essay' | string;
+}
 
-  assert.match(prompt, /Grade this response/);
-  assert.match(prompt, /student-response.txt/);
-  assert.match(prompt, /Exam Paper: Physics Midterm/);
-  assert.match(prompt, /selected evidence/i);
-});
+export interface ExamPaper {
+  id: string;
+  title: string;
+  subject: string;
+  topic?: string;
+  gradeLevel?: string;
+  difficulty?: string;
+  totalMarks: number;
+  durationMinutes?: number;
+  questions: ExamQuestion[];
+  rubrics: QuestionRubric[];
+  createdAt: string;
+}
 
-test('grading prompts instruct the model to return polished structured feedback', () => {
-  const prompt = buildBwengeGradingPrompt('Grade this response', 'The student answered with Newton\'s law.', 'student-response.txt');
+/**
+ * Renders an exam paper (with its per-question rubrics) into a plain-text block
+ * suitable for inclusion in a grading prompt. Returns '' for a missing exam paper
+ * so callers can safely omit the "Exam Context" section rather than branching.
+ */
+export function buildExamPaperContext(examPaper: ExamPaper | null | undefined): string {
+  if (!examPaper) return '';
 
-  assert.match(BWENGE_SYSTEM_PROMPT, /NEVER output raw prompt context/i);
-  assert.match(prompt, /Executive Summary/i);
-  assert.match(prompt, /Question-by-Question Detailed Analysis/i);
-});
+  const lines: string[] = [];
+  lines.push(`Exam Paper: ${examPaper.title}`);
+  lines.push(`Subject: ${examPaper.subject}${examPaper.topic ? ` — ${examPaper.topic}` : ''}`);
+  if (examPaper.gradeLevel) lines.push(`Grade Level: ${examPaper.gradeLevel}`);
+  if (examPaper.difficulty) lines.push(`Difficulty: ${examPaper.difficulty}`);
+  lines.push(`Total Marks: ${examPaper.totalMarks}`);
+  if (examPaper.durationMinutes) lines.push(`Duration: ${examPaper.durationMinutes} minutes`);
+  lines.push('');
+  lines.push('Questions:');
+
+  for (const q of examPaper.questions) {
+    lines.push(`  Q${q.number} (${q.maxMarks} marks, ${q.questionType}): ${q.questionText}`);
+    const rubric = examPaper.rubrics.find(
+      (r) => r.questionId === q.id || r.questionNumber === q.number
+    );
+    if (rubric) {
+      lines.push(`  Marking Rubric for Q${q.number} (max ${rubric.maxMarks} marks):`);
+      for (const c of rubric.criteria) {
+        lines.push(
+          `    - ${c.criterion} (${c.marksAvailable} marks)${c.description ? `: ${c.description}` : ''}`
+        );
+      }
+    }
+  }
+
+  return lines.join('\n');
+}
+
+export interface ContentAwarePromptOptions {
+  userQuery: string;
+  submissionText?: string;
+  submissionName?: string;
+  examPaperContext?: string;
+  selectedTextContext?: string;
+}
+
+/**
+ * Combines the teacher's chat query with whichever context blocks are available
+ * (exam paper, raw submission, teacher-selected evidence). Sections are omitted
+ * cleanly when not supplied, so this is safe to call from any point in the chat
+ * flow (e.g. before a document has been uploaded).
+ */
+export function buildContentAwarePrompt(options: ContentAwarePromptOptions): string {
+  const { userQuery, submissionText, submissionName, examPaperContext, selectedTextContext } =
+    options;
+  const sections: string[] = [];
+
+  sections.push(`User Request: ${userQuery}`);
+
+  if (examPaperContext) {
+    sections.push(`--- Exam Context ---\n${examPaperContext}`);
+  }
+
+  if (submissionText) {
+    sections.push(
+      `--- Student Submission${submissionName ? ` (${submissionName})` : ''} ---\n${submissionText}`
+    );
+  }
+
+  if (selectedTextContext) {
+    sections.push(`--- Selected evidence highlighted by the teacher ---\n${selectedTextContext}`);
+  }
+
+  return sections.join('\n\n');
+}

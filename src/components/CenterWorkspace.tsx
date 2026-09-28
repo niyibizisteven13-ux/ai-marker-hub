@@ -1,17 +1,14 @@
 import React, { useRef, useState } from 'react';
 import { NavigationTab, ExamPaper, UploadedFile, StudentScript } from '../types';
 import { ResultsView } from './ResultsView';
-import { Plus, Check, X, Type, Maximize2, Sparkles, Trash2, RotateCcw, Award, Flag, Paperclip, Wrench, Clock, BookOpen, Layout } from 'lucide-react';
-import DocumentScanner from './DocumentScanner';
+import {
+  Plus, Check, X, Type, Maximize2, Sparkles, Trash2, RotateCcw, Award, Flag, Paperclip, Wrench,
+  Clock, BookOpen, Layout, FileText, Link2, ArrowLeft, ArrowUp, ArrowDown, Copy, AlignLeft,
+  CircleDot, CheckSquare, ChevronDown, Calendar, Hash, Mail, Phone, Upload, Star,
+} from 'lucide-react';
 import { useStore } from '../store/useStore';
 import DynamicForm from './DynamicForm';
 import { BwengeLoader } from './BwengeLoader';
-
-interface ScannedPage {
-  id: string;
-  dataUrl: string;
-  filter: string;
-}
 
 interface CenterWorkspaceProps {
   activeTab?: NavigationTab;
@@ -28,9 +25,6 @@ interface CenterWorkspaceProps {
   onToggleFlag?: (fileId: string) => void;
   onUpdateBonusMarks?: (fileId: string, bonus: number) => void;
   onDeletePermanently?: (fileId: string) => void;
-  scannerOpen?: boolean;
-  onCloseScanner?: () => void;
-  onSaveScannedPages?: (pages: ScannedPage[]) => void;
   activeDocument?: any;
   pinnedSyllabusId?: string | null;
   onPinSyllabus?: (id: string | null) => void;
@@ -43,6 +37,69 @@ interface Annotation {
   text: string;
   type: 'note' | 'score' | 'check';
 }
+
+// ── Manual Form Builder types ──────────────────────────────────────────
+// Mirrors the flat { title, description, questions } schema shape already
+// produced by the AI path (POST /api/forms/generate → FormOrchestrator),
+// so both the manual builder and the AI builder feed the same
+// <DynamicForm /> renderer and the same publish/preview overlay.
+type ManualQuestionType =
+  | 'SHORT_TEXT'
+  | 'LONG_TEXT'
+  | 'MULTIPLE_CHOICE'
+  | 'CHECKBOX'
+  | 'DROPDOWN'
+  | 'DATE'
+  | 'NUMBER'
+  | 'EMAIL'
+  | 'PHONE'
+  | 'URL'
+  | 'FILE_UPLOAD'
+  | 'RATING';
+
+interface ManualQuestionOption {
+  id: string;
+  label: string;
+}
+
+interface ManualQuestion {
+  id: string;
+  type: ManualQuestionType;
+  title: string;
+  description?: string;
+  required: boolean;
+  options?: ManualQuestionOption[];
+}
+
+interface ManualFormDraft {
+  id?: string;
+  title: string;
+  description: string;
+  questions: ManualQuestion[];
+}
+
+// Collision-resistant enough for client-side draft IDs; crypto.randomUUID
+// isn't available in every runtime this bundle might hit (older WebViews),
+// hence the fallback.
+const genId = (prefix: string) =>
+  typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? `${prefix}_${crypto.randomUUID()}`
+    : `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+const QUESTION_TYPE_CATALOG: { type: ManualQuestionType; label: string; icon: React.ElementType; hasOptions?: boolean }[] = [
+  { type: 'SHORT_TEXT', label: 'Short answer', icon: Type },
+  { type: 'LONG_TEXT', label: 'Paragraph', icon: AlignLeft },
+  { type: 'MULTIPLE_CHOICE', label: 'Multiple choice', icon: CircleDot, hasOptions: true },
+  { type: 'CHECKBOX', label: 'Checkboxes', icon: CheckSquare, hasOptions: true },
+  { type: 'DROPDOWN', label: 'Dropdown', icon: ChevronDown, hasOptions: true },
+  { type: 'DATE', label: 'Date', icon: Calendar },
+  { type: 'NUMBER', label: 'Number', icon: Hash },
+  { type: 'EMAIL', label: 'Email', icon: Mail },
+  { type: 'PHONE', label: 'Phone', icon: Phone },
+  { type: 'URL', label: 'Link', icon: Link2 },
+  { type: 'FILE_UPLOAD', label: 'File upload', icon: Upload },
+  { type: 'RATING', label: 'Rating', icon: Star },
+];
 
 export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
   activeTab,
@@ -59,9 +116,6 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
   onToggleFlag,
   onUpdateBonusMarks,
   onDeletePermanently,
-  scannerOpen,
-  onCloseScanner,
-  onSaveScannedPages,
   activeDocument,
   pinnedSyllabusId,
   onPinSyllabus,
@@ -73,6 +127,313 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
   const setAiDesignBuffer = useStore((state) => state.setAiDesignBuffer);
   const agentStatus = useStore((state) => state.agentStatus);
   const isAiLoading = useStore((state) => state.isAiLoading);
+
+  // ── Create Form feature state ──────────────────────────────────────────
+  // This is a separate flow from the exam/assessment draft above
+  // (aiDesignBuffer / AssessmentDraftView, which is exam-and-rubric
+  // specific). "Create Form" talks to the general-purpose form builder on
+  // the server — POST /api/forms/generate, backed by FormOrchestrator —
+  // and renders the resulting schema with the same <DynamicForm />
+  // component already used to render forms streamed from chat
+  // (see ChatMessage.tsx's formSchemaMatch handling).
+  const [showFormCreatorModal, setShowFormCreatorModal] = useState(false);
+  const [formIntentText, setFormIntentText] = useState('');
+  const [isGeneratingForm, setIsGeneratingForm] = useState(false);
+  const [formGenError, setFormGenError] = useState<string | null>(null);
+  const [generatedForm, setGeneratedForm] = useState<any | null>(null);
+  const [formLinkCopied, setFormLinkCopied] = useState(false);
+
+  const handleGenerateForm = async () => {
+    if (!formIntentText.trim()) return;
+    setIsGeneratingForm(true);
+    setFormGenError(null);
+    try {
+      // ASSUMPTION: this app authenticates requests via an httpOnly session
+      // cookie — server.ts's CORS layer sets
+      // `Access-Control-Allow-Credentials: true`, which only matters if
+      // cookies (not a bearer token) are what requireAuth reads. If this
+      // codebase actually carries a client-side token (e.g. in
+      // localStorage), swap `credentials: 'include'` for an
+      // `Authorization: Bearer <token>` header here instead.
+      const res = await fetch('/api/forms/generate', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ intent: formIntentText.trim() }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({} as any));
+        throw new Error(body?.error || `Form generation failed (${res.status})`);
+      }
+
+      const data = await res.json();
+      if (!data?.success || !data?.form) {
+        throw new Error('Form generation returned an unexpected response.');
+      }
+
+      setGeneratedForm(data.form);
+      setShowFormCreatorModal(false);
+      setFormIntentText('');
+    } catch (err: any) {
+      setFormGenError(err?.message || 'Something went wrong generating the form.');
+    } finally {
+      setIsGeneratingForm(false);
+    }
+  };
+
+  const handleDiscardGeneratedForm = () => {
+    setGeneratedForm(null);
+    setFormGenError(null);
+  };
+
+  const handleCopyFormLink = () => {
+    if (!generatedForm?.id) return;
+    const link = `${window.location.origin}/f/${generatedForm.id}`;
+    navigator.clipboard.writeText(link);
+    setFormLinkCopied(true);
+    setTimeout(() => setFormLinkCopied(false), 1800);
+  };
+
+  // Lets the creator test-submit their own generated form straight from
+  // the preview, exercising the same POST /api/forms/:id/submit route a
+  // real respondent would hit.
+  const handleTestFormSubmit = async (answers: Record<string, any>) => {
+    if (!generatedForm?.id) return;
+    try {
+      await fetch(`/api/forms/${generatedForm.id}/submit`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(answers),
+      });
+    } catch (err) {
+      console.warn('Test form submission failed', err);
+    }
+  };
+
+  const FormBuilderView = ({ form }: { form: any }) => {
+    const publicLink = form?.id ? `${window.location.origin}/f/${form.id}` : '';
+    return (
+      <div className="w-full max-w-3xl bg-white dark:bg-[#1C1C20] rounded-[32px] shadow-2xl overflow-hidden border border-[#E8E4DC] dark:border-[#2D2D32] animate-in fade-in zoom-in-95 duration-500">
+        <div className="bg-[#D97757] p-8 text-white relative overflow-hidden">
+          <div className="absolute top-0 right-0 p-8 opacity-10">
+            <FileText size={120} />
+          </div>
+          <div className="relative z-10 space-y-2">
+            <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] opacity-80">
+              <Sparkles size={12} />
+              AI Drafted Form
+            </div>
+            <h2 className="text-3xl font-black tracking-tight">{form.title || 'Untitled Form'}</h2>
+            {form.description && (
+              <p className="text-sm opacity-90 max-w-xl leading-relaxed pt-1">{form.description}</p>
+            )}
+          </div>
+        </div>
+
+        <div className="p-8 space-y-6 max-h-[55vh] overflow-y-auto custom-scrollbar">
+          <DynamicForm schema={JSON.stringify(form)} onSubmit={handleTestFormSubmit} />
+        </div>
+
+        <div className="p-8 bg-[#F4F0E8]/30 dark:bg-[#18181B]/30 border-t border-[#E8E4DC] dark:border-[#2D2D32] flex flex-col sm:flex-row items-center gap-3">
+          <button
+            onClick={handleCopyFormLink}
+            disabled={!form?.id}
+            className="w-full sm:w-auto px-6 py-3 rounded-2xl font-black text-sm bg-[#191919] dark:bg-[#F3F3F3] text-white dark:text-[#191919] hover:opacity-90 transition-all flex items-center justify-center gap-2 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {formLinkCopied ? <Check size={16} /> : <Link2 size={16} />}
+            {formLinkCopied ? 'Link Copied' : 'Copy Public Link'}
+          </button>
+          <button
+            onClick={() => setShowFormCreatorModal(true)}
+            className="w-full sm:w-auto px-6 py-3 bg-white dark:bg-[#202024] hover:bg-[#F4F0E8] dark:hover:bg-[#2D2D32] text-[#191919] dark:text-[#F3F3F3] rounded-2xl font-bold text-sm transition-all border border-[#E8E4DC] dark:border-[#2D2D32] active:scale-95"
+          >
+            Refine Prompt &amp; Regenerate
+          </button>
+          <button
+            onClick={handleDiscardGeneratedForm}
+            className="w-full sm:w-auto px-6 py-3 text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 rounded-2xl font-bold text-sm transition-all active:scale-95"
+          >
+            Discard
+          </button>
+          <div className="flex-1 text-center sm:text-right text-[9px] font-bold text-[#858075] uppercase tracking-widest truncate">
+            {form?.id ? publicLink : 'Not yet published'}
+          </div>
+        </div>
+      </div>
+    );
+  };
+  // ── Manual Form Builder state ────────────────────────────────────────
+  const [showManualFormBuilder, setShowManualFormBuilder] = useState(false);
+  const [manualForm, setManualForm] = useState<ManualFormDraft>({ title: '', description: '', questions: [] });
+  const [manualBuilderTab, setManualBuilderTab] = useState<'build' | 'preview'>('build');
+  const [isSavingManualForm, setIsSavingManualForm] = useState(false);
+  const [manualSaveError, setManualSaveError] = useState<string | null>(null);
+
+  const addManualQuestion = (type: ManualQuestionType) => {
+    const meta = QUESTION_TYPE_CATALOG.find((t) => t.type === type)!;
+    setManualForm((prev) => ({
+      ...prev,
+      questions: [
+        ...prev.questions,
+        {
+          id: genId('q'),
+          type,
+          title: '',
+          description: '',
+          required: false,
+          options: meta.hasOptions ? [{ id: genId('opt'), label: 'Option 1' }] : undefined,
+        },
+      ],
+    }));
+  };
+
+  const updateManualQuestion = (id: string, patch: Partial<ManualQuestion>) => {
+    setManualForm((prev) => ({
+      ...prev,
+      questions: prev.questions.map((q) => (q.id === id ? { ...q, ...patch } : q)),
+    }));
+  };
+
+  const deleteManualQuestion = (id: string) => {
+    setManualForm((prev) => ({ ...prev, questions: prev.questions.filter((q) => q.id !== id) }));
+  };
+
+  const duplicateManualQuestion = (id: string) => {
+    setManualForm((prev) => {
+      const idx = prev.questions.findIndex((q) => q.id === id);
+      if (idx === -1) return prev;
+      const original = prev.questions[idx];
+      const clone: ManualQuestion = {
+        ...original,
+        id: genId('q'),
+        options: original.options ? original.options.map((o) => ({ ...o, id: genId('opt') })) : undefined,
+      };
+      const next = [...prev.questions];
+      next.splice(idx + 1, 0, clone);
+      return { ...prev, questions: next };
+    });
+  };
+
+  const moveManualQuestion = (id: string, direction: 'up' | 'down') => {
+    setManualForm((prev) => {
+      const idx = prev.questions.findIndex((q) => q.id === id);
+      if (idx === -1) return prev;
+      const swapWith = direction === 'up' ? idx - 1 : idx + 1;
+      if (swapWith < 0 || swapWith >= prev.questions.length) return prev;
+      const next = [...prev.questions];
+      [next[idx], next[swapWith]] = [next[swapWith], next[idx]];
+      return { ...prev, questions: next };
+    });
+  };
+
+  const addManualOption = (questionId: string) => {
+    setManualForm((prev) => ({
+      ...prev,
+      questions: prev.questions.map((q) =>
+        q.id === questionId
+          ? { ...q, options: [...(q.options || []), { id: genId('opt'), label: `Option ${(q.options?.length || 0) + 1}` }] }
+          : q
+      ),
+    }));
+  };
+
+  const updateManualOption = (questionId: string, optionId: string, label: string) => {
+    setManualForm((prev) => ({
+      ...prev,
+      questions: prev.questions.map((q) =>
+        q.id === questionId
+          ? { ...q, options: (q.options || []).map((o) => (o.id === optionId ? { ...o, label } : o)) }
+          : q
+      ),
+    }));
+  };
+
+  const removeManualOption = (questionId: string, optionId: string) => {
+    setManualForm((prev) => ({
+      ...prev,
+      questions: prev.questions.map((q) =>
+        q.id === questionId ? { ...q, options: (q.options || []).filter((o) => o.id !== optionId) } : q
+      ),
+    }));
+  };
+
+  const resetManualBuilder = () => {
+    setManualForm({ title: '', description: '', questions: [] });
+    setManualBuilderTab('build');
+    setManualSaveError(null);
+  };
+
+  const handleOpenManualBuilder = () => {
+    resetManualBuilder();
+    setShowFormCreatorModal(false);
+    setShowManualFormBuilder(true);
+  };
+
+  const handleSaveManualForm = async () => {
+    if (!manualForm.title.trim()) {
+      setManualSaveError('Give the form a title before publishing.');
+      return;
+    }
+    if (manualForm.questions.length === 0) {
+      setManualSaveError('Add at least one question before publishing.');
+      return;
+    }
+    if (manualForm.questions.some((q) => !q.title.trim())) {
+      setManualSaveError('Every question needs a title before publishing.');
+      return;
+    }
+
+    setIsSavingManualForm(true);
+    setManualSaveError(null);
+    try {
+      // NOTE: POST /api/forms is a manual-create endpoint distinct from
+      // POST /api/forms/generate (AI-only). The server.ts shared alongside
+      // this component doesn't define this route yet — add something like:
+      //
+      //   app.post('/api/forms', requireAuth, async (req, res) => {
+      //     const userId = (req as any).user?.userId;
+      //     const { title, description, questions } = req.body;
+      //     const form = await prisma.form.create({
+      //       data: { ownerId: userId, title, description, status: 'DRAFT',
+      //                schema: JSON.stringify({ title, description, questions }) },
+      //     });
+      //     res.json({ success: true, form: { id: form.id, title, description, questions } });
+      //   });
+      //
+      // adjusted to match your actual Prisma `Form` model fields.
+      const res = await fetch('/api/forms', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: manualForm.title.trim(),
+          description: manualForm.description.trim(),
+          questions: manualForm.questions,
+        }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({} as any));
+        throw new Error(body?.error || `Saving the form failed (${res.status})`);
+      }
+
+      const data = await res.json();
+      if (!data?.success || !data?.form) {
+        throw new Error('Save succeeded but the server response was unexpected.');
+      }
+
+      setShowManualFormBuilder(false);
+      // Reuse the same publish/preview overlay the AI flow already uses.
+      setGeneratedForm(data.form);
+    } catch (err: any) {
+      setManualSaveError(err?.message || 'Something went wrong saving the form.');
+    } finally {
+      setIsSavingManualForm(false);
+    }
+  };
+  // ── End Create Form feature state ──────────────────────────────────────
 
   const AssessmentDraftView = ({ schema }: { schema: any }) => {
     const questions = schema.questions || [];
@@ -206,6 +567,10 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
 
   // Live Canvas Annotation state for expanded view
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  // AI vision-marking evidence overlays (see the "AI vision-marking evidence
+  // overlays" block in the magnified viewer). Populated by the AI re-grade /
+  // auto-mark pipeline; empty until that pipeline is wired up.
+  const [visualAnnotations, setVisualAnnotations] = useState<any[]>([]);
   const [toolMode, setToolMode] = useState<'select' | 'text' | 'check' | 'score'>('select');
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -424,6 +789,14 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
         </div>
       )}
 
+      {/* Create Form Priority Layer — shows the AI-generated form schema
+          from POST /api/forms/generate, rendered live via DynamicForm */}
+      {generatedForm && !aiDesignBuffer && (
+        <div className="absolute inset-0 z-[100] bg-[#FBF9F6]/95 dark:bg-[#141416]/95 backdrop-blur-sm flex flex-col items-center justify-center p-4 lg:p-8 overflow-y-auto">
+          <FormBuilderView form={generatedForm} />
+        </div>
+      )}
+
       {/* Persistent AI Agent Status Bar */}
       {agentStatus && !aiDesignBuffer && (
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-40 animate-in slide-in-from-bottom-4 duration-500">
@@ -467,7 +840,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
               </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-4 pt-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 pt-4">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -512,6 +885,25 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                 </span>
                 <span className="text-[10px] text-[#858075] font-medium mt-1 block">
                   Phone / Camera
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleOpenManualBuilder();
+                }}
+                className="group p-5 rounded-2xl bg-white dark:bg-[#202024] hover:bg-[#F4F0E8] dark:hover:bg-[#2D2D32] border border-[#E8E4DC] dark:border-[#2D2D32] hover:border-[#D97757] text-left transition-all shadow-sm hover:shadow-xl hover:-translate-y-1 active:translate-y-0"
+              >
+                <div className="w-10 h-10 rounded-xl bg-[#D97757]/10 text-[#D97757] flex items-center justify-center mb-3 group-hover:bg-[#D97757] group-hover:text-white transition-colors">
+                  <FileText size={20} />
+                </div>
+                <span className="text-sm font-bold text-[#191919] dark:text-[#F3F3F3] block">
+                  Create Form
+                </span>
+                <span className="text-[10px] text-[#858075] font-medium mt-1 block">
+                  Build it question-by-question
                 </span>
               </button>
             </div>
@@ -708,13 +1100,13 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                                 {file.studentName || `Student ${displayNum}`}
                               </div>
                               <div className="text-[5.5px] sm:text-[6.5px] leading-[6.5px] sm:leading-[7.5px] font-sans antialiased subpixel-antialiased text-[#191919] dark:text-[#E2E2E2] font-medium tracking-tighter whitespace-pre-wrap break-words overflow-hidden line-clamp-6 opacity-90">
-                                {file.rawText || `Physics HL Assessment â€” Student #${displayNum}`}
+                                {file.rawText || `Physics HL Assessment — Student #${displayNum}`}
                               </div>
                             </div>
 
                             {/* Crisp Sub-Pixel Footer Tag */}
                             <div className="pt-0.5 border-t border-dashed border-[#E8E4DC] dark:border-[#2D2D32] flex items-center justify-between text-[5px] sm:text-[6px] font-mono text-emerald-600 dark:text-emerald-400 font-bold">
-                              <span className="subpixel-antialiased">âœ“ Marked</span>
+                              <span className="subpixel-antialiased">✓ Marked</span>
                               <span className="text-[#858075] subpixel-antialiased">{examPaper?.subject || 'Assessment'}</span>
                             </div>
                           </div>
@@ -938,7 +1330,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                                       id: 'regrade-' + Date.now(),
                                       x: 180,
                                       y: 120,
-                                      text: `ðŸ¤– AI Re-Grade Rule: "${reGradePromptText}" (+1 mark awarded)`,
+                                      text: `🤖 AI Re-Grade Rule: "${reGradePromptText}" (+1 mark awarded)`,
                                       type: 'score',
                                     },
                                   ]);
@@ -967,7 +1359,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                                     id: 'regrade-' + Date.now(),
                                     x: 180,
                                     y: 120,
-                                    text: `ðŸ¤– AI Re-Grade Rule: "${reGradePromptText}" (+1 mark awarded)`,
+                                    text: `🤖 AI Re-Grade Rule: "${reGradePromptText}" (+1 mark awarded)`,
                                     type: 'score',
                                   },
                                 ]);
@@ -1042,7 +1434,6 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
 
                 {/* Magnified Interactive Document Canvas */}
                 <div
-                  ref={documentContainerRef}
                   onMouseUp={handleMouseUpInMagnified}
                   className="flex-1 overflow-y-auto p-6 relative select-text transition-transform duration-700 ease-in-out"
                   style={zoomTarget ? {
@@ -1077,7 +1468,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                       contentEditable={true}
                       suppressContentEditableWarning={true}
                     >
-                      {selectedFile.rawText || `Student Answer Sheet â‘  content extracted.`}
+                      {selectedFile.rawText || `Student Answer Sheet content extracted.`}
                     </div>
                   )}
 
@@ -1114,7 +1505,11 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                     </div>
                   ))}
 
-                  {/* AI-Generated Visual Annotations */}
+                  {/* AI vision-marking evidence overlays. Populated by the AI
+                      re-grade / auto-mark pipeline (see visualAnnotations
+                      state above) with normalized [0-100] coordinates so
+                      boxes stay aligned regardless of the rendered page
+                      size. */}
                   {visualAnnotations.map((anno) => (
                     <div
                       key={anno.id}
@@ -1130,7 +1525,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                         left: `${anno.x}%`,
                         transform: 'translate(-50%, -50%)'
                       }}
-                      className={`absolute z-40 px-3 py-1.5 rounded-xl shadow-xl text-[10px] font-bold border-2 animate-in zoom-in-50 duration-300 cursor-pointer hover:scale-110 transition-all ${
+                      className={`group absolute z-40 px-3 py-1.5 rounded-xl shadow-xl text-[10px] font-bold border-2 animate-in zoom-in-50 duration-300 cursor-pointer hover:scale-110 transition-all ${
                         anno.type === 'error'
                           ? 'bg-rose-600/90 text-white border-rose-400'
                           : 'bg-emerald-600/90 text-white border-emerald-400'
@@ -1157,8 +1552,365 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
         })()}
         </div>
       )}
+
+      {/* Create Form intake modal — collects the natural-language intent
+          that's sent to POST /api/forms/generate */}
+      {showFormCreatorModal && (
+        <div className="fixed inset-0 z-[110] bg-[#141416]/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-lg bg-white dark:bg-[#1C1C20] border border-[#E8E4DC] dark:border-[#2D2D32] rounded-[28px] shadow-2xl p-6 space-y-4 animate-in zoom-in-95 duration-300">
+            <div className="flex items-start justify-between">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-[#D97757]">
+                  <FileText size={14} />
+                  Create Form
+                </div>
+                <h3 className="text-lg font-black text-[#191919] dark:text-[#F3F3F3]">
+                  Describe the form you need
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowFormCreatorModal(false)}
+                className="p-1.5 rounded-full hover:bg-[#F4F0E8] dark:hover:bg-[#2D2D32] text-[#858075] hover:text-[#191919] dark:hover:text-white transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <p className="text-xs text-[#66635B] dark:text-[#A0A0AA] leading-relaxed">
+              e.g. "A registration form for a 6-month coding scholarship — ask for name, email,
+              education background, financial situation, and let them upload a certificate."
+            </p>
+
+            <textarea
+              value={formIntentText}
+              onChange={(e) => setFormIntentText(e.target.value)}
+              rows={4}
+              placeholder="Describe the form's purpose and the fields it needs..."
+              className="w-full rounded-2xl border border-[#E8E4DC] dark:border-[#2D2D32] bg-[#FBF9F6] dark:bg-[#141416] px-4 py-3 text-sm text-[#191919] dark:text-[#F3F3F3] placeholder:text-[#858075] outline-none focus:border-[#D97757] transition-colors resize-none"
+              autoFocus
+            />
+
+            {formGenError && (
+              <div className="text-xs font-semibold text-rose-500 bg-rose-500/10 rounded-xl px-3 py-2">
+                {formGenError}
+              </div>
+            )}
+
+            <div className="flex items-center gap-3 pt-1">
+              <button
+                onClick={handleGenerateForm}
+                disabled={isGeneratingForm || !formIntentText.trim()}
+                className={`flex-1 px-5 py-3 rounded-2xl font-black text-sm transition-all flex items-center justify-center gap-2 active:scale-95 ${
+                  isGeneratingForm || !formIntentText.trim()
+                    ? 'bg-slate-400 cursor-not-allowed opacity-50 text-white'
+                    : 'bg-[#D97757] hover:bg-[#C56648] text-white shadow-lg shadow-[#D97757]/20'
+                }`}
+              >
+                {isGeneratingForm ? (
+                  <>
+                    <BwengeLoader variant="compact" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles size={16} />
+                    Generate Form
+                  </>
+                )}
+              </button>
+              <button
+                onClick={() => setShowFormCreatorModal(false)}
+                className="px-5 py-3 rounded-2xl font-bold text-sm text-[#66635B] dark:text-[#A0A0AA] hover:bg-[#F4F0E8] dark:hover:bg-[#2D2D32] transition-all active:scale-95"
+              >
+                Cancel
+              </button>
+            </div>
+
+            <div className="text-center pt-1">
+              <button
+                onClick={() => {
+                  setShowFormCreatorModal(false);
+                  handleOpenManualBuilder();
+                }}
+                className="text-xs font-semibold text-[#858075] hover:text-[#D97757] transition-colors"
+              >
+                Prefer to build it yourself? Start from scratch →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manual Form Builder — a dedicated full-screen page, opened
+          directly from the "Create Form" card. Question-by-question
+          editing with type picker, options, required toggle, reordering,
+          duplication, and a live preview tab rendered through the same
+          <DynamicForm /> used by the AI-generated path, so both flows end
+          up on one shared renderer. */}
+      {showManualFormBuilder && (
+        <div className="fixed inset-0 z-[120] bg-[#FBF9F6] dark:bg-[#141416] flex flex-col animate-in fade-in duration-200">
+          {/* Top bar */}
+          <div className="shrink-0 border-b border-[#E8E4DC] dark:border-[#2D2D32] bg-white/80 dark:bg-[#18181B]/80 backdrop-blur-md px-4 sm:px-8 py-4 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <button
+                onClick={() => setShowManualFormBuilder(false)}
+                className="p-2 rounded-xl hover:bg-[#F4F0E8] dark:hover:bg-[#2D2D32] text-[#66635B] dark:text-[#A0A0AA] hover:text-[#191919] dark:hover:text-white transition-colors shrink-0"
+                title="Exit form builder"
+              >
+                <ArrowLeft size={18} />
+              </button>
+              <div className="min-w-0">
+                <input
+                  value={manualForm.title}
+                  onChange={(e) => setManualForm((prev) => ({ ...prev, title: e.target.value }))}
+                  placeholder="Untitled form"
+                  className="w-full bg-transparent text-base sm:text-lg font-black text-[#191919] dark:text-[#F3F3F3] outline-none placeholder:text-[#858075] truncate"
+                />
+                <span className="text-[10px] font-bold uppercase tracking-widest text-[#858075]">
+                  {manualForm.questions.length} question{manualForm.questions.length === 1 ? '' : 's'} • Draft
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-1 bg-[#F4F0E8] dark:bg-[#202024] p-1 rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32]">
+                <button
+                  onClick={() => setManualBuilderTab('build')}
+                  className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+                    manualBuilderTab === 'build'
+                      ? 'bg-white dark:bg-[#2D2D32] text-[#D97757] shadow-sm'
+                      : 'text-[#858075] hover:text-[#D97757]'
+                  }`}
+                >
+                  Build
+                </button>
+                <button
+                  onClick={() => setManualBuilderTab('preview')}
+                  className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+                    manualBuilderTab === 'preview'
+                      ? 'bg-white dark:bg-[#2D2D32] text-[#D97757] shadow-sm'
+                      : 'text-[#858075] hover:text-[#D97757]'
+                  }`}
+                >
+                  Preview
+                </button>
+              </div>
+
+              <button
+                onClick={() => {
+                  setShowManualFormBuilder(false);
+                  setShowFormCreatorModal(true);
+                }}
+                className="hidden md:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-[#D97757] hover:bg-[#D97757]/10 transition-colors"
+              >
+                <Sparkles size={14} />
+                Generate with AI instead
+              </button>
+
+              <button
+                onClick={handleSaveManualForm}
+                disabled={isSavingManualForm}
+                className={`px-4 sm:px-5 py-2.5 rounded-xl font-black text-xs sm:text-sm transition-all flex items-center gap-2 active:scale-95 ${
+                  isSavingManualForm
+                    ? 'bg-slate-400 cursor-not-allowed opacity-60 text-white'
+                    : 'bg-[#D97757] hover:bg-[#C56648] text-white shadow-lg shadow-[#D97757]/20'
+                }`}
+              >
+                {isSavingManualForm ? <BwengeLoader variant="compact" /> : <Check size={16} />}
+                {isSavingManualForm ? 'Publishing...' : 'Save & Publish'}
+              </button>
+            </div>
+          </div>
+
+          {manualSaveError && (
+            <div className="shrink-0 px-4 sm:px-8 pt-3">
+              <div className="text-xs font-semibold text-rose-500 bg-rose-500/10 rounded-xl px-3 py-2 max-w-3xl mx-auto sm:mx-0">
+                {manualSaveError}
+              </div>
+            </div>
+          )}
+
+          {/* Body */}
+          <div className="flex-1 overflow-y-auto">
+            {manualBuilderTab === 'build' ? (
+              <div className="max-w-3xl mx-auto px-4 sm:px-8 py-8 space-y-4">
+                {/* Form description */}
+                <div className="bg-white dark:bg-[#1C1C20] rounded-2xl border border-[#E8E4DC] dark:border-[#2D2D32] p-5 shadow-sm">
+                  <textarea
+                    value={manualForm.description}
+                    onChange={(e) => setManualForm((prev) => ({ ...prev, description: e.target.value }))}
+                    placeholder="Form description (optional) — tell respondents what this is for"
+                    rows={2}
+                    className="w-full bg-transparent text-sm text-[#66635B] dark:text-[#A0A0AA] outline-none placeholder:text-[#858075] resize-none"
+                  />
+                </div>
+
+                {/* Question list */}
+                {manualForm.questions.length === 0 ? (
+                  <div className="rounded-2xl border-2 border-dashed border-[#E8E4DC] dark:border-[#2D2D32] p-10 text-center space-y-2">
+                    <FileText className="mx-auto text-[#D97757]" size={28} />
+                    <p className="text-sm font-bold text-[#191919] dark:text-[#F3F3F3]">No questions yet</p>
+                    <p className="text-xs text-[#858075]">Pick a question type below to add your first field.</p>
+                  </div>
+                ) : (
+                  manualForm.questions.map((q, idx) => {
+                    const meta = QUESTION_TYPE_CATALOG.find((t) => t.type === q.type)!;
+                    const Icon = meta.icon;
+                    return (
+                      <div
+                        key={q.id}
+                        className="group bg-white dark:bg-[#1C1C20] rounded-2xl border border-[#E8E4DC] dark:border-[#2D2D32] p-5 shadow-sm hover:border-[#D97757]/40 transition-colors space-y-3"
+                      >
+                        <div className="flex items-start gap-3">
+                          <span className="flex-shrink-0 w-8 h-8 rounded-xl bg-[#D97757]/10 text-[#D97757] flex items-center justify-center">
+                            <Icon size={16} />
+                          </span>
+                          <div className="flex-1 min-w-0 space-y-2">
+                            <input
+                              value={q.title}
+                              onChange={(e) => updateManualQuestion(q.id, { title: e.target.value })}
+                              placeholder={`Question ${idx + 1}`}
+                              className="w-full bg-transparent text-sm font-bold text-[#191919] dark:text-[#F3F3F3] outline-none placeholder:text-[#858075] border-b border-transparent focus:border-[#D97757] pb-1"
+                            />
+                            <input
+                              value={q.description || ''}
+                              onChange={(e) => updateManualQuestion(q.id, { description: e.target.value })}
+                              placeholder="Description (optional)"
+                              className="w-full bg-transparent text-xs text-[#858075] outline-none placeholder:text-[#B5B0A6]"
+                            />
+                          </div>
+                          <span className="text-[9px] font-black uppercase tracking-widest text-[#858075] bg-[#F4F0E8] dark:bg-[#202024] px-2 py-1 rounded-md shrink-0">
+                            {meta.label}
+                          </span>
+                        </div>
+
+                        {/* Options editor for choice-based types */}
+                        {meta.hasOptions && (
+                          <div className="pl-11 space-y-2">
+                            {(q.options || []).map((opt, oi) => (
+                              <div key={opt.id} className="flex items-center gap-2">
+                                <span className="w-4 h-4 rounded-full border border-[#D97757]/40 flex items-center justify-center text-[8px] font-bold text-[#D97757] shrink-0">
+                                  {q.type === 'DROPDOWN' ? oi + 1 : String.fromCharCode(65 + oi)}
+                                </span>
+                                <input
+                                  value={opt.label}
+                                  onChange={(e) => updateManualOption(q.id, opt.id, e.target.value)}
+                                  className="flex-1 bg-transparent text-xs text-[#191919] dark:text-[#F3F3F3] outline-none border-b border-[#E8E4DC] dark:border-[#2D2D32] focus:border-[#D97757] py-1"
+                                />
+                                <button
+                                  onClick={() => removeManualOption(q.id, opt.id)}
+                                  className="p-1 rounded-md text-[#858075] hover:text-rose-500 hover:bg-rose-500/10 transition-colors shrink-0"
+                                >
+                                  <X size={12} />
+                                </button>
+                              </div>
+                            ))}
+                            <button
+                              onClick={() => addManualOption(q.id)}
+                              className="text-xs font-semibold text-[#D97757] hover:underline pl-6"
+                            >
+                              + Add option
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Question toolbar */}
+                        <div className="flex items-center justify-between pt-2 border-t border-[#E8E4DC] dark:border-[#2D2D32]">
+                          <label className="flex items-center gap-2 text-xs font-semibold text-[#66635B] dark:text-[#A0A0AA] cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={q.required}
+                              onChange={(e) => updateManualQuestion(q.id, { required: e.target.checked })}
+                              className="rounded border-[#E8E4DC] dark:border-[#2D2D32] text-[#D97757] focus:ring-[#D97757]"
+                            />
+                            Required
+                          </label>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => moveManualQuestion(q.id, 'up')}
+                              disabled={idx === 0}
+                              className="p-1.5 rounded-lg text-[#858075] hover:text-[#191919] dark:hover:text-white hover:bg-[#F4F0E8] dark:hover:bg-[#2D2D32] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                              title="Move up"
+                            >
+                              <ArrowUp size={14} />
+                            </button>
+                            <button
+                              onClick={() => moveManualQuestion(q.id, 'down')}
+                              disabled={idx === manualForm.questions.length - 1}
+                              className="p-1.5 rounded-lg text-[#858075] hover:text-[#191919] dark:hover:text-white hover:bg-[#F4F0E8] dark:hover:bg-[#2D2D32] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                              title="Move down"
+                            >
+                              <ArrowDown size={14} />
+                            </button>
+                            <button
+                              onClick={() => duplicateManualQuestion(q.id)}
+                              className="p-1.5 rounded-lg text-[#858075] hover:text-[#191919] dark:hover:text-white hover:bg-[#F4F0E8] dark:hover:bg-[#2D2D32] transition-colors"
+                              title="Duplicate"
+                            >
+                              <Copy size={14} />
+                            </button>
+                            <button
+                              onClick={() => deleteManualQuestion(q.id)}
+                              className="p-1.5 rounded-lg text-[#858075] hover:text-rose-500 hover:bg-rose-500/10 transition-colors"
+                              title="Delete"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+
+                {/* Add-question type picker */}
+                <div className="bg-white dark:bg-[#1C1C20] rounded-2xl border border-dashed border-[#E8E4DC] dark:border-[#2D2D32] p-4">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-[#858075] mb-3">Add a question</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {QUESTION_TYPE_CATALOG.map((t) => {
+                      const Icon = t.icon;
+                      return (
+                        <button
+                          key={t.type}
+                          onClick={() => addManualQuestion(t.type)}
+                          className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] hover:border-[#D97757] hover:bg-[#D97757]/5 text-xs font-semibold text-[#191919] dark:text-[#F3F3F3] transition-all active:scale-95"
+                        >
+                          <Icon size={14} className="text-[#D97757] shrink-0" />
+                          <span className="truncate">{t.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* Preview tab — the same DynamicForm renderer used everywhere else */
+              <div className="max-w-2xl mx-auto px-4 sm:px-8 py-8">
+                <div className="bg-white dark:bg-[#1C1C20] rounded-[28px] border border-[#E8E4DC] dark:border-[#2D2D32] shadow-sm overflow-hidden">
+                  <div className="bg-[#D97757] p-6 text-white">
+                    <h2 className="text-xl font-black">{manualForm.title || 'Untitled form'}</h2>
+                    {manualForm.description && <p className="text-sm opacity-90 mt-1">{manualForm.description}</p>}
+                  </div>
+                  <div className="p-6">
+                    {manualForm.questions.length === 0 ? (
+                      <p className="text-sm text-[#858075] text-center py-8">Add questions in the Build tab to see them here.</p>
+                    ) : (
+                      <DynamicForm
+                        schema={JSON.stringify({
+                          title: manualForm.title,
+                          description: manualForm.description,
+                          questions: manualForm.questions,
+                        })}
+                        onSubmit={() => {}}
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
-
-

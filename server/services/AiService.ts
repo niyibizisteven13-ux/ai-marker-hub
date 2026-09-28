@@ -3,6 +3,8 @@ import Anthropic from '@anthropic-ai/sdk';
 import { evaluateStudentSubmission as deepseekEvaluate } from '../../src/services/deepseekMarker.js';
 import { BWENGE_GENERAL_SYSTEM_PROMPT } from './prompts/bwengeGeneralPrompt.js';
 import { MemoryService } from './MemoryService.js';
+import { stripThinkingTags } from '../utils/textSanitizers.js';
+export { stripThinkingTags };
 import logger from '../utils/logger.js';
 
 const MODELS = {
@@ -10,12 +12,34 @@ const MODELS = {
   HAIKU: 'claude-haiku-4-5-20251001',
 };
 
+// Centralised Gemini model name — update here when Google deprecates a version.
+const GEMINI_FLASH = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+const GEMINI_PRO   = process.env.GEMINI_PRO_MODEL || 'gemini-3.8-pro';
+
 const NVIDIA_MODELS = {
   LARGE: 'meta/llama-4-maverick-17b-128e-instruct', // World-class reasoning MoE
   FAST: 'meta/llama-4-scout-17b-16e-instruct',      // High-throughput MoE
 };
 
-type ProviderKey = 'gemini' | 'openai' | 'deepseek' | 'openrouter' | 'anthropic' | 'ollama' | 'nvidianim';
+// GONKA ROUTER INTEGRATION
+// GonkaRouter is a decentralized inference gateway; GLM-5.3-Flash is the
+// default model routed through it. NOTE: the request/response shapes below
+// (OpenAI-compatible /chat/completions, SSE streaming, tool_calls in the
+// same shape NVIDIA NIM uses) are an ASSUMPTION based on GonkaRouter being
+// described as an OpenAI-compatible gateway — this has not been verified
+// against GonkaRouter's actual API reference. Before deploying, confirm:
+//   1. The real base URL and endpoint path.
+//   2. Whether streaming responses use the same `data: {...}` SSE framing
+//      as OpenAI/NVIDIA NIM, or a different framing entirely.
+//   3. Whether tool/function calling is supported and in what shape.
+// If any of these differ, adjust streamGonkaChat/runGonkaAgentLoop's
+// parsing accordingly — the surrounding retry/timeout/error-handling
+// structure will still be correct either way.
+const GONKA_MODELS = {
+  DEFAULT: 'glm-5.3-flash',
+};
+
+type ProviderKey = 'gemini' | 'openai' | 'deepseek' | 'openrouter' | 'anthropic' | 'ollama' | 'nvidianim' | 'gonkarouter';
 
 // --- Shared infra -------------------------------------------------------
 
@@ -137,7 +161,7 @@ export class AiService {
     if (name === 'deepseek') return Boolean(process.env.DEEPSEEK_API_KEY);
     if (name === 'openrouter') return Boolean(process.env.OPENROUTER_API_KEY);
     if (name === 'anthropic') return Boolean(process.env.ANTHROPIC_API_KEY);
-    if (name === 'nvidianim') return Boolean(process.env.NVIDIA_NIM_API_KEY);
+    if (name === 'gonkarouter') return Boolean(process.env.GONKA_API_KEY);
     if (name === 'ollama') {
       try {
         const baseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
@@ -299,6 +323,297 @@ export class AiService {
 
     const data: any = await response.json();
     return (data.message?.content || '').trim();
+  }
+
+  /**
+   * Single-turn, non-streaming Gonka chat call. Use this for simple,
+   * one-shot generation where a streaming UI isn't needed. For
+   * conversational bot use with real-time message editing, prefer
+   * streamGonkaChat or runGonkaAgentLoop below.
+   */
+  public async sendGonkaChat(prompt: string, options: { system?: string; history?: Array<{ role: 'user' | 'assistant'; text: string }> } = {}) {
+    const apiKey = process.env.GONKA_API_KEY;
+    if (!apiKey) throw new Error('GONKA_API_KEY is not configured.');
+
+    const baseUrl = (process.env.GONKA_BASE_URL || 'https://api.gonkarouter.com/v1').replace(/\/$/, '') + '/chat/completions';
+    const model = process.env.GONKA_MODEL || GONKA_MODELS.DEFAULT;
+
+    const messages = [
+      { role: 'system', content: options.system || 'You are Bwenge AI Assistant.' },
+      ...(Array.isArray(options.history) ? options.history : []).map(h => ({ role: h.role, content: h.text })),
+      { role: 'user', content: prompt },
+    ];
+
+    const response = await fetchWithTimeout(baseUrl, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, messages, stream: false, temperature: 0.3 }),
+    });
+
+    const data: any = await response.json();
+    if (!response.ok) {
+      throw new Error(`Gonka API error (${response.status}): ${data?.error?.message || response.statusText}`);
+    }
+
+    const raw = data?.choices?.[0]?.message?.content || '';
+    return stripThinkingTags(raw);
+  }
+
+  /**
+   * Streaming Gonka chat, mirroring streamNvidiaNimChat's SSE parsing.
+   * ASSUMPTION: Gonka's streaming response uses the same `data: {...}`
+   * chunk framing as OpenAI-compatible APIs — verify against real Gonka
+   * docs before relying on this in production. Reasoning tags are
+   * stripped from the FULL accumulated text by the caller (not per-token
+   * here), since a <think> tag can span multiple streamed tokens.
+   */
+  public async streamGonkaChat(prompt: string, options: {
+    model?: string; system?: string; history?: any[]; onToken: (token: string) => void; tools?: any[];
+    temperature?: number; max_tokens?: number;
+  }) {
+    const apiKey = process.env.GONKA_API_KEY;
+    if (!apiKey) throw new Error('GONKA_API_KEY is not configured.');
+
+    const model = options.model || process.env.GONKA_MODEL || GONKA_MODELS.DEFAULT;
+    const baseUrl = (process.env.GONKA_BASE_URL || 'https://api.gonkarouter.com/v1').replace(/\/$/, '') + '/chat/completions';
+
+    const messages = [
+      { role: 'system', content: options.system || 'You are Bwenge AI, powered by GonkaRouter.' },
+      ...(Array.isArray(options.history) ? options.history : []).map(h => ({ role: h.role, content: h.text })),
+      { role: 'user', content: prompt },
+    ];
+
+    const body: any = {
+      model,
+      messages,
+      stream: true,
+      temperature: Number(options.temperature ?? 0.3),
+      max_tokens: Number(options.max_tokens ?? 4096),
+    };
+
+    if (options.tools) {
+      body.tools = options.tools.map((t: any) => ({
+        type: 'function',
+        function: { name: t.name, description: t.description, parameters: t.input_schema },
+      }));
+    }
+
+    const response = await fetchWithTimeout(baseUrl, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }, 60_000);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Gonka API error (${response.status}): ${errorText || response.statusText}`);
+    }
+
+    const reader = response.body;
+    if (!reader) throw new Error('No response body from Gonka');
+
+    let buffer = '';
+    const decoder = new TextDecoder();
+
+    // @ts-ignore
+    for await (const chunk of reader) {
+      buffer += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmedLine = line.trim();
+        if (!trimmedLine || !trimmedLine.startsWith('data: ')) continue;
+
+        const dataStr = trimmedLine.slice(6).trim();
+        if (dataStr === '[DONE]') return;
+
+        try {
+          const data = JSON.parse(dataStr);
+          const token = data.choices?.[0]?.delta?.content;
+          if (token) options.onToken(token);
+        } catch (e) {
+          // Fragmented JSON chunk split across a read boundary — expected
+          // with SSE streams, safe to skip.
+        }
+      }
+    }
+  }
+
+  /**
+   * Gonka tool-use agent loop, mirroring runNvidiaAgentLoop's structure
+   * exactly (retry policy, tool_call accumulation across streamed deltas,
+   * malformed-tool-argument recovery). Kept as a near-duplicate rather
+   * than a shared abstraction for now — see the NOTE on runAgentLoop vs.
+   * runNvidiaAgentLoop duplication flagged earlier; unifying these three
+   * near-identical loops (Claude/NVIDIA/Gonka) into one provider-agnostic
+   * loop is worth doing as a follow-up refactor once Gonka's real API
+   * shape is confirmed, rather than guessing at a shared abstraction now.
+   */
+  public async runGonkaAgentLoop(options: {
+    prompt: string;
+    system: string;
+    history?: any[];
+    tools: any[];
+    executeTool: (name: string, input: any) => Promise<string>;
+    onEvent: (event: { type: 'text' | 'tool_call' | 'tool_result' | 'done' | 'usage'; data: any }) => void;
+    model?: string;
+  }) {
+    const apiKey = process.env.GONKA_API_KEY;
+    if (!apiKey) throw new Error('GONKA_API_KEY is not configured.');
+
+    const model = options.model || process.env.GONKA_MODEL || GONKA_MODELS.DEFAULT;
+    const baseUrl = (process.env.GONKA_BASE_URL || 'https://api.gonkarouter.com/v1').replace(/\/$/, '') + '/chat/completions';
+
+    let messages = [
+      { role: 'system', content: options.system },
+      ...(options.history || []).map(h => ({ role: h.role, content: h.text })),
+      { role: 'user', content: options.prompt },
+    ];
+
+    const gonkaTools = options.tools.map(t => ({
+      type: 'function',
+      function: { name: t.name, description: t.description, parameters: t.input_schema },
+    }));
+
+    let accumulatedUsage = { input_tokens: 0, output_tokens: 0 };
+    let retryCount = 0;
+    const MAX_RETRIES = 3;
+
+    for (let turn = 0; turn < 10; turn++) {
+      let reader: ReadableStream<Uint8Array> | null = null;
+
+      try {
+        const response = await fetchWithTimeout(baseUrl, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model, messages, tools: gonkaTools, tool_choice: 'auto', stream: true }),
+        }, 60_000);
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          const httpErr: any = new Error(`Gonka Agent error (${response.status}): ${errorText || response.statusText}`);
+          httpErr.status = response.status;
+          throw httpErr;
+        }
+
+        reader = response.body;
+        retryCount = 0;
+      } catch (err: any) {
+        logger.error(`Gonka Agent error on turn ${turn}:`, err);
+        if (isRetryableError(err) && retryCount < MAX_RETRIES) {
+          retryCount++;
+          options.onEvent({ type: 'text', data: { text: `\n> 🔄 **Gonka Recovery**: Retrying turn ${turn} (Attempt ${retryCount}/${MAX_RETRIES})...\n`, isThinking: true } });
+          turn--;
+          await new Promise(r => setTimeout(r, 1000 * retryCount));
+          continue;
+        }
+        throw err;
+      }
+
+      if (!reader) throw new Error('No response body from Gonka');
+
+      let buffer = '';
+      const decoder = new TextDecoder();
+      // Accumulate the FULL raw text for this turn so stripThinkingTags
+      // can operate on a complete (potentially multi-token) <think> block
+      // rather than being applied per-token, where a tag could be split
+      // across chunk boundaries and missed.
+      let rawTurnText = '';
+      let turnMessage: any = { role: 'assistant', content: '' };
+
+      // @ts-ignore
+      for await (const chunk of reader) {
+        buffer += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmedLine = line.trim();
+          if (!trimmedLine || !trimmedLine.startsWith('data: ')) continue;
+          const dataStr = trimmedLine.slice(6).trim();
+          if (dataStr === '[DONE]') continue;
+
+          try {
+            const data = JSON.parse(dataStr);
+            const delta = data.choices?.[0]?.delta;
+            if (delta?.content) {
+              rawTurnText += delta.content;
+              // Emit the running, tag-stripped view so a streaming UI
+              // (e.g. Telegram's throttled editMessageText) never shows
+              // raw reasoning tags mid-stream, even before the turn ends.
+              options.onEvent({ type: 'text', data: { text: stripThinkingTags(rawTurnText), replaceFullText: true } });
+            }
+            if (delta?.tool_calls) {
+              if (!turnMessage.tool_calls) turnMessage.tool_calls = [];
+              for (const tc of delta.tool_calls) {
+                const existing = turnMessage.tool_calls[tc.index || 0];
+                if (existing) {
+                  if (tc.function?.arguments) existing.function.arguments += tc.function.arguments;
+                } else {
+                  turnMessage.tool_calls[tc.index || 0] = tc;
+                }
+              }
+            }
+            if (data.usage) {
+              accumulatedUsage.input_tokens += data.usage.prompt_tokens || 0;
+              accumulatedUsage.output_tokens += data.usage.completion_tokens || 0;
+              options.onEvent({ type: 'usage', data: { ...data.usage, model } });
+            }
+          } catch (e) {}
+        }
+      }
+
+      turnMessage.content = stripThinkingTags(rawTurnText);
+      messages.push(turnMessage);
+
+      if (!turnMessage.tool_calls || turnMessage.tool_calls.length === 0) {
+        options.onEvent({ type: 'done', data: {} });
+        (messages as any)._usage = accumulatedUsage;
+        return messages;
+      }
+
+      for (const toolCall of turnMessage.tool_calls.filter(Boolean)) {
+        const name = toolCall.function.name;
+
+        let input: any;
+        try {
+          input = JSON.parse(toolCall.function.arguments);
+        } catch (parseErr) {
+          const reason = parseErr instanceof Error ? parseErr.message : String(parseErr);
+          logger.error('Gonka: failed to parse tool call arguments', { name, raw: toolCall.function.arguments, reason });
+          options.onEvent({ type: 'tool_result', data: { name, output: `ERROR: could not parse arguments for ${name}: ${reason}` } });
+          messages.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            name,
+            content: `ERROR: your arguments for ${name} were not valid JSON. Please retry with valid JSON arguments.`,
+          } as any);
+          continue;
+        }
+
+        options.onEvent({ type: 'tool_call', data: { name, input } });
+
+        let result: string;
+        try {
+          result = await options.executeTool(name, input);
+        } catch (toolErr) {
+          result = sanitizeToolError(name, toolErr);
+        }
+        options.onEvent({ type: 'tool_result', data: { name, output: result } });
+
+        messages.push({
+          role: 'tool',
+          tool_call_id: toolCall.id,
+          name: name,
+          content: result,
+        } as any);
+      }
+    }
+
+    options.onEvent({ type: 'done', data: { hitMaxTurns: true } });
+    (messages as any)._usage = accumulatedUsage;
+    return messages;
   }
 
   public async streamNvidiaNimChat(prompt: string, options: {
@@ -671,7 +986,7 @@ export class AiService {
 
     const {
       draftPrompt, reviewPrompt, draftSystemInstruction, reviewSystemInstruction, responseSchema,
-      model = 'gemini-2.0-flash',
+      model = GEMINI_FLASH,
     } = options;
 
     const draftResponse = await this.geminiClient.models.generateContent({
@@ -690,17 +1005,6 @@ export class AiService {
 
     return this.parseModelJson(reviewResponse.text || '{}');
   }
-
-  // NOTE: the earlier speculative `runTreeOfThoughtOrchestrator` (a
-  // multi-agent "hybrid provider" planner/critic pipeline) has been removed.
-  // It was never wired into server.ts, called an unverified MemoryService
-  // method with no type backing, and its design fanned every request out
-  // into several extra Sonnet/Haiku calls with no evaluation showing it
-  // improved output quality. `runAgentLoop` below is the supported,
-  // tested agent path. If multi-agent orchestration is needed later, it
-  // should be reintroduced behind a feature flag with cost/quality
-  // benchmarks, not as default behavior. (Prior implementation is in git
-  // history if it needs to be resurrected.)
 
   public parseModelJson(rawText: string): any {
     if (!rawText) return {};
@@ -728,21 +1032,12 @@ export class AiService {
   public async generateContent(options: { model?: string; contents: any; config?: any }) {
     if (!this.geminiClient) throw new Error('Gemini AI client is not initialized.');
     return this.geminiClient.models.generateContent({
-      model: options.model || 'gemini-2.0-flash',
+      model: options.model || GEMINI_FLASH,
       contents: options.contents,
       config: options.config,
     });
   }
 
-  /**
-   * Thin wrapper over generateContent for callers using the
-   * "interaction" shape. The underlying SDK does not yet expose a real
-   * stateful interactions endpoint, so `previousInteractionId`/`store`
-   * are accepted but not honored — every call is a fresh, stateless
-   * generateContent request. We warn rather than silently drop this,
-   * since a caller relying on conversation continuity here would
-   * otherwise fail invisibly.
-   */
   public async createInteraction(options: {
     model?: string;
     userInput: string;
@@ -758,7 +1053,7 @@ export class AiService {
     }
 
     return this.geminiClient.models.generateContent({
-      model: options.model || 'gemini-2.0-flash',
+      model: options.model || GEMINI_FLASH,
       contents: [{ role: 'user', parts: [{ text: options.userInput }] }],
       config: {
         ...options.config,
@@ -800,16 +1095,6 @@ export class AiService {
     return { text, usage: response.usage, model: params.model, content: response.content };
   }
 
-  /**
-   * Real single-shot vision call used to back the `cross_reference_visuals`
-   * tool in server.ts. Sends the (optionally cropped) image/PDF to Claude
-   * along with a focused question and returns Claude's real answer text.
-   *
-   * Kept separate from generalAssist/runAgentLoop on purpose: this is a
-   * single non-agentic turn (no tools, no multi-turn loop) so it's fast and
-   * cheap to call from inside an already-running tool executor without
-   * recursing into the full agent loop.
-   */
   public async analyzeImage(options: {
     base64: string;
     mediaType: string;
@@ -840,7 +1125,6 @@ export class AiService {
           ],
         },
       ],
-      // Prompt caching is GA — no beta header/flag needed here anymore.
     });
 
     const block = response.content[0];
@@ -850,25 +1134,12 @@ export class AiService {
   public async streamGeminiContent(options: { model?: string; contents: any; config?: any }) {
     if (!this.geminiClient) throw new Error('Gemini AI client is not initialized.');
     return this.geminiClient.models.generateContentStream({
-      model: options.model || 'gemini-2.0-flash',
+      model: options.model || GEMINI_FLASH,
       contents: options.contents,
       config: options.config,
     });
   }
 
-  /**
-   * The core Anthropic tool-use agent loop. Note what is deliberately
-   * NOT here: there used to be a "self-correction" pass (re-checking any
-   * response that looked numeric with an extra Haiku call) and an
-   * "adversary" pass (critiquing any response over 200 characters with
-   * another Haiku call) on every turn. Both fired unconditionally, had no
-   * evaluation behind them, and roughly doubled or tripled API cost per
-   * agent turn — directly at odds with a product priced at a thin, fixed
-   * margin over cost. They were removed rather than fixed. If a
-   * verification step is wanted later, it should be selective (e.g. only
-   * for high-stakes outputs like final grades) and its impact on quality
-   * should be measured before it ships as default behavior.
-   */
   public async runAgentLoop(options: {
     messages: Anthropic.MessageParam[];
     tools: Anthropic.Tool[];
@@ -897,8 +1168,6 @@ export class AiService {
           system: systemPrompt,
           tools: activeTools as any,
           messages,
-          // Prompt caching is GA and driven by `cache_control` blocks on
-          // content — the old beta flag is a no-op now and has been removed.
         });
 
         stream.on('text', (text) => {
@@ -907,7 +1176,7 @@ export class AiService {
           if (text.includes('</thinking>')) isThinking = false;
         });
 
-        (stream as any).on('tool_use', (toolUse: any) => {
+        stream.on('tool_use', (toolUse) => {
           isThinking = false;
           onEvent({ type: 'tool_call', data: { name: toolUse.name, input: toolUse.input, status: 'started' } });
         });
@@ -916,9 +1185,6 @@ export class AiService {
         retryCount = 0;
       } catch (err: any) {
         logger.error(`Agent loop error on turn ${turn}:`, err);
-        // Only retry transient failures — a bad API key or malformed request
-        // will fail identically on every attempt, so don't burn 3 retries
-        // and several seconds of latency on a guaranteed failure.
         if (isRetryableError(err) && retryCount < MAX_RETRIES) {
           retryCount++;
           onEvent({ type: 'text', data: { text: `\n> 🔄 **System Recovery**: AI encountered a transient error. Retrying turn ${turn} (Attempt ${retryCount}/${MAX_RETRIES})...\n`, isThinking: true } });
@@ -945,23 +1211,22 @@ export class AiService {
       for (const block of response.content) {
         if (block.type === 'tool_use') {
           let result: string;
-          const blockInput = block.input as any;
 
           if (block.name === 'load_specialized_tool') {
             const { ToolRegistry } = await import('./ToolRegistry.js');
-            const tool = ToolRegistry[blockInput.tool_name];
+            const tool = ToolRegistry[block.input.tool_name];
             if (tool) {
               activeTools.push(tool.metadata);
-              result = `SUCCESS: Tool ${blockInput.tool_name} loaded into context. Instructions: ${tool.instructions}`;
-              onEvent({ type: 'text', data: { text: `\n> 📥 **Registry**: Loaded specialized logic for ${blockInput.tool_name}...\n`, isThinking: true } });
+              result = `SUCCESS: Tool ${block.input.tool_name} loaded into context. Instructions: ${tool.instructions}`;
+              onEvent({ type: 'text', data: { text: `\n> 📥 **Registry**: Loaded specialized logic for ${block.input.tool_name}...\n`, isThinking: true } });
             } else {
-              result = `ERROR: Tool ${blockInput.tool_name} not found in registry.`;
+              result = `ERROR: Tool ${block.input.tool_name} not found in registry.`;
             }
           } else if (block.name === 'analyze_data_with_python') {
             onEvent({ type: 'text', data: { text: `\n> 🏗️ **Bwenge Engine**: Running MCP-Standard Python Sandbox...\n`, isThinking: true } });
             try {
               const sandbox = await import('./ExecutionSandbox.js');
-              const mcpResponse = await (sandbox as any).ExecutionSandbox.getInstance().callMcpTool('python/execute', { code: blockInput.code });
+              const mcpResponse = await (sandbox as any).ExecutionSandbox.getInstance().callMcpTool('python/execute', { code: block.input.code });
 
               if (mcpResponse.error) {
                 result = `MCP ERROR: ${mcpResponse.error.message}`;
@@ -975,10 +1240,6 @@ export class AiService {
             try {
               result = await executeTool(block.name, block.input);
             } catch (toolErr) {
-              // A throwing tool must not bubble up and kill the whole agent
-              // loop mid-conversation. Report the failure back to the model
-              // as a tool result instead so it can react (retry with
-              // different input, apologize, try another tool).
               result = sanitizeToolError(block.name, toolErr);
             }
           }
@@ -1008,14 +1269,8 @@ export class AiService {
 
     const memoryService = MemoryService.getInstance();
 
-    // Once `files` are attached, `content` is an array of image/document +
-    // text blocks; extractPlainText pulls the real question out of either
-    // shape so the memory-context lookup queries on actual user text.
     const currentQuery = extractPlainText(options.messages[options.messages.length - 1].content);
 
-    // A memory-lookup failure (timeout, bad data, service hiccup) is not a
-    // reason to fail the whole request — the assistant should still answer
-    // without personalized context rather than erroring out entirely.
     let memoryContext = '';
     try {
       memoryContext = await memoryService.getLongTermContext(options.userId, currentQuery);

@@ -4,7 +4,10 @@ import jwt from 'jsonwebtoken';
 import { createUser, findUserByEmail } from './authDb.js';
 
 const router = Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'bwenge_auth_secret_2026';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  throw new Error('JWT_SECRET environment variable is required for authentication.');
+}
 const JWT_EXPIRES_IN = '7d';
 
 function buildAuthResponse(user) {

@@ -4,7 +4,10 @@ import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
-const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_bwenge_key_2026';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  throw new Error('JWT_SECRET environment variable is required for authentication.');
+}
 const JWT_EXPIRES = '30d';
 
 function buildAuthenticatedUser(user: any) {

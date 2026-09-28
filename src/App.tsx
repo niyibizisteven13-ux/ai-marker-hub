@@ -93,6 +93,7 @@ export default function App() {
     setActiveTab,
     activeFormId,
     setActiveFormId,
+    activeSessionId,
     isAiLoading,
 
     setIsAiLoading,
@@ -109,6 +110,7 @@ export default function App() {
   });
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
+  const [mobileView, setMobileView] = useState<'workspace' | 'chat'>('workspace');
 
 
   const [highlights, setHighlights] = useState<DocumentHighlight[]>(INITIAL_HIGHLIGHTS);
@@ -135,6 +137,7 @@ export default function App() {
 
   const [activeDocument, setActiveDocument] = useState<any>(null);
   const [stagedAttachments, setStagedAttachments] = useState<Array<File | ChatAttachment>>([]);
+  const [masterGuideFiles, setMasterGuideFiles] = useState<UploadedFile[]>([]);
 
 
   const saveCurrentChatSession = () => {
@@ -147,7 +150,7 @@ export default function App() {
       date: new Date().toLocaleString(),
       messageCount: messages.length,
       messages,
-      lastInteractionId,
+      lastInteractionId: lastInteractionId ?? undefined,
     };
 
     const nextSessions = [session, ...chatSessions].slice(0, 20);
@@ -236,7 +239,7 @@ export default function App() {
       const data = await response.json();
       if (data.success) {
         setStagedAttachments((prev) =>
-          prev.map((att) => att.id === tempId ? { ...att, serverId: data.fileId, status: 'ready' } as ChatAttachment : att)
+          prev.map((att) => ('id' in att && att.id === tempId) ? { ...att, serverId: data.fileId, status: 'ready' } as ChatAttachment : att)
         );
       } else {
         throw new Error(data.error);
@@ -244,7 +247,7 @@ export default function App() {
     } catch (error) {
       console.error('Upload failed', error);
       setStagedAttachments((prev) =>
-        prev.map((att) => att.id === tempId ? { ...att, status: 'failed' } as ChatAttachment : att)
+        prev.map((att) => ('id' in att && att.id === tempId) ? { ...att, status: 'failed' } as ChatAttachment : att)
       );
     }
   };
@@ -409,7 +412,7 @@ export default function App() {
       timestamp: 'Just now',
     };
 
-    setMessages((prev: any) => [...prev, newUserMessage]);
+    setMessages((prev: Message[]) => [...prev, newUserMessage]);
 
     // Only short-circuit very basic greetings if it's the start of a chat.
     // More complex greetings or conversational greetings go to the LLM.
@@ -421,7 +424,7 @@ export default function App() {
         timestamp: 'Just now',
       };
 
-      setMessages((prev: any) => [...prev, greetingReply]);
+      setMessages((prev: Message[]) => [...prev, greetingReply]);
       setAiServiceState('ready');
       return;
     }
@@ -444,6 +447,11 @@ export default function App() {
 
       const historyPrefix = summary ? [{ role: 'system', text: `CONVERSATION SUMMARY (Memory): ${summary}` }] : [];
 
+      const recentHistory = messages.slice(-4).map((m: Message) => ({
+        role: m.sender === 'user' ? 'user' : 'assistant',
+        text: m.text,
+      }));
+
       return {
         query: userPrompt,
         fileContext: attachmentIds.length > 0 ? null : (submissionText || null),
@@ -456,12 +464,9 @@ export default function App() {
         attachmentBase64: attachmentIds.length > 0 ? null : (docToMark?.base64Data || null),
         attachmentMimeType: docToMark?.mimeType || null,
         attachmentName: docToMark?.name || null,
-        attachmentText: attachmentIds.length > 0 ? null : (docToMark?.rawText || null),
+        attachmentText: docToMark?.rawText || null,
         previousInteractionId: lastInteractionId,
-        history: [...historyPrefix, ...messages.slice(-4)].map(m => ({
-           role: m.sender === 'user' ? 'user' : 'assistant',
-           text: m.text
-        })),
+        history: [...historyPrefix, ...recentHistory],
         activeFormId,
         provider: (selectedProvider && selectedProvider !== 'auto') ? selectedProvider : undefined,
         attachmentIds: attachmentIds.length > 0 ? attachmentIds : undefined,
@@ -498,9 +503,10 @@ export default function App() {
 
       // Add text fields
       Object.entries(payload).forEach(([key, value]) => {
-        if (value !== null && key !== 'history') {
-          formData.append(key, typeof value === 'object' ? JSON.stringify(value) : String(value));
-        }
+        if (key === 'history') return;
+        if (value === undefined || value === null) return;
+        if (typeof value === 'string' && (value === 'undefined' || value === 'null')) return;
+        formData.append(key, typeof value === 'object' ? JSON.stringify(value) : String(value));
       });
 
       if (payload.history) {
@@ -527,7 +533,7 @@ export default function App() {
 
       if (!response.ok) {
         if (response.status === 401) {
-          setMessages((prev: any) => [...prev, {
+          setMessages((prev: Message[]) => [...prev, {
             id: `assistant-${Date.now()}`,
             sender: 'assistant',
             text: "🔒 **Authentication Required**: Please Log In or Register using the button in the sidebar to talk with Bwenge AI.",
@@ -538,7 +544,7 @@ export default function App() {
         }
 
         const errorData = await response.json().catch(() => ({}));
-        setMessages((prev: any) => [...prev, {
+        setMessages((prev: Message[]) => [...prev, {
           id: `assistant-${Date.now()}`,
           sender: 'assistant',
           text: `❌ **Error**: ${errorData.error || response.statusText || 'Failed to connect to AI server.'}`,
@@ -558,7 +564,7 @@ export default function App() {
       let buffer = '';
 
       // Initialize assistant message with streaming state
-      setMessages((prev: any) => [...prev, {
+      setMessages((prev: Message[]) => [...prev, {
         id: assistantMsgId,
         sender: 'assistant',
         text: '',
@@ -656,16 +662,14 @@ export default function App() {
               }
 
               // Update messages state
-              setMessages((prev: any) =>
-                prev.map((msg: any) =>
+              setMessages((prev: Message[]) =>
+                prev.map((msg: Message) =>
                   msg.id === assistantMsgId ? {
                     ...msg,
                     text: assistantText,
                     thinkingText: assistantThinkingText,
                     isThinking: data.isThinking ?? msg.isThinking,
-                    gated: data.gated || msg.gated,
                     provider: data.provider || msg.provider,
-                    taskId: data.taskId || msg.taskId,
                   } : msg
                 )
               );
@@ -673,8 +677,8 @@ export default function App() {
 
               if (data.error) {
                 assistantText = `❌ **Error**: ${data.error}`;
-                setMessages((prev: any) =>
-                  prev.map((msg: any) =>
+                setMessages((prev: Message[]) =>
+                  prev.map((msg: Message) =>
                     msg.id === assistantMsgId ? { ...msg, text: assistantText, isStreaming: false } : msg
                   )
                 );
@@ -687,8 +691,8 @@ export default function App() {
       }
 
       // Mark streaming as complete
-      setMessages((prev: any) =>
-        prev.map((msg: any) =>
+      setMessages((prev: Message[]) =>
+        prev.map((msg: Message) =>
           msg.id === assistantMsgId ? { ...msg, isStreaming: false } : msg
         )
       );
@@ -1265,8 +1269,7 @@ This is a demo response while the AI service is unavailable. Retry when the engi
   }
 
   const handleDeleteSession = (sessionId: string) => {
-    setChatSessions((prev) => prev.filter(s => s.id !== sessionId));
-    // If the deleted session was the active one, clear current workspace
+    setChatSessions((prev: ChatSession[]) => prev.filter((s: ChatSession) => s.id !== sessionId));
     if (activeSessionId === sessionId) {
       handleClearCurrentChat();
     }
@@ -1276,43 +1279,19 @@ This is a demo response while the AI service is unavailable. Retry when the engi
     <div className="h-[100dvh] w-screen bg-[#191919] text-[#D1D1D0] font-sans antialiased transition-colors duration-200 overflow-hidden flex flex-col">
 
       {scannerOpen && (
-        <div className="fixed inset-0 z-[70] bg-black/30 backdrop-blur-sm p-3 sm:p-4">
-          <div className="absolute inset-0" onClick={() => setScannerOpen(false)} />
-          <div className="relative mx-auto h-full max-w-[1700px] overflow-hidden rounded-[28px] border border-white/10 shadow-2xl">
-            <div className="flex h-full flex-col lg:flex-row-reverse">
-              <div className="lg:w-[48%] h-full overflow-hidden bg-[#0f1013] rounded-b-[28px] lg:rounded-[28px]">
-                <DocumentScanner
-                  onClose={() => setScannerOpen(false)}
-                  onSavePages={handleSaveScannedPages}
-                />
-              </div>
-              <div className="hidden lg:flex lg:w-[52%] flex-col justify-center gap-4 p-8 bg-slate-950/80 text-slate-100">
-                <div className="space-y-2">
-                  <p className="text-sm font-semibold uppercase text-amber-300 tracking-[0.18em]">Scanner preview mode</p>
-                  <h2 className="text-2xl font-semibold">Your workspace stays visible while AI prepares the report.</h2>
-                  <p className="text-sm leading-6 text-slate-300">
-                    The left workspace remains visible under the panel, so you can compare the scanned paper and worksheet context while Bwenge AI generates a polished grading response.
-                  </p>
-                </div>
-                <div className="rounded-3xl border border-slate-800/90 bg-slate-900/90 p-4 text-sm text-slate-300">
-                  <p className="font-semibold text-white mb-2">What happens next</p>
-                  <ul className="space-y-2 list-disc list-inside">
-                    <li>Review scanned pages before saving.</li>
-                    <li>Save the scan and watch the AI report appear on the right.</li>
-                    <li>Keep the original submission visible for side-by-side review.</li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-          </div>
+        <div className="fixed inset-0 z-[70] bg-[#0f1013] flex flex-col w-screen h-[100dvh] overflow-hidden animate-in fade-in duration-200">
+          <DocumentScanner
+            onClose={() => setScannerOpen(false)}
+            onSavePages={handleSaveScannedPages}
+          />
         </div>
       )}
 
       <div className="flex-1 flex flex-col overflow-hidden lg:flex-row min-h-0">
 
         <LeftSidebar
-          activeTab={activeTab as NavigationTab}
-          setActiveTab={(t) => setActiveTab(t as string)}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
           collapsed={sidebarCollapsed}
           setCollapsed={setSidebarCollapsed}
           user={authenticatedUser}
@@ -1351,8 +1330,8 @@ This is a demo response while the AI service is unavailable. Retry when the engi
         ) : (
           <div className="flex-1 flex flex-col min-w-0">
             <TopNavbar
-              activeTab={activeTab as NavigationTab}
-              setActiveTab={(t) => setActiveTab(t as string)}
+              activeTab={activeTab}
+              setActiveTab={setActiveTab}
               onNewChat={handleNewChat}
               onOpenSettings={() => setSettingsOpen(true)}
               onDeleteChat={handleClearCurrentChat}
@@ -1362,8 +1341,8 @@ This is a demo response while the AI service is unavailable. Retry when the engi
               user={authenticatedUser}
             />
 
-            <div className="flex-1 flex overflow-hidden lg:flex-row min-h-0">
-              <div className="hidden md:flex flex-1 min-h-0 border-r border-white/5">
+            <div className="flex-1 flex overflow-hidden lg:flex-row min-h-0 relative">
+              <div className={`flex-1 min-h-0 border-r border-white/5 ${mobileView === 'workspace' ? 'flex' : 'hidden'} md:flex`}>
                 <CenterWorkspace
                   activeTab={activeTab}
                   examPaper={examPaper}
@@ -1385,9 +1364,6 @@ This is a demo response while the AI service is unavailable. Retry when the engi
                     }));
                     setUploadedFiles((prev) => [...sampleBatch, ...prev]);
                   }}
-                  scannerOpen={scannerOpen}
-                  onCloseScanner={() => setScannerOpen(false)}
-                  onSaveScannedPages={handleSaveScannedPages}
                   onTextSelection={(text: string, pos: { top: number; left: number }) => {
                     setSelectedText(text);
                     setSelectionPos(pos);
@@ -1402,7 +1378,7 @@ This is a demo response while the AI service is unavailable. Retry when the engi
                 />
               </div>
 
-              <div className="w-full md:w-[460px] h-full flex flex-col border-l border-white/5">
+              <div className={`w-full md:w-[460px] h-full flex flex-col border-l border-white/5 ${mobileView === 'chat' ? 'flex' : 'hidden'} md:flex`}>
                 {activeTab !== 'results' ? (
                   <RightChatSidebar
                     messages={messages}
@@ -1446,6 +1422,65 @@ This is a demo response while the AI service is unavailable. Retry when the engi
                     onGenerateExcel={handleGenerateExcelExport}
                   />
                 )}
+              </div>
+
+              {/* Modern Mobile Bottom Navigation Bar with Safe Area Protection */}
+              <div className="absolute bottom-[calc(1rem+env(safe-area-inset-bottom,0px))] left-1/2 -translate-x-1/2 z-40 md:hidden flex items-center bg-[#1C1C20]/95 backdrop-blur-md border border-white/10 rounded-full shadow-2xl p-1.5 gap-1.5">
+                <button
+                  onClick={() => {
+                    if (navigator.vibrate) navigator.vibrate([10]);
+                    setMobileView('workspace');
+                  }}
+                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-bold transition-all ${
+                    mobileView === 'workspace'
+                      ? 'bg-[#D97757] text-white shadow-lg shadow-[#D97757]/30'
+                      : 'text-neutral-400 hover:text-white'
+                  }`}
+                >
+                  <span>📄</span>
+                  <span>Workspace</span>
+                </button>
+                <button
+                  onClick={() => {
+                    if (navigator.vibrate) navigator.vibrate([10]);
+                    setMobileView('chat');
+                  }}
+                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-bold transition-all ${
+                    mobileView === 'chat'
+                      ? 'bg-[#D97757] text-white shadow-lg shadow-[#D97757]/30'
+                      : 'text-neutral-400 hover:text-white'
+                  }`}
+                >
+                  <span>💬</span>
+                  <span>AI Chat</span>
+                </button>
+                <button
+                  onClick={() => {
+                    if (navigator.vibrate) navigator.vibrate([10]);
+                    setActiveTab('results');
+                    setMobileView('chat');
+                  }}
+                  className={`flex items-center gap-1 px-3 py-2 rounded-full text-xs font-bold transition-all ${
+                    activeTab === 'results'
+                      ? 'bg-[#D97757] text-white shadow-lg shadow-[#D97757]/30'
+                      : 'text-neutral-400 hover:text-white'
+                  }`}
+                  title="Results Panel"
+                >
+                  <span>📊</span>
+                  <span>Results</span>
+                </button>
+                <button
+                  onClick={() => {
+                    if (navigator.vibrate) navigator.vibrate([15]);
+                    setScannerOpen(true);
+                  }}
+                  className="px-3 py-2 rounded-full bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 transition-all font-bold text-xs flex items-center gap-1"
+                  title="Open Camera Scanner"
+                >
+                  <span>📷</span>
+                  <span>Scan</span>
+                </button>
               </div>
             </div>
           </div>

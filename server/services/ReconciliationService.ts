@@ -72,15 +72,15 @@ export class ReconciliationService {
 
     // Run payment reconciliation every 10 minutes
     await this.reconciliationQueue.add('reconcile', {}, {
-      repeat: { pattern: '*/10 * * * *' },
+      repeatJobKey: 'reconcile',
       removeOnComplete: true,
-    });
+    } as any);
 
     // Run subscription expiry once every 24 hours (at midnight)
     await this.reconciliationQueue.add('expire-subscriptions', {}, {
-      repeat: { pattern: '0 0 * * *' },
+      repeatJobKey: 'expire-subscriptions',
       removeOnComplete: true,
-    });
+    } as any);
   }
 
   /**

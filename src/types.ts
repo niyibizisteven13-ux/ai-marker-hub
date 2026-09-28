@@ -93,6 +93,8 @@ export interface Message {
   text: string;
   thinkingText?: string;
   isThinking?: boolean;
+  provider?: string;
+  taskId?: string;
   attachment?: ChatAttachment;
   attachments?: ChatAttachment[];
   timestamp: string;

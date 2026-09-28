@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { User, Message, ChatSession, ExamPaper, StudentScript, UploadedFile } from '../types';
+import { NavigationTab, User, Message, ChatSession, ExamPaper, StudentScript, UploadedFile } from '../types';
 
 interface AppState {
   // Auth
@@ -15,8 +15,8 @@ interface AppState {
   activeSessionId: string | null;
   lastInteractionId: string | null;
   addMessage: (message: Message) => void;
-  setMessages: (messages: Message[]) => void;
-  setSessions: (sessions: ChatSession[]) => void;
+  setMessages: (messages: Message[] | ((prev: Message[]) => Message[])) => void;
+  setSessions: (sessions: ChatSession[] | ((prev: ChatSession[]) => ChatSession[])) => void;
   setLastInteractionId: (id: string | null) => void;
   clearChat: () => void;
 
@@ -30,8 +30,8 @@ interface AppState {
   setStudentScripts: (scripts: StudentScript[] | ((prev: StudentScript[]) => StudentScript[])) => void;
 
   // UI
-  activeTab: string;
-  setActiveTab: (tab: string) => void;
+  activeTab: NavigationTab;
+  setActiveTab: (tab: NavigationTab) => void;
   activeFormId: string | null;
   setActiveFormId: (id: string | null) => void;
   isAiLoading: boolean;
@@ -122,7 +122,7 @@ export const useStore = create<AppState>((set, get) => ({
   })),
 
   activeTab: 'documents',
-  setActiveTab: (activeTab) => set({ activeTab }),
+  setActiveTab: (activeTab: NavigationTab) => set({ activeTab }),
   activeFormId: null,
   setActiveFormId: (activeFormId) => set({ activeFormId }),
   isAiLoading: false,

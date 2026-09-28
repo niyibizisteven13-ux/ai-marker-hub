@@ -58,8 +58,9 @@ export class TelegramBotService {
 
       const data: any = await res.json();
       if (!data.ok) {
-        // Fallback without Markdown if markdown formatting was malformed
-        if (options.parse_mode && data.description?.includes('can\'t parse entities')) {
+        // Fallback without parse_mode if entity formatting was malformed
+        const desc = (data.description || '').toLowerCase();
+        if (options.parse_mode && (desc.includes('parse') || desc.includes('entity') || desc.includes('bad request'))) {
           return this.sendMessage(chatId, text, { ...options, parse_mode: undefined });
         }
         logger.error('Telegram sendMessage error:', data);
@@ -102,8 +103,11 @@ export class TelegramBotService {
       });
 
       const data: any = await res.json();
-      if (!data.ok && options.parse_mode && data.description?.includes('can\'t parse entities')) {
-        return this.editMessageText(chatId, messageId, text, { ...options, parse_mode: undefined });
+      if (!data.ok) {
+        const desc = (data.description || '').toLowerCase();
+        if (options.parse_mode && (desc.includes('parse') || desc.includes('entity') || desc.includes('bad request'))) {
+          return this.editMessageText(chatId, messageId, text, { ...options, parse_mode: undefined });
+        }
       }
       return data.result;
     } catch (err) {

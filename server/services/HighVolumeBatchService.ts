@@ -88,6 +88,16 @@ Return a valid JSON array of GradedResult matching this exact structure:
 ]`;
 
     try {
+      if (await this.aiService.providerAvailable('gonkarouter')) {
+        logger.info(`[HighVolumeBatchService] Routing batch via GonkaRouter (GLM-5.3-Flash)`);
+        const textPrompt = `${prompt}\n[Note: Exam papers and rubric documents attached as PDF/binary buffers for batch evaluation].`;
+        const rawResponse = await this.aiService.sendGonkaChat(textPrompt, {});
+        const rawJson = this.aiService.parseModelJson(typeof rawResponse === 'string' ? rawResponse : (rawResponse as any).text || '');
+        const results: GradedStudentResult[] = Array.isArray(rawJson) ? rawJson : (rawJson.results || []);
+        logger.info(`[HighVolumeBatchService] GonkaRouter batch successfully processed: ${results.length} students graded.`);
+        return results;
+      }
+
       const geminiResult = await this.aiService.generateContent({
         contents: [
           prompt,

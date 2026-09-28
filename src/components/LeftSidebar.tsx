@@ -79,14 +79,8 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
         {/* Top Header: Branding & Toggle */}
         <div className={`flex items-center px-4 h-16 shrink-0 ${collapsed ? 'md:justify-center' : 'justify-between'} justify-between`}>
           <div className="flex items-center gap-2.5">
-            <div className="w-6 h-6 flex-shrink-0">
-              <svg viewBox="0 0 220 220" className="w-full h-full">
-                <circle cx="110" cy="110" r="110" fill="#0D2B24"/>
-                <g transform="translate(110,110)">
-                  <circle cx="-32" cy="-10" r="26" fill="#5DCAA5"/>
-                  <circle cx="32" cy="-10" r="26" fill="#5DCAA5"/>
-                </g>
-              </svg>
+            <div className="w-7 h-7 flex-shrink-0 rounded-lg overflow-hidden border border-amber-500/20 shadow-md">
+              <img src={logoUrl} alt="Bwenge Logo" className="w-full h-full object-cover" />
             </div>
             <span className={`font-serif text-base tracking-tight text-white font-medium ${collapsed ? 'md:hidden' : 'block'}`}>Bwenge</span>
           </div>

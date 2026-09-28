@@ -7,7 +7,7 @@ test('Multi-turn prompt building logic', () => {
   const query = "What did he discover?";
   const prompt = buildBwengeGradingPrompt(query);
 
-  // Case-insensitive matches for the new persona
+  // Case-insensitive matches for the persona
   assert.match(BWENGE_SYSTEM_PROMPT, /expert academic assistant/i);
   assert.match(BWENGE_SYSTEM_PROMPT, /pedagogical consultant/i);
   assert.match(prompt, /Question: What did he discover\?/);
