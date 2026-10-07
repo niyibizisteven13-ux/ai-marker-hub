@@ -202,5 +202,109 @@ export const ToolRegistry: Record<string, ToolDefinition> = {
     },
     instructions: "Use with caution. Allows reading and modifying project files for development assistance.",
     preferredProvider: 'nvidianim'
-  }
+  },
+
+  // ── NEW FRONTIER-LEVEL TOOLS (Gonka Router powered) ──────────────────────
+
+  fact_check: {
+    metadata: {
+      name: 'fact_check',
+      description: 'Verifies a specific factual claim by searching the web and synthesizing a verdict. Returns TRUE/FALSE/PARTIALLY_TRUE/UNVERIFIABLE with sources and a confidence score. Use proactively for any claim you are less than 70% confident in.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          claim: { type: 'string', description: 'The specific factual claim to verify. Be precise and specific.' }
+        },
+        required: ['claim']
+      }
+    },
+    instructions: 'Use whenever stating a statistic, date, named entity, or any fact that could be hallucinated. Returns verdict, confidence, explanation, and sources. Always cite sources in your response.',
+    preferredProvider: 'nvidianim'
+  },
+
+  plan_task: {
+    metadata: {
+      name: 'plan_task',
+      description: 'Decomposes a complex high-level goal into a structured plan of concrete micro-tasks with dependencies. Use when the user has a multi-step objective like "Plan a 5-day trip", "Create a curriculum", or "Analyze this data and produce a report".',
+      input_schema: {
+        type: 'object',
+        properties: {
+          goal: { type: 'string', description: 'The high-level goal to decompose into tasks.' },
+          execute: { type: 'boolean', description: 'If true, execute the plan immediately. If false, just return the plan for user review.' }
+        },
+        required: ['goal']
+      }
+    },
+    instructions: 'Use for any goal requiring 3+ steps. If execute=false, show the plan to the user and ask for approval before executing. Stream progress of each task as it runs.',
+    preferredProvider: 'nvidianim'
+  },
+
+  save_memory: {
+    metadata: {
+      name: 'save_memory',
+      description: 'Saves an important fact, preference, or correction to the user\'s long-term memory so it is remembered in future conversations. Use when the user states a preference, corrects you, or shares key context about themselves or their work.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          content: { type: 'string', description: 'The fact or preference to remember. Be specific and self-contained.' },
+          category: { type: 'string', enum: ['preference', 'correction', 'fact', 'project_context'], description: 'Category of the memory.' }
+        },
+        required: ['content', 'category']
+      }
+    },
+    instructions: 'Call this automatically when: (1) the user corrects you, (2) the user states a strong preference, (3) the user shares important project context. Always confirm to the user that you have saved the memory.',
+    preferredProvider: 'nvidianim'
+  },
+
+  detect_sentiment: {
+    metadata: {
+      name: 'detect_sentiment',
+      description: 'Analyzes the emotional tone of a text message. Returns tone (neutral/frustrated/confused/excited/stressed/sad/grateful/angry), intensity (0-1), and suggested response persona. Use internally when the emotional context of a message is unclear.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: 'The text to analyze for emotional tone.' }
+        },
+        required: ['text']
+      }
+    },
+    instructions: 'Use internally to calibrate empathy level. After detecting sentiment, silently adjust your tone — do not explicitly tell the user "I detected you are frustrated."',
+    preferredProvider: 'nvidianim'
+  },
+
+  estimate_confidence: {
+    metadata: {
+      name: 'estimate_confidence',
+      description: 'Self-evaluates the confidence of an AI-generated response and identifies uncertain claims. Returns a score (0-100), confidence level (HIGH/MEDIUM/LOW), and a list of claims that may be hallucinations. Use after generating complex factual responses.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'The original user question.' },
+          response: { type: 'string', description: 'The AI response to evaluate.' }
+        },
+        required: ['query', 'response']
+      }
+    },
+    instructions: 'Use after generating responses with multiple factual claims, statistics, or technical details. If confidence is MEDIUM or LOW, offer to fact-check the uncertain claims.',
+    preferredProvider: 'nvidianim'
+  },
+
+  run_code: {
+    metadata: {
+      name: 'run_code',
+      description: 'Executes code in a secure sandbox environment and returns the output. Supports Python, JavaScript, and shell commands. Use for calculations, data processing, file operations, and testing code.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          language: { type: 'string', enum: ['python', 'javascript', 'shell'], description: 'Programming language.' },
+          code: { type: 'string', description: 'The code to execute.' },
+          explanation: { type: 'string', description: 'What this code is intended to do.' }
+        },
+        required: ['language', 'code']
+      }
+    },
+    instructions: 'Use for precise calculations, data analysis, and code testing. Always show the code to the user before running it. Python supports: pandas, numpy, matplotlib, scipy.',
+    preferredProvider: 'nvidianim'
+  },
 };
+

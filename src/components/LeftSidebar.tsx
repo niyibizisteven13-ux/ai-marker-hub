@@ -226,6 +226,30 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
             )}
           </div>
 
+          {user?.role === 'ADMIN' && onOpenAdmin && (
+            <div className="relative group w-full flex justify-center">
+              <button
+                type="button"
+                onClick={() => {
+                  onOpenAdmin();
+                  onCloseMobile();
+                }}
+                className={`flex items-center gap-3 rounded-lg border border-emerald-500/15 bg-emerald-500/[0.06] px-3 py-2.5 text-xs font-medium text-emerald-300 transition-all hover:bg-emerald-500/10 ${
+                  collapsed ? 'lg:h-10 lg:w-10 lg:justify-center' : 'w-full'
+                }`}
+                aria-label="Open admin dashboard"
+              >
+                <Shield className="h-4 w-4 shrink-0" />
+                <span className={`${collapsed ? 'lg:hidden' : 'block'}`}>Admin Dashboard</span>
+              </button>
+              {collapsed && (
+                <div className="pointer-events-none absolute left-14 top-1/2 z-50 hidden -translate-y-1/2 whitespace-nowrap rounded-lg bg-neutral-900 px-2.5 py-1.5 text-[11px] font-semibold text-white opacity-0 shadow-xl transition-opacity group-hover:opacity-100 lg:block">
+                  Admin Dashboard
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="relative group w-full flex justify-center">
             <button
               onClick={() => {
@@ -286,19 +310,6 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                 >
                   Account Profile
                 </button>
-                {user.role === 'ADMIN' && onOpenAdmin && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowProfileMenu(false);
-                      onOpenAdmin();
-                      onCloseMobile();
-                    }}
-                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-medium text-emerald-300 transition hover:bg-emerald-500/10"
-                  >
-                    <Shield size={14} /> Admin dashboard
-                  </button>
-                )}
                 <div className="my-1 border-t" style={{ borderColor: tokens.border }} />
                 <button
                   type="button"

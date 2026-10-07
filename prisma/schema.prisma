@@ -406,6 +406,210 @@ model StudentProfile {
   @@unique([institutionId, studentId])
 }
 
+// ── Admin & RAG Models ──────────────────────────────────────────
+
+model KnowledgeBase {
+  id          String       @id @default(uuid())
+  name        String
+  description String?
+  state       String       @default("active") // active | inactive | archived
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  documents   Document[]
+  chunks      DocumentChunk[]
+}
+
+model Document {
+  id              String         @id @default(uuid())
+  knowledgeBaseId String
+  knowledgeBase   KnowledgeBase  @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+  name            String
+  type            String         // PDF, XLSX, CSV, DOCX, TXT, JSON
+  size            String         // e.g. "8.4 MB"
+  sizeBytes       Int            @default(0)
+  units           String?        // e.g. "126 pages" or "4 sheets"
+  stage           Int            @default(1) // 1 to 9
+  status          String         @default("PENDING") // PENDING, PROCESSING, READY, FAILED
+  filePath        String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  chunks          DocumentChunk[]
+  jobs            ProcessingJob[]
+  sheets          SpreadsheetSheet[]
+
+  @@index([knowledgeBaseId])
+}
+
+model DocumentChunk {
+  id              String        @id @default(uuid())
+  documentId      String
+  document        Document      @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  knowledgeBaseId String
+  knowledgeBase   KnowledgeBase @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+  pageNumber      Int?
+  section         String?
+  chunkId         String
+  sourceFilename  String
+  text            String
+  embedding       String?       // JSON stringified float array
+  metadata        String?       // JSON string
+  createdAt       DateTime      @default(now())
+
+  @@index([documentId])
+  @@index([knowledgeBaseId])
+}
+
+model SpreadsheetSheet {
+  id          String             @id @default(uuid())
+  documentId  String
+  document    Document           @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  name        String
+  columns     SpreadsheetColumn[]
+  rows        SpreadsheetRow[]
+  createdAt   DateTime           @default(now())
+}
+
+model SpreadsheetColumn {
+  id        String           @id @default(uuid())
+  sheetId   String
+  sheet     SpreadsheetSheet @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+  name      String
+  dataType  String           @default("string") // string, number, date
+  columnIndex Int
+}
+
+model SpreadsheetRow {
+  id        String           @id @default(uuid())
+  sheetId   String
+  sheet     SpreadsheetSheet @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+  rowIndex  Int
+  rowData   String           // JSON stringified object of column values
+}
+
+model ProcessingJob {
+  id          String   @id @default(uuid())
+  documentId  String
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  stage       String   @default("UPLOAD") // VALIDATE, EXTRACT, CLEAN, STRUCTURE, CHUNK, EMBED, INDEX, READY
+  status      String   @default("PENDING") // PENDING, RUNNING, COMPLETED, FAILED
+  progress    Int      @default(0) // 0-100
+  error       String?
+  attempts    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([documentId])
+}
+
+model Dataset {
+  id          String            @id @default(uuid())
+  name        String
+  description String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  examples    DatasetExample[]
+}
+
+model DatasetExample {
+  id               String   @id @default(uuid())
+  datasetId        String
+  dataset          Dataset  @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  instruction      String
+  input            String?
+  output           String
+  status           String   @default("pending") // pending | approved | rejected
+  validationFlags  String?  // JSON array of validation warnings/flags
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([datasetId])
+}
+
+model FineTuneJob {
+  id              String   @id @default(uuid())
+  datasetId       String
+  status          String   @default("QUEUED") // QUEUED, TRAINING, COMPLETED, FAILED, CANCELLED
+  providerJobId   String?
+  tokenEstimate   Int      @default(0)
+  costEstimate    Float    @default(0.0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model AiModel {
+  id          String   @id @default(uuid())
+  name        String
+  provider    String   // Anthropic, OpenAI, etc.
+  baseModel   String
+  version     String
+  status      String   @default("active") // active | inactive | archived
+  environment String   @default("draft") // draft | testing | production
+  dataset     String?
+  score       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Prompt {
+  id        String          @id @default(uuid())
+  name      String
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  versions  PromptVersion[]
+}
+
+model PromptVersion {
+  id          String   @id @default(uuid())
+  promptId    String
+  prompt      Prompt   @relation(fields: [promptId], references: [id], onDelete: Cascade)
+  version     Int
+  environment String   @default("draft") // draft | testing | production
+  active      Boolean  @default(false)
+  text        String
+  createdAt   DateTime @default(now())
+
+  @@index([promptId])
+}
+
+model ProviderConfig {
+  id          String   @id @default(uuid())
+  provider    String   @unique // OPENAI, ANTHROPIC, GEMINI, OLLAMA
+  model       String
+  baseUrl     String?
+  secretRef   String   // reference name, never the raw key
+  updatedAt   DateTime @updatedAt
+}
+
+model RetrievalSetting {
+  environment String   @id // draft, testing, production
+  chunkSize   Int      @default(800)
+  overlap     Int      @default(120)
+  topK        Int      @default(6)
+  threshold   Float    @default(0.35)
+  rerank      Boolean  @default(true)
+  hybrid      Boolean  @default(true)
+  metadata    Boolean  @default(true)
+  embedModel  String   @default("text-embedding-3-small")
+  updatedAt   DateTime @updatedAt
+}
+
+model UsageEvent {
+  id                       String   @id @default(uuid())
+  userId                   String?
+  question                 String
+  knowledgeBaseId          String?
+  model                    String
+  tokensIn                 Int      @default(0)
+  tokensOut                Int      @default(0)
+  latencyMs                Int      @default(0)
+  answeredFromKnowledge    Boolean  @default(true)
+  createdAt                DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([userId])
+}
+
+
 
 
 

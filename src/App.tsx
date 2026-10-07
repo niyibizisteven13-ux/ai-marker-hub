@@ -45,11 +45,11 @@ import { useIsMobile } from './hooks/useIsMobile';
 import { useVisualViewportHeight } from './hooks/useVisualViewportHeight';
 import { Menu, X, Plus, Sparkles } from 'lucide-react';
 import UpgradePage from './pages/UpgradePage';
-import AdminPage from './pages/AdminPage';
 
 const LoginModal = React.lazy(() => import('./components/LoginModal'));
 const UpgradeModal = React.lazy(() => import('./components/UpgradeModal'));
 const DynamicForm = React.lazy(() => import('./components/DynamicForm'));
+const AdminPage = React.lazy(() => import('./pages/AdminPage'));
 
 import { Suspense } from 'react';
 
@@ -280,6 +280,13 @@ export default function App() {
       channel?.close();
     };
   }, []);
+
+  useEffect(() => {
+    if (adminOpen && authStatus !== 'loading' && authenticatedUser?.role !== 'ADMIN') {
+      window.history.replaceState({}, '', '/');
+      setAdminOpen(false);
+    }
+  }, [adminOpen, authStatus, authenticatedUser?.role]);
 
   useEffect(() => {
     setWorkspaceHistoryLoaded(false);
@@ -1015,17 +1022,12 @@ export default function App() {
     );
   }
 
-  if (adminOpen) {
-    if (authenticatedUser?.role !== 'ADMIN') {
-      return (
-        <div className="flex h-[100dvh] w-full flex-col items-center justify-center gap-4 bg-[#101318] p-6 text-center text-white">
-          <h1 className="text-xl font-semibold">Admin access required</h1>
-          <p className="text-sm text-slate-400">Your account does not have platform administrator access.</p>
-          <button type="button" onClick={() => { setAdminOpen(false); window.history.replaceState({}, '', '/'); }} className="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-200 hover:bg-white/5">Return to workspace</button>
-        </div>
-      );
-    }
-    return <AdminPage onBack={() => { setAdminOpen(false); window.history.replaceState({}, '', '/'); }} />;
+  if (adminOpen && authStatus === 'authenticated' && authenticatedUser?.role === 'ADMIN') {
+    return (
+      <Suspense fallback={null}>
+        <AdminPage onBack={() => { setAdminOpen(false); window.history.replaceState({}, '', '/'); }} />
+      </Suspense>
+    );
   }
 
   return (
@@ -1048,7 +1050,10 @@ export default function App() {
           user={authenticatedUser}
           onOpenLoginModal={() => setLoginModalOpen(true)}
           onOpenSettings={() => setSettingsOpen(true)}
-          onOpenAdmin={() => setAdminOpen(true)}
+          onOpenAdmin={() => {
+            window.history.pushState({}, '', '/admin');
+            setAdminOpen(true);
+          }}
           onLogout={handleLogout}
           sessions={chatSessions}
           onLoadSession={handleLoadChatSession}

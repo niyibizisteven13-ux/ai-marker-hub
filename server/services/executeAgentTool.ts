@@ -5,6 +5,11 @@ import { PDFParse } from 'pdf-parse';
 import mammoth from 'mammoth';
 import ExcelJS from 'exceljs';
 import logger from '../utils/logger.js';
+import { FactCheckService } from './FactCheckService.js';
+import { PlannerService } from './PlannerService.js';
+import { MemoryService } from './MemoryService.js';
+import { SentimentService } from './SentimentService.js';
+import { ConfidenceService } from './ConfidenceService.js';
 
 const PROJECT_ROOT = '/home/user/project'; // Default working directory in E2B
 const LOCAL_ROOT = process.cwd();
@@ -130,6 +135,125 @@ export async function executeAgentTool(projectId: string, name: string, input: a
       }
       return `CHART_DATA:\n${input.definition}`;
     }
+
+    // ── FRONTIER-LEVEL TOOLS ──────────────────────────────────────────────
+
+    case 'fact_check': {
+      try {
+        const factCheckService = FactCheckService.getInstance();
+        const result = await factCheckService.check(input.claim);
+        const sourceList = result.sources
+          .map((s: any, i: number) => `  [${i + 1}] ${s.title} — ${s.url}\n      Snippet: ${s.snippet}`)
+          .join('\n');
+        return [
+          `FACT CHECK RESULT for: "${result.claim}"`,
+          `Verdict: ${result.verdict} (Confidence: ${Math.round(result.confidence * 100)}%)`,
+          `Explanation: ${result.explanation}`,
+          result.sources.length ? `Sources:\n${sourceList}` : 'No web sources found.',
+        ].join('\n');
+      } catch (e: any) {
+        return `Fact check failed: ${e.message}`;
+      }
+    }
+
+    case 'plan_task': {
+      try {
+        const plannerService = PlannerService.getInstance();
+        const plan = await plannerService.decompose(input.goal);
+        const taskList = plan.tasks
+          .map((t: any, i: number) => `${i + 1}. [${t.status.toUpperCase()}] ${t.title}\n   ${t.description}${t.tool ? ` (uses: ${t.tool})` : ''}${t.dependencies.length ? ` | depends on: ${t.dependencies.join(', ')}` : ''}`)
+          .join('\n');
+        return [
+          `PLAN created for: "${plan.goal}" (ID: ${plan.id})`,
+          `Tasks (${plan.tasks.length}):`,
+          taskList,
+          '',
+          input.execute ? 'Plan will be executed automatically.' : 'Share this plan with the user for review before executing.',
+        ].join('\n');
+      } catch (e: any) {
+        return `Plan creation failed: ${e.message}`;
+      }
+    }
+
+    case 'save_memory': {
+      try {
+        const memoryService = MemoryService.getInstance();
+        // Extract userId from projectId (used as userId in this context)
+        const userId = projectId;
+        await memoryService.addMemory(userId, input.content, { category: input.category, savedAt: new Date().toISOString() });
+        return `Memory saved successfully: "${input.content.slice(0, 100)}${input.content.length > 100 ? '...' : ''}" (category: ${input.category})`;
+      } catch (e: any) {
+        return `Failed to save memory: ${e.message}`;
+      }
+    }
+
+    case 'detect_sentiment': {
+      try {
+        const sentimentService = SentimentService.getInstance();
+        const result = await sentimentService.analyze(input.text);
+        return JSON.stringify({
+          tone: result.tone,
+          intensity: result.intensity,
+          suggestedPersona: result.suggestedPersona,
+        });
+      } catch (e: any) {
+        return JSON.stringify({ tone: 'neutral', intensity: 0.3, suggestedPersona: 'professional' });
+      }
+    }
+
+    case 'estimate_confidence': {
+      try {
+        const confidenceService = ConfidenceService.getInstance();
+        const result = await confidenceService.assessConfidence(input.query, input.response);
+        const lines = [
+          `Confidence Score: ${result.score}/100 (${result.level})`,
+          `Assessment: ${result.explanation}`,
+        ];
+        if (result.uncertainClaims.length > 0) {
+          lines.push(`Uncertain claims that may need verification:`);
+          result.uncertainClaims.forEach((claim: string, i: number) => lines.push(`  ${i + 1}. ${claim}`));
+        }
+        return lines.join('\n');
+      } catch (e: any) {
+        return `Confidence assessment failed: ${e.message}`;
+      }
+    }
+
+    case 'run_code': {
+      try {
+        const sandbox = await getSandbox(projectId);
+        let command: string;
+        if (input.language === 'python') {
+          // Write to a temp file and execute
+          const tmpFile = `/tmp/bwenge_run_${Date.now()}.py`;
+          await sandbox.files.write(tmpFile, input.code);
+          const result = await sandbox.commands.run(`python3 ${tmpFile}`, { timeoutMs: 30000 });
+          return `stdout:\n${result.stdout}\nstderr:\n${result.stderr}${result.exitCode !== 0 ? `\nexit code: ${result.exitCode}` : ''}`;
+        } else if (input.language === 'javascript') {
+          const tmpFile = `/tmp/bwenge_run_${Date.now()}.js`;
+          await sandbox.files.write(tmpFile, input.code);
+          const result = await sandbox.commands.run(`node ${tmpFile}`, { timeoutMs: 30000 });
+          return `stdout:\n${result.stdout}\nstderr:\n${result.stderr}${result.exitCode !== 0 ? `\nexit code: ${result.exitCode}` : ''}`;
+        } else if (input.language === 'shell') {
+          const result = await sandbox.commands.run(input.code, { cwd: '/home/user/project', timeoutMs: 30000 });
+          return `stdout:\n${result.stdout}\nstderr:\n${result.stderr}${result.exitCode !== 0 ? `\nexit code: ${result.exitCode}` : ''}`;
+        }
+        return `Unsupported language: ${input.language}`;
+      } catch (e: any) {
+        // Fallback: try local execution via child_process for shell commands
+        if (input.language === 'shell') {
+          try {
+            const { execSync } = await import('child_process');
+            const output = execSync(input.code, { timeout: 15000, encoding: 'utf8' });
+            return `stdout:\n${output}`;
+          } catch (execErr: any) {
+            return `Execution failed: ${execErr.message}`;
+          }
+        }
+        return `Code execution failed: ${e.message}`;
+      }
+    }
+
     default:
       return `Unknown tool: ${name}`;
   }

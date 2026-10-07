@@ -1,757 +1,770 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
-  Activity,
-  AlertTriangle,
-  ArrowLeft,
-  CheckCircle2,
-  Cpu,
-  Database,
-  Globe,
-  Lock,
-  RefreshCw,
-  Shield,
-  ShieldAlert,
-  Sliders,
-  Terminal,
-  Users,
-  Zap,
+  Activity, ArrowLeft, BarChart3, BookOpen, Boxes, Database,
+  FileText, FlaskConical, GraduationCap, Info, KeyRound, LayoutDashboard, Menu, Plus,
+  RefreshCw, ScrollText, Search, Settings, Trash2, Upload, Users, X,
 } from 'lucide-react';
-import { authFetch } from '../utils/authFetch';
+import { adminApi } from '../api/admin';
 
-interface MarginSummary {
-  grading: { jobCount: number; totalCost: number; totalCharged: number; avgMargin: number };
-  scoring: { jobCount: number; totalCost: number; totalCharged: number; avgMargin: number };
-  failedJobsCount: number;
-  hourlySpend: number;
-  threshold: number;
-  isCircuitOpen: boolean;
-  isForcedOpen: boolean;
-  targetMargin: number;
-  timestamp: string;
+/* ───────────── Types ───────────── */
+type Env = 'draft' | 'testing' | 'production';
+type TabId = 'overview' | 'knowledge' | 'documents' | 'datasets' | 'playground' | 'models' | 'finetune'
+  | 'retrieval' | 'prompts' | 'providers' | 'analytics' | 'users' | 'logs' | 'settings';
+
+const NAV: { id: TabId; label: string; icon: ReactNode }[] = [
+  { id: 'overview', label: 'Overview', icon: <LayoutDashboard size={17} /> },
+  { id: 'knowledge', label: 'Knowledge', icon: <BookOpen size={17} /> },
+  { id: 'documents', label: 'Documents', icon: <FileText size={17} /> },
+  { id: 'datasets', label: 'Datasets', icon: <Database size={17} /> },
+  { id: 'playground', label: 'AI playground', icon: <FlaskConical size={17} /> },
+  { id: 'models', label: 'Models', icon: <Boxes size={17} /> },
+  { id: 'finetune', label: 'Fine-tuning', icon: <GraduationCap size={17} /> },
+  { id: 'retrieval', label: 'Retrieval', icon: <Search size={17} /> },
+  { id: 'prompts', label: 'Prompts', icon: <ScrollText size={17} /> },
+  { id: 'providers', label: 'Providers', icon: <KeyRound size={17} /> },
+  { id: 'analytics', label: 'Analytics', icon: <BarChart3 size={17} /> },
+  { id: 'users', label: 'Users', icon: <Users size={17} /> },
+  { id: 'logs', label: 'System logs', icon: <Activity size={17} /> },
+  { id: 'settings', label: 'Settings', icon: <Settings size={17} /> },
+];
+
+/* ───────────── UI primitives ───────────── */
+const card = 'rounded-xl border border-[#263052] bg-[#161C30] min-w-0 box-border';
+const input = 'w-full box-border rounded-lg border border-[#2E3A63] bg-[#0F1424] px-3 py-2.5 text-base sm:text-sm text-[#E8EAF2] placeholder-[#6C789E] focus:border-[#3FA7E0] focus:outline-none focus:ring-1 focus:ring-[#3FA7E0]';
+const btn = 'inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg px-4 text-sm font-medium transition disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3FA7E0] cursor-pointer shrink-0';
+const btnPrimary = `${btn} bg-[#3FA7E0] text-[#08101F] hover:bg-[#62B9E8]`;
+const btnGhost = `${btn} border border-[#2E3A63] bg-[#1B2340] text-[#E8EAF2] hover:bg-[#222C50]`;
+
+function Section({ title, hint, actions, children }: { title: string; hint?: string; actions?: ReactNode; children: ReactNode }) {
+  return (
+    <section className="space-y-4 min-w-0">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-lg font-semibold text-white sm:text-xl truncate">{title}</h2>
+          {hint && <p className="mt-1 max-w-2xl text-sm leading-6 text-[#9AA6C9]">{hint}</p>}
+        </div>
+        {actions && <div className="flex flex-wrap gap-2 shrink-0">{actions}</div>}
+      </div>
+      {children}
+    </section>
+  );
 }
 
-interface FailedJob {
-  id: string;
-  jobId: string;
-  jobType: string;
-  errorMessage: string;
-  attempts: number;
-  createdAt: string;
+function Stat({ label, value, detail }: { label: string; value: string; detail?: string }) {
+  return (
+    <div className={`${card} p-4 min-w-0`}>
+      <p className="text-xs text-[#9AA6C9] truncate">{label}</p>
+      <p className="mt-2 text-xl sm:text-2xl font-semibold tracking-tight text-white tabular-nums truncate">{value}</p>
+      {detail && <p className="mt-1 text-xs text-[#6C789E] truncate">{detail}</p>}
+    </div>
+  );
 }
 
-interface AuditLog {
-  id: string;
-  actorId: string;
-  action: string;
-  resourceType: string;
-  resourceId: string | null;
-  details: string | null;
-  createdAt: string;
+const TONES: Record<string, string> = {
+  green: 'bg-[#3DB27A]/15 text-[#6FD6A2] border-[#3DB27A]/30',
+  yellow: 'bg-[#F2C230]/15 text-[#F2C230] border-[#F2C230]/30',
+  red: 'bg-[#E5586B]/15 text-[#FF8798] border-[#E5586B]/30',
+  blue: 'bg-[#3FA7E0]/15 text-[#7CC4EE] border-[#3FA7E0]/30',
+  gray: 'bg-white/5 text-[#9AA6C9] border-white/10',
+};
+function Badge({ tone = 'gray', children }: { tone?: string; children: ReactNode }) {
+  return <span className={`inline-flex shrink-0 items-center rounded-md border px-2 py-0.5 text-xs font-medium ${TONES[tone]}`}>{children}</span>;
 }
 
-interface ColabConfig {
-  tunnelUrl: string;
-  status: 'connected' | 'disconnected' | 'syncing';
-  lastSyncAt: string | null;
-  syncedChunksCount: number;
-  activeModel: string;
+function Field({ label, tip, children }: { label: string; tip?: string; children: ReactNode }) {
+  return (
+    <label className="block space-y-1.5 min-w-0">
+      <span className="flex items-center gap-1.5 text-xs font-medium text-[#B7C1DE] truncate">
+        {label}
+        {tip && <span title={tip} className="cursor-help text-[#6C789E]"><Info size={13} /></span>}
+      </span>
+      {children}
+    </label>
+  );
 }
 
-interface ComputeMatrix {
-  clusterCapacityPercent: number;
-  gpuAllocation: string;
-  networkRoutingLoad: string;
-  tokenGenerationQueueLength: number;
-  forcedOptimization: boolean;
+function ErrorBanner({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-6 text-center space-y-3 min-w-0">
+      <p className="text-sm text-red-200 break-words">Error: {message}</p>
+      <button onClick={onRetry} className={btnPrimary}>
+        <RefreshCw size={15} /> Retry Request
+      </button>
+    </div>
+  );
 }
 
-interface SafetyState {
-  flaggedRatio: number;
-  toxicityClusterCount: number;
-  guardrailBypassesDetected: number;
-  temperatureConstraint: number;
-  safetyAlignmentPatch: string;
-}
-
-interface ModelRoutingState {
-  primaryModel: string;
-  fallbackModel: string;
-  localOllamaModel: string;
-  routingSplitPercent: number;
-}
-
-interface UserRecord {
-  id: string;
-  email: string;
-  name: string;
-  role: string;
-  createdAt: string;
-}
-
-async function readJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await authFetch(url, init);
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data.error || `Request failed (${response.status}).`);
-  }
-  return data;
-}
-
-function money(value: number) {
-  return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(value);
-}
-
+/* ───────────── Main Admin Component ───────────── */
 export default function AdminPage({ onBack }: { onBack: () => void }) {
-  const [activeTab, setActiveTab] = useState<
-    'overview' | 'colab' | 'compute' | 'safety' | 'models' | 'users' | 'audit'
-  >('overview');
-
-  const [summary, setSummary] = useState<MarginSummary | null>(null);
-  const [failedJobs, setFailedJobs] = useState<FailedJob[]>([]);
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
-  const [colab, setColab] = useState<ColabConfig | null>(null);
-  const [compute, setCompute] = useState<ComputeMatrix | null>(null);
-  const [safety, setSafety] = useState<SafetyState | null>(null);
-  const [models, setModels] = useState<ModelRoutingState | null>(null);
-  const [users, setUsers] = useState<UserRecord[]>([]);
-
-  const [isLoading, setIsLoading] = useState(true);
-  const [isToggling, setIsToggling] = useState(false);
+  const [tab, setTab] = useState<TabId>('overview');
+  const [env, setEnv] = useState<Env>('draft');
+  const [drawer, setDrawer] = useState(false);
+  const [toast, setToast] = useState<{ msg: string; bad?: boolean } | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  const [tunnelInput, setTunnelInput] = useState('');
-  const [isSyncing, setIsSyncing] = useState(false);
+  // Data states from real server
+  const [overview, setOverview] = useState<any>(null);
+  const [health, setHealth] = useState<any[]>([]);
+  const [kbs, setKbs] = useState<any[]>([]);
+  const [docs, setDocs] = useState<any[]>([]);
+  const [datasets, setDatasets] = useState<any[]>([]);
+  const [models, setModels] = useState<any[]>([]);
+  const [prompts, setPrompts] = useState<any[]>([]);
+  const [users, setUsers] = useState<any[]>([]);
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [analytics, setAnalytics] = useState<any>(null);
+  const [providers, setProviders] = useState<any[]>([]);
+  const [fineTuneJobs, setFineTuneJobs] = useState<any[]>([]);
+  const [retrievalSet, setRetrievalSet] = useState<any>(null);
 
-  const refreshAll = useCallback(async () => {
-    setIsLoading(true);
+  // Playground state
+  const [pgQ, setPgQ] = useState('');
+  const [pgKb, setPgKb] = useState('');
+  const [pgResult, setPgResult] = useState<any>(null);
+  const [pgLoading, setPgLoading] = useState(false);
+
+  // Dataset inspection & approval state
+  const [inspectDataset, setInspectDataset] = useState<any | null>(null);
+  const [datasetExamples, setDatasetExamples] = useState<any[]>([]);
+  const [datasetExamplesLoading, setDatasetExamplesLoading] = useState(false);
+
+  const notify = (msg: string, bad = false) => {
+    setToast({ msg, bad });
+    window.setTimeout(() => setToast(null), 3500);
+  };
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
     setError(null);
     try {
-      const [marginRes, jobsRes, logsRes, colabRes, computeRes, safetyRes, modelsRes, usersRes] = await Promise.all([
-        readJson<{ data: MarginSummary }>('/api/admin/margin-check'),
-        readJson<{ data: FailedJob[] }>('/api/admin/failed-jobs'),
-        readJson<{ data: AuditLog[] }>('/api/admin/audit-logs?limit=40'),
-        readJson<{ data: ColabConfig }>('/api/admin/colab/status'),
-        readJson<{ data: ComputeMatrix }>('/api/admin/compute/matrix'),
-        readJson<{ data: SafetyState }>('/api/admin/safety/metrics'),
-        readJson<{ data: ModelRoutingState }>('/api/admin/models/routing'),
-        readJson<{ data: UserRecord[] }>('/api/admin/users'),
+      const [ov, hl, kbList, docList, dsList, mdList, prList, usList, lgList, anData, prvList, ftList, rsData] = await Promise.all([
+        adminApi.getOverview(),
+        adminApi.getHealth(),
+        adminApi.getKnowledgeBases(),
+        adminApi.getDocuments(),
+        adminApi.getDatasets(),
+        adminApi.getModels(),
+        adminApi.getPrompts(),
+        adminApi.getUsers(),
+        adminApi.getAuditLogs(50),
+        adminApi.getAnalytics('7d'),
+        adminApi.getProviders(),
+        adminApi.getFineTuneJobs(),
+        adminApi.getRetrievalSettings(env),
       ]);
 
-      setSummary(marginRes.data);
-      setFailedJobs(jobsRes.data);
-      setAuditLogs(logsRes.data);
-      setColab(colabRes.data);
-      setTunnelInput(colabRes.data.tunnelUrl || '');
-      setCompute(computeRes.data);
-      setSafety(safetyRes.data);
-      setModels(modelsRes.data);
-      setUsers(usersRes.data);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not load enterprise admin dashboard.');
+      setOverview(ov.data);
+      setHealth(hl.data);
+      setKbs(kbList.data);
+      setDocs(docList.data);
+      setDatasets(dsList.data);
+      setModels(mdList.data);
+      setPrompts(prList.data);
+      setUsers(usList.data);
+      setAuditLogs(lgList.data);
+      setAnalytics(anData.data);
+      setProviders(prvList.data);
+      setFineTuneJobs(ftList.data);
+      setRetrievalSet(rsData.data);
+    } catch (err: any) {
+      setError(err.message || 'Failed to connect to backend server.');
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
-  }, []);
+  }, [env]);
 
   useEffect(() => {
-    void refreshAll();
-  }, [refreshAll]);
+    void loadData();
+  }, [loadData]);
 
-  const toggleCircuitBreaker = async () => {
-    if (!summary) return;
-    setIsToggling(true);
-    setError(null);
-    try {
-      await readJson('/api/admin/circuit-breaker/toggle', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ open: !summary.isForcedOpen }),
-      });
-      await refreshAll();
-      setSuccessMsg('Circuit breaker state updated.');
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not update circuit breaker.');
-    } finally {
-      setIsToggling(false);
-    }
-  };
-
-  const saveColabTunnel = async () => {
-    setError(null);
-    try {
-      const res = await readJson<{ data: ColabConfig }>('/api/admin/colab/configure', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tunnelUrl: tunnelInput }),
-      });
-      setColab(res.data);
-      setSuccessMsg('Google Colab Tunnel URL configured successfully.');
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Failed to configure Colab tunnel.');
-    }
-  };
-
-  const triggerColabSync = async () => {
-    setIsSyncing(true);
-    setError(null);
-    try {
-      const res = await readJson<{ data: ColabConfig }>('/api/admin/colab/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      setColab(res.data);
-      setSuccessMsg('Google Colab local knowledge vector sync initiated successfully.');
-      setTimeout(() => void refreshAll(), 2000);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Colab sync failed.');
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  const toggleComputeOverride = async () => {
-    if (!compute) return;
-    try {
-      const res = await readJson<{ data: ComputeMatrix }>('/api/admin/compute/override', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ forcedOptimization: !compute.forcedOptimization }),
-      });
-      setCompute(res.data);
-      setSuccessMsg('Compute optimization mode updated.');
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Failed to update compute override.');
-    }
-  };
-
-  const updateUserRole = async (userId: string, role: string) => {
-    try {
-      await readJson('/api/admin/users/role', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, role }),
-      });
-      await refreshAll();
-      setSuccessMsg(`User role updated to ${role}.`);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Failed to update user role.');
-    }
-  };
+  const go = (id: TabId) => { setTab(id); setDrawer(false); };
 
   return (
-    <main className="flex h-[100dvh] w-full min-w-0 flex-col overflow-hidden bg-[#0A0C10] text-slate-100 font-sans">
-      {/* Top Header */}
-      <header className="flex shrink-0 items-center justify-between border-b border-white/10 bg-[#111318] px-6 py-4 shadow-xl">
-        <div className="flex items-center gap-4">
-          <button
-            type="button"
-            onClick={onBack}
-            className="rounded-xl p-2.5 text-slate-400 transition hover:bg-white/10 hover:text-white"
-            aria-label="Back to workspace"
-          >
-            <ArrowLeft size={20} />
+    <div className="h-dvh min-h-screen bg-[#0B0F19] text-[#E8EAF2] flex flex-col overflow-hidden">
+      {toast && (
+        <div className={`fixed bottom-[calc(1.5rem+env(safe-area-inset-bottom))] right-4 left-4 sm:left-auto sm:right-6 z-50 rounded-xl px-4 py-3 text-sm font-medium shadow-xl border ${toast.bad ? 'bg-red-950/90 border-red-500/40 text-red-200' : 'bg-[#161C30] border-[#3FA7E0]/40 text-[#7CC4EE]'}`}>
+          {toast.msg}
+        </div>
+      )}
+
+      {/* Backdrop for mobile drawer */}
+      {drawer && (
+        <div className="fixed inset-0 bg-black/60 z-40 backdrop-blur-sm lg:hidden" onClick={() => setDrawer(false)} />
+      )}
+
+      <header className="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-[#202945] bg-[#0F1424]/95 px-3 sm:px-8 backdrop-blur shrink-0 min-w-0">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <button onClick={onBack} className={btnGhost} title="Return to App">
+            <ArrowLeft size={16} /> <span className="hidden xs:inline">Exit Admin</span><span className="xs:hidden">Exit</span>
           </button>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-400 border border-emerald-500/20">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" /> Master Admin Secure
-              </span>
-              <span className="text-xs text-slate-400">niyibizisteven13@gmail.com</span>
-            </div>
-            <h1 className="text-xl font-bold tracking-tight text-white mt-0.5">ChatGPT Enterprise Operations & Colab Control</h1>
-          </div>
+          <div className="hidden sm:block h-5 w-px bg-[#263052] shrink-0" />
+          <h1 className="text-sm sm:text-base font-semibold tracking-tight text-white flex items-center gap-1.5 truncate min-w-0">
+            <span className="text-[#3FA7E0] shrink-0">Bwenge AI</span> <span className="truncate">Admin Console</span>
+          </h1>
         </div>
 
-        <div className="flex items-center gap-3">
-          {successMsg && (
-            <span className="hidden md:inline-flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-xl">
-              <CheckCircle2 size={14} /> {successMsg}
-            </span>
-          )}
-          <button
-            type="button"
-            onClick={() => void refreshAll()}
-            disabled={isLoading}
-            className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
-          >
-            <RefreshCw size={15} className={isLoading ? 'animate-spin' : ''} />
-            <span>Sync Telemetry</span>
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          <div className="flex items-center bg-[#161C30] rounded-lg border border-[#263052] p-0.5 sm:p-1 text-xs shrink-0">
+            {(['draft', 'testing', 'production'] as Env[]).map((e) => (
+              <button
+                key={e}
+                onClick={() => { setEnv(e); notify(`Switched environment to ${e}`); }}
+                className={`px-2 sm:px-3 py-1.5 rounded-md font-medium capitalize transition cursor-pointer ${env === e ? 'bg-[#3FA7E0] text-[#08101F]' : 'text-[#9AA6C9] hover:text-white'}`}
+              >
+                {e}
+              </button>
+            ))}
+          </div>
+
+          <button onClick={() => setDrawer(true)} className={`lg:hidden ${btnGhost} p-2.5`} aria-label="Open Navigation">
+            <Menu size={20} />
           </button>
         </div>
       </header>
 
-      {/* Navigation Tabs */}
-      <nav aria-label="Admin Sections" className="flex overflow-x-auto border-b border-white/10 bg-[#0E1015] px-6 py-2.5 gap-2 shrink-0">
-        {[
-          { id: 'overview', label: 'System Overview & Costs', icon: <Activity size={16} /> },
-          { id: 'colab', label: 'Google Colab & Local AI', icon: <Terminal size={16} /> },
-          { id: 'compute', label: 'Compute & GPU Matrix', icon: <Cpu size={16} /> },
-          { id: 'safety', label: 'Safety & Moderation', icon: <Shield size={16} /> },
-          { id: 'models', label: 'Model Weights & Routing', icon: <Sliders size={16} /> },
-          { id: 'users', label: 'Enterprise Users & Roles', icon: <Users size={16} /> },
-          { id: 'audit', label: 'Audit Trail & Security', icon: <Lock size={16} /> },
-        ].map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => setActiveTab(tab.id as any)}
-            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold transition shrink-0 ${
-              activeTab === tab.id
-                ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20'
-                : 'text-slate-400 hover:bg-white/5 hover:text-white'
-            }`}
-          >
-            {tab.icon}
-            {tab.label}
-          </button>
-        ))}
-      </nav>
+      <div className="flex flex-1 overflow-hidden min-w-0">
+        <aside className={`fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] bg-[#0F1424] border-r border-[#202945] flex flex-col transition-transform duration-200 lg:static lg:translate-x-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] ${drawer ? 'translate-x-0 shadow-2xl' : '-translate-x-full'}`}>
+          <div className="p-4 flex items-center justify-between border-b border-[#202945] lg:hidden shrink-0">
+            <span className="font-semibold text-white">Admin Navigation</span>
+            <button onClick={() => setDrawer(false)} className="text-[#9AA6C9] hover:text-white p-2" aria-label="Close Navigation"><X size={20} /></button>
+          </div>
+          <nav className="flex-1 overflow-y-auto p-4 space-y-1 min-w-0 scrollbar-hidden">
+            {NAV.map((n) => (
+              <button
+                key={n.id}
+                onClick={() => go(n.id)}
+                className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-lg text-sm font-medium transition cursor-pointer ${tab === n.id ? 'bg-[#3FA7E0]/15 text-[#7CC4EE] border border-[#3FA7E0]/30' : 'text-[#9AA6C9] hover:bg-[#161C30] hover:text-white'}`}
+              >
+                <span className="shrink-0">{n.icon}</span>
+                <span className="truncate">{n.label}</span>
+              </button>
+            ))}
+          </nav>
+        </aside>
 
-      {/* Main Content Area */}
-      <div className="min-h-0 flex-1 overflow-y-auto p-6 bg-[#0A0C10]">
-        <div className="mx-auto w-full max-w-7xl space-y-6">
-          {error && (
-            <div role="alert" className="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200 flex items-center gap-3">
-              <AlertTriangle size={18} className="shrink-0 text-rose-400" />
-              <span>{error}</span>
+        <main className="flex-1 overflow-y-auto p-4 sm:p-8 space-y-8 min-w-0 pb-[calc(3rem+env(safe-area-inset-bottom))]">
+          <div className="flex flex-wrap items-center justify-between gap-4 min-w-0">
+            <div className="min-w-0">
+              <h2 className="text-xl sm:text-2xl font-bold text-white capitalize truncate">{tab}</h2>
+              <p className="text-sm text-[#9AA6C9] mt-0.5">Live database and server connected control plane.</p>
             </div>
-          )}
+            <button onClick={loadData} className={btnGhost}>
+              <RefreshCw size={15} /> Refresh Data
+            </button>
+          </div>
 
-          {/* TAB 1: OVERVIEW & COSTS */}
-          {activeTab === 'overview' && (
-            <div className="space-y-6">
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                <MetricCard label="Hourly AI Spend" value={summary ? money(summary.hourlySpend) : '—'} detail={summary ? `of ${money(summary.threshold)} hard limit` : 'Loading'} icon={<Activity size={18} />} />
-                <MetricCard label="Failed Jobs Review" value={summary ? String(summary.failedJobsCount) : '—'} detail="Awaiting manual inspection" icon={<AlertTriangle size={18} />} />
-                <MetricCard label="Grading Markup" value={summary ? `${summary.grading.avgMargin.toFixed(2)}×` : '—'} detail={summary ? `${summary.grading.jobCount} jobs · last 24h` : 'Loading'} icon={<Zap size={18} />} />
-                <MetricCard label="Scoring Markup" value={summary ? `${summary.scoring.avgMargin.toFixed(2)}×` : '—'} detail={summary ? `${summary.scoring.jobCount} jobs · last 24h` : 'Loading'} icon={<Zap size={18} />} />
-              </div>
+          {loading ? (
+            <div className={`${card} p-12 text-center text-[#9AA6C9]`}>Loading live data from server...</div>
+          ) : error ? (
+            <ErrorBanner message={error} onRetry={loadData} />
+          ) : (
+            <>
+              {tab === 'overview' && overview && (
+                <div className="space-y-6 min-w-0">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <Stat label="Knowledge Bases" value={overview.counts.knowledgeBases} detail="Active stores" />
+                    <Stat label="Total Documents" value={overview.counts.documents} detail="Indexed files" />
+                    <Stat label="Dataset Examples" value={overview.counts.datasetExamples} detail="Curated samples" />
+                    <Stat label="Questions Answered" value={overview.counts.questionsAnswered} detail="Lifetime RAG" />
+                    <Stat label="Active Models" value={overview.counts.activeModels} detail="Deployment ready" />
+                    <Stat label="Fine-Tune Jobs" value={overview.counts.fineTuneJobs} detail="Custom weights" />
+                    <Stat label="Tokens Used" value={overview.counts.tokensUsed.toLocaleString()} detail="Input + Output" />
+                    <Stat label="Storage Used" value={`${overview.counts.storageUsedGb} GB`} detail="Object store" />
+                  </div>
 
-              <div className="grid gap-6 lg:grid-cols-2">
-                <div className="rounded-2xl border border-white/10 bg-[#12151B] p-6 shadow-xl">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <h2 className="font-semibold text-base text-white">AI Cost Circuit Breaker</h2>
-                      <p className="mt-1 text-xs leading-5 text-slate-400">Instantly halt inference dispatch if spend anomalies or cost spikes exceed safety thresholds.</p>
+                  <Section title="Live Service Health" hint="Real-time ping status of connected backend services.">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+                      {health.map((s, idx) => (
+                        <div key={idx} className={`${card} p-4 flex items-center justify-between min-w-0`}>
+                          <div className="min-w-0 mr-2">
+                            <p className="text-xs text-[#9AA6C9] truncate">{s.name}</p>
+                            <p className="mt-1 text-sm font-medium text-white truncate">{s.latency}</p>
+                          </div>
+                          <Badge tone={s.status === 'ONLINE' ? 'green' : 'yellow'}>{s.status}</Badge>
+                        </div>
+                      ))}
                     </div>
-                    <ShieldAlert className={summary?.isCircuitOpen ? 'shrink-0 text-rose-400' : 'shrink-0 text-emerald-400'} size={22} />
-                  </div>
-                  <div className="mt-6 flex flex-wrap items-center justify-between gap-4 border-t border-white/10 pt-5">
-                    <div>
-                      <p className={`text-sm font-bold ${summary?.isCircuitOpen ? 'text-rose-300' : 'text-emerald-300'}`}>
-                        {summary ? (summary.isCircuitOpen ? 'CIRCUIT OPEN — AI Requests Tripped' : 'Circuit Closed — Normal Operation') : 'Checking…'}
-                      </p>
-                      <p className="mt-1 text-xs text-slate-500">{summary?.isForcedOpen ? 'Manual override active.' : 'Automated threshold monitoring active.'}</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => void toggleCircuitBreaker()}
-                      disabled={!summary || isToggling}
-                      className="min-h-11 rounded-xl border border-white/10 bg-white/5 px-5 text-sm font-semibold transition hover:bg-white/10 disabled:opacity-50"
-                    >
-                      {isToggling ? 'Updating…' : summary?.isForcedOpen ? 'Clear Override' : 'Force Open Breaker'}
-                    </button>
-                  </div>
+                  </Section>
                 </div>
+              )}
 
-                <div className="rounded-2xl border border-white/10 bg-[#12151B] p-6 shadow-xl">
-                  <h2 className="font-semibold text-base text-white">Financial Telemetry & Margins</h2>
-                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                    <MarginDetail label="Grading Engine" value={summary?.grading} />
-                    <MarginDetail label="Scoring & Rubric" value={summary?.scoring} />
-                  </div>
-                  <p className="mt-4 text-xs text-slate-500">
-                    {summary ? `Last synced: ${new Date(summary.timestamp).toLocaleTimeString()} · Target Margin: ${summary.targetMargin.toFixed(2)}×.` : 'Waiting for telemetry'}
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 2: GOOGLE COLAB & LOCAL AI KNOWLEDGE CONSOLE */}
-          {activeTab === 'colab' && (
-            <div className="space-y-6">
-              <div className="rounded-2xl border border-white/10 bg-[#12151B] p-6 shadow-xl space-y-4">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                      <Terminal className="text-emerald-400" size={20} /> Google Colab & Local Knowledge RAG Console
-                    </h2>
-                    <p className="text-xs text-slate-400 mt-1 max-w-2xl">
-                      Connect your teammates' Google Colab GPU notebook tunnel (ngrok / cloudflare) to ingest local real-world knowledge embeddings. This allows large foundation models (GPT-4o, Claude 3.5 Sonnet) to answer relying on precise local information.
-                    </p>
-                  </div>
-                  <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${
-                    colab?.status === 'connected' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' :
-                    colab?.status === 'syncing' ? 'bg-amber-500/10 text-amber-400 border-amber-500/35' :
-                    'bg-slate-500/10 text-slate-400 border-slate-500/30'
-                  }`}>
-                    {colab?.status.toUpperCase() || 'DISCONNECTED'}
-                  </span>
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-3 pt-2">
-                  <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-                    <p className="text-xs text-slate-400">Synced Knowledge Chunks</p>
-                    <p className="text-2xl font-bold text-white mt-1">{colab?.syncedChunksCount || 0}</p>
-                    <p className="text-[11px] text-slate-500 mt-1">Local vector embeddings loaded</p>
-                  </div>
-                  <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-                    <p className="text-xs text-slate-400">Active RAG Model</p>
-                    <p className="text-sm font-semibold text-emerald-300 mt-1">{colab?.activeModel || 'GPT-4o + Local RAG'}</p>
-                    <p className="text-[11px] text-slate-500 mt-1">Hybrid context injection enabled</p>
-                  </div>
-                  <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-                    <p className="text-xs text-slate-400">Last Knowledge Sync</p>
-                    <p className="text-sm font-semibold text-white mt-1">{colab?.lastSyncAt ? new Date(colab.lastSyncAt).toLocaleTimeString() : 'Never'}</p>
-                    <p className="text-[11px] text-slate-500 mt-1">Automated background sync</p>
-                  </div>
-                </div>
-
-                <div className="space-y-3 pt-4 border-t border-white/10">
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wide">
-                    Google Colab Ngrok / Cloudflare Tunnel URL
-                  </label>
-                  <div className="flex gap-3">
-                    <input
-                      type="url"
-                      value={tunnelInput}
-                      onChange={(e) => setTunnelInput(e.target.value)}
-                      placeholder="https://xxxx-xx-xx.ngrok-free.app"
-                      className="flex-1 rounded-xl border border-white/10 bg-black/40 px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:border-emerald-500 focus:outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => void saveColabTunnel()}
-                      className="rounded-xl bg-white/10 hover:bg-white/20 px-5 text-sm font-semibold text-white transition"
-                    >
-                      Connect Tunnel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void triggerColabSync()}
-                      disabled={isSyncing}
-                      className="rounded-xl bg-emerald-500 hover:bg-emerald-400 px-5 text-sm font-bold text-black transition flex items-center gap-2 disabled:opacity-50"
-                    >
-                      <RefreshCw size={15} className={isSyncing ? 'animate-spin' : ''} />
-                      {isSyncing ? 'Syncing Knowledge…' : 'Sync Local Knowledge'}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Teammate Colab Python Notebook Code Snippet */}
-                <div className="rounded-xl border border-white/10 bg-black/40 p-5 space-y-3 mt-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-emerald-400 flex items-center gap-1.5">
-                      <Terminal size={14} /> Teammate Google Colab Setup Snippet (Python)
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const snippet = `!pip install fastapi uvicorn sentence-transformers chromadb\nfrom fastapi import FastAPI\napp = FastAPI()\n\n@app.post("/sync-knowledge")\ndef sync_kb():\n    return {"status": "success", "chunks_indexed": 1420}\n\nimport nest_asyncio\nfrom pyngrok import ngrok\nnest_asyncio.apply()\npublic_url = ngrok.connect(8000)\nprint("Colab Tunnel URL:", public_url)`;
-                        void navigator.clipboard.writeText(snippet);
-                        setSuccessMsg('Colab snippet copied to clipboard!');
-                      }}
-                      className="text-xs text-slate-400 hover:text-white underline"
-                    >
-                      Copy Snippet
-                    </button>
-                  </div>
-                  <pre className="text-xs font-mono text-slate-300 bg-black/60 p-4 rounded-lg overflow-x-auto">
-                    {`# Run this in your Google Colab GPU notebook to sync local files & embeddings
-!pip install fastapi uvicorn sentence-transformers chromadb pyngrok
-from fastapi import FastAPI
-import uvicorn
-
-app = FastAPI()
-
-@app.post("/query-local-knowledge")
-def query_kb(prompt: str):
-    # Vector search over your local dataset
-    return {"response": "Answer derived from local Google Colab RAG dataset.", "confidence": 0.98}
-
-from pyngrok import ngrok
-public_url = ngrok.connect(8000)
-print("🔑 Paste this Tunnel URL into the Admin Colab Console:", public_url)`}
-                  </pre>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 3: COMPUTE & GPU MATRIX */}
-          {activeTab === 'compute' && (
-            <div className="space-y-6">
-              <div className="rounded-2xl border border-white/10 bg-[#12151B] p-6 shadow-xl space-y-6">
-                <div>
-                  <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                    <Cpu className="text-emerald-400" size={20} /> Compute Cluster & GPU Optimization Matrix
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-1">Real-time telemetry mapping multi-region server farms, GPU allocation loads, and token routing queues.</p>
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                  <MetricCard label="Cluster Capacity" value={`${compute?.clusterCapacityPercent.toFixed(1)}%`} detail="H100 & A100 Array Load" icon={<Cpu size={18} />} />
-                  <MetricCard label="GPU Pool" value={compute?.gpuAllocation || 'H100 Alpha'} detail="8x 80GB VRAM nodes" icon={<Zap size={18} />} />
-                  <MetricCard label="Network Load" value={compute?.networkRoutingLoad || 'Normal'} detail="Global BGP Anycast" icon={<Globe size={18} />} />
-                  <MetricCard label="Token Queue" value={String(compute?.tokenGenerationQueueLength || 0)} detail="Active generation backlog" icon={<Activity size={18} />} />
-                </div>
-
-                <div className="rounded-xl border border-white/10 bg-black/30 p-6 flex items-center justify-between">
-                  <div>
-                    <h3 className="font-semibold text-white">Dynamic Cluster Optimization Override</h3>
-                    <p className="text-xs text-slate-400 mt-0.5">Force dynamic token redistribution across standby GPU workers to relieve peak traffic bottlenecks.</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => void toggleComputeOverride()}
-                    className={`px-5 py-2.5 rounded-xl text-sm font-bold transition ${
-                      compute?.forcedOptimization ? 'bg-amber-500 text-black' : 'bg-white/10 hover:bg-white/20 text-white'
-                    }`}
-                  >
-                    {compute?.forcedOptimization ? 'Optimization Active (ON)' : 'Enable Dynamic Override'}
+              {tab === 'knowledge' && (
+                <Section title="Knowledge Bases" hint="Manage document repositories and vector stores." actions={
+                  <button onClick={async () => {
+                    const name = prompt('Knowledge Base Name:');
+                    if (!name) return;
+                    try {
+                      await adminApi.createKnowledgeBase({ name, description: 'Created from admin console' });
+                      notify('Knowledge base created');
+                      await loadData();
+                    } catch (e: any) { notify(e.message, true); }
+                  }} className={btnPrimary}>
+                    <Plus size={16} /> New Knowledge Base
                   </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 4: SAFETY & MODERATION */}
-          {activeTab === 'safety' && (
-            <div className="space-y-6">
-              <div className="rounded-2xl border border-white/10 bg-[#12151B] p-6 shadow-xl space-y-6">
-                <div>
-                  <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                    <Shield className="text-emerald-400" size={20} /> Safety & Moderation Guardrail Hub
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-1">Monitor toxicity clusters, guardrail bypass alerts, and hot-patch system safety alignment matrices.</p>
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-3">
-                  <MetricCard label="Flagged Content Ratio" value={`${((safety?.flaggedRatio || 0) * 100).toFixed(3)}%`} detail="Well within safe limits (<0.1%)" icon={<ShieldAlert size={18} />} />
-                  <MetricCard label="Toxicity Clusters" value={String(safety?.toxicityClusterCount || 0)} detail="No active threat clusters" icon={<CheckCircle2 size={18} />} />
-                  <MetricCard label="Guardrail Bypasses" value={String(safety?.guardrailBypassesDetected || 0)} detail="Zero bypasses in 24h" icon={<Lock size={18} />} />
-                </div>
-
-                <div className="rounded-xl border border-white/10 bg-black/30 p-6 space-y-4">
-                  <h3 className="font-semibold text-white">Active Safety Alignment Matrix</h3>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Temperature Constraint (0.0 — 1.0)</label>
-                      <input
-                        type="number"
-                        step="0.05"
-                        min="0"
-                        max="1"
-                        value={safety?.temperatureConstraint || 0.2}
-                        onChange={async (e) => {
-                          const val = parseFloat(e.target.value);
-                          const res = await readJson<{ data: SafetyState }>('/api/admin/safety/patch', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ temperatureConstraint: val }),
-                          });
-                          setSafety(res.data);
-                        }}
-                        className="w-full rounded-xl border border-white/10 bg-black/50 px-4 py-2 text-sm text-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-400 mb-1">Alignment Version Patch</label>
-                      <input
-                        type="text"
-                        value={safety?.safetyAlignmentPatch || ''}
-                        onChange={async (e) => {
-                          const val = e.target.value;
-                          const res = await readJson<{ data: SafetyState }>('/api/admin/safety/patch', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ safetyAlignmentPatch: val }),
-                          });
-                          setSafety(res.data);
-                        }}
-                        className="w-full rounded-xl border border-white/10 bg-black/50 px-4 py-2 text-sm text-white"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 5: MODEL WEIGHTS & ROUTING */}
-          {activeTab === 'models' && (
-            <div className="space-y-6">
-              <div className="rounded-2xl border border-white/10 bg-[#12151B] p-6 shadow-xl space-y-6">
-                <div>
-                  <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                    <Sliders className="text-emerald-400" size={20} /> Foundational Model Weights & Intelligent Routing
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-1">Configure active foundational models, customized routing percentage splits, and local Ollama weights.</p>
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-3">
-                  <div className="rounded-xl border border-white/10 bg-black/30 p-4">
-                    <p className="text-xs text-slate-400">Primary Model</p>
-                    <p className="text-sm font-bold text-white mt-1">{models?.primaryModel || 'Claude 3.5 Sonnet'}</p>
-                  </div>
-                  <div className="rounded-xl border border-white/10 bg-black/30 p-4">
-                    <p className="text-xs text-slate-400">Fallback Model</p>
-                    <p className="text-sm font-bold text-white mt-1">{models?.fallbackModel || 'Gemini 2.5 Flash'}</p>
-                  </div>
-                  <div className="rounded-xl border border-white/10 bg-black/30 p-4">
-                    <p className="text-xs text-slate-400">Local Ollama Model</p>
-                    <p className="text-sm font-bold text-white mt-1">{models?.localOllamaModel || 'Llama 3:8B'}</p>
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-white/10 bg-black/30 p-6 space-y-4">
-                  <h3 className="font-semibold text-white">A/B Testing & Traffic Split</h3>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-slate-400">Primary Traffic Allocation: <strong className="text-white">{models?.routingSplitPercent || 85}%</strong></span>
-                    <span className="text-slate-400">Fallback Traffic: <strong className="text-white">{100 - (models?.routingSplitPercent || 85)}%</strong></span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    value={models?.routingSplitPercent || 85}
-                    onChange={async (e) => {
-                      const split = parseInt(e.target.value, 10);
-                      const res = await readJson<{ data: ModelRoutingState }>('/api/admin/models/routing', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ routingSplitPercent: split }),
-                      });
-                      setModels(res.data);
-                    }}
-                    className="w-full accent-emerald-500 cursor-pointer"
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 6: ENTERPRISE USERS & ROLES */}
-          {activeTab === 'users' && (
-            <div className="space-y-6">
-              <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#12151B] shadow-xl">
-                <div className="border-b border-white/10 px-6 py-4 flex items-center justify-between">
-                  <div>
-                    <h2 className="text-lg font-bold text-white">Enterprise User & Workspace Registry</h2>
-                    <p className="text-xs text-slate-400 mt-0.5">Manage user permissions and elevate administrative accounts.</p>
-                  </div>
-                  <span className="text-xs bg-white/5 border border-white/10 px-3 py-1 rounded-xl text-slate-300">
-                    {users.length} Registered Users
-                  </span>
-                </div>
-
-                <div className="divide-y divide-white/[0.06]">
-                  {users.map((u) => (
-                    <div key={u.id} className="flex flex-wrap items-center justify-between gap-4 px-6 py-4 hover:bg-white/[0.02]">
-                      <div>
-                        <p className="text-sm font-semibold text-white">{u.name}</p>
-                        <p className="text-xs text-slate-400">{u.email}</p>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className={`text-xs font-semibold px-2.5 py-1 rounded-lg border ${
-                          u.role === 'ADMIN' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-white/5 text-slate-300 border-white/10'
-                        }`}>
-                          {u.role}
-                        </span>
-                        {u.role !== 'ADMIN' && (
-                          <button
-                            type="button"
-                            onClick={() => void updateUserRole(u.id, 'ADMIN')}
-                            className="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-white/10 transition"
-                          >
-                            Make Admin
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 7: AUDIT TRAIL & SECURITY */}
-          {activeTab === 'audit' && (
-            <div className="grid gap-6 xl:grid-cols-2">
-              <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#12151B] shadow-xl">
-                <div className="border-b border-white/10 px-6 py-4">
-                  <h2 className="font-semibold text-white">Failed Jobs Review</h2>
-                  <p className="mt-1 text-xs text-slate-400">Items requiring manual intervention.</p>
-                </div>
-                {failedJobs.length === 0 ? (
-                  <p className="p-6 text-sm text-slate-400">No failed jobs require review.</p>
-                ) : (
-                  <ul className="divide-y divide-white/[0.06]">
-                    {failedJobs.map((job) => (
-                      <li key={job.id} className="space-y-1.5 p-6">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-semibold uppercase tracking-wider text-amber-400">{job.jobType} · {job.attempts} attempts</span>
-                          <time className="text-[11px] text-slate-500">{new Date(job.createdAt).toLocaleString()}</time>
+                }>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {kbs.map((kb) => (
+                      <div key={kb.id} className={`${card} p-5 space-y-4 min-w-0`}>
+                        <div className="flex justify-between items-start gap-2 min-w-0">
+                          <h3 className="font-semibold text-white truncate">{kb.name}</h3>
+                          <Badge tone={kb.state === 'active' ? 'green' : 'gray'}>{kb.state}</Badge>
                         </div>
-                        <p className="text-sm text-slate-200">{job.errorMessage}</p>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-
-              <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#12151B] shadow-xl">
-                <div className="border-b border-white/10 px-6 py-4">
-                  <h2 className="font-semibold text-white">Cryptographic Audit Trail</h2>
-                  <p className="mt-1 text-xs text-slate-400">Real-time action logging across all administrative modules.</p>
-                </div>
-                {auditLogs.length === 0 ? (
-                  <p className="p-6 text-sm text-slate-400">No audit events recorded.</p>
-                ) : (
-                  <ul className="divide-y divide-white/[0.06] max-h-[500px] overflow-y-auto">
-                    {auditLogs.map((log) => (
-                      <li key={log.id} className="space-y-1 p-5">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-semibold text-white">{log.action} · {log.resourceType}</span>
-                          <time className="text-[11px] text-slate-500">{new Date(log.createdAt).toLocaleString()}</time>
+                        <p className="text-xs text-[#9AA6C9] break-words">{kb.description || 'No description provided.'}</p>
+                        <div className="flex justify-between text-xs text-[#6C789E] border-t border-[#263052] pt-3">
+                          <span className="truncate">{kb.docs} Documents</span>
+                          <span className="truncate">{kb.chunks} Chunks</span>
                         </div>
-                        <p className="text-[11px] text-slate-500">Actor: {log.actorId}</p>
-                        {log.details && <p className="text-xs text-slate-400 font-mono bg-black/40 p-2 rounded">{log.details}</p>}
-                      </li>
+                      </div>
                     ))}
-                  </ul>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </main>
-  );
-}
+                  </div>
+                </Section>
+              )}
 
-function MetricCard({ label, value, detail, icon }: { label: string; value: string; detail: string; icon: ReactNode }) {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-[#12151B] p-5 shadow-lg">
-      <div className="flex items-center justify-between text-slate-400">
-        <span className="text-xs font-medium uppercase tracking-wider">{label}</span>
-        {icon}
+              {tab === 'documents' && (
+                <Section title="Document Ingestion & Pipeline" hint="Upload PDFs, spreadsheets, and text files for RAG indexing." actions={
+                  <label className={btnPrimary + ' cursor-pointer'}>
+                    <Upload size={16} /> Upload Document
+                    <input type="file" className="hidden" onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const kbId = kbs[0]?.id;
+                      if (!kbId) { notify('Create a knowledge base first.', true); return; }
+                      const form = new FormData();
+                      form.append('file', file);
+                      form.append('knowledgeBaseId', kbId);
+                      try {
+                        notify('Uploading and processing document...');
+                        await adminApi.uploadDocument(form);
+                        notify('Document uploaded successfully.');
+                        await loadData();
+                      } catch (err: any) { notify(err.message, true); }
+                    }} />
+                  </label>
+                }>
+                  <div className={`${card} overflow-x-auto`}>
+                    <table className="w-full text-left text-sm min-w-[650px]">
+                      <thead className="bg-[#1B2340] text-xs text-[#9AA6C9] uppercase border-b border-[#263052]">
+                        <tr>
+                          <th className="p-4">Name</th>
+                          <th className="p-4">Type</th>
+                          <th className="p-4">Size</th>
+                          <th className="p-4">Knowledge Base</th>
+                          <th className="p-4">Stage</th>
+                          <th className="p-4">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#263052]">
+                        {docs.map((d) => (
+                          <tr key={d.id} className="hover:bg-[#1B2340]/50">
+                            <td className="p-4 font-medium text-white max-w-[200px] truncate" title={d.name}>{d.name}</td>
+                            <td className="p-4"><Badge tone="blue">{d.type}</Badge></td>
+                            <td className="p-4 text-[#9AA6C9]">{d.size}</td>
+                            <td className="p-4 text-[#9AA6C9] max-w-[150px] truncate">{d.kb}</td>
+                            <td className="p-4"><Badge tone={d.status === 'READY' ? 'green' : 'yellow'}>Stage {d.stage} ({d.status})</Badge></td>
+                            <td className="p-4">
+                              <button onClick={async () => {
+                                if (confirm(`Delete document ${d.name}?`)) {
+                                  await adminApi.deleteDocument(d.id);
+                                  notify('Document deleted');
+                                  await loadData();
+                                }
+                              }} className="text-red-400 hover:text-red-300 p-1" title="Delete Document"><Trash2 size={16} /></button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Section>
+              )}
+
+              {tab === 'datasets' && (
+                inspectDataset ? (
+                  <Section title={`Dataset Examples: ${inspectDataset.name}`} hint="Review and approve examples before starting a fine-tuning job." actions={
+                    <div className="flex gap-2">
+                      <button onClick={async () => {
+                        try {
+                          await Promise.all(datasetExamples.map(ex => adminApi.updateDatasetExample(ex.id, { status: 'approved' })));
+                          const res = await adminApi.getDatasetExamples(inspectDataset.id);
+                          setDatasetExamples(res.data);
+                          notify('All dataset examples approved');
+                        } catch (err: any) { notify(err.message, true); }
+                      }} className={btnPrimary}>Approve All</button>
+                      <button onClick={() => setInspectDataset(null)} className={btnGhost}>Back to Datasets</button>
+                    </div>
+                  }>
+                    {datasetExamplesLoading ? (
+                      <p className="text-sm text-[#9AA6C9]">Loading examples...</p>
+                    ) : datasetExamples.length === 0 ? (
+                      <p className="text-sm text-[#9AA6C9]">No examples found. Click "Generate from Knowledge" in the datasets list.</p>
+                    ) : (
+                      <div className="space-y-4">
+                        {datasetExamples.map((ex) => (
+                          <div key={ex.id} className={`${card} p-4 space-y-3 min-w-0`}>
+                            <div className="flex justify-between items-center">
+                              <Badge tone={ex.status === 'approved' ? 'success' : ex.status === 'rejected' ? 'danger' : 'warning'}>{ex.status}</Badge>
+                              <div className="flex gap-2">
+                                {ex.status !== 'approved' && (
+                                  <button onClick={async () => {
+                                    await adminApi.updateDatasetExample(ex.id, { status: 'approved' });
+                                    const res = await adminApi.getDatasetExamples(inspectDataset.id);
+                                    setDatasetExamples(res.data);
+                                    notify('Example approved');
+                                  }} className="px-3 py-1 bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 rounded text-xs hover:bg-emerald-600/30">Approve</button>
+                                )}
+                                {ex.status !== 'rejected' && (
+                                  <button onClick={async () => {
+                                    await adminApi.updateDatasetExample(ex.id, { status: 'rejected' });
+                                    const res = await adminApi.getDatasetExamples(inspectDataset.id);
+                                    setDatasetExamples(res.data);
+                                    notify('Example rejected');
+                                  }} className="px-3 py-1 bg-rose-600/20 text-rose-400 border border-rose-500/30 rounded text-xs hover:bg-rose-600/30">Reject</button>
+                                )}
+                              </div>
+                            </div>
+                            <div>
+                              <p className="text-xs font-semibold text-[#9AA6C9]">Prompt:</p>
+                              <p className="text-sm text-white bg-[#0F1424] p-3 rounded border border-[#2E3A63] mt-1 whitespace-pre-wrap">{ex.prompt}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs font-semibold text-[#9AA6C9]">Completion:</p>
+                              <p className="text-sm text-white bg-[#0F1424] p-3 rounded border border-[#2E3A63] mt-1 whitespace-pre-wrap">{ex.completion}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </Section>
+                ) : (
+                  <Section title="Datasets & Fine-Tuning Curations" hint="Manage training datasets and verified examples." actions={
+                    <button onClick={async () => {
+                      const name = prompt('Dataset Name:');
+                      if (!name) return;
+                      await adminApi.createDataset({ name });
+                      notify('Dataset created');
+                      await loadData();
+                    }} className={btnPrimary}>
+                      <Plus size={16} /> New Dataset
+                    </button>
+                  }>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {datasets.map((ds) => (
+                        <div key={ds.id} className={`${card} p-5 space-y-3 min-w-0`}>
+                          <h3 className="font-semibold text-white truncate">{ds.name}</h3>
+                          <p className="text-xs text-[#9AA6C9] break-words">{ds.description || 'Curated dataset for fine-tuning.'}</p>
+                          <div className="flex flex-wrap gap-2 pt-2">
+                            <button onClick={async () => {
+                              await adminApi.generateDatasetExamples(ds.id);
+                              notify('Generated pending candidates from knowledge base.');
+                              await loadData();
+                            }} className={btnGhost}>Generate from Knowledge</button>
+                            <button onClick={async () => {
+                              setInspectDataset(ds);
+                              setDatasetExamplesLoading(true);
+                              try {
+                                const res = await adminApi.getDatasetExamples(ds.id);
+                                setDatasetExamples(res.data);
+                              } catch (err: any) { notify(err.message, true); }
+                              finally { setDatasetExamplesLoading(false); }
+                            }} className={btnGhost}>Inspect Examples</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </Section>
+                )
+              )}
+
+              {tab === 'playground' && (
+                <Section title="AI RAG Playground" hint="Test the retrieval pipeline and model response with live citations.">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 min-w-0">
+                    <div className={`${card} p-4 sm:p-6 space-y-4 min-w-0`}>
+                      <Field label="Test Question">
+                        <textarea rows={4} className={input} value={pgQ} onChange={(e) => setPgQ(e.target.value)} placeholder="Ask a question about uploaded documents..." />
+                      </Field>
+                      <Field label="Knowledge Base">
+                        <select className={input} value={pgKb} onChange={(e) => setPgKb(e.target.value)}>
+                          <option value="">All Knowledge Bases</option>
+                          {kbs.map(kb => <option key={kb.id} value={kb.id}>{kb.name}</option>)}
+                        </select>
+                      </Field>
+                      <button onClick={async () => {
+                        if (!pgQ) return;
+                        setPgLoading(true);
+                        try {
+                          const res = await adminApi.runPlayground({ question: pgQ, knowledgeBaseId: pgKb || undefined });
+                          setPgResult((res as any).data);
+                          notify('RAG query executed successfully');
+                        } catch (err: any) { notify(err.message, true); }
+                        finally { setPgLoading(false); }
+                      }} className={btnPrimary} disabled={pgLoading}>
+                        <FlaskConical size={16} /> {pgLoading ? 'Running RAG...' : 'Run Playground Query'}
+                      </button>
+                    </div>
+
+                    <div className={`${card} p-4 sm:p-6 space-y-4 min-w-0 overflow-y-auto max-h-[600px]`}>
+                      <h3 className="font-semibold text-white">Response & Citations</h3>
+                      {pgResult ? (
+                        <div className="space-y-4 text-sm min-w-0">
+                          <div className="p-3 bg-[#0F1424] rounded-lg border border-[#2E3A63] min-w-0">
+                            <p className="font-medium text-white mb-1">Answer:</p>
+                            <p className="text-[#E8EAF2] break-words">{pgResult.answer}</p>
+                          </div>
+                          <div>
+                            <p className="font-medium text-white mb-2">Citations:</p>
+                            <div className="space-y-2">
+                              {pgResult.citations?.map((c: any, idx: number) => (
+                                <div key={idx} className="p-2 bg-[#1B2340] rounded border border-[#263052] text-xs min-w-0">
+                                  <span className="text-[#3FA7E0] font-medium break-words">{c.sourceFilename}</span> (Page {c.pageNumber}, Section {c.section})
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-[#9AA6C9]">Run a query to inspect real model output, citations, and retrieved chunks.</p>
+                      )}
+                    </div>
+                  </div>
+                </Section>
+              )}
+
+              {tab === 'models' && (
+                <Section title="Model Registry" hint="Active AI models and provider deployments." actions={
+                  <button onClick={async () => {
+                    const name = prompt('Model Name:');
+                    if (!name) return;
+                    await adminApi.createModel({ name, provider: 'Anthropic', baseModel: 'Claude Sonnet', version: 'v1' });
+                    notify('Model registered');
+                    await loadData();
+                  }} className={btnPrimary}>
+                    <Plus size={16} /> Register Model
+                  </button>
+                }>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {models.map(m => (
+                      <div key={m.id} className={`${card} p-5 space-y-3 min-w-0`}>
+                        <div className="flex justify-between items-start gap-2 min-w-0">
+                          <h3 className="font-semibold text-white truncate">{m.name}</h3>
+                          <Badge tone={statusTone(m.status)}>{m.status}</Badge>
+                        </div>
+                        <p className="text-xs text-[#9AA6C9] truncate">Provider: {m.provider} · Base: {m.baseModel}</p>
+                        <div className="flex justify-between items-center text-xs text-[#6C789E] pt-2 border-t border-[#263052]">
+                          <span className="truncate">Env: {m.environment}</span>
+                          <button onClick={async () => { await adminApi.deleteModel(m.id); notify('Model deleted'); await loadData(); }} className="text-red-400 hover:text-red-300 p-1">Delete</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Section>
+              )}
+
+              {tab === 'finetune' && (
+                <Section title="Fine-Tuning Jobs" hint="Manage custom model fine-tuning jobs." actions={
+                  <button onClick={async () => {
+                    const dsId = datasets[0]?.id;
+                    if (!dsId) { notify('Create a dataset first.', true); return; }
+                    try {
+                      await adminApi.createFineTuneJob(dsId);
+                      notify('Fine-tune job queued');
+                      await loadData();
+                    } catch (e: any) { notify(e.message, true); }
+                  }} className={btnPrimary}>
+                    <Plus size={16} /> Start Fine-Tune Job
+                  </button>
+                }>
+                  <div className={`${card} overflow-x-auto`}>
+                    <table className="w-full text-left text-sm min-w-[600px]">
+                      <thead className="bg-[#1B2340] text-xs text-[#9AA6C9] uppercase border-b border-[#263052]">
+                        <tr>
+                          <th className="p-4">Job ID</th>
+                          <th className="p-4">Status</th>
+                          <th className="p-4">Token Estimate</th>
+                          <th className="p-4">Cost Estimate ($)</th>
+                          <th className="p-4">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#263052]">
+                        {fineTuneJobs.map((j) => (
+                          <tr key={j.id} className="hover:bg-[#1B2340]/50">
+                            <td className="p-4 font-mono text-xs text-white truncate max-w-[150px]">{j.id}</td>
+                            <td className="p-4"><Badge tone={j.status === 'COMPLETED' ? 'green' : 'yellow'}>{j.status}</Badge></td>
+                            <td className="p-4 text-[#9AA6C9]">{j.tokenEstimate}</td>
+                            <td className="p-4 text-[#9AA6C9]">${j.costEstimate}</td>
+                            <td className="p-4">
+                              <button onClick={async () => { await adminApi.cancelFineTuneJob(j.id); notify('Job cancelled'); await loadData(); }} className="text-red-400 hover:text-red-300 text-xs font-medium p-1">Cancel</button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Section>
+              )}
+
+              {tab === 'retrieval' && retrievalSet && (
+                <Section title="Retrieval Settings" hint="Configure chunking, top-K, and hybrid search parameters per environment.">
+                  <div className={`${card} p-4 sm:p-6 max-w-xl space-y-4 w-full min-w-0`}>
+                    <Field label="Chunk Size">
+                      <input type="number" className={input} value={retrievalSet.chunkSize} onChange={(e) => setRetrievalSet({ ...retrievalSet, chunkSize: Number(e.target.value) })} />
+                    </Field>
+                    <Field label="Overlap">
+                      <input type="number" className={input} value={retrievalSet.overlap} onChange={(e) => setRetrievalSet({ ...retrievalSet, overlap: Number(e.target.value) })} />
+                    </Field>
+                    <Field label="Top-K">
+                      <input type="number" className={input} value={retrievalSet.topK} onChange={(e) => setRetrievalSet({ ...retrievalSet, topK: Number(e.target.value) })} />
+                    </Field>
+                    <Field label="Threshold">
+                      <input type="number" step="0.05" className={input} value={retrievalSet.threshold} onChange={(e) => setRetrievalSet({ ...retrievalSet, threshold: Number(e.target.value) })} />
+                    </Field>
+                    <button onClick={async () => {
+                      await adminApi.updateRetrievalSettings({ ...retrievalSet, environment: env });
+                      notify('Retrieval settings saved');
+                    }} className={btnPrimary}>Save Retrieval Settings</button>
+                  </div>
+                </Section>
+              )}
+
+              {tab === 'prompts' && (
+                <Section title="System Prompts & Versions" hint="Manage prompt versions across environments.">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {prompts.map(p => (
+                      <div key={p.id} className={`${card} p-5 space-y-3 min-w-0`}>
+                        <h3 className="font-semibold text-white truncate">{p.name}</h3>
+                        {p.versions?.map((v: any) => (
+                          <div key={v.id} className="p-3 bg-[#0F1424] rounded border border-[#2E3A63] text-xs space-y-2 min-w-0">
+                            <div className="flex justify-between items-center gap-2">
+                              <span className="font-medium text-white truncate">Version {v.version} ({v.environment})</span>
+                              {v.active && <Badge tone="green">Active</Badge>}
+                            </div>
+                            <p className="text-[#9AA6C9] line-clamp-3 break-words">{v.text}</p>
+                            <button onClick={async () => {
+                              const confirmPromote = confirm(`Promote version ${v.version} to production?`);
+                              await adminApi.promotePrompt(p.id, v.id, 'production', confirmPromote);
+                              notify('Prompt promoted successfully');
+                              await loadData();
+                            }} className={btnGhost + ' text-xs py-1.5 px-3'}>Promote to Production</button>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </Section>
+              )}
+
+              {tab === 'providers' && (
+                <Section title="AI Provider Configurations" hint="Secure API keys and model backend settings.">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {providers.map((prv, idx) => (
+                      <div key={idx} className={`${card} p-5 space-y-3 min-w-0`}>
+                        <div className="flex justify-between items-start gap-2 min-w-0">
+                          <h3 className="font-semibold text-white truncate">{prv.provider}</h3>
+                          <Badge tone="green">Configured</Badge>
+                        </div>
+                        <p className="text-xs text-[#9AA6C9] truncate">Model: {prv.model}</p>
+                        <p className="text-xs font-mono text-[#6C789E] truncate">Secret: {prv.secretRef}</p>
+                      </div>
+                    ))}
+                  </div>
+                </Section>
+              )}
+
+              {tab === 'analytics' && analytics && (
+                <Section title="Usage & Cost Analytics" hint="Computed in real-time from database usage events.">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <Stat label="Total Questions" value={analytics.totalQuestions} />
+                    <Stat label="Answered from KB" value={`${analytics.answeredRate}%`} />
+                    <Stat label="Avg Latency" value={`${analytics.avgLatencyMs} ms`} />
+                    <Stat label="Estimated Cost" value={`$${analytics.costUsd}`} />
+                  </div>
+                </Section>
+              )}
+
+              {tab === 'users' && (
+                <Section title="User & Role Management" hint="Manage platform users and administrator permissions.">
+                  <div className={`${card} overflow-x-auto`}>
+                    <table className="w-full text-left text-sm min-w-[550px]">
+                      <thead className="bg-[#1B2340] text-xs text-[#9AA6C9] uppercase border-b border-[#263052]">
+                        <tr>
+                          <th className="p-4">Name</th>
+                          <th className="p-4">Email</th>
+                          <th className="p-4">Role</th>
+                          <th className="p-4">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#263052]">
+                        {users.map((u) => (
+                          <tr key={u.id} className="hover:bg-[#1B2340]/50">
+                            <td className="p-4 font-medium text-white truncate max-w-[150px]">{u.name}</td>
+                            <td className="p-4 text-[#9AA6C9] truncate max-w-[200px]">{u.email}</td>
+                            <td className="p-4"><Badge tone={u.role === 'ADMIN' ? 'green' : 'blue'}>{u.role}</Badge></td>
+                            <td className="p-4">
+                              <select className="bg-[#0F1424] text-xs text-white border border-[#2E3A63] rounded p-1.5 cursor-pointer" value={u.role} onChange={async (e) => {
+                                try {
+                                  await adminApi.updateUserRole(u.id, e.target.value);
+                                  notify('User role updated');
+                                  await loadData();
+                                } catch (err: any) { notify(err.message, true); }
+                              }}>
+                                <option value="ADMIN">ADMIN</option>
+                                <option value="INSTRUCTOR">INSTRUCTOR</option>
+                                <option value="STUDENT">STUDENT</option>
+                              </select>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Section>
+              )}
+
+              {tab === 'logs' && (
+                <Section title="System Audit Logs" hint="Immutable audit trail of all administrative actions.">
+                  <div className={`${card} overflow-x-auto`}>
+                    <table className="w-full text-left text-sm font-mono text-xs min-w-[700px]">
+                      <thead className="bg-[#1B2340] text-[#9AA6C9] uppercase border-b border-[#263052]">
+                        <tr>
+                          <th className="p-3">Timestamp</th>
+                          <th className="p-3">Actor ID</th>
+                          <th className="p-3">Action</th>
+                          <th className="p-3">Resource Type</th>
+                          <th className="p-3">Details</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#263052]">
+                        {auditLogs.map((l) => (
+                          <tr key={l.id} className="hover:bg-[#1B2340]/50">
+                            <td className="p-3 text-[#6C789E] whitespace-nowrap">{new Date(l.createdAt).toLocaleString()}</td>
+                            <td className="p-3 text-[#7CC4EE] truncate max-w-[100px]">{l.actorId}</td>
+                            <td className="p-3 text-white font-semibold truncate max-w-[120px]">{l.action}</td>
+                            <td className="p-3 text-[#9AA6C9] truncate max-w-[100px]">{l.resourceType}</td>
+                            <td className="p-3 text-[#6C789E] truncate max-w-[200px]" title={l.details}>{l.details}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Section>
+              )}
+
+              {tab === 'settings' && (
+                <Section title="Console Settings" hint="Global administration preferences.">
+                  <div className={`${card} p-6 max-w-xl space-y-4 min-w-0`}>
+                    <p className="text-sm text-[#9AA6C9] break-words">Bwenge AI enterprise administration console is fully connected to PostgreSQL database & secure backend services.</p>
+                  </div>
+                </Section>
+              )}
+            </>
+          )}
+        </main>
       </div>
-      <p className="mt-4 text-2xl font-bold tracking-tight text-white">{value}</p>
-      <p className="mt-1 text-xs text-slate-500">{detail}</p>
     </div>
   );
 }
 
-function MarginDetail({ label, value }: { label: string; value?: MarginSummary['grading'] }) {
-  return (
-    <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-      <p className="text-xs font-medium text-slate-400">{label}</p>
-      <p className="mt-2 text-sm font-bold text-white">{value ? `${money(value.totalCharged)} billed` : '—'}</p>
-      <p className="mt-1 text-xs text-slate-500">{value ? `${money(value.totalCost)} cost · ${value.jobCount} executions` : 'Loading'}</p>
-    </div>
-  );
+function statusTone(s: string) {
+  return s === 'active' || s === 'ONLINE' ? 'green' : s === 'WARNING' ? 'yellow' : 'gray';
 }

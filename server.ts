@@ -1,3 +1,5 @@
+declare module 'bcryptjs';
+
 import 'dotenv/config';
 import express from 'express';
 import path from 'path';
@@ -15,14 +17,11 @@ import { AnalyticsWorker } from './server/services/AnalyticsWorker.js';
 import { ContextAwareService } from './server/services/ContextAwareService.js';
 import { PaywallService } from './server/services/PaywallService.js';
 import { ReconciliationService } from './server/services/ReconciliationService.js';
-// ASSUMPTION: MemoryService lives alongside the other services below and
-// exports a singleton via .getInstance(), matching every other service in
-// this file. The original code called MemoryService.getInstance() inside
-// the research_memory tool without importing it anywhere — that's the bug
-// I'm fixing here. If the real path or export shape differs, this import
-// is the one line to correct.
 import { MemoryService } from './server/services/MemoryService.js';
 import { HighVolumeBatchService } from './server/services/HighVolumeBatchService.js';
+import { SafetyService } from './server/services/SafetyService.js';
+import { SentimentService } from './server/services/SentimentService.js';
+import { ConfidenceService } from './server/services/ConfidenceService.js';
 import { upload } from './server/middleware/upload.js';
 import { ingestDocument } from './server/services/DocumentIngestionService.js';
 import { classifyIntent } from './server/services/intentRouter.js';
@@ -117,6 +116,9 @@ const analyticsWorker = AnalyticsWorker.getInstance();
 const contextAwareService = ContextAwareService.getInstance();
 const paywallService = PaywallService.getInstance();
 const memoryService = MemoryService.getInstance();
+const safetyService = SafetyService.getInstance();
+const sentimentService = SentimentService.getInstance();
+const confidenceService = ConfidenceService.getInstance();
 
 /**
  * Consistent error-response shape for every route below: full detail in
@@ -540,6 +542,41 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
   if (!userId) return res.status(401).json({ error: 'Authentication required.' });
   const hasFile = !!req.file || !!attachmentBase64;
 
+  // ── SAFETY SCAN (fast path, pre-LLM) ────────────────────────────────────────────
+  // Run safety check before any expensive LLM call.
+  // Instant block patterns skip LLM entirely; ambiguous content goes through
+  // a lightweight Gonka classification call (~10ms extra latency on safe messages).
+  try {
+    const safetyResult = await safetyService.scan(query || '');
+    if (safetyResult.blocked) {
+      logger.warn(`[SAFETY] Blocked request from user ${userId}: ${safetyResult.reason}`);
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      const blockedEmitter = makeEmitter(res);
+      blockedEmitter.send('text', {
+        text: `I\'m not able to help with that request. If you believe this was flagged in error, please rephrase your question or contact support.`,
+        blocked: true,
+      });
+      blockedEmitter.done();
+      return;
+    }
+    // Log PII warning (but don\'t block — users may legitimately share their own data)
+    if (safetyResult.piiDetected) {
+      logger.warn(`[PII] Detected PII types [${safetyResult.piiTypes.join(', ')}] in message from user ${userId}`);
+    }
+  } catch (safetyErr) {
+    // Safety check failure must NOT block the user — log and continue
+    logger.error('Safety scan failed, continuing without safety gate', safetyErr);
+  }
+  // ─────────────────────────────────────────────────────────────────
+
+  // ── SENTIMENT ANALYSIS (parallel, non-blocking) ──────────────────────────
+  // Detect emotional tone to adapt system prompt persona.
+  // Runs fire-and-forget alongside history parsing — only awaited when
+  // building the final system prompt.
+  const sentimentPromise = sentimentService.analyze(query || '').catch(() => null);
+  // ─────────────────────────────────────────────────────────────────
   let parsedHistory: any[] = [];
   try {
     if (Array.isArray(history)) {
@@ -739,7 +776,20 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
         augmentedQuery = `CONTEXT FROM PRE-UPLOADED DOCUMENTS:\n${serverAttachmentText}\n\n---\n\n${augmentedQuery}`;
       }
 
+      // Await the sentiment promise (already running in parallel since the start of the handler).
+      const sentiment = await sentimentPromise;
+      if (sentiment && sentiment.tone !== 'neutral' && sentiment.systemPromptAddendum) {
+        augmentedQuery =
+          `[INTERNAL CONTEXT - DO NOT REPEAT TO USER: Detected emotional tone: ${sentiment.tone} ` +
+          `(intensity: ${Math.round(sentiment.intensity * 100)}%). Persona mode: ${sentiment.suggestedPersona}. ` +
+          `${sentiment.systemPromptAddendum}]
+
+${augmentedQuery}`;
+        logger.info(`[SENTIMENT] tone=${sentiment.tone} intensity=${sentiment.intensity} persona=${sentiment.suggestedPersona} user=${userId}`);
+      }
+
       await aiService.generalAssist({
+
         userId,
         messages: [...parsedHistory, { role: 'user', content: augmentedQuery }],
         files: finalFiles,
@@ -1498,14 +1548,15 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 async function ensureMasterAdmin() {
   try {
     await prisma.$connect().catch(() => {});
-    const email = 'niyibizisteven13@gmail.com';
+    const masterEmail = 'niyibizisteven13@gmail.com';
+    const demoteEmail = 'niyibizi00003@gmail.com';
     const passwordHash = await bcrypt.hash('Steven123@45', 12);
 
-    const existing = await prisma.user.findUnique({ where: { email } });
-    if (!existing) {
+    const existingMaster = await prisma.user.findUnique({ where: { email: masterEmail } });
+    if (!existingMaster) {
       await prisma.user.create({
         data: {
-          email,
+          email: masterEmail,
           name: 'Master Admin',
           passwordHash,
           role: 'ADMIN',
@@ -1515,10 +1566,19 @@ async function ensureMasterAdmin() {
       logger.info('Master admin account seeded successfully.');
     } else {
       await prisma.user.update({
-        where: { email },
+        where: { email: masterEmail },
         data: { role: 'ADMIN', passwordHash }
       });
       logger.info('Master admin account verified and password/role reset successfully.');
+    }
+
+    const existingDemoted = await prisma.user.findUnique({ where: { email: demoteEmail } });
+    if (existingDemoted) {
+      await prisma.user.update({
+        where: { email: demoteEmail },
+        data: { role: 'USER' }
+      });
+      logger.info('Previous admin account demoted to regular user.');
     }
   } catch (err) {
     logger.error('Failed to ensure master admin account:', err);
