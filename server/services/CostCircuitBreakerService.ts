@@ -48,6 +48,10 @@ export class CostCircuitBreakerService {
     logger.warn(`Cost Circuit Breaker forced to ${state ? 'OPEN (BLOCKED)' : 'CLOSED (ALLOW)'}`);
   }
 
+  public static getForcedOpenState(): boolean {
+    return this.isForcedOpen;
+  }
+
   public static async getHourlySpend(): Promise<number> {
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
     const aggregation = await prisma.jobCostLog.aggregate({

@@ -1,31 +1,29 @@
 import multer from 'multer';
 
-const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB — generous for scans, spreadsheets, and multi-page PDFs
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB — supports large codebases, archives, high-res scans, and datasets
 
-const ALLOWED_TYPES = [
-  // Native Claude support
-  'image/jpeg', 'image/png', 'image/webp', 'image/gif',
-  'application/pdf',
-  // Extracted-to-text types
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',        // .xlsx
-  'application/vnd.ms-excel',                                                  // .xls
-  'text/csv',
-  'text/plain',
-  'text/markdown',
+// List of dangerous executable extensions to block for security
+const BLOCKED_EXECUTABLE_EXTENSIONS = [
+  '.exe', '.dll', '.so', '.dylib', '.bat', '.cmd', '.vbs', '.scr', '.msi'
 ];
 
 export const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
     fileSize: MAX_FILE_SIZE,
-    fieldSize: 20 * 1024 * 1024 // 20MB limit for text fields
+    fieldSize: 10 * 1024 * 1024,
+    fields: 30,
+    files: 10,
+    parts: 50,
   },
   fileFilter: (req, file, cb) => {
-    if (ALLOWED_TYPES.includes(file.mimetype)) {
-      cb(null, true);
+    const originalName = file.originalname?.toLowerCase() || '';
+    const isExecutable = BLOCKED_EXECUTABLE_EXTENSIONS.some(ext => originalName.endsWith(ext));
+
+    if (isExecutable) {
+      cb(new Error(`Executable file types are not allowed for security reasons: ${file.originalname}`));
     } else {
-      cb(new Error(`Unsupported file type: ${file.mimetype}. Supported: images, PDF, Word, Excel, CSV, plain text.`));
+      cb(null, true);
     }
   },
 });

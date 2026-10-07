@@ -2,13 +2,14 @@ import React, { useRef, useState } from 'react';
 import { NavigationTab, ExamPaper, UploadedFile, StudentScript } from '../types';
 import { ResultsView } from './ResultsView';
 import {
-  Plus, Check, X, Type, Maximize2, Sparkles, Trash2, RotateCcw, Award, Flag, Paperclip, Wrench,
-  Clock, BookOpen, Layout, FileText, Link2, ArrowLeft, ArrowUp, ArrowDown, Copy, AlignLeft,
+  Plus, Check, X, Type, Maximize2, Sparkles, Trash2, RotateCcw, Award, Flag, Paperclip, Wrench, Bold, Italic, Underline, List, Link as LinkIcon,
+  Clock, BookOpen, Layout, FileText, Link2, ArrowLeft, ArrowUp, ArrowDown, Copy, AlignLeft, Image as ImageIcon, Video,
   CircleDot, CheckSquare, ChevronDown, Calendar, Hash, Mail, Phone, Upload, Star,
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import DynamicForm from './DynamicForm';
 import { BwengeLoader } from './BwengeLoader';
+import { authFetch } from '../utils/authFetch';
 
 interface CenterWorkspaceProps {
   activeTab?: NavigationTab;
@@ -28,6 +29,9 @@ interface CenterWorkspaceProps {
   activeDocument?: any;
   pinnedSyllabusId?: string | null;
   onPinSyllabus?: (id: string | null) => void;
+  studioProjectStatus?: 'idle' | 'saving' | 'saved' | 'error';
+  onLoadStudioProject?: (projectId: string) => void;
+  savedStudioProjects?: Array<{ id: string; title: string; updatedAt: string }>;
 }
 
 interface Annotation {
@@ -55,7 +59,11 @@ type ManualQuestionType =
   | 'PHONE'
   | 'URL'
   | 'FILE_UPLOAD'
-  | 'RATING';
+  | 'RATING'
+  | 'LINEAR_SCALE'
+  | 'MULTIPLE_CHOICE_GRID'
+  | 'CHECKBOX_GRID'
+  | 'TIME';
 
 interface ManualQuestionOption {
   id: string;
@@ -69,13 +77,37 @@ interface ManualQuestion {
   description?: string;
   required: boolean;
   options?: ManualQuestionOption[];
+  rows?: string[];
+  scaleMin?: number;
+  scaleMax?: number;
+  scaleMinLabel?: string;
+  scaleMaxLabel?: string;
+  maxRating?: number;
+  imageUrl?: string;
+  videoUrl?: string;
+  videoDataUrl?: string;
+  contentTitle?: string;
+  themeColor?: string;
+  sectionTitle?: string;
+  showVideoEditor?: boolean;
+}
+
+interface ManualContentBlock {
+  id: string;
+  type: 'TEXT' | 'IMAGE' | 'VIDEO' | 'SECTION';
+  title: string;
+  description?: string;
+  url?: string;
 }
 
 interface ManualFormDraft {
   id?: string;
   title: string;
   description: string;
+  descriptionImageUrl?: string;
   questions: ManualQuestion[];
+  blocks?: ManualContentBlock[];
+  themeColor?: string;
 }
 
 // Collision-resistant enough for client-side draft IDs; crypto.randomUUID
@@ -98,7 +130,11 @@ const QUESTION_TYPE_CATALOG: { type: ManualQuestionType; label: string; icon: Re
   { type: 'PHONE', label: 'Phone', icon: Phone },
   { type: 'URL', label: 'Link', icon: Link2 },
   { type: 'FILE_UPLOAD', label: 'File upload', icon: Upload },
+  { type: 'LINEAR_SCALE', label: 'Linear scale', icon: Hash },
   { type: 'RATING', label: 'Rating', icon: Star },
+  { type: 'MULTIPLE_CHOICE_GRID', label: 'Multiple choice grid', icon: Layout, hasOptions: true },
+  { type: 'CHECKBOX_GRID', label: 'Checkbox grid', icon: CheckSquare, hasOptions: true },
+  { type: 'TIME', label: 'Time', icon: Clock },
 ];
 
 export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
@@ -119,6 +155,9 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
   activeDocument,
   pinnedSyllabusId,
   onPinSyllabus,
+  studioProjectStatus = 'idle',
+  onLoadStudioProject,
+  savedStudioProjects = [],
 }) => {
   const [zoomLevel, setZoomLevel] = useState<number>(1);
   const [zoomTarget, setZoomTarget] = useState<{ x: number, y: number } | null>(null);
@@ -142,57 +181,129 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
   const [formGenError, setFormGenError] = useState<string | null>(null);
   const [generatedForm, setGeneratedForm] = useState<any | null>(null);
   const [formLinkCopied, setFormLinkCopied] = useState(false);
+  const [savedForms, setSavedForms] = useState<any[]>([]);
+  const [showSavedForms, setShowSavedForms] = useState(false);
+  const [activeSavedForm, setActiveSavedForm] = useState<any | null>(null);
+  const [draftRequirements, setDraftRequirements] = useState('');
+  const [draftRubric, setDraftRubric] = useState<any>(null);
+  const [draftSelectionSettings, setDraftSelectionSettings] = useState<any>(null);
+  const [selectionRequirements, setSelectionRequirements] = useState('');
+  const [formAnalysis, setFormAnalysis] = useState<any | null>(null);
+  const [formAnalysisError, setFormAnalysisError] = useState('');
+  const [savedFormsError, setSavedFormsError] = useState('');
+  const [isLoadingSavedForms, setIsLoadingSavedForms] = useState(false);
+  const [isAnalyzingForm, setIsAnalyzingForm] = useState(false);
+  const [formAnalysisNotice, setFormAnalysisNotice] = useState('');
+  const [formResponses, setFormResponses] = useState<any[]>([]);
+  const [responsesLoading, setResponsesLoading] = useState(false);
+  const [formDashboardTab, setFormDashboardTab] = useState<'responses' | 'settings'>('responses');
+  const [responsesError, setResponsesError] = useState('');
 
   const handleGenerateForm = async () => {
-    if (!formIntentText.trim()) return;
+    const intent = formIntentText.trim();
+    if (!intent || isGeneratingForm) return;
+
     setIsGeneratingForm(true);
     setFormGenError(null);
     try {
-      // ASSUMPTION: this app authenticates requests via an httpOnly session
-      // cookie — server.ts's CORS layer sets
-      // `Access-Control-Allow-Credentials: true`, which only matters if
-      // cookies (not a bearer token) are what requireAuth reads. If this
-      // codebase actually carries a client-side token (e.g. in
-      // localStorage), swap `credentials: 'include'` for an
-      // `Authorization: Bearer <token>` header here instead.
-      const res = await fetch('/api/forms/generate', {
+      const response = await authFetch('/api/forms/generate', {
         method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ intent: formIntentText.trim() }),
+        body: JSON.stringify({ intent, requirements: draftRequirements || intent }),
       });
-
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({} as any));
-        throw new Error(body?.error || `Form generation failed (${res.status})`);
-      }
-
-      const data = await res.json();
-      if (!data?.success || !data?.form) {
-        throw new Error('Form generation returned an unexpected response.');
-      }
-
-      setGeneratedForm(data.form);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Could not generate the form.');
+      const form = data.form || data.schema || data;
+      if (!form || typeof form !== 'object') throw new Error('The generated form response was invalid.');
+      setGeneratedForm(form);
       setShowFormCreatorModal(false);
-      setFormIntentText('');
-    } catch (err: any) {
-      setFormGenError(err?.message || 'Something went wrong generating the form.');
+    } catch (error: any) {
+      setFormGenError(error?.message || 'Could not generate the form.');
     } finally {
       setIsGeneratingForm(false);
     }
   };
 
-  const handleDiscardGeneratedForm = () => {
-    setGeneratedForm(null);
-    setFormGenError(null);
+  const loadOwnedForms = async () => {
+    const response = await authFetch('/api/forms');
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Could not load forms.');
+    setSavedForms(data.forms || []);
   };
 
+  const showFormsDashboard = async () => {
+    setShowSavedForms(true);
+    setSavedFormsError('');
+    setIsLoadingSavedForms(true);
+    try { await loadOwnedForms(); }
+    catch (error: any) { setSavedFormsError(error?.message || 'Could not load forms.'); }
+    finally { setIsLoadingSavedForms(false); }
+  };
+
+  const loadFormResponses = async (formId: string) => {
+    setResponsesLoading(true);
+    setResponsesError('');
+    try {
+      const response = await authFetch(`/api/forms/${formId}/responses`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Could not load responses.');
+      setFormResponses(data.submissions || []);
+    } catch (error: any) {
+      setResponsesError(error?.message || 'Could not load responses.');
+      setFormResponses([]);
+    } finally { setResponsesLoading(false); }
+  };
+
+  const runFormAnalysis = async () => {
+    if (!activeSavedForm?.id) return;
+    setIsAnalyzingForm(true);
+    setFormAnalysisError('');
+    setFormAnalysisNotice('');
+    try {
+      const response = await authFetch(`/api/forms/${activeSavedForm.id}/analyze`, {
+        method: 'POST',
+        body: JSON.stringify({ requirements: selectionRequirements }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Could not analyze responses.');
+      setFormAnalysis(data.analysis);
+      if (data.analysis?.selection?.error) setFormAnalysisNotice(data.analysis.selection.error);
+      await loadOwnedForms();
+    } catch (error: any) { setFormAnalysisError(error?.message || 'Could not analyze responses.'); }
+    finally { setIsAnalyzingForm(false); }
+  };
+
+  const saveSelectionRequirements = async () => {
+    if (!activeSavedForm?.id) return;
+    const response = await authFetch(`/api/forms/${activeSavedForm.id}/requirements`, {
+      method: 'PATCH',
+      body: JSON.stringify({ requirements: selectionRequirements }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Could not save requirements.');
+  };
+
+  const exportResponsesCsv = async () => {
+    if (!activeSavedForm?.id) return;
+    const response = await authFetch(`/api/forms/${activeSavedForm.id}/results/export.csv`);
+    if (!response.ok) throw new Error((await response.json()).error || 'Could not export responses.');
+    const url = URL.createObjectURL(await response.blob());
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `form-responses-${activeSavedForm.id}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
   const handleCopyFormLink = () => {
     if (!generatedForm?.id) return;
-    const link = `${window.location.origin}/f/${generatedForm.id}`;
+    const link = `${window.location.origin}/forms/${generatedForm.id}`;
     navigator.clipboard.writeText(link);
     setFormLinkCopied(true);
     setTimeout(() => setFormLinkCopied(false), 1800);
+  };
+
+  const handleDiscardGeneratedForm = () => {
+    setGeneratedForm(null);
+    setFormLinkCopied(false);
   };
 
   // Lets the creator test-submit their own generated form straight from
@@ -201,19 +312,18 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
   const handleTestFormSubmit = async (answers: Record<string, any>) => {
     if (!generatedForm?.id) return;
     try {
-      await fetch(`/api/forms/${generatedForm.id}/submit`, {
+      const response = await authFetch(`/api/forms/${generatedForm.id}/submit`, {
         method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(answers),
       });
+      if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Could not submit response.');
     } catch (err) {
       console.warn('Test form submission failed', err);
     }
   };
 
   const FormBuilderView = ({ form }: { form: any }) => {
-    const publicLink = form?.id ? `${window.location.origin}/f/${form.id}` : '';
+    const publicLink = form?.id ? `${window.location.origin}/forms/${form.id}` : '';
     return (
       <div className="w-full max-w-3xl bg-white dark:bg-[#1C1C20] rounded-[32px] shadow-2xl overflow-hidden border border-[#E8E4DC] dark:border-[#2D2D32] animate-in fade-in zoom-in-95 duration-500">
         <div className="bg-[#D97757] p-8 text-white relative overflow-hidden">
@@ -232,11 +342,12 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
           </div>
         </div>
 
-        <div className="p-8 space-y-6 max-h-[55vh] overflow-y-auto custom-scrollbar">
+        <div className="p-4 sm:p-8 space-y-6 max-h-[48vh] overflow-y-auto custom-scrollbar">
           <DynamicForm schema={JSON.stringify(form)} onSubmit={handleTestFormSubmit} />
         </div>
 
-        <div className="p-8 bg-[#F4F0E8]/30 dark:bg-[#18181B]/30 border-t border-[#E8E4DC] dark:border-[#2D2D32] flex flex-col sm:flex-row items-center gap-3">
+        <div className="p-4 sm:p-8 bg-[#F4F0E8]/30 dark:bg-[#18181B]/30 border-t border-[#E8E4DC] dark:border-[#2D2D32] flex flex-col sm:flex-row items-center gap-3">
+          {form?.id ? <button onClick={() => { setActiveSavedForm(form); setSelectionRequirements(draftRequirements || form.requirements || form.schema?.description || ''); setFormDashboardTab('responses'); setShowSavedForms(true); void loadFormResponses(form.id); }} className="w-full sm:w-auto px-5 py-3 rounded-2xl font-bold text-sm bg-white dark:bg-[#202024] border border-[#E8E4DC] dark:border-[#2D2D32]">View results</button> : <span className="text-xs text-[#858075]">Save and publish this draft to collect responses and analyze results.</span>}
           <button
             onClick={handleCopyFormLink}
             disabled={!form?.id}
@@ -266,10 +377,27 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
   };
   // ── Manual Form Builder state ────────────────────────────────────────
   const [showManualFormBuilder, setShowManualFormBuilder] = useState(false);
-  const [manualForm, setManualForm] = useState<ManualFormDraft>({ title: '', description: '', questions: [] });
+  const [manualForm, setManualForm] = useState<ManualFormDraft>({ title: '', description: '', questions: [], blocks: [], themeColor: '#D97757' });
   const [manualBuilderTab, setManualBuilderTab] = useState<'build' | 'preview'>('build');
+  const [descriptionSelection, setDescriptionSelection] = useState<{ top: number; left: number } | null>(null);
+  const [showImportQuestions, setShowImportQuestions] = useState(false);
   const [isSavingManualForm, setIsSavingManualForm] = useState(false);
   const [manualSaveError, setManualSaveError] = useState<string | null>(null);
+
+  const updateDescriptionSelection = () => {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !selection.toString().trim()) {
+      setDescriptionSelection(null);
+      return;
+    }
+    const editor = document.getElementById('manual-form-description');
+    if (!editor?.contains(selection.anchorNode)) {
+      setDescriptionSelection(null);
+      return;
+    }
+    const rect = selection.getRangeAt(0).getBoundingClientRect();
+    setDescriptionSelection({ top: rect.top, left: rect.left + rect.width / 2 });
+  };
 
   const addManualQuestion = (type: ManualQuestionType) => {
     const meta = QUESTION_TYPE_CATALOG.find((t) => t.type === type)!;
@@ -284,6 +412,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
           description: '',
           required: false,
           options: meta.hasOptions ? [{ id: genId('opt'), label: 'Option 1' }] : undefined,
+          rows: ['Row 1', 'Row 2'], scaleMin: 1, scaleMax: 5, scaleMinLabel: '', scaleMaxLabel: '', maxRating: 5,
         },
       ],
     }));
@@ -294,6 +423,26 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
       ...prev,
       questions: prev.questions.map((q) => (q.id === id ? { ...q, ...patch } : q)),
     }));
+  };
+
+  const addImageToQuestion = (questionId: string, file?: File) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { setManualSaveError('Choose an image file.'); return; }
+    if (file.size > 2 * 1024 * 1024) { setManualSaveError('Choose an image smaller than 2 MB.'); return; }
+    const reader = new FileReader();
+    reader.onload = () => updateManualQuestion(questionId, { imageUrl: String(reader.result || '') });
+    reader.onerror = () => setManualSaveError('Could not read this image.');
+    reader.readAsDataURL(file);
+  };
+
+  const addVideoToQuestion = (questionId: string, file?: File) => {
+    if (!file) return;
+    if (!file.type.startsWith('video/')) { setManualSaveError('Choose a video file.'); return; }
+    if (file.size > 12 * 1024 * 1024) { setManualSaveError('Choose a video smaller than 12 MB.'); return; }
+    const reader = new FileReader();
+    reader.onload = () => updateManualQuestion(questionId, { videoDataUrl: String(reader.result || ''), videoUrl: '', showVideoEditor: true });
+    reader.onerror = () => setManualSaveError('Could not read this video.');
+    reader.readAsDataURL(file);
   };
 
   const deleteManualQuestion = (id: string) => {
@@ -314,6 +463,19 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
       next.splice(idx + 1, 0, clone);
       return { ...prev, questions: next };
     });
+  };
+
+  const importQuestionsFromForm = (form: any) => {
+    const questions = form?.schema?.questions || [];
+    if (!questions.length) return;
+    const imported = questions.map((question: ManualQuestion) => ({
+      ...question,
+      id: genId('q'),
+      options: question.options?.map(option => ({ ...option, id: genId('opt') })),
+      rows: question.rows ? [...question.rows] : undefined,
+    }));
+    setManualForm(prev => ({ ...prev, questions: [...prev.questions, ...imported] }));
+    setShowImportQuestions(false);
   };
 
   const moveManualQuestion = (id: string, direction: 'up' | 'down') => {
@@ -350,6 +512,36 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
     }));
   };
 
+  const updateManualRow = (questionId: string, rowIndex: number, value: string) => setManualForm(prev => ({
+    ...prev,
+    questions: prev.questions.map(q => q.id === questionId ? { ...q, rows: (q.rows || []).map((row, index) => index === rowIndex ? value : row) } : q),
+  }));
+
+  const addManualRow = (questionId: string) => setManualForm(prev => ({
+    ...prev,
+    questions: prev.questions.map(q => q.id === questionId ? { ...q, rows: [...(q.rows || []), `Row ${(q.rows || []).length + 1}`] } : q),
+  }));
+
+  const removeManualRow = (questionId: string, rowIndex: number) => setManualForm(prev => ({
+    ...prev,
+    questions: prev.questions.map(q => q.id === questionId ? { ...q, rows: (q.rows || []).filter((_, index) => index !== rowIndex) } : q),
+  }));
+
+  const addManualBlock = (type: ManualContentBlock['type']) => setManualForm(prev => ({
+    ...prev,
+    blocks: [...(prev.blocks || []), {
+      id: genId('block'), type,
+      title: type === 'SECTION' ? `Section ${(prev.blocks || []).filter(block => block.type === 'SECTION').length + 2}` : '',
+      description: '', url: '',
+    }],
+  }));
+
+  const updateManualBlock = (id: string, patch: Partial<ManualContentBlock>) => setManualForm(prev => ({
+    ...prev, blocks: (prev.blocks || []).map(block => block.id === id ? { ...block, ...patch } : block),
+  }));
+
+  const deleteManualBlock = (id: string) => setManualForm(prev => ({ ...prev, blocks: (prev.blocks || []).filter(block => block.id !== id) }));
+
   const removeManualOption = (questionId: string, optionId: string) => {
     setManualForm((prev) => ({
       ...prev,
@@ -360,7 +552,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
   };
 
   const resetManualBuilder = () => {
-    setManualForm({ title: '', description: '', questions: [] });
+    setManualForm({ title: '', description: '', questions: [], blocks: [], themeColor: '#D97757' });
     setManualBuilderTab('build');
     setManualSaveError(null);
   };
@@ -388,29 +580,20 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
     setIsSavingManualForm(true);
     setManualSaveError(null);
     try {
-      // NOTE: POST /api/forms is a manual-create endpoint distinct from
-      // POST /api/forms/generate (AI-only). The server.ts shared alongside
-      // this component doesn't define this route yet — add something like:
-      //
-      //   app.post('/api/forms', requireAuth, async (req, res) => {
-      //     const userId = (req as any).user?.userId;
-      //     const { title, description, questions } = req.body;
-      //     const form = await prisma.form.create({
-      //       data: { ownerId: userId, title, description, status: 'DRAFT',
-      //                schema: JSON.stringify({ title, description, questions }) },
-      //     });
-      //     res.json({ success: true, form: { id: form.id, title, description, questions } });
-      //   });
-      //
-      // adjusted to match your actual Prisma `Form` model fields.
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const token = localStorage.getItem('auth_token') || localStorage.getItem('token');
+      if (token) headers.Authorization = `Bearer ${token}`;
       const res = await fetch('/api/forms', {
         method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           title: manualForm.title.trim(),
-          description: manualForm.description.trim(),
+          description: manualForm.description,
+          descriptionImageUrl: manualForm.descriptionImageUrl,
           questions: manualForm.questions,
+          blocks: manualForm.blocks || [],
+          themeColor: manualForm.themeColor || '#D97757',
+          requirements: manualForm.description.trim(),
         }),
       });
 
@@ -425,6 +608,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
       }
 
       setShowManualFormBuilder(false);
+      setFormLinkCopied(false);
       // Reuse the same publish/preview overlay the AI flow already uses.
       setGeneratedForm(data.form);
     } catch (err: any) {
@@ -777,6 +961,20 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
 
   return (
     <div className="flex-1 min-h-[50vh] h-auto lg:h-[calc(100vh-61px)] flex flex-col bg-[#FBF9F6] dark:bg-[#141416] overflow-y-auto select-text relative">
+      <div className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-[#E8E4DC] bg-[#FBF9F6]/95 px-4 py-2 text-xs dark:border-[#2D2D32] dark:bg-[#141416]/95">
+        <span className={studioProjectStatus === 'error' ? 'text-rose-500' : 'text-[#858075]'}>
+          {studioProjectStatus === 'saving' ? 'Saving studio draft…' : studioProjectStatus === 'saved' ? 'All drafts saved' : studioProjectStatus === 'error' ? 'Save failed. Check connection and retry.' : 'Studio drafts save automatically'}
+        </span>
+        {savedStudioProjects.length > 1 && onLoadStudioProject && (
+          <label className="flex items-center gap-2">
+            <span className="sr-only">Load saved studio project</span>
+            <select aria-label="Load saved studio project" className="max-w-56 rounded border border-[#E8E4DC] bg-transparent px-2 py-1 dark:border-[#2D2D32]" value="" onChange={(event) => { if (event.target.value) onLoadStudioProject(event.target.value); }}>
+              <option value="">Open saved project…</option>
+              {savedStudioProjects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
+            </select>
+          </label>
+        )}
+      </div>
       {/* AI Draft Priority Layer */}
       {aiDesignBuffer && (
         <div className="absolute inset-0 z-[100] bg-[#FBF9F6]/95 dark:bg-[#141416]/95 backdrop-blur-sm flex flex-col items-center justify-center p-4 lg:p-8 overflow-y-auto">
@@ -794,6 +992,106 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
       {generatedForm && !aiDesignBuffer && (
         <div className="absolute inset-0 z-[100] bg-[#FBF9F6]/95 dark:bg-[#141416]/95 backdrop-blur-sm flex flex-col items-center justify-center p-4 lg:p-8 overflow-y-auto">
           <FormBuilderView form={generatedForm} />
+        </div>
+      )}
+
+      {showSavedForms && (
+        <div className="fixed inset-0 z-[130] bg-black/70 backdrop-blur-sm p-0 sm:p-5 flex items-center justify-center">
+          <section className="w-full h-[100dvh] sm:h-[92dvh] max-w-6xl flex flex-col overflow-hidden bg-[#FBF9F6] dark:bg-[#141416] sm:rounded-3xl border border-[#E8E4DC] dark:border-[#2D2D32]">
+            <header className="flex items-center justify-between gap-3 px-4 sm:px-6 py-4 border-b border-[#E8E4DC] dark:border-[#2D2D32]">
+              <div><h2 className="text-lg font-black text-[#191919] dark:text-white">My Forms &amp; Results</h2><p className="text-xs text-[#858075]">Responses, AI scores, selection, and exports</p></div>
+              <button onClick={() => setShowSavedForms(false)} aria-label="Close forms dashboard" className="p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/10"><X size={18} /></button>
+            </header>
+            <div className="flex-1 min-h-0 grid md:grid-cols-[300px_minmax(0,1fr)]">
+              <aside className="overflow-y-auto border-b md:border-b-0 md:border-r border-[#E8E4DC] dark:border-[#2D2D32] p-3 sm:p-4 max-h-[32vh] md:max-h-none">
+                <button onClick={() => void showFormsDashboard()} className="mb-3 w-full rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] px-3 py-2 text-xs font-bold text-[#D97757]">Refresh forms</button>
+                {isLoadingSavedForms && <p className="p-4 text-xs text-[#858075]">Loading forms…</p>}
+                {savedFormsError && <p role="alert" className="p-3 text-xs text-rose-500">{savedFormsError}</p>}
+                {!isLoadingSavedForms && !savedForms.length && !savedFormsError && <p className="p-4 text-xs text-[#858075]">No saved forms yet. Create and publish a form to start collecting responses.</p>}
+                <div className="space-y-2">
+                  {savedForms.map((form) => <button key={form.id} onClick={() => {
+                    setActiveSavedForm(form);
+                    setFormDashboardTab('responses');
+                    setSelectionRequirements(form.selectionSettings?.requirements || form.schema?.requirements || form.schema?.description || '');
+                    setFormAnalysis(null);
+                    setFormAnalysisError('');
+                    setFormAnalysisNotice('');
+                    void loadFormResponses(form.id);
+                  }} className={`w-full text-left rounded-xl border p-3 ${activeSavedForm?.id === form.id ? 'border-[#D97757] bg-[#D97757]/10' : 'border-[#E8E4DC] dark:border-[#2D2D32]'}`}>
+                    <span className="block truncate text-sm font-bold text-[#191919] dark:text-white">{form.title}</span>
+                    <span className="mt-1 block text-xs text-[#858075]">{form.responseCount} responses · updated {new Date(form.updatedAt).toLocaleDateString()}</span>
+                  </button>)}
+                </div>
+              </aside>
+              <div className="min-h-0 overflow-y-auto p-4 sm:p-6">
+                {!activeSavedForm ? <p className="py-12 text-center text-sm text-[#858075]">Choose a form to review responses and analyze candidates.</p> : <div className="mx-auto max-w-4xl space-y-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div><h3 className="text-xl font-black text-[#191919] dark:text-white">{activeSavedForm.title}</h3><p className="text-xs text-[#858075]">{activeSavedForm.responseCount} responses · {formAnalysis?.selectedCount || 0} selected</p></div>
+                    <div className="flex flex-wrap gap-2">
+                      <button onClick={() => { void exportResponsesCsv().catch((error: any) => setFormAnalysisError(error.message)); }} className="rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] px-3 py-2 text-xs font-bold">Export CSV</button>
+                      <button onClick={() => { void loadFormResponses(activeSavedForm.id); }} className="rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] px-3 py-2 text-xs font-bold">Refresh responses</button>
+                      <a href={`/forms/${activeSavedForm.id}`} target="_blank" rel="noreferrer" className="rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] px-3 py-2 text-xs font-bold">Open public form</a>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 border-b border-[#E8E4DC] dark:border-[#2D2D32]">
+                    {(['responses', 'settings'] as const).map(tab => <button key={tab} onClick={() => setFormDashboardTab(tab)} className={`border-b-2 px-4 py-2 text-xs font-black capitalize ${formDashboardTab === tab ? 'border-[#D97757] text-[#D97757]' : 'border-transparent text-[#858075]'}`}>{tab}</button>)}
+                  </div>
+                  {formDashboardTab === 'responses' && <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                      {[['Total responses', activeSavedForm.responseCount || 0], ['Latest response', formResponses[0] ? new Date(formResponses[0].submittedAt).toLocaleDateString() : '—'], ['Analyzed', formResponses.filter(response => response.analysis).length], ['Selected', formResponses.filter(response => response.analysis?.selected).length]].map(([label, value]) => <div key={String(label)} className="rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] bg-white dark:bg-[#1C1C20] p-3"><p className="text-[10px] uppercase tracking-wider text-[#858075]">{label}</p><p className="mt-1 truncate text-lg font-black text-[#D97757]">{value}</p></div>)}
+                    </div>
+                    {responsesLoading && <p className="py-8 text-center text-sm text-[#858075]">Loading responses…</p>}
+                    {responsesError && <p role="alert" className="rounded-xl bg-rose-500/10 p-3 text-sm text-rose-600">{responsesError}</p>}
+                    {!responsesLoading && !responsesError && formResponses.length === 0 && <div className="rounded-2xl border border-dashed border-[#E8E4DC] p-8 text-center text-sm text-[#858075]">No responses yet. Copy the public link and share it to start collecting answers.</div>}
+                    {formResponses.map((response, responseIndex) => <article key={response.id} className="rounded-2xl border border-[#E8E4DC] dark:border-[#2D2D32] bg-white dark:bg-[#1C1C20] p-4 sm:p-5">
+                      <div className="flex flex-wrap items-center justify-between gap-2"><h4 className="font-bold text-[#191919] dark:text-white">Response {formResponses.length - responseIndex}</h4><span className="text-xs text-[#858075]">{new Date(response.submittedAt).toLocaleString()}</span></div>
+                      <div className="mt-3 grid gap-2 sm:grid-cols-2">{Object.entries(response.answers || {}).map(([key, value]) => {
+                        const definitions = [...(activeSavedForm.schema?.questions || []), ...(activeSavedForm.schema?.fields || [])];
+                        const question = definitions.find((item: any, index: number) => String(item.id ?? item.number ?? index + 1) === key);
+                        const displayValue = value && typeof value === 'object' ? Object.entries(value as Record<string, any>).map(([row, answer]) => `${row}: ${Array.isArray(answer) ? answer.join(', ') : answer}`).join(' · ') : Array.isArray(value) ? value.join(', ') : String(value ?? '');
+                        return <div key={key} className="rounded-xl bg-[#F7F5F0] dark:bg-white/[0.04] p-3"><p className="text-[10px] font-bold text-[#858075]">{question?.title || question?.label || key}</p><p className="mt-1 break-words text-sm text-[#191919] dark:text-slate-200">{displayValue}</p></div>;
+                      })}</div>
+                      {response.analysis?.score != null && <p className="mt-3 text-xs font-bold text-[#D97757]">AI score: {response.analysis.score}/100 {response.analysis.selected ? '· Selected' : ''}</p>}
+                    </article>)}
+                  </div>}
+                  {formDashboardTab === 'settings' && <div className="rounded-2xl border border-[#E8E4DC] dark:border-[#2D2D32] bg-white dark:bg-[#1C1C20] p-4 sm:p-5 space-y-3">
+                    <h4 className="font-bold text-[#191919] dark:text-white">Form settings</h4>
+                    <p className="text-xs text-[#858075]">This public form is accepting responses. Share the form link to collect answers. Response close controls can be added here in a later update.</p>
+                    <label className="block text-xs font-bold text-[#191919] dark:text-white">Selection requirements
+                      <textarea value={selectionRequirements} onChange={event => setSelectionRequirements(event.target.value)} rows={4} placeholder="Describe eligibility requirements and what makes a strong response…" className="mt-2 w-full rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] bg-transparent p-3 text-sm font-normal outline-none focus:border-[#D97757]" />
+                    </label>
+                    <button onClick={() => { void saveSelectionRequirements().then(() => setFormAnalysisNotice('Requirements saved.')).catch((error: any) => setFormAnalysisError(error.message)); }} className="rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] px-4 py-2.5 text-xs font-bold">Save requirements</button>
+                    {formAnalysisError && <p role="alert" className="text-xs text-rose-500">{formAnalysisError}</p>}
+                    {formAnalysisNotice && <p role="status" className="text-xs text-amber-600">{formAnalysisNotice}</p>}
+                  </div>}
+                  <div className="rounded-2xl border border-[#E8E4DC] dark:border-[#2D2D32] bg-white dark:bg-[#1C1C20] p-4 sm:p-5 space-y-3">
+                    <label className="block text-xs font-bold text-[#191919] dark:text-white">Selection requirements
+                      <textarea value={selectionRequirements} onChange={(event) => setSelectionRequirements(event.target.value)} rows={4} placeholder="Describe eligibility requirements, priorities, and any disqualifying conditions…" className="mt-2 w-full rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] bg-transparent p-3 text-sm font-normal outline-none focus:border-[#D97757]" />
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      <button onClick={() => { void saveSelectionRequirements().then(() => setFormAnalysisNotice('Requirements saved.')).catch((error: any) => setFormAnalysisError(error.message)); }} className="rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] px-4 py-2.5 text-xs font-bold">Save requirements</button>
+                      <button disabled={isAnalyzingForm || !activeSavedForm.responseCount} onClick={() => void runFormAnalysis()} className="rounded-xl bg-[#D97757] px-4 py-2.5 text-xs font-black text-white disabled:opacity-50">{isAnalyzingForm ? 'Analyzing responses…' : 'Analyze & select best fit'}</button>
+                    </div>
+                    {formAnalysisError && <p role="alert" className="text-xs text-rose-500">{formAnalysisError}</p>}
+                    {formAnalysisNotice && <p role="status" className="text-xs text-amber-600">{formAnalysisNotice}</p>}
+                  </div>
+                  {formAnalysis && <>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      {[['Responses', formAnalysis.totalSubmissions], ['Scored', formAnalysis.candidates?.filter((candidate: any) => candidate.score !== null).length || 0], ['Average score', formAnalysis.averageScore], ['Selected', formAnalysis.selectedCount]].map(([label, value]) => <div key={String(label)} className="rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] bg-white dark:bg-[#1C1C20] p-3"><p className="text-[10px] uppercase tracking-wider text-[#858075]">{label}</p><p className="mt-1 text-xl font-black text-[#D97757]">{value}</p></div>)}
+                    </div>
+                    {formAnalysis.qualitativeInsight && <p className="rounded-xl bg-[#D97757]/10 p-4 text-sm text-[#191919] dark:text-slate-200">{formAnalysis.qualitativeInsight}</p>}
+                    <div className="space-y-3">
+                      {(formAnalysis.candidates || []).map((candidate: any, index: number) => <article key={candidate.id} className="rounded-2xl border border-[#E8E4DC] dark:border-[#2D2D32] bg-white dark:bg-[#1C1C20] p-4 sm:p-5">
+                        <div className="flex flex-wrap items-center justify-between gap-2"><h4 className="font-bold text-[#191919] dark:text-white">#{index + 1} · {candidate.answers?.name || candidate.answers?.fullName || `Response ${formAnalysis.candidates.length - index}`}</h4><div className="flex items-center gap-2"><span className="rounded-full bg-[#D97757]/10 px-3 py-1 text-xs font-black text-[#D97757]">{candidate.score === null ? 'Not scored' : `${candidate.score}/100`}</span>{candidate.selected && <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-600">Selected</span>}</div></div>
+                        <p className="mt-2 text-xs text-[#858075]">{candidate.feedback || 'Run AI analysis to score this response.'}</p>
+                        <details className="mt-3"><summary className="cursor-pointer text-xs font-bold text-[#D97757]">View answers and score details</summary><div className="mt-3 grid sm:grid-cols-2 gap-2">{Object.entries(candidate.answers || {}).map(([key, value]) => <div key={key} className="rounded-lg bg-black/[0.03] dark:bg-white/[0.04] p-3"><p className="text-[10px] text-[#858075]">{activeSavedForm.schema?.questions?.find((question: any, questionIndex: number) => String(question.id ?? question.number ?? questionIndex + 1) === key)?.title || key}</p><p className="mt-1 break-words text-xs text-[#191919] dark:text-slate-200">{Array.isArray(value) ? value.join(', ') : String(value)}</p></div>)}</div></details>
+                      </article>)}
+                    </div>
+                  </>}
+                </div>}
+              </div>
+            </div>
+          </section>
         </div>
       )}
 
@@ -845,7 +1143,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                 ref={fileInputRef}
                 type="file"
                 multiple
-                accept=".pdf,.png,.jpg,.jpeg"
+                accept="*/*"
                 onChange={handleFileInputChange}
                 className="hidden"
               />
@@ -868,6 +1166,12 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                   PDF, PNG, JPEG
                 </span>
               </button>
+
+              <button type="button" onClick={(event) => { event.stopPropagation(); void showFormsDashboard(); }} className="col-span-2 sm:col-span-3 rounded-2xl bg-[#191919] p-4 text-left text-white shadow-sm dark:bg-[#F3F3F3] dark:text-[#191919]">
+                <span className="block text-sm font-bold">My Forms &amp; Results</span>
+                <span className="mt-1 block text-[10px] opacity-70">Review responses, export data, and ask AI to shortlist candidates</span>
+              </button>
+
 
               <button
                 type="button"
@@ -1565,7 +1869,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                   Create Form
                 </div>
                 <h3 className="text-lg font-black text-[#191919] dark:text-[#F3F3F3]">
-                  Describe the form you need
+                  Describe the form and candidate requirements
                 </h3>
               </div>
               <button
@@ -1577,15 +1881,14 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
             </div>
 
             <p className="text-xs text-[#66635B] dark:text-[#A0A0AA] leading-relaxed">
-              e.g. "A registration form for a 6-month coding scholarship — ask for name, email,
-              education background, financial situation, and let them upload a certificate."
+              Include the purpose, questions, eligibility rules, and what makes a strong candidate. AI can use these requirements to score and shortlist submissions.
             </p>
 
             <textarea
               value={formIntentText}
-              onChange={(e) => setFormIntentText(e.target.value)}
+              onChange={(e) => { setFormIntentText(e.target.value); setDraftRequirements(e.target.value); }}
               rows={4}
-              placeholder="Describe the form's purpose and the fields it needs..."
+              placeholder="Scholarship application: collect grades, financial need, leadership, and goals. Select the strongest eligible applicants..."
               className="w-full rounded-2xl border border-[#E8E4DC] dark:border-[#2D2D32] bg-[#FBF9F6] dark:bg-[#141416] px-4 py-3 text-sm text-[#191919] dark:text-[#F3F3F3] placeholder:text-[#858075] outline-none focus:border-[#D97757] transition-colors resize-none"
               autoFocus
             />
@@ -1650,7 +1953,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
       {showManualFormBuilder && (
         <div className="fixed inset-0 z-[120] bg-[#FBF9F6] dark:bg-[#141416] flex flex-col animate-in fade-in duration-200">
           {/* Top bar */}
-          <div className="shrink-0 border-b border-[#E8E4DC] dark:border-[#2D2D32] bg-white/80 dark:bg-[#18181B]/80 backdrop-blur-md px-4 sm:px-8 py-4 flex items-center justify-between gap-3">
+          <div className="shrink-0 border-b border-[#E8E4DC] dark:border-[#2D2D32] bg-white/80 dark:bg-[#18181B]/80 backdrop-blur-md px-3 sm:px-8 py-3 sm:py-4 flex items-center justify-between gap-2">
             <div className="flex items-center gap-3 min-w-0">
               <button
                 onClick={() => setShowManualFormBuilder(false)}
@@ -1672,7 +1975,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
               </div>
             </div>
 
-            <div className="flex items-center gap-2 shrink-0">
+      <div className="flex flex-wrap items-center justify-end gap-1.5 sm:gap-2 shrink-0">
               <div className="flex items-center gap-1 bg-[#F4F0E8] dark:bg-[#202024] p-1 rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32]">
                 <button
                   onClick={() => setManualBuilderTab('build')}
@@ -1707,19 +2010,22 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                 Generate with AI instead
               </button>
 
-              <button
-                onClick={handleSaveManualForm}
+          <button
+            onClick={handleSaveManualForm}
                 disabled={isSavingManualForm}
-                className={`px-4 sm:px-5 py-2.5 rounded-xl font-black text-xs sm:text-sm transition-all flex items-center gap-2 active:scale-95 ${
+                  className={`px-3 sm:px-5 py-2.5 rounded-xl font-black text-xs sm:text-sm transition-all flex items-center gap-2 active:scale-95 ${
                   isSavingManualForm
                     ? 'bg-slate-400 cursor-not-allowed opacity-60 text-white'
                     : 'bg-[#D97757] hover:bg-[#C56648] text-white shadow-lg shadow-[#D97757]/20'
                 }`}
               >
                 {isSavingManualForm ? <BwengeLoader variant="compact" /> : <Check size={16} />}
-                {isSavingManualForm ? 'Publishing...' : 'Save & Publish'}
-              </button>
-            </div>
+            {isSavingManualForm ? 'Publishing...' : 'Save & Publish'}
+          </button>
+          <label title="Customize form theme color" className="flex cursor-pointer items-center gap-2 rounded-xl border border-[#E8E4DC] px-3 py-2 text-xs font-bold text-[#66635B] hover:border-[#D97757] dark:border-[#2D2D32] dark:text-white"><span className="hidden sm:inline">Theme</span><input aria-label="Form theme color" type="color" value={manualForm.themeColor || '#D97757'} onChange={e => setManualForm(prev => ({ ...prev, themeColor: e.target.value }))} className="h-6 w-7 cursor-pointer rounded border-0 bg-transparent p-0" /></label>
+          <button type="button" onClick={() => { if (!manualForm.title.trim() || !manualForm.questions.length) { setManualSaveError('Add a form title and at least one question before copying a link.'); return; } void handleSaveManualForm(); }} title="Save and create a public link" className="rounded-xl border border-[#E8E4DC] px-3 py-2.5 text-xs font-bold text-[#66635B] hover:border-[#D97757] hover:text-[#D97757]">Get link</button>
+          <button type="button" onClick={() => { setShowManualFormBuilder(false); void showFormsDashboard(); }} title="View form responses" className="rounded-xl border border-[#E8E4DC] px-3 py-2.5 text-xs font-bold text-[#66635B] hover:border-[#D97757] hover:text-[#D97757]">Results</button>
+        </div>
           </div>
 
           {manualSaveError && (
@@ -1731,21 +2037,31 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
           )}
 
           {/* Body */}
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
             {manualBuilderTab === 'build' ? (
-              <div className="max-w-3xl mx-auto px-4 sm:px-8 py-8 space-y-4">
+          <div className="max-w-3xl mx-auto px-4 sm:px-8 py-8 space-y-4">
                 {/* Form description */}
                 <div className="bg-white dark:bg-[#1C1C20] rounded-2xl border border-[#E8E4DC] dark:border-[#2D2D32] p-5 shadow-sm">
-                  <textarea
-                    value={manualForm.description}
-                    onChange={(e) => setManualForm((prev) => ({ ...prev, description: e.target.value }))}
-                    placeholder="Form description (optional) — tell respondents what this is for"
-                    rows={2}
-                    className="w-full bg-transparent text-sm text-[#66635B] dark:text-[#A0A0AA] outline-none placeholder:text-[#858075] resize-none"
-                  />
-                </div>
+                  <div className="mb-2 flex flex-wrap items-center gap-1 border-b border-[#E8E4DC] pb-2 dark:border-[#2D2D32]">
+                    {([['bold', Bold, 'Bold'], ['italic', Italic, 'Italic'], ['underline', Underline, 'Underline'], ['insertUnorderedList', List, 'Bulleted list']] as const).map(([command, Icon, label]) => <button key={command} type="button" title={label} aria-label={label} onMouseDown={event => event.preventDefault()} onClick={() => { document.execCommand(command); document.getElementById('manual-form-description')?.focus(); }} className="grid h-8 w-8 place-items-center rounded-lg text-[#66635B] hover:bg-[#D97757]/10 hover:text-[#D97757] dark:text-[#A0A0AA]"><Icon size={15} /></button>)}
+                    <label title="Attach image" aria-label="Attach image" className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-[#66635B] hover:bg-[#D97757]/10 hover:text-[#D97757] dark:text-[#A0A0AA]"><ImageIcon size={16} /><input type="file" accept="image/*" className="hidden" onChange={event => { const file = event.target.files?.[0]; if (!file) return; if (file.size > 2 * 1024 * 1024) { setManualSaveError('Choose an image smaller than 2 MB.'); event.target.value = ''; return; } const reader = new FileReader(); reader.onload = () => setManualForm(prev => ({ ...prev, descriptionImageUrl: String(reader.result || '') })); reader.readAsDataURL(file); event.target.value = ''; }} /></label>
+                    <label title="Text color" className="relative grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-[#66635B] hover:bg-[#D97757]/10 dark:text-[#A0A0AA]"><Type size={16} /><input aria-label="Text color" type="color" onChange={event => { document.execCommand('foreColor', false, event.target.value); document.getElementById('manual-form-description')?.focus(); }} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" /></label>
+                  </div>
+                  <div id="manual-form-description" contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true" data-placeholder="Form description (optional) — tell respondents what this is for" onInput={event => { const html = event.currentTarget.innerHTML; setManualForm(prev => ({ ...prev, description: html })); }} onMouseUp={updateDescriptionSelection} onKeyUp={updateDescriptionSelection} dangerouslySetInnerHTML={{ __html: manualForm.description }} className="min-h-12 w-full whitespace-pre-wrap bg-transparent text-sm text-[#66635B] outline-none empty:before:content-[attr(data-placeholder)] empty:before:text-[#858075] dark:text-[#A0A0AA]" />
+                  {descriptionSelection && <div className="fixed z-[100] flex -translate-x-1/2 -translate-y-full items-center gap-1 rounded-xl border border-[#2D2D32] bg-[#202024] p-1.5 text-white shadow-xl" style={{ top: descriptionSelection.top - 8, left: descriptionSelection.left }} onMouseDown={event => event.preventDefault()}>
+                    {([['bold', Bold, 'Bold'], ['italic', Italic, 'Italic'], ['underline', Underline, 'Underline']] as const).map(([command, Icon, label]) => <button key={command} type="button" title={label} aria-label={label} onClick={() => { document.execCommand(command); const editor = document.getElementById('manual-form-description'); if (editor) setManualForm(prev => ({ ...prev, description: editor.innerHTML })); setDescriptionSelection(null); }} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white/10"><Icon size={15} /></button>)}
+                  </div>}
+                  {manualForm.descriptionImageUrl && <div className="mt-3"><img src={manualForm.descriptionImageUrl} alt="Form description attachment" className="max-h-48 max-w-full rounded-xl object-contain" /><button type="button" onClick={() => setManualForm(prev => ({ ...prev, descriptionImageUrl: undefined }))} className="mt-1 text-xs text-rose-500">Remove image</button></div>}
+            </div>
 
-                {/* Question list */}
+            {(manualForm.blocks || []).map(block => <section key={block.id} className="relative rounded-2xl border border-[#E8E4DC] bg-white p-4 shadow-sm dark:border-[#2D2D32] dark:bg-[#1C1C20]">
+              <div className="mb-3 flex items-center justify-between"><span className="text-[10px] font-black uppercase tracking-wider text-[#D97757]">{block.type === 'TEXT' ? 'Title and description' : block.type}</span><button type="button" onClick={() => deleteManualBlock(block.id)} aria-label="Remove content block" className="rounded-lg p-2 text-[#858075] hover:bg-rose-500/10 hover:text-rose-500"><Trash2 size={15} /></button></div>
+              {block.type === 'SECTION' ? <><input value={block.title} onChange={e => updateManualBlock(block.id, { title: e.target.value })} placeholder="Section title" className="w-full border-b border-[#E8E4DC] bg-transparent py-2 text-lg font-bold outline-none focus:border-[#D97757]" /><textarea value={block.description || ''} onChange={e => updateManualBlock(block.id, { description: e.target.value })} placeholder="Section description" rows={2} className="mt-2 w-full resize-y bg-transparent text-sm outline-none" /></>
+                : block.type === 'TEXT' ? <><input value={block.title} onChange={e => updateManualBlock(block.id, { title: e.target.value })} placeholder="Heading" className="w-full border-b border-[#E8E4DC] bg-transparent py-2 text-base font-bold outline-none focus:border-[#D97757]" /><textarea value={block.description || ''} onChange={e => updateManualBlock(block.id, { description: e.target.value })} placeholder="Add description or instructions" rows={3} className="mt-2 w-full resize-y bg-transparent text-sm outline-none" /></>
+                : <><input value={block.url || ''} onChange={e => updateManualBlock(block.id, { url: e.target.value })} placeholder={block.type === 'VIDEO' ? 'YouTube video URL' : 'Image URL'} className="w-full rounded-lg border border-[#E8E4DC] bg-transparent px-3 py-2 text-sm outline-none focus:border-[#D97757]" /><p className="mt-2 text-[10px] text-[#858075]">{block.type === 'VIDEO' ? 'Paste a YouTube link. The video will appear in the respondent form.' : 'Paste a public image URL.'}</p>{block.type === 'IMAGE' && block.url && <img src={block.url} alt="Form content preview" className="mt-3 max-h-52 rounded-xl object-contain" />}{block.type === 'VIDEO' && block.url && <p className="mt-2 break-all text-xs text-[#858075]">Video link: {block.url}</p>}</>}
+            </section>)}
+
+            {/* Question list */}
                 {manualForm.questions.length === 0 ? (
                   <div className="rounded-2xl border-2 border-dashed border-[#E8E4DC] dark:border-[#2D2D32] p-10 text-center space-y-2">
                     <FileText className="mx-auto text-[#D97757]" size={28} />
@@ -1759,8 +2075,9 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                     return (
                       <div
                         key={q.id}
-                        className="group bg-white dark:bg-[#1C1C20] rounded-2xl border border-[#E8E4DC] dark:border-[#2D2D32] p-5 shadow-sm hover:border-[#D97757]/40 transition-colors space-y-3"
+                        className="flex w-full items-start gap-2 sm:gap-3"
                       >
+                        <section className="group min-w-0 flex-1 space-y-3 rounded-2xl border border-[#E8E4DC] bg-white p-4 shadow-sm transition-colors hover:border-[#D97757]/40 dark:border-[#2D2D32] dark:bg-[#1C1C20] sm:p-5">
                         <div className="flex items-start gap-3">
                           <span className="flex-shrink-0 w-8 h-8 rounded-xl bg-[#D97757]/10 text-[#D97757] flex items-center justify-center">
                             <Icon size={16} />
@@ -1785,7 +2102,12 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                         </div>
 
                         {/* Options editor for choice-based types */}
-                        {meta.hasOptions && (
+                        {q.contentTitle && <input value={q.contentTitle} onChange={e => updateManualQuestion(q.id, { contentTitle: e.target.value })} placeholder="Text heading" className="w-full rounded-lg border border-[#E8E4DC] bg-transparent px-3 py-2 text-xs outline-none focus:border-[#D97757]" />}
+                        {q.sectionTitle && <input value={q.sectionTitle} onChange={e => updateManualQuestion(q.id, { sectionTitle: e.target.value })} placeholder="Section heading" className="w-full rounded-lg border-l-4 border-[#D97757] bg-[#F7F5F0] px-3 py-2 text-xs font-bold outline-none dark:bg-white/[0.04]" />}
+                        {q.showVideoEditor && <div className="space-y-2"><input value={q.videoUrl || ''} onChange={e => updateManualQuestion(q.id, { videoUrl: e.target.value, videoDataUrl: '' })} placeholder="Paste a YouTube video URL" className="w-full rounded-lg border border-[#E8E4DC] bg-transparent px-3 py-2 text-xs outline-none focus:border-[#D97757]" /><label className="inline-flex cursor-pointer rounded-lg border border-[#E8E4DC] px-3 py-2 text-xs font-semibold hover:border-[#D97757] dark:border-[#2D2D32]">Attach video file<input type="file" accept="video/*" className="hidden" onChange={event => addVideoToQuestion(q.id, event.target.files?.[0])} /></label>{q.videoDataUrl && <video controls preload="metadata" src={q.videoDataUrl} className="max-h-64 w-full rounded-xl bg-black" />}</div>}
+                        {q.imageUrl && <img src={q.imageUrl} alt="Question attachment preview" className="max-h-56 max-w-full rounded-xl object-contain" />}
+
+                {meta.hasOptions && (
                           <div className="pl-11 space-y-2">
                             {(q.options || []).map((opt, oi) => (
                               <div key={opt.id} className="flex items-center gap-2">
@@ -1811,10 +2133,33 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                             >
                               + Add option
                             </button>
-                          </div>
-                        )}
+                  </div>
+                )}
 
-                        {/* Question toolbar */}
+                {['MULTIPLE_CHOICE_GRID', 'CHECKBOX_GRID'].includes(q.type) && (
+                  <div className="pl-11 space-y-2">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-[#858075]">Rows</p>
+                    {(q.rows || []).map((row, rowIndex) => <div key={`${q.id}-row-${rowIndex}`} className="flex items-center gap-2">
+                      <input value={row} onChange={e => updateManualRow(q.id, rowIndex, e.target.value)} aria-label={`Grid row ${rowIndex + 1}`} className="flex-1 rounded-lg border border-[#E8E4DC] bg-transparent px-3 py-2 text-xs outline-none focus:border-[#D97757]" />
+                      <button type="button" onClick={() => removeManualRow(q.id, rowIndex)} className="p-1 text-[#858075] hover:text-rose-500" aria-label="Remove row"><X size={14} /></button>
+                    </div>)}
+                    <button type="button" onClick={() => addManualRow(q.id)} className="text-xs font-semibold text-[#D97757]">+ Add row</button>
+                    <p className="text-[10px] text-[#858075]">Columns are the answer options above.</p>
+                  </div>
+                )}
+
+                {q.type === 'LINEAR_SCALE' && <div className="grid grid-cols-2 gap-3 pl-11 sm:grid-cols-4">
+                  <label className="text-[10px] font-semibold text-[#858075]">Start<input type="number" min="0" max="10" value={q.scaleMin ?? 1} onChange={e => updateManualQuestion(q.id, { scaleMin: Number(e.target.value) })} className="mt-1 w-full rounded-lg border border-[#E8E4DC] bg-transparent p-2 text-sm text-[#191919] dark:text-white" /></label>
+                  <label className="text-[10px] font-semibold text-[#858075]">End<input type="number" min="2" max="10" value={q.scaleMax ?? 5} onChange={e => updateManualQuestion(q.id, { scaleMax: Number(e.target.value) })} className="mt-1 w-full rounded-lg border border-[#E8E4DC] bg-transparent p-2 text-sm text-[#191919] dark:text-white" /></label>
+                  <label className="text-[10px] font-semibold text-[#858075]">Start label<input value={q.scaleMinLabel || ''} onChange={e => updateManualQuestion(q.id, { scaleMinLabel: e.target.value })} placeholder="Not at all" className="mt-1 w-full rounded-lg border border-[#E8E4DC] bg-transparent p-2 text-xs text-[#191919] dark:text-white" /></label>
+                  <label className="text-[10px] font-semibold text-[#858075]">End label<input value={q.scaleMaxLabel || ''} onChange={e => updateManualQuestion(q.id, { scaleMaxLabel: e.target.value })} placeholder="Very much" className="mt-1 w-full rounded-lg border border-[#E8E4DC] bg-transparent p-2 text-xs text-[#191919] dark:text-white" /></label>
+                </div>}
+
+                {q.type === 'RATING' && <label className="ml-11 block max-w-40 text-[10px] font-semibold text-[#858075]">Maximum rating
+                  <select value={q.maxRating || 5} onChange={e => updateManualQuestion(q.id, { maxRating: Number(e.target.value) })} className="mt-1 w-full rounded-lg border border-[#E8E4DC] bg-transparent p-2 text-sm text-[#191919] dark:text-white">{[3, 4, 5, 6, 7, 8, 9, 10].map(n => <option key={n} value={n}>{n} stars</option>)}</select>
+                </label>}
+
+                {/* Question toolbar */}
                         <div className="flex items-center justify-between pt-2 border-t border-[#E8E4DC] dark:border-[#2D2D32]">
                           <label className="flex items-center gap-2 text-xs font-semibold text-[#66635B] dark:text-[#A0A0AA] cursor-pointer select-none">
                             <input
@@ -1858,13 +2203,20 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                             </button>
                           </div>
                         </div>
+                        </section>
+                        <aside aria-label={`Add content to question ${idx + 1}`} className="sticky top-4 flex shrink-0 flex-col gap-2 rounded-xl border border-[#E8E4DC] bg-white p-2 shadow-sm dark:border-[#2D2D32] dark:bg-[#1C1C20]">
+                          <button type="button" aria-label="Add text" title="Add text" onClick={() => updateManualQuestion(q.id, { contentTitle: q.contentTitle ? '' : 'Additional information' })} className="grid h-9 w-9 place-items-center rounded-lg text-xs font-bold hover:bg-[#D97757]/10">Tt</button>
+                          <label aria-label="Attach image" title="Attach image" className="grid h-9 w-9 cursor-pointer place-items-center rounded-lg hover:bg-[#D97757]/10"><ImageIcon size={17} /><input type="file" accept="image/*" className="hidden" onChange={event => { addImageToQuestion(q.id, event.target.files?.[0]); event.target.value = ''; }} /></label>
+                          <button type="button" aria-label="Attach video" title="Attach video or add YouTube link" onClick={() => updateManualQuestion(q.id, { showVideoEditor: !q.showVideoEditor })} className="grid h-9 w-9 place-items-center rounded-lg hover:bg-[#D97757]/10"><Video size={17} /></button>
+                          <button type="button" aria-label="Add section heading" title="Add section heading" onClick={() => updateManualQuestion(q.id, { sectionTitle: q.sectionTitle ? '' : 'Section' })} className="grid h-9 w-9 place-items-center rounded-lg hover:bg-[#D97757]/10"><Layout size={17} /></button>
+                        </aside>
                       </div>
                     );
                   })
                 )}
 
                 {/* Add-question type picker */}
-                <div className="bg-white dark:bg-[#1C1C20] rounded-2xl border border-dashed border-[#E8E4DC] dark:border-[#2D2D32] p-4">
+          <div className="bg-white dark:bg-[#1C1C20] rounded-2xl border border-dashed border-[#E8E4DC] dark:border-[#2D2D32] p-4">
                   <p className="text-[10px] font-black uppercase tracking-widest text-[#858075] mb-3">Add a question</p>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {QUESTION_TYPE_CATALOG.map((t) => {
@@ -1880,16 +2232,21 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                         </button>
                       );
                     })}
-                  </div>
+            </div>
+            <div className="mt-4 border-t border-[#E8E4DC] pt-4 dark:border-[#2D2D32]">
+              <button type="button" onClick={() => { setShowImportQuestions(open => !open); void loadOwnedForms().catch(error => setManualSaveError(error.message)); }} className="rounded-xl border border-[#E8E4DC] px-3 py-2 text-xs font-semibold text-[#191919] hover:border-[#D97757] dark:border-[#2D2D32] dark:text-white">Import questions from another form</button>
+              {showImportQuestions && <div className="mt-3 space-y-2">{savedForms.filter(form => form.id !== manualForm.id).length ? savedForms.filter(form => form.id !== manualForm.id).map(form => <button key={form.id} type="button" onClick={() => importQuestionsFromForm(form)} className="block w-full rounded-lg border border-[#E8E4DC] p-3 text-left text-xs hover:border-[#D97757] dark:border-[#2D2D32]"><span className="font-bold">{form.title}</span><span className="ml-2 text-[#858075]">{form.schema?.questions?.length || 0} questions</span></button>) : <p className="text-xs text-[#858075]">No saved forms with questions to import.</p>}</div>}
+            </div>
                 </div>
               </div>
             ) : (
               /* Preview tab — the same DynamicForm renderer used everywhere else */
               <div className="max-w-2xl mx-auto px-4 sm:px-8 py-8">
                 <div className="bg-white dark:bg-[#1C1C20] rounded-[28px] border border-[#E8E4DC] dark:border-[#2D2D32] shadow-sm overflow-hidden">
-                  <div className="bg-[#D97757] p-6 text-white">
+                  <div className="p-6 text-white" style={{ backgroundColor: manualForm.themeColor || '#D97757' }}>
                     <h2 className="text-xl font-black">{manualForm.title || 'Untitled form'}</h2>
-                    {manualForm.description && <p className="text-sm opacity-90 mt-1">{manualForm.description}</p>}
+                    {manualForm.description && <div className="text-sm opacity-90 mt-1" dangerouslySetInnerHTML={{ __html: manualForm.description }} />}
+                    {manualForm.descriptionImageUrl && <img src={manualForm.descriptionImageUrl} alt="Form description" className="mt-3 max-h-48 rounded-xl object-contain" />}
                   </div>
                   <div className="p-6">
                     {manualForm.questions.length === 0 ? (
@@ -1899,7 +2256,10 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                         schema={JSON.stringify({
                           title: manualForm.title,
                           description: manualForm.description,
+                          descriptionImageUrl: manualForm.descriptionImageUrl,
                           questions: manualForm.questions,
+                          blocks: manualForm.blocks || [],
+                          themeColor: manualForm.themeColor || '#D97757',
                         })}
                         onSubmit={() => {}}
                       />

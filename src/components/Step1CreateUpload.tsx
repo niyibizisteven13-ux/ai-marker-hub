@@ -465,7 +465,7 @@ export const Step1CreateUpload: React.FC<Step1CreateUploadProps> = ({
                 Drag and drop your exam paper file here, or browse
               </p>
               <p className="text-xs text-slate-500 dark:text-white/50 mt-1 font-mono">
-                Supports TXT, PDF, DOCX, Markdown or JSON format
+                Supports all file formats (PDF, DOCX, Code, TXT, JSON, PPTX, Spreadsheets, Images, etc.)
               </p>
             </div>
           </div>

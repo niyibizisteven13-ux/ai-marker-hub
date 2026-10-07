@@ -3,18 +3,20 @@ import { PaymentService } from '../services/PaymentService.js';
 import { PaywallService } from '../services/PaywallService.js';
 import { requireAuth } from '../../production/auth.js';
 import { verifyMomoSignature, whitelistPaymentGateways } from '../middleware/webhookAuth.js';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../db.js';
 import logger from '../utils/logger.js';
 
 const router = Router();
 const paymentService = PaymentService.getInstance();
 const paywallService = PaywallService.getInstance();
-const prisma = new PrismaClient();
 
 router.get('/quote', requireAuth, async (req, res) => {
   try {
     const { jobId, service } = req.query;
     if (!jobId || !service) return res.status(400).json({ error: 'Missing jobId or service' });
+    const userId = (req as any).user?.userId;
+    const job = await prisma.batchJob.findFirst({ where: { id: String(jobId), userId }, select: { id: true } });
+    if (!job) return res.status(404).json({ error: 'Batch job not found.' });
 
     const priceUsd = await paymentService.getPriceForJob(jobId as string, service as string);
     res.json({ priceUsd });
@@ -30,13 +32,19 @@ router.get('/status', requireAuth, async (req, res) => {
 
     if (jobId) {
       const payment = await prisma.payment.findFirst({
-        where: { batchId: jobId as string },
+        where: { batchId: jobId as string, userId },
         orderBy: { createdAt: 'desc' },
       });
       return res.json({ status: payment?.status || 'PENDING' });
     }
 
     if (planType && userId) {
+      const payment = await prisma.payment.findFirst({
+        where: { userId, batchId: `${userId}:PLAN:${String(planType)}` },
+        orderBy: { createdAt: 'desc' },
+        select: { status: true },
+      });
+      if (payment) return res.json({ status: payment.status });
       const subscription = await prisma.subscription.findUnique({
         where: { userId }
       });
@@ -51,13 +59,19 @@ router.get('/status', requireAuth, async (req, res) => {
 
 router.post('/initiate', requireAuth, async (req, res) => {
   try {
-    const { phoneNumber, batchId, service, planType, isSubscription } = req.body;
-    const userId = (req as any).user?.userId || 'anonymous';
+    const { phoneNumber, batchId, service, planType, isSubscription } = req.body || {};
+    const userId = (req as any).user?.userId;
+    if (!userId) return res.status(401).json({ error: 'Authentication required.' });
+    if (typeof phoneNumber !== 'string' || phoneNumber.length > 32) return res.status(400).json({ error: 'A valid phone number is required.' });
+    if (isSubscription && !['BUSINESS', 'PRO', 'ORGANIZATION'].includes(planType)) return res.status(400).json({ error: 'Unsupported subscription plan.' });
+    if (!isSubscription && (typeof batchId !== 'string' || typeof service !== 'string')) return res.status(400).json({ error: 'A valid batchId and service are required.' });
 
     let priceUsd = 0;
     if (isSubscription && planType === 'BUSINESS') {
       priceUsd = 9.00;
     } else if (batchId) {
+      const job = await prisma.batchJob.findFirst({ where: { id: batchId, userId }, select: { id: true } });
+      if (!job) return res.status(404).json({ error: 'Batch job not found.' });
       priceUsd = await paymentService.getPriceForJob(batchId, service);
     }
 
@@ -68,21 +82,13 @@ router.post('/initiate', requireAuth, async (req, res) => {
       ? `${userId}:PLAN:${planType}`
       : `${userId}:${batchId}:${service}`;
 
+    const paymentBatchId = batchId || referenceId;
+    const existingPayment = await prisma.payment.findUnique({ where: { batchId: paymentBatchId } });
+    if (existingPayment && existingPayment.userId !== userId) return res.status(409).json({ error: 'Payment reference already exists.' });
     await prisma.payment.upsert({
-      where: { batchId: batchId || referenceId },
-      update: {
-        status: 'PENDING',
-        externalRef: referenceId,
-        amountRwf: rwfAmount
-      },
-      create: {
-        userId,
-        batchId: batchId || referenceId,
-        amountRwf: rwfAmount,
-        status: 'PENDING',
-        provider: 'MTN_MOMO',
-        externalRef: referenceId,
-      },
+      where: { batchId: paymentBatchId },
+      update: { status: 'PENDING', externalRef: referenceId, amountRwf: rwfAmount },
+      create: { userId, batchId: paymentBatchId, amountRwf: rwfAmount, status: 'PENDING', provider: 'MTN_MOMO', externalRef: referenceId },
     });
 
     const result = await paymentService.initiateMomoPayment({
@@ -103,8 +109,10 @@ router.post('/initiate', requireAuth, async (req, res) => {
 
 router.post('/stripe/create-checkout-session', requireAuth, async (req, res) => {
   try {
-    const { plan } = req.body;
-    const userId = (req as any).user?.userId || 'anonymous';
+    const { plan } = req.body || {};
+    const userId = (req as any).user?.userId;
+    if (!userId) return res.status(401).json({ error: 'Authentication required.' });
+    if (!['BUSINESS', 'PRO', 'ORGANIZATION'].includes(plan)) return res.status(400).json({ error: 'Unsupported subscription plan.' });
 
     const result = await paymentService.createStripeCheckoutSession(userId, plan);
     res.json(result);

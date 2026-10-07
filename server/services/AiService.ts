@@ -36,7 +36,7 @@ const NVIDIA_MODELS = {
 // parsing accordingly — the surrounding retry/timeout/error-handling
 // structure will still be correct either way.
 const GONKA_MODELS = {
-  DEFAULT: 'glm-5.3-flash',
+  DEFAULT: 'zai-org/GLM-5.3-Flash',
 };
 
 type ProviderKey = 'gemini' | 'openai' | 'deepseek' | 'openrouter' | 'anthropic' | 'ollama' | 'nvidianim' | 'gonkarouter';
@@ -161,6 +161,7 @@ export class AiService {
     if (name === 'deepseek') return Boolean(process.env.DEEPSEEK_API_KEY);
     if (name === 'openrouter') return Boolean(process.env.OPENROUTER_API_KEY);
     if (name === 'anthropic') return Boolean(process.env.ANTHROPIC_API_KEY);
+    if (name === 'nvidianim') return Boolean(process.env.NVIDIA_NIM_API_KEY);
     if (name === 'gonkarouter') return Boolean(process.env.GONKA_API_KEY);
     if (name === 'ollama') {
       try {
@@ -331,17 +332,32 @@ export class AiService {
    * conversational bot use with real-time message editing, prefer
    * streamGonkaChat or runGonkaAgentLoop below.
    */
-  public async sendGonkaChat(prompt: string, options: { system?: string; history?: Array<{ role: 'user' | 'assistant'; text: string }> } = {}) {
+  public async sendGonkaChat(prompt: string, options: {
+    system?: string;
+    history?: Array<{ role: 'user' | 'assistant'; text: string }>;
+    images?: Array<{ base64: string; mediaType: string }>;
+  } = {}) {
     const apiKey = process.env.GONKA_API_KEY;
     if (!apiKey) throw new Error('GONKA_API_KEY is not configured.');
 
-    const baseUrl = (process.env.GONKA_BASE_URL || 'https://api.gonkarouter.com/v1').replace(/\/$/, '') + '/chat/completions';
+    const baseUrl = (process.env.GONKA_BASE_URL || 'https://api.gonkarouter.io/v1').replace(/\/$/, '') + '/chat/completions';
     const model = process.env.GONKA_MODEL || GONKA_MODELS.DEFAULT;
 
     const messages = [
       { role: 'system', content: options.system || 'You are Bwenge AI Assistant.' },
       ...(Array.isArray(options.history) ? options.history : []).map(h => ({ role: h.role, content: h.text })),
-      { role: 'user', content: prompt },
+      {
+        role: 'user',
+        content: options.images?.length
+          ? [
+              { type: 'text', text: prompt },
+              ...options.images.map(image => ({
+                type: 'image_url',
+                image_url: { url: `data:${image.mediaType};base64,${image.base64}` },
+              })),
+            ]
+          : prompt,
+      },
     ];
 
     const response = await fetchWithTimeout(baseUrl, {
@@ -356,7 +372,7 @@ export class AiService {
     }
 
     const raw = data?.choices?.[0]?.message?.content || '';
-    return stripThinkingTags(raw);
+    return stripThinkingTags(raw).text;
   }
 
   /**
@@ -368,25 +384,36 @@ export class AiService {
    * here), since a <think> tag can span multiple streamed tokens.
    */
   public async streamGonkaChat(prompt: string, options: {
-    model?: string; system?: string; history?: any[]; onToken: (token: string) => void; tools?: any[];
+    model?: string; system?: string; history?: any[]; images?: Array<{ base64: string; mediaType: string }>;
+    onToken: (token: string) => void; tools?: any[];
     temperature?: number; max_tokens?: number;
   }) {
     const apiKey = process.env.GONKA_API_KEY;
     if (!apiKey) throw new Error('GONKA_API_KEY is not configured.');
 
     const model = options.model || process.env.GONKA_MODEL || GONKA_MODELS.DEFAULT;
-    const baseUrl = (process.env.GONKA_BASE_URL || 'https://api.gonkarouter.com/v1').replace(/\/$/, '') + '/chat/completions';
+    const baseUrl = (process.env.GONKA_BASE_URL || 'https://api.gonkarouter.io/v1').replace(/\/$/, '') + '/chat/completions';
 
     const messages = [
       { role: 'system', content: options.system || 'You are Bwenge AI, powered by GonkaRouter.' },
       ...(Array.isArray(options.history) ? options.history : []).map(h => ({ role: h.role, content: h.text })),
-      { role: 'user', content: prompt },
+      {
+        role: 'user',
+        content: options.images?.length
+          ? [
+              { type: 'text', text: prompt },
+              ...options.images.map((image) => ({
+                type: 'image_url',
+                image_url: { url: `data:${image.mediaType};base64,${image.base64}` },
+              })),
+            ]
+          : prompt,
+      },
     ];
 
     const body: any = {
       model,
       messages,
-      stream: true,
       temperature: Number(options.temperature ?? 0.3),
       max_tokens: Number(options.max_tokens ?? 4096),
     };
@@ -398,15 +425,34 @@ export class AiService {
       }));
     }
 
-    const response = await fetchWithTimeout(baseUrl, {
+    const fetchGonka = (stream: boolean) => fetchWithTimeout(baseUrl, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ...body, stream }),
     }, 60_000);
 
+    // Request a complete JSON completion from Gonka. Its gateway/model may
+    // return HTTP 200 while ignoring the requested SSE stream, leaving the
+    // client waiting until timeout with no visible tokens. The application
+    // still sends the completed text to the browser over its own SSE channel.
+    const response = await fetchGonka(false);
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(`Gonka API error (${response.status}): ${errorText || response.statusText}`);
+    }
+
+    const contentType = response.headers.get('content-type')?.toLowerCase() || '';
+    if (contentType.includes('application/json') || !contentType.includes('text/event-stream')) {
+      const data: any = await response.json();
+      const text = data?.choices?.[0]?.message?.content
+        ?? data?.choices?.[0]?.delta?.content
+        ?? data?.message?.content
+        ?? data?.response;
+      if (typeof text !== 'string' || !text.trim()) {
+        throw new Error('Gonka returned no message content.');
+      }
+      options.onToken(text);
+      return;
     }
 
     const reader = response.body;
@@ -423,15 +469,19 @@ export class AiService {
 
       for (const line of lines) {
         const trimmedLine = line.trim();
-        if (!trimmedLine || !trimmedLine.startsWith('data: ')) continue;
+        if (!trimmedLine || !trimmedLine.startsWith('data:')) continue;
 
-        const dataStr = trimmedLine.slice(6).trim();
+        const dataStr = trimmedLine.slice(5).trim();
         if (dataStr === '[DONE]') return;
 
         try {
           const data = JSON.parse(dataStr);
-          const token = data.choices?.[0]?.delta?.content;
-          if (token) options.onToken(token);
+          const choice = data.choices?.[0];
+          const token = choice?.delta?.content
+            ?? choice?.message?.content
+            ?? data?.message?.content
+            ?? data?.response;
+          if (typeof token === 'string' && token) options.onToken(token);
         } catch (e) {
           // Fragmented JSON chunk split across a read boundary — expected
           // with SSE streams, safe to skip.
@@ -463,7 +513,7 @@ export class AiService {
     if (!apiKey) throw new Error('GONKA_API_KEY is not configured.');
 
     const model = options.model || process.env.GONKA_MODEL || GONKA_MODELS.DEFAULT;
-    const baseUrl = (process.env.GONKA_BASE_URL || 'https://api.gonkarouter.com/v1').replace(/\/$/, '') + '/chat/completions';
+    const baseUrl = (process.env.GONKA_BASE_URL || 'https://api.gonkarouter.io/v1').replace(/\/$/, '') + '/chat/completions';
 
     let messages = [
       { role: 'system', content: options.system },
@@ -915,6 +965,17 @@ export class AiService {
     const { ToolRegistry } = await import('./ToolRegistry.js');
     const { executeAgentTool } = await import('./executeAgentTool.js');
 
+    if (await this.providerAvailable('gonkarouter')) {
+      const result = await this.runGonkaAgentLoop({
+        prompt: `Perform deep research on: ${query}`,
+        system: researchSystem,
+        tools: [ToolRegistry.web_search.metadata, ToolRegistry.manage_files.metadata] as any,
+        executeTool: async (name, input) => executeAgentTool(userId, name, input),
+        onEvent,
+      });
+      return result[result.length - 1]?.content || '';
+    }
+
     const result = await this.runAgentLoop({
       messages: [{ role: 'user', content: `Perform deep research on: ${query}` }],
       tools: [ToolRegistry.web_search.metadata, ToolRegistry.manage_files.metadata] as any,
@@ -1030,6 +1091,23 @@ export class AiService {
   }
 
   public async generateContent(options: { model?: string; contents: any; config?: any }) {
+    if (await this.providerAvailable('gonkarouter') || process.env.AI_PROVIDER === 'gonkarouter') {
+      let promptText = '';
+      if (typeof options.contents === 'string') {
+        promptText = options.contents;
+      } else if (Array.isArray(options.contents)) {
+        promptText = options.contents.map((c: any) => {
+          if (typeof c === 'string') return c;
+          if (c?.parts) return c.parts.map((p: any) => p.text || '').join('\n');
+          return JSON.stringify(c);
+        }).join('\n');
+      } else if (typeof options.contents === 'object') {
+        promptText = JSON.stringify(options.contents);
+      }
+      const systemPrompt = options.config?.systemInstruction || '';
+      const text = await this.sendGonkaChat(promptText, { system: systemPrompt });
+      return { text };
+    }
     if (!this.geminiClient) throw new Error('Gemini AI client is not initialized.');
     return this.geminiClient.models.generateContent({
       model: options.model || GEMINI_FLASH,
@@ -1063,6 +1141,10 @@ export class AiService {
   }
 
   public async streamClaudeChat(options: { system: string; messages: any[]; max_tokens?: number; model?: string }) {
+    if (await this.providerAvailable('gonkarouter') || process.env.AI_PROVIDER === 'gonkarouter') {
+      const promptText = options.messages.map((m: any) => m.content).join('\n');
+      return this.streamGonkaChat(promptText, { system: options.system, onToken: () => {} });
+    }
     if (!this.anthropicClient) throw new Error('Anthropic client is not initialized.');
     return this.anthropicClient.messages.stream({
       model: options.model || MODELS.SONNET,
@@ -1073,6 +1155,28 @@ export class AiService {
   }
 
   public async sendClaudeChat(promptOrOptions: string | any, options: { system?: string; model?: string; max_tokens?: number } = {}) {
+    if (await this.providerAvailable('gonkarouter') || process.env.AI_PROVIDER === 'gonkarouter') {
+      let promptText = '';
+      let systemPrompt = options.system || '';
+      if (typeof promptOrOptions === 'string') {
+        promptText = promptOrOptions;
+      } else if (promptOrOptions && Array.isArray(promptOrOptions.messages)) {
+        promptText = promptOrOptions.messages.map((m: any) => m.content).join('\n');
+        systemPrompt = promptOrOptions.system || systemPrompt;
+      } else if (promptOrOptions) {
+        promptText = typeof promptOrOptions === 'object' ? JSON.stringify(promptOrOptions) : String(promptOrOptions);
+      }
+
+      const raw = await this.sendGonkaChat(promptText, { system: systemPrompt });
+      const text = typeof raw === 'string' ? raw : (raw as any)?.text || '';
+      return {
+        text,
+        usage: { input_tokens: 0, output_tokens: 0 },
+        model: GONKA_MODELS.DEFAULT,
+        content: [{ type: 'text', text }],
+      };
+    }
+
     if (!this.anthropicClient) throw new Error('Anthropic client is not initialized.');
 
     let params: any;
@@ -1102,6 +1206,26 @@ export class AiService {
     model?: string;
     max_tokens?: number;
   }): Promise<string> {
+    if (await this.providerAvailable('gonkarouter') && options.mediaType !== 'application/pdf') {
+      return this.sendGonkaChat(options.question, {
+        system: 'You are an accurate visual analysis assistant. Analyze the supplied image and follow the user instructions.',
+        images: [{ base64: options.base64, mediaType: options.mediaType }],
+      });
+    }
+    if (!this.anthropicClient && this.geminiClient && options.mediaType !== 'application/pdf') {
+      const response = await this.geminiClient.models.generateContent({
+        model: options.model || GEMINI_FLASH,
+        contents: [{
+          role: 'user',
+          parts: [
+            { text: options.question },
+            { inlineData: { mimeType: options.mediaType, data: options.base64 } },
+          ],
+        }],
+        config: { maxOutputTokens: options.max_tokens || 1024 },
+      });
+      return response.text || '';
+    }
     if (!this.anthropicClient) throw new Error('Anthropic client is not initialized.');
 
     const isPdf = options.mediaType === 'application/pdf';
@@ -1265,6 +1389,66 @@ export class AiService {
     executeTool?: (name: string, input: any) => Promise<string>;
     onEvent?: (event: { type: 'text' | 'tool_call' | 'tool_result' | 'done' | 'usage'; data: any }) => void;
   }) {
+    const useGonka = process.env.AI_PROVIDER === 'gonkarouter' || await this.providerAvailable('gonkarouter');
+    if (useGonka) {
+      const memoryService = MemoryService.getInstance();
+      const currentQuery = extractPlainText(options.messages[options.messages.length - 1]?.content || '');
+      let memoryContext = '';
+      try {
+        memoryContext = await memoryService.getLongTermContext(options.userId, currentQuery);
+      } catch (err) {
+        logger.warn('generalAssist: getLongTermContext failed, continuing without memory context', err);
+      }
+
+      let systemPrompt = options.extractSchema
+        ? `${BWENGE_GENERAL_SYSTEM_PROMPT}${memoryContext}\n\nFor this request, respond with ONLY valid JSON matching this shape, no other text: ${options.extractSchema}`
+        : `${BWENGE_GENERAL_SYSTEM_PROMPT}${memoryContext}`;
+      if (options.pinnedSyllabus) {
+        systemPrompt += `\n\n[MASTER CONTEXT]: ${options.pinnedSyllabus}\n(Note: This is the primary curriculum/rubric source. Prioritize this document above all other context.)`;
+      }
+
+      const gonkaMessages = options.messages.map((message) => ({
+        role: message.role as 'user' | 'assistant',
+        text: extractPlainText(message.content),
+      }));
+      const lastMessage = gonkaMessages.pop();
+      const prompt = lastMessage?.text || '';
+      const files = options.files || [];
+      const images = files.filter((file) => file.type === 'image').map((file) => ({ base64: file.base64, mediaType: file.mediaType }));
+      const documents = files.filter((file) => file.type === 'document');
+      if (documents.length) {
+        systemPrompt += '\n\n[ATTACHED DOCUMENT TEXT]\n' + documents.map((file) => {
+          try { return Buffer.from(file.base64, 'base64').toString('utf8'); } catch { return ''; }
+        }).filter(Boolean).join('\n\n');
+      }
+
+      let answer = '';
+      if (options.tools && options.executeTool && options.onEvent) {
+        const agentMessages = await this.runGonkaAgentLoop({
+          prompt,
+          system: systemPrompt,
+          history: gonkaMessages,
+          tools: options.tools,
+          executeTool: options.executeTool,
+          onEvent: options.onEvent,
+        });
+        const lastMsg = agentMessages[agentMessages.length - 1];
+        answer = typeof lastMsg === 'string' ? lastMsg : (lastMsg?.content || '');
+      } else if (options.onEvent) {
+        const onToken = (token: string) => {
+          answer += token;
+          options.onEvent?.({ type: 'text', data: { text: token, provider: 'GonkaRouter' } });
+        };
+        await this.streamGonkaChat(prompt, { system: systemPrompt, history: gonkaMessages, images, max_tokens: 8192, onToken });
+      } else {
+        answer = await this.sendGonkaChat(prompt, { system: systemPrompt, history: gonkaMessages, images });
+      }
+
+      if (options.extractSchema) return { ...this.parseModelJson(answer), _usage: {} };
+      options.onEvent?.({ type: 'done', data: {} });
+      return { content: [{ type: 'text', text: answer }], model: process.env.GONKA_MODEL || GONKA_MODELS.DEFAULT };
+    }
+
     if (!this.anthropicClient) throw new Error('Anthropic client is not initialized.');
 
     const memoryService = MemoryService.getInstance();

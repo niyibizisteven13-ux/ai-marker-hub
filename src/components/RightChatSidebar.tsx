@@ -47,6 +47,7 @@ interface RightChatSidebarProps {
   /** Set while a real request to the AI backend is in flight. */
   isTyping?: boolean;
   onUpgradeClick?: (jobId: string, service: string) => void;
+  onRetry?: () => void;
   selectedProvider?: string;
   onProviderChange?: (provider: string) => void;
   onInsightAction?: (action: string, context: any) => void;
@@ -109,6 +110,7 @@ export default function RightChatSidebar({
   isDegraded = false,
   isTyping = false,
   onUpgradeClick,
+  onRetry,
   selectedProvider = 'auto',
   onProviderChange,
   onInsightAction,
@@ -241,7 +243,7 @@ export default function RightChatSidebar({
   return (
     // FULL SIDEBAR CONTAINER (Glassmorphism theme, respect parent width)
     <aside
-      className="relative h-full w-full bg-[#0D2B24]/40 backdrop-blur-md flex flex-col z-30 font-sans text-slate-100 overflow-hidden"
+      className="relative h-full min-h-0 w-full bg-[#212121] flex flex-col z-30 font-sans text-slate-100 overflow-hidden"
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -259,7 +261,7 @@ export default function RightChatSidebar({
       )}
 
       {/* 2. CHAT MESSAGES STREAM - No top header, flows to top */}
-      <main className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 scrollbar-thin scrollbar-thumb-emerald-500/10">
+      <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-28 pt-14 sm:px-6 sm:py-6 space-y-6 scrollbar-thin scrollbar-thumb-white/10">
 
         {messages.length === 0 && (
           <div className="space-y-4">
@@ -311,6 +313,7 @@ export default function RightChatSidebar({
             onPreviewDoc={setActiveDocument ? (doc) => setActiveDocument(doc) : undefined}
             onFeedback={submitFeedback}
             onUpgradeClick={onUpgradeClick}
+            onRetry={onRetry}
           />
         ))}
 
@@ -337,17 +340,17 @@ export default function RightChatSidebar({
         ref={fileInputRef}
         type="file"
         multiple
-        accept=".pdf,.doc,.docx,.ppt,.pptx,.png,.jpg,.jpeg"
+        accept="*/*"
         onChange={handleFileChange}
         className="hidden"
       />
       {/* 3. IMMERSIVE FLOATING INPUT DOCK */}
-      <footer className="p-4 sm:p-6 shrink-0 bg-[#0D2B24]/60 backdrop-blur-xl border-t border-white/5">
+      <footer className="shrink-0 bg-gradient-to-t from-[#212121] via-[#212121]/95 to-transparent px-3 pt-1 pb-[calc(0.45rem+env(safe-area-inset-bottom,0px))] sm:bg-[#212121] sm:px-6 sm:pt-3 sm:pb-4">
         <div className="max-w-[900px] mx-auto relative group/dock">
           {/* Subtle Glow Backdrop */}
-          <div className="absolute inset-0 bg-emerald-500/5 blur-xl rounded-full opacity-0 group-focus-within/dock:opacity-100 transition-opacity duration-500" />
+          <div className="absolute inset-0 rounded-full bg-white/[0.03] blur-xl opacity-0 transition-opacity duration-300 group-focus-within/dock:opacity-100" />
 
-          <div className="relative bg-[#0D111A]/90 backdrop-blur-xl border border-white/5 rounded-[28px] p-2.5 shadow-2xl focus-within:ring-2 focus-within:ring-emerald-500/20 focus-within:border-emerald-500/30 transition-all duration-300">
+          <div className="relative rounded-[26px] border border-white/[0.08] bg-[#303030] p-1 shadow-xl transition-all duration-200 focus-within:border-white/20 sm:p-2">
             {attachmentPreviews.length > 0 && (
               <div className="mb-2 flex flex-wrap gap-2 px-2 pb-2 border-b border-white/5">
                 {attachmentPreviews.map((meta, idx) => (
@@ -391,7 +394,7 @@ export default function RightChatSidebar({
               </div>
             )}
 
-            <div className="flex items-end gap-2">
+            <div className="flex items-end gap-1">
               <div className="flex-1 flex flex-col min-w-0">
                 <textarea
                   ref={textareaRef}
@@ -405,60 +408,76 @@ export default function RightChatSidebar({
                     }
                   }}
                   onPaste={handlePaste}
-                  placeholder="Type a message or build a form..."
-                  className="max-h-[300px] w-full bg-transparent text-sm text-slate-100 placeholder-slate-500 outline-none resize-none px-3 py-3 leading-relaxed"
+                  placeholder="Message Bwenge..."
+                  className="max-h-[min(120px,25dvh)] min-h-[30px] sm:min-h-10 w-full bg-transparent text-xs sm:text-base text-neutral-100 placeholder:text-neutral-500 outline-none resize-none px-2.5 pt-1 sm:px-3 sm:pt-1.5 leading-5 sm:leading-6"
                 />
               </div>
 
-              <div className="flex items-center gap-1.5 pb-1 pr-1">
+              <div className="flex max-w-full items-center gap-0.5 pb-0.5 pr-0.5 sm:gap-1.5">
                 <button
                   type="button"
                   onClick={() => setShowInsights(!showInsights)}
-                  className={`p-2 rounded-xl transition-all group relative ${showInsights ? 'bg-amber-500/20 text-amber-400' : 'text-amber-500 hover:bg-amber-500/10'}`}
+                  className={`hidden sm:block p-2 rounded-xl transition-all group relative ${showInsights ? 'bg-amber-500/20 text-amber-400' : 'text-amber-500 hover:bg-amber-500/10'}`}
                   title="Oracle Insights"
                 >
                   <Bell className="w-4 h-4" />
                   <span className="absolute top-1 right-1 w-2 h-2 bg-rose-500 rounded-full border-2 border-[#0D111A] animate-bounce" />
                 </button>
 
-                <select
-                  value={selectedProvider}
-                  onChange={(e) => onProviderChange?.(e.target.value)}
-                  className="bg-white/5 text-slate-400 text-[10px] border border-white/5 rounded-lg px-2 py-1 outline-none focus:border-emerald-500/30 transition-all cursor-pointer hover:bg-white/10 mr-1"
-                >
-                  <option value="auto">Auto</option>
-                  <option value="gemini">Gemini</option>
-                  <option value="nvidianim">NVIDIA</option>
-                  <option value="ollama">Ollama</option>
-                </select>
-
                 <button
                   type="button"
                   onClick={handleAttachClick}
-                  className="p-2.5 rounded-xl text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-all active:scale-90"
+                  className="flex h-7 w-7 sm:h-9 sm:w-9 items-center justify-center rounded-full text-neutral-300 hover:text-white hover:bg-white/10 transition-all active:scale-90"
                   title="Attach files"
                 >
-                  <Plus className="w-5 h-5" />
+                  <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
                 </button>
 
                 <button
                   type="button"
                   onClick={handleSend}
                   disabled={!canSend}
-                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-all active:scale-95 ${
+                  className={`flex h-7 w-7 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-full transition-all active:scale-95 ${
                     canSend
-                      ? 'bg-emerald-500 hover:bg-emerald-400 text-white shadow-lg shadow-emerald-500/20'
-                      : 'bg-white/5 text-slate-600 cursor-not-allowed'
+                    ? 'bg-white hover:bg-neutral-200 text-[#212121] shadow-md'
+                      : 'bg-white/10 text-neutral-500 cursor-not-allowed'
                   }`}
                 >
-                  <span className="font-bold text-lg leading-none">➔</span>
+                  <span className="font-bold text-sm sm:text-lg leading-none">➔</span>
                 </button>
               </div>
+            </div>
+            <div className="mt-0.5 flex items-center justify-between px-2 sm:hidden">
+              <span className="sr-only">Enter to send; Shift+Enter for a new line</span>
+              <select
+                value={selectedProvider}
+                onChange={(e) => onProviderChange?.(e.target.value)}
+                aria-label="AI model"
+                className="max-w-[150px] bg-transparent text-[11px] text-neutral-300 outline-none"
+              >
+                <option value="auto">Bwenge — Balanced (Auto)</option>
+                <option value="gemini">Gemini</option>
+                <option value="nvidianim">NVIDIA</option>
+                <option value="ollama">Ollama</option>
+              </select>
+            </div>
+            <div className="hidden sm:flex sm:justify-end sm:px-2 sm:pt-1.5">
+              <select
+                value={selectedProvider}
+                onChange={(e) => onProviderChange?.(e.target.value)}
+                aria-label="AI model"
+                className="max-w-[190px] bg-transparent text-[11px] text-neutral-300 outline-none"
+              >
+                <option value="auto">Bwenge — Balanced (Auto)</option>
+                <option value="gemini">Gemini</option>
+                <option value="nvidianim">NVIDIA</option>
+                <option value="ollama">Ollama</option>
+              </select>
             </div>
           </div>
         </div>
 
-        <div className="text-[10px] text-slate-600 text-center mt-3 tracking-widest uppercase font-medium">
+        <div className="hidden sm:block text-[10px] text-neutral-600 text-center mt-2 tracking-[0.16em] uppercase font-medium">
           Powered by Bwenge Autonomous Agentic System
         </div>
       </footer>

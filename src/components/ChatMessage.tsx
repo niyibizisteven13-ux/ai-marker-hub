@@ -10,6 +10,7 @@ import {
   Sparkles,
   Zap,
   Lock,
+  FileText,
 } from 'lucide-react';
 import BwengeLoader from './BwengeLoader';
 import DynamicForm from './DynamicForm';
@@ -25,12 +26,6 @@ interface ChatMessageProps {
   onUpgradeClick?: (jobId: string, service: string) => void;
 }
 
-/**
- * Quiet, collapsed-by-default container for secondary content — tool
- * output, thinking traces. Closed state should read as "there's more
- * here if you want it," not compete with the actual answer. Height
- * animates via grid-template-rows so open/close doesn't just snap.
- */
 const CollapsibleBlock = ({
   title,
   icon: Icon = Terminal,
@@ -72,7 +67,6 @@ const CollapsibleBlock = ({
   );
 };
 
-/** Small icon-only action button used in the hover row under a response. */
 const ActionButton = ({
   onClick,
   active,
@@ -90,7 +84,7 @@ const ActionButton = ({
     onClick={onClick}
     title={title}
     aria-label={title}
-    className={`rounded-md p-1.5 text-neutral-500 transition-all duration-150 hover:scale-105 hover:bg-white/5 hover:text-neutral-200 active:scale-95 ${
+    className={`rounded-lg p-2.5 lg:p-1.5 text-[#9C9A92] transition-all duration-150 hover:scale-105 hover:bg-white/5 hover:text-[#FAF9F5] active:scale-95 ${
       active ? activeClass : ''
     }`}
   >
@@ -112,6 +106,7 @@ export default function ChatMessage({
   const thinkingText: string = message.thinkingText || '';
   const isThinking: boolean = message.isThinking === true;
   const isGated = message.gated === true;
+  const isServiceError = Boolean(message.errorKind);
 
   const isAuthAlert = rawText.includes('Authentication Required');
 
@@ -132,8 +127,8 @@ export default function ChatMessage({
     setTimeout(() => setCopied(false), 1500);
   };
 
-  // Quiet system notice — no chat bubble, just an inline pill. Auth/session
-  // issues shouldn't look like part of the conversation.
+  const attachments = message.attachments ?? (message.attachment ? [message.attachment] : []);
+
   if (isAuthAlert && !isUser) {
     return (
       <div className="flex w-full animate-in fade-in slide-in-from-bottom-1 justify-start duration-200">
@@ -147,27 +142,58 @@ export default function ChatMessage({
     );
   }
 
+  if (isServiceError && !isUser) {
+    return (
+      <div className="flex w-full justify-start animate-in fade-in slide-in-from-bottom-1 duration-200">
+        <div className="max-w-full rounded-2xl border border-amber-400/20 bg-amber-400/[0.06] p-4 text-[#FAF9F5] sm:max-w-[min(90%,42rem)]">
+          <p className="text-sm font-semibold text-amber-200">
+            {message.errorKind === 'service_unavailable' ? 'Bwenge is experiencing high demand' : 'Bwenge could not reach the AI service'}
+          </p>
+          <p className="mt-1 text-sm leading-relaxed text-[#C2C0B6]">{cleanText}</p>
+          {onRetry && (
+            <button type="button" onClick={() => onRetry(messageId)} className="mt-3 inline-flex min-h-[44px] items-center gap-2 rounded-full bg-white px-4 text-sm font-semibold text-neutral-900 transition hover:bg-neutral-200">
+              <RotateCcw className="h-4 w-4" /> Retry generation
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className={`flex w-full animate-in fade-in slide-in-from-bottom-1 duration-200 ${
         isUser ? 'justify-end' : 'justify-start'
       }`}
     >
-      <div className={`group flex max-w-[88%] flex-col ${isUser ? 'items-end' : 'items-start'}`}>
+      <div className={`group flex flex-col ${isUser ? 'max-w-[85%] items-end' : 'w-full max-w-full items-start'}`}>
+        {/* User attachments rendered above the bubble */}
+        {isUser && attachments.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1.5 justify-end">
+            {attachments.map((att: any, idx: number) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => onPreviewDoc?.(att)}
+                className="flex items-center gap-2 rounded-xl border border-white/10 bg-[#30302E] px-3 py-2 text-xs text-[#FAF9F5] hover:bg-white/10 transition-colors"
+              >
+                <FileText className="h-3.5 w-3.5 text-[#5DCAA5]" />
+                <span className="max-w-[140px] truncate">{att.name || att.fileName || 'Attachment'}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
         {isUser ? (
-          // User turn: a plain, quiet bubble — this is the one place a
-          // bubble earns its keep, since it marks "this is what I said."
-          <div className="rounded-2xl rounded-tr-md bg-white/[0.06] px-4 py-2.5 text-[15px] leading-relaxed text-neutral-100 shadow-[0_1px_0_rgba(255,255,255,0.03)_inset]">
+          <div className="rounded-3xl bg-[#141413] px-4 py-2.5 text-base leading-[1.6] text-[#FAF9F5] shadow-[0_1px_0_rgba(255,255,255,0.03)_inset]">
             {toolCallMatch && !toolOutputMatch ? null : cleanText}
           </div>
         ) : (
-          // Assistant turn: no bubble. Text sits directly on the page,
-          // the way an answer reads rather than a chat object.
-          <div className="w-full text-[15px] leading-relaxed text-neutral-100">
+          <div className="w-full text-base leading-[1.7] text-[#FAF9F5]">
             {toolCallMatch && !toolOutputMatch && (
               <div className="mb-3 flex items-center gap-3 rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3">
                 <BwengeLoader />
-                <span className="text-[12.5px] text-neutral-400">Running tool…</span>
+                <span className="text-[12.5px] text-[#C2C0B6]">Running tool…</span>
               </div>
             )}
 
@@ -181,7 +207,7 @@ export default function ChatMessage({
 
             {thinkingText && thinkingText.length > 20 && (
               <CollapsibleBlock title={isThinking ? 'Thinking…' : 'Thought process'} icon={Sparkles}>
-                <div className="whitespace-pre-wrap font-mono italic text-neutral-500">
+                <div className="whitespace-pre-wrap font-mono italic text-[#9C9A92]">
                   {thinkingText.replace(/<\/?thinking>/g, '').trim()}
                   {isThinking && (
                     <span className="ml-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400 align-middle" />
@@ -212,7 +238,7 @@ export default function ChatMessage({
                 {cleanText ? (
                   <MarkdownRenderer content={cleanText} />
                 ) : (
-                  <span className="flex items-center gap-2 py-1 italic text-neutral-500">
+                  <span className="flex items-center gap-2 py-1 italic text-[#9C9A92]">
                     <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
                     Thinking…
                   </span>
@@ -232,7 +258,7 @@ export default function ChatMessage({
                     const service = url.searchParams.get('service') || '';
                     onUpgradeClick(jobId, service);
                   }}
-                  className="group/upgrade flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-2 text-[13.5px] font-medium text-amber-400 transition-all duration-150 hover:border-amber-500/30 hover:bg-amber-500/15"
+                  className="group/upgrade flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-2.5 text-[13.5px] font-medium text-amber-400 transition-all duration-150 hover:border-amber-500/30 hover:bg-amber-500/15"
                 >
                   <Zap
                     className="h-4 w-4 transition-transform duration-150 group-hover/upgrade:scale-110"
@@ -245,21 +271,20 @@ export default function ChatMessage({
           </div>
         )}
 
-        {/* Hover-reveal actions — quiet by default, same pattern Claude.ai
-            uses: nothing competes with the text until you go looking. */}
+        {/* Action row: opacity-100 on mobile, lg:opacity-0 lg:group-hover:opacity-100 on desktop */}
         {!isUser && cleanText && !message.isStreaming && (
-          <div className="mt-1.5 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+          <div className="mt-2 flex items-center gap-1 opacity-100 lg:opacity-0 lg:transition-opacity lg:duration-150 lg:group-hover:opacity-100">
             {message.provider && (
-              <span className="mr-1.5 rounded-full border border-white/[0.08] bg-white/[0.03] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-neutral-500">
+              <span className="hidden lg:inline-block mr-1.5 rounded-full border border-white/[0.08] bg-white/[0.03] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[#9C9A92]">
                 {message.provider}
               </span>
             )}
             <ActionButton title="Copy" onClick={handleCopy}>
-              {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+              {copied ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
             </ActionButton>
             {onRetry && (
               <ActionButton title="Try again" onClick={() => onRetry(messageId)}>
-                <RotateCcw className="h-3.5 w-3.5" />
+                <RotateCcw className="h-4 w-4" />
               </ActionButton>
             )}
             <ActionButton
@@ -268,7 +293,7 @@ export default function ChatMessage({
               activeClass="text-emerald-400 bg-emerald-400/10"
               onClick={() => onFeedback?.(messageId, 'up')}
             >
-              <ThumbsUp className="h-3.5 w-3.5" />
+              <ThumbsUp className="h-4 w-4" />
             </ActionButton>
             <ActionButton
               title="Bad response"
@@ -276,7 +301,7 @@ export default function ChatMessage({
               activeClass="text-rose-400 bg-rose-400/10"
               onClick={() => onFeedback?.(messageId, 'down')}
             >
-              <ThumbsDown className="h-3.5 w-3.5" />
+              <ThumbsDown className="h-4 w-4" />
             </ActionButton>
           </div>
         )}

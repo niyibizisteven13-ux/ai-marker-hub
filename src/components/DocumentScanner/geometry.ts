@@ -43,6 +43,7 @@ export function computeHomography(srcQuad: { x: number; y: number }[], dstQuad: 
     b.push(v);
   }
   const h = solveLinear(A, b);
+  if (h.some((value) => !Number.isFinite(value))) throw new Error('Invalid page corner geometry');
   return [h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7], 1];
 }
 
@@ -74,6 +75,11 @@ export function warpQuadToRect(srcCanvas: HTMLCanvasElement, quad: Record<'tl' |
   for (let y = 0; y < outH; y++) {
     for (let x = 0; x < outW; x++) {
       const denom = g * x + h * y + i;
+      if (!Number.isFinite(denom) || Math.abs(denom) < 1e-10) {
+        const di = (y * outW + x) * 4;
+        outData.data[di] = outData.data[di + 1] = outData.data[di + 2] = outData.data[di + 3] = 255;
+        continue;
+      }
       const sx = (a * x + bb * y + c) / denom;
       const sy = (dd * x + e * y + f) / denom;
       const di = (y * outW + x) * 4;

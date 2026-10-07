@@ -1,5 +1,6 @@
 import { Queue, Worker, Job } from 'bullmq';
 import net from 'net';
+import Redis from 'ioredis';
 
 export class QueueService {
   private static instance: QueueService;
@@ -9,6 +10,7 @@ export class QueueService {
     host: process.env.REDIS_HOST || '127.0.0.1',
     port: Number(process.env.REDIS_PORT || 6379),
   };
+  private connection: Redis | null = null;
 
   private constructor() {}
 
@@ -20,7 +22,23 @@ export class QueueService {
   }
 
   public async initialize() {
-    this.isRedisAvailable = await this.checkRedisAvailability();
+    const redisUrl = process.env.REDIS_URL;
+    if (redisUrl) {
+      this.connection = new Redis(redisUrl, { maxRetriesPerRequest: null, lazyConnect: true, connectTimeout: 5000 });
+      try {
+        await this.connection.connect();
+        this.isRedisAvailable = true;
+      } catch (error) {
+        this.isRedisAvailable = false;
+        if (process.env.NODE_ENV === 'production') throw new Error(`REDIS_URL is configured but Redis is unreachable: ${error instanceof Error ? error.message : 'connection failed'}`);
+      }
+    } else {
+      this.isRedisAvailable = await this.checkRedisAvailability();
+    }
+
+    if (process.env.NODE_ENV === 'production' && !this.isRedisAvailable) {
+      throw new Error('Redis is required in production for durable background jobs. Configure REDIS_URL.');
+    }
 
     if (!this.isRedisAvailable) {
       console.warn('Redis is not available. Batch grading queue is disabled.');
@@ -28,10 +46,11 @@ export class QueueService {
     }
 
     try {
-      this.gradingQueue = new Queue('exam-grading-queue', { connection: this.redisConnection });
+      this.gradingQueue = new Queue('exam-grading-queue', { connection: this.connection || this.redisConnection });
     } catch (error) {
       this.isRedisAvailable = false;
       console.error('Failed to initialize BullMQ queue:', error);
+      if (process.env.NODE_ENV === 'production') throw error;
     }
   }
 
@@ -61,5 +80,12 @@ export class QueueService {
   public async getJob(jobId: string) {
     if (!this.gradingQueue) return null;
     return this.gradingQueue.getJob(jobId);
+  }
+
+  public async close() {
+    await this.gradingQueue?.close();
+    await this.connection?.quit().catch(() => undefined);
+    this.gradingQueue = null;
+    this.connection = null;
   }
 }

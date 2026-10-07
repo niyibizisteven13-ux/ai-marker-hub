@@ -5,13 +5,13 @@ interface UpgradeModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentJobId?: string;
-  onUpgrade: (plan: string) => void;
+  onUpgrade: (plan: 'individual' | 'business' | 'organisation') => void;
 }
 
-export default function UpgradeModal({ isOpen, onClose, onUpgrade }: UpgradeModalProps) {
+export default function UpgradeModal({ isOpen, onClose, currentJobId, onUpgrade }: UpgradeModalProps) {
   if (!isOpen) return null;
 
-  const plans = [
+  const plans: Array<{ id: 'individual' | 'business' | 'organisation'; name: string; tagline: string; price: string; period: string; icon: React.ReactNode; color: 'emerald' | 'amber' | 'indigo'; features: string[]; cta: string; popular: boolean }> = [
     {
       id: 'individual',
       name: 'Individual',
@@ -26,7 +26,7 @@ export default function UpgradeModal({ isOpen, onClose, onUpgrade }: UpgradeModa
         'Precise AI Marking',
         'Individual Data Store',
       ],
-      cta: 'Pay for Current Batch',
+      cta: currentJobId ? 'Unlock Current Batch' : 'View pay-as-you-go details',
       popular: false,
     },
     {
@@ -50,17 +50,17 @@ export default function UpgradeModal({ isOpen, onClose, onUpgrade }: UpgradeModa
       id: 'organisation',
       name: 'Organisation',
       tagline: 'For institutions',
-      price: '$50+',
-      period: 'min top-up',
+      price: 'Custom',
+      period: 'institution quote',
       icon: <Building2 className="text-indigo-400" size={24} />,
       color: 'indigo',
       features: [
-        'Shared Faculty Balance',
-        'Admin Dashboard',
-        'Audit Compliance Logs',
-        'Priority Support',
+        'Institution-specific pricing',
+        'Shared faculty setup',
+        'Admin-managed billing',
+        'Compliance options by request',
       ],
-      cta: 'Buy Institution Credits',
+      cta: 'View institution setup',
       popular: false,
     }
   ];
@@ -69,9 +69,9 @@ export default function UpgradeModal({ isOpen, onClose, onUpgrade }: UpgradeModa
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/80 backdrop-blur-xl" onClick={onClose} />
 
-      <div className="relative w-full max-w-6xl max-h-[90vh] bg-[#0F0F0F] border border-white/5 rounded-[40px] shadow-2xl animate-in zoom-in-95 duration-300 flex flex-col overflow-hidden">
+      <div className="relative w-full max-w-6xl max-h-[min(92dvh,900px)] bg-[#111318] border border-white/[0.09] rounded-3xl sm:rounded-[32px] shadow-2xl animate-in zoom-in-95 duration-300 flex flex-col overflow-hidden">
         {/* Header Section */}
-        <div className="p-8 text-center border-b border-white/5 shrink-0">
+        <div className="p-5 sm:p-8 text-center border-b border-white/[0.08] shrink-0">
           <button onClick={onClose} className="absolute top-6 right-8 p-2 rounded-full hover:bg-white/5 text-neutral-500 hover:text-white transition-colors z-20">
             <X size={24} />
           </button>
@@ -89,9 +89,9 @@ export default function UpgradeModal({ isOpen, onClose, onUpgrade }: UpgradeModa
 
         {/* Plans Grid - Scrollable */}
         <div className="flex-1 overflow-y-auto">
-          <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-white/5 h-full">
+          <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-white/[0.08] h-full">
             {plans.map((plan) => (
-              <div key={plan.id} className={`flex flex-col p-8 md:p-10 relative ${plan.popular ? 'bg-white/[0.02]' : ''}`}>
+              <div key={plan.id} className={`flex flex-col p-5 sm:p-7 lg:p-9 relative ${plan.popular ? 'bg-amber-400/[0.035]' : ''}`}>
                 {plan.popular && (
                   <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 px-4 py-1 bg-amber-500 rounded-full text-[10px] font-bold text-black uppercase tracking-widest z-10">
                     Most Popular
@@ -99,7 +99,7 @@ export default function UpgradeModal({ isOpen, onClose, onUpgrade }: UpgradeModa
                 )}
 
               <div className="mb-8">
-                <div className={`w-14 h-14 rounded-2xl bg-${plan.color}-500/10 flex items-center justify-center mb-6 border border-${plan.color}-500/20 shadow-lg shadow-${plan.color}-500/5`}>
+                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mb-5 border ${plan.color === 'emerald' ? 'bg-emerald-400/10 border-emerald-400/20 shadow-emerald-500/5' : plan.color === 'amber' ? 'bg-amber-400/10 border-amber-400/20 shadow-amber-500/5' : 'bg-indigo-400/10 border-indigo-400/20 shadow-indigo-500/5'}`}>
                   {plan.icon}
                 </div>
                 <h3 className="text-2xl font-bold text-white mb-1">{plan.name}</h3>
@@ -116,7 +116,7 @@ export default function UpgradeModal({ isOpen, onClose, onUpgrade }: UpgradeModa
               <ul className="space-y-4 mb-10 flex-1">
                 {plan.features.map((feature, i) => (
                   <li key={i} className="flex items-start gap-3 text-xs text-neutral-300">
-                    <Check size={16} className={`text-${plan.color}-500 shrink-0 mt-0.5`} />
+                    <Check size={16} className={`${plan.color === 'emerald' ? 'text-emerald-400' : plan.color === 'amber' ? 'text-amber-400' : 'text-indigo-400'} shrink-0 mt-0.5`} />
                     <span>{feature}</span>
                   </li>
                 ))}
@@ -146,7 +146,7 @@ export default function UpgradeModal({ isOpen, onClose, onUpgrade }: UpgradeModa
           <div className="w-px h-3 bg-white/5" />
           <div className="flex items-center gap-2">
             <ShieldCheck size={14} className="text-emerald-500" />
-            Encrypted Payments
+            Secure Mobile Money checkout
           </div>
         </div>
       </div>

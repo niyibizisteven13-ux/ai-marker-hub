@@ -11,6 +11,14 @@ export const generalLimiter = isDev
       legacyHeaders: false,
     });
 
+export const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: isDev ? 100 : 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many authentication attempts. Try again later.' },
+});
+
 export const gradingLimiter = isDev
   ? (req, res, next) => next()
   : rateLimit({

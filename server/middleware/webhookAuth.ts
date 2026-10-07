@@ -9,10 +9,11 @@ import logger from '../utils/logger.js';
 export function verifyMomoSignature(req: Request, res: Response, next: NextFunction) {
   const secret = process.env.MOMO_WEBHOOK_SECRET;
 
-  if (process.env.NODE_ENV === 'development' || !secret) {
+  if (process.env.NODE_ENV !== 'production') {
     logger.warn('Skipping MoMo signature verification (Dev mode or secret missing)');
     return next();
   }
+  if (!secret) return res.status(503).json({ error: 'Payment callback verification is not configured.' });
 
   const signature = req.get('X-Callback-Signature');
   if (!signature) {
@@ -26,8 +27,10 @@ export function verifyMomoSignature(req: Request, res: Response, next: NextFunct
     .update(payload)
     .digest('base64');
 
-  if (signature !== expectedSignature) {
-    logger.error('Invalid MoMo signature detected', { received: signature, expected: expectedSignature });
+  const signatureBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expectedSignature);
+  if (signatureBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)) {
+    logger.error('Invalid MoMo callback signature detected');
     return res.status(401).json({ error: 'Invalid signature' });
   }
 

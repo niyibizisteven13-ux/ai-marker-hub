@@ -14,17 +14,45 @@ const pdfToPng = async (filePath: string, options?: any): Promise<any[]> => {
   return [];
 };
 
-export type SupportedFileType = 'pdf' | 'docx' | 'image' | 'txt' | 'csv' | 'unknown';
+export type SupportedFileType = 'pdf' | 'docx' | 'image' | 'txt' | 'csv' | 'code' | 'json' | 'generic' | 'unknown';
 
 const EXTENSION_MAP: Record<string, SupportedFileType> = {
   '.pdf': 'pdf',
   '.docx': 'docx',
+  '.doc': 'docx',
   '.png': 'image',
   '.jpg': 'image',
   '.jpeg': 'image',
   '.webp': 'image',
+  '.gif': 'image',
   '.txt': 'txt',
+  '.md': 'txt',
   '.csv': 'csv',
+  '.json': 'json',
+  '.js': 'code',
+  '.ts': 'code',
+  '.tsx': 'code',
+  '.jsx': 'code',
+  '.py': 'code',
+  '.java': 'code',
+  '.kt': 'code',
+  '.cpp': 'code',
+  '.c': 'code',
+  '.h': 'code',
+  '.cs': 'code',
+  '.rs': 'code',
+  '.go': 'code',
+  '.sql': 'code',
+  '.html': 'code',
+  '.css': 'code',
+  '.yaml': 'code',
+  '.yml': 'code',
+  '.sh': 'code',
+  '.pptx': 'generic',
+  '.ppt': 'generic',
+  '.xlsx': 'generic',
+  '.xls': 'generic',
+  '.zip': 'generic',
 };
 
 const MIME_MAP: Record<SupportedFileType, string> = {
@@ -33,13 +61,16 @@ const MIME_MAP: Record<SupportedFileType, string> = {
   image: 'image/jpeg',
   txt: 'text/plain',
   csv: 'text/csv',
+  code: 'text/plain',
+  json: 'application/json',
+  generic: 'application/octet-stream',
   unknown: 'application/octet-stream',
 };
 
 // --- Tunables -------------------------------------------------------------
 
-/** Hard cap on any file we'll pull fully into memory. Adjust to your infra. */
-const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024; // 25MB
+/** Hard cap on any file we'll pull fully into memory. */
+const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
 
 /** Cap on how many pages of a scanned PDF we'll OCR, to bound cost/latency. */
 const MAX_OCR_PAGES = 20;
@@ -58,10 +89,11 @@ export function detectFileType(filename: string, mimeType?: string): SupportedFi
     if (mimeType.includes('wordprocessingml.document')) return 'docx';
     if (mimeType.startsWith('image/')) return 'image';
     if (mimeType === 'text/csv') return 'csv';
+    if (mimeType.includes('json')) return 'json';
     if (mimeType.startsWith('text/')) return 'txt';
   }
 
-  return 'unknown';
+  return 'generic';
 }
 
 export interface ExtractionResult {
@@ -90,19 +122,31 @@ export async function extractTextFromUpload(
         return await extractFromImage(filePath, warnings);
       case 'csv':
         return await extractFromCsv(filePath, warnings);
+      case 'json':
+      case 'code':
       case 'txt':
         return await extractFromTxt(filePath, warnings);
       default:
-        throw new Error(
-          `Unsupported file type for "${originalFilename}" (detected: ${fileType}). ` +
-            `Supported types: PDF, DOCX, image (PNG/JPG/WEBP), TXT, CSV.`,
-        );
+        // Generic fallback for any other file type
+        try {
+          const content = await fs.readFile(filePath, 'utf-8');
+          return { rawText: content, fileType: 'generic', warnings };
+        } catch {
+          const stat = await fs.stat(filePath);
+          return {
+            rawText: `[Attached File: ${originalFilename} (${Math.round(stat.size / 1024)} KB)]`,
+            fileType: 'generic',
+            warnings: ['Binary file format — details provided to AI model.'],
+          };
+        }
     }
   } catch (err) {
-    // Re-throw with context so callers/logs know which upload failed and why,
-    // instead of a bare "Unexpected token" or native-library error.
     const reason = err instanceof Error ? err.message : String(err);
-    throw new Error(`Failed to extract text from "${originalFilename}" (${fileType}): ${reason}`);
+    return {
+      rawText: `[File Attachment: ${originalFilename}]\nExtraction warning: ${reason}`,
+      fileType,
+      warnings: [`Extraction warning: ${reason}`],
+    };
   }
 }
 

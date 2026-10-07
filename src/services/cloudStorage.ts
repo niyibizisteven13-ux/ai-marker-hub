@@ -21,9 +21,12 @@ function buildSignedExportUrl(objectKey: string) {
 }
 
 export async function uploadBufferToCloud(buffer: Buffer, objectKey: string, contentType: string) {
+  if (process.env.NODE_ENV === 'production') throw new Error('Production S3 object-storage adapter is not implemented.');
   const exportsPath = await ensureExportsDirectory();
-  const targetFile = path.join(exportsPath, objectKey);
+  const normalizedKey = path.posix.normalize(objectKey.replace(/\\/g, '/')).replace(/^\/+/, '');
+  if (normalizedKey.startsWith('..') || path.isAbsolute(normalizedKey)) throw new Error('Invalid storage object key.');
+  const targetFile = path.join(exportsPath, normalizedKey);
   await fs.mkdir(path.dirname(targetFile), { recursive: true });
   await fs.writeFile(targetFile, buffer);
-  return buildSignedExportUrl(objectKey);
+  return buildSignedExportUrl(normalizedKey);
 }

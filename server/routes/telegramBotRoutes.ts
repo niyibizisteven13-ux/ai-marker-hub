@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../db.js';
 import { TelegramBotService } from '../services/TelegramBotService.js';
 import { AiService } from '../services/AiService.js';
 import { HighVolumeBatchService } from '../services/HighVolumeBatchService.js';
@@ -15,12 +15,12 @@ import { buildPromptForIntent } from '../services/prompts/promptRouter.js';
 import { stripThinkingTags } from '../utils/textSanitizers.js';
 import logger from '../utils/logger.js';
 import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
 import { PDFParse } from 'pdf-parse';
 import fs from 'fs/promises';
 import path from 'path';
 
 const router = Router();
-const prisma = new PrismaClient();
 const botService = TelegramBotService.getInstance();
 const aiService = AiService.getInstance();
 const paywallService = PaywallService.getInstance();
@@ -52,6 +52,22 @@ const SCAN_UPLOADS_DIR = path.join(process.cwd(), 'uploads', 'telegram-scans');
 const MAX_HISTORY_TURNS = 6;
 const HISTORY_TTL_MS = 60 * 60 * 1000; // 1 hour of inactivity clears history
 const conversationHistory = new Map<string, { turns: Array<{ role: 'user' | 'assistant'; text: string }>; lastUsed: number }>();
+
+async function ensureTelegramUser(chatId: string, session: any) {
+  if (session.userId) {
+    const linkedUser = await prisma.user.findUnique({ where: { id: session.userId } });
+    if (linkedUser) return session;
+  }
+
+  const email = `telegram-${chatId}@users.invalid`;
+  const passwordHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10);
+  const user = await prisma.user.upsert({
+    where: { email },
+    create: { email, name: `Telegram ${chatId}`, passwordHash },
+    update: {},
+  });
+  return prisma.telegramSession.update({ where: { chatId }, data: { userId: user.id } });
+}
 
 const HISTORY_SWEEP_MS = 15 * 60 * 1000;
 setInterval(() => {
@@ -102,12 +118,12 @@ function verifyTelegramSecret(req: Request, res: Response, next: () => void) {
 async function ensurePaywallAccess(
   chatId: string,
   session: any,
-  service: 'grading' | 'selection_scoring' | 'farming_advice' | 'general_assist' | 'research' = 'grading'
+  service: 'grading' | 'selection_scoring' | 'farming_advice' = 'grading'
 ): Promise<boolean> {
   const userId = session.userId || `telegram-${chatId}`;
   const jobId = crypto.randomUUID();
 
-  const access = await paywallService.checkAccess(userId, service as any, jobId);
+  const access = await paywallService.checkAccess(userId, service, jobId);
   if (!access.allowed) {
     const baseUrl = process.env.APP_BASE_URL || 'http://localhost:3000';
     const upgradeLink = `${baseUrl}/upgrade?jobId=${jobId}&service=${service}`;
@@ -223,8 +239,78 @@ function safeEvaluate(expression: string): number {
  * image this handler doesn't have, and are left unhandled with an
  * explicit message rather than silently pretending to support them.
  */
+const telegramActionTools: any[] = [
+  { name: 'start_batch_grading', description: 'Start grading the uploaded student papers against the uploaded rubric, or ask for missing files.', input_schema: { type: 'object', properties: {}, required: [] } },
+  { name: 'generate_exam', description: 'Create an exam and marking rubric when the user asks for an exam, test, or quiz.', input_schema: { type: 'object', properties: { request: { type: 'string', description: 'Subject, topic, level, marks, and any other requirements.' } }, required: ['request'] } },
+  { name: 'create_form', description: 'Create an application, registration, or assessment form.', input_schema: { type: 'object', properties: { purpose: { type: 'string', description: 'What the form is for and who will use it.' } }, required: ['purpose'] } },
+  { name: 'research_topic', description: 'Research a topic or answer a request that asks for current or sourced information.', input_schema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } },
+  { name: 'start_photo_grading', description: 'Grade a single handwritten student answer photo.', input_schema: { type: 'object', properties: {}, required: [] } },
+  { name: 'open_scanner', description: 'Open the mobile document scanner for scanning exam papers or rubric pages.', input_schema: { type: 'object', properties: {}, required: [] } },
+  { name: 'check_job_status', description: 'Show recent batch grading jobs and their progress.', input_schema: { type: 'object', properties: {}, required: [] } },
+  { name: 'check_usage', description: 'Show remaining grading usage, plan, or credits.', input_schema: { type: 'object', properties: {}, required: [] } },
+  { name: 'discuss_results', description: 'Answer questions about the latest completed grading batch and class performance.', input_schema: { type: 'object', properties: { question: { type: 'string' } }, required: ['question'] } },
+  { name: 'set_bot_language', description: 'Change the bot response language.', input_schema: { type: 'object', properties: { language: { type: 'string', enum: ['en', 'rw'] } }, required: ['language'] } },
+];
+
+async function getTelegramSession(chatId: string) {
+  const session = await prisma.telegramSession.findUnique({ where: { chatId } });
+  if (!session) throw new Error('Telegram session not found.');
+  return session;
+}
+
 async function executeBotConversationalTool(chatId: string, userId: string, name: string, input: any): Promise<string> {
   switch (name) {
+    case 'start_batch_grading': {
+      const session = await prisma.telegramSession.findUnique({ where: { chatId } });
+      if (!session) return 'Telegram session not found.';
+      const hasPaper = !!(session.stagedPaperFileId || session.stagedPaperLocalPath);
+      const hasRubric = !!(session.stagedRubricFileId || session.stagedRubricLocalPath);
+      if (hasPaper && hasRubric) {
+        await checkAndTriggerBatchGrading(chatId);
+        return 'Batch grading started. I will send the result and Excel report here.';
+      }
+      await handleGradeCommand(chatId, session);
+      return 'Asked the user to upload the student papers and rubric.';
+    }
+    case 'generate_exam':
+      await handleBotCommand(chatId, await getTelegramSession(chatId), `/exam ${input.request}`);
+      return 'Generated the requested exam using GonkaRouter and sent it in Telegram.';
+    case 'create_form':
+      await handleBotCommand(chatId, await getTelegramSession(chatId), `/form ${input.purpose}`);
+      return 'Created the requested form using GonkaRouter and sent its link in Telegram.';
+    case 'research_topic':
+      await handleBotCommand(chatId, await getTelegramSession(chatId), `/research ${input.query}`);
+      return 'Completed the research request using GonkaRouter tools and sent the report in Telegram.';
+    case 'start_photo_grading': {
+      const session = await getTelegramSession(chatId);
+      await handleBotCommand(chatId, session, '/markphoto');
+      return 'Asked the user to send the handwritten answer photo.';
+    }
+    case 'open_scanner':
+      await handleBotCommand(chatId, await getTelegramSession(chatId), '/scan');
+      return 'Sent the mobile scanner link in Telegram.';
+    case 'check_job_status':
+      await handleStatusCommand(chatId, await getTelegramSession(chatId));
+      return 'Sent the recent grading job status in Telegram.';
+    case 'check_usage':
+      await handleQuotaCommand(chatId, await getTelegramSession(chatId));
+      return 'Sent the account usage and quota in Telegram.';
+    case 'discuss_results': {
+      const session = await getTelegramSession(chatId);
+      const job = await prisma.batchJob.findFirst({
+        where: { telegramChatId: chatId, status: 'DONE' },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (!job) return 'No completed batch is available to discuss yet.';
+      const activeSession = await prisma.telegramSession.update({
+        where: { chatId }, data: { activeDiscussJobId: job.id },
+      });
+      await handleDiscussQuery(chatId, activeSession, input.question || 'Summarize the class results.');
+      return 'Answered the question using the latest completed grading batch.';
+    }
+    case 'set_bot_language':
+      await handleBotCommand(chatId, await getTelegramSession(chatId), input.language === 'rw' ? '/kinyarwanda' : '/english');
+      return `Switched the Telegram assistant language to ${input.language === 'rw' ? 'Kinyarwanda' : 'English'}.`;
     case 'calculate': {
       try {
         return String(safeEvaluate(String(input.expression)));
@@ -233,11 +319,10 @@ async function executeBotConversationalTool(chatId: string, userId: string, name
       }
     }
     case 'translate_text': {
-      const translated = await aiService.sendClaudeChat(
+      return aiService.sendGonkaChat(
         `Translate the following text into ${input.target_language}, preserving tone and meaning:\n\n${input.text}`,
         { system: 'You are a precise translator. Respond with only the translated text, no explanation.' }
       );
-      return translated.text;
     }
     case 'research_memory': {
       return await memoryService.searchMemory(userId, input.query);
@@ -307,7 +392,7 @@ router.post('/scan-upload/:sessionToken', upload.single('file'), async (req: Req
     res.json({ success: true, message: 'File processed and staged successfully.' });
   } catch (err: any) {
     logger.error('Web scanner upload failed', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: process.env.NODE_ENV === 'production' ? 'Scan upload failed. Please retry.' : err.message });
   }
 });
 
@@ -327,6 +412,99 @@ function buildTelegramKeyboard(lang: string = 'en') {
   };
 }
 
+/** Map plain-language requests onto the same handlers as slash commands. */
+async function handleNaturalLanguageAction(chatId: string, session: any, message: string): Promise<boolean> {
+  const text = message.trim();
+  const lower = text.toLowerCase();
+
+  if (/(single|one|this)\s+(script|paper|answer)|handwritten.*(photo|picture)|grade.*(photo|picture)|mark.*(photo|picture)|kosor\w*.*(ifoto|urupapuro)/i.test(lower)) {
+    await prisma.telegramSession.update({ where: { chatId }, data: { stagedMode: 'markphoto' } });
+    await botService.sendMessage(chatId, session.language === 'rw'
+      ? 'Ohereza ifoto y’urupapuro rw’umunyeshuri kugira ngo ndusuzume.'
+      : 'Send the student’s answer photo and I’ll grade it. You can include rubric instructions in the photo caption.');
+    return true;
+  }
+
+  if (/(\bgrade\b|\bmark\b|\bscore\b|\bcorrect\b|\bkosor\w*\b).*(\b(batch|papers?|scripts?|exams?|tests?|answers?|rubric|students?|ibizamini|impapuro)\b)|(\b(batch|papers?|scripts?|exams?|tests?|answers?|ibizamini|impapuro)\b).*(\bgrade\b|\bmark\b|\bscore\b|\bcorrect\b|\bkosor\w*\b)/i.test(lower)) {
+    const current = await prisma.telegramSession.findUnique({ where: { chatId } });
+    const hasPaper = !!(current?.stagedPaperFileId || current?.stagedPaperLocalPath);
+    const hasRubric = !!(current?.stagedRubricFileId || current?.stagedRubricLocalPath);
+    if (hasPaper && hasRubric) await checkAndTriggerBatchGrading(chatId);
+    else await handleGradeCommand(chatId, session);
+    return true;
+  }
+
+  if (/\b(exam|test|quiz|ikizamini)\b/i.test(lower) && /\b(create|make|generate|write|prepare|need|want|kora|tegura)\b/i.test(lower)) {
+    const genericRequest = /^(please\s+)?(create|make|generate|write|prepare|i need|i want|kora|tegura)\s+(an?\s+)?(exam|test|quiz|ikizamini)(\s+please)?[.!?]*$/i.test(text);
+    await handleBotCommand(chatId, session, genericRequest ? '/exam' : `/exam ${text}`);
+    return true;
+  }
+
+  if (/\b(research|investigate|look\s+up|find\s+(the\s+)?latest|deep\s+search|ubushakashatsi|shakashaka)\b/i.test(lower)) {
+    await handleBotCommand(chatId, session, `/research ${text}`);
+    return true;
+  }
+
+  if (/(\b(create|make|build|start|kora|tegura)\b.*\b(form|application|registration|ifomu)\b|\b(form|application|registration|ifomu)\b.*\b(create|make|build|kora|tegura)\b)/i.test(lower)) {
+    await handleBotCommand(chatId, session, `/form ${text}`);
+    return true;
+  }
+
+  if (/\b(scan|open the camera|use my camera|take a scan)\b/i.test(lower)) {
+    await handleBotCommand(chatId, session, '/scan');
+    return true;
+  }
+
+  if (/\b(status|progress|job)\b/i.test(lower) && /\b(check|show|what|how|my|recent|latest)\b/i.test(lower)) {
+    await handleStatusCommand(chatId, session);
+    return true;
+  }
+
+  if (/\b(quota|credits|usage|plan)\b/i.test(lower) && /\b(check|show|what|how|my|remaining|left)\b/i.test(lower)) {
+    await handleQuotaCommand(chatId, session);
+    return true;
+  }
+
+  if (/\b(discuss|analy[sz]e|analysis|performance)\b/i.test(lower) && /\b(class|students?|results?|batch|marks?)\b/i.test(lower)) {
+    const latestJob = await prisma.batchJob.findFirst({
+      where: { telegramChatId: chatId, status: 'DONE' },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!latestJob) {
+      await botService.sendMessage(chatId, 'There is no completed grading batch to discuss yet. Send papers and a rubric, then ask me to grade them.');
+    } else {
+      const updated = await prisma.telegramSession.update({
+        where: { chatId },
+        data: { activeDiscussJobId: latestJob.id },
+      });
+      await handleDiscussQuery(chatId, updated, text);
+    }
+    return true;
+  }
+
+  if (/\b(done|stop discussing|exit discuss|finish discuss|close discuss|cancel this mode|that’s all|that's all)\b/i.test(lower)) {
+    await handleBotCommand(chatId, session, '/done');
+    return true;
+  }
+
+  if (/\b(speak|reply|answer|switch|change)\b.*\b(kinyarwanda|rwandan)\b/i.test(lower)) {
+    await handleBotCommand(chatId, session, '/kinyarwanda');
+    return true;
+  }
+
+  if (/\b(speak|reply|answer|switch|change)\b.*\b(english|eng)\b/i.test(lower)) {
+    await handleBotCommand(chatId, session, '/english');
+    return true;
+  }
+
+  if (/\b(which|what)\b.*\b(model|provider)\b|\bGonkaRouter\b/i.test(text)) {
+    await handleBotCommand(chatId, session, '/model');
+    return true;
+  }
+
+  return false;
+}
+
 router.post('/webhook', verifyTelegramSecret, async (req: Request, res: Response) => {
   res.status(200).json({ ok: true });
 
@@ -342,20 +520,27 @@ router.post('/webhook', verifyTelegramSecret, async (req: Request, res: Response
       let session = await prisma.telegramSession.findUnique({ where: { chatId } });
       if (!session) {
         session = await prisma.telegramSession.create({
-          data: { chatId, provider: 'gemini', language: 'en' },
+          data: { chatId, provider: process.env.GONKA_API_KEY ? 'gonkarouter' : 'gemini', language: 'en' },
         });
+      }
 
-        // Initialize 20 free newcomer credits ONCE for first-time onboarding
-        const userId = `telegram-${chatId}`;
-        try {
-          await prisma.usageQuota.upsert({
-            where: { userId_service: { userId, service: 'grading' } },
-            create: { userId, service: 'grading', freeUsed: 0 },
-            update: {}, // do not modify if already existing
-          });
-        } catch (e) {
-          logger.warn('Failed to initialize newcomer quota:', e);
-        }
+      session = await ensureTelegramUser(chatId, session);
+      const telegramUserId = session.userId;
+      try {
+        await prisma.usageQuota.upsert({
+          where: { userId_service: { userId: telegramUserId, service: 'grading' } },
+          create: { userId: telegramUserId, service: 'grading', freeUsed: 0 },
+          update: {},
+        });
+      } catch (e) {
+        logger.warn('Failed to initialize Telegram grading quota:', e);
+      }
+
+      if (process.env.GONKA_API_KEY && session.provider !== 'gonkarouter') {
+        session = await prisma.telegramSession.update({
+          where: { chatId },
+          data: { provider: 'gonkarouter' },
+        });
       }
 
       if (msg.voice) {
@@ -382,6 +567,8 @@ router.post('/webhook', verifyTelegramSecret, async (req: Request, res: Response
         );
         return;
       }
+
+      if (!userText.startsWith('/') && await handleNaturalLanguageAction(chatId, session, userText)) return;
 
       if (session.activeDiscussJobId && !userText.startsWith('/')) {
         await handleDiscussQuery(chatId, session, userText);
@@ -418,8 +605,9 @@ router.post('/webhook', verifyTelegramSecret, async (req: Request, res: Response
 
 async function handleBotCommand(chatId: string, session: any, text: string) {
   try {
-    const parts = text.split(' ');
-    const cmd = parts[0].toLowerCase();
+    const parts = text.trim().split(/\s+/);
+    // Telegram appends @BotName to commands sent in group chats.
+    const cmd = parts[0].split('@')[0].toLowerCase();
     const arg = parts.slice(1).join(' ');
 
     switch (cmd) {
@@ -445,7 +633,7 @@ async function handleBotCommand(chatId: string, session: any, text: string) {
             `- 📊 **/grade** - Kosora ibizamini kuri batch (PDF/Photo)\n` +
             `- 👁️ **/markphoto** - Kosora ifoto imwe y'urupapuro rw'umunyeshuri\n` +
             `- 🗣️ **/discuss** - Mbaza ibibazo kuri batch yakosowe\n` +
-            `- 🤖 **/model** - Hindura AI (Gemini, Claude, Llama, Gonka)\n` +
+            `- 🤖 **/model** - Reba GonkaRouter model ikoreshwa\n` +
             `- 🇬🇧 **/english** / 🇷🇼 **/kinyarwanda** - Hindura ururimi`
           : `👋 **Welcome to Bwenge AI Assistant Bot!**\n\n` +
             `⚙️ **Active Model**: *${session.provider.toUpperCase()}*\n` +
@@ -459,7 +647,7 @@ async function handleBotCommand(chatId: string, session: any, text: string) {
             `- 📊 **/grade** - Batch grade student answer scripts against rubric\n` +
             `- 👁️ **/markphoto** - Grade single handwritten student photo\n` +
             `- 🗣️ **/discuss** - Post-grading Q&A & student performance analysis\n` +
-            `- 🤖 **/model** - Switch AI Provider (Gemini, Claude, Llama, Gonka)\n` +
+            `- 🤖 **/model** - Show the active GonkaRouter model\n` +
             `- 🇷🇼 **/kinyarwanda** / 🇬🇧 **/english** - Toggle bot language`;
 
         await botService.sendMessage(chatId, welcome, {
@@ -470,10 +658,25 @@ async function handleBotCommand(chatId: string, session: any, text: string) {
 
       case '/model': {
         const selected = arg.toLowerCase().trim();
-        if (['gemini', 'claude', 'nvidianim', 'ollama', 'gonkarouter'].includes(selected)) {
+        if (!selected) {
+          await botService.sendMessage(chatId, `AI Provider: GonkaRouter\nModel: ${process.env.GONKA_MODEL || 'zai-org/GLM-5.3-Flash'}`);
+          break;
+        }
+        if (selected && !['gonka', 'gonkarouter'].includes(selected)) {
+          await botService.sendMessage(chatId, 'This bot uses GonkaRouter. Use /model gonkarouter or ask “which model are you using?”.');
+          break;
+        }
+        const providerKeys: Record<string, 'gonkarouter'> = {
+          gonka: 'gonkarouter', gonkarouter: 'gonkarouter',
+        };
+        if (selected in providerKeys) {
+          if (!(await aiService.providerAvailable(providerKeys[selected]))) {
+            await botService.sendMessage(chatId, `Provider ${selected.toUpperCase()} is not configured on this server.`);
+            break;
+          }
           await prisma.telegramSession.update({
             where: { chatId },
-            data: { provider: selected },
+            data: { provider: providerKeys[selected] },
           });
           await botService.sendMessage(chatId, `🚀 AI Provider switched to **${selected.toUpperCase()}**!`);
         } else {
@@ -553,8 +756,10 @@ Respond strictly in ${lang === 'rw' ? 'Kinyarwanda' : 'English'}. Include:
 2. Section A: Questions with assigned marks.
 3. Section B: Marking Rubric & Model Answer Key.`;
 
-          const result = await aiService.generateContent({ contents: prompt });
-          await botService.sendMessage(chatId, `✨ **${lang === 'rw' ? 'Igizamini cyarakozwe' : 'Exam Paper & Rubric Generated'}**:\n\n${result.text?.slice(0, 3800)}`);
+          const result = await aiService.sendGonkaChat(prompt, {
+            system: 'You are a World-Class Assessment Architect. Generate complete, accurate assessment materials.',
+          });
+          await botService.sendMessage(chatId, `✨ **${lang === 'rw' ? 'Igizamini cyarakozwe' : 'Exam Paper & Rubric Generated'}**:\n\n${result.slice(0, 3800)}`);
         } catch (err: any) {
           await botService.sendMessage(chatId, `❌ Exam generation failed: ${err.message}`);
         }
@@ -668,8 +873,6 @@ Respond strictly in ${lang === 'rw' ? 'Kinyarwanda' : 'English'}. Include:
       }
 
       case '/research': {
-        if (!(await ensurePaywallAccess(chatId, session, 'research'))) return;
-
         if (!arg) {
           await botService.sendMessage(chatId, '⚠️ Please specify topic to research. Example: `/research Latest developments in AI grading`');
           return;
@@ -815,30 +1018,17 @@ async function handleIncomingDocument(chatId: string, session: any, doc: any) {
 }
 
 async function handleIncomingVoiceNote(chatId: string, session: any, fileId: string) {
-  await botService.sendChatAction(chatId, 'typing');
-  await botService.sendMessage(chatId, '🎙️ *Transcribing voice note...*');
-
-  const voiceFile = await botService.downloadTelegramFile(fileId);
-  if (!voiceFile) {
-    await botService.sendMessage(chatId, '❌ Failed to download voice note from Telegram.');
-    return;
-  }
-
-  const transcription = await botService.transcribeVoiceAudio(voiceFile.buffer);
-  if (!transcription) {
-    await botService.sendMessage(chatId, '⚠️ Voice note transcription is unavailable. Ensure OPENAI_API_KEY is configured for Whisper STT, or type text.');
-    return;
-  }
-
-  await botService.sendMessage(chatId, `🗣️ **Transcribed**: "${transcription}"`);
-  await handleConversationalQuery(chatId, session, transcription);
+  void session;
+  void fileId;
+  await botService.sendMessage(chatId, 'I can handle typed requests through GonkaRouter, but voice transcription is not available in this bot yet. Please type your request.');
 }
 
 async function handleIncomingPhoto(chatId: string, session: any, fileId: string, caption?: string) {
   const isMarkPhoto = session.stagedMode === 'markphoto' ||
     caption?.toLowerCase().startsWith('/markphoto') ||
     caption?.toLowerCase().includes('mark photo') ||
-    caption?.toLowerCase().includes('grade photo');
+    caption?.toLowerCase().includes('grade photo') ||
+    /\b(grade|mark|evaluate|correct|kosora)\b/i.test(caption || '');
 
   if (isMarkPhoto) {
     if (!(await ensurePaywallAccess(chatId, session, 'grading'))) return;
@@ -978,12 +1168,23 @@ async function checkAndTriggerBatchGrading(chatId: string) {
     return;
   }
 
-  const qualityService = DocumentQualityService.getInstance();
-  const rubricCheck = await qualityService.prepareScannedPage(rubricFile.buffer, 'image/jpeg');
-
-  if (!rubricCheck.ok) {
-    await botService.sendMessage(chatId, `⚠️ **Rubric Image Rejected**: ${rubricCheck.reason}. Please re-upload a clear rubric photo.`);
-    return;
+  const rubricIsPdf = rubricFile.buffer.subarray(0, 5).toString() === '%PDF-';
+  const papersIsPdf = papersFile.buffer.subarray(0, 5).toString() === '%PDF-';
+  const paperMimeType = papersIsPdf
+    ? 'application/pdf'
+    : (/\.png$/i.test(stagedPaperName || '') ? 'image/png' : (/\.webp$/i.test(stagedPaperName || '') ? 'image/webp' : 'image/jpeg'));
+  let rubricBuffer = rubricFile.buffer;
+  const rubricMimeType = rubricIsPdf
+    ? 'application/pdf'
+    : (/\.png$/i.test(stagedRubricName || '') ? 'image/png' : (/\.webp$/i.test(stagedRubricName || '') ? 'image/webp' : 'image/jpeg'));
+  if (!rubricIsPdf) {
+    const qualityService = DocumentQualityService.getInstance();
+    const rubricCheck = await qualityService.prepareScannedPage(rubricFile.buffer, rubricMimeType);
+    if (!rubricCheck.ok) {
+      await botService.sendMessage(chatId, `⚠️ **Rubric Image Rejected**: ${rubricCheck.reason}. Please re-upload a clear rubric photo.`);
+      return;
+    }
+    rubricBuffer = rubricCheck.correctedBuffer || rubricFile.buffer;
   }
 
   let estimatedCount = 800;
@@ -1011,8 +1212,9 @@ async function checkAndTriggerBatchGrading(chatId: string) {
       const gradedResults = await highVolumeService.processBatch({
         paperType: 'mcq',
         papersBuffer: papersFile.buffer,
-        rubricBuffer: rubricFile.buffer,
-        rubricMimeType: 'image/jpeg',
+        paperMimeType,
+        rubricBuffer,
+        rubricMimeType,
         estimatedStudentCount: estimatedCount,
       });
 
@@ -1136,13 +1338,17 @@ async function handleConversationalQuery(chatId: string, session: any, userQuery
 
   const initialMsgId = initialMsg.message_id;
   const userId = session.userId || `telegram-${chatId}`;
-  const useGonka = session.provider === 'gonkarouter' && Boolean(process.env.GONKA_API_KEY);
+  const selectedProvider = String(session.provider || 'gemini').toLowerCase();
+  // Existing Telegram sessions may retain a legacy provider value. If this
+  // deployment has Gonka configured, route conversational traffic through it.
+  const useGonka = Boolean(process.env.GONKA_API_KEY) || process.env.AI_PROVIDER === 'gonkarouter';
 
   let accumulatedText = '';
   let lastEditTime = Date.now();
 
   const assistantSystemPrompt = `You are Bwenge AI Assistant, a friendly, creative, and highly capable AI assistant for teachers, students, and institutions on Telegram.
 You MUST respond strictly in ${lang === 'rw' ? 'Kinyarwanda (Ururimi rw\'Ikinyarwanda)' : 'English'}.
+When the user asks you to perform an action in ordinary language, do it with the matching Telegram action tool instead of only telling them which slash command to type. Use the grading, exam, form, research, scanner, status, quota, discussion, and language tools when appropriate. If required information or files are missing, ask a short follow-up or let the tool request the missing upload.
 Even if the user sends nonsense, gibberish, off-topic, or random text, ALWAYS respond politely, maintain a helpful persona, and guide them back to Bwenge AI capabilities:
 - Batch grading student papers (/grade)
 - Mobile web document scanner (/scan)
@@ -1161,7 +1367,7 @@ Offer actionable next steps and invite them to run commands or upload documents!
         prompt,
         system,
         history,
-        tools: generalTools,
+        tools: [...generalTools, ...telegramActionTools],
         executeTool: (name, input) => executeBotConversationalTool(chatId, userId, name, input),
         onEvent: async (event) => {
           if (event.type === 'text') {
@@ -1196,7 +1402,51 @@ Offer actionable next steps and invite them to run commands or upload documents!
       return;
     }
 
-    // Default Claude / Gemini / AI path
+    // Route each supported Telegram model to its matching provider.
+    if (selectedProvider === 'gemini') {
+      const stream = await aiService.streamGeminiContent({
+        contents: [{ role: 'user', parts: [{ text: `${assistantSystemPrompt}\n\nUSER MESSAGE: ${userQuery}` }] }],
+      });
+      for await (const chunk of stream as any) {
+        accumulatedText += chunk.text || '';
+        const now = Date.now();
+        if (now - lastEditTime > 1500 && accumulatedText.trim()) {
+          lastEditTime = now;
+          await botService.editMessageText(chatId, initialMsgId, accumulatedText.slice(0, 4000));
+        }
+      }
+    } else if (selectedProvider === 'nvidianim') {
+      await aiService.streamNvidiaNimChat(userQuery, {
+        system: assistantSystemPrompt,
+        onToken: (token: string) => {
+          accumulatedText += token;
+          const now = Date.now();
+          if (now - lastEditTime > 1500 && accumulatedText.trim()) {
+            lastEditTime = now;
+            void botService.editMessageText(chatId, initialMsgId, accumulatedText.slice(0, 4000));
+          }
+        },
+      });
+    } else if (selectedProvider === 'ollama') {
+      const baseUrl = (process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/$/, '');
+      const response = await fetch(`${baseUrl}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: process.env.OLLAMA_MODEL || 'qwen2.5:3b', stream: false,
+          messages: [
+            { role: 'system', content: assistantSystemPrompt },
+            { role: 'user', content: userQuery },
+          ],
+        }),
+      });
+      if (!response.ok) throw new Error(`Ollama request failed (${response.status}).`);
+      const data: any = await response.json();
+      accumulatedText = data.message?.content || '';
+    } else {
+      if (!(await aiService.providerAvailable('anthropic'))) {
+        throw new Error(`Provider "${selectedProvider}" is not configured for Telegram chat.`);
+      }
     await aiService.generalAssist({
       userId: chatId,
       messages: [
@@ -1221,6 +1471,7 @@ Offer actionable next steps and invite them to run commands or upload documents!
         }
       },
     });
+    }
 
     const finalText = stripThinkingTags(accumulatedText);
     if (finalText.trim().length > 0) {

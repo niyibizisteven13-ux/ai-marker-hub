@@ -229,8 +229,24 @@ export default function ModernBwengeStudio() {
               }
               setActiveDocument({
                 name: `Scan_${pages.length}_pages.jpg`,
-                size: `${(pages.length * 1.8).toFixed(1)} MB`,
+                size: `${(pages.reduce((total, page) => total + page.dataUrl.length * 0.75, 0) / (1024 * 1024)).toFixed(1)} MB`,
                 pages: pages.length,
+                mimeType: 'image/jpeg',
+                fileType: 'image',
+                url: pages[0].dataUrl,
+                base64Data: pages[0].dataUrl.split(',')[1] || '',
+                rawText: `Scanned document containing ${pages.length} pages.`,
+                scannedPages: pages.map((page) => page.dataUrl),
+                attachments: pages.map((page, index) => ({
+                  id: page.id,
+                  name: `scan-page-${index + 1}.jpg`,
+                  size: `${Math.round((page.dataUrl.length * 0.75) / 1024)} KB`,
+                  type: 'image',
+                  mimeType: 'image/jpeg',
+                  fileType: 'image',
+                  url: page.dataUrl,
+                  base64Data: page.dataUrl.split(',')[1] || '',
+                })),
               });
               setScannerOpen(false);
             }}

@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { User } from '../types';
+import { setAccessToken } from '../utils/authFetch';
+import { X, Eye, EyeOff, Loader2 } from 'lucide-react';
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -12,137 +14,225 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  const emailInputRef = useRef<HTMLInputElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setEmail('');
+      setPassword('');
+      setName('');
+      setError('');
+      setTimeout(() => emailInputRef.current?.focus(), 50);
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isOpen) return;
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError('');
+
+    const trimmedEmail = email.trim().toLowerCase();
+    if (!trimmedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      setError('Enter a valid email');
+      return;
+    }
+    if (password.length < 10) {
+      setError('Use at least 10 characters');
+      return;
+    }
+    if (isSignUp && (!name.trim() || name.trim().length < 2)) {
+      setError('Enter your full name');
+      return;
+    }
+
     setLoading(true);
 
-    const endpoint = isSignUp ? '/api/auth/signup' : '/api/auth/login';
-    const payload = isSignUp ? { name, email, password } : { email, password };
+    const endpoint = isSignUp ? '/api/auth/register' : '/api/auth/login';
+    const payload = isSignUp ? { name: name.trim(), email: trimmedEmail, password } : { email: trimmedEmail, password };
 
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify(payload),
       });
 
-      const responseText = await response.text();
-      let data: any = {};
-
-      if (responseText) {
-        try {
-          data = JSON.parse(responseText);
-        } catch {
-          throw new Error(
-            `Server returned an invalid JSON response (${response.status}). Check whether the backend is running and returning JSON.`
-          );
-        }
-      }
+      const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        throw new Error(data?.error || `Authentication failed with status ${response.status}.`);
+        if (response.status === 429) {
+          setError('Too many attempts. Try again in 15 minutes.');
+        } else {
+          setError(data?.error || 'Email or password is incorrect');
+        }
+        setPassword('');
+        setLoading(false);
+        return;
       }
 
-      if (!data?.token || !data?.user) {
-        throw new Error('Authentication response missing token or user data.');
+      if (!data?.accessToken || !data?.user) {
+        setError('Authentication response missing token or user data');
+        setLoading(false);
+        return;
       }
 
-      onLoginSuccess(data.user, data.token);
+      setAccessToken(data.accessToken, data.expiresIn || 900);
+      setPassword('');
+      onLoginSuccess(data.user, data.accessToken);
       onClose();
     } catch (err: any) {
-      setError(err.message || 'Unable to connect to authentication server.');
+      setError('Unable to connect to authentication server');
+      setPassword('');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-      <div className="relative w-full max-w-md rounded-3xl border border-slate-700/90 bg-[#0B111A] p-6 shadow-2xl text-slate-100">
+    <div
+      className="fixed inset-0 z-[100] flex items-end lg:items-center justify-center bg-black/75 backdrop-blur-sm p-0 lg:p-4 animate-in fade-in duration-200"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        ref={modalRef}
+        className="relative w-full lg:max-w-md rounded-t-[28px] lg:rounded-3xl border border-white/10 bg-[#262624] p-6 lg:p-8 shadow-2xl text-[#FAF9F5] max-h-[90dvh] overflow-y-auto"
+        style={{ backgroundColor: '#262624' }}
+      >
         <button
           type="button"
           onClick={onClose}
-          className="absolute right-4 top-4 rounded-full bg-slate-800/80 px-3 py-2 text-slate-300 hover:text-white"
+          className="absolute right-5 top-5 h-11 w-11 grid place-items-center rounded-full bg-[#30302E] text-neutral-300 hover:text-white transition-colors"
           aria-label="Close login modal"
         >
-          ✕
+          <X size={20} />
         </button>
 
-        <div className="mb-5 flex items-center gap-3">
-          <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-orange-500/15 text-orange-300 text-lg">✦</span>
+        <div className="mb-6 flex items-center gap-3.5">
+          <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#D97757]/15 text-[#D97757] text-xl">✦</span>
           <div>
-            <h2 className="text-lg font-semibold">{isSignUp ? 'Create Bwenge Account' : 'Sign In to Bwenge'}</h2>
-            <p className="text-xs text-slate-500">Secure your marker workspace with email-based access.</p>
+            <h2 className="text-xl font-serif font-medium">{isSignUp ? 'Create account' : 'Sign in to Bwenge'}</h2>
+            <p className="text-xs text-neutral-400">Secure AI grading workspace for teachers</p>
           </div>
         </div>
 
         {error && (
-          <div className="mb-4 rounded-2xl border border-rose-500/20 bg-rose-500/10 p-3 text-sm text-rose-200">
+          <div role="alert" className="mb-5 rounded-2xl border border-rose-500/20 bg-rose-500/10 p-3.5 text-xs text-rose-300 font-medium">
             {error}
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {isSignUp && (
-            <label className="block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
-              Full Name
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-1.5">
+                Full name
+              </label>
               <input
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="mt-2 w-full rounded-2xl border border-slate-700 bg-[#0D111A] px-4 py-3 text-sm text-slate-100 outline-none focus:border-orange-500"
+                className="w-full rounded-2xl border border-white/10 bg-[#30302E] px-4 py-3.5 text-base text-white outline-none focus:border-[#D97757] transition"
                 placeholder="Jane Doe"
+                autoComplete="name"
                 required
               />
-            </label>
+            </div>
           )}
 
-          <label className="block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
-            Email address
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-1.5">
+              Email address
+            </label>
             <input
+              ref={emailInputRef}
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="mt-2 w-full rounded-2xl border border-slate-700 bg-[#0D111A] px-4 py-3 text-sm text-slate-100 outline-none focus:border-orange-500"
+              className="w-full rounded-2xl border border-white/10 bg-[#30302E] px-4 py-3.5 text-base text-white outline-none focus:border-[#D97757] transition"
               placeholder="teacher@school.edu"
+              autoComplete="email"
+              inputMode="email"
+              autoCapitalize="none"
               required
             />
-          </label>
+          </div>
 
-          <label className="block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
-            Password
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="mt-2 w-full rounded-2xl border border-slate-700 bg-[#0D111A] px-4 py-3 text-sm text-slate-100 outline-none focus:border-orange-500"
-              placeholder="••••••••"
-              required
-            />
-          </label>
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-1.5">
+              Password
+            </label>
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full rounded-2xl border border-white/10 bg-[#30302E] px-4 py-3.5 pr-12 text-base text-white outline-none focus:border-[#D97757] transition"
+                placeholder="At least 10 characters"
+                autoComplete={isSignUp ? 'new-password' : 'current-password'}
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 h-10 w-10 grid place-items-center text-neutral-400 hover:text-white"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between text-xs pt-1">
+            <span className="text-neutral-500">Min 10 characters</span>
+            <button
+              type="button"
+              onClick={() => alert('Password reset will be available in Phase 2.')}
+              className="text-[#D97757] hover:underline"
+            >
+              Forgot password?
+            </button>
+          </div>
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-2xl bg-orange-500 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-orange-500/20 transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-60"
+            className="w-full h-12 rounded-2xl bg-[#D97757] px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-[#D97757]/25 transition hover:bg-[#c86849] disabled:cursor-not-allowed disabled:opacity-60 flex items-center justify-center gap-2"
           >
-            {loading ? 'Working…' : isSignUp ? 'Create Account' : 'Sign In'}
+            {loading && <Loader2 size={18} className="animate-spin" />}
+            {loading ? 'Please wait…' : isSignUp ? 'Create account' : 'Sign in'}
           </button>
         </form>
 
-        <div className="mt-4 border-t border-slate-800 pt-4 text-center text-xs text-slate-500">
+        <div className="mt-6 border-t border-white/10 pt-5 text-center text-xs text-neutral-400">
           <button
             type="button"
-            onClick={() => setIsSignUp((value) => !value)}
-            className="font-medium text-slate-300 hover:text-orange-300"
+            onClick={() => {
+              setIsSignUp(!isSignUp);
+              setError('');
+            }}
+            className="font-medium text-white hover:text-[#D97757] transition"
           >
-            {isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
+            {isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Create one"}
           </button>
         </div>
       </div>

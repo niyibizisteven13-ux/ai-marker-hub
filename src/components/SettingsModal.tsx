@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { authFetch } from '../utils/authFetch';
 import { User, UserSettings } from '../types';
+import { X } from 'lucide-react';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -20,7 +21,7 @@ const DEFAULT_SETTINGS: UserSettings = {
 };
 
 export default function SettingsModal({ isOpen, onClose, user, onUpdateUser, onLogout }: SettingsModalProps) {
-  const [activeTab, setActiveTab] = useState<'account' | 'ai' | 'studio' | 'api'>('account');
+  const [activeTab, setActiveTab] = useState<'account' | 'ai'>('account');
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -29,16 +30,9 @@ export default function SettingsModal({ isOpen, onClose, user, onUpdateUser, onL
   const [strictness, setStrictness] = useState<UserSettings['defaultStrictness']>('STANDARD');
   const [autoSummarize, setAutoSummarize] = useState(true);
   const [preferredLanguage, setPreferredLanguage] = useState('en');
-  const [theme, setTheme] = useState<UserSettings['theme']>('dark');
   const [longTermMemory, setLongTermMemory] = useState(false);
   const [agentTone, setAgentTone] = useState<UserSettings['agentTone']>('PROFESSIONAL');
   const [customInstructions, setCustomInstructions] = useState('');
-
-  const [compactMobileView, setCompactMobileView] = useState(false);
-  const [autoScroll, setAutoScroll] = useState(true);
-  const [openAiKey, setOpenAiKey] = useState('');
-  const [claudeKey, setClaudeKey] = useState('');
-  const [nvidiaKey, setNvidiaKey] = useState('');
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -53,18 +47,11 @@ export default function SettingsModal({ isOpen, onClose, user, onUpdateUser, onL
     setStrictness(settings.defaultStrictness);
     setAutoSummarize(settings.autoSummarize);
     setPreferredLanguage(settings.preferredLanguage);
-    setTheme(settings.theme);
     setLongTermMemory(settings.longTermMemory);
     setAgentTone(settings.agentTone);
     setCustomInstructions(settings.customInstructions || '');
-
-    setCompactMobileView(false);
-    setAutoScroll(true);
-    setOpenAiKey('');
-    setClaudeKey('');
-    setNvidiaKey('');
     setStatusMessage(null);
-  }, [isOpen, user]);
+  }, [isOpen, user?.id]);
 
   if (!isOpen) return null;
 
@@ -88,7 +75,6 @@ export default function SettingsModal({ isOpen, onClose, user, onUpdateUser, onL
           defaultStrictness: strictness,
           autoSummarize,
           preferredLanguage,
-          theme,
           longTermMemory,
           agentTone,
           customInstructions,
@@ -99,10 +85,10 @@ export default function SettingsModal({ isOpen, onClose, user, onUpdateUser, onL
       if (!response.ok) {
         throw new Error(data.error || 'Unable to save settings.');
       }
+      if (!data.user) throw new Error('Settings were not confirmed by the server.');
 
       onUpdateUser(data.user);
       setStatusMessage('Settings saved successfully.');
-      onClose();
     } catch (error: any) {
       setStatusMessage(error?.message || 'Failed to save settings.');
     } finally {
@@ -110,8 +96,21 @@ export default function SettingsModal({ isOpen, onClose, user, onUpdateUser, onL
     }
   };
 
+  const handleLogoutAll = async () => {
+    try {
+      const response = await authFetch('/api/auth/logout-all', { method: 'POST' });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'Unable to sign out other devices.');
+      }
+      onLogout();
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : 'Unable to sign out other devices.');
+    }
+  };
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex h-[100dvh] w-full items-stretch justify-stretch bg-black/70 backdrop-blur-md">
       <style>{`
         input:-webkit-autofill,
         input:-webkit-autofill:hover,
@@ -122,8 +121,8 @@ export default function SettingsModal({ isOpen, onClose, user, onUpdateUser, onL
           transition: background-color 5000s ease-in-out 0s;
         }
       `}</style>
-      <div className="w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden rounded-[28px] border border-white/10 bg-[#0B0E17] shadow-2xl">
-        <div className="flex items-center justify-between border-b border-slate-800/80 bg-[#0E121E] px-6 py-4 shrink-0">
+      <div className="flex h-full min-h-0 w-full flex-col overflow-hidden border border-white/[0.09] bg-[#101318] shadow-2xl">
+        <div className="flex items-center justify-between border-b border-white/[0.08] bg-[#14171D] px-4 sm:px-7 py-4 shrink-0">
 
           <div className="flex items-center gap-3">
             <span className="text-orange-400 text-lg">⚙️</span>
@@ -141,18 +140,21 @@ export default function SettingsModal({ isOpen, onClose, user, onUpdateUser, onL
           </button>
         </div>
 
-        <div className="flex flex-1 overflow-hidden bg-[#090C15]">
-          <div className="w-48 border-r border-slate-800/70 bg-[#090C15] p-5 space-y-2.5 shrink-0">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#101318] sm:flex-row">
+          <div role="tablist" aria-label="Settings sections" className="flex shrink-0 gap-1 overflow-x-auto border-b border-white/[0.07] bg-[#111419] p-2 sm:w-56 sm:flex-col sm:overflow-y-auto sm:border-b-0 sm:border-r sm:p-4">
             {[
-              { key: 'account', label: '👤 Account' },
-              { key: 'ai', label: '🤖 AI Engine' },
-              { key: 'studio', label: '⚙️ Studio' },
-              { key: 'api', label: '🔑 API Keys' },
+              { key: 'account', label: 'Account' },
+              { key: 'ai', label: 'AI preferences' },
             ].map((tab) => (
               <button
                 key={tab.key}
-                onClick={() => setActiveTab(tab.key as any)}
-                className={`w-full rounded-2xl px-4 py-3 text-left text-xs font-bold tracking-wide transition-all duration-200 ${
+                type="button"
+                role="tab"
+                id={`settings-tab-${tab.key}`}
+                aria-controls={`settings-panel-${tab.key}`}
+                aria-selected={activeTab === tab.key}
+                onClick={() => setActiveTab(tab.key as 'account' | 'ai')}
+                className={`shrink-0 sm:w-full rounded-2xl px-3 sm:px-4 py-2.5 sm:py-3 text-left text-xs font-bold tracking-wide transition-all duration-200 ${
                   activeTab === tab.key
                     ? 'bg-slate-800/80 text-orange-400 shadow-sm border border-slate-700/50'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
@@ -163,11 +165,11 @@ export default function SettingsModal({ isOpen, onClose, user, onUpdateUser, onL
             ))}
           </div>
 
-          <div className="flex-1 overflow-y-auto p-8 text-slate-100 scrollbar-thin scrollbar-thumb-slate-800">
+          <div role="tabpanel" id={`settings-panel-${activeTab}`} aria-labelledby={`settings-tab-${activeTab}`} className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-7 lg:p-9 text-slate-100 scrollbar-thin scrollbar-thumb-slate-800">
 
 
             {activeTab === 'account' && (
-              <div className="space-y-6">
+              <div className="mx-auto w-full max-w-5xl space-y-6">
                 <div className="space-y-6 rounded-3xl border border-slate-800/80 bg-[#111820] p-6 shadow-inner">
                   <div className="space-y-1">
                     <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider">Profile Details</h3>
@@ -179,6 +181,9 @@ export default function SettingsModal({ isOpen, onClose, user, onUpdateUser, onL
                       Full Name
                       <input
                         type="text"
+                        required
+                        minLength={2}
+                        maxLength={100}
                         value={name}
                         onChange={(e) => setName(e.target.value)}
                         className="w-full rounded-2xl border border-slate-700/60 bg-[#0F1520] px-4 py-3.5 text-sm text-slate-100 outline-none focus:border-orange-500 focus:bg-[#0F1520] transition-colors shadow-sm"
@@ -188,6 +193,8 @@ export default function SettingsModal({ isOpen, onClose, user, onUpdateUser, onL
                       Email address
                       <input
                         type="email"
+                        required
+                        autoComplete="email"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         className="w-full rounded-2xl border border-slate-700/60 bg-[#0F1520] px-4 py-3.5 text-sm text-slate-100 outline-none focus:border-orange-500 focus:bg-[#0F1520] transition-colors shadow-sm"
@@ -210,6 +217,9 @@ export default function SettingsModal({ isOpen, onClose, user, onUpdateUser, onL
                     New password
                     <input
                       type="password"
+                      minLength={12}
+                      maxLength={128}
+                      autoComplete="new-password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="Leave blank to keep current password"
@@ -223,7 +233,7 @@ export default function SettingsModal({ isOpen, onClose, user, onUpdateUser, onL
 
 
             {activeTab === 'ai' && (
-              <div className="space-y-6">
+              <div className="mx-auto w-full max-w-5xl space-y-6">
                 <div className="space-y-6 rounded-3xl border border-slate-800/80 bg-[#111820] p-6 shadow-inner">
                   <div className="space-y-1">
                     <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider">AI Agent Configuration</h3>
@@ -233,7 +243,7 @@ export default function SettingsModal({ isOpen, onClose, user, onUpdateUser, onL
                   <div className="flex items-center justify-between rounded-2xl border border-slate-700/60 bg-[#0F1520] p-5 shadow-sm transition-colors hover:border-slate-600">
                     <div>
                       <div className="text-sm font-bold text-slate-200">🧠 Bwenge Brain (Long-term Memory)</div>
-                      <p className="text-xs text-slate-500">Allow the agent to remember context across all your chat sessions.</p>
+                      <p className="text-xs text-slate-500">Use saved context from earlier sessions to personalize future responses.</p>
                     </div>
                     <input
                       type="checkbox"
@@ -248,7 +258,7 @@ export default function SettingsModal({ isOpen, onClose, user, onUpdateUser, onL
                       Agent Tone
                       <select
                         value={agentTone}
-                        onChange={(e) => setAgentTone(e.target.value as any)}
+                        onChange={(e) => setAgentTone(e.target.value as UserSettings['agentTone'])}
                         className="w-full rounded-2xl border border-slate-700/60 bg-[#0F1520] px-4 py-3.5 text-sm text-slate-100 outline-none focus:border-orange-500 transition-colors appearance-none cursor-pointer"
                       >
                         <option value="PROFESSIONAL">Professional & Objective</option>
@@ -273,19 +283,34 @@ export default function SettingsModal({ isOpen, onClose, user, onUpdateUser, onL
                   </div>
 
                   <label className="block space-y-2.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">
+                    Response language
+                    <select
+                      value={preferredLanguage}
+                      onChange={(e) => setPreferredLanguage(e.target.value)}
+                      className="w-full rounded-2xl border border-slate-700/60 bg-[#0F1520] px-4 py-3.5 text-sm text-slate-100 outline-none transition-colors focus:border-orange-500"
+                    >
+                      <option value="en">English</option>
+                      <option value="fr">French</option>
+                      <option value="rw">Kinyarwanda</option>
+                    </select>
+                  </label>
+
+                  <label className="block space-y-2.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">
                     Custom Agent Instructions
                     <textarea
                       value={customInstructions}
                       onChange={(e) => setCustomInstructions(e.target.value)}
+                      maxLength={2000}
                       placeholder="e.g. Always emphasize critical thinking in your feedback..."
                       className="w-full h-32 rounded-2xl border border-slate-700/60 bg-[#0F1520] px-4 py-3.5 text-sm text-slate-100 outline-none focus:border-orange-500 transition-colors resize-none shadow-sm"
                     />
+                    <span className="text-xs text-slate-500">{customInstructions.length}/2000 characters</span>
                   </label>
 
                   <div className="flex items-center justify-between rounded-2xl border border-slate-700/60 bg-[#0F1520] p-5 shadow-sm transition-colors hover:border-slate-600">
                     <div>
-                      <div className="text-sm font-bold text-slate-200">Automatic Summary Reports</div>
-                      <p className="text-xs text-slate-500">Generate executive feedback when submissions are uploaded.</p>
+                      <div className="text-sm font-bold text-slate-200">Summarize reviewed work</div>
+                      <p className="text-xs text-slate-500">Ask the assistant to include a concise outcomes summary when reviewing student work.</p>
                     </div>
                     <input
                       type="checkbox"
@@ -300,119 +325,22 @@ export default function SettingsModal({ isOpen, onClose, user, onUpdateUser, onL
             )}
 
 
-            {activeTab === 'studio' && (
-              <div className="space-y-6">
-                <div className="rounded-3xl border border-slate-800/80 bg-[#111820] p-6 shadow-inner space-y-6">
-                  <div className="space-y-1">
-                    <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider">Studio Preferences</h3>
-                    <p className="text-xs text-slate-500">Customize how the interface behaves while you work.</p>
-                  </div>
-
-                  <label className="block space-y-2.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">
-                    Interface Theme
-                    <select
-                      value={theme}
-                      onChange={(e) => setTheme(e.target.value as UserSettings['theme'])}
-                      className="w-full rounded-2xl border border-slate-700/60 bg-[#0F1520] px-4 py-3.5 text-sm text-slate-100 outline-none focus:border-orange-500 focus:bg-[#0F1520] transition-colors shadow-sm appearance-none cursor-pointer"
-                    >
-                      <option value="dark">Dark</option>
-                      <option value="light">Light</option>
-                    </select>
-                  </label>
-
-
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between rounded-2xl border border-slate-700/60 bg-[#0F1520] p-5 shadow-sm transition-colors hover:border-slate-600">
-                      <div>
-                        <div className="text-sm font-bold text-slate-200">Mobile Compact View</div>
-                        <p className="text-xs text-slate-500">Use a tighter layout on phones and tablets.</p>
-                      </div>
-                      <input
-                        type="checkbox"
-                        checked={compactMobileView}
-                        onChange={(e) => setCompactMobileView(e.target.checked)}
-                        className="h-5 w-5 rounded-lg border-slate-700 bg-slate-800 text-orange-500 accent-orange-500 cursor-pointer"
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between rounded-2xl border border-slate-700/60 bg-[#0F1520] p-5 shadow-sm transition-colors hover:border-slate-600">
-                      <div>
-                        <div className="text-sm font-bold text-slate-200">Auto-scroll Results</div>
-                        <p className="text-xs text-slate-500">Keep the latest analysis in view during review.</p>
-                      </div>
-                      <input
-                        type="checkbox"
-                        checked={autoScroll}
-                        onChange={(e) => setAutoScroll(e.target.checked)}
-                        className="h-5 w-5 rounded-lg border-slate-700 bg-slate-800 text-orange-500 accent-orange-500 cursor-pointer"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-
-            {activeTab === 'api' && (
-              <div className="space-y-6">
-                <div className="rounded-3xl border border-slate-800/80 bg-[#111820] p-6 shadow-inner space-y-6">
-                  <div className="space-y-1">
-                    <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider">API Keys</h3>
-                    <p className="text-xs text-slate-500">Store optional third-party API keys for custom deployments.</p>
-                  </div>
-
-                  <label className="block space-y-2.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">
-                    OpenAI Key
-                    <input
-                      type="password"
-                      value={openAiKey}
-                      onChange={(e) => setOpenAiKey(e.target.value)}
-                      className="w-full rounded-2xl border border-slate-700/60 bg-[#0F1520] px-4 py-3.5 text-sm text-slate-100 outline-none focus:border-orange-500 focus:bg-[#0F1520] transition-colors shadow-sm"
-                      placeholder="sk-..."
-                    />
-                  </label>
-
-                  <label className="block space-y-2.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">
-                    Claude Key
-                    <input
-                      type="password"
-                      value={claudeKey}
-                      onChange={(e) => setClaudeKey(e.target.value)}
-                      className="w-full rounded-2xl border border-slate-700/60 bg-[#0F1520] px-4 py-3.5 text-sm text-slate-100 outline-none focus:border-orange-500 focus:bg-[#0F1520] transition-colors shadow-sm"
-                      placeholder="claude-..."
-                    />
-                  </label>
-
-                  <label className="block space-y-2.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">
-                    NVIDIA NIM Key
-                    <input
-                      type="password"
-                      value={nvidiaKey}
-                      onChange={(e) => setNvidiaKey(e.target.value)}
-                      className="w-full rounded-2xl border border-slate-700/60 bg-[#0F1520] px-4 py-3.5 text-sm text-slate-100 outline-none focus:border-orange-500 focus:bg-[#0F1520] transition-colors shadow-sm"
-                      placeholder="nvapi-..."
-                    />
-                  </label>
-
-
-                  <div className="rounded-2xl bg-amber-500/5 border border-amber-500/20 p-4">
-                    <p className="text-[11px] leading-relaxed text-amber-200/70">
-                      <strong>Security Note:</strong> These keys are stored only in your local browser session and are used for custom provider fallbacks.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-3 border-t border-slate-800/70 bg-[#0E121E] px-8 py-5 shrink-0">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 border-t border-white/[0.08] bg-[#14171D] px-4 sm:px-7 py-3 sm:py-4 shrink-0 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))]">
 
-          <div className="text-sm text-slate-400 font-medium">
-            {statusMessage && <span className="animate-pulse text-orange-400">{statusMessage}</span>}
+          <div className="text-sm font-medium text-slate-400" role={statusMessage?.includes('successfully') ? 'status' : statusMessage ? 'alert' : undefined}>
+            {statusMessage && <span className={statusMessage.includes('successfully') ? 'text-emerald-400' : 'text-orange-400'}>{statusMessage}</span>}
           </div>
-          <div className="flex flex-wrap items-center justify-end gap-3.5">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={handleLogoutAll}
+              className="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-rose-300 transition-all hover:bg-rose-500/20 active:scale-95"
+            >
+              Sign out all devices
+            </button>
             <button
               type="button"
               onClick={onLogout}

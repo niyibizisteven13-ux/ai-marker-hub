@@ -14,6 +14,37 @@ interface CompactInputBarProps {
   onProviderChange: (provider: string) => void;
 }
 
+export const getFileIconAndType = (fileName: string, mimeType?: string): { icon: string; label: string } => {
+  const lower = fileName.toLowerCase();
+  const ext = lower.split('.').pop() || '';
+
+  if (mimeType?.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|svg|avif|heic)$/i.test(lower)) {
+    return { icon: '🖼️', label: 'Image' };
+  }
+  if (mimeType === 'application/pdf' || ext === 'pdf') {
+    return { icon: '📕', label: 'PDF' };
+  }
+  if (ext === 'doc' || ext === 'docx' || mimeType?.includes('word')) {
+    return { icon: '📄', label: 'Word' };
+  }
+  if (ext === 'xls' || ext === 'xlsx' || ext === 'csv' || mimeType?.includes('excel') || mimeType?.includes('spreadsheet')) {
+    return { icon: '📊', label: 'Spreadsheet' };
+  }
+  if (ext === 'ppt' || ext === 'pptx' || mimeType?.includes('presentation')) {
+    return { icon: '📊', label: 'Presentation' };
+  }
+  if (/\.(js|ts|tsx|jsx|py|java|kt|cpp|c|h|cs|rs|go|rb|php|swift|sql|html|css|scss|sh|bash)$/i.test(lower)) {
+    return { icon: '💻', label: 'Code' };
+  }
+  if (ext === 'json' || ext === 'yaml' || ext === 'yml' || ext === 'xml' || ext === 'toml' || ext === 'ini') {
+    return { icon: '⚙️', label: 'Data' };
+  }
+  if (ext === 'zip' || ext === 'tar' || ext === 'gz' || ext === '7z' || ext === 'rar') {
+    return { icon: '📁', label: 'Archive' };
+  }
+  return { icon: '📝', label: 'Document' };
+};
+
 export const CompactInputBar: React.FC<CompactInputBarProps> = ({
   inputValue,
   setInputValue,
@@ -30,30 +61,38 @@ export const CompactInputBar: React.FC<CompactInputBarProps> = ({
     <div className="rounded-3xl border border-slate-800/90 bg-slate-900/95 p-3 shadow-[0_12px_30px_-20px_rgba(0,0,0,0.8)]">
       {stagedAttachments.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-2 pb-2 border-b border-slate-800/60">
-          {stagedAttachments.map((attachment, idx) => (
-            <div
-              key={`${attachment instanceof File ? attachment.name : attachment.id}-${idx}`}
-              className="group flex items-center gap-2 rounded-xl bg-slate-800/90 border border-slate-700/70 px-3 py-2 text-xs text-slate-200 shadow-sm"
-            >
-              <span className="text-sm text-orange-400">📄</span>
-              <div className="min-w-0">
-                <div className="truncate max-w-[160px] text-[11px] font-medium text-slate-100">
-                  {attachment instanceof File ? attachment.name : attachment.name}
-                </div>
-                <div className="text-[10px] text-slate-500">
-                  {attachment instanceof File ? `${Math.round(attachment.size / 1024)} KB` : attachment.size || ''}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => onRemoveAttachment(idx)}
-                className="text-slate-400 hover:text-rose-400 rounded-full w-5 h-5 flex items-center justify-center transition"
-                title="Remove attachment"
+          {stagedAttachments.map((attachment, idx) => {
+            const fileName = attachment instanceof File ? attachment.name : attachment.name;
+            const fileSize = attachment instanceof File ? `${Math.round(attachment.size / 1024)} KB` : attachment.size || '';
+            const mimeType = attachment instanceof File ? attachment.type : attachment.mimeType;
+            const { icon, label } = getFileIconAndType(fileName, mimeType);
+
+            return (
+              <div
+                key={`${fileName}-${idx}`}
+                className="group flex items-center gap-2 rounded-xl bg-slate-800/90 border border-slate-700/70 px-3 py-1.5 text-xs text-slate-200 shadow-sm"
               >
-                ✕
-              </button>
-            </div>
-          ))}
+                <span className="text-sm">{icon}</span>
+                <div className="min-w-0">
+                  <div className="truncate max-w-[160px] text-[11px] font-medium text-slate-100">
+                    {fileName}
+                  </div>
+                  <div className="text-[9px] text-slate-400 font-mono flex items-center gap-1">
+                    <span>{label}</span>
+                    {fileSize && <span>• {fileSize}</span>}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onRemoveAttachment(idx)}
+                  className="text-slate-400 hover:text-rose-400 rounded-full w-5 h-5 flex items-center justify-center transition"
+                  title="Remove attachment"
+                >
+                  ✕
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -61,7 +100,7 @@ export const CompactInputBar: React.FC<CompactInputBarProps> = ({
         rows={2}
         value={inputValue}
         onChange={(e) => setInputValue(e.target.value)}
-        placeholder="Ask Bwenge to review a submission, attach a rubric, or process a scan..."
+        placeholder="Ask Bwenge to review a submission, attach a rubric, or process a file..."
         className="w-full resize-none rounded-2xl border border-slate-800/80 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/10"
       />
 

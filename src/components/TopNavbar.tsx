@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { MoreVertical, GraduationCap, FilePlus, Award, Plus, Settings, FileOutput, Trash2, Instagram, Upload, Eye, FileText, Download, Share2, Star, Building2 } from 'lucide-react';
+import { MoreVertical, GraduationCap, FilePlus, Award, Plus, Settings, FileOutput, Trash2, Instagram, Upload, Eye, FileText, Download, Share2, Star, Building2, PanelLeft } from 'lucide-react';
 import logoUrl from '../assets/bwenge-logo.svg';
 import { NavigationTab, User } from '../types';
 
@@ -13,6 +13,7 @@ interface TopNavbarProps {
   onShare?: () => void;
   activeFormId?: string | null;
   user: User | null;
+  onOpenSidebar?: () => void;
 }
 
 export const TopNavbar: React.FC<TopNavbarProps> = ({
@@ -25,6 +26,7 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
   onShare,
   activeFormId,
   user,
+  onOpenSidebar,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -47,24 +49,44 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
   }, []);
 
   return (
-    <header className="flex-shrink-0 w-full bg-transparent px-4 py-2.5 transition-colors duration-200">
-      <div className="max-w-[1800px] mx-auto flex items-center justify-between">
-        {/* Left: Brand logo (Visible on mobile/when sidebar is hidden) */}
-        <div className="flex items-center gap-3 opacity-0 pointer-events-none md:opacity-100 md:pointer-events-auto">
-          <div className="w-8 h-8 rounded-xl bg-[#0D2B24] flex items-center justify-center overflow-hidden shrink-0">
-            <svg viewBox="0 0 220 220" className="w-full h-full">
-              <circle cx="110" cy="110" r="110" fill="#0D2B24"/>
-              <g transform="translate(110,110)">
-                <circle cx="-32" cy="-10" r="26" fill="#5DCAA5"/>
-                <circle cx="32" cy="-10" r="26" fill="#5DCAA5"/>
-              </g>
-            </svg>
+    <header className="absolute inset-x-0 top-0 z-20 flex-shrink-0 w-full pointer-events-none transition-colors duration-200">
+      <div className="flex h-[calc(52px+env(safe-area-inset-top,0px))] items-center justify-between border-b border-white/[0.06] bg-[#212121]/90 px-3 pt-[env(safe-area-inset-top,0px)] backdrop-blur-md lg:h-auto lg:border-0 lg:bg-transparent lg:px-4 lg:pt-2.5">
+        {/* Left: Top-Left Sidebar button & Brand logo */}
+        <div className="pointer-events-auto flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onOpenSidebar}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-neutral-200 bg-white/5 hover:bg-white/10 hover:text-white shadow-sm transition-all active:scale-90"
+            title="Open navigation"
+            aria-label="Open navigation menu"
+          >
+            <PanelLeft className="h-4 w-4" />
+          </button>
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-xl bg-[#0D2B24] flex items-center justify-center overflow-hidden shrink-0 border border-emerald-500/20">
+              <svg viewBox="0 0 220 220" className="w-full h-full">
+                <circle cx="110" cy="110" r="110" fill="#0D2B24"/>
+                <g transform="translate(110,110)">
+                  <circle cx="-32" cy="-10" r="26" fill="#5DCAA5"/>
+                  <circle cx="32" cy="-10" r="26" fill="#5DCAA5"/>
+                </g>
+              </svg>
+            </div>
+            <span className="text-xs sm:text-sm font-bold tracking-tight text-neutral-100">Bwenge Studio</span>
           </div>
-          <span className="hidden sm:block text-sm font-bold tracking-tight text-slate-900 dark:text-slate-100">Bwenge Studio</span>
         </div>
 
         {/* Right: Workspace Controls */}
-        <div className="flex items-center gap-3">
+        <div className="pointer-events-auto flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onNewChat}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-neutral-300 hover:bg-white/10 hover:text-white"
+            title="New chat"
+            aria-label="Start a new chat"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
           {user?.subscription && (
             <div className="flex items-center gap-1.5 px-2.5 py-1 bg-white/[0.03] border border-white/5 rounded-lg">
               {user.subscription.planType === 'BUSINESS' ? (
@@ -85,7 +107,7 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
           {!user?.subscription && (
             <button
               onClick={() => (window as any).openUpgradeModal?.()}
-              className="bg-gradient-to-r from-amber-500/20 to-orange-600/10 hover:from-amber-500/30 hover:to-orange-600/20 text-amber-400 font-medium px-3 py-1.5 rounded-xl border border-amber-500/30 text-xs transition-all shadow-md shadow-orange-950/20 flex items-center gap-1.5"
+              className="bg-amber-500/10 hover:bg-amber-500/15 text-amber-400 font-semibold px-3 py-1.5 rounded-full border border-amber-500/30 text-xs transition-all flex items-center gap-1.5"
             >
               <span className="text-amber-400">⭐</span>
               <span>Upgrade</span>
@@ -160,4 +182,3 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
     </header>
   );
 };
-

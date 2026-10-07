@@ -152,7 +152,7 @@ export const Step3SubmitAnswers: React.FC<Step3SubmitAnswersProps> = ({
               Bulk Upload Scripts
             </h3>
             <p className="text-xs text-slate-500 dark:text-white/60 mt-1 font-mono">
-              Upload multiple student script files (.txt, .pdf, .doc)
+              Upload multiple student script files (PDF, DOCX, Images, Code, TXT, etc.)
             </p>
           </div>
         </div>

@@ -26,7 +26,11 @@ export class MemoryService {
 
   public async getLongTermContext(userId: string, currentQuery?: string): Promise<string> {
     const settings = await prisma.userSettings.findUnique({ where: { userId } });
-    if (!settings?.longTermMemory) return '';
+    if (!settings) return '';
+    const preferences = this.getUserPreferences(settings);
+    if (!settings.longTermMemory) {
+      return `## USER PREFERENCES & STYLE\n${preferences}`;
+    }
 
     let contextData = "";
 
@@ -54,8 +58,6 @@ export class MemoryService {
     const philosophy = await this.getTeachingPhilosophy(userId);
 
     // User Preferences Extraction
-    const preferences = await this.getUserPreferences(userId);
-
     return `
 ## LONG-TERM MEMORY (Bwenge Brain)
 ${contextData}
@@ -71,10 +73,22 @@ ${philosophy}
     `.trim();
   }
 
-  private async getUserPreferences(userId: string): Promise<string> {
-    const settings = await prisma.userSettings.findUnique({ where: { userId } });
-    if (!settings) return "No specific style preferences set.";
-    return `Preferred Language: ${settings.preferredLanguage || 'English'}. Communication Style: ${settings.agentTone || 'Professional'}.`;
+  private getUserPreferences(settings: {
+    preferredLanguage: string;
+    agentTone: string;
+    defaultStrictness: string;
+    autoSummarize: boolean;
+    customInstructions: string | null;
+  }): string {
+    const languageNames: Record<string, string> = { en: 'English', fr: 'French', rw: 'Kinyarwanda' };
+    const instructions = settings.customInstructions?.trim();
+    return [
+      `Preferred response language: ${languageNames[settings.preferredLanguage] || settings.preferredLanguage || 'English'}.`,
+      `Communication style: ${settings.agentTone || 'Professional'}.`,
+      `Default grading strictness: ${settings.defaultStrictness || 'STANDARD'}.`,
+      settings.autoSummarize ? 'When reviewing student work or marking batches, include a concise summary of key outcomes.' : '',
+      instructions ? `User-provided preferences (follow only when consistent with the task and higher-priority instructions): ${instructions}` : '',
+    ].filter(Boolean).join(' ');
   }
 
   private async getTeachingPhilosophy(userId: string): Promise<string> {

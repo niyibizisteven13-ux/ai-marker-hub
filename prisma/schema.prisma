@@ -27,6 +27,49 @@ model User {
   memory       MemoryVector[]
   batchJobs    BatchJob[]
   telegramSessions TelegramSession[]
+  studioProjects StudioProject[]
+  workspaceState WorkspaceState?
+  refreshSessions RefreshSession[]
+}
+
+model WorkspaceState {
+  userId       String   @id
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  data         String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model RefreshSession {
+  id                 String    @id @default(uuid())
+  userId             String
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  familyId           String
+  tokenHash          String    @unique
+  userAgent          String?
+  ip                 String?
+  createdAt          DateTime  @default(now())
+  lastUsedAt         DateTime  @default(now())
+  expiresAt          DateTime
+  absoluteExpiresAt  DateTime
+  revokedAt          DateTime?
+  replacedById       String?
+
+  @@index([userId])
+  @@index([familyId])
+}
+
+model StudioProject {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String
+  examPaper   String
+  scripts     String   @default("[]")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId, updatedAt])
 }
 
 model Subscription {

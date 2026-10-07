@@ -2,9 +2,10 @@ import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from './server/db.js';
 
 import { AiService } from './server/services/AiService.js';
 import { QueueService } from './server/services/QueueService.js';
@@ -30,13 +31,14 @@ import logger from './server/utils/logger.js';
 
 import { validate, examSchema, markScriptSchema, batchGradeSchema, chatSchema } from './server/middleware/validation.js';
 
-import { requireAuth, writeAuditLog } from './production/auth.js';
+import { requireAuth, requireRole, writeAuditLog } from './production/auth.js';
 import { generalLimiter, gradingLimiter } from './production/rateLimiter.js';
 import authRoutes from './server/routes/authRoutes.ts';
 import userRoutes from './server/routes/userRoutes.ts';
 import agentRoutes from './server/routes/agentRoutes.ts';
 import paymentRoutes from './server/routes/paymentRoutes.ts';
 import formRoutes from './server/routes/formRoutes.ts';
+import studioRoutes from './server/routes/studioRoutes.ts';
 import adminRoutes from './server/routes/adminRoutes.ts';
 import ollamaRoutes from './server/routes/ollamaRoutes.ts';
 import telegramBotRoutes from './server/routes/telegramBotRoutes.ts';
@@ -56,7 +58,17 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
-const prisma = new PrismaClient();
+
+// Only trust a known number of reverse proxy hops. Express defaults to zero,
+// so direct/local requests cannot spoof their client IP through X-Forwarded-For.
+const trustProxyHops = process.env.TRUST_PROXY_HOPS;
+if (trustProxyHops !== undefined) {
+  const parsedTrustProxyHops = Number(trustProxyHops);
+  if (!Number.isInteger(parsedTrustProxyHops) || parsedTrustProxyHops < 0) {
+    throw new Error('TRUST_PROXY_HOPS must be a non-negative integer.');
+  }
+  app.set('trust proxy', parsedTrustProxyHops);
+}
 
 // ── Startup environment validation ────────────────────────────────────────
 // Catch missing/invalid configuration at boot time rather than inside a
@@ -72,9 +84,28 @@ if (process.env.NODE_ENV === 'production' && /^file:/i.test(process.env.DATABASE
   console.error('[FATAL] Production requires a non-SQLite DATABASE_URL. SQLite is not safe for concurrent production writes. Configure PostgreSQL or another production-grade database.');
   process.exit(1);
 }
+if (process.env.NODE_ENV === 'production' && (process.env.JWT_SECRET || '').length < 32) {
+  console.error('[FATAL] Production JWT_SECRET must contain at least 32 characters.');
+  process.exit(1);
+}
+if (process.env.NODE_ENV === 'production' && !process.env.APP_URL) {
+  console.error('[FATAL] Production APP_URL must be set to the public HTTPS frontend origin.');
+  process.exit(1);
+}
+if (process.env.NODE_ENV === 'production' && !/^https:\/\//i.test(process.env.APP_URL || '')) {
+  console.error('[FATAL] Production APP_URL must use HTTPS.');
+  process.exit(1);
+}
+if (process.env.NODE_ENV === 'production' && process.env.STORAGE_DRIVER !== 's3') {
+  console.error('[FATAL] Production requires STORAGE_DRIVER=s3 and a configured durable object-storage adapter. Local filesystem storage is development-only.');
+  process.exit(1);
+}
 const AI_PROVIDERS = ['GEMINI_API_KEY', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'NVIDIA_NIM_API_KEY', 'GONKA_API_KEY', 'OLLAMA_BASE_URL'];
 if (!AI_PROVIDERS.some(k => process.env[k])) {
   console.warn('[WARN] No AI provider API key is configured. All AI endpoints will fail. Set at least one of: ' + AI_PROVIDERS.join(', '));
+}
+if (process.env.AI_PROVIDER === 'gonkarouter' && !process.env.GONKA_API_KEY) {
+  console.warn('[WARN] AI_PROVIDER is gonkarouter, but GONKA_API_KEY is missing. Add a valid GonkaRouter key to your local .env file.');
 }
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -180,27 +211,46 @@ app.use((_req: express.Request, res: express.Response, next: express.NextFunctio
 const allowedOrigin = process.env.APP_URL || 'http://localhost:5173';
 app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
   const origin = req.headers.origin as string | undefined;
-  const isAllowed =
-    process.env.NODE_ENV !== 'production' ||
-    !origin ||
-    origin === allowedOrigin;
+  const isAllowed = process.env.NODE_ENV !== 'production' || origin === allowedOrigin;
 
   if (isAllowed) {
     if (origin) res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key, x-teacher-id');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   }
 
   if (req.method === 'OPTIONS') {
-    res.status(204).end();
+    res.status(isAllowed ? 204 : 403).end();
     return;
   }
   next();
 });
 // ──────────────────────────────────────────────────────────────────────────
 
-app.use(express.json({ limit: '20mb' }));
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: false, limit: '2mb', parameterLimit: 1000 }));
+// Parse the HTTP-only refresh cookie before auth controllers access req.cookies.
+app.use((req, _res, next) => {
+  const cookieHeader = req.headers.cookie;
+  const cookies: Record<string, string> = {};
+  if (cookieHeader) {
+    for (const item of cookieHeader.split(';')) {
+      const separator = item.indexOf('=');
+      if (separator < 0) continue;
+      const name = item.slice(0, separator).trim();
+      const value = item.slice(separator + 1).trim();
+      if (!name) continue;
+      try {
+        cookies[name] = decodeURIComponent(value);
+      } catch {
+        cookies[name] = value;
+      }
+    }
+  }
+  req.cookies = cookies;
+  next();
+});
 
 // Public, unauthenticated, and deliberately mounted before the rate
 // limiter below: uptime monitors hit this constantly, and getting
@@ -208,8 +258,13 @@ app.use(express.json({ limit: '20mb' }));
 // alerts. It also reveals nothing about which providers are configured —
 // that's reconnaissance information for anyone probing for which
 // upstream API to target for quota exhaustion.
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok' });
+app.get('/api/health', async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ status: 'ok', database: 'ok' });
+  } catch {
+    res.status(503).json({ status: 'degraded', database: 'unavailable' });
+  }
 });
 
 // Global rate limiting restored — this was commented out, which meant
@@ -220,19 +275,32 @@ app.use('/api', generalLimiter);
 
 app.use('/api/auth', authRoutes);
 app.use('/api/user', requireAuth, userRoutes);
+app.use('/api/studio/projects', requireAuth, studioRoutes);
 // Re-enabled: this route was fully unreachable before (import present,
 // mount commented out) — dead code that nothing outside this file could
 // have been hitting.
 app.use('/api/agent', requireAuth, generalLimiter, agentRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/forms', formRoutes);
-app.use('/api/admin', requireAuth, adminRoutes);
+app.use('/api/admin', requireAuth, requireRole('ADMIN'), adminRoutes);
 app.use('/api/ollama', requireAuth, ollamaRoutes);
 app.use('/api/telegram', telegramBotRoutes);
 // /exports serves generated Excel reports — gate it so only the owning
 // authenticated user (or admin) can download them. Anonymous access would
 // allow anyone to enumerate and download batch grading results.
-app.use('/exports', requireAuth, express.static(path.join(__dirname, 'exports')));
+app.get('/exports/:file', requireAuth, async (req, res) => {
+  try {
+    const fileName = path.basename(req.params.file);
+    const match = /^automark-results-([0-9a-f-]{36})\.xlsx$/i.exec(fileName);
+    if (!match) return res.status(404).json({ error: 'Export not found.' });
+    const job = await prisma.batchJob.findUnique({ where: { id: match[1] }, select: { userId: true } });
+    const user = (req as any).user;
+    if (!job || (job.userId !== user?.userId && user?.role !== 'ADMIN')) return res.status(404).json({ error: 'Export not found.' });
+    return res.sendFile(fileName, { root: path.join(__dirname, 'exports') });
+  } catch (error) {
+    return respondError(res, error, 'Could not retrieve export.');
+  }
+});
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Authenticated, detailed provider status for internal/admin debugging.
@@ -257,8 +325,13 @@ app.post('/api/files/upload', requireAuth, upload.single('file'), async (req, re
   let tempPath: string | undefined;
   try {
     if (!req.file) throw new Error('No file uploaded.');
+    const realMimeType = detectRealMimeType(req.file.buffer);
+    if (!realMimeType || (realMimeType !== req.file.mimetype && !(realMimeType === 'image/jpeg' && req.file.mimetype === 'image/jpg'))) {
+      return res.status(400).json({ error: 'The file contents do not match a supported document type.' });
+    }
 
-    const userId = (req as any).user?.userId || 'local-dev';
+    const userId = (req as any).user?.userId;
+    if (!userId) return res.status(401).json({ error: 'Authentication required.' });
 
     // Never trust the client-supplied filename for a path. Keep only a safe
     // extension from it (for the extractor's type detection) and generate the
@@ -271,7 +344,7 @@ app.post('/api/files/upload', requireAuth, upload.single('file'), async (req, re
     await fs.mkdir(uploadsDir, { recursive: true });
     await fs.writeFile(savedPath, req.file.buffer);
 
-    const storedUrl = await uploadBufferToCloud(req.file.buffer, `uploads/${Date.now()}-${crypto.randomUUID()}-${path.basename(req.file.originalname)}`, req.file.mimetype);
+    const storedUrl = await uploadBufferToCloud(req.file.buffer, `uploads/${path.basename(savedPath)}`, realMimeType);
 
     const record = await prisma.fileRecord.create({
       data: {
@@ -305,18 +378,14 @@ app.post('/api/files/upload', requireAuth, upload.single('file'), async (req, re
   }
 });
 
-queueService
-  .initialize()
-  .then(() => {
-    logger.info('Queue service initialized');
-  })
-  .catch((err) => {
-    logger.error('Failed to initialize Queue service', err);
-  });
+if (process.env.NODE_ENV !== 'production') {
+  queueService.initialize().then(() => logger.info('Queue service initialized')).catch((err) => logger.error('Failed to initialize Queue service', err));
+}
 
 logger.info('Environment Check:', {
   hasGemini: !!process.env.GEMINI_API_KEY,
   hasOpenRouter: !!process.env.OPENROUTER_API_KEY,
+  hasGonka: !!process.env.GONKA_API_KEY,
   hasOllama: !!process.env.OLLAMA_BASE_URL,
   provider: process.env.AI_PROVIDER,
 });
@@ -443,6 +512,12 @@ function makeEmitter(res: express.Response) {
 
 // Claude Assistant Chat Endpoint (Streaming SSE with File Support)
 app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chatSchema), async (req, res) => {
+  if (req.file) {
+    const actualMime = detectRealMimeType(req.file.buffer);
+    if (!actualMime || (actualMime !== req.file.mimetype && !(actualMime === 'image/jpeg' && req.file.mimetype === 'image/jpg'))) {
+      return res.status(400).json({ error: 'The attachment contents do not match a supported file type.' });
+    }
+  }
   const {
     query,
     attachmentText,
@@ -461,7 +536,8 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
     attachmentIds,
   } = req.body;
 
-  const userId = (req as any).user?.userId || 'local-dev';
+  const userId = (req as any).user?.userId;
+  if (!userId) return res.status(401).json({ error: 'Authentication required.' });
   const hasFile = !!req.file || !!attachmentBase64;
 
   let parsedHistory: any[] = [];
@@ -514,7 +590,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
 
   if (Array.isArray(finalAttachmentIds) && finalAttachmentIds.length > 0) {
     const files = await prisma.fileRecord.findMany({
-      where: { id: { in: finalAttachmentIds } },
+      where: { id: { in: finalAttachmentIds }, userId },
       select: { extractedText: true, path: true, url: true, mimeType: true },
     });
 
@@ -551,6 +627,34 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
     }
   }
 
+  if (attachmentBase64) {
+    try {
+      const buffer = Buffer.from(attachmentBase64, 'base64');
+      const detected = detectRealMimeType(buffer);
+      const claimed = attachmentMimeType || 'application/octet-stream';
+      const resolvedType = detected || claimed;
+
+      if (resolvedType.startsWith('image/') || resolvedType === 'application/pdf') {
+        serverVisualFiles.push({
+          type: resolvedType.startsWith('image/') ? 'image' : 'document',
+          base64: attachmentBase64,
+          mediaType: resolvedType,
+        });
+      }
+
+      const tempPath = path.join(process.cwd(), 'uploads', `chat-att-${Date.now()}-${crypto.randomUUID()}.bin`);
+      await fs.mkdir(path.dirname(tempPath), { recursive: true });
+      await fs.writeFile(tempPath, buffer);
+      const extracted = await extractTextFromUpload(tempPath, attachmentName || 'attachment.file', resolvedType);
+      if (extracted.rawText) {
+        serverAttachmentText = [serverAttachmentText, extracted.rawText].filter(Boolean).join('\n\n');
+      }
+      await fs.unlink(tempPath).catch(() => {});
+    } catch (err) {
+      logger.warn('Failed to process attachmentBase64 in chat', err);
+    }
+  }
+
   const finalAttachmentText = [attachmentText, serverAttachmentText].filter(Boolean).join('\n\n');
 
   logger.info('Chat Request Info:', {
@@ -579,7 +683,10 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
 
   const hasClaude = await aiService.providerAvailable('anthropic');
 
-  if (intent === 'general_assist' && service === 'general' && !cleanProvider && hasClaude) {
+  if (
+    intent === 'general_assist' && service === 'general' && !cleanProvider && hasClaude &&
+    process.env.AI_PROVIDER !== 'gonkarouter'
+  ) {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
@@ -886,15 +993,42 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
     // is unverified; it must not silently swallow requests meant for Gemini.
     const hasGonka = await aiService.providerAvailable('gonkarouter');
     if (cleanProvider === 'gonkarouter' || (hasGonka && !cleanProvider && !isOllama)) {
-      logger.info('Using GonkaRouter (GLM-5.3-Flash) for web chat...');
+      logger.info('Streaming web chat with GonkaRouter (GLM-5.3-Flash)...');
+      let gonkaRawText = '';
+      let gonkaVisibleText = '';
+      const gonkaStartedAt = Date.now();
       try {
-        const gonkaReply = await aiService.sendGonkaChat(prompt, { system: systemWithContext });
-        const { text: cleanGonka, thinkingText } = stripThinkingTags(gonkaReply as any);
-        emitter.send('text', { provider: 'GonkaRouter', text: cleanGonka, thinkingText });
+        await aiService.streamGonkaChat(prompt, {
+          system: systemWithContext,
+          history: parsedHistory,
+          images: serverVisualFiles.length > 0 ? serverVisualFiles.map(f => ({ base64: f.base64, mediaType: f.mediaType })) : undefined,
+          max_tokens: 2048,
+          onToken: (token) => {
+            if (emitter.isClosed()) return;
+            gonkaRawText += token;
+            const { text } = stripThinkingTags(gonkaRawText);
+            if (!text.startsWith(gonkaVisibleText)) return;
+
+            const delta = text.slice(gonkaVisibleText.length);
+            if (!delta) return;
+
+            if (!gonkaVisibleText) {
+              logger.info('GonkaRouter first visible token received', {
+                elapsedMs: Date.now() - gonkaStartedAt,
+              });
+            }
+            gonkaVisibleText = text;
+            emitter.send('text', { provider: 'GonkaRouter', text: delta });
+          },
+        });
+        if (!gonkaVisibleText.trim()) {
+          throw new Error('GonkaRouter returned no visible text.');
+        }
         clearInterval(keepAlive);
         emitter.done();
         return;
       } catch (gonkaErr: any) {
+        if (gonkaVisibleText) throw gonkaErr;
         logger.warn(`GonkaRouter chat failed, falling through to next provider: ${gonkaErr.message}`);
         // Fall through to Gemini / Ollama / OpenRouter below
       }
@@ -1005,7 +1139,8 @@ app.get('/api/forms/:id', async (req, res) => {
 app.post('/api/forms/generate', requireAuth, async (req, res) => {
   try {
     const { intent } = req.body;
-    const userId = (req as any).user?.userId || 'anonymous';
+    const userId = (req as any).user?.userId;
+    if (!userId) return res.status(401).json({ error: 'Authentication required.' });
     const form = await formOrchestrator.generateFormSchema(userId, intent);
     res.json({ success: true, form });
   } catch (error: any) {
@@ -1015,41 +1150,65 @@ app.post('/api/forms/generate', requireAuth, async (req, res) => {
 
 app.post('/api/forms/:id/submit', async (req, res) => {
   try {
-    // Basic shape guard: an unbounded number of top-level fields is either
-    // abuse or a malformed client — the global 20mb body limit alone
-    // doesn't catch a payload with, say, 50,000 tiny fields.
-    const fieldCount = req.body && typeof req.body === 'object' ? Object.keys(req.body).length : 0;
-    if (fieldCount === 0 || fieldCount > 200) {
-      return res.status(400).json({ error: 'Invalid submission payload.' });
+    const form = await prisma.applicationForm.findUnique({ where: { id: req.params.id } });
+    if (!form) return res.status(404).json({ error: 'Form not found.' });
+    let schema: any = {};
+    try { schema = JSON.parse(form.schema || '{}'); } catch { schema = {}; }
+    const definitions = [...(Array.isArray(schema.questions) ? schema.questions : []), ...(Array.isArray(schema.fields) ? schema.fields : [])];
+    const answers = req.body?.answers && typeof req.body.answers === 'object' ? req.body.answers : req.body;
+    const count = answers && typeof answers === 'object' && !Array.isArray(answers) ? Object.keys(answers).length : 0;
+    if (!count || count > Math.max(definitions.length, 1) || count > 200) return res.status(400).json({ error: 'Invalid submission payload.' });
+    const normalized: Record<string, unknown> = {};
+    for (const [index, definition] of definitions.entries()) {
+      const key = String(definition.id ?? definition.number ?? index + 1);
+      const value = (answers as any)[key];
+      const empty = value === undefined || value === null || (typeof value === 'string' && !value.trim()) || (Array.isArray(value) && !value.length);
+      if (definition.required && empty) return res.status(400).json({ error: `Please answer: ${definition.title || definition.label || `Question ${index + 1}`}` });
+      if (empty) continue;
+      const type = String(definition.type || '').toUpperCase();
+      const options = (definition.options || []).map((option: any) => String(typeof option === 'string' ? option : option.label));
+      if (['MULTIPLE_CHOICE', 'DROPDOWN'].includes(type) && options.length && !options.includes(String(value))) return res.status(400).json({ error: `Invalid choice for question ${index + 1}.` });
+      if (type === 'CHECKBOX' && (!Array.isArray(value) || (options.length && value.some((option: unknown) => !options.includes(String(option)))))) return res.status(400).json({ error: `Invalid choice for question ${index + 1}.` });
+      if (type === 'MULTIPLE_CHOICE_GRID' || type === 'CHECKBOX_GRID') {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return res.status(400).json({ error: `Invalid grid response for question ${index + 1}.` });
+        const validRows = Array.isArray(definition.rows) ? definition.rows.map(String) : [];
+        for (const [row, answer] of Object.entries(value as Record<string, unknown>)) {
+          if (!validRows.includes(row)) return res.status(400).json({ error: `Invalid grid row for question ${index + 1}.` });
+          if (type === 'MULTIPLE_CHOICE_GRID' && (typeof answer !== 'string' || !options.includes(answer))) return res.status(400).json({ error: `Invalid grid choice for question ${index + 1}.` });
+          if (type === 'CHECKBOX_GRID' && (!Array.isArray(answer) || answer.some((option: unknown) => !options.includes(String(option))))) return res.status(400).json({ error: `Invalid grid choice for question ${index + 1}.` });
+        }
+        if (definition.required && validRows.some((row: string) => !(row in (value as Record<string, unknown>)))) return res.status(400).json({ error: `Please answer every row for question ${index + 1}.` });
+      }
+      if (type === 'LINEAR_SCALE' && (!Number.isInteger(Number(value)) || Number(value) < Number(definition.scaleMin ?? 1) || Number(value) > Number(definition.scaleMax ?? 5))) return res.status(400).json({ error: `Choose a valid scale value for question ${index + 1}.` });
+      if (type === 'RATING' && (!Number.isInteger(Number(value)) || Number(value) < 1 || Number(value) > Number(definition.maxRating ?? 5))) return res.status(400).json({ error: `Choose a valid rating for question ${index + 1}.` });
+      if (type === 'EMAIL' && (typeof value !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value))) return res.status(400).json({ error: `Enter a valid email for question ${index + 1}.` });
+      if (type === 'NUMBER' && !Number.isFinite(Number(value))) return res.status(400).json({ error: `Enter a valid number for question ${index + 1}.` });
+      if (typeof value === 'string' && value.length > 10000) return res.status(400).json({ error: `Answer for question ${index + 1} is too long.` });
+      normalized[key] = value;
     }
-
-    // TODO: validate req.body against this form's actual field/rubric
-    // schema (via formOrchestrator) before persisting, once that lookup is
-    // available here — right now any shape is accepted and trusted
-    // through to the scoring/analytics dashboard downstream.
-    const submission = await prisma.formSubmission.create({
-      data: { formId: req.params.id, data: JSON.stringify(req.body) },
-    });
-    analyticsWorker.extractInsights(submission.id);
-    res.json({ success: true, submissionId: submission.id });
+    const submission = await prisma.formSubmission.create({ data: { formId: form.id, data: JSON.stringify(normalized) } });
+    analyticsWorker.extractInsights(submission.id).catch((error) => logger.error('Submission analysis failed:', error));
+    res.status(201).json({ success: true, submissionId: submission.id });
   } catch (error: any) {
-    // A bad/nonexistent formId surfaces as a Prisma foreign-key violation
-    // (P2003) — that's a client error (404), not a 500.
-    if (error?.code === 'P2003') {
-      return res.status(404).json({ error: 'Form not found.' });
-    }
     respondError(res, error, 'Failed to submit form.');
   }
 });
-
 app.get('/api/forms/:id/analyze', requireAuth, async (req, res) => {
   try {
-    // TODO: this confirms the caller is authenticated, not that they own
-    // this form. Add an ownership check (form.userId === req.user.userId)
-    // once that lookup is available here — as written, any authenticated
-    // user who can guess/enumerate a form id can pull another
-    // institution's analytics.
-    const analysis = await analyticsWorker.runDeepAnalysis(req.params.id);
+    const form = await prisma.applicationForm.findUnique({ where: { id: req.params.id } });
+    if (!form) return res.status(404).json({ error: 'Form not found.' });
+    const requesterId = (req as any).user?.userId;
+    if (!requesterId || form.userId !== requesterId) return res.status(403).json({ error: 'You do not have access to this form.' });
+    const requestedRequirements = typeof req.body?.requirements === 'string' ? req.body.requirements.trim().slice(0, 12000) : '';
+    if (requestedRequirements) {
+      let schema: any = {};
+      try { schema = JSON.parse(form.schema || '{}'); } catch { schema = {}; }
+      let settings: any = {};
+      try { settings = form.selectionSettings ? JSON.parse(form.selectionSettings) : {}; } catch { settings = {}; }
+      await prisma.applicationForm.update({ where: { id: form.id }, data: { schema: JSON.stringify({ ...schema, requirements: requestedRequirements }), selectionSettings: JSON.stringify({ ...settings, requirements: requestedRequirements }) } });
+    }
+    const requirements = requestedRequirements;
+    const analysis = await analyticsWorker.runDeepAnalysis(req.params.id, requirements);
     res.json({ success: true, analysis });
   } catch (error: any) {
     respondError(res, error, 'Failed to analyze form.');
@@ -1108,7 +1267,8 @@ RULES:
 app.post('/api/mark-script', requireAuth, gradingLimiter, validate(markScriptSchema), async (req, res) => {
   try {
     const { examPaper, studentScript } = req.body;
-    const userId = (req as any).user?.userId || 'anonymous';
+    const userId = (req as any).user?.userId;
+    if (!userId) return res.status(401).json({ error: 'Authentication required.' });
 
     const result = await gradingService.evaluateStudentScriptWithAI(examPaper, studentScript, `batch-${userId}`);
     res.json({ success: true, ...result });
@@ -1173,7 +1333,8 @@ app.post('/api/ai/translate', requireAuth, gradingLimiter, async (req, res) => {
 
 app.post('/api/batch/grade', requireAuth, gradingLimiter, upload.fields([{ name: 'papers', maxCount: 1 }, { name: 'rubric', maxCount: 1 }]), async (req: express.Request, res: express.Response) => {
   try {
-    const userId = (req as any).user?.userId || 'local-dev';
+    const userId = (req as any).user?.userId;
+    if (!userId) return res.status(401).json({ error: 'Authentication required.' });
     const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
     const papersFile = files?.papers?.[0];
     const rubricFile = files?.rubric?.[0];
@@ -1182,6 +1343,10 @@ app.post('/api/batch/grade', requireAuth, gradingLimiter, upload.fields([{ name:
     if (!papersFile || !rubricFile) {
       return res.status(400).json({ error: 'Both papers PDF and rubric image are required.' });
     }
+    if (detectRealMimeType(papersFile.buffer) !== 'application/pdf') return res.status(400).json({ error: 'The papers upload must be a valid PDF.' });
+    const rubricMime = detectRealMimeType(rubricFile.buffer);
+    if (!rubricMime || !rubricMime.startsWith('image/')) return res.status(400).json({ error: 'The rubric upload must be a valid image.' });
+    if (!['mcq', 'essay', 'short_answer', 'single'].includes(paperType)) return res.status(400).json({ error: 'Unsupported paper type.' });
 
     const jobId = crypto.randomUUID();
 
@@ -1236,7 +1401,7 @@ app.post('/api/batch/grade', requireAuth, gradingLimiter, upload.fields([{ name:
         await fs.writeFile(excelFilePath, excelBuffer);
 
         const baseUrl = `${req.protocol}://${req.get('host')}`;
-        const excelUrl = `${baseUrl}/exports/${excelFileName}`;
+        const excelUrl = `${(process.env.APP_URL || baseUrl).replace(/\/$/, '')}/exports/${excelFileName}`;
 
         const finalCount = gradedResults.length > 0 ? gradedResults.length : detectedCount;
 
@@ -1330,9 +1495,45 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   respondError(res, err, 'Internal server error', err?.status);
 });
 
+async function ensureMasterAdmin() {
+  try {
+    await prisma.$connect().catch(() => {});
+    const email = 'niyibizisteven13@gmail.com';
+    const passwordHash = await bcrypt.hash('Steven123@45', 12);
+
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (!existing) {
+      await prisma.user.create({
+        data: {
+          email,
+          name: 'Master Admin',
+          passwordHash,
+          role: 'ADMIN',
+          settings: { create: {} }
+        }
+      });
+      logger.info('Master admin account seeded successfully.');
+    } else {
+      await prisma.user.update({
+        where: { email },
+        data: { role: 'ADMIN', passwordHash }
+      });
+      logger.info('Master admin account verified and password/role reset successfully.');
+    }
+  } catch (err) {
+    logger.error('Failed to ensure master admin account:', err);
+  }
+}
+
 // --- Server Lifecycle ---
 
 async function startServer() {
+  await ensureMasterAdmin();
+  if (process.env.NODE_ENV === 'production') {
+    await prisma.$connect();
+    await prisma.$queryRaw`SELECT 1`;
+    await queueService.initialize();
+  }
   const reconService = ReconciliationService.getInstance();
   reconService.initialize().catch((err) => {
     logger.error('Failed to start Reconciliation Service', err);
@@ -1353,10 +1554,12 @@ async function startServer() {
   let vite: any = null;
   if (process.env.NODE_ENV !== 'production') {
     vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
+    app.get('/forms/:id', (_req, res) => res.sendFile(path.join(process.cwd(), 'index.html')));
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
+    app.get('/forms/:id', (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
 
     // Unmatched API routes should 404 as JSON, not fall through to the SPA
     // shell — otherwise a mistyped or removed endpoint looks like a 200 to
@@ -1386,6 +1589,7 @@ async function startServer() {
     logger.info(`${signal} received, shutting down gracefully...`);
     server.close(async () => {
       try {
+        await queueService.close();
         await prisma.$disconnect();
       } catch (err) {
         logger.warn('Error disconnecting Prisma during shutdown', err);

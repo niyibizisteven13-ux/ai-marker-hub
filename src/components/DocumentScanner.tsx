@@ -11,6 +11,7 @@ type PageItem = {
   id: string;
   dataUrl: string;
   filter: 'color' | 'gray' | 'bw' | 'auto';
+  studentName?: string;
 };
 
 type Student = {
@@ -19,16 +20,34 @@ type Student = {
   pages: PageItem[];
 };
 
+const MAX_BATCH_PAGES = 50;
+const MAX_IMAGE_PIXELS = 16_000_000;
+const DRAFT_STORAGE_KEY = 'bwenge.document-scanner.draft.v1';
+
+function readSavedDraft(): Student[] | null {
+  try {
+    const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Student[];
+    if (!Array.isArray(parsed) || parsed.some((student) => !Array.isArray(student.pages))) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 interface DocumentScannerProps {
   onClose: () => void;
-  onSavePages: (pages: PageItem[]) => void;
+  onSavePages: (pages: PageItem[]) => void | Promise<void>;
   onScanPage?: (dataUrl: string, name: string, mimeType: string) => void;
 }
 
 export default function DocumentScanner({ onClose, onSavePages }: DocumentScannerProps) {
-  const [students, setStudents] = useState<Student[]>([
-    { id: 's1', name: 'Student 1', pages: [] },
-  ]);
+  const [students, setStudents] = useState<Student[]>(() => {
+    const draft = readSavedDraft();
+    return draft || [{ id: 's1', name: 'Student 1', pages: [] }];
+  });
+  const [restoredDraft] = useState(() => Boolean(readSavedDraft()?.some((student) => student.pages.length > 0)));
   const [activeStudentId, setActiveStudentId] = useState<string>('s1');
 
   // Scanner modes: 'grid' (student list overview) | 'camera' | 'editing' | 'preview'
@@ -39,6 +58,7 @@ export default function DocumentScanner({ onClose, onSavePages }: DocumentScanne
   const editCanvasRef = useRef<HTMLCanvasElement>(null);
   const viewfinderRef = useRef<HTMLDivElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const cameraRequestIdRef = useRef(0);
   const capturedRef = useRef<HTMLCanvasElement | null>(null);
   const dragKeyRef = useRef<CornerKey | null>(null);
 
@@ -46,6 +66,8 @@ export default function DocumentScanner({ onClose, onSavePages }: DocumentScanne
   const [currentDeviceId, setCurrentDeviceId] = useState('');
   const [mirrored, setMirrored] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
+  const [cameraError, setCameraError] = useState('');
+  const [activeCameraMode, setActiveCameraMode] = useState<'environment' | 'user'>('environment');
   const [quad, setQuad] = useState<Record<CornerKey, { x: number; y: number }> | null>(null);
   const [filter, setFilter] = useState<'color' | 'gray' | 'bw' | 'auto'>('auto');
   const [processing, setProcessing] = useState<string | null>(null);
@@ -58,6 +80,8 @@ export default function DocumentScanner({ onClose, onSavePages }: DocumentScanne
 
   const fileInputCameraRef = useRef<HTMLInputElement>(null);
   const fileInputGalleryRef = useRef<HTMLInputElement>(null);
+  const renderTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const permissionStatusRef = useRef<PermissionStatus | null>(null);
 
   const showToast = useCallback((msg: string) => {
     setToastMsg(msg);
@@ -73,43 +97,184 @@ export default function DocumentScanner({ onClose, onSavePages }: DocumentScanne
     }
   }, []);
 
+  const clearRenderTimeout = useCallback(() => {
+    if (renderTimeoutRef.current) {
+      clearTimeout(renderTimeoutRef.current);
+      renderTimeoutRef.current = null;
+    }
+  }, []);
+
   const stopCamera = useCallback(() => {
+    cameraRequestIdRef.current += 1;
+    clearRenderTimeout();
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
+    if (videoRef.current) videoRef.current.srcObject = null;
     setCameraReady(false);
-  }, []);
+  }, [clearRenderTimeout]);
+
+  const handleCameraFrame = useCallback(() => {
+    const video = videoRef.current;
+    if (!video || video.readyState < 2 || video.videoWidth === 0) return;
+    clearRenderTimeout();
+    setCameraError('');
+    setCameraReady(true);
+  }, [clearRenderTimeout]);
+
+  useEffect(() => {
+    if (mode !== 'camera' || !streamRef.current || !videoRef.current) return;
+    const video = videoRef.current;
+    if (video.srcObject !== streamRef.current) {
+      video.srcObject = streamRef.current;
+    }
+    video.play().then(() => {
+      clearRenderTimeout();
+      handleCameraFrame();
+    }).catch((error) => {
+      console.warn('Camera preview could not start.', error);
+    });
+  }, [mode, clearRenderTimeout, handleCameraFrame]);
 
   const startCamera = useCallback(
-    async (deviceId?: string) => {
+    async (deviceId?: string, isFallbackConstraint = false) => {
       stopCamera();
-      const constraints: MediaStreamConstraints = {
-        audio: false,
-        video: {
-          deviceId: deviceId ? { exact: deviceId } : undefined,
-          facingMode: deviceId ? undefined : { ideal: 'environment' },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-        },
-      };
+      const requestId = ++cameraRequestIdRef.current;
+      setCameraError('');
+      setCameraReady(false);
+
+      const constraints: MediaStreamConstraints = isFallbackConstraint
+        ? { video: true }
+        : {
+            audio: false,
+            video: {
+              deviceId: deviceId ? { exact: deviceId } : undefined,
+              facingMode: deviceId ? undefined : { ideal: activeCameraMode },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+            },
+          };
+
       try {
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            if (!navigator.mediaDevices?.getUserMedia) {
+              throw new DOMException(
+                'Camera access is unavailable. Open this page in Chrome on localhost or a secure HTTPS origin.',
+                'NotSupportedError'
+              );
+            }
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        if (requestId !== cameraRequestIdRef.current) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
         streamRef.current = stream;
         const track = stream.getVideoTracks()[0];
         const settings = track?.getSettings() || {};
         setCurrentDeviceId(deviceId || (settings.deviceId as string) || '');
-        if (videoRef.current) videoRef.current.srcObject = stream;
-        setCameraReady(true);
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          try {
+            await videoRef.current.play();
+          } catch (playErr) {
+            console.warn('Video element play() call rejected:', playErr);
+          }
+        }
+
+        clearRenderTimeout();
+        renderTimeoutRef.current = setTimeout(() => {
+          if (requestId !== cameraRequestIdRef.current) return;
+          const video = videoRef.current;
+          const isRendering = Boolean(video && video.readyState >= 2 && video.videoWidth > 0);
+          if (!isRendering) {
+            console.warn('Camera stream acquired but not rendering frames. Re-initializing with fallback constraints...');
+            stopCamera();
+            if (!isFallbackConstraint) {
+              void startCamera(undefined, true);
+            } else {
+              setCameraError('Camera connected but video rendering stalled. Please tap "Try again".');
+            }
+          } else {
+            setCameraReady(true);
+          }
+        }, 10000);
+
         await refreshDevices();
       } catch (e) {
+        if (requestId !== cameraRequestIdRef.current) return;
         console.warn('getUserMedia failed', e);
-        setCameraReady(false);
-        showToast('Camera access unavailable — select gallery upload instead.');
+        stopCamera();
+        if (deviceId && (e as DOMException)?.name === 'OverconstrainedError' && !isFallbackConstraint) {
+          setCurrentDeviceId('');
+          setCameraError('Selected camera is unavailable. Reconnecting to default camera…');
+          window.setTimeout(() => {
+            if (mode === 'camera') void startCamera(undefined, true);
+          }, 0);
+          return;
+        }
+
+        const errorName = (e as DOMException)?.name;
+        const guidance = errorName === 'NotAllowedError'
+          ? 'Camera access is blocked by the browser or Windows. Check Windows Settings > Privacy & security > Camera and enable Camera access and Let desktop apps access your camera.'
+          : errorName === 'NotFoundError'
+            ? 'No camera was found on this device.'
+            : errorName === 'NotReadableError'
+              ? 'The camera is allowed but could not be opened. Close apps such as Teams, Zoom, or Camera that may be using it, then try again.'
+              : errorName === 'NotSupportedError'
+                ? (e as Error).message
+                : errorName === 'SecurityError'
+                  ? 'The browser blocked camera access for this page. Open the app at localhost or through HTTPS.'
+            : 'Camera could not start. Check that another app is not using it.';
+        const message = errorName ? `${guidance} (${errorName})` : guidance;
+        setCameraError(message);
+        showToast(message);
       }
     },
-    [refreshDevices, showToast, stopCamera]
+    [activeCameraMode, clearRenderTimeout, mode, refreshDevices, showToast, stopCamera]
   );
+
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !navigator.permissions?.query) return;
+
+    let isMounted = true;
+    let permissionStatus: PermissionStatus | null = null;
+    let handlePermissionChange: (() => void) | null = null;
+    const listenToCameraPermission = async () => {
+      try {
+        const status = await navigator.permissions.query({ name: 'camera' as PermissionName });
+        if (!isMounted) return;
+        permissionStatus = status;
+        permissionStatusRef.current = status;
+
+        handlePermissionChange = () => {
+          if (!isMounted || mode !== 'camera' || streamRef.current) return;
+          if (status.state === 'granted') {
+            void startCamera(undefined, true);
+          }
+        };
+
+        status.addEventListener('change', handlePermissionChange);
+        if (status.state === 'granted' && mode === 'camera' && !streamRef.current) {
+          void startCamera(undefined, true);
+        }
+      } catch (err) {
+        console.warn('Navigator permissions query for camera non-fatal error:', err);
+      }
+    };
+
+    void listenToCameraPermission();
+
+    return () => {
+      isMounted = false;
+      if (permissionStatus && handlePermissionChange) {
+        permissionStatus.removeEventListener('change', handlePermissionChange);
+      }
+      if (permissionStatusRef.current === permissionStatus) {
+        permissionStatusRef.current = null;
+      }
+    };
+  }, [mode, startCamera]);
 
   useEffect(() => {
     refreshDevices();
@@ -118,7 +283,20 @@ export default function DocumentScanner({ onClose, onSavePages }: DocumentScanne
     };
   }, [refreshDevices, stopCamera]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(students));
+    } catch (error) {
+      console.warn('Could not persist scanner draft in this browser.', error);
+      showToast('Draft could not be saved. Export the PDF before closing.');
+    }
+  }, [students, showToast]);
+
   const addStudent = () => {
+    if (students.length >= MAX_BATCH_PAGES) {
+      showToast(`A batch can contain at most ${MAX_BATCH_PAGES} students.`);
+      return;
+    }
     const newId = `s-${Date.now()}`;
     setStudents((prev) => [...prev, { id: newId, name: `Student ${prev.length + 1}`, pages: [] }]);
   };
@@ -138,10 +316,22 @@ export default function DocumentScanner({ onClose, onSavePages }: DocumentScanne
     setShowSourceSheet(true);
   };
 
-  const handleLaunchCamera = () => {
+  const handleLaunchCamera = async () => {
     setShowSourceSheet(false);
     setMode('camera');
-    startCamera(undefined);
+    setActiveCameraMode('environment');
+    await startCamera(undefined);
+  };
+
+  const flipCamera = () => {
+    if (devices.length < 2) {
+      setActiveCameraMode((mode) => mode === 'environment' ? 'user' : 'environment');
+      void startCamera(undefined);
+      return;
+    }
+    const currentIndex = devices.findIndex((device) => device.deviceId === currentDeviceId);
+    const next = devices[(currentIndex + 1 + devices.length) % devices.length];
+    void startCamera(next.deviceId);
   };
 
   const handleLaunchGallery = () => {
@@ -151,12 +341,30 @@ export default function DocumentScanner({ onClose, onSavePages }: DocumentScanne
 
   const handleFilePicked = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      showToast('Choose an image file to scan.');
+      return;
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      showToast('Image is larger than 20 MB. Choose a smaller image.');
+      return;
+    }
     const reader = new FileReader();
+    reader.onerror = () => showToast('Could not read that image. Please try another file.');
     reader.onload = () => {
       if (typeof reader.result === 'string') {
         const img = new Image();
         img.onload = () => {
+          if (!img.naturalWidth || !img.naturalHeight) {
+            showToast('That image could not be opened.');
+            return;
+          }
+          if (img.naturalWidth * img.naturalHeight > MAX_IMAGE_PIXELS) {
+            showToast('Image is too large to process safely. Choose an image under 16 megapixels.');
+            return;
+          }
           const raw = document.createElement('canvas');
           raw.width = img.naturalWidth;
           raw.height = img.naturalHeight;
@@ -166,8 +374,11 @@ export default function DocumentScanner({ onClose, onSavePages }: DocumentScanne
             capturedRef.current = raw;
             setQuad(autoDetectQuad(raw));
             setMode('editing');
+          } else {
+            showToast('Image processing is unavailable in this browser.');
           }
         };
+        img.onerror = () => showToast('Could not decode that image. Please try another file.');
         img.src = reader.result;
       }
     };
@@ -181,8 +392,9 @@ export default function DocumentScanner({ onClose, onSavePages }: DocumentScanne
       return;
     }
     const raw = document.createElement('canvas');
-    raw.width = video.videoWidth;
-    raw.height = video.videoHeight;
+    const downscale = Math.min(1, Math.sqrt(MAX_IMAGE_PIXELS / (video.videoWidth * video.videoHeight)));
+    raw.width = Math.round(video.videoWidth * downscale);
+    raw.height = Math.round(video.videoHeight * downscale);
     const rctx = raw.getContext('2d');
     if (!rctx) return;
     if (mirrored) {
@@ -203,6 +415,7 @@ export default function DocumentScanner({ onClose, onSavePages }: DocumentScanne
     if (!raw || !canvas || !vf) return;
     const vw = vf.clientWidth;
     const vh = vf.clientHeight;
+    if (!vw || !vh) return;
     const scale = Math.min(vw / raw.width, vh / raw.height, 1);
     canvas.style.width = `${raw.width * scale}px`;
     canvas.style.height = `${raw.height * scale}px`;
@@ -213,7 +426,16 @@ export default function DocumentScanner({ onClose, onSavePages }: DocumentScanne
   }, []);
 
   useEffect(() => {
-    if (mode === 'editing') fitAndDrawEditCanvas();
+    if (mode !== 'editing') return;
+    const frame = requestAnimationFrame(fitAndDrawEditCanvas);
+    const observer = viewfinderRef.current && typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(() => fitAndDrawEditCanvas())
+      : null;
+    if (observer && viewfinderRef.current) observer.observe(viewfinderRef.current);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+    };
   }, [mode, fitAndDrawEditCanvas]);
 
   const recomputeHandleLayout = useCallback(() => {
@@ -303,10 +525,11 @@ export default function DocumentScanner({ onClose, onSavePages }: DocumentScanne
   const applyCrop = () => {
     if (!capturedRef.current || !quad) return;
     setProcessing('Flattening document perspective...');
-    setTimeout(() => {
+    requestAnimationFrame(() => {
+      try {
       let { w, h } = quadWidthHeight(quad);
       const maxLong = 1800;
-      const scale = Math.min(1, maxLong / Math.max(w, h));
+      const scale = Math.min(1, maxLong / Math.max(w, h), Math.sqrt(MAX_IMAGE_PIXELS / Math.max(1, w * h)));
       w = Math.max(40, Math.round(w * scale));
       h = Math.max(40, Math.round(h * scale));
 
@@ -314,11 +537,20 @@ export default function DocumentScanner({ onClose, onSavePages }: DocumentScanne
       capturedRef.current = warped;
       setProcessing(null);
       setMode('preview');
-    }, 50);
+      } catch (error) {
+        console.error('Document crop failed', error);
+        setProcessing(null);
+        showToast('Could not crop this page. Adjust the corners and try again.');
+      }
+    });
   };
 
   const savePageToActiveStudent = () => {
     if (!capturedRef.current) return;
+    if (totalPagesCount >= MAX_BATCH_PAGES) {
+      showToast(`A batch can contain at most ${MAX_BATCH_PAGES} pages.`);
+      return;
+    }
     let imgData = capturedRef.current.getContext('2d')!.getImageData(0, 0, capturedRef.current.width, capturedRef.current.height);
     if (filter !== 'color') {
       imgData = applyFilter(imgData, filter === 'auto' ? 'color' : filter);
@@ -330,7 +562,7 @@ export default function DocumentScanner({ onClose, onSavePages }: DocumentScanne
     setStudents((prev) =>
       prev.map((s) =>
         s.id === activeStudentId
-          ? { ...s, pages: [...s.pages, { id: pageId, dataUrl, filter }] }
+          ? { ...s, pages: [...s.pages, { id: pageId, dataUrl, filter, studentName: s.name.trim() || 'Unnamed Student' }] }
           : s
       )
     );
@@ -381,15 +613,23 @@ export default function DocumentScanner({ onClose, onSavePages }: DocumentScanne
     }, 50);
   };
 
-  const handleSaveScansToWorkspace = () => {
-    const allPages: PageItem[] = [];
-    students.forEach((s) => allPages.push(...s.pages));
+  const handleSaveScansToWorkspace = async () => {
+    const allPages: PageItem[] = students.flatMap((s) => s.pages.map((page) => ({
+      ...page,
+      studentName: s.name.trim() || 'Unnamed Student',
+    })));
     if (allPages.length === 0) {
       showToast('Please add at least one scanned page before saving.');
       return;
     }
-    onSavePages(allPages);
-    onClose();
+    try {
+      await onSavePages(allPages);
+      try { localStorage.removeItem(DRAFT_STORAGE_KEY); } catch { /* storage may be disabled */ }
+      onClose();
+    } catch (error) {
+      console.error('Could not save scanned pages to workspace.', error);
+      showToast('Could not send scans. Your draft is still saved; try again.');
+    }
   };
 
   const totalPagesCount = students.reduce((sum, s) => sum + s.pages.length, 0);
@@ -402,7 +642,7 @@ export default function DocumentScanner({ onClose, onSavePages }: DocumentScanne
   return (
     <div className="ds-app" onPointerUp={onPointerUp}>
       {/* Top Bar */}
-      <div className="ds-topbar">
+      {mode !== 'camera' && <div className="ds-topbar">
         <div className="ds-brand">
           <div className="ds-mark">Bwenge<span>Scan</span></div>
           <div className="ds-tag">Live Batch Exam Scanner</div>
@@ -430,11 +670,16 @@ export default function DocumentScanner({ onClose, onSavePages }: DocumentScanne
             ✕
           </button>
         </div>
-      </div>
+      </div>}
 
       {/* Main Content Area */}
       {mode === 'grid' ? (
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 max-w-4xl mx-auto w-full">
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 max-w-4xl mx-auto w-full">
+          {restoredDraft && (
+            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-xs text-emerald-200">
+              Recovered an unsent scanner draft saved in this browser. Review the pages before sending.
+            </div>
+          )}
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-lg font-bold text-white">Batch Student Exam Scripts</h2>
@@ -524,22 +769,34 @@ export default function DocumentScanner({ onClose, onSavePages }: DocumentScanne
           </div>
         </div>
       ) : (
-        <div className="ds-main">
+        <div className={`ds-main ${mode === 'camera' ? 'ds-main-camera' : ''}`}>
           <div className="ds-stage-col">
             <div
               className={`ds-viewfinder ${mode === 'editing' || mode === 'preview' ? 'editing' : ''}`}
               ref={viewfinderRef}
               onPointerMove={onViewfinderPointerMove}
             >
-              {mode === 'camera' && (
+              {mode === 'camera' && <>
                 <video
                   ref={videoRef}
                   autoPlay
                   playsInline
                   muted
+                  onLoadedMetadata={() => videoRef.current?.play().catch((error) => console.warn('Camera preview could not start.', error))}
+                  onLoadedData={handleCameraFrame}
+                  onCanPlay={handleCameraFrame}
+                  onPlaying={handleCameraFrame}
                   style={{ transform: mirrored ? 'scaleX(-1)' : 'none' }}
                 />
-              )}
+                {!cameraReady && <div className="ds-camera-status" role="status">
+                  {!cameraError && <span className="ds-spinner" />}
+                  <span>{cameraError || 'Starting camera…'}</span>
+                  {cameraError && <button type="button" className="ds-camera-retry" onClick={() => void startCamera(undefined, true)}>Try again</button>}
+                </div>}
+                <div className="ds-camera-guides" aria-hidden="true">
+                  <span /><span /><span /><span />
+                </div>
+              </>}
 
               <canvas
                 ref={editCanvasRef}
@@ -576,9 +833,13 @@ export default function DocumentScanner({ onClose, onSavePages }: DocumentScanne
 
             <div className="ds-controls">
               {mode === 'camera' && (
-                <button className="ds-shutter" onClick={captureCameraPhoto} title="Capture Photo">
+                <>
+                  <button className="ds-camera-exit" onClick={() => { stopCamera(); setMode('grid'); }} aria-label="Exit camera">×</button>
+                  <button className="ds-camera-flip" onClick={flipCamera} aria-label="Switch camera">↻</button>
+                  <button className="ds-shutter" onClick={captureCameraPhoto} disabled={!cameraReady} title="Capture Photo" aria-label="Capture page">
                   <div className="ds-shutter-inner" />
-                </button>
+                  </button>
+                </>
               )}
 
               {mode === 'editing' && (

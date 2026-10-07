@@ -16,6 +16,7 @@ export interface User {
   id: string;
   name: string;
   email: string;
+  role?: 'ADMIN' | 'INSTRUCTOR';
   avatarUrl?: string;
   settings?: UserSettings;
   subscription?: {
@@ -100,6 +101,7 @@ export interface Message {
   timestamp: string;
   isStreaming?: boolean;
   rating?: 'up' | 'down';
+  errorKind?: 'service_unavailable' | 'network' | 'generic';
   actions?: Array<{
     label: string;
     value: string;
@@ -195,6 +197,8 @@ export interface UploadedFile {
   url: string;
   fileType: 'pdf' | 'image' | 'docx' | 'doc' | 'pptx' | 'ppt' | 'xlsx' | 'xls' | 'code' | 'text';
   rawText?: string;
+  /** Original file retained in memory so it can be sent to the marking API. */
+  sourceFile?: File;
   htmlContent?: string;
   studentName?: string;
   batchBadge?: string;
@@ -217,6 +221,8 @@ export interface StudentScript {
   status: 'pending' | 'marking' | 'marked' | 'approved';
   answers: StudentAnswerInput[];
   rawText?: string;
+  /** Original scan/document bytes for server-side OCR and multimodal marking. */
+  sourceFile?: File;
   fileName?: string;
   results?: QuestionMarkResult[];
   totalAwardedMarks?: number;

@@ -20,6 +20,67 @@ import {
 } from 'lucide-react';
 import 'katex/dist/katex.min.css';
 
+type ChartPoint = Record<string, string | number>;
+
+function MermaidDiagram({ source }: { source: string }) {
+  return <div className="my-3 overflow-x-auto rounded-xl border border-white/10 bg-slate-950/70 p-3"><div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">Diagram source</div><pre className="text-xs text-neutral-300">{source}</pre></div>;
+}
+
+function ChartArtifact({ title, chartType, xKey, yKey, data }: { title: string; chartType: string; xKey: string; yKey: string; data: ChartPoint[] }) {
+  const points = data.map((row) => ({ label: String(row[xKey] ?? ''), value: Number(row[yKey]) })).filter((p) => p.label && Number.isFinite(p.value));
+  if (!points.length || points.length > 80) return null;
+  const width = 640;
+  const height = 260;
+  const pad = { top: 24, right: 20, bottom: 52, left: 48 };
+  const values = points.map((p) => p.value);
+  const min = Math.min(0, ...values);
+  const max = Math.max(0, ...values);
+  const span = max - min || 1;
+  const plotW = width - pad.left - pad.right;
+  const plotH = height - pad.top - pad.bottom;
+  const y = (v: number) => pad.top + (max - v) / span * plotH;
+  const x = (i: number) => pad.left + (chartType === 'bar' ? (i + 0.5) * plotW / points.length : (points.length === 1 ? plotW / 2 : i * plotW / (points.length - 1)));
+  const zeroY = y(0);
+  const line = points.map((p, i) => `${x(i)},${y(p.value)}`).join(' ');
+
+  return (
+    <div className="my-4 overflow-hidden rounded-xl border border-white/10 bg-slate-950/70 p-3">
+      <div className="mb-2 text-sm font-semibold text-neutral-200">{title}</div>
+      <div className="overflow-x-auto">
+        <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${chartType} chart: ${title}`} className="h-auto min-w-[480px] w-full">
+          <line x1={pad.left} y1={zeroY} x2={width - pad.right} y2={zeroY} stroke="#64748b" strokeWidth="1" />
+          {chartType === 'bar' ? points.map((p, i) => {
+            const barW = Math.max(2, plotW / points.length * 0.66);
+            const valY = y(p.value);
+            return <g key={`${p.label}-${i}`}>
+              <rect x={x(i) - barW / 2} y={Math.min(valY, zeroY)} width={barW} height={Math.max(1, Math.abs(zeroY - valY))} rx="3" fill="#34d399" />
+              <text x={x(i)} y={height - pad.bottom + 17} fill="#cbd5e1" textAnchor="middle" fontSize="11">{p.label.slice(0, 16)}</text>
+            </g>;
+          }) : <>
+            {chartType === 'line' && <polyline points={line} fill="none" stroke="#34d399" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />}
+            {points.map((p, i) => <g key={`${p.label}-${i}`}>
+              <circle cx={x(i)} cy={y(p.value)} r={chartType === 'scatter' ? 5 : 3.5} fill="#34d399" />
+              <text x={x(i)} y={height - pad.bottom + 17} fill="#cbd5e1" textAnchor="middle" fontSize="11">{p.label.slice(0, 16)}</text>
+            </g>)}
+          </>}
+          <text x="8" y={pad.top + 4} fill="#94a3b8" fontSize="11">{yKey}</text>
+          <text x={width / 2} y={height - 8} fill="#94a3b8" textAnchor="middle" fontSize="11">{xKey}</text>
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+function renderArtifactJson(source: string): React.ReactNode | null {
+  try {
+    const artifact = JSON.parse(source);
+    if (artifact?.type !== 'chart' || !['bar', 'line', 'scatter'].includes(artifact.chartType) || typeof artifact.title !== 'string' || typeof artifact.xKey !== 'string' || typeof artifact.yKey !== 'string' || !Array.isArray(artifact.data) || !artifact.data.every((row: unknown) => row && typeof row === 'object' && !Array.isArray(row))) return null;
+    return <ChartArtifact title={artifact.title} chartType={artifact.chartType} xKey={artifact.xKey} yKey={artifact.yKey} data={artifact.data} />;
+  } catch {
+    return null;
+  }
+}
+
 interface MarkdownRendererProps {
   content: string;
   className?: string;
@@ -73,7 +134,9 @@ function ArtifactCard({ title, type, children }: { title: string; type?: string;
 export default function MarkdownRenderer({ content, className = '' }: MarkdownRendererProps) {
   const processedContent = React.useMemo(() => {
     if (!content) return '';
-    let res = content.replace(/==([^=]+)==/g, '<mark>$1</mark>');
+    let res = content
+      .replace(/(#{1,6})([^\s#])/g, '$1 $2')
+      .replace(/==([^=]+)==/g, '<mark>$1</mark>');
     res = res.replace(/<artifact\s+title="([^"]*)"\s+type="([^"]*)">([\s\S]*?)<\/artifact>/g, '<div data-artifact="true" data-title="$1" data-type="$2">$3</div>');
     return res;
   }, [content]);
@@ -89,6 +152,12 @@ export default function MarkdownRenderer({ content, className = '' }: MarkdownRe
             const match = /language-(\w+)/.exec(className || '');
             const language = match?.[1] || '';
             const codeContent = String(children).replace(/\n$/, '');
+
+            if (!inline && language === 'mermaid') return <MermaidDiagram source={codeContent} />;
+            if (!inline && language === 'artifact-json') {
+              const renderedArtifact = renderArtifactJson(codeContent);
+              if (renderedArtifact) return renderedArtifact;
+            }
 
             return !inline ? (
               <div className="my-3.5 overflow-hidden rounded-xl border border-white/[0.08] bg-black/50 shadow-sm">
@@ -147,7 +216,7 @@ export default function MarkdownRenderer({ content, className = '' }: MarkdownRe
             );
           },
           blockquote({ children, node, ...props }: any) {
-            const textContent = node?.children?.[0]?.children?.[0]?.value || '';
+            const textContent = node?.children?.map((child: any) => child?.children?.map((part: any) => part?.value || '').join('') || '').join(' ') || '';
             let alertType = '';
             if (textContent.includes('[!NOTE]')) alertType = 'note';
             else if (textContent.includes('[!IMPORTANT]')) alertType = 'important';
@@ -178,7 +247,7 @@ export default function MarkdownRenderer({ content, className = '' }: MarkdownRe
             }
 
             return (
-              <blockquote className="my-3 border-l-2 border-emerald-500/60 pl-3.5 py-1 text-neutral-300 bg-emerald-500/[0.03] rounded-r-lg italic">
+              <blockquote className="my-3 border-l border-white/20 pl-3 py-0.5 text-neutral-300 [&_em]:not-italic">
                 {children}
               </blockquote>
             );
@@ -202,7 +271,10 @@ export default function MarkdownRenderer({ content, className = '' }: MarkdownRe
             return <div className={className} {...props}>{children}</div>;
           },
           p({ children }) {
-            return <div className="mb-3 leading-relaxed">{children}</div>;
+            return <div className="mb-3 leading-relaxed [&_em]:not-italic">{children}</div>;
+          },
+          em({ children }) {
+            return <em className="not-italic">{children}</em>;
           },
         }}
       >

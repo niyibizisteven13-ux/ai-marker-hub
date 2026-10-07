@@ -11,11 +11,16 @@ import {
   Eye,
   FileText,
   Download,
-  Share2
-} from "lucide-react";
-import { ChatSession, Message as MessageType } from '../types';
+  Share2,
+  PanelLeft,
+  SquarePen,
+  ArrowUp,
+  Camera,
+} from 'lucide-react';
+import { ChatSession, Message as MessageType, ChatAttachment } from '../types';
 import ChatMessage from './ChatMessage';
 import BwengeLoader from './BwengeLoader';
+import logoUrl from '../assets/bwenge-logo.svg';
 
 interface CreateStudioProps {
   messages: MessageType[];
@@ -35,45 +40,68 @@ interface CreateStudioProps {
   stagedAttachments?: Array<File | ChatAttachment>;
   onStageAttachments?: (attachments: Array<File | ChatAttachment>) => void;
   onRemoveStagedAttachment?: (index: number) => void;
+  onOpenSidebar?: () => void;
+  onOpenScanner?: () => void;
+  onPreviewDoc?: (doc: any) => void;
+  onFeedback?: (messageId: string, rating: 'up' | 'down') => void;
+  onRetry?: (messageId: string) => void;
+  onUpgradeClick?: (jobId: string, service: string) => void;
+  userName?: string;
 }
 
-function ModelPicker({ selected, onSelect }: { selected: string, onSelect: (val: string) => void }) {
+function ModelPicker({ selected, onSelect }: { selected: string; onSelect: (val: string) => void }) {
   const [open, setOpen] = useState(false);
   const models = [
-    { id: 'auto', label: "Bwenge — Balanced (Auto)" },
-    { id: 'gemini', label: "Gemini — Fast" },
-    { id: 'nvidianim', label: "NVIDIA — Research" },
-    { id: 'ollama', label: "Ollama — Local" }
+    { id: 'auto', label: 'Bwenge — Balanced (Auto)', short: 'Auto' },
+    { id: 'gemini', label: 'Gemini — Fast', short: 'Gemini' },
+    { id: 'nvidianim', label: 'NVIDIA — Research', short: 'NVIDIA' },
+    { id: 'ollama', label: 'Ollama — Local', short: 'Ollama' },
   ];
 
-  const selectedModel = models.find(m => m.id === selected) || models[0];
+  const selectedModel = models.find((m) => m.id === selected) || models[0];
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleOutside = (e: PointerEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    if (open) {
+      document.addEventListener('pointerdown', handleOutside);
+    }
+    return () => document.removeEventListener('pointerdown', handleOutside);
+  }, [open]);
 
   return (
-    <div className="relative">
+    <div className="relative" ref={dropdownRef}>
       <button
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-medium transition-colors bg-[#222222] border border-neutral-800/40 hover:bg-neutral-800 text-neutral-300"
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-[#C2C0B6] hover:bg-white/5 transition-colors"
       >
-        {selectedModel.label}
-        <ChevronDown size={12} className="opacity-40" />
+        <span>{selectedModel.short}</span>
+        <ChevronDown size={12} className="opacity-60" />
       </button>
+
       {open && (
-        <ul className="absolute bottom-full mb-2 left-0 w-56 rounded-xl border border-neutral-800/80 shadow-2xl overflow-hidden z-50 bg-[#1A1A1A]">
+        <div className="absolute bottom-full right-0 mb-2 w-48 rounded-2xl border border-white/15 bg-[#30302E] shadow-2xl p-1 z-50 animate-in fade-in slide-in-from-bottom-2 duration-150">
           {models.map((m) => (
-            <li key={m.id}>
-              <button
-                onClick={() => {
-                  onSelect(m.id);
-                  setOpen(false);
-                }}
-                className="w-full text-left px-4 py-2.5 text-xs text-neutral-400 hover:bg-white/5 hover:text-white transition-colors"
-                style={{ fontWeight: m.id === selected ? 600 : 400 }}
-              >
-                {m.label}
-              </button>
-            </li>
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => {
+                onSelect(m.id);
+                setOpen(false);
+              }}
+              className={`w-full text-left px-3 py-2 rounded-xl text-xs font-medium transition-colors ${
+                selected === m.id ? 'bg-[#D97757]/20 text-white' : 'text-[#C2C0B6] hover:bg-white/5 hover:text-white'
+              }`}
+            >
+              {m.label}
+            </button>
           ))}
-        </ul>
+        </div>
       )}
     </div>
   );
@@ -81,8 +109,11 @@ function ModelPicker({ selected, onSelect }: { selected: string, onSelect: (val:
 
 export default function CreateStudio({
   messages,
+  sessions,
   onSendMessage,
   onNewChat,
+  onLoadSession,
+  onOpenSettings,
   onDeleteChat,
   onExportChat,
   onShare,
@@ -93,45 +124,64 @@ export default function CreateStudio({
   onProviderChange,
   stagedAttachments = [],
   onStageAttachments,
-  onRemoveStagedAttachment
+  onRemoveStagedAttachment,
+  onOpenSidebar,
+  onOpenScanner,
+  onPreviewDoc,
+  onFeedback,
+  onRetry,
+  onUpgradeClick,
+  userName,
 }: CreateStudioProps) {
-  const [inputValue, setInputValue] = useState("");
+  const [inputValue, setInputValue] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
+  const [showNewResponsePill, setShowNewResponsePill] = useState(false);
 
+  // Close more menu on pointerdown outside
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+    const handleOutside = (e: PointerEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setMenuOpen(false);
       }
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+    if (menuOpen) {
+      document.addEventListener('pointerdown', handleOutside);
+    }
+    return () => document.removeEventListener('pointerdown', handleOutside);
+  }, [menuOpen]);
 
   const resize = useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   }, []);
 
-  useEffect(resize, [inputValue, resize]);
-
   useEffect(() => {
-    if (messages.length > 0) {
-      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [messages, isTyping]);
+    resize();
+  }, [inputValue, resize]);
 
   const handleSend = () => {
-    const trimmed = inputValue.trim();
-    if ((!trimmed && stagedAttachments.length === 0) || isTyping) return;
-    onSendMessage(trimmed, stagedAttachments.length > 0 ? stagedAttachments : undefined);
-    setInputValue("");
+    const text = inputValue.trim();
+    if (!text && stagedAttachments.length === 0) return;
+    onSendMessage(text, stagedAttachments);
+    setInputValue('');
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
+    stickToBottomRef.current = true;
+    setShowNewResponsePill(false);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    const isDesktop = window.matchMedia('(min-width: 1024px)').matches;
+    if (isDesktop && e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -142,20 +192,80 @@ export default function CreateStudio({
     e.target.value = '';
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
+  const handleScroll = () => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const isNearBottom = distanceToBottom <= 80;
+    stickToBottomRef.current = isNearBottom;
+    setShowNewResponsePill(!isNearBottom);
   };
 
+  useEffect(() => {
+    if (stickToBottomRef.current && scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTo({
+        top: scrollContainerRef.current.scrollHeight,
+        behavior: 'auto',
+      });
+    }
+  }, [messages, isTyping]);
+
+  const firstUserMessage = messages.find((m) => m.sender === 'user')?.text || '';
+  const truncatedTitle = firstUserMessage.length > 40 ? firstUserMessage.slice(0, 40) + '...' : firstUserMessage;
+
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    const timeOfDay = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
+    const firstName = userName ? userName.split(' ')[0] : 'there';
+    return `Good ${timeOfDay}, ${firstName}`;
+  };
+
+  const canSend = Boolean(inputValue.trim() || stagedAttachments.length > 0 || isTyping);
+
   return (
-    <div className="flex flex-col h-full w-full bg-[#141414] overflow-hidden antialiased relative">
-      <header className="flex-shrink-0 w-full flex justify-end items-center p-4 z-30">
-        <div className="flex items-center gap-3">
+    <div className="relative flex h-full w-full flex-col overflow-hidden bg-[#262624] text-[#FAF9F5]">
+      {/* Header */}
+      <header className="flex h-[calc(56px+env(safe-area-inset-top,0px))] shrink-0 items-center justify-between border-b border-white/[0.06] bg-[#212121]/95 px-3 pt-[env(safe-area-inset-top,0px)] backdrop-blur-md">
+        {/* Left: Menu button on mobile, logo on desktop */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onOpenSidebar}
+            className="flex h-11 w-11 items-center justify-center rounded-xl text-[#C2C0B6] hover:bg-white/10 hover:text-white transition-colors lg:hidden"
+            aria-label="Open navigation menu"
+          >
+            <PanelLeft className="h-5 w-5" />
+          </button>
+          <div className="hidden lg:flex items-center gap-2">
+            <div className="w-7 h-7 rounded-xl bg-[#0D2B24] flex items-center justify-center overflow-hidden shrink-0 border border-emerald-500/20">
+              <img src={logoUrl} alt="Bwenge" className="w-full h-full object-cover" />
+            </div>
+            <span className="text-sm font-bold tracking-tight text-[#FAF9F5]">Bwenge Studio</span>
+          </div>
+        </div>
+
+        {/* Center: Truncated conversation title on mobile when messages exist */}
+        <div className="flex-1 px-2 text-center lg:hidden truncate">
+          {messages.length > 0 && truncatedTitle && (
+            <span className="text-sm font-medium text-[#FAF9F5] truncate">{truncatedTitle}</span>
+          )}
+        </div>
+
+        {/* Right: New chat, Upgrade, More */}
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={onNewChat}
+            className="flex h-11 w-11 items-center justify-center rounded-xl text-[#C2C0B6] hover:bg-white/10 hover:text-white transition-colors lg:hidden"
+            aria-label="New chat"
+            title="New chat"
+          >
+            <SquarePen className="h-5 w-5" />
+          </button>
+
           <button
             onClick={() => (window as any).openUpgradeModal?.()}
-            className="bg-gradient-to-r from-amber-500/20 to-orange-600/10 hover:from-amber-500/30 hover:to-orange-600/20 text-amber-400 font-medium px-3.5 py-1.5 rounded-xl border border-amber-500/30 text-xs transition-all shadow-md shadow-orange-950/20 flex items-center gap-1.5"
+            className="hidden sm:flex bg-gradient-to-r from-amber-500/20 to-orange-600/10 hover:from-amber-500/30 hover:to-orange-600/20 text-amber-400 font-medium px-3.5 py-1.5 rounded-xl border border-amber-500/30 text-xs transition-all shadow-md items-center gap-1.5"
           >
             ⭐ Upgrade
           </button>
@@ -163,32 +273,44 @@ export default function CreateStudio({
           <div className="relative" ref={menuRef}>
             <button
               onClick={() => setMenuOpen((prev) => !prev)}
-              className="p-1.5 rounded-xl text-neutral-500 hover:text-neutral-200 transition-colors focus:outline-none"
+              className="flex h-11 w-11 lg:h-9 lg:w-9 items-center justify-center rounded-xl text-[#C2C0B6] hover:bg-white/10 hover:text-white transition-colors focus:outline-none"
+              aria-label="More options"
             >
               <MoreVertical size={18} />
             </button>
 
             {menuOpen && (
-              <div className="absolute right-0 mt-2 w-52 bg-[#1a1a1a] border border-neutral-800 rounded-xl shadow-2xl z-50 py-1 text-xs text-neutral-300 animate-in fade-in slide-in-from-top-1 duration-200">
+              <div className="absolute right-0 mt-2 w-56 rounded-2xl border border-white/15 bg-[#30302E] shadow-2xl z-50 py-1.5 text-xs text-[#FAF9F5] animate-in fade-in slide-in-from-top-1 duration-150">
                 <button
-                  onClick={() => { if (activeFormId) onShare?.(); setMenuOpen(false); }}
+                  onClick={() => {
+                    if (activeFormId) onShare?.();
+                    setMenuOpen(false);
+                  }}
                   disabled={!activeFormId}
-                  className={`w-full flex items-center px-3 py-2.5 transition-colors text-left ${activeFormId ? 'hover:bg-neutral-800 hover:text-white text-emerald-400' : 'opacity-40 cursor-not-allowed'}`}
+                  className={`w-full flex items-center px-3.5 py-2.5 transition-colors text-left ${
+                    activeFormId ? 'hover:bg-white/5 text-emerald-400' : 'opacity-40 cursor-not-allowed'
+                  }`}
                 >
-                  <Share2 className="mr-3 w-4 h-4" /> {activeFormId ? 'Share USSD Instructions' : 'Share (create form first)'}
+                  <Share2 className="mr-3 w-4 h-4" />
+                  {activeFormId ? 'Share USSD Instructions' : 'Share (create form first)'}
                 </button>
-                <div className="border-t border-neutral-800/80 my-1"></div>
-                <button onClick={() => setMenuOpen(false)} className="w-full flex items-center px-3 py-2.5 hover:bg-neutral-800 hover:text-white transition-colors text-left">
-                  <Eye className="mr-3 w-4 h-4" /> View Metadata Details
+                <div className="border-t border-white/10 my-1"></div>
+                <button
+                  onClick={() => {
+                    onExportChat?.();
+                    setMenuOpen(false);
+                  }}
+                  className="w-full flex items-center px-3.5 py-2.5 hover:bg-white/5 transition-colors text-left"
+                >
+                  <Download className="mr-3 w-4 h-4" /> Export Chat
                 </button>
-                <button onClick={() => setMenuOpen(false)} className="w-full flex items-center px-3 py-2.5 hover:bg-neutral-800 hover:text-white transition-colors text-left">
-                  <FileText className="mr-3 w-4 h-4" /> Set Grading Rubric
-                </button>
-                <button onClick={() => { onExportChat?.(); setMenuOpen(false); }} className="w-full flex items-center px-3 py-2.5 hover:bg-neutral-800 hover:text-white transition-colors text-left">
-                  <Download className="mr-3 w-4 h-4" /> Export Chat (Markdown)
-                </button>
-                <div className="border-t border-neutral-800/80 my-1"></div>
-                <button onClick={() => { onDeleteChat?.(); setMenuOpen(false); }} className="w-full flex items-center px-3 py-2.5 hover:bg-neutral-800 text-rose-400 transition-colors text-left">
+                <button
+                  onClick={() => {
+                    onDeleteChat?.();
+                    setMenuOpen(false);
+                  }}
+                  className="w-full flex items-center px-3.5 py-2.5 hover:bg-rose-500/10 hover:text-rose-400 transition-colors text-left text-rose-400"
+                >
                   <Trash2 className="mr-3 w-4 h-4" /> Clear All Messages
                 </button>
               </div>
@@ -197,81 +319,181 @@ export default function CreateStudio({
         </div>
       </header>
 
-      <main className="flex-1 relative overflow-hidden flex flex-col items-center">
-        {messages.length === 0 && (
-          <div className="w-full max-w-2xl px-4 flex-1 flex flex-col justify-center py-10 animate-in fade-in slide-in-from-bottom-6 duration-700 select-none">
-            <div className="text-center space-y-4">
-              <h1 className="text-3xl font-normal font-serif tracking-tight text-[#f0f0f0]">Bwenge AI Workspace</h1>
-              <p className="text-sm text-neutral-400 max-w-md mx-auto leading-relaxed">
-                Hey there! How can I assist you in your teaching today? Simply upload a student paper or launch the scanner to get started.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {messages.length > 0 && (
-          <div className="w-full max-w-2xl px-4 flex-1 overflow-y-auto scrollbar-hidden py-6 flex flex-col gap-6 transition-all duration-500 scroll-smooth">
-            {messages.map((m, idx) => (
-              <ChatMessage key={m.id || idx} message={m} />
-            ))}
-            {isTyping && (
-              <div className="flex justify-start animate-in fade-in duration-300">
-                <BwengeLoader />
+      {/* Main Conversation or Empty State */}
+      <div
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-hidden relative"
+      >
+        <div className="mx-auto w-full max-w-2xl flex flex-col gap-6 px-4 py-6">
+          {messages.length === 0 ? (
+            <div className="flex flex-col items-center justify-center text-center py-12 md:py-20 animate-in fade-in duration-300">
+              {/* Logo Mark */}
+              <div className="w-12 h-12 rounded-2xl bg-[#0D2B24] flex items-center justify-center overflow-hidden border border-emerald-500/30 shadow-lg mb-6">
+                <img src={logoUrl} alt="Bwenge Logo" className="w-full h-full object-cover" />
               </div>
-            )}
-            <div ref={chatEndRef} className="h-4" />
-          </div>
-        )}
-      </main>
 
-      <footer className="flex-shrink-0 w-full bg-[#141414] px-4 pb-6 pt-4 flex justify-center z-20">
-        <div className="w-full max-w-2xl flex flex-col gap-3">
-          {stagedAttachments.length > 0 && (
-            <div className="flex flex-wrap gap-2 px-1 pb-1 animate-in fade-in zoom-in-95 duration-200">
-              {stagedAttachments.map((att, idx) => (
-                <div key={idx} className="flex items-center gap-2 bg-[#2a2d35] border border-white/10 rounded-2xl px-3 py-1 text-[11px] text-neutral-300">
-                  <span className="max-w-[140px] truncate">{(att as any).name}</span>
-                  <button onClick={() => onRemoveStagedAttachment?.(idx)} className="p-0.5 hover:text-rose-400 transition-colors">✕</button>
-                </div>
-              ))}
+              {/* Greeting */}
+              <h1 className="font-serif text-[26px] sm:text-[30px] font-normal tracking-tight text-[#FAF9F5] mb-2">
+                {getGreeting()}
+              </h1>
+
+              {/* Subtitle */}
+              <p className="text-[15px] text-[#9C9A92] max-w-md mb-8 leading-relaxed">
+                I can help you grade student submissions, review rubrics, and turn scanned work into a clean feedback report.
+              </p>
+
+              {/* Action Chips */}
+              <div className="flex flex-wrap items-center justify-center gap-2.5 max-w-lg">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="h-10 rounded-full border border-white/10 bg-[#30302E] px-4 text-sm text-[#C2C0B6] hover:bg-white/10 hover:text-white transition-all flex items-center gap-2 shadow-sm"
+                >
+                  <span>📄</span>
+                  <span>Upload student paper</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onOpenScanner?.()}
+                  className="h-10 rounded-full border border-white/10 bg-[#30302E] px-4 text-sm text-[#C2C0B6] hover:bg-white/10 hover:text-white transition-all flex items-center gap-2 shadow-sm"
+                >
+                  <span>📷</span>
+                  <span>Scan answers</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInputValue('Create an exam paper with a marking scheme on ');
+                    setTimeout(() => textareaRef.current?.focus(), 50);
+                  }}
+                  className="h-10 rounded-full border border-white/10 bg-[#30302E] px-4 text-sm text-[#C2C0B6] hover:bg-white/10 hover:text-white transition-all flex items-center gap-2 shadow-sm"
+                >
+                  <span>✨</span>
+                  <span>Create an exam</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            messages.map((msg, idx) => (
+              <ChatMessage
+                key={msg.id ?? idx}
+                message={msg}
+                onPreviewDoc={onPreviewDoc}
+                onFeedback={onFeedback}
+                onRetry={onRetry}
+                onUpgradeClick={onUpgradeClick}
+              />
+            ))
+          )}
+
+          {isTyping && (
+            <div className="flex flex-col gap-2">
+              <BwengeLoader />
             </div>
           )}
-          <div className="relative group">
-            <div className="absolute -inset-1 bg-[#5DCAA5]/10 blur-2xl rounded-[32px] opacity-0 group-focus-within:opacity-100 transition-opacity duration-700 pointer-events-none" />
-            <div className="relative bg-[#1A1A1A] border border-neutral-800/80 rounded-[24px] shadow-2xl shadow-black/40 focus-within:border-neutral-700/60 focus-within:ring-1 focus-within:ring-neutral-800/40 transition-all duration-300 p-2.5">
-              <textarea
-                ref={textareaRef}
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Message Bwenge or start from a suggestion..."
-                rows={1}
-                className="w-full bg-transparent border-0 resize-none text-base focus:ring-0 focus:outline-none px-3 py-2 text-white placeholder-neutral-600 focus:placeholder-neutral-700 font-sans tracking-wide min-h-[44px] max-h-[200px] scrollbar-hidden"
-              />
-              <div className="flex items-center justify-between px-2 pb-1 pt-2 border-t border-white/5">
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="flex items-center gap-2 text-[10px] text-neutral-400 hover:text-white px-3 py-1.5 rounded-xl hover:bg-[#222222] transition-colors font-bold uppercase tracking-widest border border-transparent hover:border-neutral-800"
+        </div>
+
+        {/* New Response Pill */}
+        {showNewResponsePill && (
+          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-20">
+            <button
+              type="button"
+              onClick={() => {
+                stickToBottomRef.current = true;
+                setShowNewResponsePill(false);
+                scrollContainerRef.current?.scrollTo({
+                  top: scrollContainerRef.current.scrollHeight,
+                  behavior: 'smooth',
+                });
+              }}
+              className="flex items-center gap-1.5 rounded-full bg-[#30302E] border border-white/15 px-4 py-2 text-xs font-semibold text-[#FAF9F5] shadow-2xl hover:bg-white/10 transition-all"
+            >
+              <span>↓ New response</span>
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Hidden File Input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept="*/*"
+        onChange={handleFileChange}
+        className="hidden"
+      />
+
+      {/* Composer Footer */}
+      <footer className="shrink-0 bg-[#262624] px-3 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))]">
+        <div className="mx-auto w-full max-w-2xl relative">
+          <div className="rounded-[28px] border border-white/10 bg-[#30302E] p-3 shadow-[0_4px_24px_rgba(0,0,0,0.25)]">
+            {stagedAttachments.length > 0 && (
+              <div className="mb-2.5 flex flex-wrap gap-2 overflow-x-auto pb-1">
+                {stagedAttachments.map((meta: any, idx: number) => (
+                  <div
+                    key={idx}
+                    className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 py-1.5 px-2.5 text-xs text-[#FAF9F5]"
                   >
-                    <Paperclip size={14} /> <span className="hidden sm:inline">ATTACH</span>
-                  </button>
-                  <span className="h-4 w-px bg-white/5 mx-1" />
-                  <ModelPicker selected={selectedProvider} onSelect={(val) => onProviderChange?.(val)} />
-                </div>
+                    <span>📄</span>
+                    <span className="max-w-[140px] truncate">{meta.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => onRemoveStagedAttachment?.(idx)}
+                      className="ml-1 h-7 w-7 flex items-center justify-center text-[#9C9A92] hover:text-rose-400 transition-colors"
+                      aria-label="Remove attachment"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex items-end gap-2">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 text-[#C2C0B6] hover:bg-white/5 hover:text-white transition-colors cursor-pointer" onClick={() => fileInputRef.current?.click()} title="Attach file">
+                <Plus size={18} />
+              </div>
+
+              <div className="flex-1 flex flex-col min-w-0">
+                <textarea
+                  ref={textareaRef}
+                  rows={1}
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Message Bwenge"
+                  className="w-full bg-transparent border-0 resize-none text-base leading-6 text-[#FAF9F5] placeholder-[#9C9A92] outline-none px-1 py-1 max-h-40 scrollbar-hidden"
+                />
+              </div>
+
+              <div className="flex items-center gap-1.5 shrink-0">
+                <ModelPicker selected={selectedProvider} onSelect={(val) => onProviderChange?.(val)} />
+
                 <button
-                  onClick={() => { if (isTyping) onAbort?.(); else handleSend(); }}
-                  disabled={(!inputValue.trim() && stagedAttachments.length === 0 && !isTyping)}
-                  className={`p-2 rounded-xl transition-all duration-300 transform active:scale-90 ${isTyping ? 'bg-neutral-800 text-[#5DCAA5] border border-neutral-700' : (inputValue.trim() || stagedAttachments.length > 0) ? 'bg-[#1F3D35] text-[#5DCAA5] shadow-lg shadow-black/20 scale-100' : 'bg-white/5 text-neutral-600 scale-95 cursor-not-allowed'}`}
+                  type="button"
+                  onClick={() => {
+                    if (isTyping) onAbort?.();
+                    else handleSend();
+                  }}
+                  disabled={!canSend}
+                  className={`flex h-9 w-9 items-center justify-center rounded-full transition-all ${
+                    canSend
+                      ? 'bg-[#D97757] text-white shadow-md active:scale-95'
+                      : 'bg-[#D97757]/40 text-white/50 cursor-not-allowed'
+                  }`}
+                  aria-label={isTyping ? 'Stop generating' : 'Send message'}
                 >
-                  {isTyping ? <Square size={16} fill="currentColor" /> : <Send size={18} strokeWidth={2.5} />}
+                  {isTyping ? <Square size={16} fill="currentColor" /> : <ArrowUp size={18} strokeWidth={2.5} />}
                 </button>
               </div>
             </div>
           </div>
-          <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" multiple />
-          <div className="text-center text-[9px] text-neutral-600 tracking-[0.2em] font-mono uppercase select-none">
+
+          <div className="mt-1.5 text-center text-[9px] text-[#9C9A92] tracking-[0.2em] font-mono uppercase select-none hidden sm:block">
             Powered by Bwenge Autonomous Agentic System
           </div>
         </div>

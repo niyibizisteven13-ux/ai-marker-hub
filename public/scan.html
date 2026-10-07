@@ -604,6 +604,15 @@
   let warpedCanvas = null;
   let currentFilter = 'auto';
   let pendingStudentId = null;
+  const MAX_SCAN_PAGES = 50;
+  const MAX_SCAN_PIXELS = 16000000;
+  const DRAFT_KEY = 'bwenge.telegram-scanner.draft.v1';
+
+  try {
+    const saved = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null');
+    if (Array.isArray(saved) && saved.every(s => Array.isArray(s.pages))) students = saved;
+  } catch { /* Ignore an invalid or unavailable local draft. */ }
+  const recoveredDraft = students.some(student => student.pages.length > 0);
 
   const urlParams = new URLSearchParams(window.location.search);
   const sessionToken = urlParams.get('token') || urlParams.get('sessionToken');
@@ -633,6 +642,13 @@
 
   function renderStudents() {
     const list = el('studentList');
+    if (recoveredDraft && !el('recoveredDraftNotice')) {
+      const notice = document.createElement('div');
+      notice.id = 'recoveredDraftNotice';
+      notice.className = 'telegram-badge';
+      notice.textContent = 'Recovered an unsent scan draft saved on this device.';
+      list.before(notice);
+    }
     if (students.length === 0) {
       list.innerHTML = `
         <div class="empty-state">
@@ -696,9 +712,12 @@
     el('pageCounter').textContent = `${totalPages} page${totalPages === 1 ? '' : 's'}`;
     el('bottomInfo').textContent = `${students.length} student${students.length === 1 ? '' : 's'} · ${totalPages} page${totalPages === 1 ? '' : 's'}`;
     el('exportBtn').disabled = totalPages === 0;
+    try { localStorage.setItem(DRAFT_KEY, JSON.stringify(students)); }
+    catch { showToast('Draft storage is full. Export the PDF before closing.'); }
   }
 
   function addStudent() {
+    if (students.length >= MAX_SCAN_PAGES) return showToast(`A batch can contain at most ${MAX_SCAN_PAGES} students.`);
     students.push({ id: uid(), name: `Student ${students.length + 1}`, pages: [] });
     renderStudents();
   }
@@ -748,8 +767,18 @@
   function handleFileSelected(e) {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
+    if (!file.type.startsWith('image/')) return showToast('Choose an image file to scan.');
+    if (file.size > 20 * 1024 * 1024) return showToast('Image is larger than 20 MB. Choose a smaller image.');
     const reader = new FileReader();
-    reader.onload = () => openCropStep(reader.result);
+    reader.onerror = () => showToast('Could not read this image. Please try another file.');
+    reader.onload = () => {
+      const image = new Image();
+      image.onload = () => image.naturalWidth * image.naturalHeight > MAX_SCAN_PIXELS
+        ? showToast('Image is over 16 megapixels. Choose a smaller image.')
+        : openCropStep(reader.result);
+      image.onerror = () => showToast('Could not open this image. Please try another file.');
+      image.src = reader.result;
+    };
     reader.readAsDataURL(file);
   }
   el('fileInputCamera').addEventListener('change', handleFileSelected);
@@ -1100,6 +1129,9 @@
   });
 
   el('savePageBtn').addEventListener('click', () => {
+    if (students.reduce((n, student) => n + student.pages.length, 0) >= MAX_SCAN_PAGES) {
+      return showToast(`A batch can contain at most ${MAX_SCAN_PAGES} pages.`);
+    }
     // Client-side haptic vibration feedback
     if (navigator.vibrate) navigator.vibrate([15]);
     if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.HapticFeedback) {
@@ -1160,6 +1192,10 @@
       if (sessionToken) {
         btn.textContent = 'Uploading to Telegram…';
         const pdfBlob = doc.output('blob');
+        if (pdfBlob.size > 24 * 1024 * 1024) {
+          showToast('PDF is larger than the 25 MB upload limit. Split the batch into smaller scans.');
+          return;
+        }
         const formData = new FormData();
         formData.append('file', pdfBlob, pdfFileName);
 
@@ -1173,6 +1209,7 @@
             window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
           }
           showToast('Sent to Telegram bot! Check Telegram for results.');
+          try { localStorage.removeItem(DRAFT_KEY); } catch { /* storage may be disabled */ }
         } else {
           const errData = await response.json().catch(() => ({}));
           showToast(`Telegram upload: ${errData.error || 'Server error'}`);
@@ -1182,7 +1219,7 @@
       }
     } catch (err) {
       console.error(err);
-      showToast('Could not build or upload PDF — see console');
+      showToast(sessionToken ? 'Upload failed. Your scans are saved on this device; retry when connected.' : 'Could not build PDF.');
     } finally {
       btn.disabled = students.reduce((n, s) => n + s.pages.length, 0) === 0;
       btn.textContent = original;

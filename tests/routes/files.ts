@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { streamFileToResponse, sendBufferDownload } from '../src/services/documentService.ts';
+import { streamFileToResponse, sendBufferDownload } from '../../src/services/documentService.ts';
 import path from 'path';
 
 const router = Router();

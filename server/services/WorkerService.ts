@@ -44,8 +44,8 @@ RULES:
    * Dispatches a task to Claude 3.5 Sonnet with Tool Definitions
    */
   public async processTask(taskTitle: string, taskDescription: string) {
-    if (!await this.aiService.providerAvailable('anthropic')) {
-      throw new Error('Anthropic provider not available for Workers.');
+    if (!(await this.aiService.providerAvailable('gonkarouter')) && !(await this.aiService.providerAvailable('anthropic'))) {
+      throw new Error('Neither GonkaRouter nor Anthropic provider is available for Workers.');
     }
 
     logger.info(`Worker processing task: ${taskTitle}`);

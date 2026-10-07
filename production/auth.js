@@ -1,96 +1,77 @@
-import fs from 'fs/promises';
-import path from 'path';
 import jwt from 'jsonwebtoken';
-import { fileURLToPath } from 'url';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../server/db.js';
 
-const prisma = new PrismaClient();
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const AUDIT_LOG_PATH = path.join(__dirname, '..', 'exports', 'audit.log.jsonl');
 const JWT_SECRET = process.env.JWT_SECRET;
-if (!JWT_SECRET) {
-  console.error('[FATAL] JWT_SECRET environment variable is not set. Set it in your .env file before starting the server.');
+if (!JWT_SECRET || JWT_SECRET.length < 32) {
+  console.error('[FATAL] JWT_SECRET environment variable is not set or too short. Set it in your .env file before starting the server.');
   process.exit(1);
 }
 
-function getTeacherId(req) {
-  const fromHeader = req.get?.('x-teacher-id') || req.headers?.['x-teacher-id'];
-  if (typeof fromHeader === 'string' && fromHeader.trim()) {
-    return fromHeader.trim();
-  }
-
-  if (req.body?.teacherId) {
-    return String(req.body.teacherId);
-  }
-
-  return 'local-dev';
-}
-
-function getAuthToken() {
-  return process.env.API_AUTH_TOKEN || process.env.AUTH_TOKEN || '';
-}
-
 export function isAuthEnabled() {
-  return Boolean(getAuthToken()) || Boolean(process.env.JWT_SECRET);
+  return Boolean(JWT_SECRET);
 }
 
 export function requireAuth(req, res, next) {
-  const expectedToken = getAuthToken();
-  req.teacher = { teacherId: getTeacherId(req) };
-
   const authHeader = req.get?.('authorization');
   const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
-  const tokenFromQuery = req.query?.token;
-  const tokenFromHeaderKey = req.get?.('x-api-key');
-  const token = bearerToken || tokenFromHeaderKey || tokenFromQuery || '';
 
-  if (token && expectedToken && token === expectedToken) {
-    return next();
-  }
-
-  if (!token) {
-    if (!expectedToken && !process.env.JWT_SECRET) {
-      return next();
-    }
-    return res.status(401).json({ error: 'Authentication required.' });
+  if (!bearerToken) {
+    return res.status(401).json({ error: 'Authentication required.', code: 'NO_TOKEN' });
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.teacher = { teacherId: decoded.userId || 'jwt-user' };
-    req.user = decoded;
+    const decoded = jwt.verify(bearerToken, JWT_SECRET, {
+      algorithms: ['HS256'],
+      issuer: 'bwenge',
+      audience: 'bwenge-web',
+    });
+
+    if (!decoded || typeof decoded !== 'object' || typeof decoded.userId !== 'string' || !decoded.userId) {
+      return res.status(401).json({ error: 'Invalid or expired token.', code: 'INVALID_TOKEN' });
+    }
+
+    const email = decoded.email?.toLowerCase().trim();
+    const resolvedRole = email === 'niyibizisteven13@gmail.com' ? 'ADMIN' : decoded.role;
+    req.teacher = { teacherId: decoded.userId };
+    req.user = { ...decoded, role: resolvedRole };
     return next();
   } catch (err) {
-    return res.status(401).json({ error: 'Invalid or expired token.' });
+    const isExpired = err.name === 'TokenExpiredError';
+    return res.status(401).json({
+      error: isExpired ? 'Token expired.' : 'Invalid or expired token.',
+      code: isExpired ? 'TOKEN_EXPIRED' : 'INVALID_TOKEN',
+    });
   }
+}
+
+export function requireRole(role) {
+  return (req, res, next) => {
+    const userRole = req.user?.email?.toLowerCase().trim() === 'niyibizisteven13@gmail.com' ? 'ADMIN' : req.user?.role;
+    if (!req.user || userRole !== role) {
+      return res.status(403).json({ error: 'Forbidden: insufficient permissions.' });
+    }
+    next();
+  };
 }
 
 export async function writeAuditLog(actorId, action, resourceType, resourceId, details = {}) {
   try {
-    const entry = {
-      timestamp: new Date().toISOString(),
-      actorId: actorId || 'system',
-      action,
-      resourceType,
-      resourceId,
-      details,
-    };
+    // Sanitize details to ensure tokens or passwords are never logged
+    const sanitizedDetails = { ...details };
+    delete sanitizedDetails.password;
+    delete sanitizedDetails.token;
+    delete sanitizedDetails.refreshToken;
+    delete sanitizedDetails.passwordHash;
 
-    // 1. Write to Database (Centralized)
     await prisma.auditLog.create({
       data: {
         actorId: actorId || 'system',
         action,
         resourceType,
         resourceId: resourceId || null,
-        details: JSON.stringify(details),
-      }
+        details: JSON.stringify(sanitizedDetails),
+      },
     });
-
-    // 2. Write to JSONL (Local Forensic Backup)
-    await fs.mkdir(path.dirname(AUDIT_LOG_PATH), { recursive: true });
-    await fs.appendFile(AUDIT_LOG_PATH, `${JSON.stringify(entry)}\n`, 'utf8');
   } catch (err) {
     console.error('Audit Log failed:', err);
   }

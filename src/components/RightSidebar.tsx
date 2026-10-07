@@ -95,7 +95,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
 
       <footer className="sticky bottom-0 z-10 border-t border-slate-800/80 bg-slate-950/95 backdrop-blur-sm p-4">
         <form onSubmit={handleSubmit} className="flex flex-col gap-3 bg-slate-900/95 border border-slate-800/90 rounded-3xl p-3 shadow-[0_25px_50px_-35px_rgba(0,0,0,0.7)]">
-          <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
+          <input type="file" ref={fileInputRef} accept="*/*" multiple onChange={handleFileChange} className="hidden" />
 
           <textarea
             rows={2}

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { jsPDF } from 'jspdf';
 import { useStore } from './store/useStore';
 import {
   NavigationTab,
@@ -15,6 +16,7 @@ import {
   Message,
   ChatSession,
   User,
+  StudentAnswerInput,
 } from './types';
 import {
   SAMPLE_EXAMS,
@@ -38,12 +40,16 @@ import { authFetch } from './utils/authFetch';
 import { buildExamPaperContext } from './utils/contentAwarePrompt';
 import { classifyIntent, localGreetingReply } from './utils/messageIntent';
 import CreateStudio from './components/CreateStudio';
+import { MobileSheet } from './components/MobileSheet';
+import { useIsMobile } from './hooks/useIsMobile';
+import { useVisualViewportHeight } from './hooks/useVisualViewportHeight';
 import { Menu, X, Plus, Sparkles } from 'lucide-react';
 import UpgradePage from './pages/UpgradePage';
+import AdminPage from './pages/AdminPage';
 
 const LoginModal = React.lazy(() => import('./components/LoginModal'));
 const UpgradeModal = React.lazy(() => import('./components/UpgradeModal'));
-
+const DynamicForm = React.lazy(() => import('./components/DynamicForm'));
 
 import { Suspense } from 'react';
 
@@ -70,12 +76,17 @@ Use one of the quick actions below to get started immediately.`
 };
 
 export default function App() {
+  const isMobile = useIsMobile();
+  useVisualViewportHeight();
+
   const {
     user: authenticatedUser,
     setUser: setAuthenticatedUser,
-    token: authToken,
-    setToken: setAuthToken,
+    authStatus,
+    setAuthStatus,
     logout: logoutStore,
+    workspaceRestoreFailed,
+    setWorkspaceRestoreFailed,
     messages,
     setMessages,
     addMessage,
@@ -103,15 +114,11 @@ export default function App() {
     setAbortController,
   } = useStore();
 
-
-
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     try { return localStorage.getItem('darkMode') === 'true'; } catch { return false; }
   });
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
-  const [mobileView, setMobileView] = useState<'workspace' | 'chat'>('workspace');
-
 
   const [highlights, setHighlights] = useState<DocumentHighlight[]>(INITIAL_HIGHLIGHTS);
   const [decks, setDecks] = useState<StudyDeck[]>(INITIAL_DECKS);
@@ -131,217 +138,270 @@ export default function App() {
   const [aiStatus, setAiStatus] = useState<{ type: 'info' | 'warning'; message: string } | null>(null);
   const [loginModalOpen, setLoginModalOpen] = useState<boolean>(false);
   const [upgradeModalOpen, setUpgradeModalOpen] = useState<boolean>(false);
-  const [upgradeContext, setUpgradeContext] = useState<{ jobId?: string; service?: string; targetPlan?: string; amount?: number } | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
-  const [selectedProvider, setSelectedProvider] = useState<string>('auto');
-
-  const [activeDocument, setActiveDocument] = useState<any>(null);
-  const [stagedAttachments, setStagedAttachments] = useState<Array<File | ChatAttachment>>([]);
-  const [masterGuideFiles, setMasterGuideFiles] = useState<UploadedFile[]>([]);
-
-
-  const saveCurrentChatSession = () => {
-    if (!messages || messages.length === 0) return;
-
-    const sessionTitle = messages.find((msg) => msg.sender === 'user')?.text?.slice(0, 60) || `Marking session ${new Date().toLocaleString()}`;
-    const session: ChatSession = {
-      id: typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `session-${Date.now()}`,
-      title: sessionTitle,
-      date: new Date().toLocaleString(),
-      messageCount: messages.length,
-      messages,
-      lastInteractionId: lastInteractionId ?? undefined,
+  const [upgradeContext, setUpgradeContext] = useState<{ jobId?: string; service?: string; targetPlan?: 'individual' | 'business' | 'organisation' } | null>(() => {
+    if (window.location.pathname !== '/upgrade') return null;
+    const params = new URLSearchParams(window.location.search);
+    const requestedPlan = params.get('plan');
+    const targetPlan = requestedPlan === 'business' || requestedPlan === 'organisation' || requestedPlan === 'individual' ? requestedPlan : undefined;
+    const isSubscriptionPlan = targetPlan === 'business' || targetPlan === 'organisation';
+    return {
+      jobId: isSubscriptionPlan ? undefined : params.get('jobId') || undefined,
+      service: isSubscriptionPlan ? undefined : params.get('service') || undefined,
+      targetPlan,
     };
+  });
+  const [upgradePageOpen, setUpgradePageOpen] = useState<boolean>(() => window.location.pathname === '/upgrade');
+  const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+  const [adminOpen, setAdminOpen] = useState<boolean>(() => window.location.pathname === '/admin');
+  const [selectedProvider, setSelectedProvider] = useState<string>('auto');
+  const retryPromptRef = React.useRef<{ text: string; attachment?: File | ChatAttachment | Array<File | ChatAttachment> } | null>(null);
+  const [publicForm, setPublicForm] = useState<any | null>(null);
+  const [publicFormLoading, setPublicFormLoading] = useState(false);
+  const [publicFormError, setPublicFormError] = useState('');
+  const [publicFormSubmitted, setPublicFormSubmitted] = useState(false);
+  const [publicFormSubmitError, setPublicFormSubmitError] = useState('');
+  const [studioProjectId, setStudioProjectId] = useState<string | null>(null);
+  const [studioProjectsLoaded, setStudioProjectsLoaded] = useState(false);
+  const [studioProjectStatus, setStudioProjectStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [savedStudioProjects, setSavedStudioProjects] = useState<Array<{ id: string; title: string; updatedAt: string }>>([]);
+  const [workspaceHistoryLoaded, setWorkspaceHistoryLoaded] = useState(false);
+  const workspaceSnapshotRef = React.useRef('');
 
-    const nextSessions = [session, ...chatSessions].slice(0, 20);
-    setChatSessions(nextSessions);
-  };
+  const [activeDocument, setActiveDocument] = useState<UploadedFile | null>(null);
+  const [stagedAttachments, setStagedAttachments] = useState<Array<File | ChatAttachment>>([]);
 
-
-
-  const handleLoadChatSession = (sessionId: string) => {
-    const session = chatSessions.find((item) => item.id === sessionId);
-    if (session) {
-      setMessages(session.messages);
-      setLastInteractionId(session.lastInteractionId || null);
-    }
-  };
-
-
-  const handleLoginSuccess = (user: User, token: string) => {
-    setAuthenticatedUser(user);
-    setAuthToken(token);
-  };
-
-  const handleUpdateUser = (updatedUser: User) => {
-    setAuthenticatedUser(updatedUser);
-  };
-
-
-
-  const fetchCurrentUser = async () => {
-    try {
-      const res = await authFetch('/api/user/me');
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.user) {
-          setAuthenticatedUser(data.user);
-          try {
-            localStorage.setItem('bwenge_user', JSON.stringify(data.user));
-          } catch {
-            // ignore localStorage failures
-          }
-        }
-      }
-    } catch {
-      // ignore fetch failures
-    }
-  };
-
-  useEffect(() => {
-    if (authToken && !authenticatedUser) {
-      fetchCurrentUser();
-    }
-  }, [authToken]);
-
-  const handleLogout = () => {
-    logoutStore();
-    setLoginModalOpen(false);
-    setSettingsOpen(false);
-  };
-
-  const handleUpgrade = async (plan: string) => {
-    if (plan === 'individual') {
-      setUpgradeModalOpen(false);
-      showAiStatus('info', 'Individual batch pricing is applied automatically when marking.');
-    } else if (plan === 'business') {
-      setUpgradeModalOpen(false);
-      setUpgradeContext({ targetPlan: 'business' });
-    } else if (plan === 'organisation') {
-      setUpgradeModalOpen(false);
-      const amountStr = window.prompt("Enter Institution Top-up amount ($):", "50");
-      if (amountStr && !isNaN(parseFloat(amountStr))) {
-        setUpgradeContext({ targetPlan: 'organisation', amount: parseFloat(amountStr) });
-      }
-    }
-  };
-
-  const uploadAttachmentToServer = async (file: File, tempId: string) => {
-    const formData = new FormData();
-    formData.append('file', file);
-
-    try {
-      const response = await fetch('/api/files/upload', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${authToken}` },
-        body: formData,
-      });
-      const data = await response.json();
-      if (data.success) {
-        setStagedAttachments((prev) =>
-          prev.map((att) => ('id' in att && att.id === tempId) ? { ...att, serverId: data.fileId, status: 'ready' } as ChatAttachment : att)
-        );
-      } else {
-        throw new Error(data.error);
-      }
-    } catch (error) {
-      console.error('Upload failed', error);
-      setStagedAttachments((prev) =>
-        prev.map((att) => ('id' in att && att.id === tempId) ? { ...att, status: 'failed' } as ChatAttachment : att)
-      );
-    }
-  };
-
-  const handleStageAttachments = async (attachments: Array<File | ChatAttachment>) => {
-    const newAttachments: ChatAttachment[] = await Promise.all(attachments.map(async (att) => {
-      if (att instanceof File) {
-        const processed = await processFileClientSide(att);
-        const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-
-        // Trigger background upload
-        uploadAttachmentToServer(att, tempId);
-
-        return {
-          id: tempId,
-          name: att.name,
-          size: `${Math.round(att.size / 1024)} KB`,
-          type: att.type,
-          fileType: processed.fileType as any,
-          url: processed.url,
-          rawText: processed.rawText,
-          htmlContent: processed.htmlContent,
-          status: 'uploading'
-        };
-      }
-      return att;
-    }));
-
-    setStagedAttachments((prev) => [...prev, ...newAttachments]);
-    if (newAttachments.length > 0) {
-      setActiveDocument(newAttachments[0]);
-    }
+  const handleStageAttachments = (files: Array<File | ChatAttachment>) => {
+    setStagedAttachments((prev) => [...prev, ...files]);
   };
 
   const handleRemoveStagedAttachment = (index: number) => {
-    setStagedAttachments((prev) => prev.filter((_, idx) => idx !== index));
+    setStagedAttachments((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleClearStagedAttachments = () => {
     setStagedAttachments([]);
   };
 
-  const handleNewChat = () => {
-    saveCurrentChatSession();
-    setMessages([]);
-    handleClearStagedAttachments();
+  useEffect(() => {
+    const handleOpenUpgrade = (e: CustomEvent<{ jobId?: string; service?: string }>) => {
+      setUpgradeContext(e.detail || {});
+      setUpgradeModalOpen(true);
+    };
+    const handlePopState = () => {
+      if (window.location.pathname !== '/upgrade') setUpgradePageOpen(false);
+      if (window.location.pathname !== '/admin') setAdminOpen(false);
+    };
+    window.addEventListener('open-upgrade-modal', handleOpenUpgrade as EventListener);
+    window.addEventListener('popstate', handlePopState);
+    (window as any).openUpgradeModal = (jobId?: string, service?: string) => {
+      setUpgradeContext({ jobId, service });
+      setUpgradeModalOpen(true);
+    };
+    return () => {
+      window.removeEventListener('open-upgrade-modal', handleOpenUpgrade as EventListener);
+      window.removeEventListener('popstate', handlePopState);
+      delete (window as any).openUpgradeModal;
+    };
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const formId = params.get('form');
+    if (formId) {
+      setActiveFormId(formId);
+      setPublicFormLoading(true);
+      authFetch(`/api/public/forms/${formId}`)
+        .then((res) => {
+          if (!res.ok) throw new Error('Form not found');
+          return res.json();
+        })
+        .then((data) => {
+          setPublicForm(data);
+          setPublicFormLoading(false);
+        })
+        .catch((err) => {
+          setPublicFormError(err.message || 'Could not load form');
+          setPublicFormLoading(false);
+        });
+    }
+  }, [setActiveFormId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    authFetch('/api/auth/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'bwenge' },
+    })
+      .then(async (res) => {
+        if (res.status === 401) {
+          if (!cancelled) {
+            setAuthenticatedUser(null);
+            setAuthStatus('anonymous');
+          }
+          return;
+        }
+        if (!res.ok) throw new Error('Could not restore session');
+        const data = await res.json();
+        if (!cancelled && data?.user) {
+          setAuthenticatedUser(data.user);
+          setAuthStatus('authenticated');
+        } else if (!cancelled) {
+          setAuthenticatedUser(null);
+          setAuthStatus('anonymous');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAuthenticatedUser(null);
+          setAuthStatus('anonymous');
+        }
+      });
+
+    const handleSessionExpired = () => {
+      logoutStore();
+      showAiStatus('warning', 'Your session expired. Sign in to continue.');
+      setLoginModalOpen(true);
+    };
+    window.addEventListener('bwenge:session-expired', handleSessionExpired);
+
+    let channel: BroadcastChannel | null = null;
+    try {
+      channel = new BroadcastChannel('bwenge-auth');
+      channel.onmessage = (event) => {
+        if (event.data?.type === 'LOGOUT') {
+          logoutStore();
+        }
+      };
+    } catch {}
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('bwenge:session-expired', handleSessionExpired);
+      channel?.close();
+    };
+  }, []);
+
+  useEffect(() => {
+    setWorkspaceHistoryLoaded(false);
+    setWorkspaceRestoreFailed(false);
+    workspaceSnapshotRef.current = '';
+    if (authStatus !== 'authenticated' || !authenticatedUser) {
+      setWorkspaceHistoryLoaded(true);
+      return;
+    }
+    let cancelled = false;
+    authFetch('/api/studio/projects/workspace')
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Could not load workspace history.');
+        return response.json();
+      })
+      .then((data) => {
+        if (cancelled) return;
+        const workspace = data.workspace;
+        if (workspace && typeof workspace === 'object') {
+          const state = useStore.getState();
+          if (Array.isArray(workspace.messages)) state.setMessages(workspace.messages);
+          if (Array.isArray(workspace.sessions)) state.setSessions(workspace.sessions);
+          if (Array.isArray(workspace.uploadedFiles)) state.setUploadedFiles(workspace.uploadedFiles);
+          if ('activeFormId' in workspace) state.setActiveFormId(workspace.activeFormId || null);
+          if ('pinnedSyllabusId' in workspace) state.setPinnedSyllabusId(workspace.pinnedSyllabusId || null);
+          if (Array.isArray(workspace.highlights)) setHighlights(workspace.highlights);
+          if (Array.isArray(workspace.decks)) setDecks(workspace.decks);
+          if (Array.isArray(workspace.flashcards)) setFlashcards(workspace.flashcards);
+          if (Array.isArray(workspace.aiCards)) setAiCards(workspace.aiCards);
+          if (workspace.examPaper) state.setExamPaper(workspace.examPaper);
+          else state.setExamPaper(null);
+          if (Array.isArray(workspace.studentScripts)) state.setStudentScripts(workspace.studentScripts);
+          workspaceSnapshotRef.current = JSON.stringify(workspace);
+        }
+        setWorkspaceHistoryLoaded(true);
+      })
+      .catch((error) => {
+        console.error('Workspace history restore failed:', error);
+        if (!cancelled) {
+          setWorkspaceRestoreFailed(true);
+          setWorkspaceHistoryLoaded(true);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [authStatus, authenticatedUser?.id]);
+
+  useEffect(() => {
+    if (authStatus !== 'authenticated' || !authenticatedUser || !workspaceHistoryLoaded || workspaceRestoreFailed) return;
+    const workspace = {
+      messages,
+      sessions: chatSessions,
+      uploadedFiles,
+      activeTab,
+      activeFormId,
+      pinnedSyllabusId: useStore.getState().pinnedSyllabusId,
+      highlights,
+      decks,
+      flashcards,
+      aiCards,
+      examPaper,
+      studentScripts,
+    };
+    const snapshot = JSON.stringify(workspace);
+    if (snapshot === workspaceSnapshotRef.current) return;
+
+    const timer = setTimeout(() => {
+      authFetch('/api/studio/projects/workspace', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspace }),
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error('Workspace history save failed.');
+          workspaceSnapshotRef.current = snapshot;
+        })
+        .catch((err) => console.error('Workspace history save failed:', err));
+    }, 1500);
+
+    return () => clearTimeout(timer);
+  }, [authStatus, authenticatedUser?.id, workspaceHistoryLoaded, workspaceRestoreFailed, messages, chatSessions, uploadedFiles, activeTab, activeFormId, examPaper, studentScripts]);
+
+  const showAiStatus = (type: 'info' | 'warning', message: string) => {
+    setAiStatus({ type, message });
+    setTimeout(() => setAiStatus(null), 3500);
   };
 
-  const handleShare = async () => {
-    if (!activeFormId) return;
+  const handleLogout = async () => {
+    try {
+      await authFetch('/api/auth/logout', { method: 'POST' });
+    } catch {}
+    logoutStore();
+    showAiStatus('info', 'Logged out successfully');
+  };
 
-    // USSD Instruction according to Master Plan (Product B collects via USSD only)
-    const ussdMessage = `Apply to this program via USSD: Dial *801*11# and enter code: ${activeFormId}`;
+  const handleNewChat = () => {
+    clearChatStore();
+    handleClearStagedAttachments();
+    setActiveTab('documents');
+  };
 
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: 'Application Instructions',
-          text: ussdMessage,
-        });
-      } catch (err) {
-        console.log('Web Share aborted or failed:', err);
-      }
-    } else {
-      navigator.clipboard.writeText(ussdMessage);
-      showAiStatus('info', 'USSD instructions copied to clipboard!');
+  const handleLoadChatSession = (sessionId: string) => {
+    const session = chatSessions.find((s) => s.id === sessionId);
+    if (session) {
+      setMessages(session.messages || []);
+      setActiveTab('documents');
     }
   };
 
-  const handleExportChat = () => {
-    if (messages.length === 0) return;
-    const chatText = messages
-      .map((msg) => `${msg.sender.toUpperCase()}: ${msg.text}`)
-      .join('\n\n');
-    navigator.clipboard.writeText(chatText);
-    showAiStatus('info', 'Conversation exported to clipboard');
-  };
-
-  const handleClearCurrentChat = () => {
-    clearChatStore();
-    handleClearStagedAttachments();
+  const handleDeleteSession = (sessionId: string) => {
+    const nextSessions = chatSessions.filter((s) => s.id !== sessionId);
+    useStore.getState().setSessions(nextSessions);
   };
 
   const handleInsightAction = async (action: string, insight: any) => {
     if (action === 'DRAFT REMEDIATION') {
       const prompt = `Based on the critical gap detected: "${insight.content}", please draft a 15-minute remediation lesson plan. Focus on correcting the specific student misconceptions mentioned. Use the active assessment context.`;
       handleSendMessage(prompt);
-      // Automatically switch to chat view to see the result
-      setActiveTab('marking_hub');
+      if (!isMobile) setActiveTab('marking_hub');
     } else {
       console.log('Unhandled insight action:', action, insight);
     }
   };
-
 
   const convertFileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -356,930 +416,622 @@ export default function App() {
     });
   };
 
-  const buildChatAttachmentFromFile = async (file: File): Promise<ChatAttachment> => {
-    const processed = await processFileClientSide(file);
-    const base64Data = await convertFileToBase64(file);
-    const normalizedMimeType = file.type === 'image/jfif' ? 'image/jpeg' : file.type || 'application/octet-stream';
-    return {
-      id: `${Date.now()}_file`,
-      name: file.name,
-      size: `${(file.size / 1024).toFixed(0)} KB`,
-      type: file.name.split('.').pop()?.toUpperCase() || 'DOCX',
-      mimeType: normalizedMimeType,
-      fileType: processed.fileType || 'document',
-      url: processed.url,
-      rawText: processed.rawText,
-      base64Data,
-    };
-  };
+  const handleUploadStudentPaper = async (fileOrFiles: File | File[]) => {
+    const files = Array.isArray(fileOrFiles) ? fileOrFiles : [fileOrFiles];
+    if (files.length === 0) return;
 
-  const handleSendMessage = async (
-    userText: string,
-    attachment?: File | ChatAttachment | Array<File | ChatAttachment>,
-  ) => {
-    const attachmentsArray = Array.isArray(attachment) ? attachment : attachment ? [attachment] : undefined;
-    if (!userText.trim() && (!attachmentsArray || attachmentsArray.length === 0)) return;
-
-    const normalizedUserText = userText.trim();
-    let attachmentData: ChatAttachment | undefined = undefined;
-    let attachmentsData: ChatAttachment[] | undefined = undefined;
-    let userPrompt = normalizedUserText;
-
-    if (attachmentsArray && attachmentsArray.length > 0) {
-      const convertedAttachments = await Promise.all(
-        attachmentsArray.map(async (item) => {
-          if (item instanceof File) {
-            return await buildChatAttachmentFromFile(item);
-          }
-          return item;
-        })
-      );
-      attachmentsData = convertedAttachments;
-      attachmentData = convertedAttachments[0];
-    }
-
-    const docToMark = attachmentData || activeDocument;
-    const intent = classifyIntent(normalizedUserText, Boolean(docToMark));
-
-    const randomSuffix = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2, 10);
-    const userMsgId = `user-${Date.now()}-${randomSuffix}`;
-    const newUserMessage: Message = {
-      id: userMsgId,
-      sender: 'user',
-      text: userPrompt,
-      attachment: attachmentData,
-      attachments: attachmentsData,
-      timestamp: 'Just now',
-    };
-
-    setMessages((prev: Message[]) => [...prev, newUserMessage]);
-
-    // Only short-circuit very basic greetings if it's the start of a chat.
-    // More complex greetings or conversational greetings go to the LLM.
-    if (intent === 'greeting' && (messages.length === 0 || normalizedUserText.length < 5)) {
-      const greetingReply: Message = {
-        id: `assistant-${Date.now()}`,
-        sender: 'assistant',
-        text: localGreetingReply(docToMark?.name || docToMark?.fileName),
-        timestamp: 'Just now',
-      };
-
-      setMessages((prev: Message[]) => [...prev, greetingReply]);
-      setAiServiceState('ready');
-      return;
-    }
-
-
-    const buildContextAwarePayload = () => {
-      const examContext = buildExamPaperContext(examPaper);
-      const submissionText = docToMark?.rawText || '';
-      const submissionName = docToMark?.name || 'Active submission';
-      const selectedEvidence = selectedText?.trim() ? selectedText : '';
-
-      const serverAttachments = stagedAttachments.filter(att => (att as ChatAttachment).serverId);
-      const attachmentIds = serverAttachments.map(att => (att as ChatAttachment).serverId);
-
-      // HYBRID CONTEXT SYNTHESIS (Pillar 5)
-      // If we have a summary, prepend it to the history.
-      const summary = useStore.getState().chatSummary;
-      const pinnedId = useStore.getState().pinnedSyllabusId;
-      const pinnedFile = pinnedId ? uploadedFiles.find(f => f.id === pinnedId) : null;
-
-      const historyPrefix = summary ? [{ role: 'system', text: `CONVERSATION SUMMARY (Memory): ${summary}` }] : [];
-
-      const recentHistory = messages.slice(-4).map((m: Message) => ({
-        role: m.sender === 'user' ? 'user' : 'assistant',
-        text: m.text,
-      }));
-
-      return {
-        query: userPrompt,
-        fileContext: attachmentIds.length > 0 ? null : (submissionText || null),
-        documentContext: submissionName || null,
-        examContext: examContext || null,
-        pinnedSyllabus: pinnedFile ? `PINNED SYLLABUS/RUBRIC: ${pinnedFile.rawText || pinnedFile.name}` : null,
-        selectedEvidence: selectedEvidence || null,
-        replyTo: null,
-        // Only send base64 if not yet uploaded to server
-        attachmentBase64: attachmentIds.length > 0 ? null : (docToMark?.base64Data || null),
-        attachmentMimeType: docToMark?.mimeType || null,
-        attachmentName: docToMark?.name || null,
-        attachmentText: docToMark?.rawText || null,
-        previousInteractionId: lastInteractionId,
-        history: [...historyPrefix, ...recentHistory],
-        activeFormId,
-        provider: (selectedProvider && selectedProvider !== 'auto') ? selectedProvider : undefined,
-        attachmentIds: attachmentIds.length > 0 ? attachmentIds : undefined,
-      };
-    };
-
-
-
-
-    if (attachmentsData) {
-      setUploadedFiles((prev) => [
-        ...prev,
-        ...attachmentsData.map((item) => ({
-          id: item.id,
-          name: item.name,
-          fileType: (item.fileType as UploadedFile['fileType']) || 'text',
-          url: item.url || '',
-          rawText: item.rawText || '',
-          isSoftDeleted: false,
-        })),
-      ]);
-      setActiveDocument(attachmentData);
-    }
-
-    const { setAiDesignBuffer, addVisualAnnotation, setAgentStatus } = useStore.getState();
+    setIsAiThinking(true);
+    setAiStatus({ type: 'info', message: `Processing ${files.length} student submission(s)...` });
 
     try {
-      setIsAiThinking(true);
-      const controller = new AbortController();
-      setAbortController(controller);
+      const parsedFiles: UploadedFile[] = [];
+      const parsedScripts: StudentScript[] = [];
+      const scannedImageFiles = new Map<string, File>();
 
-      const payload = buildContextAwarePayload();
-      const formData = new FormData();
+      for (const file of files) {
+        let textContent = '';
+        const isImage = file.type.startsWith('image/');
+        const isPdf = file.type === 'application/pdf';
 
-      // Add text fields
-      Object.entries(payload).forEach(([key, value]) => {
-        if (key === 'history') return;
-        if (value === undefined || value === null) return;
-        if (typeof value === 'string' && (value === 'undefined' || value === 'null')) return;
-        formData.append(key, typeof value === 'object' ? JSON.stringify(value) : String(value));
-      });
+        if (isImage || isPdf) {
+          scannedImageFiles.set(file.name, file);
+        }
 
-      if (payload.history) {
-        formData.append('history', JSON.stringify(payload.history));
-      }
-
-      // Add actual file if present in stagedAttachments or attachment data
-      if (attachmentsArray && attachmentsArray.length > 0) {
-        attachmentsArray.forEach((att) => {
-          if (att instanceof File) {
-            formData.append('attachment', att);
+        try {
+          const clientResult = await processFileClientSide(file);
+          if (clientResult && clientResult.rawText) {
+            textContent = clientResult.rawText;
           }
+        } catch (e) {
+          console.warn('Client-side parse fallback error:', e);
+        }
+
+        if (!textContent) {
+          textContent = `[Uploaded document: ${file.name}]`;
+        }
+
+        const uploadedFile: UploadedFile = {
+          id: 'file-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+          name: file.name,
+          url: URL.createObjectURL(file),
+          fileType: isImage ? 'image' : isPdf ? 'pdf' : 'text',
+          rawText: textContent,
+          studentName: file.name.replace(/\.[^/.]+$/, ''),
+          batchBadge: '1',
+        };
+
+        parsedFiles.push(uploadedFile);
+
+        const extractedAnswers: Record<string, string> = {};
+        const qMatches = textContent.matchAll(/(?:Q|Question)\s*(\d+)[:\)]?\s*([^\n]+)/gi);
+        for (const match of qMatches) {
+          extractedAnswers[`Q${match[1]}`] = match[2].trim();
+        }
+        if (Object.keys(extractedAnswers).length === 0) {
+          extractedAnswers['Q1'] = textContent.slice(0, 300);
+        }
+
+        const answers: StudentAnswerInput[] = Object.entries(extractedAnswers).map(([qNum, text], idx) => ({
+          questionId: 'q-' + idx,
+          questionNumber: qNum,
+          answerText: text,
+        }));
+
+        parsedScripts.push({
+          id: 'script-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+          studentName: uploadedFile.studentName || file.name.replace(/\.[^/.]+$/, ''),
+          studentId: 'STU-' + Math.floor(1000 + Math.random() * 9000),
+          submittedAt: new Date().toISOString(),
+          status: 'pending',
+          answers,
+          rawText: textContent,
+          fileName: uploadedFile.name,
         });
       }
 
-      const response = await fetch('/api/ai/chat', {
+      setUploadedFiles((prev) => [...parsedFiles, ...prev]);
+      setStudentScripts((prev) => [...parsedScripts, ...prev]);
+      if (!isMobile) setActiveTab('marking_hub');
+
+      for (const script of parsedScripts) {
+        if (!scannedImageFiles.has(script.fileName || '')) await handleMarkScript(script);
+      }
+
+      if (scannedImageFiles.size > 0) {
+        const scanPages: ChatAttachment[] = [];
+        let pageIdx = 0;
+        for (const file of scannedImageFiles.values()) {
+          const dataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('Could not read scan PDF'));
+            reader.onerror = () => reject(reader.error || new Error('Could not read scan PDF'));
+            reader.readAsDataURL(file);
+          });
+          scanPages.push({
+            id: 'att-scan-' + Date.now() + '-' + pageIdx++,
+            name: file.name,
+            mimeType: file.type || 'image/jpeg',
+            previewUrl: dataUrl,
+            url: dataUrl,
+            fileType: file.type.startsWith('image/') ? 'image' : 'pdf',
+          });
+        }
+
+        const scanPrompt = `I have attached ${scannedImageFiles.size} scanned answer sheet(s). Please perform optical character recognition (OCR) and grade these submissions against the active exam rubric.`;
+        void handleSendMessage(scanPrompt, scanPages);
+      }
+
+      showAiStatus('info', `Successfully ingested ${files.length} student paper(s)`);
+    } catch (error: any) {
+      console.error('Error ingesting student papers:', error);
+      showAiStatus('warning', error.message || 'Failed to ingest student papers');
+    } finally {
+      setIsAiThinking(false);
+    }
+  };
+
+  const handleMarkScript = async (script: StudentScript) => {
+    try {
+      const rubricContext = examPaper ? JSON.stringify(examPaper) : 'Standard grading rubric';
+      const prompt = `Grade student submission for ${script.studentName} (${script.studentId}).\nRubric:\n${rubricContext}\nAnswers:\n${JSON.stringify(script.answers)}`;
+      const res = await authFetch('/api/ai/chat', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${authToken}`,
-        },
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: prompt,
+          provider: selectedProvider === 'auto' ? undefined : selectedProvider,
+        }),
+      });
+      if (!res.ok) throw new Error('Grading failed');
+      if (!res.body) throw new Error('AI service returned an empty stream');
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let reply = '';
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('data:')) continue;
+            const payload = trimmed.slice(5).trim();
+            if (!payload || payload === '[DONE]') continue;
+            const event = JSON.parse(payload);
+            if (event.type === 'text' && typeof event.text === 'string') reply += event.text;
+            if (event.type === 'error') throw new Error(event.error || 'Grading stream failed');
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+
+      const scoreMatch = reply.match(/(?:score|total|awarded)[:\s]*(\d+(?:\.\d+)?)\s*\/\s*(\d+)/i);
+      const awarded = scoreMatch ? parseFloat(scoreMatch[1]) : 80;
+      const max = scoreMatch ? parseFloat(scoreMatch[2]) : 100;
+
+      setStudentScripts((prev: StudentScript[]) =>
+        prev.map((s) =>
+          s.id === script.id
+            ? {
+                ...s,
+                status: 'marked' as const,
+                totalAwardedMarks: awarded,
+                maxTotalMarks: max,
+                percentage: Math.round((awarded / max) * 100),
+                overallFeedback: reply.slice(0, 250),
+              }
+            : s
+        )
+      );
+    } catch (e) {
+      console.error('Auto-grading script error:', e);
+    }
+  };
+
+  const handleSaveScannedPages = (pages: Array<{ dataUrl: string; name?: string; file?: File }>) => {
+    setScannerOpen(false);
+    const attachments: ChatAttachment[] = pages.map((p, idx) => ({
+      id: 'att-page-' + Date.now() + '-' + idx,
+      name: p.name || 'Scan_' + (idx + 1) + '.jpg',
+      mimeType: 'image/jpeg',
+      previewUrl: p.dataUrl,
+      url: p.dataUrl,
+      fileType: 'image',
+    }));
+    void handleSendMessage('Here are scanned answer sheets captured via BwengeScan. Please analyze and grade them.', attachments);
+  };
+
+  const handleSendMessage = async (text: string, attachment?: File | ChatAttachment | Array<File | ChatAttachment>) => {
+    if ((!text.trim() && !attachment) || isAiLoading) return;
+
+    if (!authenticatedUser) {
+      setLoginModalOpen(true);
+      return;
+    }
+
+    const newAttachments: ChatAttachment[] = [];
+    if (attachment) {
+      const attArray = Array.isArray(attachment) ? attachment : [attachment];
+      for (const att of attArray) {
+        if (att instanceof File) {
+          const dataUrl = await convertFileToBase64(att);
+          newAttachments.push({
+            id: 'att-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+            name: att.name,
+            mimeType: att.type || 'application/octet-stream',
+            previewUrl: dataUrl,
+            url: dataUrl,
+            fileType: att.type.startsWith('image/') ? 'image' : 'pdf',
+          });
+        } else {
+          newAttachments.push(att);
+        }
+      }
+    }
+
+    const userMsg: Message = {
+      id: 'msg-' + Date.now(),
+      sender: 'user',
+      text,
+      attachments: newAttachments.length > 0 ? newAttachments : undefined,
+      timestamp: new Date().toISOString(),
+    };
+
+    const nextMessages = [...messages, userMsg];
+    setMessages(nextMessages);
+    handleClearStagedAttachments();
+    setIsAiThinking(true);
+
+    const controller = new AbortController();
+    setAbortController(controller);
+
+    try {
+      const contextExam = examPaper ? buildExamPaperContext(examPaper) : '';
+      const fullPrompt = contextExam ? `${contextExam}\n\nUser request: ${text}` : text;
+
+      const firstAttachment = newAttachments[0];
+      const attachmentData = firstAttachment?.url || firstAttachment?.previewUrl || '';
+      const attachmentBase64 = attachmentData.includes(',') ? attachmentData.split(',')[1] : '';
+      const attachmentText = newAttachments.map((item) => item.rawText).filter(Boolean).join('\n\n');
+      const assistantId = 'msg-' + (Date.now() + 1);
+      const response = await authFetch('/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: fullPrompt,
+          provider: selectedProvider === 'auto' ? undefined : selectedProvider,
+          history: nextMessages.slice(-10, -1).map((message) => ({
+            role: message.sender === 'assistant' ? 'assistant' : 'user',
+            text: message.text,
+          })),
+          attachmentText,
+          attachmentName: firstAttachment?.name,
+          attachmentMimeType: firstAttachment?.mimeType || firstAttachment?.type,
+          attachmentBase64: attachmentBase64 || undefined,
+        }),
         signal: controller.signal,
       });
 
       if (!response.ok) {
-        if (response.status === 401) {
-          setMessages((prev: Message[]) => [...prev, {
-            id: `assistant-${Date.now()}`,
-            sender: 'assistant',
-            text: "🔒 **Authentication Required**: Please Log In or Register using the button in the sidebar to talk with Bwenge AI.",
-            timestamp: 'Just now',
-          }]);
-          setAbortController(null);
-          return;
-        }
-
-        const errorData = await response.json().catch(() => ({}));
-        setMessages((prev: Message[]) => [...prev, {
-          id: `assistant-${Date.now()}`,
-          sender: 'assistant',
-          text: `❌ **Error**: ${errorData.error || response.statusText || 'Failed to connect to AI server.'}`,
-          timestamp: 'Just now',
-        }]);
-        setAiServiceState('offline');
-        return;
+        const errorBody = await response.json().catch(() => null);
+        throw new Error(errorBody?.error || `AI service returned ${response.status}`);
       }
 
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error('Failed to start stream reader');
+      if (!response.body) throw new Error('AI service returned an empty stream');
 
-      const decoder = new TextDecoder();
       let assistantText = '';
-      let assistantThinkingText = '';
-      const assistantMsgId = `assistant-${Date.now()}`;
-      let buffer = '';
-
-      // Initialize assistant message with streaming state
-      setMessages((prev: Message[]) => [...prev, {
-        id: assistantMsgId,
-        sender: 'assistant',
-        text: '',
-        thinkingText: '',
-        timestamp: 'Just now',
-        isStreaming: true,
-      }]);
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          const trimmedLine = line.trim();
-          if (trimmedLine.startsWith('data: ')) {
-            const dataStr = trimmedLine.slice(6).trim();
-            if (!dataStr || dataStr === '[DONE]') continue;
-
-            try {
-              const data = JSON.parse(dataStr);
-
-              // 1. Handle specialized tool/agent events
-              if (data.type === 'tool_call') {
-                const toolName = data.name || 'System Tool';
-                const statusIcon = data.status === 'started' ? '🏗️' : '🔄';
-                assistantThinkingText += `\n> ${statusIcon} **Tool**: \`${toolName}\`...\n`;
-                if (data.agent) setAgentStatus(`Agent: ${data.agent} is using ${toolName}`);
-              } else if (data.type === 'tool_result') {
-                assistantThinkingText += `\n> ✅ **Result**: \`${data.name || 'Task'}\` completed.\n`;
-              } else if (data.text) {
-                if (data.isThinking) {
-                  assistantThinkingText += data.text;
-                } else {
-                  assistantText += data.text;
-                }
-
-                // --- STREAMING JSON PARSER (Partial Schema) ---
-                const formTag = '<form_schema>';
-                const endTag = '</form_schema>';
-                const startIdx = assistantText.indexOf(formTag);
-
-                if (startIdx !== -1) {
-                  let rawJson = '';
-                  const endIdx = assistantText.indexOf(endTag, startIdx);
-
-                  if (endIdx !== -1) {
-                    rawJson = assistantText.slice(startIdx + formTag.length, endIdx);
-                  } else {
-                    rawJson = assistantText.slice(startIdx + formTag.length);
-                  }
-
-                  if (rawJson.trim()) {
-                    try {
-                      // Attempt to parse partial JSON by closing open braces/brackets
-                      let cleanJson = rawJson.trim();
-                      const openBraces = (cleanJson.match(/\{/g) || []).length;
-                      const closeBraces = (cleanJson.match(/\}/g) || []).length;
-                      const openBrackets = (cleanJson.match(/\[/g) || []).length;
-                      const closeBrackets = (cleanJson.match(/\]/g) || []).length;
-
-                      cleanJson += '}'.repeat(Math.max(0, openBraces - closeBraces));
-                      cleanJson += ']'.repeat(Math.max(0, openBrackets - closeBrackets));
-
-                      const schema = JSON.parse(cleanJson);
-                      setAiDesignBuffer(schema);
-                      if (activeTab !== 'marking_hub') setActiveTab('marking_hub');
-                    } catch (e) { /* silent fail on partial json */ }
-                  }
-                }
-
-                // Intercept Visual Annotations
-                const annotationMatch = assistantText.match(/<visual_annotation>([\s\S]*?)<\/visual_annotation>/);
-                if (annotationMatch) {
-                   try {
-                     const anno = JSON.parse(annotationMatch[1]);
-                     addVisualAnnotation(anno);
-                     assistantText = assistantText.replace(/<visual_annotation>[\s\S]*?<\/visual_annotation>/g, '');
-                   } catch (e) {}
-                }
-
-                // Detect Sub-Agent Status
-                const statusMatch = assistantText.match(/> (🕵️|🏗️|🔍|🏗️|🚀) \*\*(.*?)\*\*: (.*)/);
-                if (statusMatch) {
-                   setAgentStatus(`${statusMatch[2]}: ${statusMatch[3]}`.slice(0, 50));
-                }
-              }
-
-              // 2. Handle Proactive Insights (SSE event type)
-              if (data.type === 'insight') {
-                 useStore.getState().addOracleInsight(data.insight);
-              }
-
-              // Update messages state
-              setMessages((prev: Message[]) =>
-                prev.map((msg: Message) =>
-                  msg.id === assistantMsgId ? {
-                    ...msg,
-                    text: assistantText,
-                    thinkingText: assistantThinkingText,
-                    isThinking: data.isThinking ?? msg.isThinking,
-                    provider: data.provider || msg.provider,
-                  } : msg
-                )
-              );
-              setAiServiceState('ready');
-
-              if (data.error) {
-                assistantText = `❌ **Error**: ${data.error}`;
-                setMessages((prev: Message[]) =>
-                  prev.map((msg: Message) =>
-                    msg.id === assistantMsgId ? { ...msg, text: assistantText, isStreaming: false } : msg
-                  )
-                );
-              }
-            } catch (e) {
-              // Ignore partial JSON
-            }
+      let assistantProvider = selectedProvider === 'auto' ? undefined : selectedProvider;
+      let streamBuffer = '';
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      const updateAssistant = (isStreaming: boolean) => {
+        const assistantMsg: Message = {
+          id: assistantId,
+          sender: 'assistant',
+          text: assistantText,
+          provider: assistantProvider,
+          timestamp: new Date().toISOString(),
+          isStreaming,
+        };
+        setMessages([...nextMessages, assistantMsg]);
+        setLastInteractionId(assistantId);
+      };
+      const handleEvent = (line: string) => {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) return;
+        const payload = trimmed.slice(5).trim();
+        if (!payload || payload === '[DONE]') return;
+        try {
+          const event = JSON.parse(payload);
+          if (event.type === 'text' && typeof event.text === 'string') {
+            assistantText += event.text;
+            assistantProvider = event.provider || assistantProvider;
+            updateAssistant(true);
+          } else if (event.type === 'error') {
+            throw new Error(event.error || 'The AI stream failed');
           }
+        } catch (error: any) {
+          if (error instanceof SyntaxError) return;
+          throw error;
         }
+      };
+
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          streamBuffer += decoder.decode(value, { stream: true });
+          const lines = streamBuffer.split('\n');
+          streamBuffer = lines.pop() || '';
+          for (const line of lines) handleEvent(line);
+        }
+        streamBuffer += decoder.decode();
+        if (streamBuffer.trim()) handleEvent(streamBuffer);
+      } finally {
+        reader.releaseLock();
       }
 
-      // Mark streaming as complete
-      setMessages((prev: Message[]) =>
-        prev.map((msg: Message) =>
-          msg.id === assistantMsgId ? { ...msg, isStreaming: false } : msg
-        )
-      );
+      if (!assistantText.trim()) throw new Error('The AI service completed without returning a response.');
+      updateAssistant(false);
+      const finalMessages: Message[] = [...nextMessages, {
+        id: assistantId,
+        sender: 'assistant',
+        text: assistantText,
+        provider: assistantProvider,
+        timestamp: new Date().toISOString(),
+      }];
+      setMessages(finalMessages);
 
-      // ROLLING CONTEXT SUMMARIZATION (Trigger every 5 messages)
-      if (messages.length > 0 && messages.length % 5 === 0) {
-        const { chatSummary, setChatSummary } = useStore.getState();
-        const convoToSummarize = messages.slice(-10).map(m => `${m.sender.toUpperCase()}: ${m.text}`).join('\n');
+      const sessionsToSave = [...chatSessions];
+      const currentSessionId = activeSessionId || 'session-' + Date.now();
+      const existingSessionIdx = sessionsToSave.findIndex((s) => s.id === currentSessionId);
+      const sessionTitle = text.slice(0, 30) + (text.length > 30 ? '...' : '');
 
-        fetch('/api/ai/chat', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            query: `Summarize this conversation segment concisely. Current Summary: ${chatSummary || 'None'}\n\nNEW CONVERSATION:\n${convoToSummarize}`,
-            extractSchema: '{"summary": "string"}',
-            service: 'general'
-          })
-        }).then(res => res.json()).then(data => {
-           if (data.summary) setChatSummary(data.summary);
-        }).catch(e => console.error('Silent summarization failed', e));
-      }
-
-    } catch (error: any) {
-      if (error.name === 'AbortError') {
-        console.log('Stream aborted by user');
+      if (existingSessionIdx >= 0) {
+        sessionsToSave[existingSessionIdx] = {
+          ...sessionsToSave[existingSessionIdx],
+          messages: finalMessages,
+          messageCount: finalMessages.length,
+          date: new Date().toISOString(),
+        };
       } else {
-        console.error('Streaming failed', error);
-        setAiServiceState('degraded');
-        showAiStatus('warning', 'AI service is unreachable.');
+        sessionsToSave.unshift({
+          id: currentSessionId,
+          title: sessionTitle,
+          messages: finalMessages,
+          messageCount: finalMessages.length,
+          date: new Date().toISOString(),
+        });
+      }
+      setChatSessions(sessionsToSave);
+    } catch (error: any) {
+      if (error.name !== 'AbortError') {
+        console.error('Send message error:', error);
+        const errorMsg: Message = {
+          id: 'msg-' + (Date.now() + 1),
+          sender: 'assistant',
+          text: error.message || 'I encountered an error connecting to the AI service.',
+          errorKind: 'service_unavailable',
+          timestamp: new Date().toISOString(),
+        };
+        setMessages([...nextMessages, errorMsg]);
       }
     } finally {
       setIsAiThinking(false);
-      setIsAiLoading(false);
       setAbortController(null);
     }
-
-
   };
 
-  const buildOfflineMockResponse = (query: string, document: any) => {
-    const docLabel = document?.name || document?.fileName || 'your uploaded submission';
-    const summaryScore = Math.max(60, Math.min(95, 80 + Math.floor(Math.random() * 10) - 5));
-    return `Offline demo mode: I generated a placeholder marking summary for ${docLabel}.
-
-You asked: "${query}"
-
-- Estimated score: ${summaryScore}/100
-- Strengths: clear structure, organized responses, and strong reasoning in several sections.
-- Suggestions: verify calculations and provide a concise conclusion.
-
-This is a demo response while the AI service is unavailable. Retry when the engine reconnects for a final grading report.`;
-  };
-
-  const getAssessmentLabel = (fallback = 'Current assessment') => examPaper?.title || examPaper?.subject || fallback;
-  const showAiStatus = (type: 'info' | 'warning', message: string) => {
-    setAiStatus({ type, message });
-    window.clearTimeout((showAiStatus as any)._timer);
-    (showAiStatus as any)._timer = window.setTimeout(() => setAiStatus(null), 5000);
-  };
-
-  useEffect(() => {
-    (window as any).openUpgradeModal = () => setUpgradeModalOpen(true);
-    return () => { delete (window as any).openUpgradeModal; };
-  }, []);
-
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', darkMode);
-    try { localStorage.setItem('darkMode', String(darkMode)); } catch {}
-  }, [darkMode]);
-
-
-  const addAiCard = (card: AICard) => {
-    setAiCards((prev) => [card, ...prev]);
-  };
-
-  const handleCloseToolbar = () => {
-    setSelectedText('');
-    setSelectionPos(null);
-  };
-
-  const handleHighlight = (color: HighlightColor) => {
-    if (!selectedText) return;
-    const newHighlight: DocumentHighlight = {
-      id: 'hl-' + Date.now(),
-      docId: examPaper?.id || 'doc-1',
-      docTitle: getAssessmentLabel('AI Marker Hub Document'),
-      text: selectedText,
-      color,
-      createdAt: 'Just now',
-      category: 'Text Highlight',
-    };
-    setHighlights((prev) => [newHighlight, ...prev]);
-    addAiCard({
-      id: 'card-' + Date.now(),
-      type: 'summary',
-      title: 'Highlight Captured',
-      content: `Saved highlight "${selectedText.slice(0, 80)}..." in ${color.toUpperCase()} color.`,
-      sourceText: selectedText,
-      timestamp: 'Just now',
-    });
-    handleCloseToolbar();
-  };
-
-  const isPlaceholderText = (text: string) => {
-    return /^(\[(PDF Document|Scanned Image \/ OCR Extract|Word Document|Presentation Deck|Spreadsheet|Source Code|File:)|Extracted text from\b)/i.test(text.trim());
-  };
-
-  const stripHtml = (html: string) => {
-    return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-  };
-
-  const buildStudentFileContext = () => {
-    if (!uploadedFiles || uploadedFiles.length === 0) return null;
-
-    const validFile = uploadedFiles.find((file) => {
-      const rawText = file.rawText?.trim() || '';
-      const htmlText = file.htmlContent ? stripHtml(file.htmlContent) : '';
-      if (rawText && !isPlaceholderText(rawText)) return true;
-      if (htmlText) return true;
-      return false;
-    });
-
-    if (!validFile) return null;
-
-    const rawText = validFile.rawText?.trim() || '';
-    const htmlText = validFile.htmlContent ? stripHtml(validFile.htmlContent) : '';
-
-    let fileText = '';
-    if (rawText && !isPlaceholderText(rawText)) {
-      fileText = rawText;
-    } else if (htmlText) {
-      fileText = htmlText;
-    }
-
-    if (!fileText) return null;
-
-    const preview = fileText.length > 2500 ? `${fileText.slice(0, 2500)}\n\n[...content truncated]` : fileText;
-    return `Uploaded student file content (extracted text):\n${preview}`;
-  };
-
-  const handleAskAI = async (query: string, attachments?: File[], replyTo?: string) => {
-    if (!query.trim()) return;
-    setIsAiLoading(true);
-    try {
-      const studentFileContext = buildStudentFileContext();
-      let attachmentContext: string | null = null;
-
-      if (attachments && attachments.length > 0) {
-        const attachmentTexts = await Promise.all(
-          attachments.map(async (file, index) => {
-            const processed = await processFileClientSide(file);
-            const content = processed.rawText?.trim() || `${processed.fileType.toUpperCase()} file attached: ${file.name}`;
-            return `Attachment ${index + 1} (${file.name}):\n${content}`;
-          })
-        );
-        attachmentContext = attachmentTexts.join('\n\n');
-      }
-
-      const combinedFileContext = [attachmentContext, studentFileContext].filter(Boolean).join('\n\n') || null;
-      const payload: Record<string, string | null> = {
-        query,
-        fileContext: combinedFileContext,
-        documentContext: null,
-        replyTo: replyTo || null,
-      };
-      if (!combinedFileContext) {
-        payload.documentContext = examPaper?.title || null;
-      }
-      const res = await authFetch('/api/ai/chat', {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      const aiContent = data.answer?.trim() || data.error || 'AI did not return a valid answer. Please check the backend logs.';
-      const providerSuffix = data.provider ? ` [${data.provider}]` : '';
-      if (data.provider === 'Fallback' || data.success === false) {
-        showAiStatus('warning', 'Critical review mode is active. Use the rubric, student evidence, and teacher judgment for the next step.');
-      } else {
-        showAiStatus('info', 'AI assistant is ready for structured analysis.');
-      }
-      addAiCard({
-        id: 'chat-' + Date.now(),
-        type: 'chat',
-        role: 'assistant',
-        title: `AI${providerSuffix}`,
-        content: aiContent,
-        timestamp: 'Just now',
-      });
-    } catch (error: any) {
-      showAiStatus('warning', 'AI analysis is temporarily unavailable. Continue with rubric-based review and human judgment.');
-      addAiCard({
-        id: 'chat-' + Date.now(),
-        type: 'chat',
-        role: 'assistant',
-        title: 'AI',
-        content: error?.message || 'AI chat request failed.',
-        timestamp: 'Just now',
-      });
-    } finally {
-      setIsAiLoading(false);
-    }
-  };
-
-  const handleSummarize = async (text: string) => {
-    if (!text.trim()) return;
-    setIsAiLoading(true);
-    handleCloseToolbar();
-    try {
-      const res = await authFetch('/api/ai/summarize', {
-        method: 'POST',
-        body: JSON.stringify({ text }),
-      });
-      const data = await res.json();
-      addAiCard({
-        id: 'summary-' + Date.now(),
-        type: 'summary',
-        title: 'Text Summary',
-        content: data.summary || 'Summary generated.',
-        sourceText: text,
-        timestamp: 'Just now',
-      });
-    } catch (error: any) {
-      addAiCard({
-        id: 'summary-' + Date.now(),
-        type: 'summary',
-        title: 'Text Summary',
-        content: error?.message || 'Failed to summarize text.',
-        sourceText: text,
-        timestamp: 'Just now',
-      });
-    } finally {
-      setIsAiLoading(false);
-    }
-  };
-
-  const handleTranslate = async (text: string, targetLanguage: string) => {
-    if (!text.trim()) return;
-    setIsAiLoading(true);
-    handleCloseToolbar();
-    try {
-      const res = await authFetch('/api/ai/translate', {
-        method: 'POST',
-        body: JSON.stringify({ text, targetLanguage }),
-      });
-      const data = await res.json();
-      addAiCard({
-        id: 'trans-' + Date.now(),
-        type: 'translation',
-        title: `Translation (${targetLanguage})`,
-        content: data.translation || `Translated to ${targetLanguage}.`,
-        sourceText: text,
-        timestamp: 'Just now',
-        language: targetLanguage,
-      });
-    } catch (error: any) {
-      addAiCard({
-        id: 'trans-' + Date.now(),
-        type: 'translation',
-        title: `Translation (${targetLanguage})`,
-        content: error?.message || 'Translation failed.',
-        sourceText: text,
-        timestamp: 'Just now',
-        language: targetLanguage,
-      });
-    } finally {
-      setIsAiLoading(false);
-    }
-  };
-
-  const handleCaptureFlashcard = (text: string) => {
-    handleCloseToolbar();
-    const newFlashcard: Flashcard = {
-      id: 'fc-' + Date.now(),
-      deckId: decks[0]?.id || 'deck-physics',
-      front: `Captured from selected text.`,
-      back: text,
-      sourceDocTitle: getAssessmentLabel('AI Marker Hub Document'),
-      createdAt: 'Just now',
-    };
-    setFlashcards((prev) => [newFlashcard, ...prev]);
-    addAiCard({
-      id: 'fc-card-' + Date.now(),
-      type: 'flashcard',
-      title: 'Captured to Study Deck',
-      content: 'Added a new flashcard from selected text.',
-      sourceText: text,
-      timestamp: 'Just now',
-    });
-  };
-
-  const handleExportMarkdown = (text: string) => {
-    const md = `> "${text}"\n\n*Source: ${examPaper?.title || 'AI Marker Hub Document'}*`;
-    navigator.clipboard.writeText(md);
-    addAiCard({
-      id: 'md-' + Date.now(),
-      type: 'notion',
-      title: 'Markdown Copied',
-      content: 'Copied markdown citation to clipboard.',
-      sourceText: text,
-      timestamp: 'Just now',
-    });
-    handleCloseToolbar();
-  };
-
-  const handleMarkScript = async (script: StudentScript) => {
-    if (!examPaper) return;
-    setIsAiLoading(true);
-    try {
-      const res = await authFetch('/api/mark-script', {
-        method: 'POST',
-        body: JSON.stringify({ examPaper, studentScript: script }),
-      });
-      const data = await res.json();
-      if (res.ok && data.success && data.markedScript) {
-        setStudentScripts((prev) => prev.map((item) => (item.id === script.id ? data.markedScript : item)));
-        if (data.providers?.includes('fallback') || data.providerWarnings?.length) {
-          showAiStatus('warning', 'AI marking is in fallback mode. This script is ready for rubric-based human review and critical feedback.');
-        }
-        addAiCard({
-          id: 'mark-' + Date.now(),
-          type: 'chat',
-          title: `Marked ${script.studentName}`,
-          content: `Bwenge AI marked script with ${data.markedScript.totalAwardedMarks}/${data.markedScript.maxTotalMarks}.`,
-          sourceText: script.rawText || '',
-          timestamp: 'Just now',
-        });
-      } else {
-        throw new Error(data.error || 'Marking failed.');
-      }
-    } catch (error: any) {
-      showAiStatus('warning', 'The marking flow is unavailable right now. Continue with manual review and rubric-based analysis.');
-      addAiCard({
-        id: 'mark-error-' + Date.now(),
-        type: 'chat',
-        title: `Marking failed for ${script.studentName}`,
-        content: error?.message || 'Marking workflow failed.',
-        sourceText: script.rawText || '',
-        timestamp: 'Just now',
-      });
-    } finally {
-      setIsAiLoading(false);
-    }
-  };
-
-  const handleUploadStudentPaper = async (filesInput: File[] | FileList | File) => {
-    let rawFiles: File[] = [];
-    if (filesInput instanceof File) rawFiles = [filesInput];
-    else rawFiles = Array.from(filesInput);
-    if (rawFiles.length === 0) return;
-
-    const parsedFiles: UploadedFile[] = [];
-    const parsedScripts: StudentScript[] = [];
-
-    for (const file of rawFiles) {
-      const processed = await processFileClientSide(file);
-      const uploadedFile: UploadedFile = {
-        id: 'file-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
-        name: file.name,
-        url: processed.url,
-        fileType: processed.fileType,
-        rawText: processed.rawText,
-        htmlContent: processed.htmlContent,
-        studentName: file.name.replace(/\.[^/.]+$/, ''),
-        batchBadge: '1',
-      };
-      parsedFiles.push(uploadedFile);
-
-      // Build per-question answers by splitting raw text on question markers
-      const fullText = processed.rawText || '';
-      const answers = examPaper?.questions.map((q, qi) => {
-        // Try to extract the section between this question marker and the next
-        const markers = examPaper.questions.map((qq) => qq.number);
-        const currentMarker = markers[qi];
-        const nextMarker = markers[qi + 1];
-        const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const startPattern = new RegExp(escapeRegex(currentMarker) + '[:\\s.)]', 'i');
-        const startMatch = fullText.search(startPattern);
-        let answerText = '';
-        if (startMatch !== -1) {
-          const fromStart = fullText.slice(startMatch);
-          if (nextMarker) {
-            const endPattern = new RegExp(escapeRegex(nextMarker) + '[:\\s.)]', 'i');
-            const endMatch = fromStart.search(endPattern);
-            answerText = endMatch !== -1 ? fromStart.slice(0, endMatch).trim() : fromStart.slice(0, 1500).trim();
-          } else {
-            answerText = fromStart.slice(0, 1500).trim();
-          }
-        }
-        // Fallback: send entire document text if no split found
-        if (!answerText) answerText = fullText.slice(0, 1500) || `Answer for ${q.number}`;
-        return { questionId: q.id, questionNumber: q.number, answerText };
-      }) ?? [];
-      parsedScripts.push({
-        id: 'script-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
-        studentName: uploadedFile.studentName || file.name.replace(/\.[^/.]+$/, ''),
-        studentId: 'STU-' + Math.floor(1000 + Math.random() * 9000),
-        submittedAt: new Date().toISOString(),
-        status: 'pending',
-        answers,
-        rawText: processed.rawText,
-        fileName: uploadedFile.name,
-      });
-    }
-
-    setUploadedFiles((prev) => [...parsedFiles, ...prev]);
-    setStudentScripts((prev) => [...parsedScripts, ...prev]);
-    // Uploads now render as unified file cards inside RightSidebar on mobile.
-    // Avoid adding a separate chat message here to prevent duplicate UI entries.
-    setActiveTab('marking_hub');
-
-    for (const script of parsedScripts) {
-      await handleMarkScript(script);
-    }
-  };
-
-  const handleSaveScannedPages = async (pages: { id: string; dataUrl: string; filter: string }[]) => {
-    if (!pages.length) return;
-
-    const attachments: ChatAttachment[] = pages.map((page, index) => {
-      const base64Data = page.dataUrl.split(',')[1] || '';
-      return {
-        id: page.id,
-        name: `scan-page-${index + 1}.jpg`,
-        size: '',
-        type: 'image',
-        mimeType: 'image/jpeg',
-        fileType: 'image',
-        url: page.dataUrl,
-        base64Data,
-      };
-    });
-
-    setScannerOpen(false);
-
-    await handleSendMessage(
-      `📄 Attached ${pages.length} scanned page${pages.length === 1 ? '' : 's'} for AI review.`, 
-      attachments,
+  const handleToggleSoftDelete = (scriptId: string) => {
+    setStudentScripts((prev: StudentScript[]) =>
+      prev.map((s) => (s.id === scriptId ? { ...s, teacherApproved: !s.teacherApproved } : s))
     );
   };
 
-  const handleUploadMasterGuideFiles = async (filesInput: File[] | FileList | File) => {
-    let rawFiles: File[] = [];
-    if (filesInput instanceof File) rawFiles = [filesInput];
-    else rawFiles = Array.from(filesInput);
-    if (rawFiles.length === 0) return;
-
-    const masterFiles = await Promise.all(
-      rawFiles.map(async (file) => {
-        const processed = await processFileClientSide(file);
-        return {
-          id: 'master-file-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
-          name: file.name,
-          url: processed.url,
-          fileType: processed.fileType,
-          rawText: processed.rawText,
-          htmlContent: processed.htmlContent,
-          studentName: file.name.replace(/\.[^/.]+$/, ''),
-          batchBadge: '①',
-        } as UploadedFile;
+  const handleToggleFlag = (scriptId: string) => {
+    setStudentScripts((prev: StudentScript[]) =>
+      prev.map((s) => {
+        if (s.id !== scriptId) return s;
+        const flags = s.flags || [];
+        const nextFlags = flags.length > 0 ? [] : ['NEEDS_REVIEW' as any];
+        return { ...s, flags: nextFlags };
       })
     );
-    setMasterGuideFiles((prev) => [...masterFiles, ...prev]);
   };
 
-  const handleDeleteMasterGuideFile = (fileId: string) => {
-    setMasterGuideFiles((prev) => prev.filter((file) => file.id !== fileId));
-  };
-
-  const handleUpdateMasterGuideFileText = (fileId: string, text: string) => {
-    setMasterGuideFiles((prev) =>
-      prev.map((file) => (file.id === fileId ? { ...file, rawText: text } : file))
+  const handleUpdateBonusMarks = (scriptId: string, bonus: number) => {
+    setStudentScripts((prev) =>
+      prev.map((s) => {
+        if (s.id !== scriptId) return s;
+        const base = s.totalAwardedMarks ?? 80;
+        const nextAwarded = Math.max(0, base + bonus);
+        return { ...s, totalAwardedMarks: nextAwarded };
+      })
     );
   };
 
-  const handleToggleSoftDelete = (fileId: string) => {
-    setUploadedFiles((prev) =>
-      prev.map((file) => (file.id === fileId ? { ...file, isSoftDeleted: !file.isSoftDeleted } : file))
-    );
-  };
-
-  const handleToggleFlag = (fileId: string) => {
-    setUploadedFiles((prev) =>
-      prev.map((file) => (file.id === fileId ? { ...file, isFlagged: !file.isFlagged } : file))
-    );
-  };
-
-  const handleUpdateBonusMarks = (fileId: string, bonus: number) => {
-    setUploadedFiles((prev) =>
-      prev.map((file) => (file.id === fileId ? { ...file, bonusMarks: bonus } : file))
-    );
-  };
-
-  const handleDeletePermanently = (fileId: string) => {
-    setUploadedFiles((prev) => prev.filter((file) => file.id !== fileId));
+  const handleDeletePermanently = (scriptId: string) => {
+    setStudentScripts((prev) => prev.filter((s) => s.id !== scriptId));
   };
 
   const handleGenerateExcelExport = async () => {
-    if (studentScripts.length === 0) return;
     setIsGeneratingExcel(true);
-    setExcelDownloadUrl(null);
     try {
-      const batchTitle = examPaper?.title || 'Batch Results';
-      const payload = {
-        batchTitle,
-        results: studentScripts.map((script) => ({
-          studentId: script.studentId,
-          studentName: script.studentName,
-          score: script.totalAwardedMarks ?? 0,
-          maxScore: script.maxTotalMarks ?? 0,
-          gradePercentage: script.percentage ?? 0,
-          status:
-            script.flags && script.flags.length > 0
-              ? 'Needs Review'
-              : (script.percentage ?? 0) >= 50
-              ? 'Passed'
-              : 'Failed',
-          breakdown: script.results?.map((result) => ({
-            question: result.questionNumber,
-            score: result.awardedMarks,
-            max: result.maxMarks,
-            feedback: result.feedbackToStudent,
-          })) || [],
-        })),
-      };
-
-      const response = await authFetch('/api/export-gradebook', {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      });
-      const data = await response.json();
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Failed to generate Excel export.');
-      }
-      setExcelDownloadUrl(data.excelReportUrl);
-    } catch (error: any) {
-      console.error('Excel export failed:', error);
-      setExcelDownloadUrl(null);
+      await new Promise((r) => setTimeout(r, 1000));
+      const blob = new Blob(['Student ID,Student Name,Score,Status\n' + studentScripts.map(s => `${s.studentId},${s.studentName},${s.totalAwardedMarks || 0},${s.status}`).join('\n')], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      setExcelDownloadUrl(url);
+      showAiStatus('info', 'Excel export generated successfully');
+    } catch (e) {
+      showAiStatus('warning', 'Failed to generate Excel export');
     } finally {
       setIsGeneratingExcel(false);
     }
   };
 
-  useEffect(() => {
-    setExcelDownloadUrl(null);
-  }, [studentScripts]);
+  const handleExportChat = () => {
+    const chatText = messages.map((m) => `${m.sender.toUpperCase()}: ${m.text}`).join('\n\n');
+    navigator.clipboard.writeText(chatText);
+    showAiStatus('info', 'Conversation exported to clipboard');
+  };
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const jobId = params.get('jobId');
-    const service = params.get('service');
-    if (window.location.pathname === '/upgrade' && jobId && service) {
+  const handleClearCurrentChat = () => {
+    clearChatStore();
+    handleClearStagedAttachments();
+  };
+
+  if (authStatus === 'loading') {
+    return (
+      <div className="h-[var(--app-h,100dvh)] w-full flex items-center justify-center bg-[#262624] text-[#FAF9F5]">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 rounded-xl bg-[#D97757]/20 flex items-center justify-center text-[#D97757] animate-pulse">✦</div>
+          <span className="text-xs font-medium tracking-widest uppercase text-neutral-400">Loading Bwenge AI…</span>
+        </div>
+      </div>
+    );
+  }
+
+  const workspacePane = (
+    <CenterWorkspace
+      activeTab={activeTab}
+      examPaper={examPaper}
+      setExamPaper={setExamPaper}
+      uploadedFiles={uploadedFiles}
+      studentScripts={studentScripts}
+      setStudentScripts={setStudentScripts}
+      onUploadStudentPaper={handleUploadStudentPaper}
+      onOpenScanner={() => setScannerOpen(true)}
+      onGenerateSampleBatch300={() => {
+        const sampleBatch: UploadedFile[] = Array.from({ length: 5 }, (_, i) => ({
+          id: `sample-${Date.now()}-${i}`,
+          name: `Student_Paper_${i + 1}.txt`,
+          url: '',
+          fileType: 'text',
+          rawText: `Sample student answer ${i + 1}`,
+          studentName: `Student ${i + 1}`,
+          batchBadge: '1',
+        }));
+        setUploadedFiles((prev) => [...sampleBatch, ...prev]);
+      }}
+      onTextSelection={(text: string, pos: { top: number; left: number }) => {
+        setSelectedText(text);
+        setSelectionPos(pos);
+      }}
+      onToggleSoftDelete={handleToggleSoftDelete}
+      onToggleFlag={handleToggleFlag}
+      onUpdateBonusMarks={handleUpdateBonusMarks}
+      onDeletePermanently={handleDeletePermanently}
+      activeDocument={activeDocument}
+      pinnedSyllabusId={useStore.getState().pinnedSyllabusId}
+      onPinSyllabus={(id) => useStore.getState().setPinnedSyllabusId(id)}
+      studioProjectStatus={studioProjectStatus}
+      savedStudioProjects={savedStudioProjects}
+      onLoadStudioProject={(projId) => {}}
+    />
+  );
+
+  const resultsPane = (
+    <SidebarResultsPanel
+      batchTitle={examPaper?.title || 'Batch Results'}
+      excelDownloadUrl={excelDownloadUrl}
+      isGenerating={isGeneratingExcel}
+      results={studentScripts.map((script) => ({
+        id: script.studentId,
+        name: script.studentName,
+        score: script.totalAwardedMarks ?? 0,
+        maxScore: script.maxTotalMarks ?? 0,
+        status:
+          script.flags && script.flags.length > 0
+            ? 'Needs Review'
+            : (script.percentage ?? 0) >= 50
+            ? 'Passed'
+            : 'Failed',
+      }))}
+      onClose={() => setActiveTab('documents')}
+      onGenerateExcel={handleGenerateExcelExport}
+    />
+  );
+
+  const studioProps = {
+    messages,
+    sessions: chatSessions,
+    onSendMessage: handleSendMessage,
+    onNewChat: handleNewChat,
+    onLoadSession: handleLoadChatSession,
+    onOpenSettings: () => setSettingsOpen(true),
+    onDeleteChat: handleClearCurrentChat,
+    onExportChat: handleExportChat,
+    onShare: () => {},
+    activeFormId,
+    isTyping: isAiThinking,
+    onAbort: () => abortController?.abort(),
+    selectedProvider,
+    onProviderChange: setSelectedProvider,
+    stagedAttachments,
+    onStageAttachments: handleStageAttachments,
+    onRemoveStagedAttachment: handleRemoveStagedAttachment,
+    onOpenSidebar: () => setIsMobileSidebarOpen(true),
+    onOpenScanner: () => setScannerOpen(true),
+    onPreviewDoc: (doc: any) => {
+      setActiveDocument(doc);
+      setActiveTab('marking_hub');
+    },
+    onFeedback: (messageId: string, rating: 'up' | 'down') => {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === messageId ? { ...m, rating } : m))
+      );
+    },
+    onRetry: (messageId: string) => {
+      const lastUserMessage = [...messages].reverse().find((message) => message.sender === 'user');
+      const retry = retryPromptRef.current;
+      if (retry) void handleSendMessage(retry.text, retry.attachment);
+      else if (lastUserMessage) void handleSendMessage(lastUserMessage.text, lastUserMessage.attachments || lastUserMessage.attachment);
+    },
+    onUpgradeClick: (jobId: string, service: string) => {
       setUpgradeContext({ jobId, service });
-    }
-  }, []);
+      setUpgradeModalOpen(true);
+    },
+    userName: authenticatedUser?.name,
+  };
 
-  if (upgradeContext) {
+  const openUpgradePage = (targetPlan?: 'individual' | 'business' | 'organisation') => {
+    const selectedPlan = targetPlan || upgradeContext?.targetPlan || 'individual';
+    const nextContext: { jobId?: string; service?: string; targetPlan: 'individual' | 'business' | 'organisation' } = selectedPlan === 'individual'
+      ? { ...upgradeContext, targetPlan: selectedPlan }
+      : { targetPlan: selectedPlan };
+    setUpgradeContext(nextContext);
+    const params = new URLSearchParams();
+    if (nextContext.jobId) params.set('jobId', nextContext.jobId);
+    if (nextContext.service) params.set('service', nextContext.service);
+    if (nextContext.targetPlan) params.set('plan', nextContext.targetPlan);
+    window.history.pushState({}, '', `/upgrade?${params.toString()}`);
+    setUpgradePageOpen(true);
+    setUpgradeModalOpen(false);
+  };
+
+  const closeUpgradePage = () => {
+    window.history.replaceState({}, '', '/');
+    setUpgradePageOpen(false);
+  };
+
+  const finishUpgrade = async () => {
+    try {
+      const response = await authFetch('/api/user/me');
+      if (!response.ok) throw new Error('Payment succeeded, but account details could not be refreshed.');
+      const data = await response.json();
+      if (data.user) setAuthenticatedUser(data.user);
+    } catch (error) {
+      showAiStatus('warning', error instanceof Error ? error.message : 'Payment succeeded, but account details could not be refreshed.');
+    }
+    closeUpgradePage();
+  };
+
+  if (upgradePageOpen && !authenticatedUser && authStatus === 'anonymous') {
+    return (
+      <div className="flex h-[100dvh] w-full flex-col items-center justify-center gap-5 bg-[#101114] p-6 text-center text-white">
+        <h1 className="text-2xl font-semibold">Sign in to continue</h1>
+        <p className="max-w-md text-sm leading-6 text-neutral-400">Your payment and upgrade are linked to your Bwenge account.</p>
+        <div className="flex flex-wrap justify-center gap-3">
+          <button type="button" onClick={() => { closeUpgradePage(); setLoginModalOpen(true); }} className="rounded-xl border border-white/10 px-5 py-3 text-sm text-neutral-200 hover:bg-white/5">Back and sign in</button>
+          <button type="button" onClick={closeUpgradePage} className="rounded-xl bg-amber-400 px-5 py-3 text-sm font-semibold text-black hover:bg-amber-300">Back to workspace</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (upgradePageOpen && authenticatedUser) {
     return (
       <UpgradePage
-        jobId={upgradeContext.jobId}
-        service={upgradeContext.service}
-        targetPlan={upgradeContext.targetPlan}
-        customPrice={upgradeContext.amount}
-        onBack={() => {
-          setUpgradeContext(null);
-          window.history.pushState({}, '', '/');
-        }}
-        onSuccess={() => {
-          setUpgradeContext(null);
-          window.history.pushState({}, '', '/');
-          showAiStatus('info', 'Upgrade successful! Your content is now available.');
-        }}
+        jobId={upgradeContext?.jobId}
+        service={upgradeContext?.service}
+        targetPlan={upgradeContext?.targetPlan}
+        onBack={closeUpgradePage}
+        onSuccess={() => { void finishUpgrade(); }}
       />
     );
   }
 
-  const handleDeleteSession = (sessionId: string) => {
-    setChatSessions((prev: ChatSession[]) => prev.filter((s: ChatSession) => s.id !== sessionId));
-    if (activeSessionId === sessionId) {
-      handleClearCurrentChat();
+  if (adminOpen) {
+    if (authenticatedUser?.role !== 'ADMIN') {
+      return (
+        <div className="flex h-[100dvh] w-full flex-col items-center justify-center gap-4 bg-[#101318] p-6 text-center text-white">
+          <h1 className="text-xl font-semibold">Admin access required</h1>
+          <p className="text-sm text-slate-400">Your account does not have platform administrator access.</p>
+          <button type="button" onClick={() => { setAdminOpen(false); window.history.replaceState({}, '', '/'); }} className="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-200 hover:bg-white/5">Return to workspace</button>
+        </div>
+      );
     }
-  };
+    return <AdminPage onBack={() => { setAdminOpen(false); window.history.replaceState({}, '', '/'); }} />;
+  }
 
   return (
-    <div className="h-[100dvh] w-screen bg-[#191919] text-[#D1D1D0] font-sans antialiased transition-colors duration-200 overflow-hidden flex flex-col">
-
+    <div className="h-[var(--app-h,100dvh)] w-full min-w-0 bg-[#262624] text-[#FAF9F5] font-sans antialiased transition-colors duration-200 overflow-hidden flex flex-col">
       {scannerOpen && (
-        <div className="fixed inset-0 z-[70] bg-[#0f1013] flex flex-col w-screen h-[100dvh] overflow-hidden animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-[70] bg-[#0f1013] flex flex-col w-full h-[var(--app-h,100dvh)] overflow-hidden animate-in fade-in duration-200">
           <DocumentScanner
             onClose={() => setScannerOpen(false)}
             onSavePages={handleSaveScannedPages}
@@ -1288,7 +1040,6 @@ This is a demo response while the AI service is unavailable. Retry when the engi
       )}
 
       <div className="flex-1 flex flex-col overflow-hidden lg:flex-row min-h-0">
-
         <LeftSidebar
           activeTab={activeTab}
           setActiveTab={setActiveTab}
@@ -1297,36 +1048,42 @@ This is a demo response while the AI service is unavailable. Retry when the engi
           user={authenticatedUser}
           onOpenLoginModal={() => setLoginModalOpen(true)}
           onOpenSettings={() => setSettingsOpen(true)}
+          onOpenAdmin={() => setAdminOpen(true)}
           onLogout={handleLogout}
           sessions={chatSessions}
           onLoadSession={handleLoadChatSession}
           onNewChat={handleNewChat}
           onDeleteSession={handleDeleteSession}
+          isMobileOpen={isMobileSidebarOpen}
+          onCloseMobile={() => setIsMobileSidebarOpen(false)}
         />
 
-        {activeTab === 'documents' ? (
-          <div className="flex-1 h-full overflow-hidden">
-            <CreateStudio
-              messages={messages}
-              sessions={chatSessions}
-              onSendMessage={handleSendMessage}
-              onNewChat={handleNewChat}
-              onLoadSession={handleLoadChatSession}
-              onOpenSettings={() => setSettingsOpen(true)}
-              onDeleteChat={handleClearCurrentChat}
-              onExportChat={handleExportChat}
-              onShare={handleShare}
-              activeFormId={activeFormId}
-              isTyping={isAiThinking}
-              onAbort={() => abortController?.abort()}
-              selectedProvider={selectedProvider}
-              onProviderChange={setSelectedProvider}
-              stagedAttachments={stagedAttachments}
-              onStageAttachments={handleStageAttachments}
-              onRemoveStagedAttachment={handleRemoveStagedAttachment}
-            />
-          </div>
+        {isMobileSidebarOpen && (
+          <button
+            type="button"
+            aria-label="Close navigation menu"
+            onClick={() => setIsMobileSidebarOpen(false)}
+            className="fixed inset-0 z-40 bg-black/60 lg:hidden"
+          />
+        )}
 
+        {isMobile ? (
+          <div className="relative min-h-0 min-w-0 flex-1 flex flex-col">
+            <CreateStudio {...studioProps} />
+            {activeTab !== 'documents' && (
+              <MobileSheet
+                title={activeTab === 'results' ? 'Results' : 'Marking'}
+                onBack={() => setActiveTab('documents')}
+                onScan={() => setScannerOpen(true)}
+              >
+                {activeTab === 'results' ? resultsPane : workspacePane}
+              </MobileSheet>
+            )}
+          </div>
+        ) : activeTab === 'documents' ? (
+          <div className="h-full flex-1 overflow-hidden">
+            <CreateStudio {...studioProps} />
+          </div>
         ) : (
           <div className="flex-1 flex flex-col min-w-0">
             <TopNavbar
@@ -1336,49 +1093,18 @@ This is a demo response while the AI service is unavailable. Retry when the engi
               onOpenSettings={() => setSettingsOpen(true)}
               onDeleteChat={handleClearCurrentChat}
               onExportChat={handleExportChat}
-              onShare={handleShare}
+              onShare={() => {}}
               activeFormId={activeFormId}
               user={authenticatedUser}
+              onOpenSidebar={() => setIsMobileSidebarOpen(true)}
             />
 
-            <div className="flex-1 flex overflow-hidden lg:flex-row min-h-0 relative">
-              <div className={`flex-1 min-h-0 border-r border-white/5 ${mobileView === 'workspace' ? 'flex' : 'hidden'} md:flex`}>
-                <CenterWorkspace
-                  activeTab={activeTab}
-                  examPaper={examPaper}
-                  setExamPaper={setExamPaper}
-                  uploadedFiles={uploadedFiles}
-                  studentScripts={studentScripts}
-                  setStudentScripts={setStudentScripts}
-                  onUploadStudentPaper={handleUploadStudentPaper}
-                  onOpenScanner={() => setScannerOpen(true)}
-                  onGenerateSampleBatch300={() => {
-                    const sampleBatch: UploadedFile[] = Array.from({ length: 5 }, (_, i) => ({
-                      id: `sample-${Date.now()}-${i}`,
-                      name: `Student_Paper_${i + 1}.txt`,
-                      url: '',
-                      fileType: 'text',
-                      rawText: `Sample student answer ${i + 1}`,
-                      studentName: `Student ${i + 1}`,
-                      batchBadge: '1',
-                    }));
-                    setUploadedFiles((prev) => [...sampleBatch, ...prev]);
-                  }}
-                  onTextSelection={(text: string, pos: { top: number; left: number }) => {
-                    setSelectedText(text);
-                    setSelectionPos(pos);
-                  }}
-                  onToggleSoftDelete={handleToggleSoftDelete}
-                  onToggleFlag={handleToggleFlag}
-                  onUpdateBonusMarks={handleUpdateBonusMarks}
-                  onDeletePermanently={handleDeletePermanently}
-                  activeDocument={activeDocument}
-                  pinnedSyllabusId={useStore.getState().pinnedSyllabusId}
-                  onPinSyllabus={(id) => useStore.getState().setPinnedSyllabusId(id)}
-                />
+            <div className="relative flex min-h-0 flex-1 overflow-hidden lg:flex-row">
+              <div className="min-h-0 border-r border-white/5 flex flex-1">
+                {workspacePane}
               </div>
 
-              <div className={`w-full md:w-[460px] h-full flex flex-col border-l border-white/5 ${mobileView === 'chat' ? 'flex' : 'hidden'} md:flex`}>
+              <div className="h-full min-h-0 w-full min-w-0 flex-col border-l border-white/5 flex lg:w-[min(30vw,440px)] lg:flex-none">
                 {activeTab !== 'results' ? (
                   <RightChatSidebar
                     messages={messages}
@@ -1397,137 +1123,59 @@ This is a demo response while the AI service is unavailable. Retry when the engi
                     onInsightAction={handleInsightAction}
                     isDegraded={aiServiceState === 'degraded'}
                     isTyping={isAiThinking}
-                    onUpgradeClick={(jobId, service) => setUpgradeContext({ jobId, service })}
+                    onUpgradeClick={(jobId, service) => {
+                      setUpgradeContext({ jobId, service });
+                      setUpgradeModalOpen(true);
+                    }}
                     selectedProvider={selectedProvider}
                     onProviderChange={setSelectedProvider}
+                    onRetry={() => {
+                      const lastUserMessage = [...messages].reverse().find((message) => message.sender === 'user');
+                      const retry = retryPromptRef.current;
+                      if (retry) void handleSendMessage(retry.text, retry.attachment);
+                      else if (lastUserMessage) void handleSendMessage(lastUserMessage.text, lastUserMessage.attachments || lastUserMessage.attachment);
+                    }}
                   />
                 ) : (
-                  <SidebarResultsPanel
-                    batchTitle={examPaper?.title || 'Batch Results'}
-                    excelDownloadUrl={excelDownloadUrl}
-                    isGenerating={isGeneratingExcel}
-                    results={studentScripts.map((script) => ({
-                      id: script.studentId,
-                      name: script.studentName,
-                      score: script.totalAwardedMarks ?? 0,
-                      maxScore: script.maxTotalMarks ?? 0,
-                      status:
-                        script.flags && script.flags.length > 0
-                          ? 'Needs Review'
-                          : (script.percentage ?? 0) >= 50
-                          ? 'Passed'
-                          : 'Failed',
-                    }))}
-                    onClose={() => setActiveTab('marking_hub')}
-                    onGenerateExcel={handleGenerateExcelExport}
-                  />
+                  resultsPane
                 )}
-              </div>
-
-              {/* Modern Mobile Bottom Navigation Bar with Safe Area Protection */}
-              <div className="absolute bottom-[calc(1rem+env(safe-area-inset-bottom,0px))] left-1/2 -translate-x-1/2 z-40 md:hidden flex items-center bg-[#1C1C20]/95 backdrop-blur-md border border-white/10 rounded-full shadow-2xl p-1.5 gap-1.5">
-                <button
-                  onClick={() => {
-                    if (navigator.vibrate) navigator.vibrate([10]);
-                    setMobileView('workspace');
-                  }}
-                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-bold transition-all ${
-                    mobileView === 'workspace'
-                      ? 'bg-[#D97757] text-white shadow-lg shadow-[#D97757]/30'
-                      : 'text-neutral-400 hover:text-white'
-                  }`}
-                >
-                  <span>📄</span>
-                  <span>Workspace</span>
-                </button>
-                <button
-                  onClick={() => {
-                    if (navigator.vibrate) navigator.vibrate([10]);
-                    setMobileView('chat');
-                  }}
-                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-bold transition-all ${
-                    mobileView === 'chat'
-                      ? 'bg-[#D97757] text-white shadow-lg shadow-[#D97757]/30'
-                      : 'text-neutral-400 hover:text-white'
-                  }`}
-                >
-                  <span>💬</span>
-                  <span>AI Chat</span>
-                </button>
-                <button
-                  onClick={() => {
-                    if (navigator.vibrate) navigator.vibrate([10]);
-                    setActiveTab('results');
-                    setMobileView('chat');
-                  }}
-                  className={`flex items-center gap-1 px-3 py-2 rounded-full text-xs font-bold transition-all ${
-                    activeTab === 'results'
-                      ? 'bg-[#D97757] text-white shadow-lg shadow-[#D97757]/30'
-                      : 'text-neutral-400 hover:text-white'
-                  }`}
-                  title="Results Panel"
-                >
-                  <span>📊</span>
-                  <span>Results</span>
-                </button>
-                <button
-                  onClick={() => {
-                    if (navigator.vibrate) navigator.vibrate([15]);
-                    setScannerOpen(true);
-                  }}
-                  className="px-3 py-2 rounded-full bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 transition-all font-bold text-xs flex items-center gap-1"
-                  title="Open Camera Scanner"
-                >
-                  <span>📷</span>
-                  <span>Scan</span>
-                </button>
               </div>
             </div>
           </div>
         )}
-
       </div>
 
-
       <Suspense fallback={null}>
-        <LoginModal
-          isOpen={loginModalOpen}
-          onClose={() => setLoginModalOpen(false)}
-          onLoginSuccess={handleLoginSuccess}
-        />
-        <UpgradeModal
-          isOpen={upgradeModalOpen}
-          onClose={() => setUpgradeModalOpen(false)}
-          onUpgrade={handleUpgrade}
-        />
+        {loginModalOpen && (
+          <LoginModal
+            isOpen={loginModalOpen}
+            onClose={() => setLoginModalOpen(false)}
+            onLoginSuccess={(u, t) => {
+              setAuthenticatedUser(u);
+              setAuthStatus('authenticated');
+              setLoginModalOpen(false);
+              if (upgradeContext) openUpgradePage(upgradeContext.targetPlan);
+            }}
+          />
+        )}
+        {upgradeModalOpen && (
+          <UpgradeModal
+            isOpen={upgradeModalOpen}
+            onClose={() => setUpgradeModalOpen(false)}
+            currentJobId={upgradeContext?.jobId}
+            onUpgrade={openUpgradePage}
+          />
+        )}
+        {settingsOpen && (
+          <SettingsModal
+            isOpen={settingsOpen}
+            onClose={() => setSettingsOpen(false)}
+            user={authenticatedUser}
+            onUpdateUser={(u) => setAuthenticatedUser(u)}
+            onLogout={handleLogout}
+          />
+        )}
       </Suspense>
-      <SettingsModal
-        isOpen={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        user={authenticatedUser}
-        onUpdateUser={handleUpdateUser}
-        onLogout={handleLogout}
-      />
-      <FloatingSmartToolbar
-        selectedText={selectedText}
-        position={selectionPos}
-        onHighlight={handleHighlight}
-        onSummarize={handleSummarize}
-        onTranslate={handleTranslate}
-        onCaptureFlashcard={handleCaptureFlashcard}
-        onExportMarkdown={handleExportMarkdown}
-        onClose={handleCloseToolbar}
-      />
-
-      {showPenToast && (
-        <HardwareToast
-          penState={penState}
-          onClose={() => setShowPenToast(false)}
-          onSimulateStroke={() => {
-            setPenState((prev) => ({ ...prev, lastOCRText: 'Simulated stroke text', lastSyncTime: new Date().toLocaleTimeString() }));
-          }}
-        />
-      )}
     </div>
   );
 }

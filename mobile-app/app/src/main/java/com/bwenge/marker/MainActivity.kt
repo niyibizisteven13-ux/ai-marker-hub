@@ -10,25 +10,24 @@ import androidx.compose.ui.platform.ComposeView
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONArray
 import org.json.JSONObject
+import java.io.BufferedReader
 import java.io.IOException
+import java.io.InputStreamReader
 
 class MainActivity : AppCompatActivity() {
 
     private val client = OkHttpClient()
-    private val ollamaUrl = "http://172.20.25.88:11434/api/chat"
-    
+    // 10.0.2.2 points to host localhost in Android Emulator. Adjust for physical device testing if needed.
+    private val backendBaseUrl = "http://10.0.2.2:3000"
+    private val chatEndpoint = "$backendBaseUrl/api/ai/chat"
+
     private val phrases = listOf(
-        "Figuring out what you need",
-        "Thinking through the steps",
-        "Working out a plan",
-        "Breaking this into steps",
-        "Connecting to the model",
-        "Reaching out to Claude",
-        "Opening the line",
-        "Putting the answer together",
-        "Writing this out"
+        "Connecting to Bwenge AI Gateway...",
+        "Routing request to GonkaRouter (GLM-5.3-Flash)...",
+        "Analyzing with high-speed intelligence...",
+        "Formulating structured response...",
+        "Writing output..."
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -45,66 +44,110 @@ class MainActivity : AppCompatActivity() {
         }
 
         sendButton.setOnClickListener {
-            val userPrompt = promptInput.text.toString()
+            val userPrompt = promptInput.text.toString().trim()
             if (userPrompt.isNotEmpty()) {
                 resultText.text = phrases.random()
                 composeLoader.visibility = View.VISIBLE
-                sendToOllama(userPrompt, resultText, composeLoader)
+                sendToBwengeBackend(userPrompt, resultText, composeLoader)
             }
         }
-
-        // Initialize Telegram Bot & Gemini Agent Companion Engine (Optional)
-        // val botToken = "YOUR_BOT_TOKEN"
-        // val geminiApiKey = "YOUR_GEMINI_API_KEY"
-        // if (botToken != "YOUR_BOT_TOKEN" && geminiApiKey != "YOUR_GEMINI_API_KEY") {
-        //     val geminiAgent = GeminiAgent(geminiApiKey)
-        //     val botEngine = TelegramBotEngine(botToken, geminiAgent)
-        //     botEngine.startListening()
-        // }
     }
 
-    private fun sendToOllama(prompt: String, resultView: TextView, loader: View) {
+    private fun sendToBwengeBackend(prompt: String, resultView: TextView, loader: View) {
         val json = JSONObject().apply {
-            put("model", "bwenge-agent")
-            put("messages", JSONArray().apply {
-                put(JSONObject().apply {
-                    put("role", "user")
-                    put("content", prompt)
-                })
-            })
-            put("stream", false)
+            put("query", prompt)
+            put("provider", "gonkarouter")
         }
 
         val body = json.toString().toRequestBody("application/json".toMediaType())
         val request = Request.Builder()
-            .url(ollamaUrl)
+            .url(chatEndpoint)
             .post(body)
+            .addHeader("Accept", "text/event-stream")
             .build()
 
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 runOnUiThread {
                     loader.visibility = View.GONE
-                    resultView.text = "Error: ${e.message}"
+                    resultView.text = "Connection Error: ${e.message}\n(Ensure Bwenge AI backend is running on $backendBaseUrl)"
                 }
             }
 
             override fun onResponse(call: Call, response: Response) {
-                val bodyString = response.body?.string()
-                runOnUiThread {
-                    loader.visibility = View.GONE
-                    if (response.isSuccessful && bodyString != null) {
-                        try {
-                            val jsonRes = JSONObject(bodyString)
-                            val message = jsonRes.getJSONObject("message")
-                            val content = message.getString("content")
-                            resultView.text = content
-                        } catch (e: Exception) {
-                            resultView.text = "Parse Error: ${e.message}\nRaw: $bodyString"
-                        }
-                    } else {
-                        resultView.text = "API Error: ${response.code}\n$bodyString"
+                if (!response.isSuccessful) {
+                    val errBody = response.body?.string() ?: ""
+                    runOnUiThread {
+                        loader.visibility = View.GONE
+                        resultView.text = "API Error (${response.code}): $errBody"
                     }
+                    return
+                }
+
+                val responseStream = response.body?.byteStream()
+                if (responseStream == null) {
+                    runOnUiThread {
+                        loader.visibility = View.GONE
+                        resultView.text = "Error: Received empty response stream from Bwenge AI backend."
+                    }
+                    return
+                }
+
+                val reader = BufferedReader(InputStreamReader(responseStream))
+                val accumulatedText = StringBuilder()
+                var firstTokenReceived = false
+
+                try {
+                    var line: String? = reader.readLine()
+                    while (line != null) {
+                        val trimmed = line.trim()
+                        if (trimmed.startsWith("data:")) {
+                            val dataPayload = trimmed.removePrefix("data:").trim()
+                            if (dataPayload == "[DONE]") break
+
+                            try {
+                                val jsonObj = JSONObject(dataPayload)
+                                val type = jsonObj.optString("type")
+                                if (type == "text") {
+                                    val token = jsonObj.optString("text", "")
+                                    if (token.isNotEmpty()) {
+                                        accumulatedText.append(token)
+                                        if (!firstTokenReceived) {
+                                            firstTokenReceived = true
+                                            runOnUiThread { loader.visibility = View.GONE }
+                                        }
+                                        val currentText = accumulatedText.toString()
+                                        runOnUiThread {
+                                            resultView.text = currentText
+                                        }
+                                    }
+                                } else if (type == "error") {
+                                    val err = jsonObj.optString("error", "Unknown backend error")
+                                    runOnUiThread {
+                                        loader.visibility = View.GONE
+                                        resultView.text = "Backend Error: $err"
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                // Skip unparseable SSE metadata or commentary
+                            }
+                        }
+                        line = reader.readLine()
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread {
+                        if (accumulatedText.isEmpty()) {
+                            resultView.text = "Stream Read Exception: ${e.message}"
+                        }
+                    }
+                } finally {
+                    runOnUiThread {
+                        loader.visibility = View.GONE
+                        if (accumulatedText.isEmpty() && !firstTokenReceived) {
+                            resultView.text = "Bwenge AI completed response with no visible text."
+                        }
+                    }
+                    try { response.close() } catch (ignored: Exception) {}
                 }
             }
         })

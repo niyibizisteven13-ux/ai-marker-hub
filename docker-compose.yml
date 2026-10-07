@@ -4,32 +4,31 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - NODE_ENV=development
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/ai_marker_hub?schema=public
+      - NODE_ENV=production
+      - DATABASE_URL=${DATABASE_URL:?Set DATABASE_URL in the deployment environment}
+      - JWT_SECRET=${JWT_SECRET:?Set JWT_SECRET in the deployment environment}
+      - APP_URL=${APP_URL:?Set APP_URL in the deployment environment}
+      - REDIS_URL=redis://redis:6379
+      - STORAGE_DRIVER=${STORAGE_DRIVER:-local}
     depends_on:
       - postgres
       - redis
-    volumes:
-      - .env:/app/.env
 
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:5432:5432"
     environment:
       POSTGRES_DB: ai_marker_hub
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    ports:
-      - "5432:5432"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the deployment environment}
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
   redis:
     image: redis:alpine
-    ports:
-      - "6379:6379"
+    restart: unless-stopped
 
 volumes:
   postgres_data:
