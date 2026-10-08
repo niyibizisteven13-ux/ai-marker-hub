@@ -1,7 +1,6 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../../db.js';
 import { PlanPolicy, AccessResult } from './types.js';
 
-const prisma = new PrismaClient();
 const FREE_RESULTS_ALLOWED = 1;
 
 export class IndividualPlanPolicy implements PlanPolicy {

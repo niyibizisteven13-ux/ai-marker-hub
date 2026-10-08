@@ -120,6 +120,50 @@ export default function ChatMessage({
     .trim();
 
   const [copied, setCopied] = useState(false);
+  const [chatFormId, setChatFormId] = useState<string | null>(() => {
+    if (!formSchemaMatch) return null;
+    try {
+      const p = JSON.parse(formSchemaMatch[1]);
+      return p?.id || null;
+    } catch {
+      return null;
+    }
+  });
+  const [chatFormLinkCopied, setChatFormLinkCopied] = useState(false);
+
+  const ensureChatFormSaved = async (): Promise<string | null> => {
+    if (chatFormId) return chatFormId;
+    if (!formSchemaMatch) return null;
+    const { authFetch } = await import('../utils/authFetch');
+    let parsed: any = {};
+    try { parsed = JSON.parse(formSchemaMatch[1]); } catch { parsed = {}; }
+    if (parsed?.id) {
+      setChatFormId(parsed.id);
+      return parsed.id;
+    }
+    const rawQuestions = Array.isArray(parsed.questions) ? parsed.questions : Array.isArray(parsed.fields) ? parsed.fields : [];
+    const saveRes = await authFetch('/api/forms', {
+      method: 'POST',
+      body: JSON.stringify({
+        title: parsed.title || 'AI Agent Form',
+        description: parsed.description || '',
+        questions: rawQuestions.map((q: any, idx: number) => ({
+          id: String(q.id ?? q.number ?? idx + 1),
+          type: String(q.type || 'SHORT_TEXT').toUpperCase(),
+          title: String(q.title || q.label || q.text || `Question ${idx + 1}`),
+          required: Boolean(q.required ?? false),
+          points: q.points !== undefined ? Number(q.points) : undefined,
+          correctAnswer: q.correctAnswer,
+          options: Array.isArray(q.options) ? q.options.map((o: any, oi: number) => typeof o === 'string' ? { id: `opt_${oi}`, label: o } : o) : undefined,
+        })),
+        rubric: parsed.rubric || null,
+      }),
+    });
+    const savedData = await saveRes.json().catch(() => ({}));
+    const newId = savedData?.form?.id || null;
+    if (newId) setChatFormId(newId);
+    return newId;
+  };
 
   const handleCopy = () => {
     navigator.clipboard.writeText(cleanText);
@@ -217,11 +261,60 @@ export default function ChatMessage({
             )}
 
             {formSchemaMatch && (
-              <div className="my-3">
+              <div className="my-3 space-y-2">
+                <div className="mx-auto flex max-w-2xl flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-[#1B1B19] px-4 py-2.5">
+                  <div className="flex items-center gap-2 text-xs text-[#C2C0B6] min-w-0">
+                    <FileText className="h-4 w-4 shrink-0 text-[#D97757]" />
+                    <span className="truncate font-mono">
+                      {chatFormId ? `${window.location.origin}/forms/${chatFormId}` : 'Interactive Google-style Form ready'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const fId = await ensureChatFormSaved();
+                        if (fId) {
+                          navigator.clipboard.writeText(`${window.location.origin}/forms/${fId}`);
+                          setChatFormLinkCopied(true);
+                          setTimeout(() => setChatFormLinkCopied(false), 1800);
+                        }
+                      }}
+                      className="rounded-lg bg-[#D97757] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[#c66849]"
+                    >
+                      {chatFormLinkCopied ? 'Link Copied!' : chatFormId ? 'Copy Form Link' : 'Create & Copy Link'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const fId = await ensureChatFormSaved();
+                        if (fId) {
+                          window.dispatchEvent(new CustomEvent('bwenge:open-public-form', { detail: { formId: fId } }));
+                        }
+                      }}
+                      className="rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-semibold text-[#FAF9F5] transition hover:bg-white/10"
+                    >
+                      Open Form
+                    </button>
+                  </div>
+                </div>
                 <DynamicForm
                   schema={formSchemaMatch[1]}
-                  onSubmit={(data) => {
-                    console.log('Form submitted:', data);
+                  onSubmit={async (answers) => {
+                    const { authFetch } = await import('../utils/authFetch');
+                    const formId = await ensureChatFormSaved();
+                    if (formId) {
+                      const subRes = await authFetch(`/api/forms/${formId}/submit`, {
+                        method: 'POST',
+                        body: JSON.stringify({ answers }),
+                      });
+                      const subData = await subRes.json().catch(() => ({}));
+                      if (!subRes.ok) {
+                        throw new Error(subData.error || 'Could not submit form response.');
+                      }
+                      return subData;
+                    }
+                    return 'Form response recorded.';
                   }}
                 />
               </div>

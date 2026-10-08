@@ -1,10 +1,8 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../../db.js';
 import { PlanPolicy } from './types.js';
 import { IndividualPlanPolicy } from './IndividualPlan.js';
 import { OrganizationPlanPolicy } from './OrganizationPlan.js';
 import { BusinessPlanPolicy } from './BusinessPlan.js';
-
-const prisma = new PrismaClient();
 
 export async function resolvePlanPolicy(userId: string): Promise<PlanPolicy> {
   const membership = await prisma.organizationMember.findFirst({

@@ -43,10 +43,9 @@ export class FactCheckService {
   }
 
   private async initRedis() {
-    if (!process.env.REDIS_URL) return;
     try {
-      const { default: Redis } = await import('ioredis');
-      this.redis = new Redis(process.env.REDIS_URL);
+      const { redis } = await import('../db.js');
+      this.redis = redis;
     } catch (e) {
       logger.warn('FactCheckService: Redis not available, caching disabled');
     }

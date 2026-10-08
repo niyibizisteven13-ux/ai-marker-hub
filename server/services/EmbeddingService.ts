@@ -6,7 +6,14 @@ export class EmbeddingService {
   private client: GoogleGenAI;
 
   private constructor() {
-    this.client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+    this.client = new GoogleGenAI({
+      apiKey: process.env.GEMINI_API_KEY || '',
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    });
   }
 
   public static getInstance(): EmbeddingService {
@@ -21,11 +28,11 @@ export class EmbeddingService {
    */
   public async getEmbedding(text: string): Promise<number[]> {
     try {
-      const result = await (this.client as any).models.embedContent({
-        model: 'text-embedding-004',
-        contents: [{ role: 'user', parts: [{ text }] }]
+      const result = await this.client.models.embedContent({
+        model: 'gemini-embedding-2-preview',
+        contents: [text],
       });
-      return result.embedding.values;
+      return result.embeddings?.[0]?.values || [];
     } catch (err: any) {
       logger.error('Embedding generation failed:', err.message);
       return [];

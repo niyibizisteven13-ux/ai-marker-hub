@@ -32,6 +32,8 @@ interface CenterWorkspaceProps {
   studioProjectStatus?: 'idle' | 'saving' | 'saved' | 'error';
   onLoadStudioProject?: (projectId: string) => void;
   savedStudioProjects?: Array<{ id: string; title: string; updatedAt: string }>;
+  externalGeneratedForm?: any | null;
+  onClearExternalForm?: () => void;
 }
 
 interface Annotation {
@@ -158,6 +160,8 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
   studioProjectStatus = 'idle',
   onLoadStudioProject,
   savedStudioProjects = [],
+  externalGeneratedForm = null,
+  onClearExternalForm,
 }) => {
   const [zoomLevel, setZoomLevel] = useState<number>(1);
   const [zoomTarget, setZoomTarget] = useState<{ x: number, y: number } | null>(null);
@@ -198,6 +202,121 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
   const [responsesLoading, setResponsesLoading] = useState(false);
   const [formDashboardTab, setFormDashboardTab] = useState<'responses' | 'settings'>('responses');
   const [responsesError, setResponsesError] = useState('');
+  const [formCopilotInstruction, setFormCopilotInstruction] = useState('');
+  const [isRunningFormCopilot, setIsRunningFormCopilot] = useState(false);
+  const [isSimulatingSubmissions, setIsSimulatingSubmissions] = useState(false);
+
+  React.useEffect(() => {
+    if (externalGeneratedForm) {
+      setGeneratedForm(externalGeneratedForm);
+      onClearExternalForm?.();
+    }
+  }, [externalGeneratedForm, onClearExternalForm]);
+
+  const handleRunFormCopilot = async (customInstruction?: string) => {
+    const instruction = (customInstruction ?? formCopilotInstruction).trim();
+    if (!instruction || isRunningFormCopilot) return;
+
+    setIsRunningFormCopilot(true);
+    setManualSaveError(null);
+    try {
+      const response = await authFetch('/api/forms/ai-agent', {
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'enhance_draft',
+          currentDraft: manualForm,
+          instruction,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'AI Form Agent could not enhance draft.');
+      const draft = data.draft || {};
+      const nextQuestions: ManualQuestion[] = Array.isArray(draft.questions)
+        ? draft.questions.map((q: any, i: number) => ({
+            id: q.id || genId(`q_${i}`),
+            type: QUESTION_TYPE_CATALOG.some((t) => t.type === q.type) ? q.type : 'SHORT_TEXT',
+            title: q.title || q.label || `Question ${i + 1}`,
+            description: q.description || '',
+            required: Boolean(q.required ?? true),
+            options: Array.isArray(q.options)
+              ? q.options.map((opt: any, oi: number) => ({
+                  id: opt?.id || genId(`opt_${oi}`),
+                  label: typeof opt === 'string' ? opt : opt?.label || `Option ${oi + 1}`,
+                }))
+              : undefined,
+            rows: Array.isArray(q.rows) ? q.rows : ['Row 1', 'Row 2'],
+            scaleMin: q.scaleMin ?? 1,
+            scaleMax: q.scaleMax ?? 5,
+            maxRating: q.maxRating ?? 5,
+          }))
+        : manualForm.questions;
+
+      setManualForm((prev) => ({
+        ...prev,
+        title: draft.title || prev.title || 'AI Agent Form',
+        description: draft.description || prev.description,
+        questions: nextQuestions,
+      }));
+      if (draft.requirements) {
+        setDraftRequirements(draft.requirements);
+        setSelectionRequirements(draft.requirements);
+      }
+      setFormCopilotInstruction('');
+    } catch (err: any) {
+      setManualSaveError(err?.message || 'AI Form Co-Pilot failed.');
+    } finally {
+      setIsRunningFormCopilot(false);
+    }
+  };
+
+  const handleSimulateAndScoreForm = async (targetFormId?: string) => {
+    const fId = targetFormId || activeSavedForm?.id || generatedForm?.id;
+    if (!fId || isSimulatingSubmissions) return;
+
+    setIsSimulatingSubmissions(true);
+    setFormAnalysisError('');
+    setFormAnalysisNotice('AI Agent is simulating 3 candidate submissions and scoring them...');
+    try {
+      const simRes = await authFetch('/api/forms/ai-agent', {
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'simulate_submissions',
+          formId: fId,
+          count: 3,
+        }),
+      });
+      const simData = await simRes.json();
+      if (!simRes.ok) throw new Error(simData.error || 'Could not simulate candidate submissions.');
+
+      await loadOwnedForms();
+      await loadFormResponses(fId);
+
+      // Immediately run AI analysis & ranking on the simulated submissions
+      const analyzeRes = await authFetch(`/api/forms/${fId}/analyze`, {
+        method: 'POST',
+        body: JSON.stringify({
+          requirements:
+            selectionRequirements ||
+            draftRequirements ||
+            activeSavedForm?.schema?.requirements ||
+            'Select the strongest candidates with thorough, high-quality answers.',
+        }),
+      });
+      const analyzeData = await analyzeRes.json();
+      if (analyzeRes.ok && analyzeData.analysis) {
+        setFormAnalysis(analyzeData.analysis);
+        setFormAnalysisNotice('AI Agent simulated 3 responses, scored all candidates, and shortlisted top matches!');
+      } else {
+        setFormAnalysisNotice('Simulated 3 candidate responses.');
+      }
+      await loadFormResponses(fId);
+      await loadOwnedForms();
+    } catch (err: any) {
+      setFormAnalysisError(err?.message || 'AI Agent simulation failed.');
+    } finally {
+      setIsSimulatingSubmissions(false);
+    }
+  };
 
   const handleGenerateForm = async () => {
     const intent = formIntentText.trim();
@@ -346,8 +465,38 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
           <DynamicForm schema={JSON.stringify(form)} onSubmit={handleTestFormSubmit} />
         </div>
 
-        <div className="p-4 sm:p-8 bg-[#F4F0E8]/30 dark:bg-[#18181B]/30 border-t border-[#E8E4DC] dark:border-[#2D2D32] flex flex-col sm:flex-row items-center gap-3">
-          {form?.id ? <button onClick={() => { setActiveSavedForm(form); setSelectionRequirements(draftRequirements || form.requirements || form.schema?.description || ''); setFormDashboardTab('responses'); setShowSavedForms(true); void loadFormResponses(form.id); }} className="w-full sm:w-auto px-5 py-3 rounded-2xl font-bold text-sm bg-white dark:bg-[#202024] border border-[#E8E4DC] dark:border-[#2D2D32]">View results</button> : <span className="text-xs text-[#858075]">Save and publish this draft to collect responses and analyze results.</span>}
+        <div className="p-4 sm:p-8 bg-[#F4F0E8]/30 dark:bg-[#18181B]/30 border-t border-[#E8E4DC] dark:border-[#2D2D32] flex flex-wrap items-center gap-3">
+          {form?.id ? (
+            <>
+              <button
+                onClick={() => {
+                  setActiveSavedForm(form);
+                  setSelectionRequirements(draftRequirements || form.requirements || form.schema?.description || '');
+                  setFormDashboardTab('responses');
+                  setShowSavedForms(true);
+                  void loadFormResponses(form.id);
+                }}
+                className="w-full sm:w-auto px-5 py-3 rounded-2xl font-bold text-sm bg-white dark:bg-[#202024] border border-[#E8E4DC] dark:border-[#2D2D32]"
+              >
+                View results
+              </button>
+              <button
+                onClick={() => {
+                  setActiveSavedForm(form);
+                  setSelectionRequirements(draftRequirements || form.requirements || form.schema?.description || '');
+                  setFormDashboardTab('responses');
+                  setShowSavedForms(true);
+                  void handleSimulateAndScoreForm(form.id);
+                }}
+                className="w-full sm:w-auto px-5 py-3 rounded-2xl font-black text-sm bg-[#D97757] text-white hover:bg-[#C56648] transition-all flex items-center justify-center gap-2"
+              >
+                <Sparkles size={16} />
+                AI Agent: Simulate &amp; Score
+              </button>
+            </>
+          ) : (
+            <span className="text-xs text-[#858075]">Save and publish this draft to collect responses and analyze results.</span>
+          )}
           <button
             onClick={handleCopyFormLink}
             disabled={!form?.id}
@@ -1071,6 +1220,14 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                     <div className="flex flex-wrap gap-2">
                       <button onClick={() => { void saveSelectionRequirements().then(() => setFormAnalysisNotice('Requirements saved.')).catch((error: any) => setFormAnalysisError(error.message)); }} className="rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] px-4 py-2.5 text-xs font-bold">Save requirements</button>
                       <button disabled={isAnalyzingForm || !activeSavedForm.responseCount} onClick={() => void runFormAnalysis()} className="rounded-xl bg-[#D97757] px-4 py-2.5 text-xs font-black text-white disabled:opacity-50">{isAnalyzingForm ? 'Analyzing responses…' : 'Analyze & select best fit'}</button>
+                      <button
+                        disabled={isSimulatingSubmissions || isAnalyzingForm}
+                        onClick={() => void handleSimulateAndScoreForm(activeSavedForm.id)}
+                        className="rounded-xl bg-[#191919] dark:bg-[#F3F3F3] text-white dark:text-[#191919] px-4 py-2.5 text-xs font-black disabled:opacity-50 flex items-center gap-1.5"
+                      >
+                        <Sparkles size={14} />
+                        {isSimulatingSubmissions ? 'AI Agent Simulating & Scoring…' : 'AI Agent: Simulate 3 Candidates & Score'}
+                      </button>
                     </div>
                     {formAnalysisError && <p role="alert" className="text-xs text-rose-500">{formAnalysisError}</p>}
                     {formAnalysisNotice && <p role="status" className="text-xs text-amber-600">{formAnalysisNotice}</p>}
@@ -2040,6 +2197,74 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
           <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
             {manualBuilderTab === 'build' ? (
           <div className="max-w-3xl mx-auto px-4 sm:px-8 py-8 space-y-4">
+                {/* GonkaRouter AI Form Co-Pilot Agent Panel */}
+                <div className="rounded-2xl border border-[#D97757]/40 bg-gradient-to-r from-[#D97757]/10 via-[#D97757]/5 to-transparent p-4 sm:p-5 space-y-3 shadow-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Sparkles size={16} className="text-[#D97757]" />
+                      <span className="text-xs font-black uppercase tracking-wider text-[#D97757]">
+                        GonkaRouter AI Form Co-Pilot Agent
+                      </span>
+                    </div>
+                    <span className="text-[10px] font-semibold text-[#858075]">
+                      Auto-draft, refine, or add scoring criteria
+                    </span>
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      value={formCopilotInstruction}
+                      onChange={(e) => setFormCopilotInstruction(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          void handleRunFormCopilot();
+                        }
+                      }}
+                      placeholder="Ask the AI Agent to build or edit this form (e.g. 'Create a 6-question AI Fellowship application with coding & essay questions')..."
+                      className="flex-1 rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] bg-white dark:bg-[#141416] px-3.5 py-2.5 text-xs text-[#191919] dark:text-[#F3F3F3] placeholder:text-[#858075] outline-none focus:border-[#D97757]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void handleRunFormCopilot()}
+                      disabled={isRunningFormCopilot || !formCopilotInstruction.trim()}
+                      className="px-4 py-2.5 rounded-xl bg-[#D97757] hover:bg-[#C56648] text-white text-xs font-black disabled:opacity-50 transition-all flex items-center justify-center gap-1.5 shrink-0"
+                    >
+                      {isRunningFormCopilot ? <BwengeLoader variant="compact" /> : <Sparkles size={14} />}
+                      {isRunningFormCopilot ? 'Agent Working…' : 'Run AI Form Agent'}
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      {
+                        label: '✨ Generate Scholarship Form',
+                        prompt: 'Create a comprehensive Scholarship & Financial Aid Application form with GPA, academic achievements, financial need, leadership essay, and reference contact.',
+                      },
+                      {
+                        label: '💻 Tech Role Screening Form',
+                        prompt: 'Create a Senior Software & AI Engineer screening form with technical experience, system design scenario, GitHub link, and availability.',
+                      },
+                      {
+                        label: '🎓 Course Evaluation Survey',
+                        prompt: 'Create a student course & instructor evaluation form with rating scales, multiple choice questions, and open feedback.',
+                      },
+                      {
+                        label: '➕ Add 3 Smart Follow-up Questions',
+                        prompt: 'Keep existing questions and add 3 high-signal evaluation questions tailored to this form topic.',
+                      },
+                    ].map((preset) => (
+                      <button
+                        key={preset.label}
+                        type="button"
+                        disabled={isRunningFormCopilot}
+                        onClick={() => void handleRunFormCopilot(preset.prompt)}
+                        className="px-2.5 py-1 rounded-lg border border-[#E8E4DC] dark:border-[#2D2D32] bg-white/80 dark:bg-[#1C1C20] hover:border-[#D97757] text-[11px] font-semibold text-[#66635B] dark:text-[#A0A0AA] hover:text-[#D97757] transition-all"
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 {/* Form description */}
                 <div className="bg-white dark:bg-[#1C1C20] rounded-2xl border border-[#E8E4DC] dark:border-[#2D2D32] p-5 shadow-sm">
                   <div className="mb-2 flex flex-wrap items-center gap-1 border-b border-[#E8E4DC] pb-2 dark:border-[#2D2D32]">

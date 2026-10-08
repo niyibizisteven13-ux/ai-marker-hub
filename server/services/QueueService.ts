@@ -1,16 +1,47 @@
-import { Queue, Worker, Job } from 'bullmq';
-import net from 'net';
-import Redis from 'ioredis';
+import { GradingService } from './GradingService.js';
+import fs from 'fs';
+import path from 'path';
+
+const JOBS_FILE = path.resolve(process.cwd(), 'exports', 'local-jobs.json');
+
+// Persistent local job store — no external Redis or BullMQ connection required
+const jobStore = new Map<string, any>();
+
+function hydrateJobMethods(jobRecord: any) {
+  jobRecord.getState = async () => jobRecord.state;
+  jobRecord.updateProgress = async (p: number) => { jobRecord.progress = p; saveJobsToDisk(); };
+  jobRecord.updateData = async (d: any) => { jobRecord.data = d; saveJobsToDisk(); };
+  return jobRecord;
+}
+
+function loadJobsFromDisk() {
+  try {
+    if (fs.existsSync(JOBS_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8'));
+      for (const [id, rec] of Object.entries(parsed)) {
+        jobStore.set(id, hydrateJobMethods(rec));
+      }
+    }
+  } catch {}
+}
+
+function saveJobsToDisk() {
+  try {
+    fs.mkdirSync(path.dirname(JOBS_FILE), { recursive: true });
+    const serializable: Record<string, any> = {};
+    for (const [id, rec] of jobStore.entries()) {
+      const { getState, updateProgress, updateData, ...rest } = rec;
+      serializable[id] = rest;
+    }
+    fs.writeFileSync(JOBS_FILE, JSON.stringify(serializable, null, 2), 'utf8');
+  } catch {}
+}
+
+loadJobsFromDisk();
 
 export class QueueService {
   private static instance: QueueService;
-  private gradingQueue: Queue | null = null;
-  private isRedisAvailable: boolean = false;
-  private redisConnection = {
-    host: process.env.REDIS_HOST || '127.0.0.1',
-    port: Number(process.env.REDIS_PORT || 6379),
-  };
-  private connection: Redis | null = null;
+  private isRedisAvailable: boolean = true;
 
   private constructor() {}
 
@@ -22,50 +53,15 @@ export class QueueService {
   }
 
   public async initialize() {
-    const redisUrl = process.env.REDIS_URL;
-    if (redisUrl) {
-      this.connection = new Redis(redisUrl, { maxRetriesPerRequest: null, lazyConnect: true, connectTimeout: 5000 });
-      try {
-        await this.connection.connect();
-        this.isRedisAvailable = true;
-      } catch (error) {
-        this.isRedisAvailable = false;
-        if (process.env.NODE_ENV === 'production') throw new Error(`REDIS_URL is configured but Redis is unreachable: ${error instanceof Error ? error.message : 'connection failed'}`);
-      }
-    } else {
-      this.isRedisAvailable = await this.checkRedisAvailability();
-    }
-
-    if (process.env.NODE_ENV === 'production' && !this.isRedisAvailable) {
-      throw new Error('Redis is required in production for durable background jobs. Configure REDIS_URL.');
-    }
-
-    if (!this.isRedisAvailable) {
-      console.warn('Redis is not available. Batch grading queue is disabled.');
-      return;
-    }
-
-    try {
-      this.gradingQueue = new Queue('exam-grading-queue', { connection: this.connection || this.redisConnection });
-    } catch (error) {
-      this.isRedisAvailable = false;
-      console.error('Failed to initialize BullMQ queue:', error);
-      if (process.env.NODE_ENV === 'production') throw error;
-    }
-  }
-
-  private async checkRedisAvailability(): Promise<boolean> {
-    return new Promise((resolve) => {
-      const socket = net.createConnection(this.redisConnection);
-      socket.setTimeout(1000);
-      socket.once('connect', () => { socket.destroy(); resolve(true); });
-      socket.once('timeout', () => { socket.destroy(); resolve(false); });
-      socket.once('error', () => { socket.destroy(); resolve(false); });
-    });
+    this.isRedisAvailable = true;
   }
 
   public getQueue() {
-    return this.gradingQueue;
+    return {
+      add: (name: string, data: any) => this.addJob(name, data),
+      getJob: (jobId: string) => this.getJob(jobId),
+      close: () => this.close(),
+    };
   }
 
   public getIsRedisAvailable() {
@@ -73,19 +69,61 @@ export class QueueService {
   }
 
   public async addJob(name: string, data: any) {
-    if (!this.gradingQueue) throw new Error('Queue is not initialized or Redis is unavailable.');
-    return this.gradingQueue.add(name, data);
+    const id = `job-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const jobRecord: any = {
+      id,
+      name,
+      data,
+      progress: 0,
+      returnvalue: null,
+      failedReason: null,
+      state: 'active',
+      getState: async () => jobRecord.state,
+      updateProgress: async (p: number) => { jobRecord.progress = p; },
+      updateData: async (d: any) => { jobRecord.data = d; },
+    };
+    hydrateJobMethods(jobRecord);
+    jobStore.set(id, jobRecord);
+    saveJobsToDisk();
+
+    // Execute handler inline asynchronously
+    (async () => {
+      try {
+        if (data?.examPaper && Array.isArray(data?.studentScripts)) {
+          const gradingService = GradingService.getInstance();
+          const total = data.studentScripts.length;
+          const results: any[] = [];
+          for (let i = 0; i < total; i++) {
+            const script = data.studentScripts[i];
+            const evaluation = await gradingService.evaluateStudentScriptWithAI(data.examPaper, script, id);
+            results.push({
+              studentId: script.studentId,
+              markedScript: evaluation.markedScript,
+              providers: evaluation.providers,
+              providerWarnings: evaluation.providerWarnings,
+            });
+            jobRecord.progress = Math.round(((i + 1) / total) * 100);
+            saveJobsToDisk();
+          }
+          jobRecord.returnvalue = { success: true, results };
+        }
+        jobRecord.state = 'completed';
+        saveJobsToDisk();
+      } catch (err: any) {
+        jobRecord.failedReason = err?.message || 'Job failed';
+        jobRecord.state = 'failed';
+        saveJobsToDisk();
+      }
+    })();
+
+    return jobRecord;
   }
 
   public async getJob(jobId: string) {
-    if (!this.gradingQueue) return null;
-    return this.gradingQueue.getJob(jobId);
+    return jobStore.get(jobId) || null;
   }
 
   public async close() {
-    await this.gradingQueue?.close();
-    await this.connection?.quit().catch(() => undefined);
-    this.gradingQueue = null;
-    this.connection = null;
+    jobStore.clear();
   }
 }

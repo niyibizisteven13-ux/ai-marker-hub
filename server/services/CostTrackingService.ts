@@ -1,6 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../db.js';
 
 // Haiku 3.5 and Sonnet 3.5 pricing (Approximate USD per 1M tokens)
 // Haiku 3.5: Input $0.25 / Output $1.25 (Batch is 50% of this usually, but let's use standard for now or adjust based on requirement)

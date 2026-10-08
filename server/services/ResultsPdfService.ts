@@ -1,7 +1,5 @@
 import PDFDocument from 'pdfkit';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../db.js';
 
 export class ResultsPdfService {
   private static instance: ResultsPdfService;

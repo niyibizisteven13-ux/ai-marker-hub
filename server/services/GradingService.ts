@@ -5,11 +5,9 @@ import { buildFallbackMarkResults } from '../../src/utils/aiFallback.ts';
 import { runWithRetry } from './reliableJobRunner.js';
 import { logJobCost } from './CostTrackingService.js';
 import logger from '../utils/logger.js';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../db.js';
 
 import { PreFlightService } from './preFlightService.js';
-
-const prisma = new PrismaClient();
 
 export class GradingService {
   private static instance: GradingService;
@@ -178,7 +176,7 @@ STUDENT ANSWERS: ${JSON.stringify(studentScript.answers, null, 2)}`;
         flags: flagsDetected,
         teacherApproved: false,
       },
-      providers: ['Claude-Haiku'],
+      providers: ['GonkaRouter'],
     };
   }
 

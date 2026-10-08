@@ -1,8 +1,6 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../../db.js';
 import { PlanPolicy, AccessResult } from './types.js';
 import { PaymentService } from '../PaymentService.js';
-
-const prisma = new PrismaClient();
 
 export class OrganizationPlanPolicy implements PlanPolicy {
   constructor(private orgId: string) {}

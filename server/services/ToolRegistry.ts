@@ -306,5 +306,94 @@ export const ToolRegistry: Record<string, ToolDefinition> = {
     instructions: 'Use for precise calculations, data analysis, and code testing. Always show the code to the user before running it. Python supports: pandas, numpy, matplotlib, scipy.',
     preferredProvider: 'nvidianim'
   },
+
+  discover_dataset_patterns: {
+    metadata: {
+      name: 'discover_dataset_patterns',
+      description: 'Discovers latent statistical, structural, and semantic patterns in large datasets and optimizes user prompts (aligned with generativeai.net taxonomy).',
+      input_schema: {
+        type: 'object',
+        properties: {
+          dataset_summary: { type: 'string', description: 'Raw data, table excerpt, or description of the dataset.' },
+          user_prompt: { type: 'string', description: 'Optional user prompt to analyze and optimize for maximum generative fidelity.' }
+        },
+        required: ['dataset_summary']
+      }
+    },
+    instructions: 'Extracts correlations, clusters, anomalies, and prompt optimizations, returning a structured dataset pattern artifact.',
+    preferredProvider: 'nvidianim'
+  },
+
+  generate_image_graphic: {
+    metadata: {
+      name: 'generate_image_graphic',
+      description: 'Generates images, digital paintings, logos, graphic design layouts, and marketing assets via GonkaRouter Visual (Nano Banana Pro).',
+      input_schema: {
+        type: 'object',
+        properties: {
+          title: { type: 'string' },
+          prompt: { type: 'string', description: 'Detailed visual description of the image, logo, or layout.' },
+          style: { type: 'string', description: 'Art style (e.g. Photorealistic, Vector Logo, Digital Painting, Marketing Poster).' },
+          aspect_ratio: { type: 'string', enum: ['16:9', '1:1', '4:3', '9:16'] }
+        },
+        required: ['title', 'prompt']
+      }
+    },
+    instructions: 'Produces a renderable high-resolution vector graphic / layout artifact.',
+    preferredProvider: 'nvidianim'
+  },
+
+  generate_video_animation: {
+    metadata: {
+      name: 'generate_video_animation',
+      description: 'Generates animated scenes, talking characters, and short-form video ads or clips via GonkaRouter Motion (Flow Engine).',
+      input_schema: {
+        type: 'object',
+        properties: {
+          title: { type: 'string' },
+          concept: { type: 'string', description: 'Concept or script for the animated video clip or talking character.' },
+          motion_type: { type: 'string', enum: ['talking_character', 'orbit', 'wave', 'particles', 'zoom'] }
+        },
+        required: ['title', 'concept']
+      }
+    },
+    instructions: 'Produces a playable multi-scene HTML5 animation artifact with narration.',
+    preferredProvider: 'nvidianim'
+  },
+
+  generate_audio_speech: {
+    metadata: {
+      name: 'generate_audio_speech',
+      description: 'Generates natural-sounding voiceovers, musical tracks, sound effects, and multi-host audio podcasts from text or notes.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          title: { type: 'string' },
+          audio_type: { type: 'string', enum: ['podcast', 'voiceover', 'music', 'sfx'] },
+          script_or_notes: { type: 'string', description: 'Written text, notes, or musical mood to convert into audio.' }
+        },
+        required: ['title', 'audio_type', 'script_or_notes']
+      }
+    },
+    instructions: 'Produces a playable Web Speech & Web Audio studio artifact.',
+    preferredProvider: 'nvidianim'
+  },
+
+  generate_workflow_automation: {
+    metadata: {
+      name: 'generate_workflow_automation',
+      description: 'Generates structured spreadsheets, business process flows, document synthesis, and automated email or scheduling sequences.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          title: { type: 'string' },
+          objective: { type: 'string', description: 'The workflow, spreadsheet, or email/scheduling automation goal.' }
+        },
+        required: ['title', 'objective']
+      }
+    },
+    instructions: 'Produces an interactive workflow DAG, spreadsheet, and automation sequence artifact.',
+    preferredProvider: 'nvidianim'
+  },
 };
 

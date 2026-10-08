@@ -1,7 +1,5 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../db.js';
 import logger from '../utils/logger.js';
-
-const prisma = new PrismaClient();
 
 // Hourly spend threshold in USD
 const DEFAULT_HOURLY_THRESHOLD = Number(process.env.COST_HOURLY_THRESHOLD || 50);

@@ -1,9 +1,7 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../db.js';
 import { resolvePlanPolicy } from './plans/resolvePlan.js';
 import { AccessResult } from './plans/types.js';
 import logger from '../utils/logger.js';
-
-const prisma = new PrismaClient();
 
 // FIX: widened from 'grading' | 'scoring' to the actual set of intent/service
 // names produced by classifyIntent() in server.ts. Previously 'scoring' didn't

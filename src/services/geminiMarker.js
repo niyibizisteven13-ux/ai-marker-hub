@@ -1,10 +1,17 @@
-﻿import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import { exportResultsToExcel } from './excelExporter.js';
 
 dotenv.config();
 
-const ai = new GoogleGenAI({});
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY,
+  httpOptions: {
+    headers: {
+      'User-Agent': 'aistudio-build',
+    },
+  },
+});
 
 /**
  * JSON schema passed to Gemini alongside responseMimeType so the model's

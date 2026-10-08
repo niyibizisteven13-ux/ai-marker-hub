@@ -1,10 +1,8 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../db.js';
 import { AiService } from './AiService.js';
 import { WorkerService } from './WorkerService.js';
 import { ExecutionSandbox } from './ExecutionSandbox.js';
 import logger from '../utils/logger.js';
-
-const prisma = new PrismaClient();
 
 export class SupervisorService {
   private static instance: SupervisorService;

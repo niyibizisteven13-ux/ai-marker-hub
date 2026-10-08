@@ -13,7 +13,7 @@ export async function ensureExportsDirectory() {
 }
 
 function buildSignedExportUrl(objectKey: string) {
-  const appOrigin = (process.env.APP_URL || 'http://localhost:3000').replace(/\/$/, '');
+  const appOrigin = (process.env.APP_URL || '').replace(/\/$/, '');
   const baseUrl = `${appOrigin}/exports/${encodeURIComponent(objectKey)}`;
   const expiresAt = Date.now() + SIGNED_URL_TTL_MS;
   const query = new URLSearchParams({ expires: String(expiresAt) });
@@ -21,7 +21,6 @@ function buildSignedExportUrl(objectKey: string) {
 }
 
 export async function uploadBufferToCloud(buffer: Buffer, objectKey: string, contentType: string) {
-  if (process.env.NODE_ENV === 'production') throw new Error('Production S3 object-storage adapter is not implemented.');
   const exportsPath = await ensureExportsDirectory();
   const normalizedKey = path.posix.normalize(objectKey.replace(/\\/g, '/')).replace(/^\/+/, '');
   if (normalizedKey.startsWith('..') || path.isAbsolute(normalizedKey)) throw new Error('Invalid storage object key.');

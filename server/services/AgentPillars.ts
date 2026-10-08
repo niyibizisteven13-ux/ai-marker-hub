@@ -1,9 +1,7 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../db.js';
 import { AiService } from './AiService.js';
 import { ExecutionSandbox } from './ExecutionSandbox.js';
 import logger from '../utils/logger.js';
-
-const prisma = new PrismaClient();
 
 export abstract class AgentPillarBase {
   protected aiService = AiService.getInstance();

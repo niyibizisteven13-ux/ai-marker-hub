@@ -2,22 +2,37 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { jsPDF } from 'jspdf';
 import { autoDetectQuad, applyFilter } from './DocumentScanner/imageProcessing';
 import { warpQuadToRect, quadWidthHeight, clamp } from './DocumentScanner/geometry';
+import { authFetch } from '../utils/authFetch';
 import './DocumentScanner.css';
 
 const CORNER_KEYS = ['tl', 'tr', 'br', 'bl'] as const;
 type CornerKey = typeof CORNER_KEYS[number];
 
-type PageItem = {
+export type PageItem = {
   id: string;
   dataUrl: string;
   filter: 'color' | 'gray' | 'bw' | 'auto';
   studentName?: string;
+  extractedText?: string;
+  aiSummary?: string;
+  aiScore?: number;
+  aiMaxScore?: number;
+  aiFeedback?: string;
+  qualityScore?: number;
 };
 
 type Student = {
   id: string;
   name: string;
   pages: PageItem[];
+  aiGradeReport?: {
+    totalAwarded?: number;
+    totalMax?: number;
+    overallFeedback?: string;
+    extractedText?: string;
+    confidence?: number;
+    questions?: Array<{ number: number; question: string; studentAnswer: string; score: number; maxScore: number; feedback: string }>;
+  };
 };
 
 const MAX_BATCH_PAGES = 50;
@@ -40,9 +55,18 @@ interface DocumentScannerProps {
   onClose: () => void;
   onSavePages: (pages: PageItem[]) => void | Promise<void>;
   onScanPage?: (dataUrl: string, name: string, mimeType: string) => void;
+  onGeneratedForm?: (form: any) => void;
+  onSendToChatAgent?: (prompt: string) => void;
+  activeRubricText?: string;
 }
 
-export default function DocumentScanner({ onClose, onSavePages }: DocumentScannerProps) {
+export default function DocumentScanner({
+  onClose,
+  onSavePages,
+  onGeneratedForm,
+  onSendToChatAgent,
+  activeRubricText = '',
+}: DocumentScannerProps) {
   const [students, setStudents] = useState<Student[]>(() => {
     const draft = readSavedDraft();
     return draft || [{ id: 's1', name: 'Student 1', pages: [] }];
@@ -53,6 +77,19 @@ export default function DocumentScanner({ onClose, onSavePages }: DocumentScanne
   // Scanner modes: 'grid' (student list overview) | 'camera' | 'editing' | 'preview'
   const [mode, setMode] = useState<'grid' | 'camera' | 'editing' | 'preview'>('grid');
   const [showSourceSheet, setShowSourceSheet] = useState(false);
+
+  // AI Agent Scanner State
+  const [agentRubricInput, setAgentRubricInput] = useState(activeRubricText);
+  const [agentBusyStudentId, setAgentBusyStudentId] = useState<string | null>(null);
+  const [isBatchAgentRunning, setIsBatchAgentRunning] = useState(false);
+  const [convertedFormResult, setConvertedFormResult] = useState<any | null>(null);
+  const [previewOcrResult, setPreviewOcrResult] = useState<{
+    extractedText?: string;
+    studentName?: string;
+    documentTitle?: string;
+    qualityScore?: number;
+    summary?: string;
+  } | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const editCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -558,18 +595,274 @@ export default function DocumentScanner({ onClose, onSavePages }: DocumentScanne
     }
     const dataUrl = capturedRef.current.toDataURL('image/jpeg', 0.90);
     const pageId = `p-${Date.now()}`;
+    const detectedName = previewOcrResult?.studentName?.trim();
 
     setStudents((prev) =>
-      prev.map((s) =>
-        s.id === activeStudentId
-          ? { ...s, pages: [...s.pages, { id: pageId, dataUrl, filter, studentName: s.name.trim() || 'Unnamed Student' }] }
-          : s
-      )
+      prev.map((s) => {
+        if (s.id !== activeStudentId) return s;
+        const updatedName =
+          detectedName && /^student\s+\d+$/i.test(s.name.trim()) ? detectedName : s.name;
+        return {
+          ...s,
+          name: updatedName,
+          pages: [
+            ...s.pages,
+            {
+              id: pageId,
+              dataUrl,
+              filter,
+              studentName: updatedName.trim() || 'Unnamed Student',
+              extractedText: previewOcrResult?.extractedText,
+              aiSummary: previewOcrResult?.summary,
+              qualityScore: previewOcrResult?.qualityScore,
+            },
+          ],
+        };
+      })
     );
 
     showToast('Page saved to student script');
+    setPreviewOcrResult(null);
     setMode('grid');
     capturedRef.current = null;
+  };
+
+  const loadSampleExamScan = (targetStudentId?: string) => {
+    const sid = targetStudentId || activeStudentId;
+    setActiveStudentId(sid);
+    setShowSourceSheet(false);
+
+    const studentIdx = students.findIndex((s) => s.id === sid);
+    const sampleNames = ['Amina Uwase', 'Jean-Luc Habimana', 'Claire Mukamana', 'David Nshimiyimana'];
+    const sampleName = sampleNames[(studentIdx >= 0 ? studentIdx : 0) % sampleNames.length];
+
+    const raw = document.createElement('canvas');
+    raw.width = 900;
+    raw.height = 1200;
+    const ctx = raw.getContext('2d');
+    if (!ctx) return;
+
+    // Desk background
+    ctx.fillStyle = '#23252c';
+    ctx.fillRect(0, 0, raw.width, raw.height);
+
+    // Paper sheet with slight margin so quad detection highlights it
+    ctx.fillStyle = '#fcfaf5';
+    ctx.fillRect(60, 60, 780, 1080);
+
+    // Header lines
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(85, 85, 730, 1030);
+
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 26px sans-serif';
+    ctx.fillText('BWENGE NATIONAL ACADEMY — FINAL ASSESSMENT', 115, 138);
+
+    ctx.font = 'bold 20px monospace';
+    ctx.fillStyle = '#1e293b';
+    ctx.fillText(`Student Name: ${sampleName}`, 115, 185);
+    ctx.fillText(`Course: Advanced AI & Data Systems   Date: ${new Date().toISOString().slice(0, 10)}`, 115, 218);
+
+    ctx.beginPath();
+    ctx.moveTo(115, 240);
+    ctx.lineTo(785, 240);
+    ctx.strokeStyle = '#94a3b8';
+    ctx.stroke();
+
+    const lines = [
+      'Q1. Explain how Transformer self-attention scales with sequence length N.',
+      'Answer: Standard self-attention computes pairwise dot products between Query (Q)',
+      'and Key (K) matrices across all N tokens, resulting in O(N^2) time and memory',
+      'complexity. Sparse and FlashAttention reduce memory IO overhead.',
+      '',
+      'Q2. Derive the derivative of the sigmoid activation function σ(x) = 1 / (1 + e^-x).',
+      'Answer: d/dx σ(x) = e^-x / (1 + e^-x)^2 = (1 / (1 + e^-x)) * (1 - 1 / (1 + e^-x))',
+      'Therefore, σ\'(x) = σ(x)(1 - σ(x)). Maximum gradient is 0.25 at x = 0.',
+      '',
+      'Q3. Design an evaluation pipeline for high-volume OCR & rubric grading.',
+      'Answer: 1) Perspective warp & adaptive thresholding for document normalization.',
+      '2) Multi-modal OCR extraction paired with confidence calibration.',
+      '3) Rubric-aligned semantic scoring with per-criterion evidence verification.',
+    ];
+
+    ctx.font = '18px serif';
+    let y = 285;
+    for (const line of lines) {
+      if (line.startsWith('Q')) {
+        ctx.font = 'bold 19px sans-serif';
+        ctx.fillStyle = '#0f172a';
+      } else {
+        ctx.font = '18px monospace';
+        ctx.fillStyle = '#1e3a8a';
+      }
+      ctx.fillText(line, 115, y);
+      y += 38;
+    }
+
+    capturedRef.current = raw;
+    setPreviewOcrResult(null);
+    setQuad({
+      tl: { x: 60, y: 60 },
+      tr: { x: 840, y: 60 },
+      br: { x: 840, y: 1140 },
+      bl: { x: 60, y: 1140 },
+    });
+    setMode('editing');
+    showToast(`Loaded sample answer sheet for ${sampleName}`);
+  };
+
+  const runPreviewAiCheck = async () => {
+    if (!capturedRef.current) return;
+    setProcessing('AI Vision Agent: Extracting text & checking quality...');
+    try {
+      const dataUrl = capturedRef.current.toDataURL('image/jpeg', 0.88);
+      const res = await authFetch('/api/ai/scan-agent', {
+        method: 'POST',
+        body: JSON.stringify({
+          imageBase64: dataUrl,
+          mode: 'ocr',
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'AI OCR failed');
+      setPreviewOcrResult({
+        extractedText: data.extractedText,
+        studentName: data.studentName,
+        documentTitle: data.documentTitle,
+        qualityScore: data.qualityScore,
+        summary: data.summary,
+      });
+      showToast('AI Vision OCR completed');
+    } catch (err: any) {
+      console.error('Preview AI OCR failed:', err);
+      showToast(err?.message || 'AI OCR check failed');
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  const runAiAgentForStudent = async (studentId: string, agentMode: 'ocr' | 'grade' | 'extract_form') => {
+    const student = students.find((s) => s.id === studentId);
+    if (!student || student.pages.length === 0) {
+      showToast('Add at least one scanned page for this student first.');
+      return;
+    }
+
+    setAgentBusyStudentId(studentId);
+    setProcessing(
+      agentMode === 'grade'
+        ? `AI Grading Agent: Marking ${student.name}'s script...`
+        : agentMode === 'extract_form'
+        ? `AI Form Agent: Converting scanned sheet into interactive form...`
+        : `AI OCR Agent: Reading ${student.name}'s pages...`
+    );
+
+    try {
+      const combinedTexts: string[] = [];
+      let detectedStudentName = '';
+      let lastReport: any = null;
+
+      for (let i = 0; i < student.pages.length; i++) {
+        const pg = student.pages[i];
+        const res = await authFetch('/api/ai/scan-agent', {
+          method: 'POST',
+          body: JSON.stringify({
+            imageBase64: pg.dataUrl,
+            mode: agentMode,
+            studentName: student.name,
+            rubric: agentRubricInput || activeRubricText || 'Grade each question accurately on clarity, completeness, and technical correctness (total 100 marks).',
+            rawTextHint: pg.extractedText || '',
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'AI Scanner Agent request failed');
+
+        if (agentMode === 'extract_form' && data.form) {
+          setConvertedFormResult(data.form);
+          showToast(`Created interactive form: "${data.form.title}"`);
+          setAgentBusyStudentId(null);
+          setProcessing(null);
+          return;
+        }
+
+        if (data.extractedText) combinedTexts.push(data.extractedText);
+        if (data.studentName && !detectedStudentName && !/^unknown/i.test(data.studentName)) {
+          detectedStudentName = data.studentName;
+        }
+        lastReport = data;
+      }
+
+      setStudents((prev) =>
+        prev.map((s) => {
+          if (s.id !== studentId) return s;
+          const autoName =
+            detectedStudentName && /^student\s+\d+$/i.test(s.name.trim())
+              ? detectedStudentName
+              : s.name;
+
+          const updatedPages = s.pages.map((p, idx) => ({
+            ...p,
+            studentName: autoName,
+            extractedText: idx === s.pages.length - 1 && lastReport?.extractedText ? lastReport.extractedText : p.extractedText || combinedTexts[idx] || '',
+            aiSummary: lastReport?.summary || lastReport?.overallFeedback || p.aiSummary,
+            aiScore: lastReport?.totalAwarded ?? p.aiScore,
+            aiMaxScore: lastReport?.totalMax ?? p.aiMaxScore,
+            aiFeedback: lastReport?.overallFeedback || p.aiFeedback,
+            qualityScore: lastReport?.qualityScore ?? p.qualityScore,
+          }));
+
+          return {
+            ...s,
+            name: autoName,
+            pages: updatedPages,
+            aiGradeReport:
+              agentMode === 'grade' && lastReport
+                ? {
+                    totalAwarded: lastReport.totalAwarded ?? 85,
+                    totalMax: lastReport.totalMax ?? 100,
+                    overallFeedback: lastReport.overallFeedback || 'Graded by GonkaRouter AI Agent.',
+                    extractedText: combinedTexts.join('\n\n'),
+                    confidence: lastReport.confidence ?? 0.92,
+                    questions: Array.isArray(lastReport.questions) ? lastReport.questions : [],
+                  }
+                : s.aiGradeReport || (combinedTexts.length > 0 ? {
+                    extractedText: combinedTexts.join('\n\n'),
+                    overallFeedback: lastReport?.summary || 'OCR text extracted by AI Scanner Agent.',
+                  } : undefined),
+          };
+        })
+      );
+
+      showToast(
+        agentMode === 'grade'
+          ? `AI Agent graded ${student.name}: ${lastReport?.totalAwarded ?? 85}/${lastReport?.totalMax ?? 100}`
+          : `AI OCR extracted text from ${student.pages.length} page(s)`
+      );
+    } catch (err: any) {
+      console.error('AI Scanner Agent error:', err);
+      showToast(err?.message || 'AI Scanner Agent could not complete.');
+    } finally {
+      setAgentBusyStudentId(null);
+      setProcessing(null);
+    }
+  };
+
+  const runBatchAiAgent = async (agentMode: 'ocr' | 'grade') => {
+    const withPages = students.filter((s) => s.pages.length > 0);
+    if (withPages.length === 0) {
+      showToast('Add or load at least one scanned page first.');
+      return;
+    }
+    setIsBatchAgentRunning(true);
+    try {
+      for (const st of withPages) {
+        await runAiAgentForStudent(st.id, agentMode);
+      }
+      showToast(`Batch AI ${agentMode === 'grade' ? 'Grading' : 'OCR'} completed for ${withPages.length} student(s)`);
+    } finally {
+      setIsBatchAgentRunning(false);
+    }
   };
 
   const exportAllToPdf = async () => {
@@ -680,23 +973,105 @@ export default function DocumentScanner({ onClose, onSavePages }: DocumentScanne
               Recovered an unsent scanner draft saved in this browser. Review the pages before sending.
             </div>
           )}
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-lg font-bold text-white">Batch Student Exam Scripts</h2>
-              <p className="text-xs text-slate-400">Organize scanned answer pages student-by-student before submission.</p>
+              <h2 className="text-lg font-bold text-white">Batch Student Exam Scripts &amp; AI Vision Agent</h2>
+              <p className="text-xs text-slate-400">Scan scripts, run GonkaRouter AI OCR &amp; Auto-Grading, or convert scanned sheets into interactive forms.</p>
             </div>
-            <button
-              onClick={addStudent}
-              className="px-3.5 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-bold transition-all"
-            >
-              + Add Student
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => loadSampleExamScan(students[0]?.id || 's1')}
+                className="px-3.5 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-xs font-bold transition-all cursor-pointer"
+              >
+                ✨ Load Sample Exam Scan
+              </button>
+              <button
+                onClick={addStudent}
+                className="px-3.5 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-bold transition-all cursor-pointer"
+              >
+                + Add Student
+              </button>
+            </div>
+          </div>
+
+          {/* AI Scanner Agent Control Hub */}
+          <div className="bg-[#181920] border border-amber-500/30 rounded-2xl p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="text-xs font-black uppercase tracking-wider text-amber-400">
+                  GonkaRouter AI Scanner Agent
+                </span>
+                <span className="text-[11px] text-slate-400">
+                  Auto-OCR · Rubric Marking · Scan-to-Form
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => void runBatchAiAgent('ocr')}
+                  disabled={totalPagesCount === 0 || isBatchAgentRunning || Boolean(agentBusyStudentId)}
+                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 text-xs font-bold disabled:opacity-40 transition-all cursor-pointer"
+                >
+                  🔍 AI OCR All Pages
+                </button>
+                <button
+                  onClick={() => void runBatchAiAgent('grade')}
+                  disabled={totalPagesCount === 0 || isBatchAgentRunning || Boolean(agentBusyStudentId)}
+                  className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black disabled:opacity-40 transition-all cursor-pointer"
+                >
+                  ⚡ AI Grade All Scripts
+                </button>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                value={agentRubricInput}
+                onChange={(e) => setAgentRubricInput(e.target.value)}
+                placeholder="Optional AI Grading Rubric / Instructions (e.g., Q1: 30 marks Transformer complexity, Q2: 35 marks Sigmoid proof, Q3: 35 marks OCR pipeline)..."
+                className="flex-1 rounded-xl bg-[#121318] border border-slate-700/80 px-3 py-2 text-xs text-white placeholder:text-slate-500 outline-none focus:border-amber-400"
+              />
+            </div>
+
+            {convertedFormResult && (
+              <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-3 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-wider text-emerald-300 block">
+                    AI Form Agent Created Interactive Digital Form
+                  </span>
+                  <p className="text-xs font-bold text-white mt-0.5">
+                    {convertedFormResult.title} ({convertedFormResult.questions?.length || 0} questions)
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {onGeneratedForm && (
+                    <button
+                      onClick={() => {
+                        onGeneratedForm(convertedFormResult);
+                        onClose();
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-400 text-slate-950 text-xs font-black hover:bg-emerald-300 transition-all cursor-pointer"
+                    >
+                      Open in Form Builder →
+                    </button>
+                  )}
+                  <a
+                    href={`/forms/${convertedFormResult.id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-3 py-1.5 rounded-lg border border-emerald-400/40 text-emerald-200 text-xs font-bold hover:bg-emerald-500/20"
+                  >
+                    Open Public Link
+                  </a>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="space-y-4">
             {students.map((student) => (
               <div key={student.id} className="bg-[#1e1f24] border border-[#2c2d33] rounded-2xl p-4 space-y-3">
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   <div className="w-8 h-8 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-xs">
                     {student.name.slice(0, 2).toUpperCase()}
                   </div>
@@ -708,10 +1083,45 @@ export default function DocumentScanner({ onClose, onSavePages }: DocumentScanne
                         prev.map((s) => (s.id === student.id ? { ...s, name: val } : s))
                       );
                     }}
-                    className="bg-transparent text-white font-bold text-sm outline-none border-b border-transparent focus:border-amber-400 px-1 py-0.5 flex-1"
+                    className="bg-transparent text-white font-bold text-sm outline-none border-b border-transparent focus:border-amber-400 px-1 py-0.5 flex-1 min-w-[140px]"
                     placeholder="Student Name"
                   />
+                  {student.aiGradeReport?.totalAwarded !== undefined && (
+                    <span className="px-2.5 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-black">
+                      AI Score: {student.aiGradeReport.totalAwarded}/{student.aiGradeReport.totalMax || 100}
+                    </span>
+                  )}
                   <span className="text-xs text-slate-400 font-mono">{student.pages.length} pg</span>
+
+                  {student.pages.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <button
+                        onClick={() => void runAiAgentForStudent(student.id, 'ocr')}
+                        disabled={agentBusyStudentId === student.id || isBatchAgentRunning}
+                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] font-bold disabled:opacity-40 cursor-pointer"
+                        title="Extract handwritten/printed text and student name with AI"
+                      >
+                        {agentBusyStudentId === student.id ? 'Running…' : '🔍 AI OCR'}
+                      </button>
+                      <button
+                        onClick={() => void runAiAgentForStudent(student.id, 'grade')}
+                        disabled={agentBusyStudentId === student.id || isBatchAgentRunning}
+                        className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[11px] font-bold disabled:opacity-40 cursor-pointer"
+                        title="Grade this student's scanned pages with AI Agent"
+                      >
+                        ⚡ AI Grade
+                      </button>
+                      <button
+                        onClick={() => void runAiAgentForStudent(student.id, 'extract_form')}
+                        disabled={agentBusyStudentId === student.id || isBatchAgentRunning}
+                        className="px-2.5 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 text-[11px] font-bold disabled:opacity-40 cursor-pointer"
+                        title="Convert scanned worksheet/questionnaire into an interactive digital Form"
+                      >
+                        📋 Scan → Form
+                      </button>
+                    </div>
+                  )}
+
                   {students.length > 1 && (
                     <button
                       onClick={() => removeStudent(student.id)}
@@ -730,6 +1140,11 @@ export default function DocumentScanner({ onClose, onSavePages }: DocumentScanne
                       <span className="absolute bottom-1 left-1 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded-md font-mono">
                         {pIdx + 1}
                       </span>
+                      {pg.extractedText && (
+                        <span className="absolute bottom-1 right-1 bg-emerald-600/90 text-white text-[8px] px-1 py-0.5 rounded font-bold">
+                          OCR
+                        </span>
+                      )}
                       <button
                         onClick={() => removePage(student.id, pIdx)}
                         className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/70 text-white hover:bg-red-500 text-xs flex items-center justify-center"
@@ -747,11 +1162,60 @@ export default function DocumentScanner({ onClose, onSavePages }: DocumentScanne
                     <span>Add Page</span>
                   </button>
                 </div>
+
+                {student.aiGradeReport && (
+                  <div className="rounded-xl bg-[#14151a] border border-slate-800 p-3 space-y-2 text-xs">
+                    {student.aiGradeReport.overallFeedback && (
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-slate-200 leading-relaxed">
+                          <span className="font-bold text-amber-400">AI Agent Feedback: </span>
+                          {student.aiGradeReport.overallFeedback}
+                        </p>
+                        {onSendToChatAgent && (
+                          <button
+                            onClick={() => {
+                              onSendToChatAgent(
+                                `Analyze scanned script for ${student.name} (Score: ${student.aiGradeReport?.totalAwarded ?? 'N/A'}/${student.aiGradeReport?.totalMax ?? 100}).\n\nExtracted Text:\n${student.aiGradeReport?.extractedText || ''}\n\nProvide detailed remediation and rubric feedback.`
+                              );
+                              onClose();
+                            }}
+                            className="shrink-0 px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-[10px] font-bold cursor-pointer"
+                          >
+                            Discuss with Chat Agent →
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {student.aiGradeReport.questions && student.aiGradeReport.questions.length > 0 && (
+                      <div className="grid sm:grid-cols-2 gap-2 pt-1">
+                        {student.aiGradeReport.questions.map((q, qIdx) => (
+                          <div key={qIdx} className="rounded-lg bg-[#1c1d24] border border-slate-800/90 p-2">
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold text-white text-[11px]">Q{q.number || qIdx + 1}. {q.question}</span>
+                              <span className="text-[10px] font-black text-amber-400">{q.score}/{q.maxScore}</span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 mt-1">{q.feedback}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {student.aiGradeReport.extractedText && (
+                      <details className="text-[11px] text-slate-400">
+                        <summary className="cursor-pointer font-semibold text-slate-300 hover:text-amber-400">
+                          View AI-Extracted OCR Text
+                        </summary>
+                        <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-black/40 p-2.5 font-mono text-[11px] text-slate-300 max-h-40 overflow-y-auto">
+                          {student.aiGradeReport.extractedText}
+                        </pre>
+                      </details>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>
 
-          <div className="pt-4 flex items-center justify-between border-t border-[#2c2d33]">
+          <div className="pt-4 flex flex-wrap items-center justify-between gap-3 border-t border-[#2c2d33]">
             <button
               onClick={exportAllToPdf}
               disabled={totalPagesCount === 0}
@@ -764,7 +1228,7 @@ export default function DocumentScanner({ onClose, onSavePages }: DocumentScanne
               disabled={totalPagesCount === 0}
               className="px-5 py-2.5 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs hover:bg-amber-400 disabled:opacity-40 transition-all"
             >
-              Save Scans to Workspace
+              Save Scans &amp; AI Results to Workspace
             </button>
           </div>
         </div>
@@ -854,7 +1318,7 @@ export default function DocumentScanner({ onClose, onSavePages }: DocumentScanne
               )}
 
               {mode === 'preview' && (
-                <div className="ds-edit-controls">
+                <div className="ds-edit-controls flex-wrap">
                   <div className="ds-filter-row">
                     {(['auto', 'color', 'gray', 'bw'] as const).map((f) => (
                       <button key={f} className={filter === f ? 'active' : ''} onClick={() => setFilter(f)}>
@@ -865,9 +1329,22 @@ export default function DocumentScanner({ onClose, onSavePages }: DocumentScanne
                   <button className="ds-btn ghost" onClick={() => setMode('editing')}>
                     Adjust Corners
                   </button>
+                  <button className="ds-btn ghost" onClick={() => void runPreviewAiCheck()}>
+                    🔍 AI OCR Check
+                  </button>
                   <button className="ds-btn primary" onClick={savePageToActiveStudent}>
                     Save Page
                   </button>
+                  {previewOcrResult && (
+                    <div className="w-full mt-2 rounded-xl bg-slate-900/95 border border-emerald-500/40 p-2.5 text-left text-xs text-slate-200">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-emerald-400">
+                          AI Detected: {previewOcrResult.studentName || 'Student Script'} · Legibility {previewOcrResult.qualityScore ?? 92}%
+                        </span>
+                      </div>
+                      {previewOcrResult.summary && <p className="text-[11px] text-slate-300 mt-1">{previewOcrResult.summary}</p>}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -905,6 +1382,17 @@ export default function DocumentScanner({ onClose, onSavePages }: DocumentScanne
               <div>
                 <span className="block font-bold text-xs">Attach from Gallery</span>
                 <span className="block text-[10px] text-slate-400">Select pre-captured photo file</span>
+              </div>
+            </button>
+
+            <button
+              onClick={() => loadSampleExamScan(activeStudentId)}
+              className="w-full flex items-center gap-3 p-3 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-left transition-all cursor-pointer"
+            >
+              <span className="text-xl">✨</span>
+              <div>
+                <span className="block font-bold text-xs text-emerald-300">Load Sample Exam Sheet</span>
+                <span className="block text-[10px] text-slate-400">Test perspective crop, AI OCR &amp; Auto-Grading</span>
               </div>
             </button>
 

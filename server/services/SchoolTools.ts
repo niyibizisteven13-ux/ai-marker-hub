@@ -1,7 +1,5 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../db.js';
 import logger from '../utils/logger.js';
-
-const prisma = new PrismaClient();
 
 export class SchoolTools {
   /**

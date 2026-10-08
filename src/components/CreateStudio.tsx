@@ -52,10 +52,7 @@ interface CreateStudioProps {
 function ModelPicker({ selected, onSelect }: { selected: string; onSelect: (val: string) => void }) {
   const [open, setOpen] = useState(false);
   const models = [
-    { id: 'auto', label: 'Bwenge — Balanced (Auto)', short: 'Auto' },
-    { id: 'gemini', label: 'Gemini — Fast', short: 'Gemini' },
-    { id: 'nvidianim', label: 'NVIDIA — Research', short: 'NVIDIA' },
-    { id: 'ollama', label: 'Ollama — Local', short: 'Ollama' },
+    { id: 'gonkarouter', label: 'GonkaRouter — GLM-5.3-Flash (Primary)', short: 'GonkaRouter' },
   ];
 
   const selectedModel = models.find((m) => m.id === selected) || models[0];
@@ -334,45 +331,35 @@ export default function CreateStudio({
               </div>
 
               {/* Greeting */}
-              <h1 className="font-serif text-[26px] sm:text-[30px] font-normal tracking-tight text-[#FAF9F5] mb-2">
+              <h1 className="font-serif text-[26px] sm:text-[30px] font-normal tracking-tight text-[#FAF9F5] mb-5">
                 {getGreeting()}
               </h1>
 
-              {/* Subtitle */}
-              <p className="text-[15px] text-[#9C9A92] max-w-md mb-8 leading-relaxed">
-                I can help you grade student submissions, review rubrics, and turn scanned work into a clean feedback report.
-              </p>
-
-              {/* Action Chips */}
-              <div className="flex flex-wrap items-center justify-center gap-2.5 max-w-lg">
+              <div className="flex flex-wrap items-center justify-center gap-2.5 max-w-xl">
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="h-10 rounded-full border border-white/10 bg-[#30302E] px-4 text-sm text-[#C2C0B6] hover:bg-white/10 hover:text-white transition-all flex items-center gap-2 shadow-sm"
+                  className="h-9 rounded-lg border border-white/10 bg-[#30302E] px-3.5 text-xs text-[#C2C0B6] hover:bg-white/10 hover:text-white transition-all flex items-center gap-2"
                 >
-                  <span>📄</span>
-                  <span>Upload student paper</span>
+                  <span>Upload paper</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => onOpenScanner?.()}
-                  className="h-10 rounded-full border border-white/10 bg-[#30302E] px-4 text-sm text-[#C2C0B6] hover:bg-white/10 hover:text-white transition-all flex items-center gap-2 shadow-sm"
+                  className="h-9 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3.5 text-xs font-semibold text-amber-300 hover:bg-amber-500/20 transition-all flex items-center gap-2"
                 >
-                  <span>📷</span>
-                  <span>Scan answers</span>
+                  <span>📷 LiveScanner</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => {
-                    setInputValue('Create an exam paper with a marking scheme on ');
-                    setTimeout(() => textareaRef.current?.focus(), 50);
+                    onSendMessage('Build an interactive Scholarship & AI Fellowship Application Form with candidate eligibility questions, GPA, technical skills, and essay prompts.');
                   }}
-                  className="h-10 rounded-full border border-white/10 bg-[#30302E] px-4 text-sm text-[#C2C0B6] hover:bg-white/10 hover:text-white transition-all flex items-center gap-2 shadow-sm"
+                  className="h-9 rounded-lg border border-[#D97757]/40 bg-[#D97757]/15 px-3.5 text-xs font-semibold text-[#FAF9F5] hover:bg-[#D97757]/25 transition-all flex items-center gap-2"
                 >
-                  <span>✨</span>
-                  <span>Create an exam</span>
+                  <span>📋 Create Form</span>
                 </button>
               </div>
             </div>

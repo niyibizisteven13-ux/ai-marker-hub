@@ -1,8 +1,7 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../db.js';
 import logger from '../utils/logger.js';
 import { CostCircuitBreakerService, CostCircuitBreakerError } from './CostCircuitBreakerService.js';
 
-const prisma = new PrismaClient();
 const MAX_RETRIES = 2;
 
 export async function runWithRetry<T>(

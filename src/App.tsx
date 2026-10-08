@@ -153,7 +153,7 @@ export default function App() {
   const [upgradePageOpen, setUpgradePageOpen] = useState<boolean>(() => window.location.pathname === '/upgrade');
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [adminOpen, setAdminOpen] = useState<boolean>(() => window.location.pathname === '/admin');
-  const [selectedProvider, setSelectedProvider] = useState<string>('auto');
+  const [selectedProvider, setSelectedProvider] = useState<string>('gonkarouter');
   const retryPromptRef = React.useRef<{ text: string; attachment?: File | ChatAttachment | Array<File | ChatAttachment> } | null>(null);
   const [publicForm, setPublicForm] = useState<any | null>(null);
   const [publicFormLoading, setPublicFormLoading] = useState(false);
@@ -205,11 +205,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const formId = params.get('form');
-    if (formId) {
+    const loadPublicFormById = (formId: string) => {
       setActiveFormId(formId);
       setPublicFormLoading(true);
+      setPublicFormError('');
       authFetch(`/api/public/forms/${formId}`)
         .then((res) => {
           if (!res.ok) throw new Error('Form not found');
@@ -223,7 +222,24 @@ export default function App() {
           setPublicFormError(err.message || 'Could not load form');
           setPublicFormLoading(false);
         });
+    };
+
+    const params = new URLSearchParams(window.location.search);
+    const pathMatch = window.location.pathname.match(/^\/(?:forms|apply)\/([^/?#]+)/);
+    const formId = pathMatch?.[1] || params.get('form');
+    if (formId) {
+      loadPublicFormById(formId);
     }
+
+    const handleOpenPublicForm = (e: Event) => {
+      const custom = e as CustomEvent<{ formId?: string }>;
+      if (custom.detail?.formId) {
+        window.history.pushState({}, '', `/forms/${custom.detail.formId}`);
+        loadPublicFormById(custom.detail.formId);
+      }
+    };
+    window.addEventListener('bwenge:open-public-form', handleOpenPublicForm);
+    return () => window.removeEventListener('bwenge:open-public-form', handleOpenPublicForm);
   }, [setActiveFormId]);
 
   useEffect(() => {
@@ -599,17 +615,86 @@ export default function App() {
     }
   };
 
-  const handleSaveScannedPages = (pages: Array<{ dataUrl: string; name?: string; file?: File }>) => {
+  const [scannerGeneratedForm, setScannerGeneratedForm] = useState<any | null>(null);
+
+  const handleSaveScannedPages = (
+    pages: Array<{
+      dataUrl: string;
+      name?: string;
+      studentName?: string;
+      extractedText?: string;
+      aiSummary?: string;
+      aiScore?: number;
+      aiMaxScore?: number;
+      aiFeedback?: string;
+      file?: File;
+    }>
+  ) => {
     setScannerOpen(false);
+    const now = Date.now();
+
+    const newUploaded: UploadedFile[] = pages.map((p, idx) => ({
+      id: `scan-file-${now}-${idx}`,
+      name: p.name || `${(p.studentName || `Student_${idx + 1}`).replace(/\s+/g, '_')}_Page_${idx + 1}.jpg`,
+      size: '320 KB',
+      type: 'student_paper',
+      uploadDate: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      url: p.dataUrl,
+      fileType: 'image',
+      rawText: p.extractedText || p.aiSummary || 'Scanned student answer page',
+      studentName: p.studentName || `Student ${idx + 1}`,
+      batchBadge: String(idx + 1),
+    }));
+    setUploadedFiles((prev) => [...newUploaded, ...prev]);
+
+    const newScripts: StudentScript[] = pages.map((p, idx) => {
+      const awarded = p.aiScore ?? undefined;
+      const max = p.aiMaxScore ?? 100;
+      return {
+        id: `scan-script-${now}-${idx}`,
+        studentName: p.studentName || `Student ${idx + 1}`,
+        studentId: `SCN-${100 + idx}`,
+        status: awarded !== undefined ? ('marked' as const) : ('pending' as const),
+        totalAwardedMarks: awarded,
+        maxTotalMarks: max,
+        percentage: awarded !== undefined ? Math.round((awarded / max) * 100) : undefined,
+        overallFeedback: p.aiFeedback || p.aiSummary || '',
+        answers: [
+          {
+            questionId: 'q1',
+            extractedText: p.extractedText || 'Scanned answer page',
+            confidence: 0.94,
+            awardedMarks: awarded,
+            feedback: p.aiFeedback || '',
+          },
+        ],
+      };
+    });
+    setStudentScripts((prev) => [...newScripts, ...prev]);
+
     const attachments: ChatAttachment[] = pages.map((p, idx) => ({
-      id: 'att-page-' + Date.now() + '-' + idx,
-      name: p.name || 'Scan_' + (idx + 1) + '.jpg',
+      id: 'att-page-' + now + '-' + idx,
+      name: p.name || `${p.studentName || 'Scan'}_${idx + 1}.jpg`,
       mimeType: 'image/jpeg',
       previewUrl: p.dataUrl,
       url: p.dataUrl,
       fileType: 'image',
     }));
-    void handleSendMessage('Here are scanned answer sheets captured via BwengeScan. Please analyze and grade them.', attachments);
+
+    const ocrSummary = pages
+      .map((p, idx) =>
+        p.extractedText
+          ? `[Page ${idx + 1} - ${p.studentName || 'Student'}${p.aiScore !== undefined ? ` (AI Score: ${p.aiScore}/${p.aiMaxScore || 100})` : ''}]:\n${p.extractedText}`
+          : ''
+      )
+      .filter(Boolean)
+      .join('\n\n');
+
+    const promptText = ocrSummary
+      ? `Here are ${pages.length} scanned answer sheet(s) from BwengeScan with AI OCR & preliminary grading:\n\n${ocrSummary}\n\nPlease review the extracted answers, verify the rubric grading, and provide a summary of student performance.`
+      : `Here are ${pages.length} scanned answer sheet(s) captured via BwengeScan. Please analyze and grade them.`;
+
+    void handleSendMessage(promptText, attachments);
   };
 
   const handleSendMessage = async (text: string, attachment?: File | ChatAttachment | Array<File | ChatAttachment>) => {
@@ -898,6 +983,8 @@ export default function App() {
       studioProjectStatus={studioProjectStatus}
       savedStudioProjects={savedStudioProjects}
       onLoadStudioProject={(projId) => {}}
+      externalGeneratedForm={scannerGeneratedForm}
+      onClearExternalForm={() => setScannerGeneratedForm(null)}
     />
   );
 
@@ -1030,6 +1117,87 @@ export default function App() {
     );
   }
 
+  if (publicFormLoading || publicFormError || publicForm) {
+    return (
+      <div className="min-h-[100dvh] w-full bg-[#F0EBF8] dark:bg-[#141416] text-slate-900 overflow-y-auto flex flex-col">
+        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-black/10 bg-white/90 px-4 sm:px-8 py-3 backdrop-blur-md">
+          <div className="flex items-center gap-2.5">
+            <span className="h-3 w-3 rounded-full" style={{ backgroundColor: publicForm?.themeColor || '#D97757' }} />
+            <span className="text-sm font-bold text-slate-800 truncate">
+              {publicForm?.title || 'Bwenge Form'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            {publicForm?.id && (
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(`${window.location.origin}/forms/${publicForm.id}`);
+                }}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Copy link
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setPublicForm(null);
+                setPublicFormError('');
+                setPublicFormLoading(false);
+                window.history.pushState({}, '', '/');
+              }}
+              className="rounded-lg bg-slate-900 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-slate-800"
+            >
+              Back to Studio
+            </button>
+          </div>
+        </header>
+
+        <main className="flex-1 px-4 py-8 sm:px-6">
+          {publicFormLoading ? (
+            <div className="mx-auto max-w-2xl rounded-2xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500 shadow-sm">
+              Loading form…
+            </div>
+          ) : publicFormError ? (
+            <div className="mx-auto max-w-2xl rounded-2xl border border-rose-200 bg-white p-8 text-center space-y-3 shadow-sm">
+              <p className="text-base font-bold text-rose-600">{publicFormError}</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setPublicForm(null);
+                  setPublicFormError('');
+                  window.history.pushState({}, '', '/');
+                }}
+                className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-semibold text-white"
+              >
+                Return to Bwenge Studio
+              </button>
+            </div>
+          ) : (
+            <Suspense fallback={<div className="mx-auto max-w-2xl p-8 text-center text-sm text-slate-500">Loading form…</div>}>
+              <DynamicForm
+                schema={publicForm}
+                onSubmit={async (answers) => {
+                  const res = await fetch(`/api/forms/${publicForm.id}/submit`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ answers }),
+                  });
+                  const data = await res.json().catch(() => ({}));
+                  if (!res.ok) {
+                    throw new Error(data.error || 'Failed to submit form response.');
+                  }
+                  return data;
+                }}
+              />
+            </Suspense>
+          )}
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="h-[var(--app-h,100dvh)] w-full min-w-0 bg-[#262624] text-[#FAF9F5] font-sans antialiased transition-colors duration-200 overflow-hidden flex flex-col">
       {scannerOpen && (
@@ -1037,6 +1205,16 @@ export default function App() {
           <DocumentScanner
             onClose={() => setScannerOpen(false)}
             onSavePages={handleSaveScannedPages}
+            activeRubricText={examPaper ? JSON.stringify(examPaper) : ''}
+            onGeneratedForm={(form) => {
+              setScannerGeneratedForm(form);
+              setActiveTab('marking_hub');
+              setScannerOpen(false);
+            }}
+            onSendToChatAgent={(prompt) => {
+              setScannerOpen(false);
+              void handleSendMessage(prompt);
+            }}
           />
         </div>
       )}

@@ -111,7 +111,7 @@ export default function RightChatSidebar({
   isTyping = false,
   onUpgradeClick,
   onRetry,
-  selectedProvider = 'auto',
+  selectedProvider = 'gonkarouter',
   onProviderChange,
   onInsightAction,
 }: RightChatSidebarProps) {
@@ -453,12 +453,9 @@ export default function RightChatSidebar({
                 value={selectedProvider}
                 onChange={(e) => onProviderChange?.(e.target.value)}
                 aria-label="AI model"
-                className="max-w-[150px] bg-transparent text-[11px] text-neutral-300 outline-none"
+                className="max-w-[170px] bg-transparent text-[11px] text-neutral-300 outline-none"
               >
-                <option value="auto">Bwenge — Balanced (Auto)</option>
-                <option value="gemini">Gemini</option>
-                <option value="nvidianim">NVIDIA</option>
-                <option value="ollama">Ollama</option>
+                <option value="gonkarouter">GonkaRouter — GLM-5.3-Flash</option>
               </select>
             </div>
             <div className="hidden sm:flex sm:justify-end sm:px-2 sm:pt-1.5">
@@ -466,12 +463,9 @@ export default function RightChatSidebar({
                 value={selectedProvider}
                 onChange={(e) => onProviderChange?.(e.target.value)}
                 aria-label="AI model"
-                className="max-w-[190px] bg-transparent text-[11px] text-neutral-300 outline-none"
+                className="max-w-[220px] bg-transparent text-[11px] text-neutral-300 outline-none"
               >
-                <option value="auto">Bwenge — Balanced (Auto)</option>
-                <option value="gemini">Gemini</option>
-                <option value="nvidianim">NVIDIA</option>
-                <option value="ollama">Ollama</option>
+                <option value="gonkarouter">GonkaRouter — GLM-5.3-Flash (Primary)</option>
               </select>
             </div>
           </div>

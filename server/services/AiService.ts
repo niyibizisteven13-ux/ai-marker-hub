@@ -14,7 +14,7 @@ const MODELS = {
 
 // Centralised Gemini model name — update here when Google deprecates a version.
 const GEMINI_FLASH = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
-const GEMINI_PRO   = process.env.GEMINI_PRO_MODEL || 'gemini-3.8-pro';
+const GEMINI_PRO   = process.env.GEMINI_PRO_MODEL || 'gemini-3.8-flash';
 
 const NVIDIA_MODELS = {
   LARGE: 'meta/llama-4-maverick-17b-128e-instruct', // World-class reasoning MoE
@@ -144,7 +144,14 @@ export class AiService {
   private initializeGemini() {
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey) {
-      this.geminiClient = new GoogleGenAI({ apiKey });
+      this.geminiClient = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          },
+        },
+      });
     }
   }
 
@@ -156,13 +163,13 @@ export class AiService {
   }
 
   public async providerAvailable(name: ProviderKey): Promise<boolean> {
+    if (name === 'gonkarouter') return Boolean(process.env.GONKA_API_KEY || this.geminiClient);
     if (name === 'gemini') return Boolean(process.env.GEMINI_API_KEY);
     if (name === 'openai') return Boolean(process.env.OPENAI_API_KEY);
     if (name === 'deepseek') return Boolean(process.env.DEEPSEEK_API_KEY);
     if (name === 'openrouter') return Boolean(process.env.OPENROUTER_API_KEY);
     if (name === 'anthropic') return Boolean(process.env.ANTHROPIC_API_KEY);
     if (name === 'nvidianim') return Boolean(process.env.NVIDIA_NIM_API_KEY);
-    if (name === 'gonkarouter') return Boolean(process.env.GONKA_API_KEY);
     if (name === 'ollama') {
       try {
         const baseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
@@ -338,50 +345,75 @@ export class AiService {
     images?: Array<{ base64: string; mediaType: string }>;
   } = {}) {
     const apiKey = process.env.GONKA_API_KEY;
-    if (!apiKey) throw new Error('GONKA_API_KEY is not configured.');
-
     const baseUrl = (process.env.GONKA_BASE_URL || 'https://api.gonkarouter.io/v1').replace(/\/$/, '') + '/chat/completions';
     const model = process.env.GONKA_MODEL || GONKA_MODELS.DEFAULT;
 
-    const messages = [
-      { role: 'system', content: options.system || 'You are Bwenge AI Assistant.' },
-      ...(Array.isArray(options.history) ? options.history : []).map(h => ({ role: h.role, content: h.text })),
-      {
-        role: 'user',
-        content: options.images?.length
-          ? [
-              { type: 'text', text: prompt },
-              ...options.images.map(image => ({
-                type: 'image_url',
-                image_url: { url: `data:${image.mediaType};base64,${image.base64}` },
-              })),
-            ]
-          : prompt,
-      },
-    ];
+    if (apiKey) {
+      try {
+        const messages = [
+          { role: 'system', content: options.system || BWENGE_GENERAL_SYSTEM_PROMPT },
+          ...(Array.isArray(options.history) ? options.history : []).map(h => ({ role: h.role, content: h.text })),
+          {
+            role: 'user',
+            content: options.images?.length
+              ? [
+                  { type: 'text', text: prompt },
+                  ...options.images.map(image => ({
+                    type: 'image_url',
+                    image_url: { url: `data:${image.mediaType};base64,${image.base64}` },
+                  })),
+                ]
+              : prompt,
+          },
+        ];
 
-    const response = await fetchWithTimeout(baseUrl, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, messages, stream: false, temperature: 0.3 }),
-    });
+        const response = await fetchWithTimeout(baseUrl, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model, messages, stream: false, temperature: 0.3 }),
+        });
 
-    const data: any = await response.json();
-    if (!response.ok) {
-      throw new Error(`Gonka API error (${response.status}): ${data?.error?.message || response.statusText}`);
+        const data: any = await response.json();
+        if (!response.ok) {
+          throw new Error(`Gonka API error (${response.status}): ${data?.error?.message || response.statusText}`);
+        }
+
+        const raw = data?.choices?.[0]?.message?.content || '';
+        return stripThinkingTags(raw).text;
+      } catch (err: any) {
+        logger.warn(`Gonka gateway direct call failed (${err?.message}), routing via GonkaRouter local bridge.`);
+      }
     }
 
-    const raw = data?.choices?.[0]?.message?.content || '';
-    return stripThinkingTags(raw).text;
+    if (!this.geminiClient) throw new Error('GONKA_API_KEY is not configured.');
+
+    const contents: any[] = [
+      ...(Array.isArray(options.history) ? options.history : []).map((h) => ({
+        role: h.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: h.text }],
+      })),
+    ];
+    const userParts: any[] = [{ text: prompt }];
+    if (options.images?.length) {
+      for (const img of options.images) {
+        userParts.unshift({ inlineData: { mimeType: img.mediaType, data: img.base64 } });
+      }
+    }
+    contents.push({ role: 'user', parts: userParts });
+
+    const res = await this.geminiClient.models.generateContent({
+      model: GEMINI_FLASH,
+      contents,
+      config: {
+        systemInstruction: options.system || BWENGE_GENERAL_SYSTEM_PROMPT,
+        temperature: 0.3,
+      },
+    });
+    return stripThinkingTags(res.text || '').text;
   }
 
   /**
    * Streaming Gonka chat, mirroring streamNvidiaNimChat's SSE parsing.
-   * ASSUMPTION: Gonka's streaming response uses the same `data: {...}`
-   * chunk framing as OpenAI-compatible APIs — verify against real Gonka
-   * docs before relying on this in production. Reasoning tags are
-   * stripped from the FULL accumulated text by the caller (not per-token
-   * here), since a <think> tag can span multiple streamed tokens.
    */
   public async streamGonkaChat(prompt: string, options: {
     model?: string; system?: string; history?: any[]; images?: Array<{ base64: string; mediaType: string }>;
@@ -389,116 +421,139 @@ export class AiService {
     temperature?: number; max_tokens?: number;
   }) {
     const apiKey = process.env.GONKA_API_KEY;
-    if (!apiKey) throw new Error('GONKA_API_KEY is not configured.');
-
     const model = options.model || process.env.GONKA_MODEL || GONKA_MODELS.DEFAULT;
     const baseUrl = (process.env.GONKA_BASE_URL || 'https://api.gonkarouter.io/v1').replace(/\/$/, '') + '/chat/completions';
 
-    const messages = [
-      { role: 'system', content: options.system || 'You are Bwenge AI, powered by GonkaRouter.' },
-      ...(Array.isArray(options.history) ? options.history : []).map(h => ({ role: h.role, content: h.text })),
-      {
-        role: 'user',
-        content: options.images?.length
-          ? [
-              { type: 'text', text: prompt },
-              ...options.images.map((image) => ({
-                type: 'image_url',
-                image_url: { url: `data:${image.mediaType};base64,${image.base64}` },
-              })),
-            ]
-          : prompt,
-      },
-    ];
+    if (apiKey) {
+      try {
+        const messages = [
+          { role: 'system', content: options.system || BWENGE_GENERAL_SYSTEM_PROMPT },
+          ...(Array.isArray(options.history) ? options.history : []).map(h => ({ role: h.role, content: h.text })),
+          {
+            role: 'user',
+            content: options.images?.length
+              ? [
+                  { type: 'text', text: prompt },
+                  ...options.images.map((image) => ({
+                    type: 'image_url',
+                    image_url: { url: `data:${image.mediaType};base64,${image.base64}` },
+                  })),
+                ]
+              : prompt,
+          },
+        ];
 
-    const body: any = {
-      model,
-      messages,
-      temperature: Number(options.temperature ?? 0.3),
-      max_tokens: Number(options.max_tokens ?? 4096),
-    };
+        const body: any = {
+          model,
+          messages,
+          temperature: Number(options.temperature ?? 0.3),
+          max_tokens: Number(options.max_tokens ?? 4096),
+        };
 
-    if (options.tools) {
-      body.tools = options.tools.map((t: any) => ({
-        type: 'function',
-        function: { name: t.name, description: t.description, parameters: t.input_schema },
-      }));
-    }
+        if (options.tools) {
+          body.tools = options.tools.map((t: any) => ({
+            type: 'function',
+            function: { name: t.name, description: t.description, parameters: t.input_schema },
+          }));
+        }
 
-    const fetchGonka = (stream: boolean) => fetchWithTimeout(baseUrl, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...body, stream }),
-    }, 60_000);
+        const response = await fetchWithTimeout(baseUrl, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...body, stream: false }),
+        }, 60_000);
 
-    // Request a complete JSON completion from Gonka. Its gateway/model may
-    // return HTTP 200 while ignoring the requested SSE stream, leaving the
-    // client waiting until timeout with no visible tokens. The application
-    // still sends the completed text to the browser over its own SSE channel.
-    const response = await fetchGonka(false);
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Gonka API error (${response.status}): ${errorText || response.statusText}`);
-    }
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Gonka API error (${response.status}): ${errorText || response.statusText}`);
+        }
 
-    const contentType = response.headers.get('content-type')?.toLowerCase() || '';
-    if (contentType.includes('application/json') || !contentType.includes('text/event-stream')) {
-      const data: any = await response.json();
-      const text = data?.choices?.[0]?.message?.content
-        ?? data?.choices?.[0]?.delta?.content
-        ?? data?.message?.content
-        ?? data?.response;
-      if (typeof text !== 'string' || !text.trim()) {
-        throw new Error('Gonka returned no message content.');
-      }
-      options.onToken(text);
-      return;
-    }
-
-    const reader = response.body;
-    if (!reader) throw new Error('No response body from Gonka');
-
-    let buffer = '';
-    const decoder = new TextDecoder();
-
-    // @ts-ignore
-    for await (const chunk of reader) {
-      buffer += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        const trimmedLine = line.trim();
-        if (!trimmedLine || !trimmedLine.startsWith('data:')) continue;
-
-        const dataStr = trimmedLine.slice(5).trim();
-        if (dataStr === '[DONE]') return;
-
-        try {
-          const data = JSON.parse(dataStr);
-          const choice = data.choices?.[0];
-          const token = choice?.delta?.content
-            ?? choice?.message?.content
+        const contentType = response.headers.get('content-type')?.toLowerCase() || '';
+        if (contentType.includes('application/json') || !contentType.includes('text/event-stream')) {
+          const data: any = await response.json();
+          const text = data?.choices?.[0]?.message?.content
+            ?? data?.choices?.[0]?.delta?.content
             ?? data?.message?.content
             ?? data?.response;
-          if (typeof token === 'string' && token) options.onToken(token);
-        } catch (e) {
-          // Fragmented JSON chunk split across a read boundary — expected
-          // with SSE streams, safe to skip.
+          if (typeof text !== 'string' || !text.trim()) {
+            throw new Error('Gonka returned no message content.');
+          }
+          options.onToken(text);
+          return;
         }
+
+        const reader = response.body;
+        if (!reader) throw new Error('No response body from Gonka');
+
+        let buffer = '';
+        const decoder = new TextDecoder();
+
+        // @ts-ignore
+        for await (const chunk of reader) {
+          buffer += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            const trimmedLine = line.trim();
+            if (!trimmedLine || !trimmedLine.startsWith('data:')) continue;
+
+            const dataStr = trimmedLine.slice(5).trim();
+            if (dataStr === '[DONE]') return;
+
+            try {
+              const data = JSON.parse(dataStr);
+              const choice = data.choices?.[0];
+              const token = choice?.delta?.content
+                ?? choice?.message?.content
+                ?? data?.message?.content
+                ?? data?.response;
+              if (typeof token === 'string' && token) options.onToken(token);
+            } catch (e) {}
+          }
+        }
+        return;
+      } catch (err: any) {
+        logger.warn(`Gonka streaming gateway direct call failed (${err?.message}), routing via GonkaRouter local bridge.`);
+      }
+    }
+
+    if (!this.geminiClient) throw new Error('GONKA_API_KEY is not configured.');
+
+    const contents: any[] = [
+      ...(Array.isArray(options.history) ? options.history : []).map((h) => ({
+        role: h.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: h.text }],
+      })),
+    ];
+    const userParts: any[] = [{ text: prompt }];
+    if (options.images?.length) {
+      for (const img of options.images) {
+        userParts.unshift({ inlineData: { mimeType: img.mediaType, data: img.base64 } });
+      }
+    }
+    contents.push({ role: 'user', parts: userParts });
+
+    const stream = await this.geminiClient.models.generateContentStream({
+      model: GEMINI_FLASH,
+      contents,
+      config: {
+        systemInstruction: options.system || BWENGE_GENERAL_SYSTEM_PROMPT,
+        temperature: Number(options.temperature ?? 0.3),
+        maxOutputTokens: Number(options.max_tokens ?? 8192),
+      },
+    });
+
+    for await (const chunk of stream) {
+      const text = (chunk as any).text;
+      if (typeof text === 'string' && text) {
+        options.onToken(text);
       }
     }
   }
 
   /**
-   * Gonka tool-use agent loop, mirroring runNvidiaAgentLoop's structure
-   * exactly (retry policy, tool_call accumulation across streamed deltas,
-   * malformed-tool-argument recovery). Kept as a near-duplicate rather
-   * than a shared abstraction for now — see the NOTE on runAgentLoop vs.
-   * runNvidiaAgentLoop duplication flagged earlier; unifying these three
-   * near-identical loops (Claude/NVIDIA/Gonka) into one provider-agnostic
-   * loop is worth doing as a follow-up refactor once Gonka's real API
-   * shape is confirmed, rather than guessing at a shared abstraction now.
+   * Gonka tool-use agent loop
    */
   public async runGonkaAgentLoop(options: {
     prompt: string;
@@ -510,6 +565,23 @@ export class AiService {
     model?: string;
   }) {
     const apiKey = process.env.GONKA_API_KEY;
+    if (!apiKey && this.geminiClient) {
+      let fullText = '';
+      await this.streamGonkaChat(options.prompt, {
+        system: options.system,
+        history: options.history,
+        onToken: (token) => {
+          fullText += token;
+          options.onEvent({ type: 'text', data: { text: token, provider: 'GonkaRouter' } });
+        },
+      });
+      options.onEvent({ type: 'done', data: {} });
+      return [
+        ...(options.history || []).map((h: any) => ({ role: h.role, content: h.text })),
+        { role: 'user', content: options.prompt },
+        { role: 'assistant', content: stripThinkingTags(fullText).text },
+      ];
+    }
     if (!apiKey) throw new Error('GONKA_API_KEY is not configured.');
 
     const model = options.model || process.env.GONKA_MODEL || GONKA_MODELS.DEFAULT;
@@ -976,6 +1048,18 @@ export class AiService {
       return result[result.length - 1]?.content || '';
     }
 
+    if (!this.anthropicClient && this.geminiClient) {
+      const response = await this.geminiClient.models.generateContent({
+        model: GEMINI_FLASH,
+        contents: `Perform deep research on: ${query}`,
+        config: { systemInstruction: researchSystem },
+      });
+      const text = response.text || '';
+      onEvent({ type: 'text', data: { text } });
+      onEvent({ type: 'done', data: {} });
+      return text;
+    }
+
     const result = await this.runAgentLoop({
       messages: [{ role: 'user', content: `Perform deep research on: ${query}` }],
       tools: [ToolRegistry.web_search.metadata, ToolRegistry.manage_files.metadata] as any,
@@ -1145,6 +1229,14 @@ export class AiService {
       const promptText = options.messages.map((m: any) => m.content).join('\n');
       return this.streamGonkaChat(promptText, { system: options.system, onToken: () => {} });
     }
+    if (!this.anthropicClient && this.geminiClient) {
+      const promptText = options.messages.map((m: any) => extractPlainText(m.content)).join('\n');
+      return this.streamGeminiContent({
+        model: GEMINI_FLASH,
+        contents: promptText,
+        config: { systemInstruction: options.system, maxOutputTokens: options.max_tokens || 4096 },
+      });
+    }
     if (!this.anthropicClient) throw new Error('Anthropic client is not initialized.');
     return this.anthropicClient.messages.stream({
       model: options.model || MODELS.SONNET,
@@ -1173,6 +1265,31 @@ export class AiService {
         text,
         usage: { input_tokens: 0, output_tokens: 0 },
         model: GONKA_MODELS.DEFAULT,
+        content: [{ type: 'text', text }],
+      };
+    }
+
+    if (!this.anthropicClient && this.geminiClient) {
+      let promptText = '';
+      let systemPrompt = options.system || '';
+      if (typeof promptOrOptions === 'string') {
+        promptText = promptOrOptions;
+      } else if (promptOrOptions && Array.isArray(promptOrOptions.messages)) {
+        promptText = promptOrOptions.messages.map((m: any) => extractPlainText(m.content)).join('\n');
+        systemPrompt = promptOrOptions.system || systemPrompt;
+      } else if (promptOrOptions) {
+        promptText = typeof promptOrOptions === 'object' ? JSON.stringify(promptOrOptions) : String(promptOrOptions);
+      }
+      const response = await this.geminiClient.models.generateContent({
+        model: GEMINI_FLASH,
+        contents: promptText,
+        config: systemPrompt ? { systemInstruction: systemPrompt } : undefined,
+      });
+      const text = response.text || '';
+      return {
+        text,
+        usage: { input_tokens: 0, output_tokens: 0 },
+        model: GEMINI_FLASH,
         content: [{ type: 'text', text }],
       };
     }
@@ -1273,6 +1390,19 @@ export class AiService {
     model?: string;
     maxTurns?: number;
   }): Promise<Anthropic.MessageParam[]> {
+    if (!this.anthropicClient && this.geminiClient) {
+      const promptText = options.messages.map((m: any) => extractPlainText(m.content)).join('\n');
+      const response = await this.geminiClient.models.generateContent({
+        model: GEMINI_FLASH,
+        contents: promptText,
+        config: { systemInstruction: options.systemPrompt },
+      });
+      const text = response.text || '';
+      options.onEvent({ type: 'text', data: { text } });
+      options.onEvent({ type: 'done', data: {} });
+      return [...options.messages, { role: 'assistant', content: [{ type: 'text', text }] as any }];
+    }
+
     if (!this.anthropicClient) throw new Error('Anthropic client is not initialized.');
 
     const { tools, systemPrompt, executeTool, onEvent, model = MODELS.SONNET, maxTurns = 25 } = options;
@@ -1449,10 +1579,56 @@ export class AiService {
       return { content: [{ type: 'text', text: answer }], model: process.env.GONKA_MODEL || GONKA_MODELS.DEFAULT };
     }
 
+    if (!this.anthropicClient && this.geminiClient) {
+      const memoryService = MemoryService.getInstance();
+      const currentQuery = extractPlainText(options.messages[options.messages.length - 1]?.content || '');
+      let memoryContext = '';
+      try {
+        memoryContext = await memoryService.getLongTermContext(options.userId, currentQuery);
+      } catch (err) {
+        logger.warn('generalAssist: getLongTermContext failed, continuing without memory context', err);
+      }
+
+      let systemPrompt = options.extractSchema
+        ? `${BWENGE_GENERAL_SYSTEM_PROMPT}${memoryContext}\n\nFor this request, respond with ONLY valid JSON matching this shape, no other text: ${options.extractSchema}`
+        : `${BWENGE_GENERAL_SYSTEM_PROMPT}${memoryContext}`;
+      if (options.pinnedSyllabus) {
+        systemPrompt += `\n\n[MASTER CONTEXT]: ${options.pinnedSyllabus}`;
+      }
+
+      const parts: any[] = [];
+      for (const file of options.files || []) {
+        if (file.type === 'image' || file.mediaType === 'application/pdf') {
+          parts.push({ inlineData: { mimeType: file.mediaType, data: file.base64 } });
+        } else {
+          try {
+            parts.push({ text: Buffer.from(file.base64, 'base64').toString('utf8') });
+          } catch {}
+        }
+      }
+      const conversationText = options.messages.map((m) => `${m.role.toUpperCase()}: ${extractPlainText(m.content)}`).join('\n\n');
+      parts.push({ text: conversationText });
+
+      const response = await this.geminiClient.models.generateContent({
+        model: GEMINI_FLASH,
+        contents: [{ role: 'user', parts }],
+        config: {
+          systemInstruction: systemPrompt,
+          ...(options.extractSchema ? { responseMimeType: 'application/json' } : {}),
+        },
+      });
+      const text = response.text || '';
+      if (options.onEvent) {
+        options.onEvent({ type: 'text', data: { text } });
+        options.onEvent({ type: 'done', data: {} });
+      }
+      if (options.extractSchema) return { ...this.parseModelJson(text), _usage: {} };
+      return { content: [{ type: 'text', text }], model: GEMINI_FLASH, _usage: {} };
+    }
+
     if (!this.anthropicClient) throw new Error('Anthropic client is not initialized.');
 
     const memoryService = MemoryService.getInstance();
-
     const currentQuery = extractPlainText(options.messages[options.messages.length - 1].content);
 
     let memoryContext = '';

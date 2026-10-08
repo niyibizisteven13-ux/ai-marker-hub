@@ -35,23 +35,66 @@ export const adminApi = {
   search: (q: string, kbId?: string) => readJson<{ success: true; data: any[] }>(`/api/admin/search?q=${encodeURIComponent(q)}${kbId ? `&knowledgeBaseId=${kbId}` : ''}`),
   runPlayground: (payload: any) => readJson('/api/admin/playground', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
 
-  // Datasets
+  // Datasets & Training Examples
   getDatasets: () => readJson<{ success: true; data: any[] }>('/api/admin/datasets'),
   createDataset: (payload: any) => readJson('/api/admin/datasets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
+  deleteDataset: (datasetId: string) => readJson(`/api/admin/datasets/${datasetId}`, { method: 'DELETE' }),
   getDatasetExamples: (datasetId: string) => readJson<{ success: true; data: any[] }>(`/api/admin/datasets/${datasetId}/examples`),
   createDatasetExample: (datasetId: string, payload: any) => readJson(`/api/admin/datasets/${datasetId}/examples`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
-  generateDatasetExamples: (datasetId: string) => readJson(`/api/admin/datasets/${datasetId}/generate-from-knowledge`, { method: 'POST' }),
+  generateDatasetExamples: (datasetId: string, source = 'all') =>
+    readJson<{ success: true; data: any[]; message?: string }>(`/api/admin/datasets/${datasetId}/generate-from-knowledge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source }),
+    }),
+  approveAllDatasetExamples: (datasetId: string) =>
+    readJson(`/api/admin/datasets/${datasetId}/approve-all`, { method: 'POST' }),
   updateDatasetExample: (exampleId: string, payload: any) => readJson(`/api/admin/dataset-examples/${exampleId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
+  deleteDatasetExample: (exampleId: string) => readJson(`/api/admin/dataset-examples/${exampleId}`, { method: 'DELETE' }),
 
   // Fine-tuning
   getFineTuneJobs: () => readJson<{ success: true; data: any[] }>('/api/admin/fine-tune/jobs'),
-  createFineTuneJob: (datasetId: string) => readJson('/api/admin/fine-tune/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ datasetId }) }),
+  createFineTuneJob: (
+    payload:
+      | string
+      | {
+          datasetId: string;
+          baseModel?: string;
+          suffix?: string;
+          epochs?: number;
+          learningRate?: number;
+          batchSize?: number;
+          loraRank?: number;
+          targetEnvironment?: string;
+          autoApprove?: boolean;
+        }
+  ) =>
+    readJson('/api/admin/fine-tune/jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(typeof payload === 'string' ? { datasetId: payload } : payload),
+    }),
   cancelFineTuneJob: (id: string) => readJson(`/api/admin/fine-tune/jobs/${id}/cancel`, { method: 'POST' }),
+  testFineTuneJob: (id: string, prompt: string) =>
+    readJson<{ success: true; data: { model: string; output: string; latencyMs: number; examplesUsed: number; adapterApplied: boolean } }>(
+      `/api/admin/fine-tune/jobs/${id}/test`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+      }
+    ),
 
   // Models
   getModels: () => readJson<{ success: true; data: any[] }>('/api/admin/models'),
   createModel: (payload: any) => readJson('/api/admin/models', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
   updateModel: (id: string, payload: any) => readJson(`/api/admin/models/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
+  activateModel: (id: string, environment = 'production') =>
+    readJson(`/api/admin/models/${id}/activate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ environment }),
+    }),
   deleteModel: (id: string) => readJson(`/api/admin/models/${id}`, { method: 'DELETE' }),
 
   // Prompts

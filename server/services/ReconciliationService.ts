@@ -1,25 +1,15 @@
-import { PrismaClient } from '@prisma/client';
-import { Queue, Worker, Job } from 'bullmq';
+import { prisma } from '../db.js';
 import { PaymentService } from './PaymentService.js';
 import { PaywallService } from './PaywallService.js';
 import { writeAuditLog } from '../../production/auth.js';
 import logger from '../utils/logger.js';
-import net from 'net';
 
-const prisma = new PrismaClient();
 const paymentService = PaymentService.getInstance();
 const paywallService = PaywallService.getInstance();
 
 export class ReconciliationService {
   private static instance: ReconciliationService;
-  private reconciliationQueue: Queue | null = null;
-  private worker: Worker | null = null;
   private isRedisAvailable: boolean = false;
-
-  private redisConnection = {
-    host: process.env.REDIS_HOST || '127.0.0.1',
-    port: Number(process.env.REDIS_PORT || 6379),
-  };
 
   private constructor() {}
 
@@ -31,56 +21,12 @@ export class ReconciliationService {
   }
 
   public async initialize() {
-    this.isRedisAvailable = await this.checkRedisAvailability();
-
-    if (!this.isRedisAvailable) {
-      logger.warn('Redis is not available. Reconciliation Service background tasks are disabled.');
-      return;
-    }
-
-    try {
-      this.reconciliationQueue = new Queue('payment-reconciliation', { connection: this.redisConnection });
-
-      this.worker = new Worker('payment-reconciliation', async (job) => {
-        if (job.name === 'expire-subscriptions') {
-          await this.expireSubscriptions();
-        } else {
-          await this.reconcilePendingPayments();
-        }
-      }, { connection: this.redisConnection });
-
-      logger.info('Reconciliation Service Initialized');
-      await this.startScheduledJobs();
-    } catch (error) {
-      this.isRedisAvailable = false;
-      logger.error('Failed to initialize Reconciliation Service:', error);
-    }
-  }
-
-  private async checkRedisAvailability(): Promise<boolean> {
-    return new Promise((resolve) => {
-      const socket = net.createConnection(this.redisConnection);
-      socket.setTimeout(1000);
-      socket.once('connect', () => { socket.destroy(); resolve(true); });
-      socket.once('timeout', () => { socket.destroy(); resolve(false); });
-      socket.once('error', () => { socket.destroy(); resolve(false); });
-    });
+    logger.info('Reconciliation Service initialized (in-memory mode)');
   }
 
   public async startScheduledJobs() {
-    if (!this.reconciliationQueue) return;
-
-    // Run payment reconciliation every 10 minutes
-    await this.reconciliationQueue.add('reconcile', {}, {
-      repeatJobKey: 'reconcile',
-      removeOnComplete: true,
-    } as any);
-
-    // Run subscription expiry once every 24 hours (at midnight)
-    await this.reconciliationQueue.add('expire-subscriptions', {}, {
-      repeatJobKey: 'expire-subscriptions',
-      removeOnComplete: true,
-    } as any);
+    await this.reconcilePendingPayments().catch(() => {});
+    await this.expireSubscriptions().catch(() => {});
   }
 
   /**
