@@ -1,0 +1,432 @@
+{
+  "redis": {},
+  "tables": {
+    "refreshSession": {
+      "f73eb9ba-7e86-4b46-934e-4cf315d1f577": {
+        "id": "f73eb9ba-7e86-4b46-934e-4cf315d1f577",
+        "createdAt": "2026-10-08T08:21:30.210Z",
+        "revokedAt": "2026-10-08T08:21:29.629Z",
+        "updatedAt": "2026-10-08T08:21:30.297Z",
+        "replacedById": "5ff33982-8535-4bcd-9401-addfce429ddb"
+      },
+      "5ff33982-8535-4bcd-9401-addfce429ddb": {
+        "id": "5ff33982-8535-4bcd-9401-addfce429ddb",
+        "createdAt": "2026-10-08T08:26:35.336Z",
+        "updatedAt": "2026-10-08T08:26:35.337Z",
+        "userId": "5ff33982-8535-4bcd-9401-addfce429ddb",
+        "familyId": "beda1e6d-574f-4498-af76-4b842ac451d5",
+        "tokenHash": "4f27c557e5fe62b3a33cf23c248d2802194ec577c798f588cd05c22589217f44",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+        "ip": "127.0.0.1",
+        "expiresAt": "2026-11-07T08:26:35.330Z",
+        "absoluteExpiresAt": "2027-01-05T14:27:36.900Z",
+        "replacedById": "5ff33982-8535-4bcd-9401-addfce429ddb"
+      },
+      "84e16cb8-cb26-4a8b-baf7-ca54407117c5": {
+        "id": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "createdAt": "2026-10-10T09:48:07.176Z",
+        "updatedAt": "2026-10-10T09:48:07.179Z",
+        "userId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "familyId": "c3508976-0bcc-4557-b23d-16941402d043",
+        "tokenHash": "f6a93f6db3cdab464dc4e01bb830a505a603aeec0a6274da1173bf37d4dd0681",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+        "ip": "127.0.0.1",
+        "expiresAt": "2026-11-09T09:48:07.174Z",
+        "absoluteExpiresAt": "2027-01-08T09:34:18.771Z",
+        "replacedById": "84e16cb8-cb26-4a8b-baf7-ca54407117c5"
+      }
+    },
+    "user": {
+      "84e16cb8-cb26-4a8b-baf7-ca54407117c5": {
+        "id": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "createdAt": "2026-10-10T09:08:20.690Z",
+        "updatedAt": "2026-10-10T09:08:20.690Z",
+        "email": "niyibizisteven13@gmail.com",
+        "name": "Master Admin",
+        "passwordHash": "$2a$12$GRlutPOYaV9RmqH7bEz1PusXroXNhccUZW2dGqa3WL.ckmUYgVzRe",
+        "role": "ADMIN",
+        "settings": {
+          "id": "c5de30fd-9040-48a2-ac65-85dd7ca2d3e8",
+          "defaultStrictness": "STANDARD",
+          "autoSummarize": true,
+          "preferredLanguage": "en",
+          "theme": "dark",
+          "longTermMemory": false,
+          "agentTone": "PROFESSIONAL",
+          "customInstructions": null
+        }
+      }
+    },
+    "auditLog": {
+      "3f3da920-59b7-41a2-86bd-c747349d225c": {
+        "id": "3f3da920-59b7-41a2-86bd-c747349d225c",
+        "createdAt": "2026-10-08T08:22:17.219Z",
+        "updatedAt": "2026-10-08T08:22:17.219Z",
+        "actorId": "system",
+        "action": "LOGIN_FAILED",
+        "resourceType": "User",
+        "resourceId": null,
+        "details": "{\"emailHash\":\"1199cd1dda584929f8016c134f90a2c4c6b4b942290ce5accce3227b87f8ae38\",\"ip\":\"127.0.0.1\",\"userAgent\":\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36\"}"
+      },
+      "1fd39d74-605f-4889-8922-a2bcc9b4e401": {
+        "id": "1fd39d74-605f-4889-8922-a2bcc9b4e401",
+        "createdAt": "2026-10-08T08:22:27.951Z",
+        "updatedAt": "2026-10-08T08:22:27.951Z",
+        "actorId": "system",
+        "action": "LOGIN_FAILED",
+        "resourceType": "User",
+        "resourceId": null,
+        "details": "{\"emailHash\":\"1199cd1dda584929f8016c134f90a2c4c6b4b942290ce5accce3227b87f8ae38\",\"ip\":\"127.0.0.1\",\"userAgent\":\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36\"}"
+      },
+      "2835dfbc-3588-4625-8148-5a61553533a9": {
+        "id": "2835dfbc-3588-4625-8148-5a61553533a9",
+        "createdAt": "2026-10-08T08:22:57.182Z",
+        "updatedAt": "2026-10-08T08:22:57.182Z",
+        "actorId": "system",
+        "action": "LOGIN_FAILED",
+        "resourceType": "User",
+        "resourceId": null,
+        "details": "{\"emailHash\":\"1199cd1dda584929f8016c134f90a2c4c6b4b942290ce5accce3227b87f8ae38\",\"ip\":\"127.0.0.1\",\"userAgent\":\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36\"}"
+      },
+      "8c6693b4-451f-4fb9-9e60-413cebb8d11e": {
+        "id": "8c6693b4-451f-4fb9-9e60-413cebb8d11e",
+        "createdAt": "2026-10-08T08:23:32.444Z",
+        "updatedAt": "2026-10-08T08:23:32.444Z",
+        "actorId": "system",
+        "action": "LOGIN_FAILED",
+        "resourceType": "User",
+        "resourceId": null,
+        "details": "{\"emailHash\":\"11f8b61cd5e031d5747715b481fee35a1e593f0d4a1dc855da7e81d79af443ac\",\"ip\":\"127.0.0.1\",\"userAgent\":\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36\"}"
+      },
+      "72b92496-2dd1-442c-ba1b-a4d07266a382": {
+        "id": "72b92496-2dd1-442c-ba1b-a4d07266a382",
+        "createdAt": "2026-10-08T09:02:47.313Z",
+        "updatedAt": "2026-10-08T09:02:47.313Z",
+        "actorId": "system",
+        "action": "LOGIN_FAILED",
+        "resourceType": "User",
+        "resourceId": null,
+        "details": "{\"emailHash\":\"1199cd1dda584929f8016c134f90a2c4c6b4b942290ce5accce3227b87f8ae38\",\"ip\":\"127.0.0.1\",\"userAgent\":\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Code/1.141.0 Chrome/150.0.7871.250 Electron/43.7.7 Safari/537.36\"}"
+      },
+      "16365ee2-515b-4536-bbca-174d7a6b2566": {
+        "id": "16365ee2-515b-4536-bbca-174d7a6b2566",
+        "createdAt": "2026-10-08T09:03:23.302Z",
+        "updatedAt": "2026-10-08T09:03:23.302Z",
+        "actorId": "system",
+        "action": "LOGIN_FAILED",
+        "resourceType": "User",
+        "resourceId": null,
+        "details": "{\"emailHash\":\"1199cd1dda584929f8016c134f90a2c4c6b4b942290ce5accce3227b87f8ae38\",\"ip\":\"127.0.0.1\",\"userAgent\":\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36\"}"
+      },
+      "a2b209d3-c101-4552-9d32-cf3b0960247f": {
+        "id": "a2b209d3-c101-4552-9d32-cf3b0960247f",
+        "createdAt": "2026-10-08T09:03:40.235Z",
+        "updatedAt": "2026-10-08T09:03:40.235Z",
+        "actorId": "system",
+        "action": "LOGIN_FAILED",
+        "resourceType": "User",
+        "resourceId": null,
+        "details": "{\"emailHash\":\"1199cd1dda584929f8016c134f90a2c4c6b4b942290ce5accce3227b87f8ae38\",\"ip\":\"127.0.0.1\",\"userAgent\":\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36\"}"
+      },
+      "cd85fd76-8815-48b5-a564-a721a8dc2791": {
+        "id": "cd85fd76-8815-48b5-a564-a721a8dc2791",
+        "createdAt": "2026-10-08T09:07:35.240Z",
+        "updatedAt": "2026-10-08T09:07:35.240Z",
+        "actorId": "system",
+        "action": "LOGIN_FAILED",
+        "resourceType": "User",
+        "resourceId": null,
+        "details": "{\"emailHash\":\"1199cd1dda584929f8016c134f90a2c4c6b4b942290ce5accce3227b87f8ae38\",\"ip\":\"127.0.0.1\",\"userAgent\":\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Code/1.141.0 Chrome/150.0.7871.250 Electron/43.7.7 Safari/537.36\"}"
+      },
+      "85102cd5-43ca-4921-aac0-d337602fa313": {
+        "id": "85102cd5-43ca-4921-aac0-d337602fa313",
+        "createdAt": "2026-10-08T09:10:00.504Z",
+        "updatedAt": "2026-10-08T09:10:00.504Z",
+        "actorId": "system",
+        "action": "LOGIN_FAILED",
+        "resourceType": "User",
+        "resourceId": null,
+        "details": "{\"emailHash\":\"1199cd1dda584929f8016c134f90a2c4c6b4b942290ce5accce3227b87f8ae38\",\"ip\":\"127.0.0.1\",\"userAgent\":\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Code/1.141.0 Chrome/150.0.7871.250 Electron/43.7.7 Safari/537.36\"}"
+      },
+      "17a5eb75-c2ce-41f6-b4d9-7b07b3661126": {
+        "id": "17a5eb75-c2ce-41f6-b4d9-7b07b3661126",
+        "createdAt": "2026-10-08T09:49:34.446Z",
+        "updatedAt": "2026-10-08T09:49:34.446Z",
+        "actorId": "system",
+        "action": "LOGIN_FAILED",
+        "resourceType": "User",
+        "resourceId": null,
+        "details": "{\"emailHash\":\"1199cd1dda584929f8016c134f90a2c4c6b4b942290ce5accce3227b87f8ae38\",\"ip\":\"127.0.0.1\",\"userAgent\":\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36\"}"
+      },
+      "6f7aa22c-3e51-478b-acb3-a25b5fb4d21f": {
+        "id": "6f7aa22c-3e51-478b-acb3-a25b5fb4d21f",
+        "createdAt": "2026-10-08T09:49:42.274Z",
+        "updatedAt": "2026-10-08T09:49:42.274Z",
+        "actorId": "system",
+        "action": "LOGIN_FAILED",
+        "resourceType": "User",
+        "resourceId": null,
+        "details": "{\"emailHash\":\"1199cd1dda584929f8016c134f90a2c4c6b4b942290ce5accce3227b87f8ae38\",\"ip\":\"127.0.0.1\",\"userAgent\":\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36\"}"
+      },
+      "b0fa9113-20a1-4616-850e-32f455ec9b4a": {
+        "id": "b0fa9113-20a1-4616-850e-32f455ec9b4a",
+        "createdAt": "2026-10-08T09:50:11.073Z",
+        "updatedAt": "2026-10-08T09:50:11.073Z",
+        "actorId": "system",
+        "action": "LOGIN_FAILED",
+        "resourceType": "User",
+        "resourceId": null,
+        "details": "{\"emailHash\":\"1199cd1dda584929f8016c134f90a2c4c6b4b942290ce5accce3227b87f8ae38\",\"ip\":\"127.0.0.1\",\"userAgent\":\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36\"}"
+      },
+      "5cc3f191-76f6-4275-8bc0-e5a5800408d0": {
+        "id": "5cc3f191-76f6-4275-8bc0-e5a5800408d0",
+        "createdAt": "2026-10-08T09:51:18.022Z",
+        "updatedAt": "2026-10-08T09:51:18.022Z",
+        "actorId": "system",
+        "action": "LOGIN_FAILED",
+        "resourceType": "User",
+        "resourceId": null,
+        "details": "{\"emailHash\":\"1199cd1dda584929f8016c134f90a2c4c6b4b942290ce5accce3227b87f8ae38\",\"ip\":\"127.0.0.1\",\"userAgent\":\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Code/1.141.0 Chrome/150.0.7871.250 Electron/43.7.7 Safari/537.36\"}"
+      },
+      "c08af935-79a8-4f58-9711-86939f0ec701": {
+        "id": "c08af935-79a8-4f58-9711-86939f0ec701",
+        "createdAt": "2026-10-08T10:52:43.919Z",
+        "updatedAt": "2026-10-08T10:52:43.919Z",
+        "actorId": "system",
+        "action": "LOGIN_FAILED",
+        "resourceType": "User",
+        "resourceId": null,
+        "details": "{\"emailHash\":\"1199cd1dda584929f8016c134f90a2c4c6b4b942290ce5accce3227b87f8ae38\",\"ip\":\"127.0.0.1\",\"userAgent\":\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36\"}"
+      },
+      "afe5292d-32aa-4374-b1c4-a427a2a203cf": {
+        "id": "afe5292d-32aa-4374-b1c4-a427a2a203cf",
+        "createdAt": "2026-10-08T10:53:14.984Z",
+        "updatedAt": "2026-10-08T10:53:14.984Z",
+        "actorId": "system",
+        "action": "LOGIN_FAILED",
+        "resourceType": "User",
+        "resourceId": null,
+        "details": "{\"emailHash\":\"1199cd1dda584929f8016c134f90a2c4c6b4b942290ce5accce3227b87f8ae38\",\"ip\":\"127.0.0.1\",\"userAgent\":\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36\"}"
+      },
+      "64f58d3a-fcc6-4e67-81ad-c00b3c944769": {
+        "id": "64f58d3a-fcc6-4e67-81ad-c00b3c944769",
+        "createdAt": "2026-10-08T10:59:52.214Z",
+        "updatedAt": "2026-10-08T10:59:52.214Z",
+        "actorId": "system",
+        "action": "LOGIN_FAILED",
+        "resourceType": "User",
+        "resourceId": null,
+        "details": "{\"emailHash\":\"1199cd1dda584929f8016c134f90a2c4c6b4b942290ce5accce3227b87f8ae38\",\"ip\":\"127.0.0.1\",\"userAgent\":\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Code/1.141.0 Chrome/150.0.7871.250 Electron/43.7.7 Safari/537.36\"}"
+      },
+      "8938c64f-435d-4ed2-b62d-b96a8507ea55": {
+        "id": "8938c64f-435d-4ed2-b62d-b96a8507ea55",
+        "createdAt": "2026-10-10T09:33:45.868Z",
+        "updatedAt": "2026-10-10T09:33:45.868Z",
+        "actorId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "action": "LOGIN",
+        "resourceType": "User",
+        "resourceId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "details": "{\"email\":\"niyibizisteven13@gmail.com\"}"
+      },
+      "e794d83a-b74b-482d-9363-bc153ee8a3b2": {
+        "id": "e794d83a-b74b-482d-9363-bc153ee8a3b2",
+        "createdAt": "2026-10-10T09:34:18.774Z",
+        "updatedAt": "2026-10-10T09:34:18.774Z",
+        "actorId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "action": "LOGIN",
+        "resourceType": "User",
+        "resourceId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "details": "{\"email\":\"niyibizisteven13@gmail.com\"}"
+      },
+      "d1b91cbe-7edf-4727-a1bd-7acbae3026f2": {
+        "id": "d1b91cbe-7edf-4727-a1bd-7acbae3026f2",
+        "createdAt": "2026-10-10T09:36:36.715Z",
+        "updatedAt": "2026-10-10T09:36:36.715Z",
+        "actorId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "action": "INGEST_DATASET_FILE",
+        "resourceType": "dataset",
+        "resourceId": "a1712855-5b5f-4bf3-a8a3-8ebefe1f81fc",
+        "details": "{\"filename\":\"UNIT 1-APP-STATISTICS FOR ECONOMISTS.pdf\",\"extractedCharacters\":14183,\"generatedExamples\":4}"
+      }
+    },
+    "fineTuneJob": {},
+    "providerConfig": {
+      "GONKAROUTER": {
+        "id": "GONKAROUTER",
+        "createdAt": "2026-10-08T10:52:26.350Z",
+        "updatedAt": "2026-10-08T10:52:26.350Z",
+        "provider": "GONKAROUTER",
+        "model": "zai-org/GLM-5.3-Flash",
+        "baseUrl": "https://api.gonkarouter.io/v1",
+        "secretRef": "GONKA_y1Rc"
+      }
+    },
+    "knowledgeBase": {
+      "b87857e1-f4d6-4ad7-8fda-5cf84079dfdc": {
+        "id": "b87857e1-f4d6-4ad7-8fda-5cf84079dfdc",
+        "createdAt": "2026-10-08T10:52:27.227Z",
+        "updatedAt": "2026-10-08T10:52:27.227Z",
+        "name": "Bwenge Platform Knowledge & Rubrics",
+        "description": "Live repository synced from uploaded documents, exam papers, and application forms in the database.",
+        "state": "active"
+      }
+    },
+    "document": {},
+    "datasetExample": {
+      "9aef9d3a-12a0-4fa6-8fb4-6149fd95814d": {
+        "id": "9aef9d3a-12a0-4fa6-8fb4-6149fd95814d",
+        "createdAt": "2026-10-08T10:52:57.279Z",
+        "updatedAt": "2026-10-08T10:52:57.279Z",
+        "datasetId": "a1712855-5b5f-4bf3-a8a3-8ebefe1f81fc",
+        "instruction": "Grade a student short-answer response on neural network backpropagation against a 10-point rubric.",
+        "input": "Rubric: Chain rule derivation (5 pts), weight update equation (3 pts), vanishing gradient discussion (2 pts).\nStudent Answer: Backpropagation computes dL/dW using the chain rule layer by layer and updates W = W - lr * dL/dW.",
+        "output": "Score: 8/10.\n- Chain rule derivation: 5/5 (Clear layer-by-layer gradient flow)\n- Weight update equation: 3/3 (Exact SGD update formula)\n- Vanishing gradient discussion: 0/2 (Omitted discussion of sigmoid/tanh saturation).",
+        "status": "approved",
+        "validationFlags": "[\"CALIBRATION_BASELINE\",\"DB_VERIFIED\"]"
+      },
+      "a571c6a5-d177-4b72-9a31-d1ff31c2b367": {
+        "id": "a571c6a5-d177-4b72-9a31-d1ff31c2b367",
+        "createdAt": "2026-10-08T10:52:57.281Z",
+        "updatedAt": "2026-10-08T10:52:57.281Z",
+        "datasetId": "a1712855-5b5f-4bf3-a8a3-8ebefe1f81fc",
+        "instruction": "Analyze candidate application metrics and shortlist top applicants based on rubric weights.",
+        "input": "Criteria: Technical Depth (60%), Community Impact (40%). Minimum threshold: 75%.",
+        "output": "Evaluated candidate pool against weighted criteria. Candidates scoring >= 75% with verified technical deliverables and measurable community outcomes are shortlisted and ranked by composite score.",
+        "status": "approved",
+        "validationFlags": "[\"CALIBRATION_BASELINE\",\"DB_VERIFIED\"]"
+      },
+      "ef18533e-d04e-4275-871c-db90ae28e36f": {
+        "id": "ef18533e-d04e-4275-871c-db90ae28e36f",
+        "createdAt": "2026-10-10T09:36:36.708Z",
+        "updatedAt": "2026-10-10T09:36:36.708Z",
+        "datasetId": "a1712855-5b5f-4bf3-a8a3-8ebefe1f81fc",
+        "instruction": "Answer the following question using only the provided course material on Foundations of Statistics in Economics.",
+        "input": "What is the difference between descriptive and inferential statistics in economics?",
+        "output": "Descriptive statistics summarise and describe observed data, using tools such as the mean, median, standard deviation, tables, and graphs. Inferential statistics use sample information to draw conclusions about a wider population, using tools such as confidence intervals, hypothesis testing, regression analysis, and causal inference. In short, descriptive statistics tell us what the data show, while inferential statistics help us determine what we can conclude beyond the observed data.",
+        "status": "pending",
+        "validationFlags": "[\"AI_FILE_INGESTION\",\"SOURCE_FILE:UNIT 1-APP-STATISTICS FOR ECONOMISTS.pdf\",\"SOURCE_SECTION:1\"]"
+      },
+      "062c9165-4d01-4043-a76f-27d0901e06e9": {
+        "id": "062c9165-4d01-4043-a76f-27d0901e06e9",
+        "createdAt": "2026-10-10T09:36:36.710Z",
+        "updatedAt": "2026-10-10T09:36:36.710Z",
+        "datasetId": "a1712855-5b5f-4bf3-a8a3-8ebefe1f81fc",
+        "instruction": "Answer the following question using only the provided course material on Foundations of Statistics in Economics.",
+        "input": "What are the three important structures of economic data, and how do they differ from one another?",
+        "output": "The three structures of economic data are: (1) Cross-sectional data, which contain observations on many units (e.g., individuals, households, firms, districts, countries) at approximately the same point in time, with the main focus on differences between units; (2) Time-series data, which contain observations on one unit or aggregate measured repeatedly over time, with the main focus on changes over time; and (3) Panel data, which combine a cross-sectional dimension and a time dimension because the same units are observed repeatedly over time, allowing us to study both differences between units and changes within units over time.",
+        "status": "pending",
+        "validationFlags": "[\"AI_FILE_INGESTION\",\"SOURCE_FILE:UNIT 1-APP-STATISTICS FOR ECONOMISTS.pdf\",\"SOURCE_SECTION:1\"]"
+      },
+      "374213d3-7a74-480f-b15d-446ee445387a": {
+        "id": "374213d3-7a74-480f-b15d-446ee445387a",
+        "createdAt": "2026-10-10T09:36:36.712Z",
+        "updatedAt": "2026-10-10T09:36:36.712Z",
+        "datasetId": "a1712855-5b5f-4bf3-a8a3-8ebefe1f81fc",
+        "instruction": "Explain why class midpoints are used when computing the mean for grouped data with class intervals, and state the estimated average monthly household income from the example of 50 households.",
+        "input": "Monthly income data for 50 households are given only in class intervals (e.g., 100–199, 200–299, etc.) rather than as exact values.",
+        "output": "Because the exact income of each household is not known, the class midpoint is used as a representative value for each class. Using this method, the estimated average monthly household income is 383,500 RWF (383.5 × 1,000, since income was measured in thousands of Rwandan francs).",
+        "status": "pending",
+        "validationFlags": "[\"AI_FILE_INGESTION\",\"SOURCE_FILE:UNIT 1-APP-STATISTICS FOR ECONOMISTS.pdf\",\"SOURCE_SECTION:2\"]"
+      },
+      "5a324064-0449-4725-9018-306554d08a50": {
+        "id": "5a324064-0449-4725-9018-306554d08a50",
+        "createdAt": "2026-10-10T09:36:36.713Z",
+        "updatedAt": "2026-10-10T09:36:36.713Z",
+        "datasetId": "a1712855-5b5f-4bf3-a8a3-8ebefe1f81fc",
+        "instruction": "What does the coefficient of variation (CV) measure, and in what situation is it particularly useful?",
+        "input": "Discussing measures of dispersion, specifically the coefficient of variation.",
+        "output": "The coefficient of variation measures the size of the standard deviation relative to the mean. It is particularly useful when comparing the variability of datasets measured in different units or having very different means.",
+        "status": "pending",
+        "validationFlags": "[\"AI_FILE_INGESTION\",\"SOURCE_FILE:UNIT 1-APP-STATISTICS FOR ECONOMISTS.pdf\",\"SOURCE_SECTION:2\"]"
+      }
+    },
+    "aiModel": {
+      "production": {
+        "id": "production",
+        "createdAt": "2026-10-08T10:52:57.284Z",
+        "updatedAt": "2026-10-08T10:52:57.284Z",
+        "name": "zai-org/GLM-5.3-Flash",
+        "provider": "GonkaRouter",
+        "baseModel": "GLM-5.3-Flash",
+        "version": "v5.3",
+        "status": "active",
+        "environment": "production",
+        "dataset": "Platform Base Weights",
+        "score": "95.2%"
+      }
+    },
+    "usageEvent": {},
+    "applicationForm": {},
+    "formSubmission": {},
+    "prompt": {
+      "c9a5a980-bc9b-4dba-8db0-4dcfc92de65f": {
+        "id": "c9a5a980-bc9b-4dba-8db0-4dcfc92de65f",
+        "createdAt": "2026-10-08T10:52:57.285Z",
+        "updatedAt": "2026-10-08T10:52:57.285Z",
+        "name": "GonkaRouter Primary System Prompt",
+        "versions": [
+          {
+            "id": "0159cbd8-1a8d-4014-aafe-36adca9e43fc",
+            "promptId": "c9a5a980-bc9b-4dba-8db0-4dcfc92de65f",
+            "version": 1,
+            "environment": "production",
+            "active": true,
+            "text": "You are Bwenge — the Kinyarwanda word for \"wisdom\" and \"intelligence.\" You are a frontier-grade AI engine powered by GonkaRouter, built to execute tasks directly, accurately, and concisely across text, graphics, animated video, audio podcasts, code, workflows, forms, and dataset pattern analysis.\n\n## § 0 · Action Over Words (CRITICAL)\n- Do NOT write long capability descriptions, meta-commentary, or wordy preambles. Keep prose explanations brief (1–3 sentences) and immediately deliver the working output or executable artifact (```artifact-json```, `<form_schema>`, or runnable code).\n- When asked to generate an image, video, audio/podcast, dataset pattern report, workflow, or form, NEVER just describe it in text — emit the executable block so the backend and canvas execute it immediately.\n\n---\n\n## § 1 · Tone & Personality\n\n- **Warm, sharp, and honest** — like a brilliant patient colleague, not a hype-bot.\n- Be direct. Lead with the answer; add supporting detail only when it adds value.\n- Match the user's register: formal for business, conversational for casual, gentle for sensitive topics.\n- Avoid excessive exclamation marks, emoji spam, or hollow affirmations (\"Great question!\").\n- ",
+            "createdAt": "2026-10-08T10:52:57.285Z"
+          }
+        ]
+      }
+    },
+    "documentChunk": {},
+    "retrievalSetting": {
+      "production": {
+        "id": "production",
+        "createdAt": "2026-10-08T10:52:27.222Z",
+        "updatedAt": "2026-10-08T10:52:27.222Z",
+        "environment": "production",
+        "chunkSize": 800,
+        "overlap": 120,
+        "topK": 6,
+        "threshold": 0.35,
+        "rerank": true,
+        "hybrid": true,
+        "metadata": true,
+        "embedModel": "gonkarouter-embed-v1"
+      }
+    },
+    "fileRecord": {},
+    "studioProject": {},
+    "dataset": {
+      "a1712855-5b5f-4bf3-a8a3-8ebefe1f81fc": {
+        "id": "a1712855-5b5f-4bf3-a8a3-8ebefe1f81fc",
+        "createdAt": "2026-10-08T10:52:27.229Z",
+        "updatedAt": "2026-10-08T10:52:27.229Z",
+        "name": "Platform Live Grading & Assessment Corpus",
+        "description": "Real instruction-output training pairs harvested from platform forms, student scripts, and knowledge base records."
+      }
+    },
+    "batchJobResult": {},
+    "promptVersion": {
+      "0159cbd8-1a8d-4014-aafe-36adca9e43fc": {
+        "id": "0159cbd8-1a8d-4014-aafe-36adca9e43fc",
+        "promptId": "c9a5a980-bc9b-4dba-8db0-4dcfc92de65f",
+        "version": 1,
+        "environment": "production",
+        "active": true,
+        "text": "You are Bwenge — the Kinyarwanda word for \"wisdom\" and \"intelligence.\" You are a frontier-grade AI engine powered by GonkaRouter, built to execute tasks directly, accurately, and concisely across text, graphics, animated video, audio podcasts, code, workflows, forms, and dataset pattern analysis.\n\n## § 0 · Action Over Words (CRITICAL)\n- Do NOT write long capability descriptions, meta-commentary, or wordy preambles. Keep prose explanations brief (1–3 sentences) and immediately deliver the working output or executable artifact (```artifact-json```, `<form_schema>`, or runnable code).\n- When asked to generate an image, video, audio/podcast, dataset pattern report, workflow, or form, NEVER just describe it in text — emit the executable block so the backend and canvas execute it immediately.\n\n---\n\n## § 1 · Tone & Personality\n\n- **Warm, sharp, and honest** — like a brilliant patient colleague, not a hype-bot.\n- Be direct. Lead with the answer; add supporting detail only when it adds value.\n- Match the user's register: formal for business, conversational for casual, gentle for sensitive topics.\n- Avoid excessive exclamation marks, emoji spam, or hollow affirmations (\"Great question!\").\n- ",
+        "createdAt": "2026-10-08T10:52:57.285Z"
+      }
+    },
+    "workspaceState": {
+      "84e16cb8-cb26-4a8b-baf7-ca54407117c5": {
+        "id": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "createdAt": "2026-10-10T09:33:47.418Z",
+        "updatedAt": "2026-10-10T09:33:47.418Z",
+        "userId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "data": "{\"messages\":[],\"sessions\":[],\"uploadedFiles\":[],\"activeTab\":\"documents\",\"activeFormId\":null,\"pinnedSyllabusId\":null,\"highlights\":[{\"id\":\"hl-1\",\"docId\":\"exam-ib-physics\",\"docTitle\":\"IB Physics HL - Classical Mechanics\",\"text\":\"Newton's Second Law states that force is equal to the rate of change of momentum (F = dp/dt).\",\"color\":\"terracotta\",\"createdAt\":\"10 mins ago\",\"note\":\"Core formula for impulse derivation\",\"category\":\"Physics Principle\"},{\"id\":\"hl-2\",\"docId\":\"exam-ib-physics\",\"docTitle\":\"IB Physics HL - Classical Mechanics\",\"text\":\"Kinetic energy after = 144,000 J. Kinetic energy is not conserved (inelastic collision).\",\"color\":\"sage\",\"createdAt\":\"25 mins ago\",\"note\":\"Inelastic collision key evidence\",\"category\":\"Calculation Rule\"},{\"id\":\"hl-3\",\"docId\":\"exam-cs101\",\"docTitle\":\"CS101 - Algorithms & Recursion\",\"text\":\"Naive recursive Fibonacci is O(2^n) time due to overlapping subproblems tree.\",\"color\":\"yellow\",\"createdAt\":\"1 hour ago\",\"note\":\"Important complexity distinction for exams\",\"category\":\"CS Algorithm\"}],\"decks\":[{\"id\":\"deck-physics\",\"title\":\"Physics HL - Momentum & Collisions\",\"cardsCount\":12,\"description\":\"Newtonian mechanics, conservation equations, impulse integral proofs\",\"updatedAt\":\"Today\"},{\"id\":\"deck-cs\",\"title\":\"Computer Science - Complexity & Recursion\",\"cardsCount\":8,\"description\":\"Big-O notation, recursion base cases, dynamic programming memoization\",\"updatedAt\":\"Yesterday\"},{\"id\":\"deck-rubrics\",\"title\":\"Marking Criteria & Model Answer Anchors\",\"cardsCount\":15,\"description\":\"Rubric criteria anchors for high-scoring student essay answers\",\"updatedAt\":\"2 days ago\"}],\"flashcards\":[{\"id\":\"fc-1\",\"deckId\":\"deck-physics\",\"front\":\"What is the formal calculus expression for Newton's Second Law?\",\"back\":\"F = dp/dt (Force is equal to the rate of change of momentum with respect to time).\",\"sourceDocTitle\":\"IB Physics HL - Classical Mechanics\",\"createdAt\":\"10 mins ago\"},{\"id\":\"fc-2\",\"deckId\":\"deck-physics\",\"front\":\"How is Impulse (J) related to a Force-Time graph?\",\"back\":\"Impulse J = ∫ F dt, which corresponds exactly to the area beneath the Force-Time curve.\",\"sourceDocTitle\":\"IB Physics HL - Classical Mechanics\",\"createdAt\":\"20 mins ago\"},{\"id\":\"fc-3\",\"deckId\":\"deck-cs\",\"front\":\"What is the time and space complexity of naive recursive Fibonacci?\",\"back\":\"Time complexity: O(2^n) due to redundant tree evaluations. Space complexity: O(n) call stack depth.\",\"sourceDocTitle\":\"CS101 - Algorithms & Recursion\",\"createdAt\":\"1 hour ago\"}],\"aiCards\":[{\"id\":\"ai-card-1\",\"type\":\"summary\",\"title\":\"Key Concept Summary\",\"content\":\"Newton's Second Law directly establishes that Force equals the time derivative of momentum (F = dp/dt). Integrating force over time yields the Impulse-Momentum Theorem (J = Δp).\",\"sourceText\":\"Newton's Second Law states that force is equal to the rate of change of momentum (F = dp/dt).\",\"timestamp\":\"Just now\"}],\"examPaper\":null,\"studentScripts\":[]}"
+      }
+    },
+    "verifiedAnswer": {},
+    "correctionQueueItem": {}
+  }
+}

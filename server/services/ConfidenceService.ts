@@ -1,4 +1,5 @@
 import logger from '../utils/logger.js';
+import { parseModelJson } from '../utils/textSanitizers.js';
 
 const DEFAULT_FETCH_TIMEOUT_MS = 30_000;
 
@@ -80,7 +81,7 @@ Do NOT include any other text outside the JSON.`;
     const userPrompt = `ORIGINAL QUERY: ${originalQuery}\n\nAI RESPONSE TO AUDIT:\n${aiResponse}`;
     try {
       const raw = await this.callGonka(systemPrompt, userPrompt);
-      const json = JSON.parse(raw.replace(/```json?/g, '').replace(/```/g, '').trim());
+      const json = parseModelJson(raw);
       return {
         score: Math.min(100, Math.max(0, Number(json.score) || 50)),
         level: ['HIGH', 'MEDIUM', 'LOW'].includes(json.level) ? json.level : 'MEDIUM',

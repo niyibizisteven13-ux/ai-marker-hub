@@ -1,4 +1,5 @@
 import logger from '../utils/logger.js';
+import { parseModelJson } from '../utils/textSanitizers.js';
 
 const DEFAULT_FETCH_TIMEOUT_MS = 15_000;
 
@@ -106,7 +107,7 @@ Do NOT include any text outside the JSON object.`;
             { role: 'user', content: message.slice(0, 500) }, // cap to avoid excess tokens
           ],
           temperature: 0.0,
-          max_tokens: 128,
+          max_tokens: 256,
           stream: false,
         }),
       }, 15_000);
@@ -115,7 +116,7 @@ Do NOT include any text outside the JSON object.`;
       if (!response.ok) throw new Error(`Sentiment API error: ${data?.error?.message}`);
 
       const raw = (data?.choices?.[0]?.message?.content || '').trim();
-      const json = JSON.parse(raw.replace(/```json?/g, '').replace(/```/g, '').trim());
+      const json = parseModelJson(raw);
 
       const tone = json.tone as EmotionalTone || 'neutral';
       const suggestedPersona = json.persona as PersonaMode || 'professional';

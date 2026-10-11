@@ -55,3 +55,26 @@ export function stripThinkingTags(text: any): StripThinkingTagsResult {
   result.thinkingText = thinkingText || undefined;
   return result;
 }
+
+export function parseModelJson(rawText: string, fallback: any = {}): any {
+  if (!rawText) return fallback;
+  const cleaned = rawText.trim();
+  const fenced = cleaned.match(/```(?:json)?([\s\S]*?)```/i);
+  const content = fenced ? fenced[1].trim() : cleaned;
+
+  try {
+    return JSON.parse(content);
+  } catch {
+    const objectStart = content.indexOf('{');
+    const objectEnd = content.lastIndexOf('}');
+    if (objectStart >= 0 && objectEnd > objectStart) {
+      try { return JSON.parse(content.slice(objectStart, objectEnd + 1)); } catch {}
+    }
+    const arrayStart = content.indexOf('[');
+    const arrayEnd = content.lastIndexOf(']');
+    if (arrayStart >= 0 && arrayEnd > arrayStart) {
+      try { return JSON.parse(content.slice(arrayStart, arrayEnd + 1)); } catch {}
+    }
+  }
+  return fallback;
+}

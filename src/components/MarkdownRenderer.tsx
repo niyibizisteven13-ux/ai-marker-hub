@@ -654,7 +654,7 @@ export default function MarkdownRenderer({ content, className = '' }: MarkdownRe
     <div className={`prose prose-invert max-w-none text-[15px] leading-relaxed text-neutral-100 ${className}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        rehypePlugins={[[rehypeKatex, { strict: false }]]}
         components={{
           code({ className, children, ...props }: any) {
             const inline = 'inline' in props && Boolean(props.inline);

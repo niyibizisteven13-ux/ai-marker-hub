@@ -1,5 +1,7 @@
 import { prisma } from '../db.js';
 import logger from '../utils/logger.js';
+import { retrieveKnowledgeChunks } from './KnowledgeRetrievalService.js';
+import { isExecutionTraceExample } from './DatasetQualityService.js';
 
 export class ContextAwareService {
   private static instance: ContextAwareService;
@@ -54,25 +56,15 @@ export class ContextAwareService {
         }
       }
 
-      // Fetch approved DatasetExamples from the database to apply real in-context fine-tuned weights
-      const exampleWhere: any = { status: 'approved' };
-      if (datasetId) {
-        exampleWhere.datasetId = datasetId;
-      }
-      let approvedExamples = await prisma.datasetExample.findMany({
-        where: exampleWhere,
-        orderBy: { updatedAt: 'desc' },
-        take: 12,
-      });
-
-      // Fallback to any approved examples if specific dataset had none
-      if (approvedExamples.length === 0 && datasetId) {
-        approvedExamples = await prisma.datasetExample.findMany({
-          where: { status: 'approved' },
-          orderBy: { updatedAt: 'desc' },
-          take: 12,
-        });
-      }
+      // Fetch approved DatasetExamples as supporting in-context examples for the active adapter.
+      const loadedExamples = datasetId
+        ? await prisma.datasetExample.findMany({
+            where: { status: 'approved', datasetId },
+            orderBy: { updatedAt: 'desc' },
+            take: 12,
+          })
+        : [];
+      const approvedExamples = loadedExamples.filter((example: any) => !isExecutionTraceExample(example));
 
       const fewShotBlock =
         approvedExamples.length > 0
@@ -107,7 +99,7 @@ export class ContextAwareService {
   }
 
   /**
-   * Gathers multidimensional system states, real database records, active fine-tuned model weights,
+   * Gathers multidimensional system states, real database records, the active dataset adapter,
    * active admin system prompts, and RAG knowledge chunks to build a hydrated context block.
    */
   public async buildHydratedPrompt(userId: string, formId?: string, userQuery?: string) {
@@ -150,13 +142,13 @@ Available Data Fields: ${fields.join(', ') || 'Standard fields'}
     // 3. Real Platform Database Snapshot (Forms, Submissions, Graded Scripts, Datasets, Knowledge Base)
     let dbSnapshotContext = '';
     try {
-      const [allForms, allSubmissions, allInsights, allDatasets, allExamples, allChunks] = await Promise.all([
+      const [allForms, allSubmissions, allInsights, allDatasets, allExamples, chunkCount] = await Promise.all([
         prisma.applicationForm.findMany({ take: 10, orderBy: { createdAt: 'desc' } }),
         prisma.formSubmission.findMany({ take: 30, orderBy: { createdAt: 'desc' } }),
         prisma.extractedInsight.findMany({ take: 30, orderBy: { createdAt: 'desc' } }),
         prisma.dataset.findMany({ include: { _count: { select: { examples: true } } }, take: 10 }),
         prisma.datasetExample.findMany({ where: { status: 'approved' }, take: 15 }),
-        prisma.documentChunk.findMany({ take: 8, orderBy: { createdAt: 'desc' } }),
+        prisma.documentChunk.count(),
       ]);
 
       const insightScores = allInsights.map((i: any) => Number(i.score)).filter((n) => Number.isFinite(n));
@@ -170,26 +162,21 @@ Available Data Fields: ${fields.join(', ') || 'Standard fields'}
 - Active Application Forms in DB: ${allForms.length} (${allForms.map((f: any) => `"${f.title}"`).slice(0, 4).join(', ') || 'none'})
 - Form Submissions in DB: ${allSubmissions.length} | Scored Candidate Insights: ${allInsights.length} (Mean Score: ${meanScore}%)
 - Curated Fine-Tuning Datasets in DB: ${allDatasets.length} (${allExamples.length} approved training examples active)
-- Indexed Knowledge Base Chunks in DB: ${allChunks.length}
+- Indexed Knowledge Base Chunks in DB: ${chunkCount}
       `.trim();
-
-      if (allChunks.length > 0) {
-        const relevantChunks = userQuery
-          ? allChunks.filter((c: any) =>
-              userQuery
-                .toLowerCase()
-                .split(/\W+/)
-                .filter((w) => w.length > 3)
-                .some((w) => String(c.text || '').toLowerCase().includes(w) || String(c.sourceFilename || '').toLowerCase().includes(w))
-            )
-          : [];
-        const chunksToInject = (relevantChunks.length > 0 ? relevantChunks : allChunks).slice(0, 4);
-        dbSnapshotContext += `\n\n[VERIFIED KNOWLEDGE BASE CHUNKS]\n${chunksToInject
-          .map((c: any) => `• [${c.sourceFilename}]: ${String(c.text || '').slice(0, 350)}`)
-          .join('\n')}`;
-      }
     } catch (e) {
       logger.warn('Could not build full DB snapshot in ContextAwareService:', e);
+    }
+
+    if (userQuery) {
+      const relevantChunks = await retrieveKnowledgeChunks(userQuery, { limit: 5 });
+      if (relevantChunks.length > 0) {
+        dbSnapshotContext += `\n\n[READY KNOWLEDGE BASE SOURCES — use only for claims they support]\n${relevantChunks
+          .map(({ chunk, score }) => `[EVIDENCE ID: ${chunk.chunkId}] [${chunk.sourceFilename}${chunk.section ? `, ${chunk.section}` : ''}; relevance ${score}]: ${String(chunk.text || '').slice(0, 1_200)}`)
+          .join('\n\n')}`;
+      } else {
+        dbSnapshotContext += '\n\n[KNOWLEDGE BASE RETRIEVAL]\nNo relevant passage matched this query. If asked for facts from the knowledge base, explicitly say the evidence is unavailable and do not guess.';
+      }
     }
 
     // 4. Active Fine-Tuned Model & Admin System Prompt
@@ -219,14 +206,13 @@ Available Data Fields: ${fields.join(', ') || 'Standard fields'}
 TEMPORAL: ${temporalContext.human} ${temporalContext.time} (${temporalContext.iso})
 ENVIRONMENTAL: ${environmentalContext}
 USER STATE: ${userContext}
-ACTIVE MODEL: ${ftContext.modelName} (Base: ${ftContext.baseModel}, Approved Fine-Tune Examples: ${ftContext.exampleCount})
+ACTIVE MODEL: ${ftContext.modelName} (Base: ${ftContext.baseModel}, Approved Dataset Examples: ${ftContext.exampleCount})
 ${dbSnapshotContext}
 ${adminPromptBlock}
-${ftContext.adapterPrompt ? `\n[FINE-TUNED MODEL ADAPTER WEIGHTS & CALIBRATION]\n${ftContext.adapterPrompt}` : ''}
-${ftContext.fewShotBlock ? `\n[FINE-TUNED IN-CONTEXT TRAINING EXAMPLES FROM DATABASE]\n${ftContext.fewShotBlock}` : ''}
+${ftContext.adapterPrompt ? `\n[DATASET-GROUNDED AI KNOWLEDGE ADAPTER]\n${ftContext.adapterPrompt}` : ''}
+${ftContext.fewShotBlock ? `\n[APPROVED DATASET EXAMPLES]\n${ftContext.fewShotBlock}` : ''}
 
-EXECUTION DIRECTIVE: Execute tasks directly and concisely. Do not write filler introductions or unnecessary prose—deliver working artifacts, accurate database-grounded analysis, and direct answers.
+EXECUTION DIRECTIVE: Execute tasks directly and concisely. Do not write filler introductions or unnecessary prose. For knowledge-base facts, use only matching READY source passages and cite claims with the exact [EVIDENCE:chunk-id] shown in the passage. Never invent citations. If no relevant passage is available, say the knowledge base cannot support the answer.
     `.trim();
   }
 }
-

@@ -1,4 +1,5 @@
 import logger from '../utils/logger.js';
+import { parseModelJson } from '../utils/textSanitizers.js';
 
 const DEFAULT_FETCH_TIMEOUT_MS = 10_000;
 
@@ -118,12 +119,12 @@ Return safe for any normal educational, coding, math, writing, or professional t
         body: JSON.stringify({
           model: this.gonkaModel,
           messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: text.slice(0, 800) }],
-          temperature: 0.0, max_tokens: 128, stream: false,
+          temperature: 0.0, max_tokens: 256, stream: false,
         }),
       }, 10_000);
       const data: any = await response.json();
-      const raw = (data?.choices?.[0]?.message?.content || '').replace(/```json?/g, '').replace(/```/g, '').trim();
-      const json = JSON.parse(raw);
+      const raw = (data?.choices?.[0]?.message?.content || '').trim();
+      const json = parseModelJson(raw);
       const category: SafetyCategory = ['safe', 'borderline', 'harmful', 'illegal'].includes(json.category) ? json.category : 'safe';
       return { category, reason: json.reason || '' };
     } catch (e) {

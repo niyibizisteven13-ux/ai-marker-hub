@@ -23,6 +23,10 @@ export const adminApi = {
   // Documents
   getDocuments: () => readJson<{ success: true; data: any[] }>('/api/admin/documents'),
   getDocument: (id: string) => readJson<{ success: true; data: any }>(`/api/admin/documents/${id}`),
+  getDocumentChunks: (id: string) => readJson<{ success: true; data: any[] }>(`/api/admin/documents/${id}/chunks`),
+  updateDocumentChunk: (chunkId: string, payload: any) => readJson(`/api/admin/document-chunks/${chunkId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
+  approveDocument: (id: string) => readJson(`/api/admin/documents/${id}/approve`, { method: 'POST' }),
+  retractDocument: (id: string) => readJson(`/api/admin/documents/${id}/retract`, { method: 'POST' }),
   uploadDocument: (formData: FormData) =>
     authFetch('/api/admin/documents/upload', { method: 'POST', body: formData }).then(async r => {
       const d = await r.json();
@@ -35,11 +39,25 @@ export const adminApi = {
   search: (q: string, kbId?: string) => readJson<{ success: true; data: any[] }>(`/api/admin/search?q=${encodeURIComponent(q)}${kbId ? `&knowledgeBaseId=${kbId}` : ''}`),
   runPlayground: (payload: any) => readJson('/api/admin/playground', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
 
+  // Corrections & Verified Answers (Phases 2, 3, 4)
+  getCorrections: () => readJson<{ success: true; data: any[] }>('/api/admin/corrections'),
+  submitCorrection: (payload: any) => readJson('/api/admin/corrections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
+  approveCorrection: (id: string) => readJson(`/api/admin/corrections/${id}/approve`, { method: 'POST' }),
+  rejectCorrection: (id: string, reason: string) => readJson(`/api/admin/corrections/${id}/reject`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }) }),
+  retractCorrection: (id: string) => readJson(`/api/admin/corrections/${id}/retract`, { method: 'POST' }),
+  getVerifiedAnswers: () => readJson<{ success: true; data: any[] }>('/api/admin/verified-answers'),
+
   // Datasets & Training Examples
   getDatasets: () => readJson<{ success: true; data: any[] }>('/api/admin/datasets'),
   createDataset: (payload: any) => readJson('/api/admin/datasets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
   deleteDataset: (datasetId: string) => readJson(`/api/admin/datasets/${datasetId}`, { method: 'DELETE' }),
   getDatasetExamples: (datasetId: string) => readJson<{ success: true; data: any[] }>(`/api/admin/datasets/${datasetId}/examples`),
+  uploadDatasetFile: (datasetId: string, formData: FormData) =>
+    authFetch(`/api/admin/datasets/${datasetId}/files`, { method: 'POST', body: formData }).then(async (response) => {
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'File extraction failed.');
+      return data;
+    }),
   createDatasetExample: (datasetId: string, payload: any) => readJson(`/api/admin/datasets/${datasetId}/examples`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
   generateDatasetExamples: (datasetId: string, source = 'all') =>
     readJson<{ success: true; data: any[]; message?: string }>(`/api/admin/datasets/${datasetId}/generate-from-knowledge`, {
@@ -49,10 +67,11 @@ export const adminApi = {
     }),
   approveAllDatasetExamples: (datasetId: string) =>
     readJson(`/api/admin/datasets/${datasetId}/approve-all`, { method: 'POST' }),
+  exportDataset: (datasetId: string) => readJson<{ success: true; manifest: any; jsonl: string }>(`/api/admin/datasets/${datasetId}/export`),
   updateDatasetExample: (exampleId: string, payload: any) => readJson(`/api/admin/dataset-examples/${exampleId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
   deleteDatasetExample: (exampleId: string) => readJson(`/api/admin/dataset-examples/${exampleId}`, { method: 'DELETE' }),
 
-  // Fine-tuning
+  // Fine-tuning & Training
   getFineTuneJobs: () => readJson<{ success: true; data: any[] }>('/api/admin/fine-tune/jobs'),
   createFineTuneJob: (
     payload:
@@ -84,6 +103,7 @@ export const adminApi = {
         body: JSON.stringify({ prompt }),
       }
     ),
+  getFineTuneReadme: (id: string) => readJson<{ success: true; readme: string }>(`/api/admin/fine-tune/jobs/${id}/readme`),
 
   // Models
   getModels: () => readJson<{ success: true; data: any[] }>('/api/admin/models'),

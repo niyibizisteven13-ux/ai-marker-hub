@@ -24,9 +24,10 @@ class GonkaClient:
             logger.warning("gonka_api_key_missing")
         self.base_url = settings.GONKA_BASE_URL.rstrip("/")
         self.headers = {
-            "Authorization": f"Bearer {settings.GONKA_API_KEY}",
             "Content-Type": "application/json",
         }
+        if settings.GONKA_API_KEY:
+            self.headers["Authorization"] = f"Bearer {settings.GONKA_API_KEY}"
         self.model = settings.GONKA_MODEL
 
     async def chat(
@@ -207,7 +208,10 @@ class AIQueryEngine:
                 + "Now answer the user's question based solely on the context above."
             )
         else:
-            system = BWENGE_SYSTEM_PROMPT
+            system = (
+                BWENGE_SYSTEM_PROMPT
+                + "\n\nNote: No document files are attached to this query. Answer the user's question expertly and comprehensively as a domain-adapted AI assistant (e.g. explaining fine-tuning, local AI training, domain knowledge, and AI architecture concepts)."
+            )
 
         messages = [{"role": "user", "content": prompt}]
         file_ids_used = list({c.file_id for c in chunks_to_use})

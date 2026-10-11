@@ -1,0 +1,50 @@
+2026-10-07T14:53:11Z INF Thank you for trying Cloudflare Tunnel. Doing so, without a Cloudflare account, is a quick way to experiment and try it out. However, be aware that these account-less Tunnels have no uptime guarantee, are subject to the Cloudflare Online Services Terms of Use (https://www.cloudflare.com/website-terms/), and Cloudflare reserves the right to investigate your use of Tunnels for violations of such terms. If you intend to use Tunnels in production you should use a pre-created named tunnel by following: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps
+2026-10-07T14:53:11Z INF Requesting new quick Tunnel on trycloudflare.com...
+2026-10-07T14:53:17Z INF +--------------------------------------------------------------------------------------------+
+2026-10-07T14:53:17Z INF |  Your quick Tunnel has been created! Visit it at (it may take some time to be reachable):  |
+2026-10-07T14:53:17Z INF |  https://identifier-occupations-assisted-expanded.trycloudflare.com                        |
+2026-10-07T14:53:17Z INF +--------------------------------------------------------------------------------------------+
+2026-10-07T14:53:17Z INF Cannot determine default configuration path. No file [config.yml config.yaml] in [~/.cloudflared ~/.cloudflare-warp ~/cloudflare-warp]
+2026-10-07T14:53:17Z INF Version 2026.7.1 (Checksum ccb0756de288d3c2c076d19764ca53e0849a10f2dd9c23f8656ac42bdeb45001)
+2026-10-07T14:53:17Z INF GOOS: windows, GOVersion: go1.26.4, GoArch: amd64
+2026-10-07T14:53:17Z INF Settings: map[ha-connections:1 p:http2 protocol:http2 url:http://localhost:3000]
+2026-10-07T14:53:17Z INF cloudflared will not automatically update on Windows systems.
+2026-10-07T14:53:17Z INF Generated Connector ID: f4b9e305-9d89-4447-9705-614102f70103
+2026-10-07T14:53:17Z INF Initial protocol http2
+2026-10-07T14:53:17Z INF ICMP proxy will use 172.20.17.99 as source for IPv4
+2026-10-07T14:53:17Z INF ICMP proxy will use fe80::c9a6:aec3:1bcd:412f in zone Wi-Fi as source for IPv6
+2026-10-07T14:53:17Z INF cloudflared does not support loading the system root certificate pool on Windows. Please use --origin-ca-pool <PATH> to specify the path to the certificate pool
+2026-10-07T14:53:17Z INF ICMP proxy will use 172.20.17.99 as source for IPv4
+2026-10-07T14:53:17Z INF Tunnel connection curve preferences: [X25519MLKEM768 CurveID(65074) CurveP256] connIndex=0 event=0 ip=198.41.200.33
+2026-10-07T14:53:18Z INF +--------------------------------------------------------------------------------------+
+2026-10-07T14:53:18Z INF |                               CONNECTIVITY PRE-CHECKS                                |
+2026-10-07T14:53:18Z INF +--------------------------------------------------------------------------------------+
+2026-10-07T14:53:18Z INF |  COMPONENT         TARGET                     STATUS  DETAILS                        |
+2026-10-07T14:53:18Z INF |  DNS Resolution    region1.v2.argotunnel.com  PASS    DNS Resolved successfully      |
+2026-10-07T14:53:18Z INF |  DNS Resolution    region2.v2.argotunnel.com  PASS    DNS Resolved successfully      |
+2026-10-07T14:53:18Z INF |  UDP Connectivity  region1.v2.argotunnel.com  PASS    QUIC connection successful     |
+2026-10-07T14:53:18Z INF |  UDP Connectivity  region2.v2.argotunnel.com  PASS    QUIC connection successful     |
+2026-10-07T14:53:18Z INF |  TCP Connectivity  region1.v2.argotunnel.com  PASS    HTTP/2 connection successful   |
+2026-10-07T14:53:18Z INF |  TCP Connectivity  region2.v2.argotunnel.com  PASS    HTTP/2 connection successful   |
+2026-10-07T14:53:18Z INF |  Cloudflare API    api.cloudflare.com:443     PASS    API is reachable               |
+2026-10-07T14:53:18Z INF |                                                                                      |
+2026-10-07T14:53:18Z INF |  SUMMARY: Environment is healthy. cloudflared will use 'http2' as primary protocol.  |
+2026-10-07T14:53:18Z INF +--------------------------------------------------------------------------------------+
+2026-10-07T14:53:18Z INF precheck component="DNS Resolution" details="DNS Resolved successfully" run_id=1de30519-46e8-4e94-9ee0-07811d6007e3 status=pass target=region1.v2.argotunnel.com
+2026-10-07T14:53:18Z INF precheck component="DNS Resolution" details="DNS Resolved successfully" run_id=1de30519-46e8-4e94-9ee0-07811d6007e3 status=pass target=region2.v2.argotunnel.com
+2026-10-07T14:53:18Z INF precheck component="UDP Connectivity" details="QUIC connection successful" run_id=1de30519-46e8-4e94-9ee0-07811d6007e3 status=pass target=region1.v2.argotunnel.com
+2026-10-07T14:53:18Z INF precheck component="UDP Connectivity" details="QUIC connection successful" run_id=1de30519-46e8-4e94-9ee0-07811d6007e3 status=pass target=region2.v2.argotunnel.com
+2026-10-07T14:53:18Z INF precheck component="TCP Connectivity" details="HTTP/2 connection successful" run_id=1de30519-46e8-4e94-9ee0-07811d6007e3 status=pass target=region1.v2.argotunnel.com
+2026-10-07T14:53:18Z INF precheck component="TCP Connectivity" details="HTTP/2 connection successful" run_id=1de30519-46e8-4e94-9ee0-07811d6007e3 status=pass target=region2.v2.argotunnel.com
+2026-10-07T14:53:18Z INF precheck component="Cloudflare API" details="API is reachable" run_id=1de30519-46e8-4e94-9ee0-07811d6007e3 status=pass target=api.cloudflare.com:443
+2026-10-07T14:53:18Z INF precheck complete hard_fail=false run_id=1de30519-46e8-4e94-9ee0-07811d6007e3 suggested_protocol=http2
+2026-10-07T14:53:18Z INF ICMP proxy will use fe80::c9a6:aec3:1bcd:412f in zone Wi-Fi as source for IPv6
+2026-10-07T14:53:18Z INF Starting metrics server on 127.0.0.1:20241/metrics
+2026-10-07T14:53:19Z INF Registered tunnel connection connIndex=0 connection=5336c02f-08d3-4ae2-ba4a-0b7bdb5b2bec event=0 ip=198.41.200.33 location=jnb04 protocol=http2
+2026-10-07T17:13:06Z INF Initiating graceful shutdown due to signal terminated ...
+2026-10-07T17:13:07Z INF Unregistered tunnel connection connIndex=0 event=0 ip=198.41.200.33
+2026-10-07T17:13:07Z INF Retrying connection in up to 1s connIndex=0 event=0 ip=198.41.200.33
+2026-10-07T17:13:07Z ERR Connection terminated connIndex=0
+2026-10-07T17:13:07Z ERR no more connections active and exiting
+2026-10-07T17:13:07Z INF Tunnel server stopped
+2026-10-07T17:13:07Z INF Metrics server stopped

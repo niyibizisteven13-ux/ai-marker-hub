@@ -4,6 +4,7 @@ import { evaluateStudentSubmission as deepseekEvaluate } from '../../src/service
 import { BWENGE_GENERAL_SYSTEM_PROMPT } from './prompts/bwengeGeneralPrompt.js';
 import { MemoryService } from './MemoryService.js';
 import { stripThinkingTags } from '../utils/textSanitizers.js';
+import { extractChatCompletionText, readProviderJson } from '../utils/providerResponse.js';
 export { stripThinkingTags };
 import logger from '../utils/logger.js';
 
@@ -343,10 +344,14 @@ export class AiService {
     system?: string;
     history?: Array<{ role: 'user' | 'assistant'; text: string }>;
     images?: Array<{ base64: string; mediaType: string }>;
+    timeoutMs?: number;
+    maxTokens?: number;
+    model?: string;
   } = {}) {
     const apiKey = process.env.GONKA_API_KEY;
     const baseUrl = (process.env.GONKA_BASE_URL || 'https://api.gonkarouter.io/v1').replace(/\/$/, '') + '/chat/completions';
-    const model = process.env.GONKA_MODEL || GONKA_MODELS.DEFAULT;
+    const model = options.model || process.env.GONKA_MODEL || GONKA_MODELS.DEFAULT;
+    let gatewayError: unknown;
 
     if (apiKey) {
       try {
@@ -370,22 +375,37 @@ export class AiService {
         const response = await fetchWithTimeout(baseUrl, {
           method: 'POST',
           headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model, messages, stream: false, temperature: 0.3 }),
-        });
+          body: JSON.stringify({
+            model,
+            messages,
+            stream: false,
+            temperature: 0.2,
+            ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
+          }),
+        }, options.timeoutMs);
 
-        const data: any = await response.json();
+        const data = await readProviderJson(response, 'GonkaRouter', 'chat completions endpoint');
         if (!response.ok) {
           throw new Error(`Gonka API error (${response.status}): ${data?.error?.message || response.statusText}`);
         }
 
-        const raw = data?.choices?.[0]?.message?.content || '';
-        return stripThinkingTags(raw).text;
+        const raw = extractChatCompletionText(data);
+        if (!raw) {
+          throw new Error('GonkaRouter returned a valid JSON response without a chat completion.');
+        }
+        const answer = stripThinkingTags(raw).text;
+        if (!answer) throw new Error('GonkaRouter returned no user-visible completion text.');
+        return answer;
       } catch (err: any) {
-        logger.warn(`Gonka gateway direct call failed (${err?.message}), routing via GonkaRouter local bridge.`);
+        gatewayError = err;
+        logger.warn(`Gonka gateway direct call failed (${err?.message}).`);
       }
     }
 
-    if (!this.geminiClient) throw new Error('GONKA_API_KEY is not configured.');
+    if (!this.geminiClient) {
+      if (gatewayError instanceof Error) throw gatewayError;
+      throw new Error('GONKA_API_KEY is not configured.');
+    }
 
     const contents: any[] = [
       ...(Array.isArray(options.history) ? options.history : []).map((h) => ({
@@ -409,7 +429,9 @@ export class AiService {
         temperature: 0.3,
       },
     });
-    return stripThinkingTags(res.text || '').text;
+    const answer = stripThinkingTags(res.text || '').text;
+    if (!answer) throw new Error('Gemini returned no user-visible completion text for the request.');
+    return answer;
   }
 
   /**

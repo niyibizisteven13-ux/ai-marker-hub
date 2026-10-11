@@ -100,40 +100,41 @@ export const CompactInputBar: React.FC<CompactInputBarProps> = ({
         rows={2}
         value={inputValue}
         onChange={(e) => setInputValue(e.target.value)}
-        placeholder="Ask Bwenge to review a submission, attach a rubric, or process a file..."
+        placeholder="Message Bwenge AI..."
         className="w-full resize-none rounded-2xl border border-slate-800/80 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/10"
       />
 
       <div className="mt-3 border-t border-slate-800/60 pt-2">
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <button
               type="button"
               onClick={onAttachClick}
-              className="group relative inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 bg-slate-800/60 hover:bg-slate-700/80 hover:text-white border border-slate-700/50 hover:border-orange-500/40 shadow-sm transition-all duration-200 active:scale-95"
+              className="group relative inline-flex items-center justify-center w-8 h-8 rounded-lg text-slate-300 bg-slate-800/60 hover:bg-slate-700/80 hover:text-white border border-slate-700/50 hover:border-orange-500/40 shadow-sm transition-all active:scale-95"
+              title="Attach File"
             >
-              <span className="text-sm transition-transform duration-200 group-hover:-translate-y-0.5">📎</span>
-              <span>Attach</span>
+              <span className="text-sm">📎</span>
             </button>
 
             <button
               type="button"
               onClick={onScannerClick}
-              className="group relative inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 bg-slate-800/60 hover:bg-slate-700/80 hover:text-white border border-slate-700/50 hover:border-orange-500/40 shadow-sm transition-all duration-200 active:scale-95"
+              className="group relative inline-flex items-center justify-center w-8 h-8 rounded-lg text-slate-300 bg-slate-800/60 hover:bg-slate-700/80 hover:text-white border border-slate-700/50 hover:border-orange-500/40 shadow-sm transition-all active:scale-95"
+              title="Document Scanner"
             >
-              <span className="text-sm transition-transform duration-200 group-hover:scale-110">📷</span>
-              <span>Scanner</span>
+              <span className="text-sm">📷</span>
             </button>
 
             <select
               value={selectedProvider}
               onChange={(e) => onProviderChange(e.target.value)}
               className="bg-slate-800/60 text-slate-300 text-[10px] border border-slate-700/50 rounded-lg px-2 py-1.5 outline-none focus:border-orange-500/40 transition-all cursor-pointer hover:bg-slate-700/80"
+              title="AI Provider"
             >
-              <option value="auto">Auto (Default)</option>
-              <option value="gemini">Gemini Flash</option>
-              <option value="nvidianim">NVIDIA NIM</option>
-              <option value="ollama">Ollama (Local)</option>
+              <option value="auto">Auto</option>
+              <option value="gemini">Gemini</option>
+              <option value="nvidianim">NVIDIA</option>
+              <option value="ollama">Ollama</option>
             </select>
           </div>
 
@@ -141,6 +142,7 @@ export const CompactInputBar: React.FC<CompactInputBarProps> = ({
             type="button"
             onClick={onSend}
             className="w-8 h-8 rounded-lg bg-orange-500 hover:bg-orange-600 text-white font-bold flex items-center justify-center text-xs transition shadow-md shadow-orange-500/20 active:scale-95"
+            title="Send"
           >
             ➔
           </button>

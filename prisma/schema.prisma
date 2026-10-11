@@ -8,150 +8,150 @@ datasource db {
 }
 
 model User {
-  id           String       @id @default(uuid())
-  email        String       @unique
-  name         String
-  passwordHash String
-  avatarUrl    String?
-  role         String       @default("INSTRUCTOR")
+  id            String   @id @default(uuid())
+  email         String   @unique
+  name          String
+  passwordHash  String
+  avatarUrl     String?
+  role          String   @default("INSTRUCTOR")
   institutionId String?
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  settings     UserSettings?
-  sessions     AgentSession[]
-  forms        ApplicationForm[]
-  orgMemberships OrganizationMember[]
-  subscription Subscription?
-  files        FileRecord[]
-  memory       MemoryVector[]
-  batchJobs    BatchJob[]
+  settings         UserSettings?
+  sessions         AgentSession[]
+  forms            ApplicationForm[]
+  orgMemberships   OrganizationMember[]
+  subscription     Subscription?
+  files            FileRecord[]
+  memory           MemoryVector[]
+  batchJobs        BatchJob[]
   telegramSessions TelegramSession[]
-  studioProjects StudioProject[]
-  workspaceState WorkspaceState?
-  refreshSessions RefreshSession[]
+  studioProjects   StudioProject[]
+  workspaceState   WorkspaceState?
+  refreshSessions  RefreshSession[]
 }
 
 model WorkspaceState {
-  userId       String   @id
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  data         String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  userId    String   @id
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  data      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model RefreshSession {
-  id                 String    @id @default(uuid())
-  userId             String
-  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  familyId           String
-  tokenHash          String    @unique
-  userAgent          String?
-  ip                 String?
-  createdAt          DateTime  @default(now())
-  lastUsedAt         DateTime  @default(now())
-  expiresAt          DateTime
-  absoluteExpiresAt  DateTime
-  revokedAt          DateTime?
-  replacedById       String?
+  id                String    @id @default(uuid())
+  userId            String
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  familyId          String
+  tokenHash         String    @unique
+  userAgent         String?
+  ip                String?
+  createdAt         DateTime  @default(now())
+  lastUsedAt        DateTime  @default(now())
+  expiresAt         DateTime
+  absoluteExpiresAt DateTime
+  revokedAt         DateTime?
+  replacedById      String?
 
   @@index([userId])
   @@index([familyId])
 }
 
 model StudioProject {
-  id          String   @id @default(uuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  title       String
-  examPaper   String
-  scripts     String   @default("[]")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  examPaper String
+  scripts   String   @default("[]")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([userId, updatedAt])
 }
 
 model Subscription {
-  id        String   @id @default(uuid())
-  userId    String   @unique
-  user      User     @relation(fields: [userId], references: [id])
-  planType  String   // 'BUSINESS' | 'PRO' | 'ORGANIZATION'
-  status    String   // 'ACTIVE' | 'EXPIRED' | 'CANCELED'
-  startDate DateTime @default(now())
+  id        String    @id @default(uuid())
+  userId    String    @unique
+  user      User      @relation(fields: [userId], references: [id])
+  planType  String // 'BUSINESS' | 'PRO' | 'ORGANIZATION'
+  status    String // 'ACTIVE' | 'EXPIRED' | 'CANCELED'
+  startDate DateTime  @default(now())
   endDate   DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 }
 
 model UserSettings {
-  id                String   @id @default(uuid())
-  userId            String   @unique
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  defaultStrictness String   @default("STANDARD")
-  autoSummarize     Boolean  @default(true)
-  preferredLanguage String   @default("en")
-  theme             String   @default("dark")
-  longTermMemory    Boolean  @default(false)
-  agentTone         String   @default("PROFESSIONAL")
+  id                 String   @id @default(uuid())
+  userId             String   @unique
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  defaultStrictness  String   @default("STANDARD")
+  autoSummarize      Boolean  @default(true)
+  preferredLanguage  String   @default("en")
+  theme              String   @default("dark")
+  longTermMemory     Boolean  @default(false)
+  agentTone          String   @default("PROFESSIONAL")
   customInstructions String?
-  updatedAt         DateTime @updatedAt
+  updatedAt          DateTime @updatedAt
 }
 
 model AgentSession {
-  id                String         @id @default(uuid())
-  userId            String
-  user              User           @relation(fields: [userId], references: [id])
-  status            String         @default("PENDING") // PENDING, RUNNING, PAUSED_HITL, COMPLETED, FAILED
-  globalBudget      Float          @default(5.0) // USD
-  spentBudget       Float          @default(0.0)
-  maxIterations     Int            @default(30)
-  currentIteration  Int            @default(0)
-  activeTokens      Int            @default(0)
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
-  tasks             TaskDAG[]
-  logs              ExecutionLog[]
+  id               String         @id @default(uuid())
+  userId           String
+  user             User           @relation(fields: [userId], references: [id])
+  status           String         @default("PENDING") // PENDING, RUNNING, PAUSED_HITL, COMPLETED, FAILED
+  globalBudget     Float          @default(5.0) // USD
+  spentBudget      Float          @default(0.0)
+  maxIterations    Int            @default(30)
+  currentIteration Int            @default(0)
+  activeTokens     Int            @default(0)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  tasks            TaskDAG[]
+  logs             ExecutionLog[]
 }
 
 model TaskDAG {
-  id               String         @id @default(uuid())
-  sessionId        String
-  session          AgentSession   @relation(fields: [sessionId], references: [id])
-  parentId         String?
-  parent           TaskDAG?       @relation("TaskHierarchy", fields: [parentId], references: [id])
-  children         TaskDAG[]      @relation("TaskHierarchy")
-  title            String
-  description      String?
-  status           String         @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED, FAILED
-  dependencies     String?        // JSON array of task IDs
-  result           String?        // Serialized output
-  executionOrder   Int            @default(0)
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
+  id             String       @id @default(uuid())
+  sessionId      String
+  session        AgentSession @relation(fields: [sessionId], references: [id])
+  parentId       String?
+  parent         TaskDAG?     @relation("TaskHierarchy", fields: [parentId], references: [id])
+  children       TaskDAG[]    @relation("TaskHierarchy")
+  title          String
+  description    String?
+  status         String       @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED, FAILED
+  dependencies   String? // JSON array of task IDs
+  result         String? // Serialized output
+  executionOrder Int          @default(0)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 }
 
 model ExecutionLog {
-  id               String         @id @default(uuid())
-  sessionId        String
-  session          AgentSession   @relation(fields: [sessionId], references: [id])
-  iteration        Int
-  agentName        String
-  actionType       String         // TOOL_CALL, REASONING, VALIDATION, ERROR
-  input            String?        // JSON serialized
-  output           String?        // JSON serialized
-  tokenUsage       Int            @default(0)
-  stateDelta       Float          @default(0.0)
-  summary          String?        // High-density compression
-  createdAt        DateTime       @default(now())
+  id         String       @id @default(uuid())
+  sessionId  String
+  session    AgentSession @relation(fields: [sessionId], references: [id])
+  iteration  Int
+  agentName  String
+  actionType String // TOOL_CALL, REASONING, VALIDATION, ERROR
+  input      String? // JSON serialized
+  output     String? // JSON serialized
+  tokenUsage Int          @default(0)
+  stateDelta Float        @default(0.0)
+  summary    String? // High-density compression
+  createdAt  DateTime     @default(now())
 }
 
 model ApplicationForm {
   id                String           @id @default(uuid())
   title             String
-  schema            String           // JSON Schema definition
-  rubric            String?          // JSON Scoring Rubric
-  selectionSettings String?          // JSON selection logic (e.g. top N)
+  schema            String // JSON Schema definition
+  rubric            String? // JSON Scoring Rubric
+  selectionSettings String? // JSON selection logic (e.g. top N)
   userId            String
   user              User             @relation(fields: [userId], references: [id])
   submissions       FormSubmission[]
@@ -160,54 +160,54 @@ model ApplicationForm {
 }
 
 model FormSubmission {
-  id               String           @id @default(uuid())
-  formId           String
-  form             ApplicationForm  @relation(fields: [formId], references: [id])
-  data             String           // JSON student response
+  id                String            @id @default(uuid())
+  formId            String
+  form              ApplicationForm   @relation(fields: [formId], references: [id])
+  data              String // JSON student response
   extractedInsights ExtractedInsight?
-  createdAt        DateTime         @default(now())
+  createdAt         DateTime          @default(now())
 }
 
 model ExtractedInsight {
-  id               String           @id @default(uuid())
-  submissionId     String           @unique
-  submission       FormSubmission   @relation(fields: [submissionId], references: [id])
-  skills           String?          // JSON array
-  experienceYears  Float?
-  sentiment        String?
-  topPassion       String?
-  atRisk           Boolean          @default(false)
-  summary          String?
-  score            Float?           // Calculated score
-  selected         Boolean          @default(false)
-  scoringFeedback  String?          // AI feedback on score
-  scoringDetails   String?          // JSON breakdown of criteria and reasoning
-  createdAt        DateTime         @default(now())
+  id              String         @id @default(uuid())
+  submissionId    String         @unique
+  submission      FormSubmission @relation(fields: [submissionId], references: [id])
+  skills          String? // JSON array
+  experienceYears Float?
+  sentiment       String?
+  topPassion      String?
+  atRisk          Boolean        @default(false)
+  summary         String?
+  score           Float? // Calculated score
+  selected        Boolean        @default(false)
+  scoringFeedback String? // AI feedback on score
+  scoringDetails  String? // JSON breakdown of criteria and reasoning
+  createdAt       DateTime       @default(now())
 }
 
 model Payment {
-  id           String   @id @default(uuid())
-  userId       String
-  batchId      String   @unique
-  amountRwf    Int
-  status       String   @default("PENDING") // PENDING, SUCCESS, FAILED
-  provider     String   @default("MTN_MOMO")
-  externalRef  String?  @unique
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id          String   @id @default(uuid())
+  userId      String
+  batchId     String   @unique
+  amountRwf   Int
+  status      String   @default("PENDING") // PENDING, SUCCESS, FAILED
+  provider    String   @default("MTN_MOMO")
+  externalRef String?  @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 model JobCostLog {
-  id              String   @id @default(cuid())
-  jobId           String
-  jobType         String   // 'grading' | 'scoring'
-  model           String
-  inputTokens     Int
-  outputTokens    Int
-  actualCostUsd   Float
-  chargedUsd      Float
-  marginRealized  Float
-  createdAt       DateTime @default(now())
+  id             String   @id @default(cuid())
+  jobId          String
+  jobType        String // 'grading' | 'scoring'
+  model          String
+  inputTokens    Int
+  outputTokens   Int
+  actualCostUsd  Float
+  chargedUsd     Float
+  marginRealized Float
+  createdAt      DateTime @default(now())
 
   @@index([jobType, createdAt])
 }
@@ -216,7 +216,7 @@ model FailedJob {
   id           String   @id @default(cuid())
   jobId        String
   jobType      String
-  payload      String   // JSON snapshot of the input
+  payload      String // JSON snapshot of the input
   errorMessage String
   attempts     Int
   status       String   @default("needs_review") // needs_review | resolved
@@ -224,44 +224,44 @@ model FailedJob {
 }
 
 model UsageQuota {
-  id           String   @id @default(uuid())
-  userId       String
-  service      String   // 'grading' | 'scoring'
-  freeUsed     Int      @default(0)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id        String   @id @default(uuid())
+  userId    String
+  service   String // 'grading' | 'scoring'
+  freeUsed  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([userId, service])
 }
 
 model UnlockedResult {
-  id         String   @id @default(uuid())
-  userId     String
-  jobId      String   // the specific batch/submission this unlocks
-  service    String
-  paidUsd    Float
-  createdAt  DateTime @default(now())
+  id        String   @id @default(uuid())
+  userId    String
+  jobId     String // the specific batch/submission this unlocks
+  service   String
+  paidUsd   Float
+  createdAt DateTime @default(now())
 }
 
 model Plan {
   id              String   @id @default(uuid())
-  type            String   // 'individual' | 'organization'
+  type            String // 'individual' | 'organization'
   name            String
   freeTrialCount  Int?
   perWorkerCapUsd Float?
-  features        String?  // JSON string e.g. { "auditReports": true }
+  features        String? // JSON string e.g. { "auditReports": true }
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 }
 
 model Organization {
-  id               String   @id @default(uuid())
+  id               String               @id @default(uuid())
   name             String
-  creditBalanceUsd Float    @default(0)
+  creditBalanceUsd Float                @default(0)
   perWorkerCapUsd  Float?
   members          OrganizationMember[]
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
 }
 
 model OrganizationMember {
@@ -281,7 +281,7 @@ model AuditLog {
   action       String
   resourceType String
   resourceId   String?
-  details      String?  // JSON string
+  details      String? // JSON string
   createdAt    DateTime @default(now())
 
   @@index([actorId, createdAt])
@@ -289,17 +289,17 @@ model AuditLog {
 }
 
 model FileRecord {
-  id          String   @id @default(uuid())
-  name        String
-  mimeType    String
-  size        Int
-  url         String?
-  path        String?
+  id            String   @id @default(uuid())
+  name          String
+  mimeType      String
+  size          Int
+  url           String?
+  path          String?
   extractedText String?
-  userId      String
-  user        User     @relation(fields: [userId], references: [id])
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@index([userId])
 }
@@ -309,29 +309,29 @@ model MemoryVector {
   userId    String
   user      User     @relation(fields: [userId], references: [id])
   content   String
-  embedding String   // JSON stringified float array
-  metadata  String?  // JSON string
+  embedding String // JSON stringified float array
+  metadata  String? // JSON string
   createdAt DateTime @default(now())
 
   @@index([userId])
 }
 
 model BatchJob {
-  id            String   @id @default(uuid())
-  institutionId String?
-  userId        String
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  telegramChatId String?
-  paperType     String   @default("mcq") // 'mcq' | 'essay' | 'short_answer' | 'single'
-  status        String   @default("PENDING") // 'PENDING' | 'PROCESSING' | 'DONE' | 'FAILED'
-  detectedCount Int?
+  id               String           @id @default(uuid())
+  institutionId    String?
+  userId           String
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  telegramChatId   String?
+  paperType        String           @default("mcq") // 'mcq' | 'essay' | 'short_answer' | 'single'
+  status           String           @default("PENDING") // 'PENDING' | 'PROCESSING' | 'DONE' | 'FAILED'
+  detectedCount    Int?
   pageGroupingMeta String? // JSON stringified page grouping & confidence mapping
-  excelUrl      String?
-  summary       String?  // JSON stringified
-  errorMessage  String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  results       BatchJobResult[]
+  excelUrl         String?
+  summary          String? // JSON stringified
+  errorMessage     String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  results          BatchJobResult[]
 
   @@index([userId])
   @@index([telegramChatId])
@@ -339,69 +339,69 @@ model BatchJob {
 }
 
 model BatchJobResult {
-  id              String   @id @default(uuid())
-  jobId           String
-  job             BatchJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  studentId       String?
-  studentName     String?
-  totalScore      Float
-  maxScore        Float
-  gradedQuestions String   // JSON stringified question breakdown
-  confidence      String?  // 'high' | 'medium' | 'low'
-  flaggedForReview Boolean @default(false)
-  reviewedBy      String?
-  reviewedAt      DateTime?
-  createdAt       DateTime @default(now())
+  id               String    @id @default(uuid())
+  jobId            String
+  job              BatchJob  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  studentId        String?
+  studentName      String?
+  totalScore       Float
+  maxScore         Float
+  gradedQuestions  String // JSON stringified question breakdown
+  confidence       String? // 'high' | 'medium' | 'low'
+  flaggedForReview Boolean   @default(false)
+  reviewedBy       String?
+  reviewedAt       DateTime?
+  createdAt        DateTime  @default(now())
 
   @@index([jobId])
 }
 
 model TelegramSession {
-  id                 String   @id @default(uuid())
-  chatId             String   @unique
-  userId             String?
-  user               User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  provider           String   @default("gemini") // 'gemini' | 'claude' | 'nvidianim' | 'ollama'
-  language           String   @default("en") // 'en' | 'rw'
-  stagedPaperFileId  String?
-  stagedPaperLocalPath String?
-  stagedPaperName    String?
-  stagedRubricFileId String?
+  id                    String   @id @default(uuid())
+  chatId                String   @unique
+  userId                String?
+  user                  User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  provider              String   @default("gemini") // 'gemini' | 'claude' | 'nvidianim' | 'ollama'
+  language              String   @default("en") // 'en' | 'rw'
+  stagedPaperFileId     String?
+  stagedPaperLocalPath  String?
+  stagedPaperName       String?
+  stagedRubricFileId    String?
   stagedRubricLocalPath String?
-  stagedRubricName   String?
-  stagedRubricText   String?
-  stagedMode         String?  // 'batch' | 'markphoto' | 'form'
-  activeDiscussJobId String?
-  lastActiveAt       DateTime @default(now())
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  stagedRubricName      String?
+  stagedRubricText      String?
+  stagedMode            String? // 'batch' | 'markphoto' | 'form'
+  activeDiscussJobId    String?
+  lastActiveAt          DateTime @default(now())
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
   @@index([chatId])
 }
 
 model ClassProfile {
-  id               String   @id @default(uuid())
-  institutionId    String?
-  classId          String
-  subject          String
-  rollingMetrics   String   // JSON stringified aggregate performance metrics & weaknesses
-  updatedAt        DateTime @updatedAt
-  createdAt        DateTime @default(now())
+  id             String   @id @default(uuid())
+  institutionId  String?
+  classId        String
+  subject        String
+  rollingMetrics String // JSON stringified aggregate performance metrics & weaknesses
+  updatedAt      DateTime @updatedAt
+  createdAt      DateTime @default(now())
 
   @@unique([institutionId, classId, subject])
 }
 
 model StudentProfile {
-  id               String   @id @default(uuid())
-  institutionId    String?
-  studentId        String
-  studentName      String?
-  scoreHistory     String   // JSON stringified longitudinal score history across batches
-  consentGiven     Boolean  @default(false)
+  id                String    @id @default(uuid())
+  institutionId     String?
+  studentId         String
+  studentName       String?
+  scoreHistory      String // JSON stringified longitudinal score history across batches
+  consentGiven      Boolean   @default(false)
   consentCapturedAt DateTime?
-  guardianContact  String?
-  updatedAt        DateTime @updatedAt
-  createdAt        DateTime @default(now())
+  guardianContact   String?
+  updatedAt         DateTime  @updatedAt
+  createdAt         DateTime  @default(now())
 
   @@unique([institutionId, studentId])
 }
@@ -409,30 +409,30 @@ model StudentProfile {
 // ── Admin & RAG Models ──────────────────────────────────────────
 
 model KnowledgeBase {
-  id          String       @id @default(uuid())
+  id          String          @id @default(uuid())
   name        String
   description String?
-  state       String       @default("active") // active | inactive | archived
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  state       String          @default("active") // active | inactive | archived
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
   documents   Document[]
   chunks      DocumentChunk[]
 }
 
 model Document {
-  id              String         @id @default(uuid())
+  id              String             @id @default(uuid())
   knowledgeBaseId String
-  knowledgeBase   KnowledgeBase  @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+  knowledgeBase   KnowledgeBase      @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
   name            String
-  type            String         // PDF, XLSX, CSV, DOCX, TXT, JSON
-  size            String         // e.g. "8.4 MB"
-  sizeBytes       Int            @default(0)
-  units           String?        // e.g. "126 pages" or "4 sheets"
-  stage           Int            @default(1) // 1 to 9
-  status          String         @default("PENDING") // PENDING, PROCESSING, READY, FAILED
+  type            String // PDF, XLSX, CSV, DOCX, TXT, JSON
+  size            String // e.g. "8.4 MB"
+  sizeBytes       Int                @default(0)
+  units           String? // e.g. "126 pages" or "4 sheets"
+  stage           Int                @default(1) // 1 to 9
+  status          String             @default("PENDING") // PENDING, PROCESSING, READY, FAILED
   filePath        String?
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
   chunks          DocumentChunk[]
   jobs            ProcessingJob[]
   sheets          SpreadsheetSheet[]
@@ -451,8 +451,15 @@ model DocumentChunk {
   chunkId         String
   sourceFilename  String
   text            String
-  embedding       String?       // JSON stringified float array
-  metadata        String?       // JSON string
+  embedding       String? // JSON stringified float array
+  metadata        String? // JSON string
+  language        String   @default("rw") // rw, fr, en
+  domain          String   @default("general") // health, legal, finance, farming, education, general
+  region          String   @default("rwanda")
+  license         String   @default("proprietary")
+  consentGiven    Boolean  @default(false)
+  status          String   @default("approved") // pending | approved | rejected | retracted
+  expiresAt       DateTime?
   createdAt       DateTime      @default(now())
 
   @@index([documentId])
@@ -460,94 +467,111 @@ model DocumentChunk {
 }
 
 model SpreadsheetSheet {
-  id          String             @id @default(uuid())
-  documentId  String
-  document    Document           @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  name        String
-  columns     SpreadsheetColumn[]
-  rows        SpreadsheetRow[]
-  createdAt   DateTime           @default(now())
+  id         String              @id @default(uuid())
+  documentId String
+  document   Document            @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  name       String
+  columns    SpreadsheetColumn[]
+  rows       SpreadsheetRow[]
+  createdAt  DateTime            @default(now())
 }
 
 model SpreadsheetColumn {
-  id        String           @id @default(uuid())
-  sheetId   String
-  sheet     SpreadsheetSheet @relation(fields: [sheetId], references: [id], onDelete: Cascade)
-  name      String
-  dataType  String           @default("string") // string, number, date
+  id          String           @id @default(uuid())
+  sheetId     String
+  sheet       SpreadsheetSheet @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+  name        String
+  dataType    String           @default("string") // string, number, date
   columnIndex Int
 }
 
 model SpreadsheetRow {
-  id        String           @id @default(uuid())
-  sheetId   String
-  sheet     SpreadsheetSheet @relation(fields: [sheetId], references: [id], onDelete: Cascade)
-  rowIndex  Int
-  rowData   String           // JSON stringified object of column values
+  id       String           @id @default(uuid())
+  sheetId  String
+  sheet    SpreadsheetSheet @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+  rowIndex Int
+  rowData  String // JSON stringified object of column values
 }
 
 model ProcessingJob {
-  id          String   @id @default(uuid())
-  documentId  String
-  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  stage       String   @default("UPLOAD") // VALIDATE, EXTRACT, CLEAN, STRUCTURE, CHUNK, EMBED, INDEX, READY
-  status      String   @default("PENDING") // PENDING, RUNNING, COMPLETED, FAILED
-  progress    Int      @default(0) // 0-100
-  error       String?
-  attempts    Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String   @id @default(uuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  stage      String   @default("UPLOAD") // VALIDATE, EXTRACT, CLEAN, STRUCTURE, CHUNK, EMBED, INDEX, READY
+  status     String   @default("PENDING") // PENDING, RUNNING, COMPLETED, FAILED
+  progress   Int      @default(0) // 0-100
+  error      String?
+  attempts   Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   @@index([documentId])
 }
 
 model Dataset {
-  id          String            @id @default(uuid())
+  id          String           @id @default(uuid())
   name        String
   description String?
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
   examples    DatasetExample[]
 }
 
 model DatasetExample {
-  id               String   @id @default(uuid())
-  datasetId        String
-  dataset          Dataset  @relation(fields: [datasetId], references: [id], onDelete: Cascade)
-  instruction      String
-  input            String?
-  output           String
-  status           String   @default("pending") // pending | approved | rejected
-  validationFlags  String?  // JSON array of validation warnings/flags
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id              String   @id @default(uuid())
+  datasetId       String
+  dataset         Dataset  @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  instruction     String
+  input           String?
+  output          String
+  status          String   @default("pending") // pending | approved | rejected
+  validationFlags String? // JSON array of validation warnings/flags
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   @@index([datasetId])
 }
 
 model FineTuneJob {
-  id              String   @id @default(uuid())
-  datasetId       String
-  status          String   @default("QUEUED") // QUEUED, TRAINING, COMPLETED, FAILED, CANCELLED
-  providerJobId   String?
-  tokenEstimate   Int      @default(0)
-  costEstimate    Float    @default(0.0)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                 String    @id @default(uuid())
+  datasetId          String
+  datasetName        String?
+  baseModel          String?
+  fineTunedModelName String?
+  fineTunedModelId   String?
+  targetEnvironment  String    @default("production")
+  exampleCount       Int       @default(0)
+  currentEpoch       Int       @default(0)
+  progress           Int       @default(0)
+  status             String    @default("QUEUED") // QUEUED, TRAINING, COMPLETED, FAILED, CANCELLED
+  providerJobId      String?
+  tokenEstimate      Int       @default(0)
+  costEstimate       Float     @default(0.0)
+  trainingMetrics    Json      @default("[]")
+  logs               Json?
+  adapterPrompt      String?
+  finalLoss          Float?
+  evalScore          String?
+  errorMessage       String?
+  completedAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 }
 
 model AiModel {
-  id          String   @id @default(uuid())
-  name        String
-  provider    String   // Anthropic, OpenAI, etc.
-  baseModel   String
-  version     String
-  status      String   @default("active") // active | inactive | archived
-  environment String   @default("draft") // draft | testing | production
-  dataset     String?
-  score       String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id            String   @id @default(uuid())
+  name          String
+  provider      String // Anthropic, OpenAI, etc.
+  baseModel     String
+  version       String
+  status        String   @default("active") // active | inactive | archived
+  environment   String   @default("draft") // draft | testing | production
+  dataset       String?
+  datasetId     String?
+  adapterPrompt String?
+  score         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
 model Prompt {
@@ -572,12 +596,12 @@ model PromptVersion {
 }
 
 model ProviderConfig {
-  id          String   @id @default(uuid())
-  provider    String   @unique // OPENAI, ANTHROPIC, GEMINI, OLLAMA
-  model       String
-  baseUrl     String?
-  secretRef   String   // reference name, never the raw key
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(uuid())
+  provider  String   @unique // OPENAI, ANTHROPIC, GEMINI, OLLAMA
+  model     String
+  baseUrl   String?
+  secretRef String // reference name, never the raw key
+  updatedAt DateTime @updatedAt
 }
 
 model RetrievalSetting {
@@ -594,23 +618,77 @@ model RetrievalSetting {
 }
 
 model UsageEvent {
-  id                       String   @id @default(uuid())
-  userId                   String?
-  question                 String
-  knowledgeBaseId          String?
-  model                    String
-  tokensIn                 Int      @default(0)
-  tokensOut                Int      @default(0)
-  latencyMs                Int      @default(0)
-  answeredFromKnowledge    Boolean  @default(true)
-  createdAt                DateTime @default(now())
+  id                    String   @id @default(uuid())
+  userId                String?
+  question              String
+  knowledgeBaseId       String?
+  model                 String
+  tokensIn              Int      @default(0)
+  tokensOut             Int      @default(0)
+  latencyMs             Int      @default(0)
+  answeredFromKnowledge Boolean  @default(true)
+  createdAt             DateTime @default(now())
 
   @@index([createdAt])
   @@index([userId])
 }
 
+model CorrectionQueueItem {
+  id              String    @id @default(uuid())
+  userId          String
+  question        String
+  aiAnswer        String
+  correctedAnswer String
+  errorType       String    // wrong_fact | outdated | unnatural_rw | wrong_lang | missing_info | wrong_source | unsafe | tone | other
+  severity        String    @default("minor") // minor | major | harmful
+  domain          String    @default("general")
+  region          String    @default("rwanda")
+  sourcesUsed     String?   // JSON stringified source citations
+  retrievedChunks String?   // JSON stringified chunks
+  modelUsed       String
+  promptVersion   Int       @default(1)
+  knowledgeVersion Int      @default(1)
+  status          String    @default("pending") // pending | approved_1 | approved_2 | rejected | retracted
+  approvedBy1     String?
+  approvedBy2     String?
+  rejectedReason  String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
+  @@index([status, domain])
+}
 
+model VerifiedAnswer {
+  id              String    @id @default(uuid())
+  question        String
+  answer          String
+  sources         String?   // JSON sources
+  language        String    @default("rw")
+  domain          String    @default("general")
+  version         Int       @default(1)
+  status          String    @default("active") // active | conflicted | expired | retracted
+  expiresAt       DateTime?
+  approvedBy      String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
+  @@index([domain, language])
+}
 
+model EvaluationRun {
+  id              String    @id @default(uuid())
+  modelName       String
+  datasetId       String
+  hitRate         Float
+  correctness     Float
+  naturalness     Float     // 1-5 score
+  citationScore   Float
+  hallucinationRate Float
+  refusalRate     Float
+  repeatErrorRate Float
+  passedGate      Boolean   @default(false)
+  metricsJson     String    // detailed JSON breakdown
+  createdAt       DateTime  @default(now())
 
+  @@index([modelName, createdAt])
+}

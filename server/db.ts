@@ -441,7 +441,9 @@ function createModelMock(modelName: string) {
 }
 
 let realPrisma: PrismaClient | null = null;
-let dbAvailable = Boolean(process.env.DATABASE_URL);
+let dbAvailable = (globalThis as any).__aiStudioDbAvailable !== undefined
+  ? (globalThis as any).__aiStudioDbAvailable
+  : Boolean(process.env.DATABASE_URL);
 
 if (dbAvailable) {
   try {
@@ -451,6 +453,7 @@ if (dbAvailable) {
   } catch {
     console.warn('[AI Studio] Database not connected — using mock');
     dbAvailable = false;
+    (globalThis as any).__aiStudioDbAvailable = false;
   }
 } else {
   console.warn('[AI Studio] Database not connected — using mock');
@@ -486,10 +489,16 @@ export const prisma: PrismaClient = new Proxy({} as PrismaClient, {
       return async (...args: any[]) => {
         try {
           return await realProp.apply(realPrisma, args);
-        } catch {
-          dbAvailable = false;
-          console.warn('[AI Studio] Database not connected — using mock');
-          return mockClient[prop](...args);
+        } catch (err: any) {
+          if (err?.code === 'P1001' || err?.name === 'PrismaClientInitializationError' || err?.message?.includes('Can\'t reach database server')) {
+            console.warn('[AI Studio] Database unreachable, permanently switching to local JSON storage:', err.message);
+            dbAvailable = false;
+            (globalThis as any).__aiStudioDbAvailable = false;
+            const mockProp = (mockClient as any)[prop];
+            if (typeof mockProp === 'function') return mockProp.apply(mockClient, args);
+            return mockProp;
+          }
+          throw err;
         }
       };
     }
@@ -499,13 +508,17 @@ export const prisma: PrismaClient = new Proxy({} as PrismaClient, {
           const origMethod = modelTarget[method];
           if (typeof origMethod !== 'function') return origMethod;
           return async (...args: any[]) => {
-            if (!dbAvailable) return mockClient[prop][method](...args);
             try {
               return await origMethod.apply(modelTarget, args);
-            } catch {
-              dbAvailable = false;
-              console.warn('[AI Studio] Database not connected — using mock');
-              return mockClient[prop][method](...args);
+            } catch (err: any) {
+              if (err?.code === 'P1001' || err?.name === 'PrismaClientInitializationError' || err?.message?.includes('Can\'t reach database server')) {
+                console.warn('[AI Studio] Database unreachable on model method, permanently switching to local JSON storage:', err.message);
+                dbAvailable = false;
+                (globalThis as any).__aiStudioDbAvailable = false;
+                const mockModel = createModelMock(prop);
+                return mockModel[method].apply(mockModel, args);
+              }
+              throw err;
             }
           };
         },
@@ -514,4 +527,3 @@ export const prisma: PrismaClient = new Proxy({} as PrismaClient, {
     return mockClient[prop];
   },
 });
-

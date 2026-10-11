@@ -107,10 +107,11 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
           {!user?.subscription && (
             <button
               onClick={() => (window as any).openUpgradeModal?.()}
-              className="bg-amber-500/10 hover:bg-amber-500/15 text-amber-400 font-semibold px-3 py-1.5 rounded-full border border-amber-500/30 text-xs transition-all flex items-center gap-1.5"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 transition-all shadow-sm"
+              title="Upgrade Pro"
+              aria-label="Upgrade to Pro"
             >
-              <span className="text-amber-400">⭐</span>
-              <span>Upgrade</span>
+              <span>⭐</span>
             </button>
           )}
 

@@ -70,7 +70,7 @@ const MIME_MAP: Record<SupportedFileType, string> = {
 // --- Tunables -------------------------------------------------------------
 
 /** Hard cap on any file we'll pull fully into memory. */
-const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
+const MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024; // 100MB
 
 /** Cap on how many pages of a scanned PDF we'll OCR, to bound cost/latency. */
 const MAX_OCR_PAGES = 20;

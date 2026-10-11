@@ -1,6 +1,6 @@
 import multer from 'multer';
 
-const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB — supports large codebases, archives, high-res scans, and datasets
+const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB — supports large codebases, archives, high-res scans, and datasets
 
 // List of dangerous executable extensions to block for security
 const BLOCKED_EXECUTABLE_EXTENSIONS = [

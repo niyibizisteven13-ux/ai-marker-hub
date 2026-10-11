@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import logger from '../utils/logger.js';
+import { parseModelJson } from '../utils/textSanitizers.js';
 
 const DEFAULT_FETCH_TIMEOUT_MS = 60_000;
 
@@ -103,8 +104,8 @@ Rules:
       }, 60_000);
       const data: any = await response.json();
       if (!response.ok) throw new Error(`Gonka PlannerService error: ${data?.error?.message}`);
-      const raw = (data?.choices?.[0]?.message?.content || '').replace(/```json?/g, '').replace(/```/g, '').trim();
-      const json = JSON.parse(raw);
+      const raw = (data?.choices?.[0]?.message?.content || '').trim();
+      const json = parseModelJson(raw);
       const tasks: PlanTask[] = (json.tasks || []).map((t: any) => ({
         id: t.id || crypto.randomUUID(),
         title: t.title || 'Untitled task',

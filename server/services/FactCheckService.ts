@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import logger from '../utils/logger.js';
+import { parseModelJson } from '../utils/textSanitizers.js';
 
 const DEFAULT_FETCH_TIMEOUT_MS = 20_000;
 
@@ -110,8 +111,8 @@ No other text outside the JSON.`;
       }, 20_000);
       const data: any = await response.json();
       if (!response.ok) throw new Error(`Gonka error: ${data?.error?.message}`);
-      const raw = (data?.choices?.[0]?.message?.content || '').replace(/```json?/g, '').replace(/```/g, '').trim();
-      const json = JSON.parse(raw);
+      const raw = (data?.choices?.[0]?.message?.content || '').trim();
+      const json = parseModelJson(raw);
       return {
         verdict: ['TRUE', 'FALSE', 'PARTIALLY_TRUE', 'UNVERIFIABLE'].includes(json.verdict) ? json.verdict : 'UNVERIFIABLE',
         confidence: Math.min(1, Math.max(0, Number(json.confidence) || 0)),
