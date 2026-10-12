@@ -366,36 +366,68 @@ export default function ChatMessage({
 
         {/* Action row: opacity-100 on mobile, lg:opacity-0 lg:group-hover:opacity-100 on desktop */}
         {!isUser && cleanText && !message.isStreaming && (
-          <div className="mt-2 flex items-center gap-1 opacity-100 lg:opacity-0 lg:transition-opacity lg:duration-150 lg:group-hover:opacity-100">
-            {message.provider && (
-              <span className="hidden lg:inline-block mr-1.5 rounded-full border border-white/[0.08] bg-white/[0.03] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[#9C9A92]">
-                {message.provider}
-              </span>
+          <div className="mt-3 space-y-2">
+            {/* Trust Source Chips (Rendered only when message has actual sources/citations) */}
+            {((message.sources && message.sources.length > 0) || (message.citations && message.citations.length > 0) || (message.sourcesUsed && message.sourcesUsed.length > 0)) && (
+              <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                <span className="text-[10px] text-neutral-400 font-mono uppercase tracking-wider">Sources:</span>
+                {(message.sources || message.citations || message.sourcesUsed || []).map((src: any, idx: number) => {
+                  const title = src.filename || src.sourceFilename || src.title || `Source ${idx + 1}`;
+                  const page = src.pageNumber ? ` • p.${src.pageNumber}` : '';
+                  const table = src.tableNumber ? ` • Tab ${src.tableNumber}` : '';
+                  return (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => alert(`Opening Document: ${title}${page}${table}`)}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 text-[11px] text-emerald-400 hover:bg-white/10 transition-colors"
+                    >
+                      <FileText size={12} />
+                      <span>{title}{page}{table}</span>
+                    </button>
+                  );
+                })}
+              </div>
             )}
-            <ActionButton title="Copy" onClick={handleCopy}>
-              {copied ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
-            </ActionButton>
-            {onRetry && (
-              <ActionButton title="Try again" onClick={() => onRetry(messageId)}>
-                <RotateCcw className="h-4 w-4" />
+
+            <div className="flex items-center gap-1">
+              {message.provider && (
+                <span className="hidden lg:inline-block mr-1.5 rounded-full border border-white/[0.08] bg-white/[0.03] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[#9C9A92]">
+                  {message.provider}
+                </span>
+              )}
+              <ActionButton title="Copy" onClick={handleCopy}>
+                {copied ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
               </ActionButton>
-            )}
-            <ActionButton
-              title="Good response"
-              active={message.rating === 'up'}
-              activeClass="text-emerald-400 bg-emerald-400/10"
-              onClick={() => onFeedback?.(messageId, 'up')}
-            >
-              <ThumbsUp className="h-4 w-4" />
-            </ActionButton>
-            <ActionButton
-              title="Bad response"
-              active={message.rating === 'down'}
-              activeClass="text-rose-400 bg-rose-400/10"
-              onClick={() => onFeedback?.(messageId, 'down')}
-            >
-              <ThumbsDown className="h-4 w-4" />
-            </ActionButton>
+              {onRetry && (
+                <ActionButton title="Try again" onClick={() => onRetry(messageId)}>
+                  <RotateCcw className="h-4 w-4" />
+                </ActionButton>
+              )}
+              <ActionButton
+                title="Good response"
+                active={message.rating === 'up'}
+                activeClass="text-emerald-400 bg-emerald-400/10"
+                onClick={() => onFeedback?.(messageId, 'up')}
+              >
+                <ThumbsUp className="h-4 w-4" />
+              </ActionButton>
+              <ActionButton
+                title="Bad response"
+                active={message.rating === 'down'}
+                activeClass="text-rose-400 bg-rose-400/10"
+                onClick={() => onFeedback?.(messageId, 'down')}
+              >
+                <ThumbsDown className="h-4 w-4" />
+              </ActionButton>
+              <button
+                type="button"
+                onClick={() => alert('Report or correct feedback sent to correction loop.')}
+                className="ml-2 px-2.5 py-1 rounded-lg text-[11px] text-neutral-400 hover:text-amber-400 hover:bg-white/5 transition-colors"
+              >
+                Report or correct
+              </button>
+            </div>
           </div>
         )}
       </div>

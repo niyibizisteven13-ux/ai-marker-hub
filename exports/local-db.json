@@ -24,15 +24,15 @@
       },
       "84e16cb8-cb26-4a8b-baf7-ca54407117c5": {
         "id": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
-        "createdAt": "2026-10-10T09:48:07.176Z",
-        "updatedAt": "2026-10-10T09:48:07.179Z",
+        "createdAt": "2026-10-11T19:27:58.810Z",
+        "updatedAt": "2026-10-11T19:27:58.825Z",
         "userId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
-        "familyId": "c3508976-0bcc-4557-b23d-16941402d043",
-        "tokenHash": "f6a93f6db3cdab464dc4e01bb830a505a603aeec0a6274da1173bf37d4dd0681",
-        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+        "familyId": "c153d6bc-2831-4b22-933a-7e2e098f1e86",
+        "tokenHash": "a77437b4a7ca1fac7aaffbf315cd46058d72fe29460692b27f4f7ae7c73f8dbe",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
         "ip": "127.0.0.1",
-        "expiresAt": "2026-11-09T09:48:07.174Z",
-        "absoluteExpiresAt": "2027-01-08T09:34:18.771Z",
+        "expiresAt": "2026-11-10T19:27:58.005Z",
+        "absoluteExpiresAt": "2027-01-09T19:10:08.031Z",
         "replacedById": "84e16cb8-cb26-4a8b-baf7-ca54407117c5"
       }
     },
@@ -40,10 +40,10 @@
       "84e16cb8-cb26-4a8b-baf7-ca54407117c5": {
         "id": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
         "createdAt": "2026-10-10T09:08:20.690Z",
-        "updatedAt": "2026-10-10T09:08:20.690Z",
+        "updatedAt": "2026-10-12T07:19:48.347Z",
         "email": "niyibizisteven13@gmail.com",
         "name": "Master Admin",
-        "passwordHash": "$2a$12$GRlutPOYaV9RmqH7bEz1PusXroXNhccUZW2dGqa3WL.ckmUYgVzRe",
+        "passwordHash": "$2a$12$SX74mNHIWX6gWvhEaGRqWe1qhXNbqw/LwZt05SpX1/8c9uc8S12G6",
         "role": "ADMIN",
         "settings": {
           "id": "c5de30fd-9040-48a2-ac65-85dd7ca2d3e8",
@@ -247,6 +247,206 @@
         "resourceType": "dataset",
         "resourceId": "a1712855-5b5f-4bf3-a8a3-8ebefe1f81fc",
         "details": "{\"filename\":\"UNIT 1-APP-STATISTICS FOR ECONOMISTS.pdf\",\"extractedCharacters\":14183,\"generatedExamples\":4}"
+      },
+      "9810c7d1-0096-4859-9740-929eb7975697": {
+        "id": "9810c7d1-0096-4859-9740-929eb7975697",
+        "createdAt": "2026-10-11T09:42:08.034Z",
+        "updatedAt": "2026-10-11T09:42:08.034Z",
+        "actorId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "action": "LOGIN",
+        "resourceType": "User",
+        "resourceId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "details": "{\"email\":\"niyibizisteven13@gmail.com\"}"
+      },
+      "39e85caa-aaa6-4183-ba79-d7c7daf42645": {
+        "id": "39e85caa-aaa6-4183-ba79-d7c7daf42645",
+        "createdAt": "2026-10-11T11:38:39.887Z",
+        "updatedAt": "2026-10-11T11:38:39.887Z",
+        "actorId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "action": "LOGIN",
+        "resourceType": "User",
+        "resourceId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "details": "{\"email\":\"niyibizisteven13@gmail.com\"}"
+      },
+      "4ad11369-8ce7-429a-a711-4bc69ea676f4": {
+        "id": "4ad11369-8ce7-429a-a711-4bc69ea676f4",
+        "createdAt": "2026-10-11T11:41:15.933Z",
+        "updatedAt": "2026-10-11T11:41:15.933Z",
+        "actorId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "action": "LOGOUT",
+        "resourceType": "RefreshSession",
+        "resourceId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "details": "{}"
+      },
+      "0898edf1-9e06-4b5a-9dc4-639cbe21adae": {
+        "id": "0898edf1-9e06-4b5a-9dc4-639cbe21adae",
+        "createdAt": "2026-10-11T11:47:37.138Z",
+        "updatedAt": "2026-10-11T11:47:37.138Z",
+        "actorId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "action": "LOGIN",
+        "resourceType": "User",
+        "resourceId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "details": "{\"email\":\"niyibizisteven13@gmail.com\"}"
+      },
+      "2b71d4eb-640e-4c01-aea0-32e8097fdc00": {
+        "id": "2b71d4eb-640e-4c01-aea0-32e8097fdc00",
+        "createdAt": "2026-10-11T11:48:27.468Z",
+        "updatedAt": "2026-10-11T11:48:27.468Z",
+        "actorId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "action": "LOGIN",
+        "resourceType": "User",
+        "resourceId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "details": "{\"email\":\"niyibizisteven13@gmail.com\"}"
+      },
+      "b0aa5775-d6ef-4909-8235-b0b84a3f760e": {
+        "id": "b0aa5775-d6ef-4909-8235-b0b84a3f760e",
+        "createdAt": "2026-10-11T11:53:47.503Z",
+        "updatedAt": "2026-10-11T11:53:47.503Z",
+        "actorId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "action": "LOGIN",
+        "resourceType": "User",
+        "resourceId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "details": "{\"email\":\"niyibizisteven13@gmail.com\"}"
+      },
+      "fee7d016-ecd1-4316-9d7a-7c60611be48e": {
+        "id": "fee7d016-ecd1-4316-9d7a-7c60611be48e",
+        "createdAt": "2026-10-11T12:09:23.941Z",
+        "updatedAt": "2026-10-11T12:09:23.941Z",
+        "actorId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "action": "LOGIN",
+        "resourceType": "User",
+        "resourceId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "details": "{\"email\":\"niyibizisteven13@gmail.com\"}"
+      },
+      "fcda7bc5-a77a-4158-b015-3efa47d02960": {
+        "id": "fcda7bc5-a77a-4158-b015-3efa47d02960",
+        "createdAt": "2026-10-11T12:16:35.171Z",
+        "updatedAt": "2026-10-11T12:16:35.171Z",
+        "actorId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "action": "LOGIN",
+        "resourceType": "User",
+        "resourceId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "details": "{\"email\":\"niyibizisteven13@gmail.com\"}"
+      },
+      "2988d4ce-090d-4bea-bf9e-cf517d51cf6f": {
+        "id": "2988d4ce-090d-4bea-bf9e-cf517d51cf6f",
+        "createdAt": "2026-10-11T16:34:52.181Z",
+        "updatedAt": "2026-10-11T16:34:52.181Z",
+        "actorId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "action": "LOGIN",
+        "resourceType": "User",
+        "resourceId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "details": "{\"email\":\"niyibizisteven13@gmail.com\"}"
+      },
+      "d3f1395b-24b4-4af2-b6c7-1988a5cb4e3a": {
+        "id": "d3f1395b-24b4-4af2-b6c7-1988a5cb4e3a",
+        "createdAt": "2026-10-11T16:42:44.679Z",
+        "updatedAt": "2026-10-11T16:42:44.679Z",
+        "actorId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "action": "LOGIN",
+        "resourceType": "User",
+        "resourceId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "details": "{\"email\":\"niyibizisteven13@gmail.com\"}"
+      },
+      "f4e10334-1272-4e83-b983-b12f9b156b55": {
+        "id": "f4e10334-1272-4e83-b983-b12f9b156b55",
+        "createdAt": "2026-10-11T16:43:00.407Z",
+        "updatedAt": "2026-10-11T16:43:00.407Z",
+        "actorId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "action": "LOGIN",
+        "resourceType": "User",
+        "resourceId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "details": "{\"email\":\"niyibizisteven13@gmail.com\"}"
+      },
+      "0bbae079-5ded-476d-a2b4-d516b5f1cf4c": {
+        "id": "0bbae079-5ded-476d-a2b4-d516b5f1cf4c",
+        "createdAt": "2026-10-11T18:40:31.689Z",
+        "updatedAt": "2026-10-11T18:40:31.689Z",
+        "actorId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "action": "LOGIN",
+        "resourceType": "User",
+        "resourceId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "details": "{\"email\":\"niyibizisteven13@gmail.com\"}"
+      },
+      "c9586626-0d98-41ed-a5e0-54c94d69181a": {
+        "id": "c9586626-0d98-41ed-a5e0-54c94d69181a",
+        "createdAt": "2026-10-11T18:44:03.345Z",
+        "updatedAt": "2026-10-11T18:44:03.345Z",
+        "actorId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "action": "LOGIN",
+        "resourceType": "User",
+        "resourceId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "details": "{\"email\":\"niyibizisteven13@gmail.com\"}"
+      },
+      "d971a1a3-f560-4621-a66a-5b684ea68d96": {
+        "id": "d971a1a3-f560-4621-a66a-5b684ea68d96",
+        "createdAt": "2026-10-11T18:50:43.761Z",
+        "updatedAt": "2026-10-11T18:50:43.761Z",
+        "actorId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "action": "LOGIN",
+        "resourceType": "User",
+        "resourceId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "details": "{\"email\":\"niyibizisteven13@gmail.com\"}"
+      },
+      "c810be23-b86b-4943-a27a-11687190a790": {
+        "id": "c810be23-b86b-4943-a27a-11687190a790",
+        "createdAt": "2026-10-11T19:10:08.039Z",
+        "updatedAt": "2026-10-11T19:10:08.039Z",
+        "actorId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "action": "LOGIN",
+        "resourceType": "User",
+        "resourceId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "details": "{\"email\":\"niyibizisteven13@gmail.com\"}"
+      },
+      "bd4be32e-9a76-48f9-a1a6-3747977ba3bc": {
+        "id": "bd4be32e-9a76-48f9-a1a6-3747977ba3bc",
+        "createdAt": "2026-10-12T07:28:22.815Z",
+        "updatedAt": "2026-10-12T07:28:22.815Z",
+        "actorId": "system",
+        "action": "LOGIN_FAILED",
+        "resourceType": "User",
+        "resourceId": null,
+        "details": "{\"emailHash\":\"1199cd1dda584929f8016c134f90a2c4c6b4b942290ce5accce3227b87f8ae38\",\"ip\":\"127.0.0.1\",\"userAgent\":\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36\"}"
+      },
+      "a7b5c19d-d038-4b24-94c0-e42511b17f12": {
+        "id": "a7b5c19d-d038-4b24-94c0-e42511b17f12",
+        "createdAt": "2026-10-12T07:28:25.865Z",
+        "updatedAt": "2026-10-12T07:28:25.865Z",
+        "actorId": "system",
+        "action": "LOGIN_FAILED",
+        "resourceType": "User",
+        "resourceId": null,
+        "details": "{\"emailHash\":\"1199cd1dda584929f8016c134f90a2c4c6b4b942290ce5accce3227b87f8ae38\",\"ip\":\"127.0.0.1\",\"userAgent\":\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36\"}"
+      },
+      "d75ec751-b075-4d02-bc04-a45d016cbf62": {
+        "id": "d75ec751-b075-4d02-bc04-a45d016cbf62",
+        "createdAt": "2026-10-12T07:28:27.369Z",
+        "updatedAt": "2026-10-12T07:28:27.369Z",
+        "actorId": "system",
+        "action": "LOGIN_FAILED",
+        "resourceType": "User",
+        "resourceId": null,
+        "details": "{\"emailHash\":\"1199cd1dda584929f8016c134f90a2c4c6b4b942290ce5accce3227b87f8ae38\",\"ip\":\"127.0.0.1\",\"userAgent\":\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36\"}"
+      },
+      "27eb7c1d-846f-4650-b21f-6283fca4690c": {
+        "id": "27eb7c1d-846f-4650-b21f-6283fca4690c",
+        "createdAt": "2026-10-12T07:32:19.051Z",
+        "updatedAt": "2026-10-12T07:32:19.051Z",
+        "actorId": "system",
+        "action": "LOGIN_FAILED",
+        "resourceType": "User",
+        "resourceId": null,
+        "details": "{\"emailHash\":\"1199cd1dda584929f8016c134f90a2c4c6b4b942290ce5accce3227b87f8ae38\",\"ip\":\"127.0.0.1\",\"userAgent\":\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36\"}"
+      },
+      "6de3ae22-4b11-4e8b-a305-6461baed3fe1": {
+        "id": "6de3ae22-4b11-4e8b-a305-6461baed3fe1",
+        "createdAt": "2026-10-12T07:33:47.315Z",
+        "updatedAt": "2026-10-12T07:33:47.315Z",
+        "actorId": "system",
+        "action": "LOGIN_FAILED",
+        "resourceType": "User",
+        "resourceId": null,
+        "details": "{\"emailHash\":\"1199cd1dda584929f8016c134f90a2c4c6b4b942290ce5accce3227b87f8ae38\",\"ip\":\"127.0.0.1\",\"userAgent\":\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36\"}"
       }
     },
     "fineTuneJob": {},
@@ -355,7 +555,21 @@
         "score": "95.2%"
       }
     },
-    "usageEvent": {},
+    "usageEvent": {
+      "84e16cb8-cb26-4a8b-baf7-ca54407117c5": {
+        "id": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "createdAt": "2026-10-11T11:56:03.174Z",
+        "updatedAt": "2026-10-11T11:56:03.174Z",
+        "userId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "question": "write rnb song",
+        "knowledgeBaseId": null,
+        "model": "zai-org/GLM-5.3-Flash",
+        "tokensIn": 4679,
+        "tokensOut": 444,
+        "latencyMs": 58142,
+        "answeredFromKnowledge": false
+      }
+    },
     "applicationForm": {},
     "formSubmission": {},
     "prompt": {
@@ -421,12 +635,13 @@
       "84e16cb8-cb26-4a8b-baf7-ca54407117c5": {
         "id": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
         "createdAt": "2026-10-10T09:33:47.418Z",
-        "updatedAt": "2026-10-10T09:33:47.418Z",
+        "updatedAt": "2026-10-11T18:52:21.207Z",
         "userId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
-        "data": "{\"messages\":[],\"sessions\":[],\"uploadedFiles\":[],\"activeTab\":\"documents\",\"activeFormId\":null,\"pinnedSyllabusId\":null,\"highlights\":[{\"id\":\"hl-1\",\"docId\":\"exam-ib-physics\",\"docTitle\":\"IB Physics HL - Classical Mechanics\",\"text\":\"Newton's Second Law states that force is equal to the rate of change of momentum (F = dp/dt).\",\"color\":\"terracotta\",\"createdAt\":\"10 mins ago\",\"note\":\"Core formula for impulse derivation\",\"category\":\"Physics Principle\"},{\"id\":\"hl-2\",\"docId\":\"exam-ib-physics\",\"docTitle\":\"IB Physics HL - Classical Mechanics\",\"text\":\"Kinetic energy after = 144,000 J. Kinetic energy is not conserved (inelastic collision).\",\"color\":\"sage\",\"createdAt\":\"25 mins ago\",\"note\":\"Inelastic collision key evidence\",\"category\":\"Calculation Rule\"},{\"id\":\"hl-3\",\"docId\":\"exam-cs101\",\"docTitle\":\"CS101 - Algorithms & Recursion\",\"text\":\"Naive recursive Fibonacci is O(2^n) time due to overlapping subproblems tree.\",\"color\":\"yellow\",\"createdAt\":\"1 hour ago\",\"note\":\"Important complexity distinction for exams\",\"category\":\"CS Algorithm\"}],\"decks\":[{\"id\":\"deck-physics\",\"title\":\"Physics HL - Momentum & Collisions\",\"cardsCount\":12,\"description\":\"Newtonian mechanics, conservation equations, impulse integral proofs\",\"updatedAt\":\"Today\"},{\"id\":\"deck-cs\",\"title\":\"Computer Science - Complexity & Recursion\",\"cardsCount\":8,\"description\":\"Big-O notation, recursion base cases, dynamic programming memoization\",\"updatedAt\":\"Yesterday\"},{\"id\":\"deck-rubrics\",\"title\":\"Marking Criteria & Model Answer Anchors\",\"cardsCount\":15,\"description\":\"Rubric criteria anchors for high-scoring student essay answers\",\"updatedAt\":\"2 days ago\"}],\"flashcards\":[{\"id\":\"fc-1\",\"deckId\":\"deck-physics\",\"front\":\"What is the formal calculus expression for Newton's Second Law?\",\"back\":\"F = dp/dt (Force is equal to the rate of change of momentum with respect to time).\",\"sourceDocTitle\":\"IB Physics HL - Classical Mechanics\",\"createdAt\":\"10 mins ago\"},{\"id\":\"fc-2\",\"deckId\":\"deck-physics\",\"front\":\"How is Impulse (J) related to a Force-Time graph?\",\"back\":\"Impulse J = ∫ F dt, which corresponds exactly to the area beneath the Force-Time curve.\",\"sourceDocTitle\":\"IB Physics HL - Classical Mechanics\",\"createdAt\":\"20 mins ago\"},{\"id\":\"fc-3\",\"deckId\":\"deck-cs\",\"front\":\"What is the time and space complexity of naive recursive Fibonacci?\",\"back\":\"Time complexity: O(2^n) due to redundant tree evaluations. Space complexity: O(n) call stack depth.\",\"sourceDocTitle\":\"CS101 - Algorithms & Recursion\",\"createdAt\":\"1 hour ago\"}],\"aiCards\":[{\"id\":\"ai-card-1\",\"type\":\"summary\",\"title\":\"Key Concept Summary\",\"content\":\"Newton's Second Law directly establishes that Force equals the time derivative of momentum (F = dp/dt). Integrating force over time yields the Impulse-Momentum Theorem (J = Δp).\",\"sourceText\":\"Newton's Second Law states that force is equal to the rate of change of momentum (F = dp/dt).\",\"timestamp\":\"Just now\"}],\"examPaper\":null,\"studentScripts\":[]}"
+        "data": "{\"messages\":[{\"id\":\"msg-1791711740358\",\"sender\":\"user\",\"text\":\"hi how are you doing?\",\"timestamp\":\"2026-10-11T09:42:20.358Z\"},{\"id\":\"msg-1791711740359\",\"sender\":\"assistant\",\"text\":\"Hey! Doing well, thanks — ready to help. What are you working on today?\",\"provider\":\"GonkaRouter\",\"timestamp\":\"2026-10-11T09:42:29.930Z\"},{\"id\":\"msg-1791719704660\",\"sender\":\"user\",\"text\":\"write rnb song\",\"timestamp\":\"2026-10-11T11:55:04.660Z\"},{\"id\":\"msg-1791719704661\",\"sender\":\"assistant\",\"text\":\"Here's an original R&B track — smooth, late-night vibe:\\n\\n# \\\"Slow Gravity\\\"\\n\\n**[Verse 1]**\\nMidnight on the interstate, city lights bleed gold\\nYour voice through the speaker, warming up the cold\\nI've been running from the feeling, but it knows my name\\nEvery love song on the radio keeps calling out your flame\\n\\n**[Pre-Chorus]**\\nAnd I don't wanna fight it anymore\\nYou're the one my heart's been waiting for\\n\\n**[Chorus]**\\nFalling in slow gravity, pulling me to you\\nAin't no escaping, baby, this feeling's long overdue\\nHold me in slow gravity, don't let go too soon\\nTwo hearts in orbit, dancing underneath the moon\\n\\n**[Verse 2]**\\nCoffee going cold again, I'm lost inside your eyes\\nYou laugh at all my bad jokes, see through my disguise\\nAin't never been a poet, but for you I'll try\\nWrite a hundred love letters just to keep you by my side\\n\\n**[Pre-Chorus]**\\nAnd I don't wanna fight it anymore\\nYou're the one my heart's been waiting for\\n\\n**[Chorus]**\\nFalling in slow gravity, pulling me to you\\nAin't no escaping, baby, this feeling's long overdue\\nHold me in slow gravity, don't let go too soon\\nTwo hearts in orbit, dancing underneath the moon\\n\\n**[Bridge]**\\n*(soft, stripped back)*\\nIf the world falls apart tonight\\nI'll be right here, holding you tight\\n'Cause love don't need to make sense\\nWhen it feels like this...\\n\\n**[Final Chorus]** *(key change, full vocals)*\\nFalling in slow gravity, pulling me to you\\nAin't no escaping, baby, this feeling's long overdue\\nHold me in slow gravity, don't let go too soon\\nTwo hearts in orbit, dancing underneath the moon\\n\\n**[Outro]**\\nSlow gravity... you and me...\\nSlow gravity...\\n\\n---\\n\\nWant me to turn this into an **audio podcast/voiceover demo**, adjust the theme (heartbreak, celebration, Kinyarwanda lyrics), or write a second verse variation?\",\"provider\":\"GonkaRouter\",\"timestamp\":\"2026-10-11T11:56:03.313Z\"}],\"sessions\":[{\"id\":\"session-1791719763313\",\"title\":\"write rnb song\",\"messages\":[{\"id\":\"msg-1791711740358\",\"sender\":\"user\",\"text\":\"hi how are you doing?\",\"timestamp\":\"2026-10-11T09:42:20.358Z\"},{\"id\":\"msg-1791711740359\",\"sender\":\"assistant\",\"text\":\"Hey! Doing well, thanks — ready to help. What are you working on today?\",\"provider\":\"GonkaRouter\",\"timestamp\":\"2026-10-11T09:42:29.930Z\"},{\"id\":\"msg-1791719704660\",\"sender\":\"user\",\"text\":\"write rnb song\",\"timestamp\":\"2026-10-11T11:55:04.660Z\"},{\"id\":\"msg-1791719704661\",\"sender\":\"assistant\",\"text\":\"Here's an original R&B track — smooth, late-night vibe:\\n\\n# \\\"Slow Gravity\\\"\\n\\n**[Verse 1]**\\nMidnight on the interstate, city lights bleed gold\\nYour voice through the speaker, warming up the cold\\nI've been running from the feeling, but it knows my name\\nEvery love song on the radio keeps calling out your flame\\n\\n**[Pre-Chorus]**\\nAnd I don't wanna fight it anymore\\nYou're the one my heart's been waiting for\\n\\n**[Chorus]**\\nFalling in slow gravity, pulling me to you\\nAin't no escaping, baby, this feeling's long overdue\\nHold me in slow gravity, don't let go too soon\\nTwo hearts in orbit, dancing underneath the moon\\n\\n**[Verse 2]**\\nCoffee going cold again, I'm lost inside your eyes\\nYou laugh at all my bad jokes, see through my disguise\\nAin't never been a poet, but for you I'll try\\nWrite a hundred love letters just to keep you by my side\\n\\n**[Pre-Chorus]**\\nAnd I don't wanna fight it anymore\\nYou're the one my heart's been waiting for\\n\\n**[Chorus]**\\nFalling in slow gravity, pulling me to you\\nAin't no escaping, baby, this feeling's long overdue\\nHold me in slow gravity, don't let go too soon\\nTwo hearts in orbit, dancing underneath the moon\\n\\n**[Bridge]**\\n*(soft, stripped back)*\\nIf the world falls apart tonight\\nI'll be right here, holding you tight\\n'Cause love don't need to make sense\\nWhen it feels like this...\\n\\n**[Final Chorus]** *(key change, full vocals)*\\nFalling in slow gravity, pulling me to you\\nAin't no escaping, baby, this feeling's long overdue\\nHold me in slow gravity, don't let go too soon\\nTwo hearts in orbit, dancing underneath the moon\\n\\n**[Outro]**\\nSlow gravity... you and me...\\nSlow gravity...\\n\\n---\\n\\nWant me to turn this into an **audio podcast/voiceover demo**, adjust the theme (heartbreak, celebration, Kinyarwanda lyrics), or write a second verse variation?\",\"provider\":\"GonkaRouter\",\"timestamp\":\"2026-10-11T11:56:03.313Z\"}],\"messageCount\":4,\"date\":\"2026-10-11T11:56:03.313Z\"},{\"id\":\"session-1791711749930\",\"title\":\"hi how are you doing?\",\"messages\":[{\"id\":\"msg-1791711740358\",\"sender\":\"user\",\"text\":\"hi how are you doing?\",\"timestamp\":\"2026-10-11T09:42:20.358Z\"},{\"id\":\"msg-1791711740359\",\"sender\":\"assistant\",\"text\":\"Hey! Doing well, thanks — ready to help. What are you working on today?\",\"provider\":\"GonkaRouter\",\"timestamp\":\"2026-10-11T09:42:29.930Z\"}],\"messageCount\":2,\"date\":\"2026-10-11T09:42:29.930Z\"}],\"uploadedFiles\":[],\"activeTab\":\"marking_hub\",\"activeFormId\":null,\"pinnedSyllabusId\":null,\"highlights\":[{\"id\":\"hl-1\",\"docId\":\"exam-ib-physics\",\"docTitle\":\"IB Physics HL - Classical Mechanics\",\"text\":\"Newton's Second Law states that force is equal to the rate of change of momentum (F = dp/dt).\",\"color\":\"terracotta\",\"createdAt\":\"10 mins ago\",\"note\":\"Core formula for impulse derivation\",\"category\":\"Physics Principle\"},{\"id\":\"hl-2\",\"docId\":\"exam-ib-physics\",\"docTitle\":\"IB Physics HL - Classical Mechanics\",\"text\":\"Kinetic energy after = 144,000 J. Kinetic energy is not conserved (inelastic collision).\",\"color\":\"sage\",\"createdAt\":\"25 mins ago\",\"note\":\"Inelastic collision key evidence\",\"category\":\"Calculation Rule\"},{\"id\":\"hl-3\",\"docId\":\"exam-cs101\",\"docTitle\":\"CS101 - Algorithms & Recursion\",\"text\":\"Naive recursive Fibonacci is O(2^n) time due to overlapping subproblems tree.\",\"color\":\"yellow\",\"createdAt\":\"1 hour ago\",\"note\":\"Important complexity distinction for exams\",\"category\":\"CS Algorithm\"}],\"decks\":[{\"id\":\"deck-physics\",\"title\":\"Physics HL - Momentum & Collisions\",\"cardsCount\":12,\"description\":\"Newtonian mechanics, conservation equations, impulse integral proofs\",\"updatedAt\":\"Today\"},{\"id\":\"deck-cs\",\"title\":\"Computer Science - Complexity & Recursion\",\"cardsCount\":8,\"description\":\"Big-O notation, recursion base cases, dynamic programming memoization\",\"updatedAt\":\"Yesterday\"},{\"id\":\"deck-rubrics\",\"title\":\"Marking Criteria & Model Answer Anchors\",\"cardsCount\":15,\"description\":\"Rubric criteria anchors for high-scoring student essay answers\",\"updatedAt\":\"2 days ago\"}],\"flashcards\":[{\"id\":\"fc-1\",\"deckId\":\"deck-physics\",\"front\":\"What is the formal calculus expression for Newton's Second Law?\",\"back\":\"F = dp/dt (Force is equal to the rate of change of momentum with respect to time).\",\"sourceDocTitle\":\"IB Physics HL - Classical Mechanics\",\"createdAt\":\"10 mins ago\"},{\"id\":\"fc-2\",\"deckId\":\"deck-physics\",\"front\":\"How is Impulse (J) related to a Force-Time graph?\",\"back\":\"Impulse J = ∫ F dt, which corresponds exactly to the area beneath the Force-Time curve.\",\"sourceDocTitle\":\"IB Physics HL - Classical Mechanics\",\"createdAt\":\"20 mins ago\"},{\"id\":\"fc-3\",\"deckId\":\"deck-cs\",\"front\":\"What is the time and space complexity of naive recursive Fibonacci?\",\"back\":\"Time complexity: O(2^n) due to redundant tree evaluations. Space complexity: O(n) call stack depth.\",\"sourceDocTitle\":\"CS101 - Algorithms & Recursion\",\"createdAt\":\"1 hour ago\"}],\"aiCards\":[{\"id\":\"ai-card-1\",\"type\":\"summary\",\"title\":\"Key Concept Summary\",\"content\":\"Newton's Second Law directly establishes that Force equals the time derivative of momentum (F = dp/dt). Integrating force over time yields the Impulse-Momentum Theorem (J = Δp).\",\"sourceText\":\"Newton's Second Law states that force is equal to the rate of change of momentum (F = dp/dt).\",\"timestamp\":\"Just now\"}],\"examPaper\":null,\"studentScripts\":[]}"
       }
     },
     "verifiedAnswer": {},
-    "correctionQueueItem": {}
+    "correctionQueueItem": {},
+    "extractedInsight": {}
   }
 }

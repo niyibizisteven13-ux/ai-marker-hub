@@ -102,6 +102,8 @@ export interface Message {
   isStreaming?: boolean;
   rating?: 'up' | 'down';
   errorKind?: 'service_unavailable' | 'network' | 'generic';
+  sources?: Array<{ filename: string; pageNumber?: number; tableNumber?: string; title?: string }>;
+  citations?: Array<any>;
   actions?: Array<{
     label: string;
     value: string;

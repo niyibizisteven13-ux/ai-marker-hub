@@ -41,6 +41,7 @@ import studioRoutes from './server/routes/studioRoutes.ts';
 import adminRoutes from './server/routes/adminRoutes.ts';
 import ollamaRoutes from './server/routes/ollamaRoutes.ts';
 import telegramBotRoutes from './server/routes/telegramBotRoutes.ts';
+import settingsBillingRoutes from './server/routes/settingsBillingRoutes.ts';
 import { TelegramBotService } from './server/services/TelegramBotService.ts';
 import { buildFallbackChatReply } from './src/utils/aiFallback.ts';
 import { buildPromptForIntent } from './server/services/prompts/promptRouter.ts';
@@ -292,6 +293,7 @@ app.use('/api/forms', formRoutes);
 app.use('/api/admin', requireAuth, requireRole('ADMIN'), adminRoutes);
 app.use('/api/ollama', requireAuth, ollamaRoutes);
 app.use('/api/telegram', telegramBotRoutes);
+app.use('/api', settingsBillingRoutes);
 // /exports serves generated Excel reports — gate it so only the owning
 // authenticated user (or admin) can download them. Anonymous access would
 // allow anyone to enumerate and download batch grading results.

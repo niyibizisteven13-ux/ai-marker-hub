@@ -6,7 +6,7 @@ async function seed() {
   try {
     await prisma.$connect();
     const email = 'niyibizisteven13@gmail.com';
-    const passwordHash = await bcrypt.hash('Steven123@45', 12);
+    const passwordHash = await bcrypt.hash('work', 12);
 
     const existing = await prisma.user.findUnique({ where: { email } });
     if (!existing) {

@@ -29,7 +29,8 @@ import {
 import { TopNavbar } from './components/TopNavbar';
 import { LeftSidebar } from './components/LeftSidebar';
 import { CenterWorkspace } from './components/CenterWorkspace';
-import SettingsModal from './components/SettingsModal';
+import SettingsPage from './pages/SettingsPage';
+import UpgradeSheet from './components/UpgradeSheet';
 import RightChatSidebar from './components/RightChatSidebar';
 import { SidebarResultsPanel } from './components/SidebarResultsPanel';
 import { FloatingSmartToolbar } from './components/FloatingSmartToolbar';
@@ -45,6 +46,8 @@ import { useIsMobile } from './hooks/useIsMobile';
 import { useVisualViewportHeight } from './hooks/useVisualViewportHeight';
 import { Menu, X, Plus, Sparkles } from 'lucide-react';
 import UpgradePage from './pages/UpgradePage';
+import LandingPage from './pages/LandingPage';
+import { authService } from './auth/authService';
 
 const LoginModal = React.lazy(() => import('./components/LoginModal'));
 const UpgradeModal = React.lazy(() => import('./components/UpgradeModal'));
@@ -136,7 +139,8 @@ export default function App() {
   const [aiServiceState, setAiServiceState] = useState<'ready' | 'degraded' | 'offline'>('ready');
   const [scannerOpen, setScannerOpen] = useState<boolean>(false);
   const [aiStatus, setAiStatus] = useState<{ type: 'info' | 'warning'; message: string } | null>(null);
-  const [loginModalOpen, setLoginModalOpen] = useState<boolean>(false);
+  const [loginModalOpen, setLoginModalOpen] = useState<boolean>(() => window.location.pathname === '/signup');
+  const [isSignUpMode, setIsSignUpMode] = useState<boolean>(() => window.location.pathname === '/signup');
   const [upgradeModalOpen, setUpgradeModalOpen] = useState<boolean>(false);
   const [upgradeContext, setUpgradeContext] = useState<{ jobId?: string; service?: string; targetPlan?: 'individual' | 'business' | 'organisation' } | null>(() => {
     if (window.location.pathname !== '/upgrade') return null;
@@ -187,11 +191,27 @@ export default function App() {
       setUpgradeContext(e.detail || {});
       setUpgradeModalOpen(true);
     };
+    const handleOpenSignup = () => {
+      setIsSignUpMode(true);
+      setLoginModalOpen(true);
+    };
+    const handleOpenLogin = () => {
+      setIsSignUpMode(false);
+      setLoginModalOpen(true);
+    };
     const handlePopState = () => {
       if (window.location.pathname !== '/upgrade') setUpgradePageOpen(false);
       if (window.location.pathname !== '/admin') setAdminOpen(false);
+      if (window.location.pathname === '/signup') {
+        setIsSignUpMode(true);
+        setLoginModalOpen(true);
+      } else if (window.location.pathname === '/') {
+        setLoginModalOpen(false);
+      }
     };
     window.addEventListener('open-upgrade-modal', handleOpenUpgrade as EventListener);
+    window.addEventListener('open-signup-modal', handleOpenSignup);
+    window.addEventListener('open-login-modal', handleOpenLogin);
     window.addEventListener('popstate', handlePopState);
     (window as any).openUpgradeModal = (jobId?: string, service?: string) => {
       setUpgradeContext({ jobId, service });
@@ -199,6 +219,8 @@ export default function App() {
     };
     return () => {
       window.removeEventListener('open-upgrade-modal', handleOpenUpgrade as EventListener);
+      window.removeEventListener('open-signup-modal', handleOpenSignup);
+      window.removeEventListener('open-login-modal', handleOpenLogin);
       window.removeEventListener('popstate', handlePopState);
       delete (window as any).openUpgradeModal;
     };
@@ -654,6 +676,7 @@ export default function App() {
         id: `scan-script-${now}-${idx}`,
         studentName: p.studentName || `Student ${idx + 1}`,
         studentId: `SCN-${100 + idx}`,
+        submittedAt: new Date().toISOString(),
         status: awarded !== undefined ? ('marked' as const) : ('pending' as const),
         totalAwardedMarks: awarded,
         maxTotalMarks: max,
@@ -947,6 +970,23 @@ export default function App() {
     );
   }
 
+  if (authStatus === 'anonymous' && !publicForm && !upgradePageOpen && !adminOpen) {
+    return (
+      <LandingPage
+        onLoginSuccess={(user) => {
+          if (user) {
+            setAuthenticatedUser(user);
+          } else {
+            authService.me().then((u) => {
+              if (u) setAuthenticatedUser(u);
+            });
+          }
+          setAuthStatus('authenticated');
+        }}
+      />
+    );
+  }
+
   const workspacePane = (
     <CenterWorkspace
       activeTab={activeTab}
@@ -1030,6 +1070,8 @@ export default function App() {
     onRemoveStagedAttachment: handleRemoveStagedAttachment,
     onOpenSidebar: () => setIsMobileSidebarOpen(true),
     onOpenScanner: () => setScannerOpen(true),
+    user: authenticatedUser,
+    onOpenLoginModal: () => setLoginModalOpen(true),
     onPreviewDoc: (doc: any) => {
       setActiveDocument(doc);
       setActiveTab('marking_hub');
@@ -1332,33 +1374,44 @@ export default function App() {
         {loginModalOpen && (
           <LoginModal
             isOpen={loginModalOpen}
-            onClose={() => setLoginModalOpen(false)}
+            onClose={() => {
+              setLoginModalOpen(false);
+              if (window.location.pathname === '/signup') {
+                window.history.replaceState({}, '', '/');
+              }
+              setIsSignUpMode(false);
+            }}
+            defaultIsSignUp={isSignUpMode}
             onLoginSuccess={(u, t) => {
               setAuthenticatedUser(u);
               setAuthStatus('authenticated');
               setLoginModalOpen(false);
+              setIsSignUpMode(false);
+              if (window.location.pathname === '/signup') {
+                window.history.replaceState({}, '', '/');
+              }
               if (upgradeContext) openUpgradePage(upgradeContext.targetPlan);
             }}
           />
         )}
         {upgradeModalOpen && (
-          <UpgradeModal
+          <UpgradeSheet
             isOpen={upgradeModalOpen}
             onClose={() => setUpgradeModalOpen(false)}
-            currentJobId={upgradeContext?.jobId}
-            onUpgrade={openUpgradePage}
-          />
-        )}
-        {settingsOpen && (
-          <SettingsModal
-            isOpen={settingsOpen}
-            onClose={() => setSettingsOpen(false)}
-            user={authenticatedUser}
-            onUpdateUser={(u) => setAuthenticatedUser(u)}
-            onLogout={handleLogout}
+            onSelectPlan={openUpgradePage}
           />
         )}
       </Suspense>
+      {settingsOpen && (
+        <div className="fixed inset-0 z-[150] bg-[#FAF9F5]">
+          <SettingsPage
+            user={authenticatedUser}
+            onUpdateUser={(u) => setAuthenticatedUser(u)}
+            onLogout={handleLogout}
+            onBack={() => setSettingsOpen(false)}
+          />
+        </div>
+      )}
     </div>
   );
 }

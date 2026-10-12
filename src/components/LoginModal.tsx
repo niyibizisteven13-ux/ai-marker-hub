@@ -7,10 +7,11 @@ interface LoginModalProps {
   isOpen: boolean;
   onClose: () => void;
   onLoginSuccess: (user: User, token: string) => void;
+  defaultIsSignUp?: boolean;
 }
 
-export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginModalProps) {
-  const [isSignUp, setIsSignUp] = useState(false);
+export default function LoginModal({ isOpen, onClose, onLoginSuccess, defaultIsSignUp = false }: LoginModalProps) {
+  const [isSignUp, setIsSignUp] = useState(defaultIsSignUp);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -27,9 +28,10 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
       setPassword('');
       setName('');
       setError('');
+      setIsSignUp(defaultIsSignUp);
       setTimeout(() => emailInputRef.current?.focus(), 50);
     }
-  }, [isOpen]);
+  }, [isOpen, defaultIsSignUp]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -53,8 +55,8 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
       setError('Enter a valid email');
       return;
     }
-    if (password.length < 10) {
-      setError('Use at least 10 characters');
+    if (password.length < 4) {
+      setError('Use at least 4 characters');
       return;
     }
     if (isSignUp && (!name.trim() || name.trim().length < 2)) {

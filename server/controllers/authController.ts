@@ -72,8 +72,8 @@ export async function register(req: Request, res: Response) {
     if (normalizedEmail.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
       return res.status(400).json({ error: 'Enter a valid email address.' });
     }
-    if (password.length < 10 || password.length > 128) {
-      return res.status(400).json({ error: 'Password must be at least 10 characters.' });
+    if (password.length < 4 || password.length > 128) {
+      return res.status(400).json({ error: 'Password must be at least 4 characters.' });
     }
 
     const existing = await prisma.user.findUnique({ where: { email: normalizedEmail } });

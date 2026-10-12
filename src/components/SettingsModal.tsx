@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { authFetch } from '../utils/authFetch';
 import { User, UserSettings } from '../types';
-import { X } from 'lucide-react';
+import { X, User as UserIcon, Cpu, ShieldAlert, LogOut, Check, Sparkles } from 'lucide-react';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -110,41 +110,45 @@ export default function SettingsModal({ isOpen, onClose, user, onUpdateUser, onL
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex h-[100dvh] w-full items-stretch justify-stretch bg-black/70 backdrop-blur-md">
+    <div className="fixed inset-0 z-50 flex h-[100dvh] w-full items-center justify-center bg-black/80 backdrop-blur-md p-2 sm:p-6">
       <style>{`
         input:-webkit-autofill,
         input:-webkit-autofill:hover,
         input:-webkit-autofill:focus,
         input:-webkit-autofill:active {
-          -webkit-box-shadow: 0 0 0 30px #0F1520 inset !important;
+          -webkit-box-shadow: 0 0 0 30px #090D14 inset !important;
           -webkit-text-fill-color: #f1f5f9 !important;
           transition: background-color 5000s ease-in-out 0s;
         }
       `}</style>
-      <div className="flex h-full min-h-0 w-full flex-col overflow-hidden border border-white/[0.09] bg-[#101318] shadow-2xl">
-        <div className="flex items-center justify-between border-b border-white/[0.08] bg-[#14171D] px-4 sm:px-7 py-4 shrink-0">
-
+      <div className="flex h-full max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-white/[0.12] bg-[#0A0D14] shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-white/[0.08] bg-[#0E121A] px-6 py-4 shrink-0">
           <div className="flex items-center gap-3">
-            <span className="text-orange-400 text-lg">⚙️</span>
+            <div className="w-9 h-9 rounded-xl bg-orange-500/15 border border-orange-500/30 flex items-center justify-center text-orange-400">
+              <Sparkles size={18} />
+            </div>
             <div>
-              <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">Studio Preferences</p>
-              <h2 className="text-lg font-semibold text-slate-100">Workspace Settings</h2>
+              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-400">Preferences & Profile</p>
+              <h2 className="text-base font-semibold text-white">Workspace Settings</h2>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="rounded-full px-3 py-2 text-slate-400 transition hover:text-slate-100"
+            className="w-8 h-8 rounded-full border border-white/10 bg-white/5 flex items-center justify-center text-neutral-400 hover:text-white hover:bg-white/10 transition-all"
             aria-label="Close settings"
           >
-            ✕
+            <X size={16} />
           </button>
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#101318] sm:flex-row">
-          <div role="tablist" aria-label="Settings sections" className="flex shrink-0 gap-1 overflow-x-auto border-b border-white/[0.07] bg-[#111419] p-2 sm:w-56 sm:flex-col sm:overflow-y-auto sm:border-b-0 sm:border-r sm:p-4">
+        {/* Body split */}
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#0A0D14] sm:flex-row">
+          {/* Sidebar Tabs */}
+          <div role="tablist" aria-label="Settings sections" className="flex shrink-0 gap-1.5 overflow-x-auto border-b border-white/[0.08] bg-[#0C0F17] p-3 sm:w-64 sm:flex-col sm:overflow-y-auto sm:border-b-0 sm:border-r sm:p-4">
             {[
-              { key: 'account', label: 'Account' },
-              { key: 'ai', label: 'AI preferences' },
+              { key: 'account', label: 'Account Profile', icon: <UserIcon size={16} /> },
+              { key: 'ai', label: 'AI & Marking Agent', icon: <Cpu size={16} /> },
             ].map((tab) => (
               <button
                 key={tab.key}
@@ -154,112 +158,104 @@ export default function SettingsModal({ isOpen, onClose, user, onUpdateUser, onL
                 aria-controls={`settings-panel-${tab.key}`}
                 aria-selected={activeTab === tab.key}
                 onClick={() => setActiveTab(tab.key as 'account' | 'ai')}
-                className={`shrink-0 sm:w-full rounded-2xl px-3 sm:px-4 py-2.5 sm:py-3 text-left text-xs font-bold tracking-wide transition-all duration-200 ${
+                className={`flex items-center gap-3 shrink-0 sm:w-full rounded-2xl px-4 py-3 text-left text-xs font-semibold tracking-wide transition-all duration-200 ${
                   activeTab === tab.key
-                    ? 'bg-slate-800/80 text-orange-400 shadow-sm border border-slate-700/50'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                    ? 'bg-orange-500/10 text-orange-400 border border-orange-500/25 shadow-sm'
+                    : 'text-neutral-400 hover:text-white hover:bg-white/[0.04] border border-transparent'
                 }`}
               >
+                <span className={activeTab === tab.key ? 'text-orange-400' : 'text-neutral-500'}>{tab.icon}</span>
                 {tab.label}
               </button>
             ))}
           </div>
 
-          <div role="tabpanel" id={`settings-panel-${activeTab}`} aria-labelledby={`settings-tab-${activeTab}`} className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-7 lg:p-9 text-slate-100 scrollbar-thin scrollbar-thumb-slate-800">
-
-
+          {/* Content Panel */}
+          <div role="tabpanel" id={`settings-panel-${activeTab}`} aria-labelledby={`settings-tab-${activeTab}`} className="min-h-0 flex-1 overflow-y-auto p-6 sm:p-8 text-neutral-100 scrollbar-thin scrollbar-thumb-neutral-800">
             {activeTab === 'account' && (
-              <div className="mx-auto w-full max-w-5xl space-y-6">
-                <div className="space-y-6 rounded-3xl border border-slate-800/80 bg-[#111820] p-6 shadow-inner">
-                  <div className="space-y-1">
-                    <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider">Profile Details</h3>
-                    <p className="text-xs text-slate-500">Manage your identity and authentication credentials.</p>
+              <div className="mx-auto w-full max-w-2xl space-y-6 animate-in fade-in duration-200">
+                <div className="space-y-5 rounded-3xl border border-white/[0.08] bg-[#0E121A] p-6 shadow-xl">
+                  <div className="space-y-1 pb-2 border-b border-white/[0.06]">
+                    <h3 className="text-sm font-bold text-white tracking-wide">Personal Details</h3>
+                    <p className="text-xs text-neutral-400">Update your account credentials and profile avatar.</p>
                   </div>
 
-                  <div className="grid gap-5 sm:grid-cols-2">
-                    <label className="block space-y-2.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="block space-y-2 text-[11px] font-bold uppercase tracking-[0.15em] text-neutral-300">
                       Full Name
                       <input
                         type="text"
                         required
-                        minLength={2}
-                        maxLength={100}
                         value={name}
                         onChange={(e) => setName(e.target.value)}
-                        className="w-full rounded-2xl border border-slate-700/60 bg-[#0F1520] px-4 py-3.5 text-sm text-slate-100 outline-none focus:border-orange-500 focus:bg-[#0F1520] transition-colors shadow-sm"
+                        className="w-full rounded-xl border border-white/10 bg-[#090D14] px-4 py-3 text-sm text-white outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/50 transition-all shadow-inner"
                       />
                     </label>
-                    <label className="block space-y-2.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">
-                      Email address
+                    <label className="block space-y-2 text-[11px] font-bold uppercase tracking-[0.15em] text-neutral-300">
+                      Email Address
                       <input
                         type="email"
                         required
-                        autoComplete="email"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
-                        className="w-full rounded-2xl border border-slate-700/60 bg-[#0F1520] px-4 py-3.5 text-sm text-slate-100 outline-none focus:border-orange-500 focus:bg-[#0F1520] transition-colors shadow-sm"
+                        className="w-full rounded-xl border border-white/10 bg-[#090D14] px-4 py-3 text-sm text-white outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/50 transition-all shadow-inner"
                       />
                     </label>
                   </div>
 
-                  <label className="block space-y-2.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">
+                  <label className="block space-y-2 text-[11px] font-bold uppercase tracking-[0.15em] text-neutral-300">
                     Avatar URL
                     <input
                       type="url"
                       value={avatarUrl}
                       onChange={(e) => setAvatarUrl(e.target.value)}
                       placeholder="https://..."
-                      className="w-full rounded-2xl border border-slate-700/60 bg-[#0F1520] px-4 py-3.5 text-sm text-slate-100 outline-none focus:border-orange-500 focus:bg-[#0F1520] transition-colors shadow-sm"
+                      className="w-full rounded-xl border border-white/10 bg-[#090D14] px-4 py-3 text-sm text-white outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/50 transition-all shadow-inner"
                     />
                   </label>
 
-                  <label className="block space-y-2.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">
-                    New password
+                  <label className="block space-y-2 text-[11px] font-bold uppercase tracking-[0.15em] text-neutral-300">
+                    New Password
                     <input
                       type="password"
-                      minLength={12}
-                      maxLength={128}
-                      autoComplete="new-password"
+                      placeholder="Leave blank to keep current password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      placeholder="Leave blank to keep current password"
-                      className="w-full rounded-2xl border border-slate-700/60 bg-[#0F1520] px-4 py-3.5 text-sm text-slate-100 outline-none focus:border-orange-500 focus:bg-[#0F1520] transition-colors shadow-sm"
+                      className="w-full rounded-xl border border-white/10 bg-[#090D14] px-4 py-3 text-sm text-white outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/50 transition-all shadow-inner"
                     />
                   </label>
-
                 </div>
               </div>
             )}
 
-
             {activeTab === 'ai' && (
-              <div className="mx-auto w-full max-w-5xl space-y-6">
-                <div className="space-y-6 rounded-3xl border border-slate-800/80 bg-[#111820] p-6 shadow-inner">
-                  <div className="space-y-1">
-                    <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider">AI Agent Configuration</h3>
-                    <p className="text-xs text-slate-500">Tune Bwenge's brain and marking personality.</p>
+              <div className="mx-auto w-full max-w-2xl space-y-6 animate-in fade-in duration-200">
+                <div className="space-y-6 rounded-3xl border border-white/[0.08] bg-[#0E121A] p-6 shadow-xl">
+                  <div className="space-y-1 pb-2 border-b border-white/[0.06]">
+                    <h3 className="text-sm font-bold text-white tracking-wide">AI Agent Tuning</h3>
+                    <p className="text-xs text-neutral-400">Configure Bwenge's persona, strictness, and memory behavior.</p>
                   </div>
 
-                  <div className="flex items-center justify-between rounded-2xl border border-slate-700/60 bg-[#0F1520] p-5 shadow-sm transition-colors hover:border-slate-600">
+                  <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-[#090D14] p-4 transition-colors hover:border-white/20">
                     <div>
-                      <div className="text-sm font-bold text-slate-200">🧠 Bwenge Brain (Long-term Memory)</div>
-                      <p className="text-xs text-slate-500">Use saved context from earlier sessions to personalize future responses.</p>
+                      <div className="text-sm font-bold text-white">🧠 Long-Term Workspace Memory</div>
+                      <p className="text-xs text-neutral-400 mt-0.5">Retain context from previous marking sessions to personalize feedback.</p>
                     </div>
                     <input
                       type="checkbox"
                       checked={longTermMemory}
                       onChange={(e) => setLongTermMemory(e.target.checked)}
-                      className="h-5 w-5 rounded-lg border-slate-700 bg-slate-800 text-orange-500 accent-orange-500 transition-all cursor-pointer"
+                      className="h-5 w-5 rounded border-neutral-700 bg-neutral-900 text-orange-500 accent-orange-500 cursor-pointer"
                     />
                   </div>
 
-                  <div className="grid gap-5 sm:grid-cols-2">
-                    <label className="block space-y-2.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="block space-y-2 text-[11px] font-bold uppercase tracking-[0.15em] text-neutral-300">
                       Agent Tone
                       <select
                         value={agentTone}
                         onChange={(e) => setAgentTone(e.target.value as UserSettings['agentTone'])}
-                        className="w-full rounded-2xl border border-slate-700/60 bg-[#0F1520] px-4 py-3.5 text-sm text-slate-100 outline-none focus:border-orange-500 transition-colors appearance-none cursor-pointer"
+                        className="w-full rounded-xl border border-white/10 bg-[#090D14] px-4 py-3 text-sm text-white outline-none focus:border-orange-500 transition-colors cursor-pointer"
                       >
                         <option value="PROFESSIONAL">Professional & Objective</option>
                         <option value="ENCOURAGING">Encouraging & Mentoring</option>
@@ -268,12 +264,12 @@ export default function SettingsModal({ isOpen, onClose, user, onUpdateUser, onL
                       </select>
                     </label>
 
-                    <label className="block space-y-2.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">
-                      Grading Strictness
+                    <label className="block space-y-2 text-[11px] font-bold uppercase tracking-[0.15em] text-neutral-300">
+                      Default Grading Strictness
                       <select
                         value={strictness}
                         onChange={(e) => setStrictness(e.target.value as UserSettings['defaultStrictness'])}
-                        className="w-full rounded-2xl border border-slate-700/60 bg-[#0F1520] px-4 py-3.5 text-sm text-slate-100 outline-none focus:border-orange-500 transition-colors appearance-none cursor-pointer"
+                        className="w-full rounded-xl border border-white/10 bg-[#090D14] px-4 py-3 text-sm text-white outline-none focus:border-orange-500 transition-colors cursor-pointer"
                       >
                         <option value="LENIENT">Lenient</option>
                         <option value="STANDARD">Standard</option>
@@ -282,12 +278,12 @@ export default function SettingsModal({ isOpen, onClose, user, onUpdateUser, onL
                     </label>
                   </div>
 
-                  <label className="block space-y-2.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">
-                    Response language
+                  <label className="block space-y-2 text-[11px] font-bold uppercase tracking-[0.15em] text-neutral-300">
+                    Preferred Response Language
                     <select
                       value={preferredLanguage}
                       onChange={(e) => setPreferredLanguage(e.target.value)}
-                      className="w-full rounded-2xl border border-slate-700/60 bg-[#0F1520] px-4 py-3.5 text-sm text-slate-100 outline-none transition-colors focus:border-orange-500"
+                      className="w-full rounded-xl border border-white/10 bg-[#090D14] px-4 py-3 text-sm text-white outline-none focus:border-orange-500 transition-colors cursor-pointer"
                     >
                       <option value="en">English</option>
                       <option value="fr">French</option>
@@ -295,63 +291,52 @@ export default function SettingsModal({ isOpen, onClose, user, onUpdateUser, onL
                     </select>
                   </label>
 
-                  <label className="block space-y-2.5 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">
-                    Custom Agent Instructions
+                  <label className="block space-y-2 text-[11px] font-bold uppercase tracking-[0.15em] text-neutral-300">
+                    Custom Marking Instructions
                     <textarea
                       value={customInstructions}
                       onChange={(e) => setCustomInstructions(e.target.value)}
                       maxLength={2000}
-                      placeholder="e.g. Always emphasize critical thinking in your feedback..."
-                      className="w-full h-32 rounded-2xl border border-slate-700/60 bg-[#0F1520] px-4 py-3.5 text-sm text-slate-100 outline-none focus:border-orange-500 transition-colors resize-none shadow-sm"
+                      placeholder="e.g. Always emphasize critical thinking and concise mathematical notation..."
+                      className="w-full h-28 rounded-xl border border-white/10 bg-[#090D14] px-4 py-3 text-sm text-white outline-none focus:border-orange-500 transition-colors resize-none shadow-inner"
                     />
-                    <span className="text-xs text-slate-500">{customInstructions.length}/2000 characters</span>
+                    <span className="text-[11px] text-neutral-500">{customInstructions.length}/2000 characters</span>
                   </label>
-
-                  <div className="flex items-center justify-between rounded-2xl border border-slate-700/60 bg-[#0F1520] p-5 shadow-sm transition-colors hover:border-slate-600">
-                    <div>
-                      <div className="text-sm font-bold text-slate-200">Summarize reviewed work</div>
-                      <p className="text-xs text-slate-500">Ask the assistant to include a concise outcomes summary when reviewing student work.</p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={autoSummarize}
-                      onChange={(e) => setAutoSummarize(e.target.checked)}
-                      className="h-5 w-5 rounded-lg border-slate-700 bg-slate-800 text-orange-500 accent-orange-500 transition-all cursor-pointer"
-                    />
-                  </div>
-
                 </div>
               </div>
             )}
-
-
           </div>
         </div>
 
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 border-t border-white/[0.08] bg-[#14171D] px-4 sm:px-7 py-3 sm:py-4 shrink-0 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))]">
-
-          <div className="text-sm font-medium text-slate-400" role={statusMessage?.includes('successfully') ? 'status' : statusMessage ? 'alert' : undefined}>
-            {statusMessage && <span className={statusMessage.includes('successfully') ? 'text-emerald-400' : 'text-orange-400'}>{statusMessage}</span>}
+        {/* Footer Actions */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-white/[0.08] bg-[#0E121A] px-6 py-4 shrink-0">
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            {statusMessage && (
+              <span className={`text-xs font-medium ${statusMessage.includes('successfully') ? 'text-emerald-400' : 'text-orange-400'}`}>
+                {statusMessage}
+              </span>
+            )}
           </div>
-          <div className="flex flex-wrap items-center justify-end gap-2">
+
+          <div className="flex flex-wrap items-center justify-end gap-2.5 w-full sm:w-auto">
             <button
               type="button"
               onClick={handleLogoutAll}
-              className="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-rose-300 transition-all hover:bg-rose-500/20 active:scale-95"
+              className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3.5 py-2 text-xs font-semibold text-rose-300 hover:bg-rose-500/20 transition-all"
             >
               Sign out all devices
             </button>
             <button
               type="button"
               onClick={onLogout}
-              className="rounded-2xl border border-rose-500/20 bg-rose-500/5 px-5 py-2.5 text-xs font-bold uppercase tracking-wider text-rose-400 transition-all hover:bg-rose-500/10 active:scale-95"
+              className="rounded-xl border border-rose-500/20 bg-rose-500/5 px-4 py-2 text-xs font-semibold text-rose-400 hover:bg-rose-500/10 transition-all"
             >
               Sign Out
             </button>
             <button
               type="button"
               onClick={onClose}
-              className="rounded-2xl border border-slate-700 bg-slate-900/60 px-5 py-2.5 text-xs font-bold uppercase tracking-wider text-slate-300 transition-all hover:bg-slate-800 active:scale-95"
+              className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold text-neutral-300 hover:bg-white/10 transition-all"
             >
               Cancel
             </button>
@@ -359,13 +344,12 @@ export default function SettingsModal({ isOpen, onClose, user, onUpdateUser, onL
               type="button"
               onClick={handleSave}
               disabled={isSaving}
-              className="rounded-2xl bg-orange-500 px-6 py-2.5 text-xs font-bold uppercase tracking-wider text-white shadow-lg shadow-orange-500/10 transition-all hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50 active:scale-95"
+              className="rounded-xl bg-orange-500 px-5 py-2 text-xs font-semibold text-white shadow-lg shadow-orange-500/20 hover:bg-orange-600 disabled:opacity-50 transition-all"
             >
               {isSaving ? 'Saving…' : 'Save Changes'}
             </button>
           </div>
         </div>
-
       </div>
     </div>
   );

@@ -1,0 +1,15 @@
+{
+  "name": "Bwenge",
+  "short_name": "Bwenge",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#060B12",
+  "theme_color": "#060B12",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}

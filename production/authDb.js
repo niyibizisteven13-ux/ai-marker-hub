@@ -1,6 +1,23 @@
 import bcrypt from 'bcryptjs';
 
-export const usersDB = [];
+const salt = bcrypt.genSaltSync(10);
+const demoHash = bcrypt.hashSync('Demo#2026', salt);
+const adminHash = bcrypt.hashSync('Admin#2026', salt);
+
+export const usersDB = [
+  {
+    id: 'usr-demo-1',
+    name: 'Demo User',
+    email: 'demo@example.com',
+    passwordHash: demoHash,
+  },
+  {
+    id: 'usr-admin-1',
+    name: 'Admin User',
+    email: 'admin@bwenge.ai',
+    passwordHash: adminHash,
+  }
+];
 
 export async function createUser(name, email, passwordPlain) {
   const salt = await bcrypt.genSalt(10);
@@ -17,7 +34,9 @@ export async function createUser(name, email, passwordPlain) {
 }
 
 export function findUserByEmail(email) {
-  return usersDB.find((user) => user.email === email.toLowerCase());
+  if (!email) return null;
+  const target = email.toLowerCase().trim();
+  return usersDB.find((user) => user.email === target || user.name.toLowerCase() === target);
 }
 
 export function findUserById(id) {

@@ -1,6 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { ShieldCheck, Zap, ArrowLeft, Loader2, Phone, CheckCircle2, AlertCircle, Star, Building2, Check } from 'lucide-react';
+import { ShieldCheck, Zap, ArrowLeft, Loader2, CheckCircle2, AlertCircle, Star, Building2, Check, ChevronDown, ChevronUp, Lock } from 'lucide-react';
 import { authFetch } from '../utils/authFetch';
+import { PLANS } from '../content/plans';
+import { COMPARE_ROWS } from '../content/compare';
+import { FAQ_ITEMS } from '../content/faq';
+import OrganisationRequestDialog from '../components/OrganisationRequestDialog';
 
 interface UpgradePageProps {
   jobId?: string;
@@ -10,78 +14,63 @@ interface UpgradePageProps {
   onSuccess: () => void;
 }
 
-// Mirrors the feature copy already shown in UpgradeModal, trimmed to the
-// 3 most relevant lines — this is the "what am I actually paying for"
-// reminder the original page was missing at the point of payment.
-const PLAN_FEATURE_SUMMARY: Record<'individual' | 'business' | 'organisation', string[]> = {
-  individual: ['1 Free Trial Result', 'Mobile Money Payments', 'Precise AI Marking'],
-  business: ['Unlimited Marking', 'Priority AI Processing', 'Detailed PDF Reports'],
-  organisation: ['Institution-specific pricing', 'Shared faculty setup', 'Admin-managed billing'],
-};
+const SERIF = "font-['Georgia','Tiempos_Headline','Times_New_Roman',serif]";
 
-export default function UpgradePage({ jobId, service, targetPlan = 'individual', onBack, onSuccess }: UpgradePageProps) {
+export default function UpgradePage({ jobId, service, targetPlan = 'business', onBack, onSuccess }: UpgradePageProps) {
+  const [selectedPlanId, setSelectedPlanId] = useState<'individual' | 'business' | 'organisation'>(targetPlan || 'business');
   const [phone, setPhone] = useState('');
   const [status, setStatus] = useState<'idle' | 'pending' | 'success' | 'failed'>('idle');
   const [price, setPrice] = useState<number | null>(null);
-  const [isLoadingPrice, setIsLoadingPrice] = useState(Boolean(jobId && service));
+  const [isLoadingPrice, setIsLoadingPrice] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [compareOpen, setCompareOpen] = useState(true);
+  const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(null);
+  const [orgDialogOpen, setOrgDialogOpen] = useState(false);
+  const [reasonLimit, setReasonLimit] = useState(false);
 
   useEffect(() => {
-    if (jobId && service) {
-      void fetchQuote();
-    } else if (jobId) {
-      setPrice(null);
-      setError('A service is required to quote this batch.');
-      setIsLoadingPrice(false);
-    } else if (targetPlan === 'business') {
-      setPrice(9);
-      setError(null);
-      setIsLoadingPrice(false);
-    } else {
-      setPrice(null);
-      setIsLoadingPrice(false);
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('reason') === 'limit' || jobId) {
+      setReasonLimit(true);
     }
-  }, [jobId, service, targetPlan]);
+  }, [jobId]);
 
-  const fetchQuote = async () => {
-    setIsLoadingPrice(true);
-    try {
-      const params = new URLSearchParams({ jobId: jobId || '', service: service || '' });
-      const res = await authFetch(`/api/payments/quote?${params.toString()}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to fetch pricing');
-      const quotedPrice = Number(data.priceUsd);
-      if (!Number.isFinite(quotedPrice) || quotedPrice < 0) throw new Error('The server returned an invalid price.');
-      setPrice(quotedPrice);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Connection error');
-      setPrice(null);
-    } finally {
-      setIsLoadingPrice(false);
+  // Reorder plans: Business Pro first, then Individual, then Organisation
+  const orderedPlans = [
+    PLANS.find(p => p.id === 'business') || PLANS[1],
+    PLANS.find(p => p.id === 'individual') || PLANS[0],
+    PLANS.find(p => p.id === 'organisation') || PLANS[2],
+  ];
+
+  const handleSelectPlan = (planId: 'individual' | 'business' | 'organisation') => {
+    if (planId === 'organisation') {
+      setOrgDialogOpen(true);
+      return;
     }
+    setSelectedPlanId(planId);
   };
 
   const handlePay = async () => {
-    if (!jobId && targetPlan !== 'business') return;
-    if (jobId && !service) return setError('A service is required to pay for this batch.');
-    if (!/^\+?[0-9\s()-]{9,18}$/.test(phone.trim())) {
-      setError('Enter a valid Mobile Money number.');
+    const cleanedPhone = phone.replace(/\D/g, '');
+    const normalizedPhone = cleanedPhone.startsWith('250') ? `+${cleanedPhone}` : cleanedPhone.startsWith('0') ? `+250${cleanedPhone.slice(1)}` : `+250${cleanedPhone}`;
+
+    if (!/^\+250[0-9]{9}$/.test(normalizedPhone)) {
+      setError('Enter a valid Rwandan Mobile Money number (e.g. 078XXXXXXX).');
       return;
     }
     setError(null);
     setStatus('pending');
 
-    const payload: { phoneNumber: string; service?: string; batchId?: string; planType?: 'BUSINESS'; isSubscription?: boolean } = {
-      phoneNumber: phone.trim(),
+    const payload: { phoneNumber: string; service?: string; batchId?: string; planType?: string; isSubscription?: boolean } = {
+      phoneNumber: normalizedPhone,
     };
 
     if (jobId) {
       payload.batchId = jobId;
-      payload.service = service;
+      payload.service = service || 'grading';
     }
 
-    if (targetPlan === 'business') {
+    if (selectedPlanId === 'business') {
       payload.planType = 'BUSINESS';
       payload.isSubscription = true;
     }
@@ -93,13 +82,11 @@ export default function UpgradePage({ jobId, service, targetPlan = 'individual',
         body: JSON.stringify(payload),
       });
       const data = await res.json();
-
       if (!res.ok) {
         setStatus('failed');
-        setError(data.error || 'Payment initiation failed');
+        setError(data.error || 'Payment initiation failed.');
         return;
       }
-
       void pollPaymentStatus();
     } catch (err) {
       setStatus('failed');
@@ -109,9 +96,8 @@ export default function UpgradePage({ jobId, service, targetPlan = 'individual',
 
   const pollPaymentStatus = async () => {
     const maxAttempts = 30;
-    let lastPollingError: string | null = null;
     for (let i = 0; i < maxAttempts; i++) {
-      await new Promise(r => setTimeout(r, 3000));
+      await new Promise((r) => setTimeout(r, 3000));
       try {
         const url = jobId
           ? `/api/payments/status?${new URLSearchParams({ jobId })}`
@@ -119,209 +105,249 @@ export default function UpgradePage({ jobId, service, targetPlan = 'individual',
 
         const res = await authFetch(url);
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Could not check payment status.');
-        const currentStatus = data.status;
+        if (!res.ok) continue;
 
-        if (currentStatus === 'SUCCESS') {
+        if (data.status === 'SUCCESS') {
           setStatus('success');
           setTimeout(() => onSuccess(), 2000);
           return;
         }
-        if (currentStatus === 'FAILED') {
+        if (data.status === 'FAILED') {
           setStatus('failed');
           setError('Payment was rejected or failed.');
           return;
         }
-      } catch (err) {
-        lastPollingError = err instanceof Error ? err.message : 'Could not check payment status.';
+      } catch {
+        // network retry during poll
       }
     }
     setStatus('failed');
-    setError(lastPollingError || 'Payment timed out.');
+    setError('Payment prompt timed out.');
   };
-
-  const getPlanInfo = () => {
-    if (jobId) return {
-      name: 'Single Batch Unlock',
-      icon: <Zap size={28} />,
-      color: 'amber' as const,
-      desc: 'Unlock results for this specific marking batch.',
-    };
-    if (targetPlan === 'business') return {
-      name: 'Business Pro',
-      icon: <Star size={28} />,
-      color: 'amber' as const,
-      desc: 'Unlimited marking, every month.',
-    };
-    if (targetPlan === 'individual') return {
-      name: 'Pay as you go',
-      icon: <Zap size={28} />,
-      color: 'emerald' as const,
-      desc: 'Unlock a single result, quoted for this batch.',
-    };
-    return {
-      name: 'Organisation',
-      icon: <Building2 size={28} />,
-      color: 'indigo' as const,
-      desc: 'Institutional pricing, arranged with your organization.',
-    };
-  };
-
-  const plan = getPlanInfo();
-  const accentText = plan.color === 'emerald' ? 'text-emerald-300' : plan.color === 'indigo' ? 'text-indigo-300' : 'text-amber-300';
-  const accentBg = plan.color === 'emerald' ? 'bg-emerald-400/10 border-emerald-400/15' : plan.color === 'indigo' ? 'bg-indigo-400/10 border-indigo-400/15' : 'bg-amber-400/10 border-amber-300/15';
-  const featureList = PLAN_FEATURE_SUMMARY[targetPlan];
 
   if (status === 'success') {
     return (
-      <div className="h-dvh w-full bg-[#0B0C0F] flex flex-col items-center justify-center p-8 text-center animate-in fade-in zoom-in duration-500">
-        <div className="w-20 h-20 bg-emerald-500/20 rounded-full flex items-center justify-center text-emerald-400 mb-6 border border-emerald-500/30">
-          <CheckCircle2 size={40} />
+      <div className="h-[100dvh] w-full bg-[var(--bg)] flex flex-col items-center justify-center p-8 text-center animate-in fade-in zoom-in duration-500 text-[var(--text)]">
+        <div className="w-16 h-16 bg-[var(--teal)]/15 rounded-full flex items-center justify-center text-[var(--teal)] mb-6 border border-[var(--teal)]/30">
+          <CheckCircle2 size={32} />
         </div>
-        <h2 className="text-3xl font-bold text-white mb-4">Payment Successful!</h2>
-        <p className="text-neutral-400 mb-8 max-w-md">
-          {jobId ? 'Your result has been unlocked.' : 'Your account has been upgraded.'} Redirecting...
+        <h2 className={`${SERIF} text-3xl font-normal text-[var(--text)] mb-3`}>Payment successful</h2>
+        <p className="text-[var(--muted)] mb-8 max-w-md text-sm leading-relaxed">
+          Your access has been successfully unlocked. Redirecting to your workspace…
         </p>
-        <Loader2 className="animate-spin text-emerald-500" size={32} />
+        <Loader2 className="animate-spin text-[var(--accent)]" size={24} />
       </div>
     );
   }
 
   return (
-    <div className="h-dvh w-full overflow-hidden bg-[#0B0C0F] text-white flex flex-col">
-      {/* Slim top bar — no sticky needed, page never scrolls */}
-      <div className="shrink-0 px-4 sm:px-8 py-3 sm:py-4 border-b border-white/[0.08] flex items-center justify-between">
-        <button onClick={onBack} className="flex items-center gap-2 text-neutral-400 hover:text-white transition-colors rounded-xl px-3 py-2 hover:bg-white/5">
-          <ArrowLeft size={18} />
-          <span className="text-sm font-medium">Back</span>
+    <div className="min-h-[100dvh] w-full bg-[var(--bg)] text-[var(--text)] flex flex-col font-sans antialiased">
+      {orgDialogOpen && <OrganisationRequestDialog isOpen={orgDialogOpen} onClose={() => setOrgDialogOpen(false)} />}
+
+      {/* Top Bar */}
+      <div className="sticky top-0 z-30 px-4 sm:px-8 py-4 flex items-center justify-between border-b border-[var(--line)] bg-[var(--bg)]/90">
+        <button
+          onClick={onBack}
+          className="flex items-center gap-2 text-[var(--muted)] hover:text-[var(--text)] transition-colors rounded-lg px-3 py-2 hover:bg-[var(--hover)]"
+        >
+          <ArrowLeft size={16} />
+          <span className="text-sm font-medium">Back to workspace</span>
         </button>
-        <div className="flex items-center gap-2 px-3 py-1 bg-amber-500/10 border border-amber-500/20 rounded-full text-[10px] font-bold text-amber-500 uppercase tracking-widest">
-          <ShieldCheck size={12} />
-          Secure MoMo Checkout
+        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-[var(--muted)] border border-[var(--line)] bg-[var(--surface)]">
+          <ShieldCheck size={14} className="text-[var(--teal)]" /> Secure Mobile Money checkout
         </div>
       </div>
 
-      {/* Full-width, full-height split. No max-width cap, no page scroll —
-          the right pane is the only thing that can scroll, and only as a
-          fallback for extreme viewport/zoom combinations. */}
-      <div className="flex-1 min-h-0 w-full flex flex-col lg:flex-row">
-        {/* Left: trimmed brand/trust panel. Hidden on mobile — on a short
-            viewport, a marketing hero is the first thing to cut, not the
-            payment form. */}
-        <section className="hidden lg:flex flex-1 flex-col justify-center px-10 xl:px-16 2xl:px-24 py-10 border-r border-white/[0.06] bg-gradient-to-br from-white/[0.015] to-transparent">
-          <div className="inline-flex w-fit items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/[0.07] px-3 py-1.5 text-[11px] font-semibold text-emerald-300">
-            <ShieldCheck size={14} /> Secure checkout
-          </div>
-          <h1 className="mt-6 text-3xl xl:text-4xl font-semibold tracking-tight text-white max-w-xl">
-            Keep your work moving.
-          </h1>
-          <p className="mt-3 text-sm leading-6 text-neutral-400 max-w-md">
-            Confirm your plan and pay with Mobile Money. Access activates the moment your payment is confirmed.
-          </p>
-          <div className="mt-8 flex items-center gap-4 text-xs text-neutral-500">
-            <span className="flex items-center gap-1.5"><Zap size={14} className="text-amber-300" /> Instant activation</span>
-            <span className="w-px h-3 bg-white/10" />
-            <span className="flex items-center gap-1.5"><ShieldCheck size={14} className="text-emerald-300" /> PIN never leaves your provider</span>
-          </div>
-        </section>
-
-        {/* Right: the actual payment card — this is the page. */}
-        <section className="w-full lg:w-[460px] xl:w-[500px] shrink-0 flex flex-col min-h-0">
-          <div className="flex-1 min-h-0 overflow-y-auto [&::-webkit-scrollbar]:hidden [scrollbar-width:none] flex flex-col justify-center px-5 sm:px-8 py-6">
-            <div className="w-full bg-[#15161B] border border-white/[0.09] rounded-3xl p-5 sm:p-7 shadow-2xl">
-              {/* Plan header */}
-              <div className="flex items-start gap-3 mb-5">
-                <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 border ${accentBg} ${accentText}`}>
-                  {plan.icon}
-                </div>
-                <div className="min-w-0">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">Selected plan</p>
-                  <h2 className="text-lg font-semibold leading-tight">{plan.name}</h2>
-                  <p className="text-xs text-neutral-400 mt-0.5">{plan.desc}</p>
-                </div>
-              </div>
-
-              {/* Order summary — the piece the original page didn't have */}
-              <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4 mb-4">
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest block">
-                      {targetPlan === 'organisation' ? 'Price' : 'Amount due'}
-                    </span>
-                    <span className="text-2xl font-semibold text-white">
-                      {targetPlan === 'organisation' ? 'Custom' : isLoadingPrice ? (
-                        <span className="inline-block h-7 w-16 rounded-md bg-white/10 animate-pulse align-middle" />
-                      ) : price !== null && Number.isFinite(price) ? `$${price.toFixed(2)}` : '—'}
-                    </span>
-                  </div>
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-widest ${accentBg} ${accentText}`}>
-                    {jobId ? 'Job unlock' : targetPlan === 'organisation' ? 'Institution' : 'Subscription'}
-                  </span>
-                </div>
-                <ul className="space-y-1.5 pt-3 border-t border-white/[0.06]">
-                  {featureList.map((f) => (
-                    <li key={f} className="flex items-center gap-2 text-[11px] text-neutral-300">
-                      <Check size={12} className={accentText} />
-                      {f}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              {targetPlan === 'organisation' ? (
-                <div className="rounded-2xl border border-indigo-400/20 bg-indigo-400/[0.06] p-4 text-sm leading-6 text-indigo-100">
-                  Institution subscriptions aren't available for self-service payment yet. Ask your platform administrator for a quote and setup.
-                </div>
-              ) : !jobId && targetPlan !== 'business' ? (
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm leading-6 text-neutral-300">
-                  Pay-as-you-go pricing is calculated for a specific marking batch. Return to your workspace and start a batch to receive its exact quote.
-                </div>
-              ) : (
-                <>
-                  <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest mb-1.5 block px-1">
-                    MoMo wallet number
-                  </label>
-                  <div className="relative group mb-2">
-                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-neutral-500 group-focus-within:text-amber-500 transition-colors">
-                      <Phone size={16} />
-                    </div>
-                    <input
-                      type="tel"
-                      placeholder="078 XXX XXXX"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      autoComplete="tel"
-                      inputMode="tel"
-                      aria-label="Mobile Money wallet number"
-                      disabled={status === 'pending'}
-                      className="w-full bg-white/[0.03] border border-white/10 rounded-xl py-3 pl-10 pr-4 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500 transition-all"
-                    />
-                  </div>
-
-                  {error && (
-                    <div className="flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-xs text-red-400 mb-3">
-                      <AlertCircle size={14} className="shrink-0" />
-                      {error}
-                    </div>
-                  )}
-
-                  <button
-                    onClick={handlePay}
-                    disabled={status === 'pending' || isLoadingPrice || price === null || !Number.isFinite(price)}
-                    className="w-full py-3.5 rounded-xl font-semibold text-sm transition-all bg-[#E8A64A] text-[#17130C] hover:bg-[#F1B75E] disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {status === 'pending' ? 'Processing...' : status === 'failed' ? 'Try again' : 'Pay with Mobile Money'}
-                  </button>
-
-                  <p className="mt-3 text-center text-[10px] text-neutral-500 leading-relaxed">
-                    You'll get a payment prompt on your phone. Never share your Mobile Money PIN.
-                  </p>
-                </>
-              )}
+      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-10 space-y-12">
+        {/* Contextual Banner */}
+        {(reasonLimit || jobId) && (
+          <div className="p-4 sm:p-5 rounded-2xl bg-[var(--accent)]/15 border border-[var(--danger)]/30 flex items-start gap-3.5 animate-in fade-in">
+            <Lock size={20} className="text-[var(--accent)] shrink-0 mt-0.5" />
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--text)]">Usage limit reached or batch unlock required</h3>
+              <p className="text-xs text-[var(--muted)] mt-0.5 leading-relaxed">
+                You have reached your free tier grading limit or requested a specific batch unlock. Upgrade to Business Pro for unlimited marking, or unlock this batch with Mobile Money.
+              </p>
             </div>
           </div>
-        </section>
-      </div>
+        )}
+
+        {/* Heading */}
+        <div className="text-center max-w-2xl mx-auto space-y-3">
+          <span className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">Transparent Pricing</span>
+          <h1 className={`${SERIF} text-4xl sm:text-5xl font-normal text-[var(--text)] tracking-tight`}>
+            Choose the right plan for your classroom.
+          </h1>
+          <p className="text-sm text-[var(--muted)] leading-relaxed">
+            Simple, predictable pricing with no hidden commitments. Pay securely via MTN MoMo or Airtel Money.
+          </p>
+        </div>
+
+        {/* 3 Plan Cards (Business Pro first, then Individual, then Organisation) */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {orderedPlans.map((plan) => {
+            const isRecommended = plan.id === 'business';
+            const isSelected = selectedPlanId === plan.id;
+            return (
+              <div
+                key={plan.id}
+                className={`relative rounded-2xl bg-[var(--surface)] p-6 sm:p-8 flex flex-col justify-between transition-all border ${
+                  isRecommended
+                    ? 'border-[var(--accent)] shadow-lg ring-1 ring-[var(--accent)]/30'
+                    : 'border-[var(--line)] shadow-sm hover:border-[var(--accent)]/50'
+                }`}
+              >
+                {isRecommended && (
+                  <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 px-3.5 py-1 bg-[var(--accent)] rounded-full text-[10px] font-bold text-[var(--on-accent)] uppercase tracking-widest">
+                    Most Popular
+                  </div>
+                )}
+
+                <div>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isRecommended ? 'bg-[var(--accent)]/15 text-[var(--accent)]' : 'bg-[var(--surface-2)] text-[var(--muted)]'}`}>
+                      {plan.id === 'business' ? <Star size={20} /> : plan.id === 'organisation' ? <Building2 size={20} /> : <Zap size={20} />}
+                    </div>
+                    <span className="text-xs font-medium text-[var(--muted)]">{plan.tagline}</span>
+                  </div>
+
+                  <h3 className={`${SERIF} text-2xl font-normal text-[var(--text)] mb-1`}>{plan.name}</h3>
+                  <div className="flex items-baseline gap-1 my-4">
+                    <span className={`${SERIF} text-4xl font-normal text-[var(--text)]`}>{plan.price}</span>
+                    <span className="text-xs text-[var(--muted)]">{plan.period}</span>
+                  </div>
+
+                  <ul className="space-y-3 my-6">
+                    {plan.features.map((f, i) => (
+                      <li key={i} className="flex items-start gap-2.5 text-xs text-[var(--text)]">
+                        <div className="w-4 h-4 rounded-full bg-[var(--teal)]/15 text-[var(--teal)] flex items-center justify-center shrink-0 mt-0.5">
+                          <Check size={10} strokeWidth={3} />
+                        </div>
+                        <span>{f}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <button
+                  onClick={() => handleSelectPlan(plan.id as any)}
+                  className={`w-full py-3.5 rounded-xl text-sm font-medium transition-colors min-h-[48px] ${
+                    isRecommended
+                      ? 'bg-[var(--accent)] text-[var(--on-accent)] hover:opacity-90'
+                      : 'bg-[var(--surface-2)] text-[var(--text)] hover:bg-[var(--hover)]'
+                  }`}
+                >
+                  {plan.id === 'organisation' ? 'View institution setup' : isSelected ? 'Selected Plan' : 'Select plan'}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Selected Plan Checkout Box */}
+        {selectedPlanId !== 'organisation' && (
+          <div className="max-w-md mx-auto bg-[var(--surface)] border border-[var(--line)] rounded-2xl p-6 sm:p-8 shadow-sm space-y-5">
+            <h3 className={`${SERIF} text-xl font-normal text-[var(--text)]`}>Confirm {selectedPlanId === 'business' ? 'Business Pro' : 'Pay as you go'} Checkout</h3>
+            <div>
+              <label className="text-xs font-medium text-[var(--text)] mb-2 block">Mobile Money Phone Number (+250)</label>
+              <input
+                type="tel"
+                placeholder="078 XXX XXXX"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                className="w-full bg-[var(--bg)] border border-[var(--line)] rounded-xl py-3 px-4 text-sm text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+              />
+            </div>
+
+            {error && (
+              <div className="flex items-center gap-2.5 p-3.5 bg-[var(--danger)]/15 border border-[var(--danger)]/30 rounded-xl text-sm text-[var(--danger)]">
+                <AlertCircle size={16} className="shrink-0" />
+                {error}
+              </div>
+            )}
+
+            <button
+              onClick={handlePay}
+              disabled={status === 'pending'}
+              className="w-full py-3.5 rounded-xl bg-[var(--accent)] text-[var(--on-accent)] text-sm font-medium hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2 min-h-[48px]"
+            >
+              {status === 'pending' && <Loader2 size={18} className="animate-spin" />}
+              <span>{status === 'pending' ? 'Waiting for Mobile Money prompt…' : 'Pay with Mobile Money'}</span>
+            </button>
+          </div>
+        )}
+
+        {/* Compare Plans Collapsible Table */}
+        <div className="border border-[var(--line)] rounded-2xl bg-[var(--surface)] overflow-hidden shadow-sm">
+          <button
+            onClick={() => setCompareOpen(!compareOpen)}
+            className="w-full p-5 flex items-center justify-between bg-[var(--bg)] hover:bg-[var(--hover)] transition-colors text-left"
+          >
+            <span className={`${SERIF} text-xl font-normal text-[var(--text)]`}>Compare all plan features</span>
+            {compareOpen ? <ChevronUp size={20} className="text-[var(--muted)]" /> : <ChevronDown size={20} className="text-[var(--muted)]" />}
+          </button>
+
+          {compareOpen && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-[var(--text)]">
+                <thead className="bg-[var(--bg)] border-b border-[var(--line)] text-[var(--muted)] uppercase tracking-wider">
+                  <tr>
+                    <th className="p-4 font-medium">Feature</th>
+                    <th className="p-4 font-medium">Business Pro</th>
+                    <th className="p-4 font-medium">Individual</th>
+                    <th className="p-4 font-medium">Organisation</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--line)]">
+                  {COMPARE_ROWS.map((row, i) => (
+                    <tr key={i} className="hover:bg-[var(--surface-2)]">
+                      <td className="p-4 font-medium text-[var(--text)]">{row.feature}</td>
+                      <td className="p-4 font-semibold text-[var(--accent)]">{row.business}</td>
+                      <td className="p-4 text-[var(--muted)]">{row.individual}</td>
+                      <td className="p-4 text-[var(--muted)]">{row.organisation}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* FAQ Accordion */}
+        <div className="max-w-3xl mx-auto space-y-4">
+          <h2 className={`${SERIF} text-2xl font-normal text-[var(--text)] text-center mb-6`}>Frequently Asked Questions</h2>
+          <div className="space-y-3">
+            {FAQ_ITEMS.map((faq, index) => {
+              const isOpen = openFaqIndex === index;
+              return (
+                <div key={index} className="border border-[var(--line)] rounded-2xl bg-[var(--surface)] overflow-hidden">
+                  <button
+                    onClick={() => setOpenFaqIndex(isOpen ? null : index)}
+                    className="w-full p-5 flex items-center justify-between text-left hover:bg-[var(--hover)] transition-colors"
+                  >
+                    <span className="text-sm font-medium text-[var(--text)]">{faq.question}</span>
+                    {isOpen ? <ChevronUp size={18} className="text-[var(--muted)]" /> : <ChevronDown size={18} className="text-[var(--muted)]" />}
+                  </button>
+                  {isOpen && (
+                    <div className="px-5 pb-5 pt-0 text-xs text-[var(--muted)] leading-relaxed">
+                      {faq.answer}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Currency Note & Trust Footer Items */}
+        <div className="pt-8 border-t border-[var(--line)] flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[var(--muted)]">
+          <span>All prices quoted in USD with local currency Mobile Money conversion (RWF).</span>
+          <div className="flex items-center gap-6">
+            <span className="flex items-center gap-1.5"><ShieldCheck size={14} className="text-[var(--teal)]" /> End-to-end encrypted</span>
+            <span className="flex items-center gap-1.5"><Star size={14} className="text-[var(--accent)]" /> Trusted by educators</span>
+          </div>
+        </div>
+      </main>
     </div>
   );
 }
