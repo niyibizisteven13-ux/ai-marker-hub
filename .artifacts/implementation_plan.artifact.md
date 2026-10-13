@@ -1,37 +1,29 @@
-# DynamoDB Integration and Test Form Implementation Plan
+# Unified Landing Page Login Form and GitHub Deployment Plan
 
-Implement DynamoDB integration (`src/db.ts`) using `@aws-sdk/client-dynamodb` and `@aws-sdk/lib-dynamodb`, and add a test form component (`src/components/DynamoDBTestForm.tsx`) to verify saving and fetching map markers to/from the `ai-markers` table.
+Streamline the landing page login flow (`AuthFlow.tsx`) so there is a single, clean, unified login form directly on the landing page, and push all updates to GitHub.
 
 ## User Review Required
 
 > [!IMPORTANT]
-> - Ensure environment variables (`APP_AWS_REGION`, `APP_DYNAMODB_TABLE_NAME`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`) are set in `.env` for local testing.
-> - The DynamoDB table name configured in AWS Amplify environment variables is `ai-markers`.
+> - We will streamline `AuthFlow.tsx` on the landing page to remove duplicate/redundant phone buttons and provide a clean, unified login interface (Google SSO + direct email/identifier sign-in).
+> - After pushing to GitHub, AWS Amplify will automatically detect the new commit on `main` and redeploy.
 
 ## Open Questions
 
-- None. The API structure (`saveMarker`, `getAllMarkers`) was specified by the deployment steps.
+- None.
 
 ## Proposed Changes
 
-### Database & SDK
-#### [NEW] [db.ts](file:///C:/Users/niyib/Downloads/ai-marker-hub/src/db.ts)
-- Initialize DynamoDB client with `process.env.APP_AWS_REGION` (or fallback to `import.meta.env.VITE_APP_AWS_REGION` / default region).
-- Export `saveMarker(id, markerName, latitude, longitude)` and `getAllMarkers()`.
-
 ### Components
-#### [NEW] [DynamoDBTestForm.tsx](file:///C:/Users/niyib/Downloads/ai-marker-hub/src/components/DynamoDBTestForm.tsx)
-- Create a React test form to input marker name, latitude, longitude, and an ID (or generated via `uuid`).
-- Call `saveMarker` on submit and display success/error messages.
-- Fetch and display existing markers via `getAllMarkers()`.
-
-#### [MODIFY] [App.tsx](file:///C:/Users/niyib/Downloads/ai-marker-hub/src/App.tsx)
-- Optionally integrate `DynamoDBTestForm` into the workspace or settings for testing and verification.
+#### [MODIFY] [AuthFlow.tsx](file:///C:/Users/niyib/Downloads/ai-marker-hub/src/components/AuthFlow.tsx)
+- Clean up `AuthFlow.tsx` to have a single, unified login card on the landing page (Google sign-in and Email/Password sign-in), ensuring no duplicate or conflicting forms.
 
 ## Verification Plan
 
 ### Automated Tests
-- Run `npm run build` to ensure TypeScript compilation succeeds without errors.
+- Run `npm run build` to ensure the project builds correctly without TypeScript or Vite errors.
 
-### Manual Verification
-- Render the test form, enter test marker details (e.g., name "Test Marker", lat "1.2921", lng "36.8219"), click "Save Marker", and verify successful write to DynamoDB and list retrieval.
+### Manual Verification / Deployment
+- Verify UI on landing page.
+- Push all changes to GitHub (`git push origin main`).
+- Answer user's question regarding AWS Amplify console showing the updated repository/commit.

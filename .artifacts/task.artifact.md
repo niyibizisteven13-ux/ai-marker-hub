@@ -1,7 +1,7 @@
 # Task List
 
-- [x] Install AWS SDK dependencies (`@aws-sdk/client-dynamodb` and `@aws-sdk/lib-dynamodb`) in `package.json`
-- [x] Create `src/db.ts` with `saveMarker` and `getAllMarkers` functions
-- [x] Create `src/components/DynamoDBTestForm.tsx` for testing marker saves and fetches
-- [x] Verify build (`npm run build`)
-- [x] Create walkthrough artifact
+- [ ] Streamline `AuthFlow.tsx` to ensure a single, clean, unified login form on the landing page `[ ]`
+- [ ] Run `npm run build` to verify compilation `[ ]`
+- [ ] Stage, commit, and push all changes to GitHub (`origin main`) `[ ]`
+- [ ] Provide clear explanation on whether AWS Amplify console displays the updated repo after deployment `[ ]`
+- [ ] Create walkthrough artifact `[ ]`
