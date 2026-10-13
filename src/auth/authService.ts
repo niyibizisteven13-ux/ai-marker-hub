@@ -30,6 +30,8 @@ export interface AuthService {
   loginWithPassword(i: { identifier: string; password: string }): Promise<User>;
   requestOtp(i: { phone: string }): Promise<{ retryAfter: number }>;
   verifyOtp(i: { phone: string; code: string }): Promise<User>;
+  requestEmailOtp(i: { email: string }): Promise<{ retryAfter: number }>;
+  verifyEmailOtp(i: { email: string; code: string }): Promise<User>;
   loginWithGoogle(): Promise<User>;
   logout(): Promise<void>;
 }
@@ -105,6 +107,22 @@ const mockAuthService: AuthService = {
       setAccessToken('mock-jwt-token-' + mockUser.id, 900);
     } catch {}
     return mockUser;
+  },
+  async requestEmailOtp({ email }) {
+    await new Promise((r) => setTimeout(r, 300));
+    return { retryAfter: 30 };
+  },
+  async verifyEmailOtp({ email, code }) {
+    await new Promise((r) => setTimeout(r, 300));
+    if (code !== '123456') {
+      throw new AuthError('otp_invalid', 'Invalid verification code');
+    }
+    const user = { ...mockUser, email, name: email.split('@')[0] || 'User' };
+    try {
+      localStorage.setItem('bwenge-mock-session', JSON.stringify(user));
+      setAccessToken('mock-jwt-token-' + user.id, 900);
+    } catch {}
+    return user;
   },
   async logout() {
     await new Promise((r) => setTimeout(r, 200));
@@ -200,6 +218,36 @@ export const authService: AuthService = {
       }
     } catch {}
     return mockAuthService.verifyOtp({ phone, code });
+  },
+  async requestEmailOtp({ email }) {
+    const res = await fetch('/api/auth/email-otp/request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'bwenge' },
+      credentials: 'include',
+      body: JSON.stringify({ email }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new AuthError('network', data.error || 'Failed to send verification code');
+    }
+    return { retryAfter: data.retryAfter || 30 };
+  },
+  async verifyEmailOtp({ email, code }) {
+    const res = await fetch('/api/auth/email-otp/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'bwenge' },
+      credentials: 'include',
+      body: JSON.stringify({ email, code }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.user) {
+      throw new AuthError('otp_invalid', data.error || 'Invalid verification code');
+    }
+    if (data.accessToken) {
+      setAccessToken(data.accessToken, data.expiresIn || 900);
+      try { localStorage.setItem('bwenge_auth_token', data.accessToken); } catch {}
+    }
+    return data.user;
   },
   async loginWithGoogle() {
     try {

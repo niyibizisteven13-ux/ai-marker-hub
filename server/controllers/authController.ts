@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { prisma } from '../db.js';
 import { writeAuditLog } from '../../production/auth.js';
+import { EmailService } from '../services/EmailService.js';
 
 const JWT_SECRET = (process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 32)
   ? process.env.JWT_SECRET
@@ -13,6 +14,7 @@ const BCRYPT_ROUNDS = 12;
 
 // In-memory failed login tracking for per-account lockout: email + IP -> { count, resetAt }
 const failedLogins = new Map<string, { count: number; resetAt: number }>();
+const emailOtpStore = new Map<string, { code: string; expiresAt: number }>();
 
 function cleanupFailedLogins() {
   const now = Date.now();
@@ -403,5 +405,114 @@ export async function getMe(req: Request, res: Response) {
   } catch (err: any) {
     console.error('GetMe error:', err);
     res.status(500).json({ error: 'Failed to fetch user data.' });
+  }
+}
+
+export async function requestEmailOtp(req: Request, res: Response) {
+  try {
+    const { email } = req.body || {};
+    if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.toLowerCase().trim())) {
+      return res.status(400).json({ error: 'Valid email address is required.' });
+    }
+    const normalizedEmail = email.toLowerCase().trim();
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes
+
+    emailOtpStore.set(normalizedEmail, { code, expiresAt });
+
+    const emailService = EmailService.getInstance();
+    await emailService.sendEmail({
+      to: normalizedEmail,
+      subject: 'Your Bwenge AI Login Code',
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #101114; color: #FAF9F5; border-radius: 12px;">
+          <h2 style="color: #D97757;">Bwenge AI Studio</h2>
+          <p>Your one-time login verification code is:</p>
+          <div style="font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #D97757; margin: 20px 0;">${code}</div>
+          <p style="font-size: 12px; color: #888;">This code expires in 5 minutes. Do not share it with anyone.</p>
+        </div>
+      `,
+    });
+
+    return res.json({ success: true, retryAfter: 30 });
+  } catch (err: any) {
+    console.error('Request email OTP error:', err);
+    return res.status(500).json({ error: 'Failed to send OTP email.' });
+  }
+}
+
+export async function verifyEmailOtp(req: Request, res: Response) {
+  try {
+    const { email, code } = req.body || {};
+    if (typeof email !== 'string' || typeof code !== 'string') {
+      return res.status(400).json({ error: 'Email and verification code are required.' });
+    }
+    const normalizedEmail = email.toLowerCase().trim();
+    const stored = emailOtpStore.get(normalizedEmail);
+
+    if (!stored || stored.expiresAt < Date.now() || stored.code !== code.trim()) {
+      return res.status(400).json({ error: 'Invalid or expired verification code.' });
+    }
+
+    emailOtpStore.delete(normalizedEmail);
+
+    let user = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+      include: { settings: true, subscription: true },
+    });
+
+    if (!user) {
+      const name = normalizedEmail.split('@')[0] || 'User';
+      const randomPasswordHash = await bcrypt.hash(crypto.randomBytes(16).toString('hex'), 12);
+      user = await prisma.user.create({
+        data: {
+          name: name.charAt(0).toUpperCase() + name.slice(1),
+          email: normalizedEmail,
+          passwordHash: randomPasswordHash,
+          settings: { create: {} },
+        },
+        include: { settings: true, subscription: true },
+      });
+    }
+
+    const userRole = user.email?.toLowerCase().trim() === 'niyibizisteven13@gmail.com' ? 'ADMIN' : (user.role || 'INSTRUCTOR');
+    const accessToken = jwt.sign(
+      { userId: user.id, email: user.email, role: userRole },
+      JWT_SECRET,
+      { expiresIn: ACCESS_TOKEN_TTL, algorithm: 'HS256', issuer: 'bwenge', audience: 'bwenge-web' }
+    );
+
+    const refreshTokenBytes = crypto.randomBytes(32);
+    const refreshToken = refreshTokenBytes.toString('base64url');
+    const tokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
+    const familyId = crypto.randomUUID();
+
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const absoluteExpiresAt = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
+
+    await prisma.refreshSession.create({
+      data: {
+        userId: user.id,
+        familyId,
+        tokenHash,
+        userAgent: req.headers['user-agent'] || null,
+        ip: req.ip || null,
+        expiresAt,
+        absoluteExpiresAt,
+      },
+    });
+
+    setRefreshCookie(res, refreshToken);
+    await writeAuditLog(user.id, 'EMAIL_OTP_LOGIN', 'User', user.id, { email: normalizedEmail });
+
+    return res.json({
+      accessToken,
+      expiresIn: 900,
+      user: buildAuthenticatedUser(user),
+    });
+  } catch (err: any) {
+    console.error('Verify email OTP error:', err);
+    return res.status(500).json({ error: 'Verification failed.' });
   }
 }

@@ -5,7 +5,7 @@ import { PasswordField } from './PasswordField';
 import { OtpField } from './OtpField';
 import { Spinner } from './Spinner';
 
-export type AuthStep = 'start' | 'password' | 'phone' | 'otp';
+export type AuthStep = 'start' | 'password' | 'phone' | 'otp' | 'email-otp';
 
 export function AuthFlow({
   t,
@@ -80,6 +80,36 @@ export function AuthFlow({
     setLoading(true);
     try {
       const user = await authService.verifyOtp({ phone: normalizedPhone, code: otpCode });
+      finishLogin(user);
+    } catch (err) {
+      handleError(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRequestEmailOtp = async () => {
+    if (!identifier.trim()) return;
+    setErrorMessage(null);
+    setLoading(true);
+    try {
+      const res = await authService.requestEmailOtp({ email: identifier.trim() });
+      setResendCountdown(res.retryAfter || 30);
+      setStep('email-otp');
+    } catch (err) {
+      handleError(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyEmailOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (otpCode.length < 6) return;
+    setErrorMessage(null);
+    setLoading(true);
+    try {
+      const user = await authService.verifyEmailOtp({ email: identifier.trim(), code: otpCode });
       finishLogin(user);
     } catch (err) {
       handleError(err);
@@ -232,6 +262,74 @@ export function AuthFlow({
           >
             {loading && <Spinner />}
             <span>{t('signin')}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleRequestEmailOtp}
+            disabled={loading}
+            style={{ width: '100%', marginTop: '10px', background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: '#FAF9F5', padding: '11px', borderRadius: '16px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', transition: 'background 0.2s' }}
+          >
+            ✉️ Or send 6-digit login code to email
+          </button>
+        </form>
+      )}
+
+      {step === 'email-otp' && (
+        <form onSubmit={handleVerifyEmailOtp}>
+          <div className="back-row">
+            <button
+              type="button"
+              className="back-btn"
+              onClick={() => {
+                setStep('password');
+                setOtpCode('');
+                setErrorMessage(null);
+              }}
+            >
+              ← {t('back')}
+            </button>
+            <span style={{ fontSize: '13px', color: 'var(--muted)', fontWeight: 500 }}>{identifier}</span>
+          </div>
+
+          <p style={{ margin: '0 0 12px', fontSize: '14px', color: 'var(--muted)' }}>
+            We sent a 6-digit verification code to <strong>{identifier}</strong> via Gmail SMTP.
+          </p>
+
+          <OtpField
+            value={otpCode}
+            onChange={(e) => {
+              const val = e.target.value.replace(/\D/g, '').slice(0, 6);
+              setOtpCode(val);
+              setErrorMessage(null);
+            }}
+            label="Verification Code"
+            error={!!errorMessage}
+          />
+          {errorMessage && <p role="alert" className="err">{errorMessage}</p>}
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px' }}>
+            <button
+              type="button"
+              disabled={resendCountdown > 0 || loading}
+              onClick={async () => {
+                setResendCountdown(30);
+                await authService.requestEmailOtp({ email: identifier.trim() });
+              }}
+              style={{ background: 'none', border: 0, color: resendCountdown > 0 ? 'var(--muted)' : 'var(--accent-text)', fontSize: '13px', fontWeight: 600, cursor: resendCountdown > 0 ? 'not-allowed' : 'pointer', padding: 0 }}
+            >
+              {resendCountdown > 0 ? `Resend code in ${resendCountdown}s` : 'Resend code'}
+            </button>
+          </div>
+
+          <button
+            type="submit"
+            className="go"
+            disabled={otpCode.length < 6 || loading}
+            style={{ width: '100%', marginTop: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+          >
+            {loading && <Spinner />}
+            <span>Verify & Sign in</span>
           </button>
         </form>
       )}
