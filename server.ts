@@ -2055,30 +2055,39 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 async function ensureMasterAdmin() {
   try {
     await prisma.$connect().catch(() => {});
-    const masterEmail = 'niyibizisteven13@gmail.com';
-    const demoteEmail = 'niyibizi00003@gmail.com';
-    const passwordHash = await bcrypt.hash('Steven123@45', 12);
+    const teamAccounts = [
+      { email: 'niyibizisteven13@gmail.com', name: 'Master Admin', password: 'Steven123@45', role: 'ADMIN' },
+      { email: 'steven@bwenge.space', name: 'Steven', password: 'steven123@45', role: 'ADMIN' },
+      { email: 'divine@bwenge.space', name: 'Divine', password: 'divine123@45', role: 'INSTRUCTOR' },
+      { email: 'morin@bwenge.space', name: 'Morin', password: 'morin123@45', role: 'INSTRUCTOR' },
+      { email: 'shanie@bwenge.space', name: 'Shanie', password: 'shanie123@45', role: 'INSTRUCTOR' },
+      { email: 'support@bwenge.space', name: 'Support Team', password: 'support123@45', role: 'ADMIN' },
+    ];
 
-    const existingMaster = await prisma.user.findUnique({ where: { email: masterEmail } });
-    if (!existingMaster) {
-      await prisma.user.create({
-        data: {
-          email: masterEmail,
-          name: 'Master Admin',
-          passwordHash,
-          role: 'ADMIN',
-          settings: { create: {} }
-        }
-      });
-      logger.info('Master admin account seeded successfully.');
-    } else {
-      await prisma.user.update({
-        where: { email: masterEmail },
-        data: { role: 'ADMIN', passwordHash }
-      });
-      logger.info('Master admin account verified and password/role reset successfully.');
+    for (const acc of teamAccounts) {
+      const passwordHash = await bcrypt.hash(acc.password, 12);
+      const existing = await prisma.user.findUnique({ where: { email: acc.email } });
+      if (!existing) {
+        await prisma.user.create({
+          data: {
+            email: acc.email,
+            name: acc.name,
+            passwordHash,
+            role: acc.role,
+            settings: { create: {} }
+          }
+        });
+        logger.info(`Team account seeded successfully: ${acc.email}`);
+      } else {
+        await prisma.user.update({
+          where: { email: acc.email },
+          data: { role: acc.role, passwordHash }
+        });
+        logger.info(`Team account verified and password/role updated: ${acc.email}`);
+      }
     }
 
+    const demoteEmail = 'niyibizi00003@gmail.com';
     const existingDemoted = await prisma.user.findUnique({ where: { email: demoteEmail } });
     if (existingDemoted) {
       await prisma.user.update({
@@ -2088,7 +2097,7 @@ async function ensureMasterAdmin() {
       logger.info('Previous admin account demoted to regular user.');
     }
   } catch (err) {
-    logger.error('Failed to ensure master admin account:', err);
+    logger.error('Failed to ensure master/team admin accounts:', err);
   }
 }
 
