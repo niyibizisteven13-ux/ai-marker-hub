@@ -17,6 +17,8 @@
     "db:migrate": "prisma migrate dev --name init"
   },
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.500.0",
+    "@aws-sdk/lib-dynamodb": "^3.500.0",
     "@anthropic-ai/sdk": "^0.115.0",
     "@google/genai": "^2.13.0",
     "@prisma/client": "^5.12.0",
