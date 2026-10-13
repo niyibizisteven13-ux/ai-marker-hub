@@ -1,204 +1,185 @@
 import { Request, Response } from 'express';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
 import { prisma } from '../db.js';
 import { writeAuditLog } from '../../production/auth.js';
-import { EmailService } from '../services/EmailService.js';
+import { getGoogleAuthUrl, verifyGoogleCode, isInAppBrowser } from '../auth/googleAuth.js';
+import { normalizeEmail, createEmailCode, verifyEmailCode } from '../auth/emailCode.js';
+import { getEmailSender, getVerificationEmailContent, getDevOutbox } from '../email/EmailSender.js';
+import { sanitizeNext } from '../auth/sanitizeNext.js';
 
-const JWT_SECRET = (process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 32)
+const JWT_SECRET = process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 32
   ? process.env.JWT_SECRET
   : 'ai-studio-default-jwt-secret-key-min-32-chars';
 const ACCESS_TOKEN_TTL = '15m';
-const BCRYPT_ROUNDS = 12;
-
-// In-memory failed login tracking for per-account lockout: email + IP -> { count, resetAt }
-const failedLogins = new Map<string, { count: number; resetAt: number }>();
-const emailOtpStore = new Map<string, { code: string; expiresAt: number }>();
-
-function cleanupFailedLogins() {
-  const now = Date.now();
-  for (const [key, val] of failedLogins.entries()) {
-    if (val.resetAt <= now) failedLogins.delete(key);
-  }
-}
-setInterval(cleanupFailedLogins, 5 * 60 * 1000).unref();
 
 function buildAuthenticatedUser(user: any) {
-  const role = user.email?.toLowerCase().trim() === 'niyibizisteven13@gmail.com' ? 'ADMIN' : (user.role || 'INSTRUCTOR');
+  const role = user.email?.toLowerCase().trim() === 'niyibizisteven13@gmail.com' ? 'ADMIN' : (user.role || 'user');
   return {
     id: user.id,
-    name: user.name,
+    name: user.name || user.email?.split('@')[0] || 'User',
     email: user.email,
     avatarUrl: user.avatarUrl,
-    settings: user.settings,
-    role,
-    subscription: user.subscription?.status === 'ACTIVE'
-      ? { planType: user.subscription.planType, status: user.subscription.status }
-      : undefined,
+    role: role.toLowerCase(),
+    locale: user.settings?.preferredLanguage || 'en',
   };
 }
 
 function setRefreshCookie(res: Response, refreshToken: string) {
   const isProd = process.env.NODE_ENV === 'production';
-  res.cookie('bwenge_rt', refreshToken, {
+  const cookieName = isProd ? '__Host-session' : 'session';
+  res.cookie(cookieName, refreshToken, {
     httpOnly: true,
     secure: isProd,
     sameSite: 'lax',
-    path: '/api/auth',
+    path: '/',
     maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
   });
 }
 
 function clearRefreshCookie(res: Response) {
   const isProd = process.env.NODE_ENV === 'production';
-  res.clearCookie('bwenge_rt', {
+  const cookieName = isProd ? '__Host-session' : 'session';
+  res.clearCookie(cookieName, {
     httpOnly: true,
     secure: isProd,
     sameSite: 'lax',
-    path: '/api/auth',
+    path: '/',
   });
 }
 
-export async function register(req: Request, res: Response) {
+// ── Google Auth ──────────────────────────────────────────────
+
+export async function googleStart(req: Request, res: Response) {
   try {
-    const { name, email, password } = req.body || {};
-    if (typeof name !== 'string' || typeof email !== 'string' || typeof password !== 'string') {
-      return res.status(400).json({ error: 'All fields are required.' });
-    }
-    const normalizedName = name.trim();
-    if (normalizedName.length < 2 || normalizedName.length > 100) {
-      return res.status(400).json({ error: 'Name must be between 2 and 100 characters.' });
-    }
-    const normalizedEmail = email.toLowerCase().trim();
-    if (normalizedEmail.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-      return res.status(400).json({ error: 'Enter a valid email address.' });
-    }
-    if (password.length < 4 || password.length > 128) {
-      return res.status(400).json({ error: 'Password must be at least 4 characters.' });
+    const userAgent = req.headers['user-agent'] || '';
+    if (isInAppBrowser(userAgent)) {
+      return res.json({ blocked: 'in_app_browser' });
     }
 
-    const existing = await prisma.user.findUnique({ where: { email: normalizedEmail } });
-    if (existing) {
-      // Generic response or 409
-      return res.status(409).json({ error: 'Email already registered.' });
-    }
+    const nextUrl = (req.query.next as string) || '/chat';
+    const { authUrl, state, nonce, verifier, sanitizedNext } = getGoogleAuthUrl(nextUrl);
 
-    const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
-    const newUser = await prisma.user.create({
-      data: {
-        name: normalizedName,
-        email: normalizedEmail,
-        passwordHash,
-        settings: { create: {} },
-      },
-      include: { settings: true, subscription: true },
+    // Store state, nonce, verifier in a signed HttpOnly cookie valid for 10 minutes
+    const cookieData = JSON.stringify({ state, nonce, verifier, next: sanitizedNext });
+    const isProd = process.env.NODE_ENV === 'production';
+
+    res.cookie('google_auth_state', cookieData, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: 'lax',
+      path: '/api/auth/google',
+      maxAge: 10 * 60 * 1000,
     });
 
-    const userRole = newUser.email?.toLowerCase().trim() === 'niyibizisteven13@gmail.com' ? 'ADMIN' : (newUser.role || 'INSTRUCTOR');
-    const accessToken = jwt.sign(
-      { userId: newUser.id, email: newUser.email, role: userRole },
-      JWT_SECRET,
-      { expiresIn: ACCESS_TOKEN_TTL, algorithm: 'HS256', issuer: 'bwenge', audience: 'bwenge-web' }
-    );
-
-    // Issue refresh token
-    const refreshTokenBytes = crypto.randomBytes(32);
-    const refreshToken = refreshTokenBytes.toString('base64url');
-    const tokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
-    const familyId = crypto.randomUUID();
-
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 days sliding
-    const absoluteExpiresAt = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000); // 90 days absolute
-
-    await prisma.refreshSession.create({
-      data: {
-        userId: newUser.id,
-        familyId,
-        tokenHash,
-        userAgent: req.headers['user-agent'] || null,
-        ip: req.ip || null,
-        expiresAt,
-        absoluteExpiresAt,
-      },
-    });
-
-    setRefreshCookie(res, refreshToken);
-    await writeAuditLog(newUser.id, 'LOGIN', 'User', newUser.id, { email: normalizedEmail });
-
-    return res.status(201).json({
-      accessToken,
-      expiresIn: 900,
-      user: buildAuthenticatedUser(newUser),
-    });
+    return res.redirect(302, authUrl);
   } catch (err: any) {
-    console.error('Register failed:', err);
-    return res.status(500).json({ error: 'Failed to create user account.' });
+    console.error('Google start error:', err);
+    return res.redirect(302, '/?auth_error=google_failed');
   }
 }
 
-export async function login(req: Request, res: Response) {
+export async function googleCallback(req: Request, res: Response) {
+  const { code, state, error } = req.query;
+  const postLoginRoute = process.env.POST_LOGIN_ROUTE || '/chat';
+
+  if (error || !code || !state) {
+    return res.redirect(302, `/?auth_error=google_cancelled`);
+  }
+
   try {
-    const { email, password } = req.body || {};
-    if (typeof email !== 'string' || typeof password !== 'string') {
-      return res.status(400).json({ error: 'Email and password are required.' });
+    const rawCookie = req.cookies?.google_auth_state;
+    if (!rawCookie) {
+      return res.redirect(302, `/?auth_error=google_failed`);
     }
 
-    const normalizedEmail = email.toLowerCase().trim();
-    const ip = req.ip || 'unknown';
-    const lockoutKey = `${normalizedEmail}:${ip}`;
+    res.clearCookie('google_auth_state', { path: '/api/auth/google' });
+    const cookieParsed = JSON.parse(rawCookie);
 
-    cleanupFailedLogins();
-    const lockoutEntry = failedLogins.get(lockoutKey);
-    if (lockoutEntry && lockoutEntry.count >= 5 && lockoutEntry.resetAt > Date.now()) {
-      const retryAfterSeconds = Math.ceil((lockoutEntry.resetAt - Date.now()) / 1000);
-      res.setHeader('Retry-After', String(retryAfterSeconds));
-      return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
+    if (cookieParsed.state !== state) {
+      return res.redirect(302, `/?auth_error=google_failed`);
     }
 
-    let user = await prisma.user.findUnique({
-      where: { email: normalizedEmail },
-      include: { settings: true, subscription: true },
+    const googleUser = await verifyGoogleCode(code as string, cookieParsed.verifier, cookieParsed.nonce);
+
+    if (!googleUser.emailVerified) {
+      return res.redirect(302, `/?auth_error=google_unverified`);
+    }
+
+    const normalizedEmail = normalizeEmail(googleUser.email);
+
+    // Check if identity exists by google sub
+    let identity = await prisma.identity.findUnique({
+      where: {
+        provider_providerUserId: {
+          provider: 'google',
+          providerUserId: googleUser.sub,
+        },
+      },
+      include: { user: { include: { settings: true, subscription: true } } },
     });
 
-    const genericError = 'Email or password is incorrect.';
-    if (!user) {
-      recordFailure(lockoutKey);
-      await writeAuditlogFailed(normalizedEmail, ip, req.headers['user-agent']);
-      return res.status(401).json({ error: genericError });
-    }
+    let user: any;
+    let isNewUser = false;
 
-    const isValidPassword = await bcrypt.compare(password, user.passwordHash);
-    if (!isValidPassword) {
-      recordFailure(lockoutKey);
-      await writeAuditlogFailed(normalizedEmail, ip, req.headers['user-agent']);
-      return res.status(401).json({ error: genericError });
-    }
-
-    if (normalizedEmail === 'niyibizisteven13@gmail.com' && user.role !== 'ADMIN') {
-      user = await prisma.user.update({
-        where: { id: user.id },
-        data: { role: 'ADMIN' },
+    if (identity) {
+      user = identity.user;
+    } else {
+      // Check if user exists by email
+      user = await prisma.user.findUnique({
+        where: { email: normalizedEmail },
         include: { settings: true, subscription: true },
       });
+
+      if (user) {
+        // Link google identity to existing user
+        await prisma.identity.create({
+          data: {
+            userId: user.id,
+            provider: 'google',
+            providerUserId: googleUser.sub,
+          },
+        });
+      } else {
+        // Create new user
+        isNewUser = true;
+        const randomPasswordHash = await crypto.randomBytes(32).toString('hex');
+        user = await prisma.user.create({
+          data: {
+            name: googleUser.name,
+            email: normalizedEmail,
+            passwordHash: randomPasswordHash,
+            avatarUrl: googleUser.picture,
+            settings: { create: { preferredLanguage: 'en' } },
+          },
+          include: { settings: true, subscription: true },
+        });
+
+        await prisma.identity.create({
+          data: {
+            userId: user.id,
+            provider: 'google',
+            providerUserId: googleUser.sub,
+          },
+        });
+      }
     }
 
-    // Clear lockout on success
-    failedLogins.delete(lockoutKey);
+    if (user.disabledAt) {
+      return res.redirect(302, `/?auth_error=google_failed`);
+    }
 
-    const userRole = user.email?.toLowerCase().trim() === 'niyibizisteven13@gmail.com' ? 'ADMIN' : (user.role || 'INSTRUCTOR');
-    const accessToken = jwt.sign(
-      { userId: user.id, email: user.email, role: userRole },
-      JWT_SECRET,
-      { expiresIn: ACCESS_TOKEN_TTL, algorithm: 'HS256', issuer: 'bwenge', audience: 'bwenge-web' }
-    );
+    // Update last login
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date() },
+    });
 
+    // Create session
     const refreshTokenBytes = crypto.randomBytes(32);
     const refreshToken = refreshTokenBytes.toString('base64url');
     const tokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
     const familyId = crypto.randomUUID();
-
     const now = new Date();
     const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
     const absoluteExpiresAt = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
@@ -209,144 +190,231 @@ export async function login(req: Request, res: Response) {
         familyId,
         tokenHash,
         userAgent: req.headers['user-agent'] || null,
-        ip,
+        ip: req.ip || null,
         expiresAt,
         absoluteExpiresAt,
       },
     });
 
     setRefreshCookie(res, refreshToken);
-    await writeAuditLog(user.id, 'LOGIN', 'User', user.id, { email: normalizedEmail });
+    await writeAuditLog(user.id, 'LOGIN_GOOGLE', 'User', user.id, { email: normalizedEmail });
 
-    return res.json({
-      accessToken,
-      expiresIn: 900,
-      user: buildAuthenticatedUser(user),
-    });
+    const safeNext = sanitizeNext(cookieParsed.next, postLoginRoute);
+    return res.redirect(302, isNewUser ? `${safeNext}?welcome=1` : safeNext);
   } catch (err: any) {
-    console.error('Login error:', err);
-    return res.status(500).json({ error: 'Authentication failed.' });
+    console.error('Google callback error:', err);
+    const errCode = err.message?.includes('unverified') ? 'google_unverified' : 'google_failed';
+    return res.redirect(302, `/?auth_error=${errCode}`);
   }
 }
 
-function recordFailure(key: string) {
-  const existing = failedLogins.get(key);
-  const now = Date.now();
-  if (!existing || existing.resetAt <= now) {
-    failedLogins.set(key, { count: 1, resetAt: now + 15 * 60 * 1000 });
-  } else {
-    existing.count += 1;
-  }
-}
+// ── Email Passwordless Auth ──────────────────────────────────
 
-async function writeAuditlogFailed(email: string, ip: string, userAgent?: string) {
-  // Hash email for privacy in audit logs
-  const emailHash = crypto.createHash('sha256').update(email).digest('hex');
-  await writeAuditLog('system', 'LOGIN_FAILED', 'User', null, { emailHash, ip, userAgent });
-}
+// In-memory rate limiter store for email starts (max 3 per 15 mins per email)
+const emailStartRateLimit = new Map<string, { count: number; resetAt: number }>();
 
-export async function refresh(req: Request, res: Response) {
+export async function emailStart(req: Request, res: Response) {
   try {
-    // CSRF check for cookie endpoints: require X-Requested-With and Origin matching APP_URL in production
-    const requestedWith = req.headers['x-requested-with'];
-    if (requestedWith !== 'bwenge') {
-      return res.status(403).json({ error: 'Forbidden request.' });
+    const { email, locale } = req.body || {};
+    if (typeof email !== 'string') {
+      return res.status(400).json({ error: { code: 'invalid_email' } });
     }
 
-    const refreshToken = req.cookies?.bwenge_rt || req.body?.refreshToken;
-    if (!refreshToken) {
-      clearRefreshCookie(res);
-      return res.status(401).json({ error: 'No refresh token provided.', code: 'NO_TOKEN' });
+    const normalized = normalizeEmail(email);
+    if (normalized.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) {
+      return res.status(400).json({ error: { code: 'invalid_email' } });
     }
 
+    // Rate limit check: max 3 per 15 min per email
+    const now = Date.now();
+    const entry = emailStartRateLimit.get(normalized);
+    if (entry && entry.resetAt > now && entry.count >= 3) {
+      res.setHeader('Retry-After', '60');
+      return res.status(429).json({ error: { code: 'rate_limited', retryAfter: 60 } });
+    }
+
+    if (!entry || entry.resetAt <= now) {
+      emailStartRateLimit.set(normalized, { count: 1, resetAt: now + 15 * 60 * 1000 });
+    } else {
+      entry.count += 1;
+    }
+
+    // Check if user is disabled
+    const existingUser = await prisma.user.findUnique({ where: { email: normalized } });
+    if (existingUser?.disabledAt) {
+      // Uniform response for anti-enumeration
+      return res.status(202).json({ ok: true, retryAfter: 30 });
+    }
+
+    const code = await createEmailCode(normalized, req.ip);
+    const emailContent = getVerificationEmailContent(code, locale);
+    const emailSender = getEmailSender();
+
+    await emailSender.send({
+      to: normalized,
+      subject: emailContent.subject,
+      text: emailContent.text,
+      html: emailContent.html,
+    });
+
+    await writeAuditLog(existingUser?.id || 'system', 'CODE_SENT', 'Email', null, { emailHash: crypto.createHash('sha256').update(normalized).digest('hex') });
+
+    return res.status(202).json({ ok: true, retryAfter: 30 });
+  } catch (err: any) {
+    console.error('Email start error:', err);
+    return res.status(500).json({ error: { code: 'server_error' } });
+  }
+}
+
+export async function emailVerify(req: Request, res: Response) {
+  try {
+    const { email, code } = req.body || {};
+    if (typeof email !== 'string' || typeof code !== 'string') {
+      return res.status(400).json({ error: { code: 'code_invalid' } });
+    }
+
+    const normalized = normalizeEmail(email);
+    const isValid = await verifyEmailCode(normalized, code);
+
+    if (!isValid) {
+      return res.status(400).json({ error: { code: 'code_invalid' } });
+    }
+
+    let user = await prisma.user.findUnique({
+      where: { email: normalized },
+      include: { settings: true, subscription: true },
+    });
+
+    let isNewUser = false;
+
+    if (!user) {
+      isNewUser = true;
+      const defaultName = normalized.split('@')[0] || 'User';
+      const randomPasswordHash = await crypto.randomBytes(32).toString('hex');
+
+      user = await prisma.user.create({
+        data: {
+          name: defaultName.charAt(0).toUpperCase() + defaultName.slice(1),
+          email: normalized,
+          passwordHash: randomPasswordHash,
+          emailVerifiedAt: new Date(),
+          settings: { create: { preferredLanguage: 'en' } },
+        },
+        include: { settings: true, subscription: true },
+      });
+
+      await prisma.identity.create({
+        data: {
+          userId: user.id,
+          provider: 'email',
+          providerUserId: normalized,
+        },
+      });
+    } else {
+      if (user.disabledAt) {
+        return res.status(400).json({ error: { code: 'code_invalid' } });
+      }
+
+      // Ensure email identity exists
+      const existingIdentity = await prisma.identity.findUnique({
+        where: {
+          provider_providerUserId: {
+            provider: 'email',
+            providerUserId: normalized,
+          },
+        },
+      });
+
+      if (!existingIdentity) {
+        await prisma.identity.create({
+          data: {
+            userId: user.id,
+            provider: 'email',
+            providerUserId: normalized,
+          },
+        });
+      }
+
+      if (!user.emailVerifiedAt) {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { emailVerifiedAt: new Date(), lastLoginAt: new Date() },
+        });
+      }
+    }
+
+    // Create session
+    const refreshTokenBytes = crypto.randomBytes(32);
+    const refreshToken = refreshTokenBytes.toString('base64url');
     const tokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
-    const session = await prisma.refreshSession.findUnique({
-      where: { tokenHash },
-      include: { user: { include: { settings: true, subscription: true } } },
-    });
-
-    if (!session) {
-      clearRefreshCookie(res);
-      return res.status(401).json({ error: 'Invalid session.', code: 'INVALID_TOKEN' });
-    }
-
-    // Reuse detection
-    if (session.revokedAt) {
-      // Revoke whole token family!
-      await prisma.refreshSession.updateMany({
-        where: { familyId: session.familyId },
-        data: { revokedAt: new Date() },
-      });
-      await writeAuditLog(session.userId, 'TOKEN_REUSE', 'RefreshSession', session.id, { familyId: session.familyId });
-      clearRefreshCookie(res);
-      return res.status(401).json({ error: 'Security alert: token reuse detected.', code: 'TOKEN_REUSE' });
-    }
-
+    const familyId = crypto.randomUUID();
     const now = new Date();
-    if (session.expiresAt < now || session.absoluteExpiresAt < now) {
-      await prisma.refreshSession.update({
-        where: { id: session.id },
-        data: { revokedAt: now },
-      });
-      clearRefreshCookie(res);
-      return res.status(401).json({ error: 'Session expired.', code: 'TOKEN_EXPIRED' });
-    }
+    const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const absoluteExpiresAt = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
 
-    // Rotate refresh token
-    const newRefreshBytes = crypto.randomBytes(32);
-    const newRefreshToken = newRefreshBytes.toString('base64url');
-    const newTokenHash = crypto.createHash('sha256').update(newRefreshToken).digest('hex');
-
-    const newExpiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-
-    // Revoke old session and create new one in same family
-    await prisma.refreshSession.update({
-      where: { id: session.id },
-      data: { revokedAt: now },
-    });
-
-    const newSession = await prisma.refreshSession.create({
+    await prisma.refreshSession.create({
       data: {
-        userId: session.userId,
-        familyId: session.familyId,
-        tokenHash: newTokenHash,
-        userAgent: req.headers['user-agent'] || session.userAgent,
-        ip: req.ip || session.ip,
-        expiresAt: newExpiresAt,
-        absoluteExpiresAt: session.absoluteExpiresAt,
+        userId: user.id,
+        familyId,
+        tokenHash,
+        userAgent: req.headers['user-agent'] || null,
+        ip: req.ip || null,
+        expiresAt,
+        absoluteExpiresAt,
       },
     });
 
-    // Update replacedById on old session
-    await prisma.refreshSession.update({
-      where: { id: session.id },
-      data: { replacedById: newSession.id },
-    });
+    setRefreshCookie(res, refreshToken);
+    await writeAuditLog(user.id, 'LOGIN_EMAIL', 'User', user.id, { email: normalized });
 
-    const sessionUserRole = session.user.email?.toLowerCase().trim() === 'niyibizisteven13@gmail.com' ? 'ADMIN' : (session.user.role || 'INSTRUCTOR');
     const accessToken = jwt.sign(
-      { userId: session.user.id, email: session.user.email, role: sessionUserRole },
+      { userId: user.id, email: user.email, role: user.role || 'user' },
       JWT_SECRET,
       { expiresIn: ACCESS_TOKEN_TTL, algorithm: 'HS256', issuer: 'bwenge', audience: 'bwenge-web' }
     );
 
-    setRefreshCookie(res, newRefreshToken);
-
     return res.json({
       accessToken,
       expiresIn: 900,
-      user: buildAuthenticatedUser(session.user),
+      isNewUser,
+      user: buildAuthenticatedUser(user),
     });
   } catch (err: any) {
-    console.error('Refresh error:', err);
-    clearRefreshCookie(res);
-    return res.status(500).json({ error: 'Token refresh failed.' });
+    console.error('Email verify error:', err);
+    return res.status(500).json({ error: { code: 'server_error' } });
+  }
+}
+
+// ── Common Auth Endpoints ────────────────────────────────────
+
+export async function getMe(req: Request, res: Response) {
+  try {
+    const userId = (req as any).user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: { code: 'unauthorized' } });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: { settings: true, subscription: true },
+    });
+
+    if (!user || user.disabledAt) {
+      return res.status(401).json({ error: { code: 'unauthorized' } });
+    }
+
+    return res.json({ user: buildAuthenticatedUser(user) });
+  } catch (err: any) {
+    return res.status(500).json({ error: { code: 'server_error' } });
   }
 }
 
 export async function logout(req: Request, res: Response) {
   try {
-    const refreshToken = req.cookies?.bwenge_rt || req.body?.refreshToken;
+    const isProd = process.env.NODE_ENV === 'production';
+    const cookieName = isProd ? '__Host-session' : 'session';
+    const refreshToken = req.cookies?.[cookieName] || req.body?.refreshToken;
+
     if (refreshToken) {
       const tokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
       const session = await prisma.refreshSession.findUnique({ where: { tokenHash } });
@@ -358,6 +426,7 @@ export async function logout(req: Request, res: Response) {
         await writeAuditLog(session.userId, 'LOGOUT', 'RefreshSession', session.id);
       }
     }
+
     clearRefreshCookie(res);
     return res.status(204).end();
   } catch (err) {
@@ -366,219 +435,77 @@ export async function logout(req: Request, res: Response) {
   }
 }
 
-export async function logoutAll(req: Request, res: Response) {
-  try {
-    const userId = (req as any).user?.userId;
-    if (!userId) return res.status(401).json({ error: 'Not authenticated.' });
-
-    await prisma.refreshSession.updateMany({
-      where: { userId, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
-
-    await writeAuditLog(userId, 'LOGOUT_ALL', 'User', userId);
-    clearRefreshCookie(res);
-    return res.status(204).end();
-  } catch (err: any) {
-    console.error('Logout all error:', err);
-    return res.status(500).json({ error: 'Failed to log out all devices.' });
-  }
-}
-
-export async function getMe(req: Request, res: Response) {
+export async function patchMe(req: Request, res: Response) {
   try {
     const userId = (req as any).user?.userId;
     if (!userId) {
-      return res.status(401).json({ error: 'Not authenticated.' });
+      return res.status(401).json({ error: { code: 'unauthorized' } });
     }
 
-    const user = await prisma.user.findUnique({
+    const { name, locale } = req.body || {};
+    const updateData: any = {};
+    if (typeof name === 'string' && name.trim().length >= 1) {
+      updateData.name = name.trim().substring(0, 100);
+    }
+
+    const updatedUser = await prisma.user.update({
       where: { id: userId },
+      data: updateData,
       include: { settings: true, subscription: true },
     });
 
-    if (!user) {
-      return res.status(404).json({ error: 'User not found.' });
-    }
-
-    res.json({ user: buildAuthenticatedUser(user) });
-  } catch (err: any) {
-    console.error('GetMe error:', err);
-    res.status(500).json({ error: 'Failed to fetch user data.' });
-  }
-}
-
-export async function requestEmailOtp(req: Request, res: Response) {
-  try {
-    const { email } = req.body || {};
-    if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.toLowerCase().trim())) {
-      return res.status(400).json({ error: 'Valid email address is required.' });
-    }
-    const normalizedEmail = email.toLowerCase().trim();
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes
-
-    emailOtpStore.set(normalizedEmail, { code, expiresAt });
-
-    const emailService = EmailService.getInstance();
-    await emailService.sendEmail({
-      to: normalizedEmail,
-      subject: 'Your Bwenge AI Login Code',
-      html: `
-        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #101114; color: #FAF9F5; border-radius: 12px;">
-          <h2 style="color: #D97757;">Bwenge AI Studio</h2>
-          <p>Your one-time login verification code is:</p>
-          <div style="font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #D97757; margin: 20px 0;">${code}</div>
-          <p style="font-size: 12px; color: #888;">This code expires in 5 minutes. Do not share it with anyone.</p>
-        </div>
-      `,
-    });
-
-    return res.json({ success: true, retryAfter: 30 });
-  } catch (err: any) {
-    console.error('Request email OTP error:', err);
-    return res.status(500).json({ error: 'Failed to send OTP email.' });
-  }
-}
-
-export async function verifyEmailOtp(req: Request, res: Response) {
-  try {
-    const { email, code } = req.body || {};
-    if (typeof email !== 'string' || typeof code !== 'string') {
-      return res.status(400).json({ error: 'Email and verification code are required.' });
-    }
-    const normalizedEmail = email.toLowerCase().trim();
-    const stored = emailOtpStore.get(normalizedEmail);
-
-    if (!stored || stored.expiresAt < Date.now() || stored.code !== code.trim()) {
-      return res.status(400).json({ error: 'Invalid or expired verification code.' });
-    }
-
-    emailOtpStore.delete(normalizedEmail);
-
-    let user = await prisma.user.findUnique({
-      where: { email: normalizedEmail },
-      include: { settings: true, subscription: true },
-    });
-
-    if (!user) {
-      const name = normalizedEmail.split('@')[0] || 'User';
-      const randomPasswordHash = await bcrypt.hash(crypto.randomBytes(16).toString('hex'), 12);
-      user = await prisma.user.create({
-        data: {
-          name: name.charAt(0).toUpperCase() + name.slice(1),
-          email: normalizedEmail,
-          passwordHash: randomPasswordHash,
-          settings: { create: {} },
-        },
-        include: { settings: true, subscription: true },
+    if (typeof locale === 'string' && ['en', 'rw', 'fr'].includes(locale.toLowerCase())) {
+      await prisma.userSettings.upsert({
+        where: { userId },
+        update: { preferredLanguage: locale.toLowerCase() },
+        create: { userId, preferredLanguage: locale.toLowerCase() },
       });
+      updatedUser.settings = await prisma.userSettings.findUnique({ where: { userId } });
     }
 
-    const userRole = user.email?.toLowerCase().trim() === 'niyibizisteven13@gmail.com' ? 'ADMIN' : (user.role || 'INSTRUCTOR');
-    const accessToken = jwt.sign(
-      { userId: user.id, email: user.email, role: userRole },
-      JWT_SECRET,
-      { expiresIn: ACCESS_TOKEN_TTL, algorithm: 'HS256', issuer: 'bwenge', audience: 'bwenge-web' }
-    );
-
-    const refreshTokenBytes = crypto.randomBytes(32);
-    const refreshToken = refreshTokenBytes.toString('base64url');
-    const tokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
-    const familyId = crypto.randomUUID();
-
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-    const absoluteExpiresAt = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
-
-    await prisma.refreshSession.create({
-      data: {
-        userId: user.id,
-        familyId,
-        tokenHash,
-        userAgent: req.headers['user-agent'] || null,
-        ip: req.ip || null,
-        expiresAt,
-        absoluteExpiresAt,
-      },
-    });
-
-    setRefreshCookie(res, refreshToken);
-    await writeAuditLog(user.id, 'EMAIL_OTP_LOGIN', 'User', user.id, { email: normalizedEmail });
-
-    return res.json({
-      accessToken,
-      expiresIn: 900,
-      user: buildAuthenticatedUser(user),
-    });
+    return res.json({ user: buildAuthenticatedUser(updatedUser) });
   } catch (err: any) {
-    console.error('Verify email OTP error:', err);
-    return res.status(500).json({ error: 'Verification failed.' });
+    return res.status(500).json({ error: { code: 'server_error' } });
   }
 }
 
-export async function googleLogin(req: Request, res: Response) {
+export async function getSessions(req: Request, res: Response) {
   try {
-    const email = req.body?.email || 'demo@example.com';
-    const name = req.body?.name || 'Google User';
+    const userId = (req as any).user?.userId;
+    if (!userId) return res.status(401).json({ error: { code: 'unauthorized' } });
 
-    let user = await prisma.user.findUnique({
-      where: { email },
-      include: { settings: true, subscription: true },
+    const sessions = await prisma.refreshSession.findMany({
+      where: { userId, revokedAt: null, expiresAt: { gt: new Date() } },
+      select: { id: true, userAgent: true, ip: true, createdAt: true, lastUsedAt: true },
+      orderBy: { lastUsedAt: 'desc' },
     });
 
-    if (!user) {
-      const randomPasswordHash = await bcrypt.hash(crypto.randomBytes(16).toString('hex'), 12);
-      user = await prisma.user.create({
-        data: {
-          name,
-          email,
-          passwordHash: randomPasswordHash,
-          settings: { create: {} },
-        },
-        include: { settings: true, subscription: true },
-      });
-    }
-
-    const userRole = user.email?.toLowerCase().trim() === 'niyibizisteven13@gmail.com' ? 'ADMIN' : (user.role || 'INSTRUCTOR');
-    const accessToken = jwt.sign(
-      { userId: user.id, email: user.email, role: userRole },
-      JWT_SECRET,
-      { expiresIn: ACCESS_TOKEN_TTL, algorithm: 'HS256', issuer: 'bwenge', audience: 'bwenge-web' }
-    );
-
-    const refreshTokenBytes = crypto.randomBytes(32);
-    const refreshToken = refreshTokenBytes.toString('base64url');
-    const tokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
-    const familyId = crypto.randomUUID();
-
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-    const absoluteExpiresAt = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
-
-    await prisma.refreshSession.create({
-      data: {
-        userId: user.id,
-        familyId,
-        tokenHash,
-        userAgent: req.headers['user-agent'] || null,
-        ip: req.ip || null,
-        expiresAt,
-        absoluteExpiresAt,
-      },
-    });
-
-    setRefreshCookie(res, refreshToken);
-    await writeAuditLog(user.id, 'LOGIN_GOOGLE', 'User', user.id, { email });
-
-    return res.json({
-      accessToken,
-      expiresIn: 900,
-      user: buildAuthenticatedUser(user),
-    });
+    return res.json({ sessions });
   } catch (err: any) {
-    console.error('Google login error:', err);
-    return res.status(500).json({ error: 'Google authentication failed.' });
+    return res.status(500).json({ error: { code: 'server_error' } });
   }
 }
 
+export async function revokeSession(req: Request, res: Response) {
+  try {
+    const userId = (req as any).user?.userId;
+    const sessionId = req.params.id;
+    if (!userId) return res.status(401).json({ error: { code: 'unauthorized' } });
+
+    await prisma.refreshSession.updateMany({
+      where: { id: sessionId, userId },
+      data: { revokedAt: new Date() },
+    });
+
+    return res.status(204).end();
+  } catch (err: any) {
+    return res.status(500).json({ error: { code: 'server_error' } });
+  }
+}
+
+export async function devOutboxHandler(req: Request, res: Response) {
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(404).end();
+  }
+  return res.json({ outbox: getDevOutbox() });
+}

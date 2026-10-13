@@ -26,6 +26,7 @@ import { upload } from './server/middleware/upload.js';
 import { ingestDocument } from './server/services/DocumentIngestionService.js';
 import { classifyIntent } from './server/services/intentRouter.js';
 import { generalTools } from './server/services/generalTools.js';
+import { FileStore, createFileRouter } from './server/services/ai/index.js';
 import logger from './server/utils/logger.js';
 
 import { validate, examSchema, markScriptSchema, batchGradeSchema, chatSchema } from './server/middleware/validation.js';
@@ -99,6 +100,8 @@ const memoryService = MemoryService.getInstance();
 const safetyService = SafetyService.getInstance();
 const sentimentService = SentimentService.getInstance();
 const confidenceService = ConfidenceService.getInstance();
+export const fileStore = new FileStore({ dir: process.env.FILE_STORE_DIR ?? './data/generated', secret: process.env.FILE_URL_SECRET || 'ai-studio-default-file-url-secret-min-32-chars' });
+setInterval(() => fileStore.purgeExpired().catch(() => {}), 60 * 60 * 1000).unref();
 
 /**
  * Consistent error-response shape for every route below: full detail in
@@ -290,6 +293,7 @@ app.use('/api/studio/projects', requireAuth, studioRoutes);
 app.use('/api/agent', requireAuth, generalLimiter, agentRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/forms', formRoutes);
+app.use('/api/files', createFileRouter(fileStore, { getUserId: (req) => (req as any).user?.id }));
 app.use('/api/admin', requireAuth, requireRole('ADMIN'), adminRoutes);
 app.use('/api/ollama', requireAuth, ollamaRoutes);
 app.use('/api/telegram', telegramBotRoutes);

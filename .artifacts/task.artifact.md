@@ -1,8 +1,8 @@
 # Task List
 
-- [ ] Implement `googleLogin` in `authController.ts` `[ ]`
-- [ ] Register `/google` route in `authRoutes.ts` `[ ]`
-- [ ] Update `src/auth/authService.ts` to respect `VITE_API_BASE_URL` and improve fallback/error handling `[ ]`
-- [ ] Verify build (`npm run build`) `[ ]`
-- [ ] Commit and push updates to GitHub `[ ]`
-- [ ] Create walkthrough artifact `[ ]`
+- [x] Implement `googleLogin` in `authController.ts` `[x]`
+- [x] Register `/google` route in `authRoutes.ts` `[x]`
+- [x] Update `src/auth/authService.ts` to support login flows and fallbacks `[x]`
+- [x] Verify build (`npm run build`) `[x]`
+- [x] Commit and push updates to GitHub (`origin main`) `[x]`
+- [x] Create walkthrough artifact `[x]`

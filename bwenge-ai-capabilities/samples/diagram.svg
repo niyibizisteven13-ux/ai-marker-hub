@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 302 652" width="302" height="652" role="img" aria-label="How Bwenge marks an exam">
+<defs><marker id="arr" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0 0 L10 4 L0 8 Z" fill="#6B7280" /></marker></defs>
+<rect width="302" height="652" fill="#ffffff" />
+<text x="151" y="30" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="700" fill="#111827">How Bwenge marks an exam</text>
+<path d="M121.0 114.0 L121.0 142.0 L121.0 170.0" fill="none" stroke="#6B7280" stroke-width="1.6" marker-end="url(#arr)" />
+<path d="M121.0 246.0 L121.0 274.0 L121.0 302.0" fill="none" stroke="#6B7280" stroke-width="1.6" marker-end="url(#arr)" />
+<path d="M151.2 364.0 L187.3 401.0 L187.3 438.0" fill="none" stroke="#6B7280" stroke-width="1.6" marker-end="url(#arr)" />
+<rect x="172.6" y="391.0" width="29.5" height="18" rx="4" fill="#ffffff" fill-opacity="0.92" />
+<text x="187.3" y="404.0" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="12" fill="#374151">yes</text>
+<path d="M90.8 364.0 L54.7 401.0 L54.7 467.0 L54.7 524.0 L91.8 552.0" fill="none" stroke="#6B7280" stroke-width="1.6" marker-end="url(#arr)" />
+<rect x="43.2" y="457.0" width="23.0" height="18" rx="4" fill="#ffffff" fill-opacity="0.92" />
+<text x="54.7" y="470.0" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="12" fill="#374151">no</text>
+<path d="M187.3 496.0 L187.3 524.0 L150.2 552.0" fill="none" stroke="#6B7280" stroke-width="1.6" marker-end="url(#arr)" />
+<rect x="34.6" y="56.0" width="172.8" height="58.0" rx="10" fill="#FDE9DC" stroke="#D2691E" stroke-width="1.6" />
+<text x="121.0" y="81.0" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="14" fill="#5A2A08">Teacher uploads</text>
+<text x="121.0" y="99.0" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="14" fill="#5A2A08">scripts and rubric</text>
+<rect x="27.0" y="170.0" width="188.0" height="76.0" rx="10" fill="#D7F5F1" stroke="#1FB3A6" stroke-width="1.6" />
+<text x="121.0" y="195.0" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="14" fill="#0B4A44">AI reads each answer</text>
+<text x="121.0" y="213.0" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="14" fill="#0B4A44">and marks it against</text>
+<text x="121.0" y="231.0" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="14" fill="#0B4A44">the rubric</text>
+<polygon points="121,302 218,333 121,364 24,333" fill="#FAF0D2" stroke="#C9A24B" stroke-width="1.6" />
+<text x="121.0" y="338.0" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="14" fill="#5B4410">Low confidence?</text>
+<rect x="97.1" y="438.0" width="180.4" height="58.0" rx="10" fill="#DCE6F5" stroke="#12305A" stroke-width="1.6" />
+<text x="187.3" y="463.0" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="14" fill="#0B1F3A">Teacher reviews and</text>
+<text x="187.3" y="481.0" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="14" fill="#0B1F3A">adjusts</text>
+<ellipse cx="121.0" cy="574.0" rx="90.2" ry="22.0" fill="#DDF3E1" stroke="#2E8B57" stroke-width="1.6" />
+<text x="121.0" y="579.0" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="14" fill="#14401F">Results and reports</text>
+</svg>

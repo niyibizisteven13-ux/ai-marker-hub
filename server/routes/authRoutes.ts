@@ -1,5 +1,16 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { login, register, refresh, logout, logoutAll, getMe, requestEmailOtp, verifyEmailOtp, googleLogin } from '../controllers/authController.js';
+import {
+  googleStart,
+  googleCallback,
+  emailStart,
+  emailVerify,
+  getMe,
+  logout,
+  patchMe,
+  getSessions,
+  revokeSession,
+  devOutboxHandler,
+} from '../controllers/authController.js';
 import { authLimiter } from '../../production/rateLimiter.js';
 import { requireAuth } from '../../production/auth.js';
 
@@ -11,20 +22,22 @@ const logErrors = (name: string, h: any) =>
       await h(req, res, next);
     } catch (err: any) {
       console.error(`[AUTH ${name}]`, err?.code, err?.message, err?.stack);
-      if (!res.headersSent) res.status(500).json({ error: err?.message || 'failed' });
+      if (!res.headersSent) res.status(500).json({ error: { code: 'server_error', message: err?.message } });
     }
   };
 
-router.post('/signup', authLimiter, logErrors('signup', register));
-router.post('/register', authLimiter, logErrors('register', register));
-router.post('/login', authLimiter, logErrors('login', login));
-router.post('/google', authLimiter, logErrors('google', googleLogin));
-router.get('/google', authLimiter, logErrors('google', googleLogin));
-router.post('/email-otp/request', authLimiter, logErrors('requestEmailOtp', requestEmailOtp));
-router.post('/email-otp/verify', authLimiter, logErrors('verifyEmailOtp', verifyEmailOtp));
-router.post('/refresh', authLimiter, logErrors('refresh', refresh));
-router.post('/logout', logErrors('logout', logout));
-router.post('/logout-all', requireAuth, logErrors('logoutAll', logoutAll));
+router.get('/google/start', authLimiter, logErrors('googleStart', googleStart));
+router.get('/google/callback', logErrors('googleCallback', googleCallback));
+router.post('/email/start', authLimiter, logErrors('emailStart', emailStart));
+router.post('/email/verify', authLimiter, logErrors('emailVerify', emailVerify));
+
 router.get('/me', requireAuth, logErrors('getMe', getMe));
+router.post('/logout', logErrors('logout', logout));
+router.patch('/me', requireAuth, logErrors('patchMe', patchMe));
+
+router.get('/sessions', requireAuth, logErrors('getSessions', getSessions));
+router.delete('/sessions/:id', requireAuth, logErrors('revokeSession', revokeSession));
+
+router.get('/__dev/outbox', logErrors('devOutbox', devOutboxHandler));
 
 export default router;
