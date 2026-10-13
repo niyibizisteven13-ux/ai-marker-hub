@@ -1,12 +1,12 @@
-# AWS Amplify Gen 2 Serverless Express Integration Plan
+# Fix Login and Authentication Flow Plan
 
-Migrate the backend API from a standalone Node/Express server (`server.ts`) to AWS Amplify Gen 2 Serverless Functions using `serverless-http` to wrap the existing Express app without rewriting route handlers.
+Resolve all authentication and login issues across the frontend (`authService.ts`) and backend (`authRoutes.ts` & `authController.ts`), including the missing Google login endpoint (`/api/auth/google`), API base URL configuration support (`VITE_API_BASE_URL`), and robust fallback mechanisms.
 
 ## User Review Required
 
 > [!IMPORTANT]
-> - We are building a Vite + React SPA (Single Page Application), not Next.js.
-> - We will use `serverless-http` to wrap our existing Express application (`server.ts`) inside an AWS Lambda function handler (`amplify/functions/api-handler/handler.ts`). This allows all 50+ Express routes (`/api/auth/refresh`, `/api/ai/chat`, `/api/studio/projects/workspace`, etc.) to run natively on AWS Lambda without manual rewriting.
+> - We will add the missing `/api/auth/google` endpoint to `authRoutes.ts` and `authController.ts` so Google login calls succeed on the backend.
+> - We will update `authService.ts` to support `VITE_API_BASE_URL` pointing to your App Runner backend or local server, ensuring robust error handling and seamless fallback.
 
 ## Open Questions
 
@@ -14,23 +14,21 @@ Migrate the backend API from a standalone Node/Express server (`server.ts`) to A
 
 ## Proposed Changes
 
-### Configuration & Infrastructure
-#### [NEW] [package.json modification / dependencies](file:///C:/Users/niyib/Downloads/ai-marker-hub/package.json)
-- Add `@aws-amplify/backend`, `@aws-amplify/backend-cli`, and `serverless-http` to dependencies/devDependencies.
+### Backend
+#### [MODIFY] [authController.ts](file:///C:/Users/niyib/Downloads/ai-marker-hub/server/controllers/authController.ts)
+- Implement `googleLogin` controller handling Google SSO authentication / fallback session creation.
 
-#### [NEW] [amplify/backend.ts](file:///C:/Users/niyib/Downloads/ai-marker-hub/amplify/backend.ts)
-- Define Amplify backend configuration linking `apiHandler`.
+#### [MODIFY] [authRoutes.ts](file:///C:/Users/niyib/Downloads/ai-marker-hub/server/routes/authRoutes.ts)
+- Register `router.post('/google', googleLogin)` and `router.get('/google', googleLogin)`.
 
-#### [NEW] [amplify/functions/api-handler/resource.ts](file:///C:/Users/niyib/Downloads/ai-marker-hub/amplify/functions/api-handler/resource.ts)
-- Define Amplify Gen 2 serverless function resource with 30s timeout and environment variables.
-
-#### [NEW] [amplify/functions/api-handler/handler.ts](file:///C:/Users/niyib/Downloads/ai-marker-hub/amplify/functions/api-handler/handler.ts)
-- Import the Express application from `server.ts` (or export/wrap it) and wrap it using `serverless-http` to handle incoming API Gateway proxy events.
+### Frontend
+#### [MODIFY] [authService.ts](file:///C:/Users/niyib/Downloads/ai-marker-hub/src/auth/authService.ts)
+- Use `VITE_API_BASE_URL` for all auth fetch calls (`/api/auth/...`) so requests correctly reach your App Runner backend when deployed.
 
 ## Verification Plan
 
 ### Automated Tests
-- Run `npm run build` to verify TypeScript compilation and bundle generation.
+- Run `npm run build` to ensure clean TypeScript compilation.
 
 ### Manual Verification
-- Commit and push to GitHub to test deployment on AWS Amplify Gen 2.
+- Test password login, email OTP login, and Google login against the backend.

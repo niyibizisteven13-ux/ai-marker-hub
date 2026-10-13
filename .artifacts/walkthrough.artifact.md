@@ -1,18 +1,29 @@
-# Walkthrough - Streamlined Landing Page Login and GitHub Push
+# Walkthrough - AWS Amplify Gen 2 Serverless Backend with Express Wrapper
 
-Streamlined the landing page authentication flow to have a single, clean login form (`AuthFlow.tsx`) and pushed all updates to GitHub.
+Integrated AWS Amplify Gen 2 Serverless Functions (`serverless-http`) to wrap the existing Express backend (`server.ts`), eliminating 404 Not Found errors on API routes without requiring manual rewrites.
 
 ## Changes
 
-### Components
-#### [MODIFY] [AuthFlow.tsx](file:///C:/Users/niyib/Downloads/ai-marker-hub/src/components/AuthFlow.tsx)
-- Streamlined `AuthFlow.tsx` on the landing page to remove duplicate/redundant phone buttons, leaving a clean Google SSO button and a direct email/identifier sign-in form.
+### Backend & Serverless Configuration
+#### [NEW] [amplify/backend.ts](file:///C:/Users/niyib/Downloads/ai-marker-hub/amplify/backend.ts)
+- Defined the Amplify Gen 2 backend linking `apiHandler`.
 
-## Verification & Deployment
+#### [NEW] [amplify/functions/api-handler/resource.ts](file:///C:/Users/niyib/Downloads/ai-marker-hub/amplify/functions/api-handler/resource.ts)
+- Configured the serverless function definition with 30-second timeout and required environment variables (`DATABASE_URL`, `JWT_SECRET`, AI provider API keys).
 
-### GitHub Push
-- Committed and pushed all latest changes to `origin main` successfully (`3b4ab55..1793d98`).
+#### [NEW] [amplify/functions/api-handler/handler.ts](file:///C:/Users/niyib/Downloads/ai-marker-hub/amplify/functions/api-handler/handler.ts)
+- Wrapped the Express app using `serverless-http` to translate AWS Lambda API Gateway proxy events into Express requests and responses.
 
-### AWS Amplify Console Behavior
-- **Does AWS Amplify console display the updated repo/commit after deployment?**
-  - **Yes!** Once you push changes to your linked GitHub repository (`origin main`), AWS Amplify automatically detects the new commit (`1793d98`), triggers a fresh build with the latest code, and updates the repository status and build logs in your Amplify Console.
+#### [MODIFY] [server.ts](file:///C:/Users/niyib/Downloads/ai-marker-hub/server.ts)
+- Exported `app` so it can be imported and wrapped by the serverless handler.
+
+#### [MODIFY] [package.json](file:///C:/Users/niyib/Downloads/ai-marker-hub/package.json)
+- Added `@aws-amplify/backend`, `@aws-amplify/backend-cli`, `serverless-http`, and `@types/aws-lambda`.
+
+## Verification Results
+
+### Automated Tests
+- Ran `npm run build` successfully. TypeScript compilation and Vite bundle production build passed with exit code 0.
+
+### GitHub Deployment
+- Committed and pushed all changes to `origin main` (`1793d98..d82c913`). AWS Amplify Gen 2 will automatically build and compile the serverless lambda backend on the next deploy.
