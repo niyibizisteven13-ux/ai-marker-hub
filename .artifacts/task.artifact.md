@@ -1,7 +1,8 @@
 # Task List
 
-- [ ] Streamline `AuthFlow.tsx` to ensure a single, clean, unified login form on the landing page `[ ]`
-- [ ] Run `npm run build` to verify compilation `[ ]`
-- [ ] Stage, commit, and push all changes to GitHub (`origin main`) `[ ]`
-- [ ] Provide clear explanation on whether AWS Amplify console displays the updated repo after deployment `[ ]`
+- [ ] Add Amplify backend and `serverless-http` dependencies to `package.json` `[ ]`
+- [ ] Create `amplify/backend.ts` `[ ]`
+- [ ] Create `amplify/functions/api-handler/resource.ts` `[ ]`
+- [ ] Create `amplify/functions/api-handler/handler.ts` wrapping Express with `serverless-http` `[ ]`
+- [ ] Verify build (`npm run build`) `[ ]`
 - [ ] Create walkthrough artifact `[ ]`

@@ -1,23 +1,18 @@
-# Walkthrough - DynamoDB Integration and Test Form
+# Walkthrough - Streamlined Landing Page Login and GitHub Push
 
-Implemented DynamoDB database connection and test form for the `ai-markers` table.
+Streamlined the landing page authentication flow to have a single, clean login form (`AuthFlow.tsx`) and pushed all updates to GitHub.
 
 ## Changes
 
-### Database & Configuration
-#### [NEW] [db.ts](file:///C:/Users/niyib/Downloads/ai-marker-hub/src/db.ts)
-- Initialized AWS DynamoDB Document Client using `process.env.APP_AWS_REGION` and `process.env.APP_DYNAMODB_TABLE_NAME`.
-- Implemented `saveMarker(id, markerName, latitude, longitude)` and `getAllMarkers()`.
-
-#### [MODIFY] [package.json](file:///C:/Users/niyib/Downloads/ai-marker-hub/package.json)
-- Added `@aws-sdk/client-dynamodb` and `@aws-sdk/lib-dynamodb` dependencies.
-
 ### Components
-#### [NEW] [DynamoDBTestForm.tsx](file:///C:/Users/niyib/Downloads/ai-marker-hub/src/components/DynamoDBTestForm.tsx)
-- Created a React form component allowing users to enter marker name, latitude, and longitude.
-- Handles saving new markers to DynamoDB and displaying the list of all saved markers from `ai-markers`.
+#### [MODIFY] [AuthFlow.tsx](file:///C:/Users/niyib/Downloads/ai-marker-hub/src/components/AuthFlow.tsx)
+- Streamlined `AuthFlow.tsx` on the landing page to remove duplicate/redundant phone buttons, leaving a clean Google SSO button and a direct email/identifier sign-in form.
 
-## Verification Results
+## Verification & Deployment
 
-### Automated Tests
-- Ran `npm run build` successfully. TypeScript compilation and Vite bundle production build passed with exit code 0.
+### GitHub Push
+- Committed and pushed all latest changes to `origin main` successfully (`3b4ab55..1793d98`).
+
+### AWS Amplify Console Behavior
+- **Does AWS Amplify console display the updated repo/commit after deployment?**
+  - **Yes!** Once you push changes to your linked GitHub repository (`origin main`), AWS Amplify automatically detects the new commit (`1793d98`), triggers a fresh build with the latest code, and updates the repository status and build logs in your Amplify Console.

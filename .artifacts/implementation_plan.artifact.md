@@ -1,12 +1,12 @@
-# Unified Landing Page Login Form and GitHub Deployment Plan
+# AWS Amplify Gen 2 Serverless Express Integration Plan
 
-Streamline the landing page login flow (`AuthFlow.tsx`) so there is a single, clean, unified login form directly on the landing page, and push all updates to GitHub.
+Migrate the backend API from a standalone Node/Express server (`server.ts`) to AWS Amplify Gen 2 Serverless Functions using `serverless-http` to wrap the existing Express app without rewriting route handlers.
 
 ## User Review Required
 
 > [!IMPORTANT]
-> - We will streamline `AuthFlow.tsx` on the landing page to remove duplicate/redundant phone buttons and provide a clean, unified login interface (Google SSO + direct email/identifier sign-in).
-> - After pushing to GitHub, AWS Amplify will automatically detect the new commit on `main` and redeploy.
+> - We are building a Vite + React SPA (Single Page Application), not Next.js.
+> - We will use `serverless-http` to wrap our existing Express application (`server.ts`) inside an AWS Lambda function handler (`amplify/functions/api-handler/handler.ts`). This allows all 50+ Express routes (`/api/auth/refresh`, `/api/ai/chat`, `/api/studio/projects/workspace`, etc.) to run natively on AWS Lambda without manual rewriting.
 
 ## Open Questions
 
@@ -14,16 +14,23 @@ Streamline the landing page login flow (`AuthFlow.tsx`) so there is a single, cl
 
 ## Proposed Changes
 
-### Components
-#### [MODIFY] [AuthFlow.tsx](file:///C:/Users/niyib/Downloads/ai-marker-hub/src/components/AuthFlow.tsx)
-- Clean up `AuthFlow.tsx` to have a single, unified login card on the landing page (Google sign-in and Email/Password sign-in), ensuring no duplicate or conflicting forms.
+### Configuration & Infrastructure
+#### [NEW] [package.json modification / dependencies](file:///C:/Users/niyib/Downloads/ai-marker-hub/package.json)
+- Add `@aws-amplify/backend`, `@aws-amplify/backend-cli`, and `serverless-http` to dependencies/devDependencies.
+
+#### [NEW] [amplify/backend.ts](file:///C:/Users/niyib/Downloads/ai-marker-hub/amplify/backend.ts)
+- Define Amplify backend configuration linking `apiHandler`.
+
+#### [NEW] [amplify/functions/api-handler/resource.ts](file:///C:/Users/niyib/Downloads/ai-marker-hub/amplify/functions/api-handler/resource.ts)
+- Define Amplify Gen 2 serverless function resource with 30s timeout and environment variables.
+
+#### [NEW] [amplify/functions/api-handler/handler.ts](file:///C:/Users/niyib/Downloads/ai-marker-hub/amplify/functions/api-handler/handler.ts)
+- Import the Express application from `server.ts` (or export/wrap it) and wrap it using `serverless-http` to handle incoming API Gateway proxy events.
 
 ## Verification Plan
 
 ### Automated Tests
-- Run `npm run build` to ensure the project builds correctly without TypeScript or Vite errors.
+- Run `npm run build` to verify TypeScript compilation and bundle generation.
 
-### Manual Verification / Deployment
-- Verify UI on landing page.
-- Push all changes to GitHub (`git push origin main`).
-- Answer user's question regarding AWS Amplify console showing the updated repository/commit.
+### Manual Verification
+- Commit and push to GitHub to test deployment on AWS Amplify Gen 2.
