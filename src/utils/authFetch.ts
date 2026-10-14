@@ -2,6 +2,15 @@ let currentAccessToken: string | null = null;
 let tokenExpiresAt: number = 0;
 let refreshPromise: Promise<string | null> | null = null;
 
+export const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || '';
+
+export function getApiUrl(path: string): string {
+  if (path.startsWith('/api') && API_BASE_URL) {
+    return `${API_BASE_URL.replace(/\/$/, '')}${path}`;
+  }
+  return path;
+}
+
 export function setAccessToken(token: string | null, expiresInSeconds: number = 900) {
   currentAccessToken = token;
   tokenExpiresAt = token ? Date.now() + expiresInSeconds * 1000 : 0;
@@ -16,7 +25,7 @@ async function performRefresh(): Promise<string | null> {
 
   refreshPromise = (async () => {
     try {
-      const response = await fetch('/api/auth/refresh', {
+      const response = await fetch(getApiUrl('/api/auth/refresh'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -95,7 +104,7 @@ export async function authFetch(input: RequestInfo, init?: RequestInit): Promise
       headers.set('Authorization', `Bearer ${t}`);
     }
 
-    return fetch(input, {
+    return fetch(getApiUrl(url), {
       ...init,
       credentials: 'include',
       headers,

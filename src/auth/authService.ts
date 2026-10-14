@@ -1,4 +1,4 @@
-import { setAccessToken, getAccessToken } from '../utils/authFetch';
+import { setAccessToken, getAccessToken, getApiUrl } from '../utils/authFetch';
 
 export interface User {
   id: string;
@@ -42,7 +42,7 @@ export const authService: AuthService = {
       const token = localStorage.getItem('bwenge_auth_token') || getAccessToken();
       const headers: Record<string, string> = {};
       if (token) headers['Authorization'] = `Bearer ${token}`;
-      const res = await fetch('/api/auth/me', { headers, credentials: 'include' });
+      const res = await fetch(getApiUrl('/api/auth/me'), { headers, credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         if (data.user) return data.user;
@@ -53,7 +53,7 @@ export const authService: AuthService = {
 
   async requestEmailOtp({ email, locale }) {
     try {
-      const res = await fetch('/api/auth/email/start', {
+      const res = await fetch(getApiUrl('/api/auth/email/start'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'bwenge' },
         credentials: 'include',
@@ -75,7 +75,7 @@ export const authService: AuthService = {
 
   async verifyEmailOtp({ email, code }) {
     try {
-      const res = await fetch('/api/auth/email/verify', {
+      const res = await fetch(getApiUrl('/api/auth/email/verify'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'bwenge' },
         credentials: 'include',
@@ -98,12 +98,12 @@ export const authService: AuthService = {
 
   loginWithGoogle(next?: string) {
     const nextParam = next ? `?next=${encodeURIComponent(next)}` : '';
-    window.location.href = `/api/auth/google/start${nextParam}`;
+    window.location.href = getApiUrl(`/api/auth/google/start${nextParam}`);
   },
 
   async updateProfile({ name, locale }) {
     try {
-      const res = await fetch('/api/auth/me', {
+      const res = await fetch(getApiUrl('/api/auth/me'), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'bwenge' },
         credentials: 'include',
@@ -121,7 +121,7 @@ export const authService: AuthService = {
 
   async logout() {
     try {
-      await fetch('/api/auth/logout', {
+      await fetch(getApiUrl('/api/auth/logout'), {
         method: 'POST',
         headers: { 'X-Requested-With': 'bwenge' },
         credentials: 'include',
