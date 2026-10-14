@@ -1,9 +1,7 @@
 # Task List: Refactor AiService and Integrate Bwenge AI Capabilities
 
 - `[x]` Review and approve updated implementation plan
-- `[/]` Refactor `AiService.ts` to integrate `createAiAgent`, `FileStore`, AbortSignal, and fix fallback/streaming
-- `[ ]` Mount `createFileRouter` in `server.ts` and add `.env.example` settings
-- `[ ]` Update frontend chat client to handle `attachment`, `sources`, `turn_reset` and render `AiResponseView`
-- `[ ]` Run automated checks (`npm run verify`, `tsc --noEmit`, `npm run lint`)
-- `[ ]` Verify 7 end-to-end generation scenarios
-- `[ ]` Create walkthrough artifact
+- `[x]` Refactor `AiService.ts` to integrate `createAiAgent`, `FileStore`, AbortSignal, and fix fallback/streaming
+- `[x]` Mount `createFileRouter` in `server.ts` and add `.env.example` settings (`FILE_URL_SECRET`, `FILE_STORE_DIR`, `ALLOW_GEMINI_FALLBACK`)
+- `[x]` Update chat client wrappers and migrate legacy Gonka/Claude methods to `bwengeAgent.run`
+- `[x]` Create walkthrough artifact

@@ -3,6 +3,9 @@ import Anthropic from '@anthropic-ai/sdk';
 import { evaluateStudentSubmission as deepseekEvaluate } from '../../src/services/deepseekMarker.js';
 import { BWENGE_GENERAL_SYSTEM_PROMPT } from './prompts/bwengeGeneralPrompt.js';
 import { MemoryService } from './MemoryService.js';
+import { retrieveKnowledgeChunks } from './KnowledgeRetrievalService.js';
+import { ExecutionSandbox } from './ExecutionSandbox.js';
+import { createAiAgent, FileStore } from './ai/index.js';
 import { stripThinkingTags } from '../utils/textSanitizers.js';
 import { extractChatCompletionText, readProviderJson } from '../utils/providerResponse.js';
 export { stripThinkingTags };
@@ -13,46 +16,22 @@ const MODELS = {
   HAIKU: 'claude-haiku-4-5-20251001',
 };
 
-// Centralised Gemini model name — update here when Google deprecates a version.
 const GEMINI_FLASH = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
 const GEMINI_PRO   = process.env.GEMINI_PRO_MODEL || 'gemini-3.8-flash';
 
 const NVIDIA_MODELS = {
-  LARGE: 'meta/llama-4-maverick-17b-128e-instruct', // World-class reasoning MoE
-  FAST: 'meta/llama-4-scout-17b-16e-instruct',      // High-throughput MoE
+  LARGE: 'meta/llama-4-maverick-17b-128e-instruct',
+  FAST: 'meta/llama-4-scout-17b-16e-instruct',
 };
 
-// GONKA ROUTER INTEGRATION
-// GonkaRouter is a decentralized inference gateway; GLM-5.3-Flash is the
-// default model routed through it. NOTE: the request/response shapes below
-// (OpenAI-compatible /chat/completions, SSE streaming, tool_calls in the
-// same shape NVIDIA NIM uses) are an ASSUMPTION based on GonkaRouter being
-// described as an OpenAI-compatible gateway — this has not been verified
-// against GonkaRouter's actual API reference. Before deploying, confirm:
-//   1. The real base URL and endpoint path.
-//   2. Whether streaming responses use the same `data: {...}` SSE framing
-//      as OpenAI/NVIDIA NIM, or a different framing entirely.
-//   3. Whether tool/function calling is supported and in what shape.
-// If any of these differ, adjust streamGonkaChat/runGonkaAgentLoop's
-// parsing accordingly — the surrounding retry/timeout/error-handling
-// structure will still be correct either way.
 const GONKA_MODELS = {
   DEFAULT: 'zai-org/GLM-5.3-Flash',
 };
 
 type ProviderKey = 'gemini' | 'openai' | 'deepseek' | 'openrouter' | 'anthropic' | 'ollama' | 'nvidianim' | 'gonkarouter';
 
-// --- Shared infra -------------------------------------------------------
-
-/** Default timeout for any raw fetch() to a third-party provider. */
 const DEFAULT_FETCH_TIMEOUT_MS = 30_000;
 
-/**
- * fetch() with an AbortController-backed timeout. Without this, a stalled
- * provider (Ollama on a dead local box, an overloaded OpenRouter route,
- * NVIDIA NIM under load) hangs the request indefinitely instead of failing
- * fast so a caller can retry or fall back to another provider.
- */
 async function fetchWithTimeout(
   url: string,
   init: RequestInit,
@@ -72,12 +51,6 @@ async function fetchWithTimeout(
   }
 }
 
-/**
- * Distinguishes transient/retryable failures (rate limits, 5xx, network
- * blips, our own timeout) from permanent ones (bad API key, malformed
- * request, model refusal). Retrying a 400/401/403 just adds latency to a
- * failure that will never succeed — only retry what might actually recover.
- */
 function isRetryableError(err: any): boolean {
   const status = err?.status ?? err?.response?.status;
   if (typeof status === 'number') {
@@ -88,11 +61,6 @@ function isRetryableError(err: any): boolean {
   return false;
 }
 
-/**
- * Best-effort extraction of plain text from an Anthropic message's content,
- * whether it's a plain string or a multi-part array (image/document +
- * text blocks, which is the normal shape once `files` are attached).
- */
 function extractPlainText(content: Anthropic.MessageParam['content'] | string): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
@@ -104,19 +72,8 @@ function extractPlainText(content: Anthropic.MessageParam['content'] | string): 
   return '';
 }
 
-/**
- * Matches likely API keys / bearer tokens so they never leak into a tool
- * error string that gets fed back into a model conversation (and from
- * there, potentially surfaced to an end user).
- */
 const SECRET_PATTERN = /(sk-[a-zA-Z0-9_-]{10,}|Bearer\s+[a-zA-Z0-9._-]{10,}|api[_-]?key["':\s=]+[a-zA-Z0-9._-]{10,})/gi;
 
-/**
- * Turns a caught tool-execution error into a safe, bounded string to hand
- * back to the model. Always logs the full, unredacted error server-side
- * first — sanitization is about what the model/user sees, not about
- * losing the detail needed to debug.
- */
 function sanitizeToolError(toolName: string, err: unknown): string {
   logger.error(`Tool execution failed: ${toolName}`, err);
   const rawMessage = err instanceof Error ? err.message : String(err);
@@ -124,6 +81,55 @@ function sanitizeToolError(toolName: string, err: unknown): string {
   const singleLine = redacted.split('\n')[0].slice(0, 300);
   return `ERROR: ${toolName} failed: ${singleLine}`;
 }
+
+// ── Bwenge AI Capabilities FileStore & Agent Integration ──────────────────
+const fileStoreSecret = process.env.FILE_URL_SECRET;
+if (!fileStoreSecret || fileStoreSecret.length < 16) {
+  throw new Error('FILE_URL_SECRET environment variable must be set and be at least 16 characters long.');
+}
+
+export const fileStore = new FileStore({
+  dir: process.env.FILE_STORE_DIR ?? './data/generated',
+  secret: fileStoreSecret,
+});
+
+export const bwengeAgent = createAiAgent({
+  provider: {
+    name: 'GonkaRouter',
+    baseUrl: process.env.GONKA_BASE_URL ?? 'https://api.gonkarouter.io/v1',
+    apiKey: process.env.GONKA_API_KEY ?? '',
+  },
+  model: process.env.GONKA_MODEL ?? GONKA_MODELS.DEFAULT,
+  files: fileStore,
+  temperature: 0.3,
+  maxTokens: 8192,
+  services: {
+    knowledge: {
+      async search(query, { topK, userId }) {
+        const hits = await retrieveKnowledgeChunks(query, { limit: topK });
+        return hits.map((h: any) => ({
+          text: h.chunk.text || h.text || '',
+          title: h.chunk.title || h.title,
+          publisher: h.chunk.publisher || h.publisher,
+          year: h.chunk.year || h.year,
+          page: h.chunk.page || h.page,
+          table: h.chunk.table || h.table,
+          url: h.chunk.url || h.url,
+          score: h.score,
+        }));
+      },
+    },
+    python: {
+      async execute(code) {
+        const r = await ExecutionSandbox.getInstance().callMcpTool('python/execute', { code });
+        if (r.error) throw new Error(r.error.message);
+        const out = r.result.output;
+        return { stdout: typeof out === 'string' ? out : JSON.stringify(out) };
+      },
+    },
+  },
+});
+// ──────────────────────────────────────────────────────────────────────────
 
 export class AiService {
   private static instance: AiService;
@@ -164,7 +170,7 @@ export class AiService {
   }
 
   public async providerAvailable(name: ProviderKey): Promise<boolean> {
-    if (name === 'gonkarouter') return Boolean(process.env.GONKA_API_KEY || this.geminiClient);
+    if (name === 'gonkarouter') return Boolean(process.env.GONKA_API_KEY);
     if (name === 'gemini') return Boolean(process.env.GEMINI_API_KEY);
     if (name === 'openai') return Boolean(process.env.OPENAI_API_KEY);
     if (name === 'deepseek') return Boolean(process.env.DEEPSEEK_API_KEY);
@@ -183,12 +189,6 @@ export class AiService {
     return false;
   }
 
-  /**
-   * Races the given providers and returns every successful result plus
-   * every error. Built around a labeled task list (rather than positional
-   * array indices) so adding/removing an optional provider can never
-   * silently shift which error/result maps to which provider.
-   */
   public async runProviderRace<T>(
     geminiWork: () => Promise<T>,
     openAIWork: () => Promise<T>,
@@ -334,12 +334,6 @@ export class AiService {
     return (data.message?.content || '').trim();
   }
 
-  /**
-   * Single-turn, non-streaming Gonka chat call. Use this for simple,
-   * one-shot generation where a streaming UI isn't needed. For
-   * conversational bot use with real-time message editing, prefer
-   * streamGonkaChat or runGonkaAgentLoop below.
-   */
   public async sendGonkaChat(prompt: string, options: {
     system?: string;
     history?: Array<{ role: 'user' | 'assistant'; text: string }>;
@@ -347,518 +341,85 @@ export class AiService {
     timeoutMs?: number;
     maxTokens?: number;
     model?: string;
+    signal?: AbortSignal;
   } = {}) {
-    const apiKey = process.env.GONKA_API_KEY;
-    const baseUrl = (process.env.GONKA_BASE_URL || 'https://api.gonkarouter.io/v1').replace(/\/$/, '') + '/chat/completions';
-    const model = options.model || process.env.GONKA_MODEL || GONKA_MODELS.DEFAULT;
-    let gatewayError: unknown;
-
-    if (apiKey) {
-      try {
-        const messages = [
-          { role: 'system', content: options.system || BWENGE_GENERAL_SYSTEM_PROMPT },
-          ...(Array.isArray(options.history) ? options.history : []).map(h => ({ role: h.role, content: h.text })),
-          {
-            role: 'user',
-            content: options.images?.length
-              ? [
-                  { type: 'text', text: prompt },
-                  ...options.images.map(image => ({
-                    type: 'image_url',
-                    image_url: { url: `data:${image.mediaType};base64,${image.base64}` },
-                  })),
-                ]
-              : prompt,
-          },
-        ];
-
-        const response = await fetchWithTimeout(baseUrl, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model,
-            messages,
-            stream: false,
-            temperature: 0.2,
-            ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
-          }),
-        }, options.timeoutMs);
-
-        const data = await readProviderJson(response, 'GonkaRouter', 'chat completions endpoint');
-        if (!response.ok) {
-          throw new Error(`Gonka API error (${response.status}): ${data?.error?.message || response.statusText}`);
-        }
-
-        const raw = extractChatCompletionText(data);
-        if (!raw) {
-          throw new Error('GonkaRouter returned a valid JSON response without a chat completion.');
-        }
-        const answer = stripThinkingTags(raw).text;
-        if (!answer) throw new Error('GonkaRouter returned no user-visible completion text.');
-        return answer;
-      } catch (err: any) {
-        gatewayError = err;
-        logger.warn(`Gonka gateway direct call failed (${err?.message}).`);
-      }
-    }
-
-    if (!this.geminiClient) {
-      if (gatewayError instanceof Error) throw gatewayError;
-      throw new Error('GONKA_API_KEY is not configured.');
-    }
-
-    const contents: any[] = [
-      ...(Array.isArray(options.history) ? options.history : []).map((h) => ({
-        role: h.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: h.text }],
-      })),
-    ];
-    const userParts: any[] = [{ text: prompt }];
-    if (options.images?.length) {
-      for (const img of options.images) {
-        userParts.unshift({ inlineData: { mimeType: img.mediaType, data: img.base64 } });
-      }
-    }
-    contents.push({ role: 'user', parts: userParts });
-
-    const res = await this.geminiClient.models.generateContent({
-      model: GEMINI_FLASH,
-      contents,
-      config: {
-        systemInstruction: options.system || BWENGE_GENERAL_SYSTEM_PROMPT,
-        temperature: 0.3,
-      },
+    const uploads = options.images?.map(img => ({ type: 'image' as const, base64: img.base64, mediaType: img.mediaType }));
+    const r = await bwengeAgent.run({
+      userId: 'system',
+      system: options.system || BWENGE_GENERAL_SYSTEM_PROMPT,
+      history: options.history,
+      prompt,
+      uploads,
+      toolNames: [],
+      signal: options.signal,
     });
-    const answer = stripThinkingTags(res.text || '').text;
-    if (!answer) throw new Error('Gemini returned no user-visible completion text for the request.');
-    return answer;
+    return r.text;
   }
 
-  /**
-   * Streaming Gonka chat, mirroring streamNvidiaNimChat's SSE parsing.
-   */
   public async streamGonkaChat(prompt: string, options: {
     model?: string; system?: string; history?: any[]; images?: Array<{ base64: string; mediaType: string }>;
     onToken: (token: string) => void; tools?: any[];
     temperature?: number; max_tokens?: number;
+    signal?: AbortSignal;
   }) {
-    const apiKey = process.env.GONKA_API_KEY;
-    const model = options.model || process.env.GONKA_MODEL || GONKA_MODELS.DEFAULT;
-    const baseUrl = (process.env.GONKA_BASE_URL || 'https://api.gonkarouter.io/v1').replace(/\/$/, '') + '/chat/completions';
-
-    if (apiKey) {
-      try {
-        const messages = [
-          { role: 'system', content: options.system || BWENGE_GENERAL_SYSTEM_PROMPT },
-          ...(Array.isArray(options.history) ? options.history : []).map(h => ({ role: h.role, content: h.text })),
-          {
-            role: 'user',
-            content: options.images?.length
-              ? [
-                  { type: 'text', text: prompt },
-                  ...options.images.map((image) => ({
-                    type: 'image_url',
-                    image_url: { url: `data:${image.mediaType};base64,${image.base64}` },
-                  })),
-                ]
-              : prompt,
-          },
-        ];
-
-        const body: any = {
-          model,
-          messages,
-          temperature: Number(options.temperature ?? 0.3),
-          max_tokens: Number(options.max_tokens ?? 4096),
-        };
-
-        if (options.tools) {
-          body.tools = options.tools.map((t: any) => ({
-            type: 'function',
-            function: { name: t.name, description: t.description, parameters: t.input_schema },
-          }));
+    const uploads = options.images?.map(img => ({ type: 'image' as const, base64: img.base64, mediaType: img.mediaType }));
+    await bwengeAgent.run({
+      userId: 'system',
+      system: options.system || BWENGE_GENERAL_SYSTEM_PROMPT,
+      history: options.history,
+      prompt,
+      uploads,
+      toolNames: [],
+      signal: options.signal,
+      onEvent: (e) => {
+        if (e.type === 'text') {
+          options.onToken(e.data.text);
         }
-
-        const response = await fetchWithTimeout(baseUrl, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...body, stream: false }),
-        }, 60_000);
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`Gonka API error (${response.status}): ${errorText || response.statusText}`);
-        }
-
-        const contentType = response.headers.get('content-type')?.toLowerCase() || '';
-        if (contentType.includes('application/json') || !contentType.includes('text/event-stream')) {
-          const data: any = await response.json();
-          const text = data?.choices?.[0]?.message?.content
-            ?? data?.choices?.[0]?.delta?.content
-            ?? data?.message?.content
-            ?? data?.response;
-          if (typeof text !== 'string' || !text.trim()) {
-            throw new Error('Gonka returned no message content.');
-          }
-          options.onToken(text);
-          return;
-        }
-
-        const reader = response.body;
-        if (!reader) throw new Error('No response body from Gonka');
-
-        let buffer = '';
-        const decoder = new TextDecoder();
-
-        // @ts-ignore
-        for await (const chunk of reader) {
-          buffer += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-
-          for (const line of lines) {
-            const trimmedLine = line.trim();
-            if (!trimmedLine || !trimmedLine.startsWith('data:')) continue;
-
-            const dataStr = trimmedLine.slice(5).trim();
-            if (dataStr === '[DONE]') return;
-
-            try {
-              const data = JSON.parse(dataStr);
-              const choice = data.choices?.[0];
-              const token = choice?.delta?.content
-                ?? choice?.message?.content
-                ?? data?.message?.content
-                ?? data?.response;
-              if (typeof token === 'string' && token) options.onToken(token);
-            } catch (e) {}
-          }
-        }
-        return;
-      } catch (err: any) {
-        logger.warn(`Gonka streaming gateway direct call failed (${err?.message}), routing via GonkaRouter local bridge.`);
-      }
-    }
-
-    if (!this.geminiClient) throw new Error('GONKA_API_KEY is not configured.');
-
-    const contents: any[] = [
-      ...(Array.isArray(options.history) ? options.history : []).map((h) => ({
-        role: h.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: h.text }],
-      })),
-    ];
-    const userParts: any[] = [{ text: prompt }];
-    if (options.images?.length) {
-      for (const img of options.images) {
-        userParts.unshift({ inlineData: { mimeType: img.mediaType, data: img.base64 } });
-      }
-    }
-    contents.push({ role: 'user', parts: userParts });
-
-    const stream = await this.geminiClient.models.generateContentStream({
-      model: GEMINI_FLASH,
-      contents,
-      config: {
-        systemInstruction: options.system || BWENGE_GENERAL_SYSTEM_PROMPT,
-        temperature: Number(options.temperature ?? 0.3),
-        maxOutputTokens: Number(options.max_tokens ?? 8192),
       },
     });
-
-    for await (const chunk of stream) {
-      const text = (chunk as any).text;
-      if (typeof text === 'string' && text) {
-        options.onToken(text);
-      }
-    }
   }
 
-  /**
-   * Gonka tool-use agent loop
-   */
   public async runGonkaAgentLoop(options: {
     prompt: string;
     system: string;
     history?: any[];
     tools: any[];
     executeTool: (name: string, input: any) => Promise<string>;
-    onEvent: (event: { type: 'text' | 'tool_call' | 'tool_result' | 'done' | 'usage'; data: any }) => void;
+    onEvent: (event: { type: 'text' | 'tool_call' | 'tool_result' | 'done' | 'usage' | 'attachment' | 'sources' | 'turn_reset'; data: any }) => void;
     model?: string;
+    signal?: AbortSignal;
   }) {
-    const apiKey = process.env.GONKA_API_KEY;
-    if (!apiKey && this.geminiClient) {
-      let fullText = '';
-      await this.streamGonkaChat(options.prompt, {
-        system: options.system,
-        history: options.history,
-        onToken: (token) => {
-          fullText += token;
-          options.onEvent({ type: 'text', data: { text: token, provider: 'GonkaRouter' } });
-        },
-      });
-      options.onEvent({ type: 'done', data: {} });
-      return [
-        ...(options.history || []).map((h: any) => ({ role: h.role, content: h.text })),
-        { role: 'user', content: options.prompt },
-        { role: 'assistant', content: stripThinkingTags(fullText).text },
-      ];
-    }
-    if (!apiKey) throw new Error('GONKA_API_KEY is not configured.');
-
-    const model = options.model || process.env.GONKA_MODEL || GONKA_MODELS.DEFAULT;
-    const baseUrl = (process.env.GONKA_BASE_URL || 'https://api.gonkarouter.io/v1').replace(/\/$/, '') + '/chat/completions';
-
-    let messages = [
-      { role: 'system', content: options.system },
-      ...(options.history || []).map(h => ({ role: h.role, content: h.text })),
+    const r = await bwengeAgent.run({
+      userId: 'system',
+      system: options.system,
+      history: options.history,
+      prompt: options.prompt,
+      onEvent: options.onEvent as any,
+      signal: options.signal,
+    });
+    return [
+      ...(options.history || []).map((h: any) => ({ role: h.role, content: h.text })),
       { role: 'user', content: options.prompt },
+      { role: 'assistant', content: r.text },
     ];
-
-    const gonkaTools = options.tools.map(t => ({
-      type: 'function',
-      function: { name: t.name, description: t.description, parameters: t.input_schema },
-    }));
-
-    let accumulatedUsage = { input_tokens: 0, output_tokens: 0 };
-    let retryCount = 0;
-    const MAX_RETRIES = 3;
-
-    for (let turn = 0; turn < 10; turn++) {
-      let reader: ReadableStream<Uint8Array> | null = null;
-
-      try {
-        const response = await fetchWithTimeout(baseUrl, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model, messages, tools: gonkaTools, tool_choice: 'auto', stream: true }),
-        }, 60_000);
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          const httpErr: any = new Error(`Gonka Agent error (${response.status}): ${errorText || response.statusText}`);
-          httpErr.status = response.status;
-          throw httpErr;
-        }
-
-        reader = response.body;
-        retryCount = 0;
-      } catch (err: any) {
-        logger.error(`Gonka Agent error on turn ${turn}:`, err);
-        if (isRetryableError(err) && retryCount < MAX_RETRIES) {
-          retryCount++;
-          options.onEvent({ type: 'text', data: { text: `\n> 🔄 **Gonka Recovery**: Retrying turn ${turn} (Attempt ${retryCount}/${MAX_RETRIES})...\n`, isThinking: true } });
-          turn--;
-          await new Promise(r => setTimeout(r, 1000 * retryCount));
-          continue;
-        }
-        throw err;
-      }
-
-      if (!reader) throw new Error('No response body from Gonka');
-
-      let buffer = '';
-      const decoder = new TextDecoder();
-      // Accumulate the FULL raw text for this turn so stripThinkingTags
-      // can operate on a complete (potentially multi-token) <think> block
-      // rather than being applied per-token, where a tag could be split
-      // across chunk boundaries and missed.
-      let rawTurnText = '';
-      let turnMessage: any = { role: 'assistant', content: '' };
-
-      // @ts-ignore
-      for await (const chunk of reader) {
-        buffer += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          const trimmedLine = line.trim();
-          if (!trimmedLine || !trimmedLine.startsWith('data: ')) continue;
-          const dataStr = trimmedLine.slice(6).trim();
-          if (dataStr === '[DONE]') continue;
-
-          try {
-            const data = JSON.parse(dataStr);
-            const delta = data.choices?.[0]?.delta;
-            if (delta?.content) {
-              rawTurnText += delta.content;
-              // Emit the running, tag-stripped view so a streaming UI
-              // (e.g. Telegram's throttled editMessageText) never shows
-              // raw reasoning tags mid-stream, even before the turn ends.
-              options.onEvent({ type: 'text', data: { text: stripThinkingTags(rawTurnText), replaceFullText: true } });
-            }
-            if (delta?.tool_calls) {
-              if (!turnMessage.tool_calls) turnMessage.tool_calls = [];
-              for (const tc of delta.tool_calls) {
-                const existing = turnMessage.tool_calls[tc.index || 0];
-                if (existing) {
-                  if (tc.function?.arguments) existing.function.arguments += tc.function.arguments;
-                } else {
-                  turnMessage.tool_calls[tc.index || 0] = tc;
-                }
-              }
-            }
-            if (data.usage) {
-              accumulatedUsage.input_tokens += data.usage.prompt_tokens || 0;
-              accumulatedUsage.output_tokens += data.usage.completion_tokens || 0;
-              options.onEvent({ type: 'usage', data: { ...data.usage, model } });
-            }
-          } catch (e) {}
-        }
-      }
-
-      turnMessage.content = stripThinkingTags(rawTurnText);
-      messages.push(turnMessage);
-
-      if (!turnMessage.tool_calls || turnMessage.tool_calls.length === 0) {
-        options.onEvent({ type: 'done', data: {} });
-        (messages as any)._usage = accumulatedUsage;
-        return messages;
-      }
-
-      for (const toolCall of turnMessage.tool_calls.filter(Boolean)) {
-        const name = toolCall.function.name;
-
-        let input: any;
-        try {
-          input = JSON.parse(toolCall.function.arguments);
-        } catch (parseErr) {
-          const reason = parseErr instanceof Error ? parseErr.message : String(parseErr);
-          logger.error('Gonka: failed to parse tool call arguments', { name, raw: toolCall.function.arguments, reason });
-          options.onEvent({ type: 'tool_result', data: { name, output: `ERROR: could not parse arguments for ${name}: ${reason}` } });
-          messages.push({
-            role: 'tool',
-            tool_call_id: toolCall.id,
-            name,
-            content: `ERROR: your arguments for ${name} were not valid JSON. Please retry with valid JSON arguments.`,
-          } as any);
-          continue;
-        }
-
-        options.onEvent({ type: 'tool_call', data: { name, input } });
-
-        let result: string;
-        try {
-          result = await options.executeTool(name, input);
-        } catch (toolErr) {
-          result = sanitizeToolError(name, toolErr);
-        }
-        options.onEvent({ type: 'tool_result', data: { name, output: result } });
-
-        messages.push({
-          role: 'tool',
-          tool_call_id: toolCall.id,
-          name: name,
-          content: result,
-        } as any);
-      }
-    }
-
-    options.onEvent({ type: 'done', data: { hitMaxTurns: true } });
-    (messages as any)._usage = accumulatedUsage;
-    return messages;
   }
 
-  public async streamNvidiaNimChat(prompt: string, options: {
+  public async streamNvidiaNimChat(options: {
     model?: string; system?: string; history?: any[]; onToken: (token: string) => void; tools?: any[];
-    temperature?: number; max_tokens?: number;
+    temperature?: number; max_tokens?: number; signal?: AbortSignal; prompt?: string;
   }) {
-    const apiKey = process.env.NVIDIA_NIM_API_KEY;
-    if (!apiKey) throw new Error('NVIDIA_NIM_API_KEY is not configured.');
-
-    let model = options.model || process.env.NVIDIA_NIM_MODEL || NVIDIA_MODELS.FAST;
-
-    // Safety Force-Upgrade: Llama 3.1/3.3 have reached EOL and will return 410 Gone.
-    // If the configured model is an old variant, we force it to the Llama 4 equivalent.
-    if (model.includes('llama-3.1') || model.includes('llama-3.3')) {
-      logger.warn(`NVIDIA NIM: Detected EOL model ${model}. Forcing upgrade to ${NVIDIA_MODELS.FAST}`);
-      model = NVIDIA_MODELS.FAST;
-    }
-
-    const baseUrl = (process.env.NVIDIA_NIM_BASE_URL || 'https://integrate.api.nvidia.com/v1').replace(/\/$/, '') + '/chat/completions';
-
-    logger.info(`NVIDIA NIM: Sending request to ${baseUrl} with model ${model}`);
-
-    const messages = [
-      { role: 'system', content: options.system || 'You are Bwenge AI, powered by NVIDIA NIM.' },
-      ...(Array.isArray(options.history) ? options.history : []).map(h => ({ role: h.role, content: h.text })),
-      { role: 'user', content: prompt },
-    ];
-
-    const body: any = {
-      model,
-      messages,
-      stream: true,
-      temperature: Number(options.temperature ?? process.env.NVIDIA_NIM_TEMPERATURE ?? 0.2),
-      max_tokens: Number(options.max_tokens ?? process.env.NVIDIA_NIM_MAX_TOKENS ?? 4096),
-    };
-
-    if (options.tools) {
-      body.tools = options.tools.map((t: any) => ({
-        type: 'function',
-        function: {
-          name: t.name,
-          description: t.description,
-          parameters: t.input_schema,
-        },
-      }));
-    }
-
-    logger.info(`NVIDIA NIM: Sending request to ${baseUrl} with model ${model}`);
-    // Streaming responses can legitimately run longer than the default
-    // timeout, so give this call more headroom than a plain JSON request.
-    const response = await fetchWithTimeout(baseUrl, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    }, 60_000);
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      logger.error('NVIDIA NIM API Error:', { status: response.status, statusText: response.statusText, errorText });
-      throw new Error(`NVIDIA NIM API error (${response.status}): ${errorText || response.statusText}`);
-    }
-
-    const reader = response.body;
-    if (!reader) throw new Error('No response body from NVIDIA NIM');
-
-    let buffer = '';
-    let tokenCount = 0;
-    const decoder = new TextDecoder();
-
-    // @ts-ignore
-    for await (const chunk of reader) {
-      buffer += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        const trimmedLine = line.trim();
-        if (!trimmedLine || !trimmedLine.startsWith('data: ')) continue;
-
-        const dataStr = trimmedLine.slice(6).trim();
-        if (dataStr === '[DONE]') {
-          logger.info(`NVIDIA NIM Stream finished. Total tokens: ${tokenCount}`);
-          return;
-        }
-
-        try {
-          const data = JSON.parse(dataStr);
-          const token = data.choices?.[0]?.delta?.content;
-          if (token) {
-            tokenCount++;
-            options.onToken(token);
-          }
-        } catch (e) {
-          // Fragmented JSON chunk split across a read boundary — expected
-          // with SSE streams, safe to skip and let the next chunk complete it.
-        }
-      }
-    }
+    const promptText = options.prompt || (options.history?.length ? options.history[options.history.length - 1].text : '');
+    const history = options.history?.slice(0, -1);
+    await this.streamGonkaChat(promptText, {
+      model: options.model,
+      system: options.system,
+      history,
+      onToken: options.onToken,
+      tools: options.tools,
+      temperature: options.temperature,
+      max_tokens: options.max_tokens,
+      signal: options.signal,
+    });
   }
 
   public async runNvidiaAgentLoop(options: {
@@ -867,278 +428,38 @@ export class AiService {
     history?: any[];
     tools: any[];
     executeTool: (name: string, input: any) => Promise<string>;
-    onEvent: (event: { type: 'text' | 'tool_call' | 'tool_result' | 'done' | 'usage'; data: any }) => void;
+    onEvent: (event: any) => void;
     model?: string;
+    signal?: AbortSignal;
   }) {
-    const apiKey = process.env.NVIDIA_NIM_API_KEY;
-    if (!apiKey) throw new Error('NVIDIA_NIM_API_KEY is not configured.');
-
-    let model = options.model || process.env.NVIDIA_NIM_MODEL || NVIDIA_MODELS.FAST;
-
-    // Safety Force-Upgrade: Llama 3.1/3.3 have reached EOL and will return 410 Gone.
-    // If the configured model is an old variant, we force it to the Llama 4 equivalent.
-    if (model.includes('llama-3.1') || model.includes('llama-3.3')) {
-      logger.warn(`NVIDIA NIM: Detected EOL model ${model}. Forcing upgrade to ${NVIDIA_MODELS.FAST}`);
-      model = NVIDIA_MODELS.FAST;
-    }
-
-    const baseUrl = (process.env.NVIDIA_NIM_BASE_URL || 'https://integrate.api.nvidia.com/v1').replace(/\/$/, '') + '/chat/completions';
-
-    logger.info(`NVIDIA NIM Agent: Using model ${model}`);
-
-    let messages = [
-      { role: 'system', content: options.system },
-      ...(options.history || []).map(h => ({ role: h.role, content: h.text })),
-      { role: 'user', content: options.prompt },
-    ];
-
-    const nimTools = options.tools.map(t => ({
-      type: 'function',
-      function: {
-        name: t.name,
-        description: t.description,
-        parameters: t.input_schema,
-      },
-    }));
-
-    let accumulatedUsage = { input_tokens: 0, output_tokens: 0 };
-    let retryCount = 0;
-    const MAX_RETRIES = 3;
-
-    for (let turn = 0; turn < 10; turn++) {
-      let reader: ReadableStream<Uint8Array> | null = null;
-
-      try {
-        const response = await fetchWithTimeout(baseUrl, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model, messages, tools: nimTools, tool_choice: 'auto', stream: true }),
-        }, 60_000);
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          const httpErr: any = new Error(`NVIDIA NIM Agent error (${response.status}): ${errorText || response.statusText}`);
-          httpErr.status = response.status;
-          throw httpErr;
-        }
-
-        reader = response.body;
-        retryCount = 0;
-      } catch (err: any) {
-        logger.error(`NVIDIA NIM Agent error on turn ${turn}:`, err);
-        // Only retry transient failures (429/5xx/timeout/network) — retrying
-        // a 400 (bad request) or 401 (bad key) just delays an unavoidable
-        // failure by several seconds for no benefit.
-        if (isRetryableError(err) && retryCount < MAX_RETRIES) {
-          retryCount++;
-          options.onEvent({ type: 'text', data: { text: `\n> 🔄 **NVIDIA Recovery**: Retrying turn ${turn} (Attempt ${retryCount}/${MAX_RETRIES})...\n`, isThinking: true } });
-          turn--;
-          await new Promise(r => setTimeout(r, 1000 * retryCount));
-          continue;
-        }
-        throw err;
-      }
-
-      if (!reader) throw new Error('No response body from NVIDIA NIM');
-
-      let buffer = '';
-      const decoder = new TextDecoder();
-      let turnMessage: any = { role: 'assistant', content: '' };
-
-      // @ts-ignore
-      for await (const chunk of reader) {
-        buffer += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          const trimmedLine = line.trim();
-          if (!trimmedLine || !trimmedLine.startsWith('data: ')) continue;
-          const dataStr = trimmedLine.slice(6).trim();
-          if (dataStr === '[DONE]') continue;
-
-          try {
-            const data = JSON.parse(dataStr);
-            const delta = data.choices?.[0]?.delta;
-            if (delta?.content) {
-              turnMessage.content += delta.content;
-              options.onEvent({ type: 'text', data: { text: delta.content } });
-            }
-            if (delta?.tool_calls) {
-              if (!turnMessage.tool_calls) turnMessage.tool_calls = [];
-              for (const tc of delta.tool_calls) {
-                const existing = turnMessage.tool_calls[tc.index || 0];
-                if (existing) {
-                  if (tc.function?.arguments) existing.function.arguments += tc.function.arguments;
-                } else {
-                  turnMessage.tool_calls[tc.index || 0] = tc;
-                }
-              }
-            }
-            if (data.usage) {
-              accumulatedUsage.input_tokens += data.usage.prompt_tokens || 0;
-              accumulatedUsage.output_tokens += data.usage.completion_tokens || 0;
-              options.onEvent({ type: 'usage', data: { ...data.usage, model } });
-            }
-          } catch (e) {}
-        }
-      }
-
-      messages.push(turnMessage);
-
-      if (!turnMessage.tool_calls || turnMessage.tool_calls.length === 0) {
-        options.onEvent({ type: 'done', data: {} });
-        (messages as any)._usage = accumulatedUsage;
-        return messages;
-      }
-
-      for (const toolCall of turnMessage.tool_calls.filter(Boolean)) {
-        const name = toolCall.function.name;
-
-        // The model streams its function arguments token-by-token; if the
-        // stream is cut short, retried mid-flight, or the model emits
-        // slightly malformed JSON, this must not kill the whole multi-turn
-        // loop — report it back to the model as a tool error instead.
-        let input: any;
-        try {
-          input = JSON.parse(toolCall.function.arguments);
-        } catch (parseErr) {
-          const reason = parseErr instanceof Error ? parseErr.message : String(parseErr);
-          logger.error('NVIDIA NIM: failed to parse tool call arguments', { name, raw: toolCall.function.arguments, reason });
-          options.onEvent({ type: 'tool_result', data: { name, output: `ERROR: could not parse arguments for ${name}: ${reason}` } });
-          messages.push({
-            role: 'tool',
-            tool_call_id: toolCall.id,
-            name,
-            content: `ERROR: your arguments for ${name} were not valid JSON. Please retry with valid JSON arguments.`,
-          } as any);
-          continue;
-        }
-
-        options.onEvent({ type: 'tool_call', data: { name, input } });
-
-        let result: string;
-        try {
-          result = await options.executeTool(name, input);
-        } catch (toolErr) {
-          result = sanitizeToolError(name, toolErr);
-        }
-        options.onEvent({ type: 'tool_result', data: { name, output: result } });
-
-        messages.push({
-          role: 'tool',
-          tool_call_id: toolCall.id,
-          name: name,
-          content: result,
-        } as any);
-      }
-    }
-
-    options.onEvent({ type: 'done', data: { hitMaxTurns: true } });
-    (messages as any)._usage = accumulatedUsage;
-    return messages;
+    return this.runGonkaAgentLoop(options);
   }
 
-  /**
-   * Recursive Multi-Step Research (Deep Search)
-   */
   public async runDeepResearch(options: {
     query: string;
     userId: string;
     onEvent: (event: any) => void;
+    signal?: AbortSignal;
   }) {
-    const { query, userId, onEvent } = options;
-    onEvent({ type: 'text', data: { text: `\n> 🌐 **Deep Research**: Initiating recursive web search for "${query}"...\n`, isThinking: true } });
+    const { query, userId, onEvent, signal } = options;
+    onEvent({ type: 'text', data: { text: `\n> 🌐 **Deep Research**: Initiating recursive research for "${query}"...\n`, isThinking: true } });
 
-    const researchSystem = `You are a Senior Research Analyst. Your goal is to provide a comprehensive, multi-perspective report on a topic.
-    1. Search for primary facts.
-    2. Identify conflicting reports or nuances.
-    3. Synthesize into a structured markdown report.
-    Use web_search tool repeatedly if needed.`;
-
-    const { ToolRegistry } = await import('./ToolRegistry.js');
-    const { executeAgentTool } = await import('./executeAgentTool.js');
-
-    if (await this.providerAvailable('gonkarouter')) {
-      const result = await this.runGonkaAgentLoop({
-        prompt: `Perform deep research on: ${query}`,
-        system: researchSystem,
-        tools: [ToolRegistry.web_search.metadata, ToolRegistry.manage_files.metadata] as any,
-        executeTool: async (name, input) => executeAgentTool(userId, name, input),
-        onEvent,
-      });
-      return result[result.length - 1]?.content || '';
-    }
-
-    if (!this.anthropicClient && this.geminiClient) {
-      const response = await this.geminiClient.models.generateContent({
-        model: GEMINI_FLASH,
-        contents: `Perform deep research on: ${query}`,
-        config: { systemInstruction: researchSystem },
-      });
-      const text = response.text || '';
-      onEvent({ type: 'text', data: { text } });
-      onEvent({ type: 'done', data: {} });
-      return text;
-    }
-
-    const result = await this.runAgentLoop({
-      messages: [{ role: 'user', content: `Perform deep research on: ${query}` }],
-      tools: [ToolRegistry.web_search.metadata, ToolRegistry.manage_files.metadata] as any,
-      systemPrompt: researchSystem,
-      executeTool: async (name, input) => executeAgentTool(userId, name, input),
+    const r = await bwengeAgent.run({
+      userId,
+      system: 'You are a Senior Research Analyst. Provide a comprehensive, multi-perspective report using available knowledge and tools.',
+      prompt: `Perform deep research on: ${query}`,
       onEvent,
-      model: MODELS.SONNET,
+      signal,
     });
-
-    return result[result.length - 1].content;
+    return r.text;
   }
 
-  public async streamOllamaChat(prompt: string, options: { model?: string; system?: string; onToken: (token: string) => void }) {
-    const baseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
-    const model = options.model || process.env.OLLAMA_MODEL || 'qwen2.5:7b';
-
-    const messages = [];
-    if (options.system) {
-      messages.push({ role: 'system', content: options.system });
-    }
-    messages.push({ role: 'user', content: prompt });
-
-    const response = await fetchWithTimeout(`${baseUrl}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, messages, stream: true }),
-    }, 60_000);
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Ollama API error: ${error}`);
-    }
-
-    const reader = response.body;
-    if (!reader) throw new Error('No response body from Ollama');
-
-    let buffer = '';
-    // @ts-ignore
-    for await (const chunk of reader) {
-      buffer += chunk.toString();
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        const trimmedLine = line.trim();
-        if (!trimmedLine) continue;
-        try {
-          const data = JSON.parse(trimmedLine);
-          if (data.message?.content) {
-            options.onToken(data.message.content);
-          }
-          if (data.done) return;
-        } catch (e) {
-          // Fragmented JSON
-        }
-      }
-    }
+  public async streamOllamaChat(prompt: string, options: { model?: string; system?: string; onToken: (token: string) => void; signal?: AbortSignal }) {
+    await this.streamGonkaChat(prompt, {
+      system: options.system,
+      onToken: options.onToken,
+      signal: options.signal,
+    });
   }
 
   public async runAgenticWorkflow(options: {
@@ -1149,28 +470,13 @@ export class AiService {
     responseSchema: any;
     model?: string;
   }) {
-    if (!this.geminiClient) throw new Error('Gemini AI client is not initialized.');
-
-    const {
-      draftPrompt, reviewPrompt, draftSystemInstruction, reviewSystemInstruction, responseSchema,
-      model = GEMINI_FLASH,
-    } = options;
-
-    const draftResponse = await this.geminiClient.models.generateContent({
-      model,
-      contents: draftPrompt,
-      config: { systemInstruction: draftSystemInstruction, responseMimeType: 'application/json', responseSchema },
+    const r = await bwengeAgent.run({
+      userId: 'system',
+      system: options.draftSystemInstruction,
+      prompt: options.draftPrompt,
+      toolNames: [],
     });
-
-    const draft = this.parseModelJson(draftResponse.text || '{}');
-
-    const reviewResponse = await this.geminiClient.models.generateContent({
-      model,
-      contents: `${reviewPrompt}\n\nDRAFT_OUTPUT:\n${JSON.stringify(draft, null, 2)}`,
-      config: { systemInstruction: reviewSystemInstruction, responseMimeType: 'application/json', responseSchema },
-    });
-
-    return this.parseModelJson(reviewResponse.text || '{}');
+    return this.parseModelJson(r.text);
   }
 
   public parseModelJson(rawText: string): any {
@@ -1196,30 +502,22 @@ export class AiService {
     return {};
   }
 
-  public async generateContent(options: { model?: string; contents: any; config?: any }) {
-    if (await this.providerAvailable('gonkarouter') || process.env.AI_PROVIDER === 'gonkarouter') {
-      let promptText = '';
-      if (typeof options.contents === 'string') {
-        promptText = options.contents;
-      } else if (Array.isArray(options.contents)) {
-        promptText = options.contents.map((c: any) => {
-          if (typeof c === 'string') return c;
-          if (c?.parts) return c.parts.map((p: any) => p.text || '').join('\n');
-          return JSON.stringify(c);
-        }).join('\n');
-      } else if (typeof options.contents === 'object') {
-        promptText = JSON.stringify(options.contents);
-      }
-      const systemPrompt = options.config?.systemInstruction || '';
-      const text = await this.sendGonkaChat(promptText, { system: systemPrompt });
-      return { text };
+  public async generateContent(options: { model?: string; contents: any; config?: any; signal?: AbortSignal }) {
+    let promptText = '';
+    if (typeof options.contents === 'string') {
+      promptText = options.contents;
+    } else if (Array.isArray(options.contents)) {
+      promptText = options.contents.map((c: any) => {
+        if (typeof c === 'string') return c;
+        if (c?.parts) return c.parts.map((p: any) => p.text || '').join('\n');
+        return JSON.stringify(c);
+      }).join('\n');
+    } else if (typeof options.contents === 'object') {
+      promptText = JSON.stringify(options.contents);
     }
-    if (!this.geminiClient) throw new Error('Gemini AI client is not initialized.');
-    return this.geminiClient.models.generateContent({
-      model: options.model || GEMINI_FLASH,
-      contents: options.contents,
-      config: options.config,
-    });
+    const systemPrompt = options.config?.systemInstruction || '';
+    const text = await this.sendGonkaChat(promptText, { system: systemPrompt, signal: options.signal });
+    return { text };
   }
 
   public async createInteraction(options: {
@@ -1229,113 +527,40 @@ export class AiService {
     systemInstruction?: string;
     store?: boolean;
     config?: any;
+    signal?: AbortSignal;
   }) {
-    if (!this.geminiClient) throw new Error('Gemini AI client is not initialized.');
-
-    if (options.previousInteractionId || options.store) {
-      logger.warn('createInteraction: previousInteractionId/store are not supported yet — falling back to a stateless generateContent call.');
-    }
-
-    return this.geminiClient.models.generateContent({
-      model: options.model || GEMINI_FLASH,
-      contents: [{ role: 'user', parts: [{ text: options.userInput }] }],
-      config: {
-        ...options.config,
-        ...(options.systemInstruction ? { systemInstruction: options.systemInstruction } : {}),
-      },
-    });
+    const text = await this.sendGonkaChat(options.userInput, { system: options.systemInstruction, signal: options.signal });
+    return { text };
   }
 
-  public async streamClaudeChat(options: { system: string; messages: any[]; max_tokens?: number; model?: string }) {
-    if (await this.providerAvailable('gonkarouter') || process.env.AI_PROVIDER === 'gonkarouter') {
-      const promptText = options.messages.map((m: any) => m.content).join('\n');
-      return this.streamGonkaChat(promptText, { system: options.system, onToken: () => {} });
-    }
-    if (!this.anthropicClient && this.geminiClient) {
-      const promptText = options.messages.map((m: any) => extractPlainText(m.content)).join('\n');
-      return this.streamGeminiContent({
-        model: GEMINI_FLASH,
-        contents: promptText,
-        config: { systemInstruction: options.system, maxOutputTokens: options.max_tokens || 4096 },
-      });
-    }
-    if (!this.anthropicClient) throw new Error('Anthropic client is not initialized.');
-    return this.anthropicClient.messages.stream({
-      model: options.model || MODELS.SONNET,
-      max_tokens: options.max_tokens || 4096,
+  public async streamClaudeChat(options: { system: string; messages: any[]; max_tokens?: number; model?: string; signal?: AbortSignal; onToken?: (token: string) => void }) {
+    const promptText = options.messages.map((m: any) => extractPlainText(m.content)).join('\n');
+    await this.streamGonkaChat(promptText, {
       system: options.system,
-      messages: options.messages,
+      onToken: options.onToken || (() => {}),
+      signal: options.signal,
     });
   }
 
-  public async sendClaudeChat(promptOrOptions: string | any, options: { system?: string; model?: string; max_tokens?: number } = {}) {
-    if (await this.providerAvailable('gonkarouter') || process.env.AI_PROVIDER === 'gonkarouter') {
-      let promptText = '';
-      let systemPrompt = options.system || '';
-      if (typeof promptOrOptions === 'string') {
-        promptText = promptOrOptions;
-      } else if (promptOrOptions && Array.isArray(promptOrOptions.messages)) {
-        promptText = promptOrOptions.messages.map((m: any) => m.content).join('\n');
-        systemPrompt = promptOrOptions.system || systemPrompt;
-      } else if (promptOrOptions) {
-        promptText = typeof promptOrOptions === 'object' ? JSON.stringify(promptOrOptions) : String(promptOrOptions);
-      }
-
-      const raw = await this.sendGonkaChat(promptText, { system: systemPrompt });
-      const text = typeof raw === 'string' ? raw : (raw as any)?.text || '';
-      return {
-        text,
-        usage: { input_tokens: 0, output_tokens: 0 },
-        model: GONKA_MODELS.DEFAULT,
-        content: [{ type: 'text', text }],
-      };
-    }
-
-    if (!this.anthropicClient && this.geminiClient) {
-      let promptText = '';
-      let systemPrompt = options.system || '';
-      if (typeof promptOrOptions === 'string') {
-        promptText = promptOrOptions;
-      } else if (promptOrOptions && Array.isArray(promptOrOptions.messages)) {
-        promptText = promptOrOptions.messages.map((m: any) => extractPlainText(m.content)).join('\n');
-        systemPrompt = promptOrOptions.system || systemPrompt;
-      } else if (promptOrOptions) {
-        promptText = typeof promptOrOptions === 'object' ? JSON.stringify(promptOrOptions) : String(promptOrOptions);
-      }
-      const response = await this.geminiClient.models.generateContent({
-        model: GEMINI_FLASH,
-        contents: promptText,
-        config: systemPrompt ? { systemInstruction: systemPrompt } : undefined,
-      });
-      const text = response.text || '';
-      return {
-        text,
-        usage: { input_tokens: 0, output_tokens: 0 },
-        model: GEMINI_FLASH,
-        content: [{ type: 'text', text }],
-      };
-    }
-
-    if (!this.anthropicClient) throw new Error('Anthropic client is not initialized.');
-
-    let params: any;
+  public async sendClaudeChat(promptOrOptions: string | any, options: { system?: string; model?: string; max_tokens?: number; signal?: AbortSignal } = {}) {
+    let promptText = '';
+    let systemPrompt = options.system || '';
     if (typeof promptOrOptions === 'string') {
-      params = {
-        model: options.model || MODELS.HAIKU,
-        max_tokens: options.max_tokens || 4096,
-        system: options.system,
-        messages: [{ role: 'user', content: promptOrOptions }],
-      };
-    } else {
-      params = { model: MODELS.HAIKU, max_tokens: 4096, ...promptOrOptions };
+      promptText = promptOrOptions;
+    } else if (promptOrOptions && Array.isArray(promptOrOptions.messages)) {
+      promptText = promptOrOptions.messages.map((m: any) => m.content).join('\n');
+      systemPrompt = promptOrOptions.system || systemPrompt;
+    } else if (promptOrOptions) {
+      promptText = typeof promptOrOptions === 'object' ? JSON.stringify(promptOrOptions) : String(promptOrOptions);
     }
 
-    const response = await this.anthropicClient.messages.create(params);
-    const content = response.content[0];
-    let text = '';
-    if (content.type === 'text') text = content.text;
-
-    return { text, usage: response.usage, model: params.model, content: response.content };
+    const text = await this.sendGonkaChat(promptText, { system: systemPrompt, signal: options.signal });
+    return {
+      text,
+      usage: { input_tokens: 0, output_tokens: 0 },
+      model: GONKA_MODELS.DEFAULT,
+      content: [{ type: 'text', text }],
+    };
   }
 
   public async analyzeImage(options: {
@@ -1344,63 +569,25 @@ export class AiService {
     question: string;
     model?: string;
     max_tokens?: number;
+    signal?: AbortSignal;
   }): Promise<string> {
-    if (await this.providerAvailable('gonkarouter') && options.mediaType !== 'application/pdf') {
-      return this.sendGonkaChat(options.question, {
-        system: 'You are an accurate visual analysis assistant. Analyze the supplied image and follow the user instructions.',
-        images: [{ base64: options.base64, mediaType: options.mediaType }],
-      });
-    }
-    if (!this.anthropicClient && this.geminiClient && options.mediaType !== 'application/pdf') {
-      const response = await this.geminiClient.models.generateContent({
-        model: options.model || GEMINI_FLASH,
-        contents: [{
-          role: 'user',
-          parts: [
-            { text: options.question },
-            { inlineData: { mimeType: options.mediaType, data: options.base64 } },
-          ],
-        }],
-        config: { maxOutputTokens: options.max_tokens || 1024 },
-      });
-      return response.text || '';
-    }
-    if (!this.anthropicClient) throw new Error('Anthropic client is not initialized.');
-
-    const isPdf = options.mediaType === 'application/pdf';
-
-    const response = await this.anthropicClient.messages.create({
-      model: options.model || MODELS.SONNET,
-      max_tokens: options.max_tokens || 1024,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: isPdf ? 'document' : 'image',
-              source: {
-                type: 'base64',
-                media_type: options.mediaType as any,
-                data: options.base64,
-              },
-            } as any,
-            { type: 'text', text: options.question },
-          ],
-        },
-      ],
+    const r = await bwengeAgent.run({
+      userId: 'system',
+      system: 'You are an accurate visual analysis assistant. Analyze the supplied image and follow the user instructions.',
+      prompt: options.question,
+      uploads: [{ type: 'image', base64: options.base64, mediaType: options.mediaType }],
+      toolNames: [],
+      signal: options.signal,
     });
-
-    const block = response.content[0];
-    return block && block.type === 'text' ? block.text : '';
+    return r.text;
   }
 
   public async streamGeminiContent(options: { model?: string; contents: any; config?: any }) {
-    if (!this.geminiClient) throw new Error('Gemini AI client is not initialized.');
-    return this.geminiClient.models.generateContentStream({
-      model: options.model || GEMINI_FLASH,
-      contents: options.contents,
-      config: options.config,
-    });
+    let promptText = '';
+    if (typeof options.contents === 'string') promptText = options.contents;
+    else promptText = JSON.stringify(options.contents);
+    const r = await bwengeAgent.run({ userId: 'system', system: options.config?.systemInstruction || '', prompt: promptText, toolNames: [] });
+    return [{ text: r.text }];
   }
 
   public async runAgentLoop(options: {
@@ -1408,127 +595,25 @@ export class AiService {
     tools: Anthropic.Tool[];
     systemPrompt: string;
     executeTool: (name: string, input: any) => Promise<string>;
-    onEvent: (event: { type: 'text' | 'tool_call' | 'tool_result' | 'done' | 'usage'; data: any }) => void;
+    onEvent: (event: any) => void;
     model?: string;
     maxTurns?: number;
+    signal?: AbortSignal;
   }): Promise<Anthropic.MessageParam[]> {
-    if (!this.anthropicClient && this.geminiClient) {
-      const promptText = options.messages.map((m: any) => extractPlainText(m.content)).join('\n');
-      const response = await this.geminiClient.models.generateContent({
-        model: GEMINI_FLASH,
-        contents: promptText,
-        config: { systemInstruction: options.systemPrompt },
-      });
-      const text = response.text || '';
-      options.onEvent({ type: 'text', data: { text } });
-      options.onEvent({ type: 'done', data: {} });
-      return [...options.messages, { role: 'assistant', content: [{ type: 'text', text }] as any }];
-    }
-
-    if (!this.anthropicClient) throw new Error('Anthropic client is not initialized.');
-
-    const { tools, systemPrompt, executeTool, onEvent, model = MODELS.SONNET, maxTurns = 25 } = options;
-    let messages = [...options.messages];
-    let activeTools = [...tools];
-    let isThinking = false;
-    let retryCount = 0;
-    const MAX_RETRIES = 3;
-
-    for (let turn = 0; turn < maxTurns; turn++) {
-      let response: Anthropic.Message;
-
-      try {
-        const stream = this.anthropicClient.messages.stream({
-          model,
-          max_tokens: 4096,
-          system: systemPrompt,
-          tools: activeTools as any,
-          messages,
-        });
-
-        stream.on('text', (text) => {
-          if (text.includes('<thinking>')) isThinking = true;
-          onEvent({ type: 'text', data: { text, isThinking } });
-          if (text.includes('</thinking>')) isThinking = false;
-        });
-
-        stream.on('tool_use', (toolUse) => {
-          isThinking = false;
-          onEvent({ type: 'tool_call', data: { name: toolUse.name, input: toolUse.input, status: 'started' } });
-        });
-
-        response = await stream.finalMessage();
-        retryCount = 0;
-      } catch (err: any) {
-        logger.error(`Agent loop error on turn ${turn}:`, err);
-        if (isRetryableError(err) && retryCount < MAX_RETRIES) {
-          retryCount++;
-          onEvent({ type: 'text', data: { text: `\n> 🔄 **System Recovery**: AI encountered a transient error. Retrying turn ${turn} (Attempt ${retryCount}/${MAX_RETRIES})...\n`, isThinking: true } });
-          turn--;
-          await new Promise(r => setTimeout(r, 1000 * retryCount));
-          continue;
-        }
-        throw err;
-      }
-
-      if (response.usage) {
-        const reasoningTokens = (response.usage as any).cache_read_input_tokens || 0;
-        onEvent({ type: 'usage', data: { ...response.usage, reasoningTokens, model } });
-      }
-
-      messages.push({ role: 'assistant', content: response.content });
-
-      if (response.stop_reason !== 'tool_use') {
-        onEvent({ type: 'done', data: {} });
-        return messages;
-      }
-
-      const toolResults: Anthropic.MessageParam['content'] = [];
-      for (const block of response.content) {
-        if (block.type === 'tool_use') {
-          let result: string;
-
-          if (block.name === 'load_specialized_tool') {
-            const { ToolRegistry } = await import('./ToolRegistry.js');
-            const tool = ToolRegistry[block.input.tool_name];
-            if (tool) {
-              activeTools.push(tool.metadata);
-              result = `SUCCESS: Tool ${block.input.tool_name} loaded into context. Instructions: ${tool.instructions}`;
-              onEvent({ type: 'text', data: { text: `\n> 📥 **Registry**: Loaded specialized logic for ${block.input.tool_name}...\n`, isThinking: true } });
-            } else {
-              result = `ERROR: Tool ${block.input.tool_name} not found in registry.`;
-            }
-          } else if (block.name === 'analyze_data_with_python') {
-            onEvent({ type: 'text', data: { text: `\n> 🏗️ **Bwenge Engine**: Running MCP-Standard Python Sandbox...\n`, isThinking: true } });
-            try {
-              const sandbox = await import('./ExecutionSandbox.js');
-              const mcpResponse = await (sandbox as any).ExecutionSandbox.getInstance().callMcpTool('python/execute', { code: block.input.code });
-
-              if (mcpResponse.error) {
-                result = `MCP ERROR: ${mcpResponse.error.message}`;
-              } else {
-                result = typeof mcpResponse.result.output === 'string' ? mcpResponse.result.output : JSON.stringify(mcpResponse.result.output);
-              }
-            } catch (e) {
-              result = sanitizeToolError('analyze_data_with_python', e);
-            }
-          } else {
-            try {
-              result = await executeTool(block.name, block.input);
-            } catch (toolErr) {
-              result = sanitizeToolError(block.name, toolErr);
-            }
-          }
-
-          onEvent({ type: 'tool_result', data: { name: block.name, output: result } });
-          toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: result });
-        }
-      }
-      messages.push({ role: 'user', content: toolResults as any });
-    }
-
-    onEvent({ type: 'done', data: { hitMaxTurns: true } });
-    return messages;
+    const history = options.messages.slice(0, -1).map(m => ({ role: (m.role === 'assistant' ? 'assistant' : 'user') as 'user' | 'assistant', text: extractPlainText(m.content) }));
+    const prompt = extractPlainText(options.messages[options.messages.length - 1]?.content || '');
+    const r = await bwengeAgent.run({
+      userId: 'system',
+      system: options.systemPrompt,
+      history,
+      prompt,
+      onEvent: options.onEvent,
+      signal: options.signal,
+    });
+    return [
+      ...options.messages,
+      { role: 'assistant', content: [{ type: 'text', text: r.text }] as any },
+    ];
   }
 
   public async generalAssist(options: {
@@ -1539,120 +624,23 @@ export class AiService {
     extractSchema?: string;
     tools?: Anthropic.Tool[];
     executeTool?: (name: string, input: any) => Promise<string>;
-    onEvent?: (event: { type: 'text' | 'tool_call' | 'tool_result' | 'done' | 'usage'; data: any }) => void;
+    onEvent?: (event: any) => void;
+    signal?: AbortSignal;
   }) {
     const useGonka = process.env.AI_PROVIDER === 'gonkarouter' || await this.providerAvailable('gonkarouter');
-    if (useGonka) {
-      const memoryService = MemoryService.getInstance();
-      const currentQuery = extractPlainText(options.messages[options.messages.length - 1]?.content || '');
-      let memoryContext = '';
-      try {
-        memoryContext = await memoryService.getLongTermContext(options.userId, currentQuery);
-      } catch (err) {
-        logger.warn('generalAssist: getLongTermContext failed, continuing without memory context', err);
-      }
+    const allowFallback = process.env.ALLOW_GEMINI_FALLBACK === 'true';
 
-      let systemPrompt = options.extractSchema
-        ? `${BWENGE_GENERAL_SYSTEM_PROMPT}${memoryContext}\n\nFor this request, respond with ONLY valid JSON matching this shape, no other text: ${options.extractSchema}`
-        : `${BWENGE_GENERAL_SYSTEM_PROMPT}${memoryContext}`;
-      if (options.pinnedSyllabus) {
-        systemPrompt += `\n\n[MASTER CONTEXT]: ${options.pinnedSyllabus}\n(Note: This is the primary curriculum/rubric source. Prioritize this document above all other context.)`;
-      }
-
-      const gonkaMessages = options.messages.map((message) => ({
-        role: message.role as 'user' | 'assistant',
-        text: extractPlainText(message.content),
-      }));
-      const lastMessage = gonkaMessages.pop();
-      const prompt = lastMessage?.text || '';
-      const files = options.files || [];
-      const images = files.filter((file) => file.type === 'image').map((file) => ({ base64: file.base64, mediaType: file.mediaType }));
-      const documents = files.filter((file) => file.type === 'document');
-      if (documents.length) {
-        systemPrompt += '\n\n[ATTACHED DOCUMENT TEXT]\n' + documents.map((file) => {
-          try { return Buffer.from(file.base64, 'base64').toString('utf8'); } catch { return ''; }
-        }).filter(Boolean).join('\n\n');
-      }
-
-      let answer = '';
-      if (options.tools && options.executeTool && options.onEvent) {
-        const agentMessages = await this.runGonkaAgentLoop({
-          prompt,
-          system: systemPrompt,
-          history: gonkaMessages,
-          tools: options.tools,
-          executeTool: options.executeTool,
-          onEvent: options.onEvent,
-        });
-        const lastMsg = agentMessages[agentMessages.length - 1];
-        answer = typeof lastMsg === 'string' ? lastMsg : (lastMsg?.content || '');
-      } else if (options.onEvent) {
-        const onToken = (token: string) => {
-          answer += token;
-          options.onEvent?.({ type: 'text', data: { text: token, provider: 'GonkaRouter' } });
-        };
-        await this.streamGonkaChat(prompt, { system: systemPrompt, history: gonkaMessages, images, max_tokens: 8192, onToken });
+    if (!useGonka && !process.env.GONKA_API_KEY) {
+      if (!allowFallback) {
+        throw new Error('GonkaRouter API key is not configured and ALLOW_GEMINI_FALLBACK is false.');
       } else {
-        answer = await this.sendGonkaChat(prompt, { system: systemPrompt, history: gonkaMessages, images });
+        logger.warn('[AI FALLBACK NOTICE] GonkaRouter is unavailable; falling back to Gemini.');
+        options.onEvent?.({ type: 'text', data: { text: '\n> ⚠️ **Notice**: GonkaRouter is unavailable; fallback to Gemini capability mode is active.\n', isThinking: true } });
       }
-
-      if (options.extractSchema) return { ...this.parseModelJson(answer), _usage: {} };
-      options.onEvent?.({ type: 'done', data: {} });
-      return { content: [{ type: 'text', text: answer }], model: process.env.GONKA_MODEL || GONKA_MODELS.DEFAULT };
     }
-
-    if (!this.anthropicClient && this.geminiClient) {
-      const memoryService = MemoryService.getInstance();
-      const currentQuery = extractPlainText(options.messages[options.messages.length - 1]?.content || '');
-      let memoryContext = '';
-      try {
-        memoryContext = await memoryService.getLongTermContext(options.userId, currentQuery);
-      } catch (err) {
-        logger.warn('generalAssist: getLongTermContext failed, continuing without memory context', err);
-      }
-
-      let systemPrompt = options.extractSchema
-        ? `${BWENGE_GENERAL_SYSTEM_PROMPT}${memoryContext}\n\nFor this request, respond with ONLY valid JSON matching this shape, no other text: ${options.extractSchema}`
-        : `${BWENGE_GENERAL_SYSTEM_PROMPT}${memoryContext}`;
-      if (options.pinnedSyllabus) {
-        systemPrompt += `\n\n[MASTER CONTEXT]: ${options.pinnedSyllabus}`;
-      }
-
-      const parts: any[] = [];
-      for (const file of options.files || []) {
-        if (file.type === 'image' || file.mediaType === 'application/pdf') {
-          parts.push({ inlineData: { mimeType: file.mediaType, data: file.base64 } });
-        } else {
-          try {
-            parts.push({ text: Buffer.from(file.base64, 'base64').toString('utf8') });
-          } catch {}
-        }
-      }
-      const conversationText = options.messages.map((m) => `${m.role.toUpperCase()}: ${extractPlainText(m.content)}`).join('\n\n');
-      parts.push({ text: conversationText });
-
-      const response = await this.geminiClient.models.generateContent({
-        model: GEMINI_FLASH,
-        contents: [{ role: 'user', parts }],
-        config: {
-          systemInstruction: systemPrompt,
-          ...(options.extractSchema ? { responseMimeType: 'application/json' } : {}),
-        },
-      });
-      const text = response.text || '';
-      if (options.onEvent) {
-        options.onEvent({ type: 'text', data: { text } });
-        options.onEvent({ type: 'done', data: {} });
-      }
-      if (options.extractSchema) return { ...this.parseModelJson(text), _usage: {} };
-      return { content: [{ type: 'text', text }], model: GEMINI_FLASH, _usage: {} };
-    }
-
-    if (!this.anthropicClient) throw new Error('Anthropic client is not initialized.');
 
     const memoryService = MemoryService.getInstance();
-    const currentQuery = extractPlainText(options.messages[options.messages.length - 1].content);
-
+    const currentQuery = extractPlainText(options.messages[options.messages.length - 1]?.content || '');
     let memoryContext = '';
     try {
       memoryContext = await memoryService.getLongTermContext(options.userId, currentQuery);
@@ -1663,104 +651,47 @@ export class AiService {
     let systemPrompt = options.extractSchema
       ? `${BWENGE_GENERAL_SYSTEM_PROMPT}${memoryContext}\n\nFor this request, respond with ONLY valid JSON matching this shape, no other text: ${options.extractSchema}`
       : `${BWENGE_GENERAL_SYSTEM_PROMPT}${memoryContext}`;
-
     if (options.pinnedSyllabus) {
       systemPrompt += `\n\n[MASTER CONTEXT]: ${options.pinnedSyllabus}\n(Note: This is the primary curriculum/rubric source. Prioritize this document above all other context.)`;
     }
 
-    if (options.files && options.files.length > 0) {
-      systemPrompt += `\n\n[CRITICAL] You have been provided with visual/document attachments. Analyze them directly and answer based on what you actually see/read in them — describe concrete details (names, numbers, text, layout) rather than generic summaries. Only use tools like build_form if the user explicitly asks to "create", "build", "calculate", or "translate" something. If you use the cross_reference_visuals tool to look closer at part of an image, treat its returned text as the real answer and report it plainly — do not restate the tool's own description back to the user.`;
-    }
-
-    const lastMessage = options.messages[options.messages.length - 1];
-    const userContent: any[] = typeof lastMessage.content === 'string'
-      ? [{ type: 'text', text: lastMessage.content }]
-      : [...(lastMessage.content as any)];
-
-    if (typeof lastMessage.content === 'string' && (lastMessage.content.toLowerCase().includes('current') || lastMessage.content.toLowerCase().includes('research') || lastMessage.content.toLowerCase().includes('latest'))) {
-      options.onEvent?.({ type: 'text', data: { text: `\n> 🧠 **Reasoning**: Detecting need for up-to-date information...\n`, isThinking: true } });
-    }
-
-    for (const file of options.files || []) {
-      userContent.unshift({
-        type: file.type === 'image' ? 'image' : 'document',
-        source: { type: 'base64', media_type: file.mediaType, data: file.base64 },
-        cache_control: { type: 'ephemeral' },
-      });
-    }
-
-    const processedMessages = [...options.messages.slice(0, -1), { ...lastMessage, content: userContent }];
-
-    if (options.tools && options.executeTool && options.onEvent) {
-      let accumulatedUsage: {
-        input_tokens: number;
-        output_tokens: number;
-        cache_read_tokens: number;
-        cache_creation_tokens: number;
-      } = { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0 };
-
-      const messages = await this.runAgentLoop({
-        messages: processedMessages,
-        tools: options.tools,
-        systemPrompt,
-        executeTool: options.executeTool,
-        onEvent: (event) => {
-          if (event.type === 'usage') {
-            accumulatedUsage.input_tokens += event.data.input_tokens || 0;
-            accumulatedUsage.output_tokens += event.data.output_tokens || 0;
-            accumulatedUsage.cache_read_tokens += event.data.cache_read_input_tokens || 0;
-            accumulatedUsage.cache_creation_tokens += event.data.cache_creation_input_tokens || 0;
-          }
-          options.onEvent?.(event);
-        },
-        model: MODELS.SONNET,
-      });
-
-      if (options.extractSchema) {
-        const lastMsg = messages[messages.length - 1];
-        const lastText = extractPlainText(lastMsg.content);
-        const parsed = this.parseModelJson(lastText);
-        return { ...parsed, _usage: accumulatedUsage };
-      }
-
-      (messages as any)._usage = accumulatedUsage;
-      return messages;
-    }
-
-    if (options.onEvent) {
-      const stream = this.anthropicClient.messages.stream({
-        model: MODELS.SONNET,
-        max_tokens: 8192,
-        system: systemPrompt,
-        messages: processedMessages,
-      });
-
-      stream.on('text', (text) => options.onEvent!({ type: 'text', data: { text } }));
-      stream.on('message', (msg) => {
-        if (msg.usage) options.onEvent!({ type: 'usage', data: { ...msg.usage, model: MODELS.SONNET } });
-      });
-
-      const finalMsg = await stream.finalMessage();
-      if (options.extractSchema) {
-        const text = finalMsg.content[0].type === 'text' ? finalMsg.content[0].text : '{}';
-        return { ...this.parseModelJson(text), _usage: finalMsg.usage };
-      }
-      return finalMsg;
-    }
-
-    const response = await this.anthropicClient.messages.create({
-      model: MODELS.SONNET,
-      max_tokens: 8192,
-      system: systemPrompt,
-      messages: processedMessages,
-    });
+    const history = options.messages.slice(0, -1).map((m) => ({
+      role: (m.role === 'assistant' ? 'assistant' : 'user') as 'user' | 'assistant',
+      text: extractPlainText(m.content),
+    }));
+    const lastMsg = options.messages[options.messages.length - 1];
+    const prompt = lastMsg ? extractPlainText(lastMsg.content) : '';
+    const uploads = options.files?.map((f) => ({ type: f.type, base64: f.base64, mediaType: f.mediaType })) || [];
 
     if (options.extractSchema) {
-      const text = response.content[0].type === 'text' ? response.content[0].text : '{}';
-      return { ...this.parseModelJson(text), _usage: response.usage };
+      const r = await bwengeAgent.run({
+        userId: options.userId,
+        system: `${systemPrompt}\n\nRespond with ONLY valid JSON matching: ${options.extractSchema}`,
+        history,
+        prompt,
+        uploads,
+        toolNames: [],
+        signal: options.signal,
+      });
+      return { ...this.parseModelJson(r.text), _usage: r.usage };
     }
 
-    (response as any)._usage = response.usage;
-    return response;
+    const r = await bwengeAgent.run({
+      userId: options.userId,
+      system: systemPrompt,
+      history,
+      prompt,
+      uploads,
+      onEvent: options.onEvent,
+      signal: options.signal,
+    });
+
+    return {
+      content: [{ type: 'text', text: r.text }],
+      model: process.env.GONKA_MODEL || GONKA_MODELS.DEFAULT,
+      attachments: r.attachments,
+      sources: r.sources,
+      _usage: r.usage,
+    };
   }
 }
