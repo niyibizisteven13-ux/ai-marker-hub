@@ -236,10 +236,13 @@ export const ThreeDotMenu: React.FC<ThreeDotMenuProps> = ({
 
           <button
             role="menuitem"
-            onClick={() => { onOpenHelp?.(); setIsOpen(false); }}
+            onClick={() => {
+              window.location.href = 'mailto:support@bwenge.space?subject=Support%20Ticket%20-%20Bwenge%20AI%20Studio';
+              setIsOpen(false);
+            }}
             className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl hover:bg-[var(--hover)] transition-colors"
           >
-            <HelpCircle className="w-4 h-4 text-[var(--muted)]" /> Help and shortcuts
+            <HelpCircle className="w-4 h-4 text-[var(--muted)]" /> Help & Support (Raise Ticket)
           </button>
 
           {!isGuest && onLogout && (

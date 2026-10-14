@@ -47,6 +47,8 @@ import { useVisualViewportHeight } from './hooks/useVisualViewportHeight';
 import { Menu, X, Plus, Sparkles } from 'lucide-react';
 import UpgradePage from './pages/UpgradePage';
 import LandingPage from './pages/LandingPage';
+import TermsPage from './pages/TermsPage';
+import PrivacyPage from './pages/PrivacyPage';
 import { authService } from './auth/authService';
 
 const LoginModal = React.lazy(() => import('./components/LoginModal'));
@@ -965,6 +967,13 @@ export default function App() {
     clearChatStore();
     handleClearStagedAttachments();
   };
+
+  if (window.location.pathname === '/terms') {
+    return <TermsPage />;
+  }
+  if (window.location.pathname === '/privacy') {
+    return <PrivacyPage />;
+  }
 
   if (authStatus === 'loading') {
     return (

@@ -421,12 +421,12 @@ export default function CreateStudio({
                 </a>
                 <button
                   onClick={() => {
-                    alert('Bwenge Studio Shortcuts:\n- Enter: Send\n- Shift+Enter: New line\n- /: Quick commands');
+                    window.location.href = 'mailto:support@bwenge.space?subject=Support%20Ticket%20-%20Bwenge%20AI%20Studio';
                     setMenuOpen(false);
                   }}
                   className="w-full flex items-center px-3.5 py-2 hover:bg-white/5 transition-colors text-left text-neutral-200"
                 >
-                  <HelpCircle className="mr-3 w-4 h-4 text-yellow-400" /> Help & Shortcuts
+                  <HelpCircle className="mr-3 w-4 h-4 text-yellow-400" /> Help & Support (Raise Ticket)
                 </button>
                 {user && (
                   <button
