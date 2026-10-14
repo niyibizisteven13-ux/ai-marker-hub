@@ -1,8 +1,7 @@
-# Task List: Bwenge AI Marker Hub Gaps & UX Enhancements
+# Task List: Fix Auth Refresh 404 & Deploy to Fly.io
 
-- [x] Create task list and initialize task tracker (`/task.artifact.md`)
-- [x] Enhance AuthFlow (`src/components/AuthFlow.tsx`) with external browser redirect for in-app webviews
-- [x] Add Onboarding Quick-Start Banner to Studio workspace (`src/components/CompleteBwengeStudio.tsx` or `App.tsx`)
-- [x] Upgrade Step 4 (`src/components/Step4AIMarks.tsx`) with individual script retry error handling and fallback support
-- [x] Verify build and functionality (`npm run build`)
-- [x] Create walkthrough artifact (`/walkthrough.artifact.md`)
+- [ ] Implement `refreshTokenHandler` in `server/controllers/authController.ts`
+- [ ] Mount `/refresh` route in `server/routes/authRoutes.ts`
+- [ ] Run production build (`npm run build`)
+- [ ] Deploy to Fly.io (`flyctl deploy`)
+- [ ] Create walkthrough artifact (`/walkthrough.artifact.md`)

@@ -503,6 +503,49 @@ export async function revokeSession(req: Request, res: Response) {
   }
 }
 
+export async function refreshTokenHandler(req: Request, res: Response) {
+  try {
+    const isProd = process.env.NODE_ENV === 'production';
+    const cookieName = isProd ? '__Host-session' : 'session';
+    const refreshToken = req.cookies?.[cookieName] || req.body?.refreshToken;
+
+    if (!refreshToken) {
+      return res.status(401).json({ error: { code: 'unauthorized' } });
+    }
+
+    const tokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
+    const session = await prisma.refreshSession.findUnique({
+      where: { tokenHash },
+      include: { user: { include: { settings: true, subscription: true } } },
+    });
+
+    if (!session || session.revokedAt || session.expiresAt < new Date() || session.user.disabledAt) {
+      clearRefreshCookie(res);
+      return res.status(401).json({ error: { code: 'TOKEN_EXPIRED' } });
+    }
+
+    await prisma.refreshSession.update({
+      where: { id: session.id },
+      data: { lastUsedAt: new Date() },
+    });
+
+    const accessToken = jwt.sign(
+      { userId: session.user.id, role: session.user.email?.toLowerCase().trim() === 'niyibizisteven13@gmail.com' ? 'ADMIN' : session.user.role },
+      JWT_SECRET,
+      { expiresIn: ACCESS_TOKEN_TTL }
+    );
+
+    return res.json({
+      accessToken,
+      expiresIn: 900,
+      user: buildAuthenticatedUser(session.user),
+    });
+  } catch (err: any) {
+    console.error('Refresh token error:', err);
+    return res.status(401).json({ error: { code: 'TOKEN_EXPIRED' } });
+  }
+}
+
 export async function devOutboxHandler(req: Request, res: Response) {
   if (process.env.NODE_ENV === 'production') {
     return res.status(404).end();

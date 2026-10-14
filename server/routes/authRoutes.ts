@@ -9,6 +9,7 @@ import {
   patchMe,
   getSessions,
   revokeSession,
+  refreshTokenHandler,
   devOutboxHandler,
 } from '../controllers/authController.js';
 import { authLimiter } from '../../production/rateLimiter.js';
@@ -30,6 +31,7 @@ router.get('/google/start', authLimiter, logErrors('googleStart', googleStart));
 router.get('/google/callback', logErrors('googleCallback', googleCallback));
 router.post('/email/start', authLimiter, logErrors('emailStart', emailStart));
 router.post('/email/verify', authLimiter, logErrors('emailVerify', emailVerify));
+router.post('/refresh', authLimiter, logErrors('refreshToken', refreshTokenHandler));
 
 router.get('/me', requireAuth, logErrors('getMe', getMe));
 router.post('/logout', logErrors('logout', logout));
