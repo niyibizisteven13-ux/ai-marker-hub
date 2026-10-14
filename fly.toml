@@ -30,7 +30,7 @@ kill_timeout = 30
     path = "/api/health"
 
 [deploy]
-  release_command = "npx prisma migrate deploy"
+  release_command = "npx prisma db push --accept-data-loss"
 
 [[vm]]
   size = "shared-cpu-1x"
