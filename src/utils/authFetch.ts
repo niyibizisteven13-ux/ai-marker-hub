@@ -5,10 +5,11 @@ let refreshPromise: Promise<string | null> | null = null;
 export const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || '';
 
 export function getApiUrl(path: string): string {
-  if (path.startsWith('/api') && API_BASE_URL) {
-    return `${API_BASE_URL.replace(/\/$/, '')}${path}`;
+  const cleanPath = path.endsWith('/') && path.length > 1 ? path.slice(0, -1) : path;
+  if (cleanPath.startsWith('/api') && API_BASE_URL) {
+    return `${API_BASE_URL.replace(/\/$/, '')}${cleanPath}`;
   }
-  return path;
+  return cleanPath;
 }
 
 export function setAccessToken(token: string | null, expiresInSeconds: number = 900) {

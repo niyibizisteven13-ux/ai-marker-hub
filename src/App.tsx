@@ -266,6 +266,13 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
+    const hasToken = localStorage.getItem('bwenge_auth_token');
+    if (!hasToken) {
+      setAuthenticatedUser(null);
+      setAuthStatus('anonymous');
+      return;
+    }
+
     authFetch('/api/auth/refresh', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'bwenge' },

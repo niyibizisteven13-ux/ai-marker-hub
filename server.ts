@@ -217,12 +217,18 @@ app.use((_req: express.Request, res: express.Response, next: express.NextFunctio
 });
 
 // ── CORS ──────────────────────────────────────────────────────────────────
-// Allow requests from the configured frontend origin only. In production
-// this must match the exact deployed domain (APP_URL env var).
-const allowedOrigin = process.env.APP_URL || 'http://localhost:5173';
+// Allow requests from configured frontend origins and production domains.
+const allowedOrigins = [
+  process.env.APP_URL,
+  'https://www.bwenge.com',
+  'https://www.bwenge.space',
+  'http://localhost:3000',
+  'http://localhost:5173',
+].filter(Boolean) as string[];
+
 app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
   const origin = req.headers.origin as string | undefined;
-  const isAllowed = process.env.NODE_ENV !== 'production' || origin === allowedOrigin;
+  const isAllowed = process.env.NODE_ENV !== 'production' || (origin && allowedOrigins.includes(origin));
 
   if (isAllowed) {
     if (origin) res.setHeader('Access-Control-Allow-Origin', origin);
@@ -238,6 +244,14 @@ app.use((req: express.Request, res: express.Response, next: express.NextFunction
   next();
 });
 // ──────────────────────────────────────────────────────────────────────────
+
+// Normalize trailing slashes for API requests to prevent 404s
+app.use((req: express.Request, _res: express.Response, next: express.NextFunction) => {
+  if (req.url.startsWith('/api/') && req.url.length > 5 && req.url.endsWith('/')) {
+    req.url = req.url.slice(0, -1);
+  }
+  next();
+});
 
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: false, limit: '25mb', parameterLimit: 1000 }));
