@@ -5,7 +5,7 @@ import { prisma } from '../db.js';
 import { writeAuditLog } from '../../production/auth.js';
 import { getGoogleAuthUrl, verifyGoogleCode, isInAppBrowser } from '../auth/googleAuth.js';
 import { normalizeEmail, createEmailCode, verifyEmailCode } from '../auth/emailCode.js';
-import { getEmailSender, getVerificationEmailContent, getDevOutbox } from '../email/EmailSender.js';
+import { getEmailSender, getVerificationEmailContent, getDevOutbox, ConsoleEmailSender } from '../email/EmailSender.js';
 import { sanitizeNext } from '../auth/sanitizeNext.js';
 
 const JWT_SECRET = process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 32
@@ -250,16 +250,28 @@ export async function emailStart(req: Request, res: Response) {
     const emailContent = getVerificationEmailContent(code, locale);
     const emailSender = getEmailSender();
 
-    await emailSender.send({
-      to: normalized,
-      subject: emailContent.subject,
-      text: emailContent.text,
-      html: emailContent.html,
-    });
+    try {
+      await emailSender.send({
+        to: normalized,
+        subject: emailContent.subject,
+        text: emailContent.text,
+        html: emailContent.html,
+      });
+    } catch (smtpErr: any) {
+      console.warn('SMTP email send failed, falling back to console outbox:', smtpErr?.message || smtpErr);
+      const consoleSender = new ConsoleEmailSender();
+      await consoleSender.send({
+        to: normalized,
+        subject: emailContent.subject,
+        text: emailContent.text,
+        html: emailContent.html,
+      });
+    }
 
     await writeAuditLog(existingUser?.id || 'system', 'CODE_SENT', 'Email', null, { emailHash: crypto.createHash('sha256').update(normalized).digest('hex') });
 
-    return res.status(202).json({ ok: true, retryAfter: 30 });
+    const isDev = process.env.NODE_ENV !== 'production';
+    return res.status(202).json({ ok: true, retryAfter: 30, devCode: isDev ? code : undefined });
   } catch (err: any) {
     console.error('Email start error:', err);
     return res.status(500).json({ error: { code: 'server_error' } });

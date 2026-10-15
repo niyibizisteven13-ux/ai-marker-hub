@@ -54,7 +54,7 @@ export class SmtpEmailSender implements EmailSender {
 }
 
 export function getEmailSender(): EmailSender {
-  const provider = process.env.EMAIL_PROVIDER || 'console';
+  const provider = process.env.EMAIL_PROVIDER || (process.env.SMTP_HOST || process.env.SMTP_USER ? 'smtp' : 'console');
   if (provider === 'smtp' || provider === 'resend' || provider === 'sendgrid') {
     try {
       return new SmtpEmailSender();

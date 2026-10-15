@@ -66,7 +66,7 @@ export const authService: AuthService = {
       if (!res.ok) {
         throw new AuthError(data.error?.code || 'network', data.error?.message || 'Failed to send code');
       }
-      return { retryAfter: data.retryAfter || 30 };
+      return { retryAfter: data.retryAfter || 30, devCode: data.devCode };
     } catch (err: any) {
       if (err instanceof AuthError) throw err;
       throw new AuthError('network', err.message || 'Network error');
