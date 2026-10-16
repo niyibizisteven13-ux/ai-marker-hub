@@ -2075,19 +2075,24 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 async function ensureMasterAdmin() {
   try {
     await prisma.$connect().catch(() => {});
+    const initialPassword = process.env.TEAM_INITIAL_PASSWORD || '';
     const teamAccounts = [
-      { email: 'niyibizisteven13@gmail.com', name: 'Master Admin', password: 'Steven123@45', role: 'ADMIN' },
-      { email: 'steven@bwenge.space', name: 'Steven', password: 'steven123@45', role: 'ADMIN' },
-      { email: 'divine@bwenge.space', name: 'Divine', password: 'divine123@45', role: 'INSTRUCTOR' },
-      { email: 'morin@bwenge.space', name: 'Morin', password: 'morin123@45', role: 'INSTRUCTOR' },
-      { email: 'shanie@bwenge.space', name: 'Shanie', password: 'shanie123@45', role: 'INSTRUCTOR' },
-      { email: 'support@bwenge.space', name: 'Support Team', password: 'support123@45', role: 'ADMIN' },
+      { email: 'niyibizisteven13@gmail.com', name: 'Master Admin', role: 'ADMIN' },
+      { email: 'steven@bwenge.space', name: 'Steven', role: 'ADMIN' },
+      { email: 'divine@bwenge.space', name: 'Divine', role: 'INSTRUCTOR' },
+      { email: 'morin@bwenge.space', name: 'Morin', role: 'INSTRUCTOR' },
+      { email: 'shanie@bwenge.space', name: 'Shanie', role: 'INSTRUCTOR' },
+      { email: 'support@bwenge.space', name: 'Support Team', role: 'ADMIN' },
     ];
 
     for (const acc of teamAccounts) {
-      const passwordHash = await bcrypt.hash(acc.password, 12);
       const existing = await prisma.user.findUnique({ where: { email: acc.email } });
       if (!existing) {
+        if (initialPassword.length < 12) {
+          logger.warn(`Skipping ${acc.email}: TEAM_INITIAL_PASSWORD is not set or shorter than 12 characters`);
+          continue;
+        }
+        const passwordHash = await bcrypt.hash(initialPassword, 12);
         await prisma.user.create({
           data: {
             email: acc.email,
@@ -2097,13 +2102,13 @@ async function ensureMasterAdmin() {
             settings: { create: {} }
           }
         });
-        logger.info(`Team account seeded successfully: ${acc.email}`);
+        logger.info(`Team account created: ${acc.email}`);
       } else {
         await prisma.user.update({
           where: { email: acc.email },
-          data: { role: acc.role, passwordHash }
+          data: { role: acc.role }
         });
-        logger.info(`Team account verified and password/role updated: ${acc.email}`);
+        logger.info(`Team account role verified: ${acc.email}`);
       }
     }
 
