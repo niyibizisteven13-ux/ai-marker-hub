@@ -40,13 +40,108 @@
       "84e16cb8-cb26-4a8b-baf7-ca54407117c5": {
         "id": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
         "createdAt": "2026-10-10T09:08:20.690Z",
-        "updatedAt": "2026-10-12T07:19:48.347Z",
+        "updatedAt": "2026-10-16T06:54:59.546Z",
         "email": "niyibizisteven13@gmail.com",
         "name": "Master Admin",
-        "passwordHash": "$2a$12$SX74mNHIWX6gWvhEaGRqWe1qhXNbqw/LwZt05SpX1/8c9uc8S12G6",
+        "passwordHash": "$2a$12$5hWdfdigCQvOxjwwmzcyNugpv1Oilec2h4Wg1bPITuSeVHPJ/eCUe",
         "role": "ADMIN",
         "settings": {
           "id": "c5de30fd-9040-48a2-ac65-85dd7ca2d3e8",
+          "defaultStrictness": "STANDARD",
+          "autoSummarize": true,
+          "preferredLanguage": "en",
+          "theme": "dark",
+          "longTermMemory": false,
+          "agentTone": "PROFESSIONAL",
+          "customInstructions": null
+        }
+      },
+      "8cf8a7f0-f309-4059-a265-03aa3c6c02be": {
+        "id": "8cf8a7f0-f309-4059-a265-03aa3c6c02be",
+        "createdAt": "2026-10-16T06:54:59.937Z",
+        "updatedAt": "2026-10-16T06:54:59.937Z",
+        "email": "steven@bwenge.space",
+        "name": "Steven",
+        "passwordHash": "$2a$12$cnc7xDSdsJJdd0McnBifq.475zWazssrKjvW5XpAJRRNTBkYYVrV2",
+        "role": "ADMIN",
+        "settings": {
+          "id": "7fb1eb6e-eb74-4372-86d7-55e6b790fc82",
+          "defaultStrictness": "STANDARD",
+          "autoSummarize": true,
+          "preferredLanguage": "en",
+          "theme": "dark",
+          "longTermMemory": false,
+          "agentTone": "PROFESSIONAL",
+          "customInstructions": null
+        }
+      },
+      "933643df-3802-4c31-b657-10a52e5d0f28": {
+        "id": "933643df-3802-4c31-b657-10a52e5d0f28",
+        "createdAt": "2026-10-16T06:55:00.338Z",
+        "updatedAt": "2026-10-16T06:55:00.338Z",
+        "email": "divine@bwenge.space",
+        "name": "Divine",
+        "passwordHash": "$2a$12$sRJw6.Q7A2iUxy7AhH3RgOba3OHTmx5vdSEzMjQ9bWygtPR55Hq9q",
+        "role": "INSTRUCTOR",
+        "settings": {
+          "id": "6f2ab4ae-1dcd-44d0-a0a5-f7c8499b307f",
+          "defaultStrictness": "STANDARD",
+          "autoSummarize": true,
+          "preferredLanguage": "en",
+          "theme": "dark",
+          "longTermMemory": false,
+          "agentTone": "PROFESSIONAL",
+          "customInstructions": null
+        }
+      },
+      "ddcf73e3-94db-4770-be1a-354212a4b2b0": {
+        "id": "ddcf73e3-94db-4770-be1a-354212a4b2b0",
+        "createdAt": "2026-10-16T06:55:00.710Z",
+        "updatedAt": "2026-10-16T06:55:00.710Z",
+        "email": "morin@bwenge.space",
+        "name": "Morin",
+        "passwordHash": "$2a$12$IOMBMaTAw8L7kwfZDfuZz.Bcgf.UJWg.f2I876lziyh/HI7YFOwFa",
+        "role": "INSTRUCTOR",
+        "settings": {
+          "id": "3c3ea173-5813-4901-93cf-34f6ffd8edf4",
+          "defaultStrictness": "STANDARD",
+          "autoSummarize": true,
+          "preferredLanguage": "en",
+          "theme": "dark",
+          "longTermMemory": false,
+          "agentTone": "PROFESSIONAL",
+          "customInstructions": null
+        }
+      },
+      "7cf1a962-74b0-4f5b-ba1a-05038a0ad1c9": {
+        "id": "7cf1a962-74b0-4f5b-ba1a-05038a0ad1c9",
+        "createdAt": "2026-10-16T06:55:01.064Z",
+        "updatedAt": "2026-10-16T06:55:01.064Z",
+        "email": "shanie@bwenge.space",
+        "name": "Shanie",
+        "passwordHash": "$2a$12$UH37PfPjxq.KQ4Uo/Csmq.L/VIoXXADu5OZifoia/YZJg9HsbnkRy",
+        "role": "INSTRUCTOR",
+        "settings": {
+          "id": "7da02ad2-0991-4dac-9464-ce18a6b90c28",
+          "defaultStrictness": "STANDARD",
+          "autoSummarize": true,
+          "preferredLanguage": "en",
+          "theme": "dark",
+          "longTermMemory": false,
+          "agentTone": "PROFESSIONAL",
+          "customInstructions": null
+        }
+      },
+      "da57a165-594e-44ce-834a-728f5e13b47b": {
+        "id": "da57a165-594e-44ce-834a-728f5e13b47b",
+        "createdAt": "2026-10-16T06:55:01.433Z",
+        "updatedAt": "2026-10-16T06:55:01.433Z",
+        "email": "support@bwenge.space",
+        "name": "Support Team",
+        "passwordHash": "$2a$12$sVxf4ZhVe.GEayC1hSUJR.xgt/7Wx79az.x/eASqOYJvd/bekr7dy",
+        "role": "ADMIN",
+        "settings": {
+          "id": "530dfc4e-6374-4c96-a1c7-899ce9263198",
           "defaultStrictness": "STANDARD",
           "autoSummarize": true,
           "preferredLanguage": "en",
@@ -447,6 +542,16 @@
         "resourceType": "User",
         "resourceId": null,
         "details": "{\"emailHash\":\"1199cd1dda584929f8016c134f90a2c4c6b4b942290ce5accce3227b87f8ae38\",\"ip\":\"127.0.0.1\",\"userAgent\":\"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36\"}"
+      },
+      "ddeea32e-1320-4f2a-99d2-1c9f948424f1": {
+        "id": "ddeea32e-1320-4f2a-99d2-1c9f948424f1",
+        "createdAt": "2026-10-16T06:55:39.556Z",
+        "updatedAt": "2026-10-16T06:55:39.556Z",
+        "actorId": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
+        "action": "CODE_SENT",
+        "resourceType": "Email",
+        "resourceId": null,
+        "details": "{\"emailHash\":\"1199cd1dda584929f8016c134f90a2c4c6b4b942290ce5accce3227b87f8ae38\"}"
       }
     },
     "fineTuneJob": {},
@@ -642,6 +747,90 @@
     },
     "verifiedAnswer": {},
     "correctionQueueItem": {},
-    "extractedInsight": {}
+    "extractedInsight": {},
+    "emailCode": {
+      "3364eb1d-b145-46d2-8e47-918aecd9ec13": {
+        "id": "3364eb1d-b145-46d2-8e47-918aecd9ec13",
+        "createdAt": "2026-10-16T06:55:39.555Z",
+        "updatedAt": "2026-10-16T06:55:39.555Z",
+        "email": "niyibizisteven13@gmail.com",
+        "codeHash": {
+          "type": "Buffer",
+          "data": [
+            202,
+            61,
+            63,
+            53,
+            244,
+            254,
+            210,
+            76,
+            103,
+            51,
+            155,
+            41,
+            32,
+            233,
+            224,
+            99,
+            200,
+            23,
+            213,
+            65,
+            248,
+            86,
+            124,
+            165,
+            222,
+            246,
+            71,
+            202,
+            86,
+            177,
+            91,
+            159
+          ]
+        },
+        "expiresAt": "2026-10-16T07:05:39.554Z",
+        "attempts": 0,
+        "ipHash": {
+          "type": "Buffer",
+          "data": [
+            18,
+            202,
+            23,
+            180,
+            154,
+            242,
+            40,
+            148,
+            54,
+            243,
+            3,
+            224,
+            22,
+            96,
+            48,
+            162,
+            30,
+            82,
+            93,
+            38,
+            110,
+            32,
+            146,
+            103,
+            67,
+            56,
+            1,
+            168,
+            253,
+            64,
+            113,
+            160
+          ]
+        }
+      }
+    }
   }
 }

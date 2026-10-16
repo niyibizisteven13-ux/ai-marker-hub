@@ -60,6 +60,7 @@ const __dirname = path.dirname(__filename);
 
 export const app = express();
 const PORT = Number(process.env.PORT) || 3000;
+app.set('trust proxy', 1);
 
 // Only trust a known number of reverse proxy hops. Express defaults to zero,
 // so direct/local requests cannot spoof their client IP through X-Forwarded-For.
