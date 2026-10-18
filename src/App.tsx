@@ -198,6 +198,7 @@ export default function App() {
   const [studioProjectStatus, setStudioProjectStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [savedStudioProjects, setSavedStudioProjects] = useState<Array<{ id: string; title: string; updatedAt: string }>>([]);
   const [workspaceHistoryLoaded, setWorkspaceHistoryLoaded] = useState(false);
+  const [documentViewMode, setDocumentViewMode] = useState<'grid' | 'list'>('grid');
   const workspaceSnapshotRef = React.useRef('');
 
   const [activeDocument, setActiveDocument] = useState<UploadedFile | null>(null);
@@ -371,6 +372,9 @@ export default function App() {
             })));
           }
           if (Array.isArray(workspace.uploadedFiles)) state.setUploadedFiles(workspace.uploadedFiles);
+          if (workspace.documentViewMode === 'grid' || workspace.documentViewMode === 'list') {
+            setDocumentViewMode(workspace.documentViewMode);
+          }
           if ('activeFormId' in workspace) state.setActiveFormId(workspace.activeFormId || null);
           if ('pinnedSyllabusId' in workspace) state.setPinnedSyllabusId(workspace.pinnedSyllabusId || null);
           if (Array.isArray(workspace.highlights)) setHighlights(workspace.highlights);
@@ -400,6 +404,7 @@ export default function App() {
       messages: temporaryChatMode ? [] : messages,
       sessions: chatSessions,
       uploadedFiles,
+      documentViewMode,
       activeTab,
       activeFormId,
       pinnedSyllabusId: useStore.getState().pinnedSyllabusId,
@@ -427,7 +432,7 @@ export default function App() {
     }, 1500);
 
     return () => clearTimeout(timer);
-  }, [authStatus, authenticatedUser?.id, workspaceHistoryLoaded, workspaceRestoreFailed, temporaryChatMode, messages, chatSessions, uploadedFiles, activeTab, activeFormId, examPaper, studentScripts]);
+  }, [authStatus, authenticatedUser?.id, workspaceHistoryLoaded, workspaceRestoreFailed, temporaryChatMode, messages, chatSessions, uploadedFiles, documentViewMode, activeTab, activeFormId, examPaper, studentScripts]);
 
   const showAiStatus = (type: 'info' | 'warning', message: string) => {
     setAiStatus({ type, message });
@@ -523,8 +528,9 @@ export default function App() {
           textContent = `[Uploaded document: ${file.name}]`;
         }
 
+        const uploadedFileId = 'file-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
         const uploadedFile: UploadedFile = {
-          id: 'file-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+          id: uploadedFileId,
           name: file.name,
           url: URL.createObjectURL(file),
           fileType: isImage ? 'image' : isPdf ? 'pdf' : 'text',
@@ -552,6 +558,7 @@ export default function App() {
 
         parsedScripts.push({
           id: 'script-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+          sourceFileId: uploadedFile.id,
           studentName: uploadedFile.studentName || file.name.replace(/\.[^/.]+$/, ''),
           studentId: 'STU-' + Math.floor(1000 + Math.random() * 9000),
           submittedAt: new Date().toISOString(),
@@ -703,6 +710,7 @@ export default function App() {
       const max = p.aiMaxScore ?? 100;
       return {
         id: `scan-script-${now}-${idx}`,
+        sourceFileId: `scan-file-${now}-${idx}`,
         studentName: p.studentName || `Student ${idx + 1}`,
         studentId: `SCN-${100 + idx}`,
         submittedAt: new Date().toISOString(),
@@ -1009,8 +1017,13 @@ export default function App() {
     );
   };
 
-  const handleDeletePermanently = (scriptId: string) => {
-    setStudentScripts((prev) => prev.filter((s) => s.id !== scriptId));
+  const handleDeletePermanently = async (fileId: string) => {
+    const file = useStore.getState().uploadedFiles.find((item) => item.id === fileId);
+    if (!file) throw new Error('This paper is no longer in the workspace. Refresh and try again.');
+    setUploadedFiles((prev) => prev.filter((item) => item.id !== fileId));
+    setStudentScripts((prev) => prev.filter((script) =>
+      script.sourceFileId !== fileId && !(script.fileName && script.fileName === file.name)
+    ));
   };
 
   const handleGenerateExcelExport = async () => {
@@ -1128,6 +1141,8 @@ export default function App() {
       examPaper={examPaper}
       setExamPaper={setExamPaper}
       uploadedFiles={uploadedFiles}
+      documentViewMode={documentViewMode}
+      onDocumentViewModeChange={setDocumentViewMode}
       studentScripts={studentScripts}
       setStudentScripts={setStudentScripts}
       onUploadStudentPaper={handleUploadStudentPaper}

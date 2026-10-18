@@ -27,7 +27,9 @@ interface CenterWorkspaceProps {
   onToggleSoftDelete?: (fileId: string) => void;
   onToggleFlag?: (fileId: string) => void;
   onUpdateBonusMarks?: (fileId: string, bonus: number) => void;
-  onDeletePermanently?: (fileId: string) => void;
+  onDeletePermanently?: (fileId: string) => void | Promise<void>;
+  documentViewMode?: 'grid' | 'list';
+  onDocumentViewModeChange?: (mode: 'grid' | 'list') => void;
   activeDocument?: any;
   pinnedSyllabusId?: string | null;
   onPinSyllabus?: (id: string | null) => void;
@@ -164,6 +166,8 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
   onToggleFlag,
   onUpdateBonusMarks,
   onDeletePermanently,
+  documentViewMode,
+  onDocumentViewModeChange,
   activeDocument,
   pinnedSyllabusId,
   onPinSyllabus,
@@ -987,7 +991,14 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
   const [visualAnnotations, setVisualAnnotations] = useState<any[]>([]);
   const [toolMode, setToolMode] = useState<'select' | 'text' | 'check' | 'score'>('select');
   const [isDragging, setIsDragging] = useState<boolean>(false);
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [localViewMode, setLocalViewMode] = useState<'grid' | 'list'>('grid');
+  const viewMode = documentViewMode ?? localViewMode;
+  const [isDeletingSelectedFile, setIsDeletingSelectedFile] = useState(false);
+  const [deleteFileError, setDeleteFileError] = useState('');
+  const changeViewMode = (mode: 'grid' | 'list') => {
+    setLocalViewMode(mode);
+    onDocumentViewModeChange?.(mode);
+  };
 
   // AI-Grading Action Toolbar Local States
   const [showBonusInput, setShowBonusInput] = useState<boolean>(false);
@@ -1003,6 +1014,23 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
   // Always derive fresh selectedFile from uploadedFiles array if available
   const currentSelectedFile =
     uploadedFiles.find((f) => f.id === selectedFile?.id) || selectedFile;
+
+  const deleteSelectedFile = async () => {
+    const file = currentSelectedFile;
+    if (!file?.id || !onDeletePermanently || isDeletingSelectedFile) return;
+    if (!window.confirm(`Permanently delete “${file.name}”? This cannot be undone.`)) return;
+    setDeleteFileError('');
+    setIsDeletingSelectedFile(true);
+    try {
+      await onDeletePermanently(file.id);
+      if (file.url.startsWith('blob:')) URL.revokeObjectURL(file.url);
+      setSelectedFile(null);
+    } catch (error) {
+      setDeleteFileError(error instanceof Error ? error.message : 'Could not delete this paper. Please try again.');
+    } finally {
+      setIsDeletingSelectedFile(false);
+    }
+  };
 
   // Calculate dynamic scaling size classes based on active batch count
   const activeCount = activeFiles.length;
@@ -1486,7 +1514,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
 
             <div className="flex items-center gap-2 bg-[#F4F0E8] dark:bg-[#202024] p-1 rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32]">
               <button
-                onClick={() => setViewMode('grid')}
+                onClick={() => changeViewMode('grid')}
                 className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
                   viewMode === 'grid'
                     ? 'bg-white dark:bg-[#2D2D32] text-[#D97757] shadow-sm'
@@ -1496,7 +1524,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                 Grid
               </button>
               <button
-                onClick={() => setViewMode('list')}
+                onClick={() => changeViewMode('list')}
                 className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
                   viewMode === 'list'
                     ? 'bg-white dark:bg-[#2D2D32] text-[#D97757] shadow-sm'
@@ -1958,17 +1986,13 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
 
                     {/* Delete Permanently Trigger */}
                     <button
-                      onClick={() => {
-                        if (onDeletePermanently) {
-                          onDeletePermanently((currentSelectedFile?.id ?? ''));
-                        }
-                        setSelectedFile(null);
-                      }}
-                      className="px-2.5 py-1 rounded-full bg-red-600/15 text-red-600 dark:text-red-400 hover:bg-red-600 hover:text-white text-xs font-medium flex items-center space-x-1 transition-colors cursor-pointer"
+                      onClick={deleteSelectedFile}
+                      disabled={!currentSelectedFile?.id || !onDeletePermanently || isDeletingSelectedFile}
+                      className="px-2.5 py-1 rounded-full bg-red-600/15 text-red-600 dark:text-red-400 hover:bg-red-600 hover:text-white text-xs font-medium flex items-center space-x-1 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-wait"
                       title="Permanently delete student paper"
                     >
                       <Trash2 className="w-3 h-3" />
-                      <span>Delete Permanently</span>
+                      <span>{isDeletingSelectedFile ? 'Deleting…' : 'Delete Permanently'}</span>
                     </button>
 
                     {/* Snap Back Close Button */}
@@ -1981,6 +2005,10 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                     </button>
                   </div>
                 </div>
+
+                {deleteFileError && (
+                  <p role="alert" className="px-4 py-2 text-sm text-rose-500">{deleteFileError}</p>
+                )}
 
                 {/* Magnified Interactive Document Canvas */}
                 <div

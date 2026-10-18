@@ -219,6 +219,8 @@ export interface StudentAnswerInput {
 
 export interface StudentScript {
   id: string;
+  /** ID of the uploaded paper this marking record belongs to, when applicable. */
+  sourceFileId?: string;
   studentName: string;
   studentId: string;
   submittedAt: string;
