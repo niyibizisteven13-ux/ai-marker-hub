@@ -107,6 +107,7 @@ export default function App() {
     messages,
     setMessages,
     addMessage,
+    sessions: chatSessions,
     setSessions: setChatSessions,
     setActiveSessionId,
     clearChat: clearChatStore,
