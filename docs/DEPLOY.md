@@ -7,6 +7,7 @@ This application is configured for one PM2 process on a single VPS. Do not incre
 - Node.js supported by the repository's package manifest.
 - PostgreSQL and a valid `DATABASE_URL`. PostgreSQL is required for production; the local mock database is not a production substitute.
 - Set the production secrets required by the app through the VPS process manager or its secret store. In particular, configure `JWT_SECRET` and `FILE_URL_SECRET` (each at least 32 characters), and the provider credentials for the AI features you intend to enable. Production startup fails if either secret or the PostgreSQL `DATABASE_URL` is missing or invalid. Never place secrets in this document or commit them.
+- To create the first administrator automatically on startup, set `INITIAL_ADMIN_EMAIL` and `TEAM_INITIAL_PASSWORD` (at least 12 characters); optionally set `INITIAL_ADMIN_NAME`. Bootstrap only creates an account when that email does not already exist. It does not promote existing users or reset passwords, so manage later role changes through the admin user controls.
 - No `REDIS_URL` is required. The queue uses the local process and persists job snapshots under `./exports`.
 - `GEMINI_API_KEY` is optional for chat/RAG startup. Without it, semantic embeddings are unavailable; startup logs one warning and knowledge search uses lexical retrieval. Ingestion can still store text chunks, but does not create semantic vectors.
 

@@ -39,7 +39,7 @@ export class ContextAwareService {
       });
       const allowedDatasetIds = allowedDatasets.map(({ id }) => id);
       const models = await prisma.aiModel.findMany({
-        where: { status: 'active' },
+        where: { status: 'active', environment: 'production' },
         orderBy: { updatedAt: 'desc' },
       });
 
@@ -54,7 +54,7 @@ export class ContextAwareService {
 
       const readyJobs = allowedDatasetIds.length
         ? await prisma.fineTuneJob.findMany({
-        where: { status: 'ADAPTER_READY', datasetId: { in: allowedDatasetIds } },
+        where: { status: 'ADAPTER_READY', targetEnvironment: 'production', datasetId: { in: allowedDatasetIds } },
         orderBy: { updatedAt: 'desc' },
         take: 1,
       })
@@ -225,7 +225,7 @@ Available Data Fields: ${fields.join(', ') || 'Standard fields'}
     let adminPromptBlock = '';
     try {
       const activePrompts = await prisma.promptVersion.findMany({
-        where: { active: true },
+        where: { active: true, environment: 'production' },
         orderBy: { createdAt: 'desc' },
         take: 2,
       });

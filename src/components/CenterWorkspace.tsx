@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import DynamicForm from './DynamicForm';
+import FormBuilder from './FormBuilder';
 import { BwengeLoader } from './BwengeLoader';
 import { authFetch } from '../utils/authFetch';
 
@@ -138,6 +139,13 @@ const QUESTION_TYPE_CATALOG: { type: ManualQuestionType; label: string; icon: Re
   { type: 'CHECKBOX_GRID', label: 'Checkbox grid', icon: CheckSquare, hasOptions: true },
   { type: 'TIME', label: 'Time', icon: Clock },
 ];
+
+const FORM_BUILDER_API_TYPES: Record<string, ManualQuestionType> = {
+  text: 'SHORT_TEXT', long_text: 'LONG_TEXT', radio: 'MULTIPLE_CHOICE', checkbox: 'CHECKBOX',
+  select: 'DROPDOWN', date: 'DATE', number: 'NUMBER', email: 'EMAIL', tel: 'PHONE', url: 'URL',
+  file: 'FILE_UPLOAD', rating: 'RATING', linear_scale: 'LINEAR_SCALE', radio_grid: 'MULTIPLE_CHOICE_GRID',
+  checkbox_grid: 'CHECKBOX_GRID', time: 'TIME',
+};
 
 export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
   activeTab,
@@ -526,6 +534,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
   };
   // ── Manual Form Builder state ────────────────────────────────────────
   const [showManualFormBuilder, setShowManualFormBuilder] = useState(false);
+  const [formBuilderInitialSchema, setFormBuilderInitialSchema] = useState<any>();
   const [manualForm, setManualForm] = useState<ManualFormDraft>({ title: '', description: '', questions: [], blocks: [], themeColor: '#D97757' });
   const [manualBuilderTab, setManualBuilderTab] = useState<'build' | 'preview'>('build');
   const [descriptionSelection, setDescriptionSelection] = useState<{ top: number; left: number } | null>(null);
@@ -708,6 +717,12 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
 
   const handleOpenManualBuilder = () => {
     resetManualBuilder();
+    try {
+      const savedDraft = localStorage.getItem('bwenge-form-builder-draft');
+      setFormBuilderInitialSchema(savedDraft ? JSON.parse(savedDraft) : undefined);
+    } catch {
+      setFormBuilderInitialSchema(undefined);
+    }
     setShowFormCreatorModal(false);
     setShowManualFormBuilder(true);
   };
@@ -767,6 +782,61 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
     }
   };
   // ── End Create Form feature state ──────────────────────────────────────
+
+  const publishFormBuilderSchema = async (builderSchema: any) => {
+    const questions = (builderSchema.fields || []).map((field: any) => {
+      const { label, ...question } = field;
+      return { ...question, type: FORM_BUILDER_API_TYPES[field.type] || 'SHORT_TEXT', title: label || 'Untitled question' };
+    });
+    const response = await authFetch('/api/forms', {
+      method: 'POST',
+      body: JSON.stringify({
+        title: builderSchema.title,
+        description: builderSchema.description,
+        descriptionImageUrl: builderSchema.descriptionImageUrl,
+        questions,
+        blocks: builderSchema.blocks || [],
+        themeColor: builderSchema.themeColor,
+        isQuiz: builderSchema.isQuiz,
+        collectEmail: builderSchema.collectEmail,
+        acceptingResponses: builderSchema.acceptingResponses,
+        allowMultipleResponses: builderSchema.allowMultipleResponses,
+        confirmationMessage: builderSchema.confirmationMessage,
+        requirements: String(builderSchema.description || '').replace(/<[^>]*>/g, ' ').trim(),
+      }),
+    });
+    const data = await response.json().catch(() => ({} as any));
+    if (!response.ok || !data?.success || !data?.form) {
+      throw new Error(data?.error || `Saving the form failed (${response.status}).`);
+    }
+    const sharePath = data.form.shareableLink || `/forms/${data.form.id}`;
+    try { localStorage.removeItem('bwenge-form-builder-draft'); } catch { /* local storage may be unavailable */ }
+    setFormBuilderInitialSchema(undefined);
+    return { shareUrl: new URL(sharePath, window.location.origin).toString() };
+  };
+
+  const runFormBuilderAgent = async (prompt: string, currentSchema: any) => {
+    const response = await authFetch('/api/forms/ai-agent', {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'enhance_draft',
+        instruction: prompt,
+        currentDraft: {
+          title: currentSchema.title,
+          description: currentSchema.description,
+          questions: (currentSchema.fields || []).map((field: any) => {
+            const { label, ...question } = field;
+            return { ...question, type: FORM_BUILDER_API_TYPES[field.type] || 'SHORT_TEXT', title: label || 'Untitled question' };
+          }),
+          blocks: currentSchema.blocks || [],
+          requirements: currentSchema.description || '',
+        },
+      }),
+    });
+    const data = await response.json().catch(() => ({} as any));
+    if (!response.ok || !data?.draft) throw new Error(data?.error || 'The AI form assistant could not update this form.');
+    return data.draft;
+  };
 
   const AssessmentDraftView = ({ schema }: { schema: any }) => {
     const questions = schema.questions || [];
@@ -2099,399 +2169,20 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
         </div>
       )}
 
-      {/* Manual Form Builder — a dedicated full-screen page, opened
-          directly from the "Create Form" card. Question-by-question
-          editing with type picker, options, required toggle, reordering,
-          duplication, and a live preview tab rendered through the same
-          <DynamicForm /> used by the AI-generated path, so both flows end
-          up on one shared renderer. */}
+      {/* Dedicated full-screen form studio with the shared live respondent preview. */}
       {showManualFormBuilder && (
-        <div className="fixed inset-0 z-[120] bg-[#FBF9F6] dark:bg-[#141416] flex flex-col animate-in fade-in duration-200">
-          {/* Top bar */}
-          <div className="shrink-0 border-b border-[#E8E4DC] dark:border-[#2D2D32] bg-white/80 dark:bg-[#18181B]/80 backdrop-blur-md px-3 sm:px-8 py-3 sm:py-4 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-3 min-w-0">
-              <button
-                onClick={() => setShowManualFormBuilder(false)}
-                className="p-2 rounded-xl hover:bg-[#F4F0E8] dark:hover:bg-[#2D2D32] text-[#66635B] dark:text-[#A0A0AA] hover:text-[#191919] dark:hover:text-white transition-colors shrink-0"
-                title="Exit form builder"
-              >
-                <ArrowLeft size={18} />
-              </button>
-              <div className="min-w-0">
-                <input
-                  value={manualForm.title}
-                  onChange={(e) => setManualForm((prev) => ({ ...prev, title: e.target.value }))}
-                  placeholder="Untitled form"
-                  className="w-full bg-transparent text-base sm:text-lg font-black text-[#191919] dark:text-[#F3F3F3] outline-none placeholder:text-[#858075] truncate"
-                />
-                <span className="text-[10px] font-bold uppercase tracking-widest text-[#858075]">
-                  {manualForm.questions.length} question{manualForm.questions.length === 1 ? '' : 's'} • Draft
-                </span>
-              </div>
-            </div>
-
-      <div className="flex flex-wrap items-center justify-end gap-1.5 sm:gap-2 shrink-0">
-              <div className="flex items-center gap-1 bg-[#F4F0E8] dark:bg-[#202024] p-1 rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32]">
-                <button
-                  onClick={() => setManualBuilderTab('build')}
-                  className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
-                    manualBuilderTab === 'build'
-                      ? 'bg-white dark:bg-[#2D2D32] text-[#D97757] shadow-sm'
-                      : 'text-[#858075] hover:text-[#D97757]'
-                  }`}
-                >
-                  Build
-                </button>
-                <button
-                  onClick={() => setManualBuilderTab('preview')}
-                  className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
-                    manualBuilderTab === 'preview'
-                      ? 'bg-white dark:bg-[#2D2D32] text-[#D97757] shadow-sm'
-                      : 'text-[#858075] hover:text-[#D97757]'
-                  }`}
-                >
-                  Preview
-                </button>
-              </div>
-
-              <button
-                onClick={() => {
-                  setShowManualFormBuilder(false);
-                  setShowFormCreatorModal(true);
-                }}
-                className="hidden md:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-[#D97757] hover:bg-[#D97757]/10 transition-colors"
-              >
-                <Sparkles size={14} />
-                Generate with AI instead
-              </button>
-
-          <button
-            onClick={handleSaveManualForm}
-                disabled={isSavingManualForm}
-                  className={`px-3 sm:px-5 py-2.5 rounded-xl font-black text-xs sm:text-sm transition-all flex items-center gap-2 active:scale-95 ${
-                  isSavingManualForm
-                    ? 'bg-slate-400 cursor-not-allowed opacity-60 text-white'
-                    : 'bg-[#D97757] hover:bg-[#C56648] text-white shadow-lg shadow-[#D97757]/20'
-                }`}
-              >
-                {isSavingManualForm ? <BwengeLoader variant="compact" /> : <Check size={16} />}
-            {isSavingManualForm ? 'Publishing...' : 'Save & Publish'}
-          </button>
-          <label title="Customize form theme color" className="flex cursor-pointer items-center gap-2 rounded-xl border border-[#E8E4DC] px-3 py-2 text-xs font-bold text-[#66635B] hover:border-[#D97757] dark:border-[#2D2D32] dark:text-white"><span className="hidden sm:inline">Theme</span><input aria-label="Form theme color" type="color" value={manualForm.themeColor || '#D97757'} onChange={e => setManualForm(prev => ({ ...prev, themeColor: e.target.value }))} className="h-6 w-7 cursor-pointer rounded border-0 bg-transparent p-0" /></label>
-          <button type="button" onClick={() => { if (!manualForm.title.trim() || !manualForm.questions.length) { setManualSaveError('Add a form title and at least one question before copying a link.'); return; } void handleSaveManualForm(); }} title="Save and create a public link" className="rounded-xl border border-[#E8E4DC] px-3 py-2.5 text-xs font-bold text-[#66635B] hover:border-[#D97757] hover:text-[#D97757]">Get link</button>
-          <button type="button" onClick={() => { setShowManualFormBuilder(false); void showFormsDashboard(); }} title="View form responses" className="rounded-xl border border-[#E8E4DC] px-3 py-2.5 text-xs font-bold text-[#66635B] hover:border-[#D97757] hover:text-[#D97757]">Results</button>
-        </div>
-          </div>
-
-          {manualSaveError && (
-            <div className="shrink-0 px-4 sm:px-8 pt-3">
-              <div className="text-xs font-semibold text-rose-500 bg-rose-500/10 rounded-xl px-3 py-2 max-w-3xl mx-auto sm:mx-0">
-                {manualSaveError}
-              </div>
-            </div>
-          )}
-
-          {/* Body */}
-          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
-            {manualBuilderTab === 'build' ? (
-          <div className="max-w-3xl mx-auto px-4 sm:px-8 py-8 space-y-4">
-                {/* GonkaRouter AI Form Co-Pilot Agent Panel */}
-                <div className="rounded-2xl border border-[#D97757]/40 bg-gradient-to-r from-[#D97757]/10 via-[#D97757]/5 to-transparent p-4 sm:p-5 space-y-3 shadow-sm">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <Sparkles size={16} className="text-[#D97757]" />
-                      <span className="text-xs font-black uppercase tracking-wider text-[#D97757]">
-                        GonkaRouter AI Form Co-Pilot Agent
-                      </span>
-                    </div>
-                    <span className="text-[10px] font-semibold text-[#858075]">
-                      Auto-draft, refine, or add scoring criteria
-                    </span>
-                  </div>
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <input
-                      value={formCopilotInstruction}
-                      onChange={(e) => setFormCopilotInstruction(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          void handleRunFormCopilot();
-                        }
-                      }}
-                      placeholder="Ask the AI Agent to build or edit this form (e.g. 'Create a 6-question AI Fellowship application with coding & essay questions')..."
-                      className="flex-1 rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] bg-white dark:bg-[#141416] px-3.5 py-2.5 text-xs text-[#191919] dark:text-[#F3F3F3] placeholder:text-[#858075] outline-none focus:border-[#D97757]"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => void handleRunFormCopilot()}
-                      disabled={isRunningFormCopilot || !formCopilotInstruction.trim()}
-                      className="px-4 py-2.5 rounded-xl bg-[#D97757] hover:bg-[#C56648] text-white text-xs font-black disabled:opacity-50 transition-all flex items-center justify-center gap-1.5 shrink-0"
-                    >
-                      {isRunningFormCopilot ? <BwengeLoader variant="compact" /> : <Sparkles size={14} />}
-                      {isRunningFormCopilot ? 'Agent Working…' : 'Run AI Form Agent'}
-                    </button>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {[
-                      {
-                        label: '✨ Generate Scholarship Form',
-                        prompt: 'Create a comprehensive Scholarship & Financial Aid Application form with GPA, academic achievements, financial need, leadership essay, and reference contact.',
-                      },
-                      {
-                        label: '💻 Tech Role Screening Form',
-                        prompt: 'Create a Senior Software & AI Engineer screening form with technical experience, system design scenario, GitHub link, and availability.',
-                      },
-                      {
-                        label: '🎓 Course Evaluation Survey',
-                        prompt: 'Create a student course & instructor evaluation form with rating scales, multiple choice questions, and open feedback.',
-                      },
-                      {
-                        label: '➕ Add 3 Smart Follow-up Questions',
-                        prompt: 'Keep existing questions and add 3 high-signal evaluation questions tailored to this form topic.',
-                      },
-                    ].map((preset) => (
-                      <button
-                        key={preset.label}
-                        type="button"
-                        disabled={isRunningFormCopilot}
-                        onClick={() => void handleRunFormCopilot(preset.prompt)}
-                        className="px-2.5 py-1 rounded-lg border border-[#E8E4DC] dark:border-[#2D2D32] bg-white/80 dark:bg-[#1C1C20] hover:border-[#D97757] text-[11px] font-semibold text-[#66635B] dark:text-[#A0A0AA] hover:text-[#D97757] transition-all"
-                      >
-                        {preset.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Form description */}
-                <div className="bg-white dark:bg-[#1C1C20] rounded-2xl border border-[#E8E4DC] dark:border-[#2D2D32] p-5 shadow-sm">
-                  <div className="mb-2 flex flex-wrap items-center gap-1 border-b border-[#E8E4DC] pb-2 dark:border-[#2D2D32]">
-                    {([['bold', Bold, 'Bold'], ['italic', Italic, 'Italic'], ['underline', Underline, 'Underline'], ['insertUnorderedList', List, 'Bulleted list']] as const).map(([command, Icon, label]) => <button key={command} type="button" title={label} aria-label={label} onMouseDown={event => event.preventDefault()} onClick={() => { document.execCommand(command); document.getElementById('manual-form-description')?.focus(); }} className="grid h-8 w-8 place-items-center rounded-lg text-[#66635B] hover:bg-[#D97757]/10 hover:text-[#D97757] dark:text-[#A0A0AA]"><Icon size={15} /></button>)}
-                    <label title="Attach image" aria-label="Attach image" className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-[#66635B] hover:bg-[#D97757]/10 hover:text-[#D97757] dark:text-[#A0A0AA]"><ImageIcon size={16} /><input type="file" accept="image/*" className="hidden" onChange={event => { const file = event.target.files?.[0]; if (!file) return; if (file.size > 2 * 1024 * 1024) { setManualSaveError('Choose an image smaller than 2 MB.'); event.target.value = ''; return; } const reader = new FileReader(); reader.onload = () => setManualForm(prev => ({ ...prev, descriptionImageUrl: String(reader.result || '') })); reader.readAsDataURL(file); event.target.value = ''; }} /></label>
-                    <label title="Text color" className="relative grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-[#66635B] hover:bg-[#D97757]/10 dark:text-[#A0A0AA]"><Type size={16} /><input aria-label="Text color" type="color" onChange={event => { document.execCommand('foreColor', false, event.target.value); document.getElementById('manual-form-description')?.focus(); }} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" /></label>
-                  </div>
-                  <div id="manual-form-description" contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true" dir="ltr" data-placeholder="Form description (optional) — tell respondents what this is for" onInput={event => { const html = event.currentTarget.innerHTML; setManualForm(prev => ({ ...prev, description: html })); }} onMouseUp={updateDescriptionSelection} onKeyUp={updateDescriptionSelection} dangerouslySetInnerHTML={{ __html: manualForm.description }} className="min-h-12 w-full text-left whitespace-pre-wrap bg-transparent text-sm text-[#66635B] outline-none empty:before:content-[attr(data-placeholder)] empty:before:text-[#858075] dark:text-[#A0A0AA]" />
-                  {descriptionSelection && <div className="fixed z-[100] flex -translate-x-1/2 -translate-y-full items-center gap-1 rounded-xl border border-[#2D2D32] bg-[#202024] p-1.5 text-white shadow-xl" style={{ top: descriptionSelection.top - 8, left: descriptionSelection.left }} onMouseDown={event => event.preventDefault()}>
-                    {([['bold', Bold, 'Bold'], ['italic', Italic, 'Italic'], ['underline', Underline, 'Underline']] as const).map(([command, Icon, label]) => <button key={command} type="button" title={label} aria-label={label} onClick={() => { document.execCommand(command); const editor = document.getElementById('manual-form-description'); if (editor) setManualForm(prev => ({ ...prev, description: editor.innerHTML })); setDescriptionSelection(null); }} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white/10"><Icon size={15} /></button>)}
-                  </div>}
-                  {manualForm.descriptionImageUrl && <div className="mt-3"><img src={manualForm.descriptionImageUrl} alt="Form description attachment" className="max-h-48 max-w-full rounded-xl object-contain" /><button type="button" onClick={() => setManualForm(prev => ({ ...prev, descriptionImageUrl: undefined }))} className="mt-1 text-xs text-rose-500">Remove image</button></div>}
-            </div>
-
-            {(manualForm.blocks || []).map(block => <section key={block.id} className="relative rounded-2xl border border-[#E8E4DC] bg-white p-4 shadow-sm dark:border-[#2D2D32] dark:bg-[#1C1C20]">
-              <div className="mb-3 flex items-center justify-between"><span className="text-[10px] font-black uppercase tracking-wider text-[#D97757]">{block.type === 'TEXT' ? 'Title and description' : block.type}</span><button type="button" onClick={() => deleteManualBlock(block.id)} aria-label="Remove content block" className="rounded-lg p-2 text-[#858075] hover:bg-rose-500/10 hover:text-rose-500"><Trash2 size={15} /></button></div>
-              {block.type === 'SECTION' ? <><input value={block.title} onChange={e => updateManualBlock(block.id, { title: e.target.value })} placeholder="Section title" className="w-full border-b border-[#E8E4DC] bg-transparent py-2 text-lg font-bold outline-none focus:border-[#D97757]" /><textarea value={block.description || ''} onChange={e => updateManualBlock(block.id, { description: e.target.value })} placeholder="Section description" rows={2} className="mt-2 w-full resize-y bg-transparent text-sm outline-none" /></>
-                : block.type === 'TEXT' ? <><input value={block.title} onChange={e => updateManualBlock(block.id, { title: e.target.value })} placeholder="Heading" className="w-full border-b border-[#E8E4DC] bg-transparent py-2 text-base font-bold outline-none focus:border-[#D97757]" /><textarea value={block.description || ''} onChange={e => updateManualBlock(block.id, { description: e.target.value })} placeholder="Add description or instructions" rows={3} className="mt-2 w-full resize-y bg-transparent text-sm outline-none" /></>
-                : <><input value={block.url || ''} onChange={e => updateManualBlock(block.id, { url: e.target.value })} placeholder={block.type === 'VIDEO' ? 'YouTube video URL' : 'Image URL'} className="w-full rounded-lg border border-[#E8E4DC] bg-transparent px-3 py-2 text-sm outline-none focus:border-[#D97757]" /><p className="mt-2 text-[10px] text-[#858075]">{block.type === 'VIDEO' ? 'Paste a YouTube link. The video will appear in the respondent form.' : 'Paste a public image URL.'}</p>{block.type === 'IMAGE' && block.url && <img src={block.url} alt="Form content preview" className="mt-3 max-h-52 rounded-xl object-contain" />}{block.type === 'VIDEO' && block.url && <p className="mt-2 break-all text-xs text-[#858075]">Video link: {block.url}</p>}</>}
-            </section>)}
-
-            {/* Question list */}
-                {manualForm.questions.length === 0 ? (
-                  <div className="rounded-2xl border-2 border-dashed border-[#E8E4DC] dark:border-[#2D2D32] p-10 text-center space-y-2">
-                    <FileText className="mx-auto text-[#D97757]" size={28} />
-                    <p className="text-sm font-bold text-[#191919] dark:text-[#F3F3F3]">No questions yet</p>
-                    <p className="text-xs text-[#858075]">Pick a question type below to add your first field.</p>
-                  </div>
-                ) : (
-                  manualForm.questions.map((q, idx) => {
-                    const meta = QUESTION_TYPE_CATALOG.find((t) => t.type === q.type)!;
-                    const Icon = meta.icon;
-                    return (
-                      <div
-                        key={q.id}
-                        className="flex w-full items-start gap-2 sm:gap-3"
-                      >
-                        <section className="group min-w-0 flex-1 space-y-3 rounded-2xl border border-[#E8E4DC] bg-white p-4 shadow-sm transition-colors hover:border-[#D97757]/40 dark:border-[#2D2D32] dark:bg-[#1C1C20] sm:p-5">
-                        <div className="flex items-start gap-3">
-                          <span className="flex-shrink-0 w-8 h-8 rounded-xl bg-[#D97757]/10 text-[#D97757] flex items-center justify-center">
-                            <Icon size={16} />
-                          </span>
-                          <div className="flex-1 min-w-0 space-y-2">
-                            <input
-                              value={q.title}
-                              onChange={(e) => updateManualQuestion(q.id, { title: e.target.value })}
-                              placeholder={`Question ${idx + 1}`}
-                              className="w-full bg-transparent text-sm font-bold text-[#191919] dark:text-[#F3F3F3] outline-none placeholder:text-[#858075] border-b border-transparent focus:border-[#D97757] pb-1"
-                            />
-                            <input
-                              value={q.description || ''}
-                              onChange={(e) => updateManualQuestion(q.id, { description: e.target.value })}
-                              placeholder="Description (optional)"
-                              className="w-full bg-transparent text-xs text-[#858075] outline-none placeholder:text-[#B5B0A6]"
-                            />
-                          </div>
-                          <span className="text-[9px] font-black uppercase tracking-widest text-[#858075] bg-[#F4F0E8] dark:bg-[#202024] px-2 py-1 rounded-md shrink-0">
-                            {meta.label}
-                          </span>
-                        </div>
-
-                        {/* Options editor for choice-based types */}
-                        {q.contentTitle && <input value={q.contentTitle} onChange={e => updateManualQuestion(q.id, { contentTitle: e.target.value })} placeholder="Text heading" className="w-full rounded-lg border border-[#E8E4DC] bg-transparent px-3 py-2 text-xs outline-none focus:border-[#D97757]" />}
-                        {q.sectionTitle && <input value={q.sectionTitle} onChange={e => updateManualQuestion(q.id, { sectionTitle: e.target.value })} placeholder="Section heading" className="w-full rounded-lg border-l-4 border-[#D97757] bg-[#F7F5F0] px-3 py-2 text-xs font-bold outline-none dark:bg-white/[0.04]" />}
-                        {q.showVideoEditor && <div className="space-y-2"><input value={q.videoUrl || ''} onChange={e => updateManualQuestion(q.id, { videoUrl: e.target.value, videoDataUrl: '' })} placeholder="Paste a YouTube video URL" className="w-full rounded-lg border border-[#E8E4DC] bg-transparent px-3 py-2 text-xs outline-none focus:border-[#D97757]" /><label className="inline-flex cursor-pointer rounded-lg border border-[#E8E4DC] px-3 py-2 text-xs font-semibold hover:border-[#D97757] dark:border-[#2D2D32]">Attach video file<input type="file" accept="video/*" className="hidden" onChange={event => addVideoToQuestion(q.id, event.target.files?.[0])} /></label>{q.videoDataUrl && <video controls preload="metadata" src={q.videoDataUrl} className="max-h-64 w-full rounded-xl bg-black" />}</div>}
-                        {q.imageUrl && <img src={q.imageUrl} alt="Question attachment preview" className="max-h-56 max-w-full rounded-xl object-contain" />}
-
-                {meta.hasOptions && (
-                          <div className="pl-11 space-y-2">
-                            {(q.options || []).map((opt, oi) => (
-                              <div key={opt.id} className="flex items-center gap-2">
-                                <span className="w-4 h-4 rounded-full border border-[#D97757]/40 flex items-center justify-center text-[8px] font-bold text-[#D97757] shrink-0">
-                                  {q.type === 'DROPDOWN' ? oi + 1 : String.fromCharCode(65 + oi)}
-                                </span>
-                                <input
-                                  value={opt.label}
-                                  onChange={(e) => updateManualOption(q.id, opt.id, e.target.value)}
-                                  className="flex-1 bg-transparent text-xs text-[#191919] dark:text-[#F3F3F3] outline-none border-b border-[#E8E4DC] dark:border-[#2D2D32] focus:border-[#D97757] py-1"
-                                />
-                                <button
-                                  onClick={() => removeManualOption(q.id, opt.id)}
-                                  className="p-1 rounded-md text-[#858075] hover:text-rose-500 hover:bg-rose-500/10 transition-colors shrink-0"
-                                >
-                                  <X size={12} />
-                                </button>
-                              </div>
-                            ))}
-                            <button
-                              onClick={() => addManualOption(q.id)}
-                              className="text-xs font-semibold text-[#D97757] hover:underline pl-6"
-                            >
-                              + Add option
-                            </button>
-                  </div>
-                )}
-
-                {['MULTIPLE_CHOICE_GRID', 'CHECKBOX_GRID'].includes(q.type) && (
-                  <div className="pl-11 space-y-2">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-[#858075]">Rows</p>
-                    {(q.rows || []).map((row, rowIndex) => <div key={`${q.id}-row-${rowIndex}`} className="flex items-center gap-2">
-                      <input value={row} onChange={e => updateManualRow(q.id, rowIndex, e.target.value)} aria-label={`Grid row ${rowIndex + 1}`} className="flex-1 rounded-lg border border-[#E8E4DC] bg-transparent px-3 py-2 text-xs outline-none focus:border-[#D97757]" />
-                      <button type="button" onClick={() => removeManualRow(q.id, rowIndex)} className="p-1 text-[#858075] hover:text-rose-500" aria-label="Remove row"><X size={14} /></button>
-                    </div>)}
-                    <button type="button" onClick={() => addManualRow(q.id)} className="text-xs font-semibold text-[#D97757]">+ Add row</button>
-                    <p className="text-[10px] text-[#858075]">Columns are the answer options above.</p>
-                  </div>
-                )}
-
-                {q.type === 'LINEAR_SCALE' && <div className="grid grid-cols-2 gap-3 pl-11 sm:grid-cols-4">
-                  <label className="text-[10px] font-semibold text-[#858075]">Start<input type="number" min="0" max="10" value={q.scaleMin ?? 1} onChange={e => updateManualQuestion(q.id, { scaleMin: Number(e.target.value) })} className="mt-1 w-full rounded-lg border border-[#E8E4DC] bg-transparent p-2 text-sm text-[#191919] dark:text-white" /></label>
-                  <label className="text-[10px] font-semibold text-[#858075]">End<input type="number" min="2" max="10" value={q.scaleMax ?? 5} onChange={e => updateManualQuestion(q.id, { scaleMax: Number(e.target.value) })} className="mt-1 w-full rounded-lg border border-[#E8E4DC] bg-transparent p-2 text-sm text-[#191919] dark:text-white" /></label>
-                  <label className="text-[10px] font-semibold text-[#858075]">Start label<input value={q.scaleMinLabel || ''} onChange={e => updateManualQuestion(q.id, { scaleMinLabel: e.target.value })} placeholder="Not at all" className="mt-1 w-full rounded-lg border border-[#E8E4DC] bg-transparent p-2 text-xs text-[#191919] dark:text-white" /></label>
-                  <label className="text-[10px] font-semibold text-[#858075]">End label<input value={q.scaleMaxLabel || ''} onChange={e => updateManualQuestion(q.id, { scaleMaxLabel: e.target.value })} placeholder="Very much" className="mt-1 w-full rounded-lg border border-[#E8E4DC] bg-transparent p-2 text-xs text-[#191919] dark:text-white" /></label>
-                </div>}
-
-                {q.type === 'RATING' && <label className="ml-11 block max-w-40 text-[10px] font-semibold text-[#858075]">Maximum rating
-                  <select value={q.maxRating || 5} onChange={e => updateManualQuestion(q.id, { maxRating: Number(e.target.value) })} className="mt-1 w-full rounded-lg border border-[#E8E4DC] bg-transparent p-2 text-sm text-[#191919] dark:text-white">{[3, 4, 5, 6, 7, 8, 9, 10].map(n => <option key={n} value={n}>{n} stars</option>)}</select>
-                </label>}
-
-                {/* Question toolbar */}
-                        <div className="flex items-center justify-between pt-2 border-t border-[#E8E4DC] dark:border-[#2D2D32]">
-                          <label className="flex items-center gap-2 text-xs font-semibold text-[#66635B] dark:text-[#A0A0AA] cursor-pointer select-none">
-                            <input
-                              type="checkbox"
-                              checked={q.required}
-                              onChange={(e) => updateManualQuestion(q.id, { required: e.target.checked })}
-                              className="rounded border-[#E8E4DC] dark:border-[#2D2D32] text-[#D97757] focus:ring-[#D97757]"
-                            />
-                            Required
-                          </label>
-                          <div className="flex items-center gap-1">
-                            <button
-                              onClick={() => moveManualQuestion(q.id, 'up')}
-                              disabled={idx === 0}
-                              className="p-1.5 rounded-lg text-[#858075] hover:text-[#191919] dark:hover:text-white hover:bg-[#F4F0E8] dark:hover:bg-[#2D2D32] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                              title="Move up"
-                            >
-                              <ArrowUp size={14} />
-                            </button>
-                            <button
-                              onClick={() => moveManualQuestion(q.id, 'down')}
-                              disabled={idx === manualForm.questions.length - 1}
-                              className="p-1.5 rounded-lg text-[#858075] hover:text-[#191919] dark:hover:text-white hover:bg-[#F4F0E8] dark:hover:bg-[#2D2D32] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                              title="Move down"
-                            >
-                              <ArrowDown size={14} />
-                            </button>
-                            <button
-                              onClick={() => duplicateManualQuestion(q.id)}
-                              className="p-1.5 rounded-lg text-[#858075] hover:text-[#191919] dark:hover:text-white hover:bg-[#F4F0E8] dark:hover:bg-[#2D2D32] transition-colors"
-                              title="Duplicate"
-                            >
-                              <Copy size={14} />
-                            </button>
-                            <button
-                              onClick={() => deleteManualQuestion(q.id)}
-                              className="p-1.5 rounded-lg text-[#858075] hover:text-rose-500 hover:bg-rose-500/10 transition-colors"
-                              title="Delete"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
-                        </div>
-                        </section>
-                        <aside aria-label={`Add content to question ${idx + 1}`} className="sticky top-4 flex shrink-0 flex-col gap-2 rounded-xl border border-[#E8E4DC] bg-white p-2 shadow-sm dark:border-[#2D2D32] dark:bg-[#1C1C20]">
-                          <button type="button" aria-label="Add text" title="Add text" onClick={() => updateManualQuestion(q.id, { contentTitle: q.contentTitle ? '' : 'Additional information' })} className="grid h-9 w-9 place-items-center rounded-lg text-xs font-bold hover:bg-[#D97757]/10">Tt</button>
-                          <label aria-label="Attach image" title="Attach image" className="grid h-9 w-9 cursor-pointer place-items-center rounded-lg hover:bg-[#D97757]/10"><ImageIcon size={17} /><input type="file" accept="image/*" className="hidden" onChange={event => { addImageToQuestion(q.id, event.target.files?.[0]); event.target.value = ''; }} /></label>
-                          <button type="button" aria-label="Attach video" title="Attach video or add YouTube link" onClick={() => updateManualQuestion(q.id, { showVideoEditor: !q.showVideoEditor })} className="grid h-9 w-9 place-items-center rounded-lg hover:bg-[#D97757]/10"><Video size={17} /></button>
-                          <button type="button" aria-label="Add section heading" title="Add section heading" onClick={() => updateManualQuestion(q.id, { sectionTitle: q.sectionTitle ? '' : 'Section' })} className="grid h-9 w-9 place-items-center rounded-lg hover:bg-[#D97757]/10"><Layout size={17} /></button>
-                        </aside>
-                      </div>
-                    );
-                  })
-                )}
-
-                {/* Add-question type picker */}
-          <div className="bg-white dark:bg-[#1C1C20] rounded-2xl border border-dashed border-[#E8E4DC] dark:border-[#2D2D32] p-4">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-[#858075] mb-3">Add a question</p>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    {QUESTION_TYPE_CATALOG.map((t) => {
-                      const Icon = t.icon;
-                      return (
-                        <button
-                          key={t.type}
-                          onClick={() => addManualQuestion(t.type)}
-                          className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] hover:border-[#D97757] hover:bg-[#D97757]/5 text-xs font-semibold text-[#191919] dark:text-[#F3F3F3] transition-all active:scale-95"
-                        >
-                          <Icon size={14} className="text-[#D97757] shrink-0" />
-                          <span className="truncate">{t.label}</span>
-                        </button>
-                      );
-                    })}
-            </div>
-            <div className="mt-4 border-t border-[#E8E4DC] pt-4 dark:border-[#2D2D32]">
-              <button type="button" onClick={() => { setShowImportQuestions(open => !open); void loadOwnedForms().catch(error => setManualSaveError(error.message)); }} className="rounded-xl border border-[#E8E4DC] px-3 py-2 text-xs font-semibold text-[#191919] hover:border-[#D97757] dark:border-[#2D2D32] dark:text-white">Import questions from another form</button>
-              {showImportQuestions && <div className="mt-3 space-y-2">{savedForms.filter(form => form.id !== manualForm.id).length ? savedForms.filter(form => form.id !== manualForm.id).map(form => <button key={form.id} type="button" onClick={() => importQuestionsFromForm(form)} className="block w-full rounded-lg border border-[#E8E4DC] p-3 text-left text-xs hover:border-[#D97757] dark:border-[#2D2D32]"><span className="font-bold">{form.title}</span><span className="ml-2 text-[#858075]">{form.schema?.questions?.length || 0} questions</span></button>) : <p className="text-xs text-[#858075]">No saved forms with questions to import.</p>}</div>}
-            </div>
-                </div>
-              </div>
-            ) : (
-              /* Preview tab — the same DynamicForm renderer used everywhere else */
-              <div className="max-w-2xl mx-auto px-4 sm:px-8 py-8">
-                <div className="bg-white dark:bg-[#1C1C20] rounded-[28px] border border-[#E8E4DC] dark:border-[#2D2D32] shadow-sm overflow-hidden">
-                  <div className="p-6 text-white" style={{ backgroundColor: manualForm.themeColor || '#D97757' }}>
-                    <h2 className="text-xl font-black">{manualForm.title || 'Untitled form'}</h2>
-                    {manualForm.description && <div className="text-sm opacity-90 mt-1" dangerouslySetInnerHTML={{ __html: manualForm.description }} />}
-                    {manualForm.descriptionImageUrl && <img src={manualForm.descriptionImageUrl} alt="Form description" className="mt-3 max-h-48 rounded-xl object-contain" />}
-                  </div>
-                  <div className="p-6">
-                    {manualForm.questions.length === 0 ? (
-                      <p className="text-sm text-[#858075] text-center py-8">Add questions in the Build tab to see them here.</p>
-                    ) : (
-                      <DynamicForm
-                        schema={JSON.stringify({
-                          title: manualForm.title,
-                          description: manualForm.description,
-                          descriptionImageUrl: manualForm.descriptionImageUrl,
-                          questions: manualForm.questions,
-                          blocks: manualForm.blocks || [],
-                          themeColor: manualForm.themeColor || '#D97757',
-                        })}
-                        onSubmit={() => {}}
-                      />
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
+        <div className="fixed inset-0 z-[120] overflow-y-auto bg-[#F0EBF8]">
+          <FormBuilder
+            key="manual-form-builder"
+            initialSchema={formBuilderInitialSchema}
+            onChange={schema => {
+              try { localStorage.setItem('bwenge-form-builder-draft', JSON.stringify(schema)); } catch { /* local storage may be unavailable */ }
+            }}
+            onBack={() => setShowManualFormBuilder(false)}
+            onResults={() => { setShowManualFormBuilder(false); void showFormsDashboard(); }}
+            onPublish={publishFormBuilderSchema}
+            onRunAgent={runFormBuilderAgent}
+          />
         </div>
       )}
     </div>

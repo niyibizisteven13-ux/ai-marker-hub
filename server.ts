@@ -2260,52 +2260,32 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 async function ensureMasterAdmin() {
   try {
     await prisma.$connect().catch(() => {});
+    const email = process.env.INITIAL_ADMIN_EMAIL?.trim().toLowerCase();
     const initialPassword = process.env.TEAM_INITIAL_PASSWORD || '';
-    const teamAccounts = [
-      { email: 'niyibizisteven13@gmail.com', name: 'Master Admin', role: 'ADMIN' },
-      { email: 'steven@bwenge.space', name: 'Steven', role: 'ADMIN' },
-      { email: 'divine@bwenge.space', name: 'Divine', role: 'INSTRUCTOR' },
-      { email: 'morin@bwenge.space', name: 'Morin', role: 'INSTRUCTOR' },
-      { email: 'shanie@bwenge.space', name: 'Shanie', role: 'INSTRUCTOR' },
-      { email: 'support@bwenge.space', name: 'Support Team', role: 'ADMIN' },
-    ];
-
-    for (const acc of teamAccounts) {
-      const existing = await prisma.user.findUnique({ where: { email: acc.email } });
-      if (!existing) {
-        if (initialPassword.length < 12) {
-          logger.warn(`Skipping ${acc.email}: TEAM_INITIAL_PASSWORD is not set or shorter than 12 characters`);
-          continue;
-        }
-        const passwordHash = await bcrypt.hash(initialPassword, 12);
-        await prisma.user.create({
-          data: {
-            email: acc.email,
-            name: acc.name,
-            passwordHash,
-            role: acc.role,
-            settings: { create: {} }
-          }
-        });
-        logger.info(`Team account created: ${acc.email}`);
-      } else {
-        await prisma.user.update({
-          where: { email: acc.email },
-          data: { role: acc.role }
-        });
-        logger.info(`Team account role verified: ${acc.email}`);
-      }
+    if (!email) {
+      logger.info('Admin bootstrap skipped: set INITIAL_ADMIN_EMAIL and TEAM_INITIAL_PASSWORD to create the first admin.');
+      return;
     }
-
-    const demoteEmail = 'niyibizi00003@gmail.com';
-    const existingDemoted = await prisma.user.findUnique({ where: { email: demoteEmail } });
-    if (existingDemoted) {
-      await prisma.user.update({
-        where: { email: demoteEmail },
-        data: { role: 'USER' }
-      });
-      logger.info('Previous admin account demoted to regular user.');
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      logger.info(`Admin bootstrap skipped: ${email} already has an account; existing role and password were left unchanged.`);
+      return;
     }
+    if (initialPassword.length < 12) {
+      logger.warn('Admin bootstrap skipped: TEAM_INITIAL_PASSWORD must be at least 12 characters.');
+      return;
+    }
+    const passwordHash = await bcrypt.hash(initialPassword, 12);
+    await prisma.user.create({
+      data: {
+        email,
+        name: process.env.INITIAL_ADMIN_NAME?.trim() || 'Administrator',
+        passwordHash,
+        role: 'ADMIN',
+        settings: { create: {} },
+      },
+    });
+    logger.info(`Initial admin account created: ${email}`);
   } catch (err) {
     logger.error('Failed to ensure master/team admin accounts:', err);
   }

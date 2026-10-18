@@ -355,7 +355,7 @@ async function syncRealDatabaseState() {
           provider: 'GONKAROUTER',
           model: process.env.GONKA_MODEL || 'zai-org/GLM-5.3-Flash',
           baseUrl: process.env.GONKA_BASE_URL || 'https://api.gonkarouter.io/v1',
-          secretRef: process.env.GONKA_API_KEY ? `GONKA_${process.env.GONKA_API_KEY.slice(-4)}` : 'GONKA_BRIDGE_ACTIVE',
+          secretRef: 'GONKA_API_KEY',
         },
       });
     }
@@ -711,7 +711,7 @@ router.get('/overview', async (_req, res) => {
       datasetExampleCount,
       activeModelCount,
       fineTuneCount,
-      usageEvents,
+      usageTotals,
       formsCount,
       submissionsCount,
       recentUploads,
@@ -723,9 +723,9 @@ router.get('/overview', async (_req, res) => {
       prisma.knowledgeBase.count(),
       prisma.document.count(),
       prisma.datasetExample.count(),
-      prisma.aiModel.count({ where: { status: 'active' } }),
+      prisma.aiModel.count({ where: { status: 'active', environment: 'production' } }),
       prisma.fineTuneJob.count(),
-      prisma.usageEvent.findMany({ orderBy: { createdAt: 'desc' } }),
+      prisma.usageEvent.aggregate({ _count: { _all: true }, _sum: { tokensIn: true, tokensOut: true } }),
       prisma.applicationForm.count(),
       prisma.formSubmission.count(),
       prisma.document.findMany({ orderBy: { createdAt: 'desc' }, take: 5 }),
@@ -735,14 +735,10 @@ router.get('/overview', async (_req, res) => {
       prisma.auditLog.findMany({ where: { action: { contains: 'ERROR' } }, orderBy: { createdAt: 'desc' }, take: 5 }),
     ]);
 
-    const totalQuestions = usageEvents.length;
-    const totalTokens = usageEvents.reduce(
-      (acc: number, e: any) => acc + (Number(e.tokensIn) || 0) + (Number(e.tokensOut) || 0),
-      0
-    );
-
-    const docsAll = await prisma.document.findMany();
-    const storageBytes = docsAll.reduce((acc: number, d: any) => acc + (Number(d.sizeBytes) || 0), 0);
+    const documentTotals = await prisma.document.aggregate({ _sum: { sizeBytes: true } });
+    const totalQuestions = usageTotals._count._all;
+    const totalTokens = (usageTotals._sum.tokensIn || 0) + (usageTotals._sum.tokensOut || 0);
+    const storageBytes = Number(documentTotals._sum.sizeBytes) || 0;
     const storageMb = Number((storageBytes / (1024 * 1024)).toFixed(2));
     const storageGb = Number((storageBytes / (1024 * 1024 * 1024)).toFixed(4));
 
@@ -783,22 +779,22 @@ router.get('/health', async (_req, res) => {
     await prisma.$queryRaw`SELECT 1`;
     const dbLatency = Math.max(1, Date.now() - startDb);
 
-    const startVec = Date.now();
+    const startIndex = Date.now();
     const chunkCount = await prisma.documentChunk.count();
-    const vecLatency = Math.max(1, Date.now() - startVec);
+    const indexLatency = Math.max(1, Date.now() - startIndex);
 
     const startFt = Date.now();
     const activeFtJobs = await prisma.fineTuneJob.count({ where: { status: 'BUILDING_ADAPTER' } });
     const completedFtJobs = await prisma.fineTuneJob.count({ where: { status: 'ADAPTER_READY' } });
     const ftLatency = Math.max(1, Date.now() - startFt);
 
-    const gonkaReady = await aiService.providerAvailable('gonkarouter');
+    const gonkaConfigured = await aiService.providerAvailable('gonkarouter');
 
     const services = [
       {
         name: 'GonkaRouter AI Engine',
-        status: gonkaReady ? 'ONLINE' : 'STANDBY',
-        latency: `${dbLatency + 14}ms · GLM-5.3-Flash`,
+        status: gonkaConfigured ? 'CONFIGURED' : 'NOT_CONFIGURED',
+        detail: gonkaConfigured ? 'Credentials found; live request not tested.' : 'Server credentials are missing.',
         lastChecked: new Date().toISOString(),
       },
       {
@@ -808,21 +804,21 @@ router.get('/health', async (_req, res) => {
         lastChecked: new Date().toISOString(),
       },
       {
-        name: 'Vector & Chunk Index',
+        name: 'Knowledge Index Storage',
         status: 'ONLINE',
-        latency: `${vecLatency}ms (${chunkCount} chunks)`,
+        latency: `${indexLatency}ms database count · ${chunkCount} chunks`,
         lastChecked: new Date().toISOString(),
       },
       {
         name: 'Dataset Prompt Adapter Builder',
-        status: 'ONLINE',
-        latency: activeFtJobs > 0 ? `${activeFtJobs} adapter build(s) running` : `${ftLatency}ms (${completedFtJobs} ready)`,
+        status: 'NOT_CHECKED',
+        detail: `${activeFtJobs} build(s) running · ${completedFtJobs} ready · ${ftLatency}ms database query`,
         lastChecked: new Date().toISOString(),
       },
       {
         name: 'Document Ingestion',
-        status: 'ONLINE',
-        latency: `${vecLatency + 3}ms pipeline`,
+        status: 'NOT_CHECKED',
+        detail: 'No live document extraction probe was run.',
         lastChecked: new Date().toISOString(),
       },
     ];
@@ -2330,7 +2326,7 @@ router.post('/prompts', async (req, res) => {
           create: {
             version: 1,
             environment: result.data.environment,
-            active: true,
+            active: false,
             text: result.data.text,
           },
         },
@@ -2347,13 +2343,24 @@ router.post('/prompts', async (req, res) => {
 router.post('/prompts/:id/promote', async (req, res) => {
   try {
     const { versionId, targetEnvironment, confirm } = req.body;
-    if (targetEnvironment === 'production' && !confirm) {
+    if (!['draft', 'testing', 'production'].includes(targetEnvironment) || typeof versionId !== 'string') {
+      return res.status(400).json({ success: false, error: 'A valid version and target environment are required.' });
+    }
+    if (targetEnvironment === 'production' && confirm !== true) {
       return res.status(400).json({ success: false, error: 'Production changes need an explicit confirm flag.' });
     }
+    const existing = await prisma.promptVersion.findFirst({ where: { id: versionId, promptId: req.params.id } });
+    if (!existing) return res.status(404).json({ success: false, error: 'Prompt version not found.' });
 
-    const version = await prisma.promptVersion.update({
-      where: { id: versionId },
-      data: { environment: targetEnvironment, active: true },
+    const version = await prisma.$transaction(async (tx: any) => {
+      await tx.promptVersion.updateMany({
+        where: { promptId: req.params.id, environment: targetEnvironment },
+        data: { active: false },
+      });
+      return tx.promptVersion.update({
+        where: { id: versionId },
+        data: { environment: targetEnvironment, active: true },
+      });
     });
 
     await writeAuditLog((req as any).user?.userId, 'PROMOTE_PROMPT', 'prompt', req.params.id, { versionId, targetEnvironment });
@@ -2407,51 +2414,48 @@ router.get('/corrections', async (_req, res) => {
 
 router.post('/corrections/:id/approve', async (req: any, res) => {
   try {
-    const item = await prisma.correctionQueueItem.findUnique({ where: { id: req.params.id } });
-    if (!item) return res.status(404).json({ success: false, error: 'Correction item not found.' });
-
-    const userId = req.user?.userId || 'admin';
-    const userRole = req.user?.role || 'ADMIN';
-    const requiresTwoApprovals = ['health', 'legal', 'finance'].includes(item.domain) || item.severity === 'harmful';
-
-    let newStatus = item.status;
-    let approvedBy1 = item.approvedBy1;
-    let approvedBy2 = item.approvedBy2;
-
-    if (userRole === 'ADMIN' || !requiresTwoApprovals) {
-      newStatus = 'approved_2';
-      approvedBy1 = approvedBy1 || userId;
-      approvedBy2 = userId;
-    } else {
-      if (!approvedBy1) {
-        approvedBy1 = userId;
-        newStatus = 'approved_1';
-      } else if (approvedBy1 !== userId) {
-        approvedBy2 = userId;
-        newStatus = 'approved_2';
+    const userId = req.user?.userId;
+    if (!userId) return res.status(403).json({ success: false, error: 'An authenticated admin reviewer is required.' });
+    const result: any = await prisma.$transaction(async (tx: any) => {
+      const item = await tx.correctionQueueItem.findUnique({ where: { id: req.params.id } });
+      if (!item) return { error: 'Correction item not found.', status: 404 };
+      const needsSecondReviewer = ['health', 'legal', 'finance'].includes(item.domain) || item.severity === 'harmful';
+      if (['approved_2', 'rejected', 'retracted'].includes(item.status)) {
+        return { error: 'This correction is no longer awaiting approval.', status: 409 };
       }
-    }
-
-    const updated = await prisma.correctionQueueItem.update({
-      where: { id: req.params.id },
-      data: { status: newStatus, approvedBy1, approvedBy2 },
-    });
-
-    if (newStatus === 'approved_2') {
-      await prisma.verifiedAnswer.create({
-        data: {
-          question: item.question,
-          answer: item.correctedAnswer,
-          sources: item.sourcesUsed,
-          domain: item.domain,
-          language: 'rw',
-          status: 'active',
-          approvedBy: userId,
-        },
+      if (needsSecondReviewer && item.approvedBy1 === userId) {
+        return { error: 'A different admin must provide the second approval.', status: 409 };
+      }
+      const complete = !needsSecondReviewer || Boolean(item.approvedBy1);
+      const nextStatus = complete ? 'approved_2' : 'approved_1';
+      const changed = await tx.correctionQueueItem.updateMany({
+        where: { id: item.id, status: item.status, approvedBy1: item.approvedBy1 },
+        data: complete
+          ? { status: nextStatus, approvedBy1: item.approvedBy1 || userId, approvedBy2: needsSecondReviewer ? userId : null }
+          : { status: nextStatus, approvedBy1: userId },
       });
-    }
+      if (changed.count !== 1) return { error: 'Correction changed during review. Reload and try again.', status: 409 };
+      if (complete) {
+        await tx.verifiedAnswer.create({
+          data: {
+            question: item.question,
+            answer: item.correctedAnswer,
+            sources: item.sourcesUsed,
+            domain: item.domain,
+            language: 'rw',
+            status: 'active',
+            approvedBy: userId,
+          },
+        });
+      }
+      const updated = await tx.correctionQueueItem.findUnique({ where: { id: item.id } });
+      return { updated, status: 200 };
+    });
+    if (result.error) return res.status(result.status).json({ success: false, error: result.error });
 
-    await writeAuditLog(userId, 'APPROVE_CORRECTION', 'CorrectionQueueItem', item.id, { status: newStatus });
+    const updated = result.updated;
+    const newStatus = updated.status;
+    await writeAuditLog(userId, 'APPROVE_CORRECTION', 'CorrectionQueueItem', updated.id, { status: newStatus });
     res.json({ success: true, data: updated, message: newStatus === 'approved_2' ? 'Correction fully approved and added to Verified Answers store.' : 'Correction recorded partial approval.' });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
@@ -2560,14 +2564,20 @@ router.put('/retrieval-settings', async (req, res) => {
 router.get('/providers', async (_req, res) => {
   try {
     const configs = await prisma.providerConfig.findMany();
-    const masked = configs.map((c: any) => ({
-      provider: c.provider,
-      model: c.model,
-      baseUrl: c.baseUrl || 'https://api.gonkarouter.io/v1',
-      configured: true,
-      secretRef: '••••••••' + (c.secretRef?.slice(-4) || 'ACTIVE'),
-    }));
-    res.json({ success: true, data: masked });
+    const providerKeys: Record<string, any> = {
+      GONKAROUTER: 'gonkarouter', GEMINI: 'gemini', GOOGLE: 'gemini', OPENAI: 'openai',
+      ANTHROPIC: 'anthropic', DEEPSEEK: 'deepseek', OPENROUTER: 'openrouter',
+      'NVIDIA NIM': 'nvidianim', NVIDIANIM: 'nvidianim', OLLAMA: 'ollama',
+    };
+    const data = await Promise.all(configs.map(async (config: any) => ({
+      provider: config.provider,
+      model: config.model,
+      baseUrl: config.baseUrl,
+      configured: providerKeys[config.provider.toUpperCase()]
+        ? await aiService.providerAvailable(providerKeys[config.provider.toUpperCase()])
+        : false,
+    })));
+    res.json({ success: true, data });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -2577,8 +2587,19 @@ router.put('/providers', async (req, res) => {
   try {
     const { provider, model, baseUrl, apiKey } = req.body;
     if (!provider) return res.status(400).json({ success: false, error: 'Provider is required.' });
-
-    const secretRef = apiKey ? apiKey.trim() : 'GONKA_ACTIVE';
+    if (typeof apiKey === 'string' && apiKey.trim()) {
+      return res.status(400).json({ success: false, error: 'Do not submit credentials here. Configure provider keys in the server environment or deployment secrets.' });
+    }
+    const normalizedProvider = String(provider).trim().toUpperCase();
+    const secretRefs: Record<string, string> = {
+      GONKAROUTER: 'GONKA_API_KEY', GEMINI: 'GEMINI_API_KEY', GOOGLE: 'GEMINI_API_KEY',
+      OPENAI: 'OPENAI_API_KEY', ANTHROPIC: 'ANTHROPIC_API_KEY', DEEPSEEK: 'DEEPSEEK_API_KEY',
+      OPENROUTER: 'OPENROUTER_API_KEY', 'NVIDIA NIM': 'NVIDIA_NIM_API_KEY', NVIDIANIM: 'NVIDIA_NIM_API_KEY',
+      OLLAMA: 'OLLAMA_BASE_URL',
+    };
+    if (!secretRefs[normalizedProvider]) return res.status(400).json({ success: false, error: 'Unsupported AI provider.' });
+    if (typeof model !== 'string' || !model.trim()) return res.status(400).json({ success: false, error: 'Model is required.' });
+    const secretRef = secretRefs[normalizedProvider];
     if (provider.toUpperCase().includes('GONKA') && model) {
       process.env.GONKA_MODEL = model;
     }
@@ -2587,12 +2608,12 @@ router.put('/providers', async (req, res) => {
     }
 
     await prisma.providerConfig.upsert({
-      where: { provider },
-      update: { model, baseUrl, secretRef },
-      create: { provider, model: model || 'zai-org/GLM-5.3-Flash', baseUrl, secretRef },
+      where: { provider: normalizedProvider },
+      update: { model: model.trim(), baseUrl, secretRef },
+      create: { provider: normalizedProvider, model: model.trim(), baseUrl, secretRef },
     });
 
-    await writeAuditLog((req as any).user?.userId, 'UPDATE_PROVIDER_CONFIG', 'provider_config', provider, { model, baseUrl });
+    await writeAuditLog((req as any).user?.userId, 'UPDATE_PROVIDER_CONFIG', 'provider_config', normalizedProvider, { model, baseUrl });
     res.json({ success: true, message: 'Provider configuration updated securely.' });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });

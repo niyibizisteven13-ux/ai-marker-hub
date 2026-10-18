@@ -354,7 +354,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
           return ftList.data.find((j: any) => j.id === prev.id) || prev;
         });
       } catch {}
-    }, 1200);
+    }, 5000);
     return () => window.clearInterval(timer);
   }, [datasetAdapterJobs]);
 
@@ -599,33 +599,21 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                   <div className={`${card} p-6 space-y-4`}>
                     <div className="flex items-center justify-between">
                       <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                        <BarChart3 size={18} className="text-[#3FA7E0]" /> Token Velocity &amp; Inference Throughput
+                        <BarChart3 size={18} className="text-[#3FA7E0]" /> Usage reporting
                       </h3>
-                      <span className="text-xs text-[#9AA6C9]">Real-time telemetry distribution (Last 12 intervals)</span>
-                    </div>
-                    <div className="grid grid-cols-6 sm:grid-cols-12 gap-3 items-end h-24 pt-2">
-                      {[42, 68, 35, 88, 58, 96, 78, 62, 92, 84, 100, 88].map((val, i) => (
-                        <div key={i} className="flex flex-col items-center gap-1.5 h-full justify-end group">
-                          <div
-                            className="w-full bg-gradient-to-t from-[#3FA7E0]/30 via-[#3FA7E0]/80 to-[#55B5EA] rounded-t-md transition-all duration-300 group-hover:brightness-125 group-hover:scale-y-105"
-                            style={{ height: `${val}%` }}
-                            title={`Activity index: ${val}%`}
-                          />
-                          <span className="text-[10px] font-semibold text-[#6C789E]">T{i + 1}</span>
-                        </div>
-                      ))}
+                      <span className="text-xs text-[#9AA6C9]">Query and token totals are shown in the metrics above.</span>
                     </div>
                   </div>
 
-                  <Section title="Live Service Health" hint="Real-time database, vector index, and prompt adapter builder status.">
+                  <Section title="Service Checks" hint="Database checks are measured. Provider credentials are checked without a live AI request; adapter and ingestion services are not probed.">
                     <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-4">
                       {health.map((s, idx) => (
                         <div key={idx} className={`${card} p-5 flex items-center justify-between min-w-0`}>
                           <div className="min-w-0 mr-3">
                             <p className="text-xs font-bold text-[#9AA6C9] truncate">{s.name}</p>
-                            <p className="mt-1.5 text-sm font-extrabold text-white truncate">{s.latency}</p>
+                            <p className="mt-1.5 text-sm font-extrabold text-white truncate">{s.latency || s.detail || '—'}</p>
                           </div>
-                          <Badge tone={s.status === 'ONLINE' ? 'green' : 'yellow'}>{s.status}</Badge>
+                          <Badge tone={['ONLINE', 'CONFIGURED'].includes(s.status) ? 'green' : s.status === 'NOT_CONFIGURED' ? 'yellow' : 'blue'}>{s.status.replaceAll('_', ' ')}</Badge>
                         </div>
                       ))}
                     </div>
@@ -2187,12 +2175,12 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                         });
                         setNewPromptName('');
                         setNewPromptText('');
-                        notify('System prompt created & activated');
+                        notify('Prompt saved as an inactive draft. Promote it after review.');
                         await loadData(true);
                       }}
                       className={btnPrimary}
                     >
-                      <Plus size={16} /> Save &amp; Activate System Prompt
+                      <Plus size={16} /> Save Prompt Draft
                     </button>
                   </div>
 
@@ -2209,6 +2197,8 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                             <p className="text-[#9AA6C9] line-clamp-3 break-words font-mono">{v.text}</p>
                             <button
                               onClick={async () => {
+                                const confirmed = window.confirm(`Promote version ${v.version} of “${p.name}” to production? This changes instructions used by live AI requests.`);
+                                if (!confirmed) return;
                                 await adminApi.promotePrompt(p.id, v.id, 'production', true);
                                 notify('Prompt promoted to production');
                                 await loadData(true);
@@ -2227,17 +2217,16 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
 
               {/* ── PROVIDERS TAB ── */}
               {tab === 'providers' && (
-                <Section title="AI Provider Configurations" hint="Live GonkaRouter gateway and model routing settings.">
+                <Section title="AI Provider Configurations" hint="Credentials are configured on the server or in deployment secrets. Status confirms credentials are present, not that a live AI request succeeds.">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {providers.map((prv, idx) => (
                       <div key={idx} className={`${card} p-6 space-y-4 min-w-0`}>
                         <div className="flex justify-between items-start gap-2 min-w-0">
                           <h3 className="font-bold text-white text-base truncate">{prv.provider}</h3>
-                          <Badge tone="green">Active</Badge>
+                          <Badge tone={prv.configured ? 'green' : 'yellow'}>{prv.configured ? 'Configured' : 'Not configured'}</Badge>
                         </div>
                         <p className="text-xs text-[#9AA6C9] truncate">Model: <span className="text-white font-semibold">{prv.model}</span></p>
                         <p className="text-xs text-[#9AA6C9] truncate">Gateway: <span className="text-white font-semibold">{prv.baseUrl || 'https://api.gonkarouter.io/v1'}</span></p>
-                        <p className="text-xs font-mono text-[#6C789E] truncate">Credential Ref: {prv.secretRef}</p>
                       </div>
                     ))}
                   </div>
@@ -2251,7 +2240,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                     <Stat label="Total AI Queries" value={analytics.totalQuestions} detail="Logged in database" />
                     <Stat label="Knowledge Grounded" value={`${analytics.answeredRate}%`} detail="Verified context rate" />
                     <Stat label="Avg Inference Latency" value={`${analytics.avgLatencyMs} ms`} detail="GonkaRouter streaming" />
-                    <Stat label="Cumulative Cost" value={`$${analytics.costUsd}`} detail="Inference + Adapter generation" />
+                    <Stat label="Estimated Cost" value={`$${analytics.costUsd}`} detail="Estimate from configured token rates" />
                   </div>
                 </Section>
               )}

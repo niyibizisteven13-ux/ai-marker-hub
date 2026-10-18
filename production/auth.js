@@ -27,10 +27,8 @@ export function requireAuth(req, res, next) {
       return res.status(401).json({ error: 'Invalid or expired token.', code: 'INVALID_TOKEN' });
     }
 
-    const email = decoded.email?.toLowerCase().trim();
-    const resolvedRole = email === 'niyibizisteven13@gmail.com' ? 'ADMIN' : decoded.role;
     req.teacher = { teacherId: decoded.userId };
-    req.user = { ...decoded, role: resolvedRole };
+    req.user = decoded;
     return next();
   } catch (err) {
     const isExpired = err.name === 'TokenExpiredError';
@@ -42,12 +40,24 @@ export function requireAuth(req, res, next) {
 }
 
 export function requireRole(role) {
-  return (req, res, next) => {
-    const userRole = req.user?.email?.toLowerCase().trim() === 'niyibizisteven13@gmail.com' ? 'ADMIN' : req.user?.role;
-    if (!req.user || userRole !== role) {
+  return async (req, res, next) => {
+    if (!req.user?.userId) {
       return res.status(403).json({ error: 'Forbidden: insufficient permissions.' });
     }
-    next();
+    try {
+      const user = await prisma.user.findUnique({
+        where: { id: req.user.userId },
+        select: { id: true, email: true, name: true, role: true },
+      });
+      if (!user || user.role !== role) {
+        return res.status(403).json({ error: 'Forbidden: insufficient permissions.' });
+      }
+      req.user = { ...req.user, email: user.email, name: user.name, role: user.role };
+      return next();
+    } catch (error) {
+      console.error('Role verification failed:', error);
+      return res.status(503).json({ error: 'Permissions could not be verified. Please retry.' });
+    }
   };
 }
 

@@ -5,28 +5,27 @@ import { prisma } from '../server/db.js';
 async function seed() {
   try {
     await prisma.$connect();
-    const email = 'niyibizisteven13@gmail.com';
-    const passwordHash = await bcrypt.hash('work', 12);
+    const email = process.env.INITIAL_ADMIN_EMAIL?.trim().toLowerCase();
+    const password = process.env.TEAM_INITIAL_PASSWORD || '';
+    if (!email || password.length < 12) {
+      throw new Error('Set INITIAL_ADMIN_EMAIL and TEAM_INITIAL_PASSWORD (at least 12 characters) before seeding an admin.');
+    }
 
     const existing = await prisma.user.findUnique({ where: { email } });
-    if (!existing) {
-      const user = await prisma.user.create({
-        data: {
-          email,
-          name: 'Master Admin',
-          passwordHash,
-          role: 'ADMIN',
-          settings: { create: {} }
-        }
-      });
-      console.log('Master admin account created successfully:', user.email, user.role);
-    } else {
-      const user = await prisma.user.update({
-        where: { email },
-        data: { role: 'ADMIN', passwordHash }
-      });
-      console.log('Master admin account updated successfully:', user.email, user.role);
+    if (existing) {
+      throw new Error(`An account already exists for ${email}; refusing to overwrite its password or role.`);
     }
+    const passwordHash = await bcrypt.hash(password, 12);
+    const user = await prisma.user.create({
+      data: {
+        email,
+        name: process.env.INITIAL_ADMIN_NAME?.trim() || 'Administrator',
+        passwordHash,
+        role: 'ADMIN',
+        settings: { create: {} },
+      },
+    });
+    console.log('Initial admin account created successfully:', user.email, user.role);
   } catch (err) {
     console.error('Failed to seed master admin:', err);
     process.exit(1);

@@ -14,7 +14,7 @@ const JWT_SECRET = getJwtSecret();
 const ACCESS_TOKEN_TTL = '15m';
 
 function buildAuthenticatedUser(user: any) {
-  const role = user.email?.toLowerCase().trim() === 'niyibizisteven13@gmail.com' ? 'ADMIN' : (user.role || 'user');
+  const role = user.role || 'user';
   return {
     id: user.id,
     name: user.name || user.email?.split('@')[0] || 'User',
@@ -551,7 +551,7 @@ export async function refreshTokenHandler(req: Request, res: Response) {
       {
         userId: session.user.id,
         email: session.user.email,
-        role: session.user.email?.toLowerCase().trim() === 'niyibizisteven13@gmail.com' ? 'ADMIN' : session.user.role,
+        role: session.user.role,
       },
       JWT_SECRET,
       { expiresIn: ACCESS_TOKEN_TTL, algorithm: 'HS256', issuer: 'bwenge', audience: 'bwenge-web' }

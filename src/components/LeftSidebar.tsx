@@ -5,8 +5,6 @@ import {
   Star,
   Settings,
   Trash2,
-  Building2,
-  Zap,
   MessageSquare,
   GraduationCap,
   BarChart3,
@@ -61,7 +59,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
     },
     {
       id: 'marking_hub' as NavigationTab,
-      label: 'Agent',
+      label: 'Marking',
       icon: GraduationCap,
     },
     {
@@ -117,13 +115,14 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
         {/* Action Operational Trigger Button */}
         <div className="px-4 mb-4">
           <button
+            type="button"
             onClick={() => {
               onNewChat();
               onCloseMobile();
             }}
-            className={`w-full flex items-center justify-center space-x-2 py-2.5 lg:py-2 bg-[#222222] hover:bg-neutral-800 text-neutral-200 hover:text-white rounded-xl text-sm font-medium border border-neutral-800/80 transition-colors ${collapsed ? 'px-0' : ''}`}
+            className={`w-full flex items-center justify-center gap-2 py-2.5 lg:py-2 bg-[#222222] hover:bg-neutral-800 text-neutral-200 hover:text-white rounded-xl text-sm font-medium border border-neutral-800/80 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D97757] focus-visible:ring-offset-2 focus-visible:ring-offset-[#1F1E1D] ${collapsed ? 'px-0' : ''}`}
           >
-            <span>➕</span>
+            <Plus size={16} aria-hidden="true" />
             {!collapsed && <span>New Chat</span>}
           </button>
         </div>
@@ -141,7 +140,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                     setActiveTab(item.id);
                     onCloseMobile();
                   }}
-                  className={`flex items-center gap-3 px-3 py-2.5 text-[15px] lg:py-2 lg:text-sm rounded-lg transition-all duration-200 ${
+                  className={`flex items-center gap-3 px-3 py-2.5 text-[15px] lg:py-2 lg:text-sm rounded-lg transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D97757] focus-visible:ring-offset-2 focus-visible:ring-offset-[#1F1E1D] ${
                     collapsed ? 'lg:w-10 lg:h-10 lg:justify-center' : 'w-full'
                   } ${
                     isActive

@@ -355,8 +355,8 @@ const StarIcon = ({ filled }: { filled: boolean }) => (
 );
 
 const inputBase =
-  'w-full rounded-lg border bg-white px-3 py-2.5 text-sm outline-none transition focus:ring-2 disabled:bg-slate-100 disabled:text-slate-500';
-const inputOk = 'border-slate-400 focus:border-slate-700 focus:ring-slate-300';
+  'w-full rounded-xl border bg-white px-4 py-3 text-sm outline-none transition placeholder:text-slate-400 focus:ring-2 disabled:bg-slate-100 disabled:text-slate-500';
+const inputOk = 'border-slate-300 focus:border-slate-500 focus:ring-slate-200';
 const inputBad = 'border-rose-600 focus:border-rose-700 focus:ring-rose-200';
 
 /* ---------------------------------------------------------- question card */
@@ -389,7 +389,7 @@ const QuestionCard = memo(function QuestionCard(props: CardProps) {
   const aria = { 'aria-invalid': error ? true : undefined, 'aria-describedby': describedBy } as const;
   const cls = `${inputBase} ${error ? inputBad : inputOk}`;
   const radioCls = 'h-4 w-4 shrink-0';
-  const rowCls = 'flex min-h-11 cursor-pointer items-center gap-3 text-sm';
+  const rowCls = 'flex min-h-12 cursor-pointer items-center gap-3 rounded-xl px-3 text-sm text-slate-700 transition hover:bg-slate-50';
   const columns = field.columns && field.columns.length ? field.columns : options;
   const rows = field.rows || [];
   const set = (v: any) => onChange(id, v);
@@ -640,7 +640,7 @@ const QuestionCard = memo(function QuestionCard(props: CardProps) {
   return (
     <section
       id={`field-${id}`}
-      className={`rounded-2xl border bg-white p-5 shadow-sm sm:p-6 ${error ? 'border-rose-600 ring-1 ring-rose-600' : 'border-slate-200'}`}
+      className={`rounded-2xl border bg-white p-5 shadow-[0_2px_10px_rgba(15,23,42,0.035)] transition-shadow sm:p-6 ${error ? 'border-rose-500 ring-1 ring-rose-200' : 'border-slate-200 hover:shadow-md'}`}
     >
       {field.contentTitle && <h4 className="mb-2 text-base font-semibold">{field.contentTitle}</h4>}
       {field.imageUrl && <img src={field.imageUrl} alt={field.label || 'Question image'} className="mb-4 max-h-[28rem] max-w-full rounded-xl object-contain" />}
@@ -650,13 +650,13 @@ const QuestionCard = memo(function QuestionCard(props: CardProps) {
       <div className="flex items-start justify-between gap-3">
         {isGroup
           ? <div id={labelId} className="text-sm font-semibold leading-6 text-slate-900">{title}</div>
-          : <label id={labelId} htmlFor={controlId} className="block text-sm font-semibold leading-6 text-slate-900">{title}</label>}
+          : <label id={labelId} htmlFor={controlId} className="block text-base font-semibold leading-7 text-slate-900">{title}</label>}
         {field.points !== undefined && field.points > 0 && (
           <span className="shrink-0 text-xs font-medium text-slate-600">{field.points} {field.points === 1 ? 'point' : 'points'}</span>
         )}
       </div>
-      {field.description && <p id={descId} className="mt-1 text-xs leading-5 text-slate-600">{field.description}</p>}
-      <div className="mt-4">{control}</div>
+      {field.description && <p id={descId} className="mt-1 text-sm leading-6 text-slate-500">{field.description}</p>}
+      <div className="mt-4 text-slate-700">{control}</div>
       {error && (
         <p id={errId} className="mt-3 flex items-center gap-2 text-sm text-rose-700">
           <ErrorIcon />{error}
@@ -978,17 +978,17 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey }: 
 
   const accent = parsedSchema.themeColor || '#B4502F';
   const isClosed = parsedSchema.acceptingResponses === false;
-  const shell = 'mx-auto w-full max-w-2xl space-y-4 text-slate-800';
+  const shell = 'mx-auto w-full max-w-3xl space-y-4 text-slate-800';
   const headerCard = (
     <header className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="h-2.5" style={{ backgroundColor: accent }} />
-      <div className="p-5 sm:p-8">
-        <h2 className="break-words text-2xl font-bold tracking-tight sm:text-3xl">{parsedSchema.title || 'Untitled form'}</h2>
-        {parsedSchema.description && <RichText text={parsedSchema.description} className="mt-3 text-sm leading-6 text-slate-700" />}
+      <div className="h-3" style={{ backgroundColor: accent }} />
+      <div className="p-6 sm:p-9">
+        <h2 className="break-words text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">{parsedSchema.title || 'Untitled form'}</h2>
+        {parsedSchema.description && <RichText text={parsedSchema.description} className="mt-4 text-base leading-7 text-slate-600" />}
         {parsedSchema.descriptionImageUrl && (
           <img src={parsedSchema.descriptionImageUrl} alt="Form description attachment" className="mt-4 max-h-[28rem] max-w-full rounded-xl object-contain" />
         )}
-        {!isClosed && !result && <p className="mt-5 text-xs text-rose-700">* Indicates required question</p>}
+        {!isClosed && !result && <p className="mt-6 border-t border-slate-100 pt-4 text-xs text-slate-500"><span className="font-bold text-rose-600">*</span> Indicates required question</p>}
       </div>
     </header>
   );
@@ -1063,13 +1063,13 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey }: 
       {totalPages > 1 && (
         <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
           <div className="flex items-baseline justify-between text-sm">
-            <span className="font-bold">Page {safeIdx + 1} of {totalPages}</span>
-            {page?.title && <span className="text-slate-600">{page.title}</span>}
+            <span className="font-semibold text-slate-800">Page {safeIdx + 1} of {totalPages}</span>
+            {page?.title && <span className="truncate pl-4 text-slate-500">{page.title}</span>}
           </div>
           <div role="progressbar" aria-label="Form progress" aria-valuemin={0} aria-valuemax={100}
             aria-valuenow={Math.round(((safeIdx + 1) / totalPages) * 100)}
-            className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200">
-            <div className="h-full rounded-full transition-all" style={{ width: `${((safeIdx + 1) / totalPages) * 100}%`, backgroundColor: accent }} />
+            className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
+            <div className="h-full rounded-full transition-all duration-300" style={{ width: `${((safeIdx + 1) / totalPages) * 100}%`, backgroundColor: accent }} />
           </div>
         </div>
       )}
