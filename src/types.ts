@@ -100,6 +100,8 @@ export interface Message {
   attachments?: ChatAttachment[];
   timestamp: string;
   isStreaming?: boolean;
+  isWaiting?: boolean;
+  stopped?: boolean;
   rating?: 'up' | 'down';
   errorKind?: 'service_unavailable' | 'network' | 'generic';
   sources?: Array<{ filename: string; pageNumber?: number; tableNumber?: string; title?: string }>;

@@ -23,7 +23,13 @@ export interface ProviderAdapter {
 }
 
 export class ProviderError extends Error {
-  constructor(message: string, public status?: number, public retryable = false) {
+  constructor(
+    message: string,
+    public status?: number,
+    public retryable = false,
+    public timeout = false,
+    public timeoutKind?: 'connect' | 'idle' | 'request',
+  ) {
     super(message);
   }
 }

@@ -21,7 +21,7 @@ export class PreFlightService {
     let emptyAnswers = 0;
 
     for (const answer of answers) {
-      const content = String(answer.text || answer.content || '').trim();
+      const content = String(answer.answerText || answer.text || answer.content || '').trim();
       totalLength += content.length;
       if (content.length === 0) {
         emptyAnswers++;

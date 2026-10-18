@@ -159,14 +159,17 @@ EXPECTED JSON:
     const totalSubmissions = analyzed.length;
     const scoredSubmissions = analyzed.filter(s => s.extractedInsights?.score !== null && s.extractedInsights?.score !== undefined);
     const scoresList = scoredSubmissions.map(s => Number(s.extractedInsights?.score || 0)).sort((a, b) => a - b);
-    const averageScore = scoresList.length > 0
+    const averageScore: number | null = scoresList.length > 0
       ? scoresList.reduce((acc, s) => acc + s, 0) / scoresList.length
-      : 0;
-    const highestScore = scoresList.length > 0 ? scoresList[scoresList.length - 1] : 0;
-    const lowestScore = scoresList.length > 0 ? scoresList[0] : 0;
-    const medianScore = scoresList.length > 0 ? scoresList[Math.floor(scoresList.length / 2)] : 0;
+      : null;
+    const highestScore = scoresList.length > 0 ? scoresList[scoresList.length - 1] : null;
+    const lowestScore = scoresList.length > 0 ? scoresList[0] : null;
+    const medianScore = scoresList.length > 0 ? scoresList[Math.floor(scoresList.length / 2)] : null;
 
-    const atRiskCount = analyzed.filter(s => s.extractedInsights?.atRisk || (Number(s.extractedInsights?.score ?? 100) < 50)).length;
+    const atRiskCount = analyzed.filter((s) => {
+      const score = s.extractedInsights?.score;
+      return Boolean(s.extractedInsights?.atRisk) || (score !== null && score !== undefined && Number(score) < 50);
+    }).length;
 
     let savedSettings: any = {};
     try { savedSettings = form.selectionSettings ? JSON.parse(form.selectionSettings) : {}; } catch { savedSettings = {}; }
@@ -273,7 +276,9 @@ EXPECTED JSON:
       .filter(Boolean)
       .join('\n');
 
-    let qualitativeInsight = `Analyzed ${totalSubmissions} response(s) across ${questions.length} question(s). Average score is ${Math.round(averageScore * 10) / 10}/100 (range ${lowestScore}–${highestScore}).`;
+    let qualitativeInsight = averageScore === null
+      ? `Analyzed ${totalSubmissions} response(s) across ${questions.length} question(s); no scoring results are available yet.`
+      : `Analyzed ${totalSubmissions} response(s) across ${questions.length} question(s). Average score is ${Math.round(averageScore * 10) / 10}/100 (range ${lowestScore}–${highestScore}).`;
     let keyPatterns: string[] = [];
 
     if (insightsSummary) {
@@ -297,13 +302,18 @@ EXPECTED JSON:
     }
 
     if (keyPatterns.length === 0) {
-      keyPatterns = [
-        `Cohort average score is ${Math.round(averageScore * 10) / 10}/100 across ${totalSubmissions} submission(s), with a top score of ${highestScore}/100.`,
-        questionSummaries[0]
-          ? `"${questionSummaries[0].title}" achieved a ${questionSummaries[0].responseRate}% response rate.`
-          : 'All required questions achieved high completion rates.',
-        `${analyzed.filter(s => (s.extractedInsights?.score || 0) >= 75).length} respondent(s) scored 75+ and meet high-performing selection thresholds.`,
-      ];
+      keyPatterns = averageScore === null
+        ? [
+            `${totalSubmissions} response(s) are recorded; scores are unavailable until AI scoring succeeds.`,
+            ...(questionSummaries[0] ? [`"${questionSummaries[0].title}" has a ${questionSummaries[0].responseRate}% response rate.`] : []),
+          ]
+        : [
+            `Cohort average score is ${Math.round(averageScore * 10) / 10}/100 across ${totalSubmissions} submission(s), with a top score of ${highestScore}/100.`,
+            questionSummaries[0]
+              ? `"${questionSummaries[0].title}" achieved a ${questionSummaries[0].responseRate}% response rate.`
+              : 'No question response-rate summary is available.',
+            `${scoredSubmissions.filter((s) => Number(s.extractedInsights?.score) >= 75).length} respondent(s) scored 75 or higher.`,
+          ];
     }
 
     let selection: any = null;
@@ -315,7 +325,7 @@ EXPECTED JSON:
         submissionId: submission.id,
         submittedAt: submission.createdAt,
         answers: JSON.parse(submission.data),
-        score: submission.extractedInsights?.score ?? 75,
+        score: submission.extractedInsights?.score ?? null,
         scoringFeedback: submission.extractedInsights?.scoringFeedback,
         summary: submission.extractedInsights?.summary,
         criteria: submission.extractedInsights?.scoringDetails ? JSON.parse(submission.extractedInsights.scoringDetails) : [],
@@ -328,25 +338,27 @@ EXPECTED JSON:
         const parsedSel = this.aiService.parseModelJson(raw);
         const rankings = Array.isArray(parsedSel?.rankings) ? parsedSel.rankings : [];
         const allowed = new Set(evidence.map((candidate) => candidate.rankId));
-        const safeRankings = rankings
-          .filter((row: any) => allowed.has(Number(row.rankId)))
-          .map((row: any) => ({
-            rankId: Number(row.rankId),
-            score: Number.isFinite(Number(row.score)) ? Math.max(0, Math.min(100, Math.round(Number(row.score)))) : 75,
-            selected: Boolean(row.selected),
-            reason: String(row.reason || 'Evaluated against selection criteria.'),
-          }));
-
-        for (const cand of evidence) {
-          if (!safeRankings.some((r: any) => r.rankId === cand.rankId)) {
-            const fallbackScore = Number.isFinite(Number(cand.score)) ? Number(cand.score) : 70;
-            safeRankings.push({
-              rankId: cand.rankId,
-              score: fallbackScore,
-              selected: fallbackScore >= 70,
-              reason: cand.scoringFeedback || cand.summary || 'Evaluated based on response completeness and rubric alignment.',
-            });
+        if (rankings.length !== evidence.length) {
+          throw new Error('AI ranking returned an incomplete set of candidates.');
+        }
+        const safeRankings = rankings.map((row: any) => {
+          const rankId = Number(row?.rankId);
+          const score = Number(row?.score);
+          if (
+            !allowed.has(rankId) ||
+            !Number.isFinite(score) ||
+            score < 0 ||
+            score > 100 ||
+            typeof row.selected !== 'boolean' ||
+            typeof row.reason !== 'string' ||
+            !row.reason.trim()
+          ) {
+            throw new Error('AI ranking returned an invalid candidate result.');
           }
+          return { rankId, score: Math.round(score), selected: row.selected, reason: row.reason.trim() };
+        });
+        if (new Set(safeRankings.map((row: any) => row.rankId)).size !== evidence.length) {
+          throw new Error('AI ranking returned duplicate candidates.');
         }
 
         safeRankings.sort((a: any, b: any) => b.score - a.score);
@@ -395,19 +407,13 @@ EXPECTED JSON:
           ...writes,
         ]);
       } catch (error: any) {
-        logger.warn(`AI ranking fallback used for form ${formId}:`, error.message);
-        const fallbackRankings = evidence
-          .map((cand) => {
-            const sc = Number.isFinite(Number(cand.score)) ? Number(cand.score) : 75;
-            return {
-              rankId: cand.rankId,
-              score: sc,
-              selected: sc >= 70,
-              reason: cand.scoringFeedback || cand.summary || 'Ranked by rubric score and response completeness.',
-            };
-          })
-          .sort((a: any, b) => b.score - a.score);
-        selection = { summary: qualitativeInsight, rankings: fallbackRankings };
+        logger.error(`AI ranking failed for form ${formId}; no selection was produced.`, {
+          errorType: error?.name || 'Error',
+          status: typeof error?.status === 'number' ? error.status : undefined,
+          timeout: error?.timeout === true,
+          timeoutKind: error?.timeoutKind,
+        });
+        selection = null;
       }
     }
 
@@ -441,13 +447,15 @@ EXPECTED JSON:
       .sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
 
     const finalScores = candidates.filter((c) => c.score !== null).map((c) => Number(c.score));
-    const finalAvg = finalScores.length > 0 ? Math.round((finalScores.reduce((a, b) => a + b, 0) / finalScores.length) * 10) / 10 : Math.round(averageScore * 10) / 10;
+    const finalAvg = finalScores.length > 0
+      ? Math.round((finalScores.reduce((a, b) => a + b, 0) / finalScores.length) * 10) / 10
+      : null;
 
     return {
       totalSubmissions,
       averageScore: finalAvg,
-      highestScore: finalScores.length > 0 ? Math.max(...finalScores) : highestScore,
-      lowestScore: finalScores.length > 0 ? Math.min(...finalScores) : lowestScore,
+      highestScore: finalScores.length > 0 ? Math.max(...finalScores) : null,
+      lowestScore: finalScores.length > 0 ? Math.min(...finalScores) : null,
       medianScore,
       atRiskCount,
       qualitativeInsight,
@@ -461,4 +469,3 @@ EXPECTED JSON:
     };
   }
 }
-

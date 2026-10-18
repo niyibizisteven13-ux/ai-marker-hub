@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { ExamPaper, StudentScript } from '../types';
-import { Bot, Sparkles, Loader2, CheckCircle2, AlertTriangle, ArrowRight, RefreshCw, ShieldAlert } from 'lucide-react';
-import { buildFallbackMarkResults } from '../utils/aiFallback';
+import { Bot, Sparkles, Loader2, CheckCircle2, ArrowRight, RefreshCw, ShieldAlert } from 'lucide-react';
 
 interface Step4AIMarksProps {
   examPaper: ExamPaper;
@@ -49,19 +48,11 @@ export const Step4AIMarks: React.FC<Step4AIMarksProps> = ({
           }),
         });
 
-        const data = await res.json();
-        let markedResult: StudentScript;
-
-        if (!res.ok || !data.success) {
-          console.warn('API marking failed or offline, applying intelligent fallback grading...');
-          markedResult = buildFallbackMarkResults(examPaper, script);
-          setLogs((prev) => [
-            `⚡ Using fallback AI grading for ${script.studentName} (API offline)`,
-            ...prev,
-          ]);
-        } else {
-          markedResult = data.markedScript;
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success || data.markedScript?.status !== 'marked' || !Array.isArray(data.markedScript.results)) {
+          throw new Error(data.message || data.error || 'AI marking failed. This script remains pending; please retry.');
         }
+        const markedResult: StudentScript = data.markedScript;
 
         const flagInfo = markedResult.flags && markedResult.flags.length > 0
           ? `🚩 Flag raised: [${markedResult.flags.join(', ')}]`
@@ -76,13 +67,12 @@ export const Step4AIMarks: React.FC<Step4AIMarksProps> = ({
           prev.map((s) => (s.id === script.id ? markedResult : s))
         );
       } catch (err: any) {
-        console.error(err);
-        const fallbackResult = buildFallbackMarkResults(examPaper, script);
-        setStudentScripts((prev) =>
-          prev.map((s) => (s.id === script.id ? fallbackResult : s))
-        );
+        const message = typeof err?.message === 'string'
+          ? err.message
+          : 'AI marking failed. This script remains pending; please retry.';
+        setErrorMsg(message);
         setLogs((prev) => [
-          `⚠️ Network error for ${script.studentName}. Applied fallback grading successfully.`,
+          `⚠️ Could not mark ${script.studentName}; the script remains pending. Retry when AI service is available.`,
           ...prev,
         ]);
       }
@@ -95,6 +85,7 @@ export const Step4AIMarks: React.FC<Step4AIMarksProps> = ({
     const script = studentScripts.find((s) => s.id === scriptId);
     if (!script) return;
 
+    setErrorMsg(null);
     setLogs((prev) => [`🔄 Re-evaluating ${script.studentName}...`, ...prev]);
     try {
       const res = await fetch('/api/mark-script', {
@@ -102,15 +93,19 @@ export const Step4AIMarks: React.FC<Step4AIMarksProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ examPaper, studentScript: script }),
       });
-      const data = await res.json();
-      const markedResult = res.ok && data.success ? data.markedScript : buildFallbackMarkResults(examPaper, script);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success || data.markedScript?.status !== 'marked' || !Array.isArray(data.markedScript.results)) {
+        throw new Error(data.message || data.error || 'AI marking failed. This script remains pending; please retry.');
+      }
+      const markedResult: StudentScript = data.markedScript;
 
       setStudentScripts((prev) => prev.map((s) => (s.id === scriptId ? markedResult : s)));
       setLogs((prev) => [`✨ Successfully re-marked ${script.studentName}!`, ...prev]);
-    } catch {
-      const fallbackResult = buildFallbackMarkResults(examPaper, script);
-      setStudentScripts((prev) => prev.map((s) => (s.id === scriptId ? fallbackResult : s)));
-      setLogs((prev) => [`✨ Re-marked ${script.studentName} via fallback mode.`, ...prev]);
+    } catch (err: any) {
+      setErrorMsg(typeof err?.message === 'string'
+        ? err.message
+        : 'AI marking failed. This script remains pending; please retry.');
+      setLogs((prev) => [`⚠️ Could not mark ${script.studentName}; the script remains pending. Retry when AI service is available.`, ...prev]);
     }
   };
 

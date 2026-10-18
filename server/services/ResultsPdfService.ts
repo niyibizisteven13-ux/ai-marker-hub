@@ -27,15 +27,19 @@ export class ResultsPdfService {
 
     // Rank applicants by score
     const applicants = form.submissions
-      .map(s => ({
-        id: s.id,
-        name: this.extractName(JSON.parse(s.data)),
-        score: s.extractedInsights?.score || 0,
-        summary: s.extractedInsights?.summary || 'No summary available',
-        selected: s.extractedInsights?.selected || false,
-        scoringDetails: s.extractedInsights?.scoringDetails ? JSON.parse(s.extractedInsights.scoringDetails) : []
-      }))
-      .sort((a, b) => b.score - a.score);
+      .map(s => {
+        const scoringDetails = s.extractedInsights?.scoringDetails ? JSON.parse(s.extractedInsights.scoringDetails) : [];
+        return {
+          id: s.id,
+          name: this.extractName(JSON.parse(s.data)),
+          score: s.extractedInsights?.score ?? null,
+          summary: s.extractedInsights?.summary || 'No summary available',
+          scoringDetails,
+          selectionEvaluated: Boolean(scoringDetails?.selection),
+          selected: Boolean(scoringDetails?.selection) && Boolean(s.extractedInsights?.selected),
+        };
+      })
+      .sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
 
     return new Promise((resolve) => {
       const doc = new PDFDocument({ margin: 50 });
@@ -72,7 +76,7 @@ export class ResultsPdfService {
     });
   }
 
-  private drawResultsTable(doc: PDFKit.PDFDocument, applicants: any[]) {
+  private drawResultsTable(doc: PDFDocument, applicants: any[]) {
     const tableTop = doc.y;
     doc.fontSize(12).font('Helvetica-Bold');
     doc.text('Rank', 50, tableTop);
@@ -92,8 +96,8 @@ export class ResultsPdfService {
       doc.fontSize(11);
       doc.text(`${i + 1}`, 50, doc.y);
       doc.text(a.name, 100, doc.y);
-      doc.text(`${a.score.toFixed(1)}%`, 300, doc.y);
-      doc.text(a.selected ? 'SELECTED' : 'Waitlist', 400, doc.y);
+      doc.text(a.score === null ? 'N/A' : `${a.score.toFixed(1)}%`, 300, doc.y);
+      doc.text(a.score === null ? 'PENDING' : !a.selectionEvaluated ? 'SELECTION PENDING' : a.selected ? 'SELECTED' : 'Waitlist', 400, doc.y);
       doc.moveDown(0.5);
       doc.fontSize(9).fillColor('grey').text(a.summary, 100, doc.y, { width: 400 });
       doc.fillColor('black');
@@ -101,12 +105,12 @@ export class ResultsPdfService {
     });
   }
 
-  private drawAuditContent(doc: PDFKit.PDFDocument, applicants: any[]) {
+  private drawAuditContent(doc: PDFDocument, applicants: any[]) {
     applicants.forEach((a, i) => {
       if (doc.y > 650) doc.addPage();
 
-      doc.fontSize(14).font('Helvetica-Bold').text(`${i + 1}. ${a.name} (Score: ${a.score.toFixed(1)}%)`);
-      doc.fontSize(10).font('Helvetica-Oblique').text(`Status: ${a.selected ? 'SELECTED' : 'NOT SELECTED'}`);
+      doc.fontSize(14).font('Helvetica-Bold').text(`${i + 1}. ${a.name} (Score: ${a.score === null ? 'N/A' : `${a.score.toFixed(1)}%`})`);
+      doc.fontSize(10).font('Helvetica-Oblique').text(`Status: ${a.score === null ? 'PENDING' : !a.selectionEvaluated ? 'SELECTION PENDING' : a.selected ? 'SELECTED' : 'NOT SELECTED'}`);
       doc.moveDown(0.5);
 
       doc.fontSize(11).font('Helvetica-Bold').text('Scoring Breakdown:');

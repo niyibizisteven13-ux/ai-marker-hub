@@ -1,5 +1,5 @@
 import { BWENGE_SYSTEM_PROMPT, buildBwengeGradingPrompt } from '../../../src/services/geminiService.js';
-import { BWENGE_GENERAL_SYSTEM_PROMPT } from './bwengeGeneralPrompt.js';
+import { BWENGE_CHAT_RESPONSE_RULES, BWENGE_GENERAL_SYSTEM_PROMPT } from './bwengeGeneralPrompt.js';
 import { buildPromptForIntent as buildEffectivePrompt } from '../../../src/utils/buildPromptForIntent.ts';
 import { buildLanguageBlock, detectLanguage, type QueryLanguage } from './kinyarwandaStyle.js';
 
@@ -68,9 +68,17 @@ export function buildPromptForIntent(
         ? `ATTACHED DOCUMENT CONTENT:\n${opts.attachmentText}\n\nUSER QUERY:\n${effectiveQuery}`
         : effectiveQuery;
       return {
-        system: `${BWENGE_GENERAL_SYSTEM_PROMPT}\n\n${opts.hydratedContext}\n\n${languageBlock}`,
+        system: `${BWENGE_GENERAL_SYSTEM_PROMPT}\n\n${opts.hydratedContext}\n\n${languageBlock}\n\n${BWENGE_CHAT_RESPONSE_RULES}`,
         prompt: fullPrompt,
       };
     }
   }
+}
+
+export function buildSmallTalkPrompt(query: string) {
+  const language = detectLanguage(query);
+  return {
+    system: `You are Bwenge, a friendly and helpful assistant. Reply naturally in the user's language: Kinyarwanda, English, or French. Keep small-talk replies brief. Say when you are unsure. Do not mention model names, AI providers, adapters, or internal implementation details.\n\n${buildLanguageBlock(language)}`,
+    prompt: query,
+  };
 }

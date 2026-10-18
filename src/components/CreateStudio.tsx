@@ -32,7 +32,6 @@ import {
 } from 'lucide-react';
 import { ChatSession, Message as MessageType, ChatAttachment } from '../types';
 import ChatMessage from './ChatMessage';
-import BwengeLoader from './BwengeLoader';
 import logoUrl from '../assets/bwenge-logo.svg';
 
 interface CreateStudioProps {
@@ -532,11 +531,6 @@ export default function CreateStudio({
             ))
           )}
 
-          {isTyping && (
-            <div className="flex flex-col gap-2">
-              <BwengeLoader />
-            </div>
-          )}
         </div>
 
         {/* New Response Pill */}
@@ -620,7 +614,7 @@ export default function CreateStudio({
                     >
                       <Paperclip className="mr-3 w-4 h-4 text-amber-400" /> Upload File
                     </button>
-                    <button
+                    {onOpenScanner && <button
                       type="button"
                       onClick={() => {
                         onOpenScanner?.();
@@ -629,7 +623,7 @@ export default function CreateStudio({
                       className="w-full flex items-center px-3.5 py-2.5 hover:bg-white/5 text-left text-neutral-200"
                     >
                       <Camera className="mr-3 w-4 h-4 text-emerald-400" /> Camera Scan
-                    </button>
+                    </button>}
                     <button
                       type="button"
                       onClick={() => {

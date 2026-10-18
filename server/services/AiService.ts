@@ -1,12 +1,14 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import Anthropic from '@anthropic-ai/sdk';
 import { evaluateStudentSubmission as deepseekEvaluate } from '../../src/services/deepseekMarker.js';
-import { BWENGE_GENERAL_SYSTEM_PROMPT } from './prompts/bwengeGeneralPrompt.js';
+import { BWENGE_CHAT_RESPONSE_RULES, BWENGE_GENERAL_SYSTEM_PROMPT } from './prompts/bwengeGeneralPrompt.js';
 import { MemoryService } from './MemoryService.js';
 import { retrieveKnowledgeChunks } from './KnowledgeRetrievalService.js';
 import { ExecutionSandbox } from './ExecutionSandbox.js';
 import { createAiAgent, FileStore } from './ai/index.js';
-import { stripThinkingTags } from '../utils/textSanitizers.js';
+import { prisma } from '../db.js';
+import { getFileUrlSecret } from '../auth/secrets.js';
+import { extractJsonFragment, stripThinkingTags } from '../utils/textSanitizers.js';
 import { extractChatCompletionText, readProviderJson } from '../utils/providerResponse.js';
 export { stripThinkingTags };
 import logger from '../utils/logger.js';
@@ -83,11 +85,7 @@ function sanitizeToolError(toolName: string, err: unknown): string {
 }
 
 // ── Bwenge AI Capabilities FileStore & Agent Integration ──────────────────
-const fileStoreSecret = process.env.FILE_URL_SECRET;
-if (!fileStoreSecret || fileStoreSecret.length < 16) {
-  throw new Error('FILE_URL_SECRET environment variable must be set and be at least 16 characters long.');
-}
-
+const fileStoreSecret = getFileUrlSecret();
 export const fileStore = new FileStore({
   dir: process.env.FILE_STORE_DIR ?? './data/generated',
   secret: fileStoreSecret,
@@ -98,15 +96,31 @@ export const bwengeAgent = createAiAgent({
     name: 'GonkaRouter',
     baseUrl: process.env.GONKA_BASE_URL ?? 'https://api.gonkarouter.io/v1',
     apiKey: process.env.GONKA_API_KEY ?? '',
+    connectTimeoutMs: 15_000,
+    idleTimeoutMs: 30_000,
+    requestTimeoutMs: 60_000,
   },
+  runtime: { maxRetries: 1, retryDelayMs: 500 },
   model: process.env.GONKA_MODEL ?? GONKA_MODELS.DEFAULT,
   files: fileStore,
   temperature: 0.3,
   maxTokens: 8192,
+  promptVersion: 'bwenge-general-v1',
+  traceHashSecret: process.env.TRACE_HASH_SECRET || fileStoreSecret,
+  writeTrace: async (trace) => {
+    if (process.env.NODE_ENV === 'test') return;
+    await prisma.aiTrace.create({
+      data: {
+        ...trace,
+        toolCalls: JSON.stringify(trace.toolCalls),
+        createdAt: new Date(trace.createdAt),
+      },
+    });
+  },
   services: {
     knowledge: {
       async search(query, { topK, userId }) {
-        const hits = await retrieveKnowledgeChunks(query, { limit: topK });
+        const hits = await retrieveKnowledgeChunks(query, { limit: topK, userId });
         return hits.map((h: any) => ({
           text: h.chunk.text || h.text || '',
           title: h.chunk.title || h.title,
@@ -351,6 +365,7 @@ export class AiService {
       prompt,
       uploads,
       toolNames: [],
+      maxTokens: options.maxTokens,
       signal: options.signal,
     });
     return r.text;
@@ -358,7 +373,7 @@ export class AiService {
 
   public async streamGonkaChat(prompt: string, options: {
     model?: string; system?: string; history?: any[]; images?: Array<{ base64: string; mediaType: string }>;
-    onToken: (token: string) => void; tools?: any[];
+    onToken: (token: string) => void; onReset?: () => void; tools?: any[];
     temperature?: number; max_tokens?: number;
     signal?: AbortSignal;
   }) {
@@ -370,10 +385,14 @@ export class AiService {
       prompt,
       uploads,
       toolNames: [],
+      temperature: options.temperature,
+      maxTokens: options.max_tokens,
       signal: options.signal,
       onEvent: (e) => {
         if (e.type === 'text') {
           options.onToken(e.data.text);
+        } else if (e.type === 'turn_reset') {
+          options.onReset?.();
         }
       },
     });
@@ -481,25 +500,20 @@ export class AiService {
 
   public parseModelJson(rawText: string): any {
     if (!rawText) return {};
-    const cleaned = rawText.trim();
-    const fenced = cleaned.match(/```(?:json)?([\s\S]*?)```/i);
-    const content = fenced ? fenced[1].trim() : cleaned;
+    const content = extractJsonFragment(rawText);
+    if (!content) return {};
 
     try {
       return JSON.parse(content);
     } catch {
-      const objectStart = content.indexOf('{');
-      const objectEnd = content.lastIndexOf('}');
-      if (objectStart >= 0 && objectEnd > objectStart) {
-        try { return JSON.parse(content.slice(objectStart, objectEnd + 1)); } catch {}
+      const stripped = content.trim().replace(/^\s*JSON\s*[:=]\s*/i, '');
+      if (stripped !== content) {
+        try {
+          return JSON.parse(stripped);
+        } catch {}
       }
-      const arrayStart = content.indexOf('[');
-      const arrayEnd = content.lastIndexOf(']');
-      if (arrayStart >= 0 && arrayEnd > arrayStart) {
-        try { return JSON.parse(content.slice(arrayStart, arrayEnd + 1)); } catch {}
-      }
+      return {};
     }
-    return {};
   }
 
   public async generateContent(options: { model?: string; contents: any; config?: any; signal?: AbortSignal }) {
@@ -634,8 +648,7 @@ export class AiService {
       if (!allowFallback) {
         throw new Error('GonkaRouter API key is not configured and ALLOW_GEMINI_FALLBACK is false.');
       } else {
-        logger.warn('[AI FALLBACK NOTICE] GonkaRouter is unavailable; falling back to Gemini.');
-        options.onEvent?.({ type: 'text', data: { text: '\n> ⚠️ **Notice**: GonkaRouter is unavailable; fallback to Gemini capability mode is active.\n', isThinking: true } });
+        logger.warn('Primary chat provider unavailable; configured secondary provider will be used.');
       }
     }
 
@@ -650,7 +663,7 @@ export class AiService {
 
     let systemPrompt = options.extractSchema
       ? `${BWENGE_GENERAL_SYSTEM_PROMPT}${memoryContext}\n\nFor this request, respond with ONLY valid JSON matching this shape, no other text: ${options.extractSchema}`
-      : `${BWENGE_GENERAL_SYSTEM_PROMPT}${memoryContext}`;
+      : `${BWENGE_GENERAL_SYSTEM_PROMPT}${memoryContext}\n\n${BWENGE_CHAT_RESPONSE_RULES}`;
     if (options.pinnedSyllabus) {
       systemPrompt += `\n\n[MASTER CONTEXT]: ${options.pinnedSyllabus}\n(Note: This is the primary curriculum/rubric source. Prioritize this document above all other context.)`;
     }

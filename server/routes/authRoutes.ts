@@ -10,9 +10,14 @@ import {
   getSessions,
   revokeSession,
   refreshTokenHandler,
-  devOutboxHandler,
 } from '../controllers/authController.js';
-import { authLimiter } from '../../production/rateLimiter.js';
+import {
+  authLimiter,
+  otpRequestIpLimiter,
+  otpRequestEmailLimiter,
+  otpVerifyIpLimiter,
+  otpVerifyEmailLimiter,
+} from '../../production/rateLimiter.js';
 import { requireAuth } from '../../production/auth.js';
 
 const router = Router();
@@ -29,8 +34,8 @@ const logErrors = (name: string, h: any) =>
 
 router.get('/google/start', authLimiter, logErrors('googleStart', googleStart));
 router.get('/google/callback', logErrors('googleCallback', googleCallback));
-router.post('/email/start', authLimiter, logErrors('emailStart', emailStart));
-router.post('/email/verify', authLimiter, logErrors('emailVerify', emailVerify));
+router.post('/email/start', otpRequestIpLimiter, otpRequestEmailLimiter, logErrors('emailStart', emailStart));
+router.post('/email/verify', otpVerifyIpLimiter, otpVerifyEmailLimiter, logErrors('emailVerify', emailVerify));
 router.post('/refresh', authLimiter, logErrors('refreshToken', refreshTokenHandler));
 
 router.get('/me', requireAuth, logErrors('getMe', getMe));
@@ -39,7 +44,5 @@ router.patch('/me', requireAuth, logErrors('patchMe', patchMe));
 
 router.get('/sessions', requireAuth, logErrors('getSessions', getSessions));
 router.delete('/sessions/:id', requireAuth, logErrors('revokeSession', revokeSession));
-
-router.get('/__dev/outbox', logErrors('devOutbox', devOutboxHandler));
 
 export default router;

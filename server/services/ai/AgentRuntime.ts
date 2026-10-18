@@ -16,6 +16,7 @@ export interface RunOptions {
   maxTurns?: number;
   /** Restrict which tools the model may use in this run. */
   toolNames?: string[];
+  onRetry?: () => void;
 }
 
 export interface RuntimeConfig {
@@ -133,6 +134,7 @@ export class AgentRuntime {
       } catch (err) {
         if (opts.ctx.signal?.aborted) throw err;
         if (isRetryable(err) && attempt < this.cfg.maxRetries) {
+          opts.onRetry?.();
           if (emitted) emit({ type: 'turn_reset', data: { reason: String((err as Error).message).slice(0, 120) } });
           await new Promise((r) => setTimeout(r, this.cfg.retryDelayMs * (attempt + 1)));
           continue;

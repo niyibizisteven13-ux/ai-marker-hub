@@ -5,12 +5,12 @@ import { prisma } from '../db.js';
 import { writeAuditLog } from '../../production/auth.js';
 import { getGoogleAuthUrl, verifyGoogleCode, isInAppBrowser } from '../auth/googleAuth.js';
 import { normalizeEmail, createEmailCode, verifyEmailCode } from '../auth/emailCode.js';
-import { getEmailSender, getVerificationEmailContent, getDevOutbox, ConsoleEmailSender } from '../email/EmailSender.js';
+import { getEmailSender, getVerificationEmailContent, ConsoleEmailSender } from '../email/EmailSender.js';
 import { sanitizeNext } from '../auth/sanitizeNext.js';
+import { isPublicSignupAllowed } from '../auth/publicSignup.js';
+import { getJwtSecret } from '../auth/secrets.js';
 
-const JWT_SECRET = process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 32
-  ? process.env.JWT_SECRET
-  : 'ai-studio-default-jwt-secret-key-min-32-chars';
+const JWT_SECRET = getJwtSecret();
 const ACCESS_TOKEN_TTL = '15m';
 
 function buildAuthenticatedUser(user: any) {
@@ -141,6 +141,9 @@ export async function googleCallback(req: Request, res: Response) {
           },
         });
       } else {
+        if (!isPublicSignupAllowed()) {
+          return res.redirect(302, '/?auth_error=signup_disabled');
+        }
         // Create new user
         isNewUser = true;
         const randomPasswordHash = await crypto.randomBytes(32).toString('hex');
@@ -210,9 +213,6 @@ export async function googleCallback(req: Request, res: Response) {
 
 // ── Email Passwordless Auth ──────────────────────────────────
 
-// In-memory rate limiter store for email starts (max 3 per 15 mins per email)
-const emailStartRateLimit = new Map<string, { count: number; resetAt: number }>();
-
 export async function emailStart(req: Request, res: Response) {
   try {
     const { email, locale } = req.body || {};
@@ -225,22 +225,13 @@ export async function emailStart(req: Request, res: Response) {
       return res.status(400).json({ error: { code: 'invalid_email' } });
     }
 
-    // Rate limit check: max 3 per 15 min per email
-    const now = Date.now();
-    const entry = emailStartRateLimit.get(normalized);
-    if (entry && entry.resetAt > now && entry.count >= 3) {
-      res.setHeader('Retry-After', '60');
-      return res.status(429).json({ error: { code: 'rate_limited', retryAfter: 60 } });
-    }
-
-    if (!entry || entry.resetAt <= now) {
-      emailStartRateLimit.set(normalized, { count: 1, resetAt: now + 15 * 60 * 1000 });
-    } else {
-      entry.count += 1;
-    }
-
     // Check if user is disabled
     const existingUser = await prisma.user.findUnique({ where: { email: normalized } });
+    if (!existingUser && !isPublicSignupAllowed()) {
+      return res.status(403).json({
+        error: { code: 'signup_disabled', message: 'Accounts are currently created by an administrator. Contact your administrator.' },
+      });
+    }
     if (existingUser?.disabledAt) {
       // Uniform response for anti-enumeration
       return res.status(202).json({ ok: true, retryAfter: 30 });
@@ -258,9 +249,12 @@ export async function emailStart(req: Request, res: Response) {
         html: emailContent.html,
       });
     } catch (smtpErr: any) {
-      console.warn('SMTP email send failed, falling back to console outbox:', smtpErr?.message || smtpErr);
-      const consoleSender = new ConsoleEmailSender();
-      await consoleSender.send({
+      if (process.env.NODE_ENV === 'production') {
+        console.error('OTP email delivery failed in production.');
+        throw smtpErr;
+      }
+      console.warn('SMTP email send failed, falling back to development console:', smtpErr?.message || smtpErr);
+      await new ConsoleEmailSender().send({
         to: normalized,
         subject: emailContent.subject,
         text: emailContent.text,
@@ -270,11 +264,14 @@ export async function emailStart(req: Request, res: Response) {
 
     await writeAuditLog(existingUser?.id || 'system', 'CODE_SENT', 'Email', null, { emailHash: crypto.createHash('sha256').update(normalized).digest('hex') });
 
-    const isDev = process.env.NODE_ENV !== 'production';
-    return res.status(202).json({ ok: true, retryAfter: 30, devCode: isDev ? code : undefined });
+    return res.status(202).json({ ok: true, retryAfter: 30 });
   } catch (err: any) {
-    console.error('Email start error:', err);
-    return res.status(500).json({ error: { code: 'server_error' } });
+    if (process.env.NODE_ENV === 'production') {
+      console.error('Email start failed.');
+    } else {
+      console.error('Email start error:', err);
+    }
+    return res.status(500).json({ error: { code: 'server_error', message: 'Unable to send code.' } });
   }
 }
 
@@ -289,7 +286,7 @@ export async function emailVerify(req: Request, res: Response) {
     const isValid = await verifyEmailCode(normalized, code);
 
     if (!isValid) {
-      return res.status(400).json({ error: { code: 'code_invalid' } });
+      return res.status(400).json({ error: { code: 'code_invalid', message: 'That code is incorrect or expired.' } });
     }
 
     let user = await prisma.user.findUnique({
@@ -300,6 +297,11 @@ export async function emailVerify(req: Request, res: Response) {
     let isNewUser = false;
 
     if (!user) {
+      if (!isPublicSignupAllowed()) {
+        return res.status(403).json({
+          error: { code: 'signup_disabled', message: 'Accounts are currently created by an administrator. Contact your administrator.' },
+        });
+      }
       isNewUser = true;
       const defaultName = normalized.split('@')[0] || 'User';
       const randomPasswordHash = await crypto.randomBytes(32).toString('hex');
@@ -324,7 +326,7 @@ export async function emailVerify(req: Request, res: Response) {
       });
     } else {
       if (user.disabledAt) {
-        return res.status(400).json({ error: { code: 'code_invalid' } });
+        return res.status(400).json({ error: { code: 'code_invalid', message: 'That code is incorrect or expired.' } });
       }
 
       // Ensure email identity exists
@@ -392,7 +394,11 @@ export async function emailVerify(req: Request, res: Response) {
       user: buildAuthenticatedUser(user),
     });
   } catch (err: any) {
-    console.error('Email verify error:', err);
+    if (process.env.NODE_ENV === 'production') {
+      console.error('Email verification failed.');
+    } else {
+      console.error('Email verify error:', err);
+    }
     return res.status(500).json({ error: { code: 'server_error' } });
   }
 }
@@ -531,7 +537,7 @@ export async function refreshTokenHandler(req: Request, res: Response) {
       include: { user: { include: { settings: true, subscription: true } } },
     });
 
-    if (!session || session.revokedAt || session.expiresAt < new Date() || session.user.disabledAt) {
+    if (!session || !session.user || session.revokedAt || session.expiresAt < new Date() || session.user.disabledAt) {
       clearRefreshCookie(res);
       return res.status(401).json({ error: { code: 'TOKEN_EXPIRED' } });
     }
@@ -542,9 +548,13 @@ export async function refreshTokenHandler(req: Request, res: Response) {
     });
 
     const accessToken = jwt.sign(
-      { userId: session.user.id, role: session.user.email?.toLowerCase().trim() === 'niyibizisteven13@gmail.com' ? 'ADMIN' : session.user.role },
+      {
+        userId: session.user.id,
+        email: session.user.email,
+        role: session.user.email?.toLowerCase().trim() === 'niyibizisteven13@gmail.com' ? 'ADMIN' : session.user.role,
+      },
       JWT_SECRET,
-      { expiresIn: ACCESS_TOKEN_TTL }
+      { expiresIn: ACCESS_TOKEN_TTL, algorithm: 'HS256', issuer: 'bwenge', audience: 'bwenge-web' }
     );
 
     return res.json({
@@ -556,11 +566,4 @@ export async function refreshTokenHandler(req: Request, res: Response) {
     console.error('Refresh token error:', err);
     return res.status(401).json({ error: { code: 'TOKEN_EXPIRED' } });
   }
-}
-
-export async function devOutboxHandler(req: Request, res: Response) {
-  if (process.env.NODE_ENV === 'production') {
-    return res.status(404).end();
-  }
-  return res.json({ outbox: getDevOutbox() });
 }

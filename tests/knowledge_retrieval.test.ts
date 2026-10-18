@@ -31,6 +31,20 @@ test('retrieval returns no chunks when no meaningful terms match', () => {
   assert.deepEqual(ranked, []);
 });
 
+test('retrieval matches synonym-heavy growth phrasing without relying on brittle exact wording', () => {
+  const ranked = rankKnowledgeChunks(
+    [
+      { id: 'economy', text: 'The national production increased by eight percent during the year.' },
+      { id: 'school', text: 'School enrollment and admission requirements are managed locally.' },
+    ],
+    'How fast did the economy increase?',
+    { limit: 5, threshold: 0.1 },
+  );
+
+  assert.equal(ranked[0]?.chunk.id, 'economy');
+  assert.ok(ranked[0].score > 0);
+});
+
 test('retrieval honors top-K and excludes chunks below the relevance threshold', () => {
   const ranked = rankKnowledgeChunks(
     [
@@ -136,6 +150,10 @@ test('grounded answer validation accepts only citations belonging to retrieved p
   );
   assert.equal(validateEvidenceCitations('GDP increased. [EVIDENCE:made-up]', ['chunk-1']).valid, false);
   assert.equal(validateEvidenceCitations('GDP increased without a citation.', ['chunk-1']).valid, false);
+  assert.deepEqual(
+    validateEvidenceCitations('GDP increased. [EVIDENCE:chunk-1, chunk-2]', ['chunk-1']),
+    { valid: false, citedChunkIds: ['chunk-1'], invalidChunkIds: ['chunk-2'] },
+  );
 });
 
 test('provider response parsing reports HTML gateway errors clearly instead of leaking JSON parse errors', async () => {

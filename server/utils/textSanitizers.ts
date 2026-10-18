@@ -56,25 +56,80 @@ export function stripThinkingTags(text: any): StripThinkingTagsResult {
   return result;
 }
 
-export function parseModelJson(rawText: string, fallback: any = {}): any {
-  if (!rawText) return fallback;
-  const cleaned = rawText.trim();
-  const fenced = cleaned.match(/```(?:json)?([\s\S]*?)```/i);
-  const content = fenced ? fenced[1].trim() : cleaned;
+function findMatchingJsonBoundary(content: string, startIndex: number): number | null {
+  const startChar = content[startIndex];
+  const closingChar = startChar === '{' ? '}' : ']';
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
 
-  try {
-    return JSON.parse(content);
-  } catch {
-    const objectStart = content.indexOf('{');
-    const objectEnd = content.lastIndexOf('}');
-    if (objectStart >= 0 && objectEnd > objectStart) {
-      try { return JSON.parse(content.slice(objectStart, objectEnd + 1)); } catch {}
+  for (let index = startIndex; index < content.length; index += 1) {
+    const char = content[index];
+    if (escaped) {
+      escaped = false;
+      continue;
     }
-    const arrayStart = content.indexOf('[');
-    const arrayEnd = content.lastIndexOf(']');
-    if (arrayStart >= 0 && arrayEnd > arrayStart) {
-      try { return JSON.parse(content.slice(arrayStart, arrayEnd + 1)); } catch {}
+    if (char === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+
+    if (char === startChar) depth += 1;
+    else if (char === closingChar) {
+      depth -= 1;
+      if (depth === 0) return index;
     }
   }
-  return fallback;
+
+  return null;
+}
+
+export function extractJsonFragment(rawText: string): string | null {
+  if (!rawText) return null;
+
+  const cleaned = stripThinkingTags(rawText).text.trim();
+  if (!cleaned) return null;
+
+  const fenced = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fenced) {
+    const candidate = fenced[1].trim();
+    if (candidate) return candidate;
+  }
+
+  const candidateStarts = ['{', '['];
+  for (const startChar of candidateStarts) {
+    let startIndex = cleaned.indexOf(startChar);
+    while (startIndex >= 0) {
+      const endIndex = findMatchingJsonBoundary(cleaned, startIndex);
+      if (endIndex !== null) {
+        const candidate = cleaned.slice(startIndex, endIndex + 1).trim();
+        if (candidate) return candidate;
+      }
+      startIndex = cleaned.indexOf(startChar, startIndex + 1);
+    }
+  }
+
+  return null;
+}
+
+export function parseModelJson(rawText: string, fallback: any = {}): any {
+  const extracted = extractJsonFragment(rawText ?? '');
+  if (!extracted) return fallback;
+
+  try {
+    return JSON.parse(extracted);
+  } catch {
+    const stripped = extracted.trim().replace(/^\s*JSON\s*[:=]\s*/i, '');
+    if (stripped !== extracted) {
+      try {
+        return JSON.parse(stripped);
+      } catch {}
+    }
+    return fallback;
+  }
 }

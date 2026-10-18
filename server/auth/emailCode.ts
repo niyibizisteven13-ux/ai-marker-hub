@@ -1,7 +1,16 @@
 import crypto from 'crypto';
 import { prisma } from '../db.js';
 
-const SESSION_SECRET = process.env.SESSION_SECRET || 'ai-bwenge-default-session-secret-pepper-min-32-bytes';
+const OTP_TTL_MS = 10 * 60 * 1000;
+const MAX_ATTEMPTS = 5;
+
+function getOtpSecret(): string {
+  const secret = process.env.EMAIL_OTP_SECRET || process.env.SESSION_SECRET;
+  if (!secret || secret.length < 32) {
+    throw new Error('EMAIL_OTP_SECRET or SESSION_SECRET must be set to at least 32 characters');
+  }
+  return secret;
+}
 
 export function normalizeEmail(email: string): string {
   if (typeof email !== 'string') return '';
@@ -14,16 +23,34 @@ export function generateCode(): string {
   return num.toString();
 }
 
+export function normalizeCode(code: string): string {
+  return code.replace(/\D/g, '');
+}
+
 export function computeCodeHash(email: string, code: string): Buffer {
   const normalized = normalizeEmail(email);
-  return crypto.createHmac('sha256', SESSION_SECRET).update(`${normalized}:${code.trim()}`).digest();
+  return crypto.createHmac('sha256', getOtpSecret()).update(`${normalized}:${normalizeCode(code)}`).digest();
+}
+
+function asHashBuffer(value: unknown): Buffer | null {
+  if (Buffer.isBuffer(value)) return value;
+  if (value instanceof Uint8Array) return Buffer.from(value);
+  if (
+    value &&
+    typeof value === 'object' &&
+    (value as { type?: unknown }).type === 'Buffer' &&
+    Array.isArray((value as { data?: unknown }).data)
+  ) {
+    return Buffer.from((value as { data: number[] }).data);
+  }
+  return null;
 }
 
 export async function createEmailCode(email: string, ip?: string) {
   const normalized = normalizeEmail(email);
   const code = generateCode();
   const codeHash = computeCodeHash(normalized, code);
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+  const expiresAt = new Date(Date.now() + OTP_TTL_MS);
   const ipHash = ip ? crypto.createHash('sha256').update(ip).digest() : null;
 
   // Invalidate older unused codes for this email
@@ -38,6 +65,7 @@ export async function createEmailCode(email: string, ip?: string) {
       codeHash,
       expiresAt,
       attempts: 0,
+      consumedAt: null,
       ipHash,
     },
   });
@@ -47,6 +75,9 @@ export async function createEmailCode(email: string, ip?: string) {
 
 export async function verifyEmailCode(email: string, code: string): Promise<boolean> {
   const normalized = normalizeEmail(email);
+  const normalizedCode = normalizeCode(code);
+  if (!/^\d{6}$/.test(normalizedCode)) return false;
+
   const record = await prisma.emailCode.findFirst({
     where: { email: normalized, consumedAt: null },
     orderBy: { createdAt: 'desc' },
@@ -56,32 +87,37 @@ export async function verifyEmailCode(email: string, code: string): Promise<bool
     return false;
   }
 
-  if (record.attempts >= 5) {
-    // Invalidate code after 5 wrong attempts
-    await prisma.emailCode.update({
-      where: { id: record.id },
-      data: { consumedAt: new Date() },
-    });
+  if (record.attempts >= MAX_ATTEMPTS) {
+    await prisma.emailCode.deleteMany({ where: { id: record.id } });
     return false;
   }
 
-  const expectedHash = record.codeHash; // Buffer from Prisma Bytes
-  const providedHash = computeCodeHash(normalized, code);
+  const expectedHash = asHashBuffer(record.codeHash);
+  const providedHash = computeCodeHash(normalized, normalizedCode);
 
-  if (expectedHash.length !== providedHash.length || !crypto.timingSafeEqual(expectedHash, providedHash)) {
-    // Increment attempts
-    await prisma.emailCode.update({
-      where: { id: record.id },
-      data: { attempts: record.attempts + 1 },
-    });
+  if (!expectedHash || expectedHash.length !== providedHash.length || !crypto.timingSafeEqual(expectedHash, providedHash)) {
+    const nextAttempts = record.attempts + 1;
+    if (nextAttempts >= MAX_ATTEMPTS) {
+      await prisma.emailCode.deleteMany({
+        where: { id: record.id, consumedAt: null, attempts: record.attempts },
+      });
+    } else {
+      await prisma.emailCode.updateMany({
+        where: { id: record.id, consumedAt: null, attempts: record.attempts },
+        data: { attempts: nextAttempts },
+      });
+    }
     return false;
   }
 
-  // Consume code (single use)
-  await prisma.emailCode.update({
-    where: { id: record.id },
-    data: { consumedAt: new Date() },
+  const consumed = await prisma.emailCode.deleteMany({
+    where: {
+      id: record.id,
+      consumedAt: null,
+      attempts: record.attempts,
+      expiresAt: { gt: new Date() },
+    },
   });
 
-  return true;
+  return consumed.count === 1;
 }

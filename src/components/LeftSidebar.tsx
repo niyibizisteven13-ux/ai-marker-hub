@@ -61,7 +61,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
     },
     {
       id: 'marking_hub' as NavigationTab,
-      label: 'Marking',
+      label: 'Agent',
       icon: GraduationCap,
     },
     {

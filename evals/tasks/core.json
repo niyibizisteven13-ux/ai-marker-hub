@@ -1,0 +1,328 @@
+[
+  {
+    "id": "retrieval-gdp-2023",
+    "capability": "A",
+    "split": "dev",
+    "language": "EN",
+    "difficulty": "easy",
+    "evaluator": {
+      "kind": "retrieval",
+      "query": "What was Rwanda GDP growth in 2023?",
+      "chunks": [
+        { "id": "school", "text": "School enrollment and admission requirements." },
+        { "id": "gdp", "text": "Rwanda GDP grew by 8.2 percent in 2023 according to national accounts." }
+      ],
+      "relevantChunkIds": ["gdp"],
+      "topK": 2
+    }
+  },
+  {
+    "id": "retrieval-school-enrollment",
+    "capability": "A",
+    "split": "dev",
+    "language": "EN",
+    "difficulty": "easy",
+    "evaluator": {
+      "kind": "retrieval",
+      "query": "What are the school admission requirements?",
+      "chunks": [
+        { "id": "school", "text": "School enrollment and admission requirements." },
+        { "id": "budget", "text": "The annual budget funds roads and public services." }
+      ],
+      "relevantChunkIds": ["school"],
+      "topK": 2,
+      "minimumRecall": 1
+    }
+  },
+  {
+    "id": "retrieval-no-supporting-passage",
+    "capability": "A",
+    "split": "dev",
+    "language": "EN",
+    "difficulty": "medium",
+    "evaluator": {
+      "kind": "retrieval-no-match",
+      "query": "How many quasar zephyrs orbited Kigali in 1982?",
+      "chunks": [
+        { "id": "school", "text": "School enrollment and admission requirements." },
+        { "id": "budget", "text": "The annual budget funds roads and public services." }
+      ],
+      "topK": 2
+    }
+  },
+  {
+    "id": "retrieval-health-center-location",
+    "capability": "A",
+    "split": "dev",
+    "language": "EN",
+    "difficulty": "medium",
+    "evaluator": {
+      "kind": "retrieval",
+      "query": "Where is the health center in Nyarugenge district?",
+      "chunks": [
+        { "id": "health-center", "text": "The Nyarugenge district health center is located next to the main market and serves a population of 24,000 residents." },
+        { "id": "transport", "text": "Public transport routes connect district offices and the main bus terminal." },
+        { "id": "safety", "text": "Community safety officers patrol the central business area after 18:00." }
+      ],
+      "relevantChunkIds": ["health-center"],
+      "topK": 3,
+      "minimumRecall": 1
+    }
+  },
+  {
+    "id": "retrieval-education-budget-grounding",
+    "capability": "A",
+    "split": "dev",
+    "language": "EN",
+    "difficulty": "hard",
+    "evaluator": {
+      "kind": "retrieval",
+      "query": "What was the education budget allocation for this year?",
+      "chunks": [
+        { "id": "education-2025", "text": "The national education budget allocation increased to 11.4 percent of the total approved budget for 2025." },
+        { "id": "trade-2025", "text": "Trade priorities focused on cross-border logistics and customs facilitation." },
+        { "id": "housing-2025", "text": "Housing subsidies were expanded to support low-income rental units." }
+      ],
+      "relevantChunkIds": ["education-2025"],
+      "topK": 3,
+      "minimumRecall": 1
+    }
+  },
+  {
+    "id": "retrieval-no-match-inventory",
+    "capability": "A",
+    "split": "dev",
+    "language": "EN",
+    "difficulty": "medium",
+    "evaluator": {
+      "kind": "retrieval-no-match",
+      "query": "Which fertilizer was imported from the Moon in July 2019?",
+      "chunks": [
+        { "id": "crop", "text": "Farmers used compost and local manure to improve soil fertility during the rainy season." },
+        { "id": "market", "text": "The local market opened new stalls for vegetables and grains." }
+      ],
+      "topK": 2
+    }
+  },
+  {
+    "id": "file-docx-reopens-with-requested-content",
+    "capability": "B",
+    "split": "dev",
+    "language": "EN",
+    "difficulty": "easy",
+    "evaluator": {
+      "kind": "docx",
+      "document": {
+        "title": "Synthetic Study Guide",
+        "blocks": [
+          { "type": "heading", "level": 1, "text": "Water Cycle" },
+          { "type": "paragraph", "text": "Evaporation changes liquid water into vapor." }
+        ]
+      },
+      "requiredText": ["Synthetic Study Guide", "Water Cycle", "Evaporation changes liquid water into vapor."],
+      "forbiddenText": ["TODO", "[placeholder]"]
+    }
+  },
+  {
+    "id": "file-docx-table-preserves-matrix",
+    "capability": "B",
+    "split": "dev",
+    "language": "EN",
+    "difficulty": "medium",
+    "evaluator": {
+      "kind": "docx",
+      "document": {
+        "title": "Quarterly Summary",
+        "blocks": [
+          { "type": "heading", "level": 2, "text": "Student performance" },
+          {
+            "type": "table",
+            "header": ["Subject", "Score"],
+            "rows": [
+              ["Math", "82"],
+              ["Science", "88"],
+              ["Reading", "91"]
+            ]
+          }
+        ]
+      },
+      "requiredText": ["Quarterly Summary", "Student performance", "Math", "82", "Science", "88", "Reading", "91"],
+      "forbiddenText": ["[PLACEHOLDER]", "TODO"]
+    }
+  },
+  {
+    "id": "citation-valid-source",
+    "capability": "A",
+    "split": "dev",
+    "language": "EN",
+    "difficulty": "easy",
+    "evaluator": {
+      "kind": "citations",
+      "answer": "The GDP grew by 8.2 percent. [EVIDENCE:gdp-2023]",
+      "retrievedChunkIds": ["gdp-2023"],
+      "expectValid": true
+    }
+  },
+  {
+    "id": "citation-rejects-unknown-id",
+    "capability": "J",
+    "split": "dev",
+    "language": "EN",
+    "difficulty": "medium",
+    "evaluator": {
+      "kind": "citations",
+      "answer": "The GDP grew by 8.2 percent. [EVIDENCE:invented-source]",
+      "retrievedChunkIds": ["gdp-2023"],
+      "expectValid": false
+    }
+  },
+  {
+    "id": "citation-valid-quoted-source",
+    "capability": "J",
+    "split": "dev",
+    "language": "EN",
+    "difficulty": "easy",
+    "evaluator": {
+      "kind": "citations",
+      "answer": "The 2025 budget also increased to 11.4%. [EVIDENCE:education-2025]",
+      "retrievedChunkIds": ["education-2025"],
+      "expectValid": true
+    }
+  },
+  {
+    "id": "extraction-readable-text",
+    "capability": "D",
+    "split": "dev",
+    "language": "EN",
+    "difficulty": "easy",
+    "evaluator": {
+      "kind": "extraction",
+      "text": "A readable report with extracted text and clear page boundaries.",
+      "warnings": [],
+      "expectIssuePresent": false
+    }
+  },
+  {
+    "id": "extraction-skipped-page-warning",
+    "capability": "D",
+    "split": "dev",
+    "language": "EN",
+    "difficulty": "hard",
+    "evaluator": {
+      "kind": "extraction",
+      "text": "A readable report with extracted text and clear page boundaries.",
+      "warnings": ["Page 4 failed OCR and was skipped."],
+      "expectIssuePresent": true
+    }
+  },
+  {
+    "id": "extraction-ocr-table-shift",
+    "capability": "D",
+    "split": "dev",
+    "language": "EN",
+    "difficulty": "hard",
+    "evaluator": {
+      "kind": "extraction",
+      "text": "A report with table structure but recognizer drift on cells.",
+      "warnings": ["Column alignment drift detected in sheet 2; values may not match source."],
+      "expectIssuePresent": true
+    }
+  },
+  {
+    "id": "extraction-clean-scan",
+    "capability": "D",
+    "split": "dev",
+    "language": "EN",
+    "difficulty": "medium",
+    "evaluator": {
+      "kind": "extraction",
+      "text": "A clean scan with all pages recognized by OCR without warnings.",
+      "warnings": [],
+      "expectIssuePresent": false
+    }
+  },
+  {
+    "id": "format-json-valid",
+    "capability": "I",
+    "split": "dev",
+    "language": "EN",
+    "difficulty": "easy",
+    "evaluator": {
+      "kind": "json-schema",
+      "response": "{\"total\":5,\"passed\":true}",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "total": { "type": "integer", "minimum": 0 },
+          "passed": { "type": "boolean" }
+        },
+        "required": ["total", "passed"],
+        "additionalProperties": false
+      },
+      "expectValid": true
+    }
+  },
+  {
+    "id": "format-json-missing-required-field",
+    "capability": "I",
+    "split": "dev",
+    "language": "EN",
+    "difficulty": "medium",
+    "evaluator": {
+      "kind": "json-schema",
+      "response": "{\"total\":\"five\"}",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "total": { "type": "integer", "minimum": 0 },
+          "passed": { "type": "boolean" }
+        },
+        "required": ["total", "passed"],
+        "additionalProperties": false
+      },
+      "expectValid": false
+    }
+  },
+  {
+    "id": "format-json-extra-field-invalid",
+    "capability": "I",
+    "split": "dev",
+    "language": "EN",
+    "difficulty": "medium",
+    "evaluator": {
+      "kind": "json-schema",
+      "response": "{\"total\":7,\"passed\":true,\"note\":\"extra field\"}",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "total": { "type": "integer", "minimum": 0 },
+          "passed": { "type": "boolean" }
+        },
+        "required": ["total", "passed"],
+        "additionalProperties": false
+      },
+      "expectValid": false
+    }
+  },
+  {
+    "id": "format-json-type-mismatch",
+    "capability": "I",
+    "split": "dev",
+    "language": "EN",
+    "difficulty": "hard",
+    "evaluator": {
+      "kind": "json-schema",
+      "response": "{\"total\":3,\"passed\":\"yes\"}",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "total": { "type": "integer", "minimum": 0 },
+          "passed": { "type": "boolean" }
+        },
+        "required": ["total", "passed"],
+        "additionalProperties": false
+      },
+      "expectValid": false
+    }
+  }
+]

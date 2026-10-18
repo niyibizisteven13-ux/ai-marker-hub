@@ -4,6 +4,11 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+if grep -R -n -E 'Dev/Console OTP|devOtp' src server; then
+  echo "Blocked: development OTP disclosure strings found in src/ or server/."
+  exit 1
+fi
+
 bad_patterns=(
   "combined.log"
   "error.log"

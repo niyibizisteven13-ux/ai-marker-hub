@@ -1,9 +1,8 @@
 import jwt from 'jsonwebtoken';
 import { prisma } from '../server/db.js';
+import { getJwtSecret } from '../server/auth/secrets.js';
 
-const JWT_SECRET = (process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 32)
-  ? process.env.JWT_SECRET
-  : 'ai-studio-default-jwt-secret-key-min-32-chars';
+const JWT_SECRET = getJwtSecret();
 
 export function isAuthEnabled() {
   return Boolean(JWT_SECRET);

@@ -30,7 +30,6 @@ export function AuthFlow({
   const [isInAppBlocked, setIsInAppBlocked] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
-  const [devCode, setDevCode] = useState<string | null>(null);
 
   const firstInputRef = useRef<HTMLInputElement>(null);
 
@@ -42,6 +41,8 @@ export function AuthFlow({
         setErrorMessage(t('errGoogle'));
       } else if (authError === 'google_unverified') {
         setErrorMessage(t('errGoogleUnverified'));
+      } else if (authError === 'signup_disabled') {
+        setErrorMessage(t('errSignupDisabled'));
       }
       params.delete('auth_error');
       const newQuery = params.toString();
@@ -98,11 +99,12 @@ export function AuthFlow({
     try {
       const res = await authService.requestEmailOtp({ email: trimmed, locale });
       setResendCountdown(res.retryAfter || 30);
-      if (res.devCode) setDevCode(res.devCode);
       setStep('code');
     } catch (err: any) {
       if (err instanceof AuthError && err.code === 'rate_limited') {
         setErrorMessage(t('errRate'));
+      } else if (err instanceof AuthError && err.code === 'signup_disabled') {
+        setErrorMessage(t('errSignupDisabled'));
       } else {
         setErrorMessage(t('errNetwork'));
       }
@@ -266,13 +268,6 @@ export function AuthFlow({
             {t('codeSentTo', { email: maskEmail(email) })}
           </p>
 
-          {devCode && (
-            <div style={{ margin: '0 0 16px', padding: '12px', borderRadius: '12px', background: 'rgba(217, 119, 87, 0.15)', border: '1px solid rgba(217, 119, 87, 0.4)', color: '#D97757', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '13px' }}>
-              <span>🔑 <b>Dev/Console OTP:</b> <code style={{ fontFamily: 'monospace', fontWeight: 'bold', fontSize: '16px', letterSpacing: '4px', marginLeft: '6px' }}>{devCode}</code></span>
-              <button type="button" onClick={() => { setCode(devCode); handleCodeVerify(devCode); }} style={{ background: '#D97757', color: '#fff', border: 'none', padding: '4px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}>Auto-fill & Verify</button>
-            </div>
-          )}
-
           <div className={`field ${errorMessage ? 'error' : ''}`}>
             <label htmlFor="code-input">{t('codeLabel')}</label>
             <input
@@ -288,9 +283,6 @@ export function AuthFlow({
                 const val = e.target.value.replace(/\D/g, '').slice(0, 6);
                 setCode(val);
                 setErrorMessage(null);
-                if (val.length === 6) {
-                  handleCodeVerify(val);
-                }
               }}
               style={{ minHeight: '48px', fontSize: '24px', letterSpacing: '8px', textAlign: 'center', padding: '0 14px', width: '100%', borderRadius: '12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff' }}
             />

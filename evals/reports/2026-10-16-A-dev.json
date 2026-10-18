@@ -1,0 +1,160 @@
+{
+  "generatedAt": "2026-10-16T13:03:50.846Z",
+  "evaluationMode": "offline deterministic component evaluation",
+  "split": "dev",
+  "capability": "A",
+  "metrics": {
+    "caseCount": 3,
+    "passCount": 3,
+    "successRate": 1,
+    "confidenceInterval95": [
+      0.4385029682449546,
+      1
+    ],
+    "instabilityRate": 0,
+    "graderLatencyP50Ms": 0.08315400000014961,
+    "graderLatencyP95Ms": 1.3748820000000705
+  },
+  "costUsd": null,
+  "tokensIn": null,
+  "tokensOut": null,
+  "modelLatencyMs": null,
+  "notMeasured": "No model or provider requests are made by this evaluator.",
+  "tasks": [
+    {
+      "id": "retrieval-gdp-2023",
+      "capability": "A",
+      "language": "EN",
+      "difficulty": "easy",
+      "passed": true,
+      "unstable": false,
+      "runs": [
+        {
+          "passed": true,
+          "details": {
+            "retrievedChunkIds": [
+              "gdp"
+            ],
+            "recallAtK": 1,
+            "minimumRecall": 1
+          },
+          "graderLatencyMs": 1.3748820000000705
+        },
+        {
+          "passed": true,
+          "details": {
+            "retrievedChunkIds": [
+              "gdp"
+            ],
+            "recallAtK": 1,
+            "minimumRecall": 1
+          },
+          "graderLatencyMs": 0.07466100000010556
+        },
+        {
+          "passed": true,
+          "details": {
+            "retrievedChunkIds": [
+              "gdp"
+            ],
+            "recallAtK": 1,
+            "minimumRecall": 1
+          },
+          "graderLatencyMs": 0.09455100000013772
+        }
+      ]
+    },
+    {
+      "id": "retrieval-not-found-topic",
+      "capability": "A",
+      "language": "EN",
+      "difficulty": "medium",
+      "passed": true,
+      "unstable": false,
+      "runs": [
+        {
+          "passed": true,
+          "details": {
+            "retrievedChunkIds": [
+              "climate",
+              "school"
+            ],
+            "recallAtK": 0,
+            "minimumRecall": 0
+          },
+          "graderLatencyMs": 0.21995600000013837
+        },
+        {
+          "passed": true,
+          "details": {
+            "retrievedChunkIds": [
+              "climate",
+              "school"
+            ],
+            "recallAtK": 0,
+            "minimumRecall": 0
+          },
+          "graderLatencyMs": 0.08315400000014961
+        },
+        {
+          "passed": true,
+          "details": {
+            "retrievedChunkIds": [
+              "climate",
+              "school"
+            ],
+            "recallAtK": 0,
+            "minimumRecall": 0
+          },
+          "graderLatencyMs": 0.044106000000056156
+        }
+      ]
+    },
+    {
+      "id": "citation-valid-source",
+      "capability": "A",
+      "language": "EN",
+      "difficulty": "easy",
+      "passed": true,
+      "unstable": false,
+      "runs": [
+        {
+          "passed": true,
+          "details": {
+            "valid": true,
+            "citedChunkIds": [
+              "gdp-2023"
+            ],
+            "invalidChunkIds": [],
+            "expectedValid": true
+          },
+          "graderLatencyMs": 0.1827010000001792
+        },
+        {
+          "passed": true,
+          "details": {
+            "valid": true,
+            "citedChunkIds": [
+              "gdp-2023"
+            ],
+            "invalidChunkIds": [],
+            "expectedValid": true
+          },
+          "graderLatencyMs": 0.011087000000088665
+        },
+        {
+          "passed": true,
+          "details": {
+            "valid": true,
+            "citedChunkIds": [
+              "gdp-2023"
+            ],
+            "invalidChunkIds": [],
+            "expectedValid": true
+          },
+          "graderLatencyMs": 0.006879999999910069
+        }
+      ]
+    }
+  ]
+}

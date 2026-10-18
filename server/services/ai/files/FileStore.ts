@@ -160,9 +160,11 @@ export class FileStore {
     let names: string[] = [];
     try {
       names = await readdir(this.dir);
-    } catch {
-      return 0;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0;
+      throw error;
     }
+    const failures: Error[] = [];
     for (const n of names.filter((x) => x.endsWith('.json'))) {
       try {
         const meta = JSON.parse(await readFile(path.join(this.dir, n), 'utf8')) as StoredFileMeta;
@@ -171,9 +173,12 @@ export class FileStore {
           await rm(path.join(this.dir, n), { force: true });
           removed++;
         }
-      } catch {
-        /* ignore unreadable entries */
+      } catch (error) {
+        failures.push(new Error(`Unable to inspect expired-file metadata entry ${n}.`, { cause: error }));
       }
+    }
+    if (failures.length) {
+      throw new AggregateError(failures, `Expired-file purge failed for ${failures.length} metadata entr${failures.length === 1 ? 'y' : 'ies'}.`);
     }
     return removed;
   }

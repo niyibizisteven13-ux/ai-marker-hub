@@ -1,5 +1,47 @@
 import { authFetch } from '../utils/authFetch';
 
+export interface AdminQualitySummary {
+  generatedAt: string | null;
+  reportFile: string | null;
+  evaluationMode: string;
+  split: string;
+  status: string;
+  notMeasured: string;
+  metrics: {
+    caseCount: number;
+    passCount: number;
+    successRate: number;
+    confidenceInterval95: [number, number] | null;
+    instabilityRate: number | null;
+  };
+  capabilityBreakdown: Array<{ capability: string; total: number; passed: number; successRate: number }>;
+  traceMetrics?: {
+    traceCount: number;
+    sampleLimit: number;
+    successRate: number | null;
+    capabilityStats: Array<{ capability: string; traces: number; successes: number; successRate: number | null }>;
+    retries: number;
+    averageRetries: number | null;
+    toolErrorRate: number | null;
+    toolStats: Array<{ name: string; calls: number; errors: number }>;
+    topFailureClasses: Array<{ failureClass: string; count: number }>;
+    latencyP50Ms: number | null;
+    latencyP95Ms: number | null;
+    averageCostUsd: number | null;
+    failingTraces: Array<{
+      id: string;
+      capability: string;
+      model: string;
+      provider: string;
+      finalStatus: string;
+      failureClass: string | null;
+      latencyMs: number;
+      createdAt: string;
+      toolCalls: Array<{ name: string; argsValid: boolean; durationMs: number; ok: boolean; errorCode: string | null }>;
+    }>;
+  };
+}
+
 async function readJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await authFetch(url, init);
   const data = await response.json();
@@ -13,7 +55,7 @@ export const adminApi = {
 
   // Knowledge Bases
   getKnowledgeBases: () => readJson<{ success: true; data: any[] }>('/api/admin/knowledge-bases'),
-  createKnowledgeBase: (payload: { name: string; description?: string; state?: string }) =>
+  createKnowledgeBase: (payload: { name: string; description?: string; state?: string; globalApproved?: boolean }) =>
     readJson('/api/admin/knowledge-bases', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
   updateKnowledgeBase: (id: string, payload: any) =>
     readJson(`/api/admin/knowledge-bases/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
@@ -47,7 +89,7 @@ export const adminApi = {
   retractCorrection: (id: string) => readJson(`/api/admin/corrections/${id}/retract`, { method: 'POST' }),
   getVerifiedAnswers: () => readJson<{ success: true; data: any[] }>('/api/admin/verified-answers'),
 
-  // Datasets & Training Examples
+  // Datasets & Prompt Adapter Examples
   getDatasets: () => readJson<{ success: true; data: any[] }>('/api/admin/datasets'),
   createDataset: (payload: any) => readJson('/api/admin/datasets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
   deleteDataset: (datasetId: string) => readJson(`/api/admin/datasets/${datasetId}`, { method: 'DELETE' }),
@@ -71,40 +113,34 @@ export const adminApi = {
   updateDatasetExample: (exampleId: string, payload: any) => readJson(`/api/admin/dataset-examples/${exampleId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
   deleteDatasetExample: (exampleId: string) => readJson(`/api/admin/dataset-examples/${exampleId}`, { method: 'DELETE' }),
 
-  // Fine-tuning & Training
-  getFineTuneJobs: () => readJson<{ success: true; data: any[] }>('/api/admin/fine-tune/jobs'),
-  createFineTuneJob: (
+  // Dataset-grounded prompt adapters; these do not train model weights.
+  getDatasetAdapters: () => readJson<{ success: true; data: any[] }>('/api/admin/dataset-adapters/jobs'),
+  createDatasetAdapter: (
     payload:
       | string
       | {
           datasetId: string;
           baseModel?: string;
           suffix?: string;
-          epochs?: number;
-          learningRate?: number;
-          batchSize?: number;
-          loraRank?: number;
           targetEnvironment?: string;
           autoApprove?: boolean;
         }
   ) =>
-    readJson('/api/admin/fine-tune/jobs', {
+    readJson('/api/admin/dataset-adapters/jobs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(typeof payload === 'string' ? { datasetId: payload } : payload),
     }),
-  cancelFineTuneJob: (id: string) => readJson(`/api/admin/fine-tune/jobs/${id}/cancel`, { method: 'POST' }),
-  testFineTuneJob: (id: string, prompt: string) =>
-    readJson<{ success: true; data: { model: string; output: string; latencyMs: number; examplesUsed: number; adapterApplied: boolean } }>(
-      `/api/admin/fine-tune/jobs/${id}/test`,
+  cancelDatasetAdapter: (id: string) => readJson(`/api/admin/dataset-adapters/jobs/${id}/cancel`, { method: 'POST' }),
+  testDatasetAdapter: (id: string, prompt: string) =>
+    readJson<{ success: true; data: { baseModel: string; adapterName: string; output: string; latencyMs: number; examplesUsed: number; adapterApplied: boolean; trainedWeights: false } }>(
+      `/api/admin/dataset-adapters/jobs/${id}/test`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt }),
       }
     ),
-  getFineTuneReadme: (id: string) => readJson<{ success: true; readme: string }>(`/api/admin/fine-tune/jobs/${id}/readme`),
-
   // Models
   getModels: () => readJson<{ success: true; data: any[] }>('/api/admin/models'),
   createModel: (payload: any) => readJson('/api/admin/models', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
@@ -133,9 +169,16 @@ export const adminApi = {
 
   // Analytics
   getAnalytics: (range = '7d') => readJson<{ success: true; data: any }>(`/api/admin/analytics?range=${range}`),
+  getQuality: () => readJson<{ success: true; data: AdminQualitySummary }>(`/api/admin/quality`),
 
   // Users & Organizations
   getUsers: () => readJson<{ success: true; data: any[] }>('/api/admin/users'),
+  createUser: (payload: { email: string; name: string }) =>
+    readJson('/api/admin/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
   updateUserRole: (userId: string, role: string) => readJson('/api/admin/users/role', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId, role }) }),
   getOrganizations: () => readJson<{ success: true; data: any[] }>('/api/admin/organizations'),
   createOrganization: (name: string) => readJson('/api/admin/organizations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }),

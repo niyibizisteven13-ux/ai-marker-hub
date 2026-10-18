@@ -12,6 +12,8 @@
     "lint": "tsc --noEmit",
     "security:check": "bash scripts/check-no-secrets.sh",
     "test": "npm run security:check && node --test --import tsx tests/*.test.ts",
+    "eval": "tsx evals/runner.ts",
+    "eval:ci": "tsx evals/runner.ts --split dev --all --no-report",
     "verify": "npm run lint && npm run test && npm run build",
     "prisma": "prisma",
     "db:migrate": "prisma migrate dev --name init"

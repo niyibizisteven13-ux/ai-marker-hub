@@ -106,7 +106,7 @@ export default function ChatMessage({
   const thinkingText: string = message.thinkingText || '';
   const isThinking: boolean = message.isThinking === true;
   const isGated = message.gated === true;
-  const isServiceError = Boolean(message.errorKind);
+  const isServiceError = Boolean(message.errorKind || message.stopped);
 
   const isAuthAlert = rawText.includes('Authentication Required');
 
@@ -191,7 +191,11 @@ export default function ChatMessage({
       <div className="flex w-full justify-start animate-in fade-in slide-in-from-bottom-1 duration-200">
         <div className="max-w-full rounded-2xl border border-amber-400/20 bg-amber-400/[0.06] p-4 text-[#FAF9F5] sm:max-w-[min(90%,42rem)]">
           <p className="text-sm font-semibold text-amber-200">
-            {message.errorKind === 'service_unavailable' ? 'Bwenge is experiencing high demand' : 'Bwenge could not reach the AI service'}
+            {message.stopped
+              ? 'Stopped'
+              : message.errorKind === 'service_unavailable'
+                ? 'Bwenge is experiencing high demand'
+                : 'Bwenge could not reach the AI service'}
           </p>
           <p className="mt-1 text-sm leading-relaxed text-[#C2C0B6]">{cleanText}</p>
           {onRetry && (
@@ -326,16 +330,23 @@ export default function ChatMessage({
               </div>
             )}
 
-            {(cleanText || message.isStreaming) && (
+            {message.isWaiting && (
+              <div className="flex min-h-7 items-center gap-1.5 py-1" aria-live="polite" aria-atomic="true">
+                <span className="sr-only">Bwenge is thinking</span>
+                {[0, 1, 2].map((dot) => (
+                  <span
+                    key={dot}
+                    className="h-2 w-2 rounded-full bg-emerald-500/80 motion-safe:animate-bounce motion-reduce:animate-none dark:bg-emerald-400/80"
+                    style={{ animationDelay: `${dot * 150}ms` }}
+                    aria-hidden="true"
+                  />
+                ))}
+              </div>
+            )}
+
+            {(cleanText || (message.isStreaming && !message.isWaiting)) && (
               <div>
-                {cleanText ? (
-                  <MarkdownRenderer content={cleanText} />
-                ) : (
-                  <span className="flex items-center gap-2 py-1 italic text-[#9C9A92]">
-                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
-                    Thinking…
-                  </span>
-                )}
+                {cleanText && <MarkdownRenderer content={cleanText} />}
                 {message.isStreaming && cleanText && (
                   <span className="ml-0.5 inline-block h-4 w-1.5 -translate-y-0.5 animate-pulse rounded-sm bg-emerald-400/80" />
                 )}
@@ -391,11 +402,6 @@ export default function ChatMessage({
             )}
 
             <div className="flex items-center gap-1">
-              {message.provider && (
-                <span className="hidden lg:inline-block mr-1.5 rounded-full border border-white/[0.08] bg-white/[0.03] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[#9C9A92]">
-                  {message.provider}
-                </span>
-              )}
               <ActionButton title="Copy" onClick={handleCopy}>
                 {copied ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
               </ActionButton>

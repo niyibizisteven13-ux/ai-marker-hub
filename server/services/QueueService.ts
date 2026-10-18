@@ -100,7 +100,6 @@ export class QueueService {
               studentId: script.studentId,
               markedScript: evaluation.markedScript,
               providers: evaluation.providers,
-              providerWarnings: evaluation.providerWarnings,
             });
             jobRecord.progress = Math.round(((i + 1) / total) * 100);
             saveJobsToDisk();

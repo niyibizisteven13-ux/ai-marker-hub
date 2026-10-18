@@ -33,6 +33,8 @@ export interface DatasetExample {
   reviewerIds?: string[];
   /** True only if the data owner gave documented consent for personal data in this example. */
   consent?: boolean;
+  /** True only after a human has reviewed this example for personal data. */
+  piiReviewed?: boolean;
 }
 
 export interface Issue {
@@ -112,6 +114,9 @@ export function validateExample(ex: DatasetExample, options: ValidationOptions =
   const instruction = (ex.instruction ?? '').trim();
   const output = (ex.output ?? '').trim();
   const input = (ex.input ?? '').trim();
+
+  if (ex.consent !== true) add('missing_consent', 'blocker', 'Documented data-owner consent is required before export.');
+  if (ex.piiReviewed !== true) add('pii_not_reviewed', 'blocker', 'A human PII review is required before export.');
 
   if (instruction.length < minInstruction) add('empty_instruction', 'blocker', 'Instruction is empty or too short.');
   if (!output) add('empty_output', 'blocker', 'Output is empty.');

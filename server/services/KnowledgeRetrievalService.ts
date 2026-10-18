@@ -1,5 +1,6 @@
 import { prisma } from '../db.js';
 import { EmbeddingService } from './EmbeddingService.js';
+import { buildKnowledgeAccessWhere } from './ai/dataScope.js';
 import logger from '../utils/logger.js';
 
 const embeddingService = EmbeddingService.getInstance();
@@ -32,6 +33,31 @@ const STOP_WORDS = new Set([
   'aba', 'ubu', 'ubwo', 'ibi', 'iryo', 'ayo', 'noneho', 'rero', 'naho', 'none',
 ]);
 
+const SYNONYM_GROUPS: Record<string, string[]> = {
+  growth: ['growth', 'grow', 'grew', 'growing', 'increase', 'increased', 'increasing', 'rise', 'rose', 'rising'],
+  economy: ['economy', 'economic', 'gdp', 'production', 'income'],
+  education: ['education', 'school', 'student', 'students', 'enrollment', 'admission'],
+  health: ['health', 'clinic', 'hospital', 'medical', 'wellbeing'],
+};
+
+function expandTerm(term: string): string[] {
+  const normalized = foldText(term);
+  const expansions = new Set<string>([normalized]);
+  for (const [groupName, values] of Object.entries(SYNONYM_GROUPS)) {
+    if (values.includes(normalized)) {
+      for (const value of values) expansions.add(value);
+      expansions.add(groupName);
+    }
+  }
+  if (/^(grow|growth|grew|increase|increased|rise|rose|rising)$/.test(normalized)) {
+    expansions.add('growth');
+  }
+  if (/^(econom|gdp|production|income)$/.test(normalized)) {
+    expansions.add('economy');
+  }
+  return [...expansions];
+}
+
 export interface RankedKnowledgeChunk<T> {
   chunk: T;
   score: number;
@@ -55,11 +81,19 @@ function foldText(value: string): string {
 function tokenize(value: string, fold = true): string[] {
   const text = fold ? foldText(value) : value.toLowerCase();
   const tokens = text.match(/[\p{L}\p{N}]+/gu) ?? [];
-  return tokens.filter(
-    (term) =>
-      (term.length >= 3 || /^\d{2,}$/.test(term)) &&
-      !STOP_WORDS.has(fold ? term : foldText(term)),
-  );
+  const expanded = new Set<string>();
+
+  for (const token of tokens) {
+    const folded = fold ? token : foldText(token);
+    if ((folded.length < 3 && !/^\d{2,}$/.test(folded)) || STOP_WORDS.has(folded)) continue;
+    for (const expandedToken of expandTerm(folded)) {
+      if (expandedToken.length >= 2 || /^\d{2,}$/.test(expandedToken)) {
+        expanded.add(expandedToken);
+      }
+    }
+  }
+
+  return [...expanded];
 }
 
 /**
@@ -302,6 +336,7 @@ export type KnowledgeReranker = (query: string, passages: string[]) => Promise<n
 export async function retrieveKnowledgeChunks(
   query: string,
   options: {
+    userId: string;
     knowledgeBaseId?: string;
     limit?: number;
     threshold?: number;
@@ -309,10 +344,16 @@ export async function retrieveKnowledgeChunks(
     environment?: string;
     minimumSemanticSimilarity?: number;
     reranker?: KnowledgeReranker;
-  } = {},
+  },
 ) {
   const queryTerms = [...new Set(tokenize(query))];
-  if (queryTerms.length === 0) return [];
+  if (!options.userId || queryTerms.length === 0) return [];
+
+  const memberships = await prisma.organizationMember.findMany({
+    where: { userId: options.userId },
+    select: { organizationId: true },
+  });
+  const organizationIds = memberships.map(({ organizationId }) => organizationId);
 
   // SQL pre-filter uses RAW (accented) lowercase terms, because the database
   // text is not folded. For longer words we also match the part after a likely
@@ -331,6 +372,7 @@ export async function retrieveKnowledgeChunks(
   const where = {
     AND: [
       readyKnowledgeWhere,
+      buildKnowledgeAccessWhere(options.userId, organizationIds),
       {
         OR: [
           { embedding: { not: null } },

@@ -2,9 +2,11 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { createUser, findUserByEmail } from './authDb.js';
+import { isPublicSignupAllowed } from '../server/auth/publicSignup.js';
+import { getJwtSecret } from '../server/auth/secrets.js';
 
 const router = Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'bwenge-ai-secret-key-2026';
+const JWT_SECRET = getJwtSecret();
 const JWT_EXPIRES_IN = '7d';
 
 function buildAuthResponse(user) {
@@ -14,6 +16,9 @@ function buildAuthResponse(user) {
 }
 
 router.post('/signup', async (req, res) => {
+  if (!isPublicSignupAllowed()) {
+    return res.status(403).json({ error: 'Public signup is disabled. Contact an administrator to create an account.' });
+  }
   try {
     const { name, email, password } = req.body;
     if (!name || !email || !password) {

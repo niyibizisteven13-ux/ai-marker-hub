@@ -28,6 +28,8 @@ import {
 } from 'lucide-react';
 import 'katex/dist/katex.min.css';
 
+const MOCK_ARTIFACTS_ENABLED = import.meta.env.VITE_ENABLE_MOCK_ARTIFACTS === 'true';
+
 type ChartPoint = Record<string, string | number>;
 
 function MermaidDiagram({ source }: { source: string }) {
@@ -577,10 +579,10 @@ function renderArtifactJson(source: string): React.ReactNode | null {
   try {
     const artifact = JSON.parse(source);
     if (!artifact || typeof artifact !== 'object') return null;
-    if (artifact.type === 'image') return <ImageGraphicArtifact artifact={artifact} />;
-    if (artifact.type === 'video') return <VideoAnimationArtifact artifact={artifact} />;
-    if (artifact.type === 'audio') return <AudioSpeechArtifact artifact={artifact} />;
-    if (artifact.type === 'dataset' || artifact.type === 'workflow') return <DatasetWorkflowArtifact artifact={artifact} />;
+    if (MOCK_ARTIFACTS_ENABLED && artifact.type === 'image') return <ImageGraphicArtifact artifact={artifact} />;
+    if (MOCK_ARTIFACTS_ENABLED && artifact.type === 'video') return <VideoAnimationArtifact artifact={artifact} />;
+    if (MOCK_ARTIFACTS_ENABLED && artifact.type === 'audio') return <AudioSpeechArtifact artifact={artifact} />;
+    if (MOCK_ARTIFACTS_ENABLED && (artifact.type === 'dataset' || artifact.type === 'workflow')) return <DatasetWorkflowArtifact artifact={artifact} />;
     if (artifact.type === 'chart' && ['bar', 'line', 'scatter'].includes(artifact.chartType) && typeof artifact.title === 'string' && typeof artifact.xKey === 'string' && typeof artifact.yKey === 'string' && Array.isArray(artifact.data)) {
       return <ChartArtifact title={artifact.title} chartType={artifact.chartType} xKey={artifact.xKey} yKey={artifact.yKey} data={artifact.data} />;
     }

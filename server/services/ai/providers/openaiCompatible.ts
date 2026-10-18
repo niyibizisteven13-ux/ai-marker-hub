@@ -11,6 +11,8 @@ export interface OpenAICompatibleOptions {
   connectTimeoutMs?: number;
   /** Abort if no data arrives for this long while streaming. */
   idleTimeoutMs?: number;
+  /** Maximum total time for the request, including streaming. */
+  requestTimeoutMs?: number;
   /** Ask for token usage in the stream (OpenAI-style). Disable if the gateway rejects it. */
   includeUsage?: boolean;
   /** Last-chance edit of the request body for gateway quirks. */
@@ -49,8 +51,9 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
     const controller = new AbortController();
     const onAbort = () => controller.abort(req.signal?.reason ?? new Error('aborted'));
     req.signal?.addEventListener('abort', onAbort, { once: true });
-    let timedOut: 'connect' | 'idle' | null = null;
+    let timedOut: 'connect' | 'idle' | 'request' | null = null;
     const connectTimer = setTimeout(() => { timedOut = 'connect'; controller.abort(); }, this.opts.connectTimeoutMs ?? 30_000);
+    const requestTimer = setTimeout(() => { timedOut = 'request'; controller.abort(); }, this.opts.requestTimeoutMs ?? 60_000);
     let idleTimer: ReturnType<typeof setTimeout> | undefined;
     const armIdle = () => {
       if (idleTimer) clearTimeout(idleTimer);
@@ -72,7 +75,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
           signal: controller.signal,
         });
       } catch (err: any) {
-        if (timedOut) throw new ProviderError(`${this.name}: ${timedOut} timeout`, undefined, true);
+        if (timedOut) throw new ProviderError(`${this.name}: ${timedOut} timeout`, undefined, true, true, timedOut);
         if (req.signal?.aborted) throw err;
         throw new ProviderError(`${this.name}: ${err?.cause?.code ?? err?.message ?? 'network error'}`, undefined, true);
       } finally {
@@ -80,16 +83,18 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
       }
 
       if (!res.ok) {
-        const text = (await res.text().catch(() => '')).slice(0, 2000);
-        throw new ProviderError(`${this.name} error (${res.status}): ${text || res.statusText}`, res.status);
+        throw new ProviderError(`${this.name} request failed with HTTP ${res.status}`, res.status);
       }
 
       const type = (res.headers.get('content-type') ?? '').toLowerCase();
       if (!type.includes('text/event-stream')) {
         // Gateways sometimes ignore stream:true and return plain JSON.
-        const data: any = await res.json().catch(() => null);
+        const data: any = await res.json().catch(() => {
+          if (timedOut) throw new ProviderError(`${this.name}: ${timedOut} timeout`, undefined, true, true, timedOut);
+          return null;
+        });
         if (!data) throw new ProviderError(`${this.name}: response was not valid JSON`);
-        if (data.error) throw new ProviderError(`${this.name}: ${data.error.message ?? JSON.stringify(data.error)}`, data.error.status ?? data.error.code);
+        if (data.error) throw new ProviderError(`${this.name} returned an upstream error`, Number(data.error.status ?? data.error.code) || undefined);
         const msg = data.choices?.[0]?.message ?? {};
         const content = typeof msg.content === 'string' ? msg.content : data.message?.content ?? data.response;
         if (content) yield { type: 'text', text: String(content) };
@@ -119,7 +124,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
             if (payload === '[DONE]') return;
             let data: any;
             try { data = JSON.parse(payload); } catch { continue; }
-            if (data.error) throw new ProviderError(`${this.name}: ${data.error.message ?? JSON.stringify(data.error)}`, data.error.status ?? data.error.code);
+            if (data.error) throw new ProviderError(`${this.name} returned an upstream error`, Number(data.error.status ?? data.error.code) || undefined);
             const choice = data.choices?.[0];
             const delta = choice?.delta ?? {};
             const text = typeof delta.content === 'string' ? delta.content : Array.isArray(delta.content) ? delta.content.map((p: any) => p?.text ?? '').join('') : '';
@@ -135,15 +140,15 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
         }
       } catch (err: any) {
         if (err instanceof ProviderError) throw err;
-        if (timedOut) throw new ProviderError(`${this.name}: ${timedOut} timeout (no data for ${(this.opts.idleTimeoutMs ?? 45_000) / 1000}s)`, undefined, true);
+        if (timedOut) throw new ProviderError(`${this.name}: ${timedOut} timeout`, undefined, true, true, timedOut);
         if (req.signal?.aborted) throw err;
         throw new ProviderError(`${this.name}: stream interrupted (${err?.message ?? 'unknown'})`, undefined, true);
       }
     } finally {
       clearTimeout(connectTimer);
+      clearTimeout(requestTimer);
       if (idleTimer) clearTimeout(idleTimer);
       req.signal?.removeEventListener('abort', onAbort);
     }
   }
 }
-

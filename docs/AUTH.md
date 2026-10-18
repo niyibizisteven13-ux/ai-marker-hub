@@ -31,7 +31,8 @@ Browser                         Our API                                  Google
 2. POST /api/auth/email/start { email, locale } -> ALWAYS 202 { ok: true, retryAfter: 30 }
 3. We email a 6-digit code (valid 10 minutes, HMAC-SHA256 hashed).
 4. Person types the code (auto-submit at 6 digits).
-5. POST /api/auth/email/verify { email, code }   -> 200 { user, isNewUser } + session cookie
+5. POST /api/auth/email/verify { email, code }   -> 200 { accessToken, user, isNewUser } + HttpOnly refresh cookie
+6. The short-lived access token stays in memory; on page reload, the browser sends the refresh cookie to /api/auth/refresh.
 ```
 
 ---
@@ -75,7 +76,7 @@ EMAIL_SMTP_URL=
 |---|---|
 | **CSRF** | `SameSite=Lax` cookies, Origin checks, double-submit tokens. |
 | **Code Interception / Replay** | Single-use email codes hashed with HMAC-SHA256, 10-minute expiry, max 5 attempts. |
-| **Google Token Leak** | Server-side code exchange; access/refresh tokens never reach the browser. |
+| **Token Theft** | OAuth provider tokens stay server-side; application access tokens stay in memory and refresh tokens use HttpOnly cookies. |
 | **In-App Browser Attacks** | User-agent detection on Google start returns `{ blocked: 'in_app_browser' }` prompting browser open. |
 | **Open Redirects** | `sanitizeNext(next)` ensures only relative internal paths under 200 characters are allowed. |
 | **Account Enumeration** | Uniform 202 responses and consistent timing on email start regardless of account existence. |

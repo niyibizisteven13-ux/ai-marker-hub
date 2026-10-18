@@ -2,12 +2,14 @@ declare module 'bcryptjs';
 
 import 'dotenv/config';
 import express from 'express';
+import { createServer } from 'node:http';
 import path from 'path';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { prisma } from './server/db.js';
+import { validateEmailSenderConfiguration } from './server/email/EmailSender.js';
 
 import { AiService } from './server/services/AiService.js';
 import { QueueService } from './server/services/QueueService.js';
@@ -24,12 +26,16 @@ import { SentimentService } from './server/services/SentimentService.js';
 import { ConfidenceService } from './server/services/ConfidenceService.js';
 import { upload } from './server/middleware/upload.js';
 import { ingestDocument } from './server/services/DocumentIngestionService.js';
-import { classifyIntent } from './server/services/intentRouter.js';
+import { classifyIntent, isSmallTalkMessage } from './server/services/intentRouter.js';
 import { generalTools } from './server/services/generalTools.js';
 import { FileStore, createFileRouter } from './server/services/ai/index.js';
+import { describeChatFailure } from './server/services/ai/chatFailure.js';
+import { emptyModelOutputError, nonEmptyModelText } from './server/services/ai/modelOutput.js';
+import { validateScanGradeOutput } from './server/services/ai/scanOutput.js';
 import logger from './server/utils/logger.js';
 
 import { validate, examSchema, markScriptSchema, batchGradeSchema, chatSchema } from './server/middleware/validation.js';
+import { getFileUrlSecret, getJwtSecret } from './server/auth/secrets.js';
 
 import { requireAuth, requireRole, writeAuditLog } from './production/auth.js';
 import { generalLimiter, gradingLimiter } from './production/rateLimiter.js';
@@ -44,9 +50,9 @@ import ollamaRoutes from './server/routes/ollamaRoutes.ts';
 import telegramBotRoutes from './server/routes/telegramBotRoutes.ts';
 import settingsBillingRoutes from './server/routes/settingsBillingRoutes.ts';
 import { TelegramBotService } from './server/services/TelegramBotService.ts';
-import { buildFallbackChatReply } from './src/utils/aiFallback.ts';
-import { buildPromptForIntent } from './server/services/prompts/promptRouter.ts';
+import { buildPromptForIntent, buildSmallTalkPrompt } from './server/services/prompts/promptRouter.ts';
 import { validateEvidenceCitations } from './server/services/GroundedAnswerService.js';
+import { buildUserContextScope } from './server/services/ai/dataScope.js';
 import { stripThinkingTags } from './server/services/AiService.ts';
 import { generateBatchExcelReport, generateBatchExcelReportFromGradedResults } from './src/services/excelExporter.ts';
 import { uploadBufferToCloud } from './src/services/cloudStorage.ts';
@@ -75,19 +81,30 @@ if (trustProxyHops !== undefined) {
 }
 
 // ── Startup environment validation ────────────────────────────────────────
-if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
-  process.env.JWT_SECRET = 'ai-studio-default-jwt-secret-key-min-32-chars';
-  console.warn('[WARN] JWT_SECRET not set or too short — using runtime fallback secret.');
-}
+getJwtSecret();
 if (!process.env.DATABASE_URL) {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('DATABASE_URL must be configured in production.');
+  }
   console.warn('[WARN] DATABASE_URL is not set — running with in-memory database mock.');
+}
+if (
+  process.env.NODE_ENV === 'production' &&
+  !/^postgres(?:ql)?:\/\//i.test(process.env.DATABASE_URL || '')
+) {
+  throw new Error('DATABASE_URL must use PostgreSQL in production; SQLite file: URLs are not supported.');
 }
 if (!process.env.AI_PROVIDER) {
   process.env.AI_PROVIDER = 'gonkarouter';
 }
 const AI_PROVIDERS = ['GONKA_API_KEY', 'GEMINI_API_KEY', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'NVIDIA_NIM_API_KEY', 'OLLAMA_BASE_URL'];
-if (!AI_PROVIDERS.some(k => process.env[k])) {
-  console.warn('[WARN] No AI provider API key is configured. Set at least one of: ' + AI_PROVIDERS.join(', '));
+const hasChatProvider = AI_PROVIDERS.some((key) => process.env[key]);
+if (!process.env.GEMINI_API_KEY) {
+  logger.warn(
+    `GEMINI_API_KEY is not configured; semantic embeddings are unavailable and knowledge retrieval will use lexical matching.${hasChatProvider ? '' : ' No chat provider is configured.'}`,
+  );
+} else if (!hasChatProvider) {
+  logger.warn('No AI chat provider is configured; chat and generation features will be unavailable.');
 }
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -102,8 +119,14 @@ const memoryService = MemoryService.getInstance();
 const safetyService = SafetyService.getInstance();
 const sentimentService = SentimentService.getInstance();
 const confidenceService = ConfidenceService.getInstance();
-export const fileStore = new FileStore({ dir: process.env.FILE_STORE_DIR ?? './data/generated', secret: process.env.FILE_URL_SECRET || 'ai-studio-default-file-url-secret-min-32-chars' });
-setInterval(() => fileStore.purgeExpired().catch(() => {}), 60 * 60 * 1000).unref();
+export const fileStore = new FileStore({ dir: process.env.FILE_STORE_DIR ?? './data/generated', secret: getFileUrlSecret() });
+const purgeExpiredFiles = () => {
+  void fileStore.purgeExpired().catch((error) => {
+    logger.error('Scheduled expired-file purge failed.', error);
+  });
+};
+purgeExpiredFiles();
+setInterval(purgeExpiredFiles, 24 * 60 * 60 * 1000).unref();
 
 /**
  * Consistent error-response shape for every route below: full detail in
@@ -119,32 +142,6 @@ function respondError(res: express.Response, err: any, fallbackMessage = 'Intern
   res.status(httpStatus).json({
     error: process.env.NODE_ENV === 'production' ? fallbackMessage : (err?.message || fallbackMessage),
   });
-}
-
-function generateSmartFallbackReply(query: string, modelName: string): string {
-  const q = (query || '').toLowerCase();
-  if (q.includes('four dimensions') || q.includes('operational limitations') || q.includes('frontier ai')) {
-    return `Based on the comprehensive AI systems evaluation report and domain analysis via **${modelName}**, the four key dimensions of operational limitations for frontier AI systems and their system impacts are:
-
-1. **Context Window & Memory Degradation (Attention Decay)**
-   - *System Impact*: Long-horizon reasoning fails past threshold token counts, leading to hallucinated context and dropped constraints in multi-turn dialogues.
-2. **Reliability & Deterministic Verification (Stochastic Variance)**
-   - *System Impact*: Unpredictable output variance across identical prompts, requiring multi-sample verification or strict prompt grounding (RAG/citations).
-3. **Safety Alignment & Robustness Gaps (Adversarial Fragility)**
-   - *System Impact*: Susceptibility to sophisticated jailbreaks, prompt injections, and boundary testing that bypass guardrails.
-4. **Compute Latency & Inference Cost (Economic Bottlenecks)**
-   - *System Impact*: High per-token computational overhead and latency spikes (e.g. >60s timeouts on complex reasoning models) inhibiting real-time production agents.
-
-*Note: This synthesis was generated via fallback reasoning engine when upstream gateway latency exceeded response thresholds.*`;
-  }
-
-  return `Analysis and response generated via **${modelName}**:
-
-Regarding your request ("${query.slice(0, 100)}"), the system processed your prompt using the active knowledge adapter context. To ensure robust reliability even during upstream network timeouts, this response is anchored in verified guidelines:
-
-1. **Core Objective**: Ensure precise, domain-grounded adherence to local rubrics and dataset specifications.
-2. **Execution**: Maintain verifiable evidence citations and transparent audit logging for all automated evaluations.
-3. **Recommendation**: For high-volume grading or deep research queries, verify that knowledge documents are fully indexed in the Knowledge Base to maximize RAG retrieval accuracy.`;
 }
 
 /**
@@ -592,6 +589,8 @@ async function executeBackendAgentPostProcess(
     return;
   }
 
+  if (process.env.ENABLE_MOCK_AGENT_ARTIFACTS !== 'true') return;
+
   // If the model already emitted an executable artifact-json block, no need to synthesize another
   if (/```artifact-json[\s\S]*?```/i.test(accumulatedText)) {
     return;
@@ -600,12 +599,20 @@ async function executeBackendAgentPostProcess(
   // 2. Real Database Dataset Pattern Discovery & Prompt Optimization (Explicit Analytics Intent Only)
   if (/\b(analyze\s+dataset\s+metrics|database\s+patterns|show\s+dataset\s+patterns|correlation\s+analysis|cluster\s+analysis|optimize\s+prompt\s+report|training\s+data\s+metrics)\b/i.test(qLower)) {
     try {
+      const memberships = await prisma.organizationMember.findMany({
+        where: { userId },
+        select: { organizationId: true },
+      });
+      const contextScope = buildUserContextScope(
+        userId,
+        memberships.map(({ organizationId }) => organizationId),
+      );
       const [forms, submissions, insights, examples, usageEvents] = await Promise.all([
-        prisma.applicationForm.findMany({ take: 20 }),
-        prisma.formSubmission.findMany({ take: 100 }),
-        prisma.extractedInsight.findMany({ take: 100 }),
-        prisma.datasetExample.findMany({ take: 100 }),
-        prisma.usageEvent.findMany({ take: 100 }),
+        prisma.applicationForm.findMany({ where: contextScope.forms, take: 20 }),
+        prisma.formSubmission.findMany({ where: contextScope.submissions, take: 100 }),
+        prisma.extractedInsight.findMany({ where: contextScope.insights, take: 100 }),
+        prisma.datasetExample.findMany({ where: contextScope.examples, take: 100 }),
+        prisma.usageEvent.findMany({ where: { userId }, take: 100 }),
       ]);
 
       const scores = insights.map((i: any) => Number(i.score)).filter((n) => Number.isFinite(n));
@@ -862,6 +869,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
   const cleanProvider = requestedProvider === 'undefined' || requestedProvider === 'null' || !requestedProvider ? null : requestedProvider;
 
   const intent = await classifyIntent(query || '', hasFile);
+  const isSmallTalk = isSmallTalkMessage(query || '', hasFile);
   const service = bodyService || (intent === 'general_assist' ? 'general' : intent);
   // crypto.randomUUID() instead of `${userId}-${Date.now()}`, which could
   // collide if the same user fires two requests within the same millisecond.
@@ -988,7 +996,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
   const hasClaude = await aiService.providerAvailable('anthropic');
 
   if (
-    intent === 'general_assist' && service === 'general' && !cleanProvider && hasClaude &&
+    intent === 'general_assist' && service === 'general' && !isSmallTalk && !cleanProvider && hasClaude &&
     process.env.AI_PROVIDER !== 'gonkarouter'
   ) {
     res.setHeader('Content-Type', 'text/event-stream');
@@ -1066,7 +1074,7 @@ ${augmentedQuery}`;
         onEvent: (event) => {
           if (emitter.isClosed()) return; // client disconnected — stop pushing bytes down a dead socket
           const baseData = {
-            provider: event.data?.model?.includes('llama') ? 'NVIDIA' : event.data?.provider || 'Claude-Sonnet',
+
             taskId: (event as any).taskId,
             agent: (event as any).agent,
           };
@@ -1258,9 +1266,20 @@ ${augmentedQuery}`;
       clearInterval(keepAlive);
       emitter.done();
     } catch (err: any) {
-      logger.error('General assist error', err);
+      const failure = describeChatFailure(err);
+      logger.error('General assist request failed', {
+        code: failure.code,
+        status: failure.status,
+        timeout: failure.timeout,
+        timeoutKind: failure.timeoutKind,
+        errorType: failure.errorType,
+        networkCode: failure.networkCode,
+      });
       clearInterval(keepAlive);
-      emitter.send('error', { error: process.env.NODE_ENV === 'production' ? 'Internal error' : err.message });
+      emitter.send('error', {
+        code: failure.code,
+        message: failure.message,
+      });
       emitter.done();
     }
     return;
@@ -1279,44 +1298,74 @@ ${augmentedQuery}`;
 
   try {
     const requestStartedAt = Date.now();
-    const ftModelCtx = await contextAwareService.getActiveFineTunedModelContext();
-    const hydratedContext = await contextAwareService.buildHydratedPrompt(userId, activeFormId, query).catch((err) => {
-      logger.error('Context hydration failed:', err);
-      return 'Context unavailable due to system error.';
-    });
+    const ftModelCtx = isSmallTalk
+      ? { modelName: '', baseModel: '', adapterPrompt: '', fewShotBlock: '', exampleCount: 0 }
+      : await contextAwareService.getActiveFineTunedModelContext(userId);
+    let hydratedContext = '';
+    if (!isSmallTalk) {
+      try {
+        hydratedContext = await contextAwareService.buildHydratedPrompt(userId, activeFormId, query);
+      } catch (error) {
+        logger.error('User-scoped chat context retrieval failed.', {
+          errorType: error instanceof Error ? error.name : 'Error',
+        });
+        throw Object.assign(new Error('User-scoped chat context retrieval failed.'), {
+          code: 'CONTEXT_RETRIEVAL_FAILED',
+        });
+      }
+    }
 
     let styleExemplars: string | undefined;
     try {
-      const queryKeywords = (query || '').split(/\s+/).filter(w => w.length > 3);
-      let matchingExamples: any[] = [];
-      if (queryKeywords.length > 0) {
-        matchingExamples = await prisma.datasetExample.findMany({
-          where: {
-            OR: queryKeywords.slice(0, 4).map(kw => ({ instruction: { contains: kw, mode: 'insensitive' } }))
-          },
-          take: 3,
+      if (!isSmallTalk) {
+        const queryKeywords = (query || '').split(/\s+/).filter(w => w.length > 3);
+        let matchingExamples: any[] = [];
+        const memberships = await prisma.organizationMember.findMany({
+          where: { userId },
+          select: { organizationId: true },
         });
+        const exampleScope = buildUserContextScope(
+          userId,
+          memberships.map(({ organizationId }) => organizationId),
+        ).examples;
+        if (queryKeywords.length > 0) {
+          matchingExamples = await prisma.datasetExample.findMany({
+            where: {
+              AND: [
+                exampleScope,
+                { OR: queryKeywords.slice(0, 4).map((kw) => ({ instruction: { contains: kw, mode: 'insensitive' } })) },
+              ],
+            },
+            take: 3,
+          });
+        }
+        if (matchingExamples.length === 0) {
+          matchingExamples = await prisma.datasetExample.findMany({
+            where: exampleScope,
+            take: 3,
+            orderBy: { updatedAt: 'desc' },
+          });
+        }
+        if (matchingExamples.length > 0) {
+          styleExemplars = matchingExamples.map(ex => `[Local Dataset Reference]\nInstruction: ${ex.instruction}\nResponse: ${ex.output}`).join('\n---\n');
+        }
       }
-      if (matchingExamples.length === 0) {
-        matchingExamples = await prisma.datasetExample.findMany({
-          where: { status: 'approved' },
-          take: 3,
-          orderBy: { updatedAt: 'desc' },
-        });
-      }
-      if (matchingExamples.length > 0) {
-        styleExemplars = matchingExamples.map(ex => `[Local Dataset Reference]\nInstruction: ${ex.instruction}\nResponse: ${ex.output}`).join('\n---\n');
-      }
-    } catch {}
+    } catch (error) {
+      logger.warn('Could not load user-scoped dataset examples for chat context.', {
+        errorType: error instanceof Error ? error.name : 'Error',
+      });
+    }
 
-    const { system: systemWithContext, prompt } = buildPromptForIntent(intent, query || '', {
-      attachmentText: finalAttachmentText,
-      attachmentName,
-      examContext,
-      selectedEvidence,
-      hydratedContext,
-      styleExemplars,
-    });
+    const { system: systemWithContext, prompt } = isSmallTalk
+      ? buildSmallTalkPrompt(query || '')
+      : buildPromptForIntent(intent, query || '', {
+          attachmentText: finalAttachmentText,
+          attachmentName,
+          examContext,
+          selectedEvidence,
+          hydratedContext,
+          styleExemplars,
+        });
 
     const isOllama = cleanProvider === 'ollama' || (process.env.AI_PROVIDER === 'ollama' && !cleanProvider);
     const hasOllama = await aiService.providerAvailable('ollama');
@@ -1328,7 +1377,7 @@ ${augmentedQuery}`;
       await executeBackendAgentPostProcess(userId, query || '', finalStreamedText, (delta) => {
         finalStreamedText += delta;
         if (!requireVerifiedCitations) {
-          emitter.send('text', { provider: providerLabel, text: delta });
+          emitter.send('text', { text: delta });
         }
       });
       const citationValidation = validateEvidenceCitations(finalStreamedText, allowedEvidenceIds);
@@ -1336,7 +1385,7 @@ ${augmentedQuery}`;
         if (!citationValidation.valid) {
           finalStreamedText = 'I found relevant source passages but could not verify the response citations. Please retry.';
         }
-        emitter.send('text', { provider: providerLabel, text: finalStreamedText });
+        emitter.send('text', { text: finalStreamedText });
       }
       await prisma.usageEvent
         .create({
@@ -1376,7 +1425,13 @@ ${augmentedQuery}`;
           system: systemWithContext,
           history: parsedHistory,
           images: serverVisualFiles.length > 0 ? serverVisualFiles.map(f => ({ base64: f.base64, mediaType: f.mediaType })) : undefined,
-          max_tokens: 8192,
+          max_tokens: isSmallTalk ? 256 : 2048,
+          onReset: () => {
+            gonkaRawText = '';
+            gonkaVisibleText = '';
+            finalStreamedText = '';
+            emitter.send('reset');
+          },
           onToken: (token) => {
             if (emitter.isClosed()) return;
             gonkaRawText += token;
@@ -1394,7 +1449,7 @@ ${augmentedQuery}`;
             gonkaVisibleText = text;
             finalStreamedText = text;
             if (!requireVerifiedCitations) {
-              emitter.send('text', { provider: 'GonkaRouter', text: delta });
+              emitter.send('text', { text: delta });
             }
           },
         });
@@ -1406,8 +1461,7 @@ ${augmentedQuery}`;
         emitter.done();
         return;
       } catch (gonkaErr: any) {
-        if (gonkaVisibleText) throw gonkaErr;
-        logger.warn(`GonkaRouter chat failed, falling through to next provider: ${gonkaErr.message}`);
+        throw gonkaErr;
       }
     }
 
@@ -1444,7 +1498,7 @@ ${augmentedQuery}`;
         if (cleanChunk) {
           finalStreamedText += cleanChunk;
           if (!requireVerifiedCitations) {
-            emitter.send('text', { text: cleanChunk, provider: 'GonkaRouter' });
+            emitter.send('text', { text: cleanChunk });
           }
         }
       }
@@ -1458,7 +1512,7 @@ ${augmentedQuery}`;
           if (cleanChunk) {
             finalStreamedText += cleanChunk;
             if (!requireVerifiedCitations) {
-              emitter.send('text', { text: cleanChunk, provider: 'Ollama' });
+              emitter.send('text', { text: cleanChunk });
             }
           }
         },
@@ -1471,28 +1525,30 @@ ${augmentedQuery}`;
       const { text: cleanText, thinkingText: parsedThinking } = stripThinkingTags(rawText);
       finalStreamedText += cleanText;
       if (!requireVerifiedCitations) {
-        emitter.send('text', { text: cleanText, thinkingText: thinkingText || parsedThinking, provider: 'GonkaRouter' });
+        emitter.send('text', { text: cleanText, thinkingText: thinkingText || parsedThinking });
       }
       await recordUsageAndPostProcess('GonkaRouter');
     } else {
-      const fallbackReply = generateSmartFallbackReply(prompt, ftModelCtx.modelName);
-      finalStreamedText = fallbackReply;
-      if (!requireVerifiedCitations) {
-        emitter.send('text', { text: fallbackReply, provider: 'GonkaRouter' });
-      }
-      await recordUsageAndPostProcess('GonkaRouter');
-      emitter.send('done', {});
-      clearInterval(keepAlive);
-      emitter.done();
-      return;
+      throw Object.assign(new Error('No AI provider is configured.'), { code: 'AI_UNAVAILABLE' });
     }
 
     clearInterval(keepAlive);
     emitter.done();
   } catch (err: any) {
-    logger.error('Streaming error:', { message: err.message, stack: err.stack });
+    const failure = describeChatFailure(err);
+    logger.error('Chat upstream request failed', {
+      code: failure.code,
+      status: failure.status,
+      timeout: failure.timeout,
+      timeoutKind: failure.timeoutKind,
+      errorType: failure.errorType,
+      networkCode: failure.networkCode,
+    });
     clearInterval(keepAlive);
-    emitter.send('error', { error: process.env.NODE_ENV === 'production' ? 'Internal Streaming Error' : (err.message || 'Internal Streaming Error') });
+    emitter.send('error', {
+      code: failure.code,
+      message: failure.message,
+    });
     res.end();
   }
 });
@@ -1635,24 +1691,35 @@ app.post('/api/forms/:id/analyze', requireAuth, handleAnalyzeForm);
 
 // Autonomous LiveScanner AI Agent Endpoint (Vision OCR + Auto-Grading + Scan-to-Form)
 app.post('/api/ai/scan-agent', requireAuth, async (req, res) => {
+  if (process.env.ENABLE_AI_SCAN === 'false') {
+    return res.status(404).json({ error: 'AI scan is disabled. Set ENABLE_AI_SCAN=true to enable it.' });
+  }
   try {
     const userId = (req as any).user?.userId;
     if (!userId) return res.status(401).json({ error: 'Authentication required.' });
 
-    const { pages = [], mode = 'extract_and_grade', rubricText = '', studentName = '', instructions = '' } = req.body || {};
+    const { mode = 'extract_and_grade', rubricText = '', studentName = '', instructions = '' } = req.body || {};
+    const pages = Array.isArray(req.body?.pages)
+      ? req.body.pages
+      : req.body?.imageBase64
+        ? [req.body.imageBase64]
+        : [];
     if (!Array.isArray(pages) || pages.length === 0) {
       return res.status(400).json({ error: 'At least one scanned page is required.' });
     }
 
     const images = pages
       .map((p: any) => {
-        const dataUrl = String(p?.dataUrl || p?.url || '');
+        const dataUrl = String(typeof p === 'string' ? p : p?.dataUrl || p?.url || '');
         const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
         if (match) return { mediaType: match[1], base64: match[2] };
-        if (p?.base64) return { mediaType: p?.mimeType || 'image/jpeg', base64: String(p.base64) };
+        if (p?.base64 && typeof p.base64 === 'string') return { mediaType: p?.mimeType || 'image/jpeg', base64: p.base64 };
         return null;
       })
       .filter(Boolean) as Array<{ base64: string; mediaType: string }>;
+    if (images.length !== pages.length) {
+      return res.status(400).json({ error: 'One or more scanned pages are not valid base64 image data.' });
+    }
 
     if (mode === 'scan_to_form') {
       const systemPrompt = `You are Bwenge Scan-to-Form Autonomous Agent powered by GonkaRouter Vision.
@@ -1681,28 +1748,77 @@ Return valid JSON ONLY:
         { system: systemPrompt, images }
       );
       const parsed = aiService.parseModelJson(raw);
-      const safeTitle = String(parsed?.title || 'Scanned Worksheet Form').trim();
-      const rawQuestions = Array.isArray(parsed?.questions) && parsed.questions.length > 0
-        ? parsed.questions
-        : [
-            { id: 'q_1', type: 'SHORT_TEXT', title: 'Full Name & Student ID', required: true },
-            { id: 'q_2', type: 'LONG_TEXT', title: 'Question 1 Response (Extracted from Scan)', required: true },
-          ];
+      const allowedQuestionTypes = new Set(['SHORT_TEXT', 'LONG_TEXT', 'MULTIPLE_CHOICE', 'CHECKBOX', 'DROPDOWN', 'NUMBER', 'DATE']);
+      const validRubric =
+        parsed?.rubric &&
+        typeof parsed.rubric === 'object' &&
+        !Array.isArray(parsed.rubric) &&
+        Array.isArray(parsed.rubric.criteria) &&
+        parsed.rubric.criteria.length > 0 &&
+        parsed.rubric.criteria.every((criterion: any) =>
+          criterion &&
+          typeof criterion.name === 'string' &&
+          criterion.name.trim() &&
+          typeof criterion.weight === 'number' &&
+          Number.isFinite(criterion.weight) &&
+          criterion.weight > 0 &&
+          typeof criterion.maxMarks === 'number' &&
+          Number.isFinite(criterion.maxMarks) &&
+          criterion.maxMarks > 0,
+        );
+      if (
+        !parsed ||
+        typeof parsed.title !== 'string' ||
+        !parsed.title.trim() ||
+        typeof parsed.description !== 'string' ||
+        !parsed.description.trim() ||
+        !Array.isArray(parsed.questions) ||
+        parsed.questions.length === 0 ||
+        !validRubric ||
+        parsed.questions.some((question: any) =>
+          !question ||
+          typeof question.title !== 'string' ||
+          !question.title.trim() ||
+          !allowedQuestionTypes.has(String(question.type || '').toUpperCase()) ||
+          typeof question.required !== 'boolean' ||
+          (['MULTIPLE_CHOICE', 'CHECKBOX', 'DROPDOWN'].includes(String(question.type || '').toUpperCase()) &&
+            (!Array.isArray(question.options) ||
+              question.options.length === 0 ||
+              question.options.some((option: any) => {
+                const label = typeof option === 'string' ? option : option?.label;
+                return typeof label !== 'string' || !label.trim();
+              }))) ||
+          (question.options !== undefined &&
+            (!Array.isArray(question.options) ||
+              question.options.some((option: any) => {
+                const label = typeof option === 'string' ? option : option?.label;
+                return typeof label !== 'string' || !label.trim();
+              }))),
+        )
+      ) {
+        return res.status(502).json({
+          success: false,
+          error: { code: 'INVALID_MODEL_OUTPUT', message: 'The scan did not produce a valid form. Please retry.' },
+          retryable: true,
+        });
+      }
+      const safeTitle = parsed.title.trim();
+      const rawQuestions = parsed.questions;
       const normalizedQuestions = rawQuestions.map((q: any, i: number) => ({
-        id: q.id || `q_${Date.now()}_${i}`,
+        id: q.id || `q_${i + 1}`,
         type: String(q.type || 'SHORT_TEXT').toUpperCase(),
-        title: String(q.title || q.label || `Question ${i + 1}`),
+        title: q.title.trim(),
         required: Boolean(q.required ?? true),
         options: Array.isArray(q.options)
           ? q.options.map((o: any, oi: number) => ({
               id: `opt_${i}_${oi}`,
-              label: typeof o === 'string' ? o : String(o?.label || `Option ${oi + 1}`),
+              label: typeof o === 'string' ? o : String(o?.label || ''),
             }))
           : undefined,
       }));
       const schemaObj = {
         title: safeTitle,
-        description: String(parsed?.description || 'Digitized automatically from BwengeScan by GonkaRouter Vision Agent.'),
+        description: parsed.description.trim(),
         questions: normalizedQuestions,
         rubric: parsed?.rubric || null,
         themeColor: '#D97757',
@@ -1730,13 +1846,13 @@ Return valid JSON ONLY:
     const systemPrompt = `You are Bwenge LiveScanner Vision & Grading Agent powered by GonkaRouter.
 You are inspecting ${images.length} scanned student answer sheet page(s).
 1. Perform high-accuracy Optical Character Recognition (OCR) on all handwritten and printed text.
-2. Detect the student's name and ID if written on the page (otherwise use "${studentName || 'Student'}").
+2. Detect the student's name and ID only if visible on the page; otherwise return null for that field.
 3. Segment each question and the student's corresponding answer.
 4. Grade each answer fairly against the provided rubric (or standard academic criteria if no rubric is provided), awarding partial credit where appropriate.
 Return valid JSON ONLY in this exact shape:
 {
-  "detectedStudentName": "String",
-  "studentId": "STU-XXXX",
+  "detectedStudentName": null,
+  "studentId": null,
   "ocrTranscript": "Full verbatim transcription of the scanned page(s)...",
   "totalAwardedMarks": 85,
   "maxTotalMarks": 100,
@@ -1762,33 +1878,27 @@ ${rubricText ? `ACTIVE RUBRIC / EXAM CONTEXT:\n${rubricText}` : 'No explicit rub
 ${instructions ? `ADDITIONAL AGENT INSTRUCTIONS:\n${instructions}` : ''}`;
 
     const raw = await aiService.sendGonkaChat(userPrompt, { system: systemPrompt, images });
-    const parsed = aiService.parseModelJson(raw) || {};
-
-    const questions = Array.isArray(parsed.questions) ? parsed.questions : [];
-    const totalAwarded = Number.isFinite(Number(parsed.totalAwardedMarks))
-      ? Number(parsed.totalAwardedMarks)
-      : questions.reduce((sum: number, q: any) => sum + (Number(q.awardedMarks) || 0), 0);
-    const totalMax = Number.isFinite(Number(parsed.maxTotalMarks)) && Number(parsed.maxTotalMarks) > 0
-      ? Number(parsed.maxTotalMarks)
-      : questions.reduce((sum: number, q: any) => sum + (Number(q.maxMarks) || 0), 0) || 100;
-    const percentage = totalMax > 0 ? Math.round((totalAwarded / totalMax) * 100) : 0;
+    const parsed = validateScanGradeOutput(aiService.parseModelJson(raw));
+    if (!parsed) {
+      return res.status(502).json({
+        success: false,
+        error: { code: 'INVALID_MODEL_OUTPUT', message: 'The scan did not produce a complete, valid result. Please retry.' },
+        retryable: true,
+      });
+    }
 
     return res.json({
       success: true,
       provider: 'GonkaRouter',
-      detectedStudentName: parsed.detectedStudentName || studentName || 'Student',
-      studentId: parsed.studentId || `STU-${Math.floor(1000 + Math.random() * 9000)}`,
-      ocrTranscript: parsed.ocrTranscript || raw || 'Scanned handwriting processed.',
-      totalAwardedMarks: totalAwarded,
-      maxTotalMarks: totalMax,
-      percentage,
-      overallFeedback: parsed.overallFeedback || 'Evaluated by GonkaRouter Vision Agent.',
-      confidence: Number(parsed.confidence) || 92,
-      flags: Array.isArray(parsed.flags) ? parsed.flags : [],
-      questions,
+      ...parsed,
     });
   } catch (error: any) {
-    respondError(res, error, 'LiveScanner AI Agent failed to process scan.');
+    logger.error('Scan model request failed.', { errorType: error?.name || 'Error', status: error?.status });
+    res.status(502).json({
+      success: false,
+      error: { code: 'SCAN_FAILED', message: 'The scan could not be processed. Please retry.' },
+      retryable: true,
+    });
   }
 });
 
@@ -1831,13 +1941,63 @@ RULES:
       }
     });
 
-    const generatedJson = aiService.parseModelJson(result.text || '{}');
+    const generatedJson = aiService.parseModelJson(result.text || '');
+    const questions = Array.isArray(generatedJson?.questions) ? generatedJson.questions : [];
+    const rubrics = Array.isArray(generatedJson?.rubrics) ? generatedJson.rubrics : [];
+    const requestedTotalMarks = Number(totalMarks || 30);
+    const generatedTotalMarks = questions.reduce((sum: number, question: any) => sum + Number(question?.maxMarks), 0);
+    const validQuestions = questions.length > 0 && questions.every((question: any) =>
+      typeof question?.questionText === 'string' &&
+      question.questionText.trim() &&
+      typeof question?.modelAnswer === 'string' &&
+      question.modelAnswer.trim() &&
+      Number.isFinite(Number(question.maxMarks)) &&
+      Number(question.maxMarks) > 0
+    );
+    const validRubrics = rubrics.length === questions.length && rubrics.every((rubric: any, index: number) => {
+      const criteria = rubric?.criteria;
+      const criteriaTotal = Array.isArray(criteria)
+        ? criteria.reduce((sum: number, criterion: any) => sum + Number(criterion?.marksAvailable), 0)
+        : Number.NaN;
+      return (
+        Array.isArray(criteria) &&
+        criteria.length > 0 &&
+        criteria.every((criterion: any) =>
+          typeof criterion?.criterion === 'string' &&
+          criterion.criterion.trim() &&
+          Number.isFinite(Number(criterion.marksAvailable)) &&
+          Number(criterion.marksAvailable) >= 0
+        ) &&
+        (!rubric.questionId || String(rubric.questionId) === String(questions[index].id)) &&
+        Math.round(criteriaTotal * 100) === Math.round(Number(questions[index].maxMarks) * 100)
+      );
+    });
+    if (
+      !generatedJson ||
+      typeof generatedJson.title !== 'string' ||
+      !generatedJson.title.trim() ||
+      !validQuestions ||
+      !validRubrics ||
+      Math.round(generatedTotalMarks * 100) !== Math.round(requestedTotalMarks * 100)
+    ) {
+      throw new Error('AI exam generation returned an incomplete paper or rubric.');
+    }
+
     generatedJson.id = 'exam-' + Date.now();
     generatedJson.createdAt = new Date().toISOString();
 
     res.json({ success: true, examPaper: generatedJson });
   } catch (error: any) {
-    respondError(res, error, 'Failed to generate exam paper.');
+    logger.error('AI exam generation failed; no substitute exam was created.', {
+      errorType: error?.name || 'Error',
+      status: typeof error?.status === 'number' ? error.status : undefined,
+      timeout: error?.timeout === true,
+      timeoutKind: error?.timeoutKind,
+    });
+    res.status(503).json({
+      error: 'EXAM_GENERATION_FAILED',
+      message: 'AI exam generation could not be completed. Please retry.',
+    });
   }
 });
 
@@ -1850,7 +2010,16 @@ app.post('/api/mark-script', requireAuth, gradingLimiter, validate(markScriptSch
     const result = await gradingService.evaluateStudentScriptWithAI(examPaper, studentScript, `batch-${userId}`);
     res.json({ success: true, ...result });
   } catch (error: any) {
-    respondError(res, error, 'Failed to mark student script.');
+    logger.error('AI marking failed; student script remains pending.', {
+      errorType: error?.name || 'Error',
+      status: typeof error?.status === 'number' ? error.status : undefined,
+      timeout: error?.timeout === true,
+      timeoutKind: error?.timeoutKind,
+    });
+    res.status(503).json({
+      error: 'AI_MARKING_FAILED',
+      message: 'AI marking could not be completed. The script remains pending; please retry.',
+    });
   }
 });
 
@@ -1870,9 +2039,21 @@ Break down into specific criteria whose total points sum to ${maxMarks}.`;
     });
 
     const data = aiService.parseModelJson(result.text || '{}');
-    res.json({ success: true, criteria: data.criteria || [] });
+    if (!Array.isArray(data?.criteria) || data.criteria.length === 0) {
+      throw new Error('AI rubric generation returned no criteria.');
+    }
+    res.json({ success: true, criteria: data.criteria });
   } catch (error: any) {
-    respondError(res, error, 'Failed to generate rubric.');
+    logger.error('AI rubric generation failed.', {
+      errorType: error?.name || 'Error',
+      status: typeof error?.status === 'number' ? error.status : undefined,
+      timeout: error?.timeout === true,
+      timeoutKind: error?.timeoutKind,
+    });
+    res.status(503).json({
+      error: 'RUBRIC_GENERATION_FAILED',
+      message: 'AI rubric generation could not be completed. Please retry.',
+    });
   }
 });
 
@@ -1885,7 +2066,9 @@ app.post('/api/ai/summarize', requireAuth, gradingLimiter, async (req, res) => {
       contents: `Summarize the following text into 1 concise, high-impact bullet point insight for academic study:\n\n"${text}"`,
     });
 
-    res.json({ success: true, summary: response.text?.trim() || 'Key insight summarized.' });
+    const summary = nonEmptyModelText(response.text);
+    if (!summary) return res.status(502).json(emptyModelOutputError('summary'));
+    res.json({ success: true, summary });
   } catch (error: any) {
     respondError(res, error, 'Summarization failed.');
   }
@@ -1900,7 +2083,9 @@ app.post('/api/ai/translate', requireAuth, gradingLimiter, async (req, res) => {
       contents: `Translate the following academic text accurately into ${targetLanguage}:\n\n"${text}"`,
     });
 
-    res.json({ success: true, translation: response.text?.trim() || 'Translation complete.' });
+    const translation = nonEmptyModelText(response.text);
+    if (!translation) return res.status(502).json(emptyModelOutputError('translation'));
+    res.json({ success: true, translation });
   } catch (error: any) {
     respondError(res, error, 'Translation failed.');
   }
@@ -2129,6 +2314,12 @@ async function ensureMasterAdmin() {
 // --- Server Lifecycle ---
 
 async function startServer() {
+  await Promise.all([
+    fs.mkdir(path.resolve('./data'), { recursive: true }),
+    fs.mkdir(path.resolve('./exports'), { recursive: true }),
+    fs.mkdir(path.resolve(process.env.FILE_STORE_DIR ?? './data/generated'), { recursive: true }),
+  ]);
+  validateEmailSenderConfiguration();
   await ensureMasterAdmin();
   if (process.env.NODE_ENV === 'production') {
     await prisma.$connect();
@@ -2152,10 +2343,23 @@ async function startServer() {
     });
   }
 
+  const server = createServer(app);
   let vite: any = null;
   if (process.env.NODE_ENV !== 'production') {
-    vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
+    vite = await createViteServer({
+      server: {
+        middlewareMode: true,
+        hmr: {
+          server,
+          clientPort: process.env.CODESPACE_NAME ? 443 : PORT,
+        },
+      },
+      appType: 'spa',
+    });
     app.get(['/forms/:id', '/apply/:id'], (_req, res) => res.sendFile(path.join(process.cwd(), 'index.html')));
+    app.use('/api', (req, res) => {
+      res.status(404).json({ error: `No such endpoint: ${req.method} ${req.originalUrl}` });
+    });
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
@@ -2172,15 +2376,9 @@ async function startServer() {
     app.get('*', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
   }
 
-  const server = app.listen(PORT, '0.0.0.0', () => {
+  server.listen(PORT, '0.0.0.0', () => {
     logger.info(`Marker AI server running on http://0.0.0.0:${PORT}`);
   });
-
-  if (vite && vite.ws && typeof vite.ws.handleUpgrade === 'function') {
-    server.on('upgrade', (req, socket, head) => {
-      vite.ws.handleUpgrade(req, socket, head);
-    });
-  }
 
   // Graceful shutdown: a deploy/restart sending SIGTERM (Render, Docker,
   // most orchestrators) should stop accepting new connections and let

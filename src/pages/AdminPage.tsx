@@ -5,12 +5,12 @@ import {
   FileText, FlaskConical, GraduationCap, Info, KeyRound, LayoutDashboard, Menu, Play, Plus,
   RefreshCw, ScrollText, Search, Settings, Sparkles, Trash2, Upload, Users, X, ShieldCheck
 } from 'lucide-react';
-import { adminApi } from '../api/admin';
+import { adminApi, type AdminQualitySummary } from '../api/admin';
 
 /* ───────────── Types ───────────── */
 type Env = 'draft' | 'testing' | 'production';
 type TabId = 'overview' | 'finetune' | 'datasets' | 'models' | 'knowledge' | 'documents' | 'playground'
-  | 'review' | 'verified' | 'retrieval' | 'prompts' | 'providers' | 'analytics' | 'users' | 'logs' | 'settings';
+  | 'review' | 'verified' | 'retrieval' | 'prompts' | 'providers' | 'analytics' | 'quality' | 'users' | 'logs' | 'settings';
 
 const DATASET_FILE_ACCEPT = '.pdf,.docx,.txt,.md,.csv,.json,.xlsx,.xls,.png,.jpg,.jpeg,.webp,.gif,.js,.ts,.tsx,.jsx,.py,.java,.kt,.cpp,.c,.h,.cs,.rs,.go,.sql,.html,.css,.yaml,.yml,.sh';
 
@@ -27,13 +27,14 @@ const NAV_CATEGORIES: NavCategory[] = [
     items: [
       { id: 'overview', label: 'Overview', icon: <LayoutDashboard size={16} /> },
       { id: 'analytics', label: 'Analytics', icon: <BarChart3 size={16} /> },
+      { id: 'quality', label: 'AI Quality', icon: <FlaskConical size={16} /> },
     ],
   },
   {
-    title: 'AI & Fine-Tuning',
+    title: 'AI & Prompt Adapters',
     icon: <Sparkles size={15} className="text-[#F2C230]" />,
     items: [
-      { id: 'finetune', label: 'Fine-tuning Studio', icon: <GraduationCap size={16} /> },
+      { id: 'finetune', label: 'Dataset-grounded Prompt Adapter', icon: <GraduationCap size={16} /> },
       { id: 'models', label: 'Model Registry', icon: <Boxes size={16} /> },
       { id: 'playground', label: 'AI Playground', icon: <FlaskConical size={16} /> },
       { id: 'prompts', label: 'System Prompts', icon: <ScrollText size={16} /> },
@@ -204,11 +205,12 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
   const [users, setUsers] = useState<any[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [analytics, setAnalytics] = useState<any>(null);
+  const [quality, setQuality] = useState<AdminQualitySummary | null>(null);
   const [providers, setProviders] = useState<any[]>([]);
-  const [fineTuneJobs, setFineTuneJobs] = useState<any[]>([]);
+  const [datasetAdapterJobs, setDatasetAdapterJobs] = useState<any[]>([]);
   const [retrievalSet, setRetrievalSet] = useState<any>(null);
 
-  // Fine-Tuning configuration state
+  // Dataset-grounded prompt adapter configuration state
   const [ftDatasetId, setFtDatasetId] = useState('');
   const [ftBaseModel, setFtBaseModel] = useState('zai-org/GLM-5.3-Flash');
   const [ftSuffix, setFtSuffix] = useState('bwenge-domain-v1');
@@ -218,6 +220,8 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
   const [ftTestPrompt, setFtTestPrompt] = useState('');
   const [ftTestOutput, setFtTestOutput] = useState<any | null>(null);
   const [ftTesting, setFtTesting] = useState(false);
+  const [newExampleConsent, setNewExampleConsent] = useState(false);
+  const [newExamplePiiReviewed, setNewExamplePiiReviewed] = useState(false);
 
   // Dataset & Examples state
   const [newDatasetName, setNewDatasetName] = useState('');
@@ -234,6 +238,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
   // Knowledge Base & Model & Prompt inline creation state
   const [newKbName, setNewKbName] = useState('');
   const [newKbDesc, setNewKbDesc] = useState('');
+  const [newKbGlobalApproved, setNewKbGlobalApproved] = useState(false);
   const [newModelName, setNewModelName] = useState('');
   const [newModelBase, setNewModelBase] = useState('zai-org/GLM-5.3-Flash');
   const [newPromptName, setNewPromptName] = useState('');
@@ -244,7 +249,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
   const [uploadDomain, setUploadDomain] = useState('general');
   const [uploadLang, setUploadLang] = useState('rw');
   const [uploadRegion, setUploadRegion] = useState('Rwanda');
-  const [uploadConsent, setUploadConsent] = useState(true);
+  const [uploadConsent, setUploadConsent] = useState(false);
   const [inspectingDoc, setInspectingDoc] = useState<any | null>(null);
   const [inspectChunks, setInspectChunks] = useState<any[]>([]);
   const [inspectLoading, setInspectLoading] = useState(false);
@@ -274,7 +279,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
     if (!silent) setLoading(true);
     setError(null);
     try {
-      const [ov, hl, kbList, docList, dsList, mdList, prList, usList, lgList, anData, prvList, ftList, rsData, corrList, verList] = await Promise.all([
+      const [ov, hl, kbList, docList, dsList, mdList, prList, usList, lgList, anData, qData, prvList, ftList, rsData, corrList, verList] = await Promise.all([
         adminApi.getOverview(),
         adminApi.getHealth(),
         adminApi.getKnowledgeBases(),
@@ -285,8 +290,9 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
         adminApi.getUsers(),
         adminApi.getAuditLogs(50),
         adminApi.getAnalytics('7d'),
+        adminApi.getQuality(),
         adminApi.getProviders(),
-        adminApi.getFineTuneJobs(),
+        adminApi.getDatasetAdapters(),
         adminApi.getRetrievalSettings(env),
         adminApi.getCorrections(),
         adminApi.getVerifiedAnswers(),
@@ -302,8 +308,9 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
       setUsers(usList.data);
       setAuditLogs(lgList.data);
       setAnalytics(anData.data);
+      setQuality(qData.data);
       setProviders(prvList.data);
-      setFineTuneJobs(ftList.data);
+      setDatasetAdapterJobs(ftList.data);
       setRetrievalSet(rsData.data);
       setCorrections(corrList.data);
       setVerifiedAnswers(verList.data);
@@ -328,18 +335,18 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
     void loadData();
   }, [loadData]);
 
-  // Auto-poll fine-tune jobs while any job is TRAINING or QUEUED
+  // Auto-poll adapter builds while they are queued or running.
   useEffect(() => {
-    const hasActiveTraining = fineTuneJobs.some((j) => j.status === 'TRAINING' || j.status === 'QUEUED');
-    if (!hasActiveTraining) return;
+    const hasActiveBuild = datasetAdapterJobs.some((j) => j.status === 'BUILDING_ADAPTER' || j.status === 'QUEUED');
+    if (!hasActiveBuild) return;
     const timer = window.setInterval(async () => {
       try {
         const [ftList, mdList, ov] = await Promise.all([
-          adminApi.getFineTuneJobs(),
+          adminApi.getDatasetAdapters(),
           adminApi.getModels(),
           adminApi.getOverview(),
         ]);
-        setFineTuneJobs(ftList.data);
+        setDatasetAdapterJobs(ftList.data);
         setModels(mdList.data);
         setOverview(ov.data);
         setSelectedFtJob((prev: any) => {
@@ -349,7 +356,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
       } catch {}
     }, 1200);
     return () => window.clearInterval(timer);
-  }, [fineTuneJobs]);
+  }, [datasetAdapterJobs]);
 
   const go = (id: TabId) => { setTab(id); setDrawer(false); };
 
@@ -387,7 +394,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
   const buildDatasetKnowledgeAdapter = async (dataset: any) => {
     setDatasetAdapterStarting(dataset.id);
     try {
-      const result: any = await adminApi.createFineTuneJob({
+      const result: any = await adminApi.createDatasetAdapter({
         datasetId: dataset.id,
         baseModel: ftBaseModel,
         suffix: ftSuffix,
@@ -509,12 +516,12 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
           <div className="flex flex-wrap items-center justify-between gap-4 min-w-0">
             <div className="min-w-0">
               <h2 className="text-xl sm:text-3xl font-black text-white capitalize tracking-tight">{tab.replace(/([A-Z])/g, ' $1')}</h2>
-              <p className="text-sm text-[#9AA6C9] mt-1">Enterprise-grade AI database, vector index, and GonkaRouter weighted distillation console.</p>
+              <p className="text-sm text-[#9AA6C9] mt-1">AI database, vector index, and dataset-grounded prompt adapter console.</p>
             </div>
             <div className="flex flex-wrap gap-2.5">
               {tab !== 'finetune' && (
                 <button onClick={() => setTab('finetune')} className={btnPrimary}>
-                  <GraduationCap size={16} /> Fine-Tuning Studio
+                  <GraduationCap size={16} /> Prompt Adapters
                 </button>
               )}
               <button onClick={() => void loadData()} className={btnGhost}>
@@ -540,7 +547,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                         <h3 className="text-lg sm:text-xl font-black text-white flex items-center gap-2.5">
                           <Sparkles size={20} className="text-[#3FA7E0]" /> Enterprise Command Center
                         </h3>
-                        <p className="text-xs sm:text-sm text-[#9AA6C9] mt-1">Instant operational access to fine-tuning, dataset curation, and model evaluation.</p>
+                        <p className="text-xs sm:text-sm text-[#9AA6C9] mt-1">Manage prompt adapters, dataset curation, and model evaluation. Adapters do not train model weights.</p>
                       </div>
                       <Badge tone="blue">Environment: {env.toUpperCase()}</Badge>
                     </div>
@@ -548,8 +555,8 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                       <button onClick={() => setTab('finetune')} className={btnGhost + ' justify-start h-auto py-3.5 px-4 bg-[#0F1424]/90 hover:bg-[#1C2648]'}>
                         <GraduationCap size={18} className="text-[#3FA7E0]" />
                         <div className="text-left min-w-0">
-                          <p className="text-xs font-bold text-white truncate">Fine-Tuning</p>
-                          <p className="text-[10px] text-[#9AA6C9] truncate">Knowledge Adapters</p>
+                          <p className="text-xs font-bold text-white truncate">Dataset-grounded Prompt Adapter</p>
+                          <p className="text-[10px] text-[#9AA6C9] truncate">Dataset-grounded</p>
                         </div>
                       </button>
                       <button onClick={() => setTab('datasets')} className={btnGhost + ' justify-start h-auto py-3.5 px-4 bg-[#0F1424]/90 hover:bg-[#1C2648]'}>
@@ -563,7 +570,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                         <FlaskConical size={18} className="text-[#F2C230]" />
                         <div className="text-left min-w-0">
                           <p className="text-xs font-bold text-white truncate">AI Playground</p>
-                          <p className="text-[10px] text-[#9AA6C9] truncate">Test RAG &amp; Weights</p>
+                          <p className="text-[10px] text-[#9AA6C9] truncate">Test RAG &amp; Adapter</p>
                         </div>
                       </button>
                       <button onClick={() => setTab('review')} className={btnGhost + ' justify-start h-auto py-3.5 px-4 bg-[#0F1424]/90 hover:bg-[#1C2648]'}>
@@ -579,8 +586,8 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                   {/* Key Metrics Grid */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                     <Stat label="Knowledge Bases" value={overview.counts.knowledgeBases} detail={`${overview.counts.documents} indexed documents`} />
-                    <Stat label="Dataset Examples" value={overview.counts.datasetExamples} detail="Live fine-tuning corpus" />
-                    <Stat label="Fine-Tune Jobs" value={overview.counts.fineTuneJobs} detail={`${overview.counts.activeModels} active models`} />
+                    <Stat label="Dataset Examples" value={overview.counts.datasetExamples} detail="Approved source examples" />
+                    <Stat label="Dataset-grounded Prompt Adapters" value={overview.counts.datasetAdapters} detail={`${overview.counts.activeModels} active models`} />
                     <Stat label="Forms & Submissions" value={`${overview.counts.formsCount ?? 0} / ${overview.counts.submissionsCount ?? 0}`} detail="Forms / Candidate responses" />
                     <Stat label="Questions Answered" value={overview.counts.questionsAnswered} detail="Logged in UsageEvents" />
                     <Stat label="Tokens Processed" value={overview.counts.tokensUsed.toLocaleString()} detail="Real Input + Output tokens" />
@@ -610,7 +617,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                     </div>
                   </div>
 
-                  <Section title="Live Service Health" hint="Real-time database, vector index, and GonkaRouter fine-tuned worker status.">
+                  <Section title="Live Service Health" hint="Real-time database, vector index, and prompt adapter builder status.">
                     <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-4">
                       {health.map((s, idx) => (
                         <div key={idx} className={`${card} p-5 flex items-center justify-between min-w-0`}>
@@ -625,21 +632,21 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                   </Section>
 
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <Section title="Recent Fine-Tune & Model Activity" actions={
-                      <button onClick={() => setTab('finetune')} className={btnGhost}>Manage Fine-Tuning</button>
+                    <Section title="Recent Prompt Adapter & Model Activity" actions={
+                      <button onClick={() => setTab('finetune')} className={btnGhost}>Manage Prompt Adapters</button>
                     }>
                       <div className={`${card} p-5 space-y-3`}>
-                        {fineTuneJobs.length === 0 ? (
-                          <EmptyState title="No Fine-Tune Jobs" desc="Build an AI knowledge adapter from your datasets to start fine-tuning." icon={<GraduationCap size={24} />} />
+                        {datasetAdapterJobs.length === 0 ? (
+                          <EmptyState title="No Dataset-grounded Prompt Adapters" desc="Build an inference-time prompt adapter from approved dataset examples. Model weights are not trained." icon={<GraduationCap size={24} />} />
                         ) : (
-                          fineTuneJobs.slice(0, 4).map((j) => (
+                          datasetAdapterJobs.slice(0, 4).map((j) => (
                             <div key={j.id} className="flex items-center justify-between gap-3 p-4 rounded-xl bg-[#0F1424] border border-[#263052] hover:border-[#3FA7E0]/40 transition">
                               <div className="min-w-0">
-                                <p className="text-xs font-bold text-white truncate">{j.fineTunedModelName || j.id}</p>
-                                <p className="text-[11px] text-[#9AA6C9] truncate mt-0.5">Dataset: {j.datasetName || j.datasetId} · {j.tokenEstimate} tokens</p>
+                                <p className="text-xs font-bold text-white truncate">{j.adapterName || j.id}</p>
+                                <p className="text-[11px] text-[#9AA6C9] truncate mt-0.5">Dataset: {j.datasetName || j.datasetId} · {j.exampleCount} examples</p>
                               </div>
-                              <Badge tone={j.status === 'COMPLETED' ? 'green' : j.status === 'TRAINING' ? 'blue' : 'yellow'}>
-                                {j.status} {j.status === 'TRAINING' ? `${j.progress || 0}%` : j.evalScore ? `(${j.evalScore})` : ''}
+                              <Badge tone={j.status === 'ADAPTER_READY' ? 'green' : j.status === 'BUILDING_ADAPTER' ? 'blue' : 'yellow'}>
+                                {j.status === 'ADAPTER_READY' ? 'ADAPTER READY' : j.status === 'BUILDING_ADAPTER' ? 'BUILDING ADAPTER' : j.status}
                               </Badge>
                             </div>
                           ))
@@ -668,22 +675,22 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                 </div>
               )}
 
-              {/* ── FINE-TUNING STUDIO TAB ── */}
+              {/* ── DATASET ADAPTERS TAB ── */}
               {tab === 'finetune' && (
                 <div className="space-y-6 min-w-0">
                   <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                    {/* Left: Launch Fine-Tuning Job Form */}
+                    {/* Left: Build a dataset-grounded prompt adapter */}
                     <div className={`${card} p-6 sm:p-8 space-y-5 lg:col-span-5`}>
                       <div>
                         <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                          <GraduationCap size={20} className="text-[#3FA7E0]" /> Configure &amp; Run Fine-Tuning
+                          <GraduationCap size={20} className="text-[#3FA7E0]" /> Build Dataset-grounded Prompt Adapter
                         </h3>
                         <p className="text-xs text-[#9AA6C9] mt-1">
-                          Builds and deploys an AI knowledge adapter from approved dataset examples.
+                          Creates an inference-time adapter from approved dataset examples. It does not train or modify model weights.
                         </p>
                       </div>
 
-                      <Field label="Training Dataset (Live Database)">
+                      <Field label="Dataset (Live Database)">
                         <select
                           className={input}
                           value={ftDatasetId}
@@ -737,7 +744,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                             <option value="gonkarouter/Nano-Banana-Vision">gonkarouter/Nano-Banana-Vision</option>
                           </select>
                         </Field>
-                        <Field label="Custom Model Suffix">
+                        <Field label="Adapter Name Suffix">
                           <input
                             className={input}
                             value={ftSuffix}
@@ -754,7 +761,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                           onChange={(e) => setFtAutoApprove(e.target.checked)}
                           className="rounded border-[#2E3A63] w-4 h-4 text-[#3FA7E0]"
                         />
-                        Auto-approve pending examples &amp; activate model in <strong>{env}</strong> upon completion
+                        Auto-approve pending examples &amp; activate adapter in <strong>{env}</strong> when ready
                       </label>
 
                       <button
@@ -767,7 +774,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                           }
                           setFtStarting(true);
                           try {
-                            const res: any = await adminApi.createFineTuneJob({
+                            const res: any = await adminApi.createDatasetAdapter({
                               datasetId: ftDatasetId,
                               baseModel: ftBaseModel,
                               suffix: ftSuffix,
@@ -775,7 +782,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                               autoApprove: ftAutoApprove,
                             });
                             setSelectedFtJob(res.data);
-                            notify('AI knowledge adapter build started from the selected dataset.');
+                            notify('Dataset-grounded prompt adapter build started.');
                             await loadData(true);
                           } catch (e: any) {
                             notify(e.message, true);
@@ -785,11 +792,11 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                         }}
                         className={btnPrimary + ' w-full py-3.5'}
                       >
-                        <Sparkles size={18} /> {ftStarting ? 'Building Knowledge Adapter...' : 'Build & Activate AI Knowledge'}
+                        <Sparkles size={18} /> {ftStarting ? 'Building Prompt Adapter...' : 'Build & Activate Prompt Adapter'}
                       </button>
                     </div>
 
-                    {/* Right: Live Training Monitor & Testing Sandbox */}
+                    {/* Right: Adapter Build Monitor & Testing Sandbox */}
                     <div className={`${card} p-6 sm:p-8 space-y-6 lg:col-span-7`}>
                       {selectedFtJob ? (
                         <>
@@ -797,20 +804,20 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                             <div className="min-w-0">
                               <div className="flex items-center gap-2.5">
                                 <h3 className="text-base font-bold text-white truncate">
-                                  {selectedFtJob.fineTunedModelName || selectedFtJob.id}
+                                  {selectedFtJob.adapterName || selectedFtJob.id}
                                 </h3>
                                 <Badge
                                   tone={
-                                    selectedFtJob.status === 'COMPLETED'
+                                    selectedFtJob.status === 'ADAPTER_READY'
                                       ? 'green'
-                                      : selectedFtJob.status === 'TRAINING'
+                                      : selectedFtJob.status === 'BUILDING_ADAPTER'
                                       ? 'blue'
                                       : selectedFtJob.status === 'FAILED' || selectedFtJob.status === 'CANCELLED'
                                       ? 'red'
                                       : 'yellow'
                                   }
                                 >
-                                  {selectedFtJob.status}
+                                  {selectedFtJob.status === 'ADAPTER_READY' ? 'ADAPTER READY' : selectedFtJob.status === 'BUILDING_ADAPTER' ? 'BUILDING ADAPTER' : selectedFtJob.status}
                                 </Badge>
                               </div>
                               <p className="text-xs text-[#9AA6C9] mt-1">
@@ -819,11 +826,11 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                               </p>
                             </div>
                             <div className="flex items-center gap-2">
-                              {selectedFtJob.status === 'TRAINING' && (
+                              {selectedFtJob.status === 'BUILDING_ADAPTER' && (
                                 <button
                                   onClick={async () => {
-                                    await adminApi.cancelFineTuneJob(selectedFtJob.id);
-                                    notify('Job cancelled');
+                                    await adminApi.cancelDatasetAdapter(selectedFtJob.id);
+                                    notify('Adapter build cancelled.');
                                     await loadData(true);
                                   }}
                                   className="text-xs text-red-400 hover:text-red-300 border border-red-500/30 bg-red-950/20 rounded-xl px-3.5 py-2 font-semibold"
@@ -831,26 +838,6 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                                   Cancel Job
                                 </button>
                               )}
-                              <button
-                                onClick={async () => {
-                                  try {
-                                    const r: any = await adminApi.getFineTuneReadme(selectedFtJob.id);
-                                    const blob = new Blob([r.readme], { type: 'text/markdown' });
-                                    const url = URL.createObjectURL(blob);
-                                    const a = document.createElement('a');
-                                    a.href = url;
-                                    a.download = `README_QLORA_${selectedFtJob.id}.md`;
-                                    a.click();
-                                    URL.revokeObjectURL(url);
-                                    notify('QLoRA GPU Rental README downloaded.');
-                                  } catch (err: any) {
-                                    notify(err.message, true);
-                                  }
-                                }}
-                                className={btnGhost + ' text-xs py-2 px-3'}
-                              >
-                                🖥️ QLoRA README
-                              </button>
                             </div>
                           </div>
 
@@ -859,13 +846,13 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                             <div className="flex justify-between text-xs font-semibold text-[#9AA6C9]">
                               <span>Knowledge adapter build status</span>
                               <span className="text-white font-bold">
-                                {selectedFtJob.status === 'COMPLETED' ? 100 : selectedFtJob.progress ?? 0}%
+                                {selectedFtJob.status === 'ADAPTER_READY' ? 100 : selectedFtJob.progress ?? 0}%
                               </span>
                             </div>
                             <div className="w-full h-3 bg-[#0F1424] rounded-full overflow-hidden border border-[#263052] p-0.5">
                               <div
                                 className="h-full bg-gradient-to-r from-[#3FA7E0] via-[#3DB27A] to-[#6FD6A2] rounded-full transition-all duration-500 shadow-sm"
-                                style={{ width: `${selectedFtJob.status === 'COMPLETED' ? 100 : selectedFtJob.progress ?? 15}%` }}
+                                style={{ width: `${selectedFtJob.status === 'ADAPTER_READY' ? 100 : selectedFtJob.progress ?? 15}%` }}
                               />
                             </div>
                           </div>
@@ -898,7 +885,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                           {/* Model Verification Sandbox */}
                           <div className="pt-4 border-t border-[#263052] space-y-3">
                             <h4 className="text-xs font-bold uppercase tracking-wider text-[#9AA6C9]">
-                              Test Fine-Tuned Model Live
+                              Test Dataset-grounded Prompt Adapter
                             </h4>
                             <div className="flex flex-col sm:flex-row gap-2.5">
                               <input
@@ -909,14 +896,14 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                               />
                               <button
                                 type="button"
-                                disabled={ftTesting}
+                                disabled={ftTesting || selectedFtJob.status !== 'ADAPTER_READY'}
                                 onClick={async () => {
                                   if (!ftTestPrompt.trim()) return;
                                   setFtTesting(true);
                                   try {
-                                    const res = await adminApi.testFineTuneJob(selectedFtJob.id, ftTestPrompt);
+                                    const res = await adminApi.testDatasetAdapter(selectedFtJob.id, ftTestPrompt);
                                     setFtTestOutput(res.data);
-                                    notify('Fine-tuned model evaluated!');
+                                    notify('Prompt adapter test completed.');
                                   } catch (e: any) {
                                     notify(e.message, true);
                                   } finally {
@@ -931,8 +918,8 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                             {ftTestOutput && (
                               <div className="p-4 rounded-xl bg-[#0F1424] border border-[#3FA7E0]/50 space-y-2 text-xs shadow-lg">
                                 <div className="flex flex-wrap items-center justify-between gap-2 text-[#7CC4EE] font-bold">
-                                  <span>Model: {ftTestOutput.model}</span>
-                                  <span>{ftTestOutput.examplesUsed} DB examples applied · {ftTestOutput.latencyMs}ms</span>
+                                  <span>Adapter: {ftTestOutput.adapterName} · Provider model: {ftTestOutput.baseModel}</span>
+                                  <span>{ftTestOutput.examplesUsed} dataset examples applied · {ftTestOutput.latencyMs}ms</span>
                                 </div>
                                 <p className="text-[#E8EAF2] whitespace-pre-wrap leading-relaxed">{ftTestOutput.output}</p>
                               </div>
@@ -941,7 +928,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                         </>
                       ) : (
                         <EmptyState
-                          title="No Active Fine-Tune Job Selected"
+                          title="No Prompt Adapter Selected"
                           desc="Select a dataset on the left and build an adapter to apply its approved knowledge to live AI responses."
                           icon={<GraduationCap size={28} />}
                         />
@@ -949,13 +936,13 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                     </div>
                   </div>
 
-                  {/* All Fine-Tune Jobs Table */}
-                  <Section title="AI Knowledge Adapter Jobs History" hint="Inspect dataset-grounded knowledge adapters and test their live AI responses.">
+                  {/* Dataset-grounded Prompt Adapter Jobs Table */}
+                  <Section title="Dataset-grounded Prompt Adapter History" hint="Inspect inference-time adapters built from approved dataset examples. Model weights are not trained.">
                     <div className={`${card} overflow-x-auto`}>
                       <table className="w-full text-left text-sm min-w-[720px]">
                         <thead className="bg-[#141C36] text-xs font-bold text-[#9AA6C9] uppercase border-b border-[#263052]">
                           <tr>
-                            <th className="p-4">Fine-Tuned Model</th>
+                            <th className="p-4">Prompt Adapter</th>
                             <th className="p-4">Dataset</th>
                             <th className="p-4">Status</th>
                             <th className="p-4">Examples</th>
@@ -964,12 +951,12 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-[#263052]">
-                          {fineTuneJobs.length === 0 ? (
+                          {datasetAdapterJobs.length === 0 ? (
                             <tr>
-                              <td colSpan={6} className="p-8 text-center text-sm text-[#9AA6C9]">No fine-tune jobs created yet.</td>
+                              <td colSpan={6} className="p-8 text-center text-sm text-[#9AA6C9]">No dataset-grounded prompt adapters have been built yet.</td>
                             </tr>
                           ) : (
-                            fineTuneJobs.map((j) => (
+                            datasetAdapterJobs.map((j) => (
                               <tr
                                 key={j.id}
                                 onClick={() => setSelectedFtJob(j)}
@@ -978,24 +965,24 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                                 }`}
                               >
                                 <td className="p-4 font-mono text-xs font-bold text-white truncate max-w-[220px]">
-                                  {j.fineTunedModelName || j.id}
+                                  {j.adapterName || j.id}
                                 </td>
                                 <td className="p-4 text-xs text-[#9AA6C9] truncate max-w-[180px]">
                                   {j.datasetName || j.datasetId}
                                 </td>
                                 <td className="p-4">
-                                  <Badge tone={j.status === 'COMPLETED' ? 'green' : j.status === 'TRAINING' ? 'blue' : 'yellow'}>
-                                    {j.status} {j.status === 'TRAINING' ? `(${j.progress || 10}%)` : ''}
+                                  <Badge tone={j.status === 'ADAPTER_READY' ? 'green' : j.status === 'BUILDING_ADAPTER' ? 'blue' : 'yellow'}>
+                                    {j.status === 'ADAPTER_READY' ? 'ADAPTER READY' : j.status === 'BUILDING_ADAPTER' ? `BUILDING ADAPTER (${j.progress || 0}%)` : j.status}
                                   </Badge>
                                 </td>
                                 <td className="p-4 text-xs text-[#9AA6C9]">{j.exampleCount || 0}</td>
                                 <td className="p-4 text-xs text-[#9AA6C9]">{j.tokenEstimate}</td>
                                 <td className="p-4" onClick={(e) => e.stopPropagation()}>
-                                  {j.status === 'TRAINING' ? (
+                                  {j.status === 'BUILDING_ADAPTER' ? (
                                     <button
                                       onClick={async () => {
-                                        await adminApi.cancelFineTuneJob(j.id);
-                                        notify('Job cancelled');
+                                        await adminApi.cancelDatasetAdapter(j.id);
+                                        notify('Adapter build cancelled.');
                                         await loadData(true);
                                       }}
                                       className="text-red-400 hover:text-red-300 text-xs font-bold p-1.5"
@@ -1026,7 +1013,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                 inspectDataset ? (
                   <Section
                     title={`Dataset Examples: ${inspectDataset.name}`}
-                    hint="Review extracted training pairs, approve/reject examples, and build an inference-time AI knowledge adapter."
+                    hint="Review extracted dataset examples, record consent and PII review, and build an inference-time prompt adapter."
                     actions={
                       <div className="flex flex-wrap gap-2.5">
                         <button
@@ -1083,7 +1070,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                       <div>
                         <h4 className="text-sm font-bold text-white">Attach source file to this dataset</h4>
                         <p className="text-xs text-[#9AA6C9] mt-1">
-                          Extracted content is converted into AI training examples. Review or approve them before building the knowledge adapter.
+                          Extracted content becomes pending dataset examples. Record consent and complete a PII review before approval or export.
                         </p>
                       </div>
                       <label className={`${btnPrimary} cursor-pointer shrink-0 ${datasetFileUploading ? 'opacity-60 pointer-events-none' : ''}`}>
@@ -1104,10 +1091,10 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                       </label>
                     </div>
 
-                    {/* Add Manual Training Example Inline */}
+                    {/* Add Manual Dataset Example */}
                     <div className={`${card} p-5 space-y-4`}>
                       <h4 className="text-xs font-bold uppercase tracking-wider text-[#7CC4EE]">
-                        + Add New Training Pair to {inspectDataset.name}
+                        + Add Dataset Example to {inspectDataset.name}
                       </h4>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <Field label="Instruction / Prompt">
@@ -1136,6 +1123,14 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                           onChange={(e) => setNewExInput(e.target.value)}
                           placeholder="Optional context/input"
                         />
+                        <label className="flex items-center gap-2 text-xs text-[#B7C1DE]">
+                          <input type="checkbox" checked={newExampleConsent} onChange={(e) => setNewExampleConsent(e.target.checked)} />
+                          Data-owner consent is recorded
+                        </label>
+                        <label className="flex items-center gap-2 text-xs text-[#B7C1DE]">
+                          <input type="checkbox" checked={newExamplePiiReviewed} onChange={(e) => setNewExamplePiiReviewed(e.target.checked)} />
+                          Human PII review is complete
+                        </label>
                         <button
                           onClick={async () => {
                             if (!newExInstruction.trim() || !newExOutput.trim()) {
@@ -1147,22 +1142,26 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                                 instruction: newExInstruction,
                                 input: newExInput,
                                 output: newExOutput,
-                                status: 'approved',
+                                status: newExampleConsent && newExamplePiiReviewed ? 'approved' : 'pending',
+                                consentGiven: newExampleConsent,
+                                piiReviewed: newExamplePiiReviewed,
                               });
                               setNewExInstruction('');
                               setNewExInput('');
                               setNewExOutput('');
+                              setNewExampleConsent(false);
+                              setNewExamplePiiReviewed(false);
                               const res = await adminApi.getDatasetExamples(inspectDataset.id);
                               setDatasetExamples(res.data);
                               await loadData(true);
-                              notify('Training example added & approved');
+                              notify(newExampleConsent && newExamplePiiReviewed ? 'Dataset example added and approved.' : 'Dataset example added as pending until consent and PII review are recorded.');
                             } catch (e: any) {
                               notify(e.message, true);
                             }
                           }}
                           className={btnPrimary}
                         >
-                          <Plus size={16} /> Add Approved Example
+                          <Plus size={16} /> Add Dataset Example
                         </button>
                       </div>
                     </div>
@@ -1172,7 +1171,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                     ) : datasetExamples.length === 0 ? (
                       <EmptyState
                         title="No Dataset Examples Found"
-                        desc="Attach a source file or harvest live database records to populate training pairs."
+                        desc="Attach a source file or harvest live database records to create pending source examples."
                         icon={<Database size={28} />}
                       />
                     ) : (
@@ -1187,6 +1186,50 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                                 {ex.validationFlags && (
                                   <span className="text-[11px] font-mono text-[#6C789E]">{ex.validationFlags}</span>
                                 )}
+                              </div>
+                              <div className="flex flex-wrap gap-3 text-[11px] text-[#B7C1DE]">
+                                <label className="flex items-center gap-1.5">
+                                  <input
+                                    type="checkbox"
+                                    checked={ex.consentGiven === true}
+                                    aria-label={`Record data-owner consent for example ${ex.id}`}
+                                    onChange={async (event) => {
+                                      const consentGiven = event.target.checked;
+                                      try {
+                                        await adminApi.updateDatasetExample(ex.id, {
+                                          consentGiven,
+                                          ...(consentGiven || ex.status !== 'approved' ? {} : { status: 'pending' }),
+                                        });
+                                        const res = await adminApi.getDatasetExamples(inspectDataset.id);
+                                        setDatasetExamples(res.data);
+                                      } catch (error: any) {
+                                        notify(error.message, true);
+                                      }
+                                    }}
+                                  />
+                                  Consent recorded
+                                </label>
+                                <label className="flex items-center gap-1.5">
+                                  <input
+                                    type="checkbox"
+                                    checked={ex.piiReviewed === true}
+                                    aria-label={`Mark PII review complete for example ${ex.id}`}
+                                    onChange={async (event) => {
+                                      const piiReviewed = event.target.checked;
+                                      try {
+                                        await adminApi.updateDatasetExample(ex.id, {
+                                          piiReviewed,
+                                          ...(piiReviewed || ex.status !== 'approved' ? {} : { status: 'pending' }),
+                                        });
+                                        const res = await adminApi.getDatasetExamples(inspectDataset.id);
+                                        setDatasetExamples(res.data);
+                                      } catch (error: any) {
+                                        notify(error.message, true);
+                                      }
+                                    }}
+                                  />
+                                  PII review complete
+                                </label>
                               </div>
                               <div className="flex gap-2">
                                 {ex.status !== 'approved' && (
@@ -1259,7 +1302,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                 ) : (
                   <Section
                     title="Datasets & Real Database Curations"
-                    hint="Harvest real training pairs from database tables or create custom fine-tuning datasets."
+                    hint="Harvest source examples from database tables or create custom prompt-adapter datasets."
                   >
                     {/* Inline New Dataset Creator */}
                     <div className={`${card} p-5 flex flex-col sm:flex-row gap-4 items-end`}>
@@ -1308,7 +1351,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                     {datasets.length === 0 ? (
                       <EmptyState
                         title="No Datasets Created Yet"
-                        desc="Create a dataset above to start harvesting training pairs and building custom knowledge adapters."
+                        desc="Create a dataset above to collect source examples and build inference-time prompt adapters."
                         icon={<Database size={28} />}
                       />
                     ) : (
@@ -1319,7 +1362,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                               <div className="min-w-0">
                                 <h3 className="font-bold text-white text-base truncate">{ds.name}</h3>
                                 <p className="text-xs text-[#9AA6C9] break-words mt-1">
-                                  {ds.description || 'Curated dataset for fine-tuning.'}
+                                  {ds.description || 'Curated dataset for source-grounded examples.'}
                                 </p>
                               </div>
                               <Badge tone="blue">{ds.exampleCount ?? ds._count?.examples ?? 0} pairs</Badge>
@@ -1403,7 +1446,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
 
               {/* ── MODELS REGISTRY TAB ── */}
               {tab === 'models' && (
-                <Section title="Model Registry & Active Deployments" hint="Manage base and fine-tuned models serving live platform requests.">
+                <Section title="Model Registry & Active Deployments" hint="Manage provider models and dataset-grounded prompt adapters serving live platform requests.">
                   <div className={`${card} p-5 flex flex-col sm:flex-row gap-4 items-end`}>
                     <div className="flex-1 w-full">
                       <Field label="Model Name / Identifier">
@@ -1411,7 +1454,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                           className={input}
                           value={newModelName}
                           onChange={(e) => setNewModelName(e.target.value)}
-                          placeholder="e.g. ft:gonkarouter:glm-5.3-flash:v1"
+                          placeholder="e.g. dataset-adapter:glm-5.3-flash:stem-grader"
                         />
                       </Field>
                     </div>
@@ -1449,7 +1492,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                   </div>
 
                   {models.length === 0 ? (
-                    <EmptyState title="No Models Registered" desc="Register a model above or build a fine-tuned knowledge adapter." icon={<Boxes size={28} />} />
+                    <EmptyState title="No Models Registered" desc="Register a provider model or build a dataset-grounded prompt adapter. Model weights are not trained." icon={<Boxes size={28} />} />
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                       {models.map((m) => (
@@ -1517,6 +1560,14 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                         />
                       </Field>
                     </div>
+                    <label className="flex items-center gap-2 text-xs text-[#B7C1DE]">
+                      <input
+                        type="checkbox"
+                        checked={newKbGlobalApproved}
+                        onChange={(e) => setNewKbGlobalApproved(e.target.checked)}
+                      />
+                      Approve this knowledge base for global sharing
+                    </label>
                     <button
                       onClick={async () => {
                         if (!newKbName.trim()) {
@@ -1527,9 +1578,11 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                           await adminApi.createKnowledgeBase({
                             name: newKbName.trim(),
                             description: newKbDesc.trim() || 'Created from admin console',
+                            globalApproved: newKbGlobalApproved,
                           });
                           setNewKbName('');
                           setNewKbDesc('');
+                          setNewKbGlobalApproved(false);
                           notify('Knowledge base created');
                           await loadData(true);
                         } catch (e: any) {
@@ -1553,6 +1606,26 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                             <Badge tone={kb.state === 'active' ? 'green' : 'gray'}>{kb.state}</Badge>
                           </div>
                           <p className="text-xs text-[#9AA6C9] break-words">{kb.description || 'No description provided.'}</p>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await adminApi.updateKnowledgeBase(kb.id, {
+                                  name: kb.name,
+                                  description: kb.description || undefined,
+                                  state: kb.state,
+                                  globalApproved: !kb.globalApproved,
+                                });
+                                await loadData(true);
+                                notify(kb.globalApproved ? 'Global sharing disabled for this knowledge base.' : 'Knowledge base approved for global sharing. Documents must still be individually approved.');
+                              } catch (error: any) {
+                                notify(error.message, true);
+                              }
+                            }}
+                            className={btnGhost + ' text-xs py-1.5 px-2.5'}
+                          >
+                            {kb.globalApproved ? 'Disable global sharing' : 'Approve global sharing'}
+                          </button>
                           <div className="flex justify-between text-xs text-[#6C789E] border-t border-[#263052] pt-3 font-semibold">
                             <span>{kb.docs} Documents</span>
                             <span>{kb.chunks} Indexed Chunks</span>
@@ -1801,7 +1874,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                         </Field>
                         <Field label="Active Model">
                           <select className={input} value={pgModel} onChange={(e) => setPgModel(e.target.value)}>
-                            <option value="">Auto (Latest Fine-Tuned / Primary)</option>
+                            <option value="">Auto (Latest Dataset-grounded Prompt Adapter / Primary)</option>
                             {models.map((m) => (
                               <option key={m.id} value={m.name}>{m.name}</option>
                             ))}
@@ -1819,7 +1892,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                               model: pgModel || undefined,
                             });
                             setPgResult((res as any).data);
-                            notify('Live RAG + Fine-Tuned query executed');
+                            notify('Live RAG + prompt-adapter query completed');
                           } catch (err: any) {
                             notify(err.message, true);
                           } finally {
@@ -2173,12 +2246,150 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
 
               {/* ── ANALYTICS TAB ── */}
               {tab === 'analytics' && analytics && (
-                <Section title="Live Usage & Adapter Analytics" hint="Computed from UsageEvents, ApplicationForms, and FineTuneJobs in the database.">
+                <Section title="Live Usage & Adapter Analytics" hint="Computed from UsageEvents, ApplicationForms, and dataset-grounded prompt adapter jobs.">
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                     <Stat label="Total AI Queries" value={analytics.totalQuestions} detail="Logged in database" />
                     <Stat label="Knowledge Grounded" value={`${analytics.answeredRate}%`} detail="Verified context rate" />
                     <Stat label="Avg Inference Latency" value={`${analytics.avgLatencyMs} ms`} detail="GonkaRouter streaming" />
-                    <Stat label="Cumulative Cost" value={`$${analytics.costUsd}`} detail="Inference + Fine-Tuning" />
+                    <Stat label="Cumulative Cost" value={`$${analytics.costUsd}`} detail="Inference + Adapter generation" />
+                  </div>
+                </Section>
+              )}
+
+              {/* ── AI QUALITY TAB ── */}
+              {tab === 'quality' && quality && (
+                <Section title="AI Quality Baseline" hint="Deterministic offline evaluation snapshot from the local benchmark harness for retrieval, grounding, extraction, JSON validity, and DOCX generation.">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                    <Stat label="Success Rate" value={`${Math.round((quality.metrics?.successRate ?? 0) * 100)}%`} detail={`${quality.metrics?.passCount ?? 0}/${quality.metrics?.caseCount ?? 0} cases passed`} />
+                    <Stat label="95% CI" value={quality.metrics?.confidenceInterval95 ? `${Math.round((quality.metrics.confidenceInterval95[0] ?? 0) * 100)}%-${Math.round((quality.metrics.confidenceInterval95[1] ?? 0) * 100)}%` : 'n/a'} detail="Wilson interval" />
+                    <Stat label="Instability" value={`${Math.round((quality.metrics?.instabilityRate ?? 0) * 100)}%`} detail="Repeated-run variance" />
+                    <Stat label="Report Time" value={quality.generatedAt ? new Date(quality.generatedAt).toLocaleDateString() : 'n/a'} detail={quality.reportFile ? quality.reportFile : 'Latest offline run'} />
+                  </div>
+
+                  <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-5">
+                    <div className={`${card} p-6 space-y-4`}>
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-base font-bold text-white">Capability breakdown</h3>
+                        <Badge tone={quality.status === 'healthy' ? 'green' : quality.status === 'watch' ? 'yellow' : 'red'}>{quality.status}</Badge>
+                      </div>
+                      <div className="space-y-4">
+                        {quality.capabilityBreakdown?.map((item: any) => (
+                          <div key={item.capability} className="space-y-2">
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="font-semibold text-white">Capability {item.capability}</span>
+                              <span className="text-[#9AA6C9]">{item.passed}/{item.total} passed</span>
+                            </div>
+                            <div className="h-2.5 overflow-hidden rounded-full bg-[#10193A]">
+                              <div className="h-full rounded-full bg-gradient-to-r from-[#3FA7E0] to-[#3DB27A]" style={{ width: `${Math.max(0, Math.min(100, item.successRate * 100))}%` }} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className={`${card} p-6 space-y-4`}>
+                      <h3 className="text-base font-bold text-white">Evaluation notes</h3>
+                      <p className="text-sm leading-6 text-[#9AA6C9]">{quality.notMeasured || 'No live provider calls are made by this benchmark; the evaluator remains deterministic and offline-only.'}</p>
+                      <div className="rounded-xl border border-[#263052] bg-[#0B1020] p-4 text-xs text-[#C8D2F1] font-mono break-words">
+                        <div>{quality.evaluationMode || 'offline deterministic component evaluation'}</div>
+                        <div className="mt-2 text-[#7CC4EE]">{quality.split ? `Split: ${quality.split}` : 'Split: dev'}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-5">
+                    <h3 className="text-base font-bold text-white">Live request traces (last 7 days; up to 500 newest)</h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                      <Stat label="Traces" value={quality.traceMetrics?.traceCount ?? 0} detail="Recent agent requests" />
+                      <Stat label="Trace Success" value={quality.traceMetrics?.successRate == null ? 'n/a' : `${(quality.traceMetrics.successRate * 100).toFixed(1)}%`} detail="Successful final status" />
+                      <Stat label="Tool Error Rate" value={quality.traceMetrics?.toolErrorRate == null ? 'n/a' : `${(quality.traceMetrics.toolErrorRate * 100).toFixed(1)}%`} detail="Failed tool calls / all calls" />
+                      <Stat label="Retries" value={quality.traceMetrics?.retries ?? 0} detail={`${quality.traceMetrics?.averageRetries == null ? 'n/a' : quality.traceMetrics.averageRetries.toFixed(2)} average per trace`} />
+                      <Stat label="Request Latency p50 / p95" value={`${quality.traceMetrics?.latencyP50Ms ?? 'n/a'} / ${quality.traceMetrics?.latencyP95Ms ?? 'n/a'} ms`} detail="Agent runtime" />
+                      <Stat label="Average Cost / Request" value={quality.traceMetrics?.averageCostUsd == null ? 'NOT MEASURED' : `$${quality.traceMetrics.averageCostUsd.toFixed(4)}`} detail="Provider cost metadata unavailable" />
+                    </div>
+                    {quality.traceMetrics?.capabilityStats?.length > 0 && (
+                      <div className={`${card} p-5 space-y-3`}>
+                        <h4 className="font-bold text-white">Observed request success by capability</h4>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+                          {quality.traceMetrics.capabilityStats.map((item) => (
+                            <div key={item.capability} className="rounded-xl border border-[#263052] bg-[#0B1020] p-4">
+                              <p className="text-xs uppercase tracking-wide text-[#9AA6C9]">{item.capability}</p>
+                              <p className="mt-1 text-lg font-bold text-white">{item.successRate == null ? 'n/a' : `${(item.successRate * 100).toFixed(1)}%`}</p>
+                              <p className="text-xs text-[#7C8CB8]">{item.successes}/{item.traces} traces successful</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {quality.traceMetrics?.toolStats?.length > 0 && (
+                      <div className={`${card} p-5 space-y-3`}>
+                        <h4 className="font-bold text-white">Tool reliability</h4>
+                        <div className="overflow-x-auto">
+                          <table className="w-full min-w-[460px] text-left text-xs">
+                            <thead className="text-[#9AA6C9] uppercase border-b border-[#263052]">
+                              <tr>
+                                <th className="p-3">Tool</th>
+                                <th className="p-3">Calls</th>
+                                <th className="p-3">Errors</th>
+                                <th className="p-3">Error rate</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-[#263052]">
+                              {quality.traceMetrics.toolStats.map((item) => (
+                                <tr key={item.name}>
+                                  <td className="p-3 font-mono text-white">{item.name}</td>
+                                  <td className="p-3 text-[#C8D2F1]">{item.calls}</td>
+                                  <td className="p-3 text-[#FF8798]">{item.errors}</td>
+                                  <td className="p-3 text-[#9AA6C9]">{item.calls ? `${((item.errors / item.calls) * 100).toFixed(1)}%` : 'n/a'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                    {quality.traceMetrics?.topFailureClasses?.length > 0 && (
+                      <div className={`${card} p-5 space-y-3`}>
+                        <h4 className="font-bold text-white">Top failure classes</h4>
+                        <div className="flex flex-wrap gap-2">
+                          {quality.traceMetrics.topFailureClasses.map((item) => (
+                            <Badge key={item.failureClass} tone="red">{item.failureClass}: {item.count}</Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    <div className={`${card} p-5 space-y-3`}>
+                      <h4 className="font-bold text-white">Recent failing traces</h4>
+                      <p className="text-xs text-[#9AA6C9]">Trace summaries omit prompts, model outputs, and tool arguments. Replay is not available because request content is not retained.</p>
+                      {quality.traceMetrics?.failingTraces?.length ? (
+                        <div className="overflow-x-auto">
+                          <table className="w-full min-w-[620px] text-left text-xs">
+                            <thead className="text-[#9AA6C9] uppercase border-b border-[#263052]">
+                              <tr>
+                                <th className="p-3">Time</th>
+                                <th className="p-3">Capability</th>
+                                <th className="p-3">Status / failure</th>
+                                <th className="p-3">Model / provider</th>
+                                <th className="p-3">Latency</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-[#263052]">
+                              {quality.traceMetrics.failingTraces.map((trace) => (
+                                <tr key={trace.id}>
+                                  <td className="p-3 text-[#9AA6C9] whitespace-nowrap">{new Date(trace.createdAt).toLocaleString()}</td>
+                                  <td className="p-3 text-white">{trace.capability}</td>
+                                  <td className="p-3 text-[#FF8798]">{trace.finalStatus}{trace.failureClass ? ` · ${trace.failureClass}` : ''}</td>
+                                  <td className="p-3 text-[#C8D2F1]">{trace.model} · {trace.provider}</td>
+                                  <td className="p-3 text-[#9AA6C9]">{trace.latencyMs} ms</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-[#9AA6C9]">No failing traces recorded in the last 7 days.</p>
+                      )}
+                    </div>
                   </div>
                 </Section>
               )}
@@ -2231,7 +2442,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
 
               {/* ── AUDIT LOGS TAB ── */}
               {tab === 'logs' && (
-                <Section title="System Audit Logs" hint="Immutable database audit trail of administrative and fine-tuning actions.">
+                <Section title="System Audit Logs" hint="Immutable database audit trail of administrative and adapter actions.">
                   <div className={`${card} overflow-x-auto`}>
                     <table className="w-full text-left text-sm font-mono text-xs min-w-[760px]">
                       <thead className="bg-[#141C36] text-[#9AA6C9] uppercase border-b border-[#263052] font-bold">
@@ -2264,7 +2475,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                 <Section title="Control Plane Settings" hint="Database synchronization and system control actions.">
                   <div className={`${card} p-8 max-w-xl space-y-6 min-w-0`}>
                     <p className="text-sm text-[#9AA6C9] leading-relaxed">
-                      Bwenge AI Admin Console is connected to your live database tables (Forms, Submissions, Student Scripts, Knowledge Chunks, Datasets, and Fine-Tuned Models).
+                      Bwenge AI Admin Console is connected to live Forms, Submissions, Student Scripts, Knowledge Chunks, Datasets, and prompt adapters.
                     </p>
                     <button
                       onClick={async () => {

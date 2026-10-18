@@ -251,6 +251,31 @@ function createModelMock(modelName: string) {
     if (args?.include?.members) {
       copy.members = Array.from(getTable('organizationMember').values()).filter((m) => m.organizationId === copy.id);
     }
+    if (args?.include?.user && copy.userId) {
+      const relatedUser = getTable('user').get(String(copy.userId));
+      if (relatedUser) {
+        copy.user = { ...relatedUser };
+        const userInclude = args.include.user === true ? {} : args.include.user.include || {};
+        if (userInclude.settings && copy.user.settings === undefined) {
+          copy.user.settings = {
+            id: `settings-${copy.user.id || 'default'}`,
+            userId: copy.user.id,
+            defaultStrictness: 'STANDARD',
+            autoSummarize: true,
+            preferredLanguage: 'en',
+            theme: 'dark',
+            longTermMemory: false,
+            agentTone: 'PROFESSIONAL',
+            customInstructions: null,
+          };
+        }
+        if (userInclude.subscription && copy.user.subscription === undefined) {
+          copy.user.subscription = null;
+        }
+      } else {
+        copy.user = null;
+      }
+    }
     if (args?.include?.settings && copy.settings === undefined) {
       copy.settings = {
         id: `settings-${copy.id || 'default'}`,

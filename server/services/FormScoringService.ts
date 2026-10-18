@@ -87,62 +87,30 @@ OUTPUT JSON ONLY:
     try {
       const raw = await this.aiService.sendGonkaChat(prompt, { system: systemPrompt });
       const parsed = this.aiService.parseModelJson(raw);
-      if (parsed && Number.isFinite(Number(parsed.totalScore))) {
-        const breakdown = Array.isArray(parsed.criterionBreakdown) && parsed.criterionBreakdown.length > 0
-          ? parsed.criterionBreakdown
-          : quizBreakdown;
-        return {
-          ...parsed,
-          totalScore: Math.max(0, Math.min(100, Math.round(Number(parsed.totalScore)))),
-          feedback: String(parsed.feedback || 'Evaluated by GonkaRouter Form Scoring Agent.'),
-          criterionBreakdown: breakdown,
-          quizEarnedPoints: quizMaxPoints > 0 ? quizEarnedPoints : undefined,
-          quizMaxPoints: quizMaxPoints > 0 ? quizMaxPoints : undefined,
-        };
+      const score = Number(parsed?.totalScore);
+      if (!Number.isFinite(score) || typeof parsed?.feedback !== 'string' || !parsed.feedback.trim()) {
+        throw new Error('AI form scoring returned an incomplete result.');
       }
+
+      const breakdown = Array.isArray(parsed.criterionBreakdown) && parsed.criterionBreakdown.length > 0
+        ? parsed.criterionBreakdown
+        : quizBreakdown;
+      return {
+        ...parsed,
+        totalScore: Math.max(0, Math.min(100, Math.round(score))),
+        feedback: parsed.feedback.trim(),
+        criterionBreakdown: breakdown,
+        quizEarnedPoints: quizMaxPoints > 0 ? quizEarnedPoints : undefined,
+        quizMaxPoints: quizMaxPoints > 0 ? quizMaxPoints : undefined,
+      };
     } catch (error: any) {
-      logger.warn('GonkaRouter form scoring fallback triggered:', error?.message);
+      logger.error('AI form scoring failed; submission remains unscored.', {
+        errorType: error?.name || 'Error',
+        status: typeof error?.status === 'number' ? error.status : undefined,
+        timeout: error?.timeout === true,
+        timeoutKind: error?.timeoutKind,
+      });
+      throw new Error('AI scoring could not be completed. The submission remains unscored; please retry.');
     }
-
-    // Deterministic intelligent fallback scoring so every submission is always scored
-    let answeredCount = 0;
-    let depthBonus = 0;
-    const fallbackBreakdown: Array<{ name: string; marksAwarded: number; reason: string }> = [...quizBreakdown];
-
-    questions.forEach((q: any, idx: number) => {
-      const key = String(q.id ?? q.number ?? idx + 1);
-      const val = submissionData?.[key];
-      const str = Array.isArray(val) ? val.join(', ') : val && typeof val === 'object' ? JSON.stringify(val) : String(val ?? '').trim();
-      if (str.length > 0) {
-        answeredCount++;
-        if (str.length > 80) depthBonus += 8;
-        else if (str.length > 25) depthBonus += 4;
-      }
-      if (!quizBreakdown.some((b) => b.name === String(q.title || q.label || `Question ${idx + 1}`))) {
-        const qScore = str.length === 0 ? 0 : str.length > 60 ? 90 : str.length > 15 ? 78 : 65;
-        fallbackBreakdown.push({
-          name: String(q.title || q.label || `Question ${idx + 1}`),
-          marksAwarded: qScore,
-          reason: str.length > 0 ? `Provided ${str.length > 50 ? 'detailed' : 'complete'} response.` : 'No answer provided.',
-        });
-      }
-    });
-
-    const completionRatio = questions.length > 0 ? answeredCount / questions.length : 1;
-    const quizRatio = quizMaxPoints > 0 ? quizEarnedPoints / quizMaxPoints : null;
-    const computedScore = quizRatio !== null
-      ? Math.round(quizRatio * 70 + completionRatio * 20 + Math.min(10, depthBonus))
-      : Math.min(98, Math.round(completionRatio * 75 + Math.min(23, depthBonus)));
-
-    return {
-      totalScore: Math.max(0, Math.min(100, computedScore)),
-      feedback:
-        quizMaxPoints > 0
-          ? `Quiz score: ${quizEarnedPoints}/${quizMaxPoints} pts (${Math.round((quizRatio || 0) * 100)}%). Completed ${answeredCount}/${questions.length} questions.`
-          : `Completed ${answeredCount}/${questions.length} questions with ${depthBonus >= 8 ? 'strong detail and relevance' : 'standard completeness'}.`,
-      criterionBreakdown: fallbackBreakdown,
-      quizEarnedPoints: quizMaxPoints > 0 ? quizEarnedPoints : undefined,
-      quizMaxPoints: quizMaxPoints > 0 ? quizMaxPoints : undefined,
-    };
   }
 }

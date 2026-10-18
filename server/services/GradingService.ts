@@ -1,7 +1,6 @@
 import { AiService } from './AiService.js';
 import { Type } from '@google/genai';
 import { evaluateStudentSubmission as deepseekEvaluate } from '../../src/services/deepseekMarker.js';
-import { buildFallbackMarkResults } from '../../src/utils/aiFallback.ts';
 import { runWithRetry } from './reliableJobRunner.js';
 import { logJobCost } from './CostTrackingService.js';
 import logger from '../utils/logger.js';
@@ -36,7 +35,7 @@ export class GradingService {
 
     const scriptCheck = PreFlightService.validateScriptQuality(studentScript);
     if (!scriptCheck.isValid) {
-      return this.fallbackMarking(examPaper, studentScript, new Error(scriptCheck.reason), scriptCheck.flag);
+      throw new Error(`Script cannot be marked: ${scriptCheck.reason}`);
     }
 
     // Determine which model to use. Haiku 4.5 is default for grading as per master plan.
@@ -76,14 +75,14 @@ STUDENT ANSWERS: ${JSON.stringify(studentScript.answers, null, 2)}`;
         logger.info(`[GradingService] Exclusive Routing: using GonkaRouter (GLM-5.3-Flash) for batch ${batchId}`);
         const rawResult = await this.aiService.sendGonkaChat(prompt, { system: draftSystemInstruction });
         const results = this.aiService.parseModelJson(typeof rawResult === 'string' ? rawResult : (rawResult as any).text || '');
-        return this.processResults(results, studentScript);
+        return this.processResults(results, studentScript, examPaper);
       }
 
       // Prioritize Ollama if configured as primary provider
       if (process.env.AI_PROVIDER === 'ollama' && (await this.aiService.providerAvailable('ollama'))) {
         const rawResult = await this.aiService.sendOllamaChat(prompt, { system: draftSystemInstruction, json: true });
         const results = this.aiService.parseModelJson(rawResult);
-        return this.processResults(results, studentScript);
+        return this.processResults(results, studentScript, examPaper);
       }
 
       // Use Haiku for grading as the primary provider if configured
@@ -115,8 +114,8 @@ STUDENT ANSWERS: ${JSON.stringify(studentScript.answers, null, 2)}`;
           return this.aiService.parseModelJson(text);
         });
 
-        if (!result) return this.fallbackMarking(examPaper, studentScript, new Error('Max retries exceeded'));
-        return this.processResults(result, studentScript);
+        if (!result) throw new Error('AI grading did not return a result.');
+        return this.processResults(result, studentScript, examPaper);
       }
 
       const providerRun = await this.aiService.runProviderRace(
@@ -135,29 +134,66 @@ STUDENT ANSWERS: ${JSON.stringify(studentScript.answers, null, 2)}`;
         async () => deepseekEvaluate(examPaper, examPaper.rubrics || [], JSON.stringify(studentScript.answers || []))
       );
 
-      const bestResult = providerRun.successes[0]?.value || [];
+      const bestResult = providerRun.successes[0]?.value;
       if (providerRun.successes.length === 0) {
-        logger.warn(`All race providers failed for batch ${batchId}`, {
-          failures: providerRun.errors,
-        });
+        throw new Error('All configured AI grading providers failed.');
       }
-      return this.processResults(bestResult, studentScript);
+      return this.processResults(bestResult, studentScript, examPaper);
     } catch (error: any) {
-      // fallback
-      return this.fallbackMarking(examPaper, studentScript, error);
+      logger.error('AI grading failed; script remains pending.', {
+        batchId,
+        errorType: error?.name || 'Error',
+        status: typeof error?.status === 'number' ? error.status : undefined,
+        timeout: error?.timeout === true,
+        timeoutKind: error?.timeoutKind,
+      });
+      throw new Error('AI marking could not be completed. The script remains pending; please retry.');
     }
   }
 
-  private processResults(results: any[], studentScript: any) {
-    if (!Array.isArray(results)) results = [];
+  private processResults(results: any, studentScript: any, examPaper: any) {
+    const questions = Array.isArray(examPaper?.questions) ? examPaper.questions : [];
+    if (!Array.isArray(results) || results.length !== questions.length) {
+      throw new Error('AI grading returned an incomplete result.');
+    }
+
+    const normalizedResults = results.map((result: any) => {
+      const question = questions.find((candidate: any) =>
+        (result?.questionId && String(candidate.id) === String(result.questionId)) ||
+        (result?.questionNumber && String(candidate.number) === String(result.questionNumber))
+      );
+      const maxMarks = Number(question?.maxMarks);
+      const awardedMarks = Number(result?.awardedMarks);
+      if (
+        !question ||
+        !Number.isFinite(maxMarks) ||
+        !Number.isFinite(awardedMarks) ||
+        awardedMarks < 0 ||
+        awardedMarks > maxMarks ||
+        typeof result.feedbackToStudent !== 'string' ||
+        !result.feedbackToStudent.trim()
+      ) {
+        throw new Error('AI grading returned an invalid question result.');
+      }
+      return {
+        ...result,
+        questionId: String(question.id),
+        questionNumber: String(question.number),
+        maxMarks,
+        awardedMarks,
+      };
+    });
+    if (new Set(normalizedResults.map((result: any) => result.questionId)).size !== questions.length) {
+      throw new Error('AI grading returned duplicate question results.');
+    }
 
     let totalAwarded = 0;
     let totalMax = 0;
     const flagsDetected: string[] = [];
 
-    results.forEach((r: any) => {
-      totalAwarded += r.awardedMarks || 0;
-      totalMax += r.maxMarks || 0;
+    normalizedResults.forEach((r: any) => {
+      totalAwarded += r.awardedMarks;
+      totalMax += r.maxMarks;
       if (r.flag && r.flag !== 'none' && !flagsDetected.includes(r.flag)) {
         flagsDetected.push(r.flag);
       }
@@ -169,7 +205,7 @@ STUDENT ANSWERS: ${JSON.stringify(studentScript.answers, null, 2)}`;
       markedScript: {
         ...studentScript,
         status: 'marked',
-        results,
+        results: normalizedResults,
         totalAwardedMarks: Math.round(totalAwarded * 10) / 10,
         maxTotalMarks: totalMax,
         percentage,
@@ -177,24 +213,6 @@ STUDENT ANSWERS: ${JSON.stringify(studentScript.answers, null, 2)}`;
         teacherApproved: false,
       },
       providers: ['GonkaRouter'],
-    };
-  }
-
-  private fallbackMarking(examPaper: any, studentScript: any, error: any, customFlag?: string) {
-    const fallbackResults = buildFallbackMarkResults(examPaper, studentScript);
-    return {
-      markedScript: {
-        ...studentScript,
-        status: 'marked',
-        results: fallbackResults,
-        totalAwardedMarks: 0,
-        maxTotalMarks: fallbackResults.reduce((sum: number, item: any) => sum + Number(item.maxMarks || 0), 0),
-        percentage: 0,
-        flags: [customFlag || 'needs_teacher_review'],
-        teacherApproved: false,
-      },
-      providers: ['fallback'],
-      providerWarnings: [error?.message || String(error)],
     };
   }
 
@@ -237,6 +255,9 @@ STUDENT ANSWERS: ${JSON.stringify(studentScript.answers, null, 2)}`;
    */
   public async simulateMarking(examPaper: any) {
     logger.info(`Simulating rubric for: ${examPaper.title}`);
+    if (examPaper.questions.some((question: any) => !String(question.modelAnswer || '').trim())) {
+      return { isValid: false, reason: 'Every question needs a model answer before rubric simulation.' };
+    }
 
     const modelScript = {
       studentName: 'Synthetic Student (Ideal)',
@@ -244,7 +265,7 @@ STUDENT ANSWERS: ${JSON.stringify(studentScript.answers, null, 2)}`;
       answers: examPaper.questions.map((q: any) => ({
         questionId: q.id,
         questionNumber: q.number,
-        answerText: q.modelAnswer || 'Perfect placeholder answer based on rubric criteria.',
+        answerText: q.modelAnswer,
       })),
     };
 

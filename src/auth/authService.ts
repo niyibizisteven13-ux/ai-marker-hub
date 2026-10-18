@@ -1,12 +1,16 @@
-import { setAccessToken, getAccessToken, getApiUrl } from '../utils/authFetch';
+import { authFetch, setAccessToken, getAccessToken, getApiUrl, refreshAccessToken } from '../utils/authFetch';
 
 export interface User {
   id: string;
   name: string;
-  email?: string;
-  role: 'user' | 'admin' | 'ADMIN';
+  email: string;
+  role: 'ADMIN' | 'INSTRUCTOR';
   avatarUrl?: string;
   locale?: string;
+}
+
+function normalizeUser(user: User): User {
+  return { ...user, role: user.role.toLowerCase() === 'admin' ? 'ADMIN' : 'INSTRUCTOR' };
 }
 
 export type AuthErrorCode =
@@ -15,6 +19,7 @@ export type AuthErrorCode =
   | 'rate_limited'
   | 'google_failed'
   | 'google_unverified'
+  | 'signup_disabled'
   | 'in_app_browser'
   | 'network'
   | 'server_error'
@@ -39,13 +44,11 @@ export interface AuthService {
 export const authService: AuthService = {
   async me() {
     try {
-      const token = localStorage.getItem('bwenge_auth_token') || getAccessToken();
-      const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      const res = await fetch(getApiUrl('/api/auth/me'), { headers, credentials: 'include' });
+      if (!getAccessToken() && !await refreshAccessToken()) return null;
+      const res = await authFetch('/api/auth/me');
       if (res.ok) {
         const data = await res.json();
-        if (data.user) return data.user;
+        if (data.user) return normalizeUser(data.user);
       }
     } catch {}
     return null;
@@ -66,7 +69,7 @@ export const authService: AuthService = {
       if (!res.ok) {
         throw new AuthError(data.error?.code || 'network', data.error?.message || 'Failed to send code');
       }
-      return { retryAfter: data.retryAfter || 30, devCode: data.devCode };
+      return { retryAfter: data.retryAfter || 30 };
     } catch (err: any) {
       if (err instanceof AuthError) throw err;
       throw new AuthError('network', err.message || 'Network error');
@@ -87,9 +90,8 @@ export const authService: AuthService = {
       }
       if (data.accessToken) {
         setAccessToken(data.accessToken, data.expiresIn || 900);
-        try { localStorage.setItem('bwenge_auth_token', data.accessToken); } catch {}
       }
-      return { user: data.user, isNewUser: !!data.isNewUser };
+      return { user: normalizeUser(data.user), isNewUser: !!data.isNewUser };
     } catch (err: any) {
       if (err instanceof AuthError) throw err;
       throw new AuthError('code_invalid', err.message || 'Verification failed');
@@ -113,7 +115,7 @@ export const authService: AuthService = {
       if (!res.ok || !data.user) {
         throw new Error(data.error?.message || 'Failed to update profile');
       }
-      return data.user;
+      return normalizeUser(data.user);
     } catch (err: any) {
       throw new Error(err.message || 'Failed to update profile');
     }

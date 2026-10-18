@@ -51,6 +51,7 @@ import TermsPage from './pages/TermsPage';
 import PrivacyPage from './pages/PrivacyPage';
 import { authService } from './auth/authService';
 
+const AI_SCAN_ENABLED = import.meta.env.VITE_ENABLE_AI_SCAN !== 'false';
 const LoginModal = React.lazy(() => import('./components/LoginModal'));
 const UpgradeModal = React.lazy(() => import('./components/UpgradeModal'));
 const DynamicForm = React.lazy(() => import('./components/DynamicForm'));
@@ -60,8 +61,9 @@ import { Suspense } from 'react';
 
 const CHAT_HISTORY_KEY = 'bwenge_chat_history';
 const CHAT_SESSIONS_KEY = 'bwenge_saved_sessions';
+const CHAT_TOKEN_TIMEOUT_MS = 60_000;
 
-const normalizeInitialMessages = (loadedMessages: Message[]): Message[] => {
+const normalizeLoadedMessages = (loadedMessages: Message[]): Message[] => {
   if (!Array.isArray(loadedMessages)) return [];
 
   return loadedMessages.filter((item) => {
@@ -77,6 +79,15 @@ Tap Scanner below to process handwritten work.
 
 Use one of the quick actions below to get started immediately.`
     );
+  }).map((item) => {
+    if (!item.isStreaming && !item.isWaiting) return item;
+    return {
+      ...item,
+      text: item.text || 'Generation was interrupted. Please try again.',
+      isStreaming: false,
+      isWaiting: false,
+      stopped: true,
+    };
   });
 };
 
@@ -140,6 +151,7 @@ export default function App() {
   const [isAiThinking, setIsAiThinking] = useState<boolean>(false);
   const [aiServiceState, setAiServiceState] = useState<'ready' | 'degraded' | 'offline'>('ready');
   const [scannerOpen, setScannerOpen] = useState<boolean>(false);
+  const openScanner = AI_SCAN_ENABLED ? () => setScannerOpen(true) : undefined;
   const [aiStatus, setAiStatus] = useState<{ type: 'info' | 'warning'; message: string } | null>(null);
   const [loginModalOpen, setLoginModalOpen] = useState<boolean>(() => window.location.pathname === '/signup');
   const [isSignUpMode, setIsSignUpMode] = useState<boolean>(() => window.location.pathname === '/signup');
@@ -268,29 +280,10 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
-    const hasToken = localStorage.getItem('bwenge_auth_token');
-    if (!hasToken) {
-      setAuthenticatedUser(null);
-      setAuthStatus('anonymous');
-      return;
-    }
-
-    authFetch('/api/auth/refresh', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'bwenge' },
-    })
-      .then(async (res) => {
-        if (res.status === 401) {
-          if (!cancelled) {
-            setAuthenticatedUser(null);
-            setAuthStatus('anonymous');
-          }
-          return;
-        }
-        if (!res.ok) throw new Error('Could not restore session');
-        const data = await res.json();
-        if (!cancelled && data?.user) {
-          setAuthenticatedUser(data.user);
+    authService.me()
+      .then((user) => {
+        if (!cancelled && user) {
+          setAuthenticatedUser(user);
           setAuthStatus('authenticated');
         } else if (!cancelled) {
           setAuthenticatedUser(null);
@@ -354,8 +347,13 @@ export default function App() {
         const workspace = data.workspace;
         if (workspace && typeof workspace === 'object') {
           const state = useStore.getState();
-          if (Array.isArray(workspace.messages)) state.setMessages(workspace.messages);
-          if (Array.isArray(workspace.sessions)) state.setSessions(workspace.sessions);
+          if (Array.isArray(workspace.messages)) state.setMessages(normalizeLoadedMessages(workspace.messages));
+          if (Array.isArray(workspace.sessions)) {
+            state.setSessions(workspace.sessions.map((session: ChatSession) => ({
+              ...session,
+              messages: normalizeLoadedMessages(session.messages || []),
+            })));
+          }
           if (Array.isArray(workspace.uploadedFiles)) state.setUploadedFiles(workspace.uploadedFiles);
           if ('activeFormId' in workspace) state.setActiveFormId(workspace.activeFormId || null);
           if ('pinnedSyllabusId' in workspace) state.setPinnedSyllabusId(workspace.pinnedSyllabusId || null);
@@ -437,7 +435,7 @@ export default function App() {
   const handleLoadChatSession = (sessionId: string) => {
     const session = chatSessions.find((s) => s.id === sessionId);
     if (session) {
-      setMessages(session.messages || []);
+      setMessages(normalizeLoadedMessages(session.messages || []));
       setActiveTab('documents');
     }
   };
@@ -737,43 +735,86 @@ export default function App() {
       return;
     }
 
-    const newAttachments: ChatAttachment[] = [];
-    if (attachment) {
-      const attArray = Array.isArray(attachment) ? attachment : [attachment];
-      for (const att of attArray) {
-        if (att instanceof File) {
-          const dataUrl = await convertFileToBase64(att);
-          newAttachments.push({
-            id: 'att-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
-            name: att.name,
-            mimeType: att.type || 'application/octet-stream',
-            previewUrl: dataUrl,
-            url: dataUrl,
-            fileType: att.type.startsWith('image/') ? 'image' : 'pdf',
-          });
-        } else {
-          newAttachments.push(att);
-        }
-      }
-    }
-
     const userMsg: Message = {
       id: 'msg-' + Date.now(),
       sender: 'user',
       text,
-      attachments: newAttachments.length > 0 ? newAttachments : undefined,
       timestamp: new Date().toISOString(),
     };
 
+    const assistantId = 'msg-' + (Date.now() + 1);
+    const pendingAssistant: Message = {
+      id: assistantId,
+      sender: 'assistant',
+      text: '',
+      timestamp: new Date().toISOString(),
+      isStreaming: true,
+      isWaiting: true,
+    };
     const nextMessages = [...messages, userMsg];
-    setMessages(nextMessages);
+    let requestMessages = nextMessages;
+    setMessages([...nextMessages, pendingAssistant]);
     handleClearStagedAttachments();
     setIsAiThinking(true);
+    setIsAiLoading(true);
 
     const controller = new AbortController();
     setAbortController(controller);
+    retryPromptRef.current = { text, attachment };
+    let idleTimeout: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
+    let firstTokenReceived = false;
 
+    const resetIdleTimeout = () => {
+      if (idleTimeout) clearTimeout(idleTimeout);
+      idleTimeout = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, CHAT_TOKEN_TIMEOUT_MS);
+    };
+
+    const updateAssistant = (assistantText: string, isStreaming: boolean) => {
+      const assistantMsg: Message = {
+        ...pendingAssistant,
+        text: assistantText,
+        isStreaming,
+        isWaiting: !firstTokenReceived && isStreaming,
+      };
+      setMessages((current) => current.map((message) => (
+        message.id === assistantId ? assistantMsg : message
+      )));
+      setLastInteractionId(assistantId);
+    };
     try {
+      const newAttachments: ChatAttachment[] = [];
+      if (attachment) {
+        const attArray = Array.isArray(attachment) ? attachment : [attachment];
+        for (const att of attArray) {
+          if (att instanceof File) {
+            const dataUrl = await convertFileToBase64(att);
+            newAttachments.push({
+              id: 'att-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+              name: att.name,
+              mimeType: att.type || 'application/octet-stream',
+              previewUrl: dataUrl,
+              url: dataUrl,
+              fileType: att.type.startsWith('image/') ? 'image' : 'pdf',
+            });
+          } else {
+            newAttachments.push(att);
+          }
+        }
+      }
+      requestMessages = nextMessages.map((message) => (
+        message.id === userMsg.id
+          ? { ...message, attachments: newAttachments.length > 0 ? newAttachments : undefined }
+          : message
+      ));
+      setMessages((current) => current.map((message) => {
+        const updatedUserMessage = requestMessages.find((candidate) => candidate.id === message.id);
+        return updatedUserMessage || message;
+      }));
+
       const contextExam = examPaper ? buildExamPaperContext(examPaper) : '';
       const fullPrompt = contextExam ? `${contextExam}\n\nUser request: ${text}` : text;
 
@@ -781,14 +822,14 @@ export default function App() {
       const attachmentData = firstAttachment?.url || firstAttachment?.previewUrl || '';
       const attachmentBase64 = attachmentData.includes(',') ? attachmentData.split(',')[1] : '';
       const attachmentText = newAttachments.map((item) => item.rawText).filter(Boolean).join('\n\n');
-      const assistantId = 'msg-' + (Date.now() + 1);
+      resetIdleTimeout();
       const response = await authFetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           query: fullPrompt,
           provider: selectedProvider === 'auto' ? undefined : selectedProvider,
-          history: nextMessages.slice(-10, -1).map((message) => ({
+          history: requestMessages.slice(-10, -1).map((message) => ({
             role: message.sender === 'assistant' ? 'assistant' : 'user',
             text: message.text,
           })),
@@ -801,29 +842,16 @@ export default function App() {
       });
 
       if (!response.ok) {
-        const errorBody = await response.json().catch(() => null);
-        throw new Error(errorBody?.error || `AI service returned ${response.status}`);
+        await response.json().catch(() => null);
+        throw new Error('Bwenge could not complete your request. Please try again.');
       }
 
       if (!response.body) throw new Error('AI service returned an empty stream');
 
       let assistantText = '';
-      let assistantProvider = selectedProvider === 'auto' ? undefined : selectedProvider;
       let streamBuffer = '';
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
-      const updateAssistant = (isStreaming: boolean) => {
-        const assistantMsg: Message = {
-          id: assistantId,
-          sender: 'assistant',
-          text: assistantText,
-          provider: assistantProvider,
-          timestamp: new Date().toISOString(),
-          isStreaming,
-        };
-        setMessages([...nextMessages, assistantMsg]);
-        setLastInteractionId(assistantId);
-      };
       const handleEvent = (line: string) => {
         const trimmed = line.trim();
         if (!trimmed.startsWith('data:')) return;
@@ -833,10 +861,16 @@ export default function App() {
           const event = JSON.parse(payload);
           if (event.type === 'text' && typeof event.text === 'string') {
             assistantText += event.text;
-            assistantProvider = event.provider || assistantProvider;
-            updateAssistant(true);
+            if (event.text.length > 0) {
+              firstTokenReceived = true;
+              resetIdleTimeout();
+            }
+            updateAssistant(assistantText, true);
+          } else if (event.type === 'reset') {
+            assistantText = '';
+            updateAssistant(assistantText, true);
           } else if (event.type === 'error') {
-            throw new Error(event.error || 'The AI stream failed');
+            throw new Error(event.message || 'Bwenge could not complete your request. Please try again.');
           }
         } catch (error: any) {
           if (error instanceof SyntaxError) return;
@@ -860,13 +894,12 @@ export default function App() {
       }
 
       if (!assistantText.trim()) throw new Error('The AI service completed without returning a response.');
-      updateAssistant(false);
-      const finalMessages: Message[] = [...nextMessages, {
-        id: assistantId,
-        sender: 'assistant',
+      updateAssistant(assistantText, false);
+      const finalMessages: Message[] = [...requestMessages, {
+        ...pendingAssistant,
         text: assistantText,
-        provider: assistantProvider,
-        timestamp: new Date().toISOString(),
+        isStreaming: false,
+        isWaiting: false,
       }];
       setMessages(finalMessages);
 
@@ -893,19 +926,28 @@ export default function App() {
       }
       setChatSessions(sessionsToSave);
     } catch (error: any) {
-      if (error.name !== 'AbortError') {
-        console.error('Send message error:', error);
-        const errorMsg: Message = {
-          id: 'msg-' + (Date.now() + 1),
-          sender: 'assistant',
-          text: error.message || 'I encountered an error connecting to the AI service.',
-          errorKind: 'service_unavailable',
-          timestamp: new Date().toISOString(),
-        };
-        setMessages([...nextMessages, errorMsg]);
-      }
+      const stopped = controller.signal.aborted && !timedOut;
+      const errorText = timedOut
+        ? 'Bwenge did not respond for 60 seconds. Please try again.'
+        : stopped
+          ? 'Generation was stopped.'
+          : error?.message || 'Bwenge could not complete your request. Please try again.';
+      if (!stopped) console.error('Send message error:', error);
+      const failedAssistant: Message = {
+        ...pendingAssistant,
+        text: errorText,
+        isStreaming: false,
+        isWaiting: false,
+        stopped,
+        errorKind: stopped ? undefined : 'generic',
+      };
+      setMessages((current) => current.map((message) => (
+        message.id === assistantId ? failedAssistant : message
+      )));
     } finally {
+      if (idleTimeout) clearTimeout(idleTimeout);
       setIsAiThinking(false);
+      setIsAiLoading(false);
       setAbortController(null);
     }
   };
@@ -1012,7 +1054,7 @@ export default function App() {
       studentScripts={studentScripts}
       setStudentScripts={setStudentScripts}
       onUploadStudentPaper={handleUploadStudentPaper}
-      onOpenScanner={() => setScannerOpen(true)}
+      onOpenScanner={openScanner}
       onGenerateSampleBatch300={() => {
         const sampleBatch: UploadedFile[] = Array.from({ length: 5 }, (_, i) => ({
           id: `sample-${Date.now()}-${i}`,
@@ -1085,7 +1127,7 @@ export default function App() {
     onStageAttachments: handleStageAttachments,
     onRemoveStagedAttachment: handleRemoveStagedAttachment,
     onOpenSidebar: () => setIsMobileSidebarOpen(true),
-    onOpenScanner: () => setScannerOpen(true),
+    onOpenScanner: openScanner,
     user: authenticatedUser,
     onOpenLoginModal: () => setLoginModalOpen(true),
     onPreviewDoc: (doc: any) => {
@@ -1258,7 +1300,7 @@ export default function App() {
 
   return (
     <div className="h-[var(--app-h,100dvh)] w-full min-w-0 bg-[#262624] text-[#FAF9F5] font-sans antialiased transition-colors duration-200 overflow-hidden flex flex-col">
-      {scannerOpen && (
+      {AI_SCAN_ENABLED && scannerOpen && (
         <div className="fixed inset-0 z-[70] bg-[#0f1013] flex flex-col w-full h-[var(--app-h,100dvh)] overflow-hidden animate-in fade-in duration-200">
           <DocumentScanner
             onClose={() => setScannerOpen(false)}
@@ -1315,7 +1357,7 @@ export default function App() {
               <MobileSheet
                 title={activeTab === 'results' ? 'Results' : 'Marking'}
                 onBack={() => setActiveTab('documents')}
-                onScan={() => setScannerOpen(true)}
+                onScan={openScanner}
               >
                 {activeTab === 'results' ? resultsPane : workspacePane}
               </MobileSheet>
@@ -1357,7 +1399,7 @@ export default function App() {
                     onClearStagedAttachments={handleClearStagedAttachments}
                     activeDocument={activeDocument}
                     setActiveDocument={setActiveDocument}
-                    onOpenScanner={() => setScannerOpen(true)}
+                    onOpenScanner={openScanner}
                     onNewChat={handleNewChat}
                     onLoadSession={handleLoadChatSession}
                     onClearChat={handleClearCurrentChat}

@@ -1,26 +1,63 @@
-import React, { useMemo, useState } from 'react';
+/**
+ * DynamicForm — respondent-side form renderer (drop-in replacement).
+ *
+ * Props
+ *  - schema      JSON string or object. Old formats (`fields`, `questions`, `blocks`, uppercase types) still work.
+ *  - onSubmit    receives the answers. May return { message, score, maxScore, scoreLabel, feedback, results[] }.
+ *  - uploadFile  optional (file, onProgress) => Promise<url>. Without it, files are embedded as data URLs.
+ *  - draftKey    optional key for the autosaved draft (defaults to schema id / title).
+ *
+ * New schema options (all optional)
+ *  field: allowOther, shuffleOptions, minLength, maxLength, min, max, pattern, patternMessage,
+ *         minSelected, maxSelected, accept, maxSizeMB, placeholder, columns,
+ *         showIf { fieldId, equals | notEquals | includes | notEmpty }
+ *  A field with `sectionTitle` starts a new page. A block with `beforeFieldId` is placed before that
+ *  field; if its type is SECTION it also starts a new page.
+ *
+ * IMPORTANT (server side): never send `correctAnswer` to the browser and grade on the server.
+ * This component deletes `correctAnswer` from its own copy, but it was already in the network response.
+ */
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-type FormField = {
+/* ------------------------------------------------------------------ types */
+
+type Opt = string | { label: string };
+type ShowIf = { fieldId: string; equals?: any; notEquals?: any; includes?: string; notEmpty?: boolean };
+
+export type FormField = {
   id: string;
   type: string;
   label: string;
   description?: string;
   required?: boolean;
   points?: number;
-  correctAnswer?: string;
-  options?: Array<string | { label: string }>;
+  options?: Opt[];
   rows?: string[];
+  columns?: string[];
   sectionTitle?: string;
   contentTitle?: string;
   imageUrl?: string;
   videoUrl?: string;
   videoDataUrl?: string;
-  columns?: string[];
   scaleMin?: number;
   scaleMax?: number;
   scaleMinLabel?: string;
   scaleMaxLabel?: string;
   maxRating?: number;
+  placeholder?: string;
+  allowOther?: boolean;
+  shuffleOptions?: boolean;
+  minLength?: number;
+  maxLength?: number;
+  min?: number;
+  max?: number;
+  pattern?: string;
+  patternMessage?: string;
+  minSelected?: number;
+  maxSelected?: number;
+  accept?: string;
+  maxSizeMB?: number;
+  showIf?: ShowIf;
 };
 
 type FormSchema = {
@@ -28,7 +65,7 @@ type FormSchema = {
   title?: string;
   description?: string;
   descriptionImageUrl?: string;
-  fields?: FormField[];
+  fields?: any[];
   questions?: any[];
   blocks?: any[];
   themeColor?: string;
@@ -39,289 +76,1126 @@ type FormSchema = {
   confirmationMessage?: string;
 };
 
-const normalizeType = (type: string) => ({
+type Answers = Record<string, any>;
+type FileValue = { name: string; size: number; url: string };
+type UploadState = { busy: boolean; progress: number; error?: string };
+type Item = { kind: 'block'; block: any } | { kind: 'field'; field: FormField };
+type Page = { title?: string; description?: string; items: Item[] };
+
+type ReviewItem = {
+  id: string;
+  correct?: boolean;
+  points?: number;
+  maxPoints?: number;
+  yourAnswer?: any;
+  correctAnswer?: any;
+  explanation?: string;
+};
+type SubmitResult = {
+  message: string;
+  score?: number | null;
+  maxScore?: number;
+  scoreLabel?: string;
+  feedback?: string | null;
+  results?: ReviewItem[];
+};
+
+export type DynamicFormProps = {
+  schema: string | any;
+  onSubmit: (data: any) => void | Promise<any>;
+  uploadFile?: (file: File, onProgress?: (percent: number) => void) => Promise<string>;
+  draftKey?: string;
+};
+
+/* ---------------------------------------------------------------- helpers */
+
+const OTHER = '__other__';
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const PHONE_RE = /^\+?[0-9\s().-]{7,18}$/;
+const YT_RE = /(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/)|youtu\.be\/)([\w-]{11})/;
+const GROUP_TYPES = new Set(['radio', 'checkbox', 'linear_scale', 'rating', 'radio_grid', 'checkbox_grid', 'file']);
+
+const TYPE_MAP: Record<string, string> = {
   SHORT_TEXT: 'text', LONG_TEXT: 'long_text', MULTIPLE_CHOICE: 'radio', CHECKBOX: 'checkbox',
   DROPDOWN: 'select', DATE: 'date', NUMBER: 'number', EMAIL: 'email', PHONE: 'tel', URL: 'url',
   FILE_UPLOAD: 'file', RATING: 'rating', LINEAR_SCALE: 'linear_scale', MULTIPLE_CHOICE_GRID: 'radio_grid',
-  CHECKBOX_GRID: 'checkbox_grid', TIME: 'time',
-} as Record<string, string>)[type] || (type === 'mcq' ? 'select' : type === 'essay' ? 'long_text' : type);
+  CHECKBOX_GRID: 'checkbox_grid', TIME: 'time', MCQ: 'select', ESSAY: 'long_text',
+};
+const normalizeType = (type?: string) => {
+  const raw = String(type || 'text');
+  return TYPE_MAP[raw.toUpperCase().replace(/[\s-]/g, '_')] || raw.toLowerCase();
+};
 
-export default function DynamicForm({
-  schema,
-  onSubmit,
-}: {
-  schema: string | any;
-  onSubmit: (data: any) => void | Promise<any>;
-}) {
-  const [formData, setFormData] = useState<Record<string, any>>({});
-  const [submitError, setSubmitError] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [submitResult, setSubmitResult] = useState<{
-    message: string;
-    score?: number | null;
-    feedback?: string | null;
-  } | null>(null);
+const optionLabel = (o: Opt) => (typeof o === 'string' ? o : o.label);
 
-  const parsedSchema = useMemo<FormSchema | null>(() => {
-    if (!schema) return null;
-    let obj: any = schema;
-    if (typeof obj === 'string') {
-      try { obj = JSON.parse(obj); }
-      catch (error) { console.error('DynamicForm: Failed to parse schema string', error); return null; }
-    }
-    if (obj && typeof obj === 'object' && obj.schema && !Array.isArray(obj.questions) && !Array.isArray(obj.fields)) {
-      let inner = obj.schema;
-      if (typeof inner === 'string') {
-        try { inner = JSON.parse(inner); } catch { inner = {}; }
-      }
-      if (inner && typeof inner === 'object') {
-        obj = { ...obj, ...inner };
-      }
-    }
-    return obj;
-  }, [schema]);
+const isEmpty = (v: any) =>
+  v === undefined || v === null || v === '' ||
+  (Array.isArray(v) && v.length === 0) ||
+  (typeof v === 'object' && !Array.isArray(v) && !('url' in v) && Object.keys(v).length === 0);
 
-  const fields: FormField[] = useMemo(() => {
-    if (Array.isArray(parsedSchema?.fields)) return parsedSchema.fields.map((field: any, index) => ({
-      ...field,
-      id: String(field.id ?? index + 1),
-      label: field.label || field.title || `Question ${index + 1}`,
-      type: normalizeType(field.type || 'text'),
-    }));
-    return (parsedSchema?.questions || []).map((question: any, index: number) => ({
-      ...question,
-      id: String(question.id ?? question.number ?? index + 1),
-      label: question.title || question.text || `Question ${question.number || index + 1}`,
-      type: normalizeType(question.type || 'text'),
-      required: question.required === true,
-      points: question.points !== undefined ? Number(question.points) : undefined,
-      correctAnswer: question.correctAnswer,
-      options: question.options || [],
-    }));
-  }, [parsedSchema]);
+const shuffled = <T,>(list: T[]): T[] => {
+  const copy = [...list];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+};
 
-  const optionsFor = (field: FormField) => (field.options || []).map(option => typeof option === 'string' ? option : option.label);
-  const change = (id: string, value: any) => setFormData(current => ({ ...current, [id]: value }));
-
-  const handleFileChange = (fieldId: string, file?: File) => {
-    if (!file) {
-      change(fieldId, '');
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      setSubmitError('Please select a file smaller than 5 MB.');
-      return;
-    }
+const readAsDataUrl = (file: File) =>
+  new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => {
-      change(fieldId, `${file.name} (${Math.round(file.size / 1024)} KB)`);
-    };
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error('Could not read the file.'));
     reader.readAsDataURL(file);
+  });
+
+const formatSize = (bytes: number) =>
+  bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+
+const showAnswer = (v: any): string =>
+  Array.isArray(v) ? v.join(', ') : v && typeof v === 'object' ? (v.name ?? JSON.stringify(v)) : String(v ?? '—');
+
+/** Parses the schema and merges an inner `schema` field (old API shape). Never throws. */
+function parseSchema(input: any): { schema: FormSchema | null; failed: boolean } {
+  if (!input) return { schema: null, failed: false };
+  let obj: any = input;
+  if (typeof obj === 'string') {
+    try { obj = JSON.parse(obj); } catch (error) {
+      console.error('DynamicForm: failed to parse schema string', error);
+      return { schema: null, failed: true };
+    }
+  }
+  if (!obj || typeof obj !== 'object') return { schema: null, failed: true };
+  if (obj.schema && !Array.isArray(obj.questions) && !Array.isArray(obj.fields)) {
+    let inner = obj.schema;
+    if (typeof inner === 'string') { try { inner = JSON.parse(inner); } catch { inner = {}; } }
+    if (inner && typeof inner === 'object') obj = { ...obj, ...inner };
+  }
+  return { schema: obj, failed: false };
+}
+
+function normalizeFields(schema: FormSchema): FormField[] {
+  const usingFields = Array.isArray(schema.fields);
+  const raw: any[] = usingFields ? schema.fields! : schema.questions || [];
+  return raw.map((q, index) => {
+    const { correctAnswer: _hidden, ...rest } = q || {};
+    return {
+      ...rest,
+      id: String(q.id ?? q.number ?? index + 1),
+      label: q.label || q.title || q.text || `Question ${q.number ?? index + 1}`,
+      type: normalizeType(q.type),
+      required: usingFields ? !!q.required : q.required === true,
+      points: q.points !== undefined ? Number(q.points) : undefined,
+      options: q.options || [],
+    } as FormField;
+  });
+}
+
+/** Splits fields and blocks into pages. */
+function buildPages(fields: FormField[], blocks: any[], emailField?: FormField): Page[] {
+  const before: Record<string, any[]> = {};
+  const lead: any[] = [];
+  for (const block of blocks) {
+    const target = block.beforeFieldId ?? block.before;
+    if (target !== undefined && target !== null) (before[String(target)] ||= []).push(block);
+    else lead.push(block);
+  }
+  const pages: Page[] = [{ items: [] }];
+  const current = () => pages[pages.length - 1];
+  const startPage = (title?: string, description?: string) => {
+    if (current().items.some(item => item.kind === 'field')) pages.push({ title, description, items: [] });
+    else { current().title = title; current().description = description; }
+  };
+  if (emailField) current().items.push({ kind: 'field', field: emailField });
+  lead.forEach(block => current().items.push({ kind: 'block', block }));
+  for (const field of fields) {
+    for (const block of before[field.id] || []) {
+      if (block.type === 'SECTION') startPage(block.title, block.description);
+      else current().items.push({ kind: 'block', block });
+    }
+    if (field.sectionTitle) startPage(field.sectionTitle);
+    current().items.push({ kind: 'field', field });
+  }
+  return pages;
+}
+
+function isVisible(field: FormField, answers: Answers): boolean {
+  const rule = field.showIf;
+  if (!rule) return true;
+  const v = answers[rule.fieldId];
+  if (rule.notEmpty !== undefined) return rule.notEmpty ? !isEmpty(v) : isEmpty(v);
+  if (rule.equals !== undefined) return Array.isArray(v) ? v.includes(rule.equals) : v === rule.equals;
+  if (rule.notEquals !== undefined) return Array.isArray(v) ? !v.includes(rule.notEquals) : v !== rule.notEquals;
+  if (rule.includes !== undefined) return Array.isArray(v) ? v.includes(rule.includes) : String(v ?? '').includes(rule.includes);
+  return true;
+}
+
+function validateField(field: FormField, answers: Answers): string {
+  const v = answers[field.id];
+  const required = 'This is a required question.';
+  const rows = field.rows || [];
+
+  if (field.type === 'radio_grid') {
+    return field.required && rows.some(r => !v?.[r]) ? 'Answer every row.' : '';
+  }
+  if (field.type === 'checkbox_grid') {
+    return field.required && rows.some(r => !(v?.[r]?.length)) ? 'Select at least one option in every row.' : '';
+  }
+  if (isEmpty(v)) return field.required ? required : '';
+
+  const otherText = String(answers[`${field.id}::other`] ?? '').trim();
+  if ((v === OTHER || (Array.isArray(v) && v.includes(OTHER))) && !otherText) return 'Please specify your answer.';
+
+  if (field.type === 'checkbox') {
+    const count = (v as string[]).length;
+    if (field.minSelected && count < field.minSelected) return `Select at least ${field.minSelected}.`;
+    if (field.maxSelected && count > field.maxSelected) return `Select no more than ${field.maxSelected}.`;
+    return '';
+  }
+  if (field.type === 'rating' || field.type === 'linear_scale' || field.type === 'file' || field.type === 'radio' || field.type === 'select') return '';
+
+  const text = String(v);
+  if (field.minLength && text.length < field.minLength) return `Enter at least ${field.minLength} characters.`;
+  if (field.maxLength && text.length > field.maxLength) return `Enter no more than ${field.maxLength} characters.`;
+  if (field.type === 'number') {
+    const n = Number(text);
+    if (Number.isNaN(n)) return 'Enter a number.';
+    if (field.min !== undefined && n < field.min) return `Enter a number of ${field.min} or more.`;
+    if (field.max !== undefined && n > field.max) return `Enter a number of ${field.max} or less.`;
+  }
+  if (field.type === 'email' && !EMAIL_RE.test(text)) return 'Enter a valid email address.';
+  if (field.type === 'url') {
+    try { new URL(text); } catch { return 'Enter a valid web address, starting with https://'; }
+  }
+  if (field.pattern) {
+    let ok = true;
+    try { ok = new RegExp(field.pattern).test(text); } catch { ok = true; }
+    if (!ok) return field.patternMessage || 'This answer is not in the expected format.';
+  } else if (field.type === 'tel' && !PHONE_RE.test(text)) {
+    return 'Enter a valid phone number.';
+  }
+  return '';
+}
+
+/** Small allow-list sanitizer so form descriptions can use basic formatting without script injection. */
+const SAFE_TAGS = new Set(['B', 'I', 'EM', 'STRONG', 'U', 'BR', 'P', 'UL', 'OL', 'LI', 'A', 'SPAN', 'H3', 'H4', 'CODE', 'DIV']);
+const DROP_TAGS = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'LINK', 'META', 'SVG', 'MATH', 'FORM', 'INPUT', 'BUTTON', 'TEXTAREA', 'SELECT']);
+
+function sanitizeHtml(html: string): string {
+  if (typeof DOMParser === 'undefined') return html.replace(/<[^>]*>/g, '');
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const clean = (parent: Node) => {
+    Array.from(parent.childNodes).forEach(node => {
+      if (node.nodeType === 8) { parent.removeChild(node); return; }
+      if (node.nodeType !== 1) return;
+      const el = node as Element;
+      if (DROP_TAGS.has(el.tagName)) { parent.removeChild(el); return; }
+      clean(el);
+      if (!SAFE_TAGS.has(el.tagName)) {
+        while (el.firstChild) parent.insertBefore(el.firstChild, el);
+        parent.removeChild(el);
+        return;
+      }
+      const href = el.tagName === 'A' ? el.getAttribute('href') || '' : '';
+      Array.from(el.attributes).forEach(attr => el.removeAttribute(attr.name));
+      if (el.tagName === 'A' && /^(https?:|mailto:)/i.test(href)) {
+        el.setAttribute('href', href);
+        el.setAttribute('target', '_blank');
+        el.setAttribute('rel', 'noopener noreferrer');
+      }
+    });
+  };
+  clean(doc.body);
+  return doc.body.innerHTML;
+}
+
+/* ------------------------------------------------------- small components */
+
+const RichText = ({ text, className }: { text: string; className?: string }) =>
+  /<[a-z][\s\S]*>/i.test(text)
+    ? <div className={className} dangerouslySetInnerHTML={{ __html: sanitizeHtml(text) }} />
+    : <div className={`whitespace-pre-wrap ${className || ''}`}>{text}</div>;
+
+const YouTubeEmbed = ({ url, title }: { url: string; title: string }) => {
+  const match = String(url || '').match(YT_RE);
+  if (!match) return <p className="mb-4 text-xs text-amber-800">Add a valid YouTube link to show this video.</p>;
+  return (
+    <div className="mb-4 aspect-video overflow-hidden rounded-xl">
+      <iframe
+        title={title}
+        src={`https://www.youtube-nocookie.com/embed/${match[1]}`}
+        className="h-full w-full"
+        loading="lazy"
+        allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+        allowFullScreen
+      />
+    </div>
+  );
+};
+
+const ErrorIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" className="shrink-0">
+    <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" strokeWidth="1.5" />
+    <path d="M8 4.5v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    <circle cx="8" cy="11" r="0.9" fill="currentColor" />
+  </svg>
+);
+
+const StarIcon = ({ filled }: { filled: boolean }) => (
+  <svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true">
+    <path
+      d="M12 2.5l2.9 6.3 6.9.7-5.1 4.7 1.5 6.8L12 17.4 5.9 21l1.5-6.8L2.3 9.5l6.9-.7z"
+      fill={filled ? '#B26A00' : 'none'}
+      stroke={filled ? '#B26A00' : '#64748b'}
+      strokeWidth="1.5"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const inputBase =
+  'w-full rounded-lg border bg-white px-3 py-2.5 text-sm outline-none transition focus:ring-2 disabled:bg-slate-100 disabled:text-slate-500';
+const inputOk = 'border-slate-400 focus:border-slate-700 focus:ring-slate-300';
+const inputBad = 'border-rose-600 focus:border-rose-700 focus:ring-rose-200';
+
+/* ---------------------------------------------------------- question card */
+
+type CardProps = {
+  field: FormField;
+  number?: number;
+  value: any;
+  otherText: string;
+  error?: string;
+  disabled: boolean;
+  accent: string;
+  options: string[];
+  upload?: UploadState;
+  onChange: (id: string, value: any) => void;
+  onOtherChange: (id: string, text: string) => void;
+  onBlur: (id: string) => void;
+  onFile: (field: FormField, file?: File) => void;
+};
+
+const QuestionCard = memo(function QuestionCard(props: CardProps) {
+  const { field, number, value, otherText, error, disabled, accent, options, upload, onChange, onOtherChange, onBlur, onFile } = props;
+  const id = field.id;
+  const controlId = `input-${id}`;
+  const errId = `${id}-err`;
+  const descId = `${id}-desc`;
+  const labelId = `${id}-label`;
+  const isGroup = GROUP_TYPES.has(field.type);
+  const describedBy = [field.description ? descId : '', error ? errId : ''].filter(Boolean).join(' ') || undefined;
+  const aria = { 'aria-invalid': error ? true : undefined, 'aria-describedby': describedBy } as const;
+  const cls = `${inputBase} ${error ? inputBad : inputOk}`;
+  const radioCls = 'h-4 w-4 shrink-0';
+  const rowCls = 'flex min-h-11 cursor-pointer items-center gap-3 text-sm';
+  const columns = field.columns && field.columns.length ? field.columns : options;
+  const rows = field.rows || [];
+  const set = (v: any) => onChange(id, v);
+
+  const title = (
+    <>
+      {number !== undefined && `${number}. `}
+      {field.label}
+      {field.required && <span aria-hidden="true" className="text-rose-700"> *</span>}
+      {field.required && <span className="sr-only"> (required)</span>}
+    </>
+  );
+
+  let control: React.ReactNode;
+  switch (field.type) {
+    case 'long_text':
+    case 'textarea':
+      control = (
+        <>
+          <textarea
+            id={controlId} rows={4} disabled={disabled} value={value ?? ''} {...aria}
+            placeholder={field.placeholder || 'Your answer'}
+            onChange={e => set(e.target.value)} onBlur={() => onBlur(id)}
+            className={`${cls} resize-y`}
+          />
+          {field.maxLength ? (
+            <p className={`mt-1 text-right text-xs ${String(value ?? '').length > field.maxLength ? 'text-rose-700' : 'text-slate-600'}`}>
+              {String(value ?? '').length} / {field.maxLength}
+            </p>
+          ) : null}
+        </>
+      );
+      break;
+
+    case 'radio':
+      control = (
+        <div role="radiogroup" aria-labelledby={labelId} {...aria} className="space-y-1">
+          {options.map(option => (
+            <label key={option} className={rowCls}>
+              <input type="radio" name={`field-${id}`} disabled={disabled} checked={value === option}
+                onChange={() => set(option)} style={{ accentColor: accent }} className={radioCls} />
+              {option}
+            </label>
+          ))}
+          {field.allowOther && (
+            <div className="flex min-h-11 items-center gap-3 text-sm">
+              <label className="flex cursor-pointer items-center gap-3">
+                <input type="radio" name={`field-${id}`} disabled={disabled} checked={value === OTHER}
+                  onChange={() => set(OTHER)} style={{ accentColor: accent }} className={radioCls} />
+                Other:
+              </label>
+              <input type="text" aria-label="Other answer" disabled={disabled} value={otherText}
+                onChange={e => onOtherChange(id, e.target.value)} onBlur={() => onBlur(id)}
+                className="min-w-0 flex-1 border-0 border-b border-slate-400 bg-transparent px-1 py-1 text-sm outline-none focus:border-slate-700" />
+            </div>
+          )}
+        </div>
+      );
+      break;
+
+    case 'checkbox': {
+      const selected: string[] = Array.isArray(value) ? value : [];
+      const atMax = !!field.maxSelected && selected.length >= field.maxSelected;
+      const toggle = (option: string, on: boolean) =>
+        set(on ? [...selected, option] : selected.filter(v => v !== option));
+      control = (
+        <div role="group" aria-labelledby={labelId} {...aria} className="space-y-1">
+          {options.map(option => {
+            const checked = selected.includes(option);
+            const locked = !checked && atMax;
+            return (
+              <label key={option} className={`${rowCls} ${locked ? 'cursor-not-allowed text-slate-500' : ''}`}>
+                <input type="checkbox" disabled={disabled || locked} checked={checked}
+                  onChange={e => toggle(option, e.target.checked)} style={{ accentColor: accent }} className={radioCls} />
+                {option}
+              </label>
+            );
+          })}
+          {field.allowOther && (
+            <div className="flex min-h-11 items-center gap-3 text-sm">
+              <label className="flex cursor-pointer items-center gap-3">
+                <input type="checkbox" disabled={disabled || (!selected.includes(OTHER) && atMax)} checked={selected.includes(OTHER)}
+                  onChange={e => toggle(OTHER, e.target.checked)} style={{ accentColor: accent }} className={radioCls} />
+                Other:
+              </label>
+              <input type="text" aria-label="Other answer" disabled={disabled} value={otherText}
+                onChange={e => onOtherChange(id, e.target.value)} onBlur={() => onBlur(id)}
+                className="min-w-0 flex-1 border-0 border-b border-slate-400 bg-transparent px-1 py-1 text-sm outline-none focus:border-slate-700" />
+            </div>
+          )}
+          {field.maxSelected || field.minSelected ? (
+            <p className="pt-1 text-xs text-slate-600">
+              {selected.length}{field.maxSelected ? ` of ${field.maxSelected}` : ''} selected
+            </p>
+          ) : null}
+        </div>
+      );
+      break;
+    }
+
+    case 'select':
+      control = (
+        <select id={controlId} disabled={disabled} value={value ?? ''} {...aria}
+          onChange={e => set(e.target.value)} onBlur={() => onBlur(id)} className={cls}>
+          <option value="">Choose</option>
+          {options.map(option => <option key={option} value={option}>{option}</option>)}
+        </select>
+      );
+      break;
+
+    case 'linear_scale': {
+      const min = field.scaleMin ?? 1;
+      const max = Math.max(min + 1, field.scaleMax ?? 5);
+      const values = Array.from({ length: max - min + 1 }, (_, i) => min + i);
+      control = (
+        <div role="radiogroup" aria-labelledby={labelId} {...aria}>
+          <div className="flex items-start justify-between gap-2 text-xs text-slate-600">
+            <span>{min}{field.scaleMinLabel ? ` · ${field.scaleMinLabel}` : ''}</span>
+            <span>{max}{field.scaleMaxLabel ? ` · ${field.scaleMaxLabel}` : ''}</span>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+            {values.map(n => (
+              <label key={n} className="flex min-w-11 cursor-pointer flex-col items-center gap-2 text-xs">
+                <span>{n}</span>
+                <input type="radio" name={`field-${id}`} disabled={disabled} checked={Number(value) === n}
+                  onChange={() => set(n)} style={{ accentColor: accent }} className={radioCls} />
+              </label>
+            ))}
+          </div>
+        </div>
+      );
+      break;
+    }
+
+    case 'rating': {
+      const max = Math.max(1, Math.min(10, field.maxRating || 5));
+      control = (
+        <div role="group" aria-labelledby={labelId} {...aria} className="flex flex-wrap gap-1">
+          {Array.from({ length: max }, (_, i) => i + 1).map(n => (
+            <button key={n} type="button" disabled={disabled}
+              aria-label={`${n} out of ${max}`} aria-pressed={Number(value) >= n}
+              onClick={() => set(Number(value) === n ? undefined : n)}
+              className="flex h-11 w-11 items-center justify-center rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500">
+              <StarIcon filled={Number(value) >= n} />
+            </button>
+          ))}
+        </div>
+      );
+      break;
+    }
+
+    case 'radio_grid':
+    case 'checkbox_grid': {
+      const isRadio = field.type === 'radio_grid';
+      control = (
+        <div className="overflow-x-auto" {...aria}>
+          <table className="w-full min-w-[420px] text-left text-xs">
+            <caption className="sr-only">{field.label}</caption>
+            <thead>
+              <tr>
+                <td className="p-2" />
+                {columns.map(col => <th key={col} scope="col" className="p-2 text-center font-medium text-slate-700">{col}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, rowIndex) => (
+                <tr key={row} className="border-t border-slate-200">
+                  <th scope="row" className="p-2 text-sm font-medium text-slate-800">{row}</th>
+                  {columns.map(col => {
+                    const rowValue = value?.[row];
+                    const checked = isRadio ? rowValue === col : (rowValue || []).includes(col);
+                    return (
+                      <td key={col} className="p-1 text-center">
+                        <label className="inline-flex h-11 w-11 cursor-pointer items-center justify-center">
+                          <input type={isRadio ? 'radio' : 'checkbox'} disabled={disabled}
+                            name={`field-${id}-${rowIndex}`} aria-label={`${row}: ${col}`} checked={checked}
+                            onChange={e => {
+                              if (isRadio) set({ ...(value || {}), [row]: col });
+                              else {
+                                const current: string[] = rowValue || [];
+                                set({ ...(value || {}), [row]: e.target.checked ? [...current, col] : current.filter(v => v !== col) });
+                              }
+                            }}
+                            style={{ accentColor: accent }} className={radioCls} />
+                        </label>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+      break;
+    }
+
+    case 'file': {
+      const file = value as FileValue | undefined;
+      control = (
+        <div className="space-y-3" {...aria}>
+          {!file && (
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-400 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-800 focus-within:ring-2 focus-within:ring-slate-500 hover:bg-slate-100">
+              <span>{upload?.busy ? 'Uploading…' : 'Add file'}</span>
+              <input type="file" className="sr-only" disabled={disabled || upload?.busy} accept={field.accept}
+                onChange={e => { onFile(field, e.target.files?.[0]); e.target.value = ''; }} />
+            </label>
+          )}
+          {upload?.busy && (
+            <div role="progressbar" aria-label="Upload progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={upload.progress}
+              className="h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-slate-200">
+              <div className="h-full rounded-full" style={{ width: `${upload.progress}%`, backgroundColor: accent }} />
+            </div>
+          )}
+          {file && (
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm">
+              <span className="min-w-0 truncate"><span className="font-medium">{file.name}</span> <span className="text-slate-600">· {formatSize(file.size)}</span></span>
+              <button type="button" disabled={disabled} onClick={() => set(undefined)}
+                aria-label={`Remove ${file.name}`}
+                className="h-11 shrink-0 rounded-lg px-3 text-sm font-semibold text-slate-700 hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500">
+                Remove
+              </button>
+            </div>
+          )}
+          {upload?.error && <p className="text-xs text-rose-700">{upload.error}</p>}
+          {(field.accept || field.maxSizeMB !== undefined) && (
+            <p className="text-xs text-slate-600">
+              {field.accept ? `Accepted: ${field.accept}. ` : ''}Up to {field.maxSizeMB ?? 5} MB.
+            </p>
+          )}
+        </div>
+      );
+      break;
+    }
+
+    default: {
+      const htmlType = ['email', 'number', 'date', 'time', 'tel', 'url'].includes(field.type) ? field.type : 'text';
+      control = (
+        <input id={controlId} type={htmlType} disabled={disabled} value={value ?? ''} {...aria}
+          inputMode={htmlType === 'tel' ? 'tel' : htmlType === 'number' ? 'decimal' : undefined}
+          min={htmlType === 'number' ? field.min : undefined} max={htmlType === 'number' ? field.max : undefined}
+          placeholder={field.placeholder || 'Your answer'}
+          onChange={e => set(e.target.value)} onBlur={() => onBlur(id)} className={cls} />
+      );
+    }
+  }
+
+  return (
+    <section
+      id={`field-${id}`}
+      className={`rounded-2xl border bg-white p-5 shadow-sm sm:p-6 ${error ? 'border-rose-600 ring-1 ring-rose-600' : 'border-slate-200'}`}
+    >
+      {field.contentTitle && <h4 className="mb-2 text-base font-semibold">{field.contentTitle}</h4>}
+      {field.imageUrl && <img src={field.imageUrl} alt={field.label || 'Question image'} className="mb-4 max-h-[28rem] max-w-full rounded-xl object-contain" />}
+      {field.videoDataUrl && <video controls preload="metadata" src={field.videoDataUrl} className="mb-4 max-h-[28rem] w-full rounded-xl bg-black" />}
+      {field.videoUrl && <YouTubeEmbed url={field.videoUrl} title={`${field.label} video`} />}
+
+      <div className="flex items-start justify-between gap-3">
+        {isGroup
+          ? <div id={labelId} className="text-sm font-semibold leading-6 text-slate-900">{title}</div>
+          : <label id={labelId} htmlFor={controlId} className="block text-sm font-semibold leading-6 text-slate-900">{title}</label>}
+        {field.points !== undefined && field.points > 0 && (
+          <span className="shrink-0 text-xs font-medium text-slate-600">{field.points} {field.points === 1 ? 'point' : 'points'}</span>
+        )}
+      </div>
+      {field.description && <p id={descId} className="mt-1 text-xs leading-5 text-slate-600">{field.description}</p>}
+      <div className="mt-4">{control}</div>
+      {error && (
+        <p id={errId} className="mt-3 flex items-center gap-2 text-sm text-rose-700">
+          <ErrorIcon />{error}
+        </p>
+      )}
+    </section>
+  );
+});
+
+/* ------------------------------------------------------------------- main */
+
+export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey }: DynamicFormProps) {
+  const parsed = useMemo(() => parseSchema(schema), [schema]);
+  const parsedSchema = parsed.schema;
+
+  const emailField = useMemo<FormField | undefined>(
+    () => (parsedSchema?.collectEmail
+      ? { id: '_respondentEmail', type: 'email', label: 'Email address', required: true, placeholder: 'Your email address' }
+      : undefined),
+    [parsedSchema],
+  );
+  const fields = useMemo(() => (parsedSchema ? normalizeFields(parsedSchema) : []), [parsedSchema]);
+  const fieldMap = useMemo(() => {
+    const map: Record<string, FormField> = {};
+    if (emailField) map[emailField.id] = emailField;
+    fields.forEach(f => { map[f.id] = f; });
+    return map;
+  }, [fields, emailField]);
+  const optionLists = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    fields.forEach(f => {
+      const labels = (f.options || []).map(optionLabel);
+      map[f.id] = f.shuffleOptions ? shuffled(labels) : labels;
+    });
+    return map;
+  }, [fields]);
+  const pages = useMemo(() => buildPages(fields, parsedSchema?.blocks || [], emailField), [fields, parsedSchema, emailField]);
+
+  const [answers, setAnswers] = useState<Answers>({});
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [uploads, setUploads] = useState<Record<string, UploadState>>({});
+  const [pageIdx, setPageIdx] = useState(0);
+  const [showSummary, setShowSummary] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+  const [result, setResult] = useState<SubmitResult | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [restored, setRestored] = useState(false);
+
+  const answersRef = useRef(answers);
+  answersRef.current = answers;
+  const uploadRef = useRef(uploadFile);
+  uploadRef.current = uploadFile;
+  const pendingFocus = useRef<string | null>(null);
+  const topRef = useRef<HTMLDivElement>(null);
+
+  const storageKey = `dynamicform:${draftKey || parsedSchema?.id || parsedSchema?.title || 'form'}`;
+
+  /* pages that still have something to show (showIf may hide whole pages) */
+  const livePages = useMemo(
+    () => pages.filter(p => p.items.some(i => i.kind === 'block' || isVisible(i.field, answers))),
+    [pages, answers],
+  );
+  const safeIdx = Math.min(pageIdx, Math.max(livePages.length - 1, 0));
+  const page = livePages[safeIdx];
+  const isLast = safeIdx >= livePages.length - 1;
+
+  const numbering = useMemo(() => {
+    const map: Record<string, number> = {};
+    let n = 0;
+    livePages.forEach(p => p.items.forEach(i => {
+      if (i.kind === 'field' && i.field.id !== '_respondentEmail' && isVisible(i.field, answers)) map[i.field.id] = ++n;
+    }));
+    return map;
+  }, [livePages, answers]);
+
+  const pageFields = useCallback(
+    (p: Page | undefined) => (p ? p.items.flatMap(i => (i.kind === 'field' && isVisible(i.field, answersRef.current) ? [i.field] : [])) : []),
+    [],
+  );
+
+  /* ---------------------------------------------------- answer handlers */
+  const change = useCallback((id: string, value: any) => {
+    setAnswers(current => {
+      const next = { ...current };
+      if (value === undefined) delete next[id]; else next[id] = value;
+      return next;
+    });
+  }, []);
+
+  const changeOther = useCallback((id: string, text: string) => {
+    const field = fieldMap[id];
+    setAnswers(current => {
+      const next = { ...current, [`${id}::other`]: text };
+      if (text && field?.type === 'radio') next[id] = OTHER;
+      if (text && field?.type === 'checkbox' && !(current[id] || []).includes(OTHER)) next[id] = [...(current[id] || []), OTHER];
+      return next;
+    });
+  }, [fieldMap]);
+
+  const blurField = useCallback((id: string) => {
+    const field = fieldMap[id];
+    if (!field) return;
+    const message = validateField(field, answersRef.current);
+    setErrors(current => {
+      if (!message && !current[id]) return current;
+      const next = { ...current };
+      if (message) next[id] = message; else delete next[id];
+      return next;
+    });
+  }, [fieldMap]);
+
+  /* re-check fields that already show an error so it clears as soon as it is fixed */
+  useEffect(() => {
+    setErrors(current => {
+      const keys = Object.keys(current);
+      if (!keys.length) return current;
+      let changed = false;
+      const next = { ...current };
+      keys.forEach(id => {
+        const field = fieldMap[id];
+        const message = field && isVisible(field, answers) ? validateField(field, answers) : '';
+        if (!message) { delete next[id]; changed = true; }
+        else if (message !== current[id]) { next[id] = message; changed = true; }
+      });
+      return changed ? next : current;
+    });
+  }, [answers, fieldMap]);
+
+  const handleFile = useCallback(async (field: FormField, file?: File) => {
+    if (!file) return;
+    const setState = (state: UploadState) => setUploads(current => ({ ...current, [field.id]: state }));
+    const maxMB = field.maxSizeMB ?? 5;
+    if (file.size > maxMB * 1024 * 1024) { setState({ busy: false, progress: 0, error: `Please choose a file smaller than ${maxMB} MB.` }); return; }
+    if (field.accept) {
+      const allowed = field.accept.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+      const name = file.name.toLowerCase();
+      const ok = allowed.some(a => a.startsWith('.') ? name.endsWith(a) : a.endsWith('/*') ? file.type.startsWith(a.slice(0, -1)) : file.type === a);
+      if (!ok) { setState({ busy: false, progress: 0, error: `This file type is not accepted. Allowed: ${field.accept}.` }); return; }
+    }
+    setState({ busy: true, progress: 0 });
+    try {
+      const upload = uploadRef.current;
+      const url = upload
+        ? await upload(file, percent => setState({ busy: true, progress: Math.round(percent) }))
+        : await readAsDataUrl(file);
+      change(field.id, { name: file.name, size: file.size, url } as FileValue);
+      setState({ busy: false, progress: 100 });
+    } catch (error: any) {
+      setState({ busy: false, progress: 0, error: error?.message || 'Upload failed. Please try again.' });
+    }
+  }, [change]);
+
+  /* ------------------------------------------------------------- draft */
+  useEffect(() => {
+    if (!parsedSchema) return;
+    try {
+      const saved = sessionStorage.getItem(storageKey);
+      if (saved) {
+        const draft = JSON.parse(saved);
+        if (draft && typeof draft.answers === 'object' && Object.keys(draft.answers).length) {
+          setAnswers(draft.answers);
+          setRestored(true);
+        }
+      }
+    } catch { /* storage unavailable */ }
+  }, [storageKey, parsedSchema]);
+
+  useEffect(() => {
+    if (result || !parsedSchema) return;
+    const timer = setTimeout(() => {
+      try {
+        const keep: Answers = {};
+        Object.entries(answers).forEach(([id, value]) => {
+          if (fieldMap[id]?.type !== 'file') keep[id] = value;
+        });
+        if (Object.keys(keep).length) sessionStorage.setItem(storageKey, JSON.stringify({ answers: keep }));
+        else sessionStorage.removeItem(storageKey);
+      } catch { /* storage unavailable */ }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [answers, fieldMap, storageKey, result, parsedSchema]);
+
+  const dirty = !result && Object.keys(answers).length > 0;
+  useEffect(() => {
+    if (!dirty) return;
+    const handler = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [dirty]);
+
+  /* ----------------------------------------------------------- focus */
+  useEffect(() => {
+    const id = pendingFocus.current;
+    if (!id) return;
+    pendingFocus.current = null;
+    const card = document.getElementById(`field-${id}`);
+    if (!card) return;
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const target = card.querySelector<HTMLElement>('input:not([disabled]), textarea, select, button:not([disabled])');
+    target?.focus({ preventScroll: true });
+  });
+
+  const focusField = (id: string) => { pendingFocus.current = id; setErrors(current => ({ ...current })); };
+
+  /* --------------------------------------------------------- navigation */
+  const validateFields = (list: FormField[]) => {
+    const found: Record<string, string> = {};
+    list.forEach(field => {
+      const message = validateField(field, answersRef.current);
+      if (message) found[field.id] = message;
+    });
+    return found;
+  };
+
+  const applyPageErrors = (list: FormField[], found: Record<string, string>) => {
+    setErrors(current => {
+      const next = { ...current };
+      list.forEach(field => { if (found[field.id]) next[field.id] = found[field.id]; else delete next[field.id]; });
+      return next;
+    });
+  };
+
+  const goTo = (index: number) => {
+    setPageIdx(index);
+    setShowSummary(false);
+    requestAnimationFrame(() => topRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  };
+
+  const buildPayload = () => {
+    const out: Record<string, any> = {};
+    const resolveOther = (id: string, v: any) => {
+      const text = String(answersRef.current[`${id}::other`] ?? '').trim();
+      if (v === OTHER) return text;
+      if (Array.isArray(v)) return v.map(x => (x === OTHER ? text : x));
+      return v;
+    };
+    Object.values(fieldMap).forEach(field => {
+      if (!isVisible(field, answersRef.current)) return;
+      const v = answersRef.current[field.id];
+      if (!isEmpty(v)) out[field.id] = resolveOther(field.id, v);
+    });
+    return out;
+  };
+
+  const handleNext = () => {
+    const list = pageFields(page);
+    const found = validateFields(list);
+    applyPageErrors(list, found);
+    const first = list.find(f => found[f.id]);
+    if (first) { setShowSummary(true); focusField(first.id); return; }
+    goTo(Math.min(safeIdx + 1, livePages.length - 1));
   };
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (parsedSchema?.acceptingResponses === false) {
-      setSubmitError('This form is no longer accepting responses.');
+    if (submitting) return;
+    if (parsedSchema?.acceptingResponses === false) { setSubmitError('This form is no longer accepting responses.'); return; }
+    if (!isLast) { handleNext(); return; }
+
+    const everyField = livePages.flatMap(p => pageFields(p));
+    const found = validateFields(everyField);
+    setErrors(found);
+    const first = everyField.find(f => found[f.id]);
+    if (first) {
+      setShowSummary(true);
+      const pageOfFirst = livePages.findIndex(p => p.items.some(i => i.kind === 'field' && i.field.id === first.id));
+      if (pageOfFirst !== safeIdx) setPageIdx(pageOfFirst);
+      focusField(first.id);
       return;
     }
+
     setSubmitting(true);
     setSubmitError('');
-    setSubmitResult(null);
     try {
-      const res: any = await onSubmit(formData);
+      const res: any = await onSubmit(buildPayload());
+      const fallback = parsedSchema?.confirmationMessage || 'Your response has been recorded.';
       if (res && typeof res === 'object') {
-        setSubmitResult({
-          message: res.confirmationMessage || res.message || parsedSchema?.confirmationMessage || 'Your response has been recorded.',
+        setResult({
+          message: res.confirmationMessage || res.message || fallback,
           score: res.score ?? null,
+          maxScore: res.maxScore ?? 100,
+          scoreLabel: res.scoreLabel,
           feedback: res.feedback ?? null,
+          results: Array.isArray(res.results) ? res.results : undefined,
         });
       } else {
-        setSubmitResult({
-          message: typeof res === 'string' ? res : (parsedSchema?.confirmationMessage || 'Your response has been recorded.'),
-        });
+        setResult({ message: typeof res === 'string' ? res : fallback });
       }
+      try { sessionStorage.removeItem(storageKey); } catch { /* ignore */ }
     } catch (error: any) {
-      setSubmitError(error?.message || 'Unable to submit this form.');
+      setSubmitError(error?.message || 'Unable to submit this form. Your answers are still here, please try again.');
     } finally {
       setSubmitting(false);
     }
   };
 
+  const resetAll = () => {
+    setAnswers({}); setErrors({}); setUploads({}); setSubmitError(''); setShowSummary(false);
+    setConfirmClear(false); setRestored(false); setPageIdx(0);
+    try { sessionStorage.removeItem(storageKey); } catch { /* ignore */ }
+  };
+
+  /* -------------------------------------------------------------- views */
+  if (parsed.failed) {
+    return (
+      <div role="alert" className="rounded-2xl border border-rose-300 bg-rose-50 p-8 text-center text-sm text-rose-800">
+        This form couldn't be loaded. Please refresh the page or contact the form owner.
+      </div>
+    );
+  }
   if (!parsedSchema || fields.length === 0) {
     return (
-      <div className="rounded-2xl border border-dashed border-slate-300 p-8 text-center text-slate-500">
+      <div className="rounded-2xl border border-dashed border-slate-300 p-8 text-center text-slate-600">
         This form has no questions yet.
       </div>
     );
   }
 
-  const accent = parsedSchema.themeColor || '#D97757';
+  const accent = parsedSchema.themeColor || '#B4502F';
   const isClosed = parsedSchema.acceptingResponses === false;
+  const shell = 'mx-auto w-full max-w-2xl space-y-4 text-slate-800';
+  const headerCard = (
+    <header className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="h-2.5" style={{ backgroundColor: accent }} />
+      <div className="p-5 sm:p-8">
+        <h2 className="break-words text-2xl font-bold tracking-tight sm:text-3xl">{parsedSchema.title || 'Untitled form'}</h2>
+        {parsedSchema.description && <RichText text={parsedSchema.description} className="mt-3 text-sm leading-6 text-slate-700" />}
+        {parsedSchema.descriptionImageUrl && (
+          <img src={parsedSchema.descriptionImageUrl} alt="Form description attachment" className="mt-4 max-h-[28rem] max-w-full rounded-xl object-contain" />
+        )}
+        {!isClosed && !result && <p className="mt-5 text-xs text-rose-700">* Indicates required question</p>}
+      </div>
+    </header>
+  );
 
-  if (submitResult) {
+  if (isClosed && !result) {
     return (
-      <div className="mx-auto w-full max-w-2xl space-y-4 text-slate-800">
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="h-2.5" style={{ backgroundColor: accent }} />
-          <div className="p-6 sm:p-8 space-y-4">
-            <h2 className="text-2xl font-bold tracking-tight text-slate-900">
-              {parsedSchema.title || 'Untitled form'}
-            </h2>
-            <p className="text-sm text-slate-700 leading-relaxed">
-              {submitResult.message}
-            </p>
-            {submitResult.score !== null && submitResult.score !== undefined && (
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4 space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold uppercase tracking-wider text-emerald-800">
-                    AI &amp; Quiz Evaluation Score
-                  </span>
-                  <span className="text-lg font-black text-emerald-700">
-                    {submitResult.score} / 100
-                  </span>
-                </div>
-                {submitResult.feedback && (
-                  <p className="text-xs text-emerald-900 leading-relaxed">{submitResult.feedback}</p>
-                )}
-              </div>
-            )}
-            {parsedSchema.allowMultipleResponses !== false && (
-              <div className="pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setFormData({});
-                    setSubmitResult(null);
-                    setSubmitError('');
-                  }}
-                  style={{ color: accent }}
-                  className="text-sm font-semibold hover:underline"
-                >
-                  Submit another response
-                </button>
-              </div>
-            )}
-          </div>
+      <div className={shell}>
+        {headerCard}
+        <div role="status" className="rounded-2xl border border-amber-300 bg-amber-50 p-5 text-sm font-medium text-amber-900">
+          This form is no longer accepting responses.
         </div>
       </div>
     );
   }
 
+  if (result) {
+    const max = result.maxScore ?? 100;
+    return (
+      <div className={shell}>
+        {headerCard}
+        <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8" aria-live="polite">
+          <p className="text-sm leading-relaxed text-slate-800">{result.message}</p>
+          {result.score !== null && result.score !== undefined && (
+            <div className="space-y-1.5 rounded-xl border border-emerald-300 bg-emerald-50 p-4">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-emerald-900">{result.scoreLabel || 'Your score'}</span>
+                <span className="text-lg font-black text-emerald-800">{result.score} / {max}</span>
+              </div>
+              {result.feedback && <p className="text-xs leading-relaxed text-emerald-900">{result.feedback}</p>}
+            </div>
+          )}
+          {result.results && result.results.length > 0 && (
+            <ul className="space-y-3">
+              {result.results.map(item => {
+                const field = fieldMap[String(item.id)];
+                const status = item.correct === true ? 'Correct' : item.correct === false ? 'Incorrect' : 'Reviewed';
+                return (
+                  <li key={item.id} className={`rounded-xl border p-4 text-sm ${item.correct === false ? 'border-rose-400' : 'border-slate-200'}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="font-semibold">{field?.label || `Question ${item.id}`}</span>
+                      <span className="shrink-0 text-xs font-bold">
+                        {status}{item.points !== undefined ? ` · ${item.points}${item.maxPoints !== undefined ? `/${item.maxPoints}` : ''}` : ''}
+                      </span>
+                    </div>
+                    {item.yourAnswer !== undefined && <p className="mt-2 text-slate-700">Your answer: <strong>{showAnswer(item.yourAnswer)}</strong></p>}
+                    {item.correct === false && item.correctAnswer !== undefined && <p className="mt-1 text-slate-700">Correct answer: <strong>{showAnswer(item.correctAnswer)}</strong></p>}
+                    {item.explanation && <p className="mt-2 rounded-lg bg-slate-50 p-3 text-slate-700">{item.explanation}</p>}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {parsedSchema.allowMultipleResponses !== false && (
+            <button type="button" onClick={() => { resetAll(); setResult(null); }}
+              style={{ color: accent }} className="min-h-11 text-sm font-semibold underline-offset-2 hover:underline">
+              Submit another response
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  const currentFields = pageFields(page);
+  const summaryErrors = showSummary ? currentFields.filter(f => errors[f.id]) : [];
+  const totalPages = livePages.length;
+
   return (
-    <form onSubmit={handleSubmit} className="mx-auto w-full max-w-2xl space-y-4 text-slate-800">
-      <header className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="h-2.5" style={{ backgroundColor: accent }} />
-        <div className="p-5 sm:p-8">
-          <h2 className="break-words text-2xl font-bold tracking-tight sm:text-3xl">{parsedSchema.title || 'Untitled form'}</h2>
-          {parsedSchema.description && <div className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-600" dangerouslySetInnerHTML={{ __html: parsedSchema.description }} />}
-          {parsedSchema.descriptionImageUrl && <img src={parsedSchema.descriptionImageUrl} alt="Form description attachment" className="mt-4 max-h-[28rem] max-w-full rounded-xl object-contain" />}
-          <p className="mt-5 text-xs text-rose-600">* Indicates required question</p>
-        </div>
-      </header>
+    <form onSubmit={handleSubmit} noValidate className={shell}>
+      <div ref={topRef} />
 
-      {isClosed && (
-        <div className="rounded-2xl border border-amber-300 bg-amber-50 p-5 text-sm font-medium text-amber-900">
-          This form is no longer accepting responses.
+      {totalPages > 1 && (
+        <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+          <div className="flex items-baseline justify-between text-sm">
+            <span className="font-bold">Page {safeIdx + 1} of {totalPages}</span>
+            {page?.title && <span className="text-slate-600">{page.title}</span>}
+          </div>
+          <div role="progressbar" aria-label="Form progress" aria-valuemin={0} aria-valuemax={100}
+            aria-valuenow={Math.round(((safeIdx + 1) / totalPages) * 100)}
+            className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200">
+            <div className="h-full rounded-full transition-all" style={{ width: `${((safeIdx + 1) / totalPages) * 100}%`, backgroundColor: accent }} />
+          </div>
         </div>
       )}
 
-      {parsedSchema.collectEmail && (
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-          <label htmlFor="form-_respondentEmail" className="block text-sm font-semibold leading-6 text-slate-800">
-            Email address <span className="text-rose-600">*</span>
-          </label>
-          <input
-            id="form-_respondentEmail"
-            type="email"
-            required
-            disabled={isClosed}
-            value={formData._respondentEmail ?? ''}
-            onChange={e => change('_respondentEmail', e.target.value)}
-            placeholder="Your email address"
-            className="mt-3 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
-          />
+      {restored && safeIdx === 0 && (
+        <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-700">
+          <span>We restored the answers you saved earlier on this device.</span>
+          <button type="button" onClick={resetAll} className="min-h-11 font-semibold underline" style={{ color: accent }}>Start over</button>
+        </div>
+      )}
+
+      {summaryErrors.length > 0 && (
+        <div role="alert" className="rounded-xl border border-rose-600 bg-rose-50 p-4 text-sm text-rose-900">
+          <p className="flex items-center gap-2 font-semibold"><ErrorIcon />
+            {summaryErrors.length === 1 ? '1 question needs your attention.' : `${summaryErrors.length} questions need your attention.`}
+          </p>
+          <ul className="mt-2 list-inside list-disc space-y-1">
+            {summaryErrors.map(f => (
+              <li key={f.id}>
+                <button type="button" onClick={() => focusField(f.id)} className="text-left font-medium underline">
+                  {numbering[f.id] ? `Question ${numbering[f.id]}` : f.label}: {errors[f.id]}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {safeIdx === 0 && headerCard}
+
+      {page?.title && safeIdx > 0 && (
+        <section className="rounded-2xl border border-slate-200 border-t-4 bg-white p-5 shadow-sm sm:p-6" style={{ borderTopColor: accent }}>
+          <h3 className="text-lg font-bold">{page.title}</h3>
+          {page.description && <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{page.description}</p>}
         </section>
       )}
 
-      {(parsedSchema.blocks || []).map((block: any) => (
-        block.type === 'VIDEO' ? <section key={block.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-          {block.title && <h3 className="mb-2 font-semibold">{block.title}</h3>}
-          {block.description && <p className="mb-3 whitespace-pre-wrap text-sm text-slate-600">{block.description}</p>}
-          {(() => {
-            const match = String(block.url || '').match(/(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([\w-]{11})/);
-            return match ? <div className="aspect-video overflow-hidden rounded-xl"><iframe title={block.title || 'Form video'} src={`https://www.youtube-nocookie.com/embed/${match[1]}`} className="h-full w-full" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowFullScreen /></div> : <p className="text-xs text-amber-700">Add a valid YouTube video link to display it here.</p>;
-          })()}
-        </section>
-        : block.type === 'IMAGE' ? <section key={block.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-          {block.title && <h3 className="mb-2 font-semibold">{block.title}</h3>}{block.description && <p className="mb-3 whitespace-pre-wrap text-sm text-slate-600">{block.description}</p>}
-          {block.url && <img src={block.url} alt={block.title || 'Form image'} className="mx-auto max-h-[28rem] max-w-full rounded-xl object-contain" />}
-        </section>
-        : <section key={block.id} className={`rounded-2xl border bg-white p-5 shadow-sm sm:p-6 ${block.type === 'SECTION' ? 'border-t-4' : 'border-slate-200'}`} style={block.type === 'SECTION' ? { borderTopColor: accent } : undefined}>
-          {block.title && <h3 className="text-lg font-bold">{block.title}</h3>}{block.description && <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">{block.description}</p>}
-        </section>
-      ))}
-
-      {fields.map((field, index) => {
-        const options = optionsFor(field);
-        const common = 'w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200';
+      {page?.items.map(item => {
+        if (item.kind === 'block') {
+          const block = item.block;
+          if (block.type === 'VIDEO') {
+            return (
+              <section key={`b-${block.id}`} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+                {block.title && <h3 className="mb-2 font-semibold">{block.title}</h3>}
+                {block.description && <p className="mb-3 whitespace-pre-wrap text-sm text-slate-700">{block.description}</p>}
+                <YouTubeEmbed url={block.url} title={block.title || 'Form video'} />
+              </section>
+            );
+          }
+          if (block.type === 'IMAGE') {
+            return (
+              <section key={`b-${block.id}`} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+                {block.title && <h3 className="mb-2 font-semibold">{block.title}</h3>}
+                {block.description && <p className="mb-3 whitespace-pre-wrap text-sm text-slate-700">{block.description}</p>}
+                {block.url && <img src={block.url} alt={block.title || 'Form image'} className="mx-auto max-h-[28rem] max-w-full rounded-xl object-contain" />}
+              </section>
+            );
+          }
+          return (
+            <section key={`b-${block.id}`}
+              className={`rounded-2xl border bg-white p-5 shadow-sm sm:p-6 ${block.type === 'SECTION' ? 'border-t-4' : 'border-slate-200'}`}
+              style={block.type === 'SECTION' ? { borderTopColor: accent } : undefined}>
+              {block.title && <h3 className="text-lg font-bold">{block.title}</h3>}
+              {block.description && <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{block.description}</p>}
+            </section>
+          );
+        }
+        const field = item.field;
+        if (!isVisible(field, answers)) return null;
         return (
-          <section key={field.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-            {field.sectionTitle && <h3 className="mb-4 border-l-4 pl-3 text-lg font-bold" style={{ borderColor: accent }}>{field.sectionTitle}</h3>}
-            {field.contentTitle && <h4 className="mb-2 text-base font-semibold">{field.contentTitle}</h4>}
-            {field.imageUrl && <img src={field.imageUrl} alt={field.label || 'Question image'} className="mb-4 max-h-[28rem] max-w-full rounded-xl object-contain" />}
-            {field.videoDataUrl && <video controls preload="metadata" src={field.videoDataUrl} className="mb-4 max-h-[28rem] w-full rounded-xl bg-black" />}
-            {field.videoUrl && (() => {
-              const match = String(field.videoUrl).match(/(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([\w-]{11})/);
-              return match ? <div className="mb-4 aspect-video overflow-hidden rounded-xl"><iframe title={`${field.label} video`} src={`https://www.youtube-nocookie.com/embed/${match[1]}`} className="h-full w-full" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowFullScreen /></div> : <p className="mb-4 text-xs text-amber-700">Add a valid YouTube link to show this video.</p>;
-            })()}
-            <div className="flex items-start justify-between gap-2">
-              <label htmlFor={`form-${field.id}`} className="block text-sm font-semibold leading-6 text-slate-800">
-                {index + 1}. {field.label} {field.required && <span className="text-rose-600">*</span>}
-              </label>
-              {field.points !== undefined && field.points > 0 && (
-                <span className="shrink-0 text-xs font-medium text-slate-500">
-                  {field.points} {field.points === 1 ? 'point' : 'points'}
-                </span>
-              )}
-            </div>
-            {field.description && <p className="mt-1 text-xs leading-5 text-slate-500">{field.description}</p>}
-            <div className="mt-4">
-              {['long_text', 'textarea'].includes(field.type) ? <textarea id={`form-${field.id}`} disabled={isClosed} required={field.required} rows={4} value={formData[field.id] || ''} onChange={e => change(field.id, e.target.value)} placeholder="Your answer" className={`${common} resize-y`} />
-              : ['radio', 'checkbox'].includes(field.type) ? <div className="space-y-3">{options.map(option => <label key={option} className="flex min-h-8 items-center gap-3 text-sm cursor-pointer"><input type={field.type} disabled={isClosed} name={`field-${field.id}`} required={field.required && field.type === 'radio'} checked={field.type === 'checkbox' ? (formData[field.id] || []).includes(option) : formData[field.id] === option} onChange={e => field.type === 'checkbox' ? change(field.id, e.target.checked ? [...(formData[field.id] || []), option] : (formData[field.id] || []).filter((value: string) => value !== option)) : change(field.id, option)} style={{ accentColor: accent }} className="h-4 w-4" />{option}</label>)}</div>
-              : field.type === 'select' ? <select id={`form-${field.id}`} disabled={isClosed} required={field.required} value={formData[field.id] || ''} onChange={e => change(field.id, e.target.value)} className={common}><option value="">Choose</option>{options.map(option => <option key={option} value={option}>{option}</option>)}</select>
-              : field.type === 'linear_scale' ? <div><div className="flex flex-wrap items-start justify-between gap-2 text-xs text-slate-500"><span>{field.scaleMin ?? 1}{field.scaleMinLabel ? ` · ${field.scaleMinLabel}` : ''}</span><span>{field.scaleMax ?? 5}{field.scaleMaxLabel ? ` · ${field.scaleMaxLabel}` : ''}</span></div><div className="mt-3 flex flex-wrap items-center justify-between gap-2">{Array.from({ length: Math.max(2, Math.min(11, (field.scaleMax ?? 5) - (field.scaleMin ?? 1) + 1)) }, (_, i) => (field.scaleMin ?? 1) + i).map(value => <label key={value} className="flex min-w-8 flex-col items-center gap-2 text-xs cursor-pointer"><span>{value}</span><input type="radio" disabled={isClosed} name={`field-${field.id}`} required={field.required} checked={Number(formData[field.id]) === value} onChange={() => change(field.id, value)} style={{ accentColor: accent }} className="h-4 w-4" /></label>)}</div></div>
-              : field.type === 'rating' ? <div className="flex flex-wrap gap-2">{Array.from({ length: Math.max(1, Math.min(10, field.maxRating || 5)) }, (_, i) => i + 1).map(value => <button key={value} type="button" disabled={isClosed} aria-label={`${value} out of ${field.maxRating || 5}`} onClick={() => change(field.id, value)} className={`rounded-lg px-2 py-1 text-2xl ${Number(formData[field.id]) >= value ? 'text-amber-500' : 'text-slate-300'}`}>★</button>)}{field.required && !formData[field.id] && <input aria-label={`${field.label} rating`} required type="number" min="1" max={field.maxRating || 5} value="" onChange={e => change(field.id, Number(e.target.value))} className="sr-only" />}</div>
-              : ['radio_grid', 'checkbox_grid'].includes(field.type) ? <div className="overflow-x-auto"><table className="w-full min-w-[420px] text-left text-xs"><thead><tr><th className="p-2" />{options.map(option => <th key={option} className="p-2 text-center font-medium text-slate-600">{option}</th>)}</tr></thead><tbody>{(field.rows || []).map((row, rowIndex) => <tr key={row} className="border-t border-slate-100"><th className="p-2 font-medium text-slate-700">{row}</th>{options.map(option => <td key={option} className="p-2 text-center"><input type={field.type === 'radio_grid' ? 'radio' : 'checkbox'} disabled={isClosed} name={`field-${field.id}-${rowIndex}`} aria-label={`${row}: ${option}`} required={field.required && field.type === 'radio_grid'} checked={field.type === 'radio_grid' ? formData[field.id]?.[row] === option : (formData[field.id]?.[row] || []).includes(option)} onChange={e => field.type === 'radio_grid' ? change(field.id, { ...(formData[field.id] || {}), [row]: option }) : change(field.id, { ...(formData[field.id] || {}), [row]: e.target.checked ? [...(formData[field.id]?.[row] || []), option] : (formData[field.id]?.[row] || []).filter((v: string) => v !== option) })} style={{ accentColor: accent }} className="h-4 w-4" /></td>)}</tr>)}</tbody></table></div>
-              : field.type === 'file' ? (
-                <div className="space-y-2">
-                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 bg-slate-50 px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-100">
-                    <span>Add file</span>
-                    <input
-                      id={`form-${field.id}`}
-                      type="file"
-                      disabled={isClosed}
-                      required={field.required && !formData[field.id]}
-                      onChange={e => handleFileChange(field.id, e.target.files?.[0])}
-                      className="hidden"
-                    />
-                  </label>
-                  {formData[field.id] && (
-                    <p className="text-xs font-medium text-emerald-700">Attached: {String(formData[field.id])}</p>
-                  )}
-                </div>
-              )
-              : <input id={`form-${field.id}`} disabled={isClosed} type={['email', 'number', 'date', 'time', 'tel', 'url'].includes(field.type) ? field.type : 'text'} required={field.required} value={formData[field.id] ?? ''} onChange={e => change(field.id, e.target.value)} placeholder="Your answer" className={common} />}
-            </div>
-          </section>
+          <QuestionCard
+            key={field.id}
+            field={field}
+            number={numbering[field.id]}
+            value={answers[field.id]}
+            otherText={answers[`${field.id}::other`] ?? ''}
+            error={errors[field.id]}
+            disabled={submitting}
+            accent={accent}
+            options={optionLists[field.id] || []}
+            upload={uploads[field.id]}
+            onChange={change}
+            onOtherChange={changeOther}
+            onBlur={blurField}
+            onFile={handleFile}
+          />
         );
       })}
-      {submitError && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{submitError}</p>}
-      <div className="flex flex-col-reverse gap-3 pb-4 sm:flex-row sm:items-center sm:justify-between">
-        <button type="reset" disabled={isClosed} onClick={() => setFormData({})} className="rounded-lg px-4 py-3 text-sm font-semibold text-slate-600 hover:bg-white disabled:opacity-40">Clear form</button>
-        <button type="submit" disabled={submitting || isClosed} style={{ backgroundColor: accent }} className="rounded-lg px-7 py-3 text-sm font-bold text-white shadow-sm hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60">{submitting ? 'Submitting…' : 'Submit'}</button>
+
+      {submitError && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-800">{submitError}</p>}
+
+      <div className="flex flex-col-reverse gap-3 pb-2 sm:flex-row sm:items-center sm:justify-between">
+        {confirmClear ? (
+          <div className="flex items-center gap-2 text-sm" role="group" aria-label="Confirm clearing the form">
+            <span className="text-slate-700">Clear all answers?</span>
+            <button type="button" onClick={resetAll} className="min-h-11 rounded-lg px-3 font-semibold text-rose-800 hover:bg-rose-50">Yes, clear</button>
+            <button type="button" onClick={() => setConfirmClear(false)} className="min-h-11 rounded-lg px-3 font-semibold text-slate-700 hover:bg-white">Cancel</button>
+          </div>
+        ) : (
+          <button type="button" onClick={() => setConfirmClear(true)} disabled={!dirty || submitting}
+            className="min-h-11 rounded-lg px-4 text-sm font-semibold text-slate-700 hover:bg-white disabled:opacity-40">
+            Clear form
+          </button>
+        )}
+        <div className="flex gap-3">
+          {safeIdx > 0 && (
+            <button type="button" onClick={() => goTo(safeIdx - 1)} disabled={submitting}
+              className="min-h-12 rounded-lg border border-slate-400 bg-white px-6 text-sm font-semibold text-slate-800 hover:bg-slate-50">
+              Back
+            </button>
+          )}
+          {isLast ? (
+            <button type="submit" disabled={submitting}
+              style={{ backgroundColor: accent }}
+              className="min-h-12 rounded-lg px-8 text-sm font-bold text-white shadow-sm hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60">
+              {submitting ? 'Submitting…' : 'Submit'}
+            </button>
+          ) : (
+            <button type="submit" style={{ backgroundColor: accent }}
+              className="min-h-12 rounded-lg px-8 text-sm font-bold text-white shadow-sm hover:brightness-95">
+              Next
+            </button>
+          )}
+        </div>
       </div>
-      <p className="pb-5 text-center text-xs text-slate-500">Never submit passwords through forms.</p>
+      <p className="pb-5 text-center text-xs text-slate-600">Never submit passwords through forms.</p>
     </form>
   );
 }

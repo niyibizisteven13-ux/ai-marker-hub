@@ -19,6 +19,12 @@ View your app locally with the development server.
 3. Run the app:
    `npm run dev`
 
+AI marking, form scoring, and exam generation require a successful provider response. If a provider is unavailable or returns an incomplete result, no substitute marks, feedback, or questions are created; student scripts stay pending and can be retried when the provider is available.
+
+## Email OTP configuration
+
+Set `EMAIL_OTP_SECRET` to a randomly generated value of at least 32 characters (or use a `SESSION_SECRET` of that length) so OTP hashes can be verified. In development, the console email sender prints OTP email content only to the server terminal; codes are never returned by the API. Production email delivery requires `SMTP_HOST`, `SMTP_USER`, and `SMTP_PASS`; the console sender is disabled.
+
 ## Admin Knowledge and RAG
 
 Admin document uploads extract and chunk readable text before marking a document ready. With `GEMINI_API_KEY` configured, document chunks are batch-embedded and retrieval combines semantic and keyword matching; without it, uploads explicitly use keyword retrieval. Existing documents can be embedded through the admin-only `POST /api/admin/documents/:id/reindex-embeddings` endpoint.

@@ -36,6 +36,13 @@ test('AiService handles malformed JSON gracefully', () => {
   assert.deepStrictEqual(parsed, {});
 });
 
+test('AiService prefers the first valid JSON payload in surrounding prose', () => {
+  const ai = AiService.getInstance();
+  const raw = 'Here is the first result: {"status":"ok","items":[1,2]} and later another payload {"status":"later"}';
+  const parsed = ai.parseModelJson(raw);
+  assert.deepStrictEqual(parsed, { status: 'ok', items: [1, 2] });
+});
+
 test('AiService createInteraction is defined', () => {
   const ai = AiService.getInstance();
   assert.strictEqual(typeof ai.createInteraction, 'function');

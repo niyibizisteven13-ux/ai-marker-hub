@@ -1,6 +1,21 @@
 import rateLimit from 'express-rate-limit';
 
 const isDev = process.env.NODE_ENV !== 'production';
+const emailKey = (req) => {
+  const email = typeof req.body?.email === 'string'
+    ? req.body.email.trim().toLowerCase().normalize('NFKC')
+    : '';
+  return `email:${email || 'invalid'}`;
+};
+
+const otpLimit = (limit, keyGenerator) => rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit,
+  ...(keyGenerator ? { keyGenerator } : {}),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: { code: 'rate_limited', retryAfter: 900 } },
+});
 
 export const generalLimiter = isDev
   ? (req, res, next) => next()
@@ -18,6 +33,11 @@ export const authLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Too many authentication attempts. Try again later.' },
 });
+
+export const otpRequestIpLimiter = otpLimit(20);
+export const otpRequestEmailLimiter = otpLimit(3, emailKey);
+export const otpVerifyIpLimiter = otpLimit(30);
+export const otpVerifyEmailLimiter = otpLimit(10, emailKey);
 
 export const gradingLimiter = isDev
   ? (req, res, next) => next()

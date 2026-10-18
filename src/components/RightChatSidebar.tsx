@@ -1,9 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Bell, Sparkles, Brain, Cpu, ShieldCheck, Database, Search } from 'lucide-react';
+import { Plus, Bell, Sparkles } from 'lucide-react';
 import type { ChatAttachment, ChatSession, Message } from '../types';
 
 import ChatMessage from './ChatMessage';
-import BwengeLoader from './BwengeLoader';
 import { useStore } from '../store/useStore';
 
 interface RightChatSidebarProps {
@@ -237,7 +236,6 @@ export default function RightChatSidebar({
   };
 
   const submitFeedback = useStore((state) => state.submitFeedback);
-  const agentStatus = useStore((state) => state.agentStatus);
   const oracleInsights = useStore((state) => state.oracleInsights);
 
   return (
@@ -287,7 +285,7 @@ export default function RightChatSidebar({
                 </div>
               </button>
 
-              <button
+              {onOpenScanner && <button
                 type="button"
                 onClick={() => onOpenScanner?.()}
                 className="w-full flex items-center gap-3.5 p-3 rounded-xl bg-[#121722]/80 border border-slate-800/80 hover:border-orange-500/40 hover:bg-[#161C2A] transition text-left group"
@@ -301,7 +299,7 @@ export default function RightChatSidebar({
                   </div>
                   <div className="text-[11px] text-slate-500">Scan handwritten work live</div>
                 </div>
-              </button>
+              </button>}
             </div>
           </div>
         )}
@@ -316,21 +314,6 @@ export default function RightChatSidebar({
             onRetry={onRetry}
           />
         ))}
-
-        {isTyping && (
-          <div className="flex flex-col gap-2">
-            <BwengeLoader label={agentStatus || undefined} />
-            {agentStatus && (
-              <div className="flex justify-center gap-3 animate-in fade-in duration-500">
-                <Search size={12} className={agentStatus.includes('NVIDIA') ? 'text-emerald-400 animate-pulse' : 'text-slate-700'} />
-                <Brain size={12} className={agentStatus.includes('Claude') || agentStatus.includes('Orchestrator') ? 'text-amber-400 animate-pulse' : 'text-slate-700'} />
-                <Cpu size={12} className={agentStatus.includes('Engine') || agentStatus.includes('NVIDIA') ? 'text-blue-400 animate-pulse' : 'text-slate-700'} />
-                <ShieldCheck size={12} className={agentStatus.includes('Adversary') || agentStatus.includes('Critic') ? 'text-rose-400 animate-pulse' : 'text-slate-700'} />
-                <Database size={12} className={agentStatus.includes('Memory') || agentStatus.includes('Registry') ? 'text-purple-400 animate-pulse' : 'text-slate-700'} />
-              </div>
-            )}
-          </div>
-        )}
 
         <div ref={chatEndRef} />
       </main>

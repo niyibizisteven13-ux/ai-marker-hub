@@ -145,3 +145,28 @@ export interface AgentResult {
   usage: { input_tokens: number; output_tokens: number };
   hitMaxTurns: boolean;
 }
+
+export interface AgentTraceRecord {
+  id: string;
+  userIdHash: string;
+  chatIdHash: string | null;
+  capability: string;
+  model: string;
+  provider: string;
+  promptVersion: string;
+  toolCalls: Array<{
+    name: string;
+    argsValid: boolean;
+    durationMs: number;
+    ok: boolean;
+    errorCode: string | null;
+  }>;
+  retries: number;
+  tokensIn: number;
+  tokensOut: number;
+  finalStatus: 'ok' | 'failed' | 'partial' | 'refused';
+  failureClass: string | null;
+  latencyMs: number;
+  costUsd: number | null;
+  createdAt: string;
+}

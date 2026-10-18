@@ -1,0 +1,65 @@
+{
+  "generatedAt": "2026-10-16T13:06:23.499Z",
+  "evaluationMode": "offline deterministic component evaluation",
+  "split": "dev",
+  "capability": "B",
+  "metrics": {
+    "caseCount": 1,
+    "passCount": 1,
+    "successRate": 1,
+    "confidenceInterval95": [
+      0.20654931437723745,
+      1
+    ],
+    "instabilityRate": 0,
+    "graderLatencyP50Ms": 435.7566280000001,
+    "graderLatencyP95Ms": 553.457754
+  },
+  "costUsd": null,
+  "tokensIn": null,
+  "tokensOut": null,
+  "modelLatencyMs": null,
+  "notMeasured": "No model or provider requests are made by this evaluator.",
+  "tasks": [
+    {
+      "id": "file-docx-reopens-with-requested-content",
+      "capability": "B",
+      "language": "EN",
+      "difficulty": "easy",
+      "passed": true,
+      "unstable": false,
+      "runs": [
+        {
+          "passed": true,
+          "details": {
+            "fileBytes": 10625,
+            "requiredTextFound": 3,
+            "missingText": [],
+            "foundForbiddenText": []
+          },
+          "graderLatencyMs": 553.457754
+        },
+        {
+          "passed": true,
+          "details": {
+            "fileBytes": 10623,
+            "requiredTextFound": 3,
+            "missingText": [],
+            "foundForbiddenText": []
+          },
+          "graderLatencyMs": 435.7566280000001
+        },
+        {
+          "passed": true,
+          "details": {
+            "fileBytes": 10622,
+            "requiredTextFound": 3,
+            "missingText": [],
+            "foundForbiddenText": []
+          },
+          "graderLatencyMs": 411.2181479999999
+        }
+      ]
+    }
+  ]
+}

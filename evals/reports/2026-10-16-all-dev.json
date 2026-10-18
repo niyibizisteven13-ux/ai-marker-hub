@@ -1,0 +1,428 @@
+{
+  "generatedAt": "2026-10-16T13:12:41.492Z",
+  "evaluationMode": "offline deterministic component evaluation",
+  "split": "dev",
+  "capability": "all",
+  "metrics": {
+    "caseCount": 10,
+    "passCount": 10,
+    "successRate": 1,
+    "confidenceInterval95": [
+      0.7224672001371107,
+      0.9999999999999999
+    ],
+    "instabilityRate": 0,
+    "graderLatencyP50Ms": 0.07857700000022305,
+    "graderLatencyP95Ms": 460.1115450000002
+  },
+  "costUsd": null,
+  "tokensIn": null,
+  "tokensOut": null,
+  "modelLatencyMs": null,
+  "notMeasured": "No model or provider requests are made by this evaluator.",
+  "tasks": [
+    {
+      "id": "retrieval-gdp-2023",
+      "capability": "A",
+      "language": "EN",
+      "difficulty": "easy",
+      "passed": true,
+      "unstable": false,
+      "runs": [
+        {
+          "passed": true,
+          "details": {
+            "retrievedChunkIds": [
+              "gdp"
+            ],
+            "recallAtK": 1,
+            "minimumRecall": 1
+          },
+          "graderLatencyMs": 8.58020099999976
+        },
+        {
+          "passed": true,
+          "details": {
+            "retrievedChunkIds": [
+              "gdp"
+            ],
+            "recallAtK": 1,
+            "minimumRecall": 1
+          },
+          "graderLatencyMs": 0.08750000000009095
+        },
+        {
+          "passed": true,
+          "details": {
+            "retrievedChunkIds": [
+              "gdp"
+            ],
+            "recallAtK": 1,
+            "minimumRecall": 1
+          },
+          "graderLatencyMs": 0.07857700000022305
+        }
+      ]
+    },
+    {
+      "id": "retrieval-school-enrollment",
+      "capability": "A",
+      "language": "EN",
+      "difficulty": "easy",
+      "passed": true,
+      "unstable": false,
+      "runs": [
+        {
+          "passed": true,
+          "details": {
+            "retrievedChunkIds": [
+              "school"
+            ],
+            "recallAtK": 1,
+            "minimumRecall": 1
+          },
+          "graderLatencyMs": 0.16716799999994691
+        },
+        {
+          "passed": true,
+          "details": {
+            "retrievedChunkIds": [
+              "school"
+            ],
+            "recallAtK": 1,
+            "minimumRecall": 1
+          },
+          "graderLatencyMs": 5.775625999999647
+        },
+        {
+          "passed": true,
+          "details": {
+            "retrievedChunkIds": [
+              "school"
+            ],
+            "recallAtK": 1,
+            "minimumRecall": 1
+          },
+          "graderLatencyMs": 0.06985299999996641
+        }
+      ]
+    },
+    {
+      "id": "retrieval-no-supporting-passage",
+      "capability": "A",
+      "language": "EN",
+      "difficulty": "medium",
+      "passed": true,
+      "unstable": false,
+      "runs": [
+        {
+          "passed": true,
+          "details": {
+            "retrievedChunkIds": [],
+            "expectedRetrievedChunkIds": []
+          },
+          "graderLatencyMs": 0.05778500000042186
+        },
+        {
+          "passed": true,
+          "details": {
+            "retrievedChunkIds": [],
+            "expectedRetrievedChunkIds": []
+          },
+          "graderLatencyMs": 0.043004000000109954
+        },
+        {
+          "passed": true,
+          "details": {
+            "retrievedChunkIds": [],
+            "expectedRetrievedChunkIds": []
+          },
+          "graderLatencyMs": 0.03782600000022285
+        }
+      ]
+    },
+    {
+      "id": "file-docx-reopens-with-requested-content",
+      "capability": "B",
+      "language": "EN",
+      "difficulty": "easy",
+      "passed": true,
+      "unstable": false,
+      "runs": [
+        {
+          "passed": true,
+          "details": {
+            "fileBytes": 10625,
+            "requiredTextFound": 3,
+            "missingText": [],
+            "foundForbiddenText": []
+          },
+          "graderLatencyMs": 535.9893229999998
+        },
+        {
+          "passed": true,
+          "details": {
+            "fileBytes": 10622,
+            "requiredTextFound": 3,
+            "missingText": [],
+            "foundForbiddenText": []
+          },
+          "graderLatencyMs": 460.1115450000002
+        },
+        {
+          "passed": true,
+          "details": {
+            "fileBytes": 10622,
+            "requiredTextFound": 3,
+            "missingText": [],
+            "foundForbiddenText": []
+          },
+          "graderLatencyMs": 450.066879
+        }
+      ]
+    },
+    {
+      "id": "citation-valid-source",
+      "capability": "A",
+      "language": "EN",
+      "difficulty": "easy",
+      "passed": true,
+      "unstable": false,
+      "runs": [
+        {
+          "passed": true,
+          "details": {
+            "valid": true,
+            "citedChunkIds": [
+              "gdp-2023"
+            ],
+            "invalidChunkIds": [],
+            "expectedValid": true
+          },
+          "graderLatencyMs": 0.25460800000018935
+        },
+        {
+          "passed": true,
+          "details": {
+            "valid": true,
+            "citedChunkIds": [
+              "gdp-2023"
+            ],
+            "invalidChunkIds": [],
+            "expectedValid": true
+          },
+          "graderLatencyMs": 0.015553000000181783
+        },
+        {
+          "passed": true,
+          "details": {
+            "valid": true,
+            "citedChunkIds": [
+              "gdp-2023"
+            ],
+            "invalidChunkIds": [],
+            "expectedValid": true
+          },
+          "graderLatencyMs": 0.012087999999948806
+        }
+      ]
+    },
+    {
+      "id": "citation-rejects-unknown-id",
+      "capability": "J",
+      "language": "EN",
+      "difficulty": "medium",
+      "passed": true,
+      "unstable": false,
+      "runs": [
+        {
+          "passed": true,
+          "details": {
+            "valid": false,
+            "citedChunkIds": [],
+            "invalidChunkIds": [
+              "invented-source"
+            ],
+            "expectedValid": false
+          },
+          "graderLatencyMs": 0.01462100000026112
+        },
+        {
+          "passed": true,
+          "details": {
+            "valid": false,
+            "citedChunkIds": [],
+            "invalidChunkIds": [
+              "invented-source"
+            ],
+            "expectedValid": false
+          },
+          "graderLatencyMs": 0.005558999999720982
+        },
+        {
+          "passed": true,
+          "details": {
+            "valid": false,
+            "citedChunkIds": [],
+            "invalidChunkIds": [
+              "invented-source"
+            ],
+            "expectedValid": false
+          },
+          "graderLatencyMs": 0.005368000000089523
+        }
+      ]
+    },
+    {
+      "id": "extraction-readable-text",
+      "capability": "D",
+      "language": "EN",
+      "difficulty": "easy",
+      "passed": true,
+      "unstable": false,
+      "runs": [
+        {
+          "passed": true,
+          "details": {
+            "issuePresent": false,
+            "issue": null
+          },
+          "graderLatencyMs": 0.11660299999994095
+        },
+        {
+          "passed": true,
+          "details": {
+            "issuePresent": false,
+            "issue": null
+          },
+          "graderLatencyMs": 0.006150000000161526
+        },
+        {
+          "passed": true,
+          "details": {
+            "issuePresent": false,
+            "issue": null
+          },
+          "graderLatencyMs": 0.0024739999998928397
+        }
+      ]
+    },
+    {
+      "id": "extraction-skipped-page-warning",
+      "capability": "D",
+      "language": "EN",
+      "difficulty": "hard",
+      "passed": true,
+      "unstable": false,
+      "runs": [
+        {
+          "passed": true,
+          "details": {
+            "issuePresent": true,
+            "issue": "Could not fully extract the document: Page 4 failed OCR and was skipped."
+          },
+          "graderLatencyMs": 0.024015999999846827
+        },
+        {
+          "passed": true,
+          "details": {
+            "issuePresent": true,
+            "issue": "Could not fully extract the document: Page 4 failed OCR and was skipped."
+          },
+          "graderLatencyMs": 0.001502000000073167
+        },
+        {
+          "passed": true,
+          "details": {
+            "issuePresent": true,
+            "issue": "Could not fully extract the document: Page 4 failed OCR and was skipped."
+          },
+          "graderLatencyMs": 0.00097200000027442
+        }
+      ]
+    },
+    {
+      "id": "format-json-valid",
+      "capability": "I",
+      "language": "EN",
+      "difficulty": "easy",
+      "passed": true,
+      "unstable": false,
+      "runs": [
+        {
+          "passed": true,
+          "details": {
+            "valid": true,
+            "expectedValid": true,
+            "validationErrors": []
+          },
+          "graderLatencyMs": 49.42065999999977
+        },
+        {
+          "passed": true,
+          "details": {
+            "valid": true,
+            "expectedValid": true,
+            "validationErrors": []
+          },
+          "graderLatencyMs": 21.076016999999865
+        },
+        {
+          "passed": true,
+          "details": {
+            "valid": true,
+            "expectedValid": true,
+            "validationErrors": []
+          },
+          "graderLatencyMs": 28.90155900000036
+        }
+      ]
+    },
+    {
+      "id": "format-json-missing-required-field",
+      "capability": "I",
+      "language": "EN",
+      "difficulty": "medium",
+      "passed": true,
+      "unstable": false,
+      "runs": [
+        {
+          "passed": true,
+          "details": {
+            "valid": false,
+            "expectedValid": false,
+            "validationErrors": [
+              "/ must have required property 'passed'",
+              "/total must be integer"
+            ]
+          },
+          "graderLatencyMs": 13.71058099999982
+        },
+        {
+          "passed": true,
+          "details": {
+            "valid": false,
+            "expectedValid": false,
+            "validationErrors": [
+              "/ must have required property 'passed'",
+              "/total must be integer"
+            ]
+          },
+          "graderLatencyMs": 29.887312999999722
+        },
+        {
+          "passed": true,
+          "details": {
+            "valid": false,
+            "expectedValid": false,
+            "validationErrors": [
+              "/ must have required property 'passed'",
+              "/total must be integer"
+            ]
+          },
+          "graderLatencyMs": 16.570486999999957
+        }
+      ]
+    }
+  ]
+}

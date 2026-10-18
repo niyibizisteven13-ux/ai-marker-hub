@@ -1328,9 +1328,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                 <span className="block text-sm font-bold">My Forms &amp; Results</span>
                 <span className="mt-1 block text-[10px] opacity-70">Review responses, export data, and ask AI to shortlist candidates</span>
               </button>
-
-
-              <button
+              {onOpenScanner && <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
@@ -1347,7 +1345,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                 <span className="text-[10px] text-[#858075] font-medium mt-1 block">
                   Phone / Camera
                 </span>
-              </button>
+              </button>}
 
               <button
                 type="button"

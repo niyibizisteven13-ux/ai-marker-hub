@@ -1,8 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert';
+import crypto from 'node:crypto';
 import { sanitizeNext } from '../server/auth/sanitizeNext.js';
 import { normalizeEmail, generateCode, computeCodeHash } from '../server/auth/emailCode.js';
 import { isInAppBrowser, generatePKCE } from '../server/auth/googleAuth.js';
+
+process.env.EMAIL_OTP_SECRET ??= crypto.randomBytes(32).toString('hex');
 
 test('sanitizeNext allows valid relative paths and rejects dangerous values', () => {
   assert.strictEqual(sanitizeNext('/chat'), '/chat');
@@ -24,7 +27,7 @@ test('generateCode produces a 6-digit string', () => {
 });
 
 test('computeCodeHash produces HMAC-SHA256 buffer', () => {
-  const hash = computeCodeHash('test@example.com', '123456');
+  const hash = computeCodeHash('test@example.com', generateCode());
   assert.strictEqual(hash.length, 32); // SHA-256 digest length
 });
 

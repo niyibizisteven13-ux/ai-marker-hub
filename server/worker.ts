@@ -16,7 +16,6 @@ export async function runGradingJobInline(job: { id?: string; data: any; updateP
       studentId: script.studentId,
       markedScript: evaluation.markedScript,
       providers: evaluation.providers,
-      providerWarnings: evaluation.providerWarnings
     });
     if (job.updateProgress) {
       await job.updateProgress(Math.round(((i + 1) / total) * 100));
@@ -72,4 +71,3 @@ export const gradingWorker = {
   on: () => {},
   close: async () => {},
 };
-

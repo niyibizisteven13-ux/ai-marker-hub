@@ -59,6 +59,10 @@ async function performRefresh(): Promise<string | null> {
   return refreshPromise;
 }
 
+export function refreshAccessToken(): Promise<string | null> {
+  return performRefresh();
+}
+
 // Proactive refresh timer & visibility change listener
 if (typeof window !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
@@ -85,12 +89,12 @@ if (typeof window !== 'undefined') {
 
 export async function authFetch(input: RequestInfo, init?: RequestInit): Promise<Response> {
   const url = typeof input === 'string' ? input : input.url;
-  const isAuthEndpoint = url.includes('/api/auth/');
+  const isRefreshEndpoint = url.includes('/api/auth/refresh');
 
   let token = currentAccessToken;
 
-  // If token is about to expire or missing, and not calling auth endpoints, try silent refresh first
-  if (!isAuthEndpoint && (!token || tokenExpiresAt - Date.now() < 30 * 1000)) {
+  // If the token is about to expire or missing, refresh it before protected requests.
+  if (!isRefreshEndpoint && (!token || tokenExpiresAt - Date.now() < 30 * 1000)) {
     token = await performRefresh();
   }
 
@@ -101,7 +105,7 @@ export async function authFetch(input: RequestInfo, init?: RequestInit): Promise
       headers.set('Content-Type', 'application/json');
     }
 
-    if (t && !headers.has('Authorization') && !isAuthEndpoint) {
+    if (t && !headers.has('Authorization') && !isRefreshEndpoint) {
       headers.set('Authorization', `Bearer ${t}`);
     }
 
@@ -114,7 +118,7 @@ export async function authFetch(input: RequestInfo, init?: RequestInit): Promise
 
   let response = await makeRequest(token);
 
-  if (response.status === 401 && !isAuthEndpoint) {
+  if (response.status === 401 && !isRefreshEndpoint) {
     try {
       const errorBody = await response.clone().json().catch(() => ({}));
       if (errorBody?.code === 'TOKEN_EXPIRED' || !errorBody?.code) {

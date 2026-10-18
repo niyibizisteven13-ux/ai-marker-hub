@@ -11,19 +11,13 @@ export interface EmailSender {
   send(options: SendEmailOptions): Promise<void>;
 }
 
-const outbox: { to: string; subject: string; text: string; time: string }[] = [];
-
 export class ConsoleEmailSender implements EmailSender {
   async send(options: SendEmailOptions): Promise<void> {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('Console email delivery is disabled in production');
+    }
     console.log(`[EMAIL CONSOLE SENDER] To: ${options.to} | Subject: ${options.subject}`);
     console.log(`[BODY]:\n${options.text}`);
-    outbox.unshift({
-      to: options.to,
-      subject: options.subject,
-      text: options.text,
-      time: new Date().toISOString(),
-    });
-    if (outbox.length > 50) outbox.pop();
   }
 }
 
@@ -32,11 +26,11 @@ export class SmtpEmailSender implements EmailSender {
 
   constructor() {
     this.transporter = nodemailer.createTransport(process.env.EMAIL_SMTP_URL || {
-      host: process.env.SMTP_HOST || 'smtp.example.com',
+      host: process.env.SMTP_HOST,
       port: Number(process.env.SMTP_PORT || 587),
       auth: {
-        user: process.env.SMTP_USER || '',
-        pass: process.env.SMTP_PASS || '',
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
       },
     });
   }
@@ -53,22 +47,34 @@ export class SmtpEmailSender implements EmailSender {
   }
 }
 
+export function hasSmtpConfiguration(): boolean {
+  return Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+}
+
+export function validateEmailSenderConfiguration(): void {
+  if (process.env.NODE_ENV === 'production' && !hasSmtpConfiguration()) {
+    console.error('Email delivery is unavailable: production requires SMTP_HOST, SMTP_USER, and SMTP_PASS. OTP sending is disabled until configured.');
+  }
+}
+
 export function getEmailSender(): EmailSender {
+  if (process.env.NODE_ENV === 'production') {
+    if (!hasSmtpConfiguration()) {
+      throw new Error('Production email delivery requires SMTP_HOST, SMTP_USER, and SMTP_PASS');
+    }
+    return new SmtpEmailSender();
+  }
+
   const provider = process.env.EMAIL_PROVIDER || (process.env.SMTP_HOST || process.env.SMTP_USER ? 'smtp' : 'console');
   if (provider === 'smtp' || provider === 'resend' || provider === 'sendgrid') {
     try {
       return new SmtpEmailSender();
     } catch (err) {
-      console.warn('Failed to initialize SMTP email sender, falling back to console:', err);
+      console.warn('Failed to initialize SMTP email sender, falling back to development console:', err);
       return new ConsoleEmailSender();
     }
   }
   return new ConsoleEmailSender();
-}
-
-export function getDevOutbox() {
-  if (process.env.NODE_ENV === 'production') return [];
-  return outbox;
 }
 
 export function getVerificationEmailContent(code: string, locale: string = 'en') {
