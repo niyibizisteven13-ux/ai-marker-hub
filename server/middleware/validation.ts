@@ -75,6 +75,7 @@ export const chatSchema = z.object({
   service: z.preprocess(normalizeOptionalSentinel, z.string().max(50).optional()),
   extractSchema: z.preprocess(normalizeOptionalSentinel, z.string().max(10_000).optional()),
   provider: z.preprocess(normalizeOptionalSentinel, z.string().max(50).optional()),
+  answerLanguage: z.enum(['Auto', 'Kinyarwanda', 'English', 'French']).optional(),
   attachmentIds: z.preprocess(normalizeOptionalSentinel, z.union([z.string(), z.array(z.string())]).optional()),
 }).strict();
 

@@ -88,6 +88,107 @@
 .hl-yellow { background-color: rgba(245, 208, 97, 0.35); color: inherit; padding: 2px 4px; border-radius: 3px; }
 .hl-sage { background-color: rgba(136, 176, 75, 0.25); color: inherit; padding: 2px 4px; border-radius: 3px; }
 .hl-blue { background-color: rgba(91, 146, 229, 0.25); color: inherit; padding: 2px 4px; border-radius: 3px; }
+
+@keyframes bwenge-orbit {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes bwenge-orbit-reverse {
+  to { transform: rotate(-360deg); }
+}
+
+@keyframes bwenge-loader-glow {
+  0%, 100% { opacity: .65; transform: scale(.96); }
+  50% { opacity: 1; transform: scale(1.04); }
+}
+
+@keyframes bwenge-menu-enter {
+  from { transform: translateY(-4px) scale(.985); }
+  to { transform: translateY(0) scale(1); }
+}
+
+.bwenge-menu-enter {
+  animation: bwenge-menu-enter 120ms cubic-bezier(.2,.8,.2,1) both;
+}
+
+.bwenge-loader__mark {
+  position: relative;
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  place-items: center;
+  isolation: isolate;
+}
+
+.bwenge-loader__mark--large {
+  width: 4.25rem;
+  height: 4.25rem;
+}
+
+.bwenge-loader__orbit {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  animation: bwenge-orbit 2.8s linear infinite;
+}
+
+.bwenge-loader__orbit--outer {
+  border: 1.5px solid transparent;
+  border-top-color: #f0a12c;
+  border-right-color: rgb(240 161 44 / .32);
+  filter: drop-shadow(0 0 5px rgb(240 161 44 / .2));
+}
+
+.bwenge-loader__orbit--inner {
+  inset: 4px;
+  border: 1px solid transparent;
+  border-bottom-color: #4ce5d6;
+  border-left-color: rgb(76 229 214 / .28);
+  animation: bwenge-orbit-reverse 3.8s linear infinite;
+}
+
+.bwenge-loader__logo {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: .45rem;
+  animation: bwenge-loader-glow 2s ease-in-out infinite;
+}
+
+.bwenge-loader__mark--large .bwenge-loader__logo {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: .65rem;
+}
+
+.bwenge-loader__message {
+  color: var(--muted);
+  font-weight: 600;
+  letter-spacing: .01em;
+}
+
+.bwenge-menu-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / .2) transparent;
+}
+
+.bwenge-menu-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.bwenge-menu-scroll::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 9999px;
+  background: rgb(255 255 255 / .22);
+  background-clip: content-box;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bwenge-loader__orbit,
+  .bwenge-loader__logo,
+  .bwenge-menu-enter {
+    animation: none;
+  }
+}
 .hl-lilac { background-color: rgba(179, 136, 255, 0.25); color: inherit; padding: 2px 4px; border-radius: 3px; }
 
 /* Scrollbars */

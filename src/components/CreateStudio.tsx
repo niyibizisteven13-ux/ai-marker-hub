@@ -10,7 +10,6 @@ import {
   Trash2,
   Eye,
   FileText,
-  Download,
   Share2,
   PanelLeft,
   SquarePen,
@@ -22,29 +21,34 @@ import {
   Sprout,
   BarChart2,
   Languages,
-  CheckCircle2,
   HelpCircle,
   ExternalLink,
-  ShieldAlert,
-  Moon,
-  Sun,
-  LogOut
+  LogOut,
+  Copy
 } from 'lucide-react';
-import { ChatSession, Message as MessageType, ChatAttachment } from '../types';
+import { Message as MessageType, ChatAttachment } from '../types';
 import ChatMessage from './ChatMessage';
 import logoUrl from '../assets/bwenge-logo.svg';
 
 interface CreateStudioProps {
   messages: MessageType[];
-  sessions: ChatSession[];
-  onSendMessage: (text: string, attachment?: File | ChatAttachment | Array<File | ChatAttachment>) => void | Promise<void>;
+  onSendMessage: (
+    text: string,
+    attachment?: File | ChatAttachment | Array<File | ChatAttachment>,
+    options?: { answerLanguage?: string },
+  ) => void | Promise<void>;
   onNewChat: () => void;
   onLoadSession: (id: string) => void;
   onOpenSettings?: () => void;
   onDeleteChat?: () => void;
   onExportChat?: () => void;
   onShare?: () => void;
-  activeFormId?: string | null;
+  onRenameChat?: (title: string) => void;
+  activeSessionId?: string | null;
+  currentChatTitle?: string;
+  isTemporaryChat?: boolean;
+  onToggleTemporaryChat?: () => void;
+  onLogout?: () => void;
   isTyping?: boolean;
   onAbort?: () => void;
   selectedProvider?: string;
@@ -123,7 +127,6 @@ function ModePicker({ selected, onSelect }: { selected: string; onSelect: (val: 
 
 export default function CreateStudio({
   messages,
-  sessions,
   onSendMessage,
   onNewChat,
   onLoadSession,
@@ -131,7 +134,12 @@ export default function CreateStudio({
   onDeleteChat,
   onExportChat,
   onShare,
-  activeFormId,
+  onRenameChat,
+  activeSessionId,
+  currentChatTitle = '',
+  isTemporaryChat = false,
+  onToggleTemporaryChat,
+  onLogout,
   isTyping,
   onAbort,
   selectedProvider = 'auto',
@@ -151,12 +159,15 @@ export default function CreateStudio({
 }: CreateStudioProps) {
   const [inputValue, setInputValue] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   const [showSources, setShowSources] = useState(true);
   const [answerLanguage, setAnswerLanguage] = useState('Auto');
   const [isRecording, setIsRecording] = useState(false);
 
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
   const plusMenuRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -166,9 +177,22 @@ export default function CreateStudio({
 
   // Close menus on pointerdown outside
   useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && menuOpen) {
+        setMenuOpen(false);
+        setRenameOpen(false);
+        menuTriggerRef.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [menuOpen]);
+
+  useEffect(() => {
     const handleOutside = (e: PointerEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setMenuOpen(false);
+        setRenameOpen(false);
       }
       if (plusMenuRef.current && !plusMenuRef.current.contains(e.target as Node)) {
         setPlusMenuOpen(false);
@@ -192,7 +216,7 @@ export default function CreateStudio({
   const handleSend = () => {
     const text = inputValue.trim();
     if (!text && stagedAttachments.length === 0) return;
-    onSendMessage(text, stagedAttachments);
+    onSendMessage(text, stagedAttachments, { answerLanguage });
     setInputValue('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
     stickToBottomRef.current = true;
@@ -275,6 +299,7 @@ export default function CreateStudio({
 
         {/* Right: Mode Picker, Upgrade / Sign in, More Menu */}
         <div className="flex items-center gap-2">
+          {isTemporaryChat && <span className="hidden rounded-full border border-[#F0A12C]/25 bg-[#F0A12C]/10 px-2.5 py-1 text-[10px] font-semibold text-[#F6B94A] sm:inline-flex">Temporary</span>}
           <ModePicker selected={selectedProvider} onSelect={(val) => onProviderChange?.(val)} />
 
           <button
@@ -306,136 +331,172 @@ export default function CreateStudio({
           {/* Three Dots Categorized Menu */}
           <div className="relative" ref={menuRef}>
             <button
-              onClick={() => setMenuOpen((prev) => !prev)}
-              className="flex h-11 w-11 lg:h-9 lg:w-9 items-center justify-center rounded-xl text-[#C2C0B6] hover:bg-white/10 hover:text-white transition-colors focus:outline-none"
+              ref={menuTriggerRef}
+              onClick={() => {
+                if (menuOpen) setRenameOpen(false);
+                setMenuOpen((prev) => !prev);
+              }}
+              aria-haspopup="dialog"
+              aria-expanded={menuOpen}
+              title="Conversation menu"
+              className="flex h-11 w-11 lg:h-9 lg:w-9 items-center justify-center rounded-xl text-[#C2C0B6] hover:bg-white/10 hover:text-white transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#F0A12C]/70"
               aria-label="More options"
             >
               <MoreVertical size={18} />
             </button>
 
             {menuOpen && (
-              <div className="absolute right-0 mt-2 w-64 rounded-2xl border border-white/15 bg-[#30302E] shadow-2xl z-50 py-2 text-xs text-[#FAF9F5] animate-in fade-in slide-in-from-top-1 duration-150">
+              <div role="dialog" aria-label="Conversation options" className="bwenge-menu-scroll bwenge-menu-enter absolute right-0 mt-2 z-[80] flex max-h-[min(72dvh,36rem)] w-[min(20rem,calc(100vw-1.5rem))] flex-col overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-[#20201F] p-2 text-sm text-[#FAF9F5] shadow-[0_24px_80px_rgba(0,0,0,.65)] ring-1 ring-black/30 backdrop-blur-2xl">
                 {/* This Chat Section */}
-                <div className="px-3 py-1 font-bold text-[10px] tracking-wider uppercase text-neutral-400">This Chat</div>
+                <div className="px-3 pb-1.5 pt-2 font-bold text-[10px] tracking-[.14em] uppercase text-neutral-400">Conversation</div>
                 <button
+                  type="button"
                   onClick={() => {
-                    if (activeFormId) onShare?.();
+                    onShare?.();
                     setMenuOpen(false);
                   }}
-                  className="w-full flex items-center px-3.5 py-2 hover:bg-white/5 transition-colors text-left text-neutral-200"
+                  disabled={!messages.length || !onShare}
+                  className="flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-neutral-200 transition-colors hover:bg-white/[.07] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F0A12C]/70 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  <Share2 className="mr-3 w-4 h-4 text-emerald-400" /> Share Chat
+                  <Share2 className="h-4 w-4 text-[#4CE5D6]" /> Share conversation
                 </button>
+                {renameOpen ? (
+                  <form
+                    className="my-1 rounded-xl border border-white/10 bg-white/[.035] p-2.5"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      onRenameChat?.(renameValue);
+                      setRenameOpen(false);
+                      setMenuOpen(false);
+                    }}
+                  >
+                    <label htmlFor="rename-chat-title" className="mb-2 block text-[11px] font-medium text-neutral-400">Conversation title</label>
+                    <input
+                      id="rename-chat-title"
+                      autoFocus
+                      maxLength={80}
+                      value={renameValue}
+                      onChange={(event) => setRenameValue(event.target.value)}
+                      className="w-full rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-sm text-white outline-none placeholder:text-neutral-600 focus:border-[#F0A12C]/60 focus:ring-2 focus:ring-[#F0A12C]/15"
+                      placeholder="Add a title"
+                    />
+                    <div className="mt-2 flex justify-end gap-2">
+                      <button type="button" onClick={() => setRenameOpen(false)} className="rounded-lg px-3 py-1.5 text-xs text-neutral-400 hover:bg-white/5 hover:text-white">Cancel</button>
+                      <button type="submit" disabled={!renameValue.trim()} className="rounded-lg bg-[#F0A12C] px-3 py-1.5 text-xs font-semibold text-[#161513] hover:bg-[#F6B94A] disabled:opacity-40">Save title</button>
+                    </div>
+                  </form>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={!activeSessionId || !onRenameChat}
+                    onClick={() => { setRenameValue(currentChatTitle); setRenameOpen(true); }}
+                    className="flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-neutral-200 transition-colors hover:bg-white/[.07] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F0A12C]/70 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <FileText className="h-4 w-4 text-[#F0A12C]" /> Rename conversation
+                  </button>
+                )}
                 <button
-                  onClick={() => {
-                    setMenuOpen(false);
-                  }}
-                  className="w-full flex items-center px-3.5 py-2 hover:bg-white/5 transition-colors text-left text-neutral-200"
-                >
-                  <FileText className="mr-3 w-4 h-4 text-amber-400" /> Rename Chat
-                </button>
-                <button
+                  type="button"
                   onClick={() => {
                     onExportChat?.();
                     setMenuOpen(false);
                   }}
-                  className="w-full flex items-center px-3.5 py-2 hover:bg-white/5 transition-colors text-left text-neutral-200"
+                  disabled={!messages.length}
+                  className="flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-neutral-200 transition-colors hover:bg-white/[.07] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F0A12C]/70 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  <Download className="mr-3 w-4 h-4 text-teal-400" /> Export (PDF, DOCX)
+                  <Copy className="h-4 w-4 text-[#4CE5D6]" /> Copy conversation
                 </button>
                 <button
-                  onClick={() => {
-                    setMenuOpen(false);
-                  }}
-                  className="w-full flex items-center px-3.5 py-2 hover:bg-white/5 transition-colors text-left text-neutral-200"
+                  type="button"
+                  aria-pressed={isTemporaryChat}
+                  onClick={onToggleTemporaryChat}
+                  disabled={isTyping}
+                  className={`flex min-h-10 w-full items-center justify-between rounded-xl px-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F0A12C]/70 disabled:cursor-not-allowed disabled:opacity-40 ${isTemporaryChat ? 'bg-[#F0A12C]/10 text-white' : 'text-neutral-200 hover:bg-white/[.07] hover:text-white'}`}
                 >
-                  <Sparkles className="mr-3 w-4 h-4 text-purple-400" /> Temporary chat (Not saved)
+                  <span className="flex items-center gap-3"><Sparkles className="h-4 w-4 text-[#B28AFF]" /> Temporary chat</span>
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${isTemporaryChat ? 'bg-[#F0A12C]/20 text-[#F6B94A]' : 'bg-white/[.07] text-neutral-400'}`}>{isTemporaryChat ? 'On' : 'Off'}</span>
                 </button>
                 <button
+                  type="button"
                   onClick={() => {
+                    if (messages.length && !window.confirm('Clear the current conversation from this workspace?')) return;
                     onDeleteChat?.();
                     setMenuOpen(false);
                   }}
-                  className="w-full flex items-center px-3.5 py-2 hover:bg-rose-500/10 hover:text-rose-400 transition-colors text-left text-rose-400"
+                  disabled={!messages.length || isTyping}
+                  className="flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-[#F28B82] transition-colors hover:bg-rose-500/10 hover:text-[#FFAAA3] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300/50 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  <Trash2 className="mr-3 w-4 h-4" /> Delete Chat
+                  <Trash2 className="h-4 w-4" /> Clear current conversation
                 </button>
 
-                <div className="border-t border-white/10 my-1.5"></div>
+                <div className="my-2 border-t border-white/[.08]"></div>
 
                 {/* Answers Section */}
-                <div className="px-3 py-1 font-bold text-[10px] tracking-wider uppercase text-neutral-400">Answers</div>
+                <div className="px-3 pb-1.5 pt-1 font-bold text-[10px] tracking-[.14em] uppercase text-neutral-400">Answer preferences</div>
                 <button
+                  type="button"
+                  aria-pressed={showSources}
                   onClick={() => setShowSources(!showSources)}
-                  className="w-full flex items-center justify-between px-3.5 py-2 hover:bg-white/5 transition-colors text-left text-neutral-200"
+                  className="flex min-h-10 w-full items-center justify-between rounded-xl px-3 text-left text-neutral-200 transition-colors hover:bg-white/[.07] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F0A12C]/70"
                 >
-                  <span className="flex items-center"><BookOpen className="mr-3 w-4 h-4 text-blue-400" /> Show Sources</span>
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${showSources ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white/10 text-neutral-400'}`}>
+                  <span className="flex items-center gap-3"><BookOpen className="h-4 w-4 text-[#4CE5D6]" /> Show sources</span>
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${showSources ? 'bg-emerald-400/15 text-emerald-300' : 'bg-white/[.07] text-neutral-400'}`}>
                     {showSources ? 'On' : 'Off'}
                   </span>
                 </button>
-                <div className="px-3.5 py-2 flex items-center justify-between text-neutral-200 hover:bg-white/5">
-                  <span className="flex items-center"><Languages className="mr-3 w-4 h-4 text-amber-400" /> Answer Language</span>
+                <label className="flex min-h-10 items-center justify-between gap-3 rounded-xl px-3 text-neutral-200 hover:bg-white/[.07]">
+                  <span className="flex items-center gap-3"><Languages className="h-4 w-4 text-[#F0A12C]" /> Answer language</span>
                   <select
                     value={answerLanguage}
                     onChange={(e) => setAnswerLanguage(e.target.value)}
-                    className="bg-[#212121] text-xs text-neutral-200 border border-white/15 rounded px-2 py-1 outline-none"
+                    className="max-w-32 rounded-lg border border-white/10 bg-[#151514] px-2.5 py-1.5 text-xs text-neutral-200 outline-none focus:border-[#F0A12C]/60 focus:ring-2 focus:ring-[#F0A12C]/15"
                   >
                     <option value="Auto">Auto</option>
                     <option value="Kinyarwanda">Kinyarwanda</option>
                     <option value="English">English</option>
                     <option value="French">French</option>
                   </select>
-                </div>
-                <button
-                  onClick={() => {
-                    alert('Report or correct feedback submitted to correction loop.');
-                    setMenuOpen(false);
-                  }}
-                  className="w-full flex items-center px-3.5 py-2 hover:bg-white/5 transition-colors text-left text-neutral-200"
-                >
-                  <ShieldAlert className="mr-3 w-4 h-4 text-orange-400" /> Report or Correct
-                </button>
+                </label>
 
-                <div className="border-t border-white/10 my-1.5"></div>
+                <div className="my-2 border-t border-white/[.08]"></div>
 
                 {/* App Section */}
-                <div className="px-3 py-1 font-bold text-[10px] tracking-wider uppercase text-neutral-400">App</div>
+                <div className="px-3 pb-1.5 pt-1 font-bold text-[10px] tracking-[.14em] uppercase text-neutral-400">App</div>
                 <button
+                  type="button"
                   onClick={() => {
                     onOpenSettings?.();
                     setMenuOpen(false);
                   }}
-                  className="w-full flex items-center px-3.5 py-2 hover:bg-white/5 transition-colors text-left text-neutral-200"
+                  className="flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-neutral-200 transition-colors hover:bg-white/[.07] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F0A12C]/70"
                 >
-                  <Globe className="mr-3 w-4 h-4 text-teal-400" /> Language & Theme Settings
+                  <Globe className="h-4 w-4 text-[#4CE5D6]" /> Language & theme settings
                 </button>
                 <a
                   href="https://t.me/BwengeBot"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="w-full flex items-center px-3.5 py-2 hover:bg-white/5 transition-colors text-left text-neutral-200"
+                  className="flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-neutral-200 transition-colors hover:bg-white/[.07] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F0A12C]/70"
                 >
-                  <ExternalLink className="mr-3 w-4 h-4 text-sky-400" /> Open on Telegram
+                  <ExternalLink className="h-4 w-4 text-sky-300" /> Open Telegram
                 </a>
                 <button
+                  type="button"
                   onClick={() => {
                     window.location.href = 'mailto:support@bwenge.space?subject=Support%20Ticket%20-%20Bwenge%20AI%20Studio';
                     setMenuOpen(false);
                   }}
-                  className="w-full flex items-center px-3.5 py-2 hover:bg-white/5 transition-colors text-left text-neutral-200"
+                  className="flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-neutral-200 transition-colors hover:bg-white/[.07] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F0A12C]/70"
                 >
-                  <HelpCircle className="mr-3 w-4 h-4 text-yellow-400" /> Help & Support (Raise Ticket)
+                  <HelpCircle className="h-4 w-4 text-[#F0A12C]" /> Help & support
                 </button>
-                {user && (
+                {user && onLogout && (
                   <button
-                    onClick={() => {
-                      window.location.reload();
-                      setMenuOpen(false);
-                    }}
-                    className="w-full flex items-center px-3.5 py-2 hover:bg-rose-500/10 hover:text-rose-400 transition-colors text-left text-rose-400"
+                    type="button"
+                    onClick={() => { onLogout(); setMenuOpen(false); }}
+                    className="flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-[#F28B82] transition-colors hover:bg-rose-500/10 hover:text-[#FFAAA3] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300/50"
                   >
-                    <LogOut className="mr-3 w-4 h-4" /> Log Out
+                    <LogOut className="h-4 w-4" /> Sign out
                   </button>
                 )}
               </div>
@@ -522,7 +583,12 @@ export default function CreateStudio({
             messages.map((msg, idx) => (
               <ChatMessage
                 key={msg.id ?? idx}
-                message={msg}
+                message={{
+                  ...msg,
+                  sources: showSources ? msg.sources : [],
+                  citations: showSources ? msg.citations : [],
+                  sourcesUsed: showSources ? (msg as any).sourcesUsed : [],
+                }}
                 onPreviewDoc={onPreviewDoc}
                 onFeedback={onFeedback}
                 onRetry={onRetry}

@@ -809,6 +809,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
     service: bodyService,
     extractSchema,
     provider: requestedProvider,
+    answerLanguage,
     attachmentIds,
   } = req.body;
 
@@ -1356,7 +1357,7 @@ ${augmentedQuery}`;
       });
     }
 
-    const { system: systemWithContext, prompt } = isSmallTalk
+    const { system: baseSystemWithContext, prompt } = isSmallTalk
       ? buildSmallTalkPrompt(query || '')
       : buildPromptForIntent(intent, query || '', {
           attachmentText: finalAttachmentText,
@@ -1366,6 +1367,10 @@ ${augmentedQuery}`;
           hydratedContext,
           styleExemplars,
         });
+    const languageDirective = answerLanguage && answerLanguage !== 'Auto'
+      ? `\n\n[Response language preference]\nAnswer in ${answerLanguage}. Keep quoted source material in its original language.`
+      : '';
+    const systemWithContext = `${baseSystemWithContext}${languageDirective}`;
 
     const isOllama = cleanProvider === 'ollama' || (process.env.AI_PROVIDER === 'ollama' && !cleanProvider);
     const hasOllama = await aiService.providerAvailable('ollama');

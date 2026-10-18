@@ -14,6 +14,7 @@ interface AppState {
   messages: Message[];
   sessions: ChatSession[];
   activeSessionId: string | null;
+  setActiveSessionId: (id: string | null) => void;
   lastInteractionId: string | null;
   addMessage: (message: Message) => void;
   setMessages: (messages: Message[] | ((prev: Message[]) => Message[])) => void;
@@ -111,6 +112,7 @@ export const useStore = create<AppState>((set, get) => {
     messages: [],
     sessions: [],
     activeSessionId: null,
+    setActiveSessionId: (activeSessionId) => set({ activeSessionId }),
     lastInteractionId: null,
     addMessage: (msg) => set((state) => ({ messages: [...state.messages, msg] })),
     setMessages: (messages) => set((state) => ({

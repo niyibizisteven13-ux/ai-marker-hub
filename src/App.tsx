@@ -41,6 +41,7 @@ import { authFetch } from './utils/authFetch';
 import { buildExamPaperContext } from './utils/contentAwarePrompt';
 import { classifyIntent, localGreetingReply } from './utils/messageIntent';
 import CreateStudio from './components/CreateStudio';
+import { BwengeLoader } from './components/BwengeLoader';
 import { MobileSheet } from './components/MobileSheet';
 import { useIsMobile } from './hooks/useIsMobile';
 import { useVisualViewportHeight } from './hooks/useVisualViewportHeight';
@@ -106,8 +107,8 @@ export default function App() {
     messages,
     setMessages,
     addMessage,
-    sessions: chatSessions,
     setSessions: setChatSessions,
+    setActiveSessionId,
     clearChat: clearChatStore,
 
     examPaper,
@@ -172,7 +173,11 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [adminOpen, setAdminOpen] = useState<boolean>(() => window.location.pathname === '/admin');
   const [selectedProvider, setSelectedProvider] = useState<string>('gonkarouter');
-  const retryPromptRef = React.useRef<{ text: string; attachment?: File | ChatAttachment | Array<File | ChatAttachment> } | null>(null);
+  const retryPromptRef = React.useRef<{
+    text: string;
+    attachment?: File | ChatAttachment | Array<File | ChatAttachment>;
+    options?: { answerLanguage?: string };
+  } | null>(null);
   const [publicForm, setPublicForm] = useState<any | null>(null);
   const [publicFormLoading, setPublicFormLoading] = useState(false);
   const [publicFormError, setPublicFormError] = useState('');
@@ -187,6 +192,7 @@ export default function App() {
 
   const [activeDocument, setActiveDocument] = useState<UploadedFile | null>(null);
   const [stagedAttachments, setStagedAttachments] = useState<Array<File | ChatAttachment>>([]);
+  const [temporaryChatMode, setTemporaryChatMode] = useState(false);
 
   const handleStageAttachments = (files: Array<File | ChatAttachment>) => {
     setStagedAttachments((prev) => [...prev, ...files]);
@@ -381,7 +387,7 @@ export default function App() {
   useEffect(() => {
     if (authStatus !== 'authenticated' || !authenticatedUser || !workspaceHistoryLoaded || workspaceRestoreFailed) return;
     const workspace = {
-      messages,
+      messages: temporaryChatMode ? [] : messages,
       sessions: chatSessions,
       uploadedFiles,
       activeTab,
@@ -411,7 +417,7 @@ export default function App() {
     }, 1500);
 
     return () => clearTimeout(timer);
-  }, [authStatus, authenticatedUser?.id, workspaceHistoryLoaded, workspaceRestoreFailed, messages, chatSessions, uploadedFiles, activeTab, activeFormId, examPaper, studentScripts]);
+  }, [authStatus, authenticatedUser?.id, workspaceHistoryLoaded, workspaceRestoreFailed, temporaryChatMode, messages, chatSessions, uploadedFiles, activeTab, activeFormId, examPaper, studentScripts]);
 
   const showAiStatus = (type: 'info' | 'warning', message: string) => {
     setAiStatus({ type, message });
@@ -423,11 +429,14 @@ export default function App() {
       await authFetch('/api/auth/logout', { method: 'POST' });
     } catch {}
     logoutStore();
+    setTemporaryChatMode(false);
     showAiStatus('info', 'Logged out successfully');
   };
 
   const handleNewChat = () => {
     clearChatStore();
+    setActiveSessionId(null);
+    setTemporaryChatMode(false);
     handleClearStagedAttachments();
     setActiveTab('documents');
   };
@@ -435,7 +444,9 @@ export default function App() {
   const handleLoadChatSession = (sessionId: string) => {
     const session = chatSessions.find((s) => s.id === sessionId);
     if (session) {
+      setTemporaryChatMode(false);
       setMessages(normalizeLoadedMessages(session.messages || []));
+      setActiveSessionId(session.id);
       setActiveTab('documents');
     }
   };
@@ -727,7 +738,11 @@ export default function App() {
     void handleSendMessage(promptText, attachments);
   };
 
-  const handleSendMessage = async (text: string, attachment?: File | ChatAttachment | Array<File | ChatAttachment>) => {
+  const handleSendMessage = async (
+    text: string,
+    attachment?: File | ChatAttachment | Array<File | ChatAttachment>,
+    options?: { answerLanguage?: string },
+  ) => {
     if ((!text.trim() && !attachment) || isAiLoading) return;
 
     if (!authenticatedUser) {
@@ -760,7 +775,7 @@ export default function App() {
 
     const controller = new AbortController();
     setAbortController(controller);
-    retryPromptRef.current = { text, attachment };
+    retryPromptRef.current = { text, attachment, options };
     let idleTimeout: ReturnType<typeof setTimeout> | undefined;
     let timedOut = false;
     let firstTokenReceived = false;
@@ -837,6 +852,7 @@ export default function App() {
           attachmentName: firstAttachment?.name,
           attachmentMimeType: firstAttachment?.mimeType || firstAttachment?.type,
           attachmentBase64: attachmentBase64 || undefined,
+          answerLanguage: options?.answerLanguage,
         }),
         signal: controller.signal,
       });
@@ -903,8 +919,10 @@ export default function App() {
       }];
       setMessages(finalMessages);
 
+      if (temporaryChatMode) return;
       const sessionsToSave = [...chatSessions];
       const currentSessionId = activeSessionId || 'session-' + Date.now();
+      setActiveSessionId(currentSessionId);
       const existingSessionIdx = sessionsToSave.findIndex((s) => s.id === currentSessionId);
       const sessionTitle = text.slice(0, 30) + (text.length > 30 ? '...' : '');
 
@@ -1001,12 +1019,50 @@ export default function App() {
 
   const handleExportChat = () => {
     const chatText = messages.map((m) => `${m.sender.toUpperCase()}: ${m.text}`).join('\n\n');
-    navigator.clipboard.writeText(chatText);
-    showAiStatus('info', 'Conversation exported to clipboard');
+    navigator.clipboard.writeText(chatText)
+      .then(() => showAiStatus('info', 'Conversation copied to clipboard'))
+      .catch(() => showAiStatus('warning', 'Could not copy the conversation'));
+  };
+
+  const handleRenameCurrentChat = (title: string) => {
+    if (!activeSessionId) return;
+    const normalizedTitle = title.trim().slice(0, 80);
+    if (!normalizedTitle) return;
+    setChatSessions((current) => current.map((session) =>
+      session.id === activeSessionId ? { ...session, title: normalizedTitle } : session
+    ));
+  };
+
+  const handleToggleTemporaryChat = () => {
+    clearChatStore();
+    setActiveSessionId(null);
+    handleClearStagedAttachments();
+    setActiveTab('documents');
+    if (temporaryChatMode) {
+      setTemporaryChatMode(false);
+      return;
+    }
+    setTemporaryChatMode(true);
+  };
+
+  const handleShareChat = async () => {
+    const content = messages.map((message) => `${message.sender.toUpperCase()}: ${message.text}`).join('\n\n');
+    if (!content) return;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: 'Bwenge conversation', text: content });
+        return;
+      }
+      await navigator.clipboard.writeText(content);
+      showAiStatus('info', 'Conversation copied so you can share it');
+    } catch {
+      showAiStatus('warning', 'Sharing was cancelled or unavailable');
+    }
   };
 
   const handleClearCurrentChat = () => {
     clearChatStore();
+    setActiveSessionId(null);
     handleClearStagedAttachments();
   };
 
@@ -1019,10 +1075,10 @@ export default function App() {
 
   if (authStatus === 'loading') {
     return (
-      <div className="h-[var(--app-h,100dvh)] w-full flex items-center justify-center bg-[#262624] text-[#FAF9F5]">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 rounded-xl bg-[#D97757]/20 flex items-center justify-center text-[#D97757] animate-pulse">✦</div>
-          <span className="text-xs font-medium tracking-widest uppercase text-neutral-400">Loading Bwenge AI…</span>
+      <div className="h-[var(--app-h,100dvh)] w-full flex items-center justify-center bg-[#0B1420] text-[#FAF9F5]">
+        <div className="flex min-w-64 flex-col items-center gap-4 rounded-3xl border border-white/[0.07] bg-white/[0.025] px-10 py-9 shadow-2xl">
+          <BwengeLoader variant="banner" message="Preparing your workspace" />
+          <span className="text-[11px] font-medium tracking-wide text-neutral-500">This usually takes just a moment</span>
         </div>
       </div>
     );
@@ -1110,15 +1166,19 @@ export default function App() {
 
   const studioProps = {
     messages,
-    sessions: chatSessions,
     onSendMessage: handleSendMessage,
     onNewChat: handleNewChat,
     onLoadSession: handleLoadChatSession,
     onOpenSettings: () => setSettingsOpen(true),
     onDeleteChat: handleClearCurrentChat,
     onExportChat: handleExportChat,
-    onShare: () => {},
-    activeFormId,
+    activeSessionId,
+    currentChatTitle: chatSessions.find((session) => session.id === activeSessionId)?.title || '',
+    onRenameChat: handleRenameCurrentChat,
+    isTemporaryChat: temporaryChatMode,
+    onToggleTemporaryChat: handleToggleTemporaryChat,
+    onShare: handleShareChat,
+    onLogout: handleLogout,
     isTyping: isAiThinking,
     onAbort: () => abortController?.abort(),
     selectedProvider,
@@ -1142,7 +1202,7 @@ export default function App() {
     onRetry: (messageId: string) => {
       const lastUserMessage = [...messages].reverse().find((message) => message.sender === 'user');
       const retry = retryPromptRef.current;
-      if (retry) void handleSendMessage(retry.text, retry.attachment);
+      if (retry) void handleSendMessage(retry.text, retry.attachment, retry.options);
       else if (lastUserMessage) void handleSendMessage(lastUserMessage.text, lastUserMessage.attachments || lastUserMessage.attachment);
     },
     onUpgradeClick: (jobId: string, service: string) => {
@@ -1415,7 +1475,7 @@ export default function App() {
                     onRetry={() => {
                       const lastUserMessage = [...messages].reverse().find((message) => message.sender === 'user');
                       const retry = retryPromptRef.current;
-                      if (retry) void handleSendMessage(retry.text, retry.attachment);
+                      if (retry) void handleSendMessage(retry.text, retry.attachment, retry.options);
                       else if (lastUserMessage) void handleSendMessage(lastUserMessage.text, lastUserMessage.attachments || lastUserMessage.attachment);
                     }}
                   />
