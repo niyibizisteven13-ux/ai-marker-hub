@@ -141,7 +141,7 @@ export default function UpgradePage({ jobId, service, targetPlan = 'business', o
   }
 
   return (
-    <div className="min-h-[100dvh] w-full bg-[var(--bg)] text-[var(--text)] flex flex-col font-sans antialiased">
+    <div className="h-[100dvh] max-h-[100dvh] w-full overflow-y-auto upgrade-scrollbar bg-[var(--bg)] text-[var(--text)] flex flex-col font-sans antialiased">
       {orgDialogOpen && <OrganisationRequestDialog isOpen={orgDialogOpen} onClose={() => setOrgDialogOpen(false)} />}
 
       {/* Top Bar */}

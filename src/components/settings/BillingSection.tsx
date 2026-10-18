@@ -7,7 +7,6 @@ interface Receipt {
   date: string;
   amount: string;
   status: string;
-  invoiceUrl: string;
 }
 
 interface BillingData {
@@ -15,10 +14,6 @@ interface BillingData {
     planType: string;
     status: string;
     renewalDate: string;
-  };
-  paymentMethod: {
-    type: string;
-    maskedNumber: string;
   };
   receipts: Receipt[];
 }
@@ -70,8 +65,8 @@ export default function BillingSection() {
     );
   }
 
-  const sub = billing?.subscription || { planType: 'INDIVIDUAL', status: 'FREE', renewalDate: null };
-  const pm = billing?.paymentMethod || { type: 'Mobile Money', maskedNumber: '+250 78***1234' };
+  if (!billing) return <div className="space-y-4"><h2 className="text-xl text-[var(--text)]">Billing & Subscription</h2><p role="alert" className="text-sm text-[var(--danger)]">{errorMsg || 'Billing details are unavailable.'}</p><button type="button" onClick={() => { setLoading(true); setErrorMsg(null); void fetchBilling(); }} className="rounded-xl border border-[var(--line)] px-4 py-2 text-xs text-[var(--text)]">Retry</button></div>;
+  const sub = billing.subscription;
   const receipts = billing?.receipts || [];
 
   return (
@@ -117,12 +112,12 @@ export default function BillingSection() {
             <span className="text-xs font-medium text-[var(--muted)] block mb-1">Payment Method</span>
             <div className="flex items-center gap-2 text-sm font-medium text-[var(--text)]">
               <CreditCard size={16} className="text-[var(--accent)]" />
-              {pm.type} ({pm.maskedNumber})
+              Mobile Money checkout is available when you purchase a plan or marking batch.
             </div>
           </div>
           <div className="p-4 rounded-xl border border-[var(--line)] bg-[var(--bg)]">
-            <span className="text-xs font-medium text-[var(--muted)] block mb-1">Billing Email</span>
-            <span className="text-sm font-medium text-[var(--text)]">Verified Mobile Money Wallet</span>
+            <span className="text-xs font-medium text-[var(--muted)] block mb-1">Account email</span>
+            <span className="text-sm font-medium text-[var(--text)]">Your account email is used for billing notices.</span>
           </div>
         </div>
 
@@ -140,7 +135,7 @@ export default function BillingSection() {
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="px-2.5 py-1 rounded-full bg-[var(--teal)]/15 text-[var(--teal)] font-medium">{r.status}</span>
-                    <a href={r.invoiceUrl} className="text-[var(--accent)] font-medium hover:underline">Receipt</a>
+                    <span className="text-[var(--muted)]">Ref {r.id.slice(0, 8)}</span>
                   </div>
                 </div>
               ))}

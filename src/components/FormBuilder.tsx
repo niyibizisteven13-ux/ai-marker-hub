@@ -19,6 +19,7 @@
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import DynamicForm from './DynamicForm';
+import { copyToClipboard } from '../utils/copyToClipboard';
 
 /* ------------------------------------------------------------------ types */
 
@@ -105,6 +106,7 @@ export type FormBuilderProps = {
   initialSchema?: any;
   onChange?: (schema: any) => void;
   onPublish?: (schema: any) => void | { shareUrl?: string } | Promise<void | { shareUrl?: string }>;
+  onUpdateSettings?: (settings: { acceptingResponses: boolean }) => Promise<void>;
   shareUrl?: string;
   uploadFile?: (file: File) => Promise<string>;
   onBack?: () => void;
@@ -692,7 +694,7 @@ const AGENT_CHIPS = [
   { label: 'Add 3 Smart Follow-up Questions', prompt: 'Add 3 smart follow-up questions that fit this form.' },
 ];
 
-export default function FormBuilder({ initialSchema, onChange, onPublish, shareUrl, uploadFile, onBack, onResults, onRunAgent }: FormBuilderProps) {
+export default function FormBuilder({ initialSchema, onChange, onPublish, onUpdateSettings, shareUrl, uploadFile, onBack, onResults, onRunAgent }: FormBuilderProps) {
   const [state, setState] = useState<BuilderState>(() => (initialSchema ? fromSchema(initialSchema) : blankState()));
   const [activeId, setActiveId] = useState<string | null>(() => state.items[0]?.id ?? null);
   const [view, setView] = useState<'build' | 'preview'>('build');
@@ -781,8 +783,21 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, shareU
   };
 
   const copy = async (text: string, key: string) => {
-    try { await navigator.clipboard.writeText(text); setCopied(key); setTimeout(() => setCopied(''), 1800); }
-    catch { setCopied('failed'); }
+    try { await copyToClipboard(text); setCopied(key); setTimeout(() => setCopied(''), 1800); }
+    catch { setCopied('failed'); setTimeout(() => setCopied(''), 2500); }
+  };
+
+  const updateAcceptingResponses = async (acceptingResponses: boolean) => {
+    const previousValue = state.acceptingResponses;
+    setField('acceptingResponses', acceptingResponses);
+    if (publishedJson === null || !onUpdateSettings) return;
+    try {
+      await onUpdateSettings({ acceptingResponses });
+      setPublishedJson(JSON.stringify({ ...schema, acceptingResponses }));
+    } catch (error: any) {
+      setField('acceptingResponses', previousValue);
+      setProblems([{ text: error?.message || 'Could not update response settings.' }]);
+    }
   };
 
   const runAgent = async (prompt: string) => {
@@ -884,13 +899,14 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, shareU
                 <div className="flex flex-wrap gap-2">
                   <input readOnly aria-label="Form link" value={publishedUrl} className={`${inp} flex-1`} onFocus={e => e.currentTarget.select()} />
                   <button type="button" className={btn} onClick={() => copy(publishedUrl, 'link')}>{copied === 'link' ? 'Copied' : 'Copy link'}</button>
+                  <a className={btn} href={publishedUrl} target="_blank" rel="noopener noreferrer">Open form</a>
                 </div>
                 <Field label="Announcement message" hint="Edit it, then paste it into WhatsApp, email or your class channel.">
                   <textarea rows={3} className={inp} value={announcement} onChange={e => setAnnouncement(e.target.value)} />
                 </Field>
                 <div className="flex flex-wrap items-center gap-3">
                   <button type="button" className={btn} onClick={() => copy(announcement, 'msg')}>{copied === 'msg' ? 'Copied' : 'Copy message'}</button>
-                  <Toggle label="Accepting responses" checked={state.acceptingResponses} onChange={v => setField('acceptingResponses', v)} />
+                  <Toggle label="Accepting responses" checked={state.acceptingResponses} onChange={v => void updateAcceptingResponses(v)} />
                 </div>
                 {copied === 'failed' && <p role="alert" className="text-xs text-rose-700">Copying isn't available here. Select the text and copy it manually.</p>}
               </>

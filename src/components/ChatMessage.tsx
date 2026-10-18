@@ -16,6 +16,7 @@ import BwengeLoader from './BwengeLoader';
 import DynamicForm from './DynamicForm';
 import AnalyticsDashboard from './AnalyticsDashboard';
 import MarkdownRenderer from './MarkdownRenderer';
+import { copyToClipboard } from '../utils/copyToClipboard';
 
 interface ChatMessageProps {
   message: any;
@@ -130,6 +131,7 @@ export default function ChatMessage({
     }
   });
   const [chatFormLinkCopied, setChatFormLinkCopied] = useState(false);
+  const [chatFormLinkError, setChatFormLinkError] = useState(false);
 
   const ensureChatFormSaved = async (): Promise<string | null> => {
     if (chatFormId) return chatFormId;
@@ -277,16 +279,19 @@ export default function ChatMessage({
                     <button
                       type="button"
                       onClick={async () => {
-                        const fId = await ensureChatFormSaved();
-                        if (fId) {
-                          navigator.clipboard.writeText(`${window.location.origin}/forms/${fId}`);
-                          setChatFormLinkCopied(true);
-                          setTimeout(() => setChatFormLinkCopied(false), 1800);
-                        }
+                        setChatFormLinkError(false);
+                        try {
+                          const fId = await ensureChatFormSaved();
+                          if (fId) {
+                            await copyToClipboard(new URL(`/forms/${encodeURIComponent(fId)}`, window.location.origin).toString());
+                            setChatFormLinkCopied(true);
+                            window.setTimeout(() => setChatFormLinkCopied(false), 1800);
+                          }
+                        } catch { setChatFormLinkError(true); }
                       }}
                       className="rounded-lg bg-[#D97757] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[#c66849]"
                     >
-                      {chatFormLinkCopied ? 'Link Copied!' : chatFormId ? 'Copy Form Link' : 'Create & Copy Link'}
+                      {chatFormLinkCopied ? 'Link Copied!' : chatFormLinkError ? 'Copy failed' : chatFormId ? 'Copy Form Link' : 'Create & Copy Link'}
                     </button>
                     <button
                       type="button"

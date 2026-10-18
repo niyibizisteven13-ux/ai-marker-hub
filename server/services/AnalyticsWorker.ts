@@ -1,6 +1,7 @@
 import { prisma } from '../db.js';
 import { AgentPillarBase } from './AgentPillars.js';
 import { FormScoringService } from './FormScoringService.js';
+import { redactFormAnswersForAi } from './formPrivacy.js';
 import logger from '../utils/logger.js';
 
 export class AnalyticsWorker extends AgentPillarBase {
@@ -85,7 +86,7 @@ EXPECTED JSON:
       let insights: any = {};
       try {
         const rawInsights = await this.aiService.sendGonkaChat(
-          `FORM: ${submission.form.title}\nFORM QUESTIONS: ${submission.form.schema}\nSUBMISSION ANSWERS: ${submission.data}`,
+          `FORM: ${submission.form.title}\nFORM QUESTIONS: ${submission.form.schema}\nSUBMISSION ANSWERS: ${JSON.stringify(redactFormAnswersForAi(JSON.parse(submission.form.schema || '{}'), JSON.parse(submission.data || '{}')))}`,
           { system: systemPrompt },
         );
         insights = this.aiService.parseModelJson(rawInsights);
@@ -204,17 +205,26 @@ EXPECTED JSON:
       let correctCount = 0;
       const hasCorrectAnswer = q.correctAnswer !== undefined && q.correctAnswer !== null && String(q.correctAnswer).trim() !== '';
 
+      const normalizeQuizAnswer = (answer: unknown) => String(answer ?? '')
+        .normalize('NFKD')
+        .replace(/\p{M}+/gu, '')
+        .toLocaleLowerCase()
+        .replace(/[^\p{L}\p{N}]+/gu, ' ')
+        .trim();
+
       for (const { submission, answers } of parsedSubmissions) {
         const val = answers[qId] ?? answers[qTitle];
         if (val === undefined || val === null || val === '' || (Array.isArray(val) && val.length === 0)) continue;
         answeredCount++;
 
         if (hasCorrectAnswer) {
-          const expected = String(q.correctAnswer).trim().toLowerCase();
+          const expected = Array.isArray(q.correctAnswer)
+            ? q.correctAnswer.map(normalizeQuizAnswer).sort().join('|')
+            : normalizeQuizAnswer(q.correctAnswer);
           const actual = Array.isArray(val)
-            ? val.map((v: any) => String(v).trim().toLowerCase()).join(', ')
-            : String(val).trim().toLowerCase();
-          if (actual === expected || (expected.length > 3 && actual.includes(expected))) {
+            ? val.map(normalizeQuizAnswer).sort().join('|')
+            : normalizeQuizAnswer(val);
+          if (actual === expected) {
             correctCount++;
           }
         }
@@ -324,11 +334,12 @@ EXPECTED JSON:
         rankId: index + 1,
         submissionId: submission.id,
         submittedAt: submission.createdAt,
-        answers: JSON.parse(submission.data),
+        answers: redactFormAnswersForAi(schema, JSON.parse(submission.data)),
         score: submission.extractedInsights?.score ?? null,
+        selected: submission.extractedInsights?.selected ?? false,
         scoringFeedback: submission.extractedInsights?.scoringFeedback,
         summary: submission.extractedInsights?.summary,
-        criteria: submission.extractedInsights?.scoringDetails ? JSON.parse(submission.extractedInsights.scoringDetails) : [],
+        details: (() => { try { return JSON.parse(submission.extractedInsights?.scoringDetails || '{}'); } catch { return {}; } })(),
       }));
       try {
         const raw = await this.aiService.sendGonkaChat(
@@ -355,15 +366,30 @@ EXPECTED JSON:
           ) {
             throw new Error('AI ranking returned an invalid candidate result.');
           }
-          return { rankId, score: Math.round(score), selected: row.selected, reason: row.reason.trim() };
+          const candidate = evidence.find((item) => item.rankId === rankId)!;
+          if (candidate.details.ownerReview === true) {
+            return {
+              rankId,
+              score: candidate.score === null ? Math.round(score) : Number(candidate.score),
+              selected: Boolean(candidate.selected),
+              reason: candidate.scoringFeedback || candidate.summary || row.reason.trim(),
+              ownerReviewed: true,
+            };
+          }
+          return { rankId, score: Math.round(score), selected: row.selected, reason: row.reason.trim(), ownerReviewed: false };
         });
         if (new Set(safeRankings.map((row: any) => row.rankId)).size !== evidence.length) {
           throw new Error('AI ranking returned duplicate candidates.');
         }
 
         safeRankings.sort((a: any, b: any) => b.score - a.score);
-        const eligible = safeRankings.filter((row: any) => row.selected);
-        const selectedIds = new Set(eligible.slice(0, maxSelections || eligible.length).map((row: any) => Number(row.rankId)));
+        const ownerSelected = safeRankings.filter((row: any) => row.ownerReviewed && row.selected);
+        const eligible = safeRankings.filter((row: any) => row.selected && !row.ownerReviewed);
+        const remainingSlots = maxSelections > 0 ? Math.max(0, maxSelections - ownerSelected.length) : eligible.length;
+        const selectedIds = new Set([
+          ...ownerSelected.map((row: any) => Number(row.rankId)),
+          ...eligible.slice(0, remainingSlots).map((row: any) => Number(row.rankId)),
+        ]);
         safeRankings.forEach((row: any) => { row.selected = selectedIds.has(Number(row.rankId)); });
 
         selection = {
@@ -373,6 +399,7 @@ EXPECTED JSON:
 
         const writes = safeRankings.map((row: any) => {
           const candidate = evidence.find((item) => item.rankId === Number(row.rankId))!;
+          if (candidate.details.ownerReview === true) return null;
           return prisma.extractedInsight.upsert({
             where: { submissionId: candidate.submissionId },
             update: {
@@ -380,7 +407,7 @@ EXPECTED JSON:
               score: row.score,
               scoringFeedback: String(row.reason || ''),
               scoringDetails: JSON.stringify({
-                criteria: candidate.criteria,
+              criteria: candidate.details,
                 selection: { score: row.score, reason: String(row.reason || '') },
                 requirements: requirementText,
               }),
@@ -392,20 +419,27 @@ EXPECTED JSON:
               scoringFeedback: String(row.reason || ''),
               summary: candidate.summary || String(row.reason || ''),
               scoringDetails: JSON.stringify({
-                criteria: candidate.criteria,
+              criteria: candidate.details,
                 selection: { score: row.score, reason: String(row.reason || '') },
                 requirements: requirementText,
               }),
             },
           });
         });
-        await prisma.$transaction([
-          prisma.extractedInsight.updateMany({
-            where: { submissionId: { in: analyzed.map((submission) => submission.id) } },
+        const unreviewedSubmissionIds = analyzed
+          .filter((submission) => {
+            try { return JSON.parse(submission.extractedInsights?.scoringDetails || '{}').ownerReview !== true; }
+            catch { return true; }
+          })
+          .map((submission) => submission.id);
+        const selectionWrites = [
+          ...(unreviewedSubmissionIds.length ? [prisma.extractedInsight.updateMany({
+            where: { submissionId: { in: unreviewedSubmissionIds } },
             data: { selected: false },
-          }),
-          ...writes,
-        ]);
+          })] : []),
+          ...writes.filter(Boolean),
+        ];
+        if (selectionWrites.length) await prisma.$transaction(selectionWrites as any);
       } catch (error: any) {
         logger.error(`AI ranking failed for form ${formId}; no selection was produced.`, {
           errorType: error?.name || 'Error',
@@ -437,6 +471,7 @@ EXPECTED JSON:
         feedback: (() => {
           try {
             const details = JSON.parse(submission.extractedInsights?.scoringDetails || '{}');
+            if (details.ownerReview === true) return submission.extractedInsights?.scoringFeedback || submission.extractedInsights?.summary || null;
             return details.selection?.reason || submission.extractedInsights?.scoringFeedback || submission.extractedInsights?.summary || null;
           } catch {
             return submission.extractedInsights?.scoringFeedback || submission.extractedInsights?.summary || null;

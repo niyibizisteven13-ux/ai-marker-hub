@@ -225,7 +225,8 @@ router.get('/:id/responses', requireAuth, async (req, res) => {
               skills: (() => {
                 try { return JSON.parse(submission.extractedInsights.skills || '[]'); } catch { return []; }
               })(),
-              details: submission.extractedInsights.scoringDetails ? JSON.parse(submission.extractedInsights.scoringDetails) : null,
+              details: (() => { try { return JSON.parse(submission.extractedInsights.scoringDetails || 'null'); } catch { return null; } })(),
+              ownerReviewed: (() => { try { return JSON.parse(submission.extractedInsights.scoringDetails || '{}').ownerReview === true; } catch { return false; } })(),
             }
           : null,
       })),
@@ -243,21 +244,49 @@ router.patch('/:id/responses/:submissionId', requireAuth, async (req, res) => {
     if (!form) return res.status(404).json({ error: 'Form not found.' });
     if (!userId || form.userId !== userId) return res.status(403).json({ error: 'You do not have access to this form.' });
 
+    const submission = await prisma.formSubmission.findFirst({
+      where: { id: req.params.submissionId, formId: form.id },
+    });
+    if (!submission) return res.status(404).json({ error: 'Response not found for this form.' });
+
     const { selected, score, feedback } = req.body || {};
     const updateData: Record<string, any> = {};
     if (typeof selected === 'boolean') updateData.selected = selected;
-    if (score !== undefined && Number.isFinite(Number(score))) updateData.score = Math.max(0, Math.min(100, Number(score)));
-    if (typeof feedback === 'string') updateData.scoringFeedback = feedback;
+    if (score !== undefined) {
+      const parsedScore = Number(score);
+      if (!Number.isFinite(parsedScore) || parsedScore < 0 || parsedScore > 100) {
+        return res.status(400).json({ error: 'Score must be a number from 0 to 100.' });
+      }
+      updateData.score = parsedScore;
+    }
+    if (feedback !== undefined) {
+      if (typeof feedback !== 'string' || feedback.length > 5000) {
+        return res.status(400).json({ error: 'Feedback must be text with at most 5,000 characters.' });
+      }
+      updateData.scoringFeedback = feedback.trim();
+    }
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({ error: 'Provide a selection, score, or feedback change.' });
+    }
+
+    const currentInsight = await prisma.extractedInsight.findUnique({ where: { submissionId: submission.id } });
+    let currentDetails: Record<string, any> = {};
+    try { currentDetails = currentInsight?.scoringDetails ? JSON.parse(currentInsight.scoringDetails) : {}; } catch { currentDetails = {}; }
+    updateData.scoringDetails = JSON.stringify({
+      ...currentDetails,
+      ownerReview: true,
+      ownerReviewedAt: new Date().toISOString(),
+    });
 
     const insight = await prisma.extractedInsight.upsert({
-      where: { submissionId: req.params.submissionId },
+      where: { submissionId: submission.id },
       update: updateData,
       create: {
-        submissionId: req.params.submissionId,
-        selected: Boolean(selected),
-        score: score !== undefined && Number.isFinite(Number(score)) ? Number(score) : 75,
-        scoringFeedback: typeof feedback === 'string' ? feedback : 'Reviewed by form owner.',
-        summary: typeof feedback === 'string' ? feedback : 'Reviewed by form owner.',
+        submissionId: submission.id,
+        selected: typeof selected === 'boolean' ? selected : false,
+        score: score === undefined ? null : Number(score),
+        scoringFeedback: typeof feedback === 'string' ? feedback.trim() : null,
+        summary: typeof feedback === 'string' ? feedback.trim() : null,
       },
     });
     res.json({ success: true, insight });
@@ -274,8 +303,10 @@ router.delete('/:id/responses/:submissionId', requireAuth, async (req, res) => {
     if (!form) return res.status(404).json({ error: 'Form not found.' });
     if (!userId || form.userId !== userId) return res.status(403).json({ error: 'You do not have access to this form.' });
 
-    await prisma.extractedInsight.deleteMany({ where: { submissionId: req.params.submissionId } });
-    await prisma.formSubmission.delete({ where: { id: req.params.submissionId } });
+    const submission = await prisma.formSubmission.findFirst({ where: { id: req.params.submissionId, formId: form.id } });
+    if (!submission) return res.status(404).json({ error: 'Response not found for this form.' });
+    await prisma.extractedInsight.deleteMany({ where: { submissionId: submission.id } });
+    await prisma.formSubmission.delete({ where: { id: submission.id } });
     res.json({ success: true });
   } catch (error: any) {
     logger.error('Failed to delete form response', error);
@@ -298,6 +329,26 @@ router.patch('/:id/requirements', requireAuth, async (req, res) => {
   } catch (error: any) {
     logger.error('Failed to save form selection requirements', error);
     res.status(500).json({ error: 'Failed to save requirements.' });
+  }
+});
+
+router.patch('/:id/settings', requireAuth, async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId || (req as any).teacher?.teacherId;
+    const form = await prisma.applicationForm.findUnique({ where: { id: req.params.id } });
+    if (!form) return res.status(404).json({ error: 'Form not found.' });
+    if (!userId || form.userId !== userId) return res.status(403).json({ error: 'You do not have access to this form.' });
+    if (typeof req.body?.acceptingResponses !== 'boolean') {
+      return res.status(400).json({ error: 'acceptingResponses must be true or false.' });
+    }
+    let schema: any = {};
+    try { schema = JSON.parse(form.schema || '{}'); } catch { schema = {}; }
+    schema.acceptingResponses = req.body.acceptingResponses;
+    await prisma.applicationForm.update({ where: { id: form.id }, data: { schema: JSON.stringify(schema) } });
+    res.json({ success: true, acceptingResponses: schema.acceptingResponses });
+  } catch (error: any) {
+    logger.error('Failed to update form response settings', error);
+    res.status(500).json({ error: 'Failed to update form settings.' });
   }
 });
 

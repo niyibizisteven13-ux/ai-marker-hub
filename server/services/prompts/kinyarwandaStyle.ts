@@ -15,7 +15,9 @@ const RW_MARKERS = new Set([
   'none', 'ese', 'mbese', 'murakoze', 'urakoze', 'mwaramutse', 'mwiriwe', 'muraho', 'amakuru',
   'yego', 'oya', 'ndashaka', 'nshaka', 'nigute', 'gute', 'ikihe', 'ryari', 'angahe', 'nde',
   'iki', 'uko', 'ibyo', 'iyo', 'uyu', 'uwo', 'byose', 'cyane', 'neza', 'ndabizi', 'sinzi',
-  'ubu', 'ejo', 'muri', 'kuri',
+  'ubu', 'ejo', 'muri', 'kuri', 'mbwira', 'nyabuneka', 'ndifuza', 'wansobanurira', 'nsobanurira',
+  'mfasha', 'nimba', 'wabasha', 'ibiki', 'irihe', 'iyi', 'iki', 'yemwe', 'koko', 'bimeze',
+  'wakora', 'ndashimira', 'tubwire', 'dukore', 'nkeneye', 'gufasha', 'rwose',
 ]);
 
 const FR_MARKERS = new Set([

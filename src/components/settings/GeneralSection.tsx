@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { Check, Loader2 } from 'lucide-react';
 import { User } from '../../types';
 import { authFetch } from '../../utils/authFetch';
 
@@ -12,158 +13,69 @@ interface GeneralSectionProps {
 export default function GeneralSection({ user, onUpdateUser, onDirtyChange, onSaveRef }: GeneralSectionProps) {
   const [name, setName] = useState(user?.name || '');
   const [language, setLanguage] = useState(user?.settings?.preferredLanguage || 'en');
-  const [colorMode, setColorMode] = useState<'light' | 'auto' | 'dark'>(user?.settings?.theme === 'light' ? 'light' : 'dark');
-  const [chatFont, setChatFont] = useState('Inter');
-  const [textSize, setTextSize] = useState('Medium');
-  const [sources, setSources] = useState(true);
-  const [reduceMotion, setReduceMotion] = useState(false);
-  const [isDirty, setIsDirty] = useState(false);
+  const [theme, setTheme] = useState<'light' | 'dark'>(user?.settings?.theme === 'light' ? 'light' : 'dark');
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [dirty, setDirty] = useState(false);
 
-  const markDirty = () => {
-    setIsDirty(true);
-    onDirtyChange(true);
-  };
+  useEffect(() => {
+    setName(user?.name || '');
+    setLanguage(user?.settings?.preferredLanguage || 'en');
+    setTheme(user?.settings?.theme === 'light' ? 'light' : 'dark');
+  }, [user?.id, user?.name, user?.settings?.preferredLanguage, user?.settings?.theme]);
 
+  const markDirty = () => { setDirty(true); onDirtyChange(true); setStatus(null); };
   const handleSave = async () => {
-    const res = await authFetch('/api/user/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name,
-        preferredLanguage: language,
-        theme: colorMode === 'light' ? 'light' : 'dark',
-      }),
-    });
-    const data = await res.json();
-    if (res.ok && data.user) {
+    if (!user) throw new Error('Sign in to save account settings.');
+    setSaving(true);
+    try {
+      const res = await authFetch('/api/user/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, preferredLanguage: language, theme }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.user) throw new Error(data.error || 'Could not save settings.');
       onUpdateUser(data.user);
-      setIsDirty(false);
+      try { localStorage.setItem('darkMode', String(theme === 'dark')); } catch {}
+      setDirty(false);
       onDirtyChange(false);
-    }
+      setStatus({ type: 'success', text: 'Settings saved to your account.' });
+    } catch (error) {
+      setStatus({ type: 'error', text: error instanceof Error ? error.message : 'Could not save settings.' });
+      throw error;
+    } finally { setSaving(false); }
   };
 
-  React.useEffect(() => {
-    onSaveRef.current = handleSave;
-  }, [name, language, colorMode]);
+  useEffect(() => { onSaveRef.current = handleSave; return () => { onSaveRef.current = null; }; }, [name, language, theme, user?.id]);
 
+  const fieldClass = 'w-full sm:w-72 bg-[var(--surface)] border border-[var(--line)] rounded-xl px-3.5 py-2.5 text-sm text-[var(--text)] focus:outline-none focus:border-[var(--accent)]';
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-normal text-[var(--text)] font-['Georgia',serif]">General Settings</h2>
-        <p className="text-xs text-[var(--muted)] mt-0.5">Manage your profile display, language, and appearance preferences.</p>
+        <h2 className="text-xl font-normal text-[var(--text)] font-[\'Georgia\',serif]">General Settings</h2>
+        <p className="mt-1 text-xs text-[var(--muted)]">These profile and appearance preferences are saved to your Bwenge account.</p>
       </div>
-
       <div className="divide-y divide-[var(--line)] border-y border-[var(--line)]">
-        {/* Profile Name */}
         <div className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <label className="text-sm font-medium text-[var(--text)] block">Display Name</label>
-            <span className="text-xs text-[var(--muted)]">Your name as shown across Bwenge Studio.</span>
-          </div>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => { setName(e.target.value); markDirty(); }}
-            className="w-full sm:w-72 bg-[var(--surface)] border border-[var(--line)] rounded-xl px-3.5 py-2.5 text-sm text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
-          />
+          <div><label htmlFor="settings-name" className="block text-sm font-medium text-[var(--text)]">Display name</label><span className="text-xs text-[var(--muted)]">Shown across your workspace and account.</span></div>
+          <input id="settings-name" autoComplete="name" maxLength={100} value={name} onChange={(e) => { setName(e.target.value); markDirty(); }} className={fieldClass} />
         </div>
-
-        {/* Language */}
         <div className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <label className="text-sm font-medium text-[var(--text)] block">Interface Language</label>
-            <span className="text-xs text-[var(--muted)]">Choose your preferred language for Bwenge Studio.</span>
-          </div>
-          <select
-            value={language}
-            onChange={(e) => { setLanguage(e.target.value); markDirty(); }}
-            className="w-full sm:w-72 bg-[var(--surface)] border border-[var(--line)] rounded-xl px-3.5 py-2.5 text-sm text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
-          >
-            <option value="en">English (EN)</option>
-            <option value="rw">Kinyarwanda (RW)</option>
-            <option value="fr">Français (FR)</option>
+          <div><label htmlFor="settings-language" className="block text-sm font-medium text-[var(--text)]">Interface language</label><span className="text-xs text-[var(--muted)]">Preferred language for your account.</span></div>
+          <select id="settings-language" value={language} onChange={(e) => { setLanguage(e.target.value); markDirty(); }} className={fieldClass}>
+            <option value="en">English</option><option value="rw">Kinyarwanda</option><option value="fr">Français</option>
           </select>
         </div>
-
-        {/* Color Mode */}
         <div className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <label className="text-sm font-medium text-[var(--text)] block">Color Mode</label>
-            <span className="text-xs text-[var(--muted)]">Select light, dark, or system automatic theme.</span>
-          </div>
-          <select
-            value={colorMode}
-            onChange={(e) => { setColorMode(e.target.value as 'light' | 'auto' | 'dark'); markDirty(); }}
-            className="w-full sm:w-72 bg-[var(--surface)] border border-[var(--line)] rounded-xl px-3.5 py-2.5 text-sm text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
-          >
-            <option value="light">Light</option>
-            <option value="auto">Auto (System)</option>
-            <option value="dark">Dark</option>
+          <div><label htmlFor="settings-theme" className="block text-sm font-medium text-[var(--text)]">Color mode</label><span className="text-xs text-[var(--muted)]">Choose the appearance preference stored with your profile.</span></div>
+          <select id="settings-theme" value={theme} onChange={(e) => { setTheme(e.target.value as 'light' | 'dark'); markDirty(); }} className={fieldClass}>
+            <option value="light">Light</option><option value="dark">Dark</option>
           </select>
-        </div>
-
-        {/* Chat Font */}
-        <div className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <label className="text-sm font-medium text-[var(--text)] block">Chat Font</label>
-            <span className="text-xs text-[var(--muted)]">Choose typography style for chat and assistant responses.</span>
-          </div>
-          <select
-            value={chatFont}
-            onChange={(e) => setChatFont(e.target.value)}
-            className="w-full sm:w-72 bg-[var(--surface)] border border-[var(--line)] rounded-xl px-3.5 py-2.5 text-sm text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
-          >
-            <option value="Inter">Inter (Sans)</option>
-            <option value="Georgia">Georgia (Serif)</option>
-            <option value="JetBrains Mono">JetBrains Mono (Monospace)</option>
-          </select>
-        </div>
-
-        {/* Text Size */}
-        <div className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <label className="text-sm font-medium text-[var(--text)] block">Text Size</label>
-            <span className="text-xs text-[var(--muted)]">Adjust reading scale across workspace panels.</span>
-          </div>
-          <select
-            value={textSize}
-            onChange={(e) => setTextSize(e.target.value)}
-            className="w-full sm:w-72 bg-[var(--surface)] border border-[var(--line)] rounded-xl px-3.5 py-2.5 text-sm text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
-          >
-            <option value="Small">Small</option>
-            <option value="Medium">Medium</option>
-            <option value="Large">Large</option>
-          </select>
-        </div>
-
-        {/* Sources Toggle */}
-        <div className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <label className="text-sm font-medium text-[var(--text)] block">Show Citation Sources</label>
-            <span className="text-xs text-[var(--muted)]">Display verified evidence chips alongside AI answers.</span>
-          </div>
-          <input
-            type="checkbox"
-            checked={sources}
-            onChange={(e) => setSources(e.target.checked)}
-            className="h-5 w-5 rounded border-[var(--line)] text-[var(--accent)] accent-[var(--accent)] cursor-pointer"
-          />
-        </div>
-
-        {/* Reduce Motion */}
-        <div className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <label className="text-sm font-medium text-[var(--text)] block">Reduce Motion</label>
-            <span className="text-xs text-[var(--muted)]">Minimize interface transition animations.</span>
-          </div>
-          <input
-            type="checkbox"
-            checked={reduceMotion}
-            onChange={(e) => setReduceMotion(e.target.checked)}
-            className="h-5 w-5 rounded border-[var(--line)] text-[var(--accent)] accent-[var(--accent)] cursor-pointer"
-          />
         </div>
       </div>
+      {dirty && <button type="button" disabled={saving} onClick={() => void handleSave().catch(() => {})} className="inline-flex items-center gap-2 rounded-xl bg-[var(--accent)] px-4 py-2.5 text-xs font-semibold text-[var(--on-accent)] disabled:opacity-60">{saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Save general settings</button>}
+      {status && <p role="status" className={`rounded-xl p-3 text-xs ${status.type === 'error' ? 'bg-[var(--danger)]/10 text-[var(--danger)]' : 'bg-[var(--teal)]/10 text-[var(--teal)]'}`}>{status.text}</p>}
     </div>
   );
 }

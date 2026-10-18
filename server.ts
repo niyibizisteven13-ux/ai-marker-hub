@@ -51,6 +51,7 @@ import telegramBotRoutes from './server/routes/telegramBotRoutes.ts';
 import settingsBillingRoutes from './server/routes/settingsBillingRoutes.ts';
 import { TelegramBotService } from './server/services/TelegramBotService.ts';
 import { buildPromptForIntent, buildSmallTalkPrompt } from './server/services/prompts/promptRouter.ts';
+import { detectLanguage, buildLanguageBlock } from './server/services/prompts/kinyarwandaStyle.ts';
 import { validateEvidenceCitations } from './server/services/GroundedAnswerService.js';
 import { buildUserContextScope } from './server/services/ai/dataScope.js';
 import { stripThinkingTags } from './server/services/AiService.ts';
@@ -1368,8 +1369,8 @@ ${augmentedQuery}`;
           styleExemplars,
         });
     const languageDirective = answerLanguage && answerLanguage !== 'Auto'
-      ? `\n\n[Response language preference]\nAnswer in ${answerLanguage}. Keep quoted source material in its original language.`
-      : '';
+      ? `\n\n[Response language preference]\n${buildLanguageBlock(answerLanguage === 'Kinyarwanda' ? 'rw' : answerLanguage === 'French' ? 'fr' : 'other')}\nAnswer in ${answerLanguage}. Keep quoted source material in its original language.`
+      : `\n\n[Response language preference]\n${buildLanguageBlock(detectLanguage(query || ''))}\nAnswer naturally in the language the user wrote in. Keep quoted source material in its original language.`;
     const systemWithContext = `${baseSystemWithContext}${languageDirective}`;
 
     const isOllama = cleanProvider === 'ollama' || (process.env.AI_PROVIDER === 'ollama' && !cleanProvider);
@@ -1558,6 +1559,18 @@ ${augmentedQuery}`;
   }
 });
 
+const sanitizePublicFormSchema = (value: any): any => {
+  const privateKeys = new Set([
+    'answer', 'answerkey', 'correct', 'correctanswer', 'correctanswers', 'expectedanswer', 'modelanswer',
+    'rubric', 'scoringrubric', 'selectionsettings', 'requirements', 'solution',
+  ]);
+  if (Array.isArray(value)) return value.map(sanitizePublicFormSchema);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key]) => !privateKeys.has(key.toLowerCase().replace(/[_\s-]/g, '')))
+    .map(([key, item]) => [key, sanitizePublicFormSchema(item)]));
+};
+
 app.get('/api/forms/:id', async (req, res) => {
   try {
     const form = await prisma.applicationForm.findUnique({
@@ -1577,7 +1590,7 @@ app.get('/api/forms/:id', async (req, res) => {
       form: {
         id: form.id,
         title: form.title,
-        schema: schemaObj,
+        schema: sanitizePublicFormSchema(schemaObj),
         createdAt: form.createdAt,
       },
     });
@@ -1663,7 +1676,8 @@ app.get('/api/public/forms/:id', async (req, res) => {
     if (!form) return res.status(404).json({ error: 'Form not found.' });
     let schemaObj: any = {};
     try { schemaObj = JSON.parse(form.schema || '{}'); } catch { schemaObj = { title: form.title }; }
-    res.json({ id: form.id, title: form.title, ...schemaObj, schema: schemaObj });
+    const publicSchema = sanitizePublicFormSchema(schemaObj);
+    res.json({ id: form.id, title: form.title, ...publicSchema, schema: publicSchema });
   } catch (error: any) {
     respondError(res, error, 'Failed to retrieve public form.');
   }
@@ -2012,7 +2026,16 @@ app.post('/api/mark-script', requireAuth, gradingLimiter, validate(markScriptSch
     const userId = (req as any).user?.userId;
     if (!userId) return res.status(401).json({ error: 'Authentication required.' });
 
-    const result = await gradingService.evaluateStudentScriptWithAI(examPaper, studentScript, `batch-${userId}`);
+    const markingPreferences = await prisma.userSettings.findUnique({
+      where: { userId },
+      select: { defaultStrictness: true, agentTone: true, autoSummarize: true, customInstructions: true },
+    });
+    const result = await gradingService.evaluateStudentScriptWithAI(
+      examPaper,
+      studentScript,
+      `batch-${userId}`,
+      markingPreferences || undefined,
+    );
     res.json({ success: true, ...result });
   } catch (error: any) {
     logger.error('AI marking failed; student script remains pending.', {

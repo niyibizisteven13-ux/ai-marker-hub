@@ -14,6 +14,7 @@ import { classifyIntent } from '../services/intentRouter.js';
 import { buildPromptForIntent } from '../services/prompts/promptRouter.js';
 import { stripThinkingTags } from '../utils/textSanitizers.js';
 import logger from '../utils/logger.js';
+import { consumeTelegramLink } from '../services/telegramLinkStore.js';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { PDFParse } from 'pdf-parse';
@@ -522,6 +523,26 @@ router.post('/webhook', verifyTelegramSecret, async (req: Request, res: Response
         session = await prisma.telegramSession.create({
           data: { chatId, provider: process.env.GONKA_API_KEY ? 'gonkarouter' : 'gemini', language: 'en' },
         });
+      }
+
+      const linkCode = userText.match(/^\/(?:start|link)(?:@\w+)?\s+(?:link_)?([A-Za-z0-9_-]{20,64})$/i)?.[1];
+      if (linkCode) {
+        const linkedUserId = consumeTelegramLink(linkCode);
+        if (!linkedUserId) {
+          await botService.sendMessage(chatId, 'This account link has expired or was already used. Generate a new link from Settings → Connections.');
+          return;
+        }
+        const existingLinkedUser = session.userId && session.userId !== linkedUserId
+          ? await prisma.user.findUnique({ where: { id: session.userId }, select: { email: true } })
+          : null;
+        const isUnclaimedTelegramAccount = existingLinkedUser?.email.endsWith('@users.invalid') ?? false;
+        if (session.userId && session.userId !== linkedUserId && !isUnclaimedTelegramAccount) {
+          await botService.sendMessage(chatId, 'This Telegram chat is already linked to another Bwenge account. Disconnect it there before linking a different account.');
+          return;
+        }
+        await prisma.telegramSession.update({ where: { chatId }, data: { userId: linkedUserId } });
+        await botService.sendMessage(chatId, 'Telegram is now securely linked to your Bwenge account. You can use the bot for your account workflows.');
+        return;
       }
 
       session = await ensureTelegramUser(chatId, session);

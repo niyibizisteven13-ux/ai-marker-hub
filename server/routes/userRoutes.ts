@@ -22,6 +22,29 @@ router.get('/me', async (req, res) => {
   }
 });
 
+router.get('/export', async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId;
+    if (!userId) return res.status(401).json({ error: 'Not authenticated.' });
+    const [user, workspace, projects, forms, batches, files] = await Promise.all([
+      prisma.user.findUnique({ where: { id: userId }, select: { id: true, name: true, email: true, avatarUrl: true, role: true, createdAt: true, settings: true } }),
+      prisma.workspaceState.findUnique({ where: { userId }, select: { data: true, updatedAt: true } }),
+      prisma.studioProject.findMany({ where: { userId }, select: { id: true, title: true, examPaper: true, scripts: true, createdAt: true, updatedAt: true } }),
+      prisma.applicationForm.findMany({ where: { userId }, select: { id: true, title: true, schema: true, createdAt: true, updatedAt: true } }),
+      prisma.batchJob.findMany({ where: { userId }, include: { results: true }, orderBy: { createdAt: 'desc' } }),
+      prisma.fileRecord.findMany({ where: { userId }, select: { id: true, name: true, mimeType: true, size: true, createdAt: true } }),
+    ]);
+    const parseJson = (value: string) => { try { return JSON.parse(value); } catch { return value; } };
+    const exportedAt = new Date().toISOString();
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="bwenge-account-export-${exportedAt.slice(0, 10)}.json"`);
+    return res.json({ exportedAt, user, workspace: workspace ? { ...workspace, data: parseJson(workspace.data) } : null, projects: projects.map((project) => ({ ...project, examPaper: parseJson(project.examPaper), scripts: parseJson(project.scripts) })), forms: forms.map((form) => ({ ...form, schema: parseJson(form.schema) })), batches, files });
+  } catch (err) {
+    console.error('Export account data error:', err);
+    return res.status(500).json({ error: 'Could not prepare your account export.' });
+  }
+});
+
 router.put('/settings', async (req, res) => {
   try {
     const userId = (req as any).user?.userId;
@@ -32,6 +55,7 @@ router.put('/settings', async (req, res) => {
       email,
       avatarUrl,
       password,
+      currentPassword,
       defaultStrictness,
       autoSummarize,
       preferredLanguage,
@@ -49,6 +73,9 @@ router.put('/settings', async (req, res) => {
     }
     if (password !== undefined && (typeof password !== 'string' || password.length < 12 || password.length > 128)) {
       return res.status(400).json({ error: 'Password must be between 12 and 128 characters.' });
+    }
+    if (password !== undefined && (typeof currentPassword !== 'string' || !currentPassword)) {
+      return res.status(400).json({ error: 'Enter your current password to change it.' });
     }
     if (avatarUrl !== undefined && avatarUrl !== null && (typeof avatarUrl !== 'string' || avatarUrl.length > 2048)) {
       return res.status(400).json({ error: 'Avatar URL must be a valid short URL.' });
@@ -73,6 +100,10 @@ router.put('/settings', async (req, res) => {
     if (normalizedEmail) userData.email = normalizedEmail;
     if (avatarUrl !== undefined) userData.avatarUrl = avatarUrl || null;
     if (password) {
+      const existingUser = await prisma.user.findUnique({ where: { id: userId }, select: { passwordHash: true } });
+      if (!existingUser || !(await bcrypt.compare(currentPassword, existingUser.passwordHash))) {
+        return res.status(403).json({ error: 'Your current password is incorrect.' });
+      }
       userData.passwordHash = await bcrypt.hash(password, 12);
     }
 

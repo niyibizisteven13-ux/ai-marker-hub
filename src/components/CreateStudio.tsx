@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Send,
   ChevronDown,
@@ -40,6 +41,7 @@ interface CreateStudioProps {
   onNewChat: () => void;
   onLoadSession: (id: string) => void;
   onOpenSettings?: () => void;
+  onOpenForms?: () => void;
   onDeleteChat?: () => void;
   onExportChat?: () => void;
   onShare?: () => void;
@@ -131,6 +133,7 @@ export default function CreateStudio({
   onNewChat,
   onLoadSession,
   onOpenSettings,
+  onOpenForms,
   onDeleteChat,
   onExportChat,
   onShare,
@@ -159,6 +162,7 @@ export default function CreateStudio({
 }: CreateStudioProps) {
   const [inputValue, setInputValue] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState({ top: 0, right: 12 });
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState('');
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
@@ -175,6 +179,13 @@ export default function CreateStudio({
   const stickToBottomRef = useRef(true);
   const [showNewResponsePill, setShowNewResponsePill] = useState(false);
 
+  const positionMenu = useCallback(() => {
+    const trigger = menuTriggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    setMenuPosition({ top: Math.min(rect.bottom + 8, window.innerHeight - 80), right: Math.max(12, window.innerWidth - rect.right) });
+  }, []);
+
   // Close menus on pointerdown outside
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -190,7 +201,8 @@ export default function CreateStudio({
 
   useEffect(() => {
     const handleOutside = (e: PointerEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (!menuRef.current?.contains(target) && !menuTriggerRef.current?.contains(target)) {
         setMenuOpen(false);
         setRenameOpen(false);
       }
@@ -201,6 +213,17 @@ export default function CreateStudio({
     document.addEventListener('pointerdown', handleOutside);
     return () => document.removeEventListener('pointerdown', handleOutside);
   }, []);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    positionMenu();
+    window.addEventListener('resize', positionMenu);
+    window.addEventListener('scroll', positionMenu, true);
+    return () => {
+      window.removeEventListener('resize', positionMenu);
+      window.removeEventListener('scroll', positionMenu, true);
+    };
+  }, [menuOpen, positionMenu]);
 
   const resize = useCallback(() => {
     const el = textareaRef.current;
@@ -329,11 +352,13 @@ export default function CreateStudio({
           )}
 
           {/* Three Dots Categorized Menu */}
-          <div className="relative" ref={menuRef}>
+          <div className="relative">
             <button
               ref={menuTriggerRef}
+              type="button"
               onClick={() => {
                 if (menuOpen) setRenameOpen(false);
+                else positionMenu();
                 setMenuOpen((prev) => !prev);
               }}
               aria-haspopup="dialog"
@@ -345,8 +370,8 @@ export default function CreateStudio({
               <MoreVertical size={18} />
             </button>
 
-            {menuOpen && (
-              <div role="dialog" aria-label="Conversation options" className="bwenge-menu-scroll bwenge-menu-enter absolute right-0 mt-2 z-[80] flex max-h-[min(72dvh,36rem)] w-[min(20rem,calc(100vw-1.5rem))] flex-col overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-[#20201F] p-2 text-sm text-[#FAF9F5] shadow-[0_24px_80px_rgba(0,0,0,.65)] ring-1 ring-black/30 backdrop-blur-2xl">
+            {menuOpen && typeof document !== 'undefined' && createPortal(
+              <div ref={menuRef} role="dialog" aria-label="Conversation options" className="bwenge-menu-scroll bwenge-menu-enter fixed z-[9999] flex max-h-[min(72dvh,36rem)] w-[min(20rem,calc(100vw-1.5rem))] flex-col overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-[#20201F] p-2 text-sm text-[#FAF9F5] shadow-[0_24px_80px_rgba(0,0,0,.65)] ring-1 ring-black/30 backdrop-blur-2xl" style={{ top: menuPosition.top, right: menuPosition.right }}>
                 {/* This Chat Section */}
                 <div className="px-3 pb-1.5 pt-2 font-bold text-[10px] tracking-[.14em] uppercase text-neutral-400">Conversation</div>
                 <button
@@ -419,14 +444,14 @@ export default function CreateStudio({
                 <button
                   type="button"
                   onClick={() => {
-                    if (messages.length && !window.confirm('Clear the current conversation from this workspace?')) return;
+                    if (messages.length && !window.confirm('Delete this conversation and remove it from recent chats?')) return;
                     onDeleteChat?.();
                     setMenuOpen(false);
                   }}
                   disabled={!messages.length || isTyping}
                   className="flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-[#F28B82] transition-colors hover:bg-rose-500/10 hover:text-[#FFAAA3] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300/50 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  <Trash2 className="h-4 w-4" /> Clear current conversation
+                  <Trash2 className="h-4 w-4" /> Delete conversation
                 </button>
 
                 <div className="my-2 border-t border-white/[.08]"></div>
@@ -472,8 +497,15 @@ export default function CreateStudio({
                 >
                   <Globe className="h-4 w-4 text-[#4CE5D6]" /> Language & theme settings
                 </button>
+                <button
+                  type="button"
+                  onClick={() => { onOpenForms?.(); setMenuOpen(false); }}
+                  className="flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-neutral-200 transition-colors hover:bg-white/[.07] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F0A12C]/70"
+                >
+                  <FileText className="h-4 w-4 text-[#F0A12C]" /> Open Agent & forms workspace
+                </button>
                 <a
-                  href="https://t.me/BwengeBot"
+                  href="https://t.me/BwengeAI_Bot"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-neutral-200 transition-colors hover:bg-white/[.07] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F0A12C]/70"
@@ -499,7 +531,8 @@ export default function CreateStudio({
                     <LogOut className="h-4 w-4" /> Sign out
                   </button>
                 )}
-              </div>
+              </div>,
+              document.body,
             )}
           </div>
         </div>

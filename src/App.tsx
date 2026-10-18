@@ -38,6 +38,7 @@ import { HardwareToast } from './components/HardwareToast';
 import DocumentScanner from './components/DocumentScanner';
 import { processFileClientSide } from './utils/fileProcessor';
 import { authFetch } from './utils/authFetch';
+import { copyToClipboard } from './utils/copyToClipboard';
 import { buildExamPaperContext } from './utils/contentAwarePrompt';
 import { classifyIntent, localGreetingReply } from './utils/messageIntent';
 import CreateStudio from './components/CreateStudio';
@@ -135,6 +136,13 @@ export default function App() {
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     try { return localStorage.getItem('darkMode') === 'true'; } catch { return false; }
   });
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', darkMode);
+    try { localStorage.setItem('darkMode', String(darkMode)); } catch {}
+  }, [darkMode]);
+  useEffect(() => {
+    if (authenticatedUser?.settings?.theme) setDarkMode(authenticatedUser.settings.theme === 'dark');
+  }, [authenticatedUser?.settings?.theme]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
 
@@ -184,6 +192,7 @@ export default function App() {
   const [publicFormError, setPublicFormError] = useState('');
   const [publicFormSubmitted, setPublicFormSubmitted] = useState(false);
   const [publicFormSubmitError, setPublicFormSubmitError] = useState('');
+  const [publicFormLinkCopied, setPublicFormLinkCopied] = useState(false);
   const [studioProjectId, setStudioProjectId] = useState<string | null>(null);
   const [studioProjectsLoaded, setStudioProjectsLoaded] = useState(false);
   const [studioProjectStatus, setStudioProjectStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -657,6 +666,7 @@ export default function App() {
   };
 
   const [scannerGeneratedForm, setScannerGeneratedForm] = useState<any | null>(null);
+  const [openFormRequest, setOpenFormRequest] = useState(0);
 
   const handleSaveScannedPages = (
     pages: Array<{
@@ -1018,11 +1028,14 @@ export default function App() {
     }
   };
 
-  const handleExportChat = () => {
+  const handleExportChat = async () => {
     const chatText = messages.map((m) => `${m.sender.toUpperCase()}: ${m.text}`).join('\n\n');
-    navigator.clipboard.writeText(chatText)
-      .then(() => showAiStatus('info', 'Conversation copied to clipboard'))
-      .catch(() => showAiStatus('warning', 'Could not copy the conversation'));
+    try {
+      await copyToClipboard(chatText);
+      showAiStatus('info', 'Conversation copied to clipboard');
+    } catch {
+      showAiStatus('warning', 'Could not copy the conversation');
+    }
   };
 
   const handleRenameCurrentChat = (title: string) => {
@@ -1054,7 +1067,7 @@ export default function App() {
         await navigator.share({ title: 'Bwenge conversation', text: content });
         return;
       }
-      await navigator.clipboard.writeText(content);
+      await copyToClipboard(content);
       showAiStatus('info', 'Conversation copied so you can share it');
     } catch {
       showAiStatus('warning', 'Sharing was cancelled or unavailable');
@@ -1062,6 +1075,13 @@ export default function App() {
   };
 
   const handleClearCurrentChat = () => {
+    clearChatStore();
+    setActiveSessionId(null);
+    handleClearStagedAttachments();
+  };
+
+  const handleDeleteCurrentChat = () => {
+    if (activeSessionId) handleDeleteSession(activeSessionId);
     clearChatStore();
     setActiveSessionId(null);
     handleClearStagedAttachments();
@@ -1140,6 +1160,7 @@ export default function App() {
       onLoadStudioProject={(projId) => {}}
       externalGeneratedForm={scannerGeneratedForm}
       onClearExternalForm={() => setScannerGeneratedForm(null)}
+      openFormRequest={openFormRequest}
     />
   );
 
@@ -1171,7 +1192,11 @@ export default function App() {
     onNewChat: handleNewChat,
     onLoadSession: handleLoadChatSession,
     onOpenSettings: () => setSettingsOpen(true),
-    onDeleteChat: handleClearCurrentChat,
+    onOpenForms: () => {
+      setActiveTab('marking_hub');
+      setOpenFormRequest((request) => request + 1);
+    },
+    onDeleteChat: handleDeleteCurrentChat,
     onExportChat: handleExportChat,
     activeSessionId,
     currentChatTitle: chatSessions.find((session) => session.id === activeSessionId)?.title || '',
@@ -1292,12 +1317,16 @@ export default function App() {
             {publicForm?.id && (
               <button
                 type="button"
-                onClick={() => {
-                  navigator.clipboard.writeText(`${window.location.origin}/forms/${publicForm.id}`);
+                onClick={async () => {
+                  try {
+                    await copyToClipboard(new URL(`/forms/${encodeURIComponent(publicForm.id)}`, window.location.origin).toString());
+                    setPublicFormLinkCopied(true);
+                    window.setTimeout(() => setPublicFormLinkCopied(false), 1800);
+                  } catch { showAiStatus('warning', 'Could not copy this form link'); }
                 }}
                 className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
               >
-                Copy link
+                {publicFormLinkCopied ? 'Link copied' : 'Copy link'}
               </button>
             )}
             <button
@@ -1416,7 +1445,7 @@ export default function App() {
             <CreateStudio {...studioProps} />
             {activeTab !== 'documents' && (
               <MobileSheet
-                title={activeTab === 'results' ? 'Results' : 'Marking'}
+                title={activeTab === 'results' ? 'Results' : 'Agent'}
                 onBack={() => setActiveTab('documents')}
                 onScan={openScanner}
               >
@@ -1525,7 +1554,10 @@ export default function App() {
         <div className="fixed inset-0 z-[150] bg-[#FAF9F5]">
           <SettingsPage
             user={authenticatedUser}
-            onUpdateUser={(u) => setAuthenticatedUser(u)}
+            onUpdateUser={(u) => {
+              setAuthenticatedUser(u);
+              if (u.settings?.theme) setDarkMode(u.settings.theme === 'dark');
+            }}
             onLogout={handleLogout}
             onBack={() => setSettingsOpen(false)}
           />

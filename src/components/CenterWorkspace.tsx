@@ -11,6 +11,7 @@ import DynamicForm from './DynamicForm';
 import FormBuilder from './FormBuilder';
 import { BwengeLoader } from './BwengeLoader';
 import { authFetch } from '../utils/authFetch';
+import { copyToClipboard } from '../utils/copyToClipboard';
 
 interface CenterWorkspaceProps {
   activeTab?: NavigationTab;
@@ -35,6 +36,7 @@ interface CenterWorkspaceProps {
   savedStudioProjects?: Array<{ id: string; title: string; updatedAt: string }>;
   externalGeneratedForm?: any | null;
   onClearExternalForm?: () => void;
+  openFormRequest?: number;
 }
 
 interface Annotation {
@@ -170,6 +172,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
   savedStudioProjects = [],
   externalGeneratedForm = null,
   onClearExternalForm,
+  openFormRequest = 0,
 }) => {
   const [zoomLevel, setZoomLevel] = useState<number>(1);
   const [zoomTarget, setZoomTarget] = useState<{ x: number, y: number } | null>(null);
@@ -207,12 +210,16 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
   const [isAnalyzingForm, setIsAnalyzingForm] = useState(false);
   const [formAnalysisNotice, setFormAnalysisNotice] = useState('');
   const [formResponses, setFormResponses] = useState<any[]>([]);
+  const [savingReviewId, setSavingReviewId] = useState<string | null>(null);
   const [responsesLoading, setResponsesLoading] = useState(false);
   const [formDashboardTab, setFormDashboardTab] = useState<'responses' | 'settings'>('responses');
   const [responsesError, setResponsesError] = useState('');
   const [formCopilotInstruction, setFormCopilotInstruction] = useState('');
   const [isRunningFormCopilot, setIsRunningFormCopilot] = useState(false);
-  const [isSimulatingSubmissions, setIsSimulatingSubmissions] = useState(false);
+
+  React.useEffect(() => {
+    if (openFormRequest > 0) setShowFormCreatorModal(true);
+  }, [openFormRequest]);
 
   React.useEffect(() => {
     if (externalGeneratedForm) {
@@ -277,55 +284,6 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
     }
   };
 
-  const handleSimulateAndScoreForm = async (targetFormId?: string) => {
-    const fId = targetFormId || activeSavedForm?.id || generatedForm?.id;
-    if (!fId || isSimulatingSubmissions) return;
-
-    setIsSimulatingSubmissions(true);
-    setFormAnalysisError('');
-    setFormAnalysisNotice('AI Agent is simulating 3 candidate submissions and scoring them...');
-    try {
-      const simRes = await authFetch('/api/forms/ai-agent', {
-        method: 'POST',
-        body: JSON.stringify({
-          action: 'simulate_submissions',
-          formId: fId,
-          count: 3,
-        }),
-      });
-      const simData = await simRes.json();
-      if (!simRes.ok) throw new Error(simData.error || 'Could not simulate candidate submissions.');
-
-      await loadOwnedForms();
-      await loadFormResponses(fId);
-
-      // Immediately run AI analysis & ranking on the simulated submissions
-      const analyzeRes = await authFetch(`/api/forms/${fId}/analyze`, {
-        method: 'POST',
-        body: JSON.stringify({
-          requirements:
-            selectionRequirements ||
-            draftRequirements ||
-            activeSavedForm?.schema?.requirements ||
-            'Select the strongest candidates with thorough, high-quality answers.',
-        }),
-      });
-      const analyzeData = await analyzeRes.json();
-      if (analyzeRes.ok && analyzeData.analysis) {
-        setFormAnalysis(analyzeData.analysis);
-        setFormAnalysisNotice('AI Agent simulated 3 responses, scored all candidates, and shortlisted top matches!');
-      } else {
-        setFormAnalysisNotice('Simulated 3 candidate responses.');
-      }
-      await loadFormResponses(fId);
-      await loadOwnedForms();
-    } catch (err: any) {
-      setFormAnalysisError(err?.message || 'AI Agent simulation failed.');
-    } finally {
-      setIsSimulatingSubmissions(false);
-    }
-  };
-
   const handleGenerateForm = async () => {
     const intent = formIntentText.trim();
     if (!intent || isGeneratingForm) return;
@@ -380,6 +338,49 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
     } finally { setResponsesLoading(false); }
   };
 
+  const saveResponseReview = async (event: React.FormEvent<HTMLFormElement>, responseId: string) => {
+    event.preventDefault();
+    if (!activeSavedForm?.id) return;
+    const values = new FormData(event.currentTarget);
+    const reviewedScore = Number(values.get('score'));
+    const reviewedSelected = values.get('selected') === 'on';
+    const reviewedFeedback = String(values.get('feedback') || '');
+    setSavingReviewId(responseId);
+    setResponsesError('');
+    try {
+      const response = await authFetch(`/api/forms/${activeSavedForm.id}/responses/${responseId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          score: reviewedScore,
+          selected: reviewedSelected,
+          feedback: reviewedFeedback,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Could not save this review.');
+      await loadFormResponses(activeSavedForm.id);
+      setFormAnalysis((current) => {
+        if (!current) return current;
+        const candidates = (current.candidates || []).map((candidate: any) => candidate.id === responseId
+          ? { ...candidate, score: reviewedScore, selected: reviewedSelected, feedback: reviewedFeedback }
+          : candidate);
+        const scores = candidates.filter((candidate: any) => candidate.score !== null && candidate.score !== undefined)
+          .map((candidate: any) => Number(candidate.score)).filter(Number.isFinite);
+        return {
+          ...current,
+          candidates,
+          selectedCount: candidates.filter((candidate: any) => candidate.selected).length,
+          averageScore: scores.length ? Math.round(scores.reduce((sum: number, score: number) => sum + score, 0) / scores.length * 10) / 10 : null,
+        };
+      });
+      setFormAnalysisNotice('Review saved.');
+    } catch (error: any) {
+      setResponsesError(error?.message || 'Could not save this review.');
+    } finally {
+      setSavingReviewId(null);
+    }
+  };
+
   const runFormAnalysis = async () => {
     if (!activeSavedForm?.id) return;
     setIsAnalyzingForm(true);
@@ -409,6 +410,20 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
     if (!response.ok) throw new Error(data.error || 'Could not save requirements.');
   };
 
+  const toggleFormResponses = async () => {
+    if (!activeSavedForm?.id) return;
+    const acceptingResponses = activeSavedForm.schema?.acceptingResponses === false;
+    const response = await authFetch(`/api/forms/${activeSavedForm.id}/settings`, {
+      method: 'PATCH', body: JSON.stringify({ acceptingResponses }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Could not update form status.');
+    const updatedForm = { ...activeSavedForm, schema: { ...(activeSavedForm.schema || {}), acceptingResponses } };
+    setActiveSavedForm(updatedForm);
+    setSavedForms((previous) => previous.map((form) => form.id === updatedForm.id ? updatedForm : form));
+    setFormAnalysisNotice(acceptingResponses ? 'Form is accepting responses.' : 'Responses are paused.');
+  };
+
   const exportResponsesCsv = async () => {
     if (!activeSavedForm?.id) return;
     const response = await authFetch(`/api/forms/${activeSavedForm.id}/results/export.csv`);
@@ -420,12 +435,16 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
     anchor.click();
     URL.revokeObjectURL(url);
   };
-  const handleCopyFormLink = () => {
+  const handleCopyFormLink = async () => {
     if (!generatedForm?.id) return;
-    const link = `${window.location.origin}/forms/${generatedForm.id}`;
-    navigator.clipboard.writeText(link);
-    setFormLinkCopied(true);
-    setTimeout(() => setFormLinkCopied(false), 1800);
+    const link = new URL(`/forms/${encodeURIComponent(generatedForm.id)}`, window.location.origin).toString();
+    try {
+      await copyToClipboard(link);
+      setFormLinkCopied(true);
+      window.setTimeout(() => setFormLinkCopied(false), 1800);
+    } catch {
+      setFormGenError(`Copy failed. Your form link is ${link}`);
+    }
   };
 
   const handleDiscardGeneratedForm = () => {
@@ -488,19 +507,6 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
               >
                 View results
               </button>
-              <button
-                onClick={() => {
-                  setActiveSavedForm(form);
-                  setSelectionRequirements(draftRequirements || form.requirements || form.schema?.description || '');
-                  setFormDashboardTab('responses');
-                  setShowSavedForms(true);
-                  void handleSimulateAndScoreForm(form.id);
-                }}
-                className="w-full sm:w-auto px-5 py-3 rounded-2xl font-black text-sm bg-[#D97757] text-white hover:bg-[#C56648] transition-all flex items-center justify-center gap-2"
-              >
-                <Sparkles size={16} />
-                AI Agent: Simulate &amp; Score
-              </button>
             </>
           ) : (
             <span className="text-xs text-[#858075]">Save and publish this draft to collect responses and analyze results.</span>
@@ -513,6 +519,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
             {formLinkCopied ? <Check size={16} /> : <Link2 size={16} />}
             {formLinkCopied ? 'Link Copied' : 'Copy Public Link'}
           </button>
+          {form?.id && <a href={publicLink} target="_blank" rel="noopener noreferrer" className="w-full sm:w-auto px-5 py-3 rounded-2xl font-bold text-sm bg-white dark:bg-[#202024] border border-[#E8E4DC] dark:border-[#2D2D32] text-center">Open public form</a>}
           <button
             onClick={() => setShowFormCreatorModal(true)}
             className="w-full sm:w-auto px-6 py-3 bg-white dark:bg-[#202024] hover:bg-[#F4F0E8] dark:hover:bg-[#2D2D32] text-[#191919] dark:text-[#F3F3F3] rounded-2xl font-bold text-sm transition-all border border-[#E8E4DC] dark:border-[#2D2D32] active:scale-95"
@@ -528,6 +535,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
           <div className="flex-1 text-center sm:text-right text-[9px] font-bold text-[#858075] uppercase tracking-widest truncate">
             {form?.id ? publicLink : 'Not yet published'}
           </div>
+          {formGenError && <p role="alert" className="basis-full break-all text-xs text-rose-600">{formGenError}</p>}
         </div>
       </div>
     );
@@ -541,6 +549,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
   const [showImportQuestions, setShowImportQuestions] = useState(false);
   const [isSavingManualForm, setIsSavingManualForm] = useState(false);
   const [manualSaveError, setManualSaveError] = useState<string | null>(null);
+  const [manualPublishedFormId, setManualPublishedFormId] = useState<string | null>(null);
 
   const updateDescriptionSelection = () => {
     const selection = window.getSelection();
@@ -713,6 +722,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
     setManualForm({ title: '', description: '', questions: [], blocks: [], themeColor: '#D97757' });
     setManualBuilderTab('build');
     setManualSaveError(null);
+    setManualPublishedFormId(null);
   };
 
   const handleOpenManualBuilder = () => {
@@ -809,6 +819,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
     if (!response.ok || !data?.success || !data?.form) {
       throw new Error(data?.error || `Saving the form failed (${response.status}).`);
     }
+    setManualPublishedFormId(data.form.id);
     const sharePath = data.form.shareableLink || `/forms/${data.form.id}`;
     try { localStorage.removeItem('bwenge-form-builder-draft'); } catch { /* local storage may be unavailable */ }
     setFormBuilderInitialSchema(undefined);
@@ -1249,7 +1260,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                     <div className="flex flex-wrap gap-2">
                       <button onClick={() => { void exportResponsesCsv().catch((error: any) => setFormAnalysisError(error.message)); }} className="rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] px-3 py-2 text-xs font-bold">Export CSV</button>
                       <button onClick={() => { void loadFormResponses(activeSavedForm.id); }} className="rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] px-3 py-2 text-xs font-bold">Refresh responses</button>
-                      <a href={`/forms/${activeSavedForm.id}`} target="_blank" rel="noreferrer" className="rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] px-3 py-2 text-xs font-bold">Open public form</a>
+                      <a href={new URL(`/forms/${encodeURIComponent(activeSavedForm.id)}`, window.location.origin).toString()} target="_blank" rel="noreferrer" className="rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] px-3 py-2 text-xs font-bold">Open public form</a>
                     </div>
                   </div>
                   <div className="flex gap-2 border-b border-[#E8E4DC] dark:border-[#2D2D32]">
@@ -1270,12 +1281,30 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                         const displayValue = value && typeof value === 'object' ? Object.entries(value as Record<string, any>).map(([row, answer]) => `${row}: ${Array.isArray(answer) ? answer.join(', ') : answer}`).join(' · ') : Array.isArray(value) ? value.join(', ') : String(value ?? '');
                         return <div key={key} className="rounded-xl bg-[#F7F5F0] dark:bg-white/[0.04] p-3"><p className="text-[10px] font-bold text-[#858075]">{question?.title || question?.label || key}</p><p className="mt-1 break-words text-sm text-[#191919] dark:text-slate-200">{displayValue}</p></div>;
                       })}</div>
-                      {response.analysis?.score != null && <p className="mt-3 text-xs font-bold text-[#D97757]">AI score: {response.analysis.score}/100 {response.analysis.selected ? '· Selected' : ''}</p>}
+                      {response.analysis?.score != null && <p className="mt-3 text-xs font-bold text-[#D97757]">{response.analysis.ownerReviewed ? 'Reviewed score' : 'AI score'}: {response.analysis.score}/100 {response.analysis.selected ? '· Selected' : ''}</p>}
+                      <form onSubmit={(event) => void saveResponseReview(event, response.id)} className="mt-4 grid gap-3 rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] bg-[#F7F5F0]/70 dark:bg-white/[0.025] p-3 sm:grid-cols-[120px_1fr_auto] sm:items-end">
+                        <label className="text-[11px] font-bold text-[#858075]">Score (0–100)
+                          <input name="score" type="number" min="0" max="100" step="0.1" required value={response.analysis?.score ?? ''} onChange={(event) => {
+                            const value = event.target.value;
+                            setFormResponses((previous) => previous.map((item) => item.id === response.id ? { ...item, analysis: { ...(item.analysis || {}), score: value === '' ? null : Number(value) } } : item));
+                          }} className="mt-1 w-full rounded-lg border border-[#E8E4DC] dark:border-[#2D2D32] bg-white dark:bg-[#1C1C20] px-2.5 py-2 text-sm text-[#191919] dark:text-white" />
+                        </label>
+                        <label className="text-[11px] font-bold text-[#858075]">Reviewer feedback
+                          <textarea name="feedback" rows={2} maxLength={5000} defaultValue={response.analysis?.feedback || ''} className="mt-1 w-full resize-y rounded-lg border border-[#E8E4DC] dark:border-[#2D2D32] bg-white dark:bg-[#1C1C20] px-2.5 py-2 text-sm font-normal text-[#191919] dark:text-white" placeholder="Add evidence-based feedback" />
+                        </label>
+                        <div className="flex items-center justify-between gap-3 sm:flex-col sm:items-stretch">
+                          <label className="flex items-center gap-2 whitespace-nowrap text-xs font-semibold text-[#191919] dark:text-slate-200"><input name="selected" type="checkbox" defaultChecked={Boolean(response.analysis?.selected)} className="accent-[#D97757]" /> Select candidate</label>
+                          <button type="submit" disabled={savingReviewId === response.id} className="rounded-lg bg-[#D97757] px-3 py-2 text-xs font-bold text-white disabled:opacity-50">{savingReviewId === response.id ? 'Saving…' : 'Save review'}</button>
+                        </div>
+                      </form>
                     </article>)}
                   </div>}
                   {formDashboardTab === 'settings' && <div className="rounded-2xl border border-[#E8E4DC] dark:border-[#2D2D32] bg-white dark:bg-[#1C1C20] p-4 sm:p-5 space-y-3">
                     <h4 className="font-bold text-[#191919] dark:text-white">Form settings</h4>
-                    <p className="text-xs text-[#858075]">This public form is accepting responses. Share the form link to collect answers. Response close controls can be added here in a later update.</p>
+                    <p className="text-xs text-[#858075]">Control whether respondents can submit new answers. Existing responses and analysis stay available while submissions are paused.</p>
+                    <button onClick={() => { void toggleFormResponses().catch((error: any) => setFormAnalysisError(error.message)); }} className={`rounded-xl px-4 py-2.5 text-xs font-bold ${activeSavedForm.schema?.acceptingResponses === false ? 'bg-emerald-600 text-white' : 'border border-rose-300 text-rose-600'}`}>
+                      {activeSavedForm.schema?.acceptingResponses === false ? 'Resume responses' : 'Pause responses'}
+                    </button>
                     <label className="block text-xs font-bold text-[#191919] dark:text-white">Selection requirements
                       <textarea value={selectionRequirements} onChange={event => setSelectionRequirements(event.target.value)} rows={4} placeholder="Describe eligibility requirements and what makes a strong response…" className="mt-2 w-full rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] bg-transparent p-3 text-sm font-normal outline-none focus:border-[#D97757]" />
                     </label>
@@ -1290,14 +1319,6 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                     <div className="flex flex-wrap gap-2">
                       <button onClick={() => { void saveSelectionRequirements().then(() => setFormAnalysisNotice('Requirements saved.')).catch((error: any) => setFormAnalysisError(error.message)); }} className="rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] px-4 py-2.5 text-xs font-bold">Save requirements</button>
                       <button disabled={isAnalyzingForm || !activeSavedForm.responseCount} onClick={() => void runFormAnalysis()} className="rounded-xl bg-[#D97757] px-4 py-2.5 text-xs font-black text-white disabled:opacity-50">{isAnalyzingForm ? 'Analyzing responses…' : 'Analyze & select best fit'}</button>
-                      <button
-                        disabled={isSimulatingSubmissions || isAnalyzingForm}
-                        onClick={() => void handleSimulateAndScoreForm(activeSavedForm.id)}
-                        className="rounded-xl bg-[#191919] dark:bg-[#F3F3F3] text-white dark:text-[#191919] px-4 py-2.5 text-xs font-black disabled:opacity-50 flex items-center gap-1.5"
-                      >
-                        <Sparkles size={14} />
-                        {isSimulatingSubmissions ? 'AI Agent Simulating & Scoring…' : 'AI Agent: Simulate 3 Candidates & Score'}
-                      </button>
                     </div>
                     {formAnalysisError && <p role="alert" className="text-xs text-rose-500">{formAnalysisError}</p>}
                     {formAnalysisNotice && <p role="status" className="text-xs text-amber-600">{formAnalysisNotice}</p>}
@@ -2181,6 +2202,14 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
             onBack={() => setShowManualFormBuilder(false)}
             onResults={() => { setShowManualFormBuilder(false); void showFormsDashboard(); }}
             onPublish={publishFormBuilderSchema}
+            onUpdateSettings={async (settings) => {
+              if (!manualPublishedFormId) throw new Error('Publish the form before changing response settings.');
+              const response = await authFetch(`/api/forms/${manualPublishedFormId}/settings`, {
+                method: 'PATCH', body: JSON.stringify(settings),
+              });
+              const data = await response.json();
+              if (!response.ok) throw new Error(data.error || 'Could not update response settings.');
+            }}
             onRunAgent={runFormBuilderAgent}
           />
         </div>

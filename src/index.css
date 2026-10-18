@@ -182,6 +182,12 @@
   background-clip: content-box;
 }
 
+.upgrade-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.upgrade-scrollbar::-webkit-scrollbar { display: none; }
+
 @media (prefers-reduced-motion: reduce) {
   .bwenge-loader__orbit,
   .bwenge-loader__logo,

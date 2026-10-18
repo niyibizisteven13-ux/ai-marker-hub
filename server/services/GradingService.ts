@@ -26,7 +26,7 @@ export class GradingService {
     return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : min;
   }
 
-  public async evaluateStudentScriptWithAI(examPaper: any, studentScript: any, batchId: string = 'unknown') {
+  public async evaluateStudentScriptWithAI(examPaper: any, studentScript: any, batchId: string = 'unknown', preferences?: { defaultStrictness?: string; agentTone?: string; autoSummarize?: boolean; customInstructions?: string | null }) {
     // 1. Pre-flight checks (CHEAPEST WIN)
     const rubricCheck = PreFlightService.validateRubricHealth(examPaper);
     if (!rubricCheck.isValid) {
@@ -57,6 +57,13 @@ WHAT TO DO FOR EACH QUESTION
 
 FLAG OPTIONS:
 - "none", "illegible", "blank", "off_topic", "possible_plagiarism", "needs_teacher_review"
+
+USER MARKING PREFERENCES
+- Strictness: ${preferences?.defaultStrictness || 'STANDARD'} (apply proportionately; award partial credit for demonstrated understanding).
+- Feedback tone: ${preferences?.agentTone || 'PROFESSIONAL'}.
+- Include a concise outcome summary: ${preferences?.autoSummarize === false ? 'No' : 'Yes'}.
+- Additional teacher guidance: ${preferences?.customInstructions?.trim() || 'None'}.
+These preferences must not override the exam, answer key, rubric, safeguarding rules, or evidence in the student's response.
 
 OUTPUT RULES
 Return a JSON array of question evaluations.`;

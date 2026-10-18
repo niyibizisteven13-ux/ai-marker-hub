@@ -1,6 +1,7 @@
 import { AiService } from './AiService.js';
 import logger from '../utils/logger.js';
 import { runWithRetry } from './reliableJobRunner.js';
+import { redactFormAnswersForAi } from './formPrivacy.js';
 
 export class FormScoringService {
   private static instance: FormScoringService;
@@ -41,14 +42,20 @@ export class FormScoringService {
       const hasAnswerKey = q.correctAnswer !== undefined && q.correctAnswer !== null && String(q.correctAnswer).trim() !== '';
       if (hasAnswerKey && Number.isFinite(qPoints) && qPoints > 0) {
         quizMaxPoints += qPoints;
-        const expected = String(q.correctAnswer).trim().toLowerCase();
+        const normalizeAnswer = (answer: any) => String(answer ?? '')
+          .normalize('NFKD')
+          .replace(/\p{M}+/gu, '')
+          .toLocaleLowerCase()
+          .replace(/[^\p{L}\p{N}]+/gu, ' ')
+          .trim();
+        const expected = normalizeAnswer(q.correctAnswer);
         const actual = Array.isArray(userVal)
-          ? userVal.map((v: any) => String(v).trim().toLowerCase()).sort().join('|')
-          : String(userVal ?? '').trim().toLowerCase();
+          ? userVal.map(normalizeAnswer).sort().join('|')
+          : normalizeAnswer(userVal);
         const expectedNorm = Array.isArray(q.correctAnswer)
-          ? q.correctAnswer.map((v: any) => String(v).trim().toLowerCase()).sort().join('|')
+          ? q.correctAnswer.map(normalizeAnswer).sort().join('|')
           : expected;
-        const isCorrect = actual === expectedNorm || (expectedNorm.length > 3 && actual.includes(expectedNorm));
+        const isCorrect = actual === expectedNorm;
         const awarded = isCorrect ? qPoints : 0;
         quizEarnedPoints += awarded;
         quizBreakdown.push({
@@ -82,7 +89,7 @@ OUTPUT JSON ONLY:
   ]
 }`;
 
-    const prompt = `FORM TITLE: ${form.title}\nFORM DEFINITION: ${form.schema}\nSUBMISSION DATA: ${JSON.stringify(submissionData)}`;
+    const prompt = `FORM TITLE: ${form.title}\nFORM DEFINITION: ${form.schema}\nSUBMISSION DATA: ${JSON.stringify(redactFormAnswersForAi(schema, submissionData))}`;
 
     try {
       const raw = await this.aiService.sendGonkaChat(prompt, { system: systemPrompt });

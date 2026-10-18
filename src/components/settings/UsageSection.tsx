@@ -14,6 +14,7 @@ interface UsageData {
 export default function UsageSection() {
   const [usage, setUsage] = useState<UsageData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     void fetchUsage();
@@ -23,9 +24,10 @@ export default function UsageSection() {
     try {
       const res = await authFetch('/api/usage');
       const data = await res.json();
-      if (res.ok) setUsage(data);
-    } catch {
-      // fallback
+      if (!res.ok) throw new Error(data.error || 'Could not load usage.');
+      setUsage(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load usage.');
     } finally {
       setLoading(false);
     }
@@ -39,12 +41,9 @@ export default function UsageSection() {
     );
   }
 
-  const meters = usage?.meters || {
-    scriptsMarked: { used: 340, limit: 1000 },
-    batchesPaid: { used: 12, limit: 50 },
-    dataStoreMb: { used: 120, limit: 500 },
-  };
-  const history = usage?.history || [];
+  if (!usage) return <div className="space-y-4"><h2 className="text-xl text-[var(--text)]">Usage & Quotas</h2><p role="alert" className="text-sm text-[var(--danger)]">{error || 'Usage data is unavailable.'}</p><button type="button" onClick={() => { setLoading(true); setError(null); void fetchUsage(); }} className="rounded-xl border border-[var(--line)] px-4 py-2 text-xs text-[var(--text)]">Retry</button></div>;
+  const meters = usage.meters;
+  const history = usage.history;
 
   const getBarColor = (used: number, limit: number) => {
     const ratio = used / limit;

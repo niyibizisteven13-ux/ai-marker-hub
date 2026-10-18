@@ -42,6 +42,8 @@ export default function SettingsPage({ user, onUpdateUser, onLogout, onBack }: S
       try {
         await saveActionRef.current();
         setIsDirty(false);
+      } catch {
+        // The active section displays the save error inline.
       } finally {
         setSaving(false);
       }
@@ -53,7 +55,7 @@ export default function SettingsPage({ user, onUpdateUser, onLogout, onBack }: S
       case 'general':
         return <GeneralSection user={user} onUpdateUser={onUpdateUser} onDirtyChange={setIsDirty} onSaveRef={saveActionRef} />;
       case 'account':
-        return <AccountSection user={user} onUpdateUser={onUpdateUser} onLogout={onLogout} />;
+        return <AccountSection user={user} onLogout={onLogout} />;
       case 'privacy':
         return <PrivacySection />;
       case 'billing':
@@ -61,7 +63,7 @@ export default function SettingsPage({ user, onUpdateUser, onLogout, onBack }: S
       case 'usage':
         return <UsageSection />;
       case 'preferences':
-        return <PreferencesSection />;
+        return <PreferencesSection user={user} onUpdateUser={onUpdateUser} />;
       case 'connections':
         return <ConnectionsSection />;
       default:
