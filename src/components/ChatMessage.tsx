@@ -18,12 +18,13 @@ import AnalyticsDashboard from './AnalyticsDashboard';
 import MarkdownRenderer from './MarkdownRenderer';
 import { AttachmentCards } from './AttachmentCards';
 import { copyToClipboard } from '../utils/copyToClipboard';
+import type { ResponseFeedbackDetails } from '../types';
 
 interface ChatMessageProps {
   message: any;
   onPreviewDoc?: (doc: any) => void;
   onShare?: (messageId: string, text: string) => void;
-  onFeedback?: (messageId: string, rating: 'up' | 'down') => void;
+  onFeedback?: (messageId: string, rating: 'up' | 'down', details: ResponseFeedbackDetails) => void | Promise<void>;
   onRetry?: (messageId: string) => void;
   onUpgradeClick?: (jobId: string, service: string) => void;
 }
@@ -122,6 +123,13 @@ export default function ChatMessage({
     .trim();
 
   const [copied, setCopied] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedbackReason, setFeedbackReason] = useState('');
+  const [feedbackDetails, setFeedbackDetails] = useState('');
+  const [feedbackConsent, setFeedbackConsent] = useState(false);
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [feedbackThankYou, setFeedbackThankYou] = useState(false);
+  const [feedbackError, setFeedbackError] = useState('');
   const [chatFormId, setChatFormId] = useState<string | null>(() => {
     if (!formSchemaMatch) return null;
     try {
@@ -172,6 +180,27 @@ export default function ChatMessage({
     navigator.clipboard.writeText(cleanText);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+  };
+
+  const sendFeedback = async (rating: 'up' | 'down', reasons: string[] = [], details = '', consentForImprovement?: boolean) => {
+    if (feedbackSubmitting) return;
+    setFeedbackSubmitting(true);
+    setFeedbackError('');
+    try {
+      await onFeedback?.(messageId, rating, {
+        question: '',
+        response: cleanText.slice(0, 20_000),
+        reasons,
+        details,
+        consentForImprovement,
+      });
+      setFeedbackThankYou(true);
+      setFeedbackOpen(false);
+    } catch (error) {
+      setFeedbackError(error instanceof Error ? error.message : 'Feedback could not be sent. Please try again.');
+    } finally {
+      setFeedbackSubmitting(false);
+    }
   };
 
   const attachments = message.attachments ?? (message.attachment ? [message.attachment] : []);
@@ -422,26 +451,106 @@ export default function ChatMessage({
                 title="Good response"
                 active={message.rating === 'up'}
                 activeClass="text-emerald-400 bg-emerald-400/10"
-                onClick={() => onFeedback?.(messageId, 'up')}
+                onClick={() => void sendFeedback('up')}
               >
                 <ThumbsUp className="h-4 w-4" />
               </ActionButton>
               <ActionButton
                 title="Bad response"
-                active={message.rating === 'down'}
+                active={message.rating === 'down' || feedbackOpen}
                 activeClass="text-rose-400 bg-rose-400/10"
-                onClick={() => onFeedback?.(messageId, 'down')}
+                onClick={() => {
+                  setFeedbackOpen((open) => !open);
+                  setFeedbackError('');
+                }}
               >
                 <ThumbsDown className="h-4 w-4" />
               </ActionButton>
               <button
                 type="button"
-                onClick={() => alert('Report or correct feedback sent to correction loop.')}
+                onClick={() => {
+                  setFeedbackOpen(true);
+                  setFeedbackReason('Other');
+                  setFeedbackError('');
+                }}
                 className="ml-2 px-2.5 py-1 rounded-lg text-[11px] text-neutral-400 hover:text-amber-400 hover:bg-white/5 transition-colors"
               >
                 Report or correct
               </button>
             </div>
+            {feedbackThankYou && (
+              <p role="status" className="text-xs text-emerald-400">Thanks for helping us improve Bwenge.</p>
+            )}
+            {feedbackError && !feedbackOpen && <p role="alert" className="text-xs text-rose-300">{feedbackError}</p>}
+            {feedbackOpen && (
+              <form
+                className="max-w-lg space-y-3 rounded-xl border border-white/10 bg-white/[0.03] p-3"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (!feedbackReason) {
+                    setFeedbackError('Choose what needs improvement so we can route your feedback.');
+                    return;
+                  }
+                  void sendFeedback('down', [feedbackReason], feedbackDetails, feedbackConsent);
+                }}
+              >
+                <div>
+                  <p className="text-sm font-medium text-[#FAF9F5]">What could be better?</p>
+                  <p className="mt-0.5 text-xs text-neutral-400">Your feedback goes to our support and AI quality team.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {['Incorrect', 'Incomplete', 'Unclear', 'Not relevant', 'Other'].map((reason) => (
+                    <button
+                      key={reason}
+                      type="button"
+                      aria-pressed={feedbackReason === reason}
+                      onClick={() => setFeedbackReason(reason)}
+                      className={`rounded-full border px-3 py-1.5 text-xs transition ${
+                        feedbackReason === reason
+                          ? 'border-[#D97757] bg-[#D97757]/15 text-[#F4A185]'
+                          : 'border-white/10 text-neutral-300 hover:bg-white/5'
+                      }`}
+                    >
+                      {reason}
+                    </button>
+                  ))}
+                </div>
+                <textarea
+                  value={feedbackDetails}
+                  onChange={(event) => setFeedbackDetails(event.target.value)}
+                  maxLength={1000}
+                  rows={2}
+                  placeholder="Anything else you’d like us to know? (optional)"
+                  className="w-full resize-y rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white placeholder:text-neutral-500 focus:border-[#D97757] focus:outline-none"
+                />
+                <label className="flex items-start gap-2 text-xs leading-relaxed text-neutral-400">
+                  <input
+                    type="checkbox"
+                    checked={feedbackConsent}
+                    onChange={(event) => setFeedbackConsent(event.target.checked)}
+                    className="mt-0.5 accent-[#D97757]"
+                  />
+                  Allow this response and my feedback to be considered for AI improvement after human review.
+                </label>
+                {feedbackError && <p role="alert" className="text-xs text-rose-300">{feedbackError}</p>}
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setFeedbackOpen(false)}
+                    className="rounded-lg px-3 py-2 text-xs text-neutral-300 hover:bg-white/5"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={feedbackSubmitting}
+                    className="rounded-lg bg-[#D97757] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#c66849] disabled:opacity-50"
+                  >
+                    {feedbackSubmitting ? 'Sending…' : 'Send feedback'}
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         )}
       </div>

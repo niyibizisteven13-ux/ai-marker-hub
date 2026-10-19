@@ -23,7 +23,13 @@ AI marking, form scoring, and exam generation require a successful provider resp
 
 ## Email OTP configuration
 
-Set `EMAIL_OTP_SECRET` to a randomly generated value of at least 32 characters (or use a `SESSION_SECRET` of that length) so OTP hashes can be verified. In development, the console email sender prints OTP email content only to the server terminal; codes are never returned by the API. Production email delivery requires `SMTP_HOST`, `SMTP_USER`, and `SMTP_PASS`; the console sender is disabled.
+Set `EMAIL_OTP_SECRET` to a randomly generated value of at least 32 characters (or use a `SESSION_SECRET` of that length) so OTP hashes can be verified. In development, the console email sender prints OTP email content only to the server terminal; codes are never returned by the API. Production email delivery requires either `EMAIL_SMTP_URL` or `SMTP_HOST`, `SMTP_USER`, and `SMTP_PASS`; the console sender is disabled.
+
+## Response feedback and admin communication
+
+People can rate AI responses; a negative rating opens a compact follow-up form. Feedback is stored for the support and AI quality team. Users must explicitly opt in before an administrator can prepare their response as a learning example, and examples remain pending until consent and personal-information checks are complete. This workflow does not automatically retrain model weights.
+
+The admin console includes feedback review, user role and account-access controls, AI provider model and gateway settings, and an email broadcast form for enabled accounts. Broadcast email uses the configured email sender.
 
 ## Admin Knowledge and RAG
 

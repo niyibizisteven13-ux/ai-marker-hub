@@ -2,15 +2,17 @@ import { useCallback, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   Activity, ArrowLeft, BarChart3, BookOpen, Boxes, CheckCircle2, ChevronDown, ChevronRight, Cpu, Database,
-  FileText, FlaskConical, GraduationCap, Info, KeyRound, LayoutDashboard, Menu, Play, Plus,
-  RefreshCw, ScrollText, Search, Settings, Sparkles, Trash2, Upload, Users, X, ShieldCheck
+  FileText, FlaskConical, GraduationCap, Info, KeyRound, LayoutDashboard, Mail, Menu, MessageSquare, Play, Plus,
+  RefreshCw, ScrollText, Search, Send, Settings, Sparkles, Trash2, Upload, Users, X, ShieldCheck
 } from 'lucide-react';
 import { adminApi, type AdminQualitySummary } from '../api/admin';
+import { useStore } from '../store/useStore';
 
 /* ───────────── Types ───────────── */
 type Env = 'draft' | 'testing' | 'production';
 type TabId = 'overview' | 'finetune' | 'datasets' | 'models' | 'knowledge' | 'documents' | 'playground'
-  | 'review' | 'verified' | 'retrieval' | 'prompts' | 'providers' | 'analytics' | 'quality' | 'users' | 'logs' | 'settings';
+  | 'review' | 'verified' | 'retrieval' | 'prompts' | 'providers' | 'analytics' | 'quality' | 'users' | 'logs' | 'settings'
+  | 'feedback' | 'communication';
 
 const DATASET_FILE_ACCEPT = '.pdf,.docx,.txt,.md,.csv,.json,.xlsx,.xls,.png,.jpg,.jpeg,.webp,.gif,.js,.ts,.tsx,.jsx,.py,.java,.kt,.cpp,.c,.h,.cs,.rs,.go,.sql,.html,.css,.yaml,.yml,.sh';
 
@@ -38,7 +40,7 @@ const NAV_CATEGORIES: NavCategory[] = [
       { id: 'models', label: 'Model Registry', icon: <Boxes size={16} /> },
       { id: 'playground', label: 'AI Playground', icon: <FlaskConical size={16} /> },
       { id: 'prompts', label: 'System Prompts', icon: <ScrollText size={16} /> },
-      { id: 'providers', label: 'AI Providers', icon: <KeyRound size={16} /> },
+      { id: 'providers', label: 'AI Connections & Providers', icon: <KeyRound size={16} /> },
     ],
   },
   {
@@ -58,6 +60,8 @@ const NAV_CATEGORIES: NavCategory[] = [
       { id: 'review', label: 'Review Queue', icon: <CheckCircle2 size={16} /> },
       { id: 'verified', label: 'Verified Answers', icon: <Sparkles size={16} /> },
       { id: 'users', label: 'User & Roles', icon: <Users size={16} /> },
+      { id: 'feedback', label: 'Feedback & Support', icon: <MessageSquare size={16} /> },
+      { id: 'communication', label: 'Email Communication', icon: <Mail size={16} /> },
       { id: 'logs', label: 'System Audit Logs', icon: <Activity size={16} /> },
       { id: 'settings', label: 'Control Plane', icon: <Settings size={16} /> },
     ],
@@ -178,6 +182,15 @@ function EmptyState({ title, desc, icon, action }: { title: string; desc: string
   );
 }
 
+function displayFeedbackReasons(value: string) {
+  try {
+    const reasons = JSON.parse(value);
+    return Array.isArray(reasons) ? reasons.join(', ') : value;
+  } catch {
+    return value;
+  }
+}
+
 /* ───────────── Main Admin Component ───────────── */
 export default function AdminPage({ onBack }: { onBack: () => void }) {
   const [tab, setTab] = useState<TabId>('overview');
@@ -207,6 +220,19 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
   const [analytics, setAnalytics] = useState<any>(null);
   const [quality, setQuality] = useState<AdminQualitySummary | null>(null);
   const [providers, setProviders] = useState<any[]>([]);
+  const [providerForms, setProviderForms] = useState<Record<string, { model: string; baseUrl: string }>>({});
+  const [newProvider, setNewProvider] = useState('GONKAROUTER');
+  const [newProviderModel, setNewProviderModel] = useState('');
+  const [newProviderBaseUrl, setNewProviderBaseUrl] = useState('');
+  const [savingProvider, setSavingProvider] = useState(false);
+  const [feedbackItems, setFeedbackItems] = useState<any[]>([]);
+  const [feedbackDatasetId, setFeedbackDatasetId] = useState('');
+  const [feedbackCorrections, setFeedbackCorrections] = useState<Record<string, string>>({});
+  const [userSearch, setUserSearch] = useState('');
+  const [broadcastSubject, setBroadcastSubject] = useState('');
+  const [broadcastText, setBroadcastText] = useState('');
+  const [broadcasting, setBroadcasting] = useState(false);
+  const currentAdminId = useStore((state) => state.user?.id);
   const [datasetAdapterJobs, setDatasetAdapterJobs] = useState<any[]>([]);
   const [retrievalSet, setRetrievalSet] = useState<any>(null);
 
@@ -279,7 +305,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
     if (!silent) setLoading(true);
     setError(null);
     try {
-      const [ov, hl, kbList, docList, dsList, mdList, prList, usList, lgList, anData, qData, prvList, ftList, rsData, corrList, verList] = await Promise.all([
+      const [ov, hl, kbList, docList, dsList, mdList, prList, usList, lgList, anData, qData, prvList, ftList, rsData, corrList, verList, fbList] = await Promise.all([
         adminApi.getOverview(),
         adminApi.getHealth(),
         adminApi.getKnowledgeBases(),
@@ -296,6 +322,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
         adminApi.getRetrievalSettings(env),
         adminApi.getCorrections(),
         adminApi.getVerifiedAnswers(),
+        adminApi.getFeedback(),
       ]);
 
       setOverview(ov.data);
@@ -310,6 +337,11 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
       setAnalytics(anData.data);
       setQuality(qData.data);
       setProviders(prvList.data);
+      setProviderForms(prvList.data.reduce((forms: Record<string, { model: string; baseUrl: string }>, provider: any) => {
+        forms[provider.provider] = { model: provider.model || '', baseUrl: provider.baseUrl || '' };
+        return forms;
+      }, {}));
+      setFeedbackItems(fbList.data);
       setDatasetAdapterJobs(ftList.data);
       setRetrievalSet(rsData.data);
       setCorrections(corrList.data);
@@ -317,6 +349,11 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
 
       if (dsList.data.length > 0 && !ftDatasetId) {
         setFtDatasetId(dsList.data[0].id);
+      }
+      if (dsList.data.length > 0 && !dsList.data.some((dataset: any) => dataset.id === feedbackDatasetId)) {
+        setFeedbackDatasetId(dsList.data[0].id);
+      } else if (dsList.data.length === 0 && feedbackDatasetId) {
+        setFeedbackDatasetId('');
       }
       if (ftList.data.length > 0) {
         setSelectedFtJob((prev: any) => {
@@ -329,7 +366,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [env, ftDatasetId]);
+  }, [env, ftDatasetId, feedbackDatasetId]);
 
   useEffect(() => {
     void loadData();
@@ -2217,17 +2254,106 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
 
               {/* ── PROVIDERS TAB ── */}
               {tab === 'providers' && (
-                <Section title="AI Provider Configurations" hint="Credentials are configured on the server or in deployment secrets. Status confirms credentials are present, not that a live AI request succeeds.">
+                <Section title="AI Connections & Providers" hint="Manage provider model and gateway settings. Credentials stay in server or deployment secrets; status confirms credentials are present, not that a live request succeeds.">
+                  <form
+                    className={`${card} grid grid-cols-1 gap-4 p-5 md:grid-cols-2`}
+                    onSubmit={async (event) => {
+                      event.preventDefault();
+                      if (!newProviderModel.trim()) {
+                        notify('Enter a model name before saving.', true);
+                        return;
+                      }
+                      setSavingProvider(true);
+                      try {
+                        await adminApi.updateProvider({
+                          provider: newProvider,
+                          model: newProviderModel.trim(),
+                          baseUrl: newProviderBaseUrl.trim() || null,
+                        });
+                        await loadData(true);
+                        setNewProviderModel('');
+                        setNewProviderBaseUrl('');
+                        notify(`${newProvider} connection saved`);
+                      } catch (err: any) {
+                        notify(err.message, true);
+                      } finally {
+                        setSavingProvider(false);
+                      }
+                    }}
+                  >
+                    <Field label="Provider">
+                      <select className={input} value={newProvider} onChange={(event) => setNewProvider(event.target.value)}>
+                        {['GONKAROUTER', 'GEMINI', 'OPENAI', 'ANTHROPIC', 'DEEPSEEK', 'OPENROUTER', 'NVIDIA NIM', 'OLLAMA'].map((provider) => (
+                          <option key={provider} value={provider}>{provider}</option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field label="Model">
+                      <input className={input} value={newProviderModel} onChange={(event) => setNewProviderModel(event.target.value)} maxLength={200} required placeholder="Provider model identifier" />
+                    </Field>
+                    <Field label="Gateway URL" tip="Optional. Keep credentials in deployment secrets, never in this form.">
+                      <input className={input} value={newProviderBaseUrl} onChange={(event) => setNewProviderBaseUrl(event.target.value)} maxLength={2000} placeholder="Use provider default" />
+                    </Field>
+                    <div className="flex items-end">
+                      <button type="submit" className={btnPrimary} disabled={savingProvider}>
+                        <Plus size={15} /> {savingProvider ? 'Saving connection…' : 'Add or update connection'}
+                      </button>
+                    </div>
+                  </form>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {providers.map((prv, idx) => (
-                      <div key={idx} className={`${card} p-6 space-y-4 min-w-0`}>
+                      <form
+                        key={idx}
+                        className={`${card} p-6 space-y-4 min-w-0`}
+                        onSubmit={async (event) => {
+                          event.preventDefault();
+                          const settings = providerForms[prv.provider];
+                          if (!settings?.model.trim()) {
+                            notify('Enter a model name before saving.', true);
+                            return;
+                          }
+                          try {
+                            await adminApi.updateProvider({
+                              provider: prv.provider,
+                              model: settings.model.trim(),
+                              baseUrl: settings.baseUrl.trim() || null,
+                            });
+                            await loadData(true);
+                            notify(`${prv.provider} connection settings saved`);
+                          } catch (err: any) {
+                            notify(err.message, true);
+                          }
+                        }}
+                      >
                         <div className="flex justify-between items-start gap-2 min-w-0">
                           <h3 className="font-bold text-white text-base truncate">{prv.provider}</h3>
                           <Badge tone={prv.configured ? 'green' : 'yellow'}>{prv.configured ? 'Configured' : 'Not configured'}</Badge>
                         </div>
-                        <p className="text-xs text-[#9AA6C9] truncate">Model: <span className="text-white font-semibold">{prv.model}</span></p>
-                        <p className="text-xs text-[#9AA6C9] truncate">Gateway: <span className="text-white font-semibold">{prv.baseUrl || 'https://api.gonkarouter.io/v1'}</span></p>
-                      </div>
+                        <Field label="Model">
+                          <input
+                            className={input}
+                            value={providerForms[prv.provider]?.model ?? prv.model}
+                            onChange={(event) => setProviderForms((current) => ({
+                              ...current,
+                              [prv.provider]: { ...current[prv.provider], model: event.target.value, baseUrl: current[prv.provider]?.baseUrl ?? '' },
+                            }))}
+                            maxLength={200}
+                          />
+                        </Field>
+                        <Field label="Gateway URL" tip="Leave blank to use the provider default. Keep credentials in deployment secrets, never in this form.">
+                          <input
+                            className={input}
+                            value={providerForms[prv.provider]?.baseUrl ?? ''}
+                            onChange={(event) => setProviderForms((current) => ({
+                              ...current,
+                              [prv.provider]: { ...current[prv.provider], model: current[prv.provider]?.model ?? prv.model, baseUrl: event.target.value },
+                            }))}
+                            maxLength={2000}
+                            placeholder="Use provider default"
+                          />
+                        </Field>
+                        <button type="submit" className={btnPrimary}><CheckCircle2 size={15} /> Save connection settings</button>
+                      </form>
                     ))}
                   </div>
                 </Section>
@@ -2383,43 +2509,245 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                 </Section>
               )}
 
-              {/* ── USERS TAB ── */}
-              {tab === 'users' && (
-                <Section title="User & Role Management" hint="Manage platform accounts and administrator permissions in the database.">
-                  <div className={`${card} overflow-x-auto`}>
-                    <table className="w-full text-left text-sm min-w-[580px]">
-                      <thead className="bg-[#141C36] text-xs font-bold text-[#9AA6C9] uppercase border-b border-[#263052]">
-                        <tr>
-                          <th className="p-4">Name</th>
-                          <th className="p-4">Email</th>
-                          <th className="p-4">Role</th>
-                          <th className="p-4">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-[#263052]">
-                        {users.map((u) => (
-                          <tr key={u.id} className="hover:bg-[#18213D]/60 transition-colors">
-                            <td className="p-4 font-bold text-white truncate max-w-[160px]">{u.name}</td>
-                            <td className="p-4 text-[#9AA6C9] truncate max-w-[220px]">{u.email}</td>
-                            <td className="p-4"><Badge tone={u.role === 'ADMIN' ? 'green' : 'blue'}>{u.role}</Badge></td>
-                            <td className="p-4">
-                              <select
-                                className="bg-[#0B1020] text-xs font-bold text-white border border-[#2E3A63] rounded-xl px-3 py-2 cursor-pointer shadow-inner"
-                                value={u.role}
-                                onChange={async (e) => {
+              {/* ── RESPONSE FEEDBACK & SUPPORT TAB ── */}
+              {tab === 'feedback' && (
+                <Section
+                  title="Feedback & Support"
+                  hint="Review ratings and the follow-up notes users leave on AI responses. Feedback only becomes a learning example after user consent and human review."
+                  actions={<Badge tone="blue">{feedbackItems.length} responses</Badge>}
+                >
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                    <Stat label="New feedback" value={feedbackItems.filter((item) => item.status === 'new').length} detail="Waiting for review" />
+                    <Stat label="Opted in for improvement" value={feedbackItems.filter((item) => item.consentForImprovement).length} detail="Human review still required" />
+                    <Stat label="Prepared examples" value={feedbackItems.filter((item) => item.status === 'used').length} detail="Pending dataset quality checks" />
+                  </div>
+
+                  <div className={`${card} p-4 sm:p-5 space-y-2`}>
+                    <Field label="Learning dataset" tip="Only feedback whose author opted in can be used to prepare a pending dataset example.">
+                      <select className={input} value={feedbackDatasetId} onChange={(event) => setFeedbackDatasetId(event.target.value)}>
+                        {datasets.length === 0 && <option value="">Create a dataset first</option>}
+                        {datasets.map((dataset) => <option key={dataset.id} value={dataset.id}>{dataset.name}</option>)}
+                      </select>
+                    </Field>
+                    <p className="text-xs leading-relaxed text-[#9AA6C9]">
+                      Feedback never changes model behavior automatically. An opted-in response can be prepared as a pending example; an administrator must check the correction, consent, and personal information before approving it in Datasets.
+                    </p>
+                  </div>
+
+                  {feedbackItems.length === 0 ? (
+                    <EmptyState title="No response feedback yet" desc="Thumbs-up ratings and submitted improvement notes will appear here." icon={<MessageSquare size={26} />} />
+                  ) : (
+                    <div className="space-y-4">
+                      {feedbackItems.map((item) => (
+                        <article key={item.id} className={`${card} space-y-4 p-5`}>
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge tone={item.rating === 'up' ? 'green' : 'red'}>{item.rating === 'up' ? 'HELPFUL' : 'NEEDS WORK'}</Badge>
+                                <Badge tone={item.status === 'used' ? 'blue' : item.status === 'reviewed' ? 'green' : 'yellow'}>{item.status}</Badge>
+                                {item.consentForImprovement && <Badge tone="blue">IMPROVEMENT CONSENT</Badge>}
+                              </div>
+                              <p className="mt-2 text-xs text-[#9AA6C9]">
+                                {item.user?.name || 'User'} · {item.user?.email || 'account unavailable'} · {new Date(item.createdAt).toLocaleString()}
+                              </p>
+                            </div>
+                            {item.status !== 'used' && (
+                              <button
+                                type="button"
+                                className={btnGhost}
+                                onClick={async () => {
                                   try {
-                                    await adminApi.updateUserRole(u.id, e.target.value);
-                                    notify('User role updated');
+                                    await adminApi.updateFeedbackStatus(item.id, item.status === 'reviewed' ? 'new' : 'reviewed');
                                     await loadData(true);
+                                    notify(item.status === 'reviewed' ? 'Feedback moved back to new' : 'Feedback marked as reviewed');
                                   } catch (err: any) {
                                     notify(err.message, true);
                                   }
                                 }}
                               >
-                                <option value="ADMIN">ADMIN</option>
-                                <option value="INSTRUCTOR">INSTRUCTOR</option>
-                                <option value="STUDENT">STUDENT</option>
-                              </select>
+                                Mark {item.status === 'reviewed' ? 'new' : 'reviewed'}
+                              </button>
+                            )}
+                          </div>
+
+                          {displayFeedbackReasons(item.reasons) && (
+                            <p className="text-sm text-[#F4A185]"><span className="font-semibold text-[#B7C1DE]">Reason: </span>{displayFeedbackReasons(item.reasons)}</p>
+                          )}
+                          {item.question && (
+                            <div>
+                              <p className="text-[11px] font-bold uppercase tracking-wide text-[#9AA6C9]">User prompt</p>
+                              <p className="mt-1 whitespace-pre-wrap break-words text-sm text-white">{item.question}</p>
+                            </div>
+                          )}
+                          <div>
+                            <p className="text-[11px] font-bold uppercase tracking-wide text-[#9AA6C9]">AI response</p>
+                            <p className="mt-1 whitespace-pre-wrap break-words text-sm text-[#D5D9E8]">{item.response}</p>
+                          </div>
+                          {item.details && (
+                            <div className="rounded-xl border border-[#2A3760] bg-[#0D1220] p-3">
+                              <p className="text-[11px] font-bold uppercase tracking-wide text-[#9AA6C9]">User note</p>
+                              <p className="mt-1 whitespace-pre-wrap break-words text-sm text-white">{item.details}</p>
+                            </div>
+                          )}
+
+                          {item.consentForImprovement && item.status !== 'used' && (
+                            <div className="space-y-3 border-t border-[#263052] pt-4">
+                              <Field label="Reviewed correction" tip="Write the corrected answer. It will remain pending until a human reviews consent and PII in Datasets.">
+                                <textarea
+                                  className={input}
+                                  rows={3}
+                                  maxLength={20_000}
+                                  value={feedbackCorrections[item.id] || ''}
+                                  onChange={(event) => setFeedbackCorrections((current) => ({ ...current, [item.id]: event.target.value }))}
+                                  placeholder="Enter a corrected answer or the response you would expect instead."
+                                />
+                              </Field>
+                              <button
+                                type="button"
+                                className={btnPrimary}
+                                disabled={!feedbackDatasetId || !feedbackCorrections[item.id]?.trim()}
+                                onClick={async () => {
+                                  try {
+                                    await adminApi.addFeedbackDatasetExample(item.id, {
+                                      datasetId: feedbackDatasetId,
+                                      correctedAnswer: feedbackCorrections[item.id].trim(),
+                                    });
+                                    await loadData(true);
+                                    notify('Added as a pending dataset example. Review it before approval.');
+                                  } catch (err: any) {
+                                    notify(err.message, true);
+                                  }
+                                }}
+                              >
+                                <Plus size={15} /> Prepare learning example
+                              </button>
+                            </div>
+                          )}
+                        </article>
+                      ))}
+                    </div>
+                  )}
+                </Section>
+              )}
+
+              {/* ── EMAIL COMMUNICATION TAB ── */}
+              {tab === 'communication' && (
+                <Section title="Email Communication" hint="Write and send an announcement to every enabled account. Emails are delivered individually, not as a shared recipient list.">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <Stat label="Enabled recipients" value={users.filter((user) => !user.disabledAt).length} detail="Disabled accounts are excluded" />
+                    <Stat label="Delivery" value="Email" detail="Uses the configured server email provider" />
+                  </div>
+                  <form
+                    className={`${card} max-w-3xl space-y-5 p-5 sm:p-7`}
+                    onSubmit={async (event) => {
+                      event.preventDefault();
+                      const recipientCount = users.filter((user) => !user.disabledAt).length;
+                      if (!broadcastSubject.trim() || !broadcastText.trim()) {
+                        notify('Enter both an email subject and message.', true);
+                        return;
+                      }
+                      if (!window.confirm(`Send this email to ${recipientCount} enabled user accounts?`)) return;
+                      setBroadcasting(true);
+                      try {
+                        const result = await adminApi.broadcastEmail({ subject: broadcastSubject, text: broadcastText });
+                        notify(`Broadcast finished: ${result.data.delivered} delivered, ${result.data.failed} failed.`, result.data.failed > 0);
+                        if (result.data.failed === 0) {
+                          setBroadcastSubject('');
+                          setBroadcastText('');
+                        }
+                      } catch (err: any) {
+                        notify(err.message, true);
+                      } finally {
+                        setBroadcasting(false);
+                      }
+                    }}
+                  >
+                    <Field label="Subject">
+                      <input className={input} value={broadcastSubject} onChange={(event) => setBroadcastSubject(event.target.value)} maxLength={180} required placeholder="A clear subject for your announcement" />
+                    </Field>
+                    <Field label="Message">
+                      <textarea className={input} value={broadcastText} onChange={(event) => setBroadcastText(event.target.value)} rows={10} maxLength={10_000} required placeholder="Write your message to users..." />
+                    </Field>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <span className="text-xs text-[#9AA6C9]">{broadcastText.length.toLocaleString()} / 10,000 characters</span>
+                      <button className={btnPrimary} type="submit" disabled={broadcasting || users.filter((user) => !user.disabledAt).length === 0}>
+                        <Send size={15} /> {broadcasting ? 'Sending emails…' : `Send to ${users.filter((user) => !user.disabledAt).length} users`}
+                      </button>
+                    </div>
+                  </form>
+                </Section>
+              )}
+
+              {/* ── USERS TAB ── */}
+              {tab === 'users' && (
+                <Section title="User & Role Management" hint="Manage platform roles and account access. Disabling an account also revokes its active refresh sessions.">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-xs text-[#9AA6C9]">{users.filter((user) => !user.disabledAt).length} enabled · {users.length} total accounts</p>
+                    <input
+                      className={`${input} max-w-sm`}
+                      value={userSearch}
+                      onChange={(event) => setUserSearch(event.target.value)}
+                      placeholder="Search users by name or email"
+                      aria-label="Search users by name or email"
+                    />
+                  </div>
+                  <div className={`${card} overflow-x-auto`}>
+                    <table className="w-full text-left text-sm min-w-[760px]">
+                      <thead className="bg-[#141C36] text-xs font-bold text-[#9AA6C9] uppercase border-b border-[#263052]">
+                        <tr>
+                          <th className="p-4">Name</th>
+                          <th className="p-4">Email</th>
+                          <th className="p-4">Role</th>
+                          <th className="p-4">Account</th>
+                          <th className="p-4">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#263052]">
+                        {users.filter((user) => `${user.name} ${user.email}`.toLowerCase().includes(userSearch.toLowerCase())).map((u) => (
+                          <tr key={u.id} className="hover:bg-[#18213D]/60 transition-colors">
+                            <td className="p-4 font-bold text-white truncate max-w-[160px]">{u.name}</td>
+                            <td className="p-4 text-[#9AA6C9] truncate max-w-[220px]">{u.email}</td>
+                            <td className="p-4"><Badge tone={u.role === 'ADMIN' ? 'green' : 'blue'}>{u.role}</Badge></td>
+                            <td className="p-4">
+                              <Badge tone={u.disabledAt ? 'red' : 'green'}>{u.disabledAt ? 'DISABLED' : 'ENABLED'}</Badge>
+                            </td>
+                            <td className="p-4">
+                              <div className="flex items-center gap-2">
+                                <select
+                                  className="bg-[#0B1020] text-xs font-bold text-white border border-[#2E3A63] rounded-xl px-3 py-2 cursor-pointer shadow-inner"
+                                  value={u.role}
+                                  onChange={async (e) => {
+                                    try {
+                                      await adminApi.updateUserRole(u.id, e.target.value);
+                                      notify('User role updated');
+                                      await loadData(true);
+                                    } catch (err: any) {
+                                      notify(err.message, true);
+                                    }
+                                  }}
+                                >
+                                  <option value="ADMIN">ADMIN</option>
+                                  <option value="INSTRUCTOR">INSTRUCTOR</option>
+                                  <option value="STUDENT">STUDENT</option>
+                                </select>
+                                <button
+                                  type="button"
+                                  disabled={u.id === currentAdminId}
+                                  title={u.id === currentAdminId ? 'You cannot disable your own administrator account.' : undefined}
+                                  className={`${btnGhost} min-h-9 px-3 py-1.5 text-xs disabled:cursor-not-allowed`}
+                                  onClick={async () => {
+                                    try {
+                                      await adminApi.updateUserStatus(u.id, !u.disabledAt);
+                                      notify(u.disabledAt ? 'User account enabled' : 'User account disabled and sessions revoked');
+                                      await loadData(true);
+                                    } catch (err: any) {
+                                      notify(err.message, true);
+                                    }
+                                  }}
+                                >
+                                  {u.disabledAt ? 'Enable' : 'Disable'}
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}

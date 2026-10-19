@@ -68,6 +68,8 @@ EMAIL_FROM="Bwenge <login@bwenge.ai>"
 EMAIL_SMTP_URL=
 ```
 
+In production, configure either `EMAIL_SMTP_URL` or `SMTP_HOST`, `SMTP_USER`, and `SMTP_PASS`. The administrator email broadcast uses this same configured sender and targets enabled accounts only.
+
 ---
 
 ## 4. Threat Model & Security Controls

@@ -37,6 +37,7 @@ model User {
   knowledgeBases   KnowledgeBase[]    @relation("KnowledgeBaseOwner")
   documents        Document[]         @relation("DocumentOwner")
   datasets         Dataset[]          @relation("DatasetOwner")
+  responseFeedback ResponseFeedback[]
 }
 
 model WorkspaceState {
@@ -566,6 +567,7 @@ model DatasetExample {
   piiReviewed     Boolean  @default(false)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+  responseFeedback ResponseFeedback?
 
   @@index([datasetId])
 }
@@ -692,6 +694,27 @@ model AiTrace {
   @@index([createdAt])
   @@index([capability, createdAt])
   @@index([finalStatus, createdAt])
+}
+
+model ResponseFeedback {
+  id                     String   @id @default(uuid())
+  userId                 String
+  user                   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messageId              String
+  rating                 String // up | down
+  question               String?
+  response               String
+  reasons                String   @default("[]") // JSON stringified
+  details                String?
+  consentForImprovement  Boolean  @default(false)
+  datasetExampleId       String?  @unique
+  datasetExample         DatasetExample? @relation(fields: [datasetExampleId], references: [id], onDelete: SetNull)
+  status                 String   @default("new") // new | reviewed | used
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@unique([userId, messageId])
+  @@index([status, createdAt])
 }
 
 model CorrectionQueueItem {

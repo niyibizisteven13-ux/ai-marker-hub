@@ -173,6 +173,8 @@ export const adminApi = {
 
   // Users & Organizations
   getUsers: () => readJson<{ success: true; data: any[] }>('/api/admin/users'),
+  updateUserStatus: (userId: string, disabled: boolean) =>
+    readJson('/api/admin/users/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId, disabled }) }),
   createUser: (payload: { email: string; name: string }) =>
     readJson('/api/admin/users', {
       method: 'POST',
@@ -180,6 +182,17 @@ export const adminApi = {
       body: JSON.stringify(payload),
     }),
   updateUserRole: (userId: string, role: string) => readJson('/api/admin/users/role', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId, role }) }),
+  getFeedback: () => readJson<{ success: true; data: any[] }>('/api/admin/feedback'),
+  updateFeedbackStatus: (id: string, status: 'new' | 'reviewed') =>
+    readJson(`/api/admin/feedback/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }),
+  addFeedbackDatasetExample: (id: string, payload: { datasetId: string; correctedAnswer: string }) =>
+    readJson(`/api/admin/feedback/${id}/dataset-example`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
+  broadcastEmail: (payload: { subject: string; text: string }) =>
+    readJson<{ success: true; data: { targeted: number; delivered: number; failed: number } }>('/api/admin/communication/broadcast', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
   getOrganizations: () => readJson<{ success: true; data: any[] }>('/api/admin/organizations'),
   createOrganization: (name: string) => readJson('/api/admin/organizations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }),
 

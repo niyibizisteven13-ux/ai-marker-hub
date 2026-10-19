@@ -18,6 +18,7 @@ import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
 import { z } from 'zod';
+import { getEmailSender } from '../email/EmailSender.js';
 
 const router = Router();
 const aiService = AiService.getInstance();
@@ -2674,7 +2675,7 @@ router.get('/analytics', async (req, res) => {
 router.get('/users', async (_req, res) => {
   try {
     const users = await prisma.user.findMany({
-      select: { id: true, email: true, name: true, role: true, createdAt: true },
+      select: { id: true, email: true, name: true, role: true, createdAt: true, disabledAt: true },
       orderBy: { createdAt: 'desc' },
     });
     res.json({ success: true, data: users });
@@ -2683,15 +2684,71 @@ router.get('/users', async (_req, res) => {
   }
 });
 
-router.post('/users/role', async (req, res) => {
-  try {
-    const { userId, role } = req.body;
-    if (!userId || !role) return res.status(400).json({ success: false, error: 'userId and role are required.' });
+router.post('/users/status', async (req, res) => {
+  const parsed = z.object({
+    userId: z.string().min(1),
+    disabled: z.boolean(),
+  }).safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: 'A user and valid account status are required.' });
+  }
 
-    if (role !== 'ADMIN') {
-      const adminCount = await prisma.user.count({ where: { role: 'ADMIN' } });
-      if (adminCount <= 1) {
-        return res.status(400).json({ success: false, error: 'Cannot remove the last admin user.' });
+  const actorId = req.user?.userId;
+  const { userId, disabled } = parsed.data;
+  if (disabled && userId === actorId) {
+    return res.status(400).json({ success: false, error: 'You cannot disable your own administrator account.' });
+  }
+
+  try {
+    const target = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, role: true } });
+    if (!target) return res.status(404).json({ success: false, error: 'User not found.' });
+    if (disabled && target.role === 'ADMIN') {
+      const enabledAdmins = await prisma.user.count({ where: { role: 'ADMIN', disabledAt: null } });
+      if (enabledAdmins <= 1) {
+        return res.status(400).json({ success: false, error: 'Cannot disable the last active administrator.' });
+      }
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const user = await tx.user.update({
+        where: { id: userId },
+        data: { disabledAt: disabled ? new Date() : null },
+        select: { id: true, email: true, name: true, role: true, disabledAt: true },
+      });
+      if (disabled) {
+        await tx.refreshSession.updateMany({
+          where: { userId, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+      }
+      return user;
+    });
+
+    await writeAuditLog(actorId, disabled ? 'DISABLE_USER' : 'ENABLE_USER', 'user', userId, {});
+    res.json({ success: true, data: updated });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.post('/users/role', async (req, res) => {
+  const parsed = z.object({
+    userId: z.string().min(1),
+    role: z.enum(['ADMIN', 'INSTRUCTOR', 'STUDENT']),
+  }).safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: 'A user and valid role are required.' });
+  }
+
+  try {
+    const { userId, role } = parsed.data;
+    const target = await prisma.user.findUnique({ where: { id: userId }, select: { role: true, disabledAt: true } });
+    if (!target) return res.status(404).json({ success: false, error: 'User not found.' });
+
+    if (target.role === 'ADMIN' && role !== 'ADMIN' && !target.disabledAt) {
+      const enabledAdmins = await prisma.user.count({ where: { role: 'ADMIN', disabledAt: null } });
+      if (enabledAdmins <= 1) {
+        return res.status(400).json({ success: false, error: 'Cannot remove the role from the last active administrator.' });
       }
     }
 
@@ -2704,6 +2761,129 @@ router.post('/users/role', async (req, res) => {
     await writeAuditLog((req as any).user?.userId, 'UPDATE_USER_ROLE', 'user', userId, { newRole: role });
     res.json({ success: true, data: updated });
   } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.get('/feedback', async (_req, res) => {
+  try {
+    const feedback = await prisma.responseFeedback.findMany({
+      include: { user: { select: { id: true, name: true, email: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+    res.json({ success: true, data: feedback });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.patch('/feedback/:id', async (req, res) => {
+  const parsed = z.object({ status: z.enum(['new', 'reviewed']) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ success: false, error: 'Invalid feedback status.' });
+
+  try {
+    const updated = await prisma.responseFeedback.update({
+      where: { id: req.params.id },
+      data: { status: parsed.data.status },
+    });
+    await writeAuditLog(req.user?.userId, 'REVIEW_RESPONSE_FEEDBACK', 'response_feedback', updated.id, { status: updated.status });
+    res.json({ success: true, data: updated });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.post('/feedback/:id/dataset-example', async (req, res) => {
+  const parsed = z.object({
+    datasetId: z.string().min(1),
+    correctedAnswer: z.string().trim().min(1).max(20_000),
+  }).safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: 'Select a dataset and provide a reviewed correction.' });
+  }
+
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      const feedback = await tx.responseFeedback.findUnique({ where: { id: req.params.id } });
+      if (!feedback) throw new Error('Feedback not found.');
+      if (!feedback.consentForImprovement) throw new Error('The user did not consent to use this feedback for AI improvement.');
+      if (feedback.status === 'used') throw new Error('This feedback has already been added to a dataset.');
+
+      const dataset = await tx.dataset.findUnique({ where: { id: parsed.data.datasetId }, select: { id: true } });
+      if (!dataset) throw new Error('Dataset not found.');
+
+      const reasons: unknown = JSON.parse(feedback.reasons);
+      const reasonText = Array.isArray(reasons) ? reasons.join(', ') : 'not specified';
+      const example = await tx.datasetExample.create({
+        data: {
+          datasetId: dataset.id,
+          instruction: `Improve the AI response to the user's question. Feedback reason: ${reasonText || 'not specified'}.`,
+          input: [feedback.question, `Original AI response: ${feedback.response}`, feedback.details ? `User feedback: ${feedback.details}` : ''].filter(Boolean).join('\n\n'),
+          output: parsed.data.correctedAnswer,
+          status: 'pending',
+          consentGiven: true,
+          piiReviewed: false,
+        },
+      });
+      await tx.responseFeedback.update({
+        where: { id: feedback.id },
+        data: { status: 'used', datasetExampleId: example.id },
+      });
+      return example;
+    });
+    await writeAuditLog(req.user?.userId, 'CREATE_FEEDBACK_DATASET_EXAMPLE', 'dataset_example', result.id, { feedbackId: req.params.id });
+    res.status(201).json({ success: true, data: result });
+  } catch (error: any) {
+    const status = error.message === 'Feedback not found.' || error.message === 'Dataset not found.' ? 404
+      : error.message.startsWith('The user did not consent') || error.message.startsWith('This feedback has already') ? 400
+        : 500;
+    res.status(status).json({ success: false, error: error.message });
+  }
+});
+
+router.post('/communication/broadcast', async (req, res) => {
+  const parsed = z.object({
+    subject: z.string().trim().min(1).max(180).regex(/^[^\r\n]+$/, 'Subject cannot contain line breaks.'),
+    text: z.string().trim().min(1).max(10_000),
+  }).safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: 'Enter an email subject and message (up to 10,000 characters).' });
+  }
+
+  try {
+    const recipients = await prisma.user.findMany({
+      where: { disabledAt: null },
+      select: { email: true },
+      orderBy: { email: 'asc' },
+    });
+    const emailSender = getEmailSender();
+    const htmlEntities: Record<string, string> = {
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    };
+    const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => htmlEntities[character] || character);
+    let delivered = 0;
+    let failed = 0;
+
+    for (let index = 0; index < recipients.length; index += 10) {
+      const batch = recipients.slice(index, index + 10);
+      const results = await Promise.allSettled(batch.map(({ email }) => emailSender.send({
+        to: email,
+        subject: parsed.data.subject,
+        text: parsed.data.text,
+        html: `<div style="font-family:sans-serif;white-space:pre-wrap">${escapeHtml(parsed.data.text)}</div>`,
+      })));
+      for (const result of results) {
+        if (result.status === 'fulfilled') delivered += 1;
+        else failed += 1;
+      }
+    }
+
+    if (failed > 0) logger.error('Admin email broadcast partially failed', { targeted: recipients.length, delivered, failed });
+    await writeAuditLog(req.user?.userId, 'BROADCAST_EMAIL', 'communication', null, { targeted: recipients.length, delivered, failed });
+    res.json({ success: true, data: { targeted: recipients.length, delivered, failed } });
+  } catch (error: any) {
+    logger.error('Admin email broadcast failed', { message: error.message });
     res.status(500).json({ success: false, error: error.message });
   }
 });

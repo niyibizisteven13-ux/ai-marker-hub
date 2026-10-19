@@ -25,6 +25,14 @@ export interface User {
   };
 }
 
+export interface ResponseFeedbackDetails {
+  question: string;
+  response: string;
+  reasons: string[];
+  details: string;
+  consentForImprovement?: boolean;
+}
+
 export type HighlightColor = 'terracotta' | 'yellow' | 'sage' | 'blue' | 'lilac';
 
 export interface DocumentHighlight {

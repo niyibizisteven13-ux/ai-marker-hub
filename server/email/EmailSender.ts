@@ -48,12 +48,12 @@ export class SmtpEmailSender implements EmailSender {
 }
 
 export function hasSmtpConfiguration(): boolean {
-  return Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+  return Boolean(process.env.EMAIL_SMTP_URL || (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS));
 }
 
 export function validateEmailSenderConfiguration(): void {
   if (process.env.NODE_ENV === 'production' && !hasSmtpConfiguration()) {
-    console.error('Email delivery is unavailable: production requires SMTP_HOST, SMTP_USER, and SMTP_PASS. OTP sending is disabled until configured.');
+    console.error('Email delivery is unavailable: production requires EMAIL_SMTP_URL or SMTP_HOST, SMTP_USER, and SMTP_PASS. OTP sending is disabled until configured.');
   }
 }
 
@@ -65,7 +65,7 @@ export function getEmailSender(): EmailSender {
     return new SmtpEmailSender();
   }
 
-  const provider = process.env.EMAIL_PROVIDER || (process.env.SMTP_HOST || process.env.SMTP_USER ? 'smtp' : 'console');
+  const provider = process.env.EMAIL_PROVIDER || (process.env.EMAIL_SMTP_URL || process.env.SMTP_HOST || process.env.SMTP_USER ? 'smtp' : 'console');
   if (provider === 'smtp' || provider === 'resend' || provider === 'sendgrid') {
     try {
       return new SmtpEmailSender();

@@ -4,6 +4,7 @@ import type { ChatAttachment, ChatSession, Message } from '../types';
 
 import ChatMessage from './ChatMessage';
 import { useStore } from '../store/useStore';
+import { submitResponseFeedback } from '../api/feedback';
 
 interface RightChatSidebarProps {
   messages: Message[];
@@ -328,7 +329,14 @@ export default function RightChatSidebar({
             key={msg.id ?? idx}
             message={msg}
             onPreviewDoc={setActiveDocument ? (doc) => setActiveDocument(doc) : undefined}
-            onFeedback={submitFeedback}
+            onFeedback={async (messageId, rating, details) => {
+              submitFeedback(messageId, rating);
+              const question = messages
+                .slice(0, idx)
+                .reverse()
+                .find((candidate: any) => candidate.sender === 'user' || candidate.role === 'user')?.text || '';
+              await submitResponseFeedback(messageId, rating, { ...details, question: question.slice(0, 6_000) });
+            }}
             onUpgradeClick={onUpgradeClick}
             onRetry={onRetry}
           />

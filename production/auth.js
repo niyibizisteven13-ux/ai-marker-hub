@@ -8,7 +8,7 @@ export function isAuthEnabled() {
   return Boolean(JWT_SECRET);
 }
 
-export function requireAuth(req, res, next) {
+export async function requireAuth(req, res, next) {
   const authHeader = req.get?.('authorization');
   const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
 
@@ -16,8 +16,9 @@ export function requireAuth(req, res, next) {
     return res.status(401).json({ error: 'Authentication required.', code: 'NO_TOKEN' });
   }
 
+  let decoded;
   try {
-    const decoded = jwt.verify(bearerToken, JWT_SECRET, {
+    decoded = jwt.verify(bearerToken, JWT_SECRET, {
       algorithms: ['HS256'],
       issuer: 'bwenge',
       audience: 'bwenge-web',
@@ -27,15 +28,28 @@ export function requireAuth(req, res, next) {
       return res.status(401).json({ error: 'Invalid or expired token.', code: 'INVALID_TOKEN' });
     }
 
-    req.teacher = { teacherId: decoded.userId };
-    req.user = decoded;
-    return next();
   } catch (err) {
     const isExpired = err.name === 'TokenExpiredError';
     return res.status(401).json({
       error: isExpired ? 'Token expired.' : 'Invalid or expired token.',
       code: isExpired ? 'TOKEN_EXPIRED' : 'INVALID_TOKEN',
     });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.userId },
+      select: { id: true, disabledAt: true },
+    });
+    if (!user || user.disabledAt) {
+      return res.status(403).json({ error: 'This account is disabled or unavailable.', code: 'ACCOUNT_DISABLED' });
+    }
+    req.teacher = { teacherId: decoded.userId };
+    req.user = decoded;
+    return next();
+  } catch (error) {
+    console.error('Account status verification failed:', error);
+    return res.status(503).json({ error: 'Account access could not be verified. Please retry.' });
   }
 }
 
@@ -47,9 +61,9 @@ export function requireRole(role) {
     try {
       const user = await prisma.user.findUnique({
         where: { id: req.user.userId },
-        select: { id: true, email: true, name: true, role: true },
+        select: { id: true, email: true, name: true, role: true, disabledAt: true },
       });
-      if (!user || user.role !== role) {
+      if (!user || user.disabledAt || user.role !== role) {
         return res.status(403).json({ error: 'Forbidden: insufficient permissions.' });
       }
       req.user = { ...req.user, email: user.email, name: user.name, role: user.role };
