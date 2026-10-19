@@ -187,7 +187,10 @@ export default function ChatMessage({
     setFeedbackSubmitting(true);
     setFeedbackError('');
     try {
-      await onFeedback?.(messageId, rating, {
+      if (!onFeedback) {
+        throw new Error('Feedback could not be sent from this conversation.');
+      }
+      await onFeedback(messageId, rating, {
         question: '',
         response: cleanText.slice(0, 20_000),
         reasons,

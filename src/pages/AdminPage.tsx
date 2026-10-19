@@ -394,8 +394,6 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
   }, [loadData]);
 
   useEffect(() => {
-    if (!currentAdminId) return;
-
     let active = true;
     let socket: WebSocket | null = null;
     let reconnectTimer: number | null = null;
@@ -463,7 +461,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
       socket?.close();
     };
-  }, [currentAdminId, refreshFeedback]);
+  }, [refreshFeedback]);
 
   useEffect(() => {
     if (!billingUserId && users.length > 0) {

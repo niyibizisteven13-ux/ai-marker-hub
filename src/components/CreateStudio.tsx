@@ -27,7 +27,7 @@ import {
   LogOut,
   Copy
 } from 'lucide-react';
-import { Message as MessageType, ChatAttachment } from '../types';
+import { Message as MessageType, ChatAttachment, ResponseFeedbackDetails } from '../types';
 import ChatMessage from './ChatMessage';
 import logoUrl from '../assets/bwenge-logo.svg';
 
@@ -62,7 +62,7 @@ interface CreateStudioProps {
   onOpenSidebar?: () => void;
   onOpenScanner?: () => void;
   onPreviewDoc?: (doc: any) => void;
-  onFeedback?: (messageId: string, rating: 'up' | 'down') => void;
+  onFeedback?: (messageId: string, rating: 'up' | 'down', details: ResponseFeedbackDetails) => void | Promise<void>;
   onRetry?: (messageId: string) => void;
   onUpgradeClick?: (jobId: string, service: string) => void;
   userName?: string;

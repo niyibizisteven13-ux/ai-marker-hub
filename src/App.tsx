@@ -17,6 +17,7 @@ import {
   ChatSession,
   User,
   StudentAnswerInput,
+  ResponseFeedbackDetails,
 } from './types';
 import {
   SAMPLE_EXAMS,
@@ -52,6 +53,7 @@ import LandingPage from './pages/LandingPage';
 import TermsPage from './pages/TermsPage';
 import PrivacyPage from './pages/PrivacyPage';
 import { authService } from './auth/authService';
+import { submitResponseFeedback } from './api/feedback';
 
 const AI_SCAN_ENABLED = import.meta.env.VITE_ENABLE_AI_SCAN !== 'false';
 const LoginModal = React.lazy(() => import('./components/LoginModal'));
@@ -1336,7 +1338,19 @@ export default function App() {
       setActiveDocument(doc);
       setActiveTab('marking_hub');
     },
-    onFeedback: (messageId: string, rating: 'up' | 'down') => {
+    onFeedback: async (messageId: string, rating: 'up' | 'down', details: ResponseFeedbackDetails) => {
+      const messageIndex = messages.findIndex((message) => message.id === messageId);
+      if (messageIndex < 0 || messages[messageIndex].sender !== 'assistant') {
+        throw new Error('Could not find the AI response to attach feedback to.');
+      }
+      const question = messages
+        .slice(0, messageIndex)
+        .reverse()
+        .find((message) => message.sender === 'user')?.text || '';
+      await submitResponseFeedback(messageId, rating, {
+        ...details,
+        question: question.slice(0, 6_000),
+      });
       setMessages((prev) =>
         prev.map((m) => (m.id === messageId ? { ...m, rating } : m))
       );

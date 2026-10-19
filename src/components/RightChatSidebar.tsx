@@ -330,12 +330,12 @@ export default function RightChatSidebar({
             message={msg}
             onPreviewDoc={setActiveDocument ? (doc) => setActiveDocument(doc) : undefined}
             onFeedback={async (messageId, rating, details) => {
-              submitFeedback(messageId, rating);
               const question = messages
                 .slice(0, idx)
                 .reverse()
                 .find((candidate: any) => candidate.sender === 'user' || candidate.role === 'user')?.text || '';
               await submitResponseFeedback(messageId, rating, { ...details, question: question.slice(0, 6_000) });
+              submitFeedback(messageId, rating);
             }}
             onUpgradeClick={onUpgradeClick}
             onRetry={onRetry}
