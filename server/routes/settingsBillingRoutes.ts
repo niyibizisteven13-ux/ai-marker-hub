@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import { prisma } from '../db.js';
 import { requireAuth } from '../../production/auth.js';
 import logger from '../utils/logger.js';
@@ -130,11 +131,29 @@ router.post('/connections/telegram', requireAuth, async (req, res) => {
 router.post('/sales/organisation-request', requireAuth, async (req, res) => {
   try {
     const userId = (req as any).user?.userId;
-    const { organizationName, faculty, estimatedSeats, contactEmail, message } = req.body;
-    if (!organizationName || !contactEmail) {
-      return res.status(400).json({ error: 'Organization name and contact email are required.' });
+    const parsed = z.object({
+      organizationName: z.string().trim().min(1).max(160),
+      faculty: z.string().trim().max(160).optional().default(''),
+      estimatedSeats: z.coerce.number().int().min(1).max(1_000_000).optional(),
+      contactEmail: z.string().trim().email().max(254),
+      message: z.string().trim().max(4_000).optional().default(''),
+    }).safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Provide a valid organization name and contact email; optional details must also be valid.' });
     }
-    logger.info('Organisation request received.', { userId, estimatedSeats: Number.isFinite(Number(estimatedSeats)) ? Number(estimatedSeats) : undefined });
+
+    const upgradeRequest = await prisma.organizationUpgradeRequest.create({
+      data: {
+        userId,
+        organizationName: parsed.data.organizationName,
+        faculty: parsed.data.faculty || null,
+        estimatedSeats: parsed.data.estimatedSeats,
+        contactEmail: parsed.data.contactEmail,
+        message: parsed.data.message || null,
+      },
+      select: { id: true },
+    });
+    logger.info('Organisation upgrade request received.', { userId, requestId: upgradeRequest.id, estimatedSeats: parsed.data.estimatedSeats });
     res.json({
       success: true,
       message: 'Thank you. Our institutional partnerships team will contact you within 24 hours with a custom quote.',

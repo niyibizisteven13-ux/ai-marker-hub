@@ -173,6 +173,22 @@ export const adminApi = {
 
   // Users & Organizations
   getUsers: () => readJson<{ success: true; data: any[] }>('/api/admin/users'),
+  getBilling: () => readJson<{
+    success: true;
+    data: { subscriptions: any[]; payments: any[]; requests: any[] };
+  }>('/api/admin/billing'),
+  updateSubscription: (userId: string, payload: { planType: string; status: string; endDate: string | null }) =>
+    readJson(`/api/admin/billing/subscriptions/${encodeURIComponent(userId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
+  updateUpgradeRequestStatus: (id: string, status: 'pending' | 'contacted' | 'closed') =>
+    readJson(`/api/admin/billing/upgrade-requests/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    }),
   updateUserStatus: (userId: string, disabled: boolean) =>
     readJson('/api/admin/users/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId, disabled }) }),
   createUser: (payload: { email: string; name: string }) =>

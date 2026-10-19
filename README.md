@@ -31,6 +31,8 @@ People can rate AI responses; a negative rating opens a compact follow-up form. 
 
 The admin console includes feedback review, user role and account-access controls, AI provider model and gateway settings, and an email broadcast form for enabled accounts. Broadcast email uses the configured email sender.
 
+The **Upgrades & Subscriptions** admin section lists subscriptions, provider-reported payment history, and saved institutional upgrade requests. Administrators can update subscription plan/status/expiry with an audit record and contact or track institutional requests. Payment outcomes remain controlled by verified payment-provider callbacks, not manual admin edits.
+
 ## Admin Knowledge and RAG
 
 Admin document uploads extract and chunk readable text before marking a document ready. With `GEMINI_API_KEY` configured, document chunks are batch-embedded and retrieval combines semantic and keyword matching; without it, uploads explicitly use keyword retrieval. Existing documents can be embedded through the admin-only `POST /api/admin/documents/:id/reindex-embeddings` endpoint.

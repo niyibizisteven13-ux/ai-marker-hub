@@ -12,7 +12,7 @@ import { useStore } from '../store/useStore';
 type Env = 'draft' | 'testing' | 'production';
 type TabId = 'overview' | 'finetune' | 'datasets' | 'models' | 'knowledge' | 'documents' | 'playground'
   | 'review' | 'verified' | 'retrieval' | 'prompts' | 'providers' | 'analytics' | 'quality' | 'users' | 'logs' | 'settings'
-  | 'feedback' | 'communication';
+  | 'feedback' | 'communication' | 'billing';
 
 const DATASET_FILE_ACCEPT = '.pdf,.docx,.txt,.md,.csv,.json,.xlsx,.xls,.png,.jpg,.jpeg,.webp,.gif,.js,.ts,.tsx,.jsx,.py,.java,.kt,.cpp,.c,.h,.cs,.rs,.go,.sql,.html,.css,.yaml,.yml,.sh';
 
@@ -61,6 +61,7 @@ const NAV_CATEGORIES: NavCategory[] = [
       { id: 'verified', label: 'Verified Answers', icon: <Sparkles size={16} /> },
       { id: 'users', label: 'User & Roles', icon: <Users size={16} /> },
       { id: 'feedback', label: 'Feedback & Support', icon: <MessageSquare size={16} /> },
+      { id: 'billing', label: 'Upgrades & Subscriptions', icon: <ShieldCheck size={16} /> },
       { id: 'communication', label: 'Email Communication', icon: <Mail size={16} /> },
       { id: 'logs', label: 'System Audit Logs', icon: <Activity size={16} /> },
       { id: 'settings', label: 'Control Plane', icon: <Settings size={16} /> },
@@ -226,6 +227,12 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
   const [newProviderBaseUrl, setNewProviderBaseUrl] = useState('');
   const [savingProvider, setSavingProvider] = useState(false);
   const [feedbackItems, setFeedbackItems] = useState<any[]>([]);
+  const [billingData, setBillingData] = useState<{ subscriptions: any[]; payments: any[]; requests: any[] }>({ subscriptions: [], payments: [], requests: [] });
+  const [billingSearch, setBillingSearch] = useState('');
+  const [billingUserId, setBillingUserId] = useState('');
+  const [billingPlan, setBillingPlan] = useState('PRO');
+  const [billingStatus, setBillingStatus] = useState('ACTIVE');
+  const [billingEndDate, setBillingEndDate] = useState('');
   const [feedbackDatasetId, setFeedbackDatasetId] = useState('');
   const [feedbackCorrections, setFeedbackCorrections] = useState<Record<string, string>>({});
   const [userSearch, setUserSearch] = useState('');
@@ -305,7 +312,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
     if (!silent) setLoading(true);
     setError(null);
     try {
-      const [ov, hl, kbList, docList, dsList, mdList, prList, usList, lgList, anData, qData, prvList, ftList, rsData, corrList, verList, fbList] = await Promise.all([
+      const [ov, hl, kbList, docList, dsList, mdList, prList, usList, lgList, anData, qData, prvList, ftList, rsData, corrList, verList, fbList, billData] = await Promise.all([
         adminApi.getOverview(),
         adminApi.getHealth(),
         adminApi.getKnowledgeBases(),
@@ -323,6 +330,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
         adminApi.getCorrections(),
         adminApi.getVerifiedAnswers(),
         adminApi.getFeedback(),
+        adminApi.getBilling(),
       ]);
 
       setOverview(ov.data);
@@ -342,6 +350,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
         return forms;
       }, {}));
       setFeedbackItems(fbList.data);
+      setBillingData(billData.data);
       setDatasetAdapterJobs(ftList.data);
       setRetrievalSet(rsData.data);
       setCorrections(corrList.data);
@@ -371,6 +380,17 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    if (!billingUserId && users.length > 0) {
+      const userId = users[0].id;
+      const subscription = billingData.subscriptions.find((entry) => entry.userId === userId);
+      setBillingUserId(userId);
+      setBillingPlan(subscription?.planType || 'PRO');
+      setBillingStatus(subscription?.status || 'ACTIVE');
+      setBillingEndDate(subscription?.endDate ? new Date(subscription.endDate).toISOString().slice(0, 10) : '');
+    }
+  }, [billingData.subscriptions, billingUserId, users]);
 
   // Auto-poll adapter builds while they are queued or running.
   useEffect(() => {
@@ -2627,6 +2647,189 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                       ))}
                     </div>
                   )}
+                </Section>
+              )}
+
+              {/* ── BILLING, UPGRADES & SUBSCRIPTIONS TAB ── */}
+              {tab === 'billing' && (
+                <Section
+                  title="Upgrades & Subscriptions"
+                  hint="Review institutional upgrade requests, inspect payment records, and manage a user's subscription. Manual subscription changes are audited; payment statuses are read-only and remain controlled by verified payment-provider callbacks."
+                >
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                    <Stat label="Active subscriptions" value={billingData.subscriptions.filter((subscription) => subscription.status === 'ACTIVE').length} detail="Across BUSINESS, PRO, and ORGANIZATION" />
+                    <Stat label="Pending payments" value={billingData.payments.filter((payment) => payment.status === 'PENDING').length} detail="Awaiting provider confirmation" />
+                    <Stat label="Open upgrade requests" value={billingData.requests.filter((request) => request.status !== 'closed').length} detail="Institutional pricing enquiries" />
+                  </div>
+
+                  <Section title="Manage an account subscription" hint="Grant or update access after confirming the request or payment. Free/pay-as-you-go users have no subscription record.">
+                    <form
+                      className={`${card} grid grid-cols-1 gap-4 p-5 sm:grid-cols-2 xl:grid-cols-5`}
+                      onSubmit={async (event) => {
+                        event.preventDefault();
+                        if (!billingUserId) {
+                          notify('Select an account first.', true);
+                          return;
+                        }
+                        if (!window.confirm(`Save ${billingPlan} · ${billingStatus} for the selected account?`)) return;
+                        try {
+                          await adminApi.updateSubscription(billingUserId, {
+                            planType: billingPlan,
+                            status: billingStatus,
+                            endDate: billingEndDate ? new Date(`${billingEndDate}T23:59:59.999Z`).toISOString() : null,
+                          });
+                          await loadData(true);
+                          notify('Subscription updated');
+                        } catch (err: any) {
+                          notify(err.message, true);
+                        }
+                      }}
+                    >
+                      <Field label="Account">
+                        <select className={input} value={billingUserId} onChange={(event) => {
+                          const userId = event.target.value;
+                          setBillingUserId(userId);
+                          const current = billingData.subscriptions.find((subscription) => subscription.userId === userId);
+                          setBillingPlan(current?.planType || 'PRO');
+                          setBillingStatus(current?.status || 'ACTIVE');
+                          setBillingEndDate(current?.endDate ? new Date(current.endDate).toISOString().slice(0, 10) : '');
+                        }}>
+                          {users.map((user) => <option key={user.id} value={user.id}>{user.name} · {user.email}</option>)}
+                        </select>
+                      </Field>
+                      <Field label="Plan">
+                        <select className={input} value={billingPlan} onChange={(event) => setBillingPlan(event.target.value)}>
+                          <option value="BUSINESS">BUSINESS</option>
+                          <option value="PRO">PRO</option>
+                          <option value="ORGANIZATION">ORGANIZATION</option>
+                        </select>
+                      </Field>
+                      <Field label="Access status">
+                        <select className={input} value={billingStatus} onChange={(event) => setBillingStatus(event.target.value)}>
+                          <option value="ACTIVE">ACTIVE</option>
+                          <option value="EXPIRED">EXPIRED</option>
+                          <option value="CANCELED">CANCELED</option>
+                        </select>
+                      </Field>
+                      <Field label="Expiry date" tip="Leave blank for no scheduled expiry. The app stores the selected date through the end of that day (UTC).">
+                        <input className={input} type="date" value={billingEndDate} onChange={(event) => setBillingEndDate(event.target.value)} />
+                      </Field>
+                      <div className="flex items-end">
+                        <button type="submit" className={btnPrimary} disabled={!billingUserId}>
+                          <CheckCircle2 size={15} /> Save subscription
+                        </button>
+                      </div>
+                    </form>
+                  </Section>
+
+                  <Section title="Customer subscriptions" hint="Search current entitlements and see when they next expire.">
+                    <input className={`${input} max-w-sm`} value={billingSearch} onChange={(event) => setBillingSearch(event.target.value)} placeholder="Search accounts or plans" aria-label="Search subscriptions" />
+                    <div className={`${card} overflow-x-auto`}>
+                      <table className="w-full min-w-[720px] text-left text-sm">
+                        <thead className="border-b border-[#263052] bg-[#141C36] text-xs font-bold uppercase text-[#9AA6C9]">
+                          <tr>
+                            <th className="p-4">Account</th><th className="p-4">Plan</th><th className="p-4">Status</th><th className="p-4">Expires</th><th className="p-4">Updated</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#263052]">
+                          {users
+                            .filter((user) => {
+                              const subscription = billingData.subscriptions.find((entry) => entry.userId === user.id);
+                              return `${user.name} ${user.email} ${subscription?.planType || 'FREE'}`.toLowerCase().includes(billingSearch.toLowerCase());
+                            })
+                            .map((user) => {
+                              const subscription = billingData.subscriptions.find((entry) => entry.userId === user.id);
+                              return (
+                                <tr key={user.id} className="hover:bg-[#18213D]/60">
+                                  <td className="p-4"><p className="font-semibold text-white">{user.name}</p><p className="text-xs text-[#9AA6C9]">{user.email}</p></td>
+                                  <td className="p-4 text-white">{subscription?.planType || 'FREE'}</td>
+                                  <td className="p-4"><Badge tone={subscription?.status === 'ACTIVE' ? 'green' : subscription ? 'yellow' : 'gray'}>{subscription?.status || 'FREE'}</Badge></td>
+                                  <td className="p-4 text-[#9AA6C9]">{subscription?.endDate ? new Date(subscription.endDate).toLocaleDateString() : subscription ? 'No expiry' : '—'}</td>
+                                  <td className="p-4 text-[#9AA6C9]">{subscription?.updatedAt ? new Date(subscription.updatedAt).toLocaleDateString() : '—'}</td>
+                                </tr>
+                              );
+                            })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </Section>
+
+                  <Section title="Institution upgrade requests" hint="Requests from the Organisation upgrade option are saved here for follow-up.">
+                    {billingData.requests.length === 0 ? (
+                      <EmptyState title="No organization upgrade requests" desc="New requests for institutional pricing and setup will appear here." icon={<Users size={26} />} />
+                    ) : (
+                      <div className="space-y-3">
+                        {billingData.requests.map((request) => (
+                          <article key={request.id} className={`${card} flex flex-col gap-4 p-5 lg:flex-row lg:items-start lg:justify-between`}>
+                            <div className="min-w-0 space-y-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h3 className="font-bold text-white">{request.organizationName}</h3>
+                                <Badge tone={request.status === 'closed' ? 'gray' : request.status === 'contacted' ? 'blue' : 'yellow'}>{request.status}</Badge>
+                              </div>
+                              <p className="text-xs text-[#9AA6C9]">{request.user?.name} · {request.user?.email} · {new Date(request.createdAt).toLocaleString()}</p>
+                              <p className="text-sm text-[#D5D9E8]">
+                                {request.faculty ? `${request.faculty} · ` : ''}{request.estimatedSeats ? `${request.estimatedSeats} estimated seats` : 'Seats not specified'}
+                              </p>
+                              <p className="text-xs text-[#9AA6C9]">Contact: {request.contactEmail}</p>
+                              {request.message && <p className="whitespace-pre-wrap text-sm text-white">{request.message}</p>}
+                            </div>
+                            <div className="flex shrink-0 flex-wrap gap-2">
+                              <a
+                                className={btnGhost}
+                                href={`mailto:${encodeURIComponent(request.contactEmail)}?subject=${encodeURIComponent(`Bwenge organization plan: ${request.organizationName}`)}`}
+                              >
+                                <Mail size={15} /> Email contact
+                              </a>
+                              <select
+                                aria-label={`Status for ${request.organizationName} upgrade request`}
+                                className={`${input} min-h-[42px] w-auto`}
+                                value={request.status}
+                                onChange={async (event) => {
+                                  try {
+                                    await adminApi.updateUpgradeRequestStatus(request.id, event.target.value as 'pending' | 'contacted' | 'closed');
+                                    await loadData(true);
+                                    notify('Upgrade request updated');
+                                  } catch (err: any) {
+                                    notify(err.message, true);
+                                  }
+                                }}
+                              >
+                                <option value="pending">Pending</option>
+                                <option value="contacted">Contacted</option>
+                                <option value="closed">Closed</option>
+                              </select>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    )}
+                  </Section>
+
+                  <Section title="Recent payment records" hint="Provider-confirmed payment history is read-only here. Initiate or refund transactions through the payment provider; this console never fabricates payment success.">
+                    {billingData.payments.length === 0 ? (
+                      <EmptyState title="No payments recorded" desc="Successful and pending upgrade or usage payments will appear here." icon={<BarChart3 size={26} />} />
+                    ) : (
+                      <div className={`${card} overflow-x-auto`}>
+                        <table className="w-full min-w-[800px] text-left text-sm">
+                          <thead className="border-b border-[#263052] bg-[#141C36] text-xs font-bold uppercase text-[#9AA6C9]">
+                            <tr><th className="p-4">Date</th><th className="p-4">Account</th><th className="p-4">Reference</th><th className="p-4">Amount</th><th className="p-4">Provider</th><th className="p-4">Status</th></tr>
+                          </thead>
+                          <tbody className="divide-y divide-[#263052]">
+                            {billingData.payments.map((payment) => (
+                              <tr key={payment.id} className="hover:bg-[#18213D]/60">
+                                <td className="p-4 whitespace-nowrap text-[#9AA6C9]">{new Date(payment.createdAt).toLocaleString()}</td>
+                                <td className="p-4"><p className="text-white">{payment.user?.name || 'Account unavailable'}</p><p className="text-xs text-[#9AA6C9]">{payment.user?.email || payment.userId}</p></td>
+                                <td className="p-4 text-xs text-[#9AA6C9]">{payment.externalRef || payment.batchId}</td>
+                                <td className="p-4 text-white">{payment.amountRwf.toLocaleString()} RWF</td>
+                                <td className="p-4 text-[#9AA6C9]">{payment.provider}</td>
+                                <td className="p-4"><Badge tone={payment.status === 'SUCCESS' ? 'green' : payment.status === 'FAILED' ? 'red' : 'yellow'}>{payment.status}</Badge></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </Section>
                 </Section>
               )}
 

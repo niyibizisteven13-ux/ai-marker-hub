@@ -2778,6 +2778,102 @@ router.get('/feedback', async (_req, res) => {
   }
 });
 
+router.get('/billing', async (_req, res) => {
+  try {
+    const [subscriptions, payments, requests] = await Promise.all([
+      prisma.subscription.findMany({
+        include: { user: { select: { id: true, name: true, email: true, disabledAt: true } } },
+        orderBy: { updatedAt: 'desc' },
+        take: 500,
+      }),
+      prisma.payment.findMany({ orderBy: { createdAt: 'desc' }, take: 500 }),
+      prisma.organizationUpgradeRequest.findMany({
+        include: { user: { select: { id: true, name: true, email: true } } },
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+      }),
+    ]);
+    const userIds = [...new Set(payments.map((payment) => payment.userId))];
+    const users = await prisma.user.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, name: true, email: true },
+    });
+    const userById = new Map(users.map((user) => [user.id, user]));
+
+    res.json({
+      success: true,
+      data: {
+        subscriptions,
+        payments: payments.map((payment) => ({ ...payment, user: userById.get(payment.userId) || null })),
+        requests,
+      },
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.put('/billing/subscriptions/:userId', async (req, res) => {
+  const parsed = z.object({
+    planType: z.enum(['BUSINESS', 'PRO', 'ORGANIZATION']),
+    status: z.enum(['ACTIVE', 'EXPIRED', 'CANCELED']),
+    endDate: z.string().datetime().nullable(),
+  }).safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: 'Choose a supported plan, status, and optional valid expiry date.' });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.params.userId },
+      select: { id: true },
+    });
+    if (!user) return res.status(404).json({ success: false, error: 'User not found.' });
+
+    const subscription = await prisma.subscription.upsert({
+      where: { userId: user.id },
+      create: {
+        userId: user.id,
+        planType: parsed.data.planType,
+        status: parsed.data.status,
+        endDate: parsed.data.endDate ? new Date(parsed.data.endDate) : null,
+      },
+      update: {
+        planType: parsed.data.planType,
+        status: parsed.data.status,
+        endDate: parsed.data.endDate ? new Date(parsed.data.endDate) : null,
+      },
+      include: { user: { select: { id: true, name: true, email: true, disabledAt: true } } },
+    });
+    await writeAuditLog(req.user?.userId, 'ADMIN_UPDATE_SUBSCRIPTION', 'subscription', subscription.id, {
+      userId: user.id,
+      planType: subscription.planType,
+      status: subscription.status,
+      endDate: subscription.endDate?.toISOString() || null,
+    });
+    res.json({ success: true, data: subscription });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.patch('/billing/upgrade-requests/:id', async (req, res) => {
+  const parsed = z.object({ status: z.enum(['pending', 'contacted', 'closed']) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ success: false, error: 'Choose a valid upgrade request status.' });
+
+  try {
+    const request = await prisma.organizationUpgradeRequest.update({
+      where: { id: req.params.id },
+      data: { status: parsed.data.status },
+      select: { id: true, status: true },
+    });
+    await writeAuditLog(req.user?.userId, 'UPDATE_ORGANIZATION_UPGRADE_REQUEST', 'organization_upgrade_request', request.id, { status: request.status });
+    res.json({ success: true, data: request });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 router.patch('/feedback/:id', async (req, res) => {
   const parsed = z.object({ status: z.enum(['new', 'reviewed']) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ success: false, error: 'Invalid feedback status.' });
