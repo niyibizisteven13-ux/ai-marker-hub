@@ -9,6 +9,7 @@ import {
   patchMe,
   getSessions,
   revokeSession,
+  revokeAllSessions,
   refreshTokenHandler,
 } from '../controllers/authController.js';
 import {
@@ -44,5 +45,6 @@ router.patch('/me', requireAuth, logErrors('patchMe', patchMe));
 
 router.get('/sessions', requireAuth, logErrors('getSessions', getSessions));
 router.delete('/sessions/:id', requireAuth, logErrors('revokeSession', revokeSession));
+router.post('/logout-all', requireAuth, logErrors('revokeAllSessions', revokeAllSessions));
 
 export default router;

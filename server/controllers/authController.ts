@@ -521,6 +521,23 @@ export async function revokeSession(req: Request, res: Response) {
   }
 }
 
+export async function revokeAllSessions(req: Request, res: Response) {
+  try {
+    const userId = (req as any).user?.userId;
+    if (!userId) return res.status(401).json({ error: { code: 'unauthorized' } });
+
+    const result = await prisma.refreshSession.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    clearRefreshCookie(res);
+    await writeAuditLog(userId, 'LOGOUT_ALL_SESSIONS', 'User', userId, { revokedCount: result.count });
+    return res.json({ success: true, revokedCount: result.count });
+  } catch (err: any) {
+    return res.status(500).json({ error: { code: 'server_error' } });
+  }
+}
+
 export async function refreshTokenHandler(req: Request, res: Response) {
   try {
     const isProd = process.env.NODE_ENV === 'production';

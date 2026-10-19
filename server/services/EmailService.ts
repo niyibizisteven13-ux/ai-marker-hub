@@ -9,7 +9,7 @@ export class EmailService {
     const pass = process.env.SMTP_PASS;
 
     if (host && user && pass) {
-      logger.info(`[EmailService] Initialized Gmail SMTP service for host ${host} (User: ${user})`);
+      logger.info('[EmailService] SMTP transport credentials are configured.');
     } else {
       logger.warn('[EmailService] SMTP credentials not fully configured. Emails will be logged to console.');
     }
@@ -26,7 +26,7 @@ export class EmailService {
     const from = process.env.SMTP_FROM || 'Bwenge AI Studio <noreply@bwenge.space>';
     const host = process.env.SMTP_HOST;
 
-    logger.info(`[EmailService] Dispatching email via ${host || 'console fallback'} -> To: ${to} | Subject: "${subject}"`);
+    logger.info('[EmailService] Email dispatch requested.');
     return { success: true, messageId: 'msg-' + Date.now() };
   }
 

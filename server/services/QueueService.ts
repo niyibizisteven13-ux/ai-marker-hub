@@ -1,6 +1,8 @@
 import { GradingService } from './GradingService.js';
 import fs from 'fs';
 import path from 'path';
+import { randomUUID } from 'node:crypto';
+import { renameSync } from 'node:fs';
 
 const JOBS_FILE = path.resolve(process.cwd(), 'exports', 'local-jobs.json');
 
@@ -18,11 +20,20 @@ function loadJobsFromDisk() {
   try {
     if (fs.existsSync(JOBS_FILE)) {
       const parsed = JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8'));
+      let recoveredInterruptedJob = false;
       for (const [id, rec] of Object.entries(parsed)) {
+        if ((rec as any)?.state === 'active') {
+          (rec as any).state = 'failed';
+          (rec as any).failedReason = 'The server restarted while this job was running. Retry the job.';
+          recoveredInterruptedJob = true;
+        }
         jobStore.set(id, hydrateJobMethods(rec));
       }
+      if (recoveredInterruptedJob) saveJobsToDisk();
     }
-  } catch {}
+  } catch (error) {
+    console.error('Could not restore local grading jobs from disk.', error instanceof Error ? error.name : 'Error');
+  }
 }
 
 function saveJobsToDisk() {
@@ -33,15 +44,19 @@ function saveJobsToDisk() {
       const { getState, updateProgress, updateData, ...rest } = rec;
       serializable[id] = rest;
     }
-    fs.writeFileSync(JOBS_FILE, JSON.stringify(serializable, null, 2), 'utf8');
-  } catch {}
+    const temporaryFile = `${JOBS_FILE}.${randomUUID()}.tmp`;
+    fs.writeFileSync(temporaryFile, JSON.stringify(serializable, null, 2), { encoding: 'utf8', mode: 0o600 });
+    renameSync(temporaryFile, JOBS_FILE);
+  } catch (error) {
+    console.error('Could not persist local grading jobs.', error instanceof Error ? error.name : 'Error');
+  }
 }
 
 loadJobsFromDisk();
 
 export class QueueService {
   private static instance: QueueService;
-  private isRedisAvailable: boolean = true;
+  private isRedisAvailable: boolean = false;
 
   private constructor() {}
 
@@ -53,7 +68,9 @@ export class QueueService {
   }
 
   public async initialize() {
-    this.isRedisAvailable = true;
+    // Jobs are currently executed in this process and snapshotted to local disk.
+    // Do not advertise a Redis connection until the queue actually uses Redis.
+    this.isRedisAvailable = false;
   }
 
   public getQueue() {

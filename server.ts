@@ -24,7 +24,7 @@ import { HighVolumeBatchService } from './server/services/HighVolumeBatchService
 import { SafetyService } from './server/services/SafetyService.js';
 import { SentimentService } from './server/services/SentimentService.js';
 import { ConfidenceService } from './server/services/ConfidenceService.js';
-import { upload } from './server/middleware/upload.js';
+import { upload, batchUpload } from './server/middleware/upload.js';
 import { ingestDocument } from './server/services/DocumentIngestionService.js';
 import { classifyIntent, isSmallTalkMessage } from './server/services/intentRouter.js';
 import { generalTools } from './server/services/generalTools.js';
@@ -38,7 +38,7 @@ import { validate, examSchema, markScriptSchema, batchGradeSchema, chatSchema } 
 import { getFileUrlSecret, getJwtSecret } from './server/auth/secrets.js';
 
 import { requireAuth, requireRole, writeAuditLog } from './production/auth.js';
-import { generalLimiter, gradingLimiter } from './production/rateLimiter.js';
+import { generalLimiter, gradingLimiter, publicFormSubmitLimiter, batchGradingLimiter } from './production/rateLimiter.js';
 import authRoutes from './server/routes/authRoutes.ts';
 import userRoutes from './server/routes/userRoutes.ts';
 import agentRoutes from './server/routes/agentRoutes.ts';
@@ -56,7 +56,6 @@ import { validateEvidenceCitations } from './server/services/GroundedAnswerServi
 import { buildUserContextScope } from './server/services/ai/dataScope.js';
 import { stripThinkingTags } from './server/services/AiService.ts';
 import { generateBatchExcelReport, generateBatchExcelReportFromGradedResults } from './src/services/excelExporter.ts';
-import { uploadBufferToCloud } from './src/services/cloudStorage.ts';
 import { extractTextFromUpload } from './src/services/documentService.ts';
 import { PDFParse } from 'pdf-parse';
 import fs from 'fs/promises';
@@ -67,6 +66,7 @@ const __dirname = path.dirname(__filename);
 
 export const app = express();
 app.set('trust proxy', 1);
+app.disable('x-powered-by');
 const PORT = Number(process.env.PORT) || 3000;
 app.set('trust proxy', 1);
 
@@ -253,6 +253,10 @@ app.use((req: express.Request, _res: express.Response, next: express.NextFunctio
   next();
 });
 
+// Public form responses do not need the large payload budget used for AI image
+// attachments. Apply a smaller parser limit before the general JSON parser so
+// oversized anonymous requests are rejected before consuming tens of MB.
+app.use('/api/forms/:id/submit', express.json({ limit: '256kb' }));
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: false, limit: '25mb', parameterLimit: 1000 }));
 // Parse the HTTP-only refresh cookie before auth controllers access req.cookies.
@@ -274,6 +278,14 @@ app.use((req, _res, next) => {
     }
   }
   req.cookies = cookies;
+  next();
+});
+
+// Responses may contain student submissions, account details, or generated
+// marking data. Prevent browsers and shared proxies from caching API payloads.
+app.use('/api', (_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Pragma', 'no-cache');
   next();
 });
 
@@ -368,10 +380,8 @@ app.post('/api/files/upload', requireAuth, upload.single('file'), async (req, re
     const uploadsDir = path.join(process.cwd(), 'uploads');
     const savedPath = path.join(uploadsDir, `file-${Date.now()}-${crypto.randomUUID()}${safeExt}`);
 
-    await fs.mkdir(uploadsDir, { recursive: true });
-    await fs.writeFile(savedPath, req.file.buffer);
-
-    const storedUrl = await uploadBufferToCloud(req.file.buffer, `uploads/${path.basename(savedPath)}`, realMimeType);
+    await fs.mkdir(uploadsDir, { recursive: true, mode: 0o700 });
+    await fs.writeFile(savedPath, req.file.buffer, { mode: 0o600 });
 
     const record = await prisma.fileRecord.create({
       data: {
@@ -379,15 +389,14 @@ app.post('/api/files/upload', requireAuth, upload.single('file'), async (req, re
         mimeType: req.file.mimetype,
         size: req.file.size,
         userId,
-        path: null,
-        url: storedUrl,
+        path: savedPath,
+        url: null,
       },
     });
 
     writeAuditLog(userId, 'FILE_UPLOAD', 'FileRecord', record.id, {
-      name: req.file.originalname,
       size: req.file.size,
-    }).catch((err) => logger.warn('Audit log write failed for file upload', err));
+    }).catch((err) => logger.warn('Audit log write failed for file upload.', { errorType: err instanceof Error ? err.name : 'Error' }));
 
     extractTextFromUpload(savedPath, req.file.originalname, req.file.mimetype)
       .then(async (result) => {
@@ -395,9 +404,9 @@ app.post('/api/files/upload', requireAuth, upload.single('file'), async (req, re
           where: { id: record.id },
           data: { extractedText: result.rawText },
         });
-        logger.info(`Extracted text from ${req.file?.originalname}`);
+        logger.info('Uploaded document text extraction completed.', { fileId: record.id });
       })
-      .catch((err) => logger.error(`Extraction failed for ${record.id}`, err));
+      .catch((err) => logger.error('Uploaded document text extraction failed.', { fileId: record.id, errorType: err instanceof Error ? err.name : 'Error' }));
 
     res.json({ success: true, fileId: record.id });
   } catch (error: any) {
@@ -884,10 +893,10 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
       if (insight?.title) {
         // Future: push this to the specific user's open SSE stream via
         // Redis pub/sub or a websocket channel keyed on userId/jobId.
-        logger.info(`Proactive Insight Generated for ${userId}: ${insight.title}`);
+        logger.info('Proactive insight generated.');
       }
     }).catch(err => {
-      logger.error(`Proactive Insight generation failed for ${userId}:`, err);
+      logger.error('Proactive insight generation failed.', { errorType: err instanceof Error ? err.name : 'Error' });
     });
   }
 
@@ -963,7 +972,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
         serverAttachmentText = [serverAttachmentText, `[Attached document: ${attachment.name}]\n${extractedText}`].filter(Boolean).join('\n\n');
       }
     } catch (err) {
-      logger.warn(`Failed to process attachment ${attachment.name}`, err);
+      logger.warn('Failed to process an attached file.', { errorType: err instanceof Error ? err.name : 'Error' });
     }
   }
 
@@ -997,10 +1006,10 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
           const response = await fetch(file.url);
           if (!response.ok) throw new Error(`Requested file URL returned ${response.status}`);
           buffer = Buffer.from(await response.arrayBuffer());
-          logger.info(`Loaded visual context from cloud URL: ${file.url}`);
+          logger.info('Loaded visual context from cloud storage.');
         } else if (file.path) {
           buffer = await fs.readFile(file.path);
-          logger.info(`Loaded visual context from disk: ${file.path}`);
+          logger.info('Loaded visual context from local storage.');
         } else {
           continue;
         }
@@ -1011,7 +1020,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
           mediaType: file.mimeType,
         });
       } catch (err) {
-        logger.error(`Failed to read file for AI vision: ${file.url || file.path}`, err);
+        logger.error('Failed to read an uploaded file for AI vision.', { errorType: err instanceof Error ? err.name : 'Error' });
       }
     }
   }
@@ -1040,7 +1049,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
       }
       await fs.unlink(tempPath).catch(() => {});
     } catch (err) {
-      logger.warn('Failed to process attachmentBase64 in chat', err);
+      logger.warn('Failed to process a legacy chat attachment.', { errorType: err instanceof Error ? err.name : 'Error' });
     }
   }
 
@@ -1364,7 +1373,7 @@ ${augmentedQuery}`;
     return;
   }
 
-  logger.info('Chat request received (streaming)', { intent, queryPreview: (query || '').slice(0, 80) });
+  logger.info('Chat request received (streaming)', { intent, queryLength: (query || '').length });
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -1688,7 +1697,7 @@ app.post('/api/forms/generate', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/forms/:id/submit', async (req, res) => {
+app.post('/api/forms/:id/submit', publicFormSubmitLimiter, async (req, res) => {
   try {
     const form = await prisma.applicationForm.findUnique({ where: { id: req.params.id } });
     if (!form) return res.status(404).json({ error: 'Form not found.' });
@@ -1699,11 +1708,18 @@ app.post('/api/forms/:id/submit', async (req, res) => {
     }
     const definitions = [...(Array.isArray(schema.questions) ? schema.questions : []), ...(Array.isArray(schema.fields) ? schema.fields : [])];
     const answers = req.body?.answers && typeof req.body.answers === 'object' ? req.body.answers : req.body;
+    if (Buffer.byteLength(JSON.stringify(answers ?? {}), 'utf8') > 200_000) {
+      return res.status(413).json({ error: 'This response is too large. Please shorten the answers and try again.' });
+    }
     const count = answers && typeof answers === 'object' && !Array.isArray(answers) ? Object.keys(answers).length : 0;
     if (!count || count > Math.max(definitions.length + 2, 2) || count > 200) return res.status(400).json({ error: 'Invalid submission payload.' });
     const normalized: Record<string, unknown> = {};
-    if (schema.collectEmail && typeof (answers as any)._respondentEmail === 'string' && (answers as any)._respondentEmail.trim()) {
-      normalized._respondentEmail = (answers as any)._respondentEmail.trim();
+    if (schema.collectEmail) {
+      const respondentEmail = (answers as any)._respondentEmail;
+      if (typeof respondentEmail !== 'string' || respondentEmail.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(respondentEmail.trim())) {
+        return res.status(400).json({ error: 'Enter a valid email address to submit this form.' });
+      }
+      normalized._respondentEmail = respondentEmail.trim().toLowerCase();
     }
     for (const [index, definition] of definitions.entries()) {
       const key = String(definition.id ?? definition.number ?? index + 1);
@@ -1987,6 +2003,7 @@ You are inspecting ${images.length} scanned student answer sheet page(s).
 2. Detect the student's name and ID only if visible on the page; otherwise return null for that field.
 3. Segment each question and the student's corresponding answer.
 4. Grade each answer fairly against the provided rubric (or standard academic criteria if no rubric is provided), awarding partial credit where appropriate.
+5. If a question has no visible answer, return an empty string for studentAnswer, award zero for that question, and do not invent a response.
 Return valid JSON ONLY in this exact shape:
 {
   "detectedStudentName": null,
@@ -2241,7 +2258,7 @@ app.post('/api/ai/translate', requireAuth, gradingLimiter, async (req, res) => {
 
 // --- Batch Grading & Job Polling API (for Telegram Bot Integration & Background Processing) ---
 
-app.post('/api/batch/grade', requireAuth, gradingLimiter, upload.fields([{ name: 'papers', maxCount: 1 }, { name: 'rubric', maxCount: 1 }]), async (req: express.Request, res: express.Response) => {
+app.post('/api/batch/grade', requireAuth, batchGradingLimiter, batchUpload.fields([{ name: 'papers', maxCount: 1 }, { name: 'rubric', maxCount: 1 }]), async (req: express.Request, res: express.Response) => {
   try {
     const userId = (req as any).user?.userId;
     if (!userId) return res.status(401).json({ error: 'Authentication required.' });
@@ -2308,7 +2325,7 @@ app.post('/api/batch/grade', requireAuth, gradingLimiter, upload.fields([{ name:
         await fs.mkdir(exportsDir, { recursive: true });
         const excelFileName = `automark-results-${jobId}.xlsx`;
         const excelFilePath = path.join(exportsDir, excelFileName);
-        await fs.writeFile(excelFilePath, excelBuffer);
+        await fs.writeFile(excelFilePath, excelBuffer, { mode: 0o600 });
 
         const baseUrl = `${req.protocol}://${req.get('host')}`;
         const excelUrl = `${(process.env.APP_URL || baseUrl).replace(/\/$/, '')}/exports/${excelFileName}`;
@@ -2416,7 +2433,7 @@ async function ensureMasterAdmin() {
     }
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) {
-      logger.info(`Admin bootstrap skipped: ${email} already has an account; existing role and password were left unchanged.`);
+      logger.info('Admin bootstrap skipped because the configured account already exists.');
       return;
     }
     if (initialPassword.length < 12) {
@@ -2433,9 +2450,9 @@ async function ensureMasterAdmin() {
         settings: { create: {} },
       },
     });
-    logger.info(`Initial admin account created: ${email}`);
+    logger.info('Initial admin account created.');
   } catch (err) {
-    logger.error('Failed to ensure master/team admin accounts:', err);
+    logger.error('Failed to ensure the initial administrator account.', { errorType: err instanceof Error ? err.name : 'Error' });
   }
 }
 
@@ -2453,6 +2470,16 @@ async function startServer() {
     await prisma.$connect();
     await prisma.$queryRaw`SELECT 1`;
     await queueService.initialize();
+    const interruptedBatches = await prisma.batchJob.updateMany({
+      where: { status: 'PROCESSING' },
+      data: {
+        status: 'FAILED',
+        errorMessage: 'The server restarted while this batch was processing. Please submit the files again.',
+      },
+    });
+    if (interruptedBatches.count > 0) {
+      logger.warn('Marked interrupted batch grading jobs as failed after restart.', { count: interruptedBatches.count });
+    }
   }
   const reconService = ReconciliationService.getInstance();
   reconService.initialize().catch((err) => {

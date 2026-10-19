@@ -384,7 +384,7 @@ router.post('/scan-upload/:sessionToken', upload.single('file'), async (req: Req
     }
 
     checkAndTriggerBatchGrading(chatId).catch((err) => {
-      logger.error(`Post-scan-upload grading trigger failed for chat ${chatId}`, err);
+      logger.error('Post-scan-upload grading trigger failed.', { errorType: err instanceof Error ? err.name : 'Error' });
     });
 
     // Single-use token cleanup
@@ -923,7 +923,7 @@ Respond strictly in ${lang === 'rw' ? 'Kinyarwanda' : 'English'}. Include:
       }
     }
   } catch (err: any) {
-    logger.error(`Error handling bot command "${text}" for chat ${chatId}:`, err);
+    logger.error('Error handling Telegram bot command.', { errorType: err instanceof Error ? err.name : 'Error' });
     const lang = session?.language || 'en';
     const errorMsg = lang === 'rw'
       ? '❌ Habaye ikibazo mu gikorwa wakoze. Ongera ugerageze cyangwa wandike /help.'
@@ -1165,7 +1165,7 @@ async function checkAndTriggerBatchGrading(chatId: string) {
   });
 
   if (claim.count !== 1) {
-    logger.info(`Staging claim skipped for chat ${chatId} - already claimed by concurrent process.`);
+    logger.info('Telegram staging claim skipped because another process already claimed it.');
     return;
   }
 

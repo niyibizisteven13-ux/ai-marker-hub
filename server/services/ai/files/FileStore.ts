@@ -58,7 +58,7 @@ export class FileStore {
   }): Promise<StoredFileMeta> {
     const data = Buffer.from(input.data);
     if (data.length > this.maxFileBytes) throw new FileStoreError('too_large', `File is larger than ${Math.round(this.maxFileBytes / 1048576)} MB.`);
-    await mkdir(this.dir, { recursive: true });
+    await mkdir(this.dir, { recursive: true, mode: 0o700 });
     const id = randomUUID();
     const now = Date.now();
     const meta: StoredFileMeta = {
@@ -72,8 +72,8 @@ export class FileStore {
       createdAt: new Date(now).toISOString(),
       expiresAt: new Date(now + (input.ttlMs ?? this.ttl)).toISOString(),
     };
-    await writeFile(this.filePath(id), data);
-    await writeFile(this.filePath(id) + '.json', JSON.stringify(meta));
+    await writeFile(this.filePath(id), data, { mode: 0o600 });
+    await writeFile(this.filePath(id) + '.json', JSON.stringify(meta), { mode: 0o600 });
     return meta;
   }
 

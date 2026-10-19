@@ -71,7 +71,7 @@ export function validateScanGradeOutput(value: unknown): ValidScanGrade | null {
     if (
       !nonEmpty(item.number) ||
       !nonEmpty(item.questionText) ||
-      !nonEmpty(item.studentAnswer) ||
+      typeof item.studentAnswer !== 'string' ||
       !nonEmpty(item.feedback) ||
       !nonEmpty(item.flag) ||
       typeof questionAwarded !== 'number' ||

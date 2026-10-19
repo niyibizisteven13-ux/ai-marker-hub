@@ -47,3 +47,23 @@ export const gradingLimiter = isDev
       standardHeaders: true,
       legacyHeaders: false,
     });
+
+export const publicFormSubmitLimiter = isDev
+  ? (req, res, next) => next()
+  : rateLimit({
+      windowMs: 15 * 60 * 1000,
+      max: 60,
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { error: 'Too many form submissions from this network. Please wait and try again.' },
+    });
+
+export const batchGradingLimiter = isDev
+  ? (req, res, next) => next()
+  : rateLimit({
+      windowMs: 15 * 60 * 1000,
+      max: 6,
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { error: 'Too many batch grading uploads from this network. Please wait and try again.' },
+    });

@@ -134,7 +134,7 @@ router.post('/sales/organisation-request', requireAuth, async (req, res) => {
     if (!organizationName || !contactEmail) {
       return res.status(400).json({ error: 'Organization name and contact email are required.' });
     }
-    logger.info('Organisation request received', { userId, organizationName, faculty, estimatedSeats, contactEmail });
+    logger.info('Organisation request received.', { userId, estimatedSeats: Number.isFinite(Number(estimatedSeats)) ? Number(estimatedSeats) : undefined });
     res.json({
       success: true,
       message: 'Thank you. Our institutional partnerships team will contact you within 24 hours with a custom quote.',
