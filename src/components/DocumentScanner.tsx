@@ -633,8 +633,8 @@ export default function DocumentScanner({
   const callAgent = async (payload: Record<string, unknown>, signal?: AbortSignal) => {
     const init: RequestInit = { method: 'POST', body: JSON.stringify(payload), signal };
     const res = await authFetch('/api/ai/scan-agent', init);
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'The AI request failed');
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error?.message || data?.error || data?.message || `The AI request failed (${res.status}).`);
     return data;
   };
 
@@ -685,7 +685,18 @@ export default function DocumentScanner({
           rawTextHint: cand.pages[i].extractedText || '',
         }, signal);
         texts.push(data.ocrTranscript || data.extractedText || '');
-        reports.push(data);
+        reports.push(agentMode === 'grade' ? {
+          ...data,
+          questions: Array.isArray(data.questions) ? data.questions.map((question: any, index: number) => ({
+            number: Number.parseInt(String(question.number || '').replace(/\D/g, ''), 10) || index + 1,
+            question: question.questionText || `Question ${index + 1}`,
+            studentAnswer: question.studentAnswer || '',
+            score: Number(question.awardedMarks) || 0,
+            maxScore: Number(question.maxMarks) || 0,
+            feedback: question.feedback || '',
+          })) : [],
+          summary: data.summary || data.overallFeedback,
+        } : data);
         const found = data.detectedStudentName || data.studentName;
         if (found && !detectedName && !/^unknown/i.test(found)) detectedName = found;
       }

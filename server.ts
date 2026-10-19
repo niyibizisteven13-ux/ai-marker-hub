@@ -1786,7 +1786,7 @@ app.get('/api/forms/:id/analyze', requireAuth, handleAnalyzeForm);
 app.post('/api/forms/:id/analyze', requireAuth, handleAnalyzeForm);
 
 // Autonomous LiveScanner AI Agent Endpoint (Vision OCR + Auto-Grading + Scan-to-Form)
-app.post('/api/ai/scan-agent', requireAuth, async (req, res) => {
+app.post('/api/ai/scan-agent', requireAuth, gradingLimiter, async (req, res) => {
   if (process.env.ENABLE_AI_SCAN === 'false') {
     return res.status(404).json({ error: 'AI scan is disabled. Set ENABLE_AI_SCAN=true to enable it.' });
   }
@@ -1794,7 +1794,21 @@ app.post('/api/ai/scan-agent', requireAuth, async (req, res) => {
     const userId = (req as any).user?.userId;
     if (!userId) return res.status(401).json({ error: 'Authentication required.' });
 
-    const { mode = 'extract_and_grade', rubricText = '', studentName = '', instructions = '' } = req.body || {};
+    const {
+      mode: requestedMode = 'grade',
+      rubricText: rubricTextInput = '',
+      rubric: rubricAlias = '',
+      studentName = '',
+      instructions = '',
+      rawTextHint = '',
+    } = req.body || {};
+    const mode = requestedMode === 'extract_form' ? 'scan_to_form' : requestedMode;
+    const rubricText = typeof rubricTextInput === 'string' && rubricTextInput.trim()
+      ? rubricTextInput
+      : typeof rubricAlias === 'string' ? rubricAlias : '';
+    if (!['ocr', 'grade', 'scan_to_form', 'extract_and_grade'].includes(mode)) {
+      return res.status(400).json({ error: 'Unsupported scan action. Choose OCR, grading, or form extraction.' });
+    }
     const pages = Array.isArray(req.body?.pages)
       ? req.body.pages
       : req.body?.imageBase64
@@ -1815,6 +1829,34 @@ app.post('/api/ai/scan-agent', requireAuth, async (req, res) => {
       .filter(Boolean) as Array<{ base64: string; mediaType: string }>;
     if (images.length !== pages.length) {
       return res.status(400).json({ error: 'One or more scanned pages are not valid base64 image data.' });
+    }
+
+    const decodedImages = images.map((image) => Buffer.from(image.base64, 'base64'));
+    if (decodedImages.some((image) => image.length === 0 || image.length > 12 * 1024 * 1024)) {
+      return res.status(413).json({ error: 'Each scanned page must be a valid image under 12 MB. Please reduce the scan quality and retry.' });
+    }
+    if (decodedImages.some((image, index) => detectRealMimeType(image) !== images[index].mediaType)) {
+      return res.status(400).json({ error: 'A scanned page does not match its declared image type. Please capture or upload it again.' });
+    }
+
+    if (mode === 'ocr') {
+      const systemPrompt = `You are a careful OCR assistant. Read only text visible in the supplied image. Do not guess missing or blurred words. Preserve the original language, spelling, line breaks, question numbers, and mathematical notation. Return JSON only with this shape: {"detectedStudentName": null, "ocrTranscript": "verbatim visible text", "summary": "brief description of the page", "qualityScore": 0}. qualityScore is an integer from 0 to 100 for legibility; use null for detectedStudentName when it is not clearly visible.`;
+      const raw = await aiService.sendGonkaChat(
+        `Transcribe the text visible on this scanned page. ${rawTextHint ? `Existing OCR hint (verify against the image and correct errors):\\n${String(rawTextHint).slice(0, 12000)}` : ''} ${instructions}`,
+        { system: systemPrompt, images, maxTokens: 3000 },
+      );
+      const parsed = aiService.parseModelJson(raw);
+      const transcript = typeof parsed?.ocrTranscript === 'string' ? parsed.ocrTranscript.trim() : '';
+      if (!transcript) return res.status(502).json({ error: { code: 'INVALID_OCR_OUTPUT', message: 'The AI could not read enough text from this scan. Try a clearer image or adjust the page corners.' }, retryable: true });
+      return res.json({
+        success: true,
+        ocrTranscript: transcript,
+        extractedText: transcript,
+        detectedStudentName: typeof parsed.detectedStudentName === 'string' ? parsed.detectedStudentName : null,
+        studentName: typeof parsed.detectedStudentName === 'string' ? parsed.detectedStudentName : null,
+        summary: typeof parsed.summary === 'string' ? parsed.summary : '',
+        qualityScore: Number.isFinite(parsed.qualityScore) ? Math.max(0, Math.min(100, parsed.qualityScore)) : undefined,
+      });
     }
 
     if (mode === 'scan_to_form') {
@@ -1971,6 +2013,7 @@ Return valid JSON ONLY in this exact shape:
 
     const userPrompt = `Analyze, transcribe (OCR), and grade these ${images.length} scanned page(s) for ${studentName || 'this student'}.
 ${rubricText ? `ACTIVE RUBRIC / EXAM CONTEXT:\n${rubricText}` : 'No explicit rubric provided — infer question max marks totaling 100 and grade with academic rigor.'}
+${rawTextHint ? `SUPPLEMENTAL OCR HINT (verify every item against the image; the image is authoritative):\n${String(rawTextHint).slice(0, 12000)}` : ''}
 ${instructions ? `ADDITIONAL AGENT INSTRUCTIONS:\n${instructions}` : ''}`;
 
     const raw = await aiService.sendGonkaChat(userPrompt, { system: systemPrompt, images });
