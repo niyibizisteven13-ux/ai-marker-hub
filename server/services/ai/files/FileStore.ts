@@ -121,14 +121,15 @@ export class FileStore {
   }
 
   toRef(meta: StoredFileMeta, previewId?: string): AttachmentRef {
+    const remainingTtl = Math.max(0, Date.parse(meta.expiresAt) - Date.now());
     return {
       id: meta.id,
       name: meta.name,
       mime: meta.mime,
       size: meta.size,
       kind: meta.kind,
-      url: this.signedUrl(meta.id),
-      ...(previewId ? { previewUrl: this.signedUrl(previewId), previewId } : {}),
+      url: this.signedUrl(meta.id, remainingTtl),
+      ...(previewId ? { previewUrl: this.signedUrl(previewId, remainingTtl), previewId } : {}),
       expiresAt: meta.expiresAt,
     };
   }

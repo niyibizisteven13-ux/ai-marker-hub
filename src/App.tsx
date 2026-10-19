@@ -203,18 +203,62 @@ export default function App() {
 
   const [activeDocument, setActiveDocument] = useState<UploadedFile | null>(null);
   const [stagedAttachments, setStagedAttachments] = useState<Array<File | ChatAttachment>>([]);
+  const [attachmentError, setAttachmentError] = useState('');
   const [temporaryChatMode, setTemporaryChatMode] = useState(false);
 
   const handleStageAttachments = (files: Array<File | ChatAttachment>) => {
-    setStagedAttachments((prev) => [...prev, ...files]);
+    const allowedExtensions = new Set([
+      'pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'csv', 'txt', 'md', 'rtf', 'json',
+      'js', 'jsx', 'ts', 'tsx', 'py', 'java', 'cpp', 'c', 'h', 'html', 'css', 'xml', 'yaml', 'yml', 'sql',
+      'png', 'jpg', 'jpeg', 'webp', 'gif',
+    ]);
+    const next = [...stagedAttachments];
+    const errors: string[] = [];
+    const maxFiles = 10;
+    const maxFileBytes = 10 * 1024 * 1024;
+    const maxTotalBytes = 15 * 1024 * 1024;
+    const sizeOf = (item: File | ChatAttachment) => {
+      if (item instanceof File) return item.size;
+      if (typeof item.size === 'number') return item.size;
+      const sizeMatch = typeof item.size === 'string' ? item.size.match(/^([\d.]+)\s*(B|KB|MB)$/i) : null;
+      if (sizeMatch) return Number(sizeMatch[1]) * (sizeMatch[2].toUpperCase() === 'MB' ? 1024 * 1024 : sizeMatch[2].toUpperCase() === 'KB' ? 1024 : 1);
+      const data = item.base64Data || item.url || item.previewUrl || '';
+      const encoded = data.includes(',') ? data.slice(data.indexOf(',') + 1) : data;
+      return encoded ? Math.floor(encoded.length * 0.75) : 0;
+    };
+    let totalBytes = next.reduce((sum, item) => sum + sizeOf(item), 0);
+
+    for (const item of files) {
+      const itemBytes = sizeOf(item);
+      if (item instanceof File) {
+        const extension = item.name.split('.').pop()?.toLowerCase() || '';
+        if (item.size === 0) { errors.push(`${item.name}: file is empty`); continue; }
+        if (!allowedExtensions.has(extension)) { errors.push(`${item.name}: file type is not supported`); continue; }
+        if (itemBytes > maxFileBytes) { errors.push(`${item.name}: larger than 10 MB`); continue; }
+        if (totalBytes + itemBytes > maxTotalBytes) { errors.push('Attachments cannot exceed 15 MB total'); continue; }
+        const duplicate = next.some((existing) => existing instanceof File && existing.name === item.name && existing.size === item.size && existing.lastModified === item.lastModified);
+        if (duplicate) { errors.push(`${item.name}: already attached`); continue; }
+      } else if (itemBytes > maxFileBytes || (itemBytes > 0 && totalBytes + itemBytes > maxTotalBytes)) {
+        errors.push(`${item.name || 'Attachment'} exceeds the attachment size limit`);
+        continue;
+      }
+      if (next.length >= maxFiles) { errors.push('You can attach up to 10 files per message'); break; }
+      next.push(item);
+      totalBytes += itemBytes;
+    }
+
+    setStagedAttachments(next);
+    setAttachmentError(errors.join('. '));
   };
 
   const handleRemoveStagedAttachment = (index: number) => {
     setStagedAttachments((prev) => prev.filter((_, i) => i !== index));
+    setAttachmentError('');
   };
 
   const handleClearStagedAttachments = () => {
     setStagedAttachments([]);
+    setAttachmentError('');
   };
 
   useEffect(() => {
@@ -491,6 +535,37 @@ export default function App() {
         resolve(base64Clean);
       };
       reader.onerror = (error) => reject(error);
+    });
+  };
+
+  const makeImageThumbnail = (source: File | string, mimeType: string): Promise<string | undefined> => {
+    if (!mimeType.startsWith('image/')) return Promise.resolve(undefined);
+    return new Promise((resolve) => {
+      const objectUrl = source instanceof File ? URL.createObjectURL(source) : undefined;
+      const image = new Image();
+      image.onload = () => {
+        try {
+          const scale = Math.min(1, 320 / Math.max(image.naturalWidth, image.naturalHeight));
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+          canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+          const context = canvas.getContext('2d');
+          if (!context) { resolve(undefined); return; }
+          context.fillStyle = '#fff';
+          context.fillRect(0, 0, canvas.width, canvas.height);
+          context.drawImage(image, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL('image/jpeg', 0.65));
+        } catch {
+          resolve(undefined);
+        } finally {
+          if (objectUrl) URL.revokeObjectURL(objectUrl);
+        }
+      };
+      image.onerror = () => {
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        resolve(undefined);
+      };
+      image.src = objectUrl || source as string;
     });
   };
 
@@ -777,6 +852,7 @@ export default function App() {
     };
 
     const assistantId = 'msg-' + (Date.now() + 1);
+    const generatedAttachments: import('./components/types').AttachmentRef[] = [];
     const pendingAssistant: Message = {
       id: assistantId,
       sender: 'assistant',
@@ -788,7 +864,6 @@ export default function App() {
     const nextMessages = [...messages, userMsg];
     let requestMessages = nextMessages;
     setMessages([...nextMessages, pendingAssistant]);
-    handleClearStagedAttachments();
     setIsAiThinking(true);
     setIsAiLoading(true);
 
@@ -813,6 +888,7 @@ export default function App() {
         text: assistantText,
         isStreaming,
         isWaiting: !firstTokenReceived && isStreaming,
+        ...(generatedAttachments.length ? { generatedAttachments: [...generatedAttachments] } : {}),
       };
       setMessages((current) => current.map((message) => (
         message.id === assistantId ? assistantMsg : message
@@ -821,21 +897,40 @@ export default function App() {
     };
     try {
       const newAttachments: ChatAttachment[] = [];
+      const attachmentPayloads: Array<{ name: string; mimeType: string; base64: string }> = [];
+      const serverAttachmentIds: string[] = [];
       if (attachment) {
         const attArray = Array.isArray(attachment) ? attachment : [attachment];
         for (const att of attArray) {
           if (att instanceof File) {
-            const dataUrl = await convertFileToBase64(att);
+            const base64 = await convertFileToBase64(att);
+            const mimeType = att.type || 'application/octet-stream';
+            if (!base64) throw new Error(`Could not read ${att.name}. Please choose the file again.`);
+            attachmentPayloads.push({ name: att.name, mimeType, base64 });
+            const previewUrl = await makeImageThumbnail(att, mimeType);
             newAttachments.push({
               id: 'att-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
               name: att.name,
-              mimeType: att.type || 'application/octet-stream',
-              previewUrl: dataUrl,
-              url: dataUrl,
-              fileType: att.type.startsWith('image/') ? 'image' : 'pdf',
+              mimeType,
+              ...(previewUrl ? { previewUrl, url: previewUrl } : {}),
+              fileType: att.type.startsWith('image/') ? 'image' : att.name.toLowerCase().endsWith('.pdf') ? 'pdf' : 'document',
             });
           } else {
-            newAttachments.push(att);
+            const source = att.base64Data || [att.url, att.previewUrl].find((value) => value?.startsWith('data:')) || '';
+            const base64 = source.includes(',') ? source.slice(source.indexOf(',') + 1) : source;
+            const mimeType = att.mimeType || att.type || 'application/octet-stream';
+            const imagePreview = source ? await makeImageThumbnail(source, mimeType) : undefined;
+            newAttachments.push({
+              ...att,
+              url: imagePreview || (att.url?.startsWith('data:') ? undefined : att.url),
+              previewUrl: imagePreview || (att.previewUrl?.startsWith('data:') ? undefined : att.previewUrl),
+            });
+            if (base64) attachmentPayloads.push({
+              name: att.name || 'attachment',
+              mimeType,
+              base64,
+            });
+            if (att.serverId) serverAttachmentIds.push(att.serverId);
           }
         }
       }
@@ -852,9 +947,6 @@ export default function App() {
       const contextExam = examPaper ? buildExamPaperContext(examPaper) : '';
       const fullPrompt = contextExam ? `${contextExam}\n\nUser request: ${text}` : text;
 
-      const firstAttachment = newAttachments[0];
-      const attachmentData = firstAttachment?.url || firstAttachment?.previewUrl || '';
-      const attachmentBase64 = attachmentData.includes(',') ? attachmentData.split(',')[1] : '';
       const attachmentText = newAttachments.map((item) => item.rawText).filter(Boolean).join('\n\n');
       resetIdleTimeout();
       const response = await authFetch('/api/ai/chat', {
@@ -868,20 +960,20 @@ export default function App() {
             text: message.text,
           })),
           attachmentText,
-          attachmentName: firstAttachment?.name,
-          attachmentMimeType: firstAttachment?.mimeType || firstAttachment?.type,
-          attachmentBase64: attachmentBase64 || undefined,
+          attachments: attachmentPayloads,
+          attachmentIds: serverAttachmentIds,
           answerLanguage: options?.answerLanguage,
         }),
         signal: controller.signal,
       });
 
       if (!response.ok) {
-        await response.json().catch(() => null);
-        throw new Error('Bwenge could not complete your request. Please try again.');
+        const errorBody = await response.json().catch(() => null);
+        throw new Error(errorBody?.error || 'Bwenge could not complete your request. Please try again.');
       }
 
       if (!response.body) throw new Error('AI service returned an empty stream');
+      handleClearStagedAttachments();
 
       let assistantText = '';
       let streamBuffer = '';
@@ -903,6 +995,11 @@ export default function App() {
             updateAssistant(assistantText, true);
           } else if (event.type === 'reset') {
             assistantText = '';
+            updateAssistant(assistantText, true);
+          } else if (event.type === 'attachment' && typeof event.id === 'string') {
+            if (!generatedAttachments.some((attachment) => attachment.id === event.id)) {
+              generatedAttachments.push(event as import('./components/types').AttachmentRef);
+            }
             updateAssistant(assistantText, true);
           } else if (event.type === 'error') {
             throw new Error(event.message || 'Bwenge could not complete your request. Please try again.');
@@ -935,6 +1032,7 @@ export default function App() {
         text: assistantText,
         isStreaming: false,
         isWaiting: false,
+        ...(generatedAttachments.length ? { generatedAttachments: [...generatedAttachments] } : {}),
       }];
       setMessages(finalMessages);
 
@@ -975,8 +1073,10 @@ export default function App() {
         text: errorText,
         isStreaming: false,
         isWaiting: false,
+        ...(generatedAttachments.length ? { generatedAttachments: [...generatedAttachments] } : {}),
         stopped,
         errorKind: stopped ? undefined : 'generic',
+        ...(generatedAttachments.length ? { generatedAttachments: [...generatedAttachments] } : {}),
       };
       setMessages((current) => current.map((message) => (
         message.id === assistantId ? failedAssistant : message
@@ -1226,6 +1326,7 @@ export default function App() {
     onProviderChange: setSelectedProvider,
     stagedAttachments,
     onStageAttachments: handleStageAttachments,
+    attachmentError,
     onRemoveStagedAttachment: handleRemoveStagedAttachment,
     onOpenSidebar: () => setIsMobileSidebarOpen(true),
     onOpenScanner: openScanner,
@@ -1500,6 +1601,7 @@ export default function App() {
                     onSendMessage={handleSendMessage}
                     stagedAttachments={stagedAttachments}
                     onStageAttachments={handleStageAttachments}
+                    attachmentError={attachmentError}
                     onRemoveStagedAttachment={handleRemoveStagedAttachment}
                     onClearStagedAttachments={handleClearStagedAttachments}
                     activeDocument={activeDocument}

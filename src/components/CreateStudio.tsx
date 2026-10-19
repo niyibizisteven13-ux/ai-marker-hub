@@ -56,6 +56,7 @@ interface CreateStudioProps {
   selectedProvider?: string;
   onProviderChange?: (provider: string) => void;
   stagedAttachments?: Array<File | ChatAttachment>;
+  attachmentError?: string;
   onStageAttachments?: (attachments: Array<File | ChatAttachment>) => void;
   onRemoveStagedAttachment?: (index: number) => void;
   onOpenSidebar?: () => void;
@@ -67,6 +68,13 @@ interface CreateStudioProps {
   userName?: string;
   user?: any;
   onOpenLoginModal?: () => void;
+}
+
+function attachmentMeta(item: File | ChatAttachment) {
+  const name = item instanceof File ? item.name : item.name || 'Attachment';
+  const bytes = item instanceof File ? item.size : typeof item.size === 'number' ? item.size : 0;
+  const size = bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MB` : bytes >= 1024 ? `${Math.round(bytes / 1024)} KB` : bytes ? `${bytes} B` : !(item instanceof File) ? item.size : '';
+  return { name, size, type: name.split('.').pop()?.toUpperCase() || 'FILE' };
 }
 
 function ModePicker({ selected, onSelect }: { selected: string; onSelect: (val: string) => void }) {
@@ -148,6 +156,7 @@ export default function CreateStudio({
   selectedProvider = 'auto',
   onProviderChange,
   stagedAttachments = [],
+  attachmentError = '',
   onStageAttachments,
   onRemoveStagedAttachment,
   onOpenSidebar,
@@ -169,6 +178,7 @@ export default function CreateStudio({
   const [showSources, setShowSources] = useState(true);
   const [answerLanguage, setAnswerLanguage] = useState('Auto');
   const [isRecording, setIsRecording] = useState(false);
+  const [isDraggingAttachments, setIsDraggingAttachments] = useState(false);
 
   const menuRef = useRef<HTMLDivElement>(null);
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
@@ -262,6 +272,28 @@ export default function CreateStudio({
     e.target.value = '';
   };
 
+  const handleComposerPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = Array.from(e.clipboardData.files || []);
+    if (files.length > 0) {
+      e.preventDefault();
+      onStageAttachments?.(files);
+      return;
+    }
+    const pastedText = e.clipboardData.getData('text/plain') || '';
+    if (pastedText.length > 10_000) {
+      e.preventDefault();
+      onStageAttachments?.([new File([pastedText], 'pasted-text.txt', { type: 'text/plain' })]);
+    }
+  };
+
+  const handleComposerDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+    setIsDraggingAttachments(false);
+    const files = Array.from(e.dataTransfer.files || []);
+    if (files.length > 0) onStageAttachments?.(files);
+  };
+
   const handleScroll = () => {
     const el = scrollContainerRef.current;
     if (!el) return;
@@ -293,7 +325,13 @@ export default function CreateStudio({
   const canSend = Boolean(inputValue.trim() || stagedAttachments.length > 0 || isTyping);
 
   return (
-    <div className="relative flex h-full w-full flex-col overflow-hidden bg-[#262624] text-[#FAF9F5]">
+    <div
+      className="relative flex h-full w-full flex-col overflow-hidden bg-[#262624] text-[#FAF9F5]"
+      onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setIsDraggingAttachments(true); } }}
+      onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setIsDraggingAttachments(false); }}
+      onDrop={handleComposerDrop}
+    >
+      {isDraggingAttachments && <div className="absolute inset-3 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-emerald-400/70 bg-[#141413]/95 text-sm font-medium text-emerald-200 pointer-events-none">Drop documents to attach</div>}
       {/* Header */}
       <header className="flex h-[calc(56px+env(safe-area-inset-top,0px))] shrink-0 items-center justify-between border-b border-white/[0.06] bg-[#212121]/95 px-3 pt-[env(safe-area-inset-top,0px)] backdrop-blur-md">
         {/* Left: Menu button on mobile */}
@@ -658,7 +696,7 @@ export default function CreateStudio({
         ref={fileInputRef}
         type="file"
         multiple
-        accept="*/*"
+        accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.txt,.md,.rtf,.json,.js,.jsx,.ts,.tsx,.py,.java,.cpp,.c,.h,.html,.css,.xml,.yaml,.yml,.sql,.png,.jpg,.jpeg,.webp,.gif"
         onChange={handleFileChange}
         className="hidden"
       />
@@ -671,16 +709,18 @@ export default function CreateStudio({
               <div className="mb-2.5 flex flex-wrap gap-2 overflow-x-auto pb-1">
                 {stagedAttachments.map((meta: any, idx: number) => (
                   <div
-                    key={idx}
-                    className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 py-1.5 px-2.5 text-xs text-[#FAF9F5]"
+                    key={`${attachmentMeta(meta).name}-${idx}`}
+                    className="flex max-w-full items-center gap-2 rounded-xl border border-white/10 bg-white/5 py-1.5 px-2.5 text-xs text-[#FAF9F5]"
                   >
                     <span>📄</span>
-                    <span className="max-w-[140px] truncate">{meta.name}</span>
+                    <span className="max-w-[180px] min-w-0 truncate" title={attachmentMeta(meta).name}>{attachmentMeta(meta).name}</span>
+                    <span className="shrink-0 rounded bg-white/[.07] px-1 py-0.5 text-[9px] font-semibold text-neutral-400">{attachmentMeta(meta).type}</span>
+                    {attachmentMeta(meta).size && <span className="shrink-0 text-[10px] text-neutral-500">{attachmentMeta(meta).size}</span>}
                     <button
                       type="button"
                       onClick={() => onRemoveStagedAttachment?.(idx)}
                       className="ml-1 h-7 w-7 flex items-center justify-center text-[#9C9A92] hover:text-rose-400 transition-colors"
-                      aria-label="Remove attachment"
+                      aria-label={`Remove ${attachmentMeta(meta).name}`}
                     >
                       ✕
                     </button>
@@ -688,6 +728,7 @@ export default function CreateStudio({
                 ))}
               </div>
             )}
+            {attachmentError && <p role="alert" className="mb-2 px-2 text-xs text-rose-300">{attachmentError}</p>}
 
             <div className="flex items-end gap-2">
               {/* Plus Button with Menu Popover */}
@@ -745,6 +786,7 @@ export default function CreateStudio({
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={handleKeyDown}
+                  onPaste={handleComposerPaste}
                   placeholder="Message Bwenge (Kinyarwanda or English)..."
                   className="w-full bg-transparent border-0 resize-none text-base leading-6 text-[#FAF9F5] placeholder-[#9C9A92] outline-none px-1 py-1 max-h-40 scrollbar-hidden"
                 />

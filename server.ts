@@ -801,6 +801,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
     attachmentName,
     attachmentMimeType,
     attachmentBase64,
+    attachments = [],
     examContext,
     pinnedSyllabus,
     selectedEvidence,
@@ -816,7 +817,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
 
   const userId = (req as any).user?.userId;
   if (!userId) return res.status(401).json({ error: 'Authentication required.' });
-  const hasFile = !!req.file || !!attachmentBase64;
+  const hasFile = !!req.file || !!attachmentBase64 || attachments.length > 0;
 
   // ── SAFETY SCAN (fast path, pre-LLM) ────────────────────────────────────────────
   // Run safety check before any expensive LLM call.
@@ -892,6 +893,80 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
 
   let serverAttachmentText = '';
   let serverVisualFiles: { type: 'image' | 'document'; base64: string; mediaType: string }[] = [];
+  const allowedAttachmentExtensions = new Set([
+    '.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx', '.csv', '.txt', '.md', '.rtf', '.json',
+    '.js', '.jsx', '.ts', '.tsx', '.py', '.java', '.cpp', '.c', '.h', '.html', '.css', '.xml', '.yaml', '.yml', '.sql',
+    '.png', '.jpg', '.jpeg', '.webp', '.gif',
+  ]);
+  let attachmentBytes = 0;
+  for (const attachment of attachments) {
+    const extension = path.extname(attachment.name).toLowerCase();
+    if (!allowedAttachmentExtensions.has(extension)) {
+      return res.status(400).json({ error: `Unsupported attachment type: ${extension || 'unknown'}` });
+    }
+    if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(attachment.base64)) {
+      return res.status(400).json({ error: `${attachment.name} could not be decoded. Please attach it again.` });
+    }
+    const buffer = Buffer.from(attachment.base64, 'base64');
+    attachmentBytes += buffer.length;
+    if (!buffer.length || buffer.length > 10 * 1024 * 1024 || attachmentBytes > 15 * 1024 * 1024) {
+      return res.status(413).json({ error: 'Attachments must be non-empty, at most 10 MB each, and no more than 15 MB total.' });
+    }
+    const detected = detectRealMimeType(buffer);
+    const claimed = attachment.mimeType || 'application/octet-stream';
+    const visualExtension = ['.pdf', '.png', '.jpg', '.jpeg', '.webp', '.gif'].includes(extension);
+    if (visualExtension && !detected) {
+      return res.status(400).json({ error: `${attachment.name} is not a valid PDF or image file.` });
+    }
+    const expectedImageMime: Record<string, string> = {
+      '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif',
+    };
+    if (detected && ((extension === '.pdf' && detected !== 'application/pdf') ||
+      (expectedImageMime[extension] && detected !== expectedImageMime[extension]))) {
+      return res.status(400).json({ error: `${attachment.name} does not match its file extension.` });
+    }
+    const mimeByExtension: Record<string, string> = {
+      '.pdf': 'application/pdf', '.doc': 'application/msword', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      '.ppt': 'application/vnd.ms-powerpoint', '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      '.xls': 'application/vnd.ms-excel', '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      '.csv': 'text/csv', '.txt': 'text/plain', '.md': 'text/markdown', '.rtf': 'application/rtf', '.json': 'application/json',
+      '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif',
+      '.js': 'text/plain', '.jsx': 'text/plain', '.ts': 'text/plain', '.tsx': 'text/plain', '.py': 'text/plain',
+      '.java': 'text/plain', '.cpp': 'text/plain', '.c': 'text/plain', '.h': 'text/plain', '.html': 'text/html',
+      '.css': 'text/css', '.xml': 'application/xml', '.yaml': 'text/plain', '.yml': 'text/plain', '.sql': 'text/plain',
+    };
+    const resolvedType = detected || mimeByExtension[extension] || claimed;
+    if (resolvedType.startsWith('image/') || resolvedType === 'application/pdf') {
+      serverVisualFiles.push({
+        type: resolvedType.startsWith('image/') ? 'image' : 'document',
+        base64: attachment.base64,
+        mediaType: resolvedType,
+      });
+    }
+    try {
+      let extractedText = '';
+      if (visualExtension) {
+        const tempPath = path.join(process.cwd(), 'uploads', `chat-att-${crypto.randomUUID()}${extension}`);
+        try {
+          await fs.mkdir(path.dirname(tempPath), { recursive: true });
+          await fs.writeFile(tempPath, buffer);
+          const extracted = await extractTextFromUpload(tempPath, attachment.name, resolvedType);
+          extractedText = extracted.rawText;
+        } finally {
+          await fs.unlink(tempPath).catch(() => {});
+        }
+      } else {
+        const ingested = await ingestDocument(buffer, resolvedType, attachment.name);
+        extractedText = ingested.text || '';
+      }
+      if (extractedText) {
+        serverAttachmentText = [serverAttachmentText, `[Attached document: ${attachment.name}]\n${extractedText}`].filter(Boolean).join('\n\n');
+      }
+    } catch (err) {
+      logger.warn(`Failed to process attachment ${attachment.name}`, err);
+    }
+  }
+
   let finalAttachmentIds = attachmentIds;
 
   if (typeof attachmentIds === 'string' && attachmentIds.startsWith('[')) {
@@ -1028,7 +1103,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
             ingested.warning ? `\n[Note: ${ingested.warning}]` : ''
           }\n\n${ingested.text}\n\n---\n\nUser's request: ${query}`;
         }
-      } else if (attachmentBase64) {
+      } else if (attachmentBase64 && attachments.length === 0) {
         // Don't trust a client-supplied MIME type unchecked — sniff the
         // actual bytes and prefer that when it disagrees with what the
         // client claimed, so a mislabeled payload can't sail through to
@@ -1098,6 +1173,8 @@ ${augmentedQuery}`;
             // usage numbers to reconcile against, not just server logs.
             logger.info('Hybrid Usage Sync:', event.data);
             emitter.send('usage', { ...baseData, usage: event.data });
+          } else if (event.type === 'attachment') {
+            emitter.send('attachment', { ...baseData, ...event.data });
           }
         },
         executeTool: async (name, input) => {

@@ -16,6 +16,7 @@ import BwengeLoader from './BwengeLoader';
 import DynamicForm from './DynamicForm';
 import AnalyticsDashboard from './AnalyticsDashboard';
 import MarkdownRenderer from './MarkdownRenderer';
+import { AttachmentCards } from './AttachmentCards';
 import { copyToClipboard } from '../utils/copyToClipboard';
 
 interface ChatMessageProps {
@@ -357,6 +358,8 @@ export default function ChatMessage({
                 )}
               </div>
             )}
+
+            <AttachmentCards attachments={message.generatedAttachments} />
 
             {isGated && onUpgradeClick && (
               <div className="mt-4">

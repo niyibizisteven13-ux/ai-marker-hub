@@ -63,6 +63,11 @@ export const chatSchema = z.object({
   attachmentName: z.string().max(500).optional(),
   attachmentMimeType: z.string().max(100).optional(),
   attachmentBase64: z.string().max(10_000_000).optional(), // ~7.5 MB base64
+  attachments: z.array(z.object({
+    name: z.string().min(1).max(500),
+    mimeType: z.string().max(100).optional(),
+    base64: z.string().min(1).max(14_000_000),
+  })).max(10).optional(),
   examContext: z.any().optional(),
   pinnedSyllabus: z.string().max(200_000).optional(),
   selectedEvidence: z.any().optional(),

@@ -13,6 +13,7 @@ interface RightChatSidebarProps {
   onStageAttachments?: (attachments: Array<File | ChatAttachment>) => void;
   onRemoveStagedAttachment?: (index: number) => void;
   onClearStagedAttachments?: () => void;
+  attachmentError?: string;
   activeDocument?: unknown;
   setActiveDocument?: React.Dispatch<React.SetStateAction<unknown>>;
   onOpenScanner?: () => void;
@@ -75,6 +76,7 @@ function describeAttachment(att: File | ChatAttachment, previewUrl?: string) {
       name: att.name,
       sizeLabel: formatFileSize(att.size),
       isImage: att.type.startsWith('image/'),
+      typeLabel: att.name.split('.').pop()?.toUpperCase() || 'FILE',
       previewUrl,
       status: 'ready'
     };
@@ -85,8 +87,9 @@ function describeAttachment(att: File | ChatAttachment, previewUrl?: string) {
   const url: string | undefined = a.previewUrl ?? a.url ?? previewUrl;
   return {
     name,
-    sizeLabel: typeof a.size === 'number' ? formatFileSize(a.size) : undefined,
+    sizeLabel: typeof a.size === 'number' ? formatFileSize(a.size) : typeof a.size === 'string' ? a.size : undefined,
     isImage: mime.startsWith('image/') || (!mime && IMAGE_EXT.test(name)),
+    typeLabel: (a.fileType || name.split('.').pop() || 'FILE').toString().toUpperCase(),
     previewUrl: url,
     status: a.status || 'ready'
   };
@@ -100,6 +103,7 @@ export default function RightChatSidebar({
   onStageAttachments,
   onRemoveStagedAttachment,
   onClearStagedAttachments,
+  attachmentError = '',
   setActiveDocument,
   onOpenScanner,
   onNewChat,
@@ -180,7 +184,6 @@ export default function RightChatSidebar({
     if (!canSend) return;
     onSendMessage(inputValue.trim(), stagedAttachments.length > 0 ? stagedAttachments : undefined);
     setInputValue('');
-    onClearStagedAttachments?.();
   };
 
   const handleAttachClick = () => {
@@ -198,7 +201,14 @@ export default function RightChatSidebar({
 
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const items = e.clipboardData?.items;
-    if (!items || items.length === 0) return;
+    if (!items || items.length === 0) {
+      const pastedText = e.clipboardData?.getData('text/plain') || '';
+      if (pastedText.length > 10_000) {
+        e.preventDefault();
+        onStageAttachments?.([new File([pastedText], 'pasted-text.txt', { type: 'text/plain' })]);
+      }
+      return;
+    }
     const files: File[] = [];
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
@@ -207,7 +217,16 @@ export default function RightChatSidebar({
         if (file) files.push(file);
       }
     }
-    if (files.length) onStageAttachments?.(files);
+    if (files.length) {
+      e.preventDefault();
+      onStageAttachments?.(files);
+    } else {
+      const pastedText = e.clipboardData?.getData('text/plain') || '';
+      if (pastedText.length > 10_000) {
+        e.preventDefault();
+        onStageAttachments?.([new File([pastedText], 'pasted-text.txt', { type: 'text/plain' })]);
+      }
+    }
   };
 
   // Drag-and-drop attach, from anywhere over the sidebar.
@@ -254,7 +273,7 @@ export default function RightChatSidebar({
         <div className="absolute inset-0 z-40 m-3 flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-emerald-500/30 bg-[#0A0D14]/95 backdrop-blur-sm">
           <span className="text-2xl">📎</span>
           <div className="text-xs font-medium text-slate-200">Drop files to attach</div>
-          <div className="text-[10px] text-slate-500">PDF, Word, or image files</div>
+          <div className="text-[10px] text-slate-500">PDF, Office files, text, code, or images</div>
         </div>
       )}
 
@@ -281,7 +300,7 @@ export default function RightChatSidebar({
                   <div className="text-xs font-medium text-slate-200 group-hover:text-white">
                     Upload Student Paper
                   </div>
-                  <div className="text-[11px] text-slate-500">Attach PDF, PNG, or JPEG</div>
+                  <div className="text-[11px] text-slate-500">Attach PDFs, Office files, text, code, or images</div>
                 </div>
               </button>
 
@@ -323,7 +342,7 @@ export default function RightChatSidebar({
         ref={fileInputRef}
         type="file"
         multiple
-        accept="*/*"
+        accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.txt,.md,.rtf,.json,.js,.jsx,.ts,.tsx,.py,.java,.cpp,.c,.h,.html,.css,.xml,.yaml,.yml,.sql,.png,.jpg,.jpeg,.webp,.gif"
         onChange={handleFileChange}
         className="hidden"
       />
@@ -361,20 +380,32 @@ export default function RightChatSidebar({
                         {meta.status === 'failed' ? '⚠️' : '📄'}
                       </span>
                     )}
-                    <div className="max-w-[140px] truncate font-medium">
-                      {meta.name}
-                      {meta.status === 'uploading' && <span className="ml-1 text-[9px] opacity-60">...</span>}
+                    <div className="max-w-[180px] min-w-0">
+                      <div className="truncate font-medium" title={meta.name}>{meta.name}</div>
+                      <div className="flex items-center gap-1.5 text-[9px] text-slate-500">
+                        <span className="rounded bg-white/[.07] px-1 py-0.5 font-semibold tracking-wide">{meta.typeLabel}</span>
+                        {meta.sizeLabel && <span>{meta.sizeLabel}</span>}
+                      </div>
                     </div>
                     <button
                       type="button"
                       onClick={() => onRemoveStagedAttachment?.(idx)}
-                      className="ml-1 text-slate-500 hover:text-rose-400 transition-colors"
+                      aria-label={`Remove ${meta.name}`}
+                      title={`Remove ${meta.name}`}
+                      className="ml-1 rounded p-1 text-slate-500 hover:bg-white/10 hover:text-rose-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-400 transition-colors"
                     >
                       ✕
                     </button>
                   </div>
                 ))}
               </div>
+            )}
+
+            {attachmentError && (
+              <p role="alert" className="mb-2 px-3 text-xs text-rose-300">{attachmentError}</p>
+            )}
+            {attachmentPreviews.length > 0 && (
+              <p className="mb-2 px-3 text-[10px] text-slate-500">{attachmentPreviews.length} of 10 files · 15 MB total limit</p>
             )}
 
             <div className="flex items-end gap-1">

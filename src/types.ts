@@ -98,6 +98,7 @@ export interface Message {
   taskId?: string;
   attachment?: ChatAttachment;
   attachments?: ChatAttachment[];
+  generatedAttachments?: import('./components/types').AttachmentRef[];
   timestamp: string;
   isStreaming?: boolean;
   isWaiting?: boolean;
