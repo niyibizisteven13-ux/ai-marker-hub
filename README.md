@@ -29,7 +29,7 @@ Set `EMAIL_OTP_SECRET` to a randomly generated value of at least 32 characters (
 
 People can rate AI responses; a negative rating opens a compact follow-up form. Feedback is stored for the support and AI quality team. Users must explicitly opt in before an administrator can prepare their response as a learning example, and examples remain pending until consent and personal-information checks are complete. This workflow does not automatically retrain model weights.
 
-The admin console includes feedback review, user role and account-access controls, AI provider model and gateway settings, and an email broadcast form for enabled accounts. Broadcast email uses the configured email sender.
+The admin console includes feedback review, user role and account-access controls, AI provider model and gateway settings, and an email broadcast form for enabled accounts. New feedback and review changes appear in the dashboard through authenticated live WebSocket updates; no manual refresh is required. Broadcast email uses the configured email sender.
 
 The **Upgrades & Subscriptions** admin section lists subscriptions, provider-reported payment history, and saved institutional upgrade requests. Administrators can update subscription plan/status/expiry with an audit record and contact or track institutional requests. Payment outcomes remain controlled by verified payment-provider callbacks, not manual admin edits.
 

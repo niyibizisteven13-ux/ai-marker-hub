@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { adminApi, type AdminQualitySummary } from '../api/admin';
 import { useStore } from '../store/useStore';
+import { API_BASE_URL, getAccessToken, refreshAccessToken } from '../utils/authFetch';
 
 /* ───────────── Types ───────────── */
 type Env = 'draft' | 'testing' | 'production';
@@ -227,6 +228,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
   const [newProviderBaseUrl, setNewProviderBaseUrl] = useState('');
   const [savingProvider, setSavingProvider] = useState(false);
   const [feedbackItems, setFeedbackItems] = useState<any[]>([]);
+  const [feedbackLive, setFeedbackLive] = useState(false);
   const [billingData, setBillingData] = useState<{ subscriptions: any[]; payments: any[]; requests: any[] }>({ subscriptions: [], payments: [], requests: [] });
   const [billingSearch, setBillingSearch] = useState('');
   const [billingUserId, setBillingUserId] = useState('');
@@ -303,10 +305,20 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
   const [correctedText, setCorrectedText] = useState('');
   const [correctionDomain] = useState('general');
 
-  const notify = (msg: string, bad = false) => {
+  const notify = useCallback((msg: string, bad = false) => {
     setToast({ msg, bad });
     window.setTimeout(() => setToast(null), 3500);
-  };
+  }, []);
+
+  const refreshFeedback = useCallback(async () => {
+    try {
+      const response = await adminApi.getFeedback();
+      setFeedbackItems(response.data);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not refresh feedback.';
+      notify(message, true);
+    }
+  }, [notify]);
 
   const loadData = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -380,6 +392,68 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    if (!currentAdminId) return;
+
+    let active = true;
+    let socket: WebSocket | null = null;
+    let reconnectTimer: number | null = null;
+    let reconnectAttempt = 0;
+
+    const scheduleReconnect = () => {
+      if (!active || reconnectTimer !== null) return;
+      setFeedbackLive(false);
+      const delay = Math.min(1_000 * 2 ** reconnectAttempt, 30_000);
+      reconnectAttempt += 1;
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = null;
+        void connect();
+      }, delay);
+    };
+
+    const connect = async () => {
+      const token = await refreshAccessToken() || getAccessToken();
+      if (!active) return;
+      if (!token) {
+        scheduleReconnect();
+        return;
+      }
+
+      const endpoint = API_BASE_URL
+        ? `${API_BASE_URL.replace(/\/+$/, '')}/api/admin/live`
+        : `${window.location.origin}/api/admin/live`;
+      const socketUrl = new URL(endpoint, window.location.origin);
+      socketUrl.protocol = socketUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+      socket = new WebSocket(socketUrl);
+      socket.addEventListener('open', () => {
+        socket?.send(JSON.stringify({ type: 'auth', token }));
+      });
+      socket.addEventListener('message', (event) => {
+        try {
+          const message = JSON.parse(String(event.data)) as { type?: string };
+          if (message.type === 'authenticated') {
+            reconnectAttempt = 0;
+            setFeedbackLive(true);
+            void refreshFeedback();
+          } else if (message.type === 'feedback:updated') {
+            void refreshFeedback();
+          }
+        } catch (err) {
+          console.error('Received an invalid live feedback update.', err);
+        }
+      });
+      socket.addEventListener('close', scheduleReconnect, { once: true });
+      socket.addEventListener('error', () => socket?.close(), { once: true });
+    };
+    void connect();
+
+    return () => {
+      active = false;
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      socket?.close();
+    };
+  }, [currentAdminId, refreshFeedback]);
 
   useEffect(() => {
     if (!billingUserId && users.length > 0) {
@@ -2534,7 +2608,12 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                 <Section
                   title="Feedback & Support"
                   hint="Review ratings and the follow-up notes users leave on AI responses. Feedback only becomes a learning example after user consent and human review."
-                  actions={<Badge tone="blue">{feedbackItems.length} responses</Badge>}
+                  actions={
+                    <>
+                      <Badge tone={feedbackLive ? 'green' : 'yellow'}>{feedbackLive ? 'LIVE UPDATES' : 'RECONNECTING'}</Badge>
+                      <Badge tone="blue">{feedbackItems.length} responses</Badge>
+                    </>
+                  }
                 >
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                     <Stat label="New feedback" value={feedbackItems.filter((item) => item.status === 'new').length} detail="Waiting for review" />

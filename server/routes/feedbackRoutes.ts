@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../../production/auth.js';
 import { prisma } from '../db.js';
+import { notifyAdminsOfFeedbackUpdate } from '../realtime.js';
 
 const router = Router();
 
@@ -62,6 +63,7 @@ router.post('/', async (req, res) => {
         select: { id: true, status: true },
       });
     });
+    void notifyAdminsOfFeedbackUpdate();
     res.status(201).json({ success: true, data: feedback });
   } catch (error) {
     console.error('Could not save response feedback:', error);

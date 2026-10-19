@@ -19,6 +19,7 @@ import os from 'os';
 import crypto from 'crypto';
 import { z } from 'zod';
 import { getEmailSender } from '../email/EmailSender.js';
+import { notifyAdminsOfFeedbackUpdate } from '../realtime.js';
 
 const router = Router();
 const aiService = AiService.getInstance();
@@ -2884,6 +2885,7 @@ router.patch('/feedback/:id', async (req, res) => {
       data: { status: parsed.data.status },
     });
     await writeAuditLog(req.user?.userId, 'REVIEW_RESPONSE_FEEDBACK', 'response_feedback', updated.id, { status: updated.status });
+    void notifyAdminsOfFeedbackUpdate();
     res.json({ success: true, data: updated });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
@@ -2929,6 +2931,7 @@ router.post('/feedback/:id/dataset-example', async (req, res) => {
       return example;
     });
     await writeAuditLog(req.user?.userId, 'CREATE_FEEDBACK_DATASET_EXAMPLE', 'dataset_example', result.id, { feedbackId: req.params.id });
+    void notifyAdminsOfFeedbackUpdate();
     res.status(201).json({ success: true, data: result });
   } catch (error: any) {
     const status = error.message === 'Feedback not found.' || error.message === 'Dataset not found.' ? 404

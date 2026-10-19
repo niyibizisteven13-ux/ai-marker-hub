@@ -58,6 +58,7 @@ import { buildUserContextScope } from './server/services/ai/dataScope.js';
 import { stripThinkingTags } from './server/services/AiService.ts';
 import { generateBatchExcelReport, generateBatchExcelReportFromGradedResults } from './src/services/excelExporter.ts';
 import { extractTextFromUpload } from './src/services/documentService.ts';
+import { attachRealtime } from './server/realtime.js';
 import { PDFParse } from 'pdf-parse';
 import fs from 'fs/promises';
 import sharp from 'sharp';
@@ -2501,6 +2502,7 @@ async function startServer() {
   }
 
   const server = createServer(app);
+  attachRealtime(server, process.env.NODE_ENV === 'production' ? allowedOrigins : true);
   let vite: any = null;
   if (process.env.NODE_ENV !== 'production') {
     vite = await createViteServer({
