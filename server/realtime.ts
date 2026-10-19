@@ -8,6 +8,19 @@ import logger from './utils/logger.js';
 const ADMIN_FEEDBACK_PATH = '/api/admin/live';
 const adminSockets = new Map<string, Set<WebSocket>>();
 
+function isAllowedOrigin(origin: string | undefined, allowedOrigins: string[] | true): boolean {
+  if (allowedOrigins === true) return true;
+  if (!origin) return false;
+  if (allowedOrigins.includes(origin)) return true;
+
+  try {
+    const hostname = new URL(origin).hostname;
+    return /^([a-z0-9-]+)-3000\.app\.github\.dev$/i.test(hostname);
+  } catch {
+    return false;
+  }
+}
+
 export function attachRealtime(httpServer: HttpServer, allowedOrigins: string[] | true) {
   const websocketServer = new WebSocketServer({ noServer: true });
 
@@ -31,8 +44,7 @@ export function attachRealtime(httpServer: HttpServer, allowedOrigins: string[] 
     }
     if (pathname !== ADMIN_FEEDBACK_PATH) return;
 
-    const origin = request.headers.origin;
-    if (allowedOrigins !== true && (!origin || !allowedOrigins.includes(origin))) {
+    if (!isAllowedOrigin(request.headers.origin, allowedOrigins)) {
       networkSocket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
       networkSocket.destroy();
       return;

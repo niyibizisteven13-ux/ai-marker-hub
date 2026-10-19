@@ -400,9 +400,11 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
     let socket: WebSocket | null = null;
     let reconnectTimer: number | null = null;
     let reconnectAttempt = 0;
+    let refreshTokenBeforeReconnect = false;
 
-    const scheduleReconnect = () => {
+    const scheduleReconnect = (event?: CloseEvent) => {
       if (!active || reconnectTimer !== null) return;
+      if (event?.code === 4401) refreshTokenBeforeReconnect = true;
       setFeedbackLive(false);
       const delay = Math.min(1_000 * 2 ** reconnectAttempt, 30_000);
       reconnectAttempt += 1;
@@ -413,12 +415,16 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
     };
 
     const connect = async () => {
-      const token = await refreshAccessToken() || getAccessToken();
+      const existingToken = getAccessToken();
+      const token = refreshTokenBeforeReconnect || !existingToken
+        ? await refreshAccessToken()
+        : existingToken;
       if (!active) return;
       if (!token) {
         scheduleReconnect();
         return;
       }
+      refreshTokenBeforeReconnect = false;
 
       const endpoint = API_BASE_URL
         ? `${API_BASE_URL.replace(/\/+$/, '')}/api/admin/live`
@@ -447,9 +453,13 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
       socket.addEventListener('error', () => socket?.close(), { once: true });
     };
     void connect();
+    const feedbackRefreshInterval = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void refreshFeedback();
+    }, 10_000);
 
     return () => {
       active = false;
+      window.clearInterval(feedbackRefreshInterval);
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
       socket?.close();
     };
@@ -2610,7 +2620,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                   hint="Review ratings and the follow-up notes users leave on AI responses. Feedback only becomes a learning example after user consent and human review."
                   actions={
                     <>
-                      <Badge tone={feedbackLive ? 'green' : 'yellow'}>{feedbackLive ? 'LIVE UPDATES' : 'RECONNECTING'}</Badge>
+                      <Badge tone={feedbackLive ? 'green' : 'yellow'}>{feedbackLive ? 'LIVE UPDATES' : 'AUTO-SYNC'}</Badge>
                       <Badge tone="blue">{feedbackItems.length} responses</Badge>
                     </>
                   }
