@@ -276,19 +276,12 @@ export default function ChatMessage({
         ) : (
           <div className="w-full text-base leading-[1.7] text-[#FAF9F5]">
             <ActivityLine
-              busy={Boolean(isThinking || (toolCallMatch && !toolOutputMatch) || message.isBusy || message.phase === 'thinking' || message.phase === 'streaming')}
-              current={message.currentStatus || (isThinking ? 'Thinking...' : toolCallMatch && !toolOutputMatch ? 'Running tool...' : '')}
+              busy={Boolean(isThinking || (toolCallMatch && !toolOutputMatch) || message.isBusy || message.phase === 'thinking' || message.phase === 'streaming' || message.isWaiting || (!cleanText && message.isStreaming))}
+              current={message.currentStatus || (isThinking ? 'Thinking...' : toolCallMatch && !toolOutputMatch ? 'Running tool...' : message.isWaiting ? 'Thinking...' : '')}
               steps={message.steps || []}
               startedAt={message.startedAt || Date.now()}
               endedAt={message.endedAt}
             />
-
-            {toolCallMatch && !toolOutputMatch && (
-              <div className="mb-3 flex items-center gap-3 rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3">
-                <BwengeLoader />
-                <span className="text-[12.5px] text-[#C2C0B6]">Running tool…</span>
-              </div>
-            )}
 
             {toolOutputMatch && (
               <CollapsibleBlock title="Tool output">
@@ -378,26 +371,9 @@ export default function ChatMessage({
               </div>
             )}
 
-            {message.isWaiting && (
-              <div className="flex min-h-7 items-center gap-1.5 py-1" aria-live="polite" aria-atomic="true">
-                <span className="sr-only">Bwenge is thinking</span>
-                {[0, 1, 2].map((dot) => (
-                  <span
-                    key={dot}
-                    className="h-2 w-2 rounded-full bg-emerald-500/80 motion-safe:animate-bounce motion-reduce:animate-none dark:bg-emerald-400/80"
-                    style={{ animationDelay: `${dot * 150}ms` }}
-                    aria-hidden="true"
-                  />
-                ))}
-              </div>
-            )}
-
             {(cleanText || (message.isStreaming && !message.isWaiting)) && (
-              <div>
+              <div className={message.isStreaming && !(!cleanText) ? "bw-caret" : undefined}>
                 {cleanText && <MarkdownRenderer content={cleanText} />}
-                {message.isStreaming && cleanText && (
-                  <span className="ml-0.5 inline-block h-4 w-1.5 -translate-y-0.5 animate-pulse rounded-sm bg-emerald-400/80" />
-                )}
               </div>
             )}
 
