@@ -1,6 +1,5 @@
-# Task List - Bwenge Chat UI Kit & Server Integration
+# Task List - Telegram Bot Auto-Configuration & Mock Fallback Mode
 
-- [x] Create `server/services/ai/thinkingRelay.ts` for thinking-to-status relay
-- [x] Create `server/routes/chatSseRoutes.ts` for Express SSE `/api/chat` endpoint (mock & real Claude tool loop)
-- [x] Mount SSE router in `server.ts`
+- [x] Update `TelegramBotService.ts` with mock fallback mode when `TELEGRAM_BOT_TOKEN` is absent
+- [x] Update `settingsBillingRoutes.ts` to support seamless Telegram linking in mock mode
 - [x] Verify static analysis and typecheck (zero errors)

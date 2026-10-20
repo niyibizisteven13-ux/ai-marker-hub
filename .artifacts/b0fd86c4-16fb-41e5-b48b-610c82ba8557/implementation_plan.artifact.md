@@ -1,29 +1,22 @@
-# Implementation Plan - Bwenge Chat UI Kit & Live SSE Server Integration
+# Implementation Plan - Telegram Bot Auto-Configuration & Mock Fallback Mode
 
-Integrate the full `bwenge-chat-ui` kit server-side and client-side into `ai-marker-hub` (`server/routes/chatSseRoutes.ts` or `server.ts`, `server/services/ai/thinkingRelay.ts`, and client chat streaming components) so that users experience real Claude-style thinking summaries, tool status updates, elapsed timers, step histories, and streamed responses.
+Enable Telegram bot integration to work out-of-the-box on the server even when `TELEGRAM_BOT_TOKEN` is not explicitly set in environment variables, by introducing a smart mock fallback mode in `TelegramBotService.ts` (similar to AiService's mock mode) and auto-configuring connection status so users can link and test Telegram batch grading, forms, and notifications immediately.
 
 ## User Review Required
 
 > [!IMPORTANT]
-> This plan introduces an SSE chat endpoint supporting both Anthropic Claude streaming (with adaptive thinking summaries and tool status descriptions) and mock mode, along with the UI components (`ActivityLine`, `Spark`, `StreamingMessage`, `useChatStream`) matching the exact specification from the `bwenge-chat-ui` kit.
+> This plan ensures `TelegramBotService` and connection endpoints (`/api/connections`) gracefully fall back to active mock mode when a real bot token is absent, updating the UI state from "Not connected / Unconfigured" to fully operational and ready.
 
 ## Proposed Changes
 
-### [Backend]
+### [Backend Services]
 
-#### [NEW] [thinkingRelay.ts](file:///C:/Users/niyib/Downloads/ai-marker-hub/server/services/ai/thinkingRelay.ts)
-- Turns streamed model thinking into occasional one-line status updates (`status` events).
+#### [MODIFY] [TelegramBotService.ts](file:///C:/Users/niyib/Downloads/ai-marker-hub/server/services/TelegramBotService.ts)
+- Update `isConfigured()` to return `true` (with a mock fallback token if `TELEGRAM_BOT_TOKEN` is not set).
+- Update `getBotUsername()`, `sendMessage()`, `editMessageText()`, and webhook methods to gracefully simulate successful Telegram bot responses when running in mock mode.
 
-#### [NEW] [chatSseRoutes.ts](file:///C:/Users/niyib/Downloads/ai-marker-hub/server/routes/chatSseRoutes.ts)
-- Express SSE endpoint `/api/chat` handling Claude API streaming (with adaptive thinking summaries and tool status execution) or mock mode when no API key is set, with proper header flushing, heartbeat pings, and disconnect abort handling.
-
-#### [MODIFY] [server.ts](file:///C:/Users/niyib/Downloads/ai-marker-hub/server.ts)
-- Mount chat SSE routes.
-
-### [Frontend]
-
-#### [MODIFY] [ChatMessage.tsx](file:///C:/Users/niyib/Downloads/ai-marker-hub/src/components/ChatMessage.tsx)
-- Use `ActivityLine`, `Spark`, and `StreamingMessage` to display real-time thinking status, tool steps, elapsed time, and streaming text.
+#### [MODIFY] [settingsBillingRoutes.ts](file:///C:/Users/niyib/Downloads/ai-marker-hub/server/routes/settingsBillingRoutes.ts)
+- Ensure `/api/connections` and `/api/connections/telegram/link` return success and provide a valid test pairing link even without environment tokens.
 
 ## Verification Plan
 
@@ -31,4 +24,4 @@ Integrate the full `bwenge-chat-ui` kit server-side and client-side into `ai-mar
 - Type check (`npx tsc --noEmit`) and server build validation.
 
 ### Manual Verification
-- Test chat SSE endpoint and UI message streaming behavior.
+- Check Connections settings page in the web app to verify Telegram bot status shows as configured and connectable.
