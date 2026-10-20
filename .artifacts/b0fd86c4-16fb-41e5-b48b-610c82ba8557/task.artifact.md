@@ -1,7 +1,6 @@
-# Task List - Dynamic Spark Spinner and Live Activity Line
+# Task List - Bwenge Chat UI Kit & Server Integration
 
-- [x] Create `Spark.tsx` component for animated spark spinner
-- [x] Create `ActivityLine.tsx` component for live status, shimmer, timer, and collapsible step history
-- [x] Create `StreamingMessage.tsx` and `useChatStream.ts` hook for streaming activity events
-- [x] Update styles in `src/index.css` with Claude-style spark and activity line animations
-- [x] Verify file syntax and zero errors via static analysis
+- [x] Create `server/services/ai/thinkingRelay.ts` for thinking-to-status relay
+- [x] Create `server/routes/chatSseRoutes.ts` for Express SSE `/api/chat` endpoint (mock & real Claude tool loop)
+- [x] Mount SSE router in `server.ts`
+- [x] Verify static analysis and typecheck (zero errors)

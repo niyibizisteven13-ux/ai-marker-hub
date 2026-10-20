@@ -50,6 +50,7 @@ import ollamaRoutes from './server/routes/ollamaRoutes.ts';
 import telegramBotRoutes from './server/routes/telegramBotRoutes.ts';
 import settingsBillingRoutes from './server/routes/settingsBillingRoutes.ts';
 import feedbackRoutes from './server/routes/feedbackRoutes.ts';
+import chatSseRoutes from './server/routes/chatSseRoutes.js';
 import { getTelegramWebhookBaseUrl, TelegramBotService } from './server/services/TelegramBotService.ts';
 import { buildPromptForIntent, buildSmallTalkPrompt } from './server/services/prompts/promptRouter.ts';
 import { detectLanguage, buildLanguageBlock } from './server/services/prompts/kinyarwandaStyle.ts';
@@ -326,6 +327,7 @@ app.use('/api/admin', requireAuth, requireRole('ADMIN'), adminRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/ollama', requireAuth, ollamaRoutes);
 app.use('/api/telegram', telegramBotRoutes);
+app.use('/api/chat', chatSseRoutes);
 app.use('/api', settingsBillingRoutes);
 // /exports serves generated Excel reports — gate it so only the owning
 // authenticated user (or admin) can download them. Anonymous access would
