@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import Anthropic from "@anthropic-ai/sdk";
-import type { StreamEvent } from "../src/components/ActivityLine";
-import { clip, thinkingRelay } from "../server/services/ai/thinkingRelay.js";
+import type { StreamEvent } from "../../src/components/ActivityLine";
+import { clip, thinkingRelay } from "../services/ai/thinkingRelay.js";
 
 const router = Router();
 
