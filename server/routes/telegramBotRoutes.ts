@@ -821,16 +821,6 @@ async function handleBotCommand(chatId: string, session: any, text: string) {
         break;
       }
 
-      default: {
-        await botService.sendMessage(chatId, `Unknown command \`${cmd}\`. Use /help to view available commands: /start, /scan, /agent, /help, /chat.`);
-      }
-    }
-  } catch (err: any) {
-    logger.error('Error handling Telegram bot command.', err);
-    await botService.sendMessage(chatId, '❌ Sorry, something went wrong processing this command. Please try again or type /help.').catch(() => {});
-  }
-}
-
       case '/discuss': {
         const targetJobId = arg === 'last' || !arg
           ? (await prisma.batchJob.findFirst({
@@ -869,96 +859,13 @@ async function handleBotCommand(chatId: string, session: any, text: string) {
         break;
       }
 
-      case '/form': {
-        if (!(await ensurePaywallAccess(chatId, session, 'selection_scoring'))) return;
-
-        const lang = session.language;
-        if (arg && arg.trim().length > 0) {
-          await handleFormCreationStep2(chatId, session, arg.trim());
-        } else {
-          await prisma.telegramSession.update({
-            where: { chatId },
-            data: { stagedMode: 'form' },
-          });
-          const promptMsg = lang === 'rw'
-            ? `📝 **Bwenge Form Builder**\n\n` +
-              `Nyamuneka andika umutwe cyangwa intego y'ifomu y'ubusabe ushaka gukora.\n\n` +
-              `*Urugero*: \`Ifomu y'Ubusabe bw'Buruse y'Abanyeshuri 2026\``
-            : `📝 **Bwenge Form Builder**\n\n` +
-              `Please type the title or purpose of the application/assessment form you want to create.\n\n` +
-              `*Example*: \`Scholarship Application Form 2026 for Secondary Schools\``;
-
-          await botService.sendMessage(chatId, promptMsg);
-        }
-        break;
-      }
-
-      case '/scan': {
-        const sessionToken = crypto.randomUUID().slice(0, 12);
-        scanTokens.set(sessionToken, { chatId, expires: Date.now() + 30 * 60 * 1000 });
-
-        const baseUrl = process.env.APP_BASE_URL || 'http://localhost:3000';
-        const scanUrl = `${baseUrl}/scan.html?token=${sessionToken}`;
-        const lang = session.language;
-
-        const msg = lang === 'rw'
-          ? `📸 **Bwenge Mobile Web Scanner**\n\n` +
-            `Fungura web scanner ku telefone yawe kugira ngo ufate amapaji y'ibizamini afite umweru n'icyerekezo cyiza.\n\n` +
-            `🔗 **[Fungura Mobile Web Scanner](${scanUrl})**\n\n` +
-            `💡 *Uko bikora*:\n` +
-            `1. Kanda kuri uyu murongo wa web scanner.\n` +
-            `2. Fotora amapaji y'ibizamini cyangwa rubric.\n` +
-            `3. Inyandiko zizahita zoherezwa muri iyi chat za Telegram!\n\n` +
-            `⏱️ *Uyu murongo uraza kurangira mu minota 30.*`
-          : `📸 **Bwenge Mobile Web Scanner**\n\n` +
-            `Use our mobile web scanner for enhanced document capture, auto-cropping, and high-volume uploads (>20MB).\n\n` +
-            `🔗 **[Open Mobile Web Scanner](${scanUrl})**\n\n` +
-            `💡 *How to use*:\n` +
-            `1. Tap the link above to open camera capture in browser.\n` +
-            `2. Scan student answer sheets or marking rubrics.\n` +
-            `3. Scanned pages auto-sync directly into this Telegram chat session!\n\n` +
-            `⏱️ *This link expires in 30 minutes.*`;
-
-        await botService.sendMessage(chatId, msg);
-        break;
-      }
-
-      case '/research': {
-        if (!arg) {
-          await botService.sendMessage(chatId, '⚠️ Please specify topic to research. Example: `/research Latest developments in AI grading`');
-          return;
-        }
-        await botService.sendChatAction(chatId, 'typing');
-        await botService.sendMessage(chatId, `🌐 Initiating Deep Research for: *${arg}*...`);
-
-        try {
-          const report = await aiService.runDeepResearch({
-            query: arg,
-            userId: chatId,
-            onEvent: (event) => {
-              if (event.type === 'text' && event.data.isThinking) {
-                botService.sendChatAction(chatId, 'typing').catch(() => {});
-              }
-            },
-          });
-          await botService.sendMessage(chatId, `📑 **Deep Research Report**:\n\n${stripThinkingTags(report as any).slice(0, 3800)}`);
-        } catch (err: any) {
-          await botService.sendMessage(chatId, `❌ Research failed: ${err.message}`);
-        }
-        break;
-      }
-
       default: {
-        await botService.sendMessage(chatId, `Unknown command \`${cmd}\`. Use /help to view available commands.`);
+        await botService.sendMessage(chatId, `Unknown command \`${cmd}\`. Use /help to view available commands: /start, /scan, /agent, /help, /chat.`);
       }
     }
   } catch (err: any) {
-    logger.error('Error handling Telegram bot command.', { errorType: err instanceof Error ? err.name : 'Error' });
-    const lang = session?.language || 'en';
-    const errorMsg = lang === 'rw'
-      ? '❌ Habaye ikibazo mu gikorwa wakoze. Ongera ugerageze cyangwa wandike /help.'
-      : '❌ Sorry, something went wrong processing this command. Please try again or type /help.';
-    await botService.sendMessage(chatId, errorMsg).catch(() => {});
+    logger.error('Error handling Telegram bot command.', err);
+    await botService.sendMessage(chatId, '❌ Sorry, something went wrong processing this command. Please try again or type /help.').catch(() => {});
   }
 }
 
