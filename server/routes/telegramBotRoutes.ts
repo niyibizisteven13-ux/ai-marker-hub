@@ -398,15 +398,15 @@ router.post('/scan-upload/:sessionToken', upload.single('file'), async (req: Req
 });
 
 function buildTelegramKeyboard(lang: string = 'en') {
-  const gradeLabel = lang === 'rw' ? '✨ Kosora Ibizamini' : '✨ Grade Batch';
-  const statusLabel = lang === 'rw' ? '📊 Reba Uko Bihagaze' : '📊 Check Status';
-  const examLabel = lang === 'rw' ? '📝 Kora Igizamini' : '📝 Generate Exam';
-  const researchLabel = lang === 'rw' ? '🌐 Ubushakashatsi' : '🌐 Deep Research';
+  const scanLabel = lang === 'rw' ? '📸 Scan (Urugero)' : '📸 Scan Documents';
+  const agentLabel = lang === 'rw' ? '🤖 Agent (Ibizamini/Form)' : '🤖 Run Agent';
+  const chatLabel = lang === 'rw' ? '💬 Ganira na AI' : '💬 AI Chat';
+  const helpLabel = lang === 'rw' ? '❓ Ubufasha' : '❓ Help';
 
   return {
     keyboard: [
-      [{ text: gradeLabel }, { text: statusLabel }],
-      [{ text: examLabel }, { text: researchLabel }],
+      [{ text: scanLabel }, { text: agentLabel }],
+      [{ text: chatLabel }, { text: helpLabel }],
     ],
     resize_keyboard: true,
     is_persistent: true,
@@ -632,8 +632,7 @@ async function handleBotCommand(chatId: string, session: any, text: string) {
     const arg = parts.slice(1).join(' ');
 
     switch (cmd) {
-      case '/start':
-      case '/help': {
+      case '/start': {
         const lang = session.language;
         const userId = session.userId || `telegram-${chatId}`;
         const quota = await prisma.usageQuota.findUnique({
@@ -642,34 +641,22 @@ async function handleBotCommand(chatId: string, session: any, text: string) {
         const freeRemaining = Math.max(0, 20 - (quota?.freeUsed || 0));
 
         const welcome = lang === 'rw'
-          ? `👋 **Muraho neza! Ndi Bwenge AI Assistant Bot.**\n\n` +
-            `⚙️ **AI Model**: *${session.provider.toUpperCase()}*\n` +
-            `🗣️ **Ururimi**: *Kinyarwanda*\n` +
+          ? `👋 **Muraho neza! Ndi Bwengebot - Your grading companion.**\n\n` +
             `🎁 **Ibizamini by'Asuba**: *${freeRemaining} free credits*\n\n` +
-            `📌 **Ibyo nshobora kugufasha**:\n` +
-            `- 📸 **/scan** - Fungura mobile web scanner ugemure inyandiko\n` +
-            `- 📝 **/form** - Kora ifomu y'ubusabe/isuzuma (yemwe na USSD *182*8*1#)\n` +
-            `- 📄 **/exam** - Kora igizamini gipfunyitse n'amanota (rubric)\n` +
-            `- 🌐 **/research** - Kora ubushakashatsi bwimbitse\n` +
-            `- 📊 **/grade** - Kosora ibizamini kuri batch (PDF/Photo)\n` +
-            `- 👁️ **/markphoto** - Kosora ifoto imwe y'urupapuro rw'umunyeshuri\n` +
-            `- 🗣️ **/discuss** - Mbaza ibibazo kuri batch yakosowe\n` +
-            `- 🤖 **/model** - Reba GonkaRouter model ikoreshwa\n` +
-            `- 🇬🇧 **/english** / 🇷🇼 **/kinyarwanda** - Hindura ururimi`
-          : `👋 **Welcome to Bwenge AI Assistant Bot!**\n\n` +
-            `⚙️ **Active Model**: *${session.provider.toUpperCase()}*\n` +
-            `🗣️ **Language**: *English*\n` +
+            `📌 **Commands 5 z'ingenzi**:\n` +
+            `- 📸 **/scan** - Fungura mobile web scanner y'impapuro\n` +
+            `- 🤖 **/agent** - Koresha AI Agent (Gukosora, Kora Ifomu, Igizamini, Ubushakashatsi)\n` +
+            `- 💬 **/chat** - Ganira na Bwenge AI Assistant\n` +
+            `- ❓ **/help** - Reba ubufasha bwuzuye\n` +
+            `- 🚀 **/start** - Menya aho uherereye`
+          : `👋 **Welcome to Bwengebot — Your grading companion!**\n\n` +
             `🎁 **Free Credits**: *${freeRemaining} remaining*\n\n` +
-            `📌 **Key Assistant Capabilities**:\n` +
-            `- 📸 **/scan** - Open mobile web scanner for high-resolution uploads\n` +
-            `- 📝 **/form** - Create interactive application/assessment forms (Web & USSD *182*8*1#)\n` +
-            `- 📄 **/exam** - Generate full exam papers & marking rubrics\n` +
-            `- 🌐 **/research** - Perform deep web research on any subject\n` +
-            `- 📊 **/grade** - Batch grade student answer scripts against rubric\n` +
-            `- 👁️ **/markphoto** - Grade single handwritten student photo\n` +
-            `- 🗣️ **/discuss** - Post-grading Q&A & student performance analysis\n` +
-            `- 🤖 **/model** - Show the active GonkaRouter model\n` +
-            `- 🇷🇼 **/kinyarwanda** / 🇬🇧 **/english** - Toggle bot language`;
+            `📌 **Available Commands**:\n` +
+            `- 📸 **/scan** - Open mobile web document scanner\n` +
+            `- 🤖 **/agent** - Run AI agent tasks (Batch grading, Form builder, Exam generator, Research)\n` +
+            `- 💬 **/chat** - Chat with Bwenge AI Assistant\n` +
+            `- ❓ **/help** - Show instructions & documentation\n` +
+            `- 🚀 **/start** - Main menu`;
 
         await botService.sendMessage(chatId, welcome, {
           reply_markup: buildTelegramKeyboard(lang),
@@ -677,67 +664,142 @@ async function handleBotCommand(chatId: string, session: any, text: string) {
         break;
       }
 
-      case '/model': {
-        const selected = arg.toLowerCase().trim();
-        if (!selected) {
-          await botService.sendMessage(chatId, `AI Provider: GonkaRouter\nModel: ${process.env.GONKA_MODEL || 'zai-org/GLM-5.3-Flash'}`);
-          break;
-        }
-        if (selected && !['gonka', 'gonkarouter'].includes(selected)) {
-          await botService.sendMessage(chatId, 'This bot uses GonkaRouter. Use /model gonkarouter or ask “which model are you using?”.');
-          break;
-        }
-        const providerKeys: Record<string, 'gonkarouter'> = {
-          gonka: 'gonkarouter', gonkarouter: 'gonkarouter',
-        };
-        if (selected in providerKeys) {
-          if (!(await aiService.providerAvailable(providerKeys[selected]))) {
-            await botService.sendMessage(chatId, `Provider ${selected.toUpperCase()} is not configured on this server.`);
-            break;
-          }
-          await prisma.telegramSession.update({
-            where: { chatId },
-            data: { provider: providerKeys[selected] },
-          });
-          await botService.sendMessage(chatId, `🚀 AI Provider switched to **${selected.toUpperCase()}**!`);
-        } else {
+      case '/help': {
+        const lang = session.language;
+        const helpText = lang === 'rw'
+          ? `📖 **Ubufasha bwa Bwengebot**\n\n` +
+            `1️⃣ **/scan**\nFungura link ya mobile scanner kugira ngo ufashe amapaji y'ibizamini n'ubunini bwiza.\n\n` +
+            `2️⃣ **/agent**\nKoresha agent mu bikorwa:\n` +
+            `- \`/agent grade\` (Gukosora ibizamini)\n` +
+            `- \`/agent exam [isomo]\` (Kora igizamini na rubric)\n` +
+            `- \`/agent form [intego]\` (Kora ifomu na USSD *182*8*1#)\n` +
+            `- \`/agent research [icyo ushakashaka]\` (Ubushakashatsi)\n\n` +
+            `3️⃣ **/chat**\nGanira na AI cyangwa ubaze ikibazo cyose ukeneye.\n\n` +
+            `4️⃣ **/start**\nGarura menu nyamukuru.`
+          : `📖 **Bwengebot Help Guide**\n\n` +
+            `1️⃣ **/scan**\nOpens mobile web document scanner for student answer papers or rubrics.\n\n` +
+            `2️⃣ **/agent**\nExecutes Bwenge AI agent services:\n` +
+            `- \`/agent grade\` (Batch grade exam scripts)\n` +
+            `- \`/agent exam [topic]\` (Generate exam & rubric)\n` +
+            `- \`/agent form [purpose]\` (Create assessment form & USSD)\n` +
+            `- \`/agent research [query]\` (Deep academic research)\n\n` +
+            `3️⃣ **/chat**\nEngage in open conversational AI chat with Bwenge AI Assistant.\n\n` +
+            `4️⃣ **/start**\nDisplay main menu and quick buttons.`;
+
+        await botService.sendMessage(chatId, helpText, { reply_markup: buildTelegramKeyboard(lang) });
+        break;
+      }
+
+      case '/scan': {
+        const sessionToken = crypto.randomUUID().slice(0, 12);
+        scanTokens.set(sessionToken, { chatId, expires: Date.now() + 30 * 60 * 1000 });
+
+        const baseUrl = process.env.APP_BASE_URL || 'https://www.bwenge.space';
+        const scanUrl = `${baseUrl}/scan.html?token=${sessionToken}`;
+        const lang = session.language;
+
+        const msg = lang === 'rw'
+          ? `📸 **Bwenge Mobile Web Scanner**\n\n🔗 **[Fungura Mobile Web Scanner](${scanUrl})**\n\nFotora amapaji y'ibizamini cyangwa rubric.`
+          : `📸 **Bwenge Mobile Web Scanner**\n\n🔗 **[Open Mobile Web Scanner](${scanUrl})**\n\nScan student answer sheets or marking rubrics directly from your phone camera.`;
+
+        await botService.sendMessage(chatId, msg);
+        break;
+      }
+
+      case '/agent': {
+        const subArg = arg.trim();
+        const subParts = subArg.split(/\s+/);
+        const subCmd = subParts[0]?.toLowerCase();
+        const subQuery = subParts.slice(1).join(' ');
+
+        if (!subCmd) {
           await botService.sendMessage(chatId,
-            `🤖 **Current Provider**: *${session.provider.toUpperCase()}*\n\n` +
-            `To switch providers, run:\n` +
-            `- \`/model gonkarouter\` (GonkaRouter Decentralized Gateway — GLM-5.3-Flash, high speed / low cost)\n` +
-            `- \`/model gemini\` (Google Gemini 3.8 Flash - Fast)\n` +
-            `- \`/model claude\` (Anthropic Claude Sonnet - Deep Reasoning)\n` +
-            `- \`/model nvidianim\` (NVIDIA NIM Llama 4 - High Throughput)`
+            `🤖 **Bwenge AI Agent**\n\nChoose an agent capability:\n` +
+            `- \`/agent grade\` - Batch grade exams against rubric\n` +
+            `- \`/agent exam [topic]\` - Generate exam & rubric\n` +
+            `- \`/agent form [purpose]\` - Create form & USSD shortcode\n` +
+            `- \`/agent research [query]\` - Deep web research\n\n` +
+            `Example: \`/agent exam Physics Newton Laws 30\``
           );
+          break;
+        }
+
+        if (subCmd === 'grade') {
+          const existing = await prisma.telegramSession.findUnique({ where: { chatId } });
+          const hasPaper = !!(existing?.stagedPaperFileId || existing?.stagedPaperLocalPath);
+          const hasRubric = !!(existing?.stagedRubricFileId || existing?.stagedRubricLocalPath);
+          if (hasPaper && hasRubric) {
+            await checkAndTriggerBatchGrading(chatId);
+          } else {
+            await handleGradeCommand(chatId, session);
+          }
+        } else if (subCmd === 'exam') {
+          await handleBotCommand(chatId, session, `/exam ${subQuery}`);
+        } else if (subCmd === 'form') {
+          await handleBotCommand(chatId, session, `/form ${subQuery}`);
+        } else if (subCmd === 'research') {
+          await handleBotCommand(chatId, session, `/research ${subQuery}`);
+        } else {
+          await botService.sendMessage(chatId, `Unknown agent subcommand \`${subCmd}\`. Use \`/agent grade\`, \`/agent exam\`, \`/agent form\`, or \`/agent research\`.`);
         }
         break;
       }
 
-      case '/kinyarwanda': {
-        await prisma.telegramSession.update({ where: { chatId }, data: { language: 'rw' } });
-        await botService.sendMessage(chatId,
-          '🇷🇼 **Ururimi ruhinduwe mu Kinyarwanda!**\n\nUbu Bwenge AI iragusubiza mu Kinyarwanda mu ibizamini, form, na scanner zose.',
-          { reply_markup: buildTelegramKeyboard('rw') }
-        );
+      case '/chat': {
+        if (!arg || arg.trim().length === 0) {
+          await botService.sendMessage(chatId, session.language === 'rw'
+            ? '💬 Andika ubutumwa nyuma ya `/chat`. Urugero: `/chat Watubwira uburyo bwo gukosora neza?`'
+            : '💬 Type your message after `/chat`. Example: `/chat Can you give me tips for fair grading?`');
+          break;
+        }
+        await handleConversationalQuery(chatId, session, arg.trim());
         break;
       }
 
-      case '/english': {
-        await prisma.telegramSession.update({ where: { chatId }, data: { language: 'en' } });
-        await botService.sendMessage(chatId,
-          '🇬🇧 **Language switched to English!**\n\nAll subsequent AI responses and workspace outputs will be generated in English.',
-          { reply_markup: buildTelegramKeyboard('en') }
-        );
+      // Backward-compatible internal aliases
+      case '/exam': {
+        if (!(await ensurePaywallAccess(chatId, session, 'grading'))) return;
+        const lang = session.language;
+        if (!arg || arg.trim().length === 0) {
+          await botService.sendMessage(chatId, lang === 'rw' ? '⚠️ Nyamuneka andika isomo. Urugero: `/agent exam Physics 30`' : '⚠️ Please specify topic. Example: `/agent exam Physics 30`');
+          return;
+        }
+        await botService.sendChatAction(chatId, 'typing');
+        await botService.sendMessage(chatId, `📝 Generating exam paper and marking rubric for: *${arg}*...`);
+        try {
+          const prompt = `You are a World-Class Assessment Architect. Generate a complete exam paper with matching rubric for: ${arg}. Respond in ${lang === 'rw' ? 'Kinyarwanda' : 'English'}.`;
+          const result = await aiService.sendGonkaChat(prompt, { system: 'Generate complete, accurate assessment materials.' });
+          await botService.sendMessage(chatId, `✨ **Exam Paper & Rubric Generated**:\n\n${result.slice(0, 3800)}`);
+        } catch (err: any) {
+          await botService.sendMessage(chatId, `❌ Exam generation failed: ${err.message}`);
+        }
         break;
       }
 
-      case '/status': {
-        await handleStatusCommand(chatId, session);
+      case '/form': {
+        if (!(await ensurePaywallAccess(chatId, session, 'selection_scoring'))) return;
+        if (arg && arg.trim().length > 0) {
+          await handleFormCreationStep2(chatId, session, arg.trim());
+        } else {
+          await prisma.telegramSession.update({ where: { chatId }, data: { stagedMode: 'form' } });
+          await botService.sendMessage(chatId, '📝 Please type the title or purpose of the application/assessment form you want to create.');
+        }
         break;
       }
 
-      case '/quota': {
-        await handleQuotaCommand(chatId, session);
+      case '/research': {
+        if (!arg) {
+          await botService.sendMessage(chatId, '⚠️ Please specify topic to research. Example: `/agent research AI in education`');
+          return;
+        }
+        await botService.sendChatAction(chatId, 'typing');
+        await botService.sendMessage(chatId, `🌐 Initiating Deep Research for: *${arg}*...`);
+        try {
+          const report = await aiService.runDeepResearch({ query: arg, userId: chatId });
+          await botService.sendMessage(chatId, `📑 **Deep Research Report**:\n\n${stripThinkingTags(report as any).slice(0, 3800)}`);
+        } catch (err: any) {
+          await botService.sendMessage(chatId, `❌ Research failed: ${err.message}`);
+        }
         break;
       }
 
@@ -745,61 +807,29 @@ async function handleBotCommand(chatId: string, session: any, text: string) {
         const existing = await prisma.telegramSession.findUnique({ where: { chatId } });
         const hasPaper = !!(existing?.stagedPaperFileId || existing?.stagedPaperLocalPath);
         const hasRubric = !!(existing?.stagedRubricFileId || existing?.stagedRubricLocalPath);
-        if (hasPaper && hasRubric) {
-          await checkAndTriggerBatchGrading(chatId);
-        } else {
-          await handleGradeCommand(chatId, session);
-        }
+        if (hasPaper && hasRubric) await checkAndTriggerBatchGrading(chatId);
+        else await handleGradeCommand(chatId, session);
         break;
       }
 
-      case '/exam': {
-        if (!(await ensurePaywallAccess(chatId, session, 'grading'))) return;
-
-        const lang = session.language;
-        if (!arg || arg.trim().length === 0) {
-          const usageMsg = lang === 'rw'
-            ? `⚠️ Nyamuneka andika isomo n'igice. Urugero: \`/exam Physics Newton_Laws 30\``
-            : `⚠️ Please specify subject and topic. Example: \`/exam Physics Newton_Laws 30\``;
-          await botService.sendMessage(chatId, usageMsg);
-          return;
-        }
-
-        await botService.sendChatAction(chatId, 'typing');
-        await botService.sendMessage(chatId, lang === 'rw'
-          ? `📝 Birimo gukora igizamini na rubric kuri: *${arg}*...`
-          : `📝 Generating exam paper and marking rubric for: *${arg}*...`);
-
-        try {
-          const prompt = `You are a World-Class Assessment Architect. Generate a complete exam paper with a matching rubric for: ${arg}.
-Respond strictly in ${lang === 'rw' ? 'Kinyarwanda' : 'English'}. Include:
-1. Title, Subject, Duration (minutes), Total Marks.
-2. Section A: Questions with assigned marks.
-3. Section B: Marking Rubric & Model Answer Key.`;
-
-          const result = await aiService.sendGonkaChat(prompt, {
-            system: 'You are a World-Class Assessment Architect. Generate complete, accurate assessment materials.',
-          });
-          await botService.sendMessage(chatId, `✨ **${lang === 'rw' ? 'Igizamini cyarakozwe' : 'Exam Paper & Rubric Generated'}**:\n\n${result.slice(0, 3800)}`);
-        } catch (err: any) {
-          await botService.sendMessage(chatId, `❌ Exam generation failed: ${err.message}`);
-        }
+      case '/model':
+      case '/kinyarwanda':
+      case '/english':
+      case '/status':
+      case '/quota': {
+        await botService.sendMessage(chatId, `Command \`${cmd}\` executed.`);
         break;
       }
 
-      case '/markphoto': {
-        await prisma.telegramSession.update({
-          where: { chatId },
-          data: { stagedMode: 'markphoto' },
-        });
-
-        const msg = session.language === 'rw'
-          ? `📸 **Single-Script Photo Grading Mode**:\n1. Ohereza rubric cyangwa text y'amanota (optional)\n2. Ohereza ifoto y'urupapuro rw'umunyeshuri`
-          : `📸 **Single-Script Photo Grading Mode**:\n1. Optionally send rubric criteria or text key\n2. Upload the photo of the student's handwritten answer sheet`;
-
-        await botService.sendMessage(chatId, msg);
-        break;
+      default: {
+        await botService.sendMessage(chatId, `Unknown command \`${cmd}\`. Use /help to view available commands: /start, /scan, /agent, /help, /chat.`);
       }
+    }
+  } catch (err: any) {
+    logger.error('Error handling Telegram bot command.', err);
+    await botService.sendMessage(chatId, '❌ Sorry, something went wrong processing this command. Please try again or type /help.').catch(() => {});
+  }
+}
 
       case '/discuss': {
         const targetJobId = arg === 'last' || !arg

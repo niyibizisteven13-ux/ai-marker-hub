@@ -13,6 +13,8 @@ import {
   FileText,
 } from 'lucide-react';
 import BwengeLoader from './BwengeLoader';
+import ActivityLine from './ActivityLine';
+import Spark from './Spark';
 import DynamicForm from './DynamicForm';
 import AnalyticsDashboard from './AnalyticsDashboard';
 import MarkdownRenderer from './MarkdownRenderer';
@@ -273,6 +275,14 @@ export default function ChatMessage({
           </div>
         ) : (
           <div className="w-full text-base leading-[1.7] text-[#FAF9F5]">
+            <ActivityLine
+              busy={Boolean(isThinking || (toolCallMatch && !toolOutputMatch) || message.isBusy || message.phase === 'thinking' || message.phase === 'streaming')}
+              current={message.currentStatus || (isThinking ? 'Thinking...' : toolCallMatch && !toolOutputMatch ? 'Running tool...' : '')}
+              steps={message.steps || []}
+              startedAt={message.startedAt || Date.now()}
+              endedAt={message.endedAt}
+            />
+
             {toolCallMatch && !toolOutputMatch && (
               <div className="mb-3 flex items-center gap-3 rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3">
                 <BwengeLoader />

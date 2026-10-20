@@ -478,6 +478,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
   useEffect(() => {
     const hasActiveBuild = datasetAdapterJobs.some((j) => j.status === 'BUILDING_ADAPTER' || j.status === 'QUEUED');
     if (!hasActiveBuild) return;
+    let hasReportedPollingError = false;
     const timer = window.setInterval(async () => {
       try {
         const [ftList, mdList, ov] = await Promise.all([
@@ -492,10 +493,16 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
           if (!prev) return ftList.data[0] || null;
           return ftList.data.find((j: any) => j.id === prev.id) || prev;
         });
-      } catch {}
+        hasReportedPollingError = false;
+      } catch (err) {
+        if (!hasReportedPollingError) {
+          notify(err instanceof Error ? `Could not refresh adapter status: ${err.message}` : 'Could not refresh adapter status.', true);
+          hasReportedPollingError = true;
+        }
+      }
     }, 5000);
     return () => window.clearInterval(timer);
-  }, [datasetAdapterJobs]);
+  }, [datasetAdapterJobs, notify]);
 
   const go = (id: TabId) => { setTab(id); setDrawer(false); };
 

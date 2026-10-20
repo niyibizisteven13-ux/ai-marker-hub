@@ -1,5 +1,13 @@
 import logger from '../utils/logger.js';
 
+export function getTelegramWebhookBaseUrl(env: NodeJS.ProcessEnv = process.env): string | null {
+  const port = Number(env.PORT) || 3000;
+  const codespaceUrl = env.CODESPACE_NAME
+    ? `https://${env.CODESPACE_NAME}-${port}.app.github.dev`
+    : null;
+  return env.APP_BASE_URL || env.APP_URL || env.RENDER_EXTERNAL_URL || codespaceUrl;
+}
+
 export interface TelegramKeyboardOption {
   text: string;
   callback_data?: string;
@@ -23,6 +31,24 @@ export class TelegramBotService {
 
   public isConfigured(): boolean {
     return Boolean(this.botToken && this.botToken.trim().length > 0);
+  }
+
+  public async getBotUsername(): Promise<string | null> {
+    if (!this.isConfigured()) return null;
+
+    try {
+      const response = await fetch(`https://api.telegram.org/bot${this.botToken}/getMe`, {
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!response.ok) return null;
+
+      const data = await response.json() as { ok?: boolean; result?: { is_bot?: boolean; username?: string } };
+      if (!data.ok || !data.result?.is_bot || !data.result.username) return null;
+      return data.result.username;
+    } catch (error) {
+      logger.warn('Telegram bot verification request failed.', error);
+      return null;
+    }
   }
 
   /**
@@ -292,20 +318,10 @@ export class TelegramBotService {
       const url = `https://api.telegram.org/bot${this.botToken}/setMyCommands`;
       const commands = [
         { command: 'start', description: 'Welcome message & main menu' },
+        { command: 'scan', description: 'Open mobile web document scanner' },
+        { command: 'agent', description: 'Run AI agent tasks (form, grade, exam, research)' },
         { command: 'help', description: 'Show instructions and bot commands' },
-        { command: 'grade', description: 'Batch grade exam papers against rubric' },
-        { command: 'markphoto', description: 'Grade single handwritten student answer photo' },
-        { command: 'discuss', description: 'Ask follow-up questions about graded batch' },
-        { command: 'done', description: 'End the current form or discussion mode' },
-        { command: 'exam', description: 'Generate exam paper and marking rubric' },
-        { command: 'research', description: 'Perform deep web research on any topic' },
-        { command: 'form', description: 'Create online application or assessment form' },
-        { command: 'scan', description: 'Open mobile web scanner for large file uploads' },
-        { command: 'model', description: 'Show or select GonkaRouter' },
-        { command: 'status', description: 'View recent batch jobs and processing status' },
-        { command: 'quota', description: 'Check remaining paper quota and plan' },
-        { command: 'english', description: 'Switch bot language to English' },
-        { command: 'kinyarwanda', description: 'Ururimi ruhinduwe mu Kinyarwanda' }
+        { command: 'chat', description: 'Chat with Bwenge AI Assistant' }
       ];
 
       const res = await fetch(url, {

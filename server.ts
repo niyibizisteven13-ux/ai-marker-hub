@@ -50,7 +50,7 @@ import ollamaRoutes from './server/routes/ollamaRoutes.ts';
 import telegramBotRoutes from './server/routes/telegramBotRoutes.ts';
 import settingsBillingRoutes from './server/routes/settingsBillingRoutes.ts';
 import feedbackRoutes from './server/routes/feedbackRoutes.ts';
-import { TelegramBotService } from './server/services/TelegramBotService.ts';
+import { getTelegramWebhookBaseUrl, TelegramBotService } from './server/services/TelegramBotService.ts';
 import { buildPromptForIntent, buildSmallTalkPrompt } from './server/services/prompts/promptRouter.ts';
 import { detectLanguage, buildLanguageBlock } from './server/services/prompts/kinyarwandaStyle.ts';
 import { validateEvidenceCitations } from './server/services/GroundedAnswerService.js';
@@ -2494,7 +2494,7 @@ async function startServer() {
   botService.registerCommands().catch((err) => {
     logger.error('Failed to register Telegram bot commands', err);
   });
-  const webhookBaseUrl = process.env.APP_BASE_URL || process.env.RENDER_EXTERNAL_URL;
+  const webhookBaseUrl = getTelegramWebhookBaseUrl();
   if (webhookBaseUrl) {
     botService.setWebhook(webhookBaseUrl).catch((err) => {
       logger.error('Failed to set Telegram webhook URL', err);

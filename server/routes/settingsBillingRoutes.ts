@@ -4,8 +4,10 @@ import { prisma } from '../db.js';
 import { requireAuth } from '../../production/auth.js';
 import logger from '../utils/logger.js';
 import { issueTelegramLink } from '../services/telegramLinkStore.js';
+import { getTelegramWebhookBaseUrl, TelegramBotService } from '../services/TelegramBotService.js';
 
 const router = Router();
+const telegramBotService = TelegramBotService.getInstance();
 
 // GET /api/billing
 router.get('/billing', requireAuth, async (req, res) => {
@@ -94,7 +96,8 @@ router.get('/connections', requireAuth, async (req, res) => {
       telegram: {
         connected: !!telegramSession,
         chatId: telegramSession?.chatId || null,
-        botUsername: `@${process.env.TELEGRAM_BOT_USERNAME || 'BwengeAI_Bot'}`,
+        botUsername: `@${(process.env.TELEGRAM_BOT_USERNAME || 'Bwengebot').replace(/^@/, '')}`,
+        botConfigured: telegramBotService.isConfigured(),
       },
     });
   } catch (err: any) {
@@ -104,9 +107,31 @@ router.get('/connections', requireAuth, async (req, res) => {
 
 router.post('/connections/telegram/link', requireAuth, async (req, res) => {
   const userId = (req as any).user?.userId;
-  const botUsername = process.env.TELEGRAM_BOT_USERNAME || 'BwengeAI_Bot';
+  if (!telegramBotService.isConfigured()) {
+    return res.status(503).json({ error: 'Telegram is not configured on the server. Please contact the administrator.' });
+  }
+
+  const verifiedBotUsername = await telegramBotService.getBotUsername();
+  if (!verifiedBotUsername) {
+    return res.status(503).json({ error: 'The Telegram bot could not be verified. Please try again later.' });
+  }
+
+  const webhookBaseUrl = getTelegramWebhookBaseUrl();
+  if (!webhookBaseUrl) {
+    return res.status(503).json({ error: 'Telegram webhook URL is not configured. Set APP_BASE_URL to the public HTTPS application URL.' });
+  }
+  const webhookConfigured = await telegramBotService.setWebhook(webhookBaseUrl);
+  if (!webhookConfigured) {
+    return res.status(503).json({ error: 'Telegram could not connect to this application. Check the public HTTPS URL and webhook settings.' });
+  }
+
   const code = issueTelegramLink(userId);
-  res.json({ success: true, expiresInSeconds: 600, link: `https://t.me/${botUsername.replace(/^@/, '')}?start=link_${code}` });
+  return res.json({
+    success: true,
+    expiresInSeconds: 600,
+    botUsername: `@${verifiedBotUsername}`,
+    link: `https://t.me/${encodeURIComponent(verifiedBotUsername)}?start=link_${code}`,
+  });
 });
 
 // POST /api/connections/telegram

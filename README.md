@@ -31,6 +31,10 @@ People can rate AI responses; a negative rating opens a compact follow-up form. 
 
 The admin console includes feedback review, user role and account-access controls, AI provider model and gateway settings, and an email broadcast form for enabled accounts. New feedback and review changes appear in the dashboard through authenticated live WebSocket updates; no manual refresh is required. Broadcast email uses the configured email sender.
 
+## Telegram account connection
+
+Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_BOT_USERNAME` as server-side secrets/configuration. The Connections settings page verifies the bot with Telegram before creating a short-lived, single-use account-pairing link. Linked Telegram conversations use the same `User` and database-backed account data as the web app. Configure `APP_BASE_URL` (or `APP_URL`) to the public HTTPS app origin so the server can register the Telegram webhook; in Codespaces, make the app port public so the detected `CODESPACE_NAME` webhook is reachable. `TELEGRAM_BOT_SECRET_TOKEN` is optional but recommended for verifying webhook requests. If a bot token was exposed, revoke it with BotFather and replace the server secret.
+
 The **Upgrades & Subscriptions** admin section lists subscriptions, provider-reported payment history, and saved institutional upgrade requests. Administrators can update subscription plan/status/expiry with an audit record and contact or track institutional requests. Payment outcomes remain controlled by verified payment-provider callbacks, not manual admin edits.
 
 ## Admin Knowledge and RAG

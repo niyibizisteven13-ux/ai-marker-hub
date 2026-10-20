@@ -543,7 +543,7 @@ export default function CreateStudio({
                   <FileText className="h-4 w-4 text-[#F0A12C]" /> Open Agent & forms workspace
                 </button>
                 <a
-                  href="https://t.me/BwengeAI_Bot"
+                  href="https://t.me/Bwengebot"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-neutral-200 transition-colors hover:bg-white/[.07] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F0A12C]/70"
