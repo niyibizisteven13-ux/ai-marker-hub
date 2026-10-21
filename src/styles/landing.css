@@ -114,3 +114,10 @@ h1 em{font-style:normal;color:var(--teal)}
   .draw{animation:none;stroke-dashoffset:0}
   .chip,.qr{animation:none}
 }
+
+.qr .qr-box{position:relative;overflow:hidden;border-radius:12px;background:#fff;aspect-ratio:1/1;line-height:0;animation:qrglow 3.2s ease-in-out infinite}
+.qr .qr-box svg{display:block;width:100%;height:auto}
+.qr .qr-scan{position:absolute;left:0;right:0;top:-22%;height:22%;background:linear-gradient(to bottom,rgba(45,212,191,0),rgba(45,212,191,.38),rgba(45,212,191,0));animation:qrscan 3.2s ease-in-out infinite;pointer-events:none}
+@keyframes qrscan{0%{top:-22%}100%{top:100%}}
+@keyframes qrglow{0%,100%{box-shadow:0 0 0 0 rgba(45,212,191,0)}50%{box-shadow:0 0 22px 2px rgba(45,212,191,.35)}}
+@media (prefers-reduced-motion:reduce){.qr .qr-scan,.qr .qr-box{animation:none}}
