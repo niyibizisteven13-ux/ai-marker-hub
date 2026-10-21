@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import MarkdownRenderer from './MarkdownRenderer';
+import { lazy as lazyLoad, Suspense as LazyBoundary } from 'react';
+const MarkdownRendererLazy = lazyLoad(() => import('./MarkdownRenderer'));
+const MarkdownRenderer = (props: any) => <LazyBoundary fallback={null}><MarkdownRendererLazy {...props} /></LazyBoundary>;
 import { Check, Copy, MoreHorizontal, RefreshCw, Share2, ThumbsDown, ThumbsUp, Volume2 } from 'lucide-react';
 
 interface AiResponseViewProps {

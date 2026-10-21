@@ -35,8 +35,6 @@ import RightChatSidebar from './components/RightChatSidebar';
 import { SidebarResultsPanel } from './components/SidebarResultsPanel';
 import { FloatingSmartToolbar } from './components/FloatingSmartToolbar';
 import { HardwareToast } from './components/HardwareToast';
-import DocumentScanner from './components/DocumentScanner';
-import { processFileClientSide } from './utils/fileProcessor';
 import { authFetch } from './utils/authFetch';
 import { copyToClipboard } from './utils/copyToClipboard';
 import { buildExamPaperContext } from './utils/contentAwarePrompt';
@@ -61,6 +59,10 @@ const DynamicForm = React.lazy(() => import('./components/DynamicForm'));
 const AdminPage = React.lazy(() => import('./pages/AdminPage'));
 
 import { Suspense } from 'react';
+const DocumentScannerLazy = React.lazy(() => import('./components/DocumentScanner'));
+const DocumentScanner = (props: React.ComponentProps<typeof DocumentScannerLazy>) => (
+  <Suspense fallback={null}><DocumentScannerLazy {...props} /></Suspense>
+);
 
 const CHAT_HISTORY_KEY = 'bwenge_chat_history';
 const CHAT_SESSIONS_KEY = 'bwenge_saved_sessions';
@@ -592,6 +594,7 @@ export default function App() {
         }
 
         try {
+          const { processFileClientSide } = await import('./utils/fileProcessor');
           const clientResult = await processFileClientSide(file);
           if (clientResult && clientResult.rawText) {
             textContent = clientResult.rawText;
