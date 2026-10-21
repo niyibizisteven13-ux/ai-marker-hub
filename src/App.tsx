@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { jsPDF } from 'jspdf';
 import { useStore } from './store/useStore';
 import {
   NavigationTab,
