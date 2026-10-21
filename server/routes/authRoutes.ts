@@ -33,7 +33,7 @@ const logErrors = (name: string, h: any) =>
     }
   };
 
-router.get('/google/start', authLimiter, logErrors('googleStart', googleStart));
+router.get('/google/start', logErrors('googleStart', googleStart));
 router.get('/google/callback', logErrors('googleCallback', googleCallback));
 router.post('/email/start', otpRequestIpLimiter, otpRequestEmailLimiter, logErrors('emailStart', emailStart));
 router.post('/email/verify', otpVerifyIpLimiter, otpVerifyEmailLimiter, logErrors('emailVerify', emailVerify));
