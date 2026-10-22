@@ -4,9 +4,12 @@ import { telegramApi, type TelegramApi } from './api.js';
 import { deliverAttachment, runAssistantTurn, type IncomingFile } from './agentBridge.js';
 import { esc } from './format.js';
 import {
-  FILES_PER_PAGE, backKeyboard, card, filesCard, filesKeyboard, guideCard, homeCard, homeKeyboard, langOf, settingsCard, settingsKeyboard, type Lang,
+  FILES_PER_PAGE, backKeyboard, card, filesCard, filesKeyboard, guideCard, homeCard, homeKeyboard, langOf, scanCard, scanKeyboard, settingsCard, settingsKeyboard, type Lang,
 } from './ui.js';
+import type { InlineKeyboard } from './api.js';
 import { copy } from './uiText.js';
+import { bannerFileId, bannerPng, rememberBannerFileId } from './banner.js';
+import { issueScanToken, miniAppReady, scannerUrl } from './scanSession.js';
 
 /**
  * Telegram update router for the assistant: home menu and inline navigation, settings, "My files", files
@@ -66,7 +69,47 @@ async function accountOf(session: any): Promise<{ linked: boolean; email?: strin
   return { linked, email: linked ? user!.email : null, name: linked ? user!.name : null };
 }
 
-async function showFiles(api: TelegramApi, chatId: string, session: any, page: number, editId?: number) {
+/** A message to update in place; `media` when it is a photo (the home banner), whose text is a caption. */
+type Target = { id: number; media: boolean } | undefined;
+const CAPTION_MAX = 1024;
+/** Telegram user ids are positive; group and channel chat ids are negative. */
+const isPrivate = (chatId: string) => !chatId.startsWith('-');
+
+/** Shows a screen: edits the target message when there is one, otherwise sends a new message. */
+async function show(api: TelegramApi, chatId: string, target: Target, html: string, keyboard?: InlineKeyboard) {
+  if (target && !target.media) return api.editMessage(chatId, target.id, html, keyboard);
+  if (target && html.length <= CAPTION_MAX) return api.editCaption(chatId, target.id, html, keyboard);
+  return api.sendMessage(chatId, html, { keyboard });
+}
+
+const targetOf = (m: any): Target => (m?.message_id ? { id: m.message_id, media: Boolean(m.photo || m.document || m.caption !== undefined) } : undefined);
+
+/** The scanner screen: a Mini App button in private chats (HTTPS), otherwise a signed link valid for 30 minutes. */
+export async function showScan(api: TelegramApi, chatId: string, session: any, target?: Target) {
+  const lang = langOf(session.language);
+  const miniApp = isPrivate(chatId) && miniAppReady();
+  const url = miniApp ? scannerUrl() : scannerUrl(issueScanToken(chatId));
+  await show(api, chatId, target, scanCard(lang, !miniApp), scanKeyboard(lang, url, miniApp));
+}
+
+/**
+ * A scan sent from the scanner page arrives in the chat as a PDF with quick actions (transcribe, mark,
+ * summarise), exactly like a file the user sent; the next typed message also uses it.
+ */
+export async function deliverScan(chatId: string, session: any, pdf: Buffer, name: string, pages: number, api: TelegramApi = telegramApi()) {
+  const lang = langOf(session.language);
+  const pageLabel = lang === 'rw' ? `impapuro ${pages}` : lang === 'fr' ? `${pages} page${pages > 1 ? 's' : ''}` : `${pages} page${pages > 1 ? 's' : ''}`;
+  const file = { name, mime: 'application/pdf', data: pdf };
+  const prev = pending.get(chatId);
+  const sentPreview = { ...file, telegramId: '' };
+  const all = [...(prev && Date.now() - prev.at < PENDING_TTL ? prev.files : []), sentPreview].slice(-MAX_PENDING);
+  const { keyboard, hint } = quickActions(lang, all);
+  const sent = await api.sendDocument(chatId, { data: pdf, name, mime: 'application/pdf' }, card('📷', name, esc(copy(lang).scan.received(pageLabel)), hint), keyboard);
+  sentPreview.telegramId = sent?.document?.file_id ?? '';
+  pending.set(chatId, { files: all, at: Date.now() });
+}
+
+async function showFiles(api: TelegramApi, chatId: string, session: any, page: number, target?: Target) {
   const lang = langOf(session.language);
   const where = { userId: session.userId };
   const [total, rows] = await Promise.all([
@@ -75,14 +118,24 @@ async function showFiles(api: TelegramApi, chatId: string, session: any, page: n
   ]);
   const html = filesCard(lang, rows as any, page, total);
   const kb = filesKeyboard(lang, rows as any, page, total);
-  if (editId) await api.editMessage(chatId, editId, html, kb); else await api.sendMessage(chatId, html, { keyboard: kb });
+  await show(api, chatId, target, html, kb);
 }
 
-async function showHome(api: TelegramApi, chatId: string, session: any, firstName?: string, editId?: number) {
+/** Home: the branded banner with the menu as its caption (sent by file_id after the first upload). */
+async function showHome(api: TelegramApi, chatId: string, session: any, firstName?: string, target?: Target) {
   const lang = langOf(session.language);
   const account = await accountOf(session);
   const html = homeCard(lang, account.name?.split(' ')[0] || firstName);
-  if (editId) await api.editMessage(chatId, editId, html, homeKeyboard(lang)); else await api.sendMessage(chatId, html, { keyboard: homeKeyboard(lang) });
+  const kb = homeKeyboard(lang, isPrivate(chatId) && miniAppReady() ? scannerUrl() : undefined);
+  if (target) { await show(api, chatId, target, html, kb); return; }
+  try {
+    const cached = bannerFileId(lang);
+    const sent = await api.sendPhoto(chatId, cached ?? { data: bannerPng(lang), name: 'bwenge.png' }, html, kb);
+    if (!cached) rememberBannerFileId(lang, sent?.photo?.at(-1)?.file_id);
+  } catch (e) {
+    logger.warn('[telegram] banner unavailable, sending the text menu', { errorType: (e as Error)?.name });
+    await api.sendMessage(chatId, html, { keyboard: kb });
+  }
 }
 
 function quickActions(lang: Lang, files: IncomingFile[]) {
@@ -103,6 +156,7 @@ const QUICK_PROMPTS: Record<string, Record<Lang, string>> = {
   sum: { en: 'Summarise the attached file(s) clearly, with the key points and any important numbers.', rw: 'Incamake dosiye zometse, ugaragaze ingingo z’ingenzi n’imibare y’ingenzi.', fr: 'Résume clairement le(s) fichier(s) joint(s), avec les points clés et les chiffres importants.' },
   chart: { en: 'Analyse the attached data, make the most useful chart of it and give me an Excel workbook of the key results.', rw: 'Sesengura amakuru yometse, ukore igishushanyo kibereye kandi umpe Excel y’ibisubizo by’ingenzi.', fr: 'Analyse les données jointes, fais le graphique le plus utile et donne-moi un classeur Excel des résultats clés.' },
   stats: { en: 'Run descriptive statistics on the attached data (counts, means, medians, spread, missing values) and explain what stands out.', rw: 'Kora imibare y’ibanze ku makuru yometse (umubare, impuzandengo, median, ikwirakwira, ibibura) maze usobanure ibigaragara.', fr: 'Calcule les statistiques descriptives des données jointes (effectifs, moyennes, médianes, dispersion, valeurs manquantes) et explique ce qui ressort.' },
+  tr: { en: 'Transcribe the attached pages exactly as written, page by page. Mark anything you cannot read as [illegible].', rw: 'Andika inyandiko iri ku mpapuro zometse uko yanditse, urupapuro ku rundi. Ahatasomeka andika [illegible].', fr: 'Transcris fidèlement les pages jointes, page par page. Indique ce qui est illisible par [illegible].' },
   mark: { en: 'Mark these exam scripts. Use the marking scheme if one is attached; otherwise ask me for it.', rw: 'Kosora izi mpapuro z’ibizamini. Koresha marking scheme niba yometse; bitabaye ibyo uyinsabe.', fr: 'Corrige ces copies. Utilise le barème s’il est joint ; sinon demande-le-moi.' },
 };
 
@@ -198,6 +252,7 @@ export async function handleUpdate(update: any, legacy: LegacyHooks, api: Telegr
       case '/start': case '/menu': await showHome(api, chatId, session, msg.from?.first_name); return;
       case '/help': await api.sendMessage(chatId, guideCard(lang, 'help'), { keyboard: backKeyboard(lang) }); return;
       case '/files': await showFiles(api, chatId, session, 0); return;
+      case '/scan': case '/scanner': await showScan(api, chatId, session); return;
       case '/settings': case '/language': await api.sendMessage(chatId, settingsCard(lang, await accountOf(session)), { keyboard: settingsKeyboard(lang) }); return;
       case '/new': case '/reset':
         pending.delete(chatId);
@@ -215,7 +270,7 @@ export async function handleUpdate(update: any, legacy: LegacyHooks, api: Telegr
   // Legacy reply-keyboard buttons from older versions of the bot map onto the new screens.
   if (/^(❓|💬|🤖|📸)\s/.test(text)) {
     if (text.startsWith('❓')) await api.sendMessage(chatId, guideCard(lang, 'help'), { keyboard: backKeyboard(lang) });
-    else if (text.startsWith('📸')) await legacy.command(chatId, session, '/scan');
+    else if (text.startsWith('📸')) await showScan(api, chatId, session);
     else await showHome(api, chatId, session, msg.from?.first_name);
     return;
   }
@@ -231,7 +286,7 @@ export async function handleUpdate(update: any, legacy: LegacyHooks, api: Telegr
 
 async function handleCallback(q: any, legacy: LegacyHooks, api: TelegramApi) {
   const chatId = String(q.message?.chat?.id ?? '');
-  const messageId: number | undefined = q.message?.message_id;
+  const target = targetOf(q.message);
   const data: string = q.data ?? '';
   if (!chatId || !data) { await api.answerCallback(q.id); return; }
   const session = await legacy.session(chatId, q.from);
@@ -241,11 +296,12 @@ async function handleCallback(q: any, legacy: LegacyHooks, api: TelegramApi) {
     switch (kind) {
       case 'm': {
         await api.answerCallback(q.id);
-        if (arg === 'home') await showHome(api, chatId, session, q.from?.first_name, messageId);
-        else if (arg === 'settings') await api.editMessage(chatId, messageId!, settingsCard(lang, await accountOf(session)), settingsKeyboard(lang));
+        if (arg === 'home') await showHome(api, chatId, session, q.from?.first_name, target);
+        else if (arg === 'settings') await show(api, chatId, target, settingsCard(lang, await accountOf(session)), settingsKeyboard(lang));
+        else if (arg === 'scan') await showScan(api, chatId, session, target);
         else if (['create', 'mark', 'transcribe', 'library', 'help'].includes(arg)) {
           if (arg === 'transcribe') await prisma.telegramSession.update({ where: { chatId }, data: { stagedMode: 'transcribe' } }).catch(() => undefined);
-          await api.editMessage(chatId, messageId!, guideCard(lang, arg as any), backKeyboard(lang));
+          await show(api, chatId, target, guideCard(lang, arg as any), backKeyboard(lang));
         }
         return;
       }
@@ -253,12 +309,12 @@ async function handleCallback(q: any, legacy: LegacyHooks, api: TelegramApi) {
         lang = langOf(arg);
         const updated = await prisma.telegramSession.update({ where: { chatId }, data: { language: lang } });
         await api.answerCallback(q.id, copy(lang).languageSet);
-        await api.editMessage(chatId, messageId!, settingsCard(lang, await accountOf(updated)), settingsKeyboard(lang));
+        await show(api, chatId, target, settingsCard(lang, await accountOf(updated)), settingsKeyboard(lang));
         return;
       }
       case 'fp': {
         await api.answerCallback(q.id);
-        await showFiles(api, chatId, session, Math.max(0, Number(arg) || 0), messageId);
+        await showFiles(api, chatId, session, Math.max(0, Number(arg) || 0), target);
         return;
       }
       case 'f': {
@@ -283,8 +339,9 @@ async function handleCallback(q: any, legacy: LegacyHooks, api: TelegramApi) {
         await api.answerCallback(q.id);
         const queued = pending.get(chatId);
         if (!queued?.files.length) { await api.sendMessage(chatId, esc(copy(lang).fileMissing)); return; }
-        if (messageId) await api.editMessage(chatId, messageId, card('📎', queued.files.length === 1 ? queued.files[0].name : `${queued.files.length} files`, '✓')).catch(() => undefined);
-        if (arg === 'tr') {
+        // Keep the file's message; only remove its buttons so the action cannot be tapped twice.
+        if (target) await api.call('editMessageReplyMarkup', { chat_id: chatId, message_id: target.id, reply_markup: { inline_keyboard: [] } }).catch(() => undefined);
+        if (arg === 'tr' && queued.files.every((f) => f.telegramId)) {
           pending.delete(chatId);
           for (const f of queued.files) await legacy.transcribe(chatId, session, f.telegramId, f.name);
           return;
@@ -307,6 +364,10 @@ async function handleCallback(q: any, legacy: LegacyHooks, api: TelegramApi) {
 export async function registerTelegramCommands(api: TelegramApi = telegramApi()) {
   await api.setCommands(copy('en').commands);
   for (const l of ['rw', 'fr'] as const) await api.setCommands(copy(l).commands, l).catch(() => undefined);
+  // Profile texts shown before the first /start, and the "Scan" button beside the message field.
+  await api.setProfile(copy('en').profile.description, copy('en').profile.short).catch(() => undefined);
+  for (const l of ['rw', 'fr'] as const) await api.setProfile(copy(l).profile.description, copy(l).profile.short, l).catch(() => undefined);
+  if (miniAppReady()) await api.setMenuButton({ type: 'web_app', text: copy('en').profile.menuButton, web_app: { url: scannerUrl() } }).catch(() => undefined);
   try {
     const me = await api.call<{ username?: string }>('getMe', {});
     if (me?.username) botUsername = me.username;

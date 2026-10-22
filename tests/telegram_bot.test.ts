@@ -37,7 +37,11 @@ const telegram = http.createServer(async (req, res) => {
   calls.push({ method, body, files });
   const result = method === 'getFile' ? { file_id: body.file_id, file_path: 'documents/scores.csv', file_size: CSV.length }
     : method === 'getMe' ? { username: 'BwengeTestBot', is_bot: true }
-      : ['sendMessage', 'sendPhoto', 'sendDocument'].includes(method) ? { message_id: ++msgSeq, chat: { id: body.chat_id } } : true;
+      : ['sendMessage', 'sendPhoto', 'sendDocument'].includes(method) ? {
+        message_id: ++msgSeq, chat: { id: body.chat_id },
+        ...(method === 'sendPhoto' ? { photo: [{ file_id: files.photo ? `photo-${msgSeq}` : String(body.photo) }] } : {}),
+        ...(method === 'sendDocument' ? { document: { file_id: `doc-${msgSeq}` } } : {}),
+      } : true;
   res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, result }));
 }).listen(0);
 
@@ -127,14 +131,29 @@ test('format: Markdown becomes safe, balanced Telegram HTML; long answers split 
   for (const c of chunks) { assert.ok(c.length <= 4096, `chunk ${c.length}`); assert.ok(htmlBalanced(c), c.slice(0, 80)); }
 });
 
-test('home: /start shows a branded card with inline navigation; menus and language switch edit in place', async () => {
+test('home: /start shows the branded banner with the menu; menus and language switch edit in place', async () => {
   let n = mark();
   await sendText('/start');
-  const home = await until(() => since(n).find((c) => c.method === 'sendMessage' && /Bwenge AI/.test(c.body.text)));
+  const home = await until(() => since(n).find((c) => c.method === 'sendPhoto'));
+  assert.equal(home.files.photo.data.subarray(1, 4).toString(), 'PNG', 'banner image uploaded');
   assert.equal(home.body.parse_mode, 'HTML');
-  assert.match(home.body.text, /Muraho, Aline!|Welcome/);
-  const buttons = home.body.reply_markup.inline_keyboard.flat().map((b: any) => b.callback_data);
-  assert.deepEqual(buttons, ['m:create', 'm:mark', 'm:transcribe', 'm:library', 'fp:0', 'm:settings']);
+  assert.match(home.body.caption, /Muraho, Aline!|Welcome/);
+  assert.match(home.body.caption, /📷 Scan papers with your camera/);
+  const flat = home.body.reply_markup.inline_keyboard.flat();
+  assert.deepEqual(flat.map((b: any) => b.callback_data ?? 'web_app'), ['m:create', 'm:mark', 'web_app', 'm:transcribe', 'm:library', 'fp:0', 'm:settings', 'm:help']);
+  assert.equal(flat[2].web_app.url, 'https://www.bwenge.space/scanner.html', 'scan opens the Mini App directly');
+
+  n = mark();
+  await sendText('/start');
+  const again = await until(() => since(n).find((c) => c.method === 'sendPhoto'));
+  assert.match(String(again.body.photo), /^photo-\d+$/);
+  assert.ok(!again.files.photo, 'later /start sends the cached file_id, not the bytes');
+
+  n = mark();
+  await post({ callback_query: { id: `cb${updateId}`, from, data: 'm:settings', message: { message_id: 76, chat: { id: chat, type: 'private' }, photo: [{ file_id: 'x' }], caption: 'menu' } } });
+  const fromBanner = await until(() => since(n).find((c) => c.method === 'editMessageCaption'));
+  assert.equal(fromBanner.body.message_id, 76);
+  assert.match(fromBanner.body.caption, /Settings/);
 
   n = mark();
   await tap('m:create', 77);
@@ -239,5 +258,79 @@ test('robustness: failures show a retry card; duplicates and unaddressed group m
   assert.equal(since(n).length, 0, 'group chatter ignored');
   await post({ message: { message_id: ++msgSeq, chat: { id: -5, type: 'group' }, from, date: 0, text: '@BwengeTestBot /help' } });
   await until(() => since(n).find((c) => c.method === 'sendMessage' && String(c.body.chat_id) === '-5'));
+  resetRouterState();
+});
+
+test('scanner: /scan opens the Mini App in private chats and a signed link in groups', async () => {
+  let n = mark();
+  await sendText('/scan');
+  const card = await until(() => since(n).find((c) => c.method === 'sendMessage' && /Document scanner/.test(c.body.text)));
+  assert.match(card.body.text, /edges are found for you/);
+  const open = card.body.reply_markup.inline_keyboard[0][0];
+  assert.deepEqual(open.web_app, { url: 'https://www.bwenge.space/scanner.html' });
+
+  n = mark();
+  await post({ message: { message_id: ++msgSeq, chat: { id: -5, type: 'group' }, from, date: 0, text: '/scan@BwengeTestBot' } });
+  const groupCard = await until(() => since(n).find((c) => c.method === 'sendMessage' && String(c.body.chat_id) === '-5'));
+  const link = groupCard.body.reply_markup.inline_keyboard[0][0];
+  assert.match(link.url, /^https:\/\/www\.bwenge\.space\/scanner\.html\?token=[\w-]{16}$/, 'web_app buttons are not allowed in groups');
+  assert.match(groupCard.body.text, /30 minutes/);
+});
+
+test('scanner: uploads are signed (Mini App initData or link token) and arrive as a PDF the AI reads as page images', async () => {
+  const crypto = await import('node:crypto');
+  const { PDFDocument } = await import('pdf-lib');
+  const sharp = (await import('sharp')).default;
+  const { issueScanToken, verifyInitData } = await import('../server/services/telegram/scanSession.js');
+  const sign = (fields: Record<string, string>, token = 'test-bot-token') => {
+    const check = Object.keys(fields).sort().map((k) => `${k}=${fields[k]}`).join('\n');
+    const secret = crypto.createHmac('sha256', 'WebAppData').update(token).digest();
+    return new URLSearchParams({ ...fields, hash: crypto.createHmac('sha256', secret).update(check).digest('hex') }).toString();
+  };
+  const now = Math.floor(Date.now() / 1000);
+  const initData = sign({ auth_date: String(now), query_id: 'q1', user: JSON.stringify({ id: chat, first_name: 'Aline' }) });
+  assert.equal(verifyInitData(initData), String(chat));
+  assert.equal(verifyInitData(initData.replace('Aline', 'Eve')), null, 'tampered data is rejected');
+  assert.equal(verifyInitData(sign({ auth_date: String(now - 3 * 86400), user: JSON.stringify({ id: chat }) })), null, 'stale data is rejected');
+  assert.equal(verifyInitData(initData, 'another-bot-token'), null);
+
+  // SYNTHETIC two-page scan without a text layer, as the scanner page builds it.
+  const doc = await PDFDocument.create();
+  for (const t of ['Q1: 2x + 3 = 7', 'Q2: x = 2']) {
+    const png = await sharp(Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="600" height="800"><rect width="100%" height="100%" fill="white"/><text x="40" y="120" font-size="40" fill="#123">${t}</text></svg>`)).png().toBuffer();
+    doc.addPage([600, 800]).drawImage(await doc.embedPng(png), { x: 0, y: 0, width: 600, height: 800 });
+  }
+  const pdf = Buffer.from(await doc.save());
+  const upload = (pathSuffix: string, headers: Record<string, string> = {}) => {
+    const form = new FormData();
+    form.append('file', new Blob([pdf], { type: 'application/pdf' }), 'Aline Uwase.pdf');
+    return fetch(`http://127.0.0.1:${port(server)}/api/telegram/scan-upload${pathSuffix}`, { method: 'POST', body: form, headers });
+  };
+
+  assert.equal((await upload('', { 'X-Telegram-Init-Data': initData.replace('Aline', 'Eve') })).status, 401);
+  assert.equal((await upload('/not-a-token')).status, 401);
+
+  let n = mark();
+  const res = await upload('', { 'X-Telegram-Init-Data': initData });
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { success: true, pages: 2 });
+  const sent = await until(() => since(n).find((c) => c.method === 'sendDocument'));
+  assert.equal(String(sent.body.chat_id), String(chat));
+  assert.equal(sent.files.document.name, 'Aline Uwase.pdf');
+  assert.match(sent.body.caption, /📷 <b>Aline Uwase\.pdf<\/b>/);
+  assert.match(sent.body.caption, /Scanned PDF · 2 pages/);
+  assert.deepEqual(sent.body.reply_markup.inline_keyboard.flat().map((b: any) => b.callback_data), ['q:sum', 'q:tr', 'q:mark']);
+
+  // A /scan link token works for several uploads (one PDF per student) until it expires.
+  const token = issueScanToken(String(chat));
+  for (let i = 0; i < 2; i++) assert.equal((await upload(`/${token}`)).status, 200);
+
+  n = mark();
+  await tap('q:sum', sent.body.message_id ?? 1);
+  await until(() => since(n).find((c) => c.method === 'editMessageText' && /Statistics: mean score/.test(c.body.text)));
+  assert.ok(since(n).some((c) => c.method === 'editMessageReplyMarkup'), 'the used quick actions are removed');
+  const user = claudeRequests.at(-1).messages.at(-1).content as any[];
+  assert.ok(user.filter((b) => b.type === 'image').length >= 2, 'the scanned pages reach the model as images');
+  assert.match(JSON.stringify(user), /Aline Uwase\.pdf/);
   resetRouterState();
 });

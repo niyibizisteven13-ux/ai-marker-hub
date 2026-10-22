@@ -17,7 +17,9 @@ import { PDFParse } from 'pdf-parse';
 import fs from 'fs/promises';
 import path from 'path';
 import { getTelegramTranscriber } from '../services/educationRuntime.js';
-import { handleUpdate as handleTelegramUpdate, type LegacyHooks } from '../services/telegram/router.js';
+import { deliverScan, handleUpdate as handleTelegramUpdate, showScan, type LegacyHooks } from '../services/telegram/router.js';
+import { telegramApi } from '../services/telegram/api.js';
+import { resolveScanToken, verifyInitData } from '../services/telegram/scanSession.js';
 import { runAssistantTurn } from '../services/telegram/agentBridge.js';
 
 const router = Router();
@@ -32,19 +34,6 @@ async function startTranscription(chatId: string, session: any, fileId: string, 
 }
 const aiService = AiService.getInstance();
 const paywallService = PaywallService.getInstance();
-
-// Scan Tokens for /scan signed single-use URLs.
-// NOTE: in-memory only — won't survive multi-instance deploys or a
-// restart mid-session. Swap for a Prisma table or Redis before scaling out.
-const scanTokens = new Map<string, { chatId: string; expires: number }>();
-
-const SCAN_TOKEN_SWEEP_MS = 5 * 60 * 1000;
-setInterval(() => {
-  const now = Date.now();
-  for (const [token, data] of scanTokens.entries()) {
-    if (data.expires <= now) scanTokens.delete(token);
-  }
-}, SCAN_TOKEN_SWEEP_MS).unref();
 
 // Where locally-uploaded (web-scanner) files land before being picked up
 // by checkAndTriggerBatchGrading, alongside Telegram-native uploads.
@@ -162,23 +151,25 @@ async function getTelegramSession(chatId: string) {
 
 
 /**
- * Web Scanner Signed Upload Endpoint.
+ * Scanner uploads (scanner.html). The sender is identified by Telegram Mini App initData (header
+ * X-Telegram-Init-Data) or by the token in a /scan link. A token stays valid for 30 minutes, so one scan
+ * session can send a PDF per student. During /grade batch mode the file is staged for grading as before;
+ * otherwise it arrives in the chat as a PDF with quick actions.
  */
-router.post('/scan-upload/:sessionToken', upload.single('file'), async (req: Request, res: Response) => {
+router.post(['/scan-upload', '/scan-upload/:sessionToken'], upload.single('file'), async (req: Request, res: Response) => {
   try {
-    const tokenData = scanTokens.get(req.params.sessionToken);
-    if (!tokenData || tokenData.expires < Date.now()) {
-      return res.status(401).json({ error: 'Scan session expired or invalid token.' });
+    const chatId = resolveScanToken(req.params.sessionToken) ?? verifyInitData(req.get('x-telegram-init-data'));
+    if (!chatId) {
+      return res.status(401).json({ error: 'This scan session has expired. Open the scanner again from Telegram.' });
     }
 
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded.' });
     }
 
-    const { chatId } = tokenData;
     const session = await prisma.telegramSession.findUnique({ where: { chatId } });
     if (!session) {
-      return res.status(404).json({ error: 'Session not found.' });
+      return res.status(404).json({ error: 'Start the Bwenge bot in Telegram first.' });
     }
 
     const qualityService = DocumentQualityService.getInstance();
@@ -188,14 +179,24 @@ router.post('/scan-upload/:sessionToken', upload.single('file'), async (req: Req
       return res.status(400).json({ error: qualityCheck.reason || 'Image quality gate rejected file.' });
     }
 
-    await fs.mkdir(SCAN_UPLOADS_DIR, { recursive: true });
+    const filename = (path.basename(req.file.originalname || 'scan.pdf').replace(/[^\p{L}\p{N} ._()-]/gu, '').trim().slice(0, 80)) || 'scan.pdf';
+    const data = qualityCheck.correctedBuffer || req.file.buffer;
 
-    const filename = req.file.originalname || 'web_scan.jpg';
-    const isRubric = filename.toLowerCase().includes('rubric') || filename.toLowerCase().includes('key');
+    if (session.stagedMode !== 'batch') {
+      if (req.file.mimetype !== 'application/pdf') return res.status(415).json({ error: 'The scanner sends PDF files.' });
+      let pages = 1;
+      const parser = new PDFParse({ data: new Uint8Array(data) });
+      try { pages = (await parser.getInfo()).total || 1; } catch { /* label only */ } finally { await parser.destroy().catch(() => undefined); }
+      await deliverScan(chatId, session, data, /\.pdf$/i.test(filename) ? filename : `${filename}.pdf`, pages);
+      return res.json({ success: true, pages });
+    }
+
+    await fs.mkdir(SCAN_UPLOADS_DIR, { recursive: true });
+    const isRubric = /rubric|key|scheme|bar[eè]me/i.test(filename);
     const safeExt = path.extname(filename).replace(/[^a-zA-Z0-9.]/g, '').slice(0, 10) || '.jpg';
     const storedPath = path.join(SCAN_UPLOADS_DIR, `${isRubric ? 'rubric' : 'paper'}-${chatId}-${crypto.randomUUID()}${safeExt}`);
 
-    await fs.writeFile(storedPath, qualityCheck.correctedBuffer || req.file.buffer);
+    await fs.writeFile(storedPath, data);
 
     if (isRubric) {
       await prisma.telegramSession.update({
@@ -215,10 +216,7 @@ router.post('/scan-upload/:sessionToken', upload.single('file'), async (req: Req
       logger.error('Post-scan-upload grading trigger failed.', { errorType: err instanceof Error ? err.name : 'Error' });
     });
 
-    // Single-use token cleanup
-    scanTokens.delete(req.params.sessionToken);
-
-    res.json({ success: true, message: 'File processed and staged successfully.' });
+    res.json({ success: true, staged: isRubric ? 'rubric' : 'paper' });
   } catch (err: any) {
     logger.error('Web scanner upload failed', err);
     res.status(500).json({ error: process.env.NODE_ENV === 'production' ? 'Scan upload failed. Please retry.' : err.message });
@@ -500,18 +498,7 @@ async function handleBotCommand(chatId: string, session: any, text: string) {
       }
 
       case '/scan': {
-        const sessionToken = crypto.randomUUID().slice(0, 12);
-        scanTokens.set(sessionToken, { chatId, expires: Date.now() + 30 * 60 * 1000 });
-
-        const baseUrl = process.env.APP_BASE_URL || 'https://www.bwenge.space';
-        const scanUrl = `${baseUrl}/scan.html?token=${sessionToken}`;
-        const lang = session.language;
-
-        const msg = lang === 'rw'
-          ? `📸 **Bwenge Mobile Web Scanner**\n\n🔗 **[Fungura Mobile Web Scanner](${scanUrl})**\n\nFotora amapaji y'ibizamini cyangwa rubric.`
-          : `📸 **Bwenge Mobile Web Scanner**\n\n🔗 **[Open Mobile Web Scanner](${scanUrl})**\n\nScan student answer sheets or marking rubrics directly from your phone camera.`;
-
-        await botService.sendMessage(chatId, msg);
+        await showScan(telegramApi(), chatId, session);
         break;
       }
 

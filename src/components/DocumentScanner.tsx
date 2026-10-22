@@ -138,6 +138,12 @@ interface DocumentScannerProps {
   labels?: LabelPresetKey | LabelSet;
   /** Shows the "Load sample paper" button. Sample pages can never be saved. Leave off in production. */
   allowSamples?: boolean;
+  /** AI reading/scoring on this page (needs a signed-in web session). Off in the Telegram scanner. */
+  aiTools?: boolean;
+  /** Label of the main save button. */
+  saveLabel?: string;
+  /** Shows "Export PDF" (a browser download). */
+  allowExport?: boolean;
 }
 
 export default function DocumentScanner({
@@ -148,6 +154,9 @@ export default function DocumentScanner({
   activeRubricText = '',
   labels: labelsProp = DEFAULT_LABEL_PRESET,
   allowSamples = false,
+  aiTools = true,
+  saveLabel = 'Save to workspace',
+  allowExport = true,
 }: DocumentScannerProps) {
   const L: LabelSet = typeof labelsProp === 'string' ? LABEL_PRESETS[labelsProp] : labelsProp;
   const defaultNamePattern = new RegExp(
@@ -912,7 +921,7 @@ export default function DocumentScanner({
             </div>
           )}
 
-          <section className="bsc-hub" aria-label="AI assistant">
+          {aiTools && <section className="bsc-hub" aria-label="AI assistant">
             <div className="bsc-hub-head"><span className="bsc-dot" /><span className="bsc-hub-title bsc-d">AI Scan Assistant</span></div>
             <p className="bsc-hub-sub" style={{ margin: 0 }}>Reads every page, suggests {L.score.toLowerCase()}s and flags what it is unsure about. You confirm before anything counts.</p>
             <label className="bsc-consent">
@@ -936,7 +945,7 @@ export default function DocumentScanner({
                 </div>
               </div>
             )}
-          </section>
+          </section>}
 
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <button className="bsc-btn bsc-sm" onClick={addCandidate}><Icon name="plus" size={16} /> Add {L.person.toLowerCase()}</button>
@@ -972,7 +981,7 @@ export default function DocumentScanner({
                   <button className="bsc-add" onClick={() => beginCapture(cand.id)}><Icon name="plus" size={20} />Add page</button>
                 </div>
 
-                {cand.pages.length > 0 && (
+                {aiTools && cand.pages.length > 0 && (
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     <button className="bsc-btn bsc-sm" disabled={aiBusy} onClick={() => void runOne(cand, 'ocr')}>{busyId === cand.id ? 'Working…' : 'Read'}</button>
                     <button className="bsc-btn bsc-sm" disabled={aiBusy} onClick={() => void runOne(cand, 'grade')}>{L.score}</button>
@@ -1017,8 +1026,8 @@ export default function DocumentScanner({
       </div>
 
       <footer className="bsc-bottom">
-        <button className="bsc-btn" disabled={totalPages === 0} onClick={exportPdf}>Export PDF</button>
-        <button className="bsc-btn bsc-pri" disabled={totalPages === 0} onClick={() => void saveToWorkspace()}>Save to workspace</button>
+        {allowExport && <button className="bsc-btn" disabled={totalPages === 0} onClick={exportPdf}>Export PDF</button>}
+        <button className="bsc-btn bsc-pri" disabled={totalPages === 0} onClick={() => void saveToWorkspace()}>{saveLabel}</button>
       </footer>
 
       {/* CAMERA: fills the whole device screen */}
@@ -1091,7 +1100,7 @@ export default function DocumentScanner({
                   ))}
                 </div>
                 <button className="bsc-btn" onClick={adjustCorners}>Adjust corners</button>
-                <button className="bsc-btn" disabled={aiBusy} onClick={() => void runPreviewCheck()}><Icon name="sparkle" size={16} /> AI read</button>
+                {aiTools && <button className="bsc-btn" disabled={aiBusy} onClick={() => void runPreviewCheck()}><Icon name="sparkle" size={16} /> AI read</button>}
                 <button className="bsc-btn bsc-pri" onClick={savePage} style={{ flex: '1 1 100%' }}>Save page</button>
               </>
             )}

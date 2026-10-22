@@ -17,7 +17,10 @@ POST /api/telegram/webhook  (server/routes/telegramBotRoutes.ts: secret check, 2
        └─ agentBridge.ts: exam chat → generalAssist (same as web) → live progress → answer → files
   telegram/api.ts     typed Bot API client (HTML, 429 retry_after, photo/document, callbacks)
   telegram/format.ts  Markdown → Telegram HTML (headings, lists, tables, code, links), safe splitting
-  telegram/ui.ts      design system: cards, keyboards, progress card, files list
+  telegram/ui.ts      design system: cards, keyboards, progress card, files list, scan card
+  telegram/banner.ts  branded welcome banner (vector icons, rendered to PNG once per language)
+  telegram/scanSession.ts  scanner sign-in: Mini App initData check and /scan link tokens
+scanner.html + src/scanner/  the web app's DocumentScanner as a Telegram Mini App (Send to Telegram)
   telegram/uiText.ts  every string in English, Kinyarwanda and French
 ```
 
@@ -27,9 +30,22 @@ POST /api/telegram/webhook  (server/routes/telegramBotRoutes.ts: secret check, 2
   - Telegram HTML is used throughout, so formatting never breaks.
   - Model answers are converted from Markdown.
   - Tables become aligned monospace blocks.
-- **Home (/start):** a greeting by name, a capability list, and a 3×2 grid of inline buttons:
-  - 📊 Charts & files, 📝 Mark exams, 📄 Transcribe, 🔎 Ask my library, 📁 My files, ⚙️ Settings.
-  - Buttons edit the same message, so menus never flood the chat. Every sub-screen has ‹ Back.
+- **Icons:** one emoji per feature, used the same way everywhere: 📊 charts & files · 📝 marking · 📷 scanner ·
+  📄 transcription · 🔎 library · 📁 my files · ⚙️ settings · ❓ help.
+- **Home (/start):** a branded banner image (logo, tagline and four feature tiles drawn as vector line icons), with
+  the greeting, capability list and a 4×2 grid of buttons as its caption:
+  - 📊 Charts & files, 📝 Mark exams, 📷 Scan papers, 📄 Transcribe, 🔎 Ask my library, 📁 My files, ⚙️ Settings, ❓ Help.
+  - The banner is uploaded once per language, then sent by its Telegram file_id.
+  - Buttons edit the same message (caption or text), so menus never flood the chat. Every sub-screen has ‹ Back.
+- **Scanner (📷, /scan, the "Scan" menu button):** the same document scanner as the web app (edge detection,
+  perspective correction, filters, several students), opened inside Telegram as a Mini App.
+  - "Send to Telegram" uploads one PDF per student. Each arrives in the chat with Summarise / Transcribe / Mark,
+    and the assistant reads the pages as images.
+  - Uploads are signed by Telegram (Mini App initData, checked with the bot token). In groups, where Mini App
+    buttons are not allowed, /scan gives a link with a token valid for 30 minutes.
+  - During /grade batch mode, scans are staged as papers or the marking scheme, as before.
+  - The old /scan.html page redirects to the new scanner.
+- **Bot profile:** description, short description and command menu are set in all three languages on start.
 - **One live progress message per request.**
   - It shows `⏳ Working on it`, then each tool step: "Creating chart: …" ⏳ → ✅ "Ready: … (XLSX, 7.4 KB)".
   - When the answer is ready, the progress message is edited into the answer, with 🔁 Regenerate · 📁 My files · 🏠 Menu.
@@ -70,7 +86,7 @@ POST /api/telegram/webhook  (server/routes/telegramBotRoutes.ts: secret check, 2
 | `TELEGRAM_BOT_SECRET_TOKEN` | Webhook secret, checked on every update (recommended). |
 | `TELEGRAM_BOT_USERNAME` | Fallback username for @mention detection in groups (normally read from `getMe`). |
 | `TELEGRAM_API_BASE` | Optional local Bot API server. |
-| `APP_BASE_URL` | Public URL; the webhook is `APP_BASE_URL/api/telegram/webhook`. |
+| `APP_BASE_URL` | Public URL; the webhook is `APP_BASE_URL/api/telegram/webhook` and the scanner `APP_BASE_URL/scanner.html`. Must be HTTPS for the Mini App scanner. |
 | `AI_AGENT_PROVIDER=anthropic`, `ANTHROPIC_API_KEY`, `CLAUDE_AGENT_MODEL` | Run tool turns (files, charts, statistics) on Claude, as in the web chat. |
 
 Deployment:
@@ -88,4 +104,7 @@ Deployment:
 - the chart + Excel acceptance request (live steps, formatted answer, PNG photo, real `.xlsx` with the values);
 - a CSV with quick actions, where the model reads the file;
 - My files, including refusing another user's file;
-- the error card, duplicate deliveries, and group etiquette.
+- the error card, duplicate deliveries, and group etiquette;
+- the banner home screen and caption edits;
+- the scanner: Mini App and group links, signed uploads (forged or stale initData refused), delivery as a PDF with
+  quick actions, and the pages reaching the model as images.

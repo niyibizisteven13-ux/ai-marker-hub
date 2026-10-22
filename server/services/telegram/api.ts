@@ -6,9 +6,9 @@ import logger from '../../utils/logger.js';
  * Without TELEGRAM_BOT_TOKEN it runs in mock mode: calls are logged and recorded, never sent.
  */
 
-export type InlineButton = { text: string; callback_data?: string; url?: string };
+export type InlineButton = { text: string; callback_data?: string; url?: string; web_app?: { url: string } };
 export type InlineKeyboard = { inline_keyboard: InlineButton[][] };
-export interface SentMessage { message_id: number; chat?: { id: number | string } }
+export interface SentMessage { message_id: number; chat?: { id: number | string }; photo?: Array<{ file_id: string }>; document?: { file_id: string } }
 
 export class TelegramApiError extends Error {
   constructor(public method: string, public status: number, public description: string) {
@@ -85,8 +85,16 @@ export class TelegramApi {
     return this.call('deleteMessage', { chat_id: chatId, message_id: messageId }).catch(() => undefined);
   }
 
-  sendPhoto(chatId: string, photo: { data: Buffer; name: string }, captionHtml: string, keyboard?: InlineKeyboard) {
-    return this.call<SentMessage>('sendPhoto', { chat_id: chatId, caption: captionHtml, parse_mode: 'HTML', reply_markup: keyboard }, { photo: { ...photo, mime: 'image/png' } });
+  /** `photo` is new bytes or the file_id of a photo already on Telegram's servers. */
+  sendPhoto(chatId: string, photo: { data: Buffer; name: string } | string, captionHtml: string, keyboard?: InlineKeyboard) {
+    const payload = { chat_id: chatId, caption: captionHtml, parse_mode: 'HTML', reply_markup: keyboard };
+    return typeof photo === 'string'
+      ? this.call<SentMessage>('sendPhoto', { ...payload, photo })
+      : this.call<SentMessage>('sendPhoto', payload, { photo: { ...photo, mime: 'image/png' } });
+  }
+
+  editCaption(chatId: string, messageId: number, html: string, keyboard?: InlineKeyboard) {
+    return this.call('editMessageCaption', { chat_id: chatId, message_id: messageId, caption: html, parse_mode: 'HTML', reply_markup: keyboard });
   }
 
   sendDocument(chatId: string, doc: { data: Buffer; name: string; mime?: string }, captionHtml: string, keyboard?: InlineKeyboard) {
@@ -99,6 +107,18 @@ export class TelegramApi {
 
   chatAction(chatId: string, action: 'typing' | 'upload_document' | 'upload_photo' = 'typing') {
     return this.call('sendChatAction', { chat_id: chatId, action }).catch(() => undefined);
+  }
+
+  /** The button beside the message field; a web_app button opens the Mini App (the scanner). */
+  setMenuButton(button: { type: 'web_app'; text: string; web_app: { url: string } } | { type: 'commands' }) {
+    return this.call('setChatMenuButton', { menu_button: button });
+  }
+
+  /** Profile texts: "What can this bot do?" (description) and the short about line. */
+  async setProfile(description: string, shortDescription: string, languageCode?: string) {
+    const lc = languageCode ? { language_code: languageCode } : {};
+    await this.call('setMyDescription', { description, ...lc });
+    await this.call('setMyShortDescription', { short_description: shortDescription, ...lc });
   }
 
   setCommands(commands: Array<{ command: string; description: string }>, languageCode?: string) {

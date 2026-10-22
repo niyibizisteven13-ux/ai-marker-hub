@@ -217,8 +217,10 @@ setInterval(() => {
 
 // ── Security headers (replaces the 'helmet' npm package) ─────────────────
 // Sets the same headers helmet would set, with no external dependency.
-app.use((_req: express.Request, res: express.Response, next: express.NextFunction) => {
-  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+  // The scanner runs as a Telegram Mini App, which Telegram Web shows in an iframe.
+  if (req.path === '/scanner.html') res.setHeader('Content-Security-Policy', "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org");
+  else res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-XSS-Protection', '0'); // Modern browsers ignore this; CSP is the real defence
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
