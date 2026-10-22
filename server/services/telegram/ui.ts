@@ -1,11 +1,13 @@
 import { copy } from './uiText.js';
 import { esc } from './format.js';
-import type { InlineKeyboard } from './api.js';
+import type { InlineButton, InlineKeyboard } from './api.js';
 
 /**
  * Bwenge's Telegram design system: card layouts (icon + bold title, short body, muted footer), inline
  * keyboards that navigate in place, and the live progress card. Callback data stays under Telegram's
  * 64-byte limit: m:<menu>, f:<artifactId> (send file), fp:<page>, l:<lang>, a:<action>.
+ * Icon system (one emoji per feature, used the same way in the banner, menus, cards and buttons):
+ * 📊 charts & files · 📝 marking · 📷 scanner · 📄 transcription · 🔎 library · 📁 my files · ⚙️ settings · ❓ help.
  */
 
 export type Lang = 'en' | 'rw' | 'fr';
@@ -21,15 +23,29 @@ export function homeCard(lang: Lang, name?: string | null) {
   return card('👋', name ? t.helloName(name) : t.hello, `${t.intro}\n\n<b>${t.whatICanDo}</b>\n${t.capabilities.map((c) => `${c[0]} ${c[1]}`).join('\n')}`, t.homeFooter);
 }
 
-export function homeKeyboard(lang: Lang): InlineKeyboard {
+/** `miniAppUrl` (private chats over HTTPS) makes the scan button open the scanner directly inside Telegram. */
+export function homeKeyboard(lang: Lang, miniAppUrl?: string): InlineKeyboard {
   const b = copy(lang).buttons;
+  const scan: InlineButton = miniAppUrl ? { text: b.scan, web_app: { url: miniAppUrl } } : { text: b.scan, callback_data: 'm:scan' };
   return {
     inline_keyboard: [
       [{ text: b.create, callback_data: 'm:create' }, { text: b.mark, callback_data: 'm:mark' }],
-      [{ text: b.transcribe, callback_data: 'm:transcribe' }, { text: b.library, callback_data: 'm:library' }],
-      [{ text: b.files, callback_data: 'fp:0' }, { text: b.settings, callback_data: 'm:settings' }],
+      [scan, { text: b.transcribe, callback_data: 'm:transcribe' }],
+      [{ text: b.library, callback_data: 'm:library' }, { text: b.files, callback_data: 'fp:0' }],
+      [{ text: b.settings, callback_data: 'm:settings' }, { text: b.help, callback_data: 'm:help' }],
     ],
   };
+}
+
+export function scanCard(lang: Lang, viaLink: boolean) {
+  const s = copy(lang).scan;
+  return card('📷', s.title, `${s.body}\n\n${s.steps.map((step, i) => `<b>${i + 1}.</b> ${step}`).join('\n')}`, viaLink ? `${s.footer} ${s.groupHint}` : s.footer);
+}
+
+/** Opens the scanner as a Mini App when possible, otherwise as a signed link. */
+export function scanKeyboard(lang: Lang, url: string, miniApp: boolean): InlineKeyboard {
+  const open: InlineButton = miniApp ? { text: copy(lang).scan.open, web_app: { url } } : { text: copy(lang).scan.open, url };
+  return backKeyboard(lang, [[open]]);
 }
 
 export const backKeyboard = (lang: Lang, extra: InlineKeyboard['inline_keyboard'] = []): InlineKeyboard =>

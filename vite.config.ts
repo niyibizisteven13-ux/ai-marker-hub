@@ -11,6 +11,12 @@ export default defineConfig(() => {
         '@': path.resolve(__dirname, '.'),
       },
     },
+    build: {
+      rollupOptions: {
+        // scanner.html: the document scanner opened from the Telegram bot (Mini App).
+        input: { main: path.resolve(__dirname, 'index.html'), scanner: path.resolve(__dirname, 'scanner.html') },
+      },
+    },
     server: {
       host: '0.0.0.0',
       port: 3000,
