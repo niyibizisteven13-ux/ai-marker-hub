@@ -89,6 +89,8 @@ const fileStoreSecret = getFileUrlSecret();
 export const fileStore = new FileStore({
   dir: process.env.FILE_STORE_DIR ?? './data/generated',
   secret: fileStoreSecret,
+  // Default 25 MB; raise it for large examination packages (all marked papers in one ZIP).
+  maxFileBytes: Number(process.env.FILE_STORE_MAX_BYTES) > 0 ? Number(process.env.FILE_STORE_MAX_BYTES) : undefined,
 });
 
 export const fileJobQueue = new FileJobQueue({

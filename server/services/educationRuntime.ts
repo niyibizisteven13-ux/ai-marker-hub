@@ -6,11 +6,14 @@ import { OwnedRecordStore } from './storage/ownedRecordStore.js';
 import { createDocumentService, type DocumentRecord } from './documents/service.js';
 import { tesseractOcr } from './documents/ocr.js';
 import { createTelegramTranscriber, type TelegramTransport } from './documents/telegramTranscribe.js';
+import { createExamService } from './exams/service.js';
+import { createExamChat, type ExamChatContext } from './exams/chat.js';
+import type { ExamRecord } from './exams/types.js';
 import logger from '../utils/logger.js';
 
 /** Wires the statistics/report and assessment services to the shared file store, job queue and agent model. */
 
-const forbiddenStrings = [process.cwd(), path.resolve(process.env.FILE_STORE_DIR ?? './data/generated'), path.resolve(process.env.JOBS_DIR ?? './data/jobs'), path.resolve(process.env.DOCUMENTS_DIR ?? './data/documents')];
+const forbiddenStrings = [process.cwd(), path.resolve(process.env.FILE_STORE_DIR ?? './data/generated'), path.resolve(process.env.JOBS_DIR ?? './data/jobs'), path.resolve(process.env.DOCUMENTS_DIR ?? './data/documents'), path.resolve(process.env.EXAMS_DIR ?? './data/exams')];
 
 export const analyticsService = createAnalyticsService({
   fileStore, queue: fileJobQueue, forbiddenStrings,
@@ -55,6 +58,33 @@ export const documentService = createDocumentService({
   maxPages: Number(process.env.DOC_MAX_PAGES) > 0 ? Number(process.env.DOC_MAX_PAGES) : 20,
 });
 
+const EXAM_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+export const examStore = new OwnedRecordStore<ExamRecord>(process.env.EXAMS_DIR ?? './data/exams', EXAM_RETENTION_MS);
+export const examChatContexts = new OwnedRecordStore<ExamChatContext>(path.join(process.env.EXAMS_DIR ?? './data/exams', 'chat'), EXAM_RETENTION_MS);
+const num = (v: string | undefined, d: number) => (Number(v) > 0 ? Number(v) : d);
+
+export const examService = createExamService({
+  fileStore, queue: fileJobQueue, store: examStore, documents: documentService, forbiddenStrings,
+  agent: () => {
+    const a = agentTarget();
+    return { adapter: a.adapter, model: a.model, fallbackModel: a.fallbackModel };
+  },
+  visionAvailable: () => visionTarget() !== null,
+  maxPages: num(process.env.DOC_MAX_PAGES, 20),
+  maxCandidates: num(process.env.EXAM_MAX_CANDIDATES, 100),
+  candidateConcurrency: num(process.env.EXAM_CANDIDATE_CONCURRENCY, 2),
+  segmentBudgetMs: num(process.env.EXAM_SEGMENT_BUDGET_MS, 8 * 60 * 1000),
+});
+
+export const examChat = createExamChat({
+  service: examService, fileStore, queue: fileJobQueue, contexts: examChatContexts,
+  agent: () => {
+    const a = agentTarget();
+    return { adapter: a.adapter, model: a.model, fallbackModel: a.fallbackModel };
+  },
+  waitMs: num(process.env.EXAM_CHAT_WAIT_MS, 45_000),
+});
+
 let started = false;
 
 /** Recovers persisted jobs and schedules cleanup of expired jobs, files and assessments. */
@@ -64,8 +94,8 @@ export async function startEducationRuntime(): Promise<void> {
   await fileJobQueue.init();
   const sweep = async () => {
     try {
-      const [jobs, files, assessments, documents] = await Promise.all([fileJobQueue.purgeExpired(), fileStore.purgeExpired(), assessmentStore.purgeExpired(), documentStore.purgeExpired()]);
-      if (jobs.length || files || assessments || documents) logger.info('[cleanup] expired items removed', { jobs: jobs.length, files, assessments, documents });
+      const [jobs, files, assessments, documents, exams, examContexts] = await Promise.all([fileJobQueue.purgeExpired(), fileStore.purgeExpired(), assessmentStore.purgeExpired(), documentStore.purgeExpired(), examStore.purgeExpired(), examChatContexts.purgeExpired()]);
+      if (jobs.length || files || assessments || documents || exams || examContexts) logger.info('[cleanup] expired items removed', { jobs: jobs.length, files, assessments, documents, exams, examContexts });
     } catch (err) {
       logger.warn('[cleanup] sweep failed', { errorType: (err as Error)?.name });
     }
