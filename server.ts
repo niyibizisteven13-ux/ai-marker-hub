@@ -935,7 +935,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
   }
 
   let serverAttachmentText = '';
-  let serverVisualFiles: { type: 'image' | 'document'; base64: string; mediaType: string }[] = [];
+  let serverVisualFiles: { type: 'image' | 'document'; base64: string; mediaType: string; name?: string }[] = [];
   const allowedAttachmentExtensions = new Set([
     '.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx', '.csv', '.txt', '.md', '.rtf', '.json',
     '.js', '.jsx', '.ts', '.tsx', '.py', '.java', '.cpp', '.c', '.h', '.html', '.css', '.xml', '.yaml', '.yml', '.sql',
@@ -984,6 +984,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
         type: resolvedType.startsWith('image/') ? 'image' : 'document',
         base64: attachment.base64,
         mediaType: resolvedType,
+        name: attachment.name, // the model and its tools see "Mugenzi.pdf", not "upload-1.pdf"
       });
     }
     try {
@@ -1023,7 +1024,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
   if (Array.isArray(finalAttachmentIds) && finalAttachmentIds.length > 0) {
     const files = await prisma.fileRecord.findMany({
       where: { id: { in: finalAttachmentIds }, userId },
-      select: { extractedText: true, path: true, url: true, mimeType: true },
+      select: { extractedText: true, path: true, url: true, mimeType: true, name: true },
     });
 
     serverAttachmentText = files.map((f) => f.extractedText).filter(Boolean).join('\n\n');
@@ -1052,6 +1053,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
           type: isImage ? 'image' : 'document',
           base64: buffer.toString('base64'),
           mediaType: file.mimeType,
+          name: file.name,
         });
       } catch (err) {
         logger.error('Failed to read an uploaded file for AI vision.', { errorType: err instanceof Error ? err.name : 'Error' });
@@ -1161,6 +1163,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
   if (useToolAgent({
     intent, service, isSmallTalk, requestedProvider: cleanProvider, hasClaudeKey: hasClaude, aiProvider: process.env.AI_PROVIDER,
     agentAvailable: agentTarget().provider === 'anthropic' || Boolean(process.env.GONKA_API_KEY), plan: turnPlan,
+    hasVisualFiles: serverVisualFiles.length > 0 || Boolean(req.file && /^image\/|application\/pdf/.test(req.file.mimetype)),
   })) {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -1177,7 +1180,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
     req.on('close', () => clearInterval(keepAlive));
 
     try {
-      let files: { type: 'image' | 'document'; base64: string; mediaType: string }[] = [...serverVisualFiles];
+      let files: { type: 'image' | 'document'; base64: string; mediaType: string; name?: string }[] = [...serverVisualFiles];
       let augmentedQuery = query || '';
 
       if (req.file) {

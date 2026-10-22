@@ -370,3 +370,10 @@ button.bw-line:hover { color: #f5f5f4; }
 @media (prefers-reduced-motion: reduce) {
   [class*="animate-[slideIn"], [class*="animate-[bw-rise"] { animation: none !important; }
 }
+
+/* Sidebar chat history: thin scrollbar that only shows on hover. */
+.sidebar-scroll { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+.sidebar-scroll:hover { scrollbar-color: rgba(255, 255, 255, 0.14) transparent; }
+.sidebar-scroll::-webkit-scrollbar { width: 6px; }
+.sidebar-scroll::-webkit-scrollbar-thumb { background: transparent; border-radius: 3px; }
+.sidebar-scroll:hover::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); }

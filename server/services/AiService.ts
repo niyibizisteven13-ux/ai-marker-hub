@@ -215,6 +215,8 @@ export const bwengeAgent = createAiAgent({
   maxTokens: 8192,
   promptVersion: 'bwenge-general-v1',
   traceHashSecret: process.env.TRACE_HASH_SECRET || fileStoreSecret,
+  // Scanned PDFs on turns whose model cannot see images (Tesseract, loaded only when needed).
+  ocr: async (png) => (await import('./documents/ocr.js')).tesseractOcr(png),
   writeTrace: async (trace) => {
     if (process.env.NODE_ENV === 'test') return;
     await prisma.aiTrace.create({
@@ -795,9 +797,12 @@ export class AiService {
       ? planOutput({ message: userText, attachments: (options.files ?? []).map((f) => ({ name: '', mime: f.mediaType })), hasDataset: (options.files ?? []).some((f) => /csv|spreadsheet|excel|json/i.test(f.mediaType)) || /\.(csv|xlsx|xls|tsv)\b/i.test(userText) })
       : null;
     const toolTurn = !!plan && (plan.artifact || plan.needsComputation);
-    // Tool turns run on the agent model (Claude when AI_AGENT_PROVIDER=anthropic); everyday chat stays on Gonka.
+    // Photos and PDFs need a model that can see them (handwriting, scans, diagrams).
+    const visualUpload = (options.files ?? []).some((f) => f.type === 'image' || /^image\/|application\/pdf/.test(f.mediaType));
+    // Tool and vision turns run on the agent model (Claude when AI_AGENT_PROVIDER=anthropic); everyday chat stays on Gonka.
     const agent = agentTarget();
-    const runModel = toolTurn && agent.provider === 'anthropic' ? agent.model : undefined;
+    const runModel = (toolTurn || visualUpload) && agent.provider === 'anthropic' ? agent.model : undefined;
+    const vision = Boolean(runModel) || process.env.DOC_VISION_GONKA === 'true';
 
     if (!runModel && !useGonka && !process.env.GONKA_API_KEY) {
       if (!allowFallback) {
@@ -856,6 +861,7 @@ export class AiService {
       uploads: correction ? [] : uploads,
       onEvent: options.onEvent,
       signal: options.signal,
+      vision,
       ...(runModel ? { model: runModel } : {}),
     });
     // A requested file only counts when a tool created it; otherwise one corrective turn, then an honest note.
