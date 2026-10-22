@@ -295,9 +295,11 @@ export default function App() {
     window.addEventListener('open-signup-modal', handleOpenSignup);
     window.addEventListener('open-login-modal', handleOpenLogin);
     window.addEventListener('popstate', handlePopState);
+    // Upgrade buttons open the plans page directly (Free / GO / PRO / Institution with RWF prices).
     (window as any).openUpgradeModal = (jobId?: string, service?: string) => {
       setUpgradeContext({ jobId, service });
-      setUpgradeModalOpen(true);
+      window.history.pushState({}, '', '/upgrade');
+      setUpgradePageOpen(true);
     };
     return () => {
       window.removeEventListener('open-upgrade-modal', handleOpenUpgrade as EventListener);
@@ -1059,6 +1061,7 @@ export default function App() {
         ...(toolSteps.length ? { steps: toolSteps.map((step) => (step.status === 'running' ? { ...step, status: 'done' as const } : step)), startedAt, endedAt: Date.now() } : {}),
       }];
       setMessages(finalMessages);
+      window.dispatchEvent(new Event('bwenge:usage')); // credits shown in the sidebar
 
       if (temporaryChatMode) return;
       const sessionsToSave = [...chatSessions];
@@ -1419,6 +1422,7 @@ export default function App() {
     } catch (error) {
       showAiStatus('warning', error instanceof Error ? error.message : 'Payment succeeded, but account details could not be refreshed.');
     }
+    window.dispatchEvent(new Event('bwenge:usage'));
     closeUpgradePage();
   };
 

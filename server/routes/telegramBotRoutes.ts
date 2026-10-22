@@ -19,6 +19,7 @@ import path from 'path';
 import { getTelegramTranscriber } from '../services/educationRuntime.js';
 import { deliverScan, handleUpdate as handleTelegramUpdate, showScan, type LegacyHooks } from '../services/telegram/router.js';
 import { telegramApi } from '../services/telegram/api.js';
+import { mergePlaceholderAccount } from '../services/billing/accounts.js';
 import { resolveScanToken, verifyInitData } from '../services/telegram/scanSession.js';
 import { runAssistantTurn } from '../services/telegram/agentBridge.js';
 
@@ -378,8 +379,10 @@ const legacyHooks: LegacyHooks = {
       await botService.sendMessage(chatId, 'This Telegram chat is already linked to another Bwenge account. Disconnect it there before linking a different account.');
       return true;
     }
+    // One account: usage, GO credits, memories, payments and files from the Telegram-only account move over.
+    if (session.userId && isUnclaimedTelegramAccount) await mergePlaceholderAccount(session.userId, linkedUserId);
     await prisma.telegramSession.update({ where: { chatId }, data: { userId: linkedUserId } });
-    await botService.sendMessage(chatId, '✅ Telegram is now securely linked to your Bwenge account. Your files and plan are available here. Send /start for the menu.');
+    await botService.sendMessage(chatId, '✅ Telegram is now securely linked to your Bwenge account. Your plan, credits, memory and files are the same here and on the web. Send /start for the menu.');
     return true;
   },
 

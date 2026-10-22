@@ -20,6 +20,7 @@ import {
 import { NavigationTab, User, ChatSession } from '../types';
 import logoUrl from '../assets/bwenge-logo.svg';
 import { tokens } from '../utils/designTokens';
+import PlanStatus, { useBillingMe } from './PlanStatus';
 
 interface LeftSidebarProps {
   activeTab: NavigationTab;
@@ -145,7 +146,11 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   const rowBase = `group/row relative flex items-center gap-3 rounded-lg text-[15px] lg:text-[13.5px] transition-colors duration-150 ${FOCUS_RING}`;
   const rowSize = c ? 'h-10 w-full px-3 lg:w-10 lg:justify-center lg:px-0' : 'h-10 w-full px-3 lg:h-9';
   const label = c ? 'truncate lg:hidden' : 'truncate';
-  const plan = user?.subscription?.planType ? PLAN_BADGE[user.subscription.planType] : undefined;
+  const billing = useBillingMe(Boolean(user));
+  // The badge follows the server's view of the plan (subscription, GO credits), falling back to the user record.
+  const plan = billing
+    ? billing.plan === 'PRO' ? PLAN_BADGE.PRO : billing.plan === 'INSTITUTION' ? PLAN_BADGE.ORGANIZATION : billing.plan === 'GO' ? { label: 'GO', className: 'border-sky-400/25 bg-sky-400/10 text-sky-300' } : undefined
+    : user?.subscription?.planType ? PLAN_BADGE[user.subscription.planType] : undefined;
 
   return (
     <aside
@@ -329,6 +334,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
 
         {/* Footer: settings, admin, account */}
         <div className={`shrink-0 space-y-0.5 border-t px-3 pb-3 pt-2 ${c ? 'lg:flex lg:flex-col lg:items-center' : ''}`} style={{ borderColor: tokens.border }}>
+          {user && <PlanStatus me={billing} collapsed={c} />}
           <div className="group relative w-full lg:w-auto">
             <button
               type="button"

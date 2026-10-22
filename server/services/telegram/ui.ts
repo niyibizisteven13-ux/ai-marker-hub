@@ -57,14 +57,20 @@ export function guideCard(lang: Lang, topic: 'create' | 'mark' | 'transcribe' | 
   return card(g.icon, g.title, `${g.body}\n\n<b>${copy(lang).tryAsking}</b>\n${g.examples.map((e) => `› <code>${esc(e)}</code>`).join('\n')}`);
 }
 
-export function settingsCard(lang: Lang, account: { linked: boolean; email?: string | null }) {
+/** Plan state shown in Settings: the same account, plan and credits as on the website. */
+export interface PlanView { plan: string; creditsLeft: number; dailyLimit: number; wallet: number; renewsOn?: string | null; upgradeUrl?: string | null; upgradePrice?: string | null }
+
+export function settingsCard(lang: Lang, account: { linked: boolean; email?: string | null; plan?: PlanView }) {
   const t = copy(lang);
-  return card('⚙️', t.settings, `<b>${t.language}</b>: ${t.langName}\n<b>${t.account}</b>: ${account.linked && account.email ? esc(account.email) : t.notLinked}`, account.linked ? undefined : t.linkHint);
+  const p = account.plan;
+  const planLines = p ? `\n\n<b>${lang === 'rw' ? 'Ifatabuguzi' : lang === 'fr' ? 'Offre' : 'Plan'}</b>: ${esc(p.plan)}${p.renewsOn ? ` · ${lang === 'fr' ? 'jusqu’au' : lang === 'rw' ? 'kugeza' : 'until'} ${esc(p.renewsOn)}` : ''}\n<b>${lang === 'rw' ? 'Credits z’uyu munsi' : lang === 'fr' ? 'Crédits du jour' : 'Credits today'}</b>: ${p.creditsLeft} / ${p.dailyLimit}${p.wallet ? `\n<b>GO</b>: ${p.wallet.toLocaleString('en-US')} credits` : ''}` : '';
+  return card('⚙️', t.settings, `<b>${t.language}</b>: ${t.langName}\n<b>${t.account}</b>: ${account.linked && account.email ? esc(account.email) : t.notLinked}${planLines}`, account.linked ? undefined : t.linkHint);
 }
 
-export function settingsKeyboard(lang: Lang): InlineKeyboard {
+export function settingsKeyboard(lang: Lang, plan?: PlanView): InlineKeyboard {
   const mark = (l: Lang, label: string) => ({ text: `${l === lang ? '✓ ' : ''}${label}`, callback_data: `l:${l}` });
-  return backKeyboard(lang, [[mark('en', 'English'), mark('rw', 'Kinyarwanda'), mark('fr', 'Français')]]);
+  const upgrade: InlineButton[][] = plan?.upgradeUrl ? [[{ text: `⭐ ${lang === 'rw' ? 'Zamura' : lang === 'fr' ? 'Passer à PRO' : 'Upgrade to PRO'}${plan.upgradePrice ? ` · ${plan.upgradePrice}` : ''}`, url: plan.upgradeUrl }]] : [];
+  return backKeyboard(lang, [[mark('en', 'English'), mark('rw', 'Kinyarwanda'), mark('fr', 'Français')], ...upgrade]);
 }
 
 /** The single live message shown while the AI works; edited in place, then replaced by the answer. */

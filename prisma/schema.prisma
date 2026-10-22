@@ -974,3 +974,62 @@ model UsageRecord {
 
   @@index([userId, createdAt])
 }
+
+/// A Mobile Money payment for a plan or a GO credit pack. `id` is also the MTN MoMo X-Reference-Id.
+model BillingPayment {
+  id                     String    @id
+  userId                 String
+  purpose                String // PRO | INSTITUTION | GO_PACK
+  packId                 String?
+  months                 Int       @default(0)
+  credits                Int       @default(0)
+  amountRwf              Int
+  amountUsd              Float
+  currency               String    @default("RWF")
+  provider               String    @default("MTN_MOMO")
+  phoneMasked            String
+  status                 String    @default("PENDING") // PENDING | SUCCESSFUL | FAILED | EXPIRED
+  providerStatus         String?
+  providerReason         String?
+  financialTransactionId String?
+  receiptNumber          String?   @unique
+  fulfilledAt            DateTime?
+  emailedAt              DateTime?
+  checks                 Int       @default(0)
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+}
+
+/// GO credits: purchases (+), usage beyond the plan allowance (-), refunds and admin adjustments. Balance = sum.
+model CreditLedger {
+  id        String   @id
+  userId    String
+  delta     Int
+  reason    String // purchase | usage | refund | adjustment | bonus
+  paymentId String?
+  note      String?
+  createdBy String?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+/// Admin-editable settings (for example billing prices, exchange rate, plan limits).
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedBy String?
+  updatedAt DateTime @updatedAt
+}
+
+/// One row per notification sent, so receipts and reminders go out exactly once.
+model NotificationLog {
+  id        String   @id
+  key       String   @unique
+  userId    String
+  channel   String // email | telegram
+  createdAt DateTime @default(now())
+}
