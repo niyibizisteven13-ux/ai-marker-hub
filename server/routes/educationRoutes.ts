@@ -8,7 +8,7 @@ import { AnalysisError, analysisRequestSchema } from '../services/analytics/anal
 import { DatasetError } from '../services/analytics/dataset.js';
 import { reportRequestSchema } from '../services/analytics/service.js';
 import { AssessmentInputError, assessmentRequestSchema, resolveRubric } from '../services/assessment/service.js';
-import { analyticsService, assessmentService } from '../services/educationRuntime.js';
+import { analyticsService, assessmentService, documentService } from '../services/educationRuntime.js';
 import { upload } from '../middleware/upload.js';
 import logger from '../utils/logger.js';
 
@@ -32,7 +32,8 @@ function fail(req: Request, res: Response, err: unknown) {
     return res.status(404).json({ code: 'NOT_FOUND', error: 'Not found or expired.', requestId });
   }
   if (err instanceof JobError) {
-    const status = err.code === 'TOO_MANY_JOBS' ? 429 : err.code === 'USE_REPORT_JOB' ? 413 : 400;
+    const status = ({ TOO_MANY_JOBS: 429, USE_REPORT_JOB: 413, TOO_MANY_PAGES: 413, VISION_MODEL_UNAVAILABLE: 503, UNKNOWN_ELEMENT: 404 } as Record<string, number>)[err.code]
+      ?? (err.code.startsWith('AI_') ? 502 : err.code === 'CONTENT_REFUSED' ? 422 : 400);
     return res.status(status).json({ code: err.code, error: err.message, requestId });
   }
   logger.error('[education] request failed', { requestId, path: req.path, errorType: (err as Error)?.name });
@@ -165,4 +166,66 @@ jobsRouter.delete('/:id', async (req, res) => {
   const job = await fileJobQueue.cancel(req.params.id, userIdOf(req));
   if (!job) return res.status(404).json({ code: 'NOT_FOUND', error: 'Not found or expired.', requestId: rid(req) });
   res.json({ job: FileJobQueue.publicView(job), requestId: rid(req) });
+});
+
+// ── Scanned / handwritten documents ───────────────────────────────────────
+export const documentsRouter = Router();
+
+async function signed(fileId: string | undefined, userId: string) {
+  if (!fileId) return null;
+  const ref = await fileStore.refresh({ id: fileId }, userId);
+  return ref ? { url: ref.url, expiresAt: ref.expiresAt } : null;
+}
+
+documentsRouter.post('/', uploadOne('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ code: 'INVALID_REQUEST', error: 'Upload a PDF or image in the "file" field.', requestId: rid(req) });
+    const opts = z.object({
+      languageHint: z.string().trim().max(80).optional(),
+      forceRecognition: z.enum(['true', 'false']).optional(),
+      crossCheck: z.enum(['true', 'false']).optional(),
+    }).strict().parse(req.body ?? {});
+    const { job, duplicate } = await documentService.submit(userIdOf(req), req.file, {
+      languageHint: opts.languageHint, forceRecognition: opts.forceRecognition === 'true', crossCheck: opts.crossCheck !== 'false',
+    });
+    res.status(duplicate ? 200 : 202).json({ job: FileJobQueue.publicView(job), duplicate, links: { status: `/api/jobs/${job.id}`, result: `/api/jobs/${job.id}/result` }, requestId: rid(req) });
+  } catch (err) { fail(req, res, err); }
+});
+
+documentsRouter.get('/:id', async (req, res) => {
+  try {
+    const userId = userIdOf(req);
+    const rec = await documentService.get(userId, req.params.id);
+    if (!rec) return res.status(404).json({ code: 'NOT_FOUND', error: 'Not found or expired.', requestId: rid(req) });
+    const pages = await Promise.all(rec.result.pages.map(async (p) => ({
+      ...p,
+      elements: await Promise.all(p.elements.map(async (e) => ({ ...e, crop: await signed(e.cropFileId, userId) }))),
+    })));
+    const { ownerId: _o, ...rest } = rec;
+    res.json({ ...rest, result: { ...rec.result, pages }, original: await signed(rec.sourceFileId, userId), report: await signed(rec.reportFileId, userId), requestId: rid(req) });
+  } catch (err) { fail(req, res, err); }
+});
+
+documentsRouter.get('/:id/text', async (req, res) => {
+  const text = await documentService.text(userIdOf(req), req.params.id);
+  if (text === null) return res.status(404).json({ code: 'NOT_FOUND', error: 'Not found or expired.', requestId: rid(req) });
+  res.json({ text, requestId: rid(req) });
+});
+
+documentsRouter.post('/:id/corrections', async (req, res) => {
+  try {
+    const body = z.object({ elementId: z.string().min(1).max(60), text: z.string().max(5000) }).strict().parse(req.body ?? {});
+    const rec = await documentService.correct(userIdOf(req), req.params.id, body as { elementId: string; text: string });
+    if (!rec) return res.status(404).json({ code: 'NOT_FOUND', error: 'Not found or expired.', requestId: rid(req) });
+    res.json({ corrections: rec.corrections, report: await signed(rec.reportFileId, userIdOf(req)), requestId: rid(req) });
+  } catch (err) { fail(req, res, err); }
+});
+
+documentsRouter.post('/:id/ask', async (req, res) => {
+  try {
+    const body = z.object({ question: z.string().trim().min(1).max(2000), language: z.enum(['English', 'Kinyarwanda', 'French']).optional() }).strict().parse(req.body ?? {});
+    const answer = await documentService.ask(userIdOf(req), req.params.id, body.question as string, body.language);
+    if (!answer) return res.status(404).json({ code: 'NOT_FOUND', error: 'Not found or expired.', requestId: rid(req) });
+    res.json({ ...answer, requestId: rid(req) });
+  } catch (err) { fail(req, res, err); }
 });

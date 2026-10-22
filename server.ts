@@ -31,8 +31,9 @@ import { generalTools } from './server/services/generalTools.js';
 import { FileStore, createFileRouter } from './server/services/ai/index.js';
 import { describeChatFailure } from './server/services/ai/chatFailure.js';
 import datasetRoutes from './server/routes/datasetRoutes.js';
-import { analyticsRouter, assessmentRouter, jobsRouter } from './server/routes/educationRoutes.js';
+import { analyticsRouter, assessmentRouter, documentsRouter, jobsRouter } from './server/routes/educationRoutes.js';
 import { startEducationRuntime } from './server/services/educationRuntime.js';
+import { shutdownOcr } from './server/services/documents/ocr.js';
 import { fileJobQueue } from './server/services/AiService.js';
 import { emptyModelOutputError, nonEmptyModelText } from './server/services/ai/modelOutput.js';
 import { validateScanGradeOutput } from './server/services/ai/scanOutput.js';
@@ -345,6 +346,7 @@ app.use('/api/datasets', requireAuth, datasetRoutes);
 app.use('/api/analytics', requireAuth, analyticsRouter);
 app.use('/api/assessment', requireAuth, assessmentRouter);
 app.use('/api/jobs', requireAuth, jobsRouter);
+app.use('/api/documents', requireAuth, documentsRouter);
 app.use('/api', settingsBillingRoutes);
 // /exports serves generated Excel reports — gate it so only the owning
 // authenticated user (or admin) can download them. Anonymous access would
@@ -2581,6 +2583,7 @@ async function startServer() {
     server.close(async () => {
       try {
         await fileJobQueue.stop();
+        await shutdownOcr();
         await queueService.close();
         await prisma.$disconnect();
       } catch (err) {

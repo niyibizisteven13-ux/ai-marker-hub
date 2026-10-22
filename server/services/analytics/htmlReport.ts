@@ -13,7 +13,11 @@ export type ContentKind = 'source' | 'calculated' | 'interpretation';
 
 export interface ReportTable { caption: string; columns: string[]; rows: Array<Array<string | number | null>>; note?: string }
 export interface ReportParagraph { text: string; kind?: ContentKind }
-export interface ReportSection { heading: string; paragraphs?: ReportParagraph[]; bullets?: ReportParagraph[]; tables?: ReportTable[]; charts?: ChartSpec[] }
+/** An inline image (e.g. a scan crop). Only base64 PNG/JPEG data URLs are accepted. */
+export interface ReportImage { dataUrl: string; alt: string; caption?: string }
+export interface ReportSection { heading: string; paragraphs?: ReportParagraph[]; bullets?: ReportParagraph[]; tables?: ReportTable[]; charts?: ChartSpec[]; images?: ReportImage[] }
+
+const SAFE_IMAGE = /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/]+={0,2}$/;
 export interface ReportCitation { title: string; publisher?: string; year?: string | number; url?: string; locator?: string; accessed?: string }
 
 export interface ReportInput {
@@ -88,6 +92,7 @@ th,td{border-bottom:1px solid var(--line);padding:6px 10px;text-align:left;verti
 .na{color:#9aa3b2}.note,.prov{color:var(--muted);font-size:13px}figure{margin:24px 0;padding:16px;border:1px solid var(--line);border-radius:10px}
 .chart{overflow-x:auto}.chart svg{max-width:100%;height:auto}figcaption{font-size:14px;margin-top:8px}details{margin-top:8px}summary{cursor:pointer;color:var(--accent);font-size:14px}
 ol.refs li{margin-bottom:6px}code{background:var(--soft);padding:1px 4px;border-radius:4px;font-size:13px}footer{margin-top:48px;color:var(--muted);font-size:13px;border-top:1px solid var(--line);padding-top:12px}
+figure.crop{padding:8px}figure.crop img{max-width:100%;height:auto;border:1px solid var(--line);background:#fff}
 @media print{figure{break-inside:avoid}details{display:block}}`;
 
 function safeUrl(u?: string): string | null {
@@ -113,6 +118,10 @@ export async function renderReportHtml(r: ReportInput): Promise<RenderedReport> 
     const body: string[] = [`<h2>${escapeHtml(s.heading)}</h2>`];
     for (const p of s.paragraphs ?? []) body.push(para(p));
     if (s.bullets?.length) body.push(`<ul>${s.bullets.map((b) => para(b, 'li')).join('')}</ul>`);
+    for (const img of s.images ?? []) {
+      if (!SAFE_IMAGE.test(img.dataUrl)) continue;
+      body.push(`<figure class="crop"><img src="${img.dataUrl}" alt="${escapeHtml(img.alt)}">${img.caption ? `<figcaption>${escapeHtml(img.caption)}</figcaption>` : ''}</figure>`);
+    }
     for (const t of s.tables ?? []) body.push(table(t));
     for (const c of s.charts ?? []) {
       const f = await figure(c);
@@ -156,7 +165,8 @@ function scanTags(html: string): string[] {
       const name = m[1].toLowerCase();
       const value = decodeAttr((m[2] ?? '').replace(/^["']|["']$/g, '')).toLowerCase();
       if (/^on/.test(name)) out.add('contains an inline event handler');
-      if ((name === 'href' || name === 'src' || name === 'xlink:href' || name === 'action') && /^(javascript|vbscript|data):/.test(value)) out.add('contains a script URL');
+      const inlineImage = name === 'src' && /^<img\s/i.test(tag) && SAFE_IMAGE.test((m[2] ?? '').replace(/^["']|["']$/g, ''));
+      if ((name === 'href' || name === 'src' || name === 'xlink:href' || name === 'action') && /^(javascript|vbscript|data):/.test(value) && !inlineImage) out.add('contains a script URL');
       if ((name === 'src' || name === 'xlink:href' || name === 'srcset' || name === 'poster') && /^(https?:)?\/\//.test(value)) out.add('loads an external resource');
     }
   }

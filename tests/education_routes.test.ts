@@ -12,7 +12,7 @@ process.env.JOBS_DIR = path.join(root, 'jobs');
 process.env.ASSESSMENTS_DIR = path.join(root, 'assessments');
 process.env.FILE_URL_SECRET ??= 'test-file-url-secret-0123456789abcdef';
 
-const { analyticsRouter, assessmentRouter, jobsRouter } = await import('../server/routes/educationRoutes.js');
+const { analyticsRouter, assessmentRouter, documentsRouter, jobsRouter } = await import('../server/routes/educationRoutes.js');
 const { fileStore, fileJobQueue } = await import('../server/services/AiService.js');
 const { createFileRouter } = await import('../server/services/ai/files/FileStore.js').then(async () => import('../server/services/ai/fileRouter.js'));
 const { startEducationRuntime } = await import('../server/services/educationRuntime.js');
@@ -36,6 +36,7 @@ app.use((req, res, next) => {
 app.use('/api/analytics', analyticsRouter);
 app.use('/api/assessment', assessmentRouter);
 app.use('/api/jobs', jobsRouter);
+app.use('/api/documents', documentsRouter);
 const files = express();
 files.use('/api/files', createFileRouter(fileStore));
 const server = app.listen(0);
@@ -186,4 +187,19 @@ test('assessment service end-to-end with a scripted model: job, record, review, 
   assert.equal(validateHtmlArtifact(html).valid, true);
   await assert.rejects(fileStore.read(confirmed!.reportFileId!, 'student'));
   await queue.stop();
+});
+
+test('documents API: input validation, 503 without a vision model, 404 for unknown/other users', async () => {
+  assert.equal((await fetch(`${base}/api/documents`, as('alice', { method: 'POST' }))).status, 400);
+  const fd = new FormData();
+  fd.append('file', new Blob([Buffer.from('%PDF-1.4 x')], { type: 'application/pdf' }), 'scan.pdf');
+  const res = await fetch(`${base}/api/documents`, as('alice', { method: 'POST', body: fd }));
+  assert.equal(res.status, 503, 'no vision model configured in this test environment');
+  assert.equal((await res.json()).code, 'VISION_MODEL_UNAVAILABLE');
+  const bad = new FormData();
+  bad.append('file', new Blob(['x']), 'a.png');
+  bad.append('surprise', 'field');
+  assert.equal((await fetch(`${base}/api/documents`, as('alice', { method: 'POST', body: bad }))).status, 400, 'unknown fields rejected');
+  for (const p of ['', '/text']) assert.equal((await fetch(`${base}/api/documents/00000000-0000-4000-8000-000000000000${p}`, as('alice'))).status, 404);
+  assert.equal((await fetch(`${base}/api/documents/00000000-0000-4000-8000-000000000000/ask`, json('alice', { question: 'x' }))).status, 404);
 });
