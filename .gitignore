@@ -3,6 +3,8 @@ build/
 dist/
 coverage/
 .DS_Store
+.artifacts/
+.idea/
 
 # Logs
 *.log

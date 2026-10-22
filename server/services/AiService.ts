@@ -5,7 +5,7 @@ import { BWENGE_CHAT_RESPONSE_RULES, BWENGE_GENERAL_SYSTEM_PROMPT } from './prom
 import { MemoryService } from './MemoryService.js';
 import { retrieveKnowledgeChunks } from './KnowledgeRetrievalService.js';
 import { ExecutionSandbox } from './ExecutionSandbox.js';
-import { createAiAgent, FileStore } from './ai/index.js';
+import { createAiAgent, FileStore, ReliableGonkaAdapter, TaskRouter, FileJobQueue, NisrIngestionPipeline, TaskClassifier, ModelPolicyManager, BudgetManager, DocumentPipeline, DeterministicTools } from './ai/index.js';
 import { prisma } from '../db.js';
 import { getFileUrlSecret } from '../auth/secrets.js';
 import { extractJsonFragment, stripThinkingTags } from '../utils/textSanitizers.js';
@@ -91,16 +91,34 @@ export const fileStore = new FileStore({
   secret: fileStoreSecret,
 });
 
+export const fileJobQueue = new FileJobQueue();
+export const nisrPipeline = new NisrIngestionPipeline();
+export const taskClassifier = new TaskClassifier();
+export const modelPolicyManager = new ModelPolicyManager();
+export const budgetManager = new BudgetManager();
+export const documentPipeline = new DocumentPipeline();
+export const deterministicTools = new DeterministicTools();
+
+export const taskRouter = new TaskRouter({
+  economicalModel: process.env.GONKA_ECONOMICAL_MODEL ?? 'zai-org/GLM-5.3-Flash-Lite',
+  defaultModel: process.env.GONKA_MODEL ?? GONKA_MODELS.DEFAULT,
+  premiumModel: process.env.GONKA_PREMIUM_MODEL ?? 'zai-org/GLM-4.6-Reasoning',
+});
+
+const reliableAdapter = new ReliableGonkaAdapter({
+  name: 'GonkaRouter',
+  baseUrl: process.env.GONKA_BASE_URL ?? 'https://api.gonkarouter.io/v1',
+  apiKey: process.env.GONKA_API_KEY ?? '',
+  connectTimeoutMs: 15_000,
+  idleTimeoutMs: 30_000,
+  maxRetries: 3,
+  initialBackoffMs: 1000,
+  maxBackoffMs: 30000,
+});
+
 export const bwengeAgent = createAiAgent({
-  provider: {
-    name: 'GonkaRouter',
-    baseUrl: process.env.GONKA_BASE_URL ?? 'https://api.gonkarouter.io/v1',
-    apiKey: process.env.GONKA_API_KEY ?? '',
-    connectTimeoutMs: 15_000,
-    idleTimeoutMs: 30_000,
-    requestTimeoutMs: 60_000,
-  },
-  runtime: { maxRetries: 1, retryDelayMs: 500 },
+  provider: reliableAdapter,
+  runtime: { maxRetries: 3, retryDelayMs: 1000 },
   model: process.env.GONKA_MODEL ?? GONKA_MODELS.DEFAULT,
   files: fileStore,
   temperature: 0.3,
@@ -120,14 +138,35 @@ export const bwengeAgent = createAiAgent({
   services: {
     knowledge: {
       async search(query, { topK, userId }) {
-        const hits = await retrieveKnowledgeChunks(query, { limit: topK, userId });
-        return hits.map((h: any) => ({
-          text: h.chunk.text || h.text || '',
-          title: h.chunk.title || h.title,
-          publisher: h.chunk.publisher || h.publisher,
-          year: h.chunk.year || h.year,
-          page: h.chunk.page || h.page,
-          table: h.chunk.table || h.table,
+        // Integrate NISR pipeline alongside knowledge retrieval
+        const nisrHits = await nisrPipeline.searchDatasets(query, topK ?? 3);
+        const knowledgeHits = await retrieveKnowledgeChunks(query, { limit: topK, userId });
+        const combined = [
+          ...nisrHits.map(n => ({ text: n.text, title: n.title, publisher: 'NISR Rwanda', year: n.period, page: 1, table: '', url: n.sourceUrl, score: n.score })),
+          ...knowledgeHits.map((h: any) => ({
+            text: h.chunk.text || h.text || '',
+            title: h.chunk.title || h.title,
+            publisher: h.chunk.publisher || h.publisher,
+            year: h.chunk.year || h.year,
+            page: h.chunk.page || h.page,
+            table: h.chunk.table || h.table,
+            url: h.chunk.url || h.url,
+            score: h.score,
+          }))
+        ];
+        return combined;
+      },
+    },
+    python: {
+      async execute(code) {
+        const r = await ExecutionSandbox.getInstance().callMcpTool('python/execute', { code });
+        if (r.error) throw new Error(r.error.message);
+        const out = r.result.output;
+        return { stdout: typeof out === 'string' ? out : JSON.stringify(out) };
+      },
+    },
+  },
+});
           url: h.chunk.url || h.url,
           score: h.score,
         }));
