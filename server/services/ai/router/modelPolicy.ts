@@ -1,69 +1,64 @@
-import { TaskClass } from './taskClassifier.js';
+import { TASK_CLASSES, type TaskClass } from './taskClassifier.js';
 
 export interface ModelPolicyConfig {
   model: string;
-  maxInputTokens: number;
   maxOutputTokens: number;
-  timeoutMs: number;
-  retryBudget: number;
+  /** Fallback used only for transient provider failures; undefined means no fallback. */
   fallbackModel?: string;
 }
 
-export const DEFAULT_MODEL_POLICIES: Record<TaskClass, ModelPolicyConfig> = {
-  SIMPLE: {
-    model: process.env.GONKA_ECONOMICAL_MODEL || 'zai-org/GLM-5.3-Flash-Lite',
-    maxInputTokens: 4096,
-    maxOutputTokens: 1024,
-    timeoutMs: 15_000,
-    retryBudget: 1,
-  },
-  STANDARD: {
-    model: process.env.GONKA_MODEL || 'zai-org/GLM-5.3-Flash',
-    maxInputTokens: 16384,
-    maxOutputTokens: 4096,
-    timeoutMs: 30_000,
-    retryBudget: 3,
-    fallbackModel: process.env.GONKA_ECONOMICAL_MODEL,
-  },
-  COMPLEX: {
-    model: process.env.GONKA_PREMIUM_MODEL || 'zai-org/GLM-4.6-Reasoning',
-    maxInputTokens: 65536,
-    maxOutputTokens: 8192,
-    timeoutMs: 60_000,
-    retryBudget: 3,
-  },
-  DETERMINISTIC: {
-    model: process.env.GONKA_MODEL || 'zai-org/GLM-5.3-Flash',
-    maxInputTokens: 8192,
-    maxOutputTokens: 2048,
-    timeoutMs: 20_000,
-    retryBudget: 2,
-  },
-  ARTIFACT_SPEC: {
-    model: process.env.GONKA_PREMIUM_MODEL || 'zai-org/GLM-4.6-Reasoning',
-    maxInputTokens: 32768,
-    maxOutputTokens: 8192,
-    timeoutMs: 60_000,
-    retryBudget: 3,
-  },
-};
+type Env = Record<string, string | undefined>;
+
+const MODEL_ID = /^[\w.\-/:@]{1,128}$/;
+
+function cleanModel(value: string | undefined): string | undefined {
+  const v = value?.trim();
+  return v && MODEL_ID.test(v) ? v : undefined;
+}
+
+function intEnv(value: string | undefined, fallback: number): number {
+  const n = Number(value);
+  return Number.isInteger(n) && n > 0 ? n : fallback;
+}
 
 /**
- * Validates and enforces model policies, fallback rules, and data-policy checks.
+ * Builds routing policies from environment variables.
+ * Every class uses GONKA_MODEL unless a class-specific model is explicitly configured, so routing
+ * never sends traffic to a model nobody has verified exists on the gateway.
+ *
+ *   GONKA_MODEL                default/standard model (required for Gonka)
+ *   GONKA_ECONOMICAL_MODEL     optional: simple chat (greetings, short Q&A)
+ *   GONKA_PREMIUM_MODEL        optional: complex reasoning and artifact specifications
+ *   GONKA_FALLBACK_MODEL       optional: fallback for SIMPLE/STANDARD/DETERMINISTIC on transient failures
+ *   AI_MAX_OUTPUT_TOKENS_{SIMPLE,STANDARD,COMPLEX}   optional output caps
  */
+export function loadModelPolicies(env: Env = process.env, defaultModel = 'zai-org/GLM-5.3-Flash'): Record<TaskClass, ModelPolicyConfig> {
+  const standard = cleanModel(env.GONKA_MODEL) ?? defaultModel;
+  const economical = cleanModel(env.GONKA_ECONOMICAL_MODEL) ?? standard;
+  const premium = cleanModel(env.GONKA_PREMIUM_MODEL) ?? standard;
+  const fallback = cleanModel(env.GONKA_FALLBACK_MODEL);
+  const simpleTokens = intEnv(env.AI_MAX_OUTPUT_TOKENS_SIMPLE, 1024);
+  const standardTokens = intEnv(env.AI_MAX_OUTPUT_TOKENS_STANDARD, 4096);
+  const complexTokens = intEnv(env.AI_MAX_OUTPUT_TOKENS_COMPLEX, 8192);
+
+  return {
+    // Falling back from the economical model to the standard one is an upgrade, so it is the default.
+    SIMPLE: { model: economical, maxOutputTokens: simpleTokens, fallbackModel: fallback ?? (economical !== standard ? standard : undefined) },
+    STANDARD: { model: standard, maxOutputTokens: standardTokens, fallbackModel: fallback },
+    DETERMINISTIC: { model: standard, maxOutputTokens: standardTokens, fallbackModel: fallback },
+    // Quality-sensitive work is never silently downgraded to a weaker model.
+    COMPLEX: { model: premium, maxOutputTokens: complexTokens },
+    ARTIFACT_SPEC: { model: premium, maxOutputTokens: complexTokens },
+  };
+}
+
 export class ModelPolicyManager {
   private policies: Record<TaskClass, ModelPolicyConfig>;
 
-  constructor(customPolicies?: Partial<Record<TaskClass, ModelPolicyConfig>>) {
-    this.policies = { ...DEFAULT_MODEL_POLICIES, ...(customPolicies ?? {}) };
-    this.validatePolicies();
-  }
-
-  private validatePolicies() {
-    for (const [taskClass, policy] of Object.entries(this.policies)) {
-      if (!policy.model) {
-        console.warn(`[ModelPolicy] Warning: Model for task class ${taskClass} is unconfigured.`);
-      }
+  constructor(customPolicies?: Partial<Record<TaskClass, ModelPolicyConfig>>, env: Env = process.env) {
+    this.policies = { ...loadModelPolicies(env), ...(customPolicies ?? {}) };
+    for (const c of TASK_CLASSES) {
+      if (!cleanModel(this.policies[c]?.model)) throw new Error(`Model policy for ${c} has no valid model id.`);
     }
   }
 
@@ -72,10 +67,8 @@ export class ModelPolicyManager {
   }
 
   getFallbackModel(taskClass: TaskClass): string | undefined {
-    // Never allow silent or automatic downgrade for COMPLEX or ARTIFACT_SPEC
-    if (taskClass === 'COMPLEX' || taskClass === 'ARTIFACT_SPEC') {
-      return undefined;
-    }
-    return this.policies[taskClass]?.fallbackModel;
+    if (taskClass === 'COMPLEX' || taskClass === 'ARTIFACT_SPEC') return undefined;
+    const p = this.getPolicy(taskClass);
+    return p.fallbackModel && p.fallbackModel !== p.model ? p.fallbackModel : undefined;
   }
 }

@@ -1,86 +1,46 @@
-export type TaskClass = 'simple' | 'standard' | 'complex' | 'tool' | 'artifact';
+import { ModelPolicyManager } from './modelPolicy.js';
+import { TaskClassifier, type ClassificationContext, type RoutingReasonCode, type TaskClass } from './taskClassifier.js';
 
-export interface ModelRoutingConfig {
-  economicalModel: string;
-  defaultModel: string;
-  premiumModel: string;
-  maxTokensSimple?: number;
-  maxTokensStandard?: number;
-  maxTokensComplex?: number;
+export type { TaskClass } from './taskClassifier.js';
+
+export interface RoutingDecision {
+  taskClass: TaskClass;
+  reasonCode: RoutingReasonCode;
+  model: string;
+  /** null = fallback disabled for this request. */
+  fallbackModel: string | null;
+  maxOutputTokens: number;
 }
 
-export interface ClassificationResult {
-  taskClass: TaskClass;
-  model: string;
-  maxTokens: number;
-  temperature: number;
+export interface RouteContext extends ClassificationContext {
+  /** Requests with images may only fall back to a model known to accept images. */
+  hasImages?: boolean;
 }
 
 /**
- * Task-based Model Router for selecting cost-effective models based on prompt complexity,
- * length, tool requirements, and expected output types.
+ * Chooses a model per request from the task class. Disabled with AI_MODEL_ROUTING=off,
+ * in which case every request uses the STANDARD policy (the pre-routing behaviour).
  */
 export class TaskRouter {
-  constructor(private config: ModelRoutingConfig) {}
+  constructor(
+    private policies = new ModelPolicyManager(),
+    private classifier = new TaskClassifier(),
+    private enabled = (process.env.AI_MODEL_ROUTING ?? 'on').toLowerCase() !== 'off',
+    private fallbackSupportsVision = process.env.GONKA_FALLBACK_SUPPORTS_VISION === 'true',
+  ) {}
 
-  classify(prompt: string, options?: { hasFiles?: boolean; hasTools?: boolean; forceClass?: TaskClass }): ClassificationResult {
-    if (options?.forceClass) {
-      return this.getResultForClass(options.forceClass);
-    }
-
-    const len = prompt.length;
-    const lower = prompt.toLowerCase();
-
-    if (lower.includes('calculate') || lower.includes('statistics') || lower.includes('sum') || lower.includes('average') || options?.hasTools) {
-      return this.getResultForClass('tool');
-    }
-
-    if (lower.includes('chart') || lower.includes('diagram') || lower.includes('create document') || lower.includes('spreadsheet')) {
-      return this.getResultForClass('artifact');
-    }
-
-    if (len > 1500 || options?.hasFiles || lower.includes('synthesize') || lower.includes('compare') || lower.includes('analyze report')) {
-      return this.getResultForClass('complex');
-    }
-
-    if (len < 100 && (lower.startsWith('hi') || lower.startsWith('hello') || lower.includes('what is'))) {
-      return this.getResultForClass('simple');
-    }
-
-    return this.getResultForClass('standard');
-  }
-
-  private getResultForClass(taskClass: TaskClass): ClassificationResult {
-    switch (taskClass) {
-      case 'simple':
-        return {
-          taskClass,
-          model: this.config.economicalModel,
-          maxTokens: this.config.maxTokensSimple ?? 1024,
-          temperature: 0.2,
-        };
-      case 'standard':
-        return {
-          taskClass,
-          model: this.config.defaultModel,
-          maxTokens: this.config.maxTokensStandard ?? 4096,
-          temperature: 0.3,
-        };
-      case 'complex':
-      case 'artifact':
-        return {
-          taskClass,
-          model: this.config.premiumModel,
-          maxTokens: this.config.maxTokensComplex ?? 8192,
-          temperature: 0.3,
-        };
-      case 'tool':
-        return {
-          taskClass,
-          model: this.config.defaultModel,
-          maxTokens: this.config.maxTokensStandard ?? 4096,
-          temperature: 0.1,
-        };
-    }
+  route(ctx: RouteContext): RoutingDecision {
+    const { taskClass, reasonCode } = this.enabled
+      ? this.classifier.classifyWithReason(ctx)
+      : { taskClass: 'STANDARD' as const, reasonCode: 'DEFAULT' as const };
+    const policy = this.policies.getPolicy(taskClass);
+    const fallback = this.policies.getFallbackModel(taskClass);
+    return {
+      taskClass,
+      reasonCode,
+      model: policy.model,
+      fallbackModel: fallback && (!ctx.hasImages || this.fallbackSupportsVision) ? fallback : null,
+      maxOutputTokens: policy.maxOutputTokens,
+    };
   }
 }

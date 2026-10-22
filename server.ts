@@ -30,6 +30,7 @@ import { classifyIntent, isSmallTalkMessage } from './server/services/intentRout
 import { generalTools } from './server/services/generalTools.js';
 import { FileStore, createFileRouter } from './server/services/ai/index.js';
 import { describeChatFailure } from './server/services/ai/chatFailure.js';
+import datasetRoutes from './server/routes/datasetRoutes.js';
 import { emptyModelOutputError, nonEmptyModelText } from './server/services/ai/modelOutput.js';
 import { validateScanGradeOutput } from './server/services/ai/scanOutput.js';
 import logger from './server/utils/logger.js';
@@ -248,6 +249,15 @@ app.use((req: express.Request, res: express.Response, next: express.NextFunction
 });
 // ──────────────────────────────────────────────────────────────────────────
 
+// Correlation id for every request: echoed in X-Request-Id, attached to AI logs and error payloads.
+app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const incoming = req.headers['x-request-id'];
+  const requestId = typeof incoming === 'string' && /^[\w-]{8,64}$/.test(incoming) ? incoming : crypto.randomUUID();
+  (req as any).requestId = requestId;
+  res.setHeader('X-Request-Id', requestId);
+  next();
+});
+
 // Normalize trailing slashes for API requests to prevent 404s
 app.use((req: express.Request, _res: express.Response, next: express.NextFunction) => {
   if (req.url.startsWith('/api/') && req.url.length > 5 && req.url.endsWith('/')) {
@@ -328,6 +338,7 @@ app.use('/api/feedback', feedbackRoutes);
 app.use('/api/ollama', requireAuth, ollamaRoutes);
 app.use('/api/telegram', telegramBotRoutes);
 app.use('/api/chat', chatSseRoutes);
+app.use('/api/datasets', requireAuth, datasetRoutes);
 app.use('/api', settingsBillingRoutes);
 // /exports serves generated Excel reports — gate it so only the owning
 // authenticated user (or admin) can download them. Anonymous access would
@@ -1362,6 +1373,8 @@ ${augmentedQuery}`;
       const failure = describeChatFailure(err);
       logger.error('General assist request failed', {
         code: failure.code,
+        category: failure.category,
+        requestId: (req as any).requestId,
         status: failure.status,
         timeout: failure.timeout,
         timeoutKind: failure.timeoutKind,
@@ -1372,6 +1385,9 @@ ${augmentedQuery}`;
       emitter.send('error', {
         code: failure.code,
         message: failure.message,
+        category: failure.category,
+        retryable: failure.retryable,
+        requestId: (req as any).requestId,
       });
       emitter.done();
     }
@@ -1523,6 +1539,8 @@ ${augmentedQuery}`;
           history: parsedHistory,
           images: serverVisualFiles.length > 0 ? serverVisualFiles.map(f => ({ base64: f.base64, mediaType: f.mediaType })) : undefined,
           max_tokens: isSmallTalk ? 256 : 2048,
+          userId,
+          requestId: (req as any).requestId,
           onReset: () => {
             gonkaRawText = '';
             gonkaVisibleText = '';
@@ -1635,6 +1653,8 @@ ${augmentedQuery}`;
     const failure = describeChatFailure(err);
     logger.error('Chat upstream request failed', {
       code: failure.code,
+        category: failure.category,
+        requestId: (req as any).requestId,
       status: failure.status,
       timeout: failure.timeout,
       timeoutKind: failure.timeoutKind,
@@ -1645,6 +1665,9 @@ ${augmentedQuery}`;
     emitter.send('error', {
       code: failure.code,
       message: failure.message,
+      category: failure.category,
+      retryable: failure.retryable,
+      requestId: (req as any).requestId,
     });
     res.end();
   }

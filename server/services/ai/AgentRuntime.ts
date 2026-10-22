@@ -17,6 +17,10 @@ export interface RunOptions {
   /** Restrict which tools the model may use in this run. */
   toolNames?: string[];
   onRetry?: () => void;
+  /** Correlation id passed to the provider layer for logs/metrics. */
+  requestId?: string;
+  /** Per-run fallback model from the routing policy; null disables fallback. */
+  fallbackModel?: string | null;
 }
 
 export interface RuntimeConfig {
@@ -107,6 +111,8 @@ export class AgentRuntime {
           temperature: opts.temperature,
           maxTokens: opts.maxTokens,
           signal: opts.ctx.signal,
+          requestId: opts.requestId,
+          fallbackModel: opts.fallbackModel,
         });
         for await (const c of stream) {
           if (c.type === 'text') {

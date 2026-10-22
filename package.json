@@ -14,6 +14,8 @@
     "test": "npm run security:check && node --test --import tsx tests/*.test.ts",
     "eval": "tsx evals/runner.ts",
     "eval:ci": "tsx evals/runner.ts --split dev --all --no-report",
+    "nisr:index": "tsx scripts/nisr-index.ts",
+    "nisr:validate": "tsx scripts/nisr-index.ts --validate",
     "verify": "npm run lint && npm run test && npm run build",
     "prisma": "prisma",
     "db:migrate": "prisma migrate dev --name init"

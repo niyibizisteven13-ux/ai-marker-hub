@@ -42,3 +42,6 @@ uploads/
 
 # Exports at runtime
 exports/audit.log.jsonl
+
+# Generated NISR index (rebuild with: npm run nisr:index)
+data/nisr/index/

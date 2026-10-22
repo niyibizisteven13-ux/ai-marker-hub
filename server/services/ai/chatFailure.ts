@@ -1,3 +1,5 @@
+import { normalizeError, type ErrorCategory } from './providers/types.js';
+
 interface ChatFailureDetails {
   code: string;
   message: string;
@@ -6,6 +8,10 @@ interface ChatFailureDetails {
   timeoutKind?: string;
   errorType: string;
   networkCode?: string;
+  /** Provider-neutral failure category (additive field; `code` keeps its existing values). */
+  category: ErrorCategory | 'CONTEXT_RETRIEVAL_FAILED' | 'AI_UNAVAILABLE';
+  /** Whether trying again later may succeed. */
+  retryable: boolean;
 }
 
 export function describeChatFailure(error: unknown): ChatFailureDetails {
@@ -35,11 +41,19 @@ export function describeChatFailure(error: unknown): ChatFailureDetails {
     ? rawNetworkCode
     : undefined;
 
+  const normalized = normalizeError(error);
+  const category = contextFailure ? 'CONTEXT_RETRIEVAL_FAILED' : unavailable ? 'AI_UNAVAILABLE' : normalized.category;
+  const transient = ['PROVIDER_BUSY', 'RATE_LIMITED', 'PROVIDER_TIMEOUT', 'NETWORK_ERROR', 'CONTEXT_RETRIEVAL_FAILED'].includes(category);
+
   return {
     code,
+    category,
+    retryable: transient,
     message: contextFailure
       ? 'Knowledge context could not be loaded. Please retry your request.'
-      : 'Bwenge could not complete your request. Please try again.',
+      : category === 'PROVIDER_BUSY' || category === 'RATE_LIMITED'
+        ? 'Bwenge is handling a lot of requests right now. Please try again in a moment.'
+        : 'Bwenge could not complete your request. Please try again.',
     status,
     timeout,
     timeoutKind: typeof err?.timeoutKind === 'string' ? err.timeoutKind : undefined,

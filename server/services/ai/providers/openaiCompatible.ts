@@ -1,4 +1,14 @@
-import { ProviderAdapter, ProviderChunk, ProviderError, ProviderRequest } from './types.js';
+import { parseRetryAfter, ProviderAdapter, ProviderChunk, ProviderError, ProviderRequest, redactUpstreamText } from './types.js';
+
+/** Builds a ProviderError from an upstream `error` object found in a 200 response body or SSE frame. */
+function upstreamError(name: string, error: any): ProviderError {
+  const status = Number(error?.status ?? error?.code) || undefined;
+  const err = new ProviderError(`${name} returned an upstream error`, status);
+  const detail = typeof error === 'string' ? error : [error?.message, error?.type, typeof error?.code === 'string' ? error.code : ''].filter(Boolean).join(' ');
+  if (detail) err.upstreamMessage = redactUpstreamText(detail);
+  return err;
+}
+
 
 export interface OpenAICompatibleOptions {
   /** Display name for logs/events, e.g. "GonkaRouter". */
@@ -83,7 +93,20 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
       }
 
       if (!res.ok) {
-        throw new ProviderError(`${this.name} request failed with HTTP ${res.status}`, res.status);
+        const err = new ProviderError(`${this.name} request failed with HTTP ${res.status}`, res.status);
+        err.retryAfterMs = parseRetryAfter(res.headers.get('retry-after'));
+        // Keep a short, redacted copy of the upstream reason so failures can be classified and logged.
+        const body = await res.text().catch(() => '');
+        if (body) {
+          let detail = body;
+          try {
+            const parsed = JSON.parse(body);
+            const e = parsed?.error ?? parsed;
+            detail = typeof e === 'string' ? e : [e?.message, e?.type, typeof e?.code === 'string' ? e.code : ''].filter(Boolean).join(' ') || body;
+          } catch { /* not JSON */ }
+          err.upstreamMessage = redactUpstreamText(detail);
+        }
+        throw err;
       }
 
       const type = (res.headers.get('content-type') ?? '').toLowerCase();
@@ -94,7 +117,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
           return null;
         });
         if (!data) throw new ProviderError(`${this.name}: response was not valid JSON`);
-        if (data.error) throw new ProviderError(`${this.name} returned an upstream error`, Number(data.error.status ?? data.error.code) || undefined);
+        if (data.error) throw upstreamError(this.name, data.error);
         const msg = data.choices?.[0]?.message ?? {};
         const content = typeof msg.content === 'string' ? msg.content : data.message?.content ?? data.response;
         if (content) yield { type: 'text', text: String(content) };
@@ -124,7 +147,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
             if (payload === '[DONE]') return;
             let data: any;
             try { data = JSON.parse(payload); } catch { continue; }
-            if (data.error) throw new ProviderError(`${this.name} returned an upstream error`, Number(data.error.status ?? data.error.code) || undefined);
+            if (data.error) throw upstreamError(this.name, data.error);
             const choice = data.choices?.[0];
             const delta = choice?.delta ?? {};
             const text = typeof delta.content === 'string' ? delta.content : Array.isArray(delta.content) ? delta.content.map((p: any) => p?.text ?? '').join('') : '';
