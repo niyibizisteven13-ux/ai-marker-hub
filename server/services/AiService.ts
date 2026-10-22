@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { evaluateStudentSubmission as deepseekEvaluate } from '../../src/services/deepseekMarker.js';
 import { BWENGE_CHAT_RESPONSE_RULES, BWENGE_GENERAL_SYSTEM_PROMPT } from './prompts/bwengeGeneralPrompt.js';
 import { MemoryService } from './MemoryService.js';
+import { toKnowledgePassage } from './knowledge/citations.js';
 import { retrieveKnowledgeChunks } from './KnowledgeRetrievalService.js';
 import { ExecutionSandbox } from './ExecutionSandbox.js';
 import { createAiAgent, FileStore, OpenAICompatibleAdapter, AnthropicAdapter, loadClaudeAgentConfig, ReliableProviderAdapter, ModelDispatchAdapter, ModelPolicyManager, TaskClassifier, loadComplexProvider, loadModelPolicies, TaskRouter, FileJobQueue, NisrIngestionPipeline, isStatisticsQuery, BudgetManager, DocumentPipeline, DeterministicTools } from './ai/index.js';
@@ -243,16 +244,7 @@ export const bwengeAgent = createAiAgent({
             url: n.citation.sourceUrl,
             score: n.score,
           })),
-          ...knowledgeHits.map((h: any) => ({
-            text: h.chunk.text || h.text || '',
-            title: h.chunk.title || h.title,
-            publisher: h.chunk.publisher || h.publisher,
-            year: h.chunk.year || h.year,
-            page: h.chunk.page || h.page,
-            table: h.chunk.table || h.table,
-            url: h.chunk.url || h.url,
-            score: h.score,
-          }))
+          ...knowledgeHits.map((h: any) => toKnowledgePassage(h))
         ];
         return combined;
       },

@@ -451,6 +451,7 @@ model KnowledgeBase {
   updatedAt      DateTime        @updatedAt
   documents      Document[]
   chunks         DocumentChunk[]
+  repositories   KnowledgeRepository[]
 
   @@index([userId])
   @@index([organizationId])
@@ -479,6 +480,7 @@ model Document {
   chunks          DocumentChunk[]
   jobs            ProcessingJob[]
   sheets          SpreadsheetSheet[]
+  repositoryFiles RepositoryFile[]
 
   @@index([knowledgeBaseId])
   @@index([userId])
@@ -831,4 +833,87 @@ model AuthEvent {
 
   @@index([userId])
   @@index([createdAt])
+}
+// ── Knowledge repositories (file explorer over the knowledge base) ─────────
+// Folders and files are persisted with parent links and full relative paths. File bytes live in the
+// file store under opaque ids (storageKey); indexed content lives in Document/DocumentChunk of the
+// linked knowledge base, so the existing retrieval, access rules and citations apply.
+
+model KnowledgeRepository {
+  id              String                @id @default(uuid())
+  name            String
+  description     String?
+  userId          String // owner (admin who created it)
+  organizationId  String? // shared with members of this organization
+  knowledgeBaseId String?
+  knowledgeBase   KnowledgeBase?        @relation(fields: [knowledgeBaseId], references: [id], onDelete: SetNull)
+  settings        Json                  @default("{}")
+  quotaBytes      Int?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  directories     RepositoryDirectory[]
+  files           RepositoryFile[]
+
+  @@index([userId])
+  @@index([organizationId])
+}
+
+model RepositoryDirectory {
+  id              String                @id @default(uuid())
+  repositoryId    String
+  repository      KnowledgeRepository   @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  parentId        String?
+  parent          RepositoryDirectory?  @relation("DirectoryTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children        RepositoryDirectory[] @relation("DirectoryTree")
+  name            String
+  path            String // normalised relative path, e.g. "Rwanda Education/Mathematics"
+  knowledgeBaseId String? // optional override for files below this folder
+  aiEnabled       Boolean               @default(true)
+  createdById     String?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  files           RepositoryFile[]
+
+  @@unique([repositoryId, path])
+  @@index([repositoryId, parentId])
+}
+
+model RepositoryFile {
+  id               String               @id @default(uuid())
+  repositoryId     String
+  repository       KnowledgeRepository  @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  directoryId      String?
+  directory        RepositoryDirectory? @relation(fields: [directoryId], references: [id], onDelete: Cascade)
+  name             String
+  path             String // normalised relative path including the file name
+  extension        String
+  mimeType         String
+  sizeBytes        Int
+  contentHash      String // sha256 of the bytes
+  storageKey       String // opaque file-store id, never a user-supplied path
+  storageOwnerId   String
+  version          Int                  @default(1)
+  uploadedById     String?
+  knowledgeBaseId  String? // optional override
+  aiEnabled        Boolean              @default(true)
+  extractionStatus String               @default("pending") // pending | extracted | unsupported | failed
+  extractionMethod String? // text | pdf_text | ocr | docx | spreadsheet | slides | html | archive
+  indexStatus      String               @default("uploaded") // uploaded | queued | extracting | chunking | embedding | indexing | indexed | pending_embeddings | partial_failure | failed | unsupported | excluded | duplicate
+  indexError       String?
+  indexedAt        DateTime?
+  indexedHash      String?
+  indexedVersion   Int?
+  chunkCount       Int                  @default(0)
+  duplicateOfId    String?
+  documentId       String?
+  document         Document?            @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  indexJobId       String?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  @@unique([repositoryId, path])
+  @@index([repositoryId, directoryId])
+  @@index([contentHash])
+  @@index([indexStatus])
+  @@index([storageKey])
 }

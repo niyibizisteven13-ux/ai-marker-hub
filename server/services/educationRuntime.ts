@@ -9,6 +9,8 @@ import { createTelegramTranscriber, type TelegramTransport } from './documents/t
 import { createExamService } from './exams/service.js';
 import { createExamChat, type ExamChatContext } from './exams/chat.js';
 import type { ExamRecord } from './exams/types.js';
+import { createKnowledgeService } from './knowledge/service.js';
+import { EmbeddingService } from './EmbeddingService.js';
 import logger from '../utils/logger.js';
 
 /** Wires the statistics/report and assessment services to the shared file store, job queue and agent model. */
@@ -85,6 +87,13 @@ export const examChat = createExamChat({
   waitMs: num(process.env.EXAM_CHAT_WAIT_MS, 45_000),
 });
 
+/** Knowledge repositories: file explorer whose files are indexed into the existing knowledge bases. */
+export const knowledgeService = createKnowledgeService({
+  fileStore, queue: fileJobQueue,
+  embedder: EmbeddingService.getInstance(),
+  ocr: process.env.KNOWLEDGE_OCR === 'false' ? undefined : tesseractOcr,
+});
+
 let started = false;
 
 /** Recovers persisted jobs and schedules cleanup of expired jobs, files and assessments. */
@@ -100,8 +109,11 @@ export async function startEducationRuntime(): Promise<void> {
       logger.warn('[cleanup] sweep failed', { errorType: (err as Error)?.name });
     }
   };
+  // Re-queue repository files left waiting (restart, job limit) and fill missing embeddings.
+  const resume = () => knowledgeService.resumePending().then((r) => { if (r.queued) logger.info('[knowledge] resumed pending indexing', r); }).catch((err) => logger.warn('[knowledge] resume failed', { errorType: (err as Error)?.name }));
   void sweep();
-  setInterval(sweep, 60 * 60 * 1000).unref();
+  void resume();
+  setInterval(() => { void sweep(); void resume(); }, 60 * 60 * 1000).unref();
 }
 
 let telegramTranscriber: ReturnType<typeof createTelegramTranscriber> | null = null;

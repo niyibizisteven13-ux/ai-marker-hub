@@ -296,7 +296,8 @@ function createModelMock(modelName: string) {
     findMany: async (args?: any) => {
       const filtered = Array.from(table.values()).filter((r) => matchesWhere(r, args?.where));
       const sorted = sortRecords(filtered, args?.orderBy);
-      const sliced = typeof args?.take === 'number' ? sorted.slice(0, args.take) : sorted;
+      const start = typeof args?.skip === 'number' ? args.skip : 0;
+      const sliced = typeof args?.take === 'number' ? sorted.slice(start, start + args.take) : sorted.slice(start);
       return sliced.map((r) => enrichRecord(r, args));
     },
     findFirst: async (args?: any) => {
@@ -414,6 +415,16 @@ function createModelMock(modelName: string) {
       table.set(String(id), created);
       saveToDisk();
       return enrichRecord(created, args);
+    },
+    createMany: async (args?: any) => {
+      const rows = Array.isArray(args?.data) ? args.data : args?.data ? [args.data] : [];
+      const now = new Date();
+      for (const row of rows) {
+        const id = row.id || crypto.randomUUID();
+        table.set(String(id), { id, createdAt: now, updatedAt: now, ...row });
+      }
+      if (rows.length) saveToDisk();
+      return { count: rows.length };
     },
     delete: async (args?: any) => {
       for (const [id, r] of table.entries()) {

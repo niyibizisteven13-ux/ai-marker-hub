@@ -285,7 +285,7 @@ export function validateChartSpec(c: ChartSpec): string[] {
   const raw = JSON.stringify(c.vegaLite);
   if (/"url"\s*:/.test(raw)) problems.push('external data URLs are not allowed');
   if (raw.length > 2_000_000) problems.push('spec too large');
-  const encodings = raw.match(/"axis":\{"title":"([^"]*)"/g) ?? [];
+  const encodings: string[] = raw.match(/"axis":\{"title":"([^"]*)"/g) ?? [];
   if (c.chartType !== 'heatmap' && encodings.some((e) => e.endsWith('""'))) problems.push('an axis has no title');
   return problems;
 }
