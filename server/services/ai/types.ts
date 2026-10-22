@@ -105,6 +105,13 @@ export interface ToolServices {
     }>;
   };
   image?: ImageProvider;
+  /** Universal output engine (server/services/outputs). */
+  outputs?: {
+    create(userId: string, spec: unknown): Promise<{ artifact: any; reused: boolean }>;
+    waitReady(userId: string, id: string, ms?: number): Promise<any>;
+    readAnalysis(userId: string, id: string): Promise<any>;
+    attachmentRef(artifact: any): Promise<AttachmentRef | null>;
+  };
 }
 
 export interface ImageProvider {

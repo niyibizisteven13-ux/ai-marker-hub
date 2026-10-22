@@ -34,6 +34,7 @@ import datasetRoutes from './server/routes/datasetRoutes.js';
 import { analyticsRouter, assessmentRouter, documentsRouter, jobsRouter } from './server/routes/educationRoutes.js';
 import { examChat, startEducationRuntime } from './server/services/educationRuntime.js';
 import { examsRouter } from './server/routes/examRoutes.js';
+import { outputsRouter, sharedOutputsRouter } from './server/routes/outputRoutes.js';
 import { knowledgeAdminRouter, knowledgeSourcesRouter } from './server/routes/knowledgeRepositoryRoutes.js';
 import { shutdownOcr } from './server/services/documents/ocr.js';
 import { fileJobQueue } from './server/services/AiService.js';
@@ -352,6 +353,8 @@ app.use('/api/assessment', requireAuth, assessmentRouter);
 app.use('/api/jobs', requireAuth, jobsRouter);
 app.use('/api/documents', requireAuth, documentsRouter);
 app.use('/api/exams', requireAuth, examsRouter);
+app.use('/api/outputs/shared', sharedOutputsRouter);
+app.use('/api/outputs', requireAuth, outputsRouter);
 app.use('/api', settingsBillingRoutes);
 // /exports serves generated Excel reports — gate it so only the owning
 // authenticated user (or admin) can download them. Anonymous access would

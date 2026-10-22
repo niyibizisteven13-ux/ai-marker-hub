@@ -11,6 +11,7 @@ import { createExamChat, type ExamChatContext } from './exams/chat.js';
 import type { ExamRecord } from './exams/types.js';
 import { createKnowledgeService } from './knowledge/service.js';
 import { EmbeddingService } from './EmbeddingService.js';
+import { createOutputService } from './outputs/service.js';
 import logger from '../utils/logger.js';
 
 /** Wires the statistics/report and assessment services to the shared file store, job queue and agent model. */
@@ -92,6 +93,24 @@ export const knowledgeService = createKnowledgeService({
   fileStore, queue: fileJobQueue,
   embedder: EmbeddingService.getInstance(),
   ocr: process.env.KNOWLEDGE_OCR === 'false' ? undefined : tesseractOcr,
+});
+
+/** Universal output engine: validated specs → charts, widgets, reports, documents, analyses (see docs/OUTPUT_ENGINE.md). */
+export const outputService = createOutputService({
+  fileStore, queue: fileJobQueue, forbiddenStrings,
+  readDataset: (userId, id) => analyticsService.readDataset(userId, id),
+  readRepositoryFile: async (userId, id) => {
+    const limit = num(process.env.ANALYSIS_MAX_INPUT_BYTES, 50 * 1024 * 1024);
+    const { file, stream } = await knowledgeService.openDownload(userId, id);
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const c of stream as AsyncIterable<Buffer>) {
+      size += c.length;
+      if (size > limit) { (stream as any).destroy?.(); throw new Error(`The file is larger than ${Math.round(limit / 1048576)} MB.`); }
+      chunks.push(c);
+    }
+    return { name: file.name, data: Buffer.concat(chunks) };
+  },
 });
 
 let started = false;

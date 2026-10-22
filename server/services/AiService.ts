@@ -13,6 +13,7 @@ import { extractJsonFragment, stripThinkingTags } from '../utils/textSanitizers.
 import { extractChatCompletionText, readProviderJson } from '../utils/providerResponse.js';
 export { stripThinkingTags };
 import logger from '../utils/logger.js';
+import { planHint, planOutput } from './outputs/planner.js';
 
 const MODELS = {
   SONNET: 'claude-sonnet-5',
@@ -248,6 +249,13 @@ export const bwengeAgent = createAiAgent({
         ];
         return combined;
       },
+    },
+    // Lazy import: educationRuntime imports this module.
+    outputs: {
+      create: async (userId, spec) => (await import('./educationRuntime.js')).outputService.create(userId, spec),
+      waitReady: async (userId, id, ms) => (await import('./educationRuntime.js')).outputService.waitReady(userId, id, ms),
+      readAnalysis: async (userId, id) => (await import('./educationRuntime.js')).outputService.readAnalysis(userId, id),
+      attachmentRef: async (a) => (await import('./educationRuntime.js')).outputService.attachmentRef(a),
     },
     python: {
       async execute(code) {
@@ -807,6 +815,12 @@ export class AiService {
     const lastMsg = options.messages[options.messages.length - 1];
     const prompt = lastMsg ? extractPlainText(lastMsg.content) : '';
     const uploads = options.files?.map((f) => ({ type: f.type, base64: f.base64, mediaType: f.mediaType })) || [];
+
+    // Output planner: steer this turn toward prose, a computed table, or one fitting artifact.
+    if (!options.extractSchema && prompt) {
+      const plan = planOutput({ message: prompt, attachments: uploads.map((u) => ({ name: '', mime: u.mediaType })), hasDataset: uploads.some((u) => /csv|spreadsheet|excel|json/i.test(u.mediaType)) || /\.(csv|xlsx|xls|tsv)\b/i.test(prompt) });
+      if (plan.artifact || plan.needsComputation || plan.needsRetrieval) systemPrompt += `\n\n${planHint(plan)}`;
+    }
 
     if (options.extractSchema) {
       const r = await bwengeAgent.run({

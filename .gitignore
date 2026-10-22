@@ -51,3 +51,4 @@ data/jobs/
 data/assessments/
 data/documents/
 data/exams/
+__pycache__/

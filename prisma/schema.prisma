@@ -917,3 +917,39 @@ model RepositoryFile {
   @@index([indexStatus])
   @@index([storageKey])
 }
+
+// ── Generated outputs (charts, reports, documents, analyses) ───────────────
+// Every artifact has an owner, a validated spec, its sources, a status and a revision chain. Files live in
+// the file store (fileId); identical requests reuse the same row (idempotencyKey).
+model GeneratedArtifact {
+  id             String    @id @default(uuid())
+  userId         String
+  organizationId String?
+  kind           String // answer | chart | widget | report | document | template | diagram | map | image | analysis
+  format         String // html | svg | xlsx | pdf | docx | pptx | json | md | png
+  title          String
+  status         String    @default("queued") // queued | generating | ready | failed
+  revision       Int       @default(1)
+  rootId         String? // first revision of this artifact
+  parentId       String? // previous revision
+  spec           Json
+  sources        Json      @default("[]")
+  fileId         String?
+  previewFileId  String?
+  sizeBytes      Int?
+  sha256         String?
+  warnings       Json      @default("[]")
+  error          String?
+  idempotencyKey String
+  jobId          String?
+  shareMode      String    @default("private") // private | organization | link
+  shareTokenHash String?
+  shareExpiresAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([userId, idempotencyKey])
+  @@index([userId, createdAt])
+  @@index([rootId])
+  @@index([shareTokenHash])
+}
