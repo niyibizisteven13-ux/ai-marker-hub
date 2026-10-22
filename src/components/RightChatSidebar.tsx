@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Bell, Sparkles } from 'lucide-react';
+import { FileTypeIcon } from './FileTypeIcon';
+import { Plus, Bell, Sparkles, Paperclip, FileUp, ScanLine, X, ArrowUp } from 'lucide-react';
 import type { ChatAttachment, ChatSession, Message } from '../types';
 
 import ChatMessage from './ChatMessage';
@@ -272,7 +273,7 @@ export default function RightChatSidebar({
       {/* Full-sidebar drop overlay */}
       {isDraggingFiles && (
         <div className="absolute inset-0 z-40 m-3 flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-emerald-500/30 bg-[#0A0D14]/95 backdrop-blur-sm">
-          <span className="text-2xl">📎</span>
+          <span className="grid h-11 w-11 place-items-center rounded-2xl bg-emerald-500/10 text-emerald-400 ring-1 ring-inset ring-emerald-400/20"><Paperclip size={20} /></span>
           <div className="text-xs font-medium text-slate-200">Drop files to attach</div>
           <div className="text-[10px] text-slate-500">PDF, Office files, text, code, or images</div>
         </div>
@@ -295,7 +296,7 @@ export default function RightChatSidebar({
                 className="w-full flex items-center gap-3.5 p-3 rounded-xl bg-[#121722]/80 border border-slate-800/80 hover:border-orange-500/40 hover:bg-[#161C2A] transition text-left group"
               >
                 <div className="w-8 h-8 rounded-lg bg-slate-800/80 flex items-center justify-center text-slate-300 group-hover:text-white transition shrink-0">
-                  📄
+                  <FileUp size={16} />
                 </div>
                 <div>
                   <div className="text-xs font-medium text-slate-200 group-hover:text-white">
@@ -311,7 +312,7 @@ export default function RightChatSidebar({
                 className="w-full flex items-center gap-3.5 p-3 rounded-xl bg-[#121722]/80 border border-slate-800/80 hover:border-orange-500/40 hover:bg-[#161C2A] transition text-left group"
               >
                 <div className="w-8 h-8 rounded-lg bg-slate-800/80 flex items-center justify-center text-slate-300 group-hover:text-white transition shrink-0">
-                  📷
+                  <ScanLine size={16} />
                 </div>
                 <div>
                   <div className="text-xs font-medium text-slate-200 group-hover:text-white">
@@ -384,9 +385,7 @@ export default function RightChatSidebar({
                         onClick={() => setLightboxUrl(meta.previewUrl!)}
                       />
                     ) : (
-                      <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-white/5 text-[10px]">
-                        {meta.status === 'failed' ? '⚠️' : '📄'}
-                      </span>
+                      <FileTypeIcon name={meta.name} size="sm" failed={meta.status === 'failed'} />
                     )}
                     <div className="max-w-[180px] min-w-0">
                       <div className="truncate font-medium" title={meta.name}>{meta.name}</div>
@@ -402,7 +401,7 @@ export default function RightChatSidebar({
                       title={`Remove ${meta.name}`}
                       className="ml-1 rounded p-1 text-slate-500 hover:bg-white/10 hover:text-rose-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-400 transition-colors"
                     >
-                      ✕
+                      <X size={13} />
                     </button>
                   </div>
                 ))}
@@ -465,7 +464,7 @@ export default function RightChatSidebar({
                       : 'bg-white/10 text-neutral-500 cursor-not-allowed'
                   }`}
                 >
-                  <span className="font-bold text-sm sm:text-lg leading-none">➔</span>
+                  <ArrowUp size={18} strokeWidth={2.4} />
                 </button>
               </div>
             </div>

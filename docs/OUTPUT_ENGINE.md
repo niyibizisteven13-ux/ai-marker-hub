@@ -84,6 +84,25 @@ Dataset sources (`dataset.type`):
 | `repository_file` | Knowledge repositories | Repository access rules |
 | `upload` | Legacy `FileRecord` uploads | Owned by the user |
 
+### Themes for HTML outputs
+- `widget` and `report` accept `theme` and `subtitle`.
+- The assistant picks the theme that fits the topic:
+
+  | Theme | Topic |
+  |---|---|
+  | `violet` | education |
+  | `forest` | agriculture and environment |
+  | `crimson` | health |
+  | `slate` | finance, business and government |
+  | `amber` | energy and economy |
+  | `teal` | science and water |
+  | `sunset` | community and culture |
+  | `ocean` | default |
+- A theme sets the hero header gradient, the KPI accents and the chart series colours. It works in light and dark
+  mode, and the page stays self-contained.
+- Requests to "demonstrate", "showcase", make an "HTML" or "web page", or build a "data story" are planned as a
+  themed HTML report.
+
 ## Agent tools (chat)
 
 Both tools are on by default. Set `ENABLE_OUTPUT_ENGINE_TOOLS=false` to disable them.

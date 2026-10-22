@@ -43,7 +43,7 @@ export function useVoiceInput(onTranscription: (text: string) => void) {
         } catch (err) {
           // Fallback mock transcription for robust offline / client testing
           setTimeout(() => {
-            onTranscription("What are the key macroeconomic indicators for Rwanda in 2026?");
+            onTranscription("Summarise the key findings of my latest research report.");
             setState('idle');
           }, 600);
         }

@@ -11,7 +11,7 @@ import { loadDataset, type Dataset } from '../analytics/dataset.js';
 import { AnalysisInputError, analyzeDataset, type AnalysisReport } from './analysis.js';
 import { makeResponsive, renderChartSvg } from './charts.js';
 import { renderDocument, renderTemplate, verifyFile, type Resolved } from './documents.js';
-import { chartWidget, reportHtml, tableWidget, validateSelfContainedHtml, kpisHtml, page, textHtml, tableHtml } from './html.js';
+import { chartWidget, reportHtml, tableWidget, validateSelfContainedHtml, kpisHtml, page, textHtml, tableHtml, heroHtml, THEMES } from './html.js';
 import { renderMap } from './map.js';
 import { parseMermaid } from './mermaid.js';
 import { SpecError, validateSpec, type ChartConfig, type OutputSpec } from './spec.js';
@@ -184,15 +184,16 @@ export function createOutputService(deps: OutputDeps) {
       }
       case 'widget': {
         const w = spec.widget;
-        if (w.type === 'table_explorer') return htmlOut(tableWidget(spec.title, res.table(w.table), sources));
-        if (w.type === 'chart_explorer') { const rows = res.chartRows(w.chart); return htmlOut(chartWidget(spec.title, w.chart, rows, await renderChartSvg(w.chart, spec.title, rows), sources)); }
-        return htmlOut(page(spec.title, `<h1>${textHtml(spec.title).replace(/<\/?p>/g, '')}</h1>${kpisHtml(w.kpis as Kpi[])}`));
+        const look = { theme: spec.theme, subtitle: spec.subtitle };
+        if (w.type === 'table_explorer') return htmlOut(tableWidget(spec.title, res.table(w.table), sources, look));
+        if (w.type === 'chart_explorer') { const rows = res.chartRows(w.chart); return htmlOut(chartWidget(spec.title, w.chart, rows, await renderChartSvg(w.chart, spec.title, rows, THEMES[spec.theme ?? 'ocean'].pal), sources, look)); }
+        return htmlOut(page(spec.title, `${heroHtml('Key figures', spec.title, spec.subtitle)}${kpisHtml(w.kpis as Kpi[])}`, { theme: spec.theme }));
       }
       case 'report': {
         const sections = [];
-        for (const s of spec.sections) sections.push({ heading: s.heading, text: s.text, table: s.table ? res.table(s.table) : undefined, chartSvg: s.chart ? await renderChartSvg(s.chart, s.heading, res.chartRows(s.chart)) : undefined });
+        for (const s of spec.sections) sections.push({ heading: s.heading, text: s.text, table: s.table ? res.table(s.table) : undefined, chartSvg: s.chart ? await renderChartSvg(s.chart, s.heading, res.chartRows(s.chart), THEMES[spec.theme ?? 'ocean'].pal) : undefined });
         const appendix = [...analyses.values()].map((rep) => ({ methodology: rep.methodology, assumptions: rep.assumptions, limitations: rep.limitations, engine: rep.engine.name, isolation: rep.isolation ? `isolated subprocess${rep.isolation.networkNamespace ? ', no network' : ''}` : undefined, rows: `${rep.source.label}: ${rep.rowsIn} rows${rep.rowsAnalysed !== rep.rowsIn ? `, ${rep.rowsAnalysed} after filters` : ''}.`, filters: rep.filters.map((f) => `${f.column} ${f.op} ${JSON.stringify(f.value)}`) }));
-        return htmlOut(reportHtml({ title: spec.title, layout: spec.layout, summary: spec.summary, kpis: spec.kpis as Kpi[], sections, sources, appendix, meta: { generatedAt: new Date().toISOString(), revision: a.revision, artifactId: a.id } }));
+        return htmlOut(reportHtml({ title: spec.title, layout: spec.layout, theme: spec.theme, subtitle: spec.subtitle, summary: spec.summary, kpis: spec.kpis as Kpi[], sections, sources, appendix, meta: { generatedAt: new Date().toISOString(), revision: a.revision, artifactId: a.id } }));
       }
       case 'document': return { data: await renderDocument(spec, res), format: spec.format, warnings };
       case 'template': { const t = await renderTemplate(spec, analyses.get(spec.analysisArtifactId)!); return { data: t.data, format: t.format, warnings: t.warnings }; }

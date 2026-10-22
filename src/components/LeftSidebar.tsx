@@ -164,7 +164,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
             </div>
             <div className="min-w-0 leading-tight">
               <div className="font-serif text-[17px] font-medium tracking-tight text-white">Bwenge</div>
-              <div className="text-[11px] text-[#9C9A92]">AI teaching assistant</div>
+              <div className="text-[11px] text-[#9C9A92]">Education · Research · Data</div>
             </div>
           </div>
 

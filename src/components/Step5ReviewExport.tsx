@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { ExamPaper, StudentScript, QuestionMarkResult, ClassAnalytics, FlagType } from '../types';
 import { jsPDF } from 'jspdf';
 import confetti from 'canvas-confetti';
-import { CheckSquare, ShieldAlert, CheckCircle2, Download, BarChart3, Edit3, ArrowUpRight, Award, FileSpreadsheet, Sparkles, Filter, ChevronRight, User } from 'lucide-react';
+import { CheckSquare, ShieldAlert, CheckCircle2, Download, BarChart3, Edit3, ArrowUpRight, Award, FileSpreadsheet, Sparkles, Filter, ChevronRight, User, Flag } from 'lucide-react';
 
 interface Step5ReviewExportProps {
   examPaper: ExamPaper;
@@ -362,8 +362,8 @@ export const Step5ReviewExport: React.FC<Step5ReviewExportProps> = ({
                 className="text-[10px] font-bold px-2 py-1 rounded-xs border border-white/10 bg-slate-950 text-white uppercase font-mono"
               >
                 <option value="all">ALL SCRIPTS</option>
-                <option value="flagged">FLAGGED ONLY 🚩</option>
-                <option value="approved">APPROVED ONLY ✅</option>
+                <option value="flagged">Flagged only</option>
+                <option value="approved">Approved only</option>
               </select>
             </div>
 
@@ -395,7 +395,7 @@ export const Step5ReviewExport: React.FC<Step5ReviewExportProps> = ({
 
                       {hasFlags && (
                         <div className="mt-1.5 inline-flex items-center px-2 py-0.5 rounded-xs bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold text-[10px]">
-                          🚩 {s.flags?.join(', ')}
+                          <Flag size={11} className="mr-1" /> {s.flags?.join(', ')}
                         </div>
                       )}
                     </div>

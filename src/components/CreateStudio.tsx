@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { FileTypeIcon } from './FileTypeIcon';
 import { createPortal } from 'react-dom';
 import {
   Send,
@@ -19,13 +20,13 @@ import {
   Mic,
   Globe,
   BookOpen,
-  Sprout,
-  BarChart2,
+  Database,
+  LayoutDashboard,
   Languages,
   HelpCircle,
   ExternalLink,
   LogOut,
-  Copy
+  Copy, X,
 } from 'lucide-react';
 import { Message as MessageType, ChatAttachment, ResponseFeedbackDetails } from '../types';
 import ChatMessage from './ChatMessage';
@@ -378,7 +379,7 @@ export default function CreateStudio({
               onClick={() => (window as any).openUpgradeModal?.()}
               className="hidden sm:flex bg-gradient-to-r from-amber-500/20 to-orange-600/10 hover:from-amber-500/30 hover:to-orange-600/20 text-amber-400 font-medium px-3.5 py-1.5 rounded-xl border border-amber-500/30 text-xs transition-all shadow-md items-center gap-1.5"
             >
-              ⭐ Upgrade
+              <Sparkles size={13} /> Upgrade
             </button>
           ) : (
             <button
@@ -599,14 +600,14 @@ export default function CreateStudio({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-lg text-left">
                 <button
                   type="button"
-                  onClick={() => onSendMessage("Show me Rwanda's census and spatial data summary for recent economic development.")}
+                  onClick={() => onSendMessage("Which datasets are available, and what are the most important insights in them?")}
                   className="p-3.5 rounded-2xl border border-white/10 bg-[#30302E]/80 hover:bg-[#30302E] hover:border-emerald-500/40 transition-all flex flex-col gap-1.5 shadow-sm group"
                 >
                   <div className="flex items-center gap-2 text-emerald-400 font-semibold text-xs">
-                    <BarChart2 size={16} /> Rwanda's data
+                    <Database size={16} /> Explore a dataset
                   </div>
                   <p className="text-[11px] text-[#C2C0B6] group-hover:text-[#FAF9F5] leading-relaxed">
-                    Explore Rwanda census & spatial statistics
+                    Search, read and analyse curated data
                   </p>
                 </button>
 
@@ -625,14 +626,14 @@ export default function CreateStudio({
 
                 <button
                   type="button"
-                  onClick={() => onSendMessage("Give me farming advice and crop disease & soil advisory for agricultural yield in East Africa.")}
+                  onClick={() => onSendMessage("Create an interactive HTML dashboard that demonstrates student performance: class A averaged 62%, 68% and 74% in terms 1 to 3, and class B 58%, 61% and 70%. Include KPIs, a chart, a table and the key insights.")}
                   className="p-3.5 rounded-2xl border border-white/10 bg-[#30302E]/80 hover:bg-[#30302E] hover:border-teal-500/40 transition-all flex flex-col gap-1.5 shadow-sm group"
                 >
                   <div className="flex items-center gap-2 text-teal-400 font-semibold text-xs">
-                    <Sprout size={16} /> Farming advice
+                    <LayoutDashboard size={16} /> Build a live dashboard
                   </div>
                   <p className="text-[11px] text-[#C2C0B6] group-hover:text-[#FAF9F5] leading-relaxed">
-                    Crop disease & soil advisory for East Africa
+                    Turn figures into an interactive HTML page
                   </p>
                 </button>
 
@@ -645,7 +646,7 @@ export default function CreateStudio({
                     <Languages size={16} /> Write or translate
                   </div>
                   <p className="text-[11px] text-[#C2C0B6] group-hover:text-[#FAF9F5] leading-relaxed">
-                    Translate between Kinyarwanda, English & French
+                    Draft and translate in English, French & Kinyarwanda
                   </p>
                 </button>
               </div>
@@ -712,7 +713,7 @@ export default function CreateStudio({
                     key={`${attachmentMeta(meta).name}-${idx}`}
                     className="flex max-w-full items-center gap-2 rounded-xl border border-white/10 bg-white/5 py-1.5 px-2.5 text-xs text-[#FAF9F5]"
                   >
-                    <span>📄</span>
+                    <FileTypeIcon name={attachmentMeta(meta).name} size="sm" />
                     <span className="max-w-[180px] min-w-0 truncate" title={attachmentMeta(meta).name}>{attachmentMeta(meta).name}</span>
                     <span className="shrink-0 rounded bg-white/[.07] px-1 py-0.5 text-[9px] font-semibold text-neutral-400">{attachmentMeta(meta).type}</span>
                     {attachmentMeta(meta).size && <span className="shrink-0 text-[10px] text-neutral-500">{attachmentMeta(meta).size}</span>}
@@ -722,7 +723,7 @@ export default function CreateStudio({
                       className="ml-1 h-7 w-7 flex items-center justify-center text-[#9C9A92] hover:text-rose-400 transition-colors"
                       aria-label={`Remove ${attachmentMeta(meta).name}`}
                     >
-                      ✕
+                      <X size={14} />
                     </button>
                   </div>
                 ))}
@@ -787,7 +788,7 @@ export default function CreateStudio({
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={handleKeyDown}
                   onPaste={handleComposerPaste}
-                  placeholder="Message Bwenge (Kinyarwanda or English)..."
+                  placeholder="Ask anything, or attach files and datasets…"
                   className="w-full bg-transparent border-0 resize-none text-base leading-6 text-[#FAF9F5] placeholder-[#9C9A92] outline-none px-1 py-1 max-h-40 scrollbar-hidden"
                 />
               </div>

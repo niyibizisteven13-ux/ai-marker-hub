@@ -71,12 +71,17 @@ const docBlock = z.union([
 ]);
 
 const common = { title, sources: z.array(sourceRefSchema).max(30).default([]) };
+/** Look of HTML outputs, chosen to fit the topic (see THEMES in html.ts). */
+const look = {
+  theme: z.enum(['ocean', 'forest', 'violet', 'crimson', 'slate', 'amber', 'teal', 'sunset']).optional(),
+  subtitle: z.string().trim().max(300).optional(),
+};
 
 export const outputSpecSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('answer'), ...common, text: text(20_000), table: tableSchema.optional() }).strict(),
   z.object({ kind: z.literal('chart'), ...common, chart: chartConfigSchema }).strict(),
   z.object({
-    kind: z.literal('widget'), ...common,
+    kind: z.literal('widget'), ...common, ...look,
     widget: z.discriminatedUnion('type', [
       z.object({ type: z.literal('table_explorer'), table: tableSchema }).strict(),
       z.object({ type: z.literal('chart_explorer'), chart: chartConfigSchema }).strict(),
@@ -84,7 +89,7 @@ export const outputSpecSchema = z.discriminatedUnion('kind', [
     ]),
   }).strict(),
   z.object({
-    kind: z.literal('report'), ...common, layout: z.enum(['report', 'dashboard']).default('report'), summary: text(5000).optional(),
+    kind: z.literal('report'), ...common, ...look, layout: z.enum(['report', 'dashboard']).default('report'), summary: text(5000).optional(),
     kpis: z.array(kpi).max(12).optional(), sections: z.array(section).min(1).max(40), analysisArtifactIds: z.array(z.string().uuid()).max(5).optional(),
   }).strict(),
   z.object({

@@ -21,9 +21,9 @@ const ICONS: Record<string, string> = {
 };
 
 const TEXT: Record<Lang, { tagline: string; tiles: [string, string][] }> = {
-  en: { tagline: 'Your assistant for teaching, research and data', tiles: [['chart', 'Charts & files'], ['mark', 'Mark exams'], ['scan', 'Scan papers'], ['library', 'Ask my library']] },
-  rw: { tagline: 'Umufasha wawe mu kwigisha, ubushakashatsi n’imibare', tiles: [['chart', 'Ibishushanyo'], ['mark', 'Gukosora'], ['scan', 'Scan impapuro'], ['library', 'Isomero']] },
-  fr: { tagline: 'Votre assistant pour l’enseignement, la recherche et les données', tiles: [['chart', 'Graphiques'], ['mark', 'Corriger'], ['scan', 'Scanner'], ['library', 'Bibliothèque']] },
+  en: { tagline: 'Your education, research & data companion', tiles: [['chart', 'Charts & files'], ['mark', 'Mark exams'], ['scan', 'Scan papers'], ['library', 'Ask my library']] },
+  rw: { tagline: 'Mugenzi wawe mu burezi, ubushakashatsi n’imibare', tiles: [['chart', 'Ibishushanyo'], ['mark', 'Gukosora'], ['scan', 'Scan impapuro'], ['library', 'Isomero']] },
+  fr: { tagline: 'Votre compagnon : éducation, recherche et données', tiles: [['chart', 'Graphiques'], ['mark', 'Corriger'], ['scan', 'Scanner'], ['library', 'Bibliothèque']] },
 };
 
 const xml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

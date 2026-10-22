@@ -1,5 +1,5 @@
 import React from 'react';
-import { Database, GraduationCap, Sprout, Languages, LucideIcon } from 'lucide-react';
+import { Database, GraduationCap, LayoutDashboard, Languages, LucideIcon } from 'lucide-react';
 
 interface StarterCardItem {
   id: string;
@@ -20,9 +20,9 @@ export const StarterCards: React.FC<StarterCardsProps> = ({ onSelectPrompt, lang
     {
       id: 'card1',
       icon: Database,
-      title: lang === 'rw' ? "Baza ku makuru y'u Rwanda" : lang === 'fr' ? "Interroger les données du Rwanda" : "Ask about Rwanda's data",
-      description: lang === 'rw' ? "Raporo n'imbonerahamwe, bifite inkomoko" : lang === 'fr' ? "Rapports et tableaux, avec sources" : "Reports and tables, with sources",
-      prompt: "What does the latest national statistical report say about economic growth and agricultural yields?",
+      title: lang === 'rw' ? "Sesengura amakuru" : lang === 'fr' ? "Explorer un jeu de données" : "Explore a dataset",
+      description: lang === 'rw' ? "Shakisha, soma kandi usesengure amakuru" : lang === 'fr' ? "Chercher, lire et analyser des données" : "Search, read and analyse curated data",
+      prompt: "Which datasets are available, and what are the most important insights in them?",
       action: 'chat',
     },
     {
@@ -35,17 +35,17 @@ export const StarterCards: React.FC<StarterCardsProps> = ({ onSelectPrompt, lang
     },
     {
       id: 'card3',
-      icon: Sprout,
-      title: lang === 'rw' ? "Inama z'ubuhinzi" : lang === 'fr' ? "Conseils agricoles" : "Farming advice",
-      description: lang === 'rw' ? "Ibihingwa, udukoko, ibihe" : lang === 'fr' ? "Cultures, ravageurs, saisons" : "Crops, pests, seasons",
-      prompt: "What are the recommended pest management practices for maize during the Season A rains in Rwanda?",
+      icon: LayoutDashboard,
+      title: lang === 'rw' ? "Kora dashboard" : lang === 'fr' ? "Créer un tableau de bord" : "Build a live dashboard",
+      description: lang === 'rw' ? "Hindura imibare paji ya HTML" : lang === 'fr' ? "Des chiffres en page HTML interactive" : "Turn figures into an interactive HTML page",
+      prompt: "Create an interactive HTML dashboard that demonstrates student performance: class A averaged 62%, 68% and 74% in terms 1 to 3, and class B 58%, 61% and 70%. Include KPIs, a chart, a table and the key insights.",
       action: 'chat',
     },
     {
       id: 'card4',
       icon: Languages,
       title: lang === 'rw' ? "Andika cyangwa uhindure" : lang === 'fr' ? "Rédiger ou traduire" : "Write or translate",
-      description: lang === 'rw' ? "Kinyarwanda, Icyongereza, Igifaransa" : lang === 'fr' ? "Kinyarwanda, anglais, français" : "Kinyarwanda, English, French",
+      description: lang === 'rw' ? "Icyongereza, Igifaransa, Kinyarwanda" : lang === 'fr' ? "Anglais, français, kinyarwanda" : "English, French, Kinyarwanda",
       prompt: "Draft a professional policy memo in Kinyarwanda and English regarding digital education standards.",
       action: 'chat',
     },

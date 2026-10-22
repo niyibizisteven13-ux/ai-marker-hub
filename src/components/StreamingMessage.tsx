@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { FileTypeIcon } from './FileTypeIcon';
 import { ActivityLine, Step } from "./ActivityLine";
 import type { ChatStreamState } from "../hooks/useChatStream";
 
@@ -35,7 +36,7 @@ export function StreamingMessage({ stream, renderMarkdown }: Props) {
         <div className="bw-files">
           {files.map((f) => (
             <a key={f.id} className="bw-file" href={f.url} download={f.name}>
-              <span aria-hidden="true">📄</span>
+              <FileTypeIcon name={f.name} size="sm" />
               <span>{f.name}</span>
             </a>
           ))}
