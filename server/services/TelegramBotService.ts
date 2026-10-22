@@ -8,6 +8,9 @@ export function getTelegramWebhookBaseUrl(env: NodeJS.ProcessEnv = process.env):
   return env.APP_BASE_URL || env.APP_URL || env.RENDER_EXTERNAL_URL || codespaceUrl || 'https://www.bwenge.space';
 }
 
+/** Bot API base (TELEGRAM_API_BASE for a local Bot API server or tests). */
+const TELEGRAM_API_BASE = () => (process.env.TELEGRAM_API_BASE || 'https://api.telegram.org').replace(/\/$/, '');
+
 export interface TelegramKeyboardOption {
   text: string;
   callback_data?: string;
@@ -41,7 +44,7 @@ export class TelegramBotService {
     }
 
     try {
-      const response = await fetch(`https://api.telegram.org/bot${this.botToken}/getMe`, {
+      const response = await fetch(`${TELEGRAM_API_BASE()}/bot${this.botToken}/getMe`, {
         signal: AbortSignal.timeout(10_000),
       });
       if (!response.ok) return process.env.TELEGRAM_BOT_USERNAME || 'Bwengebot';
@@ -69,7 +72,7 @@ export class TelegramBotService {
     }
 
     try {
-      const url = `https://api.telegram.org/bot${this.botToken}/sendMessage`;
+      const url = `${TELEGRAM_API_BASE()}/bot${this.botToken}/sendMessage`;
       const body: any = {
         chat_id: String(chatId),
         text,
@@ -113,7 +116,7 @@ export class TelegramBotService {
     if (this.isMock) return { message_id: messageId, text };
 
     try {
-      const url = `https://api.telegram.org/bot${this.botToken}/editMessageText`;
+      const url = `${TELEGRAM_API_BASE()}/bot${this.botToken}/editMessageText`;
       const body: any = {
         chat_id: String(chatId),
         message_id: messageId,
@@ -152,7 +155,7 @@ export class TelegramBotService {
     if (this.isMock) return;
 
     try {
-      const url = `https://api.telegram.org/bot${this.botToken}/sendChatAction`;
+      const url = `${TELEGRAM_API_BASE()}/bot${this.botToken}/sendChatAction`;
       await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -178,7 +181,7 @@ export class TelegramBotService {
     }
 
     try {
-      const url = `https://api.telegram.org/bot${this.botToken}/sendDocument`;
+      const url = `${TELEGRAM_API_BASE()}/bot${this.botToken}/sendDocument`;
       const form = new FormData();
       form.append('chat_id', String(chatId));
 
@@ -222,7 +225,7 @@ export class TelegramBotService {
     if (this.isMock) return { message_id: Date.now() };
 
     try {
-      const url = `https://api.telegram.org/bot${this.botToken}/sendVoice`;
+      const url = `${TELEGRAM_API_BASE()}/bot${this.botToken}/sendVoice`;
       const form = new FormData();
       form.append('chat_id', String(chatId));
       const blob = new Blob([voiceBuffer]);
@@ -293,7 +296,7 @@ export class TelegramBotService {
     if (this.isMock) return null;
 
     try {
-      const getFileUrl = `https://api.telegram.org/bot${this.botToken}/getFile?file_id=${fileId}`;
+      const getFileUrl = `${TELEGRAM_API_BASE()}/bot${this.botToken}/getFile?file_id=${fileId}`;
       const res = await fetch(getFileUrl);
       const data: any = await res.json();
 
@@ -303,7 +306,7 @@ export class TelegramBotService {
       }
 
       const filePath = data.result.file_path;
-      const downloadUrl = `https://api.telegram.org/file/bot${this.botToken}/${filePath}`;
+      const downloadUrl = `${TELEGRAM_API_BASE()}/file/bot${this.botToken}/${filePath}`;
       const fileRes = await fetch(downloadUrl);
       const buffer = Buffer.from(await fileRes.arrayBuffer());
 
@@ -319,31 +322,12 @@ export class TelegramBotService {
    */
   public async registerCommands(): Promise<boolean> {
     if (this.isMock) return true;
-
     try {
-      const url = `https://api.telegram.org/bot${this.botToken}/setMyCommands`;
-      const commands = [
-        { command: 'start', description: 'Welcome message & main menu' },
-        { command: 'scan', description: 'Open mobile web document scanner' },
-        { command: 'agent', description: 'Run AI agent tasks (form, grade, exam, research)' },
-        { command: 'help', description: 'Show instructions and bot commands' },
-        { command: 'chat', description: 'Chat with Bwenge AI Assistant' }
-      ];
-
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ commands }),
-      });
-
-      const data: any = await res.json();
-      if (data.ok) {
-        logger.info('TelegramBotService: Successfully registered bot commands with Telegram.');
-        return true;
-      } else {
-        logger.warn('TelegramBotService: Failed to register bot commands:', data);
-        return false;
-      }
+      // Command menu in English, Kinyarwanda and French (server/services/telegram/uiText.ts).
+      const { registerTelegramCommands } = await import('./telegram/router.js');
+      await registerTelegramCommands();
+      logger.info('TelegramBotService: registered bot commands (en, rw, fr).');
+      return true;
     } catch (err) {
       logger.error('TelegramBotService: registerCommands failed:', err);
       return false;
@@ -360,10 +344,11 @@ export class TelegramBotService {
     }
 
     try {
-      const url = `https://api.telegram.org/bot${this.botToken}/setWebhook`;
+      const url = `${TELEGRAM_API_BASE()}/bot${this.botToken}/setWebhook`;
       const secretToken = process.env.TELEGRAM_BOT_SECRET_TOKEN;
 
-      const body: any = { url: `${webhookUrl.replace(/\/$/, '')}/api/telegram/webhook` };
+      // allowed_updates is explicit: when omitted Telegram keeps the previous setting, which could exclude button taps.
+      const body: any = { url: `${webhookUrl.replace(/\/$/, '')}/api/telegram/webhook`, allowed_updates: ['message', 'edited_message', 'callback_query'] };
       if (secretToken) {
         body.secret_token = secretToken;
       }

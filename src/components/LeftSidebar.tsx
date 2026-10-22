@@ -1,14 +1,21 @@
-﻿import React, { useState } from 'react';
+﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Plus,
   X,
-  Star,
   Settings,
   Trash2,
   MessageSquare,
   GraduationCap,
   BarChart3,
   Shield,
+  FolderOpen,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Search,
+  SquarePen,
+  ChevronsUpDown,
+  LogOut,
+  UserRound,
+  LogIn,
 } from 'lucide-react';
 import { NavigationTab, User, ChatSession } from '../types';
 import logoUrl from '../assets/bwenge-logo.svg';
@@ -22,6 +29,8 @@ interface LeftSidebarProps {
   onOpenLoginModal: () => void;
   onOpenSettings: () => void;
   onOpenAdmin?: () => void;
+  /** Opens the "My files" library of AI-generated outputs. */
+  onOpenLibrary?: () => void;
   onLogout: () => void;
   user: User | null;
   sessions: ChatSession[];
@@ -32,6 +41,52 @@ interface LeftSidebarProps {
   onCloseMobile?: () => void;
 }
 
+const FOCUS_RING = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D97757]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#1F1E1D]';
+
+/** Label shown beside an icon-only control when the desktop sidebar is collapsed. */
+const CollapsedTip: React.FC<{ show: boolean; label: string }> = ({ show, label }) =>
+  show ? (
+    <span
+      role="tooltip"
+      className="pointer-events-none absolute left-full top-1/2 z-50 ml-3 hidden -translate-y-1/2 whitespace-nowrap rounded-md border border-white/10 bg-[#141413] px-2.5 py-1.5 text-xs font-medium text-white opacity-0 shadow-xl transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100 lg:block"
+    >
+      {label}
+    </span>
+  ) : null;
+
+/** Groups chats by recency: Today, Yesterday, Previous 7 days, Previous 30 days, Older. */
+function groupSessions(sessions: ChatSession[]): { label: string; items: ChatSession[] }[] {
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const day = 86_400_000;
+  const buckets: [string, number][] = [
+    ['Today', startOfToday.getTime()],
+    ['Yesterday', startOfToday.getTime() - day],
+    ['Previous 7 days', startOfToday.getTime() - 7 * day],
+    ['Previous 30 days', startOfToday.getTime() - 30 * day],
+    ['Older', -Infinity],
+  ];
+  const groups = new Map<string, ChatSession[]>(buckets.map(([label]) => [label, []]));
+  for (const s of sessions) {
+    const t = Date.parse(s.date);
+    const label = Number.isNaN(t) ? 'Older' : buckets.find(([, from]) => t >= from)![0];
+    groups.get(label)!.push(s);
+  }
+  return [...groups].filter(([, items]) => items.length).map(([label, items]) => ({ label, items }));
+}
+
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase();
+}
+
+const PLAN_BADGE: Record<string, { label: string; className: string }> = {
+  BUSINESS: { label: 'Pro', className: 'border-amber-400/25 bg-amber-400/10 text-amber-300' },
+  PRO: { label: 'Pro', className: 'border-amber-400/25 bg-amber-400/10 text-amber-300' },
+  ORGANIZATION: { label: 'Org', className: 'border-indigo-400/25 bg-indigo-400/10 text-indigo-300' },
+};
+
 export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   activeTab,
   setActiveTab,
@@ -40,6 +95,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   onOpenLoginModal = () => {},
   onOpenSettings = () => {},
   onOpenAdmin,
+  onOpenLibrary,
   onLogout = () => {},
   user = null,
   sessions = [],
@@ -50,282 +106,336 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   onCloseMobile = () => {},
 }) => {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [query, setQuery] = useState('');
+  const profileRef = useRef<HTMLDivElement>(null);
 
-  const navItems = [
-    {
-      id: 'documents' as NavigationTab,
-      label: 'Chat',
-      icon: MessageSquare,
-    },
-    {
-      id: 'marking_hub' as NavigationTab,
-      label: 'Agent',
-      icon: GraduationCap,
-    },
-    {
-      id: 'results' as NavigationTab,
-      label: 'Results',
-      icon: BarChart3,
-    },
+  // The mobile drawer always shows the full layout; "collapsed" only applies on desktop.
+  const c = collapsed;
+
+  useEffect(() => {
+    if (!showProfileMenu) return;
+    const onDown = (e: MouseEvent) => {
+      if (!profileRef.current?.contains(e.target as Node)) setShowProfileMenu(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setShowProfileMenu(false);
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [showProfileMenu]);
+
+  const groups = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return groupSessions(q ? sessions.filter((s) => s.title.toLowerCase().includes(q)) : sessions);
+  }, [sessions, query]);
+
+  const navItems: { id: NavigationTab; label: string; icon: React.ElementType }[] = [
+    { id: 'documents', label: 'Chat', icon: MessageSquare },
+    { id: 'marking_hub', label: 'Agent', icon: GraduationCap },
+    { id: 'results', label: 'Results', icon: BarChart3 },
   ];
+
+  const go = (fn: () => void) => () => {
+    fn();
+    onCloseMobile();
+  };
+
+  const rowBase = `group/row relative flex items-center gap-3 rounded-lg text-[15px] lg:text-[13.5px] transition-colors duration-150 ${FOCUS_RING}`;
+  const rowSize = c ? 'h-10 w-full px-3 lg:w-10 lg:justify-center lg:px-0' : 'h-10 w-full px-3 lg:h-9';
+  const label = c ? 'truncate lg:hidden' : 'truncate';
+  const plan = user?.subscription?.planType ? PLAN_BADGE[user.subscription.planType] : undefined;
 
   return (
     <aside
-      className={`fixed lg:static inset-y-0 left-0 z-50 flex flex-col h-dvh lg:h-screen transition-all duration-300 ease-in-out motion-reduce:transition-none border-r shrink-0 select-none ${
-        isMobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
-      } ${
-        collapsed ? 'lg:w-16' : 'lg:w-64'
-      } w-[86vw] max-w-[300px] lg:w-64`}
+      aria-label="Main navigation"
+      className={`fixed lg:relative inset-y-0 left-0 z-50 flex flex-col h-dvh lg:h-screen transition-[width,transform] duration-300 ease-in-out motion-reduce:transition-none border-r shrink-0 select-none ${
+        isMobileOpen ? 'translate-x-0 shadow-2xl shadow-black/50 lg:shadow-none' : '-translate-x-full lg:translate-x-0'
+      } ${c ? 'lg:w-[68px]' : 'lg:w-[272px]'} w-[86vw] max-w-[300px]`}
       style={{ backgroundColor: tokens.bgSidebar, borderColor: tokens.border }}
     >
-      <div className="flex flex-col h-full overflow-hidden pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]">
-        {/* Top Header: Branding & Toggle */}
-        <div className={`flex items-center px-4 h-16 shrink-0 ${collapsed ? 'lg:justify-center' : 'justify-between'} justify-between`}>
-          <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 flex-shrink-0 rounded-lg overflow-hidden border border-amber-500/20 shadow-md">
-              <img src={logoUrl} alt="Bwenge Logo" className="w-full h-full object-cover" />
+      <div className={`flex h-full flex-col overflow-hidden ${c ? 'lg:overflow-visible' : ''} pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]`}>
+        {/* Brand + collapse */}
+        <div className={`flex h-16 shrink-0 items-center justify-between px-4 ${c ? 'lg:justify-center lg:px-0' : ''}`}>
+          <div className={`flex min-w-0 items-center gap-2.5 ${c ? 'lg:hidden' : ''}`}>
+            <div className="h-8 w-8 shrink-0 overflow-hidden rounded-[10px] ring-1 ring-white/10 shadow-md shadow-black/30">
+              <img src={logoUrl} alt="" className="h-full w-full object-cover" />
             </div>
-            <span className={`font-serif text-base tracking-tight text-white font-medium ${collapsed ? 'lg:hidden' : 'block'}`}>Bwenge</span>
+            <div className="min-w-0 leading-tight">
+              <div className="font-serif text-[17px] font-medium tracking-tight text-white">Bwenge</div>
+              <div className="text-[11px] text-[#9C9A92]">AI teaching assistant</div>
+            </div>
           </div>
 
-          <div className="flex items-center">
-            {/* Minimal Layout Split Toggler Icon */}
+          <div className="group relative hidden lg:block">
             <button
-              onClick={() => setCollapsed(!collapsed)}
-              className="hidden lg:block p-1 text-neutral-500 hover:text-neutral-200 rounded transition-colors"
-              title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              type="button"
+              onClick={() => setCollapsed(!c)}
+              className={`grid h-9 w-9 place-items-center rounded-lg text-[#9C9A92] transition-colors hover:bg-white/[0.06] hover:text-white ${FOCUS_RING}`}
+              aria-label={c ? 'Expand sidebar' : 'Collapse sidebar'}
+              aria-expanded={!c}
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <rect x="3" y="3" width="18" height="18" rx="2"></rect>
-                <path d="M9 3v18"></path>
-              </svg>
+              {c ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
             </button>
-
-            {/* Mobile Close Button */}
-            <button
-              onClick={onCloseMobile}
-              className="lg:hidden h-11 w-11 grid place-items-center rounded-lg text-neutral-400 hover:text-white hover:bg-white/5 transition-colors"
-              aria-label="Close navigation drawer"
-            >
-              <X size={20} />
-            </button>
+            <CollapsedTip show={c} label="Expand sidebar" />
           </div>
-        </div>
 
-        {/* Action Operational Trigger Button */}
-        <div className="px-4 mb-4">
           <button
             type="button"
-            onClick={() => {
-              onNewChat();
-              onCloseMobile();
-            }}
-            className={`w-full flex items-center justify-center gap-2 py-2.5 lg:py-2 bg-[#222222] hover:bg-neutral-800 text-neutral-200 hover:text-white rounded-xl text-sm font-medium border border-neutral-800/80 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D97757] focus-visible:ring-offset-2 focus-visible:ring-offset-[#1F1E1D] ${collapsed ? 'px-0' : ''}`}
+            onClick={onCloseMobile}
+            className={`grid h-11 w-11 place-items-center rounded-lg text-[#9C9A92] transition-colors hover:bg-white/[0.06] hover:text-white lg:hidden ${FOCUS_RING}`}
+            aria-label="Close navigation drawer"
           >
-            <Plus size={16} aria-hidden="true" />
-            {!collapsed && <span>New Chat</span>}
+            <X size={20} />
           </button>
         </div>
 
-        {/* Navigation Items */}
-        <nav className={`flex-1 px-3 space-y-1 py-2 overflow-y-auto ${collapsed ? 'lg:flex lg:flex-col lg:items-center' : ''}`}>
+        {/* New chat */}
+        <div className={`shrink-0 px-3 pb-3 ${c ? 'lg:flex lg:justify-center' : ''}`}>
+          <div className="group relative">
+            <button
+              type="button"
+              onClick={go(onNewChat)}
+              aria-label="New chat"
+              className={`flex items-center justify-center gap-2 rounded-xl bg-[#D97757] font-medium text-white shadow-sm shadow-[#D97757]/20 transition-colors hover:bg-[#C96442] active:bg-[#B85A3A] ${FOCUS_RING} ${
+                c ? 'h-11 w-full text-[15px] lg:h-10 lg:w-10' : 'h-11 w-full text-[15px] lg:h-10 lg:text-sm'
+              }`}
+            >
+              <SquarePen size={16} aria-hidden="true" />
+              <span className={c ? 'lg:hidden' : ''}>New chat</span>
+            </button>
+            <CollapsedTip show={c} label="New chat" />
+          </div>
+        </div>
+
+        {/* Workspace navigation */}
+        <nav aria-label="Workspace" className={`shrink-0 space-y-0.5 px-3 ${c ? 'lg:flex lg:flex-col lg:items-center' : ''}`}>
           {navItems.map((item) => {
-            const isActive = activeTab === item.id;
+            const active = activeTab === item.id;
             const Icon = item.icon;
             return (
-              <div key={item.id} className="relative group w-full flex justify-center">
+              <div key={item.id} className="group relative w-full lg:w-auto">
                 <button
                   type="button"
-                  onClick={() => {
-                    setActiveTab(item.id);
-                    onCloseMobile();
-                  }}
-                  className={`flex items-center gap-3 px-3 py-2.5 text-[15px] lg:py-2 lg:text-sm rounded-lg transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D97757] focus-visible:ring-offset-2 focus-visible:ring-offset-[#1F1E1D] ${
-                    collapsed ? 'lg:w-10 lg:h-10 lg:justify-center' : 'w-full'
-                  } ${
-                    isActive
-                      ? 'bg-[#262626] text-white font-medium shadow-sm border border-white/5'
-                      : 'text-[#9B9B9B] hover:bg-[#222222] hover:text-white'
+                  onClick={go(() => setActiveTab(item.id))}
+                  aria-current={active ? 'page' : undefined}
+                  aria-label={item.label}
+                  className={`${rowBase} ${rowSize} ${c ? '' : 'lg:w-full'} ${
+                    active ? 'bg-white/[0.07] font-medium text-white' : 'text-[#C2C0B6] hover:bg-white/[0.04] hover:text-white'
                   }`}
                 >
-                  <Icon className={`h-4 w-4 shrink-0 ${isActive ? 'opacity-150 text-emerald-400' : 'opacity-70'}`} />
-                  <span className={`${collapsed ? 'lg:hidden' : 'block'}`}>{item.label}</span>
+                  {active && <span aria-hidden="true" className={`absolute top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-full bg-[#D97757] ${c ? 'left-0 lg:-left-3' : '-left-3'}`} />}
+                  <Icon size={17} className={`shrink-0 ${active ? 'text-[#D97757]' : 'text-[#9C9A92] group-hover/row:text-[#C2C0B6]'}`} aria-hidden="true" />
+                  <span className={label}>{item.label}</span>
                 </button>
-
-                {collapsed && (
-                  <div className="absolute left-14 top-1/2 -translate-y-1/2 bg-neutral-900 text-white text-[11px] px-2.5 py-1.5 rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap hidden lg:block z-50 pointer-events-none font-semibold">
-                    {item.label}
-                    <div className="absolute left-0 top-1/2 -translate-x-1 -translate-y-1/2 w-2 h-2 bg-neutral-900 rotate-45" />
-                  </div>
-                )}
+                <CollapsedTip show={c} label={item.label} />
               </div>
             );
           })}
 
-          {!collapsed && sessions.length > 0 && (
-            <div className="animate-in fade-in duration-500">
-              <div className="pt-5 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-neutral-600 px-3 flex items-center justify-between">
-                <span>Recent Chats</span>
-                <span className="text-xs opacity-40">↕</span>
-              </div>
-              <div className="space-y-0.5 lg:max-h-48 overflow-y-auto pr-1 scrollbar-hidden">
-                {sessions.map((session) => (
-                  <div key={session.id} className="group relative flex items-center">
-                    <button
-                      onClick={() => {
-                        onLoadSession(session.id);
-                        onCloseMobile();
-                      }}
-                      className="flex-1 flex items-center gap-3 px-3 py-2 rounded-md hover:bg-[#222222] text-[#9B9B9B] hover:text-white truncate text-xs transition-colors text-left min-h-[36px]"
-                    >
-                      <span className="opacity-60 text-sm">💬</span>
-                      <span className="truncate">{session.title}</span>
-                    </button>
-                    {onDeleteSession && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDeleteSession(session.id);
-                        }}
-                        className="absolute right-2 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 h-9 w-9 flex items-center justify-center text-neutral-500 hover:text-rose-400 transition-all"
-                        title="Delete chat"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
+          {user && onOpenLibrary && (
+            <div className="group relative w-full lg:w-auto">
+              <button
+                type="button"
+                onClick={go(onOpenLibrary)}
+                aria-label="My files"
+                className={`${rowBase} ${rowSize} ${c ? '' : 'lg:w-full'} text-[#C2C0B6] hover:bg-white/[0.04] hover:text-white`}
+              >
+                <FolderOpen size={17} className="shrink-0 text-[#9C9A92] group-hover/row:text-[#C2C0B6]" aria-hidden="true" />
+                <span className={label}>My files</span>
+              </button>
+              <CollapsedTip show={c} label="My files" />
             </div>
           )}
         </nav>
 
-        {/* Bottom Section: Settings & Profile */}
-        <div className={`p-3 border-t border-neutral-900 space-y-1 shrink-0 ${collapsed ? 'lg:flex lg:flex-col lg:items-center' : ''}`}>
+        {/* Chat history */}
+        <div className={`mt-4 flex min-h-0 flex-1 flex-col ${c ? 'lg:hidden' : ''}`}>
+          {sessions.length > 0 ? (
+            <>
+              <div className="flex shrink-0 items-center justify-between px-5 pb-2">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#9C9A92]">Recent chats</span>
+                <span className="rounded-full bg-white/[0.05] px-1.5 py-px text-[10px] tabular-nums text-[#9C9A92]">{sessions.length}</span>
+              </div>
+              {sessions.length > 5 && (
+                <div className="shrink-0 px-3 pb-2">
+                  <label className="flex h-9 items-center gap-2 rounded-lg border border-white/[0.08] bg-black/20 px-2.5 text-[#9C9A92] focus-within:border-[#D97757]/50">
+                    <Search size={14} aria-hidden="true" />
+                    <input
+                      type="search"
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder="Search chats"
+                      aria-label="Search chats"
+                      className="min-w-0 flex-1 bg-transparent text-[13px] text-white placeholder:text-[#9C9A92]/70 focus:outline-none [&::-webkit-search-cancel-button]:appearance-none"
+                    />
+                    {query && (
+                      <button type="button" onClick={() => setQuery('')} aria-label="Clear search" className="grid h-6 w-6 place-items-center rounded text-[#9C9A92] hover:bg-white/[0.06] hover:text-white">
+                        <X size={13} />
+                      </button>
+                    )}
+                  </label>
+                </div>
+              )}
+              <div className="sidebar-scroll min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+                {groups.length === 0 && <p className="px-2 py-6 text-center text-xs text-[#9C9A92]">No chats match “{query}”.</p>}
+                {groups.map((g) => (
+                  <section key={g.label} className="mb-3 last:mb-0" aria-label={g.label}>
+                    <h3 className="px-2 pb-1 pt-1 text-[11px] font-medium text-[#9C9A92]/80">{g.label}</h3>
+                    <ul className="space-y-px">
+                      {g.items.map((s) => (
+                        <li key={s.id} className="group/chat relative">
+                          <button
+                            type="button"
+                            onClick={go(() => onLoadSession(s.id))}
+                            title={s.title}
+                            className={`flex h-10 w-full items-center rounded-lg px-2 text-left text-[14px] text-[#C2C0B6] transition-colors hover:bg-white/[0.04] hover:text-white lg:h-8 lg:text-[13px] ${FOCUS_RING} ${
+                              onDeleteSession ? 'pr-10 lg:pr-2 lg:group-hover/chat:pr-9 lg:group-focus-within/chat:pr-9' : ''
+                            }`}
+                          >
+                            <span className="truncate">{s.title || 'Untitled chat'}</span>
+                          </button>
+                          {onDeleteSession && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDeleteSession(s.id);
+                              }}
+                              aria-label={`Delete chat “${s.title}”`}
+                              title="Delete chat"
+                              className={`absolute right-1 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-md text-[#9C9A92] transition-opacity hover:bg-rose-500/10 hover:text-rose-400 lg:h-7 lg:w-7 lg:opacity-0 lg:group-hover/chat:opacity-100 lg:focus:opacity-100 ${FOCUS_RING}`}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="mx-3 rounded-xl border border-dashed border-white/[0.08] px-4 py-5 text-center">
+              <MessageSquare size={18} className="mx-auto mb-2 text-[#9C9A92]" aria-hidden="true" />
+              <p className="text-[13px] text-[#C2C0B6]">No chats yet</p>
+              <p className="mt-0.5 text-xs text-[#9C9A92]">Your conversations will appear here.</p>
+            </div>
+          )}
+        </div>
+        {c && <div className="hidden flex-1 lg:block" />}
 
-          <div className="relative group w-full flex justify-center">
+        {/* Footer: settings, admin, account */}
+        <div className={`shrink-0 space-y-0.5 border-t px-3 pb-3 pt-2 ${c ? 'lg:flex lg:flex-col lg:items-center' : ''}`} style={{ borderColor: tokens.border }}>
+          <div className="group relative w-full lg:w-auto">
             <button
               type="button"
-              onClick={() => {
-                onOpenSettings();
-                onCloseMobile();
-              }}
-              className={`flex items-center gap-3 px-3 py-2.5 lg:py-2 rounded-lg text-xs font-medium text-[#9B9B9B] hover:bg-[#222222] hover:text-white transition-all ${
-                collapsed ? 'lg:w-10 lg:h-10 lg:justify-center' : 'w-full'
-              }`}
+              onClick={go(onOpenSettings)}
+              aria-label="Settings"
+              className={`${rowBase} ${rowSize} ${c ? '' : 'lg:w-full'} text-[#C2C0B6] hover:bg-white/[0.04] hover:text-white`}
             >
-              <Settings className="h-4 w-4 shrink-0 opacity-70" />
-              <span className={`${collapsed ? 'lg:hidden' : 'block'}`}>Settings</span>
+              <Settings size={17} className="shrink-0 text-[#9C9A92] group-hover/row:text-[#C2C0B6]" aria-hidden="true" />
+              <span className={label}>Settings</span>
             </button>
-            {collapsed && (
-              <div className="absolute left-14 top-1/2 -translate-y-1/2 bg-neutral-900 text-white text-[11px] px-2.5 py-1.5 rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-opacity hidden lg:block whitespace-nowrap z-50 pointer-events-none font-semibold">
-                Settings
-                <div className="absolute left-0 top-1/2 -translate-x-1 -translate-y-1/2 w-2 h-2 bg-neutral-900 rotate-45" />
-              </div>
-            )}
+            <CollapsedTip show={c} label="Settings" />
           </div>
 
           {user?.role === 'ADMIN' && onOpenAdmin && (
-            <div className="relative group w-full flex justify-center">
+            <div className="group relative w-full lg:w-auto">
               <button
                 type="button"
-                onClick={() => {
-                  onOpenAdmin();
-                  onCloseMobile();
-                }}
-                className={`flex items-center gap-3 rounded-lg border border-emerald-500/15 bg-emerald-500/[0.06] px-3 py-2.5 text-xs font-medium text-emerald-300 transition-all hover:bg-emerald-500/10 ${
-                  collapsed ? 'lg:h-10 lg:w-10 lg:justify-center' : 'w-full'
-                }`}
+                onClick={go(onOpenAdmin)}
                 aria-label="Open admin dashboard"
+                className={`${rowBase} ${rowSize} ${c ? '' : 'lg:w-full'} text-emerald-300 hover:bg-emerald-400/[0.08]`}
               >
-                <Shield className="h-4 w-4 shrink-0" />
-                <span className={`${collapsed ? 'lg:hidden' : 'block'}`}>Admin Dashboard</span>
+                <Shield size={17} className="shrink-0" aria-hidden="true" />
+                <span className={label}>Admin dashboard</span>
               </button>
-              {collapsed && (
-                <div className="pointer-events-none absolute left-14 top-1/2 z-50 hidden -translate-y-1/2 whitespace-nowrap rounded-lg bg-neutral-900 px-2.5 py-1.5 text-[11px] font-semibold text-white opacity-0 shadow-xl transition-opacity group-hover:opacity-100 lg:block">
-                  Admin Dashboard
-                </div>
-              )}
+              <CollapsedTip show={c} label="Admin dashboard" />
             </div>
           )}
 
-          <div className="relative group w-full flex justify-center">
-            <button
-              onClick={() => {
-                if (!user) {
-                  onOpenLoginModal();
-                  onCloseMobile();
-                } else {
-                  setShowProfileMenu(!showProfileMenu);
-                }
-              }}
-              className={`flex items-center gap-2 px-2 py-3 rounded-lg text-xs font-medium text-[#9B9B9B] hover:bg-[#222222] hover:text-white transition-all ${
-                collapsed ? 'lg:w-10 lg:h-10 lg:justify-center' : 'w-full'
-              }`}
-            >
-              <div className="w-6 h-6 rounded-full bg-emerald-800 text-white flex items-center justify-center font-bold shrink-0 relative">
-                {user ? user.name.charAt(0).toUpperCase() : 'S'}
-                {user?.subscription && (
-                  <div className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-amber-500 rounded-full border border-neutral-900" />
-                )}
-              </div>
-              {!collapsed && (
-                <div className="flex flex-col items-start min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5 w-full">
-                    <span className="text-neutral-300 font-medium truncate">
-                      {user ? user.email : 'Sign in'}
-                    </span>
-                    {user?.subscription?.planType === 'BUSINESS' && (
-                      <span className="shrink-0 px-1 py-0.5 bg-amber-500/10 text-amber-500 text-[8px] font-black rounded border border-amber-500/20 tracking-tighter">PRO</span>
-                    )}
-                    {user?.subscription?.planType === 'ORGANIZATION' && (
-                      <span className="shrink-0 px-1 py-0.5 bg-indigo-500/10 text-indigo-400 text-[8px] font-black rounded border border-indigo-500/20 tracking-tighter">ORG</span>
-                    )}
-                  </div>
-                </div>
-              )}
-            </button>
-
-            {/* Collapsed Profile Tooltip */}
-            {collapsed && (
-              <div className="absolute left-14 top-1/2 -translate-y-1/2 bg-neutral-900 text-white text-[11px] px-2.5 py-1.5 rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-opacity hidden lg:block whitespace-nowrap z-50 pointer-events-none font-semibold">
-                {user ? user.name : 'Sign In'}
-                <div className="absolute left-0 top-1/2 -translate-x-1 -translate-y-1/2 w-2 h-2 bg-neutral-900 rotate-45" />
-              </div>
+          <div ref={profileRef} className="group relative w-full pt-1 lg:w-auto">
+            {user ? (
+              <button
+                type="button"
+                onClick={() => setShowProfileMenu((v) => !v)}
+                aria-haspopup="menu"
+                aria-expanded={showProfileMenu}
+                aria-label={`Account menu for ${user.name}`}
+                className={`flex items-center gap-2.5 rounded-xl text-left transition-colors hover:bg-white/[0.05] ${FOCUS_RING} ${
+                  showProfileMenu ? 'bg-white/[0.05]' : ''
+                } ${c ? 'w-full p-2 lg:h-10 lg:w-10 lg:justify-center lg:p-0' : 'w-full p-2'}`}
+              >
+                <span className="relative grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-gradient-to-br from-[#5DCAA5] to-[#1F3D35] text-[12px] font-semibold text-white ring-1 ring-white/10">
+                  {user.avatarUrl ? <img src={user.avatarUrl} alt="" className="h-full w-full object-cover" /> : initials(user.name || user.email)}
+                </span>
+                <span className={`min-w-0 flex-1 ${c ? 'lg:hidden' : ''}`}>
+                  <span className="flex items-center gap-1.5">
+                    <span className="truncate text-[13px] font-medium text-white">{user.name || user.email}</span>
+                    {plan && <span className={`shrink-0 rounded border px-1 py-px text-[9px] font-semibold uppercase tracking-wide ${plan.className}`}>{plan.label}</span>}
+                  </span>
+                  <span className="block truncate text-[11.5px] text-[#9C9A92]">{user.email}</span>
+                </span>
+                <ChevronsUpDown size={15} className={`shrink-0 text-[#9C9A92] ${c ? 'lg:hidden' : ''}`} aria-hidden="true" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={go(onOpenLoginModal)}
+                aria-label="Sign in"
+                className={`flex items-center justify-center gap-2 rounded-xl border border-white/10 text-sm font-medium text-white transition-colors hover:bg-white/[0.05] ${FOCUS_RING} ${
+                  c ? 'h-11 w-full lg:h-10 lg:w-10' : 'h-11 w-full lg:h-10'
+                }`}
+              >
+                <LogIn size={16} aria-hidden="true" />
+                <span className={c ? 'lg:hidden' : ''}>Sign in</span>
+              </button>
             )}
+            {!showProfileMenu && <CollapsedTip show={c} label={user ? user.name || user.email : 'Sign in'} />}
 
             {user && showProfileMenu && (
               <div
-                className={`absolute ${collapsed ? 'lg:left-16 bottom-0' : 'left-full bottom-0 ml-2'} w-48 rounded-xl border border-white/10 bg-neutral-900 shadow-2xl p-1.5 z-50 animate-in fade-in slide-in-from-left-2 duration-200`}
+                role="menu"
+                className={`absolute bottom-full z-50 mb-2 w-60 overflow-hidden rounded-xl border border-white/10 bg-[#141413] p-1.5 shadow-2xl shadow-black/60 animate-in fade-in slide-in-from-bottom-2 duration-150 ${
+                  c ? 'left-0 right-0 w-auto lg:bottom-0 lg:left-full lg:right-auto lg:mb-0 lg:ml-3 lg:w-60' : 'left-0 right-0 w-auto'
+                }`}
               >
+                <div className="px-2.5 pb-2 pt-1.5">
+                  <div className="truncate text-[13px] font-medium text-white">{user.name}</div>
+                  <div className="truncate text-xs text-[#9C9A92]">{user.email}</div>
+                </div>
+                <div className="my-1 border-t" style={{ borderColor: tokens.border }} />
                 <button
                   type="button"
+                  role="menuitem"
                   onClick={() => {
                     setShowProfileMenu(false);
                     onOpenSettings();
                     onCloseMobile();
                   }}
-                  className="w-full text-left px-3 py-2 text-xs font-medium text-neutral-300 hover:bg-white/5 rounded-lg transition"
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-[#C2C0B6] transition-colors hover:bg-white/[0.06] hover:text-white"
                 >
-                  Account Profile
+                  <UserRound size={15} aria-hidden="true" /> Account profile
                 </button>
-                <div className="my-1 border-t" style={{ borderColor: tokens.border }} />
                 <button
                   type="button"
+                  role="menuitem"
                   onClick={() => {
                     setShowProfileMenu(false);
                     onLogout();
                     onCloseMobile();
                   }}
-                  className="w-full text-left px-3 py-2 text-xs font-medium text-rose-400 hover:bg-rose-500/10 rounded-lg transition"
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-rose-400 transition-colors hover:bg-rose-500/10"
                 >
-                  Sign Out
+                  <LogOut size={15} aria-hidden="true" /> Sign out
                 </button>
               </div>
             )}
           </div>
         </div>
-
       </div>
     </aside>
   );

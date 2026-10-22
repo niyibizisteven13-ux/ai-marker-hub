@@ -14,6 +14,7 @@ import { extractChatCompletionText, readProviderJson } from '../utils/providerRe
 export { stripThinkingTags };
 import logger from '../utils/logger.js';
 import { planHint, planOutput } from './outputs/planner.js';
+import { runDeliverableTurn, TOOL_TURN_RULES } from './outputs/chatTurn.js';
 
 const MODELS = {
   SONNET: 'claude-sonnet-5',
@@ -214,6 +215,8 @@ export const bwengeAgent = createAiAgent({
   maxTokens: 8192,
   promptVersion: 'bwenge-general-v1',
   traceHashSecret: process.env.TRACE_HASH_SECRET || fileStoreSecret,
+  // Scanned PDFs on turns whose model cannot see images (Tesseract, loaded only when needed).
+  ocr: async (png) => (await import('./documents/ocr.js')).tesseractOcr(png),
   writeTrace: async (trace) => {
     if (process.env.NODE_ENV === 'test') return;
     await prisma.aiTrace.create({
@@ -773,18 +776,35 @@ export class AiService {
   public async generalAssist(options: {
     userId: string;
     messages: Anthropic.MessageParam[];
-    files?: { type: 'image' | 'document'; base64: string; mediaType: string }[];
+    files?: { type: 'image' | 'document'; base64: string; mediaType: string; name?: string }[];
     pinnedSyllabus?: string | null;
     extractSchema?: string;
     tools?: Anthropic.Tool[];
     executeTool?: (name: string, input: any) => Promise<string>;
     onEvent?: (event: any) => void;
     signal?: AbortSignal;
+    /** The user's own message for output planning, when the last message also carries injected context. */
+    planText?: string;
   }) {
     const useGonka = process.env.AI_PROVIDER === 'gonkarouter' || await this.providerAvailable('gonkarouter');
     const allowFallback = process.env.ALLOW_GEMINI_FALLBACK === 'true';
 
-    if (!useGonka && !process.env.GONKA_API_KEY) {
+    // Output planner: decides whether this turn must produce files/charts or computed numbers (tool turn).
+    // Plan on the user's own words, never on attached-document text or injected context.
+    const planText = options.planText ?? extractPlainText(options.messages[options.messages.length - 1]?.content || '');
+    const userText = planText.includes('USER MESSAGE:') ? planText.slice(planText.lastIndexOf('USER MESSAGE:') + 13) : planText;
+    const plan = !options.extractSchema && userText.trim()
+      ? planOutput({ message: userText, attachments: (options.files ?? []).map((f) => ({ name: '', mime: f.mediaType })), hasDataset: (options.files ?? []).some((f) => /csv|spreadsheet|excel|json/i.test(f.mediaType)) || /\.(csv|xlsx|xls|tsv)\b/i.test(userText) })
+      : null;
+    const toolTurn = !!plan && (plan.artifact || plan.needsComputation);
+    // Photos and PDFs need a model that can see them (handwriting, scans, diagrams).
+    const visualUpload = (options.files ?? []).some((f) => f.type === 'image' || /^image\/|application\/pdf/.test(f.mediaType));
+    // Tool and vision turns run on the agent model (Claude when AI_AGENT_PROVIDER=anthropic); everyday chat stays on Gonka.
+    const agent = agentTarget();
+    const runModel = (toolTurn || visualUpload) && agent.provider === 'anthropic' ? agent.model : undefined;
+    const vision = Boolean(runModel) || process.env.DOC_VISION_GONKA === 'true';
+
+    if (!runModel && !useGonka && !process.env.GONKA_API_KEY) {
       if (!allowFallback) {
         throw new Error('GonkaRouter API key is not configured and ALLOW_GEMINI_FALLBACK is false.');
       } else {
@@ -814,13 +834,11 @@ export class AiService {
     }));
     const lastMsg = options.messages[options.messages.length - 1];
     const prompt = lastMsg ? extractPlainText(lastMsg.content) : '';
-    const uploads = options.files?.map((f) => ({ type: f.type, base64: f.base64, mediaType: f.mediaType })) || [];
+    const uploads = options.files?.map((f) => ({ type: f.type, base64: f.base64, mediaType: f.mediaType, ...(f.name ? { name: f.name } : {}) })) || [];
 
-    // Output planner: steer this turn toward prose, a computed table, or one fitting artifact.
-    if (!options.extractSchema && prompt) {
-      const plan = planOutput({ message: prompt, attachments: uploads.map((u) => ({ name: '', mime: u.mediaType })), hasDataset: uploads.some((u) => /csv|spreadsheet|excel|json/i.test(u.mediaType)) || /\.(csv|xlsx|xls|tsv)\b/i.test(prompt) });
-      if (plan.artifact || plan.needsComputation || plan.needsRetrieval) systemPrompt += `\n\n${planHint(plan)}`;
-    }
+    // Steer this turn toward prose, a computed table, or the requested deliverables.
+    if (plan && (plan.artifact || plan.needsComputation || plan.needsRetrieval)) systemPrompt += `\n\n${planHint(plan)}`;
+    if (toolTurn) systemPrompt += `\n\n${TOOL_TURN_RULES}`;
 
     if (options.extractSchema) {
       const r = await bwengeAgent.run({
@@ -835,19 +853,25 @@ export class AiService {
       return { ...this.parseModelJson(r.text), _usage: r.usage };
     }
 
-    const r = await bwengeAgent.run({
+    const run = (correction?: { previousText: string; note: string }) => bwengeAgent.run({
       userId: options.userId,
       system: systemPrompt,
-      history,
-      prompt,
-      uploads,
+      history: correction ? [...history, { role: 'user', text: prompt }, { role: 'assistant', text: correction.previousText || '(no reply)' }] : history,
+      prompt: correction ? correction.note : prompt,
+      uploads: correction ? [] : uploads,
       onEvent: options.onEvent,
       signal: options.signal,
+      vision,
+      ...(runModel ? { model: runModel } : {}),
     });
+    // A requested file only counts when a tool created it; otherwise one corrective turn, then an honest note.
+    const checked = plan?.artifact ? await runDeliverableTurn({ plan, run, onEvent: options.onEvent }) : null;
+    const r = checked ?? await run();
+    if (toolTurn) logger.info('[AI chat] tool turn', { model: runModel ?? 'gonka-default', deliverables: plan!.deliverables.length, attachments: r.attachments.length, missing: checked?.missing.length ?? 0 });
 
     return {
       content: [{ type: 'text', text: r.text }],
-      model: process.env.GONKA_MODEL || GONKA_MODELS.DEFAULT,
+      model: runModel ?? (process.env.GONKA_MODEL || GONKA_MODELS.DEFAULT),
       attachments: r.attachments,
       sources: r.sources,
       _usage: r.usage,

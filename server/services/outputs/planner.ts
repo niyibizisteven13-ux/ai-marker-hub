@@ -31,6 +31,8 @@ export interface OutputPlan {
   template?: 'statistical_report' | 'briefing_deck' | 'data_workbook';
   authorizedSources: Array<{ type: string; id: string }>;
   rejectedSources: Array<{ type: string; id: string; reason: string }>;
+  /** Every deliverable the user explicitly asked for in this message (e.g. a chart AND an Excel file). */
+  deliverables: Array<{ output: OutputKind; format: OutputPlan['format'] }>;
   reasons: string[];
 }
 
@@ -54,6 +56,8 @@ const R = {
   compute: /\b(mean|average|median|mode|sum|total|percent(?:age)?|ratio|rate|standard deviation|variance|regression|correlat\w*|statistic\w*|calculate|compute|how many|count|distribution|outliers?|pivot|group(?:ed)? by|moving average|significan\w*|p-value|confidence interval)\b/i,
   causal: /\b(cause|causes|caused|effect of|impact of|because of)\b/i,
   retrieval: /\b(rwanda|nisr|ministry|policy|curriculum|law|official|according to|source|report says|document says)\b/i,
+  /** The user asks for something to be produced (not merely mentions a format: "summarise this PDF"). */
+  create: /\b(make|create|generate|give|export|produce|build|prepare|draw|plot|download|save|convert|turn|put|send|write|draft|design|render|visuali[sz]e)\b|\b(?:as|in|into|to)\s+(?:an?\s+)?(?:excel|xlsx|word|docx|pdf|powerpoint|pptx|slides?|chart|graph|spreadsheet|workbook|deck)\b/i,
 };
 
 export function planOutput(input: PlanInput, authorize: (s: { type: string; id: string }) => { ok: boolean; reason?: string } = () => ({ ok: true })): OutputPlan {
@@ -76,15 +80,26 @@ export function planOutput(input: PlanInput, authorize: (s: { type: string; id: 
   if (needsRetrieval) reasons.push('The question refers to documents or official facts, so knowledge-base retrieval is needed for citations.');
   if (has(R.causal, m) && needsComputation) reasons.push('The request asks about causes; results will be reported as associations unless the data come from a controlled design.');
 
-  const plan = (p: Omit<OutputPlan, 'needsComputation' | 'needsRetrieval' | 'authorizedSources' | 'rejectedSources' | 'reasons'>): OutputPlan => ({
+  // Explicitly requested deliverables; a request can name several ("a bar chart and an Excel file").
+  const deliverables: OutputPlan['deliverables'] = [];
+  if (has(R.create, m)) {
+    if (has(R.chart, m)) deliverables.push({ output: 'chart', format: 'svg' });
+    if (has(R.diagram, m)) deliverables.push({ output: 'diagram', format: 'svg' });
+    for (const fmt of ['xlsx', 'pptx', 'docx', 'pdf'] as const) if (has(R[fmt], m)) deliverables.push({ output: needsComputation && fmt !== 'pdf' ? 'template' : 'document', format: fmt });
+    if (has(R.dashboard, m)) deliverables.push({ output: 'report', format: 'html' });
+  }
+
+  const plan = (p: Omit<OutputPlan, 'needsComputation' | 'needsRetrieval' | 'authorizedSources' | 'rejectedSources' | 'reasons' | 'deliverables'>): OutputPlan => ({
     ...p, needsComputation, needsRetrieval, authorizedSources, rejectedSources,
     tools: [...new Set([...(needsRetrieval ? ['search_knowledge'] : []), ...(needsComputation ? ['analyze_data'] : []), ...p.tools])],
+    // Only explicitly requested deliverables are enforced by the chat delivery check.
+    deliverables: p.artifact ? deliverables : [],
     reasons,
   });
 
   // 1. An explicit file format wins: the user said what they want to receive.
   for (const fmt of ['xlsx', 'pptx', 'docx', 'pdf'] as const) {
-    if (has(R[fmt], m)) {
+    if (has(R[fmt], m) && has(R.create, m)) {
       const template = needsComputation ? ({ xlsx: 'data_workbook', pptx: 'briefing_deck', docx: 'statistical_report', pdf: undefined } as const)[fmt] : undefined;
       reasons.push(`The request names a ${fmt.toUpperCase()} file${template ? `; the editable ${template.replace('_', ' ')} template keeps computed results, methods and limitations together` : ''}.`);
       return plan({ intent: 'document', output: template ? 'template' : 'document', format: fmt, tools: ['create_output'], artifact: true, template });
@@ -133,6 +148,11 @@ export function planOutput(input: PlanInput, authorize: (s: { type: string; id: 
 
 /** One-paragraph guidance for the chat model, appended to the system prompt for this turn. */
 export function planHint(p: OutputPlan): string {
-  const what = p.artifact ? `Produce at most one ${p.output}${p.template ? ` (${p.template} template)` : ''} in ${p.format.toUpperCase()} format.` : `Answer in ${p.format === 'table' ? 'prose with a compact table' : 'plain prose'}; do not create a file.`;
+  const list = p.deliverables.map((d) => `a ${d.output === 'template' ? `${d.format.toUpperCase()} template` : d.output === 'document' ? `${d.format.toUpperCase()} file` : `${d.output} (${d.format.toUpperCase()})`}`);
+  const what = p.artifact
+    ? list.length > 1
+      ? `The user asked for ${list.length} deliverables: ${list.join(' and ')}. Create each one with a tool call; do not skip any.`
+      : `Produce one ${p.output}${p.template ? ` (${p.template} template)` : ''} in ${p.format.toUpperCase()} format with a tool call.`
+    : `Answer in ${p.format === 'table' ? 'prose with a compact table' : 'plain prose'}; do not create a file.`;
   return `[Output plan for this turn: ${what}${p.needsComputation ? ' Compute every number with analyze_data; never estimate numbers.' : ''}${p.needsRetrieval ? ' Retrieve and cite sources with search_knowledge.' : ''} Reasons: ${p.reasons.join(' ')}]`;
 }

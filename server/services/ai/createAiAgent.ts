@@ -2,7 +2,7 @@ import { AgentRuntime, type RuntimeConfig } from './AgentRuntime.js';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { buildCapabilitiesPrompt } from './capabilitiesPrompt.js';
 import type { FileStore } from './files/FileStore.js';
-import { ingestUploads, type UploadedFile } from './ingest.js';
+import { ingestUploads, type IngestOptions, type UploadedFile } from './ingest.js';
 import { OpenAICompatibleAdapter, type OpenAICompatibleOptions } from './providers/openaiCompatible.js';
 import type { ProviderAdapter } from './providers/types.js';
 import { buildToolkit } from './tools/index.js';
@@ -26,6 +26,8 @@ export interface AiAgentConfig {
   promptVersion?: string;
   traceHashSecret?: string;
   writeTrace?: (trace: AgentTraceRecord) => Promise<void>;
+  /** OCR for scanned PDFs when the turn's model cannot see images. */
+  ocr?: IngestOptions['ocr'];
 }
 
 export interface AgentRunInput {
@@ -50,6 +52,8 @@ export interface AgentRunInput {
   /** Per-run fallback model from the routing policy; null disables fallback. */
   fallbackModel?: string | null;
   requestId?: string;
+  /** Whether this run's model can see images (scanned PDFs become page images instead of OCR text). Default true. */
+  vision?: boolean;
 }
 
 /** Single entry point for the host app: build once, call run() per message. */
@@ -65,7 +69,7 @@ export function createAiAgent(cfg: AiAgentConfig) {
       const ctx = { userId: input.userId, chatId: input.chatId, locale: input.locale, signal: input.signal, files: cfg.files, services: cfg.services ?? {} };
       let ingested: Awaited<ReturnType<typeof ingestUploads>>;
       try {
-        ingested = await ingestUploads(input.prompt, input.uploads, ctx);
+        ingested = await ingestUploads(input.prompt, input.uploads, ctx, { vision: input.vision, ocr: cfg.ocr });
       } catch (error) {
         if (cfg.writeTrace) {
           try {

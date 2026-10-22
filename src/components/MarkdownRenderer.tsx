@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import { isInlineCode } from '../utils/markdownCode';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
@@ -679,9 +680,10 @@ export default function MarkdownRenderer({ content, className = '' }: MarkdownRe
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[[rehypeKatex, { strict: false }]]}
         components={{
-          code({ className, children, ...props }: any) {
-            const inline = 'inline' in props && Boolean(props.inline);
+          code({ className, children, node, ...props }: any) {
             const match = /language-(\w+)/.exec(className || '');
+            const inline = isInlineCode(props, className, node, children);
+            delete props.inline;
             const language = match?.[1] || '';
             const codeContent = String(children).replace(/\n$/, '');
 
@@ -820,6 +822,34 @@ export default function MarkdownRenderer({ content, className = '' }: MarkdownRe
           },
           p({ children }) {
             return <div className="mb-3 leading-relaxed [&_em]:not-italic">{children}</div>;
+          },
+          // Explicit list and heading styles: the `prose` classes need @tailwindcss/typography, which is not installed.
+          ul({ children }) {
+            return <ul className="mb-3 ml-5 list-disc space-y-1.5 marker:text-neutral-500 [&_ul]:mb-0 [&_ul]:mt-1.5">{children}</ul>;
+          },
+          ol({ children, start }: any) {
+            return <ol start={start} className="mb-3 ml-5 list-decimal space-y-1.5 marker:text-neutral-500 [&_ol]:mb-0 [&_ol]:mt-1.5">{children}</ol>;
+          },
+          li({ children }) {
+            return <li className="pl-1 leading-relaxed [&>div]:mb-1">{children}</li>;
+          },
+          h1({ children }) {
+            return <h3 className="mb-2.5 mt-5 text-xl font-semibold tracking-tight text-white first:mt-0">{children}</h3>;
+          },
+          h2({ children }) {
+            return <h4 className="mb-2 mt-5 text-lg font-semibold tracking-tight text-white first:mt-0">{children}</h4>;
+          },
+          h3({ children }) {
+            return <h5 className="mb-2 mt-4 text-base font-semibold text-white first:mt-0">{children}</h5>;
+          },
+          h4({ children }) {
+            return <h6 className="mb-1.5 mt-3 text-[15px] font-semibold text-neutral-100 first:mt-0">{children}</h6>;
+          },
+          hr() {
+            return <hr className="my-5 border-white/10" />;
+          },
+          strong({ children }) {
+            return <strong className="font-semibold text-white">{children}</strong>;
           },
           em({ children }) {
             return <em className="not-italic">{children}</em>;

@@ -107,6 +107,12 @@ export interface Message {
   attachment?: ChatAttachment;
   attachments?: ChatAttachment[];
   generatedAttachments?: import('./components/types').AttachmentRef[];
+  /** Live agent tool steps for the activity line. */
+  steps?: import('./components/ActivityLine').Step[];
+  isBusy?: boolean;
+  currentStatus?: string;
+  startedAt?: number;
+  endedAt?: number;
   timestamp: string;
   isStreaming?: boolean;
   isWaiting?: boolean;

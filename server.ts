@@ -37,7 +37,9 @@ import { examsRouter } from './server/routes/examRoutes.js';
 import { outputsRouter, sharedOutputsRouter } from './server/routes/outputRoutes.js';
 import { knowledgeAdminRouter, knowledgeSourcesRouter } from './server/routes/knowledgeRepositoryRoutes.js';
 import { shutdownOcr } from './server/services/documents/ocr.js';
-import { fileJobQueue } from './server/services/AiService.js';
+import { agentTarget, fileJobQueue } from './server/services/AiService.js';
+import { planOutput } from './server/services/outputs/planner.js';
+import { useToolAgent } from './server/services/outputs/chatTurn.js';
 import { emptyModelOutputError, nonEmptyModelText } from './server/services/ai/modelOutput.js';
 import { validateScanGradeOutput } from './server/services/ai/scanOutput.js';
 import logger from './server/utils/logger.js';
@@ -933,7 +935,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
   }
 
   let serverAttachmentText = '';
-  let serverVisualFiles: { type: 'image' | 'document'; base64: string; mediaType: string }[] = [];
+  let serverVisualFiles: { type: 'image' | 'document'; base64: string; mediaType: string; name?: string }[] = [];
   const allowedAttachmentExtensions = new Set([
     '.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx', '.csv', '.txt', '.md', '.rtf', '.json',
     '.js', '.jsx', '.ts', '.tsx', '.py', '.java', '.cpp', '.c', '.h', '.html', '.css', '.xml', '.yaml', '.yml', '.sql',
@@ -982,6 +984,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
         type: resolvedType.startsWith('image/') ? 'image' : 'document',
         base64: attachment.base64,
         mediaType: resolvedType,
+        name: attachment.name, // the model and its tools see "Mugenzi.pdf", not "upload-1.pdf"
       });
     }
     try {
@@ -1021,7 +1024,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
   if (Array.isArray(finalAttachmentIds) && finalAttachmentIds.length > 0) {
     const files = await prisma.fileRecord.findMany({
       where: { id: { in: finalAttachmentIds }, userId },
-      select: { extractedText: true, path: true, url: true, mimeType: true },
+      select: { extractedText: true, path: true, url: true, mimeType: true, name: true },
     });
 
     serverAttachmentText = files.map((f) => f.extractedText).filter(Boolean).join('\n\n');
@@ -1050,6 +1053,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
           type: isImage ? 'image' : 'document',
           base64: buffer.toString('base64'),
           mediaType: file.mimeType,
+          name: file.name,
         });
       } catch (err) {
         logger.error('Failed to read an uploaded file for AI vision.', { errorType: err instanceof Error ? err.name : 'Error' });
@@ -1152,11 +1156,15 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
   }
 
   const hasClaude = await aiService.providerAvailable('anthropic');
+  // Requests for files, charts or computed numbers need the tool-enabled agent; the legacy stream below has
+  // no tools and could only describe a file instead of creating one.
+  const turnPlan = planOutput({ message: query || '', attachments: attachments.map((a: any) => ({ name: String(a?.name ?? ''), mime: a?.mimeType })), hasDataset: attachments.some((a: any) => /\.(csv|tsv|xlsx|xls|json)$/i.test(String(a?.name ?? ''))) });
 
-  if (
-    intent === 'general_assist' && service === 'general' && !isSmallTalk && !cleanProvider && hasClaude &&
-    process.env.AI_PROVIDER !== 'gonkarouter'
-  ) {
+  if (useToolAgent({
+    intent, service, isSmallTalk, requestedProvider: cleanProvider, hasClaudeKey: hasClaude, aiProvider: process.env.AI_PROVIDER,
+    agentAvailable: agentTarget().provider === 'anthropic' || Boolean(process.env.GONKA_API_KEY), plan: turnPlan,
+    hasVisualFiles: serverVisualFiles.length > 0 || Boolean(req.file && /^image\/|application\/pdf/.test(req.file.mimetype)),
+  })) {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
@@ -1172,7 +1180,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
     req.on('close', () => clearInterval(keepAlive));
 
     try {
-      let files: { type: 'image' | 'document'; base64: string; mediaType: string }[] = [...serverVisualFiles];
+      let files: { type: 'image' | 'document'; base64: string; mediaType: string; name?: string }[] = [...serverVisualFiles];
       let augmentedQuery = query || '';
 
       if (req.file) {
@@ -1221,6 +1229,7 @@ ${augmentedQuery}`;
         logger.info(`[SENTIMENT] tone=${sentiment.tone} intensity=${sentiment.intensity} persona=${sentiment.suggestedPersona} user=${userId}`);
       }
 
+      let afterTools = false;
       await aiService.generalAssist({
 
         userId,
@@ -1228,6 +1237,7 @@ ${augmentedQuery}`;
         files: finalFiles,
         pinnedSyllabus,
         extractSchema,
+        planText: query || '',
         tools: generalTools,
         onEvent: (event) => {
           if (emitter.isClosed()) return; // client disconnected — stop pushing bytes down a dead socket
@@ -1238,16 +1248,22 @@ ${augmentedQuery}`;
           };
 
           if (event.type === 'text') {
-            emitter.send('text', { ...baseData, text: event.data.text, isThinking: event.data.isThinking });
+            // Text from the turn after tool results is a new paragraph, not a continuation of the last sentence.
+            const text = afterTools && event.data.text && !/^\s/.test(event.data.text) ? `\n\n${event.data.text}` : event.data.text;
+            afterTools = false;
+            emitter.send('text', { ...baseData, text, isThinking: event.data.isThinking });
           } else if (event.type === 'tool_call') {
+            afterTools = false;
             emitter.send('tool_call', {
               ...baseData,
+              id: event.data.id,
               name: event.data.name,
               input: event.data.input,
               status: event.data.status || 'started',
             });
           } else if (event.type === 'tool_result') {
-            emitter.send('tool_result', { ...baseData, text: event.data.output, name: event.data.name });
+            afterTools = true;
+            emitter.send('tool_result', { ...baseData, id: event.data.id, text: event.data.output, name: event.data.name, isError: Boolean(event.data.isError) });
           } else if (event.type === 'usage') {
             // Previously only logged and dropped — now also forwarded to
             // the client, since PaywallService's pricing tiers need real
@@ -1256,6 +1272,9 @@ ${augmentedQuery}`;
             emitter.send('usage', { ...baseData, usage: event.data });
           } else if (event.type === 'attachment') {
             emitter.send('attachment', { ...baseData, ...event.data });
+          } else if (event.type === 'turn_reset') {
+            // Discarded attempt (provider retry or delivery check): the client clears the streamed text.
+            emitter.send('reset', { ...baseData });
           }
         },
         executeTool: async (name, input) => {
