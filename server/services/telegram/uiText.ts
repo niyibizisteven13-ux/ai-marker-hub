@@ -23,7 +23,7 @@ interface Copy {
 
 const en: Copy = {
   hello: 'Welcome to Bwenge AI', helloName: (n) => `Muraho, ${n}!`,
-  intro: "I'm <b>Bwenge AI</b>, your assistant for teaching, research and data. Ask in English, Kinyarwanda or French.",
+  intro: "I'm <b>Bwenge AI</b>, your education, research and data companion. Ask in English, French or Kinyarwanda.",
   whatICanDo: 'What I can do',
   capabilities: [['📊', 'Charts, Excel, Word, PowerPoint and PDF files'], ['🧮', 'Statistics on your spreadsheets'], ['🔎', 'Answers from your knowledge library, with sources'], ['📝', 'Mark exam scripts and send the results'], ['📷', 'Scan papers with your camera and read handwriting']],
   homeFooter: 'Type a request or send a file to begin.',
@@ -44,8 +44,8 @@ const en: Copy = {
     groupHint: 'The link works for 30 minutes.', received: (p) => `Scanned PDF · ${p}. What should I do with it?`,
   },
   profile: {
-    description: 'Bwenge AI is an assistant for teachers and researchers.\n\n📊 Charts, Excel, Word and PDF files\n📝 Exam marking with results sheets\n📷 Document scanner and handwriting reading\n🔎 Answers from your knowledge library\n\nWrite in English, Kinyarwanda or French.',
-    short: 'Charts, files, exam marking and scanning for teachers and researchers. bwenge.space', menuButton: 'Scan',
+    description: 'Bwenge AI is your education, research and data companion.\n\n📊 Charts, Excel, Word and PDF files\n📝 Exam marking with results sheets\n📷 Document scanner and handwriting reading\n🔎 Answers from your knowledge library\n\nWrite in English, Kinyarwanda or French.',
+    short: 'Your education, research & data companion: sourced answers, charts, files, marking and scanning.', menuButton: 'Scan',
   },
   ago: { now: 'just now', min: (n) => `${n} min ago`, hour: (n) => `${n} h ago` },
   buttons: { create: '📊 Charts & files', mark: '📝 Mark exams', scan: '📷 Scan papers', transcribe: '📄 Transcribe', library: '🔎 Ask my library', files: '📁 My files', settings: '⚙️ Settings', help: '❓ Help', back: '‹ Back', regenerate: '🔁 Regenerate', menu: '🏠 Menu', retry: '🔁 Try again' },
@@ -66,7 +66,7 @@ const en: Copy = {
 const rw: Copy = {
   ...en,
   hello: 'Murakaza neza kuri Bwenge AI', helloName: (n) => `Muraho, ${n}!`,
-  intro: 'Ndi <b>Bwenge AI</b>, umufasha wawe mu kwigisha, ubushakashatsi n’imibare. Mbaza mu Kinyarwanda, Icyongereza cyangwa Igifaransa.',
+  intro: 'Ndi <b>Bwenge AI</b>, mugenzi wawe mu burezi, ubushakashatsi n’imibare. Mbaza mu Kinyarwanda, Icyongereza cyangwa Igifaransa.',
   whatICanDo: 'Icyo nshobora gukora',
   capabilities: [['📊', 'Ibishushanyo, Excel, Word, PowerPoint na PDF'], ['🧮', 'Imibare n’isesengura ry’amakuru yawe'], ['🔎', 'Ibisubizo biva mu isomero ryawe, n’aho byavuye'], ['📝', 'Gukosora ibizamini no kohereza amanota'], ['📷', 'Gusikana impapuro na kamera no gusoma inyandiko y’intoki']],
   homeFooter: 'Andika icyo ukeneye cyangwa wohereze dosiye.',
@@ -87,8 +87,8 @@ const rw: Copy = {
     groupHint: 'Iyi link imara iminota 30.', received: (p) => `PDF yasikanwe · ${p}. Nkore iki?`,
   },
   profile: {
-    description: 'Bwenge AI ni umufasha w’abarimu n’abashakashatsi.\n\n📊 Ibishushanyo, Excel, Word na PDF\n📝 Gukosora ibizamini n’amanota\n📷 Scanner n’isoma ry’inyandiko y’intoki\n🔎 Ibisubizo biva mu isomero ryawe\n\nAndika mu Kinyarwanda, Icyongereza cyangwa Igifaransa.',
-    short: 'Ibishushanyo, dosiye, gukosora ibizamini na scanner ku barimu. bwenge.space', menuButton: 'Scan',
+    description: 'Bwenge AI ni mugenzi wawe mu burezi, ubushakashatsi n’imibare.\n\n📊 Ibishushanyo, Excel, Word na PDF\n📝 Gukosora ibizamini n’amanota\n📷 Scanner n’isoma ry’inyandiko y’intoki\n🔎 Ibisubizo biva mu isomero ryawe\n\nAndika mu Kinyarwanda, Icyongereza cyangwa Igifaransa.',
+    short: 'Mugenzi wawe mu burezi, ubushakashatsi n’imibare: ibisubizo, ibishushanyo, dosiye, gukosora na scanner.', menuButton: 'Scan',
   },
   ago: { now: 'ubu', min: (n) => `hashize iminota ${n}`, hour: (n) => `hashize amasaha ${n}` },
   buttons: { create: '📊 Ibishushanyo & dosiye', mark: '📝 Gukosora', scan: '📷 Sikana', transcribe: '📄 Kwandika', library: '🔎 Isomero', files: '📁 Dosiye zanjye', settings: '⚙️ Igenamiterere', help: '❓ Ubufasha', back: '‹ Subira inyuma', regenerate: '🔁 Ongera ukore', menu: '🏠 Ahabanza', retry: '🔁 Ongera ugerageze' },
@@ -109,7 +109,7 @@ const rw: Copy = {
 const fr: Copy = {
   ...en,
   hello: 'Bienvenue sur Bwenge AI', helloName: (n) => `Bonjour, ${n} !`,
-  intro: 'Je suis <b>Bwenge AI</b>, votre assistant pour l’enseignement, la recherche et les données. Écrivez en français, en anglais ou en kinyarwanda.',
+  intro: 'Je suis <b>Bwenge AI</b>, votre compagnon pour l’éducation, la recherche et les données. Écrivez en français, en anglais ou en kinyarwanda.',
   whatICanDo: 'Ce que je sais faire',
   capabilities: [['📊', 'Graphiques, fichiers Excel, Word, PowerPoint et PDF'], ['🧮', 'Statistiques sur vos tableurs'], ['🔎', 'Réponses tirées de votre bibliothèque, avec sources'], ['📝', 'Correction de copies et envoi des résultats'], ['📷', 'Scanner de documents et lecture de l’écriture manuscrite']],
   homeFooter: 'Écrivez une demande ou envoyez un fichier pour commencer.',
@@ -130,8 +130,8 @@ const fr: Copy = {
     groupHint: 'Le lien est valable 30 minutes.', received: (p) => `PDF scanné · ${p}. Que dois-je en faire ?`,
   },
   profile: {
-    description: 'Bwenge AI est un assistant pour les enseignants et les chercheurs.\n\n📊 Graphiques, fichiers Excel, Word et PDF\n📝 Correction de copies avec tableau de résultats\n📷 Scanner de documents et lecture manuscrite\n🔎 Réponses tirées de votre bibliothèque\n\nÉcrivez en français, en anglais ou en kinyarwanda.',
-    short: 'Graphiques, fichiers, correction et scanner pour enseignants et chercheurs. bwenge.space', menuButton: 'Scanner',
+    description: 'Bwenge AI est votre compagnon pour l’éducation, la recherche et les données.\n\n📊 Graphiques, fichiers Excel, Word et PDF\n📝 Correction de copies avec tableau de résultats\n📷 Scanner de documents et lecture manuscrite\n🔎 Réponses tirées de votre bibliothèque\n\nÉcrivez en français, en anglais ou en kinyarwanda.',
+    short: 'Votre compagnon éducation, recherche et données : réponses sourcées, graphiques, fichiers, correction, scanner.', menuButton: 'Scanner',
   },
   ago: { now: 'à l’instant', min: (n) => `il y a ${n} min`, hour: (n) => `il y a ${n} h` },
   buttons: { create: '📊 Graphiques & fichiers', mark: '📝 Corriger', scan: '📷 Scanner', transcribe: '📄 Transcrire', library: '🔎 Ma bibliothèque', files: '📁 Mes fichiers', settings: '⚙️ Paramètres', help: '❓ Aide', back: '‹ Retour', regenerate: '🔁 Régénérer', menu: '🏠 Menu', retry: '🔁 Réessayer' },

@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import {
   Activity, ArrowLeft, BarChart3, BookOpen, Boxes, CheckCircle2, ChevronDown, ChevronRight, Cpu, Database,
   FileText, FlaskConical, GraduationCap, Info, KeyRound, LayoutDashboard, Mail, Menu, MessageSquare, Play, Plus,
-  RefreshCw, ScrollText, Search, Send, Settings, Sparkles, Trash2, Upload, Users, X, ShieldCheck, FolderTree
+  RefreshCw, ScrollText, Search, Send, Settings, Sparkles, Trash2, Upload, Users, X, ShieldCheck, FolderTree, Download, PencilLine,
 } from 'lucide-react';
 import KnowledgeExplorer from '../components/knowledge/KnowledgeExplorer';
 import { adminApi, type AdminQualitySummary } from '../api/admin';
@@ -1464,7 +1464,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                             className={input}
                             value={newDatasetName}
                             onChange={(e) => setNewDatasetName(e.target.value)}
-                            placeholder="e.g. Rwanda STEM Exam Corpus"
+                            placeholder="e.g. STEM Exam Corpus"
                           />
                         </Field>
                       </div>
@@ -1585,7 +1585,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                                 }}
                                 className={btnGhost + ' text-xs py-2 px-3.5'}
                               >
-                                📥 JSONL
+                                <Download size={14} /> JSONL
                               </button>
                             </div>
                           </div>
@@ -2092,7 +2092,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                                 }}
                                 className={btnGhost + ' w-full text-xs py-3'}
                               >
-                                ✏️ Correct this answer (Learning Signal)
+                                <PencilLine size={14} /> Correct this answer (Learning Signal)
                               </button>
                             ) : (
                               <div className="space-y-4 p-4 bg-[#141C33] rounded-2xl border border-[#3FA7E0]/40 shadow-xl">

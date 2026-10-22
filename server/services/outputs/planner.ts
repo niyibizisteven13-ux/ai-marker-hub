@@ -45,6 +45,8 @@ const R = {
   docx: /\b(word|docx|editable (?:report|document))\b/i,
   pptx: /\b(powerpoint|pptx|slides?|slide deck|deck|presentation)\b/i,
   dashboard: /\bdashboard\b/i,
+  /** A shareable HTML page that demonstrates or explains something (data story, showcase, interactive page). */
+  html: /\b(html|web ?page|demonstrat\w*|demo|showcase|data story|infographic|interactive (?:page|report|story))\b/i,
   report: /\b(report|write[- ]?up|brief(?:ing)?)\b/i,
   interactive: /\b(interactive|explore|explorer|filterable|sortable|drill[- ]?down|widget|calculator)\b/i,
   chart: /\b(chart|graph|plot|visuali[sz]e|visuali[sz]ation|histogram|scatter|bar chart|line chart|pie)\b/i,
@@ -86,7 +88,7 @@ export function planOutput(input: PlanInput, authorize: (s: { type: string; id: 
     if (has(R.chart, m)) deliverables.push({ output: 'chart', format: 'svg' });
     if (has(R.diagram, m)) deliverables.push({ output: 'diagram', format: 'svg' });
     for (const fmt of ['xlsx', 'pptx', 'docx', 'pdf'] as const) if (has(R[fmt], m)) deliverables.push({ output: needsComputation && fmt !== 'pdf' ? 'template' : 'document', format: fmt });
-    if (has(R.dashboard, m)) deliverables.push({ output: 'report', format: 'html' });
+    if (has(R.dashboard, m) || has(R.html, m)) deliverables.push({ output: 'report', format: 'html' });
   }
 
   const plan = (p: Omit<OutputPlan, 'needsComputation' | 'needsRetrieval' | 'authorizedSources' | 'rejectedSources' | 'reasons' | 'deliverables'>): OutputPlan => ({
@@ -105,10 +107,12 @@ export function planOutput(input: PlanInput, authorize: (s: { type: string; id: 
       return plan({ intent: 'document', output: template ? 'template' : 'document', format: fmt, tools: ['create_output'], artifact: true, template });
     }
   }
-  // 2. Dashboards and interactive reports: only when exploring helps.
-  if (has(R.dashboard, m) || (has(R.interactive, m) && (has(R.report, m) || hasData))) {
-    reasons.push(has(R.dashboard, m) ? 'A dashboard was requested: a persistent, shareable HTML report.' : 'Interactive exploration was requested and there is data to explore.');
-    return plan({ intent: 'report', output: has(R.dashboard, m) || has(R.report, m) ? 'report' : 'widget', format: 'html', tools: ['create_output'], artifact: true });
+  // 2. Dashboards, HTML pages that demonstrate something, and interactive reports: only when exploring helps.
+  if (has(R.dashboard, m) || has(R.html, m) || (has(R.interactive, m) && (has(R.report, m) || hasData))) {
+    reasons.push(has(R.dashboard, m) ? 'A dashboard was requested: a persistent, shareable HTML report.'
+      : has(R.html, m) ? 'An HTML page that demonstrates the topic was requested: a themed report with KPIs, charts, tables and explanation.'
+        : 'Interactive exploration was requested and there is data to explore.');
+    return plan({ intent: 'report', output: has(R.dashboard, m) || has(R.report, m) || has(R.html, m) ? 'report' : 'widget', format: 'html', tools: ['create_output'], artifact: true });
   }
   if (has(R.diagram, m)) {
     reasons.push('A process or structure is best shown as a diagram.');

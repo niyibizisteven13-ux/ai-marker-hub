@@ -73,6 +73,7 @@ export function outputTools(services: ToolServices): Tool[] {
         'Every spec needs title and sources [{type, id?, label}] (values typed by the user: {"type":"user","label":"Values given by the user"}).',
         'Example chart: {"kind":"chart","title":"Values by category","sources":[{"type":"user","label":"User input"}],"chart":{"type":"bar","x":{"field":"Category","title":"Category","type":"nominal"},"y":{"field":"Value","title":"Value","unit":"none"},"data":[{"Category":"A","Value":10}],"sourceNote":"Values given by the user"}}.',
         'Example Excel file: {"kind":"document","format":"xlsx","title":"Values","sources":[{"type":"user","label":"User input"}],"sheets":[{"name":"Data","table":{"columns":[{"key":"Category","label":"Category"},{"key":"Value","label":"Value"}],"rows":[{"Category":"A","Value":10}]}}]}.',
+        'HTML outputs (widget, report) take theme and subtitle: pick the theme that fits the topic: violet education/learning, forest agriculture/environment, crimson health, slate finance/business/government, amber energy/economy, teal science/water, sunset community/culture, ocean anything else. For an HTML page that demonstrates data or a topic, use kind report (layout "dashboard" for many figures) with a summary, 3-6 KPIs, and sections that each pair a chart or table with a short explanation of what it shows.',
         'Call the tool once per requested deliverable.',
       ].join(' '),
       parameters: {

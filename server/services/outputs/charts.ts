@@ -18,7 +18,7 @@ function guessType(rows: Row[], field: string): 'quantitative' | 'nominal' | 'te
   return 'nominal';
 }
 
-export function compileChart(c: ChartConfig, title: string, rows: Row[]): Record<string, unknown> {
+export function compileChart(c: ChartConfig, title: string, rows: Row[], palette?: readonly string[]): Record<string, unknown> {
   const xType = c.x.type ?? (c.type === 'histogram' ? 'quantitative' : guessType(rows, c.x.field));
   const yType = c.y ? c.y.type ?? guessType(rows, c.y.field) : 'quantitative';
   const longLabels = xType === 'nominal' && rows.some((r) => String(r[c.x.field] ?? '').length > 10);
@@ -64,16 +64,20 @@ export function compileChart(c: ChartConfig, title: string, rows: Row[]): Record
     title: { text: title, subtitle: [...(c.subtitle ? [c.subtitle] : []), `Source: ${c.sourceNote}`], anchor: 'start', subtitleFontSize: 11 },
     width: 640, height: 360, autosize: { type: 'fit', contains: 'padding' },
     background: 'white',
-    config: { font: 'Inter, Segoe UI, Arial, sans-serif', axis: { labelFontSize: 11, titleFontSize: 12 }, legend: { labelLimit: 200 } },
+    config: {
+      font: 'Inter, Segoe UI, Arial, sans-serif', axis: { labelFontSize: 11, titleFontSize: 12 }, legend: { labelLimit: 200 },
+      // Topic theme of the surrounding HTML page: series colours and the single-series colour.
+      ...(palette?.length ? { range: { category: [...palette] }, mark: { color: palette[0] }, bar: { color: palette[0] }, line: { color: palette[0] }, point: { color: palette[0] }, area: { color: palette[0] } } : {}),
+    },
     data: { values: rows },
     mark, encoding: enc,
   };
 }
 
 /** Renders to sanitised SVG that scales to its container (no fixed pixel width, no external references). */
-export async function renderChartSvg(c: ChartConfig, title: string, rows: Row[]): Promise<string> {
+export async function renderChartSvg(c: ChartConfig, title: string, rows: Row[], palette?: readonly string[]): Promise<string> {
   if (!rows.length) throw new Error('The chart has no data rows.');
-  const svg = sanitizeSvg(await renderVegaLite(compileChart(c, title, rows)), { maxBytes: 3_000_000 });
+  const svg = sanitizeSvg(await renderVegaLite(compileChart(c, title, rows, palette)), { maxBytes: 3_000_000 });
   return makeResponsive(svg);
 }
 

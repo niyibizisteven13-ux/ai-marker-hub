@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { MoreVertical, GraduationCap, FilePlus, Award, Plus, Settings, FileOutput, Trash2, Instagram, Upload, Eye, FileText, Download, Share2, Star, Building2, PanelLeft } from 'lucide-react';
+import { MoreVertical, GraduationCap, FilePlus, Award, Plus, Settings, FileOutput, Trash2, Instagram, Upload, Eye, FileText, Download, Share2, Star, Building2, PanelLeft, Sparkles } from 'lucide-react';
 import logoUrl from '../assets/bwenge-logo.svg';
 import { NavigationTab, User } from '../types';
 
@@ -111,7 +111,7 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
               title="Upgrade Pro"
               aria-label="Upgrade to Pro"
             >
-              <span>⭐</span>
+              <Sparkles size={16} />
             </button>
           )}
 

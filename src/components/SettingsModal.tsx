@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { authFetch } from '../utils/authFetch';
 import { User, UserSettings } from '../types';
-import { X, User as UserIcon, Cpu, ShieldAlert, LogOut, Check, Sparkles } from 'lucide-react';
+import { X, User as UserIcon, Cpu, ShieldAlert, LogOut, Check, Sparkles, Brain } from 'lucide-react';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -238,7 +238,7 @@ export default function SettingsModal({ isOpen, onClose, user, onUpdateUser, onL
 
                   <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-[#090D14] p-4 transition-colors hover:border-white/20">
                     <div>
-                      <div className="text-sm font-bold text-white">🧠 Long-Term Workspace Memory</div>
+                      <div className="flex items-center gap-2 text-sm font-bold text-white"><Brain size={16} className="text-violet-400" /> Long-Term Workspace Memory</div>
                       <p className="text-xs text-neutral-400 mt-0.5">Retain context from previous marking sessions to personalize feedback.</p>
                     </div>
                     <input

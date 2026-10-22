@@ -46,6 +46,8 @@ scanner.html + src/scanner/  the web app's DocumentScanner as a Telegram Mini Ap
   - During /grade batch mode, scans are staged as papers or the marking scheme, as before.
   - The old /scan.html page redirects to the new scanner.
 - **Bot profile:** description, short description and command menu are set in all three languages on start.
+- **Profile picture:** bots can only get one through @BotFather (`/setuserpic`). Upload
+  `public/brand/bwenge-telegram-avatar.png`, which matches the banner and works in Telegram's round crop.
 - **One live progress message per request.**
   - It shows `⏳ Working on it`, then each tool step: "Creating chart: …" ⏳ → ✅ "Ready: … (XLSX, 7.4 KB)".
   - When the answer is ready, the progress message is edited into the answer, with 🔁 Regenerate · 📁 My files · 🏠 Menu.

@@ -98,7 +98,7 @@ export default function OrganisationRequestDialog({ isOpen, onClose }: Organisat
                 <input
                   type="text"
                   required
-                  placeholder="e.g. University of Rwanda"
+                  placeholder="e.g. Northfield University"
                   value={organizationName}
                   onChange={(e) => setOrganizationName(e.target.value)}
                   className="w-full bg-[var(--surface)] border border-[var(--line)] rounded-xl px-4 py-3 text-sm text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"

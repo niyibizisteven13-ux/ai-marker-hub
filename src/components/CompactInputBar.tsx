@@ -1,4 +1,5 @@
 import React from 'react';
+import { FileTypeIcon } from './FileTypeIcon';
 import type { ChatAttachment } from '../types';
 
 interface CompactInputBarProps {
@@ -65,14 +66,14 @@ export const CompactInputBar: React.FC<CompactInputBarProps> = ({
             const fileName = attachment instanceof File ? attachment.name : attachment.name;
             const fileSize = attachment instanceof File ? `${Math.round(attachment.size / 1024)} KB` : attachment.size || '';
             const mimeType = attachment instanceof File ? attachment.type : attachment.mimeType;
-            const { icon, label } = getFileIconAndType(fileName, mimeType);
+            const { label } = getFileIconAndType(fileName, mimeType);
 
             return (
               <div
                 key={`${fileName}-${idx}`}
                 className="group flex items-center gap-2 rounded-xl bg-slate-800/90 border border-slate-700/70 px-3 py-1.5 text-xs text-slate-200 shadow-sm"
               >
-                <span className="text-sm">{icon}</span>
+                <FileTypeIcon name={fileName} mimeType={mimeType} size="sm" />
                 <div className="min-w-0">
                   <div className="truncate max-w-[160px] text-[11px] font-medium text-slate-100">
                     {fileName}
