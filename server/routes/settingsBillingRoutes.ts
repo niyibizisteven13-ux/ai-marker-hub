@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { usageSummary } from '../services/billing/usage.js';
 import { z } from 'zod';
 import { prisma } from '../db.js';
 import { requireAuth } from '../../production/auth.js';
@@ -72,6 +73,8 @@ router.get('/usage', requireAuth, async (req, res) => {
 
     res.json({
       success: true,
+      // Plan, credits (day / week / month) and per-feature daily limits.
+      ...(await usageSummary(userId)),
       meters: {
         scriptsMarked: { used: scriptsMarked, limit: 1000 },
         batchesPaid: { used: paidBatches, limit: 50 },

@@ -40,6 +40,7 @@ import { shutdownOcr } from './server/services/documents/ocr.js';
 import { agentTarget, fileJobQueue } from './server/services/AiService.js';
 import { planOutput } from './server/services/outputs/planner.js';
 import { asksAboutDatasets } from './server/services/knowledge/published.js';
+import { checkUsage, recordUsage } from './server/services/billing/usage.js';
 import { useToolAgent } from './server/services/outputs/chatTurn.js';
 import { emptyModelOutputError, nonEmptyModelText } from './server/services/ai/modelOutput.js';
 import { validateScanGradeOutput } from './server/services/ai/scanOutput.js';
@@ -60,6 +61,7 @@ import adminRoutes from './server/routes/adminRoutes.ts';
 import ollamaRoutes from './server/routes/ollamaRoutes.ts';
 import telegramBotRoutes from './server/routes/telegramBotRoutes.ts';
 import settingsBillingRoutes from './server/routes/settingsBillingRoutes.ts';
+import memoryRoutes from './server/routes/memoryRoutes.js';
 import feedbackRoutes from './server/routes/feedbackRoutes.ts';
 import chatSseRoutes from './server/routes/chatSseRoutes.js';
 import { getTelegramWebhookBaseUrl, TelegramBotService } from './server/services/TelegramBotService.ts';
@@ -360,6 +362,7 @@ app.use('/api/documents', requireAuth, documentsRouter);
 app.use('/api/exams', requireAuth, examsRouter);
 app.use('/api/outputs/shared', sharedOutputsRouter);
 app.use('/api/outputs', requireAuth, outputsRouter);
+app.use('/api/memory', requireAuth, memoryRoutes);
 app.use('/api', settingsBillingRoutes);
 // /exports serves generated Excel reports — gate it so only the owning
 // authenticated user (or admin) can download them. Anonymous access would
@@ -864,6 +867,24 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
   const userId = (req as any).user?.userId;
   if (!userId) return res.status(401).json({ error: 'Authentication required.' });
   const hasFile = !!req.file || !!attachmentBase64 || attachments.length > 0;
+
+  // ── PLAN LIMITS (daily / weekly / monthly credits, per-feature daily caps, message size) ──
+  {
+    const earlyPlan = planOutput({ message: query || '' });
+    const visual = Boolean(req.file && /^image\/|application\/pdf/.test(req.file.mimetype)) || attachments.some((a: any) => /^image\/|application\/pdf/.test(String(a?.mimeType ?? a?.type ?? '')));
+    const kind = visual ? 'vision' : earlyPlan.artifact ? 'artifact' : earlyPlan.needsComputation ? 'tool' : 'chat';
+    const gate = await checkUsage(userId, { kind, chars: String(query || '').length, attachments: attachments.length + (req.file ? 1 : 0) }).catch(() => null);
+    if (gate && !gate.allowed) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      const limitEmitter = makeEmitter(res);
+      limitEmitter.send('limit', { code: gate.code, plan: gate.plan.id, resetsAt: gate.resetsAt, upgrade: gate.upgrade });
+      limitEmitter.send('text', { text: `**Limit reached.** ${gate.message}${gate.upgrade ? `\n\n[See plans and upgrade](${gate.upgrade.url})` : ''}` });
+      limitEmitter.done();
+      return;
+    }
+  }
 
   // ── SAFETY SCAN (fast path, pre-LLM) ────────────────────────────────────────────
   // Run safety check before any expensive LLM call.
@@ -1579,6 +1600,10 @@ ${augmentedQuery}`;
         }
         emitter.send('text', { text: finalStreamedText });
       }
+      await recordUsage(userId, {
+        kind: 'chat', model: ftModelCtx.modelName || 'gonka',
+        inputTokens: Math.round((prompt.length + systemWithContext.length) / 4), outputTokens: Math.round(finalStreamedText.length / 4),
+      });
       await prisma.usageEvent
         .create({
           data: {

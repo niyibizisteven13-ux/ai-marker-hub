@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { ArrowLeft, User as UserIcon, Shield, Lock, CreditCard, BarChart2, Sliders, Send, Check, X, Sparkles } from 'lucide-react';
+import { ArrowLeft, User as UserIcon, Shield, Lock, CreditCard, BarChart2, Sliders, Send, Check, X, Sparkles, Brain } from 'lucide-react';
 import { User } from '../types';
 import { useIsMobile } from '../hooks/useIsMobile';
 
@@ -8,6 +8,7 @@ import AccountSection from '../components/settings/AccountSection';
 import PrivacySection from '../components/settings/PrivacySection';
 import BillingSection from '../components/settings/BillingSection';
 import UsageSection from '../components/settings/UsageSection';
+import MemorySection from '../components/settings/MemorySection';
 import PreferencesSection from '../components/settings/PreferencesSection';
 import ConnectionsSection from '../components/settings/ConnectionsSection';
 
@@ -24,6 +25,7 @@ const SECTIONS = [
   { id: 'privacy', label: 'Privacy', icon: <Lock size={16} /> },
   { id: 'billing', label: 'Billing', icon: <CreditCard size={16} /> },
   { id: 'usage', label: 'Usage', icon: <BarChart2 size={16} /> },
+  { id: 'memory', label: 'Memory', icon: <Brain size={16} /> },
   { id: 'preferences', label: 'Preferences', icon: <Sliders size={16} /> },
   { id: 'connections', label: 'Connections', icon: <Send size={16} /> },
 ];
@@ -62,6 +64,8 @@ export default function SettingsPage({ user, onUpdateUser, onLogout, onBack }: S
         return <BillingSection />;
       case 'usage':
         return <UsageSection />;
+      case 'memory':
+        return <MemorySection />;
       case 'preferences':
         return <PreferencesSection user={user} onUpdateUser={onUpdateUser} />;
       case 'connections':

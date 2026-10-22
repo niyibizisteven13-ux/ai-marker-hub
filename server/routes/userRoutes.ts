@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { planFor } from '../services/billing/plans.js';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../db.js';
 
@@ -112,7 +113,14 @@ router.put('/settings', async (req, res) => {
     if (typeof autoSummarize === 'boolean') settingsData.autoSummarize = autoSummarize;
     if (preferredLanguage) settingsData.preferredLanguage = preferredLanguage;
     if (theme) settingsData.theme = theme;
-    if (typeof longTermMemory === 'boolean') settingsData.longTermMemory = longTermMemory;
+    if (typeof longTermMemory === 'boolean') {
+      // Memory across chats is a PRO feature: turning it on needs a plan that includes it.
+      const wasOn = Boolean((await prisma.userSettings.findUnique({ where: { userId } }).catch(() => null))?.longTermMemory);
+      if (longTermMemory && !wasOn && !(await planFor(userId)).limits.memory) {
+        return res.status(402).json({ error: 'Memory across all chats is part of PRO. Upgrade to turn it on.', code: 'UPGRADE_REQUIRED', upgrade: { plan: 'PRO', url: '/upgrade?reason=memory' } });
+      }
+      settingsData.longTermMemory = longTermMemory;
+    }
     if (agentTone) settingsData.agentTone = agentTone;
     if (typeof customInstructions === 'string') settingsData.customInstructions = customInstructions.trim() || null;
 

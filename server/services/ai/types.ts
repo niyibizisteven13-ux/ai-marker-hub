@@ -108,6 +108,12 @@ export interface ToolServices {
     }>;
   };
   image?: ImageProvider;
+  /** Memory across all chats (PRO). Calls are refused with a clear message when memory is off. */
+  memory?: {
+    remember(userId: string, content: string, kind: 'fact' | 'preference' | 'note'): Promise<string>;
+    recall(userId: string, query: string): Promise<Array<{ id: string; content: string; kind: string; createdAt: string }>>;
+    forget(userId: string, query: string): Promise<number>;
+  };
   /** Datasets curated by admins in Admin → Datasets & Curations (knowledge repositories). */
   datasets?: {
     catalog(userId: string): Promise<DatasetSummary[]>;

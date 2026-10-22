@@ -238,8 +238,8 @@ export default function SettingsModal({ isOpen, onClose, user, onUpdateUser, onL
 
                   <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-[#090D14] p-4 transition-colors hover:border-white/20">
                     <div>
-                      <div className="flex items-center gap-2 text-sm font-bold text-white"><Brain size={16} className="text-violet-400" /> Long-Term Workspace Memory</div>
-                      <p className="text-xs text-neutral-400 mt-0.5">Retain context from previous marking sessions to personalize feedback.</p>
+                      <div className="flex items-center gap-2 text-sm font-bold text-white"><Brain size={16} className="text-violet-400" /> Memory across all chats <span className="rounded-full bg-orange-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-orange-400">PRO</span></div>
+                      <p className="text-xs text-neutral-400 mt-0.5">Remember facts, preferences and past topics in every chat. Review and edit memories in Settings → Memory.</p>
                     </div>
                     <input
                       type="checkbox"
