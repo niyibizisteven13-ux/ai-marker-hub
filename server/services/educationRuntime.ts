@@ -6,11 +6,17 @@ import { OwnedRecordStore } from './storage/ownedRecordStore.js';
 import { createDocumentService, type DocumentRecord } from './documents/service.js';
 import { tesseractOcr } from './documents/ocr.js';
 import { createTelegramTranscriber, type TelegramTransport } from './documents/telegramTranscribe.js';
+import { createExamService } from './exams/service.js';
+import { createExamChat, type ExamChatContext } from './exams/chat.js';
+import type { ExamRecord } from './exams/types.js';
+import { createKnowledgeService } from './knowledge/service.js';
+import { EmbeddingService } from './EmbeddingService.js';
+import { createOutputService } from './outputs/service.js';
 import logger from '../utils/logger.js';
 
 /** Wires the statistics/report and assessment services to the shared file store, job queue and agent model. */
 
-const forbiddenStrings = [process.cwd(), path.resolve(process.env.FILE_STORE_DIR ?? './data/generated'), path.resolve(process.env.JOBS_DIR ?? './data/jobs'), path.resolve(process.env.DOCUMENTS_DIR ?? './data/documents')];
+const forbiddenStrings = [process.cwd(), path.resolve(process.env.FILE_STORE_DIR ?? './data/generated'), path.resolve(process.env.JOBS_DIR ?? './data/jobs'), path.resolve(process.env.DOCUMENTS_DIR ?? './data/documents'), path.resolve(process.env.EXAMS_DIR ?? './data/exams')];
 
 export const analyticsService = createAnalyticsService({
   fileStore, queue: fileJobQueue, forbiddenStrings,
@@ -55,6 +61,58 @@ export const documentService = createDocumentService({
   maxPages: Number(process.env.DOC_MAX_PAGES) > 0 ? Number(process.env.DOC_MAX_PAGES) : 20,
 });
 
+const EXAM_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+export const examStore = new OwnedRecordStore<ExamRecord>(process.env.EXAMS_DIR ?? './data/exams', EXAM_RETENTION_MS);
+export const examChatContexts = new OwnedRecordStore<ExamChatContext>(path.join(process.env.EXAMS_DIR ?? './data/exams', 'chat'), EXAM_RETENTION_MS);
+const num = (v: string | undefined, d: number) => (Number(v) > 0 ? Number(v) : d);
+
+export const examService = createExamService({
+  fileStore, queue: fileJobQueue, store: examStore, documents: documentService, forbiddenStrings,
+  agent: () => {
+    const a = agentTarget();
+    return { adapter: a.adapter, model: a.model, fallbackModel: a.fallbackModel };
+  },
+  visionAvailable: () => visionTarget() !== null,
+  maxPages: num(process.env.DOC_MAX_PAGES, 20),
+  maxCandidates: num(process.env.EXAM_MAX_CANDIDATES, 100),
+  candidateConcurrency: num(process.env.EXAM_CANDIDATE_CONCURRENCY, 2),
+  segmentBudgetMs: num(process.env.EXAM_SEGMENT_BUDGET_MS, 8 * 60 * 1000),
+});
+
+export const examChat = createExamChat({
+  service: examService, fileStore, queue: fileJobQueue, contexts: examChatContexts,
+  agent: () => {
+    const a = agentTarget();
+    return { adapter: a.adapter, model: a.model, fallbackModel: a.fallbackModel };
+  },
+  waitMs: num(process.env.EXAM_CHAT_WAIT_MS, 45_000),
+});
+
+/** Knowledge repositories: file explorer whose files are indexed into the existing knowledge bases. */
+export const knowledgeService = createKnowledgeService({
+  fileStore, queue: fileJobQueue,
+  embedder: EmbeddingService.getInstance(),
+  ocr: process.env.KNOWLEDGE_OCR === 'false' ? undefined : tesseractOcr,
+});
+
+/** Universal output engine: validated specs → charts, widgets, reports, documents, analyses (see docs/OUTPUT_ENGINE.md). */
+export const outputService = createOutputService({
+  fileStore, queue: fileJobQueue, forbiddenStrings,
+  readDataset: (userId, id) => analyticsService.readDataset(userId, id),
+  readRepositoryFile: async (userId, id) => {
+    const limit = num(process.env.ANALYSIS_MAX_INPUT_BYTES, 50 * 1024 * 1024);
+    const { file, stream } = await knowledgeService.openDownload(userId, id);
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const c of stream as AsyncIterable<Buffer>) {
+      size += c.length;
+      if (size > limit) { (stream as any).destroy?.(); throw new Error(`The file is larger than ${Math.round(limit / 1048576)} MB.`); }
+      chunks.push(c);
+    }
+    return { name: file.name, data: Buffer.concat(chunks) };
+  },
+});
+
 let started = false;
 
 /** Recovers persisted jobs and schedules cleanup of expired jobs, files and assessments. */
@@ -64,14 +122,17 @@ export async function startEducationRuntime(): Promise<void> {
   await fileJobQueue.init();
   const sweep = async () => {
     try {
-      const [jobs, files, assessments, documents] = await Promise.all([fileJobQueue.purgeExpired(), fileStore.purgeExpired(), assessmentStore.purgeExpired(), documentStore.purgeExpired()]);
-      if (jobs.length || files || assessments || documents) logger.info('[cleanup] expired items removed', { jobs: jobs.length, files, assessments, documents });
+      const [jobs, files, assessments, documents, exams, examContexts] = await Promise.all([fileJobQueue.purgeExpired(), fileStore.purgeExpired(), assessmentStore.purgeExpired(), documentStore.purgeExpired(), examStore.purgeExpired(), examChatContexts.purgeExpired()]);
+      if (jobs.length || files || assessments || documents || exams || examContexts) logger.info('[cleanup] expired items removed', { jobs: jobs.length, files, assessments, documents, exams, examContexts });
     } catch (err) {
       logger.warn('[cleanup] sweep failed', { errorType: (err as Error)?.name });
     }
   };
+  // Re-queue repository files left waiting (restart, job limit) and fill missing embeddings.
+  const resume = () => knowledgeService.resumePending().then((r) => { if (r.queued) logger.info('[knowledge] resumed pending indexing', r); }).catch((err) => logger.warn('[knowledge] resume failed', { errorType: (err as Error)?.name }));
   void sweep();
-  setInterval(sweep, 60 * 60 * 1000).unref();
+  void resume();
+  setInterval(() => { void sweep(); void resume(); }, 60 * 60 * 1000).unref();
 }
 
 let telegramTranscriber: ReturnType<typeof createTelegramTranscriber> | null = null;

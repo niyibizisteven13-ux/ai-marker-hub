@@ -4,6 +4,9 @@ import path from 'path';
 import crypto from 'crypto';
 import { getSandbox } from './sandboxManager.js';
 
+/** Single-quotes a value for a POSIX shell. */
+const shellQuote = (v: string) => `'${v.replace(/'/g, "'\\''")}'`;
+
 export class ExecutionSandbox {
   private static instance: ExecutionSandbox;
   private stateHashes: string[] = [];
@@ -37,7 +40,11 @@ export class ExecutionSandbox {
       switch (method) {
         case 'python/execute':
           logger.info('Sandbox: Executing Python code via E2B');
-          const res = await sandbox.commands.run(`python3 -c "${params.code.replace(/"/g, '\\"')}"`);
+          // The code is written to a file and never interpolated into a shell command.
+          if (typeof params.code !== 'string' || params.code.length > 200_000) throw new Error('code must be a string of at most 200,000 characters');
+          const script = `/tmp/bwenge_${crypto.randomUUID()}.py`;
+          await sandbox.files.write(script, params.code);
+          const res = await sandbox.commands.run(`timeout 120 python3 ${script}`).catch((e: any) => e?.result ?? { stdout: '', stderr: String(e?.message ?? e) });
           return {
               jsonrpc: "2.0",
               result: { output: res.stdout || res.stderr },
@@ -53,7 +60,7 @@ export class ExecutionSandbox {
           return { jsonrpc: "2.0", result: { content }, id: request.id };
 
         case 'workspace/search':
-          const searchRes = await sandbox.commands.run(`grep -r "${params.pattern}" ${params.dir || '/home/user/project'}`);
+          const searchRes = await sandbox.commands.run(`grep -r -- ${shellQuote(String(params.pattern ?? ''))} ${shellQuote(String(params.dir || '/home/user/project'))}`).catch((e: any) => e?.result ?? { stdout: '' });
           return { jsonrpc: "2.0", result: { matches: searchRes.stdout }, id: request.id };
 
         default:

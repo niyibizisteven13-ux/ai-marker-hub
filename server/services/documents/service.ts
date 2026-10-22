@@ -7,7 +7,7 @@ import { renderReportHtml, validateHtmlArtifact, type ReportInput, type ReportSe
 import { OwnedRecordStore, type OwnedRecord } from '../storage/ownedRecordStore.js';
 import { answerFromDocument } from './ask.js';
 import { DocumentInputError, loadPages } from './pages.js';
-import { documentText, finalText, processDocument, type DocumentResult } from './pipeline.js';
+import { PIPELINE_VERSION, documentText, finalText, processDocument, type DocumentResult } from './pipeline.js';
 import type { IndependentOcr } from './verify.js';
 
 export interface DocumentCorrection { elementId: string; text: string; by: string; at: string }
@@ -143,6 +143,33 @@ export function createDocumentService(deps: DocumentDeps) {
     return res;
   }
 
+  /**
+   * Recognition for another workflow (exam marking), run inside that workflow's own job. The record id is
+   * derived from owner + content hash + pipeline version + settings, so an unchanged script is never
+   * recognised twice and a retried job overwrites its own record.
+   */
+  async function recognizeCached(userId: string, file: { buffer: Buffer; name: string; sourceFileId?: string }, opts: { languageHint?: string; tiling?: 'auto' | 'always' | 'off'; crossCheck?: boolean }, ctx: { signal?: AbortSignal; progress?: (stage: string, percent: number) => Promise<void> } = {}) {
+    const sha = createHash('sha256').update(file.buffer).digest('hex');
+    const key = createHash('sha256').update(JSON.stringify({ userId, sha, v: PIPELINE_VERSION, opts: { languageHint: opts.languageHint ?? null, tiling: opts.tiling ?? null, crossCheck: opts.crossCheck ?? null } })).digest('hex');
+    const id = `${key.slice(0, 8)}-${key.slice(8, 12)}-4${key.slice(13, 16)}-8${key.slice(17, 20)}-${key.slice(20, 32)}`;
+    const existing = await deps.store.get(id, userId);
+    if (existing) return { record: existing, cached: true, key };
+    const vision = deps.vision();
+    if (!vision) throw new JobError('VISION_MODEL_UNAVAILABLE', 'No vision-capable model is configured for handwriting recognition.');
+    let result: DocumentResult;
+    try {
+      result = await processDocument(file.buffer, file.name, {
+        adapter: vision.adapter, model: vision.model, fallbackModel: vision.fallbackModel, ocr: deps.ocr,
+        storeCrop: async (png, name) => (await deps.fileStore.put({ userId, name, mime: 'image/png', kind: 'image', data: png, ttlMs: RETENTION_MS })).id,
+      }, { ...opts, maxPages: deps.maxPages, signal: ctx.signal, progress: ctx.progress });
+    } catch (e) {
+      mapAiError(e);
+    }
+    const sourceFileId = file.sourceFileId ?? (await deps.fileStore.put({ userId, name: file.name.replace(/[^\w.\- ]/g, '_').slice(0, 120) || 'upload', mime: 'application/octet-stream', kind: 'document', data: file.buffer, ttlMs: RETENTION_MS })).id;
+    const record = await deps.store.put(id, userId, { result: result!, corrections: [], sourceFileId } as Omit<DocumentRecord, keyof OwnedRecord>);
+    return { record, cached: false, key };
+  }
+
   async function get(userId: string, id: string) {
     return deps.store.get(id, userId);
   }
@@ -172,7 +199,7 @@ export function createDocumentService(deps: DocumentDeps) {
     return rec ? documentText(rec.result, rec.corrections) : null;
   }
 
-  return { submit, get, correct, ask, text, runJob, buildReport };
+  return { submit, get, correct, ask, text, runJob, buildReport, recognizeCached };
 }
 
 export type DocumentService = ReturnType<typeof createDocumentService>;

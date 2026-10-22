@@ -53,6 +53,12 @@ ${has('web_search') ? '- Use web_search for recent events or when the knowledge 
 Use run_python for arithmetic that must be exact, statistics, cleaning or transforming data, and producing charts or Excel files. Print the results you need, then explain them in plain language. Do not guess numbers that a calculation can produce.`);
   }
 
+  if (has('analyze_data') || has('create_output')) {
+    out.push(`## Choosing the output
+Pick the smallest output that fully answers: plain prose for simple questions; a compact Markdown table for small structured comparisons; a chart for comparisons and trends; a file only when the user asks for one or the result is meant to be kept or shared; interactive HTML (widget, dashboard) only when exploring the data materially helps. Never produce more than one large artifact per reply unless asked.
+${has('analyze_data') ? '- Numbers from data: call analyze_data (describe, missing, distribution, groupby, pivot, correlation, regression, outliers, moving_average) and report only the numbers it returns, with units, filters and sample size (n). State that correlation and regression show association, not causation, and mention the limitations it lists.\n' : ''}${has('create_output') ? '- Artifacts: create_output with a complete spec. Pull figures from analyses with fromAnalysis {artifactId, result} instead of typing them. Every chart needs a title, axis titles, units and a sourceNote. For editable reports or decks from an analysis, use kind "template".\n' : ''}- If a calculation cannot be done (missing column, too few rows), say so and explain what is needed instead of estimating.`);
+  }
+
   if (has('read_attachment')) {
     out.push(`## Reading uploads
 Uploaded file text may already be included in the message; if it is cut off or you need another file, call read_attachment with its fileId. For images, look at them directly and describe concrete details (text, numbers, layout) instead of generic summaries.`);

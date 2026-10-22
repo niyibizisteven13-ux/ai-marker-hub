@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { evaluateStudentSubmission as deepseekEvaluate } from '../../src/services/deepseekMarker.js';
 import { BWENGE_CHAT_RESPONSE_RULES, BWENGE_GENERAL_SYSTEM_PROMPT } from './prompts/bwengeGeneralPrompt.js';
 import { MemoryService } from './MemoryService.js';
+import { toKnowledgePassage } from './knowledge/citations.js';
 import { retrieveKnowledgeChunks } from './KnowledgeRetrievalService.js';
 import { ExecutionSandbox } from './ExecutionSandbox.js';
 import { createAiAgent, FileStore, OpenAICompatibleAdapter, AnthropicAdapter, loadClaudeAgentConfig, ReliableProviderAdapter, ModelDispatchAdapter, ModelPolicyManager, TaskClassifier, loadComplexProvider, loadModelPolicies, TaskRouter, FileJobQueue, NisrIngestionPipeline, isStatisticsQuery, BudgetManager, DocumentPipeline, DeterministicTools } from './ai/index.js';
@@ -12,6 +13,7 @@ import { extractJsonFragment, stripThinkingTags } from '../utils/textSanitizers.
 import { extractChatCompletionText, readProviderJson } from '../utils/providerResponse.js';
 export { stripThinkingTags };
 import logger from '../utils/logger.js';
+import { planHint, planOutput } from './outputs/planner.js';
 
 const MODELS = {
   SONNET: 'claude-sonnet-5',
@@ -89,6 +91,8 @@ const fileStoreSecret = getFileUrlSecret();
 export const fileStore = new FileStore({
   dir: process.env.FILE_STORE_DIR ?? './data/generated',
   secret: fileStoreSecret,
+  // Default 25 MB; raise it for large examination packages (all marked papers in one ZIP).
+  maxFileBytes: Number(process.env.FILE_STORE_MAX_BYTES) > 0 ? Number(process.env.FILE_STORE_MAX_BYTES) : undefined,
 });
 
 export const fileJobQueue = new FileJobQueue({
@@ -241,19 +245,17 @@ export const bwengeAgent = createAiAgent({
             url: n.citation.sourceUrl,
             score: n.score,
           })),
-          ...knowledgeHits.map((h: any) => ({
-            text: h.chunk.text || h.text || '',
-            title: h.chunk.title || h.title,
-            publisher: h.chunk.publisher || h.publisher,
-            year: h.chunk.year || h.year,
-            page: h.chunk.page || h.page,
-            table: h.chunk.table || h.table,
-            url: h.chunk.url || h.url,
-            score: h.score,
-          }))
+          ...knowledgeHits.map((h: any) => toKnowledgePassage(h))
         ];
         return combined;
       },
+    },
+    // Lazy import: educationRuntime imports this module.
+    outputs: {
+      create: async (userId, spec) => (await import('./educationRuntime.js')).outputService.create(userId, spec),
+      waitReady: async (userId, id, ms) => (await import('./educationRuntime.js')).outputService.waitReady(userId, id, ms),
+      readAnalysis: async (userId, id) => (await import('./educationRuntime.js')).outputService.readAnalysis(userId, id),
+      attachmentRef: async (a) => (await import('./educationRuntime.js')).outputService.attachmentRef(a),
     },
     python: {
       async execute(code) {
@@ -813,6 +815,12 @@ export class AiService {
     const lastMsg = options.messages[options.messages.length - 1];
     const prompt = lastMsg ? extractPlainText(lastMsg.content) : '';
     const uploads = options.files?.map((f) => ({ type: f.type, base64: f.base64, mediaType: f.mediaType })) || [];
+
+    // Output planner: steer this turn toward prose, a computed table, or one fitting artifact.
+    if (!options.extractSchema && prompt) {
+      const plan = planOutput({ message: prompt, attachments: uploads.map((u) => ({ name: '', mime: u.mediaType })), hasDataset: uploads.some((u) => /csv|spreadsheet|excel|json/i.test(u.mediaType)) || /\.(csv|xlsx|xls|tsv)\b/i.test(prompt) });
+      if (plan.artifact || plan.needsComputation || plan.needsRetrieval) systemPrompt += `\n\n${planHint(plan)}`;
+    }
 
     if (options.extractSchema) {
       const r = await bwengeAgent.run({

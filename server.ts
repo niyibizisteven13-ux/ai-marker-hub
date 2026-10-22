@@ -32,7 +32,10 @@ import { FileStore, createFileRouter } from './server/services/ai/index.js';
 import { describeChatFailure } from './server/services/ai/chatFailure.js';
 import datasetRoutes from './server/routes/datasetRoutes.js';
 import { analyticsRouter, assessmentRouter, documentsRouter, jobsRouter } from './server/routes/educationRoutes.js';
-import { startEducationRuntime } from './server/services/educationRuntime.js';
+import { examChat, startEducationRuntime } from './server/services/educationRuntime.js';
+import { examsRouter } from './server/routes/examRoutes.js';
+import { outputsRouter, sharedOutputsRouter } from './server/routes/outputRoutes.js';
+import { knowledgeAdminRouter, knowledgeSourcesRouter } from './server/routes/knowledgeRepositoryRoutes.js';
 import { shutdownOcr } from './server/services/documents/ocr.js';
 import { fileJobQueue } from './server/services/AiService.js';
 import { emptyModelOutputError, nonEmptyModelText } from './server/services/ai/modelOutput.js';
@@ -337,6 +340,8 @@ app.use('/api/agent', requireAuth, generalLimiter, agentRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/forms', formRoutes);
 app.use('/api/files', createFileRouter(fileStore, { getUserId: (req) => (req as any).user?.id }));
+app.use('/api/admin/knowledge', requireAuth, requireRole('ADMIN'), knowledgeAdminRouter);
+app.use('/api/knowledge', requireAuth, knowledgeSourcesRouter);
 app.use('/api/admin', requireAuth, requireRole('ADMIN'), adminRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/ollama', requireAuth, ollamaRoutes);
@@ -347,6 +352,9 @@ app.use('/api/analytics', requireAuth, analyticsRouter);
 app.use('/api/assessment', requireAuth, assessmentRouter);
 app.use('/api/jobs', requireAuth, jobsRouter);
 app.use('/api/documents', requireAuth, documentsRouter);
+app.use('/api/exams', requireAuth, examsRouter);
+app.use('/api/outputs/shared', sharedOutputsRouter);
+app.use('/api/outputs', requireAuth, outputsRouter);
 app.use('/api', settingsBillingRoutes);
 // /exports serves generated Excel reports — gate it so only the owning
 // authenticated user (or admin) can download them. Anonymous access would
@@ -1100,6 +1108,46 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
       gatedEmitter.send('text', { text: gatedMsg, gated: true });
       gatedEmitter.done();
       return;
+    }
+  }
+
+  // ── Examination marking through the chat ────────────────────────────────
+  // Claims only messages that start a marking request or refer to the user's active examination;
+  // everything else continues to the normal chat below. Replies reuse the text and attachment events.
+  {
+    let examEmitter: ReturnType<typeof makeEmitter> | null = null;
+    const openExamStream = () => {
+      if (!examEmitter) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        examEmitter = makeEmitter(res);
+      }
+      return examEmitter;
+    };
+    try {
+      const examFiles: Array<{ name: string; buffer: Buffer; mime?: string }> = [];
+      for (const a of attachments) examFiles.push({ name: String(a.name).slice(0, 200), buffer: Buffer.from(a.base64, 'base64'), mime: a.mimeType });
+      if (req.file) examFiles.push({ name: req.file.originalname, buffer: req.file.buffer, mime: req.file.mimetype });
+      if (Array.isArray(finalAttachmentIds) && finalAttachmentIds.length) {
+        const recs = await prisma.fileRecord.findMany({ where: { id: { in: finalAttachmentIds }, userId }, select: { name: true, path: true, mimeType: true } });
+        for (const r of recs) if (r.path) { try { examFiles.push({ name: r.name, buffer: await fs.readFile(r.path), mime: r.mimeType }); } catch { /* file gone */ } }
+      }
+      const examReply = await examChat.handle(userId, query || '', examFiles, { onStatus: (t) => openExamStream().send('text', { text: `${t}\n\n` }) });
+      if (examReply) {
+        const em = openExamStream();
+        em.send('text', { text: examReply.text });
+        for (const a of examReply.attachments) em.send('attachment', { ...a });
+        em.done();
+        return;
+      }
+    } catch (examErr) {
+      logger.error('Examination chat handling failed.', { errorType: examErr instanceof Error ? examErr.name : 'Error' });
+      if (examEmitter) {
+        (examEmitter as ReturnType<typeof makeEmitter>).send('error', { message: 'The examination request could not be completed. Please try again.' });
+        (examEmitter as ReturnType<typeof makeEmitter>).done();
+        return;
+      }
     }
   }
 

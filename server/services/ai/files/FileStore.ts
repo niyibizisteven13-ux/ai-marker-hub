@@ -1,5 +1,8 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
-import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { mkdir, open, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import path from 'node:path';
 import type { AttachmentKind, AttachmentRef, StoredFileMeta } from '../types.js';
 
@@ -74,6 +77,61 @@ export class FileStore {
     };
     await writeFile(this.filePath(id), data, { mode: 0o600 });
     await writeFile(this.filePath(id) + '.json', JSON.stringify(meta), { mode: 0o600 });
+    return meta;
+  }
+
+  /**
+   * Stores a file that is already on disk (e.g. a streamed upload) without reading it into memory.
+   * The SHA-256 and size are computed while copying. `maxBytes` overrides the store-wide limit.
+   */
+  async putFile(input: { userId: string; name: string; mime: string; kind: AttachmentKind; sourcePath: string; ttlMs?: number; maxBytes?: number }): Promise<StoredFileMeta> {
+    const size = (await stat(input.sourcePath)).size;
+    const limit = input.maxBytes ?? this.maxFileBytes;
+    if (size > limit) throw new FileStoreError('too_large', `File is larger than ${Math.round(limit / 1048576)} MB.`);
+    await mkdir(this.dir, { recursive: true, mode: 0o700 });
+    const id = randomUUID();
+    const hash = createHash('sha256');
+    const tap = new Transform({ transform(chunk, _enc, cb) { hash.update(chunk); cb(null, chunk); } });
+    try {
+      await pipeline(createReadStream(input.sourcePath), tap, createWriteStream(this.filePath(id), { mode: 0o600 }));
+    } catch (error) {
+      await rm(this.filePath(id), { force: true });
+      throw error;
+    }
+    const now = Date.now();
+    const meta: StoredFileMeta = {
+      id, userId: input.userId, name: input.name, mime: input.mime, size, kind: input.kind, sha256: hash.digest('hex'),
+      createdAt: new Date(now).toISOString(), expiresAt: new Date(now + (input.ttlMs ?? this.ttl)).toISOString(),
+    };
+    await writeFile(this.filePath(id) + '.json', JSON.stringify(meta), { mode: 0o600 });
+    return meta;
+  }
+
+  /** Streams a file to its owner (optionally a byte range) instead of buffering it. */
+  async openStream(id: string, userId: string, range?: { start: number; end: number }): Promise<{ meta: StoredFileMeta; stream: NodeJS.ReadableStream }> {
+    const meta = await this.meta(id);
+    if (meta.userId !== userId) throw new FileStoreError('forbidden');
+    return { meta, stream: createReadStream(this.filePath(id), range) };
+  }
+
+  /** Reads at most `length` bytes from `start` (bounded previews of large files). */
+  async readRange(id: string, userId: string, start: number, length: number): Promise<{ meta: StoredFileMeta; data: Buffer }> {
+    const meta = await this.meta(id);
+    if (meta.userId !== userId) throw new FileStoreError('forbidden');
+    const fh = await open(this.filePath(id), 'r');
+    try {
+      const buf = Buffer.alloc(Math.max(0, Math.min(length, meta.size - start)));
+      const { bytesRead } = await fh.read(buf, 0, buf.length, start);
+      return { meta, data: buf.subarray(0, bytesRead) };
+    } finally {
+      await fh.close();
+    }
+  }
+
+  /** Copies a stored file to a local temp path for parsers that need a file (still streamed). */
+  async copyTo(id: string, userId: string, destPath: string): Promise<StoredFileMeta> {
+    const { meta, stream } = await this.openStream(id, userId);
+    await pipeline(stream, createWriteStream(destPath, { mode: 0o600 }));
     return meta;
   }
 
