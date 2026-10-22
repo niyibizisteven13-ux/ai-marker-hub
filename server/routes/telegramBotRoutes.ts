@@ -6,12 +6,8 @@ import { HighVolumeBatchService } from '../services/HighVolumeBatchService.js';
 import { FormOrchestrator } from '../services/FormOrchestrator.js';
 import { DocumentQualityService } from '../services/DocumentQualityService.js';
 import { PaywallService } from '../services/PaywallService.js';
-import { MemoryService } from '../services/MemoryService.js';
 import { upload } from '../middleware/upload.js';
-import { generalTools } from '../services/generalTools.js';
 import { generateBatchExcelReportFromGradedResults } from '../../src/services/excelExporter.ts';
-import { classifyIntent } from '../services/intentRouter.js';
-import { buildPromptForIntent } from '../services/prompts/promptRouter.js';
 import { stripThinkingTags } from '../utils/textSanitizers.js';
 import logger from '../utils/logger.js';
 import { consumeTelegramLink } from '../services/telegramLinkStore.js';
@@ -21,6 +17,8 @@ import { PDFParse } from 'pdf-parse';
 import fs from 'fs/promises';
 import path from 'path';
 import { getTelegramTranscriber } from '../services/educationRuntime.js';
+import { handleUpdate as handleTelegramUpdate, type LegacyHooks } from '../services/telegram/router.js';
+import { runAssistantTurn } from '../services/telegram/agentBridge.js';
 
 const router = Router();
 const botService = TelegramBotService.getInstance();
@@ -34,7 +32,6 @@ async function startTranscription(chatId: string, session: any, fileId: string, 
 }
 const aiService = AiService.getInstance();
 const paywallService = PaywallService.getInstance();
-const memoryService = MemoryService.getInstance();
 
 // Scan Tokens for /scan signed single-use URLs.
 // NOTE: in-memory only — won't survive multi-instance deploys or a
@@ -53,15 +50,6 @@ setInterval(() => {
 // by checkAndTriggerBatchGrading, alongside Telegram-native uploads.
 const SCAN_UPLOADS_DIR = path.join(process.cwd(), 'uploads', 'telegram-scans');
 
-// Lightweight per-chat recent-turn cache for multi-turn conversational
-// context. In-memory, same caveats as scanTokens above (not
-// multi-instance safe, lost on restart) — if that matters before a
-// proper persisted history table is built, this is the piece to swap
-// for a Prisma-backed store first, since losing conversational context
-// mid-session is more user-visible than losing a scan token.
-const MAX_HISTORY_TURNS = 6;
-const HISTORY_TTL_MS = 60 * 60 * 1000; // 1 hour of inactivity clears history
-const conversationHistory = new Map<string, { turns: Array<{ role: 'user' | 'assistant'; text: string }>; lastUsed: number }>();
 
 async function ensureTelegramUser(chatId: string, session: any) {
   if (session.userId) {
@@ -79,27 +67,6 @@ async function ensureTelegramUser(chatId: string, session: any) {
   return prisma.telegramSession.update({ where: { chatId }, data: { userId: user.id } });
 }
 
-const HISTORY_SWEEP_MS = 15 * 60 * 1000;
-setInterval(() => {
-  const now = Date.now();
-  for (const [chatId, entry] of conversationHistory.entries()) {
-    if (now - entry.lastUsed > HISTORY_TTL_MS) conversationHistory.delete(chatId);
-  }
-}, HISTORY_SWEEP_MS).unref();
-
-function getHistory(chatId: string): Array<{ role: 'user' | 'assistant'; text: string }> {
-  return conversationHistory.get(chatId)?.turns || [];
-}
-
-function appendHistory(chatId: string, role: 'user' | 'assistant', text: string) {
-  const entry = conversationHistory.get(chatId) || { turns: [], lastUsed: Date.now() };
-  entry.turns.push({ role, text });
-  if (entry.turns.length > MAX_HISTORY_TURNS) {
-    entry.turns = entry.turns.slice(-MAX_HISTORY_TURNS);
-  }
-  entry.lastUsed = Date.now();
-  conversationHistory.set(chatId, entry);
-}
 
 /**
  * Secret token middleware verifying incoming Telegram webhooks.
@@ -176,69 +143,6 @@ async function cleanupLocalScanFile(localPath: string | null | undefined) {
   }
 }
 
-/**
- * Safe arithmetic evaluator backing the conversational `calculate` tool.
- *
- * DUPLICATION NOTE: this is the same recursive-descent parser already
- * defined in server.ts for its /api/ai/chat tool executor. Duplicated
- * here rather than imported because server.ts's copy is a local,
- * unexported function. If this bot file and server.ts's tool executor
- * keep growing, extract this (and the tool-dispatch switch generally)
- * into a shared module the same way buildPromptForIntent was — flagged
- * here rather than done silently, since it touches server.ts too.
- */
-function safeEvaluate(expression: string): number {
-  const tokens = expression.match(/\d+(\.\d+)?|[+\-*/()]/g);
-  if (!tokens || tokens.join('') !== expression.replace(/\s+/g, '')) {
-    throw new Error('Expression contains unsupported characters.');
-  }
-
-  let pos = 0;
-  const peek = () => tokens[pos];
-  const next = () => tokens[pos++];
-
-  function parseExpr(): number {
-    let value = parseTerm();
-    while (peek() === '+' || peek() === '-') {
-      const op = next();
-      const rhs = parseTerm();
-      value = op === '+' ? value + rhs : value - rhs;
-    }
-    return value;
-  }
-
-  function parseTerm(): number {
-    let value = parseFactor();
-    while (peek() === '*' || peek() === '/') {
-      const op = next();
-      const rhs = parseFactor();
-      if (op === '/' && rhs === 0) throw new Error('Division by zero.');
-      value = op === '*' ? value * rhs : value / rhs;
-    }
-    return value;
-  }
-
-  function parseFactor(): number {
-    if (peek() === '(') {
-      next();
-      const value = parseExpr();
-      if (next() !== ')') throw new Error('Mismatched parentheses.');
-      return value;
-    }
-    if (peek() === '-') {
-      next();
-      return -parseFactor();
-    }
-    const token = next();
-    const value = Number(token);
-    if (token === undefined || Number.isNaN(value)) throw new Error('Malformed expression.');
-    return value;
-  }
-
-  const result = parseExpr();
-  if (pos !== tokens.length) throw new Error('Malformed expression.');
-  return result;
-}
 
 /**
  * Tool executor for conversational bot chat (Gonka path). Deliberately
@@ -249,18 +153,6 @@ function safeEvaluate(expression: string): number {
  * image this handler doesn't have, and are left unhandled with an
  * explicit message rather than silently pretending to support them.
  */
-const telegramActionTools: any[] = [
-  { name: 'start_batch_grading', description: 'Start grading the uploaded student papers against the uploaded rubric, or ask for missing files.', input_schema: { type: 'object', properties: {}, required: [] } },
-  { name: 'generate_exam', description: 'Create an exam and marking rubric when the user asks for an exam, test, or quiz.', input_schema: { type: 'object', properties: { request: { type: 'string', description: 'Subject, topic, level, marks, and any other requirements.' } }, required: ['request'] } },
-  { name: 'create_form', description: 'Create an application, registration, or assessment form.', input_schema: { type: 'object', properties: { purpose: { type: 'string', description: 'What the form is for and who will use it.' } }, required: ['purpose'] } },
-  { name: 'research_topic', description: 'Research a topic or answer a request that asks for current or sourced information.', input_schema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } },
-  { name: 'start_photo_grading', description: 'Grade a single handwritten student answer photo.', input_schema: { type: 'object', properties: {}, required: [] } },
-  { name: 'open_scanner', description: 'Open the mobile document scanner for scanning exam papers or rubric pages.', input_schema: { type: 'object', properties: {}, required: [] } },
-  { name: 'check_job_status', description: 'Show recent batch grading jobs and their progress.', input_schema: { type: 'object', properties: {}, required: [] } },
-  { name: 'check_usage', description: 'Show remaining grading usage, plan, or credits.', input_schema: { type: 'object', properties: {}, required: [] } },
-  { name: 'discuss_results', description: 'Answer questions about the latest completed grading batch and class performance.', input_schema: { type: 'object', properties: { question: { type: 'string' } }, required: ['question'] } },
-  { name: 'set_bot_language', description: 'Change the bot response language.', input_schema: { type: 'object', properties: { language: { type: 'string', enum: ['en', 'rw'] } }, required: ['language'] } },
-];
 
 async function getTelegramSession(chatId: string) {
   const session = await prisma.telegramSession.findUnique({ where: { chatId } });
@@ -268,79 +160,6 @@ async function getTelegramSession(chatId: string) {
   return session;
 }
 
-async function executeBotConversationalTool(chatId: string, userId: string, name: string, input: any): Promise<string> {
-  switch (name) {
-    case 'start_batch_grading': {
-      const session = await prisma.telegramSession.findUnique({ where: { chatId } });
-      if (!session) return 'Telegram session not found.';
-      const hasPaper = !!(session.stagedPaperFileId || session.stagedPaperLocalPath);
-      const hasRubric = !!(session.stagedRubricFileId || session.stagedRubricLocalPath);
-      if (hasPaper && hasRubric) {
-        await checkAndTriggerBatchGrading(chatId);
-        return 'Batch grading started. I will send the result and Excel report here.';
-      }
-      await handleGradeCommand(chatId, session);
-      return 'Asked the user to upload the student papers and rubric.';
-    }
-    case 'generate_exam':
-      await handleBotCommand(chatId, await getTelegramSession(chatId), `/exam ${input.request}`);
-      return 'Generated the requested exam using GonkaRouter and sent it in Telegram.';
-    case 'create_form':
-      await handleBotCommand(chatId, await getTelegramSession(chatId), `/form ${input.purpose}`);
-      return 'Created the requested form using GonkaRouter and sent its link in Telegram.';
-    case 'research_topic':
-      await handleBotCommand(chatId, await getTelegramSession(chatId), `/research ${input.query}`);
-      return 'Completed the research request using GonkaRouter tools and sent the report in Telegram.';
-    case 'start_photo_grading': {
-      const session = await getTelegramSession(chatId);
-      await handleBotCommand(chatId, session, '/markphoto');
-      return 'Asked the user to send the handwritten answer photo.';
-    }
-    case 'open_scanner':
-      await handleBotCommand(chatId, await getTelegramSession(chatId), '/scan');
-      return 'Sent the mobile scanner link in Telegram.';
-    case 'check_job_status':
-      await handleStatusCommand(chatId, await getTelegramSession(chatId));
-      return 'Sent the recent grading job status in Telegram.';
-    case 'check_usage':
-      await handleQuotaCommand(chatId, await getTelegramSession(chatId));
-      return 'Sent the account usage and quota in Telegram.';
-    case 'discuss_results': {
-      const session = await getTelegramSession(chatId);
-      const job = await prisma.batchJob.findFirst({
-        where: { telegramChatId: chatId, status: 'DONE' },
-        orderBy: { createdAt: 'desc' },
-      });
-      if (!job) return 'No completed batch is available to discuss yet.';
-      const activeSession = await prisma.telegramSession.update({
-        where: { chatId }, data: { activeDiscussJobId: job.id },
-      });
-      await handleDiscussQuery(chatId, activeSession, input.question || 'Summarize the class results.');
-      return 'Answered the question using the latest completed grading batch.';
-    }
-    case 'set_bot_language':
-      await handleBotCommand(chatId, await getTelegramSession(chatId), input.language === 'rw' ? '/kinyarwanda' : '/english');
-      return `Switched the Telegram assistant language to ${input.language === 'rw' ? 'Kinyarwanda' : 'English'}.`;
-    case 'calculate': {
-      try {
-        return String(safeEvaluate(String(input.expression)));
-      } catch (e: any) {
-        return `Error evaluating expression: ${e.message}`;
-      }
-    }
-    case 'translate_text': {
-      return aiService.sendGonkaChat(
-        `Translate the following text into ${input.target_language}, preserving tone and meaning:\n\n${input.text}`,
-        { system: 'You are a precise translator. Respond with only the translated text, no explanation.' }
-      );
-    }
-    case 'research_memory': {
-      return await memoryService.searchMemory(userId, input.query);
-    }
-    default:
-      return `Tool "${name}" is not available in Telegram chat yet — this works in the full Bwenge web assistant.`;
-  }
-}
 
 /**
  * Web Scanner Signed Upload Endpoint.
@@ -423,7 +242,7 @@ function buildTelegramKeyboard(lang: string = 'en') {
 }
 
 /** Map plain-language requests onto the same handlers as slash commands. */
-async function handleNaturalLanguageAction(chatId: string, session: any, message: string): Promise<boolean> {
+async function handleNaturalLanguageAction(chatId: string, session: any, message: string, opts: { assistantFirst?: boolean } = {}): Promise<boolean> {
   const text = message.trim();
   const lower = text.toLowerCase();
 
@@ -444,13 +263,14 @@ async function handleNaturalLanguageAction(chatId: string, session: any, message
     return true;
   }
 
-  if (/\b(exam|test|quiz|ikizamini)\b/i.test(lower) && /\b(create|make|generate|write|prepare|need|want|kora|tegura)\b/i.test(lower)) {
+  // With the assistant first, exam papers and research go to the full assistant (real Word/PDF files, sources).
+  if (!opts.assistantFirst && /\b(exam|test|quiz|ikizamini)\b/i.test(lower) && /\b(create|make|generate|write|prepare|need|want|kora|tegura)\b/i.test(lower)) {
     const genericRequest = /^(please\s+)?(create|make|generate|write|prepare|i need|i want|kora|tegura)\s+(an?\s+)?(exam|test|quiz|ikizamini)(\s+please)?[.!?]*$/i.test(text);
     await handleBotCommand(chatId, session, genericRequest ? '/exam' : `/exam ${text}`);
     return true;
   }
 
-  if (/\b(research|investigate|look\s+up|find\s+(the\s+)?latest|deep\s+search|ubushakashatsi|shakashaka)\b/i.test(lower)) {
+  if (!opts.assistantFirst && /\b(research|investigate|look\s+up|find\s+(the\s+)?latest|deep\s+search|ubushakashatsi|shakashaka)\b/i.test(lower)) {
     await handleBotCommand(chatId, session, `/research ${text}`);
     return true;
   }
@@ -515,129 +335,92 @@ async function handleNaturalLanguageAction(chatId: string, session: any, message
   return false;
 }
 
-router.post('/webhook', verifyTelegramSecret, async (req: Request, res: Response) => {
-  res.status(200).json({ ok: true });
-
-  try {
-    const update = req.body;
-    if (!update || typeof update !== 'object') return;
-
-    if (update.message) {
-      const msg = update.message;
-      const chatId = String(msg.chat.id);
-      const userText = (msg.text || msg.caption || '').trim();
-
-      let session = await prisma.telegramSession.findUnique({ where: { chatId } });
-      if (!session) {
-        session = await prisma.telegramSession.create({
-          data: { chatId, provider: process.env.GONKA_API_KEY ? 'gonkarouter' : 'gemini', language: 'en' },
-        });
-      }
-
-      const linkCode = userText.match(/^\/(?:start|link)(?:@\w+)?\s+(?:link_)?([A-Za-z0-9_-]{20,64})$/i)?.[1];
-      if (linkCode) {
-        const linkedUserId = consumeTelegramLink(linkCode);
-        if (!linkedUserId) {
-          await botService.sendMessage(chatId, 'This account link has expired or was already used. Generate a new link from Settings → Connections.');
-          return;
-        }
-        const existingLinkedUser = session.userId && session.userId !== linkedUserId
-          ? await prisma.user.findUnique({ where: { id: session.userId }, select: { email: true } })
-          : null;
-        const isUnclaimedTelegramAccount = existingLinkedUser?.email.endsWith('@users.invalid') ?? false;
-        if (session.userId && session.userId !== linkedUserId && !isUnclaimedTelegramAccount) {
-          await botService.sendMessage(chatId, 'This Telegram chat is already linked to another Bwenge account. Disconnect it there before linking a different account.');
-          return;
-        }
-        await prisma.telegramSession.update({ where: { chatId }, data: { userId: linkedUserId } });
-        await botService.sendMessage(chatId, 'Telegram is now securely linked to your Bwenge account. You can use the bot for your account workflows.');
-        return;
-      }
-
-      session = await ensureTelegramUser(chatId, session);
-      const telegramUserId = session.userId;
-      try {
-        await prisma.usageQuota.upsert({
-          where: { userId_service: { userId: telegramUserId, service: 'grading' } },
-          create: { userId: telegramUserId, service: 'grading', freeUsed: 0 },
-          update: {},
-        });
-      } catch (e) {
-        logger.warn('Failed to initialize Telegram grading quota:', e);
-      }
-
-      if (process.env.GONKA_API_KEY && session.provider !== 'gonkarouter') {
-        session = await prisma.telegramSession.update({
-          where: { chatId },
-          data: { provider: 'gonkarouter' },
-        });
-      }
-
-      if (msg.voice) {
-        await handleIncomingVoiceNote(chatId, session, msg.voice.file_id);
-        return;
-      }
-
-      if (msg.document) {
-        if (wantsTranscription(session, msg.caption)) {
-          await startTranscription(chatId, session, msg.document.file_id, msg.document.file_name || 'document.pdf');
-          return;
-        }
-        await handleIncomingDocument(chatId, session, msg.document);
-        return;
-      }
-
-      if (msg.photo && Array.isArray(msg.photo) && msg.photo.length > 0) {
-        const largestPhoto = msg.photo[msg.photo.length - 1];
-        if (wantsTranscription(session, msg.caption)) {
-          await startTranscription(chatId, session, largestPhoto.file_id, 'photo.jpg');
-          return;
-        }
-        await handleIncomingPhoto(chatId, session, largestPhoto.file_id, msg.caption);
-        return;
-      }
-
-      if (!userText) {
-        await botService.sendMessage(chatId,
-          session.language === 'rw'
-            ? '🤔 Ntabwo nashoboye gusoma ubu bwoko bw\'ubutumwa. Ohereza inyandiko, ifoto, cyangwa PDF.'
-            : "🤔 I can't process that type of message yet. Please send text, a photo, or a PDF/document."
-        );
-        return;
-      }
-
-      if (!userText.startsWith('/') && await handleNaturalLanguageAction(chatId, session, userText)) return;
-
-      if (session.activeDiscussJobId && !userText.startsWith('/')) {
-        await handleDiscussQuery(chatId, session, userText);
-        return;
-      }
-
-      if (session.stagedMode === 'form' && !userText.startsWith('/')) {
-        await handleFormCreationStep2(chatId, session, userText);
-        return;
-      }
-
-      if (userText.startsWith('/')) {
-        await handleBotCommand(chatId, session, userText);
-      } else if (userText.includes('Grade Batch') || userText.includes('Kosora Ibizamini')) {
-        await handleGradeCommand(chatId, session);
-      } else if (userText.includes('Check Status') || userText.includes('Reba Uko Bihagaze')) {
-        await handleStatusCommand(chatId, session);
-      } else if (userText.includes('Generate Exam') || userText.includes('Kora Igizamini')) {
-        await botService.sendMessage(chatId, session.language === 'rw'
-          ? '📝 Ohereza syntax: `/exam [Isomo] [Igice] [Amanota]` (urugero: `/exam Physics Newton_Laws 30`)'
-          : '📝 Use format: `/exam [Subject] [Topic] [Total Marks]` (e.g. `/exam Physics Newton_Laws 30`)');
-      } else if (userText.includes('Deep Research') || userText.includes('Ubushakashatsi')) {
-        await botService.sendMessage(chatId, session.language === 'rw'
-          ? '🌐 Ohereza syntax: `/research [Icyo ushakashaka]`'
-          : '🌐 Use format: `/research [Your research query]`');
-      } else {
-        await handleConversationalQuery(chatId, session, userText);
-      }
+/**
+ * The assistant router (server/services/telegram/router.ts) handles every update; the bot-specific
+ * features that live in this file are reached through these hooks.
+ */
+const legacyHooks: LegacyHooks = {
+  async session(chatId, from) {
+    let session = await prisma.telegramSession.findUnique({ where: { chatId } });
+    if (!session) {
+      const code = String(from?.language_code ?? '').slice(0, 2);
+      session = await prisma.telegramSession.create({
+        data: { chatId, provider: process.env.GONKA_API_KEY ? 'gonkarouter' : 'gemini', language: code === 'rw' || code === 'fr' ? code : 'en' },
+      });
     }
+    session = await ensureTelegramUser(chatId, session);
+    try {
+      await prisma.usageQuota.upsert({
+        where: { userId_service: { userId: session.userId, service: 'grading' } },
+        create: { userId: session.userId, service: 'grading', freeUsed: 0 },
+        update: {},
+      });
+    } catch (e) {
+      logger.warn('Failed to initialize Telegram grading quota:', e);
+    }
+    if (process.env.GONKA_API_KEY && session.provider !== 'gonkarouter') {
+      session = await prisma.telegramSession.update({ where: { chatId }, data: { provider: 'gonkarouter' } });
+    }
+    return session;
+  },
+
+  async link(chatId, session, text) {
+    const linkCode = text.match(/^\/(?:start|link)(?:@\w+)?\s+(?:link_)?([A-Za-z0-9_-]{20,64})$/i)?.[1];
+    if (!linkCode) return false;
+    const linkedUserId = consumeTelegramLink(linkCode);
+    if (!linkedUserId) {
+      await botService.sendMessage(chatId, 'This account link has expired or was already used. Generate a new link from Settings → Connections.');
+      return true;
+    }
+    const existingLinkedUser = session.userId && session.userId !== linkedUserId
+      ? await prisma.user.findUnique({ where: { id: session.userId }, select: { email: true } })
+      : null;
+    const isUnclaimedTelegramAccount = existingLinkedUser?.email.endsWith('@users.invalid') ?? false;
+    if (session.userId && session.userId !== linkedUserId && !isUnclaimedTelegramAccount) {
+      await botService.sendMessage(chatId, 'This Telegram chat is already linked to another Bwenge account. Disconnect it there before linking a different account.');
+      return true;
+    }
+    await prisma.telegramSession.update({ where: { chatId }, data: { userId: linkedUserId } });
+    await botService.sendMessage(chatId, '✅ Telegram is now securely linked to your Bwenge account. Your files and plan are available here. Send /start for the menu.');
+    return true;
+  },
+
+  command: (chatId, session, text) => handleBotCommand(chatId, session, text),
+  naturalAction: (chatId, session, text) => handleNaturalLanguageAction(chatId, session, text, { assistantFirst: true }),
+
+  async modeText(chatId, session, text) {
+    if (session.activeDiscussJobId) { await handleDiscussQuery(chatId, session, text); return true; }
+    if (session.stagedMode === 'form') { await handleFormCreationStep2(chatId, session, text); return true; }
+    return false;
+  },
+
+  async modeFile(chatId, session, files, caption) {
+    if (wantsTranscription(session, caption)) {
+      for (const f of files) await startTranscription(chatId, session, f.fileId, f.name);
+      return true;
+    }
+    const markPhoto = session.stagedMode === 'markphoto' || /^\/markphoto\b/i.test(caption);
+    if (session.stagedMode === 'batch' || markPhoto) {
+      for (const f of files) {
+        if (f.isPhoto) await handleIncomingPhoto(chatId, session, f.fileId, caption || (markPhoto ? '/markphoto' : undefined));
+        else await handleIncomingDocument(chatId, session, { file_id: f.fileId, file_name: f.name });
+      }
+      return true;
+    }
+    return false;
+  },
+
+  transcribe: (chatId, session, fileId, name) => startTranscription(chatId, session, fileId, name),
+};
+
+router.post('/webhook', verifyTelegramSecret, async (req: Request, res: Response) => {
+  // Acknowledge at once: Telegram redelivers slow updates, and the router drops duplicates by update_id.
+  res.status(200).json({ ok: true });
+  try {
+    if (!req.body || typeof req.body !== 'object') return;
+    await handleTelegramUpdate(req.body, legacyHooks);
   } catch (err: any) {
-    logger.error('Error handling Telegram Webhook update:', err);
+    logger.error('Error handling Telegram Webhook update:', { errorType: err?.name });
   }
 });
 
@@ -772,13 +555,7 @@ async function handleBotCommand(chatId: string, session: any, text: string) {
       }
 
       case '/chat': {
-        if (!arg || arg.trim().length === 0) {
-          await botService.sendMessage(chatId, session.language === 'rw'
-            ? '💬 Andika ubutumwa nyuma ya `/chat`. Urugero: `/chat Watubwira uburyo bwo gukosora neza?`'
-            : '💬 Type your message after `/chat`. Example: `/chat Can you give me tips for fair grading?`');
-          break;
-        }
-        await handleConversationalQuery(chatId, session, arg.trim());
+        await runAssistantTurn({ chatId, session, text: arg.trim() || 'What can you do?' });
         break;
       }
 
@@ -952,7 +729,7 @@ async function handleDiscussQuery(chatId: string, session: any, queryText: strin
   }
 
   const contextPrompt = `DISCUSS SESSION FOR GRADED BATCH JOB ${jobId}:\n${contextData}\n\nUSER FOLLOW-UP QUESTION: ${queryText}`;
-  await handleConversationalQuery(chatId, session, contextPrompt);
+  await runAssistantTurn({ chatId, session, text: contextPrompt });
 }
 
 async function handleQuotaCommand(chatId: string, session: any) {
@@ -1001,11 +778,6 @@ async function handleIncomingDocument(chatId: string, session: any, doc: any) {
   await checkAndTriggerBatchGrading(chatId);
 }
 
-async function handleIncomingVoiceNote(chatId: string, session: any, fileId: string) {
-  void session;
-  void fileId;
-  await botService.sendMessage(chatId, 'I can handle typed requests through GonkaRouter, but voice transcription is not available in this bot yet. Please type your request.');
-}
 
 async function handleIncomingPhoto(chatId: string, session: any, fileId: string, caption?: string) {
   const isMarkPhoto = session.stagedMode === 'markphoto' ||
@@ -1124,6 +896,7 @@ async function checkAndTriggerBatchGrading(chatId: string) {
       stagedPaperLocalPath: null,
       stagedRubricFileId: null,
       stagedRubricLocalPath: null,
+      stagedMode: null, // batch mode ends once grading starts; later files go to the assistant again
     },
   });
 
@@ -1260,6 +1033,8 @@ async function checkAndTriggerBatchGrading(chatId: string) {
 
 async function handleGradeCommand(chatId: string, session: any) {
   const lang = session.language;
+  // Uploads are staged as papers / rubric only while this batch-grading mode is on.
+  await prisma.telegramSession.update({ where: { chatId }, data: { stagedMode: 'batch' } });
   const msg = lang === 'rw'
     ? `📥 **Gahunda y'Ibizamini**:\n1. Ohereza PDF y'ibizamini\n2. Ohereza ifoto cyangwa PDF ya rubric/ipaki y'ibisubizo\n\nAI irahita ikora batch kugihe!`
     : `📥 **Batch Grading Guide**:\n1. Upload the exam papers PDF file\n2. Upload the rubric image/PDF\n\nAI will automatically trigger high-volume grading and send you the Excel report!`;
@@ -1287,197 +1062,5 @@ async function handleStatusCommand(chatId: string, session: any) {
   await botService.sendMessage(chatId, msg, { reply_markup: buildTelegramKeyboard(session.language) });
 }
 
-/**
- * Conversational Q&A Handler with Real-Time Token Editing.
- *
- * Routes on session.provider (the field the /model command actually
- * writes to — NOT a "preferredModel" field, which does not exist
- * anywhere in this schema). Two paths:
- *
- * 1. session.provider === 'gonkarouter' (and GONKA_API_KEY configured):
- *    routes through aiService.runGonkaAgentLoop, using the same
- *    buildPromptForIntent routing + classifyIntent the web chat route
- *    uses, with reasoning tags stripped both mid-stream and on the final
- *    message, and recent per-chat turn history included for multi-turn
- *    context.
- * 2. Everything else: falls back to the existing Claude-based
- *    generalAssist path (unchanged from before), with stripThinkingTags
- *    applied defensively before any message is sent — cheap insurance in
- *    case a future model swap on that path also emits reasoning tags.
- *
- * NOTE (pre-existing, not introduced here): before this change, this
- * handler ALWAYS used the Claude path regardless of session.provider —
- * a teacher who ran /model nvidianim still got Claude-generated
- * conversational replies. This fix only wires up the Gonka branch
- * explicitly; gemini/nvidianim conversational routing parity is a
- * separate, pre-existing gap worth its own follow-up.
- */
-async function handleConversationalQuery(chatId: string, session: any, userQuery: string) {
-  await botService.sendChatAction(chatId, 'typing');
-
-  const lang = session.language || 'en';
-  const thinkingMsg = lang === 'rw' ? '✨ *Bwenge AI irimo gutekereza...*' : '✨ *Bwenge AI is thinking...*';
-  const initialMsg = await botService.sendMessage(chatId, thinkingMsg);
-  if (!initialMsg) return;
-
-  const initialMsgId = initialMsg.message_id;
-  const userId = session.userId || `telegram-${chatId}`;
-  const selectedProvider = String(session.provider || 'gemini').toLowerCase();
-  // Existing Telegram sessions may retain a legacy provider value. If this
-  // deployment has Gonka configured, route conversational traffic through it.
-  const useGonka = Boolean(process.env.GONKA_API_KEY) || process.env.AI_PROVIDER === 'gonkarouter';
-
-  let accumulatedText = '';
-  let lastEditTime = Date.now();
-
-  const assistantSystemPrompt = `You are Bwenge AI Assistant, a friendly, creative, and highly capable AI assistant for teachers, students, and institutions on Telegram.
-You MUST respond strictly in ${lang === 'rw' ? 'Kinyarwanda (Ururimi rw\'Ikinyarwanda)' : 'English'}.
-When the user asks you to perform an action in ordinary language, do it with the matching Telegram action tool instead of only telling them which slash command to type. Use the grading, exam, form, research, scanner, status, quota, discussion, and language tools when appropriate. If required information or files are missing, ask a short follow-up or let the tool request the missing upload.
-Even if the user sends nonsense, gibberish, off-topic, or random text, ALWAYS respond politely, maintain a helpful persona, and guide them back to Bwenge AI capabilities:
-- Batch grading student papers (/grade)
-- Mobile web document scanner (/scan)
-- Online form creation (Web & USSD *182*8*1#) (/form)
-- Exam paper and marking rubric generation (/exam)
-- Deep research briefing (/research)
-Offer actionable next steps and invite them to run commands or upload documents!`;
-
-  try {
-    if (useGonka) {
-      const intent = await classifyIntent(userQuery, false);
-      const { system, prompt } = buildPromptForIntent(intent, userQuery, { hydratedContext: assistantSystemPrompt });
-      const history = getHistory(chatId);
-
-      await aiService.runGonkaAgentLoop({
-        prompt,
-        system,
-        history,
-        tools: [...generalTools, ...telegramActionTools],
-        executeTool: (name, input) => executeBotConversationalTool(chatId, userId, name, input),
-        onEvent: async (event) => {
-          if (event.type === 'text') {
-            if (event.data.replaceFullText) {
-              accumulatedText = event.data.text || '';
-            } else {
-              accumulatedText += event.data.text || '';
-            }
-            const now = Date.now();
-            if (now - lastEditTime > 1500 && accumulatedText.trim().length > 0) {
-              lastEditTime = now;
-              await botService.editMessageText(chatId, initialMsgId, accumulatedText.slice(0, 4000));
-            }
-          } else if (event.type === 'tool_call') {
-            accumulatedText += `\n> 🛠️ *Executing tool*: \`${event.data.name}\`...\n`;
-            const now = Date.now();
-            if (now - lastEditTime > 1500) {
-              lastEditTime = now;
-              await botService.editMessageText(chatId, initialMsgId, accumulatedText.slice(0, 4000));
-            }
-          }
-        },
-      });
-
-      const finalText = stripThinkingTags(accumulatedText);
-      if (finalText.trim().length > 0) {
-        await botService.editMessageText(chatId, initialMsgId, finalText.slice(0, 4000));
-      }
-
-      appendHistory(chatId, 'user', userQuery);
-      appendHistory(chatId, 'assistant', String(finalText));
-      return;
-    }
-
-    // Route each supported Telegram model to its matching provider.
-    if (selectedProvider === 'gemini') {
-      const stream = await aiService.streamGeminiContent({
-        contents: [{ role: 'user', parts: [{ text: `${assistantSystemPrompt}\n\nUSER MESSAGE: ${userQuery}` }] }],
-      });
-      for await (const chunk of stream as any) {
-        accumulatedText += chunk.text || '';
-        const now = Date.now();
-        if (now - lastEditTime > 1500 && accumulatedText.trim()) {
-          lastEditTime = now;
-          await botService.editMessageText(chatId, initialMsgId, accumulatedText.slice(0, 4000));
-        }
-      }
-    } else if (selectedProvider === 'nvidianim') {
-      await aiService.streamNvidiaNimChat(userQuery, {
-        system: assistantSystemPrompt,
-        onToken: (token: string) => {
-          accumulatedText += token;
-          const now = Date.now();
-          if (now - lastEditTime > 1500 && accumulatedText.trim()) {
-            lastEditTime = now;
-            void botService.editMessageText(chatId, initialMsgId, accumulatedText.slice(0, 4000));
-          }
-        },
-      });
-    } else if (selectedProvider === 'ollama') {
-      const baseUrl = (process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/$/, '');
-      const response = await fetch(`${baseUrl}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: process.env.OLLAMA_MODEL || 'qwen2.5:3b', stream: false,
-          messages: [
-            { role: 'system', content: assistantSystemPrompt },
-            { role: 'user', content: userQuery },
-          ],
-        }),
-      });
-      if (!response.ok) throw new Error(`Ollama request failed (${response.status}).`);
-      const data: any = await response.json();
-      accumulatedText = data.message?.content || '';
-    } else {
-      if (!(await aiService.providerAvailable('anthropic'))) {
-        throw new Error(`Provider "${selectedProvider}" is not configured for Telegram chat.`);
-      }
-    await aiService.generalAssist({
-      userId: chatId,
-      messages: [
-        { role: 'user', content: `${assistantSystemPrompt}\n\nUSER MESSAGE: ${userQuery}` }
-      ],
-      tools: generalTools,
-      onEvent: async (event) => {
-        if (event.type === 'text') {
-          accumulatedText += event.data.text || '';
-          const now = Date.now();
-          if (now - lastEditTime > 1500 && accumulatedText.trim().length > 0) {
-            lastEditTime = now;
-            await botService.editMessageText(chatId, initialMsgId, stripThinkingTags(accumulatedText).slice(0, 4000));
-          }
-        } else if (event.type === 'turn_reset') {
-          accumulatedText = '';
-        } else if (event.type === 'tool_call') {
-          accumulatedText += `\n> 🛠️ *Executing tool*: \`${event.data.name}\`...\n`;
-          const now = Date.now();
-          if (now - lastEditTime > 1500) {
-            lastEditTime = now;
-            await botService.editMessageText(chatId, initialMsgId, stripThinkingTags(accumulatedText).slice(0, 4000));
-          }
-        }
-      },
-    });
-    }
-
-    const finalText = stripThinkingTags(accumulatedText);
-    if (finalText.trim().length > 0) {
-      await botService.editMessageText(chatId, initialMsgId, finalText.slice(0, 4000));
-    } else {
-      const fallbackGuidedText = lang === 'rw'
-        ? `👋 Muraho! Ndi **Bwenge AI Assistant**.\n\nNshobora kugufasha gukora ibizamini, gukosora, kurema ifomu, gukora scanner, cyangwa gukora ubushakashatsi.\n\nAndika /help cyangwa koresha icyo ushaka mu buryo bwa menu!`
-        : `👋 Hello! I am **Bwenge AI Assistant**.\n\nI can help you grade exams, scan documents, create application forms, generate exam papers, or conduct research.\n\nType /help or select an option from the menu below!`;
-      await botService.editMessageText(chatId, initialMsgId, fallbackGuidedText);
-    }
-
-    appendHistory(chatId, 'user', userQuery);
-    appendHistory(chatId, 'assistant', String(finalText));
-  } catch (err: any) {
-    logger.error('Telegram conversational AI error:', err);
-    const errorGuide = lang === 'rw'
-      ? `👋 **Bwenge AI Assistant**\n\nUmbabarire, habaye akabazo mu gutunganya ubutumwa bwawe. Nshobora kugufasha binyuze mu gukoresha amakomande:\n- /scan (Mobile Scanner)\n- /form (Ifomu y'ubusabe)\n- /exam (Kora Igizamini)\n- /grade (Kosora Ibizamini)`
-      : `👋 **Bwenge AI Assistant**\n\nI apologize, I encountered a minor issue processing that message. How can I assist you today?\n- /scan (Mobile Scanner)\n- /form (Create Application Form)\n- /exam (Generate Exam & Rubric)\n- /grade (Batch Grading)`;
-    await botService.editMessageText(chatId, initialMsgId, errorGuide).catch(() => {});
-  }
-}
 
 export default router;

@@ -774,7 +774,7 @@ export class AiService {
   public async generalAssist(options: {
     userId: string;
     messages: Anthropic.MessageParam[];
-    files?: { type: 'image' | 'document'; base64: string; mediaType: string }[];
+    files?: { type: 'image' | 'document'; base64: string; mediaType: string; name?: string }[];
     pinnedSyllabus?: string | null;
     extractSchema?: string;
     tools?: Anthropic.Tool[];
@@ -829,7 +829,7 @@ export class AiService {
     }));
     const lastMsg = options.messages[options.messages.length - 1];
     const prompt = lastMsg ? extractPlainText(lastMsg.content) : '';
-    const uploads = options.files?.map((f) => ({ type: f.type, base64: f.base64, mediaType: f.mediaType })) || [];
+    const uploads = options.files?.map((f) => ({ type: f.type, base64: f.base64, mediaType: f.mediaType, ...(f.name ? { name: f.name } : {}) })) || [];
 
     // Steer this turn toward prose, a computed table, or the requested deliverables.
     if (plan && (plan.artifact || plan.needsComputation || plan.needsRetrieval)) systemPrompt += `\n\n${planHint(plan)}`;

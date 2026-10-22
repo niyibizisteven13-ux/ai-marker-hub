@@ -401,6 +401,10 @@ model TelegramSession {
   stagedRubricText      String?
   stagedMode            String? // 'batch' | 'markphoto' | 'form'
   activeDiscussJobId    String?
+  /// Recent assistant conversation (last turns, oldest first) so context survives restarts.
+  history               Json?
+  /// The last request, for the Regenerate button.
+  lastPrompt            String?
   lastActiveAt          DateTime @default(now())
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
