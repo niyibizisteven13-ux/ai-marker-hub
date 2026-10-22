@@ -321,6 +321,10 @@ test('scanner: uploads are signed (Mini App initData or link token) and arrive a
   assert.match(sent.body.caption, /Scanned PDF · 2 pages/);
   assert.deepEqual(sent.body.reply_markup.inline_keyboard.flat().map((b: any) => b.callback_data), ['q:sum', 'q:tr', 'q:mark']);
 
+  // Three PDFs go to the assistant together below; the Free plan allows 2 attachments per message, PRO 10.
+  const owner = (await db.telegramSession.findUnique({ where: { chatId: String(chat) } })).userId;
+  await db.subscription.create({ data: { id: `sub-${Date.now()}`, userId: owner, planType: 'PRO', status: 'ACTIVE', startDate: new Date(), endDate: new Date(Date.now() + 86_400_000) } });
+
   // A /scan link token works for several uploads (one PDF per student) until it expires.
   const token = issueScanToken(String(chat));
   for (let i = 0; i < 2; i++) assert.equal((await upload(`/${token}`)).status, 200);
@@ -332,5 +336,21 @@ test('scanner: uploads are signed (Mini App initData or link token) and arrive a
   const user = claudeRequests.at(-1).messages.at(-1).content as any[];
   assert.ok(user.filter((b) => b.type === 'image').length >= 2, 'the scanned pages reach the model as images');
   assert.match(JSON.stringify(user), /Aline Uwase\.pdf/);
+  resetRouterState();
+});
+
+test('limits: over the daily credit limit, the bot answers with a limit card and an Upgrade button', async () => {
+  const session = await db.telegramSession.findUnique({ where: { chatId: String(chat) } });
+  await db.subscription.deleteMany({ where: { userId: session.userId } });
+  await db.usageRecord.create({ data: { id: `ur-${Date.now()}`, userId: session.userId, kind: 'chat', credits: 25, model: 'gonka', inputTokens: 0, outputTokens: 0, costUsd: 0, channel: 'telegram', createdAt: new Date() } });
+  const n = mark();
+  await sendText('Explain photosynthesis please');
+  const limit = await until(() => since(n).find((c) => c.method === 'sendMessage' && /Limit reached/.test(c.body.text)));
+  assert.match(limit.body.text, /today's 20 credits/);
+  const buttons = limit.body.reply_markup.inline_keyboard.flat();
+  assert.match(buttons[0].url, /\/upgrade\?reason=limit$/);
+  assert.equal(buttons[1].callback_data, 'm:home');
+  await new Promise((r) => setTimeout(r, 200));
+  assert.ok(!since(n).some((c) => c.method === 'sendMessage' && /Working on it/.test(c.body.text)), 'no AI turn starts');
   resetRouterState();
 });

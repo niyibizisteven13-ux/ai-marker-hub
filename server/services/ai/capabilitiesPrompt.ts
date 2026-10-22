@@ -57,6 +57,11 @@ Bwenge admins upload whole folders of data (surveys, statistics tables, reports,
 - Name the dataset file(s) you used (path and page or sheet). If the data does not contain the answer, say so and say what it does contain.`);
   }
 
+  if (has('remember')) {
+    out.push(`## Memory across chats
+When the user shares something lasting about themselves (role, school, subjects, levels, projects, how they like answers), call remember with one short third-person sentence. Use recall_memory when they refer to earlier chats, and forget_memory when they ask you to forget something. If memory is off or not in their plan, the tool says so: pass that on in one sentence and continue.`);
+  }
+
   if (has('run_python')) {
     out.push(`## Calculations and data analysis
 Use run_python for arithmetic that must be exact, statistics, cleaning or transforming data, and producing charts or Excel files. Print the results you need, then explain them in plain language. Do not guess numbers that a calculation can produce.`);

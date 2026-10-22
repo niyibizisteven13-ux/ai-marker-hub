@@ -957,3 +957,20 @@ model GeneratedArtifact {
   @@index([rootId])
   @@index([shareTokenHash])
 }
+
+/// One metered AI action (a chat reply, tool answer, scan, marking...). Credits = real model cost / $0.001,
+/// at least 1; daily, weekly and monthly plan limits are sums over this table.
+model UsageRecord {
+  id           String   @id @default(uuid())
+  userId       String
+  kind         String // chat | tool | vision | artifact | marking
+  credits      Int
+  model        String?
+  inputTokens  Int      @default(0)
+  outputTokens Int      @default(0)
+  costUsd      Float    @default(0)
+  channel      String   @default("web") // web | telegram
+  createdAt    DateTime @default(now())
+
+  @@index([userId, createdAt])
+}

@@ -7,6 +7,7 @@ import type { TelegramApi } from './api.js';
 import { esc, markdownToMessages, caption as fitCaption } from './format.js';
 import { answerKeyboard, card, errorCard, fmtSize, langOf, progressCard, retryKeyboard, type Lang, type StepView } from './ui.js';
 import { copy } from './uiText.js';
+import { checkUsage } from '../billing/usage.js';
 
 /**
  * One Telegram turn through the same assistant as the web chat: exam marking first (as on the web), then
@@ -32,7 +33,7 @@ async function loadDefaultDeps(api: TelegramApi): Promise<BridgeDeps> {
   const ai = AiService.getInstance();
   return {
     api, fileStore,
-    assist: (o) => ai.generalAssist(o) as any,
+    assist: (o) => ai.generalAssist({ ...o, channel: 'telegram' } as any) as any,
     exam: async (userId, text, files, onStatus) => runtime.examChat.handle(userId, text, files, { onStatus }),
   };
 }
@@ -98,9 +99,21 @@ export async function runAssistantTurn(input: TurnInput, depsOverride?: BridgeDe
     await api.sendMessage(chatId, card('⏳', t.working, esc(t.slowDown)), { replyTo: input.replyTo, silent: true });
     return null;
   }
+  const userId: string = session.userId;
+
+  // Plan limits (daily / weekly / monthly credits, per-feature caps), the same as on the web.
+  const visual = (input.files ?? []).some((f) => /^image\/|application\/pdf/.test(f.mime));
+  const gate = userId ? await checkUsage(userId, { kind: visual ? 'vision' : 'chat', chars: input.text.length, attachments: input.files?.length ?? 0 }).catch(() => null) : null;
+  if (gate && !gate.allowed) {
+    const base = (process.env.APP_BASE_URL || 'https://www.bwenge.space').replace(/\/$/, '');
+    await api.sendMessage(chatId, card('⏳', lang === 'rw' ? 'Wageze ku rugero' : lang === 'fr' ? 'Limite atteinte' : 'Limit reached', esc(gate.message ?? '')), {
+      replyTo: input.replyTo,
+      keyboard: { inline_keyboard: [[...(gate.upgrade ? [{ text: lang === 'rw' ? '⭐ Zamura konti' : lang === 'fr' ? '⭐ Passer à PRO' : '⭐ Upgrade', url: `${base}${gate.upgrade.url}` }] : []), { text: t.buttons.menu, callback_data: 'm:home' }]] },
+    });
+    return null;
+  }
   busy.set(chatId, Date.now());
 
-  const userId: string = session.userId;
   const steps: Array<StepView & { id: string; name: string }> = [];
   let text = '';
   const attachments: AttachmentRef[] = [];

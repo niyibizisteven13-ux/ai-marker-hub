@@ -5,6 +5,7 @@ import { BWENGE_CHAT_RESPONSE_RULES, BWENGE_GENERAL_SYSTEM_PROMPT } from './prom
 import { MemoryService } from './MemoryService.js';
 import { toKnowledgePassage } from './knowledge/citations.js';
 import { asksAboutDatasets } from './knowledge/published.js';
+import { recordUsage } from './billing/usage.js';
 import { retrieveKnowledgeChunks } from './KnowledgeRetrievalService.js';
 import { ExecutionSandbox } from './ExecutionSandbox.js';
 import { createAiAgent, FileStore, OpenAICompatibleAdapter, AnthropicAdapter, loadClaudeAgentConfig, ReliableProviderAdapter, ModelDispatchAdapter, ModelPolicyManager, TaskClassifier, loadComplexProvider, loadModelPolicies, TaskRouter, FileJobQueue, NisrIngestionPipeline, isStatisticsQuery, BudgetManager, DocumentPipeline, DeterministicTools } from './ai/index.js';
@@ -252,6 +253,29 @@ export const bwengeAgent = createAiAgent({
           ...knowledgeHits.map((h: any) => toKnowledgePassage(h))
         ];
         return combined;
+      },
+    },
+    // Memory across chats (PRO); refused with an upgrade note when memory is off or not in the plan.
+    memory: {
+      async remember(userId, content, kind) {
+        const m = MemoryService.getInstance();
+        const st = await m.status(userId);
+        if (!st.available) return 'Memory is not part of the user\'s plan. If they want you to remember things across chats, tell them PRO includes it (Settings → Memory).';
+        if (!st.enabled) return 'Memory is turned off. Tell the user they can turn it on in Settings → Memory.';
+        const saved = await m.add(userId, content, { kind, source: 'assistant' });
+        return saved ? `Saved to memory: ${saved.content}` : 'Nothing was saved (empty or duplicate).';
+      },
+      async recall(userId, query) {
+        const m = MemoryService.getInstance();
+        if (!(await m.status(userId)).enabled) return [];
+        return m.search(userId, query, { limit: 8 });
+      },
+      async forget(userId, query) {
+        const m = MemoryService.getInstance();
+        if (!(await m.status(userId)).enabled) return 0;
+        const hits = await m.search(userId, query, { limit: 5 });
+        for (const h of hits) await m.remove(userId, h.id);
+        return hits.length;
       },
     },
     // Datasets from Admin → Datasets & Curations (lazy import: educationRuntime imports this module).
@@ -792,6 +816,8 @@ export class AiService {
     signal?: AbortSignal;
     /** The user's own message for output planning, when the last message also carries injected context. */
     planText?: string;
+    /** Where the request came from, for usage records. */
+    channel?: 'web' | 'telegram';
   }) {
     const useGonka = process.env.AI_PROVIDER === 'gonkarouter' || await this.providerAvailable('gonkarouter');
     const allowFallback = process.env.ALLOW_GEMINI_FALLBACK === 'true';
@@ -825,7 +851,12 @@ export class AiService {
     const currentQuery = extractPlainText(options.messages[options.messages.length - 1]?.content || '');
     let memoryContext = '';
     try {
+      // Memory across chats (PRO): save what the user states or asks to keep, then recall what is relevant.
+      const captured = options.extractSchema ? { saved: [], forgotten: 0 } : await memoryService.capture(options.userId, userText);
       memoryContext = await memoryService.getLongTermContext(options.userId, currentQuery);
+      if (memoryContext) memoryContext = `\n\n${memoryContext}`;
+      if (captured.saved.some((m) => m.source === 'user')) memoryContext += `\n\n[Memory] The user's request was saved to memory: "${captured.saved.find((m) => m.source === 'user')!.content}". Confirm briefly that you will remember it.`;
+      if (captured.forgotten) memoryContext += `\n\n[Memory] ${captured.forgotten} matching memor${captured.forgotten > 1 ? 'ies were' : 'y was'} deleted at the user's request. Confirm briefly.`;
     } catch (err) {
       logger.warn('generalAssist: getLongTermContext failed, continuing without memory context', err);
     }
@@ -859,6 +890,7 @@ export class AiService {
         toolNames: [],
         signal: options.signal,
       });
+      void recordUsage(options.userId, { kind: 'tool', model: runModel ?? (process.env.GONKA_MODEL || GONKA_MODELS.DEFAULT), inputTokens: r.usage?.input_tokens, outputTokens: r.usage?.output_tokens, channel: options.channel });
       return { ...this.parseModelJson(r.text), _usage: r.usage };
     }
 
@@ -876,6 +908,12 @@ export class AiService {
     // A requested file only counts when a tool created it; otherwise one corrective turn, then an honest note.
     const checked = plan?.artifact ? await runDeliverableTurn({ plan, run, onEvent: options.onEvent }) : null;
     const r = checked ?? await run();
+    const usedModel = runModel ?? (process.env.GONKA_MODEL || GONKA_MODELS.DEFAULT);
+    const credits = await recordUsage(options.userId, {
+      kind: visualUpload ? 'vision' : plan?.artifact ? 'artifact' : toolTurn ? 'tool' : 'chat',
+      model: usedModel, inputTokens: r.usage?.input_tokens, outputTokens: r.usage?.output_tokens, channel: options.channel,
+    });
+    options.onEvent?.({ type: 'usage', data: { input_tokens: r.usage?.input_tokens ?? 0, output_tokens: r.usage?.output_tokens ?? 0, model: usedModel, credits } as any });
     if (toolTurn) logger.info('[AI chat] tool turn', { model: runModel ?? 'gonka-default', deliverables: plan!.deliverables.length, attachments: r.attachments.length, missing: checked?.missing.length ?? 0 });
 
     return {
