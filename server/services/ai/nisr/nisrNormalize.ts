@@ -52,7 +52,7 @@ export interface NormalizeResult<T> {
 }
 
 /** Tokens NISR and similar publications use for "not available" / suppressed values. */
-const MISSING = new Set(['', '-', '–', '—', '..', '...', 'n/a', 'na', 'n.a.', 'nan', 'null', 'x', '*', ':', 'not available']);
+export const MISSING = new Set(['', '-', '–', '—', '..', '...', 'n/a', 'na', 'n.a.', 'nan', 'null', 'x', '*', ':', 'not available']);
 
 export function parseStatValue(raw: unknown): { value: number | null; missing: boolean; percent: boolean; text: string } {
   const text = raw === null || raw === undefined ? '' : String(typeof raw === 'object' && raw && 'result' in (raw as any) ? (raw as any).result : raw).trim();

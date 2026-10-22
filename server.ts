@@ -31,6 +31,9 @@ import { generalTools } from './server/services/generalTools.js';
 import { FileStore, createFileRouter } from './server/services/ai/index.js';
 import { describeChatFailure } from './server/services/ai/chatFailure.js';
 import datasetRoutes from './server/routes/datasetRoutes.js';
+import { analyticsRouter, assessmentRouter, jobsRouter } from './server/routes/educationRoutes.js';
+import { startEducationRuntime } from './server/services/educationRuntime.js';
+import { fileJobQueue } from './server/services/AiService.js';
 import { emptyModelOutputError, nonEmptyModelText } from './server/services/ai/modelOutput.js';
 import { validateScanGradeOutput } from './server/services/ai/scanOutput.js';
 import logger from './server/utils/logger.js';
@@ -339,6 +342,9 @@ app.use('/api/ollama', requireAuth, ollamaRoutes);
 app.use('/api/telegram', telegramBotRoutes);
 app.use('/api/chat', chatSseRoutes);
 app.use('/api/datasets', requireAuth, datasetRoutes);
+app.use('/api/analytics', requireAuth, analyticsRouter);
+app.use('/api/assessment', requireAuth, assessmentRouter);
+app.use('/api/jobs', requireAuth, jobsRouter);
 app.use('/api', settingsBillingRoutes);
 // /exports serves generated Excel reports — gate it so only the owning
 // authenticated user (or admin) can download them. Anonymous access would
@@ -2562,6 +2568,8 @@ async function startServer() {
 
   server.listen(PORT, '0.0.0.0', () => {
     logger.info(`Marker AI server running on http://0.0.0.0:${PORT}`);
+    // Recover persisted background jobs and start periodic cleanup of expired jobs/artifacts.
+    startEducationRuntime().catch((err) => logger.error('Background job runtime failed to start', { errorType: err?.name }));
   });
 
   // Graceful shutdown: a deploy/restart sending SIGTERM (Render, Docker,
@@ -2572,6 +2580,7 @@ async function startServer() {
     logger.info(`${signal} received, shutting down gracefully...`);
     server.close(async () => {
       try {
+        await fileJobQueue.stop();
         await queueService.close();
         await prisma.$disconnect();
       } catch (err) {

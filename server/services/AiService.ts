@@ -5,7 +5,7 @@ import { BWENGE_CHAT_RESPONSE_RULES, BWENGE_GENERAL_SYSTEM_PROMPT } from './prom
 import { MemoryService } from './MemoryService.js';
 import { retrieveKnowledgeChunks } from './KnowledgeRetrievalService.js';
 import { ExecutionSandbox } from './ExecutionSandbox.js';
-import { createAiAgent, FileStore, OpenAICompatibleAdapter, ReliableProviderAdapter, ModelDispatchAdapter, ModelPolicyManager, TaskClassifier, loadComplexProvider, loadModelPolicies, TaskRouter, FileJobQueue, NisrIngestionPipeline, isStatisticsQuery, BudgetManager, DocumentPipeline, DeterministicTools } from './ai/index.js';
+import { createAiAgent, FileStore, OpenAICompatibleAdapter, AnthropicAdapter, loadClaudeAgentConfig, ReliableProviderAdapter, ModelDispatchAdapter, ModelPolicyManager, TaskClassifier, loadComplexProvider, loadModelPolicies, TaskRouter, FileJobQueue, NisrIngestionPipeline, isStatisticsQuery, BudgetManager, DocumentPipeline, DeterministicTools } from './ai/index.js';
 import { prisma } from '../db.js';
 import { getFileUrlSecret } from '../auth/secrets.js';
 import { extractJsonFragment, stripThinkingTags } from '../utils/textSanitizers.js';
@@ -91,7 +91,12 @@ export const fileStore = new FileStore({
   secret: fileStoreSecret,
 });
 
-export const fileJobQueue = new FileJobQueue();
+export const fileJobQueue = new FileJobQueue({
+  storageDir: process.env.JOBS_DIR ?? './data/jobs',
+  concurrency: Number(process.env.JOBS_CONCURRENCY) > 0 ? Number(process.env.JOBS_CONCURRENCY) : 2,
+  maxActivePerUser: Number(process.env.JOBS_MAX_ACTIVE_PER_USER) > 0 ? Number(process.env.JOBS_MAX_ACTIVE_PER_USER) : 5,
+  log: (event, data) => logger.info(`[jobs] ${event}`, data),
+});
 export const nisrPipeline = new NisrIngestionPipeline();
 export const budgetManager = new BudgetManager();
 export const documentPipeline = new DocumentPipeline();
@@ -158,10 +163,35 @@ export const taskRouter = new TaskRouter(
   complexProvider.config,
 );
 
+// Agent tasks (tool loops, rubric assessment, report interpretation) can run on Claude
+// (AI_AGENT_PROVIDER=anthropic, default model claude-haiku-5-5). Transient Claude failures fall back
+// to Gonka's standard model when CLAUDE_FALLBACK_TO_GONKA is on; refusals never fall back.
+const claudeAgent = loadClaudeAgentConfig();
+logger.info('[AI routing] agent provider', { provider: claudeAgent.config ? 'anthropic' : 'gonka', model: claudeAgent.config?.model, reason: claudeAgent.reason });
+const gonkaStandardModel = loadModelPolicies(process.env, GONKA_MODELS.DEFAULT).STANDARD.model;
+export const claudeAdapter = claudeAgent.config
+  ? new ReliableProviderAdapter({
+    primary: new AnthropicAdapter({ apiKey: claudeAgent.config.apiKey, name: 'Claude', effort: claudeAgent.config.effort, requestTimeoutMs: envMs('CLAUDE_REQUEST_TIMEOUT_MS', 120_000) }),
+    ...reliability,
+    fallbackAdapter: claudeAgent.config.fallbackToGonka ? gonkaAdapter : undefined,
+    fallbackModel: claudeAgent.config.fallbackToGonka ? gonkaStandardModel : undefined,
+  })
+  : null;
+
 const agentProvider = new ModelDispatchAdapter(
   gonkaAdapter,
-  new Map(complexProvider.config && complexAdapter ? [[complexProvider.config.model, complexAdapter]] : []),
+  new Map([
+    ...(complexProvider.config && complexAdapter ? [[complexProvider.config.model, complexAdapter] as const] : []),
+    ...(claudeAgent.config && claudeAdapter ? [[claudeAgent.config.model, claudeAdapter] as const] : []),
+  ]),
 );
+
+/** Adapter + model for agent tasks: Claude when configured, otherwise Gonka's standard model. */
+export function agentTarget(): { adapter: typeof agentProvider; model: string; provider: 'anthropic' | 'gonka'; fallbackModel: string | null | undefined } {
+  return claudeAgent.config
+    ? { adapter: agentProvider, model: claudeAgent.config.model, provider: 'anthropic', fallbackModel: undefined }
+    : { adapter: agentProvider, model: gonkaStandardModel, provider: 'gonka', fallbackModel: null };
+}
 
 /** Picks model and fallback for a chat request and logs the decision (never the prompt). */
 function routeChat(prompt: string, opts: { hasImages?: boolean; hasTools?: boolean; requestId?: string }) {
@@ -508,8 +538,12 @@ export class AiService {
     signal?: AbortSignal;
     requestId?: string;
   }) {
-    // options.model is ignored as before; the task router picks Gonka or the big-task provider.
-    const route = routeChat(options.prompt, { hasTools: true, requestId: options.requestId });
+    // options.model is ignored as before. Agent loops run on Claude when AI_AGENT_PROVIDER=anthropic;
+    // otherwise the task router picks Gonka or the big-task provider.
+    const agent = agentTarget();
+    const route = agent.provider === 'anthropic'
+      ? { model: agent.model, fallbackModel: agent.fallbackModel }
+      : routeChat(options.prompt, { hasTools: true, requestId: options.requestId });
     const r = await bwengeAgent.run({
       userId: 'system',
       system: options.system,

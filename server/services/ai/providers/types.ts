@@ -12,6 +12,11 @@ export interface ProviderRequest {
   requestId?: string;
   /** Per-request fallback model chosen by the routing policy. `null` disables fallback for this request. */
   fallbackModel?: string | null;
+  /**
+   * Ask for JSON matching this schema. Claude enforces it with structured outputs; gateways only get it
+   * as an instruction, so callers must still validate the result.
+   */
+  responseSchema?: Record<string, unknown>;
 }
 
 export type ProviderChunk =
@@ -19,7 +24,9 @@ export type ProviderChunk =
   | { type: 'reasoning'; text: string }
   | { type: 'tool_call'; index: number; id?: string; name?: string; args?: string }
   | { type: 'usage'; input: number; output: number }
-  | { type: 'finish'; reason: string };
+  | { type: 'finish'; reason: string }
+  /** Provider-native assistant content to replay on the next turn of the same loop (see ChatMessage.providerState). */
+  | { type: 'provider_state'; provider: string; content: unknown[] };
 
 export interface ProviderAdapter {
   readonly name: string;
@@ -35,6 +42,7 @@ export type ErrorCategory =
   | 'INVALID_REQUEST'
   | 'AUTH_FAILURE'
   | 'MODEL_UNAVAILABLE'
+  | 'CONTENT_REFUSED'
   | 'INTERNAL_ERROR';
 
 export class ProviderError extends Error {

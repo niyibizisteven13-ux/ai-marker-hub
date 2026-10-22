@@ -46,7 +46,8 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
   async *stream(req: ProviderRequest): AsyncGenerator<ProviderChunk> {
     const body: Record<string, unknown> = {
       model: req.model,
-      messages: req.messages,
+      // providerState belongs to other providers (e.g. Claude thinking blocks) and is never forwarded.
+      messages: req.messages.map(({ providerState: _providerState, ...m }) => m),
       stream: true,
       ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
       ...(req.maxTokens ? { max_tokens: req.maxTokens } : {}),

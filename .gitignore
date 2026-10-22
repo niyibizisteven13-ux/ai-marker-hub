@@ -45,3 +45,7 @@ exports/audit.log.jsonl
 
 # Generated NISR index (rebuild with: npm run nisr:index)
 data/nisr/index/
+
+# Background jobs and assessment records (runtime data; keep on a durable volume)
+data/jobs/
+data/assessments/
