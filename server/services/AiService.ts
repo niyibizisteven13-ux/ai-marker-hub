@@ -4,6 +4,7 @@ import { evaluateStudentSubmission as deepseekEvaluate } from '../../src/service
 import { BWENGE_CHAT_RESPONSE_RULES, BWENGE_GENERAL_SYSTEM_PROMPT } from './prompts/bwengeGeneralPrompt.js';
 import { MemoryService } from './MemoryService.js';
 import { toKnowledgePassage } from './knowledge/citations.js';
+import { asksAboutDatasets } from './knowledge/published.js';
 import { retrieveKnowledgeChunks } from './KnowledgeRetrievalService.js';
 import { ExecutionSandbox } from './ExecutionSandbox.js';
 import { createAiAgent, FileStore, OpenAICompatibleAdapter, AnthropicAdapter, loadClaudeAgentConfig, ReliableProviderAdapter, ModelDispatchAdapter, ModelPolicyManager, TaskClassifier, loadComplexProvider, loadModelPolicies, TaskRouter, FileJobQueue, NisrIngestionPipeline, isStatisticsQuery, BudgetManager, DocumentPipeline, DeterministicTools } from './ai/index.js';
@@ -252,6 +253,12 @@ export const bwengeAgent = createAiAgent({
         ];
         return combined;
       },
+    },
+    // Datasets from Admin → Datasets & Curations (lazy import: educationRuntime imports this module).
+    datasets: {
+      catalog: async (userId) => (await import('./educationRuntime.js')).knowledgeService.assistantCatalog(userId),
+      browse: async (userId, id, opts) => (await import('./educationRuntime.js')).knowledgeService.assistantBrowse(userId, id, opts),
+      read: async (userId, id, opts) => (await import('./educationRuntime.js')).knowledgeService.assistantRead(userId, id, opts) as any,
     },
     // Lazy import: educationRuntime imports this module.
     outputs: {
@@ -796,7 +803,9 @@ export class AiService {
     const plan = !options.extractSchema && userText.trim()
       ? planOutput({ message: userText, attachments: (options.files ?? []).map((f) => ({ name: '', mime: f.mediaType })), hasDataset: (options.files ?? []).some((f) => /csv|spreadsheet|excel|json/i.test(f.mediaType)) || /\.(csv|xlsx|xls|tsv)\b/i.test(userText) })
       : null;
-    const toolTurn = !!plan && (plan.artifact || plan.needsComputation);
+    // Questions the curated datasets may answer also need the tools (search, browse, read, analyse).
+    const dataTurn = !options.extractSchema && await asksAboutDatasets(userText).catch(() => false);
+    const toolTurn = !!plan && (plan.artifact || plan.needsComputation) || dataTurn;
     // Photos and PDFs need a model that can see them (handwriting, scans, diagrams).
     const visualUpload = (options.files ?? []).some((f) => f.type === 'image' || /^image\/|application\/pdf/.test(f.mediaType));
     // Tool and vision turns run on the agent model (Claude when AI_AGENT_PROVIDER=anthropic); everyday chat stays on Gonka.

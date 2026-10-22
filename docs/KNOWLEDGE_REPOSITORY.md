@@ -121,6 +121,40 @@ The frontend calls admin endpoints through `authFetch` and `readJson` (`src/api/
 - **Previews:** render `html` only inside a sandboxed `<iframe srcdoc sandbox>`. Show PDF pages with `<img src=".../preview?render=image&page=N">` and fetch the image with `authFetch`, since it requires authentication.
 - **Indexing progress:** poll `GET /jobs/:jobId` or the statistics. Show `indexing.error` and offer `POST /files/:id/index` (retry) or `POST /repositories/:id/reindex { onlyFailed: true }`.
 
+## Bwenge AI: answering users from datasets
+
+A repository is private to its owner and their organisation until an admin turns on **Bwenge AI: all users** in
+the repository bar (setting `assistant: true`). From then on, every signed-in user's assistant can use it, on
+the web and in Telegram.
+
+**What the assistant can do with a published dataset:**
+- `search_knowledge` finds passages across all published datasets. Each passage names the file and its `fileId`.
+- `list_datasets` lists the datasets, with their file types and top-level folders.
+- `browse_dataset` opens a folder by path, or finds files by name anywhere in the dataset.
+- `read_dataset_file` reads any supported file:
+  - PDF, Word, PowerPoint, HTML and text, page by page (scans are read through OCR);
+  - spreadsheets, CSV and JSON as column headers plus rows.
+- `analyze_data` with `{ "type": "repository_file", "id": fileId }` computes statistics over the whole table.
+  The assistant reports only the numbers this tool returns.
+
+**Routing:**
+- A question that mentions data words (English, Kinyarwanda, French) or the name of a published dataset or one of
+  its top-level folders runs on the tool-enabled agent.
+- That agent is Claude Haiku when `AI_AGENT_PROVIDER=anthropic`.
+- Other chat is unchanged.
+
+**What stays hidden:**
+- Folders and files switched off for AI are never shown, read or indexed.
+- Turning the switch off removes the dataset from other users' search, browsing, reading, analysis and source links
+  at once. The owner keeps access.
+
+**Code:**
+- `server/services/knowledge/published.ts`: which datasets are published, and the question detector.
+- `assistant*` methods in `knowledge/service.ts`.
+- `server/services/ai/tools/datasetTools.ts`.
+
+**Tests:** `tests/dataset_ai.test.ts`.
+
 ## Security
 
 - **Paths:** `normalizeRelativePath` rejects absolute paths, drive letters, UNC paths, `..`, `.`, null bytes, control characters and over-deep or over-long paths. ZIP entries are judged by their original names, because `JSZip` silently rewrites `../`.

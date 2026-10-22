@@ -17,5 +17,7 @@ export function toKnowledgePassage(h: { chunk: any; score?: number; text?: strin
     table: c.table || h.table || (meta.sheet ? `Sheet ${meta.sheet}${meta.section ? `, ${meta.section}` : ''}` : meta.slide ? `Slide ${meta.slide}` : undefined),
     url: c.url || h.url || meta.sourceUrl,
     score: h.score,
+    fileId: typeof meta.fileId === 'string' ? meta.fileId : undefined,
+    path: typeof meta.path === 'string' ? meta.path : undefined,
   };
 }

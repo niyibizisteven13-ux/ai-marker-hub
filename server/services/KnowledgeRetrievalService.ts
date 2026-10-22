@@ -1,6 +1,7 @@
 import { prisma } from '../db.js';
 import { EmbeddingService } from './EmbeddingService.js';
 import { buildKnowledgeAccessWhere } from './ai/dataScope.js';
+import { publishedKnowledgeBaseIds } from './knowledge/published.js';
 import logger from '../utils/logger.js';
 
 const embeddingService = EmbeddingService.getInstance();
@@ -354,6 +355,7 @@ export async function retrieveKnowledgeChunks(
     select: { organizationId: true },
   });
   const organizationIds = memberships.map(({ organizationId }) => organizationId);
+  const published = await publishedKnowledgeBaseIds().catch(() => [] as string[]);
 
   // SQL pre-filter uses RAW (accented) lowercase terms, because the database
   // text is not folded. For longer words we also match the part after a likely
@@ -372,7 +374,7 @@ export async function retrieveKnowledgeChunks(
   const where = {
     AND: [
       readyKnowledgeWhere,
-      buildKnowledgeAccessWhere(options.userId, organizationIds),
+      buildKnowledgeAccessWhere(options.userId, organizationIds, published),
       {
         OR: [
           { embedding: { not: null } },

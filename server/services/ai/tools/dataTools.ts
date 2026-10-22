@@ -27,14 +27,14 @@ export function searchKnowledgeTool(services: ToolServices): Tool | null {
   return {
     definition: {
       name: 'search_knowledge',
-      description: "Search Bwenge's curated knowledge base (official reports, statistical releases, tables, laws, curriculum, farming guides). Use it BEFORE answering questions about Rwanda data, statistics, policy, or any fact that may be in the documents. Cite results as [1], [2] with title, publisher, year, and page. If nothing relevant is found, say so; never invent numbers or sources.",
+      description: "Search Bwenge's curated knowledge base and the datasets admins uploaded (official reports, statistical releases, tables, laws, curriculum, farming guides, research files). Use it BEFORE answering questions about Rwanda data, statistics, policy, or any fact that may be in the documents. Cite results as [1], [2] with title, publisher, year, and page. If nothing relevant is found, say so; never invent numbers or sources.",
       parameters: { type: 'object', required: ['query'], properties: { query: { type: 'string' }, topK: { type: 'integer', minimum: 1, maximum: 12, default: 6 } } },
     },
     async execute(input, ctx) {
       try {
         const passages = await services.knowledge!.search(String(input.query), { topK: input.topK ?? 6, userId: ctx.userId });
         if (!passages.length) return { text: 'No matching sources were found in the knowledge base. Tell the user you could not find a source, and do not guess figures.' };
-        const body = passages.map((p, i) => `[${i + 1}] ${[p.title, p.publisher, p.year, p.page ? `p. ${p.page}` : '', p.table ? `table ${p.table}` : ''].filter(Boolean).join(', ')}\n${truncate(p.text, 1800)}`).join('\n\n');
+        const body = passages.map((p, i) => `[${i + 1}] ${[p.title, p.publisher, p.year, p.page ? `p. ${p.page}` : '', p.table ? `table ${p.table}` : ''].filter(Boolean).join(', ')}${p.fileId ? ` (dataset file, fileId ${p.fileId})` : ''}\n${truncate(p.text, 1800)}`).join('\n\n');
         return { text: untrusted('KNOWLEDGE PASSAGES', body), sources: passages };
       } catch (e: any) {
         return err(`Knowledge search failed: ${String(e.message).slice(0, 200)}`);

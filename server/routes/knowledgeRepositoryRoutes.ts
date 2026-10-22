@@ -110,7 +110,7 @@ knowledgeAdminRouter.get('/repositories', wrap(async (req, res) => ok(res, await
 knowledgeAdminRouter.post('/repositories', wrap(async (req, res) => {
   const body = z.object({
     name: z.string().min(1).max(200), description: z.string().max(2000).optional(), organizationId: z.string().nullable().optional(), knowledgeBaseId: z.string().nullable().optional(),
-    settings: z.object({ language: z.string().max(10).optional(), domain: z.string().max(40).optional(), ocr: z.boolean().optional(), autoIndex: z.boolean().optional() }).strict().optional(),
+    settings: z.object({ language: z.string().max(10).optional(), domain: z.string().max(40).optional(), ocr: z.boolean().optional(), autoIndex: z.boolean().optional(), assistant: z.boolean().optional() }).strict().optional(),
     quotaBytes: z.number().int().positive().nullable().optional(),
   }).strict().parse(req.body ?? {});
   ok(res, await knowledgeService.createRepository(userIdOf(req), body as any), 201);
@@ -124,7 +124,7 @@ knowledgeAdminRouter.get('/repositories/:id', wrap(async (req, res) => {
 knowledgeAdminRouter.patch('/repositories/:id', wrap(async (req, res) => {
   const body = z.object({
     name: z.string().min(1).max(200).optional(), description: z.string().max(2000).nullable().optional(), knowledgeBaseId: z.string().optional(), quotaBytes: z.number().int().positive().nullable().optional(),
-    settings: z.object({ language: z.string().max(10).optional(), domain: z.string().max(40).optional(), ocr: z.boolean().optional(), autoIndex: z.boolean().optional() }).strict().optional(),
+    settings: z.object({ language: z.string().max(10).optional(), domain: z.string().max(40).optional(), ocr: z.boolean().optional(), autoIndex: z.boolean().optional(), assistant: z.boolean().optional() }).strict().optional(),
   }).strict().parse(req.body ?? {});
   ok(res, await knowledgeService.updateRepository(userIdOf(req), req.params.id, body as any));
 }));
