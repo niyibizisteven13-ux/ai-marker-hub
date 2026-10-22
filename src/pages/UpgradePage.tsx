@@ -1,353 +1,339 @@
-import React, { useState, useEffect } from 'react';
-import { ShieldCheck, Zap, ArrowLeft, Loader2, CheckCircle2, AlertCircle, Star, Building2, Check, ChevronDown, ChevronUp, Lock } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AlertCircle, ArrowLeft, Building2, Check, CheckCircle2, Coins, Loader2, Lock, ShieldCheck, Smartphone, Sparkles, X, Zap } from 'lucide-react';
 import { authFetch } from '../utils/authFetch';
-import { PLANS } from '../content/plans';
-import { COMPARE_ROWS } from '../content/compare';
-import { FAQ_ITEMS } from '../content/faq';
 import OrganisationRequestDialog from '../components/OrganisationRequestDialog';
+
+/**
+ * Upgrade: Free, GO (pay as you go credit packs), PRO (launch price with the regular price struck through)
+ * and Institution. Prices come from the server (admin-editable) in USD with Rwandan franc equivalents; payment
+ * is MTN Mobile Money: the user approves on their phone and the page follows the payment until MTN confirms.
+ */
+
+interface PlanLimits { daily: number; weekly: number; monthly: number; perDay: { tool: number; vision: number; artifact: number; marking: number }; maxUploadMb: number; maxAttachments: number; memory: boolean; memoryItems: number }
+interface Pack { id: string; rwf: number; credits: number; usd: number }
+interface PlansResponse {
+  fxUsdRwf: number; payments: 'live' | 'sandbox' | 'simulated' | 'off';
+  plans: Array<{ id: 'FREE' | 'GO' | 'PRO' | 'INSTITUTION'; name: string; priceUsd: number | null; listPriceUsd?: number | null; priceRwf: number | null; listPriceRwf?: number | null; period: string; limits: PlanLimits; packs?: Pack[]; seats?: number }>;
+}
+interface Me { plan: 'FREE' | 'GO' | 'PRO' | 'INSTITUTION'; planName: string; wallet: number; subscription: { endDate: string | null; daysLeft: number | null } | null; usage: { day: { used: number; limit: number } } }
+interface Payment { id: string; status: 'PENDING' | 'SUCCESSFUL' | 'FAILED' | 'EXPIRED'; amountRwf: number; currency: string; receiptNumber: string | null; reason: string | null; phoneMasked: string; purpose: string; credits: number; months: number }
+type Checkout = { purpose: 'PRO' | 'GO_PACK' | 'INSTITUTION'; packId?: string; months: number; title: string; amountRwf: number; amountUsd: number };
 
 interface UpgradePageProps {
   jobId?: string;
   service?: string;
-  targetPlan?: 'individual' | 'business' | 'organisation';
+  targetPlan?: string;
   onBack: () => void;
   onSuccess: () => void;
 }
 
 const SERIF = "font-['Georgia','Tiempos_Headline','Times_New_Roman',serif]";
+const rwf = (n: number) => `${Math.round(n).toLocaleString('en-US')} RWF`;
+const usd = (n: number) => `$${Number.isInteger(n) ? n : n.toFixed(2)}`;
+const REASONS: Record<string, { title: string; body: string }> = {
+  limit: { title: 'You have reached your limit', body: 'Upgrade to PRO for more credits every day, or buy GO credits to keep going right now.' },
+  usage: { title: 'Get more out of Bwenge', body: 'PRO gives you six times the daily credits, memory across all chats and larger files.' },
+  memory: { title: 'Memory across all chats is part of PRO', body: 'Bwenge remembers who you are, how you like answers and what you worked on, on the web and in Telegram.' },
+};
 
-export default function UpgradePage({ jobId, service, targetPlan = 'business', onBack, onSuccess }: UpgradePageProps) {
-  const [selectedPlanId, setSelectedPlanId] = useState<'individual' | 'business' | 'organisation'>(targetPlan || 'business');
-  const [phone, setPhone] = useState('');
-  const [status, setStatus] = useState<'idle' | 'pending' | 'success' | 'failed'>('idle');
-  const [price, setPrice] = useState<number | null>(null);
-  const [isLoadingPrice, setIsLoadingPrice] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [compareOpen, setCompareOpen] = useState(true);
-  const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(null);
-  const [orgDialogOpen, setOrgDialogOpen] = useState(false);
-  const [reasonLimit, setReasonLimit] = useState(false);
+function features(id: string, l: PlanLimits, packs?: Pack[]): string[] {
+  if (id === 'GO') return [`Free daily allowance plus credits you buy`, `Packs from ${rwf(packs?.[0]?.rwf ?? 500)}, valid 12 months`, 'No daily cap while you have credits', `Uploads up to ${l.maxUploadMb} MB`];
+  return [
+    `${l.daily.toLocaleString('en-US')} credits a day · ${l.monthly.toLocaleString('en-US')} a month`,
+    `${l.perDay.tool} data & tool answers a day`,
+    `${l.perDay.vision} scan and image reads a day`,
+    `${l.perDay.artifact} files, charts & dashboards a day`,
+    l.memory ? `Memory across all chats (${l.memoryItems.toLocaleString('en-US')})` : 'No memory across chats',
+    `Uploads up to ${l.maxUploadMb} MB, ${l.maxAttachments} per message`,
+  ];
+}
+
+export default function UpgradePage({ jobId, onBack, onSuccess }: UpgradePageProps) {
+  const [data, setData] = useState<PlansResponse | null>(null);
+  const [me, setMe] = useState<Me | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [months, setMonths] = useState(1);
+  const [packId, setPackId] = useState<string>('');
+  const [checkout, setCheckout] = useState<Checkout | null>(null);
+  const [orgOpen, setOrgOpen] = useState(false);
+  const params = useMemo(() => new URLSearchParams(window.location.search), []);
+  const reason = REASONS[params.get('reason') ?? ''] ?? (jobId ? REASONS.limit : null);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('reason') === 'limit' || jobId) {
-      setReasonLimit(true);
-    }
-  }, [jobId]);
-
-  // Reorder plans: Business Pro first, then Individual, then Organisation
-  const orderedPlans = [
-    PLANS.find(p => p.id === 'business') || PLANS[1],
-    PLANS.find(p => p.id === 'individual') || PLANS[0],
-    PLANS.find(p => p.id === 'organisation') || PLANS[2],
-  ];
-
-  const handleSelectPlan = (planId: 'individual' | 'business' | 'organisation') => {
-    if (planId === 'organisation') {
-      setOrgDialogOpen(true);
-      return;
-    }
-    setSelectedPlanId(planId);
-  };
-
-  const handlePay = async () => {
-    const cleanedPhone = phone.replace(/\D/g, '');
-    const normalizedPhone = cleanedPhone.startsWith('250') ? `+${cleanedPhone}` : cleanedPhone.startsWith('0') ? `+250${cleanedPhone.slice(1)}` : `+250${cleanedPhone}`;
-
-    if (!/^\+250[0-9]{9}$/.test(normalizedPhone)) {
-      setError('Enter a valid Rwandan Mobile Money number (e.g. 078XXXXXXX).');
-      return;
-    }
-    setError(null);
-    setStatus('pending');
-
-    const payload: { phoneNumber: string; service?: string; batchId?: string; planType?: string; isSubscription?: boolean } = {
-      phoneNumber: normalizedPhone,
-    };
-
-    if (jobId) {
-      payload.batchId = jobId;
-      payload.service = service || 'grading';
-    }
-
-    if (selectedPlanId === 'business') {
-      payload.planType = 'BUSINESS';
-      payload.isSubscription = true;
-    }
-
-    try {
-      const res = await authFetch('/api/payments/initiate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setStatus('failed');
-        setError(data.error || 'Payment initiation failed.');
-        return;
-      }
-      void pollPaymentStatus();
-    } catch (err) {
-      setStatus('failed');
-      setError(err instanceof Error ? err.message : 'Network error during payment initiation.');
-    }
-  };
-
-  const pollPaymentStatus = async () => {
-    const maxAttempts = 30;
-    for (let i = 0; i < maxAttempts; i++) {
-      await new Promise((r) => setTimeout(r, 3000));
+    (async () => {
       try {
-        const url = jobId
-          ? `/api/payments/status?${new URLSearchParams({ jobId })}`
-          : `/api/payments/status?${new URLSearchParams({ planType: 'BUSINESS' })}`;
-
-        const res = await authFetch(url);
-        const data = await res.json();
-        if (!res.ok) continue;
-
-        if (data.status === 'SUCCESS') {
-          setStatus('success');
-          setTimeout(() => onSuccess(), 2000);
-          return;
-        }
-        if (data.status === 'FAILED') {
-          setStatus('failed');
-          setError('Payment was rejected or failed.');
-          return;
-        }
-      } catch {
-        // network retry during poll
+        const [p, m] = await Promise.all([authFetch('/api/billing/plans'), authFetch('/api/billing/me')]);
+        if (!p.ok) throw new Error('Could not load plans.');
+        const plans: PlansResponse = await p.json();
+        setData(plans);
+        setPackId(plans.plans.find((x) => x.id === 'GO')?.packs?.[1]?.id ?? plans.plans.find((x) => x.id === 'GO')?.packs?.[0]?.id ?? '');
+        if (m.ok) setMe(await m.json());
+      } catch (e) {
+        setLoadError(e instanceof Error ? e.message : 'Could not load plans.');
       }
-    }
-    setStatus('failed');
-    setError('Payment prompt timed out.');
-  };
+    })();
+  }, []);
 
-  if (status === 'success') {
-    return (
-      <div className="h-[100dvh] w-full bg-[var(--bg)] flex flex-col items-center justify-center p-8 text-center animate-in fade-in zoom-in duration-500 text-[var(--text)]">
-        <div className="w-16 h-16 bg-[var(--teal)]/15 rounded-full flex items-center justify-center text-[var(--teal)] mb-6 border border-[var(--teal)]/30">
-          <CheckCircle2 size={32} />
-        </div>
-        <h2 className={`${SERIF} text-3xl font-normal text-[var(--text)] mb-3`}>Payment successful</h2>
-        <p className="text-[var(--muted)] mb-8 max-w-md text-sm leading-relaxed">
-          Your access has been successfully unlocked. Redirecting to your workspace…
-        </p>
-        <Loader2 className="animate-spin text-[var(--accent)]" size={24} />
-      </div>
-    );
-  }
+  const plan = (id: string) => data?.plans.find((p) => p.id === id);
+  const pro = plan('PRO');
+  const go = plan('GO');
+  const inst = plan('INSTITUTION');
+  const free = plan('FREE');
+  const pack = go?.packs?.find((p) => p.id === packId);
+  const discount = pro?.listPriceUsd && pro.priceUsd ? Math.round((1 - pro.priceUsd / pro.listPriceUsd) * 100) : 0;
+  const paymentsOff = data?.payments === 'off';
+  const current = me?.plan ?? 'FREE';
 
   return (
-    <div className="h-[100dvh] max-h-[100dvh] w-full overflow-y-auto upgrade-scrollbar bg-[var(--bg)] text-[var(--text)] flex flex-col font-sans antialiased">
-      {orgDialogOpen && <OrganisationRequestDialog isOpen={orgDialogOpen} onClose={() => setOrgDialogOpen(false)} />}
+    <div className="flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-y-auto bg-[var(--bg)] font-sans text-[var(--text)] antialiased upgrade-scrollbar">
+      {orgOpen && <OrganisationRequestDialog isOpen={orgOpen} onClose={() => setOrgOpen(false)} />}
+      {checkout && <CheckoutDialog checkout={checkout} onClose={() => setCheckout(null)} onDone={onSuccess} />}
 
-      {/* Top Bar */}
-      <div className="sticky top-0 z-30 px-4 sm:px-8 py-4 flex items-center justify-between border-b border-[var(--line)] bg-[var(--bg)]/90">
-        <button
-          onClick={onBack}
-          className="flex items-center gap-2 text-[var(--muted)] hover:text-[var(--text)] transition-colors rounded-lg px-3 py-2 hover:bg-[var(--hover)]"
-        >
-          <ArrowLeft size={16} />
-          <span className="text-sm font-medium">Back to workspace</span>
+      <div className="sticky top-0 z-30 flex items-center justify-between border-b border-[var(--line)] bg-[var(--bg)]/90 px-4 py-4 backdrop-blur sm:px-8">
+        <button onClick={onBack} className="flex items-center gap-2 rounded-lg px-3 py-2 text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--text)]">
+          <ArrowLeft size={16} /> <span className="text-sm font-medium">Back to workspace</span>
         </button>
-        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-[var(--muted)] border border-[var(--line)] bg-[var(--surface)]">
-          <ShieldCheck size={14} className="text-[var(--teal)]" /> Secure Mobile Money checkout
+        <div className="flex items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1.5 text-xs font-medium text-[var(--muted)]">
+          <ShieldCheck size={14} className="text-[var(--teal)]" /> Secure MTN Mobile Money
         </div>
       </div>
 
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-10 space-y-12">
-        {/* Contextual Banner */}
-        {(reasonLimit || jobId) && (
-          <div className="p-4 sm:p-5 rounded-2xl bg-[var(--accent)]/15 border border-[var(--danger)]/30 flex items-start gap-3.5 animate-in fade-in">
-            <Lock size={20} className="text-[var(--accent)] shrink-0 mt-0.5" />
-            <div>
-              <h3 className="text-sm font-semibold text-[var(--text)]">Usage limit reached or batch unlock required</h3>
-              <p className="text-xs text-[var(--muted)] mt-0.5 leading-relaxed">
-                You have reached your free tier grading limit or requested a specific batch unlock. Upgrade to Business Pro for unlimited marking, or unlock this batch with Mobile Money.
-              </p>
-            </div>
+      <main className="mx-auto w-full max-w-6xl flex-1 space-y-10 px-4 py-10 sm:px-6">
+        {reason && (
+          <div className="flex items-start gap-3.5 rounded-2xl border border-[var(--accent)]/30 bg-[var(--accent)]/10 p-4 sm:p-5">
+            <Lock size={20} className="mt-0.5 shrink-0 text-[var(--accent)]" />
+            <div><h3 className="text-sm font-semibold text-[var(--text)]">{reason.title}</h3><p className="mt-0.5 text-xs leading-relaxed text-[var(--muted)]">{reason.body}</p></div>
           </div>
         )}
 
-        {/* Heading */}
-        <div className="text-center max-w-2xl mx-auto space-y-3">
-          <span className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">Transparent Pricing</span>
-          <h1 className={`${SERIF} text-4xl sm:text-5xl font-normal text-[var(--text)] tracking-tight`}>
-            Choose the right plan for your classroom.
-          </h1>
-          <p className="text-sm text-[var(--muted)] leading-relaxed">
-            Simple, predictable pricing with no hidden commitments. Pay securely via MTN MoMo or Airtel Money.
-          </p>
-        </div>
-
-        {/* 3 Plan Cards (Business Pro first, then Individual, then Organisation) */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {orderedPlans.map((plan) => {
-            const isRecommended = plan.id === 'business';
-            const isSelected = selectedPlanId === plan.id;
-            return (
-              <div
-                key={plan.id}
-                className={`relative rounded-2xl bg-[var(--surface)] p-6 sm:p-8 flex flex-col justify-between transition-all border ${
-                  isRecommended
-                    ? 'border-[var(--accent)] shadow-lg ring-1 ring-[var(--accent)]/30'
-                    : 'border-[var(--line)] shadow-sm hover:border-[var(--accent)]/50'
-                }`}
-              >
-                {isRecommended && (
-                  <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 px-3.5 py-1 bg-[var(--accent)] rounded-full text-[10px] font-bold text-[var(--on-accent)] uppercase tracking-widest">
-                    Most Popular
-                  </div>
-                )}
-
-                <div>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isRecommended ? 'bg-[var(--accent)]/15 text-[var(--accent)]' : 'bg-[var(--surface-2)] text-[var(--muted)]'}`}>
-                      {plan.id === 'business' ? <Star size={20} /> : plan.id === 'organisation' ? <Building2 size={20} /> : <Zap size={20} />}
-                    </div>
-                    <span className="text-xs font-medium text-[var(--muted)]">{plan.tagline}</span>
-                  </div>
-
-                  <h3 className={`${SERIF} text-2xl font-normal text-[var(--text)] mb-1`}>{plan.name}</h3>
-                  <div className="flex items-baseline gap-1 my-4">
-                    <span className={`${SERIF} text-4xl font-normal text-[var(--text)]`}>{plan.price}</span>
-                    <span className="text-xs text-[var(--muted)]">{plan.period}</span>
-                  </div>
-
-                  <ul className="space-y-3 my-6">
-                    {plan.features.map((f, i) => (
-                      <li key={i} className="flex items-start gap-2.5 text-xs text-[var(--text)]">
-                        <div className="w-4 h-4 rounded-full bg-[var(--teal)]/15 text-[var(--teal)] flex items-center justify-center shrink-0 mt-0.5">
-                          <Check size={10} strokeWidth={3} />
-                        </div>
-                        <span>{f}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-
-                <button
-                  onClick={() => handleSelectPlan(plan.id as any)}
-                  className={`w-full py-3.5 rounded-xl text-sm font-medium transition-colors min-h-[48px] ${
-                    isRecommended
-                      ? 'bg-[var(--accent)] text-[var(--on-accent)] hover:opacity-90'
-                      : 'bg-[var(--surface-2)] text-[var(--text)] hover:bg-[var(--hover)]'
-                  }`}
-                >
-                  {plan.id === 'organisation' ? 'View institution setup' : isSelected ? 'Selected Plan' : 'Select plan'}
-                </button>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Selected Plan Checkout Box */}
-        {selectedPlanId !== 'organisation' && (
-          <div className="max-w-md mx-auto bg-[var(--surface)] border border-[var(--line)] rounded-2xl p-6 sm:p-8 shadow-sm space-y-5">
-            <h3 className={`${SERIF} text-xl font-normal text-[var(--text)]`}>Confirm {selectedPlanId === 'business' ? 'Business Pro' : 'Pay as you go'} Checkout</h3>
-            <div>
-              <label className="text-xs font-medium text-[var(--text)] mb-2 block">Mobile Money Phone Number (+250)</label>
-              <input
-                type="tel"
-                placeholder="078 XXX XXXX"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                className="w-full bg-[var(--bg)] border border-[var(--line)] rounded-xl py-3 px-4 text-sm text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
-              />
-            </div>
-
-            {error && (
-              <div className="flex items-center gap-2.5 p-3.5 bg-[var(--danger)]/15 border border-[var(--danger)]/30 rounded-xl text-sm text-[var(--danger)]">
-                <AlertCircle size={16} className="shrink-0" />
-                {error}
-              </div>
-            )}
-
-            <button
-              onClick={handlePay}
-              disabled={status === 'pending'}
-              className="w-full py-3.5 rounded-xl bg-[var(--accent)] text-[var(--on-accent)] text-sm font-medium hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2 min-h-[48px]"
-            >
-              {status === 'pending' && <Loader2 size={18} className="animate-spin" />}
-              <span>{status === 'pending' ? 'Waiting for Mobile Money prompt…' : 'Pay with Mobile Money'}</span>
-            </button>
-          </div>
-        )}
-
-        {/* Compare Plans Collapsible Table */}
-        <div className="border border-[var(--line)] rounded-2xl bg-[var(--surface)] overflow-hidden shadow-sm">
-          <button
-            onClick={() => setCompareOpen(!compareOpen)}
-            className="w-full p-5 flex items-center justify-between bg-[var(--bg)] hover:bg-[var(--hover)] transition-colors text-left"
-          >
-            <span className={`${SERIF} text-xl font-normal text-[var(--text)]`}>Compare all plan features</span>
-            {compareOpen ? <ChevronUp size={20} className="text-[var(--muted)]" /> : <ChevronDown size={20} className="text-[var(--muted)]" />}
-          </button>
-
-          {compareOpen && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs text-[var(--text)]">
-                <thead className="bg-[var(--bg)] border-b border-[var(--line)] text-[var(--muted)] uppercase tracking-wider">
-                  <tr>
-                    <th className="p-4 font-medium">Feature</th>
-                    <th className="p-4 font-medium">Business Pro</th>
-                    <th className="p-4 font-medium">Individual</th>
-                    <th className="p-4 font-medium">Organisation</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--line)]">
-                  {COMPARE_ROWS.map((row, i) => (
-                    <tr key={i} className="hover:bg-[var(--surface-2)]">
-                      <td className="p-4 font-medium text-[var(--text)]">{row.feature}</td>
-                      <td className="p-4 font-semibold text-[var(--accent)]">{row.business}</td>
-                      <td className="p-4 text-[var(--muted)]">{row.individual}</td>
-                      <td className="p-4 text-[var(--muted)]">{row.organisation}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        <div className="mx-auto max-w-2xl space-y-3 text-center">
+          <span className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">Plans & pricing</span>
+          <h1 className={`${SERIF} text-4xl font-normal tracking-tight text-[var(--text)] sm:text-5xl`}>Pick the plan that fits your work.</h1>
+          <p className="text-sm leading-relaxed text-[var(--muted)]">Pay with MTN Mobile Money. Prices are in US dollars with the Rwandan franc amount you pay{data ? ` (1 USD ≈ ${data.fxUsdRwf.toLocaleString('en-US')} RWF)` : ''}.</p>
+          {me && (
+            <div className="inline-flex flex-wrap items-center justify-center gap-2 rounded-full border border-[var(--line)] bg-[var(--surface)] px-4 py-1.5 text-xs text-[var(--muted)]">
+              You are on <b className="text-[var(--text)]">{me.planName}</b>
+              {me.subscription?.endDate && <span>· until {new Date(me.subscription.endDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}</span>}
+              <span>· {Math.max(0, me.usage.day.limit - me.usage.day.used)} of {me.usage.day.limit} credits left today</span>
+              {me.wallet > 0 && <span>· {me.wallet.toLocaleString('en-US')} GO credits</span>}
             </div>
           )}
         </div>
 
-        {/* FAQ Accordion */}
-        <div className="max-w-3xl mx-auto space-y-4">
-          <h2 className={`${SERIF} text-2xl font-normal text-[var(--text)] text-center mb-6`}>Frequently Asked Questions</h2>
-          <div className="space-y-3">
-            {FAQ_ITEMS.map((faq, index) => {
-              const isOpen = openFaqIndex === index;
-              return (
-                <div key={index} className="border border-[var(--line)] rounded-2xl bg-[var(--surface)] overflow-hidden">
-                  <button
-                    onClick={() => setOpenFaqIndex(isOpen ? null : index)}
-                    className="w-full p-5 flex items-center justify-between text-left hover:bg-[var(--hover)] transition-colors"
-                  >
-                    <span className="text-sm font-medium text-[var(--text)]">{faq.question}</span>
-                    {isOpen ? <ChevronUp size={18} className="text-[var(--muted)]" /> : <ChevronDown size={18} className="text-[var(--muted)]" />}
-                  </button>
-                  {isOpen && (
-                    <div className="px-5 pb-5 pt-0 text-xs text-[var(--muted)] leading-relaxed">
-                      {faq.answer}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+        {paymentsOff && (
+          <div className="mx-auto flex max-w-3xl items-start gap-3 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4 text-sm text-[var(--muted)]">
+            <AlertCircle size={18} className="mt-0.5 shrink-0 text-[var(--accent)]" /> Mobile Money payments are being set up. Plans can be activated by an administrator in the meantime.
           </div>
+        )}
+        {loadError && <p role="alert" className="text-center text-sm text-[var(--danger)]">{loadError}</p>}
+        {!data && !loadError && <div className="flex justify-center py-16"><Loader2 className="animate-spin text-[var(--accent)]" /></div>}
+
+        {data && free && go && pro && inst && (
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
+            {/* Free */}
+            <PlanCard title="Free" icon={<Zap size={18} />} current={current === 'FREE'}
+              price={<><span className={`${SERIF} text-4xl`}>$0</span></>} sub="Free forever"
+              features={features('FREE', free.limits)}
+              action={<button disabled className="min-h-[46px] w-full rounded-xl bg-[var(--surface-2)] py-3 text-sm font-medium text-[var(--muted)]">{current === 'FREE' ? 'Your current plan' : 'Included'}</button>} />
+
+            {/* GO */}
+            <PlanCard title="GO" icon={<Coins size={18} />} current={current === 'GO'} tag="Pay as you go"
+              price={<><span className={`${SERIF} text-4xl`}>{pack ? rwf(pack.rwf).replace(' RWF', '') : '500'}</span><span className="ml-1 text-sm text-[var(--muted)]">RWF</span></>}
+              sub={pack ? `${pack.credits.toLocaleString('en-US')} credits · ≈ ${usd(pack.usd)}` : 'Credit packs'}
+              features={features('GO', go.limits, go.packs)}
+              extra={
+                <div className="grid grid-cols-2 gap-1.5" role="radiogroup" aria-label="GO credit pack">
+                  {go.packs!.map((p) => (
+                    <button key={p.id} type="button" role="radio" aria-checked={p.id === packId} onClick={() => setPackId(p.id)}
+                      className={`rounded-lg border px-2 py-1.5 text-left text-[11px] transition-colors ${p.id === packId ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--text)]' : 'border-[var(--line)] text-[var(--muted)] hover:text-[var(--text)]'}`}>
+                      <b className="block text-xs">{rwf(p.rwf)}</b>{p.credits.toLocaleString('en-US')} credits
+                    </button>
+                  ))}
+                </div>
+              }
+              action={<button disabled={paymentsOff || !pack} onClick={() => pack && setCheckout({ purpose: 'GO_PACK', packId: pack.id, months: 0, title: `GO credits · ${pack.credits.toLocaleString('en-US')} credits`, amountRwf: pack.rwf, amountUsd: pack.usd })}
+                className="min-h-[46px] w-full rounded-xl bg-[var(--surface-2)] py-3 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--hover)] disabled:opacity-50">Buy {pack ? rwf(pack.rwf) : 'credits'}</button>} />
+
+            {/* PRO */}
+            <PlanCard title="PRO" icon={<Sparkles size={18} />} current={current === 'PRO'} recommended tag={discount ? `Launch offer −${discount}%` : 'Most popular'}
+              price={<>
+                {pro.listPriceUsd ? <span className="mr-2 text-xl text-[var(--muted)] line-through">{usd(pro.listPriceUsd)}</span> : null}
+                <span className={`${SERIF} text-4xl`}>{usd(pro.priceUsd ?? 0)}</span><span className="ml-1 text-sm text-[var(--muted)]">/ month</span>
+              </>}
+              sub={`≈ ${rwf((pro.priceRwf ?? 0) * months)}${months > 1 ? ` for ${months} months` : ' a month'}${pro.listPriceRwf ? ` (was ${rwf(pro.listPriceRwf)})` : ''}`}
+              features={features('PRO', pro.limits)}
+              extra={
+                <div className="flex gap-1.5" role="radiogroup" aria-label="Months">
+                  {[1, 3, 6, 12].map((m) => (
+                    <button key={m} type="button" role="radio" aria-checked={m === months} onClick={() => setMonths(m)}
+                      className={`flex-1 rounded-lg border py-1.5 text-xs font-medium transition-colors ${m === months ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--text)]' : 'border-[var(--line)] text-[var(--muted)] hover:text-[var(--text)]'}`}>{m} mo</button>
+                  ))}
+                </div>
+              }
+              action={<button disabled={paymentsOff} onClick={() => setCheckout({ purpose: 'PRO', months, title: `PRO plan · ${months} month${months > 1 ? 's' : ''}`, amountRwf: (pro.priceRwf ?? 0) * months, amountUsd: (pro.priceUsd ?? 0) * months })}
+                className="min-h-[46px] w-full rounded-xl bg-[var(--accent)] py-3 text-sm font-semibold text-[var(--on-accent)] transition-opacity hover:opacity-90 disabled:opacity-50">
+                {current === 'PRO' ? 'Extend PRO' : 'Upgrade to PRO'} · {rwf((pro.priceRwf ?? 0) * months)}
+              </button>} />
+
+            {/* Institution */}
+            <PlanCard title="Institution" icon={<Building2 size={18} />} current={current === 'INSTITUTION'} tag={`${inst.seats ?? 25} seats`}
+              price={<><span className={`${SERIF} text-4xl`}>{usd(inst.priceUsd ?? 50)}+</span><span className="ml-1 text-sm text-[var(--muted)]">/ month</span></>}
+              sub={`≈ ${rwf(inst.priceRwf ?? 0)}+ a month · schools & organisations`}
+              features={[...features('INSTITUTION', inst.limits).slice(0, 5), 'Admin dashboard, shared datasets & invoices']}
+              action={<button onClick={() => setOrgOpen(true)} className="min-h-[46px] w-full rounded-xl border border-[var(--line)] py-3 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--hover)]">Talk to us</button>} />
+          </div>
+        )}
+
+        <section className="mx-auto grid max-w-4xl grid-cols-1 gap-3 sm:grid-cols-3">
+          {[
+            ['What is a credit?', 'A chat reply is 1 credit. Heavier work (reading scans, analysing data, building files) uses a few, based on its real AI cost.'],
+            ['How do I pay?', 'Enter your MTN MoMo number, then approve the prompt on your phone with your PIN. Your plan or credits are added as soon as MTN confirms.'],
+            ['Receipts and renewal', 'A receipt is emailed and sent to Telegram. Mobile Money never renews automatically: we remind you 3 days before PRO ends.'],
+          ].map(([q, a]) => (
+            <div key={q} className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4"><h3 className="text-sm font-semibold text-[var(--text)]">{q}</h3><p className="mt-1 text-xs leading-relaxed text-[var(--muted)]">{a}</p></div>
+          ))}
+        </section>
+      </main>
+    </div>
+  );
+}
+
+function PlanCard({ title, icon, price, sub, features: list, action, extra, current, recommended, tag }: { title: string; icon: React.ReactNode; price: React.ReactNode; sub: string; features: string[]; action: React.ReactNode; extra?: React.ReactNode; current?: boolean; recommended?: boolean; tag?: string }) {
+  return (
+    <div className={`relative flex flex-col justify-between rounded-2xl border bg-[var(--surface)] p-6 shadow-sm transition-all ${recommended ? 'border-[var(--accent)] ring-1 ring-[var(--accent)]/30 shadow-lg' : 'border-[var(--line)]'}`}>
+      {(tag || current) && (
+        <span className={`absolute -top-3 left-6 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${current ? 'bg-[var(--teal)] text-white' : recommended ? 'bg-[var(--accent)] text-[var(--on-accent)]' : 'border border-[var(--line)] bg-[var(--surface)] text-[var(--muted)]'}`}>{current ? 'Your plan' : tag}</span>
+      )}
+      <div className="space-y-4">
+        <div className="flex items-center gap-2.5">
+          <span className={`grid h-9 w-9 place-items-center rounded-xl ${recommended ? 'bg-[var(--accent)]/15 text-[var(--accent)]' : 'bg-[var(--surface-2)] text-[var(--muted)]'}`}>{icon}</span>
+          <h3 className={`${SERIF} text-2xl font-normal text-[var(--text)]`}>{title}</h3>
+        </div>
+        <div><div className="flex items-baseline text-[var(--text)]">{price}</div><p className="mt-1 text-xs text-[var(--muted)]">{sub}</p></div>
+        {extra}
+        <ul className="space-y-2 border-t border-[var(--line)] pt-4">
+          {list.map((f) => <li key={f} className="flex items-start gap-2 text-xs text-[var(--text)]"><Check size={14} className="mt-0.5 shrink-0 text-[var(--teal)]" /> {f}</li>)}
+        </ul>
+      </div>
+      <div className="mt-6">{action}</div>
+    </div>
+  );
+}
+
+/** Receipts need the signed-in session, so they are fetched and opened as a local page. */
+export async function openReceipt(paymentId: string) {
+  const res = await authFetch(`/api/billing/payments/${paymentId}/receipt`);
+  if (!res.ok) return;
+  const url = URL.createObjectURL(new Blob([await res.text()], { type: 'text/html' }));
+  window.open(url, '_blank', 'noopener');
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+/** Phone number → MTN prompt → live status until MTN confirms (or declines). */
+function CheckoutDialog({ checkout, onClose, onDone }: { checkout: Checkout; onClose: () => void; onDone: () => void }) {
+  const [phone, setPhone] = useState('');
+  const [state, setState] = useState<'form' | 'starting' | 'pending' | 'success' | 'failed'>('form');
+  const [error, setError] = useState<string | null>(null);
+  const [payment, setPayment] = useState<Payment | null>(null);
+  const timer = useRef<number | null>(null);
+  useEffect(() => () => { if (timer.current) window.clearTimeout(timer.current); }, []);
+
+  const poll = (id: string, n = 0) => {
+    timer.current = window.setTimeout(async () => {
+      try {
+        const res = await authFetch(`/api/billing/payments/${id}`);
+        const body = await res.json();
+        const p: Payment | undefined = body.payment;
+        if (p) setPayment(p);
+        if (p?.status === 'SUCCESSFUL') { setState('success'); window.dispatchEvent(new Event('bwenge:usage')); return; }
+        if (p && (p.status === 'FAILED' || p.status === 'EXPIRED')) {
+          setState('failed');
+          setError(p.reason === 'NOT_ENOUGH_FUNDS' ? 'There is not enough balance on this Mobile Money account.' : p.status === 'EXPIRED' ? 'The payment was not approved in time.' : 'The payment was declined or did not go through. No money was taken.');
+          return;
+        }
+      } catch { /* retry */ }
+      if (n < 90) poll(id, n + 1);
+      else { setState('failed'); setError('We could not confirm the payment yet. If you approved it, it will appear shortly; you will get a receipt by email.'); }
+    }, 3000);
+  };
+
+  const pay = async () => {
+    setError(null);
+    setState('starting');
+    try {
+      const res = await authFetch('/api/billing/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ purpose: checkout.purpose, packId: checkout.packId, months: checkout.months || undefined, phone }) });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'The payment could not start.');
+      setPayment(body.payment);
+      setState('pending');
+      poll(body.payment.id);
+    } catch (e) {
+      setState('form');
+      setError(e instanceof Error ? e.message : 'The payment could not start.');
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Pay with Mobile Money">
+      <div className="w-full max-w-md rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-6 shadow-2xl">
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <h2 className={`${SERIF} text-2xl font-normal text-[var(--text)]`}>{state === 'success' ? 'Payment received' : 'Pay with MTN MoMo'}</h2>
+            <p className="mt-0.5 text-xs text-[var(--muted)]">{checkout.title}</p>
+          </div>
+          {state !== 'pending' && <button onClick={state === 'success' ? onDone : onClose} aria-label="Close" className="grid h-8 w-8 place-items-center rounded-lg text-[var(--muted)] hover:bg-[var(--hover)]"><X size={16} /></button>}
         </div>
 
-        {/* Currency Note & Trust Footer Items */}
-        <div className="pt-8 border-t border-[var(--line)] flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[var(--muted)]">
-          <span>All prices quoted in USD with local currency Mobile Money conversion (RWF).</span>
-          <div className="flex items-center gap-6">
-            <span className="flex items-center gap-1.5"><ShieldCheck size={14} className="text-[var(--teal)]" /> End-to-end encrypted</span>
-            <span className="flex items-center gap-1.5"><Star size={14} className="text-[var(--accent)]" /> Trusted by educators</span>
-          </div>
+        <div className="mb-5 flex items-center justify-between rounded-xl border border-[var(--line)] bg-[var(--bg)] px-4 py-3">
+          <span className="text-xs text-[var(--muted)]">Total</span>
+          <span className="text-right"><b className="text-lg text-[var(--text)]">{rwf(checkout.amountRwf)}</b><span className="block text-[11px] text-[var(--muted)]">≈ {usd(checkout.amountUsd)}</span></span>
         </div>
-      </main>
+
+        {(state === 'form' || state === 'starting') && (
+          <form onSubmit={(e) => { e.preventDefault(); void pay(); }} className="space-y-3">
+            <label className="block text-xs font-medium text-[var(--muted)]">MTN Mobile Money number
+              <div className="mt-1.5 flex items-center gap-2 rounded-xl border border-[var(--line)] bg-[var(--bg)] px-3 focus-within:border-[var(--accent)]">
+                <Smartphone size={16} className="text-[var(--muted)]" />
+                <input autoFocus inputMode="tel" autoComplete="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="078 123 4567" aria-label="MTN Mobile Money number"
+                  className="min-w-0 flex-1 bg-transparent py-3 text-sm text-[var(--text)] placeholder:text-[var(--muted)] focus:outline-none" />
+              </div>
+            </label>
+            {error && <p role="alert" className="text-xs text-[var(--danger)]">{error}</p>}
+            <button type="submit" disabled={state === 'starting' || phone.replace(/\D/g, '').length < 9} className="flex min-h-[46px] w-full items-center justify-center gap-2 rounded-xl bg-[var(--accent)] py-3 text-sm font-semibold text-[var(--on-accent)] disabled:opacity-50">
+              {state === 'starting' ? <Loader2 size={16} className="animate-spin" /> : <ShieldCheck size={16} />} Pay {rwf(checkout.amountRwf)}
+            </button>
+            <p className="text-center text-[11px] text-[var(--muted)]">You will get a prompt on your phone. Approve it with your MoMo PIN.</p>
+          </form>
+        )}
+
+        {state === 'pending' && (
+          <div className="space-y-3 py-2 text-center">
+            <Loader2 size={30} className="mx-auto animate-spin text-[var(--accent)]" />
+            <p className="text-sm font-medium text-[var(--text)]">Approve the payment on your phone</p>
+            <p className="text-xs text-[var(--muted)]">We sent a request to {payment?.phoneMasked}. Enter your MoMo PIN to confirm. This page updates by itself.</p>
+          </div>
+        )}
+
+        {state === 'success' && (
+          <div className="space-y-3 py-2 text-center">
+            <CheckCircle2 size={34} className="mx-auto text-[var(--teal)]" />
+            <p className="text-sm font-medium text-[var(--text)]">{checkout.purpose === 'GO_PACK' ? `${payment?.credits?.toLocaleString('en-US')} credits were added.` : 'Your PRO plan is active.'}</p>
+            {payment?.receiptNumber && <p className="text-xs text-[var(--muted)]">Receipt {payment.receiptNumber}. A copy was sent to your email{payment ? ' and Telegram (if connected)' : ''}.</p>}
+            <div className="flex gap-2">
+              {payment && <button type="button" onClick={() => void openReceipt(payment.id)} className="flex-1 rounded-xl border border-[var(--line)] py-2.5 text-sm text-[var(--text)]">View receipt</button>}
+              <button onClick={onDone} className="flex-1 rounded-xl bg-[var(--accent)] py-2.5 text-sm font-semibold text-[var(--on-accent)]">Continue</button>
+            </div>
+          </div>
+        )}
+
+        {state === 'failed' && (
+          <div className="space-y-3 py-2 text-center">
+            <AlertCircle size={30} className="mx-auto text-[var(--danger)]" />
+            <p className="text-sm text-[var(--text)]">{error}</p>
+            <button onClick={() => { setState('form'); setError(null); }} className="w-full rounded-xl bg-[var(--accent)] py-2.5 text-sm font-semibold text-[var(--on-accent)]">Try again</button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

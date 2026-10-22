@@ -62,6 +62,9 @@ import ollamaRoutes from './server/routes/ollamaRoutes.ts';
 import telegramBotRoutes from './server/routes/telegramBotRoutes.ts';
 import settingsBillingRoutes from './server/routes/settingsBillingRoutes.ts';
 import memoryRoutes from './server/routes/memoryRoutes.js';
+import billingRoutes, { momoCallbackRouter } from './server/routes/billingRoutes.js';
+import adminBillingRoutes from './server/routes/adminBillingRoutes.js';
+import { startBillingJobs } from './server/services/billing/payments.js';
 import feedbackRoutes from './server/routes/feedbackRoutes.ts';
 import chatSseRoutes from './server/routes/chatSseRoutes.js';
 import { getTelegramWebhookBaseUrl, TelegramBotService } from './server/services/TelegramBotService.ts';
@@ -363,6 +366,9 @@ app.use('/api/exams', requireAuth, examsRouter);
 app.use('/api/outputs/shared', sharedOutputsRouter);
 app.use('/api/outputs', requireAuth, outputsRouter);
 app.use('/api/memory', requireAuth, memoryRoutes);
+app.use('/api/billing/momo/callback', momoCallbackRouter);
+app.use('/api/billing', billingRoutes);
+app.use('/api/admin/billing', requireAuth, requireRole('ADMIN'), adminBillingRoutes);
 app.use('/api', settingsBillingRoutes);
 // /exports serves generated Excel reports — gate it so only the owning
 // authenticated user (or admin) can download them. Anonymous access would
@@ -2668,6 +2674,8 @@ async function startServer() {
     logger.info(`Marker AI server running on http://0.0.0.0:${PORT}`);
     // Recover persisted background jobs and start periodic cleanup of expired jobs/artifacts.
     startEducationRuntime().catch((err) => logger.error('Background job runtime failed to start', { errorType: err?.name }));
+    // Mobile Money: confirm pending payments (missed callbacks) and send renewal reminders.
+    startBillingJobs();
   });
 
   // Graceful shutdown: a deploy/restart sending SIGTERM (Render, Docker,

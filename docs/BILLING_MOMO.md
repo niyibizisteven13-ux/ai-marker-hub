@@ -1,0 +1,102 @@
+# Billing: plans, MTN Mobile Money, receipts and admin control
+
+## What the user sees
+
+- **Upgrade page** (`/upgrade`) shows four plans with prices in USD and Rwandan francs:
+  - **Free**: a daily, weekly and monthly credit allowance.
+  - **GO**: pay as you go. Credit packs from 500 RWF, used only after the free allowance runs out.
+  - **PRO**: $3 a month (list price $9, shown struck through as a launch offer). You can pay for 1, 3, 6 or 12 months.
+  - **Institution**: $50+. It opens the request form.
+- **Checkout**:
+  1. The user enters an MTN number.
+  2. MTN sends an approval prompt to their phone.
+  3. The page waits for the confirmation, then shows success or the reason it failed.
+- **Sidebar status**: plan, credits left today, GO balance, renewal date, and "Payment pending" while a payment is open.
+- **Settings → Billing**: plan, renewal date, GO credits, all payments, and a printable receipt for each.
+- **Telegram** `/settings` and `/plan` show the same plan and credits. A user who links Telegram to their web account uses one account: credits, usage, memory and files from Telegram-only use move to the web account.
+
+## Payment flow (server)
+
+1. `POST /api/billing/checkout {purpose: PRO|INSTITUTION|GO_PACK, months | packId, phone}`.
+   - The amount always comes from the server price list.
+   - A second tap within 2 minutes reuses the open payment, so nobody is charged twice.
+2. MTN `requesttopay` is called with `X-Reference-Id` set to our payment id (a UUID).
+3. The status is confirmed **by asking MTN** (`GET requesttopay/{id}`). Three things trigger a check:
+   - the MTN callback `PUT/POST /api/billing/momo/callback/:id` (its body is ignored);
+   - the checkout page polling;
+   - a background poller every 30 seconds.
+4. On SUCCESSFUL the payment is fulfilled exactly once:
+   - PRO / Institution time is extended by 30 days per month, added on top of the current end date if the plan is still active, or GO credits are added;
+   - a receipt number `BW-YYYYMMDD-XXXXXX` is issued;
+   - the receipt is sent by email and Telegram, once each.
+5. FAILED, or no approval within 15 minutes, marks the payment FAILED or EXPIRED and sends a "payment not completed" email.
+6. Every hour a renewal sweep:
+   - sends reminders 3 days and 1 day before a plan ends;
+   - sends a notice when the plan has ended, and the account returns to Free.
+
+   Mobile Money cannot renew automatically.
+
+## Setting up MTN MoMo
+
+1. Create an account on the MTN MoMo developer portal and subscribe to the **Collections** product. Copy its primary key.
+2. Sandbox:
+   - Create an API user (a UUID you choose) with your callback host (for example `www.bwenge.space`).
+   - Generate its API key.
+   - Set `MOMO_TARGET_ENV=sandbox`. The sandbox only accepts EUR, and the currency is set automatically.
+3. Production:
+   - MTN Rwanda gives you the production base URL, the API user and API key (created through the partner portal), and the target environment (`mtnrwanda`).
+   - Set `MOMO_CURRENCY=RWF` (this is the default outside the sandbox).
+4. Put these values in the server environment (`/opt/nexus/.env` or the secret manager), **never in git or chat**:
+
+```
+MOMO_BASE_URL=            # sandbox: https://sandbox.momodeveloper.mtn.com, production: from MTN
+MOMO_COLLECTION_PRIMARY_KEY=
+MOMO_API_USER=
+MOMO_API_KEY=
+MOMO_TARGET_ENV=          # sandbox | mtnrwanda
+MOMO_CURRENCY=            # optional; EUR in sandbox, RWF otherwise
+MOMO_CALLBACK_HOST=https://www.bwenge.space
+```
+
+5. The callback URL is `https://<host>/api/billing/momo/callback/<paymentId>`. MTN only calls back to HTTPS hosts that are registered for the API user. Payments still complete without callbacks, because the poller asks MTN.
+6. Development without MTN: `MOMO_SIMULATE=true`. This is refused when `NODE_ENV=production`.
+   - The second status check succeeds.
+   - Numbers ending in `0000` are declined.
+
+Until the keys are set, checkout answers "Mobile Money payments are being set up". Nothing is ever marked paid without MTN's confirmation.
+
+## Email (SMTP)
+
+Receipts and notices are sent through SMTP:
+
+```
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_USER=
+SMTP_PASS=
+SMTP_FROM=Bwenge AI <billing@your-domain>
+SMTP_SECURE=false        # true for port 465
+SMTP_REPLY_TO=           # optional
+```
+
+Without SMTP the emails are skipped and logged. Telegram notices still go out.
+
+## Admin → Billing
+
+- **Overview**: revenue, AI cost, margin, active plans, GO credits sold and used, and the MoMo mode (live / sandbox / simulated / off).
+- **Prices**:
+  - PRO price and list price, Institution price;
+  - USD→RWF rate;
+  - GO packs (RWF and credits);
+  - daily, weekly and monthly credit limits per plan.
+
+  Changes are stored in the database and apply within a minute, with no redeploy.
+- **Users**: search, grant PRO or Institution for N days, return a user to Free, add or remove GO credits. Each change is recorded.
+- **Payments**: filter by status and re-check a pending payment with MTN. An admin cannot mark a payment paid by hand.
+
+## Deploying
+
+```
+npx prisma migrate deploy   # adds BillingPayment, CreditLedger, AppSetting, NotificationLog
+sudo systemctl restart nexus
+```

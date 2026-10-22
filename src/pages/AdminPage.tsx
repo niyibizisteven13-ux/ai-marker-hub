@@ -6,6 +6,7 @@ import {
   RefreshCw, ScrollText, Search, Send, Settings, Sparkles, Trash2, Upload, Users, X, ShieldCheck, FolderTree, Download, PencilLine,
 } from 'lucide-react';
 import KnowledgeExplorer from '../components/knowledge/KnowledgeExplorer';
+import BillingAdmin from '../components/admin/BillingAdmin';
 import { adminApi, type AdminQualitySummary } from '../api/admin';
 import { useStore } from '../store/useStore';
 import { API_BASE_URL, getAccessToken, refreshAccessToken } from '../utils/authFetch';
@@ -2767,7 +2768,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
               {tab === 'billing' && (
                 <Section
                   title="Upgrades & Subscriptions"
-                  hint="Review institutional upgrade requests, inspect payment records, and manage a user's subscription. Manual subscription changes are audited; payment statuses are read-only and remain controlled by verified payment-provider callbacks."
+                  hint="Prices, RWF exchange rate, GO packs and limits; MTN Mobile Money payments and receipts; grant plans or credits. Payment statuses are only changed by verified checks with MTN."
                 >
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                     <Stat label="Active subscriptions" value={billingData.subscriptions.filter((subscription) => subscription.status === 'ACTIVE').length} detail="Across BUSINESS, PRO, and ORGANIZATION" />
@@ -2775,65 +2776,7 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                     <Stat label="Open upgrade requests" value={billingData.requests.filter((request) => request.status !== 'closed').length} detail="Institutional pricing enquiries" />
                   </div>
 
-                  <Section title="Manage an account subscription" hint="Grant or update access after confirming the request or payment. Free/pay-as-you-go users have no subscription record.">
-                    <form
-                      className={`${card} grid grid-cols-1 gap-4 p-5 sm:grid-cols-2 xl:grid-cols-5`}
-                      onSubmit={async (event) => {
-                        event.preventDefault();
-                        if (!billingUserId) {
-                          notify('Select an account first.', true);
-                          return;
-                        }
-                        if (!window.confirm(`Save ${billingPlan} · ${billingStatus} for the selected account?`)) return;
-                        try {
-                          await adminApi.updateSubscription(billingUserId, {
-                            planType: billingPlan,
-                            status: billingStatus,
-                            endDate: billingEndDate ? new Date(`${billingEndDate}T23:59:59.999Z`).toISOString() : null,
-                          });
-                          await loadData(true);
-                          notify('Subscription updated');
-                        } catch (err: any) {
-                          notify(err.message, true);
-                        }
-                      }}
-                    >
-                      <Field label="Account">
-                        <select className={input} value={billingUserId} onChange={(event) => {
-                          const userId = event.target.value;
-                          setBillingUserId(userId);
-                          const current = billingData.subscriptions.find((subscription) => subscription.userId === userId);
-                          setBillingPlan(current?.planType || 'PRO');
-                          setBillingStatus(current?.status || 'ACTIVE');
-                          setBillingEndDate(current?.endDate ? new Date(current.endDate).toISOString().slice(0, 10) : '');
-                        }}>
-                          {users.map((user) => <option key={user.id} value={user.id}>{user.name} · {user.email}</option>)}
-                        </select>
-                      </Field>
-                      <Field label="Plan">
-                        <select className={input} value={billingPlan} onChange={(event) => setBillingPlan(event.target.value)}>
-                          <option value="BUSINESS">BUSINESS</option>
-                          <option value="PRO">PRO</option>
-                          <option value="ORGANIZATION">ORGANIZATION</option>
-                        </select>
-                      </Field>
-                      <Field label="Access status">
-                        <select className={input} value={billingStatus} onChange={(event) => setBillingStatus(event.target.value)}>
-                          <option value="ACTIVE">ACTIVE</option>
-                          <option value="EXPIRED">EXPIRED</option>
-                          <option value="CANCELED">CANCELED</option>
-                        </select>
-                      </Field>
-                      <Field label="Expiry date" tip="Leave blank for no scheduled expiry. The app stores the selected date through the end of that day (UTC).">
-                        <input className={input} type="date" value={billingEndDate} onChange={(event) => setBillingEndDate(event.target.value)} />
-                      </Field>
-                      <div className="flex items-end">
-                        <button type="submit" className={btnPrimary} disabled={!billingUserId}>
-                          <CheckCircle2 size={15} /> Save subscription
-                        </button>
-                      </div>
-                    </form>
-                  </Section>
+                  <BillingAdmin notify={notify} />
 
                   <Section title="Customer subscriptions" hint="Search current entitlements and see when they next expire.">
                     <input className={`${input} max-w-sm`} value={billingSearch} onChange={(event) => setBillingSearch(event.target.value)} placeholder="Search accounts or plans" aria-label="Search subscriptions" />
@@ -2914,32 +2857,6 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                             </div>
                           </article>
                         ))}
-                      </div>
-                    )}
-                  </Section>
-
-                  <Section title="Recent payment records" hint="Provider-confirmed payment history is read-only here. Initiate or refund transactions through the payment provider; this console never fabricates payment success.">
-                    {billingData.payments.length === 0 ? (
-                      <EmptyState title="No payments recorded" desc="Successful and pending upgrade or usage payments will appear here." icon={<BarChart3 size={26} />} />
-                    ) : (
-                      <div className={`${card} overflow-x-auto`}>
-                        <table className="w-full min-w-[800px] text-left text-sm">
-                          <thead className="border-b border-[#263052] bg-[#141C36] text-xs font-bold uppercase text-[#9AA6C9]">
-                            <tr><th className="p-4">Date</th><th className="p-4">Account</th><th className="p-4">Reference</th><th className="p-4">Amount</th><th className="p-4">Provider</th><th className="p-4">Status</th></tr>
-                          </thead>
-                          <tbody className="divide-y divide-[#263052]">
-                            {billingData.payments.map((payment) => (
-                              <tr key={payment.id} className="hover:bg-[#18213D]/60">
-                                <td className="p-4 whitespace-nowrap text-[#9AA6C9]">{new Date(payment.createdAt).toLocaleString()}</td>
-                                <td className="p-4"><p className="text-white">{payment.user?.name || 'Account unavailable'}</p><p className="text-xs text-[#9AA6C9]">{payment.user?.email || payment.userId}</p></td>
-                                <td className="p-4 text-xs text-[#9AA6C9]">{payment.externalRef || payment.batchId}</td>
-                                <td className="p-4 text-white">{payment.amountRwf.toLocaleString()} RWF</td>
-                                <td className="p-4 text-[#9AA6C9]">{payment.provider}</td>
-                                <td className="p-4"><Badge tone={payment.status === 'SUCCESS' ? 'green' : payment.status === 'FAILED' ? 'red' : 'yellow'}>{payment.status}</Badge></td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
                       </div>
                     )}
                   </Section>

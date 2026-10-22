@@ -1,0 +1,243 @@
+import { useCallback, useEffect, useState } from 'react';
+import { Banknote, BellRing, Coins, Loader2, Plus, RefreshCw, Save, Search, Sparkles, Trash2, TrendingUp, Users } from 'lucide-react';
+import { authFetch } from '../../utils/authFetch';
+
+/**
+ * Admin → Upgrades & Subscriptions: revenue vs AI cost, prices / exchange rate / GO packs / plan limits,
+ * Mobile Money payments (re-check with MTN), and per-user plans and GO credits. All changes are logged server-side.
+ */
+
+type PlanId = 'FREE' | 'GO' | 'PRO' | 'INSTITUTION';
+interface Limits { daily: number; weekly: number; monthly: number; perDay: { tool: number; vision: number; artifact: number; marking: number }; maxMessageChars: number; maxAttachments: number; maxUploadMb: number; memory: boolean; memoryItems: number }
+interface Overview {
+  revenue: { rwf: number; usd: number; payments: number }; aiCost: { usd: number; rwf: number; credits: number }; margin: { usd: number; percent: number | null };
+  pendingPayments: number; subscriptions: { pro: number; institution: number }; goCredits: { sold: number; used: number };
+  momo: { mode: 'live' | 'sandbox' | 'simulated' | 'off'; targetEnv: string; currency: string; callback: boolean };
+}
+interface Effective { fxUsdRwf: number; goPacks: Array<{ id: string; rwf: number; credits: number }>; plans: Record<PlanId, { priceUsd: number | null; listPriceUsd: number | null; priceRwf: number | null; limits: Limits }> }
+interface AdminPayment { id: string; createdAt: string; paidAt: string | null; purpose: string; months: number; credits: number; amountRwf: number; currency: string; phoneMasked: string; status: string; reason: string | null; receiptNumber: string | null; user: { email?: string; name?: string } }
+interface AdminUser { id: string; email: string; name: string; plan: PlanId; subscription: { planType: string; status: string; endDate: string | null } | null; wallet: number; usedToday: number; dailyLimit: number; telegram: boolean }
+
+const card = 'rounded-2xl border border-[#263052] bg-[#0E1426] p-5';
+const input = 'w-full rounded-lg border border-[#2A3760] bg-[#0A1020] px-2.5 py-1.5 text-sm text-white outline-none focus:border-[#3FA7E0]';
+const btn = 'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-50';
+const rwf = (n: number) => `${Math.round(n).toLocaleString('en-US')} RWF`;
+const PLAN_IDS: PlanId[] = ['FREE', 'GO', 'PRO', 'INSTITUTION'];
+
+async function api<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await authFetch(url, { ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) } });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || 'Request failed.');
+  return body as T;
+}
+
+export default function BillingAdmin({ notify }: { notify: (msg: string, error?: boolean) => void }) {
+  const [overview, setOverview] = useState<Overview | null>(null);
+  const [eff, setEff] = useState<Effective | null>(null);
+  const [payments, setPayments] = useState<AdminPayment[]>([]);
+  const [status, setStatus] = useState('');
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [q, setQ] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const loadOverview = useCallback(async () => {
+    const [o, s] = await Promise.all([api<Overview & { success: boolean }>('/api/admin/billing/overview'), api<{ effective: Effective }>('/api/admin/billing/settings')]);
+    setOverview(o);
+    setEff(s.effective);
+  }, []);
+  const loadPayments = useCallback(async () => setPayments((await api<{ payments: AdminPayment[] }>(`/api/admin/billing/payments${status ? `?status=${status}` : ''}`)).payments), [status]);
+  const loadUsers = useCallback(async () => setUsers((await api<{ users: AdminUser[] }>(`/api/admin/billing/users?q=${encodeURIComponent(q)}`)).users), [q]);
+
+  useEffect(() => { void loadOverview().catch((e) => notify(e.message, true)); }, [loadOverview, notify]);
+  useEffect(() => { void loadPayments().catch((e) => notify(e.message, true)); }, [loadPayments, notify]);
+  useEffect(() => { const t = window.setTimeout(() => void loadUsers().catch((e) => notify(e.message, true)), 250); return () => window.clearTimeout(t); }, [loadUsers, notify]);
+
+  const run = async (fn: () => Promise<unknown>, ok: string) => {
+    setBusy(true);
+    try { await fn(); notify(ok); await Promise.all([loadOverview(), loadPayments(), loadUsers()]); } catch (e) { notify((e as Error).message, true); } finally { setBusy(false); }
+  };
+
+  const saveSettings = () => eff && run(() => api('/api/admin/billing/settings', {
+    method: 'PUT',
+    body: JSON.stringify({
+      fxUsdRwf: eff.fxUsdRwf,
+      pro: { priceUsd: eff.plans.PRO.priceUsd ?? 3, listPriceUsd: eff.plans.PRO.listPriceUsd },
+      institution: { priceUsd: eff.plans.INSTITUTION.priceUsd ?? 50 },
+      goPacks: eff.goPacks,
+      limits: Object.fromEntries(PLAN_IDS.map((id) => [id, eff.plans[id].limits])),
+    }),
+  }), 'Prices and limits saved. They apply immediately.');
+
+  const setPlanField = (id: PlanId, patch: Partial<Effective['plans'][PlanId]>) => setEff((e) => (e ? { ...e, plans: { ...e.plans, [id]: { ...e.plans[id], ...patch } } } : e));
+  const setLimit = (id: PlanId, key: keyof Limits | `perDay.${keyof Limits['perDay']}`, value: number | boolean) => setEff((e) => {
+    if (!e) return e;
+    const l = { ...e.plans[id].limits, perDay: { ...e.plans[id].limits.perDay } };
+    if (String(key).startsWith('perDay.')) (l.perDay as any)[String(key).slice(7)] = value; else (l as any)[key] = value;
+    return { ...e, plans: { ...e.plans, [id]: { ...e.plans[id], limits: l } } };
+  });
+
+  const momoTone = overview?.momo.mode === 'live' ? 'bg-emerald-500/15 text-emerald-300' : overview?.momo.mode === 'off' ? 'bg-rose-500/15 text-rose-300' : 'bg-amber-500/15 text-amber-300';
+
+  return (
+    <div className="space-y-6">
+      {/* Overview */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <Kpi icon={<Banknote size={16} />} label="Revenue this month" value={overview ? rwf(overview.revenue.rwf) : '…'} detail={overview ? `≈ $${overview.revenue.usd} · ${overview.revenue.payments} payments` : ''} />
+        <Kpi icon={<TrendingUp size={16} />} label="AI cost this month" value={overview ? `$${overview.aiCost.usd}` : '…'} detail={overview ? `${overview.aiCost.credits.toLocaleString('en-US')} credits used · margin ${overview.margin.percent ?? '—'}${overview.margin.percent != null ? '%' : ''}` : ''} />
+        <Kpi icon={<Sparkles size={16} />} label="Active plans" value={overview ? `${overview.subscriptions.pro} PRO · ${overview.subscriptions.institution} Inst.` : '…'} detail={overview ? `${overview.pendingPayments} payments pending` : ''} />
+        <Kpi icon={<Coins size={16} />} label="GO credits" value={overview ? `${overview.goCredits.sold.toLocaleString('en-US')} sold` : '…'} detail={overview ? `${overview.goCredits.used.toLocaleString('en-US')} used this month` : ''} />
+      </div>
+
+      {overview && (
+        <div className={`${card} flex flex-wrap items-center justify-between gap-3`}>
+          <div className="text-sm text-[#C9D3F0]">
+            MTN Mobile Money: <span className={`ml-1 rounded-md px-2 py-0.5 text-xs font-bold uppercase ${momoTone}`}>{overview.momo.mode}</span>
+            <span className="ml-2 text-xs text-[#8A97C2]">target {overview.momo.targetEnv} · currency {overview.momo.currency} · callbacks {overview.momo.callback ? 'on (HTTPS)' : 'off (polling only)'}</span>
+            {overview.momo.mode === 'off' && <p className="mt-1 text-xs text-[#8A97C2]">Add MOMO_COLLECTION_PRIMARY_KEY, MOMO_API_USER, MOMO_API_KEY and MOMO_TARGET_ENV to the server environment to accept payments.</p>}
+          </div>
+          <button className={`${btn} bg-[#1A2240] text-[#C9D3F0] hover:bg-[#222C50]`} disabled={busy} onClick={() => run(() => api('/api/admin/billing/renewals/run', { method: 'POST' }), 'Renewal reminders checked')}><BellRing size={13} /> Send due renewal reminders</button>
+        </div>
+      )}
+
+      {/* Prices and limits */}
+      {eff && (
+        <div className={`${card} space-y-5`}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div><h3 className="text-base font-semibold text-white">Prices, exchange rate and limits</h3><p className="text-xs text-[#8A97C2]">Changes apply to new payments and to everyone's limits immediately.</p></div>
+            <button className={`${btn} bg-[#3FA7E0] text-white hover:bg-[#3596CB]`} disabled={busy} onClick={() => void saveSettings()}><Save size={13} /> Save changes</button>
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <Num label="1 USD in RWF" value={eff.fxUsdRwf} onChange={(v) => setEff({ ...eff, fxUsdRwf: v })} />
+            <Num label="PRO price (USD / month)" step={0.5} value={eff.plans.PRO.priceUsd ?? 0} onChange={(v) => setPlanField('PRO', { priceUsd: v })} hint={rwf(Math.round((eff.plans.PRO.priceUsd ?? 0) * eff.fxUsdRwf / 100) * 100)} />
+            <Num label="PRO regular price (struck through)" step={0.5} value={eff.plans.PRO.listPriceUsd ?? 0} onChange={(v) => setPlanField('PRO', { listPriceUsd: v || null })} hint={eff.plans.PRO.listPriceUsd ? `−${Math.round((1 - (eff.plans.PRO.priceUsd ?? 0) / eff.plans.PRO.listPriceUsd) * 100)}%` : 'no discount shown'} />
+            <Num label="Institution from (USD / month)" value={eff.plans.INSTITUTION.priceUsd ?? 0} onChange={(v) => setPlanField('INSTITUTION', { priceUsd: v })} hint={rwf(Math.round((eff.plans.INSTITUTION.priceUsd ?? 0) * eff.fxUsdRwf / 100) * 100)} />
+          </div>
+
+          <div>
+            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#8A97C2]">GO credit packs</h4>
+            <div className="space-y-2">
+              {eff.goPacks.map((p, i) => (
+                <div key={i} className="grid grid-cols-[1fr_1fr_auto] items-end gap-2 sm:max-w-md">
+                  <Num label={i ? '' : 'Price (RWF)'} value={p.rwf} onChange={(v) => setEff({ ...eff, goPacks: eff.goPacks.map((x, j) => (j === i ? { ...x, rwf: v, id: `go-${v}` } : x)) })} />
+                  <Num label={i ? '' : 'Credits'} value={p.credits} onChange={(v) => setEff({ ...eff, goPacks: eff.goPacks.map((x, j) => (j === i ? { ...x, credits: v } : x)) })} />
+                  <button aria-label="Remove pack" className={`${btn} mb-0.5 text-[#8A97C2] hover:text-rose-300`} disabled={eff.goPacks.length <= 1} onClick={() => setEff({ ...eff, goPacks: eff.goPacks.filter((_, j) => j !== i) })}><Trash2 size={14} /></button>
+                </div>
+              ))}
+              {eff.goPacks.length < 8 && <button className={`${btn} bg-[#1A2240] text-[#C9D3F0]`} onClick={() => setEff({ ...eff, goPacks: [...eff.goPacks, { id: `go-${Date.now() % 100000}`, rwf: 10_000, credits: 2_800 }] })}><Plus size={13} /> Add pack</button>}
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#8A97C2]">Limits per plan</h4>
+            <table className="w-full min-w-[760px] text-xs">
+              <thead><tr className="text-left text-[#8A97C2]">{['Plan', 'Credits / day', '/ week', '/ month', 'Tool answers / day', 'Scans / day', 'Files / day', 'Marking / day', 'Memory'].map((h) => <th key={h} className="px-1.5 py-1 font-medium">{h}</th>)}</tr></thead>
+              <tbody>
+                {PLAN_IDS.map((id) => {
+                  const l = eff.plans[id].limits;
+                  return (
+                    <tr key={id} className="border-t border-[#1E2848]">
+                      <td className="px-1.5 py-1.5 font-semibold text-white">{id}</td>
+                      {(['daily', 'weekly', 'monthly'] as const).map((k) => <td key={k} className="px-1"><input className={input} type="number" min={1} value={l[k]} onChange={(e) => setLimit(id, k, Number(e.target.value))} /></td>)}
+                      {(['tool', 'vision', 'artifact', 'marking'] as const).map((k) => <td key={k} className="px-1"><input className={input} type="number" min={0} value={l.perDay[k]} onChange={(e) => setLimit(id, `perDay.${k}`, Number(e.target.value))} /></td>)}
+                      <td className="px-1.5 text-center"><input type="checkbox" checked={l.memory} onChange={(e) => setLimit(id, 'memory', e.target.checked)} aria-label={`${id} memory`} /></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Users */}
+      <div className={`${card} space-y-3`}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="flex items-center gap-2 text-base font-semibold text-white"><Users size={16} /> Users, plans and GO credits</h3>
+          <label className="flex items-center gap-2 rounded-lg border border-[#2A3760] bg-[#0A1020] px-2.5 text-[#8A97C2]"><Search size={14} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name or email" className="bg-transparent py-1.5 text-sm text-white outline-none" /></label>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[820px] text-xs">
+            <thead><tr className="text-left text-[#8A97C2]">{['User', 'Plan', 'Until', 'GO credits', 'Today', 'Telegram', 'Actions'].map((h) => <th key={h} className="px-2 py-1.5 font-medium">{h}</th>)}</tr></thead>
+            <tbody>
+              {users.map((u) => (
+                <tr key={u.id} className="border-t border-[#1E2848] text-[#C9D3F0]">
+                  <td className="px-2 py-2"><div className="font-medium text-white">{u.name}</div><div className="text-[#8A97C2]">{u.email}</div></td>
+                  <td className="px-2"><span className="rounded-md bg-[#1A2240] px-1.5 py-0.5 font-bold">{u.plan}</span></td>
+                  <td className="px-2">{u.subscription?.endDate && u.subscription.status === 'ACTIVE' ? new Date(u.subscription.endDate).toLocaleDateString() : '—'}</td>
+                  <td className="px-2 tabular-nums">{u.wallet.toLocaleString('en-US')}</td>
+                  <td className="px-2 tabular-nums">{u.usedToday} / {u.dailyLimit}</td>
+                  <td className="px-2">{u.telegram ? 'Linked' : '—'}</td>
+                  <td className="px-2">
+                    <div className="flex flex-wrap gap-1">
+                      <button className={`${btn} bg-amber-500/15 text-amber-300`} disabled={busy} onClick={() => { const d = window.prompt('Grant PRO for how many days?', '30'); if (d) void run(() => api(`/api/admin/billing/users/${u.id}/plan`, { method: 'POST', body: JSON.stringify({ plan: 'PRO', days: Number(d) }) }), `PRO granted to ${u.email}`); }}>PRO</button>
+                      <button className={`${btn} bg-indigo-500/15 text-indigo-300`} disabled={busy} onClick={() => { const d = window.prompt('Grant Institution for how many days?', '30'); if (d) void run(() => api(`/api/admin/billing/users/${u.id}/plan`, { method: 'POST', body: JSON.stringify({ plan: 'INSTITUTION', days: Number(d) }) }), `Institution granted to ${u.email}`); }}>Inst.</button>
+                      <button className={`${btn} bg-[#1A2240] text-[#C9D3F0]`} disabled={busy || u.plan === 'FREE' || u.plan === 'GO'} onClick={() => { if (window.confirm(`Move ${u.email} to Free now?`)) void run(() => api(`/api/admin/billing/users/${u.id}/plan`, { method: 'POST', body: JSON.stringify({ plan: 'FREE' }) }), `${u.email} moved to Free`); }}>Free</button>
+                      <button className={`${btn} bg-sky-500/15 text-sky-300`} disabled={busy} onClick={() => {
+                        const v = window.prompt('GO credits to add (negative to remove):', '100');
+                        if (!v) return;
+                        const note = window.prompt('Reason (shown in the ledger):', 'Admin adjustment') ?? '';
+                        void run(() => api(`/api/admin/billing/users/${u.id}/credits`, { method: 'POST', body: JSON.stringify({ delta: Number(v), note: note || 'Admin adjustment' }) }), 'Credits updated');
+                      }}><Coins size={12} /> Credits</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {!users.length && <tr><td colSpan={7} className="px-2 py-6 text-center text-[#8A97C2]">No users match.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Payments */}
+      <div className={`${card} space-y-3`}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="flex items-center gap-2 text-base font-semibold text-white"><Banknote size={16} /> Mobile Money payments</h3>
+          <select className={`${input} w-auto`} value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Payment status">
+            <option value="">All statuses</option><option value="SUCCESSFUL">Paid</option><option value="PENDING">Pending</option><option value="FAILED">Failed</option><option value="EXPIRED">Not approved</option>
+          </select>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[820px] text-xs">
+            <thead><tr className="text-left text-[#8A97C2]">{['Date', 'User', 'Item', 'Amount', 'Phone', 'Status', 'Receipt', ''].map((h, i) => <th key={i} className="px-2 py-1.5 font-medium">{h}</th>)}</tr></thead>
+            <tbody>
+              {payments.map((p) => (
+                <tr key={p.id} className="border-t border-[#1E2848] text-[#C9D3F0]">
+                  <td className="px-2 py-2">{new Date(p.paidAt ?? p.createdAt).toLocaleString()}</td>
+                  <td className="px-2">{p.user?.email ?? '—'}</td>
+                  <td className="px-2">{p.purpose === 'GO_PACK' ? `GO · ${p.credits} credits` : `${p.purpose} · ${p.months} mo`}</td>
+                  <td className="px-2 tabular-nums">{p.amountRwf.toLocaleString('en-US')} {p.currency}</td>
+                  <td className="px-2">{p.phoneMasked}</td>
+                  <td className="px-2"><span className={`rounded-md px-1.5 py-0.5 font-semibold ${p.status === 'SUCCESSFUL' ? 'bg-emerald-500/15 text-emerald-300' : p.status === 'PENDING' ? 'bg-amber-500/15 text-amber-300' : 'bg-rose-500/15 text-rose-300'}`}>{p.status}</span>{p.reason ? <span className="ml-1 text-[#8A97C2]">{p.reason}</span> : null}</td>
+                  <td className="px-2">{p.receiptNumber ?? '—'}</td>
+                  <td className="px-2">{p.status === 'PENDING' && <button className={`${btn} bg-[#1A2240] text-[#C9D3F0]`} disabled={busy} onClick={() => void run(() => api(`/api/admin/billing/payments/${p.id}/recheck`, { method: 'POST' }), 'Checked with MTN')}><RefreshCw size={12} /> Check</button>}</td>
+                </tr>
+              ))}
+              {!payments.length && <tr><td colSpan={8} className="px-2 py-6 text-center text-[#8A97C2]">No payments yet.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {busy && <div className="fixed bottom-6 right-6 rounded-full bg-[#1A2240] p-2 text-white shadow-lg"><Loader2 size={18} className="animate-spin" /></div>}
+    </div>
+  );
+}
+
+function Kpi({ icon, label, value, detail }: { icon: React.ReactNode; label: string; value: string; detail: string }) {
+  return (
+    <div className={card}>
+      <div className="flex items-center gap-2 text-xs text-[#8A97C2]">{icon} {label}</div>
+      <div className="mt-2 text-xl font-semibold text-white">{value}</div>
+      <div className="mt-1 text-xs text-[#8A97C2]">{detail}</div>
+    </div>
+  );
+}
+
+function Num({ label, value, onChange, step = 1, hint }: { label: string; value: number; onChange: (v: number) => void; step?: number; hint?: string }) {
+  return (
+    <label className="block text-[11px] font-medium text-[#8A97C2]">
+      {label}
+      <input className={`${input} mt-1`} type="number" step={step} value={Number.isFinite(value) ? value : 0} onChange={(e) => onChange(Number(e.target.value))} />
+      {hint && <span className="mt-0.5 block text-[10px] text-[#6C789E]">{hint}</span>}
+    </label>
+  );
+}

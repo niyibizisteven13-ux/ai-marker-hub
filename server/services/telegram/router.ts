@@ -4,7 +4,7 @@ import { telegramApi, type TelegramApi } from './api.js';
 import { deliverAttachment, runAssistantTurn, type IncomingFile } from './agentBridge.js';
 import { esc } from './format.js';
 import {
-  FILES_PER_PAGE, backKeyboard, card, filesCard, filesKeyboard, guideCard, homeCard, homeKeyboard, langOf, scanCard, scanKeyboard, settingsCard, settingsKeyboard, type Lang,
+  FILES_PER_PAGE, backKeyboard, card, filesCard, filesKeyboard, guideCard, homeCard, homeKeyboard, langOf, scanCard, scanKeyboard, settingsCard, settingsKeyboard, type Lang, type PlanView,
 } from './ui.js';
 import type { InlineKeyboard } from './api.js';
 import { copy } from './uiText.js';
@@ -62,11 +62,25 @@ const limited = (chatId: string) => {
   return list.length > RATE.max;
 };
 
-async function accountOf(session: any): Promise<{ linked: boolean; email?: string | null; name?: string | null }> {
+async function accountOf(session: any): Promise<{ linked: boolean; email?: string | null; name?: string | null; plan?: PlanView }> {
   if (!session.userId) return { linked: false };
   const user = await prisma.user.findUnique({ where: { id: session.userId }, select: { email: true, name: true } }).catch(() => null);
   const linked = !!user && !user.email.endsWith('@users.invalid');
-  return { linked, email: linked ? user!.email : null, name: linked ? user!.name : null };
+  return { linked, email: linked ? user!.email : null, name: linked ? user!.name : null, plan: await planView(session.userId).catch(() => undefined) };
+}
+
+/** Plan, credits left today, GO balance and renewal date: the same account state as the website. */
+async function planView(userId: string): Promise<PlanView> {
+  const { planFor, walletBalance, PLANS, toRwf } = await import('../billing/plans.js');
+  const { usedTotals } = await import('../billing/usage.js');
+  const [plan, wallet, used, sub] = await Promise.all([planFor(userId), walletBalance(userId), usedTotals(userId), prisma.subscription.findUnique({ where: { userId } }).catch(() => null)]);
+  const base = (process.env.APP_BASE_URL || 'https://www.bwenge.space').replace(/\/$/, '');
+  const paid = plan.id === 'PRO' || plan.id === 'INSTITUTION';
+  return {
+    plan: plan.name, dailyLimit: plan.limits.daily, creditsLeft: Math.max(0, plan.limits.daily - used.used.day), wallet,
+    renewsOn: paid && sub?.endDate ? new Date(sub.endDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Africa/Kigali' }) : null,
+    upgradeUrl: paid ? null : `${base}/upgrade`, upgradePrice: paid ? null : `${toRwf(PLANS.PRO.priceUsd ?? 0).toLocaleString('en-US')} RWF`,
+  };
 }
 
 /** A message to update in place; `media` when it is a photo (the home banner), whose text is a caption. */
@@ -253,7 +267,7 @@ export async function handleUpdate(update: any, legacy: LegacyHooks, api: Telegr
       case '/help': await api.sendMessage(chatId, guideCard(lang, 'help'), { keyboard: backKeyboard(lang) }); return;
       case '/files': await showFiles(api, chatId, session, 0); return;
       case '/scan': case '/scanner': await showScan(api, chatId, session); return;
-      case '/settings': case '/language': await api.sendMessage(chatId, settingsCard(lang, await accountOf(session)), { keyboard: settingsKeyboard(lang) }); return;
+      case '/settings': case '/language': case '/plan': { const acc = await accountOf(session); await api.sendMessage(chatId, settingsCard(lang, acc), { keyboard: settingsKeyboard(lang, acc.plan) }); return; }
       case '/new': case '/reset':
         pending.delete(chatId);
         await prisma.telegramSession.update({ where: { chatId }, data: { history: [], lastPrompt: null, activeDiscussJobId: null, stagedMode: null } }).catch(() => undefined);
@@ -297,7 +311,7 @@ async function handleCallback(q: any, legacy: LegacyHooks, api: TelegramApi) {
       case 'm': {
         await api.answerCallback(q.id);
         if (arg === 'home') await showHome(api, chatId, session, q.from?.first_name, target);
-        else if (arg === 'settings') await show(api, chatId, target, settingsCard(lang, await accountOf(session)), settingsKeyboard(lang));
+        else if (arg === 'settings') { const acc = await accountOf(session); await show(api, chatId, target, settingsCard(lang, acc), settingsKeyboard(lang, acc.plan)); }
         else if (arg === 'scan') await showScan(api, chatId, session, target);
         else if (['create', 'mark', 'transcribe', 'library', 'help'].includes(arg)) {
           if (arg === 'transcribe') await prisma.telegramSession.update({ where: { chatId }, data: { stagedMode: 'transcribe' } }).catch(() => undefined);
@@ -309,7 +323,8 @@ async function handleCallback(q: any, legacy: LegacyHooks, api: TelegramApi) {
         lang = langOf(arg);
         const updated = await prisma.telegramSession.update({ where: { chatId }, data: { language: lang } });
         await api.answerCallback(q.id, copy(lang).languageSet);
-        await show(api, chatId, target, settingsCard(lang, await accountOf(updated)), settingsKeyboard(lang));
+        const acc = await accountOf(updated);
+        await show(api, chatId, target, settingsCard(lang, acc), settingsKeyboard(lang, acc.plan));
         return;
       }
       case 'fp': {

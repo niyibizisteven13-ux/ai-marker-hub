@@ -63,7 +63,8 @@ router.post('/initiate', requireAuth, async (req, res) => {
     const userId = (req as any).user?.userId;
     if (!userId) return res.status(401).json({ error: 'Authentication required.' });
     if (typeof phoneNumber !== 'string' || phoneNumber.length > 32) return res.status(400).json({ error: 'A valid phone number is required.' });
-    if (isSubscription && !['BUSINESS', 'PRO', 'ORGANIZATION'].includes(planType)) return res.status(400).json({ error: 'Unsupported subscription plan.' });
+    // Plans and GO credits are bought through /api/billing/checkout (server-side prices, verified with MTN).
+    if (isSubscription) return res.status(410).json({ error: 'Plans are now purchased from the Upgrade page.', code: 'USE_BILLING_CHECKOUT' });
     if (!isSubscription && (typeof batchId !== 'string' || typeof service !== 'string')) return res.status(400).json({ error: 'A valid batchId and service are required.' });
 
     let priceUsd = 0;
@@ -147,21 +148,8 @@ router.post('/momo/callback', whitelistPaymentGateways, verifyMomoSignature, asy
         const paidUsd = payment.amountRwf / RWF_PER_USD;
 
         if (jobId === 'PLAN') {
-          // It's a subscription upgrade
-          await prisma.subscription.upsert({
-            where: { userId },
-            update: {
-              planType: service, // in this case 'service' is the planType from the ref
-              status: 'ACTIVE',
-              endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 days
-            },
-            create: {
-              userId,
-              planType: service,
-              status: 'ACTIVE',
-              endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-            }
-          });
+          // Plans are granted only by /api/billing after MTN confirms the payment; never from this callback.
+          logger.warn('Ignored legacy plan callback', { ref });
         } else {
           // It's a job unlock
           await paywallService.unlockResult(userId, jobId, service, paidUsd);

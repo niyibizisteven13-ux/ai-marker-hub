@@ -1,152 +1,103 @@
-import { useState, useEffect } from 'react';
-import { CreditCard, CheckCircle2, ArrowUpRight, Loader2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { ArrowUpRight, CheckCircle2, Clock, Coins, Loader2, Receipt, Sparkles, XCircle } from 'lucide-react';
 import { authFetch } from '../../utils/authFetch';
+import { openReceipt } from '../../pages/UpgradePage';
 
-interface Receipt {
-  id: string;
-  date: string;
-  amount: string;
-  status: string;
-}
+/** Settings → Billing: current plan and renewal, GO credits, and Mobile Money payments with receipts. */
 
-interface BillingData {
-  subscription: {
-    planType: string;
-    status: string;
-    renewalDate: string;
-  };
-  receipts: Receipt[];
-}
+interface Me { plan: 'FREE' | 'GO' | 'PRO' | 'INSTITUTION'; planName: string; wallet: number; subscription: { planType: string; endDate: string | null; daysLeft: number | null } | null; payments: 'ready' | 'unavailable' }
+interface Payment { id: string; purpose: string; months: number; credits: number; amountRwf: number; currency: string; status: string; receiptNumber: string | null; createdAt: string; paidAt: string | null; phoneMasked: string }
 
 const SERIF = "font-['Georgia','Tiempos_Headline','Times_New_Roman',serif]";
+const STATUS: Record<string, { label: string; icon: React.ReactNode; tone: string }> = {
+  SUCCESSFUL: { label: 'Paid', icon: <CheckCircle2 size={13} />, tone: 'text-[var(--teal)]' },
+  PENDING: { label: 'Pending', icon: <Clock size={13} />, tone: 'text-[var(--accent)]' },
+  FAILED: { label: 'Failed', icon: <XCircle size={13} />, tone: 'text-[var(--danger)]' },
+  EXPIRED: { label: 'Not approved', icon: <XCircle size={13} />, tone: 'text-[var(--muted)]' },
+};
+const itemOf = (p: Payment) => (p.purpose === 'GO_PACK' ? `GO credits · ${p.credits.toLocaleString('en-US')}` : `${p.purpose === 'INSTITUTION' ? 'Institution' : 'PRO'} · ${p.months} month${p.months > 1 ? 's' : ''}`);
 
 export default function BillingSection() {
-  const [billing, setBilling] = useState<BillingData | null>(null);
+  const [me, setMe] = useState<Me | null>(null);
+  const [payments, setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
-  const [canceling, setCanceling] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    void fetchBilling();
+    (async () => {
+      try {
+        const [m, p] = await Promise.all([authFetch('/api/billing/me'), authFetch('/api/billing/payments')]);
+        if (!m.ok) throw new Error('Billing details are unavailable.');
+        setMe(await m.json());
+        if (p.ok) setPayments((await p.json()).payments ?? []);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Billing details are unavailable.');
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, []);
 
-  const fetchBilling = async () => {
-    try {
-      const res = await authFetch('/api/billing');
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to fetch billing');
-      setBilling(data);
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Could not load billing');
-    } finally {
-      setLoading(false);
-    }
-  };
+  if (loading) return <div className="flex items-center justify-center gap-2 py-12 text-sm text-[var(--muted)]"><Loader2 size={18} className="animate-spin text-[var(--accent)]" /> Loading billing…</div>;
+  if (!me) return <div className="space-y-3"><h2 className="text-xl text-[var(--text)]">Billing</h2><p role="alert" className="text-sm text-[var(--danger)]">{error}</p></div>;
 
-  const handleCancelSubscription = async () => {
-    if (!confirm('Are you sure you want to cancel your subscription?')) return;
-    setCanceling(true);
-    try {
-      const res = await authFetch('/api/billing/cancel', { method: 'POST' });
-      if (!res.ok) throw new Error('Failed to cancel');
-      await fetchBilling();
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Cancellation failed');
-    } finally {
-      setCanceling(false);
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="py-12 text-center text-sm text-[var(--muted)] flex items-center justify-center gap-2">
-        <Loader2 size={18} className="animate-spin text-[var(--accent)]" /> Loading billing details…
-      </div>
-    );
-  }
-
-  if (!billing) return <div className="space-y-4"><h2 className="text-xl text-[var(--text)]">Billing & Subscription</h2><p role="alert" className="text-sm text-[var(--danger)]">{errorMsg || 'Billing details are unavailable.'}</p><button type="button" onClick={() => { setLoading(true); setErrorMsg(null); void fetchBilling(); }} className="rounded-xl border border-[var(--line)] px-4 py-2 text-xs text-[var(--text)]">Retry</button></div>;
-  const sub = billing.subscription;
-  const receipts = billing?.receipts || [];
+  const paid = me.plan === 'PRO' || me.plan === 'INSTITUTION';
+  const end = me.subscription?.endDate ? new Date(me.subscription.endDate).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' }) : null;
 
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-normal text-[var(--text)] font-['Georgia',serif]">Billing & Subscription</h2>
-        <p className="text-xs text-[var(--muted)] mt-0.5">Manage your active plan, Mobile Money payment methods, and invoice receipts.</p>
+        <h2 className={`${SERIF} text-xl font-normal text-[var(--text)]`}>Billing</h2>
+        <p className="mt-0.5 text-xs text-[var(--muted)]">Your plan, GO credits and Mobile Money payments. Receipts are also emailed to you.</p>
       </div>
 
-      <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-6 shadow-sm space-y-5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-[var(--line)]">
-          <div>
-            <span className="text-xs font-medium text-[var(--muted)] uppercase tracking-wider block mb-1">Current Plan</span>
-            <h3 className={`${SERIF} text-2xl font-normal text-[var(--text)]`}>
-              {sub.planType === 'BUSINESS' ? 'Business Pro' : sub.planType === 'ORGANISATION' ? 'Organisation' : 'Pay as you go'}
-            </h3>
-            <p className="text-xs text-[var(--muted)] mt-1">
-              Status: <span className="font-semibold text-[var(--teal)]">{sub.status}</span> {sub.renewalDate ? `· Renews on ${new Date(sub.renewalDate).toLocaleDateString()}` : ''}
-            </p>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="space-y-3 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-5 shadow-sm">
+          <span className="text-xs font-medium text-[var(--muted)]">Current plan</span>
+          <div className="flex items-center gap-2">
+            {paid && <Sparkles size={18} className="text-[var(--accent)]" />}
+            <h3 className={`${SERIF} text-2xl font-normal text-[var(--text)]`}>{me.planName}</h3>
           </div>
-          <div className="flex items-center gap-3">
-            <a
-              href="/upgrade"
-              className="px-4 py-2.5 rounded-xl bg-[var(--accent)] text-[var(--on-accent)] text-xs font-medium hover:opacity-90 transition-colors flex items-center gap-1.5"
-            >
-              Upgrade plan <ArrowUpRight size={14} />
-            </a>
-            {sub.status === 'ACTIVE' && (
-              <button
-                type="button"
-                disabled={canceling}
-                onClick={handleCancelSubscription}
-                className="px-4 py-2.5 rounded-xl border border-[var(--line)] text-xs font-medium text-[var(--danger)] hover:bg-[var(--danger)]/15 transition-colors"
-              >
-                {canceling ? 'Canceling…' : 'Cancel plan'}
-              </button>
-            )}
-          </div>
+          <p className="text-xs text-[var(--muted)]">
+            {paid && end ? <>Active until <b className="text-[var(--text)]">{end}</b>{me.subscription?.daysLeft != null && me.subscription.daysLeft <= 3 ? ' · ends soon' : ''}. Mobile Money does not renew automatically.</> : me.plan === 'GO' ? 'Free allowance plus your GO credits.' : 'Free daily allowance.'}
+          </p>
+          <a href={paid ? '/upgrade?renew=1' : '/upgrade'} className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-[var(--on-accent)] hover:opacity-90">
+            {paid ? 'Renew or extend' : 'Upgrade to PRO'} <ArrowUpRight size={14} />
+          </a>
         </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pb-5 border-b border-[var(--line)]">
-          <div className="p-4 rounded-xl border border-[var(--line)] bg-[var(--bg)]">
-            <span className="text-xs font-medium text-[var(--muted)] block mb-1">Payment Method</span>
-            <div className="flex items-center gap-2 text-sm font-medium text-[var(--text)]">
-              <CreditCard size={16} className="text-[var(--accent)]" />
-              Mobile Money checkout is available when you purchase a plan or marking batch.
-            </div>
-          </div>
-          <div className="p-4 rounded-xl border border-[var(--line)] bg-[var(--bg)]">
-            <span className="text-xs font-medium text-[var(--muted)] block mb-1">Account email</span>
-            <span className="text-sm font-medium text-[var(--text)]">Your account email is used for billing notices.</span>
-          </div>
+        <div className="space-y-3 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-5 shadow-sm">
+          <span className="flex items-center gap-1.5 text-xs font-medium text-[var(--muted)]"><Coins size={14} /> GO credits</span>
+          <div className={`${SERIF} text-2xl font-normal text-[var(--text)]`}>{me.wallet.toLocaleString('en-US')} <span className="text-xs text-[var(--muted)]">credits</span></div>
+          <p className="text-xs text-[var(--muted)]">Used automatically when your plan's daily, weekly or monthly allowance runs out.</p>
+          <a href="/upgrade" className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--line)] px-4 py-2 text-xs font-semibold text-[var(--text)] hover:bg-[var(--hover)]">Buy credits from 500 RWF <ArrowUpRight size={14} /></a>
         </div>
+      </div>
 
-        <div>
-          <h4 className="text-sm font-medium text-[var(--text)] mb-3">Receipts & Invoices</h4>
-          {receipts.length === 0 ? (
-            <p className="text-xs text-[var(--muted)] py-4">No payment receipts found yet.</p>
-          ) : (
-            <div className="divide-y divide-[var(--line)] border border-[var(--line)] rounded-xl overflow-hidden">
-              {receipts.map((r) => (
-                <div key={r.id} className="p-3.5 flex items-center justify-between text-xs bg-[var(--surface)] hover:bg-[var(--surface-2)]">
-                  <div>
-                    <span className="font-medium text-[var(--text)] block">{new Date(r.date).toLocaleDateString()}</span>
-                    <span className="text-[var(--muted)]">Mobile Money · {r.amount}</span>
+      <div className="space-y-3 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-5 shadow-sm">
+        <h3 className="flex items-center gap-2 text-sm font-medium text-[var(--text)]"><Receipt size={15} /> Payments & receipts</h3>
+        {payments.length === 0 ? (
+          <p className="text-xs text-[var(--muted)]">No payments yet.</p>
+        ) : (
+          <div className="divide-y divide-[var(--line)] overflow-hidden rounded-xl border border-[var(--line)]">
+            {payments.map((p) => {
+              const st = STATUS[p.status] ?? STATUS.PENDING;
+              return (
+                <div key={p.id} className="flex flex-wrap items-center justify-between gap-3 bg-[var(--surface)] p-3 text-xs">
+                  <div className="min-w-0">
+                    <div className="font-medium text-[var(--text)]">{itemOf(p)}</div>
+                    <div className="text-[var(--muted)]">{new Date(p.paidAt ?? p.createdAt).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })} · MoMo {p.phoneMasked}{p.receiptNumber ? ` · ${p.receiptNumber}` : ''}</div>
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="px-2.5 py-1 rounded-full bg-[var(--teal)]/15 text-[var(--teal)] font-medium">{r.status}</span>
-                    <span className="text-[var(--muted)]">Ref {r.id.slice(0, 8)}</span>
+                    <span className="font-semibold tabular-nums text-[var(--text)]">{p.amountRwf.toLocaleString('en-US')} {p.currency}</span>
+                    <span className={`inline-flex items-center gap-1 ${st.tone}`}>{st.icon} {st.label}</span>
+                    {p.status === 'SUCCESSFUL' && <button type="button" onClick={() => void openReceipt(p.id)} className="rounded-lg border border-[var(--line)] px-2.5 py-1 text-[var(--text)] hover:bg-[var(--hover)]">Receipt</button>}
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </div>
-
-      {errorMsg && (
-        <p className="text-xs text-[var(--danger)] font-medium">{errorMsg}</p>
-      )}
     </div>
   );
 }

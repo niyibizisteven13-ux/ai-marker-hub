@@ -1,3 +1,4 @@
+import nodemailer, { type Transporter } from 'nodemailer';
 import logger from '../utils/logger.js';
 
 export class EmailService {
@@ -22,12 +23,49 @@ export class EmailService {
     return EmailService.instance;
   }
 
-  public async sendEmail({ to, subject, html, text }: { to: string; subject: string; html: string; text?: string }) {
-    const from = process.env.SMTP_FROM || 'Bwenge AI Studio <noreply@bwenge.space>';
-    const host = process.env.SMTP_HOST;
+  private transport: Transporter | null = null;
+  private static testTransport: Transporter | null = null;
 
-    logger.info('[EmailService] Email dispatch requested.');
-    return { success: true, messageId: 'msg-' + Date.now() };
+  /** Tests capture mail with a nodemailer stream/json transport instead of SMTP. */
+  public static setTestTransport(t: Transporter | null) { EmailService.testTransport = t; }
+
+  private getTransport(): Transporter | null {
+    if (EmailService.testTransport) return EmailService.testTransport;
+    if (this.transport) return this.transport;
+    const host = process.env.SMTP_HOST;
+    if (!host || !process.env.SMTP_USER || !process.env.SMTP_PASS) return null;
+    const port = Number(process.env.SMTP_PORT) || 587;
+    this.transport = nodemailer.createTransport({
+      host, port, secure: process.env.SMTP_SECURE ? process.env.SMTP_SECURE === 'true' : port === 465,
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+      pool: true, maxConnections: 3, connectionTimeout: 20_000, greetingTimeout: 15_000, socketTimeout: 30_000,
+    });
+    return this.transport;
+  }
+
+  /**
+   * Sends one email over SMTP (SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASS, SMTP_FROM, SMTP_REPLY_TO).
+   * Without SMTP settings nothing is sent and the result says so; callers never treat that as delivered.
+   */
+  public async sendEmail({ to, subject, html, text }: { to: string; subject: string; html: string; text?: string }): Promise<{ success: boolean; messageId?: string; skipped?: boolean; error?: string }> {
+    const from = process.env.SMTP_FROM || 'Bwenge AI <noreply@bwenge.space>';
+    const transport = this.getTransport();
+    if (!transport) {
+      logger.warn('[EmailService] SMTP is not configured; email not sent.', { subject });
+      return { success: false, skipped: true };
+    }
+    try {
+      const info = await transport.sendMail({
+        from, to, subject, html,
+        text: text ?? html.replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<br\s*\/?>(?!\n)/gi, '\n').replace(/<\/(p|div|tr|h[1-6]|li)>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\n{3,}/g, '\n\n').trim(),
+        ...(process.env.SMTP_REPLY_TO ? { replyTo: process.env.SMTP_REPLY_TO } : {}),
+      });
+      logger.info('[EmailService] Email sent.', { subject, messageId: info.messageId });
+      return { success: true, messageId: info.messageId };
+    } catch (err) {
+      logger.error('[EmailService] Email failed.', { subject, errorType: (err as Error)?.name });
+      return { success: false, error: (err as Error)?.message };
+    }
   }
 
   public async sendOtpEmail(to: string, otpCode: string) {

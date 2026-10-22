@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../../db.js';
-import { PLANS, planFor, toRwf, type PlanId, type PlanInfo, type UsageKind } from './plans.js';
+import { PLANS, currentGoPacks, planFor, toRwf, walletBalance, type PlanId, type PlanInfo, type UsageKind } from './plans.js';
 
 /**
  * Usage metering and plan limits. Every AI action is recorded with its real token usage and priced in
@@ -59,6 +59,8 @@ export type LimitCode = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'FEATURE' | 'MESSAGE_TO
 export interface GateResult {
   allowed: boolean;
   plan: PlanInfo;
+  /** Allowed beyond the plan allowance because the user holds GO credits (they pay for this action). */
+  wallet?: boolean;
   code?: LimitCode;
   message?: string;
   resetsAt?: string;
@@ -80,7 +82,8 @@ function upsell(plan: PlanInfo): string {
   const next = nextPlan(plan);
   if (!next) return 'Contact your administrator to raise the limit.';
   const p = PLANS[next];
-  if (next === 'PRO') return `Upgrade to PRO ($${p.priceUsd}/month, about ${toRwf(p.priceUsd!).toLocaleString('en-US')} RWF) for ${p.limits.daily} credits a day and memory across all chats, or top up with GO credits.`;
+  const minPack = currentGoPacks()[0];
+  if (next === 'PRO') return `Upgrade to PRO ($${p.priceUsd}/month, about ${toRwf(p.priceUsd!).toLocaleString('en-US')} RWF) for ${p.limits.daily} credits a day and memory across all chats, or buy GO credits from ${minPack.rwf.toLocaleString('en-US')} RWF.`;
   return `Institutions get ${p.limits.daily} credits a day per member, from $${p.priceUsd}/month.`;
 }
 
@@ -96,6 +99,9 @@ export async function checkUsage(userId: string, req: { kind: UsageKind; chars?:
   if ((req.chars ?? 0) > L.maxMessageChars) return deny('MESSAGE_TOO_LONG', `Your message is ${req.chars!.toLocaleString('en-US')} characters; the ${plan.name} plan allows ${L.maxMessageChars.toLocaleString('en-US')}. Attach long text as a file instead.`);
   if ((req.attachments ?? 0) > L.maxAttachments) return deny('TOO_MANY_ATTACHMENTS', `The ${plan.name} plan allows ${L.maxAttachments} attachments per message.`);
   const { p, used, perDay } = await usedTotals(userId, now);
+  const over = used.month >= L.monthly || used.week >= L.weekly || used.day >= L.daily || (req.kind !== 'chat' && perDay[req.kind] >= L.perDay[req.kind]);
+  // Past the allowance, purchased GO credits pay for the action instead of a refusal.
+  if (over && (await walletBalance(userId)) > 0) return { allowed: true, plan, wallet: true };
   if (used.month >= L.monthly) return deny('MONTHLY', `You have used this month's ${L.monthly.toLocaleString('en-US')} credits. They renew ${until(p.resets.month, now)}.`, p.resets.month);
   if (used.week >= L.weekly) return deny('WEEKLY', `You have used this week's ${L.weekly.toLocaleString('en-US')} credits. They renew ${until(p.resets.week, now)}.`, p.resets.week);
   if (used.day >= L.daily) return deny('DAILY', `You have used today's ${L.daily} credits. They renew ${until(p.resets.day, now)} (midnight, Kigali time).`, p.resets.day);
@@ -109,6 +115,15 @@ export async function recordUsage(userId: string, u: { kind: UsageKind; model?: 
   const output = Math.max(0, Math.round(u.outputTokens ?? 0));
   const credits = Math.max(u.minCredits ?? 1, creditsFor(u.model, input, output));
   try {
+    // Beyond the plan allowance (or a daily feature cap), the action is paid from GO credits.
+    const plan = await planFor(userId);
+    const L = plan.limits;
+    const { used, perDay } = await usedTotals(userId);
+    const over = used.month >= L.monthly || used.week >= L.weekly || used.day >= L.daily || (u.kind !== 'chat' && perDay[u.kind] >= L.perDay[u.kind]);
+    if (over) {
+      const balance = await walletBalance(userId);
+      if (balance > 0) await db.creditLedger.create({ data: { id: randomUUID(), userId, delta: -Math.min(credits, balance), reason: 'usage', note: u.kind, createdAt: new Date() } });
+    }
     await db.usageRecord.create({ data: { id: randomUUID(), userId, kind: u.kind, credits, model: u.model ?? null, inputTokens: input, outputTokens: output, costUsd: costUsd(u.model, input, output), channel: u.channel ?? 'web', createdAt: new Date() } });
   } catch {
     /* metering is best-effort */
@@ -122,7 +137,9 @@ export async function usageSummary(userId: string, now = Date.now()) {
   const { p, used, perDay } = await usedTotals(userId, now);
   const recent = await db.usageRecord.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, take: 15 });
   const L = plan.limits;
+  const wallet = await walletBalance(userId);
   return {
+    wallet: { credits: wallet, packs: currentGoPacks() },
     plan: { id: plan.id, name: plan.name, priceUsd: plan.priceUsd, listPriceUsd: plan.listPriceUsd ?? null, priceRwf: plan.priceUsd ? toRwf(plan.priceUsd) : null, priceNote: plan.priceNote },
     credits: {
       day: { used: used.day, limit: L.daily, resetsAt: p.resets.day.toISOString() },
