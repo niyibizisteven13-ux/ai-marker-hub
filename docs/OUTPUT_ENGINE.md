@@ -99,7 +99,41 @@ Both tools are on by default. Set `ENABLE_OUTPUT_ENGINE_TOOLS=false` to disable 
 - **`create_output`** creates one artifact from a spec. It waits up to 90 s and attaches the file. It does not handle
   the `analysis` kind.
 
-The capabilities prompt has a "Choosing the output" section: no forced artifacts, and at most one large output per reply.
+The capabilities prompt has a "Choosing the output" section: no forced artifacts, and at most one large output per reply
+unless the user asks for several.
+
+### How a web-chat message reaches the tools
+
+`POST /api/ai/chat` (`server.ts`) has two paths:
+
+| Path | Has tools | Taken when |
+|---|---|---|
+| Agent (`AiService.generalAssist` → `bwengeAgent`) | Yes | Either rule matches (`useToolAgent` in `server/services/outputs/chatTurn.ts`):<br>• Original rule: general intent, an Anthropic key, and `AI_PROVIDER` is not `gonkarouter`.<br>• Added rule: the planner says the message needs a file, chart or computed numbers (`plan.artifact` or `plan.needsComputation`), and an agent model is configured (Claude agent or `GONKA_API_KEY`). A provider explicitly chosen in the UI that cannot run tools (Ollama) is respected. |
+| Legacy text stream | No | Everything else (unchanged). |
+
+Before this fix, `AI_PROVIDER=gonkarouter` (the default in `.env.example`) sent every message, including "make a chart and
+an Excel file", to the legacy stream. That stream has no tools, and the persona prompt asks for ```` ```artifact-json ````
+blocks, so the model answered with CSV text and told the user to save it as Excel.
+
+Inside `generalAssist`, a tool turn works like this:
+
+1. The turn runs on the agent model: Claude (`CLAUDE_AGENT_MODEL`, default `claude-haiku-5-5`) when
+   `AI_AGENT_PROVIDER=anthropic` and `ANTHROPIC_API_KEY` are set, otherwise Gonka. Everyday chat stays on Gonka.
+   `ANTHROPIC_BASE_URL` is honoured by the SDK for an Anthropic-compatible endpoint.
+2. The system prompt gets the planner hint, which lists every requested deliverable (for example "a chart (SVG) and an XLSX
+   file"). It also gets rules that override the older `artifact-json` persona instructions: files exist only through tool
+   calls, and the model must never tell the user to rename CSV text.
+3. **Delivery check** (`runDeliverableTurn`):
+   - If a requested deliverable has no matching attachment, the client is told to discard the streamed text (SSE `reset`),
+     and the model gets one corrective turn.
+   - Anything still missing is reported as "Not created: …".
+   - Download links the model wrote itself are flagged.
+4. **Attachment validation.** `create_output` only reports success after the stored file is re-read and matches the
+   artifact: size, sha256, MIME type and file-format check. The signed download link (`/api/files/:id`) lasts at most
+   7 days; the artifact stays available at `/api/outputs/:id/download`.
+
+Telegram uses the same `generalAssist`: retries no longer duplicate text. Telegram does not yet send generated files as
+documents.
 
 ## HTTP API (`/api/outputs`, behind `requireAuth`)
 

@@ -1445,6 +1445,8 @@ Offer actionable next steps and invite them to run commands or upload documents!
             lastEditTime = now;
             await botService.editMessageText(chatId, initialMsgId, stripThinkingTags(accumulatedText).slice(0, 4000));
           }
+        } else if (event.type === 'turn_reset') {
+          accumulatedText = '';
         } else if (event.type === 'tool_call') {
           accumulatedText += `\n> 🛠️ *Executing tool*: \`${event.data.name}\`...\n`;
           const now = Date.now();

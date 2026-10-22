@@ -362,7 +362,7 @@ test('artifacts: link shares expire-capable, revocable, and scoped to the one ar
   assert.notEqual(stored.shareTokenHash, s.shareToken, 'only the hash is stored');
   assert.equal((await svc.byToken('', s.shareToken!)).id, artifact.id);
   const opened = await svc.open('', artifact.id, s.shareToken!);
-  opened.stream.destroy();
+  (opened.stream as unknown as { destroy(): void }).destroy();
   await assert.rejects(svc.byToken('', 'x'.repeat(32)), (e: any) => e.status === 404);
   await svc.share(user, artifact.id, { mode: 'private' });
   await assert.rejects(svc.byToken('', s.shareToken!), (e: any) => e.status === 404);

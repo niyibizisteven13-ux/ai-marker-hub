@@ -70,7 +70,10 @@ export function outputTools(services: ToolServices): Tool[] {
         'Create a stored, shareable, revisioned artifact from a validated output spec. Use it only when the output materially helps; prefer plain prose and Markdown tables for simple answers.',
         'kinds: chart (Vega-Lite-like config; quantitative axes need a unit; sourceNote required), widget (table_explorer | chart_explorer | kpi_cards: interactive self-contained HTML), report (layout "report" or "dashboard": persistent HTML with sections, KPIs, charts, tables), document (format xlsx | pdf | docx | pptx with blocks / sheets / slides), template (statistical_report DOCX | briefing_deck PPTX | data_workbook XLSX filled from analysisArtifactId), diagram (mermaid flowchart text or graph nodes/edges), map (geojson polygons or points).',
         'Numbers in charts and tables must come from analyze_data results via fromAnalysis {artifactId, result} or from sources the user supplied; never type computed numbers.',
-        'Every spec needs title and sources [{type, id?, label}]. See docs/OUTPUT_ENGINE.md for full examples.',
+        'Every spec needs title and sources [{type, id?, label}] (values typed by the user: {"type":"user","label":"Values given by the user"}).',
+        'Example chart: {"kind":"chart","title":"Values by category","sources":[{"type":"user","label":"User input"}],"chart":{"type":"bar","x":{"field":"Category","title":"Category","type":"nominal"},"y":{"field":"Value","title":"Value","unit":"none"},"data":[{"Category":"A","Value":10}],"sourceNote":"Values given by the user"}}.',
+        'Example Excel file: {"kind":"document","format":"xlsx","title":"Values","sources":[{"type":"user","label":"User input"}],"sheets":[{"name":"Data","table":{"columns":[{"key":"Category","label":"Category"},{"key":"Value","label":"Value"}],"rows":[{"Category":"A","Value":10}]}}]}.',
+        'Call the tool once per requested deliverable.',
       ].join(' '),
       parameters: {
         type: 'object', required: ['spec'],
@@ -85,8 +88,10 @@ export function outputTools(services: ToolServices): Tool[] {
         if (a.status === 'failed') return err(`The output could not be generated: ${a.error}`);
         if (a.status !== 'ready') return { text: `"${a.title}" is still being generated (artifact ${a.id}). Tell the user it will appear in their outputs when ready.` };
         const ref = await outputs.attachmentRef(a);
+        // Never report success unless the stored file was re-read and validated.
+        if (!ref) return err(`"${a.title}" was generated but the stored file failed validation, so it cannot be delivered. Tell the user it failed; do not claim a download exists.`);
         const warnings = (a.warnings ?? []).length ? `\nWarnings to tell the user: ${(a.warnings as string[]).join(' ')}` : '';
-        return { text: `${reused ? 'Reused the identical' : 'Created'} ${a.kind} "${a.title}" (${a.format}, artifact ${a.id}, revision ${a.revision}). It is attached; do not paste its contents.${warnings}`, attachments: ref ? [ref] : [] };
+        return { text: `${reused ? 'Reused the identical' : 'Created'} ${a.kind} "${a.title}" (${a.format}, ${ref.size} bytes, artifact ${a.id}, revision ${a.revision}). It is attached to your reply as a download; do not paste its contents or write a link.${warnings}`, attachments: [ref] };
       } catch (e: any) {
         return err(`The output spec was rejected: ${problemText(e)} Fix the spec and try again.`);
       }

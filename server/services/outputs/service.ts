@@ -48,6 +48,7 @@ export interface OutputDeps {
 
 const db = prisma as any;
 const KEEP = 100 * 365 * 24 * 60 * 60 * 1000;
+const LINK_TTL = 7 * 24 * 60 * 60 * 1000;
 const ASYNC = new Set(['analysis', 'template', 'report', 'document']);
 const FORMAT: Record<string, string> = { answer: 'json', chart: 'svg', widget: 'html', report: 'html', diagram: 'svg', map: 'svg', image: 'png', analysis: 'json' };
 const MIME: Record<string, string> = { json: 'application/json', svg: 'image/svg+xml', html: 'text/html; charset=utf-8', png: 'image/png', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', pdf: 'application/pdf' };
@@ -337,9 +338,22 @@ export function createOutputService(deps: OutputDeps) {
     return { artifact: a, meta, stream };
   }
 
+  /**
+   * Chat attachment for a ready artifact, only after the stored file is re-read and matches the artifact
+   * (size, sha256, MIME type, file format). Signed links last LINK_TTL; the artifact itself stays
+   * downloadable through /api/outputs/:id/download and the chat's link re-signing.
+   */
   async function attachmentRef(a: any): Promise<AttachmentRef | null> {
-    if (!a?.fileId) return null;
-    try { return deps.fileStore.toRef(await deps.fileStore.meta(a.fileId), a.previewFileId ?? undefined); } catch { return null; }
+    if (!a?.fileId || a.status !== 'ready') return null;
+    try {
+      const { meta, data } = await deps.fileStore.read(a.fileId, a.userId);
+      if (data.length !== a.sizeBytes || sha(data) !== a.sha256 || meta.mime !== MIME[a.format] || await verifyFile(a.format, data)) return null;
+      const ref = deps.fileStore.toRef(meta, a.previewFileId ?? undefined);
+      const ttl = Math.min(LINK_TTL, Math.max(0, Date.parse(meta.expiresAt) - Date.now()));
+      return { ...ref, url: deps.fileStore.signedUrl(meta.id, ttl), ...(a.previewFileId ? { previewUrl: deps.fileStore.signedUrl(a.previewFileId, ttl) } : {}), expiresAt: new Date(Date.now() + ttl).toISOString() };
+    } catch {
+      return null;
+    }
   }
 
   /** Waits for a background render (chat tools); returns the latest row either way. */

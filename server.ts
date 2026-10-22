@@ -37,7 +37,9 @@ import { examsRouter } from './server/routes/examRoutes.js';
 import { outputsRouter, sharedOutputsRouter } from './server/routes/outputRoutes.js';
 import { knowledgeAdminRouter, knowledgeSourcesRouter } from './server/routes/knowledgeRepositoryRoutes.js';
 import { shutdownOcr } from './server/services/documents/ocr.js';
-import { fileJobQueue } from './server/services/AiService.js';
+import { agentTarget, fileJobQueue } from './server/services/AiService.js';
+import { planOutput } from './server/services/outputs/planner.js';
+import { useToolAgent } from './server/services/outputs/chatTurn.js';
 import { emptyModelOutputError, nonEmptyModelText } from './server/services/ai/modelOutput.js';
 import { validateScanGradeOutput } from './server/services/ai/scanOutput.js';
 import logger from './server/utils/logger.js';
@@ -1152,11 +1154,14 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
   }
 
   const hasClaude = await aiService.providerAvailable('anthropic');
+  // Requests for files, charts or computed numbers need the tool-enabled agent; the legacy stream below has
+  // no tools and could only describe a file instead of creating one.
+  const turnPlan = planOutput({ message: query || '', attachments: attachments.map((a: any) => ({ name: String(a?.name ?? ''), mime: a?.mimeType })), hasDataset: attachments.some((a: any) => /\.(csv|tsv|xlsx|xls|json)$/i.test(String(a?.name ?? ''))) });
 
-  if (
-    intent === 'general_assist' && service === 'general' && !isSmallTalk && !cleanProvider && hasClaude &&
-    process.env.AI_PROVIDER !== 'gonkarouter'
-  ) {
+  if (useToolAgent({
+    intent, service, isSmallTalk, requestedProvider: cleanProvider, hasClaudeKey: hasClaude, aiProvider: process.env.AI_PROVIDER,
+    agentAvailable: agentTarget().provider === 'anthropic' || Boolean(process.env.GONKA_API_KEY), plan: turnPlan,
+  })) {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
@@ -1228,6 +1233,7 @@ ${augmentedQuery}`;
         files: finalFiles,
         pinnedSyllabus,
         extractSchema,
+        planText: query || '',
         tools: generalTools,
         onEvent: (event) => {
           if (emitter.isClosed()) return; // client disconnected — stop pushing bytes down a dead socket
@@ -1256,6 +1262,9 @@ ${augmentedQuery}`;
             emitter.send('usage', { ...baseData, usage: event.data });
           } else if (event.type === 'attachment') {
             emitter.send('attachment', { ...baseData, ...event.data });
+          } else if (event.type === 'turn_reset') {
+            // Discarded attempt (provider retry or delivery check): the client clears the streamed text.
+            emitter.send('reset', { ...baseData });
           }
         },
         executeTool: async (name, input) => {
