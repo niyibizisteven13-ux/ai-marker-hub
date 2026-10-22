@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ArrowDownAZ, CheckSquare, ChevronDown, ChevronRight, Database, Download, Eye, FolderInput, FolderOpen, FolderPlus, FolderTree,
-  HardDrive, LayoutGrid, List, Loader2, MoreVertical, Pencil, Plus, RefreshCw, Search, Square, Trash2, Upload, UploadCloud, X,
+  HardDrive, LayoutGrid, List, Loader2, MoreVertical, Pencil, Plus, RefreshCw, Search, Sparkles, Square, Trash2, Upload, UploadCloud, X,
 } from 'lucide-react';
 import {
   filesFromDrop, formatBytes, knowledgeApi, type Contents, type RepoDirectory, type RepoFile, type RepoTree, type Repository, type SearchResults, type UploadSummary,
@@ -280,6 +280,12 @@ export default function KnowledgeExplorer({ notify }: { notify: Notify }) {
             {stats && <StatPill tone="green" label="Searchable by AI" value={['indexed', 'pending_embeddings', 'partial_failure', 'duplicate'].reduce((a, k) => a + (stats.byStatus[k] ?? 0), 0)} />}
             {stats && stats.awaitingIndexing + stats.indexing > 0 && <StatPill tone="blue" label="Indexing" value={stats.awaitingIndexing + stats.indexing} spin />}
             {stats && stats.failed > 0 && <StatPill tone="red" label="Failed" value={stats.failed} onClick={() => repoId && run(() => knowledgeApi.reindexRepository(repoId, true), 'Retrying failed files')} title="Retry failed files" />}
+            {repo && (
+              <AssistantSwitch on={repo.settings?.assistant === true} onChange={(on) => run(async () => {
+                await knowledgeApi.updateRepository(repo.id, { settings: { assistant: on } });
+                await loadRepos(repo.id);
+              }, on ? 'Bwenge AI can now use this dataset for every user' : 'This dataset is hidden from Bwenge AI')} />
+            )}
             <button className={`${kx.btn} ${kx.ghost}`} onClick={createRepo}><Plus size={15} /> New repository</button>
             <RepoMenu onReindex={() => repoId && run(() => knowledgeApi.reindexRepository(repoId), 'Re-indexing the repository')} onRename={() => repo && setDialog(
               <PromptDialog title="Rename repository" label="Name" initial={repo.name} confirm="Save" onClose={() => setDialog(null)}
@@ -580,6 +586,21 @@ function RowMenu({ items }: { items: MenuItem[] }) {
         </div>
       )}
     </div>
+  );
+}
+
+/** Publishes the repository to Bwenge AI: every user's assistant can search, browse, read and analyse it. */
+function AssistantSwitch({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <button type="button" role="switch" aria-checked={on} onClick={() => onChange(!on)}
+      title={on ? 'Bwenge AI uses this dataset to answer every user. Folders and files switched off for AI stay hidden.' : 'Only you can use this dataset. Turn on to let Bwenge AI answer every user from it.'}
+      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3FA7E0] ${on ? 'border-[#B48CFF]/40 bg-[#B48CFF]/12 text-[#D6C2FF]' : 'border-[#2A3760] bg-[#18213D] text-[#9AA6C9] hover:text-white'}`}>
+      <Sparkles size={13} />
+      {on ? 'Bwenge AI: all users' : 'Bwenge AI: off'}
+      <span aria-hidden="true" className={`relative h-4 w-7 rounded-full transition-colors ${on ? 'bg-[#8E63F0]' : 'bg-[#2A3760]'}`}>
+        <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${on ? 'left-3.5' : 'left-0.5'}`} />
+      </span>
+    </button>
   );
 }
 

@@ -88,6 +88,9 @@ export interface KnowledgePassage {
   table?: string;
   url?: string;
   score?: number;
+  /** Repository file the passage comes from (datasets in Admin → Datasets & Curations). */
+  fileId?: string;
+  path?: string;
 }
 
 /** Optional services injected from the host app. Tools that need a service are only offered when it exists. */
@@ -105,6 +108,12 @@ export interface ToolServices {
     }>;
   };
   image?: ImageProvider;
+  /** Datasets curated by admins in Admin → Datasets & Curations (knowledge repositories). */
+  datasets?: {
+    catalog(userId: string): Promise<DatasetSummary[]>;
+    browse(userId: string, datasetId: string, opts: { path?: string; search?: string; limit?: number }): Promise<DatasetListing>;
+    read(userId: string, fileId: string, opts: { maxChars?: number; sheet?: string; rowOffset?: number }): Promise<DatasetFileContent>;
+  };
   /** Universal output engine (server/services/outputs). */
   outputs?: {
     create(userId: string, spec: unknown): Promise<{ artifact: any; reused: boolean }>;
@@ -112,6 +121,26 @@ export interface ToolServices {
     readAnalysis(userId: string, id: string): Promise<any>;
     attachmentRef(artifact: any): Promise<AttachmentRef | null>;
   };
+}
+
+export interface DatasetSummary { id: string; name: string; description: string; files: number; totalBytes: number; types: Record<string, number>; indexed: number; folders: string[] }
+export interface DatasetListing {
+  repository: { id: string; name: string };
+  path: string;
+  search?: string;
+  folders: Array<{ name: string; path: string; files: number }>;
+  files: Array<{ id: string; path: string; name: string; type: string; sizeBytes: number; status: string }>;
+  totalFiles: number;
+}
+export interface DatasetFileContent {
+  file: { id: string; path: string; name: string; type: string; sizeBytes: number; repository: string };
+  supported: boolean;
+  method: string;
+  pages?: number;
+  sheets: Array<{ name: string; columns: string[]; totalRows: number }>;
+  text: string;
+  truncated: boolean;
+  warnings: string[];
 }
 
 export interface ImageProvider {

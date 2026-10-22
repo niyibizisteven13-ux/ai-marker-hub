@@ -39,6 +39,7 @@ import { knowledgeAdminRouter, knowledgeSourcesRouter } from './server/routes/kn
 import { shutdownOcr } from './server/services/documents/ocr.js';
 import { agentTarget, fileJobQueue } from './server/services/AiService.js';
 import { planOutput } from './server/services/outputs/planner.js';
+import { asksAboutDatasets } from './server/services/knowledge/published.js';
 import { useToolAgent } from './server/services/outputs/chatTurn.js';
 import { emptyModelOutputError, nonEmptyModelText } from './server/services/ai/modelOutput.js';
 import { validateScanGradeOutput } from './server/services/ai/scanOutput.js';
@@ -1166,6 +1167,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
     intent, service, isSmallTalk, requestedProvider: cleanProvider, hasClaudeKey: hasClaude, aiProvider: process.env.AI_PROVIDER,
     agentAvailable: agentTarget().provider === 'anthropic' || Boolean(process.env.GONKA_API_KEY), plan: turnPlan,
     hasVisualFiles: serverVisualFiles.length > 0 || Boolean(req.file && /^image\/|application\/pdf/.test(req.file.mimetype)),
+    asksAboutDatasets: intent === 'general_assist' && !isSmallTalk && await asksAboutDatasets(query || '').catch(() => false),
   })) {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');

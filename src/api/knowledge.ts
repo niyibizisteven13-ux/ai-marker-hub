@@ -11,7 +11,8 @@ export interface RepoStatistics {
 }
 export interface Repository {
   id: string; name: string; description: string | null; knowledgeBaseId: string | null; createdAt: string; updatedAt: string;
-  settings: { language: string; domain: string; ocr: boolean; autoIndex: boolean }; statistics: RepoStatistics;
+  /** assistant: published to Bwenge AI for every user (off until an admin turns it on). */
+  settings: { language: string; domain: string; ocr: boolean; autoIndex: boolean; assistant?: boolean }; statistics: RepoStatistics;
 }
 export interface RepoDirectory { id: string; name: string; path: string; parentId: string | null; aiEnabled: boolean; createdAt?: string; updatedAt?: string }
 export interface TreeDirectory extends RepoDirectory { files: number; bytes: number }
@@ -59,7 +60,7 @@ const qs = (o: Record<string, string | number | undefined | null>) => {
 export const knowledgeApi = {
   listRepositories: () => call<Repository[]>('/repositories'),
   createRepository: (input: { name: string; description?: string }) => call<Repository>('/repositories', json('POST', input)),
-  updateRepository: (id: string, patch: { name?: string; description?: string | null }) => call<Repository>(`/repositories/${id}`, json('PATCH', patch)),
+  updateRepository: (id: string, patch: { name?: string; description?: string | null; settings?: { assistant?: boolean } }) => call<Repository>(`/repositories/${id}`, json('PATCH', patch)),
   deleteRepository: (id: string) => call<unknown>(`/repositories/${id}?confirm=true`, { method: 'DELETE' }),
   tree: (id: string) => call<RepoTree>(`/repositories/${id}/tree`),
   statistics: (id: string) => call<RepoStatistics>(`/repositories/${id}/statistics`),

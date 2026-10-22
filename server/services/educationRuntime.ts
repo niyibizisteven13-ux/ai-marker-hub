@@ -101,7 +101,8 @@ export const outputService = createOutputService({
   readDataset: (userId, id) => analyticsService.readDataset(userId, id),
   readRepositoryFile: async (userId, id) => {
     const limit = num(process.env.ANALYSIS_MAX_INPUT_BYTES, 50 * 1024 * 1024);
-    const { file, stream } = await knowledgeService.openDownload(userId, id);
+    // Published datasets are analysable by every user's assistant; private ones only by their owners.
+    const { file, stream } = await knowledgeService.openForAnalysis(userId, id);
     const chunks: Buffer[] = [];
     let size = 0;
     for await (const c of stream as AsyncIterable<Buffer>) {

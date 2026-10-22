@@ -4,6 +4,7 @@ import { createArchive, createDocument, createPresentation, createSpreadsheet, c
 import { createChart, createDiagram, createDrawing, generateImage } from './drawingTools.js';
 import { pythonTool, readAttachment, searchKnowledgeTool, webTools } from './dataTools.js';
 import { outputTools } from './outputTools.js';
+import { datasetTools } from './datasetTools.js';
 
 /** Builds the full toolkit. Tools that need an optional service are only included when it is provided. */
 export function buildToolkit(services: ToolServices = {}): ToolRegistry {
@@ -14,6 +15,7 @@ export function buildToolkit(services: ToolServices = {}): ToolRegistry {
     enabled('ENABLE_AGENT_IMAGE_GENERATION') && services.image ? generateImage : null,
     readAttachment,
     searchKnowledgeTool(services),
+    ...datasetTools(services),
     ...(enabled('ENABLE_AGENT_WEB_TOOLS') ? webTools(services) : []),
     enabled('ENABLE_AGENT_PYTHON_TOOL') ? pythonTool(services) : null,
     ...(process.env.ENABLE_OUTPUT_ENGINE_TOOLS === 'false' ? [] : outputTools(services)),

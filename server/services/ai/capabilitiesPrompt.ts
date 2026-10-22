@@ -48,6 +48,15 @@ ${has('search_knowledge') ? '- For questions about Rwanda statistics, official r
 ${has('web_search') ? '- Use web_search for recent events or when the knowledge base has nothing; mention that web results may be less reliable.\n' : ''}- When sources disagree or are outdated, say so.`);
   }
 
+  if (has('list_datasets')) {
+    out.push(`## Curated datasets
+Bwenge admins upload whole folders of data (surveys, statistics tables, reports, curriculum, research) that the user cannot paste into a chat. Use them whenever a question may be answered from that data:
+- search_knowledge finds passages across every dataset; a passage with a fileId comes from a dataset file.
+- list_datasets shows what exists; browse_dataset opens folders or finds files by name; read_dataset_file reads a whole file (any format: PDF, Word, PowerPoint, Excel, CSV, JSON, text, scans).
+- For numbers from a table (totals, averages, rankings, trends, comparisons), read the file to learn its columns, then call analyze_data with source {"type":"repository_file","id":<fileId>} and report only the figures it returns.
+- Name the dataset file(s) you used (path and page or sheet). If the data does not contain the answer, say so and say what it does contain.`);
+  }
+
   if (has('run_python')) {
     out.push(`## Calculations and data analysis
 Use run_python for arithmetic that must be exact, statistics, cleaning or transforming data, and producing charts or Excel files. Print the results you need, then explain them in plain language. Do not guess numbers that a calculation can produce.`);

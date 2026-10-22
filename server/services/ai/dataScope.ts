@@ -7,7 +7,8 @@ function ownerOrSharedWhere(userId: string, organizationIds: string[]) {
   };
 }
 
-export function buildKnowledgeAccessWhere(userId: string, organizationIds: string[]) {
+/** `publishedKnowledgeBaseIds`: datasets an admin published to Bwenge AI (readable by every signed-in user). */
+export function buildKnowledgeAccessWhere(userId: string, organizationIds: string[], publishedKnowledgeBaseIds: string[] = []) {
   return {
     OR: [
       { document: { userId } },
@@ -17,6 +18,7 @@ export function buildKnowledgeAccessWhere(userId: string, organizationIds: strin
         ? [{ document: { knowledgeBase: { organizationId: { in: organizationIds } } } }]
         : []),
       { document: { globalApproved: true, knowledgeBase: { globalApproved: true } } },
+      ...(publishedKnowledgeBaseIds.length ? [{ knowledgeBaseId: { in: publishedKnowledgeBaseIds } }] : []),
     ],
   };
 }

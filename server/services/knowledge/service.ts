@@ -17,6 +17,7 @@ import { rankHybridKnowledgeChunks } from '../KnowledgeRetrievalService.js';
 import {
   ExtractionError, decodeText, extractForIndex, htmlToText, pptxSlides, readCsv, readXlsx, rtfToText, safePreviewHtml, type Extracted, type Ocr,
 } from './extract.js';
+import { isPublished } from './published.js';
 import { PathError, baseName, extensionOf, joinPath, nextFreeName, normalizeRelativePath, parentPath, validateFileType, validateName } from './paths.js';
 
 /**
@@ -59,8 +60,9 @@ const db = prisma as any;
 const now = () => new Date();
 const env = (k: string, d: number) => (Number(process.env[k]) > 0 ? Number(process.env[k]) : d);
 
-interface Settings { language: string; domain: string; ocr: boolean; autoIndex: boolean }
-const settingsOf = (repo: any): Settings => ({ language: 'en', domain: 'general', ocr: true, autoIndex: true, ...(repo.settings && typeof repo.settings === 'object' ? repo.settings : {}) });
+/** `assistant`: published to Bwenge AI, so every signed-in user's assistant can search, browse and read it. */
+interface Settings { language: string; domain: string; ocr: boolean; autoIndex: boolean; assistant: boolean }
+const settingsOf = (repo: any): Settings => ({ language: 'en', domain: 'general', ocr: true, autoIndex: true, assistant: false, ...(repo.settings && typeof repo.settings === 'object' ? repo.settings : {}) });
 
 interface IndexJobPayload { repositoryId: string; fileIds: string[]; force?: boolean; segment?: number }
 
@@ -961,7 +963,7 @@ export function createKnowledgeService(deps: KnowledgeDeps) {
     if (!file) throw new KnowledgeError('NOT_FOUND', 'Source not found.', 404);
     const repo = await db.knowledgeRepository.findUnique({ where: { id: file.repositoryId } });
     const orgs = await orgIdsOf(userId);
-    let allowed = !!repo && canAccess(repo, userId, orgs);
+    let allowed = !!repo && (canAccess(repo, userId, orgs) || (isPublished(repo) && await aiEnabledChain(file)));
     if (!allowed && file.documentId) {
       const doc = await db.document.findUnique({ where: { id: file.documentId } });
       const kb = doc ? await db.knowledgeBase.findUnique({ where: { id: doc.knowledgeBaseId } }) : null;
@@ -972,7 +974,158 @@ export function createKnowledgeService(deps: KnowledgeDeps) {
     return { file, stream };
   }
 
+  // ── Bwenge AI access (any signed-in user, through the assistant's dataset tools) ──
+  /** A file is readable by the assistant unless it or one of its folders is switched off for AI. */
+  async function aiEnabledChain(file: any): Promise<boolean> {
+    if (file.aiEnabled === false) return false;
+    for (let id = file.directoryId; id;) {
+      const d = await db.repositoryDirectory.findUnique({ where: { id } });
+      if (!d) break;
+      if (d.aiEnabled === false) return false;
+      id = d.parentId;
+    }
+    return true;
+  }
+
+  /** Repositories the user's assistant may use: published ones, plus the user's own or organisation's. */
+  async function assistantRepositories(userId: string) {
+    const orgs = await orgIdsOf(userId);
+    const repos = await db.knowledgeRepository.findMany({ orderBy: { createdAt: 'desc' } });
+    return repos.filter((r: any) => isPublished(r) || canAccess(r, userId, orgs));
+  }
+
+  /** Folder ids inside a folder switched off for AI (directly or through a parent). */
+  async function hiddenFolders(repoId: string): Promise<Set<string>> {
+    const dirs = await db.repositoryDirectory.findMany({ where: { repositoryId: repoId }, select: { id: true, parentId: true, aiEnabled: true } });
+    const byId = new Map<string, any>(dirs.map((d: any) => [d.id, d]));
+    const hidden = new Set<string>();
+    for (const d of dirs) for (let x: any = d; x; x = x.parentId ? byId.get(x.parentId) : null) if (x.aiEnabled === false) { hidden.add(d.id); break; }
+    return hidden;
+  }
+
+  async function assistantRepo(userId: string, id: string) {
+    const repo = (await assistantRepositories(userId)).find((r: any) => r.id === id);
+    if (!repo) throw new KnowledgeError('NOT_FOUND', 'Dataset not found.', 404);
+    return repo;
+  }
+
+  async function assistantFile(userId: string, fileId: string) {
+    const file = typeof fileId === 'string' ? await db.repositoryFile.findUnique({ where: { id: fileId } }) : null;
+    if (!file) throw new KnowledgeError('NOT_FOUND', 'File not found.', 404);
+    const repo = await assistantRepo(userId, file.repositoryId).catch(() => { throw new KnowledgeError('NOT_FOUND', 'File not found.', 404); });
+    if (!(await aiEnabledChain(file))) throw new KnowledgeError('NOT_FOUND', 'This file is not available to the assistant.', 404);
+    return { file, repo };
+  }
+
+  /** Overview of every dataset the assistant can use: size, file types and top-level folders. */
+  async function assistantCatalog(userId: string) {
+    const repos = await assistantRepositories(userId);
+    return Promise.all(repos.map(async (r: any) => {
+      const [all, folders, hidden] = await Promise.all([
+        db.repositoryFile.findMany({ where: { repositoryId: r.id }, select: { extension: true, sizeBytes: true, indexStatus: true, aiEnabled: true, directoryId: true } }),
+        db.repositoryDirectory.findMany({ where: { repositoryId: r.id, parentId: null }, select: { name: true, aiEnabled: true }, orderBy: { name: 'asc' } }),
+        hiddenFolders(r.id),
+      ]);
+      const files = all.filter((f: any) => f.aiEnabled !== false && !(f.directoryId && hidden.has(f.directoryId)));
+      const types: Record<string, number> = {};
+      for (const f of files) types[f.extension || 'other'] = (types[f.extension || 'other'] ?? 0) + 1;
+      return {
+        id: r.id, name: r.name, description: r.description ?? '', files: files.length,
+        totalBytes: files.reduce((a: number, f: any) => a + (f.sizeBytes ?? 0), 0), types,
+        indexed: files.filter((f: any) => f.indexStatus === 'indexed').length,
+        folders: folders.filter((d: any) => d.aiEnabled !== false).map((d: any) => d.name),
+      };
+    }));
+  }
+
+  /**
+   * One folder of a dataset (by path, '' for the top), or files whose path matches `search` anywhere in it.
+   * Folders and files switched off for AI are left out.
+   */
+  async function assistantBrowse(userId: string, repoId: string, opts: { path?: string; search?: string; limit?: number } = {}) {
+    const repo = await assistantRepo(userId, repoId);
+    const limit = Math.min(Math.max(1, opts.limit ?? 200), 500);
+    const dirs = await db.repositoryDirectory.findMany({ where: { repositoryId: repo.id } });
+    const byId = new Map<string, any>(dirs.map((d: any) => [d.id, d]));
+    const off = (dirId: string | null): boolean => { for (let d = dirId ? byId.get(dirId) : null; d; d = d.parentId ? byId.get(d.parentId) : null) if (d.aiEnabled === false) return true; return false; };
+    const fileView = (f: any) => ({ id: f.id, path: f.path, name: f.name, type: f.extension || 'other', sizeBytes: f.sizeBytes, status: f.indexStatus, updatedAt: f.updatedAt });
+    if (opts.search?.trim()) {
+      const terms = opts.search.toLowerCase().split(/\s+/).filter(Boolean);
+      const all = await db.repositoryFile.findMany({ where: { repositoryId: repo.id }, orderBy: { path: 'asc' } });
+      const hits = all.filter((f: any) => f.aiEnabled !== false && !off(f.directoryId) && terms.every((t) => f.path.toLowerCase().includes(t)));
+      return { repository: { id: repo.id, name: repo.name }, path: '', search: opts.search, folders: [], files: hits.slice(0, limit).map(fileView), totalFiles: hits.length };
+    }
+    const p = (opts.path ?? '').replace(/^\/+|\/+$/g, '');
+    const dir = p ? dirs.find((d: any) => d.path === p) : null;
+    if (p && (!dir || off(dir.id))) throw new KnowledgeError('NOT_FOUND', `No folder "${p}" in ${repo.name}.`, 404);
+    const [files, counts] = await Promise.all([
+      db.repositoryFile.findMany({ where: { repositoryId: repo.id, directoryId: dir?.id ?? null }, orderBy: { name: 'asc' } }),
+      db.repositoryFile.findMany({ where: { repositoryId: repo.id }, select: { directoryId: true, aiEnabled: true } }),
+    ]);
+    const below = (d: any) => counts.filter((f: any) => f.aiEnabled !== false && f.directoryId && (f.directoryId === d.id || byId.get(f.directoryId)?.path.startsWith(`${d.path}/`))).length;
+    const folders = dirs.filter((d: any) => (d.parentId ?? null) === (dir?.id ?? null) && d.aiEnabled !== false).sort((a: any, b: any) => a.name.localeCompare(b.name));
+    const visible = files.filter((f: any) => f.aiEnabled !== false);
+    return {
+      repository: { id: repo.id, name: repo.name }, path: p,
+      folders: folders.map((d: any) => ({ name: d.name, path: d.path, files: below(d) })),
+      files: visible.slice(0, limit).map(fileView), totalFiles: visible.length,
+    };
+  }
+
+  /**
+   * The content of one dataset file for the assistant: text by page/slide/section, or spreadsheet sheets as
+   * column headers plus rows (CSV-style). Bounded by `maxChars`; the full table stays available to analyze_data.
+   */
+  async function assistantRead(userId: string, fileId: string, opts: { maxChars?: number; sheet?: string; rowOffset?: number } = {}) {
+    const { file, repo } = await assistantFile(userId, fileId);
+    const maxChars = Math.min(Math.max(2000, opts.maxChars ?? 40_000), 120_000);
+    const extracted = await withTemp(file, (p) => extractForIndex(p, file.name, { ocr: settingsOf(repo).ocr ? deps.ocr : undefined, maxChars: maxChars * 3 }));
+    const parts: string[] = [];
+    let used = 0;
+    const push = (s: string) => { if (used >= maxChars) return false; const piece = s.slice(0, maxChars - used); parts.push(piece); used += piece.length; return piece.length === s.length; };
+    const csvCell = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+    let truncated = false;
+    if (extracted.sheets.length) {
+      const sheets = opts.sheet ? extracted.sheets.filter((sh) => sh.name.toLowerCase() === opts.sheet!.toLowerCase()) : extracted.sheets;
+      if (opts.sheet && !sheets.length) throw new KnowledgeError('NOT_FOUND', `No sheet "${opts.sheet}". Sheets: ${extracted.sheets.map((sh) => sh.name).join(', ')}.`, 404);
+      for (const sh of sheets) {
+        const start = Math.max(0, opts.rowOffset ?? 0);
+        const rows = sh.rows.slice(start);
+        if (!push(`### Sheet "${sh.name}": ${sh.totalRows} data rows, ${sh.columns.length} columns${start ? ` (from row ${start + 1})` : ''}\n${sh.columns.map(csvCell).join(',')}\n`)) { truncated = true; break; }
+        let shown = 0;
+        for (const r of rows) { if (!push(`${r.map((c) => csvCell(String(c ?? ''))).join(',')}\n`)) { truncated = true; break; } shown++; }
+        const total = Math.min(sh.rows.length, sh.totalRows);
+        if (start + shown < sh.totalRows) { truncated = true; parts.push(`… rows ${start + shown + 1}–${sh.totalRows} not shown${total < sh.totalRows ? ' (only the first rows were parsed for reading)' : ''}.\n`); }
+        if (truncated) break;
+      }
+    } else {
+      for (const seg of extracted.segments) {
+        const label = seg.page ? `--- Page ${seg.page} ---` : seg.slide ? `--- Slide ${seg.slide} ---` : seg.section ? `--- ${seg.section} ---` : '';
+        if (!push(`${label ? `${label}\n` : ''}${seg.text}\n\n`)) { truncated = true; break; }
+      }
+    }
+    return {
+      file: { id: file.id, path: file.path, name: file.name, type: file.extension || 'other', sizeBytes: file.sizeBytes, repository: repo.name },
+      supported: extracted.supported, method: extracted.method, pages: extracted.pages,
+      sheets: extracted.sheets.map((sh) => ({ name: sh.name, columns: sh.columns, totalRows: sh.totalRows })),
+      text: parts.join(''), truncated, warnings: extracted.warnings,
+    };
+  }
+
+  /** Raw bytes for the analysis engine: owners as before, other users only for published, AI-enabled files. */
+  async function openForAnalysis(userId: string, fileId: string) {
+    try {
+      return await openDownload(userId, fileId);
+    } catch (e) {
+      if (!(e instanceof KnowledgeError) || e.status !== 404) throw e;
+      const { file } = await assistantFile(userId, fileId);
+      const { stream } = await deps.fileStore.openStream(file.storageKey, file.storageOwnerId);
+      return { file, stream };
+    }
+  }
+
   return {
+    assistantCatalog, assistantBrowse, assistantRead, openForAnalysis,
     createRepository, listRepositories, updateRepository, deleteRepository, repoFor, statistics,
     createDirectory, updateDirectory, deleteDirectory, tree, contents,
     ingest, getFile, updateFile, copyFile, deleteFile, bulk, openDownload, preview, renderImage, extractArchive, archiveListing,
