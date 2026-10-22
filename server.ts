@@ -1226,6 +1226,7 @@ ${augmentedQuery}`;
         logger.info(`[SENTIMENT] tone=${sentiment.tone} intensity=${sentiment.intensity} persona=${sentiment.suggestedPersona} user=${userId}`);
       }
 
+      let afterTools = false;
       await aiService.generalAssist({
 
         userId,
@@ -1244,16 +1245,22 @@ ${augmentedQuery}`;
           };
 
           if (event.type === 'text') {
-            emitter.send('text', { ...baseData, text: event.data.text, isThinking: event.data.isThinking });
+            // Text from the turn after tool results is a new paragraph, not a continuation of the last sentence.
+            const text = afterTools && event.data.text && !/^\s/.test(event.data.text) ? `\n\n${event.data.text}` : event.data.text;
+            afterTools = false;
+            emitter.send('text', { ...baseData, text, isThinking: event.data.isThinking });
           } else if (event.type === 'tool_call') {
+            afterTools = false;
             emitter.send('tool_call', {
               ...baseData,
+              id: event.data.id,
               name: event.data.name,
               input: event.data.input,
               status: event.data.status || 'started',
             });
           } else if (event.type === 'tool_result') {
-            emitter.send('tool_result', { ...baseData, text: event.data.output, name: event.data.name });
+            afterTools = true;
+            emitter.send('tool_result', { ...baseData, id: event.data.id, text: event.data.output, name: event.data.name, isError: Boolean(event.data.isError) });
           } else if (event.type === 'usage') {
             // Previously only logged and dropped — now also forwarded to
             // the client, since PaywallService's pricing tiers need real

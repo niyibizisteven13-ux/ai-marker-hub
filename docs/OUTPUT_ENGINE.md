@@ -233,3 +233,23 @@ Deployment:
     per-result error that says the Python engine is needed;
   - regression diagnostics (VIF, Breusch–Pagan, influence) are left out, with a warning.
 - Artifacts render in the default theme. Interactive HTML follows `prefers-color-scheme` and `data-theme`.
+
+## Frontend
+
+- **Chat activity.** `tool_call`/`tool_result` SSE events carry `id` and `isError`.
+  - `src/utils/toolSteps.ts` turns them into steps in the reply's activity line, for example "Building Excel workbook:
+    Marks ✓ Ready: Marks (XLSX, 7.4 KB)".
+  - Results written for the model are never shown to users.
+  - Text from the turn after tool results starts a new paragraph.
+- **Generated files** (`src/components/AttachmentCards.tsx`):
+  - charts and diagrams appear as image tiles with a lightbox;
+  - workbooks, documents, decks and PDFs appear as typed cards with Download;
+  - interactive HTML reports open inline or full screen in an `allow-scripts` sandbox without same-origin access;
+  - text and JSON files can be previewed.
+- **My files** (sidebar → My files, `src/components/OutputsLibrary.tsx`) lists every artifact.
+  - Filters: charts, documents, reports, analyses. There is also a title search.
+  - Each item shows its status and revision.
+  - Actions: open (charts, HTML, PDF, JSON), download, share by expiring link (copy once), stop sharing, retry failed,
+    delete.
+- **Markdown.** Inline code is detected without react-markdown's removed `inline` prop (`src/utils/markdownCode.ts`).
+  Lists and headings are styled explicitly; `@tailwindcss/typography` is not installed.

@@ -3,8 +3,9 @@ import type { ReactNode } from 'react';
 import {
   Activity, ArrowLeft, BarChart3, BookOpen, Boxes, CheckCircle2, ChevronDown, ChevronRight, Cpu, Database,
   FileText, FlaskConical, GraduationCap, Info, KeyRound, LayoutDashboard, Mail, Menu, MessageSquare, Play, Plus,
-  RefreshCw, ScrollText, Search, Send, Settings, Sparkles, Trash2, Upload, Users, X, ShieldCheck
+  RefreshCw, ScrollText, Search, Send, Settings, Sparkles, Trash2, Upload, Users, X, ShieldCheck, FolderTree
 } from 'lucide-react';
+import KnowledgeExplorer from '../components/knowledge/KnowledgeExplorer';
 import { adminApi, type AdminQualitySummary } from '../api/admin';
 import { useStore } from '../store/useStore';
 import { API_BASE_URL, getAccessToken, refreshAccessToken } from '../utils/authFetch';
@@ -196,6 +197,7 @@ function displayFeedbackReasons(value: string) {
 /* ───────────── Main Admin Component ───────────── */
 export default function AdminPage({ onBack }: { onBack: () => void }) {
   const [tab, setTab] = useState<TabId>('overview');
+  const [datasetView, setDatasetView] = useState<'repositories' | 'curations'>('repositories');
   const [env, setEnv] = useState<Env>('production');
   const [drawer, setDrawer] = useState(false);
   const [toast, setToast] = useState<{ msg: string; bad?: boolean } | null>(null);
@@ -1144,7 +1146,23 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
 
               {/* ── DATASETS TAB ── */}
               {tab === 'datasets' && (
-                inspectDataset ? (
+                <div className="space-y-6 min-w-0">
+                  <div className="inline-flex flex-wrap gap-1 rounded-2xl border border-[#263052] bg-[#0E1426] p-1" role="tablist" aria-label="Datasets view">
+                    {([
+                      ['repositories', 'Knowledge repositories', <FolderTree key="i" size={15} />],
+                      ['curations', 'Prompt-adapter datasets', <GraduationCap key="i" size={15} />],
+                    ] as const).map(([id, label, icon]) => (
+                      <button key={id} role="tab" aria-selected={datasetView === id} onClick={() => setDatasetView(id)}
+                        className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${datasetView === id ? 'bg-gradient-to-r from-[#3FA7E0] to-[#60C0F3] text-[#08101F] shadow-lg shadow-[#3FA7E0]/20' : 'text-[#9AA6C9] hover:bg-white/5 hover:text-white'}`}>
+                        {icon}{label}
+                      </button>
+                    ))}
+                  </div>
+                {datasetView === 'repositories' ? (
+                  <Section title="Knowledge Repositories" hint="Upload whole folders, browse them like a file explorer and preview any file. Everything you add is indexed so the AI can answer from it with citations.">
+                    <KnowledgeExplorer notify={notify} />
+                  </Section>
+                ) : inspectDataset ? (
                   <Section
                     title={`Dataset Examples: ${inspectDataset.name}`}
                     hint="Review extracted dataset examples, record consent and PII review, and build an inference-time prompt adapter."
@@ -1575,7 +1593,8 @@ export default function AdminPage({ onBack }: { onBack: () => void }) {
                       </div>
                     )}
                   </Section>
-                )
+                )}
+                </div>
               )}
 
               {/* ── MODELS REGISTRY TAB ── */}

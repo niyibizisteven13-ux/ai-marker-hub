@@ -40,8 +40,8 @@ button,input{font-family:inherit}
 .seg button[aria-pressed="true"]{background:var(--text);color:var(--bg)}
 .icon-btn{width:32px;height:32px;border-radius:50%;border:1px solid var(--border);background:transparent;color:var(--muted);display:flex;align-items:center;justify-content:center;cursor:pointer}
 .icon-btn:hover{color:var(--text)}
-h1{font-size:clamp(40px,min(5.6vw,8.6vh),80px);line-height:.98;letter-spacing:-.04em;font-weight:800;margin:0 0 clamp(8px,1.6vh,16px)}
-h1 em{font-style:normal;color:var(--teal)}
+.page h1{font-size:clamp(40px,min(5.6vw,8.6vh),80px);line-height:.98;letter-spacing:-.04em;font-weight:800;margin:0 0 clamp(8px,1.6vh,16px)}
+.page h1 em{font-style:normal;color:var(--teal)}
 .sub{color:var(--muted);font-size:16px;line-height:1.5;max-width:560px;margin:0 0 clamp(14px,3vh,30px)}
 .auth{width:100%;max-width:576px;display:flex;flex-direction:column;gap:clamp(8px,1.6vh,14px)}
 .pill{display:flex;align-items:center;justify-content:center;gap:10px;height:clamp(40px,6vh,52px);border-radius:999px;border:1px solid var(--btn-border);background:var(--btn-bg);color:var(--btn-text);font-size:16px;font-weight:600;cursor:pointer;transition:background .15s}

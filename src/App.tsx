@@ -51,12 +51,15 @@ import TermsPage from './pages/TermsPage';
 import PrivacyPage from './pages/PrivacyPage';
 import { authService } from './auth/authService';
 import { submitResponseFeedback } from './api/feedback';
+import { applyToolEvent } from './utils/toolSteps';
+import type { Step } from './components/ActivityLine';
 
 const AI_SCAN_ENABLED = import.meta.env.VITE_ENABLE_AI_SCAN !== 'false';
 const LoginModal = React.lazy(() => import('./components/LoginModal'));
 const UpgradeModal = React.lazy(() => import('./components/UpgradeModal'));
 const DynamicForm = React.lazy(() => import('./components/DynamicForm'));
 const AdminPage = React.lazy(() => import('./pages/AdminPage'));
+const OutputsLibrary = React.lazy(() => import('./components/OutputsLibrary'));
 
 import { Suspense } from 'react';
 const DocumentScannerLazy = React.lazy(() => import('./components/DocumentScanner'));
@@ -183,6 +186,7 @@ export default function App() {
   });
   const [upgradePageOpen, setUpgradePageOpen] = useState<boolean>(() => window.location.pathname === '/upgrade');
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+  const [libraryOpen, setLibraryOpen] = useState<boolean>(false);
   const [adminOpen, setAdminOpen] = useState<boolean>(() => window.location.pathname === '/admin');
   const [selectedProvider, setSelectedProvider] = useState<string>('gonkarouter');
   const retryPromptRef = React.useRef<{
@@ -857,6 +861,9 @@ export default function App() {
 
     const assistantId = 'msg-' + (Date.now() + 1);
     const generatedAttachments: import('./components/types').AttachmentRef[] = [];
+    // Live tool activity ("Creating chart…", "Building Excel workbook…") shown in the reply's activity line.
+    let toolSteps: Step[] = [];
+    const startedAt = Date.now();
     const pendingAssistant: Message = {
       id: assistantId,
       sender: 'assistant',
@@ -887,12 +894,20 @@ export default function App() {
     };
 
     const updateAssistant = (assistantText: string, isStreaming: boolean) => {
+      const running = isStreaming ? toolSteps.filter((step) => step.status === 'running') : [];
       const assistantMsg: Message = {
         ...pendingAssistant,
         text: assistantText,
         isStreaming,
         isWaiting: !firstTokenReceived && isStreaming,
         ...(generatedAttachments.length ? { generatedAttachments: [...generatedAttachments] } : {}),
+        ...(toolSteps.length ? {
+          steps: toolSteps.map((step) => (isStreaming || step.status !== 'running' ? step : { ...step, status: 'done' as const })),
+          isBusy: running.length > 0,
+          currentStatus: running.at(-1)?.label,
+          startedAt,
+          ...(isStreaming ? {} : { endedAt: Date.now() }),
+        } : {}),
       };
       setMessages((current) => current.map((message) => (
         message.id === assistantId ? assistantMsg : message
@@ -1000,6 +1015,10 @@ export default function App() {
           } else if (event.type === 'reset') {
             assistantText = '';
             updateAssistant(assistantText, true);
+          } else if (event.type === 'tool_call' || event.type === 'tool_result') {
+            toolSteps = applyToolEvent(toolSteps, event);
+            resetIdleTimeout();
+            updateAssistant(assistantText, true);
           } else if (event.type === 'attachment' && typeof event.id === 'string') {
             if (!generatedAttachments.some((attachment) => attachment.id === event.id)) {
               generatedAttachments.push(event as import('./components/types').AttachmentRef);
@@ -1037,6 +1056,7 @@ export default function App() {
         isStreaming: false,
         isWaiting: false,
         ...(generatedAttachments.length ? { generatedAttachments: [...generatedAttachments] } : {}),
+        ...(toolSteps.length ? { steps: toolSteps.map((step) => (step.status === 'running' ? { ...step, status: 'done' as const } : step)), startedAt, endedAt: Date.now() } : {}),
       }];
       setMessages(finalMessages);
 
@@ -1545,6 +1565,7 @@ export default function App() {
         <LeftSidebar
           activeTab={activeTab}
           setActiveTab={setActiveTab}
+          onOpenLibrary={() => setLibraryOpen(true)}
           collapsed={sidebarCollapsed}
           setCollapsed={setSidebarCollapsed}
           user={authenticatedUser}
@@ -1683,6 +1704,11 @@ export default function App() {
           />
         )}
       </Suspense>
+      {libraryOpen && (
+        <Suspense fallback={null}>
+          <OutputsLibrary onClose={() => setLibraryOpen(false)} />
+        </Suspense>
+      )}
       {settingsOpen && (
         <div className="fixed inset-0 z-[150] bg-[#FAF9F5]">
           <SettingsPage

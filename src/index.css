@@ -275,7 +275,8 @@
 @keyframes bw-breathe { 0%, 100% { scale: 0.92; } 50% { scale: 1.08; } }
 
 /* ---------- The one activity line ---------- */
-.bw-activity { margin: 2px 0 8px; }
+/* Own colour: the landing page sets a global --muted that is dark in light mode, unreadable on the dark chat. */
+.bw-activity { margin: 2px 0 8px; --bw-muted: #b4b0a8; }
 .bw-line {
   display: flex;
   align-items: center;
@@ -285,13 +286,13 @@
   padding: 2px 0;
   background: none;
   border: 0;
-  color: var(--muted, #9ca3af);
+  color: var(--bw-muted);
   font: inherit;
   font-size: 14.5px;
   text-align: left;
 }
 button.bw-line { cursor: pointer; }
-button.bw-line:hover { color: var(--text, #e5e7eb); }
+button.bw-line:hover { color: #f5f5f4; }
 .bw-line-text {
   min-width: 0;
   overflow: hidden;
@@ -302,7 +303,7 @@ button.bw-line:hover { color: var(--text, #e5e7eb); }
 @keyframes bw-rise { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 
 .bw-shimmer {
-  background: linear-gradient(90deg, var(--muted, #9ca3af) 0%, var(--muted, #9ca3af) 38%, #fff 50%, var(--muted, #9ca3af) 62%, var(--muted, #9ca3af) 100%);
+  background: linear-gradient(90deg, var(--bw-muted) 0%, var(--bw-muted) 38%, #fff 50%, var(--bw-muted) 62%, var(--bw-muted) 100%);
   background-size: 250% 100%;
   -webkit-background-clip: text;
   background-clip: text;
@@ -324,7 +325,7 @@ button.bw-line:hover { color: var(--text, #e5e7eb); }
   padding: 2px 0 2px 16px;
   border-left: 1px solid var(--line, rgba(255, 255, 255, 0.09));
   font-size: 13.5px;
-  color: var(--muted, #9ca3af);
+  color: var(--bw-muted);
 }
 .bw-detail li { display: flex; gap: 9px; align-items: flex-start; padding: 3px 0; animation: bw-rise 0.25s ease both; }
 .bw-detail-icon { display: grid; place-items: center; width: 14px; height: 14px; margin-top: 2px; flex: none; }
@@ -361,4 +362,11 @@ button.bw-line:hover { color: var(--text, #e5e7eb); }
 @media (prefers-reduced-motion: reduce) {
   .bw-spark { animation: none; }
   .bw-spark > span, .bw-shimmer, .bw-caret::after { animation-duration: 3s; }
+}
+
+/* Knowledge explorer preview panel and chat artifact cards */
+@keyframes slideIn { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes bw-rise { from { transform: translateY(6px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  [class*="animate-[slideIn"], [class*="animate-[bw-rise"] { animation: none !important; }
 }

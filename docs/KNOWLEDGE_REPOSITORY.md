@@ -177,3 +177,38 @@ The tests use synthetic files, a fake embedder and a fake OCR. Database behaviou
 - **Spreadsheets:** rows are stored in the existing spreadsheet tables and indexed as row chunks. There is no table-query retrieval yet.
 - **Duplicates:** copies of identical content in the same knowledge base are cited through the original. The duplicate check examines up to 50 files with the same hash.
 - **Permissions:** only owner or organisation, on top of the admin role. There are no per-folder grants.
+
+## Frontend: the file explorer
+
+Admin console → **Datasets & Curations** → **Knowledge repositories**. The existing prompt-adapter datasets are the
+tab's second view.
+
+The explorer is made of:
+- `src/components/knowledge/KnowledgeExplorer.tsx`, the main view;
+- `src/components/knowledge/FilePreview.tsx`, the preview panel;
+- `src/api/knowledge.ts`, the API client.
+
+What it offers:
+- **Repositories:**
+  - a switcher, plus new, rename, re-index and delete (delete asks you to type the name);
+  - storage quota;
+  - a "searchable by AI" count, and retry for failed files.
+- **Browsing:**
+  - a folder tree, breadcrumbs that collapse for deep paths, and list or grid view;
+  - sort by name, size, modified or AI status;
+  - live indexing status, updated every 3 seconds while files are processed.
+- **Uploads:**
+  - files, whole folders (keeping their structure), or drag-and-drop of folders, empty ones included;
+  - a progress tray with per-file reasons for rejected files;
+  - large folders go up in batches of 200.
+- **File operations:** new folder, rename, move (folder picker), re-index, delete, and multi-select bulk actions.
+- **Previews:**
+  - spreadsheet and CSV tables with sheet tabs and paging;
+  - PDF pages, with text on demand;
+  - Word and HTML in a script-less sandboxed frame;
+  - slides, Markdown, text and JSON;
+  - images with their OCR text;
+  - ZIP listings with "extract here".
+
+  Images and PDF pages are fetched with the bearer token.
+- **Search:** file names and contents, showing page, slide or sheet references.

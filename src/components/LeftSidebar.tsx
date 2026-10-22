@@ -9,6 +9,7 @@ import {
   GraduationCap,
   BarChart3,
   Shield,
+  FolderOpen,
 } from 'lucide-react';
 import { NavigationTab, User, ChatSession } from '../types';
 import logoUrl from '../assets/bwenge-logo.svg';
@@ -22,6 +23,8 @@ interface LeftSidebarProps {
   onOpenLoginModal: () => void;
   onOpenSettings: () => void;
   onOpenAdmin?: () => void;
+  /** Opens the "My files" library of AI-generated outputs. */
+  onOpenLibrary?: () => void;
   onLogout: () => void;
   user: User | null;
   sessions: ChatSession[];
@@ -40,6 +43,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   onOpenLoginModal = () => {},
   onOpenSettings = () => {},
   onOpenAdmin,
+  onOpenLibrary,
   onLogout = () => {},
   user = null,
   sessions = [],
@@ -161,6 +165,28 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
               </div>
             );
           })}
+
+          {user && onOpenLibrary && (
+            <div className="relative group">
+              <button
+                onClick={() => {
+                  onOpenLibrary();
+                  onCloseMobile();
+                }}
+                className={`flex items-center gap-3 px-3 py-2.5 text-[15px] lg:py-2 lg:text-sm rounded-lg transition-all duration-200 text-[#9B9B9B] hover:bg-[#222222] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D97757] focus-visible:ring-offset-2 focus-visible:ring-offset-[#1F1E1D] ${
+                  collapsed ? 'lg:w-10 lg:h-10 lg:justify-center' : 'w-full'
+                }`}
+              >
+                <FolderOpen className="h-4 w-4 shrink-0 opacity-70" />
+                <span className={`${collapsed ? 'lg:hidden' : 'block'}`}>My files</span>
+              </button>
+              {collapsed && (
+                <div className="absolute left-14 top-1/2 -translate-y-1/2 bg-neutral-900 text-white text-[11px] px-2.5 py-1.5 rounded-lg shadow-xl opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap hidden lg:block z-50 pointer-events-none font-semibold">
+                  My files
+                </div>
+              )}
+            </div>
+          )}
 
           {!collapsed && sessions.length > 0 && (
             <div className="animate-in fade-in duration-500">
