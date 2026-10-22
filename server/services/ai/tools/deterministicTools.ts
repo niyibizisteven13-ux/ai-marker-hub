@@ -52,7 +52,7 @@ export class DeterministicTools {
       return { percentChange: 0, description: 'Zero denominator or invalid values encountered; percentage change undefined.' };
     }
     const pc = ((newVal - oldVal) / Math.abs(oldVal)) * 100;
-    return { percentChange: pc, description: `${pc >= ِّف ? '+' : ''}${pc.toFixed(2)}% change` };
+    return { percentChange: pc, description: `${pc >= 0 ? '+' : ''}${pc.toFixed(2)}% change` };
   }
 
   computeRankings(items: Array<{ item: string | number; value: number }>): RankedItem[] {

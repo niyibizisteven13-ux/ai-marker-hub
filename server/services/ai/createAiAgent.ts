@@ -45,6 +45,11 @@ export interface AgentRunInput {
   maxTurns?: number;
   temperature?: number;
   maxTokens?: number;
+  /** Overrides the configured model for this run (set by the task router). */
+  model?: string;
+  /** Per-run fallback model from the routing policy; null disables fallback. */
+  fallbackModel?: string | null;
+  requestId?: string;
 }
 
 /** Single entry point for the host app: build once, call run() per message. */
@@ -69,7 +74,7 @@ export function createAiAgent(cfg: AiAgentConfig) {
               userIdHash: hashTraceIdentifier(input.userId, cfg.traceHashSecret),
               chatIdHash: input.chatId ? hashTraceIdentifier(input.chatId, cfg.traceHashSecret) : null,
               capability: input.uploads?.length ? 'D' : 'UNCLASSIFIED',
-              model: cfg.model,
+              model: input.model ?? cfg.model,
               provider: adapter.name,
               promptVersion: cfg.promptVersion ?? 'unversioned',
               toolCalls: [],
@@ -161,7 +166,7 @@ export function createAiAgent(cfg: AiAgentConfig) {
           userIdHash: hashTraceIdentifier(input.userId, cfg.traceHashSecret),
           chatIdHash: input.chatId ? hashTraceIdentifier(input.chatId, cfg.traceHashSecret) : null,
           capability,
-          model: cfg.model,
+          model: input.model ?? cfg.model,
           provider: adapter.name,
           promptVersion: cfg.promptVersion ?? 'unversioned',
           toolCalls,
@@ -186,18 +191,21 @@ export function createAiAgent(cfg: AiAgentConfig) {
 
       try {
         const result = await runtime.run({
-          system, messages, ctx, model: cfg.model, onEvent: emit,
+          system, messages, ctx, model: input.model ?? cfg.model, onEvent: emit,
           temperature: input.temperature ?? cfg.temperature,
           maxTokens: input.maxTokens ?? cfg.maxTokens,
           maxTurns: input.maxTurns,
           toolNames: input.toolNames,
+          requestId: input.requestId,
+          fallbackModel: input.fallbackModel,
           onRetry: () => { retries += 1; },
         });
         await persistTrace();
         return { ...result, fileIds: ingested.fileIds, warnings: ingested.warnings };
       } catch (error) {
         finalStatus = 'failed';
-        failureClass = 'runtime_error';
+        // Normalized provider category (e.g. PROVIDER_BUSY) when the reliability layer supplied one.
+        failureClass = (error as { category?: string })?.category ?? 'runtime_error';
         await persistTrace();
         throw error;
       }

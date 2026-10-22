@@ -12,12 +12,14 @@ ssh $VPS_USER@$VPS_HOST << 'EOF'
   cd /var/www/bwenge.space
   echo "Pulling latest changes..."
   git pull origin main
-  echo "Installing production dependencies..."
-  npm ci --omit=dev
+  echo "Installing dependencies (the build needs dev tools such as esbuild)..."
+  npm ci
   echo "Building application..."
-  npm run build || true
+  npm run build
+  echo "Applying database migrations..."
+  npx prisma migrate deploy
   echo "Reloading PM2 process..."
-  pm2 reload bwenge.space || pm2 start ecosystem.config.js
+  pm2 reload ecosystem.config.js --update-env || pm2 start ecosystem.config.js
   pm2 save
   echo "Deployment complete!"
 EOF

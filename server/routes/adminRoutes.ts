@@ -3,7 +3,8 @@ import { fileURLToPath } from 'url';
 import { prisma } from '../db.js';
 import { requireAuth, requireRole, writeAuditLog } from '../../production/auth.js';
 import { upload } from '../middleware/upload.js';
-import { AiService } from '../services/AiService.js';
+import { AiService, complexAdapter, gonkaAdapter, nisrPipeline } from '../services/AiService.js';
+import { providerMetrics } from '../services/ai/observability/providerMetrics.js';
 import { extractTextFromUpload } from '../../src/services/documentService.js';
 import { ingestDocument } from '../services/DocumentIngestionService.js';
 import { retrieveKnowledgeChunks } from '../services/KnowledgeRetrievalService.js';
@@ -3056,6 +3057,44 @@ router.get('/audit-logs', async (req, res) => {
     res.json({ success: true, data: logs });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ── AI reliability & NISR dataset administration ─────────────────────────
+router.get('/ai/provider-metrics', (_req, res) => {
+  res.json({ ...providerMetrics.snapshot(), breakers: { gonka: gonkaAdapter.breakerState(), bigTask: complexAdapter?.breakerState() ?? null } });
+});
+
+router.get('/datasets/nisr/status', async (_req, res) => {
+  try {
+    res.json(await nisrPipeline.status());
+  } catch (error: any) {
+    logger.error('[NISR] status failed', { errorType: error?.name });
+    res.status(500).json({ error: 'Could not read NISR dataset status.' });
+  }
+});
+
+let nisrReindexInFlight: Promise<unknown> | null = null;
+router.post('/datasets/nisr/reindex', async (req, res) => {
+  if (nisrReindexInFlight) return res.status(409).json({ error: 'A NISR re-index is already running.' });
+  const force = req.body?.force === true;
+  const actorId = (req as any).user?.userId;
+  const run = nisrPipeline.buildIndex({ force });
+  nisrReindexInFlight = run;
+  try {
+    const { index, rebuilt, problems } = await run;
+    const summary = {
+      indexVersion: index.indexVersion, rebuilt, builtAt: index.builtAt, records: index.records.length, passages: index.passages.length,
+      datasets: index.datasets.map((d) => ({ id: d.id, status: d.ingestion.status, error: d.ingestion.error, warnings: d.ingestion.warnings })),
+      problems,
+    };
+    await writeAuditLog(actorId, 'NISR_REINDEX', 'nisr_index', index.indexVersion, { force, rebuilt, records: summary.records, passages: summary.passages, failed: summary.datasets.filter((d) => d.status === 'failed').map((d) => d.id) });
+    res.json(summary);
+  } catch (error: any) {
+    logger.error('[NISR] reindex failed', { errorType: error?.name, message: String(error?.message).slice(0, 200) });
+    res.status(500).json({ error: 'NISR re-index failed. Check the manifest and server logs.' });
+  } finally {
+    nisrReindexInFlight = null;
   }
 });
 

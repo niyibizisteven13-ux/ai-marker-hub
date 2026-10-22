@@ -5,7 +5,7 @@ import { BWENGE_CHAT_RESPONSE_RULES, BWENGE_GENERAL_SYSTEM_PROMPT } from './prom
 import { MemoryService } from './MemoryService.js';
 import { retrieveKnowledgeChunks } from './KnowledgeRetrievalService.js';
 import { ExecutionSandbox } from './ExecutionSandbox.js';
-import { createAiAgent, FileStore, ReliableGonkaAdapter, TaskRouter, FileJobQueue, NisrIngestionPipeline, TaskClassifier, ModelPolicyManager, BudgetManager, DocumentPipeline, DeterministicTools } from './ai/index.js';
+import { createAiAgent, FileStore, OpenAICompatibleAdapter, AnthropicAdapter, loadClaudeAgentConfig, ReliableProviderAdapter, ModelDispatchAdapter, ModelPolicyManager, TaskClassifier, loadComplexProvider, loadModelPolicies, TaskRouter, FileJobQueue, NisrIngestionPipeline, isStatisticsQuery, BudgetManager, DocumentPipeline, DeterministicTools } from './ai/index.js';
 import { prisma } from '../db.js';
 import { getFileUrlSecret } from '../auth/secrets.js';
 import { extractJsonFragment, stripThinkingTags } from '../utils/textSanitizers.js';
@@ -91,34 +91,119 @@ export const fileStore = new FileStore({
   secret: fileStoreSecret,
 });
 
-export const fileJobQueue = new FileJobQueue();
+export const fileJobQueue = new FileJobQueue({
+  storageDir: process.env.JOBS_DIR ?? './data/jobs',
+  concurrency: Number(process.env.JOBS_CONCURRENCY) > 0 ? Number(process.env.JOBS_CONCURRENCY) : 2,
+  maxActivePerUser: Number(process.env.JOBS_MAX_ACTIVE_PER_USER) > 0 ? Number(process.env.JOBS_MAX_ACTIVE_PER_USER) : 5,
+  log: (event, data) => logger.info(`[jobs] ${event}`, data),
+});
 export const nisrPipeline = new NisrIngestionPipeline();
-export const taskClassifier = new TaskClassifier();
-export const modelPolicyManager = new ModelPolicyManager();
 export const budgetManager = new BudgetManager();
 export const documentPipeline = new DocumentPipeline();
 export const deterministicTools = new DeterministicTools();
 
-export const taskRouter = new TaskRouter({
-  economicalModel: process.env.GONKA_ECONOMICAL_MODEL ?? 'zai-org/GLM-5.3-Flash-Lite',
-  defaultModel: process.env.GONKA_MODEL ?? GONKA_MODELS.DEFAULT,
-  premiumModel: process.env.GONKA_PREMIUM_MODEL ?? 'zai-org/GLM-4.6-Reasoning',
+function envMs(name: string, fallback: number): number {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+// One reliability policy for every Gonka call: transient-only retries before first output,
+// Retry-After, a total deadline below the 60s proxy limit, a per-model circuit breaker and
+// an optional configured fallback. See docs/AI_RELIABILITY.md.
+const providerLog = (e: { event: string }) => {
+  if (e.event === 'provider_retry') logger.info('[AI provider]', e);
+  else logger.warn('[AI provider]', e);
+};
+const reliability = {
+  maxAttempts: envMs('AI_MAX_ATTEMPTS', 3),
+  initialBackoffMs: envMs('AI_INITIAL_BACKOFF_MS', 500),
+  maxBackoffMs: envMs('AI_MAX_BACKOFF_MS', 8_000),
+  totalDeadlineMs: envMs('AI_TOTAL_DEADLINE_MS', 45_000),
+  breakerThreshold: envMs('AI_BREAKER_THRESHOLD', 5),
+  breakerCooldownMs: envMs('AI_BREAKER_COOLDOWN_MS', 30_000),
+  log: providerLog,
+};
+const httpTimeouts = {
+  connectTimeoutMs: envMs('AI_CONNECT_TIMEOUT_MS', 15_000),
+  idleTimeoutMs: envMs('AI_IDLE_TIMEOUT_MS', 30_000),
+  requestTimeoutMs: envMs('AI_REQUEST_TIMEOUT_MS', 60_000),
+};
+
+// One reliability policy for every provider call: transient-only retries before first output,
+// Retry-After, a total deadline below the 60s proxy limit, a per-model circuit breaker and
+// an optional configured fallback. See docs/AI_RELIABILITY.md.
+export const gonkaAdapter = new ReliableProviderAdapter({
+  primary: new OpenAICompatibleAdapter({
+    name: 'GonkaRouter',
+    baseUrl: process.env.GONKA_BASE_URL ?? 'https://api.gonkarouter.io/v1',
+    apiKey: process.env.GONKA_API_KEY ?? '',
+    ...httpTimeouts,
+  }),
+  ...reliability,
 });
 
-const reliableAdapter = new ReliableGonkaAdapter({
-  name: 'GonkaRouter',
-  baseUrl: process.env.GONKA_BASE_URL ?? 'https://api.gonkarouter.io/v1',
-  apiKey: process.env.GONKA_API_KEY ?? '',
-  connectTimeoutMs: 15_000,
-  idleTimeoutMs: 30_000,
-  maxRetries: 3,
-  initialBackoffMs: 1000,
-  maxBackoffMs: 30000,
-});
+// Everyday chat stays on Gonka. Big tasks (COMPLEX, ARTIFACT_SPEC) can go to a second provider
+// (AI_COMPLEX_PROVIDER), which falls back to Gonka's complex-task model if it is unavailable.
+const complexProvider = loadComplexProvider();
+logger.info('[AI routing] big-task provider', { provider: complexProvider.config?.name ?? 'gonka', model: complexProvider.config?.model, reason: complexProvider.reason });
+export const complexAdapter = complexProvider.config
+  ? new ReliableProviderAdapter({
+    primary: new OpenAICompatibleAdapter({ name: complexProvider.config.name, baseUrl: complexProvider.config.baseUrl, apiKey: complexProvider.config.apiKey, ...httpTimeouts, requestTimeoutMs: envMs('AI_COMPLEX_REQUEST_TIMEOUT_MS', 90_000) }),
+    ...reliability,
+    fallbackAdapter: complexProvider.config.fallbackToGonka ? gonkaAdapter : undefined,
+    fallbackModel: complexProvider.config.fallbackToGonka ? loadModelPolicies(process.env, GONKA_MODELS.DEFAULT).COMPLEX.model : undefined,
+  })
+  : null;
+
+export const taskRouter = new TaskRouter(
+  new ModelPolicyManager(),
+  new TaskClassifier(),
+  (process.env.AI_MODEL_ROUTING ?? 'on').toLowerCase() !== 'off',
+  process.env.GONKA_FALLBACK_SUPPORTS_VISION === 'true',
+  complexProvider.config,
+);
+
+// Agent tasks (tool loops, rubric assessment, report interpretation) can run on Claude
+// (AI_AGENT_PROVIDER=anthropic, default model claude-haiku-5-5). Transient Claude failures fall back
+// to Gonka's standard model when CLAUDE_FALLBACK_TO_GONKA is on; refusals never fall back.
+const claudeAgent = loadClaudeAgentConfig();
+logger.info('[AI routing] agent provider', { provider: claudeAgent.config ? 'anthropic' : 'gonka', model: claudeAgent.config?.model, reason: claudeAgent.reason });
+const gonkaStandardModel = loadModelPolicies(process.env, GONKA_MODELS.DEFAULT).STANDARD.model;
+export const claudeAdapter = claudeAgent.config
+  ? new ReliableProviderAdapter({
+    primary: new AnthropicAdapter({ apiKey: claudeAgent.config.apiKey, name: 'Claude', effort: claudeAgent.config.effort, requestTimeoutMs: envMs('CLAUDE_REQUEST_TIMEOUT_MS', 120_000) }),
+    ...reliability,
+    fallbackAdapter: claudeAgent.config.fallbackToGonka ? gonkaAdapter : undefined,
+    fallbackModel: claudeAgent.config.fallbackToGonka ? gonkaStandardModel : undefined,
+  })
+  : null;
+
+const agentProvider = new ModelDispatchAdapter(
+  gonkaAdapter,
+  new Map([
+    ...(complexProvider.config && complexAdapter ? [[complexProvider.config.model, complexAdapter] as const] : []),
+    ...(claudeAgent.config && claudeAdapter ? [[claudeAgent.config.model, claudeAdapter] as const] : []),
+  ]),
+);
+
+/** Adapter + model for agent tasks: Claude when configured, otherwise Gonka's standard model. */
+export function agentTarget(): { adapter: typeof agentProvider; model: string; provider: 'anthropic' | 'gonka'; fallbackModel: string | null | undefined } {
+  return claudeAgent.config
+    ? { adapter: agentProvider, model: claudeAgent.config.model, provider: 'anthropic', fallbackModel: undefined }
+    : { adapter: agentProvider, model: gonkaStandardModel, provider: 'gonka', fallbackModel: null };
+}
+
+/** Picks model and fallback for a chat request and logs the decision (never the prompt). */
+function routeChat(prompt: string, opts: { hasImages?: boolean; hasTools?: boolean; requestId?: string }) {
+  const route = taskRouter.route({ prompt, hasFiles: opts.hasImages, hasImages: opts.hasImages, hasTools: opts.hasTools });
+  logger.info('[AI routing]', { requestId: opts.requestId, taskClass: route.taskClass, reasonCode: route.reasonCode, provider: route.provider, model: route.model, fallback: route.fallbackModel !== null });
+  return route;
+}
 
 export const bwengeAgent = createAiAgent({
-  provider: reliableAdapter,
-  runtime: { maxRetries: 3, retryDelayMs: 1000 },
+  provider: agentProvider,
+  // The adapter owns retry policy; the runtime only retries a stream that broke after partial output.
+  runtime: { maxRetries: 1, retryDelayMs: 1000 },
   model: process.env.GONKA_MODEL ?? GONKA_MODELS.DEFAULT,
   files: fileStore,
   temperature: 0.3,
@@ -138,11 +223,24 @@ export const bwengeAgent = createAiAgent({
   services: {
     knowledge: {
       async search(query, { topK, userId }) {
-        // Integrate NISR pipeline alongside knowledge retrieval
-        const nisrHits = await nisrPipeline.searchDatasets(query, topK ?? 3);
+        // NISR index is consulted only for statistics questions; a missing/broken index never blocks the knowledge base.
+        const nisrHits = isStatisticsQuery(query)
+          ? await nisrPipeline.search(query, Math.min(topK ?? 6, 6)).catch((err) => {
+            logger.warn('[NISR] search failed', { errorType: err?.name });
+            return [];
+          })
+          : [];
         const knowledgeHits = await retrieveKnowledgeChunks(query, { limit: topK, userId });
         const combined = [
-          ...nisrHits.map(n => ({ text: n.text, title: n.title, publisher: 'NISR Rwanda', year: n.period, page: 1, table: '', url: n.sourceUrl, score: n.score })),
+          ...nisrHits.map((n) => ({
+            text: `${n.text}\nReference period: ${n.citation.referencePeriod}. Source: ${n.citation.source}${n.citation.row ? ` row ${n.citation.row}` : ''}.`,
+            title: n.citation.title,
+            publisher: n.citation.organization,
+            year: Number(n.citation.publicationDate.slice(0, 4)) || undefined,
+            table: n.record ? n.record.indicator : undefined,
+            url: n.citation.sourceUrl,
+            score: n.score,
+          })),
           ...knowledgeHits.map((h: any) => ({
             text: h.chunk.text || h.text || '',
             title: h.chunk.title || h.title,
@@ -155,21 +253,6 @@ export const bwengeAgent = createAiAgent({
           }))
         ];
         return combined;
-      },
-    },
-    python: {
-      async execute(code) {
-        const r = await ExecutionSandbox.getInstance().callMcpTool('python/execute', { code });
-        if (r.error) throw new Error(r.error.message);
-        const out = r.result.output;
-        return { stdout: typeof out === 'string' ? out : JSON.stringify(out) };
-      },
-    },
-  },
-});
-          url: h.chunk.url || h.url,
-          score: h.score,
-        }));
       },
     },
     python: {
@@ -415,17 +498,24 @@ export class AiService {
     onToken: (token: string) => void; onReset?: () => void; tools?: any[];
     temperature?: number; max_tokens?: number;
     signal?: AbortSignal;
+    userId?: string; requestId?: string;
   }) {
     const uploads = options.images?.map(img => ({ type: 'image' as const, base64: img.base64, mediaType: img.mediaType }));
+    const route = routeChat(prompt, { hasImages: !!uploads?.length, requestId: options.requestId });
+    const model = options.model ?? route.model;
     await bwengeAgent.run({
-      userId: 'system',
+      userId: options.userId || 'system',
       system: options.system || BWENGE_GENERAL_SYSTEM_PROMPT,
       history: options.history,
       prompt,
       uploads,
       toolNames: [],
       temperature: options.temperature,
-      maxTokens: options.max_tokens,
+      // An explicit caller limit wins; the class cap applies only when none is given.
+      maxTokens: options.max_tokens ?? route.maxOutputTokens,
+      model,
+      fallbackModel: options.model ? null : route.fallbackModel,
+      requestId: options.requestId,
       signal: options.signal,
       onEvent: (e) => {
         if (e.type === 'text') {
@@ -446,12 +536,21 @@ export class AiService {
     onEvent: (event: { type: 'text' | 'tool_call' | 'tool_result' | 'done' | 'usage' | 'attachment' | 'sources' | 'turn_reset'; data: any }) => void;
     model?: string;
     signal?: AbortSignal;
+    requestId?: string;
   }) {
+    // options.model is ignored as before. Agent loops run on Claude when AI_AGENT_PROVIDER=anthropic;
+    // otherwise the task router picks Gonka or the big-task provider.
+    const agent = agentTarget();
+    const route = agent.provider === 'anthropic'
+      ? { model: agent.model, fallbackModel: agent.fallbackModel }
+      : routeChat(options.prompt, { hasTools: true, requestId: options.requestId });
     const r = await bwengeAgent.run({
       userId: 'system',
       system: options.system,
       history: options.history,
       prompt: options.prompt,
+      model: route.model,
+      fallbackModel: route.fallbackModel,
       onEvent: options.onEvent as any,
       signal: options.signal,
     });
@@ -468,8 +567,8 @@ export class AiService {
   }) {
     const promptText = options.prompt || (options.history?.length ? options.history[options.history.length - 1].text : '');
     const history = options.history?.slice(0, -1);
+    // options.model is an NVIDIA model id; Gonka chooses its own model via the task router.
     await this.streamGonkaChat(promptText, {
-      model: options.model,
       system: options.system,
       history,
       onToken: options.onToken,

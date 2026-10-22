@@ -20,9 +20,18 @@ import bcrypt from 'bcryptjs';
 import { PDFParse } from 'pdf-parse';
 import fs from 'fs/promises';
 import path from 'path';
+import { getTelegramTranscriber } from '../services/educationRuntime.js';
 
 const router = Router();
 const botService = TelegramBotService.getInstance();
+// Async handwriting/scan transcription (/api/documents pipeline): submit a job, notify when it settles.
+const transcriber = getTelegramTranscriber(botService);
+const wantsTranscription = (session: any, caption?: string) => session?.stagedMode === 'transcribe' || /^\/(transcribe|soma)\b/i.test(caption?.trim() ?? '');
+
+async function startTranscription(chatId: string, session: any, fileId: string, fileName: string) {
+  if (session?.stagedMode === 'transcribe') await prisma.telegramSession.update({ where: { chatId }, data: { stagedMode: null } });
+  await transcriber.submit(chatId, session?.userId, { fileId, fileName }, session?.language);
+}
 const aiService = AiService.getInstance();
 const paywallService = PaywallService.getInstance();
 const memoryService = MemoryService.getInstance();
@@ -570,12 +579,20 @@ router.post('/webhook', verifyTelegramSecret, async (req: Request, res: Response
       }
 
       if (msg.document) {
+        if (wantsTranscription(session, msg.caption)) {
+          await startTranscription(chatId, session, msg.document.file_id, msg.document.file_name || 'document.pdf');
+          return;
+        }
         await handleIncomingDocument(chatId, session, msg.document);
         return;
       }
 
       if (msg.photo && Array.isArray(msg.photo) && msg.photo.length > 0) {
         const largestPhoto = msg.photo[msg.photo.length - 1];
+        if (wantsTranscription(session, msg.caption)) {
+          await startTranscription(chatId, session, largestPhoto.file_id, 'photo.jpg');
+          return;
+        }
         await handleIncomingPhoto(chatId, session, largestPhoto.file_id, msg.caption);
         return;
       }
@@ -661,6 +678,15 @@ async function handleBotCommand(chatId: string, session: any, text: string) {
         await botService.sendMessage(chatId, welcome, {
           reply_markup: buildTelegramKeyboard(lang),
         });
+        break;
+      }
+
+      case '/transcribe':
+      case '/soma': {
+        await prisma.telegramSession.update({ where: { chatId }, data: { stagedMode: 'transcribe' } });
+        await botService.sendMessage(chatId, session.language === 'rw'
+          ? '📝 Ohereza ifoto cyangwa PDF y\'inyandiko yanditse n\'intoki. Nzayisoma, nkwereke ibice bishidikanywaho, maze nkumenyeshe birangiye.'
+          : '📝 Send a photo or PDF of the handwritten or scanned page. I will transcribe it, mark anything uncertain, and message you when it is ready.');
         break;
       }
 

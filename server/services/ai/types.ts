@@ -22,6 +22,11 @@ export interface ChatMessage {
   tool_calls?: ToolCall[];
   tool_call_id?: string;
   name?: string;
+  /**
+   * Provider-native content for an assistant turn (e.g. Claude thinking + tool_use blocks), replayed
+   * unchanged to the same provider within an agent loop. Never sent to other providers.
+   */
+  providerState?: { provider: string; content: unknown[] };
 }
 
 export interface ToolDefinition {

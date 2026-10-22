@@ -17,6 +17,10 @@ export interface RunOptions {
   /** Restrict which tools the model may use in this run. */
   toolNames?: string[];
   onRetry?: () => void;
+  /** Correlation id passed to the provider layer for logs/metrics. */
+  requestId?: string;
+  /** Per-run fallback model from the routing policy; null disables fallback. */
+  fallbackModel?: string | null;
 }
 
 export interface RuntimeConfig {
@@ -58,7 +62,7 @@ export class AgentRuntime {
     let finalText = '';
 
     for (let turn = 0; turn < maxTurns; turn++) {
-      const { text, calls } = await this.streamTurn(opts, history, defs, emit, usage);
+      const { text, calls, providerState } = await this.streamTurn(opts, history, defs, emit, usage);
       finalText = text;
 
       if (!calls.length) {
@@ -68,7 +72,7 @@ export class AgentRuntime {
         return { text, messages: history, attachments, sources, usage, hitMaxTurns: false };
       }
 
-      history.push({ role: 'assistant', content: text || null, tool_calls: calls });
+      history.push({ role: 'assistant', content: text || null, tool_calls: calls, ...(providerState ? { providerState } : {}) });
       const results = await this.runTools(calls, opts.ctx, emit);
       for (const r of results) {
         history.push({ role: 'tool', tool_call_id: r.id, name: r.name, content: r.text });
@@ -92,13 +96,14 @@ export class AgentRuntime {
     defs: ReturnType<ToolRegistry['definitions']>,
     emit: (e: AgentEvent) => void,
     usage: { input_tokens: number; output_tokens: number },
-  ): Promise<{ text: string; calls: ToolCall[] }> {
+  ): Promise<{ text: string; calls: ToolCall[]; providerState?: ChatMessage['providerState'] }> {
     for (let attempt = 0; ; attempt++) {
       const filter = new ThinkFilter();
       let text = '';
       let emitted = false;
       const calls = new Map<number, { id?: string; name: string; args: string }>();
       let turnUsage = { input: 0, output: 0 };
+      let providerState: ChatMessage['providerState'];
       try {
         const stream = this.adapter.stream({
           model: opts.model,
@@ -107,6 +112,8 @@ export class AgentRuntime {
           temperature: opts.temperature,
           maxTokens: opts.maxTokens,
           signal: opts.ctx.signal,
+          requestId: opts.requestId,
+          fallbackModel: opts.fallbackModel,
         });
         for await (const c of stream) {
           if (c.type === 'text') {
@@ -120,6 +127,8 @@ export class AgentRuntime {
             calls.set(c.index, cur);
           } else if (c.type === 'usage') {
             turnUsage = { input: c.input, output: c.output };
+          } else if (c.type === 'provider_state') {
+            providerState = { provider: c.provider, content: c.content };
           }
         }
         const tail = filter.flush();
@@ -130,7 +139,7 @@ export class AgentRuntime {
           .sort((a, b) => a[0] - b[0])
           .filter(([, v]) => v.name)
           .map(([i, v]) => ({ id: v.id || `call_${Date.now().toString(36)}_${i}`, type: 'function' as const, function: { name: v.name, arguments: v.args || '{}' } }));
-        return { text: text.trim() ? text : text, calls: list };
+        return { text: text.trim() ? text : text, calls: list, providerState };
       } catch (err) {
         if (opts.ctx.signal?.aborted) throw err;
         if (isRetryable(err) && attempt < this.cfg.maxRetries) {
