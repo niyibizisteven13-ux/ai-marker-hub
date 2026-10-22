@@ -5,7 +5,7 @@ import { BWENGE_CHAT_RESPONSE_RULES, BWENGE_GENERAL_SYSTEM_PROMPT } from './prom
 import { MemoryService } from './MemoryService.js';
 import { retrieveKnowledgeChunks } from './KnowledgeRetrievalService.js';
 import { ExecutionSandbox } from './ExecutionSandbox.js';
-import { createAiAgent, FileStore, OpenAICompatibleAdapter, ReliableProviderAdapter, TaskRouter, FileJobQueue, NisrIngestionPipeline, isStatisticsQuery, BudgetManager, DocumentPipeline, DeterministicTools } from './ai/index.js';
+import { createAiAgent, FileStore, OpenAICompatibleAdapter, ReliableProviderAdapter, ModelDispatchAdapter, ModelPolicyManager, TaskClassifier, loadComplexProvider, loadModelPolicies, TaskRouter, FileJobQueue, NisrIngestionPipeline, isStatisticsQuery, BudgetManager, DocumentPipeline, DeterministicTools } from './ai/index.js';
 import { prisma } from '../db.js';
 import { getFileUrlSecret } from '../auth/secrets.js';
 import { extractJsonFragment, stripThinkingTags } from '../utils/textSanitizers.js';
@@ -96,7 +96,6 @@ export const nisrPipeline = new NisrIngestionPipeline();
 export const budgetManager = new BudgetManager();
 export const documentPipeline = new DocumentPipeline();
 export const deterministicTools = new DeterministicTools();
-export const taskRouter = new TaskRouter();
 
 function envMs(name: string, fallback: number): number {
   const n = Number(process.env[name]);
@@ -106,29 +105,73 @@ function envMs(name: string, fallback: number): number {
 // One reliability policy for every Gonka call: transient-only retries before first output,
 // Retry-After, a total deadline below the 60s proxy limit, a per-model circuit breaker and
 // an optional configured fallback. See docs/AI_RELIABILITY.md.
-export const gonkaAdapter = new ReliableProviderAdapter({
-  primary: new OpenAICompatibleAdapter({
-    name: 'GonkaRouter',
-    baseUrl: process.env.GONKA_BASE_URL ?? 'https://api.gonkarouter.io/v1',
-    apiKey: process.env.GONKA_API_KEY ?? '',
-    connectTimeoutMs: envMs('AI_CONNECT_TIMEOUT_MS', 15_000),
-    idleTimeoutMs: envMs('AI_IDLE_TIMEOUT_MS', 30_000),
-    requestTimeoutMs: envMs('AI_REQUEST_TIMEOUT_MS', 60_000),
-  }),
+const providerLog = (e: { event: string }) => {
+  if (e.event === 'provider_retry') logger.info('[AI provider]', e);
+  else logger.warn('[AI provider]', e);
+};
+const reliability = {
   maxAttempts: envMs('AI_MAX_ATTEMPTS', 3),
   initialBackoffMs: envMs('AI_INITIAL_BACKOFF_MS', 500),
   maxBackoffMs: envMs('AI_MAX_BACKOFF_MS', 8_000),
   totalDeadlineMs: envMs('AI_TOTAL_DEADLINE_MS', 45_000),
   breakerThreshold: envMs('AI_BREAKER_THRESHOLD', 5),
   breakerCooldownMs: envMs('AI_BREAKER_COOLDOWN_MS', 30_000),
-  log: (e) => {
-    if (e.event === 'provider_retry') logger.info('[AI provider]', e);
-    else logger.warn('[AI provider]', e);
-  },
+  log: providerLog,
+};
+const httpTimeouts = {
+  connectTimeoutMs: envMs('AI_CONNECT_TIMEOUT_MS', 15_000),
+  idleTimeoutMs: envMs('AI_IDLE_TIMEOUT_MS', 30_000),
+  requestTimeoutMs: envMs('AI_REQUEST_TIMEOUT_MS', 60_000),
+};
+
+// One reliability policy for every provider call: transient-only retries before first output,
+// Retry-After, a total deadline below the 60s proxy limit, a per-model circuit breaker and
+// an optional configured fallback. See docs/AI_RELIABILITY.md.
+export const gonkaAdapter = new ReliableProviderAdapter({
+  primary: new OpenAICompatibleAdapter({
+    name: 'GonkaRouter',
+    baseUrl: process.env.GONKA_BASE_URL ?? 'https://api.gonkarouter.io/v1',
+    apiKey: process.env.GONKA_API_KEY ?? '',
+    ...httpTimeouts,
+  }),
+  ...reliability,
 });
 
+// Everyday chat stays on Gonka. Big tasks (COMPLEX, ARTIFACT_SPEC) can go to a second provider
+// (AI_COMPLEX_PROVIDER), which falls back to Gonka's complex-task model if it is unavailable.
+const complexProvider = loadComplexProvider();
+logger.info('[AI routing] big-task provider', { provider: complexProvider.config?.name ?? 'gonka', model: complexProvider.config?.model, reason: complexProvider.reason });
+export const complexAdapter = complexProvider.config
+  ? new ReliableProviderAdapter({
+    primary: new OpenAICompatibleAdapter({ name: complexProvider.config.name, baseUrl: complexProvider.config.baseUrl, apiKey: complexProvider.config.apiKey, ...httpTimeouts, requestTimeoutMs: envMs('AI_COMPLEX_REQUEST_TIMEOUT_MS', 90_000) }),
+    ...reliability,
+    fallbackAdapter: complexProvider.config.fallbackToGonka ? gonkaAdapter : undefined,
+    fallbackModel: complexProvider.config.fallbackToGonka ? loadModelPolicies(process.env, GONKA_MODELS.DEFAULT).COMPLEX.model : undefined,
+  })
+  : null;
+
+export const taskRouter = new TaskRouter(
+  new ModelPolicyManager(),
+  new TaskClassifier(),
+  (process.env.AI_MODEL_ROUTING ?? 'on').toLowerCase() !== 'off',
+  process.env.GONKA_FALLBACK_SUPPORTS_VISION === 'true',
+  complexProvider.config,
+);
+
+const agentProvider = new ModelDispatchAdapter(
+  gonkaAdapter,
+  new Map(complexProvider.config && complexAdapter ? [[complexProvider.config.model, complexAdapter]] : []),
+);
+
+/** Picks model and fallback for a chat request and logs the decision (never the prompt). */
+function routeChat(prompt: string, opts: { hasImages?: boolean; hasTools?: boolean; requestId?: string }) {
+  const route = taskRouter.route({ prompt, hasFiles: opts.hasImages, hasImages: opts.hasImages, hasTools: opts.hasTools });
+  logger.info('[AI routing]', { requestId: opts.requestId, taskClass: route.taskClass, reasonCode: route.reasonCode, provider: route.provider, model: route.model, fallback: route.fallbackModel !== null });
+  return route;
+}
+
 export const bwengeAgent = createAiAgent({
-  provider: gonkaAdapter,
+  provider: agentProvider,
   // The adapter owns retry policy; the runtime only retries a stream that broke after partial output.
   runtime: { maxRetries: 1, retryDelayMs: 1000 },
   model: process.env.GONKA_MODEL ?? GONKA_MODELS.DEFAULT,
@@ -428,9 +471,8 @@ export class AiService {
     userId?: string; requestId?: string;
   }) {
     const uploads = options.images?.map(img => ({ type: 'image' as const, base64: img.base64, mediaType: img.mediaType }));
-    const route = taskRouter.route({ prompt, hasFiles: !!uploads?.length, hasImages: !!uploads?.length });
+    const route = routeChat(prompt, { hasImages: !!uploads?.length, requestId: options.requestId });
     const model = options.model ?? route.model;
-    logger.info('[AI routing]', { requestId: options.requestId, taskClass: route.taskClass, reasonCode: route.reasonCode, model, fallback: !!route.fallbackModel });
     await bwengeAgent.run({
       userId: options.userId || 'system',
       system: options.system || BWENGE_GENERAL_SYSTEM_PROMPT,
@@ -464,12 +506,17 @@ export class AiService {
     onEvent: (event: { type: 'text' | 'tool_call' | 'tool_result' | 'done' | 'usage' | 'attachment' | 'sources' | 'turn_reset'; data: any }) => void;
     model?: string;
     signal?: AbortSignal;
+    requestId?: string;
   }) {
+    // options.model is ignored as before; the task router picks Gonka or the big-task provider.
+    const route = routeChat(options.prompt, { hasTools: true, requestId: options.requestId });
     const r = await bwengeAgent.run({
       userId: 'system',
       system: options.system,
       history: options.history,
       prompt: options.prompt,
+      model: route.model,
+      fallbackModel: route.fallbackModel,
       onEvent: options.onEvent as any,
       signal: options.signal,
     });

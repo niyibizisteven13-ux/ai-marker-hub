@@ -3,7 +3,7 @@ import { fileURLToPath } from 'url';
 import { prisma } from '../db.js';
 import { requireAuth, requireRole, writeAuditLog } from '../../production/auth.js';
 import { upload } from '../middleware/upload.js';
-import { AiService, gonkaAdapter, nisrPipeline } from '../services/AiService.js';
+import { AiService, complexAdapter, gonkaAdapter, nisrPipeline } from '../services/AiService.js';
 import { providerMetrics } from '../services/ai/observability/providerMetrics.js';
 import { extractTextFromUpload } from '../../src/services/documentService.js';
 import { ingestDocument } from '../services/DocumentIngestionService.js';
@@ -3062,7 +3062,7 @@ router.get('/audit-logs', async (req, res) => {
 
 // ── AI reliability & NISR dataset administration ─────────────────────────
 router.get('/ai/provider-metrics', (_req, res) => {
-  res.json({ ...providerMetrics.snapshot(), breakers: gonkaAdapter.breakerState() });
+  res.json({ ...providerMetrics.snapshot(), breakers: { gonka: gonkaAdapter.breakerState(), bigTask: complexAdapter?.breakerState() ?? null } });
 });
 
 router.get('/datasets/nisr/status', async (_req, res) => {

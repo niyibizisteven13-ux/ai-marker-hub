@@ -58,7 +58,17 @@ POST /api/ai/chat ─► request-id middleware (X-Request-Id)
 | COMPLEX | >1500 chars, compare/synthesize/analyze report (`LONG_OR_MULTI_SOURCE`) | `GONKA_PREMIUM_MODEL` | **never** |
 | ARTIFACT_SPEC | chart/graph/diagram/quiz/flashcards (`ARTIFACT_SPECIFICATION`) | `GONKA_PREMIUM_MODEL` | **never** |
 
-Any class model left unset uses `GONKA_MODEL`. With only `GONKA_MODEL` set, behaviour is the same as before routing existed. Invalid model ids in env are ignored. `AI_MODEL_ROUTING=off` disables classification. Per-class output caps (`AI_MAX_OUTPUT_TOKENS_{SIMPLE,STANDARD,COMPLEX}`) apply when the caller does not set its own limit. Routing currently applies to the web chat path (`streamGonkaChat`); other `bwengeAgent.run` callers use `GONKA_MODEL`.
+### Big tasks on a second provider (optional)
+
+Everyday chat always uses Gonka. Set `AI_COMPLEX_PROVIDER=deepseek` (with `DEEPSEEK_API_KEY`) or `openrouter` (with `OPENROUTER_API_KEY` and `OPENROUTER_COMPLEX_MODEL`) to send COMPLEX and ARTIFACT_SPEC requests there instead:
+
+- **Fallback:** if the big-task provider fails with a transient or model-unavailable error, the same request is answered by Gonka's complex-task model (`GONKA_PREMIUM_MODEL`, else `GONKA_MODEL`). Each request tries Gonka at most once more (bounded, no 3×3 retries). Set `AI_COMPLEX_FALLBACK_TO_GONKA=false` to fail instead. Auth and bad-request errors never fall back.
+- **Images:** requests with images stay on Gonka unless `AI_COMPLEX_SUPPORTS_VISION=true`.
+- **Scope:** routing applies to web chat (`streamGonkaChat`) and the Telegram chat agent loop (`runGonkaAgentLoop`). Grading, forms, analytics and other `sendGonkaChat` callers stay on Gonka, so student submissions are not sent to a second provider unless you extend this.
+- **Privacy:** the big-task provider receives the full prompt and chat history of those requests. Check its data terms and where it processes data before enabling it.
+- **Model id:** `DEEPSEEK_COMPLEX_MODEL` defaults to `deepseek-chat`. Confirm the current model ids in DeepSeek's docs. Big-task runs appear in metrics and `AiTrace` under that model id; the `[AI routing]` log shows `provider` per request.
+
+Any class model left unset uses `GONKA_MODEL`. With only `GONKA_MODEL` set, behaviour is the same as before routing existed. Invalid model ids in env are ignored. `AI_MODEL_ROUTING=off` disables classification. Per-class output caps (`AI_MAX_OUTPUT_TOKENS_{SIMPLE,STANDARD,COMPLEX}`) apply when the caller does not set its own limit. Routing applies to web chat and the Telegram chat agent loop; other `bwengeAgent.run` callers use `GONKA_MODEL`.
 
 `BudgetManager` (concurrency caps, monthly token quota from `AiTrace`, cost estimates from `AI_MODEL_PRICING_JSON`) is implemented and tested but **not enforced on any route yet**.
 
