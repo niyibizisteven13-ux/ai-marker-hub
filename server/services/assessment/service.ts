@@ -96,7 +96,8 @@ export function createAssessmentService(deps: AssessmentDeps) {
       throw e;
     }
     await ctx.progress('saving', 85);
-    const rec = await deps.store.create(job.ownerId, {
+    // Keyed by job id: a re-run after a crash replaces this record instead of duplicating it.
+    const rec = await deps.store.put(job.id, job.ownerId, {
       rubric: p.rubric, rubricWarnings: p.rubricWarnings, outcome, reviews: [], status: 'proposed', studentLabel: p.studentLabel, submissionSha256: p.submissionSha256,
     } as Omit<AssessmentRecord, keyof OwnedRecord>);
     const reportFileId = await renderAndStore(rec);

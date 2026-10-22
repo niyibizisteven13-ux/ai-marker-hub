@@ -5,6 +5,7 @@ import { createAssessmentService, type AssessmentRecord } from './assessment/ser
 import { OwnedRecordStore } from './storage/ownedRecordStore.js';
 import { createDocumentService, type DocumentRecord } from './documents/service.js';
 import { tesseractOcr } from './documents/ocr.js';
+import { createTelegramTranscriber, type TelegramTransport } from './documents/telegramTranscribe.js';
 import logger from '../utils/logger.js';
 
 /** Wires the statistics/report and assessment services to the shared file store, job queue and agent model. */
@@ -71,4 +72,15 @@ export async function startEducationRuntime(): Promise<void> {
   };
   void sweep();
   setInterval(sweep, 60 * 60 * 1000).unref();
+}
+
+let telegramTranscriber: ReturnType<typeof createTelegramTranscriber> | null = null;
+
+/** Telegram front end for /api/documents; registers the completion notifier once. */
+export function getTelegramTranscriber(bot: TelegramTransport) {
+  if (!telegramTranscriber) {
+    telegramTranscriber = createTelegramTranscriber({ bot, documents: documentService, queue: fileJobQueue, fileStore, baseUrl: process.env.APP_BASE_URL || process.env.APP_URL || 'https://www.bwenge.space' });
+    telegramTranscriber.register();
+  }
+  return telegramTranscriber;
 }

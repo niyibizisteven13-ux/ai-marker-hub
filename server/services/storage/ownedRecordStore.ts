@@ -37,6 +37,26 @@ export class OwnedRecordStore<T extends OwnedRecord> {
     return rec;
   }
 
+  /**
+   * Creates or replaces the record with a caller-chosen id (e.g. the job id), so a job handler that is
+   * re-run after a crash overwrites its own record instead of creating a duplicate. Refuses another owner's id.
+   */
+  async put(id: string, ownerId: string, data: Omit<T, keyof OwnedRecord>): Promise<T> {
+    if (!ID_RE.test(id)) throw new Error('invalid id');
+    let createdAt = new Date().toISOString();
+    try {
+      const existing = JSON.parse(await fs.readFile(this.file(id), 'utf8')) as T;
+      if (existing.ownerId !== ownerId) throw new Error('record belongs to another user');
+      createdAt = existing.createdAt;
+    } catch (e) {
+      if ((e as Error).message === 'record belongs to another user') throw e;
+    }
+    const now = new Date();
+    const rec = { ...data, id, ownerId, createdAt, updatedAt: now.toISOString(), expiresAt: new Date(now.getTime() + this.ttlMs).toISOString() } as T;
+    await this.write(rec);
+    return rec;
+  }
+
   async get(id: string, ownerId: string): Promise<T | null> {
     if (!ID_RE.test(id)) return null;
     try {

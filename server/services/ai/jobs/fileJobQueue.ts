@@ -92,6 +92,20 @@ export class FileJobQueue {
     };
   }
 
+  private listeners: Array<(job: FileJob) => void | Promise<void>> = [];
+
+  /** Called once whenever a job reaches completed, failed or cancelled (e.g. to notify a Telegram chat). */
+  onSettled(listener: (job: FileJob) => void | Promise<void>): () => void {
+    this.listeners.push(listener);
+    return () => { this.listeners = this.listeners.filter((l) => l !== listener); };
+  }
+
+  private emitSettled(job: FileJob) {
+    for (const l of this.listeners) {
+      Promise.resolve().then(() => l(job)).catch((err) => this.o.log?.('job_listener_failed', { id: job.id, errorType: (err as Error)?.name }));
+    }
+  }
+
   register<P, R>(type: string, handler: JobHandler<P, R>): this {
     this.handlers.set(type, handler as JobHandler);
     return this;
@@ -183,6 +197,7 @@ export class FileJobQueue {
     if (job.status === 'queued' || job.status === 'processing') {
       this.running.get(id)?.abort(new Error('cancelled'));
       await this.update(job, { status: 'cancelled', finishedAt: new Date().toISOString(), progress: { stage: 'cancelled', percent: null } });
+      this.emitSettled(job);
     }
     return job;
   }
@@ -252,6 +267,7 @@ export class FileJobQueue {
       if (job.status !== 'processing') return; // cancelled while running
       await this.update(job, { status: 'completed', result, finishedAt: new Date().toISOString(), progress: { stage: 'completed', percent: 100 } });
       this.o.log?.('job_completed', { id: job.id, type: job.type, attempts: job.attempts });
+      this.emitSettled(job);
     } catch (err) {
       if (job.status === 'cancelled') return;
       const reason = controller.signal.aborted ? controller.signal.reason : err;
@@ -269,6 +285,7 @@ export class FileJobQueue {
           status: 'failed', finishedAt: new Date().toISOString(), progress: { stage: 'failed', percent: null },
           error: je ? { code: je.code, message: je.message } : { code: 'INTERNAL_ERROR', message: 'The job failed unexpectedly. Try again; if it keeps failing, contact support with the job id.' },
         });
+        this.emitSettled(job);
       }
     } finally {
       clearTimeout(timer);

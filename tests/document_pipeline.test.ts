@@ -50,7 +50,7 @@ function fakeVision(pageJson: RecognizedPage | ((req: ProviderRequest) => Recogn
 
 const el = (over: Partial<RecognizedPage['elements'][number]>) => ({
   id: 'e1', type: 'paragraph' as const, text: 'x', latex: null, table: null, region: { x0: 50, y0: 50, x1: 950, y1: 120 },
-  legibility: 'clear' as const, uncertainSpans: [], crossedOut: false, handwritten: true, ...over,
+  legibility: 'clear' as const, uncertainSpans: [], crossedOut: false, handwritten: true, language: 'en', ...over,
 });
 
 test('CER/WER follow (S + D + I) / N, with the breakdown', () => {

@@ -130,8 +130,14 @@ export async function preprocessPage(input: Buffer, opts: { maxSide?: number; de
   const pm = await sharp(gray).metadata();
 
   // Quality signals.
-  const stats = await sharp(original).grayscale().stats();
-  const contrast = Math.round(stats.channels[0].stdev * 10) / 10;
+  // Ink-vs-paper contrast on the original (before normalisation): mean of paper pixels minus mean of ink
+  // pixels, split by Otsu. Global standard deviation would mostly measure how much of the page is ink.
+  const o = await sharp(original).grayscale().resize({ width: 800, fit: 'inside', withoutEnlargement: true }).removeAlpha().extractChannel(0).raw().toBuffer();
+  const ov = new Uint8Array(o.buffer, o.byteOffset, o.length);
+  const othr = otsuThreshold(ov);
+  let inkSum = 0, inkN = 0, paperSum = 0, paperN = 0;
+  for (const v of ov) { if (v < othr) { inkSum += v; inkN++; } else { paperSum += v; paperN++; } }
+  const contrast = inkN && paperN ? Math.round((paperSum / paperN - inkSum / inkN) * 10) / 10 : 0;
   const lap = await sharp(original).grayscale().resize({ width: 1200, fit: 'inside', withoutEnlargement: true })
     .convolve({ width: 3, height: 3, kernel: [0, 1, 0, 1, -4, 1, 0, 1, 0], offset: 128 }).stats();
   const sharpness = Math.round(lap.channels[0].stdev ** 2);
@@ -140,8 +146,10 @@ export async function preprocessPage(input: Buffer, opts: { maxSide?: number; de
   const warnings: string[] = [];
   if (estimatedDpi !== null && estimatedDpi < 150) warnings.push(`Low resolution (about ${estimatedDpi} DPI for an A4 page). Small or faint handwriting may be misread; rescan at 300 DPI or more if possible.`);
   if (Math.min(w0, h0) < 600) warnings.push(`Very small image (${w0}×${h0}px). Recognition will be unreliable.`);
-  if (contrast < 25) warnings.push('Low contrast between ink and paper.');
-  if (sharpness < 60) warnings.push('The image looks blurred (low edge sharpness); characters may be ambiguous.');
+  if (inkN / Math.max(1, ov.length) < 0.0005) warnings.push('The page looks blank.');
+  else if (contrast < 60) warnings.push(`Low contrast between ink and paper (${contrast} grey levels).`);
+  // Edge strength scales with contrast, so blur is only judged when ink and paper are well separated.
+  if (contrast >= 40 && sharpness < 60) warnings.push('The image looks blurred (low edge sharpness); characters may be ambiguous.');
   if (Math.abs(deskew) >= 10) warnings.push(`The page was strongly tilted (${deskew.toFixed(1)}°).`);
 
   return {

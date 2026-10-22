@@ -184,9 +184,10 @@ documentsRouter.post('/', uploadOne('file'), async (req, res) => {
       languageHint: z.string().trim().max(80).optional(),
       forceRecognition: z.enum(['true', 'false']).optional(),
       crossCheck: z.enum(['true', 'false']).optional(),
+      tiling: z.enum(['auto', 'always', 'off']).optional(),
     }).strict().parse(req.body ?? {});
     const { job, duplicate } = await documentService.submit(userIdOf(req), req.file, {
-      languageHint: opts.languageHint, forceRecognition: opts.forceRecognition === 'true', crossCheck: opts.crossCheck !== 'false',
+      languageHint: opts.languageHint, forceRecognition: opts.forceRecognition === 'true', crossCheck: opts.crossCheck !== 'false', tiling: opts.tiling as 'auto' | 'always' | 'off' | undefined,
     });
     res.status(duplicate ? 200 : 202).json({ job: FileJobQueue.publicView(job), duplicate, links: { status: `/api/jobs/${job.id}`, result: `/api/jobs/${job.id}/result` }, requestId: rid(req) });
   } catch (err) { fail(req, res, err); }
@@ -223,8 +224,8 @@ documentsRouter.post('/:id/corrections', async (req, res) => {
 
 documentsRouter.post('/:id/ask', async (req, res) => {
   try {
-    const body = z.object({ question: z.string().trim().min(1).max(2000), language: z.enum(['English', 'Kinyarwanda', 'French']).optional() }).strict().parse(req.body ?? {});
-    const answer = await documentService.ask(userIdOf(req), req.params.id, body.question as string, body.language);
+    const body = z.object({ question: z.string().trim().min(1).max(2000), language: z.enum(['English', 'Kinyarwanda', 'French']).optional(), supportCheck: z.boolean().optional() }).strict().parse(req.body ?? {});
+    const answer = await documentService.ask(userIdOf(req), req.params.id, body.question as string, body.language, undefined, body.supportCheck !== false);
     if (!answer) return res.status(404).json({ code: 'NOT_FOUND', error: 'Not found or expired.', requestId: rid(req) });
     res.json({ ...answer, requestId: rid(req) });
   } catch (err) { fail(req, res, err); }

@@ -32,7 +32,7 @@ export interface DocumentDeps {
   maxPages?: number;
 }
 
-interface DocumentJobPayload { sourceFileId: string; name: string; languageHint?: string; forceRecognition?: boolean; crossCheck?: boolean }
+interface DocumentJobPayload { sourceFileId: string; name: string; languageHint?: string; forceRecognition?: boolean; crossCheck?: boolean; tiling?: 'auto' | 'always' | 'off'; notifyTelegramChatId?: string }
 
 const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -107,12 +107,13 @@ export function createDocumentService(deps: DocumentDeps) {
       result = await processDocument(data, p.name, {
         adapter: vision.adapter, model: vision.model, fallbackModel: vision.fallbackModel, ocr: deps.ocr,
         storeCrop: async (png, name) => (await deps.fileStore.put({ userId: job.ownerId, name, mime: 'image/png', kind: 'image', data: png, ttlMs: RETENTION_MS })).id,
-      }, { languageHint: p.languageHint, forceRecognition: p.forceRecognition, crossCheck: p.crossCheck, maxPages: deps.maxPages, signal: ctx.signal, progress: ctx.progress });
+      }, { languageHint: p.languageHint, forceRecognition: p.forceRecognition, crossCheck: p.crossCheck, tiling: p.tiling, maxPages: deps.maxPages, signal: ctx.signal, progress: ctx.progress });
     } catch (e) {
       mapAiError(e);
     }
     await ctx.progress('saving', 95);
-    const rec = await deps.store.create(job.ownerId, { result: result!, corrections: [], sourceFileId: p.sourceFileId } as Omit<DocumentRecord, keyof OwnedRecord>);
+    // Keyed by job id: a re-run after a crash replaces this record instead of duplicating it.
+    const rec = await deps.store.put(job.id, job.ownerId, { result: result!, corrections: [], sourceFileId: p.sourceFileId } as Omit<DocumentRecord, keyof OwnedRecord>);
     const reportFileId = await buildReport(rec);
     await deps.store.update(rec.id, job.ownerId, (r) => { r.reportFileId = reportFileId; });
     return { documentId: rec.id, reportFileId, pages: result!.pages.length, needsReview: result!.needsReview, usage: result!.usage };
@@ -120,7 +121,7 @@ export function createDocumentService(deps: DocumentDeps) {
 
   deps.queue.register<DocumentJobPayload, unknown>('document.process', runJob);
 
-  async function submit(userId: string, file: { originalname: string; mimetype?: string; buffer: Buffer }, opts: { languageHint?: string; forceRecognition?: boolean; crossCheck?: boolean }) {
+  async function submit(userId: string, file: { originalname: string; mimetype?: string; buffer: Buffer }, opts: { languageHint?: string; forceRecognition?: boolean; crossCheck?: boolean; tiling?: 'auto' | 'always' | 'off'; notifyTelegramChatId?: string }) {
     if (!deps.vision()) throw new JobError('VISION_MODEL_UNAVAILABLE', 'Handwriting recognition needs a vision-capable model. Set AI_AGENT_PROVIDER=anthropic (Claude) or DOC_VISION_GONKA=true if your Gonka model accepts images.');
     // Validate format and page count before queueing.
     try {
@@ -134,7 +135,8 @@ export function createDocumentService(deps: DocumentDeps) {
     const meta = await deps.fileStore.put({ userId, name: file.originalname.replace(/[^\w.\- ]/g, '_').slice(0, 120) || 'upload', mime: isPdf ? 'application/pdf' : (file.mimetype || 'application/octet-stream'), kind: isPdf ? 'pdf' : 'image', data: file.buffer, ttlMs: RETENTION_MS });
     const res = await deps.queue.submit<DocumentJobPayload>({
       type: 'document.process', ownerId: userId,
-      idempotencyKey: createHash('sha256').update(JSON.stringify({ sha, opts })).digest('hex').slice(0, 32),
+      // Same owner + same content hash + same options = same job (the queue scopes keys to the owner).
+      idempotencyKey: createHash('sha256').update(JSON.stringify({ sha, opts: { ...opts, notifyTelegramChatId: undefined } })).digest('hex').slice(0, 32),
       payload: { sourceFileId: meta.id, name: file.originalname, ...opts },
     });
     if (res.duplicate) await deps.fileStore.delete(meta.id, userId).catch(() => {});
@@ -154,12 +156,12 @@ export function createDocumentService(deps: DocumentDeps) {
     return deps.store.update(id, userId, (r) => { r.reportFileId = reportFileId; });
   }
 
-  async function ask(userId: string, id: string, question: string, language?: string, signal?: AbortSignal) {
+  async function ask(userId: string, id: string, question: string, language?: string, signal?: AbortSignal, supportCheck = true) {
     const rec = await deps.store.get(id, userId);
     if (!rec) return null;
     const agent = deps.agent();
     try {
-      return await answerFromDocument(agent.adapter, agent.model, rec.result, rec.corrections, question, { language, signal, fallbackModel: agent.fallbackModel });
+      return await answerFromDocument(agent.adapter, agent.model, rec.result, rec.corrections, question, { language, signal, fallbackModel: agent.fallbackModel, supportCheck });
     } catch (e) {
       mapAiError(e);
     }
