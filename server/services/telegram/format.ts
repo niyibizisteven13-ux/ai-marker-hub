@@ -2,8 +2,9 @@
  * Markdown (as the AI writes it) → Telegram HTML. Telegram supports only a small tag set
  * (b, i, u, s, code, pre, a, blockquote), so headings become bold lines, lists get bullets, tables become
  * aligned monospace blocks, and everything else is escaped. Long answers are split at block boundaries
- * so every message is valid HTML on its own.
+ * so every message is valid HTML on its own. LaTeX maths becomes readable symbols (Telegram renders none).
  */
+import { displayMath, inlineMath } from './math.js';
 
 export const MESSAGE_LIMIT = 4096;
 export const CAPTION_LIMIT = 1024;
@@ -15,6 +16,8 @@ export const escAttr = (s: string) => esc(s).replace(/"/g, '&quot;');
 function inline(src: string): string {
   const codes: string[] = [];
   let s = src.replace(/`([^`\n]+)`/g, (_, c) => `\u0000${codes.push(`<code>${esc(c)}</code>`) - 1}\u0000`);
+  // Maths is converted and protected like code, so its ^, _ and * are not read as formatting.
+  s = inlineMath(s, (m) => `\u0000${codes.push(esc(m)) - 1}\u0000`);
   const links: string[] = [];
   // App links ("/upgrade", "/exams/…") become absolute: Telegram only opens full URLs.
   const appBase = (process.env.APP_BASE_URL || 'https://www.bwenge.space').replace(/\/$/, '');
@@ -51,9 +54,20 @@ function blocks(md: string): string[] {
       continue;
     }
     if (!line.trim()) { i++; continue; }
+    const open = /^\s*(\$\$|\\\[)/.exec(line);
+    if (open) {
+      // Display maths: from the opening $$ (or \[) to the closing one, possibly on the same line.
+      const close = open[1] === '$$' ? '$$' : '\\]';
+      const start = i;
+      const rest = line.trim().slice(open[1].length);
+      if (!rest.includes(close)) { i++; while (i < lines.length && !lines[i].includes(close)) i++; }
+      out.push(lines.slice(start, Math.min(i + 1, lines.length)).join('\n'));
+      i++;
+      continue;
+    }
     const start = i;
     const isTable = /^\s*\|.*\|\s*$/.test(line);
-    while (i < lines.length && lines[i].trim() && !/^\s*```/.test(lines[i]) && (/^\s*\|.*\|\s*$/.test(lines[i]) === isTable)) i++;
+    while (i < lines.length && lines[i].trim() && !/^\s*```/.test(lines[i]) && (i === start || !/^\s*(\$\$|\\\[)/.test(lines[i])) && (/^\s*\|.*\|\s*$/.test(lines[i]) === isTable)) i++;
     out.push(lines.slice(start, i).join('\n'));
   }
   return out;
@@ -62,6 +76,8 @@ function blocks(md: string): string[] {
 export function blockToHtml(block: string): string {
   const fence = /^\s*```([\w+-]*)\n([\s\S]*?)(?:\n\s*```)?\s*$/.exec(block);
   if (fence) return `<pre>${fence[1] ? `<code class="language-${escAttr(fence[1])}">` : ''}${esc(fence[2])}${fence[1] ? '</code>' : ''}</pre>`;
+  const math = displayMath(block);
+  if (math !== null) return `<pre>${esc(math)}</pre>`;
   const lines = block.split('\n');
   if (lines.every((l) => /^\s*\|.*\|\s*$/.test(l)) && lines.length >= 2) return table(lines);
   if (lines.every((l) => /^\s*>/.test(l))) return `<blockquote>${lines.map((l) => inline(l.replace(/^\s*>\s?/, ''))).join('\n')}</blockquote>`;
