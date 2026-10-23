@@ -15,6 +15,11 @@ need_root
 [[ -n $PRIMARY_IP ]] || die "Set PRIMARY_IP to this server's private network address (Hetzner Console → Networks)."
 ip -4 addr | grep -q "inet $PRIMARY_IP/" || die "$PRIMARY_IP is not an address of this server. Attach the server to the private network first."
 systemctl cat "$SERVICE" >/dev/null 2>&1 || die "The $SERVICE service was not found."
+# The load-balancing step writes nginx configuration. On a server whose site is served by Caddy it would put a
+# second web server on ports 80/443, so stop here (see docs/SCALING.md, "Caddy").
+if systemctl is-active caddy >/dev/null 2>&1 && ! systemctl is-active nginx >/dev/null 2>&1; then
+  die "This server serves the site with Caddy, not nginx. The multi-server setup currently configures nginx only; see docs/SCALING.md (Caddy) before adding servers."
+fi
 
 ENV_FILE=$(env_file)
 PORT=$(app_port)

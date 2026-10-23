@@ -86,6 +86,29 @@ systemctl start nexus
 ```
 For a brand-new empty database without a dump (a test environment), use `scripts/db-bootstrap-empty.sh`.
 
+## Caddy
+
+The production server serves the site with **Caddy** (automatic HTTPS), not nginx. The scripts above configure
+nginx, so `setup-primary.sh` refuses to run while Caddy is the active web server. Before adding servers, either
+move the site to nginx, or add the same load balancing to the Caddyfile:
+
+```
+bwenge.space {
+    @primary path /api/telegram/* /api/billing/momo/callback* /api/payments/momo/callback* /api/admin/live* /scanner.html /scan.html
+    reverse_proxy @primary 127.0.0.1:5000
+    reverse_proxy 127.0.0.1:5000 10.0.0.3:5000 10.0.0.4:5000 {
+        lb_policy ip_hash
+        health_uri /api/health
+        fail_duration 10s
+    }
+}
+www.bwenge.space {
+    redir https://bwenge.space{uri} permanent
+}
+```
+
+On one server nothing needs to change: Redis, server roles and the cluster scripts stay unused.
+
 ## Limits of this setup
 - The primary holds the database, Redis and the files, so it is the single point of failure. If it is lost,
   restore it from the backups. The next step up is a managed PostgreSQL with a standby, and S3-compatible
