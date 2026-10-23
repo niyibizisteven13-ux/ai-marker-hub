@@ -91,7 +91,7 @@ export const chatSchema = z.object({
   surfaceId: z.string().max(100).optional(),
 }).strict();
 
-export const validate = (schema: z.ZodObject<any, any> | z.ZodEffects<any>) => (req: Request, res: Response, next: NextFunction) => {
+export const validate = (schema: z.ZodType) => (req: Request, res: Response, next: NextFunction) => {
   try {
     schema.parse(req.body);
     next();
@@ -99,7 +99,7 @@ export const validate = (schema: z.ZodObject<any, any> | z.ZodEffects<any>) => (
     if (error instanceof ZodError) {
       return res.status(400).json({
         error: 'Validation failed',
-        details: error.errors.map(e => ({ path: e.path, message: e.message })),
+        details: error.issues.map(e => ({ path: e.path, message: e.message })),
       });
     }
     next(error);

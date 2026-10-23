@@ -28,7 +28,7 @@ export const analysisInputSchema = z.object({
   operations: z.array(operationSchema).min(1).max(20),
   filters: z.array(filterSchema).max(20).optional(),
   /** Units per column, carried into tables, charts and reports (e.g. { "income": "RWF" }). */
-  units: z.record(z.string().max(40)).optional(),
+  units: z.record(z.string(), z.string().max(40)).optional(),
 }).strict();
 export type AnalysisInput = z.infer<typeof analysisInputSchema>;
 
