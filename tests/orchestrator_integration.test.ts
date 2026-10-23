@@ -18,7 +18,7 @@ test('Orchestrator Convergence Detection', async () => {
   assert.strictEqual(isLooped, true, 'Should detect infinite loop after 3 stagnant iterations');
 });
 
-test('Supervisor Session Lifecycle', async () => {
+test('Supervisor Session Lifecycle', { skip: !process.env.DATABASE_URL && 'needs PostgreSQL (DATABASE_URL); CI provides it' }, async () => {
   const supervisor = SupervisorService.getInstance();
 
   // 1. Create a dummy user for testing

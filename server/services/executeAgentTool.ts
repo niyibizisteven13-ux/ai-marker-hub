@@ -42,7 +42,7 @@ export async function executeAgentTool(projectId: string, name: string, input: a
     case 'list_files': {
       const p = sandboxPath(input.path || '.');
       const entries = await sandbox.files.list(p);
-      return entries.map(e => e.isDir ? `${e.name}/` : e.name).join('\n');
+      return entries.map(e => (String(e.type) === 'dir' ? `${e.name}/` : e.name)).join('\n');
     }
     case 'run_command': {
       const result = await sandbox.commands.run(input.command, {
@@ -93,7 +93,7 @@ export async function executeAgentTool(projectId: string, name: string, input: a
           workbook.eachSheet((sheet) => {
             output += `Sheet: ${sheet.name}\n`;
             sheet.eachRow((row) => {
-              output += row.values.join(' | ') + '\n';
+              output += (row.values as unknown[]).slice(1).join(' | ') + '\n';
             });
             output += '\n';
           });

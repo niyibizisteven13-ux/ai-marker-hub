@@ -15,6 +15,17 @@ export default defineConfig(() => {
       rollupOptions: {
         // scanner.html: the document scanner opened from the Telegram bot (Mini App).
         input: { main: path.resolve(__dirname, 'index.html'), scanner: path.resolve(__dirname, 'scanner.html') },
+        // Libraries in their own files: they change rarely, so browsers keep them cached between releases.
+        output: {
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return undefined;
+            if (/node_modules\/(react|react-dom|scheduler)\//.test(id)) return 'vendor-react';
+            if (/node_modules\/(react-markdown|remark-|rehype-|micromark|mdast-|hast-|unified|unist-|vfile|katex|property-information|space-separated|comma-separated|decode-named|character-|html-url|trim-lines|devlop|bail|is-plain-obj|trough|zwitch|ccount|markdown-table|longest-streak|estree-|style-to)/.test(id)) return 'vendor-markdown';
+            if (/node_modules\/(motion|framer-motion|motion-dom|motion-utils)\//.test(id)) return 'vendor-motion';
+            if (/node_modules\/lucide-react\//.test(id)) return 'vendor-icons';
+            return undefined;
+          },
+        },
       },
     },
     server: {

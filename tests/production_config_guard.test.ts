@@ -7,11 +7,12 @@ const repoRoot = path.resolve(import.meta.dirname, '..');
 
 test('production config defaults are not SQLite and include required infrastructure settings', () => {
   const schema = fs.readFileSync(path.join(repoRoot, 'prisma/schema.prisma'), 'utf8');
-  const compose = fs.readFileSync(path.join(repoRoot, 'docker-compose.yml'), 'utf8');
+  const server = fs.readFileSync(path.join(repoRoot, 'server.ts'), 'utf8');
+  const db = fs.readFileSync(path.join(repoRoot, 'server/db.ts'), 'utf8');
   const envExample = fs.readFileSync(path.join(repoRoot, '.env.example'), 'utf8');
 
   assert.match(schema, /provider\s*=\s*"postgresql"/i, 'Prisma datasource should not use SQLite.');
-  assert.match(compose, /postgres:/i, 'Docker compose should include a Postgres service.');
-  assert.match(compose, /DATABASE_URL=postgresql:/i, 'Compose should define a PostgreSQL database URL.');
-  assert.match(envExample, /DATABASE_URL="postgresql:/i, 'Env example should document Postgres, not SQLite.');
+  assert.match(server, /DATABASE_URL must use PostgreSQL in production/, 'Production startup must refuse a non-PostgreSQL database.');
+  assert.match(db, /mockFallbackAllowed = process\.env\.NODE_ENV !== 'production'/, 'Production must never fall back to the local JSON store.');
+  assert.match(envExample, /DATABASE_URL="?postgresql:/i, 'Env example should document Postgres, not SQLite.');
 });

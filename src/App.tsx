@@ -29,7 +29,6 @@ import {
 import { TopNavbar } from './components/TopNavbar';
 import { LeftSidebar } from './components/LeftSidebar';
 import { CenterWorkspace } from './components/CenterWorkspace';
-import SettingsPage from './pages/SettingsPage';
 import UpgradeSheet from './components/UpgradeSheet';
 import RightChatSidebar from './components/RightChatSidebar';
 import { SidebarResultsPanel } from './components/SidebarResultsPanel';
@@ -45,20 +44,28 @@ import { MobileSheet } from './components/MobileSheet';
 import { useIsMobile } from './hooks/useIsMobile';
 import { useVisualViewportHeight } from './hooks/useVisualViewportHeight';
 import { Menu, X, Plus, Sparkles } from 'lucide-react';
-import UpgradePage from './pages/UpgradePage';
-import ExamReviewPage from './pages/ExamReviewPage';
-import FormStudioPage from './pages/FormStudioPage';
-import ModelPage from './pages/ModelPage';
-import LearnPage from './pages/LearnPage';
 import LandingPage from './pages/LandingPage';
-import TermsPage from './pages/TermsPage';
-import PrivacyPage from './pages/PrivacyPage';
 import { authService } from './auth/authService';
 import { submitResponseFeedback } from './api/feedback';
 import { applyStatusEvent, applyToolEvent } from './utils/toolSteps';
 import type { Step } from './components/ActivityLine';
 
 const AI_SCAN_ENABLED = import.meta.env.VITE_ENABLE_AI_SCAN !== 'false';
+/** A page loaded only when it is opened, with a quiet placeholder while it arrives. */
+function lazyPage<P extends object>(load: () => Promise<{ default: React.ComponentType<P> }>) {
+  const Inner = React.lazy(load);
+  return function LazyPage(props: P) {
+    return <Suspense fallback={<div className="min-h-[100dvh] bg-[#141413]" aria-busy="true" />}><Inner {...(props as any)} /></Suspense>;
+  };
+}
+const SettingsPage = lazyPage(() => import('./pages/SettingsPage'));
+const UpgradePage = lazyPage(() => import('./pages/UpgradePage'));
+const ExamReviewPage = lazyPage(() => import('./pages/ExamReviewPage'));
+const FormStudioPage = lazyPage(() => import('./pages/FormStudioPage'));
+const ModelPage = lazyPage(() => import('./pages/ModelPage'));
+const LearnPage = lazyPage(() => import('./pages/LearnPage'));
+const TermsPage = lazyPage(() => import('./pages/TermsPage'));
+const PrivacyPage = lazyPage(() => import('./pages/PrivacyPage'));
 const LoginModal = React.lazy(() => import('./components/LoginModal'));
 const UpgradeModal = React.lazy(() => import('./components/UpgradeModal'));
 const DynamicForm = React.lazy(() => import('./components/DynamicForm'));
@@ -814,13 +821,8 @@ export default function App() {
         percentage: awarded !== undefined ? Math.round((awarded / max) * 100) : undefined,
         overallFeedback: p.aiFeedback || p.aiSummary || '',
         answers: [
-          {
-            questionId: 'q1',
-            extractedText: p.extractedText || 'Scanned answer page',
-            confidence: 0.94,
-            awardedMarks: awarded,
-            feedback: p.aiFeedback || '',
-          },
+          // The review screen shows questionNumber and answerText; the scan's mark and feedback are on the script.
+          { questionId: 'q1', questionNumber: '1', answerText: p.extractedText || 'Scanned answer page' },
         ],
       };
     });

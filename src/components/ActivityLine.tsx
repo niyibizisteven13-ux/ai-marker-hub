@@ -11,6 +11,27 @@ export interface Step {
   summary?: string;
 }
 
+/** Where a streamed reply is. */
+export type Phase = "idle" | "thinking" | "streaming" | "done" | "error" | "stopped";
+
+/** A file the assistant made during a reply. */
+export interface GeneratedFile {
+  id: string;
+  name: string;
+  url: string;
+  mime?: string;
+}
+
+/** One server-sent event of the /api/chat stream (server/routes/chatSseRoutes.ts). */
+export type StreamEvent =
+  | { type: "status"; label: string }
+  | { type: "text_delta"; text: string }
+  | { type: "tool_start"; id: string; name: string; label: string }
+  | { type: "tool_end"; id: string; ok: boolean; summary?: string }
+  | { type: "file_created"; id: string; name: string; url: string; mime?: string }
+  | { type: "error"; message: string }
+  | { type: "done" };
+
 interface Props {
   steps: Step[];
   /** The live line from the server. Undefined means "working, nothing to say yet": the spark shows alone. */

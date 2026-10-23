@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AiService } from '../server/services/AiService.js';
+
+// The provider adapter reads its settings once, when the AI service loads; set them before loading it.
+process.env.GONKA_API_KEY = 'test-gonka-key';
+process.env.GONKA_BASE_URL = 'https://gonka.test/v1';
+process.env.GONKA_MODEL = 'test-model';
+const { AiService } = await import('../server/services/AiService.js');
 
 test('GonkaRouter streams response deltas and keeps request context', async () => {
   const originalApiKey = process.env.GONKA_API_KEY;
@@ -17,7 +22,7 @@ test('GonkaRouter streams response deltas and keeps request context', async () =
     assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer test-gonka-key');
 
     const body = JSON.parse(String(init?.body));
-    assert.equal(body.stream, false);
+    assert.equal(body.stream, true, 'answers stream so the user sees progress');
     assert.equal(body.model, 'test-model');
     assert.deepEqual(body.messages.slice(1), [
       { role: 'assistant', content: 'Earlier answer' },

@@ -216,9 +216,14 @@ export class FileJobQueue {
     return removed;
   }
 
+  /** Writes the new state to disk first, then shows it in memory: a reader never sees a state a crash could lose. */
   private async update(job: FileJob, patch: Partial<FileJob>) {
-    Object.assign(job, patch, { updatedAt: new Date().toISOString() });
-    await this.persist(job);
+    const next = { ...job, ...patch, updatedAt: new Date().toISOString() };
+    await this.persist(next);
+    // A cancel (or another final state) recorded while this write was in flight wins over a non-final update.
+    const final = (s: JobStatus) => s === 'completed' || s === 'failed' || s === 'cancelled';
+    if (final(job.status) && patch.status !== undefined && !final(patch.status)) { await this.persist(job); return; }
+    Object.assign(job, next);
   }
 
   private async persist(job: FileJob): Promise<void> {
