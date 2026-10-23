@@ -18,7 +18,7 @@ const MARK_SCHEMA = {
       type: 'array',
       items: {
         type: 'object', additionalProperties: false,
-        required: ['questionId', 'answerFound', 'evidenceElementIds', 'evidenceQuotes', 'path', 'level', 'holisticMarks', 'criterionResults', 'feedback', 'lostMarks', 'readingConcern', 'mappingConcern', 'rubricConcern'],
+        required: ['questionId', 'answerFound', 'evidenceElementIds', 'evidenceQuotes', 'path', 'level', 'holisticMarks', 'criterionResults', 'feedback', 'lostMarks', 'correction', 'confidence', 'readingConcern', 'mappingConcern', 'rubricConcern'],
         properties: {
           questionId: { type: 'string' },
           answerFound: { type: 'boolean' },
@@ -30,6 +30,8 @@ const MARK_SCHEMA = {
           criterionResults: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['criterionId', 'awardedMarks', 'reason'], properties: { criterionId: { type: 'string' }, awardedMarks: { type: 'number' }, reason: { type: 'string' } } } },
           feedback: { type: 'string' },
           lostMarks: { type: 'string' },
+          correction: { type: ['string', 'null'] },
+          confidence: { type: 'number' },
           readingConcern: { type: ['string', 'null'] },
           mappingConcern: { type: ['string', 'null'] },
           rubricConcern: { type: ['string', 'null'] },
@@ -42,7 +44,7 @@ const MARK_SCHEMA = {
 interface ModelMark {
   questionId: string; answerFound: boolean; evidenceElementIds: string[]; evidenceQuotes: Array<{ elementId: string; quote: string }>;
   path: string | null; level: string | null; holisticMarks: number | null; criterionResults: Array<{ criterionId: string; awardedMarks: number; reason: string }>;
-  feedback: string; lostMarks: string; readingConcern: string | null; mappingConcern: string | null; rubricConcern: string | null;
+  feedback: string; lostMarks: string; correction?: string | null; confidence?: number; readingConcern: string | null; mappingConcern: string | null; rubricConcern: string | null;
 }
 
 const SYSTEM = `You are an experienced examiner marking one candidate's script against the official marking scheme.
@@ -59,6 +61,8 @@ Marking rules:
 - Cite the element ids you relied on and short quotes copied exactly from them.
 - If the answer is missing or unreadable, set answerFound accordingly and award 0 for what is absent.
 - feedback: one or two examiner-style sentences. lostMarks: what earned no credit and why, or "" if full marks.
+- correction: when marks were lost, the short correct working or answer a teacher would write in red under the answer (at most 60 characters, e.g. "Area = 7 x 5 = 35 cm²"); null when full marks or when no short correction fits.
+- confidence: your confidence from 0 to 1 that these marks are what an experienced examiner would award, considering how clearly you could read the answer and how clearly the scheme applies.
 - Use mappingConcern when you are not sure which question some work belongs to, rubricConcern when the scheme is ambiguous for this answer.
 - Do not add up totals.`;
 
@@ -92,6 +96,23 @@ function transcriptLine(e: MatchedElement, numberOf: Map<string, string>): strin
 }
 
 const norm = (s: string) => s.normalize('NFKC').toLowerCase().replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/\s+/g, ' ').trim();
+
+/**
+ * Confidence in a question's mark: the marker's own estimate, capped by what the checks found. A high-severity
+ * flag caps it at 0.4, a medium one at 0.7, marks without a verified quote at 0.5, and no valid mark is 0.
+ */
+export function markConfidence(model: number | undefined, flags: ReviewFlag[], awarded: number | null, quoteVerified: boolean): AiQuestionMark['confidence'] {
+  const basis: string[] = [];
+  let score = typeof model === 'number' && Number.isFinite(model) ? Math.min(1, Math.max(0, model)) : 0.75;
+  basis.push(typeof model === 'number' ? `marker estimate ${Math.round(score * 100)}%` : 'no marker estimate (default 75%)');
+  const cap = (limit: number, why: string) => { if (score > limit) { score = limit; basis.push(why); } };
+  if (awarded === null) cap(0, 'no valid mark');
+  if (flags.some((f) => f.severity === 'high')) cap(0.4, `needs review: ${flags.filter((f) => f.severity === 'high').map((f) => f.code.replace(/_/g, ' ')).slice(0, 2).join(', ')}`);
+  else if (flags.length) cap(0.7, `check: ${flags.map((f) => f.code.replace(/_/g, ' ')).slice(0, 2).join(', ')}`);
+  if ((awarded ?? 0) > 0 && !quoteVerified) cap(0.5, 'no quote matches the script');
+  score = Math.round(score * 100) / 100;
+  return { level: score >= 0.8 ? 'high' : score >= 0.55 ? 'medium' : 'low', score, basis };
+}
 
 /** Deterministic validation of the model's proposal for one question. Exported for tests. */
 export function finalizeQuestion(q: SchemeQuestion, allowHalf: boolean, m: ModelMark | undefined, match: MatchResult, meta: { runId: string; schemeVersion: number; model: string }): AiQuestionMark {
@@ -167,9 +188,16 @@ export function finalizeQuestion(q: SchemeQuestion, allowHalf: boolean, m: Model
     if (!flags.some((x) => x.code === f.code)) flags.push(f);
   }
 
+  const full = awarded !== null && awarded >= q.maxMarks;
+  // The record a "why" answer is read from: the answer as read, the scheme line behind each mark, the reason, the confidence.
+  const rubricOf = new Map((q.marking === 'holistic' ? [] : (pathCriteria(q, path) ?? q.criteria)).map((c) => [c.id, c.description]));
+  for (const c of criterionResults) { const line = rubricOf.get(c.criterionId); if (line) c.rubric = line.slice(0, 400); }
+  const answerAsRead = used.length ? [...used].sort((a, b) => a.page - b.page || a.region.y0 - b.region.y0).map((e) => e.text).join('\n').slice(0, 2000) : '';
+  const correction = !full && typeof m.correction === 'string' && m.correction.trim() ? m.correction.trim().replace(/\s+/g, ' ').slice(0, 80) : null;
   return {
-    ...base, awardedMarks: awarded, criterionResults, path, level, feedback: m.feedback.slice(0, 1200), lostMarks: (awarded !== null && awarded >= q.maxMarks) ? '' : m.lostMarks.slice(0, 1200),
+    ...base, awardedMarks: awarded, criterionResults, path, level, feedback: m.feedback.slice(0, 1200), lostMarks: full ? '' : m.lostMarks.slice(0, 1200),
     answerFound: m.answerFound, evidenceElementIds: evidenceIds, evidenceQuotes, reviewFlags: flags,
+    answerAsRead, correction, confidence: markConfidence(m.confidence, flags, awarded, evidenceQuotes.some((x) => x.verified)),
   };
 }
 

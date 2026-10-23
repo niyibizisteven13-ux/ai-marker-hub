@@ -46,6 +46,7 @@ import { useIsMobile } from './hooks/useIsMobile';
 import { useVisualViewportHeight } from './hooks/useVisualViewportHeight';
 import { Menu, X, Plus, Sparkles } from 'lucide-react';
 import UpgradePage from './pages/UpgradePage';
+import ExamReviewPage from './pages/ExamReviewPage';
 import LandingPage from './pages/LandingPage';
 import TermsPage from './pages/TermsPage';
 import PrivacyPage from './pages/PrivacyPage';
@@ -1425,6 +1426,10 @@ export default function App() {
     window.dispatchEvent(new Event('bwenge:usage'));
     closeUpgradePage();
   };
+
+  if (authenticatedUser && /^\/exams(\/|$)/.test(window.location.pathname)) {
+    return <ExamReviewPage onBack={() => { window.history.pushState({}, '', '/'); window.location.reload(); }} />;
+  }
 
   if (upgradePageOpen && !authenticatedUser && authStatus === 'anonymous') {
     return (

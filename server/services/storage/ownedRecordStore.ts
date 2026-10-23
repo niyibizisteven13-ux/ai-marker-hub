@@ -83,6 +83,20 @@ export class OwnedRecordStore<T extends OwnedRecord> {
     return true;
   }
 
+  /** The owner's unexpired records, newest first (scans the directory; fine for per-user lists of modest size). */
+  async list(ownerId: string, limit = 50): Promise<T[]> {
+    let names: string[] = [];
+    try { names = await fs.readdir(this.dir); } catch { return []; }
+    const out: T[] = [];
+    for (const n of names.filter((x) => x.endsWith('.json'))) {
+      try {
+        const rec = JSON.parse(await fs.readFile(path.join(this.dir, n), 'utf8')) as T;
+        if (rec.ownerId === ownerId && Date.parse(rec.expiresAt) >= Date.now()) out.push(rec);
+      } catch { /* skip unreadable */ }
+    }
+    return out.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, limit);
+  }
+
   async purgeExpired(): Promise<number> {
     let removed = 0;
     let names: string[] = [];

@@ -1,8 +1,9 @@
 import sharp from 'sharp';
-import { PDFArray, PDFDict, PDFDocument, PDFName, StandardFonts, degrees, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
+import { LineCapStyle, PDFArray, PDFDict, PDFDocument, PDFName, StandardFonts, degrees, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import type { DocumentResult } from '../documents/pipeline.js';
 import { loadPages } from '../documents/pages.js';
-import { regionPointToPdf, viewedSize, type PdfBox } from './pdfGeometry.js';
+import { viewedSize, viewedToPdf, type PdfBox } from './pdfGeometry.js';
+import { computeLayout, GAP, LABEL_CHAR, NOTE_CHAR, SYMBOL, type MarkSymbol } from './layout.js';
 import type { CandidateSummary } from './results.js';
 import type { MarkingScheme } from './scheme.js';
 import type { CandidateResult } from './types.js';
@@ -14,7 +15,7 @@ import { effectiveMarks, openFlags } from './results.js';
  * pages are appended. Answers that cannot be located reliably are reported on the summary page only.
  */
 
-const GREEN = rgb(0.09, 0.55, 0.24), RED = rgb(0.8, 0.12, 0.12), AMBER = rgb(0.85, 0.5, 0.0), ORANGE = rgb(0.93, 0.42, 0.0), INK = rgb(0.12, 0.12, 0.14), GREY = rgb(0.45, 0.45, 0.5);
+const GREEN = rgb(0.09, 0.55, 0.24), RED = rgb(0.84, 0.11, 0.09), AMBER = rgb(0.85, 0.5, 0.0), ORANGE = rgb(0.93, 0.42, 0.0), INK = rgb(0.12, 0.12, 0.14), GREY = rgb(0.45, 0.45, 0.5);
 
 /** Standard PDF fonts only cover WinAnsi; replace other characters with readable ASCII. */
 const TRANSLIT: Record<string, string> = { '×': 'x', '÷': '/', '−': '-', '–': '-', '—': '-', '≤': '<=', '≥': '>=', '≠': '!=', '≈': '~', '→': '->', '√': 'sqrt', '∞': 'inf', 'π': 'pi', 'θ': 'theta', 'λ': 'lambda', 'α': 'alpha', 'β': 'beta', 'Δ': 'Delta', '∫': 'int', '…': '...', '‘': "'", '’': "'", '“': '"', '”': '"', '•': '-' };
@@ -97,24 +98,23 @@ async function sourcePages(original: Buffer, fileName: string, maxPages: number)
   return { doc: await imagesToPdf(pages.map((p) => p.image)), rebuilt: true };
 }
 
-function drawSymbol(page: PDFPage, kind: 'full' | 'partial' | 'zero' | 'review', x: number, y: number, size: number, rot: number) {
-  // Draws in a local, upright frame at (x, y) rotated with the page so the mark reads correctly.
+function drawSymbol(page: PDFPage, kind: MarkSymbol | 'review', x: number, y: number, size: number, rot: number) {
+  // Draws in a local, upright frame at (x, y) = bottom-left, rotated with the page so the mark reads correctly.
   const a = (rot * Math.PI) / 180;
   const P = (u: number, v: number) => ({ x: x + u * Math.cos(a) - v * Math.sin(a), y: y + u * Math.sin(a) + v * Math.cos(a) });
-  const line = (u1: number, v1: number, u2: number, v2: number, color: ReturnType<typeof rgb>) => page.drawLine({ start: P(u1, v1), end: P(u2, v2), thickness: 1.8, color });
+  const line = (u1: number, v1: number, u2: number, v2: number, color = RED) => page.drawLine({ start: P(u1, v1), end: P(u2, v2), thickness: Math.max(1.4, size / 8), color, lineCap: LineCapStyle.Round });
   const s = size;
-  if (kind === 'full' || kind === 'partial') {
-    const color = kind === 'full' ? GREEN : AMBER;
-    line(0, s * 0.45, s * 0.35, s * 0.1, color);
-    line(s * 0.35, s * 0.1, s, s * 0.9, color);
-    // Partial credit: a tick with a short bar across its long stroke (distinct from a red cross).
-    if (kind === 'partial') line(s * 0.48, s * 0.5, s * 0.9, s * 0.5, color);
-  } else if (kind === 'zero') {
-    line(0, 0, s, s, RED);
-    line(0, s, s, 0, RED);
+  if (kind === 'tick' || kind === 'half') {
+    line(0, s * 0.45, s * 0.35, s * 0.08);
+    line(s * 0.35, s * 0.08, s, s * 0.95);
+    // Part credit for a step: a short bar across the tick's long stroke.
+    if (kind === 'half') line(s * 0.45, s * 0.62, s * 0.92, s * 0.38);
+  } else if (kind === 'cross') {
+    line(s * 0.08, s * 0.08, s * 0.92, s * 0.92);
+    line(s * 0.08, s * 0.92, s * 0.92, s * 0.08);
   } else {
     const c = P(s / 2, s / 2);
-    page.drawCircle({ x: c.x, y: c.y, size: s / 2, borderColor: ORANGE, borderWidth: 1.4 });
+    page.drawCircle({ x: c.x, y: c.y, size: s / 2, borderColor: ORANGE, borderWidth: 1.2 });
   }
 }
 
@@ -127,6 +127,8 @@ export interface AnnotateInput {
   scheme: MarkingScheme;
   meta: { examTitle: string; examId: string; runId: string; resultRevision: number; generatedAt: string };
   maxPages?: number;
+  /** Released by the teacher: no draft label and no review "?" marks. */
+  released?: boolean;
 }
 
 export interface AnnotateOutput { pdf: Buffer; placed: number; summaryOnly: string[]; rebuilt: boolean }
@@ -135,70 +137,63 @@ export async function annotateScript(input: AnnotateInput): Promise<AnnotateOutp
   const { doc: out, rebuilt } = await sourcePages(input.original, input.fileName, input.maxPages ?? 50);
   const font = await out.embedFont(StandardFonts.Helvetica);
   const bold = await out.embedFont(StandardFonts.HelveticaBold);
+  const italic = await out.embedFont(StandardFonts.HelveticaOblique);
   const pages = out.getPages();
-  const docPages = new Map(input.doc.pages.map((p) => [p.page, p]));
-  const summaryOnly: string[] = [];
+  const layout = computeLayout(input.doc, input.result, input.summary);
+  const summaryOnly = layout.items.filter((it) => it.kind === 'mark' && !it.placed && !it.hidden && it.label).map((it) => it.number!);
   let placed = 0;
-  // Vertical bands already used by marks, per page and side (in 0–1000 page units), so marks never overlap.
-  const used = new Map<string, Array<[number, number]>>();
 
-  for (const q of input.result.questions) {
-    const marks = effectiveMarks(q);
-    const ids = q.ai?.evidenceElementIds.length ? q.ai.evidenceElementIds : q.mappedElementIds;
-    // Locate the answer: the first page with reliably placed, uncrossed evidence.
-    let target: { page: number; x0: number; y0: number; x1: number; y1: number } | null = null;
-    for (const p of input.doc.pages) {
-      const els = p.elements.filter((e) => ids.includes(e.id) && !e.crossedOut && e.checks.region === 'ok' && p.source === 'recognition');
-      if (!els.length) continue;
-      target = { page: p.page, x0: Math.min(...els.map((e) => e.region.x0)), y0: Math.min(...els.map((e) => e.region.y0)), x1: Math.max(...els.map((e) => e.region.x1)), y1: Math.max(...els.map((e) => e.region.y1)) };
-      break;
-    }
-    const page = target ? pages[target.page - 1] : undefined;
-    const dp = target ? docPages.get(target.page) : undefined;
-    if (!target || !page || !dp || marks === null) { summaryOnly.push(q.number); continue; }
-    const side = target.x1 <= 880 ? 'right' : target.x0 >= 120 ? 'left' : null;
-    if (!side) { summaryOnly.push(q.number); continue; }
-
+  for (const it of layout.items) {
+    if (!it.placed || it.hidden) continue;
+    const page = pages[it.page - 1];
+    if (!page) continue;
     const crop = page.getCropBox();
     const box: PdfBox = { x: crop.x, y: crop.y, width: crop.width, height: crop.height };
     const rot = page.getRotation().angle;
-    const g = { width: dp.width, height: dp.height, deskewDegrees: dp.deskewDegrees };
     const vs = viewedSize(box, rot);
-    const size = Math.max(10, Math.min(16, vs.width / 40));
-    const unit = 1000 / vs.height;
-    const markH = size * 1.3 * unit;
-    const noteText = q.ai?.lostMarks && marks < q.maxMarks ? q.ai.lostMarks : '';
-    const bands = used.get(`${target.page}:${side}`) ?? [];
-    const free = (top: number, h: number) => bands.every(([a, b]) => top + h <= a || top >= b);
-    let anchorY = Math.min(target.y0 + 30, (target.y0 + target.y1) / 2);
-    // Move below any earlier mark on the same side; give up the margin note before moving far from the answer.
-    while (!free(anchorY - markH * 0.8, markH) && anchorY < target.y1 + 3 * markH) anchorY += markH * 0.5;
-    const noteH = (3 * 8 + 4) * unit;
-    const noteFits = !!noteText && free(anchorY + markH * 0.2, noteH);
-    bands.push([anchorY - markH * 0.8, anchorY + markH * 0.2 + (noteFits ? noteH : 0)]);
-    used.set(`${target.page}:${side}`, bands);
-    const anchorX = side === 'right' ? Math.min(target.x1 + 18, 1000 - (size * 7.5 * 1000) / vs.width) : Math.max(8, target.x0 - (size * 6 * 1000) / vs.width);
-    const at = regionPointToPdf(anchorX, anchorY, g, box, rot);
-    const kind = marks >= q.maxMarks ? 'full' : marks <= 0 ? 'zero' : 'partial';
-    drawSymbol(page, kind, at.x, at.y, size, rot);
     const a = (rot * Math.PI) / 180;
-    const off = (u: number, v: number) => ({ x: at.x + u * Math.cos(a) - v * Math.sin(a), y: at.y + u * Math.sin(a) + v * Math.cos(a) });
-    const label = pdfSafe(`${marks}/${q.maxMarks}`);
-    const color = kind === 'full' ? GREEN : kind === 'zero' ? RED : AMBER;
-    page.drawText(label, { ...off(size * 1.2, size * 0.15), size: size * 0.85, font: bold, color, rotate: degrees(rot) });
-    if (openFlags(q).length) {
-      const rx = size * 1.3 + bold.widthOfTextAtSize(label, size * 0.85);
-      drawSymbol(page, 'review', off(rx, 0).x, off(rx, 0).y, size * 0.8, rot);
-      page.drawText('?', { ...off(rx + size * 0.27, size * 0.18), size: size * 0.6, font: bold, color: ORANGE, rotate: degrees(rot) });
+    const at = (fx: number, fy: number) => viewedToPdf(Math.min(1, Math.max(0, fx)), Math.min(1, Math.max(0, fy)), box, rot);
+    const off = (p: { x: number; y: number }, u: number, v: number) => ({ x: p.x + u * Math.cos(a) - v * Math.sin(a), y: p.y + u * Math.sin(a) + v * Math.cos(a) });
+
+    if (it.kind === 'mark') {
+      const size = Math.min(18, Math.max(8, SYMBOL * vs.width));
+      // Anchor: left edge, vertical centre → bottom-left of the first symbol.
+      const origin = at(it.fx, it.fy + size / vs.height / 2);
+      (it.symbols ?? []).forEach((sym, i) => {
+        const p = off(origin, i * (SYMBOL + GAP) * vs.width, 0);
+        drawSymbol(page, sym, p.x, p.y, size, rot);
+      });
+      const fs = Math.min(16, Math.max(7.5, (LABEL_CHAR / 0.56) * vs.width));
+      const lx = (it.symbols?.length ?? 0) * (SYMBOL + GAP) * vs.width + size * 0.3;
+      page.drawText(pdfSafe(it.label ?? ''), { ...off(origin, lx, size * 0.18), size: fs, font: bold, color: RED, rotate: degrees(rot) });
+      if (it.flagged && !input.released) {
+        const rx = lx + bold.widthOfTextAtSize(pdfSafe(it.label ?? ''), fs) + 4;
+        const q = off(origin, rx, size * 0.1);
+        drawSymbol(page, 'review', q.x, q.y, size * 0.8, rot);
+        page.drawText('?', { ...off(origin, rx + size * 0.25, size * 0.25), size: size * 0.6, font: bold, color: ORANGE, rotate: degrees(rot) });
+      }
+      placed++;
+    } else if (it.kind === 'correction') {
+      const fs = Math.min(14, Math.max(8, (NOTE_CHAR / 0.5) * vs.width));
+      const origin = at(it.fx, it.fy + (fs * 0.35) / vs.height);
+      page.drawText(pdfSafe(it.text ?? ''), { ...origin, size: fs, font: italic, color: RED, rotate: degrees(rot) });
+    } else {
+      const label = pdfSafe(it.label ?? '');
+      const fs = Math.min(18, Math.max(9, 0.03 * vs.width));
+      const c = at(it.fx, it.fy);
+      const rx = Math.max((it.w / 2) * vs.width, bold.widthOfTextAtSize(label, fs) / 2 + 8);
+      const ry = Math.max((it.h / 2) * vs.height, fs * 0.85);
+      page.drawEllipse({ x: c.x, y: c.y, xScale: rx, yScale: ry, borderColor: RED, borderWidth: 1.8, rotate: degrees(rot) });
+      page.drawText(label, { ...off(c, -bold.widthOfTextAtSize(label, fs) / 2, -fs * 0.35), size: fs, font: bold, color: RED, rotate: degrees(rot) });
     }
-    // A short note only where the margin has room; the full explanation is on the summary page.
-    const marginPts = side === 'right' ? ((1000 - target.x1 - 18) / 1000) * vs.width : ((target.x0 - 8) / 1000) * vs.width;
-    const note = noteFits ? noteText : '';
-    if (note && marginPts >= 70) {
-      const lines = wrap(note, font, 6.5, Math.min(marginPts - 6, 160), 3);
-      lines.forEach((l, i) => page.drawText(l, { ...off(0, -size * 0.6 - 8 * (i + 1)), size: 6.5, font, color: GREY, rotate: degrees(rot) }));
-    }
-    placed++;
+  }
+
+  if (!input.released && pages[0]) {
+    const p0 = pages[0];
+    const crop = p0.getCropBox();
+    const box: PdfBox = { x: crop.x, y: crop.y, width: crop.width, height: crop.height };
+    const rot = p0.getRotation().angle;
+    p0.drawText('DRAFT - for teacher review, not released', { ...viewedToPdf(0.02, 0.988, box, rot), size: 7, font, color: GREY, rotate: degrees(rot) });
   }
 
   // Summary pages (appended; source pages are untouched apart from margin marks).
@@ -210,7 +205,7 @@ export async function annotateScript(input: AnnotateInput): Promise<AnnotateOutp
   const s = input.summary;
   text('Bwenge.AI marking summary', M, 15, bold);
   y -= 18;
-  const statusLine = s.status === 'user_confirmed' ? 'Confirmed by the user' : s.status === 'user_corrected' ? 'Includes user corrections; other marks are AI-proposed' : s.status === 'needs_review' ? 'PROVISIONAL - items need review' : 'PROVISIONAL - AI-proposed, not examiner-certified';
+  const statusLine = input.released ? 'Released by the teacher' : s.status === 'user_confirmed' ? 'Confirmed by the user' : s.status === 'user_corrected' ? 'Includes user corrections; other marks are AI-proposed' : s.status === 'needs_review' ? 'PROVISIONAL - items need review' : 'PROVISIONAL - AI-proposed, not examiner-certified';
   text(statusLine, M, 9.5, bold, s.status === 'needs_review' ? ORANGE : GREY);
   y -= 16;
   for (const [k, v] of [
@@ -223,7 +218,7 @@ export async function annotateScript(input: AnnotateInput): Promise<AnnotateOutp
   y -= 14;
   for (const q of s.questions) {
     const rq = input.result.questions.find((x) => x.questionId === q.questionId);
-    const fb = [rq?.override ? `Examiner override: ${rq.override.reason}` : '', rq?.ai?.feedback ?? '', rq?.ai?.lostMarks ? `Lost marks: ${rq.ai.lostMarks}` : '', ...q.flags.map((f) => `Check: ${f.detail}`)].filter(Boolean).join('\n');
+    const fb = [rq?.override ? `Examiner override: ${rq.override.reason}` : '', rq?.ai?.feedback ?? '', rq?.ai?.lostMarks ? `Lost marks: ${rq.ai.lostMarks}` : '', rq?.ai?.correction && (q.marks ?? 0) < q.maxMarks ? `Correction: ${rq.ai.correction}` : '', ...(input.released ? [] : q.flags.map((f) => `Check: ${f.detail}`))].filter(Boolean).join('\n');
     const lines = wrap(fb || (q.marks === null ? 'Not marked yet.' : ''), font, 8, W - 2 * M - 120, 14);
     ensure(16 + lines.length * 10);
     const color = q.outcome === 'full' ? GREEN : q.outcome === 'zero' ? RED : q.outcome === 'partial' ? AMBER : ORANGE;
@@ -237,7 +232,7 @@ export async function annotateScript(input: AnnotateInput): Promise<AnnotateOutp
   }
   ensure(30);
   y -= 6;
-  for (const l of wrap('AI-assisted marking against the official scheme. Marks are proposals until a teacher confirms them; questions marked "Check" need attention. Original pages are unchanged apart from the margin marks.', font, 7.5, W - 2 * M, 4)) { text(l, M, 7.5, font, GREY); y -= 9; }
+  for (const l of wrap('AI-assisted marking against the official scheme. Marks are proposals until a teacher confirms them; questions marked "Check" need attention. The original scan is unchanged; this marked copy is a new file.', font, 7.5, W - 2 * M, 4)) { text(l, M, 7.5, font, GREY); y -= 9; }
 
   out.setTitle(pdfSafe(`Marked script ${s.candidateId} - ${input.meta.examTitle}`));
   out.setSubject(pdfSafe(`exam ${input.meta.examId}; run ${input.meta.runId}; revision ${input.meta.resultRevision}`));

@@ -16,7 +16,9 @@ import { createDocumentService, type DocumentRecord } from '../server/services/d
 import { loadPages } from '../server/services/documents/pages.js';
 import { changedQuestions, questionKey, validateScheme, type MarkingSchemeInput } from '../server/services/exams/scheme.js';
 import { matchAnswers, readLabel } from '../server/services/exams/matching.js';
-import { finalizeQuestion } from '../server/services/exams/marking.js';
+import { finalizeQuestion, markConfidence } from '../server/services/exams/marking.js';
+import { computeLayout, symbolsFor } from '../server/services/exams/layout.js';
+import { PDFParse } from 'pdf-parse';
 import { classStatistics, effectiveMarks, questionStatus, summarizeCandidate } from '../server/services/exams/results.js';
 import { processedToViewed, viewedToPdf } from '../server/services/exams/pdfGeometry.js';
 import { cellText } from '../server/services/exams/workbook.js';
@@ -340,11 +342,11 @@ const adapter: ProviderAdapter = {
             const ev = right ?? find('= 5')!;
             return { questionId: 'Q1', answerFound: true, evidenceElementIds: [ev.id], evidenceQuotes: [{ elementId: ev.id, quote: ev.text }], path: null, level: null, holisticMarks: null,
               criterionResults: [{ criterionId: cs[0], awardedMarks: 1, reason: 'Subtracted 2' }, { criterionId: cs[1], awardedMarks: right ? 2 : 0, reason: right ? 'Correct' : 'Arithmetic error' }],
-              feedback: right ? 'Correct.' : 'Correct method, arithmetic slip.', lostMarks: right ? '' : '6 - 2 is 4, not 5.', readingConcern: null, mappingConcern: null, rubricConcern: null };
+              feedback: right ? 'Correct.' : 'Correct method, arithmetic slip.', lostMarks: right ? '' : '6 - 2 is 4, not 5.', correction: right ? null : 'x = 6 - 2 = 4', confidence: right ? 0.95 : 0.85, readingConcern: null, mappingConcern: null, rubricConcern: null };
           }
           const ev = find('= 15')!;
           return { questionId: q, answerFound: true, evidenceElementIds: [ev.id], evidenceQuotes: [{ elementId: ev.id, quote: '3 x 5 = 15' }], path: null, level: null, holisticMarks: null,
-            criterionResults: [{ criterionId: cs[0], awardedMarks: 2, reason: 'Correct area' }], feedback: 'Correct.', lostMarks: '', readingConcern: null, mappingConcern: null, rubricConcern: null };
+            criterionResults: [{ criterionId: cs[0], awardedMarks: 2, reason: 'Correct area' }], feedback: 'Correct.', lostMarks: '', correction: null, confidence: 0.9, readingConcern: null, mappingConcern: null, rubricConcern: null };
         }),
       };
     } else if (sys.startsWith('You map a teacher')) {
@@ -553,4 +555,130 @@ test('chat: ambiguous scheme files are kept and resolved by the reply, not guess
   const r2 = await chat.handle(user, 'file 2', []);
   assert.match(r2!.text, /1 candidate script registered: C001 ← C001\.pdf/);
   assert.match(r2!.text, /2 questions, 5 marks in total/);
+});
+
+// ── Red marks on the candidate's page, the saved record, teacher review and release ─────────────────
+
+const crit = (id: string, awarded: number, max: number, rubric: string) => ({ criterionId: id, awardedMarks: awarded, maxMarks: max, reason: awarded >= max ? 'Correct' : 'Wrong value', rubric });
+
+test('layout: one tick or cross per step in the right margin, level with the answer, never on the writing', () => {
+  // Page 1: question 3 (wrong, with a correction) and question 4 (two steps: fraction right, decimal wrong).
+  const doc = docOf([[
+    { id: 'e1', text: '3) area = 7 x 5' }, { id: 'e2', text: '= 30 cm2' },
+    { id: 'e3', text: '4) 3/4 = 0.75 ... 3/4' }, { id: 'e4', text: '= 0.34' },
+  ]]);
+  const ai = (over: Partial<NonNullable<QuestionResult['ai']>>) => ({ runId: 'r', schemeVersion: 1, awardedMarks: 0, criterionResults: [], path: null, level: null, feedback: '', lostMarks: '', answerFound: true, evidenceElementIds: [], evidenceQuotes: [], reviewFlags: [], model: 'm', at: '', ...over });
+  const result: CandidateResult = {
+    submissionId: 's', candidateId: 'C1', runId: 'r', schemeVersion: 1, updatedAt: 't', usage: { input: 0, output: 0 },
+    questions: [
+      { questionId: 'Q3', number: '3', maxMarks: 2, override: null, confirmed: null, mappedElementIds: [], mappingFlags: [], history: [],
+        ai: ai({ awardedMarks: 0, criterionResults: [crit('Q3-A', 0, 2, 'Area = 35 cm2')], evidenceElementIds: ['p1-e1', 'p1-e2'], correction: '7 x 5 = 35 cm2' }) },
+      { questionId: 'Q4', number: '4', maxMarks: 4, override: null, confirmed: null, mappedElementIds: [], mappingFlags: [], history: [],
+        ai: ai({ awardedMarks: 2, criterionResults: [crit('Q4-A', 2, 2, 'Fraction 3/4'), crit('Q4-B', 0, 2, 'Decimal 0.75')], evidenceElementIds: ['p1-e3', 'p1-e4'] }) },
+    ],
+  };
+  const { items } = computeLayout(doc, result, { total: 2, maxTotal: 6 });
+  const q3 = items.find((i) => i.id === 'Q3:mark')!, q4 = items.find((i) => i.id === 'Q4:mark')!;
+  assert.deepEqual(q3.symbols, ['cross']);
+  assert.deepEqual(q4.symbols, ['tick', 'cross'], 'each step gets its own mark');
+  assert.equal(q4.label, '2/4');
+  const rightEdge = 0.6; // writing ends at x1 = 600/1000 in docOf
+  for (const it of [q3, q4]) {
+    assert.ok(it.placed);
+    assert.ok(it.fx >= rightEdge, 'in the margin, right of every line of writing');
+    assert.ok(it.fx + it.w <= 0.99);
+  }
+  // Level with the end of each answer: e2 spans y 0.14–0.18, e4 spans 0.26–0.30.
+  assert.ok(q3.fy > 0.14 && q3.fy < 0.2, `Q3 level with its last line (${q3.fy})`);
+  assert.ok(q4.fy > 0.26 && q4.fy < 0.32, `Q4 level with its last line (${q4.fy})`);
+  const corr = items.find((i) => i.id === 'Q3:correction')!;
+  assert.equal(corr.text, '7 x 5 = 35 cm2');
+  assert.ok(corr.placed);
+  // The correction never covers writing: the line below Q3 (e3, from y 0.2) blocks the space under the answer,
+  // so it goes into the margin under the mark instead.
+  const lines = [[0.08, 0.08, 0.6, 0.12], [0.08, 0.14, 0.6, 0.18], [0.08, 0.2, 0.6, 0.24], [0.08, 0.26, 0.6, 0.3]];
+  const box = { x0: corr.fx, x1: corr.fx + corr.w, y0: corr.fy - corr.h / 2, y1: corr.fy + corr.h / 2 };
+  assert.ok(!lines.some(([x0, y0, x1, y1]) => box.x0 < x1 && box.x1 > x0 && box.y0 < y1 && box.y1 > y0), 'correction does not overlap the writing');
+  const total = items.find((i) => i.id === 'total')!;
+  assert.deepEqual([total.page, total.label], [1, '2/6']);
+  assert.ok(total.fy < 0.1, 'total at the top of page 1');
+
+  // A teacher's adjustment wins over the automatic place; hiding removes the item from the page.
+  result.layout = { 'Q4:mark': { page: 1, fx: 0.7, fy: 0.5, by: 't', at: 'x' }, 'Q3:correction': { page: 1, fx: 0, fy: 0, hidden: true, by: 't', at: 'x' } };
+  const after = computeLayout(doc, result, { total: 2, maxTotal: 6 }).items;
+  assert.deepEqual([after.find((i) => i.id === 'Q4:mark')!.fx, after.find((i) => i.id === 'Q4:mark')!.fy, after.find((i) => i.id === 'Q4:mark')!.auto], [0.7, 0.5, false]);
+  assert.equal(after.find((i) => i.id === 'Q3:correction')!.hidden, true);
+
+  // An override replaces the per-step marks with one symbol for the teacher's total.
+  result.questions[1].override = { marks: 4, reason: 'accepted', by: 't', at: 'x', rubricConflict: null };
+  assert.deepEqual(symbolsFor(result.questions[1]), ['tick']);
+});
+
+test('confidence: the marker\'s estimate is capped by what the checks found', () => {
+  assert.deepEqual(markConfidence(0.95, [], 2, true)!.level, 'high');
+  assert.equal(markConfidence(0.95, [{ code: 'uncertain_reading', severity: 'medium', detail: '' }], 2, true)!.score, 0.7);
+  const low = markConfidence(0.95, [{ code: 'unreadable_handwriting', severity: 'high', detail: '' }], 2, true)!;
+  assert.equal(low.level, 'low');
+  assert.match(low.basis.join(' '), /unreadable handwriting/);
+  assert.equal(markConfidence(0.9, [], 2, false)!.score, 0.5, 'marks without a matching quote');
+  assert.equal(markConfidence(undefined, [], null, false)!.score, 0);
+});
+
+const pdfText = async (buf: Buffer) => { const p = new PDFParse({ data: new Uint8Array(buf) }); try { return (await p.getText()).text; } finally { await p.destroy(); } };
+
+test('review: saved record, page images, moving a mark, release and the draft label', async () => {
+  const user = 'teacher-review';
+  const exam = await exams.createExam(user, { title: 'Review quiz' });
+  await exams.setSchemeJson(user, exam.id, SCHEME, { confirm: true });
+  const original = await scriptPdf('C002');
+  await exams.addSubmissions(user, exam.id, [{ name: 'C002.pdf', buffer: original }]);
+  await exams.startMarking(user, exam.id);
+  const done = await waitRun(user, exam.id);
+  const sub = done.submissions[0];
+
+  const rv = await exams.reviewCandidate(user, exam.id, sub.id);
+  const q1 = rv.questions.find((q) => q.number === '1')!;
+  // The record a "why" answer is read from.
+  assert.match(q1.answerAsRead!, /6 - 2 = 5/);
+  assert.deepEqual(q1.criterionResults.map((c) => [c.rubric, c.awardedMarks]), [['Subtract 2 from both sides', 1], ['x = 4', 0]]);
+  assert.equal(q1.correction, 'x = 6 - 2 = 4');
+  assert.ok(q1.confidence && q1.confidence.score <= 0.85);
+  const m1 = rv.layout.items.find((i) => i.id === `${q1.questionId}:mark`)!;
+  assert.deepEqual([m1.symbols, m1.label, m1.placed], [['tick', 'cross'], '1/3', true]);
+  assert.equal(rv.layout.items.find((i) => i.id === 'total')!.label, '3/5');
+  assert.equal(rv.released, false);
+
+  const img = await exams.pageImage(user, exam.id, sub.id, 1);
+  assert.equal((await sharp(img).metadata()).format, 'jpeg');
+  await assert.rejects(exams.pageImage('someone-else', exam.id, sub.id, 1));
+
+  // The first marked PDF is a draft.
+  const draftPdf = (await fileStore.read(done.artifacts[0].candidatePdfs[sub.id], user)).data;
+  assert.match(await pdfText(draftPdf), /DRAFT/);
+
+  // The teacher nudges the mark; release confirms the marks and the regenerated PDF has no draft label.
+  await exams.setLayout(user, exam.id, sub.id, m1.id, { page: 1, fx: 0.7, fy: 0.3 });
+  const moved = await exams.reviewCandidate(user, exam.id, sub.id);
+  assert.deepEqual(((i) => [i.fx, i.fy, i.auto])(moved.layout.items.find((i) => i.id === m1.id)!), [0.7, 0.3, false]);
+  const rel = await exams.release(user, exam.id, [sub.id]);
+  assert.deepEqual(rel.released, ['C002']);
+  const exp = await exams.requestExport(user, exam.id);
+  if (exp.job) await waitJob(user, exp.job.id);
+  const after = await exams.load(user, exam.id);
+  const r = after.results[sub.id];
+  assert.ok(r.questions.every((q) => q.confirmed), 'release confirms every mark');
+  const releasedPdf = (await fileStore.read(after.artifacts[0].candidatePdfs[sub.id], user)).data;
+  const text = await pdfText(releasedPdf);
+  assert.doesNotMatch(text, /DRAFT/);
+  assert.match(text, /Released by the teacher/);
+  assert.match(text, /Correction: x = 6 - 2 = 4/);
+
+  // The original scan is never changed.
+  assert.ok((await fileStore.read(sub.fileId, user)).data.equals(original));
+
+  // Any later change makes it a draft again until released again.
+  await exams.setLayout(user, exam.id, sub.id, 'total', { page: 1, fx: 0.5, fy: 0.05 });
+  const changed = await exams.reviewCandidate(user, exam.id, sub.id);
+  assert.deepEqual([changed.released, changed.changedSinceRelease], [false, true]);
+  await assert.rejects(exams.setLayout(user, exam.id, sub.id, 'Q9:mark', { reset: true }), /No item/);
 });
