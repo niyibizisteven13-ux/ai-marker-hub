@@ -823,16 +823,16 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, onUpda
   let questionNumber = 0;
   const seg = (id: 'build' | 'preview', text: string) => (
     <button type="button" role="tab" aria-selected={view === id} onClick={() => setView(id)}
-      className={`min-h-10 rounded-lg px-5 text-xs font-bold uppercase tracking-wider ${ring} ${view === id ? 'bg-[#FCE9E2] text-[#202124]' : 'text-[#5F6368] hover:text-[#202124]'}`}>
+      className={`min-h-9 rounded-lg px-3.5 text-xs font-bold uppercase tracking-wider sm:min-h-10 sm:px-5 ${ring} ${view === id ? 'bg-[#FCE9E2] text-[#202124]' : 'text-[#5F6368] hover:text-[#202124]'}`}>
       {text}
     </button>
   );
-  const headBtn = `inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#DADCE0] px-4 text-sm font-bold text-[#202124] hover:bg-black/5 ${ring}`;
+  const headBtn = `inline-flex min-h-10 items-center gap-2 whitespace-nowrap rounded-xl border border-[#DADCE0] px-3 text-[13px] font-bold text-[#202124] hover:bg-black/5 sm:min-h-11 sm:px-4 sm:text-sm ${ring}`;
 
   return (
     <div className="min-h-full bg-[#F0EBF8] text-[#202124]">
       {/* ---------- header ---------- */}
-      <header className="border-b border-[#E0E0E0] bg-white px-4 py-4 shadow-sm sm:px-8">
+      <header className="sticky top-0 z-20 border-b border-[#E0E0E0] bg-white px-3 py-2.5 shadow-sm sm:px-8 sm:py-4">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-3">
           {onBack && (
             <button type="button" onClick={onBack} aria-label="Back" className={`flex h-11 w-11 items-center justify-center rounded-xl text-[#5F6368] hover:bg-black/5 ${ring}`}>
@@ -843,13 +843,15 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, onUpda
             <label>
               <span className="sr-only">Form title</span>
               <input value={state.title} onChange={e => setField('title', e.target.value)} placeholder="Untitled form"
-                className="w-full bg-transparent text-2xl font-bold text-[#202124] placeholder:text-[#757575] outline-none focus:underline focus:decoration-[#D97757] focus:underline-offset-4" />
+                className="w-full bg-transparent text-xl font-bold text-[#202124] sm:text-2xl placeholder:text-[#757575] outline-none focus:underline focus:decoration-[#D97757] focus:underline-offset-4" />
             </label>
             <p className="mt-1 text-xs font-bold uppercase tracking-widest text-[#5F6368]" aria-live="polite">
               {questionCount} {questionCount === 1 ? 'question' : 'questions'} · {status}
             </p>
           </div>
 
+          {/* Actions: one swipeable row on phones, inline on larger screens. */}
+          <div className="-mx-3 flex w-[calc(100%+1.5rem)] items-center gap-2 overflow-x-auto px-3 pb-0.5 [scrollbar-width:none] sm:mx-0 sm:w-auto sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0 [&>*]:shrink-0">
           <div role="tablist" aria-label="Builder view" className="flex rounded-xl border border-[#E0E0E0] bg-[#F8F9FA] p-1">
             {seg('build', 'Build')}
             {seg('preview', 'Preview')}
@@ -857,23 +859,24 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, onUpda
 
           {onRunAgent && (
             <button type="button" onClick={() => setAiOpen(o => !o)} aria-expanded={aiOpen}
-              className={`inline-flex min-h-11 items-center gap-2 rounded-xl px-3 text-sm font-bold text-[#B4502F] hover:bg-black/5 ${ring}`}>
-              <SparkIcon /> Generate with AI instead
+              className={`inline-flex min-h-10 items-center gap-2 whitespace-nowrap rounded-xl px-3 text-[13px] font-bold text-[#B4502F] hover:bg-black/5 sm:min-h-11 sm:text-sm ${ring}`}>
+              <SparkIcon /> <span className="sm:hidden">AI</span><span className="hidden sm:inline">Generate with AI instead</span>
             </button>
           )}
 
-          <button type="button" onClick={publish} disabled={publishing} className={`${primary} inline-flex items-center gap-2`}>
+          <button type="button" onClick={publish} disabled={publishing} className={`${primary} inline-flex items-center gap-2 whitespace-nowrap`}>
             <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
             {publishing ? 'Publishing…' : 'Save & Publish'}
           </button>
 
-          <label className={`${headBtn} cursor-pointer focus-within:ring-2 focus-within:ring-[#F0A58C]`}>
+          <label className={`${headBtn} relative cursor-pointer focus-within:ring-2 focus-within:ring-[#F0A58C]`}>
             Theme
             <span aria-hidden="true" className="h-6 w-9 rounded-md border border-black/20" style={{ backgroundColor: state.themeColor }} />
             <input type="color" aria-label="Form theme color" className="sr-only" value={state.themeColor} onChange={e => setField('themeColor', e.target.value)} />
           </label>
           <button type="button" className={headBtn} aria-expanded={shareOpen} onClick={() => setShareOpen(o => !o)}>Get link</button>
           {onResults && <button type="button" className={headBtn} onClick={onResults}>Results</button>}
+          </div>
         </div>
       </header>
 

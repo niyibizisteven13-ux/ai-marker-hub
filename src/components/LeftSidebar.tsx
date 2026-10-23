@@ -14,7 +14,7 @@ import {
   SquarePen,
   ChevronsUpDown,
   LogOut,
-  UserRound,
+  ClipboardCheck,
   LogIn,
   Sparkles,
   Coins,
@@ -23,7 +23,7 @@ import {
 import { NavigationTab, User, ChatSession } from '../types';
 import logoUrl from '../assets/bwenge-logo.svg';
 import { tokens } from '../utils/designTokens';
-import PlanStatus, { useBillingMe } from './PlanStatus';
+import { useBillingMe } from './PlanStatus';
 
 interface LeftSidebarProps {
   activeTab: NavigationTab;
@@ -339,37 +339,8 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
         </div>
         {c && <div className="hidden flex-1 lg:block" />}
 
-        {/* Footer: settings, admin, account */}
-        <div className={`shrink-0 space-y-0.5 border-t px-3 pb-3 pt-2 ${c ? 'lg:flex lg:flex-col lg:items-center' : ''}`} style={{ borderColor: tokens.border }}>
-          {user && <PlanStatus me={billing} collapsed={c} />}
-          <div className="group relative w-full lg:w-auto">
-            <button
-              type="button"
-              onClick={go(onOpenSettings)}
-              aria-label="Settings"
-              className={`${rowBase} ${rowSize} ${c ? '' : 'lg:w-full'} text-[#C2C0B6] hover:bg-white/[0.04] hover:text-white`}
-            >
-              <Settings size={17} className="shrink-0 text-[#9C9A92] group-hover/row:text-[#C2C0B6]" aria-hidden="true" />
-              <span className={label}>Settings</span>
-            </button>
-            <CollapsedTip show={c} label="Settings" />
-          </div>
-
-          {user?.role === 'ADMIN' && onOpenAdmin && (
-            <div className="group relative w-full lg:w-auto">
-              <button
-                type="button"
-                onClick={go(onOpenAdmin)}
-                aria-label="Open admin dashboard"
-                className={`${rowBase} ${rowSize} ${c ? '' : 'lg:w-full'} text-emerald-300 hover:bg-emerald-400/[0.08]`}
-              >
-                <Shield size={17} className="shrink-0" aria-hidden="true" />
-                <span className={label}>Admin dashboard</span>
-              </button>
-              <CollapsedTip show={c} label="Admin dashboard" />
-            </div>
-          )}
-
+        {/* Footer: the account (settings, admin, plan and sign-out are in its menu, as in Claude) */}
+        <div className={`shrink-0 border-t px-3 pb-3 pt-2 ${c ? 'lg:flex lg:flex-col lg:items-center' : ''}`} style={{ borderColor: tokens.border }}>
           <div ref={profileRef} className="group relative w-full pt-1 lg:w-auto">
             {user ? (
               <button
@@ -414,7 +385,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
             {user && showProfileMenu && (
               <div
                 role="menu"
-                className={`absolute bottom-full z-50 mb-2 w-60 overflow-hidden rounded-xl border border-white/10 bg-[#141413] p-1.5 shadow-2xl shadow-black/60 animate-in fade-in slide-in-from-bottom-2 duration-150 ${
+                className={`absolute bottom-full z-50 mb-2 w-64 overflow-hidden rounded-xl border border-white/10 bg-[#141413] p-1.5 shadow-2xl shadow-black/60 animate-in fade-in slide-in-from-bottom-2 duration-150 ${
                   c ? 'left-0 right-0 w-auto lg:bottom-0 lg:left-full lg:right-auto lg:mb-0 lg:ml-3 lg:w-60' : 'left-0 right-0 w-auto'
                 }`}
               >
@@ -422,6 +393,16 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                   <div className="truncate text-[13px] font-medium text-white">{user.name}</div>
                   <div className="truncate text-xs text-[#9C9A92]">{user.email}</div>
                 </div>
+                {billing && (
+                  <a href="/upgrade" role="menuitem" className="mx-1 mb-1 block rounded-lg border border-white/[0.07] bg-white/[0.03] px-2.5 py-2 hover:bg-white/[0.06]">
+                    <span className="flex items-center justify-between gap-2 text-[12px]">
+                      <span className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-px text-[9.5px] font-bold uppercase ${plan.className}`}>{plan.icon && <plan.icon size={9} strokeWidth={2.5} aria-hidden="true" />}{billing.planName}</span>
+                      <span className="font-semibold text-[#D97757]">{billing.plan === 'PRO' || billing.plan === 'INSTITUTION' ? 'Manage' : 'Upgrade'}</span>
+                    </span>
+                    <span className="mt-1.5 block text-[11.5px] text-[#C2C0B6]">{Math.max(0, billing.usage.day.limit - billing.usage.day.used)} of {billing.usage.day.limit} credits left today{billing.wallet > 0 ? ` · ${billing.wallet.toLocaleString('en-US')} GO` : ''}</span>
+                    <span className="mt-1 block h-1 overflow-hidden rounded-full bg-white/[0.07]"><span className="block h-full rounded-full bg-[#5DCAA5]" style={{ width: `${billing.usage.day.limit ? Math.max(0, 100 - (billing.usage.day.used / billing.usage.day.limit) * 100) : 0}%` }} /></span>
+                  </a>
+                )}
                 <div className="my-1 border-t" style={{ borderColor: tokens.border }} />
                 <button
                   type="button"
@@ -433,8 +414,26 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                   }}
                   className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-[#C2C0B6] transition-colors hover:bg-white/[0.06] hover:text-white"
                 >
-                  <UserRound size={15} aria-hidden="true" /> Account profile
+                  <Settings size={15} aria-hidden="true" /> Settings
                 </button>
+                <a role="menuitem" href="/exams" className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-[#C2C0B6] transition-colors hover:bg-white/[0.06] hover:text-white">
+                  <ClipboardCheck size={15} aria-hidden="true" /> Marked exams
+                </a>
+                {user.role === 'ADMIN' && onOpenAdmin && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setShowProfileMenu(false);
+                      onOpenAdmin();
+                      onCloseMobile();
+                    }}
+                    className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-emerald-300 transition-colors hover:bg-emerald-400/[0.08]"
+                  >
+                    <Shield size={15} aria-hidden="true" /> Admin dashboard
+                  </button>
+                )}
+                <div className="my-1 border-t" style={{ borderColor: tokens.border }} />
                 <button
                   type="button"
                   role="menuitem"

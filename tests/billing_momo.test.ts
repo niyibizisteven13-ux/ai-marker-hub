@@ -26,6 +26,10 @@ fake.post('/collection/v1_0/requesttopay', (req, res) => {
   mtn.statuses.set(ref, { status: 'PENDING' });
   res.status(202).end();
 });
+fake.get('/collection/v1_0/account/balance', (req, res) => {
+  if (req.headers.authorization !== 'Bearer tok') return res.status(401).end();
+  res.json({ availableBalance: '1000', currency: 'EUR' });
+});
 fake.get('/collection/v1_0/requesttopay/:id', (req, res) => {
   const s = mtn.statuses.get(req.params.id);
   if (!s) return res.status(404).end();
@@ -42,8 +46,9 @@ const { EmailService } = await import('../server/services/EmailService.js');
 const { PLANS, planFor, walletBalance, toRwf, currentGoPacks } = await import('../server/services/billing/plans.js');
 const { checkUsage, recordUsage } = await import('../server/services/billing/usage.js');
 const { startPayment, checkPayment, fulfil, quote, runRenewalSweep, billingState } = await import('../server/services/billing/payments.js');
-const { momoMode, normalizeMsisdn, resetMomo } = await import('../server/services/billing/momo.js');
+const { momoMode, momoHealth, normalizeMsisdn, resetMomo } = await import('../server/services/billing/momo.js');
 const { mergePlaceholderAccount } = await import('../server/services/billing/accounts.js');
+const { platformContext } = await import('../server/services/platformContext.js');
 const { momoCallbackRouter } = await import('../server/routes/billingRoutes.js');
 const db = prisma as any;
 
@@ -274,4 +279,40 @@ test('without MTN keys, checkout is refused cleanly and nothing is faked', async
     assert.equal(momoMode(), 'off');
     await assert.rejects(startPayment(await newUser(), { purpose: 'PRO', months: 1, phone: '0788123456' }), (e: any) => e.status === 503 && e.code === 'NOT_CONFIGURED');
   } finally { process.env.MOMO_API_KEY = keep; }
+});
+
+test('admin connection test: token and Collections account checked, secrets never returned, missing keys named', async () => {
+  const h = await momoHealth();
+  assert.equal(h.ok, true);
+  assert.deepEqual(h.steps.map((x) => x.step), ['Configuration', 'Access token', 'Collections account']);
+  assert.ok(!JSON.stringify(h).includes('api-key') && !JSON.stringify(h).includes('sub-key'), 'no secrets in the result');
+  const keep = process.env.MOMO_API_KEY;
+  delete process.env.MOMO_API_KEY;
+  try {
+    const off = await momoHealth();
+    assert.equal(off.ok, false);
+    assert.match(off.steps[0].detail, /MOMO_API_KEY/);
+  } finally { process.env.MOMO_API_KEY = keep; }
+});
+
+test('platform context: the AI knows the plan, credits left, real links, and when (not) to suggest upgrading', async () => {
+  const free = await newUser();
+  const web = await platformContext(free, 'web');
+  assert.match(web, /Free plan/);
+  assert.match(web, /Credits left: \d+ of 20 today/);
+  assert.match(web, /\[Open the scanner\]\([^)]*\/scan\)/);
+  assert.match(web, /\[the review screen\]\([^)]*\/exams\)/);
+  assert.match(web, /\[Upgrade\]\([^)]*\/upgrade\)/);
+  assert.match(web, /draft the marking scheme/);
+  assert.match(web, /Suggest upgrading at most once/);
+  const tg = await platformContext(free, 'telegram');
+  assert.match(tg, /\/scan command/);
+  assert.match(tg, /\]\(https:\/\/[^)]+\/upgrade\)/, 'absolute links in Telegram');
+
+  const pro = await newUser();
+  await db.subscription.create({ data: { id: randomUUID(), userId: pro, planType: 'PRO', status: 'ACTIVE', startDate: new Date(), endDate: new Date(Date.now() + 10 * 86_400_000) } });
+  const p = await platformContext(pro, 'web');
+  assert.match(p, /PRO plan, active until/);
+  assert.match(p, /do not suggest upgrading/);
+  assert.equal(await platformContext(null, 'web'), '');
 });

@@ -16,7 +16,9 @@ function inline(src: string): string {
   const codes: string[] = [];
   let s = src.replace(/`([^`\n]+)`/g, (_, c) => `\u0000${codes.push(`<code>${esc(c)}</code>`) - 1}\u0000`);
   const links: string[] = [];
-  s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, (_, t, u) => `\u0001${links.push(`<a href="${escAttr(u)}">${esc(t)}</a>`) - 1}\u0001`);
+  // App links ("/upgrade", "/exams/…") become absolute: Telegram only opens full URLs.
+  const appBase = (process.env.APP_BASE_URL || 'https://www.bwenge.space').replace(/\/$/, '');
+  s = s.replace(/\[([^\]\n]+)\]\(((?:https?:\/\/|\/(?!\/))[^)\s]*)\)/g, (_, t, u) => `\u0001${links.push(`<a href="${escAttr(u.startsWith('/') ? appBase + u : u)}">${esc(t)}</a>`) - 1}\u0001`);
   s = esc(s);
   s = s.replace(/\*\*([^*\n]+?)\*\*|__([^_\n]+?)__/g, (_, a, b) => `<b>${a ?? b}</b>`);
   s = s.replace(/(^|[\s(])\*([^*\n]+?)\*(?=[\s).,;:!?]|$)/g, '$1<i>$2</i>');

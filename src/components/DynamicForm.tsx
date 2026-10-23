@@ -510,14 +510,21 @@ const QuestionCard = memo(function QuestionCard(props: CardProps) {
             <span>{min}{field.scaleMinLabel ? ` · ${field.scaleMinLabel}` : ''}</span>
             <span>{max}{field.scaleMaxLabel ? ` · ${field.scaleMaxLabel}` : ''}</span>
           </div>
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-            {values.map(n => (
-              <label key={n} className="flex min-w-11 cursor-pointer flex-col items-center gap-2 text-xs">
-                <span>{n}</span>
-                <input type="radio" name={`field-${id}`} disabled={disabled} checked={Number(value) === n}
-                  onChange={() => set(n)} style={{ accentColor: accent }} className={radioCls} />
-              </label>
-            ))}
+          {/* One even row of number buttons that always fits the screen (0–10 included). */}
+          <div className="mt-3 grid gap-1" style={{ gridTemplateColumns: `repeat(${values.length}, minmax(0, 1fr))` }}>
+            {values.map(n => {
+              const on = Number(value) === n;
+              return (
+                <label key={n} className="relative cursor-pointer">
+                  <input type="radio" name={`field-${id}`} disabled={disabled} checked={on} aria-label={String(n)}
+                    onChange={() => set(n)} className="peer sr-only" />
+                  <span className="flex h-10 items-center justify-center rounded-lg border text-sm font-semibold transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-slate-500"
+                    style={on ? { backgroundColor: accent, borderColor: accent, color: '#fff' } : { borderColor: '#CBD5E1', color: '#334155' }}>
+                    {n}
+                  </span>
+                </label>
+              );
+            })}
           </div>
         </div>
       );
@@ -545,7 +552,36 @@ const QuestionCard = memo(function QuestionCard(props: CardProps) {
     case 'checkbox_grid': {
       const isRadio = field.type === 'radio_grid';
       control = (
-        <div className="overflow-x-auto" {...aria}>
+        <div {...aria}>
+          {/* Phones: one card per row with every choice visible, nothing hidden off-screen. */}
+          <div className="space-y-3 sm:hidden">
+            {rows.map((row, rowIndex) => (
+              <fieldset key={row} className="rounded-xl border border-slate-200 p-3">
+                <legend className="px-1 text-sm font-medium text-slate-800">{row}</legend>
+                <div className="flex flex-wrap gap-2">
+                  {columns.map(col => {
+                    const rowValue = value?.[row];
+                    const checked = isRadio ? rowValue === col : (rowValue || []).includes(col);
+                    return (
+                      <label key={col} className="cursor-pointer">
+                        <input type={isRadio ? 'radio' : 'checkbox'} disabled={disabled} name={`field-${id}-m-${rowIndex}`} checked={checked} className="peer sr-only"
+                          onChange={e => {
+                            if (isRadio) set({ ...(value || {}), [row]: col });
+                            else {
+                              const current: string[] = rowValue || [];
+                              set({ ...(value || {}), [row]: e.target.checked ? [...current, col] : current.filter(v => v !== col) });
+                            }
+                          }} />
+                        <span className="inline-flex min-h-10 items-center rounded-full border px-3 text-sm transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-slate-500"
+                          style={checked ? { backgroundColor: accent, borderColor: accent, color: '#fff' } : { borderColor: '#CBD5E1', color: '#334155' }}>{col}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </fieldset>
+            ))}
+          </div>
+          <div className="hidden overflow-x-auto sm:block">
           <table className="w-full min-w-[420px] text-left text-xs">
             <caption className="sr-only">{field.label}</caption>
             <thead>
@@ -582,6 +618,7 @@ const QuestionCard = memo(function QuestionCard(props: CardProps) {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       );
       break;

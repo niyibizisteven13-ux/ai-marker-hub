@@ -223,6 +223,132 @@
           "agentTone": "PROFESSIONAL",
           "customInstructions": null
         }
+      },
+      "u-037d6f07-cb4e-4165-9b76-520212c571e0": {
+        "id": "u-037d6f07-cb4e-4165-9b76-520212c571e0",
+        "createdAt": "2026-10-23T05:28:24.431Z",
+        "updatedAt": "2026-10-23T05:28:24.431Z",
+        "email": "u-037d6f07-cb4e-4165-9b76-520212c571e0@test.local",
+        "name": "Aline Uwase",
+        "passwordHash": "x",
+        "role": "INSTRUCTOR"
+      },
+      "u-c8232092-b33d-4728-9bcd-49a6e7aaea4e": {
+        "id": "u-c8232092-b33d-4728-9bcd-49a6e7aaea4e",
+        "createdAt": "2026-10-23T05:28:24.591Z",
+        "updatedAt": "2026-10-23T05:28:24.591Z",
+        "email": "u-c8232092-b33d-4728-9bcd-49a6e7aaea4e@test.local",
+        "name": "Aline Uwase",
+        "passwordHash": "x",
+        "role": "INSTRUCTOR"
+      },
+      "u-2a6c1768-20ae-4d6d-94b3-4175bb314bd5": {
+        "id": "u-2a6c1768-20ae-4d6d-94b3-4175bb314bd5",
+        "createdAt": "2026-10-23T05:28:24.599Z",
+        "updatedAt": "2026-10-23T05:28:24.599Z",
+        "email": "u-2a6c1768-20ae-4d6d-94b3-4175bb314bd5@test.local",
+        "name": "Aline Uwase",
+        "passwordHash": "x",
+        "role": "ADMIN"
+      },
+      "u-cc262f87-1c50-4d8a-89d9-5183d9b81bea": {
+        "id": "u-cc262f87-1c50-4d8a-89d9-5183d9b81bea",
+        "createdAt": "2026-10-23T05:28:24.625Z",
+        "updatedAt": "2026-10-23T05:28:24.625Z",
+        "email": "u-cc262f87-1c50-4d8a-89d9-5183d9b81bea@test.local",
+        "name": "Aline Uwase",
+        "passwordHash": "x",
+        "role": "INSTRUCTOR"
+      },
+      "u-026d8336-5736-40e6-93d2-e2ad499808f1": {
+        "id": "u-026d8336-5736-40e6-93d2-e2ad499808f1",
+        "createdAt": "2026-10-23T05:28:24.696Z",
+        "updatedAt": "2026-10-23T05:28:24.696Z",
+        "email": "u-026d8336-5736-40e6-93d2-e2ad499808f1@test.local",
+        "name": "Aline Uwase",
+        "passwordHash": "x",
+        "role": "INSTRUCTOR"
+      },
+      "u-37f896eb-5bfa-428d-9bbb-7016b56dfb64": {
+        "id": "u-37f896eb-5bfa-428d-9bbb-7016b56dfb64",
+        "createdAt": "2026-10-23T05:28:24.777Z",
+        "updatedAt": "2026-10-23T05:28:24.777Z",
+        "email": "u-37f896eb-5bfa-428d-9bbb-7016b56dfb64@test.local",
+        "name": "Aline Uwase",
+        "passwordHash": "x",
+        "role": "INSTRUCTOR"
+      },
+      "u-4de92001-fcab-4443-88e1-66cad0f5196b": {
+        "id": "u-4de92001-fcab-4443-88e1-66cad0f5196b",
+        "createdAt": "2026-10-23T05:28:24.800Z",
+        "updatedAt": "2026-10-23T05:28:24.800Z",
+        "email": "u-4de92001-fcab-4443-88e1-66cad0f5196b@test.local",
+        "name": "Aline Uwase",
+        "passwordHash": "x",
+        "role": "INSTRUCTOR"
+      },
+      "u-21f31041-28d7-4df5-be78-59b508ba196e": {
+        "id": "u-21f31041-28d7-4df5-be78-59b508ba196e",
+        "createdAt": "2026-10-23T05:28:24.836Z",
+        "updatedAt": "2026-10-23T05:28:24.836Z",
+        "email": "u-21f31041-28d7-4df5-be78-59b508ba196e@test.local",
+        "name": "Aline Uwase",
+        "passwordHash": "x",
+        "role": "INSTRUCTOR"
+      },
+      "u-57aebe3a-04d8-416b-8e71-3857c962b1c7": {
+        "id": "u-57aebe3a-04d8-416b-8e71-3857c962b1c7",
+        "createdAt": "2026-10-23T05:28:24.878Z",
+        "updatedAt": "2026-10-23T05:28:24.878Z",
+        "email": "u-57aebe3a-04d8-416b-8e71-3857c962b1c7@test.local",
+        "name": "Aline Uwase",
+        "passwordHash": "x",
+        "role": "INSTRUCTOR"
+      },
+      "u-2c938ab8-1d1b-4ee3-9e4d-a9dbb7083b82": {
+        "id": "u-2c938ab8-1d1b-4ee3-9e4d-a9dbb7083b82",
+        "createdAt": "2026-10-23T05:28:24.933Z",
+        "updatedAt": "2026-10-23T05:28:24.933Z",
+        "email": "u-2c938ab8-1d1b-4ee3-9e4d-a9dbb7083b82@test.local",
+        "name": "Aline Uwase",
+        "passwordHash": "x",
+        "role": "INSTRUCTOR"
+      },
+      "u-b14c4d80-e438-443e-9957-50efb7cf1f7d": {
+        "id": "u-b14c4d80-e438-443e-9957-50efb7cf1f7d",
+        "createdAt": "2026-10-23T05:28:24.963Z",
+        "updatedAt": "2026-10-23T05:28:24.963Z",
+        "email": "u-b14c4d80-e438-443e-9957-50efb7cf1f7d@test.local",
+        "name": "Aline Uwase",
+        "passwordHash": "x",
+        "role": "INSTRUCTOR"
+      },
+      "tg-229b7b0a-a2cb-4c5a-ab92-95e11eef9b5a": {
+        "id": "tg-229b7b0a-a2cb-4c5a-ab92-95e11eef9b5a",
+        "createdAt": "2026-10-23T05:28:24.967Z",
+        "updatedAt": "2026-10-23T05:28:24.967Z",
+        "email": "telegram-tg-229b7b0a-a2cb-4c5a-ab92-95e11eef9b5a@users.invalid",
+        "name": "Telegram user",
+        "passwordHash": "x",
+        "role": "INSTRUCTOR"
+      },
+      "u-9278a1d1-5aca-4d19-9468-3621fac8358b": {
+        "id": "u-9278a1d1-5aca-4d19-9468-3621fac8358b",
+        "createdAt": "2026-10-23T05:28:25.004Z",
+        "updatedAt": "2026-10-23T05:28:25.004Z",
+        "email": "u-9278a1d1-5aca-4d19-9468-3621fac8358b@test.local",
+        "name": "Aline Uwase",
+        "passwordHash": "x",
+        "role": "INSTRUCTOR"
+      },
+      "u-df3096d4-cf42-49f6-a2bc-e3a145f9ec95": {
+        "id": "u-df3096d4-cf42-49f6-a2bc-e3a145f9ec95",
+        "createdAt": "2026-10-23T05:28:25.013Z",
+        "updatedAt": "2026-10-23T05:28:25.013Z",
+        "email": "u-df3096d4-cf42-49f6-a2bc-e3a145f9ec95@test.local",
+        "name": "Aline Uwase",
+        "passwordHash": "x",
+        "role": "INSTRUCTOR"
       }
     },
     "auditLog": {
@@ -1761,7 +1887,58 @@
     },
     "unlockedResult": {},
     "organizationMember": {},
-    "subscription": {},
+    "subscription": {
+      "be81eacb-0bf9-46d2-a358-4c216f2724ca": {
+        "id": "be81eacb-0bf9-46d2-a358-4c216f2724ca",
+        "createdAt": "2026-10-23T05:28:24.516Z",
+        "updatedAt": "2026-10-23T05:28:24.516Z",
+        "userId": "u-037d6f07-cb4e-4165-9b76-520212c571e0",
+        "planType": "PRO",
+        "status": "ACTIVE",
+        "startDate": "2026-10-23T05:28:24.516Z",
+        "endDate": "2026-11-22T05:28:24.516Z"
+      },
+      "9f26720c-08e7-4456-a910-65b69c7c8f24": {
+        "id": "9f26720c-08e7-4456-a910-65b69c7c8f24",
+        "createdAt": "2026-10-23T05:28:24.614Z",
+        "updatedAt": "2026-10-23T05:28:24.614Z",
+        "userId": "u-2a6c1768-20ae-4d6d-94b3-4175bb314bd5",
+        "planType": "PRO",
+        "status": "ACTIVE",
+        "startDate": "2026-10-23T05:28:24.614Z",
+        "endDate": "2026-11-22T05:28:24.614Z"
+      },
+      "0252849b-8fea-4125-bd9d-7ddf45966af4": {
+        "id": "0252849b-8fea-4125-bd9d-7ddf45966af4",
+        "createdAt": "2026-10-23T05:28:24.648Z",
+        "updatedAt": "2026-10-23T05:28:24.690Z",
+        "userId": "u-cc262f87-1c50-4d8a-89d9-5183d9b81bea",
+        "planType": "PRO",
+        "status": "ACTIVE",
+        "startDate": "2026-10-23T05:28:24.648Z",
+        "endDate": "2027-02-20T05:28:24.648Z"
+      },
+      "c50f3206-3f71-4b84-bcbf-ce273bf67923": {
+        "id": "c50f3206-3f71-4b84-bcbf-ce273bf67923",
+        "createdAt": "2026-10-23T05:28:24.854Z",
+        "updatedAt": "2026-10-23T05:28:24.854Z",
+        "userId": "u-21f31041-28d7-4df5-be78-59b508ba196e",
+        "planType": "PRO",
+        "status": "ACTIVE",
+        "startDate": "2026-10-23T05:28:24.854Z",
+        "endDate": "2026-11-22T05:28:24.854Z"
+      },
+      "0b2b7512-451e-432c-876e-4b4605d0720b": {
+        "id": "0b2b7512-451e-432c-876e-4b4605d0720b",
+        "createdAt": "2026-10-23T05:28:24.938Z",
+        "updatedAt": "2026-10-23T05:28:24.953Z",
+        "userId": "u-2c938ab8-1d1b-4ee3-9e4d-a9dbb7083b82",
+        "planType": "PRO",
+        "status": "EXPIRED",
+        "startDate": "2026-10-23T05:28:24.938Z",
+        "endDate": "2026-10-23T05:27:24.949Z"
+      }
+    },
     "usageQuota": {
       "84e16cb8-cb26-4a8b-baf7-ca54407117c5": {
         "id": "84e16cb8-cb26-4a8b-baf7-ca54407117c5",
@@ -1779,6 +1956,382 @@
         "service": "grading",
         "freeUsed": 1
       }
-    }
+    },
+    "appSetting": {},
+    "billingPayment": {
+      "64a54f62-0af1-4022-8a91-4dd1d1d4ad33": {
+        "id": "64a54f62-0af1-4022-8a91-4dd1d1d4ad33",
+        "createdAt": "2026-10-23T05:28:24.439Z",
+        "updatedAt": "2026-10-23T05:28:24.544Z",
+        "userId": "u-037d6f07-cb4e-4165-9b76-520212c571e0",
+        "purpose": "PRO",
+        "packId": null,
+        "months": 1,
+        "credits": 0,
+        "amountRwf": 4400,
+        "amountUsd": 3,
+        "currency": "EUR",
+        "provider": "MTN_MOMO",
+        "phoneMasked": "25078•••456",
+        "status": "SUCCESSFUL",
+        "checks": 1,
+        "fulfilledAt": "2026-10-23T05:28:24.516Z",
+        "emailedAt": "2026-10-23T05:28:24.544Z",
+        "receiptNumber": "BW-20261023-64A54F",
+        "financialTransactionId": "987654321",
+        "providerStatus": "SUCCESSFUL",
+        "providerReason": null
+      },
+      "a2eeaaf6-5cd9-443e-a46a-c701ec049ebd": {
+        "id": "a2eeaaf6-5cd9-443e-a46a-c701ec049ebd",
+        "createdAt": "2026-10-23T05:28:24.604Z",
+        "updatedAt": "2026-10-23T05:28:24.638Z",
+        "userId": "u-2a6c1768-20ae-4d6d-94b3-4175bb314bd5",
+        "purpose": "PRO",
+        "packId": null,
+        "months": 1,
+        "credits": 0,
+        "amountRwf": 4400,
+        "amountUsd": 3,
+        "currency": "EUR",
+        "provider": "MTN_MOMO",
+        "phoneMasked": "25078•••434",
+        "status": "SUCCESSFUL",
+        "checks": 0,
+        "fulfilledAt": "2026-10-23T05:28:24.614Z",
+        "emailedAt": "2026-10-23T05:28:24.638Z",
+        "receiptNumber": "BW-20261023-A2EEAA",
+        "financialTransactionId": "adm",
+        "providerStatus": "SUCCESSFUL",
+        "providerReason": null
+      },
+      "69cc8ff2-e2c0-4e9d-99cf-7468bf622670": {
+        "id": "69cc8ff2-e2c0-4e9d-99cf-7468bf622670",
+        "createdAt": "2026-10-23T05:18:24.657Z",
+        "updatedAt": "2026-10-23T05:28:24.674Z",
+        "userId": "u-cc262f87-1c50-4d8a-89d9-5183d9b81bea",
+        "purpose": "PRO",
+        "packId": null,
+        "months": 1,
+        "credits": 0,
+        "amountRwf": 4400,
+        "amountUsd": 3,
+        "currency": "EUR",
+        "provider": "MTN_MOMO",
+        "phoneMasked": "25078•••111",
+        "status": "SUCCESSFUL",
+        "checks": 0,
+        "fulfilledAt": "2026-10-23T05:28:24.648Z",
+        "emailedAt": "2026-10-23T05:28:24.674Z",
+        "receiptNumber": "BW-20261023-69CC8F",
+        "financialTransactionId": "1",
+        "providerStatus": "SUCCESSFUL",
+        "providerReason": null
+      },
+      "1dc2d168-f4e7-40bf-9a70-21e45f32583a": {
+        "id": "1dc2d168-f4e7-40bf-9a70-21e45f32583a",
+        "createdAt": "2026-10-23T05:28:24.662Z",
+        "updatedAt": "2026-10-23T05:28:24.713Z",
+        "userId": "u-cc262f87-1c50-4d8a-89d9-5183d9b81bea",
+        "purpose": "PRO",
+        "packId": null,
+        "months": 3,
+        "credits": 0,
+        "amountRwf": 13200,
+        "amountUsd": 9,
+        "currency": "EUR",
+        "provider": "MTN_MOMO",
+        "phoneMasked": "25078•••111",
+        "status": "SUCCESSFUL",
+        "checks": 0,
+        "fulfilledAt": "2026-10-23T05:28:24.685Z",
+        "emailedAt": "2026-10-23T05:28:24.713Z",
+        "receiptNumber": "BW-20261023-1DC2D1",
+        "financialTransactionId": "2",
+        "providerStatus": "SUCCESSFUL",
+        "providerReason": null
+      },
+      "85848c77-67ca-41cc-ba22-fb9f5d0d831a": {
+        "id": "85848c77-67ca-41cc-ba22-fb9f5d0d831a",
+        "createdAt": "2026-10-23T05:28:24.702Z",
+        "updatedAt": "2026-10-23T05:28:24.722Z",
+        "userId": "u-026d8336-5736-40e6-93d2-e2ad499808f1",
+        "purpose": "PRO",
+        "packId": null,
+        "months": 1,
+        "credits": 0,
+        "amountRwf": 4400,
+        "amountUsd": 3,
+        "currency": "EUR",
+        "provider": "MTN_MOMO",
+        "phoneMasked": "25078•••666",
+        "status": "FAILED",
+        "checks": 1,
+        "fulfilledAt": null,
+        "emailedAt": null,
+        "receiptNumber": null,
+        "financialTransactionId": null,
+        "providerStatus": "FAILED",
+        "providerReason": "APPROVAL_REJECTED"
+      },
+      "336fb06d-9fe6-4112-b8bc-cae7d71098e4": {
+        "id": "336fb06d-9fe6-4112-b8bc-cae7d71098e4",
+        "createdAt": "2026-10-23T05:28:24.784Z",
+        "updatedAt": "2026-10-23T05:28:24.795Z",
+        "userId": "u-37f896eb-5bfa-428d-9bbb-7016b56dfb64",
+        "purpose": "PRO",
+        "packId": null,
+        "months": 1,
+        "credits": 0,
+        "amountRwf": 4400,
+        "amountUsd": 3,
+        "currency": "EUR",
+        "provider": "MTN_MOMO",
+        "phoneMasked": "25078•••667",
+        "status": "FAILED",
+        "checks": 0,
+        "fulfilledAt": null,
+        "emailedAt": null,
+        "receiptNumber": null,
+        "financialTransactionId": null,
+        "providerStatus": null,
+        "providerReason": "MOMO_ERROR"
+      },
+      "663ec585-f4df-4c2b-bd28-231ce8772477": {
+        "id": "663ec585-f4df-4c2b-bd28-231ce8772477",
+        "createdAt": "2026-10-23T05:12:24.814Z",
+        "updatedAt": "2026-10-23T05:28:24.823Z",
+        "userId": "u-4de92001-fcab-4443-88e1-66cad0f5196b",
+        "purpose": "PRO",
+        "packId": null,
+        "months": 1,
+        "credits": 0,
+        "amountRwf": 4400,
+        "amountUsd": 3,
+        "currency": "EUR",
+        "provider": "MTN_MOMO",
+        "phoneMasked": "25078•••888",
+        "status": "EXPIRED",
+        "checks": 1,
+        "fulfilledAt": null,
+        "emailedAt": null,
+        "receiptNumber": null,
+        "financialTransactionId": null,
+        "providerStatus": "PENDING",
+        "providerReason": "EXPIRED"
+      },
+      "a0b8a356-ab33-4af0-9af8-13bb6ec751d2": {
+        "id": "a0b8a356-ab33-4af0-9af8-13bb6ec751d2",
+        "createdAt": "2026-10-23T05:28:24.840Z",
+        "updatedAt": "2026-10-23T05:28:24.867Z",
+        "userId": "u-21f31041-28d7-4df5-be78-59b508ba196e",
+        "purpose": "PRO",
+        "packId": null,
+        "months": 1,
+        "credits": 0,
+        "amountRwf": 4400,
+        "amountUsd": 3,
+        "currency": "EUR",
+        "provider": "MTN_MOMO",
+        "phoneMasked": "25078•••000",
+        "status": "SUCCESSFUL",
+        "checks": 0,
+        "fulfilledAt": "2026-10-23T05:28:24.854Z",
+        "emailedAt": "2026-10-23T05:28:24.867Z",
+        "receiptNumber": "BW-20261023-A0B8A3",
+        "financialTransactionId": "real-1",
+        "providerStatus": "SUCCESSFUL",
+        "providerReason": null
+      },
+      "6f2a0c36-1bd8-4664-975a-a6a84d33b79e": {
+        "id": "6f2a0c36-1bd8-4664-975a-a6a84d33b79e",
+        "createdAt": "2026-10-23T05:28:24.883Z",
+        "updatedAt": "2026-10-23T05:28:24.909Z",
+        "userId": "u-57aebe3a-04d8-416b-8e71-3857c962b1c7",
+        "purpose": "GO_PACK",
+        "packId": "go-500",
+        "months": 0,
+        "credits": 100,
+        "amountRwf": 500,
+        "amountUsd": 0.34,
+        "currency": "EUR",
+        "provider": "MTN_MOMO",
+        "phoneMasked": "25078•••212",
+        "status": "SUCCESSFUL",
+        "checks": 0,
+        "fulfilledAt": "2026-10-23T05:28:24.894Z",
+        "emailedAt": "2026-10-23T05:28:24.909Z",
+        "receiptNumber": "BW-20261023-6F2A0C",
+        "financialTransactionId": "go-1",
+        "providerStatus": "SUCCESSFUL",
+        "providerReason": null
+      }
+    },
+    "creditLedger": {
+      "5cc8ac3f-c8dd-44b1-b8de-a26901ae91e7": {
+        "id": "5cc8ac3f-c8dd-44b1-b8de-a26901ae91e7",
+        "createdAt": "2026-10-23T05:28:24.894Z",
+        "updatedAt": "2026-10-23T05:28:24.899Z",
+        "userId": "u-57aebe3a-04d8-416b-8e71-3857c962b1c7",
+        "delta": 100,
+        "reason": "purchase",
+        "paymentId": "6f2a0c36-1bd8-4664-975a-a6a84d33b79e",
+        "note": "go-500"
+      },
+      "d7065171-c945-4476-a36f-d2d7108f931f": {
+        "id": "d7065171-c945-4476-a36f-d2d7108f931f",
+        "createdAt": "2026-10-23T05:28:24.923Z",
+        "updatedAt": "2026-10-23T05:28:24.923Z",
+        "userId": "u-57aebe3a-04d8-416b-8e71-3857c962b1c7",
+        "delta": -7,
+        "reason": "usage",
+        "note": "chat"
+      },
+      "0c89d298-eea4-4d74-9d44-0d309f8a512f": {
+        "id": "0c89d298-eea4-4d74-9d44-0d309f8a512f",
+        "createdAt": "2026-10-23T05:28:24.971Z",
+        "updatedAt": "2026-10-23T05:28:24.988Z",
+        "userId": "u-b14c4d80-e438-443e-9957-50efb7cf1f7d",
+        "delta": 220,
+        "reason": "purchase",
+        "paymentId": null,
+        "note": "go-1000"
+      },
+      "8c6e3d85-5f9a-42d2-a27b-b543a863d54b": {
+        "id": "8c6e3d85-5f9a-42d2-a27b-b543a863d54b",
+        "createdAt": "2026-10-23T05:28:25.008Z",
+        "updatedAt": "2026-10-23T05:28:25.008Z",
+        "userId": "u-9278a1d1-5aca-4d19-9468-3621fac8358b",
+        "delta": 50,
+        "reason": "grant",
+        "paymentId": null,
+        "note": null
+      }
+    },
+    "notificationLog": {
+      "cff4910a-1ed3-4897-a9d7-43325f635f0b": {
+        "id": "cff4910a-1ed3-4897-a9d7-43325f635f0b",
+        "createdAt": "2026-10-23T05:28:24.541Z",
+        "updatedAt": "2026-10-23T05:28:24.541Z",
+        "key": "receipt:64a54f62-0af1-4022-8a91-4dd1d1d4ad33:email",
+        "userId": "u-037d6f07-cb4e-4165-9b76-520212c571e0",
+        "channel": "email"
+      },
+      "93817382-ca62-4f82-9bc8-092f1bade6c0": {
+        "id": "93817382-ca62-4f82-9bc8-092f1bade6c0",
+        "createdAt": "2026-10-23T05:28:24.629Z",
+        "updatedAt": "2026-10-23T05:28:24.629Z",
+        "key": "receipt:a2eeaaf6-5cd9-443e-a46a-c701ec049ebd:email",
+        "userId": "u-2a6c1768-20ae-4d6d-94b3-4175bb314bd5",
+        "channel": "email"
+      },
+      "28ca0e8b-a38c-4f91-9aad-4e1d01a01ef0": {
+        "id": "28ca0e8b-a38c-4f91-9aad-4e1d01a01ef0",
+        "createdAt": "2026-10-23T05:28:24.670Z",
+        "updatedAt": "2026-10-23T05:28:24.670Z",
+        "key": "receipt:69cc8ff2-e2c0-4e9d-99cf-7468bf622670:email",
+        "userId": "u-cc262f87-1c50-4d8a-89d9-5183d9b81bea",
+        "channel": "email"
+      },
+      "573343e9-8e6d-4c0f-bf76-14e87210ac73": {
+        "id": "573343e9-8e6d-4c0f-bf76-14e87210ac73",
+        "createdAt": "2026-10-23T05:28:24.708Z",
+        "updatedAt": "2026-10-23T05:28:24.708Z",
+        "key": "receipt:1dc2d168-f4e7-40bf-9a70-21e45f32583a:email",
+        "userId": "u-cc262f87-1c50-4d8a-89d9-5183d9b81bea",
+        "channel": "email"
+      },
+      "5ee22b55-ce60-419f-9e26-363436d049f3": {
+        "id": "5ee22b55-ce60-419f-9e26-363436d049f3",
+        "createdAt": "2026-10-23T05:28:24.728Z",
+        "updatedAt": "2026-10-23T05:28:24.728Z",
+        "key": "failed:85848c77-67ca-41cc-ba22-fb9f5d0d831a:email",
+        "userId": "u-026d8336-5736-40e6-93d2-e2ad499808f1",
+        "channel": "email"
+      },
+      "6f461012-bfaf-4782-8037-d73386917247": {
+        "id": "6f461012-bfaf-4782-8037-d73386917247",
+        "createdAt": "2026-10-23T05:28:24.829Z",
+        "updatedAt": "2026-10-23T05:28:24.829Z",
+        "key": "failed:663ec585-f4df-4c2b-bd28-231ce8772477:email",
+        "userId": "u-4de92001-fcab-4443-88e1-66cad0f5196b",
+        "channel": "email"
+      },
+      "72501474-078e-47f8-beb8-62542b4bdcbd": {
+        "id": "72501474-078e-47f8-beb8-62542b4bdcbd",
+        "createdAt": "2026-10-23T05:28:24.863Z",
+        "updatedAt": "2026-10-23T05:28:24.863Z",
+        "key": "receipt:a0b8a356-ab33-4af0-9af8-13bb6ec751d2:email",
+        "userId": "u-21f31041-28d7-4df5-be78-59b508ba196e",
+        "channel": "email"
+      },
+      "40f2125c-9cd6-4d68-bff1-8e5b5ee7063f": {
+        "id": "40f2125c-9cd6-4d68-bff1-8e5b5ee7063f",
+        "createdAt": "2026-10-23T05:28:24.905Z",
+        "updatedAt": "2026-10-23T05:28:24.905Z",
+        "key": "receipt:6f2a0c36-1bd8-4664-975a-a6a84d33b79e:email",
+        "userId": "u-57aebe3a-04d8-416b-8e71-3857c962b1c7",
+        "channel": "email"
+      },
+      "dccbcbfb-9ed3-4e4b-9440-393f971586f1": {
+        "id": "dccbcbfb-9ed3-4e4b-9440-393f971586f1",
+        "createdAt": "2026-10-23T05:28:24.944Z",
+        "updatedAt": "2026-10-23T05:28:24.944Z",
+        "key": "renewal-3:u-2c938ab8-1d1b-4ee3-9e4d-a9dbb7083b82:2026-10-25:email",
+        "userId": "u-2c938ab8-1d1b-4ee3-9e4d-a9dbb7083b82",
+        "channel": "email"
+      },
+      "5652ea3f-a007-4c03-ae50-7ffd7cf0a613": {
+        "id": "5652ea3f-a007-4c03-ae50-7ffd7cf0a613",
+        "createdAt": "2026-10-23T05:28:24.958Z",
+        "updatedAt": "2026-10-23T05:28:24.958Z",
+        "key": "expired:u-2c938ab8-1d1b-4ee3-9e4d-a9dbb7083b82:2026-10-23:email",
+        "userId": "u-2c938ab8-1d1b-4ee3-9e4d-a9dbb7083b82",
+        "channel": "email"
+      }
+    },
+    "usageRecord": {
+      "1fa12e2c-23f1-409d-addf-aa25a1387361": {
+        "id": "1fa12e2c-23f1-409d-addf-aa25a1387361",
+        "createdAt": "2026-10-23T05:28:24.918Z",
+        "updatedAt": "2026-10-23T05:28:24.918Z",
+        "userId": "u-57aebe3a-04d8-416b-8e71-3857c962b1c7",
+        "kind": "chat",
+        "credits": 20,
+        "model": "gonka",
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "costUsd": 0,
+        "channel": "web"
+      },
+      "77283079-5e06-4a9f-b892-d24b5fe6b707": {
+        "id": "77283079-5e06-4a9f-b892-d24b5fe6b707",
+        "createdAt": "2026-10-23T05:28:24.928Z",
+        "updatedAt": "2026-10-23T05:28:24.928Z",
+        "userId": "u-57aebe3a-04d8-416b-8e71-3857c962b1c7",
+        "kind": "chat",
+        "credits": 7,
+        "model": "gonka",
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "costUsd": 0,
+        "channel": "web"
+      },
+      "fa5961b5-238d-4213-88f4-8018ffa72444": {
+        "id": "fa5961b5-238d-4213-88f4-8018ffa72444",
+        "createdAt": "2026-10-23T05:28:24.977Z",
+        "updatedAt": "2026-10-23T05:28:24.983Z",
+        "userId": "u-b14c4d80-e438-443e-9957-50efb7cf1f7d",
+        "kind": "chat",
+        "credits": 3,
+        "model": "gonka",
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "costUsd": 0,
+        "channel": "telegram"
+      }
+    },
+    "memoryVector": {},
+    "generatedArtifact": {}
   }
 }

@@ -11,6 +11,7 @@ import type { DocumentService } from '../documents/service.js';
 import { OwnedRecordStore, type OwnedRecord } from '../storage/ownedRecordStore.js';
 import { annotateScript } from './annotate.js';
 import { computeLayout } from './layout.js';
+import { expandArchives, InputError, isPdf, isTyped, typedToPdf } from './inputs.js';
 import { loadPages } from '../documents/pages.js';
 import { buildBundle, safeName, type BundleFile } from './bundle.js';
 import { markCandidate } from './marking.js';
@@ -64,7 +65,7 @@ const sleep = (ms: number, signal?: AbortSignal) => new Promise<void>((res) => {
 interface MarkJobPayload { examId: string; runId: string; segment: number }
 interface RemarkJobPayload { examId: string; submissionId: string; questionIds: string[]; reason: string; actor: string }
 interface ExportJobPayload { examId: string; revision: number }
-interface SchemeJobPayload { examId: string; schemeFileIds: Array<{ fileId: string; name: string }>; questionPaper?: { fileId: string; name: string }; autoMark: boolean; actor: string }
+interface SchemeJobPayload { examId: string; schemeFileIds: Array<{ fileId: string; name: string }>; questionPaper?: { fileId: string; name: string }; autoMark: boolean; actor: string; /** No official scheme: the AI drafts one for the teacher to confirm. */ draft?: boolean }
 
 export interface UploadFile { name: string; buffer: Buffer; mime?: string }
 export interface CandidateMapping { fileName: string; candidateId: string; candidateName?: string }
@@ -223,6 +224,29 @@ export function createExamService(deps: ExamDeps) {
     return job;
   }
 
+  /**
+   * No official marking scheme: queue an AI draft from the question paper (if given) or from the questions as
+   * they appear on the candidates' scripts. A draft is never used until the teacher confirms it.
+   */
+  async function draftScheme(userId: string, examId: string, input: { questionPaper?: UploadFile } = {}) {
+    const exam = await load(userId, examId);
+    let questionPaper: SchemeJobPayload['questionPaper'];
+    if (input.questionPaper) {
+      questionPaper = { fileId: (await storeUpload(userId, input.questionPaper, 'document')).id, name: input.questionPaper.name };
+      await mutate(userId, examId, (e) => { e.questionPaper = { ...questionPaper!, documentId: undefined }; });
+    } else if (exam.questionPaper) questionPaper = { fileId: exam.questionPaper.fileId, name: exam.questionPaper.name };
+    if (!questionPaper && !exam.submissions.length) throw new ExamInputError('NO_SOURCE', 'Send the question paper or at least one candidate script so I can draft a marking scheme.');
+    const { job } = await deps.queue.submit<SchemeJobPayload>({ type: 'exam.scheme', ownerId: userId, payload: { examId, schemeFileIds: [], questionPaper, autoMark: false, actor: userId, draft: true } });
+    return job;
+  }
+
+  /** Recognition of a candidate's script, shared by marking and scheme drafting so it is done once. */
+  async function recognizeSubmission(userId: string, sub: Submission, signal?: AbortSignal) {
+    let original: Buffer;
+    try { original = (await deps.fileStore.read(sub.fileId, userId)).data; } catch { throw new JobError('SOURCE_UNAVAILABLE', 'The uploaded script is no longer available.'); }
+    return deps.documents.recognizeCached(userId, { buffer: original, name: sub.fileName.replace(/\.[a-z0-9]+$/i, sub.typed ? '.pdf' : '$&'), sourceFileId: sub.fileId }, { crossCheck: true, ...(sub.typed ? { forceRecognition: true } : {}) }, { signal });
+  }
+
   /** Text of a teacher document: its own text when it has some, otherwise handwriting/scan recognition. */
   async function documentTextOf(userId: string, fileId: string, name: string, ctx?: JobContext): Promise<{ text: string; documentId?: string }> {
     const { data, meta } = await deps.fileStore.read(fileId, userId);
@@ -236,9 +260,20 @@ export function createExamService(deps: ExamDeps) {
 
   async function runSchemeJob(job: FileJob<SchemeJobPayload>, ctx: JobContext) {
     const p = job.payload;
-    await ctx.progress('reading the marking scheme', 10);
+    await ctx.progress(p.draft ? 'reading the questions' : 'reading the marking scheme', 10);
     const texts: string[] = [];
     for (const f of p.schemeFileIds) texts.push((await documentTextOf(job.ownerId, f.fileId, f.name, ctx)).text);
+    if (p.draft) {
+      // A few scripts show the questions and how they are numbered; recognition is cached for marking later.
+      const ex = await load(job.ownerId, p.examId);
+      for (const sub of ex.submissions.slice(0, 3)) {
+        try {
+          const { record } = await recognizeSubmission(job.ownerId, sub, ctx.signal);
+          await mutate(job.ownerId, p.examId, (e) => { const x = e.submissions.find((y) => y.id === sub.id); if (x) x.documentId = record.id; });
+          texts.push(`--- Script ${sub.candidateId} ---\n${documentText(record.result, record.corrections)}`);
+        } catch (err) { if (ctx.signal.aborted) throw err; }
+      }
+    }
     let qpText: string | undefined;
     if (p.questionPaper) {
       const r = await documentTextOf(job.ownerId, p.questionPaper.fileId, p.questionPaper.name, ctx);
@@ -250,16 +285,18 @@ export function createExamService(deps: ExamDeps) {
     const agent = deps.agent();
     let extracted: Awaited<ReturnType<typeof extractScheme>>;
     try {
-      extracted = await extractScheme(agent.adapter, agent.model, texts.join('\n\n'), { questionPaperText: qpText, title: exam.title !== 'Examination' ? exam.title : undefined, signal: ctx.signal, fallbackModel: agent.fallbackModel });
+      if (p.draft && !qpText && !texts.join('').trim()) throw new JobError('NO_SOURCE', 'There is nothing to draft from: send the question paper or readable candidate scripts.');
+      extracted = await extractScheme(agent.adapter, agent.model, texts.join('\n\n'), { questionPaperText: qpText, title: exam.title !== 'Examination' ? exam.title : undefined, signal: ctx.signal, fallbackModel: agent.fallbackModel, draft: p.draft });
     } catch (e) {
-      if (e instanceof StructuredOutputError) throw new JobError('SCHEME_EXTRACTION_FAILED', 'The marking scheme could not be structured. Send it as text or JSON, or try again.');
+      if (e instanceof StructuredOutputError) throw new JobError('SCHEME_EXTRACTION_FAILED', p.draft ? 'A marking scheme could not be drafted. Send the question paper as text, or try again.' : 'The marking scheme could not be structured. Send it as text or JSON, or try again.');
+      if (e instanceof JobError) throw e;
       throw mapProvider(e);
     }
     let sv: SchemeVersion | undefined;
     await mutate(job.ownerId, p.examId, (e) => {
       sv = addSchemeVersion(e, p.actor, {
         scheme: extracted.validation.scheme, errors: extracted.validation.errors, warnings: [...extracted.validation.warnings, ...extracted.ambiguities],
-        source: { kind: 'document', fileIds: p.schemeFileIds.map((f) => f.fileId), note: p.schemeFileIds.map((f) => f.name).join(', ') }, autoConfirm: true,
+        source: { kind: 'document', fileIds: p.schemeFileIds.map((f) => f.fileId), note: p.draft ? 'Drafted by Bwenge AI (no official scheme)' : p.schemeFileIds.map((f) => f.name).join(', ') }, autoConfirm: !p.draft,
       });
       if (sv.scheme && e.title === 'Examination') e.title = sv.scheme.title;
     });
@@ -284,10 +321,10 @@ export function createExamService(deps: ExamDeps) {
     }
     try {
       const m = await sharp(f.buffer, { limitInputPixels: 80_000_000 }).metadata();
-      if (!m.format || !['jpeg', 'png', 'webp', 'tiff'].includes(m.format)) throw new Error('format');
+      if (!m.format || !['jpeg', 'png', 'webp', 'tiff', 'gif', 'heif', 'avif'].includes(m.format)) throw new Error('format');
       return { mime: `image/${m.format}`, pages: m.format === 'tiff' ? m.pages ?? 1 : 1 };
     } catch {
-      throw new ExamInputError('UNSUPPORTED_FORMAT', `${f.name} is not a PDF or a supported image (JPEG, PNG, WebP, TIFF).`);
+      throw new ExamInputError('UNSUPPORTED_FORMAT', `${f.name} is not a script I can read. Send PDFs, photos (JPEG, PNG, WebP, HEIC, TIFF), Word or text documents, or a ZIP folder of them.`);
     }
   }
 
@@ -298,6 +335,7 @@ export function createExamService(deps: ExamDeps) {
    */
   async function addSubmissions(userId: string, examId: string, files: UploadFile[], mapping: CandidateMapping[] = []) {
     const exam = await load(userId, examId);
+    try { files = await expandArchives(files); } catch (e) { if (e instanceof InputError) throw new ExamInputError('UNREADABLE', e.message); throw e; }
     if (!files.length) throw new ExamInputError('NO_FILES', 'Attach at least one candidate script.');
     if (exam.submissions.length + files.length > maxCandidates) throw new ExamInputError('TOO_MANY_CANDIDATES', `At most ${maxCandidates} candidates per examination.`, 413);
     const accepted: Submission[] = [];
@@ -309,14 +347,20 @@ export function createExamService(deps: ExamDeps) {
     // Explicit ids (mapping or file name) are reserved first so a newly assigned id never takes one of them.
     const explicit = new Map(files.map((f) => [f, byFile.get(f.name.toLowerCase())?.candidateId?.trim() || candidateIdFromFileName(f.name) || null]));
     const reserved = new Set([...explicit.values()].filter((x): x is string => !!x).map((x) => x.toLowerCase()));
-    for (const f of files) {
+    for (let f of files) {
       try {
+        // Typed answers are printed to a PDF that is read like a scan; the teacher's file is kept as it is.
+        let typedOriginal: UploadFile | null = null;
+        if (isTyped(f) && !isPdf(f)) {
+          typedOriginal = f;
+          try { f = { name: f.name, buffer: await typedToPdf(f), mime: 'application/pdf' }; } catch (e) { throw new ExamInputError('UNREADABLE', e instanceof Error ? e.message : `${f.name} could not be read.`); }
+        }
         const info = await inspectFile(f);
         if (info.pages > (deps.maxPages ?? 20)) throw new ExamInputError('TOO_MANY_PAGES', `${f.name} has ${info.pages} pages; the limit is ${deps.maxPages ?? 20}.`, 413);
-        const hash = sha256(f.buffer);
+        const hash = sha256((typedOriginal ?? f).buffer);
         if (hashes.has(hash)) throw new ExamInputError('DUPLICATE', `${f.name} is identical to the script of ${hashes.get(hash)}.`, 409);
         const m = byFile.get(f.name.toLowerCase());
-        let candidateId = explicit.get(f) ?? undefined;
+        let candidateId = explicit.get(typedOriginal ?? f) ?? undefined;
         let identity: Submission['identity'] = m?.candidateId?.trim() ? 'manifest' : 'filename';
         if (!candidateId) {
           identity = 'assigned';
@@ -328,6 +372,7 @@ export function createExamService(deps: ExamDeps) {
         const sub: Submission = {
           id: randomUUID(), candidateId, candidateName: m?.candidateName?.slice(0, 120), identity, fileId: stored.id, fileName: f.name.slice(0, 200), mime: info.mime,
           sha256: hash, pages: info.pages, uploadedAt: now(), state: 'queued', stateAt: now(),
+          ...(typedOriginal ? { typed: true, originalFileId: (await storeUpload(userId, typedOriginal, 'document')).id } : {}),
         };
         taken.add(candidateId.toLowerCase());
         hashes.set(hash, candidateId);
@@ -398,11 +443,8 @@ export function createExamService(deps: ExamDeps) {
     if (existing?.runId === runId && existing.questions.every((q) => q.ai)) return; // already done in an earlier attempt
 
     await setState(userId, examId, sub.id, 'validating');
-    let original: Buffer;
-    try { original = (await deps.fileStore.read(sub.fileId, userId)).data; } catch { throw new JobError('SOURCE_UNAVAILABLE', 'The uploaded script is no longer available.'); }
-
     await setState(userId, examId, sub.id, 'recognizing');
-    const { record, cached, key } = await deps.documents.recognizeCached(userId, { buffer: original, name: sub.fileName, sourceFileId: sub.fileId }, { crossCheck: true }, { signal });
+    const { record, cached, key } = await recognizeSubmission(userId, sub, signal);
     await mutate(userId, examId, (e) => { const s = e.submissions.find((x) => x.id === sub.id)!; s.documentId = record.id; s.recognitionCached = cached; s.recognitionKey = key; });
 
     await setState(userId, examId, sub.id, 'matching_questions');
@@ -911,7 +953,7 @@ export function createExamService(deps: ExamDeps) {
     createExam, load, mutate, setSchemeJson, confirmScheme, editSchemeQuestion, submitSchemeDocuments, addSubmissions, startMarking,
     summaries, overrideMark, confirmResults, correctTranscription, remarkQuestions, requestRemark, generateArtifacts, requestExport, artifacts, artifactRefs, candidateView, progress,
     latestScheme, confirmedScheme, findSub, findQuestion,
-    listExams, reviewList, reviewCandidate, pageImage, setLayout, release,
+    listExams, reviewList, reviewCandidate, pageImage, setLayout, release, draftScheme,
   };
 }
 
