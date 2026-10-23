@@ -44,7 +44,7 @@ const ingestLimiter = isDev ? (_req: Request, _res: Response, next: NextFunction
   message: { success: false, code: 'RATE_LIMITED', error: 'Too many uploads or re-index requests. Try again later.' },
 });
 
-const UPLOAD_TMP = path.join(process.env.KNOWLEDGE_TMP_DIR || os.tmpdir(), 'bwenge-knowledge-uploads');
+const UPLOAD_TMP = path.join(process.env.KNOWLEDGE_TMP_DIR || os.tmpdir(), `bwenge-knowledge-uploads-${process.getuid?.() ?? 'user'}`);
 mkdirSync(UPLOAD_TMP, { recursive: true, mode: 0o700 });
 const MAX_FILE = Number(process.env.KNOWLEDGE_MAX_FILE_BYTES) > 0 ? Number(process.env.KNOWLEDGE_MAX_FILE_BYTES) : 100 * 1024 * 1024;
 const MAX_FILES = Number(process.env.KNOWLEDGE_MAX_FILES_PER_UPLOAD) > 0 ? Number(process.env.KNOWLEDGE_MAX_FILES_PER_UPLOAD) : 500;
