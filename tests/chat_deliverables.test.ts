@@ -254,3 +254,18 @@ test('delivery check: invented download links are flagged; real attachment links
   assert.deepEqual(fabricatedLinks('[Download the workbook](https://example.com/data.xlsx)', [real]), ['https://example.com/data.xlsx']);
   assert.deepEqual(fabricatedLinks('See /api/files/abc?exp=1&sig=2', [real]), ['/api/files/abc?exp=1&sig=2']);
 });
+
+test('planner: 3D requests become an interactive model (create_3d_model), not a flat drawing', () => {
+  for (const message of ['generate 3 dimensianal structure of heart in arifact', 'Create a 3D model of a plant cell', 'show me the heart in three-dimensional form', 'build a ball-and-stick model of glucose', 'Make a rotatable model of the solar system']) {
+    const p = planOutput({ message });
+    assert.equal(p.output, 'model3d', message);
+    assert.deepEqual(p.tools, ['create_3d_model']);
+    assert.deepEqual(p.deliverables, [{ output: 'model3d', format: 'scene' }]);
+    assert.match(planHint(p), /create_3d_model/);
+    assert.deepEqual(missingDeliverables(p, [ref('image/svg+xml')]), p.deliverables, 'an SVG drawing does not count as the 3D model');
+    assert.deepEqual(missingDeliverables(p, [ref('application/vnd.bwenge.scene+json')]), []);
+  }
+  for (const message of ['What is a molecule?', 'show me how to rotate a matrix by 90 degrees', 'Give me a walkthrough of the code', 'draw a flowchart of photosynthesis']) {
+    assert.notEqual(planOutput({ message }).output, 'model3d', message);
+  }
+});

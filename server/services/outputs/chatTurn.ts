@@ -50,6 +50,7 @@ const FORMAT_MIME: Record<string, RegExp> = {
   docx: /wordprocessingml|msword/,
   pptx: /presentationml|ms-powerpoint/,
   pdf: /^application\/pdf/,
+  scene: /^application\/vnd\.bwenge\.scene\+json/,
 };
 
 /** Deliverables with no matching attachment (by file type). Each attachment satisfies one deliverable. */
@@ -65,7 +66,7 @@ export function missingDeliverables(plan: Pick<OutputPlan, 'deliverables'>, atta
   return missing;
 }
 
-const describe = (d: OutputPlan['deliverables'][number]) => (d.output === 'document' || d.output === 'template' ? `${d.format.toUpperCase()} file` : `${d.output} (${d.format.toUpperCase()})`);
+const describe = (d: OutputPlan['deliverables'][number]) => (d.output === 'model3d' ? '3D model (create_3d_model)' : d.output === 'document' || d.output === 'template' ? `${d.format.toUpperCase()} file` : `${d.output} (${d.format.toUpperCase()})`);
 
 /** File links in the answer that do not point at a file created in this turn. */
 export function fabricatedLinks(text: string, attachments: AttachmentRef[]): string[] {
