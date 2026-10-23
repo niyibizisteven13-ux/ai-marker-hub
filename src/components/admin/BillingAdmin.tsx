@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Banknote, BellRing, CheckCircle2, Coins, Loader2, PlugZap, XCircle, Plus, RefreshCw, Save, Search, Sparkles, Trash2, TrendingUp, Users } from 'lucide-react';
+import { Banknote, BellRing, CheckCircle2, Coins, Loader2, Pause, Play, PlugZap, ShieldAlert, ShieldCheck, XCircle, Plus, RefreshCw, Save, Search, Sparkles, Trash2, TrendingUp, Users } from 'lucide-react';
 import { authFetch } from '../../utils/authFetch';
 
 /**
@@ -82,6 +82,8 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
 
   return (
     <div className="space-y-6">
+      <AiGuardPanel notify={notify} />
+
       {/* Overview */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Kpi icon={<Banknote size={16} />} label="Revenue this month" value={overview ? rwf(overview.revenue.rwf) : '…'} detail={overview ? `≈ $${overview.revenue.usd} · ${overview.revenue.payments} payments` : ''} />
@@ -258,5 +260,96 @@ function Num({ label, value, onChange, step = 1, hint }: { label: string; value:
       <input className={`${input} mt-1`} type="number" step={step} value={Number.isFinite(value) ? value : 0} onChange={(e) => onChange(Number(e.target.value))} />
       {hint && <span className="mt-0.5 block text-[10px] text-[#6C789E]">{hint}</span>}
     </label>
+  );
+}
+
+// ── AI generation: pause switch and profit guard ─────────────────────────────
+interface GuardGroup { users: number; costUsd: number; credits: number; actions: number }
+interface Guard {
+  settings: { paused: boolean; pausedReason?: string | null; pausedAt?: string | null; lossGuard: { enabled: boolean; freeBudgetUsd: number; mode: 'free_only' | 'all' } };
+  economics: {
+    revenueUsd: number; costUsd: number; marginUsd: number; free: GuardGroup; paying: GuardGroup & { revenueUsd: number };
+    byChannel: Array<GuardGroup & { channel: string }>; topUsers: Array<{ user: string; paying: boolean; costUsd: number; credits: number; actions: number }>;
+    costPerFreeUser: number | null; costPerPayingUser: number | null; revenuePerPayingUser: number | null; conversionPercent: number | null;
+  };
+  block: 'none' | 'free' | 'all'; reason: string | null;
+}
+const usd = (n: number | null | undefined) => (n == null ? '—' : `$${n < 1 && n > 0 ? n.toFixed(4) : n.toFixed(2)}`);
+
+function AiGuardPanel({ notify }: { notify: (msg: string, error?: boolean) => void }) {
+  const [g, setG] = useState<Guard | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [budget, setBudget] = useState('');
+  const load = useCallback(async () => {
+    const r = await api<Guard>('/api/admin/billing/ai-guard');
+    setG(r); setBudget(String(r.settings.lossGuard.freeBudgetUsd));
+  }, []);
+  useEffect(() => { void load().catch((e) => notify(e.message, true)); const t = window.setInterval(() => void load().catch(() => undefined), 60_000); return () => window.clearInterval(t); }, [load, notify]);
+  const save = async (body: object, ok: string) => {
+    setBusy(true);
+    try { const r = await api<Guard>('/api/admin/billing/ai-guard', { method: 'PUT', body: JSON.stringify(body) }); setG(r); notify(ok); } catch (e) { notify((e as Error).message, true); } finally { setBusy(false); }
+  };
+  if (!g) return <div className={`${card} text-sm text-[#8A97C2]`}><Loader2 size={14} className="mr-2 inline animate-spin" />Loading AI status…</div>;
+  const e = g.economics;
+  const paused = g.settings.paused;
+  const tone = g.block === 'none' ? 'border-emerald-500/30 bg-emerald-500/[0.06]' : 'border-rose-500/40 bg-rose-500/[0.08]';
+  const statusText = paused ? 'Paused by an administrator: no one can generate (admins can still test).'
+    : g.block === 'all' ? `Stopped by the profit guard for everyone: ${g.reason}.`
+      : g.block === 'free' ? `Free users stopped by the profit guard: ${g.reason}. Paying users continue.`
+        : 'Running. Generation is allowed for everyone within their plan.';
+  return (
+    <section className={`rounded-2xl border p-5 ${tone}`}>
+      <div className="flex flex-wrap items-start gap-4">
+        <div className="min-w-0 flex-1">
+          <h3 className="flex items-center gap-2 text-base font-semibold text-white">{g.block === 'none' ? <ShieldCheck size={18} className="text-emerald-400" /> : <ShieldAlert size={18} className="text-rose-400" />} AI generation</h3>
+          <p className="mt-1 text-sm text-[#C9D3F0]">{statusText}</p>
+        </div>
+        <button disabled={busy} onClick={() => save({ paused: !paused }, paused ? 'AI generation resumed.' : 'AI generation paused for everyone.')}
+          className={`${btn} px-4 py-2 text-sm ${paused ? 'bg-emerald-500 text-white hover:bg-emerald-400' : 'bg-rose-500 text-white hover:bg-rose-400'}`}>
+          {busy ? <Loader2 size={15} className="animate-spin" /> : paused ? <Play size={15} /> : <Pause size={15} />} {paused ? 'Resume AI' : 'Pause AI now'}
+        </button>
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Kpi icon={<Banknote size={16} />} label="Revenue this month" value={usd(e.revenueUsd)} detail={`${e.paying.users} paying users · ${usd(e.revenuePerPayingUser)} each`} />
+        <Kpi icon={<TrendingUp size={16} />} label="AI cost this month" value={usd(e.costUsd)} detail={`margin ${e.marginUsd >= 0 ? '+' : ''}${usd(e.marginUsd)}`} />
+        <Kpi icon={<Users size={16} />} label="Free users" value={`${e.free.users} · ${usd(e.free.costUsd)}`} detail={`${usd(e.costPerFreeUser)} per user · budget ${usd(g.settings.lossGuard.freeBudgetUsd)}`} />
+        <Kpi icon={<Sparkles size={16} />} label="Paying users" value={`${e.paying.users} · ${usd(e.paying.costUsd)}`} detail={`${usd(e.costPerPayingUser)} cost per user · conversion ${e.conversionPercent ?? '—'}${e.conversionPercent != null ? '%' : ''}`} />
+      </div>
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <div className={card}>
+          <h4 className="text-sm font-semibold text-white">Profit guard</h4>
+          <p className="mt-1 text-xs text-[#8A97C2]">Checks this month's AI cost against revenue every minute and stops generation by itself before the platform loses money.</p>
+          <label className="mt-3 flex items-center gap-2 text-sm text-[#C9D3F0]">
+            <input type="checkbox" checked={g.settings.lossGuard.enabled} disabled={busy} onChange={(ev) => save({ lossGuard: { enabled: ev.target.checked } }, ev.target.checked ? 'Profit guard on.' : 'Profit guard off.')} /> Stop generation automatically when losing money
+          </label>
+          <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-[#8A97C2]">
+            <label>Monthly free budget (USD)
+              <div className="mt-1 flex gap-1.5"><input className={input} inputMode="decimal" value={budget} onChange={(ev) => setBudget(ev.target.value)} />
+                <button className={`${btn} bg-[#1A2240] text-[#C9D3F0] hover:bg-[#222C50]`} disabled={busy || !(Number(budget) >= 0)} onClick={() => save({ lossGuard: { freeBudgetUsd: Number(budget) } }, 'Free budget saved.')}><Save size={13} /></button></div>
+            </label>
+            <label>When in loss, stop
+              <select className={`${input} mt-1`} value={g.settings.lossGuard.mode} disabled={busy} onChange={(ev) => save({ lossGuard: { mode: ev.target.value } }, 'Saved.')}>
+                <option value="free_only">free users only</option>
+                <option value="all">everyone except admins</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div className={card}>
+          <h4 className="text-sm font-semibold text-white">Usage by platform</h4>
+          <table className="mt-2 w-full text-left text-xs text-[#C9D3F0]">
+            <thead className="text-[#8A97C2]"><tr><th className="py-1">Platform</th><th>Users</th><th>Actions</th><th>Credits</th><th>Cost</th></tr></thead>
+            <tbody>{e.byChannel.map((c) => <tr key={c.channel} className="border-t border-[#263052]"><td className="py-1.5 capitalize">{c.channel}</td><td>{c.users}</td><td>{c.actions}</td><td>{c.credits.toLocaleString('en-US')}</td><td>{usd(c.costUsd)}</td></tr>)}
+              {!e.byChannel.length && <tr><td colSpan={5} className="py-2 text-[#8A97C2]">No usage this month yet.</td></tr>}</tbody>
+          </table>
+          {e.topUsers.length > 0 && <>
+            <h4 className="mt-4 text-sm font-semibold text-white">Highest cost users</h4>
+            <ul className="mt-1 space-y-1 text-xs text-[#C9D3F0]">{e.topUsers.slice(0, 5).map((u) => <li key={u.user} className="flex justify-between gap-2"><span className="truncate">{u.user} <span className={`ml-1 rounded px-1.5 py-px text-[10px] ${u.paying ? 'bg-emerald-500/15 text-emerald-300' : 'bg-white/10 text-[#8A97C2]'}`}>{u.paying ? 'paying' : 'free'}</span></span><span>{u.actions} actions · {usd(u.costUsd)}</span></li>)}</ul>
+          </>}
+        </div>
+      </div>
+    </section>
   );
 }

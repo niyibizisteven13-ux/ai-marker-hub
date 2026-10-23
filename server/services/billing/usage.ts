@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../../db.js';
 import { PLANS, currentGoPacks, planFor, toRwf, walletBalance, type PlanId, type PlanInfo, type UsageKind } from './plans.js';
+import { guardFor } from './aiGuard.js';
 
 /**
  * Usage metering and plan limits. Every AI action is recorded with its real token usage and priced in
@@ -55,7 +56,7 @@ export async function usedTotals(userId: string, now = Date.now()) {
   return { p, used: { day, week, month }, perDay: Object.fromEntries(kinds.map((k, i) => [k, Number(counts[i] ?? 0)])) as Record<(typeof kinds)[number], number> };
 }
 
-export type LimitCode = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'FEATURE' | 'MESSAGE_TOO_LONG' | 'TOO_MANY_ATTACHMENTS';
+export type LimitCode = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'FEATURE' | 'MESSAGE_TOO_LONG' | 'TOO_MANY_ATTACHMENTS' | 'PAUSED' | 'PROTECTED';
 export interface GateResult {
   allowed: boolean;
   plan: PlanInfo;
@@ -96,6 +97,17 @@ export async function checkUsage(userId: string, req: { kind: UsageKind; chars?:
     allowed: false, plan, code, message: `${message} ${upsell(plan)}`, resetsAt: resetsAt?.toISOString(),
     ...(next ? { upgrade: { plan: next, url: '/upgrade?reason=limit' } } : {}),
   });
+  // The admin pause switch and the profit guard come first: they apply whatever the plan allowance says.
+  {
+    const role = (await db.user.findUnique({ where: { id: userId } }).catch(() => null))?.role ?? null;
+    const paying = plan.id !== 'FREE' || (await walletBalance(userId)) > 0;
+    const g = await guardFor(userId, { role, paying });
+    if ('code' in g) {
+      return g.code === 'PAUSED' || paying
+        ? { allowed: false, plan, code: g.code === 'PAUSED' ? 'PAUSED' : 'PROTECTED', message: g.message }
+        : deny('PROTECTED', g.message);
+    }
+  }
   if ((req.chars ?? 0) > L.maxMessageChars) return deny('MESSAGE_TOO_LONG', `Your message is ${req.chars!.toLocaleString('en-US')} characters; the ${plan.name} plan allows ${L.maxMessageChars.toLocaleString('en-US')}. Attach long text as a file instead.`);
   if ((req.attachments ?? 0) > L.maxAttachments) return deny('TOO_MANY_ATTACHMENTS', `The ${plan.name} plan allows ${L.maxAttachments} attachments per message.`);
   const { p, used, perDay } = await usedTotals(userId, now);

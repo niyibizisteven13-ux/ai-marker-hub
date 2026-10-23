@@ -1491,7 +1491,7 @@ export default function App() {
 
   if (publicFormLoading || publicFormError || publicForm) {
     return (
-      <div className="min-h-[100dvh] w-full bg-[#F0EBF8] dark:bg-[#141416] text-slate-900 overflow-y-auto flex flex-col">
+      <div className="min-h-[100dvh] w-full bg-[#F4F4F1] dark:bg-[#141416] text-slate-900 overflow-y-auto flex flex-col">
         <header className="sticky top-0 z-30 flex items-center justify-between border-b border-black/10 bg-white/90 px-4 sm:px-8 py-3 backdrop-blur-md">
           <div className="flex items-center gap-2.5">
             <span className="h-3 w-3 rounded-full" style={{ backgroundColor: publicForm?.themeColor || '#D97757' }} />
@@ -1575,7 +1575,7 @@ export default function App() {
   }
 
   return (
-    <div className="h-[var(--app-h,100dvh)] w-full min-w-0 bg-[#262624] text-[#FAF9F5] font-sans antialiased transition-colors duration-200 overflow-hidden flex flex-col">
+    <div className="dark h-[var(--app-h,100dvh)] w-full min-w-0 bg-[#262624] text-[#FAF9F5] font-sans antialiased transition-colors duration-200 overflow-hidden flex flex-col">
       {AI_SCAN_ENABLED && scannerOpen && (
         <div className="fixed inset-0 z-[70] bg-[#0f1013] flex flex-col w-full h-[var(--app-h,100dvh)] overflow-hidden animate-in fade-in duration-200">
           <DocumentScanner
@@ -1698,7 +1698,7 @@ export default function App() {
                     }}
                   />
                 ) : (
-                  resultsPane
+                  <div className="flex h-full min-h-0 flex-col lg:pt-12">{resultsPane}</div>
                 )}
               </div>
             </div>

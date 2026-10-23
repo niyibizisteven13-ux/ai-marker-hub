@@ -40,7 +40,8 @@ const START_VERB = /\b(mark|grade|correct|assess|score|kosora|corrige[rz]?|noter
 /** A batch: plural scripts/papers/candidates. A single "grade this essay" stays with the normal chat. */
 const START_BATCH = /\b(papers|scripts|exams|examinations|candidates|students|answer\s*sheets|copies|ibizamini|impapuro)\b/i;
 const START_SCHEME = /\b(mark(?:ing)?\s+scheme|marking\s+guide|bar[eè]me|official\s+rubric)\b/i;
-const isStart = (msg: string, visualFiles: number) => START_VERB.test(msg) && (START_SCHEME.test(msg) || (START_BATCH.test(msg) && visualFiles >= 2) || (visualFiles >= 1 && /\.zip\b|\bfolder\b/i.test(msg)));
+/** A marking request: a marking verb with at least one script (one paper or a whole class, any format), or a scheme. */
+const isStart = (msg: string, visualFiles: number) => START_VERB.test(msg) && (START_SCHEME.test(msg) || START_BATCH.test(msg) || visualFiles >= 1);
 const SCHEME_NAME = /(mark(?:ing)?[\s_-]*(scheme|guide|key)|rubric|memo(?:randum)?|answer[\s_-]*key|solutions?|bar[eè]me|corrig[eé]|marking)/i;
 const PAPER_NAME = /(question[\s_-]*paper|questions|exam[\s_-]*paper|examen|[eé]preuve|test[\s_-]*paper)/i;
 const MANIFEST_NAME = /(manifest|candidates?|mapping|class[\s_-]*list|roster|students?)/i;
@@ -162,6 +163,39 @@ export function createExamChat(deps: ExamChatDeps) {
     return 'pending';
   }
 
+  /** Waits for the latest marking run to finish, reporting "Marked 3 of 20 scripts". */
+  async function waitRun(userId: string, examId: string, onStatus?: (t: string) => void): Promise<'done' | 'pending'> {
+    const until = Date.now() + waitMs;
+    let last = '';
+    while (Date.now() < until) {
+      const e = await s.load(userId, examId);
+      const run = e.runs[e.runs.length - 1];
+      if (!run || ['completed', 'completed_with_warnings', 'failed'].includes(run.state)) return 'done';
+      const p = s.progress(e);
+      const done = (p.counts.completed ?? 0) + (p.counts.completed_with_warnings ?? 0) + (p.counts.failed ?? 0);
+      const total = p.candidates.length;
+      const line = run.state === 'generating_artifacts' ? 'Drawing the red-pen corrections on the scripts' : `Marked ${done} of ${total} script${total === 1 ? '' : 's'}`;
+      if (onStatus && line !== last) { last = line; onStatus(`${line}…`); }
+      await new Promise((r) => setTimeout(r, 700));
+    }
+    return 'pending';
+  }
+
+  /** Starts marking whatever is queued (if anything) and replies with the marked PDFs once the run is finished. */
+  async function markAndFinish(userId: string, examId: string, lines: string[], onStatus?: (t: string) => void): Promise<ChatReply> {
+    let e = await s.load(userId, examId);
+    if (e.submissions.some((x) => x.state === 'queued')) {
+      try { await s.startMarking(userId, examId); } catch (err) { if (!(err instanceof ExamInputError && ['NOTHING_TO_MARK', 'RUN_IN_PROGRESS'].includes(err.code))) throw err; }
+    }
+    e = await s.load(userId, examId);
+    if (!e.runs.length) return { text: [...lines, statusText(e)].filter(Boolean).join('\n\n'), attachments: [] };
+    const st = await waitRun(userId, examId, onStatus);
+    e = await s.load(userId, examId);
+    if (st === 'pending') return { text: [...lines, statusText(e), 'Marking is still running in the background; the marked PDFs will be ready shortly. Ask "status" to get them.'].filter(Boolean).join('\n\n'), attachments: [] };
+    const fin = await finishedReply(e);
+    return { text: [...lines, fin.text].filter(Boolean).join('\n\n'), attachments: fin.attachments };
+  }
+
   /** Resolves a candidate reference: explicit id, a supplied name, an ordinal ("the second paper"), or the last one discussed. */
   function resolveCandidate(e: ExamRecord, msg: string, explicit: string | null, last: string | null): { id: string } | { ask: string } {
     const words = msg.toLowerCase();
@@ -204,18 +238,23 @@ export function createExamChat(deps: ExamChatDeps) {
     const { list, stats } = s.summaries(e);
     const set = e.artifacts.find((a) => a.status === 'ready');
     const flagged = list.reduce((a, x) => a + x.openFlags, 0);
-    const needs = list.filter((x) => x.openFlags > 0).length;
     const failed = e.submissions.filter((x) => x.state === 'failed');
+    const max = list[0]?.maxTotal;
+    // The scripts themselves, corrected in red pen: one PDF per student (up to 10), otherwise the ZIP of all of them.
+    const pdfIds = set ? e.submissions.map((x) => set.candidatePdfs[x.id]).filter(Boolean) : [];
+    const pdfs = (await Promise.all((pdfIds.length && pdfIds.length <= 10 ? pdfIds : [set?.bundleFileId]).map(ref))).filter((x): x is AttachmentRef => !!x);
+    const workbook = await ref(set?.workbookFileId);
+    const rows = list.slice(0, 12).map((c) => `| ${c.candidateId}${c.candidateName ? ` (${c.candidateName})` : ''} | ${fmt(c.total)} / ${fmt(c.maxTotal)} | ${c.percent}% |${c.openFlags ? ' check' : ''}`);
     const text = [
-      `The marking package is ready${set && set.resultRevision !== e.resultRevision ? ' (an older version; say "regenerate" for the latest marks)' : ''}. ${list.length} candidate${list.length === 1 ? '' : 's'} marked${stats?.mean !== null && stats?.mean !== undefined ? `, class mean ${fmt(stats.mean)} / ${stats ? list[0]?.maxTotal ?? '' : ''}` : ''}${stats?.passRate !== null && stats?.passRate !== undefined ? `, ${stats.passRate}% at or above the ${e.passPercent}% pass mark` : ''}.`,
-      flagged ? `${flagged} item${flagged === 1 ? '' : 's'} across ${needs} candidate${needs === 1 ? '' : 's'} need attention (uncertain handwriting, matching or marks); they are listed in the report and the Review Log sheet.` : 'No items were flagged for review.',
+      `**Marking finished.** ${list.length} script${list.length === 1 ? '' : 's'} marked${stats?.mean !== null && stats?.mean !== undefined && max ? `, class average ${fmt(stats.mean)} / ${max}` : ''}${stats?.passRate !== null && stats?.passRate !== undefined ? `, ${stats.passRate}% passed (pass mark ${e.passPercent}%)` : ''}.`,
+      rows.length ? `| Student | Marks | % |\n|---|---|---|\n${rows.join('\n')}${list.length > 12 ? `\n\n… and ${list.length - 12} more in the results.` : ''}` : '',
+      pdfs.length ? `The ${pdfIds.length && pdfIds.length <= 10 ? `marked paper${pdfIds.length === 1 ? ' is' : 's are'}` : 'marked papers are'} attached: each script with the red-pen ticks, crosses, marks per question, corrections and the circled total.` : '',
+      flagged ? `${flagged} item${flagged === 1 ? '' : 's'} with unclear handwriting or uncertain marks ${flagged === 1 ? 'is' : 'are'} marked "check".` : '',
       failed.length ? `Could not process: ${failed.map((x) => `${x.candidateId} (${x.error?.message ?? 'error'})`).join('; ')}.` : '',
-      `${link('Open the review screen', `/exams/${e.id}/review`)} to see the red marks on every page, move any that landed in the wrong place, and release the marked PDFs.`,
-      'All marks are AI-proposed and provisional until you confirm them. You can ask, for example: "Why did C001 lose marks on question 2?", "Change C001\'s question 2 to 4 because the method is correct", or "Show C001\'s marked paper".',
-      ...(set?.problems.length ? [`Notes: ${set.problems.slice(0, 5).join(' ')}`] : []),
+      `**Do you want the results in Excel?** ${workbook ? `[Download the Excel workbook](${workbook.url})` : 'Say "excel" and I will make it'} · ${link('Open the results', `/exams/${e.id}/review`)} to see every page, move a mark or change it before you share the PDFs.`,
+      'You can also ask: "Why did C001 lose marks on question 2?" or "Change C001 question 2 to 4 because the method is right".',
     ].filter(Boolean).join('\n\n');
-    const attachments = (await Promise.all([ref(set?.bundleFileId), ref(set?.workbookFileId)])).filter((x): x is AttachmentRef => !!x);
-    return { text, attachments };
+    return { text, attachments: pdfs };
   }
 
   async function exportReply(userId: string, examId: string, what: 'all' | 'workbook' | 'report', onStatus?: (t: string) => void): Promise<ChatReply> {
@@ -231,6 +270,16 @@ export function createExamChat(deps: ExamChatDeps) {
     const ids = what === 'workbook' ? [set.workbookFileId] : what === 'report' ? [set.htmlFileId, set.bundleFileId] : [set.bundleFileId, set.workbookFileId];
     const attachments = (await Promise.all(ids.map(ref))).filter((x): x is AttachmentRef => !!x);
     return { text: `Here is the ${what === 'workbook' ? 'results workbook' : 'complete marking package'} (result revision ${set.resultRevision}${set.resultRevision === e.resultRevision ? ', up to date' : ''}). Marks are provisional unless confirmed.\n\nCheck the red marks on each page, move any that landed in the wrong place, and release the PDFs: ${link('Open the review screen', `/exams/${e.id}/review`)}${set.problems.length ? `\n\nNotes: ${set.problems.slice(0, 5).join(' ')}` : ''}`, attachments };
+  }
+
+  /** Uses the latest scheme without a "confirm" round-trip when it has no errors; warnings are reported, not blocking. */
+  async function autoConfirm(userId: string, examId: string): Promise<{ ok: true; summary: string; warnings: string } | { ok: false; text: string }> {
+    const e = await s.load(userId, examId);
+    const sv = s.latestScheme(e);
+    if (!sv?.scheme || sv.status === 'invalid') return { ok: false, text: `The marking scheme could not be used:\n${(sv?.errors ?? ['it could not be read']).slice(0, 6).map((x) => `- ${x}`).join('\n')}\nSend a clearer scheme, or tell me the fix (for example "question 3 is worth 6 marks").` };
+    if (sv.status !== 'confirmed') await s.confirmScheme(userId, examId, sv.version);
+    const qs = sv.scheme.questions;
+    return { ok: true, summary: `${qs.length} question${qs.length === 1 ? '' : 's'}, ${sv.scheme.totalMarks} marks`, warnings: sv.warnings.slice(0, 4).join(' ') };
   }
 
   /** Drafts a marking scheme (no official one) and shows it for confirmation; nothing is marked until confirmed. */
@@ -277,28 +326,38 @@ export function createExamChat(deps: ExamChatDeps) {
       await stage();
       return { text: `Several files could be the marking scheme. I received: ${listing}. Which one is the official marking scheme (for example "file 2")?`, attachments: [] };
     }
-    if (!schemes.length && !inlineScheme && !hasScheme && !draftWanted) {
+    // No marking scheme: Bwenge drafts one from the questions and marks with it straight away (the teacher can still
+    // send their own scheme and re-mark). Without any scripts there is nothing to draft from, so ask for them.
+    const autoDraft = !schemes.length && !inlineScheme && !hasScheme && (draftWanted || scripts.length > 0 || papers.length > 0);
+    if (!schemes.length && !inlineScheme && !hasScheme && !autoDraft) {
       await stage();
-      return { text: `I received: ${listing}.\n\nTo mark them I need a marking scheme. You can:\n- attach your marking scheme or rubric (PDF, photo, Word or text with the marks per question), or say which file it is ("file 2 is the marking scheme");\n- or reply **"draft the marking scheme"** and I will write one from the question paper (or the questions on the scripts) for you to check and confirm before anything is marked.\n\nTo add scripts from paper, ${link('scan them with your phone', '/scan')}.`, attachments: [] };
+      return { text: `I received: ${listing}. Attach the students' scripts (PDFs, photos, Word documents or a ZIP folder) and I will mark them${papers.length ? '' : ', with or without a marking scheme'}. You can also ${link('scan them with your phone', '/scan')}.`, attachments: [] };
     }
     if (!exam || (schemes.length && exam.runs.length)) {
       const title = /\b(?:exam|examination|test)\s+(?:called|named|titled)\s+["“]?([^"”\n]{3,80})/i.exec(message)?.[1];
       exam = await s.createExam(userId, { title });
     }
     await saveCtx(userId, { examId: exam.id, pending: null });
-    const lines: string[] = ['Exam materials received. Checking the marking scheme and candidate files.'];
+    const lines: string[] = [];
     if (scripts.length) {
       const { accepted, rejected } = await s.addSubmissions(userId, exam.id, scripts, mapping);
       // A file name without a candidate id gets a new id; its name is kept as a label so the mapping is visible.
       if (accepted.some((a) => a.identity === 'assigned')) {
         await s.mutate(userId, exam.id, (e) => { for (const a of accepted) { const x = e.submissions.find((y) => y.id === a.id); if (x && x.identity === 'assigned' && !x.candidateName) x.candidateName = x.fileName.replace(/\.[a-z0-9]+$/i, '').slice(0, 60); } });
       }
-      lines.push(`${accepted.length} candidate script${accepted.length === 1 ? '' : 's'} registered: ${accepted.slice(0, 15).map((a) => `${a.candidateId} ← ${a.fileName}${a.identity === 'assigned' ? ' (new id)' : ''}`).join(', ')}${accepted.length > 15 ? ', …' : ''}.`);
+      onStatus?.(`Received ${accepted.length} script${accepted.length === 1 ? '' : 's'}…`);
       if (rejected.length) lines.push(`Not accepted: ${rejected.map((r) => `${r.fileName}: ${r.reason}`).join(' ')}`);
     }
-    if (!schemes.length && !inlineScheme && !hasScheme && draftWanted) {
-      lines.push(await draftReply(userId, exam.id, papers[0], onStatus));
-      return { text: lines.join('\n\n'), attachments: [] };
+    if (autoDraft) {
+      const job = await s.draftScheme(userId, exam.id, { questionPaper: papers[0] });
+      onStatus?.('Reading the questions and writing a marking scheme…');
+      const st = await waitJob(userId, job.id, onStatus);
+      if (st === 'failed') { const j = await deps.queue.get(job.id, userId); lines.push(`I could not work out a marking scheme from these papers: ${j?.error?.message ?? 'unknown error'}. Attach the marking scheme or the question paper and I will mark straight away.`); return { text: lines.join('\n\n'), attachments: [] }; }
+      if (st === 'pending') { lines.push('Still working out the marking scheme. Ask "status" in a moment.'); return { text: lines.join('\n\n'), attachments: [] }; }
+      const auto = await autoConfirm(userId, exam.id);
+      if ('text' in auto) { lines.push(auto.text); return { text: lines.join('\n\n'), attachments: [] }; }
+      lines.push(`No marking scheme was attached, so I wrote one from the questions (${auto.summary}). To use your own, send it and say "mark again with this scheme".`);
+      return markAndFinish(userId, exam.id, lines, onStatus);
     }
     if (schemes.length || inlineScheme) {
       const schemeFiles = schemes.length ? schemes : [{ name: 'marking-scheme.txt', buffer: Buffer.from(inlineScheme!, 'utf8'), mime: 'text/plain' }];
@@ -308,16 +367,17 @@ export function createExamChat(deps: ExamChatDeps) {
       exam = await s.load(userId, exam.id);
       if (st === 'failed') { const j = await deps.queue.get(job.id, userId); lines.push(`The marking scheme could not be read: ${j?.error?.message ?? 'unknown error'}.`); return { text: lines.join('\n\n'), attachments: [] }; }
       if (st === 'pending') { lines.push('Still reading the marking scheme. Marking starts automatically once it is structured and unambiguous; ask "status" for progress.'); return { text: lines.join('\n\n'), attachments: [] }; }
-      const sv = s.latestScheme(exam)!;
-      if (sv.status === 'confirmed' && sv.scheme) lines.push(`The marking scheme is structured (version ${sv.version}):\n${schemeSummary(sv.scheme)}`);
-    } else if (hasScheme && exam.submissions.some((x) => x.state === 'queued')) {
-      try { await s.startMarking(userId, exam.id); } catch (err) { if (!(err instanceof ExamInputError && err.code === 'NOTHING_TO_MARK')) throw err; }
+      const auto = await autoConfirm(userId, exam.id);
+      if ('text' in auto) { lines.push(auto.text); return { text: lines.join('\n\n'), attachments: [] }; }
+      if (auto.warnings) lines.push(`Marking scheme read (${auto.summary}). Please check: ${auto.warnings}`);
       exam = await s.load(userId, exam.id);
+      if (exam.submissions.length) return markAndFinish(userId, exam.id, lines, onStatus);
+    } else if (hasScheme && exam.submissions.some((x) => x.state === 'queued')) {
+      return markAndFinish(userId, exam.id, lines, onStatus);
     }
     const status = statusText(exam);
     if (status) lines.push(status);
-    if (exam.runs.length && !['completed', 'completed_with_warnings', 'failed'].includes(exam.runs[exam.runs.length - 1].state)) lines.push('Marking runs in the background. Ask "status" at any time; the package (annotated papers, report and Excel workbook) arrives when it is ready.');
-    else if (!exam.submissions.length) lines.push(`Now attach the candidate scripts: PDFs, photos, Word documents, or one ZIP folder with a sub-folder of page photos per student. A file or folder name with the candidate number (for example C014.pdf) keeps the identities exact. You can also ${link('scan them with your phone', '/scan')}.`);
+    if (!exam.submissions.length) lines.push(`Got the marking scheme. Now attach the students' scripts (PDFs, photos, Word documents or a ZIP folder) and I will mark them straight away. You can also ${link('scan them with your phone', '/scan')}.`);
     return { text: lines.join('\n\n'), attachments: [] };
   }
 
@@ -401,13 +461,14 @@ export function createExamChat(deps: ExamChatDeps) {
     switch (cmd.action) {
       case 'status': {
         if (runState && ['completed', 'completed_with_warnings'].includes(runState) && exam.artifacts.some((a) => a.status === 'ready')) return finishedReply(exam);
+        if (runState && !['completed', 'completed_with_warnings', 'failed'].includes(runState)) return markAndFinish(userId, exam.id, [], onStatus);
         return { text: statusText(exam) || 'Nothing is being marked right now.', attachments: [] };
       }
       case 'confirm_scheme': {
         const sv = await s.confirmScheme(userId, exam.id);
         const e = await s.load(userId, exam.id);
         let started = '';
-        if (e.submissions.some((x) => x.state === 'queued')) { const r = await s.startMarking(userId, exam.id); started = ` Marking ${r.candidates} script${r.candidates === 1 ? '' : 's'} in the background now; ask "status" for progress.`; }
+        if (e.submissions.some((x) => x.state === 'queued')) return markAndFinish(userId, exam.id, [`Marking scheme version ${sv.version} confirmed.`], onStatus);
         return { text: `Marking scheme version ${sv.version} confirmed.${started}`, attachments: [] };
       }
       case 'scheme_marks': {

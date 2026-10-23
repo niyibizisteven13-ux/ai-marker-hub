@@ -155,3 +155,21 @@ cd /opt/nexus && sudo -u nexus npm run --silent momo:diagnose            # add a
 ```
 
 Each line is one request-to-pay with its HTTP status (`202 OK` = accepted). Nothing is charged in the sandbox, and no keys or tokens are printed.
+
+## AI pause switch and profit guard
+
+**Admin → Upgrades & Subscriptions → AI generation** shows this month's numbers:
+- revenue against AI cost, with the margin;
+- free users against paying users: how many, what they cost, and what each costs on average;
+- conversion: the share of active users who pay;
+- usage by platform (web and Telegram);
+- the users who cost the most (emails masked).
+
+The panel has two controls:
+
+- **Pause AI now** stops every new AI action at once (chat, marking, Telegram, practice) for everyone except admins. Users see "Temporarily unavailable"; after a resume, "continue" finishes their request.
+- **Profit guard** (on by default) checks the month's AI cost against revenue every minute and stops new AI actions by itself:
+  - **Free users:** paused when they cost more than the monthly free budget (default $10). Paying users continue, and free users are offered GO credits or PRO.
+  - **Everyone except admins:** only when the mode is "everyone" and total cost is above revenue plus the free budget.
+
+"Paying" means an active PRO or Institution plan, GO credits bought, or a payment this month. Actions already running finish; only new ones are refused. The guard lives in `server/services/billing/aiGuard.ts`; every AI action passes through it in `checkUsage`.

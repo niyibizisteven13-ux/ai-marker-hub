@@ -329,9 +329,11 @@ test('platform context: the AI knows the plan, credits left, real links, and whe
   assert.match(web, /Free plan/);
   assert.match(web, /Credits left: \d+ of 20 today/);
   assert.match(web, /\[Open the scanner\]\([^)]*\/scan\)/);
-  assert.match(web, /\[the review screen\]\([^)]*\/exams\)/);
+  assert.match(web, /\[The results page\]\([^)]*\/exams\)/);
   assert.match(web, /\[Upgrade\]\([^)]*\/upgrade\)/);
-  assert.match(web, /draft the marking scheme/);
+  assert.match(web, /Without a scheme, Bwenge writes one from the questions and marks straight away/);
+  assert.match(web, /red pen/);
+  assert.match(web, /Never ask the user to confirm a scheme/);
   assert.match(web, /Suggest upgrading at most once/);
   const tg = await platformContext(free, 'telegram');
   assert.match(tg, /\/scan command/);
@@ -386,4 +388,47 @@ test('a request stopped by a limit resumes on "continue" / "give me result" afte
   rememberBlocked('u-big', { query: 'q', attachments: [{ base64: 'x'.repeat(26 * 1024 * 1024) }], attachmentIds: ['f9'] });
   assert.deepEqual(peekPending('u-big')!.body, { query: 'q', attachmentIds: ['f9'] }, 'huge inline uploads are not kept in memory');
   resetPending();
+});
+
+test('AI guard: admin pause stops everyone but admins; the profit guard stops free users when they cost more than the budget', async () => {
+  const { decide, saveGuardSettings, resetGuard, guardState } = await import('../server/services/billing/aiGuard.js');
+  const base = { paused: false, lossGuard: { enabled: true, freeBudgetUsd: 5, mode: 'free_only' as const } };
+  assert.equal(decide(base, { revenueUsd: 0, costUsd: 4, free: { users: 3, costUsd: 4, credits: 0, actions: 0 } }).block, 'none');
+  assert.equal(decide(base, { revenueUsd: 0, costUsd: 6, free: { users: 3, costUsd: 6, credits: 0, actions: 0 } }).block, 'free');
+  assert.equal(decide({ ...base, lossGuard: { ...base.lossGuard, mode: 'all' } }, { revenueUsd: 10, costUsd: 16, free: { users: 3, costUsd: 1, credits: 0, actions: 0 } }).block, 'all', 'paying users cost more than they paid');
+  assert.equal(decide({ ...base, lossGuard: { ...base.lossGuard, enabled: false } }, { revenueUsd: 0, costUsd: 99, free: { users: 3, costUsd: 99, credits: 0, actions: 0 } }).block, 'none');
+  assert.equal(decide({ ...base, paused: true }, { revenueUsd: 99, costUsd: 0, free: { users: 0, costUsd: 0, credits: 0, actions: 0 } }).block, 'all');
+
+  const free = await newUser();
+  const go = await newUser();
+  await db.creditLedger.create({ data: { id: randomUUID(), userId: go, delta: 100, reason: 'purchase', paymentId: null, note: 'go', createdAt: new Date() } });
+  const admin = await newUser({ role: 'ADMIN' });
+
+  // Pause: nobody but admins.
+  await saveGuardSettings({ paused: true, pausedReason: 'maintenance' }, admin);
+  const p1 = await checkUsage(free, { kind: 'chat' });
+  assert.equal(p1.allowed, false);
+  assert.equal(p1.code, 'PAUSED');
+  assert.equal((await checkUsage(go, { kind: 'chat' })).code, 'PAUSED');
+  assert.equal((await checkUsage(admin, { kind: 'chat' })).allowed, true, 'admins can still test');
+  await saveGuardSettings({ paused: false }, admin);
+  assert.equal((await checkUsage(free, { kind: 'chat' })).allowed, true);
+
+  // Free users this month cost more than the budget: free users stop, paying users continue.
+  await db.usageRecord.create({ data: { id: randomUUID(), userId: free, kind: 'chat', credits: 1, model: 'claude-opus', inputTokens: 0, outputTokens: 0, costUsd: 50, channel: 'telegram', createdAt: new Date() } });
+  await saveGuardSettings({ lossGuard: { enabled: true, freeBudgetUsd: 5, mode: 'free_only' } }, admin);
+  const st = await guardState(true);
+  assert.equal(st.block, 'free');
+  assert.ok(st.economics.byChannel.some((c) => c.channel === 'telegram' && c.costUsd >= 50), 'cost tracked per platform');
+  const f = await checkUsage(free, { kind: 'chat' });
+  assert.equal(f.allowed, false);
+  assert.equal(f.code, 'PROTECTED');
+  assert.match(f.message!, /Free AI answers are paused/);
+  assert.match(f.message!, /GO credits/, 'offers a way to continue');
+  assert.equal((await checkUsage(go, { kind: 'chat' })).allowed, true, 'paying users continue');
+  await saveGuardSettings({ lossGuard: { enabled: false } }, admin);
+  assert.equal((await checkUsage(free, { kind: 'chat' })).allowed, true);
+  await db.usageRecord.deleteMany({ where: { userId: free } });
+  await saveGuardSettings({ lossGuard: { enabled: true, freeBudgetUsd: 10 } }, admin);
+  resetGuard();
 });

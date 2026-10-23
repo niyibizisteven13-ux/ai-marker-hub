@@ -18,28 +18,29 @@
  * strip them before sending the schema to respondents.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { AlignLeft, AtSign, Calendar, CheckSquare, ChevronDownSquare, CircleDot, Clock, Grid2x2Check, Grid3x3, Hash, Link2, Phone, SlidersHorizontal, Star, Type, Upload, type LucideIcon } from 'lucide-react';
 import DynamicForm from './DynamicForm';
 import { copyToClipboard } from '../utils/copyToClipboard';
 
 /* ------------------------------------------------------------------ types */
 
 export const QUESTION_TYPES = [
-  { type: 'text', label: 'Short answer', glyph: 'Aa' },
-  { type: 'long_text', label: 'Paragraph', glyph: '¶' },
-  { type: 'radio', label: 'Multiple choice', glyph: '( )' },
-  { type: 'checkbox', label: 'Checkboxes', glyph: '[ ]' },
-  { type: 'select', label: 'Dropdown', glyph: '▾' },
-  { type: 'date', label: 'Date', glyph: '31' },
-  { type: 'number', label: 'Number', glyph: '#' },
-  { type: 'email', label: 'Email', glyph: '@' },
-  { type: 'tel', label: 'Phone', glyph: '+' },
-  { type: 'url', label: 'Link', glyph: '://' },
-  { type: 'file', label: 'File upload', glyph: '↑' },
-  { type: 'linear_scale', label: 'Linear scale', glyph: '1–5' },
-  { type: 'rating', label: 'Rating', glyph: '★' },
-  { type: 'radio_grid', label: 'Multiple choice grid', glyph: '::' },
-  { type: 'checkbox_grid', label: 'Checkbox grid', glyph: '[::]' },
-  { type: 'time', label: 'Time', glyph: ':' },
+  { type: 'text', label: 'Short answer', glyph: 'Aa', icon: Type },
+  { type: 'long_text', label: 'Paragraph', glyph: '¶', icon: AlignLeft },
+  { type: 'radio', label: 'Multiple choice', glyph: '( )', icon: CircleDot },
+  { type: 'checkbox', label: 'Checkboxes', glyph: '[ ]', icon: CheckSquare },
+  { type: 'select', label: 'Dropdown', glyph: '▾', icon: ChevronDownSquare },
+  { type: 'date', label: 'Date', glyph: '31', icon: Calendar },
+  { type: 'number', label: 'Number', glyph: '#', icon: Hash },
+  { type: 'email', label: 'Email', glyph: '@', icon: AtSign },
+  { type: 'tel', label: 'Phone', glyph: '+', icon: Phone },
+  { type: 'url', label: 'Link', glyph: '://', icon: Link2 },
+  { type: 'file', label: 'File upload', glyph: '↑', icon: Upload },
+  { type: 'linear_scale', label: 'Linear scale', glyph: '1–5', icon: SlidersHorizontal },
+  { type: 'rating', label: 'Rating', glyph: '★', icon: Star },
+  { type: 'radio_grid', label: 'Multiple choice grid', glyph: '::', icon: Grid3x3 },
+  { type: 'checkbox_grid', label: 'Checkbox grid', glyph: '[::]', icon: Grid2x2Check },
+  { type: 'time', label: 'Time', glyph: ':', icon: Clock },
 ] as const;
 
 const TYPE_LABEL: Record<string, string> = Object.fromEntries(QUESTION_TYPES.map(t => [t.type, t.label]));
@@ -830,7 +831,7 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, onUpda
   const headBtn = `inline-flex min-h-10 items-center gap-2 whitespace-nowrap rounded-xl border border-[#DADCE0] px-3 text-[13px] font-bold text-[#202124] hover:bg-black/5 sm:min-h-11 sm:px-4 sm:text-sm ${ring}`;
 
   return (
-    <div className="min-h-full bg-[#F0EBF8] text-[#202124]">
+    <div className="min-h-full bg-[#F4F4F1] text-[#202124]">
       {/* ---------- header ---------- */}
       <header className="sticky top-0 z-20 border-b border-[#E0E0E0] bg-white px-3 py-2.5 shadow-sm sm:px-8 sm:py-4">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-3">
@@ -924,7 +925,7 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, onUpda
         {view === 'preview' ? (
           <div role="tabpanel" aria-label="Preview" className="space-y-3">
             <p className="rounded-xl bg-[#FFFFFF] px-4 py-3 text-sm text-[#5F6368]">Preview only. Nothing you enter here is saved.</p>
-            <div className="rounded-2xl bg-[#F0EBF8] p-4 sm:p-6">
+            <div className="rounded-2xl bg-[#F4F4F1] p-4 sm:p-6">
               <DynamicForm
                 key={schemaJson.length}
                 schema={schema}
@@ -1046,7 +1047,7 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, onUpda
                 {QUESTION_TYPES.map(t => (
                   <button key={t.type} type="button" onClick={() => insert(makeQuestion(t.type))}
                     className={`flex min-h-12 items-center gap-3 rounded-xl border border-[#E0E0E0] bg-[#F8F9FA] px-3 text-left text-sm font-medium text-[#202124] hover:border-[#D97757] ${ring}`}>
-                    <span aria-hidden="true" className="w-9 shrink-0 text-center font-mono text-xs text-[#B4502F]">{t.glyph}</span>
+                    <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#FCE9E2] text-[#B4502F]">{React.createElement((t as { icon: LucideIcon }).icon, { size: 16, strokeWidth: 2 })}</span>
                     {t.label}
                   </button>
                 ))}

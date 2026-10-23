@@ -882,7 +882,8 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
       res.setHeader('Connection', 'keep-alive');
       const limitEmitter = makeEmitter(res);
       limitEmitter.send('limit', { code: gate.code, plan: gate.plan.id, resetsAt: gate.resetsAt, upgrade: gate.upgrade });
-      limitEmitter.send('text', { text: `**Limit reached.** ${gate.message}${gate.upgrade ? `\n\n[See plans and upgrade](${gate.upgrade.url})` : ''}\n\nAfter upgrading or buying credits, say **"continue"** and I will finish this request without re-uploading.` });
+      const unavailable = gate.code === 'PAUSED' || gate.code === 'PROTECTED';
+      limitEmitter.send('text', { text: `**${unavailable ? 'Temporarily unavailable.' : 'Limit reached.'}** ${gate.message}${gate.upgrade ? `\n\n[See plans and upgrade](${gate.upgrade.url})` : ''}\n\n${gate.code === 'PAUSED' ? 'When it is back, say **"continue"** and I will finish this request without re-uploading.' : 'After upgrading or buying credits, say **"continue"** and I will finish this request without re-uploading.'}` });
       limitEmitter.done();
       return;
     }
