@@ -212,6 +212,24 @@ export interface MarkCandidateInput {
   fallbackModel?: string | null;
   /** Questions per model call. */
   chunkSize?: number;
+  /** The teacher's marking preferences for this exam. */
+  preferences?: { credit: 'partial' | 'strict'; feedback: 'brief' | 'detailed' };
+  /** Called as each group of questions goes to the marker (for live progress). */
+  onChunk?: (questionIds: string[]) => void | Promise<void>;
+}
+
+/** Teacher preferences as instructions; they never override the scheme's own rules. */
+export function preferenceLines(p?: MarkCandidateInput['preferences']): string {
+  if (!p) return '';
+  return [
+    p.credit === 'strict'
+      ? 'TEACHER PREFERENCE - strict marking: award a criterion\'s marks only when the work fully meets it. Give part of a criterion\'s marks only where the scheme itself defines part marks for it.'
+      : 'TEACHER PREFERENCE - partial credit: where the scheme\'s mark steps allow, award part of a criterion\'s marks for work that partly meets it, and say what was missing.',
+    p.feedback === 'detailed'
+      ? 'TEACHER PREFERENCE - detailed feedback: feedback may be up to four sentences explaining what was right, what was wrong and how to improve.'
+      : '',
+    'These preferences never override the official marking scheme: where the scheme is explicit, follow the scheme.',
+  ].filter(Boolean).join('\n');
 }
 
 export async function markCandidate(adapter: ProviderAdapter, model: string, input: MarkCandidateInput): Promise<{ marks: Record<string, AiQuestionMark>; usage: { input: number; output: number } }> {
@@ -223,12 +241,14 @@ export async function markCandidate(adapter: ProviderAdapter, model: string, inp
   const size = input.chunkSize ?? 6;
   for (let i = 0; i < qs.length; i += size) {
     const chunk = qs.slice(i, i + size);
+    await input.onChunk?.(chunk.map((q) => q.id));
     let out: ModelMark[] = [];
     try {
       const res = await generateStructured<{ questions: ModelMark[] }>(adapter, {
         model, system: SYSTEM, schema: MARK_SCHEMA, maxTokens: 12_000, signal: input.signal, fallbackModel: input.fallbackModel,
         prompt: [
           input.scheme.instructions ? `GENERAL MARKING INSTRUCTIONS:\n${input.scheme.instructions}` : '',
+          preferenceLines(input.preferences),
           input.questionPaperText ? `<question_paper>\n${input.questionPaperText.slice(0, 40_000)}\n</question_paper>` : '',
           `OFFICIAL MARKING SCHEME (questions to mark now):\n${chunk.map((q) => schemeBlock(q, input.scheme.allowHalfMarks)).join('\n\n')}`,
           `<candidate_script>\n${transcript.slice(0, 150_000)}\n</candidate_script>`,

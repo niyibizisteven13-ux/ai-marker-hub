@@ -10,7 +10,7 @@ export type CandidateState =
   | 'queued' | 'validating' | 'recognizing' | 'matching_questions' | 'marking' | 'verifying'
   | 'generating_artifacts' | 'completed' | 'completed_with_warnings' | 'failed';
 
-export type BatchState = CandidateState;
+export type BatchState = CandidateState | 'cancelled';
 
 export type ResultStatus = 'provisional' | 'needs_review' | 'user_corrected' | 'user_confirmed';
 
@@ -167,7 +167,51 @@ export interface ArtifactSet {
   candidatePdfStamps: Record<string, string>;
   problems: string[];
   bundleBytes?: number;
+  /** Candidate PDFs that were reopened, rendered and matched to the stored marks before release. */
+  verified?: number;
 }
+
+/**
+ * Live marking events (contract v1). Each one records a real state change in this record, with a
+ * per-exam sequence number so a reconnecting viewer can replay what it missed. Payloads never carry
+ * document text, prompts or file contents: only ids, counts, marks and short teacher-facing messages.
+ */
+export type ExamEventType =
+  | 'job_created' | 'document_inspected' | 'page_processing_started' | 'handwriting_recovery_started'
+  | 'handwriting_recovery_completed' | 'question_detected' | 'clarification_required' | 'rubric_processing_started'
+  | 'rubric_ready' | 'marking_started' | 'question_marking_started' | 'question_marked' | 'uncertainty_detected'
+  | 'teacher_review_required' | 'script_marked' | 'pdf_generation_started' | 'pdf_generation_completed' | 'job_completed'
+  | 'job_failed' | 'job_cancelled';
+
+export interface ExamEvent {
+  v: 1;
+  seq: number;
+  type: ExamEventType;
+  at: string;
+  runId?: string;
+  jobId?: string;
+  submissionId?: string;
+  candidateId?: string;
+  questionId?: string;
+  page?: number;
+  message: string;
+  /** Completed work, e.g. scripts marked of the run's scripts. */
+  progress?: { done: number; total: number };
+  data?: Record<string, string | number | boolean | null>;
+}
+
+/** How the teacher wants this exam marked (asked in chat or set on the review screen). */
+export interface MarkingPreferences {
+  /** partial: credit each satisfied criterion; strict: a criterion earns marks only when fully met. */
+  credit: 'partial' | 'strict';
+  /** Red corrections under wrong answers on the marked PDF. */
+  corrections: boolean;
+  /** Feedback length in the report and on the summary page. */
+  feedback: 'brief' | 'detailed';
+  updatedAt?: string;
+}
+
+export const DEFAULT_PREFERENCES: MarkingPreferences = { credit: 'partial', corrections: true, feedback: 'brief' };
 
 export interface ExamRecord extends OwnedRecord {
   title: string;
@@ -180,4 +224,8 @@ export interface ExamRecord extends OwnedRecord {
   resultRevision: number;
   audit: AuditEvent[];
   artifacts: ArtifactSet[];
+  /** Live marking events (latest 2,000) and the last sequence number used. */
+  events?: ExamEvent[];
+  eventSeq?: number;
+  preferences?: MarkingPreferences;
 }

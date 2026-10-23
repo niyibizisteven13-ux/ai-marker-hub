@@ -47,7 +47,7 @@ const taskSchema = z.object({
     z.object({
       kind: z.literal('json-schema'),
       response: z.string(),
-      schema: z.record(z.unknown()),
+      schema: z.record(z.string(), z.unknown()),
       expectValid: z.boolean(),
     }),
     z.object({

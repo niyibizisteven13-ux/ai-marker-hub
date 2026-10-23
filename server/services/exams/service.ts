@@ -10,6 +10,7 @@ import { documentText, finalText } from '../documents/pipeline.js';
 import type { DocumentService } from '../documents/service.js';
 import { OwnedRecordStore, type OwnedRecord } from '../storage/ownedRecordStore.js';
 import { annotateScript } from './annotate.js';
+import { verifyMarkedPdf } from './verifyPdf.js';
 import { computeLayout } from './layout.js';
 import { expandArchives, InputError, isPdf, isTyped, typedToPdf } from './inputs.js';
 import { loadPages } from '../documents/pages.js';
@@ -19,7 +20,7 @@ import { matchAnswers } from './matching.js';
 import { buildReportData, renderExamReport, validateExamReport } from './report.js';
 import { classStatistics, currentSummaries, effectiveMarks, openFlags, schemeOf, summarizeCandidate, type CandidateSummary } from './results.js';
 import { changedQuestions, extractScheme, questionKey, validateScheme, type MarkingScheme } from './scheme.js';
-import type { ArtifactSet, AuditEvent, CandidateResult, CandidateState, ExamRecord, LayoutOverride, MarkingRun, QuestionResult, SchemeVersion, Submission } from './types.js';
+import { DEFAULT_PREFERENCES, type ArtifactSet, type AuditEvent, type CandidateResult, type CandidateState, type ExamEvent, type ExamRecord, type LayoutOverride, type MarkingPreferences, type MarkingRun, type QuestionResult, type SchemeVersion, type Submission } from './types.js';
 import { buildWorkbook } from './workbook.js';
 
 /**
@@ -50,6 +51,11 @@ export interface ExamDeps {
   /** Time a marking job works before handing over to a continuation job (stays under the queue deadline). */
   segmentBudgetMs?: number;
   retryDelayMs?: number;
+  /**
+   * Premium gate for new marking work (marking, re-marking, scheme reading or drafting, exports). Checked
+   * here, inside the service, so chat, REST and any later route all go through it. Absent = allowed.
+   */
+  entitlement?: (userId: string) => Promise<{ allowed: boolean; code?: string; message?: string; upgradeUrl?: string }>;
   /** Called once per marked or re-marked script with the model tokens it used, for credits and cost tracking. */
   onUsage?: (userId: string, u: { model: string; input: number; output: number; what: 'mark' | 'remark' }) => void;
 }
@@ -59,7 +65,7 @@ const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 /** Released and unchanged since: any later change to marks or layout makes the PDF a draft again. */
 export const isReleased = (r: CandidateResult | undefined) => !!r?.released && r.released.resultUpdatedAt === r.updatedAt;
 /** Stamp of what a candidate PDF was drawn from (result version and release state). */
-const pdfStamp = (r: CandidateResult) => `${r.updatedAt}|${isReleased(r) ? 'released' : 'draft'}`;
+const pdfStamp = (r: CandidateResult, corrections = true) => `${r.updatedAt}|${isReleased(r) ? 'released' : 'draft'}${corrections ? '' : '|no-corrections'}`;
 const sha256 = (b: Buffer | string) => createHash('sha256').update(b).digest('hex');
 const now = () => new Date().toISOString();
 const sleep = (ms: number, signal?: AbortSignal) => new Promise<void>((res) => { const t = setTimeout(res, ms); signal?.addEventListener('abort', () => { clearTimeout(t); res(); }, { once: true }); });
@@ -103,13 +109,31 @@ export function createExamService(deps: ExamDeps) {
   const budget = deps.segmentBudgetMs ?? 8 * 60 * 1000;
   const maxCandidates = deps.maxCandidates ?? 100;
 
+  // Live viewers of an exam's events (this process). Other processes replay from the stored record.
+  const listeners = new Map<string, Set<(ev: ExamEvent) => void>>();
+  function subscribe(examId: string, fn: (ev: ExamEvent) => void): () => void {
+    const set = listeners.get(examId) ?? new Set();
+    set.add(fn);
+    listeners.set(examId, set);
+    return () => { set.delete(fn); if (!set.size) listeners.delete(examId); };
+  }
+  /** Appends an event to the record inside an update, so the event and the state change are saved together. */
+  const emit = (e: ExamRecord, ev: Omit<ExamEvent, 'v' | 'seq' | 'at'>) => {
+    e.eventSeq = (e.eventSeq ?? 0) + 1;
+    (e.events ??= []).push({ v: 1, seq: e.eventSeq, at: now(), ...ev, message: ev.message.slice(0, 300) });
+    if (e.events.length > 2000) e.events.splice(0, e.events.length - 2000);
+  };
+
   // Serialises read-modify-write updates per exam (candidates are processed concurrently).
   const locks = new Map<string, Promise<unknown>>();
   async function mutate(userId: string, examId: string, fn: (e: ExamRecord) => void): Promise<ExamRecord> {
     const prev = locks.get(examId) ?? Promise.resolve();
     const run = prev.catch(() => {}).then(async () => {
-      const rec = await deps.store.update(examId, userId, (e) => { fn(e); });
+      let before = 0;
+      const rec = await deps.store.update(examId, userId, (e) => { before = e.eventSeq ?? 0; fn(e); });
       if (!rec) throw new ExamInputError('NOT_FOUND', 'Examination not found.', 404);
+      const fresh = (rec.events ?? []).filter((ev) => ev.seq > before);
+      if (fresh.length) for (const l of listeners.get(examId) ?? []) for (const ev of fresh) { try { l(ev); } catch { /* a viewer never breaks marking */ } }
       return rec;
     });
     locks.set(examId, run);
@@ -120,6 +144,12 @@ export function createExamService(deps: ExamDeps) {
     const e = await deps.store.get(examId, userId);
     if (!e) throw new ExamInputError('NOT_FOUND', 'Examination not found.', 404);
     return e;
+  }
+
+  async function requirePremium(userId: string) {
+    if (!deps.entitlement) return;
+    const d = await deps.entitlement(userId);
+    if (!d.allowed) throw new ExamInputError(d.code === 'UPGRADE_REQUIRED' ? 'UPGRADE_REQUIRED' : 'LIMIT_REACHED', d.message ?? 'Marking is not available on your plan.', d.code === 'UPGRADE_REQUIRED' ? 402 : 429, d.upgradeUrl ? { upgradeUrl: d.upgradeUrl } : undefined);
   }
 
   const audit = (e: ExamRecord, ev: Omit<AuditEvent, 'revision' | 'at'>) => { e.audit.push({ ...ev, revision: e.resultRevision, at: now() }); if (e.audit.length > 5000) e.audit.splice(0, e.audit.length - 5000); };
@@ -215,6 +245,7 @@ export function createExamService(deps: ExamDeps) {
   async function submitSchemeDocuments(userId: string, examId: string, input: { scheme: UploadFile[]; questionPaper?: UploadFile; autoMark?: boolean }) {
     if (!input.scheme.length) throw new ExamInputError('NO_SCHEME', 'Upload the official marking scheme.');
     await load(userId, examId);
+    await requirePremium(userId);
     const schemeFileIds = [];
     for (const f of input.scheme) schemeFileIds.push({ fileId: (await storeUpload(userId, f, 'document')).id, name: f.name });
     let questionPaper: SchemeJobPayload['questionPaper'];
@@ -232,6 +263,7 @@ export function createExamService(deps: ExamDeps) {
    */
   async function draftScheme(userId: string, examId: string, input: { questionPaper?: UploadFile } = {}) {
     const exam = await load(userId, examId);
+    await requirePremium(userId);
     let questionPaper: SchemeJobPayload['questionPaper'];
     if (input.questionPaper) {
       questionPaper = { fileId: (await storeUpload(userId, input.questionPaper, 'document')).id, name: input.questionPaper.name };
@@ -263,6 +295,7 @@ export function createExamService(deps: ExamDeps) {
   async function runSchemeJob(job: FileJob<SchemeJobPayload>, ctx: JobContext) {
     const p = job.payload;
     await ctx.progress(p.draft ? 'reading the questions' : 'reading the marking scheme', 10);
+    await mutate(job.ownerId, p.examId, (e) => emit(e, { type: 'rubric_processing_started', jobId: job.id, message: p.draft ? 'Drafting a provisional marking scheme from the questions (no official scheme was given).' : `Reading the marking scheme (${p.schemeFileIds.map((f) => f.name).join(', ').slice(0, 120)}).`, data: { draft: !!p.draft } }));
     const texts: string[] = [];
     for (const f of p.schemeFileIds) texts.push((await documentTextOf(job.ownerId, f.fileId, f.name, ctx)).text);
     if (p.draft) {
@@ -301,6 +334,12 @@ export function createExamService(deps: ExamDeps) {
         source: { kind: 'document', fileIds: p.schemeFileIds.map((f) => f.fileId), note: p.draft ? 'Drafted by Bwenge AI (no official scheme)' : p.schemeFileIds.map((f) => f.name).join(', ') }, autoConfirm: !p.draft,
       });
       if (sv.scheme && e.title === 'Examination') e.title = sv.scheme.title;
+      const qs = sv.scheme?.questions.length ?? 0;
+      if (sv.status === 'confirmed') emit(e, { type: 'rubric_ready', jobId: job.id, message: `Marking scheme v${sv.version} ready: ${qs} question${qs === 1 ? '' : 's'}, ${sv.scheme?.totalMarks ?? 0} marks.`, data: { schemeVersion: sv.version, questions: qs, totalMarks: sv.scheme?.totalMarks ?? 0 } });
+      else emit(e, { type: 'clarification_required', jobId: job.id, message: sv.status === 'invalid'
+        ? `The marking scheme needs fixing before marking: ${sv.errors.slice(0, 2).join('; ').slice(0, 200)}`
+        : p.draft ? `Draft marking scheme v${sv.version} (${qs} questions) is provisional, not the official scheme. Check it and say "confirm the marking scheme".` : `Marking scheme v${sv.version} needs your confirmation before marking.`,
+        data: { schemeVersion: sv.version, status: sv.status, draft: !!p.draft } });
     });
     let markJobId: string | null = null;
     if (sv!.status === 'confirmed' && p.autoMark) {
@@ -400,10 +439,11 @@ export function createExamService(deps: ExamDeps) {
       throw new ExamInputError(latest ? 'SCHEME_NOT_CONFIRMED' : 'NO_SCHEME', latest ? 'Confirm the marking scheme before marking starts.' : 'Upload the official marking scheme first.', 409, latest?.errors);
     }
     if (!deps.visionAvailable()) throw new ExamInputError('VISION_MODEL_UNAVAILABLE', 'Handwriting recognition needs a vision-capable model (set AI_AGENT_PROVIDER=anthropic).', 503);
+    await requirePremium(userId);
     const ids = (opts.submissionIds?.length ? opts.submissionIds : exam.submissions.filter((s) => opts.remarkAll || s.state === 'queued' || s.state === 'failed' || !exam.results[s.id] || exam.results[s.id].schemeVersion !== sv.version).map((s) => s.id))
       .filter((id) => exam.submissions.some((s) => s.id === id));
     if (!ids.length) throw new ExamInputError('NOTHING_TO_MARK', 'Every script is already marked with the current scheme. Ask to re-mark if you want a fresh run.', 409);
-    const active = exam.runs.find((r) => !['completed', 'completed_with_warnings', 'failed'].includes(r.state));
+    const active = exam.runs.find((r) => !['completed', 'completed_with_warnings', 'failed', 'cancelled'].includes(r.state));
     if (active) throw new ExamInputError('RUN_IN_PROGRESS', 'A marking run is already in progress for this examination.', 409);
     const run: MarkingRun = { id: randomUUID(), schemeVersion: sv.version, submissionIds: ids, state: 'queued', createdAt: now(), createdBy: userId, jobIds: [] };
     const { job } = await deps.queue.submit<MarkJobPayload>({ type: 'exam.mark', ownerId: userId, payload: { examId, runId: run.id, segment: 0 }, idempotencyKey: `${run.id}:0`, maxAttempts: 3 });
@@ -411,16 +451,26 @@ export function createExamService(deps: ExamDeps) {
     await mutate(userId, examId, (e) => {
       e.runs.push(run);
       for (const s of e.submissions) if (ids.includes(s.id)) { s.state = 'queued'; s.stateAt = now(); delete s.error; }
+      const pref = e.preferences ?? DEFAULT_PREFERENCES;
+      emit(e, { type: 'job_created', runId: run.id, jobId: job.id, progress: { done: 0, total: ids.length }, message: `Marking ${ids.length} script${ids.length === 1 ? '' : 's'} against marking scheme v${sv.version} (${pref.credit === 'strict' ? 'strict' : 'partial-credit'} marking).`, data: { schemeVersion: sv.version, candidates: ids.length, credit: pref.credit } });
     });
     return { runId: run.id, jobId: job.id, candidates: ids.length, schemeVersion: sv.version };
   }
 
-  async function setState(userId: string, examId: string, submissionId: string, state: CandidateState, error?: { code: string; message: string }) {
+  async function setState(userId: string, examId: string, submissionId: string, state: CandidateState, error?: { code: string; message: string }, ...events: Array<Omit<ExamEvent, 'v' | 'seq' | 'at'>>) {
     await mutate(userId, examId, (e) => {
       const s = e.submissions.find((x) => x.id === submissionId);
       if (s) { s.state = state; s.stateAt = now(); if (error) s.error = error; else delete s.error; }
+      for (const ev of events) emit(e, ev);
     });
   }
+
+  /** Scripts of a run that are finished, for progress counts. */
+  const runProgress = (e: ExamRecord, runId: string) => {
+    const r = e.runs.find((x) => x.id === runId);
+    const ids = r?.submissionIds ?? [];
+    return { done: e.submissions.filter((s) => ids.includes(s.id) && ['completed', 'completed_with_warnings', 'failed'].includes(s.state)).length, total: ids.length };
+  };
 
   function mapProvider(e: unknown): unknown {
     const cat = (e as { category?: string })?.category;
@@ -444,20 +494,44 @@ export function createExamService(deps: ExamDeps) {
     const existing = exam.results[sub.id];
     if (existing?.runId === runId && existing.questions.every((q) => q.ai)) return; // already done in an earlier attempt
 
+    const ref = { runId, submissionId: sub.id, candidateId: sub.candidateId };
     await setState(userId, examId, sub.id, 'validating');
-    await setState(userId, examId, sub.id, 'recognizing');
+    await setState(userId, examId, sub.id, 'recognizing', undefined, { ...ref, type: 'page_processing_started', message: `Reading ${sub.candidateId}'s script (${sub.pages} page${sub.pages === 1 ? '' : 's'}).`, data: { pages: sub.pages } });
     const { record, cached, key } = await recognizeSubmission(userId, sub, signal);
-    await mutate(userId, examId, (e) => { const s = e.submissions.find((x) => x.id === sub.id)!; s.documentId = record.id; s.recognitionCached = cached; s.recognitionKey = key; });
+    const pages = record.result.pages;
+    const elements = pages.flatMap((pg) => pg.elements);
+    const unclear = pages.flatMap((pg) => pg.elements.filter((el) => el.uncertainty !== 'low').map(() => pg.page));
+    const veryUnclear = elements.filter((el) => el.uncertainty === 'high').length;
+    const tiled = pages.filter((pg) => pg.tiling);
+    await mutate(userId, examId, (e) => {
+      const s = e.submissions.find((x) => x.id === sub.id)!; s.documentId = record.id; s.recognitionCached = cached; s.recognitionKey = key;
+      emit(e, { ...ref, type: 'document_inspected', message: `${sub.candidateId}: ${pages.length} page${pages.length === 1 ? '' : 's'} read${cached ? ' (reused an earlier reading)' : ''}, ${elements.length} passages${unclear.length ? `, ${unclear.length} unclear` : ', handwriting readable'}.`, data: { pages: pages.length, passages: elements.length, unclear: unclear.length, cached } });
+      if (tiled.length) {
+        const t = tiled.reduce((a, pg) => ({ tiles: a.tiles + pg.tiling!.tiles, replaced: a.replaced + pg.tiling!.replaced, agreed: a.agreed + pg.tiling!.agreed, added: a.added + pg.tiling!.added }), { tiles: 0, replaced: 0, agreed: 0, added: 0 });
+        emit(e, { ...ref, type: 'handwriting_recovery_completed', message: `${sub.candidateId}: small handwriting re-read close up on ${tiled.length} page${tiled.length === 1 ? '' : 's'}: ${t.replaced} reading${t.replaced === 1 ? '' : 's'} improved, ${t.added} passage${t.added === 1 ? '' : 's'} found, ${t.agreed} confirmed.`, data: t });
+      }
+      if (unclear.length) emit(e, { ...ref, type: 'uncertainty_detected', page: unclear[0], message: `${sub.candidateId}: ${unclear.length} passage${unclear.length === 1 ? '' : 's'} not fully clear on page${new Set(unclear).size === 1 ? '' : 's'} ${[...new Set(unclear)].join(', ')}. ${unclear.length === 1 ? 'It is' : 'They are'} marked on the most likely reading and flagged for you to check, not treated as mistakes.`, data: { unclear: unclear.length, veryUnclear } });
+    });
 
     await setState(userId, examId, sub.id, 'matching_questions');
     const match = matchAnswers(record.result, record.corrections, scheme);
+    const found = scheme.questions.filter((q) => (match.questions[q.id]?.elementIds.length ?? 0) > 0);
+    const missing = scheme.questions.filter((q) => !found.includes(q)).map((q) => q.number);
 
-    await setState(userId, examId, sub.id, 'marking');
+    await setState(userId, examId, sub.id, 'marking', undefined, { ...ref, type: 'marking_started', progress: runProgress(await load(userId, examId), runId), message: `Marking ${sub.candidateId}.` }, { ...ref, type: 'question_detected', message: `${sub.candidateId}: answers found for ${found.length} of ${scheme.questions.length} questions${missing.length ? ` (not found: ${missing.slice(0, 8).join(', ')})` : ''}. Marking now.`, data: { found: found.length, questions: scheme.questions.length, missing: missing.join(', ').slice(0, 120) || null } });
     exam = await load(userId, examId);
     const agent = deps.agent();
     let marked: Awaited<ReturnType<typeof markCandidate>>;
     try {
-      marked = await markCandidate(agent.adapter, agent.model, { scheme, questionIds: scheme.questions.map((q) => q.id), match, questionPaperText: await questionPaperText(userId, exam), runId, schemeVersion: run.schemeVersion, signal, fallbackModel: agent.fallbackModel });
+      const pref = exam.preferences ?? DEFAULT_PREFERENCES;
+      marked = await markCandidate(agent.adapter, agent.model, {
+        scheme, questionIds: scheme.questions.map((q) => q.id), match, questionPaperText: await questionPaperText(userId, exam), runId, schemeVersion: run.schemeVersion, signal, fallbackModel: agent.fallbackModel,
+        preferences: { credit: pref.credit, feedback: pref.feedback },
+        onChunk: (ids) => mutate(userId, examId, (e) => {
+          const nums = ids.map((id) => scheme.questions.find((q) => q.id === id)?.number ?? id);
+          emit(e, { ...ref, type: 'question_marking_started', questionId: ids[0], message: `${sub.candidateId}: marking question${nums.length === 1 ? '' : 's'} ${nums.join(', ')}.`, data: { questions: nums.join(', ') } });
+        }).then(() => undefined),
+      });
     } catch (e) {
       throw mapProvider(e);
     }
@@ -480,6 +554,16 @@ export function createExamService(deps: ExamDeps) {
       s.state = questions.some((q) => openFlags(q).length) ? 'completed_with_warnings' : 'completed';
       s.stateAt = now();
       delete s.error;
+      for (const q of questions) {
+        const m = effectiveMarks(q);
+        const why = q.ai?.lostMarks && m !== null && m < q.maxMarks ? ` ${q.ai.lostMarks}` : '';
+        emit(e, { ...ref, questionId: q.questionId, type: 'question_marked', message: `${sub.candidateId} · Q${q.number}: ${m === null ? 'no mark (needs a teacher)' : `${m}/${q.maxMarks}`}.${why}`.slice(0, 220), data: { number: q.number, marks: m, maxMarks: q.maxMarks, confidence: q.ai?.confidence?.level ?? null } });
+        const serious = openFlags(q).filter((f) => f.severity === 'high');
+        if (serious.length) emit(e, { ...ref, questionId: q.questionId, type: 'teacher_review_required', message: `${sub.candidateId} · Q${q.number} needs your review: ${serious[0].detail}`.slice(0, 220), data: { number: q.number, flags: serious.length } });
+      }
+      const total = questions.reduce((a, q) => a + (effectiveMarks(q) ?? 0), 0);
+      const max = questions.reduce((a, q) => a + q.maxMarks, 0);
+      emit(e, { ...ref, type: 'script_marked', message: `${sub.candidateId} marked: ${total}/${max} (provisional until you confirm).`, data: { total, maxTotal: max, provisional: true } });
     });
   }
 
@@ -487,6 +571,7 @@ export function createExamService(deps: ExamDeps) {
     const { examId, runId, segment } = job.payload;
     const userId = job.ownerId;
     const started = Date.now();
+    if ((await load(userId, examId)).runs.find((x) => x.id === runId)?.state === 'cancelled') return { examId, runId, state: 'cancelled' };
     await mutate(userId, examId, (e) => { const r = e.runs.find((x) => x.id === runId); if (r && r.state === 'queued') { r.state = 'recognizing'; r.startedAt = now(); } });
     const pending = async () => {
       const e = await load(userId, examId);
@@ -509,7 +594,9 @@ export function createExamService(deps: ExamDeps) {
             if (ctx.signal.aborted) throw err;
             if (je?.retryable && attempt < 3) { await sleep((deps.retryDelayMs ?? 4000) * attempt * (0.75 + Math.random() * 0.5), ctx.signal); continue; }
             // One candidate's failure never stops the batch.
-            await setState(userId, examId, id, 'failed', { code: je?.code ?? 'PROCESSING_FAILED', message: je?.message ?? 'The script could not be processed.' });
+            const failed = (await load(userId, examId)).submissions.find((s) => s.id === id);
+            const msg = je?.message ?? 'The script could not be processed.';
+            await setState(userId, examId, id, 'failed', { code: je?.code ?? 'PROCESSING_FAILED', message: msg }, { runId, submissionId: id, candidateId: failed?.candidateId, type: 'teacher_review_required', message: `${failed?.candidateId ?? 'A script'} could not be marked: ${msg} The other scripts continue.`, data: { code: je?.code ?? 'PROCESSING_FAILED' } });
             break;
           }
         }
@@ -525,16 +612,26 @@ export function createExamService(deps: ExamDeps) {
       await mutate(userId, examId, (e) => { const r = e.runs.find((x) => x.id === runId); if (r && !r.jobIds.includes(next.job.id)) r.jobIds.push(next.job.id); });
       return { examId, runId, continuedIn: next.job.id };
     }
-    await mutate(userId, examId, (e) => { const r = e.runs.find((x) => x.id === runId)!; r.state = 'generating_artifacts'; });
+    await mutate(userId, examId, (e) => {
+      const r = e.runs.find((x) => x.id === runId)!; r.state = 'generating_artifacts';
+      emit(e, { runId, jobId: job.id, type: 'pdf_generation_started', progress: runProgress(e, runId), message: 'Drawing red-pen marks on each script and building the report and workbook.' });
+    });
     await ctx.progress('generating annotated papers, report and workbook', 92);
     let artifactError: string | null = null;
-    try { await generateArtifacts(userId, examId); } catch (err) { artifactError = err instanceof Error ? err.message : 'Artifact generation failed.'; }
+    let set: ArtifactSet | null = null;
+    try { set = await generateArtifacts(userId, examId); } catch (err) { artifactError = err instanceof Error ? err.message : 'Artifact generation failed.'; }
     const e = await mutate(userId, examId, (x) => {
       const r = x.runs.find((y) => y.id === runId)!;
       const subs = x.submissions.filter((s) => r.submissionIds.includes(s.id));
       r.state = subs.every((s) => s.state === 'failed') ? 'failed' : subs.some((s) => s.state !== 'completed') || artifactError ? 'completed_with_warnings' : 'completed';
       r.finishedAt = now();
       if (artifactError) r.error = artifactError;
+      const pdfs = set ? Object.keys(set.candidatePdfs).length : 0;
+      if (set) emit(x, { runId, jobId: job.id, type: 'pdf_generation_completed', message: `${pdfs} marked PDF${pdfs === 1 ? '' : 's'} generated and checked${set.problems.length ? `; ${set.problems.length} note${set.problems.length === 1 ? '' : 's'} for you` : ''}.`, data: { pdfs, verified: set.verified ?? pdfs, problems: set.problems.length } });
+      const failedN = subs.filter((s) => s.state === 'failed').length;
+      const review = subs.filter((s) => s.state === 'completed_with_warnings').length;
+      if (r.state === 'failed') emit(x, { runId, jobId: job.id, type: 'job_failed', progress: runProgress(x, runId), message: `Marking failed for every script${artifactError ? ` (${artifactError.slice(0, 120)})` : ''}. Nothing was lost: re-send or ask to re-mark.`, data: { failed: failedN } });
+      else emit(x, { runId, jobId: job.id, type: 'job_completed', progress: runProgress(x, runId), message: `Marking finished: ${subs.length - failedN} of ${subs.length} scripts marked${review ? `, ${review} with items to review` : ''}${failedN ? `, ${failedN} could not be marked` : ''}. Marks stay provisional until you confirm them.`, data: { state: r.state, marked: subs.length - failedN, review, failed: failedN, artifactError: artifactError ? artifactError.slice(0, 160) : null } });
     });
     const r = e.runs.find((y) => y.id === runId)!;
     return { examId, runId, state: r.state, artifactError };
@@ -621,11 +718,13 @@ export function createExamService(deps: ExamDeps) {
       audit(e, { actor: userId, type: 'transcription_correction', submissionId: sub.id, candidateId: sub.candidateId, before: target!.text.slice(0, 500), after: newText.slice(0, 500), reason: `element ${target!.el.id} on page ${target!.page}` });
     });
     let jobId: string | null = null;
-    if (input.remark !== false && affected.length) {
+    // The correction is the teacher's own data and is always saved; re-marking with the AI needs the plan.
+    const premium = deps.entitlement ? await deps.entitlement(userId) : { allowed: true as const, message: undefined };
+    if (input.remark !== false && affected.length && premium.allowed) {
       const { job } = await deps.queue.submit<RemarkJobPayload>({ type: 'exam.remark', ownerId: userId, payload: { examId, submissionId: sub.id, questionIds: affected, reason: `Transcription corrected: "${target.text.slice(0, 80)}" → "${newText.slice(0, 80)}"`, actor: userId } });
       jobId = job.id;
     }
-    return { candidateId: sub.candidateId, elementId: target.el.id, page: target.page, before: target.text, after: newText, affectedQuestionIds: affected, jobId };
+    return { candidateId: sub.candidateId, elementId: target.el.id, page: target.page, before: target.text, after: newText, affectedQuestionIds: affected, jobId, ...(input.remark !== false && affected.length && !premium.allowed ? { remarkSkipped: premium.message ?? 'Re-marking needs an upgraded plan.' } : {}) };
   }
 
   async function remarkQuestions(userId: string, examId: string, submissionId: string, questionIds: string[], reason: string, actor: string, signal?: AbortSignal) {
@@ -668,6 +767,7 @@ export function createExamService(deps: ExamDeps) {
   /** Queues re-marking of some questions for one candidate (e.g. after the teacher asks for it in chat). */
   async function requestRemark(userId: string, examId: string, submissionRef: string, questionIds: string[] | null, reason: string) {
     const exam = await load(userId, examId);
+    await requirePremium(userId);
     const sub = findSub(exam, submissionRef);
     const res = sub ? exam.results[sub.id] : undefined;
     if (!sub || !res) throw new ExamInputError('UNKNOWN_CANDIDATE', `No marked script for "${submissionRef}".`, 404);
@@ -722,15 +822,22 @@ export function createExamService(deps: ExamDeps) {
       usedNames.add(name);
       let pdf: Buffer | null = null;
       // Reuse an unchanged candidate PDF from the previous export.
-      if (prev?.candidatePdfs[s.submissionId] && prev.candidatePdfStamps?.[s.submissionId] === pdfStamp(res)) {
-        try { pdf = (await deps.fileStore.read(prev.candidatePdfs[s.submissionId], userId)).data; set.candidatePdfs[s.submissionId] = prev.candidatePdfs[s.submissionId]; } catch { pdf = null; }
+      if (prev?.candidatePdfs[s.submissionId] && prev.candidatePdfStamps?.[s.submissionId] === pdfStamp(res, (exam.preferences ?? DEFAULT_PREFERENCES).corrections)) {
+        try { pdf = (await deps.fileStore.read(prev.candidatePdfs[s.submissionId], userId)).data; set.candidatePdfs[s.submissionId] = prev.candidatePdfs[s.submissionId]; set.verified = (set.verified ?? 0) + 1; } catch { pdf = null; }
       }
       if (!pdf) {
         try {
           const doc = sub.documentId ? await deps.documents.get(userId, sub.documentId) : null;
           if (!doc) throw new Error('The recognised script is no longer available.');
           const original = (await deps.fileStore.read(sub.fileId, userId)).data;
-          const out = await annotateScript({ original, fileName: sub.fileName, doc: doc.result, result: res, summary: s, scheme, meta: { examTitle: exam.title, examId: exam.id, runId: res.runId, resultRevision: exam.resultRevision, generatedAt }, maxPages: deps.maxPages, released: isReleased(res) });
+          const draw = () => annotateScript({ original, fileName: sub.fileName, doc: doc.result, result: res, summary: s, scheme, meta: { examTitle: exam.title, examId: exam.id, runId: res.runId, resultRevision: exam.resultRevision, generatedAt }, maxPages: deps.maxPages, released: isReleased(res), corrections: (exam.preferences ?? DEFAULT_PREFERENCES).corrections });
+          // Reopen, render and match the PDF to the stored marks before anyone can download it; one redraw on failure.
+          let out = await draw();
+          const expect = { candidateId: s.candidateId, revision: exam.resultRevision, sourcePages: out.sourcePages, total: s.total, maxTotal: s.maxTotal, placedMarks: out.placed };
+          let check = await verifyMarkedPdf(out.pdf, expect);
+          if (!check.ok) { out = await draw(); check = await verifyMarkedPdf(out.pdf, { ...expect, sourcePages: out.sourcePages, placedMarks: out.placed }); }
+          if (!check.ok) throw new Error(`it failed its final check: ${check.problems.slice(0, 2).join('; ')}`);
+          set.verified = (set.verified ?? 0) + 1;
           pdf = out.pdf;
           if (out.summaryOnly.length) set.problems.push(`${s.candidateId}: marks for ${out.summaryOnly.join(', ')} are on the summary page only (answer location uncertain).`);
           set.candidatePdfs[s.submissionId] = (await deps.fileStore.put({ userId, name, mime: 'application/pdf', kind: 'pdf', data: pdf, ttlMs: RETENTION_MS })).id;
@@ -738,7 +845,7 @@ export function createExamService(deps: ExamDeps) {
           set.problems.push(`${s.candidateId}: the marked PDF could not be generated (${err instanceof Error ? err.message.slice(0, 120) : 'error'}).`);
         }
       }
-      set.candidatePdfStamps[s.submissionId] = pdfStamp(res);
+      set.candidatePdfStamps[s.submissionId] = pdfStamp(res, (exam.preferences ?? DEFAULT_PREFERENCES).corrections);
       if (pdf) { files.push({ path: `candidates/${name}`, data: pdf, kind: 'candidate_pdf' }); pdfPaths[s.submissionId] = `candidates/${name}`; }
       files.push({ path: `reports/${safeName(s.candidateId)}_marking.json`, data: Buffer.from(JSON.stringify(candidateReport(exam, s), null, 2)), kind: 'candidate_report' });
     }
@@ -773,6 +880,7 @@ export function createExamService(deps: ExamDeps) {
   async function requestExport(userId: string, examId: string) {
     const exam = await load(userId, examId);
     if (!Object.keys(exam.results).length) throw new ExamInputError('NOTHING_TO_EXPORT', 'No marked scripts to export yet.', 409);
+    await requirePremium(userId);
     const latest = exam.artifacts.find((a) => a.status === 'ready');
     if (latest && latest.resultRevision === exam.resultRevision) return { job: null, artifact: latest, fresh: true };
     const { job } = await deps.queue.submit<ExportJobPayload>({ type: 'exam.export', ownerId: userId, payload: { examId, revision: exam.resultRevision }, idempotencyKey: `${examId}:export:${exam.resultRevision}` });
@@ -812,7 +920,7 @@ export function createExamService(deps: ExamDeps) {
     return {
       submission: { id: sub.id, candidateId: sub.candidateId, candidateName: sub.candidateName ?? null, fileName: sub.fileName, pages: sub.pages, state: sub.state, error: sub.error ?? null, identity: sub.identity },
       summary, result: res ? candidateReport(exam, summary!) : null,
-      markedPdf: set ? { fileId: set.candidatePdfs[sub.id], url: deps.fileStore.signedUrl(set.candidatePdfs[sub.id], 60 * 60 * 1000), resultRevision: set.resultRevision, stale: !res || set.candidatePdfStamps[sub.id] !== pdfStamp(res) } : null,
+      markedPdf: set ? { fileId: set.candidatePdfs[sub.id], url: deps.fileStore.signedUrl(set.candidatePdfs[sub.id], 60 * 60 * 1000), resultRevision: set.resultRevision, stale: !res || set.candidatePdfStamps[sub.id] !== pdfStamp(res, (exam.preferences ?? DEFAULT_PREFERENCES).corrections) } : null,
     };
   }
 
@@ -953,7 +1061,45 @@ export function createExamService(deps: ExamDeps) {
     return { run: run ? { id: run.id, state: run.state, schemeVersion: run.schemeVersion, startedAt: run.startedAt ?? null, finishedAt: run.finishedAt ?? null, error: run.error ?? null } : null, counts, candidates: subs.map((s) => ({ submissionId: s.id, candidateId: s.candidateId, state: s.state, stateAt: s.stateAt, error: s.error ?? null })) };
   }
 
+  // ── Live events, cancellation and preferences ──────────────────────────
+  /** Events after a sequence number (replay for a viewer that connects or reconnects). */
+  async function eventsSince(userId: string, examId: string, after = 0) {
+    const e = await load(userId, examId);
+    const events = (e.events ?? []).filter((ev) => ev.seq > after);
+    const first = e.events?.[0]?.seq ?? 1;
+    // When older events were trimmed the viewer missed some: it should refresh the full state.
+    return { events, lastSeq: e.eventSeq ?? 0, gap: after > 0 && after < first - 1 };
+  }
+
+  /** Stops the active run. Finished scripts keep their marks; unfinished ones go back to the queue. */
+  async function cancelRun(userId: string, examId: string) {
+    const exam = await load(userId, examId);
+    const run = [...exam.runs].reverse().find((r) => !['completed', 'completed_with_warnings', 'failed', 'cancelled'].includes(r.state));
+    if (!run) throw new ExamInputError('NO_ACTIVE_RUN', 'There is no marking in progress to cancel.', 409);
+    for (const id of run.jobIds) await deps.queue.cancel(id, userId).catch(() => null);
+    const e = await mutate(userId, examId, (x) => {
+      const r = x.runs.find((y) => y.id === run.id)!;
+      r.state = 'cancelled';
+      r.finishedAt = now();
+      for (const s of x.submissions) if (r.submissionIds.includes(s.id) && !['completed', 'completed_with_warnings', 'failed'].includes(s.state)) { s.state = 'queued'; s.stateAt = now(); }
+      const p = runProgress(x, r.id);
+      emit(x, { runId: r.id, type: 'job_cancelled', progress: p, message: `Marking cancelled. ${p.done} of ${p.total} scripts were finished and keep their marks; the rest are waiting. Say "mark" to continue.`, data: { done: p.done, total: p.total } });
+    });
+    return { runId: run.id, state: 'cancelled' as const, done: runProgress(e, run.id).done };
+  }
+
+  async function setPreferences(userId: string, examId: string, patch: Partial<Omit<MarkingPreferences, 'updatedAt'>>) {
+    const clean: Partial<MarkingPreferences> = {};
+    if (patch.credit === 'partial' || patch.credit === 'strict') clean.credit = patch.credit;
+    if (typeof patch.corrections === 'boolean') clean.corrections = patch.corrections;
+    if (patch.feedback === 'brief' || patch.feedback === 'detailed') clean.feedback = patch.feedback;
+    if (!Object.keys(clean).length) throw new ExamInputError('INVALID_PREFERENCES', 'Choose credit (partial or strict), corrections (true or false) or feedback (brief or detailed).');
+    const e = await mutate(userId, examId, (x) => { x.preferences = { ...(x.preferences ?? DEFAULT_PREFERENCES), ...clean, updatedAt: now() }; });
+    return e.preferences!;
+  }
+
   return {
+    eventsSince, subscribe, cancelRun, setPreferences,
     createExam, load, mutate, setSchemeJson, confirmScheme, editSchemeQuestion, submitSchemeDocuments, addSubmissions, startMarking,
     summaries, overrideMark, confirmResults, correctTranscription, remarkQuestions, requestRemark, generateArtifacts, requestExport, artifacts, artifactRefs, candidateView, progress,
     latestScheme, confirmedScheme, findSub, findQuestion,
