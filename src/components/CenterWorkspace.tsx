@@ -4,7 +4,7 @@ import { ResultsView } from './ResultsView';
 import {
   Plus, Check, X, Type, Maximize2, Sparkles, Trash2, RotateCcw, Award, Flag, Paperclip, Wrench, Bold, Italic, Underline, List, Link as LinkIcon,
   Clock, BookOpen, Layout, FileText, Link2, ArrowLeft, ArrowUp, ArrowDown, Copy, AlignLeft, Image as ImageIcon, Video,
-  CircleDot, CheckSquare, ChevronDown, Calendar, Hash, Mail, Phone, Upload, Star,
+  CircleDot, CheckSquare, ChevronDown, Calendar, Hash, Mail, Phone, Upload, Star, CheckCircle2,
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import DynamicForm from './DynamicForm';
@@ -1410,11 +1410,11 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                 Bwenge AI <span className="text-[#D97757]">Workspace</span>
               </h2>
               <p className="text-sm text-[#66635B] dark:text-[#A0A0AA] font-medium leading-relaxed">
-                Connect your assessment infrastructure. Upload student scripts, scan paper booklets, or let AI draft your next rubric.
+                Upload or scan student scripts, build forms, and review marked exams. To mark a class, you can also just send the scripts in the chat.
               </p>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 pt-4">
+            <div className="grid grid-cols-2 gap-3 sm:gap-4 pt-4">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -1439,14 +1439,10 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                   Upload Paper
                 </span>
                 <span className="text-[10px] text-[#858075] font-medium mt-1 block">
-                  PDF, PNG, JPEG
+                  PDF, photos, Word, ZIP
                 </span>
               </button>
 
-              <button type="button" onClick={(event) => { event.stopPropagation(); void showFormsDashboard(); }} className="col-span-2 sm:col-span-3 rounded-2xl bg-[#191919] p-4 text-left text-white shadow-sm dark:bg-[#F3F3F3] dark:text-[#191919]">
-                <span className="block text-sm font-bold">My Forms &amp; Results</span>
-                <span className="mt-1 block text-[10px] opacity-70">Review responses, export data, and ask AI to shortlist candidates</span>
-              </button>
               {onOpenScanner && <button
                 type="button"
                 onClick={(e) => {
@@ -1484,21 +1480,29 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                   Build it question-by-question
                 </span>
               </button>
+
+              <a
+                href="/exams"
+                onClick={(e) => e.stopPropagation()}
+                className="group p-5 rounded-2xl bg-white dark:bg-[#202024] hover:bg-[#F4F0E8] dark:hover:bg-[#2D2D32] border border-[#E8E4DC] dark:border-[#2D2D32] hover:border-[#D97757] text-left transition-all shadow-sm hover:shadow-xl hover:-translate-y-1 active:translate-y-0"
+              >
+                <div className="w-10 h-10 rounded-xl bg-[#D97757]/10 text-[#D97757] flex items-center justify-center mb-3 group-hover:bg-[#D97757] group-hover:text-white transition-colors">
+                  <CheckCircle2 size={20} />
+                </div>
+                <span className="text-sm font-bold text-[#191919] dark:text-[#F3F3F3] block">
+                  Marked Exams
+                </span>
+                <span className="text-[10px] text-[#858075] font-medium mt-1 block">
+                  Review red marks, release PDFs
+                </span>
+              </a>
+
+              <button type="button" onClick={(event) => { event.stopPropagation(); void showFormsDashboard(); }} className="col-span-2 rounded-2xl bg-[#191919] p-4 text-left text-white shadow-sm dark:bg-[#F3F3F3] dark:text-[#191919]">
+                <span className="block text-sm font-bold">My Forms &amp; Results</span>
+                <span className="mt-1 block text-[10px] opacity-70">Review responses, export data, and ask AI to shortlist candidates</span>
+              </button>
             </div>
 
-            {onGenerateSampleBatch300 && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onGenerateSampleBatch300();
-                }}
-                className="mt-2 inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-full bg-[#FFFFFF] dark:bg-[#202024] border border-[#E8E4DC] dark:border-[#2D2D32] text-xs font-semibold text-[#D97757] hover:border-[#D97757] transition-all shadow-2xs cursor-pointer"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>Simulate Mass Upload (300 Student Papers: 1 to 300)</span>
-              </button>
-            )}
           </div>
         </div>
       ) : (

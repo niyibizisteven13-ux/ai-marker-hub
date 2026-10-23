@@ -398,14 +398,14 @@ export default function CreateStudio({
             <SquarePen className="h-5 w-5" />
           </button>
 
-          {user ? (
+          {user ? (billing?.plan === 'PRO' || billing?.plan === 'INSTITUTION' ? null : (
             <button
               onClick={() => (window as any).openUpgradeModal?.()}
               className="hidden sm:flex bg-gradient-to-r from-amber-500/20 to-orange-600/10 hover:from-amber-500/30 hover:to-orange-600/20 text-amber-400 font-medium px-3.5 py-1.5 rounded-xl border border-amber-500/30 text-xs transition-all shadow-md items-center gap-1.5"
             >
               <Sparkles size={13} /> Upgrade
             </button>
-          ) : (
+          )) : (
             <button
               onClick={onOpenLoginModal}
               className="flex bg-[#D97757] hover:bg-[#c26647] text-white font-medium px-3.5 py-1.5 rounded-xl text-xs transition-all shadow-md items-center gap-1.5"
@@ -830,7 +830,7 @@ export default function CreateStudio({
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={handleKeyDown}
                   onPaste={handleComposerPaste}
-                  placeholder="Ask anything, or attach files and datasets…"
+                  placeholder={typeof window !== 'undefined' && window.innerWidth < 640 ? 'Ask Bwenge anything…' : 'Ask anything, or attach files and datasets…'}
                   className="w-full bg-transparent border-0 resize-none text-base leading-6 text-[#FAF9F5] placeholder-[#9C9A92] outline-none px-1 py-1 max-h-40 scrollbar-hidden"
                 />
               </div>
