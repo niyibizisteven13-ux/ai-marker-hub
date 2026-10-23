@@ -390,7 +390,7 @@ test('a request stopped by a limit resumes on "continue" / "give me result" afte
   resetPending();
 });
 
-test('AI guard: admin pause stops everyone but admins; the profit guard stops free users when they cost more than the budget', async () => {
+test('AI guard: admin pause stops everyone, admins included; the profit guard stops free users when they cost more than the budget', async () => {
   const { decide, saveGuardSettings, resetGuard, guardState } = await import('../server/services/billing/aiGuard.js');
   const base = { paused: false, lossGuard: { enabled: true, freeBudgetUsd: 5, mode: 'free_only' as const } };
   assert.equal(decide(base, { revenueUsd: 0, costUsd: 4, free: { users: 3, costUsd: 4, credits: 0, actions: 0 } }).block, 'none');
@@ -404,14 +404,17 @@ test('AI guard: admin pause stops everyone but admins; the profit guard stops fr
   await db.creditLedger.create({ data: { id: randomUUID(), userId: go, delta: 100, reason: 'purchase', paymentId: null, note: 'go', createdAt: new Date() } });
   const admin = await newUser({ role: 'ADMIN' });
 
-  // Pause: nobody but admins.
+  // Pause: nobody, admins included (they resume it in the admin console).
   await saveGuardSettings({ paused: true, pausedReason: 'maintenance' }, admin);
+  try {
   const p1 = await checkUsage(free, { kind: 'chat' });
   assert.equal(p1.allowed, false);
   assert.equal(p1.code, 'PAUSED');
   assert.equal((await checkUsage(go, { kind: 'chat' })).code, 'PAUSED');
-  assert.equal((await checkUsage(admin, { kind: 'chat' })).allowed, true, 'admins can still test');
-  await saveGuardSettings({ paused: false }, admin);
+  const a = await checkUsage(admin, { kind: 'chat' });
+  assert.equal(a.allowed, false, 'the pause also stops admins');
+  assert.match(a.message!, /Resume it in Admin/);
+  } finally { await saveGuardSettings({ paused: false }, admin); }
   assert.equal((await checkUsage(free, { kind: 'chat' })).allowed, true);
 
   // Free users this month cost more than the budget: free users stop, paying users continue.
@@ -426,6 +429,7 @@ test('AI guard: admin pause stops everyone but admins; the profit guard stops fr
   assert.match(f.message!, /Free AI answers are paused/);
   assert.match(f.message!, /GO credits/, 'offers a way to continue');
   assert.equal((await checkUsage(go, { kind: 'chat' })).allowed, true, 'paying users continue');
+  assert.equal((await checkUsage(admin, { kind: 'chat' })).allowed, true, 'the profit guard never stops admins');
   await saveGuardSettings({ lossGuard: { enabled: false } }, admin);
   assert.equal((await checkUsage(free, { kind: 'chat' })).allowed, true);
   await db.usageRecord.deleteMany({ where: { userId: free } });

@@ -1,5 +1,7 @@
 declare module 'bcryptjs';
 
+// First: the admin "Pause AI" stop guards every request to an AI provider, so it must wrap fetch before any SDK loads.
+import './server/services/billing/aiKillSwitch.js';
 import 'dotenv/config';
 import express from 'express';
 import { createServer } from 'node:http';
@@ -43,6 +45,7 @@ import { agentTarget, fileJobQueue } from './server/services/AiService.js';
 import { planOutput } from './server/services/outputs/planner.js';
 import { asksAboutDatasets } from './server/services/knowledge/published.js';
 import { checkUsage, recordUsage } from './server/services/billing/usage.js';
+import { guardSettings } from './server/services/billing/aiGuard.js';
 import { rememberBlocked, takeResumable } from './server/services/billing/pendingRequest.js';
 import { makeEmitter } from './server/utils/sseEmitter.js';
 import { validateSubmission } from './server/services/forms/validation.js';
@@ -2686,6 +2689,9 @@ async function startServer() {
     startEducationRuntime().catch((err) => logger.error('Background job runtime failed to start', { errorType: err?.name }));
     // Mobile Money: confirm pending payments (missed callbacks) and send renewal reminders.
     startBillingJobs();
+    // Keep the "Pause AI" stop in step with the saved setting (it is also applied the moment an admin saves it).
+    void guardSettings(true).catch(() => undefined);
+    setInterval(() => void guardSettings(true).catch(() => undefined), 15_000).unref();
   });
 
   // Graceful shutdown: a deploy/restart sending SIGTERM (Render, Docker,

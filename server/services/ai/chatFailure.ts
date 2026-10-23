@@ -1,4 +1,5 @@
 import { normalizeError, type ErrorCategory } from './providers/types.js';
+import { AiPausedError, isAiPaused } from '../billing/aiKillSwitch.js';
 
 interface ChatFailureDetails {
   code: string;
@@ -23,6 +24,10 @@ export function describeChatFailure(error: unknown): ChatFailureDetails {
     name?: unknown;
     message?: unknown;
   } | null;
+  // Stopped by the admin "Pause AI" switch: say so plainly instead of reporting a provider failure.
+  if (error instanceof AiPausedError || isAiPaused()) {
+    return { code: 'AI_PAUSED', message: new AiPausedError().message, timeout: false, errorType: 'AiPausedError', category: 'AI_UNAVAILABLE', retryable: true };
+  }
   const status = typeof err?.status === 'number' ? err.status : undefined;
   const timeout = err?.timeout === true || /timeout|timed out/i.test(String(err?.message || ''));
   const unavailable = err?.code === 'AI_UNAVAILABLE';
