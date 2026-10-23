@@ -1,4 +1,4 @@
-import type { StreamEvent } from "../../src/components/ActivityLine";
+import type { StreamEvent } from "../../../src/components/ActivityLine";
 
 export const clip = (s: string, n = 90) => (s.length > n ? s.slice(0, n - 1).trimEnd() + "…" : s);
 

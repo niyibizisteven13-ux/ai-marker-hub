@@ -1,0 +1,73 @@
+name: CI
+
+# Every push to main and every pull request: types, security checks, the full test suite (also against a real
+# PostgreSQL and Redis), and a production build. A red run means the change is not ready to deploy.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: bwenge
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: bwenge
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U bwenge" --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      CI_DATABASE_URL: postgresql://bwenge:ci-only-password@127.0.0.1:5432/bwenge?schema=public
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: No secrets or temporary files committed
+        run: npm run --silent security:check
+
+      - name: No known high or critical vulnerabilities in production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Tests
+        run: node --test --test-reporter=spec --import tsx tests/*.test.ts
+
+      - name: Database schema from an empty PostgreSQL
+        env:
+          DATABASE_URL: ${{ env.CI_DATABASE_URL }}
+        run: bash scripts/db-bootstrap-empty.sh
+
+      - name: Tests against PostgreSQL
+        env:
+          DATABASE_URL: ${{ env.CI_DATABASE_URL }}
+          REDIS_URL: redis://127.0.0.1:6379/0
+        run: npm run test:db && node --test --import tsx tests/production_hardening.test.ts
+
+      - name: Production build
+        run: npm run build
+
+      - name: Cluster scripts parse
+        run: for f in scripts/cluster/*.sh scripts/db-bootstrap-empty.sh; do bash -n "$f"; done

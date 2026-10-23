@@ -30,6 +30,14 @@ router.post('/', async (req, res) => {
   }
 
   try {
+    // zod has already checked these; spelled out so the database types see every required field.
+    const fields = {
+      messageId: parsed.data.messageId as string,
+      rating: parsed.data.rating as 'up' | 'down',
+      question: parsed.data.question ?? '',
+      response: parsed.data.response as string,
+      details: parsed.data.details ?? '',
+    };
     const feedback = await prisma.$transaction(async (tx) => {
       const key = { userId_messageId: { userId, messageId: parsed.data.messageId } };
       const existing = await tx.responseFeedback.findUnique({
@@ -48,13 +56,13 @@ router.post('/', async (req, res) => {
       return tx.responseFeedback.upsert({
         where: key,
         create: {
-          ...parsed.data,
+          ...fields,
           reasons: JSON.stringify(parsed.data.reasons),
           consentForImprovement,
           userId,
         },
         update: {
-          ...parsed.data,
+          ...fields,
           reasons: JSON.stringify(parsed.data.reasons),
           consentForImprovement,
           status: existing?.datasetExampleId && consentForImprovement ? 'used' : 'new',

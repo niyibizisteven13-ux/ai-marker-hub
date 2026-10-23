@@ -67,7 +67,8 @@ const settingsOf = (repo: any): Settings => ({ language: 'en', domain: 'general'
 interface IndexJobPayload { repositoryId: string; fileIds: string[]; force?: boolean; segment?: number }
 
 export function createKnowledgeService(deps: KnowledgeDeps) {
-  const tmpRoot = deps.tmpDir ?? path.join(os.tmpdir(), 'bwenge-knowledge');
+  // One folder per system user: a folder left by another user (for example root) is not writable by this one.
+  const tmpRoot = deps.tmpDir ?? path.join(os.tmpdir(), `bwenge-knowledge-${process.getuid?.() ?? 'user'}`);
   const maxFileBytes = deps.maxFileBytes ?? env('KNOWLEDGE_MAX_FILE_BYTES', 100 * 1024 * 1024);
   const defaultQuota = deps.defaultQuotaBytes ?? env('KNOWLEDGE_REPO_QUOTA_BYTES', 5 * 1024 * 1024 * 1024);
   const concurrency = Math.max(1, deps.indexConcurrency ?? env('KNOWLEDGE_INDEX_CONCURRENCY', 2));
@@ -728,6 +729,11 @@ export function createKnowledgeService(deps: KnowledgeDeps) {
     if (!fileIds.length) return null;
     const files = await db.repositoryFile.findMany({ where: { id: { in: fileIds } }, select: { id: true, contentHash: true, version: true } });
     const key = createHash('sha256').update(JSON.stringify({ r: repo.id, f: files.map((f: any) => `${f.id}:${f.contentHash}:${f.version}`).sort(), force: force ? Date.now() : 0 })).digest('hex').slice(0, 32);
+    // Mark the files queued before the job exists: a fast job may finish before this function returns, and its
+    // final status (indexed, duplicate…) must not be overwritten by a late "queued".
+    const fresh = await db.repositoryFile.findMany({ where: { id: { in: fileIds }, indexStatus: { notIn: [...ACTIVE] } }, select: { id: true } });
+    const freshIds = fresh.map((f: any) => f.id);
+    if (freshIds.length) await db.repositoryFile.updateMany({ where: { id: { in: freshIds } }, data: { indexStatus: 'queued', indexJobId: null } });
     let jobId: string | null = null;
     try {
       let { job, duplicate } = await deps.queue.submit<IndexJobPayload>({ type: 'knowledge.index', ownerId: repo.userId, payload: { repositoryId: repo.id, fileIds, force }, idempotencyKey: key, maxAttempts: 3 });
@@ -740,7 +746,8 @@ export function createKnowledgeService(deps: KnowledgeDeps) {
       // Too many active jobs: files stay "queued" and the periodic sweep (resumePending) picks them up.
       if (!(e instanceof JobError && e.code === 'TOO_MANY_JOBS')) throw e;
     }
-    await db.repositoryFile.updateMany({ where: { id: { in: fileIds }, indexStatus: { notIn: [...ACTIVE] } }, data: { indexStatus: 'queued', indexJobId: jobId } });
+    // Link the job to the files this call queued, unless the job already moved them on.
+    if (jobId && freshIds.length) await db.repositoryFile.updateMany({ where: { id: { in: freshIds }, indexStatus: 'queued', indexJobId: null }, data: { indexJobId: jobId } });
     return jobId;
   }
 

@@ -13,6 +13,7 @@ import { knowledgeService } from '../services/educationRuntime.js';
 import { KnowledgeError, type ConflictPolicy, type UploadItem } from '../services/knowledge/service.js';
 import { PathError } from '../services/knowledge/paths.js';
 import logger from '../utils/logger.js';
+import { SharedRateLimitStore } from '../services/cache/redis.js';
 
 /**
  * Knowledge repository (file explorer) API. Mounted at /api/admin/knowledge behind requireAuth +
@@ -37,13 +38,13 @@ const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Re
 
 const isDev = process.env.NODE_ENV !== 'production';
 /** Expensive ingestion operations (uploads, re-index, archive extraction) per admin. */
-const ingestLimiter = isDev ? (_req: Request, _res: Response, next: NextFunction) => next() : rateLimit({
+const ingestLimiter = isDev ? (_req: Request, _res: Response, next: NextFunction) => next() : rateLimit({ store: new SharedRateLimitStore('knowledge-ingest'),
   windowMs: 15 * 60 * 1000, limit: Number(process.env.KNOWLEDGE_INGEST_RATE_LIMIT) > 0 ? Number(process.env.KNOWLEDGE_INGEST_RATE_LIMIT) : 60,
   keyGenerator: (req) => `knowledge:${(req as any).user?.userId ?? 'anonymous'}`, standardHeaders: true, legacyHeaders: false,
   message: { success: false, code: 'RATE_LIMITED', error: 'Too many uploads or re-index requests. Try again later.' },
 });
 
-const UPLOAD_TMP = path.join(process.env.KNOWLEDGE_TMP_DIR || os.tmpdir(), 'bwenge-knowledge-uploads');
+const UPLOAD_TMP = path.join(process.env.KNOWLEDGE_TMP_DIR || os.tmpdir(), `bwenge-knowledge-uploads-${process.getuid?.() ?? 'user'}`);
 mkdirSync(UPLOAD_TMP, { recursive: true, mode: 0o700 });
 const MAX_FILE = Number(process.env.KNOWLEDGE_MAX_FILE_BYTES) > 0 ? Number(process.env.KNOWLEDGE_MAX_FILE_BYTES) : 100 * 1024 * 1024;
 const MAX_FILES = Number(process.env.KNOWLEDGE_MAX_FILES_PER_UPLOAD) > 0 ? Number(process.env.KNOWLEDGE_MAX_FILES_PER_UPLOAD) : 500;

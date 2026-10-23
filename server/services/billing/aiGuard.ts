@@ -2,6 +2,7 @@ import { prisma } from '../../db.js';
 import logger from '../../utils/logger.js';
 import { periods } from './usage.js';
 import { setAiPaused } from './aiKillSwitch.js';
+import { cached, publish, subscribe } from '../cache/redis.js';
 
 /**
  * AI guard: an admin pause switch for all AI generation, and a profit guard that compares this month's AI cost
@@ -84,6 +85,8 @@ export async function saveGuardSettings(patch: Partial<Omit<GuardSettings, 'loss
   settingsCache = { at: Date.now(), value: next };
   stateCache = null;
   setAiPaused(next.paused);
+  // Every other server applies the change at once (without Redis they pick it up within 15 s).
+  void publish('ai-guard', next.paused ? 'paused' : 'running');
   return next;
 }
 
@@ -156,7 +159,8 @@ export function decide(s: GuardSettings, e: Pick<Economics, 'revenueUsd' | 'cost
 
 export async function guardState(force = false): Promise<GuardState> {
   if (!force && stateCache && Date.now() - stateCache.at < CACHE_MS) return stateCache.value;
-  const [settings, e] = await Promise.all([guardSettings(force), economics()]);
+  // This month's numbers are one heavy query: computed once a minute for all servers together.
+  const [settings, e] = await Promise.all([guardSettings(force), force ? economics() : cached('ai-guard:economics', CACHE_MS, () => economics())]);
   const d = decide(settings, e);
   if (d.block !== lastBlock) {
     logger.warn('[ai-guard] generation guard changed', { from: lastBlock, to: d.block, reason: d.reason });
@@ -178,6 +182,16 @@ export async function guardFor(userId: string, opts: { role?: string | null; pay
   if (st.block === 'all') return { allowed: false, code: 'BUDGET', message: 'Bwenge AI is temporarily unavailable because of very high demand. Please try again later.' };
   if (!opts.paying) return { allowed: false, code: 'BUDGET', message: 'Free AI answers are paused for now because of very high demand.' };
   return { allowed: true };
+}
+
+/** Applies pause changes made on another server immediately. Call once at startup. */
+export function listenForGuardChanges(): void {
+  subscribe('ai-guard', (msg) => {
+    setAiPaused(msg === 'paused');
+    settingsCache = null;
+    stateCache = null;
+    void guardSettings(true).catch(() => undefined);
+  });
 }
 
 export function resetGuard() { settingsCache = null; stateCache = null; lastBlock = 'none'; }

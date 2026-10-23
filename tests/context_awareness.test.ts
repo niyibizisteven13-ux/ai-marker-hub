@@ -5,7 +5,7 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
-test('ContextAwareService builds a valid hydrated prompt', async () => {
+test('ContextAwareService builds a valid hydrated prompt', { skip: !process.env.DATABASE_URL && 'needs PostgreSQL (DATABASE_URL); CI provides it' }, async () => {
   const service = ContextAwareService.getInstance();
 
   // Create mock user

@@ -4,6 +4,11 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { getJwtSecret } from './auth/secrets.js';
 import { prisma } from './db.js';
 import logger from './utils/logger.js';
+import { randomUUID } from 'node:crypto';
+import { publish, subscribe } from './services/cache/redis.js';
+
+/** Identifies this server, so its own cluster-wide messages are not delivered twice. */
+const SERVER_ID = randomUUID();
 
 const ADMIN_FEEDBACK_PATH = '/api/admin/live';
 const adminSockets = new Map<string, Set<WebSocket>>();
@@ -22,6 +27,8 @@ function isAllowedOrigin(origin: string | undefined, allowedOrigins: string[] | 
 }
 
 export function attachRealtime(httpServer: HttpServer, allowedOrigins: string[] | true) {
+  // Admins connected to another server hear about changes made here, and the other way round.
+  subscribe('admin-live', (from) => { if (from !== SERVER_ID) void notifyLocalAdmins(); });
   const websocketServer = new WebSocketServer({ noServer: true });
 
   websocketServer.on('error', (error) => {
@@ -139,6 +146,12 @@ export function attachRealtime(httpServer: HttpServer, allowedOrigins: string[] 
 }
 
 export async function notifyAdminsOfFeedbackUpdate() {
+  void publish('admin-live', SERVER_ID);
+  await notifyLocalAdmins();
+}
+
+async function notifyLocalAdmins() {
+  if (!adminSockets.size) return;
   try {
     const admins = await prisma.user.findMany({
       where: { role: 'ADMIN', disabledAt: null },

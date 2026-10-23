@@ -52,3 +52,4 @@ data/assessments/
 data/documents/
 data/exams/
 __pycache__/
+dump.rdb

@@ -588,7 +588,7 @@ async function handleBotCommand(chatId: string, session: any, text: string) {
         await botService.sendChatAction(chatId, 'typing');
         await botService.sendMessage(chatId, `🌐 Initiating Deep Research for: *${arg}*...`);
         try {
-          const report = await aiService.runDeepResearch({ query: arg, userId: chatId });
+          const report = await aiService.runDeepResearch({ query: arg, userId: chatId, onEvent: () => undefined });
           await botService.sendMessage(chatId, `📑 **Deep Research Report**:\n\n${stripThinkingTags(report as any).slice(0, 3800)}`);
         } catch (err: any) {
           await botService.sendMessage(chatId, `❌ Research failed: ${err.message}`);

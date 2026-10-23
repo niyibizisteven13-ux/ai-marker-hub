@@ -3,12 +3,16 @@ import assert from 'node:assert/strict';
 import { SupervisorService } from '../server/services/SupervisorService.js';
 import { ExecutionSandbox } from '../server/services/ExecutionSandbox.js';
 import { PrismaClient } from '@prisma/client';
+import { mkdtemp } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
 const prisma = new PrismaClient();
 
 test('Orchestrator Convergence Detection', async () => {
   const sandbox = ExecutionSandbox.getInstance();
-  const workspace = process.cwd();
+  // A workspace of its own: the repository folder changes while other test files run in parallel.
+  const workspace = await mkdtemp(path.join(os.tmpdir(), 'bwenge-converge-'));
 
   // Simulate 3 iterations with NO environment change
   await sandbox.detectInfiniteLoop(workspace);
@@ -18,7 +22,7 @@ test('Orchestrator Convergence Detection', async () => {
   assert.strictEqual(isLooped, true, 'Should detect infinite loop after 3 stagnant iterations');
 });
 
-test('Supervisor Session Lifecycle', async () => {
+test('Supervisor Session Lifecycle', { skip: !process.env.DATABASE_URL && 'needs PostgreSQL (DATABASE_URL); CI provides it' }, async () => {
   const supervisor = SupervisorService.getInstance();
 
   // 1. Create a dummy user for testing

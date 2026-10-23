@@ -177,6 +177,52 @@ function typescriptFallback(ds: Dataset, input: AnalysisInput) {
         if ('error' in r) return { op: 'outliers', error: r.error };
         return { op: 'outliers', column: op.column, method: 'iqr', n: numericColumn(ds, op.column).filter((v) => v !== null).length, count: r.outliers.length, bounds: { lower: r.lowerFence, upper: r.upperFence }, outliers: r.outliers.map((o: any) => ({ row: o.index + 2, value: o.value })), methodDescription: 'Tukey fences (TypeScript engine).', assumptions: [], warnings: [] };
       }
+      case 'groupby': {
+        // Same rules and output as the Python engine's op_groupby, so either engine answers "X by district".
+        const by: string[] = (op as any).by ?? [];
+        const metrics: Array<{ column: string; agg: string; as?: string }> = (op as any).metrics ?? [];
+        const AGGS = new Set(['count', 'mean', 'median', 'sum', 'min', 'max', 'std']);
+        if (!by.length || by.length > 3) return { op: 'groupby', error: 'Group by 1 to 3 columns.' };
+        for (const b of by) if (!types.has(b)) return { op: 'groupby', error: `There is no column "${b}".` };
+        for (const m of metrics) {
+          if (!AGGS.has(m.agg)) return { op: 'groupby', error: `Unknown aggregation "${m.agg}".` };
+          if (!types.has(m.column)) return { op: 'groupby', error: `There is no column "${m.column}".` };
+          if (m.agg !== 'count' && types.get(m.column) !== 'numeric') return { op: 'groupby', error: `"${m.column}" is not numeric, so it can only be counted.` };
+        }
+        const value = (c: string) => (types.get(c) === 'numeric' ? numericColumn(ds, c) : textColumn(ds, c));
+        const keys = by.map((b) => value(b).map((v) => (v === null || v === '' ? '(missing)' : v)));
+        const cols = new Map(metrics.map((m) => [m.column, value(m.column)]));
+        const groups = new Map<string, number[]>();
+        for (let i = 0; i < ds.rows.length; i++) {
+          const k = JSON.stringify(keys.map((col) => col[i]));
+          const list = groups.get(k);
+          if (list) list.push(i); else groups.set(k, [i]);
+        }
+        if (groups.size > 5000) return { op: 'groupby', error: `${groups.size} groups; at most 5000 are allowed.` };
+        const sorted = [...groups.entries()].sort(([a], [b]) => {
+          const ka = JSON.parse(a), kb = JSON.parse(b);
+          for (let j = 0; j < ka.length; j++) { const x = ka[j], y = kb[j]; if (x === y) continue; return typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y)); }
+          return 0;
+        });
+        const rows = sorted.map(([k, idx]) => {
+          const row: Record<string, unknown> = Object.fromEntries(by.map((b, j) => [b, JSON.parse(k)[j]]));
+          row.n = idx.length;
+          for (const m of metrics) {
+            const all = idx.map((i) => cols.get(m.column)![i]);
+            const label = m.as || `${m.agg}_${m.column}`;
+            if (m.agg === 'count') { row[label] = all.filter((v) => v !== null && v !== '').length; continue; }
+            const x = (all.filter((v) => typeof v === 'number' && Number.isFinite(v)) as number[]).sort((a, b) => a - b);
+            if (!x.length) { row[label] = null; continue; }
+            const sum = x.reduce((a, v) => a + v, 0), mean = sum / x.length;
+            row[label] = m.agg === 'mean' ? mean : m.agg === 'sum' ? sum : m.agg === 'min' ? x[0] : m.agg === 'max' ? x[x.length - 1]
+              : m.agg === 'median' ? (x.length % 2 ? x[(x.length - 1) / 2] : (x[x.length / 2 - 1] + x[x.length / 2]) / 2)
+                : x.length > 1 ? Math.sqrt(x.reduce((a, v) => a + (v - mean) ** 2, 0) / (x.length - 1)) : null;
+          }
+          return row;
+        });
+        const small = rows.filter((r) => (r.n as number) < 5).length;
+        return { op: 'groupby', by, rows, method: 'Groups of rows sharing the same values; missing group values shown as "(missing)"; aggregations ignore missing values; std uses n − 1 (TypeScript engine).', assumptions: [], warnings: small ? [`${small} group(s) have fewer than 5 rows; their statistics are unstable.`] : [] };
+      }
       default:
         return { op: op.op, error: `"${op.op}" needs the Python analysis engine, which is not installed on this server.` };
     }

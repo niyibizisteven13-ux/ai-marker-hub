@@ -477,6 +477,12 @@ function createModelMock(modelName: string) {
 }
 
 let realPrisma: PrismaClient | null = null;
+/**
+ * The local JSON store is for development and tests only. In production a database outage must surface as an
+ * error (and be retried by the next request), never as a silent switch to a file that holds users, payments
+ * and marks the real database never sees.
+ */
+const mockFallbackAllowed = process.env.NODE_ENV !== 'production' || process.env.ALLOW_MOCK_DB === 'true';
 let dbAvailable = (globalThis as any).__aiStudioDbAvailable !== undefined
   ? (globalThis as any).__aiStudioDbAvailable
   : Boolean(process.env.DATABASE_URL);
@@ -526,7 +532,7 @@ export const prisma: PrismaClient = new Proxy({} as PrismaClient, {
         try {
           return await realProp.apply(realPrisma, args);
         } catch (err: any) {
-          if (err?.code === 'P1001' || err?.name === 'PrismaClientInitializationError' || err?.message?.includes('Can\'t reach database server')) {
+          if (mockFallbackAllowed && (err?.code === 'P1001' || err?.name === 'PrismaClientInitializationError' || err?.message?.includes('Can\'t reach database server'))) {
             console.warn('[AI Studio] Database unreachable, permanently switching to local JSON storage:', err.message);
             dbAvailable = false;
             (globalThis as any).__aiStudioDbAvailable = false;
@@ -547,7 +553,7 @@ export const prisma: PrismaClient = new Proxy({} as PrismaClient, {
             try {
               return await origMethod.apply(modelTarget, args);
             } catch (err: any) {
-              if (err?.code === 'P1001' || err?.name === 'PrismaClientInitializationError' || err?.message?.includes('Can\'t reach database server')) {
+              if (mockFallbackAllowed && (err?.code === 'P1001' || err?.name === 'PrismaClientInitializationError' || err?.message?.includes('Can\'t reach database server'))) {
                 console.warn('[AI Studio] Database unreachable on model method, permanently switching to local JSON storage:', err.message);
                 dbAvailable = false;
                 (globalThis as any).__aiStudioDbAvailable = false;

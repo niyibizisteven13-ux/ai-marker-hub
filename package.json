@@ -21,7 +21,9 @@
     "eval:documents": "tsx scripts/eval-documents.ts",
     "verify": "npm run lint && npm run test && npm run build",
     "prisma": "prisma",
-    "db:migrate": "prisma migrate dev --name init"
+    "db:migrate": "prisma migrate dev --name init",
+    "typecheck": "tsc --noEmit -p .",
+    "test:db": "node --test --import tsx tests/context_awareness.test.ts tests/orchestrator_integration.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
@@ -53,13 +55,13 @@
     "jsonwebtoken": "^9.0.2",
     "jspdf": "^4.2.1",
     "jszip": "^3.10.1",
-    "katex": "^0.18.1",
+    "katex": "^0.19.0",
     "lucide-react": "^0.546.0",
     "mammoth": "^1.12.0",
     "moment": "^2.30.1",
     "motion": "^12.23.24",
     "multer": "^2.2.0",
-    "nodemailer": "^6.9.16",
+    "nodemailer": "^10.2.1",
     "papaparse": "^5.5.4",
     "pdf-lib": "^1.17.1",
     "pdf-parse": "^2.4.5",
@@ -85,7 +87,6 @@
     "vite": "^6.2.3",
     "winston": "^3.17.0",
     "ws": "^8.22.0",
-    "xlsx": "^0.18.5",
     "zod": "^3.24.1",
     "zustand": "^5.0.3"
   },
@@ -112,5 +113,10 @@
     "typescript": "~5.8.2",
     "vite": "^6.2.3",
     "vitest": "^3.0.0"
+  },
+  "overrides": {
+    "katex": "$katex",
+    "uuid": "$uuid",
+    "image-size": "^2.0.4"
   }
 }

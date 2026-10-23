@@ -1,3 +1,4 @@
+import { SandboxFrame } from './SandboxFrame';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 
 const PdfViewer = lazy(() => import('./PdfViewer').then((m) => ({ default: m.PdfViewer })));
@@ -64,7 +65,7 @@ function Lightbox({ item, onClose }: { item: AttachmentRef; onClose: () => void 
 
 /** Generated HTML runs in a sandbox without same-origin access: its scripts work, but it cannot reach the app, cookies or network. */
 function HtmlFrame({ html, title, tall }: { html: string; title: string; tall?: boolean }) {
-  return <iframe title={title} sandbox="allow-scripts allow-downloads" srcDoc={html} className={`w-full rounded-lg bg-white ${tall ? 'h-[85vh]' : 'h-[460px]'}`} />;
+  return <SandboxFrame title={title} html={html} className={`w-full rounded-lg bg-white ${tall ? 'h-[85vh]' : 'h-[460px]'}`} />;
 }
 
 function FullScreenHtml({ item, html, onClose }: { item: AttachmentRef; html: string; onClose: () => void }) {

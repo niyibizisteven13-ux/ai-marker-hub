@@ -1,4 +1,3 @@
-declare module 'bcryptjs';
 
 // First: the admin "Pause AI" stop guards every request to an AI provider, so it must wrap fetch before any SDK loads.
 import './server/services/billing/aiKillSwitch.js';
@@ -45,9 +44,12 @@ import { agentTarget, fileJobQueue } from './server/services/AiService.js';
 import { planOutput } from './server/services/outputs/planner.js';
 import { asksAboutDatasets } from './server/services/knowledge/published.js';
 import { checkUsage, recordUsage } from './server/services/billing/usage.js';
-import { guardSettings } from './server/services/billing/aiGuard.js';
+import { guardSettings, listenForGuardChanges } from './server/services/billing/aiGuard.js';
+import { isPrimary, nodeName, nodeRole } from './server/utils/cluster.js';
+import { closeRedis, getRedis, redisReady } from './server/services/cache/redis.js';
 import { rememberBlocked, takeResumable } from './server/services/billing/pendingRequest.js';
 import { makeEmitter } from './server/utils/sseEmitter.js';
+import { contentSecurityPolicy } from './server/utils/csp.js';
 import { validateSubmission } from './server/services/forms/validation.js';
 import { ensureVersion } from './server/services/forms/versions.js';
 import { ownForm } from './server/services/forms/service.js';
@@ -156,8 +158,11 @@ const purgeExpiredFiles = () => {
     logger.error('Scheduled expired-file purge failed.', error);
   });
 };
-purgeExpiredFiles();
-setInterval(purgeExpiredFiles, 24 * 60 * 60 * 1000).unref();
+// Shared files are cleaned by the primary server only (see server/utils/cluster.ts).
+if (isPrimary()) {
+  purgeExpiredFiles();
+  setInterval(purgeExpiredFiles, 24 * 60 * 60 * 1000).unref();
+}
 
 /**
  * Consistent error-response shape for every route below: full detail in
@@ -238,7 +243,11 @@ app.use((req: express.Request, res: express.Response, next: express.NextFunction
   // The scanner runs as a Telegram Mini App, which Telegram Web shows in an iframe.
   if (req.path === '/scanner.html') res.setHeader('Content-Security-Policy', "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org");
   else res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  const csp = contentSecurityPolicy(req.path);
+  if (csp) res.setHeader(csp.header, csp.value);
   res.setHeader('X-Content-Type-Options', 'nosniff');
+  // Which server answered, when running several (NODE_NAME is set by scripts/cluster).
+  if (process.env.NODE_NAME) res.setHeader('X-Served-By', process.env.NODE_NAME);
   res.setHeader('X-XSS-Protection', '0'); // Modern browsers ignore this; CSP is the real defence
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=()');
@@ -336,12 +345,24 @@ app.use('/api', (_req, res, next) => {
 // alerts. It also reveals nothing about which providers are configured —
 // that's reconnaissance information for anyone probing for which
 // upstream API to target for quota exhaustion.
+// Browsers report blocked content here (Content-Security-Policy); logged in small batches, never stored.
+let cspReports = 0;
+app.post('/api/csp-report', express.json({ type: ['application/csp-report', 'application/json', 'application/reports+json'], limit: '16kb' }), (req, res) => {
+  if (cspReports++ < 200) {
+    const r = (req.body?.['csp-report'] ?? req.body?.[0]?.body ?? req.body) || {};
+    logger.warn('[csp] blocked', { directive: r['violated-directive'] ?? r.effectiveDirective, blocked: String(r['blocked-uri'] ?? r.blockedURL ?? '').slice(0, 200), page: String(r['document-uri'] ?? r.documentURL ?? '').slice(0, 200) });
+  }
+  res.status(204).end();
+});
+setInterval(() => { cspReports = 0; }, 3_600_000).unref();
+
 app.get('/api/health', async (_req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
-    res.json({ status: 'ok', database: 'ok' });
+    // The load balancer and the deploy script read this: which server answered, and whether shared services are up.
+    res.json({ status: 'ok', database: 'ok', redis: process.env.REDIS_URL ? (redisReady() ? 'ok' : 'unavailable') : 'not configured', node: nodeName(), role: nodeRole() });
   } catch {
-    res.status(503).json({ status: 'degraded', database: 'unavailable' });
+    res.status(503).json({ status: 'degraded', database: 'unavailable', node: nodeName(), role: nodeRole() });
   }
 });
 
@@ -2637,13 +2658,13 @@ async function startServer() {
     logger.error('Failed to start Reconciliation Service', err);
   });
 
-  // Register Telegram bot commands and webhook URL with Telegram API
+  // Register Telegram bot commands and webhook URL with Telegram API (once, from the primary server)
   const botService = TelegramBotService.getInstance();
-  botService.registerCommands().catch((err) => {
+  if (isPrimary()) botService.registerCommands().catch((err) => {
     logger.error('Failed to register Telegram bot commands', err);
   });
   const webhookBaseUrl = getTelegramWebhookBaseUrl();
-  if (webhookBaseUrl) {
+  if (webhookBaseUrl && isPrimary()) {
     botService.setWebhook(webhookBaseUrl).catch((err) => {
       logger.error('Failed to set Telegram webhook URL', err);
     });
@@ -2683,12 +2704,14 @@ async function startServer() {
     app.get('*', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
   }
 
-  server.listen(PORT, '0.0.0.0', () => {
-    logger.info(`Marker AI server running on http://0.0.0.0:${PORT}`);
+  server.listen(PORT, process.env.HOST || '0.0.0.0', () => {
+    logger.info(`Marker AI server running on http://0.0.0.0:${PORT}`, { node: nodeName(), role: nodeRole(), redis: process.env.REDIS_URL ? 'configured' : 'off' });
+    getRedis();
+    listenForGuardChanges();
     // Recover persisted background jobs and start periodic cleanup of expired jobs/artifacts.
     startEducationRuntime().catch((err) => logger.error('Background job runtime failed to start', { errorType: err?.name }));
-    // Mobile Money: confirm pending payments (missed callbacks) and send renewal reminders.
-    startBillingJobs();
+    // Mobile Money: confirm pending payments (missed callbacks) and send renewal reminders (primary only).
+    if (isPrimary()) startBillingJobs();
     // Keep the "Pause AI" stop in step with the saved setting (it is also applied the moment an admin saves it).
     void guardSettings(true).catch(() => undefined);
     setInterval(() => void guardSettings(true).catch(() => undefined), 15_000).unref();
@@ -2705,6 +2728,7 @@ async function startServer() {
         await fileJobQueue.stop();
         await shutdownOcr();
         await queueService.close();
+        await closeRedis();
         await prisma.$disconnect();
       } catch (err) {
         logger.warn('Error disconnecting Prisma during shutdown', err);
@@ -2712,11 +2736,11 @@ async function startServer() {
         process.exit(0);
       }
     });
-    // Don't hang forever waiting for slow/stuck connections to drain.
+    // Don't hang forever waiting for slow/stuck connections to drain (long AI answers get a fair chance).
     setTimeout(() => {
       logger.warn('Forced shutdown after timeout');
       process.exit(1);
-    }, 10_000).unref();
+    }, Number(process.env.SHUTDOWN_GRACE_MS) || 30_000).unref();
   };
 
   process.on('SIGTERM', () => shutdown('SIGTERM'));
