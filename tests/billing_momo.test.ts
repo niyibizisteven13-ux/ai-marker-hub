@@ -48,6 +48,7 @@ const { checkUsage, recordUsage } = await import('../server/services/billing/usa
 const { startPayment, checkPayment, fulfil, quote, runRenewalSweep, billingState } = await import('../server/services/billing/payments.js');
 const { momoMode, momoHealth, normalizeMsisdn, resetMomo } = await import('../server/services/billing/momo.js');
 const { mergePlaceholderAccount } = await import('../server/services/billing/accounts.js');
+const { platformContext } = await import('../server/services/platformContext.js');
 const { momoCallbackRouter } = await import('../server/routes/billingRoutes.js');
 const db = prisma as any;
 
@@ -292,4 +293,26 @@ test('admin connection test: token and Collections account checked, secrets neve
     assert.equal(off.ok, false);
     assert.match(off.steps[0].detail, /MOMO_API_KEY/);
   } finally { process.env.MOMO_API_KEY = keep; }
+});
+
+test('platform context: the AI knows the plan, credits left, real links, and when (not) to suggest upgrading', async () => {
+  const free = await newUser();
+  const web = await platformContext(free, 'web');
+  assert.match(web, /Free plan/);
+  assert.match(web, /Credits left: \d+ of 20 today/);
+  assert.match(web, /\[Open the scanner\]\([^)]*\/scan\)/);
+  assert.match(web, /\[the review screen\]\([^)]*\/exams\)/);
+  assert.match(web, /\[Upgrade\]\([^)]*\/upgrade\)/);
+  assert.match(web, /draft the marking scheme/);
+  assert.match(web, /Suggest upgrading at most once/);
+  const tg = await platformContext(free, 'telegram');
+  assert.match(tg, /\/scan command/);
+  assert.match(tg, /\]\(https:\/\/[^)]+\/upgrade\)/, 'absolute links in Telegram');
+
+  const pro = await newUser();
+  await db.subscription.create({ data: { id: randomUUID(), userId: pro, planType: 'PRO', status: 'ACTIVE', startDate: new Date(), endDate: new Date(Date.now() + 10 * 86_400_000) } });
+  const p = await platformContext(pro, 'web');
+  assert.match(p, /PRO plan, active until/);
+  assert.match(p, /do not suggest upgrading/);
+  assert.equal(await platformContext(null, 'web'), '');
 });

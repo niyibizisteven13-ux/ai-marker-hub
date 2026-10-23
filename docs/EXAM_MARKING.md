@@ -80,7 +80,30 @@ Routes are in `server/routes/examRoutes.ts`.
 
    The workbook and ZIP are also sent as separate chat attachments. A candidate's PDF is sent on request.
 
-## Conversational editing
+## What teachers can send, and marking without a scheme
+
+**Scripts** can be:
+- PDFs;
+- photos (JPEG, PNG, WebP, HEIC, TIFF);
+- typed answers (Word, OpenDocument, RTF, text, Markdown, HTML);
+- a **ZIP folder**.
+
+How each is handled:
+- **ZIP folders.** In the web chat, "Upload Folder" zips a folder in the browser. On the server, a ZIP is unpacked. Each sub-folder of page photos becomes one script named after the folder (`C014/page1.jpg`, `C014/page2.jpg` become `C014.pdf`); other files are scripts on their own.
+- **Typed answers.** These are printed to a clean PDF, which is read and marked like a scan. The teacher's file is kept unchanged (`originalFileId`).
+- **Text files.** A text file is the marking scheme only when its name says so (scheme, rubric, memo, answer key, barème), or when it is the one unnamed text file sent next to scanned scripts. Otherwise text documents are candidates' answers.
+
+**No marking scheme.** The chat offers two options: attach a scheme, or reply "draft the marking scheme" (also "I don't have one, mark it yourself").
+- In that case Bwenge AI drafts a scheme. It uses the question paper if one was sent, otherwise the questions as they appear on up to three scripts. The recognition of those scripts is cached, so marking later reuses it.
+- The draft carries a warning that it was drafted by the AI, and it is **never used until the teacher confirms it** ("confirm the marking scheme").
+- Marks the AI had to assign are listed for the teacher to check.
+
+**Links in replies.** Replies point to the scanner (`/scan`), the review screen (`/exams/<id>/review`) and the upgrade page.
+- In Telegram, links become full URLs based on `APP_BASE_URL`.
+- The AI's general instructions also carry the user's plan, the credits left (today, this week, this month) and these links; see `server/services/platformContext.ts`.
+- It suggests upgrading at most once in a conversation, and only when it helps.
+
+
 
 Each command resolves the exam, candidate and question, validates the request, writes a new result revision with an audit event, recomputes totals, and regenerates stale files. Unchanged candidate PDFs are reused.
 
