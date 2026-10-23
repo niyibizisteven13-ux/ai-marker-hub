@@ -12,6 +12,7 @@ import ExcelJS from 'exceljs';
 type Call = { method: string; body: any; files: Record<string, { name: string; type: string; data: Buffer }> };
 const calls: Call[] = [];
 const claudeRequests: any[] = [];
+const gonkaRequests: any[] = [];
 const CSV = 'district,score\nGasabo,71\nHuye,64\nMusanze,58\n';
 let msgSeq = 1000;
 
@@ -64,6 +65,15 @@ function script(p: any): Turn | 'fail' {
 
 const claude = http.createServer(async (req, res) => {
   const p = JSON.parse((await readBody(req)).toString());
+  if (req.url?.endsWith('/chat/completions') && /Learning mode/.test(JSON.stringify(p.messages?.[0] ?? ''))) {
+    // Everyday chat runs on the OpenAI-compatible Gonka endpoint; answered here only for the learning-mode test.
+    gonkaRequests.push(p);
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.write(`data: ${JSON.stringify({ id: 'g', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { role: 'assistant', content: 'What denominator could both fractions share?' }, finish_reason: null }] })}\n\n`);
+    res.write(`data: ${JSON.stringify({ id: 'g', object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 5, completion_tokens: 7 } })}\n\n`);
+    res.end('data: [DONE]\n\n');
+    return;
+  }
   if (!req.url?.endsWith('/messages')) { res.writeHead(400, { 'content-type': 'application/json' }).end('{"error":{"message":"stub"}}'); return; }
   claudeRequests.push(p);
   const turn = script(p);
@@ -336,6 +346,36 @@ test('scanner: uploads are signed (Mini App initData or link token) and arrive a
   const user = claudeRequests.at(-1).messages.at(-1).content as any[];
   assert.ok(user.filter((b) => b.type === 'image').length >= 2, 'the scanned pages reach the model as images');
   assert.match(JSON.stringify(user), /Aline Uwase\.pdf/);
+  resetRouterState();
+});
+
+test('learning modes: /socratic, /roleplay presets and /normal change the instructions the model gets', async () => {
+  let n = mark();
+  await sendText('/socratic fractions');
+  await until(() => since(n).find((c) => c.method === 'sendMessage' && /Socratic tutor/.test(c.body.text)));
+  assert.deepEqual((await db.telegramSession.findUnique({ where: { chatId: String(chat) } })).learning, { mode: 'socratic', topic: 'fractions' });
+  n = mark();
+  await sendText('What is 1/2 + 1/3?');
+  await until(() => since(n).find((c) => c.method === 'editMessageText' && /denominator could both/.test(c.body.text)));
+  const system = JSON.stringify(gonkaRequests.at(-1).messages[0]);
+  assert.match(system, /Learning mode: Socratic guide · topic: fractions/);
+  assert.match(system, /Do not give the final answer/);
+
+  n = mark();
+  await sendText('/roleplay');
+  const menu = await until(() => since(n).find((c) => c.method === 'sendMessage' && c.body.reply_markup?.inline_keyboard?.[0]?.[0]?.callback_data?.startsWith('lm:')));
+  const preset = menu.body.reply_markup.inline_keyboard.find((r: any) => r[0].callback_data === 'lm:french-market')[0];
+  n = mark();
+  await tap(preset.callback_data, menu.body.message_id ?? 1);
+  await until(() => since(n).find((c) => c.method === 'sendMessage' && /hello/i.test(c.body.text)));
+  const learning = (await db.telegramSession.findUnique({ where: { chatId: String(chat) } })).learning;
+  assert.equal(learning.mode, 'roleplay');
+  assert.equal(learning.language, 'French');
+
+  n = mark();
+  await sendText('/normal');
+  await until(() => since(n).find((c) => c.method === 'sendMessage'));
+  assert.equal((await db.telegramSession.findUnique({ where: { chatId: String(chat) } })).learning?.mode ?? 'normal', 'normal');
   resetRouterState();
 });
 

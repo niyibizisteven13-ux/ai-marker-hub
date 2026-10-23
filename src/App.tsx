@@ -48,6 +48,7 @@ import { Menu, X, Plus, Sparkles } from 'lucide-react';
 import UpgradePage from './pages/UpgradePage';
 import ExamReviewPage from './pages/ExamReviewPage';
 import ModelPage from './pages/ModelPage';
+import LearnPage from './pages/LearnPage';
 import LandingPage from './pages/LandingPage';
 import TermsPage from './pages/TermsPage';
 import PrivacyPage from './pages/PrivacyPage';
@@ -198,7 +199,7 @@ export default function App() {
   const retryPromptRef = React.useRef<{
     text: string;
     attachment?: File | ChatAttachment | Array<File | ChatAttachment>;
-    options?: { answerLanguage?: string };
+    options?: { answerLanguage?: string; learning?: import('./lib/learning/presets').LearningSettings };
   } | null>(null);
   const [publicForm, setPublicForm] = useState<any | null>(null);
   const [publicFormLoading, setPublicFormLoading] = useState(false);
@@ -851,7 +852,7 @@ export default function App() {
   const handleSendMessage = async (
     text: string,
     attachment?: File | ChatAttachment | Array<File | ChatAttachment>,
-    options?: { answerLanguage?: string },
+    options?: { answerLanguage?: string; learning?: import('./lib/learning/presets').LearningSettings },
   ) => {
     if ((!text.trim() && !attachment) || isAiLoading) return;
 
@@ -990,6 +991,7 @@ export default function App() {
           attachments: attachmentPayloads,
           attachmentIds: serverAttachmentIds,
           answerLanguage: options?.answerLanguage,
+          learning: options?.learning && options.learning.mode !== 'normal' ? options.learning : undefined,
         }),
         signal: controller.signal,
       });
@@ -1434,6 +1436,10 @@ export default function App() {
     window.dispatchEvent(new Event('bwenge:usage'));
     closeUpgradePage();
   };
+
+  if (authenticatedUser && window.location.pathname === '/learn') {
+    return <LearnPage onBack={() => { window.history.pushState({}, '', '/'); window.location.reload(); }} />;
+  }
 
   if (authenticatedUser && /^\/exams(\/|$)/.test(window.location.pathname)) {
     return <ExamReviewPage onBack={() => { window.history.pushState({}, '', '/'); window.location.reload(); }} />;

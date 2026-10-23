@@ -273,6 +273,29 @@ export async function handleUpdate(update: any, legacy: LegacyHooks, api: Telegr
         await prisma.telegramSession.update({ where: { chatId }, data: { history: [], lastPrompt: null, activeDiscussJobId: null, stagedMode: null } }).catch(() => undefined);
         await api.sendMessage(chatId, card('✨', lang === 'rw' ? 'Ikiganiro gishya' : lang === 'fr' ? 'Nouvelle conversation' : 'New conversation', esc(copy(lang).homeFooter)));
         return;
+      case '/tutor': case '/socratic': {
+        const topic = rest.join(' ').slice(0, 200);
+        await prisma.telegramSession.update({ where: { chatId }, data: { learning: { mode: 'socratic', ...(topic ? { topic } : {}) } } }).catch(() => undefined);
+        await api.sendMessage(chatId, card('🎓', lang === 'rw' ? 'Umwarimu ubaza ibibazo' : lang === 'fr' ? 'Tuteur socratique' : 'Socratic tutor', esc(lang === 'rw' ? 'Nzakuyobora nkoresheje ibibazo n’inama aho kuguha igisubizo. Andika ikibazo cyawe. /normal kugira ngo uhagarike.' : lang === 'fr' ? 'Je vous guide par des questions et des indices au lieu de donner la réponse. Écrivez votre exercice. /normal pour arrêter.' : 'I will guide you with questions and hints instead of giving the answer. Send your problem. /normal to stop.')));
+        return;
+      }
+      case '/roleplay': {
+        if (rest.length) {
+          await prisma.telegramSession.update({ where: { chatId }, data: { learning: { mode: 'roleplay', character: rest.join(' ').slice(0, 120) } } }).catch(() => undefined);
+          await api.sendMessage(chatId, card('🎭', 'Roleplay', esc(`I am now ${rest.join(' ').slice(0, 120)}. Start the conversation; say "end" for feedback, /normal to stop.`)));
+        } else {
+          const { ROLEPLAY_PRESETS } = await import('../learning/modes.js');
+          await api.sendMessage(chatId, card('🎭', 'Roleplay', esc('Pick a scenario, or type /roleplay followed by who I should play (e.g. /roleplay a bank clerk in Kigali).')), {
+            keyboard: { inline_keyboard: ROLEPLAY_PRESETS.map((p) => [{ text: p.title, callback_data: `lm:${p.id}` }]) },
+          });
+        }
+        return;
+      }
+      case '/normal': {
+        await prisma.telegramSession.update({ where: { chatId }, data: { learning: null as any } }).catch(() => undefined);
+        await api.sendMessage(chatId, card('💬', lang === 'rw' ? 'Ikiganiro gisanzwe' : lang === 'fr' ? 'Mode normal' : 'Normal mode', esc(lang === 'rw' ? 'Nsubiye ku kiganiro gisanzwe.' : lang === 'fr' ? 'Retour au mode normal.' : 'Back to normal answers.')));
+        return;
+      }
       case '/chat': case '/ask':
         if (rest.length) await runAssistantTurn({ chatId, session, text: rest.join(' '), replyTo: msg.message_id });
         else await api.sendMessage(chatId, guideCard(lang, 'create'), { keyboard: backKeyboard(lang) });
@@ -317,6 +340,15 @@ async function handleCallback(q: any, legacy: LegacyHooks, api: TelegramApi) {
           if (arg === 'transcribe') await prisma.telegramSession.update({ where: { chatId }, data: { stagedMode: 'transcribe' } }).catch(() => undefined);
           await show(api, chatId, target, guideCard(lang, arg as any), backKeyboard(lang));
         }
+        return;
+      }
+      case 'lm': {
+        const { ROLEPLAY_PRESETS } = await import('../learning/modes.js');
+        const p = ROLEPLAY_PRESETS.find((x) => x.id === arg);
+        await api.answerCallback(q.id);
+        if (!p) return;
+        await prisma.telegramSession.update({ where: { chatId }, data: { learning: p.settings as any } }).catch(() => undefined);
+        await api.sendMessage(chatId, card('🎭', p.title, esc(`${p.settings.scenario ?? ''}\n\nI am ${p.settings.character}. You start: say hello. Say "end" for feedback, /normal to stop.`)));
         return;
       }
       case 'l': {

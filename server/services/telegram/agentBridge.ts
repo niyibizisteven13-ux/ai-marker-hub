@@ -22,7 +22,7 @@ type Turn = { role: 'user' | 'assistant'; text: string };
 export interface BridgeDeps {
   api: TelegramApi;
   fileStore: FileStore;
-  assist: (o: { userId: string; messages: Array<{ role: 'user' | 'assistant'; content: string }>; files?: Array<{ type: 'image' | 'document'; base64: string; mediaType: string; name?: string }>; planText: string; onEvent: (e: any) => void; signal?: AbortSignal }) => Promise<{ content: Array<{ text: string }>; attachments?: AttachmentRef[] }>;
+  assist: (o: { userId: string; learning?: import('../learning/modes.js').LearningSettings; messages: Array<{ role: 'user' | 'assistant'; content: string }>; files?: Array<{ type: 'image' | 'document'; base64: string; mediaType: string; name?: string }>; planText: string; onEvent: (e: any) => void; signal?: AbortSignal }) => Promise<{ content: Array<{ text: string }>; attachments?: AttachmentRef[] }>;
   exam?: (userId: string, text: string, files: Array<{ name: string; buffer: Buffer; mime?: string }>, onStatus: (t: string) => void) => Promise<{ text: string; attachments: AttachmentRef[] } | null>;
   editIntervalMs?: number;
 }
@@ -179,8 +179,10 @@ export async function runAssistantTurn(input: TurnInput, depsOverride?: BridgeDe
       answer = exam.text;
       for (const a of exam.attachments) if (!attachments.some((x) => x.id === a.id)) attachments.push(a);
     } else {
+      const { parseLearning } = await import('../learning/modes.js');
       const r = await deps.assist({
         userId,
+        learning: parseLearning(session?.learning),
         messages: [...historyOf(session).map((h) => ({ role: h.role, content: h.text })), { role: 'user' as const, content: input.text }],
         files: files.map((f) => ({ type: f.mime.startsWith('image/') ? 'image' as const : 'document' as const, base64: f.data.toString('base64'), mediaType: f.mime, name: f.name })),
         planText: input.text,

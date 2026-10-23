@@ -419,6 +419,9 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                 <a role="menuitem" href="/exams" className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-[#C2C0B6] transition-colors hover:bg-white/[0.06] hover:text-white">
                   <ClipboardCheck size={15} aria-hidden="true" /> Marked exams
                 </a>
+                <a role="menuitem" href="/learn" className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-[#C2C0B6] transition-colors hover:bg-white/[0.06] hover:text-white">
+                  <GraduationCap size={15} aria-hidden="true" /> Practice & classes
+                </a>
                 {user.role === 'ADMIN' && onOpenAdmin && (
                   <button
                     type="button"
