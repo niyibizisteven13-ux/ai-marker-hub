@@ -1,3 +1,4 @@
+import { SandboxFrame } from './SandboxFrame';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, BarChart3, Check, Copy, Download, FileSpreadsheet, FileText, FileType2, FolderOpen, GitBranch, LayoutDashboard, Link2, Link2Off,
@@ -230,7 +231,7 @@ function ArtifactViewer({ artifact: a, revisions, onSelect, onClose, onChanged, 
                 </div>
               ) : error ? <p className="text-sm text-red-300">{error}</p>
                 : !content ? <div className="flex h-60 items-center justify-center text-stone-500"><Loader2 className="h-5 w-5 animate-spin" aria-label="Loading" /></div>
-                  : content.html !== undefined ? <iframe title={a.title} sandbox="allow-scripts allow-downloads" srcDoc={content.html} className="h-[70vh] w-full rounded-xl bg-white" />
+                  : content.html !== undefined ? <SandboxFrame title={a.title} html={content.html} className="h-[70vh] w-full rounded-xl bg-white" />
                     : content.text !== undefined ? <pre className="whitespace-pre-wrap break-words rounded-xl bg-stone-950 p-4 font-mono text-[12.5px] leading-relaxed text-stone-300">{content.text}</pre>
                       : a.format === 'pdf' ? <iframe title={a.title} src={content.url} className="h-[70vh] w-full rounded-xl bg-white" />
                         : <img src={content.url} alt={a.title} className="mx-auto max-h-[70vh] max-w-full rounded-xl bg-white object-contain" />}

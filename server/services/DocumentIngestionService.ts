@@ -1,5 +1,5 @@
 import mammoth from 'mammoth';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import Papa from 'papaparse';
 import zlib from 'zlib';
 import logger from '../utils/logger.js';
@@ -49,11 +49,24 @@ export async function ingestDocument(buffer: Buffer, mimeType: string, fileName:
 
     // 2. Excel Spreadsheets (.xlsx, .xls)
     if (ext === 'xlsx' || ext === 'xls' || mimeType.includes('spreadsheetml') || mimeType.includes('excel')) {
-      const workbook = XLSX.read(buffer, { type: 'buffer' });
-      const sheets = workbook.SheetNames.map(name => {
-        const sheet = workbook.Sheets[name];
-        const csv = XLSX.utils.sheet_to_csv(sheet);
-        return `## Sheet: ${name}\n${csv}`;
+      // ExcelJS reads .xlsx only; the old binary .xls format must be re-saved as .xlsx or CSV first.
+      if (ext === 'xls' && !mimeType.includes('spreadsheetml')) throw new Error('Old .xls files cannot be read. Save the file as .xlsx or CSV and upload it again.');
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(buffer as any);
+      const cell = (v: any): string => {
+        if (v === null || v === undefined) return '';
+        if (v instanceof Date) return v.toISOString().slice(0, 10);
+        if (typeof v === 'object') return String(v.result ?? v.text ?? (Array.isArray(v.richText) ? v.richText.map((r: any) => r.text).join('') : v.hyperlink ?? ''));
+        return String(v);
+      };
+      const csvCell = (t: string) => (/[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t);
+      const sheets = workbook.worksheets.map((sheet) => {
+        const rows: string[] = [];
+        sheet.eachRow({ includeEmpty: false }, (row) => {
+          const values = (row.values as any[]).slice(1);
+          rows.push(values.map((v) => csvCell(cell(v))).join(','));
+        });
+        return `## Sheet: ${sheet.name}\n${rows.join('\n')}`;
       });
       return truncateWithWarning(sheets.join('\n\n'), fileName);
     }
