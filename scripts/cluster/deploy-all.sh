@@ -19,7 +19,7 @@ if [[ ${1:-} != --pulled ]]; then
 fi
 
 PORT=$(app_port)
-say "Building on the primary ($(git log --oneline -1))"
+say "Building on the primary ($(sudo -u "$APP_USER" git log --oneline -1))"
 sudo -u "$APP_USER" npm ci --silent
 sudo -u "$APP_USER" npm run --silent build
 sudo -u "$APP_USER" npx prisma migrate deploy
@@ -34,4 +34,4 @@ for n in $NODES; do
 done
 
 [[ -f /etc/nginx/conf.d/bwenge-cluster.conf ]] && { write_nginx_upstreams; nginx -t 2>/dev/null && systemctl reload nginx; }
-ok "Deployed $(git log --oneline -1 | cut -c1-60) to primary${NODES:+ and $(wc -w <<<"$NODES") more server(s)}"
+ok "Deployed $(sudo -u "$APP_USER" git log --oneline -1 | cut -c1-60) to primary${NODES:+ and $(wc -w <<<"$NODES") more server(s)}"
