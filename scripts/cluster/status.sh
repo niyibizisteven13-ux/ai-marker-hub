@@ -16,12 +16,15 @@ echo "node:           $(node -v)"
 echo "errors (24 h):  $(journalctl -u "$SERVICE" --since '24 hours ago' -p err --no-pager -q 2>/dev/null | wc -l) error lines"
 
 echo "== Public site"
-# Follow redirects (www → apex or the reverse) and read the headers of the page actually served.
-FINAL=$(curl -sSL -m 10 -o /dev/null -w '%{url_effective}' https://www.bwenge.space/ 2>/dev/null)
-H=$(curl -sS -m 10 -D - -o /dev/null "${FINAL:-https://www.bwenge.space/}" 2>&1)
+# Ask the local web server (Caddy or nginx) for the public site: a server often cannot reach its own public
+# address through its firewall. Follow the www → main-domain redirect and read the page actually served.
+R=(--resolve www.bwenge.space:443:127.0.0.1 --resolve bwenge.space:443:127.0.0.1)
+FINAL=$(curl -sSL "${R[@]}" -m 10 -o /dev/null -w '%{url_effective}' https://www.bwenge.space/ 2>/dev/null)
+H=$(curl -sS "${R[@]}" -m 10 -D - -o /dev/null "${FINAL:-https://www.bwenge.space/}" 2>&1)
 echo "https status:   $(head -1 <<<"$H" | tr -d '\r') at ${FINAL:-?}"
 echo "security policy:$(grep -i '^content-security-policy' <<<"$H" >/dev/null && echo ' enforced' || echo ' MISSING')"
 echo "HSTS:          $(grep -i '^strict-transport-security' <<<"$H" >/dev/null && echo ' yes' || echo ' no')"
+echo "web server:     $(grep -i '^server:' <<<"$H" | cut -d' ' -f2- | tr -d '\r' || true)$(systemctl is-active caddy >/dev/null 2>&1 && echo ' (caddy active)')$(systemctl is-active nginx >/dev/null 2>&1 && echo ' (nginx active)')"
 echo "TLS expires:    $(echo | openssl s_client -servername www.bwenge.space -connect www.bwenge.space:443 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)"
 
 echo "== Settings present (values not shown)"
