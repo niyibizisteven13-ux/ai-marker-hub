@@ -47,6 +47,7 @@ import { useVisualViewportHeight } from './hooks/useVisualViewportHeight';
 import { Menu, X, Plus, Sparkles } from 'lucide-react';
 import UpgradePage from './pages/UpgradePage';
 import ExamReviewPage from './pages/ExamReviewPage';
+import ModelPage from './pages/ModelPage';
 import LandingPage from './pages/LandingPage';
 import TermsPage from './pages/TermsPage';
 import PrivacyPage from './pages/PrivacyPage';
@@ -1232,6 +1233,9 @@ export default function App() {
     handleClearStagedAttachments();
   };
 
+  if (window.location.pathname === '/model') {
+    return <ModelPage />;
+  }
   if (window.location.pathname === '/terms') {
     return <TermsPage />;
   }

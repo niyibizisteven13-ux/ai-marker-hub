@@ -47,7 +47,8 @@ export type AttachmentKind =
   | 'drawing'
   | 'chart'
   | 'diagram'
-  | 'archive';
+  | 'archive'
+  | 'model3d';
 
 /** What the UI receives for every file the AI creates. */
 export interface AttachmentRef {

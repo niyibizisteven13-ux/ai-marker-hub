@@ -55,6 +55,7 @@ function fileLabel(a: Pick<AttachmentRef, 'mime' | 'kind'>): { icon: string; lab
   if (a.kind === 'chart') return { icon: '📊', label: 'Chart' };
   if (a.kind === 'diagram') return { icon: '🧭', label: 'Diagram' };
   if (a.kind === 'archive') return { icon: '🗜️', label: 'ZIP archive' };
+  if (a.kind === 'model3d') return { icon: '🧊', label: 'Interactive 3D model · open in a browser' };
   return { icon: '📄', label: 'File' };
 }
 
@@ -71,6 +72,14 @@ export async function deliverAttachment(deps: Pick<BridgeDeps, 'api' | 'fileStor
       return true;
     }
     const { meta, data } = await deps.fileStore.read(a.id, userId);
+    if (a.kind === 'model3d') {
+      // Telegram cannot show 3D: send a self-contained viewer page that opens in the phone's browser.
+      const [{ validateScene }, { sceneHtml }] = await Promise.all([import('../../../src/lib/scene/spec.js'), import('../spatial/sceneHtml.js')]);
+      const html = sceneHtml(validateScene(JSON.parse(data.toString('utf8'))));
+      await deps.api.chatAction(chatId, 'upload_document');
+      await deps.api.sendDocument(chatId, { data: Buffer.from(html, 'utf8'), name: `${title.replace(/\.scene$/i, '')}.html`, mime: 'text/html' }, cap);
+      return true;
+    }
     await deps.api.chatAction(chatId, 'upload_document');
     await deps.api.sendDocument(chatId, { data, name: meta.name, mime: meta.mime.split(';')[0] }, cap);
     return true;

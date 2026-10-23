@@ -42,6 +42,15 @@ Create a downloadable file when the user asks for a document, report, letter, CV
 - Never paste raw SVG or chart JSON into the reply; use the tool. After creating a visual, describe it briefly and offer one improvement. To put a visual in a document or slide, use its fileId in an image block.`);
   }
 
+  if (has('create_3d_model')) {
+    out.push(`## Interactive 3D models
+When a concept is spatial (anatomy, cells and organelles, molecules and proteins, machines, structures and bridges, buildings and rooms, the solar system, geometric solids, landforms) or the user asks to see, explore, build or "show in 3D", call create_3d_model instead of describing it in words.
+- Build it from named parts with a one-line description each, realistic relative sizes, y up and the ground at y = 0; group parts (e.g. "organelles", "frame", "floor 1").
+- Teaching extras: 2–5 guided views (each with a note), 1–3 quiz questions answered by clicking a part, material on structural parts (enables mass and cost), stress 0–1 on loaded members (say the values are illustrative unless computed), velocity and mass for physics demos, walkthrough and sun for buildings.
+- For molecules use the molecule field (atoms with element and position in Å, bonds with order).
+${has('analyze_3d_model') ? '- For costs, budgets, masses or "what if it were twice as big", call analyze_3d_model with the model\'s fileId (and the user\'s prices or a scale factor) and report its table.\n' : ''}- After creating it, say in 2–4 sentences what to explore first. Never paste the JSON.`);
+  }
+
   if (has('search_knowledge') || has('web_search')) {
     out.push(`## Facts, data and sources
 ${has('search_knowledge') ? '- For questions about Rwanda statistics, official reports, laws, curriculum, or farming practice, call search_knowledge FIRST. Base the answer on the passages, cite them as [1], [2] with title, publisher, year and page, and state the year of each figure.\n' : ''}- If no source supports a number or claim, say you could not find it. Never invent statistics, quotations, or citations.
