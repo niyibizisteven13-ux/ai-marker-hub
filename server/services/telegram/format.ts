@@ -41,7 +41,10 @@ function table(lines: string[]): string {
 
 /** Splits Markdown into blocks: fenced code, tables, lists, quotes, headings and paragraphs. */
 function blocks(md: string): string[] {
-  const lines = md.replace(/\r\n/g, '\n').replace(/<\/?think(ing)?>[\s\S]*?<\/think(ing)?>/gi, '').split('\n');
+  const lines = md.replace(/\r\n/g, '\n').replace(/<\/?think(ing)?>[\s\S]*?<\/think(ing)?>/gi, '')
+    // A plain-text copy written after a formula ("Unicode: y = …") repeats what the conversion already shows.
+    .replace(/(\$\$[^\n]*\$\$|\\\][^\n]*)\n(?:[ \t]*\n)?[ \t]*Unicode:[^\n]*/g, '$1')
+    .split('\n');
   const out: string[] = [];
   let i = 0;
   while (i < lines.length) {

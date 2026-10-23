@@ -29,7 +29,7 @@ const SUP: Record<string, string> = { 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '�
 const SUB: Record<string, string> = { 0: '₀', 1: '₁', 2: '₂', 3: '₃', 4: '₄', 5: '₅', 6: '₆', 7: '₇', 8: '₈', 9: '₉', '+': '₊', '-': '₋', '=': '₌', '(': '₍', ')': '₎', a: 'ₐ', e: 'ₑ', i: 'ᵢ', j: 'ⱼ', k: 'ₖ', n: 'ₙ', m: 'ₘ', o: 'ₒ', r: 'ᵣ', t: 'ₜ', x: 'ₓ' };
 
 /** Wraps in parentheses when the expression is more than one simple term. */
-const group = (s: string) => (/^(?:\d+(?:[.,]\d+)?|\p{L}′?|[∞°])$/u.test(s) || /^\([^()]*\)$/.test(s) ? s : `(${s})`);
+const group = (s: string) => (/^(?:\d+(?:[.,]\d+)?|\p{L}′?|[∞°]|[d∂][a-z])$/u.test(s) || /^\([^()]*\)$/.test(s) ? s : `(${s})`);
 const script = (s: string, map: Record<string, string>, mark: string) => {
   const t = s.trim();
   if (t && [...t].every((c) => map[c])) return [...t].map((c) => map[c]).join('');

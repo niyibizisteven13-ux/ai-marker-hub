@@ -4,6 +4,7 @@ import { evaluateStudentSubmission as deepseekEvaluate } from '../../src/service
 import { BWENGE_CHAT_RESPONSE_RULES, BWENGE_GENERAL_SYSTEM_PROMPT } from './prompts/bwengeGeneralPrompt.js';
 import { platformContext } from './platformContext.js';
 import { learningModePrompt } from './learning/modes.js';
+import { looksMathematical, mathStyle } from './prompts/mathStyle.js';
 import { MemoryService } from './MemoryService.js';
 import { toKnowledgePassage } from './knowledge/citations.js';
 import { asksAboutDatasets } from './knowledge/published.js';
@@ -870,6 +871,7 @@ export class AiService {
     let systemPrompt = options.extractSchema
       ? `${BWENGE_GENERAL_SYSTEM_PROMPT}${memoryContext}\n\nFor this request, respond with ONLY valid JSON matching this shape, no other text: ${options.extractSchema}`
       : `${BWENGE_GENERAL_SYSTEM_PROMPT}${memoryContext}${platform ? `\n\n${platform}` : ''}\n\n${BWENGE_CHAT_RESPONSE_RULES}${options.learning ? (learningModePrompt(options.learning) ? `\n\n${learningModePrompt(options.learning)}` : '') : ''}`;
+    if (!options.extractSchema && looksMathematical(currentQuery || '')) systemPrompt += `\n\n${mathStyle(options.channel === 'telegram' ? 'telegram' : 'web')}`;
     if (options.pinnedSyllabus) {
       systemPrompt += `\n\n[MASTER CONTEXT]: ${options.pinnedSyllabus}\n(Note: This is the primary curriculum/rubric source. Prioritize this document above all other context.)`;
     }

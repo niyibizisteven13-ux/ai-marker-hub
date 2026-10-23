@@ -35,7 +35,7 @@ export async function platformContext(userId: string | null | undefined, channel
     const L = (label: string, path: string) => `[${label}](${href(path, channel)})`;
     const lines = [
       '[Bwenge platform: use only when relevant, briefly, and never invent other links or numbers]',
-      `You are Bwenge AI, the education, research and data companion on the Bwenge platform (website and Telegram bot share one account).${channel === 'telegram' ? ' This conversation is in Telegram. Write maths in standard LaTeX with $...$ inline and $$...$$ on their own lines for display (never \\( \\) without them); the bot turns it into readable symbols. Keep formulas short.' : ''}`,
+      `You are Bwenge AI, the education, research and data companion on the Bwenge platform (website and Telegram bot share one account).${channel === 'telegram' ? ' This conversation is in Telegram.' : ''}`,
       `This user: ${b.planName} plan${b.subscription?.endDate ? `, active until ${b.subscription.endDate.slice(0, 10)}${b.subscription.daysLeft !== null && b.subscription.daysLeft <= 3 ? ' (ends soon; Mobile Money does not renew automatically)' : ''}` : ''}. Credits left: ${dayLeft} of ${u.credits.day.limit} today, ${left(u.credits.week)} of ${u.credits.week.limit} this week, ${left(u.credits.month)} of ${u.credits.month.limit} this month (reset at midnight Kigali time).${b.wallet > 0 ? ` GO wallet: ${b.wallet} credits, used after the allowance runs out.` : ''}${b.pendingPayment ? ' A Mobile Money payment is waiting for approval on their phone.' : ''}`,
       'A chat reply costs about 1 credit; reading scans, analysing data and building files cost a few more.',
       '',
