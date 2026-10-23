@@ -222,7 +222,7 @@ export function createExamChat(deps: ExamChatDeps) {
     const set = e.artifacts.find((a) => a.status === 'ready')!;
     const ids = what === 'workbook' ? [set.workbookFileId] : what === 'report' ? [set.htmlFileId, set.bundleFileId] : [set.bundleFileId, set.workbookFileId];
     const attachments = (await Promise.all(ids.map(ref))).filter((x): x is AttachmentRef => !!x);
-    return { text: `Here is the ${what === 'workbook' ? 'results workbook' : 'complete marking package'} (result revision ${set.resultRevision}${set.resultRevision === e.resultRevision ? ', up to date' : ''}). Marks are provisional unless confirmed.${set.problems.length ? `\n\nNotes: ${set.problems.slice(0, 5).join(' ')}` : ''}`, attachments };
+    return { text: `Here is the ${what === 'workbook' ? 'results workbook' : 'complete marking package'} (result revision ${set.resultRevision}${set.resultRevision === e.resultRevision ? ', up to date' : ''}). Marks are provisional unless confirmed.\n\nCheck the red marks on each page, move any that landed in the wrong place, and release the PDFs: [Open the review screen](/exams/${e.id}/review)${set.problems.length ? `\n\nNotes: ${set.problems.slice(0, 5).join(' ')}` : ''}`, attachments };
   }
 
   async function startFromFiles(userId: string, message: string, files: UploadFile[], existingExamId: string | null, onStatus?: (t: string) => void): Promise<ChatReply> {
@@ -438,12 +438,15 @@ export function createExamChat(deps: ExamChatDeps) {
           const parts = qs.slice(0, 8).map((q) => [
             `Question ${q.number}: ${fmt(q.awardedMarks)} / ${q.maxMarks} (${q.source === 'examiner_override' ? 'examiner override' : q.status?.replace('_', ' ')})`,
             q.override ? `  Override: ${q.override.reason}` : '',
+            q.answerAsRead ? `  Answer as read: "${q.answerAsRead.replace(/\s+/g, ' ').slice(0, 200)}"` : '',
             q.feedback ? `  ${q.feedback}` : '', q.lostMarks ? `  Lost marks: ${q.lostMarks}` : '',
-            ...q.criterionResults.filter((c) => c.awardedMarks < c.maxMarks).map((c) => `  - ${c.criterionId}: ${c.awardedMarks}/${c.maxMarks}${c.reason ? ` – ${c.reason}` : ''}`),
+            ...q.criterionResults.map((c) => `  ${c.awardedMarks >= c.maxMarks ? '✓' : '✗'} ${c.rubric ?? c.criterionId} – ${c.awardedMarks}/${c.maxMarks}${c.reason ? `: ${c.reason}` : ''}`),
+            q.correction ? `  Correction: ${q.correction}` : '',
+            q.confidence ? `  Confidence: ${q.confidence.level} (${Math.round(q.confidence.score * 100)}%)${q.confidence.basis.length > 1 ? ` – ${q.confidence.basis.slice(1).join('; ')}` : ''}` : '',
             q.evidenceQuotes.filter((x) => x.verified).length ? `  Evidence: ${q.evidenceQuotes.filter((x) => x.verified).slice(0, 3).map((x) => `"${x.quote.slice(0, 80)}" (${x.elementId})`).join('; ')}` : '',
             ...q.openReviewFlags.map((f) => `  Check: ${f.detail}`),
           ].filter(Boolean).join('\n'));
-          return { text: `${cid}: ${view.summary.total} / ${view.summary.maxTotal} (${view.summary.percent}%), ${view.summary.status.replace('_', ' ')}.\n\n${parts.join('\n\n')}`, attachments: [] };
+          return { text: `${cid}: ${view.summary.total} / ${view.summary.maxTotal} (${view.summary.percent}%), ${view.summary.status.replace('_', ' ')}.\n\n${parts.join('\n\n')}\n\nFrom the saved marking record (not a new judgement).`, attachments: [] };
         }
         // show_candidate
         let pdf = view.markedPdf;

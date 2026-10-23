@@ -57,7 +57,14 @@ export interface Submission {
   recognitionKey?: string;
 }
 
-export interface CriterionResult { criterionId: string; awardedMarks: number; maxMarks: number; reason: string }
+export interface CriterionResult {
+  criterionId: string; awardedMarks: number; maxMarks: number; reason: string;
+  /** The scheme line this mark was judged against, as it stood when marking (kept for "why" questions). */
+  rubric?: string;
+}
+
+/** How sure the marking is, from the marker's own estimate capped by what code found (flags, evidence). */
+export interface MarkConfidence { level: 'high' | 'medium' | 'low'; score: number; basis: string[] }
 
 export interface AiQuestionMark {
   runId: string;
@@ -75,6 +82,11 @@ export interface AiQuestionMark {
   reviewFlags: ReviewFlag[];
   /** Marked from text the teacher corrected. */
   basedOnCorrection?: boolean;
+  /** The candidate's answer as the AI read it when marking (evidence lines, in order). */
+  answerAsRead?: string;
+  /** Short red correction written under a wrong answer, e.g. "Area = 7 × 5 = 35 cm²". */
+  correction?: string | null;
+  confidence?: MarkConfidence;
   model: string;
   at: string;
 }
@@ -94,6 +106,9 @@ export interface QuestionResult {
   history: Array<{ revision: number; at: string; actor: string; kind: 'ai_mark' | 'ai_remark' | 'override' | 'confirm' | 'scheme_change'; before: number | null; after: number | null; reason: string }>;
 }
 
+/** A teacher's adjustment of where an item is drawn: page and position as fractions of the displayed page. */
+export interface LayoutOverride { page: number; fx: number; fy: number; hidden?: boolean; by: string; at: string }
+
 export interface CandidateResult {
   submissionId: string;
   candidateId: string;
@@ -102,6 +117,10 @@ export interface CandidateResult {
   questions: QuestionResult[];
   updatedAt: string;
   usage: { input: number; output: number };
+  /** Teacher adjustments keyed by layout item id ("<questionId>:mark", "<questionId>:correction", "total"). */
+  layout?: Record<string, LayoutOverride>;
+  /** Set when the teacher releases the marked PDF; cleared by any later change to marks or layout. */
+  released?: { at: string; by: string; resultUpdatedAt: string } | null;
 }
 
 export interface MarkingRun {
@@ -121,7 +140,7 @@ export interface AuditEvent {
   revision: number;
   at: string;
   actor: string;
-  type: 'marked' | 'remarked' | 'override' | 'transcription_correction' | 'confirm' | 'scheme_version' | 'scheme_confirmed' | 'submission_added' | 'export';
+  type: 'marked' | 'remarked' | 'override' | 'transcription_correction' | 'confirm' | 'scheme_version' | 'scheme_confirmed' | 'submission_added' | 'export' | 'layout' | 'release';
   submissionId?: string;
   candidateId?: string;
   questionId?: string;

@@ -10,13 +10,15 @@ import { documentText, finalText } from '../documents/pipeline.js';
 import type { DocumentService } from '../documents/service.js';
 import { OwnedRecordStore, type OwnedRecord } from '../storage/ownedRecordStore.js';
 import { annotateScript } from './annotate.js';
+import { computeLayout } from './layout.js';
+import { loadPages } from '../documents/pages.js';
 import { buildBundle, safeName, type BundleFile } from './bundle.js';
 import { markCandidate } from './marking.js';
 import { matchAnswers } from './matching.js';
 import { buildReportData, renderExamReport, validateExamReport } from './report.js';
 import { classStatistics, currentSummaries, effectiveMarks, openFlags, schemeOf, summarizeCandidate, type CandidateSummary } from './results.js';
 import { changedQuestions, extractScheme, questionKey, validateScheme, type MarkingScheme } from './scheme.js';
-import type { ArtifactSet, AuditEvent, CandidateResult, CandidateState, ExamRecord, MarkingRun, QuestionResult, SchemeVersion, Submission } from './types.js';
+import type { ArtifactSet, AuditEvent, CandidateResult, CandidateState, ExamRecord, LayoutOverride, MarkingRun, QuestionResult, SchemeVersion, Submission } from './types.js';
 import { buildWorkbook } from './workbook.js';
 
 /**
@@ -50,6 +52,11 @@ export interface ExamDeps {
 }
 
 const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** Released and unchanged since: any later change to marks or layout makes the PDF a draft again. */
+export const isReleased = (r: CandidateResult | undefined) => !!r?.released && r.released.resultUpdatedAt === r.updatedAt;
+/** Stamp of what a candidate PDF was drawn from (result version and release state). */
+const pdfStamp = (r: CandidateResult) => `${r.updatedAt}|${isReleased(r) ? 'released' : 'draft'}`;
 const sha256 = (b: Buffer | string) => createHash('sha256').update(b).digest('hex');
 const now = () => new Date().toISOString();
 const sleep = (ms: number, signal?: AbortSignal) => new Promise<void>((res) => { const t = setTimeout(res, ms); signal?.addEventListener('abort', () => { clearTimeout(t); res(); }, { once: true }); });
@@ -637,12 +644,13 @@ export function createExamService(deps: ExamDeps) {
     const r = e.results[s.submissionId];
     return {
       candidateId: s.candidateId, candidateName: s.candidateName, script: s.fileName, examId: e.id, resultRevision: e.resultRevision, markingRunId: r.runId, schemeVersion: r.schemeVersion,
-      total: s.total, maxTotal: s.maxTotal, percent: s.percent, complete: s.complete, status: s.status,
+      total: s.total, maxTotal: s.maxTotal, percent: s.percent, complete: s.complete, status: s.status, released: isReleased(r) ? r.released : null,
       questions: r.questions.map((q) => ({
         questionId: q.questionId, number: q.number, maxMarks: q.maxMarks, awardedMarks: effectiveMarks(q), status: s.questions.find((x) => x.questionId === q.questionId)?.status,
         source: q.override ? 'examiner_override' : q.ai?.basedOnCorrection ? 'ai_after_correction' : q.ai ? 'ai' : 'none',
         aiProposedMarks: q.ai?.awardedMarks ?? null, override: q.override, confirmed: q.confirmed,
         criterionResults: q.ai?.criterionResults ?? [], feedback: q.ai?.feedback ?? '', lostMarks: q.ai?.lostMarks ?? '',
+        answerAsRead: q.ai?.answerAsRead ?? null, correction: q.ai?.correction ?? null, confidence: q.ai?.confidence ?? null,
         evidenceElementIds: q.ai?.evidenceElementIds ?? [], evidenceQuotes: q.ai?.evidenceQuotes ?? [], openReviewFlags: openFlags(q), history: q.history,
       })),
     };
@@ -668,7 +676,7 @@ export function createExamService(deps: ExamDeps) {
       usedNames.add(name);
       let pdf: Buffer | null = null;
       // Reuse an unchanged candidate PDF from the previous export.
-      if (prev?.candidatePdfs[s.submissionId] && prev.candidatePdfStamps?.[s.submissionId] === res.updatedAt) {
+      if (prev?.candidatePdfs[s.submissionId] && prev.candidatePdfStamps?.[s.submissionId] === pdfStamp(res)) {
         try { pdf = (await deps.fileStore.read(prev.candidatePdfs[s.submissionId], userId)).data; set.candidatePdfs[s.submissionId] = prev.candidatePdfs[s.submissionId]; } catch { pdf = null; }
       }
       if (!pdf) {
@@ -676,7 +684,7 @@ export function createExamService(deps: ExamDeps) {
           const doc = sub.documentId ? await deps.documents.get(userId, sub.documentId) : null;
           if (!doc) throw new Error('The recognised script is no longer available.');
           const original = (await deps.fileStore.read(sub.fileId, userId)).data;
-          const out = await annotateScript({ original, fileName: sub.fileName, doc: doc.result, result: res, summary: s, scheme, meta: { examTitle: exam.title, examId: exam.id, runId: res.runId, resultRevision: exam.resultRevision, generatedAt }, maxPages: deps.maxPages });
+          const out = await annotateScript({ original, fileName: sub.fileName, doc: doc.result, result: res, summary: s, scheme, meta: { examTitle: exam.title, examId: exam.id, runId: res.runId, resultRevision: exam.resultRevision, generatedAt }, maxPages: deps.maxPages, released: isReleased(res) });
           pdf = out.pdf;
           if (out.summaryOnly.length) set.problems.push(`${s.candidateId}: marks for ${out.summaryOnly.join(', ')} are on the summary page only (answer location uncertain).`);
           set.candidatePdfs[s.submissionId] = (await deps.fileStore.put({ userId, name, mime: 'application/pdf', kind: 'pdf', data: pdf, ttlMs: RETENTION_MS })).id;
@@ -684,7 +692,7 @@ export function createExamService(deps: ExamDeps) {
           set.problems.push(`${s.candidateId}: the marked PDF could not be generated (${err instanceof Error ? err.message.slice(0, 120) : 'error'}).`);
         }
       }
-      set.candidatePdfStamps[s.submissionId] = res.updatedAt;
+      set.candidatePdfStamps[s.submissionId] = pdfStamp(res);
       if (pdf) { files.push({ path: `candidates/${name}`, data: pdf, kind: 'candidate_pdf' }); pdfPaths[s.submissionId] = `candidates/${name}`; }
       files.push({ path: `reports/${safeName(s.candidateId)}_marking.json`, data: Buffer.from(JSON.stringify(candidateReport(exam, s), null, 2)), kind: 'candidate_report' });
     }
@@ -758,8 +766,137 @@ export function createExamService(deps: ExamDeps) {
     return {
       submission: { id: sub.id, candidateId: sub.candidateId, candidateName: sub.candidateName ?? null, fileName: sub.fileName, pages: sub.pages, state: sub.state, error: sub.error ?? null, identity: sub.identity },
       summary, result: res ? candidateReport(exam, summary!) : null,
-      markedPdf: set ? { fileId: set.candidatePdfs[sub.id], url: deps.fileStore.signedUrl(set.candidatePdfs[sub.id], 60 * 60 * 1000), resultRevision: set.resultRevision, stale: set.candidatePdfStamps[sub.id] !== res?.updatedAt } : null,
+      markedPdf: set ? { fileId: set.candidatePdfs[sub.id], url: deps.fileStore.signedUrl(set.candidatePdfs[sub.id], 60 * 60 * 1000), resultRevision: set.resultRevision, stale: !res || set.candidatePdfStamps[sub.id] !== pdfStamp(res) } : null,
     };
+  }
+
+
+  // ── Teacher review: layout adjustments and release ──────────────────────
+  async function listExams(userId: string) {
+    const exams = await deps.store.list(userId, 50);
+    return exams.map((e) => {
+      const results = Object.values(e.results);
+      return {
+        examId: e.id, title: e.title, updatedAt: e.updatedAt, candidates: e.submissions.length, marked: results.length,
+        released: results.filter((r) => isReleased(r)).length,
+        needsReview: results.filter((r) => !isReleased(r) && r.questions.some((q) => openFlags(q).length || (q.ai?.confidence?.level === 'low'))).length,
+      };
+    });
+  }
+
+  function reviewList(e: ExamRecord) {
+    const { summaries: list } = currentSummaries(e);
+    return list.map((s) => {
+      const r = e.results[s.submissionId];
+      return {
+        submissionId: s.submissionId, candidateId: s.candidateId, candidateName: s.candidateName, total: s.total, maxTotal: s.maxTotal, percent: s.percent, status: s.status, complete: s.complete,
+        openFlags: s.questions.reduce((a, q) => a + q.flags.length, 0),
+        lowConfidence: r.questions.filter((q) => q.ai?.confidence?.level === 'low').length,
+        released: isReleased(r), releasedAt: isReleased(r) ? r.released!.at : null, changedSinceRelease: !!r.released && !isReleased(r),
+      };
+    });
+  }
+
+  /** Everything the review screen needs for one candidate: pages, where each red item goes, and the saved record. */
+  async function reviewCandidate(userId: string, examId: string, ref: string) {
+    const exam = await load(userId, examId);
+    const sub = findSub(exam, ref);
+    const res = sub ? exam.results[sub.id] : undefined;
+    if (!sub || !res) throw new ExamInputError('UNKNOWN_CANDIDATE', `No marked script for "${ref}".`, 404);
+    const scheme = schemeOf(exam, res.schemeVersion)!;
+    const summary = summarizeCandidate(res, sub, scheme, exam.passPercent);
+    const doc = sub.documentId ? await deps.documents.get(userId, sub.documentId) : null;
+    if (!doc) throw new ExamInputError('DOCUMENT_EXPIRED', 'The recognised script has expired; upload it again.', 410);
+    const layout = computeLayout(doc.result, res, summary);
+    const view = await candidateView(userId, examId, sub.id);
+    return {
+      exam: { examId: exam.id, title: exam.title, resultRevision: exam.resultRevision, allowHalfMarks: scheme.allowHalfMarks },
+      candidate: { submissionId: sub.id, candidateId: sub.candidateId, candidateName: sub.candidateName ?? null, fileName: sub.fileName },
+      summary, layout, released: isReleased(res), releasedAt: isReleased(res) ? res.released!.at : null, changedSinceRelease: !!res.released && !isReleased(res),
+      questions: view.result!.questions, markedPdf: view.markedPdf,
+      candidates: reviewList(exam),
+    };
+  }
+
+  const pageCache = new Map<string, Buffer>();
+  /** The candidate's page as displayed (JPEG), for the review screen. The original file is only read. */
+  async function pageImage(userId: string, examId: string, ref: string, page: number): Promise<Buffer> {
+    const exam = await load(userId, examId);
+    const sub = findSub(exam, ref);
+    if (!sub) throw new ExamInputError('UNKNOWN_CANDIDATE', `No candidate "${ref}".`, 404);
+    const key = `${sub.fileId}:${page}`;
+    const hit = pageCache.get(key);
+    if (hit) return hit;
+    const original = (await deps.fileStore.read(sub.fileId, userId)).data;
+    const { pages } = await loadPages(original, sub.fileName, { maxPages: deps.maxPages ?? 50, pdfScale: 1.6 });
+    const src = pages.find((p) => p.page === page);
+    if (!src) throw new ExamInputError('UNKNOWN_PAGE', `Page ${page} does not exist.`, 404);
+    const jpg = await sharp(src.image, { limitInputPixels: 80_000_000 }).rotate().flatten({ background: '#ffffff' }).resize({ width: 1400, withoutEnlargement: true }).jpeg({ quality: 82 }).toBuffer();
+    pageCache.set(key, jpg);
+    if (pageCache.size > 60) pageCache.delete(pageCache.keys().next().value!);
+    return jpg;
+  }
+
+  /** Moves or hides one red item (or resets it to the automatic place). Any change makes the PDF a draft again. */
+  async function setLayout(userId: string, examId: string, ref: string, itemId: string, input: { page?: number; fx?: number; fy?: number; hidden?: boolean; reset?: boolean }) {
+    const exam = await load(userId, examId);
+    const sub = findSub(exam, ref);
+    const res = sub ? exam.results[sub.id] : undefined;
+    if (!sub || !res) throw new ExamInputError('UNKNOWN_CANDIDATE', `No marked script for "${ref}".`, 404);
+    const valid = itemId === 'total' || res.questions.some((q) => itemId === `${q.questionId}:mark` || itemId === `${q.questionId}:correction`);
+    if (!valid) throw new ExamInputError('UNKNOWN_ITEM', `No item "${itemId}" on this script.`, 404);
+    if (!input.reset && !input.hidden && (input.page === undefined || input.fx === undefined || input.fy === undefined)) throw new ExamInputError('INVALID_REQUEST', 'Give page, fx and fy, or hidden, or reset.', 400);
+    if (input.page !== undefined && (input.page < 1 || input.page > sub.pages)) throw new ExamInputError('UNKNOWN_PAGE', `Page ${input.page} does not exist.`, 404);
+    return mutate(userId, examId, (e) => {
+      const r = e.results[sub.id];
+      const before = r.layout?.[itemId] ?? null;
+      r.layout = { ...(r.layout ?? {}) };
+      if (input.reset) delete r.layout[itemId];
+      else {
+        const prev = r.layout[itemId];
+        const o: LayoutOverride = input.hidden
+          ? { page: prev?.page ?? 1, fx: prev?.fx ?? 0, fy: prev?.fy ?? 0, hidden: true, by: userId, at: now() }
+          : { page: input.page!, fx: Math.min(1, Math.max(0, input.fx!)), fy: Math.min(1, Math.max(0, input.fy!)), by: userId, at: now() };
+        r.layout[itemId] = o;
+      }
+      r.updatedAt = now();
+      e.resultRevision++;
+      audit(e, { actor: userId, type: 'layout', submissionId: sub.id, candidateId: sub.candidateId, before, after: r.layout[itemId] ?? 'automatic', reason: itemId });
+    });
+  }
+
+  /**
+   * Releases marked PDFs. A candidate is released only when every question has a mark; releasing confirms the
+   * marks as the teacher's. The release stays valid until marks or layout change.
+   */
+  async function release(userId: string, examId: string, refs: string[] | 'all') {
+    const exam = await load(userId, examId);
+    const subs = refs === 'all' ? exam.submissions.filter((s) => exam.results[s.id]) : refs.map((r) => findSub(exam, r)).filter((s): s is Submission => !!s);
+    const released: string[] = [];
+    const skipped: Array<{ candidateId: string; reason: string }> = [];
+    for (const s of subs) {
+      const r = exam.results[s.id];
+      if (!r) { skipped.push({ candidateId: s.candidateId, reason: 'not marked yet' }); continue; }
+      const unmarked = r.questions.filter((q) => effectiveMarks(q) === null).map((q) => q.number);
+      if (unmarked.length) { skipped.push({ candidateId: s.candidateId, reason: `question ${unmarked.join(', ')} has no mark` }); continue; }
+      if (isReleased(r)) { released.push(s.candidateId); continue; }
+      released.push(s.candidateId);
+    }
+    const ids = new Set(subs.filter((s) => released.includes(s.candidateId)).map((s) => s.id));
+    const updated = await mutate(userId, examId, (e) => {
+      for (const id of ids) {
+        const r = e.results[id];
+        if (isReleased(r)) continue;
+        e.resultRevision++;
+        const at = now();
+        for (const q of r.questions) if (!q.confirmed) { q.confirmed = { by: userId, at }; q.history.push({ revision: e.resultRevision, at, actor: userId, kind: 'confirm', before: effectiveMarks(q), after: effectiveMarks(q), reason: 'Confirmed on release' }); }
+        r.updatedAt = at;
+        r.released = { at, by: userId, resultUpdatedAt: at };
+        const sub = e.submissions.find((x) => x.id === id)!;
+        audit(e, { actor: userId, type: 'release', submissionId: id, candidateId: sub.candidateId });
+      }
+    });
+    return { exam: updated, released, skipped };
   }
 
   function progress(e: ExamRecord) {
@@ -774,6 +911,7 @@ export function createExamService(deps: ExamDeps) {
     createExam, load, mutate, setSchemeJson, confirmScheme, editSchemeQuestion, submitSchemeDocuments, addSubmissions, startMarking,
     summaries, overrideMark, confirmResults, correctTranscription, remarkQuestions, requestRemark, generateArtifacts, requestExport, artifacts, artifactRefs, candidateView, progress,
     latestScheme, confirmedScheme, findSub, findQuestion,
+    listExams, reviewList, reviewCandidate, pageImage, setLayout, release,
   };
 }
 

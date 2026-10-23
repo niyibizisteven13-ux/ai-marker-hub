@@ -174,3 +174,60 @@ examsRouter.get('/:examId/artifacts', async (req, res) => {
     res.json({ artifacts: await examService.artifacts(userIdOf(req), req.params.examId), requestId: rid(req) });
   } catch (err) { fail(req, res, err); }
 });
+
+// ── Teacher review ───────────────────────────────────────────────────────────
+
+examsRouter.get('/', async (req, res) => {
+  try {
+    res.json({ exams: await examService.listExams(userIdOf(req)), requestId: rid(req) });
+  } catch (err) { fail(req, res, err); }
+});
+
+examsRouter.get('/:examId/review', async (req, res) => {
+  try {
+    const e = await examRef(req);
+    res.json({ exam: { examId: e.id, title: e.title, resultRevision: e.resultRevision }, candidates: examService.reviewList(e), requestId: rid(req) });
+  } catch (err) { fail(req, res, err); }
+});
+
+examsRouter.get('/:examId/review/:submissionId', async (req, res) => {
+  try {
+    res.json({ ...(await examService.reviewCandidate(userIdOf(req), req.params.examId, req.params.submissionId)), requestId: rid(req) });
+  } catch (err) { fail(req, res, err); }
+});
+
+/** The candidate's page as displayed, for the review screen (owner only, never cached by shared caches). */
+examsRouter.get('/:examId/submissions/:submissionId/pages/:page', async (req, res) => {
+  try {
+    const page = z.coerce.number().int().min(1).max(500).parse(req.params.page);
+    const jpg = await examService.pageImage(userIdOf(req), req.params.examId, req.params.submissionId, page);
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Cache-Control', 'private, max-age=600');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.end(jpg);
+  } catch (err) { fail(req, res, err); }
+});
+
+examsRouter.put('/:examId/submissions/:submissionId/layout/:itemId', async (req, res) => {
+  try {
+    const body = z.union([
+      z.object({ page: z.number().int().min(1).max(500), fx: z.number().min(0).max(1), fy: z.number().min(0).max(1) }).strict(),
+      z.object({ hidden: z.literal(true) }).strict(),
+      z.object({ reset: z.literal(true) }).strict(),
+    ]).parse(req.body ?? {});
+    const itemId = z.string().max(120).regex(/^(total|[\w.-]+:(mark|correction))$/).parse(req.params.itemId);
+    await examService.setLayout(userIdOf(req), req.params.examId, req.params.submissionId, itemId, body);
+    res.json({ ...(await examService.reviewCandidate(userIdOf(req), req.params.examId, req.params.submissionId)), requestId: rid(req) });
+  } catch (err) { fail(req, res, err); }
+});
+
+examsRouter.post('/:examId/release', async (req, res) => {
+  try {
+    const body = z.object({ submissionIds: z.array(z.string().min(1).max(60)).min(1).max(500).optional(), all: z.literal(true).optional() }).strict()
+      .refine((b) => b.all || b.submissionIds, 'Give submissionIds or all: true.').parse(req.body ?? {});
+    const out = await examService.release(userIdOf(req), req.params.examId, body.all ? 'all' : body.submissionIds!);
+    // Regenerate the marked PDFs without the draft label.
+    const exp = out.released.length ? await examService.requestExport(userIdOf(req), req.params.examId) : null;
+    res.json({ released: out.released, skipped: out.skipped, resultRevision: out.exam.resultRevision, exportJobId: exp?.job?.id ?? null, requestId: rid(req) });
+  } catch (err) { fail(req, res, err); }
+});

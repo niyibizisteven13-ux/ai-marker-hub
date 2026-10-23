@@ -5,7 +5,7 @@ Teachers upload the official marking scheme and many candidate scripts through t
 - marks every question against the scheme;
 - returns one download: annotated PDFs, an interactive HTML report, a real Excel workbook and machine-readable results.
 
-The work is backend only: no frontend files changed. Replies use the chat's existing `text` and `attachment` stream events. There are no new dependencies (`pdf-lib`, `exceljs`, `jszip`, `sharp` and `jsdom` for tests were already installed). `/api/ai/scan-agent`, the Telegram bot, `/api/documents` and the AI/RAG services are unchanged.
+The teacher review screen is `src/pages/ExamReviewPage.tsx`; everything else is backend. Replies use the chat's existing `text` and `attachment` stream events. There are no new dependencies (`pdf-lib`, `exceljs`, `jszip`, `sharp` and `jsdom` for tests were already installed). `/api/ai/scan-agent`, the Telegram bot, `/api/documents` and the AI/RAG services are unchanged.
 
 ## Architecture (as inspected)
 
@@ -59,7 +59,8 @@ Routes are in `server/routes/examRoutes.ts`.
    - **Model output:** marks per criterion (or a level for holistic questions), evidence ids, exact quotes, feedback, lost marks, and concerns about reading, matching or the scheme.
    - **Code checks:**
      - every criterion belongs to the question and its mark is within range and on the mark step;
-     - the question mark is the sum of its criteria; an invalid mark becomes "no mark" and is flagged, never clamped;
+     - the question mark is the sum of its criteria;
+     - the model also returns a short correction and its own confidence; code caps the confidence by the checks (see "the saved record"); an invalid mark becomes "no mark" and is flagged, never clamped;
      - evidence ids must exist in this candidate's document, and quotes must match it;
      - totals and percentages are always computed in code.
 8. **Review flags, without an approval screen.** Flags are raised for:
@@ -96,19 +97,78 @@ Short references such as "the second paper" or "their" resolve against the activ
 
 ## Marked PDFs and coordinates
 
-Recognition regions are 0–1000 on the processed page image (crop box with `/Rotate` applied, then deskewed by rotating about the centre with the canvas expanded). `pdfGeometry.ts` inverts each step: deskew, then page fraction, then the PDF crop box and rotation (bottom-left origin). The tests render real PDFs at 0°, 90°, 180° and 270° with an offset crop box, and rotate images by 4° and −7.5°, to check that marks land where expected.
+The AI marks each question on the candidate's own scanned page, in red, the way a teacher would.
 
-Source pages are copied into a new PDF, and script or launch actions are stripped. If `pdf-lib` cannot open the original (for example, it is encrypted), the pages are rebuilt from rendered images where the renderer can read them. Otherwise that candidate's PDF is reported as unavailable, and the rest of the package is still produced. Each answer gets:
-- a green tick, an amber partial tick or a red cross;
-- `awarded/max`;
-- an orange `?` when the answer needs review;
-- a short lost-marks note, only where the margin has room.
+### On the page
 
-Marks never overlap. When an answer's location is unreliable (a text-layer page, an invalid region or no margin), the mark goes on the appended summary page only. Metadata records the candidate, exam, run and result revision.
+- **One mark per step.**
+  - A red tick goes beside a correct step and a red cross beside a wrong one. Part credit for a step is a tick with a short bar.
+  - A question with several criteria gets one symbol per criterion. For example, "fraction right, decimal wrong" is a tick and a cross, then `2/4`.
+  - When the teacher overrides a question's total, it shows one symbol.
+- **Placement.**
+  - The marks sit in the right margin, just right of the widest line of writing on that page.
+  - They are level with the last line of the answer, where the answer ends, so they never cover the student's writing.
+  - Marks on one page never overlap. If the margin is too narrow, the space right of the writing at that height is used.
+  - If neither fits, the mark goes on the summary page only and is listed for the teacher.
+- **Total.** It is circled at the top of page 1.
+- **Corrections.**
+  - Below a wrong answer, a short red correction from the marker (at most 80 characters, for example `7 x 5 = 35 cm2`) goes in the free space under the answer, or else in the margin under the mark.
+  - It is never drawn over writing; if there is no free space, it appears on the summary page.
+- **Original scan.** It is never changed. Its pages are copied into a new PDF; script and launch actions are stripped.
+- **Draft and released copies.**
+  - Until the teacher releases a script, its PDF carries "DRAFT – for teacher review, not released" and an orange `?` beside marks that need a check.
+  - The released copy has neither.
+
+### Layout and coordinates
+
+- `server/services/exams/layout.ts` computes every item's position as fractions of the page as displayed (0–1, top-left origin). The PDF (`annotate.ts`) and the review screen draw from the same layout, so what the teacher moves is what gets printed.
+- Recognition regions (0–1000 on the deskewed processed image) are converted with `processedToViewed`.
+- `viewedToPdf` honours the PDF crop box and `/Rotate`. The tests render real PDFs at 0°, 90°, 180° and 270° with an offset crop box, and rotate images by 4° and −7.5°.
+
+## Why a candidate lost marks: the saved record
+
+For every question mark, the result stores:
+- the answer as the AI read it (`answerAsRead`);
+- for each criterion, the scheme line it was judged against (`rubric`), the marks and the reason;
+- the short correction;
+- a confidence (`high`, `medium` or `low`).
+
+**How confidence is set.** It starts from the marker's own estimate. It is then capped:
+- at 40% by a serious review flag;
+- at 70% by any other flag;
+- at 50% when marks have no quote that matches the script.
+
+The basis is stored with the score.
+
+**"Why did C014 lose marks on question 4?"** The chat answers by reading this record back, criterion by criterion. It never asks the model for a new explanation.
+
+## Teacher review and release
+
+Placement depends on finding where each answer ends, and handwriting varies, so some marks will land in the wrong place. Before release the teacher opens the review screen at `/exams/<examId>/review`. The chat links to it when the package is ready, and `/exams` lists all exams.
+
+The screen shows:
+- each page of the candidate's own scan with the red items exactly where the PDF puts them;
+- a card per question from the saved record: the answer as read, a tick or cross per rubric line with its reason, the correction, the confidence and any open checks.
+
+The teacher can:
+- drag any mark, correction or the total, or select it and nudge it with the arrow keys (Shift for bigger steps);
+- reset an item to its automatic position, hide or restore a correction, or place a mark that could not be located;
+- change a question's mark with − / +. A reason is required, and the change is stored as an examiner override next to the AI's proposal;
+- release this candidate, or all fully marked candidates.
+
+**Release rules:**
+- Releasing confirms every mark as the teacher's and regenerates the PDF without the draft label.
+- A script with an unmarked question cannot be released.
+- Any later change to marks or positions makes the script a draft again ("Changed since release") until it is released again.
+
+**Storage and audit:**
+- Positions are stored per candidate as `layout` overrides (page and fractions, who and when).
+- The release is stored as `released`.
+- Both are written to the audit log (`layout`, `release`).
 
 ## API (`/api/exams`, behind `requireAuth`, owner-scoped, `requestId` in every response)
 
-`POST /` · `GET /:examId` · `POST /:examId/rubric` (JSON `{scheme, confirm?}` or multipart `scheme`/`questionPaper` → 202) · `GET /:examId/rubric` · `POST /:examId/rubric/confirm` · `POST /:examId/submissions` (multipart `scripts`, optional `manifest` file or `mapping` JSON) · `POST /:examId/mark` (202) · `GET /:examId/jobs/:jobId` · `GET /:examId/results` · `GET /:examId/submissions/:submissionId` (id or candidate id) · `PATCH /:examId/submissions/:submissionId/marks/:questionId` · `POST /:examId/submissions/:submissionId/corrections` (202 when re-marking) · `POST /:examId/exports` · `GET /:examId/artifacts` (with `stale`).
+`POST /` · `GET /:examId` · `POST /:examId/rubric` (JSON `{scheme, confirm?}` or multipart `scheme`/`questionPaper` → 202) · `GET /:examId/rubric` · `POST /:examId/rubric/confirm` · `POST /:examId/submissions` (multipart `scripts`, optional `manifest` file or `mapping` JSON) · `POST /:examId/mark` (202) · `GET /:examId/jobs/:jobId` · `GET /:examId/results` · `GET /:examId/submissions/:submissionId` (id or candidate id) · `PATCH /:examId/submissions/:submissionId/marks/:questionId` · `POST /:examId/submissions/:submissionId/corrections` (202 when re-marking) · `POST /:examId/exports` · `GET /:examId/artifacts` (with `stale`) · `GET /` (the user's exams) · `GET /:examId/review` · `GET /:examId/review/:submissionId` (pages, layout, saved record) · `GET /:examId/submissions/:submissionId/pages/:page` (the displayed page as JPEG) · `PUT /:examId/submissions/:submissionId/layout/:itemId` (`{page, fx, fy}`, `{hidden: true}` or `{reset: true}`) · `POST /:examId/release` (`{submissionIds}` or `{all: true}`).
 
 Other users' exams answer 404. Signed download URLs expire after 1 hour (`FileStore`).
 
