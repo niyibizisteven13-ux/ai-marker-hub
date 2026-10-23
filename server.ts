@@ -27,7 +27,7 @@ import { HighVolumeBatchService } from './server/services/HighVolumeBatchService
 import { SafetyService } from './server/services/SafetyService.js';
 import { SentimentService } from './server/services/SentimentService.js';
 import { ConfidenceService } from './server/services/ConfidenceService.js';
-import { upload, batchUpload } from './server/middleware/upload.js';
+import { upload, batchUpload, chatFileUpload, CHAT_MAX_FILE_BYTES } from './server/middleware/upload.js';
 import { ingestDocument } from './server/services/DocumentIngestionService.js';
 import { classifyIntent, isSmallTalkMessage } from './server/services/intentRouter.js';
 import { generalTools } from './server/services/generalTools.js';
@@ -438,58 +438,107 @@ app.get('/api/health/providers', requireAuth, async (req, res) => {
   });
 });
 
-// Instant Upload & Extraction API
-app.post('/api/files/upload', requireAuth, upload.single('file'), async (req, res) => {
-  let tempPath: string | undefined;
-  try {
-    if (!req.file) throw new Error('No file uploaded.');
-    const realMimeType = detectRealMimeType(req.file.buffer);
-    if (!realMimeType || (realMimeType !== req.file.mimetype && !(realMimeType === 'image/jpeg' && req.file.mimetype === 'image/jpg'))) {
-      return res.status(400).json({ error: 'The file contents do not match a supported document type.' });
-    }
+// Chat attachments: the types the chat accepts and the type each extension stands for.
+const CHAT_ATTACHMENT_EXTENSIONS = new Set([
+  '.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx', '.csv', '.txt', '.md', '.rtf', '.json',
+  '.js', '.jsx', '.ts', '.tsx', '.py', '.java', '.cpp', '.c', '.h', '.html', '.css', '.xml', '.yaml', '.yml', '.sql',
+  '.png', '.jpg', '.jpeg', '.webp', '.gif',
+]);
+const VISUAL_EXTENSIONS = new Set(['.pdf', '.png', '.jpg', '.jpeg', '.webp', '.gif']);
+const MIME_BY_EXTENSION: Record<string, string> = {
+  '.pdf': 'application/pdf', '.doc': 'application/msword', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.ppt': 'application/vnd.ms-powerpoint', '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.xls': 'application/vnd.ms-excel', '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.csv': 'text/csv', '.txt': 'text/plain', '.md': 'text/markdown', '.rtf': 'application/rtf', '.json': 'application/json',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif',
+  '.js': 'text/plain', '.jsx': 'text/plain', '.ts': 'text/plain', '.tsx': 'text/plain', '.py': 'text/plain',
+  '.java': 'text/plain', '.cpp': 'text/plain', '.c': 'text/plain', '.h': 'text/plain', '.html': 'text/html',
+  '.css': 'text/css', '.xml': 'application/xml', '.yaml': 'text/plain', '.yml': 'text/plain', '.sql': 'text/plain',
+};
 
+const MAX_STORED_UPLOAD_TEXT = 2_000_000;
+
+/** Text extraction still running for an uploaded file, so the chat can wait for it instead of reading nothing. */
+const pendingUploadText = new Map<string, Promise<string | null>>();
+
+/** The extracted text of an uploaded chat file: stored, still being extracted, or extracted now. */
+async function uploadedFileText(file: { id: string; extractedText: string | null; path: string | null; name: string; mimeType: string }): Promise<string | null> {
+  if (file.extractedText) return file.extractedText;
+  const pending = pendingUploadText.get(file.id);
+  if (pending) return pending;
+  if (!file.path) return null;
+  try {
+    const result = await extractTextFromUpload(file.path, file.name, file.mimeType);
+    return result.rawText ? result.rawText.slice(0, MAX_STORED_UPLOAD_TEXT) : null;
+  } catch {
+    return null;
+  }
+}
+
+// Large chat attachments: uploaded first (up to CHAT_MAX_FILE_MB, default 100 MB), then sent with the message by id.
+app.post('/api/files/upload', requireAuth, generalLimiter, (req, res, next) => {
+  chatFileUpload.single('file')(req, res, (err?: any) => {
+    if (!err) return next();
+    const tooBig = err?.code === 'LIMIT_FILE_SIZE';
+    res.status(tooBig ? 413 : 400).json({ error: tooBig ? `Each file can be at most ${Math.round(CHAT_MAX_FILE_BYTES / 1048576)} MB.` : 'The upload could not be read. Please try again.' });
+  });
+}, async (req, res) => {
+  const tempPath = req.file?.path;
+  try {
+    if (!req.file || !tempPath) return res.status(400).json({ error: 'No file uploaded.' });
     const userId = (req as any).user?.userId;
     if (!userId) return res.status(401).json({ error: 'Authentication required.' });
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    if (!CHAT_ATTACHMENT_EXTENSIONS.has(ext)) return res.status(400).json({ error: `Unsupported file type: ${ext || 'unknown'}` });
+    if (!req.file.size) return res.status(400).json({ error: `${req.file.originalname} is empty.` });
 
-    // Never trust the client-supplied filename for a path. Keep only a safe
-    // extension from it (for the extractor's type detection) and generate the
-    // rest — this closes the path-traversal hole where an originalname like
-    // "../../.env" or one containing null bytes could write outside uploads/.
-    const safeExt = path.extname(req.file.originalname).replace(/[^a-zA-Z0-9.]/g, '').slice(0, 10);
+    // Check the file's first bytes against its extension: a PDF or image must really be one.
+    const head = Buffer.alloc(16);
+    const fh = await fs.open(tempPath, 'r');
+    try { await fh.read(head, 0, 16, 0); } finally { await fh.close(); }
+    const detected = detectRealMimeType(head);
+    if (VISUAL_EXTENSIONS.has(ext) && (!detected || detected !== MIME_BY_EXTENSION[ext])) {
+      return res.status(400).json({ error: `${req.file.originalname} does not match its file extension.` });
+    }
+    const mimeType = detected || MIME_BY_EXTENSION[ext] || 'application/octet-stream';
+
+    // Never trust the client-supplied filename for a path: keep only the checked extension.
     const uploadsDir = path.join(process.cwd(), 'uploads');
-    const savedPath = path.join(uploadsDir, `file-${Date.now()}-${crypto.randomUUID()}${safeExt}`);
-
+    const savedPath = path.join(uploadsDir, `file-${Date.now()}-${crypto.randomUUID()}${ext}`);
     await fs.mkdir(uploadsDir, { recursive: true, mode: 0o700 });
-    await fs.writeFile(savedPath, req.file.buffer, { mode: 0o600 });
+    await fs.copyFile(tempPath, savedPath);
+    await fs.chmod(savedPath, 0o600);
 
     const record = await prisma.fileRecord.create({
-      data: {
-        name: req.file.originalname,
-        mimeType: req.file.mimetype,
-        size: req.file.size,
-        userId,
-        path: savedPath,
-        url: null,
-      },
+      data: { name: req.file.originalname.slice(0, 255), mimeType, size: req.file.size, userId, path: savedPath, url: null },
     });
 
     writeAuditLog(userId, 'FILE_UPLOAD', 'FileRecord', record.id, {
       size: req.file.size,
     }).catch((err) => logger.warn('Audit log write failed for file upload.', { errorType: err instanceof Error ? err.name : 'Error' }));
 
-    extractTextFromUpload(savedPath, req.file.originalname, req.file.mimetype)
+    const extraction = extractTextFromUpload(savedPath, record.name, mimeType)
       .then(async (result) => {
-        await prisma.fileRecord.update({
-          where: { id: record.id },
-          data: { extractedText: result.rawText },
-        });
+        // Keep the database row small: the chat reads at most the first part of a file's text.
+        const text = (result.rawText || '').length > MAX_STORED_UPLOAD_TEXT
+          ? `${result.rawText.slice(0, MAX_STORED_UPLOAD_TEXT)}\n[The file continues; only its first ${MAX_STORED_UPLOAD_TEXT.toLocaleString('en')} characters were kept.]`
+          : result.rawText;
+        await prisma.fileRecord.update({ where: { id: record.id }, data: { extractedText: text } });
         logger.info('Uploaded document text extraction completed.', { fileId: record.id });
+        return text || null;
       })
-      .catch((err) => logger.error('Uploaded document text extraction failed.', { fileId: record.id, errorType: err instanceof Error ? err.name : 'Error' }));
+      .catch((err) => {
+        logger.error('Uploaded document text extraction failed.', { fileId: record.id, errorType: err instanceof Error ? err.name : 'Error' });
+        return null;
+      })
+      .finally(() => pendingUploadText.delete(record.id));
+    pendingUploadText.set(record.id, extraction);
 
-    res.json({ success: true, fileId: record.id });
+    res.json({ success: true, fileId: record.id, name: record.name, size: record.size, mimeType });
   } catch (error: any) {
     respondError(res, error, 'File upload failed.');
+  } finally {
+    if (tempPath) await fs.unlink(tempPath).catch(() => undefined);
   }
 });
 
@@ -990,15 +1039,10 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
 
   let serverAttachmentText = '';
   let serverVisualFiles: { type: 'image' | 'document'; base64: string; mediaType: string; name?: string }[] = [];
-  const allowedAttachmentExtensions = new Set([
-    '.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx', '.csv', '.txt', '.md', '.rtf', '.json',
-    '.js', '.jsx', '.ts', '.tsx', '.py', '.java', '.cpp', '.c', '.h', '.html', '.css', '.xml', '.yaml', '.yml', '.sql',
-    '.png', '.jpg', '.jpeg', '.webp', '.gif',
-  ]);
   let attachmentBytes = 0;
   for (const attachment of attachments) {
     const extension = path.extname(attachment.name).toLowerCase();
-    if (!allowedAttachmentExtensions.has(extension)) {
+    if (!CHAT_ATTACHMENT_EXTENSIONS.has(extension)) {
       return res.status(400).json({ error: `Unsupported attachment type: ${extension || 'unknown'}` });
     }
     if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(attachment.base64)) {
@@ -1022,17 +1066,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
       (expectedImageMime[extension] && detected !== expectedImageMime[extension]))) {
       return res.status(400).json({ error: `${attachment.name} does not match its file extension.` });
     }
-    const mimeByExtension: Record<string, string> = {
-      '.pdf': 'application/pdf', '.doc': 'application/msword', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      '.ppt': 'application/vnd.ms-powerpoint', '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      '.xls': 'application/vnd.ms-excel', '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      '.csv': 'text/csv', '.txt': 'text/plain', '.md': 'text/markdown', '.rtf': 'application/rtf', '.json': 'application/json',
-      '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif',
-      '.js': 'text/plain', '.jsx': 'text/plain', '.ts': 'text/plain', '.tsx': 'text/plain', '.py': 'text/plain',
-      '.java': 'text/plain', '.cpp': 'text/plain', '.c': 'text/plain', '.h': 'text/plain', '.html': 'text/html',
-      '.css': 'text/css', '.xml': 'application/xml', '.yaml': 'text/plain', '.yml': 'text/plain', '.sql': 'text/plain',
-    };
-    const resolvedType = detected || mimeByExtension[extension] || claimed;
+    const resolvedType = detected || MIME_BY_EXTENSION[extension] || claimed;
     if (resolvedType.startsWith('image/') || resolvedType === 'application/pdf') {
       serverVisualFiles.push({
         type: resolvedType.startsWith('image/') ? 'image' : 'document',
@@ -1078,10 +1112,22 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
   if (Array.isArray(finalAttachmentIds) && finalAttachmentIds.length > 0) {
     const files = await prisma.fileRecord.findMany({
       where: { id: { in: finalAttachmentIds }, userId },
-      select: { extractedText: true, path: true, url: true, mimeType: true, name: true },
+      select: { id: true, extractedText: true, path: true, url: true, mimeType: true, name: true },
     });
 
-    serverAttachmentText = files.map((f) => f.extractedText).filter(Boolean).join('\n\n');
+    // PDFs and images go to the model below (text layer, page images); other files as their extracted text,
+    // waiting for an extraction still running and capped so a 100 MB file cannot fill the model's context.
+    const MAX_FILE_TEXT_CHARS = 120_000;
+    const texts = await Promise.all(files
+      .filter((f) => !f.mimeType.startsWith('image/') && f.mimeType !== 'application/pdf')
+      .map(async (f) => {
+        const text = await uploadedFileText(f);
+        if (!text) return '';
+        return text.length > MAX_FILE_TEXT_CHARS
+          ? `${text.slice(0, MAX_FILE_TEXT_CHARS)}\n[${f.name}: only the first ${MAX_FILE_TEXT_CHARS.toLocaleString('en')} of ${text.length.toLocaleString('en')} characters are included.]`
+          : text;
+      }));
+    serverAttachmentText = texts.filter(Boolean).join('\n\n');
 
     for (const file of files) {
       const isImage = file.mimeType.startsWith('image/');
@@ -1103,10 +1149,16 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
           continue;
         }
 
+        let mediaType = file.mimeType;
+        // Large photos are shrunk before they reach the model, which rejects very large images.
+        if (isImage && buffer.length > 4 * 1024 * 1024) {
+          buffer = await sharp(buffer, { limitInputPixels: 400_000_000 }).rotate().resize({ width: 2400, height: 2400, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer();
+          mediaType = 'image/jpeg';
+        }
         serverVisualFiles.push({
           type: isImage ? 'image' : 'document',
           base64: buffer.toString('base64'),
-          mediaType: file.mimeType,
+          mediaType,
           name: file.name,
         });
       } catch (err) {
@@ -2671,6 +2723,9 @@ async function startServer() {
   }
 
   const server = createServer(app);
+  // A 100 MB attachment on a slow mobile connection takes longer than Node's default 5 minutes to arrive.
+  // Headers must still arrive within headersTimeout (60 s), which keeps slow-header attacks out.
+  server.requestTimeout = Number(process.env.REQUEST_TIMEOUT_MS) > 0 ? Number(process.env.REQUEST_TIMEOUT_MS) : 30 * 60_000;
   attachRealtime(server, process.env.NODE_ENV === 'production' ? allowedOrigins : true);
   let vite: any = null;
   if (process.env.NODE_ENV !== 'production') {

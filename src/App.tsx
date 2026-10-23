@@ -82,6 +82,20 @@ const CHAT_HISTORY_KEY = 'bwenge_chat_history';
 const CHAT_SESSIONS_KEY = 'bwenge_saved_sessions';
 // The server streams a heartbeat every 15 s, so this only fires when the connection itself is gone.
 const CHAT_TOKEN_TIMEOUT_MS = 120_000;
+/** Attachment limits per file and per message (the server's CHAT_MAX_FILE_MB defaults to 100). */
+const CHAT_MAX_FILE_BYTES = 100 * 1024 * 1024;
+const CHAT_MAX_TOTAL_BYTES = 200 * 1024 * 1024;
+/** Files above this size (alone or together) are uploaded first and sent with the message by id. */
+const CHAT_INLINE_MAX_BYTES = 8 * 1024 * 1024;
+
+async function uploadChatFile(file: File, signal?: AbortSignal): Promise<string> {
+  const form = new FormData();
+  form.append('file', file, file.name);
+  const res = await authFetch('/api/files/upload', { method: 'POST', body: form, signal });
+  const data = await res.json().catch(() => ({} as { fileId?: string; error?: string }));
+  if (!res.ok || !data.fileId) throw new Error(data.error || `Could not upload ${file.name}. Please try again.`);
+  return data.fileId;
+}
 
 const normalizeLoadedMessages = (loadedMessages: Message[]): Message[] => {
   if (!Array.isArray(loadedMessages)) return [];
@@ -238,8 +252,8 @@ export default function App() {
     const next = [...stagedAttachments];
     const errors: string[] = [];
     const maxFiles = 10;
-    const maxFileBytes = 10 * 1024 * 1024;
-    const maxTotalBytes = 15 * 1024 * 1024;
+    const maxFileBytes = CHAT_MAX_FILE_BYTES;
+    const maxTotalBytes = CHAT_MAX_TOTAL_BYTES;
     const sizeOf = (item: File | ChatAttachment) => {
       if (item instanceof File) return item.size;
       if (typeof item.size === 'number') return item.size;
@@ -257,8 +271,8 @@ export default function App() {
         const extension = item.name.split('.').pop()?.toLowerCase() || '';
         if (item.size === 0) { errors.push(`${item.name}: file is empty`); continue; }
         if (!allowedExtensions.has(extension)) { errors.push(`${item.name}: file type is not supported`); continue; }
-        if (itemBytes > maxFileBytes) { errors.push(`${item.name}: larger than 10 MB`); continue; }
-        if (totalBytes + itemBytes > maxTotalBytes) { errors.push('Attachments cannot exceed 15 MB total'); continue; }
+        if (itemBytes > maxFileBytes) { errors.push(`${item.name}: larger than ${maxFileBytes / 1048576} MB`); continue; }
+        if (totalBytes + itemBytes > maxTotalBytes) { errors.push(`Attachments cannot exceed ${maxTotalBytes / 1048576} MB total`); continue; }
         const duplicate = next.some((existing) => existing instanceof File && existing.name === item.name && existing.size === item.size && existing.lastModified === item.lastModified);
         if (duplicate) { errors.push(`${item.name}: already attached`); continue; }
       } else if (itemBytes > maxFileBytes || (itemBytes > 0 && totalBytes + itemBytes > maxTotalBytes)) {
@@ -931,14 +945,21 @@ export default function App() {
       const newAttachments: ChatAttachment[] = [];
       const attachmentPayloads: Array<{ name: string; mimeType: string; base64: string }> = [];
       const serverAttachmentIds: string[] = [];
+      let inlineBytes = 0;
       if (attachment) {
         const attArray = Array.isArray(attachment) ? attachment : [attachment];
         for (const att of attArray) {
           if (att instanceof File) {
-            const base64 = await convertFileToBase64(att);
             const mimeType = att.type || 'application/octet-stream';
-            if (!base64) throw new Error(`Could not read ${att.name}. Please choose the file again.`);
-            attachmentPayloads.push({ name: att.name, mimeType, base64 });
+            if (att.size > CHAT_INLINE_MAX_BYTES || inlineBytes + att.size > CHAT_INLINE_MAX_BYTES) {
+              // Large files are uploaded on their own first and sent with the message by id.
+              serverAttachmentIds.push(await uploadChatFile(att, controller.signal));
+            } else {
+              const base64 = await convertFileToBase64(att);
+              if (!base64) throw new Error(`Could not read ${att.name}. Please choose the file again.`);
+              attachmentPayloads.push({ name: att.name, mimeType, base64 });
+              inlineBytes += att.size;
+            }
             const previewUrl = await makeImageThumbnail(att, mimeType);
             newAttachments.push({
               id: 'att-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),

@@ -200,14 +200,16 @@ Other users' exams answer 404. Signed download URLs expire after 1 hour (`FileSt
 | Variable | Default | Meaning |
 |---|---|---|
 | `AI_AGENT_PROVIDER=anthropic` + `ANTHROPIC_API_KEY` | – | Needed: recognition needs a vision model; scheme extraction and marking use the agent model (`claude-haiku-5-5`). |
+| `CLAUDE_MARKING_MODEL`, `CLAUDE_MARKING_EFFORT` | agent model and effort | Model for reading handwriting, extracting schemes and marking. `claude-opus-5-5` with `high` is the most accurate choice; each script then costs more credits (priced from the model's real token use). Everyday chat and other agent tasks keep `CLAUDE_AGENT_MODEL`. |
 | `EXAMS_DIR` | `./data/exams` | Exam records and chat context (durable volume). |
 | `EXAM_CANDIDATE_CONCURRENCY` | 2 | Scripts processed in parallel per batch. |
 | `EXAM_MAX_CANDIDATES` | 100 | Per exam. |
 | `EXAM_SEGMENT_BUDGET_MS` | 480000 | Hand over to a continuation job before the 10-minute queue deadline. |
 | `EXAM_CHAT_WAIT_MS` | 45000 | How long a chat turn waits for a quick job (export, re-mark) before replying "still working". |
 | `EXAM_MAX_FILES_PER_UPLOAD` | 30 | REST upload limit; each file ≤ 20 MB. |
-| `FILE_STORE_MAX_BYTES` | 25 MB | Raise for large ZIP packages. If the ZIP is too large, the workbook, report and PDFs are still delivered separately. |
+| `FILE_STORE_MAX_BYTES` | `CHAT_MAX_FILE_MB` (100 MB) | Raise for large ZIP packages. If the ZIP is too large, the workbook, report and PDFs are still delivered separately. |
 | `DOC_MAX_PAGES` | 20 | Pages per script. |
+| `CHAT_MAX_FILE_MB` | 100 | Largest file sent through the chat (web). Files over 8 MB are uploaded first and passed by id. Telegram bots can only download files up to 20 MB (Telegram's limit). |
 
 Retention: exam records, originals and artifacts are kept for 30 days, the same as documents.
 

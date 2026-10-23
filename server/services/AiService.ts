@@ -98,7 +98,8 @@ export const fileStore = new FileStore({
   dir: process.env.FILE_STORE_DIR ?? './data/generated',
   secret: fileStoreSecret,
   // Default 25 MB; raise it for large examination packages (all marked papers in one ZIP).
-  maxFileBytes: Number(process.env.FILE_STORE_MAX_BYTES) > 0 ? Number(process.env.FILE_STORE_MAX_BYTES) : undefined,
+  // At least as large as a chat attachment (CHAT_MAX_FILE_MB, default 100 MB), so large uploads reach the model.
+  maxFileBytes: Number(process.env.FILE_STORE_MAX_BYTES) > 0 ? Number(process.env.FILE_STORE_MAX_BYTES) : (Number(process.env.CHAT_MAX_FILE_MB) > 0 ? Number(process.env.CHAT_MAX_FILE_MB) : 100) * 1024 * 1024,
 });
 
 export const fileJobQueue = new FileJobQueue({
@@ -189,6 +190,19 @@ export const claudeAdapter = claudeAgent.config
   })
   : null;
 
+// Examination marking can use a larger Claude model and effort (CLAUDE_MARKING_MODEL, CLAUDE_MARKING_EFFORT).
+const ownMarkingModel = claudeAgent.config && (claudeAgent.config.markingModel !== claudeAgent.config.model || claudeAgent.config.markingEffort !== claudeAgent.config.effort)
+  ? claudeAgent.config : null;
+if (ownMarkingModel) logger.info('[AI routing] marking model', { model: ownMarkingModel.markingModel, effort: ownMarkingModel.markingEffort });
+const markingAdapter = ownMarkingModel
+  ? new ReliableProviderAdapter({
+    primary: new AnthropicAdapter({ apiKey: ownMarkingModel.apiKey, name: 'Claude (marking)', effort: ownMarkingModel.markingEffort, requestTimeoutMs: envMs('CLAUDE_REQUEST_TIMEOUT_MS', 900_000) }),
+    ...reliability,
+    fallbackAdapter: ownMarkingModel.fallbackToGonka ? gonkaAdapter : undefined,
+    fallbackModel: ownMarkingModel.fallbackToGonka ? gonkaStandardModel : undefined,
+  })
+  : claudeAdapter;
+
 const agentProvider = new ModelDispatchAdapter(
   gonkaAdapter,
   new Map([
@@ -196,6 +210,16 @@ const agentProvider = new ModelDispatchAdapter(
     ...(claudeAgent.config && claudeAdapter ? [[claudeAgent.config.model, claudeAdapter] as const] : []),
   ]),
 );
+const markingProvider = markingAdapter && claudeAgent.config
+  ? new ModelDispatchAdapter(gonkaAdapter, new Map([[claudeAgent.config.markingModel, markingAdapter] as const]))
+  : agentProvider;
+
+/** Adapter + model for examination marking: the marking model when set, otherwise the agent target. */
+export function markingTarget(): { adapter: typeof agentProvider; model: string; provider: 'anthropic' | 'gonka'; fallbackModel: string | null | undefined } {
+  return claudeAgent.config
+    ? { adapter: markingProvider, model: claudeAgent.config.markingModel, provider: 'anthropic', fallbackModel: undefined }
+    : agentTarget();
+}
 
 /** Adapter + model for agent tasks: Claude when configured, otherwise Gonka's standard model. */
 export function agentTarget(): { adapter: typeof agentProvider; model: string; provider: 'anthropic' | 'gonka'; fallbackModel: string | null | undefined } {

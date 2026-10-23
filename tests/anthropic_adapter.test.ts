@@ -160,3 +160,13 @@ test('Claude agent config is opt-in and validated', () => {
   assert.equal(d.config!.fallbackToGonka, false);
   assert.equal(loadClaudeAgentConfig({ AI_AGENT_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'k', CLAUDE_AGENT_MODEL: 'bad model!' }).config, null);
 });
+
+test('Marking can use its own, larger Claude model', () => {
+  const same = loadClaudeAgentConfig({ AI_AGENT_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'k', CLAUDE_EFFORT: 'low' }).config!;
+  assert.deepEqual([same.markingModel, same.markingEffort], ['claude-haiku-5-5', 'low']);
+  const big = loadClaudeAgentConfig({ AI_AGENT_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'k', CLAUDE_MARKING_MODEL: 'claude-opus-5-5', CLAUDE_MARKING_EFFORT: 'high' }).config!;
+  assert.deepEqual([big.model, big.markingModel, big.markingEffort], ['claude-haiku-5-5', 'claude-opus-5-5', 'high']);
+  const bad = loadClaudeAgentConfig({ AI_AGENT_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'k', CLAUDE_MARKING_MODEL: 'bad model!' });
+  assert.equal(bad.config!.markingModel, 'claude-haiku-5-5');
+  assert.match(bad.reason, /CLAUDE_MARKING_MODEL/);
+});
