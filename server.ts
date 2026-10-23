@@ -21,6 +21,7 @@ import { PaywallService } from './server/services/PaywallService.js';
 import { ReconciliationService } from './server/services/ReconciliationService.js';
 import { MemoryService } from './server/services/MemoryService.js';
 import { platformContext } from './server/services/platformContext.js';
+import { learningModePrompt, parseLearning } from './server/services/learning/modes.js';
 import { HighVolumeBatchService } from './server/services/HighVolumeBatchService.js';
 import { SafetyService } from './server/services/SafetyService.js';
 import { SentimentService } from './server/services/SentimentService.js';
@@ -63,6 +64,7 @@ import ollamaRoutes from './server/routes/ollamaRoutes.ts';
 import telegramBotRoutes from './server/routes/telegramBotRoutes.ts';
 import settingsBillingRoutes from './server/routes/settingsBillingRoutes.ts';
 import memoryRoutes from './server/routes/memoryRoutes.js';
+import learnRoutes from './server/routes/learnRoutes.js';
 import billingRoutes, { momoCallbackRouter } from './server/routes/billingRoutes.js';
 import adminBillingRoutes from './server/routes/adminBillingRoutes.js';
 import { startBillingJobs } from './server/services/billing/payments.js';
@@ -367,6 +369,7 @@ app.use('/api/exams', requireAuth, examsRouter);
 app.use('/api/outputs/shared', sharedOutputsRouter);
 app.use('/api/outputs', requireAuth, outputsRouter);
 app.use('/api/memory', requireAuth, memoryRoutes);
+app.use('/api/learn', requireAuth, learnRoutes);
 app.use('/api/billing/momo/callback', momoCallbackRouter);
 app.use('/api/billing', billingRoutes);
 app.use('/api/admin/billing', requireAuth, requireRole('ADMIN'), adminBillingRoutes);
@@ -869,7 +872,9 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
     provider: requestedProvider,
     answerLanguage,
     attachmentIds,
+    learning: rawLearning,
   } = req.body;
+  const learning = parseLearning(rawLearning);
 
   const userId = (req as any).user?.userId;
   if (!userId) return res.status(401).json({ error: 'Authentication required.' });
@@ -1265,6 +1270,7 @@ ${augmentedQuery}`;
       await aiService.generalAssist({
 
         userId,
+        learning,
         messages: [...parsedHistory, { role: 'user', content: augmentedQuery }],
         files: finalFiles,
         pinnedSyllabus,
@@ -1586,7 +1592,8 @@ ${augmentedQuery}`;
       ? `\n\n[Response language preference]\n${buildLanguageBlock(answerLanguage === 'Kinyarwanda' ? 'rw' : answerLanguage === 'French' ? 'fr' : 'other')}\nAnswer in ${answerLanguage}. Keep quoted source material in its original language.`
       : `\n\n[Response language preference]\n${buildLanguageBlock(detectLanguage(query || ''))}\nAnswer naturally in the language the user wrote in. Keep quoted source material in its original language.`;
     const platformBlock = isSmallTalk ? '' : await platformContext(userId, 'web');
-    const systemWithContext = `${baseSystemWithContext}${platformBlock ? `\n\n${platformBlock}` : ''}${languageDirective}`;
+    const modeBlock = learningModePrompt(learning);
+    const systemWithContext = `${baseSystemWithContext}${platformBlock ? `\n\n${platformBlock}` : ''}${modeBlock ? `\n\n${modeBlock}` : ''}${languageDirective}`;
 
     const isOllama = cleanProvider === 'ollama' || (process.env.AI_PROVIDER === 'ollama' && !cleanProvider);
     const hasOllama = await aiService.providerAvailable('ollama');

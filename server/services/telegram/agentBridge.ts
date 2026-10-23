@@ -22,7 +22,7 @@ type Turn = { role: 'user' | 'assistant'; text: string };
 export interface BridgeDeps {
   api: TelegramApi;
   fileStore: FileStore;
-  assist: (o: { userId: string; messages: Array<{ role: 'user' | 'assistant'; content: string }>; files?: Array<{ type: 'image' | 'document'; base64: string; mediaType: string; name?: string }>; planText: string; onEvent: (e: any) => void; signal?: AbortSignal }) => Promise<{ content: Array<{ text: string }>; attachments?: AttachmentRef[] }>;
+  assist: (o: { userId: string; learning?: import('../learning/modes.js').LearningSettings; messages: Array<{ role: 'user' | 'assistant'; content: string }>; files?: Array<{ type: 'image' | 'document'; base64: string; mediaType: string; name?: string }>; planText: string; onEvent: (e: any) => void; signal?: AbortSignal }) => Promise<{ content: Array<{ text: string }>; attachments?: AttachmentRef[] }>;
   exam?: (userId: string, text: string, files: Array<{ name: string; buffer: Buffer; mime?: string }>, onStatus: (t: string) => void) => Promise<{ text: string; attachments: AttachmentRef[] } | null>;
   editIntervalMs?: number;
 }
@@ -55,6 +55,7 @@ function fileLabel(a: Pick<AttachmentRef, 'mime' | 'kind'>): { icon: string; lab
   if (a.kind === 'chart') return { icon: '📊', label: 'Chart' };
   if (a.kind === 'diagram') return { icon: '🧭', label: 'Diagram' };
   if (a.kind === 'archive') return { icon: '🗜️', label: 'ZIP archive' };
+  if (a.kind === 'model3d') return { icon: '🧊', label: 'Interactive 3D model · open in a browser' };
   return { icon: '📄', label: 'File' };
 }
 
@@ -71,6 +72,14 @@ export async function deliverAttachment(deps: Pick<BridgeDeps, 'api' | 'fileStor
       return true;
     }
     const { meta, data } = await deps.fileStore.read(a.id, userId);
+    if (a.kind === 'model3d') {
+      // Telegram cannot show 3D: send a self-contained viewer page that opens in the phone's browser.
+      const [{ validateScene }, { sceneHtml }] = await Promise.all([import('../../../src/lib/scene/spec.js'), import('../spatial/sceneHtml.js')]);
+      const html = sceneHtml(validateScene(JSON.parse(data.toString('utf8'))));
+      await deps.api.chatAction(chatId, 'upload_document');
+      await deps.api.sendDocument(chatId, { data: Buffer.from(html, 'utf8'), name: `${title.replace(/\.scene$/i, '')}.html`, mime: 'text/html' }, cap);
+      return true;
+    }
     await deps.api.chatAction(chatId, 'upload_document');
     await deps.api.sendDocument(chatId, { data, name: meta.name, mime: meta.mime.split(';')[0] }, cap);
     return true;
@@ -170,8 +179,10 @@ export async function runAssistantTurn(input: TurnInput, depsOverride?: BridgeDe
       answer = exam.text;
       for (const a of exam.attachments) if (!attachments.some((x) => x.id === a.id)) attachments.push(a);
     } else {
+      const { parseLearning } = await import('../learning/modes.js');
       const r = await deps.assist({
         userId,
+        learning: parseLearning(session?.learning),
         messages: [...historyOf(session).map((h) => ({ role: h.role, content: h.text })), { role: 'user' as const, content: input.text }],
         files: files.map((f) => ({ type: f.mime.startsWith('image/') ? 'image' as const : 'document' as const, base64: f.data.toString('base64'), mediaType: f.mime, name: f.name })),
         planText: input.text,

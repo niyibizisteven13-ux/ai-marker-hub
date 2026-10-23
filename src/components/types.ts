@@ -1,7 +1,7 @@
 /** Client-side copies of the server types (kept separate so the browser bundle never imports server code). */
 export type AttachmentKind =
   | 'document' | 'spreadsheet' | 'presentation' | 'pdf' | 'text' | 'code'
-  | 'image' | 'drawing' | 'chart' | 'diagram' | 'archive';
+  | 'image' | 'drawing' | 'chart' | 'diagram' | 'archive' | 'model3d';
 
 export interface AttachmentRef {
   id: string;

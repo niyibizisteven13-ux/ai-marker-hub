@@ -405,6 +405,8 @@ model TelegramSession {
   history               Json?
   /// The last request, for the Regenerate button.
   lastPrompt            String?
+  /// Learning mode for this chat: { mode: 'socratic' | 'roleplay', character, scenario, language, level, topic }.
+  learning              Json?
   lastActiveAt          DateTime @default(now())
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
@@ -1032,4 +1034,78 @@ model NotificationLog {
   userId    String
   channel   String // email | telegram
   createdAt DateTime @default(now())
+}
+
+/// Adaptive practice: what the learner knows per topic (mastery 0–1), the difficulty they are working at,
+/// and how well their confidence matches their results (calibration).
+model LearnerSkill {
+  id          String   @id @default(uuid())
+  userId      String
+  topicKey    String
+  topic       String
+  mastery     Float    @default(0.3)
+  level       Int      @default(2)
+  attempts    Int      @default(0)
+  correct     Float    @default(0)
+  streak      Int      @default(0)
+  misses      Int      @default(0)
+  brierSum    Float    @default(0)
+  ratedCount  Int      @default(0)
+  lastSeenAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, topicKey])
+  @@index([userId, lastSeenAt])
+}
+
+/// One practice question. The answer, hints and misconception map stay on the server until answered.
+model PracticeItem {
+  id            String    @id @default(uuid())
+  userId        String
+  topicKey      String
+  level         Int
+  kind          String
+  question      String
+  choices       Json?
+  answer        String
+  acceptable    Json?
+  explanation   String
+  hints         Json?
+  misconceptions Json?
+  foundation    Boolean   @default(false)
+  hintsUsed     Int       @default(0)
+  response      String?
+  confidence    Int?
+  score         Float?
+  misconception String?
+  feedback      String?
+  answeredAt    DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([userId, topicKey, createdAt])
+  @@index([topicKey, answeredAt])
+}
+
+/// A teacher's class. Students join with the code; the teacher sees only anonymised, aggregated results.
+model Classroom {
+  id        String   @id @default(uuid())
+  ownerId   String
+  name      String
+  code      String   @unique
+  archived  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerId])
+}
+
+model ClassMember {
+  id       String   @id @default(uuid())
+  classId  String
+  userId   String
+  joinedAt DateTime @default(now())
+
+  @@unique([classId, userId])
+  @@index([userId])
 }

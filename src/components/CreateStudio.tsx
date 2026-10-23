@@ -29,6 +29,8 @@ import {
   Copy, X, FolderUp, Coins,
 } from 'lucide-react';
 import { useBillingMe } from './PlanStatus';
+import { LearningModeBanner, LearningModePicker, speakText, speechLang, useLearningMode, useSpeechInput } from './LearningMode';
+import type { LearningSettings } from '../lib/learning/presets';
 import { Message as MessageType, ChatAttachment, ResponseFeedbackDetails } from '../types';
 import ChatMessage from './ChatMessage';
 import logoUrl from '../assets/bwenge-logo.svg';
@@ -38,7 +40,7 @@ interface CreateStudioProps {
   onSendMessage: (
     text: string,
     attachment?: File | ChatAttachment | Array<File | ChatAttachment>,
-    options?: { answerLanguage?: string },
+    options?: { answerLanguage?: string; learning?: LearningSettings },
   ) => void | Promise<void>;
   onNewChat: () => void;
   onLoadSession: (id: string) => void;
@@ -179,7 +181,10 @@ export default function CreateStudio({
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   const [showSources, setShowSources] = useState(true);
   const [answerLanguage, setAnswerLanguage] = useState('Auto');
-  const [isRecording, setIsRecording] = useState(false);
+  const [learning, setLearning] = useLearningMode();
+  const [speakReplies, setSpeakReplies] = useState(true);
+  const voiceLang = speechLang(learning.mode === 'roleplay' ? learning.language : undefined, answerLanguage === 'Auto' ? undefined : answerLanguage);
+  const speech = useSpeechInput(voiceLang, useCallback((t: string) => setInputValue((prev) => (prev.trim() ? `${prev.trim()} ${t}` : t)), []));
   const [isDraggingAttachments, setIsDraggingAttachments] = useState(false);
 
   const menuRef = useRef<HTMLDivElement>(null);
@@ -254,7 +259,7 @@ export default function CreateStudio({
   const handleSend = () => {
     const text = inputValue.trim();
     if (!text && stagedAttachments.length === 0) return;
-    onSendMessage(text, stagedAttachments, { answerLanguage });
+    onSendMessage(text, stagedAttachments, { answerLanguage, learning });
     setInputValue('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
     stickToBottomRef.current = true;
@@ -346,6 +351,16 @@ export default function CreateStudio({
     const firstName = userName || (user?.name ? user.name.split(' ')[0] : null);
     return firstName ? `${kinyarwandaGreeting}, ${firstName}` : kinyarwandaGreeting;
   };
+
+  // Roleplay: read each finished reply aloud in the practice language.
+  const wasTyping = useRef(false);
+  useEffect(() => {
+    if (wasTyping.current && !isTyping && learning.mode === 'roleplay' && speakReplies) {
+      const last = [...messages].reverse().find((m) => m.sender === 'assistant');
+      if (last?.text) speakText(last.text, voiceLang);
+    }
+    wasTyping.current = !!isTyping;
+  }, [isTyping, messages, learning.mode, speakReplies, voiceLang]);
 
   const canSend = Boolean(inputValue.trim() || stagedAttachments.length > 0 || isTyping);
 
@@ -737,6 +752,8 @@ export default function CreateStudio({
       {/* Composer Footer */}
       <footer className="shrink-0 bg-[#262624] px-3 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))]">
         <div className="mx-auto w-full max-w-2xl relative">
+          <LearningModeBanner value={learning} onExit={() => setLearning({ mode: 'normal' })} speak={speakReplies} onToggleSpeak={() => { setSpeakReplies((v) => !v); window.speechSynthesis?.cancel(); }}
+            onFeedback={() => onSendMessage('End the roleplay and give me my feedback.', [], { answerLanguage, learning })} />
           <div className="rounded-[28px] border border-white/10 bg-[#30302E] p-3 shadow-[0_4px_24px_rgba(0,0,0,0.25)]">
             {stagedAttachments.length > 0 && (
               <div className="mb-2.5 flex flex-wrap gap-2 overflow-x-auto pb-1">
@@ -840,18 +857,17 @@ export default function CreateStudio({
                 <button
                   type="button"
                   onClick={() => {
-                    setIsRecording(!isRecording);
-                    if (!isRecording) {
-                      setInputValue((prev) => prev + '(Voice recording in Kinyarwanda...) ');
-                    }
+                    if (speech.listening) { speech.stop(); return; }
+                    if (!speech.start()) window.alert('Voice input is not available in this browser. Try Chrome or Edge, or type your message.');
                   }}
                   className={`flex h-9 w-9 items-center justify-center rounded-full border transition-colors ${
-                    isRecording
+                    speech.listening
                       ? 'border-rose-500 bg-rose-500/20 text-rose-400 animate-pulse'
                       : 'border-white/10 text-[#C2C0B6] hover:bg-white/5 hover:text-white'
                   }`}
-                  title="Voice input (Kinyarwanda)"
-                  aria-label="Voice input"
+                  title={speech.listening ? 'Stop listening' : 'Speak your message'}
+                  aria-pressed={speech.listening}
+                  aria-label={speech.listening ? 'Stop voice input' : 'Voice input'}
                 >
                   <Mic size={16} />
                 </button>
@@ -878,15 +894,7 @@ export default function CreateStudio({
             {/* Sources Toggle and Answer In Language under box */}
             <div className="mt-2.5 pt-2 border-t border-white/5 flex items-center justify-between text-[11px] text-neutral-400">
               <div className="flex items-center gap-3">
-                <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors">
-                  <input
-                    type="checkbox"
-                    checked={showSources}
-                    onChange={(e) => setShowSources(e.target.checked)}
-                    className="rounded bg-black/40 border-white/20 text-amber-500 focus:ring-0"
-                  />
-                  <span>Show Sources</span>
-                </label>
+                <LearningModePicker value={learning} onChange={setLearning} />
               </div>
 
               <div className="flex items-center gap-1.5">

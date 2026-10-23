@@ -1,8 +1,10 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 
 const PdfViewer = lazy(() => import('./PdfViewer').then((m) => ({ default: m.PdfViewer })));
+const SceneViewer = lazy(() => import('./scene3d/SceneViewer'));
 import { Download, Eye, EyeOff, FileArchive, FileCode, FileImage, FileSpreadsheet, FileText, FileType2, LayoutDashboard, Loader2, Maximize2, Presentation, Sparkles, X } from 'lucide-react';
 import type { AttachmentKind, AttachmentRef } from './types';
+import { validateScene, type Scene } from '../lib/scene/spec';
 
 /** Type label, icon and accent per generated file, decided by MIME type first (HTML reports have kind "document"). */
 function fileStyle(a: AttachmentRef): { label: string; Icon: typeof FileText; tone: string } {
@@ -12,6 +14,7 @@ function fileStyle(a: AttachmentRef): { label: string; Icon: typeof FileText; to
   if (/presentationml|powerpoint/.test(m) || a.kind === 'presentation') return { label: 'PowerPoint deck', Icon: Presentation, tone: 'text-[#F2A65A] bg-[#F2A65A]/10 ring-[#F2A65A]/25' };
   if (m === 'application/pdf' || a.kind === 'pdf') return { label: 'PDF', Icon: FileType2, tone: 'text-[#FF8A80] bg-[#FF8A80]/10 ring-[#FF8A80]/25' };
   if (/wordprocessingml|msword/.test(m)) return { label: 'Word document', Icon: FileText, tone: 'text-[#7DB7F5] bg-[#7DB7F5]/10 ring-[#7DB7F5]/25' };
+  if (a.kind === 'model3d') return { label: '3D model', Icon: FileCode, tone: 'text-[#F2A65A] bg-[#F2A65A]/10 ring-[#F2A65A]/25' };
   if (a.kind === 'archive') return { label: 'ZIP archive', Icon: FileArchive, tone: 'text-[#E8C468] bg-[#E8C468]/10 ring-[#E8C468]/25' };
   if (a.kind === 'code' || m === 'application/json') return { label: m === 'application/json' ? 'JSON data' : 'Code file', Icon: FileCode, tone: 'text-[#9FD3F2] bg-[#9FD3F2]/10 ring-[#9FD3F2]/25' };
   const LABEL: Partial<Record<AttachmentKind, string>> = { text: 'Text file', image: 'Image', drawing: 'Drawing', chart: 'Chart', diagram: 'Diagram', document: 'Document' };
@@ -139,6 +142,25 @@ function FileCard({ a }: { a: AttachmentRef }) {
   );
 }
 
+/** Interactive 3D model: loads the scene JSON (validated again in the browser) and shows the viewer inline. */
+function SceneCard({ a }: { a: AttachmentRef }) {
+  const [scene, setScene] = useState<Scene | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (isExpired(a)) { setError('This model link has expired.'); return; }
+    let live = true;
+    fetch(a.url, { credentials: 'include' })
+      .then((r) => { if (!r.ok) throw new Error(r.status === 410 ? 'This model link has expired.' : `Could not load the model (${r.status}).`); return r.json(); })
+      .then((j) => { if (live) setScene(validateScene(j)); })
+      .catch((e) => { if (live) setError(e instanceof Error ? e.message : 'Could not load the model.'); });
+    return () => { live = false; };
+  }, [a]);
+  const loading = <div className="flex h-[420px] items-center justify-center rounded-2xl border border-stone-800 bg-[#0c0f15] text-stone-500"><Loader2 className="h-5 w-5 animate-spin" aria-label="Loading 3D model" /></div>;
+  if (error) return <div className="rounded-2xl border border-stone-800 bg-stone-900/70 p-4 text-sm text-stone-400">{error}</div>;
+  if (!scene) return loading;
+  return <Suspense fallback={loading}><SceneViewer scene={scene} fileName={a.name} /></Suspense>;
+}
+
 /**
  * Files the AI created in this reply: charts, diagrams and drawings as image tiles (click to enlarge),
  * and workbooks, documents, decks, PDFs, interactive reports and archives as cards with preview and download.
@@ -148,7 +170,8 @@ export function AttachmentCards({ attachments }: { attachments?: AttachmentRef[]
   const [open, setOpen] = useState<AttachmentRef | null>(null);
   if (!attachments?.length) return null;
   const visuals = attachments.filter(isVisual);
-  const files = attachments.filter((a) => !isVisual(a));
+  const scenes = attachments.filter((a) => a.kind === 'model3d');
+  const files = attachments.filter((a) => !isVisual(a) && a.kind !== 'model3d');
 
   return (
     <div className="mt-4 space-y-3 animate-[bw-rise_.25s_ease-out]" data-testid="attachments">
@@ -176,6 +199,7 @@ export function AttachmentCards({ attachments }: { attachments?: AttachmentRef[]
           })}
         </div>
       )}
+      {scenes.map((a) => <SceneCard key={a.id} a={a} />)}
       {files.length > 0 && <div className="space-y-2.5">{files.map((a) => <FileCard key={a.id} a={a} />)}</div>}
       {open && <Lightbox item={open} onClose={() => setOpen(null)} />}
     </div>

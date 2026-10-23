@@ -10,6 +10,7 @@ export const MIME = {
   txt: 'text/plain; charset=utf-8',
   html: 'text/html; charset=utf-8',
   json: 'application/json',
+  scene: 'application/vnd.bwenge.scene+json',
   svg: 'image/svg+xml',
   png: 'image/png',
   jpg: 'image/jpeg',

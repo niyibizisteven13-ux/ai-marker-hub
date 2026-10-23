@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { evaluateStudentSubmission as deepseekEvaluate } from '../../src/services/deepseekMarker.js';
 import { BWENGE_CHAT_RESPONSE_RULES, BWENGE_GENERAL_SYSTEM_PROMPT } from './prompts/bwengeGeneralPrompt.js';
 import { platformContext } from './platformContext.js';
+import { learningModePrompt } from './learning/modes.js';
 import { MemoryService } from './MemoryService.js';
 import { toKnowledgePassage } from './knowledge/citations.js';
 import { asksAboutDatasets } from './knowledge/published.js';
@@ -819,6 +820,8 @@ export class AiService {
     planText?: string;
     /** Where the request came from, for usage records. */
     channel?: 'web' | 'telegram';
+    /** Socratic guide or roleplay for this conversation. */
+    learning?: import('./learning/modes.js').LearningSettings;
   }) {
     const useGonka = process.env.AI_PROVIDER === 'gonkarouter' || await this.providerAvailable('gonkarouter');
     const allowFallback = process.env.ALLOW_GEMINI_FALLBACK === 'true';
@@ -865,7 +868,7 @@ export class AiService {
     const platform = options.extractSchema ? '' : await platformContext(options.userId, options.channel === 'telegram' ? 'telegram' : 'web');
     let systemPrompt = options.extractSchema
       ? `${BWENGE_GENERAL_SYSTEM_PROMPT}${memoryContext}\n\nFor this request, respond with ONLY valid JSON matching this shape, no other text: ${options.extractSchema}`
-      : `${BWENGE_GENERAL_SYSTEM_PROMPT}${memoryContext}${platform ? `\n\n${platform}` : ''}\n\n${BWENGE_CHAT_RESPONSE_RULES}`;
+      : `${BWENGE_GENERAL_SYSTEM_PROMPT}${memoryContext}${platform ? `\n\n${platform}` : ''}\n\n${BWENGE_CHAT_RESPONSE_RULES}${options.learning ? (learningModePrompt(options.learning) ? `\n\n${learningModePrompt(options.learning)}` : '') : ''}`;
     if (options.pinnedSyllabus) {
       systemPrompt += `\n\n[MASTER CONTEXT]: ${options.pinnedSyllabus}\n(Note: This is the primary curriculum/rubric source. Prioritize this document above all other context.)`;
     }
