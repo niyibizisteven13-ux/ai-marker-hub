@@ -1,5 +1,5 @@
 import { prisma } from '../db.js';
-import { resolvePlanPolicy } from './plans/resolvePlan.js';
+import { checkUsage } from './billing/usage.js';
 import { AccessResult } from './plans/types.js';
 import logger from '../utils/logger.js';
 
@@ -37,16 +37,15 @@ export class PaywallService {
       return { allowed: true };
     }
 
-    // 2. Resolve plan and delegate access check
-    const policy = await resolvePlanPolicy(userId);
-    const result = await policy.checkAccess(userId, service, jobId);
-
-    if (result.allowed) {
-      logger.info('Access allowed by policy', { userId, service, paidFrom: result.paidFrom });
-    } else {
-      logger.info('Access denied by policy', { userId, service, reason: result.reason });
-    }
-
+    // 2. The plan allowance and GO credits decide, the same as for every other AI action (one billing system).
+    //    The old "one free result, then pay per result" policy ignored plans and GO credits and locked results
+    //    for users who had already paid.
+    const gate = await checkUsage(userId, { kind: service === 'farming_advice' ? 'chat' : 'marking' });
+    const result: AccessResult = gate.allowed
+      ? { allowed: true, paidFrom: gate.wallet ? 'individual_charge' : undefined }
+      : { allowed: false, reason: 'payment_required', message: gate.message, upgradeUrl: gate.upgrade?.url ?? '/upgrade?reason=limit' };
+    if (result.allowed) logger.info('Access allowed by plan', { userId, service, wallet: !!gate.wallet });
+    else logger.info('Access denied by plan limits', { userId, service, code: gate.code });
     return result;
   }
 
@@ -61,21 +60,14 @@ export class PaywallService {
   // reads correctly for all three paywalled services, not just the two
   // originally handled (grading fell through to the else branch as
   // "application scoring", which was wrong for farming_advice too).
-  public buildUpgradeMessage(service: ServiceName, upgradeLink: string, customMessage?: string) {
-    const labels: Record<ServiceName, string> = {
-      grading: 'grading',
-      selection_scoring: 'application scoring',
-      farming_advice: 'farming advice',
-    };
-    const label = labels[service] || 'this feature';
-    const mainText = customMessage || `You've used your free result for this feature. To unlock this result and keep using ${label}, upgrade below:`;
+  public buildUpgradeMessage(service: ServiceName, upgradeLink: string, customMessage?: string, resumable = true) {
+    const labels: Record<ServiceName, string> = { grading: 'Marking', selection_scoring: 'Application scoring', farming_advice: 'This answer' };
+    const what = labels[service] || 'This request';
+    return `**Limit reached.** ${customMessage || `${what} needs more credits than you have left today.`}
 
-    return `Your free ${label} result is ready! 🎉
+**[See plans and buy credits →](${upgradeLink})**
 
-${mainText}
-
-**[Unlock this result →](${upgradeLink})**
-
-Payment is quick via Mobile Money — you'll see your result immediately after.`;
+Payment is by MTN Mobile Money.${resumable ? ' After paying, just say **"continue"** and I will finish this request: there is no need to upload the files again.' : ' After paying, send the request again.'}`;
   }
+
 }

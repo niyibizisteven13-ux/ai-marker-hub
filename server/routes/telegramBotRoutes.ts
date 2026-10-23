@@ -93,8 +93,8 @@ async function ensurePaywallAccess(
   const access = await paywallService.checkAccess(userId, service, jobId);
   if (!access.allowed) {
     const baseUrl = process.env.APP_BASE_URL || 'http://localhost:3000';
-    const upgradeLink = `${baseUrl}/upgrade?jobId=${jobId}&service=${service}`;
-    const upgradeMsg = paywallService.buildUpgradeMessage(service as any, upgradeLink, access.reason);
+    const upgradeLink = `${baseUrl.replace(/\/$/, '')}${access.upgradeUrl ?? '/upgrade?reason=limit'}`;
+    const upgradeMsg = paywallService.buildUpgradeMessage(service as any, upgradeLink, access.message, false);
     await botService.sendMessage(chatId, upgradeMsg);
     return false;
   }

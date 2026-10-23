@@ -43,6 +43,7 @@ import { agentTarget, fileJobQueue } from './server/services/AiService.js';
 import { planOutput } from './server/services/outputs/planner.js';
 import { asksAboutDatasets } from './server/services/knowledge/published.js';
 import { checkUsage, recordUsage } from './server/services/billing/usage.js';
+import { rememberBlocked, takeResumable } from './server/services/billing/pendingRequest.js';
 import { useToolAgent } from './server/services/outputs/chatTurn.js';
 import { emptyModelOutputError, nonEmptyModelText } from './server/services/ai/modelOutput.js';
 import { validateScanGradeOutput } from './server/services/ai/scanOutput.js';
@@ -854,6 +855,18 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
       return res.status(400).json({ error: 'The attachment contents do not match a supported file type.' });
     }
   }
+  // After paying, "continue" / "give me the result" replays the request a plan limit stopped (same files).
+  {
+    const uid = (req as any).user?.userId;
+    const b = req.body ?? {};
+    const ids = typeof b.attachmentIds === 'string' ? (b.attachmentIds.startsWith('[') ? b.attachmentIds !== '[]' : !!b.attachmentIds) : Array.isArray(b.attachmentIds) && b.attachmentIds.length > 0;
+    const newFiles = !!req.file || !!b.attachmentBase64 || (Array.isArray(b.attachments) && b.attachments.length > 0) || ids;
+    const resumed = uid ? takeResumable(uid, String(b.query ?? ''), newFiles) : null;
+    if (resumed) {
+      logger.info('Resuming a request stopped by a plan limit', { label: resumed.label });
+      req.body = { ...b, ...resumed.body };
+    }
+  }
   const {
     query,
     attachmentText,
@@ -887,12 +900,13 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
     const kind = visual ? 'vision' : earlyPlan.artifact ? 'artifact' : earlyPlan.needsComputation ? 'tool' : 'chat';
     const gate = await checkUsage(userId, { kind, chars: String(query || '').length, attachments: attachments.length + (req.file ? 1 : 0) }).catch(() => null);
     if (gate && !gate.allowed) {
+      rememberBlocked(userId, req.body, 'your request');
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       const limitEmitter = makeEmitter(res);
       limitEmitter.send('limit', { code: gate.code, plan: gate.plan.id, resetsAt: gate.resetsAt, upgrade: gate.upgrade });
-      limitEmitter.send('text', { text: `**Limit reached.** ${gate.message}${gate.upgrade ? `\n\n[See plans and upgrade](${gate.upgrade.url})` : ''}` });
+      limitEmitter.send('text', { text: `**Limit reached.** ${gate.message}${gate.upgrade ? `\n\n[See plans and upgrade](${gate.upgrade.url})` : ''}\n\nAfter upgrading or buying credits, say **"continue"** and I will finish this request without re-uploading.` });
       limitEmitter.done();
       return;
     }
@@ -1138,7 +1152,8 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
   if (service !== 'general') {
     const access = await paywallService.checkAccess(userId, service as any, jobId);
     if (!access.allowed) {
-      const upgradeLink = `/upgrade?jobId=${jobId}&service=${service}`;
+      rememberBlocked(userId, req.body, service === 'grading' ? 'marking' : 'your request');
+      const upgradeLink = access.upgradeUrl ?? '/upgrade?reason=limit';
       const gatedMsg = paywallService.buildUpgradeMessage(service, upgradeLink, access.message);
 
       res.setHeader('Content-Type', 'text/event-stream');

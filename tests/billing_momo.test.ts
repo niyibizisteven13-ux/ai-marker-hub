@@ -344,3 +344,46 @@ test('platform context: the AI knows the plan, credits left, real links, and whe
   assert.match(p, /do not suggest upgrading/);
   assert.equal(await platformContext(null, 'web'), '');
 });
+
+test('marking access follows the plan and GO credits: no "free result used, pay per result" lock', async () => {
+  const { PaywallService } = await import('../server/services/PaywallService.js');
+  const paywall = PaywallService.getInstance();
+  // A user with GO credits whose daily allowance is used up (the reported case: 440 GO, result "locked").
+  const paid = await newUser();
+  await db.creditLedger.create({ data: { id: randomUUID(), userId: paid, delta: 440, reason: 'purchase', paymentId: null, note: 'go', createdAt: new Date() } });
+  await db.usageRecord.create({ data: { id: randomUUID(), userId: paid, kind: 'chat', credits: 25, model: 'gonka', inputTokens: 0, outputTokens: 0, costUsd: 0, channel: 'web', createdAt: new Date() } });
+  await db.usageQuota.create({ data: { id: randomUUID(), userId: paid, service: 'grading', freeUsed: 5 } }).catch(() => undefined);
+  for (let i = 0; i < 3; i++) assert.equal((await paywall.checkAccess(paid, 'grading', randomUUID())).allowed, true, 'GO credits pay for marking, every time');
+
+  // A free user with credits left today is allowed too; out of credits and no wallet → upgrade message, no "free result".
+  const free = await newUser();
+  assert.equal((await paywall.checkAccess(free, 'grading', randomUUID())).allowed, true);
+  await db.usageRecord.create({ data: { id: randomUUID(), userId: free, kind: 'chat', credits: 25, model: 'gonka', inputTokens: 0, outputTokens: 0, costUsd: 0, channel: 'web', createdAt: new Date() } });
+  const denied = await paywall.checkAccess(free, 'grading', randomUUID());
+  assert.equal(denied.allowed, false);
+  assert.match(denied.upgradeUrl!, /^\/upgrade\?reason=limit/);
+  const msg = paywall.buildUpgradeMessage('grading', denied.upgradeUrl!, denied.message);
+  assert.match(msg, /Limit reached/);
+  assert.match(msg, /say \*\*"continue"\*\*/);
+  assert.doesNotMatch(msg, /free .*result|one-time/i);
+  assert.match(paywall.buildUpgradeMessage('grading', '/upgrade', denied.message, false), /send the request again/);
+});
+
+test('a request stopped by a limit resumes on "continue" / "give me result" after paying, without re-uploading', async () => {
+  const { rememberBlocked, takeResumable, peekPending, resetPending } = await import('../server/services/billing/pendingRequest.js');
+  resetPending();
+  rememberBlocked('u-r', { query: 'Mark these scripts with the attached rubric', attachmentIds: ['f1', 'f2'], history: [{ role: 'user', text: 'x' }], learning: { mode: 'socratic' } }, 'marking');
+  assert.equal(takeResumable('u-r', 'What is photosynthesis?', false), null, 'other messages do not resume');
+  assert.equal(takeResumable('u-r', 'continue', true), null, 'a message with new files is a new request');
+  assert.ok(peekPending('u-r'));
+  const r = takeResumable('u-r', 'Now give me result then', false)!;
+  assert.deepEqual(r.body, { query: 'Mark these scripts with the attached rubric', attachmentIds: ['f1', 'f2'] }, 'only the request itself is replayed');
+  assert.equal(peekPending('u-r'), null, 'resumed once');
+  for (const m of ['continue', 'OK, continue', 'I paid', "I've upgraded", 'give me the results please', 'show my marked scripts']) {
+    rememberBlocked('u-r', { query: 'q' });
+    assert.ok(takeResumable('u-r', m, false), m);
+  }
+  rememberBlocked('u-big', { query: 'q', attachments: [{ base64: 'x'.repeat(26 * 1024 * 1024) }], attachmentIds: ['f9'] });
+  assert.deepEqual(peekPending('u-big')!.body, { query: 'q', attachmentIds: ['f9'] }, 'huge inline uploads are not kept in memory');
+  resetPending();
+});

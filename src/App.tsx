@@ -1435,6 +1435,12 @@ export default function App() {
     }
     window.dispatchEvent(new Event('bwenge:usage'));
     closeUpgradePage();
+    // If the chat stopped at a limit, carry on with that request right away (the server kept its files).
+    const lastReply = [...messages].reverse().find((m) => m.sender === 'assistant');
+    if (lastReply && /Limit reached/.test(String(lastReply.text ?? ''))) {
+      showAiStatus('info', 'Payment received. Finishing your request…');
+      setTimeout(() => { void handleSendMessage('continue'); }, 400);
+    }
   };
 
   if (authenticatedUser && window.location.pathname === '/learn') {

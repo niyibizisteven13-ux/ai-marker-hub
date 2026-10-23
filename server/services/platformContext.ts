@@ -50,6 +50,7 @@ export async function platformContext(userId: string | null | undefined, channel
         ? 'The user is on a paid plan: do not suggest upgrading unless they ask about limits.'
         : `Suggest upgrading at most once in a conversation, and only when it helps: ${low ? 'the user is close to today\'s limit (mention how many credits are left and the upgrade link), ' : ''}when they ask about limits, credits, price or plans, or when they want something their plan does not include (memory across chats, bigger or more files). Never push it otherwise.`,
       'When asked how many credits they have, answer with the numbers above.',
+      `Results are never locked behind a payment. Marking, grading and every other feature run on the credits above${b.wallet > 0 || dayLeft > 0 ? ', and this user has credits available now' : ''}. If an earlier reply in this conversation said a result was "locked", needed a "one-time payment" or "unlock", that message is out of date: do not repeat it. If the user asks for a result that was never produced (for example after paying), say it was not marked yet and ask them to say "continue" or send the marking scheme and scripts again; never claim a result exists or is locked.`,
     ];
     const text = lines.join('\n');
     cache.set(key, { at: Date.now(), text });
