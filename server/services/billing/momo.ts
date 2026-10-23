@@ -126,5 +126,40 @@ export async function paymentStatus(referenceId: string): Promise<MomoResult> {
   }
 }
 
+/**
+ * Connection check for the admin page: gets an access token and reads the Collections account balance.
+ * Never returns secrets; only whether each step worked and MTN's status codes.
+ */
+export async function momoHealth(): Promise<{ ok: boolean; mode: ReturnType<typeof momoMode>; steps: Array<{ step: string; ok: boolean; detail: string }> }> {
+  const c = momoConfig();
+  const mode = momoMode();
+  const steps: Array<{ step: string; ok: boolean; detail: string }> = [];
+  if (c.simulate) return { ok: true, mode, steps: [{ step: 'Simulator', ok: true, detail: 'MOMO_SIMULATE is on (development only); no MTN calls are made.' }] };
+  const missing = [!c.subscriptionKey && 'MOMO_COLLECTION_PRIMARY_KEY', !c.apiUser && 'MOMO_API_USER', !c.apiKey && 'MOMO_API_KEY'].filter(Boolean);
+  if (missing.length) return { ok: false, mode, steps: [{ step: 'Configuration', ok: false, detail: `Missing on the server: ${missing.join(', ')}.` }] };
+  steps.push({ step: 'Configuration', ok: true, detail: `Target ${c.targetEnv}, currency ${c.currency}, ${c.callbackHost.startsWith('https://') ? `callbacks to ${c.callbackHost}` : 'no HTTPS callback host (status is polled)'}.` });
+  token = null;
+  try {
+    await accessToken();
+    steps.push({ step: 'Access token', ok: true, detail: 'MTN accepted the API user and key.' });
+  } catch {
+    steps.push({ step: 'Access token', ok: false, detail: 'MTN refused the credentials. Check the subscription key, API user, API key and target environment.' });
+    return { ok: false, mode, steps };
+  }
+  try {
+    const res = await fetch(`${c.baseUrl}/collection/v1_0/account/balance`, {
+      headers: { Authorization: `Bearer ${await accessToken()}`, 'X-Target-Environment': c.targetEnv, 'Ocp-Apim-Subscription-Key': c.subscriptionKey },
+      signal: AbortSignal.timeout(20_000),
+    });
+    const d: any = res.ok ? await res.json().catch(() => ({})) : null;
+    steps.push(res.ok
+      ? { step: 'Collections account', ok: true, detail: `Reachable${d?.currency ? ` (${d.currency} account)` : ''}.` }
+      : { step: 'Collections account', ok: false, detail: `MTN answered ${res.status}. The API user may not be activated for Collections in ${c.targetEnv}.` });
+  } catch {
+    steps.push({ step: 'Collections account', ok: false, detail: 'MTN could not be reached from the server (network or firewall).' });
+  }
+  return { ok: steps.every((x) => x.ok), mode, steps };
+}
+
 /** Test hook. */
 export function resetMomo() { token = null; simulated.clear(); }

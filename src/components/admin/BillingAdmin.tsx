@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Banknote, BellRing, Coins, Loader2, Plus, RefreshCw, Save, Search, Sparkles, Trash2, TrendingUp, Users } from 'lucide-react';
+import { Banknote, BellRing, CheckCircle2, Coins, Loader2, PlugZap, XCircle, Plus, RefreshCw, Save, Search, Sparkles, Trash2, TrendingUp, Users } from 'lucide-react';
 import { authFetch } from '../../utils/authFetch';
 
 /**
@@ -38,6 +38,8 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
   const [status, setStatus] = useState('');
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [q, setQ] = useState('');
+  const [health, setHealth] = useState<{ ok: boolean; steps: Array<{ step: string; ok: boolean; detail: string }> } | null>(null);
+  const [testing, setTesting] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const loadOverview = useCallback(async () => {
@@ -95,7 +97,24 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
             <span className="ml-2 text-xs text-[#8A97C2]">target {overview.momo.targetEnv} · currency {overview.momo.currency} · callbacks {overview.momo.callback ? 'on (HTTPS)' : 'off (polling only)'}</span>
             {overview.momo.mode === 'off' && <p className="mt-1 text-xs text-[#8A97C2]">Add MOMO_COLLECTION_PRIMARY_KEY, MOMO_API_USER, MOMO_API_KEY and MOMO_TARGET_ENV to the server environment to accept payments.</p>}
           </div>
-          <button className={`${btn} bg-[#1A2240] text-[#C9D3F0] hover:bg-[#222C50]`} disabled={busy} onClick={() => run(() => api('/api/admin/billing/renewals/run', { method: 'POST' }), 'Renewal reminders checked')}><BellRing size={13} /> Send due renewal reminders</button>
+          <div className="flex flex-wrap gap-2">
+            <button className={`${btn} bg-[#1A2240] text-[#C9D3F0] hover:bg-[#222C50]`} disabled={testing} onClick={async () => {
+              setTesting(true);
+              try { setHealth(await api('/api/admin/billing/momo/test', { method: 'POST' })); } catch (e) { notify(e instanceof Error ? e.message : 'Test failed', true); } finally { setTesting(false); }
+            }}>{testing ? <Loader2 size={13} className="animate-spin" /> : <PlugZap size={13} />} Test MTN connection</button>
+            <button className={`${btn} bg-[#1A2240] text-[#C9D3F0] hover:bg-[#222C50]`} disabled={busy} onClick={() => run(() => api('/api/admin/billing/renewals/run', { method: 'POST' }), 'Renewal reminders checked')}><BellRing size={13} /> Send due renewal reminders</button>
+          </div>
+          {health && (
+            <ul className="w-full space-y-1.5 border-t border-[#263052] pt-3 text-xs">
+              {health.steps.map((st) => (
+                <li key={st.step} className="flex items-start gap-2">
+                  {st.ok ? <CheckCircle2 size={14} className="mt-px shrink-0 text-emerald-400" /> : <XCircle size={14} className="mt-px shrink-0 text-rose-400" />}
+                  <span><b className="text-[#E4E9F7]">{st.step}:</b> <span className="text-[#8A97C2]">{st.detail}</span></span>
+                </li>
+              ))}
+              <li className={`pt-1 font-semibold ${health.ok ? 'text-emerald-300' : 'text-rose-300'}`}>{health.ok ? 'Payments are ready to accept.' : 'Payments are not ready yet.'}</li>
+            </ul>
+          )}
         </div>
       )}
 

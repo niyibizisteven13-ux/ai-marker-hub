@@ -65,6 +65,45 @@ MOMO_CALLBACK_HOST=https://www.bwenge.space
 
 Until the keys are set, checkout answers "Mobile Money payments are being set up". Nothing is ever marked paid without MTN's confirmation.
 
+### Quick sandbox setup (one command)
+
+With your sandbox **Collections** subscription key (momodeveloper.mtn.com → Profile → Subscriptions), run:
+
+```
+MOMO_COLLECTION_PRIMARY_KEY=<key> MOMO_CALLBACK_HOST=www.bwenge.space npm run momo:sandbox
+```
+
+It creates the sandbox API user and API key and prints the lines to put in the server environment. Restart the service, then open **Admin → Billing → Test MTN connection**.
+
+The test checks three things:
+- that the configuration is present;
+- that MTN accepts the credentials (an access token);
+- that the Collections account is reachable.
+
+It never shows the keys.
+
+### Go-live checklist (MTN Rwanda)
+
+1. Test end to end in the sandbox. Sandbox test numbers (see MTN's sandbox docs) approve automatically, and the sandbox currency is EUR.
+2. Apply to MTN Rwanda MoMo for production Collections access (KYC and business documents). MTN gives you:
+   - the production base URL;
+   - a production subscription key;
+   - an API user and API key, created by MTN for your callback host;
+   - the target environment, `mtnrwanda`.
+3. Set these on the server:
+   - `MOMO_BASE_URL`, `MOMO_COLLECTION_PRIMARY_KEY`, `MOMO_API_USER` and `MOMO_API_KEY`;
+   - `MOMO_TARGET_ENV=mtnrwanda` and `MOMO_CURRENCY=RWF`;
+   - `MOMO_CALLBACK_HOST=https://www.bwenge.space`;
+   - `APP_BASE_URL=https://www.bwenge.space`, so receipts, Telegram buttons and chat links point to the site.
+4. Restart, then run **Test MTN connection** in Admin → Billing. All three checks must be green.
+5. Make one real small payment (a 500 RWF GO pack) with your own MTN number. Confirm that:
+   - the credits arrive;
+   - the receipt email arrives (SMTP configured);
+   - the Telegram notice arrives.
+6. Watch Admin → Billing → Payments for the first days. "Check" re-asks MTN for any payment stuck in PENDING.
+
+Nothing in the code needs to change between sandbox and production; only the environment does.
+
 ## Email (SMTP)
 
 Receipts and notices are sent through SMTP:

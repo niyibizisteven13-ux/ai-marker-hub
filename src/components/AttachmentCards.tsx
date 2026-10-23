@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+
+const PdfViewer = lazy(() => import('./PdfViewer').then((m) => ({ default: m.PdfViewer })));
 import { Download, Eye, EyeOff, FileArchive, FileCode, FileImage, FileSpreadsheet, FileText, FileType2, LayoutDashboard, Loader2, Maximize2, Presentation, Sparkles, X } from 'lucide-react';
 import type { AttachmentKind, AttachmentRef } from './types';
 
@@ -25,6 +27,7 @@ const isVisual = (a: AttachmentRef) =>
 const isExpired = (a: AttachmentRef) => Date.parse(a.expiresAt) < Date.now();
 const isHtml = (a: AttachmentRef) => a.mime.startsWith('text/html');
 const isText = (a: AttachmentRef) => /^(text\/(plain|csv|markdown)|application\/json)/.test(a.mime);
+const isPdf = (a: AttachmentRef) => a.mime.startsWith('application/pdf') || a.kind === 'pdf';
 
 function useEscape(onClose: () => void) {
   useEffect(() => {
@@ -80,7 +83,7 @@ function FullScreenHtml({ item, html, onClose }: { item: AttachmentRef; html: st
 function FileCard({ a }: { a: AttachmentRef }) {
   const { label, Icon, tone } = fileStyle(a);
   const expired = isExpired(a);
-  const previewable = !expired && (isHtml(a) || isText(a));
+  const previewable = !expired && (isHtml(a) || isText(a) || isPdf(a));
   const [open, setOpen] = useState(false);
   const [full, setFull] = useState(false);
   const [body, setBody] = useState<string | null>(null);
@@ -89,7 +92,7 @@ function FileCard({ a }: { a: AttachmentRef }) {
   const toggle = async () => {
     if (open) { setOpen(false); return; }
     setOpen(true);
-    if (body !== null) return;
+    if (body !== null || isPdf(a)) return;
     try {
       const res = await fetch(a.url, { credentials: 'include' });
       if (!res.ok) throw new Error(res.status === 410 ? 'This link has expired.' : `Could not load the file (${res.status}).`);
@@ -120,7 +123,8 @@ function FileCard({ a }: { a: AttachmentRef }) {
       </div>
       {open && (
         <div className="border-t border-stone-800 bg-stone-950/60 p-2.5">
-          {error ? <p className="p-3 text-sm text-red-300">{error}</p>
+          {isPdf(a) ? <Suspense fallback={<div className="flex h-40 items-center justify-center text-stone-500"><Loader2 className="h-5 w-5 animate-spin" aria-label="Loading" /></div>}><PdfViewer url={a.url} name={a.name} /></Suspense>
+            : error ? <p className="p-3 text-sm text-red-300">{error}</p>
             : body === null ? <div className="flex h-40 items-center justify-center text-stone-500"><Loader2 className="h-5 w-5 animate-spin" aria-label="Loading" /></div>
               : isHtml(a) ? (
                 <div className="space-y-2">

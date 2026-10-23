@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { prisma } from '../db.js';
 import logger from '../utils/logger.js';
 import { DEFAULT_GO_PACKS, PLANS, currentGoPacks, fxUsdRwf, planFor, refreshBillingSettings, toRwf, walletBalance, type BillingSettings } from '../services/billing/plans.js';
-import { momoConfig, momoMode } from '../services/billing/momo.js';
+import { momoConfig, momoHealth, momoMode } from '../services/billing/momo.js';
 import { checkPayment, publicPayment, runRenewalSweep } from '../services/billing/payments.js';
 import { periods, usedTotals } from '../services/billing/usage.js';
 
@@ -98,6 +98,11 @@ router.post('/payments/:id/recheck', async (req, res) => {
 
 router.post('/renewals/run', async (_req, res) => {
   try { res.json({ success: true, ...(await runRenewalSweep()) }); } catch (e) { fail(res, e); }
+});
+
+/** Checks the MTN MoMo connection with the server's credentials (token + Collections account). */
+router.post('/momo/test', async (_req, res) => {
+  try { res.json({ success: true, ...(await momoHealth()) }); } catch (e) { fail(res, e); }
 });
 
 /** Users with their plan, renewal, GO balance and usage today. */
