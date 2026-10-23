@@ -1,6 +1,7 @@
 import { prisma } from '../../db.js';
 import logger from '../../utils/logger.js';
 import { periods } from './usage.js';
+import { setAiPaused } from './aiKillSwitch.js';
 
 /**
  * AI guard: an admin pause switch for all AI generation, and a profit guard that compares this month's AI cost
@@ -12,8 +13,9 @@ import { periods } from './usage.js';
  *    (the marketing allowance the admin accepts to lose on free users);
  *  - "paying cost" is what PRO, Institution and GO users cost; it should stay below what they paid.
  * When free cost passes its budget, free users are paused (paying users continue). When the whole platform is in
- * loss (total cost > revenue + free budget) and the mode is "all", every non-admin user is paused.
- * Admins are never paused, so they can still test and fix things.
+ * loss (total cost > revenue + free budget) and the mode is "all", every non-admin user is paused (admins can
+ * still test). The admin pause is a hard stop for everyone, admins included: aiKillSwitch refuses every request
+ * to an AI provider and cancels the ones in progress.
  */
 
 const db = prisma as any;
@@ -62,6 +64,7 @@ export async function guardSettings(force = false): Promise<GuardSettings> {
   const v = (row?.value && typeof row.value === 'object' ? row.value : {}) as Partial<GuardSettings>;
   const value: GuardSettings = { ...DEFAULTS, ...v, lossGuard: { ...DEFAULTS.lossGuard, ...(v.lossGuard ?? {}) } };
   settingsCache = { at: Date.now(), value };
+  setAiPaused(value.paused);
   return value;
 }
 
@@ -80,6 +83,7 @@ export async function saveGuardSettings(patch: Partial<Omit<GuardSettings, 'loss
   logger.info('[ai-guard] settings changed', { adminId, paused: next.paused, lossGuard: next.lossGuard });
   settingsCache = { at: Date.now(), value: next };
   stateCache = null;
+  setAiPaused(next.paused);
   return next;
 }
 
@@ -163,12 +167,14 @@ export async function guardState(force = false): Promise<GuardState> {
   return value;
 }
 
-/** Whether this user may start an AI action now. Admins are never blocked. */
+/** Whether this user may start an AI action now. The pause stops everyone; the profit guard never stops admins. */
 export async function guardFor(userId: string, opts: { role?: string | null; paying: boolean }): Promise<{ allowed: true } | { allowed: false; code: 'PAUSED' | 'BUDGET'; message: string }> {
-  if (opts.role === 'ADMIN') return { allowed: true };
   const st = await guardState().catch(() => null);
   if (!st || st.block === 'none') return { allowed: true };
-  if (st.settings.paused) return { allowed: false, code: 'PAUSED', message: 'Bwenge AI is paused for a short maintenance. Please try again a little later.' };
+  if (st.settings.paused) return opts.role === 'ADMIN'
+    ? { allowed: false, code: 'PAUSED', message: 'AI generation is paused. Resume it in Admin › Upgrades & Subscriptions › AI status.' }
+    : { allowed: false, code: 'PAUSED', message: 'Bwenge AI is paused for a short maintenance. Please try again a little later.' };
+  if (opts.role === 'ADMIN') return { allowed: true };
   if (st.block === 'all') return { allowed: false, code: 'BUDGET', message: 'Bwenge AI is temporarily unavailable because of very high demand. Please try again later.' };
   if (!opts.paying) return { allowed: false, code: 'BUDGET', message: 'Free AI answers are paused for now because of very high demand.' };
   return { allowed: true };
