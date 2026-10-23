@@ -13,6 +13,7 @@ import { createKnowledgeService } from './knowledge/service.js';
 import { EmbeddingService } from './EmbeddingService.js';
 import { createOutputService } from './outputs/service.js';
 import logger from '../utils/logger.js';
+import { recordUsage } from './billing/usage.js';
 
 /** Wires the statistics/report and assessment services to the shared file store, job queue and agent model. */
 
@@ -77,6 +78,8 @@ export const examService = createExamService({
   maxCandidates: num(process.env.EXAM_MAX_CANDIDATES, 100),
   candidateConcurrency: num(process.env.EXAM_CANDIDATE_CONCURRENCY, 2),
   segmentBudgetMs: num(process.env.EXAM_SEGMENT_BUDGET_MS, 8 * 60 * 1000),
+  // Every marked script is charged in credits (at least 2) and counted in the AI cost the profit guard watches.
+  onUsage: (userId, u) => { void recordUsage(userId, { kind: 'marking', model: u.model, inputTokens: u.input, outputTokens: u.output, minCredits: u.what === 'mark' ? 2 : 1 }); },
 });
 
 export const examChat = createExamChat({

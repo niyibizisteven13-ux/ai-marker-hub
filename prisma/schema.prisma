@@ -190,6 +190,8 @@ model FormSubmission {
   formId            String
   form              ApplicationForm   @relation(fields: [formId], references: [id])
   data              String // JSON student response
+  /// The FormVersion the respondent answered (null for responses collected before versions existed).
+  formVersion       Int?
   extractedInsights ExtractedInsight?
   createdAt         DateTime          @default(now())
 }
@@ -1108,4 +1110,18 @@ model ClassMember {
 
   @@unique([classId, userId])
   @@index([userId])
+}
+
+/// Immutable snapshot of a form definition. A new version is recorded whenever the questions change, so every
+/// response stays tied to the exact questions it answered.
+model FormVersion {
+  id         String   @id @default(uuid())
+  formId     String
+  version    Int
+  hash       String
+  definition Json
+  createdAt  DateTime @default(now())
+
+  @@unique([formId, version])
+  @@index([formId, createdAt])
 }

@@ -4,6 +4,7 @@ import {
   AlertTriangle, ArrowLeft, Check, ChevronLeft, ChevronRight, CircleCheck, Download, EyeOff, FileCheck2, Loader2, Move, RotateCcw, Send, X,
 } from 'lucide-react';
 import { authFetch } from '../utils/authFetch';
+import AskBwengeDrawer from '../components/AskBwengeDrawer';
 
 /**
  * Teacher review of marked scripts before release. Each page of the candidate's own scan is shown with the
@@ -406,6 +407,8 @@ export default function ExamReviewPage({ onBack }: { onBack: () => void }) {
           </aside>
         </div>
       )}
+      <AskBwengeDrawer surface="exam" surfaceId={examId} title={review?.exam.title ?? 'Examination'} onDone={() => void load(review?.candidate.submissionId ?? subId)}
+        suggestions={['Who scored lowest, and on which questions?', `Why did ${review?.candidate.candidateId ?? 'this student'} lose marks?`, 'Give me the Excel results', 'Send me all the marked PDFs']} />
       {toast && <div role="status" className="fixed bottom-5 left-1/2 z-50 -translate-x-1/2 rounded-xl bg-white px-4 py-2.5 text-sm font-medium text-[#141413] shadow-2xl">{toast}</div>}
     </div>
   );

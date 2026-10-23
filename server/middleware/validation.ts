@@ -82,6 +82,11 @@ export const chatSchema = z.object({
   provider: z.preprocess(normalizeOptionalSentinel, z.string().max(50).optional()),
   answerLanguage: z.enum(['Auto', 'Kinyarwanda', 'English', 'French']).optional(),
   attachmentIds: z.preprocess(normalizeOptionalSentinel, z.union([z.string(), z.array(z.string())]).optional()),
+  // Socratic tutor / roleplay settings (validated again by parseLearning).
+  learning: z.object({ mode: z.enum(['normal', 'socratic', 'roleplay']) }).passthrough().optional(),
+  // The page the message was sent from (form editor, marked-exam review), with what is open there.
+  surface: z.enum(['chat', 'form', 'exam']).optional(),
+  surfaceId: z.string().max(100).optional(),
 }).strict();
 
 export const validate = (schema: z.ZodObject<any, any> | z.ZodEffects<any>) => (req: Request, res: Response, next: NextFunction) => {

@@ -21,8 +21,8 @@ export interface PlanInput {
 }
 
 export interface OutputPlan {
-  intent: 'question' | 'analysis' | 'visualisation' | 'document' | 'report' | 'diagram' | 'map' | 'image' | 'table' | 'model3d';
-  output: OutputKind | 'model3d';
+  intent: 'question' | 'analysis' | 'visualisation' | 'document' | 'report' | 'diagram' | 'map' | 'image' | 'table' | 'model3d' | 'form';
+  output: OutputKind | 'model3d' | 'form';
   format: 'prose' | 'table' | 'svg' | 'html' | 'xlsx' | 'pdf' | 'docx' | 'pptx' | 'json' | 'png' | 'scene';
   needsComputation: boolean;
   needsRetrieval: boolean;
@@ -45,6 +45,11 @@ const R = {
   docx: /\b(word|docx|editable (?:report|document))\b/i,
   pptx: /\b(powerpoint|pptx|slides?|slide deck|deck|presentation)\b/i,
   dashboard: /\bdashboard\b/i,
+  /** Forms, surveys and questionnaires: creating, changing, publishing them, or working with their responses. */
+  form: /\b(forms?|surveys?|questionnaires?|quiz(?:zes)?|registration|sign-?up\s+sheet|application\s+form|feedback\s+form|poll)\b/i,
+  /** A saved form the user owns ("my survey", "this form"), as opposed to figures that merely came from a survey. */
+  ownForm: /\b(?:my|this|the|our)\s+(?:\w+\s+)?(?:forms?|surveys?|questionnaires?|quiz(?:zes)?|poll)\b/i,
+  formWork: /\b(create|make|build|design|generate|draft|prepare|add|remove|change|edit|update|reword|publish|share|open|close|review|check|analy[sz]e|results?|responses?|submissions?|report|export|excel|statistics|stats|chart|summari[sz]e|my)\b/i,
   /** Something to look at from every side: a 3D model the student can rotate (anatomy, molecules, machines, buildings). */
   model3d: /(?:\b3[- ]?d\b|\b(?:3|three)[- ]?dimen\w*|\brotatable\b|\b(?:can|could|to) (?:rotate|spin) (?:it|them|the model)\b|\bball[- ]and[- ]stick\b|\bin vr\b|\bvirtual reality\b)/i,
   /** A shareable HTML page that demonstrates or explains something (data story, showcase, interactive page). */
@@ -101,6 +106,11 @@ export function planOutput(input: PlanInput, authorize: (s: { type: string; id: 
     reasons,
   });
 
+  // 0. Forms: the form tools create, change, review and publish real forms and analyse their stored responses.
+  if (has(R.form, m) && has(R.formWork, m) && !hasData && (!has(R.html, m) || has(R.ownForm, m))) {
+    reasons.push('A form, survey or questionnaire request: handled by the form tools (real saved forms and their stored responses).');
+    return { ...plan({ intent: 'form', output: 'form', format: 'json', tools: ['create_form', 'edit_form', 'review_form', 'publish_form', 'list_forms', 'analyze_form', 'form_report'], artifact: true }), deliverables: [] };
+  }
   // 1. An explicit file format wins: the user said what they want to receive.
   for (const fmt of ['xlsx', 'pptx', 'docx', 'pdf'] as const) {
     if (has(R[fmt], m) && has(R.create, m)) {
@@ -164,6 +174,7 @@ export function planHint(p: OutputPlan): string {
   const what = p.artifact
     ? list.length > 1
       ? `The user asked for ${list.length} deliverables: ${list.join(' and ')}. Create each one with a tool call; do not skip any.`
+      : p.output === 'form' ? 'Use the form tools: create_form for a new form, list_forms then edit_form / review_form / publish_form for an existing one, analyze_form for statistics on its responses, form_report for the HTML report and Excel data. Do not write a <form_schema> block or JSON.'
       : p.output === 'model3d' ? 'Call create_3d_model to build an interactive 3D model (named parts with realistic proportions and colours, a short description each, guided views). Never draw it as an SVG or describe JSON in the reply.'
       : `Produce one ${p.output}${p.template ? ` (${p.template} template)` : ''} in ${p.format.toUpperCase()} format with a tool call.`
     : `Answer in ${p.format === 'table' ? 'prose with a compact table' : 'plain prose'}; do not create a file.`;

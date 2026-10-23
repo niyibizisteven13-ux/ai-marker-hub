@@ -50,6 +50,8 @@ export interface ExamDeps {
   /** Time a marking job works before handing over to a continuation job (stays under the queue deadline). */
   segmentBudgetMs?: number;
   retryDelayMs?: number;
+  /** Called once per marked or re-marked script with the model tokens it used, for credits and cost tracking. */
+  onUsage?: (userId: string, u: { model: string; input: number; output: number; what: 'mark' | 'remark' }) => void;
 }
 
 const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -472,6 +474,7 @@ export function createExamService(deps: ExamDeps) {
         return { questionId: q.id, number: q.number, maxMarks: q.maxMarks, ai, override: old?.override ?? null, confirmed: null, mappedElementIds: match.questions[q.id]?.elementIds ?? [], mappingFlags: match.questions[q.id]?.flags ?? [], history };
       });
       e.results[sub.id] = { submissionId: sub.id, candidateId: sub.candidateId, runId, schemeVersion: run.schemeVersion, questions, updatedAt: now(), usage: marked.usage };
+      try { deps.onUsage?.(userId, { model: deps.agent().model, input: marked.usage.input, output: marked.usage.output, what: 'mark' }); } catch { /* metering never breaks marking */ }
       audit(e, { actor: 'bwenge-ai', type: 'marked', submissionId: sub.id, candidateId: sub.candidateId, after: { total: questions.reduce((a, q) => a + (effectiveMarks(q) ?? 0), 0) } });
       const s = e.submissions.find((x) => x.id === sub.id)!;
       s.state = questions.some((q) => openFlags(q).length) ? 'completed_with_warnings' : 'completed';
@@ -658,6 +661,7 @@ export function createExamService(deps: ExamDeps) {
       }
       r.updatedAt = now();
       r.usage = { input: r.usage.input + marked.usage.input, output: r.usage.output + marked.usage.output };
+      try { deps.onUsage?.(userId, { model: deps.agent().model, input: marked.usage.input, output: marked.usage.output, what: 'remark' }); } catch { /* metering never breaks marking */ }
     });
   }
 
