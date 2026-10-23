@@ -5,6 +5,8 @@ export interface AccessResult {
   paidFrom?: 'individual_charge' | 'org_balance' | 'free_trial';
   message?: string;
   wasFreeTrial?: boolean;
+  /** Where to upgrade or buy credits when not allowed. */
+  upgradeUrl?: string;
 }
 
 export interface PlanPolicy {

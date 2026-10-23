@@ -115,6 +115,8 @@ export async function fulfil(p: any, financialTransactionId?: string) {
     else await db.subscription.create({ data: { id: randomUUID(), userId: p.userId, planType, status: 'ACTIVE', startDate: now, endDate, createdAt: now, updatedAt: now } });
   }
   const done = await db.billingPayment.findUnique({ where: { id: p.id } });
+  // The assistant sees the new plan and credits on the very next message (imported lazily: platformContext imports this file).
+  void import('../platformContext.js').then((m) => m.invalidatePlatformContext(p.userId)).catch(() => undefined);
   void notifyReceipt(done).catch((e) => logger.warn('[billing] receipt notification failed', { errorType: e?.name }));
   logger.info('[billing] payment fulfilled', { paymentId: p.id, purpose: p.purpose });
   return done;
