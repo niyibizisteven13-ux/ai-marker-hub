@@ -48,7 +48,10 @@ const Cross = () => (
  * summary that expands to show what was done.
  */
 export function ActivityLine({ steps, current, busy, startedAt, endedAt }: Props) {
-  const [open, setOpen] = useState(false);
+  // While working, the steps are shown as a live checklist; when done they fold into "N steps · Xs".
+  const [userOpen, setUserOpen] = useState<boolean | null>(null);
+  const open = userOpen ?? busy;
+  const setOpen = (f: (o: boolean) => boolean) => setUserOpen(f(open));
   const now = useNow(busy);
   const secs = Math.max(0, Math.round(((endedAt ?? now) - startedAt) / 1000));
   const hasDetail = steps.length > 0;
@@ -67,7 +70,7 @@ export function ActivityLine({ steps, current, busy, startedAt, endedAt }: Props
               {current}
             </span>
           )}
-          {secs >= 8 && <span className="bw-time">{secs}s</span>}
+          {secs >= 2 && <span className="bw-time">{secs}s</span>}
         </>
       ) : (
         <span className="bw-line-text">{summary}</span>

@@ -85,7 +85,7 @@ export const examChat = createExamChat({
     const a = agentTarget();
     return { adapter: a.adapter, model: a.model, fallbackModel: a.fallbackModel };
   },
-  waitMs: num(process.env.EXAM_CHAT_WAIT_MS, 45_000),
+  waitMs: num(process.env.EXAM_CHAT_WAIT_MS, 15 * 60_000),
 });
 
 /** Knowledge repositories: file explorer whose files are indexed into the existing knowledge bases. */

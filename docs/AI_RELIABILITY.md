@@ -30,7 +30,8 @@ POST /api/ai/chat ─► request-id middleware (X-Request-Id)
 - **Retries only transient failures:** 429, 500/502/503/504, timeouts, connection errors, and "busy/high demand" messages. It never retries 400/401/403/404 or malformed responses.
 - **Retries only before any output reached the caller.**
 - **Backoff** is exponential with jitter, `AI_INITIAL_BACKOFF_MS` up to `AI_MAX_BACKOFF_MS`, and never shorter than `Retry-After`.
-- **Total deadline:** no attempt starts after `AI_TOTAL_DEADLINE_MS` (default 45 s). It aborts at once when the client disconnects.
+- **Total deadline:** no retry starts after `AI_TOTAL_DEADLINE_MS` (default 45 s). It aborts at once when the client disconnects. It does not limit how long an answer may stream.
+- **Long answers:** a streaming answer may run up to `AI_REQUEST_TIMEOUT_MS` (default 15 min). A stream that sends nothing for `AI_IDLE_TIMEOUT_MS` (default 2 min) is treated as dead. Chat streams send a heartbeat every 15 s and `X-Accel-Buffering: no`, so proxies neither cut nor buffer them. Marking in chat waits up to `EXAM_CHAT_WAIT_MS` (default 15 min) while showing each stage.
 - **Per-model circuit breaker:** after `AI_BREAKER_THRESHOLD` consecutive transient failures the model is skipped for `AI_BREAKER_COOLDOWN_MS`, then one trial request is allowed.
 - **Fallback:** only to an explicitly configured `GONKA_FALLBACK_MODEL`, only after transient or model-unavailable failures, and only for SIMPLE/STANDARD/DETERMINISTIC work without images (unless `GONKA_FALLBACK_SUPPORTS_VISION=true`). It is logged as `provider_fallback` and counted in metrics.
 - **Final error** keeps `status`/`timeout`/`timeoutKind` and is marked `exhausted`, so no outer layer retries it again.

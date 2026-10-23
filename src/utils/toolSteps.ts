@@ -75,3 +75,16 @@ export function applyToolEvent(steps: Step[], event: { type: string; id?: string
   }
   return steps;
 }
+
+/** Server progress steps ({type:"status", id, label, state, detail}): reading files, marking stages, writing. */
+export function applyStatusEvent(steps: Step[], event: { id?: string; label?: string; state?: string; detail?: string }): Step[] {
+  if (!event.id || !event.label) return steps;
+  const id = `status-${event.id}`;
+  const status = event.state === 'done' ? 'done' : event.state === 'error' ? 'error' : 'running';
+  const step: Step = { id, name: 'status', label: event.label, status, ...(event.detail ? { summary: event.detail } : {}) };
+  const i = steps.findIndex((s) => s.id === id);
+  if (i < 0) return [...steps, step];
+  const next = [...steps];
+  next[i] = { ...next[i], ...step };
+  return next;
+}

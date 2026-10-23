@@ -278,7 +278,7 @@ export default function ChatMessage({
         ) : (
           <div className="w-full text-base leading-[1.7] text-[#FAF9F5]">
             <ActivityLine
-              busy={Boolean(isThinking || (toolCallMatch && !toolOutputMatch) || message.isBusy || message.phase === 'thinking' || message.phase === 'streaming' || message.isWaiting || (!cleanText && message.isStreaming))}
+              busy={Boolean(message.isStreaming || isThinking || (toolCallMatch && !toolOutputMatch) || message.isBusy || message.phase === 'thinking' || message.phase === 'streaming' || message.isWaiting || (!cleanText && message.isStreaming))}
               current={message.currentStatus || (isThinking ? 'Thinking...' : toolCallMatch && !toolOutputMatch ? 'Running tool...' : message.isWaiting ? 'Thinking...' : '')}
               steps={message.steps || []}
               startedAt={message.startedAt || Date.now()}
