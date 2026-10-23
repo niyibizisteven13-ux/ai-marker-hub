@@ -1001,6 +1001,12 @@ export default function App() {
       const fullPrompt = contextExam ? `${contextExam}\n\nUser request: ${text}` : text;
 
       const attachmentText = newAttachments.map((item) => item.rawText).filter(Boolean).join('\n\n');
+      // Files from earlier messages in this chat (the last five), so "explain section 5.2" still finds the book.
+      const contextFiles = messages
+        .flatMap((message) => (message.sender === 'user' ? message.attachments ?? [] : []))
+        .filter((a) => a.storedFileId)
+        .map((a) => ({ fileId: a.storedFileId as string, name: a.name || 'file' }))
+        .slice(-5);
       resetIdleTimeout();
       const response = await authFetch('/api/ai/chat', {
         method: 'POST',
@@ -1015,6 +1021,7 @@ export default function App() {
           attachmentText,
           attachments: attachmentPayloads,
           attachmentIds: serverAttachmentIds,
+          contextFiles: contextFiles.length ? contextFiles : undefined,
           answerLanguage: options?.answerLanguage,
           learning: options?.learning && options.learning.mode !== 'normal' ? options.learning : undefined,
         }),
@@ -1057,6 +1064,17 @@ export default function App() {
             toolSteps = applyToolEvent(toolSteps, event);
             resetIdleTimeout();
             updateAssistant(assistantText, true);
+          } else if (event.type === 'files_stored' && Array.isArray(event.files)) {
+            // Remember where the AI stored this message's files, so follow-up questions can use them.
+            const key = (name: string) => String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            const stored = event.files as Array<{ fileId: string; name: string }>;
+            setMessages((current) => current.map((message) => message.id !== userMsg.id || !message.attachments ? message : {
+              ...message,
+              attachments: message.attachments.map((a) => {
+                const hit = stored.find((f) => key(f.name) === key(a.name));
+                return hit ? { ...a, storedFileId: hit.fileId } : a;
+              }),
+            }));
           } else if (event.type === 'attachment' && typeof event.id === 'string') {
             if (!generatedAttachments.some((attachment) => attachment.id === event.id)) {
               generatedAttachments.push(event as import('./components/types').AttachmentRef);

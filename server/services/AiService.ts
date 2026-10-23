@@ -848,6 +848,8 @@ export class AiService {
     channel?: 'web' | 'telegram';
     /** Socratic guide or roleplay for this conversation. */
     learning?: import('./learning/modes.js').LearningSettings;
+    /** Files attached earlier in this conversation (stored ids), readable with read_attachment. */
+    contextFiles?: Array<{ fileId: string; name: string }>;
   }) {
     const useGonka = process.env.AI_PROVIDER === 'gonkarouter' || await this.providerAvailable('gonkarouter');
     const allowFallback = process.env.ALLOW_GEMINI_FALLBACK === 'true';
@@ -864,9 +866,11 @@ export class AiService {
     const toolTurn = !!plan && (plan.artifact || plan.needsComputation) || dataTurn;
     // Photos and PDFs need a model that can see them (handwriting, scans, diagrams).
     const visualUpload = (options.files ?? []).some((f) => f.type === 'image' || /^image\/|application\/pdf/.test(f.mediaType));
+    // Files from earlier messages are read with tools, so those turns also run on the agent model.
+    const earlierFiles = (options.contextFiles ?? []).slice(-5);
     // Tool and vision turns run on the agent model (Claude when AI_AGENT_PROVIDER=anthropic); everyday chat stays on Gonka.
     const agent = agentTarget();
-    const runModel = (toolTurn || visualUpload) && agent.provider === 'anthropic' ? agent.model : undefined;
+    const runModel = (toolTurn || visualUpload || earlierFiles.length > 0) && agent.provider === 'anthropic' ? agent.model : undefined;
     const vision = Boolean(runModel) || process.env.DOC_VISION_GONKA === 'true';
 
     if (!runModel && !useGonka && !process.env.GONKA_API_KEY) {
@@ -905,7 +909,10 @@ export class AiService {
       text: extractPlainText(m.content),
     }));
     const lastMsg = options.messages[options.messages.length - 1];
-    const prompt = lastMsg ? extractPlainText(lastMsg.content) : '';
+    const earlierNote = earlierFiles.length
+      ? `\n\n[Files the user attached earlier in this conversation (not re-attached to this message): ${earlierFiles.map((f) => `${f.name} (fileId ${f.fileId})`).join('; ')}. If the request is about one of them, read it with read_attachment; for a long file such as a book, pass find (e.g. "Chapter 5") or offset. Never say a file is missing when it is listed here.]`
+      : '';
+    const prompt = lastMsg ? `${extractPlainText(lastMsg.content)}${earlierNote}` : '';
     const uploads = options.files?.map((f) => ({ type: f.type, base64: f.base64, mediaType: f.mediaType, ...(f.name ? { name: f.name } : {}) })) || [];
 
     // Steer this turn toward prose, a computed table, or the requested deliverables.

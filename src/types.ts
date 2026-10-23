@@ -83,6 +83,8 @@ export interface AICard {
 export interface ChatAttachment {
   id: string;
   serverId?: string;
+  /** Where the AI stored this file; sent with later messages so the AI can read it again. */
+  storedFileId?: string;
   status?: 'uploading' | 'ready' | 'failed';
   name: string;
   size?: string;

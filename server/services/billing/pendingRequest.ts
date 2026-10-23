@@ -11,7 +11,7 @@ const MAX_INLINE_BYTES = 25 * 1024 * 1024;
 const pending = new Map<string, PendingRequest>();
 
 /** Fields replayed on resume; history and per-turn settings come from the new request. */
-const KEEP = ['query', 'attachmentText', 'attachmentName', 'attachmentMimeType', 'attachmentBase64', 'attachments', 'attachmentIds', 'examContext', 'pinnedSyllabus', 'service', 'jobId'] as const;
+const KEEP = ['query', 'attachmentText', 'attachmentName', 'attachmentMimeType', 'attachmentBase64', 'attachments', 'attachmentIds', 'contextFiles', 'examContext', 'pinnedSyllabus', 'service', 'jobId'] as const;
 
 export function rememberBlocked(userId: string, body: Record<string, unknown>, label = 'your request') {
   const kept: Record<string, unknown> = {};

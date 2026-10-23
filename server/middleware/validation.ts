@@ -82,6 +82,8 @@ export const chatSchema = z.object({
   provider: z.preprocess(normalizeOptionalSentinel, z.string().max(50).optional()),
   answerLanguage: z.enum(['Auto', 'Kinyarwanda', 'English', 'French']).optional(),
   attachmentIds: z.preprocess(normalizeOptionalSentinel, z.union([z.string(), z.array(z.string())]).optional()),
+  // Files attached earlier in the conversation (ids the server reported), read on demand with read_attachment.
+  contextFiles: z.array(z.object({ fileId: z.string().min(1).max(100), name: z.string().max(255) })).max(10).optional(),
   // Socratic tutor / roleplay settings (validated again by parseLearning).
   learning: z.object({ mode: z.enum(['normal', 'socratic', 'roleplay']) }).passthrough().optional(),
   // The page the message was sent from (form editor, marked-exam review), with what is open there.

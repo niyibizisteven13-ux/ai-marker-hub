@@ -70,6 +70,7 @@ export function createAiAgent(cfg: AiAgentConfig) {
       let ingested: Awaited<ReturnType<typeof ingestUploads>>;
       try {
         ingested = await ingestUploads(input.prompt, input.uploads, ctx, { vision: input.vision, ocr: cfg.ocr });
+        if (ingested.stored.length) input.onEvent?.({ type: 'files_stored', data: { files: ingested.stored } });
       } catch (error) {
         if (cfg.writeTrace) {
           try {
