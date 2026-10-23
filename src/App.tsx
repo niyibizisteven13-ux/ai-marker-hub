@@ -167,7 +167,11 @@ export default function App() {
   const [selectionPos, setSelectionPos] = useState<{ top: number; left: number } | null>(null);
   const [isAiThinking, setIsAiThinking] = useState<boolean>(false);
   const [aiServiceState, setAiServiceState] = useState<'ready' | 'degraded' | 'offline'>('ready');
-  const [scannerOpen, setScannerOpen] = useState<boolean>(false);
+  // Deep links the AI can give in chat: /scan opens the scanner, /settings the settings page.
+  const [scannerOpen, setScannerOpen] = useState<boolean>(() => AI_SCAN_ENABLED && window.location.pathname === '/scan');
+  useEffect(() => {
+    if (['/scan', '/settings'].includes(window.location.pathname)) window.history.replaceState({}, '', '/');
+  }, []);
   const openScanner = AI_SCAN_ENABLED ? () => setScannerOpen(true) : undefined;
   const [aiStatus, setAiStatus] = useState<{ type: 'info' | 'warning'; message: string } | null>(null);
   const [loginModalOpen, setLoginModalOpen] = useState<boolean>(() => window.location.pathname === '/signup');
@@ -186,7 +190,7 @@ export default function App() {
     };
   });
   const [upgradePageOpen, setUpgradePageOpen] = useState<boolean>(() => window.location.pathname === '/upgrade');
-  const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+  const [settingsOpen, setSettingsOpen] = useState<boolean>(() => window.location.pathname === '/settings');
   const [libraryOpen, setLibraryOpen] = useState<boolean>(false);
   const [adminOpen, setAdminOpen] = useState<boolean>(() => window.location.pathname === '/admin');
   const [selectedProvider, setSelectedProvider] = useState<string>('gonkarouter');

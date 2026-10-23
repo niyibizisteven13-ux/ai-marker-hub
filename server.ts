@@ -20,6 +20,7 @@ import { ContextAwareService } from './server/services/ContextAwareService.js';
 import { PaywallService } from './server/services/PaywallService.js';
 import { ReconciliationService } from './server/services/ReconciliationService.js';
 import { MemoryService } from './server/services/MemoryService.js';
+import { platformContext } from './server/services/platformContext.js';
 import { HighVolumeBatchService } from './server/services/HighVolumeBatchService.js';
 import { SafetyService } from './server/services/SafetyService.js';
 import { SentimentService } from './server/services/SentimentService.js';
@@ -1584,7 +1585,8 @@ ${augmentedQuery}`;
     const languageDirective = answerLanguage && answerLanguage !== 'Auto'
       ? `\n\n[Response language preference]\n${buildLanguageBlock(answerLanguage === 'Kinyarwanda' ? 'rw' : answerLanguage === 'French' ? 'fr' : 'other')}\nAnswer in ${answerLanguage}. Keep quoted source material in its original language.`
       : `\n\n[Response language preference]\n${buildLanguageBlock(detectLanguage(query || ''))}\nAnswer naturally in the language the user wrote in. Keep quoted source material in its original language.`;
-    const systemWithContext = `${baseSystemWithContext}${languageDirective}`;
+    const platformBlock = isSmallTalk ? '' : await platformContext(userId, 'web');
+    const systemWithContext = `${baseSystemWithContext}${platformBlock ? `\n\n${platformBlock}` : ''}${languageDirective}`;
 
     const isOllama = cleanProvider === 'ollama' || (process.env.AI_PROVIDER === 'ollama' && !cleanProvider);
     const hasOllama = await aiService.providerAvailable('ollama');

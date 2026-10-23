@@ -18,6 +18,7 @@ import { changedQuestions, questionKey, validateScheme, type MarkingSchemeInput 
 import { matchAnswers, readLabel } from '../server/services/exams/matching.js';
 import { finalizeQuestion, markConfidence } from '../server/services/exams/marking.js';
 import { computeLayout, symbolsFor } from '../server/services/exams/layout.js';
+import { expandArchives, typedToPdf } from '../server/services/exams/inputs.js';
 import { PDFParse } from 'pdf-parse';
 import { classStatistics, effectiveMarks, questionStatus, summarizeCandidate } from '../server/services/exams/results.js';
 import { processedToViewed, viewedToPdf } from '../server/services/exams/pdfGeometry.js';
@@ -291,7 +292,7 @@ async function scriptPdf(id: string, rotate = 0) {
 
 const C001_PDF = await scriptPdf('C001');
 const C002_PDF = await scriptPdf('C002');
-const calls = { recognition: 0, marking: [] as string[][], extraction: 0 };
+const calls = { recognition: 0, marking: [] as string[][], extraction: 0, drafts: 0 };
 const textOf = (req: ProviderRequest) => req.messages.map((m) => (typeof m.content === 'string' ? m.content : (m.content as any[]).map((c) => c.text ?? '').join(''))).join('\n');
 const imageOf = (req: ProviderRequest) => { for (const m of req.messages) if (Array.isArray(m.content)) for (const c of m.content as any[]) if (c.type === 'image_url') return c.image_url.url as string; return null; };
 
@@ -316,8 +317,9 @@ const adapter: ProviderAdapter = {
           legibility: id === 'C002' && i === 2 ? 'partly_unclear' : 'clear', uncertainSpans: id === 'C002' && i === 2 ? [{ text: '15', alternatives: ['16'], reason: 'faint' }] : [], crossedOut: false, handwritten: true, language: 'en',
         })),
       };
-    } else if (sys.startsWith('You convert a teacher')) {
+    } else if (sys.startsWith('You convert a teacher') || sys.startsWith('There is no official marking scheme')) {
       calls.extraction++;
+      if (sys.startsWith('There is no official')) { calls.drafts++; assert.match(textOf(req), /candidate_scripts_sample[\s\S]*x \+ 2 = 6/, 'drafts from the questions on the scripts'); }
       out = {
         title: 'Algebra quiz', statedTotal: 5, allowHalfMarks: false, ambiguities: [],
         questions: [
@@ -507,8 +509,8 @@ test('chat: start, progress, explanations, edits and downloads through conversat
   assert.equal(await chat.handle(user, 'hello, how are you?', []), null, 'ordinary chat is not captured');
   assert.equal(await chat.handle(user, "Grade this student's essay", [{ name: 'essay.pdf', buffer: C002_PDF, mime: 'application/pdf' }]), null, 'a single-essay request stays with the existing chat');
   const ask = await chat.handle(user, 'Mark this paper using the marking scheme', [{ name: 'Mugenzi.pdf', buffer: C002_PDF, mime: 'application/pdf' }]);
-  assert.match(ask!.text, /official marking scheme/);
-  assert.match(ask!.text, /won't invent one/);
+  assert.match(ask!.text, /draft the marking scheme/);
+  assert.match(ask!.text, /check and confirm before anything is marked/, 'never marks against an unconfirmed scheme');
   const schemeTxt = Buffer.from('Marking scheme\n1. (3 marks) M1 subtract 2 from both sides; A1 x = 4 (2 marks)\n2. (2 marks) B1 area 15\nTotal: 5 marks');
   const start = await chat.handle(user, 'Mark these examination papers using the attached official marking scheme. Return corrected papers and an Excel file.', [
     { name: 'marking_scheme.txt', buffer: schemeTxt, mime: 'text/plain' }, { name: 'C001.pdf', buffer: C001_PDF, mime: 'application/pdf' },
@@ -681,4 +683,55 @@ test('review: saved record, page images, moving a mark, release and the draft la
   const changed = await exams.reviewCandidate(user, exam.id, sub.id);
   assert.deepEqual([changed.released, changed.changedSinceRelease], [false, true]);
   await assert.rejects(exams.setLayout(user, exam.id, sub.id, 'Q9:mark', { reset: true }), /No item/);
+});
+
+test('chat: no marking scheme, the AI drafts one and nothing is marked until the teacher confirms it', async () => {
+  const user = 'teacher-draft';
+  const r1 = await chat.handle(user, 'Please mark these scripts', [{ name: 'C001.pdf', buffer: C001_PDF, mime: 'application/pdf' }, { name: 'C002.pdf', buffer: C002_PDF, mime: 'application/pdf' }]);
+  assert.match(r1!.text, /draft the marking scheme/);
+  assert.match(r1!.text, /scan them with your phone\]\([^)]*\/scan\)/, 'gives the scanner link');
+  const before = calls.drafts;
+  const r2 = await chat.handle(user, "I don't have a marking scheme, mark it yourself", []);
+  assert.equal(calls.drafts, before + 1);
+  assert.match(r2!.text, /2 candidate scripts registered/);
+  assert.match(r2!.text, /\*\*draft\*\* marking scheme/);
+  assert.match(r2!.text, /drafted by Bwenge AI/);
+  const ctxExam = (await exams.listExams(user))[0];
+  let e = await exams.load(user, ctxExam.examId);
+  assert.equal(exams.latestScheme(e)!.status, 'needs_confirmation', 'a draft is never used on its own');
+  assert.equal(e.runs.length, 0, 'nothing marked yet');
+  const r3 = await chat.handle(user, 'confirm the marking scheme', []);
+  assert.match(r3!.text, /Marking 2 scripts/);
+  e = await waitRun(user, e.id);
+  assert.equal(Object.keys(e.results).length, 2);
+});
+
+test('inputs: a ZIP folder becomes one script per student; typed answers are printed to a PDF and kept', async () => {
+  const page = async (label: string) => sharp(Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="600" height="800"><rect width="100%" height="100%" fill="#fff"/><text x="40" y="80" font-size="40">${label}</text></svg>`)).png().toBuffer();
+  const zip = new JSZip();
+  zip.file('class 3B/C014/page2.png', await page('p2'));
+  zip.file('class 3B/C014/page1.png', await page('p1'));
+  zip.file('class 3B/C015.pdf', C001_PDF);
+  zip.file('class 3B/__MACOSX/._junk', 'x');
+  const files = await expandArchives([{ name: 'class 3B.zip', buffer: await zip.generateAsync({ type: 'nodebuffer' }) }]);
+  assert.deepEqual(files.map((f) => f.name).sort(), ['C014.pdf', 'C015.pdf']);
+  const c014 = await PDFDocument.load(files.find((f) => f.name === 'C014.pdf')!.buffer);
+  assert.equal(c014.getPageCount(), 2, 'one page per photo in the folder');
+
+  const pdf = await typedToPdf({ name: 'C016.txt', buffer: Buffer.from('1) x + 2 = 6\nx = 4\n\n2) area = 15') });
+  assert.equal(pdf.subarray(0, 5).toString('latin1'), '%PDF-');
+
+  const user = 'teacher-inputs';
+  const exam = await exams.createExam(user, { title: 'Inputs' });
+  const out = await exams.addSubmissions(user, exam.id, [
+    { name: 'class.zip', buffer: await zip.generateAsync({ type: 'nodebuffer' }) },
+    { name: 'C016.txt', buffer: Buffer.from('1) x + 2 = 6\nx = 4') },
+    { name: 'C017.rtf', buffer: Buffer.from('{\\rtf1\\ansi 1) x = 4\\par 2) area = 15}') },
+  ]);
+  assert.deepEqual(out.accepted.map((a) => a.candidateId).sort(), ['C014', 'C015', 'C016', 'C017']);
+  assert.deepEqual(out.rejected, []);
+  const typed = out.accepted.find((a) => a.candidateId === 'C016')!;
+  assert.equal(typed.typed, true);
+  assert.equal(typed.mime, 'application/pdf');
+  assert.equal((await fileStore.read(typed.originalFileId!, user)).data.toString(), '1) x + 2 = 6\nx = 4', 'the teacher\'s file is kept unchanged');
 });

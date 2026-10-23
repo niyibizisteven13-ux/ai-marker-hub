@@ -2,6 +2,7 @@ import { GoogleGenAI, Type } from '@google/genai';
 import Anthropic from '@anthropic-ai/sdk';
 import { evaluateStudentSubmission as deepseekEvaluate } from '../../src/services/deepseekMarker.js';
 import { BWENGE_CHAT_RESPONSE_RULES, BWENGE_GENERAL_SYSTEM_PROMPT } from './prompts/bwengeGeneralPrompt.js';
+import { platformContext } from './platformContext.js';
 import { MemoryService } from './MemoryService.js';
 import { toKnowledgePassage } from './knowledge/citations.js';
 import { asksAboutDatasets } from './knowledge/published.js';
@@ -861,9 +862,10 @@ export class AiService {
       logger.warn('generalAssist: getLongTermContext failed, continuing without memory context', err);
     }
 
+    const platform = options.extractSchema ? '' : await platformContext(options.userId, options.channel === 'telegram' ? 'telegram' : 'web');
     let systemPrompt = options.extractSchema
       ? `${BWENGE_GENERAL_SYSTEM_PROMPT}${memoryContext}\n\nFor this request, respond with ONLY valid JSON matching this shape, no other text: ${options.extractSchema}`
-      : `${BWENGE_GENERAL_SYSTEM_PROMPT}${memoryContext}\n\n${BWENGE_CHAT_RESPONSE_RULES}`;
+      : `${BWENGE_GENERAL_SYSTEM_PROMPT}${memoryContext}${platform ? `\n\n${platform}` : ''}\n\n${BWENGE_CHAT_RESPONSE_RULES}`;
     if (options.pinnedSyllabus) {
       systemPrompt += `\n\n[MASTER CONTEXT]: ${options.pinnedSyllabus}\n(Note: This is the primary curriculum/rubric source. Prioritize this document above all other context.)`;
     }

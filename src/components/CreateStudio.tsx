@@ -26,8 +26,9 @@ import {
   HelpCircle,
   ExternalLink,
   LogOut,
-  Copy, X,
+  Copy, X, FolderUp, Coins,
 } from 'lucide-react';
+import { useBillingMe } from './PlanStatus';
 import { Message as MessageType, ChatAttachment, ResponseFeedbackDetails } from '../types';
 import ChatMessage from './ChatMessage';
 import logoUrl from '../assets/bwenge-logo.svg';
@@ -186,6 +187,9 @@ export default function CreateStudio({
   const plusMenuRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  const [zipping, setZipping] = useState(false);
+  const billing = useBillingMe(true);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
   const [showNewResponsePill, setShowNewResponsePill] = useState(false);
@@ -271,6 +275,26 @@ export default function CreateStudio({
       onStageAttachments?.(files);
     }
     e.target.value = '';
+  };
+
+  // A whole folder (e.g. one sub-folder of page photos per student) is zipped in the browser and sent as one file.
+  const handleFolderChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []).filter((f) => !/(^|\/)\./.test((f as any).webkitRelativePath || f.name));
+    e.target.value = '';
+    if (!files.length) return;
+    const total = files.reduce((a, f) => a + f.size, 0);
+    if (total > 200 * 1024 * 1024) { window.alert('That folder is larger than 200 MB. Send it in parts.'); return; }
+    setZipping(true);
+    try {
+      const { default: JSZip } = await import('jszip');
+      const zip = new JSZip();
+      for (const f of files) zip.file((f as any).webkitRelativePath || f.name, f);
+      const folder = ((files[0] as any).webkitRelativePath || 'folder').split('/')[0] || 'folder';
+      const blob = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
+      onStageAttachments?.([new File([blob], `${folder}.zip`, { type: 'application/zip' })]);
+    } finally {
+      setZipping(false);
+    }
   };
 
   const handleComposerPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -697,8 +721,16 @@ export default function CreateStudio({
         ref={fileInputRef}
         type="file"
         multiple
-        accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.txt,.md,.rtf,.json,.js,.jsx,.ts,.tsx,.py,.java,.cpp,.c,.h,.html,.css,.xml,.yaml,.yml,.sql,.png,.jpg,.jpeg,.webp,.gif"
+        accept=".pdf,.doc,.docx,.odt,.rtf,.ppt,.pptx,.xls,.xlsx,.ods,.csv,.tsv,.txt,.md,.json,.js,.jsx,.ts,.tsx,.py,.java,.cpp,.c,.h,.html,.css,.xml,.yaml,.yml,.sql,.png,.jpg,.jpeg,.webp,.gif,.heic,.heif,.tif,.tiff,.zip,image/*"
         onChange={handleFileChange}
+        className="hidden"
+      />
+      <input
+        ref={folderInputRef}
+        type="file"
+        multiple
+        {...({ webkitdirectory: '', directory: '' } as any)}
+        onChange={(e) => void handleFolderChange(e)}
         className="hidden"
       />
 
@@ -744,7 +776,7 @@ export default function CreateStudio({
                 </button>
 
                 {plusMenuOpen && (
-                  <div className="absolute bottom-full left-0 mb-2 w-48 rounded-2xl border border-white/15 bg-[#212121] shadow-2xl z-50 py-1.5 text-xs text-[#FAF9F5] animate-in fade-in slide-in-from-bottom-1">
+                  <div className="absolute bottom-full left-0 mb-2 w-52 rounded-2xl border border-white/15 bg-[#212121] shadow-2xl z-50 py-1.5 text-xs text-[#FAF9F5] animate-in fade-in slide-in-from-bottom-1">
                     <button
                       type="button"
                       onClick={() => {
@@ -754,6 +786,16 @@ export default function CreateStudio({
                       className="w-full flex items-center px-3.5 py-2.5 hover:bg-white/5 text-left text-neutral-200"
                     >
                       <Paperclip className="mr-3 w-4 h-4 text-amber-400" /> Upload File
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        folderInputRef.current?.click();
+                        setPlusMenuOpen(false);
+                      }}
+                      className="w-full flex items-center px-3.5 py-2.5 hover:bg-white/5 text-left text-neutral-200"
+                    >
+                      <FolderUp className="mr-3 w-4 h-4 text-violet-300" /> Upload Folder
                     </button>
                     {onOpenScanner && <button
                       type="button"
@@ -863,9 +905,20 @@ export default function CreateStudio({
             </div>
           </div>
 
-          {/* Footer Disclaimer */}
-          <div className="mt-2 text-center text-[10px] text-[#9C9A92] font-sans tracking-tight select-none">
-            Bwenge can make mistakes. Check important information.
+          {/* Credits left (plan) and disclaimer */}
+          <div className="mt-2 flex items-center justify-between gap-3 px-1 text-[10.5px] text-[#9C9A92] select-none">
+            {billing ? (
+              <span className="flex min-w-0 items-center gap-1.5">
+                <Coins size={11} className="shrink-0 text-[#D97757]" />
+                <span className="truncate">
+                  {Math.max(0, billing.usage.day.limit - billing.usage.day.used)} of {billing.usage.day.limit} credits left today
+                  {billing.wallet > 0 ? ` · ${billing.wallet.toLocaleString('en-US')} GO` : ''}
+                </span>
+                {(billing.plan === 'FREE' || billing.plan === 'GO') && <a href="/upgrade" className="shrink-0 font-semibold text-[#D97757] hover:underline">Upgrade</a>}
+              </span>
+            ) : <span />}
+            <span className="hidden shrink-0 sm:inline">{zipping ? 'Packing folder…' : 'Bwenge can make mistakes. Check important information.'}</span>
+            {zipping && <span className="shrink-0 sm:hidden">Packing folder…</span>}
           </div>
         </div>
       </footer>
