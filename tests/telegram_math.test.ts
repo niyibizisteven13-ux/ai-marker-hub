@@ -20,3 +20,12 @@ test('Telegram messages: inline and display maths converted, money left alone, H
   assert.match(html, /xᵢ/);
   assert.doesNotMatch(html, /\\frac|\$\$/);
 });
+
+test('A worked solution in the house style reads cleanly in Telegram, without repeated plain-text copies', () => {
+  const html = markdownToHtml('This becomes exact with $\\mu(y)$.\n$$-3t^2 dt + (t^3 + e^y) dy = 0$$\nSo $\\mu(y) = e^{-y}$.\n\nSolution:\n\n$$y - t^3 e^{-y} = C$$\n\nUnicode: y - t³·e⁻ʸ = C\n\nCheck: $\\frac{d}{dt}(y - t^3 e^{-y}) = 0$.');
+  assert.match(html, /<pre>-3t² dt \+ \(t³ \+ eʸ\) dy = 0<\/pre>/);
+  assert.match(html, /μ\(y\) = e⁻ʸ/);
+  assert.match(html, /<pre>y - t³ e⁻ʸ = C<\/pre>/);
+  assert.doesNotMatch(html, /Unicode:/);
+  assert.match(html, /d\/dt\(y - t³ e⁻ʸ\) = 0/);
+});
