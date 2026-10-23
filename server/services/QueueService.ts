@@ -4,7 +4,7 @@ import path from 'path';
 import { randomUUID } from 'node:crypto';
 import { renameSync } from 'node:fs';
 
-const JOBS_FILE = path.resolve(process.cwd(), 'exports', 'local-jobs.json');
+const JOBS_FILE = path.resolve(process.env.QUEUE_SNAPSHOT_FILE ?? path.join(process.cwd(), 'exports', 'local-jobs.json'));
 
 // Persistent local job store — no external Redis or BullMQ connection required
 const jobStore = new Map<string, any>();

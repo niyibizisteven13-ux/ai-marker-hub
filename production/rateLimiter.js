@@ -1,4 +1,8 @@
 import rateLimit from 'express-rate-limit';
+import { SharedRateLimitStore } from '../server/services/cache/redis.js';
+
+// Counts are shared by every server through Redis when REDIS_URL is set (see server/services/cache/redis.ts).
+const store = (name) => new SharedRateLimitStore(name);
 
 const isDev = process.env.NODE_ENV !== 'production';
 const emailKey = (req) => {
@@ -8,9 +12,10 @@ const emailKey = (req) => {
   return `email:${email || 'invalid'}`;
 };
 
-const otpLimit = (limit, keyGenerator) => rateLimit({
+const otpLimit = (name, limit, keyGenerator) => rateLimit({
   windowMs: 15 * 60 * 1000,
   limit,
+  store: store(name),
   ...(keyGenerator ? { keyGenerator } : {}),
   standardHeaders: true,
   legacyHeaders: false,
@@ -20,6 +25,7 @@ const otpLimit = (limit, keyGenerator) => rateLimit({
 export const generalLimiter = isDev
   ? (req, res, next) => next()
   : rateLimit({
+      store: store('general'),
       windowMs: 15 * 60 * 1000,
       max: 300,
       standardHeaders: true,
@@ -27,21 +33,23 @@ export const generalLimiter = isDev
     });
 
 export const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
+  store: store('auth'),
+      windowMs: 15 * 60 * 1000,
   max: isDev ? 100 : 10,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many authentication attempts. Try again later.' },
 });
 
-export const otpRequestIpLimiter = otpLimit(20);
-export const otpRequestEmailLimiter = otpLimit(3, emailKey);
-export const otpVerifyIpLimiter = otpLimit(30);
-export const otpVerifyEmailLimiter = otpLimit(10, emailKey);
+export const otpRequestIpLimiter = otpLimit('otp-request-ip', 20);
+export const otpRequestEmailLimiter = otpLimit('otp-request-email', 3, emailKey);
+export const otpVerifyIpLimiter = otpLimit('otp-verify-ip', 30);
+export const otpVerifyEmailLimiter = otpLimit('otp-verify-email', 10, emailKey);
 
 export const gradingLimiter = isDev
   ? (req, res, next) => next()
   : rateLimit({
+      store: store('grading'),
       windowMs: 15 * 60 * 1000,
       max: 60,
       standardHeaders: true,
@@ -51,6 +59,7 @@ export const gradingLimiter = isDev
 export const publicFormSubmitLimiter = isDev
   ? (req, res, next) => next()
   : rateLimit({
+      store: store('form-submit'),
       windowMs: 15 * 60 * 1000,
       max: 60,
       standardHeaders: true,
@@ -61,6 +70,7 @@ export const publicFormSubmitLimiter = isDev
 export const batchGradingLimiter = isDev
   ? (req, res, next) => next()
   : rateLimit({
+      store: store('batch-grading'),
       windowMs: 15 * 60 * 1000,
       max: 6,
       standardHeaders: true,

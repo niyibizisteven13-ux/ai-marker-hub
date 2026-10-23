@@ -14,6 +14,7 @@ import { EmbeddingService } from './EmbeddingService.js';
 import { createOutputService } from './outputs/service.js';
 import logger from '../utils/logger.js';
 import { recordUsage } from './billing/usage.js';
+import { isPrimary } from '../utils/cluster.js';
 
 /** Wires the statistics/report and assessment services to the shared file store, job queue and agent model. */
 
@@ -124,9 +125,13 @@ export async function startEducationRuntime(): Promise<void> {
   if (started) return;
   started = true;
   await fileJobQueue.init();
+  // Each server cleans its own job queue; the shared folders (files, exams, documents) are cleaned by the
+  // primary server only, so several servers never delete the same files at once.
+  const shared = isPrimary();
+  const none = async () => 0 as any;
   const sweep = async () => {
     try {
-      const [jobs, files, assessments, documents, exams, examContexts] = await Promise.all([fileJobQueue.purgeExpired(), fileStore.purgeExpired(), assessmentStore.purgeExpired(), documentStore.purgeExpired(), examStore.purgeExpired(), examChatContexts.purgeExpired()]);
+      const [jobs, files, assessments, documents, exams, examContexts] = await Promise.all([fileJobQueue.purgeExpired(), shared ? fileStore.purgeExpired() : none(), shared ? assessmentStore.purgeExpired() : none(), shared ? documentStore.purgeExpired() : none(), shared ? examStore.purgeExpired() : none(), shared ? examChatContexts.purgeExpired() : none()]);
       if (jobs.length || files || assessments || documents || exams || examContexts) logger.info('[cleanup] expired items removed', { jobs: jobs.length, files, assessments, documents, exams, examContexts });
     } catch (err) {
       logger.warn('[cleanup] sweep failed', { errorType: (err as Error)?.name });
@@ -135,8 +140,8 @@ export async function startEducationRuntime(): Promise<void> {
   // Re-queue repository files left waiting (restart, job limit) and fill missing embeddings.
   const resume = () => knowledgeService.resumePending().then((r) => { if (r.queued) logger.info('[knowledge] resumed pending indexing', r); }).catch((err) => logger.warn('[knowledge] resume failed', { errorType: (err as Error)?.name }));
   void sweep();
-  void resume();
-  setInterval(() => { void sweep(); void resume(); }, 60 * 60 * 1000).unref();
+  if (shared) void resume();
+  setInterval(() => { void sweep(); if (shared) void resume(); }, 60 * 60 * 1000).unref();
 }
 
 let telegramTranscriber: ReturnType<typeof createTelegramTranscriber> | null = null;
