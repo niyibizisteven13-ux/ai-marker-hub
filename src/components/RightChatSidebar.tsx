@@ -412,7 +412,7 @@ export default function RightChatSidebar({
               <p role="alert" className="mb-2 px-3 text-xs text-rose-300">{attachmentError}</p>
             )}
             {attachmentPreviews.length > 0 && (
-              <p className="mb-2 px-3 text-[10px] text-slate-500">{attachmentPreviews.length} of 10 files · 15 MB total limit</p>
+              <p className="mb-2 px-3 text-[10px] text-slate-500">{attachmentPreviews.length} of 10 files · up to 100 MB each</p>
             )}
 
             <div className="flex items-end gap-1">

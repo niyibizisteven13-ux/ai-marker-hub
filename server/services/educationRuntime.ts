@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { agentTarget, fileJobQueue, fileStore } from './AiService.js';
+import { agentTarget, fileJobQueue, fileStore, markingTarget } from './AiService.js';
 import { createAnalyticsService } from './analytics/service.js';
 import { createAssessmentService, type AssessmentRecord } from './assessment/service.js';
 import { OwnedRecordStore } from './storage/ownedRecordStore.js';
@@ -46,7 +46,8 @@ export const documentStore = new OwnedRecordStore<DocumentRecord>(process.env.DO
  * fallback model that is known to accept images (GONKA_FALLBACK_SUPPORTS_VISION=true).
  */
 function visionTarget() {
-  const a = agentTarget();
+  // Handwriting is read by the marking model (CLAUDE_MARKING_MODEL), the same one that marks it.
+  const a = markingTarget();
   if (a.provider === 'anthropic') return { adapter: a.adapter, model: a.model, fallbackModel: process.env.GONKA_FALLBACK_SUPPORTS_VISION === 'true' ? undefined : null };
   if (process.env.DOC_VISION_GONKA === 'true') return { adapter: a.adapter, model: process.env.DOC_VISION_MODEL?.trim() || a.model, fallbackModel: null };
   return null;
@@ -71,7 +72,7 @@ const num = (v: string | undefined, d: number) => (Number(v) > 0 ? Number(v) : d
 export const examService = createExamService({
   fileStore, queue: fileJobQueue, store: examStore, documents: documentService, forbiddenStrings,
   agent: () => {
-    const a = agentTarget();
+    const a = markingTarget();
     return { adapter: a.adapter, model: a.model, fallbackModel: a.fallbackModel };
   },
   visionAvailable: () => visionTarget() !== null,
@@ -86,7 +87,7 @@ export const examService = createExamService({
 export const examChat = createExamChat({
   service: examService, fileStore, queue: fileJobQueue, contexts: examChatContexts,
   agent: () => {
-    const a = agentTarget();
+    const a = markingTarget();
     return { adapter: a.adapter, model: a.model, fallbackModel: a.fallbackModel };
   },
   waitMs: num(process.env.EXAM_CHAT_WAIT_MS, 15 * 60_000),
