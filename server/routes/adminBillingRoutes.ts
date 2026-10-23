@@ -7,6 +7,7 @@ import { DEFAULT_GO_PACKS, PLANS, currentGoPacks, fxUsdRwf, planFor, refreshBill
 import { momoConfig, momoHealth, momoMode } from '../services/billing/momo.js';
 import { checkPayment, publicPayment, runRenewalSweep } from '../services/billing/payments.js';
 import { periods, usedTotals } from '../services/billing/usage.js';
+import { guardState, saveGuardSettings } from '../services/billing/aiGuard.js';
 
 /**
  * Admin billing control (/api/admin/billing, ADMIN only): revenue vs AI cost, prices and limits, Mobile Money
@@ -44,6 +45,22 @@ router.get('/overview', async (_req, res) => {
       goCredits: { sold: Number(sold?._sum?.delta ?? 0), used: -Number(spent?._sum?.delta ?? 0) },
       momo: { mode: momoMode(), targetEnv: momoConfig().targetEnv, currency: momoConfig().currency, callback: momoConfig().callbackHost.startsWith('https://') },
     });
+  } catch (e) { fail(res, e); }
+});
+
+// AI generation: pause switch, profit guard and the economics behind it (cost vs revenue, free vs paying, web vs Telegram).
+router.get('/ai-guard', async (_req, res) => {
+  try { res.json({ success: true, ...(await guardState(true)) }); } catch (e) { fail(res, e); }
+});
+router.put('/ai-guard', async (req, res) => {
+  try {
+    const body = z.object({
+      paused: z.boolean().optional(),
+      pausedReason: z.string().trim().max(200).nullable().optional(),
+      lossGuard: z.object({ enabled: z.boolean().optional(), freeBudgetUsd: z.number().min(0).max(100_000).optional(), mode: z.enum(['free_only', 'all']).optional() }).optional(),
+    }).strict().parse(req.body ?? {});
+    await saveGuardSettings(body as any, adminId(req));
+    res.json({ success: true, ...(await guardState(true)) });
   } catch (e) { fail(res, e); }
 });
 

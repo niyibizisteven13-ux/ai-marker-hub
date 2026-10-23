@@ -314,10 +314,23 @@ export default function ExamReviewPage({ onBack }: { onBack: () => void }) {
       <div className="min-h-[100dvh] bg-[#141413] px-4 py-8 text-white">
         <div className="mx-auto max-w-3xl">
           <button type="button" onClick={onBack} className="mb-6 inline-flex items-center gap-2 text-sm text-neutral-400 hover:text-white"><ArrowLeft size={16} /> Back to workspace</button>
-          <h1 className="font-serif text-3xl">Marked examinations</h1>
+          <h1 className="font-serif text-3xl">Marked exams</h1>
           <p className="mt-1 text-sm text-neutral-400">Review the red marks on each script and release the marked PDFs.</p>
           {error && <p className="mt-6 text-sm text-rose-300">{error}</p>}
-          {!exams ? <Loader2 className="mt-8 animate-spin text-neutral-500" /> : exams.length === 0 ? <p className="mt-8 text-sm text-neutral-400">No examinations yet. Upload a marking scheme and candidate scripts in the chat to start.</p> : (
+          {!exams ? <Loader2 className="mt-8 animate-spin text-neutral-500" /> : exams.length === 0 ? (
+            <div className="mt-8 rounded-3xl border border-white/[0.08] bg-white/[0.02] p-6 sm:p-8">
+              <p className="text-lg font-semibold text-white">Mark a class in one message</p>
+              <ol className="mt-4 space-y-3 text-sm text-neutral-300">
+                <li className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#D97757]/20 text-xs font-bold text-[#F2B39C]">1</span>Attach the students' scripts in the chat: PDFs, phone photos, Word files or a ZIP folder. Add the marking scheme if you have one.</li>
+                <li className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#D97757]/20 text-xs font-bold text-[#F2B39C]">2</span>Say "mark these". Bwenge reads the handwriting, marks every question and corrects each script in red pen.</li>
+                <li className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#D97757]/20 text-xs font-bold text-[#F2B39C]">3</span>The marked PDFs come back in the chat, with the Excel results. Every class appears here to review and share.</li>
+              </ol>
+              <div className="mt-6 flex flex-wrap gap-2">
+                <a href="/" className="rounded-xl bg-[#D97757] px-4 py-2 text-sm font-semibold text-white hover:bg-[#c66849]">Open the chat</a>
+                <a href="/scan" className="rounded-xl border border-white/15 px-4 py-2 text-sm font-semibold text-neutral-200 hover:bg-white/5">Scan papers with the phone</a>
+              </div>
+            </div>
+          ) : (
             <ul className="mt-6 divide-y divide-white/[0.06] overflow-hidden rounded-2xl border border-white/[0.08]">
               {exams.map((e) => (
                 <li key={e.examId}><a href={`/exams/${e.examId}/review`} className="flex items-center gap-4 bg-white/[0.02] px-4 py-3.5 hover:bg-white/[0.05]">

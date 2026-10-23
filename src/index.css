@@ -1,4 +1,6 @@
 @import "tailwindcss";
+/* The signed-in app is one consistent dark theme: "dark:" styles follow the .dark app shell, not the OS setting. */
+@custom-variant dark (&:where(.dark, .dark *));
 
 @layer base {
   :root {

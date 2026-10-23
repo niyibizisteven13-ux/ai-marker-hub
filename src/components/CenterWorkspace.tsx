@@ -1218,7 +1218,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
   };
 
   return (
-    <div className="flex-1 min-h-[50vh] h-auto lg:h-[calc(100vh-61px)] flex flex-col bg-[#FBF9F6] dark:bg-[#141416] overflow-y-auto select-text relative">
+    <div className="flex-1 min-h-[50vh] h-auto lg:h-full lg:pt-12 flex flex-col bg-[#FBF9F6] dark:bg-[#171717] overflow-y-auto select-text relative">
       <div className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-[#E8E4DC] bg-[#FBF9F6]/95 px-4 py-2 text-xs dark:border-[#2D2D32] dark:bg-[#141416]/95">
         <span className={studioProjectStatus === 'error' ? 'text-rose-500' : 'text-[#858075]'}>
           {studioProjectStatus === 'saving' ? 'Saving studio draft…' : studioProjectStatus === 'saved' ? 'All drafts saved' : studioProjectStatus === 'error' ? 'Save failed. Check connection and retry.' : 'Studio drafts save automatically'}
@@ -1497,7 +1497,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                 </span>
               </a>
 
-              <button type="button" onClick={(event) => { event.stopPropagation(); void showFormsDashboard(); }} className="col-span-2 rounded-2xl bg-[#191919] p-4 text-left text-white shadow-sm dark:bg-[#F3F3F3] dark:text-[#191919]">
+              <button type="button" onClick={(event) => { event.stopPropagation(); void showFormsDashboard(); }} className="col-span-2 rounded-2xl border border-[#D97757]/40 bg-[#D97757]/10 p-4 text-left text-[#191919] shadow-sm transition-colors hover:bg-[#D97757]/20 dark:text-white">
                 <span className="block text-sm font-bold">My Forms &amp; Results</span>
                 <span className="mt-1 block text-[10px] opacity-70">Review responses, export data, and ask AI to shortlist candidates</span>
               </button>
@@ -2224,7 +2224,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
 
       {/* Dedicated full-screen form studio with the shared live respondent preview. */}
       {showManualFormBuilder && (
-        <div className="fixed inset-0 z-[120] overflow-y-auto bg-[#F0EBF8]">
+        <div className="fixed inset-0 z-[120] overflow-y-auto bg-[#F4F4F1]">
           <FormBuilder
             key="manual-form-builder"
             initialSchema={formBuilderInitialSchema}

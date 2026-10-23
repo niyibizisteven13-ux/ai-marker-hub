@@ -272,7 +272,7 @@ export default function RightChatSidebar({
 
       {/* Full-sidebar drop overlay */}
       {isDraggingFiles && (
-        <div className="absolute inset-0 z-40 m-3 flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-emerald-500/30 bg-[#0A0D14]/95 backdrop-blur-sm">
+        <div className="absolute inset-0 z-40 m-3 flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-emerald-500/30 bg-[#171717]/95 backdrop-blur-sm">
           <span className="grid h-11 w-11 place-items-center rounded-2xl bg-emerald-500/10 text-emerald-400 ring-1 ring-inset ring-emerald-400/20"><Paperclip size={20} /></span>
           <div className="text-xs font-medium text-slate-200">Drop files to attach</div>
           <div className="text-[10px] text-slate-500">PDF, Office files, text, code, or images</div>
@@ -293,7 +293,7 @@ export default function RightChatSidebar({
               <button
                 type="button"
                 onClick={handleAttachClick}
-                className="w-full flex items-center gap-3.5 p-3 rounded-xl bg-[#121722]/80 border border-slate-800/80 hover:border-orange-500/40 hover:bg-[#161C2A] transition text-left group"
+                className="w-full flex items-center gap-3.5 p-3 rounded-xl bg-white/[0.04] border border-slate-800/80 hover:border-orange-500/40 hover:bg-white/[0.06] transition text-left group"
               >
                 <div className="w-8 h-8 rounded-lg bg-slate-800/80 flex items-center justify-center text-slate-300 group-hover:text-white transition shrink-0">
                   <FileUp size={16} />
@@ -309,7 +309,7 @@ export default function RightChatSidebar({
               {onOpenScanner && <button
                 type="button"
                 onClick={() => onOpenScanner?.()}
-                className="w-full flex items-center gap-3.5 p-3 rounded-xl bg-[#121722]/80 border border-slate-800/80 hover:border-orange-500/40 hover:bg-[#161C2A] transition text-left group"
+                className="w-full flex items-center gap-3.5 p-3 rounded-xl bg-white/[0.04] border border-slate-800/80 hover:border-orange-500/40 hover:bg-white/[0.06] transition text-left group"
               >
                 <div className="w-8 h-8 rounded-lg bg-slate-800/80 flex items-center justify-center text-slate-300 group-hover:text-white transition shrink-0">
                   <ScanLine size={16} />
@@ -442,7 +442,7 @@ export default function RightChatSidebar({
                   title="Oracle Insights"
                 >
                   <Bell className="w-4 h-4" />
-                  <span className="absolute top-1 right-1 w-2 h-2 bg-rose-500 rounded-full border-2 border-[#0D111A] animate-bounce" />
+                  <span className="absolute top-1 right-1 w-2 h-2 bg-rose-500 rounded-full border-2 border-[#171717] animate-bounce" />
                 </button>
 
                 <button
@@ -468,39 +468,16 @@ export default function RightChatSidebar({
                 </button>
               </div>
             </div>
-            <div className="mt-0.5 flex items-center justify-between px-2 sm:hidden">
-              <span className="sr-only">Enter to send; Shift+Enter for a new line</span>
-              <select
-                value={selectedProvider}
-                onChange={(e) => onProviderChange?.(e.target.value)}
-                aria-label="AI model"
-                className="max-w-[170px] bg-transparent text-[11px] text-neutral-300 outline-none"
-              >
-                <option value="gonkarouter">GonkaRouter — GLM-5.3-Flash</option>
-              </select>
-            </div>
-            <div className="hidden sm:flex sm:justify-end sm:px-2 sm:pt-1.5">
-              <select
-                value={selectedProvider}
-                onChange={(e) => onProviderChange?.(e.target.value)}
-                aria-label="AI model"
-                className="max-w-[220px] bg-transparent text-[11px] text-neutral-300 outline-none"
-              >
-                <option value="gonkarouter">GonkaRouter — GLM-5.3-Flash (Primary)</option>
-              </select>
-            </div>
+            <span className="sr-only">Enter to send; Shift+Enter for a new line</span>
           </div>
         </div>
 
-        <div className="hidden sm:block text-[10px] text-neutral-600 text-center mt-2 tracking-[0.16em] uppercase font-medium">
-          Powered by Bwenge Autonomous Agentic System
-        </div>
       </footer>
 
 
       {/* History Drawer */}
       {showHistory && (
-        <div className="absolute inset-0 z-40 flex flex-col bg-[#0A0D14]/98 p-4 backdrop-blur-sm">
+        <div className="absolute inset-0 z-40 flex flex-col bg-[#171717]/98 p-4 backdrop-blur-sm">
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
             <div>
               <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">📜 Chat History</h3>
@@ -509,7 +486,7 @@ export default function RightChatSidebar({
             <button
               type="button"
               onClick={() => setShowHistory(false)}
-              className="rounded-lg bg-[#121722] px-3 py-2 text-xs text-slate-200 hover:bg-slate-800 transition"
+              className="rounded-lg bg-white/[0.04] px-3 py-2 text-xs text-slate-200 hover:bg-slate-800 transition"
               aria-label="Close chat history"
             >
               ✕ Close
@@ -518,7 +495,7 @@ export default function RightChatSidebar({
 
           <div className="mt-4 flex-1 space-y-2.5 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-800">
             {chatSessions.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-slate-800 bg-[#121722]/60 p-5 text-center text-xs text-slate-500">
+              <div className="rounded-xl border border-dashed border-slate-800 bg-white/[0.03] p-5 text-center text-xs text-slate-500">
                 No saved sessions yet. Start a chat and it will show up here.
               </div>
             ) : (
@@ -530,7 +507,7 @@ export default function RightChatSidebar({
                     setShowHistory(false);
                     onLoadSession?.(session.id);
                   }}
-                  className="w-full rounded-xl border border-slate-800 bg-[#121722]/80 px-4 py-3 text-left hover:border-orange-500/40 hover:bg-[#161C2A] transition"
+                  className="w-full rounded-xl border border-slate-800 bg-white/[0.04] px-4 py-3 text-left hover:border-orange-500/40 hover:bg-white/[0.06] transition"
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="truncate text-xs font-medium text-slate-100">{session.title}</div>
@@ -564,7 +541,7 @@ export default function RightChatSidebar({
 
       {/* Oracle Insight Feed (V4) */}
       {showInsights && (
-        <div className="absolute inset-0 z-50 flex flex-col bg-[#0A0D14]/98 p-4 backdrop-blur-md animate-in slide-in-from-right duration-300">
+        <div className="absolute inset-0 z-50 flex flex-col bg-[#171717]/98 p-4 backdrop-blur-md animate-in slide-in-from-right duration-300">
            <div className="flex items-center justify-between border-b border-white/5 pb-3">
             <div>
               <h3 className="text-sm font-bold text-amber-500 flex items-center gap-2">
@@ -651,7 +628,7 @@ export default function RightChatSidebar({
             </button>
           </div>
 
-          <div className="flex-1 my-3 rounded-2xl overflow-hidden border border-slate-800 bg-[#0B0E14] flex items-center justify-center">
+          <div className="flex-1 my-3 rounded-2xl overflow-hidden border border-slate-800 bg-[#171717] flex items-center justify-center">
             {(() => {
               const fileUrl = previewFile instanceof File
                 ? previewFileUrl
