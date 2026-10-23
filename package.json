@@ -12,6 +12,7 @@
     "lint": "tsc --noEmit",
     "security:check": "bash scripts/check-no-secrets.sh",
     "momo:sandbox": "tsx scripts/momo-sandbox-setup.ts",
+    "momo:diagnose": "tsx scripts/momo-diagnose.ts",
     "test": "npm run security:check && node --test --import tsx tests/*.test.ts",
     "eval": "tsx evals/runner.ts",
     "eval:ci": "tsx evals/runner.ts --split dev --all --no-report",

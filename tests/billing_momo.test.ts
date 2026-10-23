@@ -10,7 +10,7 @@ import express from 'express';
 // renewal reminders and merging a Telegram-only account into the web account. Local test database.
 
 // ── Fake MTN Collections API ─────────────────────────────────────────────────
-const mtn = { requests: new Map<string, any>(), statuses: new Map<string, any>(), tokenCalls: 0, refuseNext: false };
+const mtn = { requests: new Map<string, any>(), statuses: new Map<string, any>(), tokenCalls: 0, refuseNext: false, refuseCallback: false, attempts: [] as any[] };
 const fake = express();
 fake.use(express.json());
 fake.post('/collection/token/', (req, res) => {
@@ -21,6 +21,10 @@ fake.post('/collection/token/', (req, res) => {
 fake.post('/collection/v1_0/requesttopay', (req, res) => {
   if (req.headers.authorization !== 'Bearer tok') return res.status(401).end();
   if (mtn.refuseNext) { mtn.refuseNext = false; return res.status(500).json({ message: 'boom' }); }
+  mtn.attempts.push({ headers: req.headers, body: req.body });
+  // Like the real API: a bare 400 for characters it does not accept, or a callback host it does not allow.
+  if (/[^\x20-\x7e]/.test(`${req.body.payerMessage}${req.body.payeeNote}`)) return res.status(400).end();
+  if (mtn.refuseCallback && req.headers['x-callback-url']) return res.status(400).end();
   const ref = String(req.headers['x-reference-id']);
   mtn.requests.set(ref, { body: req.body, headers: req.headers });
   mtn.statuses.set(ref, { status: 'PENDING' });
@@ -135,6 +139,30 @@ test('PRO purchase: request-to-pay reaches MTN, status is confirmed with MTN, pl
 
   // Someone else cannot read or check this payment.
   await assert.rejects(checkPayment(payment.id, await newUser()), /not found/i);
+});
+
+test('MTN quirks: messages are sent as plain ASCII; a refused callback URL is retried without it, then skipped', async () => {
+  resetMomo();
+  mtn.refuseCallback = true;
+  const userId = await newUser();
+  const pack = currentGoPacks()[0];
+  mtn.attempts.length = 0;
+  const { payment } = await startPayment(userId, { purpose: 'GO_PACK', packId: pack.id, phone: '46733123456' });
+  assert.equal(payment.status, 'PENDING');
+  assert.equal(mtn.attempts.length, 2, 'refused once with the callback, accepted without it');
+  assert.ok(mtn.attempts[0].headers['x-callback-url']);
+  assert.equal(mtn.attempts[1].headers['x-callback-url'], undefined);
+  const sent = mtn.requests.get(payment.id);
+  assert.match(sent.body.payerMessage, /^Bwenge AI GO credits \d[\d,]* credits$/);
+  assert.equal(sent.body.amount, String(pack.rwf));
+  assert.equal(sent.body.payer.partyId, '46733123456', 'sandbox test numbers are sent as typed');
+
+  mtn.attempts.length = 0;
+  await startPayment(await newUser(), { purpose: 'PRO', months: 1, phone: '46733123457' });
+  assert.equal(mtn.attempts.length, 1, 'later payments skip the refused callback');
+  assert.equal(mtn.attempts[0].headers['x-callback-url'], undefined);
+  mtn.refuseCallback = false;
+  resetMomo();
 });
 
 test('an admin who buys PRO keeps Institution limits', async () => {

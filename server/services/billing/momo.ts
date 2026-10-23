@@ -54,7 +54,7 @@ export function normalizeMsisdn(phone: string): { msisdn: string; masked: string
 let token: { value: string; expires: number } | null = null;
 const simulated = new Map<string, { checks: number; fail: boolean }>();
 
-async function accessToken(): Promise<string> {
+export async function accessToken(): Promise<string> {
   if (token && Date.now() < token.expires) return token.value;
   const c = momoConfig();
   const res = await fetch(`${c.baseUrl}/collection/token/`, {
@@ -71,31 +71,57 @@ async function accessToken(): Promise<string> {
   return token.value;
 }
 
-/** Asks the payer to approve a payment on their phone. `referenceId` must be a UUID v4 (our payment id). */
-export async function requestToPay(o: { referenceId: string; amount: number; msisdn: string; externalId: string; payerMessage: string; payeeNote: string }): Promise<void> {
+/**
+ * MTN rejects some characters in payerMessage/payeeNote with a bare 400 (no body), e.g. "·", accents or ":".
+ * Keep letters, digits, spaces and . , - only.
+ */
+export const momoText = (s: string) => s.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9 .,-]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160) || 'Bwenge AI';
+
+export interface RequestToPay { referenceId: string; amount: number; msisdn: string; externalId: string; payerMessage: string; payeeNote: string }
+
+/** The exact request-to-pay MTN receives (shared with scripts/momo-diagnose.ts). */
+export function buildRequestToPay(o: RequestToPay, token: string, withCallback: boolean) {
   const c = momoConfig();
-  if (c.simulate) { simulated.set(o.referenceId, { checks: 0, fail: o.msisdn.endsWith('0000') }); return; }
-  if (!momoReady()) throw new MomoError('Mobile Money payments are not set up yet.', 503, 'NOT_CONFIGURED');
   const headers: Record<string, string> = {
-    Authorization: `Bearer ${await accessToken()}`,
+    Authorization: `Bearer ${token}`,
     'X-Reference-Id': o.referenceId,
     'X-Target-Environment': c.targetEnv,
     'Ocp-Apim-Subscription-Key': c.subscriptionKey,
     'Content-Type': 'application/json',
   };
-  // MTN only calls back to HTTPS hosts registered for the API user; the callback is a hint, status is re-checked.
-  if (c.callbackHost.startsWith('https://')) headers['X-Callback-Url'] = `${c.callbackHost}/api/billing/momo/callback/${o.referenceId}`;
-  const res = await fetch(`${c.baseUrl}/collection/v1_0/requesttopay`, {
-    method: 'POST', headers, signal: AbortSignal.timeout(20_000),
-    body: JSON.stringify({
-      amount: String(o.amount), currency: c.currency, externalId: o.externalId,
-      payer: { partyIdType: 'MSISDN', partyId: o.msisdn },
-      payerMessage: o.payerMessage.slice(0, 160), payeeNote: o.payeeNote.slice(0, 160),
-    }),
+  if (withCallback && c.callbackHost.startsWith('https://')) headers['X-Callback-Url'] = `${c.callbackHost}/api/billing/momo/callback/${o.referenceId}`;
+  const body = JSON.stringify({
+    amount: String(Math.round(o.amount)), currency: c.currency, externalId: o.externalId.replace(/[^A-Za-z0-9]/g, '').slice(0, 36) || o.referenceId.replace(/-/g, '').slice(0, 18),
+    payer: { partyIdType: 'MSISDN', partyId: o.msisdn },
+    payerMessage: momoText(o.payerMessage), payeeNote: momoText(o.payeeNote),
   });
+  return { url: `${c.baseUrl}/collection/v1_0/requesttopay`, headers, body };
+}
+
+// MTN only accepts callbacks to the host registered for the API user; when it refuses one, later requests skip it.
+let callbackRefused = false;
+
+/** Asks the payer to approve a payment on their phone. `referenceId` must be a UUID v4 (our payment id). */
+export async function requestToPay(o: RequestToPay): Promise<void> {
+  const c = momoConfig();
+  if (c.simulate) { simulated.set(o.referenceId, { checks: 0, fail: o.msisdn.endsWith('0000') }); return; }
+  if (!momoReady()) throw new MomoError('Mobile Money payments are not set up yet.', 503, 'NOT_CONFIGURED');
+  const send = async (withCallback: boolean) => {
+    const r = buildRequestToPay(o, await accessToken(), withCallback);
+    const res = await fetch(r.url, { method: 'POST', headers: r.headers, body: r.body, signal: AbortSignal.timeout(20_000) });
+    return { res, withCallback: 'X-Callback-Url' in r.headers };
+  };
+  let { res, withCallback } = await send(!callbackRefused);
+  // A 400 creates nothing at MTN, so the same reference can be retried. Status is polled, so the callback is optional.
+  if (res.status === 400 && withCallback) {
+    logger.warn('[momo] request-to-pay refused with a callback URL; retrying without it', { callbackHost: c.callbackHost });
+    ({ res, withCallback } = await send(false));
+    if (res.status === 202) callbackRefused = true;
+  }
+  if (res.status === 401) token = null;
   if (res.status !== 202) {
     const body = await res.text().catch(() => '');
-    logger.error('[momo] request-to-pay refused', { status: res.status, body: body.slice(0, 300) });
+    logger.error('[momo] request-to-pay refused', { status: res.status, body: body.slice(0, 300), withCallback, currency: c.currency, amount: Math.round(o.amount), msisdn: `${o.msisdn.slice(0, 5)}•••${o.msisdn.slice(-3)}` });
     throw new MomoError(res.status === 409 ? 'This payment was already requested.' : 'Mobile Money could not start the payment. Check the number and try again.');
   }
 }
@@ -162,4 +188,4 @@ export async function momoHealth(): Promise<{ ok: boolean; mode: ReturnType<type
 }
 
 /** Test hook. */
-export function resetMomo() { token = null; simulated.clear(); }
+export function resetMomo() { token = null; simulated.clear(); callbackRefused = false; }

@@ -139,3 +139,19 @@ Without SMTP the emails are skipped and logged. Telegram notices still go out.
 npx prisma migrate deploy   # adds BillingPayment, CreditLedger, AppSetting, NotificationLog
 sudo systemctl restart nexus
 ```
+
+## Troubleshooting: request-to-pay returns 400 with an empty body
+
+MTN answers a bare `400 Bad Request` with no body. That gives no reason, so the app avoids the known causes on its own:
+
+- **Payer message and payee note:** these are sent as plain ASCII: letters, digits, spaces and `. , -`. Characters such as `·`, `:` or accents were refused.
+- **Callback URL:** the `X-Callback-Url` header is only accepted for the callback host registered with the API user (`providerCallbackHost`). If MTN refuses a request that carries it, the app retries once without it and skips it for later payments, until the next restart. The callback is only a hint: payment status is always confirmed by asking MTN, and pending payments are checked every 30 s.
+- **Sandbox numbers:** in the sandbox, use MTN's test numbers (for example `46733123456`). They are sent exactly as typed.
+
+To see which part MTN refuses, run this on the server in the app directory:
+
+```bash
+cd /opt/nexus && sudo -u nexus npm run --silent momo:diagnose            # add a number to test it too: -- 0788123456
+```
+
+Each line is one request-to-pay with its HTTP status (`202 OK` = accepted). Nothing is charged in the sandbox, and no keys or tokens are printed.
