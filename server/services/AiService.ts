@@ -134,8 +134,9 @@ const reliability = {
 };
 const httpTimeouts = {
   connectTimeoutMs: envMs('AI_CONNECT_TIMEOUT_MS', 15_000),
-  idleTimeoutMs: envMs('AI_IDLE_TIMEOUT_MS', 30_000),
-  requestTimeoutMs: envMs('AI_REQUEST_TIMEOUT_MS', 60_000),
+  // No overall cap on a streaming answer beyond 15 min; a stream that goes silent for 2 min is treated as dead.
+  idleTimeoutMs: envMs('AI_IDLE_TIMEOUT_MS', 120_000),
+  requestTimeoutMs: envMs('AI_REQUEST_TIMEOUT_MS', 900_000),
 };
 
 // One reliability policy for every provider call: transient-only retries before first output,
@@ -157,7 +158,7 @@ const complexProvider = loadComplexProvider();
 logger.info('[AI routing] big-task provider', { provider: complexProvider.config?.name ?? 'gonka', model: complexProvider.config?.model, reason: complexProvider.reason });
 export const complexAdapter = complexProvider.config
   ? new ReliableProviderAdapter({
-    primary: new OpenAICompatibleAdapter({ name: complexProvider.config.name, baseUrl: complexProvider.config.baseUrl, apiKey: complexProvider.config.apiKey, ...httpTimeouts, requestTimeoutMs: envMs('AI_COMPLEX_REQUEST_TIMEOUT_MS', 90_000) }),
+    primary: new OpenAICompatibleAdapter({ name: complexProvider.config.name, baseUrl: complexProvider.config.baseUrl, apiKey: complexProvider.config.apiKey, ...httpTimeouts, requestTimeoutMs: envMs('AI_COMPLEX_REQUEST_TIMEOUT_MS', 900_000) }),
     ...reliability,
     fallbackAdapter: complexProvider.config.fallbackToGonka ? gonkaAdapter : undefined,
     fallbackModel: complexProvider.config.fallbackToGonka ? loadModelPolicies(process.env, GONKA_MODELS.DEFAULT).COMPLEX.model : undefined,
@@ -180,7 +181,7 @@ logger.info('[AI routing] agent provider', { provider: claudeAgent.config ? 'ant
 const gonkaStandardModel = loadModelPolicies(process.env, GONKA_MODELS.DEFAULT).STANDARD.model;
 export const claudeAdapter = claudeAgent.config
   ? new ReliableProviderAdapter({
-    primary: new AnthropicAdapter({ apiKey: claudeAgent.config.apiKey, name: 'Claude', effort: claudeAgent.config.effort, requestTimeoutMs: envMs('CLAUDE_REQUEST_TIMEOUT_MS', 120_000) }),
+    primary: new AnthropicAdapter({ apiKey: claudeAgent.config.apiKey, name: 'Claude', effort: claudeAgent.config.effort, requestTimeoutMs: envMs('CLAUDE_REQUEST_TIMEOUT_MS', 900_000) }),
     ...reliability,
     fallbackAdapter: claudeAgent.config.fallbackToGonka ? gonkaAdapter : undefined,
     fallbackModel: claudeAgent.config.fallbackToGonka ? gonkaStandardModel : undefined,

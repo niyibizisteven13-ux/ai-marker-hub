@@ -54,7 +54,7 @@ import TermsPage from './pages/TermsPage';
 import PrivacyPage from './pages/PrivacyPage';
 import { authService } from './auth/authService';
 import { submitResponseFeedback } from './api/feedback';
-import { applyToolEvent } from './utils/toolSteps';
+import { applyStatusEvent, applyToolEvent } from './utils/toolSteps';
 import type { Step } from './components/ActivityLine';
 
 const AI_SCAN_ENABLED = import.meta.env.VITE_ENABLE_AI_SCAN !== 'false';
@@ -72,7 +72,8 @@ const DocumentScanner = (props: React.ComponentProps<typeof DocumentScannerLazy>
 
 const CHAT_HISTORY_KEY = 'bwenge_chat_history';
 const CHAT_SESSIONS_KEY = 'bwenge_saved_sessions';
-const CHAT_TOKEN_TIMEOUT_MS = 60_000;
+// The server streams a heartbeat every 15 s, so this only fires when the connection itself is gone.
+const CHAT_TOKEN_TIMEOUT_MS = 120_000;
 
 const normalizeLoadedMessages = (loadedMessages: Message[]): Message[] => {
   if (!Array.isArray(loadedMessages)) return [];
@@ -1025,6 +1026,9 @@ export default function App() {
           } else if (event.type === 'reset') {
             assistantText = '';
             updateAssistant(assistantText, true);
+          } else if (event.type === 'status') {
+            toolSteps = applyStatusEvent(toolSteps, event);
+            updateAssistant(assistantText, true);
           } else if (event.type === 'tool_call' || event.type === 'tool_result') {
             toolSteps = applyToolEvent(toolSteps, event);
             resetIdleTimeout();
@@ -1047,6 +1051,7 @@ export default function App() {
         while (true) {
           const { value, done } = await reader.read();
           if (done) break;
+          resetIdleTimeout(); // any bytes, including heartbeats, mean the server is still working
           streamBuffer += decoder.decode(value, { stream: true });
           const lines = streamBuffer.split('\n');
           streamBuffer = lines.pop() || '';
@@ -1098,7 +1103,7 @@ export default function App() {
     } catch (error: any) {
       const stopped = controller.signal.aborted && !timedOut;
       const errorText = timedOut
-        ? 'Bwenge did not respond for 60 seconds. Please try again.'
+        ? 'The connection to Bwenge was lost. Please try again.'
         : stopped
           ? 'Generation was stopped.'
           : error?.message || 'Bwenge could not complete your request. Please try again.';

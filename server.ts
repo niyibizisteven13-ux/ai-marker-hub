@@ -44,6 +44,7 @@ import { planOutput } from './server/services/outputs/planner.js';
 import { asksAboutDatasets } from './server/services/knowledge/published.js';
 import { checkUsage, recordUsage } from './server/services/billing/usage.js';
 import { rememberBlocked, takeResumable } from './server/services/billing/pendingRequest.js';
+import { makeEmitter } from './server/utils/sseEmitter.js';
 import { useToolAgent } from './server/services/outputs/chatTurn.js';
 import { emptyModelOutputError, nonEmptyModelText } from './server/services/ai/modelOutput.js';
 import { validateScanGradeOutput } from './server/services/ai/scanOutput.js';
@@ -571,31 +572,6 @@ function safeEvaluate(expression: string): number {
 // matter which upstream model actually answered. `type` used to be implicit
 // or missing for some providers (Gemini/Ollama/OpenRouter just sent bare
 // {text, provider}); now every event explicitly declares its type.
-function makeEmitter(res: express.Response) {
-  let closed = false;
-  res.on('close', () => {
-    closed = true;
-  });
-
-  const send = (type: string, data: Record<string, any> = {}) => {
-    if (closed) return;
-    try {
-      res.write(`data: ${JSON.stringify({ type, ...data })}\n\n`);
-    } catch (err) {
-      logger.warn('SSE write failed (client likely disconnected)', err);
-    }
-  };
-
-  const done = () => {
-    if (closed) return;
-    res.write('data: [DONE]\n\n');
-    res.end();
-  };
-
-  const isClosed = () => closed;
-
-  return { send, done, isClosed };
-}
 
 /**
  * Backend Autonomous Execution Engine:
@@ -1166,19 +1142,43 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
     }
   }
 
+  let announceFiles: (em: ReturnType<typeof makeEmitter>) => void = () => undefined;
   // ── Examination marking through the chat ────────────────────────────────
   // Claims only messages that start a marking request or refer to the user's active examination;
   // everything else continues to the normal chat below. Replies reuse the text and attachment events.
   {
+    // Live step for the files read before the answer starts ("Read 3 files: a.pdf, b.jpg …").
+    const fileNames = [
+      ...attachments.map((a: any) => String(a?.name ?? '')),
+      ...(req.file ? [req.file.originalname] : []),
+      ...(attachmentBase64 && !attachments.length && attachmentName ? [String(attachmentName)] : []),
+    ].filter(Boolean);
+    const idCount = Array.isArray(finalAttachmentIds) ? finalAttachmentIds.length : 0;
+    const fileCount = Math.max(fileNames.length, idCount);
+    announceFiles = (em) => {
+      if (!fileCount) return;
+      const names = fileNames.slice(0, 3).join(', ') + (fileNames.length > 3 ? ` +${fileNames.length - 3} more` : '');
+      em.status('files', `Read ${fileCount} file${fileCount > 1 ? 's' : ''}`, 'done', names || undefined);
+    };
     let examEmitter: ReturnType<typeof makeEmitter> | null = null;
     const openExamStream = () => {
       if (!examEmitter) {
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
-        examEmitter = makeEmitter(res);
+        examEmitter = makeEmitter(res, { progress: true });
       }
       return examEmitter;
+    };
+    // Marking stages become live steps; "marked 3 of 20 scripts" updates one step in place.
+    let examStep: { id: string; label: string } | null = null;
+    const examStatus = (t: string) => {
+      const em = openExamStream();
+      const label = t.replace(/…$/, '');
+      const id = /^marked \d+ of \d+/i.test(label) ? 'exam-marking' : `exam-${label.toLowerCase().replace(/[^a-z]+/g, '-').slice(0, 40)}`;
+      if (examStep && examStep.id !== id) em.status(examStep.id, examStep.label, 'done');
+      examStep = { id, label };
+      em.status(id, label);
     };
     try {
       const examFiles: Array<{ name: string; buffer: Buffer; mime?: string }> = [];
@@ -1188,9 +1188,10 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
         const recs = await prisma.fileRecord.findMany({ where: { id: { in: finalAttachmentIds }, userId }, select: { name: true, path: true, mimeType: true } });
         for (const r of recs) if (r.path) { try { examFiles.push({ name: r.name, buffer: await fs.readFile(r.path), mime: r.mimeType }); } catch { /* file gone */ } }
       }
-      const examReply = await examChat.handle(userId, query || '', examFiles, { onStatus: (t) => openExamStream().send('text', { text: `${t}\n\n` }) });
+      const examReply = await examChat.handle(userId, query || '', examFiles, { onStatus: examStatus });
       if (examReply) {
         const em = openExamStream();
+        if (examStep) em.status(examStep.id, examStep.label, 'done');
         em.send('text', { text: examReply.text });
         for (const a of examReply.attachments) em.send('attachment', { ...a });
         em.done();
@@ -1220,16 +1221,10 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
-    const emitter = makeEmitter(res);
-
-    // SSE keep-alive: without this, a long tool call (e.g. delegate_task's
-    // nested sub-agent turn) can go long enough with zero bytes written
-    // that a reverse proxy (including Render's) times out the connection
-    // as idle.
-    const keepAlive = setInterval(() => {
-      if (!emitter.isClosed()) res.write(':\n\n');
-    }, 15000);
-    req.on('close', () => clearInterval(keepAlive));
+    // The emitter sends a heartbeat every 15 s, so long tool calls are never cut by a proxy as idle.
+    const emitter = makeEmitter(res, { progress: true });
+    const keepAlive: ReturnType<typeof setInterval> | undefined = undefined;
+    announceFiles(emitter);
 
     try {
       let files: { type: 'image' | 'document'; base64: string; mediaType: string; name?: string }[] = [...serverVisualFiles];
@@ -1526,12 +1521,9 @@ ${augmentedQuery}`;
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
-  const emitter = makeEmitter(res);
-
-  const keepAlive = setInterval(() => {
-    if (!emitter.isClosed()) res.write(':\n\n');
-  }, 15000);
-  req.on('close', () => clearInterval(keepAlive));
+  const emitter = makeEmitter(res, { progress: true });
+  const keepAlive: ReturnType<typeof setInterval> | undefined = undefined;
+  announceFiles(emitter);
 
   try {
     const requestStartedAt = Date.now();
