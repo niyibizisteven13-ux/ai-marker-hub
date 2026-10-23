@@ -61,6 +61,10 @@ type Question = {
   rows: string[];
   columns: string[];
   allowOther?: boolean;
+  /** Kept as-is from the saved form: branching rule, data-dictionary settings and unit (set by Bwenge AI or the chat). */
+  showIf?: { fieldId: string; equals?: unknown; notEquals?: unknown; includes?: string; notEmpty?: boolean };
+  analytics?: { variableName?: string; measurementLevel?: string; unit?: string };
+  unit?: string;
   shuffleOptions?: boolean;
   minLength?: number;
   maxLength?: number;
@@ -208,6 +212,7 @@ export function fromSchema(input: any): BuilderState {
       scaleMinLabel: f.scaleMinLabel || '', scaleMaxLabel: f.scaleMaxLabel || '',
       maxRating: f.maxRating || 5, accept: f.accept || '', maxSizeMB: f.maxSizeMB ?? 5,
       imageUrl: f.imageUrl, videoUrl: f.videoUrl, videoDataUrl: f.videoDataUrl,
+      ...(f.showIf ? { showIf: f.showIf } : {}), ...(f.analytics ? { analytics: f.analytics } : {}), ...(f.unit ? { unit: f.unit } : {}),
     });
   });
   return {
@@ -268,6 +273,9 @@ export function buildSchema(s: BuilderState): any {
       if (Array.isArray(a) ? a.length : a) f.correctAnswer = a;
     }
     if (it.imageUrl) f.imageUrl = it.imageUrl;
+    if (it.showIf && s.items.some((x) => x.kind === 'question' && x.id === it.showIf!.fieldId)) f.showIf = it.showIf;
+    if (it.analytics) f.analytics = it.analytics;
+    if (it.unit) f.unit = it.unit;
     if (it.videoUrl) f.videoUrl = it.videoUrl;
     if (it.videoDataUrl) f.videoDataUrl = it.videoDataUrl;
     fields.push(f);
@@ -718,6 +726,9 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, onUpda
   onChangeRef.current = onChange;
   useEffect(() => { onChangeRef.current?.(schema); }, [schema]);
   useEffect(() => { if (shareUrl) setPublishedUrl(shareUrl); }, [shareUrl]);
+  // A form that is already live opens as "Published", not "Draft".
+  const primedStatus = useRef(false);
+  useEffect(() => { if (!primedStatus.current) { primedStatus.current = true; if (shareUrl && initialSchema?.acceptingResponses !== false) setPublishedJson(schemaJson); } }, [schemaJson]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const status = publishedJson === null ? 'Draft' : publishedJson === schemaJson ? 'Published' : 'Unpublished changes';
 

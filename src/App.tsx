@@ -47,6 +47,7 @@ import { useVisualViewportHeight } from './hooks/useVisualViewportHeight';
 import { Menu, X, Plus, Sparkles } from 'lucide-react';
 import UpgradePage from './pages/UpgradePage';
 import ExamReviewPage from './pages/ExamReviewPage';
+import FormStudioPage from './pages/FormStudioPage';
 import ModelPage from './pages/ModelPage';
 import LearnPage from './pages/LearnPage';
 import LandingPage from './pages/LandingPage';
@@ -339,7 +340,7 @@ export default function App() {
     };
 
     const params = new URLSearchParams(window.location.search);
-    const pathMatch = window.location.pathname.match(/^\/(?:forms|apply)\/([^/?#]+)/);
+    const pathMatch = window.location.pathname.match(/^\/(?:forms|apply)\/([^/?#]+)\/?$/);
     const formId = pathMatch?.[1] || params.get('form');
     if (formId) {
       loadPublicFormById(formId);
@@ -1450,6 +1451,11 @@ export default function App() {
 
   if (authenticatedUser && window.location.pathname === '/learn') {
     return <LearnPage onBack={() => { window.history.pushState({}, '', '/'); window.location.reload(); }} />;
+  }
+
+  const studioMatch = window.location.pathname.match(/^\/forms\/([^/?#]+)\/edit\/?$/);
+  if (authenticatedUser && studioMatch) {
+    return <FormStudioPage formId={decodeURIComponent(studioMatch[1])} onBack={() => { window.history.pushState({}, '', '/'); window.location.reload(); }} />;
   }
 
   if (authenticatedUser && /^\/exams(\/|$)/.test(window.location.pathname)) {

@@ -33,6 +33,14 @@ export function describeToolCall(name: string, input: any): string {
     case 'fetch_url': return 'Reading a web page';
     case 'read_attachment': return 'Reading your file';
     case 'run_python': return 'Running Python';
+    case 'create_form': return 'Designing the form';
+    case 'edit_form': return 'Updating the form';
+    case 'review_form': return 'Reviewing the form';
+    case 'publish_form': return input?.open === false ? 'Closing the form' : 'Publishing the form';
+    case 'list_forms': return 'Looking up your forms';
+    case 'analyze_form': return 'Analysing the responses';
+    case 'form_report': return input?.format === 'xlsx' ? 'Building the Excel file' : input?.format === 'html' ? 'Building the report' : 'Building the report and Excel file';
+    case 'create_3d_model': return `Building the 3D model${typeof input?.scene?.title === 'string' ? `: ${clip(input.scene.title)}` : ''}`;
     default: return name.replace(/_/g, ' ');
   }
 }

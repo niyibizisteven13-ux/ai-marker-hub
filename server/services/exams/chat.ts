@@ -590,7 +590,13 @@ export function createExamChat(deps: ExamChatDeps) {
     }
   }
 
-  return { handle, parseCommand, statusText };
+  /** Makes an examination the active one for this teacher (the review page they are looking at). */
+  async function focus(userId: string, examId: string) {
+    await s.load(userId, examId);
+    await saveCtx(userId, { examId, pending: null });
+  }
+
+  return { handle, parseCommand, statusText, focus };
 }
 
 export type ExamChat = ReturnType<typeof createExamChat>;

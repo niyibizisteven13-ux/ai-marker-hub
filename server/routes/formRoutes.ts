@@ -5,6 +5,11 @@ import { GradingService } from '../services/GradingService.js';
 import { requireAuth } from '../../production/auth.js';
 import logger from '../utils/logger.js';
 import { prisma } from '../db.js';
+import { FormError, formDataset, formLinks, ownForm, saveForm, setOpen } from '../services/forms/service.js';
+import { reviewForm } from '../services/forms/review.js';
+import { codebook } from '../services/forms/model.js';
+import { summarize } from '../services/forms/analysis.js';
+import { listVersions } from '../services/forms/versions.js';
 
 const router = Router();
 const formOrchestrator = FormOrchestrator.getInstance();
@@ -171,6 +176,41 @@ router.delete('/:id', requireAuth, async (req, res) => {
     logger.error('Failed to delete form', error);
     res.status(500).json({ error: 'Failed to delete form.' });
   }
+});
+
+// ── Form studio (owner): everything the form page shows, saving the builder's schema, opening and closing ──
+const studioFail = (res: any, e: any) => res.status(e instanceof FormError ? (e.code === 'NOT_FOUND' ? 404 : 400) : 500).json({ error: e instanceof FormError ? e.message : 'The form could not be loaded.' });
+router.get('/:id/studio', requireAuth, async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId;
+    const { row, schema } = await ownForm(userId, req.params.id);
+    const { ds } = await formDataset(userId, req.params.id);
+    res.json({
+      success: true,
+      form: { id: row.id, title: row.title, schema, open: schema.acceptingResponses !== false, updatedAt: row.updatedAt },
+      links: formLinks(row.id), responses: ds.rows.length, review: reviewForm(schema), versions: await listVersions(row.id),
+      codebook: codebook(ds.fields), summaries: ds.fields.filter((f) => f.kind !== 'file').map((f) => summarize(ds, f, { examples: 3 })),
+    });
+  } catch (e) { studioFail(res, e); }
+});
+router.put('/:id/schema', requireAuth, async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId;
+    const schema = req.body?.schema;
+    if (!schema || typeof schema !== 'object' || !Array.isArray(schema.fields ?? schema.questions)) return res.status(400).json({ error: 'A form schema with questions is required.' });
+    if (Buffer.byteLength(JSON.stringify(schema)) > 2_000_000) return res.status(413).json({ error: 'The form is too large.' });
+    const { schema: prev } = await ownForm(userId, req.params.id);
+    // Saving from the editor never silently opens or closes the form, and keeps scoring settings.
+    await saveForm(userId, req.params.id, { ...prev, ...schema, acceptingResponses: prev.acceptingResponses ?? false });
+    res.json({ success: true, review: reviewForm({ ...prev, ...schema }) });
+  } catch (e) { studioFail(res, e); }
+});
+router.post('/:id/open', requireAuth, async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId;
+    const version = await setOpen(userId, req.params.id, !!req.body?.open);
+    res.json({ success: true, open: !!req.body?.open, version, links: formLinks(req.params.id) });
+  } catch (e) { studioFail(res, e); }
 });
 
 router.get('/', requireAuth, async (req, res) => {

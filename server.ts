@@ -45,6 +45,9 @@ import { asksAboutDatasets } from './server/services/knowledge/published.js';
 import { checkUsage, recordUsage } from './server/services/billing/usage.js';
 import { rememberBlocked, takeResumable } from './server/services/billing/pendingRequest.js';
 import { makeEmitter } from './server/utils/sseEmitter.js';
+import { validateSubmission } from './server/services/forms/validation.js';
+import { ensureVersion } from './server/services/forms/versions.js';
+import { ownForm } from './server/services/forms/service.js';
 import { useToolAgent } from './server/services/outputs/chatTurn.js';
 import { emptyModelOutputError, nonEmptyModelText } from './server/services/ai/modelOutput.js';
 import { validateScanGradeOutput } from './server/services/ai/scanOutput.js';
@@ -1144,6 +1147,19 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
   }
 
   let announceFiles: (em: ReturnType<typeof makeEmitter>) => void = () => undefined;
+  // ── Page context: a message sent from the form editor or the marked-exam review page ────
+  const surface = (req.body?.surface as string | undefined) ?? 'chat';
+  const surfaceId = typeof req.body?.surfaceId === 'string' ? req.body.surfaceId : '';
+  let surfaceNote = '';
+  if (surface === 'form' && surfaceId) {
+    try {
+      const { row } = await ownForm(userId, surfaceId);
+      surfaceNote = `[Context: the user is in the form editor with the form "${String(row.title).slice(0, 120)}" (formId ${surfaceId}) open. "This form" means formId ${surfaceId}: use the form tools (edit_form, review_form, publish_form, analyze_form, form_report) with it. After a change, say briefly what changed; the editor reloads by itself.]`;
+    } catch { /* not their form: answer as a normal chat */ }
+  }
+  if (surface === 'exam' && surfaceId) await examChat.focus(userId, surfaceId).catch(() => undefined);
+  /** What the output planner reads: on the form editor every request is form work. */
+  const planQuery = surfaceNote ? `edit my form: ${query || ''}` : query || '';
   // ── Examination marking through the chat ────────────────────────────────
   // Claims only messages that start a marking request or refer to the user's active examination;
   // everything else continues to the normal chat below. Replies reuse the text and attachment events.
@@ -1189,7 +1205,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
         const recs = await prisma.fileRecord.findMany({ where: { id: { in: finalAttachmentIds }, userId }, select: { name: true, path: true, mimeType: true } });
         for (const r of recs) if (r.path) { try { examFiles.push({ name: r.name, buffer: await fs.readFile(r.path), mime: r.mimeType }); } catch { /* file gone */ } }
       }
-      const examReply = await examChat.handle(userId, query || '', examFiles, { onStatus: examStatus });
+      const examReply = surface === 'form' ? null : await examChat.handle(userId, query || '', examFiles, { onStatus: examStatus });
       if (examReply) {
         const em = openExamStream();
         if (examStep) em.status(examStep.id, examStep.label, 'done');
@@ -1211,7 +1227,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
   const hasClaude = await aiService.providerAvailable('anthropic');
   // Requests for files, charts or computed numbers need the tool-enabled agent; the legacy stream below has
   // no tools and could only describe a file instead of creating one.
-  const turnPlan = planOutput({ message: query || '', attachments: attachments.map((a: any) => ({ name: String(a?.name ?? ''), mime: a?.mimeType })), hasDataset: attachments.some((a: any) => /\.(csv|tsv|xlsx|xls|json)$/i.test(String(a?.name ?? ''))) });
+  const turnPlan = planOutput({ message: planQuery, attachments: attachments.map((a: any) => ({ name: String(a?.name ?? ''), mime: a?.mimeType })), hasDataset: attachments.some((a: any) => /\.(csv|tsv|xlsx|xls|json)$/i.test(String(a?.name ?? ''))) });
 
   if (useToolAgent({
     intent, service, isSmallTalk, requestedProvider: cleanProvider, hasClaudeKey: hasClaude, aiProvider: process.env.AI_PROVIDER,
@@ -1229,7 +1245,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
 
     try {
       let files: { type: 'image' | 'document'; base64: string; mediaType: string; name?: string }[] = [...serverVisualFiles];
-      let augmentedQuery = query || '';
+      let augmentedQuery = surfaceNote ? `${surfaceNote}\n\n${query || ''}` : query || '';
 
       if (req.file) {
         const ingested = await ingestDocument(req.file.buffer, req.file.mimetype, req.file.originalname);
@@ -1286,7 +1302,7 @@ ${augmentedQuery}`;
         files: finalFiles,
         pinnedSyllabus,
         extractSchema,
-        planText: query || '',
+        planText: planQuery,
         tools: generalTools,
         onEvent: (event) => {
           if (emitter.isClosed()) return; // client disconnected — stop pushing bytes down a dead socket
@@ -1861,13 +1877,11 @@ app.post('/api/forms/:id/submit', publicFormSubmitLimiter, async (req, res) => {
     if (schema.acceptingResponses === false) {
       return res.status(403).json({ error: 'This form is no longer accepting responses.' });
     }
-    const definitions = [...(Array.isArray(schema.questions) ? schema.questions : []), ...(Array.isArray(schema.fields) ? schema.fields : [])];
     const answers = req.body?.answers && typeof req.body.answers === 'object' ? req.body.answers : req.body;
     if (Buffer.byteLength(JSON.stringify(answers ?? {}), 'utf8') > 200_000) {
       return res.status(413).json({ error: 'This response is too large. Please shorten the answers and try again.' });
     }
-    const count = answers && typeof answers === 'object' && !Array.isArray(answers) ? Object.keys(answers).length : 0;
-    if (!count || count > Math.max(definitions.length + 2, 2) || count > 200) return res.status(400).json({ error: 'Invalid submission payload.' });
+    if (!answers || typeof answers !== 'object' || Array.isArray(answers) || Object.keys(answers).length > 400) return res.status(400).json({ error: 'Invalid submission payload.' });
     const normalized: Record<string, unknown> = {};
     if (schema.collectEmail) {
       const respondentEmail = (answers as any)._respondentEmail;
@@ -1876,34 +1890,13 @@ app.post('/api/forms/:id/submit', publicFormSubmitLimiter, async (req, res) => {
       }
       normalized._respondentEmail = respondentEmail.trim().toLowerCase();
     }
-    for (const [index, definition] of definitions.entries()) {
-      const key = String(definition.id ?? definition.number ?? index + 1);
-      const value = (answers as any)[key];
-      const empty = value === undefined || value === null || (typeof value === 'string' && !value.trim()) || (Array.isArray(value) && !value.length);
-      if (definition.required && empty) return res.status(400).json({ error: `Please answer: ${definition.title || definition.label || `Question ${index + 1}`}` });
-      if (empty) continue;
-      const type = String(definition.type || '').toUpperCase();
-      const options = (definition.options || []).map((option: any) => String(typeof option === 'string' ? option : option.label));
-      if (['MULTIPLE_CHOICE', 'DROPDOWN'].includes(type) && options.length && !options.includes(String(value))) return res.status(400).json({ error: `Invalid choice for question ${index + 1}.` });
-      if (type === 'CHECKBOX' && (!Array.isArray(value) || (options.length && value.some((option: unknown) => !options.includes(String(option)))))) return res.status(400).json({ error: `Invalid choice for question ${index + 1}.` });
-      if (type === 'MULTIPLE_CHOICE_GRID' || type === 'CHECKBOX_GRID') {
-        if (!value || typeof value !== 'object' || Array.isArray(value)) return res.status(400).json({ error: `Invalid grid response for question ${index + 1}.` });
-        const validRows = Array.isArray(definition.rows) ? definition.rows.map(String) : [];
-        for (const [row, answer] of Object.entries(value as Record<string, unknown>)) {
-          if (!validRows.includes(row)) return res.status(400).json({ error: `Invalid grid row for question ${index + 1}.` });
-          if (type === 'MULTIPLE_CHOICE_GRID' && (typeof answer !== 'string' || !options.includes(answer))) return res.status(400).json({ error: `Invalid grid choice for question ${index + 1}.` });
-          if (type === 'CHECKBOX_GRID' && (!Array.isArray(answer) || answer.some((option: unknown) => !options.includes(String(option))))) return res.status(400).json({ error: `Invalid grid choice for question ${index + 1}.` });
-        }
-        if (definition.required && validRows.some((row: string) => !(row in (value as Record<string, unknown>)))) return res.status(400).json({ error: `Please answer every row for question ${index + 1}.` });
-      }
-      if (type === 'LINEAR_SCALE' && (!Number.isInteger(Number(value)) || Number(value) < Number(definition.scaleMin ?? 1) || Number(value) > Number(definition.scaleMax ?? 5))) return res.status(400).json({ error: `Choose a valid scale value for question ${index + 1}.` });
-      if (type === 'RATING' && (!Number.isInteger(Number(value)) || Number(value) < 1 || Number(value) > Number(definition.maxRating ?? 5))) return res.status(400).json({ error: `Choose a valid rating for question ${index + 1}.` });
-      if (type === 'EMAIL' && (typeof value !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value))) return res.status(400).json({ error: `Enter a valid email for question ${index + 1}.` });
-      if (type === 'NUMBER' && !Number.isFinite(Number(value))) return res.status(400).json({ error: `Enter a valid number for question ${index + 1}.` });
-      if (typeof value === 'string' && value.length > 50000) return res.status(400).json({ error: `Answer for question ${index + 1} is too long.` });
-      normalized[key] = value;
-    }
-    const submission = await prisma.formSubmission.create({ data: { formId: form.id, data: JSON.stringify(normalized) } });
+    // Checked again on the server against the form's own definition, including which questions branching showed.
+    const checked = validateSubmission(schema, answers as Record<string, unknown>);
+    if ('error' in checked) return res.status(400).json({ error: checked.error, fieldId: checked.fieldId });
+    Object.assign(normalized, checked.values);
+    if (!Object.keys(checked.values).length) return res.status(400).json({ error: 'Answer at least one question before submitting.' });
+    const formVersion = await ensureVersion(form.id, schema).catch(() => null);
+    const submission = await prisma.formSubmission.create({ data: { formId: form.id, data: JSON.stringify(normalized), formVersion } as any });
     await analyticsWorker.extractInsights(submission.id).catch((error) => logger.error('Submission analysis failed:', error));
     const insight = await prisma.extractedInsight.findUnique({ where: { submissionId: submission.id } });
     res.status(201).json({
