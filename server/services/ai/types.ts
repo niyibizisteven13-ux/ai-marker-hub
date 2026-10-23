@@ -183,6 +183,8 @@ export type AgentEvent =
   | { type: 'sources'; data: { passages: KnowledgePassage[] } }
   | { type: 'usage'; data: { input_tokens: number; output_tokens: number; model?: string } }
   | { type: 'turn_reset'; data: { reason: string } }
+  /** Uploads stored for this turn, so later turns can name them (read_attachment). */
+  | { type: 'files_stored'; data: { files: Array<{ fileId: string; name: string }> } }
   | { type: 'done'; data: { hitMaxTurns?: boolean } };
 
 export interface AgentResult {

@@ -28,6 +28,7 @@ import { SafetyService } from './server/services/SafetyService.js';
 import { SentimentService } from './server/services/SentimentService.js';
 import { ConfidenceService } from './server/services/ConfidenceService.js';
 import { upload, batchUpload, chatFileUpload, CHAT_MAX_FILE_BYTES } from './server/middleware/upload.js';
+import { isBase64 } from './server/utils/base64.js';
 import { ingestDocument } from './server/services/DocumentIngestionService.js';
 import { classifyIntent, isSmallTalkMessage } from './server/services/intentRouter.js';
 import { generalTools } from './server/services/generalTools.js';
@@ -457,6 +458,11 @@ const MIME_BY_EXTENSION: Record<string, string> = {
 };
 
 const MAX_STORED_UPLOAD_TEXT = 2_000_000;
+/** Text of one attached file placed in the prompt; a whole book would not fit in one request. */
+const MAX_FILE_TEXT_CHARS = 120_000;
+const capFileText = (text: string, name: string) => text.length > MAX_FILE_TEXT_CHARS
+  ? `${text.slice(0, MAX_FILE_TEXT_CHARS)}\n[${name}: only the first ${MAX_FILE_TEXT_CHARS.toLocaleString('en')} of ${text.length.toLocaleString('en')} characters are included here.]`
+  : text;
 
 /** Text extraction still running for an uploaded file, so the chat can wait for it instead of reading nothing. */
 const pendingUploadText = new Map<string, Promise<string | null>>();
@@ -937,6 +943,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
     provider: requestedProvider,
     answerLanguage,
     attachmentIds,
+    contextFiles: rawContextFiles,
     learning: rawLearning,
   } = req.body;
   const learning = parseLearning(rawLearning);
@@ -1039,13 +1046,18 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
 
   let serverAttachmentText = '';
   let serverVisualFiles: { type: 'image' | 'document'; base64: string; mediaType: string; name?: string }[] = [];
+  // Earlier files are only names and ids here: read_attachment checks they belong to this user.
+  const contextFiles: Array<{ fileId: string; name: string }> = Array.isArray(rawContextFiles)
+    ? rawContextFiles.slice(-5).map((f: any) => ({ fileId: String(f.fileId).slice(0, 100), name: String(f.name || 'file').slice(0, 255) }))
+    : [];
+  const agentReadsFiles = agentTarget().provider === 'anthropic' || Boolean(process.env.GONKA_API_KEY);
   let attachmentBytes = 0;
   for (const attachment of attachments) {
     const extension = path.extname(attachment.name).toLowerCase();
     if (!CHAT_ATTACHMENT_EXTENSIONS.has(extension)) {
       return res.status(400).json({ error: `Unsupported attachment type: ${extension || 'unknown'}` });
     }
-    if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(attachment.base64)) {
+    if (!isBase64(attachment.base64)) {
       return res.status(400).json({ error: `${attachment.name} could not be decoded. Please attach it again.` });
     }
     const buffer = Buffer.from(attachment.base64, 'base64');
@@ -1075,6 +1087,9 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
         name: attachment.name, // the model and its tools see "Mugenzi.pdf", not "upload-1.pdf"
       });
     }
+    // PDFs and images go to the tool agent as files (text layer, page images, read_attachment for the rest),
+    // so their text is not also pasted here: a whole book would not fit in one request.
+    if (visualExtension && agentReadsFiles) continue;
     try {
       let extractedText = '';
       if (visualExtension) {
@@ -1092,7 +1107,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
         extractedText = ingested.text || '';
       }
       if (extractedText) {
-        serverAttachmentText = [serverAttachmentText, `[Attached document: ${attachment.name}]\n${extractedText}`].filter(Boolean).join('\n\n');
+        serverAttachmentText = [serverAttachmentText, `[Attached document: ${attachment.name}]\n${capFileText(extractedText, attachment.name)}`].filter(Boolean).join('\n\n');
       }
     } catch (err) {
       logger.warn('Failed to process an attached file.', { errorType: err instanceof Error ? err.name : 'Error' });
@@ -1117,15 +1132,11 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
 
     // PDFs and images go to the model below (text layer, page images); other files as their extracted text,
     // waiting for an extraction still running and capped so a 100 MB file cannot fill the model's context.
-    const MAX_FILE_TEXT_CHARS = 120_000;
     const texts = await Promise.all(files
       .filter((f) => !f.mimeType.startsWith('image/') && f.mimeType !== 'application/pdf')
       .map(async (f) => {
         const text = await uploadedFileText(f);
-        if (!text) return '';
-        return text.length > MAX_FILE_TEXT_CHARS
-          ? `${text.slice(0, MAX_FILE_TEXT_CHARS)}\n[${f.name}: only the first ${MAX_FILE_TEXT_CHARS.toLocaleString('en')} of ${text.length.toLocaleString('en')} characters are included.]`
-          : text;
+        return text ? capFileText(text, f.name) : '';
       }));
     serverAttachmentText = texts.filter(Boolean).join('\n\n');
 
@@ -1308,7 +1319,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
   if (useToolAgent({
     intent, service, isSmallTalk, requestedProvider: cleanProvider, hasClaudeKey: hasClaude, aiProvider: process.env.AI_PROVIDER,
     agentAvailable: agentTarget().provider === 'anthropic' || Boolean(process.env.GONKA_API_KEY), plan: turnPlan,
-    hasVisualFiles: serverVisualFiles.length > 0 || Boolean(req.file && /^image\/|application\/pdf/.test(req.file.mimetype)),
+    hasVisualFiles: serverVisualFiles.length > 0 || contextFiles.length > 0 || Boolean(req.file && /^image\/|application\/pdf/.test(req.file.mimetype)),
     asksAboutDatasets: intent === 'general_assist' && !isSmallTalk && await asksAboutDatasets(query || '').catch(() => false),
   })) {
     res.setHeader('Content-Type', 'text/event-stream');
@@ -1376,6 +1387,7 @@ ${augmentedQuery}`;
         learning,
         messages: [...parsedHistory, { role: 'user', content: augmentedQuery }],
         files: finalFiles,
+        contextFiles,
         pinnedSyllabus,
         extractSchema,
         planText: planQuery,
@@ -1413,6 +1425,9 @@ ${augmentedQuery}`;
             emitter.send('usage', { ...baseData, usage: event.data });
           } else if (event.type === 'attachment') {
             emitter.send('attachment', { ...baseData, ...event.data });
+          } else if (event.type === 'files_stored') {
+            // The browser keeps these ids on the message, so later questions can refer back to the files.
+            emitter.send('files_stored', { files: event.data.files });
           } else if (event.type === 'turn_reset') {
             // Discarded attempt (provider retry or delivery check): the client clears the streamed text.
             emitter.send('reset', { ...baseData });
@@ -2800,6 +2815,10 @@ async function startServer() {
 
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
+  // A failed promise in one request handler must not take every other user's request down with it.
+  process.on('unhandledRejection', (reason) => {
+    logger.error('Unhandled promise rejection', { errorType: reason instanceof Error ? reason.name : typeof reason, message: reason instanceof Error ? reason.message.slice(0, 300) : undefined, stack: reason instanceof Error ? reason.stack?.split('\n').slice(0, 4).join(' | ') : undefined });
+  });
 }
 
 startServer();

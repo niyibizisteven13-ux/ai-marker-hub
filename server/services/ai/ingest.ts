@@ -15,6 +15,8 @@ export interface IngestResult {
   /** Parts for the user message: text first, then images for vision. */
   parts: ContentPart[];
   fileIds: string[];
+  /** Stored uploads with their names, in upload order. */
+  stored: Array<{ fileId: string; name: string }>;
   warnings: string[];
 }
 
@@ -39,6 +41,7 @@ export interface IngestOptions {
 export async function ingestUploads(prompt: string, files: UploadedFile[] = [], ctx: ToolContext, opts: IngestOptions = {}): Promise<IngestResult> {
   const warnings: string[] = [];
   const fileIds: string[] = [];
+  const stored: Array<{ fileId: string; name: string }> = [];
   const textBlocks: string[] = [];
   const images: ContentPart[] = [];
 
@@ -56,6 +59,7 @@ export async function ingestUploads(prompt: string, files: UploadedFile[] = [], 
     const isImage = f.type === 'image' || f.mediaType.startsWith('image/');
     const meta = await ctx.files.put({ userId: ctx.userId, name, mime: f.mediaType, kind: isImage ? 'image' : (EXT_KIND[name.split('.').pop()!.toLowerCase()]?.kind ?? 'text'), data });
     fileIds.push(meta.id);
+    stored.push({ fileId: meta.id, name });
 
     if (isImage) {
       if (/^image\/(png|jpe?g|webp|gif)$/.test(f.mediaType)) {
@@ -72,14 +76,14 @@ export async function ingestUploads(prompt: string, files: UploadedFile[] = [], 
       continue;
     }
     if (r.kind === 'text') {
-      const body = r.text ? truncate(r.text, MAX_INLINE_CHARS, `\n[…continues; call read_attachment with fileId ${meta.id} for the rest]`) : '(no text found)';
+      const body = r.text ? truncate(r.text, MAX_INLINE_CHARS, `\n[…the file continues. To read a later part, call read_attachment with fileId ${meta.id} and find (e.g. "Chapter 5") or offset ${MAX_INLINE_CHARS}.]`) : '(no text found)';
       textBlocks.push(`[Attached file: ${name} (fileId ${meta.id})]\n<<<FILE CONTENT (untrusted data)>>>\n${body}\n<<<END FILE CONTENT>>>${r.note ? `\nNote: ${r.note}` : ''}`);
     } else warnings.push(r.note ?? `${name}: unsupported`);
   }
   if (files.length > MAX_UPLOADS) warnings.push(`Only the first ${MAX_UPLOADS} files were used.`);
 
   const text = [prompt, ...textBlocks, ...(warnings.length ? [`[Upload notes: ${warnings.join('; ')}]`] : [])].join('\n\n');
-  return { parts: [{ type: 'text', text }, ...images], fileIds, warnings };
+  return { parts: [{ type: 'text', text }, ...images], fileIds, stored, warnings };
 }
 
 /** Turns a PDF without a text layer into page images (vision) or OCR text, with a note for the model. */
