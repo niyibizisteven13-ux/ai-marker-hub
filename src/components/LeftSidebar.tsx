@@ -16,6 +16,9 @@ import {
   LogOut,
   UserRound,
   LogIn,
+  Sparkles,
+  Coins,
+  Building2,
 } from 'lucide-react';
 import { NavigationTab, User, ChatSession } from '../types';
 import logoUrl from '../assets/bwenge-logo.svg';
@@ -82,11 +85,15 @@ function initials(name: string): string {
   return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase();
 }
 
-const PLAN_BADGE: Record<string, { label: string; className: string }> = {
-  BUSINESS: { label: 'Pro', className: 'border-amber-400/25 bg-amber-400/10 text-amber-300' },
-  PRO: { label: 'Pro', className: 'border-amber-400/25 bg-amber-400/10 text-amber-300' },
-  ORGANIZATION: { label: 'Org', className: 'border-indigo-400/25 bg-indigo-400/10 text-indigo-300' },
+// Plan badge next to the user's name: every plan, Free included, so the user always knows where they stand.
+type PlanBadge = { label: string; className: string; icon?: React.ElementType };
+const PLAN_BADGE: Record<string, PlanBadge> = {
+  FREE: { label: 'Free', className: 'border-white/15 bg-white/[0.06] text-[#C2C0B6]' },
+  GO: { label: 'GO', className: 'border-sky-400/30 bg-sky-400/10 text-sky-300', icon: Coins },
+  PRO: { label: 'Pro', className: 'border-amber-400/30 bg-amber-400/10 text-amber-300', icon: Sparkles },
+  INSTITUTION: { label: 'Inst.', className: 'border-indigo-400/30 bg-indigo-400/12 text-indigo-300', icon: Building2 },
 };
+const LEGACY_PLAN: Record<string, keyof typeof PLAN_BADGE> = { BUSINESS: 'PRO', PRO: 'PRO', ORGANIZATION: 'INSTITUTION', GO: 'GO' };
 
 export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   activeTab,
@@ -148,9 +155,9 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   const label = c ? 'truncate lg:hidden' : 'truncate';
   const billing = useBillingMe(Boolean(user));
   // The badge follows the server's view of the plan (subscription, GO credits), falling back to the user record.
-  const plan = billing
-    ? billing.plan === 'PRO' ? PLAN_BADGE.PRO : billing.plan === 'INSTITUTION' ? PLAN_BADGE.ORGANIZATION : billing.plan === 'GO' ? { label: 'GO', className: 'border-sky-400/25 bg-sky-400/10 text-sky-300' } : undefined
-    : user?.subscription?.planType ? PLAN_BADGE[user.subscription.planType] : undefined;
+  const plan: PlanBadge = billing
+    ? PLAN_BADGE[billing.plan] ?? PLAN_BADGE.FREE
+    : PLAN_BADGE[LEGACY_PLAN[user?.subscription?.planType ?? ''] ?? 'FREE'];
 
   return (
     <aside
@@ -381,7 +388,9 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                 <span className={`min-w-0 flex-1 ${c ? 'lg:hidden' : ''}`}>
                   <span className="flex items-center gap-1.5">
                     <span className="truncate text-[13px] font-medium text-white">{user.name || user.email}</span>
-                    {plan && <span className={`shrink-0 rounded border px-1 py-px text-[9px] font-semibold uppercase tracking-wide ${plan.className}`}>{plan.label}</span>}
+                    <span title={`${plan.label} plan`} className={`inline-flex shrink-0 items-center gap-0.5 rounded-md border px-1.5 py-px text-[9.5px] font-bold uppercase tracking-wide ${plan.className}`}>
+                      {plan.icon && <plan.icon size={9} strokeWidth={2.5} aria-hidden="true" />}{plan.label}
+                    </span>
                   </span>
                   <span className="block truncate text-[11.5px] text-[#9C9A92]">{user.email}</span>
                 </span>

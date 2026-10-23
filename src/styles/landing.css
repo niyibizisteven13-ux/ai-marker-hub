@@ -83,11 +83,22 @@ button,input{font-family:inherit}
 .draw{stroke-dasharray:1;stroke-dashoffset:1;animation:draw 2.4s cubic-bezier(.2,.7,.2,1) .15s forwards}
 @keyframes draw{to{stroke-dashoffset:0}}
 @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-.chip{position:absolute;display:flex;align-items:center;gap:9px;padding:9px 15px;border:1px solid var(--border);border-radius:999px;background:var(--chip-bg);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);font-size:13px;font-weight:500;animation:rise .9s ease both}
-.chip i{width:7px;height:7px;border-radius:50%;background:var(--teal);flex:none}
-.c1{top:18%;left:6%;animation-delay:1.1s}
-.c2{top:42%;right:7%;animation-delay:1.4s}
-.c3{top:62%;left:10%;animation-delay:1.7s}
+/* Scan → mark → export banner */
+.smb{border:1px solid var(--border);border-radius:20px;background:var(--chip-bg);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);padding:clamp(10px,1.6vh,16px) clamp(12px,1.4vw,18px) clamp(10px,1.4vh,14px);box-shadow:0 18px 50px -24px rgba(0,0,0,.45)}
+.smb svg{display:block;width:100%;height:auto;overflow:visible}
+.smb text{font-family:inherit}
+.smb-steps{list-style:none;margin:clamp(6px,1vh,10px) 0 0;padding:0;display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.smb-steps li{display:flex;flex-direction:column;gap:7px;min-width:0}
+.smb-steps span{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:var(--muted);transition:color .3s ease;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.smb-steps em{flex:none;display:inline-grid;place-items:center;width:19px;height:19px;border-radius:50%;border:1px solid var(--border);font-style:normal;font-size:10.5px;font-weight:700;transition:all .3s ease}
+.smb-steps i{display:block;height:3px;border-radius:3px;background:var(--outline-soft);overflow:hidden}
+.smb-steps b{display:block;height:100%;width:0;border-radius:3px;background:linear-gradient(90deg,var(--teal),var(--accent))}
+.smb-steps li[data-state=on] span{color:var(--text)}
+.smb-steps li[data-state=on] em{background:var(--accent);border-color:var(--accent);color:var(--on-accent);transform:scale(1.08)}
+.smb-steps li[data-state=done] em{background:var(--teal);border-color:var(--teal);color:var(--on-accent)}
+.smb-steps li[data-state=done] span{color:var(--text)}
+.smb-hero{position:absolute;left:clamp(20px,4vw,64px);right:clamp(20px,4vw,64px);margin-inline:auto;max-width:720px;bottom:calc(clamp(16px,3vh,28px) + clamp(150px,24vh,216px) + clamp(56px,8vh,76px));animation:rise .9s ease 1.1s both}
+@media (max-height:760px){.smb-hero{bottom:clamp(16px,3vh,28px);right:calc(clamp(16px,2vw,28px) + clamp(150px,24vh,216px) + 20px);margin-inline:0}.smb-steps span{font-size:11.5px}}
 .qr{position:absolute;right:clamp(16px,2vw,28px);bottom:clamp(16px,3vh,28px);width:clamp(150px,24vh,216px);padding:clamp(10px,1.6vh,16px);border:1px solid var(--border);border-radius:16px;background:var(--surface);text-align:center;animation:rise .9s ease 1.9s both}
 .qr p{margin:0 0 clamp(6px,1.2vh,12px);font-size:13px;font-weight:500;color:var(--muted)}
 .qr svg{display:block;width:100%;height:auto;color:var(--text)}
@@ -112,7 +123,7 @@ button,input{font-family:inherit}
 }
 @media (prefers-reduced-motion:reduce){
   .draw{animation:none;stroke-dashoffset:0}
-  .chip,.qr{animation:none}
+  .smb-hero,.qr{animation:none}
 }
 
 .qr .qr-box{position:relative;overflow:hidden;border-radius:12px;background:#fff;aspect-ratio:1/1;line-height:0;animation:qrglow 3.2s ease-in-out infinite}

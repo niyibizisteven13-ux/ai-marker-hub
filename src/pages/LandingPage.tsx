@@ -8,12 +8,14 @@ import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { AuthFlow } from '../components/AuthFlow';
 import { NewAccountBlock } from '../components/NewAccountBlock';
-import { FeatureChips } from '../components/FeatureChips';
+import { ScanMarkBanner } from '../components/ScanMarkBanner';
 import { QrCard } from '../components/QrCard';
 
 export default function LandingPage({ onLoginSuccess }: { onLoginSuccess: (user?: any) => void }) {
   const { lang, setLang, t } = useLang();
   const { theme, toggleTheme } = useTheme();
+
+  const bannerLabels = { s1: t('s1'), s2: t('s2'), s3: t('s3'), mark: t('bMark'), marking: t('bMarking'), done: t('bDone') };
 
   useEffect(() => {
     document.title = 'Bwenge — Sign in';
@@ -101,7 +103,7 @@ export default function LandingPage({ onLoginSuccess }: { onLoginSuccess: (user?
 
         <aside className="hero" aria-hidden="true">
           <LogoHeroOutline />
-          <FeatureChips c1={t('c1')} c2={t('c2')} c3={t('c3')} />
+          <ScanMarkBanner className="smb-hero" labels={bannerLabels} />
           <QrCard qrTitle={t('qr')} />
         </aside>
       </div>
