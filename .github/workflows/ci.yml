@@ -53,7 +53,7 @@ jobs:
         run: npm audit --omit=dev --audit-level=high
 
       - name: Tests
-        run: node --test --import tsx tests/*.test.ts
+        run: node --test --test-reporter=spec --import tsx tests/*.test.ts
 
       - name: Database schema from an empty PostgreSQL
         env:
