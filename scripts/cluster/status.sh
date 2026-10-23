@@ -16,8 +16,10 @@ echo "node:           $(node -v)"
 echo "errors (24 h):  $(journalctl -u "$SERVICE" --since '24 hours ago' -p err --no-pager -q 2>/dev/null | wc -l) error lines"
 
 echo "== Public site"
-H=$(curl -sS -m 10 -D - -o /dev/null https://www.bwenge.space/ 2>&1)
-echo "https status:   $(head -1 <<<"$H" | tr -d '\r')"
+# Follow redirects (www → apex or the reverse) and read the headers of the page actually served.
+FINAL=$(curl -sSL -m 10 -o /dev/null -w '%{url_effective}' https://www.bwenge.space/ 2>/dev/null)
+H=$(curl -sS -m 10 -D - -o /dev/null "${FINAL:-https://www.bwenge.space/}" 2>&1)
+echo "https status:   $(head -1 <<<"$H" | tr -d '\r') at ${FINAL:-?}"
 echo "security policy:$(grep -i '^content-security-policy' <<<"$H" >/dev/null && echo ' enforced' || echo ' MISSING')"
 echo "HSTS:          $(grep -i '^strict-transport-security' <<<"$H" >/dev/null && echo ' yes' || echo ' no')"
 echo "TLS expires:    $(echo | openssl s_client -servername www.bwenge.space -connect www.bwenge.space:443 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)"
@@ -33,6 +35,7 @@ echo "data size:      $(du -sh "$APP_DIR/data" 2>/dev/null | cut -f1)"
 echo "database size:  $(sudo -u postgres psql -tAc "select pg_size_pretty(sum(pg_database_size(datname))) from pg_database" 2>/dev/null)"
 echo "python libs:    $(python3 -c 'import numpy, pandas; print("numpy+pandas ok")' 2>/dev/null || echo 'missing (built-in analysis engine used)')"
 echo "firewall:       $(ufw status 2>/dev/null | head -1)"
+echo "open ports:     $(ss -tlnH 2>/dev/null | awk '{print $4}' | grep -vE '^(127\.|\[::1\]|::1)' | sed -E 's/.*:([0-9]+)$/\1/' | sort -un | tr '\n' ' ')(listening on public addresses)"
 echo "auto updates:   $(dpkg -l unattended-upgrades 2>/dev/null | grep -q '^ii' && echo installed || echo 'not installed')"
 
 echo "== Backups"
