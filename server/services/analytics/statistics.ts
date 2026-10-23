@@ -371,7 +371,7 @@ export function linearRegression(y: Array<number | null>, xs: Record<string, Arr
   const sst = ys.reduce((a, v) => a + (v - my) ** 2, 0);
   const sigma2 = sse / df;
   const tcrit = tQuantile(0.975, df);
-  const terms = ['(Intercept)', ...names];
+  const terms = ['(intercept)', ...names]; // same name as the Python engine
   const coefficients = beta.map((b, i) => {
     const se = Math.sqrt(sigma2 * inv[i][i]);
     const t = b / se;
