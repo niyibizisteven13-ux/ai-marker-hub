@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { lazy, Suspense, useState } from 'react';
+import { validateScene } from '../lib/scene/spec';
 import ReactMarkdown from 'react-markdown';
 import { isInlineCode } from '../utils/markdownCode';
 import remarkGfm from 'remark-gfm';
@@ -49,6 +50,8 @@ SyntaxHighlighter.registerLanguage('bash', bash);
 SyntaxHighlighter.registerLanguage('css', css);
 SyntaxHighlighter.registerLanguage('markup', markup);
 SyntaxHighlighter.registerLanguage('sql', sql);
+
+const SceneViewer = lazy(() => import('./scene3d/SceneViewer'));
 
 const MOCK_ARTIFACTS_ENABLED = import.meta.env.VITE_ENABLE_MOCK_ARTIFACTS === 'true';
 
@@ -601,6 +604,11 @@ function renderArtifactJson(source: string): React.ReactNode | null {
   try {
     const artifact = JSON.parse(source);
     if (!artifact || typeof artifact !== 'object') return null;
+    // A 3D model written inline (when the turn had no tools): validated, then shown in the interactive viewer.
+    if (artifact.type === 'model3d' || artifact.type === 'scene3d') {
+      const scene = validateScene(artifact.scene ?? artifact);
+      return <Suspense fallback={<div className="my-3 flex h-64 items-center justify-center rounded-xl border border-white/10 text-sm text-neutral-400">Loading 3D model…</div>}><div className="my-3"><SceneViewer scene={scene} fileName={`${scene.title}.scene.json`} /></div></Suspense>;
+    }
     if (MOCK_ARTIFACTS_ENABLED && artifact.type === 'image') return <ImageGraphicArtifact artifact={artifact} />;
     if (MOCK_ARTIFACTS_ENABLED && artifact.type === 'video') return <VideoAnimationArtifact artifact={artifact} />;
     if (MOCK_ARTIFACTS_ENABLED && artifact.type === 'audio') return <AudioSpeechArtifact artifact={artifact} />;
@@ -688,7 +696,7 @@ export default function MarkdownRenderer({ content, className = '' }: MarkdownRe
             const codeContent = String(children).replace(/\n$/, '');
 
             if (!inline && language === 'mermaid') return <MermaidDiagram source={codeContent} />;
-            if (!inline && (language === 'artifact-json' || language === 'json')) {
+            if (!inline && (language === 'artifact-json' || language === 'artifact' || language === 'json')) {
               const renderedArtifact = renderArtifactJson(codeContent);
               if (renderedArtifact) return renderedArtifact;
             }

@@ -21,9 +21,9 @@ export interface PlanInput {
 }
 
 export interface OutputPlan {
-  intent: 'question' | 'analysis' | 'visualisation' | 'document' | 'report' | 'diagram' | 'map' | 'image' | 'table';
-  output: OutputKind;
-  format: 'prose' | 'table' | 'svg' | 'html' | 'xlsx' | 'pdf' | 'docx' | 'pptx' | 'json' | 'png';
+  intent: 'question' | 'analysis' | 'visualisation' | 'document' | 'report' | 'diagram' | 'map' | 'image' | 'table' | 'model3d';
+  output: OutputKind | 'model3d';
+  format: 'prose' | 'table' | 'svg' | 'html' | 'xlsx' | 'pdf' | 'docx' | 'pptx' | 'json' | 'png' | 'scene';
   needsComputation: boolean;
   needsRetrieval: boolean;
   tools: string[];
@@ -32,7 +32,7 @@ export interface OutputPlan {
   authorizedSources: Array<{ type: string; id: string }>;
   rejectedSources: Array<{ type: string; id: string; reason: string }>;
   /** Every deliverable the user explicitly asked for in this message (e.g. a chart AND an Excel file). */
-  deliverables: Array<{ output: OutputKind; format: OutputPlan['format'] }>;
+  deliverables: Array<{ output: OutputKind | 'model3d'; format: OutputPlan['format'] }>;
   reasons: string[];
 }
 
@@ -45,6 +45,8 @@ const R = {
   docx: /\b(word|docx|editable (?:report|document))\b/i,
   pptx: /\b(powerpoint|pptx|slides?|slide deck|deck|presentation)\b/i,
   dashboard: /\bdashboard\b/i,
+  /** Something to look at from every side: a 3D model the student can rotate (anatomy, molecules, machines, buildings). */
+  model3d: /(?:\b3[- ]?d\b|\b(?:3|three)[- ]?dimen\w*|\brotatable\b|\b(?:can|could|to) (?:rotate|spin) (?:it|them|the model)\b|\bball[- ]and[- ]stick\b|\bin vr\b|\bvirtual reality\b)/i,
   /** A shareable HTML page that demonstrates or explains something (data story, showcase, interactive page). */
   html: /\b(html|web ?page|demonstrat\w*|demo|showcase|data story|infographic|interactive (?:page|report|story))\b/i,
   report: /\b(report|write[- ]?up|brief(?:ing)?)\b/i,
@@ -107,7 +109,13 @@ export function planOutput(input: PlanInput, authorize: (s: { type: string; id: 
       return plan({ intent: 'document', output: template ? 'template' : 'document', format: fmt, tools: ['create_output'], artifact: true, template });
     }
   }
-  // 2. Dashboards, HTML pages that demonstrate something, and interactive reports: only when exploring helps.
+  // 2. A 3D model the student can rotate: rendered by the interactive viewer, never drawn as a flat image.
+  if (has(R.model3d, m) && (has(R.create, m) || /\b(show|see|view|explore|model|structure)\b/i.test(m))) {
+    reasons.push('A 3D structure was requested: an interactive model the student can rotate, take apart and cut open.');
+    const p = plan({ intent: 'model3d', output: 'model3d', format: 'scene', tools: ['create_3d_model'], artifact: true });
+    return { ...p, deliverables: [{ output: 'model3d', format: 'scene' }] };
+  }
+  // 3. Dashboards, HTML pages that demonstrate something, and interactive reports: only when exploring helps.
   if (has(R.dashboard, m) || has(R.html, m) || (has(R.interactive, m) && (has(R.report, m) || hasData))) {
     reasons.push(has(R.dashboard, m) ? 'A dashboard was requested: a persistent, shareable HTML report.'
       : has(R.html, m) ? 'An HTML page that demonstrates the topic was requested: a themed report with KPIs, charts, tables and explanation.'
@@ -156,6 +164,7 @@ export function planHint(p: OutputPlan): string {
   const what = p.artifact
     ? list.length > 1
       ? `The user asked for ${list.length} deliverables: ${list.join(' and ')}. Create each one with a tool call; do not skip any.`
+      : p.output === 'model3d' ? 'Call create_3d_model to build an interactive 3D model (named parts with realistic proportions and colours, a short description each, guided views). Never draw it as an SVG or describe JSON in the reply.'
       : `Produce one ${p.output}${p.template ? ` (${p.template} template)` : ''} in ${p.format.toUpperCase()} format with a tool call.`
     : `Answer in ${p.format === 'table' ? 'prose with a compact table' : 'plain prose'}; do not create a file.`;
   return `[Output plan for this turn: ${what}${p.needsComputation ? ' Compute every number with analyze_data; never estimate numbers.' : ''}${p.needsRetrieval ? ' Retrieve and cite sources with search_knowledge.' : ''} Reasons: ${p.reasons.join(' ')}]`;
