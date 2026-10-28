@@ -2,6 +2,7 @@ import React from 'react';
 import { ArrowLeft, Camera } from 'lucide-react';
 
 interface MobileSheetProps {
+  hideHeader?: boolean;
   title: string;
   onBack: () => void;
   onScan?: () => void;
@@ -10,6 +11,7 @@ interface MobileSheetProps {
 
 export const MobileSheet: React.FC<MobileSheetProps> = ({
   title,
+  hideHeader = false,
   onBack,
   onScan,
   children,
@@ -17,7 +19,7 @@ export const MobileSheet: React.FC<MobileSheetProps> = ({
   return (
     <div className="absolute inset-0 z-30 flex flex-col bg-[#262624] text-[#FAF9F5] animate-in slide-in-from-right duration-200 motion-reduce:animate-none">
       {/* Header */}
-      <header className="flex h-[calc(56px+env(safe-area-inset-top,0px))] shrink-0 items-center justify-between border-b border-white/[0.06] bg-[#212121]/95 px-3 pt-[env(safe-area-inset-top,0px)] backdrop-blur-md">
+      {!hideHeader && <header className="flex h-[calc(56px+env(safe-area-inset-top,0px))] shrink-0 items-center justify-between border-b border-white/[0.06] bg-[#212121]/95 px-3 pt-[env(safe-area-inset-top,0px)] backdrop-blur-md">
         <button
           type="button"
           onClick={onBack}
@@ -45,10 +47,10 @@ export const MobileSheet: React.FC<MobileSheetProps> = ({
             <div className="w-11" />
           )}
         </div>
-      </header>
+      </header>}
 
       {/* Body */}
-      <div className="flex-1 min-h-0 overflow-y-auto pb-[env(safe-area-inset-bottom,0px)]">
+      <div className="flex-1 min-h-0 overflow-hidden pb-[env(safe-area-inset-bottom,0px)]">
         {children}
       </div>
     </div>

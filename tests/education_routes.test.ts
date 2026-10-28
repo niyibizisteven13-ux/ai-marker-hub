@@ -1,3 +1,4 @@
+import sharp from 'sharp';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -251,4 +252,31 @@ test('exam live stream is owner-scoped and replays saved state without AI calls'
   assert.match(chunk, /Saved live paper/);
   assert.match(chunk, /"candidates":\[\]/);
   controller.abort(); await reader.cancel().catch(() => undefined);
+});
+
+
+test('scanner limits are shared and stopping another teacher examination is rejected', async () => {
+  const limits = await (await fetch(`${base}/api/exams/limits`, as('limits-owner'))).json();
+  assert.equal(limits.maxCandidates, 30);
+  assert.equal(limits.maxPagesPerPaper, 20);
+  assert.ok(limits.maxUploadBytes >= limits.maxFileBytes);
+  const exam = await (await fetch(`${base}/api/exams`, json('limits-owner', { title: 'Limits test' }))).json();
+  assert.equal((await fetch(`${base}/api/exams/${exam.examId}/stop`, json('other-user', {}))).status, 404);
+  assert.equal((await fetch(`${base}/api/exams/${exam.examId}/stop`, json('limits-owner', {}))).status, 200);
+});
+
+
+test('phone previews and thumbnails are smaller while page access remains owner-only', async () => {
+  const created = await (await fetch(`${base}/api/exams`, json('preview-owner', { title: 'Responsive preview' }))).json();
+  const jpeg = await sharp({ create: { width: 1800, height: 2400, channels: 3, background: 'white' } }).jpeg().toBuffer();
+  const form = new FormData(); form.append('scripts', new Blob([jpeg], { type: 'image/jpeg' }), 'C001.jpg');
+  const uploaded = await (await fetch(`${base}/api/exams/${created.examId}/submissions`, as('preview-owner', { method: 'POST', body: form }))).json();
+  const url = `${base}/api/exams/${created.examId}/submissions/${uploaded.accepted[0].id}/pages/1`;
+  const phone = await fetch(`${url}?width=1000`, as('preview-owner'));
+  assert.equal(phone.status, 200);
+  assert.equal((await sharp(Buffer.from(await phone.arrayBuffer())).metadata()).width, 1000);
+  const thumb = await fetch(`${url}?thumbnail=1`, as('preview-owner'));
+  assert.equal((await sharp(Buffer.from(await thumb.arrayBuffer())).metadata()).width, 140);
+  assert.equal((await fetch(`${url}?width=3000`, as('preview-owner'))).status, 400);
+  assert.equal((await fetch(`${url}?width=1000`, as('another-user'))).status, 404);
 });

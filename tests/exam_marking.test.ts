@@ -16,7 +16,7 @@ import { createDocumentService, type DocumentRecord } from '../server/services/d
 import { loadPages } from '../server/services/documents/pages.js';
 import { changedQuestions, questionKey, validateScheme, type MarkingSchemeInput } from '../server/services/exams/scheme.js';
 import { matchAnswers, readLabel } from '../server/services/exams/matching.js';
-import { finalizeQuestion, markConfidence } from '../server/services/exams/marking.js';
+import { finalizeQuestion, markConfidence, markCandidate } from '../server/services/exams/marking.js';
 import { computeLayout, symbolsFor } from '../server/services/exams/layout.js';
 import { expandArchives, typedToPdf } from '../server/services/exams/inputs.js';
 import { PDFParse } from 'pdf-parse';
@@ -442,6 +442,69 @@ test('handwriting review provides owner-scoped source crops and invalidates a re
   assert.match(corrected.evidence.find(e => e.id === evidence.id)!.text, /teacher checked/);
   assert.ok(corrected.questions.find(q => q.questionId === 'Q1')!.openReviewFlags.some(f => f.code === 'transcription_affects_mark'));
   assert.equal(corrected.markedPdf?.stale, true);
+});
+
+test('visual marking receives original answer images alongside the transcription', async () => {
+  const scheme = validateScheme(SCHEME).scheme!;
+  const match = matchAnswers(docOf([[{ id: 'e1', text: '2. 3 x 5 = 15' }]]), [], scheme);
+  const jpeg = await sharp({ create: { width: 200, height: 100, channels: 3, background: 'white' } }).jpeg().toBuffer();
+  let sawImage = false;
+  const visual: ProviderAdapter = { name: 'visual-fixture', async *stream(req) { sawImage = !!imageOf(req); yield* adapter.stream(req); } };
+  const result = await markCandidate(visual, 'fake-model', { scheme, questionIds: ['Q2'], match, runId: 'visual', schemeVersion: 1,
+    imagesForQuestions: async ids => { assert.deepEqual(ids, ['Q2']); return [`data:image/jpeg;base64,${jpeg.toString('base64')}`]; } });
+  assert.ok(sawImage); assert.equal(result.marks.Q2.awardedMarks, 2);
+});
+
+test('stop retains validated partial marks and a new run can finish the paper', async () => {
+  const user = 'teacher-stop';
+  const exam = await exams.createExam(user, { title: 'Stop and retry' });
+  await exams.setSchemeJson(user, exam.id, SCHEME, { confirm: true });
+  const { accepted } = await exams.addSubmissions(user, exam.id, [{ name: 'C001.pdf', buffer: C001_PDF }]);
+  onMarkRequest = async ids => { if (ids.includes('Q2')) await exams.stopMarking(user, exam.id); };
+  try { await exams.startMarking(user, exam.id); await waitRun(user, exam.id); }
+  finally { onMarkRequest = undefined; }
+  await new Promise(resolve => setTimeout(resolve, 30));
+  const stopped = await exams.load(user, exam.id);
+  assert.equal(stopped.results[accepted[0].id].questions[0].ai?.awardedMarks, 3);
+  assert.equal(stopped.results[accepted[0].id].questions[1].ai, null);
+  assert.equal(stopped.submissions[0].state, 'failed');
+  await exams.startMarking(user, exam.id);
+  assert.equal(exams.summaries(await waitRun(user, exam.id)).list[0].total, 5);
+});
+
+test('selected workspace student and question govern contextual chat without affecting another student', async () => {
+  const user = 'teacher-focus';
+  const exam = await exams.createExam(user, { title: 'Focused paper' });
+  await exams.setSchemeJson(user, exam.id, SCHEME, { confirm: true });
+  const { accepted } = await exams.addSubmissions(user, exam.id, [{ name: 'C001.pdf', buffer: C001_PDF }, { name: 'C002.pdf', buffer: await scriptPdf('C002') }]);
+  await exams.startMarking(user, exam.id); await waitRun(user, exam.id);
+  const focusedChat = createExamChat({ service: exams, fileStore, queue, contexts: new OwnedRecordStore<ExamChatContext>(path.join(root, 'focused-ctx')), agent: () => target });
+  await focusedChat.focus(user, exam.id, accepted[1].id);
+  const response = await focusedChat.handle(user, 'Why did this answer lose marks?', [], { submissionId: accepted[1].id, questionId: 'Q1' });
+  assert.match(response!.text, /C002/);
+  assert.match(response!.text, /arithmetic|slip|lost|1\s*\/\s*3/i);
+  await assert.rejects(() => focusedChat.focus('another-user', exam.id, accepted[0].id), /not found/i);
+});
+
+test('marking allowance failures block provider work and oversized papers are rejected before registration', async () => {
+  const localQueue = new FileJobQueue({ storageDir: path.join(root, 'limited-jobs'), concurrency: 1 });
+  const limited = createExamService({ fileStore, queue: localQueue, store: new OwnedRecordStore<ExamRecord>(path.join(root, 'limited-exams')), documents, agent: () => target,
+    visionAvailable: () => true, maxBatchPages: 1, beforeAi: async () => { throw new Error('Marking allowance unavailable'); } });
+  try {
+    const exam = await limited.createExam('limited-owner', {});
+    await limited.setSchemeJson('limited-owner', exam.id, SCHEME, { confirm: true });
+    const original = await PDFDocument.load(C001_PDF);
+    const doubled = await PDFDocument.create();
+    for (const page of await doubled.copyPages(original, [0, 0])) doubled.addPage(page);
+    const rejected = await limited.addSubmissions('limited-owner', exam.id, [{ name: 'two-pages.pdf', buffer: Buffer.from(await doubled.save()) }]);
+    assert.equal(rejected.accepted.length, 0);
+    assert.equal(rejected.rejected[0].code, 'BATCH_PAGE_LIMIT');
+    await limited.addSubmissions('limited-owner', exam.id, [{ name: 'C001.pdf', buffer: C001_PDF }]);
+    const before = calls.marking.length;
+    await assert.rejects(() => limited.startMarking('limited-owner', exam.id), /allowance unavailable/);
+    assert.equal(calls.marking.length, before);
+    assert.equal((await limited.load('limited-owner', exam.id)).runs.length, 0);
+  } finally { await localQueue.stop(); }
 });
 
 test('end to end: batch marking, failures isolated, package contents match the persisted results', async () => {

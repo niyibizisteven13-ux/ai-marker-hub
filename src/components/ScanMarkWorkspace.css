@@ -1,0 +1,42 @@
+.scan-mark-workspace { position:relative; min-height:0!important; height:100%; overflow:hidden; isolation:isolate; }
+.scan-mark-workspace button,.scan-mark-workspace select,.scan-mark-workspace input[type=number] { min-height:44px; }
+.scan-mark-workspace button,.scan-mark-workspace a { touch-action:manipulation; }
+.scan-mark-workspace > header { flex-shrink:0; padding:8px 12px; }
+.scan-toolbar-actions { display:flex; gap:6px; overflow-x:auto; max-width:100%; align-items:center; }
+.scan-paper-content { position:relative; flex:1; min-height:0; min-width:0; overflow:hidden; }
+.scan-students { position:absolute; left:0; top:0; bottom:0; width:min(280px,85%); z-index:45; background:#fbf9f6; box-shadow:12px 0 28px #0002; }
+.scan-drawer-backdrop { position:absolute; inset:0; border:0; background:#0005; z-index:40; }
+.scan-paper-viewport { flex:1; min-height:0; min-width:0; overflow:auto; background:#efeeeb; padding:12px; touch-action:none; overscroll-behavior:contain; }
+.scan-paper-page { margin:0 auto; min-width:0; }
+.scan-chat-pane,.scan-results-pane { flex:1; min-height:0; min-width:0; overflow:auto; }
+.scan-chat-pane { background:#171717; color:#faf9f5; }
+.scan-review-sheet { position:absolute; z-index:50; left:0; right:0; bottom:0; max-height:72%; overflow-y:auto; background:#fbf9f6; border:1px solid #e8e4dc; border-radius:18px 18px 0 0; box-shadow:0 -10px 35px #0002; padding-bottom:env(safe-area-inset-bottom,0px); }
+.scan-review-sheet textarea,.scan-review-sheet input { font-size:16px; }
+.scan-review-sheet > header { position:sticky; top:0; z-index:2; display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:#fbf9f6; border-bottom:1px solid #e8e4dc; }
+.scan-mobile-nav { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); flex-shrink:0; border-top:1px solid #e8e4dc; background:#fbf9f6; padding-bottom:env(safe-area-inset-bottom,0px); }
+.scan-mobile-nav button { font-size:13px; font-weight:600; }
+.scan-mobile-nav button[aria-pressed=true] { color:#a44b32; background:#f7e8e0; }
+.scan-mark-workspace footer { flex-shrink:0; padding:6px 10px; }
+.scan-mark-workspace footer .scan-thumbnails { max-width:100%; }
+.scan-results-pane table { width:100%; border-collapse:collapse; font-size:13px; }
+.scan-results-pane th,.scan-results-pane td { text-align:left; padding:12px; border-bottom:1px solid #e8e4dc; }
+@media (min-width:1280px) {
+ .scan-students { position:static; box-shadow:none; width:192px; }
+ .scan-review-sheet { left:auto; top:0; width:min(400px,90%); max-height:100%; border-radius:12px 0 0 12px; }
+ .scan-students-toggle,.scan-drawer-backdrop { display:none; }
+ .scan-paper-viewport { padding:20px; }
+}
+@media (max-width:767px) {
+ .scan-mark-workspace > header { gap:6px; }
+ .scan-toolbar-actions { width:100%; padding-bottom:2px; }
+ .scan-mark-workspace h2 { font-size:13px; }
+ .scan-paper-controls { gap:4px; padding:4px 8px; }
+ .scan-paper-controls b { flex-basis:100%; }
+ .scan-mark-workspace .scan-thumbnail { height:52px; width:38px; }
+ .scan-mark-workspace footer button { padding:4px 8px; }
+}
+
+.scan-criteria-panel { max-height:38%; overflow:auto; flex-shrink:0; }
+.scan-export-links { max-height:96px; overflow:auto; flex-shrink:0; }
+.scan-results-pane td { overflow-wrap:anywhere; }
+.scan-mark-workspace > div[role=alert],.scan-mark-workspace > div[role=status] { max-height:90px; overflow:auto; flex-shrink:0; }

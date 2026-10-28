@@ -89,6 +89,8 @@ export const chatSchema = z.object({
   // The page the message was sent from (form editor, marked-exam review), with what is open there.
   surface: z.enum(['chat', 'form', 'exam']).optional(),
   surfaceId: z.string().max(100).optional(),
+  surfaceSubmissionId: z.string().uuid().optional(),
+  surfaceQuestionId: z.string().max(100).optional(),
 }).strict();
 
 export const validate = (schema: z.ZodType) => (req: Request, res: Response, next: NextFunction) => {
