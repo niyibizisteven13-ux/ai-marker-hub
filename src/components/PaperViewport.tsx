@@ -25,6 +25,6 @@ export default function PaperViewport({ zoom, onZoom, children }: { zoom: number
       else if (box.current) { box.current.scrollLeft -= e.clientX - previous.x; box.current.scrollTop -= e.clientY - previous.y; }
     }}
     onPointerUp={e => end(e.pointerId)} onPointerCancel={e => end(e.pointerId)} onLostPointerCapture={e => end(e.pointerId)}>
-    <div className="scan-paper-page" style={{ width: `${zoom}%`, maxWidth: zoom === 100 ? 1200 : undefined }}>{children}</div>
+    <div className="scan-paper-page" style={{ width: `${zoom}%`, maxWidth: zoom === 100 ? 960 : undefined }}>{children}</div>
   </div>;
 }

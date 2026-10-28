@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { registerScannedPapers } from '../services/scannedPapers';
-import { Camera, Download, Maximize2, ArrowLeft, Loader2 } from 'lucide-react';
+import { Camera, Download, Maximize2, ArrowLeft, Loader2, Search, FileText, MessageSquare, ListChecks, CheckCircle2, RefreshCw, ScanLine, SlidersHorizontal } from 'lucide-react';
 import { authFetch } from '../utils/authFetch';
 import { readServerEvents } from '../services/examEvents';
 import ScanPageThumbnail from './ScanPageThumbnail';
 import HandwritingReview, { type HandwritingEvidence } from './HandwritingReview';
-import { PageView, type Review } from '../pages/ExamReviewPage';
+import { PageView } from './MarkedPaperView';
+import type { Review } from '../pages/ExamReviewPage';
 import type { PageItem } from './DocumentScanner';
 import PaperViewport from './PaperViewport';
 import './ScanMarkWorkspace.css';
@@ -19,7 +20,7 @@ interface Row { submissionId: string; candidateId: string; candidateName: string
 async function request(path: string, init?: RequestInit) {
   const res = await authFetch(`/api/exams${path}`, init);
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'The request could not be completed.');
+  if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : data.error?.message || 'The request could not be completed.');
   return data;
 }
 const exportDownloads = (artifacts: any[]) => { const latest = artifacts.find(a => !a.stale && a.status === 'ready'); return latest ? [...(latest.classPdfUrl ? [{ name: 'All students — marked papers.pdf', url: latest.classPdfUrl }] : []), ...(latest.candidatePdfs || [])] : []; };
@@ -56,6 +57,21 @@ export default function ScanMarkWorkspace({ batch, onClose, onScan, onResults, o
   const [overrideQuestion, setOverrideQuestion] = useState('');
   const [overrideMarks, setOverrideMarks] = useState('');
   const [overrideReason, setOverrideReason] = useState('');
+  const [studentQuery, setStudentQuery] = useState('');
+  const [studentFilter, setStudentFilter] = useState('all');
+  const [editPlacement, setEditPlacement] = useState(false);
+  const [notice, setNotice] = useState('');
+  const actionLock = useRef(false);
+  useEffect(() => { const close = (event: KeyboardEvent) => { if (event.key === 'Escape') { setReviewOpen(false); setShowStudents(false); setEditPlacement(false); } }; window.addEventListener('keydown', close); return () => window.removeEventListener('keydown', close); }, []);
+  const selectStudent = (id: string) => {
+    setSelected(id); setPage(1); setReview(null); setSelectedItem(null); setShowStudents(false);
+    setReviewOpen(false); setOverrideQuestion(''); setOverrideReason(''); setEditPlacement(false); setError('');
+    setFollow(false); lastMarked.current = ''; setPane('paper');
+  };
+  useEffect(() => {
+    setOverrideQuestion(''); setOverrideReason('');
+  }, [selected, selectedItem]);
+  useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(''), 5000); return () => clearTimeout(timer); }, [notice]);
   useEffect(() => {
     if (examId) contextSink.current?.({ examId, submissionId: selected || undefined, questionId: selectedItem?.split(':')[0], page });
   }, [examId, selected, selectedItem, page]);
@@ -150,8 +166,11 @@ export default function ScanMarkWorkspace({ batch, onClose, onScan, onResults, o
   }, [examId, selected, schemeJob, exportJob, remarkJob, refresh, follow]);
 
   const action = async (label: string, fn: () => Promise<void>) => {
-    setError(''); setBusy(label);
-    try { await fn(); } catch (e: any) { setError(e.message); } finally { setBusy(''); setRefresh(n => n + 1); }
+    if (actionLock.current) return;
+    actionLock.current = true; setError(''); setNotice(''); setBusy(label);
+    try { await fn(); setNotice(label.startsWith('Saving') ? 'Changes saved.' : label.startsWith('Confirming') ? 'Paper approved. Preparing the reviewed PDF.' : 'Request accepted. Progress is saved automatically.'); }
+    catch (e: any) { setError(e.message || 'Something went wrong. Please retry.'); }
+    finally { actionLock.current = false; setBusy(''); setRefresh(n => n + 1); }
   };
   const rubric = (files?: FileList | null, questionPaper = false) => action('Reading marking criteria…', async () => {
     const form = new FormData();
@@ -172,17 +191,33 @@ export default function ScanMarkWorkspace({ batch, onClose, onScan, onResults, o
   const selectedRow = rows.find(r => r.submissionId === selected);
   const running = !!remarkJob || (!!snapshot?.progress?.run && !['completed', 'completed_with_warnings', 'failed'].includes(snapshot.progress.run.state)) || snapshot?.submissions.some(s => !['queued', 'completed', 'completed_with_warnings', 'failed'].includes(s.state));
   const markedQuestions = review?.questions.filter(q => q.awardedMarks !== null).length || 0;
-  const button = 'rounded-lg border border-[#E8E4DC] px-3 py-2 text-xs font-semibold disabled:opacity-40 hover:bg-black/5';
+  const filteredStudents = (snapshot?.submissions || []).filter(s => {
+    const row = rows.find(r => r.submissionId === s.id);
+    return `${s.candidateName || ''} ${s.candidateId}`.toLowerCase().includes(studentQuery.trim().toLowerCase()) &&
+      (studentFilter === 'all' || (studentFilter === 'review' && row?.complete && !row.released) || (studentFilter === 'approved' && row?.released) || (studentFilter === 'failed' && s.state === 'failed'));
+  });
+  const approvedCount = rows.filter(r => r.released).length;
+  const reviewCount = rows.filter(r => r.complete && !r.released).length;
+  const button = 'scan-button rounded-lg border px-3 py-2 text-xs font-semibold disabled:opacity-40';
+  const fullscreen = async () => {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else if (root.current?.requestFullscreen) await root.current.requestFullscreen();
+      else throw new Error('Your browser does not support fullscreen. Use the paper zoom control instead.');
+    } catch (e: any) { setError(e.message || 'Fullscreen is unavailable. Use the paper zoom control instead.'); }
+  };
 
   return <div ref={root} className="scan-mark-workspace flex h-full flex-col bg-[#FBF9F6] text-[#242422]">
-    <header className="flex flex-wrap items-center gap-2 border-b border-[#E8E4DC] px-4 py-3">
+    <header className="scan-studio-header flex flex-wrap items-center gap-2 border-b px-4 py-3">
       <button className={button} onClick={onClose} aria-label="Back to workspace"><ArrowLeft size={16} /></button>
       <button className={`${button} scan-students-toggle`} onClick={() => setShowStudents(v => !v)}>Students</button>
-      <div className="mr-auto"><h2 className="text-sm font-bold">Scanned assessment</h2><p className="text-xs text-neutral-500" role="status">{connection === 'live' ? '● Live — saved results' : connection === 'reconnecting' ? 'Reconnecting — your marks are saved' : connection === 'offline' ? 'Live updates unavailable' : 'Connecting to saved papers…'}</p></div>
+      <div className="scan-studio-title mr-auto"><span className="scan-eyebrow"><ScanLine size={13} /> Bwenge · Assessment studio</span><h2>{snapshot?.title || 'Scanned assessment'}</h2></div>
+      <span className={`scan-connection scan-connection-${connection}`} role="status"><span />{connection === 'live' ? 'Live · saved' : connection === 'reconnecting' ? 'Reconnecting' : connection === 'offline' ? 'Offline' : 'Connecting'}</span>
+      {(connection === 'offline' || connection === 'reconnecting') && <button className={button} aria-label="Reconnect live progress" onClick={() => setRefresh(n => n + 1)}><RefreshCw size={15} /></button>}
       <div className="scan-toolbar-actions">
-      <button className={button} onClick={onScan}><Camera size={15} className="inline mr-1" />New scan</button>
+      <button className={button} disabled={!onScan || !!busy} onClick={onScan}><Camera size={15} className="inline mr-1" />New scan</button>
       {examId && <a className={button} href={`/exams/${examId}/review`}>Review all</a>}
-      <button className={`${button} bg-[#D97757] text-white`} disabled={!rows.some(r => r.complete) || !!busy || !!exportJob || running} onClick={() => void exportPdf()}><Download size={14} className="inline mr-1" />Export PDFs</button>      {(running || schemeJob || exportJob) && <button className={button} disabled={!!busy} onClick={() => void action('Stopping marking…', async () => {
+      <button className={`${button} scan-button-primary`} disabled={!rows.some(r => r.complete) || !!busy || !!exportJob || running} onClick={() => void exportPdf()}><Download size={14} className="inline mr-1" />Export PDFs</button>      {(running || schemeJob || exportJob) && <button className={button} disabled={!!busy} onClick={() => void action('Stopping marking…', async () => {
         for (const id of [schemeJob, exportJob, remarkJob].filter(Boolean)) {
           const response = await authFetch(`/api/jobs/${id}`, { method: 'DELETE' });
           if (!response.ok) throw new Error('The task could not be stopped. Please retry.');
@@ -191,18 +226,20 @@ export default function ScanMarkWorkspace({ batch, onClose, onScan, onResults, o
       })}>Stop</button>}
       </div>
     </header>
+    <div className="scan-workflow" aria-label="Assessment workflow">{['Capture papers', 'Set criteria', 'AI marking', 'Teacher review'].map((step, index) => <span key={step} data-active={index === (!examId ? 0 : snapshot?.scheme?.status !== 'confirmed' ? 1 : running ? 2 : 3)}><i>{index + 1}</i>{step}</span>)}<small>Original scans preserved</small></div>
+    {notice && !error && !busy && <div className="scan-save-notice" role="status"><CheckCircle2 size={15} />{notice}</div>}
     {(error || busy || schemeJob || exportJob || remarkJob) && <div role={error ? 'alert' : 'status'} className={`px-4 py-2 text-sm ${error ? 'bg-rose-50 text-rose-700' : 'bg-orange-50 text-orange-900'}`}>{error || busy || taskProgress || (schemeJob ? 'Reading marking criteria…' : remarkJob ? 'Re-marking corrected handwriting…' : 'Preparing PDFs…')}</div>}
-    {snapshot?.progress?.work && <section className="border-b bg-white px-4 py-2 text-xs" aria-label="Saved marking progress">
+    {snapshot?.progress?.work && (running || snapshot.progress.work.finished < snapshot.progress.work.total) && <section className="scan-live-progress border-b bg-white px-4 py-2 text-xs" aria-label="Saved marking progress">
       <div className="flex flex-wrap justify-between gap-2"><span>{snapshot.progress.work.savedQuestions}/{snapshot.progress.work.totalQuestions} questions saved · {snapshot.progress.work.finished}/{snapshot.progress.work.total} papers finished{snapshot.progress.work.failed ? ` · ${snapshot.progress.work.failed} need retry` : ''}</span><b>{snapshot.progress.work.percent}%</b></div>
       <progress className="my-1 h-2 w-full accent-red-600" max={100} value={snapshot.progress.work.percent} aria-label="Questions saved" />
       <div role="status" aria-live="polite">{snapshot.progress.work.active.map(a => <p key={a.submissionId}>{a.name} — {a.stage.replaceAll('_', ' ')}{a.question ? ` · Question ${a.question}` : ''}</p>)}</div>
     </section>}
     {examId && !running && snapshot?.scheme?.status !== 'confirmed' && <section className="scan-criteria-panel border-b p-4 text-sm">
-      <p className="mb-2 font-semibold">Attach a marking scheme, or let AI draft one from the visible questions.</p>
+      <div className="scan-criteria-heading"><span className="scan-feature-icon"><ListChecks size={20} /></span><div><h3>Set your marking criteria</h3><p>Attach an official scheme for consistent grading, or review an AI draft before marking.</p></div></div>
       <div className="flex flex-wrap gap-2">
-        <label className={button}>Attach scheme<input aria-label="Attach marking scheme" type="file" accept=".pdf,.jpg,.jpeg,.png,.txt,.docx" className="hidden" disabled={!!busy || !!schemeJob} onChange={e => void rubric(e.target.files)} /></label>
-        <label className={button}>Attach question paper<input aria-label="Attach question paper" type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" disabled={!!busy || !!schemeJob} onChange={e => void rubric(e.target.files, true)} /></label>
-        <button className={button} disabled={!!busy || !!schemeJob} onClick={() => void rubric()}>Use AI draft</button>
+        <label className={button}>Attach scheme<input aria-label="Attach marking scheme" type="file" accept=".pdf,.jpg,.jpeg,.png,.txt,.docx" className="sr-only" disabled={!examId || !!busy || !!schemeJob} onChange={e => { if (e.target.files?.length) { void rubric(e.target.files); e.target.value = ''; } }} /></label>
+        <label className={button}>Attach question paper<input aria-label="Attach question paper" type="file" accept=".pdf,.jpg,.jpeg,.png" className="sr-only" disabled={!examId || !!busy || !!schemeJob} onChange={e => { if (e.target.files?.length) { void rubric(e.target.files, true); e.target.value = ''; } }} /></label>
+        <button className={button} disabled={!examId || !!busy || !!schemeJob} onClick={() => void rubric()}>Use AI draft</button>
       </div>
       {schemePreview && <div className="mt-3"><p className="text-xs text-amber-800">AI draft — check the questions and marks before starting.</p><div className="my-2 max-h-40 overflow-auto rounded border bg-white p-3 text-xs">{schemePreview.questions?.map((q: any) => <p key={q.id} className="mb-2"><b>Q{q.number} · {q.maxMarks} marks</b> {q.text} {q.criteria?.map((c: any) => c.description).join('; ')}</p>)}</div><button className={button} disabled={!!busy} onClick={() => void mark()}>Confirm criteria & start marking</button></div>}
       {snapshot?.scheme?.errors?.map(e => <p key={e} className="mt-2 text-rose-700">{e}</p>)}
@@ -211,17 +248,20 @@ export default function ScanMarkWorkspace({ batch, onClose, onScan, onResults, o
     {downloads.length > 0 && <div className="scan-export-links flex flex-wrap gap-3 border-b p-3 text-xs">{downloads.map((d: any) => <a key={d.url} className="underline text-[#A44B32]" href={d.url} download>{d.submissionId ? `${rows.find(r => r.submissionId === d.submissionId)?.candidateName || 'Student'} — marked.pdf` : d.name || 'Marked PDF'}</a>)}</div>}
     <div className="scan-paper-content flex" style={{ display: pane === 'paper' ? 'flex' : 'none' }}>
       {showStudents && <button className="scan-drawer-backdrop" aria-label="Close student list" onClick={() => setShowStudents(false)} />}
-      <aside className={`scan-students ${showStudents ? 'block' : 'hidden'} shrink-0 overflow-y-auto border-r border-[#E8E4DC] p-2 xl:block`}>
+      <aside aria-label="Student papers" className={`scan-students ${showStudents ? 'block' : 'hidden'} shrink-0 overflow-y-auto border-r border-[#E8E4DC] p-2 xl:block`}>
         <h3 className="p-2 text-xs font-bold uppercase text-neutral-500">Class papers · {snapshot?.submissions.length || 0}</h3>
-        {(snapshot?.submissions || []).map(s => { const r = rows.find(x => x.submissionId === s.id); return <button key={s.id} className={`mb-2 w-full rounded-xl p-3 text-left text-xs ${selected === s.id ? 'bg-[#F7E8E0] ring-1 ring-[#D97757]' : 'bg-white'}`} onClick={() => { setSelected(s.id); setPage(1); setReview(null); setSelectedItem(null); setShowStudents(false); setReviewOpen(false); lastMarked.current = '';  }}><b className="block">{s.candidateName || s.candidateId}</b><span className="block mt-1">{s.pages} pages · {r?.complete ? `${r.total}/${r.maxTotal}` : r ? `${r.total} so far` : 'Pending'}</span><span className={`block mt-1 ${s.error ? 'text-rose-700' : 'text-neutral-500'}`}>{s.error?.message || (r?.released ? 'Reviewed' : r?.complete ? 'Needs teacher review' : s.state.replaceAll('_', ' '))}</span></button>; })}
+        <label className="scan-search"><Search size={15} /><input aria-label="Find student" placeholder="Find a student…" value={studentQuery} onChange={e => setStudentQuery(e.target.value)} /></label>
+        <select className="scan-student-filter" aria-label="Filter student papers" value={studentFilter} onChange={e => setStudentFilter(e.target.value)}><option value="all">All papers</option><option value="review">Needs review</option><option value="approved">Approved</option><option value="failed">Needs retry</option></select>
+        {!filteredStudents.length && <p className="scan-empty">{snapshot?.submissions.length ? 'No students match this search.' : 'Your scanned papers will appear here.'}</p>}
+        {filteredStudents.map((s, index) => { const r = rows.find(x => x.submissionId === s.id); return <button key={s.id} aria-current={selected === s.id ? 'true' : undefined} className={`scan-student-card mb-2 w-full rounded-xl p-3 text-left text-xs ${selected === s.id ? 'bg-[#F7E8E0] ring-1 ring-[#D97757]' : 'bg-white'}`} onClick={() => selectStudent(s.id)}><span className="scan-student-index">{String(index + 1).padStart(2, '0')}</span><b className="block">{s.candidateName || s.candidateId}</b><span className="block mt-1">{s.pages} pages · {r?.complete ? `${r.total}/${r.maxTotal}` : r ? `${r.total} so far` : 'Pending'}</span><span className={`block mt-1 ${s.error ? 'text-rose-700' : 'text-neutral-500'}`}>{s.error?.message || (r?.released ? 'Reviewed' : r?.complete ? 'Needs teacher review' : s.state.replaceAll('_', ' '))}</span></button>; })}
       </aside>
-      <main className="flex min-w-0 flex-1 flex-col">
-        <div className="scan-paper-controls flex flex-wrap items-center gap-2 border-b px-3 py-2 text-xs"><label className="flex items-center gap-1"><input type="checkbox" checked={follow} onChange={e => setFollow(e.target.checked)} />Follow marking</label><b className="mr-auto">{sub?.candidateName || 'Scanned paper'} · Page {page}/{sub?.pages || batch.pages.length}</b><select aria-label="Paper zoom" className={button} value={zoom} onChange={e => setZoom(Number(e.target.value))}><option value={100}>Fit width</option><option value={125}>125%</option><option value={150}>150%</option><option value={200}>200%</option><option value={250}>250%</option><option value={300}>300%</option>{![100,125,150,200,250,300].includes(zoom) && <option value={zoom}>{zoom}%</option>}</select><button className={button} title="Fullscreen paper" onClick={() => void root.current?.requestFullscreen().catch(() => setError('Fullscreen is unavailable.'))}><Maximize2 size={14} /></button></div>
+      <main className={`scan-main flex min-w-0 flex-1 flex-col ${reviewOpen ? 'scan-review-open' : ''}`}>
+        <div className="scan-paper-controls flex flex-wrap items-center gap-2 border-b px-3 py-2 text-xs"><label className="flex items-center gap-1"><input type="checkbox" checked={follow} onChange={e => setFollow(e.target.checked)} />Follow marking</label><b className="mr-auto">{sub?.candidateName || sub?.candidateId || 'Scanned paper'} · Page {page}/{sub?.pages || batch.pages.length}</b><select aria-label="Paper zoom" className={button} value={zoom} onChange={e => setZoom(Number(e.target.value))}><option value={100}>Fit width</option><option value={125}>125%</option><option value={150}>150%</option><option value={200}>200%</option><option value={250}>250%</option><option value={300}>300%</option>{![100,125,150,200,250,300].includes(zoom) && <option value={zoom}>{zoom}%</option>}</select><button className={button} aria-label="Toggle fullscreen paper" title="Toggle fullscreen" onClick={() => void fullscreen()}><Maximize2 size={14} /></button><button className={button} aria-pressed={editPlacement} disabled={!!running || !!busy || !review} onClick={() => setEditPlacement(v => !v)}><SlidersHorizontal size={14} /><span>{editPlacement ? 'Finish placement' : 'Move marks'}</span></button></div>
         <PaperViewport zoom={zoom} onZoom={setZoom}>
           {sub ? <PageView key={`${examId}:${selected}:${page}`} examId={examId} submissionId={selected} page={page}
             aspect={review?.layout.pages.find(p => p.page === page)?.aspect}
-            editable={false} items={review?.layout.items.filter(i => i.kind !== 'total' || selectedRow?.complete) || []}
-            selected={selectedItem} onSelect={id => { if (id) { setSelectedItem(id); setReviewOpen(true); setFollow(false); } }}
+            editable={editPlacement && !running && !busy} items={review?.layout.items.filter(i => i.kind !== 'total' || selectedRow?.complete) || []}
+            selected={selectedItem} onSelect={id => { if (id) { setSelectedItem(id); setFollow(false); if (id === 'total') { setReviewOpen(false); if (!editPlacement) setPane('results'); } else setReviewOpen(!editPlacement); } }}
             onMove={(id, page, fx, fy) => { if (running) return; void action('Saving mark position…', async () => {
               const data = await request(`/${examId}/submissions/${selected}/layout/${encodeURIComponent(id)}`, { ...json({ page, fx, fy }), method: 'PUT' });
               setReview(data); setDownloads([]);
@@ -234,17 +274,17 @@ export default function ScanMarkWorkspace({ batch, onClose, onScan, onResults, o
           <button className={button} disabled={page >= (sub?.pages || 1)} onClick={() => { setPage(p => p + 1); setFollow(false); }}>Next</button>
         </div></footer>
         {review && <div className="flex items-center gap-2 border-t px-3 py-2 text-xs"><label htmlFor="review-question">Review answer</label><select id="review-question" className={button} value={selectedItem?.split(':')[0] || ''} onChange={e => { setFollow(false); setReviewOpen(!!e.target.value); setSelectedItem(e.target.value ? `${e.target.value}:mark` : null); const item = review.layout.items.find(i => i.id === `${e.target.value}:mark`); if (item?.placed) setPage(item.page); }}><option value="">Select question</option>{review.questions.map(q => <option key={q.questionId} value={q.questionId}>Q{q.number} · {q.awardedMarks ?? 'Pending'}/{q.maxMarks}{q.openReviewFlags.length ? ' · Check' : ''}</option>)}</select></div>}
-        {reviewOpen && selectedItem && review && <div className="scan-review-sheet" role="region" aria-label="Teacher answer review"><header><b>Answer review</b><button className={button} onClick={() => setReviewOpen(false)} aria-label="Close answer review">Close</button></header><section className="p-3 text-xs">{review.questions.filter(q => selectedItem.startsWith(`${q.questionId}:`)).map(q => <div key={q.questionId}><p className="my-1">Q{q.number}: {q.answerAsRead || 'No readable answer'}</p><p>{q.feedback} {q.lostMarks}</p><ul className="mt-2 space-y-2">{q.criterionResults?.map(c => <li key={c.criterionId}><b>{c.awardedMarks}/{c.maxMarks}</b> {c.rubric || c.reason}{c.evidenceElementIds?.length ? <span className="block text-neutral-500">Source: {c.evidenceElementIds.join(', ')}</span> : null}</li>)}</ul>{q.openReviewFlags.map(f => <p key={f.code} className="text-amber-800">{f.detail}</p>)}{review.evidence?.filter(e => e.questionIds.includes(q.questionId)).map(e => <HandwritingReview key={e.id} evidence={e} disabled={!!running || !!busy} onCorrect={async (elementId, text) => {
+        {reviewOpen && selectedItem && review && <div className="scan-review-sheet" role="region" aria-label="Teacher answer review"><header><div><span className="scan-eyebrow">Teacher workspace</span><b>Review this answer</b></div><button className={button} onClick={() => setReviewOpen(false)} aria-label="Close answer review">Close</button></header><section className="p-3 text-xs">{review.questions.filter(q => selectedItem.startsWith(`${q.questionId}:`)).map(q => <div key={q.questionId}><div className="scan-answer-heading"><h3>Question {q.number}</h3><strong>{q.awardedMarks ?? '—'}<small> / {q.maxMarks}</small></strong></div><div className="scan-answer-transcript"><span className="scan-eyebrow">Answer as read</span><p>{q.answerAsRead || 'No readable answer — check the original scan.'}</p></div><p>{q.feedback} {q.lostMarks}</p><ul className="mt-2 space-y-2">{q.criterionResults?.map(c => <li key={c.criterionId}><b>{c.awardedMarks}/{c.maxMarks}</b> {c.rubric || c.reason}{c.evidenceElementIds?.length ? <span className="block text-neutral-500">Source: {c.evidenceElementIds.join(', ')}</span> : null}</li>)}</ul>{q.openReviewFlags.map(f => <p key={f.code} className="text-amber-800">{f.detail}</p>)}{review.evidence?.filter(e => e.questionIds.includes(q.questionId)).map(e => <HandwritingReview key={e.id} evidence={e} disabled={!!running || !!busy} onCorrect={async (elementId, text) => {
           const result = await request(`/${examId}/submissions/${selected}/corrections`, json({ elementId, to: text, remark: true }));
           setDownloads([]); if (result.jobId) setRemarkJob(result.jobId); setRefresh(n => n + 1);
-        }} />)}<button className={`${button} mt-2`} disabled={running} onClick={() => { setOverrideQuestion(q.questionId); setOverrideMarks(String(q.awardedMarks ?? 0)); }}>Adjust mark</button><button className={`${button} ml-2 mt-2`} disabled={running || !!busy || q.awardedMarks === null} onClick={() => void action('Saving question approval…', async () => { await request(`/${examId}/submissions/${selected}/confirm`, json({ question: q.questionId })); setDownloads([]); })}>{q.confirmed ? 'Answer approved' : 'Approve this answer'}</button>{q.history?.length ? <details className="mt-3"><summary>Mark history</summary>{q.history.map((entry, i) => <p key={i} className="mt-1">{entry.kind.replaceAll('_', ' ')} · {entry.before ?? '—'} → {entry.after ?? '—'} · {entry.reason}</p>)}</details> : null}</div>)}</section>
-        {overrideQuestion && <form className="flex flex-wrap gap-2 border-t p-3 text-xs" onSubmit={e => { e.preventDefault(); void action('Saving teacher mark…', async () => { await request(`/${examId}/submissions/${selected}/marks/${overrideQuestion}`, { ...json({ marks: Number(overrideMarks), reason: overrideReason }), method: 'PATCH' }); setOverrideQuestion(''); setOverrideReason(''); setDownloads([]); }); }}><input aria-label="Teacher mark" type="number" min="0" step="0.5" required value={overrideMarks} onChange={e => setOverrideMarks(e.target.value)} className="w-20 rounded border p-2" /><input aria-label="Reason for mark adjustment" required maxLength={1000} placeholder="Reason for adjustment" value={overrideReason} onChange={e => setOverrideReason(e.target.value)} className="min-w-40 flex-1 rounded border p-2" /><button className={button}>Save mark</button></form>}
+        }} />)}<button className={`${button} mt-2`} disabled={!!running || !!busy} onClick={() => { setOverrideQuestion(q.questionId); setOverrideMarks(String(q.awardedMarks ?? 0)); }}>Adjust mark</button><button className={`${button} ml-2 mt-2`} disabled={!!running || !!busy || q.awardedMarks === null || !!q.confirmed} onClick={() => void action('Saving question approval…', async () => { await request(`/${examId}/submissions/${selected}/confirm`, json({ question: q.questionId })); setDownloads([]); })}>{q.confirmed ? 'Answer approved' : 'Approve this answer'}</button>{q.history?.length ? <details className="mt-3"><summary>Mark history</summary>{q.history.map((entry, i) => <p key={i} className="mt-1">{entry.kind.replaceAll('_', ' ')} · {entry.before ?? '—'} → {entry.after ?? '—'} · {entry.reason}</p>)}</details> : null}</div>)}</section>
+        {overrideQuestion && <form className="flex flex-wrap gap-2 border-t p-3 text-xs" onSubmit={e => { e.preventDefault(); void action('Saving teacher mark…', async () => { await request(`/${examId}/submissions/${selected}/marks/${overrideQuestion}`, { ...json({ marks: Number(overrideMarks), reason: overrideReason }), method: 'PATCH' }); setOverrideQuestion(''); setOverrideReason(''); setDownloads([]); }); }}><input aria-label="Teacher mark" type="number" min="0" max={review.questions.find(q => q.questionId === overrideQuestion)?.maxMarks} step={review.exam.allowHalfMarks ? 0.5 : 1} disabled={!!busy || !!running} required value={overrideMarks} onChange={e => setOverrideMarks(e.target.value)} className="w-20 rounded border p-2" /><input aria-label="Reason for mark adjustment" required maxLength={1000} placeholder="Reason for adjustment" value={overrideReason} onChange={e => setOverrideReason(e.target.value)} className="min-w-40 flex-1 rounded border p-2" /><button className={`${button} scan-button-primary`} disabled={!!busy || !!running}>Save mark</button><button type="button" className={button} disabled={!!busy} onClick={() => { setOverrideQuestion(''); setOverrideReason(''); setError(''); }}>Cancel</button></form>}
         </div>}
         {selectedRow?.complete && <div className="flex gap-2 border-t p-3 text-xs"><span className="mr-auto self-center">{selectedRow.released ? 'Teacher reviewed' : 'AI draft — teacher review required'}</span><button className={button} disabled={!!busy || running || selectedRow.released} onClick={() => void action('Confirming reviewed paper…', async () => { const result = await request(`/${examId}/release`, json({ submissionIds: [selected] })); if (result.skipped?.length) throw new Error(result.skipped[0].reason); setDownloads([]); if (result.exportJobId) setExportJob(result.exportJobId); })}>Confirm reviewed paper</button></div>}
       </main>
     </div>
     <section className="scan-chat-pane" style={{ display: pane === 'chat' ? 'flex' : 'none' }} aria-label="Paper conversation">{chat || <p className="p-4">Open the chat from the main workspace.</p>}</section>
-    {pane === 'results' && <section className="scan-results-pane" aria-label="Class results"><h3 className="p-3 font-bold">Class results · {snapshot?.submissions.length || 0} students</h3><table><thead><tr><th>Student</th><th>Marks</th><th>Status</th></tr></thead><tbody>{snapshot?.submissions.map(s => { const row = rows.find(r => r.submissionId === s.id); return <tr key={s.id}><td><button className="text-left underline" onClick={() => { setSelected(s.id); setPage(1); setPane('paper'); }}>{s.candidateName || s.candidateId}</button></td><td>{row?.complete ? `${row.total}/${row.maxTotal}` : 'Pending'}</td><td>{row?.released ? 'Reviewed' : row?.complete ? 'Needs review' : s.state.replaceAll('_',' ')}</td></tr>; })}</tbody></table></section>}
-    <nav className="scan-mobile-nav" aria-label="Marking workspace views">{(['paper','chat','results'] as const).map(view => <button key={view} aria-pressed={pane === view} onClick={() => { setPane(view); setShowStudents(false); }}>{view === 'paper' ? 'Paper' : view === 'chat' ? 'Ask AI' : 'Results'}</button>)}</nav>
+    {pane === 'results' && <section className="scan-results-pane" aria-label="Class results"><div className="scan-results-heading"><span className="scan-eyebrow">Assessment overview</span><h3>Class results</h3><p>Review each paper before sharing final marks.</p></div><div className="scan-result-metrics"><div><span>Student papers</span><b>{snapshot?.submissions.length || 0}</b></div><div><span>Awaiting review</span><b>{reviewCount}</b></div><div><span>Teacher approved</span><b>{approvedCount}</b></div></div><table><caption className="sr-only">Student marks and teacher review status</caption><thead><tr><th>Student</th><th>Marks</th><th>Status</th></tr></thead><tbody>{snapshot?.submissions.map(s => { const row = rows.find(r => r.submissionId === s.id); return <tr key={s.id}><td><button className="text-left underline" onClick={() => selectStudent(s.id)}>{s.candidateName || s.candidateId}</button></td><td>{row?.complete ? `${row.total}/${row.maxTotal}` : 'Pending'}</td><td>{row?.released ? 'Reviewed' : row?.complete ? 'Needs review' : s.state.replaceAll('_',' ')}</td></tr>; })}</tbody></table></section>}
+    <nav className="scan-mobile-nav" aria-label="Marking workspace views">{(['paper','chat','results'] as const).map(view => <button key={view} aria-label={view === 'paper' ? 'Paper' : view === 'chat' ? 'Ask AI' : 'Results'} aria-pressed={pane === view} onClick={() => { setPane(view); setShowStudents(false); }}>{view === 'paper' ? <FileText size={16} /> : view === 'chat' ? <MessageSquare size={16} /> : <ListChecks size={16} />}{view === 'paper' ? 'Paper' : view === 'chat' ? 'Ask AI' : 'Results'}{view === 'results' && reviewCount > 0 && <span className="scan-nav-count">{reviewCount}</span>}</button>)}</nav>
   </div>;
 }
