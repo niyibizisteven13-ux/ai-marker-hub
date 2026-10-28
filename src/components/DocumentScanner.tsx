@@ -21,6 +21,7 @@ export type PageItem = {
   dataUrl: string;
   filter: FilterId;
   studentName?: string;
+  candidateId?: string;
   extractedText?: string;
   aiSummary?: string;
   aiScore?: number;
@@ -860,7 +861,7 @@ export default function DocumentScanner({
   };
 
   const saveToWorkspace = async () => {
-    const pages: PageItem[] = candidates.flatMap((c) => c.pages.map((p) => ({ ...p, studentName: c.name.trim() || `Unnamed ${L.person.toLowerCase()}` })));
+    const pages: PageItem[] = candidates.flatMap((c) => c.pages.map((p) => ({ ...p, candidateId: c.id, studentName: c.name.trim() || `Unnamed ${L.person.toLowerCase()}` })));
     if (pages.length === 0) { showToast('Add at least one page before saving.'); return; }
     if (pages.some((p) => p.isSample)) { showToast('Remove the sample pages before saving.'); return; }
     const unconfirmed = pages.filter((p) => p.extractedText && p.reviewStatus !== 'confirmed').length;

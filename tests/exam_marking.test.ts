@@ -130,6 +130,10 @@ test('marking: code validates every mark, sums criteria, checks evidence and rai
   assert.equal(unknown.awardedMarks, null);
   const concern = finalizeQuestion(scheme.questions[1], false, { ...base, questionId: 'Q2', evidenceElementIds: ['p1-e3'], evidenceQuotes: [{ elementId: 'p1-e3', quote: '3 x 5 = 15' }], criterionResults: [{ criterionId: 'Q2-B1', awardedMarks: 2, reason: '' }], readingConcern: 'If 15 is 16 the answer is wrong.' }, match, meta);
   assert.equal(concern.awardedMarks, 2);
+  const unreadableMatch = structuredClone(match);
+  unreadableMatch.elements.find(e => e.id === 'p1-e3')!.uncertainty = 'high';
+  const unreadableMark = finalizeQuestion(scheme.questions[1], false, { ...base, questionId: 'Q2', evidenceElementIds: ['p1-e3'], evidenceQuotes: [{ elementId: 'p1-e3', quote: '3 x 5 = 15' }], criterionResults: [{ criterionId: 'Q2-B1', awardedMarks: 0, reason: 'Cannot read final digit' }] }, unreadableMatch, meta);
+  assert.equal(unreadableMark.awardedMarks, null, 'unreadable handwriting is held for review, never turned into a wrong-answer cross');
   assert.ok(concern.reviewFlags.some((f) => f.code === 'transcription_affects_mark' && f.severity === 'high'));
   assert.equal(finalizeQuestion(scheme.questions[1], false, undefined, match, meta).awardedMarks, null, 'a missing model result is never filled in');
 });
@@ -296,6 +300,7 @@ const calls = { recognition: 0, marking: [] as string[][], extraction: 0, drafts
 const textOf = (req: ProviderRequest) => req.messages.map((m) => (typeof m.content === 'string' ? m.content : (m.content as any[]).map((c) => c.text ?? '').join(''))).join('\n');
 const imageOf = (req: ProviderRequest) => { for (const m of req.messages) if (Array.isArray(m.content)) for (const c of m.content as any[]) if (c.type === 'image_url') return c.image_url.url as string; return null; };
 
+let onMarkRequest: ((ids: string[]) => Promise<void>) | undefined;
 const adapter: ProviderAdapter = {
   name: 'fake',
   async *stream(req) {
@@ -331,6 +336,7 @@ const adapter: ProviderAdapter = {
       const prompt = textOf(req);
       const ids = /Mark exactly these question ids: ([^\n.]+)/.exec(prompt)![1].split(',').map((x) => x.trim());
       calls.marking.push(ids);
+      await onMarkRequest?.(ids);
       assert.ok(!/C00\d/.test(prompt.split('<candidate_script>')[1]), 'the marker never sees the candidate id');
       const lines = [...prompt.matchAll(/^\[(p\d+-e\d+) [^\]]*\] (.*)$/gm)].map((m) => ({ id: m[1], text: m[2] }));
       const find = (s: string) => lines.find((l) => l.text.includes(s));
@@ -384,6 +390,59 @@ async function waitJob(user: string, id: string) {
   }
   throw new Error('job did not finish');
 }
+
+test('live marking persists validated questions before the next question and exports a combined PDF', async () => {
+  const user = 'teacher-live';
+  const exam = await exams.createExam(user, { title: 'Live scan' });
+  await exams.setSchemeJson(user, exam.id, SCHEME, { confirm: true });
+  const uploaded = await exams.addSubmissions(user, exam.id, [{ name: 'C001.pdf', buffer: C001_PDF }]);
+  const sub = uploaded.accepted[0];
+  let observed = false;
+  onMarkRequest = async (ids) => {
+    if (!ids.includes('Q2')) return;
+    const saved = await exams.load(user, exam.id);
+    assert.equal(saved.results[sub.id].questions[0].ai?.awardedMarks, 3);
+    assert.equal(saved.results[sub.id].questions[1].ai, null, 'no fabricated mark before evaluation');
+    const review = await exams.reviewCandidate(user, exam.id, sub.id);
+    assert.ok(review.layout.items.some(i => i.questionId === 'Q1' && i.placed));
+    assert.ok(!review.layout.items.some(i => i.questionId === 'Q2' && i.placed));
+    observed = true;
+  };
+  try { await exams.startMarking(user, exam.id); await waitRun(user, exam.id); }
+  finally { onMarkRequest = undefined; }
+  assert.ok(observed, 'question 1 was available to the viewer while question 2 was pending');
+  const done = await exams.load(user, exam.id);
+  const artifact = done.artifacts.find(a => a.status === 'ready')!;
+  assert.ok(artifact.classPdfFileId);
+  const pdf = await PDFDocument.load((await fileStore.read(artifact.classPdfFileId!, user)).data);
+  assert.ok(pdf.getPageCount() >= 1);
+  assert.ok(exams.artifactRefs(artifact).classPdfUrl);
+});
+
+test('handwriting review provides owner-scoped source crops and invalidates a released mark after correction', async () => {
+  const user = 'teacher-source';
+  const exam = await exams.createExam(user, { title: 'Handwriting review' });
+  await exams.setSchemeJson(user, exam.id, SCHEME, { confirm: true });
+  const { accepted } = await exams.addSubmissions(user, exam.id, [{ name: 'C001.pdf', buffer: C001_PDF }]);
+  await exams.startMarking(user, exam.id); await waitRun(user, exam.id);
+  const review = await exams.reviewCandidate(user, exam.id, accepted[0].id);
+  const evidence = review.evidence.find(e => e.questionIds.includes('Q1'))!;
+  assert.ok(evidence.text);
+  assert.match(evidence.cropUrl, /evidence/);
+  const crop = await exams.evidenceCrop(user, exam.id, accepted[0].id, evidence.id);
+  const meta = await sharp(crop).metadata();
+  assert.equal(meta.format, 'jpeg');
+  assert.ok(meta.width! > 10 && meta.height! > 10);
+  await assert.rejects(() => exams.evidenceCrop('another-teacher', exam.id, accepted[0].id, evidence.id), /not found/i);
+  await exams.release(user, exam.id, [accepted[0].id]);
+  assert.equal((await exams.reviewCandidate(user, exam.id, accepted[0].id)).released, true);
+  await exams.correctTranscription(user, exam.id, { submission: accepted[0].id }, { elementId: evidence.id, to: '1. x = 4 (teacher checked)', remark: false });
+  const corrected = await exams.reviewCandidate(user, exam.id, accepted[0].id);
+  assert.equal(corrected.released, false, 'corrected readings require renewed teacher review');
+  assert.match(corrected.evidence.find(e => e.id === evidence.id)!.text, /teacher checked/);
+  assert.ok(corrected.questions.find(q => q.questionId === 'Q1')!.openReviewFlags.some(f => f.code === 'transcription_affects_mark'));
+  assert.equal(corrected.markedPdf?.stale, true);
+});
 
 test('end to end: batch marking, failures isolated, package contents match the persisted results', async () => {
   const user = 'teacher-1';

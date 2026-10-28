@@ -941,7 +941,7 @@ router.get('/knowledge-bases', async (_req, res) => {
 
 router.post('/knowledge-bases', async (req, res) => {
   const result = kbSchema.safeParse(req.body);
-  if (!result.success) return res.status(400).json({ success: false, error: result.error.errors[0].message });
+  if (!result.success) return res.status(400).json({ success: false, error: result.error.issues[0].message });
   try {
     const kb = await prisma.knowledgeBase.create({
       data: {
@@ -961,7 +961,7 @@ router.post('/knowledge-bases', async (req, res) => {
 
 router.put('/knowledge-bases/:id', async (req, res) => {
   const result = kbSchema.safeParse(req.body);
-  if (!result.success) return res.status(400).json({ success: false, error: result.error.errors[0].message });
+  if (!result.success) return res.status(400).json({ success: false, error: result.error.issues[0].message });
   try {
     const kb = await prisma.$transaction(async (tx) => {
       const updated = await tx.knowledgeBase.update({
@@ -1415,7 +1415,7 @@ router.get('/search', async (req, res) => {
 router.post('/rag/evaluate', async (req, res) => {
   const parsed = ragEvaluationSchema.safeParse(req.body);
   if (!parsed.success) {
-    return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || 'Invalid RAG evaluation cases.' });
+    return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || 'Invalid RAG evaluation cases.' });
   }
 
   try {
@@ -1621,7 +1621,7 @@ router.get('/datasets', async (_req, res) => {
 
 router.post('/datasets', async (req, res) => {
   const result = datasetSchema.safeParse(req.body);
-  if (!result.success) return res.status(400).json({ success: false, error: result.error.errors[0].message });
+  if (!result.success) return res.status(400).json({ success: false, error: result.error.issues[0].message });
   try {
     const ds = await prisma.dataset.create({
       data: {
@@ -1795,7 +1795,7 @@ router.get('/datasets/:id/examples', async (req, res) => {
 
 router.post('/datasets/:id/examples', async (req, res) => {
   const result = exampleSchema.safeParse(req.body);
-  if (!result.success) return res.status(400).json({ success: false, error: result.error.errors[0].message });
+  if (!result.success) return res.status(400).json({ success: false, error: result.error.issues[0].message });
   try {
     const instruction = (result.data.instruction || result.data.prompt || '').trim();
     const output = (result.data.output || result.data.completion || '').trim();
@@ -1879,7 +1879,7 @@ router.put('/dataset-examples/:exampleId', async (req, res) => {
     }).strict();
     const parsedPatch = patchSchema.safeParse(req.body);
     if (!parsedPatch.success) {
-      return res.status(400).json({ success: false, error: parsedPatch.error.errors[0].message });
+      return res.status(400).json({ success: false, error: parsedPatch.error.issues[0].message });
     }
     const patch: any = { ...parsedPatch.data };
     const current = await prisma.datasetExample.findUnique({ where: { id: req.params.exampleId } });
@@ -2246,7 +2246,7 @@ router.get('/models', async (_req, res) => {
 
 router.post('/models', async (req, res) => {
   const result = modelSchema.safeParse(req.body);
-  if (!result.success) return res.status(400).json({ success: false, error: result.error.errors[0].message });
+  if (!result.success) return res.status(400).json({ success: false, error: result.error.issues[0].message });
   try {
     const model = await prisma.aiModel.create({
       data: {
@@ -2320,7 +2320,7 @@ router.get('/prompts', async (_req, res) => {
 
 router.post('/prompts', async (req, res) => {
   const result = promptSchema.safeParse(req.body);
-  if (!result.success) return res.status(400).json({ success: false, error: result.error.errors[0].message });
+  if (!result.success) return res.status(400).json({ success: false, error: result.error.issues[0].message });
   try {
     const prompt = await prisma.prompt.create({
       data: {
@@ -2530,7 +2530,7 @@ router.get('/retrieval-settings', async (req, res) => {
 
 router.put('/retrieval-settings', async (req, res) => {
   const result = retrievalSettingsSchema.safeParse(req.body);
-  if (!result.success) return res.status(400).json({ success: false, error: result.error.errors[0].message });
+  if (!result.success) return res.status(400).json({ success: false, error: result.error.issues[0].message });
   try {
     const settings = await prisma.retrievalSetting.upsert({
       where: { environment: result.data.environment },
