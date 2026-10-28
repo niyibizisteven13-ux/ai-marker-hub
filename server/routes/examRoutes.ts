@@ -304,7 +304,7 @@ examsRouter.put('/:examId/submissions/:submissionId/layout/:itemId', async (req,
       z.object({ hidden: z.literal(true) }).strict(),
       z.object({ reset: z.literal(true) }).strict(),
     ]).parse(req.body ?? {});
-    const itemId = z.string().max(120).regex(/^(total|[\w.-]+:(mark|correction))$/).parse(req.params.itemId);
+    const itemId = z.string().max(120).regex(/^(total|[\w.-]+:(mark|correction|criterion:[\w.-]+))$/).parse(req.params.itemId);
     await examService.setLayout(userIdOf(req), req.params.examId, req.params.submissionId, itemId, body);
     res.json({ ...(await examService.reviewCandidate(userIdOf(req), req.params.examId, req.params.submissionId)), requestId: rid(req) });
   } catch (err) { fail(req, res, err); }

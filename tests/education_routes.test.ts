@@ -280,3 +280,14 @@ test('phone previews and thumbnails are smaller while page access remains owner-
   assert.equal((await fetch(`${url}?width=3000`, as('preview-owner'))).status, 400);
   assert.equal((await fetch(`${url}?width=1000`, as('another-user'))).status, 404);
 });
+
+
+test('review controls accept criterion IDs, validate positions and remain owner-scoped', async () => {
+  const { examId } = await (await fetch(`${base}/api/exams`, json('review-owner', { title: 'Review controls' }))).json();
+  const layout = (user: string, item: string, body: unknown) => fetch(`${base}/api/exams/${examId}/submissions/missing/layout/${encodeURIComponent(item)}`, { ...json(user, body), method: 'PUT' });
+  assert.equal((await layout('review-owner', 'Q1:criterion:Q1-M1', { page: 1, fx: .8, fy: .2 })).status, 404, 'valid criterion ID reaches owner-scoped service, not a schema rejection');
+  assert.equal((await layout('another-owner', 'Q1:criterion:Q1-M1', { page: 1, fx: .8, fy: .2 })).status, 404);
+  assert.equal((await layout('review-owner', 'Q1:criterion:Q1-M1', { page: 1, fx: 1.2, fy: .2 })).status, 400);
+  assert.equal((await layout('review-owner', 'bad:item:unknown', { page: 1, fx: .8, fy: .2 })).status, 400);
+  assert.equal((await fetch(`${base}/api/exams/${examId}/submissions/missing/confirm`, json('another-owner', { question: 'Q1' }))).status, 404);
+});
