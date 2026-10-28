@@ -104,7 +104,7 @@ examsRouter.get('/:examId/events', async (req, res) => {
         // A job owned by the same user but belonging to a different exam is still excluded.
         return job && (job.payload as { examId?: string }).examId === exam.id ? FileJobQueue.publicView(job) : null;
       }));
-      const id = createHash('sha256').update(JSON.stringify([exam.updatedAt, exam.resultRevision, exam.submissions.map(s => [s.id, s.state, s.stateAt]), exam.schemes.map(s => [s.version, s.status]), exam.artifacts.map(a => [a.id, a.status]), jobs])).digest('hex');
+      const id = createHash('sha256').update(JSON.stringify([exam.updatedAt, exam.resultRevision, exam.submissions.map(s => [s.id, s.state, s.stateAt, s.activity]), exam.schemes.map(s => [s.version, s.status]), exam.artifacts.map(a => [a.id, a.status]), jobs])).digest('hex');
       if (cached?.id === id) return cached;
       const scheme = examService.latestScheme(exam);
       const selected = query.submissionId || exam.submissions[0]?.id;
@@ -225,6 +225,14 @@ examsRouter.patch('/:examId/submissions/:submissionId/marks/:questionId', async 
     const body = z.object({ marks: z.number().min(0).max(1000), reason: z.string().trim().min(1).max(1000) }).strict().parse(req.body ?? {});
     const out = await examService.overrideMark(userIdOf(req), req.params.examId, { submission: req.params.submissionId, question: req.params.questionId }, body as { marks: number; reason: string });
     res.json({ candidateId: out.candidateId, question: out.question, before: out.before, after: out.after, rubricConflict: out.rubricConflict, resultRevision: out.exam.resultRevision, requestId: rid(req) });
+  } catch (err) { fail(req, res, err); }
+});
+
+examsRouter.post('/:examId/submissions/:submissionId/confirm', async (req, res) => {
+  try {
+    const body = z.object({ question: z.string().max(100).optional() }).strict().parse(req.body ?? {});
+    const exam = await examService.confirmResults(userIdOf(req), req.params.examId, { submission: req.params.submissionId, question: body.question });
+    res.json({ resultRevision: exam.resultRevision, requestId: rid(req) });
   } catch (err) { fail(req, res, err); }
 });
 

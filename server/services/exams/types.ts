@@ -53,6 +53,7 @@ export interface Submission {
   error?: { code: string; message: string };
   documentId?: string;
   recognitionCached?: boolean;
+  activity?: { questionId: string; at: string };
   /** Recognition settings fingerprint the document was produced with. */
   recognitionKey?: string;
   /** Typed answers (Word, text…): fileId is the printed PDF made from them; the teacher's file is kept here unchanged. */

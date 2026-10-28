@@ -22,6 +22,7 @@ interface Item {
 interface Criterion { criterionId: string; awardedMarks: number; maxMarks: number; reason: string; rubric?: string; evidenceElementIds?: string[] }
 interface Question {
   questionId: string; number: string; maxMarks: number; awardedMarks: number | null; source: string; aiProposedMarks: number | null;
+  confirmed?: { by: string; at: string } | null; history?: Array<{ at: string; actor: string; kind: string; before: number | null; after: number | null; reason: string }>;
   override: { marks: number; reason: string } | null; criterionResults: Criterion[]; feedback: string; lostMarks: string;
   answerAsRead: string | null; correction: string | null; confidence: Item['confidence']; openReviewFlags: Array<{ code: string; detail: string; severity: string }>;
 }
