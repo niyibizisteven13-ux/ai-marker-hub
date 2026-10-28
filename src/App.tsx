@@ -789,6 +789,15 @@ export default function App() {
   };
 
   const [scanBatch, setScanBatch] = useState<ScanBatch | null>(null);
+  // Store only the owner-scoped exam id, never scan images or student names in browser storage.
+  useEffect(() => {
+    setScanBatch(null);
+    if (!authenticatedUser?.id) return;
+    try {
+      const examId = sessionStorage.getItem(`bwenge.scan.exam:${authenticatedUser.id}`);
+      if (examId && /^[0-9a-f-]{36}$/i.test(examId)) { setScanBatch({ id: `resume-${examId}`, examId, pages: [] }); setActiveTab('marking_hub'); }
+    } catch { /* browser storage is optional */ }
+  }, [authenticatedUser?.id]);
   const [scannerGeneratedForm, setScannerGeneratedForm] = useState<any | null>(null);
   const [openFormRequest, setOpenFormRequest] = useState(0);
 
@@ -1313,8 +1322,17 @@ export default function App() {
     <CenterWorkspace
       activeTab={activeTab}
       scanBatch={scanBatch}
-      onScanExamReady={(examId) => setScanBatch(prev => prev && prev.id === scanBatch?.id ? { ...prev, examId } : prev)}
-      onCloseScanBatch={() => setScanBatch(null)}
+      onScanExamReady={(examId) => {
+        setScanBatch(prev => {
+          if (!prev || prev.id !== scanBatch?.id) return prev;
+          try { if (authenticatedUser?.id) sessionStorage.setItem(`bwenge.scan.exam:${authenticatedUser.id}`, examId); } catch {}
+          return { ...prev, examId };
+        });
+      }}
+      onCloseScanBatch={() => {
+        setScanBatch(null);
+        try { if (authenticatedUser?.id) sessionStorage.removeItem(`bwenge.scan.exam:${authenticatedUser.id}`); } catch {}
+      }}
       examPaper={examPaper}
       setExamPaper={setExamPaper}
       uploadedFiles={uploadedFiles}

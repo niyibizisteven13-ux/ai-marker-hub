@@ -57,26 +57,30 @@ function SymbolSvg({ kind, size }: { kind: Sym; size: number }) {
 const confTone = (l?: string) => (l === 'high' ? 'bg-emerald-500/12 text-emerald-300 border-emerald-500/25' : l === 'medium' ? 'bg-amber-500/12 text-amber-300 border-amber-500/25' : 'bg-rose-500/12 text-rose-300 border-rose-500/25');
 
 export function PageView({ examId, submissionId, page, aspect, items, selected, onSelect, onMove }: {
-  examId: string; submissionId: string; page: number; aspect: number; items: Item[]; selected: string | null;
+  examId: string; submissionId: string; page: number; aspect?: number; items: Item[]; selected: string | null;
   onSelect: (id: string | null) => void; onMove: (id: string, page: number, fx: number, fy: number) => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const [src, setSrc] = useState<string | null>(null);
   const [width, setWidth] = useState(800);
+  const [imageAspect, setImageAspect] = useState(1.414);
+  const [imageError, setImageError] = useState(false);
+  const [retryImage, setRetryImage] = useState(0);
   const [drag, setDrag] = useState<{ id: string; dx: number; dy: number; sx: number; sy: number } | null>(null);
 
   useEffect(() => {
     let url: string | null = null;
-    let live = true;
-    setSrc(null);
+    const controller = new AbortController();
+    setSrc(null); setImageError(false);
     (async () => {
-      const res = await authFetch(`/api/exams/${examId}/submissions/${submissionId}/pages/${page}`);
-      if (!res.ok || !live) return;
-      url = URL.createObjectURL(await res.blob());
-      setSrc(url);
-    })().catch(() => undefined);
-    return () => { live = false; if (url) URL.revokeObjectURL(url); };
-  }, [examId, submissionId, page]);
+      const res = await authFetch(`/api/exams/${examId}/submissions/${submissionId}/pages/${page}`, { signal: controller.signal });
+      if (!res.ok) throw new Error('Page unavailable');
+      const blob = await res.blob();
+      if (controller.signal.aborted) return;
+      url = URL.createObjectURL(blob); setSrc(url);
+    })().catch(() => { if (!controller.signal.aborted) setImageError(true); });
+    return () => { controller.abort(); if (url) URL.revokeObjectURL(url); };
+  }, [examId, submissionId, page, retryImage]);
 
   useEffect(() => {
     const el = box.current;
@@ -86,7 +90,7 @@ export function PageView({ examId, submissionId, page, aspect, items, selected, 
     return () => ro.disconnect();
   }, []);
 
-  const height = width * aspect;
+  const height = width * (aspect ?? imageAspect);
   const down = (e: RPointerEvent, it: Item) => {
     e.stopPropagation();
     onSelect(it.id);
@@ -103,8 +107,8 @@ export function PageView({ examId, submissionId, page, aspect, items, selected, 
 
   return (
     <div ref={box} className="relative w-full select-none overflow-hidden rounded-lg bg-white shadow-[0_10px_40px_-18px_rgba(0,0,0,.6)] ring-1 ring-black/10" style={{ height }} onPointerMove={move} onPointerUp={up} onPointerDown={() => onSelect(null)}>
-      {src ? <img src={src} alt={`Page ${page}`} className="absolute inset-0 h-full w-full object-fill" draggable={false} />
-        : <div className="absolute inset-0 grid place-items-center text-sm text-neutral-400"><Loader2 className="animate-spin" size={20} /></div>}
+      {src ? <img src={src} alt={`Page ${page}`} className="absolute inset-0 h-full w-full object-fill" onLoad={e => setImageAspect(e.currentTarget.naturalHeight / e.currentTarget.naturalWidth)} draggable={false} />
+        : <div className="absolute inset-0 grid place-items-center text-sm text-neutral-400">{imageError ? <button onClick={() => setRetryImage(n => n + 1)} className="rounded border p-3">Page unavailable — retry</button> : <Loader2 className="animate-spin" size={20} />}</div>}
       <span className="absolute left-2 top-2 rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-semibold text-white">Page {page}</span>
       {items.filter((it) => it.page === page && it.placed && !it.hidden).map((it) => {
         const d = drag?.id === it.id ? drag : null;

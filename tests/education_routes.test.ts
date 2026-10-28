@@ -236,3 +236,19 @@ test('exams API: owner scoping, validation, scheme versions and status codes', a
   assert.equal((await fetch(`${base}/api/exams/${examId}/jobs/00000000-0000-4000-8000-000000000000`, as('alice'))).status, 404);
   assert.equal((await fetch(`${base}/api/exams/not-a-uuid`, as('alice'))).status, 404);
 });
+
+
+test('exam live stream is owner-scoped and replays saved state without AI calls', async () => {
+  const created = await (await fetch(`${base}/api/exams`, json('live-owner', { title: 'Saved live paper' }))).json();
+  assert.equal((await fetch(`${base}/api/exams/${created.examId}/events`, as('other-owner'))).status, 404);
+  assert.equal((await fetch(`${base}/api/exams/${created.examId}/events?submissionId=invalid`, as('live-owner'))).status, 400);
+  const controller = new AbortController();
+  const response = await fetch(`${base}/api/exams/${created.examId}/events`, as('live-owner', { signal: controller.signal }));
+  assert.equal(response.status, 200);
+  const reader = response.body!.getReader();
+  const chunk = new TextDecoder().decode((await reader.read()).value);
+  assert.match(chunk, /event: snapshot/);
+  assert.match(chunk, /Saved live paper/);
+  assert.match(chunk, /"candidates":\[\]/);
+  controller.abort(); await reader.cancel().catch(() => undefined);
+});

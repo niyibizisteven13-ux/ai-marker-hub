@@ -1655,7 +1655,8 @@ ${augmentedQuery}`;
     let styleExemplars: string | undefined;
     try {
       if (!isSmallTalk) {
-        const queryKeywords = (query || '').split(/\s+/).filter(w => w.length > 3);
+        const queryText = typeof query === 'string' ? query : '';
+        const queryKeywords = queryText.split(/\s+/).filter(w => w.length > 3);
         let matchingExamples: any[] = [];
         const memberships = await prisma.organizationMember.findMany({
           where: { userId },

@@ -11,6 +11,7 @@ import type { DocumentService } from '../documents/service.js';
 import { OwnedRecordStore, type OwnedRecord } from '../storage/ownedRecordStore.js';
 import { annotateScript } from './annotate.js';
 import { computeLayout } from './layout.js';
+import { processedToViewed } from './pdfGeometry.js';
 import { expandArchives, InputError, isPdf, isTyped, typedToPdf } from './inputs.js';
 import { loadPages } from '../documents/pages.js';
 import { buildBundle, safeName, type BundleFile } from './bundle.js';
@@ -635,6 +636,15 @@ export function createExamService(deps: ExamDeps) {
     const affected = res ? res.questions.filter((q) => q.ai?.evidenceElementIds.includes(target!.el.id) || q.mappedElementIds.includes(target!.el.id)).map((q) => q.questionId) : [];
     await mutate(userId, examId, (e) => {
       e.resultRevision++;
+      const result = e.results[sub.id];
+      if (result) {
+        result.updatedAt = now(); result.released = null;
+        for (const q of result.questions.filter(q => affected.includes(q.questionId))) {
+          q.confirmed = null;
+          if (q.ai && !q.ai.reviewFlags.some(f => f.code === 'transcription_affects_mark'))
+            q.ai.reviewFlags.push({ code: 'transcription_affects_mark', severity: 'high', detail: 'The reading was corrected. Re-mark or review this question before release.' });
+        }
+      }
       audit(e, { actor: userId, type: 'transcription_correction', submissionId: sub.id, candidateId: sub.candidateId, before: target!.text.slice(0, 500), after: newText.slice(0, 500), reason: `element ${target!.el.id} on page ${target!.page}` });
     });
     let jobId: string | null = null;
@@ -890,6 +900,13 @@ export function createExamService(deps: ExamDeps) {
       candidate: { submissionId: sub.id, candidateId: sub.candidateId, candidateName: sub.candidateName ?? null, fileName: sub.fileName },
       summary, layout, released: isReleased(res), releasedAt: isReleased(res) ? res.released!.at : null, changedSinceRelease: !!res.released && !isReleased(res),
       questions: view.result!.questions, markedPdf: view.markedPdf,
+      evidence: doc.result.pages.flatMap(p => p.elements.map(el => ({
+        id: el.id, page: p.page, text: finalText(el, doc.corrections), handwritten: el.handwritten,
+        needsReview: el.needsReview && !doc.corrections.some(c => c.elementId === el.id),
+        signals: doc.corrections.some(c => c.elementId === el.id) ? ['Reading corrected by the teacher.'] : el.signals.map(s => s.detail),
+        questionIds: res.questions.filter(q => q.mappedElementIds.includes(el.id) || q.ai?.evidenceElementIds.includes(el.id)).map(q => q.questionId),
+        cropUrl: `/api/exams/${exam.id}/submissions/${sub.id}/evidence/${encodeURIComponent(el.id)}`,
+      }))),
       candidates: reviewList(exam),
     };
   }
@@ -907,10 +924,33 @@ export function createExamService(deps: ExamDeps) {
     const { pages } = await loadPages(original, sub.fileName, { maxPages: deps.maxPages ?? 50, pdfScale: 1.6 });
     const src = pages.find((p) => p.page === page);
     if (!src) throw new ExamInputError('UNKNOWN_PAGE', `Page ${page} does not exist.`, 404);
-    const jpg = await sharp(src.image, { limitInputPixels: 80_000_000 }).rotate().flatten({ background: '#ffffff' }).resize({ width: 1400, withoutEnlargement: true }).jpeg({ quality: 82 }).toBuffer();
+    const jpg = await sharp(src.image, { limitInputPixels: 80_000_000 }).rotate().flatten({ background: '#ffffff' }).resize({ width: 2200, withoutEnlargement: true }).jpeg({ quality: 90 }).toBuffer();
     pageCache.set(key, jpg);
     if (pageCache.size > 60) pageCache.delete(pageCache.keys().next().value!);
     return jpg;
+  }
+
+  /** A source close-up in original displayed-page coordinates, never an AI-generated reconstruction. */
+  async function evidenceCrop(userId: string, examId: string, ref: string, elementId: string) {
+    const exam = await load(userId, examId);
+    const sub = findSub(exam, ref);
+    const doc = sub?.documentId ? await deps.documents.get(userId, sub.documentId) : null;
+    const page = doc?.result.pages.find(p => p.elements.some(e => e.id === elementId));
+    const el = page?.elements.find(e => e.id === elementId);
+    if (!sub || !page || !el) throw new ExamInputError('UNKNOWN_ELEMENT', 'No source region for this answer.', 404);
+    const jpg = await pageImage(userId, examId, sub.id, page.page);
+    const meta = await sharp(jpg).metadata();
+    const points = [
+      processedToViewed(el.region.x0, el.region.y0, page), processedToViewed(el.region.x1, el.region.y0, page),
+      processedToViewed(el.region.x0, el.region.y1, page), processedToViewed(el.region.x1, el.region.y1, page),
+    ];
+    const width = meta.width!, height = meta.height!;
+    const left = Math.max(0, Math.floor(Math.min(...points.map(p => p.fx)) * width) - 16);
+    const top = Math.max(0, Math.floor(Math.min(...points.map(p => p.fy)) * height) - 16);
+    const right = Math.min(width, Math.ceil(Math.max(...points.map(p => p.fx)) * width) + 16);
+    const bottom = Math.min(height, Math.ceil(Math.max(...points.map(p => p.fy)) * height) + 16);
+    if (right <= left || bottom <= top) throw new ExamInputError('INVALID_REGION', 'The answer location is uncertain. Review the full page.', 422);
+    return sharp(jpg).extract({ left, top, width: right - left, height: bottom - top }).jpeg({ quality: 95 }).toBuffer();
   }
 
   /** Moves or hides one red item (or resets it to the automatic place). Any change makes the PDF a draft again. */
@@ -987,7 +1027,7 @@ export function createExamService(deps: ExamDeps) {
     createExam, load, mutate, setSchemeJson, confirmScheme, editSchemeQuestion, submitSchemeDocuments, addSubmissions, startMarking,
     summaries, overrideMark, confirmResults, correctTranscription, remarkQuestions, requestRemark, generateArtifacts, requestExport, artifacts, artifactRefs, candidateView, progress,
     latestScheme, confirmedScheme, findSub, findQuestion,
-    listExams, reviewList, reviewCandidate, pageImage, setLayout, release, draftScheme,
+    listExams, reviewList, reviewCandidate, pageImage, evidenceCrop, setLayout, release, draftScheme,
   };
 }
 

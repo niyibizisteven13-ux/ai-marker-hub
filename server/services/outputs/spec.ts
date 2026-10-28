@@ -37,7 +37,7 @@ export const chartConfigSchema = z.object({
   x: axis,
   y: axis.optional(),
   color: axis.optional(),
-  data: z.array(z.record(cell)).max(5000).optional(),
+  data: z.array(z.record(z.string(), cell)).max(5000).optional(),
   fromAnalysis: fromAnalysisSchema.optional(),
   /** Where the data comes from, shown under the chart. */
   sourceNote: z.string().trim().min(3).max(300),
@@ -47,7 +47,7 @@ export type ChartConfig = z.infer<typeof chartConfigSchema>;
 export const tableSchema = z.object({
   caption: text(300).optional(),
   columns: z.array(z.object({ key: z.string().min(1).max(200), label: z.string().min(1).max(200), unit: z.string().max(40).optional() }).strict()).min(1).max(50),
-  rows: z.array(z.record(cell)).max(2000).optional(),
+  rows: z.array(z.record(z.string(), cell)).max(2000).optional(),
   fromAnalysis: fromAnalysisSchema.optional(),
 }).strict();
 export type TableSpec = z.infer<typeof tableSchema>;

@@ -59,7 +59,7 @@ Marking rules:
 - Crossed-out work is not marked when a replacement attempt exists. If there are two uncrossed attempts, say so in mappingConcern.
 - A reading marked UNCERTAIN may be a misread, not a mistake. Mark the most plausible reading and describe in readingConcern how a different reading would change the mark.
 - Cite the element ids you relied on and short quotes copied exactly from them.
-- If the answer is missing or unreadable, set answerFound accordingly and award 0 for what is absent.
+- If the answer is missing, set answerFound accordingly. Unreadable handwriting is not a wrong answer: report the reading concern instead of guessing what was written.
 - feedback: one or two examiner-style sentences. lostMarks: what earned no credit and why, or "" if full marks.
 - correction: when marks were lost, the short correct working or answer a teacher would write in red under the answer (at most 60 characters, e.g. "Area = 7 x 5 = 35 cm²"); null when full marks or when no short correction fits.
 - confidence: your confidence from 0 to 1 that these marks are what an experienced examiner would award, considering how clearly you could read the answer and how clearly the scheme applies.
@@ -188,6 +188,9 @@ export function finalizeQuestion(q: SchemeQuestion, allowHalf: boolean, m: Model
     if (!flags.some((x) => x.code === f.code)) flags.push(f);
   }
 
+  // A high-uncertainty reading cannot justify either a red cross or a final score.
+  // Keep the proposal for review; teacher correction and re-marking can establish a valid mark.
+  if (unreadable.length) awarded = null;
   const full = awarded !== null && awarded >= q.maxMarks;
   // The record a "why" answer is read from: the answer as read, the scheme line behind each mark, the reason, the confidence.
   const rubricOf = new Map((q.marking === 'holistic' ? [] : (pathCriteria(q, path) ?? q.criteria)).map((c) => [c.id, c.description]));

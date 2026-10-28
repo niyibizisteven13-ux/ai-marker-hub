@@ -130,6 +130,10 @@ test('marking: code validates every mark, sums criteria, checks evidence and rai
   assert.equal(unknown.awardedMarks, null);
   const concern = finalizeQuestion(scheme.questions[1], false, { ...base, questionId: 'Q2', evidenceElementIds: ['p1-e3'], evidenceQuotes: [{ elementId: 'p1-e3', quote: '3 x 5 = 15' }], criterionResults: [{ criterionId: 'Q2-B1', awardedMarks: 2, reason: '' }], readingConcern: 'If 15 is 16 the answer is wrong.' }, match, meta);
   assert.equal(concern.awardedMarks, 2);
+  const unreadableMatch = structuredClone(match);
+  unreadableMatch.elements.find(e => e.id === 'p1-e3')!.uncertainty = 'high';
+  const unreadableMark = finalizeQuestion(scheme.questions[1], false, { ...base, questionId: 'Q2', evidenceElementIds: ['p1-e3'], evidenceQuotes: [{ elementId: 'p1-e3', quote: '3 x 5 = 15' }], criterionResults: [{ criterionId: 'Q2-B1', awardedMarks: 0, reason: 'Cannot read final digit' }] }, unreadableMatch, meta);
+  assert.equal(unreadableMark.awardedMarks, null, 'unreadable handwriting is held for review, never turned into a wrong-answer cross');
   assert.ok(concern.reviewFlags.some((f) => f.code === 'transcription_affects_mark' && f.severity === 'high'));
   assert.equal(finalizeQuestion(scheme.questions[1], false, undefined, match, meta).awardedMarks, null, 'a missing model result is never filled in');
 });
@@ -413,6 +417,31 @@ test('live marking persists validated questions before the next question and exp
   const pdf = await PDFDocument.load((await fileStore.read(artifact.classPdfFileId!, user)).data);
   assert.ok(pdf.getPageCount() >= 1);
   assert.ok(exams.artifactRefs(artifact).classPdfUrl);
+});
+
+test('handwriting review provides owner-scoped source crops and invalidates a released mark after correction', async () => {
+  const user = 'teacher-source';
+  const exam = await exams.createExam(user, { title: 'Handwriting review' });
+  await exams.setSchemeJson(user, exam.id, SCHEME, { confirm: true });
+  const { accepted } = await exams.addSubmissions(user, exam.id, [{ name: 'C001.pdf', buffer: C001_PDF }]);
+  await exams.startMarking(user, exam.id); await waitRun(user, exam.id);
+  const review = await exams.reviewCandidate(user, exam.id, accepted[0].id);
+  const evidence = review.evidence.find(e => e.questionIds.includes('Q1'))!;
+  assert.ok(evidence.text);
+  assert.match(evidence.cropUrl, /evidence/);
+  const crop = await exams.evidenceCrop(user, exam.id, accepted[0].id, evidence.id);
+  const meta = await sharp(crop).metadata();
+  assert.equal(meta.format, 'jpeg');
+  assert.ok(meta.width! > 10 && meta.height! > 10);
+  await assert.rejects(() => exams.evidenceCrop('another-teacher', exam.id, accepted[0].id, evidence.id), /not found/i);
+  await exams.release(user, exam.id, [accepted[0].id]);
+  assert.equal((await exams.reviewCandidate(user, exam.id, accepted[0].id)).released, true);
+  await exams.correctTranscription(user, exam.id, { submission: accepted[0].id }, { elementId: evidence.id, to: '1. x = 4 (teacher checked)', remark: false });
+  const corrected = await exams.reviewCandidate(user, exam.id, accepted[0].id);
+  assert.equal(corrected.released, false, 'corrected readings require renewed teacher review');
+  assert.match(corrected.evidence.find(e => e.id === evidence.id)!.text, /teacher checked/);
+  assert.ok(corrected.questions.find(q => q.questionId === 'Q1')!.openReviewFlags.some(f => f.code === 'transcription_affects_mark'));
+  assert.equal(corrected.markedPdf?.stale, true);
 });
 
 test('end to end: batch marking, failures isolated, package contents match the persisted results', async () => {
