@@ -143,6 +143,35 @@ export function computeLayout(doc: DocumentResult, result: CandidateResult, tota
       }
     }
     items.push(mark);
+    // Place criterion symbols against their cited working, using the same geometry in PDFs.
+    if (!q.override && marks !== null && (q.ai?.criterionResults.length ?? 0) > 1) {
+      const reserved = taken.get(mark.page) ?? [];
+      if (mark.placed) taken.set(mark.page, reserved.slice(0, -1));
+      const steps: LayoutItem[] = [];
+      for (const c of q.ai!.criterionResults) {
+        const evidence = (c.evidenceElementIds ?? []).filter(id => !crossed.has(id)).map(id => boxes.get(id)).filter(b => b?.usable);
+        const last = evidence.sort((a, b) => b!.page - a!.page || b!.y1 - a!.y1)[0];
+        if (!last) break;
+        const h = SYMBOL * 1.25 / (aspectOf.get(last.page) ?? 1.414);
+        const label = `${fmt(c.awardedMarks)}/${fmt(c.maxMarks)}`;
+        const w = markWidth(1, label), x = last.x1 + 0.015, y = (last.y0 + last.y1) / 2;
+        const box = { x0: x, x1: x + w, y0: y - h / 2, y1: y + h / 2 };
+        if (!isFree(last.page, box) || steps.some(it => it.page === last.page && overlaps(box, { x0: it.fx, x1: it.fx + it.w, y0: it.fy - it.h / 2, y1: it.fy + it.h / 2 }))) break;
+        steps.push({ ...base, id: `${q.questionId}:criterion:${c.criterionId}`, kind: 'mark', page: last.page,
+          fx: x, fy: y, w, h, placed: true, auto: true, hidden: false, label,
+          symbols: [c.awardedMarks >= c.maxMarks ? 'tick' : c.awardedMarks <= 0 ? 'cross' : 'half'] });
+      }
+      if (steps.length === q.ai!.criterionResults.length) {
+        mark.symbols = []; // Keep the question total, without duplicating the step symbols.
+        mark.placed = false;
+        for (const step of steps) { items.push(step); take(step.page, { x0: step.fx, x1: step.fx + step.w, y0: step.fy - step.h / 2, y1: step.fy + step.h / 2 }); }
+        for (let k = 1; k <= 12; k++) {
+          const y = mark.fy + k * mark.h;
+          const box = { x0: mark.fx, x1: mark.fx + mark.w, y0: y - mark.h / 2, y1: y + mark.h / 2 };
+          if (isFree(mark.page, box)) { mark.fy = y; mark.placed = true; take(mark.page, box); break; }
+        }
+      } else taken.set(mark.page, reserved);
+    }
 
     const text = marks !== null && marks < q.maxMarks ? q.ai?.correction?.trim() : '';
     if (text) {

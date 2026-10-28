@@ -217,6 +217,9 @@ export interface MarkCandidateInput {
   fallbackModel?: string | null;
   /** Questions per model call. */
   chunkSize?: number;
+  /** Validated checkpoints from this run; never reuse a different scheme or run. */
+  checkpoints?: Record<string, AiQuestionMark>;
+  onStartQuestion?: (questionId: string) => Promise<void>;
   imagesForQuestions?: (ids: string[]) => Promise<string[]>;
   /** Called only after the question proposal has passed deterministic validation. */
   onQuestion?: (questionId: string, mark: AiQuestionMark) => Promise<void>;
@@ -225,12 +228,23 @@ export interface MarkCandidateInput {
 export async function markCandidate(adapter: ProviderAdapter, model: string, input: MarkCandidateInput): Promise<{ marks: Record<string, AiQuestionMark>; usage: { input: number; output: number } }> {
   const qs = input.scheme.questions.filter((q) => input.questionIds.includes(q.id));
   const numberOf = new Map(input.scheme.questions.map((q) => [q.id, q.number]));
-  const transcript = input.match.elements.map((e) => transcriptLine(e, numberOf)).join('\n');
+
   const usage = { input: 0, output: 0 };
   const marks: Record<string, AiQuestionMark> = {};
-  const size = input.chunkSize ?? 6;
-  for (let i = 0; i < qs.length; i += size) {
-    const chunk = qs.slice(i, i + size);
+  for (const q of qs) {
+    const saved = input.checkpoints?.[q.id];
+    if (saved?.runId === input.runId && saved.schemeVersion === input.schemeVersion && !saved.reviewFlags.some(f => f.code === 'marking_failed')) marks[q.id] = saved;
+  }
+  const pending = qs.filter(q => !marks[q.id]);
+  const size = Math.max(1, Math.min(6, Math.floor(input.chunkSize || 2)));
+  for (let i = 0; i < pending.length; i += size) {
+    const chunk = pending.slice(i, i + size);
+    if (input.signal?.aborted) throw input.signal.reason;
+    await input.onStartQuestion?.(chunk[0].id);
+    // Keep all unassigned/ambiguous evidence; omit confidently unrelated answers.
+    const ids = new Set(chunk.map(q => q.id));
+    const focused = input.match.elements.filter(e => !e.questionIds.length || e.questionIds.some(id => ids.has(id)));
+    const transcript = focused.map(e => transcriptLine(e, numberOf)).join('\n');
     let out: ModelMark[] = [];
     try {
       const res = await generateStructured<{ questions: ModelMark[] }>(adapter, {

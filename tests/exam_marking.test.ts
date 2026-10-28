@@ -853,3 +853,49 @@ test('inputs: a ZIP folder becomes one script per student; typed answers are pri
   assert.equal(typed.mime, 'application/pdf');
   assert.equal((await fileStore.read(typed.originalFileId!, user)).data.toString(), '1) x + 2 = 6\nx = 4', 'the teacher\'s file is kept unchanged');
 });
+
+test('incremental marking focuses context and resumes only validated same-run checkpoints', async () => {
+  const scheme = validateScheme(SCHEME).scheme!;
+  const match = matchAnswers(docOf([[{ id: 'e1', text: '1. x = 4 unrelated-secret' }, { id: 'e2', text: '2. 3 x 5 = 15' }]]), [], scheme);
+  let requests = 0;
+  const focused: ProviderAdapter = { name: 'focused', async *stream(req) { requests++; assert.ok(!textOf(req).includes('unrelated-secret')); yield* adapter.stream(req); } };
+  const options = { scheme, questionIds: ['Q2'], match, runId: 'checkpoint', schemeVersion: 1, chunkSize: 1 };
+  const first = await markCandidate(focused, 'fake', options);
+  const resumed = await markCandidate(focused, 'fake', { ...options, checkpoints: first.marks });
+  assert.equal(requests, 1);
+  assert.deepEqual(resumed.marks, first.marks);
+  await markCandidate(focused, 'fake', { ...options, runId: 'new-run', checkpoints: first.marks });
+  assert.equal(requests, 2);
+});
+
+test('live work counters count persisted questions, expose active work and separate failures', async () => {
+  const exam = await exams.createExam('progress-teacher', { title: 'Progress' });
+  await exams.setSchemeJson('progress-teacher', exam.id, SCHEME, { confirm: true });
+  await exams.addSubmissions('progress-teacher', exam.id, [{ name: 'C001.pdf', buffer: C001_PDF }]);
+  const loaded = await exams.load('progress-teacher', exam.id);
+  loaded.submissions[0].state = 'marking';
+  loaded.submissions[0].activity = { questionId: 'Q2', at: new Date().toISOString() };
+  const work = exams.progress(loaded).work;
+  assert.equal(work.totalQuestions, 2);
+  assert.equal(work.savedQuestions, 0);
+  assert.equal(work.active[0].question, '2');
+  assert.equal(work.percent, 0);
+});
+
+test('criterion evidence places separate red symbols next to working without duplicating summary symbols', async () => {
+  const scheme = validateScheme(SCHEME).scheme!;
+  const doc = docOf([[{ id: 'e1', text: '1. x + 2 = 6' }, { id: 'e2', text: 'x = 4' }]]);
+  const match = matchAnswers(doc, [], scheme);
+  const marked = await markCandidate(adapter, 'fake', { scheme, questionIds: ['Q1'], match, runId: 'layout-step', schemeVersion: 1 });
+  const ai = marked.marks.Q1;
+  ai.criterionResults[0].evidenceElementIds = ['p1-e1'];
+  ai.criterionResults[1].evidenceElementIds = ['p1-e2'];
+  const result: CandidateResult = { submissionId: 's', candidateId: 'c', runId: 'layout-step', schemeVersion: 1, updatedAt: '', usage: marked.usage,
+    questions: [{ questionId: 'Q1', number: '1', maxMarks: 3, ai, override: null, confirmed: null, mappedElementIds: ['p1-e1', 'p1-e2'], mappingFlags: [], history: [] }] };
+  const layout = computeLayout(doc, result, { total: 3, maxTotal: 3 });
+  const steps = layout.items.filter(i => i.id.includes(':criterion:'));
+  assert.equal(steps.length, 2);
+  assert.ok(steps.every(i => i.placed && i.fx >= 0.6));
+  assert.ok(steps[0].fy < steps[1].fy);
+  assert.deepEqual(layout.items.find(i => i.id === 'Q1:mark')!.symbols, []);
+});

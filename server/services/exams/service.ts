@@ -103,7 +103,7 @@ export function parseManifest(text: string): CandidateMapping[] {
 }
 
 export function createExamService(deps: ExamDeps) {
-  const concurrency = Math.max(1, deps.candidateConcurrency ?? 2);
+  const concurrency = Math.max(1, Math.min(4, Math.floor(deps.candidateConcurrency || 2)));
   const budget = deps.segmentBudgetMs ?? 8 * 60 * 1000;
   const maxCandidates = deps.maxCandidates ?? 100;
 
@@ -427,7 +427,7 @@ export function createExamService(deps: ExamDeps) {
   async function setState(userId: string, examId: string, submissionId: string, state: CandidateState, error?: { code: string; message: string }) {
     await mutate(userId, examId, (e) => {
       const s = e.submissions.find((x) => x.id === submissionId);
-      if (s) { s.state = state; s.stateAt = now(); if (error) s.error = error; else delete s.error; }
+      if (s) { s.state = state; s.stateAt = now(); if (error) s.error = error; else delete s.error; if (state !== 'marking') delete s.activity; }
     });
   }
 
@@ -470,6 +470,13 @@ export function createExamService(deps: ExamDeps) {
       marked = await markCandidate(agent.adapter, agent.model, { scheme, questionIds: scheme.questions.map((q) => q.id), match, questionPaperText: await questionPaperText(userId, exam), runId, schemeVersion: run.schemeVersion, signal, fallbackModel: agent.fallbackModel,
         imagesForQuestions: deps.visualEvidence ? ids => markingImages(userId, examId, sub.id, match, ids) : undefined,
         chunkSize: 1,
+        checkpoints: existing?.runId === runId ? Object.fromEntries(existing.questions.filter(q => q.ai).map(q => [q.questionId, q.ai!])) : undefined,
+        onStartQuestion: async questionId => {
+          await mutate(userId, examId, e => {
+            const s = e.submissions.find(x => x.id === sub.id)!;
+            s.activity = { questionId, at: now() };
+          });
+        },
         onQuestion: async (questionId, ai) => {
           await mutate(userId, examId, (e) => {
             const previous = e.results[sub.id];
@@ -482,7 +489,7 @@ export function createExamService(deps: ExamDeps) {
             });
             e.resultRevision++;
             e.results[sub.id] = { submissionId: sub.id, candidateId: sub.candidateId, runId, schemeVersion: run.schemeVersion,
-              questions, updatedAt: now(), usage: { input: 0, output: 0 } };
+              questions, updatedAt: now(), usage: previous?.runId === runId ? previous.usage : { input: 0, output: 0 } };
           });
         },
       });
@@ -998,7 +1005,7 @@ export function createExamService(deps: ExamDeps) {
     const sub = findSub(exam, ref);
     const res = sub ? exam.results[sub.id] : undefined;
     if (!sub || !res) throw new ExamInputError('UNKNOWN_CANDIDATE', `No marked script for "${ref}".`, 404);
-    const valid = itemId === 'total' || res.questions.some((q) => itemId === `${q.questionId}:mark` || itemId === `${q.questionId}:correction`);
+    const valid = itemId === 'total' || res.questions.some((q) => itemId === `${q.questionId}:mark` || itemId === `${q.questionId}:correction` || q.ai?.criterionResults.some(c => itemId === `${q.questionId}:criterion:${c.criterionId}`));
     if (!valid) throw new ExamInputError('UNKNOWN_ITEM', `No item "${itemId}" on this script.`, 404);
     if (!input.reset && !input.hidden && (input.page === undefined || input.fx === undefined || input.fy === undefined)) throw new ExamInputError('INVALID_REQUEST', 'Give page, fx and fy, or hidden, or reset.', 400);
     if (input.page !== undefined && (input.page < 1 || input.page > sub.pages)) throw new ExamInputError('UNKNOWN_PAGE', `Page ${input.page} does not exist.`, 404);
@@ -1059,7 +1066,20 @@ export function createExamService(deps: ExamDeps) {
     const subs = run ? e.submissions.filter((s) => run.submissionIds.includes(s.id)) : e.submissions;
     const counts: Partial<Record<CandidateState, number>> = {};
     for (const s of subs) counts[s.state] = (counts[s.state] ?? 0) + 1;
-    return { run: run ? { id: run.id, state: run.state, schemeVersion: run.schemeVersion, startedAt: run.startedAt ?? null, finishedAt: run.finishedAt ?? null, error: run.error ?? null } : null, counts, candidates: subs.map((s) => ({ submissionId: s.id, candidateId: s.candidateId, state: s.state, stateAt: s.stateAt, error: s.error ?? null })) };
+    const scheme = run ? schemeOf(e, run.schemeVersion) : confirmedScheme(e)?.scheme;
+    const totalQuestions = subs.length * (scheme?.questions.length ?? 0);
+    const savedQuestions = subs.reduce((n, s) => n + ((!run || e.results[s.id]?.runId === run.id) && e.results[s.id]?.schemeVersion === (run?.schemeVersion ?? confirmedScheme(e)?.version)
+      ? e.results[s.id].questions.filter(q => q.ai).length : 0), 0);
+    const finished = subs.filter(s => ['completed', 'completed_with_warnings'].includes(s.state)).length;
+    const failed = subs.filter(s => s.state === 'failed').length;
+    const active = subs.filter(s => !['queued', 'completed', 'completed_with_warnings', 'failed'].includes(s.state)).map(s => ({
+      submissionId: s.id, name: s.candidateName || s.candidateId, stage: s.state,
+      question: scheme?.questions.find(q => q.id === s.activity?.questionId)?.number ?? null,
+      since: s.activity?.at ?? s.stateAt,
+    }));
+    const work = { totalQuestions, savedQuestions, finished, failed, total: subs.length, active,
+      percent: totalQuestions ? Math.min(100, Math.floor(savedQuestions / totalQuestions * 100)) : 0 };
+    return { work, run: run ? { id: run.id, state: run.state, schemeVersion: run.schemeVersion, startedAt: run.startedAt ?? null, finishedAt: run.finishedAt ?? null, error: run.error ?? null } : null, counts, candidates: subs.map((s) => ({ submissionId: s.id, candidateId: s.candidateId, state: s.state, stateAt: s.stateAt, error: s.error ?? null })) };
   }
 
   return {
