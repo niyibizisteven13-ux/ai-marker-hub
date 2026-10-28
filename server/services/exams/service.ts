@@ -442,7 +442,7 @@ export function createExamService(deps: ExamDeps) {
     const scheme = schemeOf(exam, run.schemeVersion)!;
     const sub = exam.submissions.find((s) => s.id === submissionId)!;
     const existing = exam.results[sub.id];
-    if (existing?.runId === runId && existing.questions.every((q) => q.ai)) return; // already done in an earlier attempt
+    if (existing?.runId === runId && ['completed', 'completed_with_warnings'].includes(sub.state) && existing.questions.every((q) => q.ai)) return; // already done in an earlier attempt
 
     await setState(userId, examId, sub.id, 'validating');
     await setState(userId, examId, sub.id, 'recognizing');
@@ -457,7 +457,24 @@ export function createExamService(deps: ExamDeps) {
     const agent = deps.agent();
     let marked: Awaited<ReturnType<typeof markCandidate>>;
     try {
-      marked = await markCandidate(agent.adapter, agent.model, { scheme, questionIds: scheme.questions.map((q) => q.id), match, questionPaperText: await questionPaperText(userId, exam), runId, schemeVersion: run.schemeVersion, signal, fallbackModel: agent.fallbackModel });
+      marked = await markCandidate(agent.adapter, agent.model, { scheme, questionIds: scheme.questions.map((q) => q.id), match, questionPaperText: await questionPaperText(userId, exam), runId, schemeVersion: run.schemeVersion, signal, fallbackModel: agent.fallbackModel,
+        chunkSize: 1,
+        onQuestion: async (questionId, ai) => {
+          await mutate(userId, examId, (e) => {
+            const previous = e.results[sub.id];
+            const questions: QuestionResult[] = scheme.questions.map((q) => {
+              const old = previous?.questions.find((x) => x.questionId === q.id);
+              return { questionId: q.id, number: q.number, maxMarks: q.maxMarks,
+                ai: q.id === questionId ? ai : previous?.runId === runId ? old?.ai ?? null : null,
+                override: old?.override ?? null, confirmed: null,
+                mappedElementIds: match.questions[q.id]?.elementIds ?? [], mappingFlags: match.questions[q.id]?.flags ?? [], history: old?.history ?? [] };
+            });
+            e.resultRevision++;
+            e.results[sub.id] = { submissionId: sub.id, candidateId: sub.candidateId, runId, schemeVersion: run.schemeVersion,
+              questions, updatedAt: now(), usage: { input: 0, output: 0 } };
+          });
+        },
+      });
     } catch (e) {
       throw mapProvider(e);
     }
@@ -742,6 +759,19 @@ export function createExamService(deps: ExamDeps) {
       if (pdf) { files.push({ path: `candidates/${name}`, data: pdf, kind: 'candidate_pdf' }); pdfPaths[s.submissionId] = `candidates/${name}`; }
       files.push({ path: `reports/${safeName(s.candidateId)}_marking.json`, data: Buffer.from(JSON.stringify(candidateReport(exam, s), null, 2)), kind: 'candidate_report' });
     }
+    const pdfFiles = files.filter((f) => f.kind === 'candidate_pdf');
+    if (pdfFiles.length) {
+      try {
+        const combined = await PDFDocument.create();
+        for (const f of pdfFiles) {
+          const source = await PDFDocument.load(f.data);
+          for (const page of await combined.copyPages(source, source.getPageIndices())) combined.addPage(page);
+        }
+        set.classPdfFileId = (await deps.fileStore.put({ userId, name: 'class-marked-papers.pdf', mime: 'application/pdf', kind: 'pdf', data: Buffer.from(await combined.save()), ttlMs: RETENTION_MS })).id;
+      } catch {
+        set.problems.push('The combined class PDF could not be created. Download the individual marked PDFs or the class ZIP instead.');
+      }
+    }
     const meta = { runId, schemeVersion, generatedAt };
     const workbook = await buildWorkbook(exam, scheme, list, stats, meta);
     const data = buildReportData(exam, scheme, list, stats, pdfPaths, meta);
@@ -793,7 +823,7 @@ export function createExamService(deps: ExamDeps) {
   function artifactRefs(set: ArtifactSet) {
     const ttl = 60 * 60 * 1000;
     const url = (id?: string) => (id ? deps.fileStore.signedUrl(id, ttl) : null);
-    return { id: set.id, resultRevision: set.resultRevision, createdAt: set.createdAt, status: set.status, problems: set.problems, bundleUrl: url(set.bundleFileId), workbookUrl: url(set.workbookFileId), reportUrl: url(set.htmlFileId), summaryUrl: url(set.summaryFileId) };
+    return { id: set.id, resultRevision: set.resultRevision, createdAt: set.createdAt, status: set.status, problems: set.problems, classPdfUrl: url(set.classPdfFileId), candidatePdfs: Object.entries(set.candidatePdfs).map(([submissionId, id]) => ({ submissionId, name: `${submissionId}.pdf`, url: url(id) })), bundleUrl: url(set.bundleFileId), workbookUrl: url(set.workbookFileId), reportUrl: url(set.htmlFileId), summaryUrl: url(set.summaryFileId) };
   }
 
   async function artifacts(userId: string, examId: string) {

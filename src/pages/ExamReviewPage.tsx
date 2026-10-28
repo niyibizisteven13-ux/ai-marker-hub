@@ -26,7 +26,7 @@ interface Question {
   answerAsRead: string | null; correction: string | null; confidence: Item['confidence']; openReviewFlags: Array<{ code: string; detail: string; severity: string }>;
 }
 interface CandidateRow { submissionId: string; candidateId: string; candidateName: string | null; total: number; maxTotal: number; percent: number; openFlags: number; lowConfidence: number; released: boolean; changedSinceRelease: boolean; complete: boolean }
-interface Review {
+export interface Review {
   exam: { examId: string; title: string; allowHalfMarks: boolean };
   candidate: { submissionId: string; candidateId: string; candidateName: string | null; fileName: string };
   summary: { total: number; maxTotal: number; percent: number };
@@ -56,7 +56,7 @@ function SymbolSvg({ kind, size }: { kind: Sym; size: number }) {
 
 const confTone = (l?: string) => (l === 'high' ? 'bg-emerald-500/12 text-emerald-300 border-emerald-500/25' : l === 'medium' ? 'bg-amber-500/12 text-amber-300 border-amber-500/25' : 'bg-rose-500/12 text-rose-300 border-rose-500/25');
 
-function PageView({ examId, submissionId, page, aspect, items, selected, onSelect, onMove }: {
+export function PageView({ examId, submissionId, page, aspect, items, selected, onSelect, onMove }: {
   examId: string; submissionId: string; page: number; aspect: number; items: Item[]; selected: string | null;
   onSelect: (id: string | null) => void; onMove: (id: string, page: number, fx: number, fy: number) => void;
 }) {

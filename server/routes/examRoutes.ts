@@ -89,6 +89,14 @@ examsRouter.get('/:examId/rubric', async (req, res) => {
   } catch (err) { fail(req, res, err); }
 });
 
+// Draft from the visible questions or an optional question-paper upload; teacher confirms before use.
+examsRouter.post('/:examId/rubric/draft', withFiles([{ name: 'questionPaper', maxCount: 1 }]), async (req, res) => {
+  try {
+    const job = await examService.draftScheme(userIdOf(req), req.params.examId, { questionPaper: filesOf(req, 'questionPaper')[0] });
+    res.status(202).json({ job: FileJobQueue.publicView(job), requestId: rid(req) });
+  } catch (err) { fail(req, res, err); }
+});
+
 examsRouter.post('/:examId/rubric/confirm', async (req, res) => {
   try {
     const body = z.object({ version: z.number().int().positive().optional() }).strict().parse(req.body ?? {});

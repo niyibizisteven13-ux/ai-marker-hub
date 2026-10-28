@@ -212,6 +212,8 @@ export interface MarkCandidateInput {
   fallbackModel?: string | null;
   /** Questions per model call. */
   chunkSize?: number;
+  /** Called only after the question proposal has passed deterministic validation. */
+  onQuestion?: (questionId: string, mark: AiQuestionMark) => Promise<void>;
 }
 
 export async function markCandidate(adapter: ProviderAdapter, model: string, input: MarkCandidateInput): Promise<{ marks: Record<string, AiQuestionMark>; usage: { input: number; output: number } }> {
@@ -246,7 +248,10 @@ export async function markCandidate(adapter: ProviderAdapter, model: string, inp
       // A malformed answer for this chunk is a per-question failure; provider errors propagate for a retry.
       if (!(e instanceof StructuredOutputError)) throw e;
     }
-    for (const q of chunk) marks[q.id] = finalizeQuestion(q, input.scheme.allowHalfMarks, out.find((x) => x.questionId === q.id), input.match, { runId: input.runId, schemeVersion: input.schemeVersion, model });
+    for (const q of chunk) {
+      marks[q.id] = finalizeQuestion(q, input.scheme.allowHalfMarks, out.find((x) => x.questionId === q.id), input.match, { runId: input.runId, schemeVersion: input.schemeVersion, model });
+      await input.onQuestion?.(q.id, marks[q.id]);
+    }
   }
   return { marks, usage };
 }

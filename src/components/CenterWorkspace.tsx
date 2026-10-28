@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { NavigationTab, ExamPaper, UploadedFile, StudentScript } from '../types';
 import { ResultsView } from './ResultsView';
+import ScanMarkWorkspace, { type ScanBatch } from './ScanMarkWorkspace';
 import {
   Plus, Check, X, Type, Maximize2, Sparkles, Trash2, RotateCcw, Award, Flag, Paperclip, Wrench, Bold, Italic, Underline, List, Link as LinkIcon,
   Clock, BookOpen, Layout, FileText, Link2, ArrowLeft, ArrowUp, ArrowDown, Copy, AlignLeft, Image as ImageIcon, Video,
@@ -14,6 +15,9 @@ import { authFetch } from '../utils/authFetch';
 import { copyToClipboard } from '../utils/copyToClipboard';
 
 interface CenterWorkspaceProps {
+  scanBatch?: ScanBatch | null;
+  onScanExamReady?: (examId: string) => void;
+  onCloseScanBatch?: () => void;
   activeTab?: NavigationTab;
   examPaper: ExamPaper | null;
   setExamPaper?: (exam: ExamPaper) => void;
@@ -153,6 +157,9 @@ const FORM_BUILDER_API_TYPES: Record<string, ManualQuestionType> = {
 
 export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
   activeTab,
+  scanBatch,
+  onScanExamReady,
+  onCloseScanBatch,
   examPaper,
   setExamPaper,
   uploadedFiles,
@@ -1217,6 +1224,13 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
     );
   };
 
+  if (scanBatch && activeTab === 'marking_hub') return (
+    <div className="flex-1 min-w-0 h-full overflow-hidden lg:pt-12">
+      <ScanMarkWorkspace key={scanBatch.id} batch={scanBatch} onExamReady={(id) => onScanExamReady?.(id)} onClose={() => onCloseScanBatch?.()} onScan={onOpenScanner}
+        onResults={(scripts) => setStudentScripts?.(scripts)} />
+    </div>
+  );
+
   return (
     <div className="flex-1 min-h-[50vh] h-auto lg:h-full lg:pt-12 flex flex-col bg-[#FBF9F6] dark:bg-[#171717] overflow-y-auto select-text relative">
       <div className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-[#E8E4DC] bg-[#FBF9F6]/95 px-4 py-2 text-xs dark:border-[#2D2D32] dark:bg-[#141416]/95">
@@ -1879,87 +1893,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                       )}
                     </div>
 
-                    {/* 2. AI Re-Evaluate Tool */}
-                    <div className="relative flex items-center">
-                      <button
-                        onClick={() => setShowReGradePrompt((prev) => !prev)}
-                        className={`px-2.5 py-1 rounded-full text-xs font-medium flex items-center space-x-1 transition-colors cursor-pointer ${
-                          showReGradePrompt || isReGrading
-                            ? 'bg-blue-600 text-white shadow-xs'
-                            : 'text-[#52504A] dark:text-[#A0A0AA] hover:text-[#191919] dark:hover:text-white'
-                        }`}
-                        title="Re-scan answer with custom AI grading rules"
-                      >
-                        <Sparkles className="w-3 h-3" />
-                        <span>AI Re-Grade</span>
-                      </button>
-
-                      {showReGradePrompt && (
-                        <div className="flex items-center space-x-1 ml-1 px-2 py-0.5 rounded-full bg-[#F4F0E8] dark:bg-[#202024] border border-[#E8E4DC] dark:border-[#2D2D32] animate-in fade-in zoom-in-95 duration-150">
-                          <input
-                            type="text"
-                            value={reGradePromptText}
-                            onChange={(e) => setReGradePromptText(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                if (!reGradePromptText.trim()) return;
-                                setIsReGrading(true);
-                                setTimeout(() => {
-                                  setIsReGrading(false);
-                                  setAnnotations((prev) => [
-                                    ...prev,
-                                    {
-                                      id: 'regrade-' + Date.now(),
-                                      x: 180,
-                                      y: 120,
-                                      text: `🤖 AI Re-Grade Rule: "${reGradePromptText}" (+1 mark awarded)`,
-                                      type: 'score',
-                                    },
-                                  ]);
-                                  if (onUpdateBonusMarks) {
-                                    onUpdateBonusMarks((currentSelectedFile?.id ?? ''), ((currentSelectedFile?.bonusMarks ?? '') || 0) + 1);
-                                  }
-                                  setReGradePromptText('');
-                                  setShowReGradePrompt(false);
-                                }, 500);
-                              }
-                            }}
-                            placeholder="e.g. Be lenient on Q2 derivation..."
-                            className="bg-transparent text-xs px-2 py-0.5 outline-none w-44 sm:w-52 text-[#191919] dark:text-[#F3F3F3] placeholder:text-[#858075]"
-                            autoFocus
-                          />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (!reGradePromptText.trim()) return;
-                              setIsReGrading(true);
-                              setTimeout(() => {
-                                setIsReGrading(false);
-                                setAnnotations((prev) => [
-                                  ...prev,
-                                  {
-                                    id: 'regrade-' + Date.now(),
-                                    x: 180,
-                                    y: 120,
-                                    text: `🤖 AI Re-Grade Rule: "${reGradePromptText}" (+1 mark awarded)`,
-                                    type: 'score',
-                                  },
-                                ]);
-                                if (onUpdateBonusMarks) {
-                                  onUpdateBonusMarks((currentSelectedFile?.id ?? ''), ((currentSelectedFile?.bonusMarks ?? '') || 0) + 1);
-                                }
-                                setReGradePromptText('');
-                                setShowReGradePrompt(false);
-                              }, 500);
-                            }}
-                            disabled={isReGrading}
-                            className="px-2 py-0.5 rounded-full bg-[#D97757] text-white text-[10px] font-bold hover:bg-[#c26243] transition-colors cursor-pointer flex items-center space-x-1 shrink-0"
-                          >
-                            {isReGrading ? <span>Re-scanning...</span> : <span>Re-Scan</span>}
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                    <a href="/exams" className="px-2.5 py-1 rounded-full text-xs font-medium text-[#52504A] dark:text-[#A0A0AA] hover:underline" title="Open saved marking records for real AI re-marking and teacher review">Review marked exams</a>
 
                     {/* 3. Flag Review Tool */}
                     <button

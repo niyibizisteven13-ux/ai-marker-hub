@@ -296,6 +296,7 @@ const calls = { recognition: 0, marking: [] as string[][], extraction: 0, drafts
 const textOf = (req: ProviderRequest) => req.messages.map((m) => (typeof m.content === 'string' ? m.content : (m.content as any[]).map((c) => c.text ?? '').join(''))).join('\n');
 const imageOf = (req: ProviderRequest) => { for (const m of req.messages) if (Array.isArray(m.content)) for (const c of m.content as any[]) if (c.type === 'image_url') return c.image_url.url as string; return null; };
 
+let onMarkRequest: ((ids: string[]) => Promise<void>) | undefined;
 const adapter: ProviderAdapter = {
   name: 'fake',
   async *stream(req) {
@@ -331,6 +332,7 @@ const adapter: ProviderAdapter = {
       const prompt = textOf(req);
       const ids = /Mark exactly these question ids: ([^\n.]+)/.exec(prompt)![1].split(',').map((x) => x.trim());
       calls.marking.push(ids);
+      await onMarkRequest?.(ids);
       assert.ok(!/C00\d/.test(prompt.split('<candidate_script>')[1]), 'the marker never sees the candidate id');
       const lines = [...prompt.matchAll(/^\[(p\d+-e\d+) [^\]]*\] (.*)$/gm)].map((m) => ({ id: m[1], text: m[2] }));
       const find = (s: string) => lines.find((l) => l.text.includes(s));
@@ -384,6 +386,34 @@ async function waitJob(user: string, id: string) {
   }
   throw new Error('job did not finish');
 }
+
+test('live marking persists validated questions before the next question and exports a combined PDF', async () => {
+  const user = 'teacher-live';
+  const exam = await exams.createExam(user, { title: 'Live scan' });
+  await exams.setSchemeJson(user, exam.id, SCHEME, { confirm: true });
+  const uploaded = await exams.addSubmissions(user, exam.id, [{ name: 'C001.pdf', buffer: C001_PDF }]);
+  const sub = uploaded.accepted[0];
+  let observed = false;
+  onMarkRequest = async (ids) => {
+    if (!ids.includes('Q2')) return;
+    const saved = await exams.load(user, exam.id);
+    assert.equal(saved.results[sub.id].questions[0].ai?.awardedMarks, 3);
+    assert.equal(saved.results[sub.id].questions[1].ai, null, 'no fabricated mark before evaluation');
+    const review = await exams.reviewCandidate(user, exam.id, sub.id);
+    assert.ok(review.layout.items.some(i => i.questionId === 'Q1' && i.placed));
+    assert.ok(!review.layout.items.some(i => i.questionId === 'Q2' && i.placed));
+    observed = true;
+  };
+  try { await exams.startMarking(user, exam.id); await waitRun(user, exam.id); }
+  finally { onMarkRequest = undefined; }
+  assert.ok(observed, 'question 1 was available to the viewer while question 2 was pending');
+  const done = await exams.load(user, exam.id);
+  const artifact = done.artifacts.find(a => a.status === 'ready')!;
+  assert.ok(artifact.classPdfFileId);
+  const pdf = await PDFDocument.load((await fileStore.read(artifact.classPdfFileId!, user)).data);
+  assert.ok(pdf.getPageCount() >= 1);
+  assert.ok(exams.artifactRefs(artifact).classPdfUrl);
+});
 
 test('end to end: batch marking, failures isolated, package contents match the persisted results', async () => {
   const user = 'teacher-1';

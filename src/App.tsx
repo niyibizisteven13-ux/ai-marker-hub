@@ -29,6 +29,7 @@ import {
 import { TopNavbar } from './components/TopNavbar';
 import { LeftSidebar } from './components/LeftSidebar';
 import { CenterWorkspace } from './components/CenterWorkspace';
+import type { ScanBatch } from './components/ScanMarkWorkspace';
 import UpgradeSheet from './components/UpgradeSheet';
 import RightChatSidebar from './components/RightChatSidebar';
 import { SidebarResultsPanel } from './components/SidebarResultsPanel';
@@ -787,12 +788,16 @@ export default function App() {
     }
   };
 
+  const [scanBatch, setScanBatch] = useState<ScanBatch | null>(null);
   const [scannerGeneratedForm, setScannerGeneratedForm] = useState<any | null>(null);
   const [openFormRequest, setOpenFormRequest] = useState(0);
 
   const handleSaveScannedPages = (
     pages: Array<{
       dataUrl: string;
+      id?: string;
+      filter?: any;
+      candidateId?: string;
       name?: string;
       studentName?: string;
       extractedText?: string;
@@ -820,27 +825,16 @@ export default function App() {
     }));
     setUploadedFiles((prev) => [...newUploaded, ...prev]);
 
-    const newScripts: StudentScript[] = pages.map((p, idx) => {
-      const awarded = p.aiScore ?? undefined;
-      const max = p.aiMaxScore ?? 100;
-      return {
-        id: `scan-script-${now}-${idx}`,
-        sourceFileId: `scan-file-${now}-${idx}`,
-        studentName: p.studentName || `Student ${idx + 1}`,
-        studentId: `SCN-${100 + idx}`,
-        submittedAt: new Date().toISOString(),
-        status: awarded !== undefined ? ('marked' as const) : ('pending' as const),
-        totalAwardedMarks: awarded,
-        maxTotalMarks: max,
-        percentage: awarded !== undefined ? Math.round((awarded / max) * 100) : undefined,
-        overallFeedback: p.aiFeedback || p.aiSummary || '',
-        answers: [
-          // The review screen shows questionNumber and answerText; the scan's mark and feedback are on the script.
-          { questionId: 'q1', questionNumber: '1', answerText: p.extractedText || 'Scanned answer page' },
-        ],
-      };
-    });
-    setStudentScripts((prev) => [...newScripts, ...prev]);
+    const grouped = new Map<string, typeof pages>();
+    pages.forEach((p, i) => { const id = p.candidateId || p.studentName || `paper-${i}`; grouped.set(id, [...(grouped.get(id) || []), p]); });
+    const newScripts: StudentScript[] = Array.from(grouped.values()).map((paper, idx) => ({
+      id: `scan-script-${now}-${idx}`, sourceFileId: `scan-file-${now}-${pages.indexOf(paper[0])}`,
+      studentName: paper[0].studentName || `Student ${idx + 1}`, studentId: `SCN-${String(idx + 1).padStart(3, '0')}`,
+      submittedAt: new Date().toISOString(), status: 'pending', answers: [],
+    }));
+    setStudentScripts(newScripts);
+    setScanBatch({ id: String(now), pages: pages.map((p, i) => ({ ...p, id: p.id || `scan-${now}-${i}`, filter: p.filter || 'color' })) });
+    setActiveTab('marking_hub');
 
     const attachments: ChatAttachment[] = pages.map((p, idx) => ({
       id: 'att-page-' + now + '-' + idx,
@@ -851,20 +845,15 @@ export default function App() {
       fileType: 'image',
     }));
 
-    const ocrSummary = pages
-      .map((p, idx) =>
-        p.extractedText
-          ? `[Page ${idx + 1} - ${p.studentName || 'Student'}${p.aiScore !== undefined ? ` (AI Score: ${p.aiScore}/${p.aiMaxScore || 100})` : ''}]:\n${p.extractedText}`
-          : ''
-      )
-      .filter(Boolean)
-      .join('\n\n');
-
-    const promptText = ocrSummary
-      ? `Here are ${pages.length} scanned answer sheet(s) from BwengeScan with AI OCR & preliminary grading:\n\n${ocrSummary}\n\nPlease review the extracted answers, verify the rubric grading, and provide a summary of student performance.`
-      : `Here are ${pages.length} scanned answer sheet(s) captured via BwengeScan. Please analyze and grade them.`;
-
-    void handleSendMessage(promptText, attachments);
+    // The workspace owns this marking session; do not start a second independent chat grading run.
+    setMessages(prev => [...prev, {
+      id: `scan-message-${now}`, sender: 'user', text: `Mark these scanned papers: ${grouped.size} students, ${pages.length} JPEG pages.`,
+      attachments, timestamp: new Date().toISOString(),
+    }, {
+      id: `scan-reply-${now}`, sender: 'assistant',
+      text: 'Your scanned papers are open in the workspace. Attach a marking scheme there, or choose Use AI draft if the questions are visible. If these pages contain only answers, attach the question paper. Validated red marks will appear as each question is checked.',
+      timestamp: new Date().toISOString(),
+    }]);
   };
 
   const handleSendMessage = async (
@@ -1323,6 +1312,9 @@ export default function App() {
   const workspacePane = (
     <CenterWorkspace
       activeTab={activeTab}
+      scanBatch={scanBatch}
+      onScanExamReady={(examId) => setScanBatch(prev => prev && prev.id === scanBatch?.id ? { ...prev, examId } : prev)}
+      onCloseScanBatch={() => setScanBatch(null)}
       examPaper={examPaper}
       setExamPaper={setExamPaper}
       uploadedFiles={uploadedFiles}
@@ -1369,7 +1361,7 @@ export default function App() {
       batchTitle={examPaper?.title || 'Batch Results'}
       excelDownloadUrl={excelDownloadUrl}
       isGenerating={isGeneratingExcel}
-      results={studentScripts.map((script) => ({
+      results={studentScripts.filter(script => script.totalAwardedMarks !== undefined).map((script) => ({
         id: script.studentId,
         name: script.studentName,
         score: script.totalAwardedMarks ?? 0,

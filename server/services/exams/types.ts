@@ -159,6 +159,7 @@ export interface ArtifactSet {
   status: 'generating' | 'ready' | 'failed';
   error?: string;
   bundleFileId?: string;
+  classPdfFileId?: string;
   workbookFileId?: string;
   htmlFileId?: string;
   summaryFileId?: string;
