@@ -1244,7 +1244,10 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
       surfaceNote = `[Context: the user is in the form editor with the form "${String(row.title).slice(0, 120)}" (formId ${surfaceId}) open. "This form" means formId ${surfaceId}: use the form tools (edit_form, review_form, publish_form, analyze_form, form_report) with it. After a change, say briefly what changed; the editor reloads by itself.]`;
     } catch { /* not their form: answer as a normal chat */ }
   }
-  if (surface === 'exam' && surfaceId) await examChat.focus(userId, surfaceId).catch(() => undefined);
+  if (surface === 'exam' && surfaceId) {
+    try { await examChat.focus(userId, surfaceId, req.body.surfaceSubmissionId); }
+    catch { return res.status(404).json({ error: 'The selected examination or paper is unavailable.' }); }
+  }
   /** What the output planner reads: on the form editor every request is form work. */
   const planQuery = surfaceNote ? `edit my form: ${query || ''}` : query || '';
   // ── Examination marking through the chat ────────────────────────────────
@@ -1292,7 +1295,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
         const recs = await prisma.fileRecord.findMany({ where: { id: { in: finalAttachmentIds }, userId }, select: { name: true, path: true, mimeType: true } });
         for (const r of recs) if (r.path) { try { examFiles.push({ name: r.name, buffer: await fs.readFile(r.path), mime: r.mimeType }); } catch { /* file gone */ } }
       }
-      const examReply = surface === 'form' ? null : await examChat.handle(userId, query || '', examFiles, { onStatus: examStatus });
+      const examReply = surface === 'form' ? null : await examChat.handle(userId, query || '', examFiles, { onStatus: examStatus, submissionId: surface === 'exam' ? req.body.surfaceSubmissionId : undefined, questionId: surface === 'exam' ? req.body.surfaceQuestionId : undefined });
       if (examReply) {
         const em = openExamStream();
         if (examStep) em.status(examStep.id, examStep.label, 'done');

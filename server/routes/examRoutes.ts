@@ -1,6 +1,11 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import multer from 'multer';
 import sharp from 'sharp';
+import os from 'node:os';
+import path from 'node:path';
+import fs from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { markingLimits } from '../services/exams/limits.js';
 import { z } from 'zod';
 import { FileStoreError } from '../services/ai/files/FileStore.js';
 import { FileJobQueue, JobError } from '../services/ai/jobs/fileJobQueue.js';
@@ -32,12 +37,26 @@ function fail(req: Request, res: Response, err: unknown) {
   return res.status(500).json({ code: 'INTERNAL_ERROR', error: 'The request could not be completed.', requestId });
 }
 
-const MAX_FILES = Number(process.env.EXAM_MAX_FILES_PER_UPLOAD) > 0 ? Number(process.env.EXAM_MAX_FILES_PER_UPLOAD) : 30;
-const examUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024, files: MAX_FILES + 2, fields: 20, parts: MAX_FILES + 25, fieldSize: 1024 * 1024 } });
+const MAX_FILES = markingLimits.maxCandidates;
+const uploadDir = path.join(os.tmpdir(), `bwenge-exams-${randomUUID()}`);
+const examUpload = multer({ storage: multer.diskStorage({ destination: (_req, _file, cb) => { void fs.mkdir(uploadDir, { recursive: true, mode: 0o700 }).then(() => cb(null, uploadDir), error => cb(error as Error, uploadDir)); }, filename: (_req, _file, cb) => cb(null, `bwenge-exam-${randomUUID()}`) }), limits: { fileSize: markingLimits.maxFileBytes, files: MAX_FILES + 2, fields: 20, parts: MAX_FILES + 25, fieldSize: 1024 * 1024 } });
 
 const withFiles = (fields: multer.Field[]) => (req: Request, res: Response, next: NextFunction) => {
   examUpload.fields(fields)(req, res, (err?: unknown) => {
-    if (!err) return next();
+    if (!err) {
+      const files = Object.values((req.files || {}) as Record<string, Express.Multer.File[]>).flat();
+      void (async () => {
+        try {
+          if (files.reduce((sum, file) => sum + file.size, 0) > markingLimits.maxUploadBytes) {
+            res.status(413).json({ code: 'TOO_LARGE', error: 'This upload exceeds the batch size limit. Send a smaller batch.' }); return;
+          }
+          for (const file of files) file.buffer = await fs.readFile(file.path);
+          next();
+        } catch (error) { next(error); }
+        finally { await Promise.allSettled(files.map(file => fs.unlink(file.path))); }
+      })();
+      return;
+    }
     if (err instanceof multer.MulterError) return res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ code: err.code === 'LIMIT_FILE_SIZE' ? 'TOO_LARGE' : 'INVALID_UPLOAD', error: err.message, requestId: rid(req) });
     return res.status(400).json({ code: 'INVALID_UPLOAD', error: 'Upload rejected.', requestId: rid(req) });
   });
@@ -48,6 +67,7 @@ const filesOf = (req: Request, field: string) => ((req.files as Record<string, E
 const examRef = async (req: Request) => examService.load(userIdOf(req), req.params.examId);
 
 export const examsRouter = Router();
+examsRouter.get('/limits', (_req, res) => res.json(markingLimits));
 
 examsRouter.post('/', async (req, res) => {
   try {
@@ -181,6 +201,11 @@ examsRouter.get('/:examId/jobs/:jobId', async (req, res) => {
   } catch (err) { fail(req, res, err); }
 });
 
+examsRouter.post('/:examId/stop', async (req, res) => {
+  try { res.json(await examService.stopMarking(userIdOf(req), req.params.examId)); }
+  catch (err) { fail(req, res, err); }
+});
+
 examsRouter.get('/:examId/results', async (req, res) => {
   try {
     const e = await examRef(req);
@@ -253,6 +278,10 @@ examsRouter.get('/:examId/submissions/:submissionId/pages/:page', async (req, re
     const page = z.coerce.number().int().min(1).max(500).parse(req.params.page);
     let jpg = await examService.pageImage(userIdOf(req), req.params.examId, req.params.submissionId, page);
     if (req.query.thumbnail === '1') jpg = await sharp(jpg).resize({ width: 140, withoutEnlargement: true }).jpeg({ quality: 65 }).toBuffer();
+    else if (req.query.width !== undefined) {
+      const width = Number(z.enum(['1000', '1600', '2200']).parse(req.query.width));
+      jpg = await sharp(jpg).resize({ width, withoutEnlargement: true }).jpeg({ quality: 88 }).toBuffer();
+    }
     res.setHeader('Content-Type', 'image/jpeg');
     res.setHeader('Cache-Control', 'private, max-age=600');
     res.setHeader('X-Content-Type-Options', 'nosniff');

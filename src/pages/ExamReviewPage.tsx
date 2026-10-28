@@ -19,7 +19,7 @@ interface Item {
   placed: boolean; auto: boolean; hidden: boolean; symbols?: Sym[]; label?: string; text?: string; flagged?: boolean;
   confidence?: { level: 'high' | 'medium' | 'low'; score: number; basis: string[] } | null;
 }
-interface Criterion { criterionId: string; awardedMarks: number; maxMarks: number; reason: string; rubric?: string }
+interface Criterion { criterionId: string; awardedMarks: number; maxMarks: number; reason: string; rubric?: string; evidenceElementIds?: string[] }
 interface Question {
   questionId: string; number: string; maxMarks: number; awardedMarks: number | null; source: string; aiProposedMarks: number | null;
   override: { marks: number; reason: string } | null; criterionResults: Criterion[]; feedback: string; lostMarks: string;
@@ -56,13 +56,15 @@ function SymbolSvg({ kind, size }: { kind: Sym; size: number }) {
 
 const confTone = (l?: string) => (l === 'high' ? 'bg-emerald-500/12 text-emerald-300 border-emerald-500/25' : l === 'medium' ? 'bg-amber-500/12 text-amber-300 border-amber-500/25' : 'bg-rose-500/12 text-rose-300 border-rose-500/25');
 
-export function PageView({ examId, submissionId, page, aspect, items, selected, onSelect, onMove }: {
+export function PageView({ examId, submissionId, page, aspect, items, selected, onSelect, onMove, editable = true }: {
   examId: string; submissionId: string; page: number; aspect?: number; items: Item[]; selected: string | null;
+  editable?: boolean;
   onSelect: (id: string | null) => void; onMove: (id: string, page: number, fx: number, fy: number) => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const [src, setSrc] = useState<string | null>(null);
-  const [width, setWidth] = useState(800);
+  const [width, setWidth] = useState(() => typeof window === 'undefined' ? 800 : Math.min(800, window.innerWidth));
+  const deliveryWidth = width > 1100 ? 2200 : width > 600 ? 1600 : 1000;
   const [imageAspect, setImageAspect] = useState(1.414);
   const [imageError, setImageError] = useState(false);
   const [retryImage, setRetryImage] = useState(0);
@@ -73,14 +75,14 @@ export function PageView({ examId, submissionId, page, aspect, items, selected, 
     const controller = new AbortController();
     setSrc(null); setImageError(false);
     (async () => {
-      const res = await authFetch(`/api/exams/${examId}/submissions/${submissionId}/pages/${page}`, { signal: controller.signal });
+      const res = await authFetch(`/api/exams/${examId}/submissions/${submissionId}/pages/${page}?width=${deliveryWidth}`, { signal: controller.signal });
       if (!res.ok) throw new Error('Page unavailable');
       const blob = await res.blob();
       if (controller.signal.aborted) return;
       url = URL.createObjectURL(blob); setSrc(url);
     })().catch(() => { if (!controller.signal.aborted) setImageError(true); });
     return () => { controller.abort(); if (url) URL.revokeObjectURL(url); };
-  }, [examId, submissionId, page, retryImage]);
+  }, [examId, submissionId, page, retryImage, deliveryWidth]);
 
   useEffect(() => {
     const el = box.current;
@@ -94,6 +96,7 @@ export function PageView({ examId, submissionId, page, aspect, items, selected, 
   const down = (e: RPointerEvent, it: Item) => {
     e.stopPropagation();
     onSelect(it.id);
+    if (!editable) return;
     (e.target as Element).setPointerCapture?.(e.pointerId);
     setDrag({ id: it.id, dx: 0, dy: 0, sx: e.clientX, sy: e.clientY });
   };
@@ -114,7 +117,7 @@ export function PageView({ examId, submissionId, page, aspect, items, selected, 
         const d = drag?.id === it.id ? drag : null;
         const fx = it.fx + (d?.dx ?? 0), fy = it.fy + (d?.dy ?? 0);
         const sel = selected === it.id;
-        const ring = 'touch-none ' + (sel ? 'outline outline-2 outline-offset-2 outline-sky-500' : it.flagged || it.confidence?.level === 'low' ? 'outline outline-1 outline-dashed outline-offset-2 outline-orange-500' : 'hover:outline hover:outline-1 hover:outline-offset-2 hover:outline-sky-400');
+        const ring = (editable ? 'touch-none ' : '') + (sel ? 'outline outline-2 outline-offset-2 outline-sky-500' : it.flagged || it.confidence?.level === 'low' ? 'outline outline-1 outline-dashed outline-offset-2 outline-orange-500' : 'hover:outline hover:outline-1 hover:outline-offset-2 hover:outline-sky-400');
         const common = { onPointerDown: (e: RPointerEvent) => down(e, it), title: it.kind === 'mark' ? `Question ${it.number}: drag to move` : it.kind === 'correction' ? 'Correction: drag to move' : 'Total: drag to move' };
         if (it.kind === 'total') {
           const fs = Math.max(9, 0.03 * width);

@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { NavigationTab, ExamPaper, UploadedFile, StudentScript } from '../types';
 import { ResultsView } from './ResultsView';
-import ScanMarkWorkspace, { type ScanBatch } from './ScanMarkWorkspace';
+import ScanMarkWorkspace, { type ScanBatch, type MarkingContext } from './ScanMarkWorkspace';
 import {
   Plus, Check, X, Type, Maximize2, Sparkles, Trash2, RotateCcw, Award, Flag, Paperclip, Wrench, Bold, Italic, Underline, List, Link as LinkIcon,
   Clock, BookOpen, Layout, FileText, Link2, ArrowLeft, ArrowUp, ArrowDown, Copy, AlignLeft, Image as ImageIcon, Video,
@@ -16,6 +16,8 @@ import { copyToClipboard } from '../utils/copyToClipboard';
 
 interface CenterWorkspaceProps {
   scanBatch?: ScanBatch | null;
+  markingChat?: React.ReactNode;
+  onMarkingContext?: (context: MarkingContext) => void;
   onScanExamReady?: (examId: string) => void;
   onCloseScanBatch?: () => void;
   activeTab?: NavigationTab;
@@ -158,6 +160,8 @@ const FORM_BUILDER_API_TYPES: Record<string, ManualQuestionType> = {
 export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
   activeTab,
   scanBatch,
+  markingChat,
+  onMarkingContext,
   onScanExamReady,
   onCloseScanBatch,
   examPaper,
@@ -1225,8 +1229,8 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
   };
 
   if (scanBatch && activeTab === 'marking_hub') return (
-    <div className="flex-1 min-w-0 h-full overflow-hidden lg:pt-12">
-      <ScanMarkWorkspace key={scanBatch.id} batch={scanBatch} onExamReady={(id) => onScanExamReady?.(id)} onClose={() => onCloseScanBatch?.()} onScan={onOpenScanner}
+    <div className="flex-1 min-w-0 min-h-0 h-full overflow-hidden">
+      <ScanMarkWorkspace chat={markingChat} onContext={onMarkingContext} key={scanBatch.id} batch={scanBatch} onExamReady={(id) => onScanExamReady?.(id)} onClose={() => onCloseScanBatch?.()} onScan={onOpenScanner}
         onResults={(scripts) => setStudentScripts?.(scripts)} />
     </div>
   );

@@ -29,7 +29,8 @@ import {
 import { TopNavbar } from './components/TopNavbar';
 import { LeftSidebar } from './components/LeftSidebar';
 import { CenterWorkspace } from './components/CenterWorkspace';
-import type { ScanBatch } from './components/ScanMarkWorkspace';
+import { registerScannedPapers } from './services/scannedPapers';
+import type { ScanBatch, MarkingContext } from './components/ScanMarkWorkspace';
 import UpgradeSheet from './components/UpgradeSheet';
 import RightChatSidebar from './components/RightChatSidebar';
 import { SidebarResultsPanel } from './components/SidebarResultsPanel';
@@ -788,6 +789,7 @@ export default function App() {
     }
   };
 
+  const [markingContext, setMarkingContext] = useState<MarkingContext | null>(null);
   const [scanBatch, setScanBatch] = useState<ScanBatch | null>(null);
   // Store only the owner-scoped exam id, never scan images or student names in browser storage.
   useEffect(() => {
@@ -801,9 +803,10 @@ export default function App() {
   const [scannerGeneratedForm, setScannerGeneratedForm] = useState<any | null>(null);
   const [openFormRequest, setOpenFormRequest] = useState(0);
 
-  const handleSaveScannedPages = (
+  const handleSaveScannedPages = async (
     pages: Array<{
       dataUrl: string;
+      sourceDataUrl?: string;
       id?: string;
       filter?: any;
       candidateId?: string;
@@ -817,7 +820,9 @@ export default function App() {
       file?: File;
     }>
   ) => {
+    const saved = await registerScannedPapers(pages.map((p, i) => ({ ...p, id: p.id || `scan-${i}`, filter: p.filter || 'color' })));
     setScannerOpen(false);
+    try { if (authenticatedUser?.id) sessionStorage.setItem(`bwenge.scan.exam:${authenticatedUser.id}`, saved.examId); } catch {}
     const now = Date.now();
 
     const newUploaded: UploadedFile[] = pages.map((p, idx) => ({
@@ -842,7 +847,7 @@ export default function App() {
       submittedAt: new Date().toISOString(), status: 'pending', answers: [],
     }));
     setStudentScripts(newScripts);
-    setScanBatch({ id: String(now), pages: pages.map((p, i) => ({ ...p, id: p.id || `scan-${now}-${i}`, filter: p.filter || 'color' })) });
+    setScanBatch({ id: String(now), examId: saved.examId, pages: pages.map((p, i) => ({ ...p, id: p.id || `scan-${now}-${i}`, filter: p.filter || 'color' })) });
     setActiveTab('marking_hub');
 
     const attachments: ChatAttachment[] = pages.map((p, idx) => ({
@@ -1011,6 +1016,10 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           query: fullPrompt,
+          surface: scanBatch?.examId && activeTab === 'marking_hub' ? 'exam' : undefined,
+          surfaceId: scanBatch?.examId && activeTab === 'marking_hub' ? scanBatch.examId : undefined,
+          surfaceSubmissionId: scanBatch?.examId === markingContext?.examId ? markingContext?.submissionId : undefined,
+          surfaceQuestionId: scanBatch?.examId === markingContext?.examId ? markingContext?.questionId : undefined,
           provider: selectedProvider === 'auto' ? undefined : selectedProvider,
           history: requestMessages.slice(-10, -1).map((message) => ({
             role: message.sender === 'assistant' ? 'assistant' : 'user',
@@ -1318,10 +1327,46 @@ export default function App() {
     );
   }
 
+  const markingChatPane = (
+<RightChatSidebar
+                    messages={messages}
+                    chatSessions={chatSessions}
+                    onSendMessage={handleSendMessage}
+                    stagedAttachments={stagedAttachments}
+                    onStageAttachments={handleStageAttachments}
+                    attachmentError={attachmentError}
+                    onRemoveStagedAttachment={handleRemoveStagedAttachment}
+                    onClearStagedAttachments={handleClearStagedAttachments}
+                    activeDocument={activeDocument}
+                    setActiveDocument={setActiveDocument}
+                    onOpenScanner={openScanner}
+                    onNewChat={handleNewChat}
+                    onLoadSession={handleLoadChatSession}
+                    onClearChat={handleClearCurrentChat}
+                    onInsightAction={handleInsightAction}
+                    isDegraded={aiServiceState === 'degraded'}
+                    isTyping={isAiThinking}
+                    onUpgradeClick={(jobId, service) => {
+                      setUpgradeContext({ jobId, service });
+                      setUpgradeModalOpen(true);
+                    }}
+                    selectedProvider={selectedProvider}
+                    onProviderChange={setSelectedProvider}
+                    onRetry={() => {
+                      const lastUserMessage = [...messages].reverse().find((message) => message.sender === 'user');
+                      const retry = retryPromptRef.current;
+                      if (retry) void handleSendMessage(retry.text, retry.attachment, retry.options);
+                      else if (lastUserMessage) void handleSendMessage(lastUserMessage.text, lastUserMessage.attachments || lastUserMessage.attachment);
+                    }}
+                  />
+  );
+
   const workspacePane = (
     <CenterWorkspace
       activeTab={activeTab}
       scanBatch={scanBatch}
+      markingChat={markingChatPane}
+      onMarkingContext={setMarkingContext}
       onScanExamReady={(examId) => {
         setScanBatch(prev => {
           if (!prev || prev.id !== scanBatch?.id) return prev;
@@ -1689,6 +1734,7 @@ export default function App() {
             <CreateStudio {...studioProps} />
             {activeTab !== 'documents' && (
               <MobileSheet
+                hideHeader={!!scanBatch && activeTab === 'marking_hub'}
                 title={activeTab === 'results' ? 'Results' : 'Agent'}
                 onBack={() => setActiveTab('documents')}
                 onScan={openScanner}
@@ -1703,6 +1749,7 @@ export default function App() {
           </div>
         ) : (
           <div className="flex-1 flex flex-col min-w-0">
+            {!(scanBatch && activeTab === 'marking_hub') && (
             <TopNavbar
               activeTab={activeTab}
               setActiveTab={setActiveTab}
@@ -1715,45 +1762,16 @@ export default function App() {
               user={authenticatedUser}
               onOpenSidebar={() => setIsMobileSidebarOpen(true)}
             />
+            )}
 
             <div className="relative flex min-h-0 flex-1 overflow-hidden lg:flex-row">
-              <div className="min-h-0 border-r border-white/5 flex flex-1">
+              <div className="min-h-0 min-w-0 border-r border-white/5 flex flex-1">
                 {workspacePane}
               </div>
 
-              <div className="h-full min-h-0 w-full min-w-0 flex-col border-l border-white/5 flex lg:w-[min(30vw,440px)] lg:flex-none">
-                {activeTab !== 'results' ? (
-                  <RightChatSidebar
-                    messages={messages}
-                    chatSessions={chatSessions}
-                    onSendMessage={handleSendMessage}
-                    stagedAttachments={stagedAttachments}
-                    onStageAttachments={handleStageAttachments}
-                    attachmentError={attachmentError}
-                    onRemoveStagedAttachment={handleRemoveStagedAttachment}
-                    onClearStagedAttachments={handleClearStagedAttachments}
-                    activeDocument={activeDocument}
-                    setActiveDocument={setActiveDocument}
-                    onOpenScanner={openScanner}
-                    onNewChat={handleNewChat}
-                    onLoadSession={handleLoadChatSession}
-                    onClearChat={handleClearCurrentChat}
-                    onInsightAction={handleInsightAction}
-                    isDegraded={aiServiceState === 'degraded'}
-                    isTyping={isAiThinking}
-                    onUpgradeClick={(jobId, service) => {
-                      setUpgradeContext({ jobId, service });
-                      setUpgradeModalOpen(true);
-                    }}
-                    selectedProvider={selectedProvider}
-                    onProviderChange={setSelectedProvider}
-                    onRetry={() => {
-                      const lastUserMessage = [...messages].reverse().find((message) => message.sender === 'user');
-                      const retry = retryPromptRef.current;
-                      if (retry) void handleSendMessage(retry.text, retry.attachment, retry.options);
-                      else if (lastUserMessage) void handleSendMessage(lastUserMessage.text, lastUserMessage.attachments || lastUserMessage.attachment);
-                    }}
-                  />
+              <div className={`${scanBatch && activeTab === 'marking_hub' ? 'hidden' : 'flex'} h-full min-h-0 w-full min-w-0 flex-col border-l border-white/5 lg:w-[min(30vw,440px)] lg:flex-none`}>
+                {scanBatch && activeTab === 'marking_hub' ? null : activeTab !== 'results' ? (
+                  markingChatPane
                 ) : (
                   <div className="flex h-full min-h-0 flex-col lg:pt-12">{resultsPane}</div>
                 )}

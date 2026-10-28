@@ -64,6 +64,7 @@ export interface CriterionResult {
   criterionId: string; awardedMarks: number; maxMarks: number; reason: string;
   /** The scheme line this mark was judged against, as it stood when marking (kept for "why" questions). */
   rubric?: string;
+  evidenceElementIds?: string[];
 }
 
 /** How sure the marking is, from the marker's own estimate capped by what code found (flags, evidence). */

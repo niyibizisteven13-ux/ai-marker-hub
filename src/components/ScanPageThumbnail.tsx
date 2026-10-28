@@ -18,7 +18,7 @@ export default function ScanPageThumbnail({ examId, submissionId, page, active, 
     return () => { controller.abort(); if (url) URL.revokeObjectURL(url); };
   }, [examId, submissionId, page]);
   return <button aria-label={`Open scanned page ${page}`} aria-current={active ? 'page' : undefined} onClick={onClick}
-    className={`relative h-20 w-14 shrink-0 overflow-hidden rounded border-2 bg-white ${active ? 'border-[#D97757]' : 'border-[#E8E4DC]'}`}>
+    className={`scan-thumbnail relative h-20 w-14 shrink-0 overflow-hidden rounded border-2 bg-white ${active ? 'border-[#D97757]' : 'border-[#E8E4DC]'}`}>
     {source && <img src={source} alt="" className="h-full w-full object-contain" />}
     <span className="absolute bottom-0 right-0 rounded-tl bg-black/70 px-1.5 py-0.5 text-[10px] text-white">{page}</span>
   </button>;

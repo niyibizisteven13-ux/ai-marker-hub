@@ -5,6 +5,8 @@ import { warpQuadToRect, quadWidthHeight, clamp } from './DocumentScanner/geomet
 import { authFetch } from '../utils/authFetch';
 import { LABEL_PRESETS, DEFAULT_LABEL_PRESET, type LabelPresetKey, type LabelSet } from './scannerLabels';
 import './BwengeScan.css';
+import { scanQualityWarnings } from '../services/scanQuality';
+import { DEFAULT_MARKING_LIMITS, type MarkingLimits } from '../../shared/markingLimits';
 
 /* ───────────── Types ───────────── */
 const CORNER_KEYS = ['tl', 'tr', 'br', 'bl'] as const;
@@ -19,6 +21,7 @@ type AgentMode = 'ocr' | 'grade' | 'extract_form';
 export type PageItem = {
   id: string;
   dataUrl: string;
+  sourceDataUrl?: string;
   filter: FilterId;
   studentName?: string;
   candidateId?: string;
@@ -46,8 +49,8 @@ type GradeReport = {
 type Candidate = { id: string; name: string; pages: PageItem[]; aiGradeReport?: GradeReport };
 type ReviewDraft = { id: string; texts: string[]; score: string; max: string };
 
-const MAX_PAGES = 50;
-const MAX_CANDIDATES = 50;
+
+
 const MAX_IMAGE_PIXELS = 16_000_000;
 const LEGACY_DRAFT_KEY = 'bwenge.document-scanner.draft.v1';
 const DEFAULT_CRITERIA = 'Score each question accurately on clarity, completeness and correctness (total 100 marks).';
@@ -159,6 +162,15 @@ export default function DocumentScanner({
   saveLabel = 'Save to workspace',
   allowExport = true,
 }: DocumentScannerProps) {
+  const [limits, setLimits] = useState<MarkingLimits>(DEFAULT_MARKING_LIMITS);
+  useEffect(() => {
+    if (!aiTools) return;
+    const controller = new AbortController();
+    void authFetch('/api/exams/limits', { signal: controller.signal }).then(async res => { if (res.ok) setLimits(await res.json()); }).catch(() => undefined);
+    return () => controller.abort();
+  }, [aiTools]);
+  const MAX_PAGES = limits.maxBatchPages;
+  const MAX_CANDIDATES = limits.maxCandidates;
   const L: LabelSet = typeof labelsProp === 'string' ? LABEL_PRESETS[labelsProp] : labelsProp;
   const defaultNamePattern = new RegExp(
     `^(${[...Object.values(LABEL_PRESETS).map((p) => p.person), L.person].map(escapeRegExp).join('|')})\\s+\\d+$`,
@@ -194,6 +206,8 @@ export default function DocumentScanner({
   const facingRef = useRef<'environment' | 'user'>('environment');
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [currentDeviceId, setCurrentDeviceId] = useState('');
+  const [savingPages, setSavingPages] = useState(false);
+  const [qualityWarnings, setQualityWarnings] = useState<string[]>([]);
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState('');
 
@@ -580,7 +594,7 @@ export default function DocumentScanner({
     requestAnimationFrame(() => {
       try {
         let { w, h } = quadWidthHeight(quad);
-        const scale = Math.min(1, 1800 / Math.max(w, h), Math.sqrt(MAX_IMAGE_PIXELS / Math.max(1, w * h)));
+        const scale = Math.min(1, limits.originalMaxSide / Math.max(w, h), Math.sqrt(MAX_IMAGE_PIXELS / Math.max(1, w * h)));
         w = Math.max(40, Math.round(w * scale));
         h = Math.max(40, Math.round(h * scale));
         originalRef.current = source; // keep the uncropped image for "Adjust corners"
@@ -604,12 +618,21 @@ export default function DocumentScanner({
     const source = capturedRef.current;
     if (!source) return;
     if (totalPages >= MAX_PAGES) { showToast(`A batch can contain at most ${MAX_PAGES} pages.`); return; }
+    if ((candidates.find(c => c.id === activeId)?.pages.length || 0) >= limits.maxPagesPerPaper) { showToast(`A paper can contain at most ${limits.maxPagesPerPaper} pages.`); return; }
+    const original = document.createElement('canvas');
+    const originalScale = Math.min(1, limits.originalMaxSide / Math.max(source.width, source.height));
+    original.width = Math.round(source.width * originalScale); original.height = Math.round(source.height * originalScale);
+    const originalContext = original.getContext('2d');
+    if (originalContext) { originalContext.fillStyle = '#ffffff'; originalContext.fillRect(0, 0, original.width, original.height); originalContext.drawImage(source, 0, 0, original.width, original.height); }
+    const sourceDataUrl = original.toDataURL('image/jpeg', 0.96);
     const out = document.createElement('canvas');
-    out.width = source.width;
-    out.height = source.height;
+    const previewScale = Math.min(1, limits.previewMaxSide / Math.max(source.width, source.height));
+    out.width = Math.round(source.width * previewScale);
+    out.height = Math.round(source.height * previewScale);
     const ctx = out.getContext('2d');
     if (!ctx) return;
-    ctx.drawImage(source, 0, 0);
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, out.width, out.height);
+    ctx.drawImage(source, 0, 0, out.width, out.height);
     if (filter !== 'color') {
       ctx.putImageData(applyFilter(ctx.getImageData(0, 0, out.width, out.height), filter === 'auto' ? 'color' : filter), 0, 0);
     }
@@ -622,6 +645,7 @@ export default function DocumentScanner({
       const page: PageItem = {
         id: `p-${Date.now()}`,
         dataUrl,
+        sourceDataUrl,
         filter,
         studentName: name.trim() || `Unnamed ${L.person.toLowerCase()}`,
         extractedText: previewOcr?.extractedText,
@@ -860,20 +884,30 @@ export default function DocumentScanner({
     }, 50);
   };
 
+  useEffect(() => {
+    const source = capturedRef.current;
+    if (mode !== 'edit' || !source) { setQualityWarnings([]); return; }
+    const sample = document.createElement('canvas'); sample.width = 128; sample.height = 128;
+    const ctx = sample.getContext('2d'); if (!ctx) return;
+    ctx.drawImage(source, 0, 0, 128, 128);
+    setQualityWarnings(scanQualityWarnings(source.width, source.height, ctx.getImageData(0, 0, 128, 128).data));
+  }, [mode, filter, quad]);
+
   const saveToWorkspace = async () => {
     const pages: PageItem[] = candidates.flatMap((c) => c.pages.map((p) => ({ ...p, candidateId: c.id, studentName: c.name.trim() || `Unnamed ${L.person.toLowerCase()}` })));
     if (pages.length === 0) { showToast('Add at least one page before saving.'); return; }
     if (pages.some((p) => p.isSample)) { showToast('Remove the sample pages before saving.'); return; }
     const unconfirmed = pages.filter((p) => p.extractedText && p.reviewStatus !== 'confirmed').length;
     if (unconfirmed > 0 && !window.confirm(`${unconfirmed} page(s) have AI results that nobody has confirmed. They will be saved as "unreviewed". Save anyway?`)) return;
+    setSavingPages(true);
     try {
       await onSavePages(pages);
       await draftSet(null);
       onClose();
     } catch (error) {
       console.error('Could not save pages', error);
-      showToast('Could not save. Your draft is kept; try again.');
-    }
+      showToast(error instanceof Error ? error.message : 'Could not save. Your draft is kept; try again.');
+    } finally { setSavingPages(false); }
   };
 
   const discardDraft = async () => {
@@ -1028,7 +1062,7 @@ export default function DocumentScanner({
 
       <footer className="bsc-bottom">
         {allowExport && <button className="bsc-btn" disabled={totalPages === 0} onClick={exportPdf}>Export PDF</button>}
-        <button className="bsc-btn bsc-pri" disabled={totalPages === 0} onClick={() => void saveToWorkspace()}>{saveLabel}</button>
+        <button className="bsc-btn bsc-pri" disabled={totalPages === 0 || savingPages} onClick={() => void saveToWorkspace()}>{savingPages ? 'Saving scanned papers…' : saveLabel}</button>
       </footer>
 
       {/* CAMERA: fills the whole device screen */}

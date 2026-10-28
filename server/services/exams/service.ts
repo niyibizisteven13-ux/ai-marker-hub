@@ -47,6 +47,9 @@ export interface ExamDeps {
   forbiddenStrings?: string[];
   maxPages?: number;
   maxCandidates?: number;
+  maxBatchPages?: number;
+  visualEvidence?: boolean;
+  beforeAi?: (userId: string) => Promise<void>;
   candidateConcurrency?: number;
   /** Time a marking job works before handing over to a continuation job (stays under the queue deadline). */
   segmentBudgetMs?: number;
@@ -214,6 +217,7 @@ export function createExamService(deps: ExamDeps) {
 
   /** Stores the scheme (and optional question paper) and queues extraction. */
   async function submitSchemeDocuments(userId: string, examId: string, input: { scheme: UploadFile[]; questionPaper?: UploadFile; autoMark?: boolean }) {
+    await deps.beforeAi?.(userId);
     if (!input.scheme.length) throw new ExamInputError('NO_SCHEME', 'Upload the official marking scheme.');
     await load(userId, examId);
     const schemeFileIds = [];
@@ -232,6 +236,7 @@ export function createExamService(deps: ExamDeps) {
    * they appear on the candidates' scripts. A draft is never used until the teacher confirms it.
    */
   async function draftScheme(userId: string, examId: string, input: { questionPaper?: UploadFile } = {}) {
+    await deps.beforeAi?.(userId);
     const exam = await load(userId, examId);
     let questionPaper: SchemeJobPayload['questionPaper'];
     if (input.questionPaper) {
@@ -263,6 +268,7 @@ export function createExamService(deps: ExamDeps) {
 
   async function runSchemeJob(job: FileJob<SchemeJobPayload>, ctx: JobContext) {
     const p = job.payload;
+    await deps.beforeAi?.(job.ownerId);
     await ctx.progress(p.draft ? 'reading the questions' : 'reading the marking scheme', 10);
     const texts: string[] = [];
     for (const f of p.schemeFileIds) texts.push((await documentTextOf(job.ownerId, f.fileId, f.name, ctx)).text);
@@ -359,6 +365,7 @@ export function createExamService(deps: ExamDeps) {
           try { f = { name: f.name, buffer: await typedToPdf(f), mime: 'application/pdf' }; } catch (e) { throw new ExamInputError('UNREADABLE', e instanceof Error ? e.message : `${f.name} could not be read.`); }
         }
         const info = await inspectFile(f);
+        if (exam.submissions.reduce((sum, sub) => sum + sub.pages, 0) + accepted.reduce((sum, sub) => sum + sub.pages, 0) + info.pages > (deps.maxBatchPages ?? 50)) throw new ExamInputError('BATCH_PAGE_LIMIT', 'This batch has too many pages. Start another assessment.', 413);
         if (info.pages > (deps.maxPages ?? 20)) throw new ExamInputError('TOO_MANY_PAGES', `${f.name} has ${info.pages} pages; the limit is ${deps.maxPages ?? 20}.`, 413);
         const hash = sha256((typedOriginal ?? f).buffer);
         if (hashes.has(hash)) throw new ExamInputError('DUPLICATE', `${f.name} is identical to the script of ${hashes.get(hash)}.`, 409);
@@ -394,6 +401,7 @@ export function createExamService(deps: ExamDeps) {
 
   // ── Marking runs ────────────────────────────────────────────────────────
   async function startMarking(userId: string, examId: string, opts: { submissionIds?: string[]; remarkAll?: boolean } = {}) {
+    await deps.beforeAi?.(userId);
     const exam = await load(userId, examId);
     const sv = confirmedScheme(exam);
     if (!sv?.scheme) {
@@ -445,6 +453,7 @@ export function createExamService(deps: ExamDeps) {
     const existing = exam.results[sub.id];
     if (existing?.runId === runId && ['completed', 'completed_with_warnings'].includes(sub.state) && existing.questions.every((q) => q.ai)) return; // already done in an earlier attempt
 
+    await deps.beforeAi?.(userId);
     await setState(userId, examId, sub.id, 'validating');
     await setState(userId, examId, sub.id, 'recognizing');
     const { record, cached, key } = await recognizeSubmission(userId, sub, signal);
@@ -459,6 +468,7 @@ export function createExamService(deps: ExamDeps) {
     let marked: Awaited<ReturnType<typeof markCandidate>>;
     try {
       marked = await markCandidate(agent.adapter, agent.model, { scheme, questionIds: scheme.questions.map((q) => q.id), match, questionPaperText: await questionPaperText(userId, exam), runId, schemeVersion: run.schemeVersion, signal, fallbackModel: agent.fallbackModel,
+        imagesForQuestions: deps.visualEvidence ? ids => markingImages(userId, examId, sub.id, match, ids) : undefined,
         chunkSize: 1,
         onQuestion: async (questionId, ai) => {
           await mutate(userId, examId, (e) => {
@@ -480,6 +490,7 @@ export function createExamService(deps: ExamDeps) {
       throw mapProvider(e);
     }
 
+    if (signal.aborted) throw signal.reason;
     await setState(userId, examId, sub.id, 'verifying');
     await mutate(userId, examId, (e) => {
       const prev = e.results[sub.id];
@@ -547,6 +558,7 @@ export function createExamService(deps: ExamDeps) {
     await ctx.progress('generating annotated papers, report and workbook', 92);
     let artifactError: string | null = null;
     try { await generateArtifacts(userId, examId); } catch (err) { artifactError = err instanceof Error ? err.message : 'Artifact generation failed.'; }
+    if (ctx.signal.aborted) throw ctx.signal.reason;
     const e = await mutate(userId, examId, (x) => {
       const r = x.runs.find((y) => y.id === runId)!;
       const subs = x.submissions.filter((s) => r.submissionIds.includes(s.id));
@@ -666,8 +678,9 @@ export function createExamService(deps: ExamDeps) {
     const match = matchAnswers(doc.result, doc.corrections, scheme);
     const agent = deps.agent();
     let marked: Awaited<ReturnType<typeof markCandidate>>;
+    await deps.beforeAi?.(userId);
     try {
-      marked = await markCandidate(agent.adapter, agent.model, { scheme, questionIds, match, questionPaperText: await questionPaperText(userId, exam), runId: res.runId, schemeVersion: res.schemeVersion, signal, fallbackModel: agent.fallbackModel });
+      marked = await markCandidate(agent.adapter, agent.model, { imagesForQuestions: deps.visualEvidence ? ids => markingImages(userId, examId, sub.id, match, ids) : undefined, scheme, questionIds, match, questionPaperText: await questionPaperText(userId, exam), runId: res.runId, schemeVersion: res.schemeVersion, signal, fallbackModel: agent.fallbackModel });
     } catch (e) { throw mapProvider(e); }
     const correctedIds = new Set(doc.corrections.map((c) => c.elementId));
     await mutate(userId, examId, (e) => {
@@ -921,7 +934,7 @@ export function createExamService(deps: ExamDeps) {
     const hit = pageCache.get(key);
     if (hit) return hit;
     const original = (await deps.fileStore.read(sub.fileId, userId)).data;
-    const { pages } = await loadPages(original, sub.fileName, { maxPages: deps.maxPages ?? 50, pdfScale: 1.6 });
+    const { pages } = await loadPages(original, sub.fileName, { maxPages: deps.maxPages ?? 50, pdfScale: 3 });
     const src = pages.find((p) => p.page === page);
     if (!src) throw new ExamInputError('UNKNOWN_PAGE', `Page ${page} does not exist.`, 404);
     const jpg = await sharp(src.image, { limitInputPixels: 80_000_000 }).rotate().flatten({ background: '#ffffff' }).resize({ width: 2200, withoutEnlargement: true }).jpeg({ quality: 90 }).toBuffer();
@@ -951,6 +964,32 @@ export function createExamService(deps: ExamDeps) {
     const bottom = Math.min(height, Math.ceil(Math.max(...points.map(p => p.fy)) * height) + 16);
     if (right <= left || bottom <= top) throw new ExamInputError('INVALID_REGION', 'The answer location is uncertain. Review the full page.', 422);
     return sharp(jpg).extract({ left, top, width: right - left, height: bottom - top }).jpeg({ quality: 95 }).toBuffer();
+  }
+
+  async function markingImages(userId: string, examId: string, submissionId: string, match: ReturnType<typeof matchAnswers>, questionIds: string[]) {
+    const ids = [...new Set(questionIds.flatMap(id => match.questions[id]?.elementIds ?? []))];
+    const pages = [...new Set(match.elements.filter(e => ids.includes(e.id)).map(e => e.page))].slice(0, 2);
+    const images: string[] = [];
+    for (const page of pages) images.push(`data:image/jpeg;base64,${(await pageImage(userId, examId, submissionId, page)).toString('base64')}`);
+    for (const id of ids.slice(0, 3)) {
+      try { images.push(`data:image/jpeg;base64,${(await evidenceCrop(userId, examId, submissionId, id)).toString('base64')}`); }
+      catch { /* An invalid crop is not evidence; full source pages remain available. */ }
+    }
+    return images;
+  }
+
+  /** Stop active runs and retain validated partial results. Retry starts a new run. */
+  async function stopMarking(userId: string, examId: string) {
+    const exam = await load(userId, examId);
+    const active = exam.runs.filter(r => !['completed', 'completed_with_warnings', 'failed'].includes(r.state));
+    for (const run of active) for (const id of run.jobIds) await deps.queue.cancel(id, userId);
+    await mutate(userId, examId, e => {
+      for (const run of e.runs.filter(r => active.some(a => a.id === r.id))) { run.state = 'failed'; run.error = 'Stopped by teacher'; run.finishedAt = now(); }
+      for (const sub of e.submissions.filter(s => active.some(r => r.submissionIds.includes(s.id)))) {
+        if (!['completed', 'completed_with_warnings'].includes(sub.state)) { sub.state = 'failed'; sub.stateAt = now(); sub.error = { code: 'STOPPED', message: 'Stopped. Saved marks are retained; retry to finish this paper.' }; }
+      }
+    });
+    return { stopped: active.length };
   }
 
   /** Moves or hides one red item (or resets it to the automatic place). Any change makes the PDF a draft again. */
@@ -1024,7 +1063,7 @@ export function createExamService(deps: ExamDeps) {
   }
 
   return {
-    createExam, load, mutate, setSchemeJson, confirmScheme, editSchemeQuestion, submitSchemeDocuments, addSubmissions, startMarking,
+    createExam, load, mutate, stopMarking, setSchemeJson, confirmScheme, editSchemeQuestion, submitSchemeDocuments, addSubmissions, startMarking,
     summaries, overrideMark, confirmResults, correctTranscription, remarkQuestions, requestRemark, generateArtifacts, requestExport, artifacts, artifactRefs, candidateView, progress,
     latestScheme, confirmedScheme, findSub, findQuestion,
     listExams, reviewList, reviewCandidate, pageImage, evidenceCrop, setLayout, release, draftScheme,
