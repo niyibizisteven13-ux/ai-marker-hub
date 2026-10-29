@@ -1,3 +1,4 @@
+import sharp from 'sharp';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -249,7 +250,7 @@ test('exams API: live events replay over SSE, cancel and preferences validate', 
   assert.equal(ok.status, 200);
   assert.deepEqual(await ok.json().then((b) => [b.preferences.credit, b.preferences.corrections, b.preferences.feedback]), ['strict', false, 'brief']);
   assert.equal((await put('bob', { credit: 'strict' })).status, 404);
-  assert.equal((await fetch(`${base}/api/exams/${examId}/events`, as('bob'))).status, 404, 'events are owner-scoped');
+  assert.equal((await fetch(`${base}/api/exams/${examId}/activity`, as('bob'))).status, 404, 'events are owner-scoped');
 
   // Two stored events: a fresh viewer gets both; one resuming after event 1 gets only the second.
   await examService.mutate('alice', examId, (e) => {
@@ -261,7 +262,7 @@ test('exams API: live events replay over SSE, cancel and preferences validate', 
   });
   const read = async (headers: Record<string, string> = {}) => {
     const ctrl = new AbortController();
-    const res = await fetch(`${base}/api/exams/${examId}/events`, { ...as('alice', { headers }), signal: ctrl.signal });
+    const res = await fetch(`${base}/api/exams/${examId}/activity`, { ...as('alice', { headers }), signal: ctrl.signal });
     assert.equal(res.status, 200);
     assert.match(res.headers.get('content-type') ?? '', /text\/event-stream/);
     const reader = res.body!.getReader();
@@ -273,4 +274,57 @@ test('exams API: live events replay over SSE, cancel and preferences validate', 
   };
   assert.deepEqual(await read(), [1, 2]);
   assert.deepEqual(await read({ 'Last-Event-ID': '1' }), [2], 'a reconnecting viewer gets only what it missed');
+});
+
+test('exam live stream is owner-scoped and replays saved state without AI calls', async () => {
+  const created = await (await fetch(`${base}/api/exams`, json('live-owner', { title: 'Saved live paper' }))).json();
+  assert.equal((await fetch(`${base}/api/exams/${created.examId}/events`, as('other-owner'))).status, 404);
+  assert.equal((await fetch(`${base}/api/exams/${created.examId}/events?submissionId=invalid`, as('live-owner'))).status, 400);
+  const controller = new AbortController();
+  const response = await fetch(`${base}/api/exams/${created.examId}/events`, as('live-owner', { signal: controller.signal }));
+  assert.equal(response.status, 200);
+  const reader = response.body!.getReader();
+  const chunk = new TextDecoder().decode((await reader.read()).value);
+  assert.match(chunk, /event: snapshot/);
+  assert.match(chunk, /Saved live paper/);
+  assert.match(chunk, /"candidates":\[\]/);
+  controller.abort(); await reader.cancel().catch(() => undefined);
+});
+
+
+test('scanner limits are shared and stopping another teacher examination is rejected', async () => {
+  const limits = await (await fetch(`${base}/api/exams/limits`, as('limits-owner'))).json();
+  assert.equal(limits.maxCandidates, 30);
+  assert.equal(limits.maxPagesPerPaper, 20);
+  assert.ok(limits.maxUploadBytes >= limits.maxFileBytes);
+  const exam = await (await fetch(`${base}/api/exams`, json('limits-owner', { title: 'Limits test' }))).json();
+  assert.equal((await fetch(`${base}/api/exams/${exam.examId}/stop`, json('other-user', {}))).status, 404);
+  assert.equal((await fetch(`${base}/api/exams/${exam.examId}/stop`, json('limits-owner', {}))).status, 200);
+});
+
+
+test('phone previews and thumbnails are smaller while page access remains owner-only', async () => {
+  const created = await (await fetch(`${base}/api/exams`, json('preview-owner', { title: 'Responsive preview' }))).json();
+  const jpeg = await sharp({ create: { width: 1800, height: 2400, channels: 3, background: 'white' } }).jpeg().toBuffer();
+  const form = new FormData(); form.append('scripts', new Blob([jpeg], { type: 'image/jpeg' }), 'C001.jpg');
+  const uploaded = await (await fetch(`${base}/api/exams/${created.examId}/submissions`, as('preview-owner', { method: 'POST', body: form }))).json();
+  const url = `${base}/api/exams/${created.examId}/submissions/${uploaded.accepted[0].id}/pages/1`;
+  const phone = await fetch(`${url}?width=1000`, as('preview-owner'));
+  assert.equal(phone.status, 200);
+  assert.equal((await sharp(Buffer.from(await phone.arrayBuffer())).metadata()).width, 1000);
+  const thumb = await fetch(`${url}?thumbnail=1`, as('preview-owner'));
+  assert.equal((await sharp(Buffer.from(await thumb.arrayBuffer())).metadata()).width, 140);
+  assert.equal((await fetch(`${url}?width=3000`, as('preview-owner'))).status, 400);
+  assert.equal((await fetch(`${url}?width=1000`, as('another-user'))).status, 404);
+});
+
+
+test('review controls accept criterion IDs, validate positions and remain owner-scoped', async () => {
+  const { examId } = await (await fetch(`${base}/api/exams`, json('review-owner', { title: 'Review controls' }))).json();
+  const layout = (user: string, item: string, body: unknown) => fetch(`${base}/api/exams/${examId}/submissions/missing/layout/${encodeURIComponent(item)}`, { ...json(user, body), method: 'PUT' });
+  assert.equal((await layout('review-owner', 'Q1:criterion:Q1-M1', { page: 1, fx: .8, fy: .2 })).status, 404, 'valid criterion ID reaches owner-scoped service, not a schema rejection');
+  assert.equal((await layout('another-owner', 'Q1:criterion:Q1-M1', { page: 1, fx: .8, fy: .2 })).status, 404);
+  assert.equal((await layout('review-owner', 'Q1:criterion:Q1-M1', { page: 1, fx: 1.2, fy: .2 })).status, 400);
+  assert.equal((await layout('review-owner', 'bad:item:unknown', { page: 1, fx: .8, fy: .2 })).status, 400);
+  assert.equal((await fetch(`${base}/api/exams/${examId}/submissions/missing/confirm`, json('another-owner', { question: 'Q1' }))).status, 404);
 });

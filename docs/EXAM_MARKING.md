@@ -158,7 +158,7 @@ Every real state change in a marking run is saved in the exam record as an event
   - `handwriting_recovery_started` is in the contract but is not emitted yet: the close-up re-reading runs inside recognition and reports only when it finishes.
 - **Payload:** ids, counts, marks and short messages for the teacher. Never document text, prompts or file contents.
 - **Kept:** the latest 2,000 events per exam.
-- **Stream:** `GET /api/exams/:examId/events` (Server-Sent Events, owner-scoped).
+- **Stream:** `GET /api/exams/:examId/activity` (Server-Sent Events, owner-scoped; `/events` streams state snapshots for the scan workspace).
   - It replays everything after `Last-Event-ID` (or `?after=`), then pushes new events as they are saved.
   - Events from another server process are picked up by a 3-second re-read.
   - A heartbeat is sent every 15 s.

@@ -1,7 +1,5 @@
 // Types the app relies on that its dependencies do not ship.
 
-declare module 'bcryptjs';
-
 declare global {
   namespace Express {
     interface Request {

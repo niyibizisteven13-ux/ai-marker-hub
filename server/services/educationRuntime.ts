@@ -1,3 +1,4 @@
+import { JobError } from './ai/jobs/fileJobQueue.js';
 import path from 'node:path';
 import { agentTarget, fileJobQueue, fileStore, markingTarget } from './AiService.js';
 import { createAnalyticsService } from './analytics/service.js';
@@ -13,7 +14,8 @@ import { createKnowledgeService } from './knowledge/service.js';
 import { EmbeddingService } from './EmbeddingService.js';
 import { createOutputService } from './outputs/service.js';
 import logger from '../utils/logger.js';
-import { recordUsage } from './billing/usage.js';
+import { markingLimits } from './exams/limits.js';
+import { recordUsage, checkUsage } from './billing/usage.js';
 import { isPrimary } from '../utils/cluster.js';
 import { canUseAutonomousMarking } from './billing/entitlements.js';
 
@@ -79,8 +81,14 @@ export const examService = createExamService({
   visionAvailable: () => visionTarget() !== null,
   // Upgraded plans only, counted against the plan's daily marking limit (see billing/entitlements.ts).
   entitlement: canUseAutonomousMarking,
-  maxPages: num(process.env.DOC_MAX_PAGES, 20),
-  maxCandidates: num(process.env.EXAM_MAX_CANDIDATES, 100),
+  maxPages: markingLimits.maxPagesPerPaper,
+  maxCandidates: markingLimits.maxCandidates,
+  maxBatchPages: markingLimits.maxBatchPages,
+  visualEvidence: visionTarget() !== null,
+  beforeAi: async userId => {
+    const gate = await checkUsage(userId, { kind: 'marking' });
+    if (!gate.allowed) throw new JobError('MARKING_LIMIT', gate.message || 'Marking allowance exceeded.');
+  },
   candidateConcurrency: num(process.env.EXAM_CANDIDATE_CONCURRENCY, 2),
   segmentBudgetMs: num(process.env.EXAM_SEGMENT_BUDGET_MS, 8 * 60 * 1000),
   // Every marked script is charged in credits (at least 2) and counted in the AI cost the profit guard watches.

@@ -1,5 +1,11 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import multer from 'multer';
+import sharp from 'sharp';
+import os from 'node:os';
+import path from 'node:path';
+import fs from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { markingLimits } from '../services/exams/limits.js';
 import { z } from 'zod';
 import { FileStoreError } from '../services/ai/files/FileStore.js';
 import { FileJobQueue, JobError } from '../services/ai/jobs/fileJobQueue.js';
@@ -7,6 +13,8 @@ import { fileJobQueue } from '../services/AiService.js';
 import { examService } from '../services/educationRuntime.js';
 import { ExamInputError, parseManifest, type CandidateMapping } from '../services/exams/service.js';
 import logger from '../utils/logger.js';
+import { createHash } from 'node:crypto';
+import { streamExam } from '../services/exams/live.js';
 
 /**
  * Examination marking API (mounted behind requireAuth). Every lookup is owner-scoped; other users'
@@ -29,12 +37,26 @@ function fail(req: Request, res: Response, err: unknown) {
   return res.status(500).json({ code: 'INTERNAL_ERROR', error: 'The request could not be completed.', requestId });
 }
 
-const MAX_FILES = Number(process.env.EXAM_MAX_FILES_PER_UPLOAD) > 0 ? Number(process.env.EXAM_MAX_FILES_PER_UPLOAD) : 30;
-const examUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024, files: MAX_FILES + 2, fields: 20, parts: MAX_FILES + 25, fieldSize: 1024 * 1024 } });
+const MAX_FILES = markingLimits.maxCandidates;
+const uploadDir = path.join(os.tmpdir(), `bwenge-exams-${randomUUID()}`);
+const examUpload = multer({ storage: multer.diskStorage({ destination: (_req, _file, cb) => { void fs.mkdir(uploadDir, { recursive: true, mode: 0o700 }).then(() => cb(null, uploadDir), error => cb(error as Error, uploadDir)); }, filename: (_req, _file, cb) => cb(null, `bwenge-exam-${randomUUID()}`) }), limits: { fileSize: markingLimits.maxFileBytes, files: MAX_FILES + 2, fields: 20, parts: MAX_FILES + 25, fieldSize: 1024 * 1024 } });
 
 const withFiles = (fields: multer.Field[]) => (req: Request, res: Response, next: NextFunction) => {
   examUpload.fields(fields)(req, res, (err?: unknown) => {
-    if (!err) return next();
+    if (!err) {
+      const files = Object.values((req.files || {}) as Record<string, Express.Multer.File[]>).flat();
+      void (async () => {
+        try {
+          if (files.reduce((sum, file) => sum + file.size, 0) > markingLimits.maxUploadBytes) {
+            res.status(413).json({ code: 'TOO_LARGE', error: 'This upload exceeds the batch size limit. Send a smaller batch.' }); return;
+          }
+          for (const file of files) file.buffer = await fs.readFile(file.path);
+          next();
+        } catch (error) { next(error); }
+        finally { await Promise.allSettled(files.map(file => fs.unlink(file.path))); }
+      })();
+      return;
+    }
     if (err instanceof multer.MulterError) return res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ code: err.code === 'LIMIT_FILE_SIZE' ? 'TOO_LARGE' : 'INVALID_UPLOAD', error: err.message, requestId: rid(req) });
     return res.status(400).json({ code: 'INVALID_UPLOAD', error: 'Upload rejected.', requestId: rid(req) });
   });
@@ -45,6 +67,7 @@ const filesOf = (req: Request, field: string) => ((req.files as Record<string, E
 const examRef = async (req: Request) => examService.load(userIdOf(req), req.params.examId);
 
 export const examsRouter = Router();
+examsRouter.get('/limits', (_req, res) => res.json(markingLimits));
 
 examsRouter.post('/', async (req, res) => {
   try {
@@ -68,11 +91,11 @@ examsRouter.get('/:examId', async (req, res) => {
 });
 
 /**
- * Live marking events (Server-Sent Events). Replays everything after `?after=` or the Last-Event-ID header,
+ * Live marking activity (Server-Sent Events): the saved event log, unlike /events, which streams state snapshots. Replays everything after `?after=` or the Last-Event-ID header,
  * then streams new events as they are saved. Closing the page never stops the marking job. Events from a
  * job running in another server process are picked up by a short re-read of the stored record.
  */
-examsRouter.get('/:examId/events', async (req, res) => {
+examsRouter.get('/:examId/activity', async (req, res) => {
   const userId = userIdOf(req);
   const examId = req.params.examId;
   let last = Number(req.get('last-event-id') ?? req.query.after ?? 0);
@@ -111,6 +134,46 @@ examsRouter.put('/:examId/preferences', async (req, res) => {
   } catch (err) { fail(req, res, err); }
 });
 
+/** Bearer-authenticated SSE; the first owner-scoped snapshot also restores a refreshed workspace. */
+examsRouter.get('/:examId/events', async (req, res) => {
+  try {
+    const query = z.object({ submissionId: z.string().uuid().optional(), jobs: z.string().max(300).optional() }).parse(req.query);
+    const jobIds = query.jobs ? z.array(z.string().uuid()).max(4).parse(query.jobs.split(',')) : [];
+    const userId = userIdOf(req);
+    let cached: { id: string; data: unknown } | undefined;
+    await streamExam(req, res, async () => {
+      const exam = await examRef(req);
+      const jobs = await Promise.all(jobIds.map(async id => {
+        const job = await fileJobQueue.get(id, userId);
+        // A job owned by the same user but belonging to a different exam is still excluded.
+        return job && (job.payload as { examId?: string }).examId === exam.id ? FileJobQueue.publicView(job) : null;
+      }));
+      const id = createHash('sha256').update(JSON.stringify([exam.updatedAt, exam.resultRevision, exam.submissions.map(s => [s.id, s.state, s.stateAt, s.activity]), exam.schemes.map(s => [s.version, s.status]), exam.artifacts.map(a => [a.id, a.status]), jobs])).digest('hex');
+      if (cached?.id === id) return cached;
+      const scheme = examService.latestScheme(exam);
+      const selected = query.submissionId || exam.submissions[0]?.id;
+      const review = selected && exam.results[selected] ? await examService.reviewCandidate(userId, exam.id, selected) : null;
+      const data = {
+        exam: { examId: exam.id, title: exam.title, scheme: scheme ? { status: scheme.status, errors: scheme.errors, warnings: scheme.warnings } : null,
+          submissions: exam.submissions.map(s => ({ id: s.id, candidateId: s.candidateId, candidateName: s.candidateName ?? null, pages: s.pages, state: s.state, error: s.error ?? null })),
+          progress: examService.progress(exam) },
+        candidates: examService.reviewList(exam), review, jobs: jobs.filter(Boolean),
+        schemePreview: scheme?.status === 'needs_confirmation' ? scheme.scheme : null,
+        artifacts: await examService.artifacts(userId, exam.id),
+      };
+      cached = { id, data }; return cached;
+    });
+  } catch (err) { if (!res.headersSent) fail(req, res, err); else res.end(); }
+});
+
+examsRouter.get('/:examId/submissions/:submissionId/evidence/:elementId', async (req, res) => {
+  try {
+    const elementId = z.string().min(1).max(120).parse(req.params.elementId);
+    const jpg = await examService.evidenceCrop(userIdOf(req), req.params.examId, req.params.submissionId, elementId);
+    res.set({ 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' }).end(jpg);
+  } catch (err) { fail(req, res, err); }
+});
+
 /** JSON body { scheme, confirm? } or multipart "scheme" (+ optional "questionPaper") files for extraction. */
 examsRouter.post('/:examId/rubric', withFiles([{ name: 'scheme', maxCount: 5 }, { name: 'questionPaper', maxCount: 1 }]), async (req, res) => {
   try {
@@ -130,6 +193,14 @@ examsRouter.get('/:examId/rubric', async (req, res) => {
   try {
     const e = await examRef(req);
     res.json({ versions: e.schemes.map((s) => ({ version: s.version, status: s.status, errors: s.errors, warnings: s.warnings, createdAt: s.createdAt, confirmedAt: s.confirmedAt ?? null, changedQuestionIds: s.changedQuestionIds ?? [], scheme: s.scheme })), requestId: rid(req) });
+  } catch (err) { fail(req, res, err); }
+});
+
+// Draft from the visible questions or an optional question-paper upload; teacher confirms before use.
+examsRouter.post('/:examId/rubric/draft', withFiles([{ name: 'questionPaper', maxCount: 1 }]), async (req, res) => {
+  try {
+    const job = await examService.draftScheme(userIdOf(req), req.params.examId, { questionPaper: filesOf(req, 'questionPaper')[0] });
+    res.status(202).json({ job: FileJobQueue.publicView(job), requestId: rid(req) });
   } catch (err) { fail(req, res, err); }
 });
 
@@ -174,6 +245,11 @@ examsRouter.get('/:examId/jobs/:jobId', async (req, res) => {
   } catch (err) { fail(req, res, err); }
 });
 
+examsRouter.post('/:examId/stop', async (req, res) => {
+  try { res.json(await examService.stopMarking(userIdOf(req), req.params.examId)); }
+  catch (err) { fail(req, res, err); }
+});
+
 examsRouter.get('/:examId/results', async (req, res) => {
   try {
     const e = await examRef(req);
@@ -193,6 +269,14 @@ examsRouter.patch('/:examId/submissions/:submissionId/marks/:questionId', async 
     const body = z.object({ marks: z.number().min(0).max(1000), reason: z.string().trim().min(1).max(1000) }).strict().parse(req.body ?? {});
     const out = await examService.overrideMark(userIdOf(req), req.params.examId, { submission: req.params.submissionId, question: req.params.questionId }, body as { marks: number; reason: string });
     res.json({ candidateId: out.candidateId, question: out.question, before: out.before, after: out.after, rubricConflict: out.rubricConflict, resultRevision: out.exam.resultRevision, requestId: rid(req) });
+  } catch (err) { fail(req, res, err); }
+});
+
+examsRouter.post('/:examId/submissions/:submissionId/confirm', async (req, res) => {
+  try {
+    const body = z.object({ question: z.string().max(100).optional() }).strict().parse(req.body ?? {});
+    const exam = await examService.confirmResults(userIdOf(req), req.params.examId, { submission: req.params.submissionId, question: body.question });
+    res.json({ resultRevision: exam.resultRevision, requestId: rid(req) });
   } catch (err) { fail(req, res, err); }
 });
 
@@ -244,7 +328,12 @@ examsRouter.get('/:examId/review/:submissionId', async (req, res) => {
 examsRouter.get('/:examId/submissions/:submissionId/pages/:page', async (req, res) => {
   try {
     const page = z.coerce.number().int().min(1).max(500).parse(req.params.page);
-    const jpg = await examService.pageImage(userIdOf(req), req.params.examId, req.params.submissionId, page);
+    let jpg = await examService.pageImage(userIdOf(req), req.params.examId, req.params.submissionId, page);
+    if (req.query.thumbnail === '1') jpg = await sharp(jpg).resize({ width: 140, withoutEnlargement: true }).jpeg({ quality: 65 }).toBuffer();
+    else if (req.query.width !== undefined) {
+      const width = Number(z.enum(['1000', '1600', '2200']).parse(req.query.width));
+      jpg = await sharp(jpg).resize({ width, withoutEnlargement: true }).jpeg({ quality: 88 }).toBuffer();
+    }
     res.setHeader('Content-Type', 'image/jpeg');
     res.setHeader('Cache-Control', 'private, max-age=600');
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -259,7 +348,7 @@ examsRouter.put('/:examId/submissions/:submissionId/layout/:itemId', async (req,
       z.object({ hidden: z.literal(true) }).strict(),
       z.object({ reset: z.literal(true) }).strict(),
     ]).parse(req.body ?? {});
-    const itemId = z.string().max(120).regex(/^(total|[\w.-]+:(mark|correction))$/).parse(req.params.itemId);
+    const itemId = z.string().max(120).regex(/^(total|[\w.-]+:(mark|correction|criterion:[\w.-]+))$/).parse(req.params.itemId);
     await examService.setLayout(userIdOf(req), req.params.examId, req.params.submissionId, itemId, body);
     res.json({ ...(await examService.reviewCandidate(userIdOf(req), req.params.examId, req.params.submissionId)), requestId: rid(req) });
   } catch (err) { fail(req, res, err); }

@@ -210,7 +210,7 @@ export function createExamChat(deps: ExamChatDeps) {
   }
 
   /** Resolves a candidate reference: explicit id, a supplied name, an ordinal ("the second paper"), or the last one discussed. */
-  function resolveCandidate(e: ExamRecord, msg: string, explicit: string | null, last: string | null): { id: string } | { ask: string } {
+  function resolveCandidate(e: ExamRecord, msg: string, explicit: string | null, last: string | null, selected?: string): { id: string } | { ask: string } {
     const words = msg.toLowerCase();
     const hits = e.submissions.filter((x) => new RegExp(`(^|[^a-z0-9])${x.candidateId.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^a-z0-9])`).test(words) || (explicit && x.candidateId.toLowerCase() === explicit.toLowerCase()));
     const named = hits.length ? hits : e.submissions.filter((x) => x.candidateName && x.candidateName.length >= 3 && words.includes(x.candidateName.toLowerCase()));
@@ -222,6 +222,8 @@ export function createExamChat(deps: ExamChatDeps) {
       if (e.submissions[i]) return { id: e.submissions[i].candidateId };
     }
     if (last && e.submissions.some((x) => x.candidateId === last) && /\b(it|this|that|the (?:corrected|marked|same) one|their|his|her|same)\b/i.test(msg)) return { id: last };
+    const focused = selected ? e.submissions.find(s => s.id === selected) : null;
+    if (focused) return { id: focused.candidateId };
     if (e.submissions.length === 1) return { id: e.submissions[0].candidateId };
     return { ask: `Which candidate? This examination has ${e.submissions.length}: ${e.submissions.slice(0, 12).map((x) => x.candidateId).join(', ')}${e.submissions.length > 12 ? ', …' : ''}.` };
   }
@@ -425,7 +427,7 @@ export function createExamChat(deps: ExamChatDeps) {
    * Handles a chat message if it belongs to the examination workflow; returns null otherwise so the
    * normal chat continues. `onStatus` receives short progress lines while the turn is open.
    */
-  async function handle(userId: string, message: string, files: UploadFile[], opts: { onStatus?: (t: string) => void } = {}): Promise<ChatReply | null> {
+  async function handle(userId: string, message: string, files: UploadFile[], opts: { onStatus?: (t: string) => void; submissionId?: string; questionId?: string } = {}): Promise<ChatReply | null> {
     const ctx = await getCtx(userId);
     const visual = files.filter(isScriptLike);
     try {
@@ -455,18 +457,22 @@ export function createExamChat(deps: ExamChatDeps) {
       if (!looksExam) return null;
       if (DRAFT_REQUEST.test(message) && !s.confirmedScheme(exam)) return { text: await draftReply(userId, exam.id, undefined, opts.onStatus), attachments: [] };
       const cmd = parseCommand(message) ?? (await llmCommand(message, exam));
+      if (cmd && 'question' in cmd && !cmd.question && opts.questionId) {
+        const question = s.latestScheme(exam)?.scheme?.questions.find(q => q.id === opts.questionId);
+        if (question) cmd.question = question.number;
+      }
       if (!cmd) return null;
-      return await run(userId, exam, cmd, message, ctx, opts.onStatus);
+      return await run(userId, exam, cmd, message, ctx, opts.onStatus, opts.submissionId);
     } catch (err) {
       if (err instanceof ExamInputError || err instanceof JobError) return { text: err.message, attachments: [] };
       throw err;
     }
   }
 
-  async function run(userId: string, exam: ExamRecord, cmd: Command, message: string, ctx: ExamChatContext, onStatus?: (t: string) => void): Promise<ChatReply> {
+  async function run(userId: string, exam: ExamRecord, cmd: Command, message: string, ctx: ExamChatContext, onStatus?: (t: string) => void, selected?: string): Promise<ChatReply> {
     const { list, scheme, stats } = s.summaries(exam);
     const needCandidate = async (explicit: string | null) => {
-      const r = resolveCandidate(exam, message, explicit, ctx.lastCandidateId);
+      const r = resolveCandidate(exam, message, explicit, ctx.lastCandidateId, selected);
       if ('id' in r) await saveCtx(userId, { lastCandidateId: r.id });
       return r;
     };
@@ -617,9 +623,11 @@ export function createExamChat(deps: ExamChatDeps) {
   }
 
   /** Makes an examination the active one for this teacher (the review page they are looking at). */
-  async function focus(userId: string, examId: string) {
-    await s.load(userId, examId);
-    await saveCtx(userId, { examId, pending: null });
+  async function focus(userId: string, examId: string, submissionId?: string) {
+    const exam = await s.load(userId, examId);
+    const selected = submissionId ? exam.submissions.find(s => s.id === submissionId) : null;
+    if (submissionId && !selected) throw new Error('Selected paper not found in this examination.');
+    await saveCtx(userId, { examId, pending: null, lastCandidateId: selected?.candidateId ?? null });
   }
 
   return { handle, parseCommand, statusText, focus };

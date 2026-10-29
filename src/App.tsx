@@ -29,6 +29,8 @@ import {
 import { TopNavbar } from './components/TopNavbar';
 import { LeftSidebar } from './components/LeftSidebar';
 import { CenterWorkspace } from './components/CenterWorkspace';
+import { registerScannedPapers } from './services/scannedPapers';
+import type { ScanBatch, MarkingContext } from './components/ScanMarkWorkspace';
 import UpgradeSheet from './components/UpgradeSheet';
 import RightChatSidebar from './components/RightChatSidebar';
 import { SidebarResultsPanel } from './components/SidebarResultsPanel';
@@ -787,12 +789,27 @@ export default function App() {
     }
   };
 
+  const [markingContext, setMarkingContext] = useState<MarkingContext | null>(null);
+  const [scanBatch, setScanBatch] = useState<ScanBatch | null>(null);
+  // Store only the owner-scoped exam id, never scan images or student names in browser storage.
+  useEffect(() => {
+    setScanBatch(null);
+    if (!authenticatedUser?.id) return;
+    try {
+      const examId = sessionStorage.getItem(`bwenge.scan.exam:${authenticatedUser.id}`);
+      if (examId && /^[0-9a-f-]{36}$/i.test(examId)) { setScanBatch({ id: `resume-${examId}`, examId, pages: [] }); setActiveTab('marking_hub'); }
+    } catch { /* browser storage is optional */ }
+  }, [authenticatedUser?.id]);
   const [scannerGeneratedForm, setScannerGeneratedForm] = useState<any | null>(null);
   const [openFormRequest, setOpenFormRequest] = useState(0);
 
-  const handleSaveScannedPages = (
+  const handleSaveScannedPages = async (
     pages: Array<{
       dataUrl: string;
+      sourceDataUrl?: string;
+      id?: string;
+      filter?: any;
+      candidateId?: string;
       name?: string;
       studentName?: string;
       extractedText?: string;
@@ -803,7 +820,9 @@ export default function App() {
       file?: File;
     }>
   ) => {
+    const saved = await registerScannedPapers(pages.map((p, i) => ({ ...p, id: p.id || `scan-${i}`, filter: p.filter || 'color' })));
     setScannerOpen(false);
+    try { if (authenticatedUser?.id) sessionStorage.setItem(`bwenge.scan.exam:${authenticatedUser.id}`, saved.examId); } catch {}
     const now = Date.now();
 
     const newUploaded: UploadedFile[] = pages.map((p, idx) => ({
@@ -820,27 +839,16 @@ export default function App() {
     }));
     setUploadedFiles((prev) => [...newUploaded, ...prev]);
 
-    const newScripts: StudentScript[] = pages.map((p, idx) => {
-      const awarded = p.aiScore ?? undefined;
-      const max = p.aiMaxScore ?? 100;
-      return {
-        id: `scan-script-${now}-${idx}`,
-        sourceFileId: `scan-file-${now}-${idx}`,
-        studentName: p.studentName || `Student ${idx + 1}`,
-        studentId: `SCN-${100 + idx}`,
-        submittedAt: new Date().toISOString(),
-        status: awarded !== undefined ? ('marked' as const) : ('pending' as const),
-        totalAwardedMarks: awarded,
-        maxTotalMarks: max,
-        percentage: awarded !== undefined ? Math.round((awarded / max) * 100) : undefined,
-        overallFeedback: p.aiFeedback || p.aiSummary || '',
-        answers: [
-          // The review screen shows questionNumber and answerText; the scan's mark and feedback are on the script.
-          { questionId: 'q1', questionNumber: '1', answerText: p.extractedText || 'Scanned answer page' },
-        ],
-      };
-    });
-    setStudentScripts((prev) => [...newScripts, ...prev]);
+    const grouped = new Map<string, typeof pages>();
+    pages.forEach((p, i) => { const id = p.candidateId || p.studentName || `paper-${i}`; grouped.set(id, [...(grouped.get(id) || []), p]); });
+    const newScripts: StudentScript[] = Array.from(grouped.values()).map((paper, idx) => ({
+      id: `scan-script-${now}-${idx}`, sourceFileId: `scan-file-${now}-${pages.indexOf(paper[0])}`,
+      studentName: paper[0].studentName || `Student ${idx + 1}`, studentId: `SCN-${String(idx + 1).padStart(3, '0')}`,
+      submittedAt: new Date().toISOString(), status: 'pending', answers: [],
+    }));
+    setStudentScripts(newScripts);
+    setScanBatch({ id: String(now), examId: saved.examId, pages: pages.map((p, i) => ({ ...p, id: p.id || `scan-${now}-${i}`, filter: p.filter || 'color' })) });
+    setActiveTab('marking_hub');
 
     const attachments: ChatAttachment[] = pages.map((p, idx) => ({
       id: 'att-page-' + now + '-' + idx,
@@ -851,20 +859,15 @@ export default function App() {
       fileType: 'image',
     }));
 
-    const ocrSummary = pages
-      .map((p, idx) =>
-        p.extractedText
-          ? `[Page ${idx + 1} - ${p.studentName || 'Student'}${p.aiScore !== undefined ? ` (AI Score: ${p.aiScore}/${p.aiMaxScore || 100})` : ''}]:\n${p.extractedText}`
-          : ''
-      )
-      .filter(Boolean)
-      .join('\n\n');
-
-    const promptText = ocrSummary
-      ? `Here are ${pages.length} scanned answer sheet(s) from BwengeScan with AI OCR & preliminary grading:\n\n${ocrSummary}\n\nPlease review the extracted answers, verify the rubric grading, and provide a summary of student performance.`
-      : `Here are ${pages.length} scanned answer sheet(s) captured via BwengeScan. Please analyze and grade them.`;
-
-    void handleSendMessage(promptText, attachments);
+    // The workspace owns this marking session; do not start a second independent chat grading run.
+    setMessages(prev => [...prev, {
+      id: `scan-message-${now}`, sender: 'user', text: `Mark these scanned papers: ${grouped.size} students, ${pages.length} JPEG pages.`,
+      attachments, timestamp: new Date().toISOString(),
+    }, {
+      id: `scan-reply-${now}`, sender: 'assistant',
+      text: 'Your scanned papers are open in the workspace. Attach a marking scheme there, or choose Use AI draft if the questions are visible. If these pages contain only answers, attach the question paper. Validated red marks will appear as each question is checked.',
+      timestamp: new Date().toISOString(),
+    }]);
   };
 
   const handleSendMessage = async (
@@ -1013,6 +1016,10 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           query: fullPrompt,
+          surface: scanBatch?.examId && activeTab === 'marking_hub' ? 'exam' : undefined,
+          surfaceId: scanBatch?.examId && activeTab === 'marking_hub' ? scanBatch.examId : undefined,
+          surfaceSubmissionId: scanBatch?.examId === markingContext?.examId ? markingContext?.submissionId : undefined,
+          surfaceQuestionId: scanBatch?.examId === markingContext?.examId ? markingContext?.questionId : undefined,
           provider: selectedProvider === 'auto' ? undefined : selectedProvider,
           history: requestMessages.slice(-10, -1).map((message) => ({
             role: message.sender === 'assistant' ? 'assistant' : 'user',
@@ -1320,9 +1327,57 @@ export default function App() {
     );
   }
 
+  const markingChatPane = (
+<RightChatSidebar
+                    messages={messages}
+                    chatSessions={chatSessions}
+                    onSendMessage={handleSendMessage}
+                    stagedAttachments={stagedAttachments}
+                    onStageAttachments={handleStageAttachments}
+                    attachmentError={attachmentError}
+                    onRemoveStagedAttachment={handleRemoveStagedAttachment}
+                    onClearStagedAttachments={handleClearStagedAttachments}
+                    activeDocument={activeDocument}
+                    setActiveDocument={setActiveDocument}
+                    onOpenScanner={openScanner}
+                    onNewChat={handleNewChat}
+                    onLoadSession={handleLoadChatSession}
+                    onClearChat={handleClearCurrentChat}
+                    onInsightAction={handleInsightAction}
+                    isDegraded={aiServiceState === 'degraded'}
+                    isTyping={isAiThinking}
+                    onUpgradeClick={(jobId, service) => {
+                      setUpgradeContext({ jobId, service });
+                      setUpgradeModalOpen(true);
+                    }}
+                    selectedProvider={selectedProvider}
+                    onProviderChange={setSelectedProvider}
+                    onRetry={() => {
+                      const lastUserMessage = [...messages].reverse().find((message) => message.sender === 'user');
+                      const retry = retryPromptRef.current;
+                      if (retry) void handleSendMessage(retry.text, retry.attachment, retry.options);
+                      else if (lastUserMessage) void handleSendMessage(lastUserMessage.text, lastUserMessage.attachments || lastUserMessage.attachment);
+                    }}
+                  />
+  );
+
   const workspacePane = (
     <CenterWorkspace
       activeTab={activeTab}
+      scanBatch={scanBatch}
+      markingChat={markingChatPane}
+      onMarkingContext={setMarkingContext}
+      onScanExamReady={(examId) => {
+        setScanBatch(prev => {
+          if (!prev || prev.id !== scanBatch?.id) return prev;
+          try { if (authenticatedUser?.id) sessionStorage.setItem(`bwenge.scan.exam:${authenticatedUser.id}`, examId); } catch {}
+          return { ...prev, examId };
+        });
+      }}
+      onCloseScanBatch={() => {
+        setScanBatch(null);
+        try { if (authenticatedUser?.id) sessionStorage.removeItem(`bwenge.scan.exam:${authenticatedUser.id}`); } catch {}
+      }}
       examPaper={examPaper}
       setExamPaper={setExamPaper}
       uploadedFiles={uploadedFiles}
@@ -1369,7 +1424,7 @@ export default function App() {
       batchTitle={examPaper?.title || 'Batch Results'}
       excelDownloadUrl={excelDownloadUrl}
       isGenerating={isGeneratingExcel}
-      results={studentScripts.map((script) => ({
+      results={studentScripts.filter(script => script.totalAwardedMarks !== undefined).map((script) => ({
         id: script.studentId,
         name: script.studentName,
         score: script.totalAwardedMarks ?? 0,
@@ -1679,6 +1734,7 @@ export default function App() {
             <CreateStudio {...studioProps} />
             {activeTab !== 'documents' && (
               <MobileSheet
+                hideHeader={!!scanBatch && activeTab === 'marking_hub'}
                 title={activeTab === 'results' ? 'Results' : 'Agent'}
                 onBack={() => setActiveTab('documents')}
                 onScan={openScanner}
@@ -1693,6 +1749,7 @@ export default function App() {
           </div>
         ) : (
           <div className="flex-1 flex flex-col min-w-0">
+            {!(scanBatch && activeTab === 'marking_hub') && (
             <TopNavbar
               activeTab={activeTab}
               setActiveTab={setActiveTab}
@@ -1705,45 +1762,16 @@ export default function App() {
               user={authenticatedUser}
               onOpenSidebar={() => setIsMobileSidebarOpen(true)}
             />
+            )}
 
             <div className="relative flex min-h-0 flex-1 overflow-hidden lg:flex-row">
-              <div className="min-h-0 border-r border-white/5 flex flex-1">
+              <div className="min-h-0 min-w-0 border-r border-white/5 flex flex-1">
                 {workspacePane}
               </div>
 
-              <div className="h-full min-h-0 w-full min-w-0 flex-col border-l border-white/5 flex lg:w-[min(30vw,440px)] lg:flex-none">
-                {activeTab !== 'results' ? (
-                  <RightChatSidebar
-                    messages={messages}
-                    chatSessions={chatSessions}
-                    onSendMessage={handleSendMessage}
-                    stagedAttachments={stagedAttachments}
-                    onStageAttachments={handleStageAttachments}
-                    attachmentError={attachmentError}
-                    onRemoveStagedAttachment={handleRemoveStagedAttachment}
-                    onClearStagedAttachments={handleClearStagedAttachments}
-                    activeDocument={activeDocument}
-                    setActiveDocument={setActiveDocument}
-                    onOpenScanner={openScanner}
-                    onNewChat={handleNewChat}
-                    onLoadSession={handleLoadChatSession}
-                    onClearChat={handleClearCurrentChat}
-                    onInsightAction={handleInsightAction}
-                    isDegraded={aiServiceState === 'degraded'}
-                    isTyping={isAiThinking}
-                    onUpgradeClick={(jobId, service) => {
-                      setUpgradeContext({ jobId, service });
-                      setUpgradeModalOpen(true);
-                    }}
-                    selectedProvider={selectedProvider}
-                    onProviderChange={setSelectedProvider}
-                    onRetry={() => {
-                      const lastUserMessage = [...messages].reverse().find((message) => message.sender === 'user');
-                      const retry = retryPromptRef.current;
-                      if (retry) void handleSendMessage(retry.text, retry.attachment, retry.options);
-                      else if (lastUserMessage) void handleSendMessage(lastUserMessage.text, lastUserMessage.attachments || lastUserMessage.attachment);
-                    }}
-                  />
+              <div className={`${scanBatch && activeTab === 'marking_hub' ? 'hidden' : 'flex'} h-full min-h-0 w-full min-w-0 flex-col border-l border-white/5 lg:w-[min(30vw,440px)] lg:flex-none`}>
+                {scanBatch && activeTab === 'marking_hub' ? null : activeTab !== 'results' ? (
+                  markingChatPane
                 ) : (
                   <div className="flex h-full min-h-0 flex-col lg:pt-12">{resultsPane}</div>
                 )}

@@ -53,6 +53,7 @@ export interface Submission {
   error?: { code: string; message: string };
   documentId?: string;
   recognitionCached?: boolean;
+  activity?: { questionId: string; at: string };
   /** Recognition settings fingerprint the document was produced with. */
   recognitionKey?: string;
   /** Typed answers (Word, text…): fileId is the printed PDF made from them; the teacher's file is kept here unchanged. */
@@ -64,6 +65,7 @@ export interface CriterionResult {
   criterionId: string; awardedMarks: number; maxMarks: number; reason: string;
   /** The scheme line this mark was judged against, as it stood when marking (kept for "why" questions). */
   rubric?: string;
+  evidenceElementIds?: string[];
 }
 
 /** How sure the marking is, from the marker's own estimate capped by what code found (flags, evidence). */
@@ -159,6 +161,7 @@ export interface ArtifactSet {
   status: 'generating' | 'ready' | 'failed';
   error?: string;
   bundleFileId?: string;
+  classPdfFileId?: string;
   workbookFileId?: string;
   htmlFileId?: string;
   summaryFileId?: string;

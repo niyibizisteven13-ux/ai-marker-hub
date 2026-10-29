@@ -13,7 +13,7 @@ export const analysisSpecSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('crosstab'), row: col, column: col }).strict(),
   z.object({ type: z.literal('correlation'), columns: z.array(col).min(2).max(20).optional(), method: z.enum(['pearson', 'spearman']).optional() }).strict(),
   z.object({ type: z.literal('regression'), y: col, x: z.array(col).min(1).max(10) }).strict(),
-  z.object({ type: z.literal('ttest'), column: col, groupBy: col.optional(), groups: z.tuple([z.string(), z.string()]).optional(), mu: z.number().optional() }).strict(),
+  z.object({ type: z.literal('ttest'), column: col, groupBy: col.optional(), groups: z.array(z.string()).length(2).optional(), mu: z.number().optional() }).strict(),
   z.object({ type: z.literal('outliers'), column: col, k: z.number().positive().max(10).optional() }).strict(),
   z.object({ type: z.literal('timeseries'), time: col, value: col, groupBy: col.optional() }).strict(),
 ]);

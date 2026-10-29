@@ -51,7 +51,7 @@ export default function LiveMarkingPanel({ examId, onScriptMarked, compact = fal
       while (!stopped) {
         ctrl = new AbortController();
         try {
-          const res = await authFetch(`/api/exams/${examId}/events`, { headers: { 'Last-Event-ID': String(lastSeq.current) }, signal: ctrl.signal });
+          const res = await authFetch(`/api/exams/${examId}/activity`, { headers: { 'Last-Event-ID': String(lastSeq.current) }, signal: ctrl.signal });
           if (res.status === 404 || res.status === 401 || res.status === 403) { setConnected(false); return; }
           if (!res.ok || !res.body) throw new Error(String(res.status));
           setConnected(true);

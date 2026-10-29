@@ -12,6 +12,7 @@ import { OwnedRecordStore, type OwnedRecord } from '../storage/ownedRecordStore.
 import { annotateScript } from './annotate.js';
 import { verifyMarkedPdf } from './verifyPdf.js';
 import { computeLayout } from './layout.js';
+import { processedToViewed } from './pdfGeometry.js';
 import { expandArchives, InputError, isPdf, isTyped, typedToPdf } from './inputs.js';
 import { loadPages } from '../documents/pages.js';
 import { buildBundle, safeName, type BundleFile } from './bundle.js';
@@ -47,6 +48,9 @@ export interface ExamDeps {
   forbiddenStrings?: string[];
   maxPages?: number;
   maxCandidates?: number;
+  maxBatchPages?: number;
+  visualEvidence?: boolean;
+  beforeAi?: (userId: string) => Promise<void>;
   candidateConcurrency?: number;
   /** Time a marking job works before handing over to a continuation job (stays under the queue deadline). */
   segmentBudgetMs?: number;
@@ -66,6 +70,7 @@ const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 export const isReleased = (r: CandidateResult | undefined) => !!r?.released && r.released.resultUpdatedAt === r.updatedAt;
 /** Stamp of what a candidate PDF was drawn from (result version and release state). */
 const pdfStamp = (r: CandidateResult, corrections = true) => `${r.updatedAt}|${isReleased(r) ? 'released' : 'draft'}${corrections ? '' : '|no-corrections'}`;
+const STOPPED = 'Stopped by teacher';
 const sha256 = (b: Buffer | string) => createHash('sha256').update(b).digest('hex');
 const now = () => new Date().toISOString();
 const sleep = (ms: number, signal?: AbortSignal) => new Promise<void>((res) => { const t = setTimeout(res, ms); signal?.addEventListener('abort', () => { clearTimeout(t); res(); }, { once: true }); });
@@ -105,7 +110,7 @@ export function parseManifest(text: string): CandidateMapping[] {
 }
 
 export function createExamService(deps: ExamDeps) {
-  const concurrency = Math.max(1, deps.candidateConcurrency ?? 2);
+  const concurrency = Math.max(1, Math.min(4, Math.floor(deps.candidateConcurrency || 2)));
   const budget = deps.segmentBudgetMs ?? 8 * 60 * 1000;
   const maxCandidates = deps.maxCandidates ?? 100;
 
@@ -243,6 +248,7 @@ export function createExamService(deps: ExamDeps) {
 
   /** Stores the scheme (and optional question paper) and queues extraction. */
   async function submitSchemeDocuments(userId: string, examId: string, input: { scheme: UploadFile[]; questionPaper?: UploadFile; autoMark?: boolean }) {
+    await deps.beforeAi?.(userId);
     if (!input.scheme.length) throw new ExamInputError('NO_SCHEME', 'Upload the official marking scheme.');
     await load(userId, examId);
     await requirePremium(userId);
@@ -262,6 +268,7 @@ export function createExamService(deps: ExamDeps) {
    * they appear on the candidates' scripts. A draft is never used until the teacher confirms it.
    */
   async function draftScheme(userId: string, examId: string, input: { questionPaper?: UploadFile } = {}) {
+    await deps.beforeAi?.(userId);
     const exam = await load(userId, examId);
     await requirePremium(userId);
     let questionPaper: SchemeJobPayload['questionPaper'];
@@ -294,6 +301,7 @@ export function createExamService(deps: ExamDeps) {
 
   async function runSchemeJob(job: FileJob<SchemeJobPayload>, ctx: JobContext) {
     const p = job.payload;
+    await deps.beforeAi?.(job.ownerId);
     await ctx.progress(p.draft ? 'reading the questions' : 'reading the marking scheme', 10);
     await mutate(job.ownerId, p.examId, (e) => emit(e, { type: 'rubric_processing_started', jobId: job.id, message: p.draft ? 'Drafting a provisional marking scheme from the questions (no official scheme was given).' : `Reading the marking scheme (${p.schemeFileIds.map((f) => f.name).join(', ').slice(0, 120)}).`, data: { draft: !!p.draft } }));
     const texts: string[] = [];
@@ -397,6 +405,7 @@ export function createExamService(deps: ExamDeps) {
           try { f = { name: f.name, buffer: await typedToPdf(f), mime: 'application/pdf' }; } catch (e) { throw new ExamInputError('UNREADABLE', e instanceof Error ? e.message : `${f.name} could not be read.`); }
         }
         const info = await inspectFile(f);
+        if (exam.submissions.reduce((sum, sub) => sum + sub.pages, 0) + accepted.reduce((sum, sub) => sum + sub.pages, 0) + info.pages > (deps.maxBatchPages ?? 50)) throw new ExamInputError('BATCH_PAGE_LIMIT', 'This batch has too many pages. Start another assessment.', 413);
         if (info.pages > (deps.maxPages ?? 20)) throw new ExamInputError('TOO_MANY_PAGES', `${f.name} has ${info.pages} pages; the limit is ${deps.maxPages ?? 20}.`, 413);
         const hash = sha256((typedOriginal ?? f).buffer);
         if (hashes.has(hash)) throw new ExamInputError('DUPLICATE', `${f.name} is identical to the script of ${hashes.get(hash)}.`, 409);
@@ -432,6 +441,7 @@ export function createExamService(deps: ExamDeps) {
 
   // ── Marking runs ────────────────────────────────────────────────────────
   async function startMarking(userId: string, examId: string, opts: { submissionIds?: string[]; remarkAll?: boolean } = {}) {
+    await deps.beforeAi?.(userId);
     const exam = await load(userId, examId);
     const sv = confirmedScheme(exam);
     if (!sv?.scheme) {
@@ -461,14 +471,14 @@ export function createExamService(deps: ExamDeps) {
     return { runId: run.id, jobId: job.id, candidates: ids.length, schemeVersion: sv.version };
   }
 
-  /** A run that was cancelled must not change anything: its work may still be finishing in the background. */
-  const runLive = (e: ExamRecord, runId: string) => { const r = e.runs.find((x) => x.id === runId); return !!r && r.state !== 'cancelled'; };
+  /** A run that was cancelled or stopped must not change anything: its work may still be finishing in the background. */
+  const runLive = (e: ExamRecord, runId: string) => { const r = e.runs.find((x) => x.id === runId); return !!r && r.state !== 'cancelled' && !(r.state === 'failed' && r.error === STOPPED); };
 
   async function setState(userId: string, examId: string, runId: string, submissionId: string, state: CandidateState, error?: { code: string; message: string }, ...events: Array<Omit<ExamEvent, 'v' | 'seq' | 'at'>>) {
     await mutate(userId, examId, (e) => {
       if (!runLive(e, runId)) return;
       const s = e.submissions.find((x) => x.id === submissionId);
-      if (s) { s.state = state; s.stateAt = now(); if (error) s.error = error; else delete s.error; }
+      if (s) { s.state = state; s.stateAt = now(); if (error) s.error = error; else delete s.error; if (state !== 'marking') delete s.activity; }
       for (const ev of events) emit(e, ev);
     });
   }
@@ -511,6 +521,7 @@ export function createExamService(deps: ExamDeps) {
       return;
     }
 
+    await deps.beforeAi?.(userId);
     const ref = { runId, submissionId: sub.id, candidateId: sub.candidateId };
     await setState(userId, examId, runId, sub.id, 'validating');
     await setState(userId, examId, runId, sub.id, 'recognizing', undefined, { ...ref, type: 'page_processing_started', message: `Reading ${sub.candidateId}'s script (${sub.pages} page${sub.pages === 1 ? '' : 's'}).`, data: { pages: sub.pages } });
@@ -542,19 +553,42 @@ export function createExamService(deps: ExamDeps) {
     let marked: Awaited<ReturnType<typeof markCandidate>>;
     try {
       const pref = exam.preferences ?? DEFAULT_PREFERENCES;
-      marked = await markCandidate(agent.adapter, agent.model, {
-        scheme, questionIds: scheme.questions.map((q) => q.id), match, questionPaperText: await questionPaperText(userId, exam), runId, schemeVersion: run.schemeVersion, signal, fallbackModel: agent.fallbackModel,
+      marked = await markCandidate(agent.adapter, agent.model, { scheme, questionIds: scheme.questions.map((q) => q.id), match, questionPaperText: await questionPaperText(userId, exam), runId, schemeVersion: run.schemeVersion, signal, fallbackModel: agent.fallbackModel,
         preferences: { credit: pref.credit, feedback: pref.feedback },
-        onChunk: (ids) => mutate(userId, examId, (e) => {
-          if (!runLive(e, runId)) return;
-          const nums = ids.map((id) => scheme.questions.find((q) => q.id === id)?.number ?? id);
-          emit(e, { ...ref, type: 'question_marking_started', questionId: ids[0], message: `${sub.candidateId}: marking question${nums.length === 1 ? '' : 's'} ${nums.join(', ')}.`, data: { questions: nums.join(', ') } });
-        }).then(() => undefined),
+        imagesForQuestions: deps.visualEvidence ? ids => markingImages(userId, examId, sub.id, match, ids) : undefined,
+        chunkSize: 1,
+        checkpoints: existing?.runId === runId ? Object.fromEntries(existing.questions.filter(q => q.ai).map(q => [q.questionId, q.ai!])) : undefined,
+        onStartQuestion: async questionId => {
+          await mutate(userId, examId, e => {
+            if (!runLive(e, runId)) return;
+            const s = e.submissions.find(x => x.id === sub.id)!;
+            s.activity = { questionId, at: now() };
+            const number = scheme.questions.find((q) => q.id === questionId)?.number ?? questionId;
+            emit(e, { ...ref, type: 'question_marking_started', questionId, message: `${sub.candidateId}: marking question ${number}.`, data: { questions: number } });
+          });
+        },
+        onQuestion: async (questionId, ai) => {
+          await mutate(userId, examId, (e) => {
+            if (!runLive(e, runId)) return;
+            const previous = e.results[sub.id];
+            const questions: QuestionResult[] = scheme.questions.map((q) => {
+              const old = previous?.questions.find((x) => x.questionId === q.id);
+              return { questionId: q.id, number: q.number, maxMarks: q.maxMarks,
+                ai: q.id === questionId ? ai : previous?.runId === runId ? old?.ai ?? null : null,
+                override: old?.override ?? null, confirmed: null,
+                mappedElementIds: match.questions[q.id]?.elementIds ?? [], mappingFlags: match.questions[q.id]?.flags ?? [], history: old?.history ?? [] };
+            });
+            e.resultRevision++;
+            e.results[sub.id] = { submissionId: sub.id, candidateId: sub.candidateId, runId, schemeVersion: run.schemeVersion,
+              questions, updatedAt: now(), usage: previous?.runId === runId ? previous.usage : { input: 0, output: 0 } };
+          });
+        },
       });
     } catch (e) {
       throw mapProvider(e);
     }
 
+    if (signal.aborted) throw signal.reason;
     await setState(userId, examId, runId, sub.id, 'verifying');
     await mutate(userId, examId, (e) => {
       // Marks finished after the run was cancelled are dropped: the next run marks this script again.
@@ -654,6 +688,7 @@ export function createExamService(deps: ExamDeps) {
     let artifactError: string | null = null;
     let set: ArtifactSet | null = null;
     try { set = await generateArtifacts(userId, examId); } catch (err) { artifactError = err instanceof Error ? err.message : 'Artifact generation failed.'; }
+    if (ctx.signal.aborted) throw ctx.signal.reason;
     const e = await mutate(userId, examId, (x) => {
       if (!runLive(x, runId)) return;
       const r = x.runs.find((y) => y.id === runId)!;
@@ -750,6 +785,15 @@ export function createExamService(deps: ExamDeps) {
     const affected = res ? res.questions.filter((q) => q.ai?.evidenceElementIds.includes(target!.el.id) || q.mappedElementIds.includes(target!.el.id)).map((q) => q.questionId) : [];
     await mutate(userId, examId, (e) => {
       e.resultRevision++;
+      const result = e.results[sub.id];
+      if (result) {
+        result.updatedAt = now(); result.released = null;
+        for (const q of result.questions.filter(q => affected.includes(q.questionId))) {
+          q.confirmed = null;
+          if (q.ai && !q.ai.reviewFlags.some(f => f.code === 'transcription_affects_mark'))
+            q.ai.reviewFlags.push({ code: 'transcription_affects_mark', severity: 'high', detail: 'The reading was corrected. Re-mark or review this question before release.' });
+        }
+      }
       audit(e, { actor: userId, type: 'transcription_correction', submissionId: sub.id, candidateId: sub.candidateId, before: target!.text.slice(0, 500), after: newText.slice(0, 500), reason: `element ${target!.el.id} on page ${target!.page}` });
     });
     let jobId: string | null = null;
@@ -773,8 +817,9 @@ export function createExamService(deps: ExamDeps) {
     const match = matchAnswers(doc.result, doc.corrections, scheme);
     const agent = deps.agent();
     let marked: Awaited<ReturnType<typeof markCandidate>>;
+    await deps.beforeAi?.(userId);
     try {
-      marked = await markCandidate(agent.adapter, agent.model, { scheme, questionIds, match, questionPaperText: await questionPaperText(userId, exam), runId: res.runId, schemeVersion: res.schemeVersion, signal, fallbackModel: agent.fallbackModel });
+      marked = await markCandidate(agent.adapter, agent.model, { imagesForQuestions: deps.visualEvidence ? ids => markingImages(userId, examId, sub.id, match, ids) : undefined, scheme, questionIds, match, questionPaperText: await questionPaperText(userId, exam), runId: res.runId, schemeVersion: res.schemeVersion, signal, fallbackModel: agent.fallbackModel });
     } catch (e) { throw mapProvider(e); }
     const correctedIds = new Set(doc.corrections.map((c) => c.elementId));
     await mutate(userId, examId, (e) => {
@@ -884,6 +929,19 @@ export function createExamService(deps: ExamDeps) {
       if (pdf) { files.push({ path: `candidates/${name}`, data: pdf, kind: 'candidate_pdf' }); pdfPaths[s.submissionId] = `candidates/${name}`; }
       files.push({ path: `reports/${safeName(s.candidateId)}_marking.json`, data: Buffer.from(JSON.stringify(candidateReport(exam, s), null, 2)), kind: 'candidate_report' });
     }
+    const pdfFiles = files.filter((f) => f.kind === 'candidate_pdf');
+    if (pdfFiles.length) {
+      try {
+        const combined = await PDFDocument.create();
+        for (const f of pdfFiles) {
+          const source = await PDFDocument.load(f.data);
+          for (const page of await combined.copyPages(source, source.getPageIndices())) combined.addPage(page);
+        }
+        set.classPdfFileId = (await deps.fileStore.put({ userId, name: 'class-marked-papers.pdf', mime: 'application/pdf', kind: 'pdf', data: Buffer.from(await combined.save()), ttlMs: RETENTION_MS })).id;
+      } catch {
+        set.problems.push('The combined class PDF could not be created. Download the individual marked PDFs or the class ZIP instead.');
+      }
+    }
     const meta = { runId, schemeVersion, generatedAt };
     const workbook = await buildWorkbook(exam, scheme, list, stats, meta);
     const data = buildReportData(exam, scheme, list, stats, pdfPaths, meta);
@@ -936,7 +994,7 @@ export function createExamService(deps: ExamDeps) {
   function artifactRefs(set: ArtifactSet) {
     const ttl = 60 * 60 * 1000;
     const url = (id?: string) => (id ? deps.fileStore.signedUrl(id, ttl) : null);
-    return { id: set.id, resultRevision: set.resultRevision, createdAt: set.createdAt, status: set.status, problems: set.problems, bundleUrl: url(set.bundleFileId), workbookUrl: url(set.workbookFileId), reportUrl: url(set.htmlFileId), summaryUrl: url(set.summaryFileId) };
+    return { id: set.id, resultRevision: set.resultRevision, createdAt: set.createdAt, status: set.status, problems: set.problems, classPdfUrl: url(set.classPdfFileId), candidatePdfs: Object.entries(set.candidatePdfs).map(([submissionId, id]) => ({ submissionId, name: `${submissionId}.pdf`, url: url(id) })), bundleUrl: url(set.bundleFileId), workbookUrl: url(set.workbookFileId), reportUrl: url(set.htmlFileId), summaryUrl: url(set.summaryFileId) };
   }
 
   async function artifacts(userId: string, examId: string) {
@@ -1003,6 +1061,13 @@ export function createExamService(deps: ExamDeps) {
       candidate: { submissionId: sub.id, candidateId: sub.candidateId, candidateName: sub.candidateName ?? null, fileName: sub.fileName },
       summary, layout, released: isReleased(res), releasedAt: isReleased(res) ? res.released!.at : null, changedSinceRelease: !!res.released && !isReleased(res),
       questions: view.result!.questions, markedPdf: view.markedPdf,
+      evidence: doc.result.pages.flatMap(p => p.elements.map(el => ({
+        id: el.id, page: p.page, text: finalText(el, doc.corrections), handwritten: el.handwritten,
+        needsReview: el.needsReview && !doc.corrections.some(c => c.elementId === el.id),
+        signals: doc.corrections.some(c => c.elementId === el.id) ? ['Reading corrected by the teacher.'] : el.signals.map(s => s.detail),
+        questionIds: res.questions.filter(q => q.mappedElementIds.includes(el.id) || q.ai?.evidenceElementIds.includes(el.id)).map(q => q.questionId),
+        cropUrl: `/api/exams/${exam.id}/submissions/${sub.id}/evidence/${encodeURIComponent(el.id)}`,
+      }))),
       candidates: reviewList(exam),
     };
   }
@@ -1017,13 +1082,62 @@ export function createExamService(deps: ExamDeps) {
     const hit = pageCache.get(key);
     if (hit) return hit;
     const original = (await deps.fileStore.read(sub.fileId, userId)).data;
-    const { pages } = await loadPages(original, sub.fileName, { maxPages: deps.maxPages ?? 50, pdfScale: 1.6 });
+    const { pages } = await loadPages(original, sub.fileName, { maxPages: deps.maxPages ?? 50, pdfScale: 3 });
     const src = pages.find((p) => p.page === page);
     if (!src) throw new ExamInputError('UNKNOWN_PAGE', `Page ${page} does not exist.`, 404);
-    const jpg = await sharp(src.image, { limitInputPixels: 80_000_000 }).rotate().flatten({ background: '#ffffff' }).resize({ width: 1400, withoutEnlargement: true }).jpeg({ quality: 82 }).toBuffer();
+    const jpg = await sharp(src.image, { limitInputPixels: 80_000_000 }).rotate().flatten({ background: '#ffffff' }).resize({ width: 2200, withoutEnlargement: true }).jpeg({ quality: 90 }).toBuffer();
     pageCache.set(key, jpg);
     if (pageCache.size > 60) pageCache.delete(pageCache.keys().next().value!);
     return jpg;
+  }
+
+  /** A source close-up in original displayed-page coordinates, never an AI-generated reconstruction. */
+  async function evidenceCrop(userId: string, examId: string, ref: string, elementId: string) {
+    const exam = await load(userId, examId);
+    const sub = findSub(exam, ref);
+    const doc = sub?.documentId ? await deps.documents.get(userId, sub.documentId) : null;
+    const page = doc?.result.pages.find(p => p.elements.some(e => e.id === elementId));
+    const el = page?.elements.find(e => e.id === elementId);
+    if (!sub || !page || !el) throw new ExamInputError('UNKNOWN_ELEMENT', 'No source region for this answer.', 404);
+    const jpg = await pageImage(userId, examId, sub.id, page.page);
+    const meta = await sharp(jpg).metadata();
+    const points = [
+      processedToViewed(el.region.x0, el.region.y0, page), processedToViewed(el.region.x1, el.region.y0, page),
+      processedToViewed(el.region.x0, el.region.y1, page), processedToViewed(el.region.x1, el.region.y1, page),
+    ];
+    const width = meta.width!, height = meta.height!;
+    const left = Math.max(0, Math.floor(Math.min(...points.map(p => p.fx)) * width) - 16);
+    const top = Math.max(0, Math.floor(Math.min(...points.map(p => p.fy)) * height) - 16);
+    const right = Math.min(width, Math.ceil(Math.max(...points.map(p => p.fx)) * width) + 16);
+    const bottom = Math.min(height, Math.ceil(Math.max(...points.map(p => p.fy)) * height) + 16);
+    if (right <= left || bottom <= top) throw new ExamInputError('INVALID_REGION', 'The answer location is uncertain. Review the full page.', 422);
+    return sharp(jpg).extract({ left, top, width: right - left, height: bottom - top }).jpeg({ quality: 95 }).toBuffer();
+  }
+
+  async function markingImages(userId: string, examId: string, submissionId: string, match: ReturnType<typeof matchAnswers>, questionIds: string[]) {
+    const ids = [...new Set(questionIds.flatMap(id => match.questions[id]?.elementIds ?? []))];
+    const pages = [...new Set(match.elements.filter(e => ids.includes(e.id)).map(e => e.page))].slice(0, 2);
+    const images: string[] = [];
+    for (const page of pages) images.push(`data:image/jpeg;base64,${(await pageImage(userId, examId, submissionId, page)).toString('base64')}`);
+    for (const id of ids.slice(0, 3)) {
+      try { images.push(`data:image/jpeg;base64,${(await evidenceCrop(userId, examId, submissionId, id)).toString('base64')}`); }
+      catch { /* An invalid crop is not evidence; full source pages remain available. */ }
+    }
+    return images;
+  }
+
+  /** Stop active runs and retain validated partial results. Retry starts a new run. */
+  async function stopMarking(userId: string, examId: string) {
+    const exam = await load(userId, examId);
+    const active = exam.runs.filter(r => !['completed', 'completed_with_warnings', 'failed', 'cancelled'].includes(r.state));
+    for (const run of active) for (const id of run.jobIds) await deps.queue.cancel(id, userId);
+    await mutate(userId, examId, e => {
+      for (const run of e.runs.filter(r => active.some(a => a.id === r.id))) { run.state = 'failed'; run.error = STOPPED; run.finishedAt = now(); }
+      for (const sub of e.submissions.filter(s => active.some(r => r.submissionIds.includes(s.id)))) {
+        if (!['completed', 'completed_with_warnings'].includes(sub.state)) { sub.state = 'failed'; sub.stateAt = now(); sub.error = { code: 'STOPPED', message: 'Stopped. Saved marks are retained; retry to finish this paper.' }; }
+      }
+    });
+    return { stopped: active.length };
   }
 
   /** Moves or hides one red item (or resets it to the automatic place). Any change makes the PDF a draft again. */
@@ -1032,7 +1146,7 @@ export function createExamService(deps: ExamDeps) {
     const sub = findSub(exam, ref);
     const res = sub ? exam.results[sub.id] : undefined;
     if (!sub || !res) throw new ExamInputError('UNKNOWN_CANDIDATE', `No marked script for "${ref}".`, 404);
-    const valid = itemId === 'total' || res.questions.some((q) => itemId === `${q.questionId}:mark` || itemId === `${q.questionId}:correction`);
+    const valid = itemId === 'total' || res.questions.some((q) => itemId === `${q.questionId}:mark` || itemId === `${q.questionId}:correction` || q.ai?.criterionResults.some(c => itemId === `${q.questionId}:criterion:${c.criterionId}`));
     if (!valid) throw new ExamInputError('UNKNOWN_ITEM', `No item "${itemId}" on this script.`, 404);
     if (!input.reset && !input.hidden && (input.page === undefined || input.fx === undefined || input.fy === undefined)) throw new ExamInputError('INVALID_REQUEST', 'Give page, fx and fy, or hidden, or reset.', 400);
     if (input.page !== undefined && (input.page < 1 || input.page > sub.pages)) throw new ExamInputError('UNKNOWN_PAGE', `Page ${input.page} does not exist.`, 404);
@@ -1093,7 +1207,20 @@ export function createExamService(deps: ExamDeps) {
     const subs = run ? e.submissions.filter((s) => run.submissionIds.includes(s.id)) : e.submissions;
     const counts: Partial<Record<CandidateState, number>> = {};
     for (const s of subs) counts[s.state] = (counts[s.state] ?? 0) + 1;
-    return { run: run ? { id: run.id, state: run.state, schemeVersion: run.schemeVersion, startedAt: run.startedAt ?? null, finishedAt: run.finishedAt ?? null, error: run.error ?? null } : null, counts, candidates: subs.map((s) => ({ submissionId: s.id, candidateId: s.candidateId, state: s.state, stateAt: s.stateAt, error: s.error ?? null })) };
+    const scheme = run ? schemeOf(e, run.schemeVersion) : confirmedScheme(e)?.scheme;
+    const totalQuestions = subs.length * (scheme?.questions.length ?? 0);
+    const savedQuestions = subs.reduce((n, s) => n + ((!run || e.results[s.id]?.runId === run.id) && e.results[s.id]?.schemeVersion === (run?.schemeVersion ?? confirmedScheme(e)?.version)
+      ? e.results[s.id].questions.filter(q => q.ai).length : 0), 0);
+    const finished = subs.filter(s => ['completed', 'completed_with_warnings'].includes(s.state)).length;
+    const failed = subs.filter(s => s.state === 'failed').length;
+    const active = subs.filter(s => !['queued', 'completed', 'completed_with_warnings', 'failed'].includes(s.state)).map(s => ({
+      submissionId: s.id, name: s.candidateName || s.candidateId, stage: s.state,
+      question: scheme?.questions.find(q => q.id === s.activity?.questionId)?.number ?? null,
+      since: s.activity?.at ?? s.stateAt,
+    }));
+    const work = { totalQuestions, savedQuestions, finished, failed, total: subs.length, active,
+      percent: totalQuestions ? Math.min(100, Math.floor(savedQuestions / totalQuestions * 100)) : 0 };
+    return { work, run: run ? { id: run.id, state: run.state, schemeVersion: run.schemeVersion, startedAt: run.startedAt ?? null, finishedAt: run.finishedAt ?? null, error: run.error ?? null } : null, counts, candidates: subs.map((s) => ({ submissionId: s.id, candidateId: s.candidateId, state: s.state, stateAt: s.stateAt, error: s.error ?? null })) };
   }
 
   // ── Live events, cancellation and preferences ──────────────────────────
@@ -1135,10 +1262,10 @@ export function createExamService(deps: ExamDeps) {
 
   return {
     eventsSince, subscribe, cancelRun, setPreferences,
-    createExam, load, mutate, setSchemeJson, confirmScheme, editSchemeQuestion, submitSchemeDocuments, addSubmissions, startMarking,
+    createExam, load, mutate, stopMarking, setSchemeJson, confirmScheme, editSchemeQuestion, submitSchemeDocuments, addSubmissions, startMarking,
     summaries, overrideMark, confirmResults, correctTranscription, remarkQuestions, requestRemark, generateArtifacts, requestExport, artifacts, artifactRefs, candidateView, progress,
     latestScheme, confirmedScheme, findSub, findQuestion,
-    listExams, reviewList, reviewCandidate, pageImage, setLayout, release, draftScheme,
+    listExams, reviewList, reviewCandidate, pageImage, evidenceCrop, setLayout, release, draftScheme,
   };
 }
 
