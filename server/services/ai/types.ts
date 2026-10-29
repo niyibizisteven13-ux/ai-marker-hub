@@ -73,11 +73,15 @@ export interface ToolOutput {
   /** Knowledge passages used, so the UI can show source chips. */
   sources?: KnowledgePassage[];
   isError?: boolean;
+  /** Images the model should look at next (e.g. PDF pages), shown to it right after the tool results. */
+  images?: Array<{ mime: string; base64: string; label?: string }>;
 }
 
 export interface Tool {
   definition: ToolDefinition;
   execute(input: any, ctx: ToolContext): Promise<ToolOutput>;
+  /** Longer than the runtime's default tool timeout (whole-document analysis). */
+  timeoutMs?: number;
 }
 
 export interface KnowledgePassage {
@@ -96,6 +100,8 @@ export interface KnowledgePassage {
 
 /** Optional services injected from the host app. Tools that need a service are only offered when it exists. */
 export interface ToolServices {
+  /** Plain text completion on the document model, for tools that read long documents section by section. */
+  llm?: { complete(req: { system: string; prompt: string; maxTokens?: number; userId: string; signal?: AbortSignal }): Promise<string> };
   knowledge?: { search(query: string, opts: { topK: number; userId: string }): Promise<KnowledgePassage[]> };
   webSearch?: {
     search(query: string): Promise<Array<{ title: string; url: string; snippet: string }>>;

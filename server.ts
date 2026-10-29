@@ -29,6 +29,7 @@ import { SentimentService } from './server/services/SentimentService.js';
 import { ConfidenceService } from './server/services/ConfidenceService.js';
 import { upload, batchUpload, chatFileUpload, CHAT_MAX_FILE_BYTES } from './server/middleware/upload.js';
 import { isBase64 } from './server/utils/base64.js';
+import { fitHistory, sanitizeHistory } from './server/services/ai/chatHistory.js';
 import { ingestDocument } from './server/services/DocumentIngestionService.js';
 import { classifyIntent, isSmallTalkMessage } from './server/services/intentRouter.js';
 import { generalTools } from './server/services/generalTools.js';
@@ -1020,7 +1021,8 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
     parsedHistory = [];
   }
 
-  parsedHistory = parsedHistory.filter((h) => h && typeof h === 'object' && h.role && h.text);
+  // The whole conversation: recent turns word for word, older ones condensed, within the model's context.
+  parsedHistory = fitHistory(sanitizeHistory(parsedHistory));
 
   const cleanProvider = requestedProvider === 'undefined' || requestedProvider === 'null' || !requestedProvider ? null : requestedProvider;
 
@@ -1295,7 +1297,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
         const recs = await prisma.fileRecord.findMany({ where: { id: { in: finalAttachmentIds }, userId }, select: { name: true, path: true, mimeType: true } });
         for (const r of recs) if (r.path) { try { examFiles.push({ name: r.name, buffer: await fs.readFile(r.path), mime: r.mimeType }); } catch { /* file gone */ } }
       }
-      const examReply = surface === 'form' ? null : await examChat.handle(userId, query || '', examFiles, { onStatus: examStatus, submissionId: surface === 'exam' ? req.body.surfaceSubmissionId : undefined, questionId: surface === 'exam' ? req.body.surfaceQuestionId : undefined });
+      const examReply = surface === 'form' ? null : await examChat.handle(userId, query || '', examFiles, { onStatus: examStatus, submissionId: surface === 'exam' ? req.body.surfaceSubmissionId : undefined, questionId: surface === 'exam' ? req.body.surfaceQuestionId : undefined, history: parsedHistory });
       if (examReply) {
         const em = openExamStream();
         if (examStep) em.status(examStep.id, examStep.label, 'done');
@@ -1388,7 +1390,7 @@ ${augmentedQuery}`;
 
         userId,
         learning,
-        messages: [...parsedHistory, { role: 'user', content: augmentedQuery }],
+        messages: [...parsedHistory.map((h) => ({ role: h.role, content: h.text })), { role: 'user', content: augmentedQuery }],
         files: finalFiles,
         contextFiles,
         pinnedSyllabus,

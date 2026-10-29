@@ -126,3 +126,17 @@ test('everyday chat is not routed to Claude or forced through tools', async () =
   assert.equal(gonkaRequests.length, 1, 'plain questions stay on the Gonka chat model');
   assert.doesNotMatch(JSON.stringify(gonkaRequests[0].messages[0]), /Deliverables for this turn/);
 });
+
+test('earlier turns reach Claude with their text, also when given in the chat-history shape { role, text }', async () => {
+  requests.length = 0;
+  script.push({ text: 'Based on our earlier discussion…' });
+  const history: any[] = [
+    { role: 'user', text: 'My class is Senior 4 B and the scheme gives half marks for method.' },
+    { role: 'assistant', text: 'Noted: Senior 4 B, half marks for method.' },
+  ];
+  await ai.generalAssist({ userId: `history-${Date.now()}`, messages: [...history, { role: 'user', content: 'Make a bar chart of A=1, B=2 as an Excel file.' }], onEvent: () => undefined });
+  const sent = JSON.stringify(requests[0].messages);
+  assert.match(sent, /Senior 4 B and the scheme gives half marks/);
+  assert.match(sent, /Noted: Senior 4 B/);
+  assert.ok(requests[0].messages.every((m: any) => JSON.stringify(m.content) !== '""'), 'no empty turns');
+});

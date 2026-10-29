@@ -84,7 +84,7 @@ ${has('analyze_data') ? '- Numbers from data: call analyze_data (describe, missi
 
   if (has('read_attachment')) {
     out.push(`## Reading uploads
-Uploaded file text may already be included in the message; if it is cut off or you need another file, call read_attachment with its fileId. For images, look at them directly and describe concrete details (text, numbers, layout) instead of generic summaries.`);
+Uploaded file text may already be included in the message; if it is cut off or you need another file, call read_attachment with its fileId (page, find or offset for a later part). For images, look at them directly and describe concrete details (text, numbers, layout) instead of generic summaries.${has('analyze_document') ? '\n- Long documents (books, long reports): when the answer depends on the whole document (summarise the book, every example of X, compare chapters), call analyze_document once with the full task; it reads every page and returns page-cited notes. Never answer about a whole document from its first pages only.' : ''}${has('view_pages') ? '\n- Scanned or handwritten PDFs, diagrams and tables: call view_pages for the pages you need (up to 20 per call); never say a page is unavailable before looking at it.' : ''}`);
   }
   return out.join('\n\n');
 }

@@ -6,12 +6,13 @@ import { truncate } from '../util/text.js';
 export const readAttachment: Tool = {
   definition: {
     name: 'read_attachment',
-    description: 'Read the text of a file the user uploaded or that was created earlier (PDF, Word, Excel, PowerPoint, CSV, text, code). Use the fileId shown in the conversation. For long files (books, reports) pass `find` to start at a heading such as "Chapter 5" or a phrase, or `offset` to continue where the previous read ended. Images are viewed directly, not through this tool.',
+    description: 'Read the text of a file the user uploaded or that was created earlier (PDF, Word, Excel, PowerPoint, CSV, text, code). Use the fileId shown in the conversation. For long files (books, reports) pass `page` to start at a PDF page, `find` to start at a heading such as "Chapter 5" or a phrase, or `offset` to continue where the previous read ended. Images are viewed directly, not through this tool.',
     parameters: { type: 'object', required: ['fileId'], properties: {
       fileId: { type: 'string' },
       find: { type: 'string', description: 'Start reading at the first place this text appears (case-insensitive), e.g. "Chapter 5". Later matches: raise `occurrence`.' },
       occurrence: { type: 'integer', minimum: 1, default: 1, description: 'Which match of `find` to start at (a table of contents often holds the first one).' },
       offset: { type: 'integer', minimum: 0, default: 0, description: 'Character position to start at; each read reports where the next one should start.' },
+      page: { type: 'integer', minimum: 1, description: 'PDF page to start at (page numbers of the file, not printed page labels).' },
       maxChars: { type: 'integer', minimum: 1000, maximum: 120000, default: 60000 },
     } },
   },
@@ -19,13 +20,19 @@ export const readAttachment: Tool = {
     try {
       const { meta, data } = await ctx.files.read(input.fileId, ctx.userId);
       const want = Math.min(Math.max(Number(input.maxChars) || 60000, 1000), 120000);
-      const windowed = Boolean(input.find) || Number(input.offset) > 0;
+      const windowed = Boolean(input.find) || Number(input.offset) > 0 || Number(input.page) > 1;
       const r = await extractText({ name: meta.name, mime: meta.mime, data }, { maxChars: windowed ? 20_000_000 : want });
       if (r.kind === 'image') return { text: `${meta.name} is an image. Look at it directly if it was attached to the message; text cannot be extracted with this tool.` };
       if (r.kind === 'unsupported') return err(r.note ?? 'Unsupported file.');
       const full = r.text || '';
       if (!windowed) return { text: untrusted(`FILE ${meta.name}`, full || '(no text found)') + (r.note ? `\nNote: ${r.note}` : '') };
       let start = Math.max(0, Number(input.offset) || 0);
+      if (Number(input.page) > 1) {
+        // pdf-parse ends each page with "-- N of M --", so page N starts after the mark of page N - 1.
+        const mark = new RegExp(`^--\\s*${Number(input.page) - 1}\\s+of\\s+(\\d+)\\s*--$`, 'm').exec(full);
+        if (!mark) return { text: `${meta.name} has no page ${Number(input.page)} (or no page marks; use find or offset instead).` };
+        start = mark.index + mark[0].length;
+      }
       if (input.find) {
         const needle = String(input.find).toLowerCase();
         const hay = full.toLowerCase();

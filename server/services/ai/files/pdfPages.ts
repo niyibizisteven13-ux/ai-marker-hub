@@ -6,14 +6,15 @@ import sharp from 'sharp';
  * model has to look at the pages. Long side capped at 1568 px (what Claude reads at full detail),
  * JPEG keeps each page well under provider image limits.
  */
-export async function renderPdfPages(data: Buffer, opts: { maxPages?: number; maxSide?: number } = {}): Promise<{ total: number; pages: Buffer[] }> {
+export async function renderPdfPages(data: Buffer, opts: { maxPages?: number; maxSide?: number; fromPage?: number } = {}): Promise<{ total: number; pages: Buffer[] }> {
   const maxPages = opts.maxPages ?? 8;
+  const first = Math.max(1, opts.fromPage ?? 1);
   const maxSide = opts.maxSide ?? 1568;
   const parser = new PDFParse({ data: new Uint8Array(data) });
   try {
     const info = await parser.getInfo();
     const total = info.total;
-    const wanted = Array.from({ length: Math.min(total, maxPages) }, (_, i) => i + 1);
+    const wanted = Array.from({ length: Math.max(0, Math.min(total - first + 1, maxPages)) }, (_, i) => first + i);
     if (!wanted.length) return { total, pages: [] };
     const shot = await parser.getScreenshot({ partial: wanted, scale: 2, imageBuffer: true, imageDataUrl: false });
     const pages: Buffer[] = [];

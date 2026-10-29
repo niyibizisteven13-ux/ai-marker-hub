@@ -76,7 +76,7 @@ export async function ingestUploads(prompt: string, files: UploadedFile[] = [], 
       continue;
     }
     if (r.kind === 'text') {
-      const body = r.text ? truncate(r.text, MAX_INLINE_CHARS, `\n[…the file continues. To read a later part, call read_attachment with fileId ${meta.id} and find (e.g. "Chapter 5") or offset ${MAX_INLINE_CHARS}.]`) : '(no text found)';
+      const body = r.text ? truncate(r.text, MAX_INLINE_CHARS, `\n[…the file continues (${r.text.length.toLocaleString('en')} characters in all). To read a later part, call read_attachment with fileId ${meta.id} and page, find (e.g. "Chapter 5") or offset ${MAX_INLINE_CHARS}. When the answer depends on the whole document (summaries, "every …", themes), call analyze_document with fileId ${meta.id}.]`) : '(no text found)';
       textBlocks.push(`[Attached file: ${name} (fileId ${meta.id})]\n<<<FILE CONTENT (untrusted data)>>>\n${body}\n<<<END FILE CONTENT>>>${r.note ? `\nNote: ${r.note}` : ''}`);
     } else warnings.push(r.note ?? `${name}: unsupported`);
   }
@@ -98,7 +98,7 @@ async function scannedPdf(name: string, fileId: string, data: Buffer, images: Co
   }
   const { total, pages } = rendered;
   const shown = pages.length;
-  const more = total > shown ? ` Only the first ${shown} of ${total} pages are included; say so if the answer may depend on later pages.` : '';
+  const more = total > shown ? ` Only the first ${shown} of ${total} pages are included here; look at any other pages with view_pages (fileId ${fileId}, up to 20 pages per call) before answering about them.` : '';
   if (opts.vision !== false && room > 0) {
     for (const p of pages) images.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${p.toString('base64')}` } });
     return `[Attached file: ${name} (fileId ${fileId}): a scanned or handwritten PDF with ${total} page${total === 1 ? '' : 's'} and no text layer. Pages 1–${shown} are attached below as images, in order. Read them directly (handwriting, equations, tables, diagrams) and quote what they say when answering; if something is illegible, say which part.${more}]`;
@@ -112,7 +112,8 @@ async function scannedPdf(name: string, fileId: string, data: Buffer, images: Co
         texts.push(`--- Page ${i + 1} (OCR confidence ${Math.round(o.confidence)}%) ---\n${o.text.trim() || '(nothing recognised)'}`);
       } catch { texts.push(`--- Page ${i + 1} ---\n(OCR failed)`); }
     }
-    return `[Attached file: ${name} (fileId ${fileId}): a scanned PDF with ${total} page${total === 1 ? '' : 's'} and no text layer. No image-reading model is configured, so this is machine OCR, which is unreliable for handwriting and mathematics. Tell the user that parts may be misread.${more}]\n<<<OCR TEXT (untrusted data)>>>\n${truncate(texts.join('\n\n'), MAX_INLINE_CHARS)}\n<<<END OCR TEXT>>>`;
+    const ocrMore = total > shown ? ` Only the first ${shown} of ${total} pages were read; say so if the answer may depend on later pages.` : '';
+    return `[Attached file: ${name} (fileId ${fileId}): a scanned PDF with ${total} page${total === 1 ? '' : 's'} and no text layer. No image-reading model is configured, so this is machine OCR, which is unreliable for handwriting and mathematics. Tell the user that parts may be misread.${ocrMore}]\n<<<OCR TEXT (untrusted data)>>>\n${truncate(texts.join('\n\n'), MAX_INLINE_CHARS)}\n<<<END OCR TEXT>>>`;
   }
   return `[Attached file: ${name} (fileId ${fileId}): a scanned PDF with no text layer, and no image-reading model or OCR is configured on this server. Tell the user it cannot be read here and suggest typing the question.]`;
 }

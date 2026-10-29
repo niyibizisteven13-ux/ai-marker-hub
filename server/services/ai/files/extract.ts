@@ -11,6 +11,8 @@ export interface ExtractResult {
   note?: string;
 }
 
+/** PDF pages read per pass. */
+const PDF_PAGE_BATCH = 200;
 const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp']);
 
 const extOf = (name: string) => (name.split('.').pop() ?? '').toLowerCase();
@@ -75,8 +77,22 @@ export async function extractText(file: { name: string; mime?: string; data: Buf
     if (ext === 'pdf' || mime === 'application/pdf') {
       const parser = new PDFParse({ data: new Uint8Array(file.data) });
       try {
-        const res = await parser.getText({ partial: Array.from({ length: 200 }, (_, i) => i + 1) } as any).catch(() => parser.getText());
-        const text = res.text.trim();
+        // Pages are read in batches until there is enough text for the caller (a 900-page book is read whole
+        // when the caller asks for all of it; a short preview stops after the first batch).
+        const total = await parser.getInfo().then((i) => i.total).catch(() => 0);
+        let text: string;
+        if (!total) text = (await parser.getText()).text.trim();
+        else {
+          const parts: string[] = [];
+          let length = 0;
+          for (let first = 1; first <= total && length < maxChars; first += PDF_PAGE_BATCH) {
+            const batch = Array.from({ length: Math.min(PDF_PAGE_BATCH, total - first + 1) }, (_, i) => first + i);
+            const res = await parser.getText({ partial: batch } as any);
+            parts.push(res.text.trim());
+            length += res.text.length;
+          }
+          text = parts.join('\n\n').trim();
+        }
         // pdf-parse adds "-- 1 of N --" page markers; a scan has only those and no real text.
         const meaningful = text.replace(/^--\s*\d+\s+of\s+\d+\s*--$/gm, '').trim();
         if (!meaningful) return { kind: 'text', text: '', note: 'This PDF has no extractable text (it may be a scan). Ask for a photo or use OCR/vision.' };

@@ -47,7 +47,8 @@ test('a long PDF: the start goes to the model with the stored id, and read_attac
   assert.equal(r.stored[0].name, 'Book.pdf');
   const text = (r.parts[0] as any).text as string;
   assert.ok(text.length < 32_000, 'only the start of the book is placed in the prompt');
-  assert.match(text, new RegExp(`call read_attachment with fileId ${r.stored[0].fileId} and find`));
+  assert.match(text, new RegExp(`call read_attachment with fileId ${r.stored[0].fileId} and page, find`));
+  assert.match(text, new RegExp(`call analyze_document with fileId ${r.stored[0].fileId}`), 'whole-book questions are pointed at analyze_document');
 
   const out = await readAttachment.execute({ fileId: r.stored[0].fileId, find: 'Chapter 5', maxChars: 3000 }, ctx);
   assert.match(out.text, /Chapter 5: Topic 5/);

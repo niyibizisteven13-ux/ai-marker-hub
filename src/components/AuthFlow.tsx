@@ -193,7 +193,7 @@ export function AuthFlow({
                     navigator.clipboard.writeText(window.location.href);
                     setLinkCopied(true);
                   }}
-                  style={{ marginTop: '8px', background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', padding: '8px 12px', borderRadius: '8px', fontSize: '13px', cursor: 'pointer' }}
+                  style={{ marginTop: '8px', background: 'var(--field)', border: 'none', color: 'var(--text)', padding: '8px 12px', borderRadius: '8px', fontSize: '13px', cursor: 'pointer' }}
                 >
                   {linkCopied ? 'Link Copied!' : t('copyLink')}
                 </button>
@@ -234,7 +234,7 @@ export function AuthFlow({
               placeholder="name@example.com"
               value={email}
               onChange={(e) => { setEmail(e.target.value); setErrorMessage(null); }}
-              style={{ minHeight: '48px', fontSize: '16px', padding: '0 14px', width: '100%', borderRadius: '12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff' }}
+              style={{ minHeight: '48px', fontSize: '16px', padding: '0 14px', width: '100%', borderRadius: '12px', background: 'var(--field)', border: '1px solid var(--border)', color: 'var(--text)' }}
             />
           </div>
           {errorMessage && <p role="alert" className="err" style={{ marginTop: '8px', fontSize: '13px', color: '#ff6b6b' }}>{errorMessage}</p>}
@@ -284,7 +284,7 @@ export function AuthFlow({
                 setCode(val);
                 setErrorMessage(null);
               }}
-              style={{ minHeight: '48px', fontSize: '24px', letterSpacing: '8px', textAlign: 'center', padding: '0 14px', width: '100%', borderRadius: '12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff' }}
+              style={{ minHeight: '48px', fontSize: '24px', letterSpacing: '8px', textAlign: 'center', padding: '0 14px', width: '100%', borderRadius: '12px', background: 'var(--field)', border: '1px solid var(--border)', color: 'var(--text)' }}
             />
           </div>
           {errorMessage && <p role="alert" className="err" style={{ marginTop: '8px', fontSize: '13px', color: '#ff6b6b' }}>{errorMessage}</p>}
@@ -318,7 +318,7 @@ export function AuthFlow({
       {step === 'name' && (
         <form onSubmit={handleNameSubmit}>
           <div style={{ marginBottom: '16px' }}>
-            <h3 style={{ margin: '0 0 6px', fontSize: '18px', fontWeight: 600, color: '#fff' }}>{t('nameQ')}</h3>
+            <h3 style={{ margin: '0 0 6px', fontSize: '18px', fontWeight: 600, color: 'var(--text)' }}>{t('nameQ')}</h3>
           </div>
 
           <div className="field">
@@ -328,7 +328,7 @@ export function AuthFlow({
               placeholder="Your full name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              style={{ minHeight: '48px', fontSize: '16px', padding: '0 14px', width: '100%', borderRadius: '12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff' }}
+              style={{ minHeight: '48px', fontSize: '16px', padding: '0 14px', width: '100%', borderRadius: '12px', background: 'var(--field)', border: '1px solid var(--border)', color: 'var(--text)' }}
             />
           </div>
 
@@ -336,7 +336,7 @@ export function AuthFlow({
             <button
               type="button"
               onClick={() => finishSuccess(currentUser!)}
-              style={{ flex: 1, minHeight: '48px', borderRadius: '12px', background: 'transparent', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', fontWeight: 600, cursor: 'pointer' }}
+              style={{ flex: 1, minHeight: '48px', borderRadius: '12px', background: 'transparent', border: '1px solid var(--border)', color: 'var(--text)', fontWeight: 600, cursor: 'pointer' }}
             >
               {t('skip')}
             </button>
@@ -347,7 +347,7 @@ export function AuthFlow({
               style={{ flex: 1, minHeight: '48px', borderRadius: '12px', background: 'var(--accent)', color: '#fff', fontWeight: 600, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
             >
               {loading && <Spinner />}
-              <span>{t('verify')}</span>
+              <span>{t('saveName')}</span>
             </button>
           </div>
         </form>
