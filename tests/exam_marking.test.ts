@@ -293,7 +293,7 @@ async function scriptPdf(id: string, rotate = 0) {
 
 const C001_PDF = await scriptPdf('C001');
 const C002_PDF = await scriptPdf('C002');
-const calls = { recognition: 0, marking: [] as string[][], extraction: 0, drafts: 0, markPrompts: [] as string[] };
+const calls = { recognition: 0, marking: [] as string[][], extraction: 0, drafts: 0, markPrompts: [] as string[], markGate: null as Promise<void> | null };
 const textOf = (req: ProviderRequest) => req.messages.map((m) => (typeof m.content === 'string' ? m.content : (m.content as any[]).map((c) => c.text ?? '').join(''))).join('\n');
 const imageOf = (req: ProviderRequest) => { for (const m of req.messages) if (Array.isArray(m.content)) for (const c of m.content as any[]) if (c.type === 'image_url') return c.image_url.url as string; return null; };
 
@@ -329,6 +329,7 @@ const adapter: ProviderAdapter = {
         ],
       };
     } else if (sys.startsWith('You are an experienced examiner')) {
+      if (calls.markGate) await calls.markGate; // a test holds the marker mid-run (ignores the abort signal, like a slow provider)
       const prompt = textOf(req);
       const ids = /Mark exactly these question ids: ([^\n.]+)/.exec(prompt)![1].split(',').map((x) => x.trim());
       calls.marking.push(ids);
@@ -376,7 +377,9 @@ async function waitRun(user: string, examId: string) {
     if (r && ['completed', 'completed_with_warnings', 'failed'].includes(r.state)) return e;
     await new Promise((res) => setTimeout(res, 50));
   }
-  throw new Error('run did not finish');
+  const e = await exams.load(user, examId);
+  const jobs = await Promise.all(e.runs.flatMap((r) => r.jobIds).map((id) => queue.get(id, user)));
+  throw new Error(`run did not finish: ${JSON.stringify({ runs: e.runs.map((r) => [r.id.slice(0, 6), r.state, r.jobIds.length]), subs: e.submissions.map((x) => [x.candidateId, x.state, e.results[x.id]?.runId?.slice(0, 6) ?? null]), jobs: jobs.map((j) => j && [j.id.slice(0, 6), j.status, j.attempts, j.error?.code ?? null, j.progress?.stage]) })}`);
 }
 async function waitJob(user: string, id: string) {
   for (let i = 0; i < 600; i++) {
@@ -776,13 +779,21 @@ test('live events: a run records real, ordered events that a viewer receives liv
 test('premium: without the entitlement, new marking work is refused on the server; corrections and viewing still work', async () => {
   const user = 'teacher-free';
   let allowed = true;
-  const gated = createExamService({ fileStore, queue, store: examStore, documents, agent: () => target, visionAvailable: () => true, maxPages: 5, candidateConcurrency: 2, retryDelayMs: 10, forbiddenStrings: [root],
+  // Its own queue and store: a second service registers its own job handlers, which must not take over the shared queue.
+  const gatedQueue = new FileJobQueue({ storageDir: path.join(root, 'jobs-gated'), concurrency: 2, retryDelayMs: 20, maxActivePerUser: 5 });
+  const gatedStore = new OwnedRecordStore<ExamRecord>(path.join(root, 'exams-gated'));
+  const gatedDocs = createDocumentService({ fileStore, queue: gatedQueue, store: new OwnedRecordStore<DocumentRecord>(path.join(root, 'docs-gated')), vision: () => target, agent: () => target, maxPages: 5 });
+  const gated = createExamService({ fileStore, queue: gatedQueue, store: gatedStore, documents: gatedDocs, agent: () => target, visionAvailable: () => true, maxPages: 5, candidateConcurrency: 2, retryDelayMs: 10, forbiddenStrings: [root],
     entitlement: async () => (allowed ? { allowed: true } : { allowed: false, code: 'UPGRADE_REQUIRED', message: 'Automatic marking is part of the GO, PRO and Institution plans.', upgradeUrl: '/upgrade?reason=marking' }) });
   const exam = await gated.createExam(user, { title: 'Gated quiz' });
   await gated.setSchemeJson(user, exam.id, SCHEME, { confirm: true });
   await gated.addSubmissions(user, exam.id, [{ name: 'C002.pdf', buffer: C002_PDF }]);
   await gated.startMarking(user, exam.id);
-  await waitRun(user, exam.id);
+  for (let i = 0; i < 600; i++) {
+    const r = (await gated.load(user, exam.id)).runs[0];
+    if (['completed', 'completed_with_warnings', 'failed'].includes(r.state)) break;
+    await new Promise((res) => setTimeout(res, 50));
+  }
   allowed = false;
   await assert.rejects(gated.startMarking(user, exam.id, { remarkAll: true }), (e: any) => e.code === 'UPGRADE_REQUIRED' && e.status === 402 && e.details?.upgradeUrl === '/upgrade?reason=marking');
   await assert.rejects(gated.requestRemark(user, exam.id, 'C002', null, 'again'), (e: any) => e.code === 'UPGRADE_REQUIRED');
@@ -795,9 +806,10 @@ test('premium: without the entitlement, new marking work is refused on the serve
   // Viewing existing results stays available.
   assert.ok((await gated.candidateView(user, exam.id, 'C002')).submission);
   // The chat explains instead of failing.
-  const gatedChat = createExamChat({ service: gated, fileStore, queue, contexts: new OwnedRecordStore<ExamChatContext>(path.join(root, 'ctx-gated')), agent: () => target, waitMs: 5_000 });
+  const gatedChat = createExamChat({ service: gated, fileStore, queue: gatedQueue, contexts: new OwnedRecordStore<ExamChatContext>(path.join(root, 'ctx-gated')), agent: () => target, waitMs: 5_000 });
   const reply = await gatedChat.handle(user, 'Mark these scripts with this marking scheme', [{ name: 'marking-scheme.txt', buffer: Buffer.from('1. Solve (3 marks)') }, { name: 'C001.pdf', buffer: C001_PDF }]);
   assert.match(reply?.text ?? '', /GO, PRO and Institution/);
+  await gatedQueue.stop();
 });
 
 test('preferences: strict marking reaches the marker, corrections can be turned off, chat sets both', async () => {
@@ -860,4 +872,49 @@ test('PDF check: a marked PDF must open, render, show red ink and carry the stor
   // An unmarked copy of the script (no red ink, no summary) fails.
   const plain = await verifyMarkedPdf(C001_PDF, good);
   assert.equal(plain.ok, false);
+});
+
+test('cancel race: work still finishing from a cancelled run never blocks or changes the next run', async () => {
+  const user = 'teacher-race';
+  const exam = await exams.createExam(user, { title: 'Race quiz' });
+  await exams.setSchemeJson(user, exam.id, SCHEME, { confirm: true });
+  await exams.addSubmissions(user, exam.id, [{ name: 'C001.pdf', buffer: C001_PDF }, { name: 'C002.pdf', buffer: C002_PDF }]);
+  let release!: () => void;
+  calls.markGate = new Promise<void>((r) => { release = r; });
+  try {
+    await exams.startMarking(user, exam.id);
+    // Wait until the first run is inside the marker, then cancel it and start again while it is still busy.
+    for (let i = 0; i < 400 && !(await exams.eventsSince(user, exam.id, 0)).events.some((e) => e.type === 'question_marking_started'); i++) await new Promise((r) => setTimeout(r, 25));
+    const first = (await exams.load(user, exam.id)).runs[0].id;
+    await exams.cancelRun(user, exam.id);
+    await exams.startMarking(user, exam.id);
+  } finally {
+    release();
+    calls.markGate = null;
+  }
+  const done = await waitRun(user, exam.id);
+  assert.equal(done.runs.length, 2);
+  assert.equal(done.runs[0].state, 'cancelled', 'the cancelled run stays cancelled');
+  assert.ok(['completed', 'completed_with_warnings'].includes(done.runs[1].state));
+  for (const s of done.submissions) {
+    assert.ok(['completed', 'completed_with_warnings'].includes(s.state), `${s.candidateId} finished`);
+    assert.equal(done.results[s.id].runId, done.runs[1].id, 'marks come from the new run only');
+  }
+});
+
+test('resume: a script already marked by this run but left in a working state finishes instead of looping', async () => {
+  const user = 'teacher-stale';
+  const exam = await exams.createExam(user, { title: 'Stale state quiz' });
+  await exams.setSchemeJson(user, exam.id, SCHEME, { confirm: true });
+  await exams.addSubmissions(user, exam.id, [{ name: 'C001.pdf', buffer: C001_PDF }]);
+  await exams.startMarking(user, exam.id);
+  const marked = await waitRun(user, exam.id);
+  const runId = marked.runs[0].id;
+  // What a late write from a cancelled run's leftover work leaves behind: marks from this run, status "marking".
+  await exams.mutate(user, exam.id, (e) => { e.runs[0].state = 'marking'; e.submissions[0].state = 'marking'; });
+  await queue.submit({ type: 'exam.mark', ownerId: user, payload: { examId: exam.id, runId, segment: 7 }, idempotencyKey: `${runId}:7`, maxAttempts: 1 });
+  const done = await waitRun(user, exam.id);
+  assert.equal(done.submissions[0].state, 'completed');
+  assert.ok(['completed', 'completed_with_warnings'].includes(done.runs[0].state));
+  assert.ok(done.runs[0].jobIds.length <= 2, 'no chain of continuation jobs');
 });

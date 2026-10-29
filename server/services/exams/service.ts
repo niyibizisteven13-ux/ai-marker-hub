@@ -446,19 +446,27 @@ export function createExamService(deps: ExamDeps) {
     const active = exam.runs.find((r) => !['completed', 'completed_with_warnings', 'failed', 'cancelled'].includes(r.state));
     if (active) throw new ExamInputError('RUN_IN_PROGRESS', 'A marking run is already in progress for this examination.', 409);
     const run: MarkingRun = { id: randomUUID(), schemeVersion: sv.version, submissionIds: ids, state: 'queued', createdAt: now(), createdBy: userId, jobIds: [] };
-    const { job } = await deps.queue.submit<MarkJobPayload>({ type: 'exam.mark', ownerId: userId, payload: { examId, runId: run.id, segment: 0 }, idempotencyKey: `${run.id}:0`, maxAttempts: 3 });
-    run.jobIds.push(job.id);
+    // Save the run before its job is queued: the queue may start the job at once.
     await mutate(userId, examId, (e) => {
       e.runs.push(run);
       for (const s of e.submissions) if (ids.includes(s.id)) { s.state = 'queued'; s.stateAt = now(); delete s.error; }
+    });
+    const { job } = await deps.queue.submit<MarkJobPayload>({ type: 'exam.mark', ownerId: userId, payload: { examId, runId: run.id, segment: 0 }, idempotencyKey: `${run.id}:0`, maxAttempts: 3 });
+    await mutate(userId, examId, (e) => {
+      const r = e.runs.find((x) => x.id === run.id);
+      if (r && !r.jobIds.includes(job.id)) r.jobIds.push(job.id);
       const pref = e.preferences ?? DEFAULT_PREFERENCES;
       emit(e, { type: 'job_created', runId: run.id, jobId: job.id, progress: { done: 0, total: ids.length }, message: `Marking ${ids.length} script${ids.length === 1 ? '' : 's'} against marking scheme v${sv.version} (${pref.credit === 'strict' ? 'strict' : 'partial-credit'} marking).`, data: { schemeVersion: sv.version, candidates: ids.length, credit: pref.credit } });
     });
     return { runId: run.id, jobId: job.id, candidates: ids.length, schemeVersion: sv.version };
   }
 
-  async function setState(userId: string, examId: string, submissionId: string, state: CandidateState, error?: { code: string; message: string }, ...events: Array<Omit<ExamEvent, 'v' | 'seq' | 'at'>>) {
+  /** A run that was cancelled must not change anything: its work may still be finishing in the background. */
+  const runLive = (e: ExamRecord, runId: string) => { const r = e.runs.find((x) => x.id === runId); return !!r && r.state !== 'cancelled'; };
+
+  async function setState(userId: string, examId: string, runId: string, submissionId: string, state: CandidateState, error?: { code: string; message: string }, ...events: Array<Omit<ExamEvent, 'v' | 'seq' | 'at'>>) {
     await mutate(userId, examId, (e) => {
+      if (!runLive(e, runId)) return;
       const s = e.submissions.find((x) => x.id === submissionId);
       if (s) { s.state = state; s.stateAt = now(); if (error) s.error = error; else delete s.error; }
       for (const ev of events) emit(e, ev);
@@ -492,11 +500,20 @@ export function createExamService(deps: ExamDeps) {
     const scheme = schemeOf(exam, run.schemeVersion)!;
     const sub = exam.submissions.find((s) => s.id === submissionId)!;
     const existing = exam.results[sub.id];
-    if (existing?.runId === runId && existing.questions.every((q) => q.ai)) return; // already done in an earlier attempt
+    if (existing?.runId === runId && existing.questions.every((q) => q.ai)) {
+      // Already marked by this run in an earlier attempt: make sure the script is shown as finished.
+      await mutate(userId, examId, (e) => {
+        const s = e.submissions.find((x) => x.id === sub.id);
+        if (!runLive(e, runId) || !s || ['completed', 'completed_with_warnings', 'failed'].includes(s.state)) return;
+        s.state = existing.questions.some((q) => openFlags(q).length) ? 'completed_with_warnings' : 'completed';
+        s.stateAt = now();
+      });
+      return;
+    }
 
     const ref = { runId, submissionId: sub.id, candidateId: sub.candidateId };
-    await setState(userId, examId, sub.id, 'validating');
-    await setState(userId, examId, sub.id, 'recognizing', undefined, { ...ref, type: 'page_processing_started', message: `Reading ${sub.candidateId}'s script (${sub.pages} page${sub.pages === 1 ? '' : 's'}).`, data: { pages: sub.pages } });
+    await setState(userId, examId, runId, sub.id, 'validating');
+    await setState(userId, examId, runId, sub.id, 'recognizing', undefined, { ...ref, type: 'page_processing_started', message: `Reading ${sub.candidateId}'s script (${sub.pages} page${sub.pages === 1 ? '' : 's'}).`, data: { pages: sub.pages } });
     const { record, cached, key } = await recognizeSubmission(userId, sub, signal);
     const pages = record.result.pages;
     const elements = pages.flatMap((pg) => pg.elements);
@@ -504,6 +521,7 @@ export function createExamService(deps: ExamDeps) {
     const veryUnclear = elements.filter((el) => el.uncertainty === 'high').length;
     const tiled = pages.filter((pg) => pg.tiling);
     await mutate(userId, examId, (e) => {
+      if (!runLive(e, runId)) return;
       const s = e.submissions.find((x) => x.id === sub.id)!; s.documentId = record.id; s.recognitionCached = cached; s.recognitionKey = key;
       emit(e, { ...ref, type: 'document_inspected', message: `${sub.candidateId}: ${pages.length} page${pages.length === 1 ? '' : 's'} read${cached ? ' (reused an earlier reading)' : ''}, ${elements.length} passages${unclear.length ? `, ${unclear.length} unclear` : ', handwriting readable'}.`, data: { pages: pages.length, passages: elements.length, unclear: unclear.length, cached } });
       if (tiled.length) {
@@ -513,12 +531,12 @@ export function createExamService(deps: ExamDeps) {
       if (unclear.length) emit(e, { ...ref, type: 'uncertainty_detected', page: unclear[0], message: `${sub.candidateId}: ${unclear.length} passage${unclear.length === 1 ? '' : 's'} not fully clear on page${new Set(unclear).size === 1 ? '' : 's'} ${[...new Set(unclear)].join(', ')}. ${unclear.length === 1 ? 'It is' : 'They are'} marked on the most likely reading and flagged for you to check, not treated as mistakes.`, data: { unclear: unclear.length, veryUnclear } });
     });
 
-    await setState(userId, examId, sub.id, 'matching_questions');
+    await setState(userId, examId, runId, sub.id, 'matching_questions');
     const match = matchAnswers(record.result, record.corrections, scheme);
     const found = scheme.questions.filter((q) => (match.questions[q.id]?.elementIds.length ?? 0) > 0);
     const missing = scheme.questions.filter((q) => !found.includes(q)).map((q) => q.number);
 
-    await setState(userId, examId, sub.id, 'marking', undefined, { ...ref, type: 'marking_started', progress: runProgress(await load(userId, examId), runId), message: `Marking ${sub.candidateId}.` }, { ...ref, type: 'question_detected', message: `${sub.candidateId}: answers found for ${found.length} of ${scheme.questions.length} questions${missing.length ? ` (not found: ${missing.slice(0, 8).join(', ')})` : ''}. Marking now.`, data: { found: found.length, questions: scheme.questions.length, missing: missing.join(', ').slice(0, 120) || null } });
+    await setState(userId, examId, runId, sub.id, 'marking', undefined, { ...ref, type: 'marking_started', progress: runProgress(await load(userId, examId), runId), message: `Marking ${sub.candidateId}.` }, { ...ref, type: 'question_detected', message: `${sub.candidateId}: answers found for ${found.length} of ${scheme.questions.length} questions${missing.length ? ` (not found: ${missing.slice(0, 8).join(', ')})` : ''}. Marking now.`, data: { found: found.length, questions: scheme.questions.length, missing: missing.join(', ').slice(0, 120) || null } });
     exam = await load(userId, examId);
     const agent = deps.agent();
     let marked: Awaited<ReturnType<typeof markCandidate>>;
@@ -528,6 +546,7 @@ export function createExamService(deps: ExamDeps) {
         scheme, questionIds: scheme.questions.map((q) => q.id), match, questionPaperText: await questionPaperText(userId, exam), runId, schemeVersion: run.schemeVersion, signal, fallbackModel: agent.fallbackModel,
         preferences: { credit: pref.credit, feedback: pref.feedback },
         onChunk: (ids) => mutate(userId, examId, (e) => {
+          if (!runLive(e, runId)) return;
           const nums = ids.map((id) => scheme.questions.find((q) => q.id === id)?.number ?? id);
           emit(e, { ...ref, type: 'question_marking_started', questionId: ids[0], message: `${sub.candidateId}: marking question${nums.length === 1 ? '' : 's'} ${nums.join(', ')}.`, data: { questions: nums.join(', ') } });
         }).then(() => undefined),
@@ -536,8 +555,10 @@ export function createExamService(deps: ExamDeps) {
       throw mapProvider(e);
     }
 
-    await setState(userId, examId, sub.id, 'verifying');
+    await setState(userId, examId, runId, sub.id, 'verifying');
     await mutate(userId, examId, (e) => {
+      // Marks finished after the run was cancelled are dropped: the next run marks this script again.
+      if (!runLive(e, runId)) return;
       const prev = e.results[sub.id];
       e.resultRevision++;
       const questions: QuestionResult[] = scheme.questions.map((q) => {
@@ -571,7 +592,9 @@ export function createExamService(deps: ExamDeps) {
     const { examId, runId, segment } = job.payload;
     const userId = job.ownerId;
     const started = Date.now();
-    if ((await load(userId, examId)).runs.find((x) => x.id === runId)?.state === 'cancelled') return { examId, runId, state: 'cancelled' };
+    const own = (await load(userId, examId)).runs.find((x) => x.id === runId);
+    if (!own) throw new JobError('RUN_NOT_FOUND', 'The marking run is not saved yet.', true);
+    if (own.state === 'cancelled') return { examId, runId, state: 'cancelled' };
     await mutate(userId, examId, (e) => { const r = e.runs.find((x) => x.id === runId); if (r && r.state === 'queued') { r.state = 'recognizing'; r.startedAt = now(); } });
     const pending = async () => {
       const e = await load(userId, examId);
@@ -596,7 +619,7 @@ export function createExamService(deps: ExamDeps) {
             // One candidate's failure never stops the batch.
             const failed = (await load(userId, examId)).submissions.find((s) => s.id === id);
             const msg = je?.message ?? 'The script could not be processed.';
-            await setState(userId, examId, id, 'failed', { code: je?.code ?? 'PROCESSING_FAILED', message: msg }, { runId, submissionId: id, candidateId: failed?.candidateId, type: 'teacher_review_required', message: `${failed?.candidateId ?? 'A script'} could not be marked: ${msg} The other scripts continue.`, data: { code: je?.code ?? 'PROCESSING_FAILED' } });
+            await setState(userId, examId, runId, id, 'failed', { code: je?.code ?? 'PROCESSING_FAILED', message: msg }, { runId, submissionId: id, candidateId: failed?.candidateId, type: 'teacher_review_required', message: `${failed?.candidateId ?? 'A script'} could not be marked: ${msg} The other scripts continue.`, data: { code: je?.code ?? 'PROCESSING_FAILED' } });
             break;
           }
         }
@@ -606,13 +629,24 @@ export function createExamService(deps: ExamDeps) {
     };
     await Promise.all(Array.from({ length: Math.min(concurrency, queue.length || 1) }, worker));
     if (ctx.signal.aborted) throw new JobError('CANCELLED', 'Marking was interrupted.', true);
+    if (!runLive(await load(userId, examId), runId)) return { examId, runId, state: 'cancelled' };
     queue = await pending();
+    if (queue.length && !continued) {
+      // Every script of this segment was worked on; one still unfinished would otherwise be handed to
+      // continuation jobs forever. Report it instead.
+      for (const id of queue) {
+        const sub = (await load(userId, examId)).submissions.find((s) => s.id === id);
+        await setState(userId, examId, runId, id, 'failed', { code: 'PROCESSING_FAILED', message: 'The script did not finish processing. Ask to re-mark it.' }, { runId, submissionId: id, candidateId: sub?.candidateId, type: 'teacher_review_required', message: `${sub?.candidateId ?? 'A script'} did not finish processing. Ask to re-mark it.` });
+      }
+      queue = await pending();
+    }
     if (queue.length || continued) {
       const next = await deps.queue.submit<MarkJobPayload>({ type: 'exam.mark', ownerId: userId, payload: { examId, runId, segment: segment + 1 }, idempotencyKey: `${runId}:${segment + 1}`, maxAttempts: 3 });
       await mutate(userId, examId, (e) => { const r = e.runs.find((x) => x.id === runId); if (r && !r.jobIds.includes(next.job.id)) r.jobIds.push(next.job.id); });
       return { examId, runId, continuedIn: next.job.id };
     }
     await mutate(userId, examId, (e) => {
+      if (!runLive(e, runId)) return;
       const r = e.runs.find((x) => x.id === runId)!; r.state = 'generating_artifacts';
       emit(e, { runId, jobId: job.id, type: 'pdf_generation_started', progress: runProgress(e, runId), message: 'Drawing red-pen marks on each script and building the report and workbook.' });
     });
@@ -621,6 +655,7 @@ export function createExamService(deps: ExamDeps) {
     let set: ArtifactSet | null = null;
     try { set = await generateArtifacts(userId, examId); } catch (err) { artifactError = err instanceof Error ? err.message : 'Artifact generation failed.'; }
     const e = await mutate(userId, examId, (x) => {
+      if (!runLive(x, runId)) return;
       const r = x.runs.find((y) => y.id === runId)!;
       const subs = x.submissions.filter((s) => r.submissionIds.includes(s.id));
       r.state = subs.every((s) => s.state === 'failed') ? 'failed' : subs.some((s) => s.state !== 'completed') || artifactError ? 'completed_with_warnings' : 'completed';
