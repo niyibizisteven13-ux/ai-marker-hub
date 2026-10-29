@@ -227,6 +227,9 @@ export default function App() {
   const [libraryOpen, setLibraryOpen] = useState<boolean>(false);
   // Mark page, and a marking request waiting for the fresh chat it is sent in.
   const [markOpen, setMarkOpen] = useState<boolean>(() => window.location.pathname === '/mark');
+  // Camera opened from the Mark page: its pages go back to that page (one folder per student), not to the old hub.
+  const [scanForMark, setScanForMark] = useState(false);
+  const [markIncoming, setMarkIncoming] = useState<{ id: number; files: File[] } | null>(null);
   const [pendingMark, setPendingMark] = useState<import('./components/MarkPage').MarkRequest | null>(null);
   const [libraryTab, setLibraryTab] = useState<'mine' | 'library'>('mine');
   const [adminOpen, setAdminOpen] = useState<boolean>(() => window.location.pathname === '/admin');
@@ -1716,10 +1719,14 @@ export default function App() {
   return (
     <div className="dark h-[var(--app-h,100dvh)] w-full min-w-0 bg-[#262624] text-[#FAF9F5] font-sans antialiased transition-colors duration-200 overflow-hidden flex flex-col">
       {AI_SCAN_ENABLED && scannerOpen && (
-        <div className="fixed inset-0 z-[70] bg-[#0f1013] flex flex-col w-full h-[var(--app-h,100dvh)] overflow-hidden animate-in fade-in duration-200">
+        <div className={`fixed inset-0 ${scanForMark ? 'z-[75]' : 'z-[70]'} bg-[#0f1013] flex flex-col w-full h-[var(--app-h,100dvh)] overflow-hidden animate-in fade-in duration-200`}>
           <DocumentScanner
-            onClose={() => setScannerOpen(false)}
-            onSavePages={handleSaveScannedPages}
+            onClose={() => { setScannerOpen(false); setScanForMark(false); }}
+            onSavePages={scanForMark
+              ? async (pages) => { const { scansToZip } = await import('./utils/scansToZip'); setMarkIncoming({ id: Date.now(), files: [await scansToZip(pages)] }); }
+              : handleSaveScannedPages}
+            aiTools={!scanForMark}
+            saveLabel={scanForMark ? 'Add to marking' : undefined}
             activeRubricText={examPaper ? JSON.stringify(examPaper) : ''}
             onGeneratedForm={(form) => {
               setScannerGeneratedForm(form);
@@ -1858,7 +1865,9 @@ export default function App() {
           <MarkPage
             onClose={() => { setMarkOpen(false); if (window.location.pathname === '/mark') window.history.replaceState({}, '', '/'); }}
             onMark={startMarking}
-            onScan={openScanner ? () => { setMarkOpen(false); openScanner(); } : undefined}
+            onScan={openScanner ? () => { setScanForMark(true); openScanner(); } : undefined}
+            incoming={markIncoming}
+            covered={scanForMark && scannerOpen}
           />
         </Suspense>
       )}

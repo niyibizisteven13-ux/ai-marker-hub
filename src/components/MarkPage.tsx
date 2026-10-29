@@ -46,7 +46,13 @@ async function upload(file: File): Promise<string> {
 
 const kindIcon = (f: File) => (/\.zip$/i.test(f.name) ? FolderArchive : f.type.startsWith('image/') ? ImageIcon : FileText);
 
-export default function MarkPage({ onClose, onMark, onScan }: { onClose: () => void; onMark: (req: MarkRequest) => void; onScan?: () => void }) {
+export default function MarkPage({ onClose, onMark, onScan, incoming, covered = false }: {
+  onClose: () => void; onMark: (req: MarkRequest) => void; onScan?: () => void;
+  /** Another screen (the camera) is on top: keys belong to it. */
+  covered?: boolean;
+  /** Files made elsewhere while this page stays open (the camera scanner's pages); added once per id. */
+  incoming?: { id: number; files: File[] } | null;
+}) {
   const [items, setItems] = useState<Item[]>([]);
   const [instructions, setInstructions] = useState('');
   const [credit, setCredit] = useState<'partial' | 'strict'>('partial');
@@ -57,14 +63,16 @@ export default function MarkPage({ onClose, onMark, onScan }: { onClose: () => v
   const input = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    if (covered) return;
     const key = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
-  }, [onClose]);
+  }, [onClose, covered]);
   useEffect(() => () => { for (const i of items) if (i.preview) URL.revokeObjectURL(i.preview); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const patch = (key: string, p: Partial<Item>) => setItems((cur) => cur.map((i) => (i.key === key ? { ...i, ...p } : i)));
 
+  const taken = useRef(0);
   const add = useCallback((files: FileList | File[]) => {
     const fresh: Item[] = [...files].map((file) => ({
       key: `${file.name}-${file.size}-${Math.random().toString(36).slice(2, 7)}`, file, role: guessRole(file.name), status: 'uploading',
@@ -84,6 +92,11 @@ export default function MarkPage({ onClose, onMark, onScan }: { onClose: () => v
         .catch((e) => patch(it.key, { status: 'failed', error: e instanceof Error ? e.message : 'Upload failed.' }));
     }
   }, []);
+  useEffect(() => {
+    if (!incoming || incoming.id === taken.current) return;
+    taken.current = incoming.id;
+    add(incoming.files);
+  }, [incoming, add]);
 
   const scripts = items.filter((i) => i.role === 'scripts');
   const scheme = items.find((i) => i.role === 'scheme');

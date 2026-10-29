@@ -91,8 +91,13 @@ async function checkZip(name: string, data: Buffer): Promise<FileCheck> {
   try {
     const zip = await JSZip.loadAsync(data);
     const entries = Object.values(zip.files).filter((f) => !f.dir && !/(^|\/)(__MACOSX|\.)/.test(f.name) && (IMAGE.test(f.name) || /\.(pdf|docx|txt)$/i.test(f.name)));
-    // One student per top-level folder when the ZIP has folders, otherwise one per file.
-    const folders = new Set(entries.map((e) => e.name.includes('/') ? e.name.split('/')[0] : null).filter(Boolean));
+    // As marking reads it: a single wrapping folder is ignored, then one student per folder of photos and one per
+    // other file (a student's photos in a folder become one script).
+    const roots = new Set(entries.map((e) => e.name.split('/')[0]));
+    const strip = roots.size === 1 && entries.every((e) => e.name.includes('/')) ? `${[...roots][0]}/` : '';
+    const rel = entries.map((e) => e.name.slice(strip.length));
+    const folders = new Set(rel.filter((n) => n.includes('/') && IMAGE.test(n)).map((n) => n.slice(0, n.lastIndexOf('/'))));
+    const loose = rel.filter((n) => !(n.includes('/') && IMAGE.test(n))).length;
     const issues: FileCheck['issues'] = [];
     let pages = 0;
     let typed = 0;
@@ -102,7 +107,7 @@ async function checkZip(name: string, data: Buffer): Promise<FileCheck> {
       else if (/\.pdf$/i.test(e.name)) { const c = await checkPdf(e.name, buf); pages += c.pages; typed += c.typedPages; issues.push(...c.issues.map((x) => ({ ...x, entry: e.name }))); }
       else { pages++; typed++; }
     }
-    return { name, kind: 'zip', pages, typedPages: typed, students: folders.size > 1 ? folders.size : entries.length, issues };
+    return { name, kind: 'zip', pages, typedPages: typed, students: folders.size + loose, issues };
   } catch {
     return { name, kind: 'zip', pages: 0, typedPages: 0, issues: [{ issue: 'unreadable' }] };
   }

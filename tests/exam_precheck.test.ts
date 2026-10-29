@@ -54,3 +54,30 @@ test('precheck: the text says which file is the scheme or the question paper, wh
   const script = await precheckFile({ name: 'alice.txt', data: Buffer.from(`${'x = 6 - 2 = 4. '.repeat(120)} I followed the marking scheme`) });
   assert.equal(script.looksLike, undefined, 'a late mention does not make a script a scheme');
 });
+
+test('camera scans: a ZIP with a folder per student is one script per student, also with a single student', async () => {
+  const { expandArchives } = await import('../server/services/exams/inputs.js');
+  const page = await sharpPage();
+  for (const names of [['Uwase Aline'], ['Uwase Aline', 'Mugisha Eric']]) {
+    const zip = new JSZip();
+    for (const n of names) { zip.file(`scans/${n}/page-01.jpg`, page); zip.file(`scans/${n}/page-02.jpg`, page); }
+    const data = await zip.generateAsync({ type: 'nodebuffer' });
+    const check = await precheckFile({ name: 'Camera scans.zip', data });
+    assert.equal(check.students, names.length);
+    assert.equal(check.pages, names.length * 2);
+    const scripts = await expandArchives([{ name: 'Camera scans.zip', buffer: data }]);
+    assert.deepEqual(scripts.map((s) => s.name), names.map((n) => `${n}.pdf`), 'each student\'s two pages become one PDF');
+  }
+});
+
+test('camera scans: the scanner\'s pages are packed one folder per student, in order, same names kept apart', async () => {
+  const { scansToZip } = await import('../src/utils/scansToZip.js');
+  const url = `data:image/jpeg;base64,${(await sharp(await sharpPage()).jpeg().toBuffer()).toString('base64')}`;
+  const file = await scansToZip([
+    { dataUrl: url, candidateId: 'c1', studentName: 'Aline' }, { dataUrl: url, candidateId: 'c1', studentName: 'Aline' },
+    { dataUrl: url, candidateId: 'c2', studentName: 'Aline' }, { dataUrl: url, candidateId: 'c3', studentName: 'Eric/S4' },
+  ]);
+  const zip = await JSZip.loadAsync(Buffer.from(await file.arrayBuffer()));
+  assert.deepEqual(Object.keys(zip.files).filter((n) => !zip.files[n].dir).sort(), ['scans/Aline (2)/page-01.jpg', 'scans/Aline/page-01.jpg', 'scans/Aline/page-02.jpg', 'scans/Eric S4/page-01.jpg']);
+  assert.equal((await precheckFile({ name: file.name, data: Buffer.from(await file.arrayBuffer()) })).students, 3);
+});
