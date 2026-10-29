@@ -88,4 +88,6 @@ tests/             automated tests
 ## Team
 
 Built in Rwanda for the NISR 2026 Big Data Hackathon. This submission is the team's own work. All external
-libraries and data sources are acknowledged above and in `package.json`.
+libraries and data sources are acknowledged above and in `package.json`. 
+1. Niyibizi Steven
+2. Ngoboka Izere Herve Morin
