@@ -6,7 +6,7 @@
 
 **Making published statistics accessible, interactive and ready for AI, without downloading a single file.**
 
-[Live app: www.bwenge.space](https://www.bwenge.space) · [Demo video](https://youtu.be/n24wdixVfFU) · [Telegram bot](https://t.me/Bwengebot) · [Documentation](docs/)
+[Live app: www.bwenge.space](https://www.bwenge.space) · [Demo video](https://youtu.be/n24wdixVfFU) · [Telegram bot](https://t.me/Bwengebot) · [Documentation](docs/) · [Script](server.ts)
 
 *Submission to the NISR 2026 Big Data Hackathon*
 
