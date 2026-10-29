@@ -90,6 +90,50 @@ examsRouter.get('/:examId', async (req, res) => {
   } catch (err) { fail(req, res, err); }
 });
 
+/**
+ * Live marking activity (Server-Sent Events): the saved event log, unlike /events, which streams state snapshots. Replays everything after `?after=` or the Last-Event-ID header,
+ * then streams new events as they are saved. Closing the page never stops the marking job. Events from a
+ * job running in another server process are picked up by a short re-read of the stored record.
+ */
+examsRouter.get('/:examId/activity', async (req, res) => {
+  const userId = userIdOf(req);
+  const examId = req.params.examId;
+  let last = Number(req.get('last-event-id') ?? req.query.after ?? 0);
+  if (!Number.isFinite(last) || last < 0) last = 0;
+  let first;
+  try { first = await examService.eventsSince(userId, examId, last); } catch (err) { return fail(req, res, err); }
+  res.status(200).set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+  res.flushHeaders?.();
+  let closed = false;
+  const send = (ev: { seq: number }) => {
+    if (closed || ev.seq <= last) return; // duplicates (live push and re-read) are dropped by sequence
+    last = ev.seq;
+    res.write(`id: ${ev.seq}\nevent: exam\ndata: ${JSON.stringify(ev)}\n\n`);
+  };
+  if (first.gap) res.write(`event: gap\ndata: ${JSON.stringify({ lastSeq: first.lastSeq })}\n\n`);
+  for (const ev of first.events) send(ev);
+  const off = examService.subscribe(examId, (ev) => send(ev));
+  const reread = setInterval(() => { examService.eventsSince(userId, examId, last).then((r) => r.events.forEach(send)).catch(() => undefined); }, 3000);
+  const beat = setInterval(() => { if (!closed) res.write(': ping\n\n'); }, 15_000);
+  req.on('close', () => { closed = true; off(); clearInterval(reread); clearInterval(beat); });
+});
+
+/** Stops the marking run in progress. Finished scripts keep their marks. */
+examsRouter.post('/:examId/cancel', async (req, res) => {
+  try { res.json({ ...(await examService.cancelRun(userIdOf(req), req.params.examId)), requestId: rid(req) }); } catch (err) { fail(req, res, err); }
+});
+
+examsRouter.get('/:examId/preferences', async (req, res) => {
+  try { const e = await examRef(req); res.json({ preferences: e.preferences ?? { credit: 'partial', corrections: true, feedback: 'brief' }, requestId: rid(req) }); } catch (err) { fail(req, res, err); }
+});
+
+examsRouter.put('/:examId/preferences', async (req, res) => {
+  try {
+    const body = z.object({ credit: z.enum(['partial', 'strict']).optional(), corrections: z.boolean().optional(), feedback: z.enum(['brief', 'detailed']).optional() }).strict().parse(req.body ?? {});
+    res.json({ preferences: await examService.setPreferences(userIdOf(req), req.params.examId, body), requestId: rid(req) });
+  } catch (err) { fail(req, res, err); }
+});
+
 /** Bearer-authenticated SSE; the first owner-scoped snapshot also restores a refreshed workspace. */
 examsRouter.get('/:examId/events', async (req, res) => {
   try {

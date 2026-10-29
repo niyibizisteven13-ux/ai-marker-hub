@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { prisma } from '../../db.js';
 import { PLANS, currentGoPacks, planFor, toRwf, walletBalance, type PlanId, type PlanInfo, type UsageKind } from './plans.js';
 import { guardFor } from './aiGuard.js';
+import { markingEntitled } from './entitlements.js';
 
 /**
  * Usage metering and plan limits. Every AI action is recorded with its real token usage and priced in
@@ -159,7 +160,7 @@ export async function usageSummary(userId: string, now = Date.now()) {
       month: { used: used.month, limit: L.monthly, resetsAt: p.resets.month.toISOString() },
     },
     features: (['tool', 'vision', 'artifact', 'marking'] as const).map((k) => ({ kind: k, label: FEATURE_LABEL[k], used: perDay[k], limit: L.perDay[k] })),
-    limits: { maxMessageChars: L.maxMessageChars, maxAttachments: L.maxAttachments, maxUploadMb: L.maxUploadMb, memory: L.memory, memoryItems: L.memoryItems },
+    limits: { maxMessageChars: L.maxMessageChars, maxAttachments: L.maxAttachments, maxUploadMb: L.maxUploadMb, memory: L.memory, memoryItems: L.memoryItems, autonomousMarking: markingEntitled(L) },
     recent: recent.map((r: any) => ({ at: new Date(r.createdAt).toISOString(), kind: r.kind, credits: r.credits, channel: r.channel })),
     upgrade: nextPlan(plan),
     pro: { priceUsd: PLANS.PRO.priceUsd, listPriceUsd: PLANS.PRO.listPriceUsd ?? null, priceRwf: toRwf(PLANS.PRO.priceUsd!), daily: PLANS.PRO.limits.daily },

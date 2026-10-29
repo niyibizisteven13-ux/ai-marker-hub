@@ -76,7 +76,8 @@ type Command =
   | { action: 'failed_question'; question: string; mode: 'zero' | 'not_full' } | { action: 'failed' }
   | { action: 'top'; n: number; order: 'top' | 'bottom' } | { action: 'stats' } | { action: 'flags' }
   | { action: 'export'; what: 'all' | 'workbook' | 'report' } | { action: 'confirm_candidate'; candidate: string | null; question: string | null }
-  | { action: 'pass_mark'; percent: number } | { action: 'start' };
+  | { action: 'pass_mark'; percent: number } | { action: 'start' } | { action: 'cancel' }
+  | { action: 'preferences'; credit?: 'partial' | 'strict'; corrections?: boolean; feedback?: 'brief' | 'detailed' };
 
 const Q = String.raw`(?:question|qn|q)\.?\s*([0-9]{1,3}(?:\s*\(?[a-h]\)?(?![a-z]))?(?:\s*\(?(?:iv|v?i{1,3}|v)\)?(?![a-z]))?)`;
 
@@ -84,6 +85,18 @@ const Q = String.raw`(?:question|qn|q)\.?\s*([0-9]{1,3}(?:\s*\(?[a-h]\)?(?![a-z]
 export function parseCommand(msg: string): Command | null {
   const m = msg.trim();
   let r: RegExpExecArray | null;
+  if (/^\s*(?:please\s+)?(?:cancel|stop|abort|halt)\b(?:\s+(?:the\s+)?(?:marking|it|this|run|grading))?\s*(?:now|please)?\s*[.!]?\s*$/i.test(m)) return { action: 'cancel' };
+  {
+    // How to mark: strict or partial credit, red corrections on or off, brief or detailed feedback.
+    const pref: Extract<Command, { action: 'preferences' }> = { action: 'preferences' };
+    if (/\bstrict(?:ly)?\b/i.test(m) && !/\bnot\s+strict/i.test(m)) pref.credit = 'strict';
+    else if (/\b(?:partial|part)[\s-]*(?:credit|marks?)\b|\blenient(?:ly)?\b|\bnot\s+strict/i.test(m)) pref.credit = 'partial';
+    if (/\b(?:no|without|turn\s+off|hide|remove|skip|don'?t\s+(?:add|show|write))\b[^.]*\bcorrections?\b/i.test(m)) pref.corrections = false;
+    else if (/\b(?:with|show|add|include|turn\s+on|write)\b[^.]*\bcorrections?\b/i.test(m)) pref.corrections = true;
+    if (/\b(?:detailed|longer|more|full)\s+(?:feedback|explanations?|comments?)\b/i.test(m)) pref.feedback = 'detailed';
+    else if (/\b(?:brief|short|less|minimal)\s+(?:feedback|explanations?|comments?)\b/i.test(m)) pref.feedback = 'brief';
+    if (pref.credit || pref.corrections !== undefined || pref.feedback) return pref;
+  }
   if ((r = new RegExp(String.raw`\b(?:change|set|give|make|update|award)\b[^.]*?${Q}[^.]*?\b(?:to|=|as)\s*(\d+(?:\.\d+)?)(?:\s*(?:marks?|points?))?(?:[^.]*?\bbecause\b\s*(.+))?`, 'i').exec(m))) {
     return { action: 'override', candidate: null, question: r[1], marks: Number(r[2]), reason: (r[3] ?? '').trim().replace(/[.]$/, '') };
   }
@@ -170,7 +183,7 @@ export function createExamChat(deps: ExamChatDeps) {
     while (Date.now() < until) {
       const e = await s.load(userId, examId);
       const run = e.runs[e.runs.length - 1];
-      if (!run || ['completed', 'completed_with_warnings', 'failed'].includes(run.state)) return 'done';
+      if (!run || ['completed', 'completed_with_warnings', 'failed', 'cancelled'].includes(run.state)) return 'done';
       const p = s.progress(e);
       const done = (p.counts.completed ?? 0) + (p.counts.completed_with_warnings ?? 0) + (p.counts.failed ?? 0);
       const total = p.candidates.length;
@@ -191,7 +204,7 @@ export function createExamChat(deps: ExamChatDeps) {
     if (!e.runs.length) return { text: [...lines, statusText(e)].filter(Boolean).join('\n\n'), attachments: [] };
     const st = await waitRun(userId, examId, onStatus);
     e = await s.load(userId, examId);
-    if (st === 'pending') return { text: [...lines, statusText(e), 'Marking is still running in the background; the marked PDFs will be ready shortly. Ask "status" to get them.'].filter(Boolean).join('\n\n'), attachments: [] };
+    if (st === 'pending') return { text: [...lines, statusText(e), `Marking is still running in the background; the marked PDFs will be ready shortly. Watch each script being marked live in ${link('the marking workspace', `/exams/${e.id}/review`)}, or ask "status" here. You can say "stop marking" to cancel, or "mark strictly" / "no corrections" to change how it marks.`].filter(Boolean).join('\n\n'), attachments: [] };
     const fin = await finishedReply(e);
     return { text: [...lines, fin.text].filter(Boolean).join('\n\n'), attachments: fin.attachments };
   }
@@ -228,7 +241,7 @@ export function createExamChat(deps: ExamChatDeps) {
       const total = p.candidates.length;
       const active = (Object.keys(STATE_TEXT) as CandidateState[]).filter((k) => !['completed', 'completed_with_warnings', 'failed', 'queued'].includes(k) && c[k]);
       if (p.run.state === 'generating_artifacts') lines.push(`All ${total} scripts are marked. Generating the annotated papers, the report and the workbook.`);
-      else if (!['completed', 'completed_with_warnings', 'failed'].includes(p.run.state)) {
+      else if (!['completed', 'completed_with_warnings', 'failed', 'cancelled'].includes(p.run.state)) {
         lines.push(`Marking ${total} script${total === 1 ? '' : 's'}: ${done} done${c.failed ? `, ${c.failed} could not be processed` : ''}${c.queued ? `, ${c.queued} waiting` : ''}.`);
         if (active.length) lines.push(`Now ${active.map((k) => `${STATE_TEXT[k]} (${c[k]})`).join('; ')}.`);
       } else lines.push(`Marking run finished: ${done} of ${total} scripts marked${c.failed ? `, ${c.failed} could not be processed` : ''}.`);
@@ -467,7 +480,7 @@ export function createExamChat(deps: ExamChatDeps) {
     switch (cmd.action) {
       case 'status': {
         if (runState && ['completed', 'completed_with_warnings'].includes(runState) && exam.artifacts.some((a) => a.status === 'ready')) return finishedReply(exam);
-        if (runState && !['completed', 'completed_with_warnings', 'failed'].includes(runState)) return markAndFinish(userId, exam.id, [], onStatus);
+        if (runState && !['completed', 'completed_with_warnings', 'failed', 'cancelled'].includes(runState)) return markAndFinish(userId, exam.id, [], onStatus);
         return { text: statusText(exam) || 'Nothing is being marked right now.', attachments: [] };
       }
       case 'confirm_scheme': {
@@ -480,6 +493,19 @@ export function createExamChat(deps: ExamChatDeps) {
       case 'scheme_marks': {
         const sv = await s.editSchemeQuestion(userId, exam.id, cmd.question, { maxMarks: cmd.marks });
         return { text: sv.status === 'invalid' ? `Recorded as scheme version ${sv.version}, but it still has problems:\n${sv.errors.map((x) => `- ${x}`).join('\n')}` : `Scheme version ${sv.version} created with question ${cmd.question} worth ${cmd.marks} marks:\n${schemeSummary(sv.scheme!)}\nReply "confirm the marking scheme" to use it.`, attachments: [] };
+      }
+      case 'cancel': {
+        const r = await s.cancelRun(userId, exam.id);
+        return { text: `Marking stopped. ${r.done} script${r.done === 1 ? ' was' : 's were'} already finished and keep${r.done === 1 ? 's' : ''} ${r.done === 1 ? 'its' : 'their'} marks; the others are waiting. Say "mark" when you want to continue.`, attachments: [] };
+      }
+      case 'preferences': {
+        const p = await s.setPreferences(userId, exam.id, { credit: cmd.credit, corrections: cmd.corrections, feedback: cmd.feedback });
+        const marked = Object.keys(exam.results).length;
+        return {
+          text: `Marking preferences saved: ${p.credit === 'strict' ? 'strict marking (a criterion earns marks only when fully met)' : 'partial credit where the scheme allows it'}, ${p.corrections ? 'red corrections under wrong answers' : 'no red corrections'}, ${p.feedback} feedback. These never override the official marking scheme.`
+            + (marked ? (cmd.credit || cmd.feedback ? ` Scripts marked from now on use them; say "re-mark everything" to apply them to the ${marked} already marked.` : ' Say "regenerate" for updated marked PDFs.') : ''),
+          attachments: [],
+        };
       }
       case 'pass_mark': {
         if (!(cmd.percent >= 0 && cmd.percent <= 100)) return { text: 'The pass mark must be between 0 and 100%.', attachments: [] };

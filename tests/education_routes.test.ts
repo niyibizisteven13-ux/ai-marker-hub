@@ -238,6 +238,43 @@ test('exams API: owner scoping, validation, scheme versions and status codes', a
   assert.equal((await fetch(`${base}/api/exams/not-a-uuid`, as('alice'))).status, 404);
 });
 
+test('exams API: live events replay over SSE, cancel and preferences validate', async () => {
+  const { examId } = await (await fetch(`${base}/api/exams`, json('alice', { title: 'Live' }))).json();
+  const { examService } = await import('../server/services/educationRuntime.js');
+  assert.equal((await fetch(`${base}/api/exams/${examId}/cancel`, json('alice', {}))).status, 409, 'nothing to cancel');
+  assert.equal((await fetch(`${base}/api/exams/${examId}/cancel`, json('bob', {}))).status, 404, 'another user cannot cancel');
+  const put = (user: string, body: unknown) => fetch(`${base}/api/exams/${examId}/preferences`, as(user, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }));
+  assert.equal((await put('alice', { credit: 'lenient' })).status, 400);
+  assert.equal((await put('alice', { credit: 'strict', extra: 1 })).status, 400);
+  const ok = await put('alice', { credit: 'strict', corrections: false });
+  assert.equal(ok.status, 200);
+  assert.deepEqual(await ok.json().then((b) => [b.preferences.credit, b.preferences.corrections, b.preferences.feedback]), ['strict', false, 'brief']);
+  assert.equal((await put('bob', { credit: 'strict' })).status, 404);
+  assert.equal((await fetch(`${base}/api/exams/${examId}/activity`, as('bob'))).status, 404, 'events are owner-scoped');
+
+  // Two stored events: a fresh viewer gets both; one resuming after event 1 gets only the second.
+  await examService.mutate('alice', examId, (e) => {
+    e.events = [
+      { v: 1, seq: 1, type: 'job_created', at: new Date().toISOString(), message: 'Marking 2 scripts.' },
+      { v: 1, seq: 2, type: 'job_completed', at: new Date().toISOString(), message: 'Marking finished.' },
+    ];
+    e.eventSeq = 2;
+  });
+  const read = async (headers: Record<string, string> = {}) => {
+    const ctrl = new AbortController();
+    const res = await fetch(`${base}/api/exams/${examId}/activity`, { ...as('alice', { headers }), signal: ctrl.signal });
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('content-type') ?? '', /text\/event-stream/);
+    const reader = res.body!.getReader();
+    let text = '';
+    const until = Date.now() + 2000;
+    while (Date.now() < until && (text.match(/^id: /gm)?.length ?? 0) < (headers['Last-Event-ID'] ? 1 : 2)) text += new TextDecoder().decode((await reader.read()).value);
+    ctrl.abort();
+    return [...text.matchAll(/^id: (\d+)$/gm)].map((m) => Number(m[1]));
+  };
+  assert.deepEqual(await read(), [1, 2]);
+  assert.deepEqual(await read({ 'Last-Event-ID': '1' }), [2], 'a reconnecting viewer gets only what it missed');
+});
 
 test('exam live stream is owner-scoped and replays saved state without AI calls', async () => {
   const created = await (await fetch(`${base}/api/exams`, json('live-owner', { title: 'Saved live paper' }))).json();

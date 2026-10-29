@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { authFetch } from '../utils/authFetch';
 import AskBwengeDrawer from '../components/AskBwengeDrawer';
+import LiveMarkingPanel from '../components/LiveMarkingPanel';
 
 /**
  * Teacher review of marked scripts before release. Each page of the candidate's own scan is shown with the
@@ -267,6 +268,8 @@ export default function ExamReviewPage({ onBack }: { onBack: () => void }) {
       </header>
 
       {error && <div className="m-4 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200">{error}</div>}
+      {/* Nothing marked yet: the live activity is the page, and the first marked script opens by itself. */}
+      {!review && examId && <div className="mx-auto w-full max-w-2xl px-4 pb-6"><LiveMarkingPanel examId={examId} onScriptMarked={() => { if (!review) void load(null); }} /></div>}
       {!review && !error && <div className="grid flex-1 place-items-center"><Loader2 className="animate-spin text-neutral-500" /></div>}
 
       {review && (
@@ -286,6 +289,9 @@ export default function ExamReviewPage({ onBack }: { onBack: () => void }) {
             </div>
           </main>
           <aside className="flex max-h-[45dvh] w-full shrink-0 flex-col border-t border-white/[0.07] lg:max-h-none lg:w-[400px] lg:border-l lg:border-t-0">
+            <div className="px-3 pt-3">
+              <LiveMarkingPanel compact examId={review.exam.examId} onScriptMarked={(sid) => { if (sid && sid === review.candidate.submissionId) void load(sid); }} />
+            </div>
             <div className="flex items-center justify-between px-4 py-3 text-xs text-neutral-400">
               <span>{review.questions.length} questions · from the saved marking record</span>
               {review.questions.some((q) => q.openReviewFlags.length) && <span className="inline-flex items-center gap-1 text-orange-300"><AlertTriangle size={13} /> {review.questions.filter((q) => q.openReviewFlags.length).length} to check</span>}

@@ -148,6 +148,64 @@ The AI marks each question on the candidate's own scanned page, in red, the way 
 - Recognition regions (0–1000 on the deskewed processed image) are converted with `processedToViewed`.
 - `viewedToPdf` honours the PDF crop box and `/Rotate`. The tests render real PDFs at 0°, 90°, 180° and 270° with an offset crop box, and rotate images by 4° and −7.5°.
 
+## Live marking, premium access, preferences and cancellation
+
+### Live events
+Every real state change in a marking run is saved in the exam record as an event, in the same write as the change itself. Each event has a per-exam sequence number (`seq`), so nothing is fabricated or shown twice.
+- **Types** (contract v1, `ExamEvent` in `types.ts`): `job_created`, `rubric_processing_started`, `rubric_ready`, `clarification_required`, `page_processing_started`, `document_inspected`, `handwriting_recovery_completed`, `uncertainty_detected`, `marking_started`, `question_detected`, `question_marking_started`, `question_marked`, `script_marked`, `teacher_review_required`, `pdf_generation_started`, `pdf_generation_completed`, `job_completed`, `job_failed`, `job_cancelled`.
+  - `handwriting_recovery_completed` reports the real close-up re-reading numbers (tiles, readings improved, passages found).
+  - `uncertainty_detected` reports passages that are not fully clear. They are marked on the most likely reading and flagged, never treated as mistakes.
+  - `handwriting_recovery_started` is in the contract but is not emitted yet: the close-up re-reading runs inside recognition and reports only when it finishes.
+- **Payload:** ids, counts, marks and short messages for the teacher. Never document text, prompts or file contents.
+- **Kept:** the latest 2,000 events per exam.
+- **Stream:** `GET /api/exams/:examId/activity` (Server-Sent Events, owner-scoped; `/events` streams state snapshots for the scan workspace).
+  - It replays everything after `Last-Event-ID` (or `?after=`), then pushes new events as they are saved.
+  - Events from another server process are picked up by a 3-second re-read.
+  - A heartbeat is sent every 15 s.
+  - If older events were trimmed, a `gap` event tells the viewer to refresh.
+  - Closing the page never stops the job.
+- **Where it shows:** the review screen (`/exams/<id>/review`).
+  - It shows the live activity, with progress counted from finished scripts, plus a **Stop** button and the preferences.
+  - Until the first script is marked, the live activity is the whole page, and the first marked script then opens by itself.
+  - The chat links to it while marking runs.
+
+### Premium access
+Automatic marking is a premium feature, defined in `server/services/billing/entitlements.ts`.
+- **Who gets it:** plans with `autonomousMarking` (GO, PRO and Institution by default; admins can change it per plan in the billing settings).
+- **Counting:** each use is counted against the plan's daily marking limit.
+- **Where it is checked:** inside the exam service (`deps.entitlement`), so the chat, `/api/exams` and the background jobs all go through it. Refusals are 402 `UPGRADE_REQUIRED` (with `details.upgradeUrl`) or 429 when a limit is reached.
+- **What it covers:** starting or re-marking, reading or drafting a marking scheme, and exports.
+- **What stays open on every plan:**
+  - viewing existing results;
+  - transcription corrections (the AI re-mark is skipped and explained);
+  - scanning, documents and chat.
+- **Rollout:** `MARKING_REQUIRES_UPGRADE=false` opens marking to every plan.
+
+### Preferences
+`GET/PUT /api/exams/:examId/preferences`; in chat, say "mark strictly", "partial credit", "no corrections" or "detailed feedback". Also on the review screen.
+- **Credit:**
+  - strict: a criterion earns its marks only when fully met;
+  - partial: part marks where the scheme's mark steps allow.
+- **Red corrections:** on or off.
+- **Feedback:** brief or detailed.
+
+They are sent to the marker as teacher preferences that never override the official scheme. Changing corrections redraws the PDFs on the next export. Changing credit or feedback applies to scripts marked from then on ("re-mark everything" applies it to the rest).
+
+### Cancellation
+`POST /api/exams/:examId/cancel`; in chat, "stop marking".
+- Scripts already finished keep their marks; unfinished ones go back to the queue.
+- The run ends as `cancelled`. Saying "mark" starts a new run for what is left.
+
+### PDF checks before download
+Before a marked PDF is stored, it is reopened and checked (`verifyPdf.ts`):
+- it must open;
+- it must have the script's pages plus a summary;
+- it must carry the candidate, result revision and total it was drawn from;
+- every page must render and none may be blank;
+- red ink must be visible on the script pages when marks were placed there.
+
+A failed check redraws the PDF once. If it still fails, that candidate's PDF is left out and listed as a problem. `pdf_generation_completed` reports how many PDFs passed.
+
 ## Why a candidate lost marks: the saved record
 
 For every question mark, the result stores:
@@ -237,5 +295,5 @@ All of this is synthetic: printed pages and a scripted model.
 - **Question matching uses labels.** Unlabelled answers rely on the marker model's evidence, and are flagged when that evidence is outside the labelled answer.
 - **Optional-question rules are not supported.** "Answer any three of five" is rejected with an explanation.
 - **Arithmetic only.** Mathematical equivalence is judged by the model; no CAS is involved.
-- **Single process.** The queue persists to disk but runs in one process. A chat turn waits for quick jobs only; batch progress is reported when the teacher asks.
+- **Single process.** The queue persists to disk but runs in one process. Live progress streams to the review screen; a chat turn waits for quick jobs only.
 - **No Telegram exam flow.** Telegram keeps its existing `/transcribe` document flow.

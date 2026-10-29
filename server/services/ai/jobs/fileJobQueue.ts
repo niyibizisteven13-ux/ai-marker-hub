@@ -195,8 +195,9 @@ export class FileJobQueue {
     const job = await this.get(id, ownerId);
     if (!job) return null;
     if (job.status === 'queued' || job.status === 'processing') {
-      this.running.get(id)?.abort(new Error('cancelled'));
+      // Mark it cancelled before aborting, so the running attempt sees "cancelled" and is not recorded as a failure.
       await this.update(job, { status: 'cancelled', finishedAt: new Date().toISOString(), progress: { stage: 'cancelled', percent: null } });
+      this.running.get(id)?.abort(new Error('cancelled'));
       this.emitSettled(job);
     }
     return job;

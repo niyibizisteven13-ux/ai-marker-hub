@@ -129,9 +129,11 @@ export interface AnnotateInput {
   maxPages?: number;
   /** Released by the teacher: no draft label and no review "?" marks. */
   released?: boolean;
+  /** Red corrections under wrong answers (the teacher's preference; default on). */
+  corrections?: boolean;
 }
 
-export interface AnnotateOutput { pdf: Buffer; placed: number; summaryOnly: string[]; rebuilt: boolean }
+export interface AnnotateOutput { pdf: Buffer; placed: number; summaryOnly: string[]; rebuilt: boolean; /** Pages of the script itself (before the summary pages). */ sourcePages: number }
 
 export async function annotateScript(input: AnnotateInput): Promise<AnnotateOutput> {
   const { doc: out, rebuilt } = await sourcePages(input.original, input.fileName, input.maxPages ?? 50);
@@ -173,7 +175,7 @@ export async function annotateScript(input: AnnotateInput): Promise<AnnotateOutp
         page.drawText('?', { ...off(origin, rx + size * 0.25, size * 0.25), size: size * 0.6, font: bold, color: ORANGE, rotate: degrees(rot) });
       }
       placed++;
-    } else if (it.kind === 'correction') {
+    } else if (it.kind === 'correction' && input.corrections !== false) {
       const fs = Math.min(14, Math.max(8, (NOTE_CHAR / 0.5) * vs.width));
       const origin = at(it.fx, it.fy + (fs * 0.35) / vs.height);
       page.drawText(pdfSafe(it.text ?? ''), { ...origin, size: fs, font: italic, color: RED, rotate: degrees(rot) });
@@ -218,7 +220,7 @@ export async function annotateScript(input: AnnotateInput): Promise<AnnotateOutp
   y -= 14;
   for (const q of s.questions) {
     const rq = input.result.questions.find((x) => x.questionId === q.questionId);
-    const fb = [rq?.override ? `Examiner override: ${rq.override.reason}` : '', rq?.ai?.feedback ?? '', rq?.ai?.lostMarks ? `Lost marks: ${rq.ai.lostMarks}` : '', rq?.ai?.correction && (q.marks ?? 0) < q.maxMarks ? `Correction: ${rq.ai.correction}` : '', ...(input.released ? [] : q.flags.map((f) => `Check: ${f.detail}`))].filter(Boolean).join('\n');
+    const fb = [rq?.override ? `Examiner override: ${rq.override.reason}` : '', rq?.ai?.feedback ?? '', rq?.ai?.lostMarks ? `Lost marks: ${rq.ai.lostMarks}` : '', rq?.ai?.correction && input.corrections !== false && (q.marks ?? 0) < q.maxMarks ? `Correction: ${rq.ai.correction}` : '', ...(input.released ? [] : q.flags.map((f) => `Check: ${f.detail}`))].filter(Boolean).join('\n');
     const lines = wrap(fb || (q.marks === null ? 'Not marked yet.' : ''), font, 8, W - 2 * M - 120, 14);
     ensure(16 + lines.length * 10);
     const color = q.outcome === 'full' ? GREEN : q.outcome === 'zero' ? RED : q.outcome === 'partial' ? AMBER : ORANGE;
@@ -236,9 +238,9 @@ export async function annotateScript(input: AnnotateInput): Promise<AnnotateOutp
 
   out.setTitle(pdfSafe(`Marked script ${s.candidateId} - ${input.meta.examTitle}`));
   out.setSubject(pdfSafe(`exam ${input.meta.examId}; run ${input.meta.runId}; revision ${input.meta.resultRevision}`));
-  out.setKeywords([`candidate:${pdfSafe(s.candidateId)}`, `exam:${input.meta.examId}`, `run:${input.meta.runId}`, `revision:${input.meta.resultRevision}`]);
+  out.setKeywords([`candidate:${pdfSafe(s.candidateId)}`, `exam:${input.meta.examId}`, `run:${input.meta.runId}`, `revision:${input.meta.resultRevision}`, `total:${s.total}/${s.maxTotal}`]);
   out.setProducer('Bwenge.AI');
   out.setCreator('Bwenge.AI examination marking');
   out.setCreationDate(new Date(input.meta.generatedAt));
-  return { pdf: Buffer.from(await out.save()), placed, summaryOnly, rebuilt };
+  return { pdf: Buffer.from(await out.save()), placed, summaryOnly, rebuilt, sourcePages: pages.length };
 }

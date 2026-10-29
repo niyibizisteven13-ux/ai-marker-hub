@@ -23,6 +23,8 @@ export interface PlanLimits {
   /** Cross-chat memory: available on this plan, and how many memories it keeps. */
   memory: boolean;
   memoryItems: number;
+  /** Autonomous handwriting marking (exams, red-pen PDFs, reports). Admin-editable per plan. */
+  autonomousMarking: boolean;
 }
 
 export interface PlanInfo {
@@ -38,21 +40,21 @@ export interface PlanInfo {
 export const PLANS: Record<PlanId, PlanInfo> = {
   FREE: {
     id: 'FREE', name: 'Free', priceUsd: 0, priceNote: 'Free forever',
-    limits: { daily: 20, weekly: 80, monthly: 250, perDay: { tool: 5, vision: 5, artifact: 2, marking: 3 }, maxMessageChars: 8_000, maxAttachments: 2, maxUploadMb: 10, memory: false, memoryItems: 0 },
+    limits: { daily: 20, weekly: 80, monthly: 250, perDay: { tool: 5, vision: 5, artifact: 2, marking: 3 }, maxMessageChars: 8_000, maxAttachments: 2, maxUploadMb: 10, memory: false, memoryItems: 0, autonomousMarking: false },
   },
   // GO = the Free allowance plus purchased credits: once the allowance or a daily feature cap is used up,
   // further actions are paid from the credit wallet instead of being refused.
   GO: {
     id: 'GO', name: 'GO', priceUsd: null, priceNote: 'Pay as you go, from 500 RWF',
-    limits: { daily: 20, weekly: 80, monthly: 250, perDay: { tool: 5, vision: 5, artifact: 2, marking: 3 }, maxMessageChars: 20_000, maxAttachments: 5, maxUploadMb: 25, memory: false, memoryItems: 0 },
+    limits: { daily: 20, weekly: 80, monthly: 250, perDay: { tool: 5, vision: 5, artifact: 2, marking: 3 }, maxMessageChars: 20_000, maxAttachments: 5, maxUploadMb: 25, memory: false, memoryItems: 0, autonomousMarking: true },
   },
   PRO: {
     id: 'PRO', name: 'PRO', priceUsd: 3, listPriceUsd: 9, priceNote: 'per month',
-    limits: { daily: 120, weekly: 500, monthly: 1_000, perDay: { tool: 60, vision: 100, artifact: 25, marking: 60 }, maxMessageChars: 40_000, maxAttachments: 10, maxUploadMb: 50, memory: true, memoryItems: 2_000 },
+    limits: { daily: 120, weekly: 500, monthly: 1_000, perDay: { tool: 60, vision: 100, artifact: 25, marking: 60 }, maxMessageChars: 40_000, maxAttachments: 10, maxUploadMb: 50, memory: true, memoryItems: 2_000, autonomousMarking: true },
   },
   INSTITUTION: {
     id: 'INSTITUTION', name: 'Institution', priceUsd: 50, priceNote: 'per month and up, 25 seats',
-    limits: { daily: 400, weekly: 1_800, monthly: 5_000, perDay: { tool: 200, vision: 300, artifact: 80, marking: 300 }, maxMessageChars: 60_000, maxAttachments: 20, maxUploadMb: 100, memory: true, memoryItems: 10_000 },
+    limits: { daily: 400, weekly: 1_800, monthly: 5_000, perDay: { tool: 200, vision: 300, artifact: 80, marking: 300 }, maxMessageChars: 60_000, maxAttachments: 20, maxUploadMb: 100, memory: true, memoryItems: 10_000, autonomousMarking: true },
   },
 };
 

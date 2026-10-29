@@ -17,6 +17,7 @@ import logger from '../utils/logger.js';
 import { markingLimits } from './exams/limits.js';
 import { recordUsage, checkUsage } from './billing/usage.js';
 import { isPrimary } from '../utils/cluster.js';
+import { canUseAutonomousMarking } from './billing/entitlements.js';
 
 /** Wires the statistics/report and assessment services to the shared file store, job queue and agent model. */
 
@@ -78,6 +79,8 @@ export const examService = createExamService({
     return { adapter: a.adapter, model: a.model, fallbackModel: a.fallbackModel };
   },
   visionAvailable: () => visionTarget() !== null,
+  // Upgraded plans only, counted against the plan's daily marking limit (see billing/entitlements.ts).
+  entitlement: canUseAutonomousMarking,
   maxPages: markingLimits.maxPagesPerPaper,
   maxCandidates: markingLimits.maxCandidates,
   maxBatchPages: markingLimits.maxBatchPages,

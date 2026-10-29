@@ -152,7 +152,7 @@ function run(ds: Dataset, spec: AnalysisSpec): { title: string; result: unknown 
       }
       requireColumns(ds, [spec.groupBy]);
       const groups = groupsOf(ds, spec.groupBy);
-      const names = spec.groups ?? [...groups.keys()];
+      const names: string[] = spec.groups ? spec.groups.map(String) : [...groups.keys()];
       if (names.length !== 2 || !names.every((g) => groups.has(g))) throw new AnalysisError(`"${spec.groupBy}" must have exactly two groups (or name two with "groups"); found ${groups.size}.`);
       const r = welchTTest(groups.get(names[0])!.map((i) => vals[i]), groups.get(names[1])!.map((i) => vals[i]));
       if ('error' in r) throw new AnalysisError(r.error);
