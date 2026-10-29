@@ -81,6 +81,12 @@ type Command =
 
 const Q = String.raw`(?:question|qn|q)\.?\s*([0-9]{1,3}(?:\s*\(?[a-h]\)?(?![a-z]))?(?:\s*\(?(?:iv|v?i{1,3}|v)\)?(?![a-z]))?)`;
 
+/** The last few turns of the conversation, one short line each, for resolving "him", "that question", "it says 4". */
+function recentLines(history: Array<{ role: 'user' | 'assistant'; text: string }>): string {
+  const lines = history.slice(-6).map((h) => `${h.role === 'user' ? 'Teacher' : 'Bwenge'}: ${h.text.replace(/\s+/g, ' ').slice(0, 600)}`);
+  return lines.length ? `Recent conversation:\n${lines.join('\n')}\n` : '';
+}
+
 /** Pattern-based command parsing. Exported for tests. */
 export function parseCommand(msg: string): Command | null {
   const m = msg.trim();
@@ -396,14 +402,14 @@ export function createExamChat(deps: ExamChatDeps) {
     return { text: lines.join('\n\n'), attachments: [] };
   }
 
-  async function llmCommand(message: string, e: ExamRecord): Promise<Command | null> {
+  async function llmCommand(message: string, e: ExamRecord, history: Array<{ role: 'user' | 'assistant'; text: string }> = []): Promise<Command | null> {
     const a = deps.agent?.();
     if (!a) return null;
     try {
       const { data } = await generateStructured<{ action: string; candidate: string | null; question: string | null; marks: number | null; reason: string | null; from: string | null; to: string | null; page: number | null; n: number | null }>(a.adapter, {
         model: a.model, schema: COMMAND_SCHEMA, maxTokens: 400, fallbackModel: a.fallbackModel,
-        system: 'You map a teacher\'s chat message about an examination that is being marked to one action. Use "none" if the message is not about this examination. Copy candidate ids and question numbers exactly as written. Never invent marks.',
-        prompt: `Candidates: ${e.submissions.slice(0, 50).map((x) => x.candidateId).join(', ')}\nMessage: ${message.slice(0, 2000)}`,
+        system: 'You map a teacher\'s chat message about an examination that is being marked to one action. Use "none" if the message is not about this examination. Copy candidate ids and question numbers exactly as written. Never invent marks. The recent conversation tells you who or what a short reply refers to ("give him the mark back", "it says 4"); take the candidate, question and marks from it only when the reply clearly refers to it.',
+        prompt: `Candidates: ${e.submissions.slice(0, 50).map((x) => x.candidateId).join(', ')}\n${recentLines(history)}Message: ${message.slice(0, 2000)}`,
       });
       switch (data.action) {
         case 'none': return null;
@@ -427,7 +433,7 @@ export function createExamChat(deps: ExamChatDeps) {
    * Handles a chat message if it belongs to the examination workflow; returns null otherwise so the
    * normal chat continues. `onStatus` receives short progress lines while the turn is open.
    */
-  async function handle(userId: string, message: string, files: UploadFile[], opts: { onStatus?: (t: string) => void; submissionId?: string; questionId?: string } = {}): Promise<ChatReply | null> {
+  async function handle(userId: string, message: string, files: UploadFile[], opts: { onStatus?: (t: string) => void; submissionId?: string; questionId?: string; history?: Array<{ role: 'user' | 'assistant'; text: string }> } = {}): Promise<ChatReply | null> {
     const ctx = await getCtx(userId);
     const visual = files.filter(isScriptLike);
     try {
@@ -456,7 +462,7 @@ export function createExamChat(deps: ExamChatDeps) {
       const looksExam = mentionsCandidate || (recent && (EXAM_WORDS.test(message) || SHORT_STATUS.test(message) || DRAFT_REQUEST.test(message)));
       if (!looksExam) return null;
       if (DRAFT_REQUEST.test(message) && !s.confirmedScheme(exam)) return { text: await draftReply(userId, exam.id, undefined, opts.onStatus), attachments: [] };
-      const cmd = parseCommand(message) ?? (await llmCommand(message, exam));
+      const cmd = parseCommand(message) ?? (await llmCommand(message, exam, opts.history));
       if (cmd && 'question' in cmd && !cmd.question && opts.questionId) {
         const question = s.latestScheme(exam)?.scheme?.questions.find(q => q.id === opts.questionId);
         if (question) cmd.question = question.number;

@@ -235,10 +235,28 @@ function routeChat(prompt: string, opts: { hasImages?: boolean; hasTools?: boole
   return route;
 }
 
+/**
+ * Plain completion for tools that read long documents section by section (analyze_document). Runs on the
+ * marking model when DOCUMENT_MODEL=marking (the larger model), otherwise on the agent model; usage is charged.
+ */
+async function completeForTools(req: { system: string; prompt: string; maxTokens?: number; userId: string; signal?: AbortSignal }): Promise<string> {
+  const t = process.env.DOCUMENT_MODEL === 'marking' ? markingTarget() : agentTarget();
+  let text = '';
+  let input = 0;
+  let output = 0;
+  for await (const c of t.adapter.stream({ model: t.model, messages: [{ role: 'system', content: req.system }, { role: 'user', content: req.prompt }], maxTokens: req.maxTokens ?? 2_000, temperature: 0.1, signal: req.signal, fallbackModel: t.fallbackModel })) {
+    if (c.type === 'text') text += c.text;
+    else if (c.type === 'usage') { input = c.input; output = c.output; }
+  }
+  void recordUsage(req.userId, { kind: 'tool', model: t.model, inputTokens: input, outputTokens: output });
+  return stripThinkingTags(text).text.trim();
+}
+
 export const bwengeAgent = createAiAgent({
   provider: agentProvider,
   // The adapter owns retry policy; the runtime only retries a stream that broke after partial output.
-  runtime: { maxRetries: 1, retryDelayMs: 1000 },
+  // Tool results up to 120k characters, so a 60k-character read of a book arrives whole with its "continue at" line.
+  runtime: { maxRetries: 1, retryDelayMs: 1000, maxToolResultChars: 120_000 },
   model: process.env.GONKA_MODEL ?? GONKA_MODELS.DEFAULT,
   files: fileStore,
   temperature: 0.3,
@@ -258,6 +276,7 @@ export const bwengeAgent = createAiAgent({
     });
   },
   services: {
+    llm: { complete: completeForTools },
     knowledge: {
       async search(query, { topK, userId }) {
         // NISR index is consulted only for statistics questions; a missing/broken index never blocks the knowledge base.
@@ -904,10 +923,11 @@ export class AiService {
       systemPrompt += `\n\n[MASTER CONTEXT]: ${options.pinnedSyllabus}\n(Note: This is the primary curriculum/rubric source. Prioritize this document above all other context.)`;
     }
 
+    // Earlier turns; a turn given as { role, text } (chat history shape) is read too, never sent empty.
     const history = options.messages.slice(0, -1).map((m) => ({
       role: (m.role === 'assistant' ? 'assistant' : 'user') as 'user' | 'assistant',
-      text: extractPlainText(m.content),
-    }));
+      text: extractPlainText(m.content ?? (m as { text?: string }).text ?? ''),
+    })).filter((h) => h.text.trim() !== '');
     const lastMsg = options.messages[options.messages.length - 1];
     const earlierNote = earlierFiles.length
       ? `\n\n[Files the user attached earlier in this conversation (not re-attached to this message): ${earlierFiles.map((f) => `${f.name} (fileId ${f.fileId})`).join('; ')}. If the request is about one of them, read it with read_attachment; for a long file such as a book, pass find (e.g. "Chapter 5") or offset. Never say a file is missing when it is listed here.]`

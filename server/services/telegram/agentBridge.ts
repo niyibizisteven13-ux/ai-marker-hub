@@ -8,6 +8,7 @@ import { esc, markdownToMessages, caption as fitCaption } from './format.js';
 import { answerKeyboard, card, errorCard, fmtSize, langOf, progressCard, retryKeyboard, type Lang, type StepView } from './ui.js';
 import { copy } from './uiText.js';
 import { checkUsage } from '../billing/usage.js';
+import { fitHistory } from '../ai/chatHistory.js';
 
 /**
  * One Telegram turn through the same assistant as the web chat: exam marking first (as on the web), then
@@ -23,7 +24,7 @@ export interface BridgeDeps {
   api: TelegramApi;
   fileStore: FileStore;
   assist: (o: { userId: string; learning?: import('../learning/modes.js').LearningSettings; messages: Array<{ role: 'user' | 'assistant'; content: string }>; files?: Array<{ type: 'image' | 'document'; base64: string; mediaType: string; name?: string }>; planText: string; onEvent: (e: any) => void; signal?: AbortSignal }) => Promise<{ content: Array<{ text: string }>; attachments?: AttachmentRef[] }>;
-  exam?: (userId: string, text: string, files: Array<{ name: string; buffer: Buffer; mime?: string }>, onStatus: (t: string) => void) => Promise<{ text: string; attachments: AttachmentRef[] } | null>;
+  exam?: (userId: string, text: string, files: Array<{ name: string; buffer: Buffer; mime?: string }>, onStatus: (t: string) => void, history?: Turn[]) => Promise<{ text: string; attachments: AttachmentRef[] } | null>;
   editIntervalMs?: number;
 }
 
@@ -34,14 +35,15 @@ async function loadDefaultDeps(api: TelegramApi): Promise<BridgeDeps> {
   return {
     api, fileStore,
     assist: (o) => ai.generalAssist({ ...o, channel: 'telegram' } as any) as any,
-    exam: async (userId, text, files, onStatus) => runtime.examChat.handle(userId, text, files, { onStatus }),
+    exam: async (userId, text, files, onStatus, history) => runtime.examChat.handle(userId, text, files, { onStatus, history }),
   };
 }
 export const bridgeDeps = (api: TelegramApi) => (defaultDeps ??= loadDefaultDeps(api));
 /** Tests inject their own dependencies. */
 export function setBridgeDeps(deps: BridgeDeps | null) { defaultDeps = deps ? Promise.resolve(deps) : null; }
 
-const HISTORY_TURNS = 12;
+// Turns kept per Telegram chat; fitHistory condenses the oldest when they no longer fit the model.
+const HISTORY_TURNS = 40;
 const busy = new Map<string, number>();
 
 const VISUAL = new Set(['chart', 'diagram', 'drawing', 'image']);
@@ -171,7 +173,7 @@ export async function runAssistantTurn(input: TurnInput, depsOverride?: BridgeDe
       if (last?.status === 'running') last.status = 'done';
       steps.push({ id: `exam-${steps.length}`, name: 'exam', label: status, status: 'running' });
       schedule();
-    }).catch((e) => { logger.warn('[telegram] exam chat failed', { errorType: (e as Error)?.name }); return null; }) : null;
+    }, historyOf(session)).catch((e) => { logger.warn('[telegram] exam chat failed', { errorType: (e as Error)?.name }); return null; }) : null;
 
     let answer: string;
     if (exam) {
@@ -183,7 +185,7 @@ export async function runAssistantTurn(input: TurnInput, depsOverride?: BridgeDe
       const r = await deps.assist({
         userId,
         learning: parseLearning(session?.learning),
-        messages: [...historyOf(session).map((h) => ({ role: h.role, content: h.text })), { role: 'user' as const, content: input.text }],
+        messages: [...fitHistory(historyOf(session)).map((h) => ({ role: h.role, content: h.text })), { role: 'user' as const, content: input.text }],
         files: files.map((f) => ({ type: f.mime.startsWith('image/') ? 'image' as const : 'document' as const, base64: f.data.toString('base64'), mediaType: f.mime, name: f.name })),
         planText: input.text,
         onEvent,

@@ -8,6 +8,7 @@ import { datasetTools } from './datasetTools.js';
 import { memoryTools } from './memoryTools.js';
 import { sceneTools } from './sceneTools.js';
 import { formTools } from './formTools.js';
+import { analyzeDocument, viewPages } from './documentTools.js';
 
 /** Builds the full toolkit. Tools that need an optional service are only included when it is provided. */
 export function buildToolkit(services: ToolServices = {}): ToolRegistry {
@@ -19,6 +20,8 @@ export function buildToolkit(services: ToolServices = {}): ToolRegistry {
     ...(process.env.ENABLE_FORM_TOOLS === 'false' ? [] : formTools(services)),
     enabled('ENABLE_AGENT_IMAGE_GENERATION') && services.image ? generateImage : null,
     readAttachment,
+    services.llm ? analyzeDocument : null,
+    viewPages,
     searchKnowledgeTool(services),
     ...datasetTools(services),
     ...memoryTools(services),

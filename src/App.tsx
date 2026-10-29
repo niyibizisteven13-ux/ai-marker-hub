@@ -84,6 +84,9 @@ const CHAT_HISTORY_KEY = 'bwenge_chat_history';
 const CHAT_SESSIONS_KEY = 'bwenge_saved_sessions';
 // The server streams a heartbeat every 15 s, so this only fires when the connection itself is gone.
 const CHAT_TOKEN_TIMEOUT_MS = 120_000;
+/** Conversation sent with each message: up to 200 turns, each cut at 20,000 characters (about 4 MB at most). */
+const CHAT_HISTORY_MAX_TURNS = 200;
+const CHAT_HISTORY_MAX_CHARS = 20_000;
 /** Attachment limits per file and per message (the server's CHAT_MAX_FILE_MB defaults to 100). */
 const CHAT_MAX_FILE_BYTES = 100 * 1024 * 1024;
 const CHAT_MAX_TOTAL_BYTES = 200 * 1024 * 1024;
@@ -1021,9 +1024,10 @@ export default function App() {
           surfaceSubmissionId: scanBatch?.examId === markingContext?.examId ? markingContext?.submissionId : undefined,
           surfaceQuestionId: scanBatch?.examId === markingContext?.examId ? markingContext?.questionId : undefined,
           provider: selectedProvider === 'auto' ? undefined : selectedProvider,
-          history: requestMessages.slice(-10, -1).map((message) => ({
+          // The whole conversation (the server keeps recent turns word for word and condenses older ones).
+          history: requestMessages.slice(-CHAT_HISTORY_MAX_TURNS - 1, -1).filter((message) => message.text?.trim()).map((message) => ({
             role: message.sender === 'assistant' ? 'assistant' : 'user',
-            text: message.text,
+            text: message.text.length > CHAT_HISTORY_MAX_CHARS ? `${message.text.slice(0, CHAT_HISTORY_MAX_CHARS)}\n[…]` : message.text,
           })),
           attachmentText,
           attachments: attachmentPayloads,

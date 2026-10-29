@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentResult, AttachmentRef, ChatMessage, KnowledgePassage, ToolCall, ToolContext } from './types.js';
+import type { AgentEvent, AgentResult, AttachmentRef, ChatMessage, ContentPart, KnowledgePassage, ToolCall, ToolContext, ToolOutput } from './types.js';
 import { isRetryable, type ProviderAdapter } from './providers/types.js';
 import type { ToolRegistry } from './tools/registry.js';
 import { ThinkFilter } from './util/thinkFilter.js';
@@ -74,11 +74,15 @@ export class AgentRuntime {
 
       history.push({ role: 'assistant', content: text || null, tool_calls: calls, ...(providerState ? { providerState } : {}) });
       const results = await this.runTools(calls, opts.ctx, emit);
+      const shown: ContentPart[] = [];
       for (const r of results) {
         history.push({ role: 'tool', tool_call_id: r.id, name: r.name, content: r.text });
         for (const a of r.attachments) { attachments.push(a); emit({ type: 'attachment', data: a }); }
         if (r.sources.length) { sources.push(...r.sources); emit({ type: 'sources', data: { passages: r.sources } }); }
+        for (const img of r.images) shown.push({ type: 'text', text: img.label ?? 'Image' }, { type: 'image_url', image_url: { url: `data:${img.mime};base64,${img.base64}` } });
       }
+      // Images from tools (PDF pages) follow the tool results as a user turn, the only place models accept them.
+      if (shown.length) history.push({ role: 'user', content: shown });
     }
 
     // Out of turns: ask once for a final answer without tools so the user is never left with nothing.
@@ -154,7 +158,7 @@ export class AgentRuntime {
   }
 
   private async runTools(calls: ToolCall[], ctx: ToolContext, emit: (e: AgentEvent) => void) {
-    type R = { id: string; name: string; text: string; attachments: AttachmentRef[]; sources: KnowledgePassage[] };
+    type R = { id: string; name: string; text: string; attachments: AttachmentRef[]; sources: KnowledgePassage[]; images: NonNullable<ToolOutput['images']> };
     const results: R[] = new Array(calls.length);
     let next = 0;
     const worker = async () => {
@@ -170,10 +174,10 @@ export class AgentRuntime {
   private async runOne(call: ToolCall, ctx: ToolContext, emit: (e: AgentEvent) => void) {
     const name = call.function.name;
     const id = call.id;
-    const finish = (text: string, isError = false, attachments: AttachmentRef[] = [], sources: KnowledgePassage[] = []) => {
+    const finish = (text: string, isError = false, attachments: AttachmentRef[] = [], sources: KnowledgePassage[] = [], images: NonNullable<ToolOutput['images']> = []) => {
       const out = truncate(text, this.cfg.maxToolResultChars, '\n[output truncated]');
       emit({ type: 'tool_result', data: { id, name, output: out, isError } });
-      return { id, name, text: out, attachments, sources };
+      return { id, name, text: out, attachments, sources, images };
     };
 
     let input: unknown;
@@ -191,10 +195,10 @@ export class AgentRuntime {
     if (problem) return finish(`ERROR: invalid arguments for ${name}: ${problem}. Fix them and call the tool again.`, true);
 
     try {
-      const timeout = AbortSignal.timeout(this.cfg.toolTimeoutMs);
+      const timeout = AbortSignal.timeout(tool.timeoutMs ?? this.cfg.toolTimeoutMs);
       const signal = ctx.signal ? AbortSignal.any([ctx.signal, timeout]) : timeout;
       const out = await tool.execute(input, { ...ctx, signal });
-      return finish(out.text, !!out.isError, out.attachments ?? [], out.sources ?? []);
+      return finish(out.text, !!out.isError, out.attachments ?? [], out.sources ?? [], out.images ?? []);
     } catch (e: any) {
       // Never leak secrets or stack traces to the model or the user.
       const msg = String(e?.message ?? e).replace(/(sk-[\w-]{10,}|Bearer\s+[\w.-]{10,}|api[_-]?key["':\s=]+[\w.-]{10,})/gi, '[redacted]').split('\n')[0].slice(0, 300);
