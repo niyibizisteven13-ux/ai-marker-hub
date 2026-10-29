@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import type { FileStore } from '../ai/files/FileStore.js';
 import { FileJobQueue, JobError } from '../ai/jobs/fileJobQueue.js';
@@ -23,7 +24,12 @@ export interface ExamChatContext extends OwnedRecord {
   pending: { files: Array<{ fileId: string; name: string; mime: string }>; question: 'which_scheme'; autoMark: boolean } | null;
 }
 
-export interface ChatReply { text: string; attachments: AttachmentRef[] }
+/** examId: the examination the reply is about, so the chat can show its live marking card. */
+export interface ChatReply { text: string; attachments: AttachmentRef[]; examId?: string }
+
+/** Per-turn callbacks (the exam chat is shared by every request). */
+const turn = new AsyncLocalStorage<{ onExam?: (examId: string) => void }>();
+const onExam = (examId: string) => turn.getStore()?.onExam?.(examId);
 
 export interface ExamChatDeps {
   service: ExamService;
@@ -186,9 +192,24 @@ export function createExamChat(deps: ExamChatDeps) {
   async function waitRun(userId: string, examId: string, onStatus?: (t: string) => void): Promise<'done' | 'pending'> {
     const until = Date.now() + waitMs;
     let last = '';
+    // One line per student as each script is finished: "Student 2 marked: S4B-002, 41/50".
+    const reported = new Set<string>();
+    const report = (e: ExamRecord) => {
+      if (!onStatus) return;
+      const order = new Map(e.submissions.map((x, i) => [x.id, i + 1]));
+      for (const c of s.summaries(e).list) {
+        if (reported.has(c.submissionId)) continue;
+        reported.add(c.submissionId);
+        onStatus(`Student ${order.get(c.submissionId) ?? reported.size} marked: ${c.candidateName ? `${c.candidateName} (${c.candidateId})` : c.candidateId}, ${c.total}/${c.maxTotal}`);
+      }
+      for (const x of e.submissions) if (x.state === 'failed' && !reported.has(x.id)) { reported.add(x.id); onStatus(`Student ${order.get(x.id)} (${x.candidateId}) could not be marked`); }
+    };
+    const first = await s.load(userId, examId);
+    for (const c of s.summaries(first).list) reported.add(c.submissionId); // marked before this run
     while (Date.now() < until) {
       const e = await s.load(userId, examId);
       const run = e.runs[e.runs.length - 1];
+      report(e);
       if (!run || ['completed', 'completed_with_warnings', 'failed', 'cancelled'].includes(run.state)) return 'done';
       const p = s.progress(e);
       const done = (p.counts.completed ?? 0) + (p.counts.completed_with_warnings ?? 0) + (p.counts.failed ?? 0);
@@ -202,6 +223,7 @@ export function createExamChat(deps: ExamChatDeps) {
 
   /** Starts marking whatever is queued (if anything) and replies with the marked PDFs once the run is finished. */
   async function markAndFinish(userId: string, examId: string, lines: string[], onStatus?: (t: string) => void): Promise<ChatReply> {
+    onExam?.(examId);
     let e = await s.load(userId, examId);
     if (e.submissions.some((x) => x.state === 'queued')) {
       try { await s.startMarking(userId, examId); } catch (err) { if (!(err instanceof ExamInputError && ['NOTHING_TO_MARK', 'RUN_IN_PROGRESS'].includes(err.code))) throw err; }
@@ -210,7 +232,7 @@ export function createExamChat(deps: ExamChatDeps) {
     if (!e.runs.length) return { text: [...lines, statusText(e)].filter(Boolean).join('\n\n'), attachments: [] };
     const st = await waitRun(userId, examId, onStatus);
     e = await s.load(userId, examId);
-    if (st === 'pending') return { text: [...lines, statusText(e), `Marking is still running in the background; the marked PDFs will be ready shortly. Watch each script being marked live in ${link('the marking workspace', `/exams/${e.id}/review`)}, or ask "status" here. You can say "stop marking" to cancel, or "mark strictly" / "no corrections" to change how it marks.`].filter(Boolean).join('\n\n'), attachments: [] };
+    if (st === 'pending') return { text: [...lines, statusText(e), `Marking is still running in the background; the marked PDFs will be ready shortly. Each student appears in the card below as soon as their script is marked: press **Open live marking** to watch it beside this chat and see each marked page, or ask "status" here. You can say "stop marking" to cancel, or "mark strictly" / "no corrections" to change how it marks.`].filter(Boolean).join('\n\n'), attachments: [] };
     const fin = await finishedReply(e);
     return { text: [...lines, fin.text].filter(Boolean).join('\n\n'), attachments: fin.attachments };
   }
@@ -433,7 +455,13 @@ export function createExamChat(deps: ExamChatDeps) {
    * Handles a chat message if it belongs to the examination workflow; returns null otherwise so the
    * normal chat continues. `onStatus` receives short progress lines while the turn is open.
    */
-  async function handle(userId: string, message: string, files: UploadFile[], opts: { onStatus?: (t: string) => void; submissionId?: string; questionId?: string; history?: Array<{ role: 'user' | 'assistant'; text: string }> } = {}): Promise<ChatReply | null> {
+  async function handle(userId: string, message: string, files: UploadFile[], opts: { onStatus?: (t: string) => void; submissionId?: string; questionId?: string; history?: Array<{ role: 'user' | 'assistant'; text: string }>; onExam?: (examId: string) => void } = {}): Promise<ChatReply | null> {
+    const reply = await turn.run({ onExam: opts.onExam }, () => handleTurn(userId, message, files, opts));
+    if (reply && !reply.examId) reply.examId = (await getCtx(userId)).examId ?? undefined;
+    return reply;
+  }
+
+  async function handleTurn(userId: string, message: string, files: UploadFile[], opts: { onStatus?: (t: string) => void; submissionId?: string; questionId?: string; history?: Array<{ role: 'user' | 'assistant'; text: string }> }): Promise<ChatReply | null> {
     const ctx = await getCtx(userId);
     const visual = files.filter(isScriptLike);
     try {
