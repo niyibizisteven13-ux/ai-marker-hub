@@ -211,6 +211,8 @@ export interface MarkingPreferences {
   corrections: boolean;
   /** Feedback length in the report and on the summary page. */
   feedback: 'brief' | 'detailed';
+  /** The teacher's own marking instructions ("accept g = 9.8 or 10"); followed unless they contradict the scheme. */
+  instructions?: string;
   updatedAt?: string;
 }
 

@@ -221,7 +221,7 @@ export default function ExamReviewPage({ onBack }: { onBack: () => void }) {
               </ol>
               <div className="mt-6 flex flex-wrap gap-2">
                 <a href="/" className="rounded-xl bg-[#D97757] px-4 py-2 text-sm font-semibold text-white hover:bg-[#c66849]">Open the chat</a>
-                <a href="/scan" className="rounded-xl border border-white/15 px-4 py-2 text-sm font-semibold text-neutral-200 hover:bg-white/5">Scan papers with the phone</a>
+                <a href="/scan" className="rounded-xl border border-white/15 px-4 py-2 text-sm font-semibold text-neutral-200 hover:bg-white/5">Mark papers with the phone camera</a>
               </div>
             </div>
           ) : (

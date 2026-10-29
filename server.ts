@@ -218,6 +218,10 @@ function detectRealMimeType(buffer: Buffer): string | null {
   if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg';
   if (buffer.length >= 6 && ['GIF87a', 'GIF89a'].includes(buffer.slice(0, 6).toString('ascii'))) return 'image/gif';
   if (buffer.length >= 12 && buffer.slice(0, 4).toString('ascii') === 'RIFF' && buffer.slice(8, 12).toString('ascii') === 'WEBP') return 'image/webp';
+  // Phone and scanner photo formats (marking accepts them; they are converted before reading).
+  if (buffer.length >= 4 && (buffer.slice(0, 4).equals(Buffer.from([0x49, 0x49, 0x2a, 0x00])) || buffer.slice(0, 4).equals(Buffer.from([0x4d, 0x4d, 0x00, 0x2a])))) return 'image/tiff';
+  if (buffer.length >= 2 && buffer.slice(0, 2).toString('ascii') === 'BM') return 'image/bmp';
+  if (buffer.length >= 12 && buffer.slice(4, 8).toString('ascii') === 'ftyp' && /^(heic|heix|hevc|heim|heis|mif1|msf1)$/.test(buffer.slice(8, 12).toString('ascii'))) return 'image/heic';
   return null;
 }
 
@@ -446,6 +450,8 @@ const CHAT_ATTACHMENT_EXTENSIONS = new Set([
   '.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx', '.csv', '.txt', '.md', '.rtf', '.json',
   '.js', '.jsx', '.ts', '.tsx', '.py', '.java', '.cpp', '.c', '.h', '.html', '.css', '.xml', '.yaml', '.yml', '.sql',
   '.png', '.jpg', '.jpeg', '.webp', '.gif',
+  // Marking: a ZIP of the class, phone photos (HEIC) and scanner images (TIFF, BMP), OpenDocument text.
+  '.zip', '.heic', '.heif', '.tif', '.tiff', '.bmp', '.odt',
 ]);
 const VISUAL_EXTENSIONS = new Set(['.pdf', '.png', '.jpg', '.jpeg', '.webp', '.gif']);
 const MIME_BY_EXTENSION: Record<string, string> = {
@@ -457,6 +463,8 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   '.js': 'text/plain', '.jsx': 'text/plain', '.ts': 'text/plain', '.tsx': 'text/plain', '.py': 'text/plain',
   '.java': 'text/plain', '.cpp': 'text/plain', '.c': 'text/plain', '.h': 'text/plain', '.html': 'text/html',
   '.css': 'text/css', '.xml': 'application/xml', '.yaml': 'text/plain', '.yml': 'text/plain', '.sql': 'text/plain',
+  '.zip': 'application/zip', '.heic': 'image/heic', '.heif': 'image/heic', '.tif': 'image/tiff', '.tiff': 'image/tiff', '.bmp': 'image/bmp',
+  '.odt': 'application/vnd.oasis.opendocument.text',
 };
 
 const MAX_STORED_UPLOAD_TEXT = 2_000_000;
@@ -1298,7 +1306,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
         const recs = await prisma.fileRecord.findMany({ where: { id: { in: finalAttachmentIds }, userId }, select: { name: true, path: true, mimeType: true } });
         for (const r of recs) if (r.path) { try { examFiles.push({ name: r.name, buffer: await fs.readFile(r.path), mime: r.mimeType }); } catch { /* file gone */ } }
       }
-      const examReply = surface === 'form' ? null : await examChat.handle(userId, query || '', examFiles, { onStatus: examStatus, submissionId: surface === 'exam' ? req.body.surfaceSubmissionId : undefined, questionId: surface === 'exam' ? req.body.surfaceQuestionId : undefined, history: parsedHistory, onExam: (examId) => openExamStream().send('exam', { examId }) });
+      const examReply = surface === 'form' ? null : await examChat.handle(userId, query || '', examFiles, { onStatus: examStatus, submissionId: surface === 'exam' ? req.body.surfaceSubmissionId : undefined, questionId: surface === 'exam' ? req.body.surfaceQuestionId : undefined, history: parsedHistory, onExam: (examId) => openExamStream().send('exam', { examId }), marking: req.body.marking });
       if (examReply) {
         const em = openExamStream();
         if (examStep) em.status(examStep.id, examStep.label, 'done');

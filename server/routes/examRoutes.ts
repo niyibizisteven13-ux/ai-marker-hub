@@ -15,6 +15,8 @@ import { ExamInputError, parseManifest, type CandidateMapping } from '../service
 import logger from '../utils/logger.js';
 import { createHash } from 'node:crypto';
 import { streamExam } from '../services/exams/live.js';
+import { precheckFile } from '../services/exams/precheck.js';
+import { prisma } from '../db.js';
 
 /**
  * Examination marking API (mounted behind requireAuth). Every lookup is owner-scoped; other users'
@@ -68,6 +70,23 @@ const examRef = async (req: Request) => examService.load(userIdOf(req), req.para
 
 export const examsRouter = Router();
 examsRouter.get('/limits', (_req, res) => res.json(markingLimits));
+
+/**
+ * Mark page summary before marking: pages, typed or handwritten, students in a ZIP and photos that will read
+ * badly, for files the user already uploaded (/api/files/upload ids). No AI is used.
+ */
+examsRouter.post('/precheck', async (req, res) => {
+  try {
+    const body = z.object({ fileIds: z.array(z.string().min(1).max(100)).min(1).max(60) }).strict().parse(req.body ?? {});
+    const recs = await prisma.fileRecord.findMany({ where: { id: { in: body.fileIds }, userId: userIdOf(req) }, select: { id: true, name: true, path: true, mimeType: true } });
+    const files = [];
+    for (const r of recs) {
+      if (!r.path) continue;
+      try { files.push({ fileId: r.id, ...(await precheckFile({ name: r.name, mime: r.mimeType ?? undefined, data: await fs.readFile(r.path) })) }); } catch { files.push({ fileId: r.id, name: r.name, kind: 'other', pages: 0, typedPages: 0, issues: [{ issue: 'unreadable' }] }); }
+    }
+    res.json({ files, requestId: rid(req) });
+  } catch (err) { fail(req, res, err); }
+});
 
 examsRouter.post('/', async (req, res) => {
   try {
@@ -129,7 +148,7 @@ examsRouter.get('/:examId/preferences', async (req, res) => {
 
 examsRouter.put('/:examId/preferences', async (req, res) => {
   try {
-    const body = z.object({ credit: z.enum(['partial', 'strict']).optional(), corrections: z.boolean().optional(), feedback: z.enum(['brief', 'detailed']).optional() }).strict().parse(req.body ?? {});
+    const body = z.object({ credit: z.enum(['partial', 'strict']).optional(), corrections: z.boolean().optional(), feedback: z.enum(['brief', 'detailed']).optional(), instructions: z.string().max(2000).optional() }).strict().parse(req.body ?? {});
     res.json({ preferences: await examService.setPreferences(userIdOf(req), req.params.examId, body), requestId: rid(req) });
   } catch (err) { fail(req, res, err); }
 });

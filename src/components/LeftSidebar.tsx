@@ -9,6 +9,7 @@ import {
   Shield,
   FolderOpen,
   Library,
+  PenLine,
   PanelLeftClose,
   PanelLeftOpen,
   Search,
@@ -38,6 +39,8 @@ interface LeftSidebarProps {
   onOpenLibrary?: () => void;
   /** Opens the public library (folders and files admins share with everyone). */
   onOpenPublicLibrary?: () => void;
+  /** Opens the Mark page (scripts, marking scheme, instructions → live marking in the chat). */
+  onOpenMark?: () => void;
   onLogout: () => void;
   user: User | null;
   sessions: ChatSession[];
@@ -108,6 +111,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   onOpenAdmin,
   onOpenLibrary,
   onOpenPublicLibrary,
+  onOpenMark,
   onLogout = () => {},
   user = null,
   sessions = [],
@@ -249,6 +253,21 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
               </div>
             );
           })}
+
+          {user && onOpenMark && (
+            <div className="group relative w-full lg:w-auto">
+              <button
+                type="button"
+                onClick={go(onOpenMark)}
+                aria-label="Mark"
+                className={`${rowBase} ${rowSize} ${c ? '' : 'lg:w-full'} text-[#C2C0B6] hover:bg-white/[0.04] hover:text-white`}
+              >
+                <PenLine size={17} className="shrink-0 text-[#E08A6A]" aria-hidden="true" />
+                <span className={label}>Mark</span>
+              </button>
+              <CollapsedTip show={c} label="Mark" />
+            </div>
+          )}
 
           {user && onOpenLibrary && (
             <div className="group relative w-full lg:w-auto">

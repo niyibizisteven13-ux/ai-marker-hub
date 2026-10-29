@@ -409,7 +409,7 @@ export default function DocumentScanner({
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    if (!file.type.startsWith('image/')) { showToast('Choose an image file to scan.'); return; }
+    if (!file.type.startsWith('image/')) { showToast('Choose an image file to mark.'); return; }
     if (file.size > 20 * 1024 * 1024) { showToast('That image is larger than 20 MB. Choose a smaller one.'); return; }
     const reader = new FileReader();
     reader.onerror = () => showToast('Could not read that image. Try another file.');
@@ -939,7 +939,7 @@ export default function DocumentScanner({
       <header className="bsc-top">
         <div className="bsc-brand">
           <div className="bsc-logo bsc-d">B</div>
-          <div className="bsc-brand-name bsc-d">Bwenge <span>Scan</span></div>
+          <div className="bsc-brand-name bsc-d">Bwenge <span>Mark</span></div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span className="bsc-chip">{candidates.length} {candidates.length === 1 ? L.person.toLowerCase() : L.people.toLowerCase()} · {totalPages} {totalPages === 1 ? 'page' : 'pages'}</span>
@@ -957,7 +957,7 @@ export default function DocumentScanner({
           )}
 
           {aiTools && <section className="bsc-hub" aria-label="AI assistant">
-            <div className="bsc-hub-head"><span className="bsc-dot" /><span className="bsc-hub-title bsc-d">AI Scan Assistant</span></div>
+            <div className="bsc-hub-head"><span className="bsc-dot" /><span className="bsc-hub-title bsc-d">AI Marking Assistant</span></div>
             <p className="bsc-hub-sub" style={{ margin: 0 }}>Reads every page, suggests {L.score.toLowerCase()}s and flags what it is unsure about. You confirm before anything counts.</p>
             <label className="bsc-consent">
               <input type="checkbox" checked={aiConsent} onChange={(e) => setAiConsent(e.target.checked)} />
@@ -1154,7 +1154,7 @@ export default function DocumentScanner({
         <div className="bsc-modal-back" onClick={() => setShowSource(false)}>
           <div className="bsc-sheet" role="dialog" aria-label="Add a page" onClick={(e) => e.stopPropagation()}>
             <h3 className="bsc-d" style={{ margin: 0 }}>Add a page</h3>
-            <button className="bsc-source" onClick={launchCamera}><Icon name="sparkle" size={22} /><span><b>Scan with camera</b><small>Full-screen live camera</small></span></button>
+            <button className="bsc-source" onClick={launchCamera}><Icon name="sparkle" size={22} /><span><b>Photograph papers to mark</b><small>Full-screen live camera</small></span></button>
             <button className="bsc-source" onClick={() => { setShowSource(false); galleryInputRef.current?.click(); }}><Icon name="gallery" size={22} /><span><b>Choose from gallery</b><small>Use a photo you already took</small></span></button>
             {allowSamples && <button className="bsc-source" onClick={() => loadSample(activeId)}><Icon name="sparkle" size={22} /><span><b>Load sample paper</b><small>For testing only. It can never be saved.</small></span></button>}
             <button className="bsc-btn" onClick={() => setShowSource(false)}>Cancel</button>

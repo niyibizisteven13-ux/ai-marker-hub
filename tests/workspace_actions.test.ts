@@ -62,7 +62,7 @@ test('studio actions save marks, approve, export, navigate and clear stale forms
     await settle(() => root.render(React.createElement(Workspace, { batch: { id: 'batch', examId: 'exam', pages: [] }, onExamReady() {}, onClose() { closes++; }, onScan() { scans++; }, onResults() {}, chat: React.createElement('p', null, 'Paper chat') })));
     await settle();
     assert.match(document.body.textContent!, /Mathematics · Term 1/);
-    await settle(() => button('New scan').click()); assert.equal(scans, 1);
+    await settle(() => button('Add papers').click()); assert.equal(scans, 1);
     await settle(() => button('Back to workspace').click()); assert.equal(closes, 1);
     await change(document.querySelector<HTMLInputElement>('[aria-label="Find student"]')!, 'Alice');
     assert.equal(document.querySelectorAll('.scan-student-card').length, 1);

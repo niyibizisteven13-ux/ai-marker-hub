@@ -554,7 +554,7 @@ export function createExamService(deps: ExamDeps) {
     try {
       const pref = exam.preferences ?? DEFAULT_PREFERENCES;
       marked = await markCandidate(agent.adapter, agent.model, { scheme, questionIds: scheme.questions.map((q) => q.id), match, questionPaperText: await questionPaperText(userId, exam), runId, schemeVersion: run.schemeVersion, signal, fallbackModel: agent.fallbackModel,
-        preferences: { credit: pref.credit, feedback: pref.feedback },
+        preferences: { credit: pref.credit, feedback: pref.feedback, instructions: pref.instructions },
         imagesForQuestions: deps.visualEvidence ? ids => markingImages(userId, examId, sub.id, match, ids) : undefined,
         chunkSize: 1,
         checkpoints: existing?.runId === runId ? Object.fromEntries(existing.questions.filter(q => q.ai).map(q => [q.questionId, q.ai!])) : undefined,
@@ -1255,7 +1255,8 @@ export function createExamService(deps: ExamDeps) {
     if (patch.credit === 'partial' || patch.credit === 'strict') clean.credit = patch.credit;
     if (typeof patch.corrections === 'boolean') clean.corrections = patch.corrections;
     if (patch.feedback === 'brief' || patch.feedback === 'detailed') clean.feedback = patch.feedback;
-    if (!Object.keys(clean).length) throw new ExamInputError('INVALID_PREFERENCES', 'Choose credit (partial or strict), corrections (true or false) or feedback (brief or detailed).');
+    if (typeof patch.instructions === 'string') clean.instructions = patch.instructions.replace(/\s+\n/g, '\n').trim().slice(0, 2000);
+    if (!Object.keys(clean).length) throw new ExamInputError('INVALID_PREFERENCES', 'Choose credit (partial or strict), corrections (true or false), feedback (brief or detailed) or marking instructions.');
     const e = await mutate(userId, examId, (x) => { x.preferences = { ...(x.preferences ?? DEFAULT_PREFERENCES), ...clean, updatedAt: now() }; });
     return e.preferences!;
   }

@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, ExternalLink, Loader2, PanelRightOpen, X, XCircle } from 'lucide-react';
 import { authFetch } from '../utils/authFetch';
 import LiveMarkingPanel, { useExamActivity, type ExamEvent } from './LiveMarkingPanel';
+import { PageView, type Item } from './MarkedPaperView';
 
 /**
  * Marking inside the chat. The card under the assistant's reply shows the run live: progress, then one line per
@@ -33,6 +34,18 @@ function useRunState(events: ExamEvent[]) {
   return { active: lastStart >= 0 && lastStart > lastEnd, progress, ended: lastEnd >= 0 ? events[lastEnd] : null };
 }
 
+/** What the marker is doing right now, in words, plus the steps of the current script already done (ticked). */
+const STEP_TYPES = new Set(['page_processing_started', 'question_marking_started', 'question_marked', 'uncertainty_detected', 'rubric_processing_started', 'rubric_ready', 'marking_started', 'pdf_generation_started']);
+function currentSteps(events: ExamEvent[]) {
+  const steps = events.filter((e) => STEP_TYPES.has(e.type) && e.message);
+  const now = steps[steps.length - 1] ?? null;
+  // Steps of the script being marked now (since its "reading" step), oldest first, the last one still running.
+  const sid = now?.submissionId;
+  const start = sid ? steps.reduce((a, e, i) => (e.submissionId === sid && e.type === 'page_processing_started' ? i : a), -1) : -1;
+  const mine = (start >= 0 ? steps.slice(start) : steps.slice(-1)).filter((e) => !sid || e.submissionId === sid);
+  return { now, done: mine.slice(0, -1).filter((e) => e.type !== 'question_marking_started').slice(-4) };
+}
+
 export function PageThumb({ examId, submissionId, page = 1, large = false, alt }: { examId: string; submissionId: string; page?: number; large?: boolean; alt: string }) {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -54,6 +67,7 @@ export default function ChatMarkingCard({ examId }: { examId: string }) {
   const marked = useMemo(() => markedFrom(events), [events]);
   const { active, progress, ended } = useRunState(events);
   const shown = marked.slice(-6);
+  const steps = useMemo(() => currentSteps(events), [events]);
 
   return (
     <div className="mt-3 overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.02]">
@@ -71,7 +85,7 @@ export default function ChatMarkingCard({ examId }: { examId: string }) {
         </div>
       )}
       <ul className="divide-y divide-white/[0.04]" aria-live="polite">
-        {!marked.length && (
+        {!marked.length && !(active && steps.now) && (
           <li className="flex items-center gap-2 px-3 py-2.5 text-[12px] text-neutral-400">
             {active ? <Loader2 size={13} className="animate-spin" /> : null}
             {active ? 'Reading the first script…' : 'Each student appears here as soon as their script is marked.'}
@@ -89,19 +103,62 @@ export default function ChatMarkingCard({ examId }: { examId: string }) {
             </button>
           </li>
         ))}
-        {active && marked.length > 0 && <li className="flex items-center gap-2 px-3 py-2 text-[12px] text-neutral-400"><Loader2 size={13} className="animate-spin" />Marking student {marked.length + 1}…</li>}
+        {active && (marked.length > 0 || steps.now) && (
+          <li className="px-3 py-2 text-[12px]">
+            {steps.done.map((e) => (
+              <span key={e.seq} className="flex items-center gap-2 py-0.5 text-neutral-500"><CheckCircle2 size={12} className="text-emerald-500/80" aria-hidden /><span className="truncate">{e.message}</span></span>
+            ))}
+            <span className="flex items-center gap-2 py-0.5 text-neutral-200"><Loader2 size={13} className="animate-spin text-[#D97757]" aria-hidden /><span className="truncate">{steps.now?.message ?? `Marking student ${marked.length + 1}…`}</span></span>
+          </li>
+        )}
         {ended?.type === 'job_failed' && <li className="flex items-center gap-2 px-3 py-2 text-[12px] text-rose-300"><XCircle size={13} />{ended.message}</li>}
       </ul>
     </div>
   );
 }
 
+interface ReviewView { candidate: { submissionId: string; candidateId: string }; summary?: { total: number; maxTotal: number }; layout: { pages: Array<{ page: number; aspect: number }>; items: Item[] } }
+
+/**
+ * The script with the red pen on it: ticks, crosses, corrections and the circled total, drawn where the marked PDF
+ * puts them. Before the script is finished the plain page shows; the marks appear as soon as it is marked.
+ */
+function RedPenScript({ examId, submissionId, refresh }: { examId: string; submissionId: string; refresh: number }) {
+  const [review, setReview] = useState<ReviewView | null>(null);
+  const [page, setPage] = useState(1);
+  useEffect(() => { setReview(null); setPage(1); }, [submissionId]);
+  useEffect(() => {
+    let alive = true;
+    authFetch(`/api/exams/${examId}/review/${submissionId}`)
+      .then(async (r) => { if (r.ok && alive) setReview(await r.json()); })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, [examId, submissionId, refresh]);
+  const pages = review?.layout.pages ?? [];
+  const pageCount = pages.length || null;
+  const aspect = pages.find((p) => p.page === page)?.aspect;
+  return (
+    <section className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-2.5">
+      <div className="mb-2 flex items-center gap-2 text-[12px] text-neutral-300">
+        {review
+          ? <span className="inline-flex items-center gap-1.5 font-medium text-[#ff8a80]"><span className="h-1.5 w-1.5 rounded-full bg-[#D61C17]" aria-hidden />Red pen · {review.candidate.candidateId}{review.summary ? ` · ${review.summary.total}/${review.summary.maxTotal}` : ''}</span>
+          : <span className="inline-flex items-center gap-1.5 text-neutral-400"><Loader2 size={12} className="animate-spin" aria-hidden />Marking this script…</span>}
+        <span className="ml-auto text-neutral-500">Page {page}{pageCount ? ` of ${pageCount}` : ''}</span>
+        <button type="button" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="rounded border border-white/10 px-2 py-0.5 disabled:opacity-40">Previous</button>
+        <button type="button" disabled={!!pageCount && page >= pageCount} onClick={() => setPage((p) => p + 1)} className="rounded border border-white/10 px-2 py-0.5 disabled:opacity-40">Next</button>
+      </div>
+      {review
+        ? <PageView examId={examId} submissionId={submissionId} page={page} aspect={aspect} items={review.layout.items} selected={null} editable={false} onSelect={() => undefined} onMove={() => undefined} />
+        : <PageThumb examId={examId} submissionId={submissionId} page={page} large alt={`Page ${page} of the script`} />}
+    </section>
+  );
+}
+
 /** Right-hand panel with the full live marking view, opened from the chat card. */
 export function MarkingDrawer() {
-  const [target, setTarget] = useState<{ examId: string; submissionId?: string } | null>(null);
-  const [page, setPage] = useState(1);
+  const [target, setTarget] = useState<{ examId: string; submissionId?: string; pinned?: boolean } | null>(null);
   useEffect(() => {
-    const open = (e: Event) => { const d = (e as CustomEvent).detail; if (d?.examId) { setTarget(d); setPage(1); } };
+    const open = (e: Event) => { const d = (e as CustomEvent).detail; if (d?.examId) setTarget({ ...d, pinned: !!d.submissionId }); };
     window.addEventListener(OPEN_EVENT, open);
     return () => window.removeEventListener(OPEN_EVENT, open);
   }, []);
@@ -117,27 +174,39 @@ export function MarkingDrawer() {
     return () => window.removeEventListener('keydown', key);
   }, [target]);
   if (!target) return null;
+  return <DrawerBody target={target} setTarget={setTarget} />;
+}
+
+function DrawerBody({ target, setTarget }: { target: { examId: string; submissionId?: string; pinned?: boolean }; setTarget: (t: { examId: string; submissionId?: string; pinned?: boolean } | null) => void }) {
+  const { events } = useExamActivity(target.examId);
+  const [refresh, setRefresh] = useState(0);
+  const seen = useRef(0);
+  // Unless the teacher picked a script, show the latest one with the red pen on it (or, before any is finished,
+  // the one being read); reload the red pen when the shown script is marked or re-marked.
+  useEffect(() => {
+    const fresh = events.filter((e) => e.seq > seen.current);
+    if (!fresh.length) return;
+    seen.current = fresh[fresh.length - 1].seq;
+    let next = target.submissionId;
+    if (!target.pinned) {
+      const marked = [...fresh].reverse().find((e) => e.type === 'script_marked' && e.submissionId);
+      const reading = !next ? fresh.find((e) => e.type === 'page_processing_started' && e.submissionId) : undefined;
+      next = marked?.submissionId ?? reading?.submissionId ?? next;
+      if (next !== target.submissionId) setTarget({ ...target, submissionId: next });
+    }
+    if (fresh.some((e) => e.type === 'script_marked' && e.submissionId === next)) setRefresh((n) => n + 1);
+  }, [events, target, setTarget]);
   return (
     <aside aria-label="Live marking" className="fixed inset-y-0 right-0 z-[80] flex w-full flex-col border-l border-white/[0.08] bg-[#1F1E1D] text-neutral-100 shadow-2xl sm:w-[min(560px,92vw)] animate-[slideIn_.22s_ease-out]">
       <header className="flex items-center gap-2 border-b border-white/[0.06] px-4 py-3">
         <h2 className="flex-1 text-[15px] font-semibold">Live marking</h2>
+        {target.pinned && <button type="button" onClick={() => setTarget({ ...target, pinned: false })} className="rounded-lg border border-white/10 px-2.5 py-1 text-[12px] text-neutral-300 hover:bg-white/5">Follow live</button>}
         <a href={`/exams/${target.examId}/review`} className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2.5 py-1 text-[12px] text-neutral-300 hover:bg-white/5"><ExternalLink size={12} />Full review</a>
         <button type="button" onClick={() => setTarget(null)} aria-label="Close" className="rounded-lg p-1.5 text-neutral-400 hover:bg-white/5 hover:text-white"><X size={18} /></button>
       </header>
       <div className="flex-1 space-y-3 overflow-y-auto p-3">
-        {target.submissionId && (
-          <section className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-2.5">
-            <div className="mb-2 flex items-center justify-between text-[12px] text-neutral-300">
-              <span>Script · page {page}</span>
-              <span className="flex gap-1">
-                <button type="button" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="rounded border border-white/10 px-2 py-0.5 disabled:opacity-40">Previous</button>
-                <button type="button" onClick={() => setPage((p) => p + 1)} className="rounded border border-white/10 px-2 py-0.5">Next</button>
-              </span>
-            </div>
-            <PageThumb examId={target.examId} submissionId={target.submissionId} page={page} large alt={`Page ${page} of the script`} />
-          </section>
-        )}
-        <LiveMarkingPanel examId={target.examId} onScriptMarked={(sid) => { if (sid && !target.submissionId) setTarget((t) => (t ? { ...t, submissionId: sid } : t)); }} />
+        {target.submissionId && <RedPenScript examId={target.examId} submissionId={target.submissionId} refresh={refresh} />}
+        <LiveMarkingPanel examId={target.examId} onScriptMarked={(sid) => { if (sid && !target.submissionId) setTarget({ ...target, submissionId: sid }); }} />
       </div>
     </aside>
   );

@@ -692,6 +692,22 @@ test('chat: ambiguous scheme files are kept and resolved by the reply, not guess
   assert.deepEqual(r2!.attachments.map((a) => a.name), ['C001_marked.pdf']);
 });
 
+test('chat: roles set on the Mark page are used as given, and the teacher\'s instructions reach the marker', async () => {
+  const user = 'teacher-roles';
+  // A scheme named like a student's paper and wording no phrase detector knows: the explicit roles decide.
+  const scheme = Buffer.from('1. (3 marks) M1 subtract 2; A1 x = 4 (2 marks)\n2. (2 marks) B1 area 15\nTotal: 5 marks');
+  const before = calls.markPrompts.length;
+  const statuses: string[] = [];
+  const r = await chat.handle(user, 'check these', [
+    { name: 'Maths S4.txt', buffer: scheme, mime: 'text/plain' }, { name: 'C001.pdf', buffer: C001_PDF, mime: 'application/pdf' },
+  ], { onStatus: (t) => statuses.push(t), marking: { roles: { 'Maths S4.txt': 'scheme', 'C001.pdf': 'scripts' }, instructions: 'Accept answers in any unit.', credit: 'partial', feedback: 'brief' } });
+  assert.match(r!.text, /Marking finished\.\*\* 1 script marked/);
+  assert.doesNotMatch(r!.text, /Several files could be the marking scheme/);
+  assert.ok(statuses.includes('Noted your marking instructions'), statuses.join(' | '));
+  assert.ok(calls.markPrompts.slice(before).some((pr) => /TEACHER'S MARKING INSTRUCTIONS[\s\S]*Accept answers in any unit\./.test(pr)), 'the instructions are in the marking prompt');
+  assert.match(preferenceLines({ credit: 'partial', feedback: 'brief', instructions: 'Ignore spelling.' }), /Ignore spelling\./);
+});
+
 // ── Red marks on the candidate's page, the saved record, teacher review and release ─────────────────
 
 const crit = (id: string, awarded: number, max: number, rubric: string) => ({ criterionId: id, awardedMarks: awarded, maxMarks: max, reason: awarded >= max ? 'Correct' : 'Wrong value', rubric });

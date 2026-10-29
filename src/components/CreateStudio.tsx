@@ -787,7 +787,7 @@ export default function CreateStudio({
                   type="button"
                   onClick={() => setPlusMenuOpen((prev) => !prev)}
                   className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 text-[#C2C0B6] hover:bg-white/5 hover:text-white transition-colors"
-                  title="Add attachments or scan"
+                  title="Add attachments or mark papers"
                 >
                   <Plus size={18} />
                 </button>
@@ -822,7 +822,7 @@ export default function CreateStudio({
                       }}
                       className="w-full flex items-center px-3.5 py-2.5 hover:bg-white/5 text-left text-neutral-200"
                     >
-                      <Camera className="mr-3 w-4 h-4 text-emerald-400" /> Camera Scan
+                      <Camera className="mr-3 w-4 h-4 text-emerald-400" /> Mark papers with the camera
                     </button>}
                     <button
                       type="button"

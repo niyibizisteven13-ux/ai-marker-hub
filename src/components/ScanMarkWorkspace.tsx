@@ -215,7 +215,7 @@ export default function ScanMarkWorkspace({ batch, onClose, onScan, onResults, o
       <span className={`scan-connection scan-connection-${connection}`} role="status"><span />{connection === 'live' ? 'Live · saved' : connection === 'reconnecting' ? 'Reconnecting' : connection === 'offline' ? 'Offline' : 'Connecting'}</span>
       {(connection === 'offline' || connection === 'reconnecting') && <button className={button} aria-label="Reconnect live progress" onClick={() => setRefresh(n => n + 1)}><RefreshCw size={15} /></button>}
       <div className="scan-toolbar-actions">
-      <button className={button} disabled={!onScan || !!busy} onClick={onScan}><Camera size={15} className="inline mr-1" />New scan</button>
+      <button className={button} disabled={!onScan || !!busy} onClick={onScan}><Camera size={15} className="inline mr-1" />Add papers</button>
       {examId && <a className={button} href={`/exams/${examId}/review`}>Review all</a>}
       <button className={`${button} scan-button-primary`} disabled={!rows.some(r => r.complete) || !!busy || !!exportJob || running} onClick={() => void exportPdf()}><Download size={14} className="inline mr-1" />Export PDFs</button>      {(running || schemeJob || exportJob) && <button className={button} disabled={!!busy} onClick={() => void action('Stopping marking…', async () => {
         for (const id of [schemeJob, exportJob, remarkJob].filter(Boolean)) {
@@ -226,7 +226,7 @@ export default function ScanMarkWorkspace({ batch, onClose, onScan, onResults, o
       })}>Stop</button>}
       </div>
     </header>
-    <div className="scan-workflow" aria-label="Assessment workflow">{['Capture papers', 'Set criteria', 'AI marking', 'Teacher review'].map((step, index) => <span key={step} data-active={index === (!examId ? 0 : snapshot?.scheme?.status !== 'confirmed' ? 1 : running ? 2 : 3)}><i>{index + 1}</i>{step}</span>)}<small>Original scans preserved</small></div>
+    <div className="scan-workflow" aria-label="Assessment workflow">{['Capture papers', 'Set criteria', 'AI marking', 'Teacher review'].map((step, index) => <span key={step} data-active={index === (!examId ? 0 : snapshot?.scheme?.status !== 'confirmed' ? 1 : running ? 2 : 3)}><i>{index + 1}</i>{step}</span>)}<small>Original papers kept</small></div>
     {notice && !error && !busy && <div className="scan-save-notice" role="status"><CheckCircle2 size={15} />{notice}</div>}
     {(error || busy || schemeJob || exportJob || remarkJob) && <div role={error ? 'alert' : 'status'} className={`px-4 py-2 text-sm ${error ? 'bg-rose-50 text-rose-700' : 'bg-orange-50 text-orange-900'}`}>{error || busy || taskProgress || (schemeJob ? 'Reading marking criteria…' : remarkJob ? 'Re-marking corrected handwriting…' : 'Preparing PDFs…')}</div>}
     {snapshot?.progress?.work && (running || snapshot.progress.work.finished < snapshot.progress.work.total) && <section className="scan-live-progress border-b bg-white px-4 py-2 text-xs" aria-label="Saved marking progress">
