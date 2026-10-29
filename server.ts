@@ -1297,10 +1297,11 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
         const recs = await prisma.fileRecord.findMany({ where: { id: { in: finalAttachmentIds }, userId }, select: { name: true, path: true, mimeType: true } });
         for (const r of recs) if (r.path) { try { examFiles.push({ name: r.name, buffer: await fs.readFile(r.path), mime: r.mimeType }); } catch { /* file gone */ } }
       }
-      const examReply = surface === 'form' ? null : await examChat.handle(userId, query || '', examFiles, { onStatus: examStatus, submissionId: surface === 'exam' ? req.body.surfaceSubmissionId : undefined, questionId: surface === 'exam' ? req.body.surfaceQuestionId : undefined, history: parsedHistory });
+      const examReply = surface === 'form' ? null : await examChat.handle(userId, query || '', examFiles, { onStatus: examStatus, submissionId: surface === 'exam' ? req.body.surfaceSubmissionId : undefined, questionId: surface === 'exam' ? req.body.surfaceQuestionId : undefined, history: parsedHistory, onExam: (examId) => openExamStream().send('exam', { examId }) });
       if (examReply) {
         const em = openExamStream();
         if (examStep) em.status(examStep.id, examStep.label, 'done');
+        if (examReply.examId) em.send('exam', { examId: examReply.examId });
         em.send('text', { text: examReply.text });
         for (const a of examReply.attachments) em.send('attachment', { ...a });
         em.done();

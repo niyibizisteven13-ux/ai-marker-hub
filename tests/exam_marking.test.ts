@@ -638,10 +638,15 @@ test('chat: start, progress, explanations, edits and downloads through conversat
   // One message: scheme and scripts in any order. Marking runs in the same turn; the reply carries the red-pen PDFs.
   const schemeTxt = Buffer.from('Marking scheme\n1. (3 marks) M1 subtract 2 from both sides; A1 x = 4 (2 marks)\n2. (2 marks) B1 area 15\nTotal: 5 marks');
   const statuses: string[] = [];
+  const exams: string[] = [];
   const start = await chat.handle(user, 'Mark these papers', [
     { name: 'Mugenzi.pdf', buffer: C002_PDF, mime: 'application/pdf' }, { name: 'marking_scheme.txt', buffer: schemeTxt, mime: 'text/plain' }, { name: 'C001.pdf', buffer: C001_PDF, mime: 'application/pdf' },
-  ], { onStatus: (t) => statuses.push(t) });
+  ], { onStatus: (t) => statuses.push(t), onExam: (id) => exams.push(id) });
   assert.match(start!.text, /\*\*Marking finished\.\*\* 2 scripts marked/);
+  assert.ok(exams.length >= 1 && exams.every((id) => id === start!.examId), 'the chat learns which examination is being marked, to show its live card');
+  const perStudent = statuses.filter((t) => /^Student \d marked: .+, \d+\/5$/.test(t));
+  assert.equal(perStudent.length, 2, `one line per marked student: ${statuses.join(' | ')}`);
+  assert.ok(perStudent.some((t) => /C001, 5\/5$/.test(t)));
   assert.match(start!.text, /\| C002 \(Mugenzi\) \| \d+ \/ 5 \|/, 'a new id for the unnamed file, with its name kept');
   assert.match(start!.text, /\| C001 \| 5 \/ 5 \| 100% \|/);
   assert.deepEqual(start!.attachments.map((a) => a.mime), ['application/pdf', 'application/pdf'], 'each marked script as a PDF');

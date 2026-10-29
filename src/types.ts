@@ -109,6 +109,8 @@ export interface Message {
   attachment?: ChatAttachment;
   attachments?: ChatAttachment[];
   generatedAttachments?: import('./components/types').AttachmentRef[];
+  /** Examination this reply is marking: shows the live marking card. */
+  examId?: string;
   /** Live agent tool steps for the activity line. */
   steps?: import('./components/ActivityLine').Step[];
   isBusy?: boolean;

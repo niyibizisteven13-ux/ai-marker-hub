@@ -73,6 +73,8 @@ const UpgradeModal = React.lazy(() => import('./components/UpgradeModal'));
 const DynamicForm = React.lazy(() => import('./components/DynamicForm'));
 const AdminPage = React.lazy(() => import('./pages/AdminPage'));
 const OutputsLibrary = React.lazy(() => import('./components/OutputsLibrary'));
+const MarkingDrawer = React.lazy(() => import('./components/ChatMarkingCard').then((m) => ({ default: m.MarkingDrawer })));
+const openMarking = (examId: string) => window.dispatchEvent(new CustomEvent('bwenge:open-marking', { detail: { examId } }));
 
 import { Suspense } from 'react';
 const DocumentScannerLazy = React.lazy(() => import('./components/DocumentScanner'));
@@ -927,6 +929,8 @@ export default function App() {
       }, CHAT_TOKEN_TIMEOUT_MS);
     };
 
+    // The examination this reply is marking: the message shows its live marking card.
+    let examId: string | undefined;
     const updateAssistant = (assistantText: string, isStreaming: boolean) => {
       const running = isStreaming ? toolSteps.filter((step) => step.status === 'running') : [];
       const assistantMsg: Message = {
@@ -935,6 +939,7 @@ export default function App() {
         isStreaming,
         isWaiting: !firstTokenReceived && isStreaming,
         ...(generatedAttachments.length ? { generatedAttachments: [...generatedAttachments] } : {}),
+        ...(examId ? { examId } : {}),
         ...(toolSteps.length ? {
           steps: toolSteps.map((step) => (isStreaming || step.status !== 'running' ? step : { ...step, status: 'done' as const })),
           isBusy: running.length > 0,
@@ -1076,6 +1081,12 @@ export default function App() {
             toolSteps = applyToolEvent(toolSteps, event);
             resetIdleTimeout();
             updateAssistant(assistantText, true);
+          } else if (event.type === 'exam' && typeof event.examId === 'string') {
+            const first = examId !== event.examId;
+            examId = event.examId;
+            updateAssistant(assistantText, true);
+            // Large screens open the live marking panel beside the chat, like an artifact.
+            if (first && window.innerWidth >= 1200) openMarking(event.examId);
           } else if (event.type === 'files_stored' && Array.isArray(event.files)) {
             // Remember where the AI stored this message's files, so follow-up questions can use them.
             const key = (name: string) => String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -1125,6 +1136,7 @@ export default function App() {
         isStreaming: false,
         isWaiting: false,
         ...(generatedAttachments.length ? { generatedAttachments: [...generatedAttachments] } : {}),
+        ...(examId ? { examId } : {}),
         ...(toolSteps.length ? { steps: toolSteps.map((step) => (step.status === 'running' ? { ...step, status: 'done' as const } : step)), startedAt, endedAt: Date.now() } : {}),
       }];
       setMessages(finalMessages);
@@ -1266,18 +1278,17 @@ export default function App() {
     setTemporaryChatMode(true);
   };
 
+  // Share the whole conversation, with everything Bwenge made, as one HTML page (opens anywhere, offline).
   const handleShareChat = async () => {
-    const content = messages.map((message) => `${message.sender.toUpperCase()}: ${message.text}`).join('\n\n');
-    if (!content) return;
+    if (!messages.length) return;
+    const title = chatSessions.find((session) => session.id === activeSessionId)?.title || 'Bwenge conversation';
+    showAiStatus('info', 'Preparing the conversation page…');
     try {
-      if (navigator.share) {
-        await navigator.share({ title: 'Bwenge conversation', text: content });
-        return;
-      }
-      await copyToClipboard(content);
-      showAiStatus('info', 'Conversation copied so you can share it');
-    } catch {
-      showAiStatus('warning', 'Sharing was cancelled or unavailable');
+      const { shareConversationHtml } = await import('./lib/conversationHtml');
+      const { shared, skipped } = await shareConversationHtml(messages, title);
+      showAiStatus(skipped.length ? 'warning' : 'info', `${shared ? 'Conversation shared' : 'Conversation saved'} as an HTML page${skipped.length ? `; ${skipped.length} large or expired file(s) are listed by name only` : ', with its files'}`);
+    } catch (e) {
+      if ((e as Error)?.name !== 'AbortError') showAiStatus('warning', 'The conversation page could not be made');
     }
   };
 
@@ -1819,6 +1830,7 @@ export default function App() {
           />
         )}
       </Suspense>
+      {authenticatedUser && <Suspense fallback={null}><MarkingDrawer /></Suspense>}
       {libraryOpen && (
         <Suspense fallback={null}>
           <OutputsLibrary initialTab={libraryTab} onClose={() => setLibraryOpen(false)} onAsk={(m) => { void handleSendMessage(m); }} />

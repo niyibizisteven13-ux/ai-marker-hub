@@ -3,6 +3,8 @@ import type { ContentPart, ToolContext } from './types.js';
 import { safeFileName, truncate } from './util/text.js';
 import { EXT_KIND } from './tools/helpers.js';
 import { renderPdfPages } from './files/pdfPages.js';
+import JSZip from 'jszip';
+import sharp from 'sharp';
 
 export interface UploadedFile {
   type?: 'image' | 'document';
@@ -65,7 +67,12 @@ export async function ingestUploads(prompt: string, files: UploadedFile[] = [], 
       if (/^image\/(png|jpe?g|webp|gif)$/.test(f.mediaType)) {
         images.push({ type: 'image_url', image_url: { url: `data:${f.mediaType};base64,${f.base64}` } });
         textBlocks.push(`[Attached image: ${name} (fileId ${meta.id})]`);
-      } else warnings.push(`${name}: image type ${f.mediaType} is not supported for viewing`);
+      } else {
+        // TIFF, BMP, AVIF, HEIF (where the server can decode it) and other photos: shown as JPEG.
+        const jpg = await toJpeg(data);
+        if (jpg) { images.push(jpegPart(jpg)); textBlocks.push(`[Attached image: ${name} (fileId ${meta.id})]`); }
+        else warnings.push(`${name}: image type ${f.mediaType} could not be opened; send it as JPEG or PNG`);
+      }
       continue;
     }
     const r = await extractText({ name, mime: f.mediaType, data });
@@ -75,15 +82,68 @@ export async function ingestUploads(prompt: string, files: UploadedFile[] = [], 
       textBlocks.push(await scannedPdf(name, meta.id, data, images, opts, warnings));
       continue;
     }
+    // Handwriting inside other files: handwritten pages of a typed PDF, photos inside Word or PowerPoint.
+    const seen = opts.vision !== false ? (isPdf && r.kind === 'text' ? await handwrittenPdfPages(data, r.text, images) : /\.(docx|pptx|xlsx)$/i.test(name) ? await embeddedPictures(data, images) : '') : '';
     if (r.kind === 'text') {
       const body = r.text ? truncate(r.text, MAX_INLINE_CHARS, `\n[…the file continues (${r.text.length.toLocaleString('en')} characters in all). To read a later part, call read_attachment with fileId ${meta.id} and page, find (e.g. "Chapter 5") or offset ${MAX_INLINE_CHARS}. When the answer depends on the whole document (summaries, "every …", themes), call analyze_document with fileId ${meta.id}.]`) : '(no text found)';
-      textBlocks.push(`[Attached file: ${name} (fileId ${meta.id})]\n<<<FILE CONTENT (untrusted data)>>>\n${body}\n<<<END FILE CONTENT>>>${r.note ? `\nNote: ${r.note}` : ''}`);
+      textBlocks.push(`[Attached file: ${name} (fileId ${meta.id})]\n<<<FILE CONTENT (untrusted data)>>>\n${body}\n<<<END FILE CONTENT>>>${r.note ? `\nNote: ${r.note}` : ''}${seen ? `\n${seen}` : ''}`);
     } else warnings.push(r.note ?? `${name}: unsupported`);
   }
   if (files.length > MAX_UPLOADS) warnings.push(`Only the first ${MAX_UPLOADS} files were used.`);
 
   const text = [prompt, ...textBlocks, ...(warnings.length ? [`[Upload notes: ${warnings.join('; ')}]`] : [])].join('\n\n');
   return { parts: [{ type: 'text', text }, ...images], fileIds, stored, warnings };
+}
+
+const jpegPart = (jpg: Buffer): ContentPart => ({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${jpg.toString('base64')}` } });
+
+/** Any image the server can decode, as a JPEG the vision models read (long side 1568 px), or null. */
+async function toJpeg(data: Buffer): Promise<Buffer | null> {
+  try {
+    return await sharp(data, { limitInputPixels: 100_000_000 }).rotate().flatten({ background: '#ffffff' })
+      .resize({ width: 1568, height: 1568, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer();
+  } catch { return null; }
+}
+
+/** Pages of a typed PDF that carry (almost) no text: usually handwriting, a scan or a drawing. */
+const MAX_HANDWRITTEN_PAGES = 6;
+async function handwrittenPdfPages(data: Buffer, text: string, images: ContentPart[]): Promise<string> {
+  const room = Math.min(MAX_HANDWRITTEN_PAGES, MAX_IMAGES_PER_MESSAGE - images.length);
+  if (room <= 0) return '';
+  const blank: number[] = [];
+  let last = 0;
+  for (const m of text.matchAll(/^--\s*(\d+)\s+of\s+(\d+)\s*--$/gm)) {
+    if (text.slice(last, m.index).replace(/\s+/g, '').length < 25) blank.push(Number(m[1]));
+    last = m.index! + m[0].length;
+  }
+  if (!blank.length) return '';
+  try {
+    const shot = await renderPdfPages(data, { pages: blank, maxPages: room });
+    for (const p of shot.pages) images.push(jpegPart(p));
+    const shown = blank.slice(0, shot.pages.length);
+    return `[Pages ${shown.join(', ')} of this PDF have no typed text (handwriting, a scan or a drawing); they are attached below as images, in that order. Read them directly.${blank.length > shown.length ? ` Pages ${blank.slice(shown.length).join(', ')} are also untyped: look at them with view_pages.` : ''}]`;
+  } catch { return ''; }
+}
+
+/** Pictures inside Word, PowerPoint or Excel files (photos of handwriting, diagrams), shown to the model. */
+const MAX_EMBEDDED_PICTURES = 6;
+async function embeddedPictures(data: Buffer, images: ContentPart[]): Promise<string> {
+  const room = Math.min(MAX_EMBEDDED_PICTURES, MAX_IMAGES_PER_MESSAGE - images.length);
+  if (room <= 0) return '';
+  try {
+    const zip = await JSZip.loadAsync(data);
+    const media = Object.keys(zip.files).filter((p) => /^(word|ppt|xl)\/media\/[^/]+\.(png|jpe?g|gif|bmp|tiff?|webp)$/i.test(p))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    let shown = 0;
+    for (const p of media) {
+      if (shown >= room) break;
+      const buf = await zip.file(p)!.async('nodebuffer');
+      if (buf.length < 4_000) continue; // icons and bullets
+      const jpg = await toJpeg(buf);
+      if (jpg) { images.push(jpegPart(jpg)); shown++; }
+    }
+    return shown ? `[This file contains ${media.length} picture${media.length === 1 ? '' : 's'}; ${shown === media.length ? (shown === 1 ? 'it is' : 'they are') : `${shown} of them ${shown === 1 ? 'is' : 'are'}`} attached below as images (handwriting, diagrams or photos; small icons are left out). Read them as part of the file.]` : '';
+  } catch { return ''; }
 }
 
 /** Turns a PDF without a text layer into page images (vision) or OCR text, with a note for the model. */

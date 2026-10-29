@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+import React, { Suspense, lazy, useState } from 'react';
+
+const ChatMarkingCard = lazy(() => import('./ChatMarkingCard'));
 import {
   Check,
   Copy,
@@ -380,6 +382,10 @@ export default function ChatMessage({
             )}
 
             <AttachmentCards attachments={message.generatedAttachments} />
+
+            {typeof message.examId === 'string' && message.sender === 'assistant' && (
+              <Suspense fallback={null}><ChatMarkingCard examId={message.examId} /></Suspense>
+            )}
 
             {isGated && onUpgradeClick && (
               <div className="mt-4">

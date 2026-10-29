@@ -461,7 +461,7 @@ export default function CreateStudio({
                   disabled={!messages.length || !onShare}
                   className="flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-neutral-200 transition-colors hover:bg-white/[.07] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F0A12C]/70 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  <Share2 className="h-4 w-4 text-[#4CE5D6]" /> Share conversation
+                  <Share2 className="h-4 w-4 text-[#4CE5D6]" /> <span className="flex-1">Share conversation<span className="block text-[11px] text-neutral-500">HTML page with the files Bwenge made</span></span>
                 </button>
                 {renameOpen ? (
                   <form

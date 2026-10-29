@@ -32,15 +32,17 @@ function icon(type: string) {
   return <Sparkles size={14} className="text-[#F2B39C]" />;
 }
 
-export default function LiveMarkingPanel({ examId, onScriptMarked, compact = false }: { examId: string; onScriptMarked?: (submissionId: string | undefined) => void; compact?: boolean }) {
+/**
+ * The saved marking events of one examination, live: replays everything so far, then streams new events.
+ * Reconnects after a drop (backing off), asking only for events after the last one seen.
+ */
+export function useExamActivity(examId: string, onEvent?: (ev: ExamEvent) => void) {
   const [events, setEvents] = useState<ExamEvent[]>([]);
   const [connected, setConnected] = useState(false);
-  const [prefs, setPrefs] = useState<Preferences | null>(null);
-  const [notice, setNotice] = useState<{ text: string; upgrade?: string } | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [gap, setGap] = useState(false);
   const lastSeq = useRef(0);
-  const onMarked = useRef(onScriptMarked);
-  onMarked.current = onScriptMarked;
+  const cb = useRef(onEvent);
+  cb.current = onEvent;
 
   // Stream with resume: reconnects after a drop (backing off), asking only for events after the last one seen.
   useEffect(() => {
@@ -70,12 +72,12 @@ export default function LiveMarkingPanel({ examId, onScriptMarked, compact = fal
               const kind = /^event: (.+)$/m.exec(block)?.[1];
               const data = /^data: (.+)$/m.exec(block)?.[1];
               if (!data) continue;
-              if (kind === 'gap') { setNotice({ text: 'Some older activity is no longer kept; showing what is.' }); continue; }
+              if (kind === 'gap') { setGap(true); continue; }
               const ev = JSON.parse(data) as ExamEvent;
               if (ev.seq <= lastSeq.current) continue;
               lastSeq.current = ev.seq;
               setEvents((cur) => [...cur.slice(-299), ev]);
-              if (ev.type === 'script_marked' || ev.type === 'job_completed') onMarked.current?.(ev.submissionId);
+              cb.current?.(ev);
             }
           }
         } catch { /* dropped: retry below */ }
@@ -88,6 +90,20 @@ export default function LiveMarkingPanel({ examId, onScriptMarked, compact = fal
     void run();
     return () => { stopped = true; ctrl?.abort(); };
   }, [examId]);
+
+  return { events, connected, gap };
+}
+
+export default function LiveMarkingPanel({ examId, onScriptMarked, compact = false }: { examId: string; onScriptMarked?: (submissionId: string | undefined) => void; compact?: boolean }) {
+  const [prefs, setPrefs] = useState<Preferences | null>(null);
+  const [notice, setNotice] = useState<{ text: string; upgrade?: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const onMarked = useRef(onScriptMarked);
+  onMarked.current = onScriptMarked;
+  const { events, connected, gap } = useExamActivity(examId, (ev) => {
+    if (ev.type === 'script_marked' || ev.type === 'job_completed') onMarked.current?.(ev.submissionId);
+  });
+  useEffect(() => { if (gap) setNotice({ text: 'Some older activity is no longer kept; showing what is.' }); }, [gap]);
 
   useEffect(() => {
     authFetch(`/api/exams/${examId}/preferences`).then(async (r) => { if (r.ok) setPrefs((await r.json()).preferences); }).catch(() => undefined);
