@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { jsPDF } from 'jspdf';
-import { autoDetectQuad, applyFilter } from './DocumentScanner/imageProcessing';
+import { autoDetectQuad, applyFilter, canvasPageStandsOut } from './DocumentScanner/imageProcessing';
 import { warpQuadToRect, quadWidthHeight, clamp } from './DocumentScanner/geometry';
 import { authFetch } from '../utils/authFetch';
 import { LABEL_PRESETS, DEFAULT_LABEL_PRESET, type LabelPresetKey, type LabelSet } from './scannerLabels';
@@ -148,6 +148,11 @@ interface DocumentScannerProps {
   saveLabel?: string;
   /** Shows "Export PDF" (a browser download). */
   allowExport?: boolean;
+  /**
+   * Quick capture for marking: opens straight on the camera, one tap keeps a page (cropped automatically when the
+   * page stands out from the desk), "Next student" starts the next script and "Done" saves. No AI on this screen.
+   */
+  quick?: boolean;
 }
 
 export default function DocumentScanner({
@@ -161,6 +166,7 @@ export default function DocumentScanner({
   aiTools = true,
   saveLabel = 'Save to workspace',
   allowExport = true,
+  quick = false,
 }: DocumentScannerProps) {
   const [limits, setLimits] = useState<MarkingLimits>(DEFAULT_MARKING_LIMITS);
   useEffect(() => {
@@ -183,7 +189,8 @@ export default function DocumentScanner({
   const [draftReady, setDraftReady] = useState(false);
   const [restored, setRestored] = useState(false);
 
-  const [mode, setMode] = useState<Mode>('home');
+  const [mode, setMode] = useState<Mode>(quick ? 'camera' : 'home');
+  const [flash, setFlash] = useState(0);
   const [showSource, setShowSource] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
   const [processing, setProcessing] = useState<string | null>(null);
@@ -239,8 +246,10 @@ export default function DocumentScanner({
       if (!alive) return;
       if (stored && stored.length > 0) {
         setCandidates(stored);
-        setActiveId(stored[0].id);
+        setActiveId(quick ? stored[stored.length - 1].id : stored[0].id);
         setRestored(stored.some((c) => c.pages.length > 0));
+        // Quick capture with an unfinished scan: show it first (keep going, add it, or discard it), never add it unseen.
+        if (quick && stored.some((c) => c.pages.length > 0)) { setMode('home'); showToast('Your last scan was not finished: continue it, add it to marking, or discard it.'); }
       }
       try { localStorage.removeItem(LEGACY_DRAFT_KEY); } catch { /* storage may be disabled */ }
       setDraftReady(true);
@@ -406,33 +415,40 @@ export default function DocumentScanner({
   };
 
   const handleFilePicked = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const files = [...(e.target.files ?? [])];
     e.target.value = '';
-    if (!file) return;
-    if (!file.type.startsWith('image/')) { showToast('Choose an image file to mark.'); return; }
-    if (file.size > 20 * 1024 * 1024) { showToast('That image is larger than 20 MB. Choose a smaller one.'); return; }
+    // Quick capture keeps every chosen photo as a page of the current student, in order.
+    if (quick) { void files.reduce((chain, f) => chain.then(() => loadPicked(f)), Promise.resolve()); return; }
+    if (files[0]) void loadPicked(files[0]);
+  };
+
+  const loadPicked = (file: File) => new Promise<void>((done) => {
+    if (!file.type.startsWith('image/')) { showToast('Choose an image file to mark.'); done(); return; }
+    if (file.size > 20 * 1024 * 1024) { showToast('That image is larger than 20 MB. Choose a smaller one.'); done(); return; }
     const reader = new FileReader();
-    reader.onerror = () => showToast('Could not read that image. Try another file.');
+    reader.onerror = () => { showToast('Could not read that image. Try another file.'); done(); };
     reader.onload = () => {
-      if (typeof reader.result !== 'string') return;
+      if (typeof reader.result !== 'string') { done(); return; }
       const img = new Image();
       img.onload = () => {
-        if (!img.naturalWidth || !img.naturalHeight) { showToast('That image could not be opened.'); return; }
-        if (img.naturalWidth * img.naturalHeight > MAX_IMAGE_PIXELS) { showToast('That image is too large to process. Choose one under 16 megapixels.'); return; }
+        if (!img.naturalWidth || !img.naturalHeight) { showToast('That image could not be opened.'); done(); return; }
+        // Large phone photos (48 MP and up) are scaled down rather than refused.
+        const scale = Math.min(1, Math.sqrt(MAX_IMAGE_PIXELS / (img.naturalWidth * img.naturalHeight)));
         const raw = document.createElement('canvas');
-        raw.width = img.naturalWidth;
-        raw.height = img.naturalHeight;
+        raw.width = Math.round(img.naturalWidth * scale);
+        raw.height = Math.round(img.naturalHeight * scale);
         const ctx = raw.getContext('2d');
-        if (!ctx) { showToast('Image processing is unavailable in this browser.'); return; }
-        ctx.drawImage(img, 0, 0);
+        if (!ctx) { showToast('Image processing is unavailable in this browser.'); done(); return; }
+        ctx.drawImage(img, 0, 0, raw.width, raw.height);
         sampleRef.current = false;
-        setCaptured(raw, autoDetectQuad(raw));
+        if (quick) quickKeep(raw); else setCaptured(raw, autoDetectQuad(raw));
+        done();
       };
-      img.onerror = () => showToast('Could not decode that image. Try another file.');
+      img.onerror = () => { showToast('Could not decode that image. Try another file.'); done(); };
       img.src = reader.result;
     };
     reader.readAsDataURL(file);
-  };
+  });
 
   const captureCameraPhoto = () => {
     const video = videoRef.current;
@@ -444,6 +460,7 @@ export default function DocumentScanner({
     const ctx = raw.getContext('2d');
     if (!ctx) return;
     ctx.drawImage(video, 0, 0, raw.width, raw.height);
+    if (quick) { quickKeep(raw); return; }
     stopCamera();
     setCaptured(raw, autoDetectQuad(raw));
   };
@@ -614,11 +631,10 @@ export default function DocumentScanner({
     setMode('edit');
   };
 
-  const savePage = () => {
-    const source = capturedRef.current;
-    if (!source) return;
-    if (totalPages >= MAX_PAGES) { showToast(`A batch can contain at most ${MAX_PAGES} pages.`); return; }
-    if ((candidates.find(c => c.id === activeId)?.pages.length || 0) >= limits.maxPagesPerPaper) { showToast(`A paper can contain at most ${limits.maxPagesPerPaper} pages.`); return; }
+  /** Keeps one finished page on the active student's script. Returns false when a limit stops it. */
+  const storePage = (source: HTMLCanvasElement): boolean => {
+    if (totalPages >= MAX_PAGES) { showToast(`A batch can contain at most ${MAX_PAGES} pages.`); return false; }
+    if ((candidates.find(c => c.id === activeId)?.pages.length || 0) >= limits.maxPagesPerPaper) { showToast(`A paper can contain at most ${limits.maxPagesPerPaper} pages.`); return false; }
     const original = document.createElement('canvas');
     const originalScale = Math.min(1, limits.originalMaxSide / Math.max(source.width, source.height));
     original.width = Math.round(source.width * originalScale); original.height = Math.round(source.height * originalScale);
@@ -630,7 +646,7 @@ export default function DocumentScanner({
     out.width = Math.round(source.width * previewScale);
     out.height = Math.round(source.height * previewScale);
     const ctx = out.getContext('2d');
-    if (!ctx) return;
+    if (!ctx) return false;
     ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, out.width, out.height);
     ctx.drawImage(source, 0, 0, out.width, out.height);
     if (filter !== 'color') {
@@ -643,7 +659,7 @@ export default function DocumentScanner({
       if (c.id !== activeId) return c;
       const name = detected && isDefaultName(c.name) ? detected : c.name;
       const page: PageItem = {
-        id: `p-${Date.now()}`,
+        id: `p-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         dataUrl,
         sourceDataUrl,
         filter,
@@ -656,11 +672,53 @@ export default function DocumentScanner({
       };
       return { ...c, name, pages: [...c.pages, page] };
     }));
+    return true;
+  };
+
+  const savePage = () => {
+    const source = capturedRef.current;
+    if (!source || !storePage(source)) return;
     showToast('Page saved');
     setPreviewOcr(null);
     capturedRef.current = null;
     originalRef.current = null;
     setMode('home');
+  };
+
+  /* ── quick capture (marking) ── */
+  /** Crops only when the page clearly stands out from the desk; otherwise keeps the whole photo (nothing cut off). */
+  const quickKeep = (raw: HTMLCanvasElement) => {
+    let page = raw;
+    try {
+      const q = autoDetectQuad(raw);
+      if (canvasPageStandsOut(raw, q)) {
+        let { w, h } = quadWidthHeight(q);
+        const scale = Math.min(1, limits.originalMaxSide / Math.max(w, h), Math.sqrt(MAX_IMAGE_PIXELS / Math.max(1, w * h)));
+        w = Math.max(40, Math.round(w * scale)); h = Math.max(40, Math.round(h * scale));
+        page = warpQuadToRect(raw, q, w, h);
+      }
+    } catch { /* keep the whole photo */ }
+    sampleRef.current = false;
+    if (storePage(page)) {
+      setFlash((n) => n + 1);
+      const n = (candidates.find((c) => c.id === activeId)?.pages.length ?? 0) + 1;
+      showToast(`Page ${n} kept`);
+    }
+  };
+  const nextStudent = () => {
+    if (!candidates.find((c) => c.id === activeId)?.pages.length) { showToast(`Take this ${L.person.toLowerCase()}'s first page, then move on.`); return; }
+    if (candidates.length >= MAX_CANDIDATES) { showToast(`A batch can contain at most ${MAX_CANDIDATES} ${L.people.toLowerCase()}.`); return; }
+    const id = `c-${Date.now()}`;
+    setCandidates((prev) => [...prev, { id, name: `${L.person} ${prev.length + 1}`, pages: [] }]);
+    setActiveId(id);
+    showToast(`${L.person} ${candidates.length + 1}: take the first page`);
+  };
+  /** Takes back the last page (a blurred or wrong shot); on an empty new student, steps back to the previous one. */
+  const undoLast = () => {
+    const i = candidates.findIndex((c) => c.id === activeId);
+    const active = candidates[i];
+    if (active?.pages.length) { removePage(active.id, active.pages.length - 1); showToast('Last page removed'); return; }
+    if (i > 0) { setCandidates((prev) => prev.filter((c) => c.id !== activeId)); setActiveId(candidates[i - 1].id); showToast(`Back to ${candidates[i - 1].name}`); }
   };
 
   /* ── AI ── */
@@ -1074,20 +1132,39 @@ export default function DocumentScanner({
               {!cameraError && <span className="bsc-spinner" />}
               <span>{cameraError || 'Starting the camera…'}</span>
               {cameraError && <button className="bsc-btn bsc-pri" onClick={() => void startCamera(undefined, true)}>Try again</button>}
+              {cameraError && quick && <button className="bsc-btn" onClick={() => galleryInputRef.current?.click()}>Choose photos instead</button>}
             </div>
           )}
           <div className="bsc-guides" aria-hidden="true"><span /><span /><span /><span /></div>
+          {quick && flash > 0 && <div key={flash} className="bsc-flash" aria-hidden="true" />}
           <div className="bsc-cam-top">
-            <button className="bsc-iconbtn" aria-label="Close camera" onClick={() => setMode('home')}><Icon name="close" /></button>
+            <button className="bsc-iconbtn" aria-label={quick ? 'See all pages' : 'Close camera'} onClick={() => setMode('home')}><Icon name="close" /></button>
             <span className="bsc-chip">{activeName} · Page {(candidates.find((c) => c.id === activeId)?.pages.length ?? 0) + 1}</span>
             <button className="bsc-iconbtn" aria-label="Switch camera" onClick={flipCamera}><Icon name="flip" /></button>
           </div>
-          <div className="bsc-hint">Fit the whole page inside the corners</div>
-          <div className="bsc-cam-bottom" style={{ justifyContent: 'space-between', flexWrap: 'nowrap' }}>
-            <button className="bsc-iconbtn bsc-side" aria-label="Choose from gallery" onClick={() => { galleryInputRef.current?.click(); setMode('home'); }}><Icon name="gallery" size={22} /></button>
-            <button className="bsc-shutter" aria-label="Capture page" disabled={!cameraReady} onClick={captureCameraPhoto}><span /></button>
-            <span style={{ width: 56 }} aria-hidden="true" />
-          </div>
+          {quick ? (
+            <>
+              <div className="bsc-quickbar">
+                <button className="bsc-btn bsc-sm" disabled={totalPages === 0} onClick={undoLast}>Undo</button>
+                <span className="bsc-quickcount" aria-live="polite">{totalPages} page{totalPages === 1 ? '' : 's'} · {candidates.filter((c) => c.pages.length).length} {L.people.toLowerCase()}</span>
+                <button className="bsc-btn bsc-sm" onClick={nextStudent}>Next {L.person.toLowerCase()} →</button>
+              </div>
+              <div className="bsc-cam-bottom" style={{ justifyContent: 'space-between', flexWrap: 'nowrap' }}>
+                <button className="bsc-iconbtn bsc-side" aria-label="Choose photos" onClick={() => galleryInputRef.current?.click()}><Icon name="gallery" size={22} /></button>
+                <button className="bsc-shutter" aria-label="Keep this page" disabled={!cameraReady} onClick={captureCameraPhoto}><span /></button>
+                <button className="bsc-btn bsc-pri bsc-done" disabled={savingPages} onClick={() => (totalPages ? void saveToWorkspace() : onClose())}>{savingPages ? '…' : totalPages ? 'Done' : 'Close'}</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="bsc-hint">Fit the whole page inside the corners</div>
+              <div className="bsc-cam-bottom" style={{ justifyContent: 'space-between', flexWrap: 'nowrap' }}>
+                <button className="bsc-iconbtn bsc-side" aria-label="Choose from gallery" onClick={() => { galleryInputRef.current?.click(); setMode('home'); }}><Icon name="gallery" size={22} /></button>
+                <button className="bsc-shutter" aria-label="Capture page" disabled={!cameraReady} onClick={captureCameraPhoto}><span /></button>
+                <span style={{ width: 56 }} aria-hidden="true" />
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -1147,7 +1224,7 @@ export default function DocumentScanner({
         <div className="bsc-loupe" style={{ left: magnifier.x, top: magnifier.y }}><canvas ref={magCanvasRef} width={96} height={96} /></div>
       )}
 
-      <input ref={galleryInputRef} type="file" accept="image/*" onChange={handleFilePicked} style={{ display: 'none' }} />
+      <input ref={galleryInputRef} type="file" accept="image/*" multiple={quick} onChange={handleFilePicked} style={{ display: 'none' }} />
 
       {/* Source sheet */}
       {showSource && (
@@ -1192,7 +1269,7 @@ export default function DocumentScanner({
       {processing && (
         <div className="bsc-veil" role="status"><span className="bsc-spinner" /><span>{processing}</span></div>
       )}
-      {toastMsg && <div className="bsc-toast" role="status">{toastMsg}</div>}
+      {toastMsg && <div className={`bsc-toast${mode === 'camera' ? ' bsc-toast-top' : ''}`} role="status">{toastMsg}</div>}
     </div>
   );
 }

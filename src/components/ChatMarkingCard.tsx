@@ -73,10 +73,10 @@ export default function ChatMarkingCard({ examId }: { examId: string }) {
     <div className="mt-3 overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.02]">
       <div className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-2">
         <span className={`h-2 w-2 rounded-full ${active ? 'animate-pulse bg-emerald-400' : connected ? 'bg-emerald-500/70' : 'bg-neutral-500'}`} aria-hidden />
-        <span className="text-[12.5px] font-semibold text-white">{active ? 'Marking in progress' : ended?.type === 'job_cancelled' ? 'Marking stopped' : marked.length ? 'Marking finished' : 'Marking'}</span>
-        {progress && <span className="text-[11.5px] text-neutral-400">{progress.done} of {progress.total} marked</span>}
+        <span className="whitespace-nowrap text-[12.5px] font-semibold text-white">{active ? 'Marking in progress' : ended?.type === 'job_cancelled' ? 'Marking stopped' : marked.length ? 'Marking finished' : 'Marking'}</span>
+        {progress && <span className="whitespace-nowrap text-[11.5px] text-neutral-400">{progress.done}/{progress.total}<span className="hidden sm:inline"> marked</span></span>}
         <button type="button" onClick={() => openMarking(examId)} className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-[#D97757] px-2.5 py-1 text-[12px] font-semibold text-white hover:bg-[#c96a4c]">
-          <PanelRightOpen size={13} aria-hidden /> Open live marking
+          <PanelRightOpen size={13} aria-hidden /><span className="whitespace-nowrap"><span className="sm:hidden">Red pen</span><span className="hidden sm:inline">Open live marking</span></span>
         </button>
       </div>
       {progress && (
@@ -140,12 +140,12 @@ function RedPenScript({ examId, submissionId, refresh }: { examId: string; submi
   return (
     <section className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-2.5">
       <div className="mb-2 flex items-center gap-2 text-[12px] text-neutral-300">
-        {review
+        <span className="min-w-0 flex-1 truncate">{review
           ? <span className="inline-flex items-center gap-1.5 font-medium text-[#ff8a80]"><span className="h-1.5 w-1.5 rounded-full bg-[#D61C17]" aria-hidden />Red pen · {review.candidate.candidateId}{review.summary ? ` · ${review.summary.total}/${review.summary.maxTotal}` : ''}</span>
-          : <span className="inline-flex items-center gap-1.5 text-neutral-400"><Loader2 size={12} className="animate-spin" aria-hidden />Marking this script…</span>}
-        <span className="ml-auto text-neutral-500">Page {page}{pageCount ? ` of ${pageCount}` : ''}</span>
-        <button type="button" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="rounded border border-white/10 px-2 py-0.5 disabled:opacity-40">Previous</button>
-        <button type="button" disabled={!!pageCount && page >= pageCount} onClick={() => setPage((p) => p + 1)} className="rounded border border-white/10 px-2 py-0.5 disabled:opacity-40">Next</button>
+          : <span className="inline-flex items-center gap-1.5 text-neutral-400"><Loader2 size={12} className="animate-spin" aria-hidden />Marking this script…</span>}</span>
+        <span className="shrink-0 whitespace-nowrap text-neutral-500">{page}{pageCount ? ` / ${pageCount}` : ''}</span>
+        <button type="button" aria-label="Previous page" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="shrink-0 rounded border border-white/10 px-2 py-0.5 disabled:opacity-40">‹</button>
+        <button type="button" aria-label="Next page" disabled={!!pageCount && page >= pageCount} onClick={() => setPage((p) => p + 1)} className="shrink-0 rounded border border-white/10 px-2 py-0.5 disabled:opacity-40">›</button>
       </div>
       {review
         ? <PageView examId={examId} submissionId={submissionId} page={page} aspect={aspect} items={review.layout.items} selected={null} editable={false} onSelect={() => undefined} onMove={() => undefined} />

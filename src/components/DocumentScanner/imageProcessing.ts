@@ -115,3 +115,33 @@ export function applyFilter(imageData: ImageData, mode: 'color' | 'gray' | 'bw')
   }
   return imageData;
 }
+
+/**
+ * Whether an automatic crop is safe: the page must stand out from what surrounds it (a lighter page on a darker
+ * desk). When the page fills the photo, the edge finder can stop on a line of writing instead of the page edge, so
+ * the photo is kept whole: the marker reads it just as well, and no answer is cut off.
+ * Works on luminance means: the photo's outer frame against the inside of the detected page.
+ */
+export function pageStandsOut(lum: (x: number, y: number) => number, w: number, h: number, quad: Record<'tl' | 'tr' | 'br' | 'bl', { x: number; y: number }>) {
+  const left = Math.max(quad.tl.x, quad.bl.x), right = Math.min(quad.tr.x, quad.br.x);
+  const top = Math.max(quad.tl.y, quad.tr.y), bottom = Math.min(quad.bl.y, quad.br.y);
+  if (right - left < w * 0.3 || bottom - top < h * 0.3) return false;
+  const step = Math.max(1, Math.floor(Math.min(w, h) / 120));
+  let inside = 0, nIn = 0, frame = 0, nFrame = 0;
+  const band = Math.max(2, Math.round(Math.min(w, h) * 0.03));
+  for (let y = 0; y < h; y += step) {
+    for (let x = 0; x < w; x += step) {
+      if (x < band || y < band || x >= w - band || y >= h - band) { frame += lum(x, y); nFrame++; }
+      else if (x > left + (right - left) * 0.15 && x < right - (right - left) * 0.15 && y > top + (bottom - top) * 0.15 && y < bottom - (bottom - top) * 0.15) { inside += lum(x, y); nIn++; }
+    }
+  }
+  return nIn > 0 && nFrame > 0 && inside / nIn - frame / nFrame > 30;
+}
+
+/** pageStandsOut on a canvas. */
+export function canvasPageStandsOut(canvas: HTMLCanvasElement, quad: Record<'tl' | 'tr' | 'br' | 'bl', { x: number; y: number }>) {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return false;
+  const { data, width } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  return pageStandsOut((x, y) => { const i = (y * width + x) * 4; return 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]; }, canvas.width, canvas.height, quad);
+}

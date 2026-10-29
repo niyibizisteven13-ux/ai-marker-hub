@@ -652,14 +652,14 @@ export default function CreateStudio({
 
                 <button
                   type="button"
-                  onClick={() => onSendMessage("Auto-grade this student exam paper using the attached rubric and provide detailed feedback.")}
+                  onClick={() => window.dispatchEvent(new Event('bwenge:open-mark'))}
                   className="p-3.5 rounded-2xl border border-white/10 bg-[#30302E]/80 hover:bg-[#30302E] hover:border-amber-500/40 transition-all flex flex-col gap-1.5 shadow-sm group"
                 >
                   <div className="flex items-center gap-2 text-amber-400 font-semibold text-xs">
                     <FileText size={16} /> Mark an exam
                   </div>
                   <p className="text-[11px] text-[#C2C0B6] group-hover:text-[#FAF9F5] leading-relaxed">
-                    Auto-grade student paper with rubric
+                    Scan or add the scripts, watch the red pen
                   </p>
                 </button>
 

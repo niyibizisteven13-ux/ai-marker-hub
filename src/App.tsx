@@ -230,6 +230,12 @@ export default function App() {
   // Camera opened from the Mark page: its pages go back to that page (one folder per student), not to the old hub.
   const [scanForMark, setScanForMark] = useState(false);
   const [markIncoming, setMarkIncoming] = useState<{ id: number; files: File[] } | null>(null);
+  // "Mark an exam" on the home screen (and anything else) opens the Mark page through this event.
+  useEffect(() => {
+    const open = () => setMarkOpen(true);
+    window.addEventListener('bwenge:open-mark', open);
+    return () => window.removeEventListener('bwenge:open-mark', open);
+  }, []);
   const [pendingMark, setPendingMark] = useState<import('./components/MarkPage').MarkRequest | null>(null);
   const [libraryTab, setLibraryTab] = useState<'mine' | 'library'>('mine');
   const [adminOpen, setAdminOpen] = useState<boolean>(() => window.location.pathname === '/admin');
@@ -1726,6 +1732,8 @@ export default function App() {
               ? async (pages) => { const { scansToZip } = await import('./utils/scansToZip'); setMarkIncoming({ id: Date.now(), files: [await scansToZip(pages)] }); }
               : handleSaveScannedPages}
             aiTools={!scanForMark}
+            quick={scanForMark}
+            labels={scanForMark ? 'student' : undefined}
             saveLabel={scanForMark ? 'Add to marking' : undefined}
             activeRubricText={examPaper ? JSON.stringify(examPaper) : ''}
             onGeneratedForm={(form) => {

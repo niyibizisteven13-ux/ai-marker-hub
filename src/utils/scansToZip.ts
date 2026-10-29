@@ -2,7 +2,8 @@ import JSZip from 'jszip';
 
 /**
  * Camera scans → one ZIP for the Mark page: a folder per student, pages in order. The server turns each folder
- * into one script (one PDF per student), so a student's pages are never marked as separate students.
+ * into one script (one PDF per student), so a student's pages are never marked as separate students. The 1800 px page
+ * goes in, not the 4000 px original: the model reads images at about 1568 px, and a class stays a few MB per student.
  * Everything sits under one wrapping folder, which the server strips, so a single student is still one folder.
  */
 export async function scansToZip(pages: Array<{ dataUrl: string; candidateId?: string; studentName?: string }>): Promise<File> {
