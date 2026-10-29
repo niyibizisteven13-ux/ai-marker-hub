@@ -133,6 +133,11 @@ export class AgentRuntime {
             turnUsage = { input: c.input, output: c.output };
           } else if (c.type === 'provider_state') {
             providerState = { provider: c.provider, content: c.content };
+          } else if (c.type === 'server_tool') {
+            // Searches the provider runs itself show in the activity line like our own tools.
+            emit({ type: 'tool_call', data: { id: c.id, name: c.name, input: c.input } });
+          } else if (c.type === 'server_tool_result') {
+            emit({ type: 'tool_result', data: { id: c.id, name: c.name, output: c.ok ? 'done' : 'failed', isError: !c.ok } });
           }
         }
         const tail = filter.flush();

@@ -1,5 +1,6 @@
 import { extractText } from '../files/extract.js';
 import { renderPdfPages } from '../files/pdfPages.js';
+import sharp from 'sharp';
 import type { Tool } from '../types.js';
 import { err, untrusted } from './helpers.js';
 
@@ -146,7 +147,7 @@ const VIEW_MAX_PAGES = 20;
 export const viewPages: Tool = {
   definition: {
     name: 'view_pages',
-    description: `Look at pages of a PDF as images (up to ${VIEW_MAX_PAGES} per call): scanned or handwritten pages, diagrams, tables, figures, or any page of a long scan beyond the ones already shown. The pages are shown to you right after this call.`,
+    description: `Look at pages of a PDF as images (up to ${VIEW_MAX_PAGES} per call): scanned or handwritten pages, diagrams, tables, figures, or any page of a long scan beyond the ones already shown. Works for files the user uploaded and for public library files (their fileId); a library image (a photo of handwriting) is shown whole. The pages are shown to you right after this call.`,
     parameters: { type: 'object', required: ['fileId', 'fromPage'], properties: {
       fileId: { type: 'string' },
       fromPage: { type: 'integer', minimum: 1 },
@@ -155,8 +156,21 @@ export const viewPages: Tool = {
   },
   async execute(input, ctx) {
     try {
-      const { meta, data } = await ctx.files.read(input.fileId, ctx.userId);
-      if (!/pdf/i.test(meta.mime) && !/\.pdf$/i.test(meta.name)) return err(`${meta.name} is not a PDF.`);
+      const own = await ctx.files.read(input.fileId, ctx.userId).catch((e: any) => {
+        if (e?.code === 'forbidden' || e?.code === 'not_found') return null;
+        throw e;
+      });
+      // Not the user's upload: a public library file (checked against the library's access rules).
+      const lib = own ? null : ctx.services.datasets?.open ? await ctx.services.datasets.open(ctx.userId, input.fileId).catch(() => null) : null;
+      if (!own && !lib) return err('Could not show the pages: file not found');
+      const meta = own ? own.meta : { name: lib!.name, mime: lib!.mime };
+      const data = own ? own.data : lib!.data;
+      if (/^image\//i.test(meta.mime) || /\.(png|jpe?g|webp|gif|tiff?|bmp|heic|heif)$/i.test(meta.name)) {
+        const jpg = await sharp(data, { limitInputPixels: 100_000_000 }).rotate().flatten({ background: '#ffffff' }).resize({ width: 1568, height: 1568, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer().catch(() => null);
+        if (!jpg) return err(`${meta.name} could not be opened as an image.`);
+        return { text: `Showing ${meta.name} as an image.`, images: [{ mime: 'image/jpeg', base64: jpg.toString('base64'), label: meta.name }] };
+      }
+      if (!/pdf/i.test(meta.mime) && !/\.pdf$/i.test(meta.name)) return err(`${meta.name} is not a PDF or an image.`);
       const from = Math.max(1, Number(input.fromPage) || 1);
       const to = Math.max(from, Math.min(Number(input.toPage) || from, from + VIEW_MAX_PAGES - 1));
       const shot = await renderPdfPages(data, { fromPage: from, maxPages: to - from + 1 });

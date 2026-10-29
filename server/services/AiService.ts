@@ -8,6 +8,7 @@ import { looksMathematical, mathStyle } from './prompts/mathStyle.js';
 import { MemoryService } from './MemoryService.js';
 import { toKnowledgePassage } from './knowledge/citations.js';
 import { asksAboutDatasets } from './knowledge/published.js';
+import { needsResearch } from './ai/research.js';
 import { recordUsage } from './billing/usage.js';
 import { retrieveKnowledgeChunks } from './KnowledgeRetrievalService.js';
 import { ExecutionSandbox } from './ExecutionSandbox.js';
@@ -181,9 +182,11 @@ export const taskRouter = new TaskRouter(
 const claudeAgent = loadClaudeAgentConfig();
 logger.info('[AI routing] agent provider', { provider: claudeAgent.config ? 'anthropic' : 'gonka', model: claudeAgent.config?.model, reason: claudeAgent.reason });
 const gonkaStandardModel = loadModelPolicies(process.env, GONKA_MODELS.DEFAULT).STANDARD.model;
+/** Claude researches the web itself on agent turns (CLAUDE_WEB_SEARCH=false turns it off). */
+const claudeWebSearch = process.env.CLAUDE_WEB_SEARCH === 'false' ? false as const : { maxUses: Number(process.env.CLAUDE_WEB_SEARCH_MAX_USES) > 0 ? Number(process.env.CLAUDE_WEB_SEARCH_MAX_USES) : 5 };
 export const claudeAdapter = claudeAgent.config
   ? new ReliableProviderAdapter({
-    primary: new AnthropicAdapter({ apiKey: claudeAgent.config.apiKey, name: 'Claude', effort: claudeAgent.config.effort, requestTimeoutMs: envMs('CLAUDE_REQUEST_TIMEOUT_MS', 900_000) }),
+    primary: new AnthropicAdapter({ apiKey: claudeAgent.config.apiKey, name: 'Claude', effort: claudeAgent.config.effort, requestTimeoutMs: envMs('CLAUDE_REQUEST_TIMEOUT_MS', 900_000), webTools: claudeWebSearch }),
     ...reliability,
     fallbackAdapter: claudeAgent.config.fallbackToGonka ? gonkaAdapter : undefined,
     fallbackModel: claudeAgent.config.fallbackToGonka ? gonkaStandardModel : undefined,
@@ -263,6 +266,7 @@ export const bwengeAgent = createAiAgent({
   maxTokens: 8192,
   promptVersion: 'bwenge-general-v1',
   traceHashSecret: process.env.TRACE_HASH_SECRET || fileStoreSecret,
+  webResearch: (model) => !!claudeWebSearch && !!claudeAgent.config && model === claudeAgent.config.model,
   // Scanned PDFs on turns whose model cannot see images (Tesseract, loaded only when needed).
   ocr: async (png) => (await import('./documents/ocr.js')).tesseractOcr(png),
   writeTrace: async (trace) => {
@@ -331,6 +335,12 @@ export const bwengeAgent = createAiAgent({
       browse: async (userId, id, opts) => (await import('./educationRuntime.js')).knowledgeService.assistantBrowse(userId, id, opts),
       read: async (userId, id, opts) => (await import('./educationRuntime.js')).knowledgeService.assistantRead(userId, id, opts) as any,
       fullText: async (userId, id) => (await import('./educationRuntime.js')).knowledgeService.assistantFullText(userId, id),
+      open: async (userId, id) => {
+        const { file, stream } = await (await import('./educationRuntime.js')).knowledgeService.openForAnalysis(userId, id);
+        const chunks: Buffer[] = [];
+        for await (const c of stream as AsyncIterable<Buffer>) chunks.push(Buffer.from(c));
+        return { name: file.name, mime: file.mimeType, data: Buffer.concat(chunks) };
+      },
     },
     // Lazy import: educationRuntime imports this module.
     outputs: {
@@ -882,7 +892,8 @@ export class AiService {
       ? planOutput({ message: userText, attachments: (options.files ?? []).map((f) => ({ name: '', mime: f.mediaType })), hasDataset: (options.files ?? []).some((f) => /csv|spreadsheet|excel|json/i.test(f.mediaType)) || /\.(csv|xlsx|xls|tsv)\b/i.test(userText) })
       : null;
     // Questions the curated datasets may answer also need the tools (search, browse, read, analyse).
-    const dataTurn = !options.extractSchema && await asksAboutDatasets(userText, options.userId).catch(() => false);
+    // Library questions and research questions (current facts, "find sources") need the tools and the web.
+    const dataTurn = !options.extractSchema && (needsResearch(userText) || await asksAboutDatasets(userText, options.userId).catch(() => false));
     const toolTurn = !!plan && (plan.artifact || plan.needsComputation) || dataTurn;
     // Photos and PDFs need a model that can see them (handwriting, scans, diagrams).
     const visualUpload = (options.files ?? []).some((f) => f.type === 'image' || /^image\/|application\/pdf/.test(f.mediaType));

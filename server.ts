@@ -30,6 +30,7 @@ import { ConfidenceService } from './server/services/ConfidenceService.js';
 import { upload, batchUpload, chatFileUpload, CHAT_MAX_FILE_BYTES } from './server/middleware/upload.js';
 import { isBase64 } from './server/utils/base64.js';
 import { fitHistory, sanitizeHistory } from './server/services/ai/chatHistory.js';
+import { needsResearch } from './server/services/ai/research.js';
 import { ingestDocument } from './server/services/DocumentIngestionService.js';
 import { classifyIntent, isSmallTalkMessage } from './server/services/intentRouter.js';
 import { generalTools } from './server/services/generalTools.js';
@@ -1326,7 +1327,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
     intent, service, isSmallTalk, requestedProvider: cleanProvider, hasClaudeKey: hasClaude, aiProvider: process.env.AI_PROVIDER,
     agentAvailable: agentTarget().provider === 'anthropic' || Boolean(process.env.GONKA_API_KEY), plan: turnPlan,
     hasVisualFiles: serverVisualFiles.length > 0 || contextFiles.length > 0 || Boolean(req.file && /^image\/|application\/pdf/.test(req.file.mimetype)),
-    asksAboutDatasets: intent === 'general_assist' && !isSmallTalk && await asksAboutDatasets(query || '', userId).catch(() => false),
+    asksAboutDatasets: intent === 'general_assist' && !isSmallTalk && (needsResearch(query || '') || await asksAboutDatasets(query || '', userId).catch(() => false)),
   })) {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');

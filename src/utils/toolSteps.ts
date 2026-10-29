@@ -30,7 +30,8 @@ export function describeToolCall(name: string, input: any): string {
     case 'generate_image': return 'Generating image';
     case 'search_knowledge': return typeof input?.query === 'string' ? `Searching the knowledge base for “${clip(input.query, 40)}”` : 'Searching the knowledge base';
     case 'web_search': return typeof input?.query === 'string' ? `Searching the web for “${clip(input.query, 40)}”` : 'Searching the web';
-    case 'fetch_url': return 'Reading a web page';
+    case 'fetch_url':
+    case 'web_fetch': return typeof input?.url === 'string' ? `Reading ${clip(input.url.replace(/^https?:\/\/(www\.)?/, ''), 40)}` : 'Reading a web page';
     case 'read_attachment': return 'Reading your file';
     case 'run_python': return 'Running Python';
     case 'create_form': return 'Designing the form';
