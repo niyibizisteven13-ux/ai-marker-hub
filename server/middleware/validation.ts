@@ -91,6 +91,14 @@ export const chatSchema = z.object({
   surfaceId: z.string().max(100).optional(),
   surfaceSubmissionId: z.string().uuid().optional(),
   surfaceQuestionId: z.string().max(100).optional(),
+  // A request from the Mark page: each file's role, the teacher's instructions and settings (no guessing from names).
+  marking: z.object({
+    roles: z.record(z.string().max(500), z.enum(['scheme', 'paper', 'scripts'])).optional(),
+    instructions: z.string().max(2000).optional(),
+    credit: z.enum(['partial', 'strict']).optional(),
+    corrections: z.boolean().optional(),
+    feedback: z.enum(['brief', 'detailed']).optional(),
+  }).strict().optional(),
 }).strict();
 
 export const validate = (schema: z.ZodType) => (req: Request, res: Response, next: NextFunction) => {

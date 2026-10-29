@@ -224,7 +224,7 @@ export interface MarkCandidateInput {
   /** Called only after the question proposal has passed deterministic validation. */
   onQuestion?: (questionId: string, mark: AiQuestionMark) => Promise<void>;
   /** The teacher's marking preferences for this exam. */
-  preferences?: { credit: 'partial' | 'strict'; feedback: 'brief' | 'detailed' };
+  preferences?: { credit: 'partial' | 'strict'; feedback: 'brief' | 'detailed'; instructions?: string };
 }
 
 /** Teacher preferences as instructions; they never override the scheme's own rules. */
@@ -237,7 +237,10 @@ export function preferenceLines(p?: MarkCandidateInput['preferences']): string {
     p.feedback === 'detailed'
       ? 'TEACHER PREFERENCE - detailed feedback: feedback may be up to four sentences explaining what was right, what was wrong and how to improve.'
       : '',
-    'These preferences never override the official marking scheme: where the scheme is explicit, follow the scheme.',
+    p.instructions?.trim()
+      ? `TEACHER'S MARKING INSTRUCTIONS for this examination (apply them to every answer; where they accept an alternative answer, unit or method, award the marks as if the scheme listed it):\n<<<\n${p.instructions.trim().slice(0, 2000)}\n>>>`
+      : '',
+    'These preferences never override the official marking scheme: where the scheme is explicit, follow the scheme, except where the teacher\'s instructions above explicitly accept something more.',
   ].filter(Boolean).join('\n');
 }
 

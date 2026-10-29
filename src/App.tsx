@@ -73,6 +73,7 @@ const UpgradeModal = React.lazy(() => import('./components/UpgradeModal'));
 const DynamicForm = React.lazy(() => import('./components/DynamicForm'));
 const AdminPage = React.lazy(() => import('./pages/AdminPage'));
 const OutputsLibrary = React.lazy(() => import('./components/OutputsLibrary'));
+const MarkPage = React.lazy(() => import('./components/MarkPage'));
 const MarkingDrawer = React.lazy(() => import('./components/ChatMarkingCard').then((m) => ({ default: m.MarkingDrawer })));
 const openMarking = (examId: string) => window.dispatchEvent(new CustomEvent('bwenge:open-marking', { detail: { examId } }));
 
@@ -224,6 +225,12 @@ export default function App() {
   const [upgradePageOpen, setUpgradePageOpen] = useState<boolean>(() => window.location.pathname === '/upgrade');
   const [settingsOpen, setSettingsOpen] = useState<boolean>(() => window.location.pathname === '/settings');
   const [libraryOpen, setLibraryOpen] = useState<boolean>(false);
+  // Mark page, and a marking request waiting for the fresh chat it is sent in.
+  const [markOpen, setMarkOpen] = useState<boolean>(() => window.location.pathname === '/mark');
+  // Camera opened from the Mark page: its pages go back to that page (one folder per student), not to the old hub.
+  const [scanForMark, setScanForMark] = useState(false);
+  const [markIncoming, setMarkIncoming] = useState<{ id: number; files: File[] } | null>(null);
+  const [pendingMark, setPendingMark] = useState<import('./components/MarkPage').MarkRequest | null>(null);
   const [libraryTab, setLibraryTab] = useState<'mine' | 'library'>('mine');
   const [adminOpen, setAdminOpen] = useState<boolean>(() => window.location.pathname === '/admin');
   const [selectedProvider, setSelectedProvider] = useState<string>('gonkarouter');
@@ -545,6 +552,14 @@ export default function App() {
     setTemporaryChatMode(false);
     handleClearStagedAttachments();
     setActiveTab('documents');
+  };
+
+  // Mark page → a new chat that marks live: the files, their roles and the teacher's instructions.
+  const startMarking = (req: import('./components/MarkPage').MarkRequest) => {
+    setMarkOpen(false);
+    if (window.location.pathname === '/mark') window.history.replaceState({}, '', '/');
+    handleNewChat();
+    setPendingMark(req);
   };
 
   const handleLoadChatSession = (sessionId: string) => {
@@ -879,7 +894,7 @@ export default function App() {
   const handleSendMessage = async (
     text: string,
     attachment?: File | ChatAttachment | Array<File | ChatAttachment>,
-    options?: { answerLanguage?: string; learning?: import('./lib/learning/presets').LearningSettings },
+    options?: { answerLanguage?: string; learning?: import('./lib/learning/presets').LearningSettings; marking?: import('./components/MarkPage').MarkRequest['marking'] },
   ) => {
     if ((!text.trim() && !attachment) || isAiLoading) return;
 
@@ -1041,6 +1056,7 @@ export default function App() {
           contextFiles: contextFiles.length ? contextFiles : undefined,
           answerLanguage: options?.answerLanguage,
           learning: options?.learning && options.learning.mode !== 'normal' ? options.learning : undefined,
+          marking: options?.marking,
         }),
         signal: controller.signal,
       });
@@ -1277,6 +1293,14 @@ export default function App() {
     }
     setTemporaryChatMode(true);
   };
+
+  useEffect(() => {
+    if (!pendingMark || messages.length > 0 || isAiLoading) return;
+    const req = pendingMark;
+    setPendingMark(null);
+    void handleSendMessage(req.text, req.attachments, { marking: req.marking });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingMark, messages.length, isAiLoading]);
 
   // Share the whole conversation, with everything Bwenge made, as one HTML page (opens anywhere, offline).
   const handleShareChat = async () => {
@@ -1695,10 +1719,14 @@ export default function App() {
   return (
     <div className="dark h-[var(--app-h,100dvh)] w-full min-w-0 bg-[#262624] text-[#FAF9F5] font-sans antialiased transition-colors duration-200 overflow-hidden flex flex-col">
       {AI_SCAN_ENABLED && scannerOpen && (
-        <div className="fixed inset-0 z-[70] bg-[#0f1013] flex flex-col w-full h-[var(--app-h,100dvh)] overflow-hidden animate-in fade-in duration-200">
+        <div className={`fixed inset-0 ${scanForMark ? 'z-[75]' : 'z-[70]'} bg-[#0f1013] flex flex-col w-full h-[var(--app-h,100dvh)] overflow-hidden animate-in fade-in duration-200`}>
           <DocumentScanner
-            onClose={() => setScannerOpen(false)}
-            onSavePages={handleSaveScannedPages}
+            onClose={() => { setScannerOpen(false); setScanForMark(false); }}
+            onSavePages={scanForMark
+              ? async (pages) => { const { scansToZip } = await import('./utils/scansToZip'); setMarkIncoming({ id: Date.now(), files: [await scansToZip(pages)] }); }
+              : handleSaveScannedPages}
+            aiTools={!scanForMark}
+            saveLabel={scanForMark ? 'Add to marking' : undefined}
             activeRubricText={examPaper ? JSON.stringify(examPaper) : ''}
             onGeneratedForm={(form) => {
               setScannerGeneratedForm(form);
@@ -1719,6 +1747,7 @@ export default function App() {
           setActiveTab={setActiveTab}
           onOpenLibrary={() => { setLibraryTab('mine'); setLibraryOpen(true); }}
           onOpenPublicLibrary={() => { setLibraryTab('library'); setLibraryOpen(true); }}
+          onOpenMark={() => setMarkOpen(true)}
           collapsed={sidebarCollapsed}
           setCollapsed={setSidebarCollapsed}
           user={authenticatedUser}
@@ -1831,6 +1860,17 @@ export default function App() {
         )}
       </Suspense>
       {authenticatedUser && <Suspense fallback={null}><MarkingDrawer /></Suspense>}
+      {authenticatedUser && markOpen && (
+        <Suspense fallback={null}>
+          <MarkPage
+            onClose={() => { setMarkOpen(false); if (window.location.pathname === '/mark') window.history.replaceState({}, '', '/'); }}
+            onMark={startMarking}
+            onScan={openScanner ? () => { setScanForMark(true); openScanner(); } : undefined}
+            incoming={markIncoming}
+            covered={scanForMark && scannerOpen}
+          />
+        </Suspense>
+      )}
       {libraryOpen && (
         <Suspense fallback={null}>
           <OutputsLibrary initialTab={libraryTab} onClose={() => setLibraryOpen(false)} onAsk={(m) => { void handleSendMessage(m); }} />

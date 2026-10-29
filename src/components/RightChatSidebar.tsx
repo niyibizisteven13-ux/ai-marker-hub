@@ -318,7 +318,7 @@ export default function RightChatSidebar({
                   <div className="text-xs font-medium text-slate-200 group-hover:text-white">
                     Launch BwengeScan
                   </div>
-                  <div className="text-[11px] text-slate-500">Scan handwritten work live</div>
+                  <div className="text-[11px] text-slate-500">Mark handwritten work live</div>
                 </div>
               </button>}
             </div>
