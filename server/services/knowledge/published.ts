@@ -40,17 +40,35 @@ async function publishedNames(): Promise<string[]> {
 }
 
 /** Test hook. */
-export function resetPublishedCache() { namesCache = null; }
+export function resetPublishedCache() { namesCache = null; answerCache.clear(); }
 
 /**
  * True when published datasets exist and the message looks like a question they could answer, so the turn
  * runs on the tool-enabled agent (search, browse, read and analyse the datasets) instead of plain chat.
  */
-export async function asksAboutDatasets(message: string): Promise<boolean> {
+export async function asksAboutDatasets(message: string, userId?: string): Promise<boolean> {
   const text = message.trim();
   if (!text) return false;
+  // A question asked from the Public library panel names the folder or file it is about.
+  if (/\[Public library: /.test(text)) return true;
   const names = await publishedNames().catch(() => [] as string[]);
   if (!names.length) return false;
   const lower = text.toLowerCase();
-  return DATA_WORDS.test(text) || names.some((n) => lower.includes(n));
+  if (DATA_WORDS.test(text) || names.some((n) => lower.includes(n))) return true;
+  // Any other question the library can answer (a topic in a published book or report): ask the index.
+  return userId ? libraryHasAnswer(text, userId) : false;
+}
+
+const answerCache = new Map<string, { at: number; hit: boolean }>();
+
+/** True when the knowledge index holds passages matching the question (cached briefly per user and text). */
+async function libraryHasAnswer(text: string, userId: string): Promise<boolean> {
+  const key = `${userId}\u0000${text.slice(0, 500)}`;
+  const cached = answerCache.get(key);
+  if (cached && Date.now() - cached.at < 30_000) return cached.hit;
+  const { retrieveKnowledgeChunks } = await import('../KnowledgeRetrievalService.js');
+  const hit = (await retrieveKnowledgeChunks(text.slice(0, 500), { userId, limit: 1 }).catch(() => [])).length > 0;
+  if (answerCache.size > 500) answerCache.clear();
+  answerCache.set(key, { at: Date.now(), hit });
+  return hit;
 }

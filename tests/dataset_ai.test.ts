@@ -177,7 +177,7 @@ test('agent: a normal user\'s data question runs on Claude Haiku and lists → b
   assert.equal(requests[0].model, 'claude-haiku-5-5');
   const names = requests[0].tools.map((t: any) => t.name);
   for (const n of ['list_datasets', 'browse_dataset', 'read_dataset_file', 'search_knowledge', 'analyze_data']) assert.ok(names.includes(n), `${n} offered`);
-  assert.match(requests[0].system.map?.((b: any) => b.text).join('') ?? String(requests[0].system), /Curated datasets/);
+  assert.match(requests[0].system.map?.((b: any) => b.text).join('') ?? String(requests[0].system), /Public library/);
 
   const results = requests.slice(1).map((r) => toolText(r.messages.at(-1).content.find((b: any) => b.type === 'tool_result')));
   assert.match(results[0], /Agriculture Survey \(datasetId .*2 files/);
@@ -187,6 +187,34 @@ test('agent: a normal user\'s data question runs on Claude Haiku and lists → b
   assert.match(results[3], /3\.2/, 'the analysis engine computed the Gasabo mean (3.0 and 3.4)');
   assert.match(results[3], /2\.3/, 'Huye mean (2.0 and 2.6)');
   assert.match(out.content[0].text, /Gasabo and Huye compared/);
+});
+
+test('public library: questions from the library panel and topic questions the library can answer take the tool path', async () => {
+  resetPublishedCache();
+  assert.equal(await asksAboutDatasets('Summarise this file\n\n[Public library: file "Agriculture/2024/summary.pdf" in "Agriculture Survey" (fileId x)]'), true);
+  // No data words and no dataset name: only the index knows the library covers it.
+  const topic = `What helped the maize harvest in Season A ${tag}?`;
+  assert.equal(await asksAboutDatasets(topic), false, 'without the user the words alone do not decide');
+  assert.equal(await asksAboutDatasets(topic, user), true, 'the library holds a matching passage');
+  assert.equal(await asksAboutDatasets('hello, how are you?', user), false);
+});
+
+test('public library: a whole library file is readable for whole-document analysis, with page marks', async () => {
+  const doc = await db.repositoryFile.findFirst({ where: { repositoryId: repo.id, path: 'Agriculture/2024/summary.pdf' } });
+  const full = await knowledgeService.assistantFullText(user, doc.id);
+  assert.equal(full.repository, 'Agriculture Survey');
+  assert.match(full.text, /irrigation[\s\S]*-- 1 of 1 --/);
+  await assert.rejects(knowledgeService.assistantFullText(user, salaries.id), /not available to the assistant/);
+  const { analyzeDocument } = await import('../server/services/ai/tools/documentTools.js');
+  const seen: string[] = [];
+  const out = await analyzeDocument.execute({ fileId: doc.id, task: 'What improved the harvest?' }, {
+    userId: user, files: { read: async () => { const e: any = new Error('nf'); e.code = 'not_found'; throw e; } },
+    services: { llm: { complete: async (r: any) => { seen.push(r.prompt); return 'Irrigation improved the maize harvest in Gasabo (p. 1).'; } }, datasets: { fullText: (u: string, id: string) => knowledgeService.assistantFullText(u, id) } },
+  } as any);
+  assert.ok(!out.isError, out.text);
+  assert.match(out.text, /Agriculture Survey\/Agriculture\/2024\/summary\.pdf/);
+  assert.match(out.text, /Irrigation improved .*\(p\. 1\)/);
+  assert.match(seen[0], /\[Page 1\]/);
 });
 
 test('switching the dataset off hides it from other users\' assistants; the owner keeps access', async () => {

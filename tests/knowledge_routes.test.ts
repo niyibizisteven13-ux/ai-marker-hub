@@ -37,10 +37,17 @@ async function waitIndexed(repoId: string) {
 }
 
 test('knowledge API: folder upload, browse, download safely, scope every request to its owner', async () => {
-  const created = await fetch(`${base}/api/admin/knowledge/repositories`, json(owner, 'POST', { name: 'Route Repo', description: 'synthetic' }));
+  const created = await fetch(`${base}/api/admin/knowledge/repositories`, json(owner, 'POST', { name: 'Route Repo', description: 'synthetic', settings: { assistant: false } }));
   assert.equal(created.status, 201);
   const repo = (await created.json()).data;
   assert.ok(repo.knowledgeBaseId);
+  assert.equal(repo.settings.assistant, false, 'an admin can keep a dataset private');
+  const pub = (await (await fetch(`${base}/api/admin/knowledge/repositories`, json(owner, 'POST', { name: 'Library Repo' }))).json()).data;
+  assert.equal(pub.settings.assistant, true, 'admin datasets join the public library by default');
+  const shelf = (await (await fetch(`${base}/api/knowledge/library`, as(other))).json()).data;
+  assert.ok(shelf.some((d: any) => d.id === pub.id) && !shelf.some((d: any) => d.id === repo.id), 'other users see the public dataset, not the private one');
+  assert.equal((await fetch(`${base}/api/knowledge/library/${repo.id}`, as(other))).status, 404);
+  assert.equal((await (await fetch(`${base}/api/knowledge/library/${pub.id}?path=`, as(other))).json()).data.repository.name, 'Library Repo');
   assert.equal((await fetch(`${base}/api/admin/knowledge/repositories`, json(owner, 'POST', { name: 'x', extra: true }))).status, 400, 'unknown fields rejected');
 
   // Folder upload as a browser sends it: relative paths (webkitRelativePath) in a parallel JSON field.

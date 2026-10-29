@@ -2,13 +2,15 @@ import { SandboxFrame } from './SandboxFrame';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, BarChart3, Check, Copy, Download, FileSpreadsheet, FileText, FileType2, FolderOpen, GitBranch, LayoutDashboard, Link2, Link2Off,
-  Loader2, Presentation, RefreshCw, Search, Share2, Sigma, Trash2, Workflow, X,
+  Library, Loader2, Presentation, RefreshCw, Search, Share2, Sigma, Trash2, Workflow, X,
 } from 'lucide-react';
 import { outputsApi, type Artifact } from '../api/outputs';
+import PublicLibrary from './PublicLibrary';
 
 /**
  * "My files": everything the AI produced for this user (charts, workbooks, reports, dashboards, analyses),
  * stored by the output engine with revisions. Open, download, share by link, retry or delete.
+ * The "Public library" tab shows the folders and files admins publish for everyone, and asks the chat about them.
  */
 
 const FILTERS: Array<{ id: string; label: string; match: (a: Artifact) => boolean }> = [
@@ -39,7 +41,8 @@ const when = (s: string) => {
   return new Date(s).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 };
 
-export default function OutputsLibrary({ onClose }: { onClose: () => void }) {
+export default function OutputsLibrary({ onClose, onAsk, initialTab = 'mine' }: { onClose: () => void; onAsk?: (message: string) => void; initialTab?: 'mine' | 'library' }) {
+  const [tab, setTab] = useState<'mine' | 'library'>(initialTab);
   const [items, setItems] = useState<Artifact[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState('all');
@@ -78,15 +81,25 @@ export default function OutputsLibrary({ onClose }: { onClose: () => void }) {
     <div className="fixed inset-0 z-[90] flex justify-end bg-black/50 backdrop-blur-[2px]" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <aside role="dialog" aria-modal="true" aria-label="My files" className="flex h-full w-full flex-col border-l border-stone-800 bg-[#1F1E1C] text-stone-100 shadow-2xl sm:w-[min(760px,94vw)] animate-[slideIn_.22s_ease-out]">
         <header className="flex items-center gap-3 border-b border-stone-800 px-4 py-4 sm:px-6">
-          <div className="rounded-xl bg-amber-500/10 p-2.5 text-amber-400 ring-1 ring-amber-500/20"><FolderOpen className="h-5 w-5" aria-hidden="true" /></div>
+          <div className="rounded-xl bg-amber-500/10 p-2.5 text-amber-400 ring-1 ring-amber-500/20">{tab === 'library' ? <Library className="h-5 w-5" aria-hidden="true" /> : <FolderOpen className="h-5 w-5" aria-hidden="true" />}</div>
           <div className="min-w-0 flex-1">
-            <h2 className="text-lg font-semibold tracking-tight">My files</h2>
-            <p className="text-xs text-stone-400">Charts, workbooks, reports and analyses Bwenge created for you</p>
+            <h2 className="text-lg font-semibold tracking-tight">{tab === 'library' ? 'Public library' : 'My files'}</h2>
+            <p className="text-xs text-stone-400">{tab === 'library' ? 'Folders and files shared with everyone. Open them or ask Bwenge about them.' : 'Charts, workbooks, reports and analyses Bwenge created for you'}</p>
           </div>
-          <button type="button" onClick={() => void load()} aria-label="Refresh" className="rounded-lg p-2 text-stone-400 hover:bg-stone-800 hover:text-white"><RefreshCw className="h-4 w-4" aria-hidden="true" /></button>
+          {tab === 'mine' && <button type="button" onClick={() => void load()} aria-label="Refresh" className="rounded-lg p-2 text-stone-400 hover:bg-stone-800 hover:text-white"><RefreshCw className="h-4 w-4" aria-hidden="true" /></button>}
           <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-2 text-stone-400 hover:bg-stone-800 hover:text-white"><X className="h-5 w-5" aria-hidden="true" /></button>
         </header>
 
+        <div className="flex gap-1 border-b border-stone-800 px-4 pt-2 sm:px-6" role="tablist" aria-label="Files">
+          {([['mine', 'My files', FolderOpen], ['library', 'Public library', Library]] as const).map(([id, label, Icon]) => (
+            <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)}
+              className={`-mb-px inline-flex items-center gap-1.5 border-b-2 px-3 pb-2.5 pt-1.5 text-sm font-medium transition ${tab === id ? 'border-amber-400 text-stone-100' : 'border-transparent text-stone-400 hover:text-stone-200'}`}>
+              <Icon className="h-4 w-4" aria-hidden="true" />{label}
+            </button>
+          ))}
+        </div>
+
+        {tab === 'library' ? <PublicLibrary onAsk={(m) => { onAsk?.(m); onClose(); }} /> : <>
         <div className="space-y-3 border-b border-stone-800 px-4 py-3 sm:px-6">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-500" aria-hidden="true" />
@@ -139,6 +152,7 @@ export default function OutputsLibrary({ onClose }: { onClose: () => void }) {
             </ul>
           )}
         </div>
+        </>}
         {toast && <div role="status" className="pointer-events-none absolute bottom-6 left-1/2 -translate-x-1/2 rounded-full bg-stone-100 px-4 py-2 text-sm font-medium text-stone-900 shadow-xl">{toast}</div>}
       </aside>
       {open && <ArtifactViewer artifact={open} revisions={revisionsOf(open)} onSelect={setOpen} onClose={() => setOpen(null)} onChanged={load} notify={notify} />}

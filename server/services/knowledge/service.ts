@@ -1119,6 +1119,18 @@ export function createKnowledgeService(deps: KnowledgeDeps) {
     };
   }
 
+  /**
+   * The whole text of a library file for whole-document analysis, with "-- N of M --" after each page (the
+   * same page marks as chat uploads), so a long book can be read section by section with page citations.
+   */
+  async function assistantFullText(userId: string, fileId: string) {
+    const { file, repo } = await assistantFile(userId, fileId);
+    const extracted = await withTemp(file, (p) => extractForIndex(p, file.name, { ocr: settingsOf(repo).ocr ? deps.ocr : undefined, maxChars: 20_000_000 }));
+    const pages = extracted.pages || 0;
+    const text = extracted.segments.map((seg) => seg.page && pages ? `${seg.text}\n-- ${seg.page} of ${pages} --` : seg.slide ? `--- Slide ${seg.slide} ---\n${seg.text}` : seg.text).join('\n\n');
+    return { name: file.name, path: file.path, repository: repo.name, text };
+  }
+
   /** Raw bytes for the analysis engine: owners as before, other users only for published, AI-enabled files. */
   async function openForAnalysis(userId: string, fileId: string) {
     try {
@@ -1132,7 +1144,7 @@ export function createKnowledgeService(deps: KnowledgeDeps) {
   }
 
   return {
-    assistantCatalog, assistantBrowse, assistantRead, openForAnalysis,
+    assistantCatalog, assistantBrowse, assistantRead, assistantFullText, openForAnalysis,
     createRepository, listRepositories, updateRepository, deleteRepository, repoFor, statistics,
     createDirectory, updateDirectory, deleteDirectory, tree, contents,
     ingest, getFile, updateFile, copyFile, deleteFile, bulk, openDownload, preview, renderImage, extractArchive, archiveListing,

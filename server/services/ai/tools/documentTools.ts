@@ -79,14 +79,27 @@ export const analyzeDocument: Tool = {
     let full: string;
     let name: string;
     try {
-      const { meta, data } = await ctx.files.read(input.fileId, ctx.userId);
-      name = meta.name;
-      const r = await extractText({ name: meta.name, mime: meta.mime, data }, { maxChars: 20_000_000 });
-      if (r.kind !== 'text') return err(r.kind === 'image' ? `${meta.name} is an image; look at it directly.` : r.note ?? 'Unsupported file.');
-      full = r.text || '';
-      if (full.replace(PAGE_MARK, '').trim().length < 40) return err(`${meta.name} has no text layer (a scan). Look at its pages with view_pages (up to 20 pages per call).`);
+      const upload = await ctx.files.read(input.fileId, ctx.userId).catch((e: any) => {
+        if (e?.code === 'forbidden' || e?.code === 'not_found') return null;
+        throw e;
+      });
+      if (upload) {
+        const { meta, data } = upload;
+        name = meta.name;
+        const r = await extractText({ name: meta.name, mime: meta.mime, data }, { maxChars: 20_000_000 });
+        if (r.kind !== 'text') return err(r.kind === 'image' ? `${meta.name} is an image; look at it directly.` : r.note ?? 'Unsupported file.');
+        full = r.text || '';
+        if (full.replace(PAGE_MARK, '').trim().length < 40) return err(`${meta.name} has no text layer (a scan). Look at its pages with view_pages (up to 20 pages per call).`);
+      } else {
+        // Not an upload of this user: a file of the public library (checked against the library's access rules).
+        const lib = ctx.services.datasets?.fullText ? await ctx.services.datasets.fullText(ctx.userId, input.fileId).catch(() => null) : null;
+        if (!lib) return err('Could not read the file: file not found');
+        name = `${lib.repository}/${lib.path}`;
+        full = lib.text;
+        if (full.replace(PAGE_MARK, '').trim().length < 40) return err(`${name} has no readable text. Read it with read_dataset_file instead.`);
+      }
     } catch (e: any) {
-      return err(`Could not read the file: ${e?.code === 'forbidden' || e?.code === 'not_found' ? 'file not found' : String(e?.message).slice(0, 200)}`);
+      return err(`Could not read the file: ${String(e?.message).slice(0, 200)}`);
     }
     let sections = splitDocument(full, SECTION_CHARS);
     const from = Number(input.fromPage) || 0;

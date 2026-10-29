@@ -330,6 +330,7 @@ export const bwengeAgent = createAiAgent({
       catalog: async (userId) => (await import('./educationRuntime.js')).knowledgeService.assistantCatalog(userId),
       browse: async (userId, id, opts) => (await import('./educationRuntime.js')).knowledgeService.assistantBrowse(userId, id, opts),
       read: async (userId, id, opts) => (await import('./educationRuntime.js')).knowledgeService.assistantRead(userId, id, opts) as any,
+      fullText: async (userId, id) => (await import('./educationRuntime.js')).knowledgeService.assistantFullText(userId, id),
     },
     // Lazy import: educationRuntime imports this module.
     outputs: {
@@ -881,7 +882,7 @@ export class AiService {
       ? planOutput({ message: userText, attachments: (options.files ?? []).map((f) => ({ name: '', mime: f.mediaType })), hasDataset: (options.files ?? []).some((f) => /csv|spreadsheet|excel|json/i.test(f.mediaType)) || /\.(csv|xlsx|xls|tsv)\b/i.test(userText) })
       : null;
     // Questions the curated datasets may answer also need the tools (search, browse, read, analyse).
-    const dataTurn = !options.extractSchema && await asksAboutDatasets(userText).catch(() => false);
+    const dataTurn = !options.extractSchema && await asksAboutDatasets(userText, options.userId).catch(() => false);
     const toolTurn = !!plan && (plan.artifact || plan.needsComputation) || dataTurn;
     // Photos and PDFs need a model that can see them (handwriting, scans, diagrams).
     const visualUpload = (options.files ?? []).some((f) => f.type === 'image' || /^image\/|application\/pdf/.test(f.mediaType));

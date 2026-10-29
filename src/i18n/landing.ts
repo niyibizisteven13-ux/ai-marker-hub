@@ -1,8 +1,6 @@
 export const dictionaries = {
   en: {
     tag: "Your education, research & data companion",
-    h1a: "Every document,",
-    h1b: "understood.",
     sub: "Scan handwritten scripts, mark them in one tap and explore your data with charts and ready-to-share files.",
     phone: "Continue with phone",
     google: "Continue with Google",
@@ -92,8 +90,6 @@ export const dictionaries = {
   },
   rw: {
     tag: "Mugenzi wawe mu burezi, ubushakashatsi n'imibare",
-    h1a: "Buri nyandiko,",
-    h1b: "isobanuwe.",
     sub: "Sikana impapuro zanditswe n'intoki, uzikosore ukanze rimwe, kandi usesengure amakuru yawe ukoresheje ibishushanyo na dosiye zisangizwa.",
     phone: "Komeza ukoresheje telefoni",
     google: "Komeza ukoresheje Google",
@@ -183,8 +179,6 @@ export const dictionaries = {
   },
   fr: {
     tag: "Votre compagnon pour l'éducation, la recherche et les données",
-    h1a: "Chaque document,",
-    h1b: "compris.",
     sub: "Scannez des copies manuscrites, corrigez-les en un geste et explorez vos données avec des graphiques et des fichiers prêts à partager.",
     phone: "Continuer avec le téléphone",
     google: "Continuer avec Google",

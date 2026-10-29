@@ -593,10 +593,10 @@ function RowMenu({ items }: { items: MenuItem[] }) {
 function AssistantSwitch({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
   return (
     <button type="button" role="switch" aria-checked={on} onClick={() => onChange(!on)}
-      title={on ? 'Bwenge AI uses this dataset to answer every user. Folders and files switched off for AI stay hidden.' : 'Only you can use this dataset. Turn on to let Bwenge AI answer every user from it.'}
+      title={on ? 'In the public library: every user can browse it and Bwenge AI answers everyone from it. Folders and files switched off for AI stay hidden.' : 'Private: only you can use this dataset. Turn on to add it to the public library.'}
       className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3FA7E0] ${on ? 'border-[#B48CFF]/40 bg-[#B48CFF]/12 text-[#D6C2FF]' : 'border-[#2A3760] bg-[#18213D] text-[#9AA6C9] hover:text-white'}`}>
       <Sparkles size={13} />
-      {on ? 'Bwenge AI: all users' : 'Bwenge AI: off'}
+      {on ? 'Public library: on' : 'Public library: off'}
       <span aria-hidden="true" className={`relative h-4 w-7 rounded-full transition-colors ${on ? 'bg-[#8E63F0]' : 'bg-[#2A3760]'}`}>
         <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${on ? 'left-3.5' : 'left-0.5'}`} />
       </span>
