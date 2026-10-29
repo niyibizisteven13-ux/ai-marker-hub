@@ -15,6 +15,25 @@ export interface AnthropicAdapterOptions {
   promptCaching?: boolean;
   /** Injected client for tests. */
   client?: Pick<Anthropic, 'messages'>;
+  /**
+   * Claude's own web search and web fetch on agent turns (requests that carry tools), so answers can be
+   * researched and cited. maxUses caps searches per request.
+   */
+  webTools?: { maxUses?: number } | false;
+}
+
+/** Longest a paused server-tool turn is resumed (each resume continues the same answer). */
+const MAX_RESUMES = 4;
+
+/** "Sources" list from the web citations in Claude's answer, numbered in first-cited order. */
+export function webSources(content: Anthropic.ContentBlock[]): string {
+  const seen = new Map<string, string>();
+  for (const b of content) {
+    if (b.type !== 'text' || !b.citations) continue;
+    for (const c of b.citations) if (c.type === 'web_search_result_location' && c.url && !seen.has(c.url)) seen.set(c.url, c.title || c.url);
+  }
+  if (!seen.size) return '';
+  return `\n\n**Sources**\n${[...seen].map(([url, title], i) => `${i + 1}. [${title.replace(/[[\]]/g, '')}](${url})`).join('\n')}`;
 }
 
 type MessageParam = Anthropic.MessageParam;
@@ -127,12 +146,21 @@ export class AnthropicAdapter implements ProviderAdapter {
 
   async *stream(req: ProviderRequest): AsyncGenerator<ProviderChunk> {
     const { system, messages } = toAnthropicMessages(req.messages);
+    const own = toTools(req.tools);
+    // Web research only on agent turns, never for structured output, and never shadowing a tool of ours.
+    const web = this.opts.webTools && own?.length && !req.responseSchema && req.toolChoice !== 'none' && !own.some((t) => t.name === 'web_search' || t.name === 'web_fetch')
+      ? [
+          { type: 'web_search_20260209', name: 'web_search', max_uses: this.opts.webTools.maxUses ?? 5 },
+          { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: this.opts.webTools.maxUses ?? 5 },
+        ] as Anthropic.ToolUnion[]
+      : [];
+    const tools = own ? [...own, ...web] : undefined;
     const params: Anthropic.MessageStreamParams = {
       model: req.model,
       max_tokens: req.maxTokens ?? this.opts.defaultMaxTokens ?? 16_000,
       messages,
       ...(system ? { system } : {}),
-      ...(toTools(req.tools) ? { tools: toTools(req.tools), tool_choice: { type: req.toolChoice === 'none' ? 'none' : 'auto' } as Anthropic.ToolChoice } : {}),
+      ...(tools ? { tools, tool_choice: { type: req.toolChoice === 'none' ? 'none' : 'auto' } as Anthropic.ToolChoice } : {}),
       ...(this.opts.promptCaching !== false ? { cache_control: { type: 'ephemeral' } } : {}),
       // Sampling parameters (temperature/top_p/top_k) are deliberately not sent: current Claude models reject them.
       output_config: {
@@ -141,22 +169,48 @@ export class AnthropicAdapter implements ProviderAdapter {
       },
     };
 
-    let finalMessage: Anthropic.Message;
-    try {
-      const stream = this.client.messages.stream(params, { signal: req.signal });
-      for await (const event of stream) {
-        if (event.type === 'content_block_delta') {
-          if (event.delta.type === 'text_delta' && event.delta.text) yield { type: 'text', text: event.delta.text };
-          else if (event.delta.type === 'thinking_delta' && event.delta.thinking) yield { type: 'reasoning', text: event.delta.thinking };
+    let finalMessage!: Anthropic.Message;
+    // Content of earlier parts of a paused turn (server tools stop after a set number of steps).
+    const before: Anthropic.ContentBlock[] = [];
+    const usage = { input: 0, output: 0 };
+    for (let resume = 0; ; resume++) {
+      try {
+        const stream = this.client.messages.stream(params, { signal: req.signal });
+        const pending = new Map<number, { id: string; name: string; json: string }>();
+        for await (const event of stream) {
+          if (event.type === 'content_block_delta') {
+            if (event.delta.type === 'text_delta' && event.delta.text) yield { type: 'text', text: event.delta.text };
+            else if (event.delta.type === 'thinking_delta' && event.delta.thinking) yield { type: 'reasoning', text: event.delta.thinking };
+            else if (event.delta.type === 'input_json_delta' && pending.has(event.index)) pending.get(event.index)!.json += event.delta.partial_json;
+          } else if (event.type === 'content_block_start') {
+            const b = event.content_block;
+            if (b.type === 'server_tool_use') pending.set(event.index, { id: b.id, name: b.name, json: '' });
+            else if (b.type === 'web_search_tool_result' || b.type === 'web_fetch_tool_result') {
+              const ok = !(b.content && typeof b.content === 'object' && 'type' in b.content && /error/.test(String((b.content as { type: string }).type)));
+              yield { type: 'server_tool_result', id: b.tool_use_id, name: b.type === 'web_search_tool_result' ? 'web_search' : 'web_fetch', ok };
+            }
+          } else if (event.type === 'content_block_stop' && pending.has(event.index)) {
+            const t = pending.get(event.index)!;
+            pending.delete(event.index);
+            yield { type: 'server_tool', id: t.id, name: t.name, input: safeJson(t.json) };
+          }
         }
+        finalMessage = await stream.finalMessage();
+      } catch (err) {
+        throw mapError(this.name, err, req.signal);
       }
-      finalMessage = await stream.finalMessage();
-    } catch (err) {
-      throw mapError(this.name, err, req.signal);
+      const u = finalMessage.usage;
+      usage.input += (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+      usage.output += u.output_tokens ?? 0;
+      if (finalMessage.stop_reason !== 'pause_turn' || resume >= MAX_RESUMES) break;
+      // Resume the paused turn: send it back as is; the API continues where it stopped.
+      before.push(...finalMessage.content);
+      params.messages = [...messages, { role: 'assistant', content: before as unknown as ContentBlockParam[] }];
     }
-
-    const u = finalMessage.usage;
-    yield { type: 'usage', input: (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0), output: u.output_tokens ?? 0 };
+    if (before.length) finalMessage = { ...finalMessage, content: [...before, ...finalMessage.content] };
+    yield { type: 'usage', ...usage };
+    const sources = webSources(finalMessage.content);
+    if (sources) yield { type: 'text', text: sources };
 
     if (finalMessage.stop_reason === 'refusal') {
       const e = new ProviderError(`${this.name} declined the request`);

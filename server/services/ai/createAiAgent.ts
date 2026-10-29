@@ -28,6 +28,8 @@ export interface AiAgentConfig {
   writeTrace?: (trace: AgentTraceRecord) => Promise<void>;
   /** OCR for scanned PDFs when the turn's model cannot see images. */
   ocr?: IngestOptions['ocr'];
+  /** Models that research the web themselves (Claude's web search and fetch); the prompt tells them how to cite. */
+  webResearch?: (model: string) => boolean;
 }
 
 export interface AgentRunInput {
@@ -103,7 +105,9 @@ export function createAiAgent(cfg: AiAgentConfig) {
         { role: 'user', content: ingested.parts.length === 1 && ingested.parts[0].type === 'text' ? ingested.parts[0].text : ingested.parts },
       ];
       const available = input.toolNames ? tools.names().filter((n) => input.toolNames!.includes(n)) : tools.names();
-      const system = `${input.system}\n\n${buildCapabilitiesPrompt({ tools: available, locale: input.locale })}`;
+      // Claude's own web search runs on tool turns of web-research models (see AnthropicAdapter webTools).
+      const web = available.length > 0 && !available.includes('web_search') && !!cfg.webResearch?.(input.model ?? cfg.model);
+      const system = `${input.system}\n\n${buildCapabilitiesPrompt({ tools: web ? [...available, 'web_search'] : available, locale: input.locale })}`;
       const startedAt = requestStartedAt;
       const toolCalls: AgentTraceRecord['toolCalls'] = [];
       const activeTools = new Map<string, { startedAt: number; trace: AgentTraceRecord['toolCalls'][number] }>();

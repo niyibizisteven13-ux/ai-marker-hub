@@ -24,6 +24,9 @@ export type ProviderChunk =
   | { type: 'reasoning'; text: string }
   | { type: 'tool_call'; index: number; id?: string; name?: string; args?: string }
   | { type: 'usage'; input: number; output: number }
+  /** A tool the provider ran itself (Claude's web search / web fetch), for the activity line. */
+  | { type: 'server_tool'; id: string; name: string; input: unknown }
+  | { type: 'server_tool_result'; id: string; name: string; ok: boolean }
   | { type: 'finish'; reason: string }
   /** Provider-native assistant content to replay on the next turn of the same loop (see ChatMessage.providerState). */
   | { type: 'provider_state'; provider: string; content: unknown[] };

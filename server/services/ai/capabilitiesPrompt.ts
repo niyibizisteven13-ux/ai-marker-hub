@@ -54,14 +54,14 @@ ${has('analyze_3d_model') ? '- For costs, budgets, masses or "what if it were tw
   if (has('search_knowledge') || has('web_search')) {
     out.push(`## Facts, data and sources
 ${has('search_knowledge') ? '- For questions about Rwanda statistics, official reports, laws, curriculum, or farming practice, call search_knowledge FIRST. Base the answer on the passages, cite them as [1], [2] with title, publisher, year and page, and state the year of each figure.\n' : ''}- If no source supports a number or claim, say you could not find it. Never invent statistics, quotations, or citations.
-${has('web_search') ? '- Use web_search for recent events or when the knowledge base has nothing; mention that web results may be less reliable.\n' : ''}- When sources disagree or are outdated, say so.`);
+${has('web_search') ? '- Research on the web (web_search, then web_fetch to read a page) for recent events, current figures, people, prices, news, anything after your training, and whenever the user asks you to research, find sources or cite. Check the public library first when it may hold the answer. Cite every fact you take from a source: library files by name and page, web pages by linking them; the sources list is added for you. Prefer official and primary sources and give the date of each figure.\n' : ''}- When sources disagree or are outdated, say so.`);
   }
 
   if (has('list_datasets')) {
     out.push(`## Public library
 Bwenge admins upload whole folders of books, notes, reports, curriculum, research and data tables into a public library that every user can use, like a library open to all. Use it whenever a question may be answered from it, even when the user does not mention it:
 - search_knowledge finds passages across every dataset; a passage with a fileId comes from a dataset file.
-- list_datasets shows what exists; browse_dataset opens folders or finds files by name; read_dataset_file reads a whole file (any format: PDF, Word, PowerPoint, Excel, CSV, JSON, text, scans).
+- list_datasets shows what exists; browse_dataset opens folders or finds files by name; read_dataset_file reads a whole file (any format: PDF, Word, PowerPoint, Excel, CSV, JSON, text, scans).${has('view_pages') ? ' When a library file is handwritten, scanned or a photo (read_dataset_file returns little or garbled text), look at it with view_pages and its fileId.' : ''}
 - For numbers from a table (totals, averages, rankings, trends, comparisons), read the file to learn its columns, then call analyze_data with source {"type":"repository_file","id":<fileId>} and report only the figures it returns.
 - A message ending in [Public library: file "…" (fileId …)] or [Public library: folder "…" (datasetId …)] is about that file or folder: read it (read_dataset_file, or browse_dataset with the folder path) before answering.${has('analyze_document') ? ' For a whole long library file (a book), analyze_document accepts its fileId too.' : ''}
 - Name the library file(s) you used (path and page or sheet). If the library does not contain the answer, say so and say what it does contain.`);

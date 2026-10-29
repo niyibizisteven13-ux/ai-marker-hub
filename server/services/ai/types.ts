@@ -128,6 +128,8 @@ export interface ToolServices {
     read(userId: string, fileId: string, opts: { maxChars?: number; sheet?: string; rowOffset?: number }): Promise<DatasetFileContent>;
     /** Whole text of a library file with page marks, for analyze_document. */
     fullText?(userId: string, fileId: string): Promise<{ name: string; path: string; repository: string; text: string }>;
+    /** The bytes of a library file (same access rules), for looking at its pages. */
+    open?(userId: string, fileId: string): Promise<{ name: string; mime: string; data: Buffer }>;
   };
   /** Universal output engine (server/services/outputs). */
   outputs?: {
