@@ -20,19 +20,80 @@
 
 **Watch:** https://youtu.be/n24wdixVfFU (under 3 minutes, screen recording of the web app)
 
-## Submission at a glance
+## Demo script (video walkthrough)
 
-| NISR requirement | Where to find it |
-|---|---|
-| Deployed app, publicly accessible | **https://www.bwenge.space** |
-| Login for judges | Sign in with Google, or with any email address (a one-time code is sent). No password or sample account is needed. |
-| README: data used, what it communicates, how to interact | This file: [Data](#data), [What it communicates](#what-it-communicates), [How to use it](#how-to-use-it) |
-| Script(s) with the code, runs on any machine | [`server.ts`](server.ts), [`server/`](server/), [`src/`](src/) and [Run it](#run-it) |
-| Demo video (3 minutes maximum) | [YouTube](https://youtu.be/n24wdixVfFU) and [`demo/`](demo/) |
-| Data and a link to the data | [`data/`](data/) and [Data](#data); the datasets are too large for GitHub, so links are given |
-| Eligibility documents (both members) | [`student_cards/`](student_cards/) |
+What the [demo video](https://youtu.be/n24wdixVfFU) shows, scene by scene.
 
----
+### Scene 1: The challenge (0:00–0:30)
+
+> Hello, NISR judges.
+>
+> Have you ever tried to use AI to analyse a large dataset, only to discover that downloading, processing and
+> transferring that data can be difficult?
+>
+> AI systems can provide summaries, but working with detailed datasets can require additional tools, data
+> preparation and technical effort.
+>
+> Meanwhile, institutions such as national statistical agencies publish valuable datasets that people need to explore
+> and use.
+>
+> This is the challenge we want to address.
+
+### Scene 2: Introducing Bwenge.space (0:30–0:55)
+
+*On screen: the [www.bwenge.space](https://www.bwenge.space) homepage.*
+
+> To address this challenge, we developed Bwenge.space.
+>
+> Our idea is simple: instead of making users repeatedly download and process datasets before they can work with
+> them, we want to make data more accessible through a shared platform.
+>
+> We provide a way to add datasets and use APIs to make their information available for interactive exploration and
+> potential AI integration.
+
+### Scene 3: Demonstrating the solution (0:55–1:55)
+
+*On screen: the dataset section and the actual workflow.*
+
+> Let me show you how it works.
+>
+> Here, users can access the dataset section of our platform.
+>
+> We can add a dataset and connect the relevant data through our API-based workflow.
+>
+> Instead of treating data only as a file that must be downloaded, our goal is to make its information accessible
+> through an interactive interface.
+>
+> Users can explore the information presented by the platform and interact with the available data.
+>
+> This approach aims to reduce unnecessary duplication of work and make datasets easier to discover, explore and
+> integrate into AI-assisted workflows.
+
+### Scene 4: Why it matters (1:55–2:30)
+
+*On screen: the interactive data view.*
+
+> Imagine the potential for researchers, students, developers and institutions that work with large amounts of data.
+>
+> A more accessible data layer could help users explore statistical information more efficiently and develop new
+> applications using reliable sources.
+>
+> For institutions such as NISR, our vision is to complement existing data-publication systems by creating additional
+> ways for people and AI-enabled applications to interact with published data.
+>
+> We are not trying to replace the institutions that produce data. We want to make the data they provide more useful
+> and accessible.
+
+### Scene 5: Closing (2:30–2:50)
+
+*On screen: the homepage and the website address.*
+
+> Bwenge.space is our step toward making data more accessible, interactive and useful in the age of AI.
+>
+> Our vision is simple: less unnecessary data handling, more accessible information, and more opportunities for
+> innovation.
+>
+> Thank you. Explore our platform at [www.bwenge.space](https://www.bwenge.space).
 
 ## The challenge
 
@@ -63,12 +124,27 @@ We are not replacing the institutions that produce data. Bwenge.space **compleme
 such as the NISR microdata portal, by adding a way for people and AI-enabled applications to interact with the data
 NISR already publishes.
 
+Users can also upload their own CSV or Excel files and analyse them the same way.
+
 ## Why it matters
 
 - **Less duplicated work:** a dataset is processed once instead of once per user.
 - **Easier discovery:** datasets can be browsed, searched and questioned without technical tools.
 - **Trustworthy answers:** every figure comes with its source, period and unit, and is computed from the file.
 - **Ready for AI:** the same indexed data serves the chat, the Telegram bot and future applications through the API.
+
+## Submission at a glance
+
+| NISR requirement | Where to find it |
+|---|---|
+| Deployed app, publicly accessible | **https://www.bwenge.space** |
+| Login for judges | Sign in with Google, or with any email address (a one-time code is sent). No password or sample account is needed. |
+| README: data used, what it communicates, how to interact | This file: [Data](#data), [What it communicates](#what-it-communicates), [How to use it](#how-to-use-it) |
+| Script(s) with the code, runs on any machine | [`server.ts`](server.ts), [`server/`](server/), [`src/`](src/) and [Run it](#run-it) |
+| Demo video (3 minutes maximum) | [YouTube](https://youtu.be/n24wdixVfFU) and [`demo/`](demo/) |
+| Data and a link to the data | [`data/`](data/) and [Data](#data); the datasets are too large for GitHub, so links are given |
+| Eligibility documents (both members) | [`student_cards/`](student_cards/) |
+
 
 ## Data
 
@@ -108,20 +184,6 @@ layout, the manifest format and the steps to add a dataset ([`data/nisr/README.m
 **For developers and institutions:** the indexed data is available through the API (dataset repositories, folders,
 files, search and cited sources), documented in [`docs/KNOWLEDGE_REPOSITORY.md`](docs/KNOWLEDGE_REPOSITORY.md).
 
-## Also on the platform
-
-| | |
-|---|---|
-| **Mark exams** | Attach scripts (phone photos, PDF, Word or a ZIP) or scan them with the camera, and press Mark. Every script comes back corrected in red pen as a PDF, with an Excel results file. The teacher reviews and adjusts marks before releasing them. |
-| **Scan papers** | Phone-camera scanner with edge detection, on the web and as a Telegram Mini App. |
-| **Forms and surveys** | Describe a survey in plain words. Bwenge builds it, checks it (readiness score, consent, wording, branching), publishes it and analyses the responses. |
-| **Data analysis** | Upload CSV or Excel files, or ask about NISR statistics. Charts, tables, HTML reports and Excel files are made in the chat. All numbers are computed by code, never estimated by the AI. |
-| **Learning** | Socratic tutor, roleplay practice, adaptive practice questions and anonymous class overviews for teachers. |
-
-Teachers in Rwanda spend evenings marking paper scripts by hand, and schools, students and researchers collect
-survey data that is rarely analysed properly. These tools turn both into evidence, supporting evidence-based
-decision making in education (NST2 human-capital priority, Vision 2050).
-
 ## Run it
 
 Requirements: Node.js 20 or later.
@@ -155,6 +217,21 @@ prisma/            database schema and migrations
 docs/              documentation
 tests/             automated tests
 ```
+
+## Other uses of the platform
+
+Beyond the data layer, the same platform serves schools:
+
+| | |
+|---|---|
+| **Mark exams** | Attach scripts (phone photos, PDF, Word or a ZIP) or scan them with the camera, and press Mark. Every script comes back corrected in red pen as a PDF, with an Excel results file. The teacher reviews and adjusts marks before releasing them. |
+| **Scan papers** | Phone-camera scanner with edge detection, on the web and as a Telegram Mini App. |
+| **Forms and surveys** | Describe a survey in plain words. Bwenge builds it, checks it (readiness score, consent, wording, branching), publishes it and analyses the responses. |
+| **Learning** | Socratic tutor, roleplay practice, adaptive practice questions and anonymous class overviews for teachers. |
+
+Teachers in Rwanda spend evenings marking paper scripts by hand, and schools, students and researchers collect
+survey data that is rarely analysed properly. These tools turn both into evidence, supporting evidence-based
+decision making in education (NST2 human-capital priority, Vision 2050).
 
 ## Team
 
