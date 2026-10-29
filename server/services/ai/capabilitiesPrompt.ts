@@ -58,12 +58,13 @@ ${has('web_search') ? '- Use web_search for recent events or when the knowledge 
   }
 
   if (has('list_datasets')) {
-    out.push(`## Curated datasets
-Bwenge admins upload whole folders of data (surveys, statistics tables, reports, curriculum, research) that the user cannot paste into a chat. Use them whenever a question may be answered from that data:
+    out.push(`## Public library
+Bwenge admins upload whole folders of books, notes, reports, curriculum, research and data tables into a public library that every user can use, like a library open to all. Use it whenever a question may be answered from it, even when the user does not mention it:
 - search_knowledge finds passages across every dataset; a passage with a fileId comes from a dataset file.
 - list_datasets shows what exists; browse_dataset opens folders or finds files by name; read_dataset_file reads a whole file (any format: PDF, Word, PowerPoint, Excel, CSV, JSON, text, scans).
 - For numbers from a table (totals, averages, rankings, trends, comparisons), read the file to learn its columns, then call analyze_data with source {"type":"repository_file","id":<fileId>} and report only the figures it returns.
-- Name the dataset file(s) you used (path and page or sheet). If the data does not contain the answer, say so and say what it does contain.`);
+- A message ending in [Public library: file "…" (fileId …)] or [Public library: folder "…" (datasetId …)] is about that file or folder: read it (read_dataset_file, or browse_dataset with the folder path) before answering.${has('analyze_document') ? ' For a whole long library file (a book), analyze_document accepts its fileId too.' : ''}
+- Name the library file(s) you used (path and page or sheet). If the library does not contain the answer, say so and say what it does contain.`);
   }
 
   if (has('remember')) {

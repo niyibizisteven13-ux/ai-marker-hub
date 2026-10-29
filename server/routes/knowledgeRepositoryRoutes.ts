@@ -114,7 +114,8 @@ knowledgeAdminRouter.post('/repositories', wrap(async (req, res) => {
     settings: z.object({ language: z.string().max(10).optional(), domain: z.string().max(40).optional(), ocr: z.boolean().optional(), autoIndex: z.boolean().optional(), assistant: z.boolean().optional() }).strict().optional(),
     quotaBytes: z.number().int().positive().nullable().optional(),
   }).strict().parse(req.body ?? {});
-  ok(res, await knowledgeService.createRepository(userIdOf(req), body as any), 201);
+  // Admin datasets are the public library: published to every user unless the admin turns it off.
+  ok(res, await knowledgeService.createRepository(userIdOf(req), { ...body, settings: { assistant: true, ...(body.settings ?? {}) } } as any), 201);
 }));
 
 knowledgeAdminRouter.get('/repositories/:id', wrap(async (req, res) => {
@@ -251,6 +252,19 @@ knowledgeAdminRouter.get('/jobs/:jobId', wrap(async (req, res) => ok(res, await 
 
 /** Mounted at /api/knowledge behind requireAuth: opens a cited source for users allowed to retrieve it. */
 export const knowledgeSourcesRouter = Router();
+
+/**
+ * Public library for every signed-in user: datasets admins published (plus the user's own), their folders and
+ * files. Files open through /sources/:fileId; folders and files switched off for AI never appear.
+ */
+knowledgeSourcesRouter.get('/library', wrap(async (req, res) => {
+  ok(res, await knowledgeService.assistantCatalog(userIdOf(req)));
+}));
+
+knowledgeSourcesRouter.get('/library/:repoId', wrap(async (req, res) => {
+  const q = z.object({ path: z.string().max(1000).optional(), search: z.string().max(200).optional() }).parse(req.query);
+  ok(res, await knowledgeService.assistantBrowse(userIdOf(req), req.params.repoId, { path: q.path, search: q.search, limit: 500 }));
+}));
 knowledgeSourcesRouter.get('/sources/:fileId', wrap(async (req, res) => {
   const out = await knowledgeService.openSource(userIdOf(req), req.params.fileId);
   await sendStoredFile(req, res, async () => out, async () => out.file.sizeBytes, false);

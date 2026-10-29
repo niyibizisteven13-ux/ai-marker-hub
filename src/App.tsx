@@ -222,6 +222,7 @@ export default function App() {
   const [upgradePageOpen, setUpgradePageOpen] = useState<boolean>(() => window.location.pathname === '/upgrade');
   const [settingsOpen, setSettingsOpen] = useState<boolean>(() => window.location.pathname === '/settings');
   const [libraryOpen, setLibraryOpen] = useState<boolean>(false);
+  const [libraryTab, setLibraryTab] = useState<'mine' | 'library'>('mine');
   const [adminOpen, setAdminOpen] = useState<boolean>(() => window.location.pathname === '/admin');
   const [selectedProvider, setSelectedProvider] = useState<string>('gonkarouter');
   const retryPromptRef = React.useRef<{
@@ -1705,7 +1706,8 @@ export default function App() {
         <LeftSidebar
           activeTab={activeTab}
           setActiveTab={setActiveTab}
-          onOpenLibrary={() => setLibraryOpen(true)}
+          onOpenLibrary={() => { setLibraryTab('mine'); setLibraryOpen(true); }}
+          onOpenPublicLibrary={() => { setLibraryTab('library'); setLibraryOpen(true); }}
           collapsed={sidebarCollapsed}
           setCollapsed={setSidebarCollapsed}
           user={authenticatedUser}
@@ -1819,7 +1821,7 @@ export default function App() {
       </Suspense>
       {libraryOpen && (
         <Suspense fallback={null}>
-          <OutputsLibrary onClose={() => setLibraryOpen(false)} />
+          <OutputsLibrary initialTab={libraryTab} onClose={() => setLibraryOpen(false)} onAsk={(m) => { void handleSendMessage(m); }} />
         </Suspense>
       )}
       {settingsOpen && (

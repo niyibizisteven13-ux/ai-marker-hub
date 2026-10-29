@@ -52,11 +52,6 @@ export default function LandingPage({ onLoginSuccess }: { onLoginSuccess: (user?
           </div>
 
           <div className="mid">
-            <h1>
-              <span>{t('h1a')}</span>
-              <br />
-              <em>{t('h1b')}</em>
-            </h1>
             <p className="sub">{t('sub')}</p>
 
             <AuthFlow

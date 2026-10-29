@@ -1325,7 +1325,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
     intent, service, isSmallTalk, requestedProvider: cleanProvider, hasClaudeKey: hasClaude, aiProvider: process.env.AI_PROVIDER,
     agentAvailable: agentTarget().provider === 'anthropic' || Boolean(process.env.GONKA_API_KEY), plan: turnPlan,
     hasVisualFiles: serverVisualFiles.length > 0 || contextFiles.length > 0 || Boolean(req.file && /^image\/|application\/pdf/.test(req.file.mimetype)),
-    asksAboutDatasets: intent === 'general_assist' && !isSmallTalk && await asksAboutDatasets(query || '').catch(() => false),
+    asksAboutDatasets: intent === 'general_assist' && !isSmallTalk && await asksAboutDatasets(query || '', userId).catch(() => false),
   })) {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');

@@ -126,6 +126,8 @@ export interface ToolServices {
     catalog(userId: string): Promise<DatasetSummary[]>;
     browse(userId: string, datasetId: string, opts: { path?: string; search?: string; limit?: number }): Promise<DatasetListing>;
     read(userId: string, fileId: string, opts: { maxChars?: number; sheet?: string; rowOffset?: number }): Promise<DatasetFileContent>;
+    /** Whole text of a library file with page marks, for analyze_document. */
+    fullText?(userId: string, fileId: string): Promise<{ name: string; path: string; repository: string; text: string }>;
   };
   /** Universal output engine (server/services/outputs). */
   outputs?: {
