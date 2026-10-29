@@ -104,3 +104,11 @@
 .bsc-rev-page .bsc-textarea{margin-top:0;flex:1}
 .bsc-note{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--ok)}
 @media (prefers-reduced-motion:reduce){.bsc-spinner{animation-duration:2.4s}.bsc-btn{transition:none}}
+/* Quick capture (marking): count, undo and next student above the shutter; a short flash when a page is kept. */
+.bsc-quickbar{position:absolute;left:0;right:0;bottom:calc(120px + env(safe-area-inset-bottom));z-index:4;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 16px}
+.bsc-quickbar .bsc-btn{background:rgba(20,22,28,.72);backdrop-filter:blur(6px);border-color:rgba(255,255,255,.18)}
+.bsc-quickcount{font-size:13px;font-weight:600;color:#fff;text-shadow:0 1px 6px #000;white-space:nowrap}
+.bsc-done{min-width:76px;height:52px;border-radius:16px}
+.bsc-flash{position:absolute;inset:0;z-index:5;background:#fff;pointer-events:none;animation:bscFlash .28s ease-out forwards}
+@keyframes bscFlash{from{opacity:.55}to{opacity:0}}
+.bsc-toast.bsc-toast-top{top:calc(72px + env(safe-area-inset-top));bottom:auto}

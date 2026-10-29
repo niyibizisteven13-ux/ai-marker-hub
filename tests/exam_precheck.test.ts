@@ -81,3 +81,17 @@ test('camera scans: the scanner\'s pages are packed one folder per student, in o
   assert.deepEqual(Object.keys(zip.files).filter((n) => !zip.files[n].dir).sort(), ['scans/Aline (2)/page-01.jpg', 'scans/Aline/page-01.jpg', 'scans/Aline/page-02.jpg', 'scans/Eric S4/page-01.jpg']);
   assert.equal((await precheckFile({ name: file.name, data: Buffer.from(await file.arrayBuffer()) })).students, 3);
 });
+
+test('quick capture: crops only when the page stands out from the desk, never cutting into a page that fills the photo', async () => {
+  const { pageStandsOut } = await import('../src/components/DocumentScanner/imageProcessing.js');
+  const w = 400, h = 600;
+  const quad = { tl: { x: 60, y: 40 }, tr: { x: 340, y: 40 }, br: { x: 340, y: 560 }, bl: { x: 60, y: 560 } };
+  // A white page on a dark desk: safe to crop.
+  const onDesk = (x: number, y: number) => (x >= 60 && x <= 340 && y >= 40 && y <= 560 ? 235 : 70);
+  assert.equal(pageStandsOut(onDesk, w, h, quad), true);
+  // The page fills the photo; the "edges" found are lines of writing: keep the whole photo.
+  const filling = (x: number, y: number) => (y % 40 < 3 ? 40 : 235);
+  assert.equal(pageStandsOut(filling, w, h, quad), false);
+  // A tiny detected region is never trusted.
+  assert.equal(pageStandsOut(onDesk, w, h, { tl: { x: 190, y: 290 }, tr: { x: 210, y: 290 }, br: { x: 210, y: 310 }, bl: { x: 190, y: 310 } }), false);
+});
