@@ -413,8 +413,10 @@ test('live marking persists validated questions before the next question and exp
     assert.ok(!review.layout.items.some(i => i.questionId === 'Q2' && i.placed));
     observed = true;
   };
+  // One group at a time, so the viewer can be checked between them (groups normally run in parallel).
+  process.env.EXAM_QUESTION_CONCURRENCY = '1';
   try { await exams.startMarking(user, exam.id); await waitRun(user, exam.id); }
-  finally { onMarkRequest = undefined; }
+  finally { onMarkRequest = undefined; delete process.env.EXAM_QUESTION_CONCURRENCY; }
   assert.ok(observed, 'question 1 was available to the viewer while question 2 was pending');
   const done = await exams.load(user, exam.id);
   const artifact = done.artifacts.find(a => a.status === 'ready')!;
@@ -1093,6 +1095,33 @@ test('incremental marking focuses context and resumes only validated same-run ch
   assert.deepEqual(resumed.marks, first.marks);
   await markCandidate(focused, 'fake', { ...options, runId: 'new-run', checkpoints: first.marks });
   assert.equal(requests, 2);
+});
+
+test('groups of questions are marked at the same time, with the whole scheme sent first as cached shared text', async () => {
+  const scheme = validateScheme(SCHEME).scheme!;
+  const match = matchAnswers(docOf([[{ id: 'e1', text: '1. x = 4' }, { id: 'e2', text: '2. 3 x 5 = 15' }]]), [], scheme);
+  let inFlight = 0;
+  let peak = 0;
+  const shared: string[] = [];
+  const parallel: ProviderAdapter = {
+    name: 'parallel',
+    async *stream(req) {
+      const parts = req.messages[1].content as any[];
+      assert.ok(Array.isArray(parts) && parts[0].cache === true, 'the scheme goes first, marked for caching');
+      shared.push(parts[0].text);
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise((r) => setTimeout(r, 40));
+      inFlight--;
+      yield* adapter.stream(req);
+    },
+  };
+  const out = await markCandidate(parallel, 'fake', { scheme, questionIds: ['Q1', 'Q2'], match, runId: 'parallel', schemeVersion: 1, chunkSize: 1 });
+  assert.equal(peak, 2, 'both questions were marked at once');
+  assert.equal(new Set(shared).size, 1, 'every call shares the same cached text');
+  assert.match(shared[0], /QUESTION Q1[\s\S]*QUESTION Q2/, 'the whole scheme is in the shared text');
+  assert.equal(out.marks.Q1.awardedMarks, 3);
+  assert.equal(out.marks.Q2.awardedMarks, 2);
 });
 
 test('live work counters count persisted questions, expose active work and separate failures', async () => {

@@ -3,6 +3,10 @@ import { generateStructured, StructuredOutputError } from '../ai/llm/structuredJ
 import type { MatchResult, MatchedElement } from './matching.js';
 import { pathCriteria, type MarkingScheme, type SchemeQuestion } from './scheme.js';
 import type { AiQuestionMark, CriterionResult, ReviewFlag } from './types.js';
+import { mapPool, visionCalls } from '../../utils/concurrency.js';
+
+/** Groups of questions of one script marked at the same time (EXAM_QUESTION_CONCURRENCY). */
+const markingGroupConcurrency = () => Math.max(1, Math.min(8, Number(process.env.EXAM_QUESTION_CONCURRENCY) || 3));
 
 /**
  * Rubric-based marking of one candidate. The model sees the official scheme and the candidate's
@@ -256,8 +260,19 @@ export async function markCandidate(adapter: ProviderAdapter, model: string, inp
   }
   const pending = qs.filter(q => !marks[q.id]);
   const size = Math.max(1, Math.min(6, Math.floor(input.chunkSize || 2)));
-  for (let i = 0; i < pending.length; i += size) {
-    const chunk = pending.slice(i, i + size);
+  const chunks: SchemeQuestion[][] = [];
+  for (let i = 0; i < pending.length; i += size) chunks.push(pending.slice(i, i + size));
+  // Everything that is the same for every candidate and every group of questions goes first, once, and is cached
+  // by the provider: later calls for this class pay a fraction for it and start answering sooner.
+  const shared = [
+    input.scheme.instructions ? `GENERAL MARKING INSTRUCTIONS:\n${input.scheme.instructions}` : '',
+    preferenceLines(input.preferences),
+    input.questionPaperText ? `<question_paper>\n${input.questionPaperText.slice(0, 40_000)}\n</question_paper>` : '',
+    `OFFICIAL MARKING SCHEME (every question; mark only the ids requested below):\n${input.scheme.questions.map((q) => schemeBlock(q, input.scheme.allowHalfMarks)).join('\n\n')}`,
+  ].filter(Boolean).join('\n\n');
+
+  // Groups of questions are marked at the same time; each is saved as soon as it passes validation.
+  await mapPool(chunks, markingGroupConcurrency(), async (chunk) => {
     if (input.signal?.aborted) throw input.signal.reason;
     await input.onStartQuestion?.(chunk[0].id);
     // Keep all unassigned/ambiguous evidence; omit confidently unrelated answers.
@@ -266,21 +281,20 @@ export async function markCandidate(adapter: ProviderAdapter, model: string, inp
     const transcript = focused.map(e => transcriptLine(e, numberOf)).join('\n');
     let out: ModelMark[] = [];
     try {
-      const res = await generateStructured<{ questions: ModelMark[] }>(adapter, {
-        model, system: SYSTEM, schema: MARK_SCHEMA, images: await input.imagesForQuestions?.(chunk.map(q => q.id)), maxTokens: 12_000, signal: input.signal, fallbackModel: input.fallbackModel,
+      const images = await input.imagesForQuestions?.(chunk.map(q => q.id));
+      const call = () => generateStructured<{ questions: ModelMark[] }>(adapter, {
+        model, system: SYSTEM, schema: MARK_SCHEMA, images, maxTokens: 12_000, signal: input.signal, fallbackModel: input.fallbackModel,
+        sharedPrefix: shared,
         prompt: [
-          input.scheme.instructions ? `GENERAL MARKING INSTRUCTIONS:\n${input.scheme.instructions}` : '',
-          preferenceLines(input.preferences),
-          input.questionPaperText ? `<question_paper>\n${input.questionPaperText.slice(0, 40_000)}\n</question_paper>` : '',
-          `OFFICIAL MARKING SCHEME (questions to mark now):\n${chunk.map((q) => schemeBlock(q, input.scheme.allowHalfMarks)).join('\n\n')}`,
           `<candidate_script>\n${transcript.slice(0, 150_000)}\n</candidate_script>`,
           `Mark exactly these question ids: ${chunk.map((q) => q.id).join(', ')}.`,
-        ].filter(Boolean).join('\n\n'),
+        ].join('\n\n'),
         validate: (d) => {
-          const ids = new Set((d as { questions: ModelMark[] }).questions.map((x) => x.questionId));
-          return chunk.filter((q) => !ids.has(q.id)).map((q) => `question ${q.id} is missing`);
+          const got = new Set((d as { questions: ModelMark[] }).questions.map((x) => x.questionId));
+          return chunk.filter((q) => !got.has(q.id)).map((q) => `question ${q.id} is missing`);
         },
       });
+      const res = images?.length ? await visionCalls.run(call) : await call();
       out = res.data.questions;
       usage.input += res.usage.input;
       usage.output += res.usage.output;
@@ -293,6 +307,6 @@ export async function markCandidate(adapter: ProviderAdapter, model: string, inp
       marks[q.id] = finalizeQuestion(q, input.scheme.allowHalfMarks, out.find((x) => x.questionId === q.id), input.match, { runId: input.runId, schemeVersion: input.schemeVersion, model });
       await input.onQuestion?.(q.id, marks[q.id]);
     }
-  }
+  });
   return { marks, usage };
 }

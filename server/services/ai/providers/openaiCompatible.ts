@@ -47,7 +47,13 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
     const body: Record<string, unknown> = {
       model: req.model,
       // providerState belongs to other providers (e.g. Claude thinking blocks) and is never forwarded.
-      messages: req.messages.map(({ providerState: _providerState, ...m }) => m),
+      // The cache hint on text parts is ours (Anthropic prompt caching); OpenAI-compatible APIs get plain parts.
+      // Text-only part lists become one string, which every OpenAI-compatible server accepts.
+      messages: req.messages.map(({ providerState: _providerState, ...m }) => {
+        if (!Array.isArray(m.content)) return m;
+        if (m.content.every((p) => p.type === 'text')) return { ...m, content: m.content.map((p) => (p.type === 'text' ? p.text : '')).join('\n\n') };
+        return { ...m, content: m.content.map((p) => (p.type === 'text' ? { type: 'text' as const, text: p.text } : p)) };
+      }),
       stream: true,
       ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
       ...(req.maxTokens ? { max_tokens: req.maxTokens } : {}),

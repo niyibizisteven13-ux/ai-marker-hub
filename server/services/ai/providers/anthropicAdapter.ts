@@ -49,16 +49,24 @@ function toImageBlock(url: string): Anthropic.ImageBlockParam | null {
 function userContent(content: ChatMessage['content']): string | ContentBlockParam[] {
   if (typeof content === 'string') return content;
   if (!content) return '';
-  const blocks: ContentBlockParam[] = [];
+  const shared: ContentBlockParam[] = [];
+  const images: ContentBlockParam[] = [];
+  const text: ContentBlockParam[] = [];
   for (const part of content as ContentPart[]) {
-    if (part.type === 'text') { if (part.text) blocks.push({ type: 'text', text: part.text }); }
-    else {
+    if (part.type === 'text') {
+      if (!part.text) continue;
+      if (part.cache) shared.push({ type: 'text', text: part.text });
+      else text.push({ type: 'text', text: part.text });
+    } else {
       const img = toImageBlock(part.image_url.url);
-      if (img) blocks.push(img);
+      if (img) images.push(img);
     }
   }
-  // Images go before the text that refers to them.
-  return blocks.sort((a, b) => Number(a.type !== 'image') - Number(b.type !== 'image'));
+  // Shared text first, with a cache breakpoint after it so every request that repeats it reuses the cache;
+  // then the images, before the text that refers to them.
+  const last = shared.at(-1);
+  if (last && last.type === 'text') last.cache_control = { type: 'ephemeral' };
+  return [...shared, ...images, ...text];
 }
 
 function safeJson(args: string): Record<string, unknown> {

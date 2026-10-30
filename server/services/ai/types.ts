@@ -7,7 +7,9 @@
 export type JsonSchema = Record<string, unknown>;
 
 export type ContentPart =
-  | { type: 'text'; text: string }
+  /** `cache`: the text is the same across many requests (a marking scheme, a question paper); providers that
+   *  support prompt caching store everything up to and including it, so later requests reuse it. */
+  | { type: 'text'; text: string; cache?: boolean }
   | { type: 'image_url'; image_url: { url: string } };
 
 export interface ToolCall {
