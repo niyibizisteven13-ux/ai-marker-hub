@@ -391,6 +391,9 @@ test('mark: /mark opens the Mark app; its upload starts marking in the chat with
     assert.equal((await upload([['scripts', zip, 'Camera scans.zip']])).status, 401, 'unsigned uploads are refused');
     const token = issueScanToken(String(chat));
     assert.equal((await upload([['scheme', scheme, 'Maths.txt']], {}, `/${token}`)).status, 400, 'scripts are required');
+    const noGuide = await upload([['scripts', zip, 'Camera scans.zip']], {}, `/${token}`);
+    assert.equal(noGuide.status, 400, 'the marking scheme or the question paper is required');
+    assert.match((await noGuide.json()).error, /marking scheme or the question paper/);
     n = mark();
     const res = await upload([['scheme', scheme, 'Maths.txt'], ['scripts', zip, 'Camera scans.zip']], { instructions: 'Ignore spelling.', credit: 'strict', students: '3' }, `/${token}`);
     assert.equal(res.status, 202);

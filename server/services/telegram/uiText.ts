@@ -41,7 +41,7 @@ const en: Copy = {
   receivedFile: (n) => `Received <b>${n}</b>. What should I do with it?`, readyCaption: 'Ready',
   markApp: {
     title: 'Mark exams', body: 'Mark a whole class from your phone camera.',
-    steps: ['Photograph the marking scheme (or skip: Bwenge writes one from the questions)', 'Photograph each student: one tap per page, <b>Next student</b> between students', 'Add instructions if you like, then tap <b>Mark</b>'],
+    steps: ['Photograph the marking scheme or the question paper (one is required: from the question paper, Bwenge writes the scheme first)', 'Photograph each student: one tap per page, <b>Next student</b> between students', 'Add instructions if you like, then tap <b>Mark</b>'],
     footer: 'Marking runs here: each student appears with a tick as it is marked, then the red-pen PDFs and the Excel results arrive.', open: '✅ Open Mark',
   },
   scan: {
@@ -89,7 +89,7 @@ const rw: Copy = {
   receivedFile: (n) => `Nakiriye <b>${n}</b>. Nkore iki?`, readyCaption: 'Byarangiye',
   markApp: {
     title: 'Gukosora ibizamini', body: 'Kosora ishuri ryose ukoresheje kamera ya telefoni yawe.',
-    steps: ['Fotora marking scheme (cyangwa uyireke: Bwenge iyandika uhereye ku bibazo)', 'Fotora buri munyeshuri: gukanda rimwe ku rupapuro, <b>Umunyeshuri ukurikira</b> hagati y’abanyeshuri', 'Ongeraho amabwiriza niba ubishaka, hanyuma ukande <b>Kosora</b>'],
+    steps: ['Fotora marking scheme cyangwa urupapuro rw’ibibazo (kimwe kirakenewe: ku rupapuro rw’ibibazo, Bwenge ibanza kwandika marking scheme)', 'Fotora buri munyeshuri: gukanda rimwe ku rupapuro, <b>Umunyeshuri ukurikira</b> hagati y’abanyeshuri', 'Ongeraho amabwiriza niba ubishaka, hanyuma ukande <b>Kosora</b>'],
     footer: 'Gukosora bibera hano: buri munyeshuri agaragara afite akamenyetso iyo arangije gukosorwa, hanyuma PDF zikosoye n’amanota muri Excel bikaza.', open: '✅ Fungura Gukosora',
   },
   scan: {
@@ -137,7 +137,7 @@ const fr: Copy = {
   receivedFile: (n) => `<b>${n}</b> reçu. Que dois-je en faire ?`, readyCaption: 'Prêt',
   markApp: {
     title: 'Corriger des copies', body: 'Corrigez toute une classe avec l’appareil photo de votre téléphone.',
-    steps: ['Photographiez le barème (ou passez : Bwenge le rédige à partir des questions)', 'Photographiez chaque élève : une touche par page, <b>Élève suivant</b> entre deux élèves', 'Ajoutez des consignes si vous le souhaitez, puis touchez <b>Corriger</b>'],
+    steps: ['Photographiez le barème ou le sujet (l’un des deux est requis : à partir du sujet, Bwenge rédige d’abord le barème)', 'Photographiez chaque élève : une touche par page, <b>Élève suivant</b> entre deux élèves', 'Ajoutez des consignes si vous le souhaitez, puis touchez <b>Corriger</b>'],
     footer: 'La correction se déroule ici : chaque élève apparaît coché dès qu’il est corrigé, puis arrivent les PDF annotés en rouge et les résultats Excel.', open: '✅ Ouvrir Corriger',
   },
   scan: {

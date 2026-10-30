@@ -21,7 +21,12 @@ import type { CandidateState, ExamRecord } from './types.js';
 export interface ExamChatContext extends OwnedRecord {
   examId: string | null;
   lastCandidateId: string | null;
-  pending: { files: Array<{ fileId: string; name: string; mime: string }>; question: 'which_scheme'; autoMark: boolean } | null;
+  /**
+   * Files kept while Bwenge asks a question. 'which_scheme': several files could be the scheme. 'need_scheme': the
+   * scripts arrived without a marking scheme or question paper; the next files sent are that, and `marking` keeps
+   * the Mark page's settings for when marking starts.
+   */
+  pending: { files: Array<{ fileId: string; name: string; mime: string }>; question: 'which_scheme' | 'need_scheme'; autoMark: boolean; marking?: ExplicitMarking } | null;
 }
 
 /** examId: the examination the reply is about, so the chat can show its live marking card. */
@@ -377,19 +382,25 @@ export function createExamChat(deps: ExamChatDeps) {
     const hasScheme = !!(exam && s.confirmedScheme(exam));
     const inlineScheme = message.length > 300 && /\b\d+\s*marks?\b/i.test(message) ? message : null;
     // Never guess which file is the official scheme: ask, and keep the files so they need not be re-sent.
-    const stage = async () => {
+    const stage = async (question: 'which_scheme' | 'need_scheme' = 'which_scheme') => {
       const staged = [];
       for (const f of files) staged.push({ fileId: (await deps.fileStore.put({ userId, name: f.name.replace(/[^\w.\- ]/g, '_').slice(0, 120), mime: f.mime || 'application/octet-stream', kind: 'document', data: f.buffer, ttlMs: 24 * 60 * 60 * 1000 })).id, name: f.name.replace(/^marking-scheme__/, ''), mime: f.mime || 'application/octet-stream' });
-      await saveCtx(userId, { pending: { files: staged, question: 'which_scheme', autoMark: true } });
+      await saveCtx(userId, { pending: { files: staged, question, autoMark: true, ...(question === 'need_scheme' && explicit ? { marking: explicit } : {}) } });
     };
     const listing = files.map((f, i) => `${i + 1}) ${f.name}`).join(', ');
     if (!explicit && schemes.length > 1 && !forced.length && schemes.filter((f) => SCHEME_NAME.test(f.name)).length !== 1) {
       await stage();
       return { text: `Several files could be the marking scheme. I received: ${listing}. Which one is the official marking scheme (for example "file 2")?`, attachments: [] };
     }
-    // No marking scheme: Bwenge drafts one from the questions and marks with it straight away (the teacher can still
-    // send their own scheme and re-mark). Without any scripts there is nothing to draft from, so ask for them.
-    const autoDraft = !schemes.length && !inlineScheme && !hasScheme && (draftWanted || scripts.length > 0 || papers.length > 0);
+    // Marking needs the marking scheme or the question paper. Without either, the scripts are kept and the teacher is
+    // asked for one; only when the teacher says there is no scheme does Bwenge write one from the questions on the
+    // scripts. With a question paper, Bwenge writes the scheme from it and marks straight away.
+    if (!schemes.length && !papers.length && !inlineScheme && !hasScheme && scripts.length && (explicit || !draftWanted)) {
+      await stage('need_scheme');
+      const n = scripts.length;
+      return { text: `I have ${n === 1 ? 'the script' : `the ${n} scripts`}. Before I mark, I need **the marking scheme or the question paper**. Send it now (a file or a photo) and I will start straight away${explicit ? '' : ', or say "I don\'t have a marking scheme" and I will write one from the questions on the scripts'}.`, attachments: [] };
+    }
+    const autoDraft = !schemes.length && !inlineScheme && !hasScheme && (draftWanted || papers.length > 0);
     if (!schemes.length && !inlineScheme && !hasScheme && !autoDraft) {
       await stage();
       return { text: `I received: ${listing}. Attach the students' scripts (PDFs, photos, Word documents or a ZIP folder) and I will mark them${papers.length ? '' : ', with or without a marking scheme'}. You can also ${link('take photos of them with your phone', '/scan')}.`, attachments: [] };
@@ -512,6 +523,19 @@ export function createExamChat(deps: ExamChatDeps) {
           await saveCtx(userId, { pending: null });
           return await startFromFiles(userId, message, [...restored, ...files], ctx.examId, opts.onStatus);
         }
+      }
+      // 1b. The marking scheme or question paper the scripts were waiting for (or "I don't have one").
+      if (ctx.pending?.question === 'need_scheme' && Date.now() - Date.parse(ctx.updatedAt) < 24 * 60 * 60 * 1000 && (files.length || DRAFT_REQUEST.test(message))) {
+        const kept = ctx.pending;
+        const restored: UploadFile[] = [];
+        for (const f of kept.files) { try { const { data } = await deps.fileStore.read(f.fileId, userId); restored.push({ name: f.name, buffer: data, mime: f.mime }); } catch { /* expired */ } }
+        await saveCtx(userId, { pending: null });
+        if (!files.length) return await startFromFiles(userId, message, restored, ctx.examId, opts.onStatus);
+        const paper = /\bquestion\s*paper|\bthe\s+questions\b|\bépreuve\b|\bibibazo\b/i.test(message) && !/\b(scheme|rubric|marking|bar[eè]me)\b/i.test(message);
+        const roles: Record<string, 'scheme' | 'paper' | 'scripts'> = {};
+        for (const f of restored) roles[f.name] = 'scripts';
+        for (const f of files) roles[f.name] = paper || (PAPER_NAME.test(f.name) && !SCHEME_NAME.test(f.name)) ? 'paper' : 'scheme';
+        return await startFromFiles(userId, message, [...restored, ...files.filter((f) => !restored.some((r) => r.name === f.name))], ctx.examId, opts.onStatus, { ...(kept.marking ?? {}), roles });
       }
       // 2. A new marking request with files.
       if (files.length && (isStart(message, visual.length) || (ctx.examId && visual.length && /\b(scheme|rubric|scripts|candidates|more\s+papers)\b/i.test(message)))) {
