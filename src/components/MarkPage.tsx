@@ -11,13 +11,19 @@ import type { ChatAttachment } from '../types';
  */
 
 export type MarkRole = 'scheme' | 'paper' | 'scripts';
+/** What the camera photographs for this page. */
+export type MarkScanTarget = MarkRole;
+/** Students found in a camera scan: name, page count and the first page (for the thumbnail). */
+export interface ScannedStudent { name: string; pages: number; thumb: string }
+/** Files made elsewhere (the camera) and handed to this page, once per id. */
+export interface MarkIncoming { id: number; files: File[]; role?: MarkRole; students?: ScannedStudent[] }
 export interface MarkRequest {
   text: string;
   attachments: ChatAttachment[];
   marking: { roles: Record<string, MarkRole>; instructions?: string; credit: 'partial' | 'strict'; corrections: boolean; feedback: 'brief' | 'detailed' };
 }
 interface Check { pages: number; typedPages: number; students?: number; kind: string; looksLike?: MarkRole; issues: Array<{ page?: number; entry?: string; issue: 'blurry' | 'dark' | 'small' | 'unreadable' }> }
-interface Item { key: string; file: File; role: MarkRole; chosen?: boolean; status: 'uploading' | 'ready' | 'failed'; fileId?: string; error?: string; check?: Check; preview?: string }
+interface Item { key: string; file: File; role: MarkRole; chosen?: boolean; status: 'uploading' | 'ready' | 'failed'; fileId?: string; error?: string; check?: Check; preview?: string; students?: ScannedStudent[] }
 
 const ROLE_LABEL: Record<MarkRole, string> = { scheme: 'Marking scheme', paper: 'Question paper', scripts: 'Student scripts' };
 const ROLE_TONE: Record<MarkRole, string> = {
@@ -47,11 +53,13 @@ async function upload(file: File): Promise<string> {
 const kindIcon = (f: File) => (/\.zip$/i.test(f.name) ? FolderArchive : f.type.startsWith('image/') ? ImageIcon : FileText);
 
 export default function MarkPage({ onClose, onMark, onScan, incoming, covered = false }: {
-  onClose: () => void; onMark: (req: MarkRequest) => void; onScan?: () => void;
+  onClose: () => void; onMark: (req: MarkRequest) => void;
+  /** Opens the camera for the students' scripts, or for one marking scheme / question paper. */
+  onScan?: (target: MarkScanTarget) => void;
   /** Another screen (the camera) is on top: keys belong to it. */
   covered?: boolean;
   /** Files made elsewhere while this page stays open (the camera scanner's pages); added once per id. */
-  incoming?: { id: number; files: File[] } | null;
+  incoming?: MarkIncoming | null;
 }) {
   const [items, setItems] = useState<Item[]>([]);
   const [instructions, setInstructions] = useState('');
@@ -61,6 +69,9 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
   const [dragging, setDragging] = useState(false);
   const [menu, setMenu] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  const guideInput = useRef<HTMLInputElement>(null);
+  // Step 2 asks for one of these; the teacher says which before photographing or choosing it.
+  const [guideKind, setGuideKind] = useState<'scheme' | 'paper'>('scheme');
 
   useEffect(() => {
     if (covered) return;
@@ -73,10 +84,11 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
   const patch = (key: string, p: Partial<Item>) => setItems((cur) => cur.map((i) => (i.key === key ? { ...i, ...p } : i)));
 
   const taken = useRef(0);
-  const add = useCallback((files: FileList | File[]) => {
+  const add = useCallback((files: FileList | File[], opts: { role?: MarkRole; students?: ScannedStudent[] } = {}) => {
     const fresh: Item[] = [...files].map((file) => ({
-      key: `${file.name}-${file.size}-${Math.random().toString(36).slice(2, 7)}`, file, role: guessRole(file.name), status: 'uploading',
-      preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined,
+      key: `${file.name}-${file.size}-${Math.random().toString(36).slice(2, 7)}`, file, role: opts.role ?? guessRole(file.name), chosen: !!opts.role, status: 'uploading',
+      preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : opts.students?.[0]?.thumb,
+      students: opts.students,
     }));
     setItems((cur) => [...cur, ...fresh]);
     for (const it of fresh) {
@@ -95,7 +107,7 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
   useEffect(() => {
     if (!incoming || incoming.id === taken.current) return;
     taken.current = incoming.id;
-    add(incoming.files);
+    add(incoming.files, { role: incoming.role, students: incoming.students });
   }, [incoming, add]);
 
   const scripts = items.filter((i) => i.role === 'scripts');
@@ -149,7 +161,7 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
             // Two ways in, side by side: the camera (one tap per page) and files (or drop them here on a computer).
             <div className="grid gap-2.5 p-3.5 sm:grid-cols-2">
               {onScan && (
-                <button type="button" onClick={onScan} className="flex items-center gap-3 rounded-2xl bg-[#D97757] px-4 py-4 text-left text-white hover:bg-[#c96a4c] sm:flex-col sm:items-start sm:py-6">
+                <button type="button" onClick={() => onScan('scripts')} className="flex items-center gap-3 rounded-2xl bg-[#D97757] px-4 py-4 text-left text-white hover:bg-[#c96a4c] sm:flex-col sm:items-start sm:py-6">
                   <span className="rounded-xl bg-white/15 p-2.5"><Camera size={22} /></span>
                   <span><span className="block text-[15px] font-semibold">Scan papers</span><span className="block text-[12.5px] text-white/80">One tap per page, then next student</span></span>
                 </button>
@@ -192,6 +204,16 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
                           </span>
                         )}
                       </span>
+                      {it.students && it.students.length > 0 && (
+                        <span className="mt-2 flex gap-1.5 overflow-x-auto pb-0.5" aria-label="Scanned students">
+                          {it.students.map((st, i) => (
+                            <span key={i} className="w-12 shrink-0 text-center">
+                              <img src={st.thumb} alt={`${st.name}, first page`} className="h-14 w-12 rounded border border-black/20 bg-[#FBFAF6] object-cover" />
+                              <span className="mt-0.5 block truncate text-[10px] text-neutral-400">{st.name.replace(/^Student\s+/i, 'S')} · {st.pages}p</span>
+                            </span>
+                          ))}
+                        </span>
+                      )}
                       {issues.length > 0 && <span className="mt-1 flex items-start gap-1 text-[11px] text-amber-300"><AlertTriangle size={11} className="mt-0.5 shrink-0" />{issues.slice(0, 2).map((x) => `${x.entry ? `${x.entry.split('/').pop()} ` : x.page ? `page ${x.page} ` : ''}${ISSUE_TEXT[x.issue]}`).join(', ')}{issues.length > 2 ? ` +${issues.length - 2}` : ''}: retake</span>}
                     </span>
                     <button type="button" aria-label={`Remove ${it.file.name}`} onClick={() => setItems((cur) => cur.filter((x) => x.key !== it.key))} className="absolute right-2 top-2 rounded p-0.5 text-neutral-500 hover:bg-white/10 hover:text-white"><X size={13} /></button>
@@ -199,6 +221,29 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
                 );
               })}
             </ul>
+          )}
+
+          {scripts.length > 0 && !scheme && !paper && (
+            // Step 2, right where the teacher looks next: Bwenge marks against the scheme, or writes it from the questions.
+            <div className="border-t border-white/[0.08] bg-[#D97757]/[0.06] px-4 py-3.5">
+              <div className="flex items-center gap-2 text-[13.5px] font-semibold text-white">
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#D97757] text-[11px] font-bold text-white">2</span>
+                Now add the marking scheme or the question paper
+              </div>
+              <p className="mt-1 text-[12.5px] text-neutral-400">Bwenge marks against your scheme. With only the question paper, it writes the scheme first and shows it to you.</p>
+              <div role="radiogroup" aria-label="Which document" className="mt-2.5 grid max-w-sm grid-cols-2 gap-1 rounded-xl bg-white/[0.05] p-1 text-[12.5px]">
+                {(['scheme', 'paper'] as const).map((k) => (
+                  <button key={k} type="button" role="radio" aria-checked={guideKind === k} onClick={() => setGuideKind(k)}
+                    className={`rounded-lg px-2 py-1.5 font-semibold ${guideKind === k ? 'bg-[#D97757] text-white' : 'text-neutral-400 hover:text-neutral-200'}`}>{ROLE_LABEL[k]}</button>
+                ))}
+              </div>
+              <div className="mt-2.5 flex flex-wrap gap-2">
+                {onScan && <button type="button" onClick={() => onScan(guideKind)} className="inline-flex items-center gap-1.5 rounded-xl bg-[#D97757] px-3.5 py-2 text-[13px] font-semibold text-white hover:bg-[#c96a4c]"><Camera size={15} />Photograph it</button>}
+                <button type="button" onClick={() => guideInput.current?.click()} className="inline-flex items-center gap-1.5 rounded-xl border border-white/[0.14] px-3.5 py-2 text-[13px] text-neutral-200 hover:bg-white/5"><Paperclip size={15} />Choose file</button>
+              </div>
+              <input ref={guideInput} type="file" hidden accept=".pdf,.png,.jpg,.jpeg,.webp,.heic,.heif,.docx,.doc,.odt,.rtf,.txt,image/*,application/pdf"
+                onChange={(e) => { if (e.target.files?.length) add(e.target.files, { role: guideKind }); e.target.value = ''; }} />
+            </div>
           )}
 
           <div className="border-t border-white/[0.08] px-4 py-3">
@@ -215,7 +260,7 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
 
           <div className="flex items-center gap-2 overflow-x-auto border-t border-white/[0.08] px-3.5 py-2.5 [&>*]:shrink-0 sm:flex-wrap sm:overflow-visible">
             {items.length > 0 && <button type="button" onClick={() => input.current?.click()} className="inline-flex items-center gap-1.5 rounded-[10px] border border-white/[0.12] px-3 py-1.5 text-[12.5px] text-neutral-300 hover:bg-white/5"><Paperclip size={14} />Add files</button>}
-            {onScan && items.length > 0 && <button type="button" onClick={onScan} className="inline-flex items-center gap-1.5 rounded-[10px] border border-white/[0.12] px-3 py-1.5 text-[12.5px] text-neutral-300 hover:bg-white/5"><Camera size={14} />Scan papers</button>}
+            {onScan && items.length > 0 && <button type="button" onClick={() => onScan('scripts')} className="inline-flex items-center gap-1.5 rounded-[10px] border border-white/[0.12] px-3 py-1.5 text-[12.5px] text-neutral-300 hover:bg-white/5"><Camera size={14} />Scan papers</button>}
             <select aria-label="Credit" value={credit} onChange={(e) => setCredit(e.target.value as 'partial' | 'strict')} className="h-[30px] rounded-[10px] border border-white/[0.12] bg-[#30302E] px-2 text-[12.5px] text-neutral-300">
               <option value="partial">Part marks allowed</option><option value="strict">Strict marking</option>
             </select>
@@ -245,10 +290,12 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
         {/* Phone: the Mark button stays in reach at the bottom of the screen. */}
         <div className="fixed inset-x-0 bottom-0 z-10 flex items-center gap-3 border-t border-white/[0.08] bg-[#262624]/95 px-4 pb-[calc(12px+env(safe-area-inset-bottom))] pt-3 backdrop-blur sm:hidden">
           <span className="min-w-0 flex-1 text-[12px] leading-tight text-neutral-400">
-            {items.length ? <>{scheme ? 'Scheme attached' : paper ? 'Question paper attached' : 'Add the scheme or question paper'}<br />{summary.students || 0} student{summary.students === 1 ? '' : 's'} · {summary.pages} page{summary.pages === 1 ? '' : 's'}</> : 'Scan or add the scripts to start'}
+            {items.length
+              ? <><span className="block truncate">{!scripts.length ? 'Next: the students\' scripts' : scheme ? 'Scheme attached' : paper ? 'Question paper attached' : 'Next: scheme or question paper'}</span><span className="block truncate">{summary.students || 0} student{summary.students === 1 ? '' : 's'} · {summary.pages} page{summary.pages === 1 ? '' : 's'}</span></>
+              : 'Scan or add the scripts to start'}
           </span>
           <button type="button" disabled={!canMark} onClick={submit} className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-[#D97757] px-4 py-2.5 text-[14px] font-semibold text-white disabled:opacity-40">
-            {uploading ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}{markLabel}
+            {uploading ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}{canMark || uploading ? markLabel : !scripts.length ? 'Add scripts' : 'Add scheme'}
           </button>
         </div>
         <ol className="mx-auto mt-6 hidden flex-wrap justify-center gap-x-5 gap-y-1 text-[12.5px] text-neutral-500 sm:flex">

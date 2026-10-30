@@ -75,6 +75,8 @@ const AdminPage = React.lazy(() => import('./pages/AdminPage'));
 const CurationViewPage = React.lazy(() => import('./pages/CurationViewPage'));
 const OutputsLibrary = React.lazy(() => import('./components/OutputsLibrary'));
 const MarkPage = React.lazy(() => import('./components/MarkPage'));
+type MarkIncoming = import('./components/MarkPage').MarkIncoming;
+type MarkScanTarget = import('./components/MarkPage').MarkScanTarget;
 const MarkingDrawer = React.lazy(() => import('./components/ChatMarkingCard').then((m) => ({ default: m.MarkingDrawer })));
 const openMarking = (examId: string) => window.dispatchEvent(new CustomEvent('bwenge:open-marking', { detail: { examId } }));
 
@@ -230,7 +232,9 @@ export default function App() {
   const [markOpen, setMarkOpen] = useState<boolean>(() => window.location.pathname === '/mark');
   // Camera opened from the Mark page: its pages go back to that page (one folder per student), not to the old hub.
   const [scanForMark, setScanForMark] = useState(false);
-  const [markIncoming, setMarkIncoming] = useState<{ id: number; files: File[] } | null>(null);
+  const [markIncoming, setMarkIncoming] = useState<MarkIncoming | null>(null);
+  // What the camera is photographing for the Mark page: the students' scripts, or one marking scheme / question paper.
+  const [scanTarget, setScanTarget] = useState<MarkScanTarget>('scripts');
   // "Mark an exam" on the home screen (and anything else) opens the Mark page through this event.
   useEffect(() => {
     const open = () => setMarkOpen(true);
@@ -1742,12 +1746,29 @@ export default function App() {
           <DocumentScanner
             onClose={() => { setScannerOpen(false); setScanForMark(false); }}
             onSavePages={scanForMark
-              ? async (pages) => { const { scansToZip } = await import('./utils/scansToZip'); setMarkIncoming({ id: Date.now(), files: [await scansToZip(pages)] }); }
+              ? async (pages) => {
+                if (scanTarget !== 'scripts') {
+                  const { buildPdf } = await import('./scanner/TelegramScanApp');
+                  const name = scanTarget === 'paper' ? 'Question paper (photographed).pdf' : 'Marking scheme (photographed).pdf';
+                  setMarkIncoming({ id: Date.now(), files: [new File([await buildPdf(pages)], name, { type: 'application/pdf' })], role: scanTarget });
+                  return;
+                }
+                const { scansToZip } = await import('./utils/scansToZip');
+                // Each student's first page comes back too, so the Mark page can show who was scanned.
+                const byStudent = new Map<string, { name: string; pages: number; thumb: string }>();
+                for (const p of pages) {
+                  const key = p.candidateId ?? p.studentName ?? 'student';
+                  const cur = byStudent.get(key);
+                  if (cur) cur.pages++; else byStudent.set(key, { name: p.studentName ?? `Student ${byStudent.size + 1}`, pages: 1, thumb: p.dataUrl });
+                }
+                setMarkIncoming({ id: Date.now(), files: [await scansToZip(pages)], students: [...byStudent.values()] });
+              }
               : handleSaveScannedPages}
             aiTools={!scanForMark}
             quick={scanForMark}
+            single={scanForMark && scanTarget !== 'scripts' ? (scanTarget === 'paper' ? 'Question paper' : 'Marking scheme') : undefined}
             labels={scanForMark ? 'student' : undefined}
-            saveLabel={scanForMark ? 'Add to marking' : undefined}
+            saveLabel={scanForMark ? (scanTarget === 'scripts' ? 'Add to marking' : scanTarget === 'paper' ? 'Use as question paper' : 'Use as marking scheme') : undefined}
             activeRubricText={examPaper ? JSON.stringify(examPaper) : ''}
             onGeneratedForm={(form) => {
               setScannerGeneratedForm(form);
@@ -1886,7 +1907,7 @@ export default function App() {
           <MarkPage
             onClose={() => { setMarkOpen(false); if (window.location.pathname === '/mark') window.history.replaceState({}, '', '/'); }}
             onMark={startMarking}
-            onScan={openScanner ? () => { setScanForMark(true); openScanner(); } : undefined}
+            onScan={openScanner ? (target) => { setScanTarget(target); setScanForMark(true); openScanner(); } : undefined}
             incoming={markIncoming}
             covered={scanForMark && scannerOpen}
           />
