@@ -133,6 +133,12 @@ export interface ToolServices {
     /** The bytes of a library file (same access rules), for looking at its pages. */
     open?(userId: string, fileId: string): Promise<{ name: string; mime: string; data: Buffer }>;
   };
+  /** Assignments: tasks shared with a class by link, the students' hand-ins, and marking them. */
+  assignments?: {
+    create(userId: string, input: { title: string; instructions: string; dueAt?: string }): Promise<{ id: string; title: string; link: string; dueAt: string | null }>;
+    list(userId: string): Promise<Array<{ id: string; title: string; dueAt: string | null; open: boolean; link: string; submitted: number; lastSubmissionAt: string | null }>>;
+    get(userId: string, id: string): Promise<{ id: string; title: string; instructions: string; dueAt: string | null; open: boolean; link: string; submissions: Array<{ studentName: string; studentId?: string; files: Array<{ name: string }>; text?: string; submittedAt: string; late: boolean }> }>;
+  };
   /** Universal output engine (server/services/outputs). */
   outputs?: {
     create(userId: string, spec: unknown): Promise<{ artifact: any; reused: boolean }>;

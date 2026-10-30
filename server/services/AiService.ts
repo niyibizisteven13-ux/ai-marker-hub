@@ -329,6 +329,12 @@ export const bwengeAgent = createAiAgent({
         return hits.length;
       },
     },
+    // Assignments (lazy import keeps the database and file store out of this module's load order).
+    assignments: {
+      create: async (userId, input) => (await import('./assignments/runtime.js')).assignmentService().create(userId, input),
+      list: async (userId) => (await import('./assignments/runtime.js')).assignmentService().list(userId),
+      get: async (userId, id) => (await import('./assignments/runtime.js')).assignmentService().get(userId, id),
+    },
     // Datasets from Admin → Datasets & Curations (lazy import: educationRuntime imports this module).
     datasets: {
       catalog: async (userId) => (await import('./educationRuntime.js')).knowledgeService.assistantCatalog(userId),
@@ -893,7 +899,9 @@ export class AiService {
       : null;
     // Questions the curated datasets may answer also need the tools (search, browse, read, analyse).
     // Library questions and research questions (current facts, "find sources") need the tools and the web.
-    const dataTurn = !options.extractSchema && (needsResearch(userText) || await asksAboutDatasets(userText, options.userId).catch(() => false));
+    // Assignments (set a task, who handed in, mark the class) are tool work too.
+    const assignmentTurn = /\b(assignments?|homework|hand[- ]?ins?|handed in|submissions?|devoirs?|umukoro|imikoro)\b/i.test(userText);
+    const dataTurn = !options.extractSchema && (assignmentTurn || needsResearch(userText) || await asksAboutDatasets(userText, options.userId).catch(() => false));
     const toolTurn = !!plan && (plan.artifact || plan.needsComputation) || dataTurn;
     // Photos and PDFs need a model that can see them (handwriting, scans, diagrams).
     const visualUpload = (options.files ?? []).some((f) => f.type === 'image' || /^image\/|application\/pdf/.test(f.mediaType));

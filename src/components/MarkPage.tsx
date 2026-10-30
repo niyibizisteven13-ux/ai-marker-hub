@@ -16,14 +16,20 @@ export type MarkScanTarget = MarkRole;
 /** Students found in a camera scan: name, page count and the first page (for the thumbnail). */
 export interface ScannedStudent { name: string; pages: number; thumb: string }
 /** Files made elsewhere (the camera) and handed to this page, once per id. */
-export interface MarkIncoming { id: number; files: File[]; role?: MarkRole; students?: ScannedStudent[] }
+export interface MarkIncoming {
+  id: number; files: File[]; role?: MarkRole; students?: ScannedStudent[];
+  /** Files already on the server (an assignment's hand-ins, one PDF per student), each with its role. */
+  uploaded?: Array<{ fileId: string; name: string; mime: string; size: number; role: MarkRole; label?: string }>;
+  /** Sent with the marking but not shown as a file: the students list that keeps their names in the results. */
+  extras?: Array<{ fileId: string; name: string; mime: string; size: number }>;
+}
 export interface MarkRequest {
   text: string;
   attachments: ChatAttachment[];
   marking: { roles: Record<string, MarkRole>; instructions?: string; credit: 'partial' | 'strict'; corrections: boolean; feedback: 'brief' | 'detailed' };
 }
 interface Check { pages: number; typedPages: number; students?: number; kind: string; looksLike?: MarkRole; issues: Array<{ page?: number; entry?: string; issue: 'blurry' | 'dark' | 'small' | 'unreadable' }> }
-interface Item { key: string; file: File; role: MarkRole; chosen?: boolean; status: 'uploading' | 'ready' | 'failed'; fileId?: string; error?: string; check?: Check; preview?: string; students?: ScannedStudent[] }
+interface Item { key: string; file: File; role: MarkRole; chosen?: boolean; status: 'uploading' | 'ready' | 'failed'; fileId?: string; error?: string; check?: Check; preview?: string; students?: ScannedStudent[]; bytes?: number; label?: string }
 
 const ROLE_LABEL: Record<MarkRole, string> = { scheme: 'Marking scheme', paper: 'Question paper', scripts: 'Student scripts' };
 const ROLE_TONE: Record<MarkRole, string> = {
@@ -104,10 +110,26 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
         .catch((e) => patch(it.key, { status: 'failed', error: e instanceof Error ? e.message : 'Upload failed.' }));
     }
   }, []);
+  const [extras, setExtras] = useState<NonNullable<MarkIncoming['extras']>>([]);
   useEffect(() => {
     if (!incoming || incoming.id === taken.current) return;
     taken.current = incoming.id;
-    add(incoming.files, { role: incoming.role, students: incoming.students });
+    if (incoming.files.length) add(incoming.files, { role: incoming.role, students: incoming.students });
+    if (incoming.extras?.length) setExtras((cur) => [...cur, ...incoming.extras!]);
+    if (incoming.uploaded?.length) {
+      const ready: Item[] = incoming.uploaded.map((u) => ({
+        key: `${u.fileId}-${Math.random().toString(36).slice(2, 7)}`, file: new File([], u.name, { type: u.mime }), bytes: u.size, label: u.label,
+        role: u.role, chosen: true, status: 'ready', fileId: u.fileId,
+      }));
+      setItems((cur) => [...cur, ...ready]);
+      // Same quick check as for added files, for the page counts and photos to retake.
+      void authFetch('/api/exams/precheck', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileIds: ready.map((r) => r.fileId) }) })
+        .then((res) => res.json()).then((body) => {
+          // Results come back in any order; each names its file.
+          const byId = new Map<string, Check>((body?.files ?? []).map((c: Check & { fileId: string }) => [c.fileId, c]));
+          setItems((cur) => cur.map((x) => (x.fileId && byId.has(x.fileId) && ready.some((r) => r.key === x.key) ? { ...x, check: byId.get(x.fileId) } : x)));
+        }).catch(() => undefined);
+    }
   }, [incoming, add]);
 
   const scripts = items.filter((i) => i.role === 'scripts');
@@ -137,7 +159,11 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
     ].filter(Boolean).join('\n\n');
     onMark({
       text,
-      attachments: ready.map((i) => ({ id: i.key, name: i.file.name, serverId: i.fileId, storedFileId: i.fileId, mimeType: i.file.type || 'application/octet-stream', size: `${Math.max(1, Math.round(i.file.size / 1024))} KB`, fileType: i.file.type.startsWith('image/') ? 'image' : /\.pdf$/i.test(i.file.name) ? 'pdf' : 'document' })),
+      attachments: [
+        ...ready.map((i) => ({ id: i.key, name: i.file.name, serverId: i.fileId, storedFileId: i.fileId, mimeType: i.file.type || 'application/octet-stream', size: `${Math.max(1, Math.round((i.bytes ?? i.file.size) / 1024))} KB`, fileType: i.file.type.startsWith('image/') ? 'image' as const : /\.pdf$/i.test(i.file.name) ? 'pdf' as const : 'document' as const })),
+        // The students list carries no role, so the marker reads it as the list of names.
+        ...extras.map((x) => ({ id: x.fileId, name: x.name, serverId: x.fileId, storedFileId: x.fileId, mimeType: x.mime, size: `${Math.max(1, Math.round(x.size / 1024))} KB`, fileType: 'document' as const })),
+      ],
       marking: { roles, instructions: instructions.trim() || undefined, credit, corrections, feedback },
     });
   };
@@ -182,7 +208,7 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
                       {it.preview ? <img src={it.preview} alt="" className="h-full w-full object-cover" /> : <Icon size={18} />}
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate pr-5 text-[12.5px] font-semibold">{it.file.name}</span>
+                      <span className="block truncate pr-5 text-[12.5px] font-semibold">{it.label ?? it.file.name}</span>
                       <span className="block text-[11.5px] text-neutral-400">
                         {it.status === 'uploading' ? <span className="inline-flex items-center gap-1"><Loader2 size={11} className="animate-spin" />Uploading…</span>
                           : it.status === 'failed' ? <span className="text-rose-300">{it.error}</span>

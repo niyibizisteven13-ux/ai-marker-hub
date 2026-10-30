@@ -9,7 +9,7 @@ import { Download, Loader2, Maximize2, Minimize2, ZoomIn, ZoomOut } from 'lucide
 
 type PdfDoc = { numPages: number; getPage: (n: number) => Promise<any>; destroy: () => Promise<void> };
 let pdfjs: Promise<any> | null = null;
-async function loadPdfJs() {
+export async function loadPdfJs() {
   pdfjs ??= (async () => {
     const lib = await import('pdfjs-dist');
     const worker = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');

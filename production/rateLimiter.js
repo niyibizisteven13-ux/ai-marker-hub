@@ -1,4 +1,4 @@
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { SharedRateLimitStore } from '../server/services/cache/redis.js';
 
 // Counts are shared by every server through Redis when REDIS_URL is set (see server/services/cache/redis.ts).
@@ -65,6 +65,20 @@ export const publicFormSubmitLimiter = isDev
       standardHeaders: true,
       legacyHeaders: false,
       message: { error: 'Too many form submissions from this network. Please wait and try again.' },
+    });
+
+// Assignment hand-ins: a whole class often shares one school network (one address), so the cap is per link
+// and network together, and high enough for a large class handing in and re-handing in near the deadline.
+export const assignmentSubmitLimiter = isDev
+  ? (req, res, next) => next()
+  : rateLimit({
+      store: store('assignment-submit'),
+      windowMs: 15 * 60 * 1000,
+      max: 400,
+      keyGenerator: (req) => `${ipKeyGenerator(req.ip ?? '')}:${String(req.params?.token ?? '').slice(0, 40)}`,
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { error: 'Too many hand-ins from this network just now. Wait a minute and try again.' },
     });
 
 export const batchGradingLimiter = isDev

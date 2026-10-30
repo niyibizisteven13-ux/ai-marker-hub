@@ -5,6 +5,7 @@ import { createChart, createDiagram, createDrawing, generateImage } from './draw
 import { pythonTool, readAttachment, searchKnowledgeTool, webTools } from './dataTools.js';
 import { outputTools } from './outputTools.js';
 import { datasetTools } from './datasetTools.js';
+import { assignmentTools } from './assignmentTools.js';
 import { memoryTools } from './memoryTools.js';
 import { sceneTools } from './sceneTools.js';
 import { formTools } from './formTools.js';
@@ -24,6 +25,7 @@ export function buildToolkit(services: ToolServices = {}): ToolRegistry {
     viewPages,
     searchKnowledgeTool(services),
     ...datasetTools(services),
+    ...(process.env.ENABLE_ASSIGNMENT_TOOLS === 'false' ? [] : assignmentTools(services)),
     ...memoryTools(services),
     ...(enabled('ENABLE_AGENT_WEB_TOOLS') ? webTools(services) : []),
     enabled('ENABLE_AGENT_PYTHON_TOOL') ? pythonTool(services) : null,
