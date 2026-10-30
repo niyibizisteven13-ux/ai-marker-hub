@@ -68,6 +68,16 @@ On the primary it installs, builds, migrates the database, restarts and checks h
 server in turn, checking each before the next. If a server fails its check, the deploy stops there and the
 remaining servers keep the previous version. The same command works with no web servers yet.
 
+### Automatic deploys (no SSH needed)
+Run once on the primary (for example from the Hetzner web console):
+```bash
+cd /opt/nexus && sudo -u nexus git pull origin main && bash scripts/cluster/install-autodeploy.sh
+```
+From then on the server checks GitHub every 5 minutes and runs the deploy above whenever `main` has a new
+commit, so a merged pull request is live within about 5 minutes plus the build. A commit that fails to deploy
+is not retried until a newer one arrives. Log: `/var/log/bwenge-autodeploy.log`. Turn it off with
+`rm /etc/cron.d/bwenge-autodeploy`.
+
 ## Checking
 - Which server answered: the `X-Served-By` response header (`node-1`, `node-2`, …).
 - Health of each server: `curl http://10.0.0.3:PORT/api/health` from the primary shows the database, Redis, node and role.
