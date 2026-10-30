@@ -38,6 +38,7 @@ function useRunState(events: ExamEvent[]) {
 }
 
 const minutes = (ms: number) => (ms < 60_000 ? 'under a minute' : `${Math.round(ms / 60_000)} min`);
+const timeLeft = (ms: number) => (ms < 60_000 ? 'less than a minute left' : `about ${Math.round(ms / 60_000)} min left`);
 
 /** Time left from the pace so far ("about 3 min left"), or how long the finished run took. */
 function useTiming(active: boolean, progress: { done: number; total: number } | null, startedAt: number, endedAt: number) {
@@ -51,7 +52,7 @@ function useTiming(active: boolean, progress: { done: number; total: number } | 
   if (!active) return Number.isFinite(endedAt) && endedAt > startedAt ? `in ${minutes(endedAt - startedAt)}` : null;
   if (!progress || progress.done < 1 || progress.done >= progress.total) return null;
   const left = ((now - startedAt) / progress.done) * (progress.total - progress.done);
-  return `about ${minutes(left)} left`;
+  return timeLeft(left);
 }
 
 /** What the marker is doing right now, in words, plus the steps of the current script already done (ticked). */
@@ -93,10 +94,10 @@ export default function ChatMarkingCard({ examId }: { examId: string }) {
   return (
     <div className="mt-3 overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.02]">
       <div className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-2">
-        <span className={`h-2 w-2 rounded-full ${active ? 'animate-pulse bg-emerald-400' : connected ? 'bg-emerald-500/70' : 'bg-neutral-500'}`} aria-hidden />
+        <span className={`h-2 w-2 shrink-0 rounded-full ${active ? 'animate-pulse bg-emerald-400' : connected ? 'bg-emerald-500/70' : 'bg-neutral-500'}`} aria-hidden />
         <span className="whitespace-nowrap text-[12.5px] font-semibold text-white">{active ? 'Marking in progress' : ended?.type === 'job_cancelled' ? 'Marking stopped' : marked.length ? 'Marking finished' : 'Marking'}</span>
-        {progress && <span className="whitespace-nowrap text-[11.5px] text-neutral-400">{progress.done}/{progress.total}<span className="hidden sm:inline"> marked</span>{timing ? <span className="hidden sm:inline"> · {timing}</span> : null}</span>}
-        <button type="button" onClick={() => openMarking(examId)} className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-[#D97757] px-2.5 py-1 text-[12px] font-semibold text-white hover:bg-[#c96a4c]">
+        {progress && <span className="min-w-0 truncate whitespace-nowrap text-[11.5px] text-neutral-400">{progress.done}/{progress.total}<span className="hidden sm:inline"> marked</span>{timing ? <span className="hidden sm:inline"> · {timing}</span> : null}</span>}
+        <button type="button" onClick={() => openMarking(examId)} className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-[#D97757] px-2.5 py-1 text-[12px] font-semibold text-white hover:bg-[#c96a4c]">
           <PanelRightOpen size={13} aria-hidden /><span className="whitespace-nowrap"><span className="sm:hidden">Red pen</span><span className="hidden sm:inline">Open live marking</span></span>
         </button>
       </div>

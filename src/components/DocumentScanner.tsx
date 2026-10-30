@@ -153,6 +153,11 @@ interface DocumentScannerProps {
    * page stands out from the desk), "Next student" starts the next script and "Done" saves. No AI on this screen.
    */
   quick?: boolean;
+  /**
+   * With quick: photograph one document (a marking scheme, a question paper) named by this title. No "Next student",
+   * and the class scan saved on this device is left untouched.
+   */
+  single?: string;
 }
 
 export default function DocumentScanner({
@@ -167,6 +172,7 @@ export default function DocumentScanner({
   saveLabel = 'Save to workspace',
   allowExport = true,
   quick = false,
+  single,
 }: DocumentScannerProps) {
   const [limits, setLimits] = useState<MarkingLimits>(DEFAULT_MARKING_LIMITS);
   useEffect(() => {
@@ -184,7 +190,7 @@ export default function DocumentScanner({
   );
   const isDefaultName = (name: string) => defaultNamePattern.test(name.trim());
 
-  const [candidates, setCandidates] = useState<Candidate[]>([{ id: 'c1', name: `${L.person} 1`, pages: [] }]);
+  const [candidates, setCandidates] = useState<Candidate[]>([{ id: 'c1', name: single ?? `${L.person} 1`, pages: [] }]);
   const [activeId, setActiveId] = useState('c1');
   const [draftReady, setDraftReady] = useState(false);
   const [restored, setRestored] = useState(false);
@@ -241,6 +247,7 @@ export default function DocumentScanner({
   /* ── draft: load once, then save (debounced) ── */
   useEffect(() => {
     let alive = true;
+    if (single) return; // one document: no draft, so the class scan saved on this device stays as it is
     void (async () => {
       const stored = (await draftGet()) ?? readLegacyDraft();
       if (!alive) return;
@@ -960,7 +967,7 @@ export default function DocumentScanner({
     setSavingPages(true);
     try {
       await onSavePages(pages);
-      await draftSet(null);
+      if (!single) await draftSet(null);
       onClose();
     } catch (error) {
       console.error('Could not save pages', error);
@@ -1139,15 +1146,15 @@ export default function DocumentScanner({
           {quick && flash > 0 && <div key={flash} className="bsc-flash" aria-hidden="true" />}
           <div className="bsc-cam-top">
             <button className="bsc-iconbtn" aria-label={quick ? 'See all pages' : 'Close camera'} onClick={() => setMode('home')}><Icon name="close" /></button>
-            <span className="bsc-chip">{activeName} · Page {(candidates.find((c) => c.id === activeId)?.pages.length ?? 0) + 1}</span>
+            <span className="bsc-chip">{single ?? activeName} · Page {(candidates.find((c) => c.id === activeId)?.pages.length ?? 0) + 1}</span>
             <button className="bsc-iconbtn" aria-label="Switch camera" onClick={flipCamera}><Icon name="flip" /></button>
           </div>
           {quick ? (
             <>
               <div className="bsc-quickbar">
                 <button className="bsc-btn bsc-sm" disabled={totalPages === 0} onClick={undoLast}>Undo</button>
-                <span className="bsc-quickcount" aria-live="polite">{totalPages} page{totalPages === 1 ? '' : 's'} · {candidates.filter((c) => c.pages.length).length} {L.people.toLowerCase()}</span>
-                <button className="bsc-btn bsc-sm" onClick={nextStudent}>Next {L.person.toLowerCase()} →</button>
+                <span className="bsc-quickcount" aria-live="polite">{totalPages} page{totalPages === 1 ? '' : 's'}{single ? '' : (() => { const n = candidates.filter((c) => c.pages.length).length; return ` · ${n} ${(n === 1 ? L.person : L.people).toLowerCase()}`; })()}</span>
+                {single ? <span style={{ width: 64 }} aria-hidden="true" /> : <button className="bsc-btn bsc-sm" onClick={nextStudent}>Next {L.person.toLowerCase()} →</button>}
               </div>
               <div className="bsc-cam-bottom" style={{ justifyContent: 'space-between', flexWrap: 'nowrap' }}>
                 <button className="bsc-iconbtn bsc-side" aria-label="Choose photos" onClick={() => galleryInputRef.current?.click()}><Icon name="gallery" size={22} /></button>
