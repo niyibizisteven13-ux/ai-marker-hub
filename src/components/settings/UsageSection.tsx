@@ -6,13 +6,14 @@ import { authFetch } from '../../utils/authFetch';
 
 interface Meter { used: number; limit: number; resetsAt: string }
 interface UsageData {
-  plan: { id: 'FREE' | 'GO' | 'PRO' | 'INSTITUTION'; name: string; priceUsd: number | null; listPriceUsd: number | null; priceRwf: number | null; priceNote: string };
+  plan: { id: 'FREE' | 'GO' | 'STARTER' | 'PRO' | 'PLUS' | 'INSTITUTION'; name: string; priceUsd: number | null; listPriceUsd: number | null; priceRwf: number | null; priceNote: string };
   credits: { day: Meter; week: Meter; month: Meter };
   features: Array<{ kind: 'tool' | 'vision' | 'artifact' | 'marking'; label: string; used: number; limit: number }>;
   limits: { maxMessageChars: number; maxAttachments: number; maxUploadMb: number; memory: boolean; memoryItems: number };
   recent: Array<{ at: string; kind: string; credits: number; channel: string }>;
-  upgrade: 'PRO' | 'INSTITUTION' | null;
-  pro: { priceUsd: number; listPriceUsd: number | null; priceRwf: number; daily: number };
+  upgrade: 'PRO' | 'PLUS' | null;
+  /** The plan suggested next. */
+  pro: { id: string; name: string; priceUsd: number; listPriceUsd: number | null; priceRwf: number; daily: number; monthly: number; memory: boolean };
 }
 
 const FEATURE_ICON: Record<string, LucideIcon> = { tool: Database, vision: ScanLine, artifact: FileBarChart2, marking: GraduationCap };
@@ -93,14 +94,8 @@ export default function UsageSection() {
       {usage.upgrade && (
         <div className="flex flex-col gap-3 rounded-2xl border border-[var(--accent)]/30 bg-[var(--accent)]/[0.06] p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-sm text-[var(--text)]">
-            {usage.upgrade === 'PRO' ? (
-              <>
-                <b>PRO</b> gives you {usage.pro.daily} credits a day, memory across all chats and larger files:{' '}
-                {usage.pro.listPriceUsd ? <span className="text-[var(--muted)] line-through">${usage.pro.listPriceUsd}</span> : null} <b>${usage.pro.priceUsd}/month</b> <span className="text-[var(--muted)]">(about {n(usage.pro.priceRwf)} RWF)</span>.
-              </>
-            ) : (
-              <><b>Institution</b> plans start at $50/month for 25 seats with shared credits and admin tools.</>
-            )}
+            <b>{usage.pro.name}</b> gives you {n(usage.pro.monthly)} credits a month{usage.pro.memory ? ', memory across all chats' : ''} and larger files:{' '}
+            <b>{n(usage.pro.priceRwf)} RWF a month</b> <span className="text-[var(--muted)]">(about ${usage.pro.priceUsd})</span>.
           </div>
           <a href="/upgrade?reason=usage" className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-[var(--on-accent)] hover:opacity-90">
             Upgrade <ArrowUpRight size={14} />

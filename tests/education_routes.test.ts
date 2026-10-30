@@ -208,6 +208,10 @@ test('documents API: input validation, 503 without a vision model, 404 for unkno
 });
 
 test('exams API: owner scoping, validation, scheme versions and status codes', async () => {
+  // Marking is part of the paid plans (Free has none).
+  const { prisma } = await import('../server/db.js');
+  await (prisma as any).subscription.deleteMany({ where: { userId: 'alice' } });
+  await (prisma as any).subscription.create({ data: { id: `sub-alice-${Date.now()}`, userId: 'alice', planType: 'STARTER', status: 'ACTIVE', startDate: new Date(), endDate: new Date(Date.now() + 30 * 86_400_000) } });
   const created = await fetch(`${base}/api/exams`, json('alice', { title: 'Mock exam', passPercent: 60 }));
   assert.equal(created.status, 201);
   const { examId, requestId } = await created.json();

@@ -121,7 +121,7 @@ export async function runAssistantTurn(input: TurnInput, depsOverride?: BridgeDe
     const base = (process.env.APP_BASE_URL || 'https://www.bwenge.space').replace(/\/$/, '');
     await api.sendMessage(chatId, card('⏳', gate.code === 'PAUSED' || gate.code === 'PROTECTED' ? (lang === 'rw' ? 'Ntibikunda ubu' : lang === 'fr' ? 'Indisponible pour le moment' : 'Temporarily unavailable') : lang === 'rw' ? 'Wageze ku rugero' : lang === 'fr' ? 'Limite atteinte' : 'Limit reached', esc(gate.message ?? '')), {
       replyTo: input.replyTo,
-      keyboard: { inline_keyboard: [[...(gate.upgrade ? [{ text: lang === 'rw' ? '⭐ Zamura konti' : lang === 'fr' ? '⭐ Passer à PRO' : '⭐ Upgrade', url: `${base}${gate.upgrade.url}` }] : []), { text: t.buttons.menu, callback_data: 'm:home' }]] },
+      keyboard: { inline_keyboard: [[...(gate.upgrade ? [{ text: lang === 'rw' ? '⭐ Zamura konti' : lang === 'fr' ? '⭐ Choisir un forfait' : '⭐ Upgrade', url: `${base}${gate.upgrade.url}` }] : []), { text: t.buttons.menu, callback_data: 'm:home' }]] },
     });
     return null;
   }

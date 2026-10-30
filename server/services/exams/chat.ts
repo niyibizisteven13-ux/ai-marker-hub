@@ -42,6 +42,8 @@ export interface ExplicitMarking {
   credit?: 'partial' | 'strict';
   corrections?: boolean;
   feedback?: 'brief' | 'detailed';
+  /** Mark overnight at half price (results within 24 h). */
+  overnight?: boolean;
 }
 
 /** Per-turn callbacks (the exam chat is shared by every request). */
@@ -88,6 +90,7 @@ const isText = (f: UploadFile) => /\.(csv|tsv|json|txt|md|docx|odt|rtf)$/i.test(
 /** "I don't have a scheme, mark it yourself" and similar. */
 const DRAFT_REQUEST = /\b(draft|write|create|make|generate|prepare)\b[^.]*\b(scheme|rubric|marking\s+guide|answers?)\b|\b(mark|grade)\s+(it|them)\s+(your\s*self|yourself|alone)\b|\b(don'?t|do\s+not|no)\s+(have\s+)?(an?\s+)?(official\s+)?(scheme|rubric|marking\s+(scheme|guide)|answer\s+key)\b|\buse\s+your\s+own\b|\bnta\s+(rubric|bar[eè]me)\b|\bpas\s+de\s+bar[eè]me\b/i;
 const app = () => (process.env.APP_BASE_URL || '').replace(/\/$/, '');
+const OVERNIGHT_REQUEST = /\b(?:over\s?night|half[- ]price|by (?:tomorrow|the morning)|ijoro)\b/i;
 const link = (label: string, path: string) => `[${label}](${app()}${path})`;
 /** A refusal as the teacher reads it: the upgrade page as a link, not a bare path. */
 const errorText = (err: ExamInputError | JobError) => err.message.replace(/Upgrade at (\/upgrade\S*?) to use it/, (_, p: string) => `${link('Upgrade', p)} to use it`);
@@ -249,6 +252,11 @@ export function createExamChat(deps: ExamChatDeps) {
     }
     e = await s.load(userId, examId);
     if (!e.runs.length) return { text: [...lines, statusText(e)].filter(Boolean).join('\n\n'), attachments: [] };
+    const latest = e.runs[e.runs.length - 1];
+    if (latest.mode === 'overnight' && !['completed', 'completed_with_warnings', 'failed', 'cancelled'].includes(latest.state)) {
+      const n = latest.submissionIds.length;
+      return { text: [...lines, `Marking ${n} script${n === 1 ? '' : 's'} **overnight at half price**. The marked PDFs and results will be ready by tomorrow morning, usually much sooner: each student appears in the card below as soon as their script is marked, and ${link('the results page', `/exams/${examId}/review`)} shows them too. You can close this page. Say "stop marking" to cancel.`].join('\n\n'), attachments: [] };
+    }
     const st = await waitRun(userId, examId, onStatus);
     e = await s.load(userId, examId);
     if (st === 'pending') return { text: [...lines, statusText(e), `Marking is still running in the background; the marked PDFs will be ready shortly. Each student appears in the card below as soon as their script is marked: press **Open live marking** to watch it beside this chat and see each marked page, or ask "status" here. You can say "stop marking" to cancel, or "mark strictly" / "no corrections" to change how it marks.`].filter(Boolean).join('\n\n'), attachments: [] };
@@ -411,8 +419,12 @@ export function createExamChat(deps: ExamChatDeps) {
       exam = await s.createExam(userId, { title });
     }
     await saveCtx(userId, { examId: exam.id, pending: null });
-    if (explicit && (explicit.instructions?.trim() || explicit.credit || explicit.corrections !== undefined || explicit.feedback)) {
+    // "Mark these overnight" in the message, or the Mark page's Overnight choice: half-price batches.
+    const overnight = (explicit?.overnight || OVERNIGHT_REQUEST.test(message)) && s.overnightAvailable();
+    if (overnight && !explicit) await s.setPreferences(userId, exam.id, { overnight: true });
+    if (explicit && (explicit.instructions?.trim() || explicit.credit || explicit.corrections !== undefined || explicit.feedback || overnight)) {
       await s.setPreferences(userId, exam.id, {
+        ...(overnight ? { overnight: true } : {}),
         ...(explicit.instructions?.trim() ? { instructions: explicit.instructions.trim().slice(0, 2000) } : {}),
         ...(explicit.credit ? { credit: explicit.credit } : {}),
         ...(explicit.corrections !== undefined ? { corrections: explicit.corrections } : {}),

@@ -98,6 +98,7 @@ export const chatSchema = z.object({
     credit: z.enum(['partial', 'strict']).optional(),
     corrections: z.boolean().optional(),
     feedback: z.enum(['brief', 'detailed']).optional(),
+    overnight: z.boolean().optional(),
   }).strict().optional(),
 }).strict();
 

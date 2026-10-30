@@ -23,7 +23,7 @@ export interface FeatureDecision {
   upgradeUrl?: string;
 }
 
-const firstPlanWithMarking = (): PlanId => (['GO', 'PRO', 'INSTITUTION'] as PlanId[]).find((id) => PLANS[id].limits.autonomousMarking) ?? 'PRO';
+const firstPlanWithMarking = (): PlanId => (['STARTER', 'PRO', 'PLUS'] as PlanId[]).find((id) => PLANS[id].limits.autonomousMarking) ?? 'PRO';
 
 /** May this user start marking work now: plan entitlement first, then the plan's limits and the admin pause. */
 export async function canUseAutonomousMarking(userId: string): Promise<FeatureDecision> {
@@ -32,7 +32,7 @@ export async function canUseAutonomousMarking(userId: string): Promise<FeatureDe
     const next = PLANS[firstPlanWithMarking()];
     return {
       allowed: false, plan: gate.plan.id, code: 'UPGRADE_REQUIRED', upgradeUrl: '/upgrade?reason=marking',
-      message: `Automatic marking of handwritten scripts (red-pen PDFs and reports) is part of the ${next.name}${next.id === 'GO' ? ', PRO and Institution plans' : ' plan'}. Upgrade at /upgrade?reason=marking to use it; your ${gate.plan.name} plan keeps scanning, reading documents and chat.`,
+      message: `Automatic marking of handwritten scripts (red-pen PDFs and reports) is part of the paid plans, from ${next.name} at ${(next.priceRwf ?? 0).toLocaleString('en-US')} RWF a month (or top up credits). Upgrade at /upgrade?reason=marking to use it; your ${gate.plan.name} plan keeps scanning, reading documents and chat.`,
     };
   }
   if (!gate.allowed) return { allowed: false, plan: gate.plan.id, code: gate.code ?? 'LIMIT', message: gate.message, upgradeUrl: gate.upgrade?.url };

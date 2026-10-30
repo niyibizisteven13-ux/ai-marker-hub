@@ -1,5 +1,5 @@
 import logger from '../utils/logger.js';
-import { PLANS, currentGoPacks, toRwf } from './billing/plans.js';
+import { PLANS, SOLD_PLANS, currentGoPacks } from './billing/plans.js';
 import { usageSummary } from './billing/usage.js';
 import { billingState } from './billing/payments.js';
 
@@ -29,8 +29,8 @@ export async function platformContext(userId: string | null | undefined, channel
     const left = (x: { used: number; limit: number }) => Math.max(0, x.limit - x.used);
     const dayLeft = left(u.credits.day);
     const low = u.credits.day.limit > 0 && dayLeft / u.credits.day.limit < 0.2;
-    const paid = b.plan === 'PRO' || b.plan === 'INSTITUTION';
-    const pro = PLANS.PRO;
+    const paid = b.plan !== 'FREE' && b.plan !== 'GO';
+    const priceList = SOLD_PLANS.map((id) => `${PLANS[id].name} ${PLANS[id].priceRwf?.toLocaleString('en-US')} RWF a month (about $${PLANS[id].priceUsd}; ${PLANS[id].limits.monthly.toLocaleString('en-US')} credits${PLANS[id].limits.memory ? ', memory across chats' : ''})`).join('; ');
     const smallestPack = currentGoPacks()[0];
     const L = (label: string, path: string) => `[${label}](${href(path, channel)})`;
     const lines = [
@@ -44,7 +44,7 @@ export async function platformContext(userId: string | null | undefined, channel
       `- Marking happens right here in the chat in one step: the user attaches the students' scripts in any form (PDFs, phone photos, Word or text files, or a ZIP folder, one sub-folder of page photos per student) and says "mark these", with or without a marking scheme. Without a scheme, Bwenge writes one from the questions and marks straight away. Bwenge reads the handwriting, marks each question and draws the corrections on the script itself in red pen (ticks, crosses, marks per question, corrections and a circled total); the reply brings back the marked PDF of every script and offers the Excel results. ${L('The results page', '/exams')} shows every marked page, lets the teacher move or change marks and share the PDFs. Never ask the user to confirm a scheme or to type "status"; if they ask how marking works, explain it in this simple way.`,
       `- Forms and surveys, all in the chat: the user describes a form (survey, research questionnaire, registration, application, feedback, quiz) and Bwenge designs it with sections, validated question types, branching and a data dictionary, reviews it (readiness score, consent and wording checks), changes it in plain words, and publishes it with a share link. When responses arrive, ask for results: statistics (frequencies, averages, cross-tabulations with chi-square, group comparisons, correlations), an interactive HTML report and an Excel file with a codebook. Each form also has a page to edit it and see results (the tools give the link).`,
       `- Learning: adaptive practice on any topic (questions adapt to the learner's level, with hints and confidence ratings) and classes for teachers (students join with a code; the teacher sees an anonymous per-topic overview): ${L('Practice & classes', '/learn')}. In chat, a Socratic tutor mode (hints, not answers) and roleplay practice are in the mode picker under the message box${channel === 'telegram' ? ' (/socratic, /roleplay, /normal here)' : ''}.`,
-      `- Plans and payment: ${L('Upgrade', '/upgrade')}. PRO costs $${pro.priceUsd} a month (about ${toRwf(pro.priceUsd ?? 0).toLocaleString('en-US')} RWF; regular price $${pro.listPriceUsd ?? 9}) with more daily credits and memory across chats; GO credit packs start at ${smallestPack ? `${smallestPack.rwf.toLocaleString('en-US')} RWF for ${smallestPack.credits} credits` : '500 RWF'}; Institution from $50 a month. Payment is by MTN Mobile Money${b.payments === 'ready' ? '' : ' (being set up right now; say payments open soon)'}; receipts arrive by email and Telegram.`,
+      `- Plans and payment: ${L('Upgrade', '/upgrade')}. Plans: ${priceList}. The Free plan has ${PLANS.FREE.limits.monthly} credits a month and no automatic marking. Credit top-ups start at ${smallestPack ? `${smallestPack.rwf.toLocaleString('en-US')} RWF for ${smallestPack.credits} credits` : '500 RWF'}. Schools buy one Teacher plan per teacher. Marking a script with the standard model costs about 12 credits; overnight marking (results by the next morning) costs half. Payment is by MTN Mobile Money${b.payments === 'ready' ? '' : ' (being set up right now; say payments open soon)'}; receipts arrive by email and Telegram.`,
       `- Settings (language, memory, usage, billing, Telegram link): ${channel === 'telegram' ? '/settings here, or' : ''} ${L('Settings', '/settings')}.`,
       '',
       paid

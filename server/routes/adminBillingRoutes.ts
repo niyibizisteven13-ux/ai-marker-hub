@@ -3,7 +3,7 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../db.js';
 import logger from '../utils/logger.js';
-import { DEFAULT_GO_PACKS, PLANS, currentGoPacks, fxUsdRwf, planFor, refreshBillingSettings, toRwf, walletBalance, type BillingSettings } from '../services/billing/plans.js';
+import { DEFAULT_GO_PACKS, PLANS, SOLD_PLANS, currentGoPacks, planIdForSubscription, subscriptionTypeFor, fxUsdRwf, planFor, refreshBillingSettings, toRwf, walletBalance, type BillingSettings } from '../services/billing/plans.js';
 import { momoConfig, momoHealth, momoMode } from '../services/billing/momo.js';
 import { checkPayment, publicPayment, runRenewalSweep } from '../services/billing/payments.js';
 import { periods, usedTotals } from '../services/billing/usage.js';
@@ -41,7 +41,7 @@ router.get('/overview', async (_req, res) => {
       aiCost: { usd: Math.round(costUsd * 100) / 100, rwf: toRwf(costUsd), credits: Number(usage?._sum?.credits ?? 0) },
       margin: { usd: Math.round((revenueUsd - costUsd) * 100) / 100, percent: revenueUsd > 0 ? Math.round(((revenueUsd - costUsd) / revenueUsd) * 100) : null },
       pendingPayments: pending,
-      subscriptions: { pro: activeSubs.filter((s: any) => s.planType === 'PRO' || s.planType === 'BUSINESS').length, institution: activeSubs.filter((s: any) => s.planType === 'ORGANIZATION' || s.planType === 'INSTITUTION').length },
+      subscriptions: Object.fromEntries((['STARTER', 'PRO', 'PLUS', 'INSTITUTION'] as const).map((id) => [id, activeSubs.filter((s: any) => planIdForSubscription(s.planType) === id).length])),
       goCredits: { sold: Number(sold?._sum?.delta ?? 0), used: -Number(spent?._sum?.delta ?? 0) },
       momo: { mode: momoMode(), targetEnv: momoConfig().targetEnv, currency: momoConfig().currency, callback: momoConfig().callbackHost.startsWith('https://') },
     });
@@ -70,12 +70,13 @@ const limitsSchema = z.object({
   maxMessageChars: z.number().int().min(500).max(500_000), maxAttachments: z.number().int().min(0).max(100), maxUploadMb: z.number().int().min(1).max(500),
   memory: z.boolean(), memoryItems: z.number().int().min(0).max(1_000_000),
 }).partial();
+const priceSchema = z.object({ priceRwf: z.number().int().min(100).max(10_000_000).optional() });
 const settingsSchema = z.object({
+  schema: z.literal(2).default(2),
   fxUsdRwf: z.number().min(100).max(100_000).optional(),
-  pro: z.object({ priceUsd: z.number().min(0.5).max(1000).optional(), listPriceUsd: z.number().min(0).max(1000).nullable().optional() }).optional(),
-  institution: z.object({ priceUsd: z.number().min(1).max(100_000).optional() }).optional(),
+  prices: z.object({ STARTER: priceSchema, PRO: priceSchema, PLUS: priceSchema }).partial().optional(),
   goPacks: z.array(z.object({ id: z.string().regex(/^[a-z0-9-]{2,30}$/), rwf: z.number().int().min(100).max(10_000_000), credits: z.number().int().min(1).max(10_000_000) })).min(1).max(8).optional(),
-  limits: z.object({ FREE: limitsSchema, GO: limitsSchema, PRO: limitsSchema, INSTITUTION: limitsSchema }).partial().optional(),
+  limits: z.object({ FREE: limitsSchema, GO: limitsSchema, STARTER: limitsSchema, PRO: limitsSchema, PLUS: limitsSchema, INSTITUTION: limitsSchema }).partial().optional(),
 }).strict();
 
 router.get('/settings', async (_req, res) => {
@@ -83,7 +84,7 @@ router.get('/settings', async (_req, res) => {
   await refreshBillingSettings(true);
   res.json({
     success: true, settings: row?.value ?? {}, updatedAt: row?.updatedAt ?? null,
-    effective: { fxUsdRwf: fxUsdRwf(), goPacks: currentGoPacks(), defaultGoPacks: DEFAULT_GO_PACKS, plans: Object.fromEntries(Object.values(PLANS).map((p) => [p.id, { priceUsd: p.priceUsd, listPriceUsd: p.listPriceUsd ?? null, priceRwf: p.priceUsd ? toRwf(p.priceUsd) : null, limits: p.limits }])) },
+    effective: { fxUsdRwf: fxUsdRwf(), goPacks: currentGoPacks(), defaultGoPacks: DEFAULT_GO_PACKS, plans: Object.fromEntries(Object.values(PLANS).map((p) => [p.id, { name: p.name, sold: (SOLD_PLANS as readonly string[]).includes(p.id), priceUsd: p.priceUsd, priceRwf: p.priceRwf, limits: p.limits }])) },
   });
 });
 
@@ -139,7 +140,7 @@ router.get('/users', async (req, res) => {
 /** Grants a plan for N days, or moves the user back to Free (ends the subscription now). */
 router.post('/users/:id/plan', async (req, res) => {
   try {
-    const body = z.object({ plan: z.enum(['FREE', 'PRO', 'INSTITUTION']), days: z.number().int().min(1).max(3660).optional() }).strict().parse(req.body ?? {});
+    const body = z.object({ plan: z.enum(['FREE', 'STARTER', 'PRO', 'PLUS', 'INSTITUTION']), days: z.number().int().min(1).max(3660).optional() }).strict().parse(req.body ?? {});
     const userId = req.params.id;
     if (!(await db.user.findUnique({ where: { id: userId } }))) return res.status(404).json({ error: 'User not found.' });
     const sub = await db.subscription.findUnique({ where: { userId } });
@@ -147,7 +148,7 @@ router.post('/users/:id/plan', async (req, res) => {
     if (body.plan === 'FREE') {
       if (sub) await db.subscription.update({ where: { userId }, data: { status: 'CANCELED', endDate: now } });
     } else {
-      const planType = body.plan === 'INSTITUTION' ? 'ORGANIZATION' : 'PRO';
+      const planType = subscriptionTypeFor(body.plan);
       const endDate = new Date(now.getTime() + (body.days ?? 30) * 86_400_000);
       if (sub) await db.subscription.update({ where: { userId }, data: { planType, status: 'ACTIVE', startDate: now, endDate } });
       else await db.subscription.create({ data: { id: randomUUID(), userId, planType, status: 'ACTIVE', startDate: now, endDate, createdAt: now, updatedAt: now } });

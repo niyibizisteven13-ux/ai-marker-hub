@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { ChatMessage, ContentPart, ToolDefinition } from '../types.js';
+import { batchCollector, isOvernight, type BatchCollector } from '../batchMode.js';
 import { ProviderError, redactUpstreamText, parseRetryAfter, type ProviderAdapter, type ProviderChunk, type ProviderRequest } from './types.js';
 
 export interface AnthropicAdapterOptions {
@@ -20,6 +21,8 @@ export interface AnthropicAdapterOptions {
    * researched and cited. maxUses caps searches per request.
    */
   webTools?: { maxUses?: number } | false;
+  /** Sends requests made in overnight mode (see batchMode.ts) as half-price batches. Default: the shared collector. */
+  batch?: BatchCollector | false;
 }
 
 /** Longest a paused server-tool turn is resumed (each resume continues the same answer). */
@@ -181,7 +184,24 @@ export class AnthropicAdapter implements ProviderAdapter {
     // Content of earlier parts of a paused turn (server tools stop after a set number of steps).
     const before: Anthropic.ContentBlock[] = [];
     const usage = { input: 0, output: 0 };
+    // Overnight work goes through the Message Batches API at half price (no web research there).
+    const batch = this.opts.batch !== false && isOvernight() && !web.length ? this.opts.batch ?? batchCollector : null;
     for (let resume = 0; ; resume++) {
+      if (batch) {
+        try {
+          finalMessage = await batch.run(this.client, params as Anthropic.MessageCreateParamsNonStreaming, req.signal);
+        } catch (err) {
+          throw mapError(this.name, err, req.signal);
+        }
+        for (const b of finalMessage.content) {
+          if (b.type === 'thinking' && b.thinking) yield { type: 'reasoning', text: b.thinking };
+          else if (b.type === 'text' && b.text) yield { type: 'text', text: b.text };
+        }
+        const u = finalMessage.usage;
+        usage.input += (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+        usage.output += u.output_tokens ?? 0;
+        break;
+      }
       try {
         const stream = this.client.messages.stream(params, { signal: req.signal });
         const pending = new Map<number, { id: string; name: string; json: string }>();

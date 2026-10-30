@@ -107,7 +107,7 @@ export function settingsCard(lang: Lang, account: { linked: boolean; email?: str
 
 export function settingsKeyboard(lang: Lang, plan?: PlanView): InlineKeyboard {
   const mark = (l: Lang, label: string) => ({ text: `${l === lang ? '✓ ' : ''}${label}`, callback_data: `l:${l}` });
-  const upgrade: InlineButton[][] = plan?.upgradeUrl ? [[{ text: `⭐ ${lang === 'rw' ? 'Zamura' : lang === 'fr' ? 'Passer à PRO' : 'Upgrade to PRO'}${plan.upgradePrice ? ` · ${plan.upgradePrice}` : ''}`, url: plan.upgradeUrl }]] : [];
+  const upgrade: InlineButton[][] = plan?.upgradeUrl ? [[{ text: `⭐ ${lang === 'rw' ? 'Zamura' : lang === 'fr' ? 'Choisir un forfait' : 'Upgrade'}${plan.upgradePrice ? ` · ${plan.upgradePrice}` : ''}`, url: plan.upgradeUrl }]] : [];
   return backKeyboard(lang, [[mark('en', 'English'), mark('rw', 'Kinyarwanda'), mark('fr', 'Français')], ...upgrade]);
 }
 

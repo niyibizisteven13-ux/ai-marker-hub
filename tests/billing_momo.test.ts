@@ -82,10 +82,14 @@ test('MoMo mode and phone numbers: sandbox accepts test numbers, production only
   } finally { process.env.MOMO_TARGET_ENV = prev; }
 });
 
-test('quotes come from the server price list: PRO $3 a month in RWF, GO packs, months capped at 12', async () => {
+test('quotes come from the server price list: Starter / Teacher / Teacher Plus in RWF, top-ups, months capped at 12', async () => {
   const pro = await quote('PRO', { months: 3 });
-  assert.equal(PLANS.PRO.priceUsd, 3);
-  assert.equal(pro.amountRwf, toRwf(3) * 3);
+  assert.equal(PLANS.PRO.name, 'Teacher');
+  assert.equal(pro.amountRwf, 4_500 * 3);
+  assert.equal((await quote('STARTER')).amountRwf, 1_500);
+  assert.equal((await quote('PLUS')).amountRwf, 7_000);
+  assert.match((await quote('PLUS')).item, /Teacher Plus plan · 1 month/);
+  await assert.rejects(quote('INSTITUTION' as any), /not available for online payment/);
   assert.equal((await quote('PRO', { months: 99 })).months, 12);
   const pack = currentGoPacks()[0];
   const go = await quote('GO_PACK', { packId: pack.id });
@@ -100,7 +104,7 @@ test('PRO purchase: request-to-pay reaches MTN, status is confirmed with MTN, pl
   const { payment } = await startPayment(userId, { purpose: 'PRO', months: 1, phone: '0788123456' });
   const sent = mtn.requests.get(payment.id);
   assert.ok(sent, 'MTN received the request with our payment id as X-Reference-Id');
-  assert.equal(sent.body.amount, String(toRwf(3)));
+  assert.equal(sent.body.amount, '4500');
   assert.equal(sent.body.payer.partyId, '250788123456');
   assert.equal(sent.headers['x-target-environment'], 'sandbox');
   assert.equal(sent.headers['x-callback-url'], `https://pay.example.test/api/billing/momo/callback/${payment.id}`);
@@ -135,7 +139,7 @@ test('PRO purchase: request-to-pay reaches MTN, status is confirmed with MTN, pl
   assert.equal(receipts.length, 1, 'one receipt email');
   assert.match(receipts[0].subject, /receipt/i);
   assert.match(receipts[0].html, new RegExp(done.receiptNumber!));
-  assert.match(receipts[0].text, /PRO/);
+  assert.match(receipts[0].text, /Teacher/);
 
   // Someone else cannot read or check this payment.
   await assert.rejects(checkPayment(payment.id, await newUser()), /not found/i);
@@ -327,7 +331,10 @@ test('platform context: the AI knows the plan, credits left, real links, and whe
   const free = await newUser();
   const web = await platformContext(free, 'web');
   assert.match(web, /Free plan/);
-  assert.match(web, /Credits left: \d+ of 20 today/);
+  assert.match(web, /Credits left: \d+ of 15 today/);
+  assert.match(web, /Starter 1,500 RWF a month/);
+  assert.match(web, /Teacher 4,500 RWF a month/);
+  assert.match(web, /overnight marking/);
   assert.match(web, /\[Open the scanner\]\([^)]*\/scan\)/);
   assert.match(web, /\[The results page\]\([^)]*\/exams\)/);
   assert.match(web, /\[Upgrade\]\([^)]*\/upgrade\)/);
@@ -342,7 +349,7 @@ test('platform context: the AI knows the plan, credits left, real links, and whe
   const pro = await newUser();
   await db.subscription.create({ data: { id: randomUUID(), userId: pro, planType: 'PRO', status: 'ACTIVE', startDate: new Date(), endDate: new Date(Date.now() + 10 * 86_400_000) } });
   const p = await platformContext(pro, 'web');
-  assert.match(p, /PRO plan, active until/);
+  assert.match(p, /Teacher plan, active until/);
   assert.match(p, /do not suggest upgrading/);
   assert.equal(await platformContext(null, 'web'), '');
 });
@@ -357,9 +364,12 @@ test('marking access follows the plan and GO credits: no "free result used, pay 
   await db.usageQuota.create({ data: { id: randomUUID(), userId: paid, service: 'grading', freeUsed: 5 } }).catch(() => undefined);
   for (let i = 0; i < 3; i++) assert.equal((await paywall.checkAccess(paid, 'grading', randomUUID())).allowed, true, 'GO credits pay for marking, every time');
 
-  // A free user with credits left today is allowed too; out of credits and no wallet → upgrade message, no "free result".
+  // Starter users mark from their monthly credits; Free users (no marking on Free) and paid users who ran out
+  // with no top-up get an upgrade message, never a "free result".
+  const starter = await newUser();
+  await db.subscription.create({ data: { id: randomUUID(), userId: starter, planType: 'STARTER', status: 'ACTIVE', startDate: new Date(), endDate: new Date(Date.now() + 10 * 86_400_000) } });
+  assert.equal((await paywall.checkAccess(starter, 'grading', randomUUID())).allowed, true);
   const free = await newUser();
-  assert.equal((await paywall.checkAccess(free, 'grading', randomUUID())).allowed, true);
   await db.usageRecord.create({ data: { id: randomUUID(), userId: free, kind: 'chat', credits: 25, model: 'gonka', inputTokens: 0, outputTokens: 0, costUsd: 0, channel: 'web', createdAt: new Date() } });
   const denied = await paywall.checkAccess(free, 'grading', randomUUID());
   assert.equal(denied.allowed, false);
@@ -427,7 +437,7 @@ test('AI guard: admin pause stops everyone, admins included; the profit guard st
   assert.equal(f.allowed, false);
   assert.equal(f.code, 'PROTECTED');
   assert.match(f.message!, /Free AI answers are paused/);
-  assert.match(f.message!, /GO credits/, 'offers a way to continue');
+  assert.match(f.message!, /top up/, 'offers a way to continue');
   assert.equal((await checkUsage(go, { kind: 'chat' })).allowed, true, 'paying users continue');
   assert.equal((await checkUsage(admin, { kind: 'chat' })).allowed, true, 'the profit guard never stops admins');
   await saveGuardSettings({ lossGuard: { enabled: false } }, admin);

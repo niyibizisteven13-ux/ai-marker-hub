@@ -11,6 +11,7 @@ import { PDFDocument, degrees, rgb } from 'pdf-lib';
 import type { ProviderAdapter, ProviderRequest } from '../server/services/ai/providers/types.js';
 import { FileStore } from '../server/services/ai/files/FileStore.js';
 import { FileJobQueue } from '../server/services/ai/jobs/fileJobQueue.js';
+import { isOvernight } from '../server/services/ai/batchMode.js';
 import { OwnedRecordStore } from '../server/services/storage/ownedRecordStore.js';
 import { createDocumentService, type DocumentRecord } from '../server/services/documents/service.js';
 import { loadPages } from '../server/services/documents/pages.js';
@@ -1154,4 +1155,33 @@ test('criterion evidence places separate red symbols next to working without dup
   assert.ok(steps.every(i => i.placed && i.fx >= 0.6));
   assert.ok(steps[0].fy < steps[1].fy);
   assert.deepEqual(layout.items.find(i => i.id === 'Q1:mark')!.symbols, []);
+});
+
+test('overnight: the run goes to the overnight queue, every model call runs in batch mode, credits are charged at half price', async () => {
+  const nightQueue = new FileJobQueue({ storageDir: path.join(root, 'night-jobs'), concurrency: 1, retryDelayMs: 20, deadlineMs: 60_000 });
+  const usage: Array<{ what: string; batch?: boolean }> = [];
+  const night = createExamService({ fileStore, queue, overnightQueue: nightQueue, store: new OwnedRecordStore<ExamRecord>(path.join(root, 'night-exams')), documents, agent: () => target, visionAvailable: () => true, maxPages: 5, retryDelayMs: 10, forbiddenStrings: [root], onUsage: (_u, x) => usage.push(x) });
+  const seen: boolean[] = [];
+  const stream = adapter.stream;
+  adapter.stream = (req) => { seen.push(isOvernight()); return stream.call(adapter, req); };
+  try {
+    const user = 'teacher-night';
+    const exam = await night.createExam(user, { title: 'Algebra quiz' });
+    await night.setSchemeJson(user, exam.id, SCHEME, { confirm: true });
+    await night.addSubmissions(user, exam.id, [{ name: 'C001.pdf', buffer: await scriptPdf('C001') }]);
+    await night.setPreferences(user, exam.id, { overnight: true });
+    const started = await night.startMarking(user, exam.id);
+    assert.ok(await nightQueue.get(started.jobId, user), 'the job is on the overnight queue');
+    assert.equal(await queue.get(started.jobId, user), null, 'not on the live queue');
+    let e = await night.load(user, exam.id);
+    for (let i = 0; i < 600 && !['completed', 'completed_with_warnings', 'failed'].includes(e.runs[0].state); i++) { await new Promise((r) => setTimeout(r, 50)); e = await night.load(user, exam.id); }
+    assert.equal(e.runs[0].mode, 'overnight');
+    assert.equal(e.runs[0].state, 'completed');
+    assert.ok(seen.length >= 2 && seen.every(Boolean), 'recognition and marking both ran in batch mode');
+    assert.deepEqual(usage.map((u) => [u.what, u.batch]), [['mark', true]]);
+    assert.match(e.events!.find((x) => x.type === 'job_created')!.message, /overnight at half price/);
+  } finally {
+    adapter.stream = stream;
+    await nightQueue.stop();
+  }
 });

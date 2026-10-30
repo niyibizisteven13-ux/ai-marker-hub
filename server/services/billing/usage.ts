@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../../db.js';
-import { PLANS, currentGoPacks, planFor, toRwf, walletBalance, type PlanId, type PlanInfo, type UsageKind } from './plans.js';
+import { PLANS, currentGoPacks, planFor, walletBalance, type PlanId, type PlanInfo, type UsageKind } from './plans.js';
+import { BATCH_PRICE_FACTOR } from '../ai/batchMode.js';
 import { guardFor } from './aiGuard.js';
 import { markingEntitled } from './entitlements.js';
 
@@ -31,8 +32,9 @@ export function costUsd(model: string | null | undefined, inputTokens: number, o
   return (Math.max(0, inputTokens) * i + Math.max(0, outputTokens) * o) / 1_000_000;
 }
 
-export const creditsFor = (model: string | null | undefined, inputTokens: number, outputTokens: number) =>
-  Math.max(1, Math.ceil(costUsd(model, inputTokens, outputTokens) / USD_PER_CREDIT - 1e-9));
+/** Credits for a model call; batch (overnight) calls cost half, like the API price. */
+export const creditsFor = (model: string | null | undefined, inputTokens: number, outputTokens: number, batch = false) =>
+  Math.max(1, Math.ceil((costUsd(model, inputTokens, outputTokens) * (batch ? BATCH_PRICE_FACTOR : 1)) / USD_PER_CREDIT - 1e-9));
 
 /** Start of the current day, ISO week (Monday) and month in Kigali time, and when each resets. */
 export function periods(now = Date.now()) {
@@ -76,17 +78,19 @@ function until(d: Date, now: number) {
   return h < 1 ? 'within the hour' : h < 48 ? `in ${h} h` : `on ${d.toISOString().slice(0, 10)}`;
 }
 
+/** The plan to suggest next: Teacher for Free / top-up / Starter users, Teacher Plus for Teacher users. */
 function nextPlan(plan: PlanInfo): PlanId | null {
-  return plan.id === 'FREE' || plan.id === 'GO' ? 'PRO' : plan.id === 'PRO' ? 'INSTITUTION' : null;
+  return plan.id === 'FREE' || plan.id === 'GO' || plan.id === 'STARTER' ? 'PRO' : plan.id === 'PRO' ? 'PLUS' : null;
 }
+const rwf = (n: number | null) => `${(n ?? 0).toLocaleString('en-US')} RWF`;
 
 function upsell(plan: PlanInfo): string {
   const next = nextPlan(plan);
-  if (!next) return 'Contact your administrator to raise the limit.';
-  const p = PLANS[next];
   const minPack = currentGoPacks()[0];
-  if (next === 'PRO') return `Upgrade to PRO ($${p.priceUsd}/month, about ${toRwf(p.priceUsd!).toLocaleString('en-US')} RWF) for ${p.limits.daily} credits a day and memory across all chats, or buy GO credits from ${minPack.rwf.toLocaleString('en-US')} RWF.`;
-  return `Institutions get ${p.limits.daily} credits a day per member, from $${p.priceUsd}/month.`;
+  const topUp = minPack ? `, or top up from ${rwf(minPack.rwf)}` : '';
+  if (!next) return `Top up credits to keep going${minPack ? ` (from ${rwf(minPack.rwf)})` : ''}.`;
+  const p = PLANS[next];
+  return `${p.name} (${rwf(p.priceRwf)} a month, about $${p.priceUsd}) gives ${p.limits.monthly.toLocaleString('en-US')} credits a month${p.limits.memory ? ' and memory across all chats' : ''}${topUp}.`;
 }
 
 /** Checks the plan limits before an AI action. Totals are compared before the action is charged. */
@@ -123,10 +127,10 @@ export async function checkUsage(userId: string, req: { kind: UsageKind; chars?:
 }
 
 /** Records one AI action and returns the credits charged. Never throws: metering must not break a reply. */
-export async function recordUsage(userId: string, u: { kind: UsageKind; model?: string | null; inputTokens?: number; outputTokens?: number; channel?: 'web' | 'telegram'; minCredits?: number }): Promise<number> {
+export async function recordUsage(userId: string, u: { kind: UsageKind; model?: string | null; inputTokens?: number; outputTokens?: number; channel?: 'web' | 'telegram'; minCredits?: number; /** Sent as an overnight batch (half price). */ batch?: boolean }): Promise<number> {
   const input = Math.max(0, Math.round(u.inputTokens ?? 0));
   const output = Math.max(0, Math.round(u.outputTokens ?? 0));
-  const credits = Math.max(u.minCredits ?? 1, creditsFor(u.model, input, output));
+  const credits = Math.max(u.minCredits ?? 1, creditsFor(u.model, input, output, u.batch));
   try {
     // Beyond the plan allowance (or a daily feature cap), the action is paid from GO credits.
     const plan = await planFor(userId);
@@ -137,7 +141,7 @@ export async function recordUsage(userId: string, u: { kind: UsageKind; model?: 
       const balance = await walletBalance(userId);
       if (balance > 0) await db.creditLedger.create({ data: { id: randomUUID(), userId, delta: -Math.min(credits, balance), reason: 'usage', note: u.kind, createdAt: new Date() } });
     }
-    await db.usageRecord.create({ data: { id: randomUUID(), userId, kind: u.kind, credits, model: u.model ?? null, inputTokens: input, outputTokens: output, costUsd: costUsd(u.model, input, output), channel: u.channel ?? 'web', createdAt: new Date() } });
+    await db.usageRecord.create({ data: { id: randomUUID(), userId, kind: u.kind, credits, model: u.model ?? null, inputTokens: input, outputTokens: output, costUsd: costUsd(u.model, input, output) * (u.batch ? BATCH_PRICE_FACTOR : 1), channel: u.channel ?? 'web', createdAt: new Date() } });
   } catch {
     /* metering is best-effort */
   }
@@ -153,7 +157,7 @@ export async function usageSummary(userId: string, now = Date.now()) {
   const wallet = await walletBalance(userId);
   return {
     wallet: { credits: wallet, packs: currentGoPacks() },
-    plan: { id: plan.id, name: plan.name, priceUsd: plan.priceUsd, listPriceUsd: plan.listPriceUsd ?? null, priceRwf: plan.priceUsd ? toRwf(plan.priceUsd) : null, priceNote: plan.priceNote },
+    plan: { id: plan.id, name: plan.name, priceUsd: plan.priceUsd, listPriceUsd: plan.listPriceUsd ?? null, priceRwf: plan.priceRwf, priceNote: plan.priceNote },
     credits: {
       day: { used: used.day, limit: L.daily, resetsAt: p.resets.day.toISOString() },
       week: { used: used.week, limit: L.weekly, resetsAt: p.resets.week.toISOString() },
@@ -163,6 +167,7 @@ export async function usageSummary(userId: string, now = Date.now()) {
     limits: { maxMessageChars: L.maxMessageChars, maxAttachments: L.maxAttachments, maxUploadMb: L.maxUploadMb, memory: L.memory, memoryItems: L.memoryItems, autonomousMarking: markingEntitled(L) },
     recent: recent.map((r: any) => ({ at: new Date(r.createdAt).toISOString(), kind: r.kind, credits: r.credits, channel: r.channel })),
     upgrade: nextPlan(plan),
-    pro: { priceUsd: PLANS.PRO.priceUsd, listPriceUsd: PLANS.PRO.listPriceUsd ?? null, priceRwf: toRwf(PLANS.PRO.priceUsd!), daily: PLANS.PRO.limits.daily },
+    /** The plan suggested next (name, price and monthly credits), for the upgrade note. */
+    pro: (() => { const n = PLANS[nextPlan(plan) ?? 'PRO']; return { id: n.id, name: n.name, priceUsd: n.priceUsd, listPriceUsd: n.listPriceUsd ?? null, priceRwf: n.priceRwf ?? 0, daily: n.limits.daily, monthly: n.limits.monthly, memory: n.limits.memory }; })(),
   };
 }

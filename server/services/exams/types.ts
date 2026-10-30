@@ -139,6 +139,8 @@ export interface MarkingRun {
   finishedAt?: string;
   jobIds: string[];
   error?: string;
+  /** overnight = sent as half-price batches, results within 24 h (usually much sooner). */
+  mode?: 'live' | 'overnight';
 }
 
 export interface AuditEvent {
@@ -213,6 +215,8 @@ export interface MarkingPreferences {
   feedback: 'brief' | 'detailed';
   /** The teacher's own marking instructions ("accept g = 9.8 or 10"); followed unless they contradict the scheme. */
   instructions?: string;
+  /** Mark overnight as half-price batches (results within 24 h) instead of now. */
+  overnight?: boolean;
   updatedAt?: string;
 }
 

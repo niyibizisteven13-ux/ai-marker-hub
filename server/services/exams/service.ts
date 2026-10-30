@@ -4,6 +4,7 @@ import sharp from 'sharp';
 import type { FileStore } from '../ai/files/FileStore.js';
 import { extractText } from '../ai/files/extract.js';
 import { FileJobQueue, JobError, type FileJob, type JobContext } from '../ai/jobs/fileJobQueue.js';
+import { isOvernight, runOvernight } from '../ai/batchMode.js';
 import { StructuredOutputError } from '../ai/llm/structuredJson.js';
 import type { ProviderAdapter } from '../ai/providers/types.js';
 import { documentText, finalText } from '../documents/pipeline.js';
@@ -39,6 +40,8 @@ export class ExamInputError extends Error {
 export interface ExamDeps {
   fileStore: FileStore;
   queue: FileJobQueue;
+  /** Queue for overnight (half-price batch) marking runs, whose jobs may wait many hours. Absent = not offered. */
+  overnightQueue?: FileJobQueue;
   store: OwnedRecordStore<ExamRecord>;
   documents: DocumentService;
   /** Text model for scheme extraction and marking. */
@@ -61,7 +64,7 @@ export interface ExamDeps {
    */
   entitlement?: (userId: string) => Promise<{ allowed: boolean; code?: string; message?: string; upgradeUrl?: string }>;
   /** Called once per marked or re-marked script with the model tokens it used, for credits and cost tracking. */
-  onUsage?: (userId: string, u: { model: string; input: number; output: number; what: 'mark' | 'remark' }) => void;
+  onUsage?: (userId: string, u: { model: string; input: number; output: number; what: 'mark' | 'remark'; batch?: boolean }) => void;
 }
 
 const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -112,6 +115,10 @@ export function parseManifest(text: string): CandidateMapping[] {
 export function createExamService(deps: ExamDeps) {
   const concurrency = Math.max(1, Math.min(8, Math.floor(deps.candidateConcurrency || 4)));
   const budget = deps.segmentBudgetMs ?? 8 * 60 * 1000;
+  // Overnight: every script at once, so each step of all scripts shares one batch; one job runs the night.
+  const OVERNIGHT_CONCURRENCY = 200;
+  const OVERNIGHT_BUDGET_MS = 24 * 3600_000;
+  const queueFor = (run: Pick<MarkingRun, 'mode'> | undefined) => (run?.mode === 'overnight' && deps.overnightQueue ? deps.overnightQueue : deps.queue);
   const maxCandidates = deps.maxCandidates ?? 100;
 
   // Live viewers of an exam's events (this process). Other processes replay from the stored record.
@@ -440,9 +447,12 @@ export function createExamService(deps: ExamDeps) {
   }
 
   // ── Marking runs ────────────────────────────────────────────────────────
-  async function startMarking(userId: string, examId: string, opts: { submissionIds?: string[]; remarkAll?: boolean } = {}) {
+  async function startMarking(userId: string, examId: string, opts: { submissionIds?: string[]; remarkAll?: boolean; overnight?: boolean } = {}) {
     await deps.beforeAi?.(userId);
     const exam = await load(userId, examId);
+    // The exam's preference applies unless this request says otherwise (marking straight after the scheme is read).
+    const overnight = (opts.overnight ?? exam.preferences?.overnight ?? false) && !!deps.overnightQueue;
+    if (opts.overnight && !deps.overnightQueue) throw new ExamInputError('OVERNIGHT_UNAVAILABLE', 'Overnight marking is not available right now. Mark now instead.', 503);
     const sv = confirmedScheme(exam);
     if (!sv?.scheme) {
       const latest = latestScheme(exam);
@@ -455,18 +465,18 @@ export function createExamService(deps: ExamDeps) {
     if (!ids.length) throw new ExamInputError('NOTHING_TO_MARK', 'Every script is already marked with the current scheme. Ask to re-mark if you want a fresh run.', 409);
     const active = exam.runs.find((r) => !['completed', 'completed_with_warnings', 'failed', 'cancelled'].includes(r.state));
     if (active) throw new ExamInputError('RUN_IN_PROGRESS', 'A marking run is already in progress for this examination.', 409);
-    const run: MarkingRun = { id: randomUUID(), schemeVersion: sv.version, submissionIds: ids, state: 'queued', createdAt: now(), createdBy: userId, jobIds: [] };
+    const run: MarkingRun = { id: randomUUID(), schemeVersion: sv.version, submissionIds: ids, state: 'queued', createdAt: now(), createdBy: userId, jobIds: [], ...(overnight ? { mode: 'overnight' as const } : {}) };
     // Save the run before its job is queued: the queue may start the job at once.
     await mutate(userId, examId, (e) => {
       e.runs.push(run);
       for (const s of e.submissions) if (ids.includes(s.id)) { s.state = 'queued'; s.stateAt = now(); delete s.error; }
     });
-    const { job } = await deps.queue.submit<MarkJobPayload>({ type: 'exam.mark', ownerId: userId, payload: { examId, runId: run.id, segment: 0 }, idempotencyKey: `${run.id}:0`, maxAttempts: 3 });
+    const { job } = await queueFor(run).submit<MarkJobPayload>({ type: 'exam.mark', ownerId: userId, payload: { examId, runId: run.id, segment: 0 }, idempotencyKey: `${run.id}:0`, maxAttempts: 3 });
     await mutate(userId, examId, (e) => {
       const r = e.runs.find((x) => x.id === run.id);
       if (r && !r.jobIds.includes(job.id)) r.jobIds.push(job.id);
       const pref = e.preferences ?? DEFAULT_PREFERENCES;
-      emit(e, { type: 'job_created', runId: run.id, jobId: job.id, progress: { done: 0, total: ids.length }, message: `Marking ${ids.length} script${ids.length === 1 ? '' : 's'} against marking scheme v${sv.version} (${pref.credit === 'strict' ? 'strict' : 'partial-credit'} marking).`, data: { schemeVersion: sv.version, candidates: ids.length, credit: pref.credit } });
+      emit(e, { type: 'job_created', runId: run.id, jobId: job.id, progress: { done: 0, total: ids.length }, message: `Marking ${ids.length} script${ids.length === 1 ? '' : 's'} against marking scheme v${sv.version} (${pref.credit === 'strict' ? 'strict' : 'partial-credit'} marking)${run.mode === 'overnight' ? ' overnight at half price: results are ready by tomorrow morning, usually much sooner' : ''}.`, data: { schemeVersion: sv.version, candidates: ids.length, credit: pref.credit, overnight: run.mode === 'overnight' } });
     });
     return { runId: run.id, jobId: job.id, candidates: ids.length, schemeVersion: sv.version };
   }
@@ -603,7 +613,7 @@ export function createExamService(deps: ExamDeps) {
         return { questionId: q.id, number: q.number, maxMarks: q.maxMarks, ai, override: old?.override ?? null, confirmed: null, mappedElementIds: match.questions[q.id]?.elementIds ?? [], mappingFlags: match.questions[q.id]?.flags ?? [], history };
       });
       e.results[sub.id] = { submissionId: sub.id, candidateId: sub.candidateId, runId, schemeVersion: run.schemeVersion, questions, updatedAt: now(), usage: marked.usage };
-      try { deps.onUsage?.(userId, { model: deps.agent().model, input: marked.usage.input, output: marked.usage.output, what: 'mark' }); } catch { /* metering never breaks marking */ }
+      try { deps.onUsage?.(userId, { model: deps.agent().model, input: marked.usage.input, output: marked.usage.output, what: 'mark', batch: run.mode === 'overnight' }); } catch { /* metering never breaks marking */ }
       audit(e, { actor: 'bwenge-ai', type: 'marked', submissionId: sub.id, candidateId: sub.candidateId, after: { total: questions.reduce((a, q) => a + (effectiveMarks(q) ?? 0), 0) } });
       const s = e.submissions.find((x) => x.id === sub.id)!;
       s.state = questions.some((q) => openFlags(q).length) ? 'completed_with_warnings' : 'completed';
@@ -629,6 +639,10 @@ export function createExamService(deps: ExamDeps) {
     const own = (await load(userId, examId)).runs.find((x) => x.id === runId);
     if (!own) throw new JobError('RUN_NOT_FOUND', 'The marking run is not saved yet.', true);
     if (own.state === 'cancelled') return { examId, runId, state: 'cancelled' };
+    const overnight = own.mode === 'overnight';
+    // Model calls made by this job (and everything it awaits) are sent as half-price batches.
+    if (overnight && !isOvernight()) return runOvernight(() => runMarkJob(job, ctx));
+    const segmentBudget = overnight ? OVERNIGHT_BUDGET_MS : budget;
     await mutate(userId, examId, (e) => { const r = e.runs.find((x) => x.id === runId); if (r && r.state === 'queued') { r.state = 'recognizing'; r.startedAt = now(); } });
     const pending = async () => {
       const e = await load(userId, examId);
@@ -640,11 +654,11 @@ export function createExamService(deps: ExamDeps) {
     let continued = false;
     // Scripts marked at the same time. When the provider says it is busy, one fewer runs from then on (never
     // below one), so a big class slows down a little instead of failing scripts.
-    let allowed = Math.min(concurrency, queue.length || 1);
+    let allowed = Math.min(overnight ? OVERNIGHT_CONCURRENCY : concurrency, queue.length || 1);
     const worker = async (slot: number) => {
       while (queue.length && !ctx.signal.aborted) {
         if (slot >= allowed) return;
-        if (Date.now() - started > budget) { continued = true; return; }
+        if (Date.now() - started > segmentBudget) { continued = true; return; }
         const id = queue.shift()!;
         for (let attempt = 1; ; attempt++) {
           try {
@@ -680,7 +694,7 @@ export function createExamService(deps: ExamDeps) {
       queue = await pending();
     }
     if (queue.length || continued) {
-      const next = await deps.queue.submit<MarkJobPayload>({ type: 'exam.mark', ownerId: userId, payload: { examId, runId, segment: segment + 1 }, idempotencyKey: `${runId}:${segment + 1}`, maxAttempts: 3 });
+      const next = await queueFor(own).submit<MarkJobPayload>({ type: 'exam.mark', ownerId: userId, payload: { examId, runId, segment: segment + 1 }, idempotencyKey: `${runId}:${segment + 1}`, maxAttempts: 3 });
       await mutate(userId, examId, (e) => { const r = e.runs.find((x) => x.id === runId); if (r && !r.jobIds.includes(next.job.id)) r.jobIds.push(next.job.id); });
       return { examId, runId, continuedIn: next.job.id };
     }
@@ -992,6 +1006,7 @@ export function createExamService(deps: ExamDeps) {
   }
 
   deps.queue.register<MarkJobPayload, unknown>('exam.mark', runMarkJob);
+  deps.overnightQueue?.register<MarkJobPayload, unknown>('exam.mark', runMarkJob);
   deps.queue.register<RemarkJobPayload, unknown>('exam.remark', runRemarkJob);
   deps.queue.register<ExportJobPayload, unknown>('exam.export', runExportJob);
   deps.queue.register<SchemeJobPayload, unknown>('exam.scheme', runSchemeJob);
@@ -1135,7 +1150,7 @@ export function createExamService(deps: ExamDeps) {
   async function stopMarking(userId: string, examId: string) {
     const exam = await load(userId, examId);
     const active = exam.runs.filter(r => !['completed', 'completed_with_warnings', 'failed', 'cancelled'].includes(r.state));
-    for (const run of active) for (const id of run.jobIds) await deps.queue.cancel(id, userId);
+    for (const run of active) for (const id of run.jobIds) await queueFor(run).cancel(id, userId);
     await mutate(userId, examId, e => {
       for (const run of e.runs.filter(r => active.some(a => a.id === r.id))) { run.state = 'failed'; run.error = STOPPED; run.finishedAt = now(); }
       for (const sub of e.submissions.filter(s => active.some(r => r.submissionIds.includes(s.id)))) {
@@ -1243,7 +1258,7 @@ export function createExamService(deps: ExamDeps) {
     const exam = await load(userId, examId);
     const run = [...exam.runs].reverse().find((r) => !['completed', 'completed_with_warnings', 'failed', 'cancelled'].includes(r.state));
     if (!run) throw new ExamInputError('NO_ACTIVE_RUN', 'There is no marking in progress to cancel.', 409);
-    for (const id of run.jobIds) await deps.queue.cancel(id, userId).catch(() => null);
+    for (const id of run.jobIds) await queueFor(run).cancel(id, userId).catch(() => null);
     const e = await mutate(userId, examId, (x) => {
       const r = x.runs.find((y) => y.id === run.id)!;
       r.state = 'cancelled';
@@ -1261,12 +1276,18 @@ export function createExamService(deps: ExamDeps) {
     if (typeof patch.corrections === 'boolean') clean.corrections = patch.corrections;
     if (patch.feedback === 'brief' || patch.feedback === 'detailed') clean.feedback = patch.feedback;
     if (typeof patch.instructions === 'string') clean.instructions = patch.instructions.replace(/\s+\n/g, '\n').trim().slice(0, 2000);
+    if (typeof patch.overnight === 'boolean') {
+      if (patch.overnight && !deps.overnightQueue) throw new ExamInputError('OVERNIGHT_UNAVAILABLE', 'Overnight marking is not available right now.', 503);
+      clean.overnight = patch.overnight;
+    }
     if (!Object.keys(clean).length) throw new ExamInputError('INVALID_PREFERENCES', 'Choose credit (partial or strict), corrections (true or false), feedback (brief or detailed) or marking instructions.');
     const e = await mutate(userId, examId, (x) => { x.preferences = { ...(x.preferences ?? DEFAULT_PREFERENCES), ...clean, updatedAt: now() }; });
     return e.preferences!;
   }
 
   return {
+    /** Whether overnight (half-price batch) marking can be chosen. */
+    overnightAvailable: () => !!deps.overnightQueue,
     eventsSince, subscribe, cancelRun, setPreferences,
     createExam, load, mutate, stopMarking, setSchemeJson, confirmScheme, editSchemeQuestion, submitSchemeDocuments, addSubmissions, startMarking,
     summaries, overrideMark, confirmResults, correctTranscription, remarkQuestions, requestRemark, generateArtifacts, requestExport, artifacts, artifactRefs, candidateView, progress,

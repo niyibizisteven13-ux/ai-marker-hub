@@ -1,3 +1,5 @@
+import { isOvernight } from '../services/ai/batchMode.js';
+
 /**
  * Small concurrency helpers for the AI pipelines: a counting limiter shared across callers, and a pool that maps
  * items with bounded parallelism while keeping results in input order.
@@ -61,6 +63,12 @@ const envInt = (v: string | undefined, d: number, max: number) => {
  * Vision-model calls in flight across this process (page readings, close-up tiles, marking with images). One cap
  * for all of them keeps a big class from hitting the provider's rate limits while still running many at once.
  */
-export const visionCalls = createLimiter(envInt(process.env.VISION_MAX_CONCURRENT, 8, 64));
-/** Pages of one document read at the same time. */
-export const pageConcurrency = () => envInt(process.env.DOC_PAGE_CONCURRENCY, 3, 16);
+const liveVisionCalls = createLimiter(envInt(process.env.VISION_MAX_CONCURRENT, 8, 64));
+// Overnight requests wait in a batch for up to hours: they never hold the slots that live marking needs.
+export const visionCalls: Limiter = {
+  run: (fn) => (isOvernight() ? fn() : liveVisionCalls.run(fn)),
+  get active() { return liveVisionCalls.active; },
+  get waiting() { return liveVisionCalls.waiting; },
+};
+/** Pages of one document read at the same time (all of them overnight, so they share one batch). */
+export const pageConcurrency = () => (isOvernight() ? 64 : envInt(process.env.DOC_PAGE_CONCURRENCY, 3, 16));

@@ -6,8 +6,11 @@ import { prisma } from '../../db.js';
  * Prices are shown in USD with the Rwandan franc equivalent (FX_USD_RWF).
  */
 
-export type PlanId = 'FREE' | 'GO' | 'PRO' | 'INSTITUTION';
+export type PlanId = 'FREE' | 'GO' | 'STARTER' | 'PRO' | 'PLUS' | 'INSTITUTION';
 export type UsageKind = 'chat' | 'tool' | 'vision' | 'artifact' | 'marking';
+/** Plans a teacher can buy online, cheapest first. INSTITUTION is kept for existing subscribers and admins only. */
+export const SOLD_PLANS = ['STARTER', 'PRO', 'PLUS'] as const;
+export type SoldPlanId = (typeof SOLD_PLANS)[number];
 
 export interface PlanLimits {
   /** Credits per calendar day, ISO week (Monday) and calendar month, in Kigali time. */
@@ -30,6 +33,9 @@ export interface PlanLimits {
 export interface PlanInfo {
   id: PlanId;
   name: string;
+  /** The price charged, in RWF per month (Mobile Money). null = not sold for a fixed monthly price. */
+  priceRwf: number | null;
+  /** USD equivalent of priceRwf, for display only (derived from the exchange rate). */
   priceUsd: number | null;
   /** Original price shown struck through next to a launch discount. */
   listPriceUsd?: number;
@@ -37,40 +43,67 @@ export interface PlanInfo {
   limits: PlanLimits;
 }
 
+// Paid plans keep high daily caps (teachers mark a whole class in one evening); the monthly credits are the
+// cost control. 1 credit ≈ $0.001 of model spend, so 1,700 credits ≈ 120 Haiku-marked scripts plus chat.
 export const PLANS: Record<PlanId, PlanInfo> = {
   FREE: {
-    id: 'FREE', name: 'Free', priceUsd: 0, priceNote: 'Free forever',
-    limits: { daily: 20, weekly: 80, monthly: 250, perDay: { tool: 5, vision: 5, artifact: 2, marking: 3 }, maxMessageChars: 8_000, maxAttachments: 2, maxUploadMb: 10, memory: false, memoryItems: 0, autonomousMarking: false },
+    id: 'FREE', name: 'Free', priceRwf: 0, priceUsd: 0, priceNote: 'Free forever',
+    limits: { daily: 15, weekly: 40, monthly: 50, perDay: { tool: 3, vision: 3, artifact: 1, marking: 0 }, maxMessageChars: 8_000, maxAttachments: 2, maxUploadMb: 10, memory: false, memoryItems: 0, autonomousMarking: false },
   },
   // GO = the Free allowance plus purchased credits: once the allowance or a daily feature cap is used up,
   // further actions are paid from the credit wallet instead of being refused.
   GO: {
-    id: 'GO', name: 'GO', priceUsd: null, priceNote: 'Pay as you go, from 500 RWF',
-    limits: { daily: 20, weekly: 80, monthly: 250, perDay: { tool: 5, vision: 5, artifact: 2, marking: 3 }, maxMessageChars: 20_000, maxAttachments: 5, maxUploadMb: 25, memory: false, memoryItems: 0, autonomousMarking: true },
+    id: 'GO', name: 'Top-up', priceRwf: null, priceUsd: null, priceNote: 'Pay as you go, from 500 RWF',
+    limits: { daily: 15, weekly: 40, monthly: 50, perDay: { tool: 3, vision: 3, artifact: 1, marking: 0 }, maxMessageChars: 20_000, maxAttachments: 5, maxUploadMb: 25, memory: false, memoryItems: 0, autonomousMarking: true },
+  },
+  STARTER: {
+    id: 'STARTER', name: 'Starter', priceRwf: 1_500, priceUsd: 1, priceNote: 'per month',
+    limits: { daily: 400, weekly: 400, monthly: 400, perDay: { tool: 60, vision: 100, artifact: 15, marking: 60 }, maxMessageChars: 20_000, maxAttachments: 10, maxUploadMb: 50, memory: false, memoryItems: 0, autonomousMarking: true },
   },
   PRO: {
-    id: 'PRO', name: 'PRO', priceUsd: 3, listPriceUsd: 9, priceNote: 'per month',
-    limits: { daily: 120, weekly: 500, monthly: 1_000, perDay: { tool: 60, vision: 100, artifact: 25, marking: 60 }, maxMessageChars: 40_000, maxAttachments: 10, maxUploadMb: 50, memory: true, memoryItems: 2_000, autonomousMarking: true },
+    id: 'PRO', name: 'Teacher', priceRwf: 4_500, priceUsd: 3, priceNote: 'per month',
+    limits: { daily: 1_700, weekly: 1_700, monthly: 1_700, perDay: { tool: 200, vision: 300, artifact: 40, marking: 200 }, maxMessageChars: 40_000, maxAttachments: 20, maxUploadMb: 50, memory: true, memoryItems: 2_000, autonomousMarking: true },
+  },
+  PLUS: {
+    id: 'PLUS', name: 'Teacher Plus', priceRwf: 7_000, priceUsd: 4.75, priceNote: 'per month',
+    limits: { daily: 2_800, weekly: 2_800, monthly: 2_800, perDay: { tool: 300, vision: 500, artifact: 60, marking: 400 }, maxMessageChars: 60_000, maxAttachments: 20, maxUploadMb: 100, memory: true, memoryItems: 5_000, autonomousMarking: true },
   },
   INSTITUTION: {
-    id: 'INSTITUTION', name: 'Institution', priceUsd: 50, priceNote: 'per month and up, 25 seats',
-    limits: { daily: 400, weekly: 1_800, monthly: 5_000, perDay: { tool: 200, vision: 300, artifact: 80, marking: 300 }, maxMessageChars: 60_000, maxAttachments: 20, maxUploadMb: 100, memory: true, memoryItems: 10_000, autonomousMarking: true },
+    id: 'INSTITUTION', name: 'Institution', priceRwf: null, priceUsd: null, priceNote: 'by arrangement',
+    limits: { daily: 2_800, weekly: 2_800, monthly: 2_800, perDay: { tool: 300, vision: 500, artifact: 80, marking: 400 }, maxMessageChars: 60_000, maxAttachments: 20, maxUploadMb: 100, memory: true, memoryItems: 10_000, autonomousMarking: true },
   },
 };
 
+/** Maps a stored Subscription.planType to a plan (older rows say ORGANIZATION / BUSINESS). */
+export function planIdForSubscription(planType: string | null | undefined): PlanId | null {
+  switch (planType) {
+    case 'ORGANIZATION': case 'INSTITUTION': return 'INSTITUTION';
+    case 'PRO': case 'BUSINESS': return 'PRO';
+    case 'STARTER': return 'STARTER';
+    case 'PLUS': return 'PLUS';
+    case 'GO': return 'GO';
+    default: return null;
+  }
+}
+/** Subscription.planType stored for a plan. */
+export const subscriptionTypeFor = (id: PlanId) => (id === 'INSTITUTION' ? 'ORGANIZATION' : id);
+
 export interface GoPack { id: string; rwf: number; credits: number }
+// About 2.3 RWF per credit: dearer than a plan's credits, so a plan stays the better deal for regular use.
 export const DEFAULT_GO_PACKS: GoPack[] = [
-  { id: 'go-500', rwf: 500, credits: 100 },
-  { id: 'go-1000', rwf: 1_000, credits: 220 },
-  { id: 'go-2500', rwf: 2_500, credits: 600 },
-  { id: 'go-5000', rwf: 5_000, credits: 1_300 },
+  { id: 'go-500', rwf: 500, credits: 215 },
+  { id: 'go-1000', rwf: 1_000, credits: 430 },
+  { id: 'go-2500', rwf: 2_500, credits: 1_080 },
+  { id: 'go-5000', rwf: 5_000, credits: 2_170 },
 ];
 
 /** Admin-editable billing settings (AppSetting "billing"), applied over the defaults above. */
 export interface BillingSettings {
+  /** 2 = saved for the Starter / Teacher / Teacher Plus price list. Older saves keep only the exchange rate. */
+  schema?: number;
   fxUsdRwf?: number;
-  pro?: { priceUsd?: number; listPriceUsd?: number | null };
-  institution?: { priceUsd?: number };
+  /** Monthly price in RWF per plan sold online. */
+  prices?: Partial<Record<SoldPlanId, { priceRwf?: number }>>;
   goPacks?: GoPack[];
   limits?: Partial<Record<PlanId, Partial<Omit<PlanLimits, 'perDay'>> & { perDay?: Partial<PlanLimits['perDay']> }>>;
 }
@@ -90,16 +123,20 @@ export async function refreshBillingSettings(force = false): Promise<BillingSett
 }
 
 export function applyBillingSettings(next: BillingSettings) {
-  settings = next ?? {};
+  next = next ?? {};
+  // Prices, packs and limits saved before the new price list would otherwise override it.
+  settings = (next.schema ?? 1) >= 2 ? next : { fxUsdRwf: next.fxUsdRwf };
   for (const id of Object.keys(DEFAULTS) as PlanId[]) {
     const base = JSON.parse(JSON.stringify(DEFAULTS[id])) as PlanInfo;
     const o = settings.limits?.[id];
     if (o) base.limits = { ...base.limits, ...o, perDay: { ...base.limits.perDay, ...(o.perDay ?? {}) } } as PlanLimits;
     Object.assign(PLANS[id], base);
   }
-  if (settings.pro?.priceUsd != null) PLANS.PRO.priceUsd = settings.pro.priceUsd;
-  if (settings.pro && 'listPriceUsd' in settings.pro) PLANS.PRO.listPriceUsd = settings.pro.listPriceUsd ?? undefined;
-  if (settings.institution?.priceUsd != null) PLANS.INSTITUTION.priceUsd = settings.institution.priceUsd;
+  for (const id of SOLD_PLANS) {
+    const rwf = settings.prices?.[id]?.priceRwf;
+    if (rwf && rwf > 0) PLANS[id].priceRwf = Math.round(rwf);
+    PLANS[id].priceUsd = Math.round(((PLANS[id].priceRwf ?? 0) / fxUsdRwf()) * 100) / 100;
+  }
   goPacks = settings.goPacks?.length ? settings.goPacks : DEFAULT_GO_PACKS;
 }
 
@@ -127,10 +164,7 @@ export async function planFor(userId: string): Promise<PlanInfo> {
     db.subscription.findUnique({ where: { userId } }).catch(() => null),
   ]);
   const active = sub && sub.status === 'ACTIVE' && (!sub.endDate || new Date(sub.endDate).getTime() > Date.now());
-  const fromSub: PlanId | null = !active ? null
-    : sub.planType === 'ORGANIZATION' || sub.planType === 'INSTITUTION' ? 'INSTITUTION'
-      : sub.planType === 'PRO' || sub.planType === 'BUSINESS' ? 'PRO'
-        : sub.planType === 'GO' ? 'GO' : null;
+  const fromSub = active ? planIdForSubscription(sub.planType) : null;
   // Admins always keep Institution limits, even after buying or being granted a smaller plan.
   if (user?.role === 'ADMIN') return PLANS.INSTITUTION;
   if (fromSub) return PLANS[fromSub];

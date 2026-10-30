@@ -20,7 +20,7 @@ export interface User {
   avatarUrl?: string;
   settings?: UserSettings;
   subscription?: {
-    planType: 'BUSINESS' | 'PRO' | 'ORGANIZATION';
+    planType: 'BUSINESS' | 'STARTER' | 'PRO' | 'PLUS' | 'ORGANIZATION';
     status: 'ACTIVE' | 'EXPIRED' | 'CANCELED';
   };
 }

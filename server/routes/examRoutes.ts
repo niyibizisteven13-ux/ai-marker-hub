@@ -148,7 +148,7 @@ examsRouter.get('/:examId/preferences', async (req, res) => {
 
 examsRouter.put('/:examId/preferences', async (req, res) => {
   try {
-    const body = z.object({ credit: z.enum(['partial', 'strict']).optional(), corrections: z.boolean().optional(), feedback: z.enum(['brief', 'detailed']).optional(), instructions: z.string().max(2000).optional() }).strict().parse(req.body ?? {});
+    const body = z.object({ credit: z.enum(['partial', 'strict']).optional(), corrections: z.boolean().optional(), feedback: z.enum(['brief', 'detailed']).optional(), instructions: z.string().max(2000).optional(), overnight: z.boolean().optional() }).strict().parse(req.body ?? {});
     res.json({ preferences: await examService.setPreferences(userIdOf(req), req.params.examId, body), requestId: rid(req) });
   } catch (err) { fail(req, res, err); }
 });
@@ -249,7 +249,7 @@ examsRouter.post('/:examId/submissions', withFiles([{ name: 'scripts', maxCount:
 
 examsRouter.post('/:examId/mark', async (req, res) => {
   try {
-    const body = z.object({ submissionIds: z.array(z.string().uuid()).max(500).optional(), remarkAll: z.boolean().optional() }).strict().parse(req.body ?? {});
+    const body = z.object({ submissionIds: z.array(z.string().uuid()).max(500).optional(), remarkAll: z.boolean().optional(), overnight: z.boolean().optional() }).strict().parse(req.body ?? {});
     const out = await examService.startMarking(userIdOf(req), req.params.examId, body);
     res.status(202).json({ ...out, links: { status: `/api/exams/${req.params.examId}/jobs/${out.jobId}` }, requestId: rid(req) });
   } catch (err) { fail(req, res, err); }

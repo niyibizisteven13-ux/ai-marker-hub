@@ -71,15 +71,15 @@ async function accountOf(session: any): Promise<{ linked: boolean; email?: strin
 
 /** Plan, credits left today, GO balance and renewal date: the same account state as the website. */
 async function planView(userId: string): Promise<PlanView> {
-  const { planFor, walletBalance, PLANS, toRwf } = await import('../billing/plans.js');
+  const { planFor, walletBalance, PLANS } = await import('../billing/plans.js');
   const { usedTotals } = await import('../billing/usage.js');
   const [plan, wallet, used, sub] = await Promise.all([planFor(userId), walletBalance(userId), usedTotals(userId), prisma.subscription.findUnique({ where: { userId } }).catch(() => null)]);
   const base = (process.env.APP_BASE_URL || 'https://www.bwenge.space').replace(/\/$/, '');
-  const paid = plan.id === 'PRO' || plan.id === 'INSTITUTION';
+  const paid = plan.id !== 'FREE' && plan.id !== 'GO';
   return {
     plan: plan.name, dailyLimit: plan.limits.daily, creditsLeft: Math.max(0, plan.limits.daily - used.used.day), wallet,
     renewsOn: paid && sub?.endDate ? new Date(sub.endDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Africa/Kigali' }) : null,
-    upgradeUrl: paid ? null : `${base}/upgrade`, upgradePrice: paid ? null : `${toRwf(PLANS.PRO.priceUsd ?? 0).toLocaleString('en-US')} RWF`,
+    upgradeUrl: paid ? null : `${base}/upgrade`, upgradePrice: paid ? null : `${(PLANS.STARTER.priceRwf ?? 0).toLocaleString('en-US')} RWF`,
   };
 }
 

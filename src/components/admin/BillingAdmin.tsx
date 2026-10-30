@@ -7,14 +7,15 @@ import { authFetch } from '../../utils/authFetch';
  * Mobile Money payments (re-check with MTN), and per-user plans and GO credits. All changes are logged server-side.
  */
 
-type PlanId = 'FREE' | 'GO' | 'PRO' | 'INSTITUTION';
+type PlanId = 'FREE' | 'GO' | 'STARTER' | 'PRO' | 'PLUS' | 'INSTITUTION';
+type SoldPlan = 'STARTER' | 'PRO' | 'PLUS';
 interface Limits { daily: number; weekly: number; monthly: number; perDay: { tool: number; vision: number; artifact: number; marking: number }; maxMessageChars: number; maxAttachments: number; maxUploadMb: number; memory: boolean; memoryItems: number }
 interface Overview {
   revenue: { rwf: number; usd: number; payments: number }; aiCost: { usd: number; rwf: number; credits: number }; margin: { usd: number; percent: number | null };
-  pendingPayments: number; subscriptions: { pro: number; institution: number }; goCredits: { sold: number; used: number };
+  pendingPayments: number; subscriptions: Record<SoldPlan | 'INSTITUTION', number>; goCredits: { sold: number; used: number };
   momo: { mode: 'live' | 'sandbox' | 'simulated' | 'off'; targetEnv: string; currency: string; callback: boolean };
 }
-interface Effective { fxUsdRwf: number; goPacks: Array<{ id: string; rwf: number; credits: number }>; plans: Record<PlanId, { priceUsd: number | null; listPriceUsd: number | null; priceRwf: number | null; limits: Limits }> }
+interface Effective { fxUsdRwf: number; goPacks: Array<{ id: string; rwf: number; credits: number }>; plans: Record<PlanId, { name: string; sold: boolean; priceUsd: number | null; priceRwf: number | null; limits: Limits }> }
 interface AdminPayment { id: string; createdAt: string; paidAt: string | null; purpose: string; months: number; credits: number; amountRwf: number; currency: string; phoneMasked: string; status: string; reason: string | null; receiptNumber: string | null; user: { email?: string; name?: string } }
 interface AdminUser { id: string; email: string; name: string; plan: PlanId; subscription: { planType: string; status: string; endDate: string | null } | null; wallet: number; usedToday: number; dailyLimit: number; telegram: boolean }
 
@@ -22,7 +23,8 @@ const card = 'rounded-2xl border border-[#263052] bg-[#0E1426] p-5';
 const input = 'w-full rounded-lg border border-[#2A3760] bg-[#0A1020] px-2.5 py-1.5 text-sm text-white outline-none focus:border-[#3FA7E0]';
 const btn = 'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-50';
 const rwf = (n: number) => `${Math.round(n).toLocaleString('en-US')} RWF`;
-const PLAN_IDS: PlanId[] = ['FREE', 'GO', 'PRO', 'INSTITUTION'];
+const PLAN_IDS: PlanId[] = ['FREE', 'GO', 'STARTER', 'PRO', 'PLUS', 'INSTITUTION'];
+const SOLD: SoldPlan[] = ['STARTER', 'PRO', 'PLUS'];
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await authFetch(url, { ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) } });
@@ -62,9 +64,9 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
   const saveSettings = () => eff && run(() => api('/api/admin/billing/settings', {
     method: 'PUT',
     body: JSON.stringify({
+      schema: 2,
       fxUsdRwf: eff.fxUsdRwf,
-      pro: { priceUsd: eff.plans.PRO.priceUsd ?? 3, listPriceUsd: eff.plans.PRO.listPriceUsd },
-      institution: { priceUsd: eff.plans.INSTITUTION.priceUsd ?? 50 },
+      prices: Object.fromEntries(SOLD.map((id) => [id, { priceRwf: eff.plans[id].priceRwf ?? 0 }])),
       goPacks: eff.goPacks,
       limits: Object.fromEntries(PLAN_IDS.map((id) => [id, eff.plans[id].limits])),
     }),
@@ -88,7 +90,7 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Kpi icon={<Banknote size={16} />} label="Revenue this month" value={overview ? rwf(overview.revenue.rwf) : '…'} detail={overview ? `≈ $${overview.revenue.usd} · ${overview.revenue.payments} payments` : ''} />
         <Kpi icon={<TrendingUp size={16} />} label="AI cost this month" value={overview ? `$${overview.aiCost.usd}` : '…'} detail={overview ? `${overview.aiCost.credits.toLocaleString('en-US')} credits used · margin ${overview.margin.percent ?? '—'}${overview.margin.percent != null ? '%' : ''}` : ''} />
-        <Kpi icon={<Sparkles size={16} />} label="Active plans" value={overview ? `${overview.subscriptions.pro} PRO · ${overview.subscriptions.institution} Inst.` : '…'} detail={overview ? `${overview.pendingPayments} payments pending` : ''} />
+        <Kpi icon={<Sparkles size={16} />} label="Active plans" value={overview ? SOLD.map((id) => `${overview.subscriptions[id] ?? 0} ${id === 'PRO' ? 'Teacher' : id === 'PLUS' ? 'Plus' : 'Starter'}`).join(' · ') : '…'} detail={overview ? `${overview.subscriptions.INSTITUTION ? `${overview.subscriptions.INSTITUTION} Institution · ` : ''}${overview.pendingPayments} payments pending` : ''} />
         <Kpi icon={<Coins size={16} />} label="GO credits" value={overview ? `${overview.goCredits.sold.toLocaleString('en-US')} sold` : '…'} detail={overview ? `${overview.goCredits.used.toLocaleString('en-US')} used this month` : ''} />
       </div>
 
@@ -129,9 +131,9 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
           </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Num label="1 USD in RWF" value={eff.fxUsdRwf} onChange={(v) => setEff({ ...eff, fxUsdRwf: v })} />
-            <Num label="PRO price (USD / month)" step={0.5} value={eff.plans.PRO.priceUsd ?? 0} onChange={(v) => setPlanField('PRO', { priceUsd: v })} hint={rwf(Math.round((eff.plans.PRO.priceUsd ?? 0) * eff.fxUsdRwf / 100) * 100)} />
-            <Num label="PRO regular price (struck through)" step={0.5} value={eff.plans.PRO.listPriceUsd ?? 0} onChange={(v) => setPlanField('PRO', { listPriceUsd: v || null })} hint={eff.plans.PRO.listPriceUsd ? `−${Math.round((1 - (eff.plans.PRO.priceUsd ?? 0) / eff.plans.PRO.listPriceUsd) * 100)}%` : 'no discount shown'} />
-            <Num label="Institution from (USD / month)" value={eff.plans.INSTITUTION.priceUsd ?? 0} onChange={(v) => setPlanField('INSTITUTION', { priceUsd: v })} hint={rwf(Math.round((eff.plans.INSTITUTION.priceUsd ?? 0) * eff.fxUsdRwf / 100) * 100)} />
+            {SOLD.map((id) => (
+              <Num key={id} label={`${eff.plans[id].name} (RWF / month)`} step={100} value={eff.plans[id].priceRwf ?? 0} onChange={(v) => setPlanField(id, { priceRwf: v })} hint={`≈ $${((eff.plans[id].priceRwf ?? 0) / eff.fxUsdRwf).toFixed(2)}`} />
+            ))}
           </div>
 
           <div>
@@ -144,7 +146,7 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
                   <button aria-label="Remove pack" className={`${btn} mb-0.5 text-[#8A97C2] hover:text-rose-300`} disabled={eff.goPacks.length <= 1} onClick={() => setEff({ ...eff, goPacks: eff.goPacks.filter((_, j) => j !== i) })}><Trash2 size={14} /></button>
                 </div>
               ))}
-              {eff.goPacks.length < 8 && <button className={`${btn} bg-[#1A2240] text-[#C9D3F0]`} onClick={() => setEff({ ...eff, goPacks: [...eff.goPacks, { id: `go-${Date.now() % 100000}`, rwf: 10_000, credits: 2_800 }] })}><Plus size={13} /> Add pack</button>}
+              {eff.goPacks.length < 8 && <button className={`${btn} bg-[#1A2240] text-[#C9D3F0]`} onClick={() => setEff({ ...eff, goPacks: [...eff.goPacks, { id: `go-${Date.now() % 100000}`, rwf: 10_000, credits: 4_350 }] })}><Plus size={13} /> Add pack</button>}
             </div>
           </div>
 
@@ -157,7 +159,7 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
                   const l = eff.plans[id].limits;
                   return (
                     <tr key={id} className="border-t border-[#1E2848]">
-                      <td className="px-1.5 py-1.5 font-semibold text-white">{id}</td>
+                      <td className="px-1.5 py-1.5 font-semibold text-white">{eff.plans[id].name}{eff.plans[id].sold ? '' : <span className="block text-[10px] font-normal text-[#8A97C2]">not sold online</span>}</td>
                       {(['daily', 'weekly', 'monthly'] as const).map((k) => <td key={k} className="px-1"><input className={input} type="number" min={1} value={l[k]} onChange={(e) => setLimit(id, k, Number(e.target.value))} /></td>)}
                       {(['tool', 'vision', 'artifact', 'marking'] as const).map((k) => <td key={k} className="px-1"><input className={input} type="number" min={0} value={l.perDay[k]} onChange={(e) => setLimit(id, `perDay.${k}`, Number(e.target.value))} /></td>)}
                       <td className="px-1.5 text-center"><input type="checkbox" checked={l.memory} onChange={(e) => setLimit(id, 'memory', e.target.checked)} aria-label={`${id} memory`} /></td>
@@ -190,8 +192,9 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
                   <td className="px-2">{u.telegram ? 'Linked' : '—'}</td>
                   <td className="px-2">
                     <div className="flex flex-wrap gap-1">
-                      <button className={`${btn} bg-amber-500/15 text-amber-300`} disabled={busy} onClick={() => { const d = window.prompt('Grant PRO for how many days?', '30'); if (d) void run(() => api(`/api/admin/billing/users/${u.id}/plan`, { method: 'POST', body: JSON.stringify({ plan: 'PRO', days: Number(d) }) }), `PRO granted to ${u.email}`); }}>PRO</button>
-                      <button className={`${btn} bg-indigo-500/15 text-indigo-300`} disabled={busy} onClick={() => { const d = window.prompt('Grant Institution for how many days?', '30'); if (d) void run(() => api(`/api/admin/billing/users/${u.id}/plan`, { method: 'POST', body: JSON.stringify({ plan: 'INSTITUTION', days: Number(d) }) }), `Institution granted to ${u.email}`); }}>Inst.</button>
+                      {(['STARTER', 'PRO', 'PLUS', 'INSTITUTION'] as const).map((id) => (
+                        <button key={id} className={`${btn} ${id === 'INSTITUTION' ? 'bg-indigo-500/15 text-indigo-300' : 'bg-amber-500/15 text-amber-300'}`} disabled={busy} onClick={() => { const d = window.prompt(`Grant ${eff?.plans[id].name ?? id} for how many days?`, '30'); if (d) void run(() => api(`/api/admin/billing/users/${u.id}/plan`, { method: 'POST', body: JSON.stringify({ plan: id, days: Number(d) }) }), `${eff?.plans[id].name ?? id} granted to ${u.email}`); }}>{id === 'INSTITUTION' ? 'Inst.' : id === 'PRO' ? 'Teacher' : id === 'PLUS' ? 'Plus' : 'Starter'}</button>
+                      ))}
                       <button className={`${btn} bg-[#1A2240] text-[#C9D3F0]`} disabled={busy || u.plan === 'FREE' || u.plan === 'GO'} onClick={() => { if (window.confirm(`Move ${u.email} to Free now?`)) void run(() => api(`/api/admin/billing/users/${u.id}/plan`, { method: 'POST', body: JSON.stringify({ plan: 'FREE' }) }), `${u.email} moved to Free`); }}>Free</button>
                       <button className={`${btn} bg-sky-500/15 text-sky-300`} disabled={busy} onClick={() => {
                         const v = window.prompt('GO credits to add (negative to remove):', '100');

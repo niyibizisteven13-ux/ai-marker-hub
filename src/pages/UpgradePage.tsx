@@ -1,23 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, ArrowLeft, Building2, Check, CheckCircle2, Coins, Loader2, Lock, ShieldCheck, Smartphone, Sparkles, X, Zap } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Building2, Check, CheckCircle2, Coins, GraduationCap, Loader2, Lock, ShieldCheck, Smartphone, Sparkles, X, Zap } from 'lucide-react';
 import { authFetch } from '../utils/authFetch';
 import OrganisationRequestDialog from '../components/OrganisationRequestDialog';
+import { creditMeter } from '../components/PlanStatus';
 
 /**
- * Upgrade: Free, GO (pay as you go credit packs), PRO (launch price with the regular price struck through)
- * and Institution. Prices come from the server (admin-editable) in USD with Rwandan franc equivalents; payment
- * is MTN Mobile Money: the user approves on their phone and the page follows the payment until MTN confirms.
+ * Upgrade: Free, Starter, Teacher and Teacher Plus (monthly, in RWF), credit top-ups, and schools (one Teacher
+ * plan per teacher). Prices come from the server (admin-editable); payment is MTN Mobile Money: the user
+ * approves on their phone and the page follows the payment until MTN confirms.
  */
 
 interface PlanLimits { daily: number; weekly: number; monthly: number; perDay: { tool: number; vision: number; artifact: number; marking: number }; maxUploadMb: number; maxAttachments: number; memory: boolean; memoryItems: number }
 interface Pack { id: string; rwf: number; credits: number; usd: number }
 interface PlansResponse {
   fxUsdRwf: number; payments: 'live' | 'sandbox' | 'simulated' | 'off';
-  plans: Array<{ id: 'FREE' | 'GO' | 'PRO' | 'INSTITUTION'; name: string; priceUsd: number | null; listPriceUsd?: number | null; priceRwf: number | null; listPriceRwf?: number | null; period: string; limits: PlanLimits; packs?: Pack[]; seats?: number }>;
+  plans: Array<{ id: PlanId; name: string; priceUsd: number | null; priceRwf: number | null; period: string; limits: PlanLimits; packs?: Pack[] }>;
 }
-interface Me { plan: 'FREE' | 'GO' | 'PRO' | 'INSTITUTION'; planName: string; wallet: number; subscription: { endDate: string | null; daysLeft: number | null } | null; usage: { day: { used: number; limit: number } } }
+type PlanId = 'FREE' | 'GO' | 'STARTER' | 'PRO' | 'PLUS' | 'INSTITUTION';
+type SoldPlan = 'STARTER' | 'PRO' | 'PLUS';
+interface Me { plan: PlanId; planName: string; wallet: number; subscription: { endDate: string | null; daysLeft: number | null } | null; usage: { day: { used: number; limit: number }; month?: { used: number; limit: number } } }
 interface Payment { id: string; status: 'PENDING' | 'SUCCESSFUL' | 'FAILED' | 'EXPIRED'; amountRwf: number; currency: string; receiptNumber: string | null; reason: string | null; phoneMasked: string; purpose: string; credits: number; months: number }
-type Checkout = { purpose: 'PRO' | 'GO_PACK' | 'INSTITUTION'; packId?: string; months: number; title: string; amountRwf: number; amountUsd: number };
+type Checkout = { purpose: SoldPlan | 'GO_PACK'; packId?: string; months: number; title: string; amountRwf: number; amountUsd: number };
 
 interface UpgradePageProps {
   jobId?: string;
@@ -31,19 +34,28 @@ const SERIF = "font-['Georgia','Tiempos_Headline','Times_New_Roman',serif]";
 const rwf = (n: number) => `${Math.round(n).toLocaleString('en-US')} RWF`;
 const usd = (n: number) => `$${Number.isInteger(n) ? n : n.toFixed(2)}`;
 const REASONS: Record<string, { title: string; body: string }> = {
-  limit: { title: 'You have reached your limit', body: 'Upgrade to PRO for more credits every day, or buy GO credits to keep going right now.' },
-  usage: { title: 'Get more out of Bwenge', body: 'PRO gives you six times the daily credits, memory across all chats and larger files.' },
-  memory: { title: 'Memory across all chats is part of PRO', body: 'Bwenge remembers who you are, how you like answers and what you worked on, on the web and in Telegram.' },
+  limit: { title: 'You have used your credits', body: 'Pick a monthly plan for more credits, or top up to keep going right now.' },
+  usage: { title: 'Get more out of Bwenge', body: 'Monthly plans give you credits for marking, scans and files; Teacher adds memory across all chats.' },
+  memory: { title: 'Memory across all chats is part of Teacher', body: 'Bwenge remembers who you are, how you like answers and what you worked on, on the web and in Telegram.' },
+  marking: { title: 'Automatic marking is part of the paid plans', body: 'From 1,500 RWF a month: Bwenge reads the handwriting, marks each question in red pen and gives you the class results.' },
 };
 
-function features(id: string, l: PlanLimits, packs?: Pack[]): string[] {
-  if (id === 'GO') return [`Free daily allowance plus credits you buy`, `Packs from ${rwf(packs?.[0]?.rwf ?? 500)}, valid 12 months`, 'No daily cap while you have credits', `Uploads up to ${l.maxUploadMb} MB`];
+/** About 12 credits mark one handwritten script with the standard model (half that overnight). */
+const CREDITS_PER_SCRIPT = 12;
+const SOLD: Array<{ id: SoldPlan; icon: React.ReactNode; blurb: string }> = [
+  { id: 'STARTER', icon: <Zap size={18} />, blurb: 'For a teacher trying it out with one class' },
+  { id: 'PRO', icon: <Sparkles size={18} />, blurb: 'For a teacher marking every week' },
+  { id: 'PLUS', icon: <GraduationCap size={18} />, blurb: 'For several classes and exam season' },
+];
+
+function features(id: PlanId, l: PlanLimits): string[] {
+  const n = (x: number) => x.toLocaleString('en-US');
+  if (id === 'FREE') return [`${n(l.monthly)} credits a month for chat, scans and documents`, 'Try marking with a top-up', `Uploads up to ${l.maxUploadMb} MB`];
   return [
-    `${l.daily.toLocaleString('en-US')} credits a day · ${l.monthly.toLocaleString('en-US')} a month`,
-    `${l.perDay.tool} data & tool answers a day`,
-    `${l.perDay.vision} scan and image reads a day`,
-    `${l.perDay.artifact} files, charts & dashboards a day`,
-    l.memory ? `Memory across all chats (${l.memoryItems.toLocaleString('en-US')})` : 'No memory across chats',
+    `${n(l.monthly)} credits a month`,
+    `≈ ${n(Math.floor(l.monthly / CREDITS_PER_SCRIPT))} scripts marked in red pen, or twice that overnight`,
+    'Assignments by link, class results and Excel',
+    l.memory ? `Memory across all chats (${n(l.memoryItems)})` : 'No memory across chats',
     `Uploads up to ${l.maxUploadMb} MB, ${l.maxAttachments} per message`,
   ];
 }
@@ -75,12 +87,9 @@ export default function UpgradePage({ jobId, onBack, onSuccess }: UpgradePagePro
   }, []);
 
   const plan = (id: string) => data?.plans.find((p) => p.id === id);
-  const pro = plan('PRO');
   const go = plan('GO');
-  const inst = plan('INSTITUTION');
   const free = plan('FREE');
   const pack = go?.packs?.find((p) => p.id === packId);
-  const discount = pro?.listPriceUsd && pro.priceUsd ? Math.round((1 - pro.priceUsd / pro.listPriceUsd) * 100) : 0;
   const paymentsOff = data?.payments === 'off';
   const current = me?.plan ?? 'FREE';
 
@@ -109,13 +118,13 @@ export default function UpgradePage({ jobId, onBack, onSuccess }: UpgradePagePro
         <div className="mx-auto max-w-2xl space-y-3 text-center">
           <span className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">Plans & pricing</span>
           <h1 className={`${SERIF} text-4xl font-normal tracking-tight text-[var(--text)] sm:text-5xl`}>Pick the plan that fits your work.</h1>
-          <p className="text-sm leading-relaxed text-[var(--muted)]">Pay with MTN Mobile Money. Prices are in US dollars with the Rwandan franc amount you pay{data ? ` (1 USD ≈ ${data.fxUsdRwf.toLocaleString('en-US')} RWF)` : ''}.</p>
+          <p className="text-sm leading-relaxed text-[var(--muted)]">Pay monthly with MTN Mobile Money, no contract. Prices are in Rwandan francs{data ? ` (1 USD ≈ ${data.fxUsdRwf.toLocaleString('en-US')} RWF)` : ''}.</p>
           {me && (
             <div className="inline-flex flex-wrap items-center justify-center gap-2 rounded-full border border-[var(--line)] bg-[var(--surface)] px-4 py-1.5 text-xs text-[var(--muted)]">
               You are on <b className="text-[var(--text)]">{me.planName}</b>
               {me.subscription?.endDate && <span>· until {new Date(me.subscription.endDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}</span>}
-              <span>· {Math.max(0, me.usage.day.limit - me.usage.day.used)} of {me.usage.day.limit} credits left today</span>
-              {me.wallet > 0 && <span>· {me.wallet.toLocaleString('en-US')} GO credits</span>}
+              <span>· {creditMeter(me.usage).label}</span>
+              {me.wallet > 0 && <span>· {me.wallet.toLocaleString('en-US')} top-up credits</span>}
             </div>
           )}
         </div>
@@ -128,67 +137,76 @@ export default function UpgradePage({ jobId, onBack, onSuccess }: UpgradePagePro
         {loadError && <p role="alert" className="text-center text-sm text-[var(--danger)]">{loadError}</p>}
         {!data && !loadError && <div className="flex justify-center py-16"><Loader2 className="animate-spin text-[var(--accent)]" /></div>}
 
-        {data && free && go && pro && inst && (
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
-            {/* Free */}
-            <PlanCard title="Free" icon={<Zap size={18} />} current={current === 'FREE'}
-              price={<><span className={`${SERIF} text-4xl`}>$0</span></>} sub="Free forever"
-              features={features('FREE', free.limits)}
-              action={<button disabled className="min-h-[46px] w-full rounded-xl bg-[var(--surface-2)] py-3 text-sm font-medium text-[var(--muted)]">{current === 'FREE' ? 'Your current plan' : 'Included'}</button>} />
+        {data && free && go && (
+          <>
+            <div className="flex justify-center">
+              <div className="inline-flex gap-1 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-1" role="radiogroup" aria-label="Months">
+                {[1, 3, 6, 12].map((m) => (
+                  <button key={m} type="button" role="radio" aria-checked={m === months} onClick={() => setMonths(m)}
+                    className={`rounded-lg px-3.5 py-1.5 text-xs font-medium transition-colors ${m === months ? 'bg-[var(--accent)] text-[var(--on-accent)]' : 'text-[var(--muted)] hover:text-[var(--text)]'}`}>{m === 1 ? '1 month' : `${m} months`}</button>
+                ))}
+              </div>
+            </div>
 
-            {/* GO */}
-            <PlanCard title="GO" icon={<Coins size={18} />} current={current === 'GO'} tag="Pay as you go"
-              price={<><span className={`${SERIF} text-4xl`}>{pack ? rwf(pack.rwf).replace(' RWF', '') : '500'}</span><span className="ml-1 text-sm text-[var(--muted)]">RWF</span></>}
-              sub={pack ? `${pack.credits.toLocaleString('en-US')} credits · ≈ ${usd(pack.usd)}` : 'Credit packs'}
-              features={features('GO', go.limits, go.packs)}
-              extra={
-                <div className="grid grid-cols-2 gap-1.5" role="radiogroup" aria-label="GO credit pack">
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
+              <PlanCard title="Free" icon={<Coins size={18} />} current={current === 'FREE' || current === 'GO'}
+                price={<><span className={`${SERIF} text-4xl`}>0</span><span className="ml-1 text-sm text-[var(--muted)]">RWF</span></>} sub="Free forever"
+                features={features('FREE', free.limits)}
+                action={<button disabled className="min-h-[46px] w-full rounded-xl bg-[var(--surface-2)] py-3 text-sm font-medium text-[var(--muted)]">{current === 'FREE' || current === 'GO' ? 'Your current plan' : 'Included'}</button>} />
+
+              {SOLD.map(({ id, icon, blurb }) => {
+                const p = plan(id);
+                if (!p?.priceRwf) return null;
+                const total = p.priceRwf * months;
+                const recommended = id === 'PRO';
+                return (
+                  <PlanCard key={id} title={p.name} icon={icon} current={current === id} recommended={recommended} tag={recommended ? 'Most popular' : undefined}
+                    price={<><span className={`${SERIF} text-4xl`}>{p.priceRwf.toLocaleString('en-US')}</span><span className="ml-1 text-sm text-[var(--muted)]">RWF / month</span></>}
+                    sub={`${blurb} · ≈ ${usd(p.priceUsd ?? 0)}`}
+                    features={features(id, p.limits)}
+                    action={<button disabled={paymentsOff} onClick={() => setCheckout({ purpose: id, months, title: `${p.name} plan · ${months} month${months > 1 ? 's' : ''}`, amountRwf: total, amountUsd: Math.round((total / data.fxUsdRwf) * 100) / 100 })}
+                      className={`min-h-[46px] w-full rounded-xl py-3 text-sm font-semibold transition-opacity disabled:opacity-50 ${recommended ? 'bg-[var(--accent)] text-[var(--on-accent)] hover:opacity-90' : 'bg-[var(--surface-2)] text-[var(--text)] hover:bg-[var(--hover)]'}`}>
+                      {current === id ? 'Extend' : 'Choose'} · {rwf(total)}
+                    </button>} />
+                );
+              })}
+            </div>
+
+            <div className="grid grid-cols-1 gap-5 lg:grid-cols-[3fr_2fr]">
+              <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="flex items-center gap-2 text-base font-semibold text-[var(--text)]"><Coins size={16} className="text-[var(--accent)]" /> Top up credits</h3>
+                    <p className="mt-0.5 text-xs text-[var(--muted)]">For any plan, used once your monthly credits run out. Valid 12 months.</p>
+                  </div>
+                  <button disabled={paymentsOff || !pack} onClick={() => pack && setCheckout({ purpose: 'GO_PACK', packId: pack.id, months: 0, title: `Top-up · ${pack.credits.toLocaleString('en-US')} credits`, amountRwf: pack.rwf, amountUsd: pack.usd })}
+                    className="min-h-[40px] rounded-xl bg-[var(--surface-2)] px-4 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--hover)] disabled:opacity-50">Buy {pack ? rwf(pack.rwf) : 'credits'}</button>
+                </div>
+                <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4" role="radiogroup" aria-label="Top-up">
                   {go.packs!.map((p) => (
                     <button key={p.id} type="button" role="radio" aria-checked={p.id === packId} onClick={() => setPackId(p.id)}
-                      className={`rounded-lg border px-2 py-1.5 text-left text-[11px] transition-colors ${p.id === packId ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--text)]' : 'border-[var(--line)] text-[var(--muted)] hover:text-[var(--text)]'}`}>
-                      <b className="block text-xs">{rwf(p.rwf)}</b>{p.credits.toLocaleString('en-US')} credits
+                      className={`rounded-xl border px-3 py-2 text-left text-xs transition-colors ${p.id === packId ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--text)]' : 'border-[var(--line)] text-[var(--muted)] hover:text-[var(--text)]'}`}>
+                      <b className="block text-sm">{rwf(p.rwf)}</b>{p.credits.toLocaleString('en-US')} credits
                     </button>
                   ))}
                 </div>
-              }
-              action={<button disabled={paymentsOff || !pack} onClick={() => pack && setCheckout({ purpose: 'GO_PACK', packId: pack.id, months: 0, title: `GO credits · ${pack.credits.toLocaleString('en-US')} credits`, amountRwf: pack.rwf, amountUsd: pack.usd })}
-                className="min-h-[46px] w-full rounded-xl bg-[var(--surface-2)] py-3 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--hover)] disabled:opacity-50">Buy {pack ? rwf(pack.rwf) : 'credits'}</button>} />
-
-            {/* PRO */}
-            <PlanCard title="PRO" icon={<Sparkles size={18} />} current={current === 'PRO'} recommended tag={discount ? `Launch offer −${discount}%` : 'Most popular'}
-              price={<>
-                {pro.listPriceUsd ? <span className="mr-2 text-xl text-[var(--muted)] line-through">{usd(pro.listPriceUsd)}</span> : null}
-                <span className={`${SERIF} text-4xl`}>{usd(pro.priceUsd ?? 0)}</span><span className="ml-1 text-sm text-[var(--muted)]">/ month</span>
-              </>}
-              sub={`≈ ${rwf((pro.priceRwf ?? 0) * months)}${months > 1 ? ` for ${months} months` : ' a month'}${pro.listPriceRwf ? ` (was ${rwf(pro.listPriceRwf)})` : ''}`}
-              features={features('PRO', pro.limits)}
-              extra={
-                <div className="flex gap-1.5" role="radiogroup" aria-label="Months">
-                  {[1, 3, 6, 12].map((m) => (
-                    <button key={m} type="button" role="radio" aria-checked={m === months} onClick={() => setMonths(m)}
-                      className={`flex-1 rounded-lg border py-1.5 text-xs font-medium transition-colors ${m === months ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--text)]' : 'border-[var(--line)] text-[var(--muted)] hover:text-[var(--text)]'}`}>{m} mo</button>
-                  ))}
+              </div>
+              <div className="flex flex-col justify-between gap-4 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-5">
+                <div>
+                  <h3 className="flex items-center gap-2 text-base font-semibold text-[var(--text)]"><Building2 size={16} className="text-[var(--accent)]" /> Schools</h3>
+                  <p className="mt-1 text-xs leading-relaxed text-[var(--muted)]">One Teacher plan per teacher ({rwf(plan('PRO')?.priceRwf ?? 0)} a month each). Each teacher keeps their own classes, credits and memory. We can invoice the school for several teachers.</p>
                 </div>
-              }
-              action={<button disabled={paymentsOff} onClick={() => setCheckout({ purpose: 'PRO', months, title: `PRO plan · ${months} month${months > 1 ? 's' : ''}`, amountRwf: (pro.priceRwf ?? 0) * months, amountUsd: (pro.priceUsd ?? 0) * months })}
-                className="min-h-[46px] w-full rounded-xl bg-[var(--accent)] py-3 text-sm font-semibold text-[var(--on-accent)] transition-opacity hover:opacity-90 disabled:opacity-50">
-                {current === 'PRO' ? 'Extend PRO' : 'Upgrade to PRO'} · {rwf((pro.priceRwf ?? 0) * months)}
-              </button>} />
-
-            {/* Institution */}
-            <PlanCard title="Institution" icon={<Building2 size={18} />} current={current === 'INSTITUTION'} tag={`${inst.seats ?? 25} seats`}
-              price={<><span className={`${SERIF} text-4xl`}>{usd(inst.priceUsd ?? 50)}+</span><span className="ml-1 text-sm text-[var(--muted)]">/ month</span></>}
-              sub={`≈ ${rwf(inst.priceRwf ?? 0)}+ a month · schools & organisations`}
-              features={[...features('INSTITUTION', inst.limits).slice(0, 5), 'Admin dashboard, shared datasets & invoices']}
-              action={<button onClick={() => setOrgOpen(true)} className="min-h-[46px] w-full rounded-xl border border-[var(--line)] py-3 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--hover)]">Talk to us</button>} />
-          </div>
+                <button onClick={() => setOrgOpen(true)} className="min-h-[40px] w-full rounded-xl border border-[var(--line)] text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--hover)]">Ask for a school invoice</button>
+              </div>
+            </div>
+          </>
         )}
 
         <section className="mx-auto grid max-w-4xl grid-cols-1 gap-3 sm:grid-cols-3">
           {[
-            ['What is a credit?', 'A chat reply is 1 credit. Heavier work (reading scans, analysing data, building files) uses a few, based on its real AI cost.'],
+            ['What is a credit?', 'A chat reply is about 1 credit. Marking one handwritten script is about 12; overnight marking (results by the next morning) costs half.'],
             ['How do I pay?', 'Enter your MTN MoMo number, then approve the prompt on your phone with your PIN. Your plan or credits are added as soon as MTN confirms.'],
-            ['Receipts and renewal', 'A receipt is emailed and sent to Telegram. Mobile Money never renews automatically: we remind you 3 days before PRO ends.'],
+            ['Receipts and renewal', 'A receipt is emailed and sent to Telegram. Mobile Money never renews automatically: we remind you 3 days before your plan ends.'],
           ].map(([q, a]) => (
             <div key={q} className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4"><h3 className="text-sm font-semibold text-[var(--text)]">{q}</h3><p className="mt-1 text-xs leading-relaxed text-[var(--muted)]">{a}</p></div>
           ))}
@@ -317,7 +335,7 @@ function CheckoutDialog({ checkout, onClose, onDone }: { checkout: Checkout; onC
         {state === 'success' && (
           <div className="space-y-3 py-2 text-center">
             <CheckCircle2 size={34} className="mx-auto text-[var(--teal)]" />
-            <p className="text-sm font-medium text-[var(--text)]">{checkout.purpose === 'GO_PACK' ? `${payment?.credits?.toLocaleString('en-US')} credits were added.` : 'Your PRO plan is active.'}</p>
+            <p className="text-sm font-medium text-[var(--text)]">{checkout.purpose === 'GO_PACK' ? `${payment?.credits?.toLocaleString('en-US')} credits were added.` : 'Your plan is active.'}</p>
             {payment?.receiptNumber && <p className="text-xs text-[var(--muted)]">Receipt {payment.receiptNumber}. A copy was sent to your email{payment ? ' and Telegram (if connected)' : ''}.</p>}
             <div className="flex gap-2">
               {payment && <button type="button" onClick={() => void openReceipt(payment.id)} className="flex-1 rounded-xl border border-[var(--line)] py-2.5 text-sm text-[var(--text)]">View receipt</button>}
