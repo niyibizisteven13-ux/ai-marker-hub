@@ -40,6 +40,7 @@ import datasetRoutes from './server/routes/datasetRoutes.js';
 import { analyticsRouter, assessmentRouter, documentsRouter, jobsRouter } from './server/routes/educationRoutes.js';
 import { examChat, startEducationRuntime } from './server/services/educationRuntime.js';
 import { examsRouter } from './server/routes/examRoutes.js';
+import { createAssignmentsRouter, createPublicAssignmentsRouter } from './server/routes/assignmentRoutes.js';
 import { outputsRouter, sharedOutputsRouter } from './server/routes/outputRoutes.js';
 import { curationViewRouter, knowledgeAdminRouter, knowledgeSourcesRouter } from './server/routes/knowledgeRepositoryRoutes.js';
 import { shutdownOcr } from './server/services/documents/ocr.js';
@@ -65,7 +66,7 @@ import { validate, examSchema, markScriptSchema, batchGradeSchema, chatSchema } 
 import { getFileUrlSecret, getJwtSecret } from './server/auth/secrets.js';
 
 import { requireAuth, requireRole, writeAuditLog } from './production/auth.js';
-import { generalLimiter, gradingLimiter, publicFormSubmitLimiter, batchGradingLimiter } from './production/rateLimiter.js';
+import { generalLimiter, gradingLimiter, publicFormSubmitLimiter, batchGradingLimiter, assignmentSubmitLimiter } from './production/rateLimiter.js';
 import authRoutes from './server/routes/authRoutes.ts';
 import userRoutes from './server/routes/userRoutes.ts';
 import agentRoutes from './server/routes/agentRoutes.ts';
@@ -402,6 +403,10 @@ app.use('/api/assessment', requireAuth, assessmentRouter);
 app.use('/api/jobs', requireAuth, jobsRouter);
 app.use('/api/documents', requireAuth, documentsRouter);
 app.use('/api/exams', requireAuth, examsRouter);
+// Assignments: students hand in through the shared link without an account; the rest is the teacher's.
+app.post('/api/assignments/public/:token/submit', assignmentSubmitLimiter);
+app.use('/api/assignments/public', createPublicAssignmentsRouter());
+app.use('/api/assignments', requireAuth, createAssignmentsRouter());
 app.use('/api/outputs/shared', sharedOutputsRouter);
 app.use('/api/outputs', requireAuth, outputsRouter);
 app.use('/api/memory', requireAuth, memoryRoutes);

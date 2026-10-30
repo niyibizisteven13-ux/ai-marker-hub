@@ -51,5 +51,8 @@ data/jobs/
 data/assessments/
 data/documents/
 data/exams/
+data/assignments/
+data/assignment-links/
+data/assignment-files/
 __pycache__/
 dump.rdb

@@ -75,6 +75,8 @@ const AdminPage = React.lazy(() => import('./pages/AdminPage'));
 const CurationViewPage = React.lazy(() => import('./pages/CurationViewPage'));
 const OutputsLibrary = React.lazy(() => import('./components/OutputsLibrary'));
 const MarkPage = React.lazy(() => import('./components/MarkPage'));
+const AssignmentsPage = React.lazy(() => import('./components/AssignmentsPage'));
+const AssignmentSubmitPage = React.lazy(() => import('./pages/AssignmentSubmitPage'));
 type MarkIncoming = import('./components/MarkPage').MarkIncoming;
 type MarkScanTarget = import('./components/MarkPage').MarkScanTarget;
 const MarkingDrawer = React.lazy(() => import('./components/ChatMarkingCard').then((m) => ({ default: m.MarkingDrawer })));
@@ -230,6 +232,12 @@ export default function App() {
   const [libraryOpen, setLibraryOpen] = useState<boolean>(false);
   // Mark page, and a marking request waiting for the fresh chat it is sent in.
   const [markOpen, setMarkOpen] = useState<boolean>(() => window.location.pathname === '/mark');
+  // Assignments: /assignments, or /assignments/<id> for one class dashboard (links from the chat).
+  const [assignmentsOpen, setAssignmentsOpen] = useState<{ id: string | null; mark?: boolean } | null>(() => {
+    const m = /^\/assignments(?:\/([0-9a-f-]{36}))?\/?$/.exec(window.location.pathname);
+    // ?mark=1 (the chat's "Mark all" link) goes straight on to the Mark page with the class loaded.
+    return m ? { id: m[1] ?? null, mark: !!m[1] && new URLSearchParams(window.location.search).get('mark') === '1' } : null;
+  });
   // Camera opened from the Mark page: its pages go back to that page (one folder per student), not to the old hub.
   const [scanForMark, setScanForMark] = useState(false);
   const [markIncoming, setMarkIncoming] = useState<MarkIncoming | null>(null);
@@ -1346,6 +1354,11 @@ export default function App() {
   if (window.location.pathname === '/model') {
     return <ModelPage />;
   }
+  // A student opening the teacher's link: the hand-in page, no account needed.
+  const handIn = /^\/a\/([\w-]{16,40})\/?$/.exec(window.location.pathname);
+  if (handIn) {
+    return <Suspense fallback={null}><AssignmentSubmitPage token={handIn[1]} /></Suspense>;
+  }
   if (window.location.pathname === '/terms') {
     return <TermsPage />;
   }
@@ -1790,6 +1803,7 @@ export default function App() {
           onOpenLibrary={() => { setLibraryTab('mine'); setLibraryOpen(true); }}
           onOpenPublicLibrary={() => { setLibraryTab('library'); setLibraryOpen(true); }}
           onOpenMark={() => setMarkOpen(true)}
+          onOpenAssignments={() => setAssignmentsOpen({ id: null })}
           collapsed={sidebarCollapsed}
           setCollapsed={setSidebarCollapsed}
           user={authenticatedUser}
@@ -1902,6 +1916,29 @@ export default function App() {
         )}
       </Suspense>
       {authenticatedUser && <Suspense fallback={null}><MarkingDrawer /></Suspense>}
+      {authenticatedUser && assignmentsOpen && (
+        <Suspense fallback={null}>
+          <AssignmentsPage
+            initialId={assignmentsOpen.id}
+            autoMark={assignmentsOpen.mark}
+            onClose={() => { setAssignmentsOpen(null); if (window.location.pathname.startsWith('/assignments')) window.history.replaceState({}, '', '/'); }}
+            onMarkAll={(p) => {
+              // The class goes to the Mark page as it is: one PDF per student, the task as the question paper,
+              // and the students list so the results keep their names. The teacher adds the scheme there.
+              setMarkIncoming({
+                id: Date.now(), files: [],
+                uploaded: [
+                  ...p.task.map((f) => ({ fileId: f.id, name: f.name, mime: f.mime, size: f.size, role: 'paper' as const })),
+                  ...p.scripts.map((f) => ({ fileId: f.id, name: f.name, mime: f.mime, size: f.size, role: 'scripts' as const, label: `${f.studentName} (${f.candidateId})` })),
+                ],
+                extras: [{ fileId: p.roster.id, name: p.roster.name, mime: p.roster.mime, size: p.roster.size }],
+              });
+              setAssignmentsOpen(null);
+              setMarkOpen(true);
+            }}
+          />
+        </Suspense>
+      )}
       {authenticatedUser && markOpen && (
         <Suspense fallback={null}>
           <MarkPage
