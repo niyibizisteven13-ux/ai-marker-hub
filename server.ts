@@ -38,7 +38,7 @@ import { FileStore, createFileRouter } from './server/services/ai/index.js';
 import { describeChatFailure } from './server/services/ai/chatFailure.js';
 import datasetRoutes from './server/routes/datasetRoutes.js';
 import { analyticsRouter, assessmentRouter, documentsRouter, jobsRouter } from './server/routes/educationRoutes.js';
-import { examChat, startEducationRuntime } from './server/services/educationRuntime.js';
+import { examChat, overnightJobQueue, startEducationRuntime } from './server/services/educationRuntime.js';
 import { examsRouter } from './server/routes/examRoutes.js';
 import { createAssignmentsRouter, createPublicAssignmentsRouter } from './server/routes/assignmentRoutes.js';
 import { outputsRouter, sharedOutputsRouter } from './server/routes/outputRoutes.js';
@@ -2817,6 +2817,7 @@ async function startServer() {
     server.close(async () => {
       try {
         await fileJobQueue.stop();
+        await overnightJobQueue?.stop();
         await shutdownOcr();
         await queueService.close();
         await closeRedis();

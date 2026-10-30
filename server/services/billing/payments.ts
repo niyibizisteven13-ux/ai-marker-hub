@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { prisma } from '../../db.js';
 import logger from '../../utils/logger.js';
 import { EmailService } from '../EmailService.js';
-import { PLANS, currentGoPacks, fxUsdRwf, planFor, refreshBillingSettings, toRwf, walletBalance } from './plans.js';
+import { PLANS, SOLD_PLANS, currentGoPacks, fxUsdRwf, planFor, planIdForSubscription, refreshBillingSettings, subscriptionTypeFor, walletBalance, type SoldPlanId } from './plans.js';
 import { MomoError, momoConfig, momoReady, normalizeMsisdn, paymentStatus, requestToPay } from './momo.js';
 import { expiredEmail, paymentFailedEmail, receiptEmail, renewalReminderEmail, type Email } from './emails.js';
 
@@ -10,8 +10,8 @@ import { expiredEmail, paymentFailedEmail, receiptEmail, renewalReminderEmail, t
  * Plan and credit purchases over MTN Mobile Money.
  *
  * start → MTN asks the payer to approve on their phone → status is confirmed by asking MTN (callback, the
- * user's page polling, and a background poller all call check()) → fulfil() exactly once: PRO / Institution
- * time is extended or GO credits are added, a receipt number is issued, and the receipt goes out by email and
+ * user's page polling, and a background poller all call check()) → fulfil() exactly once: Starter / Teacher /
+ * Teacher Plus time is extended or GO credits are added, a receipt number is issued, and the receipt goes out by email and
  * Telegram. Amounts always come from the server's price list, never from the browser.
  */
 
@@ -19,7 +19,9 @@ const db = prisma as any;
 const PENDING_TTL_MS = 15 * 60_000;
 const MONTH_MS = 30 * 86_400_000;
 
-export type Purpose = 'PRO' | 'INSTITUTION' | 'GO_PACK';
+/** A plan sold online, or a GO credit top-up. */
+export type Purpose = SoldPlanId | 'GO_PACK';
+export const PURPOSES: readonly Purpose[] = [...SOLD_PLANS, 'GO_PACK'];
 export class BillingError extends Error {
   constructor(message: string, public status = 400, public code = 'BILLING_ERROR') { super(message); }
 }
@@ -34,10 +36,10 @@ export async function quote(purpose: Purpose, opts: { packId?: string; months?: 
     if (!pack) throw new BillingError('Choose a GO credit pack.', 400, 'INVALID_PACK');
     return { purpose, item: `GO credits · ${pack.credits.toLocaleString('en-US')} credits`, months: 0, credits: pack.credits, amountRwf: pack.rwf, amountUsd: Math.round((pack.rwf / fxUsdRwf()) * 100) / 100, packId: pack.id };
   }
-  const plan = purpose === 'PRO' ? PLANS.PRO : PLANS.INSTITUTION;
-  const usd = (plan.priceUsd ?? 0) * months;
-  if (!usd) throw new BillingError('This plan is not available for online payment.', 400, 'INVALID_PLAN');
-  return { purpose, item: `${plan.name} plan · ${months} month${months > 1 ? 's' : ''}`, months, credits: 0, amountRwf: toRwf(plan.priceUsd!) * months, amountUsd: usd };
+  const plan = (SOLD_PLANS as readonly string[]).includes(purpose) ? PLANS[purpose] : null;
+  if (!plan?.priceRwf) throw new BillingError('This plan is not available for online payment.', 400, 'INVALID_PLAN');
+  const amountRwf = plan.priceRwf * months;
+  return { purpose, item: `${plan.name} plan · ${months} month${months > 1 ? 's' : ''}`, months, credits: 0, amountRwf, amountUsd: Math.round((amountRwf / fxUsdRwf()) * 100) / 100 };
 }
 
 export function publicPayment(p: any) {
@@ -106,7 +108,8 @@ export async function fulfil(p: any, financialTransactionId?: string) {
   if (p.purpose === 'GO_PACK') {
     await db.creditLedger.create({ data: { id: randomUUID(), userId: p.userId, delta: p.credits, reason: 'purchase', paymentId: p.id, note: p.packId, createdAt: now } });
   } else {
-    const planType = p.purpose === 'INSTITUTION' ? 'ORGANIZATION' : 'PRO';
+    // Older payments may say INSTITUTION; they keep granting that plan.
+    const planType = subscriptionTypeFor(planIdForSubscription(p.purpose) ?? 'PRO');
     const sub = await db.subscription.findUnique({ where: { userId: p.userId } });
     const stillActive = sub && sub.status === 'ACTIVE' && sub.planType === planType && sub.endDate && new Date(sub.endDate).getTime() > now.getTime();
     const from = stillActive ? new Date(sub.endDate).getTime() : now.getTime();
@@ -154,7 +157,7 @@ async function grantText(p: any) {
   }
   const sub = await db.subscription.findUnique({ where: { userId: p.userId } });
   const until = sub?.endDate ? new Date(sub.endDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Africa/Kigali' }) : '';
-  return { grant: `Your ${p.purpose === 'INSTITUTION' ? 'Institution' : 'PRO'} plan is active${until ? ` until ${until}` : ''}.`, balanceNote: undefined };
+  return { grant: `Your ${PLANS[planIdForSubscription(p.purpose) ?? 'PRO'].name} plan is active${until ? ` until ${until}` : ''}.`, balanceNote: undefined };
 }
 
 export async function notifyReceipt(p: any) {
@@ -183,8 +186,9 @@ export async function runRenewalSweep(now = Date.now()) {
     if (!s.endDate) continue;
     const end = new Date(s.endDate);
     const daysLeft = Math.ceil((end.getTime() - now) / 86_400_000);
-    const plan = s.planType === 'ORGANIZATION' ? PLANS.INSTITUTION : PLANS.PRO;
-    const priceRwf = toRwf(plan.priceUsd ?? 0);
+    const plan = PLANS[planIdForSubscription(s.planType) ?? 'PRO'];
+    // Plans no longer sold online (Institution) renew as Teacher.
+    const priceRwf = plan.priceRwf || PLANS.PRO.priceRwf || 0;
     const c = await contact(s.userId);
     if (daysLeft <= 0) {
       const key = `expired:${s.userId}:${end.toISOString().slice(0, 10)}`;
@@ -194,7 +198,7 @@ export async function runRenewalSweep(now = Date.now()) {
     } else if (daysLeft <= 3) {
       const stage = daysLeft <= 1 ? 1 : 3;
       const key = `renewal-${stage}:${s.userId}:${end.toISOString().slice(0, 10)}`;
-      if (await once(`${key}:email`, s.userId, 'email', () => sendMail(c.email, renewalReminderEmail({ name: c.name, plan: plan.name, endDate: end, daysLeft, priceRwf, priceUsd: plan.priceUsd ?? 0 })))) sent++;
+      if (await once(`${key}:email`, s.userId, 'email', () => sendMail(c.email, renewalReminderEmail({ name: c.name, plan: plan.name, endDate: end, daysLeft, priceRwf, priceUsd: Math.round((priceRwf / fxUsdRwf()) * 100) / 100 })))) sent++;
       await once(`${key}:telegram`, s.userId, 'telegram', () => sendTelegram(c.chatId, `🔔 <b>Your ${plan.name} plan ends ${daysLeft <= 1 ? 'tomorrow' : `in ${daysLeft} days`}</b>\n\nRenew with Mobile Money to keep your credits and memory.`, { text: `Renew · ${priceRwf.toLocaleString('en-US')} RWF`, url: `${appUrl()}/upgrade?renew=1` }));
     }
   }

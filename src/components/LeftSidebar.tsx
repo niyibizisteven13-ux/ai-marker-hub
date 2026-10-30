@@ -26,7 +26,7 @@ import {
 import { NavigationTab, User, ChatSession } from '../types';
 import logoUrl from '../assets/bwenge-logo.svg';
 import { tokens } from '../utils/designTokens';
-import { useBillingMe } from './PlanStatus';
+import { creditMeter, useBillingMe } from './PlanStatus';
 
 interface LeftSidebarProps {
   activeTab: NavigationTab;
@@ -98,11 +98,13 @@ function initials(name: string): string {
 type PlanBadge = { label: string; className: string; icon?: React.ElementType };
 const PLAN_BADGE: Record<string, PlanBadge> = {
   FREE: { label: 'Free', className: 'border-white/15 bg-white/[0.06] text-[#C2C0B6]' },
-  GO: { label: 'GO', className: 'border-sky-400/30 bg-sky-400/10 text-sky-300', icon: Coins },
-  PRO: { label: 'Pro', className: 'border-amber-400/30 bg-amber-400/10 text-amber-300', icon: Sparkles },
+  GO: { label: 'Top-up', className: 'border-sky-400/30 bg-sky-400/10 text-sky-300', icon: Coins },
+  STARTER: { label: 'Starter', className: 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300', icon: Sparkles },
+  PRO: { label: 'Teacher', className: 'border-amber-400/30 bg-amber-400/10 text-amber-300', icon: Sparkles },
+  PLUS: { label: 'Teacher+', className: 'border-orange-400/30 bg-orange-400/10 text-orange-300', icon: Sparkles },
   INSTITUTION: { label: 'Inst.', className: 'border-indigo-400/30 bg-indigo-400/12 text-indigo-300', icon: Building2 },
 };
-const LEGACY_PLAN: Record<string, keyof typeof PLAN_BADGE> = { BUSINESS: 'PRO', PRO: 'PRO', ORGANIZATION: 'INSTITUTION', GO: 'GO' };
+const LEGACY_PLAN: Record<string, keyof typeof PLAN_BADGE> = { BUSINESS: 'PRO', PRO: 'PRO', STARTER: 'STARTER', PLUS: 'PLUS', ORGANIZATION: 'INSTITUTION', GO: 'GO' };
 
 export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   activeTab,
@@ -454,10 +456,10 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                   <a href="/upgrade" role="menuitem" className="mx-1 mb-1 block rounded-lg border border-white/[0.07] bg-white/[0.03] px-2.5 py-2 hover:bg-white/[0.06]">
                     <span className="flex items-center justify-between gap-2 text-[12px]">
                       <span className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-px text-[9.5px] font-bold uppercase ${plan.className}`}>{plan.icon && <plan.icon size={9} strokeWidth={2.5} aria-hidden="true" />}{billing.planName}</span>
-                      <span className="font-semibold text-[#D97757]">{billing.plan === 'PRO' || billing.plan === 'INSTITUTION' ? 'Manage' : 'Upgrade'}</span>
+                      <span className="font-semibold text-[#D97757]">{billing.plan !== 'FREE' && billing.plan !== 'GO' ? 'Manage' : 'Upgrade'}</span>
                     </span>
-                    <span className="mt-1.5 block text-[11.5px] text-[#C2C0B6]">{Math.max(0, billing.usage.day.limit - billing.usage.day.used)} of {billing.usage.day.limit} credits left today{billing.wallet > 0 ? ` · ${billing.wallet.toLocaleString('en-US')} GO` : ''}</span>
-                    <span className="mt-1 block h-1 overflow-hidden rounded-full bg-white/[0.07]"><span className="block h-full rounded-full bg-[#5DCAA5]" style={{ width: `${billing.usage.day.limit ? Math.max(0, 100 - (billing.usage.day.used / billing.usage.day.limit) * 100) : 0}%` }} /></span>
+                    <span className="mt-1.5 block text-[11.5px] text-[#C2C0B6]">{creditMeter(billing.usage).label}{billing.wallet > 0 ? ` · ${billing.wallet.toLocaleString('en-US')} top-up` : ''}</span>
+                    <span className="mt-1 block h-1 overflow-hidden rounded-full bg-white/[0.07]"><span className="block h-full rounded-full bg-[#5DCAA5]" style={{ width: `${(() => { const m = creditMeter(billing.usage); return m.limit ? Math.max(0, 100 - (m.used / m.limit) * 100) : 0; })()}%` }} /></span>
                   </a>
                 )}
                 <div className="my-1 border-t" style={{ borderColor: tokens.border }} />

@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { MemoryService, MemoryUpgradeRequired } from '../services/MemoryService.js';
-import { PLANS, toRwf } from '../services/billing/plans.js';
+import { PLANS } from '../services/billing/plans.js';
 
 /**
  * Settings → Memory (mounted at /api/memory behind requireAuth). Everyone can see the page; turning memory on
@@ -15,7 +15,7 @@ const userIdOf = (req: Request) => (req as any).user?.userId as string;
 function fail(res: Response, e: any) {
   if (e instanceof MemoryUpgradeRequired) {
     const pro = PLANS.PRO;
-    return res.status(402).json({ error: e.message, code: e.code, upgrade: { plan: 'PRO', priceUsd: pro.priceUsd, listPriceUsd: pro.listPriceUsd, priceRwf: toRwf(pro.priceUsd!), url: '/upgrade?reason=memory' } });
+    return res.status(402).json({ error: e.message, code: e.code, upgrade: { plan: 'PRO', name: pro.name, priceUsd: pro.priceUsd, listPriceUsd: pro.listPriceUsd, priceRwf: pro.priceRwf, url: '/upgrade?reason=memory' } });
   }
   if (e instanceof z.ZodError) return res.status(400).json({ error: 'Invalid request.', code: 'INVALID' });
   const status = e?.code === 'NOT_FOUND' ? 404 : e?.code === 'SENSITIVE' || e?.code === 'INVALID' ? 400 : 500;
@@ -26,7 +26,7 @@ router.get('/', async (req, res) => {
   try {
     const q = z.object({ kind: z.enum(['fact', 'preference', 'note', 'episode']).optional(), q: z.string().max(200).optional(), limit: z.coerce.number().int().min(1).max(500).optional(), offset: z.coerce.number().int().min(0).optional() }).parse(req.query);
     const [status, list] = await Promise.all([memory().status(userIdOf(req)), memory().list(userIdOf(req), q)]);
-    res.json({ success: true, ...status, ...list, pro: { priceUsd: PLANS.PRO.priceUsd, listPriceUsd: PLANS.PRO.listPriceUsd, priceRwf: toRwf(PLANS.PRO.priceUsd!) } });
+    res.json({ success: true, ...status, ...list, pro: { name: PLANS.PRO.name, priceUsd: PLANS.PRO.priceUsd, listPriceUsd: PLANS.PRO.listPriceUsd, priceRwf: PLANS.PRO.priceRwf } });
   } catch (e) { fail(res, e); }
 });
 

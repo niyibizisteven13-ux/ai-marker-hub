@@ -311,7 +311,7 @@ export const bwengeAgent = createAiAgent({
       async remember(userId, content, kind) {
         const m = MemoryService.getInstance();
         const st = await m.status(userId);
-        if (!st.available) return 'Memory is not part of the user\'s plan. If they want you to remember things across chats, tell them PRO includes it (Settings → Memory).';
+        if (!st.available) return 'Memory is not part of the user\'s plan. If they want you to remember things across chats, tell them the Teacher plan includes it (Settings → Memory).';
         if (!st.enabled) return 'Memory is turned off. Tell the user they can turn it on in Settings → Memory.';
         const saved = await m.add(userId, content, { kind, source: 'assistant' });
         return saved ? `Saved to memory: ${saved.content}` : 'Nothing was saved (empty or duplicate).';

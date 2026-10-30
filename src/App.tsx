@@ -362,7 +362,7 @@ export default function App() {
     window.addEventListener('open-signup-modal', handleOpenSignup);
     window.addEventListener('open-login-modal', handleOpenLogin);
     window.addEventListener('popstate', handlePopState);
-    // Upgrade buttons open the plans page directly (Free / GO / PRO / Institution with RWF prices).
+    // Upgrade buttons open the plans page directly (Free / Starter / Teacher / Teacher Plus and top-ups, in RWF).
     (window as any).openUpgradeModal = (jobId?: string, service?: string) => {
       setUpgradeContext({ jobId, service });
       window.history.pushState({}, '', '/upgrade');

@@ -5,7 +5,7 @@ import { openReceipt } from '../../pages/UpgradePage';
 
 /** Settings → Billing: current plan and renewal, GO credits, and Mobile Money payments with receipts. */
 
-interface Me { plan: 'FREE' | 'GO' | 'PRO' | 'INSTITUTION'; planName: string; wallet: number; subscription: { planType: string; endDate: string | null; daysLeft: number | null } | null; payments: 'ready' | 'unavailable' }
+interface Me { plan: 'FREE' | 'GO' | 'STARTER' | 'PRO' | 'PLUS' | 'INSTITUTION'; planName: string; wallet: number; subscription: { planType: string; endDate: string | null; daysLeft: number | null } | null; payments: 'ready' | 'unavailable' }
 interface Payment { id: string; purpose: string; months: number; credits: number; amountRwf: number; currency: string; status: string; receiptNumber: string | null; createdAt: string; paidAt: string | null; phoneMasked: string }
 
 const SERIF = "font-['Georgia','Tiempos_Headline','Times_New_Roman',serif]";
@@ -15,7 +15,8 @@ const STATUS: Record<string, { label: string; icon: React.ReactNode; tone: strin
   FAILED: { label: 'Failed', icon: <XCircle size={13} />, tone: 'text-[var(--danger)]' },
   EXPIRED: { label: 'Not approved', icon: <XCircle size={13} />, tone: 'text-[var(--muted)]' },
 };
-const itemOf = (p: Payment) => (p.purpose === 'GO_PACK' ? `GO credits · ${p.credits.toLocaleString('en-US')}` : `${p.purpose === 'INSTITUTION' ? 'Institution' : 'PRO'} · ${p.months} month${p.months > 1 ? 's' : ''}`);
+const PLAN_NAME: Record<string, string> = { STARTER: 'Starter', PRO: 'Teacher', PLUS: 'Teacher Plus', INSTITUTION: 'Institution' };
+const itemOf = (p: Payment) => (p.purpose === 'GO_PACK' ? `Top-up · ${p.credits.toLocaleString('en-US')} credits` : `${PLAN_NAME[p.purpose] ?? p.purpose} · ${p.months} month${p.months > 1 ? 's' : ''}`);
 
 export default function BillingSection() {
   const [me, setMe] = useState<Me | null>(null);
@@ -41,14 +42,14 @@ export default function BillingSection() {
   if (loading) return <div className="flex items-center justify-center gap-2 py-12 text-sm text-[var(--muted)]"><Loader2 size={18} className="animate-spin text-[var(--accent)]" /> Loading billing…</div>;
   if (!me) return <div className="space-y-3"><h2 className="text-xl text-[var(--text)]">Billing</h2><p role="alert" className="text-sm text-[var(--danger)]">{error}</p></div>;
 
-  const paid = me.plan === 'PRO' || me.plan === 'INSTITUTION';
+  const paid = me.plan !== 'FREE' && me.plan !== 'GO';
   const end = me.subscription?.endDate ? new Date(me.subscription.endDate).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' }) : null;
 
   return (
     <div className="space-y-6">
       <div>
         <h2 className={`${SERIF} text-xl font-normal text-[var(--text)]`}>Billing</h2>
-        <p className="mt-0.5 text-xs text-[var(--muted)]">Your plan, GO credits and Mobile Money payments. Receipts are also emailed to you.</p>
+        <p className="mt-0.5 text-xs text-[var(--muted)]">Your plan, top-up credits and Mobile Money payments. Receipts are also emailed to you.</p>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -59,14 +60,14 @@ export default function BillingSection() {
             <h3 className={`${SERIF} text-2xl font-normal text-[var(--text)]`}>{me.planName}</h3>
           </div>
           <p className="text-xs text-[var(--muted)]">
-            {paid && end ? <>Active until <b className="text-[var(--text)]">{end}</b>{me.subscription?.daysLeft != null && me.subscription.daysLeft <= 3 ? ' · ends soon' : ''}. Mobile Money does not renew automatically.</> : me.plan === 'GO' ? 'Free allowance plus your GO credits.' : 'Free daily allowance.'}
+            {paid && end ? <>Active until <b className="text-[var(--text)]">{end}</b>{me.subscription?.daysLeft != null && me.subscription.daysLeft <= 3 ? ' · ends soon' : ''}. Mobile Money does not renew automatically.</> : me.plan === 'GO' ? 'Free allowance plus your top-up credits.' : 'Free monthly allowance.'}
           </p>
           <a href={paid ? '/upgrade?renew=1' : '/upgrade'} className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-[var(--on-accent)] hover:opacity-90">
-            {paid ? 'Renew or extend' : 'Upgrade to PRO'} <ArrowUpRight size={14} />
+            {paid ? 'Renew or change plan' : 'See plans'} <ArrowUpRight size={14} />
           </a>
         </div>
         <div className="space-y-3 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-5 shadow-sm">
-          <span className="flex items-center gap-1.5 text-xs font-medium text-[var(--muted)]"><Coins size={14} /> GO credits</span>
+          <span className="flex items-center gap-1.5 text-xs font-medium text-[var(--muted)]"><Coins size={14} /> Top-up credits</span>
           <div className={`${SERIF} text-2xl font-normal text-[var(--text)]`}>{me.wallet.toLocaleString('en-US')} <span className="text-xs text-[var(--muted)]">credits</span></div>
           <p className="text-xs text-[var(--muted)]">Used automatically when your plan's daily, weekly or monthly allowance runs out.</p>
           <a href="/upgrade" className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--line)] px-4 py-2 text-xs font-semibold text-[var(--text)] hover:bg-[var(--hover)]">Buy credits from 500 RWF <ArrowUpRight size={14} /></a>

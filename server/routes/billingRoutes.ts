@@ -2,9 +2,9 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../db.js';
 import { requireAuth } from '../../production/auth.js';
-import { PLANS, currentGoPacks, fxUsdRwf, refreshBillingSettings, toRwf } from '../services/billing/plans.js';
+import { PLANS, SOLD_PLANS, currentGoPacks, fxUsdRwf, refreshBillingSettings } from '../services/billing/plans.js';
 import { momoMode } from '../services/billing/momo.js';
-import { BillingError, billingState, checkPayment, publicPayment, startPayment } from '../services/billing/payments.js';
+import { BillingError, PURPOSES, billingState, checkPayment, publicPayment, startPayment, type Purpose } from '../services/billing/payments.js';
 import { usageSummary } from '../services/billing/usage.js';
 
 /**
@@ -31,9 +31,8 @@ router.get('/plans', async (_req, res) => {
     payments: momoMode(),
     plans: [
       { id: 'FREE', name: 'Free', priceUsd: 0, priceRwf: 0, period: 'forever', limits: P.FREE.limits },
-      { id: 'GO', name: 'GO', priceUsd: null, priceRwf: null, period: 'pay as you go', limits: P.GO.limits, packs: currentGoPacks().map((p) => ({ ...p, usd: Math.round((p.rwf / fxUsdRwf()) * 100) / 100 })) },
-      { id: 'PRO', name: 'PRO', priceUsd: P.PRO.priceUsd, listPriceUsd: P.PRO.listPriceUsd ?? null, priceRwf: toRwf(P.PRO.priceUsd ?? 0), listPriceRwf: P.PRO.listPriceUsd ? toRwf(P.PRO.listPriceUsd) : null, period: 'month', limits: P.PRO.limits },
-      { id: 'INSTITUTION', name: 'Institution', priceUsd: P.INSTITUTION.priceUsd, priceRwf: toRwf(P.INSTITUTION.priceUsd ?? 0), period: 'month', from: true, seats: 25, limits: P.INSTITUTION.limits },
+      { id: 'GO', name: P.GO.name, priceUsd: null, priceRwf: null, period: 'pay as you go', limits: P.GO.limits, packs: currentGoPacks().map((p) => ({ ...p, usd: Math.round((p.rwf / fxUsdRwf()) * 100) / 100 })) },
+      ...SOLD_PLANS.map((id) => ({ id, name: P[id].name, priceUsd: P[id].priceUsd, priceRwf: P[id].priceRwf, period: 'month', limits: P[id].limits })),
     ],
   });
 });
@@ -55,8 +54,8 @@ router.get('/me', async (req, res) => {
 
 router.post('/checkout', async (req, res) => {
   try {
-    const body = z.object({ purpose: z.enum(['PRO', 'INSTITUTION', 'GO_PACK']), packId: z.string().max(40).optional(), months: z.number().int().min(1).max(12).optional(), phone: z.string().min(6).max(32) }).strict().parse(req.body ?? {});
-    const r = await startPayment(userIdOf(req), body as { purpose: 'PRO' | 'INSTITUTION' | 'GO_PACK'; packId?: string; months?: number; phone: string });
+    const body = z.object({ purpose: z.enum(PURPOSES as [Purpose, ...Purpose[]]), packId: z.string().max(40).optional(), months: z.number().int().min(1).max(12).optional(), phone: z.string().min(6).max(32) }).strict().parse(req.body ?? {});
+    const r = await startPayment(userIdOf(req), body as { purpose: Purpose; packId?: string; months?: number; phone: string });
     res.status(r.reused ? 200 : 201).json({ success: true, ...r, message: 'Approve the payment on your phone with your Mobile Money PIN. If no prompt appears, check pending approvals in your MoMo menu.' });
   } catch (e) { fail(res, e); }
 });

@@ -28,7 +28,7 @@ import {
   LogOut,
   Copy, X, FolderUp, Coins,
 } from 'lucide-react';
-import { useBillingMe } from './PlanStatus';
+import { creditMeter, useBillingMe } from './PlanStatus';
 import { LearningModeBanner, LearningModePicker, speakText, speechLang, useLearningMode, useSpeechInput } from './LearningMode';
 import type { LearningSettings } from '../lib/learning/presets';
 import { Message as MessageType, ChatAttachment, ResponseFeedbackDetails } from '../types';
@@ -413,7 +413,7 @@ export default function CreateStudio({
             <SquarePen className="h-5 w-5" />
           </button>
 
-          {user ? (billing?.plan === 'PRO' || billing?.plan === 'INSTITUTION' ? null : (
+          {user ? (billing && billing.plan !== 'FREE' && billing.plan !== 'GO' ? null : (
             <button
               onClick={() => (window as any).openUpgradeModal?.()}
               className="hidden sm:flex bg-gradient-to-r from-amber-500/20 to-orange-600/10 hover:from-amber-500/30 hover:to-orange-600/20 text-amber-400 font-medium px-3.5 py-1.5 rounded-xl border border-amber-500/30 text-xs transition-all shadow-md items-center gap-1.5"
@@ -919,8 +919,8 @@ export default function CreateStudio({
               <span className="flex min-w-0 items-center gap-1.5">
                 <Coins size={11} className="shrink-0 text-[#D97757]" />
                 <span className="truncate">
-                  {Math.max(0, billing.usage.day.limit - billing.usage.day.used)} of {billing.usage.day.limit} credits left today
-                  {billing.wallet > 0 ? ` · ${billing.wallet.toLocaleString('en-US')} GO` : ''}
+                  {creditMeter(billing.usage).label}
+                  {billing.wallet > 0 ? ` · ${billing.wallet.toLocaleString('en-US')} top-up` : ''}
                 </span>
                 {(billing.plan === 'FREE' || billing.plan === 'GO') && <a href="/upgrade" className="shrink-0 font-semibold text-[#D97757] hover:underline">Upgrade</a>}
               </span>

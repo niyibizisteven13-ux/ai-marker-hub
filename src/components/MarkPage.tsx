@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ArrowLeft, Camera, Check, ChevronDown, FileText, FolderArchive, Image as ImageIcon, Loader2, Paperclip, PenLine, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Camera, Check, ChevronDown, FileText, FolderArchive, Image as ImageIcon, Loader2, Moon, Paperclip, PenLine, X, Zap } from 'lucide-react';
 import { authFetch } from '../utils/authFetch';
 import type { ChatAttachment } from '../types';
 
@@ -26,7 +26,7 @@ export interface MarkIncoming {
 export interface MarkRequest {
   text: string;
   attachments: ChatAttachment[];
-  marking: { roles: Record<string, MarkRole>; instructions?: string; credit: 'partial' | 'strict'; corrections: boolean; feedback: 'brief' | 'detailed' };
+  marking: { roles: Record<string, MarkRole>; instructions?: string; credit: 'partial' | 'strict'; corrections: boolean; feedback: 'brief' | 'detailed'; overnight?: boolean };
 }
 interface Check { pages: number; typedPages: number; students?: number; kind: string; looksLike?: MarkRole; issues: Array<{ page?: number; entry?: string; issue: 'blurry' | 'dark' | 'small' | 'unreadable' }> }
 interface Item { key: string; file: File; role: MarkRole; chosen?: boolean; status: 'uploading' | 'ready' | 'failed'; fileId?: string; error?: string; check?: Check; preview?: string; students?: ScannedStudent[]; bytes?: number; label?: string }
@@ -72,6 +72,8 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
   const [credit, setCredit] = useState<'partial' | 'strict'>('partial');
   const [corrections, setCorrections] = useState(true);
   const [feedback, setFeedback] = useState<'brief' | 'detailed'>('brief');
+  // Overnight: sent as half-price batches; results by the next morning (usually much sooner).
+  const [overnight, setOvernight] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [menu, setMenu] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -156,6 +158,7 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
     const text = [
       `Mark ${n === 1 ? 'this script' : `these ${n} scripts`}${scheme ? ' with the marking scheme' : '. Use the question paper to write the marking scheme first'}.`,
       instructions.trim() ? `My instructions: ${instructions.trim()}` : '',
+      overnight ? 'Mark overnight at half price; I will check the results tomorrow.' : '',
     ].filter(Boolean).join('\n\n');
     onMark({
       text,
@@ -164,11 +167,11 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
         // The students list carries no role, so the marker reads it as the list of names.
         ...extras.map((x) => ({ id: x.fileId, name: x.name, serverId: x.fileId, storedFileId: x.fileId, mimeType: x.mime, size: `${Math.max(1, Math.round(x.size / 1024))} KB`, fileType: 'document' as const })),
       ],
-      marking: { roles, instructions: instructions.trim() || undefined, credit, corrections, feedback },
+      marking: { roles, instructions: instructions.trim() || undefined, credit, corrections, feedback, ...(overnight ? { overnight: true } : {}) },
     });
   };
 
-  const markLabel = !scripts.length ? 'Add student scripts' : !scheme && !paper ? 'Add scheme or question paper' : `Mark ${summary.students || scripts.length} script${(summary.students || scripts.length) === 1 ? '' : 's'}`;
+  const markLabel = !scripts.length ? 'Add student scripts' : !scheme && !paper ? 'Add scheme or question paper' : `Mark ${summary.students || scripts.length} script${(summary.students || scripts.length) === 1 ? '' : 's'}${overnight ? ' overnight' : ''}`;
   const toggleSuggestion = (s: string) => setInstructions((cur) => (cur.includes(s) ? cur.replace(s, '').replace(/\s{2,}/g, ' ').trim() : `${cur.trim()} ${s}`.trim()));
 
   return (
@@ -294,6 +297,10 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
             <select aria-label="Feedback" value={feedback} onChange={(e) => setFeedback(e.target.value as 'brief' | 'detailed')} className="h-[30px] rounded-[10px] border border-white/[0.12] bg-[#30302E] px-2 text-[12.5px] text-neutral-300">
               <option value="brief">Brief feedback</option><option value="detailed">Detailed feedback</option>
             </select>
+            <div role="radiogroup" aria-label="When to mark" className="inline-flex rounded-[10px] border border-white/[0.12] p-0.5 text-[12.5px]">
+              <button type="button" role="radio" aria-checked={!overnight} onClick={() => setOvernight(false)} className={`inline-flex items-center gap-1 rounded-[8px] px-2.5 py-1 ${!overnight ? 'bg-white/10 text-white' : 'text-neutral-400 hover:text-neutral-200'}`}><Zap size={13} />Now</button>
+              <button type="button" role="radio" aria-checked={overnight} onClick={() => setOvernight(true)} title="Results by tomorrow morning, usually much sooner, for half the credits" className={`inline-flex items-center gap-1 rounded-[8px] px-2.5 py-1 ${overnight ? 'bg-indigo-500/20 text-indigo-200' : 'text-neutral-400 hover:text-neutral-200'}`}><Moon size={13} />Overnight · half price</button>
+            </div>
             <button type="button" disabled={!canMark} onClick={submit}
               className="ml-auto hidden items-center gap-2 rounded-xl sm:inline-flex bg-[#D97757] px-4 py-2 text-[14px] font-semibold text-white hover:bg-[#c96a4c] disabled:cursor-not-allowed disabled:opacity-40">
               {uploading ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}{markLabel}
@@ -325,7 +332,7 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
           </button>
         </div>
         <ol className="mx-auto mt-6 hidden flex-wrap justify-center gap-x-5 gap-y-1 text-[12.5px] text-neutral-500 sm:flex">
-          <li><b className="text-neutral-400">1</b> Add the scripts and the scheme or question paper</li><li aria-hidden>→</li><li><b className="text-neutral-400">2</b> Mark</li><li aria-hidden>→</li><li><b className="text-neutral-400">3</b> Watch the red pen live in the chat</li>
+          <li><b className="text-neutral-400">1</b> Add the scripts and the scheme or question paper</li><li aria-hidden>→</li><li><b className="text-neutral-400">2</b> Mark</li><li aria-hidden>→</li><li><b className="text-neutral-400">3</b> {overnight ? 'Results by tomorrow morning, for half the credits' : 'Watch the red pen live in the chat'}</li>
         </ol>
       </main>
     </div>

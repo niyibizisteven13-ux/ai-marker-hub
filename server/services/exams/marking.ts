@@ -4,9 +4,10 @@ import type { MatchResult, MatchedElement } from './matching.js';
 import { pathCriteria, type MarkingScheme, type SchemeQuestion } from './scheme.js';
 import type { AiQuestionMark, CriterionResult, ReviewFlag } from './types.js';
 import { mapPool, visionCalls } from '../../utils/concurrency.js';
+import { isOvernight } from '../ai/batchMode.js';
 
 /** Groups of questions of one script marked at the same time (EXAM_QUESTION_CONCURRENCY). */
-const markingGroupConcurrency = () => Math.max(1, Math.min(8, Number(process.env.EXAM_QUESTION_CONCURRENCY) || 3));
+const markingGroupConcurrency = () => (isOvernight() ? 32 : Math.max(1, Math.min(8, Number(process.env.EXAM_QUESTION_CONCURRENCY) || 3)));
 
 /**
  * Rubric-based marking of one candidate. The model sees the official scheme and the candidate's

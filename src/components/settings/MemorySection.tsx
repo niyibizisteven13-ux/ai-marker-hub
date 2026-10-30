@@ -4,7 +4,7 @@ import { authFetch } from '../../utils/authFetch';
 
 /**
  * Settings → Memory. Bwenge remembers facts, preferences and past topics across every chat (web and Telegram).
- * Free and GO plans see what memory does and an upgrade call to action; the switch only turns on with PRO
+ * Plans without memory see what it does and an upgrade call to action; the switch only turns on with Teacher
  * or Institution. Memories can always be reviewed and deleted.
  */
 
@@ -13,7 +13,7 @@ interface Item { id: string; content: string; kind: Kind; source: 'user' | 'auto
 interface MemoryData {
   available: boolean; enabled: boolean; plan: string; count: number; capacity: number;
   items: Item[]; total: number;
-  pro: { priceUsd: number; listPriceUsd: number | null; priceRwf: number };
+  pro: { name: string; priceUsd: number; listPriceUsd: number | null; priceRwf: number };
 }
 
 const KIND: Record<Kind, { label: string; tone: string }> = {
@@ -95,16 +95,16 @@ export default function MemorySection() {
               <div>
                 <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
                   Memory across all chats
-                  {locked && <span className="inline-flex items-center gap-1 rounded-full bg-[var(--accent)]/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--accent)]"><Lock size={10} /> PRO</span>}
+                  {locked && <span className="inline-flex items-center gap-1 rounded-full bg-[var(--accent)]/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--accent)]"><Lock size={10} /> {data.pro.name}</span>}
                 </div>
                 <p className="mt-0.5 text-xs text-[var(--muted)]">
-                  {locked ? 'Upgrade to PRO to turn memory on.' : data.enabled ? 'On. New chats use what Bwenge remembers.' : 'Off. Bwenge does not save or use memories.'}
+                  {locked ? `Upgrade to ${data.pro.name} to turn memory on.` : data.enabled ? 'On. New chats use what Bwenge remembers.' : 'Off. Bwenge does not save or use memories.'}
                 </p>
               </div>
               <button
                 type="button" role="switch" aria-checked={data.enabled} aria-label="Memory across all chats" disabled={busy}
                 onClick={() => (locked ? (window.location.href = '/upgrade?reason=memory') : void call('/api/memory/settings', { method: 'PATCH', body: JSON.stringify({ enabled: !data.enabled }) }))}
-                title={locked ? 'Upgrade to PRO to turn memory on' : undefined}
+                title={locked ? `Upgrade to ${data.pro.name} to turn memory on` : undefined}
                 className={`relative h-7 w-12 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] ${data.enabled ? 'bg-violet-500' : 'bg-[var(--line)]'} ${locked ? 'opacity-70' : ''}`}
               >
                 <span className={`absolute top-1 grid h-5 w-5 place-items-center rounded-full bg-white shadow transition-all ${data.enabled ? 'left-6' : 'left-1'}`}>{locked && <Lock size={10} className="text-neutral-500" />}</span>
@@ -122,8 +122,8 @@ export default function MemorySection() {
                   ].map((t) => <li key={t} className="flex items-start gap-2"><Check size={14} className="mt-0.5 shrink-0 text-[var(--teal)]" /> {t}</li>)}
                 </ul>
                 <a href="/upgrade?reason=memory" className="inline-flex items-center gap-2 rounded-xl bg-[var(--accent)] px-4 py-2.5 text-sm font-semibold text-[var(--on-accent)] hover:opacity-90">
-                  <Sparkles size={15} /> Upgrade to PRO
-                  <span className="font-normal opacity-90">{data.pro.listPriceUsd ? <span className="line-through">${data.pro.listPriceUsd}</span> : null} ${data.pro.priceUsd}/month · ≈ {data.pro.priceRwf.toLocaleString('en-US')} RWF</span>
+                  <Sparkles size={15} /> Upgrade to {data.pro.name}
+                  <span className="font-normal opacity-90">{data.pro.priceRwf.toLocaleString('en-US')} RWF a month · ≈ ${data.pro.priceUsd}</span>
                   <ArrowUpRight size={15} />
                 </a>
               </div>

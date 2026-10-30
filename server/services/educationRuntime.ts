@@ -1,4 +1,5 @@
-import { JobError } from './ai/jobs/fileJobQueue.js';
+import { FileJobQueue, JobError } from './ai/jobs/fileJobQueue.js';
+import { isOvernight } from './ai/batchMode.js';
 import path from 'node:path';
 import { agentTarget, fileJobQueue, fileStore, markingTarget } from './AiService.js';
 import { createAnalyticsService } from './analytics/service.js';
@@ -72,8 +73,22 @@ export const examStore = new OwnedRecordStore<ExamRecord>(process.env.EXAMS_DIR 
 export const examChatContexts = new OwnedRecordStore<ExamChatContext>(path.join(process.env.EXAMS_DIR ?? './data/exams', 'chat'), EXAM_RETENTION_MS);
 const num = (v: string | undefined, d: number) => (Number(v) > 0 ? Number(v) : d);
 
+/**
+ * Overnight marking runs: Claude requests sent as half-price batches that can take hours, so they run on their
+ * own queue with a long deadline and never hold the slots of live jobs. Only with Claude as the marking model.
+ */
+export const overnightJobQueue = markingTarget().provider === 'anthropic' && process.env.OVERNIGHT_MARKING !== 'false'
+  ? new FileJobQueue({
+    storageDir: process.env.OVERNIGHT_JOBS_DIR ?? './data/jobs-overnight',
+    concurrency: num(process.env.OVERNIGHT_JOBS_CONCURRENCY, 6),
+    maxActivePerUser: 3,
+    maxAttempts: 3,
+    deadlineMs: 26 * 3600_000,
+  })
+  : undefined;
+
 export const examService = createExamService({
-  fileStore, queue: fileJobQueue, store: examStore, documents: documentService, forbiddenStrings,
+  fileStore, queue: fileJobQueue, overnightQueue: overnightJobQueue, store: examStore, documents: documentService, forbiddenStrings,
   agent: () => {
     const a = markingTarget();
     return { adapter: a.adapter, model: a.model, fallbackModel: a.fallbackModel };
@@ -92,7 +107,8 @@ export const examService = createExamService({
   candidateConcurrency: num(process.env.EXAM_CANDIDATE_CONCURRENCY, 4),
   segmentBudgetMs: num(process.env.EXAM_SEGMENT_BUDGET_MS, 8 * 60 * 1000),
   // Every marked script is charged in credits (at least 2) and counted in the AI cost the profit guard watches.
-  onUsage: (userId, u) => { void recordUsage(userId, { kind: 'marking', model: u.model, inputTokens: u.input, outputTokens: u.output, minCredits: u.what === 'mark' ? 2 : 1 }); },
+  // Overnight scripts went through the batch API: half the cost, half the credits.
+  onUsage: (userId, u) => { const batch = !!u.batch || isOvernight(); void recordUsage(userId, { kind: 'marking', model: u.model, inputTokens: u.input, outputTokens: u.output, minCredits: u.what === 'mark' && !batch ? 2 : 1, batch }); },
 });
 
 export const examChat = createExamChat({
@@ -137,13 +153,14 @@ export async function startEducationRuntime(): Promise<void> {
   if (started) return;
   started = true;
   await fileJobQueue.init();
+  await overnightJobQueue?.init();
   // Each server cleans its own job queue; the shared folders (files, exams, documents) are cleaned by the
   // primary server only, so several servers never delete the same files at once.
   const shared = isPrimary();
   const none = async () => 0 as any;
   const sweep = async () => {
     try {
-      const [jobs, files, assessments, documents, exams, examContexts] = await Promise.all([fileJobQueue.purgeExpired(), shared ? fileStore.purgeExpired() : none(), shared ? assessmentStore.purgeExpired() : none(), shared ? documentStore.purgeExpired() : none(), shared ? examStore.purgeExpired() : none(), shared ? examChatContexts.purgeExpired() : none()]);
+      const [jobs, files, assessments, documents, exams, examContexts] = await Promise.all([Promise.all([fileJobQueue.purgeExpired(), overnightJobQueue?.purgeExpired() ?? []]).then(([a, b]) => [...a, ...b]), shared ? fileStore.purgeExpired() : none(), shared ? assessmentStore.purgeExpired() : none(), shared ? documentStore.purgeExpired() : none(), shared ? examStore.purgeExpired() : none(), shared ? examChatContexts.purgeExpired() : none()]);
       if (jobs.length || files || assessments || documents || exams || examContexts) logger.info('[cleanup] expired items removed', { jobs: jobs.length, files, assessments, documents, exams, examContexts });
     } catch (err) {
       logger.warn('[cleanup] sweep failed', { errorType: (err as Error)?.name });

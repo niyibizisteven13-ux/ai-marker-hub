@@ -48,6 +48,8 @@ data/nisr/index/
 
 # Background jobs and assessment records (runtime data; keep on a durable volume)
 data/jobs/
+data/jobs-overnight/
+data/batches/
 data/assessments/
 data/documents/
 data/exams/

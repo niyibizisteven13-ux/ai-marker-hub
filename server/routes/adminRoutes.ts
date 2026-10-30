@@ -2817,7 +2817,7 @@ router.get('/billing', async (_req, res) => {
 
 router.put('/billing/subscriptions/:userId', async (req, res) => {
   const parsed = z.object({
-    planType: z.enum(['BUSINESS', 'PRO', 'ORGANIZATION']),
+    planType: z.enum(['BUSINESS', 'STARTER', 'PRO', 'PLUS', 'ORGANIZATION']),
     status: z.enum(['ACTIVE', 'EXPIRED', 'CANCELED']),
     endDate: z.string().datetime().nullable(),
   }).safeParse(req.body);

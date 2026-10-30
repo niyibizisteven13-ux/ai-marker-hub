@@ -451,7 +451,7 @@ test('limits: over the daily credit limit, the bot answers with a limit card and
   const n = mark();
   await sendText('Explain photosynthesis please');
   const limit = await until(() => since(n).find((c) => c.method === 'sendMessage' && /Limit reached/.test(c.body.text)));
-  assert.match(limit.body.text, /today's 20 credits/);
+  assert.match(limit.body.text, /today's 15 credits/);
   const buttons = limit.body.reply_markup.inline_keyboard.flat();
   assert.match(buttons[0].url, /\/upgrade\?reason=limit$/);
   assert.equal(buttons[1].callback_data, 'm:home');

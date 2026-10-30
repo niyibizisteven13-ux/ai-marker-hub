@@ -187,6 +187,7 @@ router.post(['/mark-upload', '/mark-upload/:sessionToken'], markUpload.fields([{
     const credit = body.credit === 'strict' ? 'strict' as const : 'partial' as const;
     const feedback = body.feedback === 'detailed' ? 'detailed' as const : 'brief' as const;
     const corrections = body.corrections !== 'false';
+    const overnight = body.overnight === 'true';
     const students = Math.max(scriptParts.length, Number.parseInt(String(body.students ?? ''), 10) || 0);
 
     // Names are made unique and roles attached to them, so the marker never guesses which file is which.
@@ -208,7 +209,7 @@ router.post(['/mark-upload', '/mark-upload/:sessionToken'], markUpload.fields([{
     const lang = (['en', 'rw', 'fr'].includes(session.language) ? session.language : 'en') as 'en' | 'rw' | 'fr';
     const text = [MARK_TEXT[lang](students, schemeParts.length > 0), instructions ? `${lang === 'rw' ? 'Amabwiriza yanjye' : lang === 'fr' ? 'Mes consignes' : 'My instructions'}: ${instructions}` : ''].filter(Boolean).join('\n\n');
     res.status(202).json({ started: true, students });
-    void runAssistantTurn({ chatId, session, text, files, marking: { roles, instructions: instructions || undefined, credit, corrections, feedback } })
+    void runAssistantTurn({ chatId, session, text, files, marking: { roles, instructions: instructions || undefined, credit, corrections, feedback, ...(overnight ? { overnight } : {}) } })
       .catch((e) => logger.error('[telegram] marking from the Mark app failed', { errorType: (e as Error)?.name }));
   } catch (err: any) {
     logger.error('Mark app upload failed', { errorType: err?.name });
