@@ -349,6 +349,67 @@ test('scanner: uploads are signed (Mini App initData or link token) and arrive a
   resetRouterState();
 });
 
+test('mark: /mark opens the Mark app; its upload starts marking in the chat with explicit roles, instructions and live progress', async () => {
+  let n = mark();
+  await sendText('/mark');
+  const card = await until(() => since(n).find((c) => c.method === 'sendMessage' && /Mark exams/.test(c.body.text)));
+  assert.match(card.body.text, /one tap per page/);
+  assert.deepEqual(card.body.reply_markup.inline_keyboard[0][0].web_app, { url: 'https://www.bwenge.space/scanner.html?mode=mark' });
+  n = mark();
+  await tap('m:mark');
+  await until(() => since(n).find((c) => /editMessage|sendMessage/.test(c.method) && /Open Mark/.test(JSON.stringify(c.body.reply_markup ?? {}))));
+  n = mark();
+  await post({ message: { message_id: ++msgSeq, chat: { id: -6, type: 'group' }, from, date: 0, text: '/mark@BwengeTestBot' } });
+  const groupCard = await until(() => since(n).find((c) => c.method === 'sendMessage' && String(c.body.chat_id) === '-6'));
+  assert.match(groupCard.body.reply_markup.inline_keyboard[0][0].url, /^https:\/\/www\.bwenge\.space\/scanner\.html\?mode=mark&token=[\w-]{16}$/);
+
+  const { issueScanToken } = await import('../server/services/telegram/scanSession.js');
+  const { setBridgeDeps } = await import('../server/services/telegram/agentBridge.js');
+  const { telegramApi } = await import('../server/services/telegram/api.js');
+  const { fileStore } = await import('../server/services/AiService.js');
+  let seen: any = null;
+  setBridgeDeps({
+    api: telegramApi(), fileStore, editIntervalMs: 10,
+    assist: async () => { throw new Error('marking must not fall through to the general assistant'); },
+    exam: async (_userId, text, files, onStatus, _history, marking) => {
+      seen = { text, files: files.map((f) => f.name), marking };
+      onStatus('Reading S4B-001’s script (2 pages).');
+      onStatus('Student 1 marked: S4B-001, 7/9');
+      await new Promise((r) => setTimeout(r, 150)); // real marking takes minutes; the progress message is edited meanwhile
+      return { text: '**Marking finished.** 1 script marked.', attachments: [] };
+    },
+  });
+  try {
+    const upload = (parts: Array<[string, Blob, string]>, fields: Record<string, string> = {}, suffix = '') => {
+      const form = new FormData();
+      for (const [k, b, name] of parts) form.append(k, b, name);
+      for (const [k, v] of Object.entries(fields)) form.append(k, v);
+      return fetch(`http://127.0.0.1:${port(server)}/api/telegram/mark-upload${suffix}`, { method: 'POST', body: form });
+    };
+    const zip = new Blob([Buffer.from('PK\u0005\u0006' + '\0'.repeat(18), 'binary')], { type: 'application/zip' });
+    const scheme = new Blob(['1. (3 marks) x = 4'], { type: 'text/plain' });
+    assert.equal((await upload([['scripts', zip, 'Camera scans.zip']])).status, 401, 'unsigned uploads are refused');
+    const token = issueScanToken(String(chat));
+    assert.equal((await upload([['scheme', scheme, 'Maths.txt']], {}, `/${token}`)).status, 400, 'scripts are required');
+    n = mark();
+    const res = await upload([['scheme', scheme, 'Maths.txt'], ['scripts', zip, 'Camera scans.zip']], { instructions: 'Ignore spelling.', credit: 'strict', students: '3' }, `/${token}`);
+    assert.equal(res.status, 202);
+    assert.deepEqual(await res.json(), { started: true, students: 3 });
+    const done = await until(() => since(n).find((c) => c.method === 'editMessageText' && /Marking finished/.test(c.body.text)));
+    assert.equal(String(done.body.chat_id), String(chat));
+    assert.deepEqual(seen.files, ['Maths.txt', 'Camera scans.zip']);
+    assert.deepEqual(seen.marking.roles, { 'Maths.txt': 'scheme', 'Camera scans.zip': 'scripts' }, 'the marker is told which file is which');
+    assert.equal(seen.marking.instructions, 'Ignore spelling.');
+    assert.equal(seen.marking.credit, 'strict');
+    assert.match(seen.text, /Mark these scripts with the marking scheme[\s\S]*My instructions: Ignore spelling\./);
+    const progress = since(n).filter((c) => c.method === 'editMessageText').map((c) => c.body.text).join('\n');
+    assert.match(progress, /Student 1 marked: S4B-001, 7\/9/, 'each student appears in the live progress');
+  } finally {
+    setBridgeDeps(null);
+    resetRouterState();
+  }
+});
+
 test('learning modes: /socratic, /roleplay presets and /normal change the instructions the model gets', async () => {
   let n = mark();
   await sendText('/socratic fractions');

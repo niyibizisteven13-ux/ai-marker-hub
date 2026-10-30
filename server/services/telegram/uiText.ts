@@ -14,6 +14,8 @@ interface Copy {
   fileTooLarge: string; unsupportedMessage: string; slowDown: string; fileMissing: string; nothingToRegenerate: string; languageSet: string;
   receivedFile: (n: string) => string; readyCaption: string;
   scan: { title: string; body: string; steps: string[]; footer: string; open: string; groupHint: string; received: (pages: string) => string };
+  /** The Mark Mini App: scheme, students one tap per page, then live marking in this chat. */
+  markApp: { title: string; body: string; steps: string[]; footer: string; open: string };
   profile: { description: string; short: string; menuButton: string };
   ago: { now: string; min: (n: number) => string; hour: (n: number) => string };
   buttons: Record<'create' | 'mark' | 'scan' | 'transcribe' | 'library' | 'files' | 'settings' | 'help' | 'back' | 'regenerate' | 'menu' | 'retry', string>;
@@ -37,6 +39,11 @@ const en: Copy = {
   slowDown: 'You are sending messages very fast. Give me a few seconds to catch up.',
   fileMissing: 'That file is no longer available.', nothingToRegenerate: 'There is no earlier request to repeat.', languageSet: 'Language updated',
   receivedFile: (n) => `Received <b>${n}</b>. What should I do with it?`, readyCaption: 'Ready',
+  markApp: {
+    title: 'Mark exams', body: 'Mark a whole class from your phone camera.',
+    steps: ['Photograph the marking scheme (or skip: Bwenge writes one from the questions)', 'Photograph each student: one tap per page, <b>Next student</b> between students', 'Add instructions if you like, then tap <b>Mark</b>'],
+    footer: 'Marking runs here: each student appears with a tick as it is marked, then the red-pen PDFs and the Excel results arrive.', open: '✅ Open Mark',
+  },
   scan: {
     title: 'Document scanner', body: 'Scan exam scripts, marking schemes or any handwritten page with your phone camera.',
     steps: ['Point the camera at the page; the edges are found for you', 'Adjust the corners and pick a filter if needed', 'Add more pages or another student, then tap <b>Send to Telegram</b>'],
@@ -57,7 +64,7 @@ const en: Copy = {
     help: { icon: '❓', title: 'Help', body: 'Just write what you need, or send a file. Commands: /start menu · /files your files · /settings language and account · /help this guide · /new start a fresh conversation.', examples: ['What can you do?'] },
   },
   commands: [
-    { command: 'start', description: 'Home menu' }, { command: 'new', description: 'Start a fresh conversation' }, { command: 'files', description: 'My files' },
+    { command: 'start', description: 'Home menu' }, { command: 'mark', description: 'Mark exams with the camera' }, { command: 'new', description: 'Start a fresh conversation' }, { command: 'files', description: 'My files' },
     { command: 'settings', description: 'Language and account' }, { command: 'transcribe', description: 'Transcribe handwriting' }, { command: 'scan', description: 'Open the document scanner' },
     { command: 'grade', description: 'Batch grading' }, { command: 'help', description: 'How to use Bwenge' },
   ],
@@ -80,6 +87,11 @@ const rw: Copy = {
   slowDown: 'Urimo kohereza ubutumwa vuba cyane. Mpa amasegonda make.',
   fileMissing: 'Iyo dosiye ntikiboneka.', nothingToRegenerate: 'Nta busabe bwabanje bwo gusubiramo.', languageSet: 'Ururimi rwahinduwe',
   receivedFile: (n) => `Nakiriye <b>${n}</b>. Nkore iki?`, readyCaption: 'Byarangiye',
+  markApp: {
+    title: 'Gukosora ibizamini', body: 'Kosora ishuri ryose ukoresheje kamera ya telefoni yawe.',
+    steps: ['Fotora marking scheme (cyangwa uyireke: Bwenge iyandika uhereye ku bibazo)', 'Fotora buri munyeshuri: gukanda rimwe ku rupapuro, <b>Umunyeshuri ukurikira</b> hagati y’abanyeshuri', 'Ongeraho amabwiriza niba ubishaka, hanyuma ukande <b>Kosora</b>'],
+    footer: 'Gukosora bibera hano: buri munyeshuri agaragara afite akamenyetso iyo arangije gukosorwa, hanyuma PDF zikosoye n’amanota muri Excel bikaza.', open: '✅ Fungura Gukosora',
+  },
   scan: {
     title: 'Scanner y’inyandiko', body: 'Sikana impapuro z’ibizamini, marking scheme cyangwa urupapuro rwandikishijwe intoki ukoresheje kamera ya telefoni.',
     steps: ['Erekeza kamera ku rupapuro; impande ziboneka ubwazo', 'Hindura inguni uhitemo filter niba bikenewe', 'Ongeraho izindi mpapuro cyangwa undi munyeshuri, hanyuma ukande <b>Ohereza kuri Telegram</b>'],
@@ -100,7 +112,7 @@ const rw: Copy = {
     help: { ...en.guides.help, title: 'Ubufasha', body: 'Andika icyo ukeneye cyangwa wohereze dosiye. Amabwiriza: /start ahabanza · /files dosiye zawe · /settings ururimi na konti · /help ubu bufasha · /new ikiganiro gishya.', examples: ['Ushobora gukora iki?'] },
   },
   commands: [
-    { command: 'start', description: 'Ahabanza' }, { command: 'new', description: 'Ikiganiro gishya' }, { command: 'files', description: 'Dosiye zanjye' },
+    { command: 'start', description: 'Ahabanza' }, { command: 'mark', description: 'Gukosora ukoresheje kamera' }, { command: 'new', description: 'Ikiganiro gishya' }, { command: 'files', description: 'Dosiye zanjye' },
     { command: 'settings', description: 'Ururimi na konti' }, { command: 'transcribe', description: 'Kwandika inyandiko y’intoki' }, { command: 'scan', description: 'Scanner y’inyandiko' },
     { command: 'grade', description: 'Gukosora ibizamini byinshi' }, { command: 'help', description: 'Uko wakoresha Bwenge' },
   ],
@@ -123,6 +135,11 @@ const fr: Copy = {
   slowDown: 'Vous envoyez des messages très vite. Laissez-moi quelques secondes.',
   fileMissing: 'Ce fichier n’est plus disponible.', nothingToRegenerate: 'Aucune demande précédente à relancer.', languageSet: 'Langue mise à jour',
   receivedFile: (n) => `<b>${n}</b> reçu. Que dois-je en faire ?`, readyCaption: 'Prêt',
+  markApp: {
+    title: 'Corriger des copies', body: 'Corrigez toute une classe avec l’appareil photo de votre téléphone.',
+    steps: ['Photographiez le barème (ou passez : Bwenge le rédige à partir des questions)', 'Photographiez chaque élève : une touche par page, <b>Élève suivant</b> entre deux élèves', 'Ajoutez des consignes si vous le souhaitez, puis touchez <b>Corriger</b>'],
+    footer: 'La correction se déroule ici : chaque élève apparaît coché dès qu’il est corrigé, puis arrivent les PDF annotés en rouge et les résultats Excel.', open: '✅ Ouvrir Corriger',
+  },
   scan: {
     title: 'Scanner de documents', body: 'Scannez des copies, des barèmes ou toute page manuscrite avec l’appareil photo de votre téléphone.',
     steps: ['Visez la page : les bords sont détectés automatiquement', 'Ajustez les coins et choisissez un filtre si besoin', 'Ajoutez des pages ou un autre élève, puis touchez <b>Envoyer sur Telegram</b>'],
@@ -143,7 +160,7 @@ const fr: Copy = {
     help: { ...en.guides.help, title: 'Aide', body: 'Écrivez ce dont vous avez besoin ou envoyez un fichier. Commandes : /start menu · /files fichiers · /settings langue et compte · /help aide · /new nouvelle conversation.', examples: ['Que sais-tu faire ?'] },
   },
   commands: [
-    { command: 'start', description: 'Menu principal' }, { command: 'new', description: 'Nouvelle conversation' }, { command: 'files', description: 'Mes fichiers' },
+    { command: 'start', description: 'Menu principal' }, { command: 'mark', description: 'Corriger avec l’appareil photo' }, { command: 'new', description: 'Nouvelle conversation' }, { command: 'files', description: 'Mes fichiers' },
     { command: 'settings', description: 'Langue et compte' }, { command: 'transcribe', description: 'Transcrire un manuscrit' }, { command: 'scan', description: 'Scanner de documents' },
     { command: 'grade', description: 'Correction par lots' }, { command: 'help', description: 'Mode d’emploi' },
   ],
