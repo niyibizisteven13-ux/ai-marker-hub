@@ -1521,6 +1521,28 @@
         "userId": "admin-07ffbcfb-5495-415e-8ed9-9c90ae7106c7",
         "organizationId": null,
         "globalApproved": false
+      },
+      "1992f68b-2281-4108-8b83-16a2cec6ac69": {
+        "id": "1992f68b-2281-4108-8b83-16a2cec6ac69",
+        "createdAt": "2026-10-30T05:53:41.867Z",
+        "updatedAt": "2026-10-30T05:53:41.867Z",
+        "name": "Staff Records",
+        "description": "Files from the \"Staff Records\" knowledge repository.",
+        "state": "active",
+        "userId": "admin-ds-3d0daed9",
+        "organizationId": null,
+        "globalApproved": false
+      },
+      "0c97ec5f-1da8-4d11-a407-7cc90ca9d460": {
+        "id": "0c97ec5f-1da8-4d11-a407-7cc90ca9d460",
+        "createdAt": "2026-10-30T05:53:41.891Z",
+        "updatedAt": "2026-10-30T05:53:41.891Z",
+        "name": "Agriculture Survey",
+        "description": "Files from the \"Agriculture Survey\" knowledge repository.",
+        "state": "active",
+        "userId": "admin-ds-3d0daed9",
+        "organizationId": null,
+        "globalApproved": false
       }
     },
     "document": {
@@ -1979,6 +2001,40 @@
         "size": "1 KB",
         "sizeBytes": 80,
         "units": "1 chunk(s)",
+        "stage": 9,
+        "status": "READY",
+        "filePath": null
+      },
+      "0d424a0f-b428-40f4-92ca-8552d1c6adef": {
+        "id": "0d424a0f-b428-40f4-92ca-8552d1c6adef",
+        "createdAt": "2026-10-30T05:53:42.086Z",
+        "updatedAt": "2026-10-30T05:53:42.086Z",
+        "knowledgeBaseId": "0c97ec5f-1da8-4d11-a407-7cc90ca9d460",
+        "userId": "admin-ds-3d0daed9",
+        "organizationId": null,
+        "globalApproved": false,
+        "name": "Agriculture/2024/yields.csv",
+        "type": "CSV",
+        "size": "1 KB",
+        "sizeBytes": 102,
+        "units": "1 chunk(s)",
+        "stage": 9,
+        "status": "READY",
+        "filePath": null
+      },
+      "7824864d-84eb-4766-8dd3-c89d957ed7dd": {
+        "id": "7824864d-84eb-4766-8dd3-c89d957ed7dd",
+        "createdAt": "2026-10-30T05:53:42.932Z",
+        "updatedAt": "2026-10-30T05:53:42.932Z",
+        "knowledgeBaseId": "0c97ec5f-1da8-4d11-a407-7cc90ca9d460",
+        "userId": "admin-ds-3d0daed9",
+        "organizationId": null,
+        "globalApproved": false,
+        "name": "Agriculture/2024/summary.pdf",
+        "type": "PDF",
+        "size": "1 KB",
+        "sizeBytes": 937,
+        "units": "1 chunk(s), 1 pages",
         "stage": 9,
         "status": "READY",
         "filePath": null
@@ -7534,6 +7590,48 @@
         "status": "approved",
         "expiresAt": null,
         "metadata": "{\"repositoryId\":\"0adbb3af-391b-4ad4-9800-7e3647fcc433\",\"fileId\":\"f6c6132f-f403-41da-b4d6-c66e744d2b31\",\"directoryId\":null,\"path\":\"a.txt\",\"page\":null,\"slide\":null,\"sheet\":null,\"section\":null,\"chunkIndex\":0,\"version\":1,\"contentHash\":\"d929cdeea7e6a0f46b59448d36a6fd491df8647cf292040508162ee5f6435ab8\",\"extractionMethod\":\"text\",\"indexedAt\":\"2026-10-30T05:48:28.699Z\",\"sourceUrl\":\"/api/knowledge/sources/f6c6132f-f403-41da-b4d6-c66e744d2b31\"}"
+      },
+      "8a00efe5-f3c4-47bc-8ed6-9d3bb92e7b1c": {
+        "id": "8a00efe5-f3c4-47bc-8ed6-9d3bb92e7b1c",
+        "createdAt": "2026-10-30T05:53:42.104Z",
+        "updatedAt": "2026-10-30T05:53:42.104Z",
+        "documentId": "0d424a0f-b428-40f4-92ca-8552d1c6adef",
+        "knowledgeBaseId": "0c97ec5f-1da8-4d11-a407-7cc90ca9d460",
+        "pageNumber": null,
+        "section": "rows 2-6",
+        "chunkId": "ce9c9a41-9139-4d26-b0cb-cde465e15916-v1-1",
+        "sourceFilename": "yields.csv",
+        "text": "Sheet \"Sheet1\" columns: district | crop | yield\nRow 2: district=Gasabo; crop=maize; yield=3.0\nRow 3: district=Gasabo; crop=maize; yield=3.4\nRow 4: district=Huye; crop=maize; yield=2.0\nRow 5: district=Huye; crop=maize; yield=2.6\nRow 6: district=Musanze; crop=beans; yield=1.5",
+        "embedding": null,
+        "language": "en",
+        "domain": "general",
+        "region": "rwanda",
+        "license": "proprietary",
+        "consentGiven": false,
+        "status": "approved",
+        "expiresAt": null,
+        "metadata": "{\"repositoryId\":\"e1d66343-bbc8-465b-8962-477d09978b27\",\"fileId\":\"ce9c9a41-9139-4d26-b0cb-cde465e15916\",\"directoryId\":\"b7703032-3e52-465c-8566-9fcbbce7065a\",\"path\":\"Agriculture/2024/yields.csv\",\"page\":null,\"slide\":null,\"sheet\":\"Sheet1\",\"section\":\"rows 2-6\",\"chunkIndex\":0,\"version\":1,\"contentHash\":\"e27418bb44bc1191d3f5cb3c23c77d1c996355162c014ce5fad5a68ce34b0ea2\",\"extractionMethod\":\"spreadsheet\",\"indexedAt\":\"2026-10-30T05:53:42.085Z\",\"sourceUrl\":\"/api/knowledge/sources/ce9c9a41-9139-4d26-b0cb-cde465e15916\"}"
+      },
+      "e18fe7bb-8191-44fa-8bbb-3b051f7ad9f2": {
+        "id": "e18fe7bb-8191-44fa-8bbb-3b051f7ad9f2",
+        "createdAt": "2026-10-30T05:53:42.950Z",
+        "updatedAt": "2026-10-30T05:53:42.950Z",
+        "documentId": "7824864d-84eb-4766-8dd3-c89d957ed7dd",
+        "knowledgeBaseId": "0c97ec5f-1da8-4d11-a407-7cc90ca9d460",
+        "pageNumber": 1,
+        "section": "Page 1",
+        "chunkId": "f3399742-9ff3-4524-a56a-2c44581a6fee-v1-1",
+        "sourceFilename": "summary.pdf",
+        "text": "Season A 3d0daed9 report: maize harvest improved in Gasabo thanks to\nirrigation.",
+        "embedding": null,
+        "language": "en",
+        "domain": "general",
+        "region": "rwanda",
+        "license": "proprietary",
+        "consentGiven": false,
+        "status": "approved",
+        "expiresAt": null,
+        "metadata": "{\"repositoryId\":\"e1d66343-bbc8-465b-8962-477d09978b27\",\"fileId\":\"f3399742-9ff3-4524-a56a-2c44581a6fee\",\"directoryId\":\"b7703032-3e52-465c-8566-9fcbbce7065a\",\"path\":\"Agriculture/2024/summary.pdf\",\"page\":1,\"slide\":null,\"sheet\":null,\"section\":null,\"chunkIndex\":0,\"version\":1,\"contentHash\":\"15c4748a1674280c00894928cf0bdb94d51613a1a55ef0fa79b4fd6992a3e466\",\"extractionMethod\":\"pdf_text\",\"indexedAt\":\"2026-10-30T05:53:42.931Z\",\"sourceUrl\":\"/api/knowledge/sources/f3399742-9ff3-4524-a56a-2c44581a6fee?page=1\"}"
       }
     },
     "retrievalSetting": {
@@ -8450,6 +8548,25 @@
         "finalStatus": "ok",
         "failureClass": null,
         "latencyMs": 6,
+        "costUsd": null
+      },
+      "d68e4c39-ac52-4cd4-a8c4-1ae2916179dd": {
+        "id": "d68e4c39-ac52-4cd4-a8c4-1ae2916179dd",
+        "createdAt": "2026-10-30T05:53:44.396Z",
+        "updatedAt": "2026-10-30T05:53:44.397Z",
+        "userIdHash": "eeec220cae5bdf15e90e672c32837a68dca10bc6f8ea20a625d0fbcf1f5bcf10",
+        "chatIdHash": null,
+        "capability": "UNCLASSIFIED",
+        "model": "claude-haiku-5-5",
+        "provider": "GonkaRouter",
+        "promptVersion": "bwenge-general-v1",
+        "toolCalls": "[{\"name\":\"list_datasets\",\"argsValid\":true,\"durationMs\":2,\"ok\":true,\"errorCode\":null},{\"name\":\"browse_dataset\",\"argsValid\":true,\"durationMs\":2,\"ok\":true,\"errorCode\":null},{\"name\":\"read_dataset_file\",\"argsValid\":true,\"durationMs\":5,\"ok\":true,\"errorCode\":null},{\"name\":\"analyze_data\",\"argsValid\":true,\"durationMs\":1081,\"ok\":true,\"errorCode\":null}]",
+        "retries": 0,
+        "tokensIn": 25,
+        "tokensOut": 45,
+        "finalStatus": "ok",
+        "failureClass": null,
+        "latencyMs": 1159,
         "costUsd": null
       }
     },
@@ -9625,6 +9742,19 @@
         "outputTokens": 0,
         "costUsd": 0,
         "channel": "telegram"
+      },
+      "013e16ca-84af-46ad-aa67-a33f09851ae9": {
+        "id": "013e16ca-84af-46ad-aa67-a33f09851ae9",
+        "createdAt": "2026-10-30T05:53:44.406Z",
+        "updatedAt": "2026-10-30T05:53:44.406Z",
+        "userId": "user-ds-3d0daed9",
+        "kind": "tool",
+        "credits": 1,
+        "model": "claude-haiku-5-5",
+        "inputTokens": 25,
+        "outputTokens": 45,
+        "costUsd": 0.000025,
+        "channel": "web"
       }
     },
     "memoryVector": {},
@@ -10885,6 +11015,59 @@
         "sources": [],
         "warnings": [],
         "shareMode": "private"
+      },
+      "3073311b-6189-4a49-b1ce-6f320281eec3": {
+        "id": "3073311b-6189-4a49-b1ce-6f320281eec3",
+        "createdAt": "2026-10-30T05:53:43.315Z",
+        "updatedAt": "2026-10-30T05:53:44.287Z",
+        "userId": "user-ds-3d0daed9",
+        "organizationId": null,
+        "kind": "analysis",
+        "format": "json",
+        "title": "Maize yield by district",
+        "status": "ready",
+        "revision": 1,
+        "rootId": "3073311b-6189-4a49-b1ce-6f320281eec3",
+        "parentId": null,
+        "spec": {
+          "kind": "analysis",
+          "title": "Maize yield by district",
+          "sources": [],
+          "dataset": {
+            "type": "repository_file",
+            "id": "ce9c9a41-9139-4d26-b0cb-cde465e15916"
+          },
+          "analysis": {
+            "operations": [
+              {
+                "op": "groupby",
+                "by": [
+                  "district"
+                ],
+                "metrics": [
+                  {
+                    "column": "yield",
+                    "agg": "mean"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "sources": [],
+        "fileId": "14b2686f-01c8-4444-9330-0cde6145af78",
+        "previewFileId": null,
+        "sizeBytes": 1280,
+        "sha256": "ae302e90f9a4bbfd78e3cc3b4f4b387201810f2776b30108feb7b0203fb5efe5",
+        "warnings": [
+          "groupby: 3 group(s) have fewer than 5 rows; their statistics are unstable."
+        ],
+        "error": null,
+        "idempotencyKey": "abf527dbea8b164a1a9f3434be973a3cb5964b26d3f21219e08e6006860932a4",
+        "jobId": "1c43289a-48e6-4757-8503-57d42886deb5",
+        "shareMode": "private",
+        "shareTokenHash": null,
+        "shareExpiresAt": null
       }
     },
     "knowledgeRepository": {
@@ -11085,6 +11268,42 @@
           "assistant": false
         },
         "quotaBytes": 100
+      },
+      "2aa78917-f455-4962-8cba-8ac99f802a93": {
+        "id": "2aa78917-f455-4962-8cba-8ac99f802a93",
+        "createdAt": "2026-10-30T05:53:41.882Z",
+        "updatedAt": "2026-10-30T05:53:41.882Z",
+        "name": "Staff Records",
+        "description": "Not published.",
+        "userId": "admin-ds-3d0daed9",
+        "organizationId": null,
+        "knowledgeBaseId": "1992f68b-2281-4108-8b83-16a2cec6ac69",
+        "settings": {
+          "language": "en",
+          "domain": "general",
+          "ocr": true,
+          "autoIndex": true,
+          "assistant": false
+        },
+        "quotaBytes": null
+      },
+      "e1d66343-bbc8-465b-8962-477d09978b27": {
+        "id": "e1d66343-bbc8-465b-8962-477d09978b27",
+        "createdAt": "2026-10-30T05:53:41.901Z",
+        "updatedAt": "2026-10-30T05:53:44.548Z",
+        "name": "Agriculture Survey",
+        "description": "Seasonal agriculture survey, synthetic test data.",
+        "userId": "admin-ds-3d0daed9",
+        "organizationId": null,
+        "knowledgeBaseId": "0c97ec5f-1da8-4d11-a407-7cc90ca9d460",
+        "settings": {
+          "language": "en",
+          "domain": "general",
+          "ocr": true,
+          "autoIndex": true,
+          "assistant": true
+        },
+        "quotaBytes": null
       }
     },
     "userSettings": {},
@@ -12168,6 +12387,96 @@
         "duplicateOfId": null,
         "documentId": "c9b9d759-c1b0-4538-8c9d-99541dde36ab",
         "indexJobId": "59a65fed-d63e-459b-b3fa-3376b1ba9006"
+      },
+      "ce9c9a41-9139-4d26-b0cb-cde465e15916": {
+        "id": "ce9c9a41-9139-4d26-b0cb-cde465e15916",
+        "createdAt": "2026-10-30T05:53:41.974Z",
+        "updatedAt": "2026-10-30T05:53:42.153Z",
+        "repositoryId": "e1d66343-bbc8-465b-8962-477d09978b27",
+        "directoryId": "b7703032-3e52-465c-8566-9fcbbce7065a",
+        "name": "yields.csv",
+        "path": "Agriculture/2024/yields.csv",
+        "extension": "csv",
+        "mimeType": "text/csv",
+        "sizeBytes": 102,
+        "contentHash": "e27418bb44bc1191d3f5cb3c23c77d1c996355162c014ce5fad5a68ce34b0ea2",
+        "storageKey": "f0020e0d-08d6-46bc-bb83-a81a06e9a052",
+        "storageOwnerId": "admin-ds-3d0daed9",
+        "version": 1,
+        "uploadedById": "admin-ds-3d0daed9",
+        "knowledgeBaseId": null,
+        "aiEnabled": true,
+        "extractionStatus": "extracted",
+        "extractionMethod": "spreadsheet",
+        "indexStatus": "pending_embeddings",
+        "indexError": "Searchable by keyword. Semantic embeddings are pending: no embedding provider is configured (set GEMINI_API_KEY), then re-index.",
+        "indexedAt": "2026-10-30T05:53:42.085Z",
+        "indexedHash": "e27418bb44bc1191d3f5cb3c23c77d1c996355162c014ce5fad5a68ce34b0ea2",
+        "indexedVersion": 1,
+        "chunkCount": 1,
+        "duplicateOfId": null,
+        "documentId": "0d424a0f-b428-40f4-92ca-8552d1c6adef",
+        "indexJobId": "89e4f584-130b-4efb-aa13-704c18a26407"
+      },
+      "f3399742-9ff3-4524-a56a-2c44581a6fee": {
+        "id": "f3399742-9ff3-4524-a56a-2c44581a6fee",
+        "createdAt": "2026-10-30T05:53:41.988Z",
+        "updatedAt": "2026-10-30T05:53:42.971Z",
+        "repositoryId": "e1d66343-bbc8-465b-8962-477d09978b27",
+        "directoryId": "b7703032-3e52-465c-8566-9fcbbce7065a",
+        "name": "summary.pdf",
+        "path": "Agriculture/2024/summary.pdf",
+        "extension": "pdf",
+        "mimeType": "application/pdf",
+        "sizeBytes": 937,
+        "contentHash": "15c4748a1674280c00894928cf0bdb94d51613a1a55ef0fa79b4fd6992a3e466",
+        "storageKey": "dd0e36f3-2d87-472c-a089-a2d355b4cb5a",
+        "storageOwnerId": "admin-ds-3d0daed9",
+        "version": 1,
+        "uploadedById": "admin-ds-3d0daed9",
+        "knowledgeBaseId": null,
+        "aiEnabled": true,
+        "extractionStatus": "extracted",
+        "extractionMethod": "pdf_text",
+        "indexStatus": "pending_embeddings",
+        "indexError": "Searchable by keyword. Semantic embeddings are pending: no embedding provider is configured (set GEMINI_API_KEY), then re-index.",
+        "indexedAt": "2026-10-30T05:53:42.931Z",
+        "indexedHash": "15c4748a1674280c00894928cf0bdb94d51613a1a55ef0fa79b4fd6992a3e466",
+        "indexedVersion": 1,
+        "chunkCount": 1,
+        "duplicateOfId": null,
+        "documentId": "7824864d-84eb-4766-8dd3-c89d957ed7dd",
+        "indexJobId": "89e4f584-130b-4efb-aa13-704c18a26407"
+      },
+      "c10e4efb-9a9a-4b16-8cf7-d79a278cc390": {
+        "id": "c10e4efb-9a9a-4b16-8cf7-d79a278cc390",
+        "createdAt": "2026-10-30T05:53:42.010Z",
+        "updatedAt": "2026-10-30T05:53:43.086Z",
+        "repositoryId": "e1d66343-bbc8-465b-8962-477d09978b27",
+        "directoryId": "7ca07bbf-fee3-4d62-aa0e-fe27d6034055",
+        "name": "salaries.csv",
+        "path": "Private/salaries.csv",
+        "extension": "csv",
+        "mimeType": "text/csv",
+        "sizeBytes": 18,
+        "contentHash": "c8a588716d525e3422e98bcac142d84619d73d9497f606f836d3cc13c0f3b034",
+        "storageKey": "af8223d7-8027-4ece-8e88-6978359241aa",
+        "storageOwnerId": "admin-ds-3d0daed9",
+        "version": 1,
+        "uploadedById": "admin-ds-3d0daed9",
+        "knowledgeBaseId": null,
+        "aiEnabled": true,
+        "extractionStatus": "extracted",
+        "extractionMethod": "spreadsheet",
+        "indexStatus": "excluded",
+        "indexError": null,
+        "indexedAt": "2026-10-30T05:53:42.218Z",
+        "indexedHash": "c8a588716d525e3422e98bcac142d84619d73d9497f606f836d3cc13c0f3b034",
+        "indexedVersion": 1,
+        "chunkCount": 0,
+        "duplicateOfId": null,
+        "documentId": null,
+        "indexJobId": "0db9ebd1-ee39-463b-bbbd-4f60186f0975"
       }
     },
     "repositoryDirectory": {
@@ -12398,6 +12707,42 @@
         "knowledgeBaseId": null,
         "aiEnabled": true,
         "createdById": "admin-01214714-642a-4a3e-bf67-3f835a65df8d"
+      },
+      "eeeda1cd-7a51-480c-9433-151ffd9a2bfc": {
+        "id": "eeeda1cd-7a51-480c-9433-151ffd9a2bfc",
+        "createdAt": "2026-10-30T05:53:41.944Z",
+        "updatedAt": "2026-10-30T05:53:41.944Z",
+        "repositoryId": "e1d66343-bbc8-465b-8962-477d09978b27",
+        "parentId": null,
+        "name": "Agriculture",
+        "path": "Agriculture",
+        "knowledgeBaseId": null,
+        "aiEnabled": true,
+        "createdById": "admin-ds-3d0daed9"
+      },
+      "b7703032-3e52-465c-8566-9fcbbce7065a": {
+        "id": "b7703032-3e52-465c-8566-9fcbbce7065a",
+        "createdAt": "2026-10-30T05:53:41.953Z",
+        "updatedAt": "2026-10-30T05:53:41.953Z",
+        "repositoryId": "e1d66343-bbc8-465b-8962-477d09978b27",
+        "parentId": "eeeda1cd-7a51-480c-9433-151ffd9a2bfc",
+        "name": "2024",
+        "path": "Agriculture/2024",
+        "knowledgeBaseId": null,
+        "aiEnabled": true,
+        "createdById": "admin-ds-3d0daed9"
+      },
+      "7ca07bbf-fee3-4d62-aa0e-fe27d6034055": {
+        "id": "7ca07bbf-fee3-4d62-aa0e-fe27d6034055",
+        "createdAt": "2026-10-30T05:53:41.997Z",
+        "updatedAt": "2026-10-30T05:53:42.981Z",
+        "repositoryId": "e1d66343-bbc8-465b-8962-477d09978b27",
+        "parentId": null,
+        "name": "Private",
+        "path": "Private",
+        "knowledgeBaseId": null,
+        "aiEnabled": false,
+        "createdById": "admin-ds-3d0daed9"
       }
     },
     "processingJob": {
@@ -12697,6 +13042,28 @@
         "progress": 100,
         "attempts": 1,
         "error": null
+      },
+      "d4159bf5-02ec-4201-a93a-2f45dd0a95a1": {
+        "id": "d4159bf5-02ec-4201-a93a-2f45dd0a95a1",
+        "createdAt": "2026-10-30T05:53:42.113Z",
+        "updatedAt": "2026-10-30T05:53:42.113Z",
+        "documentId": "0d424a0f-b428-40f4-92ca-8552d1c6adef",
+        "stage": "READY",
+        "status": "COMPLETED",
+        "progress": 100,
+        "attempts": 1,
+        "error": null
+      },
+      "4d1d7110-9f3b-411f-9bf9-1fda170553f2": {
+        "id": "4d1d7110-9f3b-411f-9bf9-1fda170553f2",
+        "createdAt": "2026-10-30T05:53:42.962Z",
+        "updatedAt": "2026-10-30T05:53:42.962Z",
+        "documentId": "7824864d-84eb-4766-8dd3-c89d957ed7dd",
+        "stage": "READY",
+        "status": "COMPLETED",
+        "progress": 100,
+        "attempts": 1,
+        "error": null
       }
     },
     "spreadsheetSheet": {
@@ -12734,6 +13101,13 @@
         "updatedAt": "2026-10-30T05:48:27.250Z",
         "documentId": "e7b5cb9b-216a-4c54-afac-e485b20e8e78",
         "name": "Households"
+      },
+      "1b4f7cd1-9e58-49d7-b3e9-265b5dab0395": {
+        "id": "1b4f7cd1-9e58-49d7-b3e9-265b5dab0395",
+        "createdAt": "2026-10-30T05:53:42.120Z",
+        "updatedAt": "2026-10-30T05:53:42.120Z",
+        "documentId": "0d424a0f-b428-40f4-92ca-8552d1c6adef",
+        "name": "Sheet1"
       }
     },
     "spreadsheetColumn": {
@@ -12853,6 +13227,33 @@
         "name": "electricity",
         "dataType": "string",
         "columnIndex": 2
+      },
+      "2ce52c6e-b2e4-4d34-921c-4923720eb443": {
+        "id": "2ce52c6e-b2e4-4d34-921c-4923720eb443",
+        "createdAt": "2026-10-30T05:53:42.132Z",
+        "updatedAt": "2026-10-30T05:53:42.132Z",
+        "sheetId": "1b4f7cd1-9e58-49d7-b3e9-265b5dab0395",
+        "name": "district",
+        "dataType": "string",
+        "columnIndex": 0
+      },
+      "ccb1185a-f72c-4768-a758-40d76df5db1e": {
+        "id": "ccb1185a-f72c-4768-a758-40d76df5db1e",
+        "createdAt": "2026-10-30T05:53:42.132Z",
+        "updatedAt": "2026-10-30T05:53:42.132Z",
+        "sheetId": "1b4f7cd1-9e58-49d7-b3e9-265b5dab0395",
+        "name": "crop",
+        "dataType": "string",
+        "columnIndex": 1
+      },
+      "3d155bd2-be2a-4436-b66e-8d8dd627b9e5": {
+        "id": "3d155bd2-be2a-4436-b66e-8d8dd627b9e5",
+        "createdAt": "2026-10-30T05:53:42.132Z",
+        "updatedAt": "2026-10-30T05:53:42.132Z",
+        "sheetId": "1b4f7cd1-9e58-49d7-b3e9-265b5dab0395",
+        "name": "yield",
+        "dataType": "string",
+        "columnIndex": 2
       }
     },
     "spreadsheetRow": {
@@ -12959,6 +13360,46 @@
         "sheetId": "cef72604-cdd9-480e-845a-b35c8441c2e5",
         "rowIndex": 3,
         "rowData": "{\"district\":\"Huye\",\"households\":\"830\",\"electricity\":\"partial\"}"
+      },
+      "2dc67ec4-b656-4775-9de6-85abf6e6eb83": {
+        "id": "2dc67ec4-b656-4775-9de6-85abf6e6eb83",
+        "createdAt": "2026-10-30T05:53:42.144Z",
+        "updatedAt": "2026-10-30T05:53:42.144Z",
+        "sheetId": "1b4f7cd1-9e58-49d7-b3e9-265b5dab0395",
+        "rowIndex": 2,
+        "rowData": "{\"district\":\"Gasabo\",\"crop\":\"maize\",\"yield\":\"3.0\"}"
+      },
+      "b4d9ba64-0f6f-4a17-bb89-52ed26bf9393": {
+        "id": "b4d9ba64-0f6f-4a17-bb89-52ed26bf9393",
+        "createdAt": "2026-10-30T05:53:42.144Z",
+        "updatedAt": "2026-10-30T05:53:42.144Z",
+        "sheetId": "1b4f7cd1-9e58-49d7-b3e9-265b5dab0395",
+        "rowIndex": 3,
+        "rowData": "{\"district\":\"Gasabo\",\"crop\":\"maize\",\"yield\":\"3.4\"}"
+      },
+      "ff9ad9de-7a07-4281-871b-e462f86dbe6d": {
+        "id": "ff9ad9de-7a07-4281-871b-e462f86dbe6d",
+        "createdAt": "2026-10-30T05:53:42.144Z",
+        "updatedAt": "2026-10-30T05:53:42.144Z",
+        "sheetId": "1b4f7cd1-9e58-49d7-b3e9-265b5dab0395",
+        "rowIndex": 4,
+        "rowData": "{\"district\":\"Huye\",\"crop\":\"maize\",\"yield\":\"2.0\"}"
+      },
+      "59925f44-d5cf-4b42-a251-3316c666db8b": {
+        "id": "59925f44-d5cf-4b42-a251-3316c666db8b",
+        "createdAt": "2026-10-30T05:53:42.144Z",
+        "updatedAt": "2026-10-30T05:53:42.144Z",
+        "sheetId": "1b4f7cd1-9e58-49d7-b3e9-265b5dab0395",
+        "rowIndex": 5,
+        "rowData": "{\"district\":\"Huye\",\"crop\":\"maize\",\"yield\":\"2.6\"}"
+      },
+      "626f2b02-dbd0-4c50-8eb9-d428739442eb": {
+        "id": "626f2b02-dbd0-4c50-8eb9-d428739442eb",
+        "createdAt": "2026-10-30T05:53:42.144Z",
+        "updatedAt": "2026-10-30T05:53:42.144Z",
+        "sheetId": "1b4f7cd1-9e58-49d7-b3e9-265b5dab0395",
+        "rowIndex": 6,
+        "rowData": "{\"district\":\"Musanze\",\"crop\":\"beans\",\"yield\":\"1.5\"}"
       }
     },
     "formVersion": {

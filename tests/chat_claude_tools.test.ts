@@ -54,6 +54,8 @@ Object.assign(process.env, {
   CLAUDE_FALLBACK_TO_GONKA: 'false',
   GONKA_BASE_URL: `http://127.0.0.1:${(fake.address() as AddressInfo).port}/gonka/v1`,
   GONKA_API_KEY: 'test-gonka-key',
+  // Other suites publish library datasets into the same CI database; routing here must not depend on them.
+  LIBRARY_AUTO_ROUTE: 'false',
 });
 const { AiService, fileJobQueue, fileStore } = await import('../server/services/AiService.js');
 const ai = AiService.getInstance();
