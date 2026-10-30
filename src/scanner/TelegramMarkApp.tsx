@@ -5,7 +5,7 @@ import { buildPdf } from './TelegramScanApp';
 import { scansToZip } from '../utils/scansToZip';
 
 /**
- * Mark, inside Telegram (scanner.html?mode=mark): the marking scheme, then the students with the live camera
+ * Mark, inside Telegram (scanner.html?mode=mark): the marking scheme or the question paper (one is required), then the students with the live camera
  * (one tap per page, "Next student"), optional instructions, then Mark. Everything goes up in one request with
  * each file's role; marking then runs in the Telegram chat with live progress, and the red-pen PDFs and the
  * Excel results arrive there.
@@ -35,6 +35,8 @@ export default function TelegramMarkApp() {
   const token = new URLSearchParams(window.location.search).get('token');
   const app = tg();
   const [scheme, setScheme] = useState<Scheme | null>(null);
+  // What step 1 holds: the marking scheme, or the question paper Bwenge writes the scheme from.
+  const [guideKind, setGuideKind] = useState<'scheme' | 'paper'>('scheme');
   const [students, setStudents] = useState<Student[]>([]);
   const [scriptFiles, setScriptFiles] = useState<File[]>([]);
   const [instructions, setInstructions] = useState('');
@@ -91,8 +93,8 @@ export default function TelegramMarkApp() {
     setState({ kind: 'sending' });
     try {
       const form = new FormData();
-      if (scheme?.kind === 'file') form.append('scheme', scheme.file, scheme.file.name);
-      else if (scheme?.kind === 'scan') form.append('scheme', await buildPdf(scheme.pages), 'Marking scheme.pdf');
+      if (scheme?.kind === 'file') form.append(guideKind, scheme.file, scheme.file.name);
+      else if (scheme?.kind === 'scan') form.append(guideKind, await buildPdf(scheme.pages), guideKind === 'paper' ? 'Question paper.pdf' : 'Marking scheme.pdf');
       if (students.length) {
         const pages = students.flatMap((s) => s.pages.map((p) => ({ ...p, candidateId: s.key, studentName: s.name })));
         form.append('scripts', await scansToZip(pages));
@@ -123,16 +125,22 @@ export default function TelegramMarkApp() {
       <main className="mx-auto max-w-md space-y-3 px-4 pt-5">
         <header className="mb-1">
           <h1 className="text-xl font-semibold">Mark a class</h1>
-          <p className="text-[13px] text-[#9C9A92]">Scheme, then students. Marking runs in the chat with live progress.</p>
+          <p className="text-[13px] text-[#9C9A92]">Scheme or question paper, then students. Marking runs in the chat with live progress.</p>
         </header>
 
-        {/* 1. Marking scheme */}
+        {/* 1. Marking scheme or question paper (required) */}
         <section className="rounded-2xl border border-white/10 bg-[#1A1918] p-3.5">
-          <div className="mb-2 flex items-center gap-2 text-[13px] font-semibold"><Step n={1} done={!!scheme} />Marking scheme <span className="font-normal text-[#9C9A92]">(optional)</span></div>
+          <div className="mb-2 flex items-center gap-2 text-[13px] font-semibold"><Step n={1} done={!!scheme} />{scheme ? (guideKind === 'paper' ? 'Question paper' : 'Marking scheme') : 'Marking scheme or question paper'}</div>
+          <div role="radiogroup" aria-label="What is it?" className="mb-2 grid grid-cols-2 gap-1 rounded-xl bg-white/[0.04] p-1 text-[12.5px]">
+            {(['scheme', 'paper'] as const).map((k) => (
+              <button key={k} type="button" role="radio" aria-checked={guideKind === k} onClick={() => setGuideKind(k)}
+                className={`rounded-lg px-2 py-1.5 font-semibold ${guideKind === k ? 'bg-[#D97757] text-white' : 'text-[#9C9A92]'}`}>{k === 'scheme' ? 'Marking scheme' : 'Question paper'}</button>
+            ))}
+          </div>
           {scheme ? (
             <div className="flex items-center gap-2 rounded-xl bg-emerald-500/10 px-3 py-2 text-[13px] text-emerald-300">
               <Check size={15} /><span className="min-w-0 flex-1 truncate">{schemeLabel}</span>
-              <button type="button" aria-label="Remove the marking scheme" onClick={() => setScheme(null)} className="rounded p-1 text-[#9C9A92]"><X size={15} /></button>
+              <button type="button" aria-label={guideKind === 'paper' ? 'Remove the question paper' : 'Remove the marking scheme'} onClick={() => setScheme(null)} className="rounded p-1 text-[#9C9A92]"><X size={15} /></button>
             </div>
           ) : (
             <>
@@ -140,7 +148,7 @@ export default function TelegramMarkApp() {
                 <Btn primary onClick={() => setScanning('scheme')}><Camera size={16} />Photograph</Btn>
                 <Btn onClick={() => schemeInput.current?.click()}><Paperclip size={16} />Choose file</Btn>
               </div>
-              <p className="mt-2 text-[12px] text-[#9C9A92]">No scheme? Bwenge writes one from the questions.</p>
+              <p className="mt-2 text-[12px] text-[#9C9A92]">Required. With the question paper, Bwenge writes the scheme first, then marks.</p>
             </>
           )}
           <input ref={schemeInput} type="file" hidden accept=".pdf,.docx,.txt,image/*" onChange={(e) => { const f = e.target.files?.[0]; if (f) setScheme({ kind: 'file', file: f }); e.target.value = ''; }} />
@@ -193,9 +201,9 @@ export default function TelegramMarkApp() {
       <footer className="fixed inset-x-0 bottom-0 border-t border-white/10 bg-[#0f1013]/95 px-4 pb-[calc(12px+env(safe-area-inset-bottom))] pt-3 backdrop-blur">
         <div className="mx-auto flex max-w-md items-center gap-3">
           <span className="min-w-0 flex-1 text-[12px] leading-tight text-[#9C9A92]">
-            {total ? <>{scheme ? 'Scheme ready' : 'No scheme: Bwenge drafts one'}<br />{total} student{total === 1 ? '' : 's'}{pageCount ? ` · ${pageCount} pages` : ''}</> : 'Add the students to start'}
+            {total ? <>{scheme ? (guideKind === 'paper' ? 'Question paper ready' : 'Scheme ready') : 'Add the scheme or question paper'}<br />{total} student{total === 1 ? '' : 's'}{pageCount ? ` · ${pageCount} pages` : ''}</> : 'Add the students to start'}
           </span>
-          <button type="button" disabled={!total || state.kind === 'sending'} onClick={() => void submit()} className="inline-flex items-center gap-2 rounded-xl bg-[#D97757] px-5 py-3 text-[15px] font-semibold text-white disabled:opacity-40">
+          <button type="button" disabled={!total || !scheme || state.kind === 'sending'} onClick={() => void submit()} className="inline-flex items-center gap-2 rounded-xl bg-[#D97757] px-5 py-3 text-[15px] font-semibold text-white disabled:opacity-40">
             {state.kind === 'sending' ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
             {state.kind === 'sending' ? 'Sending…' : `Mark ${total || ''} script${total === 1 ? '' : 's'}`.replace('  ', ' ')}
           </button>
@@ -209,7 +217,7 @@ export default function TelegramMarkApp() {
             aiTools={false}
             allowExport={false}
             quick
-            saveLabel={scanning === 'scheme' ? 'Use as marking scheme' : 'Add these students'}
+            saveLabel={scanning === 'scheme' ? (guideKind === 'paper' ? 'Use as question paper' : 'Use as marking scheme') : 'Add these students'}
             onSavePages={onScanned}
             onClose={() => setScanning(null)}
           />

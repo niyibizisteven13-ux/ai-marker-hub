@@ -165,11 +165,11 @@ async function getTelegramSession(chatId: string) {
  */
 const markUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 80 * 1024 * 1024, files: 13, fields: 10, parts: 30 } });
 const MARK_TEXT = {
-  en: (n: number, scheme: boolean) => `Mark ${n === 1 ? 'this script' : 'these scripts'}${scheme ? ' with the marking scheme' : '. There is no marking scheme: write one from the questions first'}.`,
-  rw: (n: number, scheme: boolean) => `Kosora ${n === 1 ? 'uru rupapuro' : 'izi mpapuro'}${scheme ? ' ukoresheje marking scheme' : '. Nta marking scheme ihari: banza uyandike uhereye ku bibazo'}.`,
-  fr: (n: number, scheme: boolean) => `Corrige ${n === 1 ? 'cette copie' : 'ces copies'}${scheme ? ' avec le barème' : '. Il n’y a pas de barème : rédige-le d’abord à partir des questions'}.`,
+  en: (n: number, scheme: boolean) => `Mark ${n === 1 ? 'this script' : 'these scripts'}${scheme ? ' with the marking scheme' : '. Use the question paper to write the marking scheme first'}.`,
+  rw: (n: number, scheme: boolean) => `Kosora ${n === 1 ? 'uru rupapuro' : 'izi mpapuro'}${scheme ? ' ukoresheje marking scheme' : '. Banza wandike marking scheme uhereye ku rupapuro rw’ibibazo'}.`,
+  fr: (n: number, scheme: boolean) => `Corrige ${n === 1 ? 'cette copie' : 'ces copies'}${scheme ? ' avec le barème' : '. Rédige d’abord le barème à partir du sujet'}.`,
 };
-router.post(['/mark-upload', '/mark-upload/:sessionToken'], markUpload.fields([{ name: 'scheme', maxCount: 3 }, { name: 'scripts', maxCount: 10 }]), async (req: Request, res: Response) => {
+router.post(['/mark-upload', '/mark-upload/:sessionToken'], markUpload.fields([{ name: 'scheme', maxCount: 3 }, { name: 'paper', maxCount: 3 }, { name: 'scripts', maxCount: 10 }]), async (req: Request, res: Response) => {
   try {
     const chatId = resolveScanToken(req.params.sessionToken) ?? verifyInitData(req.get('x-telegram-init-data'));
     if (!chatId) return res.status(401).json({ error: 'This session has expired. Open Mark again from Telegram.' });
@@ -177,8 +177,11 @@ router.post(['/mark-upload', '/mark-upload/:sessionToken'], markUpload.fields([{
     if (!found) return res.status(404).json({ error: 'Start the Bwenge bot in Telegram first.' });
     const parts = req.files as Record<string, Express.Multer.File[]> | undefined;
     const schemeParts = parts?.scheme ?? [];
+    const paperParts = parts?.paper ?? [];
     const scriptParts = parts?.scripts ?? [];
     if (!scriptParts.length) return res.status(400).json({ error: 'Add at least one student script.' });
+    // Bwenge marks against the scheme, or writes one from the question paper; never from nothing.
+    if (!schemeParts.length && !paperParts.length) return res.status(400).json({ error: 'Add the marking scheme or the question paper first.' });
     const body = req.body ?? {};
     const instructions = typeof body.instructions === 'string' ? body.instructions.trim().slice(0, 2000) : '';
     const credit = body.credit === 'strict' ? 'strict' as const : 'partial' as const;
@@ -196,8 +199,9 @@ router.post(['/mark-upload', '/mark-upload/:sessionToken'], markUpload.fields([{
       return out;
     };
     const files: Array<{ name: string; mime: string; data: Buffer }> = [];
-    const roles: Record<string, 'scheme' | 'scripts'> = {};
+    const roles: Record<string, 'scheme' | 'paper' | 'scripts'> = {};
     for (const f of schemeParts) { const name = unique(f.originalname || 'Marking scheme.pdf'); roles[name] = 'scheme'; files.push({ name, mime: f.mimetype, data: f.buffer }); }
+    for (const f of paperParts) { const name = unique(f.originalname || 'Question paper.pdf'); roles[name] = 'paper'; files.push({ name, mime: f.mimetype, data: f.buffer }); }
     for (const f of scriptParts) { const name = unique(f.originalname || 'Scripts.zip'); roles[name] = 'scripts'; files.push({ name, mime: f.mimetype, data: f.buffer }); }
 
     const session = await ensureTelegramUser(chatId, found);

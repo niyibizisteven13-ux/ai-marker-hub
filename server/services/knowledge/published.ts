@@ -51,6 +51,8 @@ export async function asksAboutDatasets(message: string, userId?: string): Promi
   if (!text) return false;
   // A question asked from the Public library panel names the folder or file it is about.
   if (/\[Public library: /.test(text)) return true;
+  // Operators (and tests sharing a database with other suites) can turn automatic library routing off.
+  if (process.env.LIBRARY_AUTO_ROUTE === 'false') return false;
   const names = await publishedNames().catch(() => [] as string[]);
   if (!names.length) return false;
   const lower = text.toLowerCase();

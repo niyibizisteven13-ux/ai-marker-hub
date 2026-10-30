@@ -6,7 +6,8 @@ import logger from '../../utils/logger.js';
  * Without TELEGRAM_BOT_TOKEN it runs in mock mode: calls are logged and recorded, never sent.
  */
 
-export type InlineButton = { text: string; callback_data?: string; url?: string; web_app?: { url: string } };
+/** `style` colours the button (Telegram apps from February 2026; older apps show it plain). `icon_custom_emoji_id` puts a custom emoji icon before the text. */
+export type InlineButton = { text: string; callback_data?: string; url?: string; web_app?: { url: string }; style?: 'primary' | 'success' | 'danger'; icon_custom_emoji_id?: string };
 export type InlineKeyboard = { inline_keyboard: InlineButton[][] };
 export interface SentMessage { message_id: number; chat?: { id: number | string }; photo?: Array<{ file_id: string }>; document?: { file_id: string } }
 

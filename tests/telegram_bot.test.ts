@@ -148,10 +148,11 @@ test('home: /start shows the branded banner with the menu; menus and language sw
   assert.equal(home.files.photo.data.subarray(1, 4).toString(), 'PNG', 'banner image uploaded');
   assert.equal(home.body.parse_mode, 'HTML');
   assert.match(home.body.caption, /Muraho, Aline!|Welcome/);
-  assert.match(home.body.caption, /📷 Scan papers with your camera/);
+  assert.match(home.body.caption, /📷  Scan papers with your camera/);
   const flat = home.body.reply_markup.inline_keyboard.flat();
-  assert.deepEqual(flat.map((b: any) => b.callback_data ?? 'web_app'), ['m:create', 'm:mark', 'web_app', 'm:transcribe', 'm:library', 'fp:0', 'm:settings', 'm:help']);
-  assert.equal(flat[2].web_app.url, 'https://www.bwenge.space/scanner.html', 'scan opens the Mini App directly');
+  assert.deepEqual(flat.map((b: any) => b.callback_data ?? 'web_app'), ['m:mark', 'web_app', 'm:create', 'm:transcribe', 'm:library', 'fp:0', 'm:settings', 'm:help']);
+  assert.equal(flat[1].web_app.url, 'https://www.bwenge.space/scanner.html', 'scan opens the Mini App directly');
+  assert.deepEqual(flat.map((b: any) => b.style ?? '-'), ['primary', 'primary', '-', '-', '-', '-', '-', '-'], 'marking and scanning are the coloured main actions');
 
   n = mark();
   await sendText('/start');
@@ -391,6 +392,9 @@ test('mark: /mark opens the Mark app; its upload starts marking in the chat with
     assert.equal((await upload([['scripts', zip, 'Camera scans.zip']])).status, 401, 'unsigned uploads are refused');
     const token = issueScanToken(String(chat));
     assert.equal((await upload([['scheme', scheme, 'Maths.txt']], {}, `/${token}`)).status, 400, 'scripts are required');
+    const noGuide = await upload([['scripts', zip, 'Camera scans.zip']], {}, `/${token}`);
+    assert.equal(noGuide.status, 400, 'the marking scheme or the question paper is required');
+    assert.match((await noGuide.json()).error, /marking scheme or the question paper/);
     n = mark();
     const res = await upload([['scheme', scheme, 'Maths.txt'], ['scripts', zip, 'Camera scans.zip']], { instructions: 'Ignore spelling.', credit: 'strict', students: '3' }, `/${token}`);
     assert.equal(res.status, 202);
@@ -454,4 +458,21 @@ test('limits: over the daily credit limit, the bot answers with a limit card and
   await new Promise((r) => setTimeout(r, 200));
   assert.ok(!since(n).some((c) => c.method === 'sendMessage' && /Working on it/.test(c.body.text)), 'no AI turn starts');
   resetRouterState();
+});
+
+test('buttons use custom emoji icons when configured, and keep the standard emoji otherwise', async () => {
+  const { homeKeyboard, resetButtonIcons } = await import('../server/services/telegram/ui.js');
+  const before = process.env.TELEGRAM_BUTTON_ICONS;
+  try {
+    process.env.TELEGRAM_BUTTON_ICONS = JSON.stringify({ mark: '5368324170671202286', scan: 'not-an-id' });
+    resetButtonIcons();
+    const [mark, scan] = homeKeyboard('en').inline_keyboard[0];
+    assert.equal(mark.text, 'Mark exams', 'the custom icon replaces the emoji');
+    assert.equal(mark.icon_custom_emoji_id, '5368324170671202286');
+    assert.equal(scan.text, '📷 Scan papers', 'an invalid id is ignored');
+    assert.equal(scan.icon_custom_emoji_id, undefined);
+  } finally {
+    if (before === undefined) delete process.env.TELEGRAM_BUTTON_ICONS; else process.env.TELEGRAM_BUTTON_ICONS = before;
+    resetButtonIcons();
+  }
 });

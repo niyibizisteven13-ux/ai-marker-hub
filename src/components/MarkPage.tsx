@@ -111,14 +111,16 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
   }, [items, scripts]);
   const uploading = items.some((i) => i.status === 'uploading');
   const failed = items.filter((i) => i.status === 'failed');
-  const canMark = scripts.length > 0 && !uploading && scripts.every((i) => i.status === 'ready');
+  // Bwenge needs one of the two before it marks: the marking scheme, or the question paper to write one from.
+  const guide = items.some((i) => (i.role === 'scheme' || i.role === 'paper') && i.status === 'ready');
+  const canMark = scripts.length > 0 && guide && !uploading && scripts.every((i) => i.status === 'ready');
 
   const submit = () => {
     const ready = items.filter((i) => i.status === 'ready' && i.fileId);
     const roles = Object.fromEntries(ready.map((i) => [i.file.name, i.role]));
     const n = summary.students;
     const text = [
-      `Mark ${n === 1 ? 'this script' : `these ${n} scripts`}${scheme ? ' with the marking scheme' : paper ? '. There is no marking scheme: write one from the question paper first' : '. There is no marking scheme: write one from the questions first'}.`,
+      `Mark ${n === 1 ? 'this script' : `these ${n} scripts`}${scheme ? ' with the marking scheme' : '. Use the question paper to write the marking scheme first'}.`,
       instructions.trim() ? `My instructions: ${instructions.trim()}` : '',
     ].filter(Boolean).join('\n\n');
     onMark({
@@ -128,7 +130,7 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
     });
   };
 
-  const markLabel = scripts.length ? `Mark ${summary.students || scripts.length} script${(summary.students || scripts.length) === 1 ? '' : 's'}` : 'Add student scripts';
+  const markLabel = !scripts.length ? 'Add student scripts' : !scheme && !paper ? 'Add scheme or question paper' : `Mark ${summary.students || scripts.length} script${(summary.students || scripts.length) === 1 ? '' : 's'}`;
   const toggleSuggestion = (s: string) => setInstructions((cur) => (cur.includes(s) ? cur.replace(s, '').replace(/\s{2,}/g, ' ').trim() : `${cur.trim()} ${s}`.trim()));
 
   return (
@@ -140,7 +142,7 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
       </header>
       <main className="mx-auto flex w-full max-w-[840px] flex-1 flex-col px-4 pb-28 sm:px-6 sm:pb-10">
         <h1 className="mt-1 text-center sm:mt-4 font-serif text-[28px] font-medium tracking-tight sm:text-[32px]">What are we <span className="text-[#D97757]">marking</span> today?</h1>
-        <p className="mx-auto mt-2 hidden max-w-xl text-center text-[14px] text-neutral-400 sm:block">Add the students' scripts and your marking scheme. Bwenge reads the handwriting, marks every question in red pen, and shows you each step in the chat.</p>
+        <p className="mx-auto mt-2 hidden max-w-xl text-center text-[14px] text-neutral-400 sm:block">Add the students' scripts and the marking scheme or the question paper. Bwenge reads the handwriting, marks every question in red pen, and shows you each step in the chat.</p>
 
         <section className={`mt-5 overflow-hidden sm:mt-7 rounded-[20px] border bg-[#30302E] shadow-[0_12px_40px_rgba(0,0,0,.25)] transition-colors ${dragging ? 'border-[#D97757]/70' : 'border-white/[0.12]'}`}>
           {items.length === 0 ? (
@@ -232,7 +234,7 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
 
         {items.length > 0 && (
           <section aria-label="Summary" className="mt-4 hidden grid-cols-2 gap-2.5 sm:grid sm:grid-cols-4">
-            <Stat value={scheme ? '✓' : '—'} label={scheme ? 'marking scheme attached' : paper ? 'no scheme: Bwenge drafts one from the question paper' : 'no scheme: Bwenge drafts one from the questions'} tone={scheme ? 'ok' : 'note'} />
+            <Stat value={scheme || paper ? '✓' : '!'} label={scheme ? 'marking scheme attached' : paper ? 'question paper: Bwenge writes the scheme from it' : 'add the marking scheme or the question paper'} tone={scheme || paper ? 'ok' : 'warn'} />
             <Stat value={summary.students || '—'} label={`student${summary.students === 1 ? '' : 's'} found`} />
             <Stat value={summary.checking ? '…' : summary.pages} label={summary.checking ? 'checking pages' : `pages, ${summary.handwritten} handwritten or scanned`} />
             <Stat value={summary.retake} label={summary.retake ? 'photos to retake (marking still works)' : 'photos to retake'} tone={summary.retake ? 'warn' : undefined} />
@@ -243,14 +245,14 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
         {/* Phone: the Mark button stays in reach at the bottom of the screen. */}
         <div className="fixed inset-x-0 bottom-0 z-10 flex items-center gap-3 border-t border-white/[0.08] bg-[#262624]/95 px-4 pb-[calc(12px+env(safe-area-inset-bottom))] pt-3 backdrop-blur sm:hidden">
           <span className="min-w-0 flex-1 text-[12px] leading-tight text-neutral-400">
-            {items.length ? <>{scheme ? 'Scheme attached' : 'No scheme: Bwenge drafts one'}<br />{summary.students || 0} student{summary.students === 1 ? '' : 's'} · {summary.pages} page{summary.pages === 1 ? '' : 's'}</> : 'Scan or add the scripts to start'}
+            {items.length ? <>{scheme ? 'Scheme attached' : paper ? 'Question paper attached' : 'Add the scheme or question paper'}<br />{summary.students || 0} student{summary.students === 1 ? '' : 's'} · {summary.pages} page{summary.pages === 1 ? '' : 's'}</> : 'Scan or add the scripts to start'}
           </span>
           <button type="button" disabled={!canMark} onClick={submit} className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-[#D97757] px-4 py-2.5 text-[14px] font-semibold text-white disabled:opacity-40">
             {uploading ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}{markLabel}
           </button>
         </div>
         <ol className="mx-auto mt-6 hidden flex-wrap justify-center gap-x-5 gap-y-1 text-[12.5px] text-neutral-500 sm:flex">
-          <li><b className="text-neutral-400">1</b> Scan or add the scripts and scheme</li><li aria-hidden>→</li><li><b className="text-neutral-400">2</b> Mark</li><li aria-hidden>→</li><li><b className="text-neutral-400">3</b> Watch the red pen live in the chat</li>
+          <li><b className="text-neutral-400">1</b> Add the scripts and the scheme or question paper</li><li aria-hidden>→</li><li><b className="text-neutral-400">2</b> Mark</li><li aria-hidden>→</li><li><b className="text-neutral-400">3</b> Watch the red pen live in the chat</li>
         </ol>
       </main>
     </div>

@@ -834,10 +834,29 @@ test('review: saved record, page images, moving a mark, release and the draft la
   await assert.rejects(exams.setLayout(user, exam.id, sub.id, 'Q9:mark', { reset: true }), /No item/);
 });
 
-test('chat: no marking scheme, the AI writes one from the questions and marks straight away', async () => {
+test('chat: scripts without a scheme or question paper are kept and Bwenge asks for one; the scheme sent next starts marking', async () => {
+  const user = 'teacher-needs-scheme';
+  const before = calls.drafts;
+  const ask = await chat.handle(user, 'Please mark these scripts', [{ name: 'C001.pdf', buffer: C001_PDF, mime: 'application/pdf' }]);
+  assert.match(ask!.text, /I need \*\*the marking scheme or the question paper\*\*/);
+  assert.equal(calls.drafts, before, 'nothing is drafted without being asked');
+  // The scheme arrives as an unnamed photo-like file: it is the scheme because Bwenge asked for it.
+  const scheme = Buffer.from('1. (3 marks) M1 subtract 2; A1 x = 4 (2 marks)\n2. (2 marks) B1 area 15\nTotal: 5 marks');
+  const done = await chat.handle(user, 'here it is', [{ name: 'IMG_0042.txt', buffer: scheme, mime: 'text/plain' }]);
+  assert.match(done!.text, /Marking finished\.\*\* 1 script marked/);
+  assert.deepEqual(done!.attachments.map((a) => a.name), ['C001_marked.pdf']);
+  // From the Mark page (explicit roles) the scheme or paper is required too; the page's settings are kept.
+  const explicitAsk = await chat.handle('teacher-needs-scheme-2', 'Mark this script', [{ name: 'C001.pdf', buffer: C001_PDF, mime: 'application/pdf' }], { marking: { roles: { 'C001.pdf': 'scripts' }, credit: 'strict' } });
+  assert.match(explicitAsk!.text, /marking scheme or the question paper/);
+  assert.doesNotMatch(explicitAsk!.text, /write one from the questions/, 'the Mark page always needs one of the two');
+});
+
+test('chat: no marking scheme, the teacher says so, and the AI writes one from the questions and marks', async () => {
   const user = 'teacher-draft';
   const before = calls.drafts;
-  const r1 = await chat.handle(user, 'Please mark these scripts', [{ name: 'C001.pdf', buffer: C001_PDF, mime: 'application/pdf' }, { name: 'C002.pdf', buffer: C002_PDF, mime: 'application/pdf' }]);
+  const ask = await chat.handle(user, 'Please mark these scripts', [{ name: 'C001.pdf', buffer: C001_PDF, mime: 'application/pdf' }, { name: 'C002.pdf', buffer: C002_PDF, mime: 'application/pdf' }]);
+  assert.match(ask!.text, /I don't have a marking scheme/);
+  const r1 = await chat.handle(user, "I don't have a marking scheme", []);
   assert.equal(calls.drafts, before + 1, 'one draft');
   assert.match(r1!.text, /No marking scheme was attached, so I wrote one from the questions \(2 questions, 5 marks\)/);
   assert.match(r1!.text, /mark again with this scheme/, 'the teacher can still use their own');
