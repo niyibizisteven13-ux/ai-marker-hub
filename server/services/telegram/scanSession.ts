@@ -58,4 +58,10 @@ export function scannerUrl(token?: string): string {
   return `${base}/scanner.html${token ? `?token=${encodeURIComponent(token)}` : ''}`;
 }
 
+/** The Mark Mini App: the same page in marking mode (scheme, then students, then Mark). */
+export function markUrl(token?: string): string {
+  const base = (process.env.APP_BASE_URL || 'https://www.bwenge.space').replace(/\/$/, '');
+  return `${base}/scanner.html?mode=mark${token ? `&token=${encodeURIComponent(token)}` : ''}`;
+}
+
 export const miniAppReady = () => scannerUrl().startsWith('https://');

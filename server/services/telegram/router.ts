@@ -4,12 +4,12 @@ import { telegramApi, type TelegramApi } from './api.js';
 import { deliverAttachment, runAssistantTurn, type IncomingFile } from './agentBridge.js';
 import { esc } from './format.js';
 import {
-  FILES_PER_PAGE, backKeyboard, card, filesCard, filesKeyboard, guideCard, homeCard, homeKeyboard, langOf, scanCard, scanKeyboard, settingsCard, settingsKeyboard, type Lang, type PlanView,
+  FILES_PER_PAGE, backKeyboard, card, filesCard, filesKeyboard, guideCard, homeCard, homeKeyboard, langOf, markCard, markKeyboard, scanCard, scanKeyboard, settingsCard, settingsKeyboard, type Lang, type PlanView,
 } from './ui.js';
 import type { InlineKeyboard } from './api.js';
 import { copy } from './uiText.js';
 import { bannerFileId, bannerPng, rememberBannerFileId } from './banner.js';
-import { issueScanToken, miniAppReady, scannerUrl } from './scanSession.js';
+import { issueScanToken, markUrl, miniAppReady, scannerUrl } from './scanSession.js';
 
 /**
  * Telegram update router for the assistant: home menu and inline navigation, settings, "My files", files
@@ -104,6 +104,14 @@ export async function showScan(api: TelegramApi, chatId: string, session: any, t
   const miniApp = isPrivate(chatId) && miniAppReady();
   const url = miniApp ? scannerUrl() : scannerUrl(issueScanToken(chatId));
   await show(api, chatId, target, scanCard(lang, !miniApp), scanKeyboard(lang, url, miniApp));
+}
+
+/** Mark exams: the Mark Mini App (scheme, students one tap per page, instructions), marking then runs in this chat. */
+export async function showMark(api: TelegramApi, chatId: string, session: any, target?: Target) {
+  const lang = langOf(session.language);
+  const miniApp = isPrivate(chatId) && miniAppReady();
+  const url = miniApp ? markUrl() : markUrl(issueScanToken(chatId));
+  await show(api, chatId, target, markCard(lang, !miniApp), markKeyboard(lang, url, miniApp));
 }
 
 /**
@@ -267,6 +275,7 @@ export async function handleUpdate(update: any, legacy: LegacyHooks, api: Telegr
       case '/help': await api.sendMessage(chatId, guideCard(lang, 'help'), { keyboard: backKeyboard(lang) }); return;
       case '/files': await showFiles(api, chatId, session, 0); return;
       case '/scan': case '/scanner': await showScan(api, chatId, session); return;
+      case '/mark': await showMark(api, chatId, session); return;
       case '/settings': case '/language': case '/plan': { const acc = await accountOf(session); await api.sendMessage(chatId, settingsCard(lang, acc), { keyboard: settingsKeyboard(lang, acc.plan) }); return; }
       case '/new': case '/reset':
         pending.delete(chatId);
@@ -336,7 +345,8 @@ async function handleCallback(q: any, legacy: LegacyHooks, api: TelegramApi) {
         if (arg === 'home') await showHome(api, chatId, session, q.from?.first_name, target);
         else if (arg === 'settings') { const acc = await accountOf(session); await show(api, chatId, target, settingsCard(lang, acc), settingsKeyboard(lang, acc.plan)); }
         else if (arg === 'scan') await showScan(api, chatId, session, target);
-        else if (['create', 'mark', 'transcribe', 'library', 'help'].includes(arg)) {
+        else if (arg === 'mark') await showMark(api, chatId, session, target);
+        else if (['create', 'transcribe', 'library', 'help'].includes(arg)) {
           if (arg === 'transcribe') await prisma.telegramSession.update({ where: { chatId }, data: { stagedMode: 'transcribe' } }).catch(() => undefined);
           await show(api, chatId, target, guideCard(lang, arg as any), backKeyboard(lang));
         }

@@ -40,7 +40,7 @@ const loadSize = (src: string) =>
   });
 
 /** One PDF per student; each page keeps the scan's proportions (A4 width). */
-async function buildPdf(pages: PageItem[]): Promise<Blob> {
+export async function buildPdf(pages: Array<Pick<PageItem, 'dataUrl'>>): Promise<Blob> {
   const W = 595.28;
   let doc: jsPDF | null = null;
   for (const p of pages) {

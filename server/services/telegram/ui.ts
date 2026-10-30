@@ -48,6 +48,17 @@ export function scanKeyboard(lang: Lang, url: string, miniApp: boolean): InlineK
   return backKeyboard(lang, [[open]]);
 }
 
+export function markCard(lang: Lang, viaLink: boolean) {
+  const m = copy(lang).markApp;
+  return card('✅', m.title, `${m.body}\n\n${m.steps.map((step, i) => `<b>${i + 1}.</b> ${step}`).join('\n')}`, viaLink ? `${m.footer} ${copy(lang).scan.groupHint}` : m.footer);
+}
+
+/** Opens the Mark app as a Mini App when possible, otherwise as a signed link. */
+export function markKeyboard(lang: Lang, url: string, miniApp: boolean): InlineKeyboard {
+  const open: InlineButton = miniApp ? { text: copy(lang).markApp.open, web_app: { url } } : { text: copy(lang).markApp.open, url };
+  return backKeyboard(lang, [[open]]);
+}
+
 export const backKeyboard = (lang: Lang, extra: InlineKeyboard['inline_keyboard'] = []): InlineKeyboard =>
   ({ inline_keyboard: [...extra, [{ text: copy(lang).buttons.back, callback_data: 'm:home' }]] });
 

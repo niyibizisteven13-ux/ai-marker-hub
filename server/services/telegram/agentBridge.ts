@@ -9,6 +9,7 @@ import { answerKeyboard, card, errorCard, fmtSize, langOf, progressCard, retryKe
 import { copy } from './uiText.js';
 import { checkUsage } from '../billing/usage.js';
 import { fitHistory } from '../ai/chatHistory.js';
+import type { ExplicitMarking } from '../exams/chat.js';
 
 /**
  * One Telegram turn through the same assistant as the web chat: exam marking first (as on the web), then
@@ -24,7 +25,7 @@ export interface BridgeDeps {
   api: TelegramApi;
   fileStore: FileStore;
   assist: (o: { userId: string; learning?: import('../learning/modes.js').LearningSettings; messages: Array<{ role: 'user' | 'assistant'; content: string }>; files?: Array<{ type: 'image' | 'document'; base64: string; mediaType: string; name?: string }>; planText: string; onEvent: (e: any) => void; signal?: AbortSignal }) => Promise<{ content: Array<{ text: string }>; attachments?: AttachmentRef[] }>;
-  exam?: (userId: string, text: string, files: Array<{ name: string; buffer: Buffer; mime?: string }>, onStatus: (t: string) => void, history?: Turn[]) => Promise<{ text: string; attachments: AttachmentRef[] } | null>;
+  exam?: (userId: string, text: string, files: Array<{ name: string; buffer: Buffer; mime?: string }>, onStatus: (t: string) => void, history?: Turn[], marking?: ExplicitMarking) => Promise<{ text: string; attachments: AttachmentRef[] } | null>;
   editIntervalMs?: number;
 }
 
@@ -35,7 +36,7 @@ async function loadDefaultDeps(api: TelegramApi): Promise<BridgeDeps> {
   return {
     api, fileStore,
     assist: (o) => ai.generalAssist({ ...o, channel: 'telegram' } as any) as any,
-    exam: async (userId, text, files, onStatus, history) => runtime.examChat.handle(userId, text, files, { onStatus, history }),
+    exam: async (userId, text, files, onStatus, history, marking) => runtime.examChat.handle(userId, text, files, { onStatus, history, marking }),
   };
 }
 export const bridgeDeps = (api: TelegramApi) => (defaultDeps ??= loadDefaultDeps(api));
@@ -95,7 +96,8 @@ function historyOf(session: any): Turn[] {
   return Array.isArray(session?.history) ? (session.history as Turn[]).filter((t) => t && (t.role === 'user' || t.role === 'assistant') && typeof t.text === 'string').slice(-HISTORY_TURNS) : [];
 }
 
-export interface TurnInput { chatId: string; session: any; text: string; files?: IncomingFile[]; replyTo?: number }
+/** `marking`: sent by the Mark Mini App, which knows which file is the scheme and which are the scripts. */
+export interface TurnInput { chatId: string; session: any; text: string; files?: IncomingFile[]; replyTo?: number; marking?: ExplicitMarking }
 
 export async function runAssistantTurn(input: TurnInput, depsOverride?: BridgeDeps): Promise<{ text: string; attachments: number } | null> {
   const { chatId, session } = input;
@@ -173,7 +175,7 @@ export async function runAssistantTurn(input: TurnInput, depsOverride?: BridgeDe
       if (last?.status === 'running') last.status = 'done';
       steps.push({ id: `exam-${steps.length}`, name: 'exam', label: status, status: 'running' });
       schedule();
-    }, historyOf(session)).catch((e) => { logger.warn('[telegram] exam chat failed', { errorType: (e as Error)?.name }); return null; }) : null;
+    }, historyOf(session), input.marking).catch((e) => { logger.warn('[telegram] exam chat failed', { errorType: (e as Error)?.name }); return null; }) : null;
 
     let answer: string;
     if (exam) {
