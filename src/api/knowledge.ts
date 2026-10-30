@@ -43,7 +43,11 @@ export interface SearchResults {
   content?: Array<{ fileId: string; path: string; name: string; page: number | null; slide: number | null; sheet: string | null; score: number; excerpt: string }>;
 }
 
-const BASE = '/api/admin/knowledge';
+const ADMIN_BASE = '/api/admin/knowledge';
+const VIEW_BASE = '/api/curation';
+let BASE = ADMIN_BASE;
+/** Read-only Datasets & Curations (any signed-in user) uses the GET-only /api/curation endpoints. */
+export const setKnowledgeViewOnly = (on: boolean) => { BASE = on ? VIEW_BASE : ADMIN_BASE; };
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await authFetch(`${BASE}${path}`, init);

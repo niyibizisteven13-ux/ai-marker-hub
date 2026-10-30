@@ -269,3 +269,37 @@ knowledgeSourcesRouter.get('/sources/:fileId', wrap(async (req, res) => {
   const out = await knowledgeService.openSource(userIdOf(req), req.params.fileId);
   await sendStoredFile(req, res, async () => out, async () => out.file.sizeBytes, false);
 }));
+
+/**
+ * Read-only Datasets & Curations for every signed-in user (for example hackathon judges): published dataset
+ * repositories with their folders, files, indexing status, previews and search. GET only, so nothing can be
+ * uploaded, renamed, moved, re-indexed or deleted; folders and files switched off for AI stay hidden.
+ */
+export const curationViewRouter = Router();
+curationViewRouter.get('/repositories', wrap(async (req, res) => ok(res, await knowledgeService.viewRepositories(userIdOf(req)))));
+curationViewRouter.get('/repositories/:id/tree', wrap(async (req, res) => ok(res, await knowledgeService.tree(userIdOf(req), req.params.id, 'view'))));
+curationViewRouter.get('/repositories/:id/statistics', wrap(async (req, res) => ok(res, await knowledgeService.statistics(userIdOf(req), req.params.id, 'view'))));
+curationViewRouter.get('/repositories/:id/contents', wrap(async (req, res) => {
+  const q = listQuery.parse(req.query);
+  ok(res, await knowledgeService.contents(userIdOf(req), req.params.id, q.directoryId || null, q, 'view'));
+}));
+curationViewRouter.get('/repositories/:id/search', wrap(async (req, res) => {
+  const q = z.object({ q: z.string().min(1).max(500), scope: z.enum(['all', 'names', 'content']).optional(), limit: z.coerce.number().int().min(1).max(100).optional(), directoryId: z.string().optional() }).strict().parse(req.query);
+  ok(res, await knowledgeService.search(userIdOf(req), req.params.id, { query: q.q, scope: q.scope, limit: q.limit, directoryId: q.directoryId || null }, 'view'));
+}));
+curationViewRouter.get('/files/:id', wrap(async (req, res) => ok(res, await knowledgeService.getFile(userIdOf(req), req.params.id, 'view'))));
+curationViewRouter.get('/files/:id/preview', wrap(async (req, res) => {
+  const q = z.object({ page: z.coerce.number().int().min(1).optional(), sheet: z.string().max(200).optional(), offset: z.coerce.number().int().min(0).optional(), limit: z.coerce.number().int().min(1).optional(), render: z.enum(['image']).optional() }).strict().parse(req.query);
+  if (q.render === 'image') {
+    const png = await knowledgeService.renderImage(userIdOf(req), req.params.id, q.page ?? 1, 'view');
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    return res.send(png);
+  }
+  ok(res, await knowledgeService.preview(userIdOf(req), req.params.id, q, 'view'));
+}));
+curationViewRouter.get('/files/:id/download', wrap(async (req, res) => {
+  const meta = await knowledgeService.getFile(userIdOf(req), req.params.id, 'view');
+  await sendStoredFile(req, res, (range) => knowledgeService.openDownload(userIdOf(req), req.params.id, range, 'view'), async () => meta.sizeBytes);
+}));

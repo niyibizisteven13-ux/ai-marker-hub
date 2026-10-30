@@ -4,8 +4,7 @@ import {
   HardDrive, LayoutGrid, List, Loader2, MoreVertical, Pencil, Plus, RefreshCw, Search, Sparkles, Square, Trash2, Upload, UploadCloud, X,
 } from 'lucide-react';
 import {
-  filesFromDrop, formatBytes, knowledgeApi, type Contents, type RepoDirectory, type RepoFile, type RepoTree, type Repository, type SearchResults, type UploadSummary,
-} from '../../api/knowledge';
+  filesFromDrop, formatBytes, knowledgeApi, type Contents, type RepoDirectory, type RepoFile, type RepoTree, type Repository, type SearchResults, type UploadSummary, setKnowledgeViewOnly } from '../../api/knowledge';
 import FilePreview from './FilePreview';
 import { ACTIVE_STATES, FileIcon, Modal, PromptDialog, StatusBadge, fmtDate, kx } from './ui';
 
@@ -23,7 +22,12 @@ const LAST_REPO = 'bwenge.knowledge.repo';
 const remember = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* storage unavailable */ } };
 const recall = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 
-export default function KnowledgeExplorer({ notify }: { notify: Notify }) {
+/**
+ * `readOnly`: the view-only Datasets & Curations page for any signed-in user (published datasets only, served by
+ * the GET-only /api/curation endpoints): browse, search, preview and download, but no upload, edit or delete.
+ */
+export default function KnowledgeExplorer({ notify, readOnly = false }: { notify: Notify; readOnly?: boolean }) {
+  setKnowledgeViewOnly(readOnly);
   const [repos, setRepos] = useState<Repository[] | null>(null);
   const [repoId, setRepoId] = useState<string | null>(null);
   const [tree, setTree] = useState<RepoTree | null>(null);
@@ -240,11 +244,11 @@ export default function KnowledgeExplorer({ notify }: { notify: Notify }) {
     <div className={`${kx.panel} flex flex-col items-center gap-4 p-10 sm:p-14 text-center`}>
       <div className="rounded-2xl border border-[#3FA7E0]/30 bg-[#3FA7E0]/10 p-4 text-[#3FA7E0]"><FolderTree size={30} /></div>
       <div className="max-w-md space-y-1.5">
-        <h3 className="text-lg font-bold text-white">Create your first knowledge repository</h3>
-        <p className="text-sm text-[#9AA6C9]">Upload whole folders of reports, curricula, spreadsheets and slides. Bwenge keeps the folder structure, previews every file, and indexes it so the AI can answer from it with citations.</p>
+        <h3 className="text-lg font-bold text-white">{readOnly ? 'No published datasets yet' : 'Create your first knowledge repository'}</h3>
+        <p className="text-sm text-[#9AA6C9]">{readOnly ? 'Datasets appear here once an administrator publishes them to Bwenge AI.' : 'Upload whole folders of reports, curricula, spreadsheets and slides. Bwenge keeps the folder structure, previews every file, and indexes it so the AI can answer from it with citations.'}</p>
       </div>
       {error && <p className="text-sm text-[#FF8798]">{error}</p>}
-      <button className={`${kx.btn} ${kx.primary}`} onClick={createRepo}><Plus size={16} /> New repository</button>
+      {!readOnly && <button className={`${kx.btn} ${kx.primary}`} onClick={createRepo}><Plus size={16} /> New repository</button>}
       {dialog}
     </div>
   );
@@ -279,21 +283,23 @@ export default function KnowledgeExplorer({ notify }: { notify: Notify }) {
           <div className="flex flex-wrap items-center gap-2">
             {stats && <StatPill tone="green" label="Searchable by AI" value={['indexed', 'pending_embeddings', 'partial_failure', 'duplicate'].reduce((a, k) => a + (stats.byStatus[k] ?? 0), 0)} />}
             {stats && stats.awaitingIndexing + stats.indexing > 0 && <StatPill tone="blue" label="Indexing" value={stats.awaitingIndexing + stats.indexing} spin />}
-            {stats && stats.failed > 0 && <StatPill tone="red" label="Failed" value={stats.failed} onClick={() => repoId && run(() => knowledgeApi.reindexRepository(repoId, true), 'Retrying failed files')} title="Retry failed files" />}
-            {repo && (
+            {stats && stats.failed > 0 && <StatPill tone="red" label="Failed" value={stats.failed} onClick={readOnly ? undefined : () => repoId && run(() => knowledgeApi.reindexRepository(repoId, true), 'Retrying failed files')} title={readOnly ? undefined : 'Retry failed files'} />}
+            {readOnly && repo?.settings?.assistant === true && <span className="inline-flex items-center gap-1.5 rounded-full border border-[#3DB27A]/35 bg-[#3DB27A]/10 px-3 py-1 text-xs font-semibold text-[#6FD6A2]">Published to Bwenge AI</span>}
+            {readOnly && <span className="inline-flex items-center gap-1.5 rounded-full border border-[#2A3760] px-3 py-1 text-xs font-semibold text-[#9AA6C9]"><Eye size={12} /> View only</span>}
+            {!readOnly && repo && (
               <AssistantSwitch on={repo.settings?.assistant === true} onChange={(on) => run(async () => {
                 await knowledgeApi.updateRepository(repo.id, { settings: { assistant: on } });
                 await loadRepos(repo.id);
               }, on ? 'Bwenge AI can now use this dataset for every user' : 'This dataset is hidden from Bwenge AI')} />
             )}
-            <button className={`${kx.btn} ${kx.ghost}`} onClick={createRepo}><Plus size={15} /> New repository</button>
-            <RepoMenu onReindex={() => repoId && run(() => knowledgeApi.reindexRepository(repoId), 'Re-indexing the repository')} onRename={() => repo && setDialog(
+            {!readOnly && <button className={`${kx.btn} ${kx.ghost}`} onClick={createRepo}><Plus size={15} /> New repository</button>}
+            {!readOnly && <RepoMenu onReindex={() => repoId && run(() => knowledgeApi.reindexRepository(repoId), 'Re-indexing the repository')} onRename={() => repo && setDialog(
               <PromptDialog title="Rename repository" label="Name" initial={repo.name} confirm="Save" onClose={() => setDialog(null)}
                 onSubmit={async (name) => { await knowledgeApi.updateRepository(repo.id, { name }); await loadRepos(repo.id); }} />,
-            )} onDelete={deleteRepo} />
+            )} onDelete={deleteRepo} />}
           </div>
         </div>
-        {stats && (
+        {stats && !readOnly && (
           <div className="mt-4" title={`${formatBytes(stats.totalBytes)} of ${formatBytes(stats.quotaBytes)} used`}>
             <div className="h-1.5 overflow-hidden rounded-full bg-[#1A2240]"><div className={`h-full rounded-full ${quotaPct > 90 ? 'bg-[#E5586B]' : 'bg-gradient-to-r from-[#3FA7E0] to-[#3DB27A]'}`} style={{ width: `${Math.max(quotaPct, 0.5)}%` }} /></div>
             <p className="mt-1 flex items-center gap-1 text-[11px] text-[#6C789E]"><HardDrive size={11} /> {formatBytes(stats.totalBytes)} of {formatBytes(stats.quotaBytes)}</p>
@@ -311,10 +317,10 @@ export default function KnowledgeExplorer({ notify }: { notify: Notify }) {
         {/* Main pane */}
         <section
           className={`${kx.panel} relative min-w-0 overflow-hidden`}
-          onDragEnter={(e) => { if (e.dataTransfer.types.includes('Files')) { dragDepth.current++; setDragging(true); } }}
-          onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); }}
+          onDragEnter={(e) => { if (!readOnly && e.dataTransfer.types.includes('Files')) { dragDepth.current++; setDragging(true); } }}
+          onDragOver={(e) => { if (!readOnly && e.dataTransfer.types.includes('Files')) e.preventDefault(); }}
           onDragLeave={() => { dragDepth.current = Math.max(0, dragDepth.current - 1); if (!dragDepth.current) setDragging(false); }}
-          onDrop={onDrop}
+          onDrop={readOnly ? undefined : onDrop}
         >
           {/* Toolbar: location and actions, then search, sort and view */}
           <div className="flex flex-col gap-3 border-b border-[#202945] p-3 sm:p-4">
@@ -323,11 +329,11 @@ export default function KnowledgeExplorer({ notify }: { notify: Notify }) {
               <Breadcrumbs crumbs={contents?.breadcrumbs ?? []} onOpen={open} />
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <div className="flex flex-wrap items-center gap-2 sm:order-2 sm:ml-auto">
+              {!readOnly && <div className="flex flex-wrap items-center gap-2 sm:order-2 sm:ml-auto">
                 <button className={`${kx.btn} ${kx.ghost}`} onClick={newFolder} title="New folder"><FolderPlus size={15} /><span className="hidden 2xl:inline">New folder</span></button>
                 <button className={`${kx.btn} ${kx.ghost}`} onClick={() => fileInput.current?.click()} title="Upload files"><Upload size={15} /><span className="hidden 2xl:inline">Upload files</span></button>
                 <button className={`${kx.btn} ${kx.primary}`} onClick={() => folderInput.current?.click()}><FolderInput size={15} /> Upload folder</button>
-              </div>
+              </div>}
               <input ref={fileInput} type="file" multiple hidden onChange={(e) => { onPickFiles(e.target.files, false); e.target.value = ''; }} />
               <input ref={folderInput} type="file" multiple hidden {...({ webkitdirectory: '', directory: '' } as any)} onChange={(e) => { onPickFiles(e.target.files, true); e.target.value = ''; }} />
             <div className="flex w-full min-w-0 items-center gap-2 sm:order-1 sm:w-auto sm:min-w-[260px] sm:flex-1">
@@ -346,7 +352,7 @@ export default function KnowledgeExplorer({ notify }: { notify: Notify }) {
           </div>
 
           {/* Bulk actions */}
-          {selectedItems.length > 0 && !results && (
+          {!readOnly && selectedItems.length > 0 && !results && (
             <div className="flex flex-wrap items-center gap-2 border-b border-[#202945] bg-[#3FA7E0]/[0.06] px-3 sm:px-4 py-2.5">
               <span className="text-sm font-semibold text-[#7CC4EE]">{selectedItems.length} selected</span>
               <div className="ml-auto flex flex-wrap gap-2">
@@ -369,18 +375,18 @@ export default function KnowledgeExplorer({ notify }: { notify: Notify }) {
               <div className="flex flex-col items-center gap-3 px-6 py-16 text-center">
                 <div className="rounded-2xl border border-dashed border-[#3FA7E0]/40 bg-[#3FA7E0]/5 p-5 text-[#3FA7E0]"><UploadCloud size={34} /></div>
                 <p className="text-base font-semibold text-white">This folder is empty</p>
-                <p className="max-w-sm text-sm text-[#9AA6C9]">Drag files or whole folders here, or use <b>Upload folder</b> to bring in a directory with all its sub-folders.</p>
-                <div className="flex flex-wrap justify-center gap-2 pt-1">
+                {!readOnly && <p className="max-w-sm text-sm text-[#9AA6C9]">Drag files or whole folders here, or use <b>Upload folder</b> to bring in a directory with all its sub-folders.</p>}
+                {!readOnly && <div className="flex flex-wrap justify-center gap-2 pt-1">
                   <button className={`${kx.btn} ${kx.primary}`} onClick={() => folderInput.current?.click()}><FolderInput size={15} /> Upload folder</button>
                   <button className={`${kx.btn} ${kx.ghost}`} onClick={() => fileInput.current?.click()}><Upload size={15} /> Upload files</button>
-                </div>
+                </div>}
               </div>
             ) : view === 'list' ? (
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm">
                   <thead className="text-[11px] uppercase tracking-wider text-[#6C789E]">
                     <tr className="border-b border-[#1A2240]">
-                      <th className="w-10 px-3 py-2.5"><button aria-label={allSelected ? 'Clear selection' : 'Select all'} onClick={() => setSelected(allSelected ? new Set() : new Set(allIds))} className="text-[#9AA6C9] hover:text-white">{allSelected ? <CheckSquare size={16} /> : <Square size={16} />}</button></th>
+                      <th className="w-10 px-3 py-2.5">{!readOnly && <button aria-label={allSelected ? 'Clear selection' : 'Select all'} onClick={() => setSelected(allSelected ? new Set() : new Set(allIds))} className="text-[#9AA6C9] hover:text-white">{allSelected ? <CheckSquare size={16} /> : <Square size={16} />}</button>}</th>
                       <th className="px-2 py-2.5 font-semibold">Name</th>
                       <th className="hidden sm:table-cell w-24 px-2 py-2.5 text-right font-semibold">Size</th>
                       <th className="hidden md:table-cell w-44 px-2 py-2.5 font-semibold">Modified</th>
@@ -393,23 +399,25 @@ export default function KnowledgeExplorer({ notify }: { notify: Notify }) {
                       const c = countOf.get(d.id);
                       return (
                         <tr key={d.id} className={`group cursor-pointer hover:bg-white/[0.03] ${selected.has(d.id) ? 'bg-[#3FA7E0]/[0.07]' : ''}`} onDoubleClick={() => open(d.id)}>
-                          <td className="px-3 py-2.5"><Check checked={selected.has(d.id)} onChange={() => toggle(d.id)} label={d.name} /></td>
+                          <td className="px-3 py-2.5">{readOnly ? <span className="block w-4" /> : <Check checked={selected.has(d.id)} onChange={() => toggle(d.id)} label={d.name} />}</td>
                           <td className="max-w-0 px-2 py-2.5"><button className="flex w-full min-w-0 items-center gap-2.5 text-left font-medium text-[#E8EAF2] hover:text-white" onClick={() => open(d.id)}><FileIcon folder /><span className="truncate">{d.name}</span></button></td>
                           <td className="hidden sm:table-cell px-2 py-2.5 text-right text-xs text-[#7C8CB8] tabular-nums">{c ? `${c.files} file${c.files === 1 ? '' : 's'}` : ''}</td>
                           <td className="hidden md:table-cell px-2 py-2.5 text-xs text-[#7C8CB8]">{fmtDate(d.updatedAt)}</td>
                           <td className="hidden sm:table-cell px-2 py-2.5" />
                           <td className="px-2 py-2.5"><RowMenu items={[
                             { label: 'Open', icon: <FolderOpen size={14} />, run: () => open(d.id) },
-                            { label: 'Rename', icon: <Pencil size={14} />, run: () => rename({ kind: 'folder', item: d }) },
-                            { label: 'Move to…', icon: <FolderInput size={14} />, run: () => move([{ kind: 'folder', item: d }]) },
-                            { label: 'Delete', icon: <Trash2 size={14} />, run: () => remove([{ kind: 'folder', item: d }]), danger: true },
+                            ...(readOnly ? [] : [
+                              { label: 'Rename', icon: <Pencil size={14} />, run: () => rename({ kind: 'folder', item: d }) },
+                              { label: 'Move to…', icon: <FolderInput size={14} />, run: () => move([{ kind: 'folder', item: d }]) },
+                              { label: 'Delete', icon: <Trash2 size={14} />, run: () => remove([{ kind: 'folder', item: d }]), danger: true },
+                            ]),
                           ]} /></td>
                         </tr>
                       );
                     })}
                     {files.map((f) => (
                       <tr key={f.id} className={`group cursor-pointer hover:bg-white/[0.03] ${selected.has(f.id) ? 'bg-[#3FA7E0]/[0.07]' : ''}`} onDoubleClick={() => setPreview(f)}>
-                        <td className="px-3 py-2.5"><Check checked={selected.has(f.id)} onChange={() => toggle(f.id)} label={f.name} /></td>
+                        <td className="px-3 py-2.5">{readOnly ? <span className="block w-4" /> : <Check checked={selected.has(f.id)} onChange={() => toggle(f.id)} label={f.name} />}</td>
                         <td className="max-w-0 px-2 py-2.5">
                           <button className="flex w-full min-w-0 items-center gap-2.5 text-left text-[#E1E6F5] hover:text-white" onClick={() => setPreview(f)} title={f.name}>
                             <FileIcon extension={f.extension} />
@@ -452,20 +460,22 @@ export default function KnowledgeExplorer({ notify }: { notify: Notify }) {
       </div>
 
       <UploadTray jobs={uploads} onDismiss={(id) => setUploads((u) => u.filter((j) => j.id !== id))} />
-      {preview && <FilePreview file={preview} onClose={() => setPreview(null)} onReindex={(f) => void reindex([f])} onExtracted={() => void refresh({ quiet: true })} />}
+      {preview && <FilePreview file={preview} readOnly={readOnly} onClose={() => setPreview(null)} onReindex={(f) => void reindex([f])} onExtracted={() => void refresh({ quiet: true })} />}
       {dialog}
     </div>
   );
 
   function fileMenu(f: RepoFile) {
-    return [
+    type Item = { label: string; icon: ReactNode; run: () => void; danger?: boolean };
+    return ([
       { label: 'Preview', icon: <Eye size={14} />, run: () => setPreview(f) },
       { label: 'Download', icon: <Download size={14} />, run: () => void knowledgeApi.download(f).catch((e) => notify(e.message, true)) },
+    ] as Item[]).concat(readOnly ? [] : [
       { label: 'Rename', icon: <Pencil size={14} />, run: () => rename({ kind: 'file', item: f }) },
       { label: 'Move to…', icon: <FolderInput size={14} />, run: () => move([{ kind: 'file', item: f }]) },
       { label: 'Re-index', icon: <RefreshCw size={14} />, run: () => void reindex([f]) },
       { label: 'Delete', icon: <Trash2 size={14} />, run: () => remove([{ kind: 'file', item: f }]), danger: true },
-    ];
+    ]);
   }
 }
 

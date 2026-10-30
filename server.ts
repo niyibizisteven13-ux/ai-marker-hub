@@ -41,7 +41,7 @@ import { analyticsRouter, assessmentRouter, documentsRouter, jobsRouter } from '
 import { examChat, startEducationRuntime } from './server/services/educationRuntime.js';
 import { examsRouter } from './server/routes/examRoutes.js';
 import { outputsRouter, sharedOutputsRouter } from './server/routes/outputRoutes.js';
-import { knowledgeAdminRouter, knowledgeSourcesRouter } from './server/routes/knowledgeRepositoryRoutes.js';
+import { curationViewRouter, knowledgeAdminRouter, knowledgeSourcesRouter } from './server/routes/knowledgeRepositoryRoutes.js';
 import { shutdownOcr } from './server/services/documents/ocr.js';
 import { agentTarget, fileJobQueue } from './server/services/AiService.js';
 import { planOutput } from './server/services/outputs/planner.js';
@@ -391,6 +391,7 @@ app.use('/api/forms', formRoutes);
 app.use('/api/files', createFileRouter(fileStore, { getUserId: (req) => (req as any).user?.id }));
 app.use('/api/admin/knowledge', requireAuth, requireRole('ADMIN'), knowledgeAdminRouter);
 app.use('/api/knowledge', requireAuth, knowledgeSourcesRouter);
+app.use('/api/curation', requireAuth, curationViewRouter);
 app.use('/api/admin', requireAuth, requireRole('ADMIN'), adminRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/ollama', requireAuth, ollamaRoutes);

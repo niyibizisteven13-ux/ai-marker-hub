@@ -72,6 +72,7 @@ const LoginModal = React.lazy(() => import('./components/LoginModal'));
 const UpgradeModal = React.lazy(() => import('./components/UpgradeModal'));
 const DynamicForm = React.lazy(() => import('./components/DynamicForm'));
 const AdminPage = React.lazy(() => import('./pages/AdminPage'));
+const CurationViewPage = React.lazy(() => import('./pages/CurationViewPage'));
 const OutputsLibrary = React.lazy(() => import('./components/OutputsLibrary'));
 const MarkPage = React.lazy(() => import('./components/MarkPage'));
 const MarkingDrawer = React.lazy(() => import('./components/ChatMarkingCard').then((m) => ({ default: m.MarkingDrawer })));
@@ -239,6 +240,8 @@ export default function App() {
   const [pendingMark, setPendingMark] = useState<import('./components/MarkPage').MarkRequest | null>(null);
   const [libraryTab, setLibraryTab] = useState<'mine' | 'library'>('mine');
   const [adminOpen, setAdminOpen] = useState<boolean>(() => window.location.pathname === '/admin');
+  // /admin/datasets: Datasets & Curations. Administrators get the full section; everyone else a view-only page.
+  const [curationOpen, setCurationOpen] = useState<boolean>(() => /^\/(admin\/)?datasets\/?$/.test(window.location.pathname));
   const [selectedProvider, setSelectedProvider] = useState<string>('gonkarouter');
   const retryPromptRef = React.useRef<{
     text: string;
@@ -335,6 +338,7 @@ export default function App() {
     const handlePopState = () => {
       if (window.location.pathname !== '/upgrade') setUpgradePageOpen(false);
       if (window.location.pathname !== '/admin') setAdminOpen(false);
+      if (!/^\/(admin\/)?datasets\/?$/.test(window.location.pathname)) setCurationOpen(false);
       if (window.location.pathname === '/signup') {
         setIsSignUpMode(true);
         setLoginModalOpen(true);
@@ -1626,6 +1630,15 @@ export default function App() {
         onBack={closeUpgradePage}
         onSuccess={() => { void finishUpgrade(); }}
       />
+    );
+  }
+
+  if (curationOpen && authStatus === 'authenticated') {
+    const leave = () => { setCurationOpen(false); window.history.replaceState({}, '', '/'); };
+    return (
+      <Suspense fallback={null}>
+        {authenticatedUser?.role === 'ADMIN' ? <AdminPage onBack={leave} initialTab="datasets" /> : <CurationViewPage onBack={leave} />}
+      </Suspense>
     );
   }
 

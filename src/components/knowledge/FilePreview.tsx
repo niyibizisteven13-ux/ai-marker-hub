@@ -9,7 +9,7 @@ import { FileIcon, StatusBadge, fmtDate, kx, useAuthedImage } from './ui';
  * sanitised preview data: HTML and Word documents go into a script-less sandboxed frame, images and PDF
  * pages are fetched with the bearer token.
  */
-export default function FilePreview({ file, onClose, onReindex, onExtracted }: { file: RepoFile; onClose: () => void; onReindex: (f: RepoFile) => void; onExtracted: () => void }) {
+export default function FilePreview({ file, onClose, onReindex, onExtracted, readOnly = false }: { file: RepoFile; onClose: () => void; onReindex: (f: RepoFile) => void; onExtracted: () => void; readOnly?: boolean }) {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -48,14 +48,14 @@ export default function FilePreview({ file, onClose, onReindex, onExtracted }: {
           </div>
           <button className="shrink-0 rounded-lg p-2 text-[#9AA6C9] hover:bg-white/5 hover:text-white sm:order-last" onClick={onClose} aria-label="Close preview"><X size={20} /></button>
           <div className="flex w-full gap-2 sm:w-auto sm:shrink-0">
-            <button className={`${kx.btn} ${kx.ghost} flex-1 sm:flex-none`} onClick={() => onReindex(f)} title="Index again"><RefreshCw size={15} /> Re-index</button>
+            {!readOnly && <button className={`${kx.btn} ${kx.ghost} flex-1 sm:flex-none`} onClick={() => onReindex(f)} title="Index again"><RefreshCw size={15} /> Re-index</button>}
             <button className={`${kx.btn} ${kx.ghost} flex-1 sm:flex-none`} onClick={() => void knowledgeApi.download(f)} title="Download"><Download size={15} /> Download</button>
           </div>
         </header>
         <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-5">
           {loading && !preview && <div className="flex h-60 items-center justify-center text-[#9AA6C9]"><Loader2 className="animate-spin" /></div>}
           {error && <p className="rounded-xl border border-[#E5586B]/30 bg-[#E5586B]/10 p-4 text-sm text-[#FF8798]">{error}</p>}
-          {preview && <Body preview={preview} loading={loading} load={load} busy={busy} onExtract={async () => {
+          {preview && <Body preview={preview} loading={loading} load={load} busy={busy} readOnly={readOnly} onExtract={async () => {
             setBusy(true);
             try { await knowledgeApi.extractArchive(file.id, file.directoryId); onExtracted(); onClose(); } catch (e) { setError(e instanceof Error ? e.message : 'Extraction failed.'); } finally { setBusy(false); }
           }} />}
@@ -77,7 +77,7 @@ function Pager({ label, onPrev, onNext, prevDisabled, nextDisabled }: { label: s
 
 const frameDoc = (html: string) => `<!doctype html><html><head><meta charset="utf-8"><style>body{font:15px/1.6 Inter,system-ui,sans-serif;color:#1d2433;margin:24px;max-width:780px}table{border-collapse:collapse}td,th{border:1px solid #d5dae6;padding:4px 8px}img{max-width:100%}</style></head><body>${html}</body></html>`;
 
-function Body({ preview: p, loading, load, onExtract, busy }: { preview: Preview; loading: boolean; load: (q?: { page?: number; sheet?: string; offset?: number }) => void; onExtract: () => void; busy: boolean }) {
+function Body({ preview: p, loading, load, onExtract, busy, readOnly }: { preview: Preview; loading: boolean; load: (q?: { page?: number; sheet?: string; offset?: number }) => void; onExtract: () => void; busy: boolean; readOnly: boolean }) {
   switch (p.kind) {
     case 'markdown':
       return <div className="rounded-xl border border-[#202945] bg-[#0E1426] p-5 text-[#E8EAF2]"><MarkdownRenderer content={p.text} /></div>;
@@ -151,9 +151,9 @@ function Body({ preview: p, loading, load, onExtract, busy }: { preview: Preview
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-[#B7C1DE]">{p.totalEntries} entries</p>
-            <button className={`${kx.btn} ${kx.primary}`} disabled={busy || p.entries.some((e) => e.problem)} onClick={onExtract}>
+            {!readOnly && <button className={`${kx.btn} ${kx.primary}`} disabled={busy || p.entries.some((e) => e.problem)} onClick={onExtract}>
               {busy ? <Loader2 size={15} className="animate-spin" /> : <FileArchive size={15} />} Extract into this folder
-            </button>
+            </button>}
           </div>
           <ul className="max-h-[65vh] divide-y divide-[#1A2240] overflow-auto rounded-xl border border-[#202945] text-[13px]">
             {p.entries.map((e) => (
