@@ -110,7 +110,7 @@ export function parseManifest(text: string): CandidateMapping[] {
 }
 
 export function createExamService(deps: ExamDeps) {
-  const concurrency = Math.max(1, Math.min(4, Math.floor(deps.candidateConcurrency || 2)));
+  const concurrency = Math.max(1, Math.min(8, Math.floor(deps.candidateConcurrency || 4)));
   const budget = deps.segmentBudgetMs ?? 8 * 60 * 1000;
   const maxCandidates = deps.maxCandidates ?? 100;
 
@@ -638,8 +638,12 @@ export function createExamService(deps: ExamDeps) {
     let queue = await pending();
     const total = (await load(userId, examId)).runs.find((x) => x.id === runId)!.submissionIds.length;
     let continued = false;
-    const worker = async () => {
+    // Scripts marked at the same time. When the provider says it is busy, one fewer runs from then on (never
+    // below one), so a big class slows down a little instead of failing scripts.
+    let allowed = Math.min(concurrency, queue.length || 1);
+    const worker = async (slot: number) => {
       while (queue.length && !ctx.signal.aborted) {
+        if (slot >= allowed) return;
         if (Date.now() - started > budget) { continued = true; return; }
         const id = queue.shift()!;
         for (let attempt = 1; ; attempt++) {
@@ -649,6 +653,7 @@ export function createExamService(deps: ExamDeps) {
           } catch (err) {
             const je = err instanceof JobError ? err : err instanceof ExamInputError ? new JobError(err.code, err.message) : null;
             if (ctx.signal.aborted) throw err;
+            if (je?.retryable && /BUSY|RATE|OVERLOAD|429/i.test(je.code) && allowed > 1) allowed--;
             if (je?.retryable && attempt < 3) { await sleep((deps.retryDelayMs ?? 4000) * attempt * (0.75 + Math.random() * 0.5), ctx.signal); continue; }
             // One candidate's failure never stops the batch.
             const failed = (await load(userId, examId)).submissions.find((s) => s.id === id);
@@ -661,7 +666,7 @@ export function createExamService(deps: ExamDeps) {
         await ctx.progress(`marked ${done} of ${total} scripts`, Math.round((90 * done) / Math.max(1, total)));
       }
     };
-    await Promise.all(Array.from({ length: Math.min(concurrency, queue.length || 1) }, worker));
+    await Promise.all(Array.from({ length: allowed }, (_, slot) => worker(slot)));
     if (ctx.signal.aborted) throw new JobError('CANCELLED', 'Marking was interrupted.', true);
     if (!runLive(await load(userId, examId), runId)) return { examId, runId, state: 'cancelled' };
     queue = await pending();

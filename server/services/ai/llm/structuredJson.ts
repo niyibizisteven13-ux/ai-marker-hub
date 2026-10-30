@@ -16,6 +16,8 @@ export interface StructuredRequest {
   model: string;
   system: string;
   prompt: string;
+  /** Text that is the same across many requests (e.g. the marking scheme). Sent first and cached, before images and the prompt. */
+  sharedPrefix?: string;
   /** JSON schema the output must match. Keep it simple (types, enums, required, additionalProperties: false). */
   schema: Record<string, unknown>;
   /** Images (data URLs) sent with the prompt, e.g. a scanned page. */
@@ -50,7 +52,13 @@ export async function generateStructured<T>(adapter: ProviderAdapter, req: Struc
       model: req.model,
       messages: [
         { role: 'system', content: `${req.system}\n\nRespond with a single JSON object that matches this JSON schema, and nothing else:\n${JSON.stringify(req.schema)}` },
-        { role: 'user', content: req.images?.length ? [...req.images.map((url) => ({ type: 'image_url' as const, image_url: { url } })), { type: 'text' as const, text: prompt }] : prompt },
+        { role: 'user', content: req.images?.length || req.sharedPrefix
+          ? [
+            ...(req.sharedPrefix ? [{ type: 'text' as const, text: req.sharedPrefix, cache: true }] : []),
+            ...(req.images ?? []).map((url) => ({ type: 'image_url' as const, image_url: { url } })),
+            { type: 'text' as const, text: prompt },
+          ]
+          : prompt },
       ],
       maxTokens: req.maxTokens ?? 16_000,
       responseSchema: req.schema,

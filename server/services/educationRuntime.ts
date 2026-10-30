@@ -89,7 +89,7 @@ export const examService = createExamService({
     const gate = await checkUsage(userId, { kind: 'marking' });
     if (!gate.allowed) throw new JobError('MARKING_LIMIT', gate.message || 'Marking allowance exceeded.');
   },
-  candidateConcurrency: num(process.env.EXAM_CANDIDATE_CONCURRENCY, 2),
+  candidateConcurrency: num(process.env.EXAM_CANDIDATE_CONCURRENCY, 4),
   segmentBudgetMs: num(process.env.EXAM_SEGMENT_BUDGET_MS, 8 * 60 * 1000),
   // Every marked script is charged in credits (at least 2) and counted in the AI cost the profit guard watches.
   onUsage: (userId, u) => { void recordUsage(userId, { kind: 'marking', model: u.model, inputTokens: u.input, outputTokens: u.output, minCredits: u.what === 'mark' ? 2 : 1 }); },

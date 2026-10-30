@@ -4,6 +4,11 @@ import type { ToolRegistry } from './tools/registry.js';
 import { ThinkFilter } from './util/thinkFilter.js';
 import { truncate } from './util/text.js';
 
+const envInt = (v: string | undefined, d: number, max: number) => {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 1 ? Math.min(max, Math.floor(n)) : d;
+};
+
 export interface RunOptions {
   system: string;
   /** Conversation so far (no system message). The last item is normally the new user message. */
@@ -46,7 +51,7 @@ export class AgentRuntime {
       retryDelayMs: cfg.retryDelayMs ?? 800,
       toolTimeoutMs: cfg.toolTimeoutMs ?? 90_000,
       maxToolResultChars: cfg.maxToolResultChars ?? 20_000,
-      maxParallelTools: cfg.maxParallelTools ?? 3,
+      maxParallelTools: cfg.maxParallelTools ?? envInt(process.env.AGENT_PARALLEL_TOOLS, 6, 16),
       providerLabel: cfg.providerLabel ?? adapter.name,
     };
   }
@@ -57,7 +62,8 @@ export class AgentRuntime {
     const attachments: AttachmentRef[] = [];
     const sources: KnowledgePassage[] = [];
     const usage = { input_tokens: 0, output_tokens: 0 };
-    const maxTurns = opts.maxTurns ?? 12;
+    // Big tasks (a report from several datasets, many files) need many steps; tools of one step run in parallel.
+    const maxTurns = opts.maxTurns ?? envInt(process.env.AGENT_MAX_TURNS, 24, 60);
     const defs = this.tools.definitions(opts.toolNames);
     let finalText = '';
 

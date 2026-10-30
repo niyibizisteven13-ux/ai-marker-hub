@@ -7,28 +7,32 @@ import type { IndependentOcr } from './verify.js';
  * only treats a confident Tesseract reading as evidence. Uses the bundled eng.traineddata (offline).
  */
 
-let worker: Promise<Worker> | null = null;
-let queue: Promise<unknown> = Promise.resolve();
+// A few workers so pages read in parallel are cross-checked in parallel too (each worker is one CPU thread).
+const POOL = Math.max(1, Math.min(8, Number(process.env.TESSERACT_WORKERS) || 2));
+const workers: Array<Promise<Worker> | null> = Array.from({ length: POOL }, () => null);
+const queues: Array<Promise<unknown>> = Array.from({ length: POOL }, () => Promise.resolve());
+const pending = new Array<number>(POOL).fill(0);
 
-function getWorker(): Promise<Worker> {
+function getWorker(i: number): Promise<Worker> {
   const dir = path.resolve(process.env.TESSERACT_DATA_DIR ?? process.cwd());
-  worker ??= createWorker(process.env.TESSERACT_LANG ?? 'eng', 1, { cachePath: dir, langPath: dir, gzip: false } as Parameters<typeof createWorker>[2]);
-  return worker;
+  workers[i] ??= createWorker(process.env.TESSERACT_LANG ?? 'eng', 1, { cachePath: dir, langPath: dir, gzip: false } as Parameters<typeof createWorker>[2]);
+  return workers[i]!;
 }
 
 export const tesseractOcr: IndependentOcr = (png) => {
-  // One recognition at a time per worker.
-  const run = queue.then(async () => {
-    const w = await getWorker();
+  // One recognition at a time per worker; a new reading goes to the least busy one.
+  const i = pending.indexOf(Math.min(...pending));
+  pending[i]++;
+  const run = queues[i].then(async () => {
+    const w = await getWorker(i);
     const { data } = await w.recognize(png);
     return { text: data.text ?? '', confidence: data.confidence ?? 0 };
-  });
-  queue = run.catch(() => {});
+  }).finally(() => { pending[i]--; });
+  queues[i] = run.catch(() => {});
   return run;
 };
 
 export async function shutdownOcr(): Promise<void> {
-  const w = worker;
-  worker = null;
-  if (w) await (await w).terminate().catch(() => {});
+  const all = workers.splice(0, workers.length, ...workers.map(() => null));
+  await Promise.all(all.map(async (w) => { if (w) await (await w).terminate().catch(() => {}); }));
 }

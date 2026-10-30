@@ -31,7 +31,27 @@ function useRunState(events: ExamEvent[]) {
   const lastStart = events.reduce((a, e, i) => (e.type === 'job_created' ? i : a), -1);
   const lastEnd = events.reduce((a, e, i) => (['job_completed', 'job_failed', 'job_cancelled'].includes(e.type) ? i : a), -1);
   const progress = [...events].reverse().find((e) => e.progress)?.progress ?? null;
-  return { active: lastStart >= 0 && lastStart > lastEnd, progress, ended: lastEnd >= 0 ? events[lastEnd] : null };
+  const active = lastStart >= 0 && lastStart > lastEnd;
+  const startedAt = lastStart >= 0 ? Date.parse(events[lastStart].at) : NaN;
+  const endedAt = lastEnd > lastStart && lastStart >= 0 ? Date.parse(events[lastEnd].at) : NaN;
+  return { active, progress, ended: lastEnd >= 0 ? events[lastEnd] : null, startedAt, endedAt };
+}
+
+const minutes = (ms: number) => (ms < 60_000 ? 'under a minute' : `${Math.round(ms / 60_000)} min`);
+
+/** Time left from the pace so far ("about 3 min left"), or how long the finished run took. */
+function useTiming(active: boolean, progress: { done: number; total: number } | null, startedAt: number, endedAt: number) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const t = window.setInterval(() => setNow(Date.now()), 15_000);
+    return () => window.clearInterval(t);
+  }, [active]);
+  if (!Number.isFinite(startedAt)) return null;
+  if (!active) return Number.isFinite(endedAt) && endedAt > startedAt ? `in ${minutes(endedAt - startedAt)}` : null;
+  if (!progress || progress.done < 1 || progress.done >= progress.total) return null;
+  const left = ((now - startedAt) / progress.done) * (progress.total - progress.done);
+  return `about ${minutes(left)} left`;
 }
 
 /** What the marker is doing right now, in words, plus the steps of the current script already done (ticked). */
@@ -65,7 +85,8 @@ export function PageThumb({ examId, submissionId, page = 1, large = false, alt }
 export default function ChatMarkingCard({ examId }: { examId: string }) {
   const { events, connected } = useExamActivity(examId);
   const marked = useMemo(() => markedFrom(events), [events]);
-  const { active, progress, ended } = useRunState(events);
+  const { active, progress, ended, startedAt, endedAt } = useRunState(events);
+  const timing = useTiming(active, progress, startedAt, endedAt);
   const shown = marked.slice(-6);
   const steps = useMemo(() => currentSteps(events), [events]);
 
@@ -74,7 +95,7 @@ export default function ChatMarkingCard({ examId }: { examId: string }) {
       <div className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-2">
         <span className={`h-2 w-2 rounded-full ${active ? 'animate-pulse bg-emerald-400' : connected ? 'bg-emerald-500/70' : 'bg-neutral-500'}`} aria-hidden />
         <span className="whitespace-nowrap text-[12.5px] font-semibold text-white">{active ? 'Marking in progress' : ended?.type === 'job_cancelled' ? 'Marking stopped' : marked.length ? 'Marking finished' : 'Marking'}</span>
-        {progress && <span className="whitespace-nowrap text-[11.5px] text-neutral-400">{progress.done}/{progress.total}<span className="hidden sm:inline"> marked</span></span>}
+        {progress && <span className="whitespace-nowrap text-[11.5px] text-neutral-400">{progress.done}/{progress.total}<span className="hidden sm:inline"> marked</span>{timing ? <span className="hidden sm:inline"> · {timing}</span> : null}</span>}
         <button type="button" onClick={() => openMarking(examId)} className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-[#D97757] px-2.5 py-1 text-[12px] font-semibold text-white hover:bg-[#c96a4c]">
           <PanelRightOpen size={13} aria-hidden /><span className="whitespace-nowrap"><span className="sm:hidden">Red pen</span><span className="hidden sm:inline">Open live marking</span></span>
         </button>

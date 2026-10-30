@@ -7,6 +7,7 @@ import { recognizePage, type Region } from './recognize.js';
 import { ocrLanguagesFromEnv, reviewThreshold, summarize, verifyPage, type IndependentOcr, type ReviewThreshold, type VerifiedElement } from './verify.js';
 import { mergeTileReadings, planTiles, shouldTile, tileToPage, type TileElement, type TilingMode } from './tiling.js';
 import { checkMath, collectAssignments } from './mathcheck.js';
+import { mapPool, pageConcurrency, visionCalls } from '../../utils/concurrency.js';
 
 /**
  * Scan → page images → preprocessing → layout + handwriting recognition (vision model) →
@@ -90,24 +91,48 @@ export async function processDocument(data: Buffer, filename: string, deps: Pipe
   let usedModel = false;
   const cropSources = new Map<number, Buffer>();
 
-  for (const [i, sp] of src.entries()) {
+  // Pages are read in parallel (DOC_PAGE_CONCURRENCY), and on each page the full-page reading and the close-up
+  // tiles run at the same time; every vision call goes through the shared process-wide limiter.
+  const vision = <T>(fn: () => Promise<T>) => visionCalls.run(fn);
+  let done = 0;
+  const step = (page: number, stage: string, extra: number) => opts.progress?.(`page ${page} of ${src.length}: ${stage}`, Math.min(95, Math.round((done / src.length) * 90) + extra));
+
+  const processed = await mapPool(src, pageConcurrency(), async (sp): Promise<ProcessedPage> => {
     if (opts.signal?.aborted) throw opts.signal.reason;
-    await opts.progress?.(`page ${sp.page} of ${src.length}: preprocessing`, Math.round((i / src.length) * 90) + 5);
+    await step(sp.page, 'preprocessing', 5);
     // Keep up to 4000 px so tiles can read small handwriting at (near) native resolution.
     const pre = await preprocessPage(sp.image, { maxSide: 4000 });
 
     if (sp.textLayer.length >= 200 && !opts.forceRecognition) {
       limitations.add('Pages with a PDF text layer were read from that layer, not recognised; handwritten notes added on top of typed pages are not captured unless recognition is forced.');
-      pages.push({
+      done++;
+      return {
         page: sp.page, source: 'pdf_text_layer', width: pre.width, height: pre.height, deskewDegrees: 0, transforms: ['Used the PDF text layer.'],
         quality: pre.quality, elements: textLayerElements(sp.textLayer), readingOrder: [], languages: [], notes: [], needsReview: false,
-      });
-      continue;
+      };
     }
 
-    await opts.progress?.(`page ${sp.page} of ${src.length}: recognising`, Math.round((i / src.length) * 90) + 10);
+    await step(sp.page, 'recognising', 10);
     const modelImage = await sharp(pre.processed).resize({ width: MODEL_MAX_SIDE, height: MODEL_MAX_SIDE, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 90 }).toBuffer();
-    const r = await recognizePage(deps.adapter, modelImage, 'image/jpeg', sp.page, { model: deps.model, fallbackModel: deps.fallbackModel, languageHint: opts.languageHint, signal: opts.signal });
+    const full = vision(() => recognizePage(deps.adapter, modelImage, 'image/jpeg', sp.page, { model: deps.model, fallbackModel: deps.fallbackModel, languageHint: opts.languageHint, signal: opts.signal }));
+    const tiles = shouldTile(pre.width, pre.height, tilingMode, MODEL_MAX_SIDE)
+      ? planTiles(pre.width, pre.height, { maxTiles: opts.maxTilesPerPage ?? (Number(process.env.DOC_MAX_TILES_PER_PAGE) || 4) })
+      : [];
+    const closeUps = Promise.all(tiles.map(async (t) => {
+      const crop = await sharp(pre.processed).extract({ left: t.x, top: t.y, width: t.width, height: t.height })
+        .resize({ width: MODEL_MAX_SIDE, height: MODEL_MAX_SIDE, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 92 }).toBuffer();
+      if (opts.signal?.aborted) throw opts.signal.reason;
+      const tr = await vision(() => recognizePage(deps.adapter, crop, 'image/jpeg', sp.page, {
+        model: deps.model, fallbackModel: deps.fallbackModel, languageHint: opts.languageHint, signal: opts.signal,
+        context: `This image is a close-up tile (row ${t.row + 1}, column ${t.col + 1}) of the page. Coordinates are relative to this tile. Text cut off at the tile edge: transcribe only what is visible and mark it partly_unclear.`,
+      }));
+      return { t, tr };
+    }));
+    // Both settle before either error is thrown, so no reading is left running unobserved.
+    const [fullRes, tileRes] = await Promise.allSettled([full, closeUps]);
+    if (fullRes.status === 'rejected') throw fullRes.reason;
+    if (tileRes.status === 'rejected') throw tileRes.reason;
+    const r = fullRes.value;
     usedModel = true;
     usage.input += r.usage.input;
     usage.output += r.usage.output;
@@ -116,18 +141,9 @@ export async function processDocument(data: Buffer, filename: string, deps: Pipe
     let alternates: Record<string, Array<{ source: 'full_page' | 'tile'; text: string }>> = {};
     let tiling: ProcessedPage['tiling'];
 
-    if (shouldTile(pre.width, pre.height, tilingMode, MODEL_MAX_SIDE)) {
-      const tiles = planTiles(pre.width, pre.height, { maxTiles: opts.maxTilesPerPage ?? (Number(process.env.DOC_MAX_TILES_PER_PAGE) || 4) });
+    if (tiles.length) {
       const tileEls: TileElement[] = [];
-      for (const t of tiles) {
-        if (opts.signal?.aborted) throw opts.signal.reason;
-        await opts.progress?.(`page ${sp.page} of ${src.length}: close-up ${t.index + 1} of ${tiles.length}`, Math.round((i / src.length) * 90) + 12);
-        const crop = await sharp(pre.processed).extract({ left: t.x, top: t.y, width: t.width, height: t.height })
-          .resize({ width: MODEL_MAX_SIDE, height: MODEL_MAX_SIDE, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 92 }).toBuffer();
-        const tr = await recognizePage(deps.adapter, crop, 'image/jpeg', sp.page, {
-          model: deps.model, fallbackModel: deps.fallbackModel, languageHint: opts.languageHint, signal: opts.signal,
-          context: `This image is a close-up tile (row ${t.row + 1}, column ${t.col + 1}) of the page. Coordinates are relative to this tile. Text cut off at the tile edge: transcribe only what is visible and mark it partly_unclear.`,
-        });
+      for (const { t, tr } of tileRes.value) {
         usage.input += tr.usage.input;
         usage.output += tr.usage.output;
         for (const e of tr.page.elements) tileEls.push({ tile: t, element: { ...e, region: tileToPage(e.region, t, pre.width, pre.height) } });
@@ -139,7 +155,7 @@ export async function processDocument(data: Buffer, filename: string, deps: Pipe
       tiling = merged.stats;
     }
 
-    await opts.progress?.(`page ${sp.page} of ${src.length}: checking`, Math.round((i / src.length) * 90) + 15);
+    await step(sp.page, 'checking', 15);
     // Regions refer to the image the model saw (preprocessed, deskewed), so crops come from that image.
     const cropper = (region: Region) => cropRegion(pre.processed, region);
     const v = await verifyPage(recognized, {
@@ -147,13 +163,15 @@ export async function processDocument(data: Buffer, filename: string, deps: Pipe
       pageQualityWarnings: pre.quality.warnings, threshold, preSignals, alternates, signal: opts.signal,
     });
     const quality = pre.quality;
-    pages.push({
+    cropSources.set(sp.page, pre.processed);
+    done++;
+    return {
       page: sp.page, source: 'recognition', width: pre.width, height: pre.height, deskewDegrees: pre.deskewDegrees, transforms: pre.transforms, quality,
       elements: v.elements.map((e) => ({ ...e, id: `p${sp.page}-${e.id}` })), readingOrder: v.readingOrder.map((id) => `p${sp.page}-${id}`),
       languages: r.page.languages, notes: [...r.page.notes, ...v.pageFlags, ...quality.warnings], needsReview: false, ...(tiling ? { tiling } : {}),
-    });
-    cropSources.set(sp.page, pre.processed);
-  }
+    };
+  });
+  pages.push(...processed);
 
   // Arithmetic consistency across the whole document (algebraic check, separate from transcription checks).
   const all = pages.flatMap((p) => p.elements);
