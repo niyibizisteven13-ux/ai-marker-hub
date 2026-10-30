@@ -6,7 +6,7 @@
 
 **Making published statistics accessible, interactive and ready for AI, without downloading a single file.**
 
-[Live app: www.bwenge.space](https://www.bwenge.space) · [Demo video](https://youtu.be/n24wdixVfFU) · [Telegram bot](https://t.me/Bwengebot) · [Documentation](docs/) · [Script](server.ts) · [Datasets & Curations](https://www.bwenge.space/admin/datasets)
+[Live app: www.bwenge.space](https://www.bwenge.space) · [Demo video](https://youtu.be/2hN1yimqRmg) · [Telegram bot](https://t.me/Bwengebot) · [Documentation](docs/) · [Script](server.ts) · [Datasets & Curations](https://www.bwenge.space/admin/datasets)
 
 *Submission to the NISR 2026 Big Data Hackathon*
 
@@ -16,13 +16,13 @@
 
 ## Demo video
 
-[![Bwenge.space: NISR Big Data Hackathon demo (click to watch on YouTube)](https://img.youtube.com/vi/n24wdixVfFU/maxresdefault.jpg)](https://youtu.be/n24wdixVfFU)
+[![Bwenge.space: NISR Big Data Hackathon demo (click to watch on YouTube)](https://img.youtube.com/vi/2hN1yimqRmg/maxresdefault.jpg)](https://youtu.be/2hN1yimqRmg)
 
-**Watch:** https://youtu.be/n24wdixVfFU (under 3 minutes, screen recording of the web app)
+**Watch:** https://youtu.be/2hN1yimqRmg (under 3 minutes, screen recording of the web app)
 
 ## Demo script (video walkthrough)
 
-What the [demo video](https://youtu.be/n24wdixVfFU) shows, scene by scene.
+What the [demo video](https://youtu.be/2hN1yimqRmg) shows, scene by scene.
 
 ### Scene 1: The challenge (0:00–0:30)
 
@@ -141,7 +141,7 @@ Users can also upload their own CSV or Excel files and analyse them the same way
 | Login for judges | Sign in with Google, or with any email address (a one-time code is sent). No password or sample account is needed. |
 | README: data used, what it communicates, how to interact | This file: [Data](#data), [What it communicates](#what-it-communicates), [How to use it](#how-to-use-it) |
 | Script(s) with the code, runs on any machine | [`server.ts`](server.ts), [`server/`](server/), [`src/`](src/) and [Run it](#run-it) |
-| Demo video (3 minutes maximum) | [YouTube](https://youtu.be/n24wdixVfFU) and [`demo/`](demo/) |
+| Demo video (3 minutes maximum) | [YouTube](https://youtu.be/2hN1yimqRmg) and [`demo/`](demo/) |
 | Datasets & Curations (view only) | **https://www.bwenge.space/admin/datasets**: sign in, then browse, search and preview the curated NISR datasets. Judges see only this section, read-only; every other admin section stays closed. |
 | Data and a link to the data | [`data/`](data/) and [Data](#data); the datasets are too large for GitHub, so links are given |
 | Eligibility documents (both members) | [`student_cards/`](student_cards/) |
