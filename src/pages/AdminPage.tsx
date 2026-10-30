@@ -196,8 +196,8 @@ function displayFeedbackReasons(value: string) {
 }
 
 /* ───────────── Main Admin Component ───────────── */
-export default function AdminPage({ onBack }: { onBack: () => void }) {
-  const [tab, setTab] = useState<TabId>('overview');
+export default function AdminPage({ onBack, initialTab = 'overview' }: { onBack: () => void; initialTab?: TabId }) {
+  const [tab, setTab] = useState<TabId>(initialTab);
   const [datasetView, setDatasetView] = useState<'repositories' | 'curations'>('repositories');
   const [env, setEnv] = useState<Env>('production');
   const [drawer, setDrawer] = useState(false);

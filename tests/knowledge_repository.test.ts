@@ -438,3 +438,49 @@ test('storage: streamed writes hash correctly, ranges read only what is asked, q
   assert.deepEqual(r.results.map((x) => x.status), ['created', 'rejected']);
   assert.match(r.results[1].reason!, /quota/i);
 });
+
+test('view-only Datasets & Curations: any user sees published datasets read-only, never unpublished ones or AI-off folders', async () => {
+  const admin = `admin-${randomUUID()}`, judge = `judge-${randomUUID()}`;
+  const pub = await svc.createRepository(admin, { name: 'NISR microdata' });
+  const priv = await svc.createRepository(admin, { name: 'Drafts' });
+  await svc.ingest(admin, pub.id, { items: await items([['LFS 2023/ddi.xml', '<codeBook><stdyDscr>Labour Force Survey 2023</stdyDscr></codeBook>'], ['LFS 2023/notes.txt', 'district unemployment notes'], ['internal/review.txt', 'not for publication']]) });
+  await svc.ingest(admin, priv.id, { items: await items([['draft.txt', 'unpublished draft']]) });
+  await settle(pub.id, admin);
+  await settle(priv.id, admin);
+  await svc.updateRepository(admin, pub.id, { settings: { assistant: true } });
+  // Published datasets are shared state (other test files read the same store): always clean up.
+  try {
+  const internal = (await svc.tree(admin, pub.id)).directories.find((d: any) => d.name === 'internal')!;
+  await svc.updateDirectory(admin, internal.id, { aiEnabled: false });
+
+  const repos = (await svc.viewRepositories(judge)).filter((r: any) => [pub.id, priv.id].includes(r.id));
+  assert.deepEqual(repos.map((r: any) => r.name), ['NISR microdata'], 'only published datasets are listed');
+  assert.equal(repos[0].statistics.files, 2, 'files in AI-off folders are not counted');
+  const tree = await svc.tree(judge, pub.id, 'view');
+  assert.deepEqual(tree.directories.map((d: any) => d.name), ['LFS 2023']);
+  const top = await svc.contents(judge, pub.id, null, {}, 'view');
+  assert.deepEqual(top.folders.map((d: any) => d.name), ['LFS 2023']);
+  const xml = await fileByPath(pub.id, 'LFS 2023/ddi.xml');
+  assert.ok((await svc.preview(judge, xml.id, {}, 'view')).file, 'files can be previewed');
+  assert.ok((await svc.openDownload(judge, xml.id, undefined, 'view')).file, 'and downloaded');
+  const hiddenFile = await fileByPath(pub.id, 'internal/review.txt');
+  await assert.rejects(svc.preview(judge, hiddenFile.id, {}, 'view'), /not found/i);
+  await assert.rejects(svc.contents(judge, pub.id, internal.id, {}, 'view'), /not found/i);
+  const found = await svc.search(judge, pub.id, { query: 'review', scope: 'names' }, 'view');
+  assert.equal(found.files.length, 0, 'search never returns hidden files');
+  await assert.rejects(svc.tree(judge, priv.id, 'view'), /not found/i, 'unpublished datasets stay private');
+  // View mode never grants management: the admin API calls still refuse the judge.
+  for (const fn of [() => svc.tree(judge, pub.id), () => svc.deleteFile(judge, xml.id), () => svc.updateRepository(judge, pub.id, { name: 'x' }), () => svc.reindexRepository(judge, pub.id)]) {
+    await assert.rejects(fn(), /not found/i);
+  }
+  } finally {
+    await svc.deleteRepository(admin, pub.id).catch(() => undefined);
+    await svc.deleteRepository(admin, priv.id).catch(() => undefined);
+  }
+});
+
+test('view-only Datasets & Curations router exposes reads only', async () => {
+  const { curationViewRouter } = await import('../server/routes/knowledgeRepositoryRoutes.js');
+  const methods = new Set((curationViewRouter as any).stack.flatMap((l: any) => Object.keys(l.route?.methods ?? {})));
+  assert.deepEqual([...methods], ['get']);
+});

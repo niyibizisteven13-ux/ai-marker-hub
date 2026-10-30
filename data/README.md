@@ -7,6 +7,10 @@ Bwenge.space uses public datasets and reports from the **National Institute of S
 | NISR microdata portal | https://microdata.statistics.gov.rw/index.php/catalog |
 | NISR publications and statistics | https://www.statistics.gov.rw |
 
+All datasets come from the NISR microdata portal, as published by NISR. Their files and XML metadata (`.xml`) are
+indexed on the platform and used by Bwenge AI for every user. They can be inspected read-only at
+https://www.bwenge.space/admin/datasets.
+
 The files are large, so they are **not stored in this repository**. They are downloaded from the links above and
 uploaded to the platform (admin dataset repositories), where every file is indexed and, once published, offered to
 all users in the **Public library** and to the AI. Answers cite the file, page or sheet they came from.

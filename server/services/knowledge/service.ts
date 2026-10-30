@@ -81,17 +81,38 @@ export function createKnowledgeService(deps: KnowledgeDeps) {
   }
   const canAccess = (repo: any, userId: string, orgs: string[]) => repo.userId === userId || (!!repo.organizationId && orgs.includes(repo.organizationId));
 
-  /** Loads a repository the user may manage (owner or member of its organisation); 404 otherwise. */
-  async function repoFor(userId: string, id: string) {
+  /**
+   * 'manage': the owner or a member of its organisation (the admin Datasets & Curations section).
+   * 'view': read-only Datasets & Curations for any signed-in user: published repositories too, and in that mode
+   * folders and files switched off for AI are left out, exactly as in the Public library.
+   */
+  type Mode = 'manage' | 'view';
+
+  /** Loads a repository the user may manage (or, in view mode, see); 404 otherwise. */
+  async function repoFor(userId: string, id: string, mode: Mode = 'manage') {
     const repo = typeof id === 'string' ? await db.knowledgeRepository.findUnique({ where: { id } }) : null;
-    if (!repo || !canAccess(repo, userId, await orgIdsOf(userId))) throw new KnowledgeError('NOT_FOUND', 'Repository not found.', 404);
+    if (!repo || !(canAccess(repo, userId, await orgIdsOf(userId)) || (mode === 'view' && isPublished(repo)))) throw new KnowledgeError('NOT_FOUND', 'Repository not found.', 404);
     return repo;
   }
-  async function fileFor(userId: string, id: string) {
+  async function fileFor(userId: string, id: string, mode: Mode = 'manage') {
     const file = typeof id === 'string' ? await db.repositoryFile.findUnique({ where: { id } }) : null;
     if (!file) throw new KnowledgeError('NOT_FOUND', 'File not found.', 404);
-    const repo = await repoFor(userId, file.repositoryId).catch(() => { throw new KnowledgeError('NOT_FOUND', 'File not found.', 404); });
+    const repo = await repoFor(userId, file.repositoryId, mode).catch(() => { throw new KnowledgeError('NOT_FOUND', 'File not found.', 404); });
+    if (mode === 'view' && !(await aiEnabledChain(file))) throw new KnowledgeError('NOT_FOUND', 'File not found.', 404);
     return { file, repo };
+  }
+  /** In view mode, what stays visible: folders not switched off (themselves or above) and their files. */
+  async function visibility(repoId: string, mode: Mode) {
+    const hidden = mode === 'view' ? await hiddenFolders(repoId) : new Set<string>();
+    return {
+      dir: (d: any) => !hidden.has(d.id),
+      file: (f: any) => mode !== 'view' || (f.aiEnabled !== false && !(f.directoryId && hidden.has(f.directoryId))),
+    };
+  }
+  /** Repositories for the read-only view: published ones, plus the user's own or organisation's. */
+  async function viewRepositories(userId: string) {
+    const repos = await assistantRepositories(userId);
+    return Promise.all(repos.map(async (r: any) => ({ id: r.id, name: r.name, description: r.description ?? null, settings: r.settings, createdAt: r.createdAt, updatedAt: r.updatedAt, statistics: await statistics(r, undefined, 'view') })));
   }
   async function dirFor(userId: string, id: string) {
     const dir = typeof id === 'string' ? await db.repositoryDirectory.findUnique({ where: { id } }) : null;
@@ -245,10 +266,11 @@ export function createKnowledgeService(deps: KnowledgeDeps) {
   }
 
   // ── Browsing ────────────────────────────────────────────────────────────
-  async function tree(userId: string, repoId: string) {
-    const repo = await repoFor(userId, repoId);
-    const dirs = await db.repositoryDirectory.findMany({ where: { repositoryId: repo.id }, orderBy: { path: 'asc' } });
-    const files = await db.repositoryFile.findMany({ where: { repositoryId: repo.id }, select: { directoryId: true, sizeBytes: true } });
+  async function tree(userId: string, repoId: string, mode: Mode = 'manage') {
+    const repo = await repoFor(userId, repoId, mode);
+    const see = await visibility(repo.id, mode);
+    const dirs = (await db.repositoryDirectory.findMany({ where: { repositoryId: repo.id }, orderBy: { path: 'asc' } })).filter(see.dir);
+    const files = (await db.repositoryFile.findMany({ where: { repositoryId: repo.id }, select: { directoryId: true, sizeBytes: true, aiEnabled: true } })).filter(see.file);
     const counts = new Map<string | null, { files: number; bytes: number }>();
     for (const f of files) { const c = counts.get(f.directoryId ?? null) ?? { files: 0, bytes: 0 }; c.files++; c.bytes += f.sizeBytes; counts.set(f.directoryId ?? null, c); }
     return {
@@ -260,9 +282,11 @@ export function createKnowledgeService(deps: KnowledgeDeps) {
 
   const SORT: Record<string, string> = { name: 'name', type: 'extension', size: 'sizeBytes', modified: 'updatedAt', status: 'indexStatus' };
 
-  async function contents(userId: string, repoId: string, directoryId: string | null, q: { sort?: string; order?: 'asc' | 'desc'; limit?: number; offset?: number; extension?: string; status?: string } = {}) {
-    const repo = await repoFor(userId, repoId);
+  async function contents(userId: string, repoId: string, directoryId: string | null, q: { sort?: string; order?: 'asc' | 'desc'; limit?: number; offset?: number; extension?: string; status?: string } = {}, mode: Mode = 'manage') {
+    const repo = await repoFor(userId, repoId, mode);
     const dir = await dirInRepo(repo, directoryId);
+    const see = await visibility(repo.id, mode);
+    if (dir && !see.dir(dir)) throw new KnowledgeError('NOT_FOUND', 'Folder not found in this repository.', 404);
     const where: any = { repositoryId: repo.id, directoryId: dir?.id ?? null };
     if (q.extension) where.extension = q.extension.toLowerCase().replace(/^\./, '');
     if (q.status) where.indexStatus = q.status;
@@ -283,7 +307,8 @@ export function createKnowledgeService(deps: KnowledgeDeps) {
         breadcrumbs.push({ id: d?.id ?? null, name: segs[i - 1], path: p });
       }
     }
-    return { directory: dir ? publicDir(dir) : null, breadcrumbs, folders: folders.map(publicDir), files: files.map(publicFile), total, offset, limit, hasMore: offset + files.length < total };
+    const shown = files.filter(see.file);
+    return { directory: dir ? publicDir(dir) : null, breadcrumbs, folders: folders.filter(see.dir).map(publicDir), files: shown.map(publicFile), total: total - (files.length - shown.length), offset, limit, hasMore: offset + files.length < total };
   }
 
   const publicDir = (d: any) => ({ id: d.id, name: d.name, path: d.path, parentId: d.parentId, aiEnabled: d.aiEnabled, knowledgeBaseId: d.knowledgeBaseId, createdAt: d.createdAt, updatedAt: d.updatedAt });
@@ -294,8 +319,21 @@ export function createKnowledgeService(deps: KnowledgeDeps) {
     indexing: { status: f.indexStatus, error: f.indexError, indexedAt: f.indexedAt, indexedHash: f.indexedHash, indexedVersion: f.indexedVersion, chunks: f.chunkCount, duplicateOf: f.duplicateOfId, jobId: f.indexJobId, searchable: ['indexed', 'pending_embeddings', 'partial_failure', 'duplicate'].includes(f.indexStatus) },
   });
 
-  async function statistics(repoOrUserId: any, maybeRepoId?: string) {
-    const repo = typeof repoOrUserId === 'string' ? await repoFor(repoOrUserId, maybeRepoId!) : repoOrUserId;
+  async function statistics(repoOrUserId: any, maybeRepoId?: string, mode: Mode = 'manage') {
+    const repo = typeof repoOrUserId === 'string' ? await repoFor(repoOrUserId, maybeRepoId!, mode) : repoOrUserId;
+    if (mode === 'view') {
+      // Counted over what the view shows (folders and files switched off for AI are not counted).
+      const see = await visibility(repo.id, mode);
+      const files = (await db.repositoryFile.findMany({ where: { repositoryId: repo.id }, select: { directoryId: true, sizeBytes: true, aiEnabled: true, indexStatus: true } })).filter(see.file);
+      const folders = (await db.repositoryDirectory.findMany({ where: { repositoryId: repo.id }, select: { id: true } })).filter(see.dir).length;
+      const byStatus: Record<string, number> = {};
+      for (const f of files) byStatus[f.indexStatus] = (byStatus[f.indexStatus] ?? 0) + 1;
+      return {
+        files: files.length, folders, totalBytes: files.reduce((a: number, f: any) => a + (f.sizeBytes ?? 0), 0), quotaBytes: repo.quotaBytes ?? defaultQuota, byStatus,
+        awaitingIndexing: (byStatus.uploaded ?? 0) + (byStatus.queued ?? 0), indexing: ['extracting', 'chunking', 'embedding', 'indexing'].reduce((a, s) => a + (byStatus[s] ?? 0), 0),
+        indexed: byStatus.indexed ?? 0, failed: (byStatus.failed ?? 0) + (byStatus.partial_failure ?? 0), embeddingsAvailable: deps.embedder.isAvailable(),
+      };
+    }
     const where = { repositoryId: repo.id };
     const [files, folders, sum] = await Promise.all([db.repositoryFile.count({ where }), db.repositoryDirectory.count({ where }), db.repositoryFile.aggregate({ where, _sum: { sizeBytes: true } })]);
     const byStatus: Record<string, number> = {};
@@ -405,8 +443,8 @@ export function createKnowledgeService(deps: KnowledgeDeps) {
   }
 
   // ── File operations ─────────────────────────────────────────────────────
-  async function getFile(userId: string, id: string) {
-    const { file, repo } = await fileFor(userId, id);
+  async function getFile(userId: string, id: string, mode: Mode = 'manage') {
+    const { file, repo } = await fileFor(userId, id, mode);
     return { ...publicFile(file), repository: { id: repo.id, name: repo.name } };
   }
 
@@ -502,8 +540,8 @@ export function createKnowledgeService(deps: KnowledgeDeps) {
     return { results, indexJobId: jobId };
   }
 
-  async function openDownload(userId: string, id: string, range?: { start: number; end: number }) {
-    const { file } = await fileFor(userId, id);
+  async function openDownload(userId: string, id: string, range?: { start: number; end: number }, mode: Mode = 'manage') {
+    const { file } = await fileFor(userId, id, mode);
     const { stream } = await deps.fileStore.openStream(file.storageKey, file.storageOwnerId, range);
     return { file, stream };
   }
@@ -524,8 +562,8 @@ export function createKnowledgeService(deps: KnowledgeDeps) {
    * Bounded, read-only preview. Text is paged by byte offset; PDFs by page; spreadsheets by sheet and row
    * window; HTML is sanitised and returned as data, never rendered or executed by the server.
    */
-  async function preview(userId: string, id: string, q: { page?: number; sheet?: string; offset?: number; limit?: number } = {}) {
-    const { file } = await fileFor(userId, id);
+  async function preview(userId: string, id: string, q: { page?: number; sheet?: string; offset?: number; limit?: number } = {}, mode: Mode = 'manage') {
+    const { file } = await fileFor(userId, id, mode);
     const ext = file.extension;
     const base = { file: publicFile(file) };
     const limit = Math.min(Math.max(1, q.limit ?? 64 * 1024), 512 * 1024);
@@ -600,8 +638,8 @@ export function createKnowledgeService(deps: KnowledgeDeps) {
   }
 
   /** PNG rendering of a PDF page or a resized image (never the raw upload). */
-  async function renderImage(userId: string, id: string, page = 1): Promise<Buffer> {
-    const { file } = await fileFor(userId, id);
+  async function renderImage(userId: string, id: string, page = 1, mode: Mode = 'manage'): Promise<Buffer> {
+    const { file } = await fileFor(userId, id, mode);
     if (file.sizeBytes > env('KNOWLEDGE_PREVIEW_MAX_BYTES', 50 * 1024 * 1024)) throw new KnowledgeError('TOO_LARGE', 'The file is too large to render.', 413);
     return withTemp(file, async (p) => {
       if (file.extension === 'pdf') {
@@ -693,8 +731,9 @@ export function createKnowledgeService(deps: KnowledgeDeps) {
   }
 
   // ── Search ──────────────────────────────────────────────────────────────
-  async function search(userId: string, repoId: string, q: { query: string; scope?: 'all' | 'names' | 'content'; limit?: number; directoryId?: string | null }) {
-    const repo = await repoFor(userId, repoId);
+  async function search(userId: string, repoId: string, q: { query: string; scope?: 'all' | 'names' | 'content'; limit?: number; directoryId?: string | null }, mode: Mode = 'manage') {
+    const repo = await repoFor(userId, repoId, mode);
+    const see = await visibility(repo.id, mode);
     const query = q.query.trim().slice(0, 500);
     if (!query) throw new KnowledgeError('INVALID_REQUEST', 'Enter something to search for.', 400);
     const limit = Math.min(Math.max(1, q.limit ?? 20), 100);
@@ -703,11 +742,11 @@ export function createKnowledgeService(deps: KnowledgeDeps) {
     const under = dir ? { path: { startsWith: `${dir.path}/` } } : {};
     const out: any = { query };
     if (scope !== 'content') {
-      out.folders = (await db.repositoryDirectory.findMany({ where: { repositoryId: repo.id, ...under, path: { contains: query, mode: 'insensitive', ...(dir ? { startsWith: `${dir.path}/` } : {}) } }, take: limit, orderBy: { path: 'asc' } })).map(publicDir);
-      out.files = (await db.repositoryFile.findMany({ where: { repositoryId: repo.id, path: { contains: query, mode: 'insensitive', ...(dir ? { startsWith: `${dir.path}/` } : {}) } }, take: limit, orderBy: { path: 'asc' } })).map(publicFile);
+      out.folders = (await db.repositoryDirectory.findMany({ where: { repositoryId: repo.id, ...under, path: { contains: query, mode: 'insensitive', ...(dir ? { startsWith: `${dir.path}/` } : {}) } }, take: limit, orderBy: { path: 'asc' } })).filter(see.dir).map(publicDir);
+      out.files = (await db.repositoryFile.findMany({ where: { repositoryId: repo.id, path: { contains: query, mode: 'insensitive', ...(dir ? { startsWith: `${dir.path}/` } : {}) } }, take: limit, orderBy: { path: 'asc' } })).filter(see.file).map(publicFile);
     }
     if (scope !== 'names') {
-      const files = await db.repositoryFile.findMany({ where: { repositoryId: repo.id, ...under, documentId: { not: null } }, select: { id: true, documentId: true, path: true, name: true } });
+      const files = await db.repositoryFile.findMany({ where: { repositoryId: repo.id, ...under, documentId: { not: null } }, select: { id: true, documentId: true, path: true, name: true, aiEnabled: true, directoryId: true } }).then((rows: any[]) => rows.filter(see.file));
       const byDoc = new Map<string, any>(files.map((f: any) => [f.documentId, f]));
       const candidates = byDoc.size ? await db.documentChunk.findMany({ where: { documentId: { in: [...byDoc.keys()] } }, take: 20_000 }) : [];
       let qv: number[] | null = null;
@@ -1146,7 +1185,7 @@ export function createKnowledgeService(deps: KnowledgeDeps) {
   return {
     assistantCatalog, assistantBrowse, assistantRead, assistantFullText, openForAnalysis,
     createRepository, listRepositories, updateRepository, deleteRepository, repoFor, statistics,
-    createDirectory, updateDirectory, deleteDirectory, tree, contents,
+    createDirectory, updateDirectory, deleteDirectory, tree, contents, viewRepositories,
     ingest, getFile, updateFile, copyFile, deleteFile, bulk, openDownload, preview, renderImage, extractArchive, archiveListing,
     search, reindexFile, reindexRepository, resumePending, jobStatus, openSource, runIndexJob,
   };

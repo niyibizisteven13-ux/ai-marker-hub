@@ -6,7 +6,7 @@
 
 **Making published statistics accessible, interactive and ready for AI, without downloading a single file.**
 
-[Live app: www.bwenge.space](https://www.bwenge.space) · [Demo video](https://youtu.be/n24wdixVfFU) · [Telegram bot](https://t.me/Bwengebot) · [Documentation](docs/) · [Script](server.ts)
+[Live app: www.bwenge.space](https://www.bwenge.space) · [Demo video](https://youtu.be/n24wdixVfFU) · [Telegram bot](https://t.me/Bwengebot) · [Documentation](docs/) · [Script](server.ts) · [Datasets & Curations](https://www.bwenge.space/admin/datasets)
 
 *Submission to the NISR 2026 Big Data Hackathon*
 
@@ -142,11 +142,18 @@ Users can also upload their own CSV or Excel files and analyse them the same way
 | README: data used, what it communicates, how to interact | This file: [Data](#data), [What it communicates](#what-it-communicates), [How to use it](#how-to-use-it) |
 | Script(s) with the code, runs on any machine | [`server.ts`](server.ts), [`server/`](server/), [`src/`](src/) and [Run it](#run-it) |
 | Demo video (3 minutes maximum) | [YouTube](https://youtu.be/n24wdixVfFU) and [`demo/`](demo/) |
+| Datasets & Curations (view only) | **https://www.bwenge.space/admin/datasets**: sign in, then browse, search and preview the curated NISR datasets. Judges see only this section, read-only; every other admin section stays closed. |
 | Data and a link to the data | [`data/`](data/) and [Data](#data); the datasets are too large for GitHub, so links are given |
 | Eligibility documents (both members) | [`student_cards/`](student_cards/) |
 
 
 ## Data
+
+**All datasets come from the [NISR microdata portal](https://microdata.statistics.gov.rw/index.php/catalog),
+as published by the National Institute of Statistics of Rwanda.** Each dataset is curated on Bwenge.space into
+folders, its files and its XML metadata (`.xml`) are indexed, and once published the dataset is used by Bwenge AI
+for every user, with the source file cited in each answer. The curated datasets can be inspected, read-only, at
+**[www.bwenge.space/admin/datasets](https://www.bwenge.space/admin/datasets)**.
 
 | Source | How it is used |
 |---|---|
@@ -172,7 +179,9 @@ layout, the manifest format and the steps to add a dataset ([`data/nisr/README.m
 
 1. Open **[www.bwenge.space](https://www.bwenge.space)** and sign in with Google or email, or open the
    [Telegram bot](https://t.me/Bwengebot).
-2. Open **Public library** in the left sidebar to browse the published datasets, their folders and files.
+2. Open **Public library** in the left sidebar to browse the published datasets, their folders and files. To see
+   how they are curated (folders, files, XML metadata and indexing status), open
+   **[www.bwenge.space/admin/datasets](https://www.bwenge.space/admin/datasets)** (view only).
 3. Pick a dataset or a file and ask about it, for example:
    - *"What does this dataset contain?"*
    - *"Show unemployment by district as a chart"*.
