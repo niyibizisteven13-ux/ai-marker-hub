@@ -128,10 +128,13 @@ export async function checkUsage(userId: string, req: { kind: UsageKind; chars?:
 }
 
 /** Records one AI action and returns the credits charged. Never throws: metering must not break a reply. */
-export async function recordUsage(userId: string, u: { kind: UsageKind; model?: string | null; inputTokens?: number; outputTokens?: number; channel?: 'web' | 'telegram'; minCredits?: number; /** Sent as an overnight batch (half price). */ batch?: boolean }): Promise<number> {
+export async function recordUsage(userId: string, u: { kind: UsageKind; model?: string | null; inputTokens?: number; outputTokens?: number; channel?: 'web' | 'telegram'; minCredits?: number; /** Sent as an overnight batch (half price). */ batch?: boolean;
+  /** Other model calls that belong to the same action (for example reading a script's handwriting before marking it): charged in this one record, so the action counts once. */
+  extra?: Array<{ model: string | null; inputTokens: number; outputTokens: number }> }): Promise<number> {
   const input = Math.max(0, Math.round(u.inputTokens ?? 0));
   const output = Math.max(0, Math.round(u.outputTokens ?? 0));
-  const credits = Math.max(u.minCredits ?? 1, creditsFor(u.model, input, output, u.batch));
+  const extra = (u.extra ?? []).filter((x) => x.inputTokens > 0 || x.outputTokens > 0);
+  const credits = Math.max(u.minCredits ?? 1, creditsFor(u.model, input, output, u.batch)) + extra.reduce((a, x) => a + creditsFor(x.model, x.inputTokens, x.outputTokens, u.batch), 0);
   try {
     // Beyond the plan allowance (or a daily feature cap), the action is paid from GO credits.
     const plan = await planFor(userId);
@@ -142,7 +145,7 @@ export async function recordUsage(userId: string, u: { kind: UsageKind; model?: 
       const balance = await walletBalance(userId);
       if (balance > 0) await db.creditLedger.create({ data: { id: randomUUID(), userId, delta: -Math.min(credits, balance), reason: 'usage', note: u.kind, createdAt: new Date() } });
     }
-    await db.usageRecord.create({ data: { id: randomUUID(), userId, kind: u.kind, credits, model: u.model ?? null, inputTokens: input, outputTokens: output, costUsd: costUsd(u.model, input, output) * (u.batch ? BATCH_PRICE_FACTOR : 1), channel: u.channel ?? 'web', createdAt: new Date() } });
+    await db.usageRecord.create({ data: { id: randomUUID(), userId, kind: u.kind, credits, model: u.model ?? null, inputTokens: input, outputTokens: output, costUsd: (costUsd(u.model, input, output) + extra.reduce((a, x) => a + costUsd(x.model, x.inputTokens, x.outputTokens), 0)) * (u.batch ? BATCH_PRICE_FACTOR : 1), channel: u.channel ?? 'web', createdAt: new Date() } });
   } catch {
     /* metering is best-effort */
   }

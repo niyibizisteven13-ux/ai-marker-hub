@@ -242,3 +242,17 @@ test('storage: each plan keeps a set amount of files; a full Free account is ref
   await ensureStorage(pro, 2 * MB);
   assert.equal((await usageSummary(pro)).storage.limitMb, PLANS.PRO.limits.storageMb);
 });
+
+test('a script\'s reading is charged with its marking: one record, both costs, the daily script count stays one', async () => {
+  const userId = await newUser('PRO');
+  const read = { model: 'claude-sonnet-5-5', inputTokens: 30_000, outputTokens: 3_000 };
+  const credits = await recordUsage(userId, { kind: 'marking', model: 'claude-opus-5-5', inputTokens: 12_000, outputTokens: 2_000, minCredits: 2, extra: [read] });
+  const expected = Math.max(2, creditsFor('claude-opus-5-5', 12_000, 2_000)) + creditsFor(read.model, read.inputTokens, read.outputTokens);
+  assert.equal(credits, expected);
+  const rows = await db.usageRecord.findMany({ where: { userId } });
+  assert.equal(rows.length, 1, 'one action');
+  assert.equal(rows[0].credits, expected);
+  assert.ok(rows[0].costUsd > 0);
+  const s = await usageSummary(userId);
+  assert.equal(s.features.find((f: any) => f.kind === 'marking').used, 1, 'counts as one marked script');
+});

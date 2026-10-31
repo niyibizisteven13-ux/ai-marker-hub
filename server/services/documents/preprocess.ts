@@ -17,7 +17,33 @@ export interface PageQuality {
   estimatedDpi: number | null;
   contrast: number;
   sharpness: number;
+  /** Edge steepness at the ink, relative to ink/paper contrast (about 0.8 sharp, below 0.45 blurred). Does not depend on how much is written. */
+  edgeSharpness?: number;
   warnings: string[];
+}
+
+/**
+ * How steeply ink meets paper: the mean gradient at ink edges divided by the ink/paper contrast. Sharp writing
+ * jumps from ink to paper in a pixel or two; blurred writing fades over many. Unlike whole-page edge variance,
+ * a nearly blank page with a few clean lines does not look blurred.
+ */
+export async function edgeSharpness(image: Buffer): Promise<number> {
+  const g = await sharp(image).grayscale().resize({ width: 1200, fit: 'inside', withoutEnlargement: true }).raw().toBuffer({ resolveWithObject: true });
+  const w = g.info.width, h = g.info.height;
+  const v = new Uint8Array(g.data.buffer, g.data.byteOffset, g.data.length);
+  const thr = otsuThreshold(v);
+  let ink = 0, paper = 0, inkN = 0, paperN = 0;
+  for (const x of v) { if (x < thr) { ink += x; inkN++; } else { paper += x; paperN++; } }
+  if (!inkN || !paperN) return 1;
+  const contrast = paper / paperN - ink / inkN;
+  if (contrast < 1) return 1;
+  let s = 0, n = 0;
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    const i = y * w + x;
+    const m = Math.hypot(v[i + 1] - v[i - 1], v[i + w] - v[i - w]);
+    if (m > contrast * 0.1) { s += m; n++; }
+  }
+  return n ? Math.round(((s / n) / contrast) * 100) / 100 : 1;
 }
 
 export interface PreprocessResult {
@@ -148,13 +174,28 @@ export async function preprocessPage(input: Buffer, opts: { maxSide?: number; de
   if (Math.min(w0, h0) < 600) warnings.push(`Very small image (${w0}×${h0}px). Recognition will be unreliable.`);
   if (inkN / Math.max(1, ov.length) < 0.0005) warnings.push('The page looks blank.');
   else if (contrast < 60) warnings.push(`Low contrast between ink and paper (${contrast} grey levels).`);
-  // Edge strength scales with contrast, so blur is only judged when ink and paper are well separated.
-  if (contrast >= 40 && sharpness < 60) warnings.push('The image looks blurred (low edge sharpness); characters may be ambiguous.');
+  // Blur is judged at the ink edges, relative to contrast, and only when ink and paper are well separated.
+  const edge = contrast >= 40 && inkN / Math.max(1, ov.length) >= 0.0005 ? await edgeSharpness(original) : 1;
+  if (contrast >= 40 && edge < 0.45) warnings.push('The image looks blurred (low edge sharpness); characters may be ambiguous.');
   if (Math.abs(deskew) >= 10) warnings.push(`The page was strongly tilted (${deskew.toFixed(1)}°).`);
+
+  // Poor scans are cleaned up for reading (the original is kept for crops and the marked PDF):
+  // local contrast (CLAHE) evens out phone-camera shadows and lifts faint pencil; an unsharp mask
+  // restores edges on blurred pages. Clean, sharp pages are left as they are.
+  const blank = inkN / Math.max(1, ov.length) < 0.0005;
+  const blurred = contrast >= 40 && edge < 0.45;
+  const faint = !blank && contrast < 60;
+  if (faint || blurred) {
+    let fix = sharp(gray);
+    if (faint) fix = fix.clahe({ width: 64, height: 64, maxSlope: 3 });
+    if (blurred) fix = fix.sharpen({ sigma: 1.2, m1: 0.5, m2: 3 });
+    gray = await fix.png().toBuffer();
+    transforms.push(`Cleaned up for reading:${faint ? ' local contrast (CLAHE) for faint ink or uneven lighting;' : ''}${blurred ? ' sharpened (unsharp mask) for blur;' : ''} the original is kept for review.`);
+  }
 
   return {
     processed: gray, original, width: pm.width ?? 0, height: pm.height ?? 0, deskewDegrees: deskew, otsuThreshold: thr, transforms,
-    quality: { width: w0, height: h0, estimatedDpi, contrast, sharpness, warnings },
+    quality: { width: w0, height: h0, estimatedDpi, contrast, sharpness, edgeSharpness: edge, warnings },
   };
 }
 

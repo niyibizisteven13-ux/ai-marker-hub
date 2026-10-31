@@ -66,7 +66,9 @@ export interface ExamDeps {
    */
   entitlement?: (userId: string) => Promise<{ allowed: boolean; code?: string; message?: string; upgradeUrl?: string }>;
   /** Called once per marked or re-marked script with the model tokens it used, for credits and cost tracking. */
-  onUsage?: (userId: string, u: { model: string; input: number; output: number; what: 'mark' | 'remark'; batch?: boolean }) => void;
+  onUsage?: (userId: string, u: { model: string; input: number; output: number; what: 'mark' | 'remark' | 'read' | 'split'; batch?: boolean; extra?: Array<{ model: string; input: number; output: number }> }) => void;
+  /** Credits an AI call costs (the billing formula), to show what a marking run used. */
+  creditsFor?: (model: string, input: number, output: number, batch?: boolean, what?: 'mark' | 'remark' | 'read' | 'split', extra?: Array<{ model: string; input: number; output: number }>) => number;
 }
 
 const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -406,7 +408,10 @@ export function createExamService(deps: ExamDeps) {
       if (!pages || (perStudent ? pages <= perStudent : pages <= (deps.maxPages ?? 20))) { expanded.push(f); continue; }
       try {
         const agent = deps.agent();
-        const pieces = await splitClassPdf(f.buffer, f.name, { pagesPerStudent: perStudent, ai: { adapter: agent.adapter, model: process.env.EXAM_SPLIT_MODEL || agent.model } });
+        const splitModel = process.env.EXAM_SPLIT_MODEL || agent.model;
+        let used = { input: 0, output: 0 };
+        const pieces = await splitClassPdf(f.buffer, f.name, { pagesPerStudent: perStudent, ai: { adapter: agent.adapter, model: splitModel }, onUsage: (u) => { used = { input: used.input + u.input, output: used.output + u.output }; } });
+        if (used.input || used.output) await charge(userId, examId, null, { model: splitModel, ...used, what: 'split' });
         opts.onSplit?.(f.name, pieces.length);
         for (const piece of pieces) expanded.push({ name: piece.name, buffer: piece.buffer, mime: 'application/pdf' });
       } catch (e) {
@@ -558,6 +563,9 @@ export function createExamService(deps: ExamDeps) {
     await setState(userId, examId, runId, sub.id, 'validating');
     await setState(userId, examId, runId, sub.id, 'recognizing', undefined, { ...ref, type: 'page_processing_started', message: `Reading ${sub.candidateId}'s script (${sub.pages} page${sub.pages === 1 ? '' : 's'}).`, data: { pages: sub.pages } });
     const { record, cached, key } = await recognizeSubmission(userId, sub, signal);
+    // Reading the handwriting is AI work too: charged with this script's marking, as one action (a reading reused
+    // from earlier is free).
+    const readUsage = cached ? [] : [{ model: record.result.model ?? deps.agent().model, input: record.result.usage.input, output: record.result.usage.output }];
     const pages = record.result.pages;
     const elements = pages.flatMap((pg) => pg.elements);
     const unclear = pages.flatMap((pg) => pg.elements.filter((el) => el.uncertainty !== 'low').map(() => pg.page));
@@ -636,6 +644,7 @@ export function createExamService(deps: ExamDeps) {
 
     if (signal.aborted) throw signal.reason;
     await setState(userId, examId, runId, sub.id, 'verifying');
+    let chargeLater: Parameters<typeof charge>[3] | null = null;
     await mutate(userId, examId, (e) => {
       // Marks finished after the run was cancelled are dropped: the next run marks this script again.
       if (!runLive(e, runId)) return;
@@ -650,7 +659,7 @@ export function createExamService(deps: ExamDeps) {
       });
       // The teacher's own pen marks survive re-marking (they are drawn on the page, not tied to the AI's marks).
       e.results[sub.id] = { submissionId: sub.id, candidateId: sub.candidateId, runId, schemeVersion: run.schemeVersion, questions, updatedAt: now(), usage: marked.usage, ...(prev?.pen ? { pen: prev.pen } : {}) };
-      try { deps.onUsage?.(userId, { model: deps.agent().model, input: marked.usage.input, output: marked.usage.output, what: 'mark', batch: run.mode === 'overnight' }); } catch { /* metering never breaks marking */ }
+      chargeLater = { model: deps.agent().model, input: marked.usage.input, output: marked.usage.output, what: 'mark', batch: run.mode === 'overnight', extra: readUsage };
       audit(e, { actor: 'bwenge-ai', type: 'marked', submissionId: sub.id, candidateId: sub.candidateId, after: { total: questions.reduce((a, q) => a + (effectiveMarks(q) ?? 0), 0) } });
       const s = e.submissions.find((x) => x.id === sub.id)!;
       s.state = questions.some((q) => openFlags(q).length) ? 'completed_with_warnings' : 'completed';
@@ -667,14 +676,27 @@ export function createExamService(deps: ExamDeps) {
       const max = questions.reduce((a, q) => a + q.maxMarks, 0);
       emit(e, { ...ref, type: 'script_marked', message: `${sub.candidateId} marked: ${total}/${max} (provisional until you confirm).`, data: { total, maxTotal: max, provisional: true } });
     });
+    if (chargeLater) await charge(userId, examId, runId, chargeLater);
   }
 
-  /** " 42 pages in 6 min." for a live run; overnight runs wait for the batch, so their time says nothing. */
+  /**
+   * Charges one piece of AI work (never breaks marking) and adds its credits to the run, so the teacher sees
+   * what a class cost: reading the handwriting, marking, second markings.
+   */
+  async function charge(userId: string, examId: string, runId: string | null, u: { model: string; input: number; output: number; what: 'mark' | 'remark' | 'read' | 'split'; batch?: boolean; extra?: Array<{ model: string; input: number; output: number }> }) {
+    try { deps.onUsage?.(userId, u); } catch { /* metering never breaks marking */ }
+    if (!runId || !deps.creditsFor) return;
+    const credits = deps.creditsFor(u.model, u.input, u.output, u.batch, u.what, u.extra);
+    await mutate(userId, examId, (e) => { const r = e.runs.find((x) => x.id === runId); if (r) r.credits = (r.credits ?? 0) + credits; }).catch(() => undefined);
+  }
+
+  /** " 42 pages in 6 min, 380 credits." for a live run; overnight runs wait for the batch, so only pages and credits. */
   function timing(subs: Submission[], r: MarkingRun): string {
     const pages = subs.filter((s) => s.state !== 'failed').reduce((a, s) => a + s.pages, 0);
-    if (!pages || !r.startedAt || !r.finishedAt || r.mode === 'overnight') return '';
+    if (!pages || !r.startedAt || !r.finishedAt) return '';
+    if (r.mode === 'overnight') return r.credits ? ` ${pages} page${pages === 1 ? '' : 's'}, ${r.credits.toLocaleString('en-US')} credits (half price overnight).` : '';
     const sec = Math.max(1, Math.round((Date.parse(r.finishedAt) - Date.parse(r.startedAt)) / 1000));
-    return ` ${pages} page${pages === 1 ? '' : 's'} in ${sec < 90 ? `${sec} s` : `${Math.round(sec / 60)} min`}.`;
+    return ` ${pages} page${pages === 1 ? '' : 's'} in ${sec < 90 ? `${sec} s` : `${Math.round(sec / 60)} min`}${r.credits ? `, ${r.credits.toLocaleString('en-US')} credits` : ''}.`;
   }
 
   async function runMarkJob(job: FileJob<MarkJobPayload>, ctx: JobContext) {
@@ -765,7 +787,7 @@ export function createExamService(deps: ExamDeps) {
       const failedN = subs.filter((s) => s.state === 'failed').length;
       const review = subs.filter((s) => s.state === 'completed_with_warnings').length;
       if (r.state === 'failed') emit(x, { runId, jobId: job.id, type: 'job_failed', progress: runProgress(x, runId), message: `Marking failed for every script${artifactError ? ` (${artifactError.slice(0, 120)})` : ''}. Nothing was lost: re-send or ask to re-mark.`, data: { failed: failedN } });
-      else emit(x, { runId, jobId: job.id, type: 'job_completed', progress: runProgress(x, runId), message: `Marking finished: ${subs.length - failedN} of ${subs.length} scripts marked${review ? `, ${review} with items to review` : ''}${failedN ? `, ${failedN} could not be marked` : ''}.${timing(subs, r)} Marks stay provisional until you confirm them.`, data: { state: r.state, pages: subs.filter((s) => s.state !== 'failed').reduce((a, s) => a + s.pages, 0), seconds: r.startedAt ? Math.round((Date.parse(r.finishedAt!) - Date.parse(r.startedAt)) / 1000) : null, marked: subs.length - failedN, review, failed: failedN, artifactError: artifactError ? artifactError.slice(0, 160) : null } });
+      else emit(x, { runId, jobId: job.id, type: 'job_completed', progress: runProgress(x, runId), message: `Marking finished: ${subs.length - failedN} of ${subs.length} scripts marked${review ? `, ${review} with items to review` : ''}${failedN ? `, ${failedN} could not be marked` : ''}.${timing(subs, r)} Marks stay provisional until you confirm them.`, data: { state: r.state, credits: r.credits ?? null, pages: subs.filter((s) => s.state !== 'failed').reduce((a, s) => a + s.pages, 0), seconds: r.startedAt ? Math.round((Date.parse(r.finishedAt!) - Date.parse(r.startedAt)) / 1000) : null, marked: subs.length - failedN, review, failed: failedN, artifactError: artifactError ? artifactError.slice(0, 160) : null } });
     });
     const r = e.runs.find((y) => y.id === runId)!;
     return { examId, runId, state: r.state, artifactError };

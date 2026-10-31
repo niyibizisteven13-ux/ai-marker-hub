@@ -14,7 +14,7 @@ import { mapPool, pageConcurrency, visionCalls } from '../../utils/concurrency.j
  * structure + independent checks → structured, source-linked result with review flags.
  */
 
-export const PIPELINE_VERSION = 'bwenge-docai-1.2.0';
+export const PIPELINE_VERSION = 'bwenge-docai-1.3.0';
 
 /** A full-page reading that is worth re-reading in close-ups: unclear writing, or nothing found on a large page. */
 export function needsCloseUp(page: { elements: Array<{ legibility: string; uncertainSpans: unknown[] }> }): boolean {
@@ -146,7 +146,9 @@ export async function processDocument(data: Buffer, filename: string, deps: Pipe
       // auto: a large page is read again in close-ups only when the full-page reading found unclear writing.
       // Clear pages (most of a class) cost one reading instead of five.
       r = await full;
-      if (shouldTile(pre.width, pre.height, tilingMode, MODEL_MAX_SIDE) && needsCloseUp(r.page)) {
+      // Blurred or faint scans are re-read close up too: a confident full-page reading of a poor scan is not trusted.
+      const poorScan = pre.quality.warnings.some((w) => /blurred|Low contrast|Low resolution/.test(w));
+      if (shouldTile(pre.width, pre.height, tilingMode, MODEL_MAX_SIDE) && (needsCloseUp(r.page) || poorScan)) {
         tiles = plan();
         tileRead = await readTiles(tiles);
       }

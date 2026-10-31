@@ -155,6 +155,8 @@ export interface MarkingRun {
   error?: string;
   /** overnight = sent as half-price batches, results within 24 h (usually much sooner). */
   mode?: 'live' | 'overnight';
+  /** Credits charged for this run so far: reading the handwriting, marking and second markings. */
+  credits?: number;
 }
 
 export interface AuditEvent {
