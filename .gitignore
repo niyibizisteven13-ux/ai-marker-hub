@@ -42,6 +42,11 @@ uploads/
 
 # Exports at runtime
 exports/audit.log.jsonl
+# Local JSON database (development and tests only) and exports: never committed, they hold user records.
+exports/local-db.json
+exports/*.xlsx
+# Generated files (charts, workbooks, marked PDFs): runtime data
+data/generated/
 
 # Generated NISR index (rebuild with: npm run nisr:index)
 data/nisr/index/
