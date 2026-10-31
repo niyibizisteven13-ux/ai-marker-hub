@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, CalendarClock, Check, ClipboardList, Copy, Download, ExternalLink, FileText, Image as ImageIcon, Link2, Loader2, Lock, Paperclip, Plus, Share2, Sparkles, Trash2, Unlock, Users, X } from 'lucide-react';
 import { authFetch } from '../utils/authFetch';
 import { PdfViewer, loadPdfJs } from './PdfViewer';
+import { Card, Empty, PageShell, Stat, StatRow, Toolbar, primaryBtn, relative } from './workspace/Shell';
 
 /**
  * Tasks: the owner sets a task (text and/or files) and shares one link; people submit through it in any format,
@@ -12,7 +13,7 @@ import { PdfViewer, loadPdfJs } from './PdfViewer';
 interface StoredFile { id: string; name: string; mime: string; size: number }
 interface Submission { id: string; studentName: string; studentId?: string; files: StoredFile[]; text?: string; submittedAt: string; late: boolean; resubmissions: number }
 interface Assignment { id: string; title: string; instructions: string; taskFiles: StoredFile[]; dueAt: string | null; open: boolean; link: string; createdAt: string; submissions: Submission[]; counts: { submitted: number; late: number } }
-interface Row { id: string; title: string; dueAt: string | null; open: boolean; link: string; createdAt: string; submitted: number; lastSubmissionAt: string | null }
+interface Row { id: string; title: string; dueAt: string | null; open: boolean; link: string; createdAt: string; submitted: number; late?: number; lastSubmissionAt: string | null }
 /** What "Mark all" hands to the Mark page: files already uploaded, each with its role. */
 export interface PreparedMarking { scripts: Array<StoredFile & { studentName: string; candidateId: string }>; roster: StoredFile; task: StoredFile[]; title: string; skipped: Array<{ studentName: string; reason: string }> }
 
@@ -111,7 +112,7 @@ function FileView({ assignmentId, file }: { assignmentId: string; file: StoredFi
   }, [url, file.mime]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <figure className="overflow-hidden rounded-xl border border-white/[0.08] bg-[#2B2A28]">
+    <figure className="overflow-hidden rounded-xl border border-white/[0.08] bg-[#16171b]">
       <figcaption className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-2 text-[12.5px] text-neutral-300">
         {isImage(file) ? <ImageIcon size={14} /> : <FileText size={14} />}
         <span className="min-w-0 flex-1 truncate">{file.name}</span>
@@ -140,7 +141,7 @@ function ShareBox({ link, title }: { link: string; title: string }) {
       <div className="min-w-0 flex-1">
         <p className="text-[13px] font-semibold text-white">Share this link with the people doing the task</p>
         <p className="mt-0.5 text-[12.5px] text-neutral-400">No account needed. They open it, write their name and submit photos, PDF, Word or typed answers.</p>
-        <div className="mt-2.5 flex items-center gap-2 rounded-xl border border-white/[0.12] bg-[#1F1E1D] px-3 py-2">
+        <div className="mt-2.5 flex items-center gap-2 rounded-xl border border-white/[0.12] bg-[#111216] px-3 py-2">
           <Link2 size={14} className="shrink-0 text-[#E08A6A]" />
           <span className="min-w-0 flex-1 truncate font-mono text-[12.5px] text-neutral-200">{link}</span>
         </div>
@@ -172,9 +173,9 @@ function CreateForm({ onCreated, onCancel }: { onCreated: (a: Assignment) => voi
       onCreated(await json<Assignment>(await authFetch('/api/assignments', { method: 'POST', body: form })));
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not create the task.'); } finally { setBusy(false); }
   };
-  const field = 'w-full rounded-xl border border-white/[0.1] bg-[#1F1E1D] px-3 py-2.5 text-[14px] text-[#F2EFE9] placeholder:text-neutral-500 focus:border-[#D97757]/60 focus:outline-none';
+  const field = 'w-full rounded-xl border border-white/[0.1] bg-[#111216] px-3 py-2.5 text-[14px] text-[#F2EFE9] placeholder:text-neutral-500 focus:border-[#D97757]/60 focus:outline-none';
   return (
-    <section className="space-y-4 rounded-[20px] border border-white/[0.12] bg-[#30302E] p-4 sm:p-5">
+    <section className="space-y-4 rounded-[20px] border border-white/[0.12] bg-[#16171b] p-4 sm:p-5">
       <div>
         <label htmlFor="as-title" className="mb-1.5 block text-[12.5px] font-medium text-neutral-300">Title</label>
         <input id="as-title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={160} placeholder="For example: S4 Physics, Newton's laws homework" className={field} />
@@ -289,7 +290,7 @@ function Dashboard({ id, onBack, onMarkAll, autoMark = false }: { id: string; on
         <ul className="grid gap-2.5 sm:grid-cols-2">
           {a.submissions.map((s) => (
             <li key={s.id}>
-              <button type="button" onClick={() => setOpen(s)} className="flex w-full gap-3 rounded-[14px] border border-white/[0.08] bg-[#2B2A28] p-3 text-left hover:border-white/[0.18]">
+              <button type="button" onClick={() => setOpen(s)} className="flex w-full gap-3 rounded-[14px] border border-white/[0.08] bg-[#16171b] p-3 text-left hover:border-white/[0.18]">
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#D97757]/20 text-[12.5px] font-bold text-[#F2B39C]">{initials(s.studentName)}</span>
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-2">
@@ -312,7 +313,7 @@ function Dashboard({ id, onBack, onMarkAll, autoMark = false }: { id: string; on
       {open && (
         // The submission, full size: every file previewed in place, the typed answer as a page.
         <div className="fixed inset-0 z-[80] flex justify-end bg-black/50" onClick={() => setOpen(null)}>
-          <aside role="dialog" aria-label={`${open.studentName}'s submission`} onClick={(e) => e.stopPropagation()} className="flex h-full w-full max-w-3xl flex-col bg-[#262624] shadow-2xl">
+          <aside role="dialog" aria-label={`${open.studentName}'s submission`} onClick={(e) => e.stopPropagation()} className="flex h-full w-full max-w-3xl flex-col bg-[#0f1012] shadow-2xl">
             <header className="flex items-center gap-3 border-b border-white/[0.08] px-4 py-3">
               <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#D97757]/20 text-[12.5px] font-bold text-[#F2B39C]">{initials(open.studentName)}</span>
               <span className="min-w-0 flex-1">
@@ -325,7 +326,7 @@ function Dashboard({ id, onBack, onMarkAll, autoMark = false }: { id: string; on
             <div className="flex-1 space-y-3 overflow-y-auto p-4">
               {open.text && (
                 <figure className="overflow-hidden rounded-xl border border-white/[0.08]">
-                  <figcaption className="border-b border-white/[0.06] bg-[#2B2A28] px-3 py-2 text-[12.5px] text-neutral-300">Typed answer</figcaption>
+                  <figcaption className="border-b border-white/[0.06] bg-[#16171b] px-3 py-2 text-[12.5px] text-neutral-300">Typed answer</figcaption>
                   <div className="whitespace-pre-wrap bg-[#FBFAF6] px-6 py-5 font-serif text-[15px] leading-relaxed text-neutral-900">{open.text}</div>
                 </figure>
               )}
@@ -342,6 +343,9 @@ export default function AssignmentsPage({ onClose, onMarkAll, initialId, autoMar
   const [rows, setRows] = useState<Row[] | null>(null);
   const [view, setView] = useState<{ kind: 'list' } | { kind: 'new' } | { kind: 'one'; id: string }>(initialId ? { kind: 'one', id: initialId } : { kind: 'list' });
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState<'all' | 'open' | 'closed'>('all');
+  const [copied, setCopied] = useState<string | null>(null);
   const loadRows = useCallback(async () => {
     try { setRows((await json<{ assignments: Row[] }>(await authFetch('/api/assignments'))).assignments); } catch (e) { setError(e instanceof Error ? e.message : 'Could not load.'); }
   }, []);
@@ -352,57 +356,80 @@ export default function AssignmentsPage({ onClose, onMarkAll, initialId, autoMar
     return () => window.removeEventListener('keydown', key);
   }, [onClose, view.kind]);
 
+  const shown = useMemo(() => (rows ?? []).filter((r) => (filter === 'all' || (filter === 'open') === r.open) && (!query.trim() || r.title.toLowerCase().includes(query.trim().toLowerCase()))), [rows, filter, query]);
+  const totals = useMemo(() => {
+    const list = rows ?? [];
+    const week = Date.now() - 7 * 86400e3;
+    return {
+      tasks: list.length, open: list.filter((r) => r.open).length,
+      handIns: list.reduce((n, r) => n + r.submitted, 0), late: list.reduce((n, r) => n + (r.late ?? 0), 0),
+      dueSoon: list.filter((r) => r.open && r.dueAt && Date.parse(r.dueAt) > Date.now() && Date.parse(r.dueAt) - Date.now() < 3 * 86400e3).length,
+      recent: list.filter((r) => r.lastSubmissionAt && Date.parse(r.lastSubmissionAt) > week).length,
+    };
+  }, [rows]);
+  const copy = async (r: Row) => { try { await navigator.clipboard.writeText(r.link); setCopied(r.id); window.setTimeout(() => setCopied(null), 1600); } catch { /* clipboard may be blocked */ } };
+
+  const newBtn = <button type="button" onClick={() => setView({ kind: 'new' })} className={primaryBtn}><Plus size={16} />New task</button>;
   return (
-    <div className="fixed inset-0 z-[70] flex flex-col overflow-y-auto bg-[#262624] text-[#F2EFE9]">
-      <header className="flex items-center gap-3 px-4 py-3 sm:px-6">
-        <button type="button" onClick={onClose} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-neutral-400 hover:bg-white/5 hover:text-white"><ArrowLeft size={16} />Back to chat</button>
-      </header>
-      <main className="mx-auto w-full max-w-[920px] flex-1 px-4 pb-16 sm:px-6">
-        {view.kind === 'one' ? (
-          <Dashboard id={view.id} onBack={() => setView({ kind: 'list' })} onMarkAll={onMarkAll} autoMark={autoMark && view.id === initialId} />
-        ) : (
-          <>
-            <div className="mt-1 flex flex-wrap items-end gap-3 sm:mt-3">
-              <div className="min-w-0 flex-1">
-                <h1 className="font-serif text-[28px] font-medium tracking-tight sm:text-[32px]">Tasks</h1>
-                <p className="mt-1 max-w-xl text-[13.5px] text-neutral-400">Set a task, share one link, and people submit from any phone: photos, PDF, Word or typed. Every submission shows here, and the AI marks them all when you are ready.</p>
-              </div>
-              {view.kind === 'list' && <button type="button" onClick={() => setView({ kind: 'new' })} className="inline-flex items-center gap-1.5 rounded-xl bg-[#D97757] px-4 py-2.5 text-[13.5px] font-semibold text-white hover:bg-[#c96a4c]"><Plus size={16} />New task</button>}
-            </div>
-            <div className="mt-5">
-              {view.kind === 'new' ? (
-                <CreateForm onCancel={() => setView({ kind: 'list' })} onCreated={(a) => setView({ kind: 'one', id: a.id })} />
-              ) : error ? (
-                <p className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[13px] text-rose-300">{error}</p>
-              ) : !rows ? (
-                <div className="flex justify-center py-16 text-neutral-400"><Loader2 className="animate-spin" /></div>
-              ) : !rows.length ? (
-                <div className="rounded-[20px] border border-dashed border-white/[0.14] px-6 py-14 text-center">
-                  <ClipboardList size={28} className="mx-auto text-[#E08A6A]" />
-                  <p className="mt-3 text-[15px] font-semibold">No tasks yet</p>
-                  <p className="mx-auto mt-1 max-w-sm text-[13px] text-neutral-400">Create one, share the link, and watch the submissions arrive.</p>
-                  <button type="button" onClick={() => setView({ kind: 'new' })} className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-[#D97757] px-4 py-2 text-[13.5px] font-semibold text-white"><Plus size={16} />New task</button>
-                </div>
+    <div className="fixed inset-0 z-[70] overflow-y-auto bg-[#0f1012]">
+      {view.kind === 'one' ? (
+        <div className="min-h-full bg-[#0f1012] text-[#ececee]">
+          <div className="px-4 pt-3 sm:px-6"><button type="button" onClick={onClose} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] text-neutral-400 hover:bg-white/[0.05] hover:text-white"><ArrowLeft size={15} />Back to chat</button></div>
+          <main className="mx-auto w-full max-w-5xl px-4 pb-16 sm:px-6">
+            <Dashboard id={view.id} onBack={() => setView({ kind: 'list' })} onMarkAll={onMarkAll} autoMark={autoMark && view.id === initialId} />
+          </main>
+        </div>
+      ) : view.kind === 'new' ? (
+        <PageShell icon={<ClipboardList size={20} />} title="New task" subtitle="Write what to do or attach the worksheet. You get one link and a QR code; people submit from any phone, no account needed." onBack={() => setView({ kind: 'list' })} backLabel="All tasks">
+          <CreateForm onCancel={() => setView({ kind: 'list' })} onCreated={(a) => setView({ kind: 'one', id: a.id })} />
+        </PageShell>
+      ) : (
+        <PageShell icon={<ClipboardList size={20} />} title="Tasks" onBack={onClose}
+          subtitle="Set work, share one link or QR code, and collect answers from any phone: photos, PDF, Word or typed. When you are ready, the AI marks the whole class."
+          actions={newBtn}>
+          {error ? <p className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[13px] text-rose-300">{error}</p>
+            : !rows ? <div className="flex justify-center py-16 text-neutral-400"><Loader2 className="animate-spin" /></div>
+              : !rows.length ? (
+                <Empty icon={<ClipboardList size={22} />} title="No tasks yet" text="Create a task, share the link in your class group, and watch the hand-ins arrive here." action={newBtn} />
               ) : (
-                <ul className="grid gap-2.5 sm:grid-cols-2">
-                  {rows.map((r) => (
-                    <li key={r.id}>
-                      <button type="button" onClick={() => setView({ kind: 'one', id: r.id })} className="w-full rounded-[16px] border border-white/[0.08] bg-[#30302E] p-4 text-left hover:border-white/[0.18]">
-                        <span className="flex items-center gap-2">
-                          <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-white">{r.title}</span>
-                          <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${r.open ? 'bg-emerald-500/15 text-emerald-300' : 'bg-white/10 text-neutral-300'}`}>{r.open ? 'Open' : 'Closed'}</span>
-                        </span>
-                        <span className="mt-1 flex items-center gap-1 text-[12px] text-neutral-400"><CalendarClock size={12} />{due(r.dueAt)}</span>
-                        <span className="mt-3 flex items-baseline gap-1.5"><b className="text-[22px] font-semibold">{r.submitted}</b><span className="text-[12.5px] text-neutral-400">handed in{r.lastSubmissionAt ? ` · last ${when(r.lastSubmissionAt)}` : ''}</span></span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  <StatRow>
+                    <Stat label="Tasks" value={totals.tasks} hint={`${totals.open} open for hand-ins`} />
+                    <Stat label="Hand-ins" value={totals.handIns} hint={totals.recent ? `${totals.recent} task${totals.recent === 1 ? '' : 's'} active this week` : 'none this week'} />
+                    <Stat label="Late" value={totals.late} tone={totals.late ? 'warn' : undefined} hint="after the due time" />
+                    <Stat label="Due soon" value={totals.dueSoon} hint="in the next 3 days" />
+                  </StatRow>
+                  <Toolbar<'all' | 'open' | 'closed'> query={query} onQuery={setQuery} placeholder="Search tasks" filter={filter} onFilter={setFilter}
+                    filters={[{ id: 'all', label: 'All', count: rows.length }, { id: 'open', label: 'Open', count: totals.open }, { id: 'closed', label: 'Closed', count: rows.length - totals.open }]} />
+                  {!shown.length ? <p className="py-10 text-center text-[13px] text-neutral-500">No task matches.</p> : (
+                    <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {shown.map((r) => {
+                        const overdue = r.open && r.dueAt && Date.parse(r.dueAt) < Date.now();
+                        return (
+                          <li key={r.id}>
+                            <Card onClick={() => setView({ kind: 'one', id: r.id })} className="flex h-full flex-col p-4">
+                              <div className="flex items-start gap-2">
+                                <span className="min-w-0 flex-1 text-[15px] font-semibold leading-snug text-white [overflow-wrap:anywhere]">{r.title}</span>
+                                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${r.open ? 'bg-emerald-500/15 text-emerald-300' : 'bg-white/10 text-neutral-300'}`}>{r.open ? 'Open' : 'Closed'}</span>
+                              </div>
+                              <p className={`mt-1.5 flex items-center gap-1 text-[12px] ${overdue ? 'text-amber-300' : 'text-neutral-400'}`}><CalendarClock size={12} />{r.dueAt ? `${overdue ? 'Was due' : 'Due'} ${relative(r.dueAt)}` : 'No due date'}</p>
+                              <div className="mt-4 flex items-end gap-2">
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-[24px] font-semibold leading-none tabular-nums text-white">{r.submitted}</p>
+                                  <p className="mt-1 truncate text-[12px] text-neutral-500">hand-in{r.submitted === 1 ? '' : 's'}{r.late ? ` · ${r.late} late` : ''}{r.lastSubmissionAt ? ` · last ${when(r.lastSubmissionAt)}` : ''}</p>
+                                </div>
+                                <button type="button" onClick={(e) => { e.stopPropagation(); void copy(r); }} className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-white/[0.1] px-2.5 py-1.5 text-[12px] text-neutral-300 hover:bg-white/[0.06]">{copied === r.id ? <Check size={13} /> : <Link2 size={13} />}{copied === r.id ? 'Copied' : 'Copy link'}</button>
+                              </div>
+                            </Card>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </>
               )}
-            </div>
-          </>
-        )}
-      </main>
+        </PageShell>
+      )}
     </div>
   );
 }

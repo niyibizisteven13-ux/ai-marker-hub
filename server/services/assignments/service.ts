@@ -162,7 +162,7 @@ export function createAssignmentService(deps: {
     async list(ownerId: string) {
       return (await deps.store.list(ownerId, 100)).map((a) => ({
         id: a.id, title: a.title, dueAt: a.dueAt, open: a.open, link: linkOf(a.token), createdAt: a.createdAt,
-        submitted: a.submissions.length, lastSubmissionAt: a.submissions.reduce<string | null>((m, s) => (!m || s.submittedAt > m ? s.submittedAt : m), null),
+        submitted: a.submissions.length, late: a.submissions.filter((s) => s.late).length, lastSubmissionAt: a.submissions.reduce<string | null>((m, s) => (!m || s.submittedAt > m ? s.submittedAt : m), null),
       }));
     },
 

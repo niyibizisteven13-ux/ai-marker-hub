@@ -384,3 +384,79 @@ button.bw-line:hover { color: #f5f5f4; }
 @media (min-width: 1200px) {
   html.bw-side-open #root { padding-right: min(560px, 92vw); transition: padding-right .22s ease-out; }
 }
+
+/* ── Dark theme for forms (shared form, preview and the form editor) ──────────────────────────────────────
+   The form screens are written with light colours; inside .form-dark those colours are mapped to a dark
+   palette, so the same components serve both. */
+.form-dark { color-scheme: dark; background-color: #0d0e10; color: #ececee; }
+.form-dark input:not([type=radio]):not([type=checkbox]):not([type=range]):not([type=color]),
+.form-dark textarea,
+.form-dark select { background-color: #111216; color: #ececee; border-color: #2c2f36; }
+.form-dark input[type=radio], .form-dark input[type=checkbox] { accent-color: #D97757; }
+.form-dark .shadow-sm, .form-dark .shadow, .form-dark .shadow-md { box-shadow: 0 1px 0 rgba(255,255,255,0.03), 0 8px 24px rgba(0,0,0,0.35); }
+.form-dark .bg-white,
+.form-dark .bg-\[\#FFFFFF\],
+.form-dark .bg-white\/95,
+.form-dark .hover\:bg-white:hover { background-color: #16171b; }
+.form-dark .bg-slate-50,
+.form-dark .bg-\[\#F8F9FA\],
+.form-dark .bg-\[\#F1F3F4\],
+.form-dark .bg-\[\#F4F4F1\],
+.form-dark .hover\:bg-slate-50:hover,
+.form-dark .hover\:bg-\[\#F8F9FA\]:hover { background-color: #1c1e23; }
+.form-dark .bg-slate-100,
+.form-dark .bg-slate-200,
+.form-dark .hover\:bg-slate-100:hover,
+.form-dark .hover\:bg-slate-200:hover,
+.form-dark .disabled\:bg-slate-100:disabled { background-color: #24262c; }
+.form-dark .bg-black\/10,
+.form-dark .hover\:bg-black\/5:hover { background-color: rgba(255,255,255,0.06); }
+.form-dark .text-slate-900,
+.form-dark .text-slate-800,
+.form-dark .text-\[\#202124\],
+.form-dark .text-\[\#3C4043\],
+.form-dark .hover\:text-\[\#202124\]:hover { color: #ececee; }
+.form-dark .text-slate-700,
+.form-dark .text-slate-600 { color: #c5c8ce; }
+.form-dark .text-slate-500,
+.form-dark .text-\[\#5F6368\],
+.form-dark .text-\[\#757575\],
+.form-dark .disabled\:text-slate-500:disabled { color: #9a9ea7; }
+.form-dark .placeholder\:text-slate-400::placeholder,
+.form-dark .placeholder\:text-\[\#757575\]::placeholder { color: #6f737b; }
+.form-dark .border-slate-100,
+.form-dark .border-slate-200,
+.form-dark .border-slate-300,
+.form-dark .border-slate-400,
+.form-dark .border-\[\#E0E0E0\],
+.form-dark .border-\[\#DADCE0\],
+.form-dark .border-\[\#F1F3F4\],
+.form-dark .border-black\/20,
+.form-dark .hover\:border-\[\#DADCE0\]:hover { border-color: #2c2f36; }
+.form-dark .focus\:border-slate-700:focus,
+.form-dark .focus\:border-slate-500:focus,
+.form-dark .focus\:border-\[\#D97757\]:focus { border-color: #D97757; }
+.form-dark .ring-slate-500,
+.form-dark .focus-within\:ring-slate-500:focus-within,
+.form-dark .focus\:ring-slate-200:focus { --tw-ring-color: rgba(217,119,87,0.45); }
+.form-dark .bg-rose-50 { background-color: rgba(244,63,94,0.12); }
+.form-dark .text-rose-600,
+.form-dark .text-rose-700,
+.form-dark .text-rose-800,
+.form-dark .text-rose-900 { color: #fda4af; }
+.form-dark .border-rose-300,
+.form-dark .border-rose-400 { border-color: rgba(244,63,94,0.45); }
+.form-dark .bg-amber-50 { background-color: rgba(245,158,11,0.12); }
+.form-dark .text-amber-600,
+.form-dark .text-amber-800,
+.form-dark .text-amber-900 { color: #fcd34d; }
+.form-dark .bg-emerald-50 { background-color: rgba(16,185,129,0.12); }
+.form-dark .text-emerald-600,
+.form-dark .text-emerald-700,
+.form-dark .text-emerald-800,
+.form-dark .text-emerald-900 { color: #6ee7b7; }
+.form-dark .bg-\[\#FCE9E2\] { background-color: rgba(217,119,87,0.16); }
+.form-dark .text-\[\#B4502F\] { color: #f0a586; }
+.form-dark .border-\[\#F0C9BA\] { border-color: rgba(217,119,87,0.4); }
+.form-dark :is(input, textarea, select):focus { border-color: #D97757 !important; outline: none; }
+.form-dark.bg-\[\#F4F4F1\], .form-dark .min-h-\[100dvh\].bg-\[\#F4F4F1\] { background-color: #0d0e10; }

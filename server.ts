@@ -2783,7 +2783,7 @@ async function startServer() {
       },
       appType: 'spa',
     });
-    app.get(['/forms/:id', '/apply/:id'], (_req, res) => res.sendFile(path.join(process.cwd(), 'index.html')));
+    // In development the SPA (including shared /forms/:id links) is served by Vite, which adds its dev runtime.
     app.use('/api', (req, res) => {
       res.status(404).json({ error: `No such endpoint: ${req.method} ${req.originalUrl}` });
     });

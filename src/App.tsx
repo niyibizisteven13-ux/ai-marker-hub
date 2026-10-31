@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import bwengeLogo from './assets/bwenge-logo.svg';
 import { useStore } from './store/useStore';
 import {
   NavigationTab,
@@ -76,6 +77,7 @@ const CurationViewPage = React.lazy(() => import('./pages/CurationViewPage'));
 const OutputsLibrary = React.lazy(() => import('./components/OutputsLibrary'));
 const MarkPage = React.lazy(() => import('./components/MarkPage'));
 const AssignmentsPage = React.lazy(() => import('./components/AssignmentsPage'));
+const FormsPage = React.lazy(() => import('./components/FormsPage'));
 const AssignmentSubmitPage = React.lazy(() => import('./pages/AssignmentSubmitPage'));
 type MarkIncoming = import('./components/MarkPage').MarkIncoming;
 type MarkScanTarget = import('./components/MarkPage').MarkScanTarget;
@@ -238,6 +240,7 @@ export default function App() {
     // ?mark=1 (the chat's "Mark all" link) goes straight on to the Mark page with the class loaded.
     return m ? { id: m[1] ?? null, mark: !!m[1] && new URLSearchParams(window.location.search).get('mark') === '1' } : null;
   });
+  const [formsOpen, setFormsOpen] = useState(() => /^\/forms\/?$/.test(window.location.pathname));
   // Camera opened from the Mark page: its pages go back to that page (one folder per student), not to the old hub.
   const [scanForMark, setScanForMark] = useState(false);
   const [markIncoming, setMarkIncoming] = useState<MarkIncoming | null>(null);
@@ -1618,7 +1621,7 @@ export default function App() {
 
   const studioMatch = window.location.pathname.match(/^\/forms\/([^/?#]+)\/edit\/?$/);
   if (authenticatedUser && studioMatch) {
-    return <FormStudioPage formId={decodeURIComponent(studioMatch[1])} onBack={() => { window.history.pushState({}, '', '/'); window.location.reload(); }} />;
+    return <FormStudioPage formId={decodeURIComponent(studioMatch[1])} onBack={() => { window.location.href = '/forms'; }} />;
   }
 
   if (authenticatedUser && /^\/exams(\/|$)/.test(window.location.pathname)) {
@@ -1668,16 +1671,17 @@ export default function App() {
   }
 
   if (publicFormLoading || publicFormError || publicForm) {
+    // The page people open from a shared form link: dark, focused on the form, with the owner's colour as accent.
+    const accent = publicForm?.themeColor || '#D97757';
     return (
-      <div className="min-h-[100dvh] w-full bg-[#F4F4F1] dark:bg-[#141416] text-slate-900 overflow-y-auto flex flex-col">
-        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-black/10 bg-white/90 px-4 sm:px-8 py-3 backdrop-blur-md">
-          <div className="flex items-center gap-2.5">
-            <span className="h-3 w-3 rounded-full" style={{ backgroundColor: publicForm?.themeColor || '#D97757' }} />
-            <span className="text-sm font-bold text-slate-800 truncate">
-              {publicForm?.title || 'Bwenge Form'}
-            </span>
+      <div className="form-dark min-h-[100dvh] w-full overflow-y-auto flex flex-col bg-[#0d0e10] text-[#ececee]">
+        <div aria-hidden="true" className="pointer-events-none fixed inset-x-0 top-0 h-72 opacity-40" style={{ background: `radial-gradient(60% 100% at 50% 0%, ${accent}33, transparent 70%)` }} />
+        <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-white/[0.06] bg-[#0d0e10]/85 px-4 py-3 backdrop-blur-md sm:px-8">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <img src={bwengeLogo} alt="" className="h-7 w-7 shrink-0 rounded-lg" />
+            <span className="truncate text-sm font-semibold text-white">{publicForm?.title || 'Form'}</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             {publicForm?.id && (
               <button
                 type="button"
@@ -1688,27 +1692,30 @@ export default function App() {
                     window.setTimeout(() => setPublicFormLinkCopied(false), 1800);
                   } catch { showAiStatus('warning', 'Could not copy this form link'); }
                 }}
-                className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                className="rounded-lg border border-white/10 px-3 py-1.5 text-xs font-medium text-neutral-200 hover:bg-white/[0.06]"
               >
                 {publicFormLinkCopied ? 'Link copied' : 'Copy link'}
               </button>
             )}
-            <button
-              type="button"
-              onClick={() => {
-                setPublicForm(null);
-                setPublicFormError('');
-                setPublicFormLoading(false);
-                window.history.pushState({}, '', '/');
-              }}
-              className="rounded-lg bg-slate-900 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-slate-800"
-            >
-              Back to Studio
-            </button>
+            {authenticatedUser && (
+              <button
+                type="button"
+                onClick={() => {
+                  setPublicForm(null);
+                  setPublicFormError('');
+                  setPublicFormLoading(false);
+                  window.history.pushState({}, '', '/forms');
+                  window.location.reload();
+                }}
+                className="rounded-lg bg-[#ececee] px-3.5 py-1.5 text-xs font-semibold text-[#0d0e10] hover:bg-[#d6d6d9]"
+              >
+                My forms
+              </button>
+            )}
           </div>
         </header>
 
-        <main className="flex-1 px-4 py-8 sm:px-6">
+        <main className="relative flex-1 px-4 py-8 sm:px-6 sm:py-12">
           {publicFormLoading ? (
             <div className="mx-auto max-w-2xl rounded-2xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500 shadow-sm">
               Loading form…
@@ -1747,6 +1754,7 @@ export default function App() {
               />
             </Suspense>
           )}
+          <p className="mx-auto mt-10 max-w-2xl text-center text-[11.5px] text-neutral-500">Made with Bwenge · Never share passwords in a form.</p>
         </main>
       </div>
     );
@@ -1804,6 +1812,7 @@ export default function App() {
           onOpenPublicLibrary={() => { setLibraryTab('library'); setLibraryOpen(true); }}
           onOpenMark={() => setMarkOpen(true)}
           onOpenAssignments={() => setAssignmentsOpen({ id: null })}
+          onOpenForms={() => { setFormsOpen(true); window.history.pushState({}, '', '/forms'); }}
           collapsed={sidebarCollapsed}
           setCollapsed={setSidebarCollapsed}
           user={authenticatedUser}
@@ -1916,6 +1925,11 @@ export default function App() {
         )}
       </Suspense>
       {authenticatedUser && <Suspense fallback={null}><MarkingDrawer /></Suspense>}
+      {authenticatedUser && formsOpen && (
+        <Suspense fallback={null}>
+          <FormsPage onClose={() => { setFormsOpen(false); if (/^\/forms\/?$/.test(window.location.pathname)) window.history.replaceState({}, '', '/'); }} />
+        </Suspense>
+      )}
       {authenticatedUser && assignmentsOpen && (
         <Suspense fallback={null}>
           <AssignmentsPage
