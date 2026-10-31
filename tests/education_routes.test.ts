@@ -298,8 +298,8 @@ test('exam live stream is owner-scoped and replays saved state without AI calls'
 
 test('scanner limits are shared and stopping another teacher examination is rejected', async () => {
   const limits = await (await fetch(`${base}/api/exams/limits`, as('limits-owner'))).json();
-  assert.equal(limits.maxCandidates, 30);
-  assert.equal(limits.maxPagesPerPaper, 20);
+  assert.equal(limits.maxCandidates, 300);
+  assert.equal(limits.maxPagesPerPaper, 40);
   assert.ok(limits.maxUploadBytes >= limits.maxFileBytes);
   const exam = await (await fetch(`${base}/api/exams`, json('limits-owner', { title: 'Limits test' }))).json();
   assert.equal((await fetch(`${base}/api/exams/${exam.examId}/stop`, json('other-user', {}))).status, 404);

@@ -262,12 +262,16 @@ Other users' exams answer 404. Signed download URLs expire after 1 hour (`FileSt
 | `EXAMS_DIR` | `./data/exams` | Exam records and chat context (durable volume). |
 | `EXAM_CANDIDATE_CONCURRENCY` | 6 | Scripts processed in parallel per batch. |
 | `EXAM_QUESTIONS_PER_CALL` | auto | Questions marked per AI call. By default the questions of a script are shared out over the `EXAM_QUESTION_CONCURRENCY` groups (at most 4 per call), so a script is marked in about one round of calls. |
-| `EXAM_MAX_CANDIDATES` | 100 | Per exam. |
+| `EXAM_MAX_CANDIDATES` | 300 | Students per exam. |
 | `EXAM_SEGMENT_BUDGET_MS` | 480000 | Hand over to a continuation job before the 10-minute queue deadline. |
 | `EXAM_CHAT_WAIT_MS` | 45000 | How long a chat turn waits for a quick job (export, re-mark) before replying "still working". |
 | `EXAM_MAX_FILES_PER_UPLOAD` | 30 | REST upload limit; each file ≤ 20 MB. |
 | `FILE_STORE_MAX_BYTES` | `CHAT_MAX_FILE_MB` (100 MB) | Raise for large ZIP packages. If the ZIP is too large, the workbook, report and PDFs are still delivered separately. |
-| `DOC_MAX_PAGES` | 20 | Pages per script. |
+| `DOC_MAX_PAGES` | 40 | Pages per script. |
+| `EXAM_MAX_BATCH_PAGES` | 2000 | Pages in one marking job (all students together). |
+| `EXAM_SECOND_OPINION_BELOW` | 0.6 | Answers marked with lower confidence are marked again independently; agreement raises confidence, a different mark is flagged for the teacher with both marks. |
+| `EXAM_SECOND_OPINION_MAX` | 6 | Most answers per script given a second marking (0 turns it off). |
+| `EXAM_SPLIT_MODEL` | marking model | Model that finds where each student starts in a whole-class PDF (8 small page pictures per call). |
 | `CHAT_MAX_FILE_MB` | 100 | Largest file sent through the chat (web). Files over 8 MB are uploaded first and passed by id. Telegram bots can only download files up to 20 MB (Telegram's limit). |
 
 Retention: exam records, originals and artifacts are kept for 30 days, the same as documents.

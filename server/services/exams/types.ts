@@ -17,7 +17,7 @@ export type ResultStatus = 'provisional' | 'needs_review' | 'user_corrected' | '
 export type ReviewFlagCode =
   | 'unreadable_handwriting' | 'uncertain_reading' | 'recognition_disagreement' | 'mapping_uncertain'
   | 'unsupported_justification' | 'marks_inconsistent' | 'missing_evidence' | 'transcription_affects_mark'
-  | 'rubric_ambiguity' | 'no_answer_found' | 'multiple_attempts' | 'scheme_changed' | 'marking_failed';
+  | 'rubric_ambiguity' | 'no_answer_found' | 'multiple_attempts' | 'scheme_changed' | 'marking_failed' | 'second_opinion_differs';
 
 export interface ReviewFlag { code: ReviewFlagCode; severity: 'medium' | 'high'; detail: string }
 
@@ -102,6 +102,8 @@ export interface AiQuestionMark {
   /** Short red correction written under a wrong answer, e.g. "Area = 7 × 5 = 35 cm²". */
   correction?: string | null;
   confidence?: MarkConfidence;
+  /** A second, independent marking of a low-confidence answer: its mark and whether it agreed. */
+  secondOpinion?: { awardedMarks: number; agreed: boolean };
   model: string;
   at: string;
 }

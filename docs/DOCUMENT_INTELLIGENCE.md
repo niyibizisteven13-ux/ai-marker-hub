@@ -99,7 +99,7 @@ Element shape (illustrative values; real values come from the model and checks):
 | `AI_AGENT_PROVIDER=anthropic` + `ANTHROPIC_API_KEY` | Claude (`CLAUDE_AGENT_MODEL`, default `claude-haiku-5-5`) does recognition and questions |
 | `DOC_VISION_GONKA=true`, `DOC_VISION_MODEL` | Use a Gonka model instead. Set this **only** if that model accepts images |
 | `GONKA_FALLBACK_SUPPORTS_VISION=true` | Allow image requests to fall back from Claude to Gonka. When off, image requests never fall back |
-| `DOC_MAX_PAGES` (20), `DOCUMENTS_DIR`, `DOC_OCR_CROSSCHECK` (true), `TESSERACT_DATA_DIR` | Limits, storage location, cross-check switch, folder with `*.traineddata` |
+| `DOC_MAX_PAGES` (40), `DOCUMENTS_DIR`, `DOC_OCR_CROSSCHECK` (true), `TESSERACT_DATA_DIR` | Limits, storage location, cross-check switch, folder with `*.traineddata` |
 | `TESSERACT_LANG` (`eng`) | OCR languages, `+`-separated (`eng`, `fra`, `kin`); the matching `.traineddata` files must be in `TESSERACT_DATA_DIR` |
 | `DOC_TILING` (`auto`), `DOC_MAX_TILES_PER_PAGE` (4) | Close-up tiling rule and cap |
 | `DOC_PDF_SCALE` (3) | PDF render scale (× 72 DPI) |
