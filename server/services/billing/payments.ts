@@ -3,6 +3,7 @@ import { prisma } from '../../db.js';
 import logger from '../../utils/logger.js';
 import { EmailService } from '../EmailService.js';
 import { PLANS, SOLD_PLANS, currentGoPacks, fxUsdRwf, planFor, planIdForSubscription, refreshBillingSettings, subscriptionTypeFor, walletBalance, type SoldPlanId } from './plans.js';
+import { pauseMessage, salesState } from './sales.js';
 import { MomoError, momoConfig, momoReady, normalizeMsisdn, paymentStatus, requestToPay } from './momo.js';
 import { expiredEmail, paymentFailedEmail, receiptEmail, renewalReminderEmail, type Email } from './emails.js';
 
@@ -52,6 +53,8 @@ export function publicPayment(p: any) {
 
 /** Starts a Mobile Money payment; the payer approves it on their phone. */
 export async function startPayment(userId: string, input: { purpose: Purpose; packId?: string; months?: number; phone: string }) {
+  const sales = await salesState();
+  if (sales.paused) throw new BillingError(pauseMessage(sales), 503, 'SALES_PAUSED');
   if (!momoReady()) throw new BillingError('Mobile Money payments are being set up. Please try again soon.', 503, 'NOT_CONFIGURED');
   const q = await quote(input.purpose, input);
   let phone;

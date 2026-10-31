@@ -8,6 +8,7 @@ import { momoConfig, momoHealth, momoMode } from '../services/billing/momo.js';
 import { checkPayment, publicPayment, runRenewalSweep } from '../services/billing/payments.js';
 import { periods, usedTotals } from '../services/billing/usage.js';
 import { guardState, saveGuardSettings } from '../services/billing/aiGuard.js';
+import { DEFAULT_PAUSE_MESSAGE, salesState, setSalesPaused } from '../services/billing/sales.js';
 
 /**
  * Admin billing control (/api/admin/billing, ADMIN only): revenue vs AI cost, prices and limits, Mobile Money
@@ -97,6 +98,19 @@ router.put('/settings', async (req, res) => {
     await refreshBillingSettings(true);
     logger.info('[admin billing] settings updated', { admin: adminId(req) });
     res.json({ success: true });
+  } catch (e) { fail(res, e); }
+});
+
+/** The "Pause upgrades" switch: stops new plan and top-up purchases until it is turned off. */
+router.get('/sales', async (_req, res) => {
+  try { res.json({ success: true, ...(await salesState(true)), defaultMessage: DEFAULT_PAUSE_MESSAGE }); } catch (e) { fail(res, e); }
+});
+router.put('/sales', async (req, res) => {
+  try {
+    const body = z.object({ paused: z.boolean(), message: z.string().max(300).nullable().optional() }).strict().parse(req.body ?? {});
+    const state = await setSalesPaused(body.paused, adminId(req), body.message);
+    logger.info('[admin billing] upgrades ' + (state.paused ? 'paused' : 'resumed'), { admin: adminId(req) });
+    res.json({ success: true, ...state, defaultMessage: DEFAULT_PAUSE_MESSAGE });
   } catch (e) { fail(res, e); }
 });
 

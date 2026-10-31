@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from 'express';
+import { pauseMessage, salesState } from '../services/billing/sales.js';
 import { z } from 'zod';
 import { prisma } from '../db.js';
 import { requireAuth } from '../../production/auth.js';
@@ -25,10 +26,12 @@ function fail(res: Response, e: any) {
 router.get('/plans', async (_req, res) => {
   await refreshBillingSettings();
   const P = PLANS;
+  const sales = await salesState();
   res.json({
     success: true,
     fxUsdRwf: fxUsdRwf(),
     payments: momoMode(),
+    sales: { paused: sales.paused, message: sales.paused ? pauseMessage(sales) : null },
     plans: [
       { id: 'FREE', name: 'Free', priceUsd: 0, priceRwf: 0, period: 'forever', limits: P.FREE.limits },
       { id: 'GO', name: P.GO.name, priceUsd: null, priceRwf: null, period: 'pay as you go', limits: P.GO.limits, packs: currentGoPacks().map((p) => ({ ...p, usd: Math.round((p.rwf / fxUsdRwf()) * 100) / 100 })) },

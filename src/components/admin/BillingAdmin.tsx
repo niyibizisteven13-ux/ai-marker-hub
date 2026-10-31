@@ -85,6 +85,7 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
   return (
     <div className="space-y-6">
       <AiGuardPanel notify={notify} />
+      <SalesPanel notify={notify} />
 
       {/* Overview */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -355,5 +356,45 @@ function AiGuardPanel({ notify }: { notify: (msg: string, error?: boolean) => vo
         </div>
       </div>
     </section>
+  );
+}
+
+/** "Pause upgrades": stops new plan and top-up purchases (web and Telegram) until it is turned off. */
+function SalesPanel({ notify }: { notify: (msg: string, error?: boolean) => void }) {
+  const [state, setState] = useState<{ paused: boolean; message: string | null; pausedAt: string | null; defaultMessage: string } | null>(null);
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { void api<typeof state & object>('/api/admin/billing/sales').then((s) => { setState(s); setMessage(s.message ?? ''); }).catch((e) => notify(e.message, true)); }, [notify]);
+  if (!state) return null;
+  const set = async (paused: boolean) => {
+    if (paused && !state.paused && !window.confirm('Pause upgrades? Nobody will be able to buy a plan or top up until you resume. Current plans keep working.')) return;
+    setBusy(true);
+    try {
+      const s = await api<NonNullable<typeof state>>('/api/admin/billing/sales', { method: 'PUT', body: JSON.stringify({ paused, message: message.trim() || null }) });
+      setState(s);
+      notify(paused ? 'Upgrades paused. The Upgrade page shows your message.' : 'Upgrades are open again.');
+    } catch (e) { notify((e as Error).message, true); } finally { setBusy(false); }
+  };
+  return (
+    <div className={`${card} space-y-3 ${state.paused ? 'border-amber-500/50' : ''}`}>
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <h3 className="flex items-center gap-2 text-base font-semibold text-white">
+            Upgrades
+            <span className={`rounded-md px-2 py-0.5 text-[11px] font-bold uppercase ${state.paused ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/15 text-emerald-300'}`}>{state.paused ? 'Paused' : 'Open'}</span>
+          </h3>
+          <p className="text-xs text-[#8A97C2]">{state.paused
+            ? `Nobody can buy a plan or top up${state.pausedAt ? ` since ${new Date(state.pausedAt).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}. Payments already started still finish; current plans keep working; you can still give plans to users below.`
+            : 'People can buy plans and top-ups. Pause to stop new purchases, for example while prices change or payments are checked.'}</p>
+        </div>
+        {state.paused
+          ? <button className={`${btn} bg-emerald-500 text-white hover:bg-emerald-600`} disabled={busy} onClick={() => void set(false)}>{busy ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />} Resume upgrades</button>
+          : <button className={`${btn} bg-amber-500 text-[#1A1200] hover:bg-amber-400`} disabled={busy} onClick={() => void set(true)}>{busy ? <Loader2 size={13} className="animate-spin" /> : <Pause size={13} />} Pause upgrades</button>}
+      </div>
+      <label className="block text-xs text-[#8A97C2]">Message shown on the Upgrade page while paused
+        <input className={`${input} mt-1`} maxLength={300} value={message} placeholder={state.defaultMessage} onChange={(e) => setMessage(e.target.value)} disabled={busy} />
+      </label>
+      {state.paused && message.trim() !== (state.message ?? '') && <button className={`${btn} bg-[#1A2240] text-[#C9D3F0] hover:bg-[#222C50]`} disabled={busy} onClick={() => void set(true)}><Save size={13} /> Update message</button>}
+    </div>
   );
 }
