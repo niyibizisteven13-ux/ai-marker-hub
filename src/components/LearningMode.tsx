@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, ChevronDown, GraduationCap, MessageSquare, Theater, Volume2, VolumeX, X } from 'lucide-react';
 import { ROLEPLAY_PRESETS, speechLang, type LearningSettings } from '../lib/learning/presets';
+import { checkMicrophone, explainCaptureFailure } from '../utils/microphone';
 
 /**
  * Learning modes in the composer: Normal, Socratic tutor (hints instead of answers) and Roleplay (practise a
@@ -108,8 +109,7 @@ export function useSpeechInput(lang: string, onText: (t: string) => void) {
   const supported = !!Ctor;
   const stop = useCallback(() => { stopping.current = true; rec.current?.stop(); setListening(false); setInterim(''); }, []);
   const abort = useCallback(() => { stopping.current = true; rec.current?.abort?.(); setListening(false); setInterim(''); }, []);
-  const start = useCallback(() => {
-    if (!Ctor) return false;
+  const begin = useCallback(() => {
     const r = new Ctor();
     r.lang = lang;
     r.interimResults = true;
@@ -128,18 +128,29 @@ export function useSpeechInput(lang: string, onText: (t: string) => void) {
       const code = e?.error;
       if (code === 'no-speech' || code === 'aborted') return;
       stopping.current = true;
-      setError(code === 'not-allowed' || code === 'service-not-allowed' ? 'Allow the microphone for this site (the lock or camera icon in the address bar), then try again.'
-        : code === 'audio-capture' ? 'No microphone was found.'
-          : code === 'network' ? 'Voice input needs an internet connection.' : 'Voice input stopped. Try again.');
       setListening(false); setInterim('');
+      if (code === 'audio-capture') { void explainCaptureFailure().then(setError); return; }
+      setError(code === 'not-allowed' || code === 'service-not-allowed' ? 'The microphone is blocked for this site. Click the lock icon in the address bar, set Microphone to Allow, then try again.'
+        : code === 'network' ? 'Voice typing needs an internet connection (the browser sends your voice to its speech service).'
+          : code === 'language-not-supported' ? 'Voice typing is not available for this language in your browser. Choose another answer language.'
+            : 'Voice typing stopped. Try again.');
     };
+    rec.current = r;
+    try { r.start(); } catch { setError('Voice typing could not start. Try again.'); setListening(false); }
+  }, [Ctor, lang, onText]);
+  /** Checks the microphone first (this shows the permission prompt and finds the real problem), then listens. */
+  const start = useCallback(() => {
+    if (!Ctor) return false;
     stopping.current = false;
     setError(null);
-    rec.current = r;
-    r.start();
     setListening(true);
+    void checkMicrophone().then((mic) => {
+      if (stopping.current) return;
+      if (!mic.ok) { setError(mic.message ?? 'The microphone could not be started.'); setListening(false); return; }
+      begin();
+    });
     return true;
-  }, [Ctor, lang, onText]);
+  }, [Ctor, begin]);
   useEffect(() => () => { stopping.current = true; rec.current?.abort?.(); }, []);
   return { supported, listening, interim, error, clearError: () => setError(null), start, stop, abort };
 }

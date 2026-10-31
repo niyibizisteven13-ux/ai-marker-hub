@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { micErrorMessage } from '../utils/microphone';
 import { Mic, Square } from 'lucide-react';
 
 /**
@@ -16,7 +17,7 @@ export default function VoiceRecorder({ onRecorded, onError, maxSeconds = 600, c
   useEffect(() => { if (recording && seconds >= maxSeconds) stop(); }, [recording, seconds, maxSeconds]);
 
   const start = async () => {
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') { onError('Voice recording is not available in this browser. Use Chrome, Edge or Safari.'); return; }
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') { onError(window.isSecureContext ? 'Voice recording is not available in this browser. Use Chrome, Edge or Safari.' : micErrorMessage(null)); return; }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const type = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find((t) => MediaRecorder.isTypeSupported?.(t)) ?? '';
@@ -37,8 +38,8 @@ export default function VoiceRecorder({ onRecorded, onError, maxSeconds = 600, c
       setSeconds(0);
       setRecording(true);
       timer.current = window.setInterval(() => setSeconds((s) => s + 1), 1000);
-    } catch {
-      onError('Allow the microphone for this page, then try again.');
+    } catch (err) {
+      onError(micErrorMessage(err));
     }
   };
 
