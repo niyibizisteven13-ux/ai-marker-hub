@@ -195,9 +195,11 @@ export function finalizeQuestion(q: SchemeQuestion, allowHalf: boolean, m: Model
     if (!flags.some((x) => x.code === f.code)) flags.push(f);
   }
 
-  // A high-uncertainty reading cannot justify either a red cross or a final score.
-  // Keep the proposal for review; teacher correction and re-marking can establish a valid mark.
-  if (unreadable.length) awarded = null;
+  // A hard-to-read answer keeps the marks the marker could justify: they stand as a proposal with a
+  // high-severity flag and low confidence, so the teacher sees and can change them. (Withholding them left
+  // scripts at "-/10" with no ticks even when most of the working was clear.) A zero is still held back:
+  // an unreadable answer is never turned into a wrong-answer cross.
+  if (unreadable.length && (awarded ?? 0) <= 0) awarded = null;
   const full = awarded !== null && awarded >= q.maxMarks;
   // The record a "why" answer is read from: the answer as read, the scheme line behind each mark, the reason, the confidence.
   const rubricOf = new Map((q.marking === 'holistic' ? [] : (pathCriteria(q, path) ?? q.criteria)).map((c) => [c.id, c.description]));

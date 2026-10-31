@@ -4,7 +4,7 @@ import { Loader2 } from 'lucide-react';
 import { authFetch } from '../utils/authFetch';
 type Sym = 'tick' | 'cross' | 'half';
 export interface Item {
-  id: string; kind: 'mark' | 'correction' | 'total'; questionId?: string; number?: string; page: number; fx: number; fy: number; w: number; h: number;
+  id: string; kind: 'mark' | 'correction' | 'total' | 'underline'; questionId?: string; number?: string; page: number; fx: number; fy: number; w: number; h: number;
   placed: boolean; auto: boolean; hidden: boolean; symbols?: Sym[]; label?: string; text?: string; flagged?: boolean;
   confidence?: { level: 'high' | 'medium' | 'low'; score: number; basis: string[] } | null;
 }
@@ -86,10 +86,14 @@ export function PageView({ examId, submissionId, page, aspect, items, selected, 
         const fx = it.fx + (d?.dx ?? 0), fy = it.fy + (d?.dy ?? 0);
         const sel = selected === it.id;
         const ring = (editable ? 'touch-none ' : '') + (sel ? 'outline outline-2 outline-offset-2 outline-sky-500' : it.flagged || it.confidence?.level === 'low' ? 'outline outline-1 outline-dashed outline-offset-2 outline-orange-500' : 'hover:outline hover:outline-1 hover:outline-offset-2 hover:outline-sky-400');
-        const label = it.kind === 'mark' ? `Question ${it.number}: ${it.label || 'mark'}` : it.kind === 'correction' ? `Correction: ${it.text}` : `Total: ${it.label}`;
+        const label = it.kind === 'mark' ? `Question ${it.number}: ${it.label || 'mark'}` : it.kind === 'correction' ? `Correction: ${it.text}` : it.kind === 'underline' ? `Question ${it.number}: working that lost marks` : `Total: ${it.label}`;
         const common = { role: 'button', tabIndex: 0, 'aria-label': label, 'aria-pressed': sel,
           onKeyDown: (e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onSelect(it.id); } },
           onPointerDown: (e: RPointerEvent) => down(e, it), title: `${label} · ${editable ? 'Drag to move' : 'Select to review'}` };
+        if (it.kind === 'underline') {
+          // Red underline under the working that lost marks; selectable like the other marks.
+          return <div key={it.id} {...common} className={`absolute cursor-pointer ${ring}`} style={{ left: fx * width, top: fy * height - 3, width: it.w * width, height: 6, borderBottom: `2px solid ${RED}`, borderRadius: 2 }} />;
+        }
         if (it.kind === 'total') {
           const fs = Math.max(9, 0.03 * width);
           return (

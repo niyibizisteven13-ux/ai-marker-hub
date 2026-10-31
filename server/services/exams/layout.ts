@@ -12,16 +12,17 @@ import { effectiveMarks, openFlags } from './results.js';
  *  - each question's ticks/crosses (one per marking step) and "awarded/max" sit in the right margin, level
  *    with the last line of the answer, clear of the writing; marks on one page never overlap;
  *  - a short red correction goes just under a wrong answer, only where that space is empty;
- *  - the total is circled at the top of page 1;
+ *  - the working behind a lost mark is underlined in red, so the student sees where it went wrong;
+ *  - the total is circled at the top of page 1, in the first spot that does not cover writing;
  *  - a teacher's adjustment (position or hiding) always wins over the automatic placement.
  */
 
 export type MarkSymbol = 'tick' | 'cross' | 'half';
 
 export interface LayoutItem {
-  /** "<questionId>:mark", "<questionId>:correction" or "total". */
+  /** "<questionId>:mark", "<questionId>:criterion:<id>", "<questionId>:correction", "<questionId>:underline:<criterion>:<element>" or "total". */
   id: string;
-  kind: 'mark' | 'correction' | 'total';
+  kind: 'mark' | 'correction' | 'total' | 'underline';
   questionId?: string;
   number?: string;
   page: number;
@@ -173,6 +174,18 @@ export function computeLayout(doc: DocumentResult, result: CandidateResult, tota
       } else taken.set(mark.page, reserved);
     }
 
+    // Underline the working behind each lost mark (at most three lines per step), just below the writing.
+    if (!q.override && marks !== null && marks < q.maxMarks) {
+      for (const c of q.ai?.criterionResults ?? []) {
+        if (c.awardedMarks >= c.maxMarks) continue;
+        const lines = (c.evidenceElementIds ?? []).filter((id) => !crossed.has(id)).map((id) => [id, boxes.get(id)] as const).filter(([, b]) => b?.usable).slice(0, 3);
+        for (const [id, b] of lines) {
+          const h = 0.004;
+          items.push({ ...base, id: `${q.questionId}:underline:${c.criterionId}:${id}`, kind: 'underline', page: b!.page, fx: b!.x0, fy: Math.min(0.995, b!.y1 + 0.003), w: Math.max(0.02, b!.x1 - b!.x0), h, placed: true, auto: true, hidden: false });
+        }
+      }
+    }
+
     const text = marks !== null && marks < q.maxMarks ? q.ai?.correction?.trim() : '';
     if (text) {
       const corr: LayoutItem = { ...base, id: `${q.questionId}:correction`, kind: 'correction', page: anchor?.page ?? 1, fx: 0, fy: 0, w: text.length * NOTE_CHAR, h: 0, placed: false, auto: true, hidden: false, text };
@@ -196,7 +209,11 @@ export function computeLayout(doc: DocumentResult, result: CandidateResult, tota
   const aspect1 = aspectOf.get(1) ?? 1.414;
   const totalLabel = `${fmt(total.total)}/${fmt(total.maxTotal)}`;
   const tw = Math.max(0.09, totalLabel.length * 0.017 + 0.04);
-  items.push({ id: 'total', kind: 'total', page: 1, fx: RIGHT_LIMIT - tw / 2 - 0.01, fy: 0.045, w: tw, h: 0.05 / aspect1, placed: doc.pages.length > 0, auto: true, hidden: false, label: totalLabel });
+  const th = 0.05 / aspect1;
+  // The first corner of page 1 where the circle covers no writing: top right, top left, top centre, then bottom.
+  const spots = [[RIGHT_LIMIT - tw / 2 - 0.01, 0.045], [tw / 2 + 0.03, 0.045], [0.5, 0.035], [RIGHT_LIMIT - tw / 2 - 0.01, 0.955], [tw / 2 + 0.03, 0.955]];
+  const spot = spots.find(([x, y]) => isFree(1, { x0: x - tw / 2, x1: x + tw / 2, y0: y - th / 2, y1: y + th / 2 })) ?? spots[0];
+  items.push({ id: 'total', kind: 'total', page: 1, fx: spot[0], fy: spot[1], w: tw, h: th, placed: doc.pages.length > 0, auto: true, hidden: false, label: totalLabel });
 
   // Teacher adjustments win.
   for (const it of items) {

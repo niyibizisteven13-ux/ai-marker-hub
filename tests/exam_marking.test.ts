@@ -19,6 +19,7 @@ import { changedQuestions, questionKey, validateScheme, type MarkingSchemeInput 
 import { matchAnswers, readLabel } from '../server/services/exams/matching.js';
 import { finalizeQuestion, markCandidate, markConfidence, preferenceLines } from '../server/services/exams/marking.js';
 import { verifyMarkedPdf } from '../server/services/exams/verifyPdf.js';
+import { pdfSafe } from '../server/services/exams/annotate.js';
 import { computeLayout, symbolsFor } from '../server/services/exams/layout.js';
 import { expandArchives, typedToPdf } from '../server/services/exams/inputs.js';
 import { PDFParse } from 'pdf-parse';
@@ -566,9 +567,9 @@ test('end to end: batch marking, failures isolated, package contents match the p
   cr.eachRow((row, i) => { if (i > 1) totals.set(String(row.getCell(1).value), (row.getCell(6).value as any).result); });
   assert.deepEqual(Object.fromEntries(totals), { C001: 5, C002: 3 }, 'workbook totals equal the persisted results');
 
-  // Marked PDFs keep the source pages, add a summary page and carry stable metadata.
+  // Marked PDFs keep the source pages and carry stable metadata; no extra summary page when every mark is on the script.
   const marked = await PDFDocument.load(await zip.file('examination-results/candidates/C002_marked.pdf')!.async('nodebuffer'));
-  assert.equal(marked.getPageCount(), 2);
+  assert.equal(marked.getPageCount(), 1);
   assert.equal(marked.getPage(0).getRotation().angle, 90, 'source page rotation preserved');
   assert.match(marked.getSubject()!, new RegExp(`run ${run.id}; revision ${done.resultRevision}`));
   assert.ok(!set.problems.some((p) => p.startsWith('C001')), 'C001 marks were placed on the page');
@@ -824,8 +825,7 @@ test('review: saved record, page images, moving a mark, release and the draft la
   const releasedPdf = (await fileStore.read(after.artifacts[0].candidatePdfs[sub.id], user)).data;
   const text = await pdfText(releasedPdf);
   assert.doesNotMatch(text, /DRAFT/);
-  assert.match(text, /Released by the teacher/);
-  assert.match(text, /Correction: x = 6 - 2 = 4/);
+  assert.match(text, /x = 6 - 2 = 4/, 'the correction is written on the script itself');
 
   // The original scan is never changed.
   assert.ok((await fileStore.read(sub.fileId, user)).data.equals(original));
@@ -1184,4 +1184,21 @@ test('overnight: the run goes to the overnight queue, every model call runs in b
     adapter.stream = stream;
     await nightQueue.stop();
   }
+});
+
+test('on the page: the working behind a lost mark is underlined, the total avoids the writing, maths letters stay readable', () => {
+  const doc = docOf([[{ id: 'e1', text: '1) x = 6 - 2' }, { id: 'e2', text: '= 5' }]]);
+  const result: CandidateResult = {
+    submissionId: 's', candidateId: 'C1', runId: 'r', schemeVersion: 1, updatedAt: 't', usage: { input: 0, output: 0 },
+    questions: [{ questionId: 'Q1', number: '1', maxMarks: 3, override: null, confirmed: null, mappedElementIds: [], mappingFlags: [], history: [],
+      ai: { runId: 'r', schemeVersion: 1, awardedMarks: 1, path: null, level: null, feedback: '', lostMarks: '', answerFound: true, evidenceElementIds: ['p1-e1', 'p1-e2'], evidenceQuotes: [], reviewFlags: [], model: 'm', at: '',
+        criterionResults: [{ ...crit('Q1-A', 1, 1, 'Subtract 2'), evidenceElementIds: ['p1-e1'] }, { ...crit('Q1-B', 0, 2, 'x = 4'), evidenceElementIds: ['p1-e2'] }] } }],
+  };
+  const { items } = computeLayout(doc, result, { total: 1, maxTotal: 3 });
+  const lines = items.filter((i) => i.kind === 'underline');
+  assert.deepEqual(lines.map((i) => i.id), ['Q1:underline:Q1-B:p1-e2'], 'only the working that lost marks is underlined');
+  assert.ok(lines[0].placed && lines[0].fy > 0.14, 'just under the wrong line');
+  const total = items.find((i) => i.id === 'total')!;
+  assert.ok(total.placed && (total.fy < 0.1 || total.fy > 0.9), 'the total sits in a free corner');
+  assert.equal(pdfSafe('ẋ = y + t, ẍ'), "x' = y + t, x''", 'dotted derivatives keep their letter');
 });
