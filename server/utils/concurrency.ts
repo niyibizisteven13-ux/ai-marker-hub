@@ -63,7 +63,7 @@ const envInt = (v: string | undefined, d: number, max: number) => {
  * Vision-model calls in flight across this process (page readings, close-up tiles, marking with images). One cap
  * for all of them keeps a big class from hitting the provider's rate limits while still running many at once.
  */
-const liveVisionCalls = createLimiter(envInt(process.env.VISION_MAX_CONCURRENT, 8, 64));
+const liveVisionCalls = createLimiter(envInt(process.env.VISION_MAX_CONCURRENT, 12, 64));
 // Overnight requests wait in a batch for up to hours: they never hold the slots that live marking needs.
 export const visionCalls: Limiter = {
   run: (fn) => (isOvernight() ? fn() : liveVisionCalls.run(fn)),
@@ -71,4 +71,4 @@ export const visionCalls: Limiter = {
   get waiting() { return liveVisionCalls.waiting; },
 };
 /** Pages of one document read at the same time (all of them overnight, so they share one batch). */
-export const pageConcurrency = () => (isOvernight() ? 64 : envInt(process.env.DOC_PAGE_CONCURRENCY, 3, 16));
+export const pageConcurrency = () => (isOvernight() ? 64 : envInt(process.env.DOC_PAGE_CONCURRENCY, 6, 16));

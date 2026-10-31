@@ -165,6 +165,33 @@ Return safe for any normal educational, coding, math, writing, or professional t
   }
 
   /**
+   * The checks that cost nothing (blocked patterns, personal data), so a reply never waits for a classifier.
+   * The model itself declines harmful requests; the slower classification runs afterwards with reviewLater.
+   */
+  public quickScan(text: string): SafetyResult {
+    const pii = this.detectPII(text);
+    const blockReason = this.instantBlock(text);
+    if (blockReason) {
+      const result: SafetyResult = { category: 'illegal', blocked: true, reason: blockReason, piiDetected: pii.detected, piiTypes: pii.types };
+      this.audit(text, result);
+      return result;
+    }
+    return { category: 'safe', blocked: false, piiDetected: pii.detected, piiTypes: pii.types };
+  }
+
+  /** Classifies the message in the background and records it in the audit log when it looks harmful. Never throws. */
+  public reviewLater(text: string): void {
+    const looksRoutine = text.length < 20 || /^(hi|hello|thanks|thank you|ok|yes|no|great|help me with)/i.test(text.trim());
+    if (looksRoutine || !this.gonkaApiKey) return;
+    void this.classifyWithGonka(text).then(({ category, reason }) => {
+      if (category === 'harmful' || category === 'illegal') {
+        const pii = this.detectPII(text);
+        this.audit(text, { category, blocked: false, reason: `flagged after reply: ${reason}`, piiDetected: pii.detected, piiTypes: pii.types });
+      }
+    }).catch(() => undefined);
+  }
+
+  /**
    * Scan AI output before sending to client.
    * Checks for accidental PII or harmful content in AI responses.
    */

@@ -105,7 +105,7 @@ export const fileStore = new FileStore({
 
 export const fileJobQueue = new FileJobQueue({
   storageDir: process.env.JOBS_DIR ?? './data/jobs',
-  concurrency: Number(process.env.JOBS_CONCURRENCY) > 0 ? Number(process.env.JOBS_CONCURRENCY) : 2,
+  concurrency: Number(process.env.JOBS_CONCURRENCY) > 0 ? Number(process.env.JOBS_CONCURRENCY) : 4,
   maxActivePerUser: Number(process.env.JOBS_MAX_ACTIVE_PER_USER) > 0 ? Number(process.env.JOBS_MAX_ACTIVE_PER_USER) : 5,
   log: (event, data) => logger.info(`[jobs] ${event}`, data),
 });
@@ -901,7 +901,23 @@ export class AiService {
     // Library questions and research questions (current facts, "find sources") need the tools and the web.
     // Assignments (set a task, who handed in, mark the class) are tool work too.
     const assignmentTurn = /\b(assignments?|homework|hand[- ]?ins?|handed in|submissions?|devoirs?|umukoro|imikoro)\b/i.test(userText);
-    const dataTurn = !options.extractSchema && (assignmentTurn || needsResearch(userText) || await asksAboutDatasets(userText, options.userId).catch(() => false));
+    // The checks before the model starts run side by side (each may wait on the database or an embedding).
+    const memoryService = MemoryService.getInstance();
+    const currentQuery = extractPlainText(options.messages[options.messages.length - 1]?.content || '');
+    const dataTurnP = options.extractSchema ? Promise.resolve(false)
+      : assignmentTurn || needsResearch(userText) ? Promise.resolve(true) : asksAboutDatasets(userText, options.userId).catch(() => false);
+    // Memory across chats (PRO): save what the user states or asks to keep (facts and the episode trace are saved
+    // in the background), then recall what is relevant.
+    const memoryP = (async () => {
+      const captured = options.extractSchema ? { saved: [], forgotten: 0 } : await memoryService.capture(options.userId, userText, { deferAuto: true });
+      const recalled = await memoryService.getLongTermContext(options.userId, currentQuery);
+      return { captured, recalled };
+    })().catch((err) => {
+      logger.warn('generalAssist: memory unavailable, continuing without memory context', err);
+      return { captured: { saved: [] as Array<{ source: string; content: string }>, forgotten: 0 }, recalled: '' };
+    });
+    const platformP = options.extractSchema ? Promise.resolve('') : platformContext(options.userId, options.channel === 'telegram' ? 'telegram' : 'web').catch(() => '');
+    const dataTurn = await dataTurnP;
     const toolTurn = !!plan && (plan.artifact || plan.needsComputation) || dataTurn;
     // Photos and PDFs need a model that can see them (handwriting, scans, diagrams).
     const visualUpload = (options.files ?? []).some((f) => f.type === 'image' || /^image\/|application\/pdf/.test(f.mediaType));
@@ -920,13 +936,10 @@ export class AiService {
       }
     }
 
-    const memoryService = MemoryService.getInstance();
-    const currentQuery = extractPlainText(options.messages[options.messages.length - 1]?.content || '');
     let memoryContext = '';
     try {
-      // Memory across chats (PRO): save what the user states or asks to keep, then recall what is relevant.
-      const captured = options.extractSchema ? { saved: [], forgotten: 0 } : await memoryService.capture(options.userId, userText);
-      memoryContext = await memoryService.getLongTermContext(options.userId, currentQuery);
+      const { captured, recalled } = await memoryP;
+      memoryContext = recalled;
       if (memoryContext) memoryContext = `\n\n${memoryContext}`;
       if (captured.saved.some((m) => m.source === 'user')) memoryContext += `\n\n[Memory] The user's request was saved to memory: "${captured.saved.find((m) => m.source === 'user')!.content}". Confirm briefly that you will remember it.`;
       if (captured.forgotten) memoryContext += `\n\n[Memory] ${captured.forgotten} matching memor${captured.forgotten > 1 ? 'ies were' : 'y was'} deleted at the user's request. Confirm briefly.`;
@@ -934,7 +947,7 @@ export class AiService {
       logger.warn('generalAssist: getLongTermContext failed, continuing without memory context', err);
     }
 
-    const platform = options.extractSchema ? '' : await platformContext(options.userId, options.channel === 'telegram' ? 'telegram' : 'web');
+    const platform = await platformP;
     let systemPrompt = options.extractSchema
       ? `${BWENGE_GENERAL_SYSTEM_PROMPT}${memoryContext}\n\nFor this request, respond with ONLY valid JSON matching this shape, no other text: ${options.extractSchema}`
       : `${BWENGE_GENERAL_SYSTEM_PROMPT}${memoryContext}${platform ? `\n\n${platform}` : ''}\n\n${BWENGE_CHAT_RESPONSE_RULES}${options.learning ? (learningModePrompt(options.learning) ? `\n\n${learningModePrompt(options.learning)}` : '') : ''}`;
