@@ -158,7 +158,7 @@ test('pipeline with tiles: full page for context, tiles for detail, coordinates 
     // Tile (0,0) re-reads the same line at higher resolution (tile-relative coordinates).
     return { languages: ['en'], readingOrder: ['t1'], notes: [], elements: [el({ id: 't1', text: 'P = 280', region: { x0: 80, y0: 80, x1: 500, y1: 160 } })] };
   });
-  const r = await processDocument(await blank(3600, 5000), 'big.png', { adapter, model: 'm' }, { crossCheck: false, tiling: 'auto', maxTilesPerPage: 4 });
+  const r = await processDocument(await blank(3600, 5000), 'big.png', { adapter, model: 'm' }, { crossCheck: false, tiling: 'always', maxTilesPerPage: 4 });
   const p = r.pages[0];
   assert.ok(p.tiling && p.tiling.tiles >= 2);
   assert.equal(requests.length, 1 + p.tiling!.tiles);
@@ -169,6 +169,19 @@ test('pipeline with tiles: full page for context, tiles for detail, coordinates 
   assert.equal(e.needsReview, true);
   assert.equal(r.usage.input, 100 * requests.length);
   assert.ok(r.limitations.some((l) => /close-up tiles/.test(l)));
+});
+
+test('auto tiling: a large clear page is read once; close-ups only when the full reading found unclear writing', async () => {
+  const clear: RecognizedPage = { languages: ['en'], readingOrder: ['e1'], notes: [], elements: [el({ id: 'e1', text: 'P = 200' })] };
+  const one = scripted(() => clear);
+  const a = await processDocument(await blank(3600, 5000), 'big.png', { adapter: one.adapter, model: 'm' }, { crossCheck: false, tiling: 'auto', maxTilesPerPage: 4 });
+  assert.equal(one.requests.length, 1, 'no close-ups for a clear page');
+  assert.equal(a.pages[0].tiling, undefined);
+  const unclear: RecognizedPage = { ...clear, elements: [el({ id: 'e1', text: 'P = 200', legibility: 'partly_unclear' })] };
+  const two = scripted((req) => (/close-up/.test(JSON.stringify(req.messages)) ? { languages: ['en'], readingOrder: [], notes: [], elements: [] } : unclear));
+  const b = await processDocument(await blank(3600, 5000), 'big.png', { adapter: two.adapter, model: 'm' }, { crossCheck: false, tiling: 'auto', maxTilesPerPage: 4 });
+  assert.ok(b.pages[0].tiling && b.pages[0].tiling.tiles >= 2);
+  assert.equal(two.requests.length, 1 + b.pages[0].tiling!.tiles);
 });
 
 // ── Answer support validation ───────────────────────────────────────────────

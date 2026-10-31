@@ -15,12 +15,12 @@ Backend only. No new dependencies: `sharp`, `pdf-parse`, `tesseract.js` (with th
 
 **Deskew.** Ink pixels come from an Otsu threshold on a downscaled copy. Their projection profile is scored at candidate angles: ±15° in 0.5° steps, then 0.1° steps. A 4% border band is ignored (page edges and scanner beds are straight lines), and the histogram bin width equals the sampling step, which avoids a grid-aliasing bias towards 0°. On synthetic pages rotated by 0.8° to 12° the estimate is exact to 0.1°.
 
-**Tiling (small handwriting).** The full page is always read once at up to 2000 px. When that would shrink the page by 1.35× or more (`DOC_TILING=auto`, the default), the page is also read in up to `DOC_MAX_TILES_PER_PAGE` (4) overlapping tiles (12% overlap), each at full resolution. Tile coordinates are mapped back to the page, and the readings are merged:
+**Tiling (small handwriting).** The full page is always read once at up to 2000 px. When that would shrink the page by 1.35× or more and the full-page reading found unclear writing (`DOC_TILING=auto`, the default), the page is read again in up to `DOC_MAX_TILES_PER_PAGE` (4) overlapping tiles (12% overlap), each at full resolution. Tile coordinates are mapped back to the page, and the readings are merged:
 - **Agreement** (similarity ≥ 0.9): the full-page reading is kept.
 - **Disagreement:** the element gets a high-severity `tile_disagreement` signal. The tile reading replaces the full-page one only when the element lies inside that tile's core and is a text type; otherwise it is kept in `alternateReadings`.
 - **Found only in a tile:** inserted by position, de-duplicated across overlapping tiles, with a `tile_only` signal.
 
-`DOC_TILING=always|off` (or the `tiling` form field) overrides the rule. Tiling multiplies model calls per page (up to 1 + `DOC_MAX_TILES_PER_PAGE`).
+`DOC_TILING=always|off` (or the `tiling` form field) overrides the rule. `always` reads the close-ups alongside the full page on every large page. Tiling multiplies model calls per page (up to 1 + `DOC_MAX_TILES_PER_PAGE`), so `auto` keeps clear pages to one call.
 
 **Uncertainty signals and the review policy.** Each element carries `signals: [{ source, severity, detail }]`. They are kept separate rather than averaged into a single score, because none of them is a calibrated probability:
 

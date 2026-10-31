@@ -260,7 +260,8 @@ Other users' exams answer 404. Signed download URLs expire after 1 hour (`FileSt
 | `AI_AGENT_PROVIDER=anthropic` + `ANTHROPIC_API_KEY` | – | Needed: recognition needs a vision model; scheme extraction and marking use the agent model (`claude-haiku-5-5`). |
 | `CLAUDE_MARKING_MODEL`, `CLAUDE_MARKING_EFFORT` | agent model and effort | Model for reading handwriting, extracting schemes and marking. `claude-opus-5-5` with `high` is the most accurate choice; each script then costs more credits (priced from the model's real token use). Everyday chat and other agent tasks keep `CLAUDE_AGENT_MODEL`. |
 | `EXAMS_DIR` | `./data/exams` | Exam records and chat context (durable volume). |
-| `EXAM_CANDIDATE_CONCURRENCY` | 2 | Scripts processed in parallel per batch. |
+| `EXAM_CANDIDATE_CONCURRENCY` | 6 | Scripts processed in parallel per batch. |
+| `EXAM_QUESTIONS_PER_CALL` | auto | Questions marked per AI call. By default the questions of a script are shared out over the `EXAM_QUESTION_CONCURRENCY` groups (at most 4 per call), so a script is marked in about one round of calls. |
 | `EXAM_MAX_CANDIDATES` | 100 | Per exam. |
 | `EXAM_SEGMENT_BUDGET_MS` | 480000 | Hand over to a continuation job before the 10-minute queue deadline. |
 | `EXAM_CHAT_WAIT_MS` | 45000 | How long a chat turn waits for a quick job (export, re-mark) before replying "still working". |

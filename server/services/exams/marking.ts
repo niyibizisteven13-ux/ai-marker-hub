@@ -225,7 +225,7 @@ export interface MarkCandidateInput {
   schemeVersion: number;
   signal?: AbortSignal;
   fallbackModel?: string | null;
-  /** Questions per model call. */
+  /** Questions per model call; by default chosen so a script needs about one round of calls. */
   chunkSize?: number;
   /** Validated checkpoints from this run; never reuse a different scheme or run. */
   checkpoints?: Record<string, AiQuestionMark>;
@@ -265,7 +265,10 @@ export async function markCandidate(adapter: ProviderAdapter, model: string, inp
     if (saved?.runId === input.runId && saved.schemeVersion === input.schemeVersion && !saved.reviewFlags.some(f => f.code === 'marking_failed')) marks[q.id] = saved;
   }
   const pending = qs.filter(q => !marks[q.id]);
-  const size = Math.max(1, Math.min(6, Math.floor(input.chunkSize || 2)));
+  // By default the questions are split into as many groups as run at once (at most 4 questions per call), so a
+  // whole script is usually marked in one round of calls instead of one round per question.
+  const fixed = input.chunkSize || Number(process.env.EXAM_QUESTIONS_PER_CALL) || 0;
+  const size = fixed > 0 ? Math.max(1, Math.min(6, Math.floor(fixed))) : Math.max(1, Math.min(4, Math.ceil(pending.length / markingGroupConcurrency())));
   const chunks: SchemeQuestion[][] = [];
   for (let i = 0; i < pending.length; i += size) chunks.push(pending.slice(i, i + size));
   // Everything that is the same for every candidate and every group of questions goes first, once, and is cached

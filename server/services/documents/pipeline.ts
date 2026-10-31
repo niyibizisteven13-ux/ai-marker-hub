@@ -5,7 +5,7 @@ import { loadPages } from './pages.js';
 import { cropRegion, preprocessPage, type PageQuality } from './preprocess.js';
 import { recognizePage, type Region } from './recognize.js';
 import { ocrLanguagesFromEnv, reviewThreshold, summarize, verifyPage, type IndependentOcr, type ReviewThreshold, type VerifiedElement } from './verify.js';
-import { mergeTileReadings, planTiles, shouldTile, tileToPage, type TileElement, type TilingMode } from './tiling.js';
+import { mergeTileReadings, planTiles, shouldTile, tileToPage, type Tile, type TileElement, type TilingMode } from './tiling.js';
 import { checkMath, collectAssignments } from './mathcheck.js';
 import { mapPool, pageConcurrency, visionCalls } from '../../utils/concurrency.js';
 
@@ -14,7 +14,12 @@ import { mapPool, pageConcurrency, visionCalls } from '../../utils/concurrency.j
  * structure + independent checks → structured, source-linked result with review flags.
  */
 
-export const PIPELINE_VERSION = 'bwenge-docai-1.1.0';
+export const PIPELINE_VERSION = 'bwenge-docai-1.2.0';
+
+/** A full-page reading that is worth re-reading in close-ups: unclear writing, or nothing found on a large page. */
+export function needsCloseUp(page: { elements: Array<{ legibility: string; uncertainSpans: unknown[] }> }): boolean {
+  return !page.elements.length || page.elements.some((e) => e.legibility !== 'clear' || e.uncertainSpans.length > 0);
+}
 
 export interface ProcessedPage {
   page: number;
@@ -115,10 +120,8 @@ export async function processDocument(data: Buffer, filename: string, deps: Pipe
     await step(sp.page, 'recognising', 10);
     const modelImage = await sharp(pre.processed).resize({ width: MODEL_MAX_SIDE, height: MODEL_MAX_SIDE, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 90 }).toBuffer();
     const full = vision(() => recognizePage(deps.adapter, modelImage, 'image/jpeg', sp.page, { model: deps.model, fallbackModel: deps.fallbackModel, languageHint: opts.languageHint, signal: opts.signal }));
-    const tiles = shouldTile(pre.width, pre.height, tilingMode, MODEL_MAX_SIDE)
-      ? planTiles(pre.width, pre.height, { maxTiles: opts.maxTilesPerPage ?? (Number(process.env.DOC_MAX_TILES_PER_PAGE) || 4) })
-      : [];
-    const closeUps = Promise.all(tiles.map(async (t) => {
+    const plan = () => planTiles(pre.width, pre.height, { maxTiles: opts.maxTilesPerPage ?? (Number(process.env.DOC_MAX_TILES_PER_PAGE) || 4) });
+    const readTiles = (tiles: Tile[]) => Promise.all(tiles.map(async (t) => {
       const crop = await sharp(pre.processed).extract({ left: t.x, top: t.y, width: t.width, height: t.height })
         .resize({ width: MODEL_MAX_SIDE, height: MODEL_MAX_SIDE, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 92 }).toBuffer();
       if (opts.signal?.aborted) throw opts.signal.reason;
@@ -128,11 +131,26 @@ export async function processDocument(data: Buffer, filename: string, deps: Pipe
       }));
       return { t, tr };
     }));
-    // Both settle before either error is thrown, so no reading is left running unobserved.
-    const [fullRes, tileRes] = await Promise.allSettled([full, closeUps]);
-    if (fullRes.status === 'rejected') throw fullRes.reason;
-    if (tileRes.status === 'rejected') throw tileRes.reason;
-    const r = fullRes.value;
+    let tiles: Tile[] = [];
+    let tileRead: Array<{ t: Tile; tr: Awaited<ReturnType<typeof recognizePage>> }> = [];
+    let r: Awaited<ReturnType<typeof recognizePage>>;
+    if (tilingMode === 'always') {
+      // Close-ups read alongside the full page; both settle before either error is thrown.
+      tiles = plan();
+      const [fullRes, tileRes] = await Promise.allSettled([full, readTiles(tiles)]);
+      if (fullRes.status === 'rejected') throw fullRes.reason;
+      if (tileRes.status === 'rejected') throw tileRes.reason;
+      r = fullRes.value;
+      tileRead = tileRes.value;
+    } else {
+      // auto: a large page is read again in close-ups only when the full-page reading found unclear writing.
+      // Clear pages (most of a class) cost one reading instead of five.
+      r = await full;
+      if (shouldTile(pre.width, pre.height, tilingMode, MODEL_MAX_SIDE) && needsCloseUp(r.page)) {
+        tiles = plan();
+        tileRead = await readTiles(tiles);
+      }
+    }
     usedModel = true;
     usage.input += r.usage.input;
     usage.output += r.usage.output;
@@ -143,7 +161,7 @@ export async function processDocument(data: Buffer, filename: string, deps: Pipe
 
     if (tiles.length) {
       const tileEls: TileElement[] = [];
-      for (const { t, tr } of tileRes.value) {
+      for (const { t, tr } of tileRead) {
         usage.input += tr.usage.input;
         usage.output += tr.usage.output;
         for (const e of tr.page.elements) tileEls.push({ tile: t, element: { ...e, region: tileToPage(e.region, t, pre.width, pre.height) } });
