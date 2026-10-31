@@ -65,7 +65,7 @@ export const documentService = createDocumentService({
     return { adapter: a.adapter, model: a.model, fallbackModel: a.fallbackModel };
   },
   ocr: process.env.DOC_OCR_CROSSCHECK === 'false' ? undefined : tesseractOcr,
-  maxPages: Number(process.env.DOC_MAX_PAGES) > 0 ? Number(process.env.DOC_MAX_PAGES) : 20,
+  maxPages: Number(process.env.DOC_MAX_PAGES) > 0 ? Number(process.env.DOC_MAX_PAGES) : 40,
 });
 
 const EXAM_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;

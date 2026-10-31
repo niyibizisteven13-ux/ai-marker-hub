@@ -280,15 +280,13 @@ export async function markCandidate(adapter: ProviderAdapter, model: string, inp
     `OFFICIAL MARKING SCHEME (every question; mark only the ids requested below):\n${input.scheme.questions.map((q) => schemeBlock(q, input.scheme.allowHalfMarks)).join('\n\n')}`,
   ].filter(Boolean).join('\n\n');
 
-  // Groups of questions are marked at the same time; each is saved as soon as it passes validation.
-  await mapPool(chunks, markingGroupConcurrency(), async (chunk) => {
-    if (input.signal?.aborted) throw input.signal.reason;
-    await input.onStartQuestion?.(chunk[0].id);
-    // Keep all unassigned/ambiguous evidence; omit confidently unrelated answers.
+  // One call for a group of questions; a malformed answer is an empty result (per-question failure), provider
+  // errors propagate for a retry.
+  const callMarker = async (chunk: SchemeQuestion[], note?: string): Promise<ModelMark[]> => {
     const ids = new Set(chunk.map(q => q.id));
+    // Keep all unassigned/ambiguous evidence; omit confidently unrelated answers.
     const focused = input.match.elements.filter(e => !e.questionIds.length || e.questionIds.some(id => ids.has(id)));
     const transcript = focused.map(e => transcriptLine(e, numberOf)).join('\n');
-    let out: ModelMark[] = [];
     try {
       const images = await input.imagesForQuestions?.(chunk.map(q => q.id));
       const call = () => generateStructured<{ questions: ModelMark[] }>(adapter, {
@@ -296,6 +294,7 @@ export async function markCandidate(adapter: ProviderAdapter, model: string, inp
         sharedPrefix: shared,
         prompt: [
           `<candidate_script>\n${transcript.slice(0, 150_000)}\n</candidate_script>`,
+          ...(note ? [note] : []),
           `Mark exactly these question ids: ${chunk.map((q) => q.id).join(', ')}.`,
         ].join('\n\n'),
         validate: (d) => {
@@ -304,18 +303,67 @@ export async function markCandidate(adapter: ProviderAdapter, model: string, inp
         },
       });
       const res = images?.length ? await visionCalls.run(call) : await call();
-      out = res.data.questions;
       usage.input += res.usage.input;
       usage.output += res.usage.output;
+      return res.data.questions;
     } catch (e) {
-      // A malformed answer for this chunk is a per-question failure; provider errors propagate for a retry.
       if (!(e instanceof StructuredOutputError)) throw e;
+      return [];
     }
+  };
+
+  // Groups of questions are marked at the same time; each is saved as soon as it passes validation.
+  await mapPool(chunks, markingGroupConcurrency(), async (chunk) => {
+    if (input.signal?.aborted) throw input.signal.reason;
+    await input.onStartQuestion?.(chunk[0].id);
+    const out = await callMarker(chunk);
     if (input.signal?.aborted) throw input.signal.reason;
     for (const q of chunk) {
       marks[q.id] = finalizeQuestion(q, input.scheme.allowHalfMarks, out.find((x) => x.questionId === q.id), input.match, { runId: input.runId, schemeVersion: input.schemeVersion, model });
       await input.onQuestion?.(q.id, marks[q.id]);
     }
   });
+
+  // Second marker: answers marked with low confidence are marked again, independently, in one call. Agreement
+  // raises confidence; a different mark is flagged for the teacher with both marks. The first mark stands.
+  const unsure = secondOpinionCandidates(qs.filter((q) => pending.includes(q)), marks);
+  if (unsure.length && !input.signal?.aborted) {
+    const out = await callMarker(unsure, 'You are the SECOND, independent examiner for these answers. Mark them from the scheme and the script only, as carefully as you can.');
+    for (const q of unsure) {
+      const second = out.find((x) => x.questionId === q.id);
+      if (!second) continue;
+      const again = finalizeQuestion(q, input.scheme.allowHalfMarks, second, input.match, { runId: input.runId, schemeVersion: input.schemeVersion, model });
+      marks[q.id] = withSecondOpinion(marks[q.id], again, q.maxMarks);
+      await input.onQuestion?.(q.id, marks[q.id]);
+    }
+  }
   return { marks, usage };
+}
+
+/** Low-confidence answers worth a second marking (at most EXAM_SECOND_OPINION_MAX per script, default 6). */
+export function secondOpinionCandidates(qs: SchemeQuestion[], marks: Record<string, AiQuestionMark>): SchemeQuestion[] {
+  const below = Number(process.env.EXAM_SECOND_OPINION_BELOW ?? 0.6);
+  const max = Number(process.env.EXAM_SECOND_OPINION_MAX ?? 6);
+  if (!(below > 0) || !(max > 0)) return [];
+  return qs.filter((q) => {
+    const m = marks[q.id];
+    if (!m || m.awardedMarks === null || !m.answerFound) return false;
+    // Unreadable writing is for the teacher's eyes, not a second guess.
+    if (m.reviewFlags.some((f) => f.code === 'unreadable_handwriting' || f.code === 'marking_failed')) return false;
+    return (m.confidence?.score ?? 1) < below;
+  }).slice(0, max);
+}
+
+/** Combines the first mark with a second, independent one. */
+export function withSecondOpinion(first: AiQuestionMark, second: AiQuestionMark, maxMarks: number): AiQuestionMark {
+  if (second.awardedMarks === null || first.awardedMarks === null) return first;
+  const conf = first.confidence ?? { level: 'low' as const, score: 0.5, basis: [] };
+  if (second.awardedMarks === first.awardedMarks) {
+    const score = Math.max(conf.score, 0.75);
+    return { ...first, secondOpinion: { awardedMarks: second.awardedMarks, agreed: true }, confidence: { level: score >= 0.8 ? 'high' : 'medium', score, basis: [...conf.basis, 'a second, independent marking gave the same mark'] } };
+  }
+  const gap = Math.abs(second.awardedMarks - first.awardedMarks);
+  const flag: ReviewFlag = { code: 'second_opinion_differs', severity: gap >= 1 || gap >= maxMarks / 4 ? 'high' : 'medium', detail: `A second, independent marking gave ${second.awardedMarks}/${maxMarks} instead of ${first.awardedMarks}/${maxMarks}${second.lostMarks ? ` (${second.lostMarks.slice(0, 120)})` : ''}. Please decide.` };
+  const score = Math.min(conf.score, 0.4);
+  return { ...first, secondOpinion: { awardedMarks: second.awardedMarks, agreed: false }, reviewFlags: [...first.reviewFlags, flag], confidence: { level: 'low', score, basis: [...conf.basis, `second marking gave ${second.awardedMarks}`] } };
 }

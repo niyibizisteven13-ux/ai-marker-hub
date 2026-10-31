@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { pagesPerStudentFrom } from './classSplit.js';
 import { createHash } from 'node:crypto';
 import type { FileStore } from '../ai/files/FileStore.js';
 import { FileJobQueue, JobError } from '../ai/jobs/fileJobQueue.js';
@@ -434,7 +435,12 @@ export function createExamChat(deps: ExamChatDeps) {
     }
     const lines: string[] = [];
     if (scripts.length) {
-      const { accepted, rejected } = await s.addSubmissions(userId, exam.id, scripts, mapping);
+      // "4 pages per student" in the message or the Mark page instructions: how to cut a whole-class PDF.
+      const pagesPerStudent = pagesPerStudentFrom(`${message}\n${explicit?.instructions ?? ''}`);
+      const { accepted, rejected } = await s.addSubmissions(userId, exam.id, scripts, mapping, {
+        pagesPerStudent,
+        onSplit: (name, n) => { onStatus?.(`Split ${name} into ${n} student${n === 1 ? '' : 's'}`); lines.push(`${name} held the whole class: I split it into ${n} scripts, one per student${pagesPerStudent ? ` (${pagesPerStudent} pages each)` : ''}.`); },
+      });
       // A file name without a candidate id gets a new id; its name is kept as a label so the mapping is visible.
       if (accepted.some((a) => a.identity === 'assigned')) {
         await s.mutate(userId, exam.id, (e) => { for (const a of accepted) { const x = e.submissions.find((y) => y.id === a.id); if (x && x.identity === 'assigned' && !x.candidateName) x.candidateName = x.fileName.replace(/\.[a-z0-9]+$/i, '').slice(0, 60); } });

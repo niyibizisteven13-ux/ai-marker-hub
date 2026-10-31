@@ -15,6 +15,7 @@ import { verifyMarkedPdf } from './verifyPdf.js';
 import { computeLayout } from './layout.js';
 import { processedToViewed } from './pdfGeometry.js';
 import { expandArchives, InputError, isPdf, isTyped, typedToPdf } from './inputs.js';
+import { splitClassPdf } from './classSplit.js';
 import { loadPages } from '../documents/pages.js';
 import { buildBundle, safeName, type BundleFile } from './bundle.js';
 import { markCandidate } from './marking.js';
@@ -390,13 +391,33 @@ export function createExamService(deps: ExamDeps) {
    * the file name, otherwise a new sequential id (reported back so the teacher can see the mapping).
    * Never reads identity from handwriting on the page.
    */
-  async function addSubmissions(userId: string, examId: string, files: UploadFile[], mapping: CandidateMapping[] = []) {
+  async function addSubmissions(userId: string, examId: string, files: UploadFile[], mapping: CandidateMapping[] = [], opts: { pagesPerStudent?: number; onSplit?: (fileName: string, students: number) => void } = {}) {
     const exam = await load(userId, examId);
     try { files = await expandArchives(files); } catch (e) { if (e instanceof InputError) throw new ExamInputError('UNREADABLE', e.message); throw e; }
     if (!files.length) throw new ExamInputError('NO_FILES', 'Attach at least one candidate script.');
+    // One PDF with the whole class: cut into one script per student (every N pages when the teacher said so,
+    // otherwise where the AI sees a new student start).
+    const splitErrors: Array<{ fileName: string; code: string; reason: string }> = [];
+    const expanded: UploadFile[] = [];
+    for (const f of files) {
+      let pages = 0;
+      if (isPdf(f)) { try { pages = (await PDFDocument.load(f.buffer, { ignoreEncryption: true })).getPageCount(); } catch { pages = 0; } }
+      const perStudent = opts.pagesPerStudent;
+      if (!pages || (perStudent ? pages <= perStudent : pages <= (deps.maxPages ?? 20))) { expanded.push(f); continue; }
+      try {
+        const agent = deps.agent();
+        const pieces = await splitClassPdf(f.buffer, f.name, { pagesPerStudent: perStudent, ai: { adapter: agent.adapter, model: process.env.EXAM_SPLIT_MODEL || agent.model } });
+        opts.onSplit?.(f.name, pieces.length);
+        for (const piece of pieces) expanded.push({ name: piece.name, buffer: piece.buffer, mime: 'application/pdf' });
+      } catch (e) {
+        splitErrors.push({ fileName: f.name, code: 'SPLIT_FAILED', reason: `${f.name} has ${pages} pages and could not be split into students${e instanceof Error ? `: ${e.message}` : ''}. Say how many pages each student has, for example "4 pages per student".` });
+      }
+    }
+    files = expanded;
+    if (!files.length) return { accepted: [] as Submission[], rejected: splitErrors };
     if (exam.submissions.length + files.length > maxCandidates) throw new ExamInputError('TOO_MANY_CANDIDATES', `At most ${maxCandidates} candidates per examination.`, 413);
     const accepted: Submission[] = [];
-    const rejected: Array<{ fileName: string; code: string; reason: string }> = [];
+    const rejected: Array<{ fileName: string; code: string; reason: string }> = [...splitErrors];
     const byFile = new Map(mapping.map((m) => [m.fileName.toLowerCase(), m]));
     const taken = new Set(exam.submissions.map((s) => s.candidateId.toLowerCase()));
     const hashes = new Map(exam.submissions.map((s) => [s.sha256, s.candidateId]));

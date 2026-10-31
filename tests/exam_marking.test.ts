@@ -1271,3 +1271,71 @@ test('the name and number written on the paper replace STUDENT1; a script withou
   assert.deepEqual([b.candidateId, b.identity], ['STUDENT2', 'filename'], 'nothing written: the fallback id stays');
   assert.ok((done.events ?? []).some((e) => /Name on the paper: 2024-015 \(Uwase Aline\)/.test(e.message)));
 });
+
+test('second marker: a low-confidence answer is marked again; agreement raises confidence, a different mark is flagged with both', async () => {
+  const scheme = validateScheme(SCHEME).scheme!;
+  const match = matchAnswers(docOf([[{ id: 'e1', text: '1. x = 4' }, { id: 'e2', text: '2. 3 x 5 = 15' }]]), [], scheme);
+  const run = async (secondQ1: number) => {
+    const prompts: string[] = [];
+    const unsure: ProviderAdapter = {
+      name: 'unsure',
+      async *stream(req) {
+        const prompt = textOf(req);
+        prompts.push(prompt);
+        const ids = /Mark exactly these question ids: ([^\n.]+)/.exec(prompt)![1].split(',').map((x) => x.trim());
+        const second = /SECOND, independent examiner/.test(prompt);
+        const critIds = (q: string) => [...prompt.matchAll(new RegExp(`- (${q}-[\\w-]+) \\[(\\w+)\\]`, 'g'))].map((m) => m[1]);
+        const out = { questions: ids.map((q) => {
+          const cs = critIds(q);
+          const ev = q === 'Q1' ? { id: 'p1-e1', text: '1. x = 4' } : { id: 'p1-e2', text: '2. 3 x 5 = 15' };
+          const q1 = second ? secondQ1 : 3;
+          return { questionId: q, answerFound: true, evidenceElementIds: [ev.id], evidenceQuotes: [{ elementId: ev.id, quote: ev.text }], path: null, level: null, holisticMarks: null,
+            criterionResults: q === 'Q1' ? [{ criterionId: cs[0], awardedMarks: Math.min(1, q1), reason: 'r' }, { criterionId: cs[1], awardedMarks: Math.max(0, q1 - 1), reason: 'r' }] : [{ criterionId: cs[0], awardedMarks: 2, reason: 'r' }],
+            feedback: 'f', lostMarks: q1 < 3 ? 'arithmetic' : '', correction: null, confidence: q === 'Q1' ? 0.3 : 0.95, readingConcern: null, mappingConcern: null, rubricConcern: null };
+        }) };
+        yield { type: 'text', text: JSON.stringify(out) };
+        yield { type: 'usage', input: 10, output: 5 };
+      },
+    };
+    const res = await markCandidate(unsure, 'fake', { scheme, questionIds: ['Q1', 'Q2'], match, runId: `second-${secondQ1}`, schemeVersion: 1 });
+    return { res, seconds: prompts.filter((p) => /SECOND, independent/.test(p)) };
+  };
+  const agree = await run(3);
+  assert.equal(agree.seconds.length, 1, 'one extra call for the unsure answers');
+  assert.match(agree.seconds[0], /Mark exactly these question ids: Q1\./, 'only the low-confidence question is marked again');
+  assert.deepEqual(agree.res.marks.Q1.secondOpinion, { awardedMarks: 3, agreed: true });
+  assert.ok(agree.res.marks.Q1.confidence!.score >= 0.75);
+  assert.equal(agree.res.marks.Q2.secondOpinion, undefined);
+
+  const differ = await run(1);
+  assert.equal(differ.res.marks.Q1.awardedMarks, 3, 'the first mark stands');
+  assert.deepEqual(differ.res.marks.Q1.secondOpinion, { awardedMarks: 1, agreed: false });
+  const flag = differ.res.marks.Q1.reviewFlags.find((f) => f.code === 'second_opinion_differs')!;
+  assert.equal(flag.severity, 'high');
+  assert.match(flag.detail, /gave 1\/3 instead of 3\/3/);
+  assert.equal(differ.res.marks.Q1.confidence!.level, 'low');
+
+  process.env.EXAM_SECOND_OPINION_MAX = '0';
+  try { assert.equal((await run(1)).seconds.length, 0, 'can be turned off'); } finally { delete process.env.EXAM_SECOND_OPINION_MAX; }
+});
+
+test('one PDF with the whole class is split into one script per student and each is marked', async () => {
+  const user = 'teacher-class-pdf';
+  const exam = await exams.createExam(user, { title: 'Class file' });
+  await exams.setSchemeJson(user, exam.id, SCHEME, { confirm: true });
+  const whole = await PDFDocument.create();
+  for (const id of ['C004', 'C001', 'C002']) {
+    const one = await PDFDocument.load(await scriptPdf(id));
+    for (const pg of await whole.copyPages(one, one.getPageIndices())) whole.addPage(pg);
+  }
+  const splits: string[] = [];
+  const { accepted, rejected } = await exams.addSubmissions(user, exam.id, [{ name: 'S3 class.pdf', buffer: Buffer.from(await whole.save()) }], [], { pagesPerStudent: 1, onSplit: (n, k) => splits.push(`${n}:${k}`) });
+  assert.deepEqual(rejected, []);
+  assert.deepEqual(splits, ['S3 class.pdf:3']);
+  assert.deepEqual(accepted.map((a) => [a.fileName, a.pages]), [['student 1 - S3 class.pdf', 1], ['student 2 - S3 class.pdf', 1], ['student 3 - S3 class.pdf', 1]]);
+  await exams.startMarking(user, exam.id);
+  const done = await waitRun(user, exam.id);
+  const first = done.submissions.find((s) => s.id === accepted[0].id)!;
+  assert.deepEqual([first.candidateId, first.candidateName], ['2024-015', 'Uwase Aline'], 'the name on the paper names the split script');
+  assert.ok(accepted.every((a) => done.results[a.id]), 'every student was marked');
+});
