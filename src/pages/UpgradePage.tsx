@@ -14,6 +14,8 @@ interface PlanLimits { daily: number; weekly: number; monthly: number; perDay: {
 interface Pack { id: string; rwf: number; credits: number; usd: number }
 interface PlansResponse {
   fxUsdRwf: number; payments: 'live' | 'sandbox' | 'simulated' | 'off';
+  /** Set by an admin with "Pause upgrades": no new purchases until it is turned off. */
+  sales?: { paused: boolean; message: string | null };
   plans: Array<{ id: PlanId; name: string; priceUsd: number | null; priceRwf: number | null; period: string; limits: PlanLimits; packs?: Pack[] }>;
 }
 type PlanId = 'FREE' | 'GO' | 'STARTER' | 'PRO' | 'PLUS' | 'INSTITUTION';
@@ -96,7 +98,8 @@ export default function UpgradePage({ jobId, onBack, onSuccess }: UpgradePagePro
   const go = plan('GO');
   const free = plan('FREE');
   const pack = go?.packs?.find((p) => p.id === packId);
-  const paymentsOff = data?.payments === 'off';
+  const salesPaused = data?.sales?.paused === true;
+  const paymentsOff = data?.payments === 'off' || salesPaused;
   const current = me?.plan ?? 'FREE';
 
   return (
@@ -135,7 +138,11 @@ export default function UpgradePage({ jobId, onBack, onSuccess }: UpgradePagePro
           )}
         </div>
 
-        {paymentsOff && (
+        {salesPaused ? (
+          <div role="status" className="mx-auto flex max-w-3xl items-start gap-3 rounded-2xl border border-[var(--accent)]/40 bg-[var(--surface)] p-4 text-sm text-[var(--text)]">
+            <AlertCircle size={18} className="mt-0.5 shrink-0 text-[var(--accent)]" /> {data?.sales?.message}
+          </div>
+        ) : paymentsOff && (
           <div className="mx-auto flex max-w-3xl items-start gap-3 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4 text-sm text-[var(--muted)]">
             <AlertCircle size={18} className="mt-0.5 shrink-0 text-[var(--accent)]" /> Mobile Money payments are being set up. Plans can be activated by an administrator in the meantime.
           </div>

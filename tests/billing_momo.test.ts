@@ -446,3 +446,28 @@ test('AI guard: admin pause stops everyone, admins included; the profit guard st
   await saveGuardSettings({ lossGuard: { enabled: true, freeBudgetUsd: 10 } }, admin);
   resetGuard();
 });
+
+test('Pause upgrades: no new plan or top-up can be bought until an admin resumes; the price list says so', async () => {
+  const { setSalesPaused, salesState } = await import('../server/services/billing/sales.js');
+  const { default: billingRoutes } = await import('../server/routes/billingRoutes.js');
+  const userId = await newUser();
+  await setSalesPaused(true, 'admin-1', 'Back on Monday.');
+  try {
+    const sent = mtn.requests.size;
+    await assert.rejects(startPayment(userId, { purpose: 'PRO', months: 1, phone: '0788123456' }), (e: any) => e.code === 'SALES_PAUSED' && e.message === 'Back on Monday.');
+    await assert.rejects(startPayment(userId, { purpose: 'GO_PACK', packId: currentGoPacks()[0].id, phone: '0788123456' }), (e: any) => e.code === 'SALES_PAUSED');
+    assert.equal(mtn.requests.size, sent, 'nothing reached MTN');
+    const app = express().use('/api/billing', billingRoutes);
+    const srv: Server = await new Promise((r) => { const s = app.listen(0, () => r(s)); });
+    try {
+      const plans = await (await fetch(`http://127.0.0.1:${(srv.address() as AddressInfo).port}/api/billing/plans`)).json();
+      assert.deepEqual(plans.sales, { paused: true, message: 'Back on Monday.' });
+    } finally { srv.close(); }
+  } finally {
+    await setSalesPaused(false, 'admin-1');
+  }
+  assert.equal((await salesState(true)).paused, false);
+  resetMomo();
+  const { payment } = await startPayment(userId, { purpose: 'STARTER', months: 1, phone: '0788123457' });
+  assert.equal(payment.status, 'PENDING', 'resumed: buying works again');
+});
