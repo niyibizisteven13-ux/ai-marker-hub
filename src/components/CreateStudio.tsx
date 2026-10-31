@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import RecordingBar from './RecordingBar';
-import { FileThumb, PreviewDialog, attachmentSource, type PreviewSource } from './FilePreview';
+import { AttachmentCard, PreviewDialog, attachmentSource, type PreviewSource } from './FilePreview';
 import { FileTypeIcon } from './FileTypeIcon';
 import { createPortal } from 'react-dom';
 import {
@@ -77,13 +77,6 @@ interface CreateStudioProps {
 }
 
 const sourceOf = attachmentSource;
-
-function attachmentMeta(item: File | ChatAttachment) {
-  const name = item instanceof File ? item.name : item.name || 'Attachment';
-  const bytes = item instanceof File ? item.size : typeof item.size === 'number' ? item.size : 0;
-  const size = bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MB` : bytes >= 1024 ? `${Math.round(bytes / 1024)} KB` : bytes ? `${bytes} B` : !(item instanceof File) ? item.size : '';
-  return { name, size, type: name.split('.').pop()?.toUpperCase() || 'FILE' };
-}
 
 function ModePicker({ selected, onSelect }: { selected: string; onSelect: (val: string) => void }) {
   const [open, setOpen] = useState(false);
@@ -769,20 +762,10 @@ export default function CreateStudio({
             onFeedback={() => onSendMessage('End the roleplay and give me my feedback.', [], { answerLanguage, learning })} />
           <div className="rounded-[28px] border border-white/10 bg-[#30302E] p-3 shadow-[0_4px_24px_rgba(0,0,0,0.25)]">
             {stagedAttachments.length > 0 && (
-              <div className="mb-2.5 flex gap-2 overflow-x-auto pb-1">
+              <div className="mb-2.5 flex gap-2.5 overflow-x-auto px-1 pb-1 pt-2">
                 {stagedAttachments.map((meta: any, idx: number) => {
-                  const m = attachmentMeta(meta);
                   const src = sourceOf(meta);
-                  return (
-                    <div key={`${m.name}-${idx}`} className="group relative w-[112px] shrink-0 overflow-hidden rounded-xl border border-white/10 bg-white/[0.04] text-left">
-                      <button type="button" onClick={() => setPreviewing(src)} className="block w-full" aria-label={`Preview ${m.name}`} title={`Preview ${m.name}`}>
-                        <FileThumb src={src} className="h-[72px] w-full" />
-                        <span className="block truncate px-2 pt-1.5 text-[11.5px] font-medium text-[#FAF9F5]">{m.name}</span>
-                        <span className="block px-2 pb-1.5 text-[10px] text-neutral-500">{m.type}{m.size ? ` · ${m.size}` : ''}</span>
-                      </button>
-                      <button type="button" onClick={() => onRemoveStagedAttachment?.(idx)} className="absolute right-1 top-1 grid h-6 w-6 place-items-center rounded-full bg-black/70 text-neutral-200 opacity-90 hover:bg-rose-500 hover:text-white sm:opacity-0 sm:group-hover:opacity-100" aria-label={`Remove ${m.name}`}><X size={13} /></button>
-                    </div>
-                  );
+                  return <AttachmentCard key={`${src.name}-${idx}`} src={src} onOpen={() => setPreviewing(src)} onRemove={onRemoveStagedAttachment ? () => onRemoveStagedAttachment(idx) : undefined} size={104} />;
                 })}
               </div>
             )}

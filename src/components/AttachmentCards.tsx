@@ -1,5 +1,6 @@
 import { SandboxFrame } from './SandboxFrame';
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { FileThumb, PreviewDialog, type PreviewSource } from './FilePreview';
 
 const PdfViewer = lazy(() => import('./PdfViewer').then((m) => ({ default: m.PdfViewer })));
 const SceneViewer = lazy(() => import('./scene3d/SceneViewer'));
@@ -87,13 +88,16 @@ function FullScreenHtml({ item, html, onClose }: { item: AttachmentRef; html: st
 function FileCard({ a }: { a: AttachmentRef }) {
   const { label, Icon, tone } = fileStyle(a);
   const expired = isExpired(a);
-  const previewable = !expired && (isHtml(a) || isText(a) || isPdf(a));
+  const previewable = !expired;
   const [open, setOpen] = useState(false);
+  const [viewer, setViewer] = useState(false);
+  const source = useMemo<PreviewSource>(() => ({ name: a.name, type: a.mime.split(';')[0], url: a.url, size: a.size }), [a]);
   const [full, setFull] = useState(false);
   const [body, setBody] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const toggle = async () => {
+    if (!isHtml(a)) { setViewer(true); return; }
     if (open) { setOpen(false); return; }
     setOpen(true);
     if (body !== null || isPdf(a)) return;
@@ -107,7 +111,9 @@ function FileCard({ a }: { a: AttachmentRef }) {
   return (
     <div className="overflow-hidden rounded-2xl border border-stone-800 bg-stone-900/70 transition hover:border-stone-700">
       <div className="flex items-center gap-3 p-3">
-        <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ring-1 ${tone}`}><Icon className="h-5 w-5" aria-hidden="true" /></div>
+        {expired || isHtml(a)
+          ? <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ring-1 ${tone}`}><Icon className="h-5 w-5" aria-hidden="true" /></div>
+          : <button type="button" onClick={() => setViewer(true)} aria-label={`Preview ${a.name}`} className="h-14 w-12 shrink-0 overflow-hidden rounded-lg ring-1 ring-white/10 transition hover:ring-white/30"><FileThumb src={source} tone="dark" badge={false} className="h-full w-full" /></button>}
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold text-stone-100" title={a.name}>{a.name}</p>
           <p className="text-xs text-stone-500">{label} · {formatSize(a.size)}</p>
@@ -139,6 +145,7 @@ function FileCard({ a }: { a: AttachmentRef }) {
         </div>
       )}
       {full && body !== null && <FullScreenHtml item={a} html={body} onClose={() => setFull(false)} />}
+      {viewer && <PreviewDialog src={source} onClose={() => setViewer(false)} />}
     </div>
   );
 }

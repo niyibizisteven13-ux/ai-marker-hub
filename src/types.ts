@@ -94,6 +94,10 @@ export interface ChatAttachment {
   url?: string;
   /** The original file in this browser session (an object URL), for previewing what was sent. */
   localUrl?: string;
+  /** Size in bytes. */
+  bytes?: number;
+  /** Small picture or first lines of the file, made when it was sent, so the card still shows what is inside after a reload. */
+  thumb?: { image?: string; text?: string; table?: string[][]; meta?: string };
   previewUrl?: string;
   rawText?: string;
   htmlContent?: string;
