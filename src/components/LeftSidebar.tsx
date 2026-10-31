@@ -17,7 +17,6 @@ import {
   SquarePen,
   ChevronsUpDown,
   LogOut,
-  ClipboardCheck,
   LogIn,
   Sparkles,
   Coins,
@@ -153,11 +152,25 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
     return groupSessions(q ? sessions.filter((s) => s.title.toLowerCase().includes(q)) : sessions);
   }, [sessions, query]);
 
-  const navItems: { id: NavigationTab; label: string; icon: React.ElementType }[] = [
-    { id: 'documents', label: 'Chat', icon: MessageSquare },
-    { id: 'marking_hub', label: 'Agent', icon: GraduationCap },
-    { id: 'results', label: 'Results', icon: BarChart3 },
-  ];
+  // Same grey icons everywhere; only the page you are on is highlighted.
+  const path = typeof window !== 'undefined' ? window.location.pathname : '/';
+  const goTo = (href: string) => () => { window.location.href = href; };
+  type NavItem = { label: string; icon: React.ElementType; onClick: () => void; active?: boolean };
+  const navGroups: { title?: string; items: NavItem[] }[] = [
+    { items: [
+      { label: 'Chat', icon: MessageSquare, onClick: () => setActiveTab('documents'), active: activeTab === 'documents' && !/^\/(learn|exams)/.test(path) },
+      ...(user ? [{ label: 'Practice', icon: GraduationCap, onClick: goTo('/learn'), active: /^\/learn/.test(path) }] : []),
+    ] },
+    { title: 'Marking', items: [
+      ...(user && onOpenMark ? [{ label: 'Mark', icon: PenLine, onClick: onOpenMark }] : []),
+      ...(user && onOpenAssignments ? [{ label: 'Assignments', icon: ClipboardList, onClick: onOpenAssignments }] : []),
+      ...(user ? [{ label: 'Results', icon: BarChart3, onClick: goTo('/exams'), active: /^\/exams/.test(path) }] : []),
+    ] },
+    { title: 'Files', items: [
+      ...(user && onOpenLibrary ? [{ label: 'My files', icon: FolderOpen, onClick: onOpenLibrary }] : []),
+      ...(user && onOpenPublicLibrary ? [{ label: 'Public library', icon: Library, onClick: onOpenPublicLibrary }] : []),
+    ] },
+  ].filter((g) => g.items.length);
 
   const go = (fn: () => void) => () => {
     fn();
@@ -235,90 +248,37 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
           </div>
         </div>
 
-        {/* Workspace navigation */}
-        <nav aria-label="Workspace" className={`shrink-0 space-y-0.5 px-3 ${c ? 'lg:flex lg:flex-col lg:items-center' : ''}`}>
-          {navItems.map((item) => {
-            const active = activeTab === item.id;
-            const Icon = item.icon;
-            return (
-              <div key={item.id} className="group relative w-full lg:w-auto">
-                <button
-                  type="button"
-                  onClick={go(() => setActiveTab(item.id))}
-                  aria-current={active ? 'page' : undefined}
-                  aria-label={item.label}
-                  className={`${rowBase} ${rowSize} ${c ? '' : 'lg:w-full'} ${
-                    active ? 'bg-white/[0.07] font-medium text-white' : 'text-[#C2C0B6] hover:bg-white/[0.04] hover:text-white'
-                  }`}
-                >
-                  {active && <span aria-hidden="true" className={`absolute top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-full bg-[#D97757] ${c ? 'left-0 lg:-left-3' : '-left-3'}`} />}
-                  <Icon size={17} className={`shrink-0 ${active ? 'text-[#D97757]' : 'text-[#9C9A92] group-hover/row:text-[#C2C0B6]'}`} aria-hidden="true" />
-                  <span className={label}>{item.label}</span>
-                </button>
-                <CollapsedTip show={c} label={item.label} />
+        {/* Workspace navigation, in groups: work, marking, files */}
+        <nav aria-label="Workspace" className={`shrink-0 px-3 ${c ? 'lg:flex lg:flex-col lg:items-center' : ''}`}>
+          {navGroups.map((g, gi) => (
+            <div key={g.title ?? 'main'} className={gi ? 'mt-3' : ''}>
+              {g.title && <h3 className={`px-3 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#9C9A92]/80 ${c ? 'lg:hidden' : ''}`}>{g.title}</h3>}
+              {g.title && c && <div aria-hidden="true" className="mx-auto mb-1 hidden h-px w-6 bg-white/10 lg:block" />}
+              <div className="space-y-0.5">
+                {g.items.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <div key={item.label} className="group relative w-full lg:w-auto">
+                      <button
+                        type="button"
+                        onClick={go(item.onClick)}
+                        aria-current={item.active ? 'page' : undefined}
+                        aria-label={item.label}
+                        className={`${rowBase} ${rowSize} ${c ? '' : 'lg:w-full'} ${
+                          item.active ? 'bg-white/[0.07] font-medium text-white' : 'text-[#C2C0B6] hover:bg-white/[0.04] hover:text-white'
+                        }`}
+                      >
+                        {item.active && <span aria-hidden="true" className={`absolute top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-full bg-[#D97757] ${c ? 'left-0 lg:-left-3' : '-left-3'}`} />}
+                        <Icon size={17} className={`shrink-0 ${item.active ? 'text-[#D97757]' : 'text-[#9C9A92] group-hover/row:text-[#C2C0B6]'}`} aria-hidden="true" />
+                        <span className={label}>{item.label}</span>
+                      </button>
+                      <CollapsedTip show={c} label={item.label} />
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
-
-          {user && onOpenMark && (
-            <div className="group relative w-full lg:w-auto">
-              <button
-                type="button"
-                onClick={go(onOpenMark)}
-                aria-label="Mark"
-                className={`${rowBase} ${rowSize} ${c ? '' : 'lg:w-full'} text-[#C2C0B6] hover:bg-white/[0.04] hover:text-white`}
-              >
-                <PenLine size={17} className="shrink-0 text-[#E08A6A]" aria-hidden="true" />
-                <span className={label}>Mark</span>
-              </button>
-              <CollapsedTip show={c} label="Mark" />
             </div>
-          )}
-
-          {user && onOpenAssignments && (
-            <div className="group relative w-full lg:w-auto">
-              <button
-                type="button"
-                onClick={go(onOpenAssignments)}
-                aria-label="Assignments"
-                className={`${rowBase} ${rowSize} ${c ? '' : 'lg:w-full'} text-[#C2C0B6] hover:bg-white/[0.04] hover:text-white`}
-              >
-                <ClipboardList size={17} className="shrink-0 text-[#E08A6A]" aria-hidden="true" />
-                <span className={label}>Assignments</span>
-              </button>
-              <CollapsedTip show={c} label="Assignments" />
-            </div>
-          )}
-
-          {user && onOpenLibrary && (
-            <div className="group relative w-full lg:w-auto">
-              <button
-                type="button"
-                onClick={go(onOpenLibrary)}
-                aria-label="My files"
-                className={`${rowBase} ${rowSize} ${c ? '' : 'lg:w-full'} text-[#C2C0B6] hover:bg-white/[0.04] hover:text-white`}
-              >
-                <FolderOpen size={17} className="shrink-0 text-[#9C9A92] group-hover/row:text-[#C2C0B6]" aria-hidden="true" />
-                <span className={label}>My files</span>
-              </button>
-              <CollapsedTip show={c} label="My files" />
-            </div>
-          )}
-
-          {user && onOpenPublicLibrary && (
-            <div className="group relative w-full lg:w-auto">
-              <button
-                type="button"
-                onClick={go(onOpenPublicLibrary)}
-                aria-label="Public library"
-                className={`${rowBase} ${rowSize} ${c ? '' : 'lg:w-full'} text-[#C2C0B6] hover:bg-white/[0.04] hover:text-white`}
-              >
-                <Library size={17} className="shrink-0 text-[#9C9A92] group-hover/row:text-[#C2C0B6]" aria-hidden="true" />
-                <span className={label}>Public library</span>
-              </button>
-              <CollapsedTip show={c} label="Public library" />
-            </div>
-          )}
+          ))}
         </nav>
 
         {/* Chat history */}
@@ -326,7 +286,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
           {sessions.length > 0 ? (
             <>
               <div className="flex shrink-0 items-center justify-between px-5 pb-2">
-                <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#9C9A92]">Recent chats</span>
+                <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#9C9A92]">Recents</span>
                 <span className="rounded-full bg-white/[0.05] px-1.5 py-px text-[10px] tabular-nums text-[#9C9A92]">{sessions.length}</span>
               </div>
               {sessions.length > 5 && (
@@ -389,11 +349,10 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
               </div>
             </>
           ) : (
-            <div className="mx-3 rounded-xl border border-dashed border-white/[0.08] px-4 py-5 text-center">
-              <MessageSquare size={18} className="mx-auto mb-2 text-[#9C9A92]" aria-hidden="true" />
-              <p className="text-[13px] text-[#C2C0B6]">No chats yet</p>
-              <p className="mt-0.5 text-xs text-[#9C9A92]">Your conversations will appear here.</p>
-            </div>
+            <>
+              <div className="px-5 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#9C9A92]">Recents</div>
+              <p className="px-5 text-xs text-[#9C9A92]">Your chats will appear here.</p>
+            </>
           )}
         </div>
         {c && <div className="hidden flex-1 lg:block" />}
@@ -475,12 +434,6 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                 >
                   <Settings size={15} aria-hidden="true" /> Settings
                 </button>
-                <a role="menuitem" href="/exams" className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-[#C2C0B6] transition-colors hover:bg-white/[0.06] hover:text-white">
-                  <ClipboardCheck size={15} aria-hidden="true" /> Marked exams
-                </a>
-                <a role="menuitem" href="/learn" className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-[#C2C0B6] transition-colors hover:bg-white/[0.06] hover:text-white">
-                  <GraduationCap size={15} aria-hidden="true" /> Practice & classes
-                </a>
                 {user.role === 'ADMIN' && onOpenAdmin && (
                   <button
                     type="button"

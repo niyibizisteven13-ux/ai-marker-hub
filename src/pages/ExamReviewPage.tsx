@@ -208,7 +208,7 @@ export default function ExamReviewPage({ onBack }: { onBack: () => void }) {
       <div className="min-h-[100dvh] bg-[#141413] px-4 py-8 text-white">
         <div className="mx-auto max-w-3xl">
           <button type="button" onClick={onBack} className="mb-6 inline-flex items-center gap-2 text-sm text-neutral-400 hover:text-white"><ArrowLeft size={16} /> Back to workspace</button>
-          <h1 className="font-serif text-3xl">Marked exams</h1>
+          <h1 className="font-serif text-3xl">Results</h1>
           <p className="mt-1 text-sm text-neutral-400">Review the red marks on each script and release the marked PDFs.</p>
           {error && <p className="mt-6 text-sm text-rose-300">{error}</p>}
           {!exams ? <Loader2 className="mt-8 animate-spin text-neutral-500" /> : exams.length === 0 ? (

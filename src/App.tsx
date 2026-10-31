@@ -1837,7 +1837,7 @@ export default function App() {
             {activeTab !== 'documents' && (
               <MobileSheet
                 hideHeader={!!scanBatch && activeTab === 'marking_hub'}
-                title={activeTab === 'results' ? 'Results' : 'Agent'}
+                title={activeTab === 'results' ? 'Results' : 'Marking workspace'}
                 onBack={() => setActiveTab('documents')}
                 onScan={openScanner}
               >

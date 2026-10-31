@@ -32,7 +32,7 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
   const menuRef = useRef<HTMLDivElement>(null);
 
   const mobileNavItems: Array<{ id: NavigationTab; label: string; icon: typeof GraduationCap }> = [
-    { id: 'marking_hub', label: 'Agent', icon: GraduationCap },
+    { id: 'marking_hub', label: 'Marking workspace', icon: GraduationCap },
     { id: 'documents', label: 'Create', icon: FilePlus },
     { id: 'results', label: 'Results', icon: Award },
   ];
