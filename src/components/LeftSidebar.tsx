@@ -163,7 +163,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
     ] },
     { title: 'Marking', items: [
       ...(user && onOpenMark ? [{ label: 'Mark', icon: PenLine, onClick: onOpenMark }] : []),
-      ...(user && onOpenAssignments ? [{ label: 'Assignments', icon: ClipboardList, onClick: onOpenAssignments }] : []),
+      ...(user && onOpenAssignments ? [{ label: 'Tasks', icon: ClipboardList, onClick: onOpenAssignments }] : []),
       ...(user ? [{ label: 'Results', icon: BarChart3, onClick: goTo('/exams'), active: /^\/exams/.test(path) }] : []),
     ] },
     { title: 'Files', items: [

@@ -234,7 +234,7 @@ export default function App() {
   const [markOpen, setMarkOpen] = useState<boolean>(() => window.location.pathname === '/mark');
   // Assignments: /assignments, or /assignments/<id> for one class dashboard (links from the chat).
   const [assignmentsOpen, setAssignmentsOpen] = useState<{ id: string | null; mark?: boolean } | null>(() => {
-    const m = /^\/assignments(?:\/([0-9a-f-]{36}))?\/?$/.exec(window.location.pathname);
+    const m = /^\/(?:assignments|tasks)(?:\/([0-9a-f-]{36}))?\/?$/.exec(window.location.pathname);
     // ?mark=1 (the chat's "Mark all" link) goes straight on to the Mark page with the class loaded.
     return m ? { id: m[1] ?? null, mark: !!m[1] && new URLSearchParams(window.location.search).get('mark') === '1' } : null;
   });
@@ -1921,7 +1921,7 @@ export default function App() {
           <AssignmentsPage
             initialId={assignmentsOpen.id}
             autoMark={assignmentsOpen.mark}
-            onClose={() => { setAssignmentsOpen(null); if (window.location.pathname.startsWith('/assignments')) window.history.replaceState({}, '', '/'); }}
+            onClose={() => { setAssignmentsOpen(null); if (/^\/(assignments|tasks)/.test(window.location.pathname)) window.history.replaceState({}, '', '/'); }}
             onMarkAll={(p) => {
               // The class goes to the Mark page as it is: one PDF per student, the task as the question paper,
               // and the students list so the results keep their names. The teacher adds the scheme there.

@@ -4,9 +4,9 @@ import { authFetch } from '../utils/authFetch';
 import { PdfViewer, loadPdfJs } from './PdfViewer';
 
 /**
- * Assignments: the teacher sets a task (text and/or files) and shares one link; students hand in through it in
- * any format, with no account. The class dashboard shows every hand-in with its files previewed in place, and
- * "Mark all with AI" hands the class to the Mark page (one PDF per student, names kept) for live marking.
+ * Tasks: the owner sets a task (text and/or files) and shares one link; people submit through it in any format,
+ * with no account. The dashboard shows every submission with its files previewed in place, and "Mark all with AI"
+ * hands them to the Mark page (one PDF per person, names kept) for live marking.
  */
 
 interface StoredFile { id: string; name: string; mime: string; size: number }
@@ -35,7 +35,7 @@ const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2)
 const isImage = (f: StoredFile) => /^image\/(png|jpeg|webp|gif)$/.test(f.mime);
 const isPdf = (f: StoredFile) => f.mime === 'application/pdf';
 
-/** A file of this assignment as a local object URL (requests carry the sign-in, so plain <img src> cannot be used). */
+/** A file of this task as a local object URL (requests carry the sign-in, so plain <img src> cannot be used). */
 function useFileUrl(assignmentId: string, f: StoredFile | null) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
@@ -133,13 +133,13 @@ function ShareBox({ link, title }: { link: string; title: string }) {
   const [qr, setQr] = useState<string | null>(null);
   useEffect(() => { void import('qrcode').then((q) => q.toDataURL(link, { margin: 1, width: 220, color: { dark: '#1B1A19', light: '#FFFFFF' } })).then(setQr).catch(() => undefined); }, [link]);
   const copy = async () => { try { await navigator.clipboard.writeText(link); setCopied(true); window.setTimeout(() => setCopied(false), 1800); } catch { /* clipboard may be blocked */ } };
-  const text = `${title}: hand in your answers here (photos, PDF, Word or typed): ${link}`;
+  const text = `${title}: submit your answers here (photos, PDF, Word or typed): ${link}`;
   return (
     <div className="flex flex-col gap-4 rounded-2xl border border-[#D97757]/30 bg-[#D97757]/[0.06] p-4 sm:flex-row sm:items-center">
-      {qr && <img src={qr} alt="QR code of the assignment link" className="h-28 w-28 shrink-0 self-center rounded-lg bg-white p-1.5" />}
+      {qr && <img src={qr} alt="QR code of the task link" className="h-28 w-28 shrink-0 self-center rounded-lg bg-white p-1.5" />}
       <div className="min-w-0 flex-1">
-        <p className="text-[13px] font-semibold text-white">Share this link with your students</p>
-        <p className="mt-0.5 text-[12.5px] text-neutral-400">No account needed. They open it, write their name and hand in photos, PDF, Word or typed answers.</p>
+        <p className="text-[13px] font-semibold text-white">Share this link with the people doing the task</p>
+        <p className="mt-0.5 text-[12.5px] text-neutral-400">No account needed. They open it, write their name and submit photos, PDF, Word or typed answers.</p>
         <div className="mt-2.5 flex items-center gap-2 rounded-xl border border-white/[0.12] bg-[#1F1E1D] px-3 py-2">
           <Link2 size={14} className="shrink-0 text-[#E08A6A]" />
           <span className="min-w-0 flex-1 truncate font-mono text-[12.5px] text-neutral-200">{link}</span>
@@ -147,7 +147,7 @@ function ShareBox({ link, title }: { link: string; title: string }) {
         <div className="mt-2.5 flex flex-wrap gap-2">
           <button type="button" onClick={() => void copy()} className="inline-flex items-center gap-1.5 rounded-xl bg-[#D97757] px-3.5 py-2 text-[13px] font-semibold text-white hover:bg-[#c96a4c]">{copied ? <Check size={15} /> : <Copy size={15} />}{copied ? 'Copied' : 'Copy link'}</button>
           <a href={`https://wa.me/?text=${encodeURIComponent(text)}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-xl border border-white/[0.14] px-3.5 py-2 text-[13px] text-neutral-200 hover:bg-white/5"><Share2 size={15} />WhatsApp</a>
-          <a href={link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-xl border border-white/[0.14] px-3.5 py-2 text-[13px] text-neutral-200 hover:bg-white/5"><ExternalLink size={15} />Open as a student</a>
+          <a href={link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-xl border border-white/[0.14] px-3.5 py-2 text-[13px] text-neutral-200 hover:bg-white/5"><ExternalLink size={15} />Open the link</a>
         </div>
       </div>
     </div>
@@ -170,7 +170,7 @@ function CreateForm({ onCreated, onCancel }: { onCreated: (a: Assignment) => voi
       if (dueAt) form.append('dueAt', new Date(dueAt).toISOString());
       for (const f of files) form.append('files', f, f.name);
       onCreated(await json<Assignment>(await authFetch('/api/assignments', { method: 'POST', body: form })));
-    } catch (e) { setError(e instanceof Error ? e.message : 'Could not create the assignment.'); } finally { setBusy(false); }
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not create the task.'); } finally { setBusy(false); }
   };
   const field = 'w-full rounded-xl border border-white/[0.1] bg-[#1F1E1D] px-3 py-2.5 text-[14px] text-[#F2EFE9] placeholder:text-neutral-500 focus:border-[#D97757]/60 focus:outline-none';
   return (
@@ -180,8 +180,8 @@ function CreateForm({ onCreated, onCancel }: { onCreated: (a: Assignment) => voi
         <input id="as-title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={160} placeholder="For example: S4 Physics, Newton's laws homework" className={field} />
       </div>
       <div>
-        <label htmlFor="as-task" className="mb-1.5 block text-[12.5px] font-medium text-neutral-300">Task for the students</label>
-        <textarea id="as-task" value={instructions} onChange={(e) => setInstructions(e.target.value)} rows={5} maxLength={8000} placeholder="Write the questions or what students must do. You can also attach the question paper below." className={`${field} resize-y`} />
+        <label htmlFor="as-task" className="mb-1.5 block text-[12.5px] font-medium text-neutral-300">What to do</label>
+        <textarea id="as-task" value={instructions} onChange={(e) => setInstructions(e.target.value)} rows={5} maxLength={8000} placeholder="Write the questions or what people must do. You can also attach files below." className={`${field} resize-y`} />
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
@@ -202,7 +202,7 @@ function CreateForm({ onCreated, onCancel }: { onCreated: (a: Assignment) => voi
           )}
         </div>
         <div>
-          <label htmlFor="as-due" className="mb-1.5 block text-[12.5px] font-medium text-neutral-300">Due <span className="text-neutral-500">(optional; late hand-ins are accepted and flagged)</span></label>
+          <label htmlFor="as-due" className="mb-1.5 block text-[12.5px] font-medium text-neutral-300">Due <span className="text-neutral-500">(optional; late submissions are accepted and flagged)</span></label>
           <input id="as-due" type="datetime-local" value={dueAt} onChange={(e) => setDueAt(e.target.value)} className={`${field} [color-scheme:dark]`} />
         </div>
       </div>
@@ -228,7 +228,7 @@ function Dashboard({ id, onBack, onMarkAll, autoMark = false }: { id: string; on
   useEffect(() => { void load(); const t = window.setInterval(() => void load(), 20_000); return () => window.clearInterval(t); }, [load]);
   const toggle = async () => { if (a) setA(await json<Assignment>(await authFetch(`/api/assignments/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ open: !a.open }) }))); };
   const remove = async (s: Submission) => {
-    if (!window.confirm(`Remove ${s.studentName}'s hand-in?`)) return;
+    if (!window.confirm(`Remove ${s.studentName}'s submission?`)) return;
     setA(await json<Assignment>(await authFetch(`/api/assignments/${id}/submissions/${s.id}`, { method: 'DELETE' })));
     setOpen(null);
   };
@@ -237,7 +237,7 @@ function Dashboard({ id, onBack, onMarkAll, autoMark = false }: { id: string; on
     try { onMarkAll(await json<PreparedMarking>(await authFetch(`/api/assignments/${id}/prepare-marking`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }))); }
     catch (e) { setError(e instanceof Error ? e.message : 'Could not prepare the marking.'); } finally { setPreparing(false); }
   };
-  // Opened from the chat's "Mark all" link: go on to the Mark page once, as soon as the hand-ins are loaded.
+  // Opened from the chat's "Mark all" link: go on to the Mark page once, as soon as the submissions are loaded.
   const [autoStarted, setAutoStarted] = useState(false);
   useEffect(() => {
     if (!autoMark || autoStarted || !a?.submissions.length) return;
@@ -249,16 +249,16 @@ function Dashboard({ id, onBack, onMarkAll, autoMark = false }: { id: string; on
   if (!a) return <div className="flex flex-1 items-center justify-center py-24 text-neutral-400">{error ?? <Loader2 className="animate-spin" />}</div>;
   return (
     <>
-      <button type="button" onClick={onBack} className="mb-3 inline-flex items-center gap-1.5 text-[13px] text-neutral-400 hover:text-white"><ArrowLeft size={15} />All assignments</button>
+      <button type="button" onClick={onBack} className="mb-3 inline-flex items-center gap-1.5 text-[13px] text-neutral-400 hover:text-white"><ArrowLeft size={15} />All tasks</button>
       <div className="flex flex-wrap items-start gap-3">
         <div className="min-w-0 flex-1">
           <h1 className="font-serif text-[26px] font-medium leading-tight tracking-tight">{a.title}</h1>
           <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px] text-neutral-400">
             <span className="inline-flex items-center gap-1"><CalendarClock size={13} />{due(a.dueAt)}</span>
-            <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold ${a.open ? 'bg-emerald-500/15 text-emerald-300' : 'bg-white/10 text-neutral-300'}`}>{a.open ? 'Open for hand-ins' : 'Closed'}</span>
+            <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold ${a.open ? 'bg-emerald-500/15 text-emerald-300' : 'bg-white/10 text-neutral-300'}`}>{a.open ? 'Open for submissions' : 'Closed'}</span>
           </p>
         </div>
-        <button type="button" onClick={() => void toggle()} className="inline-flex items-center gap-1.5 rounded-xl border border-white/[0.14] px-3 py-2 text-[13px] text-neutral-200 hover:bg-white/5">{a.open ? <Lock size={14} /> : <Unlock size={14} />}{a.open ? 'Close hand-ins' : 'Reopen'}</button>
+        <button type="button" onClick={() => void toggle()} className="inline-flex items-center gap-1.5 rounded-xl border border-white/[0.14] px-3 py-2 text-[13px] text-neutral-200 hover:bg-white/5">{a.open ? <Lock size={14} /> : <Unlock size={14} />}{a.open ? 'Close submissions' : 'Reopen'}</button>
         <button type="button" disabled={!a.submissions.length || preparing} onClick={() => void markAll()} className="inline-flex items-center gap-1.5 rounded-xl bg-[#D97757] px-3.5 py-2 text-[13px] font-semibold text-white hover:bg-[#c96a4c] disabled:opacity-40">
           {preparing ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}Mark all with AI
         </button>
@@ -268,22 +268,22 @@ function Dashboard({ id, onBack, onMarkAll, autoMark = false }: { id: string; on
       <div className="mt-4"><ShareBox link={a.link} title={a.title} /></div>
 
       <section aria-label="Summary" className="mt-4 grid grid-cols-3 gap-2.5">
-        {[[a.counts.submitted, 'handed in'], [a.counts.late, 'late'], [fileCount, 'files and typed answers']].map(([v, l]) => (
+        {[[a.counts.submitted, 'submitted'], [a.counts.late, 'late'], [fileCount, 'files and typed answers']].map(([v, l]) => (
           <div key={String(l)} className="rounded-[14px] border border-white/[0.08] px-3.5 py-3"><b className="block text-[22px] font-semibold">{v}</b><span className="text-[12px] text-neutral-400">{l}</span></div>
         ))}
       </section>
 
       {(a.instructions || a.taskFiles.length > 0) && (
         <details className="mt-4 rounded-[14px] border border-white/[0.08] bg-white/[0.02] px-4 py-3">
-          <summary className="cursor-pointer text-[13px] font-semibold text-neutral-200">The task students see</summary>
+          <summary className="cursor-pointer text-[13px] font-semibold text-neutral-200">The task as people see it</summary>
           {a.instructions && <p className="mt-2 whitespace-pre-wrap text-[13.5px] leading-relaxed text-neutral-300">{a.instructions}</p>}
           {a.taskFiles.length > 0 && <div className="mt-3 grid gap-3">{a.taskFiles.map((f) => <FileView key={f.id} assignmentId={a.id} file={f} />)}</div>}
         </details>
       )}
 
-      <h2 className="mb-2 mt-6 flex items-center gap-2 text-[14px] font-semibold text-neutral-200"><Users size={16} />Hand-ins</h2>
+      <h2 className="mb-2 mt-6 flex items-center gap-2 text-[14px] font-semibold text-neutral-200"><Users size={16} />Submissions</h2>
       {!a.submissions.length ? (
-        <p className="rounded-[14px] border border-dashed border-white/[0.12] px-4 py-10 text-center text-[13.5px] text-neutral-400">Nothing handed in yet. Share the link; each student appears here as soon as they hand in.</p>
+        <p className="rounded-[14px] border border-dashed border-white/[0.12] px-4 py-10 text-center text-[13.5px] text-neutral-400">Nothing submitted yet. Share the link; each person appears here as soon as they submit.</p>
       ) : (
         <ul className="grid gap-2.5 sm:grid-cols-2">
           {a.submissions.map((s) => (
@@ -295,7 +295,7 @@ function Dashboard({ id, onBack, onMarkAll, autoMark = false }: { id: string; on
                     <span className="truncate text-[13.5px] font-semibold text-white">{s.studentName}</span>
                     {s.late && <span className="shrink-0 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10.5px] font-semibold text-amber-300">Late</span>}
                   </span>
-                  <span className="block truncate text-[11.5px] text-neutral-400">{s.studentId ? `${s.studentId} · ` : ''}{when(s.submittedAt)}{s.resubmissions ? ` · handed in ${s.resubmissions + 1} times` : ''}</span>
+                  <span className="block truncate text-[11.5px] text-neutral-400">{s.studentId ? `${s.studentId} · ` : ''}{when(s.submittedAt)}{s.resubmissions ? ` · submitted ${s.resubmissions + 1} times` : ''}</span>
                   <span className="mt-2 flex gap-1.5 overflow-hidden">
                     {s.files.slice(0, 4).map((f) => <Thumb key={f.id} assignmentId={a.id} file={f} />)}
                     {s.text && <span className="flex h-16 w-24 shrink-0 overflow-hidden rounded-md border border-black/20 bg-[#FBFAF6] p-1.5 text-[8.5px] leading-tight text-neutral-700">{s.text.slice(0, 160)}</span>}
@@ -309,16 +309,16 @@ function Dashboard({ id, onBack, onMarkAll, autoMark = false }: { id: string; on
       )}
 
       {open && (
-        // The hand-in, full size: every file previewed in place, the typed answer as a page.
+        // The submission, full size: every file previewed in place, the typed answer as a page.
         <div className="fixed inset-0 z-[80] flex justify-end bg-black/50" onClick={() => setOpen(null)}>
-          <aside role="dialog" aria-label={`${open.studentName}'s hand-in`} onClick={(e) => e.stopPropagation()} className="flex h-full w-full max-w-3xl flex-col bg-[#262624] shadow-2xl">
+          <aside role="dialog" aria-label={`${open.studentName}'s submission`} onClick={(e) => e.stopPropagation()} className="flex h-full w-full max-w-3xl flex-col bg-[#262624] shadow-2xl">
             <header className="flex items-center gap-3 border-b border-white/[0.08] px-4 py-3">
               <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#D97757]/20 text-[12.5px] font-bold text-[#F2B39C]">{initials(open.studentName)}</span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[14px] font-semibold text-white">{open.studentName}</span>
                 <span className="block text-[12px] text-neutral-400">{open.studentId ? `${open.studentId} · ` : ''}{when(open.submittedAt)}{open.late ? ' · late' : ''}</span>
               </span>
-              <button type="button" onClick={() => void remove(open)} className="rounded-lg p-2 text-neutral-400 hover:bg-white/10 hover:text-rose-300" aria-label="Remove this hand-in"><Trash2 size={16} /></button>
+              <button type="button" onClick={() => void remove(open)} className="rounded-lg p-2 text-neutral-400 hover:bg-white/10 hover:text-rose-300" aria-label="Remove this submission"><Trash2 size={16} /></button>
               <button type="button" onClick={() => setOpen(null)} className="rounded-lg p-2 text-neutral-400 hover:bg-white/10 hover:text-white" aria-label="Close"><X size={18} /></button>
             </header>
             <div className="flex-1 space-y-3 overflow-y-auto p-4">
@@ -363,10 +363,10 @@ export default function AssignmentsPage({ onClose, onMarkAll, initialId, autoMar
           <>
             <div className="mt-1 flex flex-wrap items-end gap-3 sm:mt-3">
               <div className="min-w-0 flex-1">
-                <h1 className="font-serif text-[28px] font-medium tracking-tight sm:text-[32px]">Assignments</h1>
-                <p className="mt-1 max-w-xl text-[13.5px] text-neutral-400">Set a task, share one link, and students hand in from any phone: photos, PDF, Word or typed. Every hand-in shows here, and the AI marks the whole class when you are ready.</p>
+                <h1 className="font-serif text-[28px] font-medium tracking-tight sm:text-[32px]">Tasks</h1>
+                <p className="mt-1 max-w-xl text-[13.5px] text-neutral-400">Set a task, share one link, and people submit from any phone: photos, PDF, Word or typed. Every submission shows here, and the AI marks them all when you are ready.</p>
               </div>
-              {view.kind === 'list' && <button type="button" onClick={() => setView({ kind: 'new' })} className="inline-flex items-center gap-1.5 rounded-xl bg-[#D97757] px-4 py-2.5 text-[13.5px] font-semibold text-white hover:bg-[#c96a4c]"><Plus size={16} />New assignment</button>}
+              {view.kind === 'list' && <button type="button" onClick={() => setView({ kind: 'new' })} className="inline-flex items-center gap-1.5 rounded-xl bg-[#D97757] px-4 py-2.5 text-[13.5px] font-semibold text-white hover:bg-[#c96a4c]"><Plus size={16} />New task</button>}
             </div>
             <div className="mt-5">
               {view.kind === 'new' ? (
@@ -378,9 +378,9 @@ export default function AssignmentsPage({ onClose, onMarkAll, initialId, autoMar
               ) : !rows.length ? (
                 <div className="rounded-[20px] border border-dashed border-white/[0.14] px-6 py-14 text-center">
                   <ClipboardList size={28} className="mx-auto text-[#E08A6A]" />
-                  <p className="mt-3 text-[15px] font-semibold">No assignments yet</p>
-                  <p className="mx-auto mt-1 max-w-sm text-[13px] text-neutral-400">Create one, share the link with your class, and watch the hand-ins arrive.</p>
-                  <button type="button" onClick={() => setView({ kind: 'new' })} className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-[#D97757] px-4 py-2 text-[13.5px] font-semibold text-white"><Plus size={16} />New assignment</button>
+                  <p className="mt-3 text-[15px] font-semibold">No tasks yet</p>
+                  <p className="mx-auto mt-1 max-w-sm text-[13px] text-neutral-400">Create one, share the link, and watch the submissions arrive.</p>
+                  <button type="button" onClick={() => setView({ kind: 'new' })} className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-[#D97757] px-4 py-2 text-[13.5px] font-semibold text-white"><Plus size={16} />New task</button>
                 </div>
               ) : (
                 <ul className="grid gap-2.5 sm:grid-cols-2">

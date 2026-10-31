@@ -83,22 +83,22 @@ const ID_OK = /^[\w.-]{1,40}$/;
 
 export function createAssignmentService(deps: { store: OwnedRecordStore<AssignmentRecord>; files: AssignmentFiles; tokenDir: string; baseUrl?: () => string }) {
   const tokenFile = (token: string) => {
-    if (!/^[\w-]{16,40}$/.test(token)) throw new AssignmentError('NOT_FOUND', 'This assignment link is not valid.', 404);
+    if (!/^[\w-]{16,40}$/.test(token)) throw new AssignmentError('NOT_FOUND', 'This task link is not valid.', 404);
     return path.join(path.resolve(deps.tokenDir), `${token}.json`);
   };
   const linkOf = (token: string) => `${(deps.baseUrl?.() ?? '').replace(/\/$/, '')}/a/${token}`;
 
   async function load(ownerId: string, id: string) {
     const a = await deps.store.get(id, ownerId);
-    if (!a) throw new AssignmentError('NOT_FOUND', 'Assignment not found.', 404);
+    if (!a) throw new AssignmentError('NOT_FOUND', 'Task not found.', 404);
     return a;
   }
 
   async function byToken(token: string): Promise<AssignmentRecord> {
     let ref: { id: string; ownerId: string };
-    try { ref = JSON.parse(await fs.readFile(tokenFile(token), 'utf8')); } catch (e) { if (e instanceof AssignmentError) throw e; throw new AssignmentError('NOT_FOUND', 'This assignment link is not valid.', 404); }
+    try { ref = JSON.parse(await fs.readFile(tokenFile(token), 'utf8')); } catch (e) { if (e instanceof AssignmentError) throw e; throw new AssignmentError('NOT_FOUND', 'This task link is not valid.', 404); }
     const a = await deps.store.get(ref.id, ref.ownerId);
-    if (!a || a.token !== token) throw new AssignmentError('NOT_FOUND', 'This assignment is no longer available.', 404);
+    if (!a || a.token !== token) throw new AssignmentError('NOT_FOUND', 'This task is no longer available.', 404);
     return a;
   }
 
@@ -130,7 +130,7 @@ export function createAssignmentService(deps: { store: OwnedRecordStore<Assignme
     async create(ownerId: string, input: { title?: unknown; instructions?: unknown; dueAt?: unknown; files?: Array<{ name: string; data: Buffer }> }) {
       const title = clean(input.title, LIMITS.title);
       const instructions = clean(input.instructions, LIMITS.instructions);
-      if (!title) throw new AssignmentError('TITLE_REQUIRED', 'Give the assignment a title.');
+      if (!title) throw new AssignmentError('TITLE_REQUIRED', 'Give the task a title.');
       if (!instructions && !input.files?.length) throw new AssignmentError('TASK_REQUIRED', 'Write the task or attach the task file.');
       const due = typeof input.dueAt === 'string' && input.dueAt ? new Date(input.dueAt) : null;
       if (due && Number.isNaN(due.getTime())) throw new AssignmentError('BAD_DUE', 'The due date is not valid.');
@@ -200,13 +200,13 @@ export function createAssignmentService(deps: { store: OwnedRecordStore<Assignme
 
     async submit(token: string, input: { studentName?: unknown; studentId?: unknown; text?: unknown; files?: Array<{ name: string; data: Buffer }> }) {
       const a = await byToken(token);
-      if (!a.open) throw new AssignmentError('CLOSED', 'This assignment is closed. Ask your teacher.', 410);
+      if (!a.open) throw new AssignmentError('CLOSED', 'This task is closed. Ask the person who shared it.', 410);
       const studentName = clean(input.studentName, LIMITS.name);
       const studentId = clean(input.studentId, 40) || undefined;
       const text = clean(input.text, LIMITS.text) || undefined;
       if (!studentName) throw new AssignmentError('NAME_REQUIRED', 'Write your name.');
       if (!text && !input.files?.length) throw new AssignmentError('ANSWER_REQUIRED', 'Add your answer: upload a file or photo, or type it.');
-      if (a.submissions.length >= LIMITS.submissions) throw new AssignmentError('FULL', 'This assignment has reached its submission limit.', 409);
+      if (a.submissions.length >= LIMITS.submissions) throw new AssignmentError('FULL', 'This task has reached its submission limit.', 409);
       const files = await storeUploads(a.ownerId, input.files ?? []);
       const late = !!a.dueAt && Date.now() > Date.parse(a.dueAt);
       const same = (s: AssignmentSubmission) => (studentId && s.studentId ? s.studentId.toLowerCase() === studentId.toLowerCase() : s.studentName.toLowerCase() === studentName.toLowerCase());
@@ -226,7 +226,7 @@ export function createAssignmentService(deps: { store: OwnedRecordStore<Assignme
     async prepareMarking(ownerId: string, id: string, submissionIds?: string[]) {
       const a = await load(ownerId, id);
       const subs = a.submissions.filter((s) => !submissionIds?.length || submissionIds.includes(s.id)).sort((x, y) => x.submittedAt.localeCompare(y.submittedAt));
-      if (!subs.length) throw new AssignmentError('NO_SUBMISSIONS', 'No student has handed in yet.');
+      if (!subs.length) throw new AssignmentError('NO_SUBMISSIONS', 'Nobody has submitted yet.');
       const used = new Set<string>();
       let seq = 0;
       const scripts: Array<StoredFile & { studentName: string; candidateId: string }> = [];

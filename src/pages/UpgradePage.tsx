@@ -54,7 +54,7 @@ function features(id: PlanId, l: PlanLimits): string[] {
   return [
     `${n(l.monthly)} credits a month for chat, documents, research and files`,
     `≈ ${n(Math.floor(l.monthly / CREDITS_PER_SCRIPT))} handwritten papers marked in red pen, or twice that overnight`,
-    'Practice, forms, assignments by link and Excel results',
+    'Practice, forms, tasks shared by link and Excel results',
     l.memory ? `Memory across all chats (${n(l.memoryItems)})` : 'No memory across chats',
     `Uploads up to ${l.maxUploadMb} MB, ${l.maxAttachments} per message`,
   ];
