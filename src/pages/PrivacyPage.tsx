@@ -3,7 +3,7 @@ import { ArrowLeft, Lock, Mail } from 'lucide-react';
 
 export default function PrivacyPage() {
   return (
-    <div className="min-h-screen bg-[#262624] text-[#FAF9F5] flex flex-col">
+    <div className="h-[100dvh] overflow-y-auto bg-[#262624] text-[#FAF9F5] flex flex-col">
       {/* Header */}
       <header className="border-b border-[#3E3E3A] px-6 py-4 flex items-center justify-between bg-[#21211F]/80 backdrop-blur sticky top-0 z-50">
         <div className="flex items-center gap-3">

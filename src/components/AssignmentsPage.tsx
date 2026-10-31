@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, CalendarClock, Check, ClipboardList, Copy, Download, ExternalLink, FileText, Image as ImageIcon, Link2, Loader2, Lock, Paperclip, Plus, Share2, Sparkles, Trash2, Unlock, Users, X } from 'lucide-react';
+import { ArrowLeft, CalendarClock, Check, ChevronLeft, ChevronRight, ClipboardList, Copy, Download, ExternalLink, Eye, FileText, Image as ImageIcon, Link2, Loader2, Lock, Paperclip, Plus, Share2, Sparkles, Trash2, Unlock, Users, X } from 'lucide-react';
 import { authFetch } from '../utils/authFetch';
 import { PdfViewer, loadPdfJs } from './PdfViewer';
 import { Card, Empty, PageShell, Stat, StatRow, Toolbar, primaryBtn, relative } from './workspace/Shell';
@@ -121,6 +121,7 @@ function FileView({ assignmentId, file }: { assignmentId: string; file: StoredFi
       </figcaption>
       {!url ? <div className="flex h-40 items-center justify-center text-neutral-500"><Loader2 size={18} className="animate-spin" /></div>
         : isImage(file) ? <img src={url} alt={file.name} className="mx-auto max-h-[80vh] w-auto bg-white" />
+          : /^audio\//.test(file.mime) ? <div className="p-4"><audio controls src={url} className="w-full" /></div>
           : isPdf(file) ? <div className="h-[70vh]"><PdfViewer url={url} name={file.name} tall /></div>
             : text === null ? <div className="flex h-32 items-center justify-center text-neutral-500"><Loader2 size={18} className="animate-spin" /></div>
               : text ? <div className="max-h-[70vh] overflow-y-auto whitespace-pre-wrap bg-[#FBFAF6] px-6 py-5 font-serif text-[15px] leading-relaxed text-neutral-900">{text}</div>
@@ -246,6 +247,22 @@ function Dashboard({ id, onBack, onMarkAll, autoMark = false }: { id: string; on
     void markAll();
   }, [autoMark, autoStarted, a]); // eslint-disable-line react-hooks/exhaustive-deps
   const fileCount = useMemo(() => a?.submissions.reduce((n, s) => n + s.files.length + (s.text ? 1 : 0), 0) ?? 0, [a]);
+  // Review order: oldest hand-in first.
+  const order = useMemo(() => [...(a?.submissions ?? [])].reverse().map((s) => s.id), [a]);
+  const step = useCallback((by: number) => setOpen((cur) => {
+    if (!cur || !a) return cur;
+    const i = order.indexOf(cur.id) + by;
+    return i >= 0 && i < order.length ? a.submissions.find((s) => s.id === order[i]) ?? cur : cur;
+  }), [a, order]);
+  useEffect(() => {
+    if (!open) return;
+    const key = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement)?.closest?.('input, textarea')) return;
+      if (e.key === 'ArrowRight') step(1); else if (e.key === 'ArrowLeft') step(-1); else if (e.key === 'Escape') setOpen(null);
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, [open, step]);
 
   if (!a) return <div className="flex flex-1 items-center justify-center py-24 text-neutral-400">{error ?? <Loader2 className="animate-spin" />}</div>;
   return (
@@ -283,7 +300,10 @@ function Dashboard({ id, onBack, onMarkAll, autoMark = false }: { id: string; on
         </details>
       )}
 
-      <h2 className="mb-2 mt-6 flex items-center gap-2 text-[14px] font-semibold text-neutral-200"><Users size={16} />Submissions</h2>
+      <div className="mb-2 mt-6 flex items-center gap-2">
+        <h2 className="flex flex-1 items-center gap-2 text-[14px] font-semibold text-neutral-200"><Users size={16} />Submissions</h2>
+        {a.submissions.length > 0 && <button type="button" onClick={() => setOpen(a.submissions[a.submissions.length - 1])} className="inline-flex items-center gap-1.5 rounded-xl border border-white/[0.12] px-3 py-1.5 text-[12.5px] font-medium text-neutral-200 hover:bg-white/[0.06]"><Eye size={14} />Review all hand-ins</button>}
+      </div>
       {!a.submissions.length ? (
         <p className="rounded-[14px] border border-dashed border-white/[0.12] px-4 py-10 text-center text-[13.5px] text-neutral-400">Nothing submitted yet. Share the link; each person appears here as soon as they submit.</p>
       ) : (
@@ -312,9 +332,15 @@ function Dashboard({ id, onBack, onMarkAll, autoMark = false }: { id: string; on
 
       {open && (
         // The submission, full size: every file previewed in place, the typed answer as a page.
-        <div className="fixed inset-0 z-[80] flex justify-end bg-black/50" onClick={() => setOpen(null)}>
-          <aside role="dialog" aria-label={`${open.studentName}'s submission`} onClick={(e) => e.stopPropagation()} className="flex h-full w-full max-w-3xl flex-col bg-[#0f1012] shadow-2xl">
+        <div className="fixed inset-0 z-[80] flex justify-end bg-black/60" onClick={() => setOpen(null)}>
+          <aside role="dialog" aria-label={`${open.studentName}'s submission`} onClick={(e) => e.stopPropagation()} className="flex h-full w-full max-w-4xl flex-col bg-[#0f1012] shadow-2xl">
             <header className="flex items-center gap-3 border-b border-white/[0.08] px-4 py-3">
+              {/* Oldest first, like a pile of papers: previous / next student (or ← and →). */}
+              <div className="flex shrink-0 items-center gap-1">
+                <button type="button" disabled={order.indexOf(open.id) <= 0} onClick={() => step(-1)} className="grid h-8 w-8 place-items-center rounded-lg text-neutral-300 hover:bg-white/10 disabled:opacity-30" aria-label="Previous student"><ChevronLeft size={17} /></button>
+                <span className="w-14 text-center text-[12px] tabular-nums text-neutral-400">{order.indexOf(open.id) + 1} of {order.length}</span>
+                <button type="button" disabled={order.indexOf(open.id) >= order.length - 1} onClick={() => step(1)} className="grid h-8 w-8 place-items-center rounded-lg text-neutral-300 hover:bg-white/10 disabled:opacity-30" aria-label="Next student"><ChevronRight size={17} /></button>
+              </div>
               <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#D97757]/20 text-[12.5px] font-bold text-[#F2B39C]">{initials(open.studentName)}</span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[14px] font-semibold text-white">{open.studentName}</span>

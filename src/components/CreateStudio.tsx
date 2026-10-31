@@ -1,4 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import RecordingBar from './RecordingBar';
+import { FileThumb, PreviewDialog, attachmentSource, type PreviewSource } from './FilePreview';
 import { FileTypeIcon } from './FileTypeIcon';
 import { createPortal } from 'react-dom';
 import {
@@ -73,6 +75,8 @@ interface CreateStudioProps {
   user?: any;
   onOpenLoginModal?: () => void;
 }
+
+const sourceOf = attachmentSource;
 
 function attachmentMeta(item: File | ChatAttachment) {
   const name = item instanceof File ? item.name : item.name || 'Attachment';
@@ -185,6 +189,10 @@ export default function CreateStudio({
   const [speakReplies, setSpeakReplies] = useState(true);
   const voiceLang = speechLang(learning.mode === 'roleplay' ? learning.language : undefined, answerLanguage === 'Auto' ? undefined : answerLanguage);
   const speech = useSpeechInput(voiceLang, useCallback((t: string) => setInputValue((prev) => (prev.trim() ? `${prev.trim()} ${t}` : t)), []));
+  // What the box held before dictation, so Cancel puts it back.
+  const beforeVoice = useRef<string | null>(null);
+  const [previewing, setPreviewing] = useState<PreviewSource | null>(null);
+  const [voiceUnsupported, setVoiceUnsupported] = useState(false);
   const [isDraggingAttachments, setIsDraggingAttachments] = useState(false);
 
   const menuRef = useRef<HTMLDivElement>(null);
@@ -249,7 +257,8 @@ export default function CreateStudio({
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+    // Grows with the message up to about 40% of the screen, then scrolls inside (like Claude).
+    el.style.height = `${Math.min(el.scrollHeight, Math.max(160, Math.round(window.innerHeight * 0.4)))}px`;
   }, []);
 
   useEffect(() => {
@@ -259,9 +268,13 @@ export default function CreateStudio({
   const handleSend = () => {
     const text = inputValue.trim();
     if (!text && stagedAttachments.length === 0) return;
+    if (speech.listening) speech.stop();
+    beforeVoice.current = null;
     onSendMessage(text, stagedAttachments, { answerLanguage, learning });
     setInputValue('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
+    // Ready for the next message without another click (desktop; on phones the keyboard would pop up).
+    if (window.matchMedia('(min-width: 1024px)').matches) window.setTimeout(() => textareaRef.current?.focus(), 0);
     stickToBottomRef.current = true;
     setShowNewResponsePill(false);
   };
@@ -756,29 +769,31 @@ export default function CreateStudio({
             onFeedback={() => onSendMessage('End the roleplay and give me my feedback.', [], { answerLanguage, learning })} />
           <div className="rounded-[28px] border border-white/10 bg-[#30302E] p-3 shadow-[0_4px_24px_rgba(0,0,0,0.25)]">
             {stagedAttachments.length > 0 && (
-              <div className="mb-2.5 flex flex-wrap gap-2 overflow-x-auto pb-1">
-                {stagedAttachments.map((meta: any, idx: number) => (
-                  <div
-                    key={`${attachmentMeta(meta).name}-${idx}`}
-                    className="flex max-w-full items-center gap-2 rounded-xl border border-white/10 bg-white/5 py-1.5 px-2.5 text-xs text-[#FAF9F5]"
-                  >
-                    <FileTypeIcon name={attachmentMeta(meta).name} size="sm" />
-                    <span className="max-w-[180px] min-w-0 truncate" title={attachmentMeta(meta).name}>{attachmentMeta(meta).name}</span>
-                    <span className="shrink-0 rounded bg-white/[.07] px-1 py-0.5 text-[9px] font-semibold text-neutral-400">{attachmentMeta(meta).type}</span>
-                    {attachmentMeta(meta).size && <span className="shrink-0 text-[10px] text-neutral-500">{attachmentMeta(meta).size}</span>}
-                    <button
-                      type="button"
-                      onClick={() => onRemoveStagedAttachment?.(idx)}
-                      className="ml-1 h-7 w-7 flex items-center justify-center text-[#9C9A92] hover:text-rose-400 transition-colors"
-                      aria-label={`Remove ${attachmentMeta(meta).name}`}
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                ))}
+              <div className="mb-2.5 flex gap-2 overflow-x-auto pb-1">
+                {stagedAttachments.map((meta: any, idx: number) => {
+                  const m = attachmentMeta(meta);
+                  const src = sourceOf(meta);
+                  return (
+                    <div key={`${m.name}-${idx}`} className="group relative w-[112px] shrink-0 overflow-hidden rounded-xl border border-white/10 bg-white/[0.04] text-left">
+                      <button type="button" onClick={() => setPreviewing(src)} className="block w-full" aria-label={`Preview ${m.name}`} title={`Preview ${m.name}`}>
+                        <FileThumb src={src} className="h-[72px] w-full" />
+                        <span className="block truncate px-2 pt-1.5 text-[11.5px] font-medium text-[#FAF9F5]">{m.name}</span>
+                        <span className="block px-2 pb-1.5 text-[10px] text-neutral-500">{m.type}{m.size ? ` · ${m.size}` : ''}</span>
+                      </button>
+                      <button type="button" onClick={() => onRemoveStagedAttachment?.(idx)} className="absolute right-1 top-1 grid h-6 w-6 place-items-center rounded-full bg-black/70 text-neutral-200 opacity-90 hover:bg-rose-500 hover:text-white sm:opacity-0 sm:group-hover:opacity-100" aria-label={`Remove ${m.name}`}><X size={13} /></button>
+                    </div>
+                  );
+                })}
               </div>
             )}
             {attachmentError && <p role="alert" className="mb-2 px-2 text-xs text-rose-300">{attachmentError}</p>}
+            {voiceUnsupported && <p role="alert" className="mb-2 flex items-center gap-2 px-2 text-xs text-amber-200">Voice input needs Chrome, Edge or Safari. You can type, or use your phone keyboard's microphone.<button type="button" onClick={() => setVoiceUnsupported(false)} className="text-neutral-400 hover:text-white" aria-label="Dismiss"><X size={12} /></button></p>}
+            {speech.error && <p role="alert" className="mb-2 flex items-center gap-2 px-2 text-xs text-amber-200">{speech.error}<button type="button" onClick={speech.clearError} className="text-neutral-400 hover:text-white" aria-label="Dismiss"><X size={12} /></button></p>}
+            {speech.listening && (
+              <RecordingBar interim={speech.interim}
+                onCancel={() => { speech.abort(); if (beforeVoice.current !== null) setInputValue(beforeVoice.current); beforeVoice.current = null; }}
+                onDone={() => { speech.stop(); beforeVoice.current = null; textareaRef.current?.focus(); }} />
+            )}
 
             <div className="flex items-end gap-2">
               {/* Plus Button with Menu Popover */}
@@ -848,7 +863,7 @@ export default function CreateStudio({
                   onKeyDown={handleKeyDown}
                   onPaste={handleComposerPaste}
                   placeholder={typeof window !== 'undefined' && window.innerWidth < 640 ? 'Ask Bwenge anything…' : 'Ask anything, or attach files and datasets…'}
-                  className="w-full bg-transparent border-0 resize-none text-base leading-6 text-[#FAF9F5] placeholder-[#9C9A92] outline-none px-1 py-1 max-h-40 scrollbar-hidden"
+                  className="w-full bg-transparent border-0 resize-none text-base leading-6 text-[#FAF9F5] placeholder-[#9C9A92] outline-none px-1 py-1 scrollbar-hidden"
                 />
               </div>
 
@@ -857,8 +872,9 @@ export default function CreateStudio({
                 <button
                   type="button"
                   onClick={() => {
-                    if (speech.listening) { speech.stop(); return; }
-                    if (!speech.start()) window.alert('Voice input is not available in this browser. Try Chrome or Edge, or type your message.');
+                    if (speech.listening) { speech.stop(); beforeVoice.current = null; return; }
+                    beforeVoice.current = inputValue;
+                    if (!speech.start()) { beforeVoice.current = null; setVoiceUnsupported(true); }
                   }}
                   className={`flex h-9 w-9 items-center justify-center rounded-full border transition-colors ${
                     speech.listening
@@ -930,6 +946,7 @@ export default function CreateStudio({
           </div>
         </div>
       </footer>
+      {previewing && <PreviewDialog src={previewing} onClose={() => setPreviewing(null)} />}
     </div>
   );
 }

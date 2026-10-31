@@ -221,3 +221,15 @@ test('chat tools: create, edit, review, publish, analyse and report a form', asy
   assert.match(close.text, /Closed/);
   assert.match((await tools.list_forms.execute({}, ctx)).text, /"Course evaluation" \(formId [^)]+\): 3 questions, 5 responses, closed/);
 });
+
+test('file answers keep the file (stored link or small data URL) instead of turning into "[object Object]"', () => {
+  const schema = { questions: [{ id: 'q1', type: 'file', title: 'Photo of your project' }] } as any;
+  const stored = validateSubmission(schema, { q1: { name: 'project.jpg', size: 2_400_000, url: '/api/files/11111111-2222-4333-8444-555555555555' } });
+  assert.ok(stored.ok);
+  assert.deepEqual((stored as any).values.q1, { name: 'project.jpg', size: 2_400_000, type: '', url: '/api/files/11111111-2222-4333-8444-555555555555' });
+  const small = validateSubmission(schema, { q1: { name: 'a.png', size: 10, url: 'data:image/png;base64,iVBORw0KGgo=' } });
+  assert.ok(small.ok);
+  assert.equal(((small as any).values.q1 as any).name, 'a.png');
+  const bad = validateSubmission(schema, { q1: { name: 'x', url: 'https://evil.example/x.exe' } });
+  assert.equal(bad.ok, false, 'only stored copies or data URLs are accepted');
+});

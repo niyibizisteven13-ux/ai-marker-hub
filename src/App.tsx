@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { PreviewDialog, attachmentSource, type PreviewSource } from './components/FilePreview';
 import bwengeLogo from './assets/bwenge-logo.svg';
 import { useStore } from './store/useStore';
 import {
@@ -240,6 +241,7 @@ export default function App() {
     // ?mark=1 (the chat's "Mark all" link) goes straight on to the Mark page with the class loaded.
     return m ? { id: m[1] ?? null, mark: !!m[1] && new URLSearchParams(window.location.search).get('mark') === '1' } : null;
   });
+  const [previewAttachment, setPreviewAttachment] = useState<PreviewSource | null>(null);
   const [formsOpen, setFormsOpen] = useState(() => /^\/forms\/?$/.test(window.location.pathname));
   // Camera opened from the Mark page: its pages go back to that page (one folder per student), not to the old hub.
   const [scanForMark, setScanForMark] = useState(false);
@@ -1017,6 +1019,8 @@ export default function App() {
               id: 'att-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
               name: att.name,
               mimeType,
+              // The whole file stays previewable in this session (the stored copy is used after a reload).
+              localUrl: URL.createObjectURL(att),
               ...(previewUrl ? { previewUrl, url: previewUrl } : {}),
               fileType: att.type.startsWith('image/') ? 'image' : att.name.toLowerCase().endsWith('.pdf') ? 'pdf' : 'document',
             });
@@ -1542,10 +1546,8 @@ export default function App() {
     onOpenScanner: openScanner,
     user: authenticatedUser,
     onOpenLoginModal: () => setLoginModalOpen(true),
-    onPreviewDoc: (doc: any) => {
-      setActiveDocument(doc);
-      setActiveTab('marking_hub');
-    },
+    // A file in the chat opens in place, full screen, without leaving the conversation.
+    onPreviewDoc: (doc: any) => setPreviewAttachment(attachmentSource(doc)),
     onFeedback: async (messageId: string, rating: 'up' | 'down', details: ResponseFeedbackDetails) => {
       const messageIndex = messages.findIndex((message) => message.id === messageId);
       if (messageIndex < 0 || messages[messageIndex].sender !== 'assistant') {
@@ -1674,7 +1676,7 @@ export default function App() {
     // The page people open from a shared form link: dark, focused on the form, with the owner's colour as accent.
     const accent = publicForm?.themeColor || '#D97757';
     return (
-      <div className="form-dark min-h-[100dvh] w-full overflow-y-auto flex flex-col bg-[#0d0e10] text-[#ececee]">
+      <div className="form-dark scroll-area h-[100dvh] w-full overflow-y-auto overscroll-contain flex flex-col bg-[#0d0e10] text-[#ececee]">
         <div aria-hidden="true" className="pointer-events-none fixed inset-x-0 top-0 h-72 opacity-40" style={{ background: `radial-gradient(60% 100% at 50% 0%, ${accent}33, transparent 70%)` }} />
         <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-white/[0.06] bg-[#0d0e10]/85 px-4 py-3 backdrop-blur-md sm:px-8">
           <div className="flex min-w-0 items-center gap-2.5">
@@ -1739,6 +1741,21 @@ export default function App() {
             <Suspense fallback={<div className="mx-auto max-w-2xl p-8 text-center text-sm text-slate-500">Loading form…</div>}>
               <DynamicForm
                 schema={publicForm}
+                // Files go up on their own (with progress) and the answer keeps a link to the stored copy.
+                uploadFile={(file, onProgress) => new Promise<string>((resolve, reject) => {
+                  const xhr = new XMLHttpRequest();
+                  xhr.open('POST', `/api/forms/${encodeURIComponent(publicForm.id)}/upload`);
+                  xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(Math.round((e.loaded / e.total) * 100)); };
+                  xhr.onload = () => {
+                    let body: any = {};
+                    try { body = JSON.parse(xhr.responseText); } catch { /* not JSON */ }
+                    if (xhr.status >= 200 && xhr.status < 300 && body.url) resolve(body.url); else reject(new Error(body.error || 'The file could not be uploaded.'));
+                  };
+                  xhr.onerror = () => reject(new Error('No connection. Try again.'));
+                  const fd = new FormData();
+                  fd.append('file', file, file.name);
+                  xhr.send(fd);
+                })}
                 onSubmit={async (answers) => {
                   const res = await fetch(`/api/forms/${publicForm.id}/submit`, {
                     method: 'POST',
@@ -1925,6 +1942,7 @@ export default function App() {
         )}
       </Suspense>
       {authenticatedUser && <Suspense fallback={null}><MarkingDrawer /></Suspense>}
+      {previewAttachment && <PreviewDialog src={previewAttachment} onClose={() => setPreviewAttachment(null)} />}
       {authenticatedUser && formsOpen && (
         <Suspense fallback={null}>
           <FormsPage onClose={() => { setFormsOpen(false); if (/^\/forms\/?$/.test(window.location.pathname)) window.history.replaceState({}, '', '/'); }} />
