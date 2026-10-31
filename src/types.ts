@@ -92,6 +92,8 @@ export interface ChatAttachment {
   mimeType?: string;
   fileType?: 'image' | 'pdf' | 'document' | 'text' | 'doc' | 'docx' | 'ppt' | 'pptx' | 'xlsx' | 'xls' | 'code' | 'unknown';
   url?: string;
+  /** The original file in this browser session (an object URL), for previewing what was sent. */
+  localUrl?: string;
   previewUrl?: string;
   rawText?: string;
   htmlContent?: string;

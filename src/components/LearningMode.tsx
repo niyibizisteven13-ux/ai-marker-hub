@@ -94,28 +94,54 @@ export function LearningModeBanner({ value, onExit, speak, onToggleSpeak, onFeed
 }
 
 // ── Voice: real speech recognition (where the browser supports it) and read-aloud ──
+/**
+ * Dictation like Claude's: words appear while you speak (interim), final words are committed with onText.
+ * Errors are reported in words (microphone blocked, nothing heard) instead of failing silently.
+ */
 export function useSpeechInput(lang: string, onText: (t: string) => void) {
   const [listening, setListening] = useState(false);
+  const [interim, setInterim] = useState('');
+  const [error, setError] = useState<string | null>(null);
   const rec = useRef<any>(null);
+  const stopping = useRef(false);
   const Ctor = typeof window !== 'undefined' ? ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition) : null;
   const supported = !!Ctor;
-  const stop = useCallback(() => { rec.current?.stop(); setListening(false); }, []);
+  const stop = useCallback(() => { stopping.current = true; rec.current?.stop(); setListening(false); setInterim(''); }, []);
+  const abort = useCallback(() => { stopping.current = true; rec.current?.abort?.(); setListening(false); setInterim(''); }, []);
   const start = useCallback(() => {
     if (!Ctor) return false;
     const r = new Ctor();
     r.lang = lang;
-    r.interimResults = false;
+    r.interimResults = true;
     r.continuous = true;
-    r.onresult = (e: any) => { for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) onText(e.results[i][0].transcript.trim()); };
-    r.onend = () => setListening(false);
-    r.onerror = () => setListening(false);
+    r.onresult = (e: any) => {
+      let live = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) onText(t.trim()); else live += t;
+      }
+      setInterim(live.trim());
+    };
+    // Chrome ends a session after a pause; keep listening until the person presses Done or Cancel.
+    r.onend = () => { if (!stopping.current && rec.current === r) { try { r.start(); return; } catch { /* already started */ } } setListening(false); setInterim(''); };
+    r.onerror = (e: any) => {
+      const code = e?.error;
+      if (code === 'no-speech' || code === 'aborted') return;
+      stopping.current = true;
+      setError(code === 'not-allowed' || code === 'service-not-allowed' ? 'Allow the microphone for this site (the lock or camera icon in the address bar), then try again.'
+        : code === 'audio-capture' ? 'No microphone was found.'
+          : code === 'network' ? 'Voice input needs an internet connection.' : 'Voice input stopped. Try again.');
+      setListening(false); setInterim('');
+    };
+    stopping.current = false;
+    setError(null);
     rec.current = r;
     r.start();
     setListening(true);
     return true;
   }, [Ctor, lang, onText]);
-  useEffect(() => () => rec.current?.abort?.(), []);
-  return { supported, listening, start, stop };
+  useEffect(() => () => { stopping.current = true; rec.current?.abort?.(); }, []);
+  return { supported, listening, interim, error, clearError: () => setError(null), start, stop, abort };
 }
 
 export function speakText(text: string, lang: string) {

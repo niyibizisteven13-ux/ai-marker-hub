@@ -82,9 +82,12 @@ export function validateSubmission(schema: unknown, answers: Record<string, unkn
         break;
       }
       case 'file': {
-        const s = String(v);
-        if (s.length > 15_000_000) return fail(f, `The file for ${name(f, i)} is too large.`);
-        values[f.id] = s;
+        // { name, size, type, url }: url is the stored copy (/api/files/…) or, for small files, a data URL.
+        const o = (typeof v === 'object' && v !== null ? v : { url: String(v) }) as { name?: unknown; size?: unknown; type?: unknown; url?: unknown };
+        const url = typeof o.url === 'string' ? o.url : '';
+        if (!/^(\/api\/files\/[0-9a-f-]{36}$|data:[\w.+-]+\/[\w.+-]+;base64,)/i.test(url)) return fail(f, `The file for ${name(f, i)} could not be read. Add it again.`);
+        if (url.length > 15_000_000) return fail(f, `The file for ${name(f, i)} is too large.`);
+        values[f.id] = { name: typeof o.name === 'string' ? o.name.slice(0, 200) : 'file', size: Number(o.size) || 0, type: typeof o.type === 'string' ? o.type.slice(0, 100) : '', url };
         break;
       }
       default: {

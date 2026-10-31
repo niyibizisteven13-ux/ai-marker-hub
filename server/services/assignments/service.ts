@@ -50,13 +50,16 @@ export class AssignmentError extends Error {
 
 export const LIMITS = { files: 10, fileBytes: 25 * 1024 * 1024, text: 20_000, name: 80, title: 160, instructions: 8_000, submissions: 300 };
 
-/** What students may hand in: photos (phone and scanner formats), PDF, Word and other text documents. */
-const ACCEPT = /\.(jpe?g|png|webp|heic|heif|gif|bmp|tiff?|pdf|docx?|odt|rtf|txt|md)$/i;
+/** What students may hand in: photos (phone and scanner formats), PDF, Word and other text documents, voice recordings. */
+const ACCEPT = /\.(jpe?g|png|webp|heic|heif|gif|bmp|tiff?|pdf|docx?|odt|rtf|txt|md|webm|ogg|oga|m4a|mp3|wav|aac)$/i;
+/** Voice recordings: heard by the teacher in the dashboard; not part of the PDF the AI marks. */
+const AUDIO = /\.(webm|ogg|oga|m4a|mp3|wav|aac)$/i;
 const IMAGE = /\.(jpe?g|png|webp|heic|heif|gif|bmp|tiff?)$/i;
 const MIME: Record<string, string> = {
   jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', heic: 'image/heic', heif: 'image/heic', gif: 'image/gif', bmp: 'image/bmp', tif: 'image/tiff', tiff: 'image/tiff',
   pdf: 'application/pdf', doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   odt: 'application/vnd.oasis.opendocument.text', rtf: 'application/rtf', txt: 'text/plain', md: 'text/markdown',
+  webm: 'audio/webm', ogg: 'audio/ogg', oga: 'audio/ogg', m4a: 'audio/mp4', mp3: 'audio/mpeg', wav: 'audio/wav', aac: 'audio/aac',
 };
 const ext = (name: string) => (/\.([a-z0-9]+)$/i.exec(name)?.[1] ?? '').toLowerCase();
 const clean = (s: unknown, max: number) => (typeof s === 'string' ? s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').trim().slice(0, max) : '');
@@ -77,6 +80,12 @@ export function looksLike(name: string, data: Buffer): boolean {
   if (e === 'tif' || e === 'tiff') return str.startsWith('II*') || str.startsWith('MM\u0000*');
   if (e === 'docx' || e === 'odt') return str.startsWith('PK\u0003\u0004');
   if (e === 'doc') return head[0] === 0xd0 && head[1] === 0xcf;
+  if (e === 'webm') return head[0] === 0x1a && head[1] === 0x45 && head[2] === 0xdf && head[3] === 0xa3;
+  if (e === 'ogg' || e === 'oga') return str.startsWith('OggS');
+  if (e === 'wav') return str.startsWith('RIFF') && str.slice(8, 12) === 'WAVE';
+  if (e === 'm4a') return str.slice(4, 8) === 'ftyp';
+  if (e === 'mp3') return str.startsWith('ID3') || (head[0] === 0xff && (head[1] & 0xe0) === 0xe0);
+  if (e === 'aac') return head[0] === 0xff && (head[1] & 0xf0) === 0xf0;
   return true; // text formats
 }
 
@@ -279,6 +288,7 @@ export function createAssignmentService(deps: {
     let photos: Buffer[] = [];
     const flushPhotos = async () => { if (photos.length) { parts.push(await imagesToPdf(photos)); photos = []; } };
     for (const f of s.files) {
+      if (AUDIO.test(f.name)) continue;
       const { data } = await deps.files.read(ownerId, f.id);
       if (IMAGE.test(f.name)) { photos.push(data); continue; }
       await flushPhotos();
@@ -286,6 +296,7 @@ export function createAssignmentService(deps: {
     }
     await flushPhotos();
     if (s.text) parts.push(await typedToPdf({ name: 'answer.txt', buffer: Buffer.from(s.text, 'utf8'), mime: 'text/plain' }));
+    if (!parts.length) throw new Error('only a voice recording was handed in; listen to it in the dashboard');
     if (parts.length === 1) return parts[0];
     const out = await PDFDocument.create();
     for (const p of parts) {

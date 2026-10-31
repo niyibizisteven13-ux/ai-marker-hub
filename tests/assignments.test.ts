@@ -188,3 +188,18 @@ test('storage: hand-ins count against the owner\'s storage, a replaced or remove
   await s.remove('small', a.id);
   assert.equal(used('small'), 0, 'removing the task frees everything');
 });
+
+test('voice answers: a recording is accepted (checked by its bytes) and left out of the PDF the AI marks', async () => {
+  const a = await svc.create('t-voice', { title: 'Read aloud', instructions: 'Record verse 1.' });
+  const token = tokenOf(a.link);
+  const webm = Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.alloc(200, 1)]);
+  await assert.rejects(svc.submit(token, { studentName: 'Fake', files: [{ name: 'voice.webm', data: Buffer.from('not audio at all') }] }), /does not match/);
+  await svc.submit(token, { studentName: 'Aline', files: [{ name: 'voice-answer.webm', data: webm }, { name: 'notes.jpg', data: photo }] });
+  await svc.submit(token, { studentName: 'Eric', files: [{ name: 'voice-answer.webm', data: webm }] });
+  const dash = await svc.get('t-voice', a.id);
+  assert.equal(dash.submissions.find((s) => s.studentName === 'Aline')!.files[0].mime, 'audio/webm');
+  const prep = await svc.prepareMarking('t-voice', a.id);
+  assert.equal(prep.scripts.length, 1, 'Aline\'s photo is marked; the recording is heard in the dashboard');
+  assert.equal(prep.skipped[0].studentName, 'Eric');
+  assert.match(prep.skipped[0].reason, /voice recording/);
+});

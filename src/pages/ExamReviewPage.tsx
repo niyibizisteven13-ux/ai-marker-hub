@@ -205,7 +205,7 @@ export default function ExamReviewPage({ onBack }: { onBack: () => void }) {
 
   if (!examId) {
     return (
-      <div className="min-h-[100dvh] bg-[#141413] px-4 py-8 text-white">
+      <div className="scroll-area h-[100dvh] overflow-y-auto bg-[#141413] px-4 py-8 text-white">
         <div className="mx-auto max-w-3xl">
           <button type="button" onClick={onBack} className="mb-6 inline-flex items-center gap-2 text-sm text-neutral-400 hover:text-white"><ArrowLeft size={16} /> Back to workspace</button>
           <h1 className="font-serif text-3xl">Results</h1>

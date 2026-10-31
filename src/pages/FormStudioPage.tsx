@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import FormResponses from '../components/FormResponses';
 import { AlertTriangle, ArrowLeft, CircleCheck, Download, Loader2 } from 'lucide-react';
 import FormBuilder from '../components/FormBuilder';
 import AskBwengeDrawer from '../components/AskBwengeDrawer';
@@ -126,7 +127,7 @@ export default function FormStudioPage({ formId, onBack }: { formId: string; onB
 
   if (error) {
     return (
-      <div className="form-dark min-h-[100dvh] bg-[#F4F4F1] px-4 py-10 text-[#202124]">
+      <div className="form-dark h-[100dvh] overflow-y-auto bg-[#F4F4F1] px-4 py-10 text-[#202124]">
         <div className="mx-auto max-w-xl rounded-2xl border border-[#E0E0E0] bg-white p-6">
           <p className="font-semibold">{error}</p>
           <button type="button" onClick={onBack} className="mt-4 inline-flex items-center gap-2 text-sm text-[#5F6368] hover:text-[#202124]"><ArrowLeft size={16} /> Back to workspace</button>
@@ -189,6 +190,8 @@ export default function FormStudioPage({ formId, onBack }: { formId: string; onB
           {data.responses === 0
             ? <p className="rounded-2xl border border-dashed border-[#DADCE0] bg-white p-6 text-center text-sm text-[#5F6368]">No responses yet. {data.form.open ? 'Share the form link to start collecting.' : 'Publish the form to start collecting.'}</p>
             : data.summaries.map((s) => <SummaryCard key={s.variable} s={s} />)}
+
+          {data.responses > 0 && <FormResponses formId={formId} questions={(data.form.schema?.questions ?? data.form.schema?.fields ?? []) as any[]} />}
 
           <details className="rounded-2xl border border-[#E0E0E0] bg-white p-5">
             <summary className="cursor-pointer font-semibold">Data dictionary ({data.codebook.length} variables)</summary>

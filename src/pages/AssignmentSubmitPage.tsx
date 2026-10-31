@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, ArrowRight, CalendarClock, Camera, CheckCircle2, Download, Eye, FileText, Loader2, Lock, Paperclip, Send, Trash2, X } from 'lucide-react';
 import { FileThumb, PreviewDialog, type PreviewSource } from '../components/FilePreview';
+import VoiceRecorder from '../components/VoiceRecorder';
 import { getApiUrl } from '../utils/authFetch';
 import logoUrl from '../assets/bwenge-logo.svg';
 
@@ -14,7 +15,7 @@ import logoUrl from '../assets/bwenge-logo.svg';
 interface Task { title: string; instructions: string; dueAt: string | null; open: boolean; taskFiles: Array<{ index: number; name: string; mime: string; size: number }> }
 const MAX_FILES = 10;
 const MAX_MB = 25;
-const ACCEPT = '.pdf,.doc,.docx,.odt,.rtf,.txt,.md,image/*,.heic,.heif';
+const ACCEPT = '.pdf,.doc,.docx,.odt,.rtf,.txt,.md,image/*,.heic,.heif,audio/*,.m4a,.mp3,.wav,.ogg,.webm';
 interface Item { id: string; file: File; src: PreviewSource }
 const size = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1048576).toFixed(1)} MB`);
 
@@ -88,7 +89,7 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
   const totalBytes = files.reduce((a, f) => a + f.file.size, 0);
 
   const shell = (body: React.ReactNode) => (
-    <div className="min-h-dvh bg-[#F5F3EE] text-[#1F1E1D]">
+    <div className="scroll-area h-dvh overflow-y-auto overscroll-contain bg-[#F5F3EE] text-[#1F1E1D]">
       <header className="mx-auto flex max-w-xl items-center gap-2 px-4 pt-5">
         <img src={logoUrl} alt="" className="h-7 w-7 rounded-lg" />
         <span className="text-[14px] font-semibold">Bwenge</span>
@@ -158,7 +159,7 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
               <input value={studentId} onChange={(e) => setStudentId(e.target.value)} maxLength={40} placeholder="e.g. S4B-001" className={field} /></label>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#D97757] px-3 py-3.5 text-[14.5px] font-semibold text-white active:bg-[#c96a4c]">
               <Camera size={18} />Take photos
               <input type="file" accept="image/*" capture="environment" multiple hidden onChange={(e) => { add(e.target.files); e.target.value = ''; }} />
@@ -167,8 +168,9 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
               <Paperclip size={18} />Choose files
               <input type="file" accept={ACCEPT} multiple hidden onChange={(e) => { add(e.target.files); e.target.value = ''; }} />
             </label>
+            <VoiceRecorder className="col-span-2 sm:col-span-1" onRecorded={(f) => { const dt = new DataTransfer(); dt.items.add(f); add(dt.files); }} onError={(message) => setState({ kind: 'error', message })} />
           </div>
-          <p className="-mt-2 text-[12px] text-neutral-500">Photos of your pages (one per page), PDF, Word or text. Up to {MAX_FILES} files, {MAX_MB} MB each.</p>
+          <p className="-mt-2 text-[12px] text-neutral-500">Photos of your pages (one per page), PDF, Word, text or a voice recording. Up to {MAX_FILES} files, {MAX_MB} MB each.</p>
 
           {files.length > 0 && (
             <div>

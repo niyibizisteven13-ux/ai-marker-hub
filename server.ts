@@ -28,6 +28,7 @@ import { SafetyService } from './server/services/SafetyService.js';
 import { SentimentService } from './server/services/SentimentService.js';
 import { ConfidenceService } from './server/services/ConfidenceService.js';
 import { upload, batchUpload, chatFileUpload, CHAT_MAX_FILE_BYTES } from './server/middleware/upload.js';
+import multer from 'multer';
 import { isBase64 } from './server/utils/base64.js';
 import { fitHistory, sanitizeHistory } from './server/services/ai/chatHistory.js';
 import { needsResearch } from './server/services/ai/research.js';
@@ -390,7 +391,10 @@ app.use('/api/studio/projects', requireAuth, studioRoutes);
 app.use('/api/agent', requireAuth, generalLimiter, agentRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/forms', formRoutes);
-app.use('/api/files', createFileRouter(fileStore, { getUserId: (req) => (req as any).user?.id }));
+// Stored files: a signed link works for anyone holding it; without one, the signed-in owner (Bearer token) can open
+// their own files. (The user id is userId on the verified token; the old lookup of user.id never matched.)
+app.use('/api/files', (req, res, next) => (req.method === 'GET' && req.get('authorization') ? requireAuth(req, res, next) : next()),
+  createFileRouter(fileStore, { getUserId: (req) => (req as any).user?.userId ?? (req as any).user?.id }));
 app.use('/api/admin/knowledge', requireAuth, requireRole('ADMIN'), knowledgeAdminRouter);
 app.use('/api/knowledge', requireAuth, knowledgeSourcesRouter);
 app.use('/api/curation', requireAuth, curationViewRouter);
@@ -1985,6 +1989,32 @@ app.post('/api/forms/generate', requireAuth, async (req, res) => {
     res.json({ success: true, form });
   } catch (error: any) {
     respondError(res, error, 'Failed to generate form.');
+  }
+});
+
+// A file answered in a public form (a photo, PDF, recording…): stored for the form's owner and sent with the answers
+// as a link, so responses stay small and the owner opens the file in place. One file per request, 25 MB at most.
+const formFileUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, files: 1 } });
+app.post('/api/forms/:id/upload', publicFormSubmitLimiter, (req, res, next) => formFileUpload.single('file')(req, res, (err?: any) => {
+  if (!err) return next();
+  res.status(err?.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: err?.code === 'LIMIT_FILE_SIZE' ? 'The file is larger than 25 MB.' : 'The file could not be read.' });
+}), async (req, res) => {
+  try {
+    const form = await prisma.applicationForm.findUnique({ where: { id: req.params.id } });
+    if (!form) return res.status(404).json({ error: 'Form not found.' });
+    let schema: any = {};
+    try { schema = JSON.parse(form.schema || '{}'); } catch { schema = {}; }
+    if (schema.acceptingResponses === false) return res.status(403).json({ error: 'This form is no longer accepting responses.' });
+    const questions: any[] = Array.isArray(schema.questions) ? schema.questions : Array.isArray(schema.fields) ? schema.fields : [];
+    if (!questions.some((q) => q?.type === 'file')) return res.status(400).json({ error: 'This form does not take files.' });
+    const f = (req as any).file as { originalname: string; mimetype: string; buffer: Buffer; size: number } | undefined;
+    if (!f || !f.size) return res.status(400).json({ error: 'No file was sent.' });
+    const mime = f.mimetype || 'application/octet-stream';
+    const kind = mime.startsWith('image/') ? 'image' : mime === 'application/pdf' ? 'pdf' : 'document';
+    const meta = await fileStore.put({ userId: form.userId, name: f.originalname.replace(/[^\w.\- ]/g, '_').slice(0, 120) || 'file', mime, kind, data: f.buffer, ttlMs: 365 * 24 * 60 * 60 * 1000 });
+    res.status(201).json({ url: `/api/files/${meta.id}`, name: meta.name, size: meta.size, type: mime });
+  } catch (error) {
+    respondError(res, error, 'The file could not be saved.');
   }
 });
 
