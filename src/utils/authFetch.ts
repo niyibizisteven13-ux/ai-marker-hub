@@ -21,36 +21,59 @@ export function getAccessToken(): string | null {
   return currentAccessToken;
 }
 
+/**
+ * Why the last refresh gave no token: 'expired' means the session really ended (sign in again); 'transient' means
+ * the server was busy, rate-limited (429) or unreachable, and the session is still valid, so nobody is signed out.
+ */
+let lastRefreshFailure: 'expired' | 'transient' | null = null;
+export const refreshFailure = () => lastRefreshFailure;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 async function performRefresh(): Promise<string | null> {
   if (refreshPromise) return refreshPromise;
 
   refreshPromise = (async () => {
     try {
-      const response = await fetch(getApiUrl('/api/auth/refresh'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Requested-With': 'bwenge',
-        },
-        credentials: 'include',
-      });
+      for (let attempt = 0; ; attempt++) {
+        let response: Response | null = null;
+        try {
+          response = await fetch(getApiUrl('/api/auth/refresh'), {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Requested-With': 'bwenge',
+            },
+            credentials: 'include',
+          });
+        } catch {
+          response = null; // offline or the server is restarting
+        }
 
-      if (!response.ok) {
-        setAccessToken(null);
-        return null;
+        if (response?.ok) {
+          const data = await response.json().catch(() => null);
+          if (data?.accessToken) {
+            lastRefreshFailure = null;
+            setAccessToken(data.accessToken, data.expiresIn || 900);
+            return data.accessToken as string;
+          }
+        }
+
+        // Only 401/403 mean the session is over. Busy (429), server errors and no connection are retried and
+        // never sign the person out.
+        if (response && (response.status === 401 || response.status === 403)) {
+          lastRefreshFailure = 'expired';
+          setAccessToken(null);
+          return null;
+        }
+        if (attempt >= 2) {
+          lastRefreshFailure = 'transient';
+          // Keep a token that is still valid; the next request tries again.
+          return currentAccessToken && tokenExpiresAt > Date.now() ? currentAccessToken : null;
+        }
+        const retryAfter = Number(response?.headers.get('Retry-After'));
+        await sleep(Math.min(8000, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 1500 * (attempt + 1)));
       }
-
-      const data = await response.json();
-      if (data?.accessToken) {
-        setAccessToken(data.accessToken, data.expiresIn || 900);
-        return data.accessToken;
-      }
-
-      setAccessToken(null);
-      return null;
-    } catch (err) {
-      setAccessToken(null);
-      return null;
     } finally {
       refreshPromise = null;
     }
@@ -121,18 +144,18 @@ export async function authFetch(input: RequestInfo, init?: RequestInit): Promise
   if (response.status === 401 && !isRefreshEndpoint) {
     try {
       const errorBody = await response.clone().json().catch(() => ({}));
-      if (errorBody?.code === 'TOKEN_EXPIRED' || !errorBody?.code) {
+      if (errorBody?.code === 'TOKEN_EXPIRED' || errorBody?.code === 'NO_TOKEN' || !errorBody?.code) {
         const newToken = await performRefresh();
         if (newToken) {
           response = await makeRequest(newToken);
-        } else {
+        } else if (lastRefreshFailure !== 'transient') {
           window.dispatchEvent(new Event('bwenge:session-expired'));
         }
-      } else {
+      } else if (lastRefreshFailure !== 'transient') {
         window.dispatchEvent(new Event('bwenge:session-expired'));
       }
     } catch {
-      window.dispatchEvent(new Event('bwenge:session-expired'));
+      if (lastRefreshFailure !== 'transient') window.dispatchEvent(new Event('bwenge:session-expired'));
     }
   }
 

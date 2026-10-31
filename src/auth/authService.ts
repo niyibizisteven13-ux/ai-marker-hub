@@ -1,4 +1,4 @@
-import { authFetch, setAccessToken, getAccessToken, getApiUrl, refreshAccessToken } from '../utils/authFetch';
+import { authFetch, setAccessToken, getAccessToken, getApiUrl, refreshAccessToken, refreshFailure } from '../utils/authFetch';
 
 export interface User {
   id: string;
@@ -44,7 +44,15 @@ export interface AuthService {
 export const authService: AuthService = {
   async me() {
     try {
-      if (!getAccessToken() && !await refreshAccessToken()) return null;
+      if (!getAccessToken()) {
+        // A busy server (429) or a dropped connection is not "signed out": keep trying for a while.
+        let token = await refreshAccessToken();
+        for (let i = 0; !token && refreshFailure() === 'transient' && i < 4; i++) {
+          await new Promise((r) => setTimeout(r, 3000));
+          token = await refreshAccessToken();
+        }
+        if (!token) return null;
+      }
       const res = await authFetch('/api/auth/me');
       if (res.ok) {
         const data = await res.json();
