@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, ExternalLink, Loader2, PanelRightOpen, X, XCircle } from 'lucide-react';
 import { authFetch } from '../utils/authFetch';
 import LiveMarkingPanel, { useExamActivity, type ExamEvent } from './LiveMarkingPanel';
-import { PageView, type Item } from './MarkedPaperView';
+import { PageView, penActions, type Item } from './MarkedPaperView';
 
 /**
  * Marking inside the chat. The card under the assistant's reply shows the run live: progress, then one line per
@@ -148,6 +148,8 @@ interface ReviewView { candidate: { submissionId: string; candidateId: string };
 function RedPenScript({ examId, submissionId, refresh }: { examId: string; submissionId: string; refresh: number }) {
   const [review, setReview] = useState<ReviewView | null>(null);
   const [page, setPage] = useState(1);
+  // The teacher's own pen marks can be added on a script as soon as it is marked, while the others are still marking.
+  const [penSelected, setPenSelected] = useState<string | null>(null);
   useEffect(() => { setReview(null); setPage(1); }, [submissionId]);
   useEffect(() => {
     let alive = true;
@@ -170,7 +172,8 @@ function RedPenScript({ examId, submissionId, refresh }: { examId: string; submi
         <button type="button" aria-label="Next page" disabled={!!pageCount && page >= pageCount} onClick={() => setPage((p) => p + 1)} className="shrink-0 rounded border border-white/10 px-2 py-0.5 disabled:opacity-40">›</button>
       </div>
       {review
-        ? <PageView examId={examId} submissionId={submissionId} page={page} aspect={aspect} items={review.layout.items} selected={null} editable={false} onSelect={() => undefined} onMove={() => undefined} />
+        ? <PageView examId={examId} submissionId={submissionId} page={page} aspect={aspect} items={review.layout.items} selected={penSelected} editable={false} onSelect={setPenSelected} onMove={() => undefined}
+            pen={review.summary ? penActions(examId, submissionId, setReview) : undefined} />
         : <PageThumb examId={examId} submissionId={submissionId} page={page} large alt={`Page ${page} of the script`} />}
     </section>
   );

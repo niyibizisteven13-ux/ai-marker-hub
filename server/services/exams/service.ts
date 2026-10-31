@@ -22,7 +22,7 @@ import { matchAnswers } from './matching.js';
 import { buildReportData, renderExamReport, validateExamReport } from './report.js';
 import { classStatistics, currentSummaries, effectiveMarks, openFlags, schemeOf, summarizeCandidate, type CandidateSummary } from './results.js';
 import { changedQuestions, extractScheme, questionKey, validateScheme, type MarkingScheme } from './scheme.js';
-import { DEFAULT_PREFERENCES, type ArtifactSet, type AuditEvent, type CandidateResult, type CandidateState, type ExamEvent, type ExamRecord, type LayoutOverride, type MarkingPreferences, type MarkingRun, type QuestionResult, type SchemeVersion, type Submission } from './types.js';
+import { DEFAULT_PREFERENCES, type ArtifactSet, type AuditEvent, type CandidateResult, type CandidateState, type ExamEvent, type ExamRecord, type LayoutOverride, type MarkingPreferences, type MarkingRun, type PenKind, type PenMark, type QuestionResult, type SchemeVersion, type Submission } from './types.js';
 import { buildWorkbook } from './workbook.js';
 
 /**
@@ -590,7 +590,7 @@ export function createExamService(deps: ExamDeps) {
             });
             e.resultRevision++;
             e.results[sub.id] = { submissionId: sub.id, candidateId: sub.candidateId, runId, schemeVersion: run.schemeVersion,
-              questions, updatedAt: now(), usage: previous?.runId === runId ? previous.usage : { input: 0, output: 0 } };
+              questions, updatedAt: now(), usage: previous?.runId === runId ? previous.usage : { input: 0, output: 0 }, ...(previous?.pen ? { pen: previous.pen } : {}) };
           });
         },
       });
@@ -612,7 +612,8 @@ export function createExamService(deps: ExamDeps) {
         // An examiner override survives re-marking; the new AI proposal is kept alongside it.
         return { questionId: q.id, number: q.number, maxMarks: q.maxMarks, ai, override: old?.override ?? null, confirmed: null, mappedElementIds: match.questions[q.id]?.elementIds ?? [], mappingFlags: match.questions[q.id]?.flags ?? [], history };
       });
-      e.results[sub.id] = { submissionId: sub.id, candidateId: sub.candidateId, runId, schemeVersion: run.schemeVersion, questions, updatedAt: now(), usage: marked.usage };
+      // The teacher's own pen marks survive re-marking (they are drawn on the page, not tied to the AI's marks).
+      e.results[sub.id] = { submissionId: sub.id, candidateId: sub.candidateId, runId, schemeVersion: run.schemeVersion, questions, updatedAt: now(), usage: marked.usage, ...(prev?.pen ? { pen: prev.pen } : {}) };
       try { deps.onUsage?.(userId, { model: deps.agent().model, input: marked.usage.input, output: marked.usage.output, what: 'mark', batch: run.mode === 'overnight' }); } catch { /* metering never breaks marking */ }
       audit(e, { actor: 'bwenge-ai', type: 'marked', submissionId: sub.id, candidateId: sub.candidateId, after: { total: questions.reduce((a, q) => a + (effectiveMarks(q) ?? 0), 0) } });
       const s = e.submissions.find((x) => x.id === sub.id)!;
@@ -1166,7 +1167,8 @@ export function createExamService(deps: ExamDeps) {
     const sub = findSub(exam, ref);
     const res = sub ? exam.results[sub.id] : undefined;
     if (!sub || !res) throw new ExamInputError('UNKNOWN_CANDIDATE', `No marked script for "${ref}".`, 404);
-    const valid = itemId === 'total' || res.questions.some((q) => itemId === `${q.questionId}:mark` || itemId === `${q.questionId}:correction` || q.ai?.criterionResults.some(c => itemId === `${q.questionId}:criterion:${c.criterionId}`));
+    const valid = itemId === 'total' || res.questions.some((q) => itemId === `${q.questionId}:mark` || itemId === `${q.questionId}:correction`
+      || q.ai?.criterionResults.some(c => itemId === `${q.questionId}:criterion:${c.criterionId}` || itemId === `${q.questionId}:note:${c.criterionId}` || itemId.startsWith(`${q.questionId}:pen:${c.criterionId}:`)));
     if (!valid) throw new ExamInputError('UNKNOWN_ITEM', `No item "${itemId}" on this script.`, 404);
     if (!input.reset && !input.hidden && (input.page === undefined || input.fx === undefined || input.fy === undefined)) throw new ExamInputError('INVALID_REQUEST', 'Give page, fx and fy, or hidden, or reset.', 400);
     if (input.page !== undefined && (input.page < 1 || input.page > sub.pages)) throw new ExamInputError('UNKNOWN_PAGE', `Page ${input.page} does not exist.`, 404);
@@ -1185,6 +1187,43 @@ export function createExamService(deps: ExamDeps) {
       r.updatedAt = now();
       e.resultRevision++;
       audit(e, { actor: userId, type: 'layout', submissionId: sub.id, candidateId: sub.candidateId, before, after: r.layout[itemId] ?? 'automatic', reason: itemId });
+    });
+  }
+
+  /**
+   * The teacher's own pen marks on a page: tick, cross, circle, box, highlight, underline or a short note. They are
+   * kept through re-marking and drawn on the marked PDF; any change makes the PDF a draft again.
+   */
+  async function addPen(userId: string, examId: string, ref: string, input: { page: number; kind: PenKind; x0: number; y0: number; x1?: number; y1?: number; text?: string }) {
+    const exam = await load(userId, examId);
+    const sub = findSub(exam, ref);
+    if (!sub || !exam.results[sub.id]) throw new ExamInputError('UNKNOWN_CANDIDATE', `No marked script for "${ref}".`, 404);
+    if (input.page < 1 || input.page > sub.pages) throw new ExamInputError('UNKNOWN_PAGE', `Page ${input.page} does not exist.`, 404);
+    const text = typeof input.text === 'string' ? input.text.trim().replace(/\s+/g, ' ').slice(0, 80) : '';
+    if (input.kind === 'note' && !text) throw new ExamInputError('INVALID_REQUEST', 'Write the note text.', 400);
+    const c = (v: number | undefined, d: number) => Math.min(1, Math.max(0, v ?? d));
+    const mark: PenMark = { id: randomUUID().slice(0, 8), page: input.page, kind: input.kind, x0: c(input.x0, 0), y0: c(input.y0, 0), x1: c(input.x1, input.x0), y1: c(input.y1, input.y0), ...(text ? { text } : {}), by: userId, at: now() };
+    return mutate(userId, examId, (e) => {
+      const r = e.results[sub.id];
+      if ((r.pen ?? []).length >= 300) throw new ExamInputError('TOO_MANY_MARKS', 'This script already has 300 pen marks.', 409);
+      r.pen = [...(r.pen ?? []), mark];
+      r.updatedAt = now();
+      e.resultRevision++;
+      audit(e, { actor: userId, type: 'layout', submissionId: sub.id, candidateId: sub.candidateId, before: null, after: mark, reason: `pen:${mark.id}` });
+    });
+  }
+
+  async function removePen(userId: string, examId: string, ref: string, penId: string) {
+    const exam = await load(userId, examId);
+    const sub = findSub(exam, ref);
+    if (!sub || !exam.results[sub.id]?.pen?.some((m) => m.id === penId)) throw new ExamInputError('UNKNOWN_ITEM', `No pen mark "${penId}" on this script.`, 404);
+    return mutate(userId, examId, (e) => {
+      const r = e.results[sub.id];
+      const before = r.pen?.find((m) => m.id === penId) ?? null;
+      r.pen = (r.pen ?? []).filter((m) => m.id !== penId);
+      r.updatedAt = now();
+      e.resultRevision++;
+      audit(e, { actor: userId, type: 'layout', submissionId: sub.id, candidateId: sub.candidateId, before, after: 'removed', reason: `pen:${penId}` });
     });
   }
 
@@ -1292,7 +1331,7 @@ export function createExamService(deps: ExamDeps) {
     createExam, load, mutate, stopMarking, setSchemeJson, confirmScheme, editSchemeQuestion, submitSchemeDocuments, addSubmissions, startMarking,
     summaries, overrideMark, confirmResults, correctTranscription, remarkQuestions, requestRemark, generateArtifacts, requestExport, artifacts, artifactRefs, candidateView, progress,
     latestScheme, confirmedScheme, findSub, findQuestion,
-    listExams, reviewList, reviewCandidate, pageImage, evidenceCrop, setLayout, release, draftScheme,
+    listExams, reviewList, reviewCandidate, pageImage, evidenceCrop, setLayout, addPen, removePen, release, draftScheme,
   };
 }
 

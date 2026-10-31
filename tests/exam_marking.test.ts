@@ -19,6 +19,7 @@ import { changedQuestions, questionKey, validateScheme, type MarkingSchemeInput 
 import { matchAnswers, readLabel } from '../server/services/exams/matching.js';
 import { finalizeQuestion, markCandidate, markConfidence, preferenceLines } from '../server/services/exams/marking.js';
 import { verifyMarkedPdf } from '../server/services/exams/verifyPdf.js';
+import { pdfSafe } from '../server/services/exams/annotate.js';
 import { computeLayout, symbolsFor } from '../server/services/exams/layout.js';
 import { expandArchives, typedToPdf } from '../server/services/exams/inputs.js';
 import { PDFParse } from 'pdf-parse';
@@ -566,9 +567,9 @@ test('end to end: batch marking, failures isolated, package contents match the p
   cr.eachRow((row, i) => { if (i > 1) totals.set(String(row.getCell(1).value), (row.getCell(6).value as any).result); });
   assert.deepEqual(Object.fromEntries(totals), { C001: 5, C002: 3 }, 'workbook totals equal the persisted results');
 
-  // Marked PDFs keep the source pages, add a summary page and carry stable metadata.
+  // Marked PDFs keep the source pages and carry stable metadata; no extra summary page when every mark is on the script.
   const marked = await PDFDocument.load(await zip.file('examination-results/candidates/C002_marked.pdf')!.async('nodebuffer'));
-  assert.equal(marked.getPageCount(), 2);
+  assert.equal(marked.getPageCount(), 1);
   assert.equal(marked.getPage(0).getRotation().angle, 90, 'source page rotation preserved');
   assert.match(marked.getSubject()!, new RegExp(`run ${run.id}; revision ${done.resultRevision}`));
   assert.ok(!set.problems.some((p) => p.startsWith('C001')), 'C001 marks were placed on the page');
@@ -824,8 +825,7 @@ test('review: saved record, page images, moving a mark, release and the draft la
   const releasedPdf = (await fileStore.read(after.artifacts[0].candidatePdfs[sub.id], user)).data;
   const text = await pdfText(releasedPdf);
   assert.doesNotMatch(text, /DRAFT/);
-  assert.match(text, /Released by the teacher/);
-  assert.match(text, /Correction: x = 6 - 2 = 4/);
+  assert.match(text, /x = 6 - 2 = 4/, 'the correction is written on the script itself');
 
   // The original scan is never changed.
   assert.ok((await fileStore.read(sub.fileId, user)).data.equals(original));
@@ -1160,7 +1160,9 @@ test('criterion evidence places separate red symbols next to working without dup
 test('overnight: the run goes to the overnight queue, every model call runs in batch mode, credits are charged at half price', async () => {
   const nightQueue = new FileJobQueue({ storageDir: path.join(root, 'night-jobs'), concurrency: 1, retryDelayMs: 20, deadlineMs: 60_000 });
   const usage: Array<{ what: string; batch?: boolean }> = [];
-  const night = createExamService({ fileStore, queue, overnightQueue: nightQueue, store: new OwnedRecordStore<ExamRecord>(path.join(root, 'night-exams')), documents, agent: () => target, visionAvailable: () => true, maxPages: 5, retryDelayMs: 10, forbiddenStrings: [root], onUsage: (_u, x) => usage.push(x) });
+  // Its own live queue too: a second service registering on the shared queue would take over its job handlers.
+  const dayQueue = new FileJobQueue({ storageDir: path.join(root, 'night-day-jobs'), concurrency: 1, retryDelayMs: 20 });
+  const night = createExamService({ fileStore, queue: dayQueue, overnightQueue: nightQueue, store: new OwnedRecordStore<ExamRecord>(path.join(root, 'night-exams')), documents, agent: () => target, visionAvailable: () => true, maxPages: 5, retryDelayMs: 10, forbiddenStrings: [root], onUsage: (_u, x) => usage.push(x) });
   const seen: boolean[] = [];
   const stream = adapter.stream;
   adapter.stream = (req) => { seen.push(isOvernight()); return stream.call(adapter, req); };
@@ -1172,7 +1174,7 @@ test('overnight: the run goes to the overnight queue, every model call runs in b
     await night.setPreferences(user, exam.id, { overnight: true });
     const started = await night.startMarking(user, exam.id);
     assert.ok(await nightQueue.get(started.jobId, user), 'the job is on the overnight queue');
-    assert.equal(await queue.get(started.jobId, user), null, 'not on the live queue');
+    assert.equal(await dayQueue.get(started.jobId, user), null, 'not on the live queue');
     let e = await night.load(user, exam.id);
     for (let i = 0; i < 600 && !['completed', 'completed_with_warnings', 'failed'].includes(e.runs[0].state); i++) { await new Promise((r) => setTimeout(r, 50)); e = await night.load(user, exam.id); }
     assert.equal(e.runs[0].mode, 'overnight');
@@ -1183,5 +1185,61 @@ test('overnight: the run goes to the overnight queue, every model call runs in b
   } finally {
     adapter.stream = stream;
     await nightQueue.stop();
+    await dayQueue.stop();
   }
+});
+
+test('on the page: the working behind a lost mark is underlined, the total avoids the writing, maths letters stay readable', () => {
+  const doc = docOf([[{ id: 'e1', text: '1) x = 6 - 2' }, { id: 'e2', text: '= 5' }]]);
+  const result: CandidateResult = {
+    submissionId: 's', candidateId: 'C1', runId: 'r', schemeVersion: 1, updatedAt: 't', usage: { input: 0, output: 0 },
+    questions: [{ questionId: 'Q1', number: '1', maxMarks: 3, override: null, confirmed: null, mappedElementIds: [], mappingFlags: [], history: [],
+      ai: { runId: 'r', schemeVersion: 1, awardedMarks: 1, path: null, level: null, feedback: '', lostMarks: '', answerFound: true, evidenceElementIds: ['p1-e1', 'p1-e2'], evidenceQuotes: [], reviewFlags: [], model: 'm', at: '',
+        criterionResults: [{ ...crit('Q1-A', 1, 1, 'Subtract 2'), evidenceElementIds: ['p1-e1'] }, { ...crit('Q1-B', 0, 2, 'x = 4'), evidenceElementIds: ['p1-e2'] }] } }],
+  };
+  const { items } = computeLayout(doc, result, { total: 1, maxTotal: 3 });
+  const lines = items.filter((i) => i.kind === 'underline');
+  assert.deepEqual(lines.map((i) => i.id), ['Q1:pen:Q1-B:p1-e2'], 'only the working that lost marks is underlined');
+  assert.ok(lines[0].placed && lines[0].fy > 0.14, 'just under the wrong line');
+  const total = items.find((i) => i.id === 'total')!;
+  assert.ok(total.placed && (total.fy < 0.1 || total.fy > 0.9), 'the total sits in a free corner');
+  assert.equal(pdfSafe('ẋ = y + t, ẍ'), "x' = y + t, x''", 'dotted derivatives keep their letter');
+});
+
+test('pen marks: the marker circles and notes, the teacher adds and removes their own, all drawn on the marked PDF', async () => {
+  // The marker's pen choice and note are placed on its cited working.
+  const doc = docOf([[{ id: 'e1', text: '1) x = 6 - 2' }, { id: 'e2', text: '= 5' }]]);
+  const result: CandidateResult = {
+    submissionId: 's', candidateId: 'C1', runId: 'r', schemeVersion: 1, updatedAt: 't', usage: { input: 0, output: 0 },
+    questions: [{ questionId: 'Q1', number: '1', maxMarks: 3, override: null, confirmed: null, mappedElementIds: [], mappingFlags: [], history: [],
+      ai: { runId: 'r', schemeVersion: 1, awardedMarks: 1, path: null, level: null, feedback: '', lostMarks: '', answerFound: true, evidenceElementIds: ['p1-e1', 'p1-e2'], evidenceQuotes: [], reviewFlags: [], model: 'm', at: '',
+        criterionResults: [{ ...crit('Q1-A', 1, 1, 'Subtract 2'), evidenceElementIds: ['p1-e1'], pen: 'box' }, { ...crit('Q1-B', 0, 2, 'x = 4'), evidenceElementIds: ['p1-e2'], pen: 'circle', note: 'arithmetic slip' }] } }],
+    pen: [{ id: 'abc', page: 1, kind: 'highlight', x0: 0.1, y0: 0.5, x1: 0.4, y1: 0.55, by: 't', at: 'x' }, { id: 'def', page: 1, kind: 'note', x0: 0.1, y0: 0.6, text: 'see me', x1: 0.1, y1: 0.6, by: 't', at: 'x' }],
+  };
+  const items = computeLayout(doc, result, { total: 1, maxTotal: 3 }).items;
+  assert.equal(items.find((i) => i.id === 'Q1:pen:Q1-A:p1-e1')?.kind, 'box');
+  assert.equal(items.find((i) => i.id === 'Q1:pen:Q1-B:p1-e2')?.kind, 'circle');
+  assert.equal(items.find((i) => i.id === 'Q1:note:Q1-B')?.text, 'arithmetic slip');
+  assert.deepEqual(items.filter((i) => i.own).map((i) => [i.id, i.kind]), [['pen:abc', 'highlight'], ['pen:def', 'note']]);
+
+  // The teacher's own marks through the service: added, kept on the review, drawn on the PDF, removed.
+  const user = 'teacher-pen';
+  const exam = await exams.createExam(user, { title: 'Pen quiz' });
+  await exams.setSchemeJson(user, exam.id, SCHEME, { confirm: true });
+  await exams.addSubmissions(user, exam.id, [{ name: 'C002.pdf', buffer: await scriptPdf('C002') }]);
+  await exams.startMarking(user, exam.id);
+  const sub = (await waitRun(user, exam.id)).submissions[0];
+  await assert.rejects(exams.addPen(user, exam.id, sub.id, { page: 1, kind: 'note', x0: 0.2, y0: 0.2 }), /note text/);
+  await exams.addPen(user, exam.id, sub.id, { page: 1, kind: 'circle', x0: 0.2, y0: 0.2, x1: 0.4, y1: 0.3 });
+  await exams.addPen(user, exam.id, sub.id, { page: 1, kind: 'tick', x0: 0.5, y0: 0.5 });
+  let rv = await exams.reviewCandidate(user, exam.id, sub.id);
+  const own = rv.layout.items.filter((i) => i.own);
+  assert.deepEqual(own.map((i) => i.kind), ['circle', 'stamp']);
+  const exp = await exams.requestExport(user, exam.id);
+  if (exp.job) await waitJob(user, exp.job.id);
+  const pdf = (await fileStore.read((await exams.load(user, exam.id)).artifacts[0].candidatePdfs[sub.id], user)).data;
+  assert.ok((await PDFDocument.load(pdf)).getPageCount() >= 1, 'the marked PDF with pen marks opens');
+  await exams.removePen(user, exam.id, sub.id, own[0].id.replace(/^pen:/, ''));
+  rv = await exams.reviewCandidate(user, exam.id, sub.id);
+  assert.deepEqual(rv.layout.items.filter((i) => i.own).map((i) => i.kind), ['stamp']);
 });

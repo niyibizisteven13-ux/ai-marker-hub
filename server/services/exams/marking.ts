@@ -32,7 +32,7 @@ const MARK_SCHEMA = {
           path: { type: ['string', 'null'] },
           level: { type: ['string', 'null'] },
           holisticMarks: { type: ['number', 'null'] },
-          criterionResults: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['criterionId', 'awardedMarks', 'reason'], properties: { criterionId: { type: 'string' }, awardedMarks: { type: 'number' }, reason: { type: 'string' }, evidenceElementIds: { type: 'array', items: { type: 'string' } } } } },
+          criterionResults: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['criterionId', 'awardedMarks', 'reason'], properties: { criterionId: { type: 'string' }, awardedMarks: { type: 'number' }, reason: { type: 'string' }, evidenceElementIds: { type: 'array', items: { type: 'string' } }, pen: { type: ['string', 'null'], enum: ['underline', 'circle', 'box', 'highlight', null] }, note: { type: ['string', 'null'] } } } },
           feedback: { type: 'string' },
           lostMarks: { type: 'string' },
           correction: { type: ['string', 'null'] },
@@ -48,7 +48,7 @@ const MARK_SCHEMA = {
 
 interface ModelMark {
   questionId: string; answerFound: boolean; evidenceElementIds: string[]; evidenceQuotes: Array<{ elementId: string; quote: string }>;
-  path: string | null; level: string | null; holisticMarks: number | null; criterionResults: Array<{ criterionId: string; awardedMarks: number; reason: string; evidenceElementIds?: string[] }>;
+  path: string | null; level: string | null; holisticMarks: number | null; criterionResults: Array<{ criterionId: string; awardedMarks: number; reason: string; evidenceElementIds?: string[]; pen?: string | null; note?: string | null }>;
   feedback: string; lostMarks: string; correction?: string | null; confidence?: number; readingConcern: string | null; mappingConcern: string | null; rubricConcern: string | null;
 }
 
@@ -65,6 +65,7 @@ Marking rules:
 - Crossed-out work is not marked when a replacement attempt exists. If there are two uncrossed attempts, say so in mappingConcern.
 - A reading marked UNCERTAIN may be a misread, not a mistake. Mark the most plausible reading and describe in readingConcern how a different reading would change the mark.
 - For each criterion, cite evidenceElementIds identifying the specific working that earns or loses credit. Do not invent a location when it is unclear.
+- Mark the paper as a teacher would with pen on each criterion's cited working: "underline" or "highlight" a mistake, "circle" a wrong value or a key result to check, "box" a correct final answer, or null. note: optional, at most 4 words written beside it ("sign error", "units?", "good method"), null otherwise. Use them where they help the student, not on every line.
 - Cite the element ids you relied on and short quotes copied exactly from them.
 - If the answer is missing, set answerFound accordingly. Unreadable handwriting is not a wrong answer: report the reading concern instead of guessing what was written.
 - feedback: one or two examiner-style sentences. lostMarks: what earned no credit and why, or "" if full marks.
@@ -170,7 +171,9 @@ export function finalizeQuestion(q: SchemeQuestion, allowHalf: boolean, m: Model
           valid = false;
           flags.push({ code: 'marks_inconsistent', severity: 'high', detail: `Criterion ${c.id}: ${r.awardedMarks} is outside 0–${c.marks} or not an allowed mark step.` });
         }
-        return { criterionId: c.id, awardedMarks: r.awardedMarks, maxMarks: c.marks, reason: r.reason.slice(0, 600), evidenceElementIds: r.evidenceElementIds?.filter(id => byId.has(id) && byId.get(id)!.questionIds.includes(q.id)) };
+        const pen = r.pen === 'underline' || r.pen === 'circle' || r.pen === 'box' || r.pen === 'highlight' ? r.pen : null;
+        const note = typeof r.note === 'string' && r.note.trim() ? r.note.trim().replace(/\s+/g, ' ').slice(0, 32) : null;
+        return { criterionId: c.id, awardedMarks: r.awardedMarks, maxMarks: c.marks, reason: r.reason.slice(0, 600), evidenceElementIds: r.evidenceElementIds?.filter(id => byId.has(id) && byId.get(id)!.questionIds.includes(q.id)), pen, note };
       });
       if (valid) awarded = Number(criterionResults.reduce((a, c) => a + c.awardedMarks, 0).toFixed(4));
     }
@@ -195,9 +198,11 @@ export function finalizeQuestion(q: SchemeQuestion, allowHalf: boolean, m: Model
     if (!flags.some((x) => x.code === f.code)) flags.push(f);
   }
 
-  // A high-uncertainty reading cannot justify either a red cross or a final score.
-  // Keep the proposal for review; teacher correction and re-marking can establish a valid mark.
-  if (unreadable.length) awarded = null;
+  // A hard-to-read answer keeps the marks the marker could justify: they stand as a proposal with a
+  // high-severity flag and low confidence, so the teacher sees and can change them. (Withholding them left
+  // scripts at "-/10" with no ticks even when most of the working was clear.) A zero is still held back:
+  // an unreadable answer is never turned into a wrong-answer cross.
+  if (unreadable.length && (awarded ?? 0) <= 0) awarded = null;
   const full = awarded !== null && awarded >= q.maxMarks;
   // The record a "why" answer is read from: the answer as read, the scheme line behind each mark, the reason, the confidence.
   const rubricOf = new Map((q.marking === 'holistic' ? [] : (pathCriteria(q, path) ?? q.criteria)).map((c) => [c.id, c.description]));

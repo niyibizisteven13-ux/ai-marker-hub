@@ -15,16 +15,22 @@ import { effectiveMarks, openFlags } from './results.js';
  * pages are appended. Answers that cannot be located reliably are reported on the summary page only.
  */
 
-const GREEN = rgb(0.09, 0.55, 0.24), RED = rgb(0.84, 0.11, 0.09), AMBER = rgb(0.85, 0.5, 0.0), ORANGE = rgb(0.93, 0.42, 0.0), INK = rgb(0.12, 0.12, 0.14), GREY = rgb(0.45, 0.45, 0.5);
+const YELLOW = rgb(1, 0.86, 0.2), GREEN = rgb(0.09, 0.55, 0.24), RED = rgb(0.84, 0.11, 0.09), AMBER = rgb(0.85, 0.5, 0.0), ORANGE = rgb(0.93, 0.42, 0.0), INK = rgb(0.12, 0.12, 0.14), GREY = rgb(0.45, 0.45, 0.5);
 
 /** Standard PDF fonts only cover WinAnsi; replace other characters with readable ASCII. */
 const TRANSLIT: Record<string, string> = { '×': 'x', '÷': '/', '−': '-', '–': '-', '—': '-', '≤': '<=', '≥': '>=', '≠': '!=', '≈': '~', '→': '->', '√': 'sqrt', '∞': 'inf', 'π': 'pi', 'θ': 'theta', 'λ': 'lambda', 'α': 'alpha', 'β': 'beta', 'Δ': 'Delta', '∫': 'int', '…': '...', '‘': "'", '’': "'", '“': '"', '”': '"', '•': '-' };
+const DIACRITIC: Record<string, string> = { '\u0307': "'", '\u0308': "''", '\u0302': '^', '\u0303': '~', '\u0304': '_bar', '\u20D7': '(vec)' };
 export function pdfSafe(s: string): string {
   return [...s.normalize('NFC')].map((ch) => {
     if (TRANSLIT[ch] !== undefined) return TRANSLIT[ch];
     const c = ch.codePointAt(0)!;
     if (c === 10 || (c >= 32 && c < 127) || (c >= 160 && c <= 255)) return ch;
-    return c < 32 ? ' ' : '?';
+    if (c < 32) return ' ';
+    // Letters with marks that WinAnsi lacks keep their letter: dotted derivatives ẋ, ẍ become x', x''.
+    const [base, ...marks] = [...ch.normalize('NFD')];
+    const b = base.codePointAt(0)!;
+    if (marks.length && ((b >= 32 && b < 127) || (b >= 160 && b <= 255))) return base + marks.map((m) => DIACRITIC[m] ?? '').join('');
+    return '?';
   }).join('');
 }
 
@@ -131,6 +137,12 @@ export interface AnnotateInput {
   released?: boolean;
   /** Red corrections under wrong answers (the teacher's preference; default on). */
   corrections?: boolean;
+  /**
+   * The summary page after the script. "auto" (default) adds it only when something cannot be shown on the
+   * script itself: a mark that could not be placed, or a question without a mark yet. Feedback is always in
+   * the report, the workbook and the chat.
+   */
+  summaryPage?: 'auto' | 'always';
 }
 
 export interface AnnotateOutput { pdf: Buffer; placed: number; summaryOnly: string[]; rebuilt: boolean; /** Pages of the script itself (before the summary pages). */ sourcePages: number }
@@ -175,11 +187,31 @@ export async function annotateScript(input: AnnotateInput): Promise<AnnotateOutp
         page.drawText('?', { ...off(origin, rx + size * 0.25, size * 0.25), size: size * 0.6, font: bold, color: ORANGE, rotate: degrees(rot) });
       }
       placed++;
+    } else if (it.kind === 'underline') {
+      // A red line under the working that lost the mark (slightly wavy, like a teacher's pen).
+      const n = Math.max(4, Math.round((it.w * vs.width) / 6));
+      for (let i = 0; i < n; i++) {
+        const p = at(it.fx + (it.w * i) / n, it.fy + (i % 2 ? 0.0012 : 0));
+        const q = at(it.fx + (it.w * (i + 1)) / n, it.fy + ((i + 1) % 2 ? 0.0012 : 0));
+        page.drawLine({ start: p, end: q, thickness: 1.1, color: RED, lineCap: LineCapStyle.Round });
+      }
+    } else if (it.kind === 'circle') {
+      page.drawEllipse({ ...at(it.fx + it.w / 2, it.fy + it.h / 2), xScale: Math.max(6, (it.w / 2) * vs.width), yScale: Math.max(5, (it.h / 2) * vs.height), borderColor: RED, borderWidth: 1.4, rotate: degrees(rot) });
+    } else if (it.kind === 'box' || it.kind === 'highlight') {
+      const r = { ...at(it.fx, it.fy + it.h), width: it.w * vs.width, height: it.h * vs.height, rotate: degrees(rot) };
+      if (it.kind === 'box') page.drawRectangle({ ...r, borderColor: RED, borderWidth: 1.4 });
+      else page.drawRectangle({ ...r, color: YELLOW, opacity: 0.35 });
+    } else if (it.kind === 'note') {
+      const fs = Math.min(14, Math.max(8, (NOTE_CHAR / 0.5) * vs.width));
+      page.drawText(pdfSafe(it.text ?? ''), { ...at(it.fx, it.fy + (fs * 0.35) / vs.height), size: fs, font: italic, color: RED, rotate: degrees(rot) });
+    } else if (it.kind === 'stamp') {
+      const size = Math.min(18, Math.max(8, SYMBOL * vs.width));
+      for (const sym of it.symbols ?? []) drawSymbol(page, sym, at(it.fx, it.fy + size / vs.height).x, at(it.fx, it.fy + size / vs.height).y, size, rot);
     } else if (it.kind === 'correction' && input.corrections !== false) {
       const fs = Math.min(14, Math.max(8, (NOTE_CHAR / 0.5) * vs.width));
       const origin = at(it.fx, it.fy + (fs * 0.35) / vs.height);
       page.drawText(pdfSafe(it.text ?? ''), { ...origin, size: fs, font: italic, color: RED, rotate: degrees(rot) });
-    } else {
+    } else if (it.kind === 'total') {
       const label = pdfSafe(it.label ?? '');
       const fs = Math.min(18, Math.max(9, 0.03 * vs.width));
       const c = at(it.fx, it.fy);
@@ -198,7 +230,10 @@ export async function annotateScript(input: AnnotateInput): Promise<AnnotateOutp
     p0.drawText('DRAFT - for teacher review, not released', { ...viewedToPdf(0.02, 0.988, box, rot), size: 7, font, color: GREY, rotate: degrees(rot) });
   }
 
-  // Summary pages (appended; source pages are untouched apart from margin marks).
+  // Summary pages (appended; source pages are untouched apart from margin marks), only when needed.
+  const needSummary = input.summaryPage === 'always' || summaryOnly.length > 0 || input.summary.questions.some((q) => q.marks === null);
+  if (needSummary) await appendSummary();
+  async function appendSummary() {
   const W = 595, H = 842, M = 40;
   let page = out.addPage([W, H]);
   let y = H - M;
@@ -235,6 +270,8 @@ export async function annotateScript(input: AnnotateInput): Promise<AnnotateOutp
   ensure(30);
   y -= 6;
   for (const l of wrap('AI-assisted marking against the official scheme. Marks are proposals until a teacher confirms them; questions marked "Check" need attention. The original scan is unchanged; this marked copy is a new file.', font, 7.5, W - 2 * M, 4)) { text(l, M, 7.5, font, GREY); y -= 9; }
+  }
+  const s = input.summary;
 
   out.setTitle(pdfSafe(`Marked script ${s.candidateId} - ${input.meta.examTitle}`));
   out.setSubject(pdfSafe(`exam ${input.meta.examId}; run ${input.meta.runId}; revision ${input.meta.resultRevision}`));

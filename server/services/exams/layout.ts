@@ -1,6 +1,6 @@
 import type { DocumentResult } from '../documents/pipeline.js';
 import { preDeskewSize, processedToViewed } from './pdfGeometry.js';
-import type { CandidateResult, MarkConfidence, QuestionResult } from './types.js';
+import type { CandidateResult, MarkConfidence, PenStyle, QuestionResult } from './types.js';
 import { effectiveMarks, openFlags } from './results.js';
 
 /**
@@ -12,16 +12,25 @@ import { effectiveMarks, openFlags } from './results.js';
  *  - each question's ticks/crosses (one per marking step) and "awarded/max" sit in the right margin, level
  *    with the last line of the answer, clear of the writing; marks on one page never overlap;
  *  - a short red correction goes just under a wrong answer, only where that space is empty;
- *  - the total is circled at the top of page 1;
+ *  - pen marks on the working itself, as a teacher would: the marker's choice per step (underline or highlight a
+ *    mistake, circle a value, box a correct answer, a few words beside it), else an underline under lost marks;
+ *  - the teacher's own pen marks (ticks, crosses, circles, boxes, highlights, underlines, notes) are drawn as placed;
+ *  - the total is circled at the top of page 1, in the first spot that does not cover writing;
  *  - a teacher's adjustment (position or hiding) always wins over the automatic placement.
  */
 
 export type MarkSymbol = 'tick' | 'cross' | 'half';
 
 export interface LayoutItem {
-  /** "<questionId>:mark", "<questionId>:correction" or "total". */
+  /**
+   * "<questionId>:mark", "<questionId>:criterion:<id>", "<questionId>:correction", "<questionId>:pen:<criterion>:<element>",
+   * "<questionId>:note:<criterion>", "pen:<id>" (the teacher's own) or "total".
+   */
   id: string;
-  kind: 'mark' | 'correction' | 'total';
+  /** Pen shapes use fx/fy as the top-left corner and w/h as their size; an underline's fy is the line itself. */
+  kind: 'mark' | 'correction' | 'total' | 'note' | 'stamp' | PenStyle;
+  /** True for the teacher's own pen marks (removable rather than hidden). */
+  own?: boolean;
   questionId?: string;
   number?: string;
   page: number;
@@ -173,6 +182,30 @@ export function computeLayout(doc: DocumentResult, result: CandidateResult, tota
       } else taken.set(mark.page, reserved);
     }
 
+    // Pen marks on the working itself: the marker's choice per step, else an underline under lost marks.
+    if (!q.override && marks !== null) {
+      for (const c of q.ai?.criterionResults ?? []) {
+        const style: PenStyle | null = c.pen ?? (c.awardedMarks < c.maxMarks ? 'underline' : null);
+        if (!style && !c.note) continue;
+        const lines = (c.evidenceElementIds ?? []).filter((id) => !crossed.has(id)).map((id) => [id, boxes.get(id)] as const).filter(([, b]) => b?.usable).slice(0, style === 'circle' || style === 'box' ? 1 : 3);
+        for (const [id, b] of style ? lines : []) {
+          const w = Math.max(0.02, b!.x1 - b!.x0), pad = 0.006;
+          items.push({ ...base, id: `${q.questionId}:pen:${c.criterionId}:${id}`, kind: style!, page: b!.page, placed: true, auto: true, hidden: false,
+            ...(style === 'underline' ? { fx: b!.x0, fy: Math.min(0.995, b!.y1 + 0.003), w, h: 0.004 } : { fx: Math.max(0, b!.x0 - pad), fy: Math.max(0, b!.y0 - pad), w: w + 2 * pad, h: b!.y1 - b!.y0 + 2 * pad }) });
+        }
+        const at = lines[lines.length - 1]?.[1];
+        if (c.note && at) {
+          // The note goes beside the working, or just under it, wherever it covers no writing.
+          const aspect = aspectOf.get(at.page) ?? 1.414, h = 0.024 / aspect, w = c.note.length * NOTE_CHAR;
+          const tries = [{ x: at.x1 + 0.012, y: (at.y0 + at.y1) / 2 }, { x: at.x0, y: at.y1 + h * 0.9 }];
+          for (const t of tries) {
+            const x = Math.min(t.x, RIGHT_LIMIT - w), b = { x0: x, y0: t.y - h / 2, x1: x + w, y1: t.y + h / 2 };
+            if (x >= 0.01 && isFree(at.page, b)) { items.push({ ...base, id: `${q.questionId}:note:${c.criterionId}`, kind: 'note', page: at.page, fx: x, fy: t.y, w, h, placed: true, auto: true, hidden: false, text: c.note }); take(at.page, b); break; }
+          }
+        }
+      }
+    }
+
     const text = marks !== null && marks < q.maxMarks ? q.ai?.correction?.trim() : '';
     if (text) {
       const corr: LayoutItem = { ...base, id: `${q.questionId}:correction`, kind: 'correction', page: anchor?.page ?? 1, fx: 0, fy: 0, w: text.length * NOTE_CHAR, h: 0, placed: false, auto: true, hidden: false, text };
@@ -196,7 +229,22 @@ export function computeLayout(doc: DocumentResult, result: CandidateResult, tota
   const aspect1 = aspectOf.get(1) ?? 1.414;
   const totalLabel = `${fmt(total.total)}/${fmt(total.maxTotal)}`;
   const tw = Math.max(0.09, totalLabel.length * 0.017 + 0.04);
-  items.push({ id: 'total', kind: 'total', page: 1, fx: RIGHT_LIMIT - tw / 2 - 0.01, fy: 0.045, w: tw, h: 0.05 / aspect1, placed: doc.pages.length > 0, auto: true, hidden: false, label: totalLabel });
+  const th = 0.05 / aspect1;
+  // The first corner of page 1 where the circle covers no writing: top right, top left, top centre, then bottom.
+  const spots = [[RIGHT_LIMIT - tw / 2 - 0.01, 0.045], [tw / 2 + 0.03, 0.045], [0.5, 0.035], [RIGHT_LIMIT - tw / 2 - 0.01, 0.955], [tw / 2 + 0.03, 0.955]];
+  const spot = spots.find(([x, y]) => isFree(1, { x0: x - tw / 2, x1: x + tw / 2, y0: y - th / 2, y1: y + th / 2 })) ?? spots[0];
+  items.push({ id: 'total', kind: 'total', page: 1, fx: spot[0], fy: spot[1], w: tw, h: th, placed: doc.pages.length > 0, auto: true, hidden: false, label: totalLabel });
+
+  // The teacher's own pen marks, drawn where they were placed.
+  for (const m of result.pen ?? []) {
+    if (!aspectOf.has(m.page)) continue;
+    const box = { fx: Math.min(m.x0, m.x1), fy: Math.min(m.y0, m.y1), w: Math.abs(m.x1 - m.x0), h: Math.abs(m.y1 - m.y0) };
+    const common = { id: `pen:${m.id}`, page: m.page, placed: true, auto: false, hidden: false, own: true };
+    if (m.kind === 'tick' || m.kind === 'cross') items.push({ ...common, kind: 'stamp', fx: m.x0, fy: m.y0, w: SYMBOL, h: SYMBOL / (aspectOf.get(m.page) ?? 1.414), symbols: [m.kind] });
+    else if (m.kind === 'note') items.push({ ...common, kind: 'note', fx: m.x0, fy: m.y0, w: (m.text ?? '').length * NOTE_CHAR, h: 0.024 / (aspectOf.get(m.page) ?? 1.414), text: m.text ?? '' });
+    else if (m.kind === 'underline') items.push({ ...common, kind: 'underline', fx: box.fx, fy: box.fy + box.h, w: Math.max(0.01, box.w), h: 0.004 });
+    else items.push({ ...common, kind: m.kind, ...box });
+  }
 
   // Teacher adjustments win.
   for (const it of items) {

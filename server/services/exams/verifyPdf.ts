@@ -3,8 +3,8 @@ import sharp from 'sharp';
 import { renderPdfPages } from '../ai/files/pdfPages.js';
 
 /**
- * Checks a marked PDF before it is offered for download: it must open, have the script's pages plus the
- * summary, carry the candidate, revision and total it was drawn from, and every page must render. When
+ * Checks a marked PDF before it is offered for download: it must open, have the script's pages (and the
+ * summary page when one was needed), carry the candidate, revision and total it was drawn from, and every page must render. When
  * marks were placed on the pages, red ink must actually be visible on them.
  */
 
@@ -42,7 +42,7 @@ export async function verifyMarkedPdf(pdf: Buffer, expect: MarkedPdfExpectation)
   } catch {
     return { ok: false, pages: 0, rendered: 0, problems: ['the file does not open as a PDF'] };
   }
-  if (pages < expect.sourcePages + 1) problems.push(`${pages} pages, expected the script's ${expect.sourcePages} plus a summary page`);
+  if (pages < expect.sourcePages) problems.push(`${pages} pages, expected at least the script's ${expect.sourcePages}`);
   for (const k of [`candidate:${expect.candidateId}`, `revision:${expect.revision}`, `total:${expect.total}/${expect.maxTotal}`]) {
     if (!keywords.includes(k)) problems.push(`missing "${k}" (the PDF does not match the stored marks)`);
   }
