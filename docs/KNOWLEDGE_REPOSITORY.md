@@ -173,7 +173,7 @@ the web and in Telegram.
 | `KNOWLEDGE_MAX_FILE_BYTES` | 100 MB | Per file. |
 | `KNOWLEDGE_MAX_FILES_PER_UPLOAD` | 500 | Per request. |
 | `KNOWLEDGE_REPO_QUOTA_BYTES` | 5 GB | Default repository quota (override per repository). |
-| `KNOWLEDGE_INDEX_CONCURRENCY` | 2 | Files indexed in parallel per job. |
+| `KNOWLEDGE_INDEX_CONCURRENCY` | 4 | Files indexed in parallel per job. |
 | `KNOWLEDGE_MAX_PARSE_BYTES` / `KNOWLEDGE_PREVIEW_MAX_BYTES` | 60 MB / 50 MB | Larger files are stored and downloadable but not parsed. |
 | `KNOWLEDGE_MAX_INDEX_CHARS`, `KNOWLEDGE_MAX_SHEET_ROWS`, `KNOWLEDGE_MAX_TABLE_ROWS`, `KNOWLEDGE_MAX_CHUNKS_PER_FILE` | 2,000,000 / 5000 / 2000 / 20,000 | Indexing bounds; truncation is reported in `indexing.error`. |
 | `KNOWLEDGE_ZIP_MAX_ENTRIES`, `KNOWLEDGE_ZIP_MAX_BYTES` | 2000 / 500 MB | Archive extraction. |

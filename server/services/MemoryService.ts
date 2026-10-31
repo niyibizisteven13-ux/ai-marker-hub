@@ -193,7 +193,7 @@ export class MemoryService {
    * Called for each user message when memory is on: explicit "remember …" / "forget …", stated facts and
    * preferences, and a short trace of the conversation. Returns what changed so the reply can mention it.
    */
-  async capture(userId: string, message: string, opts: { chatId?: string } = {}): Promise<{ saved: MemoryItem[]; forgotten: number }> {
+  async capture(userId: string, message: string, opts: { chatId?: string; deferAuto?: boolean } = {}): Promise<{ saved: MemoryItem[]; forgotten: number }> {
     const out = { saved: [] as MemoryItem[], forgotten: 0 };
     const text = String(message ?? '').trim();
     if (!text || !(await this.active(userId))) return out;
@@ -210,16 +210,22 @@ export class MemoryService {
         if (saved) out.saved.push(saved);
         return out;
       }
-      for (const f of extractFacts(text)) {
-        const saved = await this.add(userId, f.content, { kind: f.kind, source: 'auto', chatId: opts.chatId }).catch(() => null);
-        if (saved) out.saved.push(saved);
-      }
-      // A light trace of what was discussed, so later chats can refer back ("as we discussed last week").
-      if (text.length >= 25 && !SENSITIVE.test(text)) {
-        const day = new Date().toISOString().slice(0, 10);
-        await this.add(userId, `On ${day} the user asked: ${text.slice(0, 220)}${text.length > 220 ? '…' : ''}`, { kind: 'episode', source: 'chat', chatId: opts.chatId }).catch(() => null);
-        await this.pruneEpisodes(userId);
-      }
+      // Facts and the episode trace are only for later chats: with deferAuto they are saved after the reply has
+      // started instead of before it (each save computes an embedding).
+      const auto = async () => {
+        for (const f of extractFacts(text)) {
+          const saved = await this.add(userId, f.content, { kind: f.kind, source: 'auto', chatId: opts.chatId }).catch(() => null);
+          if (saved) out.saved.push(saved);
+        }
+        // A light trace of what was discussed, so later chats can refer back ("as we discussed last week").
+        if (text.length >= 25 && !SENSITIVE.test(text)) {
+          const day = new Date().toISOString().slice(0, 10);
+          await this.add(userId, `On ${day} the user asked: ${text.slice(0, 220)}${text.length > 220 ? '…' : ''}`, { kind: 'episode', source: 'chat', chatId: opts.chatId }).catch(() => null);
+          await this.pruneEpisodes(userId);
+        }
+      };
+      if (opts.deferAuto) void auto().catch((e) => logger.warn('[memory] background capture failed', { errorType: (e as Error)?.name }));
+      else await auto();
     } catch (e) {
       logger.warn('[memory] capture failed', { errorType: (e as Error)?.name });
     }

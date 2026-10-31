@@ -999,12 +999,13 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
     }
   }
 
-  // ── SAFETY SCAN (fast path, pre-LLM) ────────────────────────────────────────────
-  // Run safety check before any expensive LLM call.
-  // Instant block patterns skip LLM entirely; ambiguous content goes through
-  // a lightweight Gonka classification call (~10ms extra latency on safe messages).
+  // ── SAFETY SCAN (instant, pre-LLM) ──────────────────────────────────────────────
+  // Blocked patterns stop the request at once. The model classification used to run here and held every reply
+  // for up to 10 s; it now runs alongside the reply for the audit log (the model declines harmful requests itself).
+  // SAFETY_BLOCKING_CLASSIFIER=true restores the old, slower behaviour.
   try {
-    const safetyResult = await safetyService.scan(query || '');
+    const safetyResult = process.env.SAFETY_BLOCKING_CLASSIFIER === 'true' ? await safetyService.scan(query || '') : safetyService.quickScan(query || '');
+    if (!safetyResult.blocked && process.env.SAFETY_BLOCKING_CLASSIFIER !== 'true') safetyService.reviewLater(query || '');
     if (safetyResult.blocked) {
       logger.warn(`[SAFETY] Blocked request from user ${userId}: ${safetyResult.reason}`);
       res.setHeader('Content-Type', 'text/event-stream');
@@ -1401,7 +1402,8 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
       }
 
       // Await the sentiment promise (already running in parallel since the start of the handler).
-      const sentiment = await sentimentPromise;
+      // Tone is a nicety: wait for it only briefly, never hold the reply on it (it could take up to 15 s).
+      const sentiment = await Promise.race([sentimentPromise, new Promise<null>((r) => setTimeout(() => r(null), 250))]);
       if (sentiment && sentiment.tone !== 'neutral' && sentiment.systemPromptAddendum) {
         augmentedQuery =
           `[INTERNAL CONTEXT - DO NOT REPEAT TO USER: Detected emotional tone: ${sentiment.tone} ` +

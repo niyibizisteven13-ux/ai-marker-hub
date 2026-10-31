@@ -71,7 +71,7 @@ export function createKnowledgeService(deps: KnowledgeDeps) {
   const tmpRoot = deps.tmpDir ?? path.join(os.tmpdir(), `bwenge-knowledge-${process.getuid?.() ?? 'user'}`);
   const maxFileBytes = deps.maxFileBytes ?? env('KNOWLEDGE_MAX_FILE_BYTES', 100 * 1024 * 1024);
   const defaultQuota = deps.defaultQuotaBytes ?? env('KNOWLEDGE_REPO_QUOTA_BYTES', 5 * 1024 * 1024 * 1024);
-  const concurrency = Math.max(1, deps.indexConcurrency ?? env('KNOWLEDGE_INDEX_CONCURRENCY', 2));
+  const concurrency = Math.max(1, deps.indexConcurrency ?? env('KNOWLEDGE_INDEX_CONCURRENCY', 4));
   const budget = deps.segmentBudgetMs ?? env('KNOWLEDGE_SEGMENT_BUDGET_MS', 8 * 60 * 1000);
 
   // ── Access ──────────────────────────────────────────────────────────────

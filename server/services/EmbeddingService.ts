@@ -43,6 +43,30 @@ export class EmbeddingService {
   public async getEmbeddings(texts: string[], taskType: 'RETRIEVAL_DOCUMENT' | 'RETRIEVAL_QUERY' = 'RETRIEVAL_DOCUMENT'): Promise<number[][]> {
     if (texts.length === 0) return [];
     if (!this.client) throw new Error('GEMINI_API_KEY is required for semantic embeddings.');
+    // One text is a live request (a chat message, a search): answered from the cache when the same text was
+    // embedded recently (memory, library and search often embed the same message), and never allowed to hold
+    // a reply for long; callers fall back to keyword search when it fails.
+    if (texts.length === 1) {
+      const key = `${taskType}\u0000${texts[0]}`;
+      const hit = this.cache.get(key);
+      if (hit) { this.cache.delete(key); this.cache.set(key, hit); return [await hit]; }
+      const p = this.embedBatches(texts, taskType).then((v) => v[0]);
+      this.cache.set(key, p);
+      if (this.cache.size > 500) this.cache.delete(this.cache.keys().next().value!);
+      p.catch(() => this.cache.delete(key));
+      const timeoutMs = Number(process.env.EMBEDDING_TIMEOUT_MS) > 0 ? Number(process.env.EMBEDDING_TIMEOUT_MS) : 3000;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return [await Promise.race([p, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`Embedding took longer than ${timeoutMs} ms`)), timeoutMs); })])];
+      } finally { clearTimeout(timer); }
+    }
+    return this.embedBatches(texts, taskType);
+  }
+
+  private cache = new Map<string, Promise<number[]>>();
+
+  private async embedBatches(texts: string[], taskType: 'RETRIEVAL_DOCUMENT' | 'RETRIEVAL_QUERY'): Promise<number[][]> {
+    if (!this.client) throw new Error('GEMINI_API_KEY is required for semantic embeddings.');
 
     const vectors: number[][] = [];
     for (let offset = 0; offset < texts.length; offset += 32) {
