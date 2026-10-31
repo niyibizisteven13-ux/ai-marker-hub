@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
-import { CalendarClock, Camera, CheckCircle2, Download, FileText, Image as ImageIcon, Loader2, Lock, Paperclip, Send, X } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { ArrowLeft, ArrowRight, CalendarClock, Camera, CheckCircle2, Download, Eye, FileText, Loader2, Lock, Paperclip, Send, Trash2, X } from 'lucide-react';
+import { FileThumb, PreviewDialog, type PreviewSource } from '../components/FilePreview';
 import { getApiUrl } from '../utils/authFetch';
 import logoUrl from '../assets/bwenge-logo.svg';
 
 /**
  * The page a person opens from a shared task link (/a/<token>): the task, then the submission. No account: a name
- * (and an ID if they have one), the answer as photos, PDF, Word or typed text, and a receipt.
+ * (and an ID if they have one), the answer as photos, PDF, Word or typed text, and a receipt. Every attached file
+ * can be opened full screen before sending and the pages put in order; the upload shows its progress.
  * Submitting again before the owner closes it replaces the earlier submission.
  */
 
@@ -13,6 +15,7 @@ interface Task { title: string; instructions: string; dueAt: string | null; open
 const MAX_FILES = 10;
 const MAX_MB = 25;
 const ACCEPT = '.pdf,.doc,.docx,.odt,.rtf,.txt,.md,image/*,.heic,.heif';
+interface Item { id: string; file: File; src: PreviewSource }
 const size = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1048576).toFixed(1)} MB`);
 
 export default function AssignmentSubmitPage({ token }: { token: string }) {
@@ -22,8 +25,9 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
   const [name, setName] = useState('');
   const [studentId, setStudentId] = useState('');
   const [text, setText] = useState('');
-  const [files, setFiles] = useState<File[]>([]);
-  const [state, setState] = useState<{ kind: 'idle' } | { kind: 'sending' } | { kind: 'error'; message: string } | { kind: 'done'; receiptId: string; submittedAt: string; late: boolean; replaced: boolean }>({ kind: 'idle' });
+  const [files, setFiles] = useState<Item[]>([]);
+  const [open, setOpen] = useState<{ kind: 'mine'; index: number } | { kind: 'task'; src: PreviewSource } | null>(null);
+  const [state, setState] = useState<{ kind: 'idle' } | { kind: 'sending'; percent: number } | { kind: 'error'; message: string } | { kind: 'done'; receiptId: string; submittedAt: string; late: boolean; replaced: boolean; files?: number }>({ kind: 'idle' });
 
   useEffect(() => {
     document.title = 'Submit · Bwenge';
@@ -33,34 +37,55 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
   // Nothing is remembered on the device: people often share phones, and a remembered name or number would
   // make the next person's submission replace the previous one's.
 
-  const previews = useMemo(() => files.map((f) => (f.type.startsWith('image/') ? URL.createObjectURL(f) : null)), [files]);
-  useEffect(() => () => previews.forEach((u) => u && URL.revokeObjectURL(u)), [previews]);
-
   const add = (list: FileList | null) => {
     if (!list) return;
     const fresh = [...list];
     const big = fresh.find((f) => f.size > MAX_MB * 1048576);
     if (big) { setState({ kind: 'error', message: `${big.name} is larger than ${MAX_MB} MB.` }); return; }
-    setFiles((cur) => [...cur, ...fresh].slice(0, MAX_FILES));
-    if (state.kind === 'error') setState({ kind: 'idle' });
+    const key = (f: File) => `${f.name}|${f.size}|${f.lastModified}`;
+    const have = new Set(files.map((x) => key(x.file)));
+    const added = fresh.filter((f) => !have.has(key(f)));
+    const room = MAX_FILES - files.length;
+    setFiles((cur) => [...cur, ...added.slice(0, Math.max(0, room)).map((f) => ({ id: `${key(f)}|${Math.random()}`, file: f, src: { name: f.name, type: f.type, file: f } }))]);
+    if (added.length > room) setState({ kind: 'error', message: `Up to ${MAX_FILES} files. ${added.length - Math.max(0, room)} not added.` });
+    else if (state.kind === 'error') setState({ kind: 'idle' });
   };
+  const move = useCallback((i: number, by: number) => setFiles((cur) => {
+    const j = i + by;
+    if (j < 0 || j >= cur.length) return cur;
+    const next = [...cur];
+    [next[i], next[j]] = [next[j], next[i]];
+    return next;
+  }), []);
+  const remove = (i: number) => { setFiles((cur) => cur.filter((_, j) => j !== i)); setOpen(null); };
 
   const submit = async () => {
-    setState({ kind: 'sending' });
+    setState({ kind: 'sending', percent: 0 });
     try {
       const form = new FormData();
       form.append('studentName', name.trim());
       if (studentId.trim()) form.append('studentId', studentId.trim());
       if (text.trim()) form.append('text', text.trim());
-      for (const f of files) form.append('files', f, f.name);
-      const res = await fetch(api('/submit'), { method: 'POST', body: form });
-      const b = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(b.error || 'Could not submit. Try again.');
+      for (const f of files) form.append('files', f.file, f.file.name);
+      // XMLHttpRequest rather than fetch: it reports upload progress, which matters on a slow phone connection.
+      const b = await new Promise<any>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', api('/submit'));
+        xhr.upload.onprogress = (e) => { if (e.lengthComputable) setState({ kind: 'sending', percent: Math.min(99, Math.round((e.loaded / e.total) * 100)) }); };
+        xhr.onload = () => {
+          let body: any = {};
+          try { body = JSON.parse(xhr.responseText); } catch { /* not JSON */ }
+          if (xhr.status >= 200 && xhr.status < 300) resolve(body); else reject(new Error(body.error || 'Could not submit. Try again.'));
+        };
+        xhr.onerror = () => reject(new Error('No connection. Check your internet and try again; nothing was lost.'));
+        xhr.send(form);
+      });
       setState({ kind: 'done', ...b });
     } catch (e) {
       setState({ kind: 'error', message: e instanceof Error ? e.message : 'Could not submit. Try again.' });
     }
   };
+  const totalBytes = files.reduce((a, f) => a + f.file.size, 0);
 
   const shell = (body: React.ReactNode) => (
     <div className="min-h-dvh bg-[#F5F3EE] text-[#1F1E1D]">
@@ -85,6 +110,7 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
         <dl className="mx-auto mt-5 grid max-w-xs grid-cols-2 gap-y-2 text-left text-[13.5px]">
           <dt className="text-neutral-500">Receipt</dt><dd className="font-mono font-semibold">{state.receiptId}</dd>
           <dt className="text-neutral-500">Name</dt><dd className="truncate">{name}</dd>
+          <dt className="text-neutral-500">Sent</dt><dd>{state.files ? `${state.files} file${state.files === 1 ? '' : 's'}` : ''}{state.files && text.trim() ? ' and ' : ''}{text.trim() ? 'typed answer' : ''}</dd>
           <dt className="text-neutral-500">Time</dt><dd>{new Date(state.submittedAt).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</dd>
         </dl>
         {state.late && <p className="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-[13px] text-amber-800">This was after the due time. The person who shared the task will see it was late.</p>}
@@ -108,11 +134,12 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
         {task.taskFiles.length > 0 && (
           <ul className="mt-4 space-y-2">
             {task.taskFiles.map((f) => (
-              <li key={f.index}>
-                <a href={api(`/files/${f.index}`)} target="_blank" rel="noreferrer" className="flex items-center gap-3 rounded-xl border border-neutral-200 px-3 py-2.5 hover:bg-neutral-50">
-                  <FileText size={18} className="text-[#D97757]" /><span className="min-w-0 flex-1 truncate text-[14px] font-medium">{f.name}</span>
-                  <span className="text-[12px] text-neutral-500">{size(f.size)}</span><Download size={16} className="text-neutral-400" />
-                </a>
+              <li key={f.index} className="flex items-center gap-1 rounded-xl border border-neutral-200 pr-1 hover:bg-neutral-50">
+                <button type="button" onClick={() => setOpen({ kind: 'task', src: { name: f.name, type: f.mime, url: api(`/files/${f.index}`) } })} className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 text-left">
+                  <FileText size={18} className="shrink-0 text-[#D97757]" /><span className="min-w-0 flex-1 truncate text-[14px] font-medium">{f.name}</span>
+                  <span className="shrink-0 text-[12px] text-neutral-500">{size(f.size)}</span><Eye size={16} className="shrink-0 text-neutral-400" />
+                </button>
+                <a href={api(`/files/${f.index}`)} download={f.name} aria-label={`Download ${f.name}`} className="rounded-lg p-2 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700"><Download size={16} /></a>
               </li>
             ))}
           </ul>
@@ -144,16 +171,20 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
           <p className="-mt-2 text-[12px] text-neutral-500">Photos of your pages (one per page), PDF, Word or text. Up to {MAX_FILES} files, {MAX_MB} MB each.</p>
 
           {files.length > 0 && (
-            <ul className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-              {files.map((f, i) => (
-                <li key={`${f.name}-${i}`} className="relative overflow-hidden rounded-xl border border-neutral-200 bg-neutral-50">
-                  {previews[i] ? <img src={previews[i]!} alt={f.name} className="aspect-[3/4] w-full object-cover" />
-                    : <span className="flex aspect-[3/4] flex-col items-center justify-center gap-1 p-2 text-center text-[11px] text-neutral-600">{/\.(png|jpe?g|webp|heic|heif)$/i.test(f.name) ? <ImageIcon size={20} /> : <FileText size={20} className="text-[#D97757]" />}<span className="line-clamp-2 break-all">{f.name}</span></span>}
-                  <span className="absolute left-1.5 top-1.5 rounded-full bg-black/60 px-1.5 text-[10.5px] font-semibold text-white">{i + 1}</span>
-                  <button type="button" aria-label={`Remove ${f.name}`} onClick={() => setFiles((cur) => cur.filter((_, j) => j !== i))} className="absolute right-1 top-1 rounded-full bg-white/90 p-1 text-neutral-700 shadow"><X size={13} /></button>
-                </li>
-              ))}
-            </ul>
+            <div>
+              <ul className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                {files.map((f, i) => (
+                  <li key={f.id} className="relative overflow-hidden rounded-xl border border-neutral-200">
+                    <button type="button" onClick={() => setOpen({ kind: 'mine', index: i })} aria-label={`Preview ${f.file.name}`} className="block w-full">
+                      <FileThumb src={f.src} className="aspect-[3/4] w-full" />
+                    </button>
+                    <span className="pointer-events-none absolute left-1.5 top-1.5 rounded-full bg-black/60 px-1.5 text-[10.5px] font-semibold text-white">{i + 1}</span>
+                    <button type="button" aria-label={`Remove ${f.file.name}`} onClick={() => remove(i)} className="absolute right-1 top-1 rounded-full bg-white/90 p-1 text-neutral-700 shadow"><X size={13} /></button>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-[12px] text-neutral-500">{files.length} file{files.length === 1 ? '' : 's'} · {size(totalBytes)}. Tap one to check it and put the pages in order.</p>
+            </div>
           )}
 
           <label className="block"><span className="mb-1 block text-[13px] font-medium text-neutral-700">Or type your answer <span className="font-normal text-neutral-400">(optional)</span></span>
@@ -161,10 +192,22 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
 
           {state.kind === 'error' && <p className="rounded-xl bg-rose-50 px-3 py-2 text-[13.5px] text-rose-700">{state.message}</p>}
           <button type="button" disabled={!ready} onClick={() => void submit()} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#1F1E1D] px-4 py-3.5 text-[15px] font-semibold text-white disabled:opacity-40">
-            {state.kind === 'sending' ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}{state.kind === 'sending' ? 'Submitting…' : 'Submit'}
+            {state.kind === 'sending' ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}{state.kind === 'sending' ? (state.percent < 99 && files.length ? `Sending… ${state.percent}%` : 'Saving…') : 'Submit'}
           </button>
+          {state.kind === 'sending' && files.length > 0 && <div className="-mt-2 h-1.5 overflow-hidden rounded-full bg-neutral-200" role="progressbar" aria-valuenow={state.percent} aria-valuemin={0} aria-valuemax={100}><div className="h-full bg-[#D97757] transition-[width]" style={{ width: `${state.percent}%` }} /></div>}
           <p className="text-center text-[12px] text-neutral-500">Only the person who shared the task sees what you submit.</p>
         </section>
+      )}
+      {open?.kind === 'task' && <PreviewDialog src={open.src} onClose={() => setOpen(null)} />}
+      {open?.kind === 'mine' && files[open.index] && (
+        <PreviewDialog src={files[open.index].src} onClose={() => setOpen(null)} footer={
+          <div className="flex items-center gap-2 text-white">
+            <button type="button" disabled={open.index === 0} onClick={() => { move(open.index, -1); setOpen({ kind: 'mine', index: open.index - 1 }); }} className="flex items-center gap-1 rounded-lg bg-white/10 px-3 py-2 text-[13px] disabled:opacity-30"><ArrowLeft size={15} />Earlier</button>
+            <span className="flex-1 text-center text-[13px] text-white/80">File {open.index + 1} of {files.length}</span>
+            <button type="button" disabled={open.index === files.length - 1} onClick={() => { move(open.index, 1); setOpen({ kind: 'mine', index: open.index + 1 }); }} className="flex items-center gap-1 rounded-lg bg-white/10 px-3 py-2 text-[13px] disabled:opacity-30">Later<ArrowRight size={15} /></button>
+            <button type="button" onClick={() => remove(open.index)} aria-label="Remove this file" className="rounded-lg bg-rose-500/80 p-2"><Trash2 size={16} /></button>
+          </div>
+        } />
       )}
     </>,
   );

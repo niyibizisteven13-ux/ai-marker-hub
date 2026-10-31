@@ -226,3 +226,19 @@ test('billing settings saved before the new price list keep only the exchange ra
   }
   assert.equal(PLANS.PLUS.priceRwf, 7_000);
 });
+
+test('storage: each plan keeps a set amount of files; a full Free account is refused with the plan that has more', async () => {
+  const { ensureStorage, storageSummary, StorageFullError } = await import('../server/services/billing/storage.js');
+  assert.ok(PLANS.FREE.limits.storageMb < PLANS.STARTER.limits.storageMb && PLANS.STARTER.limits.storageMb < PLANS.PRO.limits.storageMb && PLANS.PRO.limits.storageMb < PLANS.PLUS.limits.storageMb);
+  const free = await newUser();
+  const MB = 1024 * 1024;
+  await db.fileRecord.create({ data: { id: randomUUID(), name: 'big.pdf', mimeType: 'application/pdf', size: (PLANS.FREE.limits.storageMb - 1) * MB, userId: free, path: null, url: null } });
+  await ensureStorage(free, MB / 2);
+  await assert.rejects(ensureStorage(free, 2 * MB), (e: any) => e instanceof StorageFullError && /storage is full/.test(e.message) && /Starter/.test(e.message) && e.upgrade?.plan === 'STARTER');
+  await assert.rejects(ensureStorage(free, 2 * MB, { forOthers: true }), /shared this task/);
+  assert.deepEqual(await storageSummary(free), { usedMb: PLANS.FREE.limits.storageMb - 1, usedBytes: (PLANS.FREE.limits.storageMb - 1) * MB, limitMb: PLANS.FREE.limits.storageMb, files: 1 });
+  const pro = await newUser("PRO");
+  await db.fileRecord.create({ data: { id: randomUUID(), name: 'big.pdf', mimeType: 'application/pdf', size: (PLANS.FREE.limits.storageMb - 1) * MB, userId: pro, path: null, url: null } });
+  await ensureStorage(pro, 2 * MB);
+  assert.equal((await usageSummary(pro)).storage.limitMb, PLANS.PRO.limits.storageMb);
+});

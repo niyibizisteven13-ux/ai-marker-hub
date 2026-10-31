@@ -153,3 +153,38 @@ test('in the chat: the AI sets the task, lists hand-ins and gives the Mark-all l
   assert.match((await tools.mark_assignment.execute({ assignmentId: id }, ctx)).text, new RegExp(`/assignments/${id}\\?mark=1`));
   assert.ok((await tools.mark_assignment.execute({ assignmentId: id }, { userId: 'other' } as any)).isError, 'another teacher cannot reach it');
 });
+
+test('storage: hand-ins count against the owner\'s storage, a replaced or removed hand-in frees it', async () => {
+  const store = new Map<string, { owner: string; size: number }>();
+  const limits: Record<string, number> = { small: 2 * photo.length + 10 };
+  const used = (owner: string) => [...store.values()].filter((f) => f.owner === owner).reduce((a, f) => a + f.size, 0);
+  const counted: AssignmentFiles = {
+    async save(userId, name, mime, data) { const id = randomUUID(); store.set(id, { owner: userId, size: data.length }); return { id, name, mime, size: data.length }; },
+    async read() { throw new AssignmentError('NOT_FOUND', 'x', 404); },
+    async remove(userId, id) { if (store.get(id)?.owner === userId) store.delete(id); },
+  };
+  const s = createAssignmentService({
+    store: new OwnedRecordStore<AssignmentRecord>(path.join(dir, 'records-storage')), files: counted, tokenDir: path.join(dir, 'links-storage'),
+    ensureStorage: async (owner, bytes, forOthers) => {
+      if (used(owner) + bytes > (limits[owner] ?? Infinity)) throw new AssignmentError('STORAGE_FULL', forOthers ? 'The person who shared this task has no storage left.' : 'Your storage is full.', 413);
+    },
+  });
+  const a = await s.create('small', { title: 'Storage', instructions: 'Hand in one photo.' });
+  const token = tokenOf(a.link);
+  await s.submit(token, { studentName: 'Aline', files: [{ name: 'a.jpg', data: photo }] });
+  await s.submit(token, { studentName: 'Eric', files: [{ name: 'e.jpg', data: photo }] });
+  await assert.rejects(s.submit(token, { studentName: 'Keza', files: [{ name: 'k.jpg', data: photo }] }), (e: any) => e.code === 'STORAGE_FULL' && /shared this task/.test(e.message));
+  assert.equal(store.size, 2, 'a refused hand-in stores nothing');
+  await s.submit(token, { studentName: 'Keza', text: 'Typed answers need no storage.' });
+
+  // Eric hands in again: his first photo is deleted, so the owner's storage does not grow.
+  store.set('placeholder', { owner: 'other', size: 1 });
+  limits.small = 3 * photo.length;
+  await s.submit(token, { studentName: 'Eric', files: [{ name: 'e2.jpg', data: photo }] });
+  assert.equal(used('small'), 2 * photo.length);
+  const dash = await s.get('small', a.id);
+  await s.removeSubmission('small', a.id, dash.submissions.find((x) => x.studentName === 'Aline')!.id);
+  assert.equal(used('small'), photo.length, 'removing a hand-in frees its files');
+  await s.remove('small', a.id);
+  assert.equal(used('small'), 0, 'removing the task frees everything');
+});

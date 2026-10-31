@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { usageSummary } from '../services/billing/usage.js';
+import { planFor } from '../services/billing/plans.js';
 import { z } from 'zod';
 import { prisma } from '../db.js';
 import { requireAuth } from '../../production/auth.js';
@@ -78,7 +79,7 @@ router.get('/usage', requireAuth, async (req, res) => {
       meters: {
         scriptsMarked: { used: scriptsMarked, limit: 1000 },
         batchesPaid: { used: paidBatches, limit: 50 },
-        dataStoreMb: { used: Math.ceil((files._sum.size || 0) / (1024 * 1024)), limit: 500 },
+        dataStoreMb: { used: Math.ceil((files._sum.size || 0) / (1024 * 1024)), limit: (await planFor(userId)).limits.storageMb },
       },
       history: recentBatches.map((batch) => ({ date: batch.createdAt.toISOString().split('T')[0], action: `Marking batch · ${batch.status.toLowerCase()}${batch.detectedCount ? ` · ${batch.detectedCount} scripts` : ''}`, cost: '—' })),
     });
