@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, CalendarClock, Check, ChevronLeft, ChevronRight, ClipboardList, Copy, Download, ExternalLink, Eye, FileText, Image as ImageIcon, Link2, Loader2, Lock, Paperclip, Plus, Share2, Sparkles, Trash2, Unlock, Users, X } from 'lucide-react';
 import { authFetch } from '../utils/authFetch';
 import { PdfViewer, loadPdfJs } from './PdfViewer';
+import { FileThumb, PreviewDialog, type PreviewSource } from './FilePreview';
 import { Card, Empty, PageShell, Stat, StatRow, Toolbar, primaryBtn, relative } from './workspace/Shell';
 
 /**
@@ -93,23 +94,8 @@ function Thumb({ assignmentId, file }: { assignmentId: string; file: StoredFile 
 /** One file shown the way it reads best: photos full width, PDFs page by page, documents as text. */
 function FileView({ assignmentId, file }: { assignmentId: string; file: StoredFile }) {
   const url = useFileUrl(assignmentId, file);
-  const [text, setText] = useState<string | null>(null);
-  useEffect(() => {
-    if (!url || isImage(file) || isPdf(file)) return;
-    let live = true;
-    (async () => {
-      const blob = await (await fetch(url)).blob();
-      if (/wordprocessingml/.test(file.mime)) {
-        const mammoth = (await import('mammoth')).default;
-        const out = await mammoth.extractRawText({ arrayBuffer: await blob.arrayBuffer() });
-        if (live) setText(out.value);
-      } else if (/^text\//.test(file.mime)) {
-        const t = await blob.text();
-        if (live) setText(t);
-      } else if (live) setText('');
-    })().catch(() => live && setText(''));
-    return () => { live = false; };
-  }, [url, file.mime]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [viewing, setViewing] = useState(false);
+  const source = useMemo<PreviewSource | null>(() => (url ? { name: file.name, type: file.mime, url, size: file.size } : null), [url, file.name, file.mime, file.size]);
 
   return (
     <figure className="overflow-hidden rounded-xl border border-white/[0.08] bg-[#16171b]">
@@ -123,9 +109,11 @@ function FileView({ assignmentId, file }: { assignmentId: string; file: StoredFi
         : isImage(file) ? <img src={url} alt={file.name} className="mx-auto max-h-[80vh] w-auto bg-white" />
           : /^audio\//.test(file.mime) ? <div className="p-4"><audio controls src={url} className="w-full" /></div>
           : isPdf(file) ? <div className="h-[70vh]"><PdfViewer url={url} name={file.name} tall /></div>
-            : text === null ? <div className="flex h-32 items-center justify-center text-neutral-500"><Loader2 size={18} className="animate-spin" /></div>
-              : text ? <div className="max-h-[70vh] overflow-y-auto whitespace-pre-wrap bg-[#FBFAF6] px-6 py-5 font-serif text-[15px] leading-relaxed text-neutral-900">{text}</div>
-                : <p className="px-4 py-6 text-center text-[13px] text-neutral-400">No preview for this file type. Download it to open it.</p>}
+            : <button type="button" onClick={() => setViewing(true)} aria-label={`Preview ${file.name}`} className="group relative block w-full">
+                <FileThumb src={source!} tone="dark" className="h-64 w-full" />
+                <span className="absolute inset-0 grid place-items-center bg-black/0 text-[13px] font-semibold text-white opacity-0 transition group-hover:bg-black/40 group-hover:opacity-100">Open preview</span>
+              </button>}
+      {viewing && source && <PreviewDialog src={source} onClose={() => setViewing(false)} />}
     </figure>
   );
 }

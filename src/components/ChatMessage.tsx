@@ -23,6 +23,7 @@ import { lazy as lazyLoad, Suspense as LazyBoundary } from 'react';
 const MarkdownRendererLazy = lazyLoad(() => import('./MarkdownRenderer'));
 const MarkdownRenderer = (props: any) => <LazyBoundary fallback={null}><MarkdownRendererLazy {...props} /></LazyBoundary>;
 import { AttachmentCards } from './AttachmentCards';
+import { AttachmentCard, attachmentSource } from './FilePreview';
 import { copyToClipboard } from '../utils/copyToClipboard';
 import type { ResponseFeedbackDetails } from '../types';
 
@@ -258,25 +259,10 @@ export default function ChatMessage({
       <div className={`group flex flex-col ${isUser ? 'max-w-[85%] items-end' : 'w-full max-w-full items-start'}`}>
         {/* User attachments rendered above the bubble */}
         {isUser && attachments.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-1.5 justify-end">
-            {attachments.map((att: any, idx: number) => {
-              const name = att.name || att.fileName || 'Attachment';
-              const thumb = att.previewUrl || (typeof att.url === 'string' && att.url.startsWith('data:image') ? att.url : null);
-              const isImg = (att.mimeType || '').startsWith('image/') || att.fileType === 'image';
-              const ext = (/\.([a-z0-9]+)$/i.exec(name)?.[1] ?? 'file').slice(0, 4).toUpperCase();
-              return isImg && thumb ? (
-                <button key={idx} type="button" onClick={() => onPreviewDoc?.(att)} title={`Open ${name}`} aria-label={`Open ${name}`}
-                  className="h-20 w-20 overflow-hidden rounded-xl border border-white/10 bg-[#30302E] transition hover:border-white/30">
-                  <img src={thumb} alt={name} className="h-full w-full object-cover" />
-                </button>
-              ) : (
-                <button key={idx} type="button" onClick={() => onPreviewDoc?.(att)} title={`Open ${name}`}
-                  className="flex max-w-[220px] items-center gap-2.5 rounded-xl border border-white/10 bg-[#30302E] py-2 pl-2 pr-3 text-left text-xs text-[#FAF9F5] transition hover:border-white/25 hover:bg-[#363634]">
-                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#D97757]/15 text-[9.5px] font-bold text-[#F0A586]">{ext}</span>
-                  <span className="min-w-0"><span className="block truncate font-medium">{name}</span><span className="block text-[10.5px] text-neutral-500">Click to open</span></span>
-                </button>
-              );
-            })}
+          <div className="mb-2 flex flex-wrap justify-end gap-2">
+            {attachments.map((att: any, idx: number) => (
+              <AttachmentCard key={att.id ?? idx} src={attachmentSource(att)} onOpen={() => onPreviewDoc?.(att)} size={attachments.length === 1 && (att.mimeType || '').startsWith('image/') ? 180 : 120} />
+            ))}
           </div>
         )}
 

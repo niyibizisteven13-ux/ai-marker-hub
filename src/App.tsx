@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { PreviewDialog, attachmentSource, type PreviewSource } from './components/FilePreview';
+import { keyOf, thumbnailFor } from './utils/fileKinds';
 import bwengeLogo from './assets/bwenge-logo.svg';
 import { useStore } from './store/useStore';
 import {
@@ -289,6 +290,8 @@ export default function App() {
       'pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'csv', 'txt', 'md', 'rtf', 'json',
       'js', 'jsx', 'ts', 'tsx', 'py', 'java', 'cpp', 'c', 'h', 'html', 'css', 'xml', 'yaml', 'yml', 'sql',
       'png', 'jpg', 'jpeg', 'webp', 'gif',
+      // Same as the server: a ZIP of the class, phone photos (HEIC), scanner images (TIFF, BMP), OpenDocument text.
+      'zip', 'heic', 'heif', 'tif', 'tiff', 'bmp', 'odt',
     ]);
     const next = [...stagedAttachments];
     const errors: string[] = [];
@@ -1015,12 +1018,19 @@ export default function App() {
               inlineBytes += att.size;
             }
             const previewUrl = await makeImageThumbnail(att, mimeType);
+            // Page 1 / first lines for the card in the sent message (already worked out for the composer card).
+            const thumb = previewUrl ? undefined : await Promise.race([
+              thumbnailFor(keyOf({ name: att.name, file: att }), { name: att.name, type: mimeType }, async () => att),
+              new Promise<undefined>((r) => setTimeout(() => r(undefined), 4000)),
+            ]);
             newAttachments.push({
               id: 'att-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
               name: att.name,
               mimeType,
               // The whole file stays previewable in this session (the stored copy is used after a reload).
               localUrl: URL.createObjectURL(att),
+              bytes: att.size,
+              ...(thumb && (thumb.image || thumb.text || thumb.table) ? { thumb: { ...thumb, text: thumb.text?.slice(0, 400), table: thumb.table?.slice(0, 6) } } : {}),
               ...(previewUrl ? { previewUrl, url: previewUrl } : {}),
               fileType: att.type.startsWith('image/') ? 'image' : att.name.toLowerCase().endsWith('.pdf') ? 'pdf' : 'document',
             });

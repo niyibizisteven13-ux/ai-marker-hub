@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ArrowLeft, Camera, Check, ChevronDown, FileText, FolderArchive, Image as ImageIcon, Loader2, Moon, Paperclip, PenLine, X, Zap } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Camera, Check, ChevronDown, Loader2, Moon, Paperclip, PenLine, X, Zap } from 'lucide-react';
 import { authFetch } from '../utils/authFetch';
+import { FileThumb, PreviewDialog } from './FilePreview';
 import type { ChatAttachment } from '../types';
 
 /**
@@ -56,7 +57,6 @@ async function upload(file: File): Promise<string> {
   return data.fileId;
 }
 
-const kindIcon = (f: File) => (/\.zip$/i.test(f.name) ? FolderArchive : f.type.startsWith('image/') ? ImageIcon : FileText);
 
 export default function MarkPage({ onClose, onMark, onScan, incoming, covered = false }: {
   onClose: () => void; onMark: (req: MarkRequest) => void;
@@ -76,6 +76,8 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
   const [overnight, setOvernight] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [menu, setMenu] = useState<string | null>(null);
+  const [viewing, setViewing] = useState<File | null>(null);
+  const viewingSrc = useMemo(() => (viewing ? { name: viewing.name, type: viewing.type, file: viewing, size: viewing.size } : null), [viewing]);
   const input = useRef<HTMLInputElement>(null);
   const guideInput = useRef<HTMLInputElement>(null);
   // Step 2 asks for one of these; the teacher says which before photographing or choosing it.
@@ -203,13 +205,13 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
           ) : (
             <ul className="grid gap-2.5 p-3.5 sm:grid-cols-2 lg:grid-cols-3">
               {items.map((it) => {
-                const Icon = kindIcon(it.file);
                 const issues = it.check?.issues.filter((x) => x.issue !== 'small') ?? [];
                 return (
                   <li key={it.key} className="relative flex gap-3 rounded-[14px] border border-white/[0.08] bg-[#2B2A28] p-2.5">
-                    <span className="flex h-14 w-11 shrink-0 items-center justify-center overflow-hidden rounded-md border border-black/20 bg-[#FBFAF6] text-neutral-500">
-                      {it.preview ? <img src={it.preview} alt="" className="h-full w-full object-cover" /> : <Icon size={18} />}
-                    </span>
+                    <button type="button" onClick={() => setViewing(it.file)} aria-label={`Preview ${it.file.name}`} title="Preview"
+                      className="h-14 w-11 shrink-0 overflow-hidden rounded-md border border-black/20 transition hover:ring-2 hover:ring-[#D97757]/50">
+                      <FileThumb src={{ name: it.file.name, type: it.file.type, file: it.file, size: it.file.size }} badge={false} className="h-full w-full" />
+                    </button>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate pr-5 text-[12.5px] font-semibold">{it.label ?? it.file.name}</span>
                       <span className="block text-[11.5px] text-neutral-400">
@@ -335,6 +337,7 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
           <li><b className="text-neutral-400">1</b> Add the scripts and the scheme or question paper</li><li aria-hidden>→</li><li><b className="text-neutral-400">2</b> Mark</li><li aria-hidden>→</li><li><b className="text-neutral-400">3</b> {overnight ? 'Results by tomorrow morning, for half the credits' : 'Watch the red pen live in the chat'}</li>
         </ol>
       </main>
+      {viewingSrc && <PreviewDialog src={viewingSrc} onClose={() => setViewing(null)} />}
     </div>
   );
 }
