@@ -41,7 +41,7 @@ export interface Submission {
   candidateId: string;
   candidateName?: string;
   /** How the candidate id was established. */
-  identity: 'manifest' | 'message' | 'filename' | 'assigned';
+  identity: 'manifest' | 'message' | 'filename' | 'assigned' | 'paper';
   fileId: string;
   fileName: string;
   mime: string;

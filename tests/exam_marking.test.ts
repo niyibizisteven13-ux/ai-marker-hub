@@ -277,13 +277,14 @@ test.after(async () => { await queue.stop(); await fs.rm(root, { recursive: true
 
 const fileStore = new FileStore({ dir: path.join(root, 'files'), secret: 'test-secret-1234567890' });
 const queue = new FileJobQueue({ storageDir: path.join(root, 'jobs'), concurrency: 2, retryDelayMs: 20, maxActivePerUser: 5 });
-const PAGE_W: Record<string, number> = { C001: 420, C002: 520, C003: 610 };
+const PAGE_W: Record<string, number> = { C001: 420, C002: 520, C003: 610, C004: 470 };
 
 /** Lines written on each synthetic script; y positions in PDF points from the top. */
 const SCRIPTS: Record<string, string[]> = {
   C001: ['1) x + 2 = 6', 'x = 6 - 2 = 4', '2) area = 3 x 5 = 15'],
   C002: ['1) x + 2 = 6', 'x = 6 - 2 = 5', '2) area = 3 x 5 = 15'],
   C003: ['1) refused'],
+  C004: ['Name: Uwase Aline   Reg no: 2024/015', '1) x + 2 = 6', 'x = 6 - 2 = 4', '2) area = 3 x 5 = 15'],
 };
 
 async function scriptPdf(id: string, rotate = 0) {
@@ -417,8 +418,9 @@ test('live marking persists validated questions before the next question and exp
   };
   // One group at a time, so the viewer can be checked between them (groups normally run in parallel).
   process.env.EXAM_QUESTION_CONCURRENCY = '1';
+  process.env.EXAM_QUESTIONS_PER_CALL = '1';
   try { await exams.startMarking(user, exam.id); await waitRun(user, exam.id); }
-  finally { onMarkRequest = undefined; delete process.env.EXAM_QUESTION_CONCURRENCY; }
+  finally { onMarkRequest = undefined; delete process.env.EXAM_QUESTION_CONCURRENCY; delete process.env.EXAM_QUESTIONS_PER_CALL; }
   assert.ok(observed, 'question 1 was available to the viewer while question 2 was pending');
   const done = await exams.load(user, exam.id);
   const artifact = done.artifacts.find(a => a.status === 'ready')!;
@@ -1125,6 +1127,16 @@ test('groups of questions are marked at the same time, with the whole scheme sen
   assert.equal(out.marks.Q2.awardedMarks, 2);
 });
 
+test('by default a script needs one round of calls: questions are shared out over the groups that run at once', async () => {
+  const scheme = validateScheme(SCHEME).scheme!;
+  const match = matchAnswers(docOf([[{ id: 'e1', text: '1. x = 4' }, { id: 'e2', text: '2. 3 x 5 = 15' }]]), [], scheme);
+  const before = calls.marking.length;
+  process.env.EXAM_QUESTION_CONCURRENCY = '1';
+  try { await markCandidate(adapter, 'fake', { scheme, questionIds: ['Q1', 'Q2'], match, runId: 'one-round', schemeVersion: 1 }); }
+  finally { delete process.env.EXAM_QUESTION_CONCURRENCY; }
+  assert.deepEqual(calls.marking.slice(before), [['Q1', 'Q2']], 'one group running: both questions in one call');
+});
+
 test('live work counters count persisted questions, expose active work and separate failures', async () => {
   const exam = await exams.createExam('progress-teacher', { title: 'Progress' });
   await exams.setSchemeJson('progress-teacher', exam.id, SCHEME, { confirm: true });
@@ -1242,4 +1254,20 @@ test('pen marks: the marker circles and notes, the teacher adds and removes thei
   await exams.removePen(user, exam.id, sub.id, own[0].id.replace(/^pen:/, ''));
   rv = await exams.reviewCandidate(user, exam.id, sub.id);
   assert.deepEqual(rv.layout.items.filter((i) => i.own).map((i) => i.kind), ['stamp']);
+});
+
+test('the name and number written on the paper replace STUDENT1; a script without them keeps its id', async () => {
+  const user = 'teacher-names';
+  const exam = await exams.createExam(user, { title: 'Names' });
+  await exams.setSchemeJson(user, exam.id, SCHEME, { confirm: true });
+  const { accepted } = await exams.addSubmissions(user, exam.id, [{ name: 'Student_1_Page_1.pdf', buffer: await scriptPdf('C004') }, { name: 'Student_2_Page_1.pdf', buffer: C001_PDF }]);
+  assert.deepEqual(accepted.map((a) => a.candidateId), ['STUDENT1', 'STUDENT2']);
+  await exams.startMarking(user, exam.id);
+  const done = await waitRun(user, exam.id);
+  const [a, b] = accepted.map((x) => done.submissions.find((s) => s.id === x.id)!);
+  assert.deepEqual([a.candidateId, a.candidateName, a.identity], ['2024-015', 'Uwase Aline', 'paper']);
+  assert.equal(done.results[a.id].candidateId, '2024-015');
+  assert.equal(done.results[a.id].questions.reduce((t, q) => t + (q.ai?.awardedMarks ?? 0), 0), 5, 'the header line is not marked as an answer');
+  assert.deepEqual([b.candidateId, b.identity], ['STUDENT2', 'filename'], 'nothing written: the fallback id stays');
+  assert.ok((done.events ?? []).some((e) => /Name on the paper: 2024-015 \(Uwase Aline\)/.test(e.message)));
 });

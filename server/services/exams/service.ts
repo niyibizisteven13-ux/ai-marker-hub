@@ -24,6 +24,7 @@ import { classStatistics, currentSummaries, effectiveMarks, openFlags, schemeOf,
 import { changedQuestions, extractScheme, questionKey, validateScheme, type MarkingScheme } from './scheme.js';
 import { DEFAULT_PREFERENCES, type ArtifactSet, type AuditEvent, type CandidateResult, type CandidateState, type ExamEvent, type ExamRecord, type LayoutOverride, type MarkingPreferences, type MarkingRun, type PenKind, type PenMark, type QuestionResult, type SchemeVersion, type Submission } from './types.js';
 import { buildWorkbook } from './workbook.js';
+import { identityFromPaper, isPlaceholderId } from './identity.js';
 
 /**
  * Examination marking service: exams, versioned marking schemes, candidate uploads, background marking
@@ -541,10 +542,25 @@ export function createExamService(deps: ExamDeps) {
     const unclear = pages.flatMap((pg) => pg.elements.filter((el) => el.uncertainty !== 'low').map(() => pg.page));
     const veryUnclear = elements.filter((el) => el.uncertainty === 'high').length;
     const tiled = pages.filter((pg) => pg.tiling);
+    // The name and number written on the paper replace a made-up id (STUDENT1, C001) and a file-name label.
+    const written = identityFromPaper(record.result);
+    let identified = '';
     await mutate(userId, examId, (e) => {
       if (!runLive(e, runId)) return;
       const s = e.submissions.find((x) => x.id === sub.id)!; s.documentId = record.id; s.recognitionCached = cached; s.recognitionKey = key;
-      emit(e, { ...ref, type: 'document_inspected', message: `${sub.candidateId}: ${pages.length} page${pages.length === 1 ? '' : 's'} read${cached ? ' (reused an earlier reading)' : ''}, ${elements.length} passages${unclear.length ? `, ${unclear.length} unclear` : ', handwriting readable'}.`, data: { pages: pages.length, passages: elements.length, unclear: unclear.length, cached } });
+      const placeholder = isPlaceholderId(s.candidateId, s.identity);
+      const stem = s.fileName.replace(/\.[a-z0-9]+$/i, '').slice(0, 60);
+      if (written.name && (!s.candidateName || s.candidateName === stem || placeholder)) { s.candidateName = written.name.slice(0, 120); identified = written.name; }
+      if (written.id && placeholder && written.id.toLowerCase() !== s.candidateId.toLowerCase() && !e.submissions.some((x) => x.id !== s.id && x.candidateId.toLowerCase() === written.id!.toLowerCase())) {
+        const before = s.candidateId;
+        s.candidateId = written.id;
+        s.identity = 'paper';
+        if (e.results[s.id]) e.results[s.id].candidateId = written.id;
+        audit(e, { actor: 'bwenge-ai', type: 'submission_added', submissionId: s.id, candidateId: written.id, before: { candidateId: before }, after: { candidateId: written.id, identity: 'paper' } });
+        identified = `${written.id}${s.candidateName ? ` (${s.candidateName})` : ''}`;
+      } else if (identified && placeholder) s.identity = 'paper';
+      sub.candidateId = s.candidateId; sub.candidateName = s.candidateName; ref.candidateId = s.candidateId;
+      emit(e, { ...ref, type: 'document_inspected', message: `${sub.candidateId}: ${pages.length} page${pages.length === 1 ? '' : 's'} read${cached ? ' (reused an earlier reading)' : ''}, ${elements.length} passages${unclear.length ? `, ${unclear.length} unclear` : ', handwriting readable'}.${identified ? ` Name on the paper: ${identified}.` : ''}`, data: { pages: pages.length, passages: elements.length, unclear: unclear.length, cached } });
       if (tiled.length) {
         const t = tiled.reduce((a, pg) => ({ tiles: a.tiles + pg.tiling!.tiles, replaced: a.replaced + pg.tiling!.replaced, agreed: a.agreed + pg.tiling!.agreed, added: a.added + pg.tiling!.added }), { tiles: 0, replaced: 0, agreed: 0, added: 0 });
         emit(e, { ...ref, type: 'handwriting_recovery_completed', message: `${sub.candidateId}: small handwriting re-read close up on ${tiled.length} page${tiled.length === 1 ? '' : 's'}: ${t.replaced} reading${t.replaced === 1 ? '' : 's'} improved, ${t.added} passage${t.added === 1 ? '' : 's'} found, ${t.agreed} confirmed.`, data: t });
@@ -566,7 +582,6 @@ export function createExamService(deps: ExamDeps) {
       marked = await markCandidate(agent.adapter, agent.model, { scheme, questionIds: scheme.questions.map((q) => q.id), match, questionPaperText: await questionPaperText(userId, exam), runId, schemeVersion: run.schemeVersion, signal, fallbackModel: agent.fallbackModel,
         preferences: { credit: pref.credit, feedback: pref.feedback, instructions: pref.instructions },
         imagesForQuestions: deps.visualEvidence ? ids => markingImages(userId, examId, sub.id, match, ids) : undefined,
-        chunkSize: 1,
         checkpoints: existing?.runId === runId ? Object.fromEntries(existing.questions.filter(q => q.ai).map(q => [q.questionId, q.ai!])) : undefined,
         onStartQuestion: async questionId => {
           await mutate(userId, examId, e => {
@@ -631,6 +646,14 @@ export function createExamService(deps: ExamDeps) {
       const max = questions.reduce((a, q) => a + q.maxMarks, 0);
       emit(e, { ...ref, type: 'script_marked', message: `${sub.candidateId} marked: ${total}/${max} (provisional until you confirm).`, data: { total, maxTotal: max, provisional: true } });
     });
+  }
+
+  /** " 42 pages in 6 min." for a live run; overnight runs wait for the batch, so their time says nothing. */
+  function timing(subs: Submission[], r: MarkingRun): string {
+    const pages = subs.filter((s) => s.state !== 'failed').reduce((a, s) => a + s.pages, 0);
+    if (!pages || !r.startedAt || !r.finishedAt || r.mode === 'overnight') return '';
+    const sec = Math.max(1, Math.round((Date.parse(r.finishedAt) - Date.parse(r.startedAt)) / 1000));
+    return ` ${pages} page${pages === 1 ? '' : 's'} in ${sec < 90 ? `${sec} s` : `${Math.round(sec / 60)} min`}.`;
   }
 
   async function runMarkJob(job: FileJob<MarkJobPayload>, ctx: JobContext) {
@@ -721,7 +744,7 @@ export function createExamService(deps: ExamDeps) {
       const failedN = subs.filter((s) => s.state === 'failed').length;
       const review = subs.filter((s) => s.state === 'completed_with_warnings').length;
       if (r.state === 'failed') emit(x, { runId, jobId: job.id, type: 'job_failed', progress: runProgress(x, runId), message: `Marking failed for every script${artifactError ? ` (${artifactError.slice(0, 120)})` : ''}. Nothing was lost: re-send or ask to re-mark.`, data: { failed: failedN } });
-      else emit(x, { runId, jobId: job.id, type: 'job_completed', progress: runProgress(x, runId), message: `Marking finished: ${subs.length - failedN} of ${subs.length} scripts marked${review ? `, ${review} with items to review` : ''}${failedN ? `, ${failedN} could not be marked` : ''}. Marks stay provisional until you confirm them.`, data: { state: r.state, marked: subs.length - failedN, review, failed: failedN, artifactError: artifactError ? artifactError.slice(0, 160) : null } });
+      else emit(x, { runId, jobId: job.id, type: 'job_completed', progress: runProgress(x, runId), message: `Marking finished: ${subs.length - failedN} of ${subs.length} scripts marked${review ? `, ${review} with items to review` : ''}${failedN ? `, ${failedN} could not be marked` : ''}.${timing(subs, r)} Marks stay provisional until you confirm them.`, data: { state: r.state, pages: subs.filter((s) => s.state !== 'failed').reduce((a, s) => a + s.pages, 0), seconds: r.startedAt ? Math.round((Date.parse(r.finishedAt!) - Date.parse(r.startedAt)) / 1000) : null, marked: subs.length - failedN, review, failed: failedN, artifactError: artifactError ? artifactError.slice(0, 160) : null } });
     });
     const r = e.runs.find((y) => y.id === runId)!;
     return { examId, runId, state: r.state, artifactError };
@@ -917,7 +940,8 @@ export function createExamService(deps: ExamDeps) {
     for (const s of list) {
       const sub = exam.submissions.find((x) => x.id === s.submissionId)!;
       const res = exam.results[s.submissionId];
-      let name = `${safeName(s.candidateId)}_marked.pdf`;
+      // A name read from the paper names the file (Uwase_Aline_marked.pdf) instead of a made-up id.
+      let name = `${sub.identity === 'paper' && sub.candidateName ? safeName(sub.candidateName) : safeName(s.candidateId)}_marked.pdf`;
       while (usedNames.has(name)) name = name.replace(/_marked\.pdf$/, '_x_marked.pdf');
       usedNames.add(name);
       let pdf: Buffer | null = null;
