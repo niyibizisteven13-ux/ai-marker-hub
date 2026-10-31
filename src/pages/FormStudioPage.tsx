@@ -126,7 +126,7 @@ export default function FormStudioPage({ formId, onBack }: { formId: string; onB
 
   if (error) {
     return (
-      <div className="min-h-[100dvh] bg-[#F4F4F1] px-4 py-10 text-[#202124]">
+      <div className="form-dark min-h-[100dvh] bg-[#F4F4F1] px-4 py-10 text-[#202124]">
         <div className="mx-auto max-w-xl rounded-2xl border border-[#E0E0E0] bg-white p-6">
           <p className="font-semibold">{error}</p>
           <button type="button" onClick={onBack} className="mt-4 inline-flex items-center gap-2 text-sm text-[#5F6368] hover:text-[#202124]"><ArrowLeft size={16} /> Back to workspace</button>
@@ -134,12 +134,12 @@ export default function FormStudioPage({ formId, onBack }: { formId: string; onB
       </div>
     );
   }
-  if (!data) return <div className="grid min-h-[100dvh] place-items-center bg-[#F4F4F1]"><Loader2 className="animate-spin text-[#5F6368]" /></div>;
+  if (!data) return <div className="form-dark grid min-h-[100dvh] place-items-center bg-[#F4F4F1]"><Loader2 className="animate-spin text-[#5F6368]" /></div>;
 
   const { review } = data;
   const critical = review.findings.filter((f) => f.level === 'critical' || f.level === 'error');
   return (
-    <div className="h-[100dvh] overflow-y-auto overscroll-contain bg-[#F4F4F1] text-[#202124]">
+    <div className="form-dark h-[100dvh] overflow-y-auto overscroll-contain bg-[#F4F4F1] text-[#202124]">
       <header className="sticky top-0 z-40 flex flex-wrap items-center gap-2 border-b border-[#E0E0E0] bg-white/95 px-3 py-2 backdrop-blur sm:px-5">
         <button type="button" onClick={onBack} className="grid h-9 w-9 place-items-center rounded-full hover:bg-black/5" aria-label="Back"><ArrowLeft size={18} /></button>
         <div className="min-w-0 flex-1">

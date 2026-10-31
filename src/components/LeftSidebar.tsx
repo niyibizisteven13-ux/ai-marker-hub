@@ -10,7 +10,7 @@ import {
   FolderOpen,
   Library,
   PenLine,
-  ClipboardList,
+  ClipboardCheck, ClipboardList,
   PanelLeftClose,
   PanelLeftOpen,
   Search,
@@ -43,6 +43,7 @@ interface LeftSidebarProps {
   onOpenMark?: () => void;
   /** Opens Assignments (set a task, share a link, see every hand-in, mark the class). */
   onOpenAssignments?: () => void;
+  onOpenForms?: () => void;
   onLogout: () => void;
   user: User | null;
   sessions: ChatSession[];
@@ -117,6 +118,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   onOpenPublicLibrary,
   onOpenMark,
   onOpenAssignments,
+  onOpenForms,
   onLogout = () => {},
   user = null,
   sessions = [],
@@ -161,9 +163,10 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
       { label: 'Chat', icon: MessageSquare, onClick: () => setActiveTab('documents'), active: activeTab === 'documents' && !/^\/(learn|exams)/.test(path) },
       ...(user ? [{ label: 'Practice', icon: GraduationCap, onClick: goTo('/learn'), active: /^\/learn/.test(path) }] : []),
     ] },
-    { title: 'Marking', items: [
+    { title: 'Teaching', items: [
       ...(user && onOpenMark ? [{ label: 'Mark', icon: PenLine, onClick: onOpenMark }] : []),
       ...(user && onOpenAssignments ? [{ label: 'Tasks', icon: ClipboardList, onClick: onOpenAssignments }] : []),
+      ...(user && onOpenForms ? [{ label: 'Forms', icon: ClipboardCheck, onClick: onOpenForms }] : []),
       ...(user ? [{ label: 'Results', icon: BarChart3, onClick: goTo('/exams'), active: /^\/exams/.test(path) }] : []),
     ] },
     { title: 'Files', items: [
