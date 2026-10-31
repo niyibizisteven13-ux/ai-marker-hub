@@ -40,6 +40,8 @@ export interface AssignmentRecord extends OwnedRecord {
 export interface AssignmentFiles {
   save(userId: string, name: string, mime: string, data: Buffer): Promise<StoredFile>;
   read(userId: string, id: string): Promise<{ data: Buffer; name: string; mime: string }>;
+  /** Deletes a file that is no longer used (a replaced or removed hand-in), so it stops counting as storage. */
+  remove?(userId: string, id: string): Promise<void>;
 }
 
 export class AssignmentError extends Error {
@@ -81,7 +83,14 @@ export function looksLike(name: string, data: Buffer): boolean {
 /** A candidate id the marker accepts: the student's own id when usable, otherwise S001, S002, … */
 const ID_OK = /^[\w.-]{1,40}$/;
 
-export function createAssignmentService(deps: { store: OwnedRecordStore<AssignmentRecord>; files: AssignmentFiles; tokenDir: string; baseUrl?: () => string }) {
+export function createAssignmentService(deps: {
+  store: OwnedRecordStore<AssignmentRecord>; files: AssignmentFiles; tokenDir: string; baseUrl?: () => string;
+  /** Throws when the owner's plan has no room for this many more bytes (storage is sold with the plans). */
+  ensureStorage?: (ownerId: string, bytes: number, forOthers: boolean) => Promise<void>;
+}) {
+  const drop = async (ownerId: string, files: StoredFile[]) => {
+    for (const f of files) await deps.files.remove?.(ownerId, f.id).catch(() => undefined);
+  };
   const tokenFile = (token: string) => {
     if (!/^[\w-]{16,40}$/.test(token)) throw new AssignmentError('NOT_FOUND', 'This task link is not valid.', 404);
     return path.join(path.resolve(deps.tokenDir), `${token}.json`);
@@ -110,8 +119,10 @@ export function createAssignmentService(deps: { store: OwnedRecordStore<Assignme
     counts: { submitted: a.submissions.length, late: a.submissions.filter((s) => s.late).length },
   });
 
-  async function storeUploads(ownerId: string, uploads: Array<{ name: string; data: Buffer }>, max = LIMITS.files): Promise<StoredFile[]> {
+  async function storeUploads(ownerId: string, uploads: Array<{ name: string; data: Buffer }>, max = LIMITS.files, forOthers = false): Promise<StoredFile[]> {
     if (uploads.length > max) throw new AssignmentError('TOO_MANY_FILES', `At most ${max} files.`);
+    const bytes = uploads.reduce((a, u) => a + u.data.length, 0);
+    if (bytes) await deps.ensureStorage?.(ownerId, bytes, forOthers);
     const out: StoredFile[] = [];
     for (const u of uploads) {
       const name = clean(u.name, 120).replace(/[\\/]/g, '_') || 'file';
@@ -142,6 +153,12 @@ export function createAssignmentService(deps: { store: OwnedRecordStore<Assignme
       return view(a);
     },
 
+    /** Ids of the files the owner's tasks still show (task files and current hand-ins). */
+    async fileIds(ownerId: string): Promise<Set<string>> {
+      const all = await deps.store.list(ownerId, 1000);
+      return new Set(all.flatMap((a) => [...a.taskFiles, ...a.submissions.flatMap((s) => s.files)].map((f) => f.id)));
+    },
+
     async list(ownerId: string) {
       return (await deps.store.list(ownerId, 100)).map((a) => ({
         id: a.id, title: a.title, dueAt: a.dueAt, open: a.open, link: linkOf(a.token), createdAt: a.createdAt,
@@ -167,12 +184,14 @@ export function createAssignmentService(deps: { store: OwnedRecordStore<Assignme
       const a = await load(ownerId, id);
       await fs.rm(tokenFile(a.token), { force: true });
       await deps.store.delete(id, ownerId);
+      await drop(ownerId, [...a.taskFiles, ...a.submissions.flatMap((s) => s.files)]);
     },
 
     /** Removes one student's hand-in (for example a test or a duplicate). */
     async removeSubmission(ownerId: string, id: string, submissionId: string) {
-      await load(ownerId, id);
+      const before = await load(ownerId, id);
       const a = await deps.store.update(id, ownerId, (r) => { r.submissions = r.submissions.filter((s) => s.id !== submissionId); });
+      await drop(ownerId, before.submissions.find((s) => s.id === submissionId)?.files ?? []);
       return view(a!);
     },
 
@@ -207,15 +226,19 @@ export function createAssignmentService(deps: { store: OwnedRecordStore<Assignme
       if (!studentName) throw new AssignmentError('NAME_REQUIRED', 'Write your name.');
       if (!text && !input.files?.length) throw new AssignmentError('ANSWER_REQUIRED', 'Add your answer: upload a file or photo, or type it.');
       if (a.submissions.length >= LIMITS.submissions) throw new AssignmentError('FULL', 'This task has reached its submission limit.', 409);
-      const files = await storeUploads(a.ownerId, input.files ?? []);
+      const files = await storeUploads(a.ownerId, input.files ?? [], LIMITS.files, true);
       const late = !!a.dueAt && Date.now() > Date.parse(a.dueAt);
       const same = (s: AssignmentSubmission) => (studentId && s.studentId ? s.studentId.toLowerCase() === studentId.toLowerCase() : s.studentName.toLowerCase() === studentName.toLowerCase());
       let receipt!: AssignmentSubmission;
+      let replaced: StoredFile[] = [];
       await deps.store.update(a.id, a.ownerId, (r) => {
         const prev = r.submissions.find(same);
+        replaced = prev?.files ?? [];
         receipt = { id: prev?.id ?? randomUUID(), studentName, ...(studentId ? { studentId } : {}), files, ...(text ? { text } : {}), submittedAt: now(), late, resubmissions: prev ? prev.resubmissions + 1 : 0 };
         r.submissions = [...r.submissions.filter((s) => s !== prev), receipt];
       });
+      // The earlier hand-in's files are no longer shown or marked: free their storage.
+      await drop(a.ownerId, replaced);
       return { receiptId: receipt.id.slice(0, 8).toUpperCase(), submittedAt: receipt.submittedAt, late, replaced: receipt.resubmissions > 0, files: files.length };
     },
 

@@ -251,10 +251,11 @@ function Dashboard({ id, onBack, onMarkAll, autoMark = false }: { id: string; on
     <>
       <button type="button" onClick={onBack} className="mb-3 inline-flex items-center gap-1.5 text-[13px] text-neutral-400 hover:text-white"><ArrowLeft size={15} />All tasks</button>
       <div className="flex flex-wrap items-start gap-3">
-        <div className="min-w-0 flex-1">
-          <h1 className="font-serif text-[26px] font-medium leading-tight tracking-tight">{a.title}</h1>
+        {/* Full width on a phone (buttons go underneath), sharing the row on wider screens. */}
+        <div className="w-full min-w-0 sm:w-auto sm:flex-1">
+          <h1 className="break-words font-serif text-[24px] font-medium leading-tight tracking-tight sm:text-[26px]">{a.title}</h1>
           <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px] text-neutral-400">
-            <span className="inline-flex items-center gap-1"><CalendarClock size={13} />{due(a.dueAt)}</span>
+            <span className="inline-flex items-center gap-1 whitespace-nowrap"><CalendarClock size={13} />{due(a.dueAt)}</span>
             <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold ${a.open ? 'bg-emerald-500/15 text-emerald-300' : 'bg-white/10 text-neutral-300'}`}>{a.open ? 'Open for submissions' : 'Closed'}</span>
           </p>
         </div>

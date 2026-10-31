@@ -9,7 +9,7 @@ import { authFetch } from '../../utils/authFetch';
 
 type PlanId = 'FREE' | 'GO' | 'STARTER' | 'PRO' | 'PLUS' | 'INSTITUTION';
 type SoldPlan = 'STARTER' | 'PRO' | 'PLUS';
-interface Limits { daily: number; weekly: number; monthly: number; perDay: { tool: number; vision: number; artifact: number; marking: number }; maxMessageChars: number; maxAttachments: number; maxUploadMb: number; memory: boolean; memoryItems: number }
+interface Limits { daily: number; weekly: number; monthly: number; perDay: { tool: number; vision: number; artifact: number; marking: number }; maxMessageChars: number; maxAttachments: number; maxUploadMb: number; storageMb: number; memory: boolean; memoryItems: number }
 interface Overview {
   revenue: { rwf: number; usd: number; payments: number }; aiCost: { usd: number; rwf: number; credits: number }; margin: { usd: number; percent: number | null };
   pendingPayments: number; subscriptions: Record<SoldPlan | 'INSTITUTION', number>; goCredits: { sold: number; used: number };
@@ -153,7 +153,7 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
           <div className="overflow-x-auto">
             <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#8A97C2]">Limits per plan</h4>
             <table className="w-full min-w-[760px] text-xs">
-              <thead><tr className="text-left text-[#8A97C2]">{['Plan', 'Credits / day', '/ week', '/ month', 'Tool answers / day', 'Scans / day', 'Files / day', 'Marking / day', 'Memory'].map((h) => <th key={h} className="px-1.5 py-1 font-medium">{h}</th>)}</tr></thead>
+              <thead><tr className="text-left text-[#8A97C2]">{['Plan', 'Credits / day', '/ week', '/ month', 'Tool answers / day', 'Scans / day', 'Files / day', 'Marking / day', 'Storage (MB)', 'Memory'].map((h) => <th key={h} className="px-1.5 py-1 font-medium">{h}</th>)}</tr></thead>
               <tbody>
                 {PLAN_IDS.map((id) => {
                   const l = eff.plans[id].limits;
@@ -162,6 +162,7 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
                       <td className="px-1.5 py-1.5 font-semibold text-white">{eff.plans[id].name}{eff.plans[id].sold ? '' : <span className="block text-[10px] font-normal text-[#8A97C2]">not sold online</span>}</td>
                       {(['daily', 'weekly', 'monthly'] as const).map((k) => <td key={k} className="px-1"><input className={input} type="number" min={1} value={l[k]} onChange={(e) => setLimit(id, k, Number(e.target.value))} /></td>)}
                       {(['tool', 'vision', 'artifact', 'marking'] as const).map((k) => <td key={k} className="px-1"><input className={input} type="number" min={0} value={l.perDay[k]} onChange={(e) => setLimit(id, `perDay.${k}`, Number(e.target.value))} /></td>)}
+                      <td className="px-1"><input className={input} type="number" min={10} step={512} value={l.storageMb ?? 0} onChange={(e) => setLimit(id, 'storageMb', Number(e.target.value))} aria-label={`${id} storage in MB`} /></td>
                       <td className="px-1.5 text-center"><input type="checkbox" checked={l.memory} onChange={(e) => setLimit(id, 'memory', e.target.checked)} aria-label={`${id} memory`} /></td>
                     </tr>
                   );

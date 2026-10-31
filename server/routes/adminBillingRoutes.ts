@@ -67,7 +67,7 @@ router.put('/ai-guard', async (req, res) => {
 const limitsSchema = z.object({
   daily: z.number().int().min(1).max(1_000_000), weekly: z.number().int().min(1).max(5_000_000), monthly: z.number().int().min(1).max(20_000_000),
   perDay: z.object({ tool: z.number().int().min(0), vision: z.number().int().min(0), artifact: z.number().int().min(0), marking: z.number().int().min(0) }).partial(),
-  maxMessageChars: z.number().int().min(500).max(500_000), maxAttachments: z.number().int().min(0).max(100), maxUploadMb: z.number().int().min(1).max(500),
+  maxMessageChars: z.number().int().min(500).max(500_000), maxAttachments: z.number().int().min(0).max(100), maxUploadMb: z.number().int().min(1).max(500), storageMb: z.number().int().min(10).max(10_000_000),
   memory: z.boolean(), memoryItems: z.number().int().min(0).max(1_000_000),
 }).partial();
 const priceSchema = z.object({ priceRwf: z.number().int().min(100).max(10_000_000).optional() });

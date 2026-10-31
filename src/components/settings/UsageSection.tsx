@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ArrowUpRight, Brain, CalendarDays, CalendarRange, Clock, Database, FileBarChart2, GraduationCap, Loader2, ScanLine, Sparkles, type LucideIcon } from 'lucide-react';
 import { authFetch } from '../../utils/authFetch';
+import StorageCard from './StorageCard';
 
 /** Settings → Usage: the plan, credits used today / this week / this month, daily feature limits and plan limits. */
 
@@ -9,7 +10,7 @@ interface UsageData {
   plan: { id: 'FREE' | 'GO' | 'STARTER' | 'PRO' | 'PLUS' | 'INSTITUTION'; name: string; priceUsd: number | null; listPriceUsd: number | null; priceRwf: number | null; priceNote: string };
   credits: { day: Meter; week: Meter; month: Meter };
   features: Array<{ kind: 'tool' | 'vision' | 'artifact' | 'marking'; label: string; used: number; limit: number }>;
-  limits: { maxMessageChars: number; maxAttachments: number; maxUploadMb: number; memory: boolean; memoryItems: number };
+  limits: { maxMessageChars: number; maxAttachments: number; maxUploadMb: number; storageMb?: number; memory: boolean; memoryItems: number };
   recent: Array<{ at: string; kind: string; credits: number; channel: string }>;
   upgrade: 'PRO' | 'PLUS' | null;
   /** The plan suggested next. */
@@ -144,6 +145,8 @@ export default function UsageSection() {
         </div>
       </div>
 
+      <StorageCard canUpgrade={usage.plan.id !== 'PLUS' && usage.plan.id !== 'INSTITUTION'} />
+
       <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-5 shadow-sm">
         <h3 className="text-sm font-medium text-[var(--text)]">Your plan includes</h3>
         <dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-2 text-xs sm:grid-cols-2">
@@ -151,6 +154,7 @@ export default function UsageSection() {
             ['Longest message', `${n(usage.limits.maxMessageChars)} characters`],
             ['Attachments per message', String(usage.limits.maxAttachments)],
             ['Largest upload', `${usage.limits.maxUploadMb} MB`],
+            ...(usage.limits.storageMb ? [['Storage', usage.limits.storageMb >= 1024 ? `${Math.round((usage.limits.storageMb / 1024) * 10) / 10} GB` : `${usage.limits.storageMb} MB`]] : []),
             ['Credits per day / week / month', `${n(usage.credits.day.limit)} / ${n(usage.credits.week.limit)} / ${n(usage.credits.month.limit)}`],
           ].map(([k, v]) => (
             <div key={k} className="flex items-center justify-between gap-3 border-b border-[var(--line)] py-2"><dt className="text-[var(--muted)]">{k}</dt><dd className="font-medium text-[var(--text)]">{v}</dd></div>

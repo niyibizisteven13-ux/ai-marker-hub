@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../../db.js';
+import { StorageFullError, ensureStorage } from '../billing/storage.js';
 import { OwnedRecordStore } from '../storage/ownedRecordStore.js';
 import { AssignmentError, createAssignmentService, type AssignmentFiles, type AssignmentRecord, type AssignmentService } from './service.js';
 
@@ -25,6 +26,12 @@ export const uploadFiles: AssignmentFiles = {
     if (!rec?.path) throw new AssignmentError('NOT_FOUND', 'File not found.', 404);
     return { data: await fs.readFile(rec.path), name: rec.name, mime: rec.mimeType };
   },
+  async remove(userId, id) {
+    const rec = await (prisma as any).fileRecord.findFirst({ where: { id, userId } });
+    if (!rec) return;
+    await (prisma as any).fileRecord.delete({ where: { id } });
+    if (rec.path) await fs.rm(rec.path, { force: true });
+  },
 };
 
 let service: AssignmentService | null = null;
@@ -34,6 +41,12 @@ export function assignmentService(): AssignmentService {
     files: uploadFiles,
     tokenDir: process.env.ASSIGNMENT_TOKENS_DIR ?? './data/assignment-links',
     baseUrl: () => process.env.APP_BASE_URL || process.env.APP_URL || '',
+    ensureStorage: async (ownerId, bytes, forOthers) => {
+      try { await ensureStorage(ownerId, bytes, { forOthers }); } catch (e) {
+        if (e instanceof StorageFullError) throw new AssignmentError(e.code, e.message, e.status);
+        throw e;
+      }
+    },
   });
   return service;
 }

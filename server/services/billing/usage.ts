@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { storageSummary } from './storage.js';
 import { prisma } from '../../db.js';
 import { PLANS, currentGoPacks, planFor, walletBalance, type PlanId, type PlanInfo, type UsageKind } from './plans.js';
 import { BATCH_PRICE_FACTOR } from '../ai/batchMode.js';
@@ -164,7 +165,8 @@ export async function usageSummary(userId: string, now = Date.now()) {
       month: { used: used.month, limit: L.monthly, resetsAt: p.resets.month.toISOString() },
     },
     features: (['tool', 'vision', 'artifact', 'marking'] as const).map((k) => ({ kind: k, label: FEATURE_LABEL[k], used: perDay[k], limit: L.perDay[k] })),
-    limits: { maxMessageChars: L.maxMessageChars, maxAttachments: L.maxAttachments, maxUploadMb: L.maxUploadMb, memory: L.memory, memoryItems: L.memoryItems, autonomousMarking: markingEntitled(L) },
+    limits: { maxMessageChars: L.maxMessageChars, maxAttachments: L.maxAttachments, maxUploadMb: L.maxUploadMb, storageMb: L.storageMb, memory: L.memory, memoryItems: L.memoryItems, autonomousMarking: markingEntitled(L) },
+    storage: await storageSummary(userId),
     recent: recent.map((r: any) => ({ at: new Date(r.createdAt).toISOString(), kind: r.kind, credits: r.credits, channel: r.channel })),
     upgrade: nextPlan(plan),
     /** The plan suggested next (name, price and monthly credits), for the upgrade note. */

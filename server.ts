@@ -41,6 +41,8 @@ import { analyticsRouter, assessmentRouter, documentsRouter, jobsRouter } from '
 import { examChat, overnightJobQueue, startEducationRuntime } from './server/services/educationRuntime.js';
 import { examsRouter } from './server/routes/examRoutes.js';
 import { createAssignmentsRouter, createPublicAssignmentsRouter } from './server/routes/assignmentRoutes.js';
+import { createStorageRouter } from './server/routes/storageRoutes.js';
+import { StorageFullError, ensureStorage } from './server/services/billing/storage.js';
 import { outputsRouter, sharedOutputsRouter } from './server/routes/outputRoutes.js';
 import { curationViewRouter, knowledgeAdminRouter, knowledgeSourcesRouter } from './server/routes/knowledgeRepositoryRoutes.js';
 import { shutdownOcr } from './server/services/documents/ocr.js';
@@ -407,6 +409,7 @@ app.use('/api/exams', requireAuth, examsRouter);
 app.post('/api/assignments/public/:token/submit', assignmentSubmitLimiter);
 app.use('/api/assignments/public', createPublicAssignmentsRouter());
 app.use('/api/assignments', requireAuth, createAssignmentsRouter());
+app.use('/api/storage', requireAuth, createStorageRouter());
 app.use('/api/outputs/shared', sharedOutputsRouter);
 app.use('/api/outputs', requireAuth, outputsRouter);
 app.use('/api/memory', requireAuth, memoryRoutes);
@@ -522,6 +525,11 @@ app.post('/api/files/upload', requireAuth, generalLimiter, (req, res, next) => {
       return res.status(400).json({ error: `${req.file.originalname} does not match its file extension.` });
     }
     const mimeType = detected || MIME_BY_EXTENSION[ext] || 'application/octet-stream';
+    // Kept uploads count against the plan's storage.
+    try { await ensureStorage(userId, req.file.size); } catch (e) {
+      if (e instanceof StorageFullError) return res.status(413).json({ error: e.message, code: e.code, upgrade: e.upgrade });
+      throw e;
+    }
 
     // Never trust the client-supplied filename for a path: keep only the checked extension.
     const uploadsDir = path.join(process.cwd(), 'uploads');

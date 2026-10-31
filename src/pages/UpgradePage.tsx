@@ -10,7 +10,7 @@ import { creditMeter } from '../components/PlanStatus';
  * approves on their phone and the page follows the payment until MTN confirms.
  */
 
-interface PlanLimits { daily: number; weekly: number; monthly: number; perDay: { tool: number; vision: number; artifact: number; marking: number }; maxUploadMb: number; maxAttachments: number; memory: boolean; memoryItems: number }
+interface PlanLimits { daily: number; weekly: number; monthly: number; perDay: { tool: number; vision: number; artifact: number; marking: number }; maxUploadMb: number; maxAttachments: number; storageMb?: number; memory: boolean; memoryItems: number }
 interface Pack { id: string; rwf: number; credits: number; usd: number }
 interface PlansResponse {
   fxUsdRwf: number; payments: 'live' | 'sandbox' | 'simulated' | 'off';
@@ -37,6 +37,7 @@ const REASONS: Record<string, { title: string; body: string }> = {
   limit: { title: 'You have used your credits', body: 'Pick a monthly plan for more credits, or top up to keep going right now.' },
   usage: { title: 'Get more out of Bwenge', body: 'Monthly plans give you credits for chat, documents, marking and files; Pro adds memory across all chats.' },
   memory: { title: 'Memory across all chats is part of Pro', body: 'Bwenge remembers who you are, how you like answers and what you worked on, on the web and in Telegram.' },
+  storage: { title: 'More storage for your files', body: 'Paid plans keep far more files: your uploads, the files you share in tasks and everything students hand in. Each plan below shows how much it keeps.' },
   marking: { title: 'Automatic marking is part of the paid plans', body: 'From 1,500 RWF a month: Bwenge reads the handwriting, marks each question in red pen and gives you the results.' },
 };
 
@@ -48,14 +49,19 @@ const SOLD: Array<{ id: SoldPlan; icon: React.ReactNode; blurb: string }> = [
   { id: 'PLUS', icon: <GraduationCap size={18} />, blurb: 'For heavy use and busy periods' },
 ];
 
+/** 2048 MB → "2 GB", 200 → "200 MB". */
+const storageLabel = (mb: number) => (mb >= 1024 ? `${Math.round((mb / 1024) * 10) / 10} GB` : `${mb} MB`);
+
 function features(id: PlanId, l: PlanLimits): string[] {
   const n = (x: number) => x.toLocaleString('en-US');
-  if (id === 'FREE') return [`${n(l.monthly)} credits a month for chat, scans and documents`, 'Try marking with a top-up', `Uploads up to ${l.maxUploadMb} MB`];
+  const storage = l.storageMb ? `${storageLabel(l.storageMb)} storage for your files and students' hand-ins` : null;
+  if (id === 'FREE') return [`${n(l.monthly)} credits a month for chat, scans and documents`, 'Try marking with a top-up', `Uploads up to ${l.maxUploadMb} MB`, ...(storage ? [storage] : [])];
   return [
     `${n(l.monthly)} credits a month for chat, documents, research and files`,
     `≈ ${n(Math.floor(l.monthly / CREDITS_PER_SCRIPT))} handwritten papers marked in red pen, or twice that overnight`,
     'Practice, forms, tasks shared by link and Excel results',
     l.memory ? `Memory across all chats (${n(l.memoryItems)})` : 'No memory across chats',
+    ...(storage ? [storage] : []),
     `Uploads up to ${l.maxUploadMb} MB, ${l.maxAttachments} per message`,
   ];
 }
@@ -100,10 +106,10 @@ export default function UpgradePage({ jobId, onBack, onSuccess }: UpgradePagePro
 
       <div className="sticky top-0 z-30 flex items-center justify-between border-b border-[var(--line)] bg-[var(--bg)]/90 px-4 py-4 backdrop-blur sm:px-8">
         <button onClick={onBack} className="flex items-center gap-2 rounded-lg px-3 py-2 text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--text)]">
-          <ArrowLeft size={16} /> <span className="text-sm font-medium">Back to workspace</span>
+          <ArrowLeft size={16} /> <span className="whitespace-nowrap text-sm font-medium"><span className="sm:hidden">Back</span><span className="hidden sm:inline">Back to workspace</span></span>
         </button>
         <div className="flex items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1.5 text-xs font-medium text-[var(--muted)]">
-          <ShieldCheck size={14} className="text-[var(--teal)]" /> Secure MTN Mobile Money
+          <ShieldCheck size={14} className="text-[var(--teal)]" /> <span className="whitespace-nowrap">Secure MTN Mobile Money</span>
         </div>
       </div>
 
