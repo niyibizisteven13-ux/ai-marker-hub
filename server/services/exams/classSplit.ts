@@ -35,7 +35,7 @@ For each page, decide whether it is the FIRST page of a student's script: a name
 name: the student's name or number written on a starting page, exactly as written, or null if none can be read.`;
 
 /** Page numbers (1-based) where a new student's script starts; page 1 always does. */
-export async function detectStarts(adapter: ProviderAdapter, model: string, images: Buffer[], signal?: AbortSignal): Promise<Map<number, string | null>> {
+export async function detectStarts(adapter: ProviderAdapter, model: string, images: Buffer[], signal?: AbortSignal, onUsage?: (u: { input: number; output: number }) => void): Promise<Map<number, string | null>> {
   const starts = new Map<number, string | null>([[1, null]]);
   for (let i = 0; i < images.length; i += PER_CALL) {
     const batch = images.slice(i, i + PER_CALL);
@@ -45,6 +45,7 @@ export async function detectStarts(adapter: ProviderAdapter, model: string, imag
       model, system: SYSTEM, schema: START_SCHEMA, images: urls, maxTokens: 2000, signal,
       prompt: `These are pages ${first} to ${first + batch.length - 1} of the file, in order (image 1 is page ${first}). Answer for every page.`,
     }));
+    onUsage?.(res.usage);
     for (const p of res.data.pages) {
       if (p.page < first || p.page >= first + batch.length) continue;
       if (p.startsNewStudent || p.page === 1) starts.set(p.page, p.name?.trim().slice(0, 80) || starts.get(p.page) || null);
@@ -73,7 +74,7 @@ export async function cutPdf(pdf: Buffer, startPages: number[], baseName: string
 }
 
 /** Splits a class PDF: every `pagesPerStudent` pages when given, otherwise where the AI sees a new student start. */
-export async function splitClassPdf(pdf: Buffer, fileName: string, opts: { pagesPerStudent?: number; ai?: { adapter: ProviderAdapter; model: string }; signal?: AbortSignal }): Promise<ClassPiece[]> {
+export async function splitClassPdf(pdf: Buffer, fileName: string, opts: { pagesPerStudent?: number; ai?: { adapter: ProviderAdapter; model: string }; signal?: AbortSignal; onUsage?: (u: { input: number; output: number }) => void }): Promise<ClassPiece[]> {
   const base = fileName.replace(/\.pdf$/i, '').slice(0, 60) || 'class';
   const total = (await PDFDocument.load(pdf, { ignoreEncryption: true })).getPageCount();
   if (total > MAX_CLASS_PAGES) throw new Error(`${fileName} has ${total} pages; at most ${MAX_CLASS_PAGES} can be marked in one job.`);
@@ -83,7 +84,7 @@ export async function splitClassPdf(pdf: Buffer, fileName: string, opts: { pages
   }
   if (!opts.ai) throw new Error('Say how many pages each student has (for example "4 pages per student") so the file can be split.');
   const { pages } = await loadPages(pdf, fileName, { maxPages: MAX_CLASS_PAGES, pdfScale: 1 });
-  const starts = await detectStarts(opts.ai.adapter, opts.ai.model, pages.map((p) => p.image), opts.signal);
+  const starts = await detectStarts(opts.ai.adapter, opts.ai.model, pages.map((p) => p.image), opts.signal, opts.onUsage);
   return cutPdf(pdf, [...starts.keys()], base, starts);
 }
 

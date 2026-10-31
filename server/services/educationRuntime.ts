@@ -16,7 +16,7 @@ import { EmbeddingService } from './EmbeddingService.js';
 import { createOutputService } from './outputs/service.js';
 import logger from '../utils/logger.js';
 import { markingLimits } from './exams/limits.js';
-import { recordUsage, checkUsage } from './billing/usage.js';
+import { recordUsage, checkUsage, creditsFor } from './billing/usage.js';
 import { isPrimary } from '../utils/cluster.js';
 import { canUseAutonomousMarking } from './billing/entitlements.js';
 
@@ -108,7 +108,10 @@ export const examService = createExamService({
   segmentBudgetMs: num(process.env.EXAM_SEGMENT_BUDGET_MS, 8 * 60 * 1000),
   // Every marked script is charged in credits (at least 2) and counted in the AI cost the profit guard watches.
   // Overnight scripts went through the batch API: half the cost, half the credits.
-  onUsage: (userId, u) => { const batch = !!u.batch || isOvernight(); void recordUsage(userId, { kind: 'marking', model: u.model, inputTokens: u.input, outputTokens: u.output, minCredits: u.what === 'mark' && !batch ? 2 : 1, batch }); },
+  // Every piece of AI work on a class is charged: reading the handwriting (vision), marking, second markings and
+  // splitting a whole-class PDF. The same formula gives the credits shown at the end of a run.
+  onUsage: (userId, u) => { const batch = !!u.batch || isOvernight(); void recordUsage(userId, { kind: 'marking', model: u.model, inputTokens: u.input, outputTokens: u.output, minCredits: u.what === 'mark' && !batch ? 2 : 1, batch, extra: (u.extra ?? []).map((x) => ({ model: x.model, inputTokens: x.input, outputTokens: x.output })) }); },
+  creditsFor: (model, input, output, batch, what, extra) => { const b = !!batch || isOvernight(); return Math.max(what === 'mark' && !b ? 2 : 1, creditsFor(model, input, output, b)) + (extra ?? []).filter((x) => x.input > 0 || x.output > 0).reduce((a, x) => a + creditsFor(x.model, x.input, x.output, b), 0); },
 });
 
 export const examChat = createExamChat({

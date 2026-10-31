@@ -87,6 +87,14 @@ test('preprocessing: quality warnings for tiny, low-contrast and blurred images;
   assert.ok(f.quality.warnings.some((w) => /contrast/i.test(w)));
   const blurred = await preprocessPage(await sharp(page(['blurry text line here for testing'])).blur(6).png().toBuffer());
   assert.ok(blurred.quality.warnings.some((w) => /blurred/.test(w)), JSON.stringify(blurred.quality));
+  // Poor scans are cleaned up for reading: sharpened when blurred, local contrast when faint. Clean pages are not touched.
+  assert.ok(blurred.transforms.some((t) => /sharpened/.test(t)), blurred.transforms.join(' | '));
+  assert.ok(f.transforms.some((t) => /local contrast/.test(t)), f.transforms.join(' | '));
+  const lap = async (img: Buffer) => (await sharp(img).convolve({ width: 3, height: 3, kernel: [0, 1, 0, 1, -4, 1, 0, 1, 0], offset: 128 }).stats()).channels[0].stdev;
+  const plainBlur = await sharp(page(['blurry text line here for testing'])).blur(6).grayscale().normalise().png().toBuffer();
+  assert.ok(await lap(blurred.processed) > await lap(plainBlur), 'the cleaned-up page has sharper edges than the blurred one');
+  const clean = await preprocessPage(await sharp(page(['clean sharp text'])).png().toBuffer());
+  assert.ok(!clean.transforms.some((t) => /Cleaned up/.test(t)));
   const transparent = await sharp({ create: { width: 900, height: 1270, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).png().toBuffer();
   const t = await preprocessPage(transparent);
   assert.equal((await sharp(t.processed).stats()).channels[0].mean > 250, true, 'transparent pixels are white paper, not ink');

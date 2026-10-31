@@ -376,7 +376,11 @@ const adapter: ProviderAdapter = {
 const target = { adapter, model: 'fake-model', fallbackModel: null };
 const documents = createDocumentService({ fileStore, queue, store: new OwnedRecordStore<DocumentRecord>(path.join(root, 'docs')), vision: () => target, agent: () => target, maxPages: 5 });
 const examStore = new OwnedRecordStore<ExamRecord>(path.join(root, 'exams'));
-const exams = createExamService({ fileStore, queue, store: examStore, documents, agent: () => target, visionAvailable: () => true, maxPages: 5, candidateConcurrency: 2, retryDelayMs: 10, forbiddenStrings: [root] });
+const usageCalls: Array<{ user: string; what: string; extra: number }> = [];
+const exams = createExamService({ fileStore, queue, store: examStore, documents, agent: () => target, visionAvailable: () => true, maxPages: 5, candidateConcurrency: 2, retryDelayMs: 10, forbiddenStrings: [root],
+  onUsage: (user, u) => { usageCalls.push({ user, what: u.what, extra: u.extra?.length ?? 0 }); },
+  // 2 credits per marking plus 1 per reading charged with it.
+  creditsFor: (_m, _i, _o, _b, what, extra) => (what === 'mark' ? 2 : 1) + (extra?.length ?? 0) });
 const chat = createExamChat({ service: exams, fileStore, queue, contexts: new OwnedRecordStore<ExamChatContext>(path.join(root, 'ctx')), agent: () => target, waitMs: 30_000 });
 
 async function waitRun(user: string, examId: string) {
@@ -1270,6 +1274,13 @@ test('the name and number written on the paper replace STUDENT1; a script withou
   assert.equal(done.results[a.id].questions.reduce((t, q) => t + (q.ai?.awardedMarks ?? 0), 0), 5, 'the header line is not marked as an answer');
   assert.deepEqual([b.candidateId, b.identity], ['STUDENT2', 'filename'], 'nothing written: the fallback id stays');
   assert.ok((done.events ?? []).some((e) => /Name on the paper: 2024-015 \(Uwase Aline\)/.test(e.message)));
+  // Credits match the work: each script's reading is charged with its marking as one action (the daily script
+  // count stays one per script), and the finished message says what the class cost.
+  const mine = usageCalls.filter((u) => u.user === user);
+  assert.equal(mine.filter((u) => u.what === 'mark').length, 2, 'one charge per script');
+  assert.equal(mine.filter((u) => u.what === 'mark' && u.extra === 1).length >= 1, true, 'a fresh reading rides on its marking charge');
+  assert.ok(done.runs[0].credits! >= 5, `run credits ${done.runs[0].credits}`);
+  assert.ok((done.events ?? []).some((e) => e.type === 'job_completed' && /\d+ credits/.test(e.message)));
 });
 
 test('second marker: a low-confidence answer is marked again; agreement raises confidence, a different mark is flagged with both', async () => {
