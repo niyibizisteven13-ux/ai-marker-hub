@@ -39,7 +39,7 @@ test('credits follow real model cost: 1 credit = $0.001, at least 1', () => {
   assert.equal(toRwf(3), 4400, 'USD amounts in RWF, rounded to 100 (rate 1470)');
 });
 
-test('plans: subscriptions map to Starter / Teacher / Teacher Plus / Institution; expired ones and admins fall back correctly', async () => {
+test('plans: subscriptions map to Starter / Pro / Pro Plus / Institution; expired ones and admins fall back correctly', async () => {
   assert.equal((await planFor(await newUser())).id, 'FREE');
   assert.equal((await planFor(await newUser('STARTER'))).id, 'STARTER');
   assert.equal((await planFor(await newUser('PLUS'))).id, 'PLUS');
@@ -62,7 +62,7 @@ test('limits: daily, weekly and monthly credits, per-feature daily caps, message
   assert.equal(d.allowed, false);
   assert.equal(d.code, 'DAILY');
   assert.match(d.message!, /today's 15 credits/);
-  assert.match(d.message!, /Teacher \(4,500 RWF a month, about \$3\.06\) gives 1,700 credits a month/);
+  assert.match(d.message!, /Pro \(4,500 RWF a month, about \$3\.06\) gives 1,700 credits a month/);
   assert.deepEqual(d.upgrade, { plan: 'PRO', url: '/upgrade?reason=limit' });
   assert.equal(d.resetsAt, '2026-10-21T22:00:00.000Z');
 
@@ -94,14 +94,14 @@ test('limits: daily, weekly and monthly credits, per-feature daily caps, message
   // Paid plans: a whole class can be marked in one evening; the monthly credits are the limit.
   const pro = await newUser('PRO');
   await addUsage(pro, 1_600, day(0));
-  assert.equal((await checkUsage(pro, { kind: 'marking' }, now)).allowed, true, 'Teacher allows 1,600 credits in one day');
+  assert.equal((await checkUsage(pro, { kind: 'marking' }, now)).allowed, true, 'Pro allows 1,600 credits in one day');
   await addUsage(pro, 100, day(0));
   const p = await checkUsage(pro, { kind: 'chat' }, now);
   assert.equal(p.code, 'MONTHLY');
-  assert.match(p.message!, /Teacher Plus \(7,000 RWF a month/);
+  assert.match(p.message!, /Pro Plus \(7,000 RWF a month/);
 });
 
-test('metering records real usage; the summary shows plan, meters, features and the Teacher offer', async () => {
+test('metering records real usage; the summary shows plan, meters, features and the Pro offer', async () => {
   const u = await newUser();
   assert.equal(await recordUsage(u, { kind: 'tool', model: 'claude-haiku-5-5', inputTokens: 45_000, outputTokens: 1_500 }), 6);
   assert.equal(await recordUsage(u, { kind: 'chat', model: 'gonka', inputTokens: 500, outputTokens: 200, channel: 'telegram' }), 1);
@@ -113,7 +113,7 @@ test('metering records real usage; the summary shows plan, meters, features and 
   assert.deepEqual(s.features.find((f) => f.kind === 'tool'), { kind: 'tool', label: 'data and tool answers', used: 1, limit: 3 });
   assert.deepEqual(s.recent.map((r) => [r.kind, r.credits, r.channel]), [['chat', 1, 'telegram'], ['tool', 6, 'web']]);
   assert.equal(s.limits.memory, false);
-  assert.deepEqual(s.pro, { id: 'PRO', name: 'Teacher', priceUsd: 3.06, listPriceUsd: null, priceRwf: 4_500, daily: 1_700, monthly: 1_700, memory: true });
+  assert.deepEqual(s.pro, { id: 'PRO', name: 'Pro', priceUsd: 3.06, listPriceUsd: null, priceRwf: 4_500, daily: 1_700, monthly: 1_700, memory: true });
 });
 
 test('memory: facts and preferences are recognised; secrets are not', () => {
@@ -171,7 +171,7 @@ test('memory API: Free sees an upgrade offer (402 with price); PRO turns it on, 
     current = await newUser();
     const view = await (await call('')).json();
     assert.equal(view.available, false);
-    assert.deepEqual(view.pro, { name: 'Teacher', priceUsd: 3.06, priceRwf: 4_500 });
+    assert.deepEqual(view.pro, { name: 'Pro', priceUsd: 3.06, priceRwf: 4_500 });
     const on = await call('/settings', 'PATCH', { enabled: true });
     assert.equal(on.status, 402);
     const body = await on.json();
@@ -198,7 +198,7 @@ test('memory API: Free sees an upgrade offer (402 with price); PRO turns it on, 
   }
 });
 
-test('plan catalog: Starter 1,500 / Teacher 4,500 / Teacher Plus 7,000 RWF; Free has no marking; top-ups at about 2.3 RWF a credit', () => {
+test('plan catalog: Starter 1,500 / Pro 4,500 / Pro Plus 7,000 RWF; Free has no marking; top-ups at about 2.3 RWF a credit', () => {
   assert.deepEqual([PLANS.STARTER.priceRwf, PLANS.PRO.priceRwf, PLANS.PLUS.priceRwf], [1_500, 4_500, 7_000]);
   assert.deepEqual([PLANS.FREE.limits.monthly, PLANS.STARTER.limits.monthly, PLANS.PRO.limits.monthly, PLANS.PLUS.limits.monthly], [50, 400, 1_700, 2_800]);
   assert.equal(PLANS.FREE.limits.autonomousMarking, false);

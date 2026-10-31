@@ -5,7 +5,7 @@ import { planFor } from './billing/plans.js';
 import logger from '../utils/logger.js';
 
 /**
- * Memory across all chats (Teacher and Teacher Plus plans).
+ * Memory across all chats (Pro and Pro Plus plans).
  *
  * - Facts and preferences the user states ("my name is…", "I teach…", "I prefer…"), things they ask to keep
  *   ("remember that…"), notes the assistant saves with the remember tool, and a short trace of each
@@ -22,7 +22,7 @@ export interface MemoryItem { id: string; content: string; kind: MemoryKind; sou
 
 export class MemoryUpgradeRequired extends Error {
   code = 'UPGRADE_REQUIRED';
-  constructor() { super('Memory across all chats is part of the Teacher plans. Upgrade to turn it on.'); }
+  constructor() { super('Memory across all chats is part of the Pro plans. Upgrade to turn it on.'); }
 }
 
 const db = prisma as any;

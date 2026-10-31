@@ -8,7 +8,7 @@ import { prisma } from '../../db.js';
 
 export type PlanId = 'FREE' | 'GO' | 'STARTER' | 'PRO' | 'PLUS' | 'INSTITUTION';
 export type UsageKind = 'chat' | 'tool' | 'vision' | 'artifact' | 'marking';
-/** Plans a teacher can buy online, cheapest first. INSTITUTION is kept for existing subscribers and admins only. */
+/** Plans sold online, cheapest first. INSTITUTION is kept for existing subscribers and admins only. */
 export const SOLD_PLANS = ['STARTER', 'PRO', 'PLUS'] as const;
 export type SoldPlanId = (typeof SOLD_PLANS)[number];
 
@@ -43,7 +43,7 @@ export interface PlanInfo {
   limits: PlanLimits;
 }
 
-// Paid plans keep high daily caps (teachers mark a whole class in one evening); the monthly credits are the
+// Paid plans keep high daily caps (a whole class can be marked in one evening); the monthly credits are the
 // cost control. 1 credit ≈ $0.001 of model spend, so 1,700 credits ≈ 120 Haiku-marked scripts plus chat.
 export const PLANS: Record<PlanId, PlanInfo> = {
   FREE: {
@@ -61,11 +61,11 @@ export const PLANS: Record<PlanId, PlanInfo> = {
     limits: { daily: 400, weekly: 400, monthly: 400, perDay: { tool: 60, vision: 100, artifact: 15, marking: 60 }, maxMessageChars: 20_000, maxAttachments: 10, maxUploadMb: 50, memory: false, memoryItems: 0, autonomousMarking: true },
   },
   PRO: {
-    id: 'PRO', name: 'Teacher', priceRwf: 4_500, priceUsd: 3, priceNote: 'per month',
+    id: 'PRO', name: 'Pro', priceRwf: 4_500, priceUsd: 3, priceNote: 'per month',
     limits: { daily: 1_700, weekly: 1_700, monthly: 1_700, perDay: { tool: 200, vision: 300, artifact: 40, marking: 200 }, maxMessageChars: 40_000, maxAttachments: 20, maxUploadMb: 50, memory: true, memoryItems: 2_000, autonomousMarking: true },
   },
   PLUS: {
-    id: 'PLUS', name: 'Teacher Plus', priceRwf: 7_000, priceUsd: 4.75, priceNote: 'per month',
+    id: 'PLUS', name: 'Pro Plus', priceRwf: 7_000, priceUsd: 4.75, priceNote: 'per month',
     limits: { daily: 2_800, weekly: 2_800, monthly: 2_800, perDay: { tool: 300, vision: 500, artifact: 60, marking: 400 }, maxMessageChars: 60_000, maxAttachments: 20, maxUploadMb: 100, memory: true, memoryItems: 5_000, autonomousMarking: true },
   },
   INSTITUTION: {
@@ -99,7 +99,7 @@ export const DEFAULT_GO_PACKS: GoPack[] = [
 
 /** Admin-editable billing settings (AppSetting "billing"), applied over the defaults above. */
 export interface BillingSettings {
-  /** 2 = saved for the Starter / Teacher / Teacher Plus price list. Older saves keep only the exchange rate. */
+  /** 2 = saved for the Starter / Pro / Pro Plus price list. Older saves keep only the exchange rate. */
   schema?: number;
   fxUsdRwf?: number;
   /** Monthly price in RWF per plan sold online. */

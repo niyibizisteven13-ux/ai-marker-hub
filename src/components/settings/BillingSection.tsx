@@ -15,7 +15,7 @@ const STATUS: Record<string, { label: string; icon: React.ReactNode; tone: strin
   FAILED: { label: 'Failed', icon: <XCircle size={13} />, tone: 'text-[var(--danger)]' },
   EXPIRED: { label: 'Not approved', icon: <XCircle size={13} />, tone: 'text-[var(--muted)]' },
 };
-const PLAN_NAME: Record<string, string> = { STARTER: 'Starter', PRO: 'Teacher', PLUS: 'Teacher Plus', INSTITUTION: 'Institution' };
+const PLAN_NAME: Record<string, string> = { STARTER: 'Starter', PRO: 'Pro', PLUS: 'Pro Plus', INSTITUTION: 'Institution' };
 const itemOf = (p: Payment) => (p.purpose === 'GO_PACK' ? `Top-up · ${p.credits.toLocaleString('en-US')} credits` : `${PLAN_NAME[p.purpose] ?? p.purpose} · ${p.months} month${p.months > 1 ? 's' : ''}`);
 
 export default function BillingSection() {

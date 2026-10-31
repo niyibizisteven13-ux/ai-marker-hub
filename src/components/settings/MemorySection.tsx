@@ -4,7 +4,7 @@ import { authFetch } from '../../utils/authFetch';
 
 /**
  * Settings → Memory. Bwenge remembers facts, preferences and past topics across every chat (web and Telegram).
- * Plans without memory see what it does and an upgrade call to action; the switch only turns on with Teacher
+ * Plans without memory see what it does and an upgrade call to action; the switch only turns on with Pro
  * or Institution. Memories can always be reviewed and deleted.
  */
 

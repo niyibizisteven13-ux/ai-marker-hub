@@ -10,8 +10,8 @@ import { expiredEmail, paymentFailedEmail, receiptEmail, renewalReminderEmail, t
  * Plan and credit purchases over MTN Mobile Money.
  *
  * start → MTN asks the payer to approve on their phone → status is confirmed by asking MTN (callback, the
- * user's page polling, and a background poller all call check()) → fulfil() exactly once: Starter / Teacher /
- * Teacher Plus time is extended or GO credits are added, a receipt number is issued, and the receipt goes out by email and
+ * user's page polling, and a background poller all call check()) → fulfil() exactly once: Starter / Pro /
+ * Pro Plus time is extended or GO credits are added, a receipt number is issued, and the receipt goes out by email and
  * Telegram. Amounts always come from the server's price list, never from the browser.
  */
 
@@ -187,7 +187,7 @@ export async function runRenewalSweep(now = Date.now()) {
     const end = new Date(s.endDate);
     const daysLeft = Math.ceil((end.getTime() - now) / 86_400_000);
     const plan = PLANS[planIdForSubscription(s.planType) ?? 'PRO'];
-    // Plans no longer sold online (Institution) renew as Teacher.
+    // Plans no longer sold online (Institution) renew as Pro.
     const priceRwf = plan.priceRwf || PLANS.PRO.priceRwf || 0;
     const c = await contact(s.userId);
     if (daysLeft <= 0) {
