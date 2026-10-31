@@ -178,7 +178,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   };
 
   const rowBase = `group/row relative flex items-center gap-3 rounded-lg text-[15px] lg:text-[13.5px] transition-colors duration-150 ${FOCUS_RING}`;
-  const rowSize = c ? 'h-10 w-full px-3 lg:w-10 lg:justify-center lg:px-0' : 'h-10 w-full px-3 lg:h-9';
+  const rowSize = c ? 'h-10 w-full px-3 lg:h-9 lg:w-10 lg:justify-center lg:px-0' : 'h-10 w-full px-3 lg:h-8';
   const label = c ? 'truncate lg:hidden' : 'truncate';
   const billing = useBillingMe(Boolean(user));
   // The badge follows the server's view of the plan (subscription, GO credits), falling back to the user record.
@@ -196,7 +196,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
     >
       <div className={`flex h-full flex-col overflow-hidden ${c ? 'lg:overflow-visible' : ''} pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]`}>
         {/* Brand + collapse */}
-        <div className={`flex h-16 shrink-0 items-center justify-between px-4 ${c ? 'lg:justify-center lg:px-0' : ''}`}>
+        <div className={`flex h-16 shrink-0 items-center justify-between px-4 lg:h-14 ${c ? 'lg:justify-center lg:px-0' : ''}`}>
           <div className={`flex min-w-0 items-center gap-2.5 ${c ? 'lg:hidden' : ''}`}>
             <div className="h-8 w-8 shrink-0 overflow-hidden rounded-[10px] ring-1 ring-white/10 shadow-md shadow-black/30">
               <img src={logoUrl} alt="" className="h-full w-full object-cover" />
@@ -231,28 +231,28 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
         </div>
 
         {/* New chat */}
-        <div className={`shrink-0 px-3 pb-3 ${c ? 'lg:flex lg:justify-center' : ''}`}>
-          <div className="group relative">
+        <div className={`shrink-0 px-3 pb-1 ${c ? 'lg:flex lg:justify-center' : ''}`}>
+          <div className="group relative w-full lg:w-auto">
             <button
               type="button"
               onClick={go(onNewChat)}
               aria-label="New chat"
-              className={`flex items-center justify-center gap-2 rounded-xl bg-[#D97757] font-medium text-white shadow-sm shadow-[#D97757]/20 transition-colors hover:bg-[#C96442] active:bg-[#B85A3A] ${FOCUS_RING} ${
-                c ? 'h-11 w-full text-[15px] lg:h-10 lg:w-10' : 'h-11 w-full text-[15px] lg:h-10 lg:text-sm'
-              }`}
+              className={`${rowBase} ${rowSize} ${c ? '' : 'lg:w-full'} font-medium text-white hover:bg-white/[0.04]`}
             >
-              <SquarePen size={16} aria-hidden="true" />
-              <span className={c ? 'lg:hidden' : ''}>New chat</span>
+              <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#D97757] text-white shadow-sm shadow-[#D97757]/30"><SquarePen size={13} aria-hidden="true" /></span>
+              <span className={label}>New chat</span>
             </button>
             <CollapsedTip show={c} label="New chat" />
           </div>
         </div>
 
+        {/* Menu and recent chats scroll together, so recent chats always have room on short screens. */}
+        <div className={`sidebar-scroll min-h-0 flex-1 overflow-y-auto ${c ? 'lg:overflow-visible' : ''}`}>
         {/* Workspace navigation, in groups: work, marking, files */}
         <nav aria-label="Workspace" className={`shrink-0 px-3 ${c ? 'lg:flex lg:flex-col lg:items-center' : ''}`}>
           {navGroups.map((g, gi) => (
-            <div key={g.title ?? 'main'} className={gi ? 'mt-3' : ''}>
-              {g.title && <h3 className={`px-3 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#9C9A92]/80 ${c ? 'lg:hidden' : ''}`}>{g.title}</h3>}
+            <div key={g.title ?? 'main'} className={gi ? 'mt-3 lg:mt-2.5' : ''}>
+              {g.title && <h3 className={`px-3 pb-0.5 text-[11px] font-medium text-[#9C9A92] lg:text-[11.5px] ${c ? 'lg:hidden' : ''}`}>{g.title}</h3>}
               {g.title && c && <div aria-hidden="true" className="mx-auto mb-1 hidden h-px w-6 bg-white/10 lg:block" />}
               <div className="space-y-0.5">
                 {g.items.map((item) => {
@@ -282,12 +282,11 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
         </nav>
 
         {/* Chat history */}
-        <div className={`mt-4 flex min-h-0 flex-1 flex-col ${c ? 'lg:hidden' : ''}`}>
+        <div className={`mt-3 flex flex-col ${c ? 'lg:hidden' : ''}`}>
           {sessions.length > 0 ? (
             <>
-              <div className="flex shrink-0 items-center justify-between px-5 pb-2">
-                <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#9C9A92]">Recents</span>
-                <span className="rounded-full bg-white/[0.05] px-1.5 py-px text-[10px] tabular-nums text-[#9C9A92]">{sessions.length}</span>
+              <div className="sticky top-0 z-10 flex shrink-0 items-center justify-between px-6 pb-1 pt-1" style={{ backgroundColor: tokens.bgSidebar }}>
+                <span className="text-[11px] font-medium text-[#9C9A92] lg:text-[11.5px]">Recents</span>
               </div>
               {sessions.length > 5 && (
                 <div className="shrink-0 px-3 pb-2">
@@ -309,11 +308,11 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                   </label>
                 </div>
               )}
-              <div className="sidebar-scroll min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+              <div className="px-3 pb-3">
                 {groups.length === 0 && <p className="px-2 py-6 text-center text-xs text-[#9C9A92]">No chats match “{query}”.</p>}
                 {groups.map((g) => (
-                  <section key={g.label} className="mb-3 last:mb-0" aria-label={g.label}>
-                    <h3 className="px-2 pb-1 pt-1 text-[11px] font-medium text-[#9C9A92]/80">{g.label}</h3>
+                  // One flat list, newest first, as in Claude (the date is in the title tooltip's order).
+                  <section key={g.label} aria-label={g.label}>
                     <ul className="space-y-px">
                       {g.items.map((s) => (
                         <li key={s.id} className="group/chat relative">
@@ -321,7 +320,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                             type="button"
                             onClick={go(() => onLoadSession(s.id))}
                             title={s.title}
-                            className={`flex h-10 w-full items-center rounded-lg px-2 text-left text-[14px] text-[#C2C0B6] transition-colors hover:bg-white/[0.04] hover:text-white lg:h-8 lg:text-[13px] ${FOCUS_RING} ${
+                            className={`flex h-10 w-full items-center rounded-lg px-3 text-left text-[14px] text-[#C2C0B6] transition-colors hover:bg-white/[0.04] hover:text-white lg:h-8 lg:text-[13px] ${FOCUS_RING} ${
                               onDeleteSession ? 'pr-10 lg:pr-2 lg:group-hover/chat:pr-9 lg:group-focus-within/chat:pr-9' : ''
                             }`}
                           >
@@ -350,12 +349,12 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
             </>
           ) : (
             <>
-              <div className="px-5 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#9C9A92]">Recents</div>
-              <p className="px-5 text-xs text-[#9C9A92]">Your chats will appear here.</p>
+              <div className="px-6 pb-1 text-[11px] font-medium text-[#9C9A92] lg:text-[11.5px]">Recents</div>
+              <p className="px-6 text-xs text-[#9C9A92]/80">Your chats will appear here.</p>
             </>
           )}
         </div>
-        {c && <div className="hidden flex-1 lg:block" />}
+        </div>
 
         {/* Footer: the account (settings, admin, plan and sign-out are in its menu, as in Claude) */}
         <div className={`shrink-0 border-t px-3 pb-3 pt-2 ${c ? 'lg:flex lg:flex-col lg:items-center' : ''}`} style={{ borderColor: tokens.border }}>
