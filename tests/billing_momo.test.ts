@@ -82,13 +82,13 @@ test('MoMo mode and phone numbers: sandbox accepts test numbers, production only
   } finally { process.env.MOMO_TARGET_ENV = prev; }
 });
 
-test('quotes come from the server price list: Starter / Teacher / Teacher Plus in RWF, top-ups, months capped at 12', async () => {
+test('quotes come from the server price list: Starter / Pro / Pro Plus in RWF, top-ups, months capped at 12', async () => {
   const pro = await quote('PRO', { months: 3 });
-  assert.equal(PLANS.PRO.name, 'Teacher');
+  assert.equal(PLANS.PRO.name, 'Pro');
   assert.equal(pro.amountRwf, 4_500 * 3);
   assert.equal((await quote('STARTER')).amountRwf, 1_500);
   assert.equal((await quote('PLUS')).amountRwf, 7_000);
-  assert.match((await quote('PLUS')).item, /Teacher Plus plan · 1 month/);
+  assert.match((await quote('PLUS')).item, /Pro Plus plan · 1 month/);
   await assert.rejects(quote('INSTITUTION' as any), /not available for online payment/);
   assert.equal((await quote('PRO', { months: 99 })).months, 12);
   const pack = currentGoPacks()[0];
@@ -139,7 +139,7 @@ test('PRO purchase: request-to-pay reaches MTN, status is confirmed with MTN, pl
   assert.equal(receipts.length, 1, 'one receipt email');
   assert.match(receipts[0].subject, /receipt/i);
   assert.match(receipts[0].html, new RegExp(done.receiptNumber!));
-  assert.match(receipts[0].text, /Teacher/);
+  assert.match(receipts[0].text, /Pro/);
 
   // Someone else cannot read or check this payment.
   await assert.rejects(checkPayment(payment.id, await newUser()), /not found/i);
@@ -333,7 +333,7 @@ test('platform context: the AI knows the plan, credits left, real links, and whe
   assert.match(web, /Free plan/);
   assert.match(web, /Credits left: \d+ of 15 today/);
   assert.match(web, /Starter 1,500 RWF a month/);
-  assert.match(web, /Teacher 4,500 RWF a month/);
+  assert.match(web, /Pro 4,500 RWF a month/);
   assert.match(web, /overnight marking/);
   assert.match(web, /\[Open the scanner\]\([^)]*\/scan\)/);
   assert.match(web, /\[The results page\]\([^)]*\/exams\)/);
@@ -349,7 +349,7 @@ test('platform context: the AI knows the plan, credits left, real links, and whe
   const pro = await newUser();
   await db.subscription.create({ data: { id: randomUUID(), userId: pro, planType: 'PRO', status: 'ACTIVE', startDate: new Date(), endDate: new Date(Date.now() + 10 * 86_400_000) } });
   const p = await platformContext(pro, 'web');
-  assert.match(p, /Teacher plan, active until/);
+  assert.match(p, /Pro plan, active until/);
   assert.match(p, /do not suggest upgrading/);
   assert.equal(await platformContext(null, 'web'), '');
 });

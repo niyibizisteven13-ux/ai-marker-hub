@@ -5,8 +5,8 @@ import OrganisationRequestDialog from '../components/OrganisationRequestDialog';
 import { creditMeter } from '../components/PlanStatus';
 
 /**
- * Upgrade: Free, Starter, Teacher and Teacher Plus (monthly, in RWF), credit top-ups, and schools (one Teacher
- * plan per teacher). Prices come from the server (admin-editable); payment is MTN Mobile Money: the user
+ * Upgrade: Free, Starter, Pro and Pro Plus (monthly, in RWF), credit top-ups, and schools and organisations
+ * (one Pro plan per person). Prices come from the server (admin-editable); payment is MTN Mobile Money: the user
  * approves on their phone and the page follows the payment until MTN confirms.
  */
 
@@ -35,26 +35,26 @@ const rwf = (n: number) => `${Math.round(n).toLocaleString('en-US')} RWF`;
 const usd = (n: number) => `$${Number.isInteger(n) ? n : n.toFixed(2)}`;
 const REASONS: Record<string, { title: string; body: string }> = {
   limit: { title: 'You have used your credits', body: 'Pick a monthly plan for more credits, or top up to keep going right now.' },
-  usage: { title: 'Get more out of Bwenge', body: 'Monthly plans give you credits for marking, scans and files; Teacher adds memory across all chats.' },
-  memory: { title: 'Memory across all chats is part of Teacher', body: 'Bwenge remembers who you are, how you like answers and what you worked on, on the web and in Telegram.' },
-  marking: { title: 'Automatic marking is part of the paid plans', body: 'From 1,500 RWF a month: Bwenge reads the handwriting, marks each question in red pen and gives you the class results.' },
+  usage: { title: 'Get more out of Bwenge', body: 'Monthly plans give you credits for chat, documents, marking and files; Pro adds memory across all chats.' },
+  memory: { title: 'Memory across all chats is part of Pro', body: 'Bwenge remembers who you are, how you like answers and what you worked on, on the web and in Telegram.' },
+  marking: { title: 'Automatic marking is part of the paid plans', body: 'From 1,500 RWF a month: Bwenge reads the handwriting, marks each question in red pen and gives you the results.' },
 };
 
 /** About 12 credits mark one handwritten script with the standard model (half that overnight). */
 const CREDITS_PER_SCRIPT = 12;
 const SOLD: Array<{ id: SoldPlan; icon: React.ReactNode; blurb: string }> = [
-  { id: 'STARTER', icon: <Zap size={18} />, blurb: 'For a teacher trying it out with one class' },
-  { id: 'PRO', icon: <Sparkles size={18} />, blurb: 'For a teacher marking every week' },
-  { id: 'PLUS', icon: <GraduationCap size={18} />, blurb: 'For several classes and exam season' },
+  { id: 'STARTER', icon: <Zap size={18} />, blurb: 'To try it out on your own work' },
+  { id: 'PRO', icon: <Sparkles size={18} />, blurb: 'For regular use every week' },
+  { id: 'PLUS', icon: <GraduationCap size={18} />, blurb: 'For heavy use and busy periods' },
 ];
 
 function features(id: PlanId, l: PlanLimits): string[] {
   const n = (x: number) => x.toLocaleString('en-US');
   if (id === 'FREE') return [`${n(l.monthly)} credits a month for chat, scans and documents`, 'Try marking with a top-up', `Uploads up to ${l.maxUploadMb} MB`];
   return [
-    `${n(l.monthly)} credits a month`,
-    `≈ ${n(Math.floor(l.monthly / CREDITS_PER_SCRIPT))} scripts marked in red pen, or twice that overnight`,
-    'Assignments by link, class results and Excel',
+    `${n(l.monthly)} credits a month for chat, documents, research and files`,
+    `≈ ${n(Math.floor(l.monthly / CREDITS_PER_SCRIPT))} handwritten papers marked in red pen, or twice that overnight`,
+    'Practice, forms, assignments by link and Excel results',
     l.memory ? `Memory across all chats (${n(l.memoryItems)})` : 'No memory across chats',
     `Uploads up to ${l.maxUploadMb} MB, ${l.maxAttachments} per message`,
   ];
@@ -193,10 +193,10 @@ export default function UpgradePage({ jobId, onBack, onSuccess }: UpgradePagePro
               </div>
               <div className="flex flex-col justify-between gap-4 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-5">
                 <div>
-                  <h3 className="flex items-center gap-2 text-base font-semibold text-[var(--text)]"><Building2 size={16} className="text-[var(--accent)]" /> Schools</h3>
-                  <p className="mt-1 text-xs leading-relaxed text-[var(--muted)]">One Teacher plan per teacher ({rwf(plan('PRO')?.priceRwf ?? 0)} a month each). Each teacher keeps their own classes, credits and memory. We can invoice the school for several teachers.</p>
+                  <h3 className="flex items-center gap-2 text-base font-semibold text-[var(--text)]"><Building2 size={16} className="text-[var(--accent)]" /> Schools and organisations</h3>
+                  <p className="mt-1 text-xs leading-relaxed text-[var(--muted)]">One Pro plan per person ({rwf(plan('PRO')?.priceRwf ?? 0)} a month each). Each person keeps their own work, credits and memory. We can send one invoice for the whole group.</p>
                 </div>
-                <button onClick={() => setOrgOpen(true)} className="min-h-[40px] w-full rounded-xl border border-[var(--line)] text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--hover)]">Ask for a school invoice</button>
+                <button onClick={() => setOrgOpen(true)} className="min-h-[40px] w-full rounded-xl border border-[var(--line)] text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--hover)]">Ask for a group invoice</button>
               </div>
             </div>
           </>
@@ -204,7 +204,7 @@ export default function UpgradePage({ jobId, onBack, onSuccess }: UpgradePagePro
 
         <section className="mx-auto grid max-w-4xl grid-cols-1 gap-3 sm:grid-cols-3">
           {[
-            ['What is a credit?', 'A chat reply is about 1 credit. Marking one handwritten script is about 12; overnight marking (results by the next morning) costs half.'],
+            ['What is a credit?', 'A chat reply is about 1 credit. Marking one handwritten paper is about 12; overnight marking (results by the next morning) costs half.'],
             ['How do I pay?', 'Enter your MTN MoMo number, then approve the prompt on your phone with your PIN. Your plan or credits are added as soon as MTN confirms.'],
             ['Receipts and renewal', 'A receipt is emailed and sent to Telegram. Mobile Money never renews automatically: we remind you 3 days before your plan ends.'],
           ].map(([q, a]) => (

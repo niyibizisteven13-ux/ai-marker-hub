@@ -100,8 +100,8 @@ const PLAN_BADGE: Record<string, PlanBadge> = {
   FREE: { label: 'Free', className: 'border-white/15 bg-white/[0.06] text-[#C2C0B6]' },
   GO: { label: 'Top-up', className: 'border-sky-400/30 bg-sky-400/10 text-sky-300', icon: Coins },
   STARTER: { label: 'Starter', className: 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300', icon: Sparkles },
-  PRO: { label: 'Teacher', className: 'border-amber-400/30 bg-amber-400/10 text-amber-300', icon: Sparkles },
-  PLUS: { label: 'Teacher+', className: 'border-orange-400/30 bg-orange-400/10 text-orange-300', icon: Sparkles },
+  PRO: { label: 'Pro', className: 'border-amber-400/30 bg-amber-400/10 text-amber-300', icon: Sparkles },
+  PLUS: { label: 'Pro+', className: 'border-orange-400/30 bg-orange-400/10 text-orange-300', icon: Sparkles },
   INSTITUTION: { label: 'Inst.', className: 'border-indigo-400/30 bg-indigo-400/12 text-indigo-300', icon: Building2 },
 };
 const LEGACY_PLAN: Record<string, keyof typeof PLAN_BADGE> = { BUSINESS: 'PRO', PRO: 'PRO', STARTER: 'STARTER', PLUS: 'PLUS', ORGANIZATION: 'INSTITUTION', GO: 'GO' };

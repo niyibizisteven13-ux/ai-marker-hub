@@ -78,7 +78,7 @@ function until(d: Date, now: number) {
   return h < 1 ? 'within the hour' : h < 48 ? `in ${h} h` : `on ${d.toISOString().slice(0, 10)}`;
 }
 
-/** The plan to suggest next: Teacher for Free / top-up / Starter users, Teacher Plus for Teacher users. */
+/** The plan to suggest next: Pro for Free / top-up / Starter users, Pro Plus for Pro users. */
 function nextPlan(plan: PlanInfo): PlanId | null {
   return plan.id === 'FREE' || plan.id === 'GO' || plan.id === 'STARTER' ? 'PRO' : plan.id === 'PRO' ? 'PLUS' : null;
 }
