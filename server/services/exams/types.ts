@@ -66,7 +66,17 @@ export interface CriterionResult {
   /** The scheme line this mark was judged against, as it stood when marking (kept for "why" questions). */
   rubric?: string;
   evidenceElementIds?: string[];
+  /** How a teacher would mark the cited working on the paper, chosen by the marker. */
+  pen?: PenStyle | null;
+  /** A few words written next to it ("sign error", "units?", "good method"). */
+  note?: string | null;
 }
+
+/** Pen marks drawn on the script: the marker's, and the teacher's own. */
+export type PenStyle = 'underline' | 'circle' | 'box' | 'highlight';
+export type PenKind = PenStyle | 'tick' | 'cross' | 'note';
+/** A mark the teacher drew on a page (fractions of the page as displayed, top-left origin). */
+export interface PenMark { id: string; page: number; kind: PenKind; x0: number; y0: number; x1: number; y1: number; text?: string; by: string; at: string }
 
 /** How sure the marking is, from the marker's own estimate capped by what code found (flags, evidence). */
 export interface MarkConfidence { level: 'high' | 'medium' | 'low'; score: number; basis: string[] }
@@ -124,6 +134,8 @@ export interface CandidateResult {
   usage: { input: number; output: number };
   /** Teacher adjustments keyed by layout item id ("<questionId>:mark", "<questionId>:correction", "total"). */
   layout?: Record<string, LayoutOverride>;
+  /** The teacher's own pen marks (ticks, crosses, circles, boxes, highlights, underlines, notes). */
+  pen?: PenMark[];
   /** Set when the teacher releases the marked PDF; cleared by any later change to marks or layout. */
   released?: { at: string; by: string; resultUpdatedAt: string } | null;
 }

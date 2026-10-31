@@ -15,7 +15,7 @@ import { effectiveMarks, openFlags } from './results.js';
  * pages are appended. Answers that cannot be located reliably are reported on the summary page only.
  */
 
-const GREEN = rgb(0.09, 0.55, 0.24), RED = rgb(0.84, 0.11, 0.09), AMBER = rgb(0.85, 0.5, 0.0), ORANGE = rgb(0.93, 0.42, 0.0), INK = rgb(0.12, 0.12, 0.14), GREY = rgb(0.45, 0.45, 0.5);
+const YELLOW = rgb(1, 0.86, 0.2), GREEN = rgb(0.09, 0.55, 0.24), RED = rgb(0.84, 0.11, 0.09), AMBER = rgb(0.85, 0.5, 0.0), ORANGE = rgb(0.93, 0.42, 0.0), INK = rgb(0.12, 0.12, 0.14), GREY = rgb(0.45, 0.45, 0.5);
 
 /** Standard PDF fonts only cover WinAnsi; replace other characters with readable ASCII. */
 const TRANSLIT: Record<string, string> = { '×': 'x', '÷': '/', '−': '-', '–': '-', '—': '-', '≤': '<=', '≥': '>=', '≠': '!=', '≈': '~', '→': '->', '√': 'sqrt', '∞': 'inf', 'π': 'pi', 'θ': 'theta', 'λ': 'lambda', 'α': 'alpha', 'β': 'beta', 'Δ': 'Delta', '∫': 'int', '…': '...', '‘': "'", '’': "'", '“': '"', '”': '"', '•': '-' };
@@ -195,6 +195,18 @@ export async function annotateScript(input: AnnotateInput): Promise<AnnotateOutp
         const q = at(it.fx + (it.w * (i + 1)) / n, it.fy + ((i + 1) % 2 ? 0.0012 : 0));
         page.drawLine({ start: p, end: q, thickness: 1.1, color: RED, lineCap: LineCapStyle.Round });
       }
+    } else if (it.kind === 'circle') {
+      page.drawEllipse({ ...at(it.fx + it.w / 2, it.fy + it.h / 2), xScale: Math.max(6, (it.w / 2) * vs.width), yScale: Math.max(5, (it.h / 2) * vs.height), borderColor: RED, borderWidth: 1.4, rotate: degrees(rot) });
+    } else if (it.kind === 'box' || it.kind === 'highlight') {
+      const r = { ...at(it.fx, it.fy + it.h), width: it.w * vs.width, height: it.h * vs.height, rotate: degrees(rot) };
+      if (it.kind === 'box') page.drawRectangle({ ...r, borderColor: RED, borderWidth: 1.4 });
+      else page.drawRectangle({ ...r, color: YELLOW, opacity: 0.35 });
+    } else if (it.kind === 'note') {
+      const fs = Math.min(14, Math.max(8, (NOTE_CHAR / 0.5) * vs.width));
+      page.drawText(pdfSafe(it.text ?? ''), { ...at(it.fx, it.fy + (fs * 0.35) / vs.height), size: fs, font: italic, color: RED, rotate: degrees(rot) });
+    } else if (it.kind === 'stamp') {
+      const size = Math.min(18, Math.max(8, SYMBOL * vs.width));
+      for (const sym of it.symbols ?? []) drawSymbol(page, sym, at(it.fx, it.fy + size / vs.height).x, at(it.fx, it.fy + size / vs.height).y, size, rot);
     } else if (it.kind === 'correction' && input.corrections !== false) {
       const fs = Math.min(14, Math.max(8, (NOTE_CHAR / 0.5) * vs.width));
       const origin = at(it.fx, it.fy + (fs * 0.35) / vs.height);

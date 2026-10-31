@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { PageView, type Item } from '../components/MarkedPaperView';
+import { PageView, penActions, type Item } from '../components/MarkedPaperView';
 export { PageView } from '../components/MarkedPaperView';
 import {
   AlertTriangle, ArrowLeft, Check, ChevronLeft, ChevronRight, CircleCheck, Download, EyeOff, FileCheck2, Loader2, Move, RotateCcw, Send, X,
@@ -280,11 +280,12 @@ export default function ExamReviewPage({ onBack }: { onBack: () => void }) {
               <span className="ml-auto rounded-md border border-[#D61C17]/40 bg-[#D61C17]/10 px-2 py-0.5 font-bold text-[#ff6b63]">{fmt(review.summary.total)}/{fmt(review.summary.maxTotal)} · {review.summary.percent}%</span>
               {review.changedSinceRelease && <span className="rounded-md bg-amber-500/15 px-2 py-0.5 font-semibold text-amber-300">Changed since release – release again</span>}
             </div>
-            <p className="mx-auto mb-3 max-w-[860px] text-[11.5px] text-neutral-400">Drag a red mark to move it, or select it and use the arrow keys (Shift for bigger steps). Dashed orange marks need a check. The scan itself is never changed.</p>
+            <p className="mx-auto mb-3 max-w-[860px] text-[11.5px] text-neutral-400">Drag a red mark to move it, or select it and use the arrow keys (Shift for bigger steps). Use the pen tools on each page to tick, cross, circle, box, highlight, underline or write a note; select your own mark to remove it. Dashed orange marks need a check. The scan itself is never changed.</p>
             <div className="mx-auto flex max-w-[860px] flex-col gap-6">
               {review.layout.pages.map((p) => (
                 <PageView key={`${review.candidate.submissionId}:${p.page}`} examId={review.exam.examId} submissionId={review.candidate.submissionId} page={p.page} aspect={p.aspect}
-                  items={items} selected={selected} onSelect={setSelected} onMove={(id, page, fx, fy) => void moveItem(id, page, fx, fy)} />
+                  items={items} selected={selected} onSelect={setSelected} onMove={(id, page, fx, fy) => void moveItem(id, page, fx, fy)}
+                  pen={penActions(review.exam.examId, review.candidate.submissionId, setReview)} />
               ))}
             </div>
           </main>

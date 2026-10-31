@@ -360,6 +360,23 @@ examsRouter.get('/:examId/submissions/:submissionId/pages/:page', async (req, re
   } catch (err) { fail(req, res, err); }
 });
 
+// The teacher's own pen marks on the script (tick, cross, circle, box, highlight, underline, note).
+examsRouter.post('/:examId/submissions/:submissionId/pen', async (req, res) => {
+  try {
+    const f = z.number().min(0).max(1);
+    const body = z.object({ page: z.number().int().min(1).max(500), kind: z.enum(['tick', 'cross', 'circle', 'box', 'highlight', 'underline', 'note']), x0: f, y0: f, x1: f.optional(), y1: f.optional(), text: z.string().max(200).optional() }).strict().parse(req.body ?? {});
+    await examService.addPen(userIdOf(req), req.params.examId, req.params.submissionId, body);
+    res.status(201).json({ ...(await examService.reviewCandidate(userIdOf(req), req.params.examId, req.params.submissionId)), requestId: rid(req) });
+  } catch (err) { fail(req, res, err); }
+});
+
+examsRouter.delete('/:examId/submissions/:submissionId/pen/:penId', async (req, res) => {
+  try {
+    await examService.removePen(userIdOf(req), req.params.examId, req.params.submissionId, z.string().regex(/^[\w-]{1,40}$/).parse(req.params.penId));
+    res.json({ ...(await examService.reviewCandidate(userIdOf(req), req.params.examId, req.params.submissionId)), requestId: rid(req) });
+  } catch (err) { fail(req, res, err); }
+});
+
 examsRouter.put('/:examId/submissions/:submissionId/layout/:itemId', async (req, res) => {
   try {
     const body = z.union([
@@ -367,7 +384,7 @@ examsRouter.put('/:examId/submissions/:submissionId/layout/:itemId', async (req,
       z.object({ hidden: z.literal(true) }).strict(),
       z.object({ reset: z.literal(true) }).strict(),
     ]).parse(req.body ?? {});
-    const itemId = z.string().max(120).regex(/^(total|[\w.-]+:(mark|correction|criterion:[\w.-]+))$/).parse(req.params.itemId);
+    const itemId = z.string().max(160).regex(/^(total|[\w.-]+:(mark|correction|criterion:[\w.-]+|note:[\w.-]+|pen:[\w.-]+:[\w.-]+))$/).parse(req.params.itemId);
     await examService.setLayout(userIdOf(req), req.params.examId, req.params.submissionId, itemId, body);
     res.json({ ...(await examService.reviewCandidate(userIdOf(req), req.params.examId, req.params.submissionId)), requestId: rid(req) });
   } catch (err) { fail(req, res, err); }
