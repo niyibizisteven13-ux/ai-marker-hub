@@ -203,7 +203,20 @@ export default function App() {
   useEffect(() => {
     // The account's saved appearance wins over this browser's copy (it follows the user to other devices).
     const saved = authenticatedUser?.settings?.appearance;
-    if (saved) { try { setAppearance(normalizeAppearance(typeof saved === 'string' ? JSON.parse(saved) : saved)); return; } catch { /* keep the local one */ } }
+    if (saved) {
+      try {
+        const parsed = typeof saved === 'string' ? JSON.parse(saved) : saved;
+        // The picture behind the app is fetched on its own (the sign-in response leaves it out); keep the one
+        // this browser already has while it loads.
+        if (parsed?.hasImage && !parsed.image) {
+          setAppearance((cur) => normalizeAppearance({ ...parsed, image: cur.image }));
+          void authFetch('/api/user/appearance').then((r) => (r.ok ? r.json() : null)).then((b) => {
+            if (b?.appearance) setAppearance(normalizeAppearance(JSON.parse(b.appearance)));
+          }).catch(() => undefined);
+        } else setAppearance(normalizeAppearance(parsed));
+        return;
+      } catch { /* keep the local one */ }
+    }
     if (authenticatedUser?.settings?.theme) setAppearance((a) => ({ ...a, mode: authenticatedUser.settings!.theme === 'light' ? 'light' : 'dark' }));
   }, [authenticatedUser?.settings?.appearance, authenticatedUser?.settings?.theme]);
   useEffect(() => {
