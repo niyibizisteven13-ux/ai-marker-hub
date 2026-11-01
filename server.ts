@@ -44,6 +44,7 @@ import { examsRouter } from './server/routes/examRoutes.js';
 import { createAssignmentsRouter, createPublicAssignmentsRouter } from './server/routes/assignmentRoutes.js';
 import { createStorageRouter } from './server/routes/storageRoutes.js';
 import { StorageFullError, ensureStorage } from './server/services/billing/storage.js';
+import { gradeQuiz } from './server/services/forms/quiz.js';
 import { uploadLimitBytes, uploadTooLargeMessage } from './server/services/billing/plans.js';
 import { outputsRouter, sharedOutputsRouter } from './server/routes/outputRoutes.js';
 import { curationViewRouter, knowledgeAdminRouter, knowledgeSourcesRouter } from './server/routes/knowledgeRepositoryRoutes.js';
@@ -2051,8 +2052,26 @@ app.post('/api/forms/:id/submit', publicFormSubmitLimiter, async (req, res) => {
     if ('error' in checked) return res.status(400).json({ error: checked.error, fieldId: checked.fieldId });
     Object.assign(normalized, checked.values);
     if (!Object.keys(checked.values).length) return res.status(400).json({ error: 'Answer at least one question before submitting.' });
+    // Quizzes are marked against the answer key at once; the score is kept with the response for Results and the gradebook.
+    const quiz = gradeQuiz(schema, checked.values as Record<string, unknown>);
+    if (quiz) normalized._quiz = { score: quiz.score, maxScore: quiz.maxScore, percent: quiz.percent, correct: quiz.items.filter((x) => x.correct).map((x) => x.id) };
     const formVersion = await ensureVersion(form.id, schema).catch(() => null);
     const submission = await prisma.formSubmission.create({ data: { formId: form.id, data: JSON.stringify(normalized), formVersion } as any });
+    if (quiz) {
+      res.status(201).json({
+        success: true,
+        submissionId: submission.id,
+        confirmationMessage: schema.confirmationMessage || 'Your response has been recorded.',
+        isQuiz: true,
+        score: quiz.score,
+        maxScore: quiz.maxScore,
+        scoreLabel: 'Your score',
+        feedback: quiz.percent >= 80 ? 'Excellent work!' : quiz.percent >= 50 ? 'Good effort. Review the questions you missed.' : 'Keep practising. Review the questions you missed.',
+        // Which answers were right, and the correct ones, only when the owner chose to show them.
+        ...(schema.quizShowAnswers !== false ? { results: quiz.items.map((x) => ({ id: x.id, correct: x.correct, points: x.earned, maxPoints: x.points, yourAnswer: x.given, correctAnswer: x.correctAnswer })) } : {}),
+      });
+      return;
+    }
     await analyticsWorker.extractInsights(submission.id).catch((error) => logger.error('Submission analysis failed:', error));
     const insight = await prisma.extractedInsight.findUnique({ where: { submissionId: submission.id } });
     res.status(201).json({
