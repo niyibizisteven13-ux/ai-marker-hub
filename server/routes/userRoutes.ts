@@ -6,6 +6,19 @@ import { prisma } from '../db.js';
 
 const router = Router();
 
+/** The saved appearance with its background picture (the sign-in response leaves the picture out). */
+router.get('/appearance', async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId;
+    if (!userId) return res.status(401).json({ error: 'Not authenticated.' });
+    const settings = await prisma.userSettings.findUnique({ where: { userId }, select: { appearance: true } as any }).catch(() => null);
+    res.setHeader('Cache-Control', 'private, no-cache');
+    res.json({ appearance: (settings as any)?.appearance ?? null });
+  } catch {
+    res.status(500).json({ error: 'Could not load your appearance.' });
+  }
+});
+
 router.get('/me', async (req, res) => {
   try {
     const userId = (req as any).user?.userId;
@@ -92,7 +105,17 @@ router.put('/settings', async (req, res) => {
 
     let appearanceJson: string | null | undefined;
     if (appearance !== undefined) {
-      try { appearanceJson = appearance === null ? null : sanitizeAppearance(appearance); }
+      try {
+        let incoming: any = appearance;
+        if (typeof incoming === 'string') { try { incoming = JSON.parse(incoming); } catch { /* sanitize reports it */ } }
+        // A picture background sent without the picture keeps the one already saved (devices that have not
+        // downloaded it yet must not erase it).
+        if (incoming && typeof incoming === 'object' && incoming.background === 'image' && !incoming.image) {
+          const prev = await prisma.userSettings.findUnique({ where: { userId }, select: { appearance: true } as any }).catch(() => null);
+          try { const old = JSON.parse((prev as any)?.appearance ?? '{}'); if (old.image) incoming = { ...incoming, image: old.image }; } catch { /* none */ }
+        }
+        appearanceJson = appearance === null ? null : sanitizeAppearance(incoming);
+      }
       catch (e) { return res.status(400).json({ error: e instanceof AppearanceError ? e.message : 'Invalid appearance setting.' }); }
     }
 
@@ -137,26 +160,18 @@ router.put('/settings', async (req, res) => {
     if (agentTone) settingsData.agentTone = agentTone;
     if (typeof customInstructions === 'string') settingsData.customInstructions = customInstructions.trim() || null;
 
-    const updatedUser = await prisma.user.update({
-      where: { id: userId },
-      data: {
-        ...userData,
-        settings: {
-          upsert: {
-            // A first save creates the settings row with every field sent (appearance, memory, tone …), not just four.
-            create: {
-              defaultStrictness: 'STANDARD',
-              autoSummarize: true,
-              preferredLanguage: 'en',
-              theme: 'dark',
-              ...settingsData,
-            },
-            update: settingsData,
-          },
-        },
-      },
-      include: { settings: true },
-    });
+    // Profile fields and settings are saved in two plain steps (a nested upsert is not supported everywhere the
+    // app runs, and a silently dropped setting looks saved but is lost at the next sign-in).
+    if (Object.keys(userData).length) await prisma.user.update({ where: { id: userId }, data: userData });
+    if (Object.keys(settingsData).length) {
+      await prisma.userSettings.upsert({
+        where: { userId },
+        create: { userId, defaultStrictness: 'STANDARD', autoSummarize: true, preferredLanguage: 'en', theme: 'dark', ...settingsData },
+        update: settingsData,
+      });
+    }
+    const updatedUser = await prisma.user.findUnique({ where: { id: userId }, include: { settings: true } });
+    if (!updatedUser) return res.status(404).json({ error: 'Account not found.' });
 
     const { passwordHash: _passwordHash, ...safeUser } = updatedUser;
     return res.json({ user: safeUser });

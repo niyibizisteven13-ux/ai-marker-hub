@@ -10,10 +10,12 @@ import type { User } from '../../types';
  * Changes show at once and are saved with the account, so they follow you to other devices.
  */
 export default function AppearanceSection({ user, onUpdateUser }: { user: User | null; onUpdateUser: (u: User) => void }) {
+  // Start from the look the app is showing now (it has the background picture, which the sign-in leaves out).
   const [a, setA] = useState<Appearance>(() => {
+    const local = loadAppearance();
     const saved = user?.settings?.appearance;
-    if (saved) { try { return normalizeAppearance(JSON.parse(saved)); } catch { /* fall back */ } }
-    return loadAppearance();
+    if (!saved) return local;
+    try { const p = JSON.parse(saved); return normalizeAppearance({ ...p, image: p.image ?? local.image }); } catch { return local; }
   });
   const [status, setStatus] = useState<{ kind: 'saving' | 'saved' | 'error'; text?: string } | null>(null);
   const [busyPicture, setBusyPicture] = useState(false);

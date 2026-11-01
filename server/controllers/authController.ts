@@ -22,7 +22,22 @@ function buildAuthenticatedUser(user: any) {
     avatarUrl: user.avatarUrl,
     role: role.toLowerCase(),
     locale: user.settings?.preferredLanguage || 'en',
+    // The saved look (Settings → Appearance) follows the account to every device. A background picture can be
+    // large, so it is left out here (this is sent on every sign-in and refresh) and fetched once by the app.
+    settings: {
+      preferredLanguage: user.settings?.preferredLanguage || 'en',
+      theme: user.settings?.theme || 'dark',
+      appearance: appearanceWithoutImage(user.settings?.appearance),
+    },
   };
+}
+
+function appearanceWithoutImage(raw: unknown): string | null {
+  if (typeof raw !== 'string' || !raw) return null;
+  try {
+    const { image, ...rest } = JSON.parse(raw);
+    return JSON.stringify(image ? { ...rest, hasImage: true } : rest);
+  } catch { return null; }
 }
 
 function setRefreshCookie(res: Response, refreshToken: string) {
