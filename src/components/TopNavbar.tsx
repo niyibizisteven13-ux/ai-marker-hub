@@ -50,7 +50,7 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
 
   return (
     <header className="absolute inset-x-0 top-0 z-20 flex-shrink-0 w-full pointer-events-none transition-colors duration-200">
-      <div className="flex h-[calc(52px+env(safe-area-inset-top,0px))] items-center justify-between border-b border-white/[0.06] bg-[#212121]/90 px-3 pt-[env(safe-area-inset-top,0px)] backdrop-blur-md lg:h-auto lg:border-0 lg:bg-transparent lg:px-4 lg:pt-2.5">
+      <div className="flex h-[calc(52px+env(safe-area-inset-top,0px))] items-center justify-between border-b border-white/[0.06] bg-[var(--app-panel-2)]/90 px-3 pt-[env(safe-area-inset-top,0px)] backdrop-blur-md lg:h-auto lg:border-0 lg:bg-transparent lg:px-4 lg:pt-2.5">
         {/* Left: Top-Left Sidebar button & Brand logo */}
         <div className="pointer-events-auto flex items-center gap-2">
           <button

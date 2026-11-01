@@ -47,7 +47,7 @@ function Lightbox({ item, onClose }: { item: AttachmentRef; onClose: () => void 
   useEscape(onClose);
   useEffect(() => { closeRef.current?.focus(); }, []);
   return (
-    <div role="dialog" aria-modal="true" aria-label={item.name} className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm" onClick={onClose}>
+    <div role="dialog" aria-modal="true" aria-label={item.name} className="keep-colors fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm" onClick={onClose}>
       <div className="relative max-h-full max-w-5xl" onClick={(e) => e.stopPropagation()}>
         <img src={item.previewUrl ?? item.url} alt={item.name} className="max-h-[80vh] max-w-full rounded-xl bg-white object-contain shadow-2xl" />
         <div className="mt-3 flex items-center justify-between gap-3 text-sm text-stone-200">
@@ -72,7 +72,7 @@ function HtmlFrame({ html, title, tall }: { html: string; title: string; tall?: 
 function FullScreenHtml({ item, html, onClose }: { item: AttachmentRef; html: string; onClose: () => void }) {
   useEscape(onClose);
   return (
-    <div role="dialog" aria-modal="true" aria-label={item.name} className="fixed inset-0 z-[100] flex flex-col bg-black/85 p-3 sm:p-6 backdrop-blur-sm">
+    <div role="dialog" aria-modal="true" aria-label={item.name} className="keep-colors fixed inset-0 z-[100] flex flex-col bg-black/85 p-3 sm:p-6 backdrop-blur-sm">
       <div className="mb-3 flex items-center justify-between gap-3 text-sm text-stone-200">
         <span className="truncate font-medium">{item.name}</span>
         <div className="flex gap-2">

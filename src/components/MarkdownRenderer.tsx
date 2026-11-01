@@ -102,12 +102,12 @@ function ImageGraphicArtifact({ artifact }: { artifact: any }) {
   };
 
   return (
-    <div className="my-4 overflow-hidden rounded-xl border border-white/10 bg-[#1B1B19]">
+    <div className="my-4 overflow-hidden rounded-xl border border-white/10 bg-[var(--app-panel-2)]">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.08] px-4 py-3">
         <div className="flex items-center gap-2.5">
           <ImageIcon className="h-4 w-4 text-emerald-400" />
-          <span className="text-sm font-semibold text-[#FAF9F5]">{title}</span>
-          <span className="text-xs text-[#9C9A92]">· {style} · {aspectRatio}</span>
+          <span className="text-sm font-semibold text-[var(--app-text)]">{title}</span>
+          <span className="text-xs text-[var(--app-faint)]">· {style} · {aspectRatio}</span>
         </div>
         <div className="flex items-center gap-2">
           {artifact.prompt && (
@@ -118,7 +118,7 @@ function ImageGraphicArtifact({ artifact }: { artifact: any }) {
                 setCopiedPrompt(true);
                 setTimeout(() => setCopiedPrompt(false), 1500);
               }}
-              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-[#FAF9F5] transition hover:bg-white/10"
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-[var(--app-text)] transition hover:bg-white/10"
             >
               {copiedPrompt ? 'Prompt copied' : 'Copy prompt'}
             </button>
@@ -126,7 +126,7 @@ function ImageGraphicArtifact({ artifact }: { artifact: any }) {
           <button
             type="button"
             onClick={handleDownloadSvg}
-            className="flex items-center gap-1.5 rounded-lg bg-[#D97757] px-3 py-1.5 text-xs font-medium text-white transition hover:bg-[#c66849]"
+            className="flex items-center gap-1.5 rounded-lg bg-[var(--brand)] px-3 py-1.5 text-xs font-medium text-white transition hover:bg-[var(--brand-strong)]"
           >
             <Download className="h-3.5 w-3.5" />
             Download SVG
@@ -140,7 +140,7 @@ function ImageGraphicArtifact({ artifact }: { artifact: any }) {
           className="mx-auto max-h-[420px] w-full rounded-lg object-contain"
         />
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.06] px-4 py-2.5 text-xs text-[#9C9A92]">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.06] px-4 py-2.5 text-xs text-[var(--app-faint)]">
         <span className="truncate">{artifact.model || 'GonkaRouter Visual · Nano Banana Pro'}</span>
         <div className="flex items-center gap-1.5">
           <span>Palette:</span>
@@ -214,17 +214,17 @@ function VideoAnimationArtifact({ artifact }: { artifact: any }) {
   const waveOffset = tick * 6;
 
   return (
-    <div className="my-4 overflow-hidden rounded-xl border border-white/10 bg-[#1B1B19]">
+    <div className="my-4 overflow-hidden rounded-xl border border-white/10 bg-[var(--app-panel-2)]">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.08] px-4 py-3">
         <div className="flex items-center gap-2">
           <Film className="h-4 w-4 text-amber-400" />
-          <span className="text-sm font-semibold text-[#FAF9F5]">{artifact.title || 'Animated Video Studio'}</span>
-          <span className="text-xs text-[#9C9A92]">· {scenes.length} {scenes.length === 1 ? 'scene' : 'scenes'} · {artifact.model || 'GonkaRouter Flow Engine'}</span>
+          <span className="text-sm font-semibold text-[var(--app-text)]">{artifact.title || 'Animated Video Studio'}</span>
+          <span className="text-xs text-[var(--app-faint)]">· {scenes.length} {scenes.length === 1 ? 'scene' : 'scenes'} · {artifact.model || 'GonkaRouter Flow Engine'}</span>
         </div>
         <button
           type="button"
           onClick={togglePlay}
-          className="flex items-center gap-1.5 rounded-lg bg-[#D97757] px-3.5 py-1.5 text-xs font-medium text-white transition hover:bg-[#c66849]"
+          className="flex items-center gap-1.5 rounded-lg bg-[var(--brand)] px-3.5 py-1.5 text-xs font-medium text-white transition hover:bg-[var(--brand-strong)]"
         >
           {isPlaying ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
           {isPlaying ? 'Pause clip' : 'Play animation & voice'}
@@ -283,7 +283,7 @@ function VideoAnimationArtifact({ artifact }: { artifact: any }) {
               type="button"
               onClick={() => setActiveSceneIdx(idx)}
               className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
-                idx === activeSceneIdx ? 'bg-white/15 text-[#FAF9F5]' : 'text-[#9C9A92] hover:bg-white/5 hover:text-[#FAF9F5]'
+                idx === activeSceneIdx ? 'bg-white/15 text-[var(--app-text)]' : 'text-[var(--app-faint)] hover:bg-white/5 hover:text-[var(--app-text)]'
               }`}
             >
               {sc.title || `Scene ${idx + 1}`}
@@ -291,7 +291,7 @@ function VideoAnimationArtifact({ artifact }: { artifact: any }) {
           ))}
         </div>
         {activeScene?.narration && (
-          <p className="w-full text-xs text-[#C2C0B6] mt-1">
+          <p className="w-full text-xs text-[var(--app-muted)] mt-1">
             Voiceover: “{activeScene.narration}”
           </p>
         )}
@@ -366,12 +366,12 @@ function AudioSpeechArtifact({ artifact }: { artifact: any }) {
   };
 
   return (
-    <div className="my-4 overflow-hidden rounded-xl border border-white/10 bg-[#1B1B19]">
+    <div className="my-4 overflow-hidden rounded-xl border border-white/10 bg-[var(--app-panel-2)]">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.08] px-4 py-3">
         <div className="flex items-center gap-2">
           <Volume2 className="h-4 w-4 text-emerald-400" />
-          <span className="text-sm font-semibold text-[#FAF9F5]">{artifact.title || 'Audio & Podcast Studio'}</span>
-          <span className="text-xs text-[#9C9A92]">
+          <span className="text-sm font-semibold text-[var(--app-text)]">{artifact.title || 'Audio & Podcast Studio'}</span>
+          <span className="text-xs text-[var(--app-faint)]">
             · {artifact.audioType || 'podcast'}
             {artifact.tempoBpm ? ` · ${artifact.tempoBpm} BPM` : ''}
             {artifact.musicalKey ? ` · ${artifact.musicalKey}` : ''}
@@ -380,7 +380,7 @@ function AudioSpeechArtifact({ artifact }: { artifact: any }) {
         <button
           type="button"
           onClick={handleToggleAudio}
-          className="flex items-center gap-1.5 rounded-lg bg-[#D97757] px-3.5 py-1.5 text-xs font-medium text-white transition hover:bg-[#c66849]"
+          className="flex items-center gap-1.5 rounded-lg bg-[var(--brand)] px-3.5 py-1.5 text-xs font-medium text-white transition hover:bg-[var(--brand-strong)]"
         >
           {isPlaying ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
           {isPlaying ? 'Stop audio' : 'Synthesize & Play'}
@@ -397,8 +397,8 @@ function AudioSpeechArtifact({ artifact }: { artifact: any }) {
                 : 'border-white/[0.06] bg-white/[0.02]'
             }`}
           >
-            <div className="mb-1 flex items-center gap-2 text-xs text-[#9C9A92]">
-              <span className="font-semibold text-[#FAF9F5]">{seg.speaker || `Speaker ${idx + 1}`}</span>
+            <div className="mb-1 flex items-center gap-2 text-xs text-[var(--app-faint)]">
+              <span className="font-semibold text-[var(--app-text)]">{seg.speaker || `Speaker ${idx + 1}`}</span>
               {seg.voiceTone && <span>· {seg.voiceTone}</span>}
             </div>
             <p className="text-sm leading-relaxed text-[#E5E4DF]">{seg.text}</p>
@@ -441,18 +441,18 @@ function DatasetWorkflowArtifact({ artifact }: { artifact: any }) {
   };
 
   return (
-    <div className="my-4 overflow-hidden rounded-xl border border-white/10 bg-[#1B1B19]">
+    <div className="my-4 overflow-hidden rounded-xl border border-white/10 bg-[var(--app-panel-2)]">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.08] px-4 py-3">
         <div className="flex items-center gap-2">
           {isDataset ? <Database className="h-4 w-4 text-emerald-400" /> : <Workflow className="h-4 w-4 text-amber-400" />}
-          <span className="text-sm font-semibold text-[#FAF9F5]">{artifact.title || (isDataset ? 'Dataset Pattern Analysis' : 'Automated Workflow & Data Studio')}</span>
-          <span className="text-xs text-[#9C9A92]">· GonkaRouter Intelligence</span>
+          <span className="text-sm font-semibold text-[var(--app-text)]">{artifact.title || (isDataset ? 'Dataset Pattern Analysis' : 'Automated Workflow & Data Studio')}</span>
+          <span className="text-xs text-[var(--app-faint)]">· GonkaRouter Intelligence</span>
         </div>
         {(columns.length > 0 || rows.length > 0) && (
           <button
             type="button"
             onClick={handleExportCsv}
-            className="flex items-center gap-1.5 rounded-lg bg-[#D97757] px-3 py-1.5 text-xs font-medium text-white transition hover:bg-[#c66849]"
+            className="flex items-center gap-1.5 rounded-lg bg-[var(--brand)] px-3 py-1.5 text-xs font-medium text-white transition hover:bg-[var(--brand-strong)]"
           >
             <Download className="h-3.5 w-3.5" />
             Export CSV
@@ -461,19 +461,19 @@ function DatasetWorkflowArtifact({ artifact }: { artifact: any }) {
       </div>
 
       <div className="space-y-4 p-4">
-        {artifact.summary && <p className="text-sm text-[#C2C0B6]">{artifact.summary}</p>}
+        {artifact.summary && <p className="text-sm text-[var(--app-muted)]">{artifact.summary}</p>}
 
         {patterns.length > 0 && (
           <div className="space-y-2">
-            <div className="text-xs font-semibold text-[#9C9A92]">Discovered Training & Dataset Patterns</div>
+            <div className="text-xs font-semibold text-[var(--app-faint)]">Discovered Training & Dataset Patterns</div>
             <div className="grid gap-2.5 sm:grid-cols-2">
               {patterns.map((p, i) => (
                 <div key={i} className="rounded-lg border border-white/[0.07] bg-white/[0.02] p-3">
-                  <div className="flex items-center justify-between text-xs font-semibold text-[#FAF9F5]">
+                  <div className="flex items-center justify-between text-xs font-semibold text-[var(--app-text)]">
                     <span>{p.name}</span>
                     {p.confidence && <span className="font-mono text-emerald-400">{p.confidence}</span>}
                   </div>
-                  <p className="mt-1 text-xs leading-relaxed text-[#C2C0B6]">{p.insight}</p>
+                  <p className="mt-1 text-xs leading-relaxed text-[var(--app-muted)]">{p.insight}</p>
                 </div>
               ))}
             </div>
@@ -484,25 +484,25 @@ function DatasetWorkflowArtifact({ artifact }: { artifact: any }) {
           <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.05] p-3 text-xs space-y-1.5">
             <div className="font-semibold text-emerald-300">Prompt Pattern Optimization</div>
             {artifact.promptOptimization.original && (
-              <div className="text-[#9C9A92]">Original: “{artifact.promptOptimization.original}”</div>
+              <div className="text-[var(--app-faint)]">Original: “{artifact.promptOptimization.original}”</div>
             )}
             {artifact.promptOptimization.upgraded && (
-              <div className="text-[#FAF9F5]">Upgraded: “{artifact.promptOptimization.upgraded}”</div>
+              <div className="text-[var(--app-text)]">Upgraded: “{artifact.promptOptimization.upgraded}”</div>
             )}
           </div>
         )}
 
         {steps.length > 0 && (
           <div className="space-y-2">
-            <div className="text-xs font-semibold text-[#9C9A92]">Autonomous Process DAG</div>
+            <div className="text-xs font-semibold text-[var(--app-faint)]">Autonomous Process DAG</div>
             <div className="space-y-2">
               {steps.map((s, idx) => (
                 <div key={idx} className="flex items-start justify-between gap-3 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3.5 py-2.5 text-xs">
                   <div>
-                    <div className="font-semibold text-[#FAF9F5]">
-                      {idx + 1}. {s.name} {s.role ? <span className="font-normal text-[#9C9A92]">· {s.role}</span> : null}
+                    <div className="font-semibold text-[var(--app-text)]">
+                      {idx + 1}. {s.name} {s.role ? <span className="font-normal text-[var(--app-faint)]">· {s.role}</span> : null}
                     </div>
-                    <div className="mt-0.5 text-[#C2C0B6]">{s.detail}</div>
+                    <div className="mt-0.5 text-[var(--app-muted)]">{s.detail}</div>
                   </div>
                   {s.metric && <span className="shrink-0 font-mono text-emerald-400">{s.metric}</span>}
                 </div>
@@ -518,7 +518,7 @@ function DatasetWorkflowArtifact({ artifact }: { artifact: any }) {
                 <thead>
                   <tr className="border-b border-white/[0.08] bg-white/[0.04]">
                     {columns.map((col, idx) => (
-                      <th key={idx} className="px-3 py-2 text-left font-semibold text-[#FAF9F5]">{col}</th>
+                      <th key={idx} className="px-3 py-2 text-left font-semibold text-[var(--app-text)]">{col}</th>
                     ))}
                   </tr>
                 </thead>
@@ -527,7 +527,7 @@ function DatasetWorkflowArtifact({ artifact }: { artifact: any }) {
                 {rows.map((row, rIdx) => (
                   <tr key={rIdx} className="border-b border-white/[0.04]">
                     {(Array.isArray(row) ? row : Object.values(row)).map((cell, cIdx) => (
-                      <td key={cIdx} className="px-3 py-2 text-[#C2C0B6]">{String(cell ?? '')}</td>
+                      <td key={cIdx} className="px-3 py-2 text-[var(--app-muted)]">{String(cell ?? '')}</td>
                     ))}
                   </tr>
                 ))}
@@ -538,14 +538,14 @@ function DatasetWorkflowArtifact({ artifact }: { artifact: any }) {
 
         {sequence.length > 0 && (
           <div className="space-y-2">
-            <div className="text-xs font-semibold text-[#9C9A92]">Automated Communication & Scheduling Sequence</div>
+            <div className="text-xs font-semibold text-[var(--app-faint)]">Automated Communication & Scheduling Sequence</div>
             {sequence.map((item, idx) => (
               <div key={idx} className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-3 text-xs">
-                <div className="flex items-center justify-between font-semibold text-[#FAF9F5]">
+                <div className="flex items-center justify-between font-semibold text-[var(--app-text)]">
                   <span>{item.channel || 'Email'} · {item.subject}</span>
-                  {item.schedule && <span className="font-mono text-[#9C9A92]">{item.schedule}</span>}
+                  {item.schedule && <span className="font-mono text-[var(--app-faint)]">{item.schedule}</span>}
                 </div>
-                {item.body && <p className="mt-1 text-[#C2C0B6]">{item.body}</p>}
+                {item.body && <p className="mt-1 text-[var(--app-muted)]">{item.body}</p>}
               </div>
             ))}
           </div>
@@ -799,7 +799,7 @@ export default function MarkdownRenderer({ content, className = '' }: MarkdownRe
             if (formMatch) {
               return (
                 <a
-                  className="inline-flex items-center gap-1 rounded-md border border-[#D97757]/40 bg-[#D97757]/15 px-2 py-0.5 text-xs font-semibold text-[#F4B39D] no-underline hover:bg-[#D97757]/25 transition-colors cursor-pointer"
+                  className="inline-flex items-center gap-1 rounded-md border border-[var(--brand)]/40 bg-[var(--brand)]/15 px-2 py-0.5 text-xs font-semibold text-[#F4B39D] no-underline hover:bg-[var(--brand)]/25 transition-colors cursor-pointer"
                   href={href}
                   onClick={(e) => {
                     e.preventDefault();

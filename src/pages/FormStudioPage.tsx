@@ -39,7 +39,7 @@ function SummaryCard({ s }: { s: any }) {
             <div key={r.value} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm">
               <div className="min-w-0">
                 <div className="truncate text-[#3C4043]">{r.value}</div>
-                <div className="mt-0.5 h-1.5 rounded-full bg-[#F1F3F4]"><div className="h-1.5 rounded-full bg-[#D97757]" style={{ width: `${Math.min(100, r.percent)}%` }} /></div>
+                <div className="mt-0.5 h-1.5 rounded-full bg-[#F1F3F4]"><div className="h-1.5 rounded-full bg-[var(--brand)]" style={{ width: `${Math.min(100, r.percent)}%` }} /></div>
               </div>
               <span className="tabular-nums text-xs text-[#5F6368]">{r.count} · {r.percent}%</span>
             </div>

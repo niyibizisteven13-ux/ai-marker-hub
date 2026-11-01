@@ -118,6 +118,8 @@ model UserSettings {
   autoSummarize      Boolean  @default(true)
   preferredLanguage  String   @default("en")
   theme              String   @default("dark")
+  /// Settings → Appearance (mode, colour, background), JSON.
+  appearance         String?
   longTermMemory     Boolean  @default(false)
   agentTone          String   @default("PROFESSIONAL")
   customInstructions String?

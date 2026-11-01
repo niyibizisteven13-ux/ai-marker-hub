@@ -10,6 +10,8 @@ export interface UserSettings {
   longTermMemory: boolean;
   agentTone: 'PROFESSIONAL' | 'ENCOURAGING' | 'STRICT' | 'ACADEMIC';
   customInstructions?: string;
+  /** Saved appearance (Settings → Appearance), JSON. */
+  appearance?: string | null;
 }
 
 export interface User {

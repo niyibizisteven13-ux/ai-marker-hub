@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { PDFDocument } from 'pdf-lib';
 import type { OwnedRecord, OwnedRecordStore } from '../storage/ownedRecordStore.js';
+import type { MarkStatus, TaskMarker } from './autoMark.js';
 import { imagesToPdf, typedToPdf } from '../exams/inputs.js';
 
 /**
@@ -24,6 +25,11 @@ export interface AssignmentSubmission {
   late: boolean;
   /** Times this student handed in before (the latest hand-in replaces the earlier one). */
   resubmissions: number;
+  /** Private link key for the student's result page (kept across resubmissions). */
+  resultToken?: string;
+  /** Automatic marking: the script in the task's examination, or why it could not be added. */
+  examSubmissionId?: string;
+  markError?: string;
 }
 
 export interface AssignmentRecord extends OwnedRecord {
@@ -34,6 +40,11 @@ export interface AssignmentRecord extends OwnedRecord {
   open: boolean;
   token: string;
   submissions: AssignmentSubmission[];
+  /** Mark each hand-in as soon as it arrives, with the marking scheme below. */
+  autoMark?: boolean;
+  schemeFiles?: StoredFile[];
+  /** The examination that holds this task's marked scripts (created with the first automatic marking). */
+  examId?: string;
 }
 
 /** Where files live: the same uploads the chat uses, so prepared files can be marked from the chat as they are. */
@@ -96,6 +107,8 @@ export function createAssignmentService(deps: {
   store: OwnedRecordStore<AssignmentRecord>; files: AssignmentFiles; tokenDir: string; baseUrl?: () => string;
   /** Throws when the owner's plan has no room for this many more bytes (storage is sold with the plans). */
   ensureStorage?: (ownerId: string, bytes: number, forOthers: boolean) => Promise<void>;
+  /** Marks hand-ins as they arrive (tasks with automatic marking) and serves students their released results. */
+  marker?: TaskMarker;
 }) {
   const drop = async (ownerId: string, files: StoredFile[]) => {
     for (const f of files) await deps.files.remove?.(ownerId, f.id).catch(() => undefined);
@@ -105,6 +118,7 @@ export function createAssignmentService(deps: {
     return path.join(path.resolve(deps.tokenDir), `${token}.json`);
   };
   const linkOf = (token: string) => `${(deps.baseUrl?.() ?? '').replace(/\/$/, '')}/a/${token}`;
+  const resultLinkOf = (token: string, resultToken: string) => `${linkOf(token)}/result/${resultToken}`;
 
   async function load(ownerId: string, id: string) {
     const a = await deps.store.get(id, ownerId);
@@ -124,7 +138,8 @@ export function createAssignmentService(deps: {
   const view = (a: AssignmentRecord) => ({
     id: a.id, title: a.title, instructions: a.instructions, taskFiles: a.taskFiles, dueAt: a.dueAt, open: a.open,
     link: linkOf(a.token), createdAt: a.createdAt, updatedAt: a.updatedAt,
-    submissions: [...a.submissions].sort((x, y) => y.submittedAt.localeCompare(x.submittedAt)),
+    autoMark: !!a.autoMark, schemeFiles: a.schemeFiles ?? [], examId: a.examId ?? null,
+    submissions: [...a.submissions].sort((x, y) => y.submittedAt.localeCompare(x.submittedAt)).map(({ resultToken, ...x }) => ({ ...x, ...(resultToken ? { resultLink: resultLinkOf(a.token, resultToken) } : {}) })),
     counts: { submitted: a.submissions.length, late: a.submissions.filter((s) => s.late).length },
   });
 
@@ -147,16 +162,19 @@ export function createAssignmentService(deps: {
   return {
     linkOf,
 
-    async create(ownerId: string, input: { title?: unknown; instructions?: unknown; dueAt?: unknown; files?: Array<{ name: string; data: Buffer }> }) {
+    async create(ownerId: string, input: { title?: unknown; instructions?: unknown; dueAt?: unknown; files?: Array<{ name: string; data: Buffer }>; autoMark?: unknown; scheme?: Array<{ name: string; data: Buffer }> }) {
       const title = clean(input.title, LIMITS.title);
       const instructions = clean(input.instructions, LIMITS.instructions);
       if (!title) throw new AssignmentError('TITLE_REQUIRED', 'Give the task a title.');
       if (!instructions && !input.files?.length) throw new AssignmentError('TASK_REQUIRED', 'Write the task or attach the task file.');
       const due = typeof input.dueAt === 'string' && input.dueAt ? new Date(input.dueAt) : null;
       if (due && Number.isNaN(due.getTime())) throw new AssignmentError('BAD_DUE', 'The due date is not valid.');
+      const autoMark = input.autoMark === true || input.autoMark === 'true';
+      if (autoMark && !input.scheme?.length) throw new AssignmentError('SCHEME_REQUIRED', 'Attach the marking scheme so each hand-in can be marked as it arrives.');
       const taskFiles = await storeUploads(ownerId, input.files ?? [], 5);
+      const schemeFiles = autoMark ? await storeUploads(ownerId, input.scheme ?? [], 5) : [];
       const token = randomBytes(12).toString('base64url');
-      const a = await deps.store.create(ownerId, { title, instructions, taskFiles, dueAt: due ? due.toISOString() : null, open: true, token, submissions: [] });
+      const a = await deps.store.create(ownerId, { title, instructions, taskFiles, dueAt: due ? due.toISOString() : null, open: true, token, submissions: [], ...(autoMark ? { autoMark, schemeFiles } : {}) });
       await fs.mkdir(path.resolve(deps.tokenDir), { recursive: true, mode: 0o700 });
       await fs.writeFile(tokenFile(token), JSON.stringify({ id: a.id, ownerId }), { mode: 0o600 });
       return view(a);
@@ -165,17 +183,44 @@ export function createAssignmentService(deps: {
     /** Ids of the files the owner's tasks still show (task files and current hand-ins). */
     async fileIds(ownerId: string): Promise<Set<string>> {
       const all = await deps.store.list(ownerId, 1000);
-      return new Set(all.flatMap((a) => [...a.taskFiles, ...a.submissions.flatMap((s) => s.files)].map((f) => f.id)));
+      return new Set(all.flatMap((a) => [...a.taskFiles, ...(a.schemeFiles ?? []), ...a.submissions.flatMap((s) => s.files)].map((f) => f.id)));
     },
 
     async list(ownerId: string) {
       return (await deps.store.list(ownerId, 100)).map((a) => ({
         id: a.id, title: a.title, dueAt: a.dueAt, open: a.open, link: linkOf(a.token), createdAt: a.createdAt,
-        submitted: a.submissions.length, late: a.submissions.filter((s) => s.late).length, lastSubmissionAt: a.submissions.reduce<string | null>((m, s) => (!m || s.submittedAt > m ? s.submittedAt : m), null),
+        submitted: a.submissions.length, late: a.submissions.filter((s) => s.late).length, autoMark: !!a.autoMark, lastSubmissionAt: a.submissions.reduce<string | null>((m, s) => (!m || s.submittedAt > m ? s.submittedAt : m), null),
       }));
     },
 
-    async get(ownerId: string, id: string) { return view(await load(ownerId, id)); },
+    async get(ownerId: string, id: string) {
+      const a = await load(ownerId, id);
+      const v = view(a);
+      const marks = deps.marker && a.examId ? await deps.marker.statuses(ownerId, a).catch(() => ({} as Record<string, MarkStatus>)) : {};
+      return { ...v, submissions: v.submissions.map((x) => ({ ...x, ...(marks[x.id] ? { marking: marks[x.id] } : x.markError ? { marking: { state: 'failed', total: null, maxTotal: null, percent: null, released: false, error: x.markError } } : {}) })) };
+    },
+
+    /** Turns automatic marking on or off, with a new marking scheme when one is sent. */
+    async setAutoMark(ownerId: string, id: string, input: { autoMark?: unknown; scheme?: Array<{ name: string; data: Buffer }> }) {
+      const before = await load(ownerId, id);
+      const on = input.autoMark === true || input.autoMark === 'true';
+      const scheme = input.scheme?.length ? await storeUploads(ownerId, input.scheme, 5) : null;
+      if (on && !scheme && !before.schemeFiles?.length) throw new AssignmentError('SCHEME_REQUIRED', 'Attach the marking scheme first.');
+      const a = await deps.store.update(id, ownerId, (r) => {
+        r.autoMark = on;
+        // A new scheme starts a new examination, so later hand-ins are marked with it.
+        if (scheme) { r.schemeFiles = scheme; delete r.examId; }
+      });
+      if (scheme) await drop(ownerId, before.schemeFiles ?? []);
+      return this.get(ownerId, a!.id);
+    },
+
+    /** Shows marked results to students (all, or the given hand-ins). Marks are confirmed when released. */
+    async release(ownerId: string, id: string, submissionIds?: string[]) {
+      const a = await load(ownerId, id);
+      if (!deps.marker || !a.examId) throw new AssignmentError('NOT_MARKED', 'Nothing has been marked automatically for this task yet.', 409);
+      return deps.marker.release(ownerId, a, submissionIds?.length ? submissionIds : 'all');
+    },
 
     async update(ownerId: string, id: string, patch: { open?: unknown; dueAt?: unknown; title?: unknown; instructions?: unknown }) {
       await load(ownerId, id);
@@ -193,7 +238,7 @@ export function createAssignmentService(deps: {
       const a = await load(ownerId, id);
       await fs.rm(tokenFile(a.token), { force: true });
       await deps.store.delete(id, ownerId);
-      await drop(ownerId, [...a.taskFiles, ...a.submissions.flatMap((s) => s.files)]);
+      await drop(ownerId, [...a.taskFiles, ...(a.schemeFiles ?? []), ...a.submissions.flatMap((s) => s.files)]);
     },
 
     /** Removes one student's hand-in (for example a test or a duplicate). */
@@ -216,7 +261,16 @@ export function createAssignmentService(deps: {
     async publicView(token: string) {
       const a = await byToken(token);
       const closed = !a.open;
-      return { title: a.title, instructions: a.instructions, dueAt: a.dueAt, open: !closed, taskFiles: a.taskFiles.map((f, i) => ({ index: i, name: f.name, mime: f.mime, size: f.size })) };
+      return { title: a.title, instructions: a.instructions, dueAt: a.dueAt, open: !closed, autoMark: !!a.autoMark, taskFiles: a.taskFiles.map((f, i) => ({ index: i, name: f.name, mime: f.mime, size: f.size })) };
+    },
+
+    /** A student's own result, through the private link they got when they handed in. */
+    async publicResult(token: string, resultToken: string) {
+      const a = await byToken(token);
+      const sub = /^[\w-]{8,24}$/.test(resultToken) ? a.submissions.find((x) => x.resultToken === resultToken) : undefined;
+      if (!sub) throw new AssignmentError('NOT_FOUND', 'This result link is not valid.', 404);
+      if (!a.autoMark || !deps.marker) return { title: a.title, studentName: sub.studentName, state: 'not_marked' as const, submittedAt: sub.submittedAt };
+      return { ...(await deps.marker.result(a.ownerId, a, sub)), submittedAt: sub.submittedAt };
     },
 
     async publicTaskFile(token: string, index: number) {
@@ -243,12 +297,29 @@ export function createAssignmentService(deps: {
       await deps.store.update(a.id, a.ownerId, (r) => {
         const prev = r.submissions.find(same);
         replaced = prev?.files ?? [];
-        receipt = { id: prev?.id ?? randomUUID(), studentName, ...(studentId ? { studentId } : {}), files, ...(text ? { text } : {}), submittedAt: now(), late, resubmissions: prev ? prev.resubmissions + 1 : 0 };
+        receipt = { id: prev?.id ?? randomUUID(), studentName, ...(studentId ? { studentId } : {}), files, ...(text ? { text } : {}), submittedAt: now(), late, resubmissions: prev ? prev.resubmissions + 1 : 0, resultToken: prev?.resultToken ?? randomBytes(9).toString('base64url') };
         r.submissions = [...r.submissions.filter((s) => s !== prev), receipt];
       });
       // The earlier hand-in's files are no longer shown or marked: free their storage.
       await drop(a.ownerId, replaced);
-      return { receiptId: receipt.id.slice(0, 8).toUpperCase(), submittedAt: receipt.submittedAt, late, replaced: receipt.resubmissions > 0, files: files.length };
+      // Automatic marking runs in the background; the student does not wait for it.
+      if (a.autoMark && deps.marker && a.schemeFiles?.length) {
+        const sub = receipt;
+        const save = (patch: { examId?: string; examSubmissionId?: string; markError?: string | null }) => deps.store.update(a.id, a.ownerId, (r) => {
+          if (patch.examId) r.examId = patch.examId;
+          const x = r.submissions.find((y) => y.id === sub.id);
+          if (x && patch.examSubmissionId) x.examSubmissionId = patch.examSubmissionId;
+          if (x && patch.markError !== undefined) { if (patch.markError) x.markError = patch.markError; else delete x.markError; }
+        }).then(() => undefined);
+        void deps.marker.mark({
+          ownerId: a.ownerId, assignment: (await deps.store.get(a.id, a.ownerId)) ?? a, submission: sub,
+          pdf: () => studentPdf(a.ownerId, sub),
+          scheme: async () => Promise.all((a.schemeFiles ?? []).map(async (f) => { const d = await deps.files.read(a.ownerId, f.id); return { name: d.name, buffer: d.data, mime: d.mime }; })),
+          save,
+          reload: () => deps.store.get(a.id, a.ownerId),
+        }).catch((e) => save({ markError: e instanceof Error ? e.message.slice(0, 200) : 'Could not be marked.' }).catch(() => undefined));
+      }
+      return { receiptId: receipt.id.slice(0, 8).toUpperCase(), submittedAt: receipt.submittedAt, late, replaced: receipt.resubmissions > 0, files: files.length, resultLink: resultLinkOf(a.token, receipt.resultToken!), autoMark: !!a.autoMark };
     },
 
     /**

@@ -18,6 +18,9 @@
  * strip them before sending the schema to respondents.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { DEFAULT_BRANDING, normalizeBranding, type FormBranding } from '../../shared/formBranding';
+import { FormDesignPanel } from './forms/FormDesignPanel';
+import { FormCanvas } from './forms/FormCanvas';
 import { AlignLeft, AtSign, Calendar, CheckSquare, ChevronDownSquare, CircleDot, Clock, Grid2x2Check, Grid3x3, Hash, Link2, Phone, SlidersHorizontal, Star, Type, Upload, type LucideIcon } from 'lucide-react';
 import DynamicForm from './DynamicForm';
 import { copyToClipboard } from '../utils/copyToClipboard';
@@ -104,6 +107,10 @@ export type BuilderState = {
   acceptingResponses: boolean;
   allowMultipleResponses: boolean;
   confirmationMessage: string;
+  /** Quizzes: show each respondent which answers were right, with the correct answer, after they submit. */
+  quizShowAnswers: boolean;
+  /** How the form looks to respondents (template, light or dark, logo, banner, background, font). */
+  branding: FormBranding;
   items: Item[];
 };
 
@@ -165,6 +172,8 @@ export const blankState = (): BuilderState => ({
   acceptingResponses: true,
   allowMultipleResponses: true,
   confirmationMessage: 'Your response has been recorded.',
+  quizShowAnswers: true,
+  branding: { ...DEFAULT_BRANDING },
   items: [],
 });
 
@@ -225,6 +234,8 @@ export function fromSchema(input: any): BuilderState {
     acceptingResponses: s.acceptingResponses !== false,
     allowMultipleResponses: s.allowMultipleResponses !== false,
     confirmationMessage: s.confirmationMessage || 'Your response has been recorded.',
+    quizShowAnswers: s.quizShowAnswers !== false,
+    branding: normalizeBranding(s.branding ?? { mode: 'dark' }),
     items,
   };
 }
@@ -297,6 +308,8 @@ export function buildSchema(s: BuilderState): any {
     acceptingResponses: s.acceptingResponses,
     allowMultipleResponses: s.allowMultipleResponses,
     confirmationMessage: s.confirmationMessage,
+    quizShowAnswers: s.quizShowAnswers,
+    branding: s.branding,
     fields,
     blocks,
   };
@@ -335,10 +348,10 @@ const readAsDataUrl = (file: File) =>
 /* --------------------------------------------------------------- styling */
 
 const ring = 'focus:outline-none focus-visible:ring-2 focus-visible:ring-[#F0A58C]';
-const inp = 'w-full rounded-lg border border-[#DADCE0] bg-[#FFFFFF] px-3 py-2 text-sm text-[#202124] placeholder:text-[#757575] outline-none focus:border-[#D97757] focus:ring-2 focus:ring-[#D97757]/30';
+const inp = 'w-full rounded-lg border border-[#DADCE0] bg-[#FFFFFF] px-3 py-2 text-sm text-[#202124] placeholder:text-[#757575] outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30';
 const btn = `min-h-10 rounded-lg border border-[#DADCE0] bg-transparent px-3 text-sm font-semibold text-[#202124] hover:bg-black/5 ${ring} disabled:opacity-40`;
 const ghost = `min-h-10 rounded-lg px-3 text-sm font-semibold text-[#5F6368] hover:bg-black/5 hover:text-[#202124] ${ring} disabled:opacity-40`;
-const primary = `min-h-11 rounded-xl bg-[#B4502F] px-5 text-sm font-bold text-white shadow-lg shadow-[#D97757]/10 hover:bg-[#C45A37] ${ring} disabled:opacity-60`;
+const primary = `min-h-11 rounded-xl bg-[#B4502F] px-5 text-sm font-bold text-white shadow-lg shadow-[var(--brand)]/10 hover:bg-[#C45A37] ${ring} disabled:opacity-60`;
 const card = 'rounded-2xl border border-[#E0E0E0] bg-[#FFFFFF] p-5 sm:p-6';
 const eyebrow = 'text-xs font-bold uppercase tracking-wider text-[#5F6368]';
 
@@ -364,7 +377,7 @@ function Field({ label, children, hint }: { label: string; children: React.React
 function Toggle({ label, checked, onChange, hint }: { label: string; checked: boolean; onChange: (v: boolean) => void; hint?: string }) {
   return (
     <label className="flex min-h-11 cursor-pointer items-start gap-3 text-sm">
-      <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} className="mt-1 h-4 w-4 accent-[#D97757]" />
+      <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} className="mt-1 h-4 w-4 accent-[var(--brand)]" />
       <span><span className="font-semibold text-[#202124]">{label}</span>{hint && <span className="block text-xs text-[#5F6368]">{hint}</span>}</span>
     </label>
   );
@@ -643,7 +656,7 @@ function QuestionEditor({ q, quiz, patch, uploadFile }: {
                       const list = Array.isArray(q.correctAnswer) ? q.correctAnswer : [];
                       return (
                         <label key={o} className="flex min-h-9 items-center gap-2 text-sm text-[#202124]">
-                          <input type="checkbox" className="h-4 w-4 accent-[#D97757]" checked={list.includes(o)}
+                          <input type="checkbox" className="h-4 w-4 accent-[var(--brand)]" checked={list.includes(o)}
                             onChange={e => patch({ correctAnswer: e.target.checked ? [...list, o] : list.filter(x => x !== o) })} />
                           {o}
                         </label>
@@ -712,6 +725,7 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, onUpda
   const [publishedUrl, setPublishedUrl] = useState<string | undefined>(shareUrl);
   const [publishedJson, setPublishedJson] = useState<string | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
+  const [designOpen, setDesignOpen] = useState(false);
   const [copied, setCopied] = useState('');
   const [announcement, setAnnouncement] = useState('');
   const [aiOpen, setAiOpen] = useState(true);
@@ -855,7 +869,7 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, onUpda
             <label>
               <span className="sr-only">Form title</span>
               <input value={state.title} onChange={e => setField('title', e.target.value)} placeholder="Untitled form"
-                className="w-full bg-transparent text-xl font-bold text-[#202124] sm:text-2xl placeholder:text-[#757575] outline-none focus:underline focus:decoration-[#D97757] focus:underline-offset-4" />
+                className="w-full bg-transparent text-xl font-bold text-[#202124] sm:text-2xl placeholder:text-[#757575] outline-none focus:underline focus:decoration-[var(--brand)] focus:underline-offset-4" />
             </label>
             <p className="mt-1 text-xs font-bold uppercase tracking-widest text-[#5F6368]" aria-live="polite">
               {questionCount} {questionCount === 1 ? 'question' : 'questions'} · {status}
@@ -881,11 +895,10 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, onUpda
             {publishing ? 'Publishing…' : 'Save & Publish'}
           </button>
 
-          <label className={`${headBtn} relative cursor-pointer focus-within:ring-2 focus-within:ring-[#F0A58C]`}>
-            Theme
-            <span aria-hidden="true" className="h-6 w-9 rounded-md border border-black/20" style={{ backgroundColor: state.themeColor }} />
-            <input type="color" aria-label="Form theme color" className="sr-only" value={state.themeColor} onChange={e => setField('themeColor', e.target.value)} />
-          </label>
+          <button type="button" className={`${headBtn} inline-flex items-center gap-2`} aria-expanded={designOpen} onClick={() => setDesignOpen(o => !o)}>
+            Design
+            <span aria-hidden="true" className="h-5 w-7 rounded-md border border-black/20" style={{ backgroundColor: state.themeColor }} />
+          </button>
           <button type="button" className={headBtn} aria-expanded={shareOpen} onClick={() => setShareOpen(o => !o)}>Get link</button>
           {onResults && <button type="button" className={headBtn} onClick={onResults}>Results</button>}
           </div>
@@ -904,6 +917,17 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, onUpda
               ))}
             </ul>
           </div>
+        )}
+
+        {designOpen && (
+          <FormDesignPanel
+            color={state.themeColor}
+            branding={state.branding}
+            onColor={(c) => setField('themeColor', c)}
+            onBranding={(b) => setField('branding', b)}
+            onClose={() => setDesignOpen(false)}
+            onPreview={() => setView('preview')}
+          />
         )}
 
         {shareOpen && (
@@ -936,14 +960,14 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, onUpda
         {view === 'preview' ? (
           <div role="tabpanel" aria-label="Preview" className="space-y-3">
             <p className="rounded-xl bg-[#FFFFFF] px-4 py-3 text-sm text-[#5F6368]">Preview only. Nothing you enter here is saved.</p>
-            <div className="rounded-2xl bg-[#F4F4F1] p-4 sm:p-6">
+            <FormCanvas schema={schema} className="p-4 sm:p-6">
               <DynamicForm
                 key={schemaJson.length}
                 schema={schema}
                 draftKey="__builder_preview__"
                 onSubmit={async () => ({ message: 'Preview only: this response was not saved.' })}
               />
-            </div>
+            </FormCanvas>
           </div>
         ) : (
           <div role="tabpanel" aria-label="Build" className="space-y-5">
@@ -968,7 +992,7 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, onUpda
                 <div className="mt-3 flex flex-wrap gap-2">
                   {AGENT_CHIPS.map(c => (
                     <button key={c.label} type="button" disabled={aiBusy} onClick={() => { setAiPrompt(c.prompt); runAgent(c.prompt); }}
-                      className={`min-h-10 rounded-lg border border-[#DADCE0] bg-[#F8F9FA] px-3 text-sm font-medium text-[#202124] hover:border-[#D97757] ${ring} disabled:opacity-50`}>
+                      className={`min-h-10 rounded-lg border border-[#DADCE0] bg-[#F8F9FA] px-3 text-sm font-medium text-[#202124] hover:border-[var(--brand)] ${ring} disabled:opacity-50`}>
                       {c.label}
                     </button>
                   ))}
@@ -989,7 +1013,8 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, onUpda
             <details className={`${card} !p-0`}>
               <summary className="min-h-11 cursor-pointer list-none px-5 py-3 text-sm font-bold text-[#202124] sm:px-6">Form settings</summary>
               <div className="space-y-1 border-t border-[#E0E0E0] px-5 py-4 sm:px-6">
-                <Toggle label="Make this a quiz" checked={state.isQuiz} onChange={v => setField('isQuiz', v)} hint="Adds points and correct answers to each question. Grade on your server." />
+                <Toggle label="Make this a quiz" checked={state.isQuiz} onChange={v => setField('isQuiz', v)} hint="Give each question points and a correct answer. Bwenge marks every response the moment it is sent; scores appear in Results." />
+                {state.isQuiz && <Toggle label="Show answers after submitting" checked={state.quizShowAnswers} onChange={v => setField('quizShowAnswers', v)} hint="Respondents see their score, which answers were right and the correct ones. Turn off to show the score only." />}
                 <Toggle label="Collect email addresses" checked={state.collectEmail} onChange={v => setField('collectEmail', v)} />
                 <Toggle label="Accepting responses" checked={state.acceptingResponses} onChange={v => setField('acceptingResponses', v)} />
                 <Toggle label="Allow more than one response per person" checked={state.allowMultipleResponses} onChange={v => setField('allowMultipleResponses', v)} hint="Also enforce this on your server." />
@@ -1057,7 +1082,7 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, onUpda
               <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
                 {QUESTION_TYPES.map(t => (
                   <button key={t.type} type="button" onClick={() => insert(makeQuestion(t.type))}
-                    className={`flex min-h-12 items-center gap-3 rounded-xl border border-[#E0E0E0] bg-[#F8F9FA] px-3 text-left text-sm font-medium text-[#202124] hover:border-[#D97757] ${ring}`}>
+                    className={`flex min-h-12 items-center gap-3 rounded-xl border border-[#E0E0E0] bg-[#F8F9FA] px-3 text-left text-sm font-medium text-[#202124] hover:border-[var(--brand)] ${ring}`}>
                     <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#FCE9E2] text-[#B4502F]">{React.createElement((t as { icon: LucideIcon }).icon, { size: 16, strokeWidth: 2 })}</span>
                     {t.label}
                   </button>
@@ -1067,7 +1092,7 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, onUpda
               <div className="mt-3 flex flex-wrap gap-2">
                 {([['section', 'Section (new page)'], ['text', 'Title and description'], ['image', 'Picture'], ['video', 'Video']] as const).map(([kind, text]) => (
                   <button key={kind} type="button" onClick={() => insert(makeBlock(kind))}
-                    className={`min-h-10 rounded-lg border border-[#E0E0E0] bg-[#F8F9FA] px-3 text-sm font-medium text-[#202124] hover:border-[#D97757] ${ring}`}>
+                    className={`min-h-10 rounded-lg border border-[#E0E0E0] bg-[#F8F9FA] px-3 text-sm font-medium text-[#202124] hover:border-[var(--brand)] ${ring}`}>
                     + {text}
                   </button>
                 ))}

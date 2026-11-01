@@ -90,23 +90,23 @@ export default function FormsPage({ onClose }: { onClose: () => void }) {
 
   const blank = { title: 'Untitled form', description: '', questions: [{ id: 'q1', type: 'short_text', title: 'Your name', required: true }] };
   return (
-    <div className="fixed inset-0 z-[70] overflow-y-auto bg-[#0f1012]">
+    <div className="fixed inset-0 z-[70] overflow-y-auto bg-[var(--ws-bg)]">
       <PageShell icon={<ClipboardCheck size={20} />} title="Forms" onBack={onClose} wide
         subtitle="Surveys, registrations, consent slips and quizzes. Share one link; answers arrive here with charts, and download to Excel."
         actions={<button type="button" disabled={!!busy} onClick={() => void createFrom('blank', blank)} className={ghostBtn}>{busy === 'blank' ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}Blank form</button>}>
 
-        <section className="rounded-2xl border border-white/[0.08] bg-gradient-to-br from-[#1b1c21] to-[#141519] p-4 sm:p-5">
-          <p className="flex items-center gap-2 text-[14px] font-semibold text-white"><Wand2 size={16} className="text-[#F0A586]" />Describe the form, the AI writes it</p>
+        <section className="rounded-2xl border border-white/[0.08] bg-gradient-to-br from-[var(--ws-card-hover)] to-[var(--ws-card)] p-4 sm:p-5">
+          <p className="flex items-center gap-2 text-[14px] font-semibold text-white"><Wand2 size={16} className="text-[var(--brand-soft)]" />Describe the form, the AI writes it</p>
           <div className="mt-3 flex flex-col gap-2 sm:flex-row">
             <input value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void createWithAi(); }} maxLength={600}
               placeholder="e.g. Parent consent for the S4 Biology trip on Friday, with allergies and an emergency contact"
-              className="min-w-0 flex-1 rounded-xl border border-white/[0.1] bg-[#0f1012] px-3.5 py-2.5 text-[14px] text-white placeholder:text-neutral-500 focus:border-[#D97757]/60 focus:outline-none" />
+              className="min-w-0 flex-1 rounded-xl border border-white/[0.1] bg-[var(--ws-bg)] px-3.5 py-2.5 text-[14px] text-white placeholder:text-neutral-500 focus:border-[var(--brand)]/60 focus:outline-none" />
             <button type="button" disabled={!prompt.trim() || !!busy} onClick={() => void createWithAi()} className={primaryBtn}>{busy === 'ai' ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}{busy === 'ai' ? 'Writing…' : 'Create with AI'}</button>
           </div>
           <p className="mt-4 text-[11.5px] font-medium uppercase tracking-wide text-neutral-500">Or start from a template</p>
           <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
             {TEMPLATES.map((t) => (
-              <button key={t.id} type="button" disabled={!!busy} onClick={() => void createFrom(t.id, t.form)} className="flex items-start gap-2.5 rounded-xl border border-white/[0.08] bg-[#0f1012]/60 p-3 text-left hover:border-white/[0.18] disabled:opacity-50">
+              <button key={t.id} type="button" disabled={!!busy} onClick={() => void createFrom(t.id, t.form)} className="flex items-start gap-2.5 rounded-xl border border-white/[0.08] bg-[var(--ws-bg)]/60 p-3 text-left hover:border-white/[0.18] disabled:opacity-50">
                 <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-neutral-200">{busy === t.id ? <Loader2 size={15} className="animate-spin" /> : t.icon}</span>
                 <span className="min-w-0"><span className="block text-[13px] font-semibold text-white">{t.name}</span><span className="block text-[12px] leading-snug text-neutral-500">{t.text}</span></span>
               </button>

@@ -29,7 +29,7 @@ function icon(type: string) {
   if (DONE.has(type)) return <CheckCircle2 size={14} className="text-emerald-400" />;
   if (type.startsWith('pdf_')) return <FileCheck2 size={14} className="text-sky-300" />;
   if (type.includes('page') || type.includes('document') || type.includes('handwriting')) return <ScanText size={14} className="text-sky-300" />;
-  return <Sparkles size={14} className="text-[#F2B39C]" />;
+  return <Sparkles size={14} className="text-[var(--brand-soft)]" />;
 }
 
 /**
@@ -151,26 +151,26 @@ export default function LiveMarkingPanel({ examId, onScriptMarked, compact = fal
         <div className="px-3 pt-2.5">
           <div className="flex justify-between text-[11px] text-neutral-400"><span>{progress.done} of {progress.total} script{progress.total === 1 ? '' : 's'} finished</span>{active && <Loader2 size={12} className="animate-spin" />}</div>
           <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/[0.06]" role="progressbar" aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={progress.done}>
-            <div className="h-full rounded-full bg-[#D97757] transition-[width] duration-500" style={{ width: `${progress.total ? (100 * progress.done) / progress.total : 0}%` }} />
+            <div className="h-full rounded-full bg-[var(--brand)] transition-[width] duration-500" style={{ width: `${progress.total ? (100 * progress.done) / progress.total : 0}%` }} />
           </div>
         </div>
       )}
       {prefs && (
         <div className="flex flex-wrap items-center gap-1.5 px-3 pt-2.5 text-[11px]">
           <label className="sr-only" htmlFor={`credit-${examId}`}>Credit</label>
-          <select id={`credit-${examId}`} disabled={busy} value={prefs.credit} onChange={(e) => void savePrefs({ credit: e.target.value as Preferences['credit'] })} className="h-7 rounded-md border border-white/10 bg-[#1f1e1d] px-1.5 text-neutral-200">
+          <select id={`credit-${examId}`} disabled={busy} value={prefs.credit} onChange={(e) => void savePrefs({ credit: e.target.value as Preferences['credit'] })} className="h-7 rounded-md border border-white/10 bg-[var(--app-panel-2)] px-1.5 text-neutral-200">
             <option value="partial">Partial credit</option><option value="strict">Strict marking</option>
           </select>
-          <select aria-label="Feedback" disabled={busy} value={prefs.feedback} onChange={(e) => void savePrefs({ feedback: e.target.value as Preferences['feedback'] })} className="h-7 rounded-md border border-white/10 bg-[#1f1e1d] px-1.5 text-neutral-200">
+          <select aria-label="Feedback" disabled={busy} value={prefs.feedback} onChange={(e) => void savePrefs({ feedback: e.target.value as Preferences['feedback'] })} className="h-7 rounded-md border border-white/10 bg-[var(--app-panel-2)] px-1.5 text-neutral-200">
             <option value="brief">Brief feedback</option><option value="detailed">Detailed feedback</option>
           </select>
           <label className="inline-flex h-7 items-center gap-1.5 rounded-md border border-white/10 px-2 text-neutral-200">
-            <input type="checkbox" disabled={busy} checked={prefs.corrections} onChange={(e) => void savePrefs({ corrections: e.target.checked })} className="accent-[#D97757]" /> Red corrections
+            <input type="checkbox" disabled={busy} checked={prefs.corrections} onChange={(e) => void savePrefs({ corrections: e.target.checked })} className="accent-[var(--brand)]" /> Red corrections
           </label>
         </div>
       )}
       {notice && (
-        <p className="mx-3 mt-2.5 rounded-lg bg-white/[0.04] px-2.5 py-1.5 text-[11.5px] text-neutral-300">{notice.text}{notice.upgrade && <> <a className="font-semibold text-[#F2B39C] underline" href={notice.upgrade}>Upgrade</a></>}</p>
+        <p className="mx-3 mt-2.5 rounded-lg bg-white/[0.04] px-2.5 py-1.5 text-[11.5px] text-neutral-300">{notice.text}{notice.upgrade && <> <a className="font-semibold text-[var(--brand-soft)] underline" href={notice.upgrade}>Upgrade</a></>}</p>
       )}
       <ol className={`${compact ? 'max-h-56' : 'max-h-[60dvh]'} mt-2 space-y-1 overflow-y-auto px-3 pb-3`} aria-live="polite">
         {shown.length === 0 && <li className="py-2 text-[12px] text-neutral-500">Nothing yet. Activity appears here as soon as marking starts; it keeps running if you close this page.</li>}

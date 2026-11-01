@@ -54,14 +54,14 @@ interface LeftSidebarProps {
   onCloseMobile?: () => void;
 }
 
-const FOCUS_RING = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D97757]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#1F1E1D]';
+const FOCUS_RING = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--app-panel-2)]';
 
 /** Label shown beside an icon-only control when the desktop sidebar is collapsed. */
 const CollapsedTip: React.FC<{ show: boolean; label: string }> = ({ show, label }) =>
   show ? (
     <span
       role="tooltip"
-      className="pointer-events-none absolute left-full top-1/2 z-50 ml-3 hidden -translate-y-1/2 whitespace-nowrap rounded-md border border-white/10 bg-[#141413] px-2.5 py-1.5 text-xs font-medium text-white opacity-0 shadow-xl transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100 lg:block"
+      className="pointer-events-none absolute left-full top-1/2 z-50 ml-3 hidden -translate-y-1/2 whitespace-nowrap rounded-md border border-white/10 bg-[var(--app-sunken)] px-2.5 py-1.5 text-xs font-medium text-white opacity-0 shadow-xl transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100 lg:block"
     >
       {label}
     </span>
@@ -97,7 +97,7 @@ function initials(name: string): string {
 // Plan badge next to the user's name: every plan, Free included, so the user always knows where they stand.
 type PlanBadge = { label: string; className: string; icon?: React.ElementType };
 const PLAN_BADGE: Record<string, PlanBadge> = {
-  FREE: { label: 'Free', className: 'border-white/15 bg-white/[0.06] text-[#C2C0B6]' },
+  FREE: { label: 'Free', className: 'border-white/15 bg-white/[0.06] text-[var(--app-muted)]' },
   GO: { label: 'Top-up', className: 'border-sky-400/30 bg-sky-400/10 text-sky-300', icon: Coins },
   STARTER: { label: 'Starter', className: 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300', icon: Sparkles },
   PRO: { label: 'Pro', className: 'border-amber-400/30 bg-amber-400/10 text-amber-300', icon: Sparkles },
@@ -206,7 +206,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
             </div>
             <div className="min-w-0 leading-tight">
               <div className="font-serif text-[17px] font-medium tracking-tight text-white">Bwenge</div>
-              <div className="text-[11px] text-[#9C9A92]">Education · Research · Data</div>
+              <div className="text-[11px] text-[var(--app-faint)]">Education · Research · Data</div>
             </div>
           </div>
 
@@ -214,7 +214,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
             <button
               type="button"
               onClick={() => setCollapsed(!c)}
-              className={`grid h-9 w-9 place-items-center rounded-lg text-[#9C9A92] transition-colors hover:bg-white/[0.06] hover:text-white ${FOCUS_RING}`}
+              className={`grid h-9 w-9 place-items-center rounded-lg text-[var(--app-faint)] transition-colors hover:bg-white/[0.06] hover:text-white ${FOCUS_RING}`}
               aria-label={c ? 'Expand sidebar' : 'Collapse sidebar'}
               aria-expanded={!c}
             >
@@ -226,7 +226,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
           <button
             type="button"
             onClick={onCloseMobile}
-            className={`grid h-11 w-11 place-items-center rounded-lg text-[#9C9A92] transition-colors hover:bg-white/[0.06] hover:text-white lg:hidden ${FOCUS_RING}`}
+            className={`grid h-11 w-11 place-items-center rounded-lg text-[var(--app-faint)] transition-colors hover:bg-white/[0.06] hover:text-white lg:hidden ${FOCUS_RING}`}
             aria-label="Close navigation drawer"
           >
             <X size={20} />
@@ -242,7 +242,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
               aria-label="New chat"
               className={`${rowBase} ${rowSize} ${c ? '' : 'lg:w-full'} font-medium text-white hover:bg-white/[0.04]`}
             >
-              <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#D97757] text-white shadow-sm shadow-[#D97757]/30"><SquarePen size={13} aria-hidden="true" /></span>
+              <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--brand)] text-white shadow-sm shadow-[var(--brand)]/30"><SquarePen size={13} aria-hidden="true" /></span>
               <span className={label}>New chat</span>
             </button>
             <CollapsedTip show={c} label="New chat" />
@@ -255,7 +255,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
         <nav aria-label="Workspace" className={`shrink-0 px-3 ${c ? 'lg:flex lg:flex-col lg:items-center' : ''}`}>
           {navGroups.map((g, gi) => (
             <div key={g.title ?? 'main'} className={gi ? 'mt-3 lg:mt-2.5' : ''}>
-              {g.title && <h3 className={`px-3 pb-0.5 text-[11px] font-medium text-[#9C9A92] lg:text-[11.5px] ${c ? 'lg:hidden' : ''}`}>{g.title}</h3>}
+              {g.title && <h3 className={`px-3 pb-0.5 text-[11px] font-medium text-[var(--app-faint)] lg:text-[11.5px] ${c ? 'lg:hidden' : ''}`}>{g.title}</h3>}
               {g.title && c && <div aria-hidden="true" className="mx-auto mb-1 hidden h-px w-6 bg-white/10 lg:block" />}
               <div className="space-y-0.5">
                 {g.items.map((item) => {
@@ -268,11 +268,11 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                         aria-current={item.active ? 'page' : undefined}
                         aria-label={item.label}
                         className={`${rowBase} ${rowSize} ${c ? '' : 'lg:w-full'} ${
-                          item.active ? 'bg-white/[0.07] font-medium text-white' : 'text-[#C2C0B6] hover:bg-white/[0.04] hover:text-white'
+                          item.active ? 'bg-white/[0.07] font-medium text-white' : 'text-[var(--app-muted)] hover:bg-white/[0.04] hover:text-white'
                         }`}
                       >
-                        {item.active && <span aria-hidden="true" className={`absolute top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-full bg-[#D97757] ${c ? 'left-0 lg:-left-3' : '-left-3'}`} />}
-                        <Icon size={17} className={`shrink-0 ${item.active ? 'text-[#D97757]' : 'text-[#9C9A92] group-hover/row:text-[#C2C0B6]'}`} aria-hidden="true" />
+                        {item.active && <span aria-hidden="true" className={`absolute top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-full bg-[var(--brand)] ${c ? 'left-0 lg:-left-3' : '-left-3'}`} />}
+                        <Icon size={17} className={`shrink-0 ${item.active ? 'text-[var(--brand)]' : 'text-[var(--app-faint)] group-hover/row:text-[var(--app-muted)]'}`} aria-hidden="true" />
                         <span className={label}>{item.label}</span>
                       </button>
                       <CollapsedTip show={c} label={item.label} />
@@ -289,11 +289,11 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
           {sessions.length > 0 ? (
             <>
               <div className="sticky top-0 z-10 flex shrink-0 items-center justify-between px-6 pb-1 pt-1" style={{ backgroundColor: tokens.bgSidebar }}>
-                <span className="text-[11px] font-medium text-[#9C9A92] lg:text-[11.5px]">Recents</span>
+                <span className="text-[11px] font-medium text-[var(--app-faint)] lg:text-[11.5px]">Recents</span>
               </div>
               {sessions.length > 5 && (
                 <div className="shrink-0 px-3 pb-2">
-                  <label className="flex h-9 items-center gap-2 rounded-lg border border-white/[0.08] bg-black/20 px-2.5 text-[#9C9A92] focus-within:border-[#D97757]/50">
+                  <label className="flex h-9 items-center gap-2 rounded-lg border border-white/[0.08] bg-black/20 px-2.5 text-[var(--app-faint)] focus-within:border-[var(--brand)]/50">
                     <Search size={14} aria-hidden="true" />
                     <input
                       type="search"
@@ -301,10 +301,10 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                       onChange={(e) => setQuery(e.target.value)}
                       placeholder="Search chats"
                       aria-label="Search chats"
-                      className="min-w-0 flex-1 bg-transparent text-[13px] text-white placeholder:text-[#9C9A92]/70 focus:outline-none [&::-webkit-search-cancel-button]:appearance-none"
+                      className="min-w-0 flex-1 bg-transparent text-[13px] text-white placeholder:text-[var(--app-faint)]/70 focus:outline-none [&::-webkit-search-cancel-button]:appearance-none"
                     />
                     {query && (
-                      <button type="button" onClick={() => setQuery('')} aria-label="Clear search" className="grid h-6 w-6 place-items-center rounded text-[#9C9A92] hover:bg-white/[0.06] hover:text-white">
+                      <button type="button" onClick={() => setQuery('')} aria-label="Clear search" className="grid h-6 w-6 place-items-center rounded text-[var(--app-faint)] hover:bg-white/[0.06] hover:text-white">
                         <X size={13} />
                       </button>
                     )}
@@ -312,7 +312,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                 </div>
               )}
               <div className="px-3 pb-3">
-                {groups.length === 0 && <p className="px-2 py-6 text-center text-xs text-[#9C9A92]">No chats match “{query}”.</p>}
+                {groups.length === 0 && <p className="px-2 py-6 text-center text-xs text-[var(--app-faint)]">No chats match “{query}”.</p>}
                 {groups.map((g) => (
                   // One flat list, newest first, as in Claude (the date is in the title tooltip's order).
                   <section key={g.label} aria-label={g.label}>
@@ -323,7 +323,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                             type="button"
                             onClick={go(() => onLoadSession(s.id))}
                             title={s.title}
-                            className={`flex h-10 w-full items-center rounded-lg px-3 text-left text-[14px] text-[#C2C0B6] transition-colors hover:bg-white/[0.04] hover:text-white lg:h-8 lg:text-[13px] ${FOCUS_RING} ${
+                            className={`flex h-10 w-full items-center rounded-lg px-3 text-left text-[14px] text-[var(--app-muted)] transition-colors hover:bg-white/[0.04] hover:text-white lg:h-8 lg:text-[13px] ${FOCUS_RING} ${
                               onDeleteSession ? 'pr-10 lg:pr-2 lg:group-hover/chat:pr-9 lg:group-focus-within/chat:pr-9' : ''
                             }`}
                           >
@@ -338,7 +338,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                               }}
                               aria-label={`Delete chat “${s.title}”`}
                               title="Delete chat"
-                              className={`absolute right-1 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-md text-[#9C9A92] transition-opacity hover:bg-rose-500/10 hover:text-rose-400 lg:h-7 lg:w-7 lg:opacity-0 lg:group-hover/chat:opacity-100 lg:focus:opacity-100 ${FOCUS_RING}`}
+                              className={`absolute right-1 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-md text-[var(--app-faint)] transition-opacity hover:bg-rose-500/10 hover:text-rose-400 lg:h-7 lg:w-7 lg:opacity-0 lg:group-hover/chat:opacity-100 lg:focus:opacity-100 ${FOCUS_RING}`}
                             >
                               <Trash2 size={14} />
                             </button>
@@ -352,8 +352,8 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
             </>
           ) : (
             <>
-              <div className="px-6 pb-1 text-[11px] font-medium text-[#9C9A92] lg:text-[11.5px]">Recents</div>
-              <p className="px-6 text-xs text-[#9C9A92]/80">Your chats will appear here.</p>
+              <div className="px-6 pb-1 text-[11px] font-medium text-[var(--app-faint)] lg:text-[11.5px]">Recents</div>
+              <p className="px-6 text-xs text-[var(--app-faint)]/80">Your chats will appear here.</p>
             </>
           )}
         </div>
@@ -383,9 +383,9 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                       {plan.icon && <plan.icon size={9} strokeWidth={2.5} aria-hidden="true" />}{plan.label}
                     </span>
                   </span>
-                  <span className="block truncate text-[11.5px] text-[#9C9A92]">{user.email}</span>
+                  <span className="block truncate text-[11.5px] text-[var(--app-faint)]">{user.email}</span>
                 </span>
-                <ChevronsUpDown size={15} className={`shrink-0 text-[#9C9A92] ${c ? 'lg:hidden' : ''}`} aria-hidden="true" />
+                <ChevronsUpDown size={15} className={`shrink-0 text-[var(--app-faint)] ${c ? 'lg:hidden' : ''}`} aria-hidden="true" />
               </button>
             ) : (
               <button
@@ -405,21 +405,21 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
             {user && showProfileMenu && (
               <div
                 role="menu"
-                className={`absolute bottom-full z-50 mb-2 w-64 overflow-hidden rounded-xl border border-white/10 bg-[#141413] p-1.5 shadow-2xl shadow-black/60 animate-in fade-in slide-in-from-bottom-2 duration-150 ${
+                className={`absolute bottom-full z-50 mb-2 w-64 overflow-hidden rounded-xl border border-white/10 bg-[var(--app-sunken)] p-1.5 shadow-2xl shadow-black/60 animate-in fade-in slide-in-from-bottom-2 duration-150 ${
                   c ? 'left-0 right-0 w-auto lg:bottom-0 lg:left-full lg:right-auto lg:mb-0 lg:ml-3 lg:w-60' : 'left-0 right-0 w-auto'
                 }`}
               >
                 <div className="px-2.5 pb-2 pt-1.5">
                   <div className="truncate text-[13px] font-medium text-white">{user.name}</div>
-                  <div className="truncate text-xs text-[#9C9A92]">{user.email}</div>
+                  <div className="truncate text-xs text-[var(--app-faint)]">{user.email}</div>
                 </div>
                 {billing && (
                   <a href="/upgrade" role="menuitem" className="mx-1 mb-1 block rounded-lg border border-white/[0.07] bg-white/[0.03] px-2.5 py-2 hover:bg-white/[0.06]">
                     <span className="flex items-center justify-between gap-2 text-[12px]">
                       <span className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-px text-[9.5px] font-bold uppercase ${plan.className}`}>{plan.icon && <plan.icon size={9} strokeWidth={2.5} aria-hidden="true" />}{billing.planName}</span>
-                      <span className="font-semibold text-[#D97757]">{billing.plan !== 'FREE' && billing.plan !== 'GO' ? 'Manage' : 'Upgrade'}</span>
+                      <span className="font-semibold text-[var(--brand)]">{billing.plan !== 'FREE' && billing.plan !== 'GO' ? 'Manage' : 'Upgrade'}</span>
                     </span>
-                    <span className="mt-1.5 block text-[11.5px] text-[#C2C0B6]">{creditMeter(billing.usage).label}{billing.wallet > 0 ? ` · ${billing.wallet.toLocaleString('en-US')} top-up` : ''}</span>
+                    <span className="mt-1.5 block text-[11.5px] text-[var(--app-muted)]">{creditMeter(billing.usage).label}{billing.wallet > 0 ? ` · ${billing.wallet.toLocaleString('en-US')} top-up` : ''}</span>
                     <span className="mt-1 block h-1 overflow-hidden rounded-full bg-white/[0.07]"><span className="block h-full rounded-full bg-[#5DCAA5]" style={{ width: `${(() => { const m = creditMeter(billing.usage); return m.limit ? Math.max(0, 100 - (m.used / m.limit) * 100) : 0; })()}%` }} /></span>
                   </a>
                 )}
@@ -432,7 +432,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                     onOpenSettings();
                     onCloseMobile();
                   }}
-                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-[#C2C0B6] transition-colors hover:bg-white/[0.06] hover:text-white"
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] text-[var(--app-muted)] transition-colors hover:bg-white/[0.06] hover:text-white"
                 >
                   <Settings size={15} aria-hidden="true" /> Settings
                 </button>

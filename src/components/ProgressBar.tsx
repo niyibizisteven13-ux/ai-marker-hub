@@ -70,9 +70,9 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
                       disabled={s.disabled}
                       className={`flex items-center space-x-2 px-3 py-1.5 rounded-xl transition-all duration-200 cursor-pointer ${
                         isCurrent
-                          ? 'bg-[#D97757] text-white font-bold text-xs shadow-xs'
+                          ? 'bg-[var(--brand)] text-white font-bold text-xs shadow-xs'
                           : isCompleted
-                          ? 'bg-[#D97757]/15 text-[#D97757] font-semibold text-xs hover:bg-[#D97757]/25'
+                          ? 'bg-[var(--brand)]/15 text-[var(--brand)] font-semibold text-xs hover:bg-[var(--brand)]/25'
                           : s.disabled
                           ? 'opacity-40 cursor-not-allowed text-[#858075] dark:text-[#66635B] text-xs'
                           : 'text-[#66635B] dark:text-[#A0A0AA] hover:bg-[#F4F0E8] dark:hover:bg-[#2D2D32] text-xs font-semibold'
@@ -82,7 +82,7 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
                         <span className="font-mono text-[10px] opacity-80 mr-1.5">0{s.id}</span>
                         {s.icon}
                         {s.badge && (
-                          <span className="absolute -top-2.5 -right-2.5 px-1.5 py-0.5 text-[9px] font-extrabold rounded-full bg-[#D97757] text-white font-mono shadow-xs">
+                          <span className="absolute -top-2.5 -right-2.5 px-1.5 py-0.5 text-[9px] font-extrabold rounded-full bg-[var(--brand)] text-white font-mono shadow-xs">
                             {s.badge}
                           </span>
                         )}
@@ -98,7 +98,7 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
                     <div
                       className={`flex-1 h-0.5 mx-2 sm:mx-3 transition-colors duration-300 ${
                         currentStep > s.id
-                          ? 'bg-[#D97757]'
+                          ? 'bg-[var(--brand)]'
                           : 'bg-[#E8E4DC] dark:bg-[#2D2D32]'
                       }`}
                     />

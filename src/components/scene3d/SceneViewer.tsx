@@ -472,7 +472,7 @@ export default function SceneViewer({ scene, fileName, fill }: { scene: Scene; f
 
   const sel = selected ? byId.get(selected) : null;
   const q = scene.quiz[quizIndex];
-  const btn = (on: boolean) => `grid h-9 w-9 shrink-0 place-items-center rounded-lg transition-colors ${on ? 'bg-[#D97757] text-white' : 'text-stone-200 hover:bg-white/10'}`;
+  const btn = (on: boolean) => `grid h-9 w-9 shrink-0 place-items-center rounded-lg transition-colors ${on ? 'bg-[var(--brand)] text-white' : 'text-stone-200 hover:bg-white/10'}`;
   const ToolBtn = ({ id, label, children, disabled }: { id: Tool; label: string; children: React.ReactNode; disabled?: boolean }) => (
     <button type="button" title={label} aria-label={label} aria-pressed={tool === id} disabled={disabled} onClick={() => setTool((x) => (x === id ? 'none' : id))} className={`${btn(tool === id)} disabled:opacity-30`}>{children}</button>
   );
@@ -486,7 +486,7 @@ export default function SceneViewer({ scene, fileName, fill }: { scene: Scene; f
       <style>{`.bw3d-label{font:600 11px/1.2 Inter,system-ui,sans-serif;color:#fff;background:rgba(15,18,25,.72);padding:2px 6px;border-radius:6px;white-space:nowrap;transform:translateY(-10px)}.bw3d-note{font:500 11.5px/1.3 Inter,system-ui,sans-serif;color:#1b1b1b;background:#ffd166;padding:3px 7px;border-radius:7px;max-width:220px}`}</style>
       {/* Header */}
       <div className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-2">
-        <Box className="h-4 w-4 shrink-0 text-[#D97757]" aria-hidden="true" />
+        <Box className="h-4 w-4 shrink-0 text-[var(--brand)]" aria-hidden="true" />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold text-white">{scene.title}</div>
           <div className="truncate text-[11px] text-stone-400">{scene.parts.length} parts · drag to rotate, scroll or pinch to zoom, click a part</div>
@@ -518,30 +518,30 @@ export default function SceneViewer({ scene, fileName, fill }: { scene: Scene; f
         {/* Tool panel */}
         {tool !== 'none' && tool !== 'stress' && (
           <div className="absolute bottom-2 left-2 right-2 max-h-[55%] overflow-y-auto rounded-xl bg-black/70 p-3 text-xs text-stone-200 backdrop-blur sm:left-14 sm:right-auto sm:w-80">
-            {tool === 'explode' && (<label className="block">Exploded view <input type="range" min={0} max={1.5} step={0.01} value={explode} onChange={(e) => setExplode(Number(e.target.value))} className="mt-1 w-full accent-[#D97757]" /></label>)}
+            {tool === 'explode' && (<label className="block">Exploded view <input type="range" min={0} max={1.5} step={0.01} value={explode} onChange={(e) => setExplode(Number(e.target.value))} className="mt-1 w-full accent-[var(--brand)]" /></label>)}
             {tool === 'section' && (<div className="space-y-2">
-              <div className="flex gap-1">{(['x', 'y', 'z'] as const).map((a) => <button key={a} type="button" onClick={() => setSection((s) => ({ ...s, axis: a }))} className={`rounded-md px-2.5 py-1 font-semibold ${section.axis === a ? 'bg-[#D97757] text-white' : 'bg-white/10'}`}>{a.toUpperCase()}</button>)}</div>
-              <label className="block">Cut position <input type="range" min={0} max={1} step={0.005} value={section.t} onChange={(e) => setSection((s) => ({ ...s, t: Number(e.target.value) }))} className="mt-1 w-full accent-[#D97757]" /></label>
+              <div className="flex gap-1">{(['x', 'y', 'z'] as const).map((a) => <button key={a} type="button" onClick={() => setSection((s) => ({ ...s, axis: a }))} className={`rounded-md px-2.5 py-1 font-semibold ${section.axis === a ? 'bg-[var(--brand)] text-white' : 'bg-white/10'}`}>{a.toUpperCase()}</button>)}</div>
+              <label className="block">Cut position <input type="range" min={0} max={1} step={0.005} value={section.t} onChange={(e) => setSection((s) => ({ ...s, t: Number(e.target.value) }))} className="mt-1 w-full accent-[var(--brand)]" /></label>
             </div>)}
             {tool === 'physics' && (<div className="space-y-2">
-              <div className="flex flex-wrap gap-1">{[['Earth', 9.81], ['Moon', 1.62], ['Mars', 3.71], ['Jupiter', 24.79]].map(([n, g]) => <button key={n as string} type="button" onClick={() => setGravity(g as number)} className={`rounded-md px-2 py-1 ${gravity === g ? 'bg-[#D97757] text-white' : 'bg-white/10'}`}>{n}</button>)}</div>
-              <label className="block">Gravity {gravity.toFixed(2)} m/s² <input type="range" min={0} max={30} step={0.01} value={gravity} onChange={(e) => setGravity(Number(e.target.value))} className="mt-1 w-full accent-[#D97757]" /></label>
+              <div className="flex flex-wrap gap-1">{[['Earth', 9.81], ['Moon', 1.62], ['Mars', 3.71], ['Jupiter', 24.79]].map(([n, g]) => <button key={n as string} type="button" onClick={() => setGravity(g as number)} className={`rounded-md px-2 py-1 ${gravity === g ? 'bg-[var(--brand)] text-white' : 'bg-white/10'}`}>{n}</button>)}</div>
+              <label className="block">Gravity {gravity.toFixed(2)} m/s² <input type="range" min={0} max={30} step={0.01} value={gravity} onChange={(e) => setGravity(Number(e.target.value))} className="mt-1 w-full accent-[var(--brand)]" /></label>
               <div className="flex items-center gap-2">
-                {sim.running ? <button type="button" onClick={stopSim} className="rounded-md bg-white/10 px-3 py-1.5 font-semibold">Reset</button> : <button type="button" onClick={startSim} className="rounded-md bg-[#D97757] px-3 py-1.5 font-semibold text-white">Drop</button>}
+                {sim.running ? <button type="button" onClick={stopSim} className="rounded-md bg-white/10 px-3 py-1.5 font-semibold">Reset</button> : <button type="button" onClick={startSim} className="rounded-md bg-[var(--brand)] px-3 py-1.5 font-semibold text-white">Drop</button>}
                 <span className="tabular-nums text-stone-400">t = {sim.t.toFixed(2)} s</span>
               </div>
               <p className="text-[10.5px] text-stone-400">Simple simulation: constant gravity, bounce on the ground, no air resistance.</p>
             </div>)}
             {tool === 'sun' && (<div className="space-y-2">
-              <label className="block">Month: {MONTHS[month - 1]} <input type="range" min={1} max={12} step={1} value={month} onChange={(e) => setMonth(Number(e.target.value))} className="mt-1 w-full accent-[#D97757]" /></label>
-              <label className="block">Time: {String(Math.floor(hour)).padStart(2, '0')}:{String(Math.round((hour % 1) * 60)).padStart(2, '0')} <input type="range" min={5} max={19} step={0.25} value={hour} onChange={(e) => setHour(Number(e.target.value))} className="mt-1 w-full accent-[#D97757]" /></label>
+              <label className="block">Month: {MONTHS[month - 1]} <input type="range" min={1} max={12} step={1} value={month} onChange={(e) => setMonth(Number(e.target.value))} className="mt-1 w-full accent-[var(--brand)]" /></label>
+              <label className="block">Time: {String(Math.floor(hour)).padStart(2, '0')}:{String(Math.round((hour % 1) * 60)).padStart(2, '0')} <input type="range" min={5} max={19} step={0.25} value={hour} onChange={(e) => setHour(Number(e.target.value))} className="mt-1 w-full accent-[var(--brand)]" /></label>
               <p className="text-stone-400">Sun {sunInfo.elevation > 0 ? `${sunInfo.elevation.toFixed(0)}° above the horizon` : 'below the horizon'} · latitude {scene.sun.latitude.toFixed(1)}°</p>
             </div>)}
             {tool === 'quiz' && q && (<div className="space-y-2">
               <p className="font-semibold text-white">Question {quizIndex + 1} of {scene.quiz.length}</p>
               <p>{q.question}</p>
               {quizResult && <p className={quizResult.ok ? 'text-emerald-300' : 'text-amber-300'}>{quizResult.text}</p>}
-              {quizResult?.ok && quizIndex < scene.quiz.length - 1 && <button type="button" onClick={() => { setQuizIndex((i) => i + 1); setQuizResult(null); }} className="rounded-md bg-[#D97757] px-3 py-1.5 font-semibold text-white">Next question</button>}
+              {quizResult?.ok && quizIndex < scene.quiz.length - 1 && <button type="button" onClick={() => { setQuizIndex((i) => i + 1); setQuizResult(null); }} className="rounded-md bg-[var(--brand)] px-3 py-1.5 font-semibold text-white">Next question</button>}
             </div>)}
             {tool === 'bom' && (<div className="space-y-2">
               <p className="font-semibold text-white">Materials and cost</p>
@@ -595,7 +595,7 @@ export default function SceneViewer({ scene, fileName, fill }: { scene: Scene; f
         <div className="border-t border-white/[0.06] px-3 py-2">
           {scene.views.length > 0 && (
             <div className="flex gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none]">
-              {scene.views.map((v, i) => <button key={i} type="button" onClick={() => goView(i)} className={`shrink-0 rounded-full border px-3 py-1 text-xs ${view === i ? 'border-[#D97757] bg-[#D97757]/15 text-white' : 'border-white/10 text-stone-300 hover:bg-white/5'}`}>{i + 1}. {v.name}</button>)}
+              {scene.views.map((v, i) => <button key={i} type="button" onClick={() => goView(i)} className={`shrink-0 rounded-full border px-3 py-1 text-xs ${view === i ? 'border-[var(--brand)] bg-[var(--brand)]/15 text-white' : 'border-white/10 text-stone-300 hover:bg-white/5'}`}>{i + 1}. {v.name}</button>)}
             </div>
           )}
           <p className="mt-1 text-xs leading-relaxed text-stone-400">{view !== null && scene.views[view]?.note ? scene.views[view].note : scene.description}</p>

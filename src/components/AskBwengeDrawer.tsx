@@ -83,18 +83,18 @@ export function AskBwengeDrawer({ surface, surfaceId, title, suggestions, onDone
 
   const shell = light ? 'bg-white text-[#202124] border-[#E0E0E0]' : 'bg-[#1B1B1B] text-neutral-100 border-white/10';
   const sub = light ? 'text-[#5F6368]' : 'text-neutral-400';
-  const chip = light ? 'border-[#E0E0E0] hover:border-[#D97757] text-[#202124]' : 'border-white/10 hover:border-[#D97757]/60 text-neutral-200';
+  const chip = light ? 'border-[#E0E0E0] hover:border-[var(--brand)] text-[#202124]' : 'border-white/10 hover:border-[var(--brand)]/60 text-neutral-200';
   return (
     <>
       {!open && (
-        <button type="button" onClick={() => setOpen(true)} className="fixed bottom-5 right-5 z-[60] inline-flex items-center gap-2 rounded-full bg-[#D97757] px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-black/25 hover:bg-[#c66849]">
+        <button type="button" onClick={() => setOpen(true)} className="fixed bottom-5 right-5 z-[60] inline-flex items-center gap-2 rounded-full bg-[var(--brand)] px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-black/25 hover:bg-[var(--brand-strong)]">
           <Sparkles size={16} /> Ask Bwenge
         </button>
       )}
       {open && (
         <aside className={`fixed inset-y-0 right-0 z-[60] flex w-full max-w-[420px] flex-col border-l shadow-2xl ${shell}`} aria-label="Ask Bwenge">
           <header className={`flex items-center gap-2 border-b px-4 py-3 ${light ? 'border-[#E0E0E0]' : 'border-white/10'}`}>
-            <Sparkles size={16} className="text-[#D97757]" />
+            <Sparkles size={16} className="text-[var(--brand)]" />
             <div className="min-w-0 flex-1"><p className="text-sm font-semibold">Ask Bwenge</p><p className={`truncate text-xs ${sub}`}>{title}</p></div>
             <button type="button" onClick={() => setOpen(false)} aria-label="Close" className={`rounded-full p-1.5 ${light ? 'hover:bg-black/5' : 'hover:bg-white/10'}`}><X size={16} /></button>
           </header>
@@ -122,8 +122,8 @@ export function AskBwengeDrawer({ surface, surfaceId, title, suggestions, onDone
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(text); } }}
                 className="max-h-32 min-h-[24px] flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-neutral-500" />
               {busy
-                ? <button type="button" onClick={() => abort.current?.abort()} aria-label="Stop" className="flex h-8 w-8 items-center justify-center rounded-full bg-[#D97757] text-white"><Square size={13} /></button>
-                : <button type="submit" disabled={!text.trim()} aria-label="Send" className="flex h-8 w-8 items-center justify-center rounded-full bg-[#D97757] text-white disabled:opacity-40"><ArrowUp size={16} /></button>}
+                ? <button type="button" onClick={() => abort.current?.abort()} aria-label="Stop" className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--brand)] text-white"><Square size={13} /></button>
+                : <button type="submit" disabled={!text.trim()} aria-label="Send" className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--brand)] text-white disabled:opacity-40"><ArrowUp size={16} /></button>}
             </div>
           </form>
         </aside>

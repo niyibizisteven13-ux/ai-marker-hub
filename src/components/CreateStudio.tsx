@@ -106,7 +106,7 @@ function ModePicker({ selected, onSelect }: { selected: string; onSelect: (val: 
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-[#C2C0B6] hover:bg-white/5 transition-colors border border-white/10 bg-[#30302E]"
+        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-[var(--app-muted)] hover:bg-white/5 transition-colors border border-white/10 bg-[var(--app-panel)]"
       >
         <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
         <span>{selectedMode.short}</span>
@@ -114,7 +114,7 @@ function ModePicker({ selected, onSelect }: { selected: string; onSelect: (val: 
       </button>
 
       {open && (
-        <div className="absolute bottom-full right-0 mb-2 w-48 rounded-2xl border border-white/15 bg-[#30302E] shadow-2xl p-1 z-50 animate-in fade-in slide-in-from-bottom-2 duration-150">
+        <div className="absolute bottom-full right-0 mb-2 w-48 rounded-2xl border border-white/15 bg-[var(--app-panel)] shadow-2xl p-1 z-50 animate-in fade-in slide-in-from-bottom-2 duration-150">
           {modes.map((m) => (
             <button
               key={m.id}
@@ -124,7 +124,7 @@ function ModePicker({ selected, onSelect }: { selected: string; onSelect: (val: 
                 setOpen(false);
               }}
               className={`w-full text-left px-3 py-2 rounded-xl text-xs font-medium transition-colors ${
-                selected === m.id ? 'bg-[#5DCAA5]/20 text-white' : 'text-[#C2C0B6] hover:bg-white/5 hover:text-white'
+                selected === m.id ? 'bg-[#5DCAA5]/20 text-white' : 'text-[var(--app-muted)] hover:bg-white/5 hover:text-white'
               }`}
             >
               {m.label}
@@ -372,26 +372,26 @@ export default function CreateStudio({
 
   return (
     <div
-      className="relative flex h-full w-full flex-col overflow-hidden bg-[#262624] text-[#FAF9F5]"
+      className="relative flex h-full w-full flex-col overflow-hidden bg-[var(--app-bg)] text-[var(--app-text)]"
       onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setIsDraggingAttachments(true); } }}
       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setIsDraggingAttachments(false); }}
       onDrop={handleComposerDrop}
     >
-      {isDraggingAttachments && <div className="absolute inset-3 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-emerald-400/70 bg-[#141413]/95 text-sm font-medium text-emerald-200 pointer-events-none">Drop documents to attach</div>}
+      {isDraggingAttachments && <div className="absolute inset-3 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-emerald-400/70 bg-[var(--app-sunken)]/95 text-sm font-medium text-emerald-200 pointer-events-none">Drop documents to attach</div>}
       {/* Header */}
-      <header className="flex h-[calc(56px+env(safe-area-inset-top,0px))] shrink-0 items-center justify-between border-b border-white/[0.06] bg-[#212121]/95 px-3 pt-[env(safe-area-inset-top,0px)] backdrop-blur-md">
+      <header className="flex h-[calc(56px+env(safe-area-inset-top,0px))] shrink-0 items-center justify-between border-b border-white/[0.06] bg-[var(--app-panel-2)]/95 px-3 pt-[env(safe-area-inset-top,0px)] backdrop-blur-md">
         {/* Left: Menu button on mobile */}
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={onOpenSidebar}
-            className="flex h-11 w-11 items-center justify-center rounded-xl text-[#C2C0B6] hover:bg-white/10 hover:text-white transition-colors lg:hidden"
+            className="flex h-11 w-11 items-center justify-center rounded-xl text-[var(--app-muted)] hover:bg-white/10 hover:text-white transition-colors lg:hidden"
             aria-label="Open navigation menu"
           >
             <PanelLeft className="h-5 w-5" />
           </button>
           <div className="hidden lg:flex items-center gap-2">
-            <span className="text-sm font-semibold tracking-tight text-[#FAF9F5]">
+            <span className="text-sm font-semibold tracking-tight text-[var(--app-text)]">
               {messages.length > 0 && truncatedTitle ? truncatedTitle : 'New Chat'}
             </span>
           </div>
@@ -400,7 +400,7 @@ export default function CreateStudio({
         {/* Center: Truncated conversation title on mobile */}
         <div className="flex-1 px-2 text-center lg:hidden truncate">
           {messages.length > 0 && truncatedTitle && (
-            <span className="text-sm font-medium text-[#FAF9F5] truncate">{truncatedTitle}</span>
+            <span className="text-sm font-medium text-[var(--app-text)] truncate">{truncatedTitle}</span>
           )}
         </div>
 
@@ -412,7 +412,7 @@ export default function CreateStudio({
           <button
             type="button"
             onClick={onNewChat}
-            className="flex h-11 w-11 items-center justify-center rounded-xl text-[#C2C0B6] hover:bg-white/10 hover:text-white transition-colors lg:hidden"
+            className="flex h-11 w-11 items-center justify-center rounded-xl text-[var(--app-muted)] hover:bg-white/10 hover:text-white transition-colors lg:hidden"
             aria-label="New chat"
             title="New chat"
           >
@@ -429,7 +429,7 @@ export default function CreateStudio({
           )) : (
             <button
               onClick={onOpenLoginModal}
-              className="flex bg-[#D97757] hover:bg-[#c26647] text-white font-medium px-3.5 py-1.5 rounded-xl text-xs transition-all shadow-md items-center gap-1.5"
+              className="flex bg-[var(--brand)] hover:bg-[var(--brand-strong)] text-white font-medium px-3.5 py-1.5 rounded-xl text-xs transition-all shadow-md items-center gap-1.5"
             >
               Sign in
             </button>
@@ -448,14 +448,14 @@ export default function CreateStudio({
               aria-haspopup="dialog"
               aria-expanded={menuOpen}
               title="Conversation menu"
-              className="flex h-11 w-11 lg:h-9 lg:w-9 items-center justify-center rounded-xl text-[#C2C0B6] hover:bg-white/10 hover:text-white transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#F0A12C]/70"
+              className="flex h-11 w-11 lg:h-9 lg:w-9 items-center justify-center rounded-xl text-[var(--app-muted)] hover:bg-white/10 hover:text-white transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#F0A12C]/70"
               aria-label="More options"
             >
               <MoreVertical size={18} />
             </button>
 
             {menuOpen && typeof document !== 'undefined' && createPortal(
-              <div ref={menuRef} role="dialog" aria-label="Conversation options" className="bwenge-menu-scroll bwenge-menu-enter fixed z-[9999] flex max-h-[min(72dvh,36rem)] w-[min(20rem,calc(100vw-1.5rem))] flex-col overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-[#20201F] p-2 text-sm text-[#FAF9F5] shadow-[0_24px_80px_rgba(0,0,0,.65)] ring-1 ring-black/30 backdrop-blur-2xl" style={{ top: menuPosition.top, right: menuPosition.right }}>
+              <div ref={menuRef} role="dialog" aria-label="Conversation options" className="bwenge-menu-scroll bwenge-menu-enter fixed z-[9999] flex max-h-[min(72dvh,36rem)] w-[min(20rem,calc(100vw-1.5rem))] flex-col overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-[var(--app-panel-2)] p-2 text-sm text-[var(--app-text)] shadow-[0_24px_80px_rgba(0,0,0,.65)] ring-1 ring-black/30 backdrop-blur-2xl" style={{ top: menuPosition.top, right: menuPosition.right }}>
                 {/* This Chat Section */}
                 <div className="px-3 pb-1.5 pt-2 font-bold text-[10px] tracking-[.14em] uppercase text-neutral-400">Conversation</div>
                 <button
@@ -558,7 +558,7 @@ export default function CreateStudio({
                   <select
                     value={answerLanguage}
                     onChange={(e) => setAnswerLanguage(e.target.value)}
-                    className="max-w-32 rounded-lg border border-white/10 bg-[#151514] px-2.5 py-1.5 text-xs text-neutral-200 outline-none focus:border-[#F0A12C]/60 focus:ring-2 focus:ring-[#F0A12C]/15"
+                    className="max-w-32 rounded-lg border border-white/10 bg-[var(--app-sunken)] px-2.5 py-1.5 text-xs text-neutral-200 outline-none focus:border-[#F0A12C]/60 focus:ring-2 focus:ring-[#F0A12C]/15"
                   >
                     <option value="Auto">Auto</option>
                     <option value="Kinyarwanda">Kinyarwanda</option>
@@ -637,7 +637,7 @@ export default function CreateStudio({
               </div>
 
               {/* Greeting */}
-              <h1 className="font-serif text-[26px] sm:text-[32px] font-normal tracking-tight text-[#FAF9F5] mb-6">
+              <h1 className="font-serif text-[26px] sm:text-[32px] font-normal tracking-tight text-[var(--app-text)] mb-6">
                 {getGreeting()}
               </h1>
 
@@ -646,12 +646,12 @@ export default function CreateStudio({
                 <button
                   type="button"
                   onClick={() => onSendMessage("Which datasets are available, and what are the most important insights in them?")}
-                  className="p-3.5 rounded-2xl border border-white/10 bg-[#30302E]/80 hover:bg-[#30302E] hover:border-emerald-500/40 transition-all flex flex-col gap-1.5 shadow-sm group"
+                  className="p-3.5 rounded-2xl border border-white/10 bg-[var(--app-panel)]/80 hover:bg-[var(--app-panel)] hover:border-emerald-500/40 transition-all flex flex-col gap-1.5 shadow-sm group"
                 >
                   <div className="flex items-center gap-2 text-emerald-400 font-semibold text-xs">
                     <Database size={16} /> Explore a dataset
                   </div>
-                  <p className="text-[11px] text-[#C2C0B6] group-hover:text-[#FAF9F5] leading-relaxed">
+                  <p className="text-[11px] text-[var(--app-muted)] group-hover:text-[var(--app-text)] leading-relaxed">
                     Search, read and analyse curated data
                   </p>
                 </button>
@@ -659,12 +659,12 @@ export default function CreateStudio({
                 <button
                   type="button"
                   onClick={() => window.dispatchEvent(new Event('bwenge:open-mark'))}
-                  className="p-3.5 rounded-2xl border border-white/10 bg-[#30302E]/80 hover:bg-[#30302E] hover:border-amber-500/40 transition-all flex flex-col gap-1.5 shadow-sm group"
+                  className="p-3.5 rounded-2xl border border-white/10 bg-[var(--app-panel)]/80 hover:bg-[var(--app-panel)] hover:border-amber-500/40 transition-all flex flex-col gap-1.5 shadow-sm group"
                 >
                   <div className="flex items-center gap-2 text-amber-400 font-semibold text-xs">
                     <FileText size={16} /> Mark an exam
                   </div>
-                  <p className="text-[11px] text-[#C2C0B6] group-hover:text-[#FAF9F5] leading-relaxed">
+                  <p className="text-[11px] text-[var(--app-muted)] group-hover:text-[var(--app-text)] leading-relaxed">
                     Scan or add the scripts, watch the red pen
                   </p>
                 </button>
@@ -672,12 +672,12 @@ export default function CreateStudio({
                 <button
                   type="button"
                   onClick={() => onSendMessage("Create an interactive HTML dashboard that demonstrates student performance: class A averaged 62%, 68% and 74% in terms 1 to 3, and class B 58%, 61% and 70%. Include KPIs, a chart, a table and the key insights.")}
-                  className="p-3.5 rounded-2xl border border-white/10 bg-[#30302E]/80 hover:bg-[#30302E] hover:border-teal-500/40 transition-all flex flex-col gap-1.5 shadow-sm group"
+                  className="p-3.5 rounded-2xl border border-white/10 bg-[var(--app-panel)]/80 hover:bg-[var(--app-panel)] hover:border-teal-500/40 transition-all flex flex-col gap-1.5 shadow-sm group"
                 >
                   <div className="flex items-center gap-2 text-teal-400 font-semibold text-xs">
                     <LayoutDashboard size={16} /> Build a live dashboard
                   </div>
-                  <p className="text-[11px] text-[#C2C0B6] group-hover:text-[#FAF9F5] leading-relaxed">
+                  <p className="text-[11px] text-[var(--app-muted)] group-hover:text-[var(--app-text)] leading-relaxed">
                     Turn figures into an interactive HTML page
                   </p>
                 </button>
@@ -685,12 +685,12 @@ export default function CreateStudio({
                 <button
                   type="button"
                   onClick={() => onSendMessage("Help me write or translate technical and official documents between Kinyarwanda, English, and French.")}
-                  className="p-3.5 rounded-2xl border border-white/10 bg-[#30302E]/80 hover:bg-[#30302E] hover:border-purple-500/40 transition-all flex flex-col gap-1.5 shadow-sm group"
+                  className="p-3.5 rounded-2xl border border-white/10 bg-[var(--app-panel)]/80 hover:bg-[var(--app-panel)] hover:border-purple-500/40 transition-all flex flex-col gap-1.5 shadow-sm group"
                 >
                   <div className="flex items-center gap-2 text-purple-400 font-semibold text-xs">
                     <Languages size={16} /> Write or translate
                   </div>
-                  <p className="text-[11px] text-[#C2C0B6] group-hover:text-[#FAF9F5] leading-relaxed">
+                  <p className="text-[11px] text-[var(--app-muted)] group-hover:text-[var(--app-text)] leading-relaxed">
                     Draft and translate in English, French & Kinyarwanda
                   </p>
                 </button>
@@ -729,7 +729,7 @@ export default function CreateStudio({
                   behavior: 'smooth',
                 });
               }}
-              className="flex items-center gap-1.5 rounded-full bg-[#30302E] border border-white/15 px-4 py-2 text-xs font-semibold text-[#FAF9F5] shadow-2xl hover:bg-white/10 transition-all"
+              className="flex items-center gap-1.5 rounded-full bg-[var(--app-panel)] border border-white/15 px-4 py-2 text-xs font-semibold text-[var(--app-text)] shadow-2xl hover:bg-white/10 transition-all"
             >
               <span>↓ New response</span>
             </button>
@@ -756,11 +756,11 @@ export default function CreateStudio({
       />
 
       {/* Composer Footer */}
-      <footer className="shrink-0 bg-[#262624] px-3 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))]">
+      <footer className="shrink-0 bg-[var(--app-bg)] px-3 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))]">
         <div className="mx-auto w-full max-w-2xl relative">
           <LearningModeBanner value={learning} onExit={() => setLearning({ mode: 'normal' })} speak={speakReplies} onToggleSpeak={() => { setSpeakReplies((v) => !v); window.speechSynthesis?.cancel(); }}
             onFeedback={() => onSendMessage('End the roleplay and give me my feedback.', [], { answerLanguage, learning })} />
-          <div className="rounded-[28px] border border-white/10 bg-[#30302E] p-3 shadow-[0_4px_24px_rgba(0,0,0,0.25)]">
+          <div className="rounded-[28px] border border-white/10 bg-[var(--app-panel)] p-3 shadow-[0_4px_24px_rgba(0,0,0,0.25)]">
             {stagedAttachments.length > 0 && (
               <div className="mb-2.5 flex gap-2.5 overflow-x-auto px-1 pb-1 pt-2">
                 {stagedAttachments.map((meta: any, idx: number) => {
@@ -784,14 +784,14 @@ export default function CreateStudio({
                 <button
                   type="button"
                   onClick={() => setPlusMenuOpen((prev) => !prev)}
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 text-[#C2C0B6] hover:bg-white/5 hover:text-white transition-colors"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 text-[var(--app-muted)] hover:bg-white/5 hover:text-white transition-colors"
                   title="Add attachments or mark papers"
                 >
                   <Plus size={18} />
                 </button>
 
                 {plusMenuOpen && (
-                  <div className="absolute bottom-full left-0 mb-2 w-52 rounded-2xl border border-white/15 bg-[#212121] shadow-2xl z-50 py-1.5 text-xs text-[#FAF9F5] animate-in fade-in slide-in-from-bottom-1">
+                  <div className="absolute bottom-full left-0 mb-2 w-52 rounded-2xl border border-white/15 bg-[var(--app-panel-2)] shadow-2xl z-50 py-1.5 text-xs text-[var(--app-text)] animate-in fade-in slide-in-from-bottom-1">
                     <button
                       type="button"
                       onClick={() => {
@@ -846,7 +846,7 @@ export default function CreateStudio({
                   onKeyDown={handleKeyDown}
                   onPaste={handleComposerPaste}
                   placeholder={typeof window !== 'undefined' && window.innerWidth < 640 ? 'Ask Bwenge anything…' : 'Ask anything, or attach files and datasets…'}
-                  className="w-full bg-transparent border-0 resize-none text-base leading-6 text-[#FAF9F5] placeholder-[#9C9A92] outline-none px-1 py-1 scrollbar-hidden"
+                  className="w-full bg-transparent border-0 resize-none text-base leading-6 text-[var(--app-text)] placeholder-[var(--app-faint)] outline-none px-1 py-1 scrollbar-hidden"
                 />
               </div>
 
@@ -862,7 +862,7 @@ export default function CreateStudio({
                   className={`flex h-9 w-9 items-center justify-center rounded-full border transition-colors ${
                     speech.listening
                       ? 'border-rose-500 bg-rose-500/20 text-rose-400 animate-pulse'
-                      : 'border-white/10 text-[#C2C0B6] hover:bg-white/5 hover:text-white'
+                      : 'border-white/10 text-[var(--app-muted)] hover:bg-white/5 hover:text-white'
                   }`}
                   title={speech.listening ? 'Stop listening' : 'Speak your message'}
                   aria-pressed={speech.listening}
@@ -880,8 +880,8 @@ export default function CreateStudio({
                   disabled={!canSend}
                   className={`flex h-9 w-9 items-center justify-center rounded-full transition-all ${
                     canSend
-                      ? 'bg-[#D97757] text-white shadow-md active:scale-95'
-                      : 'bg-[#D97757]/40 text-white/50 cursor-not-allowed'
+                      ? 'bg-[var(--brand)] text-white shadow-md active:scale-95'
+                      : 'bg-[var(--brand)]/40 text-white/50 cursor-not-allowed'
                   }`}
                   aria-label={isTyping ? 'Stop generating' : 'Send message'}
                 >
@@ -901,7 +901,7 @@ export default function CreateStudio({
                 <select
                   value={answerLanguage}
                   onChange={(e) => setAnswerLanguage(e.target.value)}
-                  className="bg-[#212121] text-[11px] text-neutral-200 border border-white/15 rounded px-2 py-0.5 outline-none"
+                  className="bg-[var(--app-panel-2)] text-[11px] text-neutral-200 border border-white/15 rounded px-2 py-0.5 outline-none"
                 >
                   <option value="Auto">Auto</option>
                   <option value="Kinyarwanda">Kinyarwanda</option>
@@ -913,15 +913,15 @@ export default function CreateStudio({
           </div>
 
           {/* Credits left (plan) and disclaimer */}
-          <div className="mt-2 flex items-center justify-between gap-3 px-1 text-[10.5px] text-[#9C9A92] select-none">
+          <div className="mt-2 flex items-center justify-between gap-3 px-1 text-[10.5px] text-[var(--app-faint)] select-none">
             {billing ? (
               <span className="flex min-w-0 items-center gap-1.5">
-                <Coins size={11} className="shrink-0 text-[#D97757]" />
+                <Coins size={11} className="shrink-0 text-[var(--brand)]" />
                 <span className="truncate">
                   {creditMeter(billing.usage).label}
                   {billing.wallet > 0 ? ` · ${billing.wallet.toLocaleString('en-US')} top-up` : ''}
                 </span>
-                {(billing.plan === 'FREE' || billing.plan === 'GO') && <a href="/upgrade" className="shrink-0 font-semibold text-[#D97757] hover:underline">Upgrade</a>}
+                {(billing.plan === 'FREE' || billing.plan === 'GO') && <a href="/upgrade" className="shrink-0 font-semibold text-[var(--brand)] hover:underline">Upgrade</a>}
               </span>
             ) : <span />}
             <span className="hidden shrink-0 sm:inline">{zipping ? 'Packing folder…' : 'Bwenge can make mistakes. Check important information.'}</span>

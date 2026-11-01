@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { agentTarget } from '../services/AiService.js';
 import { LearnError, answerItem, archiveClass, classDashboard, createClass, joinClass, leaveClass, listSkills, myClasses, nextItem, revealHint, type AiTarget } from '../services/learning/practice.js';
+import { buildGradebook, gradebookWorkbook, setGradebookItems, type GradebookItem } from '../services/gradebook.js';
 
 /**
  * Adaptive practice and classes (mounted at /api/learn behind requireAuth).
@@ -48,6 +49,20 @@ export function createLearnRouter(ai: () => AiTarget = () => { const a = agentTa
   }));
   router.delete('/classes/:id/membership', run(async (req) => { await leaveClass(userIdOf(req), String(req.params.id)); return {}; }));
   router.delete('/classes/:id', run(async (req) => { await archiveClass(userIdOf(req), String(req.params.id)); return {}; }));
+  // Gradebook: tasks and quizzes the teacher adds, one row per student (owner only).
+  router.get('/classes/:id/gradebook', run(async (req) => ({ gradebook: await buildGradebook(userIdOf(req), String(req.params.id)) })));
+  router.put('/classes/:id/gradebook', run(async (req) => {
+    const b = z.object({ items: z.array(z.object({ kind: z.enum(['task', 'quiz']), id: z.string().max(64) })).max(60) }).parse(req.body ?? {});
+    return { gradebook: await setGradebookItems(userIdOf(req), String(req.params.id), b.items as GradebookItem[]) };
+  }));
+  router.get('/classes/:id/gradebook.xlsx', async (req, res) => {
+    try {
+      const { name, data } = await gradebookWorkbook(userIdOf(req), String(req.params.id));
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${name.replace(/"/g, '')}"`);
+      res.end(data);
+    } catch (e) { fail(res, e); }
+  });
   router.get('/classes/:id/dashboard', run(async (req) => classDashboard(userIdOf(req), String(req.params.id))));
   return router;
 }

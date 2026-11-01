@@ -35,23 +35,23 @@ export function LearningModePicker({ value, onChange }: { value: LearningSetting
   return (
     <div ref={ref} className="relative">
       <button type="button" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open}
-        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${value.mode === 'normal' ? 'border-white/10 text-neutral-300 hover:text-white' : 'border-[#D97757]/50 bg-[#D97757]/15 text-[#F2B39C]'}`}>
+        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors ${value.mode === 'normal' ? 'border-white/10 text-neutral-300 hover:text-white' : 'border-[var(--brand)]/50 bg-[var(--brand)]/15 text-[var(--brand-soft)]'}`}>
         <Icon size={12} aria-hidden="true" /> {LABEL[value.mode]} <ChevronDown size={11} aria-hidden="true" />
       </button>
       {open && (
-        <div role="menu" className="absolute bottom-full left-0 z-50 mb-2 w-[min(20rem,calc(100vw-2rem))] rounded-2xl border border-white/15 bg-[#212121] p-1.5 text-xs text-neutral-200 shadow-2xl">
+        <div role="menu" className="absolute bottom-full left-0 z-50 mb-2 w-[min(20rem,calc(100vw-2rem))] rounded-2xl border border-white/15 bg-[var(--app-panel-2)] p-1.5 text-xs text-neutral-200 shadow-2xl">
           {(['normal', 'socratic'] as const).map((m) => (
             <button key={m} type="button" role="menuitemradio" aria-checked={value.mode === m} onClick={() => pick({ mode: m })} className="flex w-full items-start gap-2.5 rounded-xl px-3 py-2 text-left hover:bg-white/5">
               {m === 'normal' ? <MessageSquare size={15} className="mt-0.5 text-neutral-400" /> : <GraduationCap size={15} className="mt-0.5 text-emerald-300" />}
               <span className="flex-1"><span className="block font-semibold text-white">{LABEL[m]}</span><span className="text-neutral-400">{m === 'normal' ? 'Answers, files, charts and everything else.' : 'Guides you with questions and hints instead of giving answers. Good for homework and revision.'}</span></span>
-              {value.mode === m && <Check size={14} className="mt-0.5 text-[#D97757]" />}
+              {value.mode === m && <Check size={14} className="mt-0.5 text-[var(--brand)]" />}
             </button>
           ))}
           <div className="mt-1 border-t border-white/10 px-3 pb-1 pt-2 text-[10.5px] font-semibold uppercase tracking-wide text-neutral-500">Roleplay</div>
           {ROLEPLAY_PRESETS.map((p) => (
             <button key={p.id} type="button" role="menuitemradio" aria-checked={value.mode === 'roleplay' && value.character === p.settings.character} onClick={() => pick(p.settings)} className="flex w-full items-center gap-2.5 rounded-xl px-3 py-1.5 text-left hover:bg-white/5">
               <Theater size={14} className="text-violet-300" /> <span className="flex-1">{p.title}</span>
-              {value.mode === 'roleplay' && value.character === p.settings.character && <Check size={14} className="text-[#D97757]" />}
+              {value.mode === 'roleplay' && value.character === p.settings.character && <Check size={14} className="text-[var(--brand)]" />}
             </button>
           ))}
           <details className="mx-1 mt-1 rounded-xl bg-white/[0.03] px-2.5 py-2">
@@ -63,7 +63,7 @@ export function LearningModePicker({ value, onChange }: { value: LearningSetting
                 <input value={custom.language} onChange={(e) => setCustom({ ...custom, language: e.target.value })} placeholder="Language (optional)" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 text-xs text-white placeholder:text-neutral-500" />
                 <select value={custom.level} onChange={(e) => setCustom({ ...custom, level: e.target.value })} className="rounded-lg border border-white/10 bg-black/30 px-1.5 text-xs text-white"><option value="">Level</option>{['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].map((l) => <option key={l}>{l}</option>)}</select>
               </div>
-              <button className="w-full rounded-lg bg-[#D97757] py-1.5 text-xs font-semibold text-white">Start roleplay</button>
+              <button className="w-full rounded-lg bg-[var(--brand)] py-1.5 text-xs font-semibold text-white">Start roleplay</button>
             </form>
           </details>
         </div>
@@ -76,7 +76,7 @@ export function LearningModePicker({ value, onChange }: { value: LearningSetting
 export function LearningModeBanner({ value, onExit, speak, onToggleSpeak, onFeedback }: { value: LearningSettings; onExit: () => void; speak: boolean; onToggleSpeak: () => void; onFeedback: () => void }) {
   if (value.mode === 'normal') return null;
   return (
-    <div className="mb-2 flex flex-wrap items-center gap-2 rounded-2xl border border-[#D97757]/30 bg-[#D97757]/10 px-3 py-2 text-[11.5px] text-[#F5C7B5]">
+    <div className="mb-2 flex flex-wrap items-center gap-2 rounded-2xl border border-[var(--brand)]/30 bg-[var(--brand)]/10 px-3 py-2 text-[11.5px] text-[#F5C7B5]">
       {value.mode === 'socratic' ? <GraduationCap size={14} className="shrink-0" /> : <Theater size={14} className="shrink-0" />}
       <span className="min-w-0 flex-1">
         {value.mode === 'socratic'

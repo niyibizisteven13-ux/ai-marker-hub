@@ -97,13 +97,13 @@ export default function ChatMarkingCard({ examId }: { examId: string }) {
         <span className={`h-2 w-2 shrink-0 rounded-full ${active ? 'animate-pulse bg-emerald-400' : connected ? 'bg-emerald-500/70' : 'bg-neutral-500'}`} aria-hidden />
         <span className="whitespace-nowrap text-[12.5px] font-semibold text-white">{active ? 'Marking in progress' : ended?.type === 'job_cancelled' ? 'Marking stopped' : marked.length ? 'Marking finished' : 'Marking'}</span>
         {progress && <span className="min-w-0 truncate whitespace-nowrap text-[11.5px] text-neutral-400">{progress.done}/{progress.total}<span className="hidden sm:inline"> marked</span>{timing ? <span className="hidden sm:inline"> · {timing}</span> : null}</span>}
-        <button type="button" onClick={() => openMarking(examId)} className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-[#D97757] px-2.5 py-1 text-[12px] font-semibold text-white hover:bg-[#c96a4c]">
+        <button type="button" onClick={() => openMarking(examId)} className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-[var(--brand)] px-2.5 py-1 text-[12px] font-semibold text-white hover:bg-[var(--brand-strong)]">
           <PanelRightOpen size={13} aria-hidden /><span className="whitespace-nowrap"><span className="sm:hidden">Red pen</span><span className="hidden sm:inline">Open live marking</span></span>
         </button>
       </div>
       {progress && (
         <div className="h-1 bg-white/[0.05]" role="progressbar" aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={progress.done}>
-          <div className="h-full bg-[#D97757] transition-[width] duration-500" style={{ width: `${progress.total ? (100 * progress.done) / progress.total : 0}%` }} />
+          <div className="h-full bg-[var(--brand)] transition-[width] duration-500" style={{ width: `${progress.total ? (100 * progress.done) / progress.total : 0}%` }} />
         </div>
       )}
       <ul className="divide-y divide-white/[0.04]" aria-live="polite">
@@ -130,7 +130,7 @@ export default function ChatMarkingCard({ examId }: { examId: string }) {
             {steps.done.map((e) => (
               <span key={e.seq} className="flex items-center gap-2 py-0.5 text-neutral-500"><CheckCircle2 size={12} className="text-emerald-500/80" aria-hidden /><span className="truncate">{e.message}</span></span>
             ))}
-            <span className="flex items-center gap-2 py-0.5 text-neutral-200"><Loader2 size={13} className="animate-spin text-[#D97757]" aria-hidden /><span className="truncate">{steps.now?.message ?? `Marking student ${marked.length + 1}…`}</span></span>
+            <span className="flex items-center gap-2 py-0.5 text-neutral-200"><Loader2 size={13} className="animate-spin text-[var(--brand)]" aria-hidden /><span className="truncate">{steps.now?.message ?? `Marking student ${marked.length + 1}…`}</span></span>
           </li>
         )}
         {ended?.type === 'job_failed' && <li className="flex items-center gap-2 px-3 py-2 text-[12px] text-rose-300"><XCircle size={13} />{ended.message}</li>}
@@ -222,7 +222,7 @@ function DrawerBody({ target, setTarget }: { target: { examId: string; submissio
     if (fresh.some((e) => e.type === 'script_marked' && e.submissionId === next)) setRefresh((n) => n + 1);
   }, [events, target, setTarget]);
   return (
-    <aside aria-label="Live marking" className="fixed inset-y-0 right-0 z-[80] flex w-full flex-col border-l border-white/[0.08] bg-[#1F1E1D] text-neutral-100 shadow-2xl sm:w-[min(560px,92vw)] animate-[slideIn_.22s_ease-out]">
+    <aside aria-label="Live marking" className="fixed inset-y-0 right-0 z-[80] flex w-full flex-col border-l border-white/[0.08] bg-[var(--app-panel-2)] text-neutral-100 shadow-2xl sm:w-[min(560px,92vw)] animate-[slideIn_.22s_ease-out]">
       <header className="flex items-center gap-2 border-b border-white/[0.06] px-4 py-3">
         <h2 className="flex-1 text-[15px] font-semibold">Live marking</h2>
         {target.pinned && <button type="button" onClick={() => setTarget({ ...target, pinned: false })} className="rounded-lg border border-white/10 px-2.5 py-1 text-[12px] text-neutral-300 hover:bg-white/5">Follow live</button>}

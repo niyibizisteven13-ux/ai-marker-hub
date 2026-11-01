@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import Gradebook from '../components/learn/Gradebook';
 import { ArrowLeft, ArrowUpRight, Check, Copy, FlaskConical, GraduationCap, Landmark, Languages, Lightbulb, Loader2, Plus, School, Sigma, Sparkles, Target, TrendingDown, TrendingUp, Users, X } from 'lucide-react';
 import { authFetch } from '../utils/authFetch';
 import { PageShell } from '../components/workspace/Shell';
@@ -33,7 +34,7 @@ const SUBJECTS: Array<{ name: string; icon: React.ReactNode; topics: string[] }>
 
 function Tile({ label, value, hint }: { label: string; value: React.ReactNode; hint?: string }) {
   return (
-    <div className="rounded-2xl border border-white/[0.07] bg-[#16171b] px-4 py-3">
+    <div className="rounded-2xl border border-white/[0.07] bg-[var(--ws-card)] px-4 py-3">
       <p className="text-[11.5px] font-medium uppercase tracking-wide text-neutral-500">{label}</p>
       <p className="mt-1 text-[22px] font-semibold tabular-nums text-white">{value}</p>
       {hint && <p className="text-[11.5px] text-neutral-500">{hint}</p>}
@@ -96,12 +97,12 @@ function Practice() {
     const mine = [...skills].sort((a, b) => a.mastery - b.mastery);
     return (
       <div className="space-y-6">
-        <form onSubmit={(e) => { e.preventDefault(); if (topic.trim()) void next(topic.trim()); }} className="rounded-2xl border border-white/[0.08] bg-gradient-to-br from-[#1b1c21] to-[#141519] p-5 sm:p-6">
+        <form onSubmit={(e) => { e.preventDefault(); if (topic.trim()) void next(topic.trim()); }} className="rounded-2xl border border-white/[0.08] bg-gradient-to-br from-[var(--ws-card-hover)] to-[var(--ws-card)] p-5 sm:p-6">
           <h2 className="text-[17px] font-semibold text-white">What do you want to practise?</h2>
           <p className="mt-1 text-[13.5px] text-neutral-400">Questions adapt to you: harder after a streak, back to the foundations when something is not clicking. Every answer is explained.</p>
           <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-            <input value={topic} onChange={(e) => setTopic(e.target.value)} maxLength={120} placeholder="Any topic, e.g. balancing chemical equations" className="min-w-0 flex-1 rounded-xl border border-white/[0.1] bg-[#0f1012] px-4 py-3 text-[14px] text-white placeholder:text-neutral-500 focus:border-[#D97757]/60 focus:outline-none" />
-            <button disabled={!topic.trim() || busy === 'next'} className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#D97757] px-5 py-3 text-[14px] font-semibold text-white shadow-[0_6px_20px_-8px_rgba(217,119,87,0.7)] hover:bg-[#c96a4c] disabled:opacity-50">
+            <input value={topic} onChange={(e) => setTopic(e.target.value)} maxLength={120} placeholder="Any topic, e.g. balancing chemical equations" className="min-w-0 flex-1 rounded-xl border border-white/[0.1] bg-[var(--ws-bg)] px-4 py-3 text-[14px] text-white placeholder:text-neutral-500 focus:border-[var(--brand)]/60 focus:outline-none" />
+            <button disabled={!topic.trim() || busy === 'next'} className="inline-flex items-center justify-center gap-2 rounded-xl bg-[var(--brand)] px-5 py-3 text-[14px] font-semibold text-white shadow-[0_6px_20px_-8px_rgba(217,119,87,0.7)] hover:bg-[var(--brand-strong)] disabled:opacity-50">
               {busy === 'next' ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />} Start practising
             </button>
           </div>
@@ -122,7 +123,7 @@ function Practice() {
             <h3 className="mb-2.5 text-[12px] font-semibold uppercase tracking-wide text-neutral-500">Continue · weakest first</h3>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {mine.map((s) => (
-                <button key={s.topicKey} type="button" onClick={() => void next(s.topic)} className="group rounded-2xl border border-white/[0.07] bg-[#16171b] p-4 text-left transition hover:border-white/[0.16] hover:bg-[#191a1f]">
+                <button key={s.topicKey} type="button" onClick={() => void next(s.topic)} className="group rounded-2xl border border-white/[0.07] bg-[var(--ws-card)] p-4 text-left transition hover:border-white/[0.16] hover:bg-[var(--ws-card-hover)]">
                   <div className="flex items-center justify-between gap-2">
                     <span className="truncate text-[14.5px] font-semibold text-white">{s.topic}</span>
                     {s.mastery < 0.4 ? <span className="shrink-0 rounded-full bg-rose-400/15 px-2 py-0.5 text-[10.5px] font-semibold text-rose-200">Needs work</span>
@@ -143,7 +144,7 @@ function Practice() {
           <h3 className="mb-2.5 text-[12px] font-semibold uppercase tracking-wide text-neutral-500">Start a subject</h3>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {SUBJECTS.map((g) => (
-              <div key={g.name} className="rounded-2xl border border-white/[0.07] bg-[#16171b] p-4">
+              <div key={g.name} className="rounded-2xl border border-white/[0.07] bg-[var(--ws-card)] p-4">
                 <p className="flex items-center gap-2 text-[14px] font-semibold text-white"><span className="grid h-7 w-7 place-items-center rounded-lg bg-white/[0.06]">{g.icon}</span>{g.name}</p>
                 <div className="mt-3 flex flex-col gap-1">
                   {g.topics.map((t) => (
@@ -169,7 +170,7 @@ function Practice() {
         {skill && <span className="ml-auto flex min-w-[10rem] items-center gap-2 text-xs text-neutral-400">Mastery <MasteryBar value={skill.mastery} /> {Math.round(skill.mastery * 100)}%</span>}
       </div>
 
-      <article className="rounded-2xl border border-white/[0.07] bg-[#16171b] p-5 sm:p-7">
+      <article className="rounded-2xl border border-white/[0.07] bg-[var(--ws-card)] p-5 sm:p-7">
         <div className="mb-3 flex flex-wrap items-center gap-2 text-[11px] font-medium">
           <span className="rounded-full bg-white/10 px-2.5 py-0.5 text-neutral-200">Level {item.level} · {LEVEL_NAMES[item.level]}</span>
           {item.foundation && <span className="rounded-full bg-sky-400/15 px-2.5 py-0.5 text-sky-200">Foundation: an idea this topic builds on</span>}
@@ -183,7 +184,7 @@ function Practice() {
               const right = done && c === item.answer;
               return (
                 <button key={c} type="button" disabled={done || busy === 'answer'} onClick={() => setResponse(c)}
-                  className={`flex items-start gap-3 rounded-2xl border px-4 py-3 text-left text-sm transition-colors ${right ? 'border-emerald-400/60 bg-emerald-400/10 text-white' : picked ? (done ? 'border-rose-400/60 bg-rose-400/10 text-white' : 'border-[#D97757] bg-[#D97757]/10 text-white') : 'border-white/10 text-neutral-200 hover:border-white/25'}`}>
+                  className={`flex items-start gap-3 rounded-2xl border px-4 py-3 text-left text-sm transition-colors ${right ? 'border-emerald-400/60 bg-emerald-400/10 text-white' : picked ? (done ? 'border-rose-400/60 bg-rose-400/10 text-white' : 'border-[var(--brand)] bg-[var(--brand)]/10 text-white') : 'border-white/10 text-neutral-200 hover:border-white/25'}`}>
                   <span className="mt-px font-semibold text-neutral-400">{String.fromCharCode(65 + i)}</span><span className="flex-1">{c}</span>
                   {right && <Check size={16} className="text-emerald-300" />}{done && picked && !right && <X size={16} className="text-rose-300" />}
                 </button>
@@ -193,7 +194,7 @@ function Practice() {
         ) : (
           <textarea value={done ? item.response : response} readOnly={done} onChange={(e) => setResponse(e.target.value)} rows={item.kind === 'numeric' ? 1 : 4} maxLength={2000}
             placeholder={item.kind === 'numeric' ? 'Your answer (include units if needed)' : 'Explain your answer in your own words'}
-            className="mt-5 w-full resize-y rounded-2xl border border-white/10 bg-[#0f1012] px-4 py-3 text-sm text-white placeholder:text-neutral-500 focus:border-[#D97757]/60 focus:outline-none" />
+            className="mt-5 w-full resize-y rounded-2xl border border-white/10 bg-[var(--ws-bg)] px-4 py-3 text-sm text-white placeholder:text-neutral-500 focus:border-[var(--brand)]/60 focus:outline-none" />
         )}
 
         {item.hintsShown.length > 0 && (
@@ -208,12 +209,12 @@ function Practice() {
               <legend className="mb-2 text-xs text-neutral-400">How sure are you?</legend>
               <div className="flex flex-wrap gap-1.5">
                 {CONFIDENCE.map((c, i) => (
-                  <button key={c} type="button" aria-pressed={confidence === i + 1} onClick={() => setConfidence(confidence === i + 1 ? null : i + 1)} className={`rounded-full border px-3 py-1 text-xs ${confidence === i + 1 ? 'border-[#D97757] bg-[#D97757]/15 text-white' : 'border-white/10 text-neutral-300 hover:border-white/25'}`}>{c}</button>
+                  <button key={c} type="button" aria-pressed={confidence === i + 1} onClick={() => setConfidence(confidence === i + 1 ? null : i + 1)} className={`rounded-full border px-3 py-1 text-xs ${confidence === i + 1 ? 'border-[var(--brand)] bg-[var(--brand)]/15 text-white' : 'border-white/10 text-neutral-300 hover:border-white/25'}`}>{c}</button>
                 ))}
               </div>
             </fieldset>
             <div className="mt-5 flex flex-wrap items-center gap-2">
-              <button type="button" disabled={!response.trim() || busy === 'answer'} onClick={() => void answer()} className="inline-flex items-center gap-2 rounded-2xl bg-[#D97757] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
+              <button type="button" disabled={!response.trim() || busy === 'answer'} onClick={() => void answer()} className="inline-flex items-center gap-2 rounded-2xl bg-[var(--brand)] px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
                 {busy === 'answer' && <Loader2 size={15} className="animate-spin" />} Check answer
               </button>
               <button type="button" disabled={item.hintsLeft === 0 || busy === 'hint'} onClick={() => void hint()} className="inline-flex items-center gap-1.5 rounded-2xl border border-white/10 px-4 py-2.5 text-sm text-neutral-200 hover:border-white/25 disabled:opacity-40">
@@ -261,6 +262,7 @@ function Classes() {
   const [dash, setDash] = useState<Dashboard | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [view, setView] = useState<'gradebook' | 'overview'>('gradebook');
   const load = useCallback(() => api<any>('/classes').then(setData).catch((e) => setError(e.message)), []);
   useEffect(() => { void load(); }, [load]);
   const act = async (fn: () => Promise<unknown>) => { setError(null); try { await fn(); await load(); } catch (e: any) { setError(e.message); } };
@@ -271,11 +273,17 @@ function Classes() {
       <div className="space-y-5">
         <button type="button" onClick={() => setDash(null)} className="inline-flex items-center gap-1 text-sm text-neutral-400 hover:text-white"><ArrowLeft size={15} /> Classes</button>
         <header className="flex flex-wrap items-end gap-3">
-          <div className="min-w-0 flex-1"><h2 className="truncate text-xl font-semibold text-white">{dash.class.name}</h2><p className="text-sm text-neutral-400">Anonymous class overview · groups smaller than {dash.k} are hidden</p></div>
+          <div className="min-w-0 flex-1"><h2 className="truncate text-xl font-semibold text-white">{dash.class.name}</h2><p className="text-sm text-neutral-400">{view === 'gradebook' ? 'Marks from your tasks and quizzes, one row per student' : `Anonymous practice overview · groups smaller than ${dash.k} are hidden`}</p></div>
           <button type="button" onClick={() => { void navigator.clipboard?.writeText(dash.class.code); setCopied(true); setTimeout(() => setCopied(false), 1500); }} className="inline-flex items-center gap-2 rounded-2xl border border-white/10 px-3 py-2 font-mono text-sm tracking-widest text-white hover:border-white/25">
             {dash.class.code} {copied ? <Check size={14} className="text-emerald-300" /> : <Copy size={14} />}
           </button>
         </header>
+        <div role="tablist" aria-label="Class view" className="inline-flex rounded-xl border border-white/[0.08] bg-[var(--ws-card)] p-0.5">
+          {([['gradebook', 'Gradebook'], ['overview', 'Practice overview']] as const).map(([id, label]) => (
+            <button key={id} type="button" role="tab" aria-selected={view === id} onClick={() => setView(id)} className={`rounded-[10px] px-3.5 py-1.5 text-[13px] font-medium ${view === id ? 'bg-white/[0.09] text-white' : 'text-neutral-400 hover:text-neutral-200'}`}>{label}</button>
+          ))}
+        </div>
+        {view === 'gradebook' ? <Gradebook classId={dash.class.id} /> : <>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <Stat label="Students" value={dash.students} />
           <Stat label="Active this week" value={dash.active7d ?? '–'} />
@@ -286,7 +294,7 @@ function Classes() {
           {dash.topics.map((t) => {
             const total = t.bands.struggling + t.bands.developing + t.bands.secure;
             return (
-              <section key={t.topic} className="rounded-2xl border border-white/[0.07] bg-[#16171b] p-5">
+              <section key={t.topic} className="rounded-2xl border border-white/[0.07] bg-[var(--ws-card)] p-5">
                 <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
                   <h3 className="flex-1 font-semibold text-white">{t.topic}</h3>
                   <span className="text-xs text-neutral-400">{t.learners} students · {t.attempts} answers · {t.accuracy === null ? '–' : `${Math.round(t.accuracy * 100)}% correct`} · avg level {t.meanLevel}</span>
@@ -312,6 +320,7 @@ function Classes() {
           })}
           {dash.topics.length === 0 && <p className="text-sm text-neutral-400">No topic has enough students practising yet.</p>}
         </div>
+        </>}
       </div>
     );
   }
@@ -328,20 +337,20 @@ function Classes() {
         </div>
       )}
       <div className="grid gap-5 lg:grid-cols-2">
-        <section className="rounded-2xl border border-white/[0.07] bg-[#16171b] p-5 sm:p-6">
-          <h2 className="flex items-center gap-2 text-[15px] font-semibold text-white"><School size={17} className="text-[#F0A586]" /> Create a class</h2>
+        <section className="rounded-2xl border border-white/[0.07] bg-[var(--ws-card)] p-5 sm:p-6">
+          <h2 className="flex items-center gap-2 text-[15px] font-semibold text-white"><School size={17} className="text-[var(--brand-soft)]" /> Create a class</h2>
           <p className="mt-1 text-[13px] text-neutral-400">Students join with a code. You see how the class does per topic and its common misconceptions, never individual names.</p>
           <form onSubmit={(e) => { e.preventDefault(); if (name.trim()) void act(async () => { await api('/classes', { json: { name } }); setName(''); }); }} className="mt-4 flex gap-2">
-            <input value={name} onChange={(e) => setName(e.target.value)} maxLength={80} placeholder="Class name, e.g. S4 Physics" className="min-w-0 flex-1 rounded-xl border border-white/[0.1] bg-[#0f1012] px-4 py-2.5 text-[14px] text-white placeholder:text-neutral-500 focus:border-[#D97757]/60 focus:outline-none" />
-            <button disabled={!name.trim()} className="inline-flex items-center gap-1.5 rounded-xl bg-[#D97757] px-4 text-[13.5px] font-semibold text-white hover:bg-[#c96a4c] disabled:opacity-50"><Plus size={15} /> Create</button>
+            <input value={name} onChange={(e) => setName(e.target.value)} maxLength={80} placeholder="Class name, e.g. S4 Physics" className="min-w-0 flex-1 rounded-xl border border-white/[0.1] bg-[var(--ws-bg)] px-4 py-2.5 text-[14px] text-white placeholder:text-neutral-500 focus:border-[var(--brand)]/60 focus:outline-none" />
+            <button disabled={!name.trim()} className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--brand)] px-4 text-[13.5px] font-semibold text-white hover:bg-[var(--brand-strong)] disabled:opacity-50"><Plus size={15} /> Create</button>
           </form>
         </section>
-        <section className="rounded-2xl border border-white/[0.07] bg-[#16171b] p-5 sm:p-6">
+        <section className="rounded-2xl border border-white/[0.07] bg-[var(--ws-card)] p-5 sm:p-6">
           <h2 className="flex items-center gap-2 text-[15px] font-semibold text-white"><GraduationCap size={17} className="text-sky-300" /> Join a class</h2>
           <p className="mt-1 text-[13px] text-neutral-400">Enter the code your teacher shared. They see only anonymous totals for the class, not your answers.</p>
           <form onSubmit={(e) => { e.preventDefault(); if (code.trim()) void act(async () => { await api('/classes/join', { json: { code } }); setCode(''); }); }} className="mt-4 flex gap-2">
-            <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} maxLength={12} placeholder="Class code" className="min-w-0 flex-1 rounded-xl border border-white/[0.1] bg-[#0f1012] px-4 py-2.5 font-mono text-[14px] tracking-widest text-white placeholder:font-sans placeholder:tracking-normal placeholder:text-neutral-500 focus:border-[#D97757]/60 focus:outline-none" />
-            <button disabled={code.trim().length < 4} className="rounded-xl bg-[#ececee] px-4 text-[13.5px] font-semibold text-[#0f1012] hover:bg-white disabled:opacity-50">Join</button>
+            <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} maxLength={12} placeholder="Class code" className="min-w-0 flex-1 rounded-xl border border-white/[0.1] bg-[var(--ws-bg)] px-4 py-2.5 font-mono text-[14px] tracking-widest text-white placeholder:font-sans placeholder:tracking-normal placeholder:text-neutral-500 focus:border-[var(--brand)]/60 focus:outline-none" />
+            <button disabled={code.trim().length < 4} className="rounded-xl bg-[var(--invert-bg)] px-4 text-[13.5px] font-semibold text-[#0f1012] hover:bg-white disabled:opacity-50">Join</button>
           </form>
         </section>
       </div>
@@ -352,7 +361,7 @@ function Classes() {
           <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {data.teaching.map((c) => (
               <li key={c.id}>
-                <button type="button" onClick={() => void open(c.id)} className="group flex h-full w-full flex-col rounded-2xl border border-white/[0.07] bg-[#16171b] p-4 text-left transition hover:border-white/[0.16] hover:bg-[#191a1f]">
+                <button type="button" onClick={() => void open(c.id)} className="group flex h-full w-full flex-col rounded-2xl border border-white/[0.07] bg-[var(--ws-card)] p-4 text-left transition hover:border-white/[0.16] hover:bg-[var(--ws-card-hover)]">
                   <span className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-white">{c.name}</span><ArrowUpRight size={15} className="text-neutral-500 group-hover:text-white" /></span>
                   <span className="mt-3 flex items-end justify-between gap-2">
                     <span><span className="block text-[24px] font-semibold leading-none tabular-nums text-white">{c.students}</span><span className="text-[12px] text-neutral-500">student{c.students === 1 ? '' : 's'}</span></span>
@@ -369,7 +378,7 @@ function Classes() {
           <h3 className="mb-2.5 text-[12px] font-semibold uppercase tracking-wide text-neutral-500">Classes you joined</h3>
           <ul className="grid gap-2 sm:grid-cols-2">
             {data.joined.map((c) => (
-              <li key={c.id} className="flex items-center gap-3 rounded-2xl border border-white/[0.07] bg-[#16171b] px-4 py-3">
+              <li key={c.id} className="flex items-center gap-3 rounded-2xl border border-white/[0.07] bg-[var(--ws-card)] px-4 py-3">
                 <Users size={15} className="text-neutral-500" /><span className="flex-1 truncate text-[14px] text-white">{c.name}</span>
                 <button type="button" onClick={() => void act(() => api(`/classes/${c.id}/membership`, { method: 'DELETE' }))} className="text-[12px] text-neutral-400 hover:text-rose-300">Leave</button>
               </li>
@@ -390,14 +399,14 @@ export default function LearnPage({ onBack }: { onBack: () => void }) {
   const [tab, setTab] = useState<'practice' | 'classes'>(() => (new URLSearchParams(window.location.search).get('tab') === 'classes' ? 'classes' : 'practice'));
   useEffect(() => { window.history.replaceState({}, '', tab === 'classes' ? '/learn?tab=classes' : '/learn'); }, [tab]);
   const tabs = (
-    <nav className="flex rounded-xl border border-white/[0.08] bg-[#16171b] p-0.5 text-[13px]" aria-label="Learn sections">
+    <nav className="flex rounded-xl border border-white/[0.08] bg-[var(--ws-card)] p-0.5 text-[13px]" aria-label="Learn sections">
       {(['practice', 'classes'] as const).map((t) => (
         <button key={t} type="button" aria-current={tab === t ? 'page' : undefined} onClick={() => setTab(t)} className={`rounded-[10px] px-4 py-1.5 font-medium capitalize ${tab === t ? 'bg-white/[0.09] text-white' : 'text-neutral-400 hover:text-neutral-200'}`}>{t}</button>
       ))}
     </nav>
   );
   return (
-    <div className="relative h-[100dvh] overflow-y-auto bg-[#0f1012] text-neutral-200">
+    <div className="relative h-[100dvh] overflow-y-auto bg-[var(--ws-bg)] text-neutral-200">
       <PageShell onBack={onBack} wide icon={tab === 'practice' ? <Target size={20} /> : <Users size={20} />}
         title={tab === 'practice' ? 'Practice' : 'Classes'}
         subtitle={tab === 'practice' ? 'Adaptive questions on any topic, at your level, with hints and explanations. Mastery grows with every answer.' : 'Bring students together with a code and see how the class is doing per topic, anonymously.'}

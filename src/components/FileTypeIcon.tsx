@@ -17,7 +17,7 @@ const KINDS: Record<FileKind, { icon: LucideIcon; label: string; tone: string }>
   code: { icon: FileCode2, label: 'Code', tone: 'bg-violet-500/12 text-violet-400 ring-violet-400/20' },
   data: { icon: Braces, label: 'Data', tone: 'bg-amber-500/12 text-amber-400 ring-amber-400/20' },
   archive: { icon: FileArchive, label: 'Archive', tone: 'bg-stone-400/12 text-stone-300 ring-stone-300/20' },
-  doc: { icon: FileIcon, label: 'Document', tone: 'bg-white/[0.06] text-[#C2C0B6] ring-white/10' },
+  doc: { icon: FileIcon, label: 'Document', tone: 'bg-white/[0.06] text-[var(--app-muted)] ring-white/10' },
 };
 
 export function fileKind(fileName: string, mimeType?: string): FileKind {

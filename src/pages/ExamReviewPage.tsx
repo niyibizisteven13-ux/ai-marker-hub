@@ -205,7 +205,7 @@ export default function ExamReviewPage({ onBack }: { onBack: () => void }) {
 
   if (!examId) {
     return (
-      <div className="scroll-area h-[100dvh] overflow-y-auto bg-[#141413] px-4 py-8 text-white">
+      <div className="scroll-area h-[100dvh] overflow-y-auto bg-[var(--app-sunken)] px-4 py-8 text-white">
         <div className="mx-auto max-w-3xl">
           <button type="button" onClick={onBack} className="mb-6 inline-flex items-center gap-2 text-sm text-neutral-400 hover:text-white"><ArrowLeft size={16} /> Back to workspace</button>
           <h1 className="font-serif text-3xl">Results</h1>
@@ -215,12 +215,12 @@ export default function ExamReviewPage({ onBack }: { onBack: () => void }) {
             <div className="mt-8 rounded-3xl border border-white/[0.08] bg-white/[0.02] p-6 sm:p-8">
               <p className="text-lg font-semibold text-white">Mark a class in one message</p>
               <ol className="mt-4 space-y-3 text-sm text-neutral-300">
-                <li className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#D97757]/20 text-xs font-bold text-[#F2B39C]">1</span>Attach the students' scripts in the chat: PDFs, phone photos, Word files or a ZIP folder. Add the marking scheme if you have one.</li>
-                <li className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#D97757]/20 text-xs font-bold text-[#F2B39C]">2</span>Say "mark these". Bwenge reads the handwriting, marks every question and corrects each script in red pen.</li>
-                <li className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#D97757]/20 text-xs font-bold text-[#F2B39C]">3</span>The marked PDFs come back in the chat, with the Excel results. Every class appears here to review and share.</li>
+                <li className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--brand)]/20 text-xs font-bold text-[var(--brand-soft)]">1</span>Attach the students' scripts in the chat: PDFs, phone photos, Word files or a ZIP folder. Add the marking scheme if you have one.</li>
+                <li className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--brand)]/20 text-xs font-bold text-[var(--brand-soft)]">2</span>Say "mark these". Bwenge reads the handwriting, marks every question and corrects each script in red pen.</li>
+                <li className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--brand)]/20 text-xs font-bold text-[var(--brand-soft)]">3</span>The marked PDFs come back in the chat, with the Excel results. Every class appears here to review and share.</li>
               </ol>
               <div className="mt-6 flex flex-wrap gap-2">
-                <a href="/" className="rounded-xl bg-[#D97757] px-4 py-2 text-sm font-semibold text-white hover:bg-[#c66849]">Open the chat</a>
+                <a href="/" className="rounded-xl bg-[var(--brand)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--brand-strong)]">Open the chat</a>
                 <a href="/scan" className="rounded-xl border border-white/15 px-4 py-2 text-sm font-semibold text-neutral-200 hover:bg-white/5">Mark papers with the phone camera</a>
               </div>
             </div>
@@ -228,7 +228,7 @@ export default function ExamReviewPage({ onBack }: { onBack: () => void }) {
             <ul className="mt-6 divide-y divide-white/[0.06] overflow-hidden rounded-2xl border border-white/[0.08]">
               {exams.map((e) => (
                 <li key={e.examId}><a href={`/exams/${e.examId}/review`} className="flex items-center gap-4 bg-white/[0.02] px-4 py-3.5 hover:bg-white/[0.05]">
-                  <FileCheck2 size={20} className="text-[#D97757]" />
+                  <FileCheck2 size={20} className="text-[var(--brand)]" />
                   <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{e.title}</span><span className="text-xs text-neutral-400">{e.marked} of {e.candidates} marked · {e.released} released</span></span>
                   {e.needsReview > 0 && <span className="rounded-md bg-orange-500/15 px-2 py-0.5 text-[11px] font-semibold text-orange-300">{e.needsReview} to check</span>}
                   <ChevronRight size={16} className="text-neutral-500" />
@@ -242,7 +242,7 @@ export default function ExamReviewPage({ onBack }: { onBack: () => void }) {
   }
 
   return (
-    <div className="flex h-[100dvh] flex-col bg-[#141413] text-white">
+    <div className="flex h-[100dvh] flex-col bg-[var(--app-sunken)] text-white">
       <header className="flex flex-wrap items-center gap-3 border-b border-white/[0.07] px-4 py-2.5">
         <button type="button" onClick={() => { window.history.pushState({}, '', '/exams'); window.location.reload(); }} className="grid h-8 w-8 place-items-center rounded-lg text-neutral-400 hover:bg-white/5 hover:text-white" aria-label="All examinations"><ArrowLeft size={17} /></button>
         <div className="min-w-0">
@@ -252,7 +252,7 @@ export default function ExamReviewPage({ onBack }: { onBack: () => void }) {
         {review && (
           <div className="ml-2 flex items-center gap-1">
             <button type="button" disabled={idx <= 0} onClick={() => go(-1)} className="grid h-8 w-8 place-items-center rounded-lg border border-white/10 disabled:opacity-30" aria-label="Previous candidate"><ChevronLeft size={16} /></button>
-            <select value={review.candidate.submissionId} onChange={(e) => { setSelected(null); void load(e.target.value); }} className="h-8 rounded-lg border border-white/10 bg-[#1f1e1d] px-2 text-sm">
+            <select value={review.candidate.submissionId} onChange={(e) => { setSelected(null); void load(e.target.value); }} className="h-8 rounded-lg border border-white/10 bg-[var(--app-panel-2)] px-2 text-sm">
               {review.candidates.map((c) => <option key={c.submissionId} value={c.submissionId}>{c.candidateId}{c.candidateName ? ` – ${c.candidateName}` : ''} · {fmt(c.total)}/{fmt(c.maxTotal)}{c.released ? ' · released' : c.openFlags || c.lowConfidence ? ' · check' : ''}</option>)}
             </select>
             <button type="button" disabled={idx < 0 || idx >= review.candidates.length - 1} onClick={() => go(1)} className="grid h-8 w-8 place-items-center rounded-lg border border-white/10 disabled:opacity-30" aria-label="Next candidate"><ChevronRight size={16} /></button>
@@ -263,7 +263,7 @@ export default function ExamReviewPage({ onBack }: { onBack: () => void }) {
           {review && <button type="button" disabled={releasing} onClick={() => void release(true)} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-white/10 px-3 text-xs hover:bg-white/5 disabled:opacity-50">Release all</button>}
           {review && (review.released
             ? <span className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-emerald-500/15 px-3 text-xs font-semibold text-emerald-300"><CircleCheck size={14} /> Released</span>
-            : <button type="button" disabled={releasing} onClick={() => void release(false)} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#D97757] px-3.5 text-xs font-semibold text-white hover:bg-[#c96646] disabled:opacity-50">{releasing ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} Release {review.candidate.candidateId}</button>)}
+            : <button type="button" disabled={releasing} onClick={() => void release(false)} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[var(--brand)] px-3.5 text-xs font-semibold text-white hover:bg-[#c96646] disabled:opacity-50">{releasing ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} Release {review.candidate.candidateId}</button>)}
         </div>
       </header>
 

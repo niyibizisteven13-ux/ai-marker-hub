@@ -1,0 +1,42 @@
+/*
+ * Appearance: the app's colours are variables, so a theme (Settings → Appearance) can recolour everything at once,
+ * like Chrome's colour themes. These defaults are the original Bwenge look; src/theme/appearance.ts overrides them.
+ */
+:root {
+  --brand: #D97757;
+  --brand-soft: #F0A586;
+  --brand-strong: #C96A4C;
+  --brand-on: #FFFFFF;
+
+  /* Chat */
+  --app-bg: #262624;
+  --app-panel: #30302E;
+  --app-panel-hover: #363634;
+  --app-panel-2: #1F1E1D;
+  --app-sunken: #141413;
+  --app-text: #FAF9F5;
+  --app-muted: #C2C0B6;
+  --app-faint: #9C9A92;
+  --app-line: rgb(255 255 255 / 0.10);
+
+  /* Workspace pages (Tasks, Forms, Practice, Classes) */
+  --ws-bg: #0F1012;
+  --ws-card: #16171B;
+  --ws-card-hover: #191A1F;
+  --ws-sunken: #111216;
+  --ws-text: #ECECEE;
+  --invert-bg: #ECECEE;
+}
+
+/*
+ * A background (scene or picture, already veiled in the theme's background colour) on every page background.
+ * Fixed attachment keeps it one continuous picture across the chat, the sidebar edge and the workspace pages.
+ */
+html.has-app-image .app-shell .bg-\[var\(--app-bg\)\],
+html.has-app-image .app-shell .bg-\[var\(--ws-bg\)\],
+html.has-app-image .app-shell.bg-\[var\(--app-bg\)\] {
+  background: var(--app-image) center / cover no-repeat fixed;
+}
+
+html.theme-light .app-shell { color-scheme: light; }
+html:not(.theme-light) .app-shell { color-scheme: dark; }

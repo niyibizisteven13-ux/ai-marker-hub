@@ -72,7 +72,7 @@ export default function TelegramScanApp() {
 
   if (!app && !token) {
     return (
-      <Screen icon={<ScanLine className="h-7 w-7 text-[#D97757]" />} title="Open the scanner from Telegram">
+      <Screen icon={<ScanLine className="h-7 w-7 text-[var(--brand)]" />} title="Open the scanner from Telegram">
         Send <b className="text-white">/scan</b> to the Bwenge bot and tap <b className="text-white">Open scanner</b>. The scanner sends your pages straight back to the chat.
       </Screen>
     );
@@ -86,7 +86,7 @@ export default function TelegramScanApp() {
     );
   }
   if (status.kind === 'closed') {
-    return <Screen icon={<ScanLine className="h-7 w-7 text-[#D97757]" />} title="Scanner closed">You can close this tab and return to Telegram.</Screen>;
+    return <Screen icon={<ScanLine className="h-7 w-7 text-[var(--brand)]" />} title="Scanner closed">You can close this tab and return to Telegram.</Screen>;
   }
 
   const send = async (pages: PageItem[]) => {
@@ -122,7 +122,7 @@ export default function TelegramScanApp() {
   };
 
   return (
-    <div className="fixed inset-0 flex flex-col overflow-hidden bg-[#0f1013]">
+    <div className="fixed inset-0 flex flex-col overflow-hidden bg-[var(--ws-bg)]">
       <DocumentScanner
         labels="student"
         aiTools={false}
@@ -138,10 +138,10 @@ export default function TelegramScanApp() {
       />
       {status.kind === 'sending' && (
         <div role="status" className="fixed inset-0 z-[2000] grid place-items-center bg-black/70 backdrop-blur-sm">
-          <div className="flex min-w-[240px] flex-col items-center gap-3 rounded-2xl border border-white/10 bg-[#1F1E1D] px-8 py-6 text-center shadow-2xl">
-            <Loader2 className="h-7 w-7 animate-spin text-[#D97757]" />
+          <div className="flex min-w-[240px] flex-col items-center gap-3 rounded-2xl border border-white/10 bg-[var(--app-panel-2)] px-8 py-6 text-center shadow-2xl">
+            <Loader2 className="h-7 w-7 animate-spin text-[var(--brand)]" />
             <div className="text-[15px] font-medium text-white">Sending to Telegram…</div>
-            {status.total > 1 && <div className="text-xs text-[#9C9A92]">{status.done} of {status.total} PDFs</div>}
+            {status.total > 1 && <div className="text-xs text-[var(--app-faint)]">{status.done} of {status.total} PDFs</div>}
           </div>
         </div>
       )}
@@ -151,11 +151,11 @@ export default function TelegramScanApp() {
 
 function Screen({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
   return (
-    <main className="grid min-h-dvh place-items-center bg-[#0f1013] px-6 text-center">
+    <main className="grid min-h-dvh place-items-center bg-[var(--ws-bg)] px-6 text-center">
       <div className="max-w-sm">
         <div className="mx-auto mb-5 grid h-14 w-14 place-items-center rounded-2xl border border-white/10 bg-white/[0.04]">{icon}</div>
         <h1 className="mb-2 text-xl font-semibold text-white">{title}</h1>
-        <p className="text-sm leading-relaxed text-[#C2C0B6]">{children}</p>
+        <p className="text-sm leading-relaxed text-[var(--app-muted)]">{children}</p>
       </div>
     </main>
   );

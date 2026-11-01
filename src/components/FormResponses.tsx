@@ -8,7 +8,7 @@ import { FileThumb, PreviewDialog, type PreviewSource } from './FilePreview';
  * Files people attached open in place, full screen, without downloading.
  */
 
-type Question = { id: string; title?: string; label?: string; type?: string };
+type Question = { id: string; title?: string; label?: string; type?: string; points?: number; correctAnswer?: unknown };
 type Response = { id: string; submittedAt: string; answers: Record<string, unknown> };
 type FileValue = { name?: string; size?: number; url?: string; type?: string };
 
@@ -44,7 +44,10 @@ export default function FormResponses({ formId, questions }: { formId: string; q
   if (!rows) return <div className="flex justify-center py-8 text-[#5F6368]"><Loader2 className="animate-spin" /></div>;
   if (!rows.length) return null;
   const r = rows[Math.min(i, rows.length - 1)];
-  const order = [...questions.map((q) => q.id), ...Object.keys(r.answers).filter((k) => !titleOf.has(k))];
+  const order = [...questions.map((q) => q.id), ...Object.keys(r.answers).filter((k) => !titleOf.has(k) && !k.startsWith('_'))];
+  const quiz = r.answers._quiz as { score: number; maxScore: number; percent: number; correct: string[] } | undefined;
+  const marked = new Set(questions.filter((q) => Number(q.points) > 0 && q.correctAnswer !== undefined && q.correctAnswer !== '').map((q) => q.id));
+  const email = typeof r.answers._respondentEmail === 'string' ? r.answers._respondentEmail : '';
 
   return (
     <section className="rounded-2xl border border-[#E0E0E0] bg-white p-5" aria-label="Individual responses">
@@ -54,21 +57,27 @@ export default function FormResponses({ formId, questions }: { formId: string; q
         <span className="min-w-[5.5rem] text-center text-sm tabular-nums text-[#5F6368]">{i + 1} of {rows.length}</span>
         <button type="button" disabled={i >= rows.length - 1} onClick={() => setI(i + 1)} className="grid h-8 w-8 place-items-center rounded-lg border border-[#DADCE0] disabled:opacity-30" aria-label="Older response"><ChevronRight size={16} /></button>
       </div>
-      <p className="mt-1 text-xs text-[#5F6368]">Sent {new Date(r.submittedAt).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+      <p className="mt-1 text-xs text-[#5F6368]">Sent {new Date(r.submittedAt).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}{email ? ` · ${email}` : ''}</p>
+      {quiz && (
+        <div className="mt-3 flex items-center gap-3 rounded-xl border border-[#E0E0E0] bg-[#F8F9FA] px-4 py-3">
+          <span className={`grid h-12 w-12 shrink-0 place-items-center rounded-full text-sm font-bold text-white ${quiz.percent >= 80 ? 'bg-emerald-600' : quiz.percent >= 50 ? 'bg-amber-500' : 'bg-rose-600'}`}>{Math.round(quiz.percent)}%</span>
+          <div><p className="text-sm font-semibold text-[#202124]">Score {quiz.score} / {quiz.maxScore}</p><p className="text-xs text-[#5F6368]">Marked against your answer key when it was sent.</p></div>
+        </div>
+      )}
       <dl className="mt-4 space-y-3">
         {order.filter((id) => r.answers[id] !== undefined).map((id) => {
           const v = r.answers[id];
           const files = (Array.isArray(v) ? v : [v]).filter(isFile);
           return (
             <div key={id} className="rounded-xl border border-[#F1F3F4] bg-[#F8F9FA] px-4 py-3">
-              <dt className="text-xs font-medium text-[#5F6368]">{titleOf.get(id) ?? id}</dt>
+              <dt className="flex items-center gap-2 text-xs font-medium text-[#5F6368]"><span className="min-w-0 flex-1">{titleOf.get(id) ?? id}</span>{quiz && marked.has(id) && (quiz.correct.includes(id) ? <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10.5px] font-semibold text-emerald-800">✓ Correct</span> : <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10.5px] font-semibold text-rose-800">✗ Wrong</span>)}</dt>
               {files.length ? (
                 <dd className="mt-2 flex flex-wrap gap-2">
                   {files.map((f, k) => {
                     const stored = /^\/api\/files\/([0-9a-f-]{36})$/i.exec(f.url ?? '')?.[1];
                     const src: PreviewSource = stored ? { name: f.name ?? 'file', type: mimeOf(f), storedFileId: stored } : { name: f.name ?? 'file', type: mimeOf(f), url: f.url };
                     return (
-                      <button key={k} type="button" onClick={() => setPreview(src)} className="w-28 overflow-hidden rounded-lg border border-[#DADCE0] bg-white text-left hover:border-[#D97757]" title={`Open ${src.name}`}>
+                      <button key={k} type="button" onClick={() => setPreview(src)} className="w-28 overflow-hidden rounded-lg border border-[#DADCE0] bg-white text-left hover:border-[var(--brand)]" title={`Open ${src.name}`}>
                         <FileThumb src={src} className="h-20 w-full" />
                         <span className="flex items-center gap-1 truncate px-2 py-1 text-[11px] text-[#3C4043]"><FileText size={11} className="shrink-0" />{src.name}</span>
                       </button>

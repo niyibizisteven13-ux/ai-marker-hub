@@ -1,15 +1,15 @@
-// Design tokens for the immersive dark minimalist aesthetic (Claude-inspired & Bwenge mobile tokens)
+// Design tokens (Claude-inspired). Colours are theme variables (src/theme), so Settings → Appearance recolours them.
 export const tokens = {
-  bg: "#262624",          // Phone page background
-  bgSidebar: "#1F1E1D",   // Drawer background
-  bgSurface: "#30302E",   // Composer + menus background
-  bgUserBubble: "#141413", // User message bubble background
-  border: "rgba(255,255,255,0.10)", // Hairline border
+  bg: "var(--app-bg)",          // Phone page background
+  bgSidebar: "var(--app-panel-2)",   // Drawer background
+  bgSurface: "var(--app-panel)",   // Composer + menus background
+  bgUserBubble: "var(--app-sunken)", // User message bubble background
+  border: "var(--app-line)", // Hairline border
   borderEmerald: "rgba(16, 185, 129, 0.05)", // Subtle brand-tinted dividers
-  textPrimary: "#FAF9F5", // Body text primary
-  textSecondary: "#C2C0B6", // Secondary text
-  textMuted: "#9C9A92",   // Muted text
-  accent: "#D97757",      // Send button accent
+  textPrimary: "var(--app-text)", // Body text primary
+  textSecondary: "var(--app-muted)", // Secondary text
+  textMuted: "var(--app-faint)",   // Muted text
+  accent: "var(--brand)",      // Send button accent
   accentEmerald: "#5DCAA5", // Emerald accent for actions
   accentHover: "#4CB391",
   accentDeep: "#1F3D35",  // Dark forest emerald for recessed button backgrounds

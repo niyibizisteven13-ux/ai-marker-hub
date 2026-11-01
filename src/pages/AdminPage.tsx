@@ -2705,7 +2705,7 @@ export default function AdminPage({ onBack, initialTab = 'overview' }: { onBack:
                           </div>
 
                           {displayFeedbackReasons(item.reasons) && (
-                            <p className="text-sm text-[#F4A185]"><span className="font-semibold text-[#B7C1DE]">Reason: </span>{displayFeedbackReasons(item.reasons)}</p>
+                            <p className="text-sm text-[var(--brand-soft)]"><span className="font-semibold text-[#B7C1DE]">Reason: </span>{displayFeedbackReasons(item.reasons)}</p>
                           )}
                           {item.question && (
                             <div>

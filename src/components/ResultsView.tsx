@@ -56,7 +56,7 @@ export const ResultsView: React.FC<ResultsViewProps> = ({ studentScripts }) => {
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-bold">Results Export</h2>
         <div className="flex items-center gap-2">
-          <button onClick={handleExportCSV} className="px-3 py-1 rounded bg-[#D97757] text-white">Export CSV</button>
+          <button onClick={handleExportCSV} className="px-3 py-1 rounded bg-[var(--brand)] text-white">Export CSV</button>
           <button onClick={handleExportJSON} className="px-3 py-1 rounded bg-[#444] text-white">Export JSON</button>
           <button onClick={handleCopyClipboard} className="px-3 py-1 rounded bg-[#222] text-white">Copy JSON</button>
         </div>

@@ -5,6 +5,11 @@ import { prisma } from '../../db.js';
 import { StorageFullError, ensureStorage } from '../billing/storage.js';
 import { OwnedRecordStore } from '../storage/ownedRecordStore.js';
 import { AssignmentError, createAssignmentService, type AssignmentFiles, type AssignmentRecord, type AssignmentService } from './service.js';
+import { createTaskMarker } from './autoMark.js';
+
+/** The examination service marks tasks' hand-ins; it is handed over at start-up (no import cycle). */
+let exams: Parameters<typeof createTaskMarker>[0] extends () => infer T ? T : never;
+export function useExamsForTasks(service: unknown) { exams = service as typeof exams; }
 
 /**
  * Files are stored like chat uploads (a FileRecord pointing at the file), so prepared scripts attach to a chat
@@ -41,6 +46,7 @@ export function assignmentService(): AssignmentService {
     files: uploadFiles,
     tokenDir: process.env.ASSIGNMENT_TOKENS_DIR ?? './data/assignment-links',
     baseUrl: () => process.env.APP_BASE_URL || process.env.APP_URL || '',
+    marker: createTaskMarker(() => { if (!exams) throw new Error('Automatic marking is not available on this server.'); return exams; }),
     ensureStorage: async (ownerId, bytes, forOthers) => {
       try { await ensureStorage(ownerId, bytes, { forOthers }); } catch (e) {
         if (e instanceof StorageFullError) throw new AssignmentError(e.code, e.message, e.status);

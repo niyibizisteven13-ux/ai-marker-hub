@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { PreviewDialog, attachmentSource, type PreviewSource } from './components/FilePreview';
 import { keyOf, thumbnailFor } from './utils/fileKinds';
+import { FormCanvas, brandingOf } from './components/forms/FormCanvas';
+import { applyAppearance, isDark, loadAppearance, normalizeAppearance, saveAppearanceLocally, type Appearance } from './theme/appearance';
 import bwengeLogo from './assets/bwenge-logo.svg';
 import { useStore } from './store/useStore';
 import {
@@ -60,7 +62,7 @@ const AI_SCAN_ENABLED = import.meta.env.VITE_ENABLE_AI_SCAN !== 'false';
 function lazyPage<P extends object>(load: () => Promise<{ default: React.ComponentType<P> }>) {
   const Inner = React.lazy(load);
   return function LazyPage(props: P) {
-    return <Suspense fallback={<div className="min-h-[100dvh] bg-[#141413]" aria-busy="true" />}><Inner {...(props as any)} /></Suspense>;
+    return <Suspense fallback={<div className="min-h-[100dvh] bg-[var(--app-sunken)]" aria-busy="true" />}><Inner {...(props as any)} /></Suspense>;
   };
 }
 const SettingsPage = lazyPage(() => import('./pages/SettingsPage'));
@@ -81,6 +83,7 @@ const MarkPage = React.lazy(() => import('./components/MarkPage'));
 const AssignmentsPage = React.lazy(() => import('./components/AssignmentsPage'));
 const FormsPage = React.lazy(() => import('./components/FormsPage'));
 const AssignmentSubmitPage = React.lazy(() => import('./pages/AssignmentSubmitPage'));
+const TaskResultPage = React.lazy(() => import('./pages/TaskResultPage'));
 type MarkIncoming = import('./components/MarkPage').MarkIncoming;
 type MarkScanTarget = import('./components/MarkPage').MarkScanTarget;
 const MarkingDrawer = React.lazy(() => import('./components/ChatMarkingCard').then((m) => ({ default: m.MarkingDrawer })));
@@ -183,16 +186,31 @@ export default function App() {
     setAbortController,
   } = useStore();
 
-  const [darkMode, setDarkMode] = useState<boolean>(() => {
-    try { return localStorage.getItem('darkMode') === 'true'; } catch { return false; }
-  });
+  // Appearance (Settings → Appearance): light / dark / device, a colour theme and an optional background.
+  const [appearance, setAppearance] = useState<Appearance>(() => loadAppearance());
+  const [systemDark, setSystemDark] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-color-scheme: dark)').matches);
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', darkMode);
-    try { localStorage.setItem('darkMode', String(darkMode)); } catch {}
-  }, [darkMode]);
+    const mq = window.matchMedia?.('(prefers-color-scheme: dark)');
+    const on = () => setSystemDark(!!mq?.matches);
+    mq?.addEventListener?.('change', on);
+    return () => mq?.removeEventListener?.('change', on);
+  }, []);
+  const darkMode = isDark(appearance);
   useEffect(() => {
-    if (authenticatedUser?.settings?.theme) setDarkMode(authenticatedUser.settings.theme === 'dark');
-  }, [authenticatedUser?.settings?.theme]);
+    applyAppearance(appearance);
+    saveAppearanceLocally(appearance);
+  }, [appearance, systemDark]);
+  useEffect(() => {
+    // The account's saved appearance wins over this browser's copy (it follows the user to other devices).
+    const saved = authenticatedUser?.settings?.appearance;
+    if (saved) { try { setAppearance(normalizeAppearance(typeof saved === 'string' ? JSON.parse(saved) : saved)); return; } catch { /* keep the local one */ } }
+    if (authenticatedUser?.settings?.theme) setAppearance((a) => ({ ...a, mode: authenticatedUser.settings!.theme === 'light' ? 'light' : 'dark' }));
+  }, [authenticatedUser?.settings?.appearance, authenticatedUser?.settings?.theme]);
+  useEffect(() => {
+    const onChange = (e: Event) => { const next = (e as CustomEvent<Appearance>).detail; if (next) setAppearance(normalizeAppearance(next)); };
+    window.addEventListener('bwenge:appearance', onChange);
+    return () => window.removeEventListener('bwenge:appearance', onChange);
+  }, []);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
 
@@ -1387,6 +1405,11 @@ export default function App() {
   if (window.location.pathname === '/model') {
     return <ModelPage />;
   }
+  // A student's private result page (the link they got when they handed in).
+  const taskResult = /^\/a\/([\w-]{16,40})\/result\/([\w-]{8,24})\/?$/.exec(window.location.pathname);
+  if (taskResult) {
+    return <Suspense fallback={null}><TaskResultPage token={taskResult[1]} resultToken={taskResult[2]} /></Suspense>;
+  }
   // A student opening the teacher's link: the hand-in page, no account needed.
   const handIn = /^\/a\/([\w-]{16,40})\/?$/.exec(window.location.pathname);
   if (handIn) {
@@ -1401,7 +1424,7 @@ export default function App() {
 
   if (authStatus === 'loading') {
     return (
-      <div className="h-[var(--app-h,100dvh)] w-full flex items-center justify-center bg-[#0B1420] text-[#FAF9F5]">
+      <div className="h-[var(--app-h,100dvh)] w-full flex items-center justify-center bg-[#0B1420] text-[var(--app-text)]">
         <div className="flex min-w-64 flex-col items-center gap-4 rounded-3xl border border-white/[0.07] bg-white/[0.025] px-10 py-9 shadow-2xl">
           <BwengeLoader variant="banner" message="Preparing your workspace" />
           <span className="text-[11px] font-medium tracking-wide text-neutral-500">This usually takes just a moment</span>
@@ -1658,7 +1681,7 @@ export default function App() {
 
   if (upgradePageOpen && !authenticatedUser && authStatus === 'anonymous') {
     return (
-      <div className="flex h-[100dvh] w-full flex-col items-center justify-center gap-5 bg-[#101114] p-6 text-center text-white">
+      <div className="flex h-[100dvh] w-full flex-col items-center justify-center gap-5 bg-[var(--ws-bg)] p-6 text-center text-white">
         <h1 className="text-2xl font-semibold">Sign in to continue</h1>
         <p className="max-w-md text-sm leading-6 text-neutral-400">Your payment and upgrade are linked to your Bwenge account.</p>
         <div className="flex flex-wrap justify-center gap-3">
@@ -1699,15 +1722,17 @@ export default function App() {
   }
 
   if (publicFormLoading || publicFormError || publicForm) {
-    // The page people open from a shared form link: dark, focused on the form, with the owner's colour as accent.
-    const accent = publicForm?.themeColor || '#D97757';
+    // The page people open from a shared form link, in the form's own design (template, light or dark, logo,
+    // background), never the visitor's app theme.
+    const formBrand = brandingOf(publicForm);
+    const formDark = formBrand.mode === 'dark';
     return (
-      <div className="form-dark scroll-area h-[100dvh] w-full overflow-y-auto overscroll-contain flex flex-col bg-[#0d0e10] text-[#ececee]">
-        <div aria-hidden="true" className="pointer-events-none fixed inset-x-0 top-0 h-72 opacity-40" style={{ background: `radial-gradient(60% 100% at 50% 0%, ${accent}33, transparent 70%)` }} />
-        <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-white/[0.06] bg-[#0d0e10]/85 px-4 py-3 backdrop-blur-md sm:px-8">
+      <div className="scroll-area h-[100dvh] w-full overflow-y-auto overscroll-contain">
+        <FormCanvas schema={publicForm ?? {}} fullPage className="flex min-h-[100dvh] flex-col">
+        <header className={`sticky top-0 z-30 flex items-center justify-between gap-3 border-b px-4 py-3 backdrop-blur-md sm:px-8 ${formDark ? 'border-white/[0.06] bg-[#0d0e10]/80' : 'border-black/[0.06] bg-white/80'}`}>
           <div className="flex min-w-0 items-center gap-2.5">
-            <img src={bwengeLogo} alt="" className="h-7 w-7 shrink-0 rounded-lg" />
-            <span className="truncate text-sm font-semibold text-white">{publicForm?.title || 'Form'}</span>
+            <img src={formBrand.logoUrl || bwengeLogo} alt="" className="h-7 w-7 shrink-0 rounded-lg bg-white object-contain" />
+            <span className={`truncate text-sm font-semibold ${formDark ? 'text-white' : 'text-slate-900'}`}>{publicForm?.title || 'Form'}</span>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {publicForm?.id && (
@@ -1720,7 +1745,7 @@ export default function App() {
                     window.setTimeout(() => setPublicFormLinkCopied(false), 1800);
                   } catch { showAiStatus('warning', 'Could not copy this form link'); }
                 }}
-                className="rounded-lg border border-white/10 px-3 py-1.5 text-xs font-medium text-neutral-200 hover:bg-white/[0.06]"
+                className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${formDark ? 'border-white/10 text-neutral-200 hover:bg-white/[0.06]' : 'border-black/10 text-slate-700 hover:bg-black/[0.04]'}`}
               >
                 {publicFormLinkCopied ? 'Link copied' : 'Copy link'}
               </button>
@@ -1735,7 +1760,7 @@ export default function App() {
                   window.history.pushState({}, '', '/forms');
                   window.location.reload();
                 }}
-                className="rounded-lg bg-[#ececee] px-3.5 py-1.5 text-xs font-semibold text-[#0d0e10] hover:bg-[#d6d6d9]"
+                className={`rounded-lg px-3.5 py-1.5 text-xs font-semibold ${formDark ? 'bg-[#ececee] text-[#0d0e10] hover:bg-[#d6d6d9]' : 'bg-slate-900 text-white hover:bg-slate-800'}`}
               >
                 My forms
               </button>
@@ -1799,14 +1824,15 @@ export default function App() {
           )}
           <p className="mx-auto mt-10 max-w-2xl text-center text-[11.5px] text-neutral-500">Made with Bwenge · Never share passwords in a form.</p>
         </main>
+        </FormCanvas>
       </div>
     );
   }
 
   return (
-    <div className="dark h-[var(--app-h,100dvh)] w-full min-w-0 bg-[#262624] text-[#FAF9F5] font-sans antialiased transition-colors duration-200 overflow-hidden flex flex-col">
+    <div className={`app-shell ${darkMode ? 'dark' : ''} h-[var(--app-h,100dvh)] w-full min-w-0 bg-[var(--app-bg)] text-[var(--app-text)] font-sans antialiased transition-colors duration-200 overflow-hidden flex flex-col`}>
       {AI_SCAN_ENABLED && scannerOpen && (
-        <div className={`fixed inset-0 ${scanForMark ? 'z-[75]' : 'z-[70]'} bg-[#0f1013] flex flex-col w-full h-[var(--app-h,100dvh)] overflow-hidden animate-in fade-in duration-200`}>
+        <div className={`fixed inset-0 ${scanForMark ? 'z-[75]' : 'z-[70]'} bg-[var(--ws-bg)] flex flex-col w-full h-[var(--app-h,100dvh)] overflow-hidden animate-in fade-in duration-200`}>
           <DocumentScanner
             onClose={() => { setScannerOpen(false); setScanForMark(false); }}
             onSavePages={scanForMark
@@ -2019,7 +2045,8 @@ export default function App() {
             user={authenticatedUser}
             onUpdateUser={(u) => {
               setAuthenticatedUser(u);
-              if (u.settings?.theme) setDarkMode(u.settings.theme === 'dark');
+              if (u.settings?.appearance) { try { setAppearance(normalizeAppearance(typeof u.settings.appearance === 'string' ? JSON.parse(u.settings.appearance) : u.settings.appearance)); } catch { /* keep */ } }
+              else if (u.settings?.theme) setAppearance((a) => ({ ...a, mode: u.settings!.theme === 'light' ? 'light' : 'dark' }));
             }}
             onLogout={handleLogout}
             onBack={() => setSettingsOpen(false)}

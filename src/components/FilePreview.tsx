@@ -87,7 +87,7 @@ const ICONS: Record<FileKind, typeof FileText> = {
 /** Badge colours per kind, like file icons in an office suite. */
 const TONE: Record<FileKind, string> = {
   image: 'bg-sky-600', pdf: 'bg-rose-600', word: 'bg-blue-600', sheet: 'bg-emerald-600', csv: 'bg-emerald-600', slides: 'bg-orange-600',
-  html: 'bg-violet-600', code: 'bg-slate-600', text: 'bg-neutral-600', audio: 'bg-[#D97757]', video: 'bg-fuchsia-600', zip: 'bg-amber-600', other: 'bg-neutral-600',
+  html: 'bg-violet-600', code: 'bg-slate-600', text: 'bg-neutral-600', audio: 'bg-[var(--brand)]', video: 'bg-fuchsia-600', zip: 'bg-amber-600', other: 'bg-neutral-600',
 };
 
 function MiniTable({ rows, dark }: { rows: string[][]; dark?: boolean }) {
@@ -111,18 +111,18 @@ export function FileThumb({ src, className = '', tone = 'light', badge = true }:
   const [broken, setBroken] = useState(false);
   const Icon = ICONS[kind];
   const dark = tone === 'dark';
-  const pictureBg = kind === 'audio' ? (dark ? 'bg-[#1f1f1d]' : 'bg-[#FBF3EF]') : kind === 'video' ? 'bg-black' : 'bg-white';
+  const pictureBg = kind === 'audio' ? (dark ? 'bg-[var(--app-panel-2)]' : 'bg-[#FBF3EF]') : kind === 'video' ? 'bg-black' : 'bg-white';
   let body: ReactNode;
   if (thumb?.image && !broken) {
     body = <img src={thumb.image} alt="" draggable={false} onError={() => setBroken(true)} className={`h-full w-full ${kind === 'audio' ? 'object-contain px-2' : 'object-cover object-top'} ${pictureBg}`} />;
   } else if (thumb?.table?.length) {
-    body = <span className={`block h-full w-full overflow-hidden p-1.5 ${dark ? 'bg-[#1f1f1d]' : 'bg-white'}`}><MiniTable rows={thumb.table} dark={dark} /></span>;
+    body = <span className={`block h-full w-full overflow-hidden p-1.5 ${dark ? 'bg-[var(--app-panel-2)]' : 'bg-white'}`}><MiniTable rows={thumb.table} dark={dark} /></span>;
   } else if (thumb?.text) {
-    body = <span className={`block h-full w-full overflow-hidden whitespace-pre-wrap break-words p-2 text-left ${kind === 'code' || kind === 'html' ? 'font-mono' : 'font-serif'} text-[7.5px] leading-[10px] ${dark ? 'bg-[#1f1f1d] text-neutral-400' : 'bg-white text-neutral-600'}`}>{thumb.text}</span>;
+    body = <span className={`block h-full w-full overflow-hidden whitespace-pre-wrap break-words p-2 text-left ${kind === 'code' || kind === 'html' ? 'font-mono' : 'font-serif'} text-[7.5px] leading-[10px] ${dark ? 'bg-[var(--app-panel-2)] text-neutral-400' : 'bg-white text-neutral-600'}`}>{thumb.text}</span>;
   } else if (!thumb) {
     body = <span className={`grid h-full w-full place-items-center ${dark ? 'bg-white/[0.03] text-neutral-500' : 'bg-neutral-50 text-neutral-400'}`}><Loader2 size={16} className="animate-spin" /></span>;
   } else {
-    body = <span className={`flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center text-[10.5px] ${dark ? 'bg-white/[0.03] text-neutral-400' : 'bg-neutral-50 text-neutral-600'}`}><Icon size={22} className="text-[#D97757]" /><span className="line-clamp-2 break-all">{src.name}</span></span>;
+    body = <span className={`flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center text-[10.5px] ${dark ? 'bg-white/[0.03] text-neutral-400' : 'bg-neutral-50 text-neutral-600'}`}><Icon size={22} className="text-[var(--brand)]" /><span className="line-clamp-2 break-all">{src.name}</span></span>;
   }
   return (
     <span className={`relative flex overflow-hidden ${className}`}>
@@ -145,7 +145,7 @@ export function AttachmentCard({ src, onOpen, onRemove, size = 120 }: { src: Pre
   return (
     <div className="group relative shrink-0" style={{ width: size }}>
       <button type="button" onClick={onOpen} aria-label={`Preview ${src.name}`} title={src.name}
-        className="relative block overflow-hidden rounded-xl border border-white/10 bg-[#1f1f1d] text-left shadow-sm transition hover:border-white/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D97757]/60" style={{ width: size, height: size }}>
+        className="relative block overflow-hidden rounded-xl border border-white/10 bg-[var(--app-panel-2)] text-left shadow-sm transition hover:border-white/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]/60" style={{ width: size, height: size }}>
         {picture ? (
           <>
             <FileThumb src={src} tone="dark" badge={false} className="absolute inset-0" />
@@ -158,7 +158,7 @@ export function AttachmentCard({ src, onOpen, onRemove, size = 120 }: { src: Pre
           </>
         ) : (
           <span className="flex h-full flex-col p-2.5">
-            <span className="line-clamp-2 break-words text-[11.5px] font-semibold leading-tight text-[#FAF9F5]">{src.name}</span>
+            <span className="line-clamp-2 break-words text-[11.5px] font-semibold leading-tight text-[var(--app-text)]">{src.name}</span>
             {detail && <span className="mt-0.5 truncate text-[10px] text-neutral-500">{detail}</span>}
             {thumb && !thumb.text && !thumb.table
               ? <span className="grid min-h-0 flex-1 place-items-center"><Icon size={26} className="text-neutral-500" /></span>
@@ -169,7 +169,7 @@ export function AttachmentCard({ src, onOpen, onRemove, size = 120 }: { src: Pre
       </button>
       {onRemove && (
         <button type="button" onClick={onRemove} aria-label={`Remove ${src.name}`}
-          className="absolute -right-1.5 -top-1.5 grid h-6 w-6 place-items-center rounded-full border border-white/15 bg-[#30302E] text-neutral-200 shadow hover:bg-rose-500 hover:text-white sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100"><X size={12} /></button>
+          className="absolute -right-1.5 -top-1.5 grid h-6 w-6 place-items-center rounded-full border border-white/15 bg-[var(--app-panel)] text-neutral-200 shadow hover:bg-rose-500 hover:text-white sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100"><X size={12} /></button>
       )}
     </div>
   );
@@ -235,7 +235,7 @@ function SlidesView({ slides, thumbnail }: { slides: Slide[]; thumbnail: string 
         <section key={s.n} className="relative aspect-video overflow-hidden rounded-lg bg-white p-6 text-neutral-900 shadow sm:p-10">
           <span className="absolute right-3 top-2 text-[11px] text-neutral-400">{s.n} / {slides.length}</span>
           <h3 className="text-[18px] font-semibold leading-snug sm:text-[24px]">{s.title || <span className="text-neutral-400">Slide {s.n}</span>}</h3>
-          <ul className="mt-3 space-y-1.5 text-[13px] leading-relaxed text-neutral-700 sm:text-[15px]">{s.lines.slice(0, 14).map((l, k) => <li key={k} className="flex gap-2"><span className="text-[#D97757]">•</span><span>{l}</span></li>)}</ul>
+          <ul className="mt-3 space-y-1.5 text-[13px] leading-relaxed text-neutral-700 sm:text-[15px]">{s.lines.slice(0, 14).map((l, k) => <li key={k} className="flex gap-2"><span className="text-[var(--brand)]">•</span><span>{l}</span></li>)}</ul>
         </section>
       ))}
     </div>
@@ -245,7 +245,7 @@ function SlidesView({ slides, thumbnail }: { slides: Slide[]; thumbnail: string 
 function ZipView({ entries, onOpen }: { entries: ZipEntry[]; onOpen: (path: string) => void }) {
   const files = entries.filter((e) => !e.dir);
   return (
-    <div className="mx-auto max-w-2xl overflow-hidden rounded-xl border border-white/10 bg-[#16171b]">
+    <div className="mx-auto max-w-2xl overflow-hidden rounded-xl border border-white/10 bg-[var(--ws-card)]">
       <p className="border-b border-white/10 px-4 py-2.5 text-[12px] text-neutral-400">{files.length} file{files.length === 1 ? '' : 's'} inside. Tap one to open it.</p>
       <ul className="divide-y divide-white/[0.06]">
         {entries.map((e) => {
@@ -256,7 +256,7 @@ function ZipView({ entries, onOpen }: { entries: ZipEntry[]; onOpen: (path: stri
             <li key={e.path}>
               {e.dir ? <span className="flex items-center gap-2 px-4 py-2 text-[13px] text-neutral-400" style={{ paddingLeft: 16 + depth * 16 }}><Icon size={15} />{name}</span>
                 : <button type="button" onClick={() => onOpen(e.path)} className="flex w-full items-center gap-2 px-4 py-2 text-left text-[13px] text-neutral-200 hover:bg-white/[0.05]" style={{ paddingLeft: 16 + depth * 16 }}>
-                    <Icon size={15} className="shrink-0 text-[#F0A586]" /><span className="min-w-0 flex-1 truncate">{name}</span><span className="shrink-0 text-[11px] text-neutral-500">{formatBytes(e.size)}</span>
+                    <Icon size={15} className="shrink-0 text-[var(--brand-soft)]" /><span className="min-w-0 flex-1 truncate">{name}</span><span className="shrink-0 text-[11px] text-neutral-500">{formatBytes(e.size)}</span>
                   </button>}
             </li>
           );
@@ -270,7 +270,7 @@ function CodeView({ text, code }: { text: string; code: boolean }) {
   const lines = text.split('\n');
   if (!code) return <div className="mx-auto max-w-3xl whitespace-pre-wrap break-words rounded-lg bg-[#FBFAF6] px-5 py-5 font-serif text-[15px] leading-relaxed text-neutral-900 sm:px-8">{text}</div>;
   return (
-    <div className="mx-auto max-w-5xl overflow-auto rounded-lg border border-white/10 bg-[#16171b] py-3 font-mono text-[12.5px] leading-[20px] text-neutral-200">
+    <div className="mx-auto max-w-5xl overflow-auto rounded-lg border border-white/10 bg-[var(--ws-card)] py-3 font-mono text-[12.5px] leading-[20px] text-neutral-200">
       <table className="border-collapse"><tbody>
         {lines.slice(0, 20000).map((l, i) => <tr key={i}><td className="select-none pl-4 pr-4 text-right align-top text-neutral-600">{i + 1}</td><td className="whitespace-pre pr-6">{l || ' '}</td></tr>)}
       </tbody></table>
@@ -281,8 +281,8 @@ function CodeView({ text, code }: { text: string; code: boolean }) {
 function Unsupported({ src, url }: { src: PreviewSource; url: string | null }) {
   const Icon = ICONS[kindOf(src)];
   return (
-    <div className="mx-auto mt-16 max-w-sm rounded-2xl border border-white/10 bg-[#16171b] p-6 text-center">
-      <Icon className="mx-auto text-[#F0A586]" size={30} />
+    <div className="mx-auto mt-16 max-w-sm rounded-2xl border border-white/10 bg-[var(--ws-card)] p-6 text-center">
+      <Icon className="mx-auto text-[var(--brand-soft)]" size={30} />
       <p className="mt-2 break-words text-[14px] font-medium text-white">{src.name}</p>
       <p className="mt-1 text-[12.5px] text-neutral-400">{badgeOf(src)} file{src.size ? ` · ${formatBytes(src.size)}` : ''}. This type can't be shown in the browser, but it is kept and sent as it is.</p>
       {url && <a href={url} download={src.name} className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-2 text-[13px] font-semibold text-neutral-900 hover:bg-neutral-200"><Download size={14} /> Download</a>}
@@ -371,7 +371,7 @@ export function PreviewDialog({ src: initial, onClose, footer }: { src: PreviewS
 
   const Icon = ICONS[kind];
   return (
-    <div role="dialog" aria-modal="true" aria-label={`Preview of ${src.name}`} className="fixed inset-0 z-[100] flex flex-col bg-neutral-950/95 backdrop-blur-sm">
+    <div role="dialog" aria-modal="true" aria-label={`Preview of ${src.name}`} className="keep-colors fixed inset-0 z-[100] flex flex-col bg-neutral-950/95 backdrop-blur-sm">
       <div className="flex items-center gap-2 px-3 py-2.5 text-white sm:px-5">
         {stack.length > 1 && <button type="button" onClick={() => setStack((s) => s.slice(0, -1))} aria-label="Back to the folder" className="rounded-full bg-white/10 p-2 hover:bg-white/20"><ArrowLeft size={16} /></button>}
         <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg text-white ${TONE[kind]}`}><Icon size={16} /></span>
@@ -392,8 +392,8 @@ export function PreviewDialog({ src: initial, onClose, footer }: { src: PreviewS
 function AudioView({ src, url }: { src: PreviewSource; url: string }) {
   const thumb = useThumbnail(src);
   return (
-    <div className="mx-auto mt-16 max-w-lg rounded-2xl border border-white/10 bg-[#16171b] p-6 text-center">
-      {thumb?.image ? <img src={thumb.image} alt="" className="mx-auto h-24 w-full object-contain" /> : <FileAudio className="mx-auto text-[#F0A586]" size={28} />}
+    <div className="mx-auto mt-16 max-w-lg rounded-2xl border border-white/10 bg-[var(--ws-card)] p-6 text-center">
+      {thumb?.image ? <img src={thumb.image} alt="" className="mx-auto h-24 w-full object-contain" /> : <FileAudio className="mx-auto text-[var(--brand-soft)]" size={28} />}
       <p className="mt-2 break-words text-[13.5px] text-neutral-300">{src.name}{thumb?.meta ? ` · ${thumb.meta}` : ''}</p>
       <audio controls autoPlay src={url} className="mt-4 w-full" />
     </div>

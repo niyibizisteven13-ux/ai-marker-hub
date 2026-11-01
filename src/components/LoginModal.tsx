@@ -117,20 +117,20 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess, defaultIsS
     >
       <div
         ref={modalRef}
-        className="relative w-full lg:max-w-md rounded-t-[28px] lg:rounded-3xl border border-white/10 bg-[#262624] p-6 lg:p-8 shadow-2xl text-[#FAF9F5] max-h-[90dvh] overflow-y-auto"
+        className="relative w-full lg:max-w-md rounded-t-[28px] lg:rounded-3xl border border-white/10 bg-[var(--app-bg)] p-6 lg:p-8 shadow-2xl text-[var(--app-text)] max-h-[90dvh] overflow-y-auto"
         style={{ backgroundColor: '#262624' }}
       >
         <button
           type="button"
           onClick={onClose}
-          className="absolute right-5 top-5 h-11 w-11 grid place-items-center rounded-full bg-[#30302E] text-neutral-300 hover:text-white transition-colors"
+          className="absolute right-5 top-5 h-11 w-11 grid place-items-center rounded-full bg-[var(--app-panel)] text-neutral-300 hover:text-white transition-colors"
           aria-label="Close login modal"
         >
           <X size={20} />
         </button>
 
         <div className="mb-6 flex items-center gap-3.5">
-          <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#D97757]/15 text-[#D97757] text-xl">✦</span>
+          <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--brand)]/15 text-[var(--brand)] text-xl">✦</span>
           <div>
             <h2 className="text-xl font-serif font-medium">{isSignUp ? 'Create account' : 'Sign in to Bwenge'}</h2>
             <p className="text-xs text-neutral-400">Secure AI grading workspace for teachers</p>
@@ -153,7 +153,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess, defaultIsS
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full rounded-2xl border border-white/10 bg-[#30302E] px-4 py-3.5 text-base text-white outline-none focus:border-[#D97757] transition"
+                className="w-full rounded-2xl border border-white/10 bg-[var(--app-panel)] px-4 py-3.5 text-base text-white outline-none focus:border-[var(--brand)] transition"
                 placeholder="Jane Doe"
                 autoComplete="name"
                 required
@@ -170,7 +170,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess, defaultIsS
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-2xl border border-white/10 bg-[#30302E] px-4 py-3.5 text-base text-white outline-none focus:border-[#D97757] transition"
+              className="w-full rounded-2xl border border-white/10 bg-[var(--app-panel)] px-4 py-3.5 text-base text-white outline-none focus:border-[var(--brand)] transition"
               placeholder="teacher@school.edu"
               autoComplete="email"
               inputMode="email"
@@ -188,7 +188,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess, defaultIsS
                 type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-2xl border border-white/10 bg-[#30302E] px-4 py-3.5 pr-12 text-base text-white outline-none focus:border-[#D97757] transition"
+                className="w-full rounded-2xl border border-white/10 bg-[var(--app-panel)] px-4 py-3.5 pr-12 text-base text-white outline-none focus:border-[var(--brand)] transition"
                 placeholder="At least 10 characters"
                 autoComplete={isSignUp ? 'new-password' : 'current-password'}
                 required
@@ -209,7 +209,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess, defaultIsS
             <button
               type="button"
               onClick={() => alert('Password reset will be available in Phase 2.')}
-              className="text-[#D97757] hover:underline"
+              className="text-[var(--brand)] hover:underline"
             >
               Forgot password?
             </button>
@@ -218,7 +218,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess, defaultIsS
           <button
             type="submit"
             disabled={loading}
-            className="w-full h-12 rounded-2xl bg-[#D97757] px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-[#D97757]/25 transition hover:bg-[#c86849] disabled:cursor-not-allowed disabled:opacity-60 flex items-center justify-center gap-2"
+            className="w-full h-12 rounded-2xl bg-[var(--brand)] px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-[var(--brand)]/25 transition hover:bg-[#c86849] disabled:cursor-not-allowed disabled:opacity-60 flex items-center justify-center gap-2"
           >
             {loading && <Loader2 size={18} className="animate-spin" />}
             {loading ? 'Please wait…' : isSignUp ? 'Create account' : 'Sign in'}
@@ -232,7 +232,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess, defaultIsS
               setIsSignUp(!isSignUp);
               setError('');
             }}
-            className="font-medium text-white hover:text-[#D97757] transition"
+            className="font-medium text-white hover:text-[var(--brand)] transition"
           >
             {isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Create one"}
           </button>
