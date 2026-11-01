@@ -99,8 +99,8 @@ export const fileStore = new FileStore({
   dir: process.env.FILE_STORE_DIR ?? './data/generated',
   secret: fileStoreSecret,
   // Default 25 MB; raise it for large examination packages (all marked papers in one ZIP).
-  // At least as large as a chat attachment (CHAT_MAX_FILE_MB, default 100 MB), so large uploads reach the model.
-  maxFileBytes: Number(process.env.FILE_STORE_MAX_BYTES) > 0 ? Number(process.env.FILE_STORE_MAX_BYTES) : (Number(process.env.CHAT_MAX_FILE_MB) > 0 ? Number(process.env.CHAT_MAX_FILE_MB) : 100) * 1024 * 1024,
+  // At least as large as a chat attachment (CHAT_MAX_FILE_MB, default 200 MB), so large uploads reach the model.
+  maxFileBytes: Number(process.env.FILE_STORE_MAX_BYTES) > 0 ? Number(process.env.FILE_STORE_MAX_BYTES) : (Number(process.env.CHAT_MAX_FILE_MB) > 0 ? Number(process.env.CHAT_MAX_FILE_MB) : 200) * 1024 * 1024,
 });
 
 export const fileJobQueue = new FileJobQueue({

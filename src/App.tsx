@@ -100,8 +100,9 @@ const CHAT_TOKEN_TIMEOUT_MS = 120_000;
 const CHAT_HISTORY_MAX_TURNS = 200;
 const CHAT_HISTORY_MAX_CHARS = 20_000;
 /** Attachment limits per file and per message (the server's CHAT_MAX_FILE_MB defaults to 100). */
+/** Largest file before the plan is known (the server checks each plan: Pro Plus and Institution 200 MB). */
 const CHAT_MAX_FILE_BYTES = 100 * 1024 * 1024;
-const CHAT_MAX_TOTAL_BYTES = 200 * 1024 * 1024;
+const CHAT_MAX_TOTAL_BYTES = 400 * 1024 * 1024;
 /** Files above this size (alone or together) are uploaded first and sent with the message by id. */
 const CHAT_INLINE_MAX_BYTES = 8 * 1024 * 1024;
 
@@ -284,6 +285,19 @@ export default function App() {
   const [stagedAttachments, setStagedAttachments] = useState<Array<File | ChatAttachment>>([]);
   const [attachmentError, setAttachmentError] = useState('');
   const [temporaryChatMode, setTemporaryChatMode] = useState(false);
+  // The largest file the user's plan uploads (100 MB; Pro Plus and Institution 200 MB), refreshed with the plan.
+  const [uploadLimit, setUploadLimit] = useState<{ bytes: number; plan: string }>({ bytes: CHAT_MAX_FILE_BYTES, plan: '' });
+  useEffect(() => {
+    if (!authenticatedUser) return;
+    let live = true;
+    const load = () => authFetch('/api/usage').then((r) => (r.ok ? r.json() : null)).then((u) => {
+      const mb = Number(u?.limits?.maxUploadMb);
+      if (live && mb > 0) setUploadLimit({ bytes: mb * 1024 * 1024, plan: String(u?.planName ?? u?.plan?.name ?? '') });
+    }).catch(() => undefined);
+    void load();
+    window.addEventListener('bwenge:usage', load);
+    return () => { live = false; window.removeEventListener('bwenge:usage', load); };
+  }, [authenticatedUser]);
 
   const handleStageAttachments = (files: Array<File | ChatAttachment>) => {
     const allowedExtensions = new Set([
@@ -296,8 +310,10 @@ export default function App() {
     const next = [...stagedAttachments];
     const errors: string[] = [];
     const maxFiles = 10;
-    const maxFileBytes = CHAT_MAX_FILE_BYTES;
-    const maxTotalBytes = CHAT_MAX_TOTAL_BYTES;
+    const maxFileBytes = uploadLimit.bytes;
+    const maxTotalBytes = Math.max(CHAT_MAX_TOTAL_BYTES, maxFileBytes * 2);
+    const limitMb = Math.round(maxFileBytes / 1048576);
+    const tooBig = (name: string) => `${name}: larger than ${limitMb} MB, the largest file ${uploadLimit.plan ? `your ${uploadLimit.plan} plan` : 'your plan'} can upload${limitMb < 200 ? '. Pro Plus uploads files up to 200 MB' : ''}`;
     const sizeOf = (item: File | ChatAttachment) => {
       if (item instanceof File) return item.size;
       if (typeof item.size === 'number') return item.size;
@@ -315,8 +331,8 @@ export default function App() {
         const extension = item.name.split('.').pop()?.toLowerCase() || '';
         if (item.size === 0) { errors.push(`${item.name}: file is empty`); continue; }
         if (!allowedExtensions.has(extension)) { errors.push(`${item.name}: file type is not supported`); continue; }
-        if (itemBytes > maxFileBytes) { errors.push(`${item.name}: larger than ${maxFileBytes / 1048576} MB`); continue; }
-        if (totalBytes + itemBytes > maxTotalBytes) { errors.push(`Attachments cannot exceed ${maxTotalBytes / 1048576} MB total`); continue; }
+        if (itemBytes > maxFileBytes) { errors.push(tooBig(item.name)); continue; }
+        if (totalBytes + itemBytes > maxTotalBytes) { errors.push(`Attachments cannot exceed ${Math.round(maxTotalBytes / 1048576)} MB in one message`); continue; }
         const duplicate = next.some((existing) => existing instanceof File && existing.name === item.name && existing.size === item.size && existing.lastModified === item.lastModified);
         if (duplicate) { errors.push(`${item.name}: already attached`); continue; }
       } else if (itemBytes > maxFileBytes || (itemBytes > 0 && totalBytes + itemBytes > maxTotalBytes)) {

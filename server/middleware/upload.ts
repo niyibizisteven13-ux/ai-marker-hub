@@ -32,10 +32,13 @@ export const upload = createUpload(DEFAULT_MAX_FILE_SIZE);
 // and stricter route-level rate limit instead of raising the limit app-wide.
 export const batchUpload = createUpload(BATCH_MAX_FILE_SIZE);
 
-/** Chat attachments sent ahead of the message (large files): up to CHAT_MAX_FILE_MB (default 100), one per request. */
-export const CHAT_MAX_FILE_BYTES = (Number(process.env.CHAT_MAX_FILE_MB) > 0 ? Number(process.env.CHAT_MAX_FILE_MB) : 100) * 1024 * 1024;
+/**
+ * Chat attachments sent ahead of the message (large files), one per request: up to CHAT_MAX_FILE_MB (default 200),
+ * the largest any plan allows. Each plan's own limit (maxUploadMb) is checked once the file has arrived.
+ */
+export const CHAT_MAX_FILE_BYTES = (Number(process.env.CHAT_MAX_FILE_MB) > 0 ? Number(process.env.CHAT_MAX_FILE_MB) : 200) * 1024 * 1024;
 
-// Streamed to disk, so a 100 MB file never sits in memory while it uploads.
+// Streamed to disk, so a 200 MB file never sits in memory while it uploads.
 export const chatFileUpload = multer({
   dest: path.join(os.tmpdir(), `bwenge-chat-uploads-${process.getuid?.() ?? 'u'}`),
   limits: { fileSize: CHAT_MAX_FILE_BYTES, files: 1, fields: 10, parts: 12 },

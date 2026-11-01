@@ -50,31 +50,47 @@ export interface PlanInfo {
 export const PLANS: Record<PlanId, PlanInfo> = {
   FREE: {
     id: 'FREE', name: 'Free', priceRwf: 0, priceUsd: 0, priceNote: 'Free forever',
-    limits: { daily: 15, weekly: 40, monthly: 50, perDay: { tool: 3, vision: 3, artifact: 1, marking: 0 }, maxMessageChars: 8_000, maxAttachments: 2, maxUploadMb: 10, storageMb: 200, memory: false, memoryItems: 0, autonomousMarking: false },
+    limits: { daily: 15, weekly: 40, monthly: 50, perDay: { tool: 3, vision: 3, artifact: 1, marking: 0 }, maxMessageChars: 8_000, maxAttachments: 2, maxUploadMb: 100, storageMb: 200, memory: false, memoryItems: 0, autonomousMarking: false },
   },
   // GO = the Free allowance plus purchased credits: once the allowance or a daily feature cap is used up,
   // further actions are paid from the credit wallet instead of being refused.
   GO: {
     id: 'GO', name: 'Top-up', priceRwf: null, priceUsd: null, priceNote: 'Pay as you go, from 500 RWF',
-    limits: { daily: 15, weekly: 40, monthly: 50, perDay: { tool: 3, vision: 3, artifact: 1, marking: 0 }, maxMessageChars: 20_000, maxAttachments: 5, maxUploadMb: 25, storageMb: 500, memory: false, memoryItems: 0, autonomousMarking: true },
+    limits: { daily: 15, weekly: 40, monthly: 50, perDay: { tool: 3, vision: 3, artifact: 1, marking: 0 }, maxMessageChars: 20_000, maxAttachments: 5, maxUploadMb: 100, storageMb: 500, memory: false, memoryItems: 0, autonomousMarking: true },
   },
   STARTER: {
     id: 'STARTER', name: 'Starter', priceRwf: 1_500, priceUsd: 1, priceNote: 'per month',
-    limits: { daily: 400, weekly: 400, monthly: 400, perDay: { tool: 60, vision: 100, artifact: 15, marking: 60 }, maxMessageChars: 20_000, maxAttachments: 10, maxUploadMb: 50, storageMb: 2_048, memory: false, memoryItems: 0, autonomousMarking: true },
+    limits: { daily: 400, weekly: 400, monthly: 400, perDay: { tool: 60, vision: 100, artifact: 15, marking: 60 }, maxMessageChars: 20_000, maxAttachments: 10, maxUploadMb: 100, storageMb: 2_048, memory: false, memoryItems: 0, autonomousMarking: true },
   },
   PRO: {
     id: 'PRO', name: 'Pro', priceRwf: 4_500, priceUsd: 3, priceNote: 'per month',
-    limits: { daily: 1_700, weekly: 1_700, monthly: 1_700, perDay: { tool: 200, vision: 300, artifact: 40, marking: 200 }, maxMessageChars: 40_000, maxAttachments: 20, maxUploadMb: 50, storageMb: 10_240, memory: true, memoryItems: 2_000, autonomousMarking: true },
+    limits: { daily: 1_700, weekly: 1_700, monthly: 1_700, perDay: { tool: 200, vision: 300, artifact: 40, marking: 200 }, maxMessageChars: 40_000, maxAttachments: 20, maxUploadMb: 100, storageMb: 10_240, memory: true, memoryItems: 2_000, autonomousMarking: true },
   },
   PLUS: {
     id: 'PLUS', name: 'Pro Plus', priceRwf: 7_000, priceUsd: 4.75, priceNote: 'per month',
-    limits: { daily: 2_800, weekly: 2_800, monthly: 2_800, perDay: { tool: 300, vision: 500, artifact: 60, marking: 400 }, maxMessageChars: 60_000, maxAttachments: 20, maxUploadMb: 100, storageMb: 25_600, memory: true, memoryItems: 5_000, autonomousMarking: true },
+    limits: { daily: 2_800, weekly: 2_800, monthly: 2_800, perDay: { tool: 300, vision: 500, artifact: 60, marking: 400 }, maxMessageChars: 60_000, maxAttachments: 20, maxUploadMb: 200, storageMb: 25_600, memory: true, memoryItems: 5_000, autonomousMarking: true },
   },
   INSTITUTION: {
     id: 'INSTITUTION', name: 'Institution', priceRwf: null, priceUsd: null, priceNote: 'by arrangement',
-    limits: { daily: 2_800, weekly: 2_800, monthly: 2_800, perDay: { tool: 300, vision: 500, artifact: 80, marking: 400 }, maxMessageChars: 60_000, maxAttachments: 20, maxUploadMb: 100, storageMb: 51_200, memory: true, memoryItems: 10_000, autonomousMarking: true },
+    limits: { daily: 2_800, weekly: 2_800, monthly: 2_800, perDay: { tool: 300, vision: 500, artifact: 80, marking: 400 }, maxMessageChars: 60_000, maxAttachments: 20, maxUploadMb: 200, storageMb: 51_200, memory: true, memoryItems: 10_000, autonomousMarking: true },
   },
 };
+
+/** Largest single upload the server accepts for any plan (CHAT_MAX_FILE_MB, default 200 MB). */
+export const UPLOAD_CEILING_BYTES = (Number(process.env.CHAT_MAX_FILE_MB) > 0 ? Number(process.env.CHAT_MAX_FILE_MB) : 200) * 1024 * 1024;
+
+/** Largest single file this user's plan may upload (Pro Plus and Institution: 200 MB; other plans: 100 MB). */
+export async function uploadLimitBytes(userId: string): Promise<{ bytes: number; plan: PlanInfo }> {
+  const plan = await planFor(userId).catch(() => PLANS.FREE);
+  return { bytes: Math.min(UPLOAD_CEILING_BYTES, Math.max(1, plan.limits.maxUploadMb) * 1024 * 1024), plan };
+}
+
+/** The message for a file over the plan's limit, pointing to the plan that allows it. */
+export function uploadTooLargeMessage(name: string, plan: PlanInfo, limitBytes: number): string {
+  const mb = Math.round(limitBytes / 1048576);
+  const bigger = (['PLUS', 'INSTITUTION'] as PlanId[]).includes(plan.id) ? '' : ' Pro Plus uploads files up to 200 MB.';
+  return `${name} is larger than ${mb} MB, the largest file your ${plan.name} plan can upload.${bigger}`;
+}
 
 /** Maps a stored Subscription.planType to a plan (older rows say ORGANIZATION / BUSINESS). */
 export function planIdForSubscription(planType: string | null | undefined): PlanId | null {
