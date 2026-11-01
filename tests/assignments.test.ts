@@ -30,7 +30,7 @@ test('a teacher sets a task and gets a link; students without an account see onl
   const a = await svc.create('t1', { title: 'Algebra homework', instructions: 'Solve questions 1 to 5. Show your working.', dueAt: new Date(Date.now() + 86_400_000).toISOString(), files: [{ name: 'Questions.pdf', data: await pdf(1) }] });
   assert.match(a.link, /^https:\/\/www\.bwenge\.space\/a\/[\w-]{16}$/);
   const pub = await svc.publicView(tokenOf(a.link));
-  assert.deepEqual(Object.keys(pub).sort(), ['dueAt', 'instructions', 'open', 'taskFiles', 'title']);
+  assert.deepEqual(Object.keys(pub).sort(), ['autoMark', 'dueAt', 'instructions', 'open', 'taskFiles', 'title']);
   assert.equal(pub.taskFiles[0].name, 'Questions.pdf');
   assert.equal((await svc.publicTaskFile(tokenOf(a.link), 0)).name, 'Questions.pdf');
   await assert.rejects(svc.publicView('not-a-real-token-123'), /not valid/);

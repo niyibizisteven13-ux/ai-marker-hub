@@ -58,7 +58,7 @@ export default function TelegramMarkApp() {
 
   if (!app && !token) {
     return (
-      <Screen icon={<FileText className="h-7 w-7 text-[#D97757]" />} title="Open Mark from Telegram">
+      <Screen icon={<FileText className="h-7 w-7 text-[var(--brand)]" />} title="Open Mark from Telegram">
         Send <b className="text-white">/mark</b> to the Bwenge bot and tap <b className="text-white">Open Mark</b>.
       </Screen>
     );
@@ -121,11 +121,11 @@ export default function TelegramMarkApp() {
   const schemeLabel = scheme?.kind === 'scan' ? `Photographed · ${scheme.pages.length} page${scheme.pages.length === 1 ? '' : 's'}` : scheme?.kind === 'file' ? scheme.file.name : null;
 
   return (
-    <div className="min-h-dvh bg-[#0f1013] pb-28 text-[#F2EFE9]">
+    <div className="min-h-dvh bg-[var(--ws-bg)] pb-28 text-[#F2EFE9]">
       <main className="mx-auto max-w-md space-y-3 px-4 pt-5">
         <header className="mb-1">
           <h1 className="text-xl font-semibold">Mark a class</h1>
-          <p className="text-[13px] text-[#9C9A92]">Scheme or question paper, then students. Marking runs in the chat with live progress.</p>
+          <p className="text-[13px] text-[var(--app-faint)]">Scheme or question paper, then students. Marking runs in the chat with live progress.</p>
         </header>
 
         {/* 1. Marking scheme or question paper (required) */}
@@ -134,13 +134,13 @@ export default function TelegramMarkApp() {
           <div role="radiogroup" aria-label="What is it?" className="mb-2 grid grid-cols-2 gap-1 rounded-xl bg-white/[0.04] p-1 text-[12.5px]">
             {(['scheme', 'paper'] as const).map((k) => (
               <button key={k} type="button" role="radio" aria-checked={guideKind === k} onClick={() => setGuideKind(k)}
-                className={`rounded-lg px-2 py-1.5 font-semibold ${guideKind === k ? 'bg-[#D97757] text-white' : 'text-[#9C9A92]'}`}>{k === 'scheme' ? 'Marking scheme' : 'Question paper'}</button>
+                className={`rounded-lg px-2 py-1.5 font-semibold ${guideKind === k ? 'bg-[var(--brand)] text-white' : 'text-[var(--app-faint)]'}`}>{k === 'scheme' ? 'Marking scheme' : 'Question paper'}</button>
             ))}
           </div>
           {scheme ? (
             <div className="flex items-center gap-2 rounded-xl bg-emerald-500/10 px-3 py-2 text-[13px] text-emerald-300">
               <Check size={15} /><span className="min-w-0 flex-1 truncate">{schemeLabel}</span>
-              <button type="button" aria-label={guideKind === 'paper' ? 'Remove the question paper' : 'Remove the marking scheme'} onClick={() => setScheme(null)} className="rounded p-1 text-[#9C9A92]"><X size={15} /></button>
+              <button type="button" aria-label={guideKind === 'paper' ? 'Remove the question paper' : 'Remove the marking scheme'} onClick={() => setScheme(null)} className="rounded p-1 text-[var(--app-faint)]"><X size={15} /></button>
             </div>
           ) : (
             <>
@@ -148,7 +148,7 @@ export default function TelegramMarkApp() {
                 <Btn primary onClick={() => setScanning('scheme')}><Camera size={16} />Photograph</Btn>
                 <Btn onClick={() => schemeInput.current?.click()}><Paperclip size={16} />Choose file</Btn>
               </div>
-              <p className="mt-2 text-[12px] text-[#9C9A92]">Required. With the question paper, Bwenge writes the scheme first, then marks.</p>
+              <p className="mt-2 text-[12px] text-[var(--app-faint)]">Required. With the question paper, Bwenge writes the scheme first, then marks.</p>
             </>
           )}
           <input ref={schemeInput} type="file" hidden accept=".pdf,.docx,.txt,image/*" onChange={(e) => { const f = e.target.files?.[0]; if (f) setScheme({ kind: 'file', file: f }); e.target.value = ''; }} />
@@ -161,15 +161,15 @@ export default function TelegramMarkApp() {
             <ul className="mb-2 space-y-1">
               {students.map((s) => (
                 <li key={s.key} className="flex items-center gap-2 rounded-xl bg-white/[0.04] px-3 py-2 text-[13px]">
-                  <Users size={14} className="text-[#D97757]" /><span className="min-w-0 flex-1 truncate">{s.name}</span>
-                  <span className="text-[12px] text-[#9C9A92]">{s.pages.length} page{s.pages.length === 1 ? '' : 's'}</span>
-                  <button type="button" aria-label={`Remove ${s.name}`} onClick={() => setStudents((cur) => cur.filter((x) => x.key !== s.key))} className="rounded p-1 text-[#9C9A92]"><X size={14} /></button>
+                  <Users size={14} className="text-[var(--brand)]" /><span className="min-w-0 flex-1 truncate">{s.name}</span>
+                  <span className="text-[12px] text-[var(--app-faint)]">{s.pages.length} page{s.pages.length === 1 ? '' : 's'}</span>
+                  <button type="button" aria-label={`Remove ${s.name}`} onClick={() => setStudents((cur) => cur.filter((x) => x.key !== s.key))} className="rounded p-1 text-[var(--app-faint)]"><X size={14} /></button>
                 </li>
               ))}
               {scriptFiles.map((f, i) => (
                 <li key={`${f.name}-${i}`} className="flex items-center gap-2 rounded-xl bg-white/[0.04] px-3 py-2 text-[13px]">
-                  <FileText size={14} className="text-[#D97757]" /><span className="min-w-0 flex-1 truncate">{f.name}</span>
-                  <button type="button" aria-label={`Remove ${f.name}`} onClick={() => setScriptFiles((cur) => cur.filter((_, j) => j !== i))} className="rounded p-1 text-[#9C9A92]"><X size={14} /></button>
+                  <FileText size={14} className="text-[var(--brand)]" /><span className="min-w-0 flex-1 truncate">{f.name}</span>
+                  <button type="button" aria-label={`Remove ${f.name}`} onClick={() => setScriptFiles((cur) => cur.filter((_, j) => j !== i))} className="rounded p-1 text-[var(--app-faint)]"><X size={14} /></button>
                 </li>
               ))}
             </ul>
@@ -178,32 +178,32 @@ export default function TelegramMarkApp() {
             <Btn primary={total === 0} onClick={() => setScanning('scripts')}><Camera size={16} />{total ? 'Scan more' : 'Scan students'}</Btn>
             <Btn onClick={() => scriptsInput.current?.click()}><Paperclip size={16} />Choose files</Btn>
           </div>
-          <p className="mt-2 text-[12px] text-[#9C9A92]">One tap per page, <b className="text-[#C2C0B6]">Next student</b> between students.</p>
+          <p className="mt-2 text-[12px] text-[var(--app-faint)]">One tap per page, <b className="text-[var(--app-muted)]">Next student</b> between students.</p>
           <input ref={scriptsInput} type="file" hidden multiple accept=".pdf,.zip,.docx,image/*" onChange={(e) => { const fs = [...(e.target.files ?? [])]; if (fs.length) setScriptFiles((cur) => [...cur, ...fs].slice(0, 9)); e.target.value = ''; }} />
         </section>
 
         {/* 3. Instructions */}
         <section className="rounded-2xl border border-white/10 bg-[#1A1918] p-3.5">
-          <div className="mb-2 flex items-center gap-2 text-[13px] font-semibold"><Step n={3} done={!!instructions.trim()} />Instructions <span className="font-normal text-[#9C9A92]">(optional)</span></div>
+          <div className="mb-2 flex items-center gap-2 text-[13px] font-semibold"><Step n={3} done={!!instructions.trim()} />Instructions <span className="font-normal text-[var(--app-faint)]">(optional)</span></div>
           <textarea value={instructions} onChange={(e) => setInstructions(e.target.value.slice(0, 2000))} rows={2} placeholder="For example: accept g = 9.8 or 10 m/s²."
-            className="w-full resize-none rounded-xl border border-white/10 bg-transparent px-3 py-2 text-[14px] placeholder:text-[#6F6D66] focus:border-[#D97757]/60 focus:outline-none" />
+            className="w-full resize-none rounded-xl border border-white/10 bg-transparent px-3 py-2 text-[14px] placeholder:text-[#6F6D66] focus:border-[var(--brand)]/60 focus:outline-none" />
           <div className="mt-2 flex flex-wrap gap-1.5">
             {SUGGESTIONS.map((s) => (
-              <button key={s} type="button" onClick={() => toggle(s)} className={`rounded-full border px-2.5 py-1 text-[12px] ${instructions.includes(s) ? 'border-[#D97757]/50 bg-[#D97757]/15 text-[#F2B39C]' : 'border-white/10 text-[#9C9A92]'}`}>{s.replace(/\.$/, '')}</button>
+              <button key={s} type="button" onClick={() => toggle(s)} className={`rounded-full border px-2.5 py-1 text-[12px] ${instructions.includes(s) ? 'border-[var(--brand)]/50 bg-[var(--brand)]/15 text-[var(--brand-soft)]' : 'border-white/10 text-[var(--app-faint)]'}`}>{s.replace(/\.$/, '')}</button>
             ))}
-            <button type="button" aria-pressed={strict} onClick={() => setStrict((v) => !v)} className={`rounded-full border px-2.5 py-1 text-[12px] ${strict ? 'border-[#D97757]/50 bg-[#D97757]/15 text-[#F2B39C]' : 'border-white/10 text-[#9C9A92]'}`}>Strict marking</button>
+            <button type="button" aria-pressed={strict} onClick={() => setStrict((v) => !v)} className={`rounded-full border px-2.5 py-1 text-[12px] ${strict ? 'border-[var(--brand)]/50 bg-[var(--brand)]/15 text-[var(--brand-soft)]' : 'border-white/10 text-[var(--app-faint)]'}`}>Strict marking</button>
           </div>
         </section>
 
         {state.kind === 'error' && <p className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[13px] text-rose-300">{state.message}</p>}
       </main>
 
-      <footer className="fixed inset-x-0 bottom-0 border-t border-white/10 bg-[#0f1013]/95 px-4 pb-[calc(12px+env(safe-area-inset-bottom))] pt-3 backdrop-blur">
+      <footer className="fixed inset-x-0 bottom-0 border-t border-white/10 bg-[var(--ws-bg)]/95 px-4 pb-[calc(12px+env(safe-area-inset-bottom))] pt-3 backdrop-blur">
         <div className="mx-auto flex max-w-md items-center gap-3">
-          <span className="min-w-0 flex-1 text-[12px] leading-tight text-[#9C9A92]">
+          <span className="min-w-0 flex-1 text-[12px] leading-tight text-[var(--app-faint)]">
             {total ? <>{scheme ? (guideKind === 'paper' ? 'Question paper ready' : 'Scheme ready') : 'Add the scheme or question paper'}<br />{total} student{total === 1 ? '' : 's'}{pageCount ? ` · ${pageCount} pages` : ''}</> : 'Add the students to start'}
           </span>
-          <button type="button" disabled={!total || !scheme || state.kind === 'sending'} onClick={() => void submit()} className="inline-flex items-center gap-2 rounded-xl bg-[#D97757] px-5 py-3 text-[15px] font-semibold text-white disabled:opacity-40">
+          <button type="button" disabled={!total || !scheme || state.kind === 'sending'} onClick={() => void submit()} className="inline-flex items-center gap-2 rounded-xl bg-[var(--brand)] px-5 py-3 text-[15px] font-semibold text-white disabled:opacity-40">
             {state.kind === 'sending' ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
             {state.kind === 'sending' ? 'Sending…' : `Mark ${total || ''} script${total === 1 ? '' : 's'}`.replace('  ', ' ')}
           </button>
@@ -211,7 +211,7 @@ export default function TelegramMarkApp() {
       </footer>
 
       {scanning && (
-        <div className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-[#0f1013]">
+        <div className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-[var(--ws-bg)]">
           <DocumentScanner
             labels="student"
             aiTools={false}
@@ -228,20 +228,20 @@ export default function TelegramMarkApp() {
 }
 
 function Step({ n, done }: { n: number; done: boolean }) {
-  return <span className={`grid h-5 w-5 place-items-center rounded-full text-[11px] font-bold ${done ? 'bg-emerald-500 text-[#0f1013]' : 'bg-white/10 text-[#C2C0B6]'}`}>{done ? <Check size={12} /> : n}</span>;
+  return <span className={`grid h-5 w-5 place-items-center rounded-full text-[11px] font-bold ${done ? 'bg-emerald-500 text-[#0f1013]' : 'bg-white/10 text-[var(--app-muted)]'}`}>{done ? <Check size={12} /> : n}</span>;
 }
 
 function Btn({ children, onClick, primary }: { children: React.ReactNode; onClick: () => void; primary?: boolean }) {
-  return <button type="button" onClick={onClick} className={`inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-[14px] font-medium ${primary ? 'bg-[#D97757] text-white' : 'border border-white/10 text-[#E8E6DE]'}`}>{children}</button>;
+  return <button type="button" onClick={onClick} className={`inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-[14px] font-medium ${primary ? 'bg-[var(--brand)] text-white' : 'border border-white/10 text-[#E8E6DE]'}`}>{children}</button>;
 }
 
 function Screen({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
   return (
-    <main className="grid min-h-dvh place-items-center bg-[#0f1013] px-6 text-center">
+    <main className="grid min-h-dvh place-items-center bg-[var(--ws-bg)] px-6 text-center">
       <div className="max-w-sm">
         <div className="mx-auto mb-5 grid h-14 w-14 place-items-center rounded-2xl border border-white/10 bg-white/[0.04]">{icon}</div>
         <h1 className="mb-2 text-xl font-semibold text-white">{title}</h1>
-        <p className="text-sm leading-relaxed text-[#C2C0B6]">{children}</p>
+        <p className="text-sm leading-relaxed text-[var(--app-muted)]">{children}</p>
       </div>
     </main>
   );

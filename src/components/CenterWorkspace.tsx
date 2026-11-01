@@ -487,7 +487,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
     const publicLink = form?.id ? `${window.location.origin}/forms/${form.id}` : '';
     return (
       <div className="w-full max-w-3xl bg-white dark:bg-[#1C1C20] rounded-[32px] shadow-2xl overflow-hidden border border-[#E8E4DC] dark:border-[#2D2D32] animate-in fade-in zoom-in-95 duration-500">
-        <div className="bg-[#D97757] p-8 text-white relative overflow-hidden">
+        <div className="bg-[var(--brand)] p-8 text-white relative overflow-hidden">
           <div className="absolute top-0 right-0 p-8 opacity-10">
             <FileText size={120} />
           </div>
@@ -869,7 +869,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
     const isDrafting = isAiLoading && !schema.questions;
     return (
       <div className="w-full max-w-4xl bg-white dark:bg-[#1C1C20] rounded-[32px] shadow-2xl overflow-hidden border border-[#E8E4DC] dark:border-[#2D2D32] animate-in fade-in zoom-in-95 duration-500">
-        <div className="bg-[#D97757] p-8 text-white relative overflow-hidden">
+        <div className="bg-[var(--brand)] p-8 text-white relative overflow-hidden">
           <div className="absolute top-0 right-0 p-8 opacity-10">
             <Award size={120} />
           </div>
@@ -905,7 +905,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
 
         <div className="p-8 space-y-8 max-h-[60vh] overflow-y-auto custom-scrollbar">
           {schema.description && (
-            <div className="text-sm text-[#66635B] dark:text-[#A0A0AA] italic leading-relaxed border-l-4 border-[#D97757]/30 pl-4 py-1">
+            <div className="text-sm text-[#66635B] dark:text-[#A0A0AA] italic leading-relaxed border-l-4 border-[var(--brand)]/30 pl-4 py-1">
               {schema.description}
             </div>
           )}
@@ -915,7 +915,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
               <div key={q.id || idx} className="group space-y-3 p-4 rounded-2xl hover:bg-[#F4F0E8]/50 dark:hover:bg-[#202024]/50 transition-all border border-transparent hover:border-[#E8E4DC] dark:hover:border-[#2D2D32]">
                 <div className="flex items-start justify-between">
                   <div className="flex gap-3">
-                    <span className="flex-shrink-0 w-6 h-6 rounded-lg bg-[#D97757]/10 text-[#D97757] flex items-center justify-center text-xs font-bold border border-[#D97757]/20">
+                    <span className="flex-shrink-0 w-6 h-6 rounded-lg bg-[var(--brand)]/10 text-[var(--brand)] flex items-center justify-center text-xs font-bold border border-[var(--brand)]/20">
                       {q.number || idx + 1}
                     </span>
                     <div className="space-y-2">
@@ -926,7 +926,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                           {q.options.map((opt: string, i: number) => (
                             <div key={i} className="text-xs px-3 py-2 rounded-xl bg-white dark:bg-[#141416] border border-[#E8E4DC] dark:border-[#2D2D32] text-[#66635B] dark:text-[#A0A0AA] flex items-center gap-2">
-                              <span className="w-4 h-4 rounded-full border border-[#D97757]/30 flex items-center justify-center text-[8px] font-bold text-[#D97757]">
+                              <span className="w-4 h-4 rounded-full border border-[var(--brand)]/30 flex items-center justify-center text-[8px] font-bold text-[var(--brand)]">
                                 {String.fromCharCode(65 + i)}
                               </span>
                               {opt}
@@ -936,7 +936,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                       )}
                     </div>
                   </div>
-                  <div className="flex-shrink-0 text-[10px] font-black text-[#D97757] bg-[#D97757]/10 px-2 py-1 rounded-md uppercase tracking-wider">
+                  <div className="flex-shrink-0 text-[10px] font-black text-[var(--brand)] bg-[var(--brand)]/10 px-2 py-1 rounded-md uppercase tracking-wider">
                     {q.maxMarks || 0} Marks
                   </div>
                 </div>
@@ -955,7 +955,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
             className={`w-full sm:w-auto px-8 py-3.5 rounded-2xl font-black text-sm transition-all shadow-xl flex items-center justify-center gap-2 active:scale-95 ${
               isAiLoading
                 ? 'bg-slate-400 cursor-not-allowed opacity-50'
-                : 'bg-[#D97757] hover:bg-[#C56648] text-white shadow-[#D97757]/20'
+                : 'bg-[var(--brand)] hover:bg-[#C56648] text-white shadow-[var(--brand)]/20'
             }`}
           >
             <Check size={18} />
@@ -1280,7 +1280,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
             </header>
             <div className="flex-1 min-h-0 grid md:grid-cols-[300px_minmax(0,1fr)]">
               <aside className="overflow-y-auto border-b md:border-b-0 md:border-r border-[#E8E4DC] dark:border-[#2D2D32] p-3 sm:p-4 max-h-[32vh] md:max-h-none">
-                <button onClick={() => void showFormsDashboard()} className="mb-3 w-full rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] px-3 py-2 text-xs font-bold text-[#D97757]">Refresh forms</button>
+                <button onClick={() => void showFormsDashboard()} className="mb-3 w-full rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] px-3 py-2 text-xs font-bold text-[var(--brand)]">Refresh forms</button>
                 {isLoadingSavedForms && <p className="p-4 text-xs text-[#858075]">Loading forms…</p>}
                 {savedFormsError && <p role="alert" className="p-3 text-xs text-rose-500">{savedFormsError}</p>}
                 {!isLoadingSavedForms && !savedForms.length && !savedFormsError && <p className="p-4 text-xs text-[#858075]">No saved forms yet. Create and publish a form to start collecting responses.</p>}
@@ -1293,7 +1293,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                     setFormAnalysisError('');
                     setFormAnalysisNotice('');
                     void loadFormResponses(form.id);
-                  }} className={`w-full text-left rounded-xl border p-3 ${activeSavedForm?.id === form.id ? 'border-[#D97757] bg-[#D97757]/10' : 'border-[#E8E4DC] dark:border-[#2D2D32]'}`}>
+                  }} className={`w-full text-left rounded-xl border p-3 ${activeSavedForm?.id === form.id ? 'border-[var(--brand)] bg-[var(--brand)]/10' : 'border-[#E8E4DC] dark:border-[#2D2D32]'}`}>
                     <span className="block truncate text-sm font-bold text-[#191919] dark:text-white">{form.title}</span>
                     <span className="mt-1 block text-xs text-[#858075]">{form.responseCount} responses · updated {new Date(form.updatedAt).toLocaleDateString()}</span>
                   </button>)}
@@ -1310,11 +1310,11 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                     </div>
                   </div>
                   <div className="flex gap-2 border-b border-[#E8E4DC] dark:border-[#2D2D32]">
-                    {(['responses', 'settings'] as const).map(tab => <button key={tab} onClick={() => setFormDashboardTab(tab)} className={`border-b-2 px-4 py-2 text-xs font-black capitalize ${formDashboardTab === tab ? 'border-[#D97757] text-[#D97757]' : 'border-transparent text-[#858075]'}`}>{tab}</button>)}
+                    {(['responses', 'settings'] as const).map(tab => <button key={tab} onClick={() => setFormDashboardTab(tab)} className={`border-b-2 px-4 py-2 text-xs font-black capitalize ${formDashboardTab === tab ? 'border-[var(--brand)] text-[var(--brand)]' : 'border-transparent text-[#858075]'}`}>{tab}</button>)}
                   </div>
                   {formDashboardTab === 'responses' && <div className="space-y-4">
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                      {[['Total responses', activeSavedForm.responseCount || 0], ['Latest response', formResponses[0] ? new Date(formResponses[0].submittedAt).toLocaleDateString() : '—'], ['Analyzed', formResponses.filter(response => response.analysis).length], ['Selected', formResponses.filter(response => response.analysis?.selected).length]].map(([label, value]) => <div key={String(label)} className="rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] bg-white dark:bg-[#1C1C20] p-3"><p className="text-[10px] uppercase tracking-wider text-[#858075]">{label}</p><p className="mt-1 truncate text-lg font-black text-[#D97757]">{value}</p></div>)}
+                      {[['Total responses', activeSavedForm.responseCount || 0], ['Latest response', formResponses[0] ? new Date(formResponses[0].submittedAt).toLocaleDateString() : '—'], ['Analyzed', formResponses.filter(response => response.analysis).length], ['Selected', formResponses.filter(response => response.analysis?.selected).length]].map(([label, value]) => <div key={String(label)} className="rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] bg-white dark:bg-[#1C1C20] p-3"><p className="text-[10px] uppercase tracking-wider text-[#858075]">{label}</p><p className="mt-1 truncate text-lg font-black text-[var(--brand)]">{value}</p></div>)}
                     </div>
                     {responsesLoading && <p className="py-8 text-center text-sm text-[#858075]">Loading responses…</p>}
                     {responsesError && <p role="alert" className="rounded-xl bg-rose-500/10 p-3 text-sm text-rose-600">{responsesError}</p>}
@@ -1327,7 +1327,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                         const displayValue = value && typeof value === 'object' ? Object.entries(value as Record<string, any>).map(([row, answer]) => `${row}: ${Array.isArray(answer) ? answer.join(', ') : answer}`).join(' · ') : Array.isArray(value) ? value.join(', ') : String(value ?? '');
                         return <div key={key} className="rounded-xl bg-[#F7F5F0] dark:bg-white/[0.04] p-3"><p className="text-[10px] font-bold text-[#858075]">{question?.title || question?.label || key}</p><p className="mt-1 break-words text-sm text-[#191919] dark:text-slate-200">{displayValue}</p></div>;
                       })}</div>
-                      {response.analysis?.score != null && <p className="mt-3 text-xs font-bold text-[#D97757]">{response.analysis.ownerReviewed ? 'Reviewed score' : 'AI score'}: {response.analysis.score}/100 {response.analysis.selected ? '· Selected' : ''}</p>}
+                      {response.analysis?.score != null && <p className="mt-3 text-xs font-bold text-[var(--brand)]">{response.analysis.ownerReviewed ? 'Reviewed score' : 'AI score'}: {response.analysis.score}/100 {response.analysis.selected ? '· Selected' : ''}</p>}
                       <form onSubmit={(event) => void saveResponseReview(event, response.id)} className="mt-4 grid gap-3 rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] bg-[#F7F5F0]/70 dark:bg-white/[0.025] p-3 sm:grid-cols-[120px_1fr_auto] sm:items-end">
                         <label className="text-[11px] font-bold text-[#858075]">Score (0–100)
                           <input name="score" type="number" min="0" max="100" step="0.1" required value={response.analysis?.score ?? ''} onChange={(event) => {
@@ -1339,8 +1339,8 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                           <textarea name="feedback" rows={2} maxLength={5000} defaultValue={response.analysis?.feedback || ''} className="mt-1 w-full resize-y rounded-lg border border-[#E8E4DC] dark:border-[#2D2D32] bg-white dark:bg-[#1C1C20] px-2.5 py-2 text-sm font-normal text-[#191919] dark:text-white" placeholder="Add evidence-based feedback" />
                         </label>
                         <div className="flex items-center justify-between gap-3 sm:flex-col sm:items-stretch">
-                          <label className="flex items-center gap-2 whitespace-nowrap text-xs font-semibold text-[#191919] dark:text-slate-200"><input name="selected" type="checkbox" defaultChecked={Boolean(response.analysis?.selected)} className="accent-[#D97757]" /> Select candidate</label>
-                          <button type="submit" disabled={savingReviewId === response.id} className="rounded-lg bg-[#D97757] px-3 py-2 text-xs font-bold text-white disabled:opacity-50">{savingReviewId === response.id ? 'Saving…' : 'Save review'}</button>
+                          <label className="flex items-center gap-2 whitespace-nowrap text-xs font-semibold text-[#191919] dark:text-slate-200"><input name="selected" type="checkbox" defaultChecked={Boolean(response.analysis?.selected)} className="accent-[var(--brand)]" /> Select candidate</label>
+                          <button type="submit" disabled={savingReviewId === response.id} className="rounded-lg bg-[var(--brand)] px-3 py-2 text-xs font-bold text-white disabled:opacity-50">{savingReviewId === response.id ? 'Saving…' : 'Save review'}</button>
                         </div>
                       </form>
                     </article>)}
@@ -1352,7 +1352,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                       {activeSavedForm.schema?.acceptingResponses === false ? 'Resume responses' : 'Pause responses'}
                     </button>
                     <label className="block text-xs font-bold text-[#191919] dark:text-white">Selection requirements
-                      <textarea value={selectionRequirements} onChange={event => setSelectionRequirements(event.target.value)} rows={4} placeholder="Describe eligibility requirements and what makes a strong response…" className="mt-2 w-full rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] bg-transparent p-3 text-sm font-normal outline-none focus:border-[#D97757]" />
+                      <textarea value={selectionRequirements} onChange={event => setSelectionRequirements(event.target.value)} rows={4} placeholder="Describe eligibility requirements and what makes a strong response…" className="mt-2 w-full rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] bg-transparent p-3 text-sm font-normal outline-none focus:border-[var(--brand)]" />
                     </label>
                     <button onClick={() => { void saveSelectionRequirements().then(() => setFormAnalysisNotice('Requirements saved.')).catch((error: any) => setFormAnalysisError(error.message)); }} className="rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] px-4 py-2.5 text-xs font-bold">Save requirements</button>
                     {formAnalysisError && <p role="alert" className="text-xs text-rose-500">{formAnalysisError}</p>}
@@ -1360,25 +1360,25 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                   </div>}
                   <div className="rounded-2xl border border-[#E8E4DC] dark:border-[#2D2D32] bg-white dark:bg-[#1C1C20] p-4 sm:p-5 space-y-3">
                     <label className="block text-xs font-bold text-[#191919] dark:text-white">Selection requirements
-                      <textarea value={selectionRequirements} onChange={(event) => setSelectionRequirements(event.target.value)} rows={4} placeholder="Describe eligibility requirements, priorities, and any disqualifying conditions…" className="mt-2 w-full rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] bg-transparent p-3 text-sm font-normal outline-none focus:border-[#D97757]" />
+                      <textarea value={selectionRequirements} onChange={(event) => setSelectionRequirements(event.target.value)} rows={4} placeholder="Describe eligibility requirements, priorities, and any disqualifying conditions…" className="mt-2 w-full rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] bg-transparent p-3 text-sm font-normal outline-none focus:border-[var(--brand)]" />
                     </label>
                     <div className="flex flex-wrap gap-2">
                       <button onClick={() => { void saveSelectionRequirements().then(() => setFormAnalysisNotice('Requirements saved.')).catch((error: any) => setFormAnalysisError(error.message)); }} className="rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] px-4 py-2.5 text-xs font-bold">Save requirements</button>
-                      <button disabled={isAnalyzingForm || !activeSavedForm.responseCount} onClick={() => void runFormAnalysis()} className="rounded-xl bg-[#D97757] px-4 py-2.5 text-xs font-black text-white disabled:opacity-50">{isAnalyzingForm ? 'Analyzing responses…' : 'Analyze & select best fit'}</button>
+                      <button disabled={isAnalyzingForm || !activeSavedForm.responseCount} onClick={() => void runFormAnalysis()} className="rounded-xl bg-[var(--brand)] px-4 py-2.5 text-xs font-black text-white disabled:opacity-50">{isAnalyzingForm ? 'Analyzing responses…' : 'Analyze & select best fit'}</button>
                     </div>
                     {formAnalysisError && <p role="alert" className="text-xs text-rose-500">{formAnalysisError}</p>}
                     {formAnalysisNotice && <p role="status" className="text-xs text-amber-600">{formAnalysisNotice}</p>}
                   </div>
                   {formAnalysis && <>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                      {[['Responses', formAnalysis.totalSubmissions], ['Scored', formAnalysis.candidates?.filter((candidate: any) => candidate.score !== null).length || 0], ['Average score', formAnalysis.averageScore], ['Selected', formAnalysis.selectedCount]].map(([label, value]) => <div key={String(label)} className="rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] bg-white dark:bg-[#1C1C20] p-3"><p className="text-[10px] uppercase tracking-wider text-[#858075]">{label}</p><p className="mt-1 text-xl font-black text-[#D97757]">{value}</p></div>)}
+                      {[['Responses', formAnalysis.totalSubmissions], ['Scored', formAnalysis.candidates?.filter((candidate: any) => candidate.score !== null).length || 0], ['Average score', formAnalysis.averageScore], ['Selected', formAnalysis.selectedCount]].map(([label, value]) => <div key={String(label)} className="rounded-xl border border-[#E8E4DC] dark:border-[#2D2D32] bg-white dark:bg-[#1C1C20] p-3"><p className="text-[10px] uppercase tracking-wider text-[#858075]">{label}</p><p className="mt-1 text-xl font-black text-[var(--brand)]">{value}</p></div>)}
                     </div>
-                    {formAnalysis.qualitativeInsight && <p className="rounded-xl bg-[#D97757]/10 p-4 text-sm text-[#191919] dark:text-slate-200">{formAnalysis.qualitativeInsight}</p>}
+                    {formAnalysis.qualitativeInsight && <p className="rounded-xl bg-[var(--brand)]/10 p-4 text-sm text-[#191919] dark:text-slate-200">{formAnalysis.qualitativeInsight}</p>}
                     <div className="space-y-3">
                       {(formAnalysis.candidates || []).map((candidate: any, index: number) => <article key={candidate.id} className="rounded-2xl border border-[#E8E4DC] dark:border-[#2D2D32] bg-white dark:bg-[#1C1C20] p-4 sm:p-5">
-                        <div className="flex flex-wrap items-center justify-between gap-2"><h4 className="font-bold text-[#191919] dark:text-white">#{index + 1} · {candidate.answers?.name || candidate.answers?.fullName || `Response ${formAnalysis.candidates.length - index}`}</h4><div className="flex items-center gap-2"><span className="rounded-full bg-[#D97757]/10 px-3 py-1 text-xs font-black text-[#D97757]">{candidate.score === null ? 'Not scored' : `${candidate.score}/100`}</span>{candidate.selected && <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-600">Selected</span>}</div></div>
+                        <div className="flex flex-wrap items-center justify-between gap-2"><h4 className="font-bold text-[#191919] dark:text-white">#{index + 1} · {candidate.answers?.name || candidate.answers?.fullName || `Response ${formAnalysis.candidates.length - index}`}</h4><div className="flex items-center gap-2"><span className="rounded-full bg-[var(--brand)]/10 px-3 py-1 text-xs font-black text-[var(--brand)]">{candidate.score === null ? 'Not scored' : `${candidate.score}/100`}</span>{candidate.selected && <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-600">Selected</span>}</div></div>
                         <p className="mt-2 text-xs text-[#858075]">{candidate.feedback || 'Run AI analysis to score this response.'}</p>
-                        <details className="mt-3"><summary className="cursor-pointer text-xs font-bold text-[#D97757]">View answers and score details</summary><div className="mt-3 grid sm:grid-cols-2 gap-2">{Object.entries(candidate.answers || {}).map(([key, value]) => <div key={key} className="rounded-lg bg-black/[0.03] dark:bg-white/[0.04] p-3"><p className="text-[10px] text-[#858075]">{activeSavedForm.schema?.questions?.find((question: any, questionIndex: number) => String(question.id ?? question.number ?? questionIndex + 1) === key)?.title || key}</p><p className="mt-1 break-words text-xs text-[#191919] dark:text-slate-200">{Array.isArray(value) ? value.join(', ') : String(value)}</p></div>)}</div></details>
+                        <details className="mt-3"><summary className="cursor-pointer text-xs font-bold text-[var(--brand)]">View answers and score details</summary><div className="mt-3 grid sm:grid-cols-2 gap-2">{Object.entries(candidate.answers || {}).map(([key, value]) => <div key={key} className="rounded-lg bg-black/[0.03] dark:bg-white/[0.04] p-3"><p className="text-[10px] text-[#858075]">{activeSavedForm.schema?.questions?.find((question: any, questionIndex: number) => String(question.id ?? question.number ?? questionIndex + 1) === key)?.title || key}</p><p className="mt-1 break-words text-xs text-[#191919] dark:text-slate-200">{Array.isArray(value) ? value.join(', ') : String(value)}</p></div>)}</div></details>
                       </article>)}
                     </div>
                   </>}
@@ -1417,7 +1417,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
         >
           <div className="max-w-md w-full space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
             <div className="relative">
-              <div className="w-20 h-20 rounded-[28px] bg-[#D97757] text-white flex items-center justify-center text-3xl font-bold mx-auto shadow-2xl shadow-[#D97757]/30 transform rotate-3 hover:rotate-0 transition-transform cursor-default">
+              <div className="w-20 h-20 rounded-[28px] bg-[var(--brand)] text-white flex items-center justify-center text-3xl font-bold mx-auto shadow-2xl shadow-[var(--brand)]/30 transform rotate-3 hover:rotate-0 transition-transform cursor-default">
                 <BookOpen size={32} />
               </div>
               <div className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-emerald-500 border-4 border-[#FBF9F6] dark:border-[#141416] animate-pulse" />
@@ -1425,7 +1425,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
 
             <div className="space-y-3">
               <h2 className="text-2xl font-black tracking-tight text-[#191919] dark:text-[#F3F3F3]">
-                Bwenge AI <span className="text-[#D97757]">Workspace</span>
+                Bwenge AI <span className="text-[var(--brand)]">Workspace</span>
               </h2>
               <p className="text-sm text-[#66635B] dark:text-[#A0A0AA] font-medium leading-relaxed">
                 Upload or scan student scripts, build forms, and review marked exams. To mark a class, you can also just send the scripts in the chat.
@@ -1448,9 +1448,9 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                   e.stopPropagation();
                   handleUploadClick();
                 }}
-                className="group p-5 rounded-2xl bg-white dark:bg-[#202024] hover:bg-[#F4F0E8] dark:hover:bg-[#2D2D32] border border-[#E8E4DC] dark:border-[#2D2D32] hover:border-[#D97757] text-left transition-all shadow-sm hover:shadow-xl hover:-translate-y-1 active:translate-y-0"
+                className="group p-5 rounded-2xl bg-white dark:bg-[#202024] hover:bg-[#F4F0E8] dark:hover:bg-[#2D2D32] border border-[#E8E4DC] dark:border-[#2D2D32] hover:border-[var(--brand)] text-left transition-all shadow-sm hover:shadow-xl hover:-translate-y-1 active:translate-y-0"
               >
-                <div className="w-10 h-10 rounded-xl bg-[#D97757]/10 text-[#D97757] flex items-center justify-center mb-3 group-hover:bg-[#D97757] group-hover:text-white transition-colors">
+                <div className="w-10 h-10 rounded-xl bg-[var(--brand)]/10 text-[var(--brand)] flex items-center justify-center mb-3 group-hover:bg-[var(--brand)] group-hover:text-white transition-colors">
                   <Plus size={20} />
                 </div>
                 <span className="text-sm font-bold text-[#191919] dark:text-[#F3F3F3] block">
@@ -1467,9 +1467,9 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                   e.stopPropagation();
                   onOpenScanner?.();
                 }}
-                className="group p-5 rounded-2xl bg-white dark:bg-[#202024] hover:bg-[#F4F0E8] dark:hover:bg-[#2D2D32] border border-[#E8E4DC] dark:border-[#2D2D32] hover:border-[#D97757] text-left transition-all shadow-sm hover:shadow-xl hover:-translate-y-1 active:translate-y-0"
+                className="group p-5 rounded-2xl bg-white dark:bg-[#202024] hover:bg-[#F4F0E8] dark:hover:bg-[#2D2D32] border border-[#E8E4DC] dark:border-[#2D2D32] hover:border-[var(--brand)] text-left transition-all shadow-sm hover:shadow-xl hover:-translate-y-1 active:translate-y-0"
               >
-                <div className="w-10 h-10 rounded-xl bg-[#D97757]/10 text-[#D97757] flex items-center justify-center mb-3 group-hover:bg-[#D97757] group-hover:text-white transition-colors">
+                <div className="w-10 h-10 rounded-xl bg-[var(--brand)]/10 text-[var(--brand)] flex items-center justify-center mb-3 group-hover:bg-[var(--brand)] group-hover:text-white transition-colors">
                   <Maximize2 size={20} />
                 </div>
                 <span className="text-sm font-bold text-[#191919] dark:text-[#F3F3F3] block">
@@ -1486,9 +1486,9 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                   e.stopPropagation();
                   handleOpenManualBuilder();
                 }}
-                className="group p-5 rounded-2xl bg-white dark:bg-[#202024] hover:bg-[#F4F0E8] dark:hover:bg-[#2D2D32] border border-[#E8E4DC] dark:border-[#2D2D32] hover:border-[#D97757] text-left transition-all shadow-sm hover:shadow-xl hover:-translate-y-1 active:translate-y-0"
+                className="group p-5 rounded-2xl bg-white dark:bg-[#202024] hover:bg-[#F4F0E8] dark:hover:bg-[#2D2D32] border border-[#E8E4DC] dark:border-[#2D2D32] hover:border-[var(--brand)] text-left transition-all shadow-sm hover:shadow-xl hover:-translate-y-1 active:translate-y-0"
               >
-                <div className="w-10 h-10 rounded-xl bg-[#D97757]/10 text-[#D97757] flex items-center justify-center mb-3 group-hover:bg-[#D97757] group-hover:text-white transition-colors">
+                <div className="w-10 h-10 rounded-xl bg-[var(--brand)]/10 text-[var(--brand)] flex items-center justify-center mb-3 group-hover:bg-[var(--brand)] group-hover:text-white transition-colors">
                   <FileText size={20} />
                 </div>
                 <span className="text-sm font-bold text-[#191919] dark:text-[#F3F3F3] block">
@@ -1502,9 +1502,9 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
               <a
                 href="/exams"
                 onClick={(e) => e.stopPropagation()}
-                className="group p-5 rounded-2xl bg-white dark:bg-[#202024] hover:bg-[#F4F0E8] dark:hover:bg-[#2D2D32] border border-[#E8E4DC] dark:border-[#2D2D32] hover:border-[#D97757] text-left transition-all shadow-sm hover:shadow-xl hover:-translate-y-1 active:translate-y-0"
+                className="group p-5 rounded-2xl bg-white dark:bg-[#202024] hover:bg-[#F4F0E8] dark:hover:bg-[#2D2D32] border border-[#E8E4DC] dark:border-[#2D2D32] hover:border-[var(--brand)] text-left transition-all shadow-sm hover:shadow-xl hover:-translate-y-1 active:translate-y-0"
               >
-                <div className="w-10 h-10 rounded-xl bg-[#D97757]/10 text-[#D97757] flex items-center justify-center mb-3 group-hover:bg-[#D97757] group-hover:text-white transition-colors">
+                <div className="w-10 h-10 rounded-xl bg-[var(--brand)]/10 text-[var(--brand)] flex items-center justify-center mb-3 group-hover:bg-[var(--brand)] group-hover:text-white transition-colors">
                   <CheckCircle2 size={20} />
                 </div>
                 <span className="text-sm font-bold text-[#191919] dark:text-[#F3F3F3] block">
@@ -1515,7 +1515,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                 </span>
               </a>
 
-              <button type="button" onClick={(event) => { event.stopPropagation(); void showFormsDashboard(); }} className="col-span-2 rounded-2xl border border-[#D97757]/40 bg-[#D97757]/10 p-4 text-left text-[#191919] shadow-sm transition-colors hover:bg-[#D97757]/20 dark:text-white">
+              <button type="button" onClick={(event) => { event.stopPropagation(); void showFormsDashboard(); }} className="col-span-2 rounded-2xl border border-[var(--brand)]/40 bg-[var(--brand)]/10 p-4 text-left text-[#191919] shadow-sm transition-colors hover:bg-[var(--brand)]/20 dark:text-white">
                 <span className="block text-sm font-bold">My Forms &amp; Results</span>
                 <span className="mt-1 block text-[10px] opacity-70">Review responses, export data, and ask AI to shortlist candidates</span>
               </button>
@@ -1539,8 +1539,8 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                 onClick={() => changeViewMode('grid')}
                 className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
                   viewMode === 'grid'
-                    ? 'bg-white dark:bg-[#2D2D32] text-[#D97757] shadow-sm'
-                    : 'text-[#858075] hover:text-[#D97757]'
+                    ? 'bg-white dark:bg-[#2D2D32] text-[var(--brand)] shadow-sm'
+                    : 'text-[#858075] hover:text-[var(--brand)]'
                 }`}
               >
                 Grid
@@ -1549,8 +1549,8 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                 onClick={() => changeViewMode('list')}
                 className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
                   viewMode === 'list'
-                    ? 'bg-white dark:bg-[#2D2D32] text-[#D97757] shadow-sm'
-                    : 'text-[#858075] hover:text-[#D97757]'
+                    ? 'bg-white dark:bg-[#2D2D32] text-[var(--brand)] shadow-sm'
+                    : 'text-[#858075] hover:text-[var(--brand)]'
                 }`}
               >
                 List
@@ -1591,10 +1591,10 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                     <div
                       key={file.id || idx}
                       onClick={() => setSelectedFile(file)}
-                      className="group flex items-center justify-between p-4 bg-white dark:bg-[#1C1C20] rounded-2xl border border-[#E8E4DC] dark:border-[#2D2D32] hover:border-[#D97757] transition-all cursor-pointer shadow-sm hover:shadow-md"
+                      className="group flex items-center justify-between p-4 bg-white dark:bg-[#1C1C20] rounded-2xl border border-[#E8E4DC] dark:border-[#2D2D32] hover:border-[var(--brand)] transition-all cursor-pointer shadow-sm hover:shadow-md"
                     >
                       <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 rounded-xl bg-[#D97757]/10 text-[#D97757] flex items-center justify-center text-xs font-black">
+                        <div className="w-10 h-10 rounded-xl bg-[var(--brand)]/10 text-[var(--brand)] flex items-center justify-center text-xs font-black">
                           {studentNum}
                         </div>
                         <div>
@@ -1631,7 +1631,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                 onDragLeave={() => setIsDragging(false)}
                 onDrop={handleFileDrop}
                 className={`w-full max-w-7xl grid ${getGridClasses()} transition-all duration-300 relative rounded-xl ${
-                  isDragging ? 'ring-2 ring-[#D97757] bg-[#F2EFE9]/40 dark:bg-[#1A1A1E]/40' : ''
+                  isDragging ? 'ring-2 ring-[var(--brand)] bg-[#F2EFE9]/40 dark:bg-[#1A1A1E]/40' : ''
                 }`}
               >
                 {activeFiles.map((file, idx) => {
@@ -1648,7 +1648,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                         file.isFlagged
                           ? 'border-amber-500 ring-2 ring-amber-500/80 shadow-sm'
                           : 'border-[#E8E4DC] dark:border-[#2D2D32]'
-                      } shadow-2xs hover:shadow-md hover:scale-110 hover:border-[#D97757] transition-all duration-200 cursor-pointer flex flex-col justify-between overflow-hidden shrink-0 select-none hover:z-20`}
+                      } shadow-2xs hover:shadow-md hover:scale-110 hover:border-[var(--brand)] transition-all duration-200 cursor-pointer flex flex-col justify-between overflow-hidden shrink-0 select-none hover:z-20`}
                       title={`Click to magnify student paper #${displayNum}${file.isFlagged ? ' (Flagged for review)' : ''}`}
                     >
                       {/* Flagged Badge Pinned to Top Left Corner */}
@@ -1662,7 +1662,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                       )}
 
                       {/* Sequential Student Identification (1, 2, 3... 300) Badge Pinned to Top Right Corner */}
-                      <div className="absolute top-1 right-1 z-20 min-w-[16px] sm:min-w-[20px] h-4 sm:h-5 px-1 rounded-full bg-[#D97757] text-white flex items-center justify-center text-[8px] sm:text-[9.5px] font-black shadow-xs shrink-0 ring-1.5 ring-white dark:ring-[#1C1C20] pointer-events-none">
+                      <div className="absolute top-1 right-1 z-20 min-w-[16px] sm:min-w-[20px] h-4 sm:h-5 px-1 rounded-full bg-[var(--brand)] text-white flex items-center justify-center text-[8px] sm:text-[9.5px] font-black shadow-xs shrink-0 ring-1.5 ring-white dark:ring-[#1C1C20] pointer-events-none">
                         {displayNum}
                       </div>
 
@@ -1696,7 +1696,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                           /* High-Precision Miniature Rendered Page with Sub-Pixel Anti-Aliasing */
                           <div className="w-full h-full p-1 sm:p-1.5 bg-white dark:bg-[#1C1C20] flex flex-col justify-between overflow-hidden subpixel-antialiased transform-gpu">
                             <div className="space-y-0.5">
-                              <div className="text-[6.5px] sm:text-[7.5px] font-bold font-mono text-[#D97757] truncate subpixel-antialiased tracking-tighter leading-tight border-b border-[#E8E4DC] dark:border-[#2D2D32] pb-0.5">
+                              <div className="text-[6.5px] sm:text-[7.5px] font-bold font-mono text-[var(--brand)] truncate subpixel-antialiased tracking-tighter leading-tight border-b border-[#E8E4DC] dark:border-[#2D2D32] pb-0.5">
                                 {file.studentName || `Student ${displayNum}`}
                               </div>
                               <div className="text-[5.5px] sm:text-[6.5px] leading-[6.5px] sm:leading-[7.5px] font-sans antialiased subpixel-antialiased text-[#191919] dark:text-[#E2E2E2] font-medium tracking-tighter whitespace-pre-wrap break-words overflow-hidden line-clamp-6 opacity-90">
@@ -1714,8 +1714,8 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                       </div>
 
                       {/* Hover Magnification Icon Hint */}
-                      <div className="absolute inset-0 bg-[#D97757]/0 group-hover:bg-[#D97757]/10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all z-10">
-                        <Maximize2 className="w-3.5 h-3.5 text-[#D97757] drop-shadow-xs" />
+                      <div className="absolute inset-0 bg-[var(--brand)]/0 group-hover:bg-[var(--brand)]/10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all z-10">
+                        <Maximize2 className="w-3.5 h-3.5 text-[var(--brand)] drop-shadow-xs" />
                       </div>
                     </div>
                   );
@@ -1729,7 +1729,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
             <div className="w-full max-w-7xl mt-6 pt-3 border-t border-[#E8E4DC] dark:border-[#2D2D32] bg-[#F4F0E8]/40 dark:bg-[#18181B]/40 rounded-xl p-3 space-y-2 select-none animate-in fade-in slide-in-from-bottom-2 duration-200">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2">
-                  <span className="px-2 py-0.5 rounded-full bg-[#D97757] text-white flex items-center justify-center text-[10px] font-bold shadow-2xs">
+                  <span className="px-2 py-0.5 rounded-full bg-[var(--brand)] text-white flex items-center justify-center text-[10px] font-bold shadow-2xs">
                     {softDeletedFiles.length}
                   </span>
                   <span className="text-xs font-bold text-[#66635B] dark:text-[#A0A0AA]">
@@ -1752,11 +1752,11 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                       key={file.id || idx}
                       type="button"
                       onClick={() => handleRestoreCard(file.id)}
-                      className="group px-2.5 py-1.5 rounded-lg bg-[#FFFFFF] dark:bg-[#202024] border border-[#E8E4DC] dark:border-[#2D2D32] hover:border-[#D97757] dark:hover:border-[#D97757] opacity-75 hover:opacity-100 transition-all cursor-pointer flex items-center space-x-2 shadow-2xs hover:shadow-xs active:scale-95"
+                      className="group px-2.5 py-1.5 rounded-lg bg-[#FFFFFF] dark:bg-[#202024] border border-[#E8E4DC] dark:border-[#2D2D32] hover:border-[var(--brand)] dark:hover:border-[var(--brand)] opacity-75 hover:opacity-100 transition-all cursor-pointer flex items-center space-x-2 shadow-2xs hover:shadow-xs active:scale-95"
                       title={`Click to restore paper #${displayNum} back to active canvas`}
                     >
                       {/* MANDATORY Sharp, 100% High-Contrast Sequential Student Badge */}
-                      <span className="min-w-[16px] sm:min-w-[18px] h-4 px-1 rounded-full bg-[#D97757] text-white flex items-center justify-center text-[8.5px] font-extrabold shrink-0 shadow-2xs">
+                      <span className="min-w-[16px] sm:min-w-[18px] h-4 px-1 rounded-full bg-[var(--brand)] text-white flex items-center justify-center text-[8.5px] font-extrabold shrink-0 shadow-2xs">
                         {displayNum}
                       </span>
 
@@ -1766,7 +1766,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                       </span>
 
                       {/* Instantaneous One-Click Restore Hint */}
-                      <span className="inline-flex items-center space-x-1 text-[10px] text-[#D97757] font-semibold opacity-80 group-hover:opacity-100">
+                      <span className="inline-flex items-center space-x-1 text-[10px] text-[var(--brand)] font-semibold opacity-80 group-hover:opacity-100">
                         <RotateCcw className="w-3 h-3" />
                         <span>Restore</span>
                       </span>
@@ -1789,11 +1789,11 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                   <div className="p-4 border-b border-[#E8E4DC] dark:border-[#2D2D32] bg-[#FFFFFF]/90 dark:bg-[#1F1F23]/90 backdrop-blur-md flex items-center justify-between z-20">
                     <div className="flex items-center gap-4">
                       <div className="flex items-center space-x-2">
-                        <span className="w-8 h-8 rounded-xl bg-[#D97757] text-white flex items-center justify-center text-xs font-black shadow-lg shadow-[#D97757]/20">
+                        <span className="w-8 h-8 rounded-xl bg-[var(--brand)] text-white flex items-center justify-center text-xs font-black shadow-lg shadow-[var(--brand)]/20">
                           {displayNum}
                         </span>
                         <div>
-                          <span className="text-xs font-black uppercase tracking-widest text-[#D97757] block leading-none mb-1">
+                          <span className="text-xs font-black uppercase tracking-widest text-[var(--brand)] block leading-none mb-1">
                             Script Viewer
                           </span>
                           <span className="text-[10px] font-bold text-[#66635B] dark:text-[#A0A0AA] block">
@@ -1873,7 +1873,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                                 onUpdateBonusMarks((currentSelectedFile?.id ?? ''), ((currentSelectedFile?.bonusMarks ?? '') || 0) - 1);
                               }
                             }}
-                            className="w-4 h-4 rounded-full bg-white dark:bg-[#2D2D32] flex items-center justify-center text-xs font-bold hover:bg-[#D97757] hover:text-white transition-colors cursor-pointer shadow-2xs"
+                            className="w-4 h-4 rounded-full bg-white dark:bg-[#2D2D32] flex items-center justify-center text-xs font-bold hover:bg-[var(--brand)] hover:text-white transition-colors cursor-pointer shadow-2xs"
                             title="Subtract 1 point"
                           >
                             -
@@ -1888,7 +1888,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                                 onUpdateBonusMarks((currentSelectedFile?.id ?? ''), ((currentSelectedFile?.bonusMarks ?? '') || 0) + 1);
                               }
                             }}
-                            className="w-4 h-4 rounded-full bg-white dark:bg-[#2D2D32] flex items-center justify-center text-xs font-bold hover:bg-[#D97757] hover:text-white transition-colors cursor-pointer shadow-2xs"
+                            className="w-4 h-4 rounded-full bg-white dark:bg-[#2D2D32] flex items-center justify-center text-xs font-bold hover:bg-[var(--brand)] hover:text-white transition-colors cursor-pointer shadow-2xs"
                             title="Add 1 point"
                           >
                             +
@@ -2002,7 +2002,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                           ? 'bg-emerald-600 text-white'
                           : anno.type === 'score'
                           ? 'bg-amber-600 text-white'
-                          : 'bg-[#D97757] text-white'
+                          : 'bg-[var(--brand)] text-white'
                       }`}
                     >
                       <span
@@ -2080,7 +2080,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
           <div className="w-full max-w-lg bg-white dark:bg-[#1C1C20] border border-[#E8E4DC] dark:border-[#2D2D32] rounded-[28px] shadow-2xl p-6 space-y-4 animate-in zoom-in-95 duration-300">
             <div className="flex items-start justify-between">
               <div className="space-y-1">
-                <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-[#D97757]">
+                <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-[var(--brand)]">
                   <FileText size={14} />
                   Create Form
                 </div>
@@ -2105,7 +2105,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
               onChange={(e) => { setFormIntentText(e.target.value); setDraftRequirements(e.target.value); }}
               rows={4}
               placeholder="Scholarship application: collect grades, financial need, leadership, and goals. Select the strongest eligible applicants..."
-              className="w-full rounded-2xl border border-[#E8E4DC] dark:border-[#2D2D32] bg-[#FBF9F6] dark:bg-[#141416] px-4 py-3 text-sm text-[#191919] dark:text-[#F3F3F3] placeholder:text-[#858075] outline-none focus:border-[#D97757] transition-colors resize-none"
+              className="w-full rounded-2xl border border-[#E8E4DC] dark:border-[#2D2D32] bg-[#FBF9F6] dark:bg-[#141416] px-4 py-3 text-sm text-[#191919] dark:text-[#F3F3F3] placeholder:text-[#858075] outline-none focus:border-[var(--brand)] transition-colors resize-none"
               autoFocus
             />
 
@@ -2122,7 +2122,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                 className={`flex-1 px-5 py-3 rounded-2xl font-black text-sm transition-all flex items-center justify-center gap-2 active:scale-95 ${
                   isGeneratingForm || !formIntentText.trim()
                     ? 'bg-slate-400 cursor-not-allowed opacity-50 text-white'
-                    : 'bg-[#D97757] hover:bg-[#C56648] text-white shadow-lg shadow-[#D97757]/20'
+                    : 'bg-[var(--brand)] hover:bg-[#C56648] text-white shadow-lg shadow-[var(--brand)]/20'
                 }`}
               >
                 {isGeneratingForm ? (
@@ -2151,7 +2151,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
                   setShowFormCreatorModal(false);
                   handleOpenManualBuilder();
                 }}
-                className="text-xs font-semibold text-[#858075] hover:text-[#D97757] transition-colors"
+                className="text-xs font-semibold text-[#858075] hover:text-[var(--brand)] transition-colors"
               >
                 Prefer to build it yourself? Start from scratch →
               </button>

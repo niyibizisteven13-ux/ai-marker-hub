@@ -17,19 +17,19 @@ export const MobileSheet: React.FC<MobileSheetProps> = ({
   children,
 }) => {
   return (
-    <div className="absolute inset-0 z-30 flex flex-col bg-[#262624] text-[#FAF9F5] animate-in slide-in-from-right duration-200 motion-reduce:animate-none">
+    <div className="absolute inset-0 z-30 flex flex-col bg-[var(--app-bg)] text-[var(--app-text)] animate-in slide-in-from-right duration-200 motion-reduce:animate-none">
       {/* Header */}
-      {!hideHeader && <header className="flex h-[calc(56px+env(safe-area-inset-top,0px))] shrink-0 items-center justify-between border-b border-white/[0.06] bg-[#212121]/95 px-3 pt-[env(safe-area-inset-top,0px)] backdrop-blur-md">
+      {!hideHeader && <header className="flex h-[calc(56px+env(safe-area-inset-top,0px))] shrink-0 items-center justify-between border-b border-white/[0.06] bg-[var(--app-panel-2)]/95 px-3 pt-[env(safe-area-inset-top,0px)] backdrop-blur-md">
         <button
           type="button"
           onClick={onBack}
-          className="flex h-11 w-11 items-center justify-center rounded-xl text-[#C2C0B6] hover:bg-white/10 hover:text-white transition-colors"
+          className="flex h-11 w-11 items-center justify-center rounded-xl text-[var(--app-muted)] hover:bg-white/10 hover:text-white transition-colors"
           aria-label="Back to chat"
         >
           <ArrowLeft className="h-5 w-5" />
         </button>
 
-        <h1 className="text-base font-semibold tracking-tight text-[#FAF9F5] truncate max-w-[200px]">
+        <h1 className="text-base font-semibold tracking-tight text-[var(--app-text)] truncate max-w-[200px]">
           {title}
         </h1>
 

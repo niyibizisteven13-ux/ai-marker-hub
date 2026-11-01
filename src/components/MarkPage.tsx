@@ -36,7 +36,7 @@ const ROLE_LABEL: Record<MarkRole, string> = { scheme: 'Marking scheme', paper: 
 const ROLE_TONE: Record<MarkRole, string> = {
   scheme: 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/25',
   paper: 'bg-sky-500/15 text-sky-300 ring-sky-500/25',
-  scripts: 'bg-[#D97757]/15 text-[#F2B39C] ring-[#D97757]/30',
+  scripts: 'bg-[var(--brand)]/15 text-[var(--brand-soft)] ring-[var(--brand)]/30',
 };
 const ISSUE_TEXT: Record<string, string> = { blurry: 'blurry', dark: 'too dark', small: 'too small', unreadable: 'could not be opened' };
 const SUGGESTIONS = ['Give half marks when the method is right.', 'Do not take marks off for spelling.', 'Accept equivalent units and correctly rounded answers.', 'Accept any correct method, even if it is not in the scheme.'];
@@ -177,22 +177,22 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
   const toggleSuggestion = (s: string) => setInstructions((cur) => (cur.includes(s) ? cur.replace(s, '').replace(/\s{2,}/g, ' ').trim() : `${cur.trim()} ${s}`.trim()));
 
   return (
-    <div className="fixed inset-0 z-[70] flex flex-col overflow-y-auto bg-[#262624] text-[#F2EFE9]"
+    <div className="fixed inset-0 z-[70] flex flex-col overflow-y-auto bg-[var(--app-bg)] text-[#F2EFE9]"
       onDragOver={(e) => { e.preventDefault(); setDragging(true); }} onDragLeave={(e) => { if (e.currentTarget === e.target) setDragging(false); }}
       onDrop={(e) => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files.length) add(e.dataTransfer.files); }}>
       <header className="flex items-center gap-3 px-4 py-3 sm:px-6">
         <button type="button" onClick={onClose} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-neutral-400 hover:bg-white/5 hover:text-white"><ArrowLeft size={16} />Back to chat</button>
       </header>
       <main className="mx-auto flex w-full max-w-[840px] flex-1 flex-col px-4 pb-28 sm:px-6 sm:pb-10">
-        <h1 className="mt-1 text-center sm:mt-4 font-serif text-[28px] font-medium tracking-tight sm:text-[32px]">What are we <span className="text-[#D97757]">marking</span> today?</h1>
+        <h1 className="mt-1 text-center sm:mt-4 font-serif text-[28px] font-medium tracking-tight sm:text-[32px]">What are we <span className="text-[var(--brand)]">marking</span> today?</h1>
         <p className="mx-auto mt-2 hidden max-w-xl text-center text-[14px] text-neutral-400 sm:block">Add the students' scripts and the marking scheme or the question paper. Bwenge reads the handwriting, marks every question in red pen, and shows you each step in the chat.</p>
 
-        <section className={`mt-5 overflow-hidden sm:mt-7 rounded-[20px] border bg-[#30302E] shadow-[0_12px_40px_rgba(0,0,0,.25)] transition-colors ${dragging ? 'border-[#D97757]/70' : 'border-white/[0.12]'}`}>
+        <section className={`mt-5 overflow-hidden sm:mt-7 rounded-[20px] border bg-[var(--app-panel)] shadow-[0_12px_40px_rgba(0,0,0,.25)] transition-colors ${dragging ? 'border-[var(--brand)]/70' : 'border-white/[0.12]'}`}>
           {items.length === 0 ? (
             // Two ways in, side by side: the camera (one tap per page) and files (or drop them here on a computer).
             <div className="grid gap-2.5 p-3.5 sm:grid-cols-2">
               {onScan && (
-                <button type="button" onClick={() => onScan('scripts')} className="flex items-center gap-3 rounded-2xl bg-[#D97757] px-4 py-4 text-left text-white hover:bg-[#c96a4c] sm:flex-col sm:items-start sm:py-6">
+                <button type="button" onClick={() => onScan('scripts')} className="flex items-center gap-3 rounded-2xl bg-[var(--brand)] px-4 py-4 text-left text-white hover:bg-[var(--brand-strong)] sm:flex-col sm:items-start sm:py-6">
                   <span className="rounded-xl bg-white/15 p-2.5"><Camera size={22} /></span>
                   <span><span className="block text-[15px] font-semibold">Scan papers</span><span className="block text-[12.5px] text-white/80">One tap per page, then next student</span></span>
                 </button>
@@ -207,9 +207,9 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
               {items.map((it) => {
                 const issues = it.check?.issues.filter((x) => x.issue !== 'small') ?? [];
                 return (
-                  <li key={it.key} className="relative flex gap-3 rounded-[14px] border border-white/[0.08] bg-[#2B2A28] p-2.5">
+                  <li key={it.key} className="relative flex gap-3 rounded-[14px] border border-white/[0.08] bg-[var(--app-panel)] p-2.5">
                     <button type="button" onClick={() => setViewing(it.file)} aria-label={`Preview ${it.file.name}`} title="Preview"
-                      className="h-14 w-11 shrink-0 overflow-hidden rounded-md border border-black/20 transition hover:ring-2 hover:ring-[#D97757]/50">
+                      className="h-14 w-11 shrink-0 overflow-hidden rounded-md border border-black/20 transition hover:ring-2 hover:ring-[var(--brand)]/50">
                       <FileThumb src={{ name: it.file.name, type: it.file.type, file: it.file, size: it.file.size }} badge={false} className="h-full w-full" />
                     </button>
                     <span className="min-w-0 flex-1">
@@ -226,7 +226,7 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
                           {it.role === 'scheme' && <Check size={11} />}{ROLE_LABEL[it.role]}<ChevronDown size={11} />
                         </button>
                         {menu === it.key && (
-                          <span role="menu" className="absolute left-0 top-full z-10 mt-1 w-44 overflow-hidden rounded-xl border border-white/10 bg-[#20201F] py-1 shadow-xl">
+                          <span role="menu" className="absolute left-0 top-full z-10 mt-1 w-44 overflow-hidden rounded-xl border border-white/10 bg-[var(--app-panel-2)] py-1 shadow-xl">
                             {(Object.keys(ROLE_LABEL) as MarkRole[]).map((r) => (
                               <button key={r} type="button" role="menuitem" onClick={() => { patch(it.key, { role: r, chosen: true }); setMenu(null); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-neutral-200 hover:bg-white/[0.06]">
                                 <span className="w-3">{it.role === r ? <Check size={12} /> : null}</span>{ROLE_LABEL[r]}
@@ -256,20 +256,20 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
 
           {scripts.length > 0 && !scheme && !paper && (
             // Step 2, right where the teacher looks next: Bwenge marks against the scheme, or writes it from the questions.
-            <div className="border-t border-white/[0.08] bg-[#D97757]/[0.06] px-4 py-3.5">
+            <div className="border-t border-white/[0.08] bg-[var(--brand)]/[0.06] px-4 py-3.5">
               <div className="flex items-center gap-2 text-[13.5px] font-semibold text-white">
-                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#D97757] text-[11px] font-bold text-white">2</span>
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--brand)] text-[11px] font-bold text-white">2</span>
                 Now add the marking scheme or the question paper
               </div>
               <p className="mt-1 text-[12.5px] text-neutral-400">Bwenge marks against your scheme. With only the question paper, it writes the scheme first and shows it to you.</p>
               <div role="radiogroup" aria-label="Which document" className="mt-2.5 grid max-w-sm grid-cols-2 gap-1 rounded-xl bg-white/[0.05] p-1 text-[12.5px]">
                 {(['scheme', 'paper'] as const).map((k) => (
                   <button key={k} type="button" role="radio" aria-checked={guideKind === k} onClick={() => setGuideKind(k)}
-                    className={`rounded-lg px-2 py-1.5 font-semibold ${guideKind === k ? 'bg-[#D97757] text-white' : 'text-neutral-400 hover:text-neutral-200'}`}>{ROLE_LABEL[k]}</button>
+                    className={`rounded-lg px-2 py-1.5 font-semibold ${guideKind === k ? 'bg-[var(--brand)] text-white' : 'text-neutral-400 hover:text-neutral-200'}`}>{ROLE_LABEL[k]}</button>
                 ))}
               </div>
               <div className="mt-2.5 flex flex-wrap gap-2">
-                {onScan && <button type="button" onClick={() => onScan(guideKind)} className="inline-flex items-center gap-1.5 rounded-xl bg-[#D97757] px-3.5 py-2 text-[13px] font-semibold text-white hover:bg-[#c96a4c]"><Camera size={15} />Photograph it</button>}
+                {onScan && <button type="button" onClick={() => onScan(guideKind)} className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--brand)] px-3.5 py-2 text-[13px] font-semibold text-white hover:bg-[var(--brand-strong)]"><Camera size={15} />Photograph it</button>}
                 <button type="button" onClick={() => guideInput.current?.click()} className="inline-flex items-center gap-1.5 rounded-xl border border-white/[0.14] px-3.5 py-2 text-[13px] text-neutral-200 hover:bg-white/5"><Paperclip size={15} />Choose file</button>
               </div>
               <input ref={guideInput} type="file" hidden accept=".pdf,.png,.jpg,.jpeg,.webp,.heic,.heif,.docx,.doc,.odt,.rtf,.txt,image/*,application/pdf"
@@ -281,10 +281,10 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
             <label htmlFor="mark-instructions" className="mb-1.5 block text-[12px] text-neutral-400">Marking instructions <span className="text-neutral-500">(optional, followed on every script)</span></label>
             <textarea id="mark-instructions" value={instructions} onChange={(e) => setInstructions(e.target.value.slice(0, 2000))} rows={2}
               placeholder="For example: accept g = 9.8 or 10 m/s². Half marks when the method is right."
-              className="w-full resize-y rounded-xl border border-white/[0.08] bg-transparent px-3 py-2.5 text-[13.5px] text-[#F2EFE9] placeholder:text-neutral-500 focus:border-[#D97757]/60 focus:outline-none" />
+              className="w-full resize-y rounded-xl border border-white/[0.08] bg-transparent px-3 py-2.5 text-[13.5px] text-[#F2EFE9] placeholder:text-neutral-500 focus:border-[var(--brand)]/60 focus:outline-none" />
             <div className="-mx-4 mt-2 flex gap-1.5 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
               {SUGGESTIONS.map((s) => (
-                <button key={s} type="button" onClick={() => toggleSuggestion(s)} className={`shrink-0 whitespace-nowrap rounded-full border px-2.5 py-1 text-[12px] ${instructions.includes(s) ? 'border-[#D97757]/50 bg-[#D97757]/15 text-[#F2B39C]' : 'border-white/[0.12] text-neutral-400 hover:text-neutral-200'}`}>{s.replace(/\.$/, '')}</button>
+                <button key={s} type="button" onClick={() => toggleSuggestion(s)} className={`shrink-0 whitespace-nowrap rounded-full border px-2.5 py-1 text-[12px] ${instructions.includes(s) ? 'border-[var(--brand)]/50 bg-[var(--brand)]/15 text-[var(--brand-soft)]' : 'border-white/[0.12] text-neutral-400 hover:text-neutral-200'}`}>{s.replace(/\.$/, '')}</button>
               ))}
             </div>
           </div>
@@ -292,11 +292,11 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
           <div className="flex items-center gap-2 overflow-x-auto border-t border-white/[0.08] px-3.5 py-2.5 [&>*]:shrink-0 sm:flex-wrap sm:overflow-visible">
             {items.length > 0 && <button type="button" onClick={() => input.current?.click()} className="inline-flex items-center gap-1.5 rounded-[10px] border border-white/[0.12] px-3 py-1.5 text-[12.5px] text-neutral-300 hover:bg-white/5"><Paperclip size={14} />Add files</button>}
             {onScan && items.length > 0 && <button type="button" onClick={() => onScan('scripts')} className="inline-flex items-center gap-1.5 rounded-[10px] border border-white/[0.12] px-3 py-1.5 text-[12.5px] text-neutral-300 hover:bg-white/5"><Camera size={14} />Scan papers</button>}
-            <select aria-label="Credit" value={credit} onChange={(e) => setCredit(e.target.value as 'partial' | 'strict')} className="h-[30px] rounded-[10px] border border-white/[0.12] bg-[#30302E] px-2 text-[12.5px] text-neutral-300">
+            <select aria-label="Credit" value={credit} onChange={(e) => setCredit(e.target.value as 'partial' | 'strict')} className="h-[30px] rounded-[10px] border border-white/[0.12] bg-[var(--app-panel)] px-2 text-[12.5px] text-neutral-300">
               <option value="partial">Part marks allowed</option><option value="strict">Strict marking</option>
             </select>
             <button type="button" onClick={() => setCorrections((v) => !v)} aria-pressed={corrections} className="inline-flex items-center gap-1.5 rounded-[10px] border border-white/[0.12] px-3 py-1.5 text-[12.5px] text-neutral-300 hover:bg-white/5"><PenLine size={14} className={corrections ? 'text-rose-400' : ''} />Red-pen corrections: {corrections ? 'on' : 'off'}</button>
-            <select aria-label="Feedback" value={feedback} onChange={(e) => setFeedback(e.target.value as 'brief' | 'detailed')} className="h-[30px] rounded-[10px] border border-white/[0.12] bg-[#30302E] px-2 text-[12.5px] text-neutral-300">
+            <select aria-label="Feedback" value={feedback} onChange={(e) => setFeedback(e.target.value as 'brief' | 'detailed')} className="h-[30px] rounded-[10px] border border-white/[0.12] bg-[var(--app-panel)] px-2 text-[12.5px] text-neutral-300">
               <option value="brief">Brief feedback</option><option value="detailed">Detailed feedback</option>
             </select>
             <div role="radiogroup" aria-label="When to mark" className="inline-flex rounded-[10px] border border-white/[0.12] p-0.5 text-[12.5px]">
@@ -304,7 +304,7 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
               <button type="button" role="radio" aria-checked={overnight} onClick={() => setOvernight(true)} title="Results by tomorrow morning, usually much sooner, for half the credits" className={`inline-flex items-center gap-1 rounded-[8px] px-2.5 py-1 ${overnight ? 'bg-indigo-500/20 text-indigo-200' : 'text-neutral-400 hover:text-neutral-200'}`}><Moon size={13} />Overnight · half price</button>
             </div>
             <button type="button" disabled={!canMark} onClick={submit}
-              className="ml-auto hidden items-center gap-2 rounded-xl sm:inline-flex bg-[#D97757] px-4 py-2 text-[14px] font-semibold text-white hover:bg-[#c96a4c] disabled:cursor-not-allowed disabled:opacity-40">
+              className="ml-auto hidden items-center gap-2 rounded-xl sm:inline-flex bg-[var(--brand)] px-4 py-2 text-[14px] font-semibold text-white hover:bg-[var(--brand-strong)] disabled:cursor-not-allowed disabled:opacity-40">
               {uploading ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}{markLabel}
             </button>
           </div>
@@ -323,13 +323,13 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
         {summary.retake > 0 && <p className="mt-3 flex items-center gap-1.5 text-[12.5px] text-amber-300 sm:hidden"><AlertTriangle size={13} />{summary.retake} photo{summary.retake === 1 ? '' : 's'} to retake (marking still works)</p>}
         {failed.length > 0 && <p className="mt-3 text-[12.5px] text-rose-300">{failed.length} file{failed.length === 1 ? '' : 's'} could not be uploaded. Remove {failed.length === 1 ? 'it' : 'them'} or add {failed.length === 1 ? 'it' : 'them'} again.</p>}
         {/* Phone: the Mark button stays in reach at the bottom of the screen. */}
-        <div className="fixed inset-x-0 bottom-0 z-10 flex items-center gap-3 border-t border-white/[0.08] bg-[#262624]/95 px-4 pb-[calc(12px+env(safe-area-inset-bottom))] pt-3 backdrop-blur sm:hidden">
+        <div className="fixed inset-x-0 bottom-0 z-10 flex items-center gap-3 border-t border-white/[0.08] bg-[var(--app-bg)]/95 px-4 pb-[calc(12px+env(safe-area-inset-bottom))] pt-3 backdrop-blur sm:hidden">
           <span className="min-w-0 flex-1 text-[12px] leading-tight text-neutral-400">
             {items.length
               ? <><span className="block truncate">{!scripts.length ? 'Next: the students\' scripts' : scheme ? 'Scheme attached' : paper ? 'Question paper attached' : 'Next: scheme or question paper'}</span><span className="block truncate">{summary.students || 0} student{summary.students === 1 ? '' : 's'} · {summary.pages} page{summary.pages === 1 ? '' : 's'}</span></>
               : 'Scan or add the scripts to start'}
           </span>
-          <button type="button" disabled={!canMark} onClick={submit} className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-[#D97757] px-4 py-2.5 text-[14px] font-semibold text-white disabled:opacity-40">
+          <button type="button" disabled={!canMark} onClick={submit} className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-[var(--brand)] px-4 py-2.5 text-[14px] font-semibold text-white disabled:opacity-40">
             {uploading ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}{canMark || uploading ? markLabel : !scripts.length ? 'Add scripts' : 'Add scheme'}
           </button>
         </div>

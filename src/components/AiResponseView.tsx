@@ -35,7 +35,7 @@ function ActionButton({
       onClick={onClick}
       title={label}
       aria-label={label}
-      className={`inline-flex h-7 w-7 items-center justify-center rounded-lg text-stone-600 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D97757]/50 ${
+      className={`inline-flex h-7 w-7 items-center justify-center rounded-lg text-stone-600 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]/50 ${
         active ? activeClass : `hover:bg-stone-800/70 ${hoverClass}`
       }`}
     >

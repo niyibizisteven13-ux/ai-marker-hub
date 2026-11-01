@@ -262,7 +262,7 @@ export default function RightChatSidebar({
   return (
     // FULL SIDEBAR CONTAINER (Glassmorphism theme, respect parent width)
     <aside
-      className="relative h-full min-h-0 w-full bg-[#212121] flex flex-col z-30 font-sans text-slate-100 overflow-hidden"
+      className="relative h-full min-h-0 w-full bg-[var(--app-panel-2)] flex flex-col z-30 font-sans text-slate-100 overflow-hidden"
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -356,7 +356,7 @@ export default function RightChatSidebar({
         className="hidden"
       />
       {/* 3. IMMERSIVE FLOATING INPUT DOCK */}
-      <footer className="shrink-0 bg-gradient-to-t from-[#212121] via-[#212121]/95 to-transparent px-3 pt-1 pb-[calc(0.45rem+env(safe-area-inset-bottom,0px))] sm:bg-[#212121] sm:px-6 sm:pt-3 sm:pb-4">
+      <footer className="shrink-0 bg-gradient-to-t from-[var(--app-panel-2)] via-[var(--app-panel-2)]/95 to-transparent px-3 pt-1 pb-[calc(0.45rem+env(safe-area-inset-bottom,0px))] sm:bg-[var(--app-panel-2)] sm:px-6 sm:pt-3 sm:pb-4">
         <div className="max-w-[900px] mx-auto relative group/dock">
           {/* Subtle Glow Backdrop */}
           <div className="absolute inset-0 rounded-full bg-white/[0.03] blur-xl opacity-0 transition-opacity duration-300 group-focus-within/dock:opacity-100" />

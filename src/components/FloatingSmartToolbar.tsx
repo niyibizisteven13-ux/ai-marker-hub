@@ -73,7 +73,7 @@ export const FloatingSmartToolbar: React.FC<FloatingSmartToolbarProps> = ({
             className="flex items-center space-x-1 px-2.5 py-1.5 rounded-xl hover:bg-[#F4F0E8] dark:hover:bg-[#2A2A2F] transition-all cursor-pointer text-[#191919] dark:text-[#F3F3F3]"
             title="Highlight Color"
           >
-            <Highlighter className="w-3.5 h-3.5 text-[#D97757]" />
+            <Highlighter className="w-3.5 h-3.5 text-[var(--brand)]" />
             <span className="font-semibold text-[11px] hidden sm:inline">Highlight</span>
             <ChevronDown className="w-3 h-3 opacity-60" />
           </button>
@@ -108,7 +108,7 @@ export const FloatingSmartToolbar: React.FC<FloatingSmartToolbarProps> = ({
           className="flex items-center space-x-1 px-2.5 py-1.5 rounded-xl hover:bg-[#F4F0E8] dark:hover:bg-[#2A2A2F] transition-all cursor-pointer text-[#191919] dark:text-[#F3F3F3]"
           title="Summarize text into key insight"
         >
-          <Sparkles className="w-3.5 h-3.5 text-[#D97757]" />
+          <Sparkles className="w-3.5 h-3.5 text-[var(--brand)]" />
           <span className="font-semibold text-[11px] hidden sm:inline">Summarize</span>
         </button>
 

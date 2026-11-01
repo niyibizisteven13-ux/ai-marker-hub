@@ -12,10 +12,10 @@ export const MobileDocumentCard: React.FC<Props> = ({ file, onStartMarking, onRe
   const [isExpanded, setIsExpanded] = useState(false);
 
   return (
-    <div className="w-full max-w-sm bg-[#0f1013] border border-[#1a1a1d] rounded-2xl overflow-hidden shadow-sm">
+    <div className="w-full max-w-sm bg-[var(--ws-bg)] border border-[#1a1a1d] rounded-2xl overflow-hidden shadow-sm">
       <div className="p-3 bg-[#111214] flex items-center justify-between border-b border-[#151516]">
         <div className="flex items-center gap-2 overflow-hidden">
-          <div className="p-2 bg-[#D97757]/10 text-[#D97757] rounded-lg shrink-0">
+          <div className="p-2 bg-[var(--brand)]/10 text-[var(--brand)] rounded-lg shrink-0">
             <FileText className="w-4 h-4" />
           </div>
           <div className="truncate">
@@ -44,7 +44,7 @@ export const MobileDocumentCard: React.FC<Props> = ({ file, onStartMarking, onRe
           <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-[#0b0b0b]/90 border border-[#222] px-3 py-1.5 rounded-full shadow-lg">
             <button
               onClick={() => onStartMarking(file)}
-              className="flex items-center gap-1.5 bg-[#D97757] hover:bg-[#c96b45] text-black text-[11px] px-3 py-1 rounded-full"
+              className="flex items-center gap-1.5 bg-[var(--brand)] hover:bg-[#c96b45] text-black text-[11px] px-3 py-1 rounded-full"
             >
               <Play className="w-3 h-3" />
               Start Marking
@@ -56,11 +56,11 @@ export const MobileDocumentCard: React.FC<Props> = ({ file, onStartMarking, onRe
           </div>
         </div>
       ) : (
-        <div className="px-3 py-2 bg-[#0f1013] flex items-center justify-between">
+        <div className="px-3 py-2 bg-[var(--ws-bg)] flex items-center justify-between">
           <span className="text-[10px] text-emerald-400 flex items-center gap-1">
             <CheckCircle2 className="w-3 h-3" /> Ready to process
           </span>
-          <button onClick={() => onStartMarking(file)} className="text-xs text-[#D97757] hover:text-amber-400 font-medium flex items-center gap-1">
+          <button onClick={() => onStartMarking(file)} className="text-xs text-[var(--brand)] hover:text-amber-400 font-medium flex items-center gap-1">
             <Sparkles className="w-3 h-3" /> Start Marking
           </button>
         </div>

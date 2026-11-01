@@ -14,7 +14,14 @@ export { setAssignmentService } from '../services/assignments/runtime.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { files: LIMITS.files, fileSize: LIMITS.fileBytes, fields: 20, fieldSize: LIMITS.text * 4 } });
 const userIdOf = (req: Request): string => (req as any).user?.userId ?? (req as any).user?.id;
-const filesOf = (req: Request) => ((req.files as Express.Multer.File[] | undefined) ?? []).map((f) => ({ name: Buffer.from(f.originalname, 'latin1').toString('utf8'), data: f.buffer }));
+const asUpload = (f: Express.Multer.File) => ({ name: Buffer.from(f.originalname, 'latin1').toString('utf8'), data: f.buffer });
+/** Files of a request: the task or answer files ("files"), and the marking scheme ("scheme") when sent. */
+const filesOf = (req: Request, field = 'files') => {
+  const f = req.files as Express.Multer.File[] | Record<string, Express.Multer.File[]> | undefined;
+  if (!f) return [];
+  if (Array.isArray(f)) return field === 'files' ? f.map(asUpload) : [];
+  return (f[field] ?? []).map(asUpload);
+};
 
 function fail(res: Response, err: unknown) {
   if (err instanceof AssignmentError) return res.status(err.status).json({ code: err.code, error: err.message });
@@ -25,6 +32,7 @@ function fail(res: Response, err: unknown) {
 }
 const run = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response) => { fn(req, res).catch((e) => fail(res, e)); };
 const withFiles = (req: Request, res: Response, next: NextFunction) => upload.array('files', LIMITS.files)(req, res, (err?: unknown) => (err ? fail(res, err) : next()));
+const withTaskFiles = (req: Request, res: Response, next: NextFunction) => upload.fields([{ name: 'files', maxCount: 5 }, { name: 'scheme', maxCount: 5 }])(req, res, (err?: unknown) => (err ? fail(res, err) : next()));
 
 /** Images and PDFs open in the page (sandboxed); everything else downloads. */
 function sendFile(res: Response, f: { data: Buffer; name: string; mime: string }, inline: boolean) {
@@ -41,7 +49,9 @@ function sendFile(res: Response, f: { data: Buffer; name: string; mime: string }
 export function createAssignmentsRouter() {
   const r = Router();
   r.get('/', run(async (req, res) => res.json({ assignments: await assignmentService().list(userIdOf(req)) })));
-  r.post('/', withFiles, run(async (req, res) => res.status(201).json(await assignmentService().create(userIdOf(req), { ...req.body, files: filesOf(req) }))));
+  r.post('/', withTaskFiles, run(async (req, res) => res.status(201).json(await assignmentService().create(userIdOf(req), { ...req.body, files: filesOf(req), scheme: filesOf(req, 'scheme') }))));
+  r.post('/:id/auto-mark', withTaskFiles, run(async (req, res) => res.json(await assignmentService().setAutoMark(userIdOf(req), String(req.params.id), { autoMark: req.body?.autoMark, scheme: filesOf(req, 'scheme') }))));
+  r.post('/:id/release', run(async (req, res) => res.json(await assignmentService().release(userIdOf(req), String(req.params.id), Array.isArray(req.body?.submissionIds) ? req.body.submissionIds.map(String) : undefined))));
   r.get('/:id', run(async (req, res) => res.json(await assignmentService().get(userIdOf(req), String(req.params.id)))));
   r.patch('/:id', run(async (req, res) => res.json(await assignmentService().update(userIdOf(req), String(req.params.id), req.body ?? {}))));
   r.delete('/:id', run(async (req, res) => { await assignmentService().remove(userIdOf(req), String(req.params.id)); res.status(204).end(); }));
@@ -54,6 +64,7 @@ export function createAssignmentsRouter() {
 export function createPublicAssignmentsRouter() {
   const r = Router();
   r.get('/:token', run(async (req, res) => res.json(await assignmentService().publicView(String(req.params.token)))));
+  r.get('/:token/result/:resultToken', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await assignmentService().publicResult(String(req.params.token), String(req.params.resultToken))); }));
   r.get('/:token/files/:index', run(async (req, res) => sendFile(res, await assignmentService().publicTaskFile(String(req.params.token), Number(req.params.index)), req.query.download !== '1')));
   r.post('/:token/submit', withFiles, run(async (req, res) => res.status(201).json(await assignmentService().submit(String(req.params.token), { ...req.body, files: filesOf(req) }))));
   return r;

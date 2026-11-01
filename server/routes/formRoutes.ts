@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { normalizeBranding } from '../../shared/formBranding.js';
 import { FormOrchestrator } from '../services/FormOrchestrator.js';
 import { ResultsPdfService } from '../services/ResultsPdfService.js';
 import { GradingService } from '../services/GradingService.js';
@@ -30,6 +31,8 @@ router.post('/', requireAuth, async (req, res) => {
       acceptingResponses = true,
       allowMultipleResponses = true,
       confirmationMessage = 'Your response has been recorded.',
+      quizShowAnswers = true,
+      branding,
     } = req.body || {};
     if (typeof title !== 'string' || !title.trim() || !Array.isArray(questions) || questions.length === 0) {
       return res.status(400).json({ error: 'A title and at least one question are required.' });
@@ -53,6 +56,8 @@ router.post('/', requireAuth, async (req, res) => {
       acceptingResponses: acceptingResponses !== false,
       allowMultipleResponses: allowMultipleResponses !== false,
       confirmationMessage: String(confirmationMessage || 'Your response has been recorded.').slice(0, 1000),
+      quizShowAnswers: quizShowAnswers !== false,
+      ...(branding ? { branding: normalizeBranding(branding) } : {}),
       ...(req.body.requirements ? { requirements: String(req.body.requirements).slice(0, 12000) } : {}),
     };
     const rubric = req.body?.rubric && typeof req.body.rubric === 'object' ? JSON.stringify(req.body.rubric) : null;
@@ -102,6 +107,8 @@ router.put('/:id', requireAuth, async (req, res) => {
       allowMultipleResponses = prevSchema.allowMultipleResponses ?? true,
       confirmationMessage = prevSchema.confirmationMessage || 'Your response has been recorded.',
       requirements = prevSchema.requirements || '',
+      quizShowAnswers = prevSchema.quizShowAnswers ?? true,
+      branding = prevSchema.branding,
     } = req.body || {};
 
     if (typeof title !== 'string' || !title.trim() || !Array.isArray(questions) || questions.length === 0) {
@@ -123,6 +130,8 @@ router.put('/:id', requireAuth, async (req, res) => {
       allowMultipleResponses: allowMultipleResponses !== false,
       confirmationMessage: String(confirmationMessage || 'Your response has been recorded.').slice(0, 1000),
       requirements: String(requirements || '').slice(0, 12000),
+      quizShowAnswers: quizShowAnswers !== false,
+      ...(branding ? { branding: normalizeBranding(branding) } : {}),
     };
 
     const prevSelection = existing.selectionSettings ? JSON.parse(existing.selectionSettings) : {};
@@ -198,8 +207,10 @@ router.put('/:id/schema', requireAuth, async (req, res) => {
     const userId = (req as any).user?.userId;
     const schema = req.body?.schema;
     if (!schema || typeof schema !== 'object' || !Array.isArray(schema.fields ?? schema.questions)) return res.status(400).json({ error: 'A form schema with questions is required.' });
-    if (Buffer.byteLength(JSON.stringify(schema)) > 2_000_000) return res.status(413).json({ error: 'The form is too large.' });
+    // Room for the form's own pictures (logo, banner, background), which are shrunk in the browser first.
+    if (Buffer.byteLength(JSON.stringify(schema)) > 4_000_000) return res.status(413).json({ error: 'The form is too large. Use smaller pictures.' });
     const { schema: prev } = await ownForm(userId, req.params.id);
+    if (schema.branding !== undefined) schema.branding = normalizeBranding(schema.branding);
     // Saving from the editor never silently opens or closes the form, and keeps scoring settings.
     await saveForm(userId, req.params.id, { ...prev, ...schema, acceptingResponses: prev.acceptingResponses ?? false });
     res.json({ success: true, review: reviewForm({ ...prev, ...schema }) });

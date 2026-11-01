@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { AppearanceError, sanitizeAppearance } from '../services/appearance.js';
 import { planFor } from '../services/billing/plans.js';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../db.js';
@@ -64,6 +65,7 @@ router.put('/settings', async (req, res) => {
       longTermMemory,
       agentTone,
       customInstructions,
+      appearance,
     } = req.body;
 
     if (name !== undefined && (typeof name !== 'string' || name.trim().length < 2 || name.trim().length > 100)) {
@@ -87,6 +89,12 @@ router.put('/settings', async (req, res) => {
     if (longTermMemory !== undefined && typeof longTermMemory !== 'boolean') return res.status(400).json({ error: 'Invalid memory setting.' });
     if (agentTone !== undefined && !['PROFESSIONAL', 'ENCOURAGING', 'STRICT', 'ACADEMIC'].includes(agentTone)) return res.status(400).json({ error: 'Invalid agent tone.' });
     if (customInstructions !== undefined && (typeof customInstructions !== 'string' || customInstructions.length > 2000)) return res.status(400).json({ error: 'Custom instructions must be 2,000 characters or fewer.' });
+
+    let appearanceJson: string | null | undefined;
+    if (appearance !== undefined) {
+      try { appearanceJson = appearance === null ? null : sanitizeAppearance(appearance); }
+      catch (e) { return res.status(400).json({ error: e instanceof AppearanceError ? e.message : 'Invalid appearance setting.' }); }
+    }
 
     const normalizedEmail = email ? String(email).toLowerCase().trim() : undefined;
     if (normalizedEmail) {
@@ -113,6 +121,11 @@ router.put('/settings', async (req, res) => {
     if (typeof autoSummarize === 'boolean') settingsData.autoSummarize = autoSummarize;
     if (preferredLanguage) settingsData.preferredLanguage = preferredLanguage;
     if (theme) settingsData.theme = theme;
+    if (appearanceJson !== undefined) {
+      settingsData.appearance = appearanceJson;
+      // The light/dark choice is also kept in theme, for older clients.
+      if (appearanceJson && !theme) { const mode = JSON.parse(appearanceJson).mode; if (mode === 'light' || mode === 'dark') settingsData.theme = mode; }
+    }
     if (typeof longTermMemory === 'boolean') {
       // Memory across chats is a PRO feature: turning it on needs a plan that includes it.
       const wasOn = Boolean((await prisma.userSettings.findUnique({ where: { userId } }).catch(() => null))?.longTermMemory);
@@ -130,11 +143,13 @@ router.put('/settings', async (req, res) => {
         ...userData,
         settings: {
           upsert: {
+            // A first save creates the settings row with every field sent (appearance, memory, tone …), not just four.
             create: {
-              defaultStrictness: settingsData.defaultStrictness || 'STANDARD',
-              autoSummarize: typeof settingsData.autoSummarize === 'boolean' ? settingsData.autoSummarize : true,
-              preferredLanguage: settingsData.preferredLanguage || 'en',
-              theme: settingsData.theme || 'dark',
+              defaultStrictness: 'STANDARD',
+              autoSummarize: true,
+              preferredLanguage: 'en',
+              theme: 'dark',
+              ...settingsData,
             },
             update: settingsData,
           },

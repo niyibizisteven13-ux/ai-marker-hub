@@ -94,7 +94,7 @@ const ActionButton = ({
     onClick={onClick}
     title={title}
     aria-label={title}
-    className={`rounded-lg p-2.5 lg:p-1.5 text-[#9C9A92] transition-all duration-150 hover:scale-105 hover:bg-white/5 hover:text-[#FAF9F5] active:scale-95 ${
+    className={`rounded-lg p-2.5 lg:p-1.5 text-[var(--app-faint)] transition-all duration-150 hover:scale-105 hover:bg-white/5 hover:text-[var(--app-text)] active:scale-95 ${
       active ? activeClass : ''
     }`}
   >
@@ -231,7 +231,7 @@ export default function ChatMessage({
   if (isServiceError && !isUser) {
     return (
       <div className="flex w-full justify-start animate-in fade-in slide-in-from-bottom-1 duration-200">
-        <div className="max-w-full rounded-2xl border border-amber-400/20 bg-amber-400/[0.06] p-4 text-[#FAF9F5] sm:max-w-[min(90%,42rem)]">
+        <div className="max-w-full rounded-2xl border border-amber-400/20 bg-amber-400/[0.06] p-4 text-[var(--app-text)] sm:max-w-[min(90%,42rem)]">
           <p className="text-sm font-semibold text-amber-200">
             {message.stopped
               ? 'Stopped'
@@ -239,7 +239,7 @@ export default function ChatMessage({
                 ? 'Bwenge is experiencing high demand'
                 : 'Bwenge could not reach the AI service'}
           </p>
-          <p className="mt-1 text-sm leading-relaxed text-[#C2C0B6]">{cleanText}</p>
+          <p className="mt-1 text-sm leading-relaxed text-[var(--app-muted)]">{cleanText}</p>
           {onRetry && (
             <button type="button" onClick={() => onRetry(messageId)} className="mt-3 inline-flex min-h-[44px] items-center gap-2 rounded-full bg-white px-4 text-sm font-semibold text-neutral-900 transition hover:bg-neutral-200">
               <RotateCcw className="h-4 w-4" /> Retry generation
@@ -267,11 +267,11 @@ export default function ChatMessage({
         )}
 
         {isUser ? (
-          <div className="rounded-3xl bg-[#141413] px-4 py-2.5 text-base leading-[1.6] text-[#FAF9F5] shadow-[0_1px_0_rgba(255,255,255,0.03)_inset]">
+          <div className="rounded-3xl bg-[var(--app-sunken)] px-4 py-2.5 text-base leading-[1.6] text-[var(--app-text)] shadow-[0_1px_0_rgba(255,255,255,0.03)_inset]">
             {toolCallMatch && !toolOutputMatch ? null : cleanText}
           </div>
         ) : (
-          <div className="w-full text-base leading-[1.7] text-[#FAF9F5]">
+          <div className="w-full text-base leading-[1.7] text-[var(--app-text)]">
             <ActivityLine
               busy={Boolean(message.isStreaming || isThinking || (toolCallMatch && !toolOutputMatch) || message.isBusy || message.phase === 'thinking' || message.phase === 'streaming' || message.isWaiting || (!cleanText && message.isStreaming))}
               current={message.currentStatus || (isThinking ? 'Thinking...' : toolCallMatch && !toolOutputMatch ? 'Running tool...' : message.isWaiting ? 'Thinking...' : '')}
@@ -290,7 +290,7 @@ export default function ChatMessage({
 
             {thinkingText && thinkingText.length > 20 && (
               <CollapsibleBlock title={isThinking ? 'Thinking…' : 'Thought process'} icon={Sparkles}>
-                <div className="whitespace-pre-wrap font-mono italic text-[#9C9A92]">
+                <div className="whitespace-pre-wrap font-mono italic text-[var(--app-faint)]">
                   {thinkingText.replace(/<\/?thinking>/g, '').trim()}
                   {isThinking && (
                     <span className="ml-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400 align-middle" />
@@ -301,9 +301,9 @@ export default function ChatMessage({
 
             {formSchemaMatch && (
               <div className="my-3 space-y-2">
-                <div className="mx-auto flex max-w-2xl flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-[#1B1B19] px-4 py-2.5">
-                  <div className="flex items-center gap-2 text-xs text-[#C2C0B6] min-w-0">
-                    <FileText className="h-4 w-4 shrink-0 text-[#D97757]" />
+                <div className="mx-auto flex max-w-2xl flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-[var(--app-panel-2)] px-4 py-2.5">
+                  <div className="flex items-center gap-2 text-xs text-[var(--app-muted)] min-w-0">
+                    <FileText className="h-4 w-4 shrink-0 text-[var(--brand)]" />
                     <span className="truncate font-mono">
                       {chatFormId ? `${window.location.origin}/forms/${chatFormId}` : 'Interactive Google-style Form ready'}
                     </span>
@@ -322,7 +322,7 @@ export default function ChatMessage({
                           }
                         } catch { setChatFormLinkError(true); }
                       }}
-                      className="rounded-lg bg-[#D97757] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[#c66849]"
+                      className="rounded-lg bg-[var(--brand)] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[var(--brand-strong)]"
                     >
                       {chatFormLinkCopied ? 'Link Copied!' : chatFormLinkError ? 'Copy failed' : chatFormId ? 'Copy Form Link' : 'Create & Copy Link'}
                     </button>
@@ -334,7 +334,7 @@ export default function ChatMessage({
                           window.dispatchEvent(new CustomEvent('bwenge:open-public-form', { detail: { formId: fId } }));
                         }
                       }}
-                      className="rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-semibold text-[#FAF9F5] transition hover:bg-white/10"
+                      className="rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-semibold text-[var(--app-text)] transition hover:bg-white/10"
                     >
                       Open Form
                     </button>
@@ -485,7 +485,7 @@ export default function ChatMessage({
                 }}
               >
                 <div>
-                  <p className="text-sm font-medium text-[#FAF9F5]">What could be better?</p>
+                  <p className="text-sm font-medium text-[var(--app-text)]">What could be better?</p>
                   <p className="mt-0.5 text-xs text-neutral-400">Your feedback goes to our support and AI quality team.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -497,7 +497,7 @@ export default function ChatMessage({
                       onClick={() => setFeedbackReason(reason)}
                       className={`rounded-full border px-3 py-1.5 text-xs transition ${
                         feedbackReason === reason
-                          ? 'border-[#D97757] bg-[#D97757]/15 text-[#F4A185]'
+                          ? 'border-[var(--brand)] bg-[var(--brand)]/15 text-[var(--brand-soft)]'
                           : 'border-white/10 text-neutral-300 hover:bg-white/5'
                       }`}
                     >
@@ -511,14 +511,14 @@ export default function ChatMessage({
                   maxLength={1000}
                   rows={2}
                   placeholder="Anything else you’d like us to know? (optional)"
-                  className="w-full resize-y rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white placeholder:text-neutral-500 focus:border-[#D97757] focus:outline-none"
+                  className="w-full resize-y rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white placeholder:text-neutral-500 focus:border-[var(--brand)] focus:outline-none"
                 />
                 <label className="flex items-start gap-2 text-xs leading-relaxed text-neutral-400">
                   <input
                     type="checkbox"
                     checked={feedbackConsent}
                     onChange={(event) => setFeedbackConsent(event.target.checked)}
-                    className="mt-0.5 accent-[#D97757]"
+                    className="mt-0.5 accent-[var(--brand)]"
                   />
                   Allow this response and my feedback to be considered for AI improvement after human review.
                 </label>
@@ -534,7 +534,7 @@ export default function ChatMessage({
                   <button
                     type="submit"
                     disabled={feedbackSubmitting}
-                    className="rounded-lg bg-[#D97757] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#c66849] disabled:opacity-50"
+                    className="rounded-lg bg-[var(--brand)] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[var(--brand-strong)] disabled:opacity-50"
                   >
                     {feedbackSubmitting ? 'Sending…' : 'Send feedback'}
                   </button>

@@ -18,6 +18,8 @@
  * This component deletes `correctAnswer` from its own copy, but it was already in the network response.
  */
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { normalizeBranding } from '../../shared/formBranding';
+import { FileThumb, PreviewDialog, type PreviewSource } from './FilePreview';
 
 /* ------------------------------------------------------------------ types */
 
@@ -78,7 +80,7 @@ type FormSchema = {
 
 type Answers = Record<string, any>;
 type FileValue = { name: string; size: number; url: string };
-type UploadState = { busy: boolean; progress: number; error?: string };
+type UploadState = { busy: boolean; progress: number; error?: string; /** The file on this device, for its preview. */ local?: File };
 type Item = { kind: 'block'; block: any } | { kind: 'field'; field: FormField };
 type Page = { title?: string; description?: string; items: Item[] };
 
@@ -190,6 +192,20 @@ function normalizeFields(schema: FormSchema): FormField[] {
       options: q.options || [],
     } as FormField;
   });
+}
+
+/** The file someone attached, as a thumbnail that opens full screen, so they can check it before sending. */
+function AttachedPreview({ file, value }: { file?: File; value: FileValue }) {
+  const [open, setOpen] = useState(false);
+  const src = useMemo<PreviewSource>(() => (file ? { name: file.name, type: file.type, file, size: file.size } : { name: value.name, type: /^data:([^;,]+)/.exec(value.url ?? '')?.[1] ?? '', url: value.url, size: value.size }), [file, value.name, value.url, value.size]);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} aria-label={`Preview ${value.name}`} title="Preview" className="h-14 w-11 shrink-0 overflow-hidden rounded-md border border-slate-300 hover:ring-2 hover:ring-slate-400">
+        <FileThumb src={src} badge={false} className="h-full w-full" />
+      </button>
+      {open && <PreviewDialog src={src} onClose={() => setOpen(false)} />}
+    </>
+  );
 }
 
 /** Splits fields and blocks into pages. */
@@ -643,7 +659,8 @@ const QuestionCard = memo(function QuestionCard(props: CardProps) {
           )}
           {file && (
             <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm">
-              <span className="min-w-0 truncate"><span className="font-medium">{file.name}</span> <span className="text-slate-600">· {formatSize(file.size)}</span></span>
+              {(upload?.local || /^data:/.test(file.url ?? '')) && <AttachedPreview file={upload?.local} value={file} />}
+              <span className="min-w-0 flex-1 truncate"><span className="font-medium">{file.name}</span> <span className="text-slate-600">· {formatSize(file.size)}</span></span>
               <button type="button" disabled={disabled} onClick={() => set(undefined)}
                 aria-label={`Remove ${file.name}`}
                 className="h-11 shrink-0 rounded-lg px-3 text-sm font-semibold text-slate-700 hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500">
@@ -841,7 +858,7 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey }: 
         ? await upload(file, percent => setState({ busy: true, progress: Math.round(percent) }))
         : await readAsDataUrl(file);
       change(field.id, { name: file.name, size: file.size, url } as FileValue);
-      setState({ busy: false, progress: 100 });
+      setState({ busy: false, progress: 100, local: file });
     } catch (error: any) {
       setState({ busy: false, progress: 0, error: error?.message || 'Upload failed. Please try again.' });
     }
@@ -1016,11 +1033,28 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey }: 
   const accent = parsedSchema.themeColor || '#B4502F';
   const isClosed = parsedSchema.acceptingResponses === false;
   const shell = 'mx-auto w-full max-w-3xl space-y-4 text-slate-800';
+  const branding = normalizeBranding((parsedSchema as any).branding);
+  const logo = branding.logoUrl ? <img src={branding.logoUrl} alt="" className="h-14 w-14 shrink-0 rounded-2xl border-4 border-white bg-white object-contain shadow-md sm:h-16 sm:w-16" /> : null;
   const headerCard = (
     <header className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="h-3" style={{ backgroundColor: accent }} />
-      <div className="p-6 sm:p-9">
-        <h2 className="break-words text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">{parsedSchema.title || 'Untitled form'}</h2>
+      {branding.header === 'banner' && branding.bannerUrl ? (
+        <div className="relative h-36 sm:h-52">
+          <img src={branding.bannerUrl} alt="" className="h-full w-full object-cover" />
+          <div className="absolute inset-x-0 bottom-0 h-1.5" style={{ backgroundColor: accent }} />
+        </div>
+      ) : branding.header === 'band' ? (
+        <div className="relative h-24 sm:h-28" style={{ background: `linear-gradient(135deg, ${accent}, ${accent}cc 55%, ${accent}99)` }}>
+          <div aria-hidden="true" className="absolute inset-0 opacity-20" style={{ backgroundImage: 'radial-gradient(circle at 85% 20%, #fff 0, transparent 45%), radial-gradient(circle at 10% 120%, #fff 0, transparent 40%)' }} />
+        </div>
+      ) : (
+        <div className="h-3" style={{ backgroundColor: accent }} />
+      )}
+      <div className={`p-6 sm:p-9 ${logo && branding.header !== 'bar' ? '!pt-0' : ''}`}>
+        {logo && branding.header !== 'bar' && <div className="relative z-10 -mt-8 mb-4 sm:-mt-9">{logo}</div>}
+        <div className="flex items-start gap-4">
+          {logo && branding.header === 'bar' && logo}
+          <h2 className="min-w-0 break-words text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">{parsedSchema.title || 'Untitled form'}</h2>
+        </div>
         {parsedSchema.description && <RichText text={parsedSchema.description} className="mt-4 text-base leading-7 text-slate-600" />}
         {parsedSchema.descriptionImageUrl && (
           <img src={parsedSchema.descriptionImageUrl} alt="Form description attachment" className="mt-4 max-h-[28rem] max-w-full rounded-xl object-contain" />

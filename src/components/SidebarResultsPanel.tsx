@@ -54,7 +54,7 @@ export const SidebarResultsPanel: React.FC<SidebarResultsPanelProps> = ({
     <aside className="w-full h-full bg-[#171717] flex flex-col text-neutral-100">
       <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-[#D97757]/15 text-[#E8A08A] flex items-center justify-center">
+          <div className="w-8 h-8 rounded-xl bg-[var(--brand)]/15 text-[#E8A08A] flex items-center justify-center">
             <FileSpreadsheet className="w-4 h-4" />
           </div>
           <div>
@@ -84,7 +84,7 @@ export const SidebarResultsPanel: React.FC<SidebarResultsPanelProps> = ({
           <a
             href={excelDownloadUrl}
             download={`Bwenge_Gradebook_${batchTitle.replace(/\s+/g, '_')}.xlsx`}
-            className="px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 bg-[#D97757] text-white hover:bg-[#c66849] transition"
+            className="px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 bg-[var(--brand)] text-white hover:bg-[var(--brand-strong)] transition"
           >
             <Download className="w-3.5 h-3.5" />
             <span>Download Excel</span>
@@ -113,7 +113,7 @@ export const SidebarResultsPanel: React.FC<SidebarResultsPanelProps> = ({
             placeholder="Search student or ID..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-[#0F0F0F] border border-white/10 rounded-xl pl-8 pr-3 py-1.5 text-xs text-neutral-200 placeholder-neutral-500 focus:outline-none focus:border-[#D97757]/60"
+            className="w-full bg-[#0F0F0F] border border-white/10 rounded-xl pl-8 pr-3 py-1.5 text-xs text-neutral-200 placeholder-neutral-500 focus:outline-none focus:border-[var(--brand)]/60"
           />
         </div>
 

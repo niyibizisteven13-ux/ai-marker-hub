@@ -45,7 +45,7 @@ export function useBillingMe(enabled: boolean) {
 }
 
 const TONE: Record<BillingMe['plan'], string> = {
-  FREE: 'bg-white/[0.06] text-[#C2C0B6]',
+  FREE: 'bg-white/[0.06] text-[var(--app-muted)]',
   GO: 'bg-sky-400/12 text-sky-300',
   STARTER: 'bg-emerald-400/12 text-emerald-300',
   PRO: 'bg-amber-400/12 text-amber-300',
@@ -73,17 +73,17 @@ export default function PlanStatus({ me, collapsed }: { me: BillingMe | null; co
         <span className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${TONE[me.plan]}`}>
           {paid && <Sparkles size={10} />}{me.planName}
         </span>
-        <span className="truncate text-[11px] text-[#9C9A92]">
+        <span className="truncate text-[11px] text-[var(--app-faint)]">
           {me.pendingPayment ? <span className="inline-flex items-center gap-1 text-amber-300"><Loader2 size={11} className="animate-spin" /> Payment pending</span>
             : paid && renew ? `Renews ${renew}${me.subscription?.daysLeft != null && me.subscription.daysLeft <= 3 ? ' · soon' : ''}`
-              : <a href="/upgrade" className="font-semibold text-[#D97757] hover:underline">Upgrade</a>}
+              : <a href="/upgrade" className="font-semibold text-[var(--brand)] hover:underline">Upgrade</a>}
         </span>
       </div>
-      <div className="mt-2 flex items-center justify-between text-[11px] text-[#C2C0B6]">
+      <div className="mt-2 flex items-center justify-between text-[11px] text-[var(--app-muted)]">
         <span>{meter.label}</span>
       </div>
       <div className="mt-1 h-1 overflow-hidden rounded-full bg-white/[0.07]">
-        <div className={`h-full rounded-full ${pct >= 100 ? 'bg-rose-400' : pct >= 80 ? 'bg-[#D97757]' : 'bg-[#5DCAA5]'}`} style={{ width: `${Math.max(pct, meter.used ? 3 : 0)}%` }} />
+        <div className={`h-full rounded-full ${pct >= 100 ? 'bg-rose-400' : pct >= 80 ? 'bg-[var(--brand)]' : 'bg-[#5DCAA5]'}`} style={{ width: `${Math.max(pct, meter.used ? 3 : 0)}%` }} />
       </div>
       {me.wallet > 0 && <div className="mt-1.5 flex items-center gap-1 text-[11px] text-sky-300"><Coins size={11} /> {me.wallet.toLocaleString('en-US')} top-up credits</div>}
     </div>

@@ -12,6 +12,10 @@ import { FileStoreError } from '../services/ai/files/FileStore.js';
 import { FileJobQueue, JobError } from '../services/ai/jobs/fileJobQueue.js';
 import { fileJobQueue } from '../services/AiService.js';
 import { examService } from '../services/educationRuntime.js';
+import { useExamsForTasks } from '../services/assignments/runtime.js';
+
+// Tasks with automatic marking use the same examination service.
+useExamsForTasks(examService);
 import { ExamInputError, parseManifest, type CandidateMapping } from '../services/exams/service.js';
 import logger from '../utils/logger.js';
 import { createHash } from 'node:crypto';

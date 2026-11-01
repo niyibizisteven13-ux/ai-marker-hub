@@ -28,7 +28,7 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
   const [text, setText] = useState('');
   const [files, setFiles] = useState<Item[]>([]);
   const [open, setOpen] = useState<{ kind: 'mine'; index: number } | { kind: 'task'; src: PreviewSource } | null>(null);
-  const [state, setState] = useState<{ kind: 'idle' } | { kind: 'sending'; percent: number } | { kind: 'error'; message: string } | { kind: 'done'; receiptId: string; submittedAt: string; late: boolean; replaced: boolean; files?: number }>({ kind: 'idle' });
+  const [state, setState] = useState<{ kind: 'idle' } | { kind: 'sending'; percent: number } | { kind: 'error'; message: string } | { kind: 'done'; receiptId: string; submittedAt: string; late: boolean; replaced: boolean; files?: number; resultLink?: string; autoMark?: boolean }>({ kind: 'idle' });
 
   useEffect(() => {
     document.title = 'Submit · Bwenge';
@@ -114,6 +114,16 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
           <dt className="text-neutral-500">Sent</dt><dd>{state.files ? `${state.files} file${state.files === 1 ? '' : 's'}` : ''}{state.files && text.trim() ? ' and ' : ''}{text.trim() ? 'typed answer' : ''}</dd>
           <dt className="text-neutral-500">Time</dt><dd>{new Date(state.submittedAt).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</dd>
         </dl>
+        {state.autoMark && state.resultLink && (
+          <div className="mt-5 rounded-xl border border-[var(--brand)]/30 bg-[var(--brand)]/[0.06] p-4 text-left">
+            <p className="text-[13.5px] font-semibold text-neutral-900">Your result</p>
+            <p className="mt-1 text-[13px] text-neutral-600">Your answer is being marked. Keep this private link: your marks, feedback and marked paper appear there when your teacher releases them.</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <a href={state.resultLink.replace(/^https?:\/\/[^/]+/, '')} className="inline-flex items-center gap-1.5 rounded-lg bg-[#1F1E1D] px-3 py-2 text-[13px] font-semibold text-white">Open my result page</a>
+              <button type="button" onClick={() => { void navigator.clipboard?.writeText(state.resultLink!).catch(() => undefined); }} className="rounded-lg border border-neutral-300 px-3 py-2 text-[13px] font-medium hover:bg-neutral-50">Copy link</button>
+            </div>
+          </div>
+        )}
         {state.late && <p className="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-[13px] text-amber-800">This was after the due time. The person who shared the task will see it was late.</p>}
         <p className="mt-4 text-[13px] text-neutral-500">{state.replaced ? 'This replaces your earlier submission. ' : ''}You can submit again while the task is open; your latest one counts.</p>
         <button type="button" onClick={() => { setFiles([]); setText(''); setName(''); setStudentId(''); setState({ kind: 'idle' }); }} className="mt-5 rounded-xl border border-neutral-300 px-4 py-2 text-[14px] font-medium hover:bg-neutral-50">Submit again</button>
@@ -122,7 +132,7 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
   }
 
   const ready = name.trim().length > 0 && (files.length > 0 || text.trim().length > 0) && task.open && state.kind !== 'sending';
-  const field = 'w-full rounded-xl border border-neutral-300 bg-white px-3 py-3 text-[15px] placeholder:text-neutral-400 focus:border-[#D97757] focus:outline-none focus:ring-2 focus:ring-[#D97757]/20';
+  const field = 'w-full rounded-xl border border-neutral-300 bg-white px-3 py-3 text-[15px] placeholder:text-neutral-400 focus:border-[var(--brand)] focus:outline-none focus:ring-2 focus:ring-[var(--brand)]/20';
   return shell(
     <>
       <section className="rounded-2xl bg-white p-5 shadow-sm">
@@ -137,7 +147,7 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
             {task.taskFiles.map((f) => (
               <li key={f.index} className="flex items-center gap-1 rounded-xl border border-neutral-200 pr-1 hover:bg-neutral-50">
                 <button type="button" onClick={() => setOpen({ kind: 'task', src: { name: f.name, type: f.mime, url: api(`/files/${f.index}`) } })} className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 text-left">
-                  <FileText size={18} className="shrink-0 text-[#D97757]" /><span className="min-w-0 flex-1 truncate text-[14px] font-medium">{f.name}</span>
+                  <FileText size={18} className="shrink-0 text-[var(--brand)]" /><span className="min-w-0 flex-1 truncate text-[14px] font-medium">{f.name}</span>
                   <span className="shrink-0 text-[12px] text-neutral-500">{size(f.size)}</span><Eye size={16} className="shrink-0 text-neutral-400" />
                 </button>
                 <a href={api(`/files/${f.index}`)} download={f.name} aria-label={`Download ${f.name}`} className="rounded-lg p-2 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700"><Download size={16} /></a>
@@ -160,7 +170,7 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
           </div>
 
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#D97757] px-3 py-3.5 text-[14.5px] font-semibold text-white active:bg-[#c96a4c]">
+            <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-[var(--brand)] px-3 py-3.5 text-[14.5px] font-semibold text-white active:bg-[var(--brand-strong)]">
               <Camera size={18} />Take photos
               <input type="file" accept="image/*" capture="environment" multiple hidden onChange={(e) => { add(e.target.files); e.target.value = ''; }} />
             </label>
@@ -193,10 +203,10 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
             <textarea value={text} onChange={(e) => setText(e.target.value.slice(0, 20000))} rows={5} placeholder="Write your answer here…" className={`${field} resize-y`} /></label>
 
           {state.kind === 'error' && <p className="rounded-xl bg-rose-50 px-3 py-2 text-[13.5px] text-rose-700">{state.message}</p>}
-          <button type="button" disabled={!ready} onClick={() => void submit()} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#1F1E1D] px-4 py-3.5 text-[15px] font-semibold text-white disabled:opacity-40">
+          <button type="button" disabled={!ready} onClick={() => void submit()} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--app-panel-2)] px-4 py-3.5 text-[15px] font-semibold text-white disabled:opacity-40">
             {state.kind === 'sending' ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}{state.kind === 'sending' ? (state.percent < 99 && files.length ? `Sending… ${state.percent}%` : 'Saving…') : 'Submit'}
           </button>
-          {state.kind === 'sending' && files.length > 0 && <div className="-mt-2 h-1.5 overflow-hidden rounded-full bg-neutral-200" role="progressbar" aria-valuenow={state.percent} aria-valuemin={0} aria-valuemax={100}><div className="h-full bg-[#D97757] transition-[width]" style={{ width: `${state.percent}%` }} /></div>}
+          {state.kind === 'sending' && files.length > 0 && <div className="-mt-2 h-1.5 overflow-hidden rounded-full bg-neutral-200" role="progressbar" aria-valuenow={state.percent} aria-valuemin={0} aria-valuemax={100}><div className="h-full bg-[var(--brand)] transition-[width]" style={{ width: `${state.percent}%` }} /></div>}
           <p className="text-center text-[12px] text-neutral-500">Only the person who shared the task sees what you submit.</p>
         </section>
       )}

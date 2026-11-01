@@ -1,9 +1,10 @@
 import { useState, useRef } from 'react';
-import { ArrowLeft, User as UserIcon, Shield, Lock, CreditCard, BarChart2, Sliders, Send, Check, X, Sparkles, Brain } from 'lucide-react';
+import { ArrowLeft, User as UserIcon, Shield, Lock, CreditCard, BarChart2, Sliders, Send, Check, X, Sparkles, Brain, Palette } from 'lucide-react';
 import { User } from '../types';
 import { useIsMobile } from '../hooks/useIsMobile';
 
 import GeneralSection from '../components/settings/GeneralSection';
+import AppearanceSection from '../components/settings/AppearanceSection';
 import AccountSection from '../components/settings/AccountSection';
 import PrivacySection from '../components/settings/PrivacySection';
 import BillingSection from '../components/settings/BillingSection';
@@ -21,6 +22,7 @@ interface SettingsPageProps {
 
 const SECTIONS = [
   { id: 'general', label: 'General', icon: <UserIcon size={16} /> },
+  { id: 'appearance', label: 'Appearance', icon: <Palette size={16} /> },
   { id: 'account', label: 'Account', icon: <Shield size={16} /> },
   { id: 'privacy', label: 'Privacy', icon: <Lock size={16} /> },
   { id: 'billing', label: 'Billing', icon: <CreditCard size={16} /> },
@@ -56,6 +58,8 @@ export default function SettingsPage({ user, onUpdateUser, onLogout, onBack }: S
     switch (activeSection) {
       case 'general':
         return <GeneralSection user={user} onUpdateUser={onUpdateUser} onDirtyChange={setIsDirty} onSaveRef={saveActionRef} />;
+      case 'appearance':
+        return <AppearanceSection user={user} onUpdateUser={onUpdateUser} />;
       case 'account':
         return <AccountSection user={user} onLogout={onLogout} />;
       case 'privacy':

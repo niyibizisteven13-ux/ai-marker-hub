@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, CalendarClock, Check, ChevronLeft, ChevronRight, ClipboardList, Copy, Download, ExternalLink, Eye, FileText, Image as ImageIcon, Link2, Loader2, Lock, Paperclip, Plus, Share2, Sparkles, Trash2, Unlock, Users, X } from 'lucide-react';
+import { ArrowLeft, CalendarClock, Check, ChevronLeft, ChevronRight, ClipboardList, Copy, Download, ExternalLink, Eye, FileText, Image as ImageIcon, Link2, Loader2, Lock, Paperclip, Plus, Send, Share2, Sparkles, Trash2, Unlock, Users, X } from 'lucide-react';
 import { authFetch } from '../utils/authFetch';
-import { PdfViewer, loadPdfJs } from './PdfViewer';
+import { PdfViewer } from './PdfViewer';
 import { FileThumb, PreviewDialog, type PreviewSource } from './FilePreview';
 import { Card, Empty, PageShell, Stat, StatRow, Toolbar, primaryBtn, relative } from './workspace/Shell';
 
@@ -12,8 +12,21 @@ import { Card, Empty, PageShell, Stat, StatRow, Toolbar, primaryBtn, relative } 
  */
 
 interface StoredFile { id: string; name: string; mime: string; size: number }
-interface Submission { id: string; studentName: string; studentId?: string; files: StoredFile[]; text?: string; submittedAt: string; late: boolean; resubmissions: number }
-interface Assignment { id: string; title: string; instructions: string; taskFiles: StoredFile[]; dueAt: string | null; open: boolean; link: string; createdAt: string; submissions: Submission[]; counts: { submitted: number; late: number } }
+interface MarkStatus { state: 'queued' | 'marking' | 'marked' | 'needs_review' | 'failed' | 'waiting_scheme'; total: number | null; maxTotal: number | null; percent: number | null; released: boolean; error?: string }
+interface Submission { id: string; studentName: string; studentId?: string; files: StoredFile[]; text?: string; submittedAt: string; late: boolean; resubmissions: number; marking?: MarkStatus; resultLink?: string }
+interface Assignment { id: string; title: string; instructions: string; taskFiles: StoredFile[]; dueAt: string | null; open: boolean; link: string; createdAt: string; submissions: Submission[]; counts: { submitted: number; late: number }; autoMark?: boolean; schemeFiles?: StoredFile[]; examId?: string | null }
+
+/** The automatic marking state of one hand-in, as a small coloured label. */
+function MarkChip({ m }: { m?: MarkStatus }) {
+  if (!m) return null;
+  const pct = m.percent === null ? '' : `${Math.round(m.percent)}%`;
+  const [text, tone] = m.state === 'marked' ? [`${m.total}/${m.maxTotal} · ${pct}${m.released ? ' · released' : ''}`, m.released ? 'bg-emerald-500/15 text-emerald-300' : 'bg-sky-500/15 text-sky-300']
+    : m.state === 'needs_review' ? [`${m.total}/${m.maxTotal} · check`, 'bg-amber-500/15 text-amber-300']
+      : m.state === 'failed' ? ['Not marked', 'bg-rose-500/15 text-rose-300']
+        : m.state === 'waiting_scheme' ? ['Waiting for scheme', 'bg-white/10 text-neutral-300']
+          : ['Marking…', 'bg-[var(--brand)]/15 text-[var(--brand-soft)]'];
+  return <span title={m.error} className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-semibold ${tone}`}>{(m.state === 'marking' || m.state === 'queued') && <Loader2 size={10} className="animate-spin" />}{text}</span>;
+}
 interface Row { id: string; title: string; dueAt: string | null; open: boolean; link: string; createdAt: string; submitted: number; late?: number; lastSubmissionAt: string | null }
 /** What "Mark all" hands to the Mark page: files already uploaded, each with its role. */
 export interface PreparedMarking { scripts: Array<StoredFile & { studentName: string; candidateId: string }>; roster: StoredFile; task: StoredFile[]; title: string; skipped: Array<{ studentName: string; reason: string }> }
@@ -54,39 +67,14 @@ function useFileUrl(assignmentId: string, f: StoredFile | null) {
   return url;
 }
 
-/** First page of a PDF as a small picture, drawn in the browser (pdf.js). */
-function usePdfCover(url: string | null) {
-  const [cover, setCover] = useState<string | null>(null);
-  useEffect(() => {
-    if (!url) return;
-    let live = true;
-    (async () => {
-      const lib = await loadPdfJs();
-      const doc = await lib.getDocument({ url, isEvalSupported: false }).promise;
-      const page = await doc.getPage(1);
-      const vp = page.getViewport({ scale: 1 });
-      const scale = 160 / vp.width;
-      const canvas = document.createElement('canvas');
-      const view = page.getViewport({ scale });
-      canvas.width = Math.ceil(view.width);
-      canvas.height = Math.ceil(view.height);
-      await page.render({ canvasContext: canvas.getContext('2d')!, viewport: view, canvas }).promise;
-      if (live) setCover(canvas.toDataURL('image/jpeg', 0.8));
-      void doc.destroy();
-    })().catch(() => undefined);
-    return () => { live = false; };
-  }, [url]);
-  return cover;
-}
 
 function Thumb({ assignmentId, file }: { assignmentId: string; file: StoredFile }) {
-  const url = useFileUrl(assignmentId, isImage(file) || isPdf(file) ? file : null);
-  const cover = usePdfCover(isPdf(file) ? url : null);
-  const src = isImage(file) ? url : cover;
+  // Every kind of file shows what is inside (photo, page 1, first lines, first rows, sound wave).
+  const url = useFileUrl(assignmentId, file);
+  const src = useMemo<PreviewSource | null>(() => (url ? { name: file.name, type: file.mime, url, size: file.size } : null), [url, file.name, file.mime, file.size]);
   return (
-    <span title={file.name} className="relative flex h-16 w-12 shrink-0 items-center justify-center overflow-hidden rounded-md border border-black/20 bg-[#FBFAF6] text-neutral-500">
-      {src ? <img src={src} alt="" className="h-full w-full object-cover object-top" /> : isImage(file) ? <ImageIcon size={16} /> : <FileText size={16} />}
-      {!isImage(file) && <span className="absolute bottom-0 inset-x-0 bg-black/55 text-center text-[8.5px] font-semibold uppercase leading-[13px] text-white">{(/\.([a-z0-9]+)$/i.exec(file.name)?.[1] ?? 'file').slice(0, 4)}</span>}
+    <span title={file.name} className="relative flex h-16 w-12 shrink-0 overflow-hidden rounded-md border border-black/20 bg-[#FBFAF6] text-neutral-500">
+      {src ? <FileThumb src={src} className="h-full w-full" /> : <span className="grid h-full w-full place-items-center">{isImage(file) ? <ImageIcon size={16} /> : <FileText size={16} />}</span>}
     </span>
   );
 }
@@ -98,7 +86,7 @@ function FileView({ assignmentId, file }: { assignmentId: string; file: StoredFi
   const source = useMemo<PreviewSource | null>(() => (url ? { name: file.name, type: file.mime, url, size: file.size } : null), [url, file.name, file.mime, file.size]);
 
   return (
-    <figure className="overflow-hidden rounded-xl border border-white/[0.08] bg-[#16171b]">
+    <figure className="overflow-hidden rounded-xl border border-white/[0.08] bg-[var(--ws-card)]">
       <figcaption className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-2 text-[12.5px] text-neutral-300">
         {isImage(file) ? <ImageIcon size={14} /> : <FileText size={14} />}
         <span className="min-w-0 flex-1 truncate">{file.name}</span>
@@ -125,17 +113,17 @@ function ShareBox({ link, title }: { link: string; title: string }) {
   const copy = async () => { try { await navigator.clipboard.writeText(link); setCopied(true); window.setTimeout(() => setCopied(false), 1800); } catch { /* clipboard may be blocked */ } };
   const text = `${title}: submit your answers here (photos, PDF, Word or typed): ${link}`;
   return (
-    <div className="flex flex-col gap-4 rounded-2xl border border-[#D97757]/30 bg-[#D97757]/[0.06] p-4 sm:flex-row sm:items-center">
+    <div className="flex flex-col gap-4 rounded-2xl border border-[var(--brand)]/30 bg-[var(--brand)]/[0.06] p-4 sm:flex-row sm:items-center">
       {qr && <img src={qr} alt="QR code of the task link" className="h-28 w-28 shrink-0 self-center rounded-lg bg-white p-1.5" />}
       <div className="min-w-0 flex-1">
         <p className="text-[13px] font-semibold text-white">Share this link with the people doing the task</p>
         <p className="mt-0.5 text-[12.5px] text-neutral-400">No account needed. They open it, write their name and submit photos, PDF, Word or typed answers.</p>
-        <div className="mt-2.5 flex items-center gap-2 rounded-xl border border-white/[0.12] bg-[#111216] px-3 py-2">
-          <Link2 size={14} className="shrink-0 text-[#E08A6A]" />
+        <div className="mt-2.5 flex items-center gap-2 rounded-xl border border-white/[0.12] bg-[var(--ws-sunken)] px-3 py-2">
+          <Link2 size={14} className="shrink-0 text-[var(--brand-strong)]" />
           <span className="min-w-0 flex-1 truncate font-mono text-[12.5px] text-neutral-200">{link}</span>
         </div>
         <div className="mt-2.5 flex flex-wrap gap-2">
-          <button type="button" onClick={() => void copy()} className="inline-flex items-center gap-1.5 rounded-xl bg-[#D97757] px-3.5 py-2 text-[13px] font-semibold text-white hover:bg-[#c96a4c]">{copied ? <Check size={15} /> : <Copy size={15} />}{copied ? 'Copied' : 'Copy link'}</button>
+          <button type="button" onClick={() => void copy()} className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--brand)] px-3.5 py-2 text-[13px] font-semibold text-white hover:bg-[var(--brand-strong)]">{copied ? <Check size={15} /> : <Copy size={15} />}{copied ? 'Copied' : 'Copy link'}</button>
           <a href={`https://wa.me/?text=${encodeURIComponent(text)}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-xl border border-white/[0.14] px-3.5 py-2 text-[13px] text-neutral-200 hover:bg-white/5"><Share2 size={15} />WhatsApp</a>
           <a href={link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-xl border border-white/[0.14] px-3.5 py-2 text-[13px] text-neutral-200 hover:bg-white/5"><ExternalLink size={15} />Open the link</a>
         </div>
@@ -149,6 +137,8 @@ function CreateForm({ onCreated, onCancel }: { onCreated: (a: Assignment) => voi
   const [instructions, setInstructions] = useState('');
   const [dueAt, setDueAt] = useState('');
   const [files, setFiles] = useState<File[]>([]);
+  const [autoMark, setAutoMark] = useState(false);
+  const [scheme, setScheme] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submit = async () => {
@@ -159,12 +149,13 @@ function CreateForm({ onCreated, onCancel }: { onCreated: (a: Assignment) => voi
       form.append('instructions', instructions);
       if (dueAt) form.append('dueAt', new Date(dueAt).toISOString());
       for (const f of files) form.append('files', f, f.name);
+      if (autoMark) { form.append('autoMark', 'true'); for (const f of scheme) form.append('scheme', f, f.name); }
       onCreated(await json<Assignment>(await authFetch('/api/assignments', { method: 'POST', body: form })));
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not create the task.'); } finally { setBusy(false); }
   };
-  const field = 'w-full rounded-xl border border-white/[0.1] bg-[#111216] px-3 py-2.5 text-[14px] text-[#F2EFE9] placeholder:text-neutral-500 focus:border-[#D97757]/60 focus:outline-none';
+  const field = 'w-full rounded-xl border border-white/[0.1] bg-[var(--ws-sunken)] px-3 py-2.5 text-[14px] text-[#F2EFE9] placeholder:text-neutral-500 focus:border-[var(--brand)]/60 focus:outline-none';
   return (
-    <section className="space-y-4 rounded-[20px] border border-white/[0.12] bg-[#16171b] p-4 sm:p-5">
+    <section className="space-y-4 rounded-[20px] border border-white/[0.12] bg-[var(--ws-card)] p-4 sm:p-5">
       <div>
         <label htmlFor="as-title" className="mb-1.5 block text-[12.5px] font-medium text-neutral-300">Title</label>
         <input id="as-title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={160} placeholder="For example: S4 Physics, Newton's laws homework" className={field} />
@@ -196,10 +187,28 @@ function CreateForm({ onCreated, onCancel }: { onCreated: (a: Assignment) => voi
           <input id="as-due" type="datetime-local" value={dueAt} onChange={(e) => setDueAt(e.target.value)} className={`${field} [color-scheme:dark]`} />
         </div>
       </div>
+      <div className="rounded-xl border border-white/[0.1] bg-white/[0.02] p-3">
+        <label className="flex cursor-pointer items-start gap-3">
+          <input type="checkbox" checked={autoMark} onChange={(e) => setAutoMark(e.target.checked)} className="mt-1 h-4 w-4 accent-[var(--brand)]" />
+          <span>
+            <span className="block text-[13.5px] font-semibold text-neutral-100">Mark each hand-in automatically</span>
+            <span className="block text-[12px] leading-relaxed text-neutral-400">The AI marks every answer minutes after it arrives, with red-pen corrections. You check and release; each student gets a private link to their result.</span>
+          </span>
+        </label>
+        {autoMark && (
+          <div className="mt-3 pl-7">
+            <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-[var(--brand)]/40 px-3 py-2.5 text-[13px] text-neutral-200 hover:bg-white/[0.03]">
+              <Paperclip size={15} />{scheme.length ? 'Add another page of the scheme' : 'Attach the marking scheme (PDF, Word, photo or text)'}
+              <input type="file" multiple hidden accept=".pdf,.docx,.doc,.odt,.txt,.md,image/*" onChange={(e) => { const picked = e.target.files ? [...e.target.files] : []; setScheme((cur) => [...cur, ...picked].slice(0, 5)); e.target.value = ''; }} />
+            </label>
+            {scheme.length > 0 && <ul className="mt-2 space-y-1">{scheme.map((f, i) => <li key={`${f.name}-${i}`} className="flex items-center gap-2 rounded-lg bg-white/[0.04] px-2.5 py-1.5 text-[12.5px] text-neutral-300"><FileText size={13} /><span className="min-w-0 flex-1 truncate">{f.name}</span><button type="button" aria-label={`Remove ${f.name}`} onClick={() => setScheme((cur) => cur.filter((_, j) => j !== i))} className="rounded p-0.5 text-neutral-500 hover:text-white"><X size={13} /></button></li>)}</ul>}
+          </div>
+        )}
+      </div>
       {error && <p className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[13px] text-rose-300">{error}</p>}
       <div className="flex flex-wrap justify-end gap-2">
         <button type="button" onClick={onCancel} className="rounded-xl px-4 py-2 text-[13.5px] text-neutral-300 hover:bg-white/5">Cancel</button>
-        <button type="button" disabled={busy || !title.trim() || (!instructions.trim() && !files.length)} onClick={() => void submit()} className="inline-flex items-center gap-2 rounded-xl bg-[#D97757] px-4 py-2 text-[13.5px] font-semibold text-white hover:bg-[#c96a4c] disabled:opacity-40">
+        <button type="button" disabled={busy || !title.trim() || (!instructions.trim() && !files.length) || (autoMark && !scheme.length)} onClick={() => void submit()} className="inline-flex items-center gap-2 rounded-xl bg-[var(--brand)] px-4 py-2 text-[13.5px] font-semibold text-white hover:bg-[var(--brand-strong)] disabled:opacity-40">
           {busy ? <Loader2 size={15} className="animate-spin" /> : <Link2 size={15} />}Create and get the link
         </button>
       </div>
@@ -217,6 +226,18 @@ function Dashboard({ id, onBack, onMarkAll, autoMark = false }: { id: string; on
   }, [id]);
   useEffect(() => { void load(); const t = window.setInterval(() => void load(), 20_000); return () => window.clearInterval(t); }, [load]);
   const toggle = async () => { if (a) setA(await json<Assignment>(await authFetch(`/api/assignments/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ open: !a.open }) }))); };
+  const [releasing, setReleasing] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const toRelease = a?.submissions.filter((x) => x.marking && (x.marking.state === 'marked' || x.marking.state === 'needs_review') && !x.marking.released).length ?? 0;
+  const release = async () => {
+    setReleasing(true); setError(null); setNotice(null);
+    try {
+      const r = await json<{ released: number; skipped: Array<{ studentName: string; reason: string }> }>(await authFetch(`/api/assignments/${id}/release`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }));
+      setNotice(`${r.released} result${r.released === 1 ? '' : 's'} released. Students see them through their private links.${r.skipped.length ? ` Not released: ${r.skipped.map((k) => `${k.studentName} (${k.reason})`).join('; ')}.` : ''}`);
+      await load();
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not release the results.'); } finally { setReleasing(false); }
+  };
+  const copyResult = async (s: Submission) => { if (!s.resultLink) return; try { await navigator.clipboard.writeText(s.resultLink); setNotice(`${s.studentName}'s result link copied.`); } catch { setNotice(s.resultLink); } };
   const remove = async (s: Submission) => {
     if (!window.confirm(`Remove ${s.studentName}'s submission?`)) return;
     setA(await json<Assignment>(await authFetch(`/api/assignments/${id}/submissions/${s.id}`, { method: 'DELETE' })));
@@ -266,10 +287,21 @@ function Dashboard({ id, onBack, onMarkAll, autoMark = false }: { id: string; on
           </p>
         </div>
         <button type="button" onClick={() => void toggle()} className="inline-flex items-center gap-1.5 rounded-xl border border-white/[0.14] px-3 py-2 text-[13px] text-neutral-200 hover:bg-white/5">{a.open ? <Lock size={14} /> : <Unlock size={14} />}{a.open ? 'Close submissions' : 'Reopen'}</button>
-        <button type="button" disabled={!a.submissions.length || preparing} onClick={() => void markAll()} className="inline-flex items-center gap-1.5 rounded-xl bg-[#D97757] px-3.5 py-2 text-[13px] font-semibold text-white hover:bg-[#c96a4c] disabled:opacity-40">
-          {preparing ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}Mark all with AI
-        </button>
+        {a.autoMark ? (
+          <>
+            {a.examId && <a href={`/exams/${a.examId}/review`} className="inline-flex items-center gap-1.5 rounded-xl border border-white/[0.14] px-3 py-2 text-[13px] text-neutral-200 hover:bg-white/5"><Eye size={14} />Check marked papers</a>}
+            <button type="button" disabled={!toRelease || releasing} onClick={() => void release()} className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--brand)] px-3.5 py-2 text-[13px] font-semibold text-white hover:bg-[var(--brand-strong)] disabled:opacity-40">
+              {releasing ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}Release results{toRelease ? ` (${toRelease})` : ''}
+            </button>
+          </>
+        ) : (
+          <button type="button" disabled={!a.submissions.length || preparing} onClick={() => void markAll()} className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--brand)] px-3.5 py-2 text-[13px] font-semibold text-white hover:bg-[var(--brand-strong)] disabled:opacity-40">
+            {preparing ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}Mark all with AI
+          </button>
+        )}
       </div>
+      {a.autoMark && <p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-[var(--brand)]/12 px-2.5 py-1 text-[11.5px] font-semibold text-[var(--brand-soft)]"><Sparkles size={12} />Automatic marking is on: each hand-in is marked as it arrives{a.schemeFiles?.length ? ` with ${a.schemeFiles.map((f) => f.name).join(', ')}` : ''}</p>}
+      {notice && <p role="status" className="mt-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[13px] text-emerald-200">{notice}</p>}
       {error && <p className="mt-3 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[13px] text-rose-300">{error}</p>}
 
       <div className="mt-4"><ShareBox link={a.link} title={a.title} /></div>
@@ -298,12 +330,13 @@ function Dashboard({ id, onBack, onMarkAll, autoMark = false }: { id: string; on
         <ul className="grid gap-2.5 sm:grid-cols-2">
           {a.submissions.map((s) => (
             <li key={s.id}>
-              <button type="button" onClick={() => setOpen(s)} className="flex w-full gap-3 rounded-[14px] border border-white/[0.08] bg-[#16171b] p-3 text-left hover:border-white/[0.18]">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#D97757]/20 text-[12.5px] font-bold text-[#F2B39C]">{initials(s.studentName)}</span>
+              <button type="button" onClick={() => setOpen(s)} className="flex w-full gap-3 rounded-[14px] border border-white/[0.08] bg-[var(--ws-card)] p-3 text-left hover:border-white/[0.18]">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--brand)]/20 text-[12.5px] font-bold text-[var(--brand-soft)]">{initials(s.studentName)}</span>
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-2">
                     <span className="truncate text-[13.5px] font-semibold text-white">{s.studentName}</span>
                     {s.late && <span className="shrink-0 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10.5px] font-semibold text-amber-300">Late</span>}
+                    <MarkChip m={s.marking} />
                   </span>
                   <span className="block truncate text-[11.5px] text-neutral-400">{s.studentId ? `${s.studentId} · ` : ''}{when(s.submittedAt)}{s.resubmissions ? ` · submitted ${s.resubmissions + 1} times` : ''}</span>
                   <span className="mt-2 flex gap-1.5 overflow-hidden">
@@ -321,7 +354,7 @@ function Dashboard({ id, onBack, onMarkAll, autoMark = false }: { id: string; on
       {open && (
         // The submission, full size: every file previewed in place, the typed answer as a page.
         <div className="fixed inset-0 z-[80] flex justify-end bg-black/60" onClick={() => setOpen(null)}>
-          <aside role="dialog" aria-label={`${open.studentName}'s submission`} onClick={(e) => e.stopPropagation()} className="flex h-full w-full max-w-4xl flex-col bg-[#0f1012] shadow-2xl">
+          <aside role="dialog" aria-label={`${open.studentName}'s submission`} onClick={(e) => e.stopPropagation()} className="flex h-full w-full max-w-4xl flex-col bg-[var(--ws-bg)] shadow-2xl">
             <header className="flex items-center gap-3 border-b border-white/[0.08] px-4 py-3">
               {/* Oldest first, like a pile of papers: previous / next student (or ← and →). */}
               <div className="flex shrink-0 items-center gap-1">
@@ -329,18 +362,20 @@ function Dashboard({ id, onBack, onMarkAll, autoMark = false }: { id: string; on
                 <span className="w-14 text-center text-[12px] tabular-nums text-neutral-400">{order.indexOf(open.id) + 1} of {order.length}</span>
                 <button type="button" disabled={order.indexOf(open.id) >= order.length - 1} onClick={() => step(1)} className="grid h-8 w-8 place-items-center rounded-lg text-neutral-300 hover:bg-white/10 disabled:opacity-30" aria-label="Next student"><ChevronRight size={17} /></button>
               </div>
-              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#D97757]/20 text-[12.5px] font-bold text-[#F2B39C]">{initials(open.studentName)}</span>
+              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--brand)]/20 text-[12.5px] font-bold text-[var(--brand-soft)]">{initials(open.studentName)}</span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[14px] font-semibold text-white">{open.studentName}</span>
                 <span className="block text-[12px] text-neutral-400">{open.studentId ? `${open.studentId} · ` : ''}{when(open.submittedAt)}{open.late ? ' · late' : ''}</span>
               </span>
+              <MarkChip m={open.marking} />
+              {open.resultLink && <button type="button" onClick={() => void copyResult(open)} className="hidden items-center gap-1.5 rounded-lg border border-white/[0.12] px-2.5 py-1.5 text-[12px] text-neutral-200 hover:bg-white/10 sm:inline-flex" title="The student's private result page"><Copy size={13} />Result link</button>}
               <button type="button" onClick={() => void remove(open)} className="rounded-lg p-2 text-neutral-400 hover:bg-white/10 hover:text-rose-300" aria-label="Remove this submission"><Trash2 size={16} /></button>
               <button type="button" onClick={() => setOpen(null)} className="rounded-lg p-2 text-neutral-400 hover:bg-white/10 hover:text-white" aria-label="Close"><X size={18} /></button>
             </header>
             <div className="flex-1 space-y-3 overflow-y-auto p-4">
               {open.text && (
                 <figure className="overflow-hidden rounded-xl border border-white/[0.08]">
-                  <figcaption className="border-b border-white/[0.06] bg-[#16171b] px-3 py-2 text-[12.5px] text-neutral-300">Typed answer</figcaption>
+                  <figcaption className="border-b border-white/[0.06] bg-[var(--ws-card)] px-3 py-2 text-[12.5px] text-neutral-300">Typed answer</figcaption>
                   <div className="whitespace-pre-wrap bg-[#FBFAF6] px-6 py-5 font-serif text-[15px] leading-relaxed text-neutral-900">{open.text}</div>
                 </figure>
               )}
@@ -385,9 +420,9 @@ export default function AssignmentsPage({ onClose, onMarkAll, initialId, autoMar
 
   const newBtn = <button type="button" onClick={() => setView({ kind: 'new' })} className={primaryBtn}><Plus size={16} />New task</button>;
   return (
-    <div className="fixed inset-0 z-[70] overflow-y-auto bg-[#0f1012]">
+    <div className="fixed inset-0 z-[70] overflow-y-auto bg-[var(--ws-bg)]">
       {view.kind === 'one' ? (
-        <div className="min-h-full bg-[#0f1012] text-[#ececee]">
+        <div className="min-h-full bg-[var(--ws-bg)] text-[var(--ws-text)]">
           <div className="px-4 pt-3 sm:px-6"><button type="button" onClick={onClose} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] text-neutral-400 hover:bg-white/[0.05] hover:text-white"><ArrowLeft size={15} />Back to chat</button></div>
           <main className="mx-auto w-full max-w-5xl px-4 pb-16 sm:px-6">
             <Dashboard id={view.id} onBack={() => setView({ kind: 'list' })} onMarkAll={onMarkAll} autoMark={autoMark && view.id === initialId} />
