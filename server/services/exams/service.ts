@@ -659,7 +659,7 @@ export function createExamService(deps: ExamDeps) {
       });
       // The teacher's own pen marks survive re-marking (they are drawn on the page, not tied to the AI's marks).
       e.results[sub.id] = { submissionId: sub.id, candidateId: sub.candidateId, runId, schemeVersion: run.schemeVersion, questions, updatedAt: now(), usage: marked.usage, ...(prev?.pen ? { pen: prev.pen } : {}) };
-      chargeLater = { model: deps.agent().model, input: marked.usage.input, output: marked.usage.output, what: 'mark', batch: run.mode === 'overnight', extra: readUsage };
+      chargeLater = { model: deps.agent().model, input: marked.usage.input, output: marked.usage.output, what: 'mark', batch: run.mode === 'overnight', extra: readUsage, second: marked.secondUsage };
       audit(e, { actor: 'bwenge-ai', type: 'marked', submissionId: sub.id, candidateId: sub.candidateId, after: { total: questions.reduce((a, q) => a + (effectiveMarks(q) ?? 0), 0) } });
       const s = e.submissions.find((x) => x.id === sub.id)!;
       s.state = questions.some((q) => openFlags(q).length) ? 'completed_with_warnings' : 'completed';
@@ -683,20 +683,43 @@ export function createExamService(deps: ExamDeps) {
    * Charges one piece of AI work (never breaks marking) and adds its credits to the run, so the teacher sees
    * what a class cost: reading the handwriting, marking, second markings.
    */
-  async function charge(userId: string, examId: string, runId: string | null, u: { model: string; input: number; output: number; what: 'mark' | 'remark' | 'read' | 'split'; batch?: boolean; extra?: Array<{ model: string; input: number; output: number }> }) {
-    try { deps.onUsage?.(userId, u); } catch { /* metering never breaks marking */ }
+  async function charge(userId: string, examId: string, runId: string | null, u: { model: string; input: number; output: number; what: 'mark' | 'remark' | 'read' | 'split'; batch?: boolean; extra?: Array<{ model: string; input: number; output: number }>; second?: { input: number; output: number } }) {
+    const { second, ...usage } = u;
+    try { deps.onUsage?.(userId, usage); } catch { /* metering never breaks marking */ }
     if (!runId || !deps.creditsFor) return;
     const credits = deps.creditsFor(u.model, u.input, u.output, u.batch, u.what, u.extra);
-    await mutate(userId, examId, (e) => { const r = e.runs.find((x) => x.id === runId); if (r) r.credits = (r.credits ?? 0) + credits; }).catch(() => undefined);
+    // Split for the breakdown: the reading (extra) is priced on its own; second markings are part of the marking.
+    const own = deps.creditsFor(u.model, u.input, u.output, u.batch, u.what);
+    const read = credits - own;
+    const secondCredits = second && (second.input || second.output) ? Math.min(own, deps.creditsFor(u.model, second.input, second.output, u.batch, 'remark')) : 0;
+    await mutate(userId, examId, (e) => {
+      const r = e.runs.find((x) => x.id === runId);
+      if (!r) return;
+      r.credits = (r.credits ?? 0) + credits;
+      const by = (r.creditsBy ??= {});
+      if (read > 0) by.read = (by.read ?? 0) + read;
+      if (secondCredits > 0) by.second = (by.second ?? 0) + secondCredits;
+      const key = u.what === 'read' ? 'read' : u.what;
+      by[key] = (by[key] ?? 0) + own - secondCredits;
+    }).catch(() => undefined);
+  }
+
+  /** "reading 120, marking 220, second marking 40" for the end-of-run message. */
+  function breakdown(r: MarkingRun): string {
+    const b = r.creditsBy;
+    if (!b) return '';
+    const parts = ([['read', 'reading the handwriting'], ['mark', 'marking'], ['second', 'second marking'], ['split', 'splitting the class PDF'], ['remark', 're-marking']] as const)
+      .filter(([k]) => (b[k] ?? 0) > 0).map(([k, label]) => `${label} ${b[k]!.toLocaleString('en-US')}`);
+    return parts.length > 1 ? ` (${parts.join(', ')})` : '';
   }
 
   /** " 42 pages in 6 min, 380 credits." for a live run; overnight runs wait for the batch, so only pages and credits. */
   function timing(subs: Submission[], r: MarkingRun): string {
     const pages = subs.filter((s) => s.state !== 'failed').reduce((a, s) => a + s.pages, 0);
     if (!pages || !r.startedAt || !r.finishedAt) return '';
-    if (r.mode === 'overnight') return r.credits ? ` ${pages} page${pages === 1 ? '' : 's'}, ${r.credits.toLocaleString('en-US')} credits (half price overnight).` : '';
+    if (r.mode === 'overnight') return r.credits ? ` ${pages} page${pages === 1 ? '' : 's'}, ${r.credits.toLocaleString('en-US')} credits${breakdown(r)}, half price overnight.` : '';
     const sec = Math.max(1, Math.round((Date.parse(r.finishedAt) - Date.parse(r.startedAt)) / 1000));
-    return ` ${pages} page${pages === 1 ? '' : 's'} in ${sec < 90 ? `${sec} s` : `${Math.round(sec / 60)} min`}${r.credits ? `, ${r.credits.toLocaleString('en-US')} credits` : ''}.`;
+    return ` ${pages} page${pages === 1 ? '' : 's'} in ${sec < 90 ? `${sec} s` : `${Math.round(sec / 60)} min`}${r.credits ? `, ${r.credits.toLocaleString('en-US')} credits${breakdown(r)}` : ''}.`;
   }
 
   async function runMarkJob(job: FileJob<MarkJobPayload>, ctx: JobContext) {

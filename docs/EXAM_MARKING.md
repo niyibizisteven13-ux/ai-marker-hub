@@ -258,7 +258,8 @@ Other users' exams answer 404. Signed download URLs expire after 1 hour (`FileSt
 | Variable | Default | Meaning |
 |---|---|---|
 | `AI_AGENT_PROVIDER=anthropic` + `ANTHROPIC_API_KEY` | – | Needed: recognition needs a vision model; scheme extraction and marking use the agent model (`claude-haiku-5-5`). |
-| `CLAUDE_MARKING_MODEL`, `CLAUDE_MARKING_EFFORT` | agent model and effort | Model for reading handwriting, extracting schemes and marking. `claude-opus-5-5` with `high` is the most accurate choice; each script then costs more credits (priced from the model's real token use). Everyday chat and other agent tasks keep `CLAUDE_AGENT_MODEL`. |
+| `CLAUDE_READING_MODEL`, `CLAUDE_READING_EFFORT` | `claude-sonnet-5-5` when marking uses Opus/Fable, else the marking model; `medium` | Model for reading handwriting (page images to text). Reading needs eyesight rather than judgement, so a cheaper model reads and the marking model marks. |
+| `CLAUDE_MARKING_MODEL`, `CLAUDE_MARKING_EFFORT` | agent model and effort | Model for extracting schemes and marking. `claude-opus-5-5` with `high` is the most accurate choice; each script then costs more credits (priced from the model's real token use). Everyday chat and other agent tasks keep `CLAUDE_AGENT_MODEL`. |
 | `EXAMS_DIR` | `./data/exams` | Exam records and chat context (durable volume). |
 | `EXAM_CANDIDATE_CONCURRENCY` | 6 | Scripts processed in parallel per batch. |
 | `EXAM_QUESTIONS_PER_CALL` | auto | Questions marked per AI call. By default the questions of a script are shared out over the `EXAM_QUESTION_CONCURRENCY` groups (at most 4 per call), so a script is marked in about one round of calls. |
@@ -270,7 +271,7 @@ Other users' exams answer 404. Signed download URLs expire after 1 hour (`FileSt
 | `DOC_MAX_PAGES` | 40 | Pages per script. |
 | `EXAM_MAX_BATCH_PAGES` | 2000 | Pages in one marking job (all students together). |
 | `EXAM_SECOND_OPINION_BELOW` | 0.6 | Answers marked with lower confidence are marked again independently; agreement raises confidence, a different mark is flagged for the teacher with both marks. |
-| `EXAM_SECOND_OPINION_MAX` | 6 | Most answers per script given a second marking (0 turns it off). |
+| `EXAM_SECOND_OPINION_MAX` | 2 | Most answers per script given a second marking (0 turns it off). |
 | `EXAM_SPLIT_MODEL` | marking model | Model that finds where each student starts in a whole-class PDF (8 small page pictures per call). |
 | `CHAT_MAX_FILE_MB` | 200 | Largest file any plan may send through the chat or the Mark page (web); each plan's own limit applies below it (100 MB; Pro Plus and Institution 200 MB). Files over 8 MB are uploaded first and passed by id. Telegram bots can only download files up to 20 MB (Telegram's limit). |
 
@@ -302,3 +303,9 @@ All of this is synthetic: printed pages and a scripted model.
 - **Arithmetic only.** Mathematical equivalence is judged by the model; no CAS is involved.
 - **Single process.** The queue persists to disk but runs in one process. Live progress streams to the review screen; a chat turn waits for quick jobs only.
 - **No Telegram exam flow.** Telegram keeps its existing `/transcribe` document flow.
+
+## What a class costs
+
+- Credits are priced from the model's real token use. Tokens read from the prompt cache (the scheme and question paper repeated for every script) are priced as Claude prices them: a small fraction of the input price, not the full price.
+- The message at the end of a run gives the credits and what they went to: reading the handwriting, marking, second marking, splitting a class PDF. The run record keeps the same split (`creditsBy`).
+- From 15 scripts, the Mark page chooses overnight marking (half price) by default; the teacher can switch to "Now".

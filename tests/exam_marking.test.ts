@@ -1280,6 +1280,11 @@ test('the name and number written on the paper replace STUDENT1; a script withou
   assert.equal(mine.filter((u) => u.what === 'mark').length, 2, 'one charge per script');
   assert.equal(mine.filter((u) => u.what === 'mark' && u.extra === 1).length >= 1, true, 'a fresh reading rides on its marking charge');
   assert.ok(done.runs[0].credits! >= 5, `run credits ${done.runs[0].credits}`);
+  // The same credits by kind of work: reading and marking add up to the total.
+  const by = done.runs[0].creditsBy!;
+  assert.ok(by.read! >= 1 && by.mark! >= 1, JSON.stringify(by));
+  assert.equal(Object.values(by).reduce((t, v) => t + (v ?? 0), 0), done.runs[0].credits);
+  assert.ok((done.events ?? []).some((e) => e.type === 'job_completed' && /reading the handwriting \d+, marking \d+/.test(e.message)));
   assert.ok((done.events ?? []).some((e) => e.type === 'job_completed' && /\d+ credits/.test(e.message)));
 });
 

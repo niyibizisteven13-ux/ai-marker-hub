@@ -157,6 +157,8 @@ export interface MarkingRun {
   mode?: 'live' | 'overnight';
   /** Credits charged for this run so far: reading the handwriting, marking and second markings. */
   credits?: number;
+  /** The same credits by kind of work, so the teacher (and the admin) can see what made a class expensive. */
+  creditsBy?: { read?: number; mark?: number; second?: number; split?: number; remark?: number };
 }
 
 export interface AuditEvent {
