@@ -44,6 +44,7 @@ import { examsRouter } from './server/routes/examRoutes.js';
 import { createAssignmentsRouter, createPublicAssignmentsRouter } from './server/routes/assignmentRoutes.js';
 import { createStorageRouter } from './server/routes/storageRoutes.js';
 import { StorageFullError, ensureStorage } from './server/services/billing/storage.js';
+import { uploadLimitBytes, uploadTooLargeMessage } from './server/services/billing/plans.js';
 import { outputsRouter, sharedOutputsRouter } from './server/routes/outputRoutes.js';
 import { curationViewRouter, knowledgeAdminRouter, knowledgeSourcesRouter } from './server/routes/knowledgeRepositoryRoutes.js';
 import { shutdownOcr } from './server/services/documents/ocr.js';
@@ -503,7 +504,7 @@ async function uploadedFileText(file: { id: string; extractedText: string | null
   }
 }
 
-// Large chat attachments: uploaded first (up to CHAT_MAX_FILE_MB, default 100 MB), then sent with the message by id.
+// Large chat attachments: uploaded first (up to the plan's limit, 200 MB on Pro Plus), then sent with the message by id.
 app.post('/api/files/upload', requireAuth, generalLimiter, (req, res, next) => {
   chatFileUpload.single('file')(req, res, (err?: any) => {
     if (!err) return next();
@@ -519,6 +520,9 @@ app.post('/api/files/upload', requireAuth, generalLimiter, (req, res, next) => {
     const ext = path.extname(req.file.originalname).toLowerCase();
     if (!CHAT_ATTACHMENT_EXTENSIONS.has(ext)) return res.status(400).json({ error: `Unsupported file type: ${ext || 'unknown'}` });
     if (!req.file.size) return res.status(400).json({ error: `${req.file.originalname} is empty.` });
+    // Each plan has its own largest file (Pro Plus and Institution: 200 MB).
+    const allowed = await uploadLimitBytes(userId);
+    if (req.file.size > allowed.bytes) return res.status(413).json({ error: uploadTooLargeMessage(req.file.originalname, allowed.plan, allowed.bytes), code: 'UPLOAD_TOO_LARGE', upgrade: !['PLUS', 'INSTITUTION'].includes(allowed.plan.id) });
 
     // Check the file's first bytes against its extension: a PDF or image must really be one.
     const head = Buffer.alloc(16);

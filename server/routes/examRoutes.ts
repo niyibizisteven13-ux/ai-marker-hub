@@ -6,6 +6,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { markingLimits } from '../services/exams/limits.js';
+import { uploadLimitBytes, uploadTooLargeMessage } from '../services/billing/plans.js';
 import { z } from 'zod';
 import { FileStoreError } from '../services/ai/files/FileStore.js';
 import { FileJobQueue, JobError } from '../services/ai/jobs/fileJobQueue.js';
@@ -52,6 +53,10 @@ const withFiles = (fields: multer.Field[]) => (req: Request, res: Response, next
           if (files.reduce((sum, file) => sum + file.size, 0) > markingLimits.maxUploadBytes) {
             res.status(413).json({ code: 'TOO_LARGE', error: 'This upload exceeds the batch size limit. Send a smaller batch.' }); return;
           }
+          // Each plan has its own largest file (Pro Plus and Institution: 200 MB).
+          const allowed = await uploadLimitBytes(userIdOf(req));
+          const big = files.find((file) => file.size > allowed.bytes);
+          if (big) { res.status(413).json({ code: 'TOO_LARGE', error: uploadTooLargeMessage(big.originalname, allowed.plan, allowed.bytes), upgrade: !['PLUS', 'INSTITUTION'].includes(allowed.plan.id), requestId: rid(req) }); return; }
           for (const file of files) file.buffer = await fs.readFile(file.path);
           next();
         } catch (error) { next(error); }
