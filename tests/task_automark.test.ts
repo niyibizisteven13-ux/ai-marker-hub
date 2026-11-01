@@ -35,7 +35,8 @@ const fakeExams = {
 const svc = createAssignmentService({ store: new OwnedRecordStore<AssignmentRecord>(path.join(dir, 'records')), files, tokenDir: path.join(dir, 'links'), baseUrl: () => 'https://www.bwenge.space', marker: createTaskMarker(() => fakeExams as any, { retryMs: 5, maxRetries: 2 }) });
 
 const pdf = async () => { const d = await PDFDocument.create(); d.addPage([595, 842]); return Buffer.from(await d.save()); };
-const settle = () => new Promise((r) => setTimeout(r, 60));
+// Background marking runs after each hand-in returns; wait for it (not a fixed delay, so slow machines pass too).
+const until = async (ok: () => boolean, ms = 5000) => { const end = Date.now() + ms; while (!ok() && Date.now() < end) await new Promise((r) => setTimeout(r, 10)); };
 
 test('tasks: hand-ins are marked as they arrive, released by the teacher, and read by each student privately', async () => {
   await assert.rejects(svc.create('t1', { title: 'Quiz 1', instructions: 'Answer all.', autoMark: 'true' }), /marking scheme/);
@@ -47,7 +48,7 @@ test('tasks: hand-ins are marked as they arrive, released by the teacher, and re
   const r1 = await svc.submit(token, { studentName: 'Uwase Aline', text: 'x = 4' });
   const r2 = await svc.submit(token, { studentName: 'Mugisha Eric', studentId: 'S3-014', files: [{ name: 'answers.pdf', data: await pdf() }] });
   assert.match(r1.resultLink, /^https:\/\/www\.bwenge\.space\/a\/[\w-]+\/result\/[\w-]+$/);
-  await settle();
+  await until(() => calls.includes('start'));
   // One examination for the task; the scheme goes with the first hand-in, the second joins and starts marking.
   assert.deepEqual(calls, ['create', 'add:Uwase Aline', 'scheme:scheme.pdf:true', 'add:Mugisha Eric', 'start']);
 
@@ -75,5 +76,6 @@ test('tasks: hand-ins are marked as they arrive, released by the teacher, and re
   // Resubmitting keeps the same private link.
   const again = await svc.submit(token, { studentName: 'Uwase Aline', text: 'x = 4, checked' });
   assert.equal(again.resultLink, r1.resultLink);
-  await settle(); // let the background marking of that hand-in finish before the folder is removed
+  await until(() => calls.filter((c) => c === 'add:Uwase Aline').length === 2); // let that hand-in's background marking finish before the folder is removed
+  await new Promise((r) => setTimeout(r, 30));
 });
