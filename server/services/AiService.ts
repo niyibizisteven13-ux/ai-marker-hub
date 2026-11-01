@@ -217,6 +217,29 @@ const markingProvider = markingAdapter && claudeAgent.config
   ? new ModelDispatchAdapter(gonkaAdapter, new Map([[claudeAgent.config.markingModel, markingAdapter] as const]))
   : agentProvider;
 
+// Reading handwriting uses its own (by default cheaper) model and effort: CLAUDE_READING_MODEL, CLAUDE_READING_EFFORT.
+const readingProvider = claudeAgent.config
+  ? (() => {
+    const c = claudeAgent.config;
+    if (c.readingModel === c.markingModel && c.readingEffort === c.markingEffort) return markingProvider;
+    logger.info('[AI routing] reading model', { model: c.readingModel, effort: c.readingEffort });
+    const reading = new ReliableProviderAdapter({
+      primary: new AnthropicAdapter({ apiKey: c.apiKey, name: 'Claude (reading)', effort: c.readingEffort, requestTimeoutMs: envMs('CLAUDE_REQUEST_TIMEOUT_MS', 900_000) }),
+      ...reliability,
+      fallbackAdapter: c.fallbackToGonka ? gonkaAdapter : undefined,
+      fallbackModel: c.fallbackToGonka ? gonkaStandardModel : undefined,
+    });
+    return new ModelDispatchAdapter(gonkaAdapter, new Map([[c.readingModel, reading] as const]));
+  })()
+  : agentProvider;
+
+/** Adapter + model for reading handwriting (page images to text): the reading model when Claude is set up. */
+export function readingTarget(): ReturnType<typeof markingTarget> {
+  return claudeAgent.config
+    ? { adapter: readingProvider, model: claudeAgent.config.readingModel, provider: 'anthropic', fallbackModel: undefined }
+    : markingTarget();
+}
+
 /** Adapter + model for examination marking: the marking model when set, otherwise the agent target. */
 export function markingTarget(): { adapter: typeof agentProvider; model: string; provider: 'anthropic' | 'gonka'; fallbackModel: string | null | undefined } {
   return claudeAgent.config

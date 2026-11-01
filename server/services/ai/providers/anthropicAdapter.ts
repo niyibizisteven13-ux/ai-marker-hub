@@ -39,6 +39,17 @@ export function webSources(content: Anthropic.ContentBlock[]): string {
   return `\n\n**Sources**\n${[...seen].map(([url, title], i) => `${i + 1}. [${title.replace(/[[\]]/g, '')}](${url})`).join('\n')}`;
 }
 
+/**
+ * Input tokens priced as plain input: tokens read from the prompt cache cost a small fraction of the input price
+ * (0.05x on Opus 5.5, 0.025x on Fable 5.1 / Mythos 5.1, 0.1x elsewhere) and cache writes (5-minute) cost 1.25x.
+ * Counting every cached token at full price overcharged credits and overstated the cost the profit guard sees.
+ */
+export function billableInput(model: string, u: { input_tokens?: number | null; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null }): number {
+  const m = model.toLowerCase();
+  const readFactor = /fable-5-1|mythos-5-1/.test(m) ? 0.025 : /opus-5-5/.test(m) ? 0.05 : 0.1;
+  return Math.round((u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) * readFactor + (u.cache_creation_input_tokens ?? 0) * 1.25);
+}
+
 type MessageParam = Anthropic.MessageParam;
 type ContentBlockParam = Anthropic.ContentBlockParam;
 
@@ -197,9 +208,8 @@ export class AnthropicAdapter implements ProviderAdapter {
           if (b.type === 'thinking' && b.thinking) yield { type: 'reasoning', text: b.thinking };
           else if (b.type === 'text' && b.text) yield { type: 'text', text: b.text };
         }
-        const u = finalMessage.usage;
-        usage.input += (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
-        usage.output += u.output_tokens ?? 0;
+        usage.input += billableInput(params.model, finalMessage.usage);
+        usage.output += finalMessage.usage.output_tokens ?? 0;
         break;
       }
       try {
@@ -227,9 +237,8 @@ export class AnthropicAdapter implements ProviderAdapter {
       } catch (err) {
         throw mapError(this.name, err, req.signal);
       }
-      const u = finalMessage.usage;
-      usage.input += (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
-      usage.output += u.output_tokens ?? 0;
+      usage.input += billableInput(params.model, finalMessage.usage);
+      usage.output += finalMessage.usage.output_tokens ?? 0;
       if (finalMessage.stop_reason !== 'pause_turn' || resume >= MAX_RESUMES) break;
       // Resume the paused turn: send it back as is; the API continues where it stopped.
       before.push(...finalMessage.content);

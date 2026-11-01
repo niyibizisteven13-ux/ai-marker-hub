@@ -1,7 +1,7 @@
 import { FileJobQueue, JobError } from './ai/jobs/fileJobQueue.js';
 import { isOvernight } from './ai/batchMode.js';
 import path from 'node:path';
-import { agentTarget, fileJobQueue, fileStore, markingTarget } from './AiService.js';
+import { agentTarget, fileJobQueue, fileStore, markingTarget, readingTarget } from './AiService.js';
 import { createAnalyticsService } from './analytics/service.js';
 import { createAssessmentService, type AssessmentRecord } from './assessment/service.js';
 import { OwnedRecordStore } from './storage/ownedRecordStore.js';
@@ -50,8 +50,8 @@ export const documentStore = new OwnedRecordStore<DocumentRecord>(process.env.DO
  * fallback model that is known to accept images (GONKA_FALLBACK_SUPPORTS_VISION=true).
  */
 function visionTarget() {
-  // Handwriting is read by the marking model (CLAUDE_MARKING_MODEL), the same one that marks it.
-  const a = markingTarget();
+  // Handwriting is read by the reading model (CLAUDE_READING_MODEL; by default cheaper than an Opus marking model).
+  const a = readingTarget();
   if (a.provider === 'anthropic') return { adapter: a.adapter, model: a.model, fallbackModel: process.env.GONKA_FALLBACK_SUPPORTS_VISION === 'true' ? undefined : null };
   if (process.env.DOC_VISION_GONKA === 'true') return { adapter: a.adapter, model: process.env.DOC_VISION_MODEL?.trim() || a.model, fallbackModel: null };
   return null;

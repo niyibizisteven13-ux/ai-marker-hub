@@ -4,6 +4,9 @@ import { authFetch } from '../utils/authFetch';
 import { FileThumb, PreviewDialog } from './FilePreview';
 import type { ChatAttachment } from '../types';
 
+/** From this many scripts, overnight marking (half price) is chosen by default. */
+const OVERNIGHT_FROM = 15;
+
 /**
  * Mark: everything needed to mark a class in one place. Files upload as soon as they are added (like attaching
  * in Claude) and each gets a role the teacher can change: marking scheme, question paper or student scripts.
@@ -73,7 +76,10 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
   const [corrections, setCorrections] = useState(true);
   const [feedback, setFeedback] = useState<'brief' | 'detailed'>('brief');
   // Overnight: sent as half-price batches; results by the next morning (usually much sooner).
-  const [overnight, setOvernight] = useState(false);
+  const [overnight, setOvernightRaw] = useState(false);
+  // Big classes start on overnight (half price) until the teacher picks for themselves.
+  const chosenWhen = useRef(false);
+  const setOvernight = (v: boolean) => { chosenWhen.current = true; setOvernightRaw(v); };
   const [dragging, setDragging] = useState(false);
   const [menu, setMenu] = useState<string | null>(null);
   const [viewing, setViewing] = useState<File | null>(null);
@@ -173,6 +179,8 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
     });
   };
 
+  const scriptCount = summary.students || scripts.length;
+  useEffect(() => { if (!chosenWhen.current) setOvernightRaw(scriptCount >= OVERNIGHT_FROM); }, [scriptCount]);
   const markLabel = !scripts.length ? 'Add student scripts' : !scheme && !paper ? 'Add scheme or question paper' : `Mark ${summary.students || scripts.length} script${(summary.students || scripts.length) === 1 ? '' : 's'}${overnight ? ' overnight' : ''}`;
   const toggleSuggestion = (s: string) => setInstructions((cur) => (cur.includes(s) ? cur.replace(s, '').replace(/\s{2,}/g, ' ').trim() : `${cur.trim()} ${s}`.trim()));
 

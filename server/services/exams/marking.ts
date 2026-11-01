@@ -256,7 +256,7 @@ export function preferenceLines(p?: MarkCandidateInput['preferences']): string {
   ].filter(Boolean).join('\n');
 }
 
-export async function markCandidate(adapter: ProviderAdapter, model: string, input: MarkCandidateInput): Promise<{ marks: Record<string, AiQuestionMark>; usage: { input: number; output: number } }> {
+export async function markCandidate(adapter: ProviderAdapter, model: string, input: MarkCandidateInput): Promise<{ marks: Record<string, AiQuestionMark>; usage: { input: number; output: number }; secondUsage: { input: number; output: number } }> {
   const qs = input.scheme.questions.filter((q) => input.questionIds.includes(q.id));
   const numberOf = new Map(input.scheme.questions.map((q) => [q.id, q.number]));
 
@@ -329,7 +329,9 @@ export async function markCandidate(adapter: ProviderAdapter, model: string, inp
   // Second marker: answers marked with low confidence are marked again, independently, in one call. Agreement
   // raises confidence; a different mark is flagged for the teacher with both marks. The first mark stands.
   const unsure = secondOpinionCandidates(qs.filter((q) => pending.includes(q)), marks);
+  const secondUsage = { input: 0, output: 0 };
   if (unsure.length && !input.signal?.aborted) {
+    const before = { ...usage };
     const out = await callMarker(unsure, 'You are the SECOND, independent examiner for these answers. Mark them from the scheme and the script only, as carefully as you can.');
     for (const q of unsure) {
       const second = out.find((x) => x.questionId === q.id);
@@ -338,14 +340,16 @@ export async function markCandidate(adapter: ProviderAdapter, model: string, inp
       marks[q.id] = withSecondOpinion(marks[q.id], again, q.maxMarks);
       await input.onQuestion?.(q.id, marks[q.id]);
     }
+    secondUsage.input = usage.input - before.input;
+    secondUsage.output = usage.output - before.output;
   }
-  return { marks, usage };
+  return { marks, usage, secondUsage };
 }
 
-/** Low-confidence answers worth a second marking (at most EXAM_SECOND_OPINION_MAX per script, default 6). */
+/** Low-confidence answers worth a second marking (at most EXAM_SECOND_OPINION_MAX per script, default 2). */
 export function secondOpinionCandidates(qs: SchemeQuestion[], marks: Record<string, AiQuestionMark>): SchemeQuestion[] {
   const below = Number(process.env.EXAM_SECOND_OPINION_BELOW ?? 0.6);
-  const max = Number(process.env.EXAM_SECOND_OPINION_MAX ?? 6);
+  const max = Number(process.env.EXAM_SECOND_OPINION_MAX ?? 2);
   if (!(below > 0) || !(max > 0)) return [];
   return qs.filter((q) => {
     const m = marks[q.id];

@@ -68,7 +68,7 @@ test('stream: text deltas, usage incl. cache reads, request has effort, caching 
   const a = new AnthropicAdapter({ client, effort: 'low' });
   const out = await collect(a.stream({ model: 'claude-haiku-5-5', messages: [{ role: 'system', content: 'sys' }, { role: 'user', content: 'hi' }], temperature: 0.3, maxTokens: 500 }));
   assert.deepEqual(out.filter((c) => c.type === 'text').map((c: any) => c.text), ['Mura', 'ho']);
-  assert.deepEqual(out.find((c) => c.type === 'usage'), { type: 'usage', input: 100, output: 5 });
+  assert.deepEqual(out.find((c) => c.type === 'usage'), { type: 'usage', input: 19, output: 5 }, 'cache reads priced at a tenth');
   const p = calls[0];
   assert.equal(p.model, 'claude-haiku-5-5');
   assert.equal(p.max_tokens, 500);
