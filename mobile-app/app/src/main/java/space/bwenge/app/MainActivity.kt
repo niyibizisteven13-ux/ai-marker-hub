@@ -140,13 +140,9 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Downloading $name", Toast.LENGTH_SHORT).show()
         }
 
-        refresh.setColorSchemeResources(R.color.bwenge_accent)
-        refresh.setProgressBackgroundColorSchemeResource(R.color.bwenge_bg)
-        refresh.setOnRefreshListener {
-            if (web.url?.startsWith("file:") == true) web.loadUrl(HOME) else web.reload()
-        }
-        // Only allow pull-to-refresh when the page is scrolled to the top.
-        web.setOnScrollChangeListener { _, _, y, _, _ -> refresh.isEnabled = y == 0 }
+        // Pull-to-refresh is disabled: the site scrolls inside inner containers (e.g. chat), and the
+        // refresh gesture would steal those drags. Offline page has its own retry button.
+        refresh.isEnabled = false
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
