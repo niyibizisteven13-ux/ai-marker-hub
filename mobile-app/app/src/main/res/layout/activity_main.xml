@@ -1,60 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="16dp"
-    android:background="#121212">
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@color/bwenge_bg">
 
-    <TextView
-        android:id="@+id/titleText"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Bwenge AI"
-        android:textColor="#FFFFFF"
-        android:textSize="24sp"
-        android:textStyle="bold"
-        android:layout_marginBottom="16dp"/>
+    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+        android:id="@+id/refresh"
+        android:layout_width="match_parent" android:layout_height="match_parent">
+        <WebView
+            android:id="@+id/web"
+            android:layout_width="match_parent" android:layout_height="match_parent"/>
+    </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
 
-    <EditText
-        android:id="@+id/promptInput"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:hint="Ask something..."
-        android:textColor="#FFFFFF"
-        android:textColorHint="#888888"
-        android:backgroundTint="#5DCAA5"
-        android:layout_marginBottom="16dp"/>
-
-    <Button
-        android:id="@+id/sendButton"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Send to Ollama"
-        android:backgroundTint="#5DCAA5"
-        android:textColor="#000000"/>
-
-    <androidx.compose.ui.platform.ComposeView
-        android:id="@+id/composeLoader"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center_horizontal"
-        android:layout_marginTop="16dp"
+    <ProgressBar
+        android:id="@+id/progress"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent" android:layout_height="3dp"
+        android:indeterminate="false" android:max="100"
+        android:progressTint="@color/bwenge_accent"
         android:visibility="gone"/>
-
-    <ScrollView
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:layout_marginTop="16dp">
-
-        <TextView
-            android:id="@+id/resultText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Response will appear here..."
-            android:textColor="#BBBBBB"
-            android:textSize="16sp"/>
-    </ScrollView>
-
-</LinearLayout>
+</FrameLayout>
