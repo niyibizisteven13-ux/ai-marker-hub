@@ -5,6 +5,9 @@ on:
   push:
     paths: ['mobile-app/**', '.github/workflows/android-apk.yml']
 
+permissions:
+  contents: write
+
 jobs:
   apk:
     runs-on: ubuntu-latest
@@ -44,3 +47,13 @@ jobs:
         with:
           name: bwenge-apk
           path: mobile-app/app/build/outputs/apk/release/*.apk
+      - name: Publish public release
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp mobile-app/app/build/outputs/apk/release/*.apk Bwenge.apk
+          gh release delete apk-latest --cleanup-tag --yes || true
+          gh release create apk-latest Bwenge.apk --target "$GITHUB_SHA" --latest \
+            --title "Bwenge for Android" \
+            --notes "Download Bwenge.apk, open it on your Android phone and install. Allow installs from this source if asked."
