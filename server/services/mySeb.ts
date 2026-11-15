@@ -291,8 +291,9 @@ export async function violations(load: TargetLoader, sid: string) {
 /** Where students get the apps. Set these to your real download pages (see .env.example). */
 export function downloadLinks() {
   const e = process.env;
+  const r = (e.MYSEB_RELEASE_URL || 'https://github.com/niyibizisteven13-ux/ai-marker-hub/releases/latest/download').replace(/\/$/, '');
   return {
-    windows: e.MYSEB_DL_WINDOWS || '', mac: e.MYSEB_DL_MAC || '', linux: e.MYSEB_DL_LINUX || '',
-    android: e.MYSEB_DL_ANDROID || '', ios: e.MYSEB_DL_IOS || '', extension: e.MYSEB_DL_EXTENSION || '',
+    windows: e.MYSEB_DL_WINDOWS || `${r}/MySEB-win.exe`, mac: e.MYSEB_DL_MAC || `${r}/MySEB-mac.dmg`, linux: e.MYSEB_DL_LINUX || `${r}/MySEB-linux.AppImage`,
+    android: e.MYSEB_DL_ANDROID || `${r}/MySEB.apk`, ios: e.MYSEB_DL_IOS || '', extension: e.MYSEB_DL_EXTENSION || '',
   };
 }
