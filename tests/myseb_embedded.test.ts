@@ -22,6 +22,12 @@ test('MySEB runs next to the bwenge server under /myseb, with its secrets derive
     const dash = await fetch(`${base}/myseb/`, { redirect: 'manual' });
     assert.equal(dash.headers.get('location'), '/myseb/dashboard/');
     assert.equal((await fetch(`${base}/myseb/dashboard/`)).status, 200);
+    const ua = (u: string) => fetch(`${base}/myseb/download`, { headers: { 'User-Agent': u } }).then((r) => r.text());
+    const phone = await ua('Mozilla/5.0 (Linux; Android 14; Pixel) Chrome/120 Mobile');
+    assert.ok(phone.indexOf('Download for Android phone') < phone.indexOf('Download for Windows laptop'), 'a phone sees its own download first');
+    assert.match(phone, /releases\/latest\/download\/MySEB\.apk/);
+    assert.match(await ua('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120'), /MySEB-win\.exe/);
+    assert.match(await ua('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)'), /not supported yet/);
     const target = { kind: 'form', ref: 'f1', title: 'Embedded quiz', url: 'https://www.bwenge.space/forms/f1', mysebExamId: null as string | null, leaveAction: 'record', minutes: 10, saveExamId: async (id: string) => { target.mysebExamId = id; } };
     const code: any = await generateCode(async () => target as any);
     assert.match(String(code.code ?? code.display), /\d/);
