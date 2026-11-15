@@ -1,5 +1,6 @@
 import type { Request, RequestHandler } from 'express';
 import jwt from 'jsonwebtoken';
+import { createHmac } from 'node:crypto';
 import { prisma } from '../db.js';
 import { getJwtSecret } from '../auth/secrets.js';
 import { normalizeExam } from '../../shared/examRules.js';
@@ -23,12 +24,12 @@ export class MySebError extends Error {
   constructor(message: string, public status = 400, public code = 'MYSEB_ERROR') { super(message); }
 }
 
-async function mysebFetch(path: string, init: { method?: string; body?: unknown } = {}) {
+async function mysebFetch(path: string, init: { method?: string; body?: unknown; timeoutMs?: number; signal?: AbortSignal } = {}) {
   if (!mySebConfigured()) throw new MySebError('MySEB is not set up on this server (MYSEB_URL and MYSEB_SERVICE_KEY).', 503, 'MYSEB_NOT_CONFIGURED');
   let res: Response;
   try {
     res = await fetch(`${MYSEB_URL()}/api${path}`, {
-      method: init.method ?? 'GET', signal: AbortSignal.timeout(8000),
+      method: init.method ?? 'GET', signal: init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(init.timeoutMs ?? 8000)]) : AbortSignal.timeout(init.timeoutMs ?? 8000),
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SERVICE_KEY()}` },
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
     });
@@ -160,10 +161,16 @@ export async function generateCode(load: TargetLoader) {
   return { mysebExamId: examId, code: r.code, display: r.display, qrSvg: r.qrSvg, joinUrl: r.joinUrl, expiresAt: r.expiresAt };
 }
 
-export async function monitor(load: TargetLoader) {
+export async function monitor(load: TargetLoader, opts: { frames?: boolean } = {}) {
   const t = await load();
   if (!t.mysebExamId) return { counts: { IN_EXAM: 0, PAUSED: 0, LEFT: 0, ENDED: 0 }, students: [] };
-  return mysebFetch(`/exams/${t.mysebExamId}/monitor`);
+  return mysebFetch(`/exams/${t.mysebExamId}/monitor${opts.frames === false ? '?frames=0' : ''}`);
+}
+/** Camera pictures for the students whose tiles are on screen. */
+export async function frames(load: TargetLoader, ids: string[]) {
+  const t = await load();
+  if (!t.mysebExamId || !ids.length) return { frames: {} };
+  return mysebFetch(`/exams/${t.mysebExamId}/frames?ids=${ids.filter((x) => SID.test(x)).slice(0, 60).join(',')}`);
 }
 
 const SID = /^[0-9a-f-]{36}$/i;
@@ -200,16 +207,69 @@ export async function setLiveFaces(load: TargetLoader, on: boolean) {
 
 /** What the exam page tells the live room: the question the student is on and, if asked for, a small picture. Never stored here. */
 const lastLive = new Map<string, number>();
-export async function relayLive(sessionId: string, body: any): Promise<{ faces: boolean }> {
+const lastAnswer = new Map<string, LiveAnswer>();
+export interface LiveAnswer { faces: boolean; live: boolean; sound: boolean }
+export async function relayLive(sessionId: string, body: any): Promise<LiveAnswer> {
   const now = Date.now();
-  if (now - (lastLive.get(sessionId) ?? 0) < 3000) return { faces: !!(lastLive.get(`${sessionId}:faces`)) };   // at most one report every 3 s per student
+  if (now - (lastLive.get(sessionId) ?? 0) < 3000) return lastAnswer.get(sessionId) ?? { faces: false, live: false, sound: false };   // at most one report every 3 s per student
   lastLive.set(sessionId, now);
   if (lastLive.size > 5000) lastLive.clear();
   const q = body?.question && typeof body.question === 'object' ? { index: body.question.index, total: body.question.total, label: String(body.question.label ?? '').slice(0, 200) } : undefined;
   const frame = typeof body?.frame === 'string' && body.frame.length <= 16000 ? body.frame : undefined;
   const r = await mysebFetch(`/sessions/${sessionId}/live`, { method: 'POST', body: { question: q, camera: body?.camera, frame } });
-  lastLive.set(`${sessionId}:faces`, r.faces ? 1 : 0);
-  return { faces: !!r.faces };
+  const answer = { faces: !!r.faces, live: !!r.live, sound: !!r.sound };
+  lastAnswer.set(sessionId, answer);
+  if (lastAnswer.size > 5000) lastAnswer.clear();
+  return answer;
+}
+
+/** Camera in the live room: off, small pictures, or live video; and whether the lecturer may listen. */
+export async function setLiveMode(load: TargetLoader, mode: 'off' | 'pictures' | 'live', sound: boolean) {
+  const examId = await ensureMysebExam(await load());
+  return mysebFetch(`/exams/${examId}`, { method: 'PATCH', body: { liveMode: mode, liveSound: mode === 'live' && sound } });
+}
+
+/* ---- live video: only the short set-up messages pass through here; the video goes student -> lecturer directly ---- */
+/** The network helper servers WebRTC needs. TURN passwords are short-lived (coturn `use-auth-secret`), never fixed. */
+export function iceServers() {
+  const stun = (process.env.MYSEB_STUN_URLS || 'stun:stun.l.google.com:19302').split(',').map((x) => x.trim()).filter(Boolean);
+  const list: Array<{ urls: string[]; username?: string; credential?: string }> = [{ urls: stun }];
+  const turn = (process.env.MYSEB_TURN_URLS || '').split(',').map((x) => x.trim()).filter(Boolean);
+  const secret = process.env.MYSEB_TURN_SECRET;
+  if (turn.length && secret) {
+    const username = `${Math.floor(Date.now() / 1000) + 6 * 3600}:myseb`;
+    list.push({ urls: turn, username, credential: createHmac('sha1', secret).update(username).digest('base64') });
+  }
+  return { iceServers: list, turn: turn.length > 0 && !!secret };
+}
+
+export const studentSignalPull = (sid: string, after: number, signal: AbortSignal) =>
+  mysebFetch(`/sessions/${sid}/from-lecturer?after=${Math.max(0, after | 0)}&wait=20000`, { timeoutMs: 26000, signal });
+export const studentSignalPush = (sid: string, msg: unknown) => mysebFetch(`/sessions/${sid}/to-lecturer`, { method: 'POST', body: { msg } });
+
+/** Who is in the lecturer's room, remembered for a few seconds so ICE traffic does not ask the database every time. */
+const roomCache = new Map<string, { at: number; sids: Set<string>; examId: string }>();
+async function roomOf(load: TargetLoader) {
+  const t = await load();
+  if (!t.mysebExamId) throw new MySebError('Nobody has joined yet.', 404, 'NOT_FOUND');
+  const hit = roomCache.get(t.mysebExamId);
+  if (hit && Date.now() - hit.at < 8000) return hit;
+  const m = await mysebFetch(`/exams/${t.mysebExamId}/monitor`);
+  const r = { at: Date.now(), sids: new Set<string>(m.students.map((x: any) => x.id)), examId: t.mysebExamId };
+  roomCache.set(t.mysebExamId, r);
+  if (roomCache.size > 500) roomCache.clear();
+  return r;
+}
+export async function lecturerSignalPull(load: TargetLoader, after: number, signal: AbortSignal) {
+  const room = await roomOf(load);
+  return mysebFetch(`/exams/${room.examId}/from-students?after=${Math.max(0, after | 0)}&wait=20000`, { timeoutMs: 26000, signal });
+}
+export async function lecturerSignalPush(load: TargetLoader, sid: string, msg: unknown) {
+  if (!SID.test(sid)) throw new MySebError('Bad session id.', 400);
+  let room = await roomOf(load);
+  if (!room.sids.has(sid)) { roomCache.delete(room.examId); room = await roomOf(load); }   // a student who just joined
+  if (!room.sids.has(sid)) throw new MySebError('That student is not in this test.', 404, 'NOT_FOUND');
+  return mysebFetch(`/sessions/${sid}/to-student`, { method: 'POST', body: { msg } });
 }
 
 export async function violations(load: TargetLoader, sid: string) {

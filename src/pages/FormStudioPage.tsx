@@ -66,6 +66,37 @@ function SummaryCard({ s }: { s: any }) {
   );
 }
 
+/** After "Upload a file, get a quiz": what to check before publishing. Shown until the lecturer dismisses it. */
+export function ImportReview({ schema, formId }: { schema: any; formId: string }) {
+  const key = `bwenge:import-review:${formId}`;
+  const [hidden, setHidden] = useState(() => { try { return localStorage.getItem(key) === '1'; } catch { return false; } });
+  const r = schema?.importReview;
+  if (!r || hidden) return null;
+  const fields: any[] = Array.isArray(schema.fields) ? schema.fields : [];
+  const label = (id: string) => { const i = fields.findIndex((f) => String(f.id) === id); return i >= 0 ? `Question ${i - 1}: ${String(fields[i].label).slice(0, 70)}` : id; };
+  const checks = (r.flags ?? []).filter((f: any) => f.level === 'check');
+  const infos = (r.flags ?? []).filter((f: any) => f.level === 'info');
+  return (
+    <section role="region" aria-label="Review before publishing" className="mx-auto mt-3 max-w-3xl rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="font-bold">Made from {r.fileName}: please review before you publish</p>
+          <p className="mt-1 text-[13px]">{r.made} question{r.made === 1 ? '' : 's'} written{r.made < r.requested ? ` (you asked for ${r.requested})` : ''}. The quiz is closed: nobody can answer until you publish.{r.truncated ? ' Your file was long, so only the first part was used.' : ''}</p>
+        </div>
+        <button type="button" className="shrink-0 rounded-lg border border-amber-400 px-3 py-1.5 text-xs font-semibold hover:bg-amber-100" onClick={() => { try { localStorage.setItem(key, '1'); } catch { /* private mode */ } setHidden(true); }}>Dismiss</button>
+      </div>
+      {checks.length > 0 ? (
+        <>
+          <p className="mt-3 text-[13px] font-semibold">Check these {checks.length}:</p>
+          <ul className="mt-1 list-disc space-y-1 pl-5 text-[13px]">{checks.map((f: any, i: number) => <li key={i}><b>{label(f.questionId)}</b>: {f.message}</li>)}</ul>
+        </>
+      ) : <p className="mt-3 text-[13px]">Every question was found in your file. Still read them once: the AI can be wrong.</p>}
+      {infos.length > 0 && <p className="mt-2 text-[12px] text-amber-900">{infos.length} long-answer question{infos.length === 1 ? '' : 's'}: you mark {infos.length === 1 ? 'it' : 'them'} yourself.</p>}
+      {r.dropped?.length > 0 && <p className="mt-2 text-[12px] text-amber-900">{r.dropped.length} draft question{r.dropped.length === 1 ? ' was' : 's were'} left out because {r.dropped.length === 1 ? 'it was' : 'they were'} broken or repeated.</p>}
+    </section>
+  );
+}
+
 export default function FormStudioPage({ formId, onBack }: { formId: string; onBack: () => void }) {
   const [data, setData] = useState<Studio | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -155,6 +186,7 @@ export default function FormStudioPage({ formId, onBack }: { formId: string; onB
         </nav>
       </header>
 
+      {tab === 'build' && <ImportReview schema={data.form.schema} formId={data.form.id} />}
       {tab === 'build' ? (
         <FormBuilder key={`${data.form.id}:${rev}`} initialSchema={data.form.schema} onChange={onChange} onPublish={onPublish}
           onUpdateSettings={async ({ acceptingResponses }) => { await setOpen(acceptingResponses); }}

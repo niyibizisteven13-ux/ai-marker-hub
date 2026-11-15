@@ -269,3 +269,82 @@ test('live room: question + camera picture only when the lecturer asked, memory 
   assert.equal(una.live, null);
   assert.equal((await live(s1.sessionId, { camera: 'on', frame: JPEG })).json.status, 'ENDED');
 });
+
+test('live video set-up messages: long poll, order, validation, wrong exam, and cleanup (the video itself never passes here)', async () => {
+  const ex = (await call('/api/exams', { method: 'POST', headers: T, body: { title: 'RTC' } })).json;
+  const c = (await call(`/api/exams/${ex.id}/generate-code`, { method: 'POST', headers: T })).json;
+  const s = (await call('/api/verify-code', { method: 'POST', body: { code: c.code, studentName: 'Rita', deviceId: 'dev-rita-123', clientType: 'desktop' } })).json;
+  const post = (p, msg, headers = T) => call(p, { method: 'POST', headers, body: { msg } });
+  assert.equal((await call('/api/exams/' + ex.id + '/from-students', {})).status, 401, 'service key required');
+
+  // lecturer -> student: a waiting student is woken the moment a message arrives
+  const waiting = call(`/api/sessions/${s.sessionId}/from-lecturer?after=0&wait=5000`, { headers: T });
+  await new Promise((r) => setTimeout(r, 150));
+  await post(`/api/sessions/${s.sessionId}/to-student`, { type: 'watch', viewer: 'v-1', audio: false });
+  const got = (await waiting).json;
+  assert.equal(got.msgs.length, 1); assert.deepEqual([got.msgs[0].type, got.msgs[0].viewer], ['watch', 'v-1']); assert.equal(got.next, got.msgs[0].n);
+  // nothing new -> an empty long poll returns after its wait, with the cursor kept
+  const t0 = Date.now(); const empty = (await call(`/api/sessions/${s.sessionId}/from-lecturer?after=${got.next}&wait=400`, { headers: T })).json;
+  assert.equal(empty.msgs.length, 0); assert.ok(Date.now() - t0 >= 350); assert.equal(empty.next, got.next);
+
+  // student -> lecturer: the lecturer's one mailbox for the exam carries which student sent it
+  await post(`/api/sessions/${s.sessionId}/to-lecturer`, { type: 'offer', viewer: 'v-1', sdp: 'v=0\r\no=- 1 2 IN IP4 127.0.0.1' });
+  await post(`/api/sessions/${s.sessionId}/to-lecturer`, { type: 'ice', viewer: 'v-1', candidate: { candidate: 'candidate:1 1 udp 1 1.2.3.4 5 typ host', sdpMid: '0', sdpMLineIndex: 0 } });
+  const inbox = (await call(`/api/exams/${ex.id}/from-students?after=0&wait=0`, { headers: T })).json;
+  assert.deepEqual(inbox.msgs.map((m) => [m.type, m.sid]), [['offer', s.sessionId], ['ice', s.sessionId]]);
+  assert.equal((await call(`/api/exams/${ex.id}/from-students?after=${inbox.next}&wait=0`, { headers: T })).json.msgs.length, 0, 'the cursor means each message is read once');
+
+  // validation: unknown type, wrong direction, oversize sdp, script in ids
+  assert.equal((await post(`/api/sessions/${s.sessionId}/to-student`, { type: 'rm -rf' })).status, 400);
+  assert.equal((await post(`/api/sessions/${s.sessionId}/to-student`, { type: 'offer' })).status, 400, 'a lecturer cannot send an offer');
+  assert.equal((await post(`/api/sessions/${s.sessionId}/to-lecturer`, { type: 'watch' })).status, 400, 'a student cannot start a watch');
+  assert.equal((await post(`/api/sessions/${s.sessionId}/to-lecturer`, { type: 'offer', sdp: 'x'.repeat(20000) })).status, 400);
+  await post(`/api/sessions/${s.sessionId}/to-student`, { type: 'watch', viewer: '<img onerror=1>' });
+  assert.equal((await call(`/api/sessions/${s.sessionId}/from-lecturer?after=${got.next}&wait=0`, { headers: T })).json.msgs[0].viewer, 'imgonerror1');
+  assert.equal((await post(`/api/sessions/${randomUUIDish()}/to-student`, { type: 'watch' })).status, 404);
+
+  // the room settings: live mode + sound, and the report tells the page what to do
+  await call(`/api/exams/${ex.id}`, { method: 'PATCH', headers: T, body: { liveMode: 'live', liveSound: true } });
+  const rep = await call(`/api/sessions/${s.sessionId}/live`, { method: 'POST', headers: T, body: { camera: 'on' } });
+  assert.deepEqual([rep.json.faces, rep.json.live, rep.json.sound], [true, true, true]);
+  await call(`/api/exams/${ex.id}`, { method: 'PATCH', headers: T, body: { liveMode: 'pictures' } });
+  const rep2 = await call(`/api/sessions/${s.sessionId}/live`, { method: 'POST', headers: T, body: { camera: 'on' } });
+  assert.deepEqual([rep2.json.faces, rep2.json.live, rep2.json.sound], [true, false, false], 'sound only exists in live mode');
+  const m = (await call(`/api/exams/${ex.id}/monitor`, { headers: T })).json.exam; assert.deepEqual([m.live_mode, m.live_sound], ['pictures', true]);
+
+  // ending the exam clears every mailbox
+  await call(`/api/exams/${ex.id}/end`, { method: 'POST', headers: T });
+  assert.equal((await call(`/api/sessions/${s.sessionId}/from-lecturer?after=0&wait=0`, { headers: T })).json.msgs.length, 0);
+});
+function randomUUIDish() { return '00000000-0000-4000-8000-000000000000'; }
+
+test('a big room asks for camera pictures only for the tiles on screen', async () => {
+  const ex = (await call('/api/exams', { method: 'POST', headers: T, body: { title: 'Frames' } })).json;
+  const other = (await call('/api/exams', { method: 'POST', headers: T, body: { title: 'Other room' } })).json;
+  const mkStudent = async (examId, name, dev) => { const c = (await call(`/api/exams/${examId}/generate-code`, { method: 'POST', headers: T })).json; return (await call('/api/verify-code', { method: 'POST', body: { code: c.code, studentName: name, deviceId: dev, clientType: 'desktop' } })).json; };
+  const a = await mkStudent(ex.id, 'Fay', 'dev-fay-12345'); const b = await mkStudent(ex.id, 'Gus', 'dev-gus-12345'); const z = await mkStudent(other.id, 'Zed', 'dev-zed-12345');
+  await call(`/api/exams/${ex.id}`, { method: 'PATCH', headers: T, body: { liveMode: 'pictures' } });
+  await call(`/api/exams/${other.id}`, { method: 'PATCH', headers: T, body: { liveMode: 'pictures' } });
+  const JPEG = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==';
+  for (const s of [a, b, z]) await call(`/api/sessions/${s.sessionId}/live`, { method: 'POST', headers: T, body: { camera: 'on', frame: JPEG } });
+  const slim = (await call(`/api/exams/${ex.id}/monitor?frames=0`, { headers: T })).json;
+  assert.ok(slim.students.every((s) => s.live.frame === null), 'the room poll carries no pictures');
+  assert.equal(slim.students.length, 2);
+  const one = (await call(`/api/exams/${ex.id}/frames?ids=${a.sessionId}`, { headers: T })).json.frames;
+  assert.deepEqual(Object.keys(one), [a.sessionId]); assert.equal(one[a.sessionId].frame, JPEG);
+  const foreign = (await call(`/api/exams/${ex.id}/frames?ids=${z.sessionId},not-a-uuid`, { headers: T })).json.frames;
+  assert.deepEqual(foreign, {}, 'a student of another exam is never returned');
+  await call(`/api/exams/${ex.id}`, { method: 'PATCH', headers: T, body: { liveMode: 'off' } });
+  assert.deepEqual((await call(`/api/exams/${ex.id}/frames?ids=${a.sessionId}`, { headers: T })).json.frames, {}, 'nothing when the camera is off');
+});
+
+test('limits: the service key is not rate limited (one school, thousands of students), a guessed exam secret is', async () => {
+  const ex = (await call('/api/exams', { method: 'POST', headers: T, body: { title: 'Limits' } })).json;
+  const svc = { 'X-MySEB-Service-Key': 'tkey', 'Content-Type': 'application/json' };
+  const body = { key: 'nope', client: 'desktop', device: 'd', userAgent: 'MySEB/1', examId: ex.id };
+  const codes = []; for (let i = 0; i < 700; i++) codes.push((await fetch(`${base}/api/gate`, { method: 'POST', headers: svc, body: JSON.stringify(body) })).status);
+  assert.ok(codes.every((c) => c === 200), 'service key: never limited');
+  const guess = []; for (let i = 0; i < 620; i++) guess.push((await fetch(`${base}/api/gate`, { method: 'POST', headers: { 'X-MySEB-Exam-Secret': 'mseb_guess' + i, 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'x' }) })).status);
+  const allowed = guess.filter((c) => c !== 429).length;   // earlier tests already used a few of the 600
+  assert.ok(allowed >= 570 && allowed <= 600, `allowed ${allowed}`); assert.ok(guess.slice(-10).every((c) => c === 429), 'secret guessing is stopped after 600 a minute');
+});

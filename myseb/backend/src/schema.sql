@@ -58,3 +58,8 @@ CREATE INDEX IF NOT EXISTS violations_session_idx ON violations(session_id, crea
 
 -- Live room: the lecturer may ask for small camera pictures (kept in memory only, never in the database).
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS live_faces boolean NOT NULL DEFAULT false;
+
+-- Camera in the live room: off, small pictures every 10 s, or live video (and optionally sound the lecturer can listen to).
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS live_mode text NOT NULL DEFAULT 'off';
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS live_sound boolean NOT NULL DEFAULT false;
+UPDATE exams SET live_mode = 'pictures' WHERE live_faces AND live_mode = 'off';

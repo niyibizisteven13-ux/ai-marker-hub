@@ -14,7 +14,13 @@ import { LearnError } from './learning/practice.js';
 export interface GradebookItem { kind: 'task' | 'quiz'; id: string }
 interface GradebookRecord extends OwnedRecord { classId: string; items: GradebookItem[] }
 
-export interface Cell { percent: number | null; label: string; state: 'marked' | 'submitted' | 'missing' }
+export interface Cell {
+  percent: number | null; label: string; state: 'marked' | 'submitted' | 'missing';
+  /** The lecturer has let the student see this mark (a task's results released, a quiz that shows scores). Transcripts show only these. */
+  released?: boolean;
+  /** The student's private page with corrections (tasks), once released. */
+  link?: string;
+}
 export interface Gradebook {
   class: { id: string; name: string };
   columns: Array<{ key: string; kind: 'task' | 'quiz'; id: string; title: string; average: number | null; count: number }>;
@@ -79,7 +85,8 @@ export async function buildGradebook(ownerId: string, classId: string): Promise<
       for (const s of a.submissions as any[]) {
         const m = s.marking;
         const marked = m && (m.state === 'marked' || m.state === 'needs_review') && typeof m.percent === 'number';
-        row(s.studentName, s.studentId).cells[key] = marked ? { percent: round1(m.percent), label: `${m.total}/${m.maxTotal}`, state: 'marked' } : { percent: null, label: 'Handed in', state: 'submitted' };
+        const released = !!(marked && m.released);
+        row(s.studentName, s.studentId).cells[key] = marked ? { percent: round1(m.percent), label: `${m.total}/${m.maxTotal}`, state: 'marked', released, ...(released && s.resultLink ? { link: String(s.resultLink) } : {}) } : { percent: null, label: 'Handed in', state: 'submitted', released: false };
       }
       columns.push({ key, kind: 'task', id: item.id, title: a.title, average: null, count: 0 });
     } else {
@@ -98,7 +105,8 @@ export async function buildGradebook(ownerId: string, classId: string): Promise<
         if (!name) continue;
         const sid = idField ? String(data[String(idField.id)] ?? '').trim().slice(0, 40) || null : null;
         // The latest attempt counts (responses are in time order).
-        row(name, sid).cells[key] = { percent: round1(q.percent), label: `${q.score}/${q.maxScore}`, state: 'marked' };
+        // A quiz that hides scores from students (showScore off) is never released to a transcript either.
+        row(name, sid).cells[key] = { percent: round1(q.percent), label: `${q.score}/${q.maxScore}`, state: 'marked', released: hit.s.showScore !== false };
       }
       columns.push({ key, kind: 'quiz', id: item.id, title: String(hit.s.title || hit.f.title || 'Quiz'), average: null, count: 0 });
     }

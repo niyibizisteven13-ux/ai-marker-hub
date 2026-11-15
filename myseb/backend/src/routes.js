@@ -4,7 +4,7 @@ import { q } from './db.js';
 import { config, safeEqual } from './config.js';
 import { newCode, parseCode, codeHash, secretHash, tokenHash, newToken, newSecret, rateLimit } from './security.js';
 import { authSession, recordViolation, VIOLATION_TYPES } from './sessions.js';
-import { forgetAllLive, forgetLive, getLive, saveLive } from './live.js';
+import { cleanSignal, dropSignals, forgetAllLive, forgetLive, getLive, pullSignal, pushSignal, saveLive } from './live.js';
 
 export const api = express.Router();
 const wrap = (fn) => (req, res, next) => fn(req, res, next).catch(next);
@@ -53,7 +53,9 @@ api.patch('/exams/:id', requireTeacher, wrap(async (req, res) => {
   if (typeof b.requireMyseb === 'boolean') add('require_myseb', b.requireMyseb);
   if (typeof b.allowExtension === 'boolean') add('allow_extension', b.allowExtension);
   if (['record', 'pause', 'end'].includes(b.leaveAction)) add('leave_action', b.leaveAction);
-  if (typeof b.liveFaces === 'boolean') add('live_faces', b.liveFaces);
+  if (typeof b.liveFaces === 'boolean') { add('live_faces', b.liveFaces); add('live_mode', b.liveFaces ? 'pictures' : 'off'); }
+  if (['off', 'pictures', 'live'].includes(b.liveMode)) { add('live_mode', b.liveMode); add('live_faces', b.liveMode !== 'off'); }
+  if (typeof b.liveSound === 'boolean') add('live_sound', b.liveSound);
   if (!sets.length) return res.status(400).json({ error: 'nothing to change' });
   const { rows } = await q(`UPDATE exams SET ${sets.join(',')} WHERE id=$1 RETURNING *`, vals);
   rows[0] ? res.json(rows[0]) : res.status(404).json({ error: 'not found' });
@@ -90,12 +92,13 @@ api.post('/exams/:id/end', requireTeacher, wrap(async (req, res) => {
   await q(`UPDATE exam_codes SET expires_at=now(), revoked_at=now() WHERE exam_id=$1`, [req.params.id]);   // code expires when the exam ends
   const ended = await q(`UPDATE exam_sessions SET status='ENDED', ended_at=now(), end_reason='exam_ended' WHERE exam_id=$1 AND status<>'ENDED' RETURNING id`, [req.params.id]);
   forgetAllLive(ended.rows.map((r) => r.id));
+  dropSignals([`e:${req.params.id}`, ...ended.rows.map((r) => `s:${r.id}`)]);
   res.json({ ok: true });
 }));
 
 api.get('/exams/:id/monitor', requireTeacher, wrap(async (req, res) => {
   if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
-  const ex = (await q('SELECT id, title, status, live_faces, require_myseb, leave_action FROM exams WHERE id=$1', [req.params.id])).rows[0];
+  const ex = (await q('SELECT id, title, status, live_faces, live_mode, live_sound, require_myseb, leave_action FROM exams WHERE id=$1', [req.params.id])).rows[0];
   if (!ex) return res.status(404).json({ error: 'not found' });
   const { rows } = await q(
     `SELECT s.id, s.student_name, s.status, s.client_type, s.platform, s.violation_count, s.pause_reason, s.end_reason,
@@ -106,9 +109,22 @@ api.get('/exams/:id/monitor', requireTeacher, wrap(async (req, res) => {
   const students = rows.map((r) => {
     counts[r.status]++;
     const l = r.status === 'ENDED' ? null : getLive(r.id);
-    return { ...r, live: l ? { question: l.question, camera: l.camera, frame: ex.live_faces ? l.frame : null, frame_age: l.frameAt ? Math.round((Date.now() - l.frameAt) / 1000) : null } : null };
+    const withFrames = req.query.frames !== '0';   // a big room asks for pictures only for the tiles on screen (see /frames)
+    return { ...r, live: l ? { question: l.question, camera: l.camera, frame: withFrames && ex.live_faces ? l.frame : null, frame_age: l.frameAt ? Math.round((Date.now() - l.frameAt) / 1000) : null } : null };
   });
-  res.json({ exam: { id: ex.id, title: ex.title, status: ex.status, live_faces: ex.live_faces, leave_action: ex.leave_action }, counts, students });
+  res.json({ exam: { id: ex.id, title: ex.title, status: ex.status, live_faces: ex.live_faces, live_mode: ex.live_mode, live_sound: ex.live_sound, leave_action: ex.leave_action }, counts, students });
+}));
+
+/** Camera pictures for some students only (the tiles on screen), so a big room does not send every picture every few seconds. */
+api.get('/exams/:id/frames', requireTeacher, wrap(async (req, res) => {
+  if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
+  const ids = String(req.query.ids || '').split(',').filter(isUuid).slice(0, 60);
+  const ex = (await q('SELECT live_faces FROM exams WHERE id=$1', [req.params.id])).rows[0];
+  if (!ex || !ex.live_faces || !ids.length) return res.json({ frames: {} });
+  const mine = (await q('SELECT id FROM exam_sessions WHERE exam_id=$1 AND id = ANY($2::uuid[])', [req.params.id, ids])).rows.map((r) => r.id);
+  const frames = {};
+  for (const id of mine) { const l = getLive(id); if (l?.frame) frames[id] = { frame: l.frame, age: l.frameAt ? Math.round((Date.now() - l.frameAt) / 1000) : null }; }
+  res.json({ frames });
 }));
 
 /** Pause everyone in the room at once (or let everyone back in). */
@@ -133,6 +149,7 @@ api.post('/sessions/:id/end', requireTeacher, wrap(async (req, res) => {
   if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
   await q(`UPDATE exam_sessions SET status='ENDED', ended_at=now(), end_reason='teacher' WHERE id=$1 AND status<>'ENDED'`, [req.params.id]);
   forgetLive(req.params.id);
+  dropSignals([`s:${req.params.id}`]);
   res.json({ ok: true });
 }));
 api.post('/sessions/:id/resume', requireTeacher, wrap(async (req, res) => {
@@ -142,13 +159,48 @@ api.post('/sessions/:id/resume', requireTeacher, wrap(async (req, res) => {
 }));
 
 /** The exam page (via bwenge) reports the question the student is on and, if the lecturer asked, a small camera picture. */
-api.post('/sessions/:id/live', requireTeacher, rateLimit({ windowMs: 60_000, max: 20_000, keyFn: () => 'live' }), wrap(async (req, res) => {
+// No limit here: only bwenge (the service key) can call it, and bwenge already allows one report per student every 3 seconds.
+api.post('/sessions/:id/live', requireTeacher, wrap(async (req, res) => {
   if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
-  const { rows } = await q(`SELECT s.status, e.live_faces FROM exam_sessions s JOIN exams e ON e.id=s.exam_id WHERE s.id=$1`, [req.params.id]);
+  const { rows } = await q(`SELECT s.status, s.exam_id, e.live_faces, e.live_mode, e.live_sound FROM exam_sessions s JOIN exams e ON e.id=s.exam_id WHERE s.id=$1`, [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: 'not found' });
-  if (rows[0].status === 'ENDED') return res.json({ faces: false, status: 'ENDED' });
+  if (rows[0].status === 'ENDED') return res.json({ faces: false, live: false, sound: false, status: 'ENDED' });
   saveLive(req.params.id, req.body || {}, rows[0].live_faces);   // pictures are dropped on the spot when the lecturer has not asked for them
-  res.json({ faces: rows[0].live_faces, status: rows[0].status });
+  res.json({ faces: rows[0].live_faces, live: rows[0].live_mode === 'live', sound: rows[0].live_mode === 'live' && rows[0].live_sound, status: rows[0].status });
+}));
+
+/* Live video set-up (WebRTC). Only short messages pass here, in memory. The video goes student -> lecturer directly. */
+const examOfSession = new Map();
+async function examOf(sid) {
+  const hit = examOfSession.get(sid);
+  if (hit) return hit;
+  const r = (await q('SELECT exam_id FROM exam_sessions WHERE id=$1', [sid])).rows[0]?.exam_id ?? null;
+  if (r) { examOfSession.set(sid, r); if (examOfSession.size > 20_000) examOfSession.clear(); }
+  return r;
+}
+const waitOf = (req) => Math.max(0, Math.min(25_000, Number(req.query.wait) || 0));
+const afterOf = (req) => Math.max(0, parseInt(req.query.after, 10) || 0);
+const abortOnClose = (req) => { const ac = new AbortController(); req.on('close', () => ac.abort()); return ac.signal; };
+
+api.post('/sessions/:id/to-student', requireTeacher, wrap(async (req, res) => {
+  if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
+  const msg = cleanSignal(req.body?.msg); if (!msg || !['watch', 'unwatch', 'listen', 'answer', 'ice'].includes(msg.type)) return res.status(400).json({ error: 'bad message' });
+  if (!(await examOf(req.params.id))) return res.status(404).json({ error: 'not found' });
+  pushSignal('s:' + req.params.id, msg); res.json({ ok: true });
+}));
+api.get('/sessions/:id/from-lecturer', requireTeacher, wrap(async (req, res) => {
+  if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
+  res.json(await pullSignal('s:' + req.params.id, afterOf(req), waitOf(req), abortOnClose(req)));
+}));
+api.post('/sessions/:id/to-lecturer', requireTeacher, wrap(async (req, res) => {
+  if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
+  const msg = cleanSignal(req.body?.msg); if (!msg || !['offer', 'ice', 'state'].includes(msg.type)) return res.status(400).json({ error: 'bad message' });
+  const exam = await examOf(req.params.id); if (!exam) return res.status(404).json({ error: 'not found' });
+  pushSignal('e:' + exam, { ...msg, sid: req.params.id }); res.json({ ok: true });
+}));
+api.get('/exams/:id/from-students', requireTeacher, wrap(async (req, res) => {
+  if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
+  res.json(await pullSignal('e:' + req.params.id, afterOf(req), waitOf(req), abortOnClose(req)));
 }));
 
 /* ---------------------------------------------------------------- student apps */
@@ -242,7 +294,10 @@ api.post('/finish', wrap(async (req, res) => {
  *   X-MySEB-Service-Key: the server-to-server key (same as TEACHER_KEY) + body.examId  -> any session of that exam
  *   X-MySEB-Exam-Secret: the secret generate-code showed the teacher                    -> sessions opened with that code
  */
-api.post('/gate', rateLimit({ windowMs: 60_000, max: 6000 }), wrap(async (req, res) => {
+// bwenge calls this for every student request, all from one address: no limit for the service key. The unauthenticated way in
+// (a guessed exam secret) is limited per address so it cannot be brute-forced.
+const gateSecretLimit = rateLimit({ windowMs: 60_000, max: 600 });
+api.post('/gate', (req, res, next) => (req.get('x-myseb-service-key') ? next() : gateSecretLimit(req, res, next)), wrap(async (req, res) => {
   const secret = req.get('x-myseb-exam-secret');
   const service = req.get('x-myseb-service-key');
   const { key, client, device, userAgent, examId } = req.body || {};

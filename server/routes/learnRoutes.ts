@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { agentTarget } from '../services/AiService.js';
 import { LearnError, answerItem, archiveClass, classDashboard, createClass, joinClass, leaveClass, listSkills, myClasses, nextItem, revealHint, type AiTarget } from '../services/learning/practice.js';
 import { buildGradebook, gradebookWorkbook, setGradebookItems, type GradebookItem } from '../services/gradebook.js';
+import { regenerateLink, transcriptLinks } from '../services/transcripts.js';
 
 /**
  * Adaptive practice and classes (mounted at /api/learn behind requireAuth).
@@ -63,6 +64,13 @@ export function createLearnRouter(ai: () => AiTarget = () => { const a = agentTa
       res.end(data);
     } catch (e) { fail(res, e); }
   });
+  // Student transcripts: one private link per student, showing only marks the lecturer has released (owner only).
+  const baseUrl = (req: Request) => (process.env.APP_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+  router.get('/classes/:id/transcripts', run(async (req) => ({ students: await transcriptLinks(userIdOf(req), String(req.params.id), baseUrl(req)) })));
+  router.post('/classes/:id/transcripts/regenerate', run(async (req) => {
+    const b = z.object({ key: z.string().min(1).max(120) }).parse(req.body ?? {});
+    return regenerateLink(userIdOf(req), String(req.params.id), b.key, baseUrl(req));
+  }));
   router.get('/classes/:id/dashboard', run(async (req) => classDashboard(userIdOf(req), String(req.params.id))));
   return router;
 }

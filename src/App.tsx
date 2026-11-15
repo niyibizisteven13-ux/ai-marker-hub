@@ -84,6 +84,7 @@ const AssignmentsPage = React.lazy(() => import('./components/AssignmentsPage'))
 const FormsPage = React.lazy(() => import('./components/FormsPage'));
 const AssignmentSubmitPage = React.lazy(() => import('./pages/AssignmentSubmitPage'));
 const MySebRequired = React.lazy(() => import('./components/MySebRequired'));
+const TranscriptPage = React.lazy(() => import('./pages/TranscriptPage'));
 const MySebLiveReporter = React.lazy(() => import('./components/MySebLiveReporter'));
 const LiveRoom = React.lazy(() => import('./components/LiveRoom'));
 const ExamRunner = React.lazy(() => import('./components/ExamRunner'));
@@ -1469,6 +1470,9 @@ export default function App() {
   if (handIn) {
     return <Suspense fallback={null}><AssignmentSubmitPage token={handIn[1]} /></Suspense>;
   }
+  // A student's private transcript: no account, the link is the key.
+  const transcriptLink = /^\/t\/([\w-]{20,40})\/?$/.exec(window.location.pathname);
+  if (transcriptLink) return <Suspense fallback={null}><TranscriptPage token={transcriptLink[1]} /></Suspense>;
   // Where students get MySEB (apps + Chrome extension).
   if (window.location.pathname === '/myseb') {
     return <div className="min-h-[100dvh] bg-slate-50 px-4"><Suspense fallback={null}><MySebRequired page /></Suspense></div>;
