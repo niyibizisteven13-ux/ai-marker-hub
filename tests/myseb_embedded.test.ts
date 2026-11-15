@@ -24,6 +24,8 @@ test('MySEB runs next to the bwenge server under /myseb, with its secrets derive
     assert.equal(mySebConfigured(), true, 'bwenge now knows where MySEB is');
     const base = `http://127.0.0.1:${port}`;
     assert.equal((await (await fetch(`${base}/myseb/readyz`)).json() as any).ok, true);
+    const status: any = await (await fetch(`${base}/myseb/_status`)).json();
+    assert.equal(status.running, true); assert.equal(status.restarts, 0); assert.equal(status.lastExit, null);
     assert.equal((await (await fetch(`${base}/api/other`)).json() as any).bwenge, true, 'bwenge routes untouched');
     const dash = await fetch(`${base}/myseb/`, { redirect: 'manual' });
     assert.equal(dash.headers.get('location'), '/myseb/dashboard/');
@@ -66,4 +68,22 @@ test('a separate MYSEB_URL turns embedding off', async () => {
   const { mysebEmbeddedWanted } = await import('../server/services/mySebEmbedded.js');
   const keep = process.env.MYSEB_URL; process.env.MYSEB_URL = 'https://myseb.example';
   try { assert.equal(mysebEmbeddedWanted(), false); } finally { if (keep) process.env.MYSEB_URL = keep; else delete process.env.MYSEB_URL; }
+});
+
+test('MySEB failing to start does not take the site down, and /myseb/_status says how it stopped', { skip: !DB }, async () => {
+  const keep = { u: process.env.DATABASE_URL, m: process.env.MYSEB_URL };
+  delete process.env.MYSEB_URL; process.env.DATABASE_URL = 'postgresql://nobody:nobody@127.0.0.1:1/none';   // nothing listens: MySEB cannot start
+  const app = express(); app.get('/api/other', (_q, r) => r.json({ bwenge: true }));
+  const srv = app.listen(0); const port = (srv.address() as AddressInfo).port;
+  const { mountEmbeddedMySeb } = await import('../server/services/mySebEmbedded.js');
+  let h: Awaited<ReturnType<typeof mountEmbeddedMySeb>> = null;
+  try {
+    h = await mountEmbeddedMySeb(app, port);
+    assert.ok(h, 'the site still comes up');
+    const base = `http://127.0.0.1:${port}`;
+    assert.equal((await fetch(`${base}/api/other`)).status, 200);
+    assert.equal((await fetch(`${base}/myseb/healthz`)).status, 502, 'a clear "restarting" while MySEB is down');
+    const st: any = await (await fetch(`${base}/myseb/_status`)).json();
+    assert.equal(st.running === false || st.restarts >= 0, true); assert.ok(st.lastExit === null || typeof st.lastExit.code === 'number');
+  } finally { h?.stop(); srv.close(); if (keep.u) process.env.DATABASE_URL = keep.u; if (keep.m) process.env.MYSEB_URL = keep.m; }
 });

@@ -46,21 +46,28 @@ export async function mountEmbeddedMySeb(app: Express, sitePort: number): Promis
 
   const script = path.join(process.cwd(), 'myseb/backend/src/server.js');
   let child: ChildProcess | null = null, stopping = false, restarts = 0;
+  const state: { running: boolean; restarts: number; lastExit: { code: number | null; signal: string | null; at: string } | null } = { running: false, restarts: 0, lastExit: null };
   const start = () => {
     child = spawn(process.execPath, [script], { env: childEnv, stdio: ['ignore', 'inherit', 'inherit'] });
-    child.on('exit', (code) => {
+    state.running = true;
+    child.on('exit', (code, signal) => {
+      state.running = false; state.lastExit = { code, signal, at: new Date().toISOString() };
       if (stopping) return;
-      console.error(`[MySEB] exited (${code}); restarting`);
-      if (++restarts <= 20) setTimeout(start, Math.min(1000 * restarts, 10_000)).unref();
+      console.error(`[MySEB] exited (code ${code}, signal ${signal}); restarting`);
+      state.restarts = ++restarts;
+      setTimeout(start, Math.min(1000 * restarts, 30_000)).unref();   // never gives up: a crash loop backs off to one try every 30 s
     });
   };
   start();
   const stop = () => { stopping = true; child?.kill('SIGTERM'); };
   process.once('exit', stop); process.once('SIGTERM', stop); process.once('SIGINT', stop);
-  if (!(await ready(port))) { stop(); throw new Error('MySEB did not become ready'); }
+  // A slow or failing start is not fatal: the website keeps working, /myseb answers 502 until MySEB is up, and the restart loop keeps trying.
+  if (!(await ready(port))) console.error('[MySEB] is not ready after 20 s; the site continues and /myseb/_status shows how it last stopped');
 
   // Everything under /myseb goes to the MySEB process. Streams straight through (long waits for signalling included).
   const agent = new http.Agent({ keepAlive: true, maxSockets: 2000 });
+  // /myseb/_status is answered here (not by MySEB), so it still works while MySEB is down: it says whether it runs and how it last stopped.
+  app.get('/myseb/_status', (_req: Request, res: Response) => { res.set('Cache-Control', 'no-store').json(state); });
   app.use('/myseb', (req: Request, res: Response) => {
     const headers = { ...req.headers, host: req.headers.host ?? '', 'x-forwarded-for': req.ip || req.socket.remoteAddress || '' } as http.OutgoingHttpHeaders;
     const up = http.request({ host: '127.0.0.1', port, method: req.method, path: req.url || '/', headers, agent }, (r) => { res.writeHead(r.statusCode || 502, r.headers); r.pipe(res); });
