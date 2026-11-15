@@ -11,6 +11,12 @@ test('MySEB runs next to the bwenge server under /myseb, with its secrets derive
   process.env.DATABASE_URL = DB; process.env.JWT_SECRET = 'test-secret-for-embedding'; process.env.APP_URL = 'https://www.bwenge.space';
   const { mountEmbeddedMySeb } = await import('../server/services/mySebEmbedded.js');
   const { mySebConfigured, generateCode } = await import('../server/services/mySeb.js');
+  // The child process inherits these fixtures. Never follow a real installer download in CI.
+  const downloadKeys = ['MYSEB_DL_ANDROID', 'MYSEB_DL_WINDOWS', 'MYSEB_DL_IOS'] as const;
+  const previousDownloads = Object.fromEntries(downloadKeys.map(k => [k, process.env[k]]));
+  process.env.MYSEB_DL_ANDROID = 'https://downloads.example.test/MySEB.apk';
+  process.env.MYSEB_DL_WINDOWS = 'https://downloads.example.test/MySEB-win.exe';
+  delete process.env.MYSEB_DL_IOS;
   const app = express(); app.get('/api/other', (_q, r) => r.json({ bwenge: true }));
   const srv = app.listen(0); const port = (srv.address() as AddressInfo).port;
   try {
@@ -22,17 +28,39 @@ test('MySEB runs next to the bwenge server under /myseb, with its secrets derive
     const dash = await fetch(`${base}/myseb/`, { redirect: 'manual' });
     assert.equal(dash.headers.get('location'), '/myseb/dashboard/');
     assert.equal((await fetch(`${base}/myseb/dashboard/`)).status, 200);
-    const ua = (u: string) => fetch(`${base}/myseb/download`, { headers: { 'User-Agent': u } }).then((r) => r.text());
-    const phone = await ua('Mozilla/5.0 (Linux; Android 14; Pixel) Chrome/120 Mobile');
-    assert.ok(phone.indexOf('Download for Android phone') < phone.indexOf('Download for Windows laptop'), 'a phone sees its own download first');
-    assert.match(phone, /releases\/latest\/download\/MySEB\.apk/);
-    assert.match(await ua('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120'), /MySEB-win\.exe/);
-    assert.match(await ua('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)'), /not supported yet/);
+    const ua = (u: string, query = '') => fetch(`${base}/myseb/download${query}`, {
+      headers: { 'User-Agent': u }, redirect: 'manual',
+    });
+    const android = 'Mozilla/5.0 (Linux; Android 14; Pixel) Chrome/120 Mobile';
+    const phone = await ua(android);
+    assert.equal(phone.status, 302, 'Android starts a direct download');
+    assert.equal(phone.headers.get('location'), process.env.MYSEB_DL_ANDROID);
+    assert.equal(phone.headers.get('cache-control'), 'no-store', 'device redirects must not be cached across visitors');
+    const windows = await ua('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120');
+    assert.equal(windows.status, 302);
+    assert.equal(windows.headers.get('location'), process.env.MYSEB_DL_WINDOWS);
+    const iphone = await ua('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)');
+    assert.equal(iphone.status, 200);
+    assert.match(await iphone.text(), /iPhone and iPad app is not available yet/);
+    const chooser = await ua(android, '?choose=1');
+    assert.equal(chooser.status, 200);
+    const html = await chooser.text();
+    assert.match(html, /href="\?platform=android"/);
+    assert.match(html, /href="\?platform=windows"/);
+    const manual = await ua(android, '?platform=windows');
+    assert.equal(manual.status, 302, 'explicit platform selection survives the embedded proxy');
+    assert.equal(manual.headers.get('location'), process.env.MYSEB_DL_WINDOWS);
     const target = { kind: 'form', ref: 'f1', title: 'Embedded quiz', url: 'https://www.bwenge.space/forms/f1', mysebExamId: null as string | null, leaveAction: 'record', minutes: 10, saveExamId: async (id: string) => { target.mysebExamId = id; } };
     const code: any = await generateCode(async () => target as any);
     assert.match(String(code.code ?? code.display), /\d/);
     assert.match(code.joinUrl, /^https:\/\/www\.bwenge\.space\/myseb\/join\/\d{6}$/);
-  } finally { srv.close(); handle?.stop(); }
+  } finally {
+    srv.close(); handle?.stop();
+    for (const key of downloadKeys) {
+      if (previousDownloads[key] === undefined) delete process.env[key];
+      else process.env[key] = previousDownloads[key];
+    }
+  }
 });
 test('a separate MYSEB_URL turns embedding off', async () => {
   const { mysebEmbeddedWanted } = await import('../server/services/mySebEmbedded.js');
