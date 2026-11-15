@@ -42,6 +42,7 @@ export async function mountEmbeddedMySeb(app: Express, sitePort: number): Promis
     PUBLIC_URL: e.PUBLIC_URL || `${site}/myseb`, TRUST_PROXY: '1', HOST: '127.0.0.1',
   };
   e.MYSEB_SERVICE_KEY ||= teacherKey;
+  e.MYSEB_WEB_PATH ||= '/myseb';                         // browsers sign in to MySEB on this same site, so the secure cookie is shared with the exam page
   e.MYSEB_URL = `http://127.0.0.1:${port}`;            // bwenge talks to MySEB directly, not through its own proxy
 
   const script = path.join(process.cwd(), 'myseb/backend/src/server.js');

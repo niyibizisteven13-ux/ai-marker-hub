@@ -33,7 +33,12 @@ Cost: the Apple Developer Program, about **US$99 per year**. There is no free wa
 
 For a permanent solution, submit the same build for the App Store (App Store Connect → the build → *Submit for review*). Apple reviews apps that lock a device carefully; explain it is an exam app for schools.
 
-## Without paying Apple
+## Free for everyone: the browser (works on any iPhone today)
+No app and no Apple account needed. In the live room open **Settings** and turn on **Browsers**. An iPhone student opens your test link in Safari and sees **No app? Use this browser**; they type their name and the exam code on that page and the test starts. The same works on any phone or laptop.
+It **cannot lock the device**: a web page cannot stop a student from switching apps. It *watches* instead, and reports to the live room: leaving the page or switching app (after 1.5 s), copy / paste, right-click, developer-tool and print shortcuts, leaving full screen (computers). Your "If a student leaves" rule applies (record, pause, pause then end, or end), you see the student in the live room marked *browser*, and you can pause or end them from there. On computers the camera and the whole-screen share work as in the app; an iPhone shows the camera.
+How it is kept honest: the key is a secure cookie the page cannot read, tied to the same browser; a cookie taken to another browser is refused and the lecturer is told. It is the lighter option, so use the app where students can.
+
+## Without paying Apple (an app on the iPhone)
 Only for a few students: send them the unsigned file from the workflow run (`myseb-iphone-unsigned` artifact) and have them install it with a free tool such as Sideloadly or AltStore using their own Apple ID. The app then **stops working after 7 days** and needs a computer to renew. It is not published on the download page on purpose.
 
 ## What the build does

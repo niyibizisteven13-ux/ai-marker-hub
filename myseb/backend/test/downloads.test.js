@@ -26,7 +26,10 @@ test('redirects devices directly; offers honest iOS fallback and manual chooser'
       assert.equal(r.headers.get('cache-control'), 'no-store');
     }
     let r = await originalFetch(base, { headers: { 'User-Agent': 'iPhone' } });
-    assert.match(await r.text(), /iPhone and iPad app is not available yet/);
+    const page = await r.text();
+    assert.match(page, /no MySEB app for iPhone or iPad yet/); assert.match(page, /in your browser/);
+    assert.doesNotMatch(page, /Download for/, 'an iPhone is not offered downloads that cannot work');
+    r = await originalFetch(base + '?choose=1', { headers: { 'User-Agent': 'iPhone' } }); assert.match(await r.text(), /Download for Windows/, 'but it can look at the list');
     process.env.MYSEB_DL_IOS = 'https://testflight.apple.com/join/example';
     r = await originalFetch(base + '?platform=ios', { redirect: 'manual' });
     assert.equal(r.headers.get('location'), process.env.MYSEB_DL_IOS);

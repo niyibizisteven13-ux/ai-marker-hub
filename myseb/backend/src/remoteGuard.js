@@ -16,16 +16,16 @@ const cache = new Map(); // a 4 s cache keeps a busy exam from hammering MySEB
 
 export function remoteMySebGuard({ mysebUrl, serviceKey = undefined, examIdFor = undefined, secretFor = undefined, bypass = undefined, soft = false, cacheMs = 4000 }) {
   const base = String(mysebUrl).replace(/\/$/, '');
-  const deny = (req, res, msg, code = 'MYSEB_REQUIRED') => ((req.get('accept') || '').includes('text/html')
+  const deny = (req, res, msg, code = 'MYSEB_REQUIRED', webAllowed = false) => ((req.get('accept') || '').includes('text/html')
     ? res.status(403).type('html').send(`<!doctype html><meta charset=utf-8><title>${msg}</title><body style="font-family:system-ui;text-align:center;padding:15vh 16px"><h1>${msg}</h1><p>Open this exam in the MySEB app.</p>`)
-    : res.status(403).json({ error: msg, code, mysebRequired: true }));
+    : res.status(403).json({ error: msg, code, mysebRequired: true, webAllowed }));
 
   async function check(req, ctx) {
     const header = req.get('x-myseb-key');
     const cookie = (req.get('cookie') || '').match(/(?:^|;\s*)myseb_s=([\w-]{20,80})/)?.[1];
     const key = header || cookie;
     if (!key) return { allowed: false, reason: 'MySEB Needed' };
-    const client = header ? (req.get('x-myseb-client') || '') : 'mobile';   // the cookie only ever belongs to mobile sessions
+    const client = header ? (req.get('x-myseb-client') || '') : 'cookie';   // a cookie belongs to a phone app or to a browser session: the stored session says which
     const device = req.get('x-myseb-device') || '';
     const ua = req.get('user-agent') || '';
     const ck = `${ctx.id}|${key}|${client}|${device}|${ua}`;
@@ -60,7 +60,7 @@ export function remoteMySebGuard({ mysebUrl, serviceKey = undefined, examIdFor =
       }
       if (!r.allowed) {
         const m = r.reason === 'PAUSED' || r.reason === 'LEFT' ? ['Exam paused', 'MYSEB_PAUSED'] : r.reason === 'ENDED' ? ['Exam ended', 'MYSEB_ENDED'] : ['MySEB Needed', 'MYSEB_REQUIRED'];
-        return deny(req, res, m[0], m[1]);
+        return deny(req, res, m[0], m[1], !!r.webAllowed);
       }
       if (r.clientType === 'mobile' && r.fromHeader) {
         const secure = req.secure || req.get('x-forwarded-proto') === 'https' ? '; Secure' : '';

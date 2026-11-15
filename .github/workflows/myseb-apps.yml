@@ -115,9 +115,20 @@ jobs:
           xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/Runner.xcarchive" -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" $AUTH
           rm -f "$RUNNER_TEMP/AuthKey.p8"
 
+  extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash myseb/scripts/pack-extension.sh
+      - run: mv myseb/dist/myseb-extension.zip myseb/dist/MySEB-extension.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: myseb-extension
+          path: myseb/dist/MySEB-extension.zip
+
   release:
     if: startsWith(github.ref, 'refs/tags/myseb-v') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
-    needs: [desktop, android]
+    needs: [desktop, android, extension]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -125,11 +136,11 @@ jobs:
       - name: Publish the release
         env: { GH_TOKEN: '${{ github.token }}' }
         run: |
-          for file in MySEB-win.exe MySEB-mac.dmg MySEB-linux.AppImage MySEB.apk; do
+          for file in MySEB-win.exe MySEB-mac.dmg MySEB-linux.AppImage MySEB.apk MySEB-extension.zip; do
             test -s "apps/$file" || { echo "Missing installer: $file"; exit 1; }
           done
           tag="${{ github.ref_name }}"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             tag="myseb-v1.0.0-build.${{ github.run_number }}.${{ github.run_attempt }}"
           fi
-          gh release create "$tag" apps/MySEB-win.exe apps/MySEB-mac.dmg apps/MySEB-linux.AppImage apps/MySEB.apk --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "MySEB $tag" --notes "Student apps for $API_BASE" --latest=false
+          gh release create "$tag" apps/MySEB-win.exe apps/MySEB-mac.dmg apps/MySEB-linux.AppImage apps/MySEB.apk apps/MySEB-extension.zip --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "MySEB $tag" --notes "Student apps for $API_BASE" --latest=false

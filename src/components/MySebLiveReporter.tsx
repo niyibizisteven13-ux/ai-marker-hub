@@ -27,7 +27,14 @@ function currentQuestion(total?: number): { index: number | null; total: number 
   return { index: n ? Number(n[1]) : at + 1, total: total ?? (labels.length > 1 ? labels.length : null), label: text.replace(/^\d+\.\s*/, '').replace(/\*\s*\(required\)$/, '').slice(0, 120) };
 }
 
-export default function MySebLiveReporter({ kind, refId, total, status }: { kind: 'form' | 'task'; refId: string; total?: number; status?: () => string | null }) {
+import MySebWebGuard from './MySebWebGuard';
+type ReporterProps = { kind: 'form' | 'task'; refId: string; total?: number; status?: () => string | null };
+/** The browser guard (for tests opened to browsers) and the live reporter share one mount point: both pages that need MySEB already render this. */
+export default function MySebLiveReporter(props: ReporterProps) { return (<><MySebWebGuard /><LiveReporter {...props} /></>); }
+
+function LiveReporter({ kind, refId, total, status }: ReporterProps) {
+  const [, force] = useState(0);
+  useEffect(() => { const f = () => force((n) => n + 1); window.addEventListener('myseb-web-active', f); return () => window.removeEventListener('myseb-web-active', f); }, []);
   const [faces, setFaces] = useState(false);
   const [liveVideo, setLiveVideo] = useState(false);
   const [sound, setSound] = useState(false);

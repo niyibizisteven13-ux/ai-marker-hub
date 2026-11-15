@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS exam_sessions (
   student_name   text NOT NULL,
   token_hash     text NOT NULL,                          -- the per-student one-time key (hash only)
   status         text NOT NULL DEFAULT 'IN_EXAM' CHECK (status IN ('IN_EXAM','PAUSED','LEFT','ENDED')),
-  client_type    text NOT NULL CHECK (client_type IN ('desktop','mobile','extension')),
+  client_type    text NOT NULL CHECK (client_type IN ('desktop','mobile','extension','web')),
   platform       text,
   device_id      text NOT NULL,                          -- the token is bound to this device on first use
   started_at     timestamptz NOT NULL DEFAULT now(),
@@ -64,5 +64,19 @@ ALTER TABLE exams ADD COLUMN IF NOT EXISTS live_mode text NOT NULL DEFAULT 'off'
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS live_sound boolean NOT NULL DEFAULT false;
 UPDATE exams SET live_mode = 'pictures' WHERE live_faces AND live_mode = 'off';
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS live_source text NOT NULL DEFAULT 'camera';
-ALTER TABLE exams DROP CONSTRAINT IF EXISTS exams_leave_action_check;
-ALTER TABLE exams ADD CONSTRAINT exams_leave_action_check CHECK (leave_action IN ('record','pause','end','pause_then_end'));
+-- Older databases: widen the allowed values, but only when needed (changing a constraint locks the table, so not at every start).
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exams_leave_action_check' AND pg_get_constraintdef(oid) LIKE '%pause_then_end%') THEN
+    ALTER TABLE exams DROP CONSTRAINT IF EXISTS exams_leave_action_check;
+    ALTER TABLE exams ADD CONSTRAINT exams_leave_action_check CHECK (leave_action IN ('record','pause','end','pause_then_end'));
+  END IF;
+END $$;
+-- Browser mode ("MySEB Web", for iPhones and anyone without the app): allowed per test, signed in with a secure cookie.
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS allow_web boolean NOT NULL DEFAULT false;
+ALTER TABLE exam_sessions ADD COLUMN IF NOT EXISTS ua_hash text;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exam_sessions_client_type_check' AND pg_get_constraintdef(oid) LIKE '%web%') THEN
+    ALTER TABLE exam_sessions DROP CONSTRAINT IF EXISTS exam_sessions_client_type_check;
+    ALTER TABLE exam_sessions ADD CONSTRAINT exam_sessions_client_type_check CHECK (client_type IN ('desktop','mobile','extension','web'));
+  END IF;
+END $$;

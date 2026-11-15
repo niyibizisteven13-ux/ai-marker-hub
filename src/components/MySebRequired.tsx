@@ -24,10 +24,42 @@ function Btn({ href, children, primary }: { href: string; children: React.ReactN
   );
 }
 
-export default function MySebRequired({ code = 'MYSEB_REQUIRED', page = false }: { code?: string; page?: boolean }) {
+/** For tests the lecturer opened to browsers (iPhones, or no app): name and code, here on this page. The key becomes a secure cookie. */
+function BrowserJoin({ path }: { path: string }) {
+  const [name, setName] = useState(() => { try { return localStorage.getItem('myseb.name') ?? ''; } catch { return ''; } });
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const join = async (e: React.FormEvent) => {
+    e.preventDefault(); setBusy(true); setErr('');
+    try {
+      let device = ''; try { device = localStorage.getItem('myseb.webDevice') ?? ''; if (!device) { device = 'web-' + crypto.randomUUID(); localStorage.setItem('myseb.webDevice', device); } localStorage.setItem('myseb.name', name.trim()); } catch { device = 'web-' + Math.random().toString(36).slice(2, 12); }
+      const r = await fetch(`${path}/api/verify-code`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: code.trim(), studentName: name.trim(), deviceId: device, clientType: 'web', platform: navigator.platform || 'browser' }) });
+      const b = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(b.error || 'That did not work. Check the code and try again.');
+      window.location.reload();
+    } catch (x) { setErr(x instanceof Error ? x.message : 'That did not work.'); setBusy(false); }
+  };
+  return (
+    <form onSubmit={join} className="space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-4">
+      <h2 className="text-base font-bold text-amber-950">No app? Use this browser</h2>
+      <p className="text-xs leading-relaxed text-amber-900">Your lecturer allows the browser for this test (for example on an iPhone). It cannot lock your device, but it watches for you leaving the page, and your lecturer is told. Stay on this page until you finish.</p>
+      <input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" aria-label="Your name" maxLength={80} className="min-h-11 w-full rounded-xl border border-amber-300 bg-white px-3 text-sm" />
+      <input required value={code} onChange={(e) => setCode(e.target.value)} placeholder="Exam code, like 8492-KIGALI-77" aria-label="Exam code" maxLength={24} className="min-h-11 w-full rounded-xl border border-amber-300 bg-white px-3 text-sm tracking-wider" />
+      <button type="submit" disabled={busy} className="min-h-11 w-full rounded-xl bg-slate-900 px-4 text-sm font-bold text-white hover:bg-slate-800 disabled:opacity-50">{busy ? 'Starting…' : 'Start the test in this browser'}</button>
+      {err && <p role="alert" className="text-sm font-semibold text-rose-700">{err}</p>}
+    </form>
+  );
+}
+
+export default function MySebRequired({ code: rawCode = 'MYSEB_REQUIRED', page = false }: { code?: string; page?: boolean }) {
+  const webAllowed = rawCode.endsWith('+WEB');
+  const code = rawCode.replace('+WEB', '');
   const [links, setLinks] = useState<Links>(NONE);
+  const [webPath, setWebPath] = useState('');
+  const onIphone = typeof navigator !== 'undefined' && /iPhone|iPad|iPod/i.test(navigator.userAgent);   // no app exists for these: the browser comes first
   useEffect(() => {
-    fetch('/api/myseb/status').then((r) => (r.ok ? r.json() : null)).then((b) => b?.links && setLinks({ ...NONE, ...b.links })).catch(() => undefined);
+    fetch('/api/myseb/status').then((r) => (r.ok ? r.json() : null)).then((b) => { if (b?.links) setLinks({ ...NONE, ...b.links }); if (typeof b?.webJoinPath === 'string') setWebPath(b.webJoinPath); }).catch(() => undefined);
   }, []);
   const copy = page ? { title: 'Get MySEB', text: 'MySEB is the secure exam app. Install it on the device you will use for your test, then enter the code your lecturer gives you.' } : (COPY[code] ?? COPY.MYSEB_REQUIRED);
   const blocked = code === 'MYSEB_PAUSED' || code === 'MYSEB_ENDED';
@@ -41,6 +73,7 @@ export default function MySebRequired({ code = 'MYSEB_REQUIRED', page = false }:
       </div>
       {!blocked && (
         <>
+          {onIphone && webAllowed && webPath && code === 'MYSEB_REQUIRED' && <BrowserJoin path={webPath} />}
           <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-700">
             <li>Install MySEB (below) on your laptop or phone.</li>
             <li>Open MySEB and type the <b>exam code</b> from your lecturer.</li>
@@ -56,6 +89,8 @@ export default function MySebRequired({ code = 'MYSEB_REQUIRED', page = false }:
             {links.extension && <Btn href={links.extension}>Chrome extension (only if your lecturer allows it)</Btn>}
           </div>
           {!any && <p className="text-xs text-slate-500">Ask your lecturer where to download MySEB.</p>}
+          {!onIphone && webAllowed && webPath && code === 'MYSEB_REQUIRED' && <BrowserJoin path={webPath} />}
+          {onIphone && !(webAllowed && webPath) && <p role="note" className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">There is no MySEB app for iPhone yet, and your lecturer has not allowed the browser for this test. Use a laptop or an Android phone, or ask your lecturer.</p>}
           <p className="text-xs text-slate-500">The app is the safest choice. The Chrome extension cannot lock your computer, so it is only for tests where your lecturer allows it.</p>
         </>
       )}

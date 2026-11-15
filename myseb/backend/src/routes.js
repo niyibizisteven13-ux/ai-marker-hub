@@ -1,7 +1,7 @@
 import express from 'express';
 import QRCode from 'qrcode';
 import { q } from './db.js';
-import { config, safeEqual } from './config.js';
+import { config, safeEqual, sha } from './config.js';
 import { newCode, parseCode, codeHash, secretHash, tokenHash, newToken, newSecret, rateLimit, failureGate } from './security.js';
 import { authSession, markAlive, recordViolation, VIOLATION_TYPES } from './sessions.js';
 import { liveStats, cleanSignal, dropSignals, forgetAllLive, forgetLive, getLive, liveChanged, picturesWanted, pullSignal, pushSignal, reportEverySeconds, saveLive, wantPictures } from './live.js';
@@ -68,6 +68,7 @@ api.patch('/exams/:id', requireTeacher, wrap(async (req, res) => {
   const add = (col, v) => { vals.push(v); sets.push(`${col}=$${vals.length}`); };
   if (typeof b.requireMyseb === 'boolean') add('require_myseb', b.requireMyseb);
   if (typeof b.allowExtension === 'boolean') add('allow_extension', b.allowExtension);
+  if (typeof b.allowWeb === 'boolean') add('allow_web', b.allowWeb);
   if (['record', 'pause', 'end', 'pause_then_end'].includes(b.leaveAction)) add('leave_action', b.leaveAction);
   if (['camera', 'screen', 'both'].includes(b.liveSource)) add('live_source', b.liveSource);
   if (typeof b.liveFaces === 'boolean') { add('live_faces', b.liveFaces); add('live_mode', b.liveFaces ? 'pictures' : 'off'); }
@@ -116,7 +117,7 @@ api.post('/exams/:id/end', requireTeacher, wrap(async (req, res) => {
 /** One copy of the student list is built and shared by every lecturer tab looking at the same test; it is rebuilt after any change. */
 const monitorShared = new Map();
 async function buildMonitor(id, withFrames) {
-  const ex = (await q('SELECT id, title, status, live_faces, live_mode, live_sound, live_source, require_myseb, leave_action FROM exams WHERE id=$1', [id])).rows[0];
+  const ex = (await q('SELECT id, title, status, live_faces, live_mode, live_sound, live_source, require_myseb, allow_web, leave_action FROM exams WHERE id=$1', [id])).rows[0];
   if (!ex) return null;
   const { rows } = await q(
     `SELECT s.id, s.student_name, s.status, s.client_type, s.platform, s.violation_count, s.pause_reason, s.end_reason,
@@ -129,7 +130,7 @@ async function buildMonitor(id, withFrames) {
     const l = r.status === 'ENDED' ? null : getLive(r.id);
     return { ...r, live: l ? { question: l.question, camera: l.camera, screen_state: l.screenState, frame: withFrames && ex.live_faces ? l.frame : null, frame_age: l.frameAt ? Math.round((Date.now() - l.frameAt) / 1000) : null, screen: withFrames && ex.live_faces ? l.screen : null, screen_age: l.screenAt ? Math.round((Date.now() - l.screenAt) / 1000) : null } : null };
   });
-  return { exam: { id: ex.id, title: ex.title, status: ex.status, live_faces: ex.live_faces, live_mode: ex.live_mode, live_sound: ex.live_sound, live_source: ex.live_source, leave_action: ex.leave_action }, counts, students };
+  return { exam: { id: ex.id, title: ex.title, status: ex.status, live_faces: ex.live_faces, live_mode: ex.live_mode, live_sound: ex.live_sound, live_source: ex.live_source, allow_web: ex.allow_web, leave_action: ex.leave_action }, counts, students };
 }
 api.get('/exams/:id/monitor', requireTeacher, wrap(async (req, res) => {
   const id = req.params.id;
@@ -288,7 +289,7 @@ api.post('/verify-code',
     const digits = parseCode(b.code);
     const name = str(b.studentName, 80);
     const deviceId = str(b.deviceId, 100);
-    const clientType = ['desktop', 'mobile', 'extension'].includes(b.clientType) ? b.clientType : null;
+    const clientType = ['desktop', 'mobile', 'extension', 'web'].includes(b.clientType) ? b.clientType : null;
     if (!digits) return bad(400, 'That code is not valid. Check it and try again.');
     if (!name) return res.status(400).json({ error: 'Enter your name' });
     if (!clientType || deviceId.length < 8) return res.status(400).json({ error: 'Unsupported client' });
@@ -299,6 +300,8 @@ api.post('/verify-code',
     const row = rows[0];
     if (!row || row.revoked_at || new Date(row.expires_at) < new Date() || row.status !== 'active')
       return bad(404, 'That code is not valid or has expired.');
+    if (clientType === 'web' && !row.allow_web)
+      return res.status(403).json({ error: 'Your lecturer has not allowed the browser for this test. Use the MySEB app.' });
     if (row.require_myseb && clientType === 'extension' && !row.allow_extension)
       return res.status(403).json({ error: 'This exam needs the MySEB app (the browser extension is not allowed).' });
 
@@ -310,15 +313,17 @@ api.post('/verify-code',
     if (prev) {
       if (prev.status === 'ENDED') return res.status(409).json({ error: 'Your exam has already ended.' });
       if (prev.device_id !== deviceId) return res.status(409).json({ error: 'You are already in this exam on another device. Ask your teacher.' });
-      session = (await q(`UPDATE exam_sessions SET token_hash=$2, last_heartbeat=now(), client_type=$3 WHERE id=$1 RETURNING *`,
-        [prev.id, tokenHash(token), clientType])).rows[0];   // rotating the token kills the old one
+      session = (await q(`UPDATE exam_sessions SET token_hash=$2, last_heartbeat=now(), client_type=$3, ua_hash=$4 WHERE id=$1 RETURNING *`,
+        [prev.id, tokenHash(token), clientType, clientType === 'web' ? sha(req.get('user-agent') || '') : null])).rows[0];   // rotating the token kills the old one
     } else {
       session = (await q(
-        `INSERT INTO exam_sessions (exam_id, code_id, student_name, token_hash, client_type, platform, device_id, deadline_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7, LEAST(now() + make_interval(mins => $8), COALESCE($9::timestamptz, 'infinity'))) RETURNING *`,
-        [row.id, row.code_id, name, tokenHash(token), clientType, str(b.platform, 60), deviceId, row.duration_minutes, row.ends_at])).rows[0];
+        `INSERT INTO exam_sessions (exam_id, code_id, student_name, token_hash, client_type, platform, device_id, deadline_at, ua_hash)
+         VALUES ($1,$2,$3,$4,$5,$6,$7, LEAST(now() + make_interval(mins => $8), COALESCE($9::timestamptz, 'infinity')), $10) RETURNING *`,
+        [row.id, row.code_id, name, tokenHash(token), clientType, str(b.platform, 60), deviceId, row.duration_minutes, row.ends_at, clientType === 'web' ? sha(req.get('user-agent') || '') : null])).rows[0];
     }
     notify(row.id, 'join');
+    // A browser keeps its key in a secure cookie (the page's own script can never read it). Only for tests the lecturer opened to browsers.
+    if (clientType === 'web') res.append('Set-Cookie', `myseb_s=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=43200${config.publicUrl.startsWith('https') ? '; Secure' : ''}`);
     res.json({
       sessionId: session.id, token, title: row.title, examUrl: row.exam_url,
       status: session.status, requireMyseb: row.require_myseb, heartbeatSeconds: 5,
@@ -327,10 +332,19 @@ api.post('/verify-code',
   }));
 
 async function studentAuth(req, res) {
-  const a = await authSession(req);
+  const a = await authSession(req, { allowCookie: true });
   if (a.error) { res.status(a.error === 'wrong_client' ? 403 : 401).json({ error: 'MySEB Needed' }); return null; }
   return a;
 }
+
+/** A browser asks "am I in a test?" (it cannot read its own cookie). Answers with the state, or 401. */
+api.get('/web/me', wrap(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const a = await authSession(req, { allowCookie: true });
+  if (a.error || a.session.client_type !== 'web') return res.status(401).json({ active: false });
+  res.json({ active: true, status: a.session.status, title: a.session.title, heartbeatSeconds: 5,
+    remainingSeconds: Math.max(0, Math.floor((new Date(a.session.deadline_at) - Date.now()) / 1000)) });
+}));
 
 api.post('/heartbeat', wrap(async (req, res) => {
   const a = await studentAuth(req, res); if (!a) return;
@@ -388,18 +402,25 @@ api.post('/gate', (req, res, next) => (req.get('x-myseb-service-key') ? next() :
   if (service) {
     if (!safeEqual(service, config.teacherKey) || !isUuid(examId)) return res.status(401).json({ allowed: false, reason: 'unauthorized' });
     ({ rows } = await q(
-      `SELECT s.id AS session_id, s.status, s.client_type, s.device_id, s.student_name, e.allow_extension, e.id AS exam_id
+      `SELECT s.id AS session_id, s.status, s.client_type, s.device_id, s.ua_hash, s.student_name, e.allow_extension, e.allow_web, e.id AS exam_id
          FROM exam_sessions s JOIN exams e ON e.id=s.exam_id WHERE s.token_hash=$1 AND s.exam_id=$2`, [tokenHash(String(key)), examId]));
   } else {
     ({ rows } = await q(
-      `SELECT s.id AS session_id, s.status, s.client_type, s.device_id, s.student_name, e.allow_extension, e.id AS exam_id
+      `SELECT s.id AS session_id, s.status, s.client_type, s.device_id, s.ua_hash, s.student_name, e.allow_extension, e.allow_web, e.id AS exam_id
          FROM exam_sessions s JOIN exam_codes c ON c.id=s.code_id JOIN exams e ON e.id=s.exam_id
         WHERE s.token_hash=$1 AND c.secret_hash=$2`, [tokenHash(String(key)), secretHash(secret)]));
   }
   const s = rows[0];
-  if (!s) return res.json({ allowed: false, reason: 'MySEB Needed' });
-  const markerOk = s.client_type === 'extension' ? s.allow_extension && client === 'extension' : /MySEB\//.test(userAgent || '');
-  if (client !== s.client_type || !markerOk || (s.client_type !== 'mobile' && device !== s.device_id)) return res.json({ allowed: false, reason: 'MySEB Needed' });
+  // Tells the exam site whether to offer "use your browser" on its "MySEB needed" page.
+  let webAllowed = false;
+  if (service && isUuid(examId)) webAllowed = !!(await q('SELECT allow_web FROM exams WHERE id=$1', [examId])).rows[0]?.allow_web;
+  if (!s) return res.json({ allowed: false, reason: 'MySEB Needed', webAllowed });
+  // client "cookie": the exam site only saw a cookie, so the stored kind of session decides which rules apply.
+  const kind = client === 'cookie' ? s.client_type : client;
+  const markerOk = s.client_type === 'extension' ? s.allow_extension && kind === 'extension'
+    : s.client_type === 'web' ? !!s.allow_web && client === 'cookie' && !!s.ua_hash && s.ua_hash === sha(userAgent || '')
+    : /MySEB\//.test(userAgent || '');
+  if (kind !== s.client_type || !markerOk || (s.client_type !== 'mobile' && s.client_type !== 'web' && device !== s.device_id)) return res.json({ allowed: false, reason: 'MySEB Needed', webAllowed });
   if (s.status !== 'IN_EXAM') return res.json({ allowed: false, reason: s.status });
   res.json({ allowed: true, studentName: s.student_name, examId: s.exam_id, clientType: s.client_type, sessionId: s.session_id });
 }));

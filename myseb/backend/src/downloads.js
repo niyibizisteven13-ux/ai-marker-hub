@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { favicon, markImg } from './brand.js';
 
-export const files = { windows: 'MySEB-win.exe', mac: 'MySEB-mac.dmg', linux: 'MySEB-linux.AppImage', android: 'MySEB.apk' };
-const labels = { windows: 'Windows (.exe)', mac: 'Mac (.dmg)', linux: 'Linux (.AppImage)', android: 'Android (.apk)', ios: 'iPhone / iPad' };
+export const files = { windows: 'MySEB-win.exe', mac: 'MySEB-mac.dmg', linux: 'MySEB-linux.AppImage', android: 'MySEB.apk', extension: 'MySEB-extension.zip' };
+const labels = { windows: 'Windows (.exe)', mac: 'Mac (.dmg)', linux: 'Linux (.AppImage)', android: 'Android (.apk)', extension: 'Chrome extension (.zip, lighter security)', ios: 'iPhone / iPad' };
 export function device(ua = '') {
   if (/iphone|ipad|ipod/i.test(ua) || /macintosh.*mobile/i.test(ua)) return 'ios';
   if (/android/i.test(ua)) return 'android';
@@ -57,6 +57,10 @@ downloadRouter.get('/', async (req, res, next) => {
     const mine = requested || device(req.get('user-agent'));
     const available = await links();
     if (mine && available[mine] && req.query.choose !== '1') return res.redirect(302, available[mine]);
+    // An iPhone or iPad cannot use the other apps. Say what to do instead of showing buttons that cannot work.
+    if (mine === 'ios' && !available.ios && req.query.choose !== '1') {
+      return res.set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; frame-ancestors 'none'").type('html').send(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MySEB on iPhone</title>${favicon}<style>body{font-family:system-ui;max-width:480px;margin:40px auto;padding:24px;color:#222;line-height:1.6}h1{text-align:center}ol{padding-left:20px}a.more{display:block;margin-top:24px;color:#666;font-size:14px}</style>${markImg(88)}<h1>MySEB on iPhone and iPad</h1><p>There is no MySEB app for iPhone or iPad yet. You can still take your test in your browser if your lecturer allows it:</p><ol><li>Open your lecturer's test link in <b>Safari</b>.</li><li>On that page, choose <b>Start the test in this browser</b>, then type your name and the exam code.</li><li>Stay on the page until you finish. Leaving it is recorded and your lecturer is told.</li></ol><p>If the page does not offer the browser, your lecturer has not allowed it: use a laptop or an Android phone with the MySEB app, or ask your lecturer.</p><a class="more" href="?choose=1">I am not on an iPhone: show all downloads</a></html>`);
+    }
     const notice = mine === 'ios' && !available.ios
       ? 'The iPhone and iPad app is not available yet. Please use a supported computer or Android device.'
       : mine && !available[mine] ? `The ${labels[mine]} installer is not published yet. Please try again later or choose another available device.`

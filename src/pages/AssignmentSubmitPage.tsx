@@ -40,7 +40,7 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
 
   useEffect(() => {
     document.title = 'Submit · Bwenge';
-    fetch(api()).then(async (r) => { const b = await r.json().catch(() => ({})); if (!r.ok) { if (typeof b.code === 'string' && b.code.startsWith('MYSEB_')) { setMysebBlock(b.code); return; } throw new Error(b.error || 'This link is not valid.'); } setTask(b); })
+    fetch(api()).then(async (r) => { const b = await r.json().catch(() => ({})); if (!r.ok) { if (typeof b.code === 'string' && b.code.startsWith('MYSEB_')) { setMysebBlock(b.code + (b.webAllowed ? '+WEB' : '')); return; } throw new Error(b.error || 'This link is not valid.'); } setTask(b); })
       .catch((e) => setLoadError(e instanceof Error ? e.message : 'This link is not valid.'));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // Nothing is remembered on the device: people often share phones, and a remembered name or number would
