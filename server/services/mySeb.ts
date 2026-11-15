@@ -212,7 +212,8 @@ export async function setLiveFaces(load: TargetLoader, on: boolean) {
 /** What the exam page tells the live room: the question the student is on and, if asked for, a small picture. Never stored here. */
 const lastLive = new Map<string, number>();
 const lastAnswer = new Map<string, LiveAnswer>();
-export interface LiveAnswer { faces: boolean; live: boolean; sound: boolean }
+export type LiveSource = 'camera' | 'screen' | 'both';
+export interface LiveAnswer { faces: boolean; live: boolean; sound: boolean; source?: LiveSource }
 export async function relayLive(sessionId: string, body: any): Promise<LiveAnswer> {
   const now = Date.now();
   if (now - (lastLive.get(sessionId) ?? 0) < 3000) return lastAnswer.get(sessionId) ?? { faces: false, live: false, sound: false };   // at most one report every 3 s per student
@@ -220,17 +221,21 @@ export async function relayLive(sessionId: string, body: any): Promise<LiveAnswe
   if (lastLive.size > 5000) lastLive.clear();
   const q = body?.question && typeof body.question === 'object' ? { index: body.question.index, total: body.question.total, label: String(body.question.label ?? '').slice(0, 200) } : undefined;
   const frame = typeof body?.frame === 'string' && body.frame.length <= 16000 ? body.frame : undefined;
-  const r = await mysebFetch(`/sessions/${sessionId}/live`, { method: 'POST', body: { question: q, camera: body?.camera, frame } });
-  const answer = { faces: !!r.faces, live: !!r.live, sound: !!r.sound };
+  const screen = typeof body?.screen === 'string' && body.screen.length <= 30000 ? body.screen : undefined;
+  const r = await mysebFetch(`/sessions/${sessionId}/live`, { method: 'POST', body: { question: q, camera: body?.camera, frame, screen, screenState: body?.screenState } });
+  const answer: LiveAnswer = { faces: !!r.faces, live: !!r.live, sound: !!r.sound, source: (['camera', 'screen', 'both'] as const).includes(r.source) ? r.source : 'camera' };
   lastAnswer.set(sessionId, answer);
   if (lastAnswer.size > 5000) lastAnswer.clear();
   return answer;
 }
 
 /** Camera in the live room: off, small pictures, or live video; and whether the lecturer may listen. */
-export async function setLiveMode(load: TargetLoader, mode: 'off' | 'pictures' | 'live', sound: boolean) {
+export const LEAVE_ACTIONS = ['record', 'pause', 'end', 'pause_then_end'] as const;
+export async function setLiveMode(load: TargetLoader, mode: 'off' | 'pictures' | 'live', sound: boolean, extra: { source?: unknown; leaveAction?: unknown } = {}) {
   const examId = await ensureMysebExam(await load());
-  return mysebFetch(`/exams/${examId}`, { method: 'PATCH', body: { liveMode: mode, liveSound: mode === 'live' && sound } });
+  const source = (['camera', 'screen', 'both'] as const).find((x) => x === extra.source);
+  const leaveAction = LEAVE_ACTIONS.find((x) => x === extra.leaveAction);
+  return mysebFetch(`/exams/${examId}`, { method: 'PATCH', body: { liveMode: mode, liveSound: mode === 'live' && sound && source !== 'screen', ...(source ? { liveSource: source } : {}), ...(leaveAction ? { leaveAction } : {}) } });
 }
 
 /* ---- live video: only the short set-up messages pass through here; the video goes student -> lecturer directly ---- */

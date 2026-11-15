@@ -4,7 +4,8 @@
  * one, and it is forgotten when the student ends, the exam ends, or 3 minutes pass without an update.
  */
 const store = new Map(); // sessionId -> { question, camera, frame, at, frameAt }
-const MAX_FRAME = 16_000;  // characters of data URL (~12 KB): a 160x120 JPEG is about 4-6 KB
+const MAX_FRAME = 16_000;
+const MAX_SCREEN = 30_000;  // a 400x225 JPEG of the screen, about 10-20 KB  // characters of data URL (~12 KB): a 160x120 JPEG is about 4-6 KB
 
 export function cleanLive(body = {}) {
   const q = body.question && typeof body.question === 'object' ? body.question : null;
@@ -12,7 +13,9 @@ export function cleanLive(body = {}) {
   const question = q ? { index: num(q.index, 10_000), total: num(q.total, 10_000), label: String(q.label ?? '').replace(/\s+/g, ' ').trim().slice(0, 120) } : null;
   const camera = ['on', 'off', 'denied', 'ask'].includes(body.camera) ? body.camera : 'off';
   const frame = typeof body.frame === 'string' && body.frame.length <= MAX_FRAME && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(body.frame) ? body.frame : null;
-  return { question, camera, frame };
+  const screen = typeof body.screen === 'string' && body.screen.length <= MAX_SCREEN && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(body.screen) ? body.screen : null;
+  const screenState = ['on', 'off', 'denied', 'ask', 'partial'].includes(body.screenState) ? body.screenState : 'off';
+  return { question, camera, frame, screen, screenState };
 }
 
 export function saveLive(sessionId, body, keepFrames) {
@@ -24,6 +27,9 @@ export function saveLive(sessionId, body, keepFrames) {
     camera: c.camera,
     frame: keepFrames ? (c.frame ?? prev?.frame ?? null) : null,
     frameAt: keepFrames && c.frame ? now : (keepFrames ? prev?.frameAt ?? null : null),
+    screenState: c.screenState,
+    screen: keepFrames ? (c.screen ?? prev?.screen ?? null) : null,
+    screenAt: keepFrames && c.screen ? now : (keepFrames ? prev?.screenAt ?? null : null),
     at: now,
   });
 }
@@ -48,6 +54,7 @@ export function cleanSignal(m) {
     const c = { candidate: String(m.candidate.candidate ?? '').slice(0, 600), sdpMid: m.candidate.sdpMid == null ? null : String(m.candidate.sdpMid).slice(0, 20), sdpMLineIndex: Number.isInteger(m.candidate.sdpMLineIndex) ? m.candidate.sdpMLineIndex : null };
     out.candidate = c;
   }
+  if (typeof m.screenStream === 'string') out.screenStream = m.screenStream.replace(/[^\w{}-]/g, '').slice(0, 80);
   if (typeof m.on === 'boolean') out.on = m.on;
   if (typeof m.audio === 'boolean') out.audio = m.audio;
   if (typeof m.state === 'string') out.state = m.state.slice(0, 20);

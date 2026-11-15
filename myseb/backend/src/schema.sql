@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS exams (
   exam_url         text NOT NULL,                        -- where the exam lives (must enforce the MySEB header, see guard)
   require_myseb    boolean NOT NULL DEFAULT true,        -- [x] Require MySEB
   allow_extension  boolean NOT NULL DEFAULT false,       -- accept the low-security Chrome extension as a client
-  leave_action     text NOT NULL DEFAULT 'pause' CHECK (leave_action IN ('record','pause','end')),
+  leave_action     text NOT NULL DEFAULT 'pause' CHECK (leave_action IN ('record','pause','end','pause_then_end')),
   duration_minutes integer NOT NULL DEFAULT 60,          -- per student, counted from entering the code
   status           text NOT NULL DEFAULT 'active' CHECK (status IN ('active','ended')),
   ends_at          timestamptz,                          -- set when the teacher ends the exam
@@ -63,3 +63,6 @@ ALTER TABLE exams ADD COLUMN IF NOT EXISTS live_faces boolean NOT NULL DEFAULT f
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS live_mode text NOT NULL DEFAULT 'off';
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS live_sound boolean NOT NULL DEFAULT false;
 UPDATE exams SET live_mode = 'pictures' WHERE live_faces AND live_mode = 'off';
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS live_source text NOT NULL DEFAULT 'camera';
+ALTER TABLE exams DROP CONSTRAINT IF EXISTS exams_leave_action_check;
+ALTER TABLE exams ADD CONSTRAINT exams_leave_action_check CHECK (leave_action IN ('record','pause','end','pause_then_end'));

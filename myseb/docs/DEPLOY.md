@@ -39,3 +39,9 @@ The compose file passes `docker compose config`. The image itself was not built 
 Actions tab → **Build MySEB apps** → Run workflow (the address defaults to `https://www.bwenge.space/myseb`). It builds the Windows installer, macOS dmg, Linux AppImage and Android APK, and attaches them to the run. Push a tag such as `myseb-v1.0.0` to also publish them as a GitHub Release.
 Then set `MYSEB_DL_PAGE` (a https link to where students download, for example the release page) so the code page shows a **Download MySEB** button.
 The Windows and Mac installers are not code-signed, so Windows SmartScreen and macOS Gatekeeper warn students once ("More info → Run anyway"). Signing needs a paid certificate. The Android APK is sideloaded (students allow "install from this source"); the Play Store needs a developer account.
+
+## Showing the student's screen and face in the live room
+In the live room, **Show** chooses Face, Screen, or Face and screen; **If a student leaves** chooses Only record it, Pause them, **Pause, then end the second time** (recommended), or End their test at once. A student who leaves appears at the top with a beep and an **End their test now** button.
+- **Laptop app:** shares the whole main screen without a picker, so a student cannot pick a smaller window. While the screen is shared, the "screenshots show black" protection is lifted so the lecturer sees the exam instead of a black rectangle.
+- **Phone app:** the phone's in-app browser cannot share its screen, so a phone student shows their camera instead and is never penalised for it. Real screen capture on Android needs native code (MediaProjection) and is not built yet.
+- Stopping the share counts as leaving the test, once per stop, and the leave rule applies. Pictures of the screen stay in memory for about 3 minutes and are never saved.

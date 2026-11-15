@@ -6,12 +6,14 @@ import { authFetch } from '../utils/authFetch';
  * asked for it), the question they are on, and what they did; Resume and End are on the tile. Nothing else to learn.
  */
 type Status = 'IN_EXAM' | 'PAUSED' | 'LEFT' | 'ENDED';
+type Source = 'camera' | 'screen' | 'both';
+interface Alert { id: string; name: string; text: string; ended: boolean }
 interface Student {
   id: string; student_name: string; status: Status; client_type: string; platform: string | null; violation_count: number;
   last_violation: string | null; pause_reason: string | null; end_reason: string | null; seen_ago: number;
-  live: { question: { index: number | null; total: number | null; label: string } | null; camera: string; frame: string | null; frame_age: number | null } | null;
+  live: { question: { index: number | null; total: number | null; label: string } | null; camera: string; screen_state?: string; frame: string | null; frame_age: number | null; screen?: string | null; screen_age?: number | null } | null;
 }
-interface Room { exam: { title: string; status: string; live_faces: boolean; live_mode?: 'off' | 'pictures' | 'live'; live_sound?: boolean }; counts: Record<Status, number>; students: Student[] }
+interface Room { exam: { title: string; status: string; live_faces: boolean; live_mode?: 'off' | 'pictures' | 'live'; live_sound?: boolean; live_source?: Source; leave_action?: string }; counts: Record<Status, number>; students: Student[] }
 interface Code { display: string; qrSvg: string; expiresAt: string }
 
 const LABEL: Record<Status, string> = { IN_EXAM: 'In the test', PAUSED: 'Paused', LEFT: 'Left', ENDED: 'Finished' };
@@ -21,7 +23,7 @@ const WHY: Record<string, string> = {
   leave: 'Left the test screen', background: 'Left the app', blur: 'Switched window', heartbeat_lost: 'Lost connection', screenshot: 'Tried a screenshot',
   copy: 'Tried to copy', paste: 'Tried to paste', cut: 'Tried to cut', devtools: 'Opened developer tools', shortcut: 'Pressed a blocked key', close_attempt: 'Tried to close the app',
   extra_display: 'Second screen', forbidden_app: 'Remote or recording app', fullscreen_exit: 'Left full screen', split_screen: 'Split screen', screen_recording: 'Screen recording',
-  visibility_hidden: 'Hid the tab', token_misuse: 'Used the key from another place', teacher: 'Paused by you',
+  visibility_hidden: 'Hid the tab', screen_share_stopped: 'Stopped sharing the screen', token_misuse: 'Used the key from another place', teacher: 'Paused by you',
 };
 const why = (k: string | null) => (k ? WHY[k] ?? k : '');
 
@@ -38,6 +40,8 @@ const MAX_LIVE = 12;
  */
 function useLiveViewers(base: string, enabled: boolean, wanted: string[], listen: string | null) {
   const [streams, setStreams] = useState<Record<string, MediaStream>>({});
+  const [screens, setScreens] = useState<Record<string, MediaStream>>({});
+  const screenIds = useRef(new Map<string, string>());   // which of a student's streams is their screen (the student says so in the offer)
   const [tick, setTick] = useState(0);
   const viewer = useRef('v' + Math.random().toString(36).slice(2, 8));
   const pcs = useRef(new Map<string, RTCPeerConnection>());
@@ -53,6 +57,8 @@ function useLiveViewers(base: string, enabled: boolean, wanted: string[], listen
   const drop = useCallback((sid: string) => {
     pcs.current.get(sid)?.close(); pcs.current.delete(sid); requested.current.delete(sid); pending.current.delete(sid);
     setStreams((s) => { if (!(sid in s)) return s; const n = { ...s }; delete n[sid]; return n; });
+    setScreens((s) => { if (!(sid in s)) return s; const n = { ...s }; delete n[sid]; return n; });
+    screenIds.current.delete(sid);
   }, []);
 
   // Messages from students (offers and network candidates), by long poll.
@@ -67,7 +73,8 @@ function useLiveViewers(base: string, enabled: boolean, wanted: string[], listen
         pcs.current.get(sid)?.close();
         const pc = new RTCPeerConnection({ iceServers: await ice() });
         pcs.current.set(sid, pc);
-        pc.ontrack = (e) => setStreams((s) => ({ ...s, [sid]: e.streams[0] }));
+        if (m.screenStream) screenIds.current.set(sid, String(m.screenStream)); else screenIds.current.delete(sid);
+        pc.ontrack = (e) => { const st = e.streams[0]; if (!st) return; if (screenIds.current.get(sid) === st.id) setScreens((s) => ({ ...s, [sid]: st })); else setStreams((s) => ({ ...s, [sid]: st })); };
         pc.onicecandidate = (e) => { if (e.candidate) void post(sid, { type: 'ice', candidate: e.candidate.toJSON() }); };
         pc.onconnectionstatechange = () => {
           if (pc.connectionState === 'failed' || pc.connectionState === 'closed') { if (pcs.current.get(sid) === pc) { drop(sid); setTick((t) => t + 1); } }
@@ -119,13 +126,13 @@ function useLiveViewers(base: string, enabled: boolean, wanted: string[], listen
   }, [listen, post]);
 
   useEffect(() => () => { pcs.current.forEach((pc) => pc.close()); [...requested.current].forEach((sid) => void post(sid, { type: 'unwatch' })); if (listening.current) void post(listening.current, { type: 'listen', on: false }); }, [post]);
-  return streams;
+  return { streams, screens };
 }
 
-function LiveVideo({ stream, muted }: { stream: MediaStream; muted: boolean }) {
+function LiveVideo({ stream, muted, mirror = true, fit = 'object-cover' }: { stream: MediaStream; muted: boolean; mirror?: boolean; fit?: string }) {
   const ref = useRef<HTMLVideoElement>(null);
   useEffect(() => { if (ref.current && ref.current.srcObject !== stream) ref.current.srcObject = stream; }, [stream]);
-  return <video ref={ref} autoPlay playsInline muted={muted} className="h-full w-full -scale-x-100 object-cover" />;
+  return <video ref={ref} autoPlay playsInline muted={muted} className={`h-full w-full ${mirror ? '-scale-x-100' : ''} ${fit}`} />;
 }
 
 export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; id: string; onBack: () => void }) {
@@ -140,7 +147,9 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
   const [copied, setCopied] = useState(false);
   const [visible, setVisible] = useState<Set<string>>(new Set());
   const [listen, setListen] = useState<string | null>(null);
-  const [pics, setPics] = useState<Record<string, { frame: string; age: number | null }>>({});
+  const [pics, setPics] = useState<Record<string, { frame: string | null; age: number | null; screen?: string | null; screen_age?: number | null }>>({});
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const seen = useRef<Map<string, { v: number; st: Status }> | null>(null);
 
   const call = useCallback(async (path: string, method = 'GET', body?: unknown) => {
     const r = await authFetch(`${base}${path}`, { method, ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}) });
@@ -162,12 +171,15 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
   });
   const makeCode = () => act(async () => { setCode(await call('/code', 'POST')); setShowCode(true); });
   const students = room?.students ?? [];
-  const needs = (s: Student) => s.status === 'PAUSED' || s.status === 'LEFT' || s.live?.camera === 'denied';
+  const needs = (s: Student) => s.status === 'PAUSED' || s.status === 'LEFT' || s.live?.camera === 'denied' || s.live?.screen_state === 'denied' || s.live?.screen_state === 'partial';
   const shown = [...students].filter((s) => !onlyAttention || needs(s)).sort((a, b) => Number(needs(b)) - Number(needs(a)) || a.student_name.localeCompare(b.student_name));
   const attention = students.filter(needs).length;
   const open = room?.exam?.status !== 'ended';
   const mode = room?.exam?.live_mode ?? (room?.exam?.live_faces ? 'pictures' : 'off');
   const sound = !!room?.exam?.live_sound && mode === 'live';
+  const source: Source = room?.exam?.live_source ?? 'camera';
+  const showScreen = mode !== 'off' && source !== 'camera';
+  const leaveAction = room?.exam?.leave_action ?? 'pause';
   // Who gets live video: the tiles on screen (needs-attention first), up to MAX_LIVE, plus the one you listen to.
   const wanted = useMemo(() => {
     if (mode !== 'live') return [];
@@ -184,7 +196,28 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
     void get(); const t = setInterval(get, 5000);
     return () => { stop = true; clearInterval(t); };
   }, [mode, picKey, call]);
-  const streams = useLiveViewers(base, mode === 'live', wanted, sound ? listen : null);
+  const { streams, screens } = useLiveViewers(base, mode === 'live', wanted, sound ? listen : null);
+
+  // A student who leaves the test, or whose quiz was closed by the rule, appears at the top with a one-click End. Short beep and a flashing tab title.
+  useEffect(() => {
+    const prev = seen.current;
+    seen.current = new Map(students.map((s) => [s.id, { v: s.violation_count, st: s.status }]));
+    if (!prev) return;
+    const fresh: Alert[] = [];
+    for (const s of students) {
+      const p = prev.get(s.id);
+      if ((s.status === 'PAUSED' || s.status === 'LEFT') && (!p || p.st === 'IN_EXAM' || s.violation_count > p.v)) fresh.push({ id: s.id, name: s.student_name, text: why(s.pause_reason ?? s.last_violation) || 'Left the test', ended: false });
+      else if (s.status === 'ENDED' && p && p.st !== 'ENDED' && !['teacher', 'time_up', 'student_exit'].includes(s.end_reason ?? '')) fresh.push({ id: s.id, name: s.student_name, text: `${why(s.end_reason) || 'Left the test'}: the test was closed automatically`, ended: true });
+    }
+    setAlerts((cur) => {
+      const live = cur.filter((a) => { const st = students.find((x) => x.id === a.id); return st && (a.ended ? true : st.status === 'PAUSED' || st.status === 'LEFT'); });
+      return [...live.filter((a) => !fresh.some((f) => f.id === a.id)), ...fresh];
+    });
+    if (fresh.length) {
+      try { const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext; const c = new AC(); const o = c.createOscillator(); const g = c.createGain(); o.frequency.value = 880; g.gain.value = 0.12; o.connect(g); g.connect(c.destination); o.start(); window.setTimeout(() => { o.stop(); void c.close(); }, 300); } catch { /* sound is a bonus */ }
+      let on = true, n = 0; const title = document.title; const t = window.setInterval(() => { document.title = on ? `(!) ${fresh[0].name} left` : title; on = !on; if (++n > 8) { window.clearInterval(t); document.title = title; } }, 700);
+    }
+  }, [students]);
   const observer = useRef<IntersectionObserver | null>(null);
   useEffect(() => {
     observer.current = new IntersectionObserver((entries) => setVisible((cur) => { const n = new Set(cur); for (const e of entries) { const id = (e.target as HTMLElement).dataset.sid!; if (e.isIntersecting) n.add(id); else n.delete(id); } return n; }), { rootMargin: '120px' });
@@ -211,14 +244,26 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
           <button type="button" className={btn} disabled={busy || !open} onClick={() => act(() => call('/pause-all', 'POST'))}>Pause everyone</button>
           <button type="button" className={btn} disabled={busy || !open} onClick={() => act(() => call('/resume-all', 'POST'))}>Let everyone continue</button>
           <label className="flex min-h-10 items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold">
-            Camera
-            <select className="bg-transparent font-semibold outline-none" value={mode} disabled={busy || !open} onChange={(e) => act(() => call('/settings', 'POST', { liveMode: e.target.value, liveSound: sound }))}>
+            Show
+            <select className="bg-transparent font-semibold outline-none" value={source} disabled={busy || !open} onChange={(e) => act(() => call('/settings', 'POST', { liveMode: mode === 'off' ? 'pictures' : mode, liveSound: sound, liveSource: e.target.value, leaveAction }))}>
+              <option value="camera">Face</option><option value="screen">Screen</option><option value="both">Face and screen</option>
+            </select>
+          </label>
+          <label className="flex min-h-10 items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold">
+            View
+            <select className="bg-transparent font-semibold outline-none" value={mode} disabled={busy || !open} onChange={(e) => act(() => call('/settings', 'POST', { liveMode: e.target.value, liveSound: sound, liveSource: source, leaveAction }))}>
               <option value="off">Off</option><option value="pictures">Pictures (every 10 s)</option><option value="live">Live video</option>
             </select>
           </label>
-          {mode === 'live' && (
+          <label className="flex min-h-10 items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold" title="What happens when a student leaves the test, switches window or stops sharing their screen">
+            If a student leaves
+            <select className="bg-transparent font-semibold outline-none" value={leaveAction} disabled={busy || !open} onChange={(e) => act(() => call('/settings', 'POST', { liveMode: mode, liveSound: sound, liveSource: source, leaveAction: e.target.value }))}>
+              <option value="record">Only record it</option><option value="pause">Pause them</option><option value="pause_then_end">Pause, then end the second time</option><option value="end">End their test at once</option>
+            </select>
+          </label>
+          {mode === 'live' && source !== 'screen' && (
             <label className="flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold">
-              <input type="checkbox" className="h-4 w-4" checked={sound} disabled={busy || !open} onChange={(e) => act(() => call('/settings', 'POST', { liveMode: 'live', liveSound: e.target.checked }))} />
+              <input type="checkbox" className="h-4 w-4" checked={sound} disabled={busy || !open} onChange={(e) => act(() => call('/settings', 'POST', { liveMode: 'live', liveSound: e.target.checked, liveSource: source, leaveAction }))} />
               Allow listening
             </label>
           )}
@@ -231,8 +276,21 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
 
       <main className="mx-auto max-w-7xl px-4 py-5">
         {err && <p role="alert" className="mb-4 rounded-xl bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">{err}</p>}
+        {alerts.length > 0 && (
+          <ul aria-live="assertive" className="mb-4 space-y-2">
+            {alerts.map((a) => (
+              <li key={a.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-rose-300 bg-rose-50 px-4 py-3">
+                <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-rose-600" />
+                <p className="min-w-0 flex-1 text-sm font-semibold text-rose-900"><strong>{a.name}</strong>: {a.text}</p>
+                {!a.ended && <button type="button" disabled={busy} onClick={() => act(() => call(`/sessions/${a.id}/resume`, 'POST'))} className={`${btn} !min-h-9 text-xs`}>Let them continue</button>}
+                {!a.ended && <button type="button" disabled={busy} onClick={() => { setAlerts((c) => c.filter((x) => x.id !== a.id)); void act(() => call(`/sessions/${a.id}/end`, 'POST')); }} className="min-h-9 rounded-xl bg-rose-600 px-4 text-xs font-bold text-white hover:bg-rose-700 disabled:opacity-40">End {a.name}'s test now</button>}
+                <button type="button" onClick={() => setAlerts((c) => c.filter((x) => x.id !== a.id))} className={`${btn} !min-h-9 text-xs`}>Dismiss</button>
+              </li>
+            ))}
+          </ul>
+        )}
         {mode !== 'off' && <p className="mb-4 text-xs text-slate-500">
-          Students were told about the camera and must agree. {mode === 'live' ? `Live video is shown for the ${MAX_LIVE} students on screen at a time; the rest show a small picture. Nothing is recorded or saved.${sound ? ' Press Listen on a tile to hear that student; they see a notice while you do.' : ''}` : 'Pictures are small, replaced every 10 seconds, and never saved.'}
+          Students were told what is shown ({source === 'camera' ? 'their camera' : source === 'screen' ? 'their whole screen' : 'their screen and camera'}) and must agree.{showScreen ? ' If a student stops sharing the screen it counts as leaving the test.' : ''} {mode === 'live' ? `Live video is shown for the ${MAX_LIVE} students on screen at a time; the rest show a small picture. Nothing is recorded or saved.${sound ? ' Press Listen on a tile to hear that student; they see a notice while you do.' : ''}` : 'Pictures are small, replaced every 10 seconds, and never saved.'}
         </p>}
 
         {showCode && code && (
@@ -261,15 +319,24 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
               const pct = q?.index && q.total ? Math.min(100, Math.round((q.index / q.total) * 100)) : 0;
               return (
                 <li key={s.id} data-sid={s.id} ref={watchTile} className={`flex flex-col overflow-hidden rounded-2xl border bg-white ${RING[s.status]}`}>
-                  <div className="relative aspect-[4/3] bg-slate-100">
-                    {streams[s.id] ? <LiveVideo stream={streams[s.id]} muted={listen !== s.id} /> : pics[s.id]?.frame ? <img src={pics[s.id].frame} alt={`Camera: ${s.student_name}`} className="h-full w-full -scale-x-100 object-cover" /> : (
+                  <div className={`relative bg-slate-100 ${showScreen ? 'aspect-video' : 'aspect-[4/3]'}`}>
+                    {showScreen && (screens[s.id] || pics[s.id]?.screen) ? (
+                      <>
+                        {screens[s.id] ? <LiveVideo stream={screens[s.id]} muted mirror={false} fit="object-contain" /> : <img src={pics[s.id]?.screen ?? ''} alt={`Screen: ${s.student_name}`} className="h-full w-full object-contain" />}
+                        {source === 'both' && (streams[s.id] || pics[s.id]?.frame) && (
+                          <div className="absolute bottom-2 right-2 h-1/3 w-[28%] overflow-hidden rounded-lg border-2 border-white shadow">
+                            {streams[s.id] ? <LiveVideo stream={streams[s.id]} muted={listen !== s.id} /> : <img src={pics[s.id]?.frame ?? ''} alt={`Camera: ${s.student_name}`} className="h-full w-full -scale-x-100 object-cover" />}
+                          </div>
+                        )}
+                      </>
+                    ) : streams[s.id] ? <LiveVideo stream={streams[s.id]} muted={listen !== s.id} /> : pics[s.id]?.frame ? <img src={pics[s.id].frame ?? ''} alt={`Camera: ${s.student_name}`} className="h-full w-full -scale-x-100 object-cover" /> : (
                       <div className="flex h-full items-center justify-center px-3 text-center text-xs font-medium text-slate-400">
-                        {mode === 'off' ? 'Camera is off' : s.live?.camera === 'denied' ? 'Camera blocked' : s.live?.camera === 'ask' ? 'Waiting for the student to agree' : s.status === 'ENDED' ? 'Finished' : 'No picture yet'}
+                        {mode === 'off' ? 'Live view is off' : s.live?.screen_state === 'partial' ? 'Shared a window, not the whole screen' : s.live?.screen_state === 'denied' ? 'Screen sharing is off' : s.live?.camera === 'denied' ? 'Camera blocked' : s.live?.camera === 'ask' ? 'Waiting for the student to agree' : s.status === 'ENDED' ? 'Finished' : 'No picture yet'}
                       </div>
                     )}
                     <span className={`absolute left-2 top-2 rounded-full px-2.5 py-0.5 text-[11px] font-bold text-white ${TONE[s.status]}`}>{LABEL[s.status]}</span>
-                    {streams[s.id] && <span className="absolute right-2 top-2 flex items-center gap-1 rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-bold text-white"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />LIVE</span>}
-                    {!streams[s.id] && pics[s.id]?.age != null && (pics[s.id].age as number) > 30 && <span className="absolute bottom-2 right-2 rounded bg-black/60 px-1.5 text-[10px] text-white">{pics[s.id].age}s ago</span>}
+                    {(streams[s.id] || screens[s.id]) && <span className="absolute right-2 top-2 flex items-center gap-1 rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-bold text-white"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />LIVE</span>}
+                    {!streams[s.id] && !screens[s.id] && pics[s.id]?.age != null && (pics[s.id].age as number) > 30 && <span className="absolute bottom-2 right-2 rounded bg-black/60 px-1.5 text-[10px] text-white">{pics[s.id].age}s ago</span>}
                   </div>
                   <div className="flex flex-1 flex-col gap-1.5 p-3">
                     <p className="truncate text-sm font-bold" title={s.student_name}>{s.student_name}</p>
@@ -284,7 +351,7 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
                     <div className="mt-auto flex flex-wrap gap-1.5 pt-1.5">
                       {(s.status === 'PAUSED' || s.status === 'LEFT') && <button type="button" className={`${btnDark} !min-h-9 !px-3 text-xs`} disabled={busy} onClick={() => act(() => call(`/sessions/${s.id}/resume`, 'POST'))}>Resume</button>}
                       {sound && streams[s.id] && <button type="button" className={`${listen === s.id ? btnDark : btn} !min-h-9 !px-3 text-xs`} onClick={() => setListen(listen === s.id ? null : s.id)}>{listen === s.id ? 'Stop listening' : 'Listen'}</button>}
-                      {s.status !== 'ENDED' && <button type="button" className={`${btn} !min-h-9 !px-3 text-xs !text-rose-700`} disabled={busy} onClick={() => { if (confirm(`End the test for ${s.student_name}?`)) void act(() => call(`/sessions/${s.id}/end`, 'POST')); }}>End</button>}
+                      {s.status !== 'ENDED' && <button type="button" className={needs(s) ? '!min-h-9 rounded-xl bg-rose-600 px-3 text-xs font-bold text-white hover:bg-rose-700 disabled:opacity-40' : `${btn} !min-h-9 !px-3 text-xs !text-rose-700`} disabled={busy} onClick={() => { if (confirm(`End the test for ${s.student_name}?`)) void act(() => call(`/sessions/${s.id}/end`, 'POST')); }}>End</button>}
                       <button type="button" className={`${btn} !min-h-9 !px-3 text-xs`} onClick={async () => { try { setLog({ name: s.student_name, rows: await call(`/sessions/${s.id}/violations`) }); } catch (e) { setErr(e instanceof Error ? e.message : 'Could not load.'); } }}>
                         {s.violation_count === 0 ? 'No problems' : `${s.violation_count} problem${s.violation_count === 1 ? '' : 's'}`}
                       </button>
