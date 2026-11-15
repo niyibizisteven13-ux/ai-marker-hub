@@ -27,7 +27,6 @@ import { AlignLeft, AtSign, Calendar, CheckSquare, ChevronDownSquare, CircleDot,
 import DynamicForm from './DynamicForm';
 import { copyToClipboard } from '../utils/copyToClipboard';
 import { authFetch } from '../utils/authFetch';
-import MySebPanel from './MySebPanel';
 
 /* ------------------------------------------------------------------ types */
 
@@ -424,6 +423,37 @@ const SparkIcon = () => (
 
 /* ------------------------------------------------------- small components */
 
+/** One choice instead of several switches: how students must take this test. */
+function SecureMode({ exam, set, formId }: { exam: ExamSettings; set: (p: Partial<ExamSettings>) => void; formId?: string }) {
+  const mode = exam.requireSeb ? 'seb' : exam.requireMyseb ? 'myseb' : 'normal';
+  const pick = (m: 'normal' | 'myseb' | 'seb') => set({ requireMyseb: m === 'myseb', requireSeb: m === 'seb' });
+  const card = (m: 'normal' | 'myseb' | 'seb', title: string, text: string) => (
+    <label key={m} className={`flex min-h-11 cursor-pointer items-start gap-3 rounded-xl border p-3 text-sm ${mode === m ? 'border-[var(--brand)] bg-[var(--brand)]/5' : 'border-[#E0E0E0] bg-white'}`}>
+      <input type="radio" name="secure-mode" checked={mode === m} onChange={() => pick(m)} className="mt-1 h-4 w-4 accent-[var(--brand)]" />
+      <span><span className="font-semibold text-[#202124]">{title}</span><span className="block text-xs text-[#5F6368]">{text}</span></span>
+    </label>
+  );
+  return (
+    <fieldset className="space-y-2">
+      <legend className="mb-1 text-sm font-semibold text-[#202124]">How students take this test</legend>
+      {card('normal', 'Normal', 'Anyone with the link, in any browser.')}
+      {card('myseb', 'MySEB (recommended)', 'Students use the MySEB app on a laptop or phone. Their device is locked, and you watch everyone live.')}
+      {card('seb', 'Safe Exam Browser', 'A free lockdown browser (safeexambrowser.org). Needs the key from its settings.')}
+      {mode === 'myseb' && (formId
+        ? <a href={`/live/form/${encodeURIComponent(formId)}`} className="flex min-h-11 items-center justify-center rounded-xl bg-[#B4502F] px-4 text-sm font-bold text-white hover:bg-[#C45A37]">Open live room: get the code and watch students</a>
+        : <p className="rounded-lg bg-[#F8F9FA] px-3 py-2 text-xs text-[#5F6368]">Save and publish the form first. Then you can open the live room and get the code.</p>)}
+      {mode === 'seb' && (
+        <div className="space-y-2">
+          {exam.sebKeys.length === 0 && <p role="alert" className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">Add the Browser Exam Key below, or nobody will be able to start this test.</p>}
+          <Field label="Browser Exam Key(s)" hint="In the SEB configuration tool, copy the Browser Exam Key (64 characters). One per line if students use more than one configuration. Keep it private: it is never sent to students.">
+            <textarea rows={2} className={`${inp} font-mono text-xs`} defaultValue={exam.sebKeys.join('\n')} onBlur={e => set({ sebKeys: e.target.value.split(/[\s,;]+/).filter(Boolean) as unknown as string[] })} placeholder="64 hexadecimal characters" />
+          </Field>
+        </div>
+      )}
+    </fieldset>
+  );
+}
+
 /** Timed test: length, camera rule and the class whose accommodations (extra time, no camera…) apply. */
 function ExamPanel({ exam, onChange, formId }: { exam: ExamSettings; onChange: (e: ExamSettings) => void; formId?: string }) {
   const [classes, setClasses] = useState<Array<{ id: string; name: string; code: string; students: number }>>([]);
@@ -434,8 +464,7 @@ function ExamPanel({ exam, onChange, formId }: { exam: ExamSettings; onChange: (
   const set = (patch: Partial<ExamSettings>) => onChange(normalizeExam({ ...exam, ...patch }));
   return (
     <div className="space-y-2">
-      <Toggle label="Require MySEB (secure exam app)" checked={exam.requireMyseb} onChange={v => set({ requireMyseb: v, ...(v ? { requireSeb: false } : {}) })} hint="Students can only open this test inside the MySEB app on a laptop or phone (or its Chrome extension). The device is locked, and leaving the test is recorded and can pause it. Works for any quiz or test, timed or not." />
-      {exam.requireMyseb && <MySebPanel base={formId ? `/api/forms/${encodeURIComponent(formId)}/myseb` : undefined} onExamId={(id) => onChange(normalizeExam({ ...exam, mysebExamId: id }))} />}
+      <SecureMode exam={exam} set={set} formId={formId} />
       <Toggle label="Timed test" checked={exam.enabled} onChange={v => set({ enabled: v })} hint="The server keeps the clock. Students start with their registration number, and their time, breaks and camera exemption come from your class list." />
       {exam.enabled && (
         <div className="space-y-3 rounded-lg border border-[#E0E0E0] bg-white p-3">
@@ -462,13 +491,6 @@ function ExamPanel({ exam, onChange, formId }: { exam: ExamSettings; onChange: (
           </Field>
           {(exam.leaveAction === 'pause' || exam.leaveAction === 'end') && (
             <Field label="Allowed times out of the page"><input type="number" min={1} max={20} className={inp} value={exam.maxLeaves} onChange={e => set({ maxLeaves: Number(e.target.value) })} /></Field>
-          )}
-          <Toggle label="Require Safe Exam Browser" checked={exam.requireSeb} onChange={v => set({ requireSeb: v, ...(v ? { requireMyseb: false } : {}) })} hint="A free lockdown browser (safeexambrowser.org) that blocks new tabs and other programs. Students must open the test inside it. Needs the key below." />
-          {exam.requireSeb && exam.sebKeys.length === 0 && <p role="alert" className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">Add the Browser Exam Key below, or nobody will be able to start this test.</p>}
-          {(exam.requireSeb || exam.sebKeys.length > 0) && (
-            <Field label="Browser Exam Key(s)" hint="In the SEB configuration tool, copy the Browser Exam Key (64 characters). One per line if students use more than one configuration. Keep it private: it is never sent to students.">
-              <textarea rows={2} className={`${inp} font-mono text-xs`} defaultValue={exam.sebKeys.join('\n')} onBlur={e => set({ sebKeys: e.target.value.split(/[\s,;]+/).filter(Boolean) as unknown as string[] })} placeholder="64 hexadecimal characters" />
-            </Field>
           )}
           <Toggle label="Require full screen" checked={exam.requireFullscreen} onChange={v => set({ requireFullscreen: v })} hint="Asks for full screen at the start; leaving it counts like leaving the page. Not available on every phone browser." />
           <Field label="Class" hint="Students on this class's list get their own accommodations. Choose a class to require that students are on the list.">

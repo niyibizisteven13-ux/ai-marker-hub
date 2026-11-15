@@ -84,6 +84,8 @@ const AssignmentsPage = React.lazy(() => import('./components/AssignmentsPage'))
 const FormsPage = React.lazy(() => import('./components/FormsPage'));
 const AssignmentSubmitPage = React.lazy(() => import('./pages/AssignmentSubmitPage'));
 const MySebRequired = React.lazy(() => import('./components/MySebRequired'));
+const MySebLiveReporter = React.lazy(() => import('./components/MySebLiveReporter'));
+const LiveRoom = React.lazy(() => import('./components/LiveRoom'));
 const ExamRunner = React.lazy(() => import('./components/ExamRunner'));
 const TaskResultPage = React.lazy(() => import('./pages/TaskResultPage'));
 type MarkIncoming = import('./components/MarkPage').MarkIncoming;
@@ -1726,6 +1728,11 @@ export default function App() {
     return <LearnPage onBack={() => { window.history.pushState({}, '', '/'); window.location.reload(); }} />;
   }
 
+  // The live room: every student in a MySEB test or hand-in, on one screen.
+  const liveMatch = window.location.pathname.match(/^\/live\/(form|task)\/([^/?#]+)\/?$/);
+  if (authenticatedUser && liveMatch) {
+    return <Suspense fallback={null}><LiveRoom kind={liveMatch[1] as 'form' | 'task'} id={decodeURIComponent(liveMatch[2])} onBack={() => { window.history.length > 1 ? window.history.back() : (window.location.href = liveMatch[1] === 'form' ? '/forms' : '/'); }} /></Suspense>;
+  }
   const studioMatch = window.location.pathname.match(/^\/forms\/([^/?#]+)\/edit\/?$/);
   if (authenticatedUser && studioMatch) {
     return <FormStudioPage formId={decodeURIComponent(studioMatch[1])} onBack={() => { window.location.href = '/forms'; }} />;
@@ -1864,6 +1871,7 @@ export default function App() {
               )}
             </Suspense>
           )}
+          {publicForm?.id && publicForm.exam?.requireMyseb && <Suspense fallback={null}><MySebLiveReporter kind="form" refId={publicForm.id} /></Suspense>}
           <p className="mx-auto mt-10 max-w-2xl text-center text-[11.5px] text-neutral-500">Made with Bwenge · Never share passwords in a form.</p>
         </main>
         </FormCanvas>

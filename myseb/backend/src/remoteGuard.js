@@ -66,7 +66,7 @@ export function remoteMySebGuard({ mysebUrl, serviceKey = undefined, examIdFor =
         const secure = req.secure || req.get('x-forwarded-proto') === 'https' ? '; Secure' : '';
         res.append('Set-Cookie', `myseb_s=${r.key}; Path=/; HttpOnly; SameSite=Lax${secure}`);
       }
-      req.myseb = { studentName: r.studentName, clientType: r.clientType };
+      req.myseb = { studentName: r.studentName, clientType: r.clientType, sessionId: r.sessionId };
       res.set('Cache-Control', 'no-store');
       next();
     } catch (e) {

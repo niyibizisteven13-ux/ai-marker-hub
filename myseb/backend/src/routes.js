@@ -4,6 +4,7 @@ import { q } from './db.js';
 import { config, safeEqual } from './config.js';
 import { newCode, parseCode, codeHash, secretHash, tokenHash, newToken, newSecret, rateLimit } from './security.js';
 import { authSession, recordViolation, VIOLATION_TYPES } from './sessions.js';
+import { forgetAllLive, forgetLive, getLive, saveLive } from './live.js';
 
 export const api = express.Router();
 const wrap = (fn) => (req, res, next) => fn(req, res, next).catch(next);
@@ -52,6 +53,7 @@ api.patch('/exams/:id', requireTeacher, wrap(async (req, res) => {
   if (typeof b.requireMyseb === 'boolean') add('require_myseb', b.requireMyseb);
   if (typeof b.allowExtension === 'boolean') add('allow_extension', b.allowExtension);
   if (['record', 'pause', 'end'].includes(b.leaveAction)) add('leave_action', b.leaveAction);
+  if (typeof b.liveFaces === 'boolean') add('live_faces', b.liveFaces);
   if (!sets.length) return res.status(400).json({ error: 'nothing to change' });
   const { rows } = await q(`UPDATE exams SET ${sets.join(',')} WHERE id=$1 RETURNING *`, vals);
   rows[0] ? res.json(rows[0]) : res.status(404).json({ error: 'not found' });
@@ -86,20 +88,39 @@ api.post('/exams/:id/end', requireTeacher, wrap(async (req, res) => {
   if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
   await q(`UPDATE exams SET status='ended', ends_at=now() WHERE id=$1`, [req.params.id]);
   await q(`UPDATE exam_codes SET expires_at=now(), revoked_at=now() WHERE exam_id=$1`, [req.params.id]);   // code expires when the exam ends
-  await q(`UPDATE exam_sessions SET status='ENDED', ended_at=now(), end_reason='exam_ended' WHERE exam_id=$1 AND status<>'ENDED'`, [req.params.id]);
+  const ended = await q(`UPDATE exam_sessions SET status='ENDED', ended_at=now(), end_reason='exam_ended' WHERE exam_id=$1 AND status<>'ENDED' RETURNING id`, [req.params.id]);
+  forgetAllLive(ended.rows.map((r) => r.id));
   res.json({ ok: true });
 }));
 
 api.get('/exams/:id/monitor', requireTeacher, wrap(async (req, res) => {
   if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
+  const ex = (await q('SELECT id, title, status, live_faces, require_myseb, leave_action FROM exams WHERE id=$1', [req.params.id])).rows[0];
+  if (!ex) return res.status(404).json({ error: 'not found' });
   const { rows } = await q(
     `SELECT s.id, s.student_name, s.status, s.client_type, s.platform, s.violation_count, s.pause_reason, s.end_reason,
             s.started_at, s.deadline_at, EXTRACT(EPOCH FROM (now() - s.last_heartbeat))::int AS seen_ago,
             (SELECT type FROM violations v WHERE v.session_id=s.id ORDER BY v.id DESC LIMIT 1) AS last_violation
        FROM exam_sessions s WHERE s.exam_id=$1 ORDER BY s.started_at`, [req.params.id]);
   const counts = { IN_EXAM: 0, PAUSED: 0, LEFT: 0, ENDED: 0 };
-  rows.forEach((r) => counts[r.status]++);
-  res.json({ counts, students: rows });
+  const students = rows.map((r) => {
+    counts[r.status]++;
+    const l = r.status === 'ENDED' ? null : getLive(r.id);
+    return { ...r, live: l ? { question: l.question, camera: l.camera, frame: ex.live_faces ? l.frame : null, frame_age: l.frameAt ? Math.round((Date.now() - l.frameAt) / 1000) : null } : null };
+  });
+  res.json({ exam: { id: ex.id, title: ex.title, status: ex.status, live_faces: ex.live_faces, leave_action: ex.leave_action }, counts, students });
+}));
+
+/** Pause everyone in the room at once (or let everyone back in). */
+api.post('/exams/:id/pause-all', requireTeacher, wrap(async (req, res) => {
+  if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
+  const r = await q(`UPDATE exam_sessions SET status='PAUSED', pause_reason='teacher' WHERE exam_id=$1 AND status='IN_EXAM'`, [req.params.id]);
+  res.json({ ok: true, changed: r.rowCount });
+}));
+api.post('/exams/:id/resume-all', requireTeacher, wrap(async (req, res) => {
+  if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
+  const r = await q(`UPDATE exam_sessions SET status='IN_EXAM', pause_reason=NULL, last_heartbeat=now() WHERE exam_id=$1 AND status IN ('PAUSED','LEFT')`, [req.params.id]);
+  res.json({ ok: true, changed: r.rowCount });
 }));
 
 api.get('/sessions/:id/violations', requireTeacher, wrap(async (req, res) => {
@@ -111,12 +132,23 @@ api.get('/sessions/:id/violations', requireTeacher, wrap(async (req, res) => {
 api.post('/sessions/:id/end', requireTeacher, wrap(async (req, res) => {
   if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
   await q(`UPDATE exam_sessions SET status='ENDED', ended_at=now(), end_reason='teacher' WHERE id=$1 AND status<>'ENDED'`, [req.params.id]);
+  forgetLive(req.params.id);
   res.json({ ok: true });
 }));
 api.post('/sessions/:id/resume', requireTeacher, wrap(async (req, res) => {
   if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
   await q(`UPDATE exam_sessions SET status='IN_EXAM', pause_reason=NULL, last_heartbeat=now() WHERE id=$1 AND status IN ('PAUSED','LEFT')`, [req.params.id]);
   res.json({ ok: true });
+}));
+
+/** The exam page (via bwenge) reports the question the student is on and, if the lecturer asked, a small camera picture. */
+api.post('/sessions/:id/live', requireTeacher, rateLimit({ windowMs: 60_000, max: 20_000, keyFn: () => 'live' }), wrap(async (req, res) => {
+  if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
+  const { rows } = await q(`SELECT s.status, e.live_faces FROM exam_sessions s JOIN exams e ON e.id=s.exam_id WHERE s.id=$1`, [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ error: 'not found' });
+  if (rows[0].status === 'ENDED') return res.json({ faces: false, status: 'ENDED' });
+  saveLive(req.params.id, req.body || {}, rows[0].live_faces);   // pictures are dropped on the spot when the lecturer has not asked for them
+  res.json({ faces: rows[0].live_faces, status: rows[0].status });
 }));
 
 /* ---------------------------------------------------------------- student apps */
@@ -219,11 +251,11 @@ api.post('/gate', rateLimit({ windowMs: 60_000, max: 6000 }), wrap(async (req, r
   if (service) {
     if (!safeEqual(service, config.teacherKey) || !isUuid(examId)) return res.status(401).json({ allowed: false, reason: 'unauthorized' });
     ({ rows } = await q(
-      `SELECT s.status, s.client_type, s.device_id, s.student_name, e.allow_extension, e.id AS exam_id
+      `SELECT s.id AS session_id, s.status, s.client_type, s.device_id, s.student_name, e.allow_extension, e.id AS exam_id
          FROM exam_sessions s JOIN exams e ON e.id=s.exam_id WHERE s.token_hash=$1 AND s.exam_id=$2`, [tokenHash(String(key)), examId]));
   } else {
     ({ rows } = await q(
-      `SELECT s.status, s.client_type, s.device_id, s.student_name, e.allow_extension, e.id AS exam_id
+      `SELECT s.id AS session_id, s.status, s.client_type, s.device_id, s.student_name, e.allow_extension, e.id AS exam_id
          FROM exam_sessions s JOIN exam_codes c ON c.id=s.code_id JOIN exams e ON e.id=s.exam_id
         WHERE s.token_hash=$1 AND c.secret_hash=$2`, [tokenHash(String(key)), secretHash(secret)]));
   }
@@ -232,5 +264,5 @@ api.post('/gate', rateLimit({ windowMs: 60_000, max: 6000 }), wrap(async (req, r
   const markerOk = s.client_type === 'extension' ? s.allow_extension && client === 'extension' : /MySEB\//.test(userAgent || '');
   if (client !== s.client_type || !markerOk || (s.client_type !== 'mobile' && device !== s.device_id)) return res.json({ allowed: false, reason: 'MySEB Needed' });
   if (s.status !== 'IN_EXAM') return res.json({ allowed: false, reason: s.status });
-  res.json({ allowed: true, studentName: s.student_name, examId: s.exam_id, clientType: s.client_type });
+  res.json({ allowed: true, studentName: s.student_name, examId: s.exam_id, clientType: s.client_type, sessionId: s.session_id });
 }));

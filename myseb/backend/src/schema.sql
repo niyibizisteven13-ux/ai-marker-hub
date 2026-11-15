@@ -55,3 +55,6 @@ CREATE TABLE IF NOT EXISTS violations (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS violations_session_idx ON violations(session_id, created_at DESC);
+
+-- Live room: the lecturer may ask for small camera pictures (kept in memory only, never in the database).
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS live_faces boolean NOT NULL DEFAULT false;

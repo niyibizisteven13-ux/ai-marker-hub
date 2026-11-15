@@ -28,6 +28,17 @@ Student: MySEB app/extension ─┴── opens https://bwenge…/forms/<id> ─
    `myseb/scripts/pack-extension.sh` zips the Chrome extension.
 4. Put the MySEB server's own `PUBLIC_URL` to its https address (QR codes use it).
 
+## The live room (one screen for the whole class)
+From a form's *How students take this test → MySEB → Open live room* (or the same button on a task) you get `/live/form/<id>`
+or `/live/task/<id>`: a tile per student with their camera picture (if you turned on *Camera pictures*), status, the question they
+are on (Q4 of 12 and its text), and Resume / End / "what happened". On top: **Get code for students** (code + QR),
+**Pause everyone**, **Let everyone continue**, **Camera pictures** on/off, **Needs attention** filter, **End test**.
+* The exam page tells the room where the student is (`MySebLiveReporter`, runs only inside MySEB): bwenge relays it to MySEB with the service key.
+* Camera pictures are **off by default**. When you turn them on, each student first sees a plain notice and must press *Turn on my camera*.
+  One small JPEG (about 5 KB) every 10 s, kept **in memory on the MySEB server only** (never in the database or on disk), replaced by the
+  next one, and forgotten when the student ends, the test ends, or 3 minutes pass. Check your school's rules and data-protection law before using it.
+* Choosing how students take a test is one choice in the form builder: **Normal / MySEB / Safe Exam Browser**.
+
 ## Assignments (hand-in links)
 Same switch on the task's dashboard: *Require MySEB (secure exam app)*. The task text, its files and the hand-in
 (`GET /api/assignments/public/:token`, `.../files/:index`, `POST .../submit`) answer 403 outside MySEB; the page shell

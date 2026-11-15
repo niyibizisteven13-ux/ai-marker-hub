@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { requireAuth } from '../../production/auth.js';
 import logger from '../utils/logger.js';
-import { MySebError, assignmentTarget, downloadLinks, endAll, formTarget, generateCode, monitor, mySebConfigured, sessionAction, violations, type TargetLoader } from '../services/mySeb.js';
+import { MySebError, assignmentTarget, downloadLinks, endAll, formTarget, generateCode, monitor, mySebConfigured, pauseAll, relayLive, resumeAll, sessionAction, setLiveFaces, violations, type TargetLoader } from '../services/mySeb.js';
 
 const userIdOf = (req: Request): string => (req as any).user?.userId;
 const run = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response) => {
@@ -21,6 +21,17 @@ export function createMySebPublicRouter() {
   return r;
 }
 
+/**
+ * The exam page reports where the student is. Mounted behind the MySEB guard, so only a live MySEB student gets this far
+ * (`req.myseb.sessionId`). A form or task that does not need MySEB just gets 204.
+ */
+export const liveReportHandler = (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const sid = (req as any).myseb?.sessionId;
+  if (!sid) return res.status(204).end();
+  relayLive(String(sid), req.body).then((r) => res.json(r)).catch(() => res.status(204).end());
+};
+
 /** Lecturer actions on one of their own forms (`/api/forms/:id/myseb/...`) or hand-in tasks (`/api/assignments/:id/myseb/...`). */
 function createMySebOwnerRouterFor(target: (userId: string, id: string) => TargetLoader) {
   const r = Router();
@@ -30,6 +41,9 @@ function createMySebOwnerRouterFor(target: (userId: string, id: string) => Targe
   r.get('/:id/myseb/sessions/:sid/violations', requireAuth, run(async (req, res) => { res.json(await violations(t(req), p(req, 'sid'))); }));
   r.post('/:id/myseb/sessions/:sid/resume', requireAuth, run(async (req, res) => { res.json(await sessionAction(t(req), p(req, 'sid'), 'resume')); }));
   r.post('/:id/myseb/sessions/:sid/end', requireAuth, run(async (req, res) => { res.json(await sessionAction(t(req), p(req, 'sid'), 'end')); }));
+  r.post('/:id/myseb/pause-all', requireAuth, run(async (req, res) => { res.json(await pauseAll(t(req))); }));
+  r.post('/:id/myseb/resume-all', requireAuth, run(async (req, res) => { res.json(await resumeAll(t(req))); }));
+  r.post('/:id/myseb/settings', requireAuth, run(async (req, res) => { res.json(await setLiveFaces(t(req), req.body?.liveFaces === true)); }));
   r.post('/:id/myseb/end', requireAuth, run(async (req, res) => { res.json(await endAll(t(req))); }));
   return r;
 }
