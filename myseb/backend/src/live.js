@@ -82,3 +82,6 @@ export function sweepSignals() {
     if (!b.msgs.length && !b.waiters.size) boxes.delete(k);
   }
 }
+
+/** Sizes of the in-memory stores, for monitoring. */
+export const liveStats = () => ({ reports: store.size, mailboxes: boxes.size });

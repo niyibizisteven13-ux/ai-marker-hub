@@ -23,3 +23,8 @@ They see every test and task of the class gradebook with their mark, a correctio
 * **Copy all links** (ID, name, link) pastes into Excel or a message. **New link** replaces a leaked link; the old one stops working at once.
 * Students are matched by registration number, then by name, the same way the gradebook does. Keep the link private: anyone with it sees that student's released marks.
 * Storage: `TRANSCRIPTS_DIR` (default `./data/transcripts`).
+
+## Marks in Excel, explanations and the MySEB report
+* **Marks (Excel)** on a quiz's Results page: a file with **Results** (every attempt, total, percent, the mark for each question), **Questions** (how many got each right, the right answer, the most common wrong answer: which questions the class got wrong) and **Summary** (average, median, highest, lowest, pass rate). Each student counts once, by their latest attempt. Marks are recalculated from the **current** answer key, so fixing a key and exporting again corrects every student. Long answers are not included (you mark them).
+* **Explanations**: each quiz question can have an explanation ("why the answer is right"). Students see it **after they submit**, next to the correct answer, only if you show answers; it is never in the public form. Upload-a-file fills it in from your file (short, using only the file).
+* **MySEB report**: in the live room, **Download report (Excel)** gives a summary per student and a time-ordered timeline of everything the app saw (left the screen, lost connection, a second screen, a remote or recording app...). It is a record to weigh in a dispute, not proof, and holds no pictures, video or sound.

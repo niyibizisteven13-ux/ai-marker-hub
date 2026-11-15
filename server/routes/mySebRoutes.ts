@@ -1,7 +1,8 @@
 import { Router, type Request, type Response } from 'express';
 import { requireAuth } from '../../production/auth.js';
+import { reportWorkbook } from '../services/mySebReport.js';
 import logger from '../utils/logger.js';
-import { MySebError, assignmentTarget, downloadLinks, endAll, formTarget, frames, generateCode, iceServers, lecturerSignalPull, lecturerSignalPush, monitor, mySebConfigured, pauseAll, relayLive, resumeAll, sessionAction, setLiveMode, studentSignalPull, studentSignalPush, violations, type TargetLoader } from '../services/mySeb.js';
+import { MySebError, assignmentTarget, downloadLinks, endAll, formTarget, frames, generateCode, iceServers, lecturerSignalPull, lecturerSignalPush, monitor, report, mySebConfigured, pauseAll, relayLive, resumeAll, sessionAction, setLiveMode, studentSignalPull, studentSignalPush, violations, type TargetLoader } from '../services/mySeb.js';
 
 const userIdOf = (req: Request): string => (req as any).user?.userId;
 const run = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response) => {
@@ -58,6 +59,12 @@ function createMySebOwnerRouterFor(target: (userId: string, id: string) => Targe
   r.get('/:id/myseb/sessions/:sid/violations', requireAuth, run(async (req, res) => { res.json(await violations(t(req), p(req, 'sid'))); }));
   r.post('/:id/myseb/sessions/:sid/resume', requireAuth, run(async (req, res) => { res.json(await sessionAction(t(req), p(req, 'sid'), 'resume')); }));
   r.post('/:id/myseb/sessions/:sid/end', requireAuth, run(async (req, res) => { res.json(await sessionAction(t(req), p(req, 'sid'), 'end')); }));
+  r.get('/:id/myseb/report.xlsx', requireAuth, run(async (req, res) => {
+    const file = await reportWorkbook(await report(t(req)));
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${file.name.replace(/[^\x20-\x7e]/g, '_').replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(file.name)}`);
+    res.end(file.data);
+  }));
   r.post('/:id/myseb/pause-all', requireAuth, run(async (req, res) => { res.json(await pauseAll(t(req))); }));
   r.post('/:id/myseb/resume-all', requireAuth, run(async (req, res) => { res.json(await resumeAll(t(req))); }));
   r.post('/:id/myseb/settings', requireAuth, run(async (req, res) => {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import FormResponses from '../components/FormResponses';
 import ExamMonitor from '../components/ExamMonitor';
-import { AlertTriangle, ArrowLeft, CircleCheck, Download, Loader2 } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, CircleCheck, Download, FileSpreadsheet, Loader2 } from 'lucide-react';
 import FormBuilder from '../components/FormBuilder';
 import AskBwengeDrawer from '../components/AskBwengeDrawer';
 import { authFetch } from '../utils/authFetch';
@@ -67,6 +67,28 @@ function SummaryCard({ s }: { s: any }) {
 }
 
 /** After "Upload a file, get a quiz": what to check before publishing. Shown until the lecturer dismisses it. */
+/** A quiz's marks as an Excel file. The request carries the sign-in, so it is fetched and saved, not opened as a plain link. */
+function MarksExcel({ formId, title }: { formId: string; title: string }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const run = async () => {
+    setBusy(true); setError(null);
+    try {
+      const r = await authFetch(`/api/forms/${encodeURIComponent(formId)}/results/export.xlsx`);
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Could not make the Excel file.');
+      const url = URL.createObjectURL(await r.blob());
+      const a = document.createElement('a'); a.href = url; a.download = `${title || 'Quiz'} marks.xlsx`; a.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not make the Excel file.'); } finally { setBusy(false); }
+  };
+  return (
+    <>
+      <button type="button" disabled={busy} onClick={() => void run()} className="inline-flex items-center gap-2 rounded-xl bg-[#B4502F] px-3.5 py-2 text-sm font-semibold text-white hover:bg-[#C45A37] disabled:opacity-60">{busy ? <Loader2 size={15} className="animate-spin" /> : <FileSpreadsheet size={15} />}Marks (Excel)</button>
+      {error && <span role="alert" className="text-xs font-semibold text-rose-700">{error}</span>}
+    </>
+  );
+}
+
 export function ImportReview({ schema, formId }: { schema: any; formId: string }) {
   const key = `bwenge:import-review:${formId}`;
   const [hidden, setHidden] = useState(() => { try { return localStorage.getItem(key) === '1'; } catch { return false; } });
@@ -216,6 +238,7 @@ export default function FormStudioPage({ formId, onBack }: { formId: string; onB
 
           <section className="flex flex-wrap items-center gap-2">
             <a href={`/api/forms/${formId}/results/export.csv`} className="inline-flex items-center gap-2 rounded-xl border border-[#DADCE0] bg-white px-3.5 py-2 text-sm font-medium hover:bg-[#F8F9FA]"><Download size={15} /> Responses (CSV)</a>
+            {data.form.schema?.isQuiz && <MarksExcel formId={formId} title={String(data.form.schema?.title || data.form.title || '')} />}
             {data.form.open && <a href={data.links.fill} target="_blank" rel="noreferrer" className="rounded-xl border border-[#DADCE0] bg-white px-3.5 py-2 text-sm font-medium hover:bg-[#F8F9FA]">Open the form</a>}
             <span className="text-xs text-[#5F6368]">For the HTML report and the Excel file with the data dictionary, ask Bwenge.</span>
           </section>

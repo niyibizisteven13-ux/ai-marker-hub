@@ -63,6 +63,8 @@ type Question = {
   required: boolean;
   points?: number;
   correctAnswer?: string | string[];
+  /** Why the answer is right. Students see it after they submit, never before. */
+  explanation?: string;
   options: string[];
   rows: string[];
   columns: string[];
@@ -244,6 +246,7 @@ export function fromSchema(input: any): BuilderState {
       required: !!f.required,
       points: f.points !== undefined ? Number(f.points) : undefined,
       correctAnswer: f.correctAnswer,
+      explanation: typeof f.explanation === 'string' ? f.explanation : undefined,
       options: GRID.has(type) ? [] : labels,
       rows: f.rows || q.rows,
       columns: GRID.has(type) ? (f.columns?.length ? f.columns : labels) : [],
@@ -329,6 +332,7 @@ export function buildSchema(s: BuilderState): any {
       if (it.points) f.points = it.points;
       const a = it.correctAnswer;
       if (Array.isArray(a) ? a.length : a) f.correctAnswer = a;
+      if (typeof it.explanation === 'string' && it.explanation.trim()) f.explanation = it.explanation.trim().slice(0, 600);
     }
     if (it.imageUrl) f.imageUrl = it.imageUrl;
     if (it.showIf && s.items.some((x) => x.kind === 'question' && x.id === it.showIf!.fieldId)) f.showIf = it.showIf;
@@ -858,6 +862,9 @@ function QuestionEditor({ q, quiz, patch, uploadFile }: {
               )
             ) : <p className="self-end text-xs text-[#5F6368]">This question type is not graded automatically.</p>}
           </div>
+          <Field label="Explanation (optional)" hint="Why the answer is right. Students see it after they submit, next to the correct answer, never before.">
+            <textarea rows={2} maxLength={600} className={inp} value={q.explanation ?? ''} onChange={e => patch({ explanation: e.target.value })} placeholder="e.g. Mitochondria release energy from glucose, so they are called the powerhouse of the cell." />
+          </Field>
         </div>
       )}
 

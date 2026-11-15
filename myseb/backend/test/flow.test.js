@@ -348,3 +348,26 @@ test('limits: the service key is not rate limited (one school, thousands of stud
   const allowed = guess.filter((c) => c !== 429).length;   // earlier tests already used a few of the 600
   assert.ok(allowed >= 570 && allowed <= 600, `allowed ${allowed}`); assert.ok(guess.slice(-10).every((c) => c === 429), 'secret guessing is stopped after 600 a minute');
 });
+
+test('the report lists every student and a time-ordered timeline, and never carries pictures', async () => {
+  const ex = (await call('/api/exams', { method: 'POST', headers: T, body: { title: 'Report me', leaveAction: 'pause' } })).json;
+  const c = (await call(`/api/exams/${ex.id}/generate-code`, { method: 'POST', headers: T })).json;
+  const a = (await call('/api/verify-code', { method: 'POST', body: { code: c.code, studentName: 'Zed', deviceId: 'dev-zed-report', clientType: 'desktop', platform: 'win32' } })).json;
+  const b = (await call('/api/verify-code', { method: 'POST', body: { code: c.code, studentName: 'Amy', deviceId: 'dev-amy-report', clientType: 'mobile', platform: 'android' } })).json;
+  await call(`/api/exams/${ex.id}`, { method: 'PATCH', headers: T, body: { liveMode: 'pictures' } });
+  await call(`/api/sessions/${a.sessionId}/live`, { method: 'POST', headers: T, body: { camera: 'on', frame: 'data:image/jpeg;base64,/9j/4AAQ' } });
+  await call('/api/violation', { method: 'POST', headers: mk(a, 'dev-zed-report'), body: { type: 'leave', detail: { thresholdMs: 1500 } } });
+  await new Promise((r) => setTimeout(r, 20));
+  await call('/api/violation', { method: 'POST', headers: mk(a, 'dev-zed-report'), body: { type: 'copy' } });
+  await call(`/api/sessions/${b.sessionId}/end`, { method: 'POST', headers: T });
+  const rep = await call(`/api/exams/${ex.id}/report`, { headers: T });
+  assert.equal(rep.status, 200);
+  const r = rep.json;
+  assert.deepEqual(r.students.map((s) => s.student_name), ['Amy', 'Zed'], 'sorted by name');
+  assert.deepEqual(r.students.map((s) => [s.status, s.end_reason, s.violation_count]), [['ENDED', 'teacher', 0], ['PAUSED', null, 2]]);
+  assert.deepEqual(r.events.map((e) => e.type), ['leave', 'copy']); assert.deepEqual(r.events[0].detail, { thresholdMs: 1500 });
+  assert.ok(new Date(r.events[0].created_at) <= new Date(r.events[1].created_at));
+  assert.ok(!JSON.stringify(r).includes('base64') && !JSON.stringify(r).includes('frame'), 'no pictures in the record');
+  assert.equal((await call(`/api/exams/${ex.id}/report`)).status, 401);
+  assert.equal((await call(`/api/exams/00000000-0000-4000-8000-000000000009/report`, { headers: T })).status, 404);
+});
