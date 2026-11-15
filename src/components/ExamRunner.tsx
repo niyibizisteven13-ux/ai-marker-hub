@@ -108,12 +108,39 @@ export default function ExamRunner({ schema, uploadFile, onSubmit }: Props) {
     }
   });
 
-  // Leaving the page is recorded (the lecturer sees it; it never changes a mark).
+  // Leaving the page is recorded (the lecturer sees it; it never changes a mark). A page cannot stop a new tab or
+  // another program, but it can see that this window lost focus (another tab, another window, another app) and
+  // keep the obvious shortcuts from working. A lockdown browser (Safe Exam Browser) is what really blocks them.
   useEffect(() => {
     if (phase !== 'running') return;
-    const onVis = () => sendEvent(document.hidden ? 'tab_hidden' : 'tab_back');
+    let away = false, timer = 0, lastShortcut = 0;
+    const out = () => { if (!away) { away = true; sendEvent('tab_hidden'); } };
+    const back = () => { window.clearTimeout(timer); if (away) { away = false; sendEvent('tab_back'); } };
+    const onVis = () => (document.hidden ? out() : back());
+    // Losing focus for a moment (a notification) is ignored: it counts after 1.5 seconds.
+    const onBlur = () => { window.clearTimeout(timer); timer = window.setTimeout(() => { if (!document.hasFocus()) out(); }, 1500); };
+    const blocked = () => { const now = Date.now(); if (now - lastShortcut > 1000) { lastShortcut = now; sendEvent('shortcut_blocked'); } };
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
+      // Print, save, view source, find, developer tools, new window; and the developer-tools key.
+      if ((mod && ['p', 's', 'u', 'f', 'o'].includes(k)) || (mod && e.shiftKey && ['i', 'j', 'c', 'n', 'p'].includes(k)) || e.key === 'F12' || (e.altKey && e.key === 'Tab' && false)) { e.preventDefault(); blocked(); }
+    };
+    const onKeyUp = (e: KeyboardEvent) => { if (e.key === 'PrintScreen') { void navigator.clipboard?.writeText('').catch(() => undefined); blocked(); } };
+    const onMenu = (e: Event) => { e.preventDefault(); blocked(); };
+    const onUnload = (e: BeforeUnloadEvent) => { if (!submitted.current) { e.preventDefault(); e.returnValue = ''; } };
     document.addEventListener('visibilitychange', onVis);
-    return () => document.removeEventListener('visibilitychange', onVis);
+    window.addEventListener('blur', onBlur); window.addEventListener('focus', back);
+    window.addEventListener('keydown', onKey, true); window.addEventListener('keyup', onKeyUp);
+    document.addEventListener('contextmenu', onMenu);
+    window.addEventListener('beforeunload', onUnload);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('blur', onBlur); window.removeEventListener('focus', back);
+      window.removeEventListener('keydown', onKey, true); window.removeEventListener('keyup', onKeyUp);
+      document.removeEventListener('contextmenu', onMenu);
+      window.removeEventListener('beforeunload', onUnload);
+    };
   }, [phase, sendEvent]);
 
   // Full screen (when the creator asks for it): leaving it is recorded like leaving the page.
@@ -175,6 +202,20 @@ export default function ExamRunner({ schema, uploadFile, onSubmit }: Props) {
   const submitAnswers = useCallback((answers: any) => onSubmit({ ...answers, _exam: sess.current ? { sid: sess.current.sid, token: sess.current.secret } : undefined }), [onSubmit]);
 
   /* ------------------------------------------------------------ views */
+  // Tests that need Safe Exam Browser cannot be started in a normal browser.
+  const inSeb = /\bSEB\b/.test(navigator.userAgent);
+  if (phase === 'intro' && exam.requireSeb && !inSeb) {
+    return (
+      <div className="mx-auto max-w-xl">
+        <section className={`${card} space-y-3`}>
+          <p className="flex items-center gap-2 text-sm font-semibold text-slate-600"><ShieldCheck size={16} />Safe Exam Browser needed</p>
+          <h1 className="text-2xl font-bold text-slate-900">{schema.title}</h1>
+          <p className="text-sm leading-relaxed text-slate-700">This test can only be taken in <strong>Safe Exam Browser</strong>, a free program that keeps the exam on your screen. Install it, then open this link inside it. Your lecturer or invigilator will tell you how.</p>
+          <a href="https://safeexambrowser.org/download_en.html" target="_blank" rel="noreferrer" className="inline-block rounded-xl bg-slate-900 px-5 py-3 font-semibold text-white">Download Safe Exam Browser</a>
+        </section>
+      </div>
+    );
+  }
   if (phase === 'intro') {
     return (
       <div className="mx-auto max-w-xl space-y-4">

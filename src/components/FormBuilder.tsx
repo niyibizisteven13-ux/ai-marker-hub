@@ -460,6 +460,13 @@ function ExamPanel({ exam, onChange }: { exam: ExamSettings; onChange: (e: ExamS
           {(exam.leaveAction === 'pause' || exam.leaveAction === 'end') && (
             <Field label="Allowed times out of the page"><input type="number" min={1} max={20} className={inp} value={exam.maxLeaves} onChange={e => set({ maxLeaves: Number(e.target.value) })} /></Field>
           )}
+          <Toggle label="Require Safe Exam Browser" checked={exam.requireSeb} onChange={v => set({ requireSeb: v })} hint="A free lockdown browser (safeexambrowser.org) that blocks new tabs and other programs. Students must open the test inside it. Needs the key below." />
+          {exam.requireSeb && exam.sebKeys.length === 0 && <p role="alert" className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">Add the Browser Exam Key below, or nobody will be able to start this test.</p>}
+          {(exam.requireSeb || exam.sebKeys.length > 0) && (
+            <Field label="Browser Exam Key(s)" hint="In the SEB configuration tool, copy the Browser Exam Key (64 characters). One per line if students use more than one configuration. Keep it private: it is never sent to students.">
+              <textarea rows={2} className={`${inp} font-mono text-xs`} defaultValue={exam.sebKeys.join('\n')} onBlur={e => set({ sebKeys: e.target.value.split(/[\s,;]+/).filter(Boolean) as unknown as string[] })} placeholder="64 hexadecimal characters" />
+            </Field>
+          )}
           <Toggle label="Require full screen" checked={exam.requireFullscreen} onChange={v => set({ requireFullscreen: v })} hint="Asks for full screen at the start; leaving it counts like leaving the page. Not available on every phone browser." />
           <Field label="Class" hint="Students on this class's list get their own accommodations. Choose a class to require that students are on the list.">
             <select className={inp} value={exam.courseId ?? ''} onChange={e => set({ courseId: e.target.value || undefined })}>

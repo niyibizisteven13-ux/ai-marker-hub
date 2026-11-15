@@ -26,6 +26,8 @@ export interface ExamSession {
   status: ExamStatus; pause: PauseInfo | null; endedAt?: number; submittedAt?: number;
   camera: CameraRule; graceSeconds: number;
   leaveAction: LeaveAction; maxLeaves: number; requireFullscreen: boolean; leaves: number;
+  /** Safe Exam Browser: when required, every request of this session must carry a valid header (the keys stay on the server). */
+  seb?: { keys: string[] };
   accommodations: Accommodation | null;
   events: ExamEvent[];
   /** The lecturer let this student back in: the next start returns this session with a new secret. */
@@ -36,7 +38,7 @@ export class ExamError extends Error {
   constructor(public code: string, message: string, public status = 400) { super(message); }
 }
 
-const EVENT_TYPES = new Set(['fullscreen_exit', 'fullscreen_back', 'face_lost', 'face_back', 'multiple_faces', 'camera_denied', 'camera_stopped', 'camera_ok', 'tab_hidden', 'tab_back', 'offline', 'online']);
+const EVENT_TYPES = new Set(['shortcut_blocked', 'fullscreen_exit', 'fullscreen_back', 'face_lost', 'face_back', 'multiple_faces', 'camera_denied', 'camera_stopped', 'camera_ok', 'tab_hidden', 'tab_back', 'offline', 'online']);
 const MAX_EVENTS = 600;
 const SUBMIT_GRACE_MS = 90_000;
 const clean = (s: unknown, max: number) => (typeof s === 'string' ? s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').trim().slice(0, max) : '');
@@ -127,7 +129,7 @@ export function createFormExamService(deps: {
   function summary(r: ExamSession) {
     const count = (type: string) => r.events.filter((e) => e.type === type).length;
     const awaySeconds = r.events.filter((e) => e.type === 'face_back').reduce((n, e) => n + (Number(e.detail) || 0), 0);
-    return { faceLost: count('face_lost'), multipleFaces: count('multiple_faces'), cameraProblems: count('camera_denied') + count('camera_stopped'), tabHidden: count('tab_hidden'), pauses: count('paused'), awaySeconds, leaves: r.leaves ?? 0 };
+    return { faceLost: count('face_lost'), multipleFaces: count('multiple_faces'), cameraProblems: count('camera_denied') + count('camera_stopped'), tabHidden: count('tab_hidden'), pauses: count('paused'), awaySeconds, leaves: r.leaves ?? 0, shortcuts: count('shortcut_blocked') };
   }
 
   async function listForm(formId: string): Promise<ExamSession[]> {
@@ -139,9 +141,10 @@ export function createFormExamService(deps: {
   }
 
   return {
-    async start(formId: string, input: { studentId?: unknown; name?: unknown }) {
+    async start(formId: string, input: { studentId?: unknown; name?: unknown }, meta?: { seb?: (keys: string[]) => boolean }) {
       const form = await deps.forms(formId);
       if (!form || !form.exam.enabled) throw new ExamError('NOT_AN_EXAM', 'This form is not a timed test.', 404);
+      if (form.exam.requireSeb && !meta?.seb?.(form.exam.sebKeys)) throw new ExamError('SEB_REQUIRED', 'This test must be opened in Safe Exam Browser.', 403);
       const studentId = clean(input.studentId, 40);
       if (!studentId) throw new ExamError('ID_REQUIRED', 'Enter your registration number.');
       let name = clean(input.name, 80);
@@ -175,6 +178,7 @@ export function createFormExamService(deps: {
         studentId, studentName: name, startedAt: t, baseMs, extraMs, usedMs: 0, runningSince: t,
         status: 'running', pause: null, camera: exempt ? 'off' : form.exam.camera, graceSeconds: form.exam.graceSeconds,
         leaveAction: form.exam.leaveAction, maxLeaves: form.exam.maxLeaves, requireFullscreen: form.exam.requireFullscreen, leaves: 0,
+        ...(form.exam.requireSeb ? { seb: { keys: form.exam.sebKeys } } : {}),
         accommodations: acc, events: [{ t, type: 'started', by: 'student' }],
       };
       if (exempt && form.exam.camera !== 'off') r.events.push({ t, type: 'camera_exempt', by: 'system' });
@@ -184,6 +188,12 @@ export function createFormExamService(deps: {
       await fs.mkdir(indexDir(formId), { recursive: true, mode: 0o700 });
       await fs.writeFile(path.join(indexDir(formId), r.id), '', { mode: 0o600 });
       return { ...publicView(r), secret: r.token };
+    },
+
+    /** Refuses a request that does not come from Safe Exam Browser when the test requires it. Call before anything else on a session. */
+    async sebGuard(sid: string, check: (keys: string[]) => boolean) {
+      const r = await read(sid);
+      if (r.seb && !check(r.seb.keys)) throw new ExamError('SEB_REQUIRED', 'This test must be opened in Safe Exam Browser.', 403);
     },
 
     /** The student's page asks for the state (and so keeps the session alive). */

@@ -68,19 +68,58 @@ export class OwnedRecordStore<T extends OwnedRecord> {
     }
   }
 
+  /**
+   * Changes happen one at a time per record: a class handing in together would otherwise read the same version,
+   * each add their own work, and the last write would erase the others. The lock works inside this process (a
+   * queue) and between servers sharing the folder (an exclusive lock file that is cleared if its owner died).
+   */
+  private tails = new Map<string, Promise<unknown>>();
+  private async locked<R>(id: string, fn: () => Promise<R>): Promise<R> {
+    const before = this.tails.get(id) ?? Promise.resolve();
+    let done!: () => void;
+    const mine = new Promise<void>((r) => { done = r; });
+    const tail = before.then(() => mine);
+    this.tails.set(id, tail);
+    await before.catch(() => undefined);
+    const lock = `${this.file(id)}.lock`;
+    try {
+      await fs.mkdir(this.dir, { recursive: true, mode: 0o700 });
+      const deadline = Date.now() + 20_000;
+      for (;;) {
+        try { await (await fs.open(lock, 'wx')).close(); break; } catch (e) {
+          if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+          const age = await fs.stat(lock).then((st) => Date.now() - st.mtimeMs).catch(() => 0);
+          if (age > 15_000) { await fs.rm(lock, { force: true }); continue; }
+          if (Date.now() > deadline) throw new Error('This record is busy. Try again.');
+          await new Promise((r) => setTimeout(r, 10 + Math.random() * 30));
+        }
+      }
+      try { return await fn(); } finally { await fs.rm(lock, { force: true }).catch(() => undefined); }
+    } finally {
+      done();
+      if (this.tails.get(id) === tail) this.tails.delete(id);
+    }
+  }
+
   async update(id: string, ownerId: string, patch: (rec: T) => T | void): Promise<T | null> {
-    const rec = await this.get(id, ownerId);
-    if (!rec) return null;
-    const next = (patch(rec) ?? rec) as T;
-    next.updatedAt = new Date().toISOString();
-    await this.write(next);
-    return next;
+    if (!ID_RE.test(id)) return null;
+    return this.locked(id, async () => {
+      const rec = await this.get(id, ownerId);
+      if (!rec) return null;
+      const next = (patch(rec) ?? rec) as T;
+      next.updatedAt = new Date().toISOString();
+      await this.write(next);
+      return next;
+    });
   }
 
   async delete(id: string, ownerId: string): Promise<boolean> {
-    if (!(await this.get(id, ownerId))) return false;
-    await fs.rm(this.file(id), { force: true });
-    return true;
+    if (!ID_RE.test(id)) return false;
+    return this.locked(id, async () => {
+      if (!(await this.get(id, ownerId))) return false;
+      await fs.rm(this.file(id), { force: true });
+      return true;
+    });
   }
 
   /** The owner's unexpired records, newest first (scans the directory; fine for per-user lists of modest size). */

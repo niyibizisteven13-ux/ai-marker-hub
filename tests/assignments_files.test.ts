@@ -103,3 +103,68 @@ test('a video or recording alone is kept but is not turned into pages', async ()
   const out = await svc.prepareMarking('t1', a.id).catch((e) => e);
   assert.match(String(out.message ?? out.skipped?.[0]?.reason), /voice recording or video|None of the submissions/);
 });
+
+// ── Code tests on a task ─────────────────────────────────────────────────────────────
+import { localUnsafeRunner } from '../server/services/codeRunner/local.js';
+const codeSvc = createAssignmentService({ store: new OwnedRecordStore<AssignmentRecord>(path.join(dir, 'rc')), files, tokenDir: path.join(dir, 'lc'), baseUrl: () => 'https://x.test', codeRunner: async () => ({ runner: localUnsafeRunner, reason: 'test' }) });
+const noRunnerSvc = createAssignmentService({ store: new OwnedRecordStore<AssignmentRecord>(path.join(dir, 'rn')), files, tokenDir: path.join(dir, 'ln'), baseUrl: () => 'https://x.test', codeRunner: async () => ({ runner: null, reason: 'Code testing needs Docker on the server.' }) });
+const waitFor = async (fn: () => Promise<boolean>, ms = 90000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await fn()) return; await new Promise((r) => setTimeout(r, 100)); } throw new Error('timed out waiting'); };
+const tests = { language: 'python', showStudents: 'full', tests: [{ name: 'sum', input: '2 3', expected: '5', points: 4 }, { name: 'hidden', input: '10 20', expected: '30', points: 6, hidden: true }] };
+
+test('a task with code tests: the program is run when handed in, marked by the tests, and shown to the lecturer and the student', async () => {
+  await assert.rejects(codeSvc.create('t1', { title: 'Bad', instructions: 'x', codeTests: { language: 'python', tests: [] } }), /at least one test/);
+  const a = await codeSvc.create('t1', { title: 'Sum two numbers', instructions: 'Read two numbers and print their sum.', codeTests: tests });
+  const token = tokenOf(a.link);
+  const pub = await codeSvc.publicView(token);
+  assert.deepEqual([pub.codeLanguage, pub.codeMain], ['Python', 'main.py']);
+  assert.ok(!JSON.stringify(pub).includes('"expected"'), 'the tests are not sent to students');
+  const good = await codeSvc.submit(token, { studentName: 'Uwase', studentId: 'S1', files: [{ name: 'main.py', data: Buffer.from('a, b = map(int, input().split())\nprint(a + b)\n') }] });
+  assert.equal(good.codeTests, true);
+  await codeSvc.submit(token, { studentName: 'Eric', studentId: 'S2', files: [{ name: 'main.py', data: Buffer.from('a, b = map(int, input().split())\nprint(a * b)\n') }] });
+  // Typed code counts too (no file was sent).
+  await codeSvc.submit(token, { studentName: 'Keza', studentId: 'S3', text: 'a, b = map(int, input().split())\nprint(a + b)\n' });
+  // A whole folder.
+  const z = new JSZip(); z.file('proj/main.py', 'from util import add\na, b = map(int, input().split())\nprint(add(a, b))\n'); z.file('proj/util.py', 'def add(a, b):\n    return a + b\n');
+  await codeSvc.submit(token, { studentName: 'Divine', studentId: 'S4', files: [{ name: 'proj.zip', data: Buffer.from(await z.generateAsync({ type: 'nodebuffer' })) }] });
+  await waitFor(async () => (await codeSvc.get('t1', a.id)).submissions.every((s: any) => s.marking?.state === 'marked'));
+  const dash = await codeSvc.get('t1', a.id);
+  const by: any = Object.fromEntries(dash.submissions.map((s: any) => [s.studentId, s]));
+  assert.deepEqual([by.S1.marking.total, by.S1.marking.maxTotal, by.S1.marking.percent], [10, 10, 100]);
+  assert.deepEqual([by.S2.marking.total, by.S2.marking.percent], [0, 0]);
+  assert.equal(by.S3.marking.percent, 100, 'typed code');
+  assert.equal(by.S4.marking.percent, 100, 'a folder with two files');
+  assert.equal(by.S1.codeResult.tests.length, 2);
+  assert.equal(by.S2.codeResult.tests[0].got, '6', 'the lecturer sees what the program printed');
+  // What the student sees: their own result, the hidden test without its answer.
+  const result: any = await codeSvc.publicResult(token, (await (codeSvc as any).get('t1', a.id)).submissions.find((s: any) => s.studentId === 'S2').resultLink.split('/result/')[1]);
+  assert.equal(result.state, 'code');
+  assert.deepEqual([result.code.passed, result.code.total], [0, 2]);
+  assert.equal(result.code.tests[1].expected, undefined, 'a hidden test keeps its answer back');
+  assert.equal(result.code.tests[0].expected, '5');
+});
+
+test('code tests can be changed and run again by the lecturer; without a runner the reason is clear; students may be shown nothing', async () => {
+  const a = await codeSvc.create('t1', { title: 'Rerun', instructions: 'x', codeTests: { ...tests, showStudents: 'none' } });
+  const token = tokenOf(a.link);
+  await codeSvc.submit(token, { studentName: 'A', studentId: 'R1', files: [{ name: 'main.py', data: Buffer.from('print(5)\n') }] });
+  await waitFor(async () => (await codeSvc.get('t1', a.id)).submissions[0].marking?.state === 'marked');
+  const one: any = (await codeSvc.get('t1', a.id)).submissions[0];
+  const res: any = await codeSvc.publicResult(token, one.resultLink.split('/result/')[1]);
+  assert.deepEqual(res.code, { hidden: true });
+  // The lecturer fixes a wrong expected output, and runs the tests again.
+  await codeSvc.update('t1', a.id, { codeTests: { language: 'python', tests: [{ input: '', expected: '5', points: 3 }] } });
+  assert.deepEqual(await codeSvc.runTests('t1', a.id), { started: 1 });
+  await waitFor(async () => (await codeSvc.get('t1', a.id)).submissions[0].marking?.maxTotal === 3);
+  assert.equal((await codeSvc.get('t1', a.id)).submissions[0].marking?.percent, 100);
+  await codeSvc.update('t1', a.id, { codeTests: null });
+  await assert.rejects(codeSvc.runTests('t1', a.id), /no code tests/i);
+  assert.equal((await codeSvc.codeStatus()).available, true);
+
+  const b = await noRunnerSvc.create('t1', { title: 'No runner', instructions: 'x', codeTests: tests });
+  await noRunnerSvc.submit(tokenOf(b.link), { studentName: 'A', studentId: 'N1', files: [{ name: 'main.py', data: Buffer.from('print(5)\n') }] });
+  await waitFor(async () => !!(await noRunnerSvc.get('t1', b.id)).submissions[0].marking);
+  const m: any = (await noRunnerSvc.get('t1', b.id)).submissions[0].marking;
+  assert.equal(m.state, 'failed'); assert.match(m.error, /needs Docker/);
+  await assert.rejects(noRunnerSvc.runTests('t1', b.id), (e: any) => e.status === 503 && /Docker/.test(e.message));
+  assert.equal((await noRunnerSvc.codeStatus()).available, false);
+});

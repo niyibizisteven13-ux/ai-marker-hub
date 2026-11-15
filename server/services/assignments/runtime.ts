@@ -6,6 +6,7 @@ import { StorageFullError, ensureStorage } from '../billing/storage.js';
 import { OwnedRecordStore } from '../storage/ownedRecordStore.js';
 import { AssignmentError, createAssignmentService, type AssignmentFiles, type AssignmentRecord, type AssignmentService } from './service.js';
 import { createTaskMarker } from './autoMark.js';
+import { codeRunnerStatus } from '../codeRunner/index.js';
 
 /** The examination service marks tasks' hand-ins; it is handed over at start-up (no import cycle). */
 let exams: Parameters<typeof createTaskMarker>[0] extends () => infer T ? T : never;
@@ -44,6 +45,7 @@ export function assignmentService(): AssignmentService {
   service ??= createAssignmentService({
     store: new OwnedRecordStore<AssignmentRecord>(process.env.ASSIGNMENTS_DIR ?? './data/assignments', 365 * 24 * 60 * 60 * 1000),
     files: uploadFiles,
+    codeRunner: codeRunnerStatus,
     tokenDir: process.env.ASSIGNMENT_TOKENS_DIR ?? './data/assignment-links',
     baseUrl: () => process.env.APP_BASE_URL || process.env.APP_URL || '',
     marker: createTaskMarker(() => { if (!exams) throw new Error('Automatic marking is not available on this server.'); return exams; }),
