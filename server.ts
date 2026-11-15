@@ -42,6 +42,7 @@ import { analyticsRouter, assessmentRouter, documentsRouter, jobsRouter } from '
 import { examChat, overnightJobQueue, startEducationRuntime } from './server/services/educationRuntime.js';
 import { examsRouter } from './server/routes/examRoutes.js';
 import { createAssignmentsRouter, createPublicAssignmentsRouter } from './server/routes/assignmentRoutes.js';
+import { createCoursesRouter } from './server/routes/courseRoutes.js';
 import { createStorageRouter } from './server/routes/storageRoutes.js';
 import { StorageFullError, ensureStorage } from './server/services/billing/storage.js';
 import { gradeQuiz } from './server/services/forms/quiz.js';
@@ -60,6 +61,8 @@ import { rememberBlocked, takeResumable } from './server/services/billing/pendin
 import { makeEmitter } from './server/utils/sseEmitter.js';
 import { contentSecurityPolicy } from './server/utils/csp.js';
 import { validateSubmission } from './server/services/forms/validation.js';
+import { normalizeFields } from './server/services/forms/model.js';
+import { sanitizeReport, integrityFlags } from './shared/formIntegrity.js';
 import { ensureVersion } from './server/services/forms/versions.js';
 import { ownForm } from './server/services/forms/service.js';
 import { useToolAgent } from './server/services/outputs/chatTurn.js';
@@ -415,6 +418,8 @@ app.use('/api/exams', requireAuth, examsRouter);
 app.post('/api/assignments/public/:token/submit', assignmentSubmitLimiter);
 app.use('/api/assignments/public', createPublicAssignmentsRouter());
 app.use('/api/assignments', requireAuth, createAssignmentsRouter());
+// Courses: the lecturer's named classes (roster, accommodations, tasks and quizzes, dashboard).
+app.use('/api/courses', requireAuth, createCoursesRouter());
 app.use('/api/storage', requireAuth, createStorageRouter());
 app.use('/api/outputs/shared', sharedOutputsRouter);
 app.use('/api/outputs', requireAuth, outputsRouter);
@@ -2055,6 +2060,17 @@ app.post('/api/forms/:id/submit', publicFormSubmitLimiter, async (req, res) => {
     // Quizzes are marked against the answer key at once; the score is kept with the response for Results and the gradebook.
     const quiz = gradeQuiz(schema, checked.values as Record<string, unknown>);
     if (quiz) normalized._quiz = { score: quiz.score, maxScore: quiz.maxScore, percent: quiz.percent, correct: quiz.items.filter((x) => x.correct).map((x) => x.id) };
+    // Integrity signals (pasting, leaving the page, typing): kept for the lecturer to review, never used to change a mark.
+    if (schema.isQuiz || schema.blockPaste || schema.trackIntegrity) {
+      const all = normalizeFields(schema);
+      const report = sanitizeReport((answers as any)._integrity, new Set(all.map((f) => f.id)));
+      const flags = integrityFlags(report, {
+        labels: Object.fromEntries(all.map((f) => [f.id, f.label])),
+        openIds: new Set(all.filter((f) => f.kind === 'text' || f.kind === 'long_text').map((f) => f.id)),
+        questionCount: Object.keys(checked.values).length, expected: true,
+      });
+      normalized._integrity = { report, flags };
+    }
     const formVersion = await ensureVersion(form.id, schema).catch(() => null);
     const submission = await prisma.formSubmission.create({ data: { formId: form.id, data: JSON.stringify(normalized), formVersion } as any });
     const confirmationMessage = schema.confirmationMessage || 'Your response has been recorded.';

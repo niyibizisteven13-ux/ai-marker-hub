@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { PDFDocument } from 'pdf-lib';
+import ExcelJS from 'exceljs';
 import type { OwnedRecord, OwnedRecordStore } from '../storage/ownedRecordStore.js';
 import type { MarkStatus, TaskMarker } from './autoMark.js';
 import { imagesToPdf, typedToPdf } from '../exams/inputs.js';
@@ -45,7 +46,13 @@ export interface AssignmentRecord extends OwnedRecord {
   schemeFiles?: StoredFile[];
   /** The examination that holds this task's marked scripts (created with the first automatic marking). */
   examId?: string;
+  /** The class list (registration number and name). When set, only these students can hand in, under their own name. */
+  roster?: RosterEntry[];
+  /** Refuse hand-ins after the due date instead of marking them late. */
+  hardDeadline?: boolean;
 }
+
+export interface RosterEntry { id: string; name: string }
 
 /** Where files live: the same uploads the chat uses, so prepared files can be marked from the chat as they are. */
 export interface AssignmentFiles {
@@ -59,7 +66,7 @@ export class AssignmentError extends Error {
   constructor(public code: string, message: string, public status = 400) { super(message); }
 }
 
-export const LIMITS = { files: 10, fileBytes: 25 * 1024 * 1024, text: 20_000, name: 80, title: 160, instructions: 8_000, submissions: 300 };
+export const LIMITS = { files: 10, fileBytes: 25 * 1024 * 1024, text: 20_000, name: 80, title: 160, instructions: 8_000, submissions: 300, roster: 1000 };
 
 /** What students may hand in: photos (phone and scanner formats), PDF, Word and other text documents, voice recordings. */
 const ACCEPT = /\.(jpe?g|png|webp|heic|heif|gif|bmp|tiff?|pdf|docx?|odt|rtf|txt|md|webm|ogg|oga|m4a|mp3|wav|aac)$/i;
@@ -100,6 +107,28 @@ export function looksLike(name: string, data: Buffer): boolean {
   return true; // text formats
 }
 
+/**
+ * A class list pasted or exported from a spreadsheet: one student per line, "registration number, name"
+ * (comma, semicolon or tab). A first line that looks like a header is skipped. Duplicate ids keep the first.
+ */
+export function parseRoster(input: unknown): RosterEntry[] {
+  if (typeof input !== 'string') return [];
+  const out: RosterEntry[] = [];
+  const seen = new Set<string>();
+  for (const raw of input.split(/\r?\n/)) {
+    const parts = raw.split(/[,;\t]/).map((x) => clean(x.replace(/^"|"$/g, ''), LIMITS.name)).filter(Boolean);
+    if (parts.length < 2) continue;
+    const [id, ...rest] = parts;
+    if (!/^[\w.\/-]{1,40}$/.test(id) || /^(reg(istration)?|id|student)\b/i.test(id) && out.length === 0 && /name/i.test(rest.join(' '))) continue;
+    const key = id.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ id, name: rest.join(' ') });
+    if (out.length >= LIMITS.roster) break;
+  }
+  return out;
+}
+
 /** A candidate id the marker accepts: the student's own id when usable, otherwise S001, S002, … */
 const ID_OK = /^[\w.-]{1,40}$/;
 
@@ -134,12 +163,19 @@ export function createAssignmentService(deps: {
     return a;
   }
 
+  /** Students on the class list who have not handed in yet. */
+  const notSubmitted = (a: AssignmentRecord): RosterEntry[] => {
+    const done = new Set(a.submissions.map((x) => (x.studentId ?? '').toLowerCase()).filter(Boolean));
+    return (a.roster ?? []).filter((r) => !done.has(r.id.toLowerCase()));
+  };
+
   /** Teacher view: everything, with counts the dashboard shows at a glance. */
   const view = (a: AssignmentRecord) => ({
     id: a.id, title: a.title, instructions: a.instructions, taskFiles: a.taskFiles, dueAt: a.dueAt, open: a.open,
     link: linkOf(a.token), createdAt: a.createdAt, updatedAt: a.updatedAt,
     autoMark: !!a.autoMark, schemeFiles: a.schemeFiles ?? [], examId: a.examId ?? null,
-    submissions: [...a.submissions].sort((x, y) => y.submittedAt.localeCompare(x.submittedAt)).map(({ resultToken, ...x }) => ({ ...x, ...(resultToken ? { resultLink: resultLinkOf(a.token, resultToken) } : {}) })),
+    roster: a.roster ?? [], hardDeadline: !!a.hardDeadline, notSubmitted: notSubmitted(a),
+    submissions: [...a.submissions].sort((x, y) => y.submittedAt.localeCompare(x.submittedAt)).map(({ resultToken, ...x }) => ({ ...x, receiptCode: x.id.slice(0, 8).toUpperCase(), ...(resultToken ? { resultLink: resultLinkOf(a.token, resultToken) } : {}) })),
     counts: { submitted: a.submissions.length, late: a.submissions.filter((s) => s.late).length },
   });
 
@@ -162,7 +198,7 @@ export function createAssignmentService(deps: {
   return {
     linkOf,
 
-    async create(ownerId: string, input: { title?: unknown; instructions?: unknown; dueAt?: unknown; files?: Array<{ name: string; data: Buffer }>; autoMark?: unknown; scheme?: Array<{ name: string; data: Buffer }> }) {
+    async create(ownerId: string, input: { title?: unknown; instructions?: unknown; dueAt?: unknown; files?: Array<{ name: string; data: Buffer }>; autoMark?: unknown; scheme?: Array<{ name: string; data: Buffer }>; roster?: unknown; hardDeadline?: unknown }) {
       const title = clean(input.title, LIMITS.title);
       const instructions = clean(input.instructions, LIMITS.instructions);
       if (!title) throw new AssignmentError('TITLE_REQUIRED', 'Give the task a title.');
@@ -171,10 +207,11 @@ export function createAssignmentService(deps: {
       if (due && Number.isNaN(due.getTime())) throw new AssignmentError('BAD_DUE', 'The due date is not valid.');
       const autoMark = input.autoMark === true || input.autoMark === 'true';
       if (autoMark && !input.scheme?.length) throw new AssignmentError('SCHEME_REQUIRED', 'Attach the marking scheme so each hand-in can be marked as it arrives.');
+      const roster = parseRoster(input.roster);
       const taskFiles = await storeUploads(ownerId, input.files ?? [], 5);
       const schemeFiles = autoMark ? await storeUploads(ownerId, input.scheme ?? [], 5) : [];
       const token = randomBytes(12).toString('base64url');
-      const a = await deps.store.create(ownerId, { title, instructions, taskFiles, dueAt: due ? due.toISOString() : null, open: true, token, submissions: [], ...(autoMark ? { autoMark, schemeFiles } : {}) });
+      const a = await deps.store.create(ownerId, { title, instructions, taskFiles, dueAt: due ? due.toISOString() : null, open: true, token, submissions: [], ...(autoMark ? { autoMark, schemeFiles } : {}), ...(roster.length ? { roster } : {}), ...(input.hardDeadline === true || input.hardDeadline === 'true' ? { hardDeadline: true } : {}) });
       await fs.mkdir(path.resolve(deps.tokenDir), { recursive: true, mode: 0o700 });
       await fs.writeFile(tokenFile(token), JSON.stringify({ id: a.id, ownerId }), { mode: 0o600 });
       return view(a);
@@ -222,7 +259,7 @@ export function createAssignmentService(deps: {
       return deps.marker.release(ownerId, a, submissionIds?.length ? submissionIds : 'all');
     },
 
-    async update(ownerId: string, id: string, patch: { open?: unknown; dueAt?: unknown; title?: unknown; instructions?: unknown }) {
+    async update(ownerId: string, id: string, patch: { open?: unknown; dueAt?: unknown; title?: unknown; instructions?: unknown; roster?: unknown; hardDeadline?: unknown }) {
       await load(ownerId, id);
       const a = await deps.store.update(id, ownerId, (r) => {
         if (typeof patch.open === 'boolean') r.open = patch.open;
@@ -230,6 +267,8 @@ export function createAssignmentService(deps: {
         else if (typeof patch.dueAt === 'string') { const d = new Date(patch.dueAt); if (!Number.isNaN(d.getTime())) r.dueAt = d.toISOString(); }
         const t = clean(patch.title, LIMITS.title); if (t) r.title = t;
         if (typeof patch.instructions === 'string') r.instructions = clean(patch.instructions, LIMITS.instructions);
+        if (typeof patch.roster === 'string') { const list = parseRoster(patch.roster); if (list.length) r.roster = list; else delete r.roster; }
+        if (typeof patch.hardDeadline === 'boolean') { if (patch.hardDeadline) r.hardDeadline = true; else delete r.hardDeadline; }
       });
       return view(a!);
     },
@@ -239,6 +278,44 @@ export function createAssignmentService(deps: {
       await fs.rm(tokenFile(a.token), { force: true });
       await deps.store.delete(id, ownerId);
       await drop(ownerId, [...a.taskFiles, ...(a.schemeFiles ?? []), ...a.submissions.flatMap((s) => s.files)]);
+    },
+
+    /**
+     * The task as an Excel sheet for the lecturer: every student on the class list (or who handed in), when they
+     * handed in, whether late, and the marks once marked. Students who have not handed in are listed too.
+     */
+    async exportWorkbook(ownerId: string, id: string): Promise<{ name: string; data: Buffer }> {
+      const a = await load(ownerId, id);
+      const marks = deps.marker && a.examId ? await deps.marker.statuses(ownerId, a).catch(() => ({} as Record<string, MarkStatus>)) : {};
+      const wb = new ExcelJS.Workbook();
+      wb.creator = 'Bwenge';
+      const ws = wb.addWorksheet('Marks', { views: [{ state: 'frozen', ySplit: 1 }] });
+      ws.columns = [
+        { header: 'Registration no.', key: 'sid', width: 18 }, { header: 'Name', key: 'name', width: 30 }, { header: 'Status', key: 'status', width: 16 },
+        { header: 'Handed in', key: 'at', width: 20 }, { header: 'Late', key: 'late', width: 8 }, { header: 'Mark', key: 'total', width: 10 },
+        { header: 'Out of', key: 'max', width: 10 }, { header: 'Percent', key: 'pct', width: 10 }, { header: 'Released', key: 'rel', width: 10 },
+      ];
+      ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F3A68' } };
+      const byId = new Map(a.submissions.filter((x) => x.studentId).map((x) => [x.studentId!.toLowerCase(), x]));
+      const rows: Array<{ sid: string; name: string; sub?: AssignmentSubmission }> = [];
+      for (const r of a.roster ?? []) rows.push({ sid: r.id, name: r.name, sub: byId.get(r.id.toLowerCase()) });
+      const listed = new Set((a.roster ?? []).map((r) => r.id.toLowerCase()));
+      for (const x of a.submissions) if (!x.studentId || !listed.has(x.studentId.toLowerCase())) rows.push({ sid: x.studentId ?? '', name: x.studentName, sub: x });
+      rows.sort((x, y) => x.name.localeCompare(y.name));
+      for (const { sid, name, sub } of rows) {
+        const m = sub ? marks[sub.id] : undefined;
+        const marked = m && (m.state === 'marked' || m.state === 'needs_review');
+        const row = ws.addRow({
+          sid, name, status: !sub ? 'Not handed in' : m ? (m.state === 'needs_review' ? 'Check marks' : m.state === 'marked' ? 'Marked' : 'Marking') : 'Handed in',
+          at: sub ? new Date(sub.submittedAt) : '', late: sub ? (sub.late ? 'Yes' : 'No') : '',
+          total: marked ? m!.total ?? '' : '', max: marked ? m!.maxTotal ?? '' : '', pct: marked && m!.percent !== null ? Math.round(m!.percent) : '', rel: m?.released ? 'Yes' : '',
+        });
+        if (!sub) row.getCell('status').font = { color: { argb: 'FFB91C1C' } };
+        if (sub) row.getCell('at').numFmt = 'dd mmm yyyy hh:mm';
+      }
+      const safe = a.title.replace(/[^\w\- ]+/g, '').trim().slice(0, 60) || 'task';
+      return { name: `${safe} marks.xlsx`, data: Buffer.from(await wb.xlsx.writeBuffer()) };
     },
 
     /** Removes one student's hand-in (for example a test or a duplicate). */
@@ -260,8 +337,8 @@ export function createAssignmentService(deps: {
     // ── Student side (the shared link) ──────────────────────────────────
     async publicView(token: string) {
       const a = await byToken(token);
-      const closed = !a.open;
-      return { title: a.title, instructions: a.instructions, dueAt: a.dueAt, open: !closed, autoMark: !!a.autoMark, taskFiles: a.taskFiles.map((f, i) => ({ index: i, name: f.name, mime: f.mime, size: f.size })) };
+      const closed = !a.open || !!(a.hardDeadline && a.dueAt && Date.now() > Date.parse(a.dueAt));
+      return { title: a.title, instructions: a.instructions, dueAt: a.dueAt, open: !closed, autoMark: !!a.autoMark, rosterRequired: !!a.roster?.length, hardDeadline: !!a.hardDeadline, taskFiles: a.taskFiles.map((f, i) => ({ index: i, name: f.name, mime: f.mime, size: f.size })) };
     },
 
     /** A student's own result, through the private link they got when they handed in. */
@@ -280,26 +357,45 @@ export function createAssignmentService(deps: {
       return deps.files.read(a.ownerId, f.id);
     },
 
-    async submit(token: string, input: { studentName?: unknown; studentId?: unknown; text?: unknown; files?: Array<{ name: string; data: Buffer }> }) {
+    async submit(token: string, input: { studentName?: unknown; studentId?: unknown; receiptCode?: unknown; text?: unknown; files?: Array<{ name: string; data: Buffer }> }) {
       const a = await byToken(token);
       if (!a.open) throw new AssignmentError('CLOSED', 'This task is closed. Ask the person who shared it.', 410);
-      const studentName = clean(input.studentName, LIMITS.name);
-      const studentId = clean(input.studentId, 40) || undefined;
+      if (a.hardDeadline && a.dueAt && Date.now() > Date.parse(a.dueAt)) throw new AssignmentError('DEADLINE_PASSED', 'The deadline has passed, so this task no longer takes hand-ins. Contact your lecturer.', 403);
+      let studentName = clean(input.studentName, LIMITS.name);
+      let studentId = clean(input.studentId, 40) || undefined;
+      // With a class list, a student hands in under their own registration number and the name on the list.
+      if (a.roster?.length) {
+        if (!studentId) throw new AssignmentError('ID_REQUIRED', 'Enter your registration number.');
+        const onList = a.roster.find((r) => r.id.toLowerCase() === studentId!.toLowerCase());
+        if (!onList) throw new AssignmentError('NOT_ON_LIST', 'This registration number is not on the class list. Check it, or ask your lecturer.', 403);
+        studentId = onList.id;
+        studentName = onList.name;
+      }
       const text = clean(input.text, LIMITS.text) || undefined;
       if (!studentName) throw new AssignmentError('NAME_REQUIRED', 'Write your name.');
       if (!text && !input.files?.length) throw new AssignmentError('ANSWER_REQUIRED', 'Add your answer: upload a file or photo, or type it.');
       if (a.submissions.length >= LIMITS.submissions) throw new AssignmentError('FULL', 'This task has reached its submission limit.', 409);
+      // Refuse a replacement without the receipt code before any file is stored.
+      const sameStudent = (x: AssignmentSubmission) => (studentId && x.studentId ? x.studentId.toLowerCase() === studentId.toLowerCase() : x.studentName.toLowerCase() === studentName.toLowerCase());
+      const earlier = a.submissions.find(sameStudent);
+      if (earlier && clean(input.receiptCode, 20).toUpperCase() !== earlier.id.slice(0, 8).toUpperCase()) {
+        throw new AssignmentError('ALREADY_SUBMITTED', 'You have already handed in. To replace your work, enter the receipt code from your first hand-in.', 409);
+      }
       const files = await storeUploads(a.ownerId, input.files ?? [], LIMITS.files, true);
       const late = !!a.dueAt && Date.now() > Date.parse(a.dueAt);
       const same = (s: AssignmentSubmission) => (studentId && s.studentId ? s.studentId.toLowerCase() === studentId.toLowerCase() : s.studentName.toLowerCase() === studentName.toLowerCase());
       let receipt!: AssignmentSubmission;
       let replaced: StoredFile[] = [];
-      await deps.store.update(a.id, a.ownerId, (r) => {
+      try { await deps.store.update(a.id, a.ownerId, (r) => {
         const prev = r.submissions.find(same);
+        // Someone who knows only a name or number cannot overwrite another student's work: replacing needs the receipt code.
+        if (prev && clean(input.receiptCode, 20).toUpperCase() !== prev.id.slice(0, 8).toUpperCase()) {
+          throw new AssignmentError('ALREADY_SUBMITTED', 'You have already handed in. To replace your work, enter the receipt code from your first hand-in.', 409);
+        }
         replaced = prev?.files ?? [];
         receipt = { id: prev?.id ?? randomUUID(), studentName, ...(studentId ? { studentId } : {}), files, ...(text ? { text } : {}), submittedAt: now(), late, resubmissions: prev ? prev.resubmissions + 1 : 0, resultToken: prev?.resultToken ?? randomBytes(9).toString('base64url') };
         r.submissions = [...r.submissions.filter((s) => s !== prev), receipt];
-      });
+      }); } catch (e) { await drop(a.ownerId, files); throw e; }
       // The earlier hand-in's files are no longer shown or marked: free their storage.
       await drop(a.ownerId, replaced);
       // Automatic marking runs in the background; the student does not wait for it.

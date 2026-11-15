@@ -109,6 +109,11 @@ export type BuilderState = {
   confirmationMessage: string;
   /** Heading of the thank-you screen (blank = none). */
   confirmationTitle: string;
+  /** Typed answers cannot be pasted into; questions and options are shuffled per person; activity is recorded for review. */
+  blockPaste: boolean;
+  shuffleQuestions: boolean;
+  shuffleAllOptions: boolean;
+  trackIntegrity: boolean;
   /** Quizzes: show the respondent their score after submitting (off = they only see the thank-you message). */
   showScore: boolean;
   /** Quizzes: show each respondent which answers were right, with the correct answer, after they submit. */
@@ -178,6 +183,10 @@ export const blankState = (): BuilderState => ({
   confirmationMessage: 'Your response has been recorded.',
   confirmationTitle: '',
   showScore: true,
+  blockPaste: false,
+  shuffleQuestions: false,
+  shuffleAllOptions: false,
+  trackIntegrity: false,
   quizShowAnswers: true,
   branding: { ...DEFAULT_BRANDING },
   items: [],
@@ -242,6 +251,10 @@ export function fromSchema(input: any): BuilderState {
     confirmationMessage: s.confirmationMessage || 'Your response has been recorded.',
     confirmationTitle: typeof s.confirmationTitle === 'string' ? s.confirmationTitle : '',
     showScore: s.showScore !== false,
+    blockPaste: !!s.blockPaste,
+    shuffleQuestions: !!s.shuffleQuestions,
+    shuffleAllOptions: !!s.shuffleAllOptions,
+    trackIntegrity: !!s.trackIntegrity,
     quizShowAnswers: s.quizShowAnswers !== false,
     branding: normalizeBranding(s.branding ?? { mode: 'dark' }),
     items,
@@ -318,6 +331,10 @@ export function buildSchema(s: BuilderState): any {
     confirmationMessage: s.confirmationMessage,
     confirmationTitle: s.confirmationTitle.trim(),
     showScore: s.showScore,
+    blockPaste: s.blockPaste,
+    shuffleQuestions: s.shuffleQuestions,
+    shuffleAllOptions: s.shuffleAllOptions,
+    trackIntegrity: s.trackIntegrity,
     quizShowAnswers: s.quizShowAnswers,
     branding: s.branding,
     fields,
@@ -1026,6 +1043,13 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, onUpda
                 <Toggle label="Make this a quiz" checked={state.isQuiz} onChange={v => setField('isQuiz', v)} hint="Give each question points and a correct answer. Bwenge marks every response the moment it is sent; scores appear in Results." />
                 {state.isQuiz && <Toggle label="Show score after submitting" checked={state.showScore} onChange={v => setField('showScore', v)} hint="Turn off to keep scores private: respondents only see your thank-you message, and you still see every score in Results." />}
                 {state.isQuiz && <Toggle label="Show answers after submitting" checked={state.quizShowAnswers} onChange={v => setField('quizShowAnswers', v)} hint="Respondents see their score, which answers were right and the correct ones. Turn off to show the score only." />}
+                <div className="space-y-1 rounded-xl border border-[#E0E0E0] bg-[#F8F9FA] px-3 py-2">
+                  <p className="text-xs font-bold uppercase tracking-wider text-[#5F6368]">Test protection</p>
+                  <Toggle label="Block pasting into typed answers" checked={state.blockPaste} onChange={v => setField('blockPaste', v)} hint="Students must type short and long answers themselves. Dropping text in is blocked too." />
+                  <Toggle label="Shuffle question order" checked={state.shuffleQuestions} onChange={v => setField('shuffleQuestions', v)} hint="Each student sees a different order. Not used when questions depend on earlier answers." />
+                  <Toggle label="Shuffle the options of every choice question" checked={state.shuffleAllOptions} onChange={v => setField('shuffleAllOptions', v)} hint="Avoid options like “All of the above” when this is on." />
+                  <Toggle label="Record pasting and leaving the page" checked={state.trackIntegrity || state.isQuiz || state.blockPaste} onChange={v => setField('trackIntegrity', v)} hint="Always on for quizzes. You see flags next to each response. They are signals to look at, not proof, and never change a mark. Students are told this is recorded." />
+                </div>
                 <Toggle label="Collect email addresses" checked={state.collectEmail} onChange={v => setField('collectEmail', v)} />
                 <Toggle label="Accepting responses" checked={state.acceptingResponses} onChange={v => setField('acceptingResponses', v)} />
                 <Toggle label="Allow more than one response per person" checked={state.allowMultipleResponses} onChange={v => setField('allowMultipleResponses', v)} hint="Also enforce this on your server." />

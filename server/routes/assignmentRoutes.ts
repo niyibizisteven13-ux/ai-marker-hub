@@ -56,6 +56,13 @@ export function createAssignmentsRouter() {
   r.patch('/:id', run(async (req, res) => res.json(await assignmentService().update(userIdOf(req), String(req.params.id), req.body ?? {}))));
   r.delete('/:id', run(async (req, res) => { await assignmentService().remove(userIdOf(req), String(req.params.id)); res.status(204).end(); }));
   r.delete('/:id/submissions/:sid', run(async (req, res) => res.json(await assignmentService().removeSubmission(userIdOf(req), String(req.params.id), String(req.params.sid)))));
+  r.get('/:id/export.xlsx', run(async (req, res) => {
+    const f = await assignmentService().exportWorkbook(userIdOf(req), String(req.params.id));
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${f.name.replace(/[^\x20-\x7e]/g, '_').replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(f.name)}`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.end(f.data);
+  }));
   r.get('/:id/files/:fileId', run(async (req, res) => sendFile(res, await assignmentService().file(userIdOf(req), String(req.params.id), String(req.params.fileId)), req.query.download !== '1')));
   r.post('/:id/prepare-marking', run(async (req, res) => res.json(await assignmentService().prepareMarking(userIdOf(req), String(req.params.id), Array.isArray(req.body?.submissionIds) ? req.body.submissionIds.map(String) : undefined))));
   return r;

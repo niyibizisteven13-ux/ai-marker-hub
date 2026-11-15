@@ -12,7 +12,7 @@ import logoUrl from '../assets/bwenge-logo.svg';
  * Submitting again before the owner closes it replaces the earlier submission.
  */
 
-interface Task { title: string; instructions: string; dueAt: string | null; open: boolean; taskFiles: Array<{ index: number; name: string; mime: string; size: number }> }
+interface Task { title: string; instructions: string; dueAt: string | null; open: boolean; rosterRequired?: boolean; hardDeadline?: boolean; taskFiles: Array<{ index: number; name: string; mime: string; size: number }> }
 const MAX_FILES = 10;
 const MAX_MB = 25;
 const ACCEPT = '.pdf,.doc,.docx,.odt,.rtf,.txt,.md,image/*,.heic,.heif,audio/*,.m4a,.mp3,.wav,.ogg,.webm';
@@ -26,6 +26,8 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
   const [name, setName] = useState('');
   const [studentId, setStudentId] = useState('');
   const [text, setText] = useState('');
+  const [receiptCode, setReceiptCode] = useState('');
+  const [needReceipt, setNeedReceipt] = useState(false);
   const [files, setFiles] = useState<Item[]>([]);
   const [open, setOpen] = useState<{ kind: 'mine'; index: number } | { kind: 'task'; src: PreviewSource } | null>(null);
   const [state, setState] = useState<{ kind: 'idle' } | { kind: 'sending'; percent: number } | { kind: 'error'; message: string } | { kind: 'done'; receiptId: string; submittedAt: string; late: boolean; replaced: boolean; files?: number; resultLink?: string; autoMark?: boolean }>({ kind: 'idle' });
@@ -66,6 +68,7 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
       const form = new FormData();
       form.append('studentName', name.trim());
       if (studentId.trim()) form.append('studentId', studentId.trim());
+      if (receiptCode.trim()) form.append('receiptCode', receiptCode.trim());
       if (text.trim()) form.append('text', text.trim());
       for (const f of files) form.append('files', f.file, f.file.name);
       // XMLHttpRequest rather than fetch: it reports upload progress, which matters on a slow phone connection.
@@ -76,13 +79,14 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
         xhr.onload = () => {
           let body: any = {};
           try { body = JSON.parse(xhr.responseText); } catch { /* not JSON */ }
-          if (xhr.status >= 200 && xhr.status < 300) resolve(body); else reject(new Error(body.error || 'Could not submit. Try again.'));
+          if (xhr.status >= 200 && xhr.status < 300) resolve(body); else reject(Object.assign(new Error(body.error || 'Could not submit. Try again.'), { code: body.code }));
         };
         xhr.onerror = () => reject(new Error('No connection. Check your internet and try again; nothing was lost.'));
         xhr.send(form);
       });
       setState({ kind: 'done', ...b });
     } catch (e) {
+      if ((e as { code?: string })?.code === 'ALREADY_SUBMITTED') setNeedReceipt(true);
       setState({ kind: 'error', message: e instanceof Error ? e.message : 'Could not submit. Try again.' });
     }
   };
@@ -125,13 +129,13 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
           </div>
         )}
         {state.late && <p className="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-[13px] text-amber-800">This was after the due time. The person who shared the task will see it was late.</p>}
-        <p className="mt-4 text-[13px] text-neutral-500">{state.replaced ? 'This replaces your earlier submission. ' : ''}You can submit again while the task is open; your latest one counts.</p>
+        <p className="mt-4 text-[13px] text-neutral-500">{state.replaced ? 'This replaces your earlier submission. ' : ''}Keep your receipt code: you need it to replace your work while the task is open; your latest hand-in counts.</p>
         <button type="button" onClick={() => { setFiles([]); setText(''); setName(''); setStudentId(''); setState({ kind: 'idle' }); }} className="mt-5 rounded-xl border border-neutral-300 px-4 py-2 text-[14px] font-medium hover:bg-neutral-50">Submit again</button>
       </div>,
     );
   }
 
-  const ready = name.trim().length > 0 && (files.length > 0 || text.trim().length > 0) && task.open && state.kind !== 'sending';
+  const ready = (task.rosterRequired ? studentId.trim().length > 0 : name.trim().length > 0) && (files.length > 0 || text.trim().length > 0) && task.open && state.kind !== 'sending';
   const field = 'w-full rounded-xl border border-neutral-300 bg-white px-3 py-3 text-[15px] placeholder:text-neutral-400 focus:border-[var(--brand)] focus:outline-none focus:ring-2 focus:ring-[var(--brand)]/20';
   return shell(
     <>
@@ -163,10 +167,17 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
         <section className="mt-4 space-y-4 rounded-2xl bg-white p-5 shadow-sm">
           <h2 className="text-[16px] font-semibold">Your answer</h2>
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block"><span className="mb-1 block text-[13px] font-medium text-neutral-700">Your full name</span>
-              <input value={name} onChange={(e) => setName(e.target.value)} maxLength={80} autoComplete="name" placeholder="e.g. Uwase Aline" className={field} /></label>
-            <label className="block"><span className="mb-1 block text-[13px] font-medium text-neutral-700">ID or number <span className="font-normal text-neutral-400">(if you have one)</span></span>
-              <input value={studentId} onChange={(e) => setStudentId(e.target.value)} maxLength={40} placeholder="e.g. S4B-001" className={field} /></label>
+            {!task.rosterRequired && (
+              <label className="block"><span className="mb-1 block text-[13px] font-medium text-neutral-700">Your full name</span>
+                <input value={name} onChange={(e) => setName(e.target.value)} maxLength={80} autoComplete="name" placeholder="e.g. Uwase Aline" className={field} /></label>
+            )}
+            <label className="block"><span className="mb-1 block text-[13px] font-medium text-neutral-700">{task.rosterRequired ? 'Registration number' : 'ID or number'} {!task.rosterRequired && <span className="font-normal text-neutral-400">(if you have one)</span>}</span>
+              <input value={studentId} onChange={(e) => setStudentId(e.target.value)} maxLength={40} inputMode={task.rosterRequired ? 'numeric' : undefined} autoComplete="off" placeholder={task.rosterRequired ? 'e.g. 222001234' : 'e.g. S4B-001'} className={field} /></label>
+            {needReceipt && (
+              <label className="block sm:col-span-2"><span className="mb-1 block text-[13px] font-medium text-neutral-700">Receipt code from your first hand-in</span>
+                <input value={receiptCode} onChange={(e) => setReceiptCode(e.target.value.toUpperCase())} maxLength={20} autoComplete="off" placeholder="e.g. 3F9A12BC" className={`${field} font-mono`} />
+                <span className="mt-1 block text-[12px] text-neutral-500">Lost it? Ask your lecturer to remove your first hand-in, then submit again.</span></label>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">

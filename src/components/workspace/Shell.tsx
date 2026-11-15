@@ -35,6 +35,18 @@ export function PageShell({ icon, title, subtitle, actions, onBack, backLabel = 
   );
 }
 
+/** Switch between the sections that share one page (for example Tasks and Classes). */
+export function SectionTabs<T extends string>({ value, onChange, tabs }: { value: T; onChange: (v: T) => void; tabs: Array<{ id: T; label: string }> }) {
+  return (
+    <div role="tablist" aria-label="Section" className="inline-flex rounded-xl border border-white/[0.08] bg-[var(--ws-card)] p-0.5">
+      {tabs.map((t) => (
+        <button key={t.id} type="button" role="tab" aria-selected={value === t.id} onClick={() => onChange(t.id)}
+          className={`rounded-[10px] px-4 py-1.5 text-[13px] font-semibold transition ${value === t.id ? 'bg-white/[0.1] text-white' : 'text-neutral-400 hover:text-neutral-200'}`}>{t.label}</button>
+      ))}
+    </div>
+  );
+}
+
 export function StatRow({ children }: { children: ReactNode }) {
   return <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">{children}</div>;
 }

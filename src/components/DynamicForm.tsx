@@ -19,6 +19,7 @@
  */
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { normalizeBranding } from '../../shared/formBranding';
+import type { FieldActivity, IntegrityReport } from '../../shared/formIntegrity';
 import { FileThumb, PreviewDialog, type PreviewSource } from './FilePreview';
 
 /* ------------------------------------------------------------------ types */
@@ -78,7 +79,15 @@ type FormSchema = {
   confirmationMessage?: string;
   confirmationTitle?: string;
   showScore?: boolean;
+  /** Test protection set by the lecturer. */
+  blockPaste?: boolean;
+  shuffleQuestions?: boolean;
+  shuffleAllOptions?: boolean;
+  trackIntegrity?: boolean;
 };
+
+/** Handlers that record (and, when the lecturer turned pasting off, stop) pasting into one typed answer. */
+type Guard = { onPaste: React.ClipboardEventHandler<any>; onDrop: React.DragEventHandler<any>; onInput: React.FormEventHandler<any> };
 
 type Answers = Record<string, any>;
 type FileValue = { name: string; size: number; url: string };
@@ -394,10 +403,12 @@ type CardProps = {
   onOtherChange: (id: string, text: string) => void;
   onBlur: (id: string) => void;
   onFile: (field: FormField, file?: File) => void;
+  guard?: Guard;
+  pasteNotice?: boolean;
 };
 
 const QuestionCard = memo(function QuestionCard(props: CardProps) {
-  const { field, number, value, otherText, error, disabled, accent, options, upload, onChange, onOtherChange, onBlur, onFile } = props;
+  const { field, number, value, otherText, error, disabled, accent, options, upload, onChange, onOtherChange, onBlur, onFile, guard, pasteNotice } = props;
   const id = field.id;
   const controlId = `input-${id}`;
   const errId = `${id}-err`;
@@ -431,7 +442,7 @@ const QuestionCard = memo(function QuestionCard(props: CardProps) {
           <textarea
             id={controlId} rows={4} disabled={disabled} value={value ?? ''} {...aria}
             placeholder={field.placeholder || 'Your answer'}
-            onChange={e => set(e.target.value)} onBlur={() => onBlur(id)}
+            onChange={e => set(e.target.value)} onBlur={() => onBlur(id)} {...guard}
             className={`${cls} resize-y`}
           />
           {field.maxLength ? (
@@ -689,7 +700,7 @@ const QuestionCard = memo(function QuestionCard(props: CardProps) {
           inputMode={htmlType === 'tel' ? 'tel' : htmlType === 'number' ? 'decimal' : undefined}
           min={htmlType === 'number' ? field.min : undefined} max={htmlType === 'number' ? field.max : undefined}
           placeholder={field.placeholder || 'Your answer'}
-          onChange={e => set(e.target.value)} onBlur={() => onBlur(id)} className={cls} />
+          onChange={e => set(e.target.value)} onBlur={() => onBlur(id)} {...(htmlType === 'text' ? guard : {})} className={cls} />
       );
     }
   }
@@ -714,6 +725,7 @@ const QuestionCard = memo(function QuestionCard(props: CardProps) {
       </div>
       {field.description && <p id={descId} className="mt-1 text-sm leading-6 text-slate-500">{field.description}</p>}
       <div className="mt-4 text-slate-700">{control}</div>
+      {pasteNotice && <p role="status" className="mt-2 text-sm font-medium text-amber-800">Pasting is turned off for this test. Please type your answer.</p>}
       {error && (
         <p id={errId} className="mt-3 flex items-center gap-2 text-sm text-rose-700">
           <ErrorIcon />{error}
@@ -746,11 +758,23 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey }: 
     const map: Record<string, string[]> = {};
     fields.forEach(f => {
       const labels = (f.options || []).map(optionLabel);
-      map[f.id] = f.shuffleOptions ? shuffled(labels) : labels;
+      const choice = f.type === 'radio' || f.type === 'checkbox' || f.type === 'select';
+      map[f.id] = f.shuffleOptions || (parsedSchema?.shuffleAllOptions && choice) ? shuffled(labels) : labels;
     });
     return map;
-  }, [fields]);
-  const pages = useMemo(() => buildPages(fields, parsedSchema?.blocks || [], emailField), [fields, parsedSchema, emailField]);
+  }, [fields, parsedSchema]);
+  // Each person sees the questions in their own order (within each section), unless questions depend on earlier answers.
+  const orderedFields = useMemo(() => {
+    if (!parsedSchema?.shuffleQuestions || fields.some(f => f.showIf)) return fields;
+    const starts = new Set((parsedSchema.blocks || []).map((b: any) => String(b.beforeFieldId ?? b.before ?? '')).filter(Boolean));
+    const groups: FormField[][] = [];
+    for (const f of fields) {
+      if (!groups.length || f.sectionTitle || starts.has(f.id)) groups.push([]);
+      groups[groups.length - 1].push(f);
+    }
+    return groups.flatMap(g => shuffled(g));
+  }, [fields, parsedSchema]);
+  const pages = useMemo(() => buildPages(orderedFields, parsedSchema?.blocks || [], emailField), [orderedFields, parsedSchema, emailField]);
 
   const [answers, setAnswers] = useState<Answers>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -770,7 +794,83 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey }: 
   const pendingFocus = useRef<string | null>(null);
   const topRef = useRef<HTMLDivElement>(null);
 
+  /* Test protection: what was typed, pasted and how often the page was left (see shared/formIntegrity.ts). */
+  const integrityOn = Boolean(parsedSchema?.isQuiz || parsedSchema?.blockPaste || parsedSchema?.trackIntegrity);
+  const blockPaste = Boolean(parsedSchema?.blockPaste);
+  const activity = useRef<Record<string, FieldActivity>>({});
+  const lastLen = useRef<Record<string, number>>({});
+  const away = useRef({ count: 0, ms: 0, since: 0 });
+  const startedAt = useRef(Date.now());
+  const [pasteNoticeId, setPasteNoticeId] = useState<string | null>(null);
+
   const storageKey = `dynamicform:${draftKey || parsedSchema?.id || parsedSchema?.title || 'form'}`;
+
+  const actKey = `${storageKey}:activity`;
+  const persistActivity = useCallback(() => {
+    if (!integrityOn) return;
+    try { sessionStorage.setItem(actKey, JSON.stringify({ fields: activity.current, awayCount: away.current.count, awayMs: away.current.ms, elapsed: Date.now() - startedAt.current })); } catch { /* storage unavailable */ }
+  }, [integrityOn, actKey]);
+  // A refresh keeps the record, so reloading the page does not make typed answers look pasted.
+  useEffect(() => {
+    if (!integrityOn) return;
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(actKey) || 'null');
+      if (saved && typeof saved === 'object') {
+        activity.current = saved.fields && typeof saved.fields === 'object' ? saved.fields : {};
+        away.current = { count: Number(saved.awayCount) || 0, ms: Number(saved.awayMs) || 0, since: 0 };
+        startedAt.current = Date.now() - (Number(saved.elapsed) || 0);
+      }
+    } catch { /* ignore */ }
+  }, [integrityOn, actKey]);
+  // Leaving the page or window is counted (and how long for).
+  useEffect(() => {
+    if (!integrityOn || result) return;
+    const leave = () => { if (!away.current.since) { away.current.since = Date.now(); away.current.count += 1; } };
+    const back = () => { if (away.current.since) { away.current.ms += Date.now() - away.current.since; away.current.since = 0; persistActivity(); } };
+    const onVisibility = () => (document.hidden ? leave() : back());
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('blur', leave);
+    window.addEventListener('focus', back);
+    return () => { document.removeEventListener('visibilitychange', onVisibility); window.removeEventListener('blur', leave); window.removeEventListener('focus', back); };
+  }, [integrityOn, result, persistActivity]);
+  const guards = useMemo(() => {
+    const map: Record<string, Guard> = {};
+    if (!integrityOn) return map;
+    const act = (id: string) => (activity.current[id] ||= { typed: 0, pasted: 0, blocked: 0, length: 0 });
+    fields.forEach(f => {
+      const id = f.id;
+      const stop = (e: { preventDefault: () => void }) => { e.preventDefault(); act(id).pasted += 1; act(id).blocked += 1; setPasteNoticeId(id); persistActivity(); };
+      map[id] = {
+        onPaste: e => { if (blockPaste) stop(e); },
+        onDrop: e => { if (blockPaste) stop(e); },
+        onInput: e => {
+          const el = e.currentTarget as HTMLInputElement | HTMLTextAreaElement;
+          const inputType = (e.nativeEvent as InputEvent).inputType || '';
+          const len = el.value.length;
+          const prev = lastLen.current[id] ?? String(answersRef.current[id] ?? '').length;
+          lastLen.current[id] = len;
+          const a = act(id);
+          if (/^insertFrom(Paste|Drop|Yank)|^insertFromPasteAsQuotation/.test(inputType)) a.pasted += 1;
+          else if (inputType.startsWith('insert') && len > prev) a.typed += len - prev;
+          a.length = len;
+          persistActivity();
+        },
+      };
+    });
+    return map;
+  }, [integrityOn, blockPaste, fields, persistActivity]);
+  const buildIntegrity = (): IntegrityReport => {
+    const now = Date.now();
+    const out: Record<string, FieldActivity> = {};
+    Object.values(fieldMap).forEach(f => {
+      if (f.type !== 'text' && f.type !== 'long_text' && f.type !== 'textarea') return;
+      const v = answersRef.current[f.id];
+      if (isEmpty(v) && !activity.current[f.id]) return;
+      const a = activity.current[f.id] || { typed: 0, pasted: 0, blocked: 0, length: 0 };
+      out[f.id] = { ...a, length: String(v ?? '').length };
+    });
+    return { v: 1, seconds: Math.round((now - startedAt.current) / 1000), awayCount: away.current.count, awaySeconds: Math.round((away.current.ms + (away.current.since ? now - away.current.since : 0)) / 1000), fields: out };
+  };
 
   /* pages that still have something to show (showIf may hide whole pages) */
   const livePages = useMemo(
@@ -956,6 +1056,7 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey }: 
       const v = answersRef.current[field.id];
       if (!isEmpty(v)) out[field.id] = resolveOther(field.id, v);
     });
+    if (integrityOn) out._integrity = buildIntegrity();
     return out;
   };
 
@@ -1004,7 +1105,7 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey }: 
       } else {
         setResult({ title: parsedSchema?.confirmationTitle || undefined, message: typeof res === 'string' ? res : fallback });
       }
-      try { sessionStorage.removeItem(storageKey); } catch { /* ignore */ }
+      try { sessionStorage.removeItem(storageKey); sessionStorage.removeItem(actKey); } catch { /* ignore */ }
     } catch (error: any) {
       setSubmitError(error?.message || 'Unable to submit this form. Your answers are still here, please try again.');
     } finally {
@@ -1015,7 +1116,8 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey }: 
   const resetAll = () => {
     setAnswers({}); setErrors({}); setUploads({}); setSubmitError(''); setShowSummary(false);
     setConfirmClear(false); setRestored(false); setPageIdx(0);
-    try { sessionStorage.removeItem(storageKey); } catch { /* ignore */ }
+    activity.current = {}; lastLen.current = {}; away.current = { count: 0, ms: 0, since: 0 }; startedAt.current = Date.now(); setPasteNoticeId(null);
+    try { sessionStorage.removeItem(storageKey); sessionStorage.removeItem(actKey); } catch { /* ignore */ }
   };
 
   /* -------------------------------------------------------------- views */
@@ -1150,6 +1252,12 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey }: 
         </div>
       )}
 
+      {integrityOn && safeIdx === 0 && (
+        <p role="note" className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-700">
+          This test records whether text is pasted and whether you leave this page. Your lecturer may look at this.{blockPaste ? ' Pasting into typed answers is turned off.' : ''}
+        </p>
+      )}
+
       {restored && safeIdx === 0 && (
         <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-700">
           <span>We restored the answers you saved earlier on this device.</span>
@@ -1231,6 +1339,8 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey }: 
             onOtherChange={changeOther}
             onBlur={blurField}
             onFile={handleFile}
+            guard={guards[field.id]}
+            pasteNotice={pasteNoticeId === field.id}
           />
         );
       })}
