@@ -761,6 +761,9 @@ function QuestionEditor({ q, quiz, patch, uploadFile }: {
               <option value=".doc,.docx">Word documents</option>
               <option value=".xls,.xlsx,.csv">Spreadsheets</option>
               <option value="video/*">Video</option>
+              <option value=".zip">A folder (ZIP)</option>
+              <option value=".py,.js,.ts,.java,.c,.cpp,.cs,.go,.ipynb,.txt,.zip">Code (files or a folder)</option>
+              <option value=".pptx">Slides (PowerPoint)</option>
             </select>
           </Field>
           <Field label="Maximum size (MB)"><input type="number" min={1} max={100} className={inp} value={q.maxSizeMB} onChange={e => patch({ maxSizeMB: Math.max(1, Number(e.target.value) || 1) })} /></Field>

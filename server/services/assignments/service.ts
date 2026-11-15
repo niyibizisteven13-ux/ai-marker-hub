@@ -6,6 +6,7 @@ import ExcelJS from 'exceljs';
 import type { OwnedRecord, OwnedRecordStore } from '../storage/ownedRecordStore.js';
 import type { MarkStatus, TaskMarker } from './autoMark.js';
 import { imagesToPdf, typedToPdf } from '../exams/inputs.js';
+import { CODE_EXT, SHEET_EXT, SLIDE_EXT, VIDEO_EXT, fileToPdf, looksTextual, mergePdfs } from './handIn.js';
 
 /**
  * Assignments: a teacher sets a task (instructions and/or files), shares one link, and students hand in their
@@ -69,7 +70,7 @@ export class AssignmentError extends Error {
 export const LIMITS = { files: 10, fileBytes: 25 * 1024 * 1024, text: 20_000, name: 80, title: 160, instructions: 8_000, submissions: 300, roster: 1000 };
 
 /** What students may hand in: photos (phone and scanner formats), PDF, Word and other text documents, voice recordings. */
-const ACCEPT = /\.(jpe?g|png|webp|heic|heif|gif|bmp|tiff?|pdf|docx?|odt|rtf|txt|md|webm|ogg|oga|m4a|mp3|wav|aac)$/i;
+const ACCEPT = new RegExp(`\\.(jpe?g|png|webp|heic|heif|gif|bmp|tiff?|pdf|docx?|odt|rtf|txt|md|webm|ogg|oga|m4a|mp3|wav|aac|zip|${[...SHEET_EXT, ...SLIDE_EXT, ...VIDEO_EXT, ...CODE_EXT].join('|')})$`, 'i');
 /** Voice recordings: heard by the teacher in the dashboard; not part of the PDF the AI marks. */
 const AUDIO = /\.(webm|ogg|oga|m4a|mp3|wav|aac)$/i;
 const IMAGE = /\.(jpe?g|png|webp|heic|heif|gif|bmp|tiff?)$/i;
@@ -77,6 +78,9 @@ const MIME: Record<string, string> = {
   jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', heic: 'image/heic', heif: 'image/heic', gif: 'image/gif', bmp: 'image/bmp', tif: 'image/tiff', tiff: 'image/tiff',
   pdf: 'application/pdf', doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   odt: 'application/vnd.oasis.opendocument.text', rtf: 'application/rtf', txt: 'text/plain', md: 'text/markdown',
+  zip: 'application/zip', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', xlsm: 'application/vnd.ms-excel.sheet.macroEnabled.12', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  csv: 'text/csv', tsv: 'text/tab-separated-values', json: 'application/json', ipynb: 'application/json', xml: 'application/xml', html: 'text/html', htm: 'text/html',
+  mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime',
   webm: 'audio/webm', ogg: 'audio/ogg', oga: 'audio/ogg', m4a: 'audio/mp4', mp3: 'audio/mpeg', wav: 'audio/wav', aac: 'audio/aac',
 };
 const ext = (name: string) => (/\.([a-z0-9]+)$/i.exec(name)?.[1] ?? '').toLowerCase();
@@ -96,7 +100,8 @@ export function looksLike(name: string, data: Buffer): boolean {
   if (e === 'heic' || e === 'heif') return str.slice(4, 8) === 'ftyp';
   if (e === 'bmp') return str.startsWith('BM');
   if (e === 'tif' || e === 'tiff') return str.startsWith('II*') || str.startsWith('MM\u0000*');
-  if (e === 'docx' || e === 'odt') return str.startsWith('PK\u0003\u0004');
+  if (e === 'docx' || e === 'odt' || e === 'xlsx' || e === 'xlsm' || e === 'pptx' || e === 'zip') return str.startsWith('PK\u0003\u0004');
+  if (e === 'mp4' || e === 'm4v' || e === 'mov') return str.slice(4, 8) === 'ftyp' || str.slice(4, 8) === 'moov' || str.slice(4, 8) === 'wide' || str.slice(4, 8) === 'free';
   if (e === 'doc') return head[0] === 0xd0 && head[1] === 0xcf;
   if (e === 'webm') return head[0] === 0x1a && head[1] === 0x45 && head[2] === 0xdf && head[3] === 0xa3;
   if (e === 'ogg' || e === 'oga') return str.startsWith('OggS');
@@ -104,7 +109,7 @@ export function looksLike(name: string, data: Buffer): boolean {
   if (e === 'm4a') return str.slice(4, 8) === 'ftyp';
   if (e === 'mp3') return str.startsWith('ID3') || (head[0] === 0xff && (head[1] & 0xe0) === 0xe0);
   if (e === 'aac') return head[0] === 0xff && (head[1] & 0xf0) === 0xf0;
-  return true; // text formats
+  return looksTextual(data); // text, code and CSV: no binary bytes
 }
 
 /**
@@ -190,7 +195,7 @@ export function createAssignmentService(deps: {
       if (!u.data.length) throw new AssignmentError('EMPTY', `${name} is empty.`);
       if (u.data.length > LIMITS.fileBytes) throw new AssignmentError('TOO_LARGE', `${name} is larger than ${LIMITS.fileBytes / 1048576} MB.`, 413);
       if (!looksLike(name, u.data)) throw new AssignmentError('MISMATCH', `${name} does not match its file type.`);
-      out.push(await deps.files.save(ownerId, name, MIME[ext(name)] ?? 'application/octet-stream', u.data));
+      out.push(await deps.files.save(ownerId, name, MIME[ext(name)] ?? (CODE_EXT.includes(ext(name)) ? 'text/plain' : 'application/octet-stream'), u.data));
     }
     return out;
   }
@@ -459,18 +464,14 @@ export function createAssignmentService(deps: {
       const { data } = await deps.files.read(ownerId, f.id);
       if (IMAGE.test(f.name)) { photos.push(data); continue; }
       await flushPhotos();
-      parts.push(/\.pdf$/i.test(f.name) ? data : await typedToPdf({ name: f.name, buffer: data, mime: f.mime }));
+      // Code, spreadsheets, slides, documents and folders (ZIP) all become pages; recordings and videos do not.
+      const pdf = await fileToPdf(f.name, f.mime, data);
+      if (pdf) parts.push(pdf);
     }
     await flushPhotos();
     if (s.text) parts.push(await typedToPdf({ name: 'answer.txt', buffer: Buffer.from(s.text, 'utf8'), mime: 'text/plain' }));
-    if (!parts.length) throw new Error('only a voice recording was handed in; listen to it in the dashboard');
-    if (parts.length === 1) return parts[0];
-    const out = await PDFDocument.create();
-    for (const p of parts) {
-      const doc = await PDFDocument.load(p, { ignoreEncryption: true });
-      for (const page of await out.copyPages(doc, doc.getPageIndices())) out.addPage(page);
-    }
-    return Buffer.from(await out.save());
+    if (!parts.length) throw new Error('only a voice recording or video was handed in; open it in the dashboard');
+    return mergePdfs(parts);
   }
 }
 

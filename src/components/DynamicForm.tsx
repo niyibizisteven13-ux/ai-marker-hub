@@ -21,6 +21,7 @@ import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from '
 import { normalizeBranding } from '../../shared/formBranding';
 import type { FieldActivity, IntegrityReport } from '../../shared/formIntegrity';
 import { applyPool } from '../../shared/formPool';
+import { folderToZip } from '../utils/folderToZip';
 import { FileThumb, PreviewDialog, type PreviewSource } from './FilePreview';
 
 /* ------------------------------------------------------------------ types */
@@ -427,12 +428,13 @@ type CardProps = {
   onOtherChange: (id: string, text: string) => void;
   onBlur: (id: string) => void;
   onFile: (field: FormField, file?: File) => void;
+  onFileError: (field: FormField, message: string) => void;
   guard?: Guard;
   pasteNotice?: boolean;
 };
 
 const QuestionCard = memo(function QuestionCard(props: CardProps) {
-  const { field, number, value, otherText, error, disabled, accent, options, upload, onChange, onOtherChange, onBlur, onFile, guard, pasteNotice } = props;
+  const { field, number, value, otherText, error, disabled, accent, options, upload, onChange, onOtherChange, onBlur, onFile, onFileError, guard, pasteNotice } = props;
   const id = field.id;
   const controlId = `input-${id}`;
   const errId = `${id}-err`;
@@ -687,6 +689,18 @@ const QuestionCard = memo(function QuestionCard(props: CardProps) {
               <span>{upload?.busy ? 'Uploading…' : 'Add file'}</span>
               <input type="file" className="sr-only" disabled={disabled || upload?.busy} accept={field.accept}
                 onChange={e => { onFile(field, e.target.files?.[0]); e.target.value = ''; }} />
+            </label>
+          )}
+          {!file && /\.zip\b/i.test(field.accept ?? '') && (
+            <label className="ml-2 inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-400 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 focus-within:ring-2 focus-within:ring-slate-500 hover:bg-slate-100">
+              <span>Send a folder</span>
+              <input type="file" multiple className="sr-only" disabled={disabled || upload?.busy} {...({ webkitdirectory: '', directory: '' } as any)}
+                onChange={async e => {
+                  const picked = e.target.files; e.target.value = '';
+                  if (!picked?.length) return;
+                  try { onFile(field, (await folderToZip(picked, (field.maxSizeMB ?? 5) * 1048576)).file); }
+                  catch (err) { onFileError(field, err instanceof Error ? err.message : 'That folder could not be added.'); }
+                }} />
             </label>
           )}
           {upload?.busy && (
@@ -1438,6 +1452,7 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey, co
             onOtherChange={changeOther}
             onBlur={blurField}
             onFile={handleFile}
+            onFileError={(f, message) => setUploads(current => ({ ...current, [f.id]: { busy: false, progress: 0, error: message } }))}
             guard={guards[field.id]}
             pasteNotice={pasteNoticeId === field.id}
           />
