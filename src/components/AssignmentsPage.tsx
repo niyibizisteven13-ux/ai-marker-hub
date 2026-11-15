@@ -97,6 +97,7 @@ function FileView({ assignmentId, file }: { assignmentId: string; file: StoredFi
       {!url ? <div className="flex h-40 items-center justify-center text-neutral-500"><Loader2 size={18} className="animate-spin" /></div>
         : isImage(file) ? <img src={url} alt={file.name} className="mx-auto max-h-[80vh] w-auto bg-white" />
           : /^audio\//.test(file.mime) ? <div className="p-4"><audio controls src={url} className="w-full" /></div>
+          : /^video\//.test(file.mime) ? <video controls preload="metadata" src={url} className="mx-auto max-h-[70vh] w-full bg-black" />
           : isPdf(file) ? <div className="h-[70vh]"><PdfViewer url={url} name={file.name} tall /></div>
             : <button type="button" onClick={() => setViewing(true)} aria-label={`Preview ${file.name}`} className="group relative block w-full">
                 <FileThumb src={source!} tone="dark" className="h-64 w-full" />
@@ -112,13 +113,13 @@ function ShareBox({ link, title }: { link: string; title: string }) {
   const [qr, setQr] = useState<string | null>(null);
   useEffect(() => { void import('qrcode').then((q) => q.toDataURL(link, { margin: 1, width: 220, color: { dark: '#1B1A19', light: '#FFFFFF' } })).then(setQr).catch(() => undefined); }, [link]);
   const copy = async () => { try { await navigator.clipboard.writeText(link); setCopied(true); window.setTimeout(() => setCopied(false), 1800); } catch { /* clipboard may be blocked */ } };
-  const text = `${title}: submit your answers here (photos, PDF, Word or typed): ${link}`;
+  const text = `${title}: submit your answers here (photos, files, code, a whole folder or typed): ${link}`;
   return (
     <div className="flex flex-col gap-4 rounded-2xl border border-[var(--brand)]/30 bg-[var(--brand)]/[0.06] p-4 sm:flex-row sm:items-center">
       {qr && <img src={qr} alt="QR code of the task link" className="h-28 w-28 shrink-0 self-center rounded-lg bg-white p-1.5" />}
       <div className="min-w-0 flex-1">
         <p className="text-[13px] font-semibold text-white">Share this link with the people doing the task</p>
-        <p className="mt-0.5 text-[12.5px] text-neutral-400">No account needed. They open it, write their name and submit photos, PDF, Word or typed answers.</p>
+        <p className="mt-0.5 text-[12.5px] text-neutral-400">No account needed. They open it, write their name and submit photos, PDF, Word, Excel, code, a whole folder, a video or typed answers.</p>
         <div className="mt-2.5 flex items-center gap-2 rounded-xl border border-white/[0.12] bg-[var(--ws-sunken)] px-3 py-2">
           <Link2 size={14} className="shrink-0 text-[var(--brand-strong)]" />
           <span className="min-w-0 flex-1 truncate font-mono text-[12.5px] text-neutral-200">{link}</span>

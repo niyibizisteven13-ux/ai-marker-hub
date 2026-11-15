@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, ArrowRight, CalendarClock, Camera, CheckCircle2, Download, Eye, FileText, Loader2, Lock, Paperclip, Send, Trash2, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, CalendarClock, Camera, CheckCircle2, Download, Eye, FileText, FolderUp, Loader2, Lock, Paperclip, Send, Trash2, X } from 'lucide-react';
 import { FileThumb, PreviewDialog, type PreviewSource } from '../components/FilePreview';
 import VoiceRecorder from '../components/VoiceRecorder';
 import { getApiUrl } from '../utils/authFetch';
+import { HAND_IN_ACCEPT } from '../../shared/handInTypes';
+import { folderToZip } from '../utils/folderToZip';
 import logoUrl from '../assets/bwenge-logo.svg';
 
 /**
@@ -15,7 +17,7 @@ import logoUrl from '../assets/bwenge-logo.svg';
 interface Task { title: string; instructions: string; dueAt: string | null; open: boolean; rosterRequired?: boolean; hardDeadline?: boolean; taskFiles: Array<{ index: number; name: string; mime: string; size: number }> }
 const MAX_FILES = 10;
 const MAX_MB = 25;
-const ACCEPT = '.pdf,.doc,.docx,.odt,.rtf,.txt,.md,image/*,.heic,.heif,audio/*,.m4a,.mp3,.wav,.ogg,.webm';
+const ACCEPT = HAND_IN_ACCEPT;
 interface Item { id: string; file: File; src: PreviewSource }
 const size = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1048576).toFixed(1)} MB`);
 
@@ -26,6 +28,7 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
   const [name, setName] = useState('');
   const [studentId, setStudentId] = useState('');
   const [text, setText] = useState('');
+  const [folderNote, setFolderNote] = useState<string | null>(null);
   const [receiptCode, setReceiptCode] = useState('');
   const [needReceipt, setNeedReceipt] = useState(false);
   const [files, setFiles] = useState<Item[]>([]);
@@ -40,7 +43,7 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
   // Nothing is remembered on the device: people often share phones, and a remembered name or number would
   // make the next person's submission replace the previous one's.
 
-  const add = (list: FileList | null) => {
+  const add = (list: FileList | File[] | null) => {
     if (!list) return;
     const fresh = [...list];
     const big = fresh.find((f) => f.size > MAX_MB * 1048576);
@@ -52,6 +55,16 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
     setFiles((cur) => [...cur, ...added.slice(0, Math.max(0, room)).map((f) => ({ id: `${key(f)}|${Math.random()}`, file: f, src: { name: f.name, type: f.type, file: f } }))]);
     if (added.length > room) setState({ kind: 'error', message: `Up to ${MAX_FILES} files. ${added.length - Math.max(0, room)} not added.` });
     else if (state.kind === 'error') setState({ kind: 'idle' });
+  };
+  /** A whole folder (a project, a set of files): zipped on this device and handed in as one file. */
+  const addFolder = async (list: FileList | null) => {
+    if (!list || !list.length) return;
+    setState({ kind: 'idle' });
+    try {
+      const { file, included, skipped } = await folderToZip(list, MAX_MB * 1048576);
+      add([file]);
+      setFolderNote(`${file.name}: ${included} file${included === 1 ? '' : 's'}${skipped ? `, ${skipped} left out (libraries and hidden files)` : ''}`);
+    } catch (e) { setState({ kind: 'error', message: e instanceof Error ? e.message : 'That folder could not be added.' }); }
   };
   const move = useCallback((i: number, by: number) => setFiles((cur) => {
     const j = i + by;
@@ -180,18 +193,22 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-[var(--brand)] px-3 py-3.5 text-[14.5px] font-semibold text-white active:bg-[var(--brand-strong)]">
               <Camera size={18} />Take photos
               <input type="file" accept="image/*" capture="environment" multiple hidden onChange={(e) => { add(e.target.files); e.target.value = ''; }} />
             </label>
             <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-neutral-300 px-3 py-3.5 text-[14.5px] font-medium hover:bg-neutral-50">
+              <FolderUp size={18} />Send a folder
+              <input type="file" hidden multiple {...({ webkitdirectory: '', directory: '' } as any)} onChange={(e) => { void addFolder(e.target.files); e.target.value = ''; }} />
+            </label>
+            <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-neutral-300 px-3 py-3.5 text-[14.5px] font-medium hover:bg-neutral-50">
               <Paperclip size={18} />Choose files
               <input type="file" accept={ACCEPT} multiple hidden onChange={(e) => { add(e.target.files); e.target.value = ''; }} />
             </label>
-            <VoiceRecorder className="col-span-2 sm:col-span-1" onRecorded={(f) => { const dt = new DataTransfer(); dt.items.add(f); add(dt.files); }} onError={(message) => setState({ kind: 'error', message })} />
+            <VoiceRecorder className="" onRecorded={(f) => { const dt = new DataTransfer(); dt.items.add(f); add(dt.files); }} onError={(message) => setState({ kind: 'error', message })} />
           </div>
-          <p className="-mt-2 text-[12px] text-neutral-500">Photos of your pages (one per page), PDF, Word, text or a voice recording. Up to {MAX_FILES} files, {MAX_MB} MB each.</p>
+          <p className="-mt-2 text-[12px] text-neutral-500">Photos of your pages (one per page), PDF, Word, Excel, PowerPoint, code, a whole folder, a voice recording or a video. Up to {MAX_FILES} files, {MAX_MB} MB each.{folderNote ? <span className="mt-1 block text-neutral-600">{folderNote}</span> : null}</p>
 
           {files.length > 0 && (
             <div>
