@@ -27,7 +27,7 @@ test('metrics need the key and report the room in Prometheus text', async () => 
   assert.equal((await get('/metrics', { Authorization: 'Bearer wrong' })).status, 401);
   const ex = (await q(`INSERT INTO exams (title, exam_url) VALUES ('m', 'http://x/') RETURNING id`)).rows[0].id;
   const code = (await q(`INSERT INTO exam_codes (exam_id, code_hash, secret_hash, expires_at) VALUES ($1::uuid, 'h' || $1::text, 's', now() + interval '1 hour') RETURNING id`, [ex])).rows[0].id;
-  await q(`INSERT INTO exam_sessions (exam_id, code_id, student_name, token_hash, client_type, device_id, deadline_at) VALUES ($1,$2,'A','t1','desktop','d-aaaaaaaa', now() + interval '1 hour'), ($1,$2,'B','t2','desktop','d-bbbbbbbb', now() + interval '1 hour')`, [ex, code]);
+  await q(`INSERT INTO exam_sessions (exam_id, code_id, student_name, token_hash, client_type, device_id, deadline_at) VALUES ($1,$2,'A','t1-' || $3::text,'desktop','d-aaaaaaaa', now() + interval '1 hour'), ($1,$2,'B','t2-' || $3::text,'desktop','d-bbbbbbbb', now() + interval '1 hour')`, [ex, code, String(Date.now())]);
   const r = await get('/metrics', { Authorization: 'Bearer tkey' });
   assert.match(r.headers.get('content-type'), /text\/plain/);
   const text = await r.text();

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { favicon, markImg } from './brand.js';
 
 export const files = { windows: 'MySEB-win.exe', mac: 'MySEB-mac.dmg', linux: 'MySEB-linux.AppImage', android: 'MySEB.apk' };
 const labels = { windows: 'Windows (.exe)', mac: 'Mac (.dmg)', linux: 'Linux (.AppImage)', android: 'Android (.apk)', ios: 'iPhone / iPad' };
@@ -63,6 +64,6 @@ downloadRouter.get('/', async (req, res, next) => {
     const buttons = Object.entries(labels).map(([key, label]) => available[key]
       ? `<a href="?platform=${key}">Download for ${escape(label)}</a>`
       : `<div class="unavailable">${escape(label)} — not available yet</div>`).join('');
-    res.set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'").type('html').send(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Get MySEB</title><style>body{font-family:system-ui;max-width:480px;margin:40px auto;padding:24px;color:#222}a,.unavailable{display:block;margin:12px 0;padding:16px;border-radius:12px}a{background:#b4502f;color:white;text-decoration:none;font-weight:700}.unavailable{background:#f1f1f1;color:#666}p{line-height:1.6}</style><h1>Get MySEB</h1><p>${escape(notice)}</p>${buttons}<p>Install the app, open it, then enter the code from your lecturer. Your browser may ask you to confirm the download. Android may ask you to allow installation from this source.</p></html>`);
+    res.set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; frame-ancestors 'none'").type('html').send(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Get MySEB</title>${favicon}<style>body{font-family:system-ui;max-width:480px;margin:40px auto;padding:24px;color:#222}a,.unavailable{display:block;margin:12px 0;padding:16px;border-radius:12px}a{background:#b4502f;color:white;text-decoration:none;font-weight:700}.unavailable{background:#f1f1f1;color:#666}p{line-height:1.6}</style>${markImg(88)}<h1 style="text-align:center">Get MySEB</h1><p>${escape(notice)}</p>${buttons}<p>Install the app, open it, then enter the code from your lecturer. Your browser may ask you to confirm the download. Android may ask you to allow installation from this source.</p></html>`);
   } catch (error) { next(error); }
 });
