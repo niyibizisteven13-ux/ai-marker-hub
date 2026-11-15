@@ -1,6 +1,7 @@
 import { q } from './db.js';
 import { config, sha } from './config.js';
 import { tokenHash } from './security.js';
+import { forgetLive, sweepLive } from './live.js';
 
 export const VIOLATION_TYPES = new Set([
   'leave', 'blur', 'background', 'visibility_hidden', 'fullscreen_exit', 'split_screen', 'screen_recording',
@@ -74,7 +75,9 @@ export async function sweep() {
     await q(`INSERT INTO violations (session_id, exam_id, type, detail) VALUES ($1,$2,'heartbeat_lost','{}')`, [r.id, r.exam_id]);
     await q('UPDATE exam_sessions SET violation_count = violation_count + 1 WHERE id=$1', [r.id]);
   }
-  await q(`UPDATE exam_sessions SET status='ENDED', ended_at=now(), end_reason='time_up' WHERE status <> 'ENDED' AND deadline_at < now()`);
+  const timedOut = await q(`UPDATE exam_sessions SET status='ENDED', ended_at=now(), end_reason='time_up' WHERE status <> 'ENDED' AND deadline_at < now() RETURNING id`);
+  timedOut.rows.forEach((r) => forgetLive(r.id));
+  sweepLive();
   await q(`UPDATE exams SET status='ended', ends_at=COALESCE(ends_at, now()) WHERE status='active' AND ends_at IS NOT NULL AND ends_at < now()`);
 }
 

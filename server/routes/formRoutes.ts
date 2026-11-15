@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { normalizeBranding } from '../../shared/formBranding.js';
-import { normalizeExam } from '../../shared/examRules.js';
+import { keepMysebLink, normalizeExam } from '../../shared/examRules.js';
 import { normalizePicks } from '../../shared/formPool.js';
 
 /** Test-design settings the creator chooses: one question at a time, no going back, a timer per question, no copying, question pools. */
@@ -172,7 +172,8 @@ router.put('/:id', requireAuth, async (req, res) => {
       confirmationTitle: String(confirmationTitle || '').trim().slice(0, 120),
       showScore: showScore !== false,
       blockPaste: blockPaste === true, shuffleQuestions: shuffleQuestions === true, shuffleAllOptions: shuffleAllOptions === true, trackIntegrity: trackIntegrity === true,
-      ...(exam ? { exam: normalizeExam(exam) } : {}),
+      // The live room can create the MySEB exam while the builder is open: a save from the builder must not drop that link.
+      ...(exam ? { exam: keepMysebLink(exam, prevSchema.exam) } : {}),
       ...designSettings({ oneAtATime, noGoingBack, perQuestionSeconds, blockCopy, poolPicks }, questions),
       requirements: String(requirements || '').slice(0, 12000),
       quizShowAnswers: quizShowAnswers !== false,
@@ -279,7 +280,7 @@ router.put('/:id/schema', requireAuth, async (req, res) => {
     if (Buffer.byteLength(JSON.stringify(schema)) > 4_000_000) return res.status(413).json({ error: 'The form is too large. Use smaller pictures.' });
     const { schema: prev } = await ownForm(userId, req.params.id);
     if (schema.branding !== undefined) schema.branding = normalizeBranding(schema.branding);
-    if (schema.exam !== undefined) schema.exam = normalizeExam(schema.exam);
+    if (schema.exam !== undefined) schema.exam = keepMysebLink(schema.exam, prev.exam);
     Object.assign(schema, designSettings({ ...prev, ...schema }, schema.fields ?? schema.questions ?? prev.fields ?? prev.questions ?? []));
     if (schema.confirmationTitle !== undefined) schema.confirmationTitle = String(schema.confirmationTitle || '').trim().slice(0, 120);
     if (schema.confirmationMessage !== undefined) schema.confirmationMessage = String(schema.confirmationMessage || 'Your response has been recorded.').slice(0, 1000);

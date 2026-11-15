@@ -223,3 +223,49 @@ test('service-key gate + soft cookie issuer (what bwenge uses): mobile gets a co
     const ds = down.listen(0); try { assert.equal((await fetch(`http://127.0.0.1:${ds.address().port}/`, { headers: dh })).status, 503); } finally { ds.close(); }
   } finally { srv.close(); }
 });
+
+test('live room: question + camera picture only when the lecturer asked, memory only, pause-all / resume-all', async () => {
+  const ex = (await call('/api/exams', { method: 'POST', headers: T, body: { title: 'Live' } })).json;
+  const c = (await call(`/api/exams/${ex.id}/generate-code`, { method: 'POST', headers: T })).json;
+  const s1 = (await call('/api/verify-code', { method: 'POST', body: { code: c.code, studentName: 'Una', deviceId: 'dev-una-1234', clientType: 'desktop' } })).json;
+  const s2 = (await call('/api/verify-code', { method: 'POST', body: { code: c.code, studentName: 'Vic', deviceId: 'dev-vic-1234', clientType: 'desktop' } })).json;
+  const JPEG = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==';
+  const live = (sid, body, headers = T) => call(`/api/sessions/${sid}/live`, { method: 'POST', headers, body });
+
+  assert.equal((await live(s1.sessionId, {}, { 'content-type': 'application/json' })).status, 401, 'only bwenge (service key) may report');
+  // pictures are refused while the lecturer has not asked for them
+  let r = await live(s1.sessionId, { question: { index: 4, total: 12, label: 'What is 12 x 12?' }, camera: 'on', frame: JPEG });
+  assert.equal(r.json.faces, false);
+  let mon = (await call(`/api/exams/${ex.id}/monitor`, { headers: T })).json;
+  let una = mon.students.find((x) => x.student_name === 'Una');
+  assert.deepEqual(una.live.question, { index: 4, total: 12, label: 'What is 12 x 12?' }); assert.equal(una.live.frame, null);
+  assert.equal(mon.exam.title, 'Live'); assert.equal(mon.exam.live_faces, false);
+
+  await call(`/api/exams/${ex.id}`, { method: 'PATCH', headers: T, body: { liveFaces: true } });
+  r = await live(s1.sessionId, { question: { index: 5, total: 12, label: 'Q5' }, camera: 'on', frame: JPEG });
+  assert.equal(r.json.faces, true);
+  una = (await call(`/api/exams/${ex.id}/monitor`, { headers: T })).json.students.find((x) => x.student_name === 'Una');
+  assert.equal(una.live.frame, JPEG); assert.equal(una.live.question.index, 5);
+  // junk is cleaned: not a JPEG data URL, oversize, script in the label
+  await live(s1.sessionId, { question: { index: 'x', total: 1e9, label: '<b>hi</b>' + 'a'.repeat(500) }, camera: 'weird', frame: 'data:text/html;base64,AAAA' });
+  una = (await call(`/api/exams/${ex.id}/monitor`, { headers: T })).json.students.find((x) => x.student_name === 'Una');
+  assert.equal(una.live.camera, 'off'); assert.equal(una.live.frame, JPEG, 'a junk frame does not replace the last good one');
+  assert.ok(una.live.question.label.length <= 120); assert.equal(una.live.question.total, 10000);
+  // nothing about pictures reaches the database
+  const cols = (await q(`SELECT column_name FROM information_schema.columns WHERE table_name IN ('exam_sessions','violations')`)).rows.map((x) => x.column_name);
+  assert.ok(!cols.some((n) => /frame|image|photo|picture/i.test(n)));
+
+  // pause everyone, then let everyone back
+  const pa = (await call(`/api/exams/${ex.id}/pause-all`, { method: 'POST', headers: T })).json; assert.equal(pa.changed, 2);
+  mon = (await call(`/api/exams/${ex.id}/monitor`, { headers: T })).json; assert.equal(mon.counts.PAUSED, 2);
+  assert.equal((await call(`/exam/${ex.id}/`, { headers: mk(s2, 'dev-vic-1234') })).status, 403, 'paused students are locked out of the exam site');
+  assert.equal((await call('/api/heartbeat', { method: 'POST', headers: mk(s2, 'dev-vic-1234') })).json.status, 'PAUSED');
+  const ra = (await call(`/api/exams/${ex.id}/resume-all`, { method: 'POST', headers: T })).json; assert.equal(ra.changed, 2);
+  assert.equal((await call('/api/heartbeat', { method: 'POST', headers: mk(s2, 'dev-vic-1234') })).json.status, 'IN_EXAM');
+
+  // when a student ends, their picture is forgotten
+  await call(`/api/sessions/${s1.sessionId}/end`, { method: 'POST', headers: T });
+  una = (await call(`/api/exams/${ex.id}/monitor`, { headers: T })).json.students.find((x) => x.student_name === 'Una');
+  assert.equal(una.live, null);
+  assert.equal((await live(s1.sessionId, { camera: 'on', frame: JPEG })).json.status, 'ENDED');
+});

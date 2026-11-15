@@ -5,7 +5,6 @@ import { PdfViewer } from './PdfViewer';
 import { FileThumb, PreviewDialog, type PreviewSource } from './FilePreview';
 import { Card, Empty, PageShell, SectionTabs, Stat, StatRow, Toolbar, primaryBtn, relative } from './workspace/Shell';
 import CoursesPage from './CoursesPage';
-import MySebPanel from './MySebPanel';
 import CodeTestsEditor, { BLANK_CONFIG, type CodeTestsConfig } from './CodeTestsEditor';
 
 /**
@@ -299,7 +298,7 @@ function MySebCard({ a, onChanged }: { a: Assignment; onChanged: () => Promise<v
         </span>
       </label>
       {msg && <p role="alert" className="mt-2 text-[12px] text-rose-400">{msg}</p>}
-      {a.requireMyseb && <div className="mt-3"><MySebPanel base={`/api/assignments/${a.id}/myseb`} onExamId={() => void onChanged()} /></div>}
+      {a.requireMyseb && <a href={`/live/task/${encodeURIComponent(a.id)}`} className="mt-3 flex min-h-11 items-center justify-center rounded-xl bg-[var(--brand)] px-4 text-[13.5px] font-semibold text-white hover:opacity-90">Open live room: get the code and watch students</a>}
     </Card>
   );
 }

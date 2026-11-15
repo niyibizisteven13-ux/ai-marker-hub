@@ -3,6 +3,7 @@
   let info;
   try { info = await chrome.runtime.sendMessage({ type: 'hello' }); } catch { return; }
   if (!info?.active) return;
+  document.documentElement.dataset.myseb = '1';   // the exam page's live reporter looks for this (the desktop and phone apps use their user agent instead)
 
   const report = (kind) => { chrome.runtime.sendMessage({ type: 'violation', kind }).catch(() => {}); };
 

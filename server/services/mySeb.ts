@@ -184,6 +184,34 @@ export async function endAll(load: TargetLoader) {
   return mysebFetch(`/exams/${t.mysebExamId}/end`, { method: 'POST' });
 }
 
+export async function pauseAll(load: TargetLoader) {
+  const t = await load();
+  return t.mysebExamId ? mysebFetch(`/exams/${t.mysebExamId}/pause-all`, { method: 'POST' }) : { ok: true, changed: 0 };
+}
+export async function resumeAll(load: TargetLoader) {
+  const t = await load();
+  return t.mysebExamId ? mysebFetch(`/exams/${t.mysebExamId}/resume-all`, { method: 'POST' }) : { ok: true, changed: 0 };
+}
+/** The lecturer asks for (or stops) small camera pictures in the live room. Made on the MySEB exam, created first if needed. */
+export async function setLiveFaces(load: TargetLoader, on: boolean) {
+  const examId = await ensureMysebExam(await load());
+  return mysebFetch(`/exams/${examId}`, { method: 'PATCH', body: { liveFaces: !!on } });
+}
+
+/** What the exam page tells the live room: the question the student is on and, if asked for, a small picture. Never stored here. */
+const lastLive = new Map<string, number>();
+export async function relayLive(sessionId: string, body: any): Promise<{ faces: boolean }> {
+  const now = Date.now();
+  if (now - (lastLive.get(sessionId) ?? 0) < 3000) return { faces: !!(lastLive.get(`${sessionId}:faces`)) };   // at most one report every 3 s per student
+  lastLive.set(sessionId, now);
+  if (lastLive.size > 5000) lastLive.clear();
+  const q = body?.question && typeof body.question === 'object' ? { index: body.question.index, total: body.question.total, label: String(body.question.label ?? '').slice(0, 200) } : undefined;
+  const frame = typeof body?.frame === 'string' && body.frame.length <= 16000 ? body.frame : undefined;
+  const r = await mysebFetch(`/sessions/${sessionId}/live`, { method: 'POST', body: { question: q, camera: body?.camera, frame } });
+  lastLive.set(`${sessionId}:faces`, r.faces ? 1 : 0);
+  return { faces: !!r.faces };
+}
+
 export async function violations(load: TargetLoader, sid: string) {
   await ownStudent(load, sid);
   return mysebFetch(`/sessions/${sid}/violations`);

@@ -1,7 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- Camera: only if your exam site proctors with the camera. Remove otherwise. -->
-    <!-- <uses-permission android:name="android.permission.CAMERA" /> -->
+    <!-- Camera: for the live room's small pictures, only when the lecturer turns them on (the page asks the student first). -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
         android:label="MySEB"

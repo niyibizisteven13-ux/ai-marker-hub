@@ -63,6 +63,16 @@ export function normalizeExam(input: unknown): ExamSettings {
   };
 }
 
+/**
+ * A save from the form builder replaces the test settings. The MySEB link (`mysebExamId`) is made elsewhere (the live room
+ * creates it when the lecturer first asks for a code), so a builder that was open at the time must not erase it.
+ */
+export function keepMysebLink(next: unknown, prev: unknown): ExamSettings {
+  const n = (next && typeof next === 'object' ? next : {}) as Record<string, unknown>;
+  const p = (prev && typeof prev === 'object' ? prev : {}) as Record<string, unknown>;
+  return normalizeExam({ ...n, mysebExamId: n.mysebExamId ?? p.mysebExamId });
+}
+
 /** A detected face as the detector reports it: a box in 0..1 of the picture. */
 export interface FaceBox { x: number; y: number; w: number; h: number }
 export type FrameStatus = 'ok' | 'no_face' | 'partial' | 'multiple';

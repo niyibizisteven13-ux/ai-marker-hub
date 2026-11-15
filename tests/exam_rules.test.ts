@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FaceWatch, frameStatus, normalizeExam } from '../shared/examRules.js';
+import { keepMysebLink, FaceWatch, frameStatus, normalizeExam } from '../shared/examRules.js';
 
 const face = (x: number, y: number, w = 0.3, h = 0.4) => ({ x, y, w, h });
 
@@ -58,4 +58,12 @@ test('MySEB and Safe Exam Browser are alternatives: both set means Safe Exam Bro
   assert.equal(both.requireSeb, true); assert.equal(both.requireMyseb, false);
   assert.equal(normalizeExam({ mysebExamId: '123e4567-e89b-12d3-a456-426614174000' }).mysebExamId, '123e4567-e89b-12d3-a456-426614174000');
   assert.equal(normalizeExam({ mysebExamId: 'not-a-uuid' }).mysebExamId, undefined);
+});
+
+test('a save from a stale form builder keeps the MySEB link made in the live room', () => {
+  const id = '123e4567-e89b-12d3-a456-426614174000';
+  assert.equal(keepMysebLink({ requireMyseb: true }, { requireMyseb: true, mysebExamId: id }).mysebExamId, id);
+  assert.equal(keepMysebLink({ requireMyseb: true, mysebExamId: '223e4567-e89b-12d3-a456-426614174000' }, { mysebExamId: id }).mysebExamId, '223e4567-e89b-12d3-a456-426614174000', 'a newer link wins');
+  assert.equal(keepMysebLink(undefined, undefined).mysebExamId, undefined);
+  assert.equal(keepMysebLink({ requireMyseb: true }, { mysebExamId: 'junk' }).mysebExamId, undefined);
 });

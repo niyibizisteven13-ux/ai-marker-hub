@@ -44,7 +44,7 @@ import { examsRouter } from './server/routes/examRoutes.js';
 import { createAssignmentsRouter, createPublicAssignmentsRouter } from './server/routes/assignmentRoutes.js';
 import { createCoursesRouter } from './server/routes/courseRoutes.js';
 import { createPublicFormExamRouter, createOwnerFormExamRouter } from './server/routes/formExamRoutes.js';
-import { createMySebAssignmentOwnerRouter, createMySebOwnerRouter, createMySebPublicRouter } from './server/routes/mySebRoutes.js';
+import { createMySebAssignmentOwnerRouter, createMySebOwnerRouter, createMySebPublicRouter, liveReportHandler } from './server/routes/mySebRoutes.js';
 import { mySebGuard, mySebShell } from './server/services/mySeb.js';
 import { formExamService } from './server/services/formExam/runtime.js';
 import { ExamError } from './server/services/formExam/service.js';
@@ -418,6 +418,9 @@ app.use('/api/payments', paymentRoutes);
   app.get('/api/assignments/public/:token', mysebTask);
   app.get('/api/assignments/public/:token/files/:index', mysebTask);
   app.post('/api/assignments/public/:token/submit', mysebTask);
+  // The page tells the live room which question the student is on (and a small picture if the lecturer asked for it).
+  app.post('/api/myseb/live/form/:id', mysebGuard, liveReportHandler);
+  app.post('/api/myseb/live/task/:token', mysebTask, liveReportHandler);
 }
 app.use('/api/myseb', createMySebPublicRouter());
 app.use('/api/forms', createMySebOwnerRouter());

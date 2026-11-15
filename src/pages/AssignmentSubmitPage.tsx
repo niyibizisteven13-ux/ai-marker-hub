@@ -4,6 +4,7 @@ import { FileThumb, PreviewDialog, type PreviewSource } from '../components/File
 import VoiceRecorder from '../components/VoiceRecorder';
 import { getApiUrl } from '../utils/authFetch';
 import MySebRequired from '../components/MySebRequired';
+import MySebLiveReporter from '../components/MySebLiveReporter';
 import { HAND_IN_ACCEPT } from '../../shared/handInTypes';
 import { folderToZip } from '../utils/folderToZip';
 import logoUrl from '../assets/bwenge-logo.svg';
@@ -155,6 +156,7 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
   const field = 'w-full rounded-xl border border-neutral-300 bg-white px-3 py-3 text-[15px] placeholder:text-neutral-400 focus:border-[var(--brand)] focus:outline-none focus:ring-2 focus:ring-[var(--brand)]/20';
   return shell(
     <>
+      <MySebLiveReporter kind="task" refId={token} status={() => (files.length ? `${files.length} file${files.length === 1 ? '' : 's'} attached` : text.trim() ? 'Writing the answer' : 'Reading the task')} />
       <section className="rounded-2xl bg-white p-5 shadow-sm">
         <h1 className="text-[21px] font-semibold leading-snug">{task.title}</h1>
         <p className="mt-1.5 flex flex-wrap items-center gap-2 text-[13px] text-neutral-500">
