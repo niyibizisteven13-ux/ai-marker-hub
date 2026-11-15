@@ -1,5 +1,11 @@
 # Deploying MySEB
 
+## Easiest: inside the existing bwenge server (nothing new to set up)
+If `MYSEB_URL` is **not** set, bwenge runs MySEB itself under `https://<your site>/myseb`, in the same process and the same PostgreSQL database (its own tables). Secrets are derived from `JWT_SECRET`, so there is nothing to configure: deploy, open the live room, get a code. Set `APP_URL` to your public address if you can. Build the apps with `apiBase` = `https://<your site>/myseb`. Set `MYSEB_EMBED=0` to turn this off.
+This suits a school or a few hundred students at a time. Live video for many students is better on its own machine (below), which also needs TURN for students behind strict networks.
+
+## Separate server (bigger exams, live video)
+
 One small server (2 vCPU, 2 GB RAM is plenty for a few thousand students) with Docker.
 
 ```bash

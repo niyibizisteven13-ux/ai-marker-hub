@@ -46,6 +46,7 @@ import { createCoursesRouter } from './server/routes/courseRoutes.js';
 import { createPublicFormExamRouter, createOwnerFormExamRouter } from './server/routes/formExamRoutes.js';
 import { createMySebAssignmentOwnerRouter, createMySebOwnerRouter, createMySebPublicRouter, liveIceHandler, liveReportHandler, liveSignalPullHandler, liveSignalPushHandler } from './server/routes/mySebRoutes.js';
 import { mySebGuard, mySebShell } from './server/services/mySeb.js';
+import { mountEmbeddedMySeb } from './server/services/mySebEmbedded.js';
 import { createFormFromFileRouter } from './server/routes/formFromFileRoutes.js';
 import { createTranscriptPublicRouter } from './server/routes/transcriptRoutes.js';
 import { formExamService } from './server/services/formExam/runtime.js';
@@ -122,6 +123,8 @@ export const app = express();
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 const PORT = Number(process.env.PORT) || 3000;
+// MySEB runs inside this server (under /myseb) unless MYSEB_URL points at a separate one. Mounted first, before the site's own security headers and parsers.
+await mountEmbeddedMySeb(app, PORT).catch((err) => console.error('[WARN] Embedded MySEB did not start:', err?.message));
 
 // Only trust a known number of reverse proxy hops. Express defaults to zero,
 // so direct/local requests cannot spoof their client IP through X-Forwarded-For.

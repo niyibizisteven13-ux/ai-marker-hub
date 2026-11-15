@@ -39,7 +39,7 @@ app.get('/metrics', async (req, res) => {
 
 // The exam site: EVERY request under /exam/:id goes through the guard first.
 // Only real UUIDs are exam routes; anything else under /exam is a 404 (never "let through").
-app.get('/exam/:examId([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})', (req, res, next) => (req.originalUrl.split('?')[0].endsWith('/') ? next() : res.redirect(301, `/exam/${req.params.examId}/`)));
+app.get('/exam/:examId([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})', (req, res, next) => (req.originalUrl.split('?')[0].endsWith('/') ? next() : res.redirect(301, `${req.baseUrl}/exam/${req.params.examId}/`)));
 app.use('/exam/:examId([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})', mySebGuard((req) => req.params.examId), examRouter);
 
 process.on('unhandledRejection', (e) => console.error('unhandledRejection', e));   // one bad request must never take the exam server down
@@ -59,7 +59,7 @@ app.get('/join/:code', (req, res) => {
 if (config.dashboardEnabled) app.use('/dashboard', express.static(path.join(here, '../public/dashboard'), {
   setHeaders: (res) => res.set('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'"),
 }));
-app.get('/', (_req, res) => (config.dashboardEnabled ? res.redirect('/dashboard/') : res.json({ name: 'MySEB', ok: true })));
+app.get('/', (_req, res) => (config.dashboardEnabled ? res.redirect(`${_req.baseUrl}/dashboard/`) : res.json({ name: 'MySEB', ok: true })));
 
 app.use((err, _req, res, _next) => { console.error(err); res.status(500).json({ error: 'server error' }); });
 
