@@ -813,8 +813,10 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
       const { label, ...question } = field;
       return { ...question, type: FORM_BUILDER_API_TYPES[field.type] || 'SHORT_TEXT', title: label || 'Untitled question' };
     });
-    const response = await authFetch('/api/forms', {
-      method: 'POST',
+    // Publishing again after the first time updates the same form (same link), instead of creating a copy.
+    const existingId = manualPublishedFormId;
+    const response = await authFetch(existingId ? `/api/forms/${existingId}` : '/api/forms', {
+      method: existingId ? 'PUT' : 'POST',
       body: JSON.stringify({
         title: builderSchema.title,
         description: builderSchema.description,
