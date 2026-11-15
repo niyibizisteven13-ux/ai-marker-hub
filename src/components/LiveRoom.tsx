@@ -13,7 +13,7 @@ interface Student {
   last_violation: string | null; pause_reason: string | null; end_reason: string | null; seen_ago: number;
   live: { question: { index: number | null; total: number | null; label: string } | null; camera: string; screen_state?: string; frame: string | null; frame_age: number | null; screen?: string | null; screen_age?: number | null } | null;
 }
-interface Room { exam: { title: string; status: string; live_faces: boolean; live_mode?: 'off' | 'pictures' | 'live'; live_sound?: boolean; live_source?: Source; leave_action?: string }; counts: Record<Status, number>; students: Student[] }
+interface Room { exam: { title: string; status: string; live_faces: boolean; live_mode?: 'off' | 'pictures' | 'live'; live_sound?: boolean; live_source?: Source; leave_action?: string; allow_web?: boolean }; counts: Record<Status, number>; students: Student[] }
 interface Code { display: string; qrSvg: string; expiresAt: string }
 
 const LABEL: Record<Status, string> = { IN_EXAM: 'In the test', PAUSED: 'Paused', LEFT: 'Left', ENDED: 'Finished' };
@@ -398,7 +398,7 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
         </div>
         {settingsOpen && (
           <div className="border-t border-white/10 bg-slate-900/70">
-            <div className="mx-auto grid max-w-[1800px] gap-3 px-4 py-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+            <div className="mx-auto grid max-w-[1800px] gap-3 px-4 py-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7">
               <Setting label="Show" hint="What each student shares with you.">
                 <select className={dSelect} style={{ colorScheme: 'dark' }} aria-label="Show" value={source} disabled={busy || !open} onChange={(e) => act(() => call('/settings', 'POST', { liveMode: mode === 'off' ? 'pictures' : mode, liveSound: sound, liveSource: e.target.value, leaveAction }))}>
                   <option value="camera">Face</option><option value="screen">Screen</option><option value="both">Face and screen</option>
@@ -423,6 +423,12 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
                 <select className={dSelect} style={{ colorScheme: 'dark' }} aria-label="Live at once" value={maxLive} disabled={mode !== 'live'} onChange={(e) => setMaxLive(Number(e.target.value))}>
                   <option value={12}>12 students</option><option value={24}>24 students</option><option value={48}>48 students</option>
                 </select>
+              </Setting>
+              <Setting label="Browsers" hint="Lets students without the app (for example on an iPhone) take the test in their browser. It cannot lock their device, only watch it.">
+                <label className="flex min-h-9 cursor-pointer items-center gap-2 text-sm font-semibold">
+                  <input type="checkbox" className="h-4 w-4" checked={!!room?.exam?.allow_web} disabled={busy || !open} onChange={(e) => act(() => call('/settings', 'POST', { liveMode: mode, liveSound: sound, liveSource: source, leaveAction, allowWeb: e.target.checked }))} />
+                  Allow browsers
+                </label>
               </Setting>
               <Setting label="Listening" hint="Lets you hear one student at a time. They see a notice while you do.">
                 <label className="flex min-h-9 cursor-pointer items-center gap-2 text-sm font-semibold">
@@ -508,7 +514,7 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
                     <button type="button" aria-label={`Zoom in on ${s.student_name}`} onClick={(e) => { e.stopPropagation(); setFocus(s.id); }} className="absolute bottom-9 left-2 rounded-full bg-black/60 px-2.5 py-0.5 text-[11px] font-bold text-white opacity-100 hover:bg-black/80 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">Zoom</button>
                   </div>
                   <div className="flex flex-1 flex-col gap-1.5 p-2.5">
-                    <p className="text-[11px] text-slate-500">{s.client_type}{s.platform ? ` · ${s.platform}` : ''}{s.status !== 'ENDED' && s.seen_ago > 15 ? ` · seen ${s.seen_ago}s ago` : ''}</p>
+                    <p className="text-[11px] text-slate-500">{s.client_type === 'web' ? 'browser' : s.client_type}{s.platform ? ` · ${s.platform}` : ''}{s.status !== 'ENDED' && s.seen_ago > 15 ? ` · seen ${s.seen_ago}s ago` : ''}</p>
                     {(s.status === 'PAUSED' || s.status === 'LEFT') && <p className="text-xs font-semibold text-amber-300">{why(s.pause_reason ?? s.last_violation)}</p>}
                     <div className="mt-auto flex flex-wrap gap-1.5">
                       {(s.status === 'PAUSED' || s.status === 'LEFT') && <button type="button" className="min-h-9 rounded-lg bg-blue-500 px-3 text-xs font-bold text-white hover:bg-blue-400 disabled:opacity-40" disabled={busy} onClick={() => act(() => call(`/sessions/${s.id}/resume`, 'POST'))}>Resume</button>}

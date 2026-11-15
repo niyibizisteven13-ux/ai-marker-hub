@@ -477,7 +477,7 @@ export default function App() {
             // A test that needs MySEB answers 403 { code: 'MYSEB_*' } to anyone outside the app: show how to get it.
             const body = await res.json().catch(() => ({} as any));
             if (res.status === 403 || res.status === 503) {
-              if (typeof body.code === 'string' && body.code.startsWith('MYSEB_')) { setMysebBlock(body.code); setPublicFormLoading(false); return null; }
+              if (typeof body.code === 'string' && body.code.startsWith('MYSEB_')) { setMysebBlock(body.code + (body.webAllowed ? '+WEB' : '')); setPublicFormLoading(false); return null; }
             }
             throw new Error('Form not found');
           }

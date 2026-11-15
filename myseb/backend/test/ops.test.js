@@ -31,7 +31,7 @@ test('metrics need the key and report the room in Prometheus text', async () => 
   const r = await get('/metrics', { Authorization: 'Bearer tkey' });
   assert.match(r.headers.get('content-type'), /text\/plain/);
   const text = await r.text();
-  assert.match(text, /myseb_students\{status="IN_EXAM"\} [2-9]/); assert.match(text, /myseb_exams_active [1-9]/);
+  assert.match(text, /myseb_students\{status="IN_EXAM"\} ([2-9]|\d{2,})/); assert.match(text, /myseb_exams_active [1-9]/);
   for (const m of ['myseb_live_entries', 'myseb_signal_mailboxes', 'myseb_process_resident_bytes', 'myseb_process_uptime_seconds']) assert.ok(text.includes(m), m);
   assert.ok(!/tkey|testpepper/.test(text), 'no secrets in the metrics');
   await q('DELETE FROM exams WHERE id=$1', [ex]);

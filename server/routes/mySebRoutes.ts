@@ -18,7 +18,7 @@ const p = (req: Request, k: string) => String(req.params[k]);
 /** Public: what the "Use MySEB" screen and the downloads page need. Contains no secrets. */
 export function createMySebPublicRouter() {
   const r = Router();
-  r.get('/status', (_req, res) => res.json({ configured: mySebConfigured(), links: downloadLinks() }));
+  r.get('/status', (_req, res) => res.json({ configured: mySebConfigured(), links: downloadLinks(), webJoinPath: process.env.MYSEB_WEB_PATH || '' }));
   return r;
 }
 
@@ -71,7 +71,7 @@ function createMySebOwnerRouterFor(target: (userId: string, id: string) => Targe
   r.post('/:id/myseb/resume-all', requireAuth, run(async (req, res) => { res.json(await resumeAll(t(req))); }));
   r.post('/:id/myseb/settings', requireAuth, run(async (req, res) => {
     const mode = ['off', 'pictures', 'live'].includes(req.body?.liveMode) ? req.body.liveMode : req.body?.liveFaces === true ? 'pictures' : 'off';
-    res.json(await setLiveMode(t(req), mode, req.body?.liveSound === true, { source: req.body?.liveSource, leaveAction: req.body?.leaveAction }));
+    res.json(await setLiveMode(t(req), mode, req.body?.liveSound === true, { source: req.body?.liveSource, leaveAction: req.body?.leaveAction, allowWeb: req.body?.allowWeb }));
   }));
   // Live video set-up: the lecturer's room listens for offers/ICE from students and sends watch/answer/ice back.
   r.get('/:id/myseb/ice', requireAuth, (_req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(iceServers()); });

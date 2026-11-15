@@ -31,16 +31,17 @@ export async function authSession(req, { allowCookie = false } = {}) {
   if (!key || key.length > 100) return { error: 'missing' };
 
   const { rows } = await q(
-    `SELECT s.*, e.title, e.exam_url, e.require_myseb, e.allow_extension, e.leave_action, e.status AS exam_status
+    `SELECT s.*, e.title, e.exam_url, e.require_myseb, e.allow_extension, e.allow_web, e.leave_action, e.status AS exam_status
        FROM exam_sessions s JOIN exams e ON e.id = s.exam_id WHERE s.token_hash = $1`, [tokenHash(key)]);
   const row = rows[0];
   if (!row) return { error: 'invalid' };
 
   const ua = req.get('user-agent') || '';
-  const client = viaCookie ? 'mobile' : (req.get('x-myseb-client') || '');
+  const client = viaCookie ? (row.client_type === 'web' ? 'web' : 'mobile') : (req.get('x-myseb-client') || '');
   const device = req.get('x-myseb-device') || '';
   let ok = client === row.client_type;
-  if (viaCookie) ok = ok && row.client_type === 'mobile' && MARK.test(ua);
+  if (row.client_type === 'web') ok = ok && viaCookie && row.allow_web && !!row.ua_hash && row.ua_hash === sha(ua);   // a browser: its secure cookie, from the same browser it was given to
+  else if (viaCookie) ok = ok && row.client_type === 'mobile' && MARK.test(ua);
   else if (row.client_type === 'extension') ok = ok && row.allow_extension && device === row.device_id;
   else ok = ok && MARK.test(ua) && device === row.device_id; // desktop + mobile native calls: marker UA AND the device the token was issued to
   if (!ok) {

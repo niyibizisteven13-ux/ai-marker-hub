@@ -343,7 +343,7 @@ test('limits: the service key is not rate limited (one school, thousands of stud
   const svc = { 'X-MySEB-Service-Key': 'tkey', 'Content-Type': 'application/json' };
   const body = { key: 'nope', client: 'desktop', device: 'd', userAgent: 'MySEB/1', examId: ex.id };
   const codes = []; for (let i = 0; i < 700; i++) codes.push((await fetch(`${base}/api/gate`, { method: 'POST', headers: svc, body: JSON.stringify(body) })).status);
-  assert.ok(codes.every((c) => c === 200), 'service key: never limited');
+  assert.ok(codes.every((c) => c === 200), 'service key: never limited, got ' + JSON.stringify([...new Set(codes)]));
   const guess = []; for (let i = 0; i < 620; i++) guess.push((await fetch(`${base}/api/gate`, { method: 'POST', headers: { 'X-MySEB-Exam-Secret': 'mseb_guess' + i, 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'x' }) })).status);
   const allowed = guess.filter((c) => c !== 429).length;   // earlier tests already used a few of the 600
   assert.ok(allowed >= 570 && allowed <= 600, `allowed ${allowed}`); assert.ok(guess.slice(-10).every((c) => c === 429), 'secret guessing is stopped after 600 a minute');

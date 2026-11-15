@@ -43,7 +43,9 @@ test('MySEB runs next to the bwenge server under /myseb, with its secrets derive
     assert.equal(windows.headers.get('location'), process.env.MYSEB_DL_WINDOWS);
     const iphone = await ua('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)');
     assert.equal(iphone.status, 200);
-    assert.match(await iphone.text(), /iPhone and iPad app is not available yet/);
+    const iphoneText = await iphone.text();
+    assert.match(iphoneText, /no MySEB app for iPhone or iPad yet/); assert.match(iphoneText, /in your browser/);
+    assert.doesNotMatch(iphoneText, /Download for/, 'no buttons that cannot work on an iPhone');
     const chooser = await ua(android, '?choose=1');
     assert.equal(chooser.status, 200);
     const html = await chooser.text();

@@ -231,11 +231,11 @@ export async function relayLive(sessionId: string, body: any): Promise<LiveAnswe
 
 /** Camera in the live room: off, small pictures, or live video; and whether the lecturer may listen. */
 export const LEAVE_ACTIONS = ['record', 'pause', 'end', 'pause_then_end'] as const;
-export async function setLiveMode(load: TargetLoader, mode: 'off' | 'pictures' | 'live', sound: boolean, extra: { source?: unknown; leaveAction?: unknown } = {}) {
+export async function setLiveMode(load: TargetLoader, mode: 'off' | 'pictures' | 'live', sound: boolean, extra: { source?: unknown; leaveAction?: unknown; allowWeb?: unknown } = {}) {
   const examId = await ensureMysebExam(await load());
   const source = (['camera', 'screen', 'both'] as const).find((x) => x === extra.source);
   const leaveAction = LEAVE_ACTIONS.find((x) => x === extra.leaveAction);
-  return mysebFetch(`/exams/${examId}`, { method: 'PATCH', body: { liveMode: mode, liveSound: mode === 'live' && sound && source !== 'screen', ...(source ? { liveSource: source } : {}), ...(leaveAction ? { leaveAction } : {}) } });
+  return mysebFetch(`/exams/${examId}`, { method: 'PATCH', body: { liveMode: mode, liveSound: mode === 'live' && sound && source !== 'screen', ...(source ? { liveSource: source } : {}), ...(leaveAction ? { leaveAction } : {}), ...(typeof extra.allowWeb === 'boolean' ? { allowWeb: extra.allowWeb } : {}) } });
 }
 
 /* ---- live video: only the short set-up messages pass through here; the video goes student -> lecturer directly ---- */

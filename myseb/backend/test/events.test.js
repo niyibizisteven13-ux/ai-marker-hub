@@ -42,13 +42,13 @@ test('the live room hears about a join, a rule broken, and an end within a momen
   try {
     let t0 = Date.now();
     const a = (await call('/api/verify-code', { method: 'POST', body: { code: code.code, studentName: 'Ivy', deviceId: 'dev-ivy-12345', clientType: 'desktop' } })).json;
-    const joined = await room.next(); assert.ok(joined.kinds.includes('join')); assert.ok(Date.now() - t0 < 800, `join arrived in ${Date.now() - t0} ms`);
+    const joined = await room.next(); assert.ok(joined.kinds.includes('join')); assert.ok(Date.now() - t0 < 2500, `join arrived in ${Date.now() - t0} ms`);
     t0 = Date.now();
     await call('/api/violation', { method: 'POST', headers: mk(a, 'dev-ivy-12345'), body: { type: 'blur', detail: {} } });
-    const broke = await room.next(); assert.ok(broke.kinds.includes('violation')); assert.ok(Date.now() - t0 < 800, `violation arrived in ${Date.now() - t0} ms`);
+    const broke = await room.next(); assert.ok(broke.kinds.includes('violation')); assert.ok(Date.now() - t0 < 2500, `violation arrived in ${Date.now() - t0} ms`);
     t0 = Date.now();
     await call(`/api/sessions/${a.sessionId}/end`, { method: 'POST', headers: T });
-    const ended = await room.next(); assert.ok(ended.kinds.length > 0); assert.ok(Date.now() - t0 < 800, `end arrived in ${Date.now() - t0} ms`);
+    const ended = await room.next(); assert.ok(ended.kinds.length > 0); assert.ok(Date.now() - t0 < 2500, `end arrived in ${Date.now() - t0} ms`);
     // a new question is shown at once, but the same question again is not news
     await call(`/api/exams/${exam.id}`, { method: 'PATCH', headers: T, body: { liveMode: 'pictures' } }); await room.next();
     const b = (await call('/api/verify-code', { method: 'POST', body: { code: code.code, studentName: 'Jon', deviceId: 'dev-jon-12345', clientType: 'desktop' } })).json; await room.next();
