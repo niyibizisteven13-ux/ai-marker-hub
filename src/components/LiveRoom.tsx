@@ -13,7 +13,7 @@ interface Student {
   last_violation: string | null; pause_reason: string | null; end_reason: string | null; seen_ago: number;
   live: { question: { index: number | null; total: number | null; label: string } | null; camera: string; screen_state?: string; frame: string | null; frame_age: number | null; screen?: string | null; screen_age?: number | null } | null;
 }
-interface Room { exam: { title: string; status: string; live_faces: boolean; live_mode?: 'off' | 'pictures' | 'live'; live_sound?: boolean; live_source?: Source; leave_action?: string; allow_web?: boolean }; counts: Record<Status, number>; students: Student[] }
+interface Room { exam: { title: string; status: string; live_faces: boolean; live_mode?: 'off' | 'pictures' | 'live'; live_sound?: boolean; live_source?: Source; leave_action?: string; allow_web?: boolean; web_strict?: boolean }; counts: Record<Status, number>; students: Student[] }
 interface Code { display: string; qrSvg: string; expiresAt: string; joinUrl?: string }
 
 const LABEL: Record<Status, string> = { IN_EXAM: 'In the test', PAUSED: 'Paused', LEFT: 'Left', ENDED: 'Finished' };
@@ -429,6 +429,12 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
                 <label className="flex min-h-9 cursor-pointer items-center gap-2 text-sm font-semibold">
                   <input type="checkbox" className="h-4 w-4" checked={!!room?.exam?.allow_web} disabled={busy || !open} onChange={(e) => act(() => call('/settings', 'POST', { liveMode: mode, liveSound: sound, liveSource: source, leaveAction, allowWeb: e.target.checked }))} />
                   Allow browsers
+                </label>
+              </Setting>
+              <Setting label="Browser rules" hint="Strict (recommended): a student in a browser is rejected at once if they leave the page, close the tab, turn the camera off or their face leaves the camera. They get one attempt. Gentler: your 'If a student leaves' rule applies.">
+                <label className="flex min-h-9 cursor-pointer items-center gap-2 text-sm font-semibold">
+                  <input type="checkbox" className="h-4 w-4" checked={room?.exam?.web_strict !== false} disabled={busy || !open || !room?.exam?.allow_web} onChange={(e) => act(() => call('/settings', 'POST', { liveMode: mode, liveSound: sound, liveSource: source, leaveAction, webStrict: e.target.checked }))} />
+                  Strict for browsers
                 </label>
               </Setting>
               <Setting label="Listening" hint="Lets you hear one student at a time. They see a notice while you do.">

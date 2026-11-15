@@ -69,6 +69,7 @@ api.patch('/exams/:id', requireTeacher, wrap(async (req, res) => {
   if (typeof b.requireMyseb === 'boolean') add('require_myseb', b.requireMyseb);
   if (typeof b.allowExtension === 'boolean') add('allow_extension', b.allowExtension);
   if (typeof b.allowWeb === 'boolean') add('allow_web', b.allowWeb);
+  if (typeof b.webStrict === 'boolean') add('web_strict', b.webStrict);
   if (['record', 'pause', 'end', 'pause_then_end'].includes(b.leaveAction)) add('leave_action', b.leaveAction);
   if (['camera', 'screen', 'both'].includes(b.liveSource)) add('live_source', b.liveSource);
   if (typeof b.liveFaces === 'boolean') { add('live_faces', b.liveFaces); add('live_mode', b.liveFaces ? 'pictures' : 'off'); }
@@ -117,7 +118,7 @@ api.post('/exams/:id/end', requireTeacher, wrap(async (req, res) => {
 /** One copy of the student list is built and shared by every lecturer tab looking at the same test; it is rebuilt after any change. */
 const monitorShared = new Map();
 async function buildMonitor(id, withFrames) {
-  const ex = (await q('SELECT id, title, status, live_faces, live_mode, live_sound, live_source, require_myseb, allow_web, leave_action FROM exams WHERE id=$1', [id])).rows[0];
+  const ex = (await q('SELECT id, title, status, live_faces, live_mode, live_sound, live_source, require_myseb, allow_web, web_strict, leave_action FROM exams WHERE id=$1', [id])).rows[0];
   if (!ex) return null;
   const { rows } = await q(
     `SELECT s.id, s.student_name, s.status, s.client_type, s.platform, s.violation_count, s.pause_reason, s.end_reason,
@@ -130,7 +131,7 @@ async function buildMonitor(id, withFrames) {
     const l = r.status === 'ENDED' ? null : getLive(r.id);
     return { ...r, live: l ? { question: l.question, camera: l.camera, screen_state: l.screenState, frame: withFrames && ex.live_faces ? l.frame : null, frame_age: l.frameAt ? Math.round((Date.now() - l.frameAt) / 1000) : null, screen: withFrames && ex.live_faces ? l.screen : null, screen_age: l.screenAt ? Math.round((Date.now() - l.screenAt) / 1000) : null } : null };
   });
-  return { exam: { id: ex.id, title: ex.title, status: ex.status, live_faces: ex.live_faces, live_mode: ex.live_mode, live_sound: ex.live_sound, live_source: ex.live_source, allow_web: ex.allow_web, leave_action: ex.leave_action }, counts, students };
+  return { exam: { id: ex.id, title: ex.title, status: ex.status, live_faces: ex.live_faces, live_mode: ex.live_mode, live_sound: ex.live_sound, live_source: ex.live_source, allow_web: ex.allow_web, web_strict: ex.web_strict, leave_action: ex.leave_action }, counts, students };
 }
 api.get('/exams/:id/monitor', requireTeacher, wrap(async (req, res) => {
   const id = req.params.id;
@@ -308,6 +309,12 @@ api.post('/verify-code',
     // Same student coming back (app crash, restart): keep the state so a pause cannot be escaped by re-entering the code.
     const prev = (await q(
       `SELECT * FROM exam_sessions WHERE exam_id=$1 AND lower(student_name)=lower($2) ORDER BY started_at DESC LIMIT 1`, [row.id, name])).rows[0];
+    // A browser takes the test once: the same browser cannot start again under another name (clearing its storage is the only way round,
+    // and a lecturer who sees two sessions with the same look can tell). The app keeps its own device rule.
+    if (clientType === 'web' && !prev) {
+      const other = (await q(`SELECT 1 FROM exam_sessions WHERE exam_id=$1 AND device_id=$2 AND client_type='web' LIMIT 1`, [row.id, deviceId])).rows[0];
+      if (other) return res.status(409).json({ error: 'This browser has already taken this test. Ask your lecturer.' });
+    }
     const token = newToken();
     let session;
     if (prev) {
@@ -342,7 +349,7 @@ api.get('/web/me', wrap(async (req, res) => {
   res.set('Cache-Control', 'no-store');
   const a = await authSession(req, { allowCookie: true });
   if (a.error || a.session.client_type !== 'web') return res.status(401).json({ active: false });
-  res.json({ active: true, status: a.session.status, title: a.session.title, heartbeatSeconds: 5,
+  res.json({ active: true, status: a.session.status, title: a.session.title, heartbeatSeconds: 5, strict: !!a.session.web_strict, reason: a.session.status === 'ENDED' ? a.session.end_reason : null,
     remainingSeconds: Math.max(0, Math.floor((new Date(a.session.deadline_at) - Date.now()) / 1000)) });
 }));
 
@@ -371,8 +378,8 @@ api.post('/violation', wrap(async (req, res) => {
   if (!VIOLATION_TYPES.has(type)) return res.status(400).json({ error: 'unknown violation type' });
   await recordViolation(a.session, a.exam, type, req.body?.detail && typeof req.body.detail === 'object' ? req.body.detail : {});
   notify(a.session.exam_id, 'violation');
-  const { rows } = await q('SELECT status, pause_reason FROM exam_sessions WHERE id=$1', [a.session.id]);
-  res.json({ status: rows[0].status, reason: rows[0].pause_reason });
+  const { rows } = await q('SELECT status, pause_reason, end_reason FROM exam_sessions WHERE id=$1', [a.session.id]);
+  res.json({ status: rows[0].status, reason: rows[0].status === 'ENDED' ? rows[0].end_reason : rows[0].pause_reason });
 }));
 
 /** The student's own "I'm finished" / "I confirmed leaving the exam". */

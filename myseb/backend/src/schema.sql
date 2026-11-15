@@ -73,6 +73,8 @@ DO $$ BEGIN
 END $$;
 -- Browser mode ("MySEB Web", for iPhones and anyone without the app): allowed per test, signed in with a secure cookie.
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS allow_web boolean NOT NULL DEFAULT false;
+-- Strict rules for students in a browser (iPhones): leaving the page, closing the tab, losing the camera or the face ends the test at once.
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS web_strict boolean NOT NULL DEFAULT true;
 ALTER TABLE exam_sessions ADD COLUMN IF NOT EXISTS ua_hash text;
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exam_sessions_client_type_check' AND pg_get_constraintdef(oid) LIKE '%web%') THEN

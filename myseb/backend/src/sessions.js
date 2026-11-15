@@ -8,7 +8,10 @@ export const VIOLATION_TYPES = new Set([
   'leave', 'blur', 'background', 'visibility_hidden', 'fullscreen_exit', 'split_screen', 'screen_recording',
   'screenshot', 'copy', 'paste', 'cut', 'devtools', 'close_attempt', 'shortcut', 'heartbeat_lost', 'token_misuse',
   'extra_display', 'forbidden_app', 'screen_share_stopped',
+  'face_missing', 'camera_off', 'multiple_faces', 'face_check_unavailable',
 ]);
+/** In a browser with strict rules (the default), these end the test on the spot: nothing is paused for the lecturer to forgive. */
+const STRICT_END = new Set(['face_missing', 'camera_off']);
 /** Violations that mean "the student was not looking at the exam": exam.leave_action decides what happens. */
 const LEAVE_LIKE = new Set(['leave', 'blur', 'background', 'visibility_hidden', 'fullscreen_exit', 'split_screen', 'screen_recording', 'extra_display', 'forbidden_app', 'screen_share_stopped']);
 
@@ -31,7 +34,7 @@ export async function authSession(req, { allowCookie = false } = {}) {
   if (!key || key.length > 100) return { error: 'missing' };
 
   const { rows } = await q(
-    `SELECT s.*, e.title, e.exam_url, e.require_myseb, e.allow_extension, e.allow_web, e.leave_action, e.status AS exam_status
+    `SELECT s.*, e.title, e.exam_url, e.require_myseb, e.allow_extension, e.allow_web, e.web_strict, e.leave_action, e.status AS exam_status
        FROM exam_sessions s JOIN exams e ON e.id = s.exam_id WHERE s.token_hash = $1`, [tokenHash(key)]);
   const row = rows[0];
   if (!row) return { error: 'invalid' };
@@ -58,8 +61,11 @@ export async function recordViolation(session, exam, type, detail = {}) {
   if (json.length > 2000) json = JSON.stringify({ truncated: json.slice(0, 1900) });
   await q('INSERT INTO violations (session_id, exam_id, type, detail) VALUES ($1,$2,$3,$4)', [session.id, session.exam_id, type, json]);
   await q('UPDATE exam_sessions SET violation_count = violation_count + 1 WHERE id = $1', [session.id]);
-  if (session.status === 'ENDED' || !LEAVE_LIKE.has(type) && type !== 'heartbeat_lost') { notify(session.exam_id, 'violation'); return; }
+  const strict = session.client_type === 'web' && exam.web_strict !== false;
+  if (session.status === 'ENDED' || !LEAVE_LIKE.has(type) && type !== 'heartbeat_lost' && !(strict && STRICT_END.has(type))) { notify(session.exam_id, 'violation'); return; }
   let action = exam.leave_action;
+  // A weak connection is not a reason to reject anyone: a lost heartbeat still follows the lecturer's own leave rule.
+  if (strict && type !== 'heartbeat_lost') action = 'end';
   if (action === 'pause_then_end') {
     // First time away: paused, the lecturer sees an alert and decides. Second time: the quiz is closed on the spot.
     const before = (await q(`SELECT count(*)::int AS n FROM violations WHERE session_id=$1 AND type = ANY($2::text[]) AND id < (SELECT max(id) FROM violations WHERE session_id=$1)`, [session.id, [...LEAVE_LIKE, 'heartbeat_lost']])).rows[0].n;
@@ -91,7 +97,7 @@ export async function sweep() {
   await flushHeartbeats();
   const lost = await q(
     `UPDATE exam_sessions SET status='LEFT', pause_reason='heartbeat_lost'
-      WHERE status='IN_EXAM' AND last_heartbeat < now() - make_interval(secs => $1)
+      WHERE status='IN_EXAM' AND last_heartbeat < now() - make_interval(secs => CASE WHEN client_type='web' THEN $1 * 3 ELSE $1 END)   -- a phone on a weak network gets three times as long
       RETURNING id, exam_id`, [config.heartbeatTimeoutSeconds]);
   for (const r of lost.rows) {
     notify(r.exam_id, 'status');

@@ -106,7 +106,7 @@ function joinBrowser(name){
    .then(function(x){if(!x.ok)throw new Error(x.j.error||'That did not work.');location.href=x.j.examUrl})
    .catch(function(e){$('go').disabled=false;$('web').disabled=false;var t=(e&&e.message)||'That did not work.';if(/not allowed/.test(t))t=ios?'Your lecturer has not turned on the browser for this test yet. Ask them to, or use a laptop or an Android phone with MySEB.':'Your lecturer has not turned on the browser for this test. Use the MySEB app.';msg(t,true)});
 }
-if(ios){$('go').textContent='Start the test';$('note').textContent='There is no MySEB app for iPhone yet, so your test opens in this browser. Stay on the test page: leaving it is reported to your lecturer.'}
+if(ios){$('go').textContent='Start the test';$('note').textContent='There is no MySEB app for iPhone yet, so your test opens in this browser. Your camera must stay on with your face in it. If you leave the page, close it or move your face away, your test ends and you cannot start again.'}
 else{$('web').style.display='block';$('note').textContent='MySEB opens by itself. If you do not have it, it downloads now.'}
 $('f').addEventListener('submit',function(e){e.preventDefault();var n=$('name').value.trim();if(!n)return;store.set('myseb.name',n);ios?joinBrowser(n):openApp(n)});
 $('retry').addEventListener('click',function(){var n=$('name').value.trim();if(n)openApp(n)});
