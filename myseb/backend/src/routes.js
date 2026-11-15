@@ -27,7 +27,7 @@ api.post('/exams', requireTeacher, wrap(async (req, res) => {
   if (!title) return res.status(400).json({ error: 'title is required' });
   let examUrl = str(b.examUrl, 1000);
   if (examUrl && !/^https?:\/\//i.test(examUrl)) return res.status(400).json({ error: 'examUrl must start with http:// or https://' });
-  const leave = ['record', 'pause', 'end'].includes(b.leaveAction) ? b.leaveAction : 'pause';
+  const leave = ['record', 'pause', 'end', 'pause_then_end'].includes(b.leaveAction) ? b.leaveAction : 'pause';
   const minutes = Math.max(1, Math.min(600, parseInt(b.durationMinutes, 10) || 60));
   const { rows } = await q(
     `INSERT INTO exams (title, exam_url, require_myseb, allow_extension, leave_action, duration_minutes)
@@ -52,7 +52,8 @@ api.patch('/exams/:id', requireTeacher, wrap(async (req, res) => {
   const add = (col, v) => { vals.push(v); sets.push(`${col}=$${vals.length}`); };
   if (typeof b.requireMyseb === 'boolean') add('require_myseb', b.requireMyseb);
   if (typeof b.allowExtension === 'boolean') add('allow_extension', b.allowExtension);
-  if (['record', 'pause', 'end'].includes(b.leaveAction)) add('leave_action', b.leaveAction);
+  if (['record', 'pause', 'end', 'pause_then_end'].includes(b.leaveAction)) add('leave_action', b.leaveAction);
+  if (['camera', 'screen', 'both'].includes(b.liveSource)) add('live_source', b.liveSource);
   if (typeof b.liveFaces === 'boolean') { add('live_faces', b.liveFaces); add('live_mode', b.liveFaces ? 'pictures' : 'off'); }
   if (['off', 'pictures', 'live'].includes(b.liveMode)) { add('live_mode', b.liveMode); add('live_faces', b.liveMode !== 'off'); }
   if (typeof b.liveSound === 'boolean') add('live_sound', b.liveSound);
@@ -98,7 +99,7 @@ api.post('/exams/:id/end', requireTeacher, wrap(async (req, res) => {
 
 api.get('/exams/:id/monitor', requireTeacher, wrap(async (req, res) => {
   if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
-  const ex = (await q('SELECT id, title, status, live_faces, live_mode, live_sound, require_myseb, leave_action FROM exams WHERE id=$1', [req.params.id])).rows[0];
+  const ex = (await q('SELECT id, title, status, live_faces, live_mode, live_sound, live_source, require_myseb, leave_action FROM exams WHERE id=$1', [req.params.id])).rows[0];
   if (!ex) return res.status(404).json({ error: 'not found' });
   const { rows } = await q(
     `SELECT s.id, s.student_name, s.status, s.client_type, s.platform, s.violation_count, s.pause_reason, s.end_reason,
@@ -110,9 +111,9 @@ api.get('/exams/:id/monitor', requireTeacher, wrap(async (req, res) => {
     counts[r.status]++;
     const l = r.status === 'ENDED' ? null : getLive(r.id);
     const withFrames = req.query.frames !== '0';   // a big room asks for pictures only for the tiles on screen (see /frames)
-    return { ...r, live: l ? { question: l.question, camera: l.camera, frame: withFrames && ex.live_faces ? l.frame : null, frame_age: l.frameAt ? Math.round((Date.now() - l.frameAt) / 1000) : null } : null };
+    return { ...r, live: l ? { question: l.question, camera: l.camera, screen_state: l.screenState, frame: withFrames && ex.live_faces ? l.frame : null, frame_age: l.frameAt ? Math.round((Date.now() - l.frameAt) / 1000) : null, screen: withFrames && ex.live_faces ? l.screen : null, screen_age: l.screenAt ? Math.round((Date.now() - l.screenAt) / 1000) : null } : null };
   });
-  res.json({ exam: { id: ex.id, title: ex.title, status: ex.status, live_faces: ex.live_faces, live_mode: ex.live_mode, live_sound: ex.live_sound, leave_action: ex.leave_action }, counts, students });
+  res.json({ exam: { id: ex.id, title: ex.title, status: ex.status, live_faces: ex.live_faces, live_mode: ex.live_mode, live_sound: ex.live_sound, live_source: ex.live_source, leave_action: ex.leave_action }, counts, students });
 }));
 
 /** Everything that happened in an exam, for the lecturer's records and for appeals. Never contains pictures or video. */
@@ -136,7 +137,7 @@ api.get('/exams/:id/frames', requireTeacher, wrap(async (req, res) => {
   if (!ex || !ex.live_faces || !ids.length) return res.json({ frames: {} });
   const mine = (await q('SELECT id FROM exam_sessions WHERE exam_id=$1 AND id = ANY($2::uuid[])', [req.params.id, ids])).rows.map((r) => r.id);
   const frames = {};
-  for (const id of mine) { const l = getLive(id); if (l?.frame) frames[id] = { frame: l.frame, age: l.frameAt ? Math.round((Date.now() - l.frameAt) / 1000) : null }; }
+  for (const id of mine) { const l = getLive(id); if (l?.frame || l?.screen) frames[id] = { frame: l.frame, age: l.frameAt ? Math.round((Date.now() - l.frameAt) / 1000) : null, screen: l.screen, screen_age: l.screenAt ? Math.round((Date.now() - l.screenAt) / 1000) : null }; }
   res.json({ frames });
 }));
 
@@ -175,11 +176,16 @@ api.post('/sessions/:id/resume', requireTeacher, wrap(async (req, res) => {
 // No limit here: only bwenge (the service key) can call it, and bwenge already allows one report per student every 3 seconds.
 api.post('/sessions/:id/live', requireTeacher, wrap(async (req, res) => {
   if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
-  const { rows } = await q(`SELECT s.status, s.exam_id, e.live_faces, e.live_mode, e.live_sound FROM exam_sessions s JOIN exams e ON e.id=s.exam_id WHERE s.id=$1`, [req.params.id]);
+  const { rows } = await q(`SELECT s.status, s.exam_id, e.live_faces, e.live_mode, e.live_sound, e.live_source, e.leave_action FROM exam_sessions s JOIN exams e ON e.id=s.exam_id WHERE s.id=$1`, [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: 'not found' });
-  if (rows[0].status === 'ENDED') return res.json({ faces: false, live: false, sound: false, status: 'ENDED' });
+  if (rows[0].status === 'ENDED') return res.json({ faces: false, live: false, sound: false, source: 'camera', status: 'ENDED' });
+  const wasSharing = !['denied', 'partial'].includes(getLive(req.params.id)?.screenState);
   saveLive(req.params.id, req.body || {}, rows[0].live_faces);   // pictures are dropped on the spot when the lecturer has not asked for them
-  res.json({ faces: rows[0].live_faces, live: rows[0].live_mode === 'live', sound: rows[0].live_mode === 'live' && rows[0].live_sound, status: rows[0].status });
+  // The screen must stay shared: stopping it counts as leaving the exam, and the exam's leave policy applies (once per stop).
+  if (rows[0].live_faces && rows[0].live_source !== 'camera' && wasSharing && ['denied', 'partial'].includes(getLive(req.params.id)?.screenState) && ['IN_EXAM', 'LEFT'].includes(rows[0].status)) {
+    await recordViolation({ id: req.params.id, exam_id: rows[0].exam_id, status: rows[0].status }, { leave_action: rows[0].leave_action }, 'screen_share_stopped', { state: getLive(req.params.id).screenState });
+  }
+  res.json({ faces: rows[0].live_faces, live: rows[0].live_mode === 'live', sound: rows[0].live_mode === 'live' && rows[0].live_sound && rows[0].live_source !== 'screen', source: rows[0].live_source, status: rows[0].status });
 }));
 
 /* Live video set-up (WebRTC). Only short messages pass here, in memory. The video goes student -> lecturer directly. */

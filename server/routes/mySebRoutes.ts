@@ -69,7 +69,7 @@ function createMySebOwnerRouterFor(target: (userId: string, id: string) => Targe
   r.post('/:id/myseb/resume-all', requireAuth, run(async (req, res) => { res.json(await resumeAll(t(req))); }));
   r.post('/:id/myseb/settings', requireAuth, run(async (req, res) => {
     const mode = ['off', 'pictures', 'live'].includes(req.body?.liveMode) ? req.body.liveMode : req.body?.liveFaces === true ? 'pictures' : 'off';
-    res.json(await setLiveMode(t(req), mode, req.body?.liveSound === true));
+    res.json(await setLiveMode(t(req), mode, req.body?.liveSound === true, { source: req.body?.liveSource, leaveAction: req.body?.leaveAction }));
   }));
   // Live video set-up: the lecturer's room listens for offers/ICE from students and sends watch/answer/ice back.
   r.get('/:id/myseb/ice', requireAuth, (_req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(iceServers()); });

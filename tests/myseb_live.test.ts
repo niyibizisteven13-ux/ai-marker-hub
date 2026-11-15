@@ -39,7 +39,7 @@ const post = (id: string, body: unknown, headers: Record<string, string> = IN) =
 
 test('a live MySEB student reports their question; MySEB learns whether pictures are wanted', async () => {
   const r = await post(form.id, { question: { index: 3, total: 10, label: 'x'.repeat(500) }, camera: 'on', frame: 'data:image/jpeg;base64,AAAA' });
-  assert.equal(r.status, 200); assert.deepEqual(await r.json(), { faces: true, live: false, sound: false });
+  assert.equal(r.status, 200); assert.deepEqual(await r.json(), { faces: true, live: false, sound: false, source: 'camera' });
   const last = got.at(-1); assert.equal(last.sid, SID);
   assert.equal(last.body.question.index, 3); assert.ok(last.body.question.label.length <= 200); assert.equal(last.body.frame, 'data:image/jpeg;base64,AAAA');
 });
@@ -82,6 +82,10 @@ test('the room poll can leave the pictures out, and asks for them only for the t
   await frames(t, [SID, 'not-a-uuid']); assert.deepEqual(got.at(-1), { frames: EXAM, ids: SID });
   await setLiveMode(t, 'live', true); assert.deepEqual(got.at(-1), { patch: EXAM, body: { liveMode: 'live', liveSound: true } });
   await setLiveMode(t, 'pictures', true); assert.deepEqual(got.at(-1), { patch: EXAM, body: { liveMode: 'pictures', liveSound: false } }, 'sound exists only in live mode');
+  await setLiveMode(t, 'live', true, { source: 'screen', leaveAction: 'pause_then_end' });
+  assert.deepEqual(got.at(-1), { patch: EXAM, body: { liveMode: 'live', liveSound: false, liveSource: 'screen', leaveAction: 'pause_then_end' } }, 'a screen-only room never listens');
+  await setLiveMode(t, 'live', true, { source: 'everything', leaveAction: 'delete' });
+  assert.deepEqual(got.at(-1), { patch: EXAM, body: { liveMode: 'live', liveSound: true } }, 'unknown values are dropped');
 });
 
 test('network helpers for live video: STUN alone, or short-lived TURN passwords', () => {

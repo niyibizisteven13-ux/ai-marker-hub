@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, Menu, ipcMain, session, clipboard, screen } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, session, clipboard, screen, desktopCapturer } = require('electron');
 const { execFile } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -270,6 +270,19 @@ app.whenReady().then(() => {
     cb({ requestHeaders: h });
   });
   ses.setPermissionRequestHandler((wc, perm, cb) => cb(['media', 'fullscreen'].includes(perm) && !!exam && originOf(wc.getURL()) === exam.examOrigin));
+  // Sharing the screen with the lecturer: when the exam page asks, the whole main screen is shared at once, with no picker, so a
+  // student cannot choose a smaller window to show. Only the exam site can ask. While the screen is shared the lecturer is watching,
+  // so the "screenshots show black" protection is lifted, otherwise the lecturer would see a black rectangle where the exam is.
+  ses.setDisplayMediaRequestHandler((request, cb) => {
+    if (!exam || !request.frame || originOf(request.frame.url) !== exam.examOrigin) return cb({});
+    desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } }).then((sources) => {
+      const primary = screen.getPrimaryDisplay();
+      const src = sources.find((x) => x.display_id === String(primary.id)) || sources[0];
+      if (!src) return cb({});
+      try { win && win.setContentProtection(false); } catch { /* window is gone */ }
+      cb({ video: src });
+    }).catch(() => cb({}));
+  }, { useSystemPicker: false });
   createWindow();
 });
 app.on('window-all-closed', () => app.quit());

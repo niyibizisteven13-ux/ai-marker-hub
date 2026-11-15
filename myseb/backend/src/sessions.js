@@ -6,10 +6,10 @@ import { forgetLive, sweepLive, sweepSignals } from './live.js';
 export const VIOLATION_TYPES = new Set([
   'leave', 'blur', 'background', 'visibility_hidden', 'fullscreen_exit', 'split_screen', 'screen_recording',
   'screenshot', 'copy', 'paste', 'cut', 'devtools', 'close_attempt', 'shortcut', 'heartbeat_lost', 'token_misuse',
-  'extra_display', 'forbidden_app',
+  'extra_display', 'forbidden_app', 'screen_share_stopped',
 ]);
 /** Violations that mean "the student was not looking at the exam": exam.leave_action decides what happens. */
-const LEAVE_LIKE = new Set(['leave', 'blur', 'background', 'visibility_hidden', 'fullscreen_exit', 'split_screen', 'screen_recording', 'extra_display', 'forbidden_app']);
+const LEAVE_LIKE = new Set(['leave', 'blur', 'background', 'visibility_hidden', 'fullscreen_exit', 'split_screen', 'screen_recording', 'extra_display', 'forbidden_app', 'screen_share_stopped']);
 
 const MARK = /MySEB\//;
 
@@ -57,7 +57,12 @@ export async function recordViolation(session, exam, type, detail = {}) {
   await q('INSERT INTO violations (session_id, exam_id, type, detail) VALUES ($1,$2,$3,$4)', [session.id, session.exam_id, type, json]);
   await q('UPDATE exam_sessions SET violation_count = violation_count + 1 WHERE id = $1', [session.id]);
   if (session.status === 'ENDED' || !LEAVE_LIKE.has(type) && type !== 'heartbeat_lost') return;
-  const action = exam.leave_action;
+  let action = exam.leave_action;
+  if (action === 'pause_then_end') {
+    // First time away: paused, the lecturer sees an alert and decides. Second time: the quiz is closed on the spot.
+    const before = (await q(`SELECT count(*)::int AS n FROM violations WHERE session_id=$1 AND type = ANY($2::text[]) AND id < (SELECT max(id) FROM violations WHERE session_id=$1)`, [session.id, [...LEAVE_LIKE, 'heartbeat_lost']])).rows[0].n;
+    action = before >= 1 ? 'end' : 'pause';
+  }
   if (action === 'pause') {
     await q(`UPDATE exam_sessions SET status='PAUSED', pause_reason=$2 WHERE id=$1 AND status IN ('IN_EXAM','LEFT')`, [session.id, type]);
   } else if (action === 'end') {
