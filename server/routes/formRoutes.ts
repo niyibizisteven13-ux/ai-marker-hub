@@ -219,6 +219,8 @@ router.put('/:id/schema', requireAuth, async (req, res) => {
     if (Buffer.byteLength(JSON.stringify(schema)) > 4_000_000) return res.status(413).json({ error: 'The form is too large. Use smaller pictures.' });
     const { schema: prev } = await ownForm(userId, req.params.id);
     if (schema.branding !== undefined) schema.branding = normalizeBranding(schema.branding);
+    if (schema.confirmationTitle !== undefined) schema.confirmationTitle = String(schema.confirmationTitle || '').trim().slice(0, 120);
+    if (schema.confirmationMessage !== undefined) schema.confirmationMessage = String(schema.confirmationMessage || 'Your response has been recorded.').slice(0, 1000);
     // Saving from the editor never silently opens or closes the form, and keeps scoring settings.
     await saveForm(userId, req.params.id, { ...prev, ...schema, acceptingResponses: prev.acceptingResponses ?? false });
     res.json({ success: true, review: reviewForm({ ...prev, ...schema }) });
