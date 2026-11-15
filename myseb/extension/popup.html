@@ -1,0 +1,16 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+  body{width:300px;margin:0;padding:16px;font:14px system-ui;background:#0f172a;color:#e2e8f0}
+  h1{margin:0 0 2px;color:#60a5fa}p{margin:0 0 12px;color:#94a3b8;font-size:12px}
+  input,button{width:100%;box-sizing:border-box;padding:9px;margin-bottom:8px;border-radius:8px;border:1px solid #334155;background:#1e293b;color:#fff;font:inherit}
+  button{background:#2563eb;border-color:#2563eb;font-weight:600;cursor:pointer}#err{color:#f87171;min-height:1.2em;font-size:12px}
+  .warn{background:#78350f;color:#fde68a;padding:6px 8px;border-radius:6px;font-size:11px;margin-top:6px}
+</style>
+<h1>MySEB</h1><p>Extension mode</p>
+<input id="name" placeholder="Your name" maxlength="80">
+<input id="code" placeholder="Exam code (8492-KIGALI-77)" maxlength="24">
+<input id="api" placeholder="Server (http://localhost:4000)">
+<button id="go">Start exam</button><div id="err"></div>
+<div class="warn">Low security: Chrome cannot be locked. The teacher sees every time you leave. Use the desktop app for full security.</div>
+<script src="popup.js"></script>
