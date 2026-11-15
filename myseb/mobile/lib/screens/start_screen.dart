@@ -36,7 +36,12 @@ class _StartScreenState extends State<StartScreen> {
 
   void _fromLink(Uri u) {
     final c = u.queryParameters['code'];
-    if (u.scheme == 'myseb' && c != null && RegExp(r'^\d{6}$').hasMatch(c)) setState(() => _code.text = c);
+    if (u.scheme == 'myseb' && c != null && RegExp(r'^\d{6}$').hasMatch(c)) {
+      final n = (u.queryParameters['name'] ?? '').trim();
+      setState(() { _code.text = c; if (n.isNotEmpty) _name.text = n.length > 80 ? n.substring(0, 80) : n; });
+      // The lecturer's link has the code and the student's name: go straight to the test.
+      if (n.isNotEmpty && !_busy) _join();
+    }
   }
 
   Future<void> _join() async {

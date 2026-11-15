@@ -1,5 +1,6 @@
 'use strict';
 const { postFollowingRedirects } = require('./post');
+const { parseJoin } = require('./joinlink');
 const { app, BrowserWindow, Menu, ipcMain, session, clipboard, screen, desktopCapturer, systemPreferences } = require('electron');
 const { execFile } = require('node:child_process');
 const path = require('node:path');
@@ -245,7 +246,17 @@ ipcMain.handle('quit-idle', () => { if (!exam) { allowQuit = true; app.quit(); }
 
 /* ------------------------------------------------------------------ app lifecycle */
 if (!app.requestSingleInstanceLock()) app.quit();
-app.on('second-instance', () => { if (win) { win.show(); win.focus(); } });
+
+/* A lecturer's link (myseb://join?code=123456&name=Ann) opens MySEB with the code and name filled in and starts the test.
+ * It is only ever a code and a name: the server address comes from this app's own settings, never from a link. */
+if (process.defaultApp) { if (process.argv.length >= 2) app.setAsDefaultProtocolClient('myseb', process.execPath, [path.resolve(process.argv[1])]); }
+else app.setAsDefaultProtocolClient('myseb');
+let pendingJoin = null;
+function offerJoin(j) { if (!j || exam) return; pendingJoin = j; toRenderer('join-link', j); }   // not while a test is running
+ipcMain.handle('pending-join', () => { const j = pendingJoin; pendingJoin = null; return j; });
+app.on('open-url', (e, url) => { e.preventDefault(); offerJoin(parseJoin(url)); });                         // Mac
+offerJoin(parseJoin(process.argv.find((a) => String(a).startsWith('myseb://'))));                          // Windows / Linux: the first start
+app.on('second-instance', (_e, argv) => { offerJoin(parseJoin(argv.find((a) => String(a).startsWith('myseb://')))); if (win) { win.show(); win.focus(); } });
 
 app.on('web-contents-created', (_e, contents) => {
   guardInput(contents);

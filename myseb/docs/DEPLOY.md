@@ -69,3 +69,10 @@ The video itself does not go through the server (it goes from the student's comp
 ## Browser mode and the Chrome extension (lighter security)
 - **Browsers** (live room → Settings → Browsers): lets students without the app take the test in their browser, including iPhones. It watches and reports but cannot lock the device (see `IOS.md`). It needs MySEB on the same site as bwenge (the built-in setup), because the sign-in is a secure cookie shared with the exam page.
 - **Chrome extension** (laptops): `MySEB-extension.zip` is built with the apps and shown on the download page. It gives a lock-like experience inside Chrome (full screen, blocked shortcuts, leaving the tab reported, a heartbeat) but still cannot stop other programs. Students install it from `chrome://extensions` (turn on Developer mode, *Load unpacked*, choose the unzipped folder) or you publish it to the Chrome Web Store (one-time US$5 fee) or push it to school computers with a Chrome policy. Its default server address is `https://bwenge.space/myseb`.
+
+## The link for students (one link for every device)
+The live room shows **Link for students** next to the code (`https://<your site>/myseb/join/<code>`, also the QR code), with **Copy link** and **Share on WhatsApp**. A student opens it, writes their name once, and:
+- **Laptop (Windows, Mac) or Android phone:** MySEB opens with the code and name filled in and starts the test. If MySEB is not installed, it downloads at once (the page waits about 2.5 s for the app to open; once a device has opened MySEB it never downloads by surprise).
+- **iPhone or iPad:** the test starts in the browser and goes straight to the quiz (needs **Settings → Browsers** in the live room; the panel has a one-click button for it).
+- **Anyone:** "Use my browser instead" starts it in the browser, if browsers are allowed.
+The link holds only the 6-digit code, expires with the code (12 hours) or when the test ends, and contains no secret. The apps take only the code and name from a link (never a server address). Linux AppImage does not register the `myseb://` link by itself; students there can type the code.

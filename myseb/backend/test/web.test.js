@@ -59,3 +59,20 @@ test('the lecturer sees a browser student, and can end them', async () => {
   await call(`/api/sessions/${j.json.sessionId}/end`, { method: 'POST', headers: T });
   assert.equal((await call('/api/heartbeat', { method: 'POST', headers: { Cookie: j.cookie.split(';')[0], 'User-Agent': SAFARI } })).json.status, 'ENDED');
 });
+
+test('the link a lecturer shares: one page for every device, with the code and nothing secret', async () => {
+  const get = async (path, ua) => { const r = await fetch(base + path, { headers: { 'User-Agent': ua } }); return { status: r.status, csp: r.headers.get('content-security-policy') || '', text: await r.text() }; };
+  const ok = await get('/join/482910', 'Mozilla/5.0 (Windows NT 10.0) Chrome/120');
+  assert.equal(ok.status, 200);
+  assert.match(ok.text, /482 910/, 'the code is shown');
+  assert.match(ok.text, /myseb:\/\/join\?code='\+CODE/, 'it can open the app with the code');
+  assert.match(ok.text, /\/download/, 'and download the app when it is missing');
+  assert.match(ok.text, /clientType:'web'/, 'and start in the browser (iPhones)');
+  assert.match(ok.csp, /connect-src 'self'/); assert.match(ok.csp, /frame-ancestors 'none'/); assert.doesNotMatch(ok.csp, /unsafe-eval/);
+  assert.doesNotMatch(ok.text, /tkey|testpepper|myseb_s=/, 'no secret on the page');
+  // anything that is not a six-digit code is not rendered into the page (no injection through the address)
+  for (const bad of ['abc', '12345', '1234567', encodeURIComponent('</script><script>alert(1)</script>')]) {
+    const r = await get(`/join/${bad}`, 'Mozilla/5.0 (iPhone)');
+    assert.match(r.text, /This link is not valid/); assert.doesNotMatch(r.text, /<script>alert|var CODE/);
+  }
+});

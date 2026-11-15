@@ -14,7 +14,7 @@ interface Student {
   live: { question: { index: number | null; total: number | null; label: string } | null; camera: string; screen_state?: string; frame: string | null; frame_age: number | null; screen?: string | null; screen_age?: number | null } | null;
 }
 interface Room { exam: { title: string; status: string; live_faces: boolean; live_mode?: 'off' | 'pictures' | 'live'; live_sound?: boolean; live_source?: Source; leave_action?: string; allow_web?: boolean }; counts: Record<Status, number>; students: Student[] }
-interface Code { display: string; qrSvg: string; expiresAt: string }
+interface Code { display: string; qrSvg: string; expiresAt: string; joinUrl?: string }
 
 const LABEL: Record<Status, string> = { IN_EXAM: 'In the test', PAUSED: 'Paused', LEFT: 'Left', ENDED: 'Finished' };
 const TONE: Record<Status, string> = { IN_EXAM: 'bg-emerald-600', PAUSED: 'bg-amber-600', LEFT: 'bg-rose-600', ENDED: 'bg-slate-500' };
@@ -262,6 +262,7 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState<{ name: string; rows: Array<{ id: number; type: string; created_at: string }> } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
   const [visible, setVisible] = useState<Set<string>>(new Set());
   const [listen, setListen] = useState<string | null>(null);
   const [pics, setPics] = useState<Record<string, { frame: string | null; age: number | null; screen?: string | null; screen_age?: number | null }>>({});
@@ -467,6 +468,18 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
               <p className="my-1 font-mono text-4xl font-bold tracking-wider text-white sm:text-5xl">{code.display}</p>
               <button type="button" className={dBtn} onClick={async () => { await navigator.clipboard.writeText(code.display); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>{copied ? 'Copied' : 'Copy'}</button>
               <button type="button" className={`${dBtn} ml-2`} onClick={() => void makeCode()}>New code</button>
+              {code.joinUrl && (
+                <div className="mt-4 max-w-md rounded-xl border border-white/10 bg-white/[0.04] p-3">
+                  <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Link for students</p>
+                  <p className="mt-1 break-all font-mono text-sm text-white" data-testid="join-link">{code.joinUrl}</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button type="button" className={dPrimary} onClick={async () => { await navigator.clipboard.writeText(code.joinUrl!); setLinkCopied(true); setTimeout(() => setLinkCopied(false), 1500); }}>{linkCopied ? 'Link copied' : 'Copy link'}</button>
+                    <a className={`${dBtn} inline-flex items-center`} target="_blank" rel="noreferrer" href={`https://wa.me/?text=${encodeURIComponent(`Join your test: ${code.joinUrl}`)}`}>Share on WhatsApp</a>
+                  </div>
+                  <p className="mt-2 text-xs leading-relaxed text-slate-400">One link for everyone. On a laptop or an Android phone it opens MySEB with the code filled in, and downloads MySEB first if it is missing. On an iPhone it starts the test in the browser{room?.exam?.allow_web ? '' : ' (needs Settings → Browsers)'}.</p>
+                  {!room?.exam?.allow_web && <button type="button" disabled={busy || !open} className={`${dBtn} mt-2`} onClick={() => act(() => call('/settings', 'POST', { liveMode: mode, liveSound: sound, liveSource: source, leaveAction, allowWeb: true }))}>Turn on browsers for iPhones</button>}
+                </div>
+              )}
               <p className="mt-2 max-w-sm text-xs text-slate-400">One code works for the whole class. It expires {new Date(code.expiresAt).toLocaleString()} or when you end the test. Install links: <a className="underline" href="/myseb/download" target="_blank" rel="noreferrer">bwenge.space/myseb/download</a>.</p>
             </div>
             <img alt="QR code: open MySEB on a phone" className="h-40 w-40 rounded-xl bg-white p-1" src={`data:image/svg+xml;utf8,${encodeURIComponent(code.qrSvg)}`} />
