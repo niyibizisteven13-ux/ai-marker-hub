@@ -125,7 +125,24 @@ export default function MySebLiveReporter({ kind, refId, total, status }: { kind
     const send = (msg: Record<string, unknown>) => fetch(`${base}/signal`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ msg }) }).catch(() => undefined);
     let ice: RTCIceServer[] | null = null;
     const iceServers = async () => { if (!ice) { try { ice = (await (await fetch(`${base}/ice`, { credentials: 'same-origin' })).json()).iceServers ?? []; } catch { ice = []; } } return ice!; };
-    const close = (viewer: string) => { pcs.current.get(viewer)?.close(); pcs.current.delete(viewer); };
+    const close = (viewer: string) => { pcs.current.get(viewer)?.close(); pcs.current.delete(viewer); quality.delete(viewer); };
+    // Two sizes per viewer: the grid gets a small, light picture; the lecturer who zooms in on this student gets full size.
+    // The student captures at full size once; each lecturer tab is sent a scaled-down copy unless it asked for HD.
+    const quality = new Map<string, 'low' | 'high'>();
+    const applyQuality = (pc: RTCPeerConnection, viewer: string) => {
+      const hd = quality.get(viewer) === 'high';
+      for (const snd of pc.getSenders()) {
+        if (snd.track?.kind !== 'video') continue;
+        const isScreen = !!screenStreamRef.current && screenStreamRef.current.getVideoTracks().includes(snd.track);
+        const p = snd.getParameters();
+        if (!p.encodings?.length) p.encodings = [{}];
+        p.encodings[0] = { ...p.encodings[0],
+          maxBitrate: isScreen ? (hd ? 1_800_000 : 120_000) : (hd ? 600_000 : 120_000),
+          maxFramerate: isScreen ? (hd ? 8 : 3) : (hd ? 15 : 8),
+          scaleResolutionDownBy: hd ? 1 : isScreen ? 4 : 2 };
+        snd.setParameters(p).catch(() => undefined);
+      }
+    };
 
     const handle = async (m: any) => {
       const viewer = String(m.viewer || 'v');
@@ -139,15 +156,18 @@ export default function MySebLiveReporter({ kind, refId, total, status }: { kind
         pcs.current.set(viewer, pc);
         stream?.getTracks().forEach((t) => pc.addTrack(t, stream));
         shared?.getTracks().forEach((t) => pc.addTrack(t, shared));
-        pc.getSenders().forEach((snd) => { if (snd.track?.kind === 'video') { const p = snd.getParameters(); const isScreen = !!shared && shared.getVideoTracks().includes(snd.track); p.encodings = [{ ...(p.encodings?.[0] ?? {}), maxBitrate: isScreen ? 250_000 : 150_000, maxFramerate: isScreen ? 3 : 8 }]; snd.setParameters(p).catch(() => undefined); } });
         pc.onicecandidate = (e) => { if (e.candidate) void send({ type: 'ice', viewer, candidate: e.candidate.toJSON() }); };
         pc.onconnectionstatechange = () => { if (pc.connectionState === 'failed' || pc.connectionState === 'closed') close(viewer); };
         await pc.setLocalDescription(await pc.createOffer());
+        applyQuality(pc, viewer);
         await send({ type: 'offer', viewer, sdp: pc.localDescription?.sdp, ...(shared ? { screenStream: shared.id } : {}) });
       } else if (m.type === 'answer') {
-        const pc = pcs.current.get(viewer); if (pc && pc.signalingState === 'have-local-offer') await pc.setRemoteDescription({ type: 'answer', sdp: m.sdp });
+        const pc = pcs.current.get(viewer); if (pc && pc.signalingState === 'have-local-offer') { await pc.setRemoteDescription({ type: 'answer', sdp: m.sdp }); applyQuality(pc, viewer); }
       } else if (m.type === 'ice') {
         const pc = pcs.current.get(viewer); if (pc && m.candidate) await pc.addIceCandidate(m.candidate).catch(() => undefined);
+      } else if (m.type === 'quality') {
+        quality.set(viewer, m.level === 'high' ? 'high' : 'low');
+        const pc = pcs.current.get(viewer); if (pc) applyQuality(pc, viewer);
       } else if (m.type === 'unwatch') {
         close(viewer);
       } else if (m.type === 'listen') {
@@ -160,7 +180,7 @@ export default function MySebLiveReporter({ kind, refId, total, status }: { kind
       while (!stopped) {
         try {
           const res = await fetch(`${base}/signal?after=${after}`, { credentials: 'same-origin', signal: ac.signal });
-          if (res.status === 204) { await new Promise((r) => setTimeout(r, 3000)); continue; }
+          if (res.status === 204) { await new Promise((r) => setTimeout(r, 1000)); continue; }
           const b = await res.json(); after = b.next ?? after;
           for (const m of b.msgs ?? []) await handle(m).catch(() => undefined);
         } catch { if (stopped) return; await new Promise((r) => setTimeout(r, 2000)); }
@@ -174,7 +194,7 @@ export default function MySebLiveReporter({ kind, refId, total, status }: { kind
       const wantAudio = soundRef.current && liveRef.current;
       closeAllRef.current();                                   // peers hold the old tracks: the lecturer's room reconnects on its own
       streamRef.current?.getTracks().forEach((t) => t.stop());
-      const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 320 }, height: { ideal: 240 }, frameRate: { ideal: 10 } }, audio: wantAudio ? { echoCancellation: true, noiseSuppression: true } : false });
+      const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 12 } }, audio: wantAudio ? { echoCancellation: true, noiseSuppression: true } : false });
       s.getAudioTracks().forEach((t) => { t.enabled = false; });   // silent until the lecturer chooses to listen to this student
       haveAudio.current = s.getAudioTracks().length > 0;
       streamRef.current = s;
@@ -186,8 +206,9 @@ export default function MySebLiveReporter({ kind, refId, total, status }: { kind
   /** The whole screen, never a window or a tab: the lecturer must see what the student sees. */
   const turnOnScreen = async () => {
     try {
-      const s = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: 'monitor', frameRate: { ideal: 3, max: 5 }, width: { max: 1600 } } as MediaTrackConstraints, audio: false });
+      const s = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: 'monitor', frameRate: { ideal: 5, max: 8 }, width: { ideal: 1920, max: 1920 } } as MediaTrackConstraints, audio: false });
       const track = s.getVideoTracks()[0];
+      if (track && 'contentHint' in track) track.contentHint = 'detail';   // text on a screen: keep it sharp rather than smooth
       const surface = (track?.getSettings() as { displaySurface?: string } | undefined)?.displaySurface;
       if (!track || (surface && surface !== 'monitor')) { s.getTracks().forEach((t) => t.stop()); setScreen('partial'); return; }
       closeAllRef.current();

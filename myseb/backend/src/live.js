@@ -45,7 +45,7 @@ export function sweepLive() { const old = Date.now() - 180_000; for (const [k, v
 const boxes = new Map(); // key -> { msgs: [{n, at, msg}], next, waiters:Set<fn> }
 const box = (key) => { let b = boxes.get(key); if (!b) { b = { msgs: [], next: 1, waiters: new Set() }; boxes.set(key, b); } return b; };
 
-const SIGNAL_TYPES = new Set(['watch', 'unwatch', 'listen', 'offer', 'answer', 'ice', 'state']);
+const SIGNAL_TYPES = new Set(['watch', 'unwatch', 'listen', 'offer', 'answer', 'ice', 'state', 'quality']);
 export function cleanSignal(m) {
   if (!m || typeof m !== 'object' || !SIGNAL_TYPES.has(m.type)) return null;
   const out = { type: m.type, viewer: String(m.viewer ?? '').replace(/[^\w-]/g, '').slice(0, 40) };
@@ -55,6 +55,7 @@ export function cleanSignal(m) {
     out.candidate = c;
   }
   if (typeof m.screenStream === 'string') out.screenStream = m.screenStream.replace(/[^\w{}-]/g, '').slice(0, 80);
+  if (m.type === 'quality') out.level = m.level === 'high' ? 'high' : 'low';
   if (typeof m.on === 'boolean') out.on = m.on;
   if (typeof m.audio === 'boolean') out.audio = m.audio;
   if (typeof m.state === 'string') out.state = m.state.slice(0, 20);
