@@ -1,6 +1,6 @@
-# Courses (lecturer dashboard)
+# Classes (lecturer dashboard)
 
-A course is a named class for a term: roster (registration number, name, email), per-student accommodations, and the tasks and quizzes that belong to it. `/courses` in the app; API under `/api/courses` (signed-in lecturer only).
+A class is a named group of students for a term: roster (registration number, name, email), per-student accommodations, and the tasks and quizzes that belong to it. It is the **Classes** tab of the Tasks page (no separate sidebar section; `/tasks?section=classes` opens it directly). API under `/api/courses` (signed-in lecturer only).
 
 - **Roster**: paste from Excel ("222001234, Uwase Aline, aline@ur.ac.rw"). Re-importing updates names and keeps accommodations. Students are matched to hand-ins by registration number only. Hand-ins with a number that is not on the roster are listed as "unmatched" (typo or other course).
 - **Work**: link tasks and quizzes. A quiz needs a question that asks for the registration number. The latest quiz attempt counts.

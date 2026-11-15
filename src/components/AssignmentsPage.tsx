@@ -3,7 +3,8 @@ import { ArrowLeft, CalendarClock, Check, ChevronLeft, ChevronRight, ClipboardLi
 import { authFetch } from '../utils/authFetch';
 import { PdfViewer } from './PdfViewer';
 import { FileThumb, PreviewDialog, type PreviewSource } from './FilePreview';
-import { Card, Empty, PageShell, Stat, StatRow, Toolbar, primaryBtn, relative } from './workspace/Shell';
+import { Card, Empty, PageShell, SectionTabs, Stat, StatRow, Toolbar, primaryBtn, relative } from './workspace/Shell';
+import CoursesPage from './CoursesPage';
 
 /**
  * Tasks: the owner sets a task (text and/or files) and shares one link; people submit through it in any format,
@@ -431,6 +432,9 @@ export default function AssignmentsPage({ onClose, onMarkAll, initialId, autoMar
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'open' | 'closed'>('all');
   const [copied, setCopied] = useState<string | null>(null);
+  // Tasks and Classes are two sections of this page (the lecturer's named classes: roster, accommodations, marks).
+  const [section, setSection] = useState<'tasks' | 'classes'>(() => (new URLSearchParams(window.location.search).get('section') === 'classes' ? 'classes' : 'tasks'));
+  const tabs = <SectionTabs<'tasks' | 'classes'> value={section} onChange={setSection} tabs={[{ id: 'tasks', label: 'Tasks' }, { id: 'classes', label: 'Classes' }]} />;
   const loadRows = useCallback(async () => {
     try { setRows((await json<{ assignments: Row[] }>(await authFetch('/api/assignments'))).assignments); } catch (e) { setError(e instanceof Error ? e.message : 'Could not load.'); }
   }, []);
@@ -457,7 +461,9 @@ export default function AssignmentsPage({ onClose, onMarkAll, initialId, autoMar
   const newBtn = <button type="button" onClick={() => setView({ kind: 'new' })} className={primaryBtn}><Plus size={16} />New task</button>;
   return (
     <div className="fixed inset-0 z-[70] overflow-y-auto bg-[var(--ws-bg)]">
-      {view.kind === 'one' ? (
+      {section === 'classes' && view.kind === 'list' ? (
+        <CoursesPage onClose={onClose} tabs={tabs} />
+      ) : view.kind === 'one' ? (
         <div className="min-h-full bg-[var(--ws-bg)] text-[var(--ws-text)]">
           <div className="px-4 pt-3 sm:px-6"><button type="button" onClick={onClose} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] text-neutral-400 hover:bg-white/[0.05] hover:text-white"><ArrowLeft size={15} />Back to chat</button></div>
           <main className="mx-auto w-full max-w-5xl px-4 pb-16 sm:px-6">
@@ -472,6 +478,7 @@ export default function AssignmentsPage({ onClose, onMarkAll, initialId, autoMar
         <PageShell icon={<ClipboardList size={20} />} title="Tasks" onBack={onClose}
           subtitle="Set work, share one link or QR code, and collect answers from any phone: photos, PDF, Word or typed. When you are ready, the AI marks the whole class."
           actions={newBtn}>
+          {tabs}
           {error ? <p className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[13px] text-rose-300">{error}</p>
             : !rows ? <div className="flex justify-center py-16 text-neutral-400"><Loader2 className="animate-spin" /></div>
               : !rows.length ? (

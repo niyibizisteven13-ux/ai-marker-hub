@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Accessibility, Download, GraduationCap, Loader2, Plus, Trash2, UserPlus, Users, X } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, Accessibility, ClipboardList, Download, GraduationCap, Loader2, Plus, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { authFetch } from '../utils/authFetch';
 import { Empty, PageShell, Stat, StatRow, Toolbar, Card, primaryBtn, ghostBtn, iconBtn } from './workspace/Shell';
 
 /**
- * Courses: a lecturer's named classes. A course holds the roster (registration number, name, email), each
+ * Classes (a section of the Tasks page): a lecturer's named classes. A class holds the roster (registration number, name, email), each
  * student's accommodations (extra time, no camera, breaks, large text, voice answers), and the tasks and quizzes
  * that belong to it. The dashboard shows every student against every piece of work: handed in, marked, missing,
  * flagged, and who needs attention. Colour is never the only signal: every status also has a word.
@@ -99,7 +99,7 @@ function StudentPanel({ courseId, student, onClose, onChanged }: { courseId: str
             <label className="mt-2 block"><span className="mb-1 block text-[12.5px] text-neutral-300">Note for you <span className="text-neutral-500">(for example the disability office reference)</span></span>
               <textarea value={a.note ?? ''} onChange={(e) => setA({ ...a, note: e.target.value })} maxLength={300} rows={2} className={`${field} resize-y`} /></label>
           </section>
-          {student.status === 'withdrawn' && <p className="rounded-xl bg-white/[0.05] px-3 py-2 text-[12.5px] text-neutral-300">Withdrawn from the course: not counted in averages or as missing work.</p>}
+          {student.status === 'withdrawn' && <p className="rounded-xl bg-white/[0.05] px-3 py-2 text-[12.5px] text-neutral-300">Withdrawn from the class: not counted in averages or as missing work.</p>}
           {error && <p role="alert" className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[13px] text-rose-300">{error}</p>}
         </div>
         <footer className="flex flex-wrap items-center gap-2 border-t border-white/[0.08] p-4">
@@ -150,14 +150,14 @@ function CourseDashboard({ id, onBack, onDeleted }: { id: string; onBack: () => 
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not make the sheet.'); }
   };
   const del = async () => {
-    if (!d || !window.confirm(`Delete the course "${d.course.name}"? The roster and accommodations are removed. Tasks and quizzes stay.`)) return;
+    if (!d || !window.confirm(`Delete the class "${d.course.name}"? The roster and accommodations are removed. Tasks and quizzes stay.`)) return;
     await authFetch(`/api/courses/${id}`, { method: 'DELETE' }); onDeleted();
   };
 
   if (!d) return <div className="flex justify-center py-24 text-neutral-400">{error ?? <Loader2 className="animate-spin" />}</div>;
   const linked = new Set(d.columns.map((c) => `${c.kind}:${c.id}`));
   return (
-    <PageShell wide icon={<GraduationCap size={20} />} title={d.course.name} onBack={onBack} backLabel="All courses"
+    <PageShell wide icon={<GraduationCap size={20} />} title={d.course.name} onBack={onBack} backLabel="All classes"
       subtitle={[d.course.code, d.course.term].filter(Boolean).join(' · ') || 'Roster, work and marks in one place.'}
       actions={<>
         <button type="button" onClick={() => setAdding((v) => !v)} className={ghostBtn}><UserPlus size={15} />Add students</button>
@@ -177,7 +177,7 @@ function CourseDashboard({ id, onBack, onDeleted }: { id: string; onBack: () => 
       {adding && (
         <Card className="p-4">
           <label htmlFor="paste" className="block text-[13.5px] font-semibold text-white">Add students</label>
-          <p className="mb-2 text-[12px] text-neutral-400">Paste from Excel: registration number, name and optionally email, one student per line. Students already on the course are updated, and their accommodations are kept.</p>
+          <p className="mb-2 text-[12px] text-neutral-400">Paste from Excel: registration number, name and optionally email, one student per line. Students already in the class are updated, and their accommodations are kept.</p>
           <textarea id="paste" value={paste} onChange={(e) => setPaste(e.target.value)} rows={5} placeholder={'222001234\tUwase Aline\taline@ur.ac.rw\n222005678\tMugisha Eric'} className={`${field} resize-y font-mono text-[12.5px]`} />
           <div className="mt-3 flex justify-end gap-2"><button type="button" onClick={() => setAdding(false)} className={ghostBtn}>Cancel</button><button type="button" disabled={!paste.trim()} onClick={() => void addStudents()} className={primaryBtn}>Add</button></div>
         </Card>
@@ -185,7 +185,7 @@ function CourseDashboard({ id, onBack, onDeleted }: { id: string; onBack: () => 
 
       {picking && (
         <Card className="p-4">
-          <p className="text-[13.5px] font-semibold text-white">Tasks and quizzes in this course</p>
+          <p className="text-[13.5px] font-semibold text-white">Tasks and quizzes in this class</p>
           <p className="mb-2 text-[12px] text-neutral-400">Quizzes need a question that asks for the registration number so responses can be matched.</p>
           <PickItems available={d.available} linked={linked} onSave={(items) => void saveItems(items)} onCancel={() => setPicking(false)} />
         </Card>
@@ -193,7 +193,7 @@ function CourseDashboard({ id, onBack, onDeleted }: { id: string; onBack: () => 
 
       {d.unmatched.length > 0 && (
         <p role="note" className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[13px] text-amber-200">
-          {d.unmatched.length} hand-in{d.unmatched.length === 1 ? '' : 's'} used a registration number that is not on this roster: <span className="font-mono">{d.unmatched.slice(0, 6).join(', ')}</span>{d.unmatched.length > 6 ? '…' : ''}. A typo, or a student from another course.
+          {d.unmatched.length} hand-in{d.unmatched.length === 1 ? '' : 's'} used a registration number that is not on this roster: <span className="font-mono">{d.unmatched.slice(0, 6).join(', ')}</span>{d.unmatched.length > 6 ? '…' : ''}. A typo, or a student from another class.
         </p>
       )}
 
@@ -237,10 +237,10 @@ function CourseDashboard({ id, onBack, onDeleted }: { id: string; onBack: () => 
               </tbody>
             </table>
           </div>
-          {d.columns.length === 0 && <p className="text-[13px] text-neutral-400">Add tasks and quizzes to this course to see marks here.</p>}
+          {d.columns.length === 0 && <p className="text-[13px] text-neutral-400">Add tasks and quizzes to this class to see marks here.</p>}
         </>
       )}
-      <div className="pt-2"><button type="button" onClick={() => void del()} className="text-[12.5px] text-neutral-500 hover:text-rose-300">Delete this course</button></div>
+      <div className="pt-2"><button type="button" onClick={() => void del()} className="text-[12.5px] text-neutral-500 hover:text-rose-300">Delete this class</button></div>
       {open && <StudentPanel courseId={id} student={open} onClose={() => setOpen(null)} onChanged={() => void load()} />}
     </PageShell>
   );
@@ -268,7 +268,8 @@ function PickItems({ available, linked, onSave, onCancel }: { available: Dashboa
   );
 }
 
-export default function CoursesPage({ onClose }: { onClose: () => void }) {
+/** The Classes section of the Tasks page: the lecturer's named classes. `tabs` is the Tasks / Classes switch shown on the list. */
+export default function CoursesPage({ onClose, tabs }: { onClose: () => void; tabs?: React.ReactNode }) {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [view, setView] = useState<{ kind: 'list' } | { kind: 'new' } | { kind: 'one'; id: string }>({ kind: 'list' });
   const [error, setError] = useState<string | null>(null);
@@ -281,32 +282,33 @@ export default function CoursesPage({ onClose }: { onClose: () => void }) {
   const create = async () => {
     setBusy(true); setError(null);
     try { const c = await json<Row>(await authFetch('/api/courses', jsonInit('POST', form))); setForm({ name: '', code: '', term: '', roster: '' }); setView({ kind: 'one', id: c.id }); }
-    catch (e) { setError(e instanceof Error ? e.message : 'Could not create the course.'); } finally { setBusy(false); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Could not create the class.'); } finally { setBusy(false); }
   };
-  const newBtn = <button type="button" onClick={() => setView({ kind: 'new' })} className={primaryBtn}><Plus size={16} />New course</button>;
+  const newBtn = <button type="button" onClick={() => setView({ kind: 'new' })} className={primaryBtn}><Plus size={16} />New class</button>;
   return (
     <div className="fixed inset-0 z-[70] overflow-y-auto bg-[var(--ws-bg)]">
       {view.kind === 'one' ? (
         <CourseDashboard id={view.id} onBack={() => setView({ kind: 'list' })} onDeleted={() => setView({ kind: 'list' })} />
       ) : view.kind === 'new' ? (
-        <PageShell icon={<GraduationCap size={20} />} title="New course" subtitle="Name the course and paste your class list. You can add students, tasks and quizzes later." onBack={() => setView({ kind: 'list' })} backLabel="All courses">
+        <PageShell icon={<GraduationCap size={20} />} title="New class" subtitle="Name the class and paste your class list. You can add students, tasks and quizzes later." onBack={() => setView({ kind: 'list' })} backLabel="All classes">
           <section className="space-y-4 rounded-[20px] border border-white/[0.12] bg-[var(--ws-card)] p-4 sm:p-5">
             <div className="grid gap-4 sm:grid-cols-3">
-              <label className="block sm:col-span-3"><span className="mb-1.5 block text-[12.5px] font-medium text-neutral-300">Course name</span><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} maxLength={120} placeholder="For example: Calculus I" className={field} /></label>
+              <label className="block sm:col-span-3"><span className="mb-1.5 block text-[12.5px] font-medium text-neutral-300">Class name</span><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} maxLength={120} placeholder="For example: Calculus I" className={field} /></label>
               <label className="block"><span className="mb-1.5 block text-[12.5px] font-medium text-neutral-300">Code <span className="text-neutral-500">(optional)</span></span><input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} maxLength={30} placeholder="MATH101" className={field} /></label>
               <label className="block"><span className="mb-1.5 block text-[12.5px] font-medium text-neutral-300">Term <span className="text-neutral-500">(optional)</span></span><input value={form.term} onChange={(e) => setForm({ ...form, term: e.target.value })} maxLength={40} placeholder="2026 semester 1" className={field} /></label>
             </div>
             <label className="block"><span className="mb-1.5 block text-[12.5px] font-medium text-neutral-300">Class list <span className="text-neutral-500">(optional): registration number, name, email</span></span>
               <textarea value={form.roster} onChange={(e) => setForm({ ...form, roster: e.target.value })} rows={6} placeholder={'222001234\tUwase Aline\taline@ur.ac.rw\n222005678\tMugisha Eric'} className={`${field} resize-y font-mono text-[12.5px]`} /></label>
             {error && <p role="alert" className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[13px] text-rose-300">{error}</p>}
-            <div className="flex justify-end gap-2"><button type="button" onClick={() => setView({ kind: 'list' })} className={ghostBtn}>Cancel</button><button type="button" disabled={busy || !form.name.trim()} onClick={() => void create()} className={primaryBtn}>{busy ? <Loader2 size={15} className="animate-spin" /> : null}Create course</button></div>
+            <div className="flex justify-end gap-2"><button type="button" onClick={() => setView({ kind: 'list' })} className={ghostBtn}>Cancel</button><button type="button" disabled={busy || !form.name.trim()} onClick={() => void create()} className={primaryBtn}>{busy ? <Loader2 size={15} className="animate-spin" /> : null}Create class</button></div>
           </section>
         </PageShell>
       ) : (
-        <PageShell icon={<GraduationCap size={20} />} title="Courses" onBack={onClose} subtitle="Your classes by name: the roster, accommodations, tasks, quizzes and marks of every student in one place." actions={newBtn}>
+        <PageShell icon={<ClipboardList size={20} />} title="Tasks" onBack={onClose} subtitle="Set work, share one link or QR code, and collect answers from any phone: photos, PDF, Word or typed. When you are ready, the AI marks the whole class." actions={newBtn}>
+          {tabs}
           {error ? <p className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[13px] text-rose-300">{error}</p>
             : !rows ? <div className="flex justify-center py-16 text-neutral-400"><Loader2 className="animate-spin" /></div>
-              : !rows.length ? <Empty icon={<GraduationCap size={22} />} title="No courses yet" text="Create a course, paste your class list, then add the tasks and quizzes you give." action={newBtn} />
+              : !rows.length ? <Empty icon={<GraduationCap size={22} />} title="No classes yet" text="Create a class, paste your class list, then add the tasks and quizzes you give." action={newBtn} />
                 : (
                   <ul className="grid gap-3 sm:grid-cols-2">
                     {rows.map((r) => (

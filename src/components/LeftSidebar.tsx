@@ -21,7 +21,6 @@ import {
   Sparkles,
   Coins,
   Building2,
-  Users,
 } from 'lucide-react';
 import { NavigationTab, User, ChatSession } from '../types';
 import logoUrl from '../assets/bwenge-logo.svg';
@@ -44,7 +43,6 @@ interface LeftSidebarProps {
   onOpenMark?: () => void;
   /** Opens Assignments (set a task, share a link, see every hand-in, mark the class). */
   onOpenAssignments?: () => void;
-  onOpenCourses?: () => void;
   onOpenForms?: () => void;
   onLogout: () => void;
   user: User | null;
@@ -120,7 +118,6 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   onOpenPublicLibrary,
   onOpenMark,
   onOpenAssignments,
-  onOpenCourses,
   onOpenForms,
   onLogout = () => {},
   user = null,
@@ -168,7 +165,6 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
     ] },
     { title: 'Teaching', items: [
       ...(user && onOpenMark ? [{ label: 'Mark', icon: PenLine, onClick: onOpenMark }] : []),
-      ...(user && onOpenCourses ? [{ label: 'Courses', icon: Users, onClick: onOpenCourses }] : []),
       ...(user && onOpenAssignments ? [{ label: 'Tasks', icon: ClipboardList, onClick: onOpenAssignments }] : []),
       ...(user && onOpenForms ? [{ label: 'Forms', icon: ClipboardCheck, onClick: onOpenForms }] : []),
       ...(user ? [{ label: 'Results', icon: BarChart3, onClick: goTo('/exams'), active: /^\/exams/.test(path) }] : []),
