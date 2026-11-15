@@ -24,6 +24,7 @@ const _hookJs = r'''
   document.documentElement.appendChild(s);
   ['copy','cut','paste'].forEach(function(t){ document.addEventListener(t, function(e){ e.preventDefault(); MySEB.postMessage(t); }, true); });
   document.addEventListener('contextmenu', function(e){ e.preventDefault(); }, true);
+  document.addEventListener('click', function(e){ var t = e.target; if (t && t.tagName === 'INPUT' && t.type === 'file') MySEB.postMessage('file_open'); }, true);
   document.addEventListener('dragstart', function(e){ e.preventDefault(); }, true);
 })();
 ''';
@@ -37,6 +38,8 @@ class _ExamScreenState extends State<ExamScreen> with WidgetsBindingObserver {
   bool _offline = false, _locked = false, _ended = false;
   int _fails = 0;
   final _lastSent = <String, DateTime>{};
+  DateTime _pickUntil = DateTime.fromMillisecondsSinceEpoch(0); // the system file/photo picker is open: leaving to it is not a violation
+  bool get _picking => DateTime.now().isBefore(_pickUntil);
   late final String _origin;
   StreamSubscription<String>? _native;
 
@@ -62,7 +65,10 @@ class _ExamScreenState extends State<ExamScreen> with WidgetsBindingObserver {
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(Colors.white)
       ..enableZoom(false)
-      ..addJavaScriptChannel('MySEB', onMessageReceived: (m) => _violation(m.message, {'via': 'page'}))
+      ..addJavaScriptChannel('MySEB', onMessageReceived: (m) {
+        if (m.message == 'file_open') { _pickUntil = DateTime.now().add(const Duration(seconds: 60)); return; }
+        _violation(m.message, {'via': 'page'});
+      })
       ..setNavigationDelegate(NavigationDelegate(
         // The exam site only. Links to anywhere else are dropped.
         onNavigationRequest: (r) => (r.url.startsWith(_origin) || r.url.startsWith('about:') || r.url.startsWith('data:')) ? NavigationDecision.navigate : NavigationDecision.prevent,
@@ -114,6 +120,7 @@ class _ExamScreenState extends State<ExamScreen> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (_ended) return;
+    if (_picking && state != AppLifecycleState.resumed) return; // choosing a file or taking a photo for the hand-in
     switch (state) {
       case AppLifecycleState.paused:
       case AppLifecycleState.hidden:
@@ -135,6 +142,7 @@ class _ExamScreenState extends State<ExamScreen> with WidgetsBindingObserver {
   }
 
   void _onNative(String e) {
+    if (_picking && e != 'screen_recording' && e != 'screenshot') return;
     switch (e) {
       case 'split_screen': _violation('split_screen'); break;
       case 'screen_recording': _violation('screen_recording'); break;

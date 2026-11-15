@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { requireAuth } from '../../production/auth.js';
 import logger from '../utils/logger.js';
-import { MySebError, downloadLinks, endAll, generateCode, monitor, mySebConfigured, sessionAction, violations } from '../services/mySeb.js';
+import { MySebError, assignmentTarget, downloadLinks, endAll, formTarget, generateCode, monitor, mySebConfigured, sessionAction, violations, type TargetLoader } from '../services/mySeb.js';
 
 const userIdOf = (req: Request): string => (req as any).user?.userId;
 const run = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response) => {
@@ -21,14 +21,17 @@ export function createMySebPublicRouter() {
   return r;
 }
 
-/** Lecturer actions on one of their own forms. Mounted at /api/forms (before the generic form routes). */
-export function createMySebOwnerRouter() {
+/** Lecturer actions on one of their own forms (`/api/forms/:id/myseb/...`) or hand-in tasks (`/api/assignments/:id/myseb/...`). */
+function createMySebOwnerRouterFor(target: (userId: string, id: string) => TargetLoader) {
   const r = Router();
-  r.post('/:id/myseb/code', requireAuth, run(async (req, res) => { res.status(201).json(await generateCode(userIdOf(req), p(req, 'id'))); }));
-  r.get('/:id/myseb/monitor', requireAuth, run(async (req, res) => { res.json(await monitor(userIdOf(req), p(req, 'id'))); }));
-  r.get('/:id/myseb/sessions/:sid/violations', requireAuth, run(async (req, res) => { res.json(await violations(userIdOf(req), p(req, 'id'), p(req, 'sid'))); }));
-  r.post('/:id/myseb/sessions/:sid/resume', requireAuth, run(async (req, res) => { res.json(await sessionAction(userIdOf(req), p(req, 'id'), p(req, 'sid'), 'resume')); }));
-  r.post('/:id/myseb/sessions/:sid/end', requireAuth, run(async (req, res) => { res.json(await sessionAction(userIdOf(req), p(req, 'id'), p(req, 'sid'), 'end')); }));
-  r.post('/:id/myseb/end', requireAuth, run(async (req, res) => { res.json(await endAll(userIdOf(req), p(req, 'id'))); }));
+  const t = (req: Request) => target(userIdOf(req), p(req, 'id'));
+  r.post('/:id/myseb/code', requireAuth, run(async (req, res) => { res.status(201).json(await generateCode(t(req))); }));
+  r.get('/:id/myseb/monitor', requireAuth, run(async (req, res) => { res.json(await monitor(t(req))); }));
+  r.get('/:id/myseb/sessions/:sid/violations', requireAuth, run(async (req, res) => { res.json(await violations(t(req), p(req, 'sid'))); }));
+  r.post('/:id/myseb/sessions/:sid/resume', requireAuth, run(async (req, res) => { res.json(await sessionAction(t(req), p(req, 'sid'), 'resume')); }));
+  r.post('/:id/myseb/sessions/:sid/end', requireAuth, run(async (req, res) => { res.json(await sessionAction(t(req), p(req, 'sid'), 'end')); }));
+  r.post('/:id/myseb/end', requireAuth, run(async (req, res) => { res.json(await endAll(t(req))); }));
   return r;
 }
+export const createMySebOwnerRouter = () => createMySebOwnerRouterFor(formTarget);
+export const createMySebAssignmentOwnerRouter = () => createMySebOwnerRouterFor(assignmentTarget);

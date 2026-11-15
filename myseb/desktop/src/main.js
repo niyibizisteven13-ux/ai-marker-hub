@@ -1,5 +1,6 @@
 'use strict';
-const { app, BrowserWindow, Menu, ipcMain, session, clipboard } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, session, clipboard, screen } = require('electron');
+const { execFile } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
@@ -9,6 +10,30 @@ const VERSION = '1.0.0';
 const BLUR_LIMIT_MS = 1500;
 const PARTITION = 'myseb-exam';                      // in-memory: nothing from an exam survives the app
 
+/* ------------------------------------------------------------------ other apps and screens */
+// Programs that show the exam to someone else or record it. Matched on the exact program name (no .exe). Add more in config.json "blockedProcesses".
+// Zoom/Teams are NOT listed: many lecturers proctor with them. Add them in config.json if you do not.
+const DEFAULT_BLOCKED = ['teamviewer', 'teamviewer_service', 'anydesk', 'rustdesk', 'ultraviewer', 'parsec', 'parsecd', 'vncviewer', 'vncserver', 'winvnc', 'tightvnc',
+  'remoting_host', 'obs', 'obs64', 'obs-studio', 'bandicam', 'camtasia', 'snagit32', 'snagiteditor', 'sharex', 'screenrec', 'quickassist', 'msra', 'mstsc'];
+
+function runningPrograms() {
+  return new Promise((resolve) => {
+    const win = process.platform === 'win32';
+    execFile(win ? 'tasklist' : 'ps', win ? ['/fo', 'csv', '/nh'] : ['-A', '-o', 'comm='], { timeout: 6000, windowsHide: true, maxBuffer: 8 * 1024 * 1024 }, (err, out) => {
+      if (err) return resolve([]);
+      const names = String(out).split('\n').map((l) => (win ? (l.match(/^"([^"]+)"/) || [])[1] : l.trim()) || '')
+        .map((n) => n.split(/[\\/]/).pop().replace(/\.exe$/i, '').toLowerCase()).filter(Boolean);
+      resolve(names);
+    });
+  });
+}
+async function checkEnvironment() {
+  if (!exam || exam.status === 'ENDED') return;
+  if (screen.getAllDisplays().length > 1) sendViolation('extra_display', { displays: screen.getAllDisplays().length });
+  const bad = (await runningPrograms()).filter((n) => cfg.blockedProcesses.includes(n));
+  if (bad.length) sendViolation('forbidden_app', { apps: [...new Set(bad)].slice(0, 5) });
+}
+
 /* ------------------------------------------------------------------ config + identity */
 function loadConfig() {
   let cfg = {};
@@ -16,6 +41,7 @@ function loadConfig() {
     try { cfg = { ...cfg, ...JSON.parse(fs.readFileSync(p, 'utf8')) }; } catch { /* optional */ }
   }
   if (process.env.MYSEB_API) cfg.apiBase = process.env.MYSEB_API;
+  cfg.blockedProcesses = [...new Set([...DEFAULT_BLOCKED, ...(Array.isArray(cfg.blockedProcesses) ? cfg.blockedProcesses : [])].map((x) => String(x).toLowerCase()))];
   cfg.apiBase = String(cfg.apiBase || 'http://localhost:4000').replace(/\/$/, '');
   return cfg;
 }
@@ -34,6 +60,8 @@ let exam = null;            // { token, sessionId, examOrigin, title, status }
 let allowQuit = false;
 let hbTimer = null, hbFails = 0, blurTimer = null;
 const lastSent = new Map();
+let fileGraceUntil = 0;     // a system file dialog is open (hand-ins): it is not 'leaving'
+let watchTimer = null;
 
 const headersFor = () => ({
   'Content-Type': 'application/json',
@@ -89,8 +117,9 @@ function startExam(data) {
   hbFails = 0;
   clearInterval(hbTimer);
   hbTimer = setInterval(heartbeat, (data.heartbeatSeconds || 5) * 1000);
+  clearInterval(watchTimer); watchTimer = setInterval(checkEnvironment, 20000); checkEnvironment();
 }
-function stopExam() { clearInterval(hbTimer); clearTimeout(blurTimer); hbTimer = null; exam = null; }
+function stopExam() { clearInterval(watchTimer); clearInterval(hbTimer); clearTimeout(blurTimer); hbTimer = null; exam = null; }
 
 /* ------------------------------------------------------------------ keyboard rules (every web contents, incl. the exam <webview>) */
 function blockedKey(input) {
@@ -123,6 +152,7 @@ const log=t=>console.log('__MYSEB__'+t);
 for(const t of ['copy','cut','paste'])document.addEventListener(t,e=>{e.preventDefault();log(t)},true);
 document.addEventListener('contextmenu',e=>e.preventDefault(),true);
 document.addEventListener('dragstart',e=>e.preventDefault(),true);
+document.addEventListener('click',e=>{const t=e.target;if(t&&t.tagName==='INPUT'&&t.type==='file')log('file_open')},true);
 document.addEventListener('visibilitychange',()=>{if(document.hidden)log('visibility_hidden')});})();`;
 const CSS = '*{-webkit-user-select:none!important;user-select:none!important}input,textarea,[contenteditable="true"]{-webkit-user-select:text!important;user-select:text!important}';
 
@@ -137,7 +167,8 @@ function lockGuest(wc) {
     const msg = typeof a[0]?.message === 'string' ? a[0].message : a[2];   // Electron >=35 passes one event object
     if (typeof msg === 'string' && msg.startsWith('__MYSEB__')) {
       const t = msg.slice(9);
-      if (['copy', 'cut', 'paste', 'visibility_hidden'].includes(t)) sendViolation(t, { via: 'page' });
+      if (t === 'file_open') fileGraceUntil = Date.now() + 45000;   // choosing a file to hand in opens a system dialog: allow 45 s
+      else if (['copy', 'cut', 'paste', 'visibility_hidden'].includes(t)) sendViolation(t, { via: 'page' });
     }
   });
 }
@@ -166,13 +197,16 @@ function createWindow() {
   win.on('blur', () => {
     if (!exam || exam.status === 'ENDED') return;
     clearTimeout(blurTimer);
-    blurTimer = setTimeout(() => {
+    const arm = (ms) => { blurTimer = setTimeout(() => {
       if (!win || win.isFocused()) return;
+      if (Date.now() < fileGraceUntil) return arm(fileGraceUntil - Date.now() + 50);   // a file dialog is open: look again when the allowance ends
       sendViolation('leave', { thresholdMs: BLUR_LIMIT_MS });
       regain();
-    }, BLUR_LIMIT_MS);
+    }, ms); };
+    arm(BLUR_LIMIT_MS);
   });
-  setInterval(() => { if (exam && exam.status !== 'ENDED' && !DEV) regain(); }, 1000).unref();
+  setInterval(() => { if (exam && exam.status !== 'ENDED' && !DEV && Date.now() >= fileGraceUntil) regain(); }, 1000).unref();
+  screen.on('display-added', () => { if (exam) checkEnvironment(); });
   win.on('focus', () => clearTimeout(blurTimer));
   win.on('minimize', () => { if (exam) { win.restore(); sendViolation('leave', { how: 'minimize' }); } });
   win.on('leave-full-screen', () => { if (!DEV && exam) { win.setFullScreen(true); sendViolation('fullscreen_exit'); } });

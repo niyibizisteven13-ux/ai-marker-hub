@@ -435,7 +435,7 @@ function ExamPanel({ exam, onChange, formId }: { exam: ExamSettings; onChange: (
   return (
     <div className="space-y-2">
       <Toggle label="Require MySEB (secure exam app)" checked={exam.requireMyseb} onChange={v => set({ requireMyseb: v, ...(v ? { requireSeb: false } : {}) })} hint="Students can only open this test inside the MySEB app on a laptop or phone (or its Chrome extension). The device is locked, and leaving the test is recorded and can pause it. Works for any quiz or test, timed or not." />
-      {exam.requireMyseb && <MySebPanel formId={formId} onExamId={(id) => onChange(normalizeExam({ ...exam, mysebExamId: id }))} />}
+      {exam.requireMyseb && <MySebPanel base={formId ? `/api/forms/${encodeURIComponent(formId)}/myseb` : undefined} onExamId={(id) => onChange(normalizeExam({ ...exam, mysebExamId: id }))} />}
       <Toggle label="Timed test" checked={exam.enabled} onChange={v => set({ enabled: v })} hint="The server keeps the clock. Students start with their registration number, and their time, breaks and camera exemption come from your class list." />
       {exam.enabled && (
         <div className="space-y-3 rounded-lg border border-[#E0E0E0] bg-white p-3">

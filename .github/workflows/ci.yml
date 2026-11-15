@@ -52,6 +52,13 @@ jobs:
       - name: No known high or critical vulnerabilities in production dependencies
         run: npm audit --omit=dev --audit-level=high
 
+      # The code-testing runner puts each student program in its own network namespace (`unshare -rn`). Ubuntu 24.04
+      # runners forbid that for unprivileged users, so every program fails to start and is reported as an error.
+      - name: Allow the code runner's sandbox (user namespaces)
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          unshare -rn -- true || { echo "::error::unshare -rn is still refused on this runner; the code runner tests cannot run"; exit 1; }
+
       - name: Tests
         run: node --test --test-reporter=spec --import tsx tests/*.test.ts
 

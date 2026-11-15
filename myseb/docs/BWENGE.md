@@ -28,7 +28,17 @@ Student: MySEB app/extension ─┴── opens https://bwenge…/forms/<id> ─
    `myseb/scripts/pack-extension.sh` zips the Chrome extension.
 4. Put the MySEB server's own `PUBLIC_URL` to its https address (QR codes use it).
 
+## Assignments (hand-in links)
+Same switch on the task's dashboard: *Require MySEB (secure exam app)*. The task text, its files and the hand-in
+(`GET /api/assignments/public/:token`, `.../files/:index`, `POST .../submit`) answer 403 outside MySEB; the page shell
+`/a/<token>` stays reachable (it holds no task content) and the student's own result page is not locked. Best for work done in class.
+Choosing a file or photo opens a system dialog: the apps allow 45 s (desktop) / 60 s (phone) for that and do not count it as leaving.
+
+## What the apps watch for (every one is recorded; leaving-type ones pause the student)
+tab/window/app switch (blur > 1.5 s, home, recents), a second monitor, remote-control or screen-recording programs
+(TeamViewer, AnyDesk, OBS, … extend with `blockedProcesses` in the desktop `config.json`), screenshots, copy/paste, dev tools,
+closing the app, losing the connection (20 s without a heartbeat).
+
 ## Not covered yet
-* The task hand-in page (`/a/<token>`, "assignments") is a separate system and is **not** behind MySEB yet.
-* Android file picker inside the phone app (for tests that need photo/file upload) is not wired in the Flutter code.
-* The Flutter app has never been compiled; see `docs/MOBILE.md`.
+* The Flutter app has never been compiled; see `docs/MOBILE.md`. The Android/iOS file chooser inside the web view has not been tested.
+* A second device (a phone beside the laptop) cannot be detected by software.

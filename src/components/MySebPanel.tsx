@@ -9,14 +9,14 @@ type Code = { display: string; qrSvg: string; expiresAt: string };
 const PILL: Record<string, string> = { IN_EXAM: 'bg-green-600', PAUSED: 'bg-amber-600', LEFT: 'bg-red-600', ENDED: 'bg-slate-500' };
 const btn = 'min-h-9 rounded-lg border border-[#DADCE0] px-3 text-xs font-semibold text-[#202124] hover:bg-black/5 disabled:opacity-40';
 
-export default function MySebPanel({ formId, onExamId }: { formId?: string; onExamId: (id: string) => void }) {
+/** `base` is the API root of the thing protected: `/api/forms/<id>/myseb` or `/api/assignments/<id>/myseb`. */
+export default function MySebPanel({ base, onExamId }: { base?: string; onExamId: (id: string) => void }) {
   const [code, setCode] = useState<Code | null>(null);
   const [mon, setMon] = useState<Monitor | null>(null);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [log, setLog] = useState<{ name: string; rows: Array<{ id: number; type: string; created_at: string }> } | null>(null);
-  const base = formId ? `/api/forms/${encodeURIComponent(formId)}/myseb` : '';
 
   const call = useCallback(async (path: string, method = 'GET') => {
     const r = await authFetch(`${base}${path}`, { method });
@@ -25,10 +25,10 @@ export default function MySebPanel({ formId, onExamId }: { formId?: string; onEx
     return b;
   }, [base]);
 
-  const refresh = useCallback(() => { if (formId) call('/monitor').then(setMon).catch(() => undefined); }, [formId, call]);
+  const refresh = useCallback(() => { if (base) call('/monitor').then(setMon).catch(() => undefined); }, [base, call]);
   useEffect(() => { refresh(); const t = setInterval(refresh, 4000); return () => clearInterval(t); }, [refresh]);
 
-  if (!formId) return <p className="text-xs text-[#5F6368]">Save and publish the form first. Then you can make the MySEB code here.</p>;
+  if (!base) return <p className="text-xs text-[#5F6368]">Save and publish first. Then you can make the MySEB code here.</p>;
 
   const generate = async () => {
     setBusy(true); setErr('');

@@ -59,6 +59,7 @@ Production: use HTTPS, remove `usesCleartextTraffic` from the Android manifest, 
    | Open the exam URL in normal Chrome | **403 "MySEB Needed"** |
    | Copy the token into Chrome / another device | blocked + `token_misuse` violation |
    | Kill the app / network | no heartbeat for 20 s → **LEFT**; on return → PAUSED |
+   | Laptop: second monitor, TeamViewer / AnyDesk / OBS running | `extra_display` / `forbidden_app` violation → **PAUSED** |
    | Re-enter the code to escape a pause | same device gets the same (paused) state; other device refused |
 5. Teacher: *Resume* / *End Exam* per student, *End exam* for everyone (codes expire).
 
