@@ -24,10 +24,12 @@ export interface IntegrityReport {
   /** Times the person left the page or window, and for how many seconds in total. */
   awayCount: number;
   awaySeconds: number;
+  /** Times copying or cutting from the page was tried (when copying is blocked, they were stopped). */
+  copies?: number;
   fields: Record<string, FieldActivity>;
 }
 
-export type FlagCode = 'PASTED' | 'PASTE_BLOCKED' | 'TYPED_LESS_THAN_ANSWER' | 'LEFT_PAGE' | 'TOO_FAST' | 'NO_SIGNALS';
+export type FlagCode = 'COPY_ATTEMPT' | 'PASTED' | 'PASTE_BLOCKED' | 'TYPED_LESS_THAN_ANSWER' | 'LEFT_PAGE' | 'TOO_FAST' | 'NO_SIGNALS';
 export interface IntegrityFlag { code: FlagCode; fieldId?: string; level: 'review' | 'info'; message: string }
 
 const int = (v: unknown, max: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.min(max, Math.round(v))) : 0);
@@ -43,7 +45,7 @@ export function sanitizeReport(input: unknown, fieldIds: Set<string>): Integrity
       fields[id] = { typed: int(a.typed, 200_000), pasted: int(a.pasted, 1000), blocked: int(a.blocked, 1000), length: int(a.length, 200_000) };
     }
   }
-  return { v: 1, seconds: int(o.seconds, 7 * 86400), awayCount: int(o.awayCount, 10_000), awaySeconds: int(o.awaySeconds, 7 * 86400), fields };
+  return { v: 1, seconds: int(o.seconds, 7 * 86400), awayCount: int(o.awayCount, 10_000), awaySeconds: int(o.awaySeconds, 7 * 86400), ...(int(o.copies, 10_000) ? { copies: int(o.copies, 10_000) } : {}), fields };
 }
 
 /**
@@ -63,6 +65,7 @@ export function integrityFlags(report: IntegrityReport | null, opts: { labels: R
     }
   }
   if (report.awayCount >= 3 || report.awaySeconds >= 60) flags.push({ code: 'LEFT_PAGE', level: 'review', message: `Left the page ${report.awayCount} time${report.awayCount === 1 ? '' : 's'} (${report.awaySeconds} s away).` });
+  if ((report.copies ?? 0) > 0) flags.push({ code: 'COPY_ATTEMPT', level: 'info', message: `Tried to copy from the page ${report.copies} time${report.copies === 1 ? '' : 's'}.` });
   if (opts.questionCount >= 5 && report.seconds < opts.questionCount * 2) flags.push({ code: 'TOO_FAST', level: 'info', message: `Finished ${opts.questionCount} questions in ${report.seconds} s.` });
   return flags;
 }

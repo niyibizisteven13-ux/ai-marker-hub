@@ -20,6 +20,7 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { normalizeBranding } from '../../shared/formBranding';
 import type { FieldActivity, IntegrityReport } from '../../shared/formIntegrity';
+import { applyPool } from '../../shared/formPool';
 import { FileThumb, PreviewDialog, type PreviewSource } from './FilePreview';
 
 /* ------------------------------------------------------------------ types */
@@ -84,6 +85,12 @@ type FormSchema = {
   shuffleQuestions?: boolean;
   shuffleAllOptions?: boolean;
   trackIntegrity?: boolean;
+  /** Test design set by the lecturer. */
+  oneAtATime?: boolean;
+  noGoingBack?: boolean;
+  perQuestionSeconds?: number;
+  blockCopy?: boolean;
+  poolPicks?: Record<string, number>;
 };
 
 /** Handlers that record (and, when the lecturer turned pasting off, stop) pasting into one typed answer. */
@@ -119,6 +126,14 @@ export type DynamicFormProps = {
   onSubmit: (data: any) => void | Promise<any>;
   uploadFile?: (file: File, onProgress?: (percent: number) => void) => Promise<string>;
   draftKey?: string;
+  /** Timed tests: lets the page above send what the student has when time is up (required questions are not enforced). */
+  controlRef?: React.MutableRefObject<{ submitNow: () => Promise<void> } | null>;
+  /** Timed tests: no typing or clicking while the test is paused. */
+  locked?: boolean;
+  /** Timed tests: the seed that draws this student's questions from the pools (the test session), so a refresh draws the same ones. */
+  poolSeed?: string;
+  /** Timed tests: extra time (1.25 = +25%) also applies to the time per question. */
+  timeFactor?: number;
 };
 
 /* ---------------------------------------------------------------- helpers */
@@ -146,6 +161,15 @@ const isEmpty = (v: any) =>
   v === undefined || v === null || v === '' ||
   (Array.isArray(v) && v.length === 0) ||
   (typeof v === 'object' && !Array.isArray(v) && !('url' in v) && Object.keys(v).length === 0);
+
+/** A random id kept on this device for quizzes, so the lecturer can see when two students used one device. */
+const deviceId = (): string => {
+  try {
+    let d = localStorage.getItem('bwenge-device');
+    if (!d) { d = (crypto.randomUUID?.() ?? `${Date.now()}${Math.random()}`).replace(/[^\w]/g, ''); localStorage.setItem('bwenge-device', d); }
+    return d;
+  } catch { return ''; }
+};
 
 const shuffled = <T,>(list: T[]): T[] => {
   const copy = [...list];
@@ -737,9 +761,19 @@ const QuestionCard = memo(function QuestionCard(props: CardProps) {
 
 /* ------------------------------------------------------------------- main */
 
-export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey }: DynamicFormProps) {
+export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey, controlRef, locked, poolSeed, timeFactor }: DynamicFormProps) {
   const parsed = useMemo(() => parseSchema(schema), [schema]);
-  const parsedSchema = parsed.schema;
+  // Question pools: this student's draw. The seed is kept for the visit, so a refresh gives the same questions.
+  const seed = useMemo(() => {
+    if (poolSeed) return poolSeed;
+    const key = `dynamicform-pool:${draftKey || parsed.schema?.id || parsed.schema?.title || 'form'}`;
+    try { const kept = sessionStorage.getItem(key); if (kept) return kept; } catch { /* storage unavailable */ }
+    const fresh = (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`).replace(/-/g, '');
+    try { sessionStorage.setItem(key, fresh); } catch { /* storage unavailable */ }
+    return fresh;
+  }, [poolSeed, draftKey, parsed.schema?.id, parsed.schema?.title]);
+  const hasPools = !!parsed.schema?.poolPicks && Object.keys(parsed.schema.poolPicks).length > 0;
+  const parsedSchema = useMemo(() => (parsed.schema && hasPools ? applyPool(parsed.schema, seed) : parsed.schema), [parsed.schema, hasPools, seed]);
 
   const emailField = useMemo<FormField | undefined>(
     () => (parsedSchema?.collectEmail
@@ -774,7 +808,26 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey }: 
     }
     return groups.flatMap(g => shuffled(g));
   }, [fields, parsedSchema]);
-  const pages = useMemo(() => buildPages(orderedFields, parsedSchema?.blocks || [], emailField), [orderedFields, parsedSchema, emailField]);
+  const perQuestion = Math.max(0, Number(parsedSchema?.perQuestionSeconds) || 0);
+  const oneAtATime = !!(parsedSchema?.oneAtATime || parsedSchema?.noGoingBack || perQuestion > 0);
+  const noGoingBack = !!parsedSchema?.noGoingBack;
+  const pages = useMemo(() => {
+    const all = buildPages(orderedFields, parsedSchema?.blocks || [], emailField);
+    if (!oneAtATime) return all;
+    // One question per screen: each question keeps the notes and pictures that come before it.
+    const out: Page[] = [];
+    for (const p of all) {
+      let carry: Item[] = [];
+      let first = true;
+      for (const item of p.items) {
+        if (item.kind === 'block') { carry.push(item); continue; }
+        out.push({ ...(first ? { title: p.title, description: p.description } : {}), items: [...carry, item] });
+        carry = []; first = false;
+      }
+      if (carry.length) { if (out.length) out[out.length - 1].items.push(...carry); else out.push({ title: p.title, description: p.description, items: carry }); }
+    }
+    return out;
+  }, [orderedFields, parsedSchema, emailField, oneAtATime]);
 
   const [answers, setAnswers] = useState<Answers>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -800,6 +853,7 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey }: 
   const activity = useRef<Record<string, FieldActivity>>({});
   const lastLen = useRef<Record<string, number>>({});
   const away = useRef({ count: 0, ms: 0, since: 0 });
+  const copyCount = useRef(0);
   const startedAt = useRef(Date.now());
   const [pasteNoticeId, setPasteNoticeId] = useState<string | null>(null);
 
@@ -869,7 +923,7 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey }: 
       const a = activity.current[f.id] || { typed: 0, pasted: 0, blocked: 0, length: 0 };
       out[f.id] = { ...a, length: String(v ?? '').length };
     });
-    return { v: 1, seconds: Math.round((now - startedAt.current) / 1000), awayCount: away.current.count, awaySeconds: Math.round((away.current.ms + (away.current.since ? now - away.current.since : 0)) / 1000), fields: out };
+    return { v: 1, ...(copyCount.current ? { copies: copyCount.current } : {}), seconds: Math.round((now - startedAt.current) / 1000), awayCount: away.current.count, awaySeconds: Math.round((away.current.ms + (away.current.since ? now - away.current.since : 0)) / 1000), fields: out };
   };
 
   /* pages that still have something to show (showIf may hide whole pages) */
@@ -1057,6 +1111,8 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey }: 
       if (!isEmpty(v)) out[field.id] = resolveOther(field.id, v);
     });
     if (integrityOn) out._integrity = buildIntegrity();
+    if (hasPools) out._pool = { seed };
+    if (integrityOn || hasPools) { const d = deviceId(); if (d) out._device = d; }
     return out;
   };
 
@@ -1069,22 +1125,24 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey }: 
     goTo(Math.min(safeIdx + 1, livePages.length - 1));
   };
 
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
+  /** `force` (time is up): send what there is, without the checks for required or unfinished questions. */
+  const runSubmit = async (force: boolean) => {
     if (submitting) return;
-    if (parsedSchema?.acceptingResponses === false) { setSubmitError('This form is no longer accepting responses.'); return; }
-    if (!isLast) { handleNext(); return; }
+    if (!force && parsedSchema?.acceptingResponses === false) { setSubmitError('This form is no longer accepting responses.'); return; }
+    if (!force && !isLast) { handleNext(); return; }
 
-    const everyField = livePages.flatMap(p => pageFields(p));
-    const found = validateFields(everyField);
-    setErrors(found);
-    const first = everyField.find(f => found[f.id]);
-    if (first) {
-      setShowSummary(true);
-      const pageOfFirst = livePages.findIndex(p => p.items.some(i => i.kind === 'field' && i.field.id === first.id));
-      if (pageOfFirst !== safeIdx) setPageIdx(pageOfFirst);
-      focusField(first.id);
-      return;
+    if (!force) {
+      const everyField = livePages.flatMap(p => pageFields(p));
+      const found = validateFields(everyField);
+      setErrors(found);
+      const first = everyField.find(f => found[f.id]);
+      if (first) {
+        setShowSummary(true);
+        const pageOfFirst = livePages.findIndex(p => p.items.some(i => i.kind === 'field' && i.field.id === first.id));
+        if (pageOfFirst !== safeIdx) setPageIdx(pageOfFirst);
+        focusField(first.id);
+        return;
+      }
     }
 
     setSubmitting(true);
@@ -1112,6 +1170,39 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey }: 
       setSubmitting(false);
     }
   };
+  const handleSubmit = async (event: React.FormEvent) => { event.preventDefault(); await runSubmit(false); };
+  // The page above (a timed test) can send the answers when the time is up. Set on every render so it sees the latest answers.
+  useEffect(() => {
+    if (!controlRef) return;
+    controlRef.current = { submitNow: () => runSubmit(true) };
+    return () => { controlRef.current = null; };
+  });
+
+  // Time per question: when it runs out the next question opens (or the test is sent), whatever is answered.
+  const qLimit = Math.round(perQuestion * (timeFactor || 1));
+  const timedPage = qLimit > 0 && !!page?.items.some(i => i.kind === 'field' && i.field.id !== '_respondentEmail');
+  const [qLeft, setQLeft] = useState(0);
+  useEffect(() => { if (qLimit > 0) setQLeft(qLimit); }, [safeIdx, qLimit]);
+  const advanceRef = useRef<() => void>(() => {});
+  advanceRef.current = () => { if (isLast) void runSubmit(true); else goTo(Math.min(safeIdx + 1, livePages.length - 1)); };
+  useEffect(() => {
+    if (!timedPage || result || locked || submitting) return;
+    const t = window.setInterval(() => setQLeft(n => { if (n <= 1) { window.setTimeout(() => advanceRef.current(), 0); return qLimit; } return n - 1; }), 1000);
+    return () => window.clearInterval(t);
+  }, [timedPage, qLimit, result, locked, submitting, safeIdx]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Copying the questions is stopped (and counted) when the creator turned it on. Copy and cut inside the student's own answer box still work.
+  const blockCopy = !!parsedSchema?.blockCopy;
+  useEffect(() => {
+    if (!blockCopy || result) return;
+    const stop = (e: Event) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT')) return;
+      e.preventDefault(); copyCount.current += 1;
+    };
+    document.addEventListener('copy', stop); document.addEventListener('cut', stop);
+    return () => { document.removeEventListener('copy', stop); document.removeEventListener('cut', stop); };
+  }, [blockCopy, result]);
 
   const resetAll = () => {
     setAnswers({}); setErrors({}); setUploads({}); setSubmitError(''); setShowSummary(false);
@@ -1235,7 +1326,8 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey }: 
   const totalPages = livePages.length;
 
   return (
-    <form onSubmit={handleSubmit} noValidate className={shell}>
+    <form onSubmit={handleSubmit} noValidate className={`${shell} ${parsedSchema?.blockCopy ? 'select-none [&_input]:select-text [&_textarea]:select-text' : ''}`}
+      >
       <div ref={topRef} />
 
       {totalPages > 1 && (
@@ -1254,8 +1346,15 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey }: 
 
       {integrityOn && safeIdx === 0 && (
         <p role="note" className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-700">
-          This test records whether text is pasted and whether you leave this page. Your lecturer may look at this.{blockPaste ? ' Pasting into typed answers is turned off.' : ''}
+          This test records whether text is pasted, whether you leave this page, and which device you use. Your lecturer may look at this.{blockPaste ? ' Pasting into typed answers is turned off.' : ''}
         </p>
+      )}
+
+      {(noGoingBack || timedPage) && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-700">
+          {noGoingBack ? <span>You cannot come back to a question after you move on.</span> : <span />}
+          {timedPage && <span role="timer" aria-live="off" className={`font-bold tabular-nums ${qLeft <= 10 ? 'text-rose-700' : 'text-slate-900'}`}>Time for this question: {Math.floor(qLeft / 60)}:{String(qLeft % 60).padStart(2, '0')}</span>}
+        </div>
       )}
 
       {restored && safeIdx === 0 && (
@@ -1331,7 +1430,7 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey }: 
             value={answers[field.id]}
             otherText={answers[`${field.id}::other`] ?? ''}
             error={errors[field.id]}
-            disabled={submitting}
+            disabled={submitting || !!locked}
             accent={accent}
             options={optionLists[field.id] || []}
             upload={uploads[field.id]}
@@ -1361,7 +1460,7 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey }: 
           </button>
         )}
         <div className="flex gap-3">
-          {safeIdx > 0 && (
+          {safeIdx > 0 && !noGoingBack && (
             <button type="button" onClick={() => goTo(safeIdx - 1)} disabled={submitting}
               className="min-h-12 rounded-lg border border-slate-400 bg-white px-6 text-sm font-semibold text-slate-800 hover:bg-slate-50">
               Back

@@ -103,7 +103,8 @@ export const publicFormSubmitLimiter = isDev
   : rateLimit({
       store: store('form-submit'),
       windowMs: 15 * 60 * 1000,
-      max: 60,
+      // A whole lab or campus can sit behind one address: raise this (FORM_SUBMIT_MAX) before a big exam.
+      max: Number(process.env.FORM_SUBMIT_MAX) > 0 ? Number(process.env.FORM_SUBMIT_MAX) : 60,
       standardHeaders: true,
       legacyHeaders: false,
       message: { error: 'Too many form submissions from this network. Please wait and try again.' },

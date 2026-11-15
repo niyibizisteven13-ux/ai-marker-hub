@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import FormResponses from '../components/FormResponses';
+import ExamMonitor from '../components/ExamMonitor';
 import { AlertTriangle, ArrowLeft, CircleCheck, Download, Loader2 } from 'lucide-react';
 import FormBuilder from '../components/FormBuilder';
 import AskBwengeDrawer from '../components/AskBwengeDrawer';
@@ -186,6 +187,8 @@ export default function FormStudioPage({ formId, onBack }: { formId: string; onB
             {data.form.open && <a href={data.links.fill} target="_blank" rel="noreferrer" className="rounded-xl border border-[#DADCE0] bg-white px-3.5 py-2 text-sm font-medium hover:bg-[#F8F9FA]">Open the form</a>}
             <span className="text-xs text-[#5F6368]">For the HTML report and the Excel file with the data dictionary, ask Bwenge.</span>
           </section>
+
+          {data.form.schema?.exam?.enabled && <ExamMonitor formId={formId} />}
 
           {data.responses === 0
             ? <p className="rounded-2xl border border-dashed border-[#DADCE0] bg-white p-6 text-center text-sm text-[#5F6368]">No responses yet. {data.form.open ? 'Share the form link to start collecting.' : 'Publish the form to start collecting.'}</p>

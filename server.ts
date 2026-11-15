@@ -43,6 +43,11 @@ import { examChat, overnightJobQueue, startEducationRuntime } from './server/ser
 import { examsRouter } from './server/routes/examRoutes.js';
 import { createAssignmentsRouter, createPublicAssignmentsRouter } from './server/routes/assignmentRoutes.js';
 import { createCoursesRouter } from './server/routes/courseRoutes.js';
+import { createPublicFormExamRouter, createOwnerFormExamRouter } from './server/routes/formExamRoutes.js';
+import { formExamService } from './server/services/formExam/runtime.js';
+import { ExamError } from './server/services/formExam/service.js';
+import { normalizeExam } from './shared/examRules.js';
+import { applyPool } from './shared/formPool.js';
 import { createStorageRouter } from './server/routes/storageRoutes.js';
 import { StorageFullError, ensureStorage } from './server/services/billing/storage.js';
 import { gradeQuiz } from './server/services/forms/quiz.js';
@@ -420,6 +425,9 @@ app.use('/api/assignments/public', createPublicAssignmentsRouter());
 app.use('/api/assignments', requireAuth, createAssignmentsRouter());
 // Courses: the lecturer's named classes (roster, accommodations, tasks and quizzes, dashboard).
 app.use('/api/courses', requireAuth, createCoursesRouter());
+// Timed tests: students (the form link) and the lecturer who watches them.
+app.use('/api/form-exams/public', createPublicFormExamRouter());
+app.use('/api/form-exams', requireAuth, createOwnerFormExamRouter());
 app.use('/api/storage', requireAuth, createStorageRouter());
 app.use('/api/outputs/shared', sharedOutputsRouter);
 app.use('/api/outputs', requireAuth, outputsRouter);
@@ -2052,17 +2060,46 @@ app.post('/api/forms/:id/submit', publicFormSubmitLimiter, async (req, res) => {
       }
       normalized._respondentEmail = respondentEmail.trim().toLowerCase();
     }
+    // A timed test only takes a response from a started session (its secret), and only while its time allows.
+    let examInfo: { studentId: string; studentName: string; timeUp: boolean } | null = null;
+    let examSessionId = '';
+    if (normalizeExam(schema.exam).enabled) {
+      const ref = (answers as any)._exam;
+      try {
+        examInfo = await formExamService().checkSubmit(ref?.sid, ref?.token, form.id);
+        examSessionId = String(ref.sid);
+      } catch (e) {
+        if (e instanceof ExamError) return res.status(e.status).json({ code: e.code, error: e.message });
+        throw e;
+      }
+    }
+    // When the time ran out the page sends what it has: required questions are not required any more.
+    const relaxed = (list: any) => (Array.isArray(list) ? list.map((q: any) => ({ ...q, required: false })) : list);
+    const checkedSchema = examInfo?.timeUp ? { ...schema, fields: relaxed(schema.fields), questions: relaxed(schema.questions) } : schema;
+    // Question pools: the draw depends only on the seed (the test session for a timed test), so the server repeats
+    // it and only the questions this student was given are checked and marked.
+    const poolSeed = examSessionId || String((answers as any)._pool?.seed ?? '').slice(0, 64);
+    const hasPools = !!schema.poolPicks && Object.keys(schema.poolPicks).length > 0;
+    if (hasPools && !poolSeed) return res.status(400).json({ error: 'Reload the page and try again.' });
+    const given = hasPools ? applyPool(checkedSchema, poolSeed) : checkedSchema;
     // Checked again on the server against the form's own definition, including which questions branching showed.
-    const checked = validateSubmission(schema, answers as Record<string, unknown>);
+    const checked = validateSubmission(given, answers as Record<string, unknown>);
     if ('error' in checked) return res.status(400).json({ error: checked.error, fieldId: checked.fieldId });
     Object.assign(normalized, checked.values);
-    if (!Object.keys(checked.values).length) return res.status(400).json({ error: 'Answer at least one question before submitting.' });
+    if (examInfo) normalized._exam = { sessionId: examSessionId, studentId: examInfo.studentId, studentName: examInfo.studentName, timeUp: examInfo.timeUp };
+    if (!Object.keys(checked.values).length && !examInfo?.timeUp) return res.status(400).json({ error: 'Answer at least one question before submitting.' });
     // Quizzes are marked against the answer key at once; the score is kept with the response for Results and the gradebook.
-    const quiz = gradeQuiz(schema, checked.values as Record<string, unknown>);
+    const quiz = gradeQuiz(given, checked.values as Record<string, unknown>);
+    if (hasPools) normalized._pool = { seed: poolSeed };
+    // Which device and (pseudonymised) network the response came from: the lecturer can see two students on one device.
+    const deviceId = String((answers as any)._device ?? '');
+    if (/^[\w-]{8,64}$/.test(deviceId) && (schema.isQuiz || schema.exam?.enabled)) {
+      normalized._device = { id: deviceId, net: crypto.createHmac('sha256', process.env.JWT_SECRET || 'dev-secret').update(String(req.ip || '')).digest('hex').slice(0, 12) };
+    }
     if (quiz) normalized._quiz = { score: quiz.score, maxScore: quiz.maxScore, percent: quiz.percent, correct: quiz.items.filter((x) => x.correct).map((x) => x.id) };
     // Integrity signals (pasting, leaving the page, typing): kept for the lecturer to review, never used to change a mark.
     if (schema.isQuiz || schema.blockPaste || schema.trackIntegrity) {
-      const all = normalizeFields(schema);
+      const all = normalizeFields(given);
       const report = sanitizeReport((answers as any)._integrity, new Set(all.map((f) => f.id)));
       const flags = integrityFlags(report, {
         labels: Object.fromEntries(all.map((f) => [f.id, f.label])),
@@ -2073,6 +2110,11 @@ app.post('/api/forms/:id/submit', publicFormSubmitLimiter, async (req, res) => {
     }
     const formVersion = await ensureVersion(form.id, schema).catch(() => null);
     const submission = await prisma.formSubmission.create({ data: { formId: form.id, data: JSON.stringify(normalized), formVersion } as any });
+    if (examInfo) {
+      // The session is closed, and the response keeps how the test went (time used, camera and page events).
+      const summary = await formExamService().markSubmitted(examSessionId).catch((e) => { logger.warn('Exam session could not be closed', { errorType: (e as Error)?.name }); return null; });
+      if (summary) await prisma.formSubmission.update({ where: { id: submission.id }, data: { data: JSON.stringify({ ...normalized, _exam: { ...(normalized._exam as object), ...summary } }) } as any }).catch(() => undefined);
+    }
     const confirmationMessage = schema.confirmationMessage || 'Your response has been recorded.';
     const confirmationTitle = typeof schema.confirmationTitle === 'string' && schema.confirmationTitle.trim() ? schema.confirmationTitle.trim() : undefined;
     if (quiz) {
