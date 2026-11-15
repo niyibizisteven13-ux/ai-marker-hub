@@ -39,7 +39,7 @@ app.get('/metrics', async (req, res) => {
 
 // The exam site: EVERY request under /exam/:id goes through the guard first.
 // Only real UUIDs are exam routes; anything else under /exam is a 404 (never "let through").
-app.get('/exam/:examId([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})', (req, res, next) => (req.originalUrl.split('?')[0].endsWith('/') ? next() : res.redirect(301, `${req.baseUrl}/exam/${req.params.examId}/`)));
+app.get('/exam/:examId([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})', (req, res, next) => (req.originalUrl.split('?')[0].endsWith('/') ? next() : res.redirect(301, `${config.basePath}/exam/${req.params.examId}/`)));
 app.use('/exam/:examId([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})', mySebGuard((req) => req.params.examId), examRouter);
 
 process.on('unhandledRejection', (e) => console.error('unhandledRejection', e));   // one bad request must never take the exam server down
@@ -48,18 +48,19 @@ app.use('/api', (_req, res) => res.status(404).json({ error: 'not found' }));
 
 app.get('/join/:code', (req, res) => {
   const code = /^\d{6}$/.test(req.params.code) ? req.params.code : '';
+  const dl = /^https:\/\/[^\s"'<>]+$/.test(process.env.MYSEB_DL_PAGE || '') ? process.env.MYSEB_DL_PAGE : '';
   res.set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'").type('html').send(
     `<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Join exam</title>
 <body style="font-family:system-ui;text-align:center;padding:32px"><h2>Open MySEB</h2><p>Your exam code is</p>
 <p style="font-size:34px;letter-spacing:4px;font-weight:700">${code || '—'}</p>
 <p><a href="myseb://join?code=${code}&api=${encodeURIComponent(config.publicUrl)}" style="font-size:18px">Open in the MySEB app</a></p>
-<p style="color:#666">Exams cannot be taken in the browser. Install MySEB, then enter the code.</p>`);
+<p style="color:#666">Exams cannot be taken in the browser. Install MySEB, then enter the code.</p>${dl ? `<p><a href="${dl}" style="font-size:18px">Download MySEB</a></p>` : ''}`);
 });
 
 if (config.dashboardEnabled) app.use('/dashboard', express.static(path.join(here, '../public/dashboard'), {
   setHeaders: (res) => res.set('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'"),
 }));
-app.get('/', (_req, res) => (config.dashboardEnabled ? res.redirect(`${_req.baseUrl}/dashboard/`) : res.json({ name: 'MySEB', ok: true })));
+app.get('/', (_req, res) => (config.dashboardEnabled ? res.redirect(`${config.basePath}/dashboard/`) : res.json({ name: 'MySEB', ok: true })));
 
 app.use((err, _req, res, _next) => { console.error(err); res.status(500).json({ error: 'server error' }); });
 
@@ -70,7 +71,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   // Retention: once at start, then every hour.
   const purge = () => purgeOld().then((r) => { if (r.sessions || r.exams) console.log(`retention: removed ${r.sessions} finished students and ${r.exams} old exams (older than ${config.retentionDays} days)`); }).catch((e) => console.error('purge', e));
   purge(); setInterval(purge, 3_600_000).unref();
-  const server = app.listen(config.port, '0.0.0.0', () => console.log(`MySEB backend on :${config.port}${config.dashboardEnabled ? `  dashboard: ${config.publicUrl}/dashboard/` : '  (standalone dashboard off)'}`));
+  const server = app.listen(config.port, process.env.HOST || '0.0.0.0', () => console.log(`MySEB backend on :${config.port}${config.dashboardEnabled ? `  dashboard: ${config.publicUrl}/dashboard/` : '  (standalone dashboard off)'}`));
   // Graceful stop (deploys, restarts): stop taking new work, let short requests finish, drop waiting long-polls after 3 s.
   let stopping = false;
   const stop = (sig) => {

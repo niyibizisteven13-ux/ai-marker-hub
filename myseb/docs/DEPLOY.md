@@ -2,7 +2,9 @@
 
 ## Easiest: inside the existing bwenge server (nothing new to set up)
 If `MYSEB_URL` is **not** set, bwenge runs MySEB itself under `https://<your site>/myseb`, in the same process and the same PostgreSQL database (its own tables). Secrets are derived from `JWT_SECRET`, so there is nothing to configure: deploy, open the live room, get a code. Set `APP_URL` to your public address if you can. Build the apps with `apiBase` = `https://<your site>/myseb`. Set `MYSEB_EMBED=0` to turn this off.
-This suits a school or a few hundred students at a time. Live video for many students is better on its own machine (below), which also needs TURN for students behind strict networks.
+MySEB runs as its own process on the same machine (its own CPU core and event loop), and `/myseb` is passed through to it, so a crowd of students cannot slow the website. If it crashes it restarts by itself.
+Measured with `node myseb/scripts/loadtest.mjs <url> <teacherKey> <students>` on a 4-core test machine that also ran the load generator, with students sending heartbeats and a lecturer watching the room: 2,000 students: heartbeat p95 6 ms, 4,000: p95 12 ms, 8,000: p95 262 ms and the site page p95 120 ms, zero errors in all. That does not include live camera pictures or video set-up, so plan for about 2,000 at once on one machine until you have run the test on your own server.
+This suits a school or a few thousand students at a time. Live video for many students is better on its own machine (below), which also needs TURN for students behind strict networks.
 
 ## Separate server (bigger exams, live video)
 
@@ -32,3 +34,8 @@ Build the apps pointing at `https://<MYSEB_DOMAIN>` (desktop `config.json` `apiB
 | More than one server | Not yet: live-room pictures and video set-up live in one server's memory. Run one MySEB server (tested to 3,000 simultaneous students on one 4-core machine) |
 
 The compose file passes `docker compose config`. The image itself was not built or run in the build environment (no Docker daemon): do a first start on a test machine.
+
+## Getting the apps to students
+Actions tab → **Build MySEB apps** → Run workflow (the address defaults to `https://www.bwenge.space/myseb`). It builds the Windows installer, macOS dmg, Linux AppImage and Android APK, and attaches them to the run. Push a tag such as `myseb-v1.0.0` to also publish them as a GitHub Release.
+Then set `MYSEB_DL_PAGE` (a https link to where students download, for example the release page) so the code page shows a **Download MySEB** button.
+The Windows and Mac installers are not code-signed, so Windows SmartScreen and macOS Gatekeeper warn students once ("More info → Run anyway"). Signing needs a paid certificate. The Android APK is sideloaded (students allow "install from this source"); the Play Store needs a developer account.
