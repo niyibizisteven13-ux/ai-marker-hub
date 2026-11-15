@@ -16,6 +16,8 @@ export const config = {
   pepper: need('PEPPER', 'dev-pepper-not-for-production'),
   heartbeatTimeoutSeconds: Number(process.env.HEARTBEAT_TIMEOUT_SECONDS || 20),
   codeTtlHours: Number(process.env.CODE_TTL_HOURS || 12),
+  retentionDays: Number(process.env.RETENTION_DAYS || 90),
+  dashboardEnabled: process.env.DISABLE_DASHBOARD !== '1',
   isProd,
 };
 

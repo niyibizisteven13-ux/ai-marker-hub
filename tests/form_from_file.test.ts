@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { FromFileError, MAX_MATERIAL_CHARS, buildPrompt, draftQuiz, normalizeOptions, quoteInSource, validateDraft } from '../server/services/forms/fromFile.js';
-import { gradeQuiz } from '../server/services/forms/quiz.js';
+import { explanationOf, gradeQuiz } from '../server/services/forms/quiz.js';
 import { checkDefinition } from '../server/services/forms/validation.js';
 import { normalizeFields } from '../server/services/forms/model.js';
 
@@ -117,4 +117,20 @@ test('the whole job: too little text, an AI failure and an unusable answer give 
   const seen: string[] = [];
   const big = await draftQuiz({ text: NOTES + ' filler'.repeat(MAX_MATERIAL_CHARS / 6), fileName: 'big.pdf', options: { kinds: ['choice', 'multi', 'truefalse', 'short', 'long'] }, ai: { json: async (_s, u) => { seen.push(u); return GOOD; } } });
   assert.equal(big.review.truncated, true); assert.ok(big.review.usedChars <= MAX_MATERIAL_CHARS); assert.ok(seen[0].length < MAX_MATERIAL_CHARS + 2000);
+});
+
+test('explanations: kept from the model (trimmed, bounded), never on long answers, and reachable only through explanationOf', () => {
+  const made = { questions: [
+    { type: 'choice', question: 'Which gas do plants absorb?', options: ['Oxygen', 'Carbon dioxide'], answer: 'Carbon dioxide', explanation: '  Plants take in   carbon dioxide through their stomata.  ', sourceQuote: 'Plants absorb carbon dioxide through small pores called stomata' },
+    { type: 'short', question: 'Which pigment makes leaves green?', answer: 'chlorophyll', explanation: 'x'.repeat(900), sourceQuote: 'contain the green pigment chlorophyll' },
+    { type: 'long', question: 'Explain how respiration differs from photosynthesis.', explanation: 'A model answer must never end up where students can read it.', sourceQuote: 'Respiration is the opposite process' },
+  ] };
+  const { schema } = validateDraft(made, NOTES, opts, meta);
+  assert.equal(schema.fields[2].explanation, 'Plants take in carbon dioxide through their stomata.');
+  assert.equal(schema.fields[3].explanation.length, 400);
+  assert.equal(schema.fields[4].explanation, undefined, 'a long answer gets no explanation');
+  assert.equal(explanationOf(schema, 'q1'), 'Plants take in carbon dioxide through their stomata.');
+  assert.equal(explanationOf(schema, 'q3'), undefined); assert.equal(explanationOf(schema, 'nope'), undefined); assert.equal(explanationOf(null, 'q1'), undefined);
+  assert.equal(explanationOf({ fields: [{ id: 'a', explanation: '   ' }] }, 'a'), undefined, 'blank means none');
+  assert.equal(explanationOf({ questions: [{ number: 2, explanation: 'old shape' }] }, '2'), 'old shape', 'forms made by the older builder work too');
 });

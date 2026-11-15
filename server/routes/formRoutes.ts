@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { normalizeBranding } from '../../shared/formBranding.js';
 import { keepMysebLink, normalizeExam } from '../../shared/examRules.js';
+import { NotAQuizError, quizWorkbook } from '../services/forms/resultsWorkbook.js';
 import { normalizePicks } from '../../shared/formPool.js';
 
 /** Test-design settings the creator chooses: one question at a time, no going back, a timer per question, no copying, question pools. */
@@ -473,6 +474,27 @@ router.patch('/:id/settings', requireAuth, async (req, res) => {
   } catch (error: any) {
     logger.error('Failed to update form response settings', error);
     res.status(500).json({ error: 'Failed to update form settings.' });
+  }
+});
+
+/** A quiz's marks as an Excel file: results per student and question, how the class did on each question, and a summary. */
+router.get('/:id/results/export.xlsx', requireAuth, async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId || (req as any).teacher?.teacherId;
+    const form = await prisma.applicationForm.findUnique({ where: { id: req.params.id } });
+    if (!form) return res.status(404).json({ error: 'Form not found.' });
+    if (!userId || form.userId !== userId) return res.status(403).json({ error: 'You do not have access to this form.' });
+    let schema: any = {}; try { schema = JSON.parse(form.schema || '{}'); } catch { schema = {}; }
+    const submissions = await prisma.formSubmission.findMany({ where: { formId: form.id }, orderBy: { createdAt: 'asc' } });
+    const file = await quizWorkbook({ title: String(schema.title || form.title || 'Quiz'), schema, submissions });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${file.name.replace(/[^\x20-\x7e]/g, '_').replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(file.name)}`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.end(file.data);
+  } catch (error: any) {
+    if (error instanceof NotAQuizError) return res.status(409).json({ error: 'Marks can only be exported for a quiz. Turn on "Make this a quiz" and give the questions points and answers.' });
+    logger.error('Failed to export quiz marks', { errorType: error?.name });
+    res.status(500).json({ error: 'Failed to export the marks.' });
   }
 });
 

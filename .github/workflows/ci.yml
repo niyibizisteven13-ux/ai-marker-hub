@@ -62,6 +62,17 @@ jobs:
       - name: Tests
         run: node --test --test-reporter=spec --import tsx tests/*.test.ts
 
+      # MySEB (secure exam app) server: end-to-end tests against a real PostgreSQL, in their own database.
+      - name: MySEB server tests
+        env:
+          PGPASSWORD: ci-only-password
+          DATABASE_URL: postgresql://bwenge:ci-only-password@127.0.0.1:5432/myseb_ci
+        run: |
+          psql -h 127.0.0.1 -U bwenge -d bwenge -c 'CREATE DATABASE myseb_ci'
+          cd myseb/backend
+          npm ci
+          npm test
+
       - name: Database schema from an empty PostgreSQL
         env:
           DATABASE_URL: ${{ env.CI_DATABASE_URL }}

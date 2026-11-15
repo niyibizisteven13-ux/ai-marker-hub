@@ -40,6 +40,13 @@ const mean = (xs: number[]) => (xs.length ? round1(xs.reduce((a, b) => a + b, 0)
 const NAME_FIELD = /\b(full\s*name|name|names|student|izina|amazina|nom|pr[ée]nom)\b/i;
 const ID_FIELD = /\b(student\s*id|reg(istration)?\s*(no|number)?|index\s*(no|number)|matricule|id)\b/i;
 
+/** The "name" and "registration number" questions of a form, found by their wording (also used by results exports and transcripts). */
+export function identityFields(fields: any[]) {
+  const nameField = fields.find((q) => NAME_FIELD.test(String(q.label ?? q.title ?? '')) && !ID_FIELD.test(String(q.label ?? q.title ?? '')));
+  const idField = fields.find((q) => ID_FIELD.test(String(q.label ?? q.title ?? '')) && !NAME_FIELD.test(String(q.label ?? q.title ?? '').replace(/student/i, '')));
+  return { nameField, idField };
+}
+
 async function ownedClass(ownerId: string, classId: string) {
   const cls = await db.classroom.findFirst({ where: { id: classId, ownerId } });
   if (!cls) throw new LearnError('NOT_FOUND', 'Class not found.');
@@ -93,8 +100,7 @@ export async function buildGradebook(ownerId: string, classId: string): Promise<
       const hit = forms.find(({ f }) => f.id === item.id);
       if (!hit) continue;
       const fields: any[] = Array.isArray(hit.s.fields) ? hit.s.fields : Array.isArray(hit.s.questions) ? hit.s.questions : [];
-      const nameField = fields.find((q) => NAME_FIELD.test(String(q.label ?? q.title ?? '')) && !ID_FIELD.test(String(q.label ?? q.title ?? '')));
-      const idField = fields.find((q) => ID_FIELD.test(String(q.label ?? q.title ?? '')) && !NAME_FIELD.test(String(q.label ?? q.title ?? '').replace(/student/i, '')));
+      const { nameField, idField } = identityFields(fields);
       const subs = await db.formSubmission.findMany({ where: { formId: item.id }, orderBy: { createdAt: 'asc' } }).catch(() => []);
       for (const sub of subs) {
         let data: any = {};

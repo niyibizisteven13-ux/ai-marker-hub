@@ -34,8 +34,9 @@ server-output*.txt
 output.log
 startup_log.txt
 
-# Orphaned compiled root file (real server is in dist/)
-server.js
+# Orphaned compiled root file (real server is in dist/). Anchored to the repo root: a bare `server.js` also hid
+# myseb/backend/src/server.js, the MySEB server's main file, from git.
+/server.js
 
 # Upload storage (runtime files — should live in cloud storage)
 uploads/

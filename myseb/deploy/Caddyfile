@@ -1,0 +1,4 @@
+{$MYSEB_DOMAIN} {
+	encode gzip
+	reverse_proxy myseb:4000
+}

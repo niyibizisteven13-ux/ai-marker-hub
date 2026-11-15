@@ -272,6 +272,13 @@ export async function lecturerSignalPush(load: TargetLoader, sid: string, msg: u
   return mysebFetch(`/sessions/${sid}/to-student`, { method: 'POST', body: { msg } });
 }
 
+/** The full record of the test (summary per student and a timeline), for the lecturer and for appeals. */
+export async function report(load: TargetLoader) {
+  const t = await load();
+  if (!t.mysebExamId) throw new MySebError('Nobody has joined yet, so there is nothing to report.', 404, 'NOT_FOUND');
+  return mysebFetch(`/exams/${t.mysebExamId}/report`, { timeoutMs: 20000 });
+}
+
 export async function violations(load: TargetLoader, sid: string) {
   await ownStudent(load, sid);
   return mysebFetch(`/sessions/${sid}/violations`);

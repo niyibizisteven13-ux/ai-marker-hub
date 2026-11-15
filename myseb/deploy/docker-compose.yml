@@ -1,0 +1,44 @@
+# MySEB server + PostgreSQL + (optional) coturn for live video, behind Caddy for HTTPS.
+# 1. Copy deploy/.env.example to deploy/.env and fill it in.   2. docker compose --env-file .env up -d
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment: { POSTGRES_USER: myseb, POSTGRES_PASSWORD: "${DB_PASSWORD}", POSTGRES_DB: myseb }
+    volumes: [dbdata:/var/lib/postgresql/data]
+    healthcheck: { test: ["CMD", "pg_isready", "-U", "myseb"], interval: 5s, timeout: 3s, retries: 20 }
+
+  myseb:
+    build: ../backend
+    restart: unless-stopped
+    depends_on: { db: { condition: service_healthy } }
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: "postgres://myseb:${DB_PASSWORD}@db:5432/myseb"
+      PUBLIC_URL: "https://${MYSEB_DOMAIN}"
+      TEACHER_KEY: "${TEACHER_KEY}"        # bwenge's MYSEB_SERVICE_KEY must be the same value
+      PEPPER: "${PEPPER}"
+      TRUST_PROXY: "1"
+      DISABLE_DASHBOARD: "1"               # bwenge is the lecturer screen
+      RETENTION_DAYS: "90"
+    expose: ["4000"]
+
+  caddy:                                    # HTTPS certificates are automatic
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes: ["./Caddyfile:/etc/caddy/Caddyfile:ro", caddydata:/data]
+    environment: { MYSEB_DOMAIN: "${MYSEB_DOMAIN}" }
+    depends_on: [myseb]
+
+  coturn:                                   # relays live video for students behind strict firewalls
+    image: coturn/coturn:4.6
+    restart: unless-stopped
+    network_mode: host
+    command: >
+      -n --realm=${MYSEB_DOMAIN} --use-auth-secret --static-auth-secret=${TURN_SECRET}
+      --listening-port=3478 --min-port=49160 --max-port=49200 --fingerprint --no-cli --no-multicast-peers
+      --denied-peer-ip=10.0.0.0-10.255.255.255 --denied-peer-ip=172.16.0.0-172.31.255.255 --denied-peer-ip=192.168.0.0-192.168.255.255
+
+volumes: { dbdata: {}, caddydata: {} }

@@ -2,7 +2,7 @@ import express from 'express';
 import QRCode from 'qrcode';
 import { q } from './db.js';
 import { config, safeEqual } from './config.js';
-import { newCode, parseCode, codeHash, secretHash, tokenHash, newToken, newSecret, rateLimit } from './security.js';
+import { newCode, parseCode, codeHash, secretHash, tokenHash, newToken, newSecret, rateLimit, failureGate } from './security.js';
 import { authSession, recordViolation, VIOLATION_TYPES } from './sessions.js';
 import { cleanSignal, dropSignals, forgetAllLive, forgetLive, getLive, pullSignal, pushSignal, saveLive } from './live.js';
 
@@ -115,6 +115,19 @@ api.get('/exams/:id/monitor', requireTeacher, wrap(async (req, res) => {
   res.json({ exam: { id: ex.id, title: ex.title, status: ex.status, live_faces: ex.live_faces, live_mode: ex.live_mode, live_sound: ex.live_sound, leave_action: ex.leave_action }, counts, students });
 }));
 
+/** Everything that happened in an exam, for the lecturer's records and for appeals. Never contains pictures or video. */
+api.get('/exams/:id/report', requireTeacher, wrap(async (req, res) => {
+  if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
+  const ex = (await q('SELECT id, title, status, leave_action, live_mode, created_at, ends_at FROM exams WHERE id=$1', [req.params.id])).rows[0];
+  if (!ex) return res.status(404).json({ error: 'not found' });
+  const students = (await q(
+    `SELECT id, student_name, status, client_type, platform, started_at, deadline_at, ended_at, end_reason, violation_count
+       FROM exam_sessions WHERE exam_id=$1 ORDER BY student_name, started_at`, [req.params.id])).rows;
+  const events = (await q(
+    `SELECT v.session_id, v.type, v.detail, v.created_at FROM violations v WHERE v.exam_id=$1 ORDER BY v.created_at, v.id LIMIT 20000`, [req.params.id])).rows;
+  res.json({ exam: ex, students, events });
+}));
+
 /** Camera pictures for some students only (the tiles on screen), so a big room does not send every picture every few seconds. */
 api.get('/exams/:id/frames', requireTeacher, wrap(async (req, res) => {
   if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
@@ -204,17 +217,21 @@ api.get('/exams/:id/from-students', requireTeacher, wrap(async (req, res) => {
 }));
 
 /* ---------------------------------------------------------------- student apps */
-// 6-digit codes can be guessed, so: 10 tries a minute per IP, and 200 a minute overall.
+// 6-digit codes can be guessed, so wrong tries are limited: 20 a minute per address and 600 a minute overall. Right codes are
+// NOT counted, so a class of hundreds (or a whole lab behind one school network) can all join at the same moment.
+const perIp = failureGate({ windowMs: 60_000, max: Number(process.env.VERIFY_FAILS_PER_IP_PER_MIN || process.env.VERIFY_RATE_PER_MIN || 20) });
+const overall = failureGate({ windowMs: 60_000, max: Number(process.env.VERIFY_FAILS_PER_MIN || 600), keyFn: () => 'all' });
 api.post('/verify-code',
-  rateLimit({ windowMs: 60_000, max: Number(process.env.VERIFY_RATE_PER_MIN || 10) }),
-  rateLimit({ windowMs: 60_000, max: 200, keyFn: () => 'global' }),
   wrap(async (req, res) => {
+    const wait = Math.max(perIp.blocked(req), overall.blocked(req));
+    if (wait) { res.set('Retry-After', String(wait)); return res.status(429).json({ error: 'Too many wrong codes. Wait a minute and try again.' }); }
+    const bad = (status, error) => { perIp.fail(req); overall.fail(req); return res.status(status).json({ error }); };
     const b = req.body || {};
     const digits = parseCode(b.code);
     const name = str(b.studentName, 80);
     const deviceId = str(b.deviceId, 100);
     const clientType = ['desktop', 'mobile', 'extension'].includes(b.clientType) ? b.clientType : null;
-    if (!digits) return res.status(400).json({ error: 'That code is not valid. Check it and try again.' });
+    if (!digits) return bad(400, 'That code is not valid. Check it and try again.');
     if (!name) return res.status(400).json({ error: 'Enter your name' });
     if (!clientType || deviceId.length < 8) return res.status(400).json({ error: 'Unsupported client' });
 
@@ -223,7 +240,7 @@ api.post('/verify-code',
          FROM exam_codes c JOIN exams e ON e.id=c.exam_id WHERE c.code_hash=$1`, [codeHash(digits)]);
     const row = rows[0];
     if (!row || row.revoked_at || new Date(row.expires_at) < new Date() || row.status !== 'active')
-      return res.status(404).json({ error: 'That code is not valid or has expired.' });
+      return bad(404, 'That code is not valid or has expired.');
     if (row.require_myseb && clientType === 'extension' && !row.allow_extension)
       return res.status(403).json({ error: 'This exam needs the MySEB app (the browser extension is not allowed).' });
 

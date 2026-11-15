@@ -55,7 +55,7 @@ import { normalizeExam } from './shared/examRules.js';
 import { applyPool } from './shared/formPool.js';
 import { createStorageRouter } from './server/routes/storageRoutes.js';
 import { StorageFullError, ensureStorage } from './server/services/billing/storage.js';
-import { gradeQuiz } from './server/services/forms/quiz.js';
+import { explanationOf, gradeQuiz } from './server/services/forms/quiz.js';
 import { uploadLimitBytes, uploadTooLargeMessage } from './server/services/billing/plans.js';
 import { outputsRouter, sharedOutputsRouter } from './server/routes/outputRoutes.js';
 import { curationViewRouter, knowledgeAdminRouter, knowledgeSourcesRouter } from './server/routes/knowledgeRepositoryRoutes.js';
@@ -1999,7 +1999,7 @@ ${augmentedQuery}`;
 const sanitizePublicFormSchema = (value: any): any => {
   const privateKeys = new Set([
     'answer', 'answerkey', 'correct', 'correctanswer', 'correctanswers', 'expectedanswer', 'modelanswer',
-    'rubric', 'scoringrubric', 'selectionsettings', 'requirements', 'solution', 'mysebexamid', 'importreview',
+    'rubric', 'scoringrubric', 'selectionsettings', 'requirements', 'solution', 'mysebexamid', 'importreview', 'explanation',
     // Safe Exam Browser keys: anyone who knew one could fake the header.
     'sebkeys',
   ]);
@@ -2171,7 +2171,7 @@ app.post('/api/forms/:id/submit', publicFormSubmitLimiter, async (req, res) => {
           scoreLabel: 'Your score',
           feedback: quiz.percent >= 80 ? 'Excellent work!' : quiz.percent >= 50 ? 'Good effort. Review the questions you missed.' : 'Keep practising. Review the questions you missed.',
         } : {}),
-        ...(schema.quizShowAnswers !== false ? { results: quiz.items.map((x) => ({ id: x.id, correct: x.correct, points: x.earned, maxPoints: x.points, yourAnswer: x.given, correctAnswer: x.correctAnswer })) } : {}),
+        ...(schema.quizShowAnswers !== false ? { results: quiz.items.map((x) => ({ id: x.id, correct: x.correct, points: x.earned, maxPoints: x.points, yourAnswer: x.given, correctAnswer: x.correctAnswer, ...(explanationOf(schema, x.id) ? { explanation: explanationOf(schema, x.id) } : {}) })) } : {}),
       });
       return;
     }

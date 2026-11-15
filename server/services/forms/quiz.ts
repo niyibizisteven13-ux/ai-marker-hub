@@ -47,3 +47,13 @@ export function gradeQuiz(schema: any, values: Record<string, unknown>): QuizRes
   const score = items.reduce((a, x) => a + x.earned, 0);
   return { score, maxScore, percent: maxScore ? Math.round((score / maxScore) * 1000) / 10 : 0, items };
 }
+
+/**
+ * The lecturer's explanation for a question ("why the answer is right"). It is on the private list of the public form, so a
+ * student can read it only through their own results after they submit (and only if the lecturer shows answers).
+ */
+export function explanationOf(schema: any, id: string): string | undefined {
+  const list: any[] = Array.isArray(schema?.fields) ? schema.fields : Array.isArray(schema?.questions) ? schema.questions : [];
+  const e = list.find((f, i) => String(f?.id ?? f?.number ?? i + 1) === String(id))?.explanation;
+  return typeof e === 'string' && e.trim() ? e.trim().slice(0, 600) : undefined;
+}

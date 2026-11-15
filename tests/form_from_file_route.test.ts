@@ -72,5 +72,7 @@ test('a lecturer who makes too many in an hour is slowed down; failed uploads do
 
 test('students can never see the review (it is on the private list of the public form route)', () => {
   const src = fs.readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
-  assert.match(src.slice(src.indexOf('const sanitizePublicFormSchema')), /'importreview'/);
+  const list = src.slice(src.indexOf('const sanitizePublicFormSchema'), src.indexOf('const sanitizePublicFormSchema') + 900);
+  assert.match(list, /'importreview'/); assert.match(list, /'explanation'/, 'an explanation is hidden from the public form until the student has submitted');
+  assert.match(src, /explanationOf\(schema, x\.id\)/, 'and is sent only inside the student\'s own results');
 });

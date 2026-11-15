@@ -153,6 +153,13 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
   useEffect(() => { document.title = 'Live room · Bwenge'; refresh(); const t = setInterval(refresh, 4000); return () => clearInterval(t); }, [refresh]);
 
   const act = async (fn: () => Promise<unknown>) => { setBusy(true); try { await fn(); refresh(); } catch (e) { setErr(e instanceof Error ? e.message : 'Something went wrong.'); } finally { setBusy(false); } };
+  const downloadReport = () => act(async () => {
+    const r = await authFetch(`${base}/report.xlsx`);
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Could not make the report.');
+    const url = URL.createObjectURL(await r.blob());
+    const a = document.createElement('a'); a.href = url; a.download = `${room?.exam.title ?? 'Test'} MySEB report.xlsx`; a.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+  });
   const makeCode = () => act(async () => { setCode(await call('/code', 'POST')); setShowCode(true); });
   const students = room?.students ?? [];
   const needs = (s: Student) => s.status === 'PAUSED' || s.status === 'LEFT' || s.live?.camera === 'denied';
@@ -217,6 +224,7 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
           )}
           <span className="flex-1" />
           <button type="button" className={`${btn} ${onlyAttention ? '!bg-amber-100' : ''}`} onClick={() => setOnlyAttention((v) => !v)}>{onlyAttention ? 'Show everyone' : `Needs attention${attention ? ` (${attention})` : ''}`}</button>
+          <button type="button" className={btn} disabled={busy || students.length === 0} title="Who joined, when, and everything the app saw, as an Excel file" onClick={() => void downloadReport()}>Download report (Excel)</button>
           <button type="button" className={`${btn} !border-rose-300 !text-rose-700`} disabled={busy || !open} onClick={() => { if (confirm('End the test for everyone? The code stops working.')) void act(() => call('/end', 'POST')); }}>End test</button>
         </div>
       </header>

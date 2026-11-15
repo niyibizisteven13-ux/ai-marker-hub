@@ -43,3 +43,22 @@ export function rateLimit({ windowMs, max, keyFn = (req) => req.ip }) {
     next();
   };
 }
+
+/**
+ * Counts only FAILED tries. A whole lab of students behind one school network can all enter the right code at once;
+ * only guessing (wrong codes) is slowed down. While an address is over its limit, every try from it is refused,
+ * right or wrong, so a refusal never tells an attacker whether a guess was close.
+ */
+export function failureGate({ windowMs, max, keyFn = (req) => req.ip }) {
+  const hits = new Map();
+  setInterval(() => { const now = Date.now(); for (const [k, v] of hits) if (v.reset < now) hits.delete(k); }, windowMs).unref();
+  const entry = (key) => {
+    const now = Date.now(); let h = hits.get(key);
+    if (!h || h.reset < now) { h = { n: 0, reset: now + windowMs }; hits.set(key, h); }
+    return h;
+  };
+  return {
+    blocked: (req) => { const h = entry(keyFn(req)); return h.n >= max ? Math.ceil((h.reset - Date.now()) / 1000) : 0; },   // seconds to wait, 0 = fine
+    fail: (req) => { entry(keyFn(req)).n++; },
+  };
+}
