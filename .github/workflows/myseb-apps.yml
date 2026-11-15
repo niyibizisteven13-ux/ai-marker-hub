@@ -68,6 +68,53 @@ jobs:
           name: myseb-android
           path: myseb/mobile/build/app/outputs/flutter-apk/MySEB.apk
 
+  # iPhone. Always builds an unsigned copy to prove the app compiles (kept as a download of this run only: an unsigned iPhone app
+  # cannot be installed normally and is never published). If the Apple secrets are set (see myseb/docs/IOS.md), it also signs the app
+  # and sends it to TestFlight. This job does not hold back the other apps' release.
+  ios:
+    runs-on: macos-latest
+    defaults: { run: { working-directory: myseb/mobile } }
+    env:
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable }
+      - run: bash setup.sh
+      - name: Build (unsigned)
+        run: flutter build ios --release --no-codesign --build-number=${{ github.run_number }} --dart-define=MYSEB_API=${{ env.API_BASE }}
+      - name: Keep the unsigned copy of this run
+        run: |
+          mkdir Payload && cp -R build/ios/iphoneos/Runner.app Payload/ && zip -qry MySEB-iphone-unsigned.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: myseb-iphone-unsigned
+          path: myseb/mobile/MySEB-iphone-unsigned.ipa
+      - name: Sign and send to TestFlight
+        if: ${{ env.ASC_KEY_P8 != '' && env.ASC_KEY_ID != '' && env.ASC_ISSUER_ID != '' && env.APPLE_TEAM_ID != '' }}
+        run: |
+          printf '%s' "$ASC_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+          flutter build ios --config-only --release --no-codesign --build-number=${{ github.run_number }} --dart-define=MYSEB_API=${{ env.API_BASE }}
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>$APPLE_TEAM_ID</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>uploadSymbols</key><true/>
+          </dict></plist>
+          EOF
+          AUTH="-allowProvisioningUpdates -authenticationKeyPath $RUNNER_TEMP/AuthKey.p8 -authenticationKeyID $ASC_KEY_ID -authenticationKeyIssuerID $ASC_ISSUER_ID"
+          xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Release -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Runner.xcarchive" DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_STYLE=Automatic $AUTH archive
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/Runner.xcarchive" -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" $AUTH
+          rm -f "$RUNNER_TEMP/AuthKey.p8"
+
   release:
     if: startsWith(github.ref, 'refs/tags/myseb-v') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     needs: [desktop, android]
