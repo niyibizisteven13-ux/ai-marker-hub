@@ -17,6 +17,7 @@ interface SessionView {
   id: string; status: 'running' | 'paused' | 'submitted' | 'ended'; serverNow: number; remainingMs: number; totalMs: number; endsAt: number | null;
   pause: { by: 'student' | 'system' | 'lecturer'; reason: string } | null; camera: 'off' | 'warn' | 'pause'; graceSeconds: number; studentName: string;
   accommodations: { largeText: boolean; voiceAnswers: boolean; breaks: boolean; cameraExempt: boolean; extraTimePercent: number } | null;
+  leaves: number; leaveAction: 'record' | 'warn' | 'pause' | 'end'; maxLeaves: number; requireFullscreen: boolean;
   secret?: string;
 }
 type Props = { schema: any; uploadFile?: React.ComponentProps<typeof DynamicForm>['uploadFile']; onSubmit: (answers: any) => Promise<any> };
@@ -45,6 +46,7 @@ export default function ExamRunner({ schema, uploadFile, onSubmit }: Props) {
   const [watch, setWatch] = useState<WatchState | null>(null);
   const [camError, setCamError] = useState<string | null>(null);
   const [camTry, setCamTry] = useState(0);
+  const [fsOut, setFsOut] = useState(false);
 
   const sess = useRef<{ sid: string; secret: string } | null>(null);
   const offset = useRef(0);
@@ -76,6 +78,8 @@ export default function ExamRunner({ schema, uploadFile, onSubmit }: Props) {
 
   const start = async () => {
     setBusy(true); setError(null);
+    // Full screen has to be asked for from the click that starts the test.
+    if (exam.requireFullscreen) { try { await document.documentElement.requestFullscreen?.(); } catch { /* not available on this browser */ } }
     try {
       const v: SessionView = await call(`/${formId}/start`, { method: 'POST', body: JSON.stringify({ studentId: studentId.trim(), name: name.trim() }) });
       sess.current = { sid: v.id, secret: v.secret! }; store.set(formId, sess.current);
@@ -111,6 +115,15 @@ export default function ExamRunner({ schema, uploadFile, onSubmit }: Props) {
     document.addEventListener('visibilitychange', onVis);
     return () => document.removeEventListener('visibilitychange', onVis);
   }, [phase, sendEvent]);
+
+  // Full screen (when the creator asks for it): leaving it is recorded like leaving the page.
+  useEffect(() => {
+    if (phase !== 'running' || !view?.requireFullscreen || !document.documentElement.requestFullscreen) return;
+    const onChange = () => { const out = !document.fullscreenElement; setFsOut(out); sendEvent(out ? 'fullscreen_exit' : 'fullscreen_back'); };
+    document.addEventListener('fullscreenchange', onChange);
+    setFsOut(!document.fullscreenElement);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, [phase, view?.requireFullscreen, sendEvent]);
 
   // The camera: only while there is a camera rule, and only to see whether a face is in the frame.
   const camera = view?.camera ?? 'off';
@@ -241,10 +254,21 @@ export default function ExamRunner({ schema, uploadFile, onSubmit }: Props) {
         <p role="alert" className="mb-3 flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900"><TriangleAlert size={16} />{FRAME_HELP[watch.status]} The test pauses in {watch.secondsLeft} s.</p>
       )}
       {camera !== 'off' && camError && <p role="alert" className="mb-3 rounded-xl bg-rose-50 p-3 text-sm text-rose-800">{camError} <button type="button" className="font-semibold underline" onClick={() => { setCamError(null); setCamTry((n) => n + 1); }}>Try again</button></p>}
+      {view && view.leaveAction !== 'record' && view.leaves > 0 && (
+        <p role="alert" className="mb-3 flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900"><TriangleAlert size={16} />
+          {view.leaveAction === 'warn' ? `You have left the page or full screen ${view.leaves} time${view.leaves === 1 ? '' : 's'}. Your lecturer will see this.`
+            : `You have left the page or full screen ${view.leaves} of ${view.maxLeaves} allowed times. After that the test ${view.leaveAction === 'pause' ? 'pauses until your lecturer resumes it' : 'ends and your answers are sent'}.`}
+        </p>
+      )}
+      {fsOut && view?.requireFullscreen && document.documentElement.requestFullscreen && (
+        <p role="alert" className="mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">This test needs full screen.
+          <button type="button" onClick={() => void document.documentElement.requestFullscreen().catch(() => undefined)} className="rounded-lg bg-amber-700 px-3 py-1.5 font-semibold text-white">Return to full screen</button></p>
+      )}
       {view?.camera === 'off' && view.accommodations?.cameraExempt && <p className="mb-3 flex items-center gap-2 rounded-xl bg-slate-100 px-4 py-2.5 text-sm text-slate-700"><ShieldCheck size={16} />You are sitting this test without the camera check.</p>}
       <div className="relative">
         <Suspense fallback={null}>
-          <DynamicForm schema={examSchema} uploadFile={uploadFile} onSubmit={submitAnswers} controlRef={controlRef} locked={paused} draftKey={`exam-${formId}`} />
+          <DynamicForm schema={examSchema} uploadFile={uploadFile} onSubmit={submitAnswers} controlRef={controlRef} locked={paused} draftKey={`exam-${formId}`}
+            poolSeed={view?.id} timeFactor={1 + (view?.accommodations?.extraTimePercent ?? 0) / 100} />
         </Suspense>
         {paused && (
           <div role="alertdialog" aria-live="assertive" aria-label="Test paused" className="absolute inset-0 z-20 flex items-start justify-center rounded-2xl bg-white/90 p-6 backdrop-blur-md">
@@ -254,6 +278,7 @@ export default function ExamRunner({ schema, uploadFile, onSubmit }: Props) {
               <p className="text-sm text-slate-700">
                 {reason === 'break' ? 'You are on a break. The clock is stopped.'
                   : reason === 'lecturer' ? 'Your lecturer paused the test. The clock is stopped.'
+                    : reason === 'leave_limit' ? 'You left the page or full screen more times than allowed. The clock is stopped. Your lecturer will decide whether to resume.'
                     : reason === 'face_lost' ? 'Your face left the frame. The clock is stopped. Put your face back in the frame; your lecturer will resume the test.'
                       : reason === 'camera_denied' || reason === 'camera_stopped' ? 'The camera is not working. The clock is stopped. Fix the camera and tell your lecturer.'
                         : 'The clock is stopped. Wait for your lecturer.'}

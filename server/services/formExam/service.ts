@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import type { CameraRule, ExamSettings } from '../../../shared/examRules.js';
+import type { CameraRule, ExamSettings, LeaveAction } from '../../../shared/examRules.js';
 import type { Accommodation } from '../courses/service.js';
 
 /**
@@ -25,6 +25,7 @@ export interface ExamSession {
   usedMs: number; runningSince: number | null;
   status: ExamStatus; pause: PauseInfo | null; endedAt?: number; submittedAt?: number;
   camera: CameraRule; graceSeconds: number;
+  leaveAction: LeaveAction; maxLeaves: number; requireFullscreen: boolean; leaves: number;
   accommodations: Accommodation | null;
   events: ExamEvent[];
   /** The lecturer let this student back in: the next start returns this session with a new secret. */
@@ -35,7 +36,7 @@ export class ExamError extends Error {
   constructor(public code: string, message: string, public status = 400) { super(message); }
 }
 
-const EVENT_TYPES = new Set(['face_lost', 'face_back', 'multiple_faces', 'camera_denied', 'camera_stopped', 'camera_ok', 'tab_hidden', 'tab_back', 'offline', 'online']);
+const EVENT_TYPES = new Set(['fullscreen_exit', 'fullscreen_back', 'face_lost', 'face_back', 'multiple_faces', 'camera_denied', 'camera_stopped', 'camera_ok', 'tab_hidden', 'tab_back', 'offline', 'online']);
 const MAX_EVENTS = 600;
 const SUBMIT_GRACE_MS = 90_000;
 const clean = (s: unknown, max: number) => (typeof s === 'string' ? s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').trim().slice(0, max) : '');
@@ -118,6 +119,7 @@ export function createFormExamService(deps: {
       endsAt: r.status === 'running' ? t + remaining(r, t) : null,
       pause: r.pause ? { by: r.pause.by, reason: r.pause.reason } : null,
       camera: r.camera, graceSeconds: r.graceSeconds, studentName: r.studentName,
+      leaves: r.leaves ?? 0, leaveAction: r.leaveAction ?? 'record', maxLeaves: r.maxLeaves ?? 3, requireFullscreen: !!r.requireFullscreen,
       accommodations: r.accommodations ? { largeText: r.accommodations.largeText, voiceAnswers: r.accommodations.voiceAnswers, breaks: r.accommodations.breaks, cameraExempt: r.accommodations.cameraExempt, extraTimePercent: r.accommodations.extraTimePercent } : null,
     };
   };
@@ -125,7 +127,7 @@ export function createFormExamService(deps: {
   function summary(r: ExamSession) {
     const count = (type: string) => r.events.filter((e) => e.type === type).length;
     const awaySeconds = r.events.filter((e) => e.type === 'face_back').reduce((n, e) => n + (Number(e.detail) || 0), 0);
-    return { faceLost: count('face_lost'), multipleFaces: count('multiple_faces'), cameraProblems: count('camera_denied') + count('camera_stopped'), tabHidden: count('tab_hidden'), pauses: count('paused'), awaySeconds };
+    return { faceLost: count('face_lost'), multipleFaces: count('multiple_faces'), cameraProblems: count('camera_denied') + count('camera_stopped'), tabHidden: count('tab_hidden'), pauses: count('paused'), awaySeconds, leaves: r.leaves ?? 0 };
   }
 
   async function listForm(formId: string): Promise<ExamSession[]> {
@@ -172,6 +174,7 @@ export function createFormExamService(deps: {
         id: randomUUID(), formId, ownerId: form.ownerId, token: randomBytes(24).toString('base64url'),
         studentId, studentName: name, startedAt: t, baseMs, extraMs, usedMs: 0, runningSince: t,
         status: 'running', pause: null, camera: exempt ? 'off' : form.exam.camera, graceSeconds: form.exam.graceSeconds,
+        leaveAction: form.exam.leaveAction, maxLeaves: form.exam.maxLeaves, requireFullscreen: form.exam.requireFullscreen, leaves: 0,
         accommodations: acc, events: [{ t, type: 'started', by: 'student' }],
       };
       if (exempt && form.exam.camera !== 'off') r.events.push({ t, type: 'camera_exempt', by: 'system' });
@@ -205,6 +208,14 @@ export function createFormExamService(deps: {
         const cameraType = type.startsWith('face_') || type.startsWith('camera_') || type === 'multiple_faces';
         if (!(cameraType && r.camera === 'off')) {
           log(r, type, 'student', seconds !== undefined ? String(seconds) : undefined);
+          // Leaving the page or full screen is counted; the creator's rule says what happens after too many.
+          if (type === 'tab_hidden' || type === 'fullscreen_exit') {
+            r.leaves = (r.leaves ?? 0) + 1;
+            if (r.leaves > r.maxLeaves && r.status === 'running') {
+              if (r.leaveAction === 'pause') pauseNow(r, 'system', 'leave_limit');
+              else if (r.leaveAction === 'end') { const t = now(); r.usedMs = total(r); r.runningSince = null; r.status = 'ended'; r.endedAt = t; log(r, 'ended', 'system', 'leave_limit'); }
+            }
+          }
           // The camera works: the clock starts (first time) and the student is in the frame.
           if (type === 'camera_ok' && r.status === 'paused' && r.pause?.by === 'system' && r.pause.reason === 'setup') resumeNow(r, 'system');
           else if (r.camera === 'pause' && (type === 'face_lost' || type === 'camera_denied' || type === 'camera_stopped')) pauseNow(r, 'system', type);

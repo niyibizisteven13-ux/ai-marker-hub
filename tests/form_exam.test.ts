@@ -165,3 +165,32 @@ test('lecturer: add time (even after the end), end one student, let a student ba
   await assert.rejects(svc.session('other', s.id), /not found/i);
   assert.ok((await svc.session('lec1', s.id)).events.some((x) => x.type === 'reentry'));
 });
+
+test('leave rule: leaving the page or full screen is counted; after the allowed number the test pauses or ends, as the creator chose', async () => {
+  const pause = mk({ minutes: 30, camera: 'off', leaveAction: 'pause', maxLeaves: 2 });
+  const p = await svc.start(pause, { studentId: 'P1', name: 'P' });
+  assert.equal(p.leaveAction, 'pause'); assert.equal(p.leaves, 0);
+  await svc.event(p.id, p.secret, { type: 'tab_hidden' });
+  await svc.event(p.id, p.secret, { type: 'fullscreen_exit' });
+  const two = await svc.event(p.id, p.secret, { type: 'tab_back' });
+  assert.equal(two.status, 'running', 'two leaves are allowed');
+  assert.equal(two.leaves, 2);
+  const third = await svc.event(p.id, p.secret, { type: 'tab_hidden' });
+  assert.equal(third.status, 'paused');
+  assert.equal(third.pause?.reason, 'leave_limit');
+  assert.deepEqual(await svc.resumeAll('lec1', pause), { resumed: 0 }, 'a lecturer looks at these one by one');
+  assert.equal((await svc.resume('lec1', p.id)).status, 'running');
+
+  const end = mk({ minutes: 30, camera: 'off', leaveAction: 'end', maxLeaves: 1 });
+  const e = await svc.start(end, { studentId: 'E1', name: 'E' });
+  await svc.event(e.id, e.secret, { type: 'tab_hidden' });
+  const over = await svc.event(e.id, e.secret, { type: 'tab_hidden' });
+  assert.equal(over.status, 'ended', 'the page sends what the student has');
+  assert.equal((await svc.checkSubmit(e.id, e.secret, end)).timeUp, true);
+
+  const warn = mk({ minutes: 30, camera: 'off', leaveAction: 'warn', maxLeaves: 1 });
+  const w = await svc.start(warn, { studentId: 'W9', name: 'W' });
+  for (let i = 0; i < 5; i++) await svc.event(w.id, w.secret, { type: 'tab_hidden' });
+  assert.equal((await svc.state(w.id, w.secret)).status, 'running', 'warn and record never stop the test');
+  assert.equal((await svc.list('lec1', warn))[0].summary.leaves, 5);
+});

@@ -47,6 +47,7 @@ import { createPublicFormExamRouter, createOwnerFormExamRouter } from './server/
 import { formExamService } from './server/services/formExam/runtime.js';
 import { ExamError } from './server/services/formExam/service.js';
 import { normalizeExam } from './shared/examRules.js';
+import { applyPool } from './shared/formPool.js';
 import { createStorageRouter } from './server/routes/storageRoutes.js';
 import { StorageFullError, ensureStorage } from './server/services/billing/storage.js';
 import { gradeQuiz } from './server/services/forms/quiz.js';
@@ -2075,18 +2076,30 @@ app.post('/api/forms/:id/submit', publicFormSubmitLimiter, async (req, res) => {
     // When the time ran out the page sends what it has: required questions are not required any more.
     const relaxed = (list: any) => (Array.isArray(list) ? list.map((q: any) => ({ ...q, required: false })) : list);
     const checkedSchema = examInfo?.timeUp ? { ...schema, fields: relaxed(schema.fields), questions: relaxed(schema.questions) } : schema;
+    // Question pools: the draw depends only on the seed (the test session for a timed test), so the server repeats
+    // it and only the questions this student was given are checked and marked.
+    const poolSeed = examSessionId || String((answers as any)._pool?.seed ?? '').slice(0, 64);
+    const hasPools = !!schema.poolPicks && Object.keys(schema.poolPicks).length > 0;
+    if (hasPools && !poolSeed) return res.status(400).json({ error: 'Reload the page and try again.' });
+    const given = hasPools ? applyPool(checkedSchema, poolSeed) : checkedSchema;
     // Checked again on the server against the form's own definition, including which questions branching showed.
-    const checked = validateSubmission(checkedSchema, answers as Record<string, unknown>);
+    const checked = validateSubmission(given, answers as Record<string, unknown>);
     if ('error' in checked) return res.status(400).json({ error: checked.error, fieldId: checked.fieldId });
     Object.assign(normalized, checked.values);
     if (examInfo) normalized._exam = { sessionId: examSessionId, studentId: examInfo.studentId, studentName: examInfo.studentName, timeUp: examInfo.timeUp };
     if (!Object.keys(checked.values).length && !examInfo?.timeUp) return res.status(400).json({ error: 'Answer at least one question before submitting.' });
     // Quizzes are marked against the answer key at once; the score is kept with the response for Results and the gradebook.
-    const quiz = gradeQuiz(schema, checked.values as Record<string, unknown>);
+    const quiz = gradeQuiz(given, checked.values as Record<string, unknown>);
+    if (hasPools) normalized._pool = { seed: poolSeed };
+    // Which device and (pseudonymised) network the response came from: the lecturer can see two students on one device.
+    const deviceId = String((answers as any)._device ?? '');
+    if (/^[\w-]{8,64}$/.test(deviceId) && (schema.isQuiz || schema.exam?.enabled)) {
+      normalized._device = { id: deviceId, net: crypto.createHmac('sha256', process.env.JWT_SECRET || 'dev-secret').update(String(req.ip || '')).digest('hex').slice(0, 12) };
+    }
     if (quiz) normalized._quiz = { score: quiz.score, maxScore: quiz.maxScore, percent: quiz.percent, correct: quiz.items.filter((x) => x.correct).map((x) => x.id) };
     // Integrity signals (pasting, leaving the page, typing): kept for the lecturer to review, never used to change a mark.
     if (schema.isQuiz || schema.blockPaste || schema.trackIntegrity) {
-      const all = normalizeFields(schema);
+      const all = normalizeFields(given);
       const report = sanitizeReport((answers as any)._integrity, new Set(all.map((f) => f.id)));
       const flags = integrityFlags(report, {
         labels: Object.fromEntries(all.map((f) => [f.id, f.label])),

@@ -11,10 +11,10 @@ import { authFetch } from '../utils/authFetch';
 interface Row {
   id: string; studentId: string; studentName: string; status: 'running' | 'paused' | 'submitted' | 'ended'; camera: 'off' | 'warn' | 'pause';
   remainingSeconds: number; usedSeconds: number; pause: { by: string; reason: string; sinceSeconds: number } | null; hasAccommodation: boolean; reentry: boolean;
-  summary: { faceLost: number; multipleFaces: number; cameraProblems: number; tabHidden: number; pauses: number; awaySeconds: number };
+  summary: { faceLost: number; multipleFaces: number; cameraProblems: number; tabHidden: number; pauses: number; awaySeconds: number; leaves: number };
 }
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-const REASON: Record<string, string> = { face_lost: 'Face left the frame', camera_denied: 'Camera blocked', camera_stopped: 'Camera stopped', break: 'On a break', lecturer: 'Paused by you', setup: 'Camera check', reconnect: 'Reconnecting' };
+const REASON: Record<string, string> = { face_lost: 'Face left the frame', camera_denied: 'Camera blocked', camera_stopped: 'Camera stopped', break: 'On a break', lecturer: 'Paused by you', setup: 'Camera check', reconnect: 'Reconnecting', leave_limit: 'Left the page too many times' };
 const STATUS: Record<Row['status'], { text: string; cls: string }> = {
   running: { text: 'Sitting', cls: 'bg-emerald-100 text-emerald-800' }, paused: { text: 'Paused', cls: 'bg-amber-100 text-amber-900' },
   submitted: { text: 'Handed in', cls: 'bg-slate-100 text-slate-700' }, ended: { text: 'Time over', cls: 'bg-slate-100 text-slate-700' },
@@ -73,7 +73,7 @@ export default function ExamMonitor({ formId }: { formId: string }) {
                   <td className="px-2 py-2.5 tabular-nums">{s.status === 'submitted' ? '–' : mmss(s.remainingSeconds)}</td>
                   <td className="px-2 py-2.5 text-xs text-[#3C4043]">
                     {s.camera === 'off' ? <span className="text-[#5F6368]">No camera check</span> : <span>Face lost {s.summary.faceLost}×{s.summary.awaySeconds ? ` (${s.summary.awaySeconds}s)` : ''}{s.summary.multipleFaces ? ` · several faces ${s.summary.multipleFaces}×` : ''}{s.summary.cameraProblems ? ` · camera problems ${s.summary.cameraProblems}×` : ''}</span>}
-                    <span className="block">Left the page {s.summary.tabHidden}×</span>
+                    <span className="block">Left the page or full screen {s.summary.leaves}×</span>
                   </td>
                   <td className="py-2.5 pl-2">
                     <div className="flex flex-wrap gap-1.5">

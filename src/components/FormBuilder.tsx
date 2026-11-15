@@ -19,6 +19,7 @@
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_EXAM, normalizeExam, type ExamSettings } from '../../shared/examRules';
+import { normalizePicks, poolGroups } from '../../shared/formPool';
 import { DEFAULT_BRANDING, normalizeBranding, type FormBranding } from '../../shared/formBranding';
 import { FormDesignPanel } from './forms/FormDesignPanel';
 import { FormCanvas } from './forms/FormCanvas';
@@ -71,6 +72,8 @@ type Question = {
   analytics?: { variableName?: string; measurementLevel?: string; unit?: string };
   unit?: string;
   shuffleOptions?: boolean;
+  /** Question pool name: each student gets a set number of the questions in a pool (see Test protection). */
+  poolGroup?: string;
   minLength?: number;
   maxLength?: number;
   min?: number;
@@ -116,6 +119,12 @@ export type BuilderState = {
   shuffleQuestions: boolean;
   shuffleAllOptions: boolean;
   trackIntegrity: boolean;
+  /** Test design: one question per screen, no going back, seconds per question, no copying, pool picks. */
+  oneAtATime: boolean;
+  noGoingBack: boolean;
+  perQuestionSeconds: number;
+  blockCopy: boolean;
+  poolPicks: Record<string, number>;
   /** A timed test: the clock is kept by the server; the camera rule; the class whose accommodations apply. */
   exam: ExamSettings;
   /** Quizzes: show the respondent their score after submitting (off = they only see the thank-you message). */
@@ -191,6 +200,11 @@ export const blankState = (): BuilderState => ({
   shuffleQuestions: false,
   shuffleAllOptions: false,
   trackIntegrity: false,
+  oneAtATime: false,
+  noGoingBack: false,
+  perQuestionSeconds: 0,
+  blockCopy: false,
+  poolPicks: {},
   exam: { ...DEFAULT_EXAM },
   quizShowAnswers: true,
   branding: { ...DEFAULT_BRANDING },
@@ -233,7 +247,7 @@ export function fromSchema(input: any): BuilderState {
       options: GRID.has(type) ? [] : labels,
       rows: f.rows || q.rows,
       columns: GRID.has(type) ? (f.columns?.length ? f.columns : labels) : [],
-      allowOther: f.allowOther, shuffleOptions: f.shuffleOptions,
+      allowOther: f.allowOther, shuffleOptions: f.shuffleOptions, poolGroup: typeof f.poolGroup === 'string' ? f.poolGroup : undefined,
       minLength: f.minLength, maxLength: f.maxLength, min: f.min, max: f.max,
       minSelected: f.minSelected, maxSelected: f.maxSelected,
       pattern: f.pattern, patternMessage: f.patternMessage,
@@ -260,6 +274,11 @@ export function fromSchema(input: any): BuilderState {
     shuffleQuestions: !!s.shuffleQuestions,
     shuffleAllOptions: !!s.shuffleAllOptions,
     trackIntegrity: !!s.trackIntegrity,
+    oneAtATime: !!s.oneAtATime,
+    noGoingBack: !!s.noGoingBack,
+    perQuestionSeconds: Number(s.perQuestionSeconds) > 0 ? Number(s.perQuestionSeconds) : 0,
+    blockCopy: !!s.blockCopy,
+    poolPicks: s.poolPicks && typeof s.poolPicks === 'object' ? s.poolPicks : {},
     exam: normalizeExam(s.exam),
     quizShowAnswers: s.quizShowAnswers !== false,
     branding: normalizeBranding(s.branding ?? { mode: 'dark' }),
@@ -276,6 +295,7 @@ export function buildSchema(s: BuilderState): any {
     if (it.kind !== 'question') { pending.push(it); continue; }
     const f: any = { id: it.id, type: it.type, label: it.label.trim() || 'Untitled question', required: it.required };
     if (it.description.trim()) f.description = it.description.trim();
+    if (it.poolGroup?.trim()) f.poolGroup = it.poolGroup.trim().slice(0, 30);
     if (CHOICE.has(it.type)) {
       f.options = clean(it.options);
       if (it.type !== 'select' && it.allowOther) f.allowOther = true;
@@ -341,6 +361,11 @@ export function buildSchema(s: BuilderState): any {
     shuffleQuestions: s.shuffleQuestions,
     shuffleAllOptions: s.shuffleAllOptions,
     trackIntegrity: s.trackIntegrity,
+    oneAtATime: s.oneAtATime || s.noGoingBack,
+    noGoingBack: s.noGoingBack,
+    perQuestionSeconds: s.perQuestionSeconds,
+    blockCopy: s.blockCopy,
+    poolPicks: normalizePicks(s.poolPicks, s.items.filter((i): i is Question => i.kind === 'question').map(q => ({ id: q.id, poolGroup: q.poolGroup }))),
     ...(s.exam.enabled ? { exam: s.exam } : { exam: { ...s.exam, enabled: false } }),
     quizShowAnswers: s.quizShowAnswers,
     branding: s.branding,
@@ -424,6 +449,18 @@ function ExamPanel({ exam, onChange }: { exam: ExamSettings; onChange: (e: ExamS
               <input type="number" min={3} max={60} className={inp} value={exam.graceSeconds} onChange={e => set({ graceSeconds: Number(e.target.value) })} />
             </Field>
           )}
+          <Field label="When a student leaves the page" hint="Leaving the page or full screen is always recorded. A student with an accommodation can ask you to resume.">
+            <select className={inp} value={exam.leaveAction} onChange={e => set({ leaveAction: e.target.value as ExamSettings['leaveAction'] })}>
+              <option value="record">Only record it</option>
+              <option value="warn">Warn the student</option>
+              <option value="pause">Pause the test after too many times (you decide)</option>
+              <option value="end">End the test after too many times</option>
+            </select>
+          </Field>
+          {(exam.leaveAction === 'pause' || exam.leaveAction === 'end') && (
+            <Field label="Allowed times out of the page"><input type="number" min={1} max={20} className={inp} value={exam.maxLeaves} onChange={e => set({ maxLeaves: Number(e.target.value) })} /></Field>
+          )}
+          <Toggle label="Require full screen" checked={exam.requireFullscreen} onChange={v => set({ requireFullscreen: v })} hint="Asks for full screen at the start; leaving it counts like leaving the page. Not available on every phone browser." />
           <Field label="Class" hint="Students on this class's list get their own accommodations. Choose a class to require that students are on the list.">
             <select className={inp} value={exam.courseId ?? ''} onChange={e => set({ courseId: e.target.value || undefined })}>
               <option value="">No class (anyone with the link, no accommodations)</option>
@@ -434,6 +471,35 @@ function ExamPanel({ exam, onChange }: { exam: ExamSettings; onChange: (e: ExamS
           <p className="text-xs text-[#5F6368]">You watch the test live in this form's Results: who is sitting, who is paused and why. You resume, add time or end it for one student.</p>
         </div>
       )}
+    </div>
+  );
+}
+
+/** One question at a time, no going back, a timer per question, no copying, and how many questions each student gets from each pool. */
+function TestDesignPanel({ state, setField }: { state: BuilderState; setField: <K extends keyof BuilderState>(k: K, v: BuilderState[K]) => void }) {
+  const groups = poolGroups(state.items.filter((i): i is Question => i.kind === 'question').map(q => ({ id: q.id, poolGroup: q.poolGroup })));
+  return (
+    <div className="space-y-1 rounded-lg border border-[#E0E0E0] bg-white px-3 py-2">
+      <Toggle label="Show one question at a time" checked={state.oneAtATime || state.noGoingBack} onChange={v => { setField('oneAtATime', v); if (!v) setField('noGoingBack', false); }} />
+      <Toggle label="Do not allow going back" checked={state.noGoingBack} onChange={v => { setField('noGoingBack', v); if (v) setField('oneAtATime', true); }} hint="Once a student moves on, the question is locked. Students cannot share answers or fix a mistake after looking it up." />
+      <div className="py-1.5">
+        <Field label="Seconds per question (0 = no limit)" hint="When the time is up the next question opens. Students with extra time get proportionally longer. Uses one question at a time.">
+          <input type="number" min={0} max={3600} className={`${inp} sm:w-40`} value={state.perQuestionSeconds || ''} placeholder="0" onChange={e => { const n = Math.max(0, Number(e.target.value) || 0); setField('perQuestionSeconds', n); if (n > 0) setField('oneAtATime', true); }} />
+        </Field>
+      </div>
+      <Toggle label="Block copying the question text" checked={state.blockCopy} onChange={v => setField('blockCopy', v)} hint="Stops copy and cut on the page. Photos and screenshots cannot be stopped." />
+      <div className="py-1.5">
+        <p className="text-sm font-medium text-[#202124]">Question pools</p>
+        {groups.length === 0
+          ? <p className="text-xs text-[#5F6368]">Give questions a pool name (in each question's settings) to give every student a different random set.</p>
+          : groups.map(g => (
+            <div key={g.group} className="mt-1.5 flex flex-wrap items-center gap-2 text-sm">
+              <span>Each student gets</span>
+              <input aria-label={`Questions from pool ${g.group}`} type="number" min={1} max={g.count} className={`${inp} w-20`} value={state.poolPicks[g.group] ?? g.count} onChange={e => setField('poolPicks', { ...state.poolPicks, [g.group]: Math.max(1, Math.min(g.count, Number(e.target.value) || 1)) })} />
+              <span>of the {g.count} questions in pool <strong>{g.group}</strong></span>
+            </div>
+          ))}
+      </div>
     </div>
   );
 }
@@ -645,6 +711,11 @@ function QuestionEditor({ q, quiz, patch, uploadFile }: {
       <Field label="Description (optional)">
         <input className={inp} value={q.description} placeholder="Help text shown under the question" onChange={e => patch({ description: e.target.value })} />
       </Field>
+      {quiz && (
+        <Field label="Question pool (optional)" hint="Give questions the same pool name, for example A, then choose in Form settings how many of that pool each student gets.">
+          <input className={`${inp} sm:w-40`} maxLength={30} value={q.poolGroup ?? ''} placeholder="A" onChange={e => patch({ poolGroup: e.target.value })} />
+        </Field>
+      )}
 
       {CHOICE.has(q.type) && (
         <div className="space-y-3">
@@ -1093,6 +1164,7 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, onUpda
                 <div className="space-y-1 rounded-xl border border-[#E0E0E0] bg-[#F8F9FA] px-3 py-2">
                   <p className="text-xs font-bold uppercase tracking-wider text-[#5F6368]">Test protection</p>
                   <ExamPanel exam={state.exam} onChange={e => setField('exam', e)} />
+                  <TestDesignPanel state={state} setField={setField} />
                   <Toggle label="Block pasting into typed answers" checked={state.blockPaste} onChange={v => setField('blockPaste', v)} hint="Students must type short and long answers themselves. Dropping text in is blocked too." />
                   <Toggle label="Shuffle question order" checked={state.shuffleQuestions} onChange={v => setField('shuffleQuestions', v)} hint="Each student sees a different order. Not used when questions depend on earlier answers." />
                   <Toggle label="Shuffle the options of every choice question" checked={state.shuffleAllOptions} onChange={v => setField('shuffleAllOptions', v)} hint="Avoid options like “All of the above” when this is on." />

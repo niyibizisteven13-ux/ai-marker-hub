@@ -1,6 +1,20 @@
 import { Router } from 'express';
 import { normalizeBranding } from '../../shared/formBranding.js';
 import { normalizeExam } from '../../shared/examRules.js';
+import { normalizePicks } from '../../shared/formPool.js';
+
+/** Test-design settings the creator chooses: one question at a time, no going back, a timer per question, no copying, question pools. */
+function designSettings(src: any, questions: any[]) {
+  const secs = Number(src.perQuestionSeconds);
+  const picks = normalizePicks(src.poolPicks, questions);
+  return {
+    oneAtATime: src.oneAtATime === true || src.noGoingBack === true,
+    noGoingBack: src.noGoingBack === true,
+    perQuestionSeconds: Number.isFinite(secs) && secs >= 5 ? Math.min(3600, Math.round(secs)) : 0,
+    blockCopy: src.blockCopy === true,
+    ...(Object.keys(picks).length ? { poolPicks: picks } : { poolPicks: {} }),
+  };
+}
 import { FormOrchestrator } from '../services/FormOrchestrator.js';
 import { ResultsPdfService } from '../services/ResultsPdfService.js';
 import { GradingService } from '../services/GradingService.js';
@@ -12,6 +26,10 @@ import { reviewForm } from '../services/forms/review.js';
 import { codebook } from '../services/forms/model.js';
 import { summarize } from '../services/forms/analysis.js';
 import { listVersions } from '../services/forms/versions.js';
+import { normalizeFields, CHOICE_KINDS } from '../services/forms/model.js';
+import { gradeQuiz } from '../services/forms/quiz.js';
+import { classReview, type ReviewQuestion, type ReviewResponse } from '../services/forms/classReview.js';
+import { applyPool } from '../../shared/formPool.js';
 
 const router = Router();
 const formOrchestrator = FormOrchestrator.getInstance();
@@ -39,6 +57,7 @@ router.post('/', requireAuth, async (req, res) => {
       shuffleAllOptions = false,
       trackIntegrity = false,
       exam,
+      oneAtATime, noGoingBack, perQuestionSeconds, blockCopy, poolPicks,
       quizShowAnswers = true,
       branding,
     } = req.body || {};
@@ -68,6 +87,7 @@ router.post('/', requireAuth, async (req, res) => {
       showScore: showScore !== false,
       blockPaste: blockPaste === true, shuffleQuestions: shuffleQuestions === true, shuffleAllOptions: shuffleAllOptions === true, trackIntegrity: trackIntegrity === true,
       ...(exam ? { exam: normalizeExam(exam) } : {}),
+      ...designSettings({ oneAtATime, noGoingBack, perQuestionSeconds, blockCopy, poolPicks }, questions),
       quizShowAnswers: quizShowAnswers !== false,
       ...(branding ? { branding: normalizeBranding(branding) } : {}),
       ...(req.body.requirements ? { requirements: String(req.body.requirements).slice(0, 12000) } : {}),
@@ -125,6 +145,7 @@ router.put('/:id', requireAuth, async (req, res) => {
       shuffleAllOptions = prevSchema.shuffleAllOptions ?? false,
       trackIntegrity = prevSchema.trackIntegrity ?? false,
       exam = prevSchema.exam,
+      oneAtATime = prevSchema.oneAtATime, noGoingBack = prevSchema.noGoingBack, perQuestionSeconds = prevSchema.perQuestionSeconds, blockCopy = prevSchema.blockCopy, poolPicks = prevSchema.poolPicks,
       requirements = prevSchema.requirements || '',
       quizShowAnswers = prevSchema.quizShowAnswers ?? true,
       branding = prevSchema.branding,
@@ -152,6 +173,7 @@ router.put('/:id', requireAuth, async (req, res) => {
       showScore: showScore !== false,
       blockPaste: blockPaste === true, shuffleQuestions: shuffleQuestions === true, shuffleAllOptions: shuffleAllOptions === true, trackIntegrity: trackIntegrity === true,
       ...(exam ? { exam: normalizeExam(exam) } : {}),
+      ...designSettings({ oneAtATime, noGoingBack, perQuestionSeconds, blockCopy, poolPicks }, questions),
       requirements: String(requirements || '').slice(0, 12000),
       quizShowAnswers: quizShowAnswers !== false,
       ...(branding ? { branding: normalizeBranding(branding) } : {}),
@@ -225,6 +247,29 @@ router.get('/:id/studio', requireAuth, async (req, res) => {
     });
   } catch (e) { studioFail(res, e); }
 });
+/**
+ * Things to look at across the whole class: near-identical answers, the same wrong answers, two students on one
+ * device. Leads for the lecturer, never a finding, and never a change to a mark.
+ */
+router.get('/:id/class-review', requireAuth, async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId;
+    const { schema } = await ownForm(userId, req.params.id);
+    const rows = await prisma.formSubmission.findMany({ where: { formId: req.params.id }, orderBy: { createdAt: 'asc' }, take: 400 });
+    const fields = normalizeFields(schema);
+    const questions: ReviewQuestion[] = fields.map((f) => ({ id: f.id, label: f.label, kind: f.kind === 'text' || f.kind === 'long_text' ? f.kind : CHOICE_KINDS.has(f.kind) ? 'choice' : 'other' }));
+    const responses: ReviewResponse[] = rows.map((row: any, i: number) => {
+      let data: any = {};
+      try { data = JSON.parse(row.data || '{}'); } catch { data = {}; }
+      const seed = String(data._exam?.sessionId || data._pool?.seed || '');
+      const given = schema.poolPicks && Object.keys(schema.poolPicks).length && seed ? applyPool(schema, seed) : schema;
+      const wrong = new Set<string>(schema.isQuiz ? (gradeQuiz(given, data)?.items ?? []).filter((x) => !x.correct).map((x) => x.id) : []);
+      const who = String(data._exam?.studentId || data._respondentEmail || `Response ${i + 1}`);
+      return { id: row.id, who, submittedAt: new Date(row.createdAt).getTime(), answers: data, wrong, device: data._device?.id, network: data._device?.net };
+    });
+    res.json({ flags: classReview(questions, responses) });
+  } catch (e) { studioFail(res, e); }
+});
 router.put('/:id/schema', requireAuth, async (req, res) => {
   try {
     const userId = (req as any).user?.userId;
@@ -235,6 +280,7 @@ router.put('/:id/schema', requireAuth, async (req, res) => {
     const { schema: prev } = await ownForm(userId, req.params.id);
     if (schema.branding !== undefined) schema.branding = normalizeBranding(schema.branding);
     if (schema.exam !== undefined) schema.exam = normalizeExam(schema.exam);
+    Object.assign(schema, designSettings({ ...prev, ...schema }, schema.fields ?? schema.questions ?? prev.fields ?? prev.questions ?? []));
     if (schema.confirmationTitle !== undefined) schema.confirmationTitle = String(schema.confirmationTitle || '').trim().slice(0, 120);
     if (schema.confirmationMessage !== undefined) schema.confirmationMessage = String(schema.confirmationMessage || 'Your response has been recorded.').slice(0, 1000);
     // Saving from the editor never silently opens or closes the form, and keeps scoring settings.

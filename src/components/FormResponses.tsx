@@ -21,6 +21,11 @@ export default function FormResponses({ formId, questions }: { formId: string; q
   const [error, setError] = useState<string | null>(null);
   const [i, setI] = useState(0);
   const [preview, setPreview] = useState<PreviewSource | null>(null);
+  // Leads across the class (similar answers, shared wrong answers, one device for two students).
+  const [review, setReview] = useState<Record<string, Array<{ code: string; level: 'review' | 'info'; message: string }>>>({});
+  useEffect(() => {
+    authFetch(`/api/forms/${encodeURIComponent(formId)}/class-review`).then((r) => (r.ok ? r.json() : { flags: {} })).then((b) => setReview(b.flags ?? {})).catch(() => undefined);
+  }, [formId]);
 
   useEffect(() => {
     authFetch(`/api/forms/${encodeURIComponent(formId)}/responses`).then(async (r) => {
@@ -48,7 +53,7 @@ export default function FormResponses({ formId, questions }: { formId: string; q
   const quiz = r.answers._quiz as { score: number; maxScore: number; percent: number; correct: string[] } | undefined;
   const marked = new Set(questions.filter((q) => Number(q.points) > 0 && q.correctAnswer !== undefined && q.correctAnswer !== '').map((q) => q.id));
   const email = typeof r.answers._respondentEmail === 'string' ? r.answers._respondentEmail : '';
-  const flags = ((r.answers._integrity as { flags?: Array<{ code: string; level: 'review' | 'info'; message: string }> } | undefined)?.flags ?? []);
+  const flags = [...((r.answers._integrity as { flags?: Array<{ code: string; level: 'review' | 'info'; message: string }> } | undefined)?.flags ?? []), ...(review[r.id] ?? [])];
 
   return (
     <section className="rounded-2xl border border-[#E0E0E0] bg-white p-5" aria-label="Individual responses">

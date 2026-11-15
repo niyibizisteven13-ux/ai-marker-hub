@@ -17,9 +17,16 @@ export interface ExamSettings {
   courseId?: string;
   /** Only students on that class's roster may start. */
   requireRoster: boolean;
+  /** What leaving the page (or full screen) does: record it, warn the student, pause the test, or end it. */
+  leaveAction: LeaveAction;
+  /** How many times a student may leave before `leaveAction` applies (for pause and end). */
+  maxLeaves: number;
+  /** Ask for full screen at the start, and count leaving it like leaving the page. */
+  requireFullscreen: boolean;
 }
+export type LeaveAction = 'record' | 'warn' | 'pause' | 'end';
 
-export const DEFAULT_EXAM: ExamSettings = { enabled: false, minutes: 60, camera: 'off', graceSeconds: 8, requireRoster: false };
+export const DEFAULT_EXAM: ExamSettings = { enabled: false, minutes: 60, camera: 'off', graceSeconds: 8, requireRoster: false, leaveAction: 'record', maxLeaves: 3, requireFullscreen: false };
 
 export function normalizeExam(input: unknown): ExamSettings {
   const o = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
@@ -33,6 +40,9 @@ export function normalizeExam(input: unknown): ExamSettings {
     graceSeconds: num(o.graceSeconds, 3, 60, DEFAULT_EXAM.graceSeconds),
     ...(courseId ? { courseId } : {}),
     requireRoster: o.requireRoster === true && !!courseId,
+    leaveAction: o.leaveAction === 'warn' || o.leaveAction === 'pause' || o.leaveAction === 'end' ? o.leaveAction : 'record',
+    maxLeaves: num(o.maxLeaves, 1, 20, DEFAULT_EXAM.maxLeaves),
+    requireFullscreen: o.requireFullscreen === true,
   };
 }
 
