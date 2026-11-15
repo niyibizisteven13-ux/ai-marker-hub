@@ -442,7 +442,8 @@ function SecureMode({ exam, set, formId }: { exam: ExamSettings; set: (p: Partia
       <legend className="mb-1 text-sm font-semibold text-[#202124]">How students take this test</legend>
       {card('normal', 'Normal', 'Anyone with the link, in any browser.')}
       {card('myseb', 'MySEB (recommended)', 'Students use the MySEB app on a laptop or phone. Their device is locked, and you watch everyone live.')}
-      {card('seb', 'Safe Exam Browser', 'A free lockdown browser (safeexambrowser.org). Needs the key from its settings.')}
+      {mode === 'seb' && <p role="alert" className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">This test still uses the old Safe Exam Browser setting, which is being retired. Choose MySEB above to switch.</p>}
+      {mode === 'seb' && card('seb', 'Safe Exam Browser (old)', 'Needs the other app and its key. Only kept so existing tests keep working.')}
       {mode === 'myseb' && (formId
         ? <a href={`/live/form/${encodeURIComponent(formId)}`} className="flex min-h-11 items-center justify-center rounded-xl bg-[#B4502F] px-4 text-sm font-bold text-white hover:bg-[#C45A37]">Open live room: get the code and watch students</a>
         : <p className="rounded-lg bg-[#F8F9FA] px-3 py-2 text-xs text-[#5F6368]">Save and publish the form first. Then you can open the live room and get the code.</p>)}
