@@ -17,10 +17,57 @@ interface Data {
 
 const tone = (v: number | null) => (v === null ? '' : v >= 80 ? 'bg-emerald-500/15 text-emerald-200' : v >= 50 ? 'bg-amber-400/15 text-amber-200' : 'bg-rose-500/15 text-rose-200');
 
+interface TLink { key: string; name: string; studentId: string | null; link: string; released: number; total: number }
+
+/** One private link per student: they see only the marks you have released. */
+function Transcripts({ classId }: { classId: string }) {
+  const [list, setList] = useState<TLink[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+  const base = `/api/learn/classes/${encodeURIComponent(classId)}/transcripts`;
+  useEffect(() => {
+    authFetch(base).then(async (r) => { const b = await r.json().catch(() => ({})); if (!r.ok) throw new Error(b.error || 'Could not load the transcripts.'); setList(b.students); }).catch((e) => setError(e.message));
+  }, [base]);
+  const copy = async (text: string, id: string) => { try { await navigator.clipboard.writeText(text); setCopied(id); window.setTimeout(() => setCopied(null), 1500); } catch { /* clipboard blocked */ } };
+  const renew = async (s: TLink) => {
+    if (!window.confirm(`Replace ${s.name}'s link? The old link stops working at once.`)) return;
+    try {
+      const r = await authFetch(`${base}/regenerate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: s.key }) });
+      const b = await r.json().catch(() => ({})); if (!r.ok) throw new Error(b.error || 'Could not replace the link.');
+      setList((cur) => (cur ?? []).map((x) => (x.key === s.key ? { ...x, link: b.link } : x)));
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not replace the link.'); }
+  };
+  if (error) return <p className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">{error}</p>;
+  if (!list) return <div className="flex justify-center py-6 text-neutral-400"><Loader2 className="animate-spin" /></div>;
+  return (
+    <section className="rounded-2xl border border-white/[0.1] bg-white/[0.02] p-4">
+      <p className="text-[13.5px] font-semibold text-neutral-100">Student transcripts</p>
+      <p className="mt-1 text-[12.5px] leading-relaxed text-neutral-400">Give each student their own private link. They see their marks for every test and task in this class, a corrections link for tasks, and can print or save it as a PDF. They see <b>only marks you have released</b>.</p>
+      {list.length === 0 ? <p className="mt-3 text-sm text-neutral-500">No students yet. Add tests or tasks with hand-ins first.</p> : (
+        <>
+          <button type="button" onClick={() => void copy(list.map((s) => `${s.studentId ?? ''}\t${s.name}\t${s.link}`).join('\n'), 'all')} className="mt-3 inline-flex items-center gap-1.5 rounded-xl border border-white/[0.12] px-3 py-2 text-[13px] text-neutral-200 hover:bg-white/[0.05]">{copied === 'all' ? 'Copied: paste into Excel or a message' : 'Copy all links (ID, name, link)'}</button>
+          <ul className="mt-3 divide-y divide-white/[0.06]">
+            {list.map((s) => (
+              <li key={s.key} className="flex flex-wrap items-center gap-2 py-2 text-[13px]">
+                <span className="min-w-[10rem] flex-1 truncate text-neutral-100">{s.name}{s.studentId ? <span className="text-neutral-500"> · {s.studentId}</span> : null}</span>
+                <span className="text-neutral-500">{s.released} of {s.total} released</span>
+                <button type="button" onClick={() => void copy(s.link, s.key)} className="rounded-lg border border-white/[0.12] px-2.5 py-1 text-neutral-200 hover:bg-white/[0.05]">{copied === s.key ? 'Copied' : 'Copy link'}</button>
+                <a href={s.link} target="_blank" rel="noreferrer" className="rounded-lg border border-white/[0.12] px-2.5 py-1 text-neutral-200 hover:bg-white/[0.05]">Preview</a>
+                <button type="button" onClick={() => void renew(s)} className="rounded-lg px-2 py-1 text-neutral-500 hover:text-rose-300">New link</button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </section>
+  );
+}
+
 export default function Gradebook({ classId }: { classId: string }) {
   const [g, setG] = useState<Data | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
+  const [showTr, setShowTr] = useState(false);
   const [saving, setSaving] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [chosen, setChosen] = useState<Set<string>>(new Set());
@@ -68,6 +115,7 @@ export default function Gradebook({ classId }: { classId: string }) {
         <p className="min-w-0 flex-1 text-sm text-neutral-400">{g.students.length} student{g.students.length === 1 ? '' : 's'} · {g.columns.length} column{g.columns.length === 1 ? '' : 's'}{classAverage !== null ? ` · class average ${classAverage}%` : ''}</p>
         <button type="button" onClick={() => setPicking((p) => !p)} className="inline-flex items-center gap-1.5 rounded-xl border border-white/[0.12] px-3 py-2 text-[13px] text-neutral-200 hover:bg-white/[0.06]"><Settings2 size={14} />Choose columns</button>
         <button type="button" disabled={!g.columns.length || downloading} onClick={() => void download()} className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--brand)] px-3.5 py-2 text-[13px] font-semibold text-white hover:bg-[var(--brand-strong)] disabled:opacity-40">{downloading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}Excel</button>
+        <button type="button" onClick={() => setShowTr((v) => !v)} className="inline-flex items-center gap-1.5 rounded-xl border border-white/[0.12] px-3 py-2 text-[13px] text-neutral-200 hover:bg-white/[0.05]">{showTr ? 'Hide transcripts' : 'Student transcripts'}</button>
       </div>
       {error && <p className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[13px] text-rose-200">{error}</p>}
 
@@ -137,6 +185,7 @@ export default function Gradebook({ classId }: { classId: string }) {
           </table>
         </div>
       )}
+      {showTr && <Transcripts classId={classId} />}
     </div>
   );
 }

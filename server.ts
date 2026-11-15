@@ -46,6 +46,8 @@ import { createCoursesRouter } from './server/routes/courseRoutes.js';
 import { createPublicFormExamRouter, createOwnerFormExamRouter } from './server/routes/formExamRoutes.js';
 import { createMySebAssignmentOwnerRouter, createMySebOwnerRouter, createMySebPublicRouter, liveIceHandler, liveReportHandler, liveSignalPullHandler, liveSignalPushHandler } from './server/routes/mySebRoutes.js';
 import { mySebGuard, mySebShell } from './server/services/mySeb.js';
+import { createFormFromFileRouter } from './server/routes/formFromFileRoutes.js';
+import { createTranscriptPublicRouter } from './server/routes/transcriptRoutes.js';
 import { formExamService } from './server/services/formExam/runtime.js';
 import { ExamError } from './server/services/formExam/service.js';
 import { sebAllowed } from './server/services/formExam/seb.js';
@@ -430,6 +432,7 @@ app.use('/api/payments', paymentRoutes);
   app.get('/api/myseb/live/task/:token/ice', mysebTask, liveIceHandler);
 }
 app.use('/api/myseb', createMySebPublicRouter());
+app.use('/api/forms/from-file', requireAuth, createFormFromFileRouter());   // before the generic form routes
 app.use('/api/forms', createMySebOwnerRouter());
 app.use('/api/forms', formRoutes);
 // Stored files: a signed link works for anyone holding it; without one, the signed-in owner (Bearer token) can open
@@ -465,6 +468,7 @@ app.use('/api/outputs/shared', sharedOutputsRouter);
 app.use('/api/outputs', requireAuth, outputsRouter);
 app.use('/api/memory', requireAuth, memoryRoutes);
 app.use('/api/learn', requireAuth, learnRoutes);
+app.use('/api/transcripts/public', createTranscriptPublicRouter());   // a student's private transcript (the link is the key)
 app.use('/api/billing/momo/callback', momoCallbackRouter);
 app.use('/api/billing', billingRoutes);
 app.use('/api/admin/billing', requireAuth, requireRole('ADMIN'), adminBillingRoutes);
@@ -1995,7 +1999,7 @@ ${augmentedQuery}`;
 const sanitizePublicFormSchema = (value: any): any => {
   const privateKeys = new Set([
     'answer', 'answerkey', 'correct', 'correctanswer', 'correctanswers', 'expectedanswer', 'modelanswer',
-    'rubric', 'scoringrubric', 'selectionsettings', 'requirements', 'solution', 'mysebexamid',
+    'rubric', 'scoringrubric', 'selectionsettings', 'requirements', 'solution', 'mysebexamid', 'importreview',
     // Safe Exam Browser keys: anyone who knew one could fake the header.
     'sebkeys',
   ]);

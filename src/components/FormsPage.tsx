@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BarChart3, Check, ClipboardCheck, ExternalLink, FileSignature, Link2, ListChecks, Loader2, MessageSquareHeart, PencilLine, Plus, Sparkles, Trash2, UserPlus, Wand2 } from 'lucide-react';
+import { BarChart3, Check, ClipboardCheck, ExternalLink, FileSignature, Link2, ListChecks, Loader2, MessageSquareHeart, PencilLine, Plus, Sparkles, Trash2, Upload, UserPlus, Wand2 } from 'lucide-react';
 import { authFetch } from '../utils/authFetch';
 import { Card, Empty, PageShell, Stat, StatRow, Toolbar, ghostBtn, iconBtn, primaryBtn, relative } from './workspace/Shell';
 
@@ -44,6 +44,53 @@ const json = async <T,>(res: Response): Promise<T> => {
   return body as T;
 };
 const openEditor = (id: string, results = false) => { window.location.href = `/forms/${encodeURIComponent(id)}/edit${results ? '?tab=results' : ''}`; };
+
+const KIND_CHOICES: Array<{ id: string; label: string }> = [
+  { id: 'choice', label: 'Multiple choice' }, { id: 'truefalse', label: 'True or false' }, { id: 'short', label: 'Short answer' },
+  { id: 'multi', label: 'Several right answers' }, { id: 'long', label: 'Long answer (you mark)' },
+];
+
+/** Upload notes, slides or a past paper: Bwenge drafts a quiz from it, checks it against the file, and opens it in the editor, closed, to review. */
+function FromFileCard({ onError }: { onError: (m: string | null) => void }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [count, setCount] = useState(10);
+  const [kinds, setKinds] = useState<string[]>(['choice', 'truefalse', 'short']);
+  const [working, setWorking] = useState(false);
+  const toggle = (id: string) => setKinds((k) => (k.includes(id) ? k.filter((x) => x !== id) : [...k, id]));
+  const make = async () => {
+    if (!file || !kinds.length) return;
+    setWorking(true); onError(null);
+    try {
+      const f = new FormData(); f.append('file', file); f.append('count', String(count)); f.append('kinds', kinds.join(','));
+      const res = await authFetch('/api/forms/from-file', { method: 'POST', body: f });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `Request failed (${res.status}).`);
+      openEditor(body.formId);
+    } catch (e) { onError(e instanceof Error ? e.message : 'The quiz could not be made.'); setWorking(false); }
+  };
+  return (
+    <section className="rounded-2xl border border-white/[0.08] bg-gradient-to-br from-[var(--ws-card-hover)] to-[var(--ws-card)] p-4 sm:p-5">
+      <p className="flex items-center gap-2 text-[14px] font-semibold text-white"><Upload size={16} className="text-[var(--brand-soft)]" />Upload a file, get a quiz</p>
+      <p className="mt-1 text-[12.5px] leading-relaxed text-neutral-400">Notes, slides or a past paper (PDF, Word, PowerPoint, Excel or text). Questions come only from your file. You review everything before students see it: the quiz is created closed.</p>
+      <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]">
+        <label className="flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border border-dashed border-white/[0.18] bg-[var(--ws-bg)] px-3.5 py-2.5 text-[13.5px] text-neutral-300 hover:border-white/[0.3]">
+          <Upload size={15} className="shrink-0 text-neutral-500" />
+          <span className="min-w-0 flex-1 truncate">{file ? file.name : 'Choose a file (up to 20 MB)'}</span>
+          <input type="file" className="sr-only" accept=".pdf,.docx,.pptx,.xlsx,.txt,.md,.csv,.html,.htm" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+        </label>
+        <label className="flex items-center gap-2 text-[13px] text-neutral-300">Questions
+          <input type="number" min={1} max={40} value={count} onChange={(e) => setCount(Math.max(1, Math.min(40, Number(e.target.value) || 1)))} className="w-20 rounded-lg border border-white/[0.1] bg-[var(--ws-bg)] px-2.5 py-2 text-white focus:outline-none" />
+        </label>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
+        {KIND_CHOICES.map((k) => (
+          <label key={k.id} className="flex cursor-pointer items-center gap-2 text-[13px] text-neutral-300"><input type="checkbox" className="h-4 w-4 accent-[var(--brand)]" checked={kinds.includes(k.id)} onChange={() => toggle(k.id)} />{k.label}</label>
+        ))}
+      </div>
+      <button type="button" disabled={!file || !kinds.length || working} onClick={() => void make()} className={`${primaryBtn} mt-4`}>{working ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}{working ? 'Reading your file and writing questions… (up to a minute)' : 'Make the quiz'}</button>
+    </section>
+  );
+}
 
 export default function FormsPage({ onClose }: { onClose: () => void }) {
   const [rows, setRows] = useState<FormRow[] | null>(null);
@@ -94,6 +141,8 @@ export default function FormsPage({ onClose }: { onClose: () => void }) {
       <PageShell icon={<ClipboardCheck size={20} />} title="Forms" onBack={onClose} wide
         subtitle="Surveys, registrations, consent slips and quizzes. Share one link; answers arrive here with charts, and download to Excel."
         actions={<button type="button" disabled={!!busy} onClick={() => void createFrom('blank', blank)} className={ghostBtn}>{busy === 'blank' ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}Blank form</button>}>
+
+        <FromFileCard onError={setError} />
 
         <section className="rounded-2xl border border-white/[0.08] bg-gradient-to-br from-[var(--ws-card-hover)] to-[var(--ws-card)] p-4 sm:p-5">
           <p className="flex items-center gap-2 text-[14px] font-semibold text-white"><Wand2 size={16} className="text-[var(--brand-soft)]" />Describe the form, the AI writes it</p>
