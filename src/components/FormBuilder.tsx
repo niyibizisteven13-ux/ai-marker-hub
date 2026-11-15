@@ -107,6 +107,10 @@ export type BuilderState = {
   acceptingResponses: boolean;
   allowMultipleResponses: boolean;
   confirmationMessage: string;
+  /** Heading of the thank-you screen (blank = none). */
+  confirmationTitle: string;
+  /** Quizzes: show the respondent their score after submitting (off = they only see the thank-you message). */
+  showScore: boolean;
   /** Quizzes: show each respondent which answers were right, with the correct answer, after they submit. */
   quizShowAnswers: boolean;
   /** How the form looks to respondents (template, light or dark, logo, banner, background, font). */
@@ -172,6 +176,8 @@ export const blankState = (): BuilderState => ({
   acceptingResponses: true,
   allowMultipleResponses: true,
   confirmationMessage: 'Your response has been recorded.',
+  confirmationTitle: '',
+  showScore: true,
   quizShowAnswers: true,
   branding: { ...DEFAULT_BRANDING },
   items: [],
@@ -234,6 +240,8 @@ export function fromSchema(input: any): BuilderState {
     acceptingResponses: s.acceptingResponses !== false,
     allowMultipleResponses: s.allowMultipleResponses !== false,
     confirmationMessage: s.confirmationMessage || 'Your response has been recorded.',
+    confirmationTitle: typeof s.confirmationTitle === 'string' ? s.confirmationTitle : '',
+    showScore: s.showScore !== false,
     quizShowAnswers: s.quizShowAnswers !== false,
     branding: normalizeBranding(s.branding ?? { mode: 'dark' }),
     items,
@@ -308,6 +316,8 @@ export function buildSchema(s: BuilderState): any {
     acceptingResponses: s.acceptingResponses,
     allowMultipleResponses: s.allowMultipleResponses,
     confirmationMessage: s.confirmationMessage,
+    confirmationTitle: s.confirmationTitle.trim(),
+    showScore: s.showScore,
     quizShowAnswers: s.quizShowAnswers,
     branding: s.branding,
     fields,
@@ -1014,11 +1024,17 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, onUpda
               <summary className="min-h-11 cursor-pointer list-none px-5 py-3 text-sm font-bold text-[#202124] sm:px-6">Form settings</summary>
               <div className="space-y-1 border-t border-[#E0E0E0] px-5 py-4 sm:px-6">
                 <Toggle label="Make this a quiz" checked={state.isQuiz} onChange={v => setField('isQuiz', v)} hint="Give each question points and a correct answer. Bwenge marks every response the moment it is sent; scores appear in Results." />
+                {state.isQuiz && <Toggle label="Show score after submitting" checked={state.showScore} onChange={v => setField('showScore', v)} hint="Turn off to keep scores private: respondents only see your thank-you message, and you still see every score in Results." />}
                 {state.isQuiz && <Toggle label="Show answers after submitting" checked={state.quizShowAnswers} onChange={v => setField('quizShowAnswers', v)} hint="Respondents see their score, which answers were right and the correct ones. Turn off to show the score only." />}
                 <Toggle label="Collect email addresses" checked={state.collectEmail} onChange={v => setField('collectEmail', v)} />
                 <Toggle label="Accepting responses" checked={state.acceptingResponses} onChange={v => setField('acceptingResponses', v)} />
                 <Toggle label="Allow more than one response per person" checked={state.allowMultipleResponses} onChange={v => setField('allowMultipleResponses', v)} hint="Also enforce this on your server." />
-                <div className="pt-2"><Field label="Confirmation message"><textarea rows={2} className={inp} value={state.confirmationMessage} onChange={e => setField('confirmationMessage', e.target.value)} /></Field></div>
+                <div className="space-y-2 pt-2">
+                  <p className="text-xs font-bold uppercase tracking-wider text-[#5F6368]">After submitting</p>
+                  <Field label="Thank-you heading (optional)"><input className={inp} maxLength={120} placeholder="Thank you for your feedback!" value={state.confirmationTitle} onChange={e => setField('confirmationTitle', e.target.value)} /></Field>
+                  <Field label="Thank-you message"><textarea rows={3} maxLength={1000} className={inp} value={state.confirmationMessage} onChange={e => setField('confirmationMessage', e.target.value)} /></Field>
+                  {!state.isQuiz && <p className="text-xs text-[#5F6368]">Respondents only see this message. Feedback forms and surveys are never shown a score. Changes apply to the published link as soon as you save.</p>}
+                </div>
               </div>
             </details>
 

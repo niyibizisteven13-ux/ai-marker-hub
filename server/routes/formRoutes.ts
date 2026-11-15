@@ -31,6 +31,8 @@ router.post('/', requireAuth, async (req, res) => {
       acceptingResponses = true,
       allowMultipleResponses = true,
       confirmationMessage = 'Your response has been recorded.',
+      confirmationTitle = '',
+      showScore = true,
       quizShowAnswers = true,
       branding,
     } = req.body || {};
@@ -56,6 +58,8 @@ router.post('/', requireAuth, async (req, res) => {
       acceptingResponses: acceptingResponses !== false,
       allowMultipleResponses: allowMultipleResponses !== false,
       confirmationMessage: String(confirmationMessage || 'Your response has been recorded.').slice(0, 1000),
+      confirmationTitle: String(confirmationTitle || '').trim().slice(0, 120),
+      showScore: showScore !== false,
       quizShowAnswers: quizShowAnswers !== false,
       ...(branding ? { branding: normalizeBranding(branding) } : {}),
       ...(req.body.requirements ? { requirements: String(req.body.requirements).slice(0, 12000) } : {}),
@@ -106,6 +110,8 @@ router.put('/:id', requireAuth, async (req, res) => {
       acceptingResponses = prevSchema.acceptingResponses ?? true,
       allowMultipleResponses = prevSchema.allowMultipleResponses ?? true,
       confirmationMessage = prevSchema.confirmationMessage || 'Your response has been recorded.',
+      confirmationTitle = prevSchema.confirmationTitle || '',
+      showScore = prevSchema.showScore ?? true,
       requirements = prevSchema.requirements || '',
       quizShowAnswers = prevSchema.quizShowAnswers ?? true,
       branding = prevSchema.branding,
@@ -129,6 +135,8 @@ router.put('/:id', requireAuth, async (req, res) => {
       acceptingResponses: acceptingResponses !== false,
       allowMultipleResponses: allowMultipleResponses !== false,
       confirmationMessage: String(confirmationMessage || 'Your response has been recorded.').slice(0, 1000),
+      confirmationTitle: String(confirmationTitle || '').trim().slice(0, 120),
+      showScore: showScore !== false,
       requirements: String(requirements || '').slice(0, 12000),
       quizShowAnswers: quizShowAnswers !== false,
       ...(branding ? { branding: normalizeBranding(branding) } : {}),
@@ -211,6 +219,8 @@ router.put('/:id/schema', requireAuth, async (req, res) => {
     if (Buffer.byteLength(JSON.stringify(schema)) > 4_000_000) return res.status(413).json({ error: 'The form is too large. Use smaller pictures.' });
     const { schema: prev } = await ownForm(userId, req.params.id);
     if (schema.branding !== undefined) schema.branding = normalizeBranding(schema.branding);
+    if (schema.confirmationTitle !== undefined) schema.confirmationTitle = String(schema.confirmationTitle || '').trim().slice(0, 120);
+    if (schema.confirmationMessage !== undefined) schema.confirmationMessage = String(schema.confirmationMessage || 'Your response has been recorded.').slice(0, 1000);
     // Saving from the editor never silently opens or closes the form, and keeps scoring settings.
     await saveForm(userId, req.params.id, { ...prev, ...schema, acceptingResponses: prev.acceptingResponses ?? false });
     res.json({ success: true, review: reviewForm({ ...prev, ...schema }) });
