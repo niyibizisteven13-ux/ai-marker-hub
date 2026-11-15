@@ -203,7 +203,7 @@ const abortOnClose = (req) => { const ac = new AbortController(); req.on('close'
 
 api.post('/sessions/:id/to-student', requireTeacher, wrap(async (req, res) => {
   if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
-  const msg = cleanSignal(req.body?.msg); if (!msg || !['watch', 'unwatch', 'listen', 'answer', 'ice'].includes(msg.type)) return res.status(400).json({ error: 'bad message' });
+  const msg = cleanSignal(req.body?.msg); if (!msg || !['watch', 'unwatch', 'listen', 'answer', 'ice', 'quality'].includes(msg.type)) return res.status(400).json({ error: 'bad message' });
   if (!(await examOf(req.params.id))) return res.status(404).json({ error: 'not found' });
   pushSignal('s:' + req.params.id, msg); res.json({ ok: true });
 }));

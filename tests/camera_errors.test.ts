@@ -19,6 +19,9 @@ test('a student is told what is actually wrong with the camera', () => {
   assert.match(cameraErrorMessage({ name: 'NotAllowedError' }), /lock icon/, 'in a browser: the lock icon');
   as('Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) Chrome/120');
   assert.match(cameraErrorMessage({ name: 'NotAllowedError' }), /System Settings/);
+  as('Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/120 Mobile MySEB/1.0 (mobile)');
+  assert.match(cameraErrorMessage({ name: 'NotAllowedError' }), /Your phone is not letting MySEB use the camera/);
+  assert.match(cameraErrorMessage({ name: 'NotAllowedError' }), /Settings → Apps → MySEB → Permissions → Camera/);
   as(WIN_APP, false);
   assert.match(cameraErrorMessage({ name: 'NotAllowedError' }), /https/);
 });

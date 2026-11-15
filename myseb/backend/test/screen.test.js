@@ -15,6 +15,7 @@ const call = async (path, { method = 'GET', headers = {}, body } = {}) => {
 };
 const UA = 'Mozilla/5.0 MySEB/1.0 (desktop)';
 const mk = (s, dev) => ({ 'X-MySEB-Key': s.token, 'X-MySEB-Client': 'desktop', 'X-MySEB-Device': dev, 'User-Agent': UA });
+const { cleanSignal } = await import('../src/live.js');
 const dot = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/';
 
 test('the lecturer chooses what students show: camera, screen or both; a bad value is ignored', async () => {
@@ -74,4 +75,11 @@ test('stopping the screen share counts as leaving, once per stop, and the leave 
   await live('denied'); await live('denied');
   const r = await row(); assert.equal(r.status, 'PAUSED'); assert.equal(r.violation_count, 1, 'counted once, not every report');
   assert.equal((await q("SELECT count(*)::int n FROM violations WHERE session_id=$1 AND type='screen_share_stopped'", [a.sessionId])).rows[0].n, 1);
+});
+
+test('the lecturer can ask a student for full quality (zoom) or the light picture; nothing else sneaks through', () => {
+  assert.deepEqual(cleanSignal({ type: 'quality', level: 'high', viewer: 'v1' }), { type: 'quality', viewer: 'v1', level: 'high' });
+  assert.equal(cleanSignal({ type: 'quality', level: 'ultra', viewer: 'v1' }).level, 'low', 'an unknown level means the light picture');
+  assert.equal(cleanSignal({ type: 'quality', level: 'high', viewer: 'v1', sdp: 'x'.repeat(20000) }), null, 'oversize messages are refused');
+  assert.equal(cleanSignal({ type: 'format-disk' }), null);
 });
