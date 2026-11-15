@@ -72,6 +72,8 @@ jobs:
           cd myseb/backend
           npm ci
           npm test
+          cd ../..
+          EMBED_TEST_DATABASE_URL=$DATABASE_URL node --test --import tsx tests/myseb_embedded.test.ts
 
       - name: Database schema from an empty PostgreSQL
         env:

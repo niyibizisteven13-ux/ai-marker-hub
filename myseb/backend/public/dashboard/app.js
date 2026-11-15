@@ -1,10 +1,12 @@
 // All text from the server (student names, exam titles) goes in with textContent, never innerHTML.
+// When MySEB runs inside another server it lives under a prefix such as /myseb; the dashboard works out where it is.
+const BASE = location.pathname.replace(/\/dashboard\/?.*$/, '');
 const $ = (id) => document.getElementById(id);
 let KEY = sessionStorage.getItem('myseb_teacher_key') || '';
 let current = null, timer = null;
 
 async function api(path, opts = {}) {
-  const r = await fetch('/api' + path, {
+  const r = await fetch(BASE + '/api' + path, {
     ...opts, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + KEY, ...(opts.headers || {}) },
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
