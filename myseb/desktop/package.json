@@ -21,7 +21,7 @@
     "artifactName": "MySEB-${os}.${ext}",
     "files": ["src/**", "renderer/**", "config.json", "package.json"],
     "win": { "target": "nsis" },
-    "mac": { "target": "dmg", "category": "public.app-category.education" },
+    "mac": { "target": "dmg", "category": "public.app-category.education", "extendInfo": { "NSCameraUsageDescription": "MySEB uses the camera when your lecturer asks to see you during the exam.", "NSMicrophoneUsageDescription": "MySEB uses the microphone only when your lecturer chooses to listen during the exam." } },
     "linux": { "target": "AppImage" }
   }
 }

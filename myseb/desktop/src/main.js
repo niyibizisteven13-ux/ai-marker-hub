@@ -1,6 +1,6 @@
 'use strict';
 const { postFollowingRedirects } = require('./post');
-const { app, BrowserWindow, Menu, ipcMain, session, clipboard, screen, desktopCapturer } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, session, clipboard, screen, desktopCapturer, systemPreferences } = require('electron');
 const { execFile } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -272,7 +272,25 @@ app.whenReady().then(() => {
     }
     cb({ requestHeaders: h });
   });
-  ses.setPermissionRequestHandler((wc, perm, cb) => cb(['media', 'fullscreen'].includes(perm) && !!exam && originOf(wc.getURL()) === exam.examOrigin));
+  // Camera and full screen: only for the exam site. On Windows and Mac the computer itself can also switch the camera off for apps;
+  // then the student is told exactly where to turn it on, instead of a camera that just does not start.
+  ses.setPermissionRequestHandler(async (wc, perm, cb, details) => {
+    if (!['media', 'fullscreen'].includes(perm) || !exam || originOf(wc.getURL()) !== exam.examOrigin) return cb(false);
+    if (perm === 'media' && (process.platform === 'win32' || process.platform === 'darwin') && (!details?.mediaTypes || details.mediaTypes.includes('video'))) {
+      try {
+        let st = systemPreferences.getMediaAccessStatus('camera');
+        if (st === 'not-determined' && process.platform === 'darwin') { await systemPreferences.askForMediaAccess('camera'); st = systemPreferences.getMediaAccessStatus('camera'); }
+        if (st === 'denied' || st === 'restricted') {
+          toRenderer('notice', { title: 'Your computer is blocking the camera', text: process.platform === 'win32'
+            ? 'Open Windows Settings → Privacy & security → Camera. Turn on "Camera access" and "Let desktop apps access your camera". Then press the camera button again.'
+            : 'Open System Settings → Privacy & Security → Camera and turn on MySEB. Then restart MySEB and enter your code again.' });
+          return cb(false);
+        }
+      } catch { /* the status is a bonus: go on and let the camera try */ }
+    }
+    cb(true);
+  });
+  ses.setPermissionCheckHandler((_wc, perm, origin) => ['media', 'fullscreen'].includes(perm) && !!exam && originOf(origin) === exam.examOrigin);
   // Sharing the screen with the lecturer: when the exam page asks, the whole main screen is shared at once, with no picker, so a
   // student cannot choose a smaller window to show. Only the exam site can ask. While the screen is shared the lecturer is watching,
   // so the "screenshots show black" protection is lifted, otherwise the lecturer would see a black rectangle where the exam is.
