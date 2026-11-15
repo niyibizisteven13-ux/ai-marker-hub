@@ -7,8 +7,11 @@ import { config, safeEqual } from './config.js';
 import { migrate, pool } from './db.js';
 import { api } from './routes.js';
 import { mySebGuard } from './guard.js';
-import { purgeOld, sweep } from './sessions.js';
+import { flushHeartbeats, purgeOld, sweep } from './sessions.js';
 import { liveStats } from './live.js';
+import { eventStats } from './events.js';
+import { monitorEventLoopDelay } from 'node:perf_hooks';
+const loopDelay = monitorEventLoopDelay({ resolution: 20 }); loopDelay.enable();
 import { q } from './db.js';
 import { examRouter } from './exam.js';
 
@@ -29,10 +32,11 @@ app.get('/metrics', async (req, res) => {
   const by = (await q(`SELECT status, count(*)::int AS n FROM exam_sessions GROUP BY status`)).rows;
   const exams = (await q(`SELECT count(*)::int AS n FROM exams WHERE status='active'`)).rows[0].n;
   const live = liveStats(); const mem = process.memoryUsage();
+  const lag = Math.round(loopDelay.percentile(99) / 1e6); loopDelay.reset();
   const lines = [
     '# TYPE myseb_students gauge', ...['IN_EXAM', 'PAUSED', 'LEFT', 'ENDED'].map((st) => `myseb_students{status="${st}"} ${by.find((r) => r.status === st)?.n ?? 0}`),
     '# TYPE myseb_exams_active gauge', `myseb_exams_active ${exams}`,
-    '# TYPE myseb_live_entries gauge', `myseb_live_entries ${live.reports}`, `myseb_signal_mailboxes ${live.mailboxes}`,
+    '# TYPE myseb_live_entries gauge', `myseb_live_entries ${live.reports}`, `myseb_signal_mailboxes ${live.mailboxes}`, `myseb_signal_waiting ${live.waiting}`, `myseb_picture_megabytes ${live.pictureMb}`, `myseb_room_streams ${eventStats().streams}`, `myseb_db_pool_waiting ${pool.waitingCount}`, `myseb_db_pool_busy ${pool.totalCount - pool.idleCount}`, `myseb_event_loop_lag_ms ${lag}`,
     '# TYPE myseb_process_resident_bytes gauge', `myseb_process_resident_bytes ${mem.rss}`,
     '# TYPE myseb_process_uptime_seconds gauge', `myseb_process_uptime_seconds ${Math.round(process.uptime())}`,
   ];
@@ -73,6 +77,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   await migrate();
   const tick = () => sweep().catch((e) => console.error('sweep', e));
   setInterval(tick, 5000).unref();
+  setInterval(() => flushHeartbeats().catch((e) => console.error('heartbeats', e)), 2000).unref();   // "still here" times, written for everyone at once
   // Retention: once at start, then every hour.
   const purge = () => purgeOld().then((r) => { if (r.sessions || r.exams) console.log(`retention: removed ${r.sessions} finished students and ${r.exams} old exams (older than ${config.retentionDays} days)`); }).catch((e) => console.error('purge', e));
   purge(); setInterval(purge, 3_600_000).unref();

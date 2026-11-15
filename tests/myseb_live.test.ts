@@ -17,6 +17,7 @@ fake.post('/api/sessions/:sid/to-student', (req, res) => { got.push({ toStudent:
 fake.post('/api/sessions/:sid/to-lecturer', (req, res) => { got.push({ toLecturer: req.params.sid, msg: req.body.msg }); res.json({ ok: true }); });
 fake.get('/api/sessions/:sid/from-lecturer', (req, res) => { got.push({ studentPoll: req.params.sid, after: req.query.after, wait: req.query.wait }); res.json({ msgs: [{ n: 1, type: 'watch', viewer: 'v1' }], next: 1 }); });
 fake.get('/api/exams/:id/from-students', (req, res) => { got.push({ lecturerPoll: req.params.id, after: req.query.after }); res.json({ msgs: [{ n: 1, type: 'offer', sid: SID, viewer: 'v1', sdp: 'x' }], next: 1 }); });
+fake.get('/api/exams/:id/events', (req, res) => { got.push({ events: req.params.id }); res.set('Content-Type', 'text/event-stream'); res.flushHeaders(); res.write('retry: 2000\n\n'); setTimeout(() => res.write('data: {"kinds":["join"]}\n\n'), 20); req.on('close', () => got.push({ eventsClosed: req.params.id })); });
 fake.get('/api/exams/:id/monitor', (req, res) => { got.push({ monitor: req.params.id, q: req.query.frames ?? null }); res.json({ counts: {}, students: [{ id: SID }] }); });
 fake.get('/api/exams/:id/frames', (req, res) => { got.push({ frames: req.params.id, ids: req.query.ids }); res.json({ frames: {} }); });
 fake.post('/api/exams/:id/pause-all', (req, res) => { got.push({ pause: req.params.id }); res.json({ ok: true, changed: 2 }); });
@@ -24,7 +25,7 @@ fake.post('/api/exams/:id/resume-all', (req, res) => { got.push({ resume: req.pa
 fake.patch('/api/exams/:id', (req, res) => { got.push({ patch: req.params.id, body: req.body }); res.json({ ok: true }); });
 const fakeSrv = fake.listen(0);
 process.env.MYSEB_URL = `http://127.0.0.1:${(fakeSrv.address() as any).port}`; process.env.MYSEB_SERVICE_KEY = 'svc-key'; process.env.APP_URL = 'https://www.bwenge.space';
-const { mySebGuard, pauseAll, resumeAll, setLiveFaces, setLiveMode, formTarget, iceServers, studentSignalPull, studentSignalPush, lecturerSignalPull, lecturerSignalPush, monitor, frames } = await import('../server/services/mySeb.js');
+const { streamRoomEvents, heldStudentSignalPull, MAX_HELD_PULLS, mySebGuard, pauseAll, resumeAll, setLiveFaces, setLiveMode, formTarget, iceServers, studentSignalPull, studentSignalPush, lecturerSignalPull, lecturerSignalPush, monitor, frames } = await import('../server/services/mySeb.js');
 import { createHmac } from 'node:crypto';
 const { liveReportHandler } = await import('../server/routes/mySebRoutes.js');
 
@@ -39,7 +40,7 @@ const post = (id: string, body: unknown, headers: Record<string, string> = IN) =
 
 test('a live MySEB student reports their question; MySEB learns whether pictures are wanted', async () => {
   const r = await post(form.id, { question: { index: 3, total: 10, label: 'x'.repeat(500) }, camera: 'on', frame: 'data:image/jpeg;base64,AAAA' });
-  assert.equal(r.status, 200); assert.deepEqual(await r.json(), { faces: true, live: false, sound: false, source: 'camera' });
+  assert.equal(r.status, 200); assert.deepEqual(await r.json(), { faces: true, live: false, sound: false, source: 'camera', pictures: false, every: 5 });
   const last = got.at(-1); assert.equal(last.sid, SID);
   assert.equal(last.body.question.index, 3); assert.ok(last.body.question.label.length <= 200); assert.equal(last.body.frame, 'data:image/jpeg;base64,AAAA');
 });
@@ -118,4 +119,33 @@ test('MySEB finds the site address even when APP_URL is not set', async () => {
     assert.notEqual(r?.code, 'APP_URL_MISSING', String(r?.message));
     void sent;
   } finally { if (keep.a) process.env.APP_URL = keep.a; if (keep.b) process.env.APP_BASE_URL = keep.b; }
+});
+
+
+test('the live room stream is relayed to the lecturer, and closed when the lecturer goes away', async () => {
+  const http = await import('node:http');
+  const app = express(); app.get('/events', (req, res) => { streamRoomEvents(formTarget('u1', form.id), res).catch((e) => res.status(e.status ?? 500).json({ error: e.message })); });
+  const srv = app.listen(0); const port = (srv.address() as any).port;
+  try {
+    const ac = new AbortController();
+    const r = await fetch(`http://127.0.0.1:${port}/events`, { signal: ac.signal });
+    assert.equal(r.status, 200); assert.match(r.headers.get('content-type') ?? '', /text\/event-stream/);
+    const reader = r.body!.getReader(); let text = '';
+    const t0 = Date.now();
+    while (!text.includes('data:') && Date.now() - t0 < 2000) { const { value, done } = await reader.read(); if (done) break; text += new TextDecoder().decode(value); }
+    assert.match(text, /"kinds":\["join"\]/, 'the message came through');
+    ac.abort();
+    for (let i = 0; i < 20 && !got.some((g) => g.eventsClosed); i++) await new Promise((x) => setTimeout(x, 50));
+    assert.ok(got.some((g) => g.eventsClosed === EXAM), 'MySEB was told the lecturer left, so nothing is held open');
+    // not a MySEB test yet: nothing to stream, and the room is told so (it then checks on a timer)
+    const r2 = await fetch(`http://127.0.0.1:${port}/events`); assert.equal(r2.status, 200);
+  } finally { srv.close(); void http; }
+});
+
+test('students waiting for the lecturer are limited, and the rest are told to come back later', async () => {
+  assert.ok(MAX_HELD_PULLS >= 100);
+  const ac = new AbortController();
+  const waits = Array.from({ length: 3 }, (_, i) => heldStudentSignalPull(`00000000-0000-4000-8000-00000000000${i}`, 0, ac.signal).catch((e) => e));
+  const done = await Promise.all(waits); ac.abort();
+  assert.ok(done.every((d) => !(d instanceof Error)), 'under the limit, everyone is served');
 });

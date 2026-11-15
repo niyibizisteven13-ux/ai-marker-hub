@@ -45,3 +45,23 @@ In the live room, **Show** chooses Face, Screen, or Face and screen; **If a stud
 - **Laptop app:** shares the whole main screen without a picker, so a student cannot pick a smaller window. While the screen is shared, the "screenshots show black" protection is lifted so the lecturer sees the exam instead of a black rectangle.
 - **Phone app:** the phone's in-app browser cannot share its screen, so a phone student shows their camera instead and is never penalised for it. Real screen capture on Android needs native code (MediaProjection) and is not built yet.
 - Stopping the share counts as leaving the test, once per stop, and the leave rule applies. Pictures of the screen stay in memory for about 3 minutes and are never saved.
+
+## How many students can be live at once (measured)
+`node myseb/scripts/loadtest-live.mjs <appUrl> <directUrl> <teacherKey> <students>` simulates a live class: every student sends heartbeats and status reports, holds a "wait for the lecturer" connection, and lecturers watch the instant stream. Measured on one 4-core machine that ALSO ran PostgreSQL and the test tool itself (so a real server with its own database does better):
+
+| Students live at once | A rule broken reaches the lecturer | Heartbeat (typical / slowest 5%) | Errors | Memory |
+|---|---|---|---|---|
+| 500 | 0.08 s | 4 ms / 11 ms | 0 | 170 MB |
+| 2,000 | 0.13 s | 6 ms / 45 ms | 0 | 480 MB |
+| 3,000 | 0.13 s (slowest 0.23 s) | 18 ms / 60 ms | 0 | 340 MB |
+| 5,100 | 0.15-0.2 s (slowest 1-3 s) | 70 ms / 300 ms (worst 3.8 s) | under 0.5% | 480 MB |
+
+Plan for about **3,000 students live at once on one machine**; 5,000 works but is at the edge (non-urgent updates take seconds). Beyond that, give MySEB its own machine and database (`MYSEB_URL`).
+The video itself does not go through the server (it goes from the student's computer to the lecturer's browser), so the lecturer's computer and internet line limit how many are *moving* at once (12 / 24 / 48 in the room's settings); all other students show a small picture.
+
+**What keeps the server from crashing under load**
+- Pictures are only uploaded by the students a lecturer is looking at (about 60 at a time), not by everyone; and a memory cap (`MYSEB_MAX_PICTURE_MB`, default 400) skips pictures before memory runs out.
+- Heartbeats are written to the database in one batch every 2 s; the live room list is built once and shared; the report rhythm slows in big rooms (5 s, 8 s, 12 s, 20 s).
+- Limits answer "busy, try again" instead of piling up: `MYSEB_MAX_INFLIGHT` (requests at once, 1500), `MYSEB_MAX_HELD` (waiting students per bwenge, 6000), `MYSEB_MAX_WAITERS` (8000), `MYSEB_MAX_STREAMS` (live rooms, 300), `MYSEB_MAX_ROOM_STREAMS` (per test, 12), `MYSEB_DB_POOL` (database connections, 30).
+- The MySEB process asks the system for the most open connections it may have, restarts by itself if it ever stops, and never gives up restarting.
+- `GET /myseb/_status` (no key) shows whether it runs; `GET /metrics` (teacher key) shows students, waiting connections, pictures, live rooms, database queue and event-loop delay.

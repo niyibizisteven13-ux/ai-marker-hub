@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { requireAuth } from '../../production/auth.js';
 import { reportWorkbook } from '../services/mySebReport.js';
 import logger from '../utils/logger.js';
-import { MySebError, assignmentTarget, downloadLinks, endAll, formTarget, frames, generateCode, iceServers, lecturerSignalPull, lecturerSignalPush, monitor, report, mySebConfigured, pauseAll, relayLive, resumeAll, sessionAction, setLiveMode, studentSignalPull, studentSignalPush, violations, type TargetLoader } from '../services/mySeb.js';
+import { MySebError, assignmentTarget, downloadLinks, endAll, formTarget, frames, generateCode, iceServers, lecturerSignalPull, lecturerSignalPush, monitor, report, mySebConfigured, pauseAll, relayLive, resumeAll, sessionAction, setLiveMode, studentSignalPull, heldStudentSignalPull, streamRoomEvents, studentSignalPush, violations, type TargetLoader } from '../services/mySeb.js';
 
 const userIdOf = (req: Request): string => (req as any).user?.userId;
 const run = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response) => {
@@ -32,7 +32,7 @@ export const liveSignalPullHandler = (req: Request, res: Response) => {
   const sid = (req as any).myseb?.sessionId;
   if (!sid) return res.status(204).end();
   const ac = new AbortController(); req.on('close', () => ac.abort());
-  studentSignalPull(String(sid), Number(req.query.after) || 0, ac.signal).then((r) => res.json(r)).catch(() => { if (!res.headersSent) res.status(204).end(); });
+  heldStudentSignalPull(String(sid), Number(req.query.after) || 0, ac.signal).then((r) => res.json(r)).catch((e) => { if (res.headersSent) return; if (e instanceof MySebError && e.status === 503) return res.status(503).set('Retry-After', '10').json({ error: 'busy' }); res.status(204).end(); });
 };
 export const liveSignalPushHandler = (req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'no-store');
@@ -54,6 +54,8 @@ function createMySebOwnerRouterFor(target: (userId: string, id: string) => Targe
   const r = Router();
   const t = (req: Request) => target(userIdOf(req), p(req, 'id'));
   r.post('/:id/myseb/code', requireAuth, run(async (req, res) => { res.status(201).json(await generateCode(t(req))); }));
+  // Instant updates (Server-Sent Events): one open stream per live room; it only says "something changed".
+  r.get('/:id/myseb/events', requireAuth, run(async (req, res) => { await streamRoomEvents(t(req), res); }));
   r.get('/:id/myseb/monitor', requireAuth, run(async (req, res) => { res.json(await monitor(t(req), { frames: req.query.frames !== '0' })); }));
   r.get('/:id/myseb/frames', requireAuth, run(async (req, res) => { res.json(await frames(t(req), String(req.query.ids || '').split(',').filter(Boolean))); }));
   r.get('/:id/myseb/sessions/:sid/violations', requireAuth, run(async (req, res) => { res.json(await violations(t(req), p(req, 'sid'))); }));

@@ -45,6 +45,10 @@ export default function MySebLiveReporter({ kind, refId, total, status }: { kind
   const screenStreamRef = useRef<MediaStream | null>(null);
   const screenVideoRef = useRef<HTMLVideoElement>(null);
   const lastScreen = useRef(0);
+  // Pictures are sent only while a lecturer is looking at this student (the server says so in its answers), and the report rhythm
+  // slows down in a very big room. Everyone else sends only a few words of status.
+  const picturesRef = useRef(false);
+  const everyRef = useRef(5);
   const facesRef = useRef(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -66,7 +70,7 @@ export default function MySebLiveReporter({ kind, refId, total, status }: { kind
     closeAllRef.current = closeAll;
     const frame = (): string | undefined => {
       const v = videoRef.current;
-      if (!v || camRef.current !== 'on' || !facesRef.current || !v.videoWidth || Date.now() - lastFrame.current < 9500) return undefined;
+      if (!picturesRef.current || !v || camRef.current !== 'on' || !facesRef.current || !v.videoWidth || Date.now() - lastFrame.current < 9500) return undefined;
       const c = document.createElement('canvas'); c.width = 160; c.height = 120;
       const ctx = c.getContext('2d'); if (!ctx) return undefined;
       const r = Math.max(160 / v.videoWidth, 120 / v.videoHeight);   // fill the picture, cropping the edges
@@ -76,7 +80,7 @@ export default function MySebLiveReporter({ kind, refId, total, status }: { kind
     };
     const screenFrame = (): string | undefined => {
       const v = screenVideoRef.current;
-      if (!v || screenRef.current !== 'on' || !v.videoWidth || Date.now() - lastScreen.current < 4500) return undefined;
+      if (!picturesRef.current || !v || screenRef.current !== 'on' || !v.videoWidth || Date.now() - lastScreen.current < 4500) return undefined;
       const c = document.createElement('canvas'); c.width = 400; c.height = 225;
       const ctx = c.getContext('2d'); if (!ctx) return undefined;
       ctx.drawImage(v, 0, 0, 400, 225);
@@ -100,6 +104,9 @@ export default function MySebLiveReporter({ kind, refId, total, status }: { kind
         if (typeof b.faces === 'boolean') {
           // A phone's in-app browser cannot share its screen: it shows its camera instead, and that is never counted against the student.
           const canShare = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getDisplayMedia;
+          if (b.pictures === true && !picturesRef.current) { lastFrame.current = 0; lastScreen.current = 0; }   // someone just started looking: send a picture at once
+          picturesRef.current = b.pictures === true;
+          if (typeof b.every === 'number') everyRef.current = Math.max(3, Math.min(30, b.every));
           const src: Source = (b.source === 'screen' || b.source === 'both') && canShare ? b.source : 'camera';
           setFaces(b.faces); setLiveVideo(!!b.live); setSound(!!b.sound); setSource(src);
           const wantCam = b.faces && src !== 'screen', wantScreen = b.faces && src !== 'camera';
@@ -112,8 +119,10 @@ export default function MySebLiveReporter({ kind, refId, total, status }: { kind
       } catch { /* the heartbeat and the guard deal with real connection problems */ }
     };
     void send();
-    const t = window.setInterval(send, 5000);
-    return () => { stopped = true; window.clearInterval(t); closeAll(); streamRef.current?.getTracks().forEach((x) => x.stop()); streamRef.current = null; screenStreamRef.current?.getTracks().forEach((x) => x.stop()); screenStreamRef.current = null; };
+    let t = 0;
+    const tick = () => { t = window.setTimeout(async () => { await send(); if (!stopped) tick(); }, everyRef.current * 1000); };
+    tick();
+    return () => { stopped = true; window.clearTimeout(t); closeAll(); streamRef.current?.getTracks().forEach((x) => x.stop()); streamRef.current = null; screenStreamRef.current?.getTracks().forEach((x) => x.stop()); screenStreamRef.current = null; };
   }, [live, kind, refId, total]);
 
   // Live video: answer the lecturer's "watch" with a small stream.
@@ -181,6 +190,7 @@ export default function MySebLiveReporter({ kind, refId, total, status }: { kind
         try {
           const res = await fetch(`${base}/signal?after=${after}`, { credentials: 'same-origin', signal: ac.signal });
           if (res.status === 204) { await new Promise((r) => setTimeout(r, 1000)); continue; }
+          if (res.status === 503) { await new Promise((r) => setTimeout(r, 10_000)); continue; }   // the server is busy: come back later, do not pile on
           const b = await res.json(); after = b.next ?? after;
           for (const m of b.msgs ?? []) await handle(m).catch(() => undefined);
         } catch { if (stopped) return; await new Promise((r) => setTimeout(r, 2000)); }
