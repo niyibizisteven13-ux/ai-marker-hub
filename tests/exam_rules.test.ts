@@ -45,7 +45,7 @@ test('face watch: several people are reported once per episode', () => {
 
 test('exam settings are bounded and the roster rule needs a class', () => {
   const e = normalizeExam({ enabled: true, minutes: 9999, camera: 'pause', graceSeconds: 1, requireRoster: true, courseId: 'nope', extra: 1 });
-  assert.deepEqual(e, { enabled: true, minutes: 600, camera: 'pause', graceSeconds: 3, requireRoster: false, leaveAction: 'record', maxLeaves: 3, requireFullscreen: false });
+  assert.deepEqual(e, { enabled: true, minutes: 600, camera: 'pause', graceSeconds: 3, requireRoster: false, leaveAction: 'record', maxLeaves: 3, requireFullscreen: false, requireSeb: false, sebKeys: [] });
   assert.equal(normalizeExam(undefined).enabled, false);
   assert.equal(normalizeExam({ camera: 'weird' }).camera, 'off');
   const ok = normalizeExam({ enabled: true, courseId: '123e4567-e89b-12d3-a456-426614174000', requireRoster: true });

@@ -5,6 +5,7 @@ import { PdfViewer } from './PdfViewer';
 import { FileThumb, PreviewDialog, type PreviewSource } from './FilePreview';
 import { Card, Empty, PageShell, SectionTabs, Stat, StatRow, Toolbar, primaryBtn, relative } from './workspace/Shell';
 import CoursesPage from './CoursesPage';
+import CodeTestsEditor, { BLANK_CONFIG, type CodeTestsConfig } from './CodeTestsEditor';
 
 /**
  * Tasks: the owner sets a task (text and/or files) and shares one link; people submit through it in any format,
@@ -14,8 +15,10 @@ import CoursesPage from './CoursesPage';
 
 interface StoredFile { id: string; name: string; mime: string; size: number }
 interface MarkStatus { state: 'queued' | 'marking' | 'marked' | 'needs_review' | 'failed' | 'waiting_scheme'; total: number | null; maxTotal: number | null; percent: number | null; released: boolean; error?: string }
-interface Submission { id: string; studentName: string; studentId?: string; files: StoredFile[]; text?: string; submittedAt: string; late: boolean; resubmissions: number; marking?: MarkStatus; resultLink?: string; receiptCode?: string }
-interface Assignment { id: string; title: string; instructions: string; taskFiles: StoredFile[]; dueAt: string | null; open: boolean; link: string; createdAt: string; submissions: Submission[]; counts: { submitted: number; late: number }; roster?: Array<{ id: string; name: string }>; hardDeadline?: boolean; notSubmitted?: Array<{ id: string; name: string }>; autoMark?: boolean; schemeFiles?: StoredFile[]; examId?: string | null }
+interface Submission { id: string; studentName: string; studentId?: string; files: StoredFile[]; text?: string; submittedAt: string; late: boolean; resubmissions: number; marking?: MarkStatus; resultLink?: string; receiptCode?: string; codeResult?: CodeResultView }
+interface CodeTestView { name: string; passed: boolean; hidden: boolean; points: number; earned: number; ms: number; reason?: string; got?: string; expected?: string; input?: string; stderr?: string }
+interface CodeResultView { runner: string; compileError?: string; error?: string; earned: number; max: number; passed: number; total: number; tests: CodeTestView[] }
+interface Assignment { id: string; title: string; instructions: string; taskFiles: StoredFile[]; dueAt: string | null; open: boolean; link: string; createdAt: string; submissions: Submission[]; counts: { submitted: number; late: number }; roster?: Array<{ id: string; name: string }>; hardDeadline?: boolean; notSubmitted?: Array<{ id: string; name: string }>; autoMark?: boolean; schemeFiles?: StoredFile[]; examId?: string | null; codeTests?: (CodeTestsConfig & { tests: Array<{ name: string; input: string; expected: string; points: number; hidden: boolean }> }) | null }
 
 /** The automatic marking state of one hand-in, as a small coloured label. */
 function MarkChip({ m }: { m?: MarkStatus }) {
@@ -142,6 +145,8 @@ function CreateForm({ onCreated, onCancel }: { onCreated: (a: Assignment) => voi
   const [autoMark, setAutoMark] = useState(false);
   const [roster, setRoster] = useState('');
   const [hardDeadline, setHardDeadline] = useState(false);
+  const [codeOn, setCodeOn] = useState(false);
+  const [code, setCode] = useState<CodeTestsConfig>(BLANK_CONFIG);
   const [scheme, setScheme] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -154,6 +159,7 @@ function CreateForm({ onCreated, onCancel }: { onCreated: (a: Assignment) => voi
       if (dueAt) form.append('dueAt', new Date(dueAt).toISOString());
       if (roster.trim()) form.append('roster', roster);
       if (dueAt && hardDeadline) form.append('hardDeadline', 'true');
+      if (codeOn) form.append('codeTests', JSON.stringify(code));
       for (const f of files) form.append('files', f, f.name);
       if (autoMark) { form.append('autoMark', 'true'); for (const f of scheme) form.append('scheme', f, f.name); }
       onCreated(await json<Assignment>(await authFetch('/api/assignments', { method: 'POST', body: form })));
@@ -207,6 +213,16 @@ function CreateForm({ onCreated, onCancel }: { onCreated: (a: Assignment) => voi
       </div>
       <div className="rounded-xl border border-white/[0.1] bg-white/[0.02] p-3">
         <label className="flex cursor-pointer items-start gap-3">
+          <input type="checkbox" checked={codeOn} onChange={(e) => setCodeOn(e.target.checked)} className="mt-1 h-4 w-4 accent-[var(--brand)]" />
+          <span>
+            <span className="block text-[13.5px] font-semibold text-neutral-100">Test programs automatically</span>
+            <span className="block text-[12px] leading-relaxed text-neutral-400">Students hand in code (a file or a whole folder). Each program is run against your tests and marked by how many it passes.</span>
+          </span>
+        </label>
+        {codeOn && <div className="mt-3"><CodeTestsEditor value={code} onChange={setCode} /></div>}
+      </div>
+      <div className="rounded-xl border border-white/[0.1] bg-white/[0.02] p-3">
+        <label className="flex cursor-pointer items-start gap-3">
           <input type="checkbox" checked={autoMark} onChange={(e) => setAutoMark(e.target.checked)} className="mt-1 h-4 w-4 accent-[var(--brand)]" />
           <span>
             <span className="block text-[13.5px] font-semibold text-neutral-100">Mark each hand-in automatically</span>
@@ -226,10 +242,71 @@ function CreateForm({ onCreated, onCancel }: { onCreated: (a: Assignment) => voi
       {error && <p className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[13px] text-rose-300">{error}</p>}
       <div className="flex flex-wrap justify-end gap-2">
         <button type="button" onClick={onCancel} className="rounded-xl px-4 py-2 text-[13.5px] text-neutral-300 hover:bg-white/5">Cancel</button>
-        <button type="button" disabled={busy || !title.trim() || (!instructions.trim() && !files.length) || (autoMark && !scheme.length)} onClick={() => void submit()} className="inline-flex items-center gap-2 rounded-xl bg-[var(--brand)] px-4 py-2 text-[13.5px] font-semibold text-white hover:bg-[var(--brand-strong)] disabled:opacity-40">
+        <button type="button" disabled={busy || !title.trim() || (!instructions.trim() && !files.length) || (autoMark && !scheme.length) || (codeOn && !code.tests.some((t) => t.expected.trim()))} onClick={() => void submit()} className="inline-flex items-center gap-2 rounded-xl bg-[var(--brand)] px-4 py-2 text-[13.5px] font-semibold text-white hover:bg-[var(--brand-strong)] disabled:opacity-40">
           {busy ? <Loader2 size={15} className="animate-spin" /> : <Link2 size={15} />}Create and get the link
         </button>
       </div>
+    </section>
+  );
+}
+
+/** What running the lecturer's tests on one hand-in gave: each test with what the program printed. */
+function CodeResultPanel({ r }: { r: CodeResultView }) {
+  return (
+    <section aria-label="Test results" className="overflow-hidden rounded-xl border border-white/[0.08] bg-[var(--ws-card)]">
+      <header className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-2 text-[12.5px]">
+        <span className="font-semibold text-neutral-100">Code tests</span>
+        <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${r.passed === r.total ? 'bg-emerald-500/15 text-emerald-300' : r.passed ? 'bg-amber-500/15 text-amber-300' : 'bg-rose-500/15 text-rose-300'}`}>{r.passed} of {r.total} passed</span>
+        <span className="ml-auto tabular-nums text-neutral-400">{r.earned} / {r.max} points</span>
+      </header>
+      {(r.error || r.compileError) && <pre className="max-h-48 overflow-auto whitespace-pre-wrap bg-rose-500/[0.07] px-3 py-2 font-mono text-[11.5px] text-rose-200">{r.error ?? `It did not compile:\n${r.compileError}`}</pre>}
+      <ul className="divide-y divide-white/[0.05]">
+        {r.tests.map((t, i) => (
+          <li key={i} className="px-3 py-2 text-[12.5px]">
+            <p className="flex items-center gap-2"><span aria-hidden="true">{t.passed ? '✓' : '✗'}</span><span className={`font-medium ${t.passed ? 'text-emerald-300' : 'text-rose-300'}`}>{t.passed ? 'Passed' : t.reason === 'timeout' ? 'Too slow' : t.reason === 'memory' ? 'Used too much memory' : t.reason === 'error' ? 'Crashed' : t.reason === 'output' ? 'Printed too much' : t.reason === 'compile' ? 'Did not compile' : 'Wrong output'}</span><span className="text-neutral-200">{t.name}{t.hidden ? ' (hidden)' : ''}</span><span className="ml-auto tabular-nums text-neutral-500">{t.earned}/{t.points} · {t.ms} ms</span></p>
+            {!t.passed && t.reason !== 'compile' && (
+              <div className="mt-1.5 grid gap-1.5 font-mono text-[11.5px] sm:grid-cols-2">
+                <div><span className="block text-[10.5px] uppercase tracking-wide text-neutral-500">Expected</span><pre className="whitespace-pre-wrap rounded bg-black/20 p-1.5 text-neutral-200">{t.expected || ' '}</pre></div>
+                <div><span className="block text-[10.5px] uppercase tracking-wide text-neutral-500">Printed</span><pre className="whitespace-pre-wrap rounded bg-black/20 p-1.5 text-neutral-200">{t.got || ' '}</pre></div>
+                {t.stderr && <div className="sm:col-span-2"><span className="block text-[10.5px] uppercase tracking-wide text-neutral-500">Error message</span><pre className="whitespace-pre-wrap rounded bg-black/20 p-1.5 text-rose-200">{t.stderr}</pre></div>}
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** The tests of a task: run them again, or change them (for example after fixing a wrong expected output). */
+function CodeTestsCard({ a, onChanged }: { a: Assignment; onChanged: () => Promise<void> }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<CodeTestsConfig>(() => a.codeTests as CodeTestsConfig);
+  const [status, setStatus] = useState<{ available: boolean; reason: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  useEffect(() => { authFetch('/api/assignments/code-status').then((r) => r.json()).then(setStatus).catch(() => undefined); }, []);
+  const run = async () => {
+    setBusy(true); setMsg(null);
+    try { const r = await json<{ started: number }>(await authFetch(`/api/assignments/${a.id}/run-tests`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })); setMsg(`Running the tests on ${r.started} hand-in${r.started === 1 ? '' : 's'}…`); await onChanged(); }
+    catch (e) { setMsg(e instanceof Error ? e.message : 'Could not run the tests.'); } finally { setBusy(false); }
+  };
+  const save = async () => {
+    setBusy(true); setMsg(null);
+    try { await json(await authFetch(`/api/assignments/${a.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ codeTests: draft }) })); setEditing(false); setMsg('Tests saved. Run them again to mark the hand-ins with the new tests.'); await onChanged(); }
+    catch (e) { setMsg(e instanceof Error ? e.message : 'Could not save the tests.'); } finally { setBusy(false); }
+  };
+  const n = a.codeTests!.tests.length;
+  return (
+    <section aria-label="Code tests" className="rounded-2xl border border-white/[0.1] bg-[var(--ws-card)] p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="flex-1 text-[14px] font-semibold text-white">Code tests · {n} test{n === 1 ? '' : 's'} · {a.codeTests!.language}</h2>
+        <button type="button" disabled={busy || !status?.available} onClick={() => void run()} className="inline-flex items-center gap-1.5 rounded-xl border border-white/[0.14] px-3 py-1.5 text-[12.5px] font-medium text-neutral-200 hover:bg-white/5 disabled:opacity-40">{busy ? <Loader2 size={13} className="animate-spin" /> : null}Run tests again</button>
+        <button type="button" onClick={() => { setDraft(a.codeTests as CodeTestsConfig); setEditing((v) => !v); }} className="rounded-xl border border-white/[0.14] px-3 py-1.5 text-[12.5px] font-medium text-neutral-200 hover:bg-white/5">{editing ? 'Cancel' : 'Change tests'}</button>
+      </div>
+      {status && !status.available && <p role="alert" className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12.5px] text-amber-200">{status.reason}</p>}
+      {msg && <p role="status" className="mt-2 text-[12.5px] text-neutral-300">{msg}</p>}
+      {editing && (<div className="mt-3"><CodeTestsEditor value={draft} onChange={setDraft} /><div className="mt-3 flex justify-end"><button type="button" disabled={busy} onClick={() => void save()} className="rounded-xl bg-[var(--brand)] px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-40">Save tests</button></div></div>)}
     </section>
   );
 }
@@ -243,6 +320,8 @@ function Dashboard({ id, onBack, onMarkAll, autoMark = false }: { id: string; on
     try { setA(await json<Assignment>(await authFetch(`/api/assignments/${id}`))); } catch (e) { setError(e instanceof Error ? e.message : 'Could not load.'); }
   }, [id]);
   useEffect(() => { void load(); const t = window.setInterval(() => void load(), 20_000); return () => window.clearInterval(t); }, [load]);
+  // The open hand-in follows the latest data (a test result arrives while it is open).
+  useEffect(() => { if (open && a) { const fresh = a.submissions.find((s) => s.id === open.id); if (fresh && fresh !== open) setOpen(fresh); } }, [a]); // eslint-disable-line react-hooks/exhaustive-deps
   const toggle = async () => { if (a) setA(await json<Assignment>(await authFetch(`/api/assignments/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ open: !a.open }) }))); };
   const [releasing, setReleasing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -336,6 +415,7 @@ function Dashboard({ id, onBack, onMarkAll, autoMark = false }: { id: string; on
       {error && <p className="mt-3 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[13px] text-rose-300">{error}</p>}
 
       <div className="mt-4"><ShareBox link={a.link} title={a.title} /></div>
+      {a.codeTests && <div className="mt-4"><CodeTestsCard a={a} onChanged={load} /></div>}
 
       {a.notSubmitted && a.notSubmitted.length > 0 && (
         <details className="mt-4 rounded-[14px] border border-amber-500/25 bg-amber-500/[0.06] px-4 py-3">
@@ -411,6 +491,7 @@ function Dashboard({ id, onBack, onMarkAll, autoMark = false }: { id: string; on
               <button type="button" onClick={() => setOpen(null)} className="rounded-lg p-2 text-neutral-400 hover:bg-white/10 hover:text-white" aria-label="Close"><X size={18} /></button>
             </header>
             <div className="flex-1 space-y-3 overflow-y-auto p-4">
+              {open.codeResult && <CodeResultPanel r={open.codeResult} />}
               {open.text && (
                 <figure className="overflow-hidden rounded-xl border border-white/[0.08]">
                   <figcaption className="border-b border-white/[0.06] bg-[var(--ws-card)] px-3 py-2 text-[12.5px] text-neutral-300">Typed answer</figcaption>

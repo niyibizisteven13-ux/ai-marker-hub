@@ -7,6 +7,11 @@ import type { OwnedRecord, OwnedRecordStore } from '../storage/ownedRecordStore.
 import type { MarkStatus, TaskMarker } from './autoMark.js';
 import { imagesToPdf, typedToPdf } from '../exams/inputs.js';
 import { CODE_EXT, SHEET_EXT, SLIDE_EXT, VIDEO_EXT, fileToPdf, looksTextual, mergePdfs } from './handIn.js';
+import JSZip from 'jszip';
+import { gradeCode, normalizeCodeTests, redactForStudent, type CodeResult, type CodeTestConfig } from '../codeRunner/grade.js';
+import { LANGUAGES } from '../codeRunner/languages.js';
+import { SKIP_DIRS } from '../../../shared/handInTypes.js';
+import type { CodeRunner } from '../codeRunner/types.js';
 
 /**
  * Assignments: a teacher sets a task (instructions and/or files), shares one link, and students hand in their
@@ -32,6 +37,9 @@ export interface AssignmentSubmission {
   /** Automatic marking: the script in the task's examination, or why it could not be added. */
   examSubmissionId?: string;
   markError?: string;
+  /** The result of running the lecturer's tests on this hand-in (tasks with code tests). */
+  codeResult?: CodeResult;
+  codeRunning?: boolean;
 }
 
 export interface AssignmentRecord extends OwnedRecord {
@@ -47,6 +55,8 @@ export interface AssignmentRecord extends OwnedRecord {
   schemeFiles?: StoredFile[];
   /** The examination that holds this task's marked scripts (created with the first automatic marking). */
   examId?: string;
+  /** Tests that run each handed-in program (language, inputs and expected outputs, points). */
+  codeTests?: CodeTestConfig;
   /** The class list (registration number and name). When set, only these students can hand in, under their own name. */
   roster?: RosterEntry[];
   /** Refuse hand-ins after the due date instead of marking them late. */
@@ -143,7 +153,12 @@ export function createAssignmentService(deps: {
   ensureStorage?: (ownerId: string, bytes: number, forOthers: boolean) => Promise<void>;
   /** Marks hand-ins as they arrive (tasks with automatic marking) and serves students their released results. */
   marker?: TaskMarker;
+  /** The runner that runs students' programs (Docker); null when this server has none. */
+  codeRunner?: () => Promise<{ runner: CodeRunner | null; reason: string }>;
 }) {
+  // At most two programs run at a time, so a class handing in together cannot overload the server.
+  let running = 0;
+  const waiting: Array<() => void> = [];
   const drop = async (ownerId: string, files: StoredFile[]) => {
     for (const f of files) await deps.files.remove?.(ownerId, f.id).catch(() => undefined);
   };
@@ -178,7 +193,7 @@ export function createAssignmentService(deps: {
   const view = (a: AssignmentRecord) => ({
     id: a.id, title: a.title, instructions: a.instructions, taskFiles: a.taskFiles, dueAt: a.dueAt, open: a.open,
     link: linkOf(a.token), createdAt: a.createdAt, updatedAt: a.updatedAt,
-    autoMark: !!a.autoMark, schemeFiles: a.schemeFiles ?? [], examId: a.examId ?? null,
+    autoMark: !!a.autoMark, schemeFiles: a.schemeFiles ?? [], examId: a.examId ?? null, codeTests: a.codeTests ?? null,
     roster: a.roster ?? [], hardDeadline: !!a.hardDeadline, notSubmitted: notSubmitted(a),
     submissions: [...a.submissions].sort((x, y) => y.submittedAt.localeCompare(x.submittedAt)).map(({ resultToken, ...x }) => ({ ...x, receiptCode: x.id.slice(0, 8).toUpperCase(), ...(resultToken ? { resultLink: resultLinkOf(a.token, resultToken) } : {}) })),
     counts: { submitted: a.submissions.length, late: a.submissions.filter((s) => s.late).length },
@@ -203,7 +218,7 @@ export function createAssignmentService(deps: {
   return {
     linkOf,
 
-    async create(ownerId: string, input: { title?: unknown; instructions?: unknown; dueAt?: unknown; files?: Array<{ name: string; data: Buffer }>; autoMark?: unknown; scheme?: Array<{ name: string; data: Buffer }>; roster?: unknown; hardDeadline?: unknown }) {
+    async create(ownerId: string, input: { title?: unknown; instructions?: unknown; dueAt?: unknown; files?: Array<{ name: string; data: Buffer }>; autoMark?: unknown; scheme?: Array<{ name: string; data: Buffer }>; roster?: unknown; hardDeadline?: unknown; codeTests?: unknown }) {
       const title = clean(input.title, LIMITS.title);
       const instructions = clean(input.instructions, LIMITS.instructions);
       if (!title) throw new AssignmentError('TITLE_REQUIRED', 'Give the task a title.');
@@ -213,10 +228,12 @@ export function createAssignmentService(deps: {
       const autoMark = input.autoMark === true || input.autoMark === 'true';
       if (autoMark && !input.scheme?.length) throw new AssignmentError('SCHEME_REQUIRED', 'Attach the marking scheme so each hand-in can be marked as it arrives.');
       const roster = parseRoster(input.roster);
+      const codeTests = input.codeTests ? normalizeCodeTests(input.codeTests) : null;
+      if (input.codeTests && !codeTests) throw new AssignmentError('BAD_TESTS', 'Add at least one test with an expected output.');
       const taskFiles = await storeUploads(ownerId, input.files ?? [], 5);
       const schemeFiles = autoMark ? await storeUploads(ownerId, input.scheme ?? [], 5) : [];
       const token = randomBytes(12).toString('base64url');
-      const a = await deps.store.create(ownerId, { title, instructions, taskFiles, dueAt: due ? due.toISOString() : null, open: true, token, submissions: [], ...(autoMark ? { autoMark, schemeFiles } : {}), ...(roster.length ? { roster } : {}), ...(input.hardDeadline === true || input.hardDeadline === 'true' ? { hardDeadline: true } : {}) });
+      const a = await deps.store.create(ownerId, { title, instructions, taskFiles, dueAt: due ? due.toISOString() : null, open: true, token, submissions: [], ...(autoMark ? { autoMark, schemeFiles } : {}), ...(roster.length ? { roster } : {}), ...(input.hardDeadline === true || input.hardDeadline === 'true' ? { hardDeadline: true } : {}), ...(codeTests ? { codeTests } : {}) });
       await fs.mkdir(path.resolve(deps.tokenDir), { recursive: true, mode: 0o700 });
       await fs.writeFile(tokenFile(token), JSON.stringify({ id: a.id, ownerId }), { mode: 0o600 });
       return view(a);
@@ -239,7 +256,15 @@ export function createAssignmentService(deps: {
       const a = await load(ownerId, id);
       const v = view(a);
       const marks = deps.marker && a.examId ? await deps.marker.statuses(ownerId, a).catch(() => ({} as Record<string, MarkStatus>)) : {};
-      return { ...v, submissions: v.submissions.map((x) => ({ ...x, ...(marks[x.id] ? { marking: marks[x.id] } : x.markError ? { marking: { state: 'failed', total: null, maxTotal: null, percent: null, released: false, error: x.markError } } : {}) })) };
+      const codeMark = (x: AssignmentSubmission): { marking: MarkStatus } | Record<string, never> => {
+        if (!a.codeTests || a.autoMark) return {};
+        const sub = a.submissions.find((y) => y.id === x.id);
+        if (sub?.codeRunning) return { marking: { state: 'marking', total: null, maxTotal: null, percent: null, released: false } };
+        const c = sub?.codeResult;
+        if (!c) return {};
+        return { marking: { state: 'marked', total: c.earned, maxTotal: c.max, percent: c.max ? Math.round((c.earned / c.max) * 1000) / 10 : 0, released: false } };
+      };
+      return { ...v, submissions: v.submissions.map((x): typeof x & { marking?: MarkStatus } => ({ ...x, ...(a.codeTests && !a.autoMark ? codeMark(x) : {}), ...(marks[x.id] ? { marking: marks[x.id] } : x.markError ? { marking: { state: 'failed', total: null, maxTotal: null, percent: null, released: false, error: x.markError } } : {}) })) };
     },
 
     /** Turns automatic marking on or off, with a new marking scheme when one is sent. */
@@ -264,8 +289,10 @@ export function createAssignmentService(deps: {
       return deps.marker.release(ownerId, a, submissionIds?.length ? submissionIds : 'all');
     },
 
-    async update(ownerId: string, id: string, patch: { open?: unknown; dueAt?: unknown; title?: unknown; instructions?: unknown; roster?: unknown; hardDeadline?: unknown }) {
+    async update(ownerId: string, id: string, patch: { open?: unknown; dueAt?: unknown; title?: unknown; instructions?: unknown; roster?: unknown; hardDeadline?: unknown; codeTests?: unknown }) {
       await load(ownerId, id);
+      const tests = patch.codeTests === null ? null : patch.codeTests !== undefined ? normalizeCodeTests(patch.codeTests) : undefined;
+      if (patch.codeTests !== undefined && patch.codeTests !== null && !tests) throw new AssignmentError('BAD_TESTS', 'Add at least one test with an expected output.');
       const a = await deps.store.update(id, ownerId, (r) => {
         if (typeof patch.open === 'boolean') r.open = patch.open;
         if (patch.dueAt === null || patch.dueAt === '') r.dueAt = null;
@@ -274,6 +301,7 @@ export function createAssignmentService(deps: {
         if (typeof patch.instructions === 'string') r.instructions = clean(patch.instructions, LIMITS.instructions);
         if (typeof patch.roster === 'string') { const list = parseRoster(patch.roster); if (list.length) r.roster = list; else delete r.roster; }
         if (typeof patch.hardDeadline === 'boolean') { if (patch.hardDeadline) r.hardDeadline = true; else delete r.hardDeadline; }
+        if (tests === null) delete r.codeTests; else if (tests) r.codeTests = tests;
       });
       return view(a!);
     },
@@ -323,6 +351,26 @@ export function createAssignmentService(deps: {
       return { name: `${safe} marks.xlsx`, data: Buffer.from(await wb.xlsx.writeBuffer()) };
     },
 
+    /**
+     * Runs the code tests again (all hand-ins, or the given ones). They run in the background, a few at a time;
+     * the dashboard shows "marking" until each result arrives.
+     */
+    async runTests(ownerId: string, id: string, submissionIds?: string[]) {
+      const a = await load(ownerId, id);
+      if (!a.codeTests) throw new AssignmentError('NO_TESTS', 'This task has no code tests.', 409);
+      const status = await deps.codeRunner?.();
+      if (!status?.runner) throw new AssignmentError('NO_RUNNER', status?.reason ?? 'Code testing is not available on this server.', 503);
+      const ids = a.submissions.filter((s) => !submissionIds?.length || submissionIds.includes(s.id)).map((s) => s.id);
+      void runCodeTests(ownerId, id, ids);
+      return { started: ids.length };
+    },
+
+    /** Whether this server can run students' programs, and why not. */
+    async codeStatus() {
+      const s = await deps.codeRunner?.();
+      return { available: !!s?.runner, runner: s?.runner?.name ?? null, reason: s?.reason ?? 'Code testing is not set up on this server.' };
+    },
+
     /** Removes one student's hand-in (for example a test or a duplicate). */
     async removeSubmission(ownerId: string, id: string, submissionId: string) {
       const before = await load(ownerId, id);
@@ -343,7 +391,7 @@ export function createAssignmentService(deps: {
     async publicView(token: string) {
       const a = await byToken(token);
       const closed = !a.open || !!(a.hardDeadline && a.dueAt && Date.now() > Date.parse(a.dueAt));
-      return { title: a.title, instructions: a.instructions, dueAt: a.dueAt, open: !closed, autoMark: !!a.autoMark, rosterRequired: !!a.roster?.length, hardDeadline: !!a.hardDeadline, taskFiles: a.taskFiles.map((f, i) => ({ index: i, name: f.name, mime: f.mime, size: f.size })) };
+      return { title: a.title, instructions: a.instructions, dueAt: a.dueAt, open: !closed, autoMark: !!a.autoMark, rosterRequired: !!a.roster?.length, hardDeadline: !!a.hardDeadline, codeLanguage: a.codeTests ? LANGUAGES[a.codeTests.language].label : null, codeMain: a.codeTests ? LANGUAGES[a.codeTests.language].mains[0] : null, taskFiles: a.taskFiles.map((f, i) => ({ index: i, name: f.name, mime: f.mime, size: f.size })) };
     },
 
     /** A student's own result, through the private link they got when they handed in. */
@@ -351,6 +399,10 @@ export function createAssignmentService(deps: {
       const a = await byToken(token);
       const sub = /^[\w-]{8,24}$/.test(resultToken) ? a.submissions.find((x) => x.resultToken === resultToken) : undefined;
       if (!sub) throw new AssignmentError('NOT_FOUND', 'This result link is not valid.', 404);
+      if (a.codeTests && !a.autoMark) {
+        const shown = sub.codeResult ? redactForStudent(sub.codeResult, a.codeTests.showStudents) : null;
+        return { title: a.title, studentName: sub.studentName, state: 'code' as const, submittedAt: sub.submittedAt, code: sub.codeRunning || (!sub.codeResult && !sub.markError) ? { running: true } : a.codeTests.showStudents === 'none' ? { hidden: true } : shown };
+      }
       if (!a.autoMark || !deps.marker) return { title: a.title, studentName: sub.studentName, state: 'not_marked' as const, submittedAt: sub.submittedAt };
       return { ...(await deps.marker.result(a.ownerId, a, sub)), submittedAt: sub.submittedAt };
     },
@@ -420,7 +472,8 @@ export function createAssignmentService(deps: {
           reload: () => deps.store.get(a.id, a.ownerId),
         }).catch((e) => save({ markError: e instanceof Error ? e.message.slice(0, 200) : 'Could not be marked.' }).catch(() => undefined));
       }
-      return { receiptId: receipt.id.slice(0, 8).toUpperCase(), submittedAt: receipt.submittedAt, late, replaced: receipt.resubmissions > 0, files: files.length, resultLink: resultLinkOf(a.token, receipt.resultToken!), autoMark: !!a.autoMark };
+      if (a.codeTests) void runCodeTests(a.ownerId, a.id, [receipt.id]);
+      return { receiptId: receipt.id.slice(0, 8).toUpperCase(), submittedAt: receipt.submittedAt, late, replaced: receipt.resubmissions > 0, files: files.length, resultLink: resultLinkOf(a.token, receipt.resultToken!), autoMark: !!a.autoMark, codeTests: !!a.codeTests && a.codeTests.showStudents !== 'none' };
     },
 
     /**
@@ -453,6 +506,57 @@ export function createAssignmentService(deps: {
       return { title: a.title, scripts, roster, task, skipped };
     },
   };
+
+  /** The files of a hand-in as a program's source tree: folders (ZIP) are unpacked, typed text becomes a main file. */
+  async function sourceFiles(ownerId: string, s: AssignmentSubmission, a: AssignmentRecord): Promise<Array<{ path: string; data: Buffer }>> {
+    const out: Array<{ path: string; data: Buffer }> = [];
+    let total = 0;
+    const add = (p: string, data: Buffer) => { if (out.length < 200 && total + data.length < 20 * 1024 * 1024 && data.length <= 2 * 1024 * 1024) { total += data.length; out.push({ path: p, data }); } };
+    for (const f of s.files) {
+      if (/\.(zip)$/i.test(f.name)) {
+        const { data } = await deps.files.read(ownerId, f.id);
+        const zip: JSZip | null = await JSZip.loadAsync(data).catch(() => null);
+        if (!zip) continue;
+        const entries = (Object.values(zip.files) as JSZip.JSZipObject[]).filter((e) => !e.dir && !SKIP_DIRS.test(e.name) && !/(^|\/)\./.test(e.name)).slice(0, 400);
+        // A single wrapping folder ("project/main.py") is stripped so the main file is found at the top.
+        const roots = new Set(entries.map((e) => e.name.split('/')[0]));
+        const strip = roots.size === 1 && entries.every((e) => e.name.includes('/')) ? `${[...roots][0]}/` : '';
+        for (const e of entries) {
+          const claimed = Number((e as any)._data?.uncompressedSize) || 0;
+          if (claimed > 2 * 1024 * 1024) continue;
+          add(e.name.slice(strip.length), await e.async('nodebuffer'));
+        }
+      } else if (!IMAGE.test(f.name) && !AUDIO.test(f.name) && !/\.(mp4|mov|m4v|pdf)$/i.test(f.name)) {
+        add(f.name, (await deps.files.read(ownerId, f.id)).data);
+      }
+    }
+    // Code typed into the page counts as the main file when no source file was sent.
+    const spec = a.codeTests ? LANGUAGES[a.codeTests.language] : null;
+    if (spec && s.text && !out.some((o) => spec.ext.includes((o.path.split('.').pop() ?? '').toLowerCase()))) add(spec.mains[0], Buffer.from(s.text, 'utf8'));
+    return out;
+  }
+
+  async function slot() { if (running >= 2) await new Promise<void>((r) => waiting.push(r)); running++; }
+  function release() { running--; waiting.shift()?.(); }
+
+  async function runCodeTests(ownerId: string, id: string, submissionIds: string[]) {
+    const mark = (sid: string, patch: (x: AssignmentSubmission) => void) => deps.store.update(id, ownerId, (r) => { const x = r.submissions.find((y) => y.id === sid); if (x) patch(x); }).catch(() => undefined);
+    for (const sid of submissionIds) await mark(sid, (x) => { x.codeRunning = true; });
+    for (const sid of submissionIds) {
+      await slot();
+      try {
+        const a = await deps.store.get(id, ownerId);
+        const sub = a?.submissions.find((x) => x.id === sid);
+        if (!a?.codeTests || !sub) { await mark(sid, (x) => { delete x.codeRunning; }); continue; }
+        const status = await deps.codeRunner?.();
+        if (!status?.runner) { await mark(sid, (x) => { delete x.codeRunning; x.markError = status?.reason ?? 'Code testing is not available on this server.'; }); continue; }
+        const result = await gradeCode(status.runner, a.codeTests, await sourceFiles(ownerId, sub, a));
+        await mark(sid, (x) => { x.codeResult = result; delete x.codeRunning; delete x.markError; });
+      } catch (e) {
+        await mark(sid, (x) => { delete x.codeRunning; x.markError = e instanceof Error ? e.message.slice(0, 200) : 'The tests could not be run.'; });
+      } finally { release(); }
+    }
+  }
 
   /** One student's hand-in as one PDF, in the order the files were sent; typed text goes last. */
   async function studentPdf(ownerId: string, s: AssignmentSubmission): Promise<Buffer> {

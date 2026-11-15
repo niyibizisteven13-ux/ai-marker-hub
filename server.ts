@@ -46,6 +46,7 @@ import { createCoursesRouter } from './server/routes/courseRoutes.js';
 import { createPublicFormExamRouter, createOwnerFormExamRouter } from './server/routes/formExamRoutes.js';
 import { formExamService } from './server/services/formExam/runtime.js';
 import { ExamError } from './server/services/formExam/service.js';
+import { sebAllowed } from './server/services/formExam/seb.js';
 import { normalizeExam } from './shared/examRules.js';
 import { applyPool } from './shared/formPool.js';
 import { createStorageRouter } from './server/routes/storageRoutes.js';
@@ -1964,6 +1965,8 @@ const sanitizePublicFormSchema = (value: any): any => {
   const privateKeys = new Set([
     'answer', 'answerkey', 'correct', 'correctanswer', 'correctanswers', 'expectedanswer', 'modelanswer',
     'rubric', 'scoringrubric', 'selectionsettings', 'requirements', 'solution',
+    // Safe Exam Browser keys: anyone who knew one could fake the header.
+    'sebkeys',
   ]);
   if (Array.isArray(value)) return value.map(sanitizePublicFormSchema);
   if (!value || typeof value !== 'object') return value;
@@ -2066,6 +2069,7 @@ app.post('/api/forms/:id/submit', publicFormSubmitLimiter, async (req, res) => {
     if (normalizeExam(schema.exam).enabled) {
       const ref = (answers as any)._exam;
       try {
+        if (typeof ref?.sid === 'string') await formExamService().sebGuard(ref.sid, (keys) => sebAllowed(req, keys)).catch((e) => { if (e instanceof ExamError && e.code === 'SEB_REQUIRED') throw e; });
         examInfo = await formExamService().checkSubmit(ref?.sid, ref?.token, form.id);
         examSessionId = String(ref.sid);
       } catch (e) {

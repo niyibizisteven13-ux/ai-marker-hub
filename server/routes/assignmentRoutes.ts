@@ -48,9 +48,11 @@ function sendFile(res: Response, f: { data: Buffer; name: string; mime: string }
 
 export function createAssignmentsRouter() {
   const r = Router();
+  r.get('/code-status', run(async (_req, res) => res.json(await assignmentService().codeStatus())));
   r.get('/', run(async (req, res) => res.json({ assignments: await assignmentService().list(userIdOf(req)) })));
   r.post('/', withTaskFiles, run(async (req, res) => res.status(201).json(await assignmentService().create(userIdOf(req), { ...req.body, files: filesOf(req), scheme: filesOf(req, 'scheme') }))));
   r.post('/:id/auto-mark', withTaskFiles, run(async (req, res) => res.json(await assignmentService().setAutoMark(userIdOf(req), String(req.params.id), { autoMark: req.body?.autoMark, scheme: filesOf(req, 'scheme') }))));
+  r.post('/:id/run-tests', run(async (req, res) => res.json(await assignmentService().runTests(userIdOf(req), String(req.params.id), Array.isArray(req.body?.submissionIds) ? req.body.submissionIds.map(String) : undefined))));
   r.post('/:id/release', run(async (req, res) => res.json(await assignmentService().release(userIdOf(req), String(req.params.id), Array.isArray(req.body?.submissionIds) ? req.body.submissionIds.map(String) : undefined))));
   r.get('/:id', run(async (req, res) => res.json(await assignmentService().get(userIdOf(req), String(req.params.id)))));
   r.patch('/:id', run(async (req, res) => res.json(await assignmentService().update(userIdOf(req), String(req.params.id), req.body ?? {}))));

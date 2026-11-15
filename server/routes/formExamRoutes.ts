@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import logger from '../utils/logger.js';
 import { ExamError } from '../services/formExam/service.js';
 import { formExamService } from '../services/formExam/runtime.js';
+import { sebAllowed } from '../services/formExam/seb.js';
 
 export { setFormExamService } from '../services/formExam/runtime.js';
 
@@ -23,10 +24,13 @@ const token = (req: Request) => req.get('x-exam-token');
 
 export function createPublicFormExamRouter() {
   const r = Router();
-  r.post('/:formId/start', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.status(201).json(await formExamService().start(p(req, 'formId'), req.body ?? {})); }));
-  r.get('/session/:sid', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await formExamService().state(p(req, 'sid'), token(req))); }));
-  r.post('/session/:sid/event', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await formExamService().event(p(req, 'sid'), token(req), req.body ?? {})); }));
-  r.post('/session/:sid/break', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await formExamService().setBreak(p(req, 'sid'), token(req), req.body?.on)); }));
+  /** Tests that need Safe Exam Browser: every call must carry a header only that browser, with the right key, can make. */
+  const seb = (req: Request) => (keys: string[]) => sebAllowed(req, keys);
+  const guard = (req: Request) => formExamService().sebGuard(p(req, 'sid'), seb(req));
+  r.post('/:formId/start', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.status(201).json(await formExamService().start(p(req, 'formId'), req.body ?? {}, { seb: seb(req) })); }));
+  r.get('/session/:sid', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); await guard(req); res.json(await formExamService().state(p(req, 'sid'), token(req))); }));
+  r.post('/session/:sid/event', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); await guard(req); res.json(await formExamService().event(p(req, 'sid'), token(req), req.body ?? {})); }));
+  r.post('/session/:sid/break', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); await guard(req); res.json(await formExamService().setBreak(p(req, 'sid'), token(req), req.body?.on)); }));
   return r;
 }
 

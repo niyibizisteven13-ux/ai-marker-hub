@@ -23,10 +23,14 @@ export interface ExamSettings {
   maxLeaves: number;
   /** Ask for full screen at the start, and count leaving it like leaving the page. */
   requireFullscreen: boolean;
+  /** The test can only be taken in Safe Exam Browser (a free lockdown browser). */
+  requireSeb: boolean;
+  /** The Browser Exam Keys of your Safe Exam Browser configuration (64 hex characters each). Never sent to students. */
+  sebKeys: string[];
 }
 export type LeaveAction = 'record' | 'warn' | 'pause' | 'end';
 
-export const DEFAULT_EXAM: ExamSettings = { enabled: false, minutes: 60, camera: 'off', graceSeconds: 8, requireRoster: false, leaveAction: 'record', maxLeaves: 3, requireFullscreen: false };
+export const DEFAULT_EXAM: ExamSettings = { enabled: false, minutes: 60, camera: 'off', graceSeconds: 8, requireRoster: false, leaveAction: 'record', maxLeaves: 3, requireFullscreen: false, requireSeb: false, sebKeys: [] };
 
 export function normalizeExam(input: unknown): ExamSettings {
   const o = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
@@ -43,6 +47,12 @@ export function normalizeExam(input: unknown): ExamSettings {
     leaveAction: o.leaveAction === 'warn' || o.leaveAction === 'pause' || o.leaveAction === 'end' ? o.leaveAction : 'record',
     maxLeaves: num(o.maxLeaves, 1, 20, DEFAULT_EXAM.maxLeaves),
     requireFullscreen: o.requireFullscreen === true,
+    ...(() => {
+      const keys = (Array.isArray(o.sebKeys) ? o.sebKeys : typeof o.sebKeys === 'string' ? o.sebKeys.split(/[\s,;]+/) : []).map((k) => String(k).trim().toLowerCase()).filter((k) => /^[0-9a-f]{64}$/.test(k));
+      const unique = [...new Set(keys)].slice(0, 10);
+      // Required without a key means nobody can start (it fails closed); the form builder warns about it.
+      return { sebKeys: unique, requireSeb: o.requireSeb === true };
+    })(),
   };
 }
 

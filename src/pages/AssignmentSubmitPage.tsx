@@ -14,7 +14,7 @@ import logoUrl from '../assets/bwenge-logo.svg';
  * Submitting again before the owner closes it replaces the earlier submission.
  */
 
-interface Task { title: string; instructions: string; dueAt: string | null; open: boolean; rosterRequired?: boolean; hardDeadline?: boolean; taskFiles: Array<{ index: number; name: string; mime: string; size: number }> }
+interface Task { title: string; instructions: string; dueAt: string | null; open: boolean; rosterRequired?: boolean; hardDeadline?: boolean; codeLanguage?: string | null; codeMain?: string | null; taskFiles: Array<{ index: number; name: string; mime: string; size: number }> }
 const MAX_FILES = 10;
 const MAX_MB = 25;
 const ACCEPT = HAND_IN_ACCEPT;
@@ -33,7 +33,7 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
   const [needReceipt, setNeedReceipt] = useState(false);
   const [files, setFiles] = useState<Item[]>([]);
   const [open, setOpen] = useState<{ kind: 'mine'; index: number } | { kind: 'task'; src: PreviewSource } | null>(null);
-  const [state, setState] = useState<{ kind: 'idle' } | { kind: 'sending'; percent: number } | { kind: 'error'; message: string } | { kind: 'done'; receiptId: string; submittedAt: string; late: boolean; replaced: boolean; files?: number; resultLink?: string; autoMark?: boolean }>({ kind: 'idle' });
+  const [state, setState] = useState<{ kind: 'idle' } | { kind: 'sending'; percent: number } | { kind: 'error'; message: string } | { kind: 'done'; receiptId: string; submittedAt: string; late: boolean; replaced: boolean; files?: number; resultLink?: string; autoMark?: boolean; codeTests?: boolean }>({ kind: 'idle' });
 
   useEffect(() => {
     document.title = 'Submit · Bwenge';
@@ -131,10 +131,10 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
           <dt className="text-neutral-500">Sent</dt><dd>{state.files ? `${state.files} file${state.files === 1 ? '' : 's'}` : ''}{state.files && text.trim() ? ' and ' : ''}{text.trim() ? 'typed answer' : ''}</dd>
           <dt className="text-neutral-500">Time</dt><dd>{new Date(state.submittedAt).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</dd>
         </dl>
-        {state.autoMark && state.resultLink && (
+        {(state.autoMark || state.codeTests) && state.resultLink && (
           <div className="mt-5 rounded-xl border border-[var(--brand)]/30 bg-[var(--brand)]/[0.06] p-4 text-left">
             <p className="text-[13.5px] font-semibold text-neutral-900">Your result</p>
-            <p className="mt-1 text-[13px] text-neutral-600">Your answer is being marked. Keep this private link: your marks, feedback and marked paper appear there when your teacher releases them.</p>
+            <p className="mt-1 text-[13px] text-neutral-600">{state.codeTests && !state.autoMark ? 'Your program is being tested now. Keep this private link: the result appears there in a moment.' : 'Your answer is being marked. Keep this private link: your marks, feedback and marked paper appear there when your teacher releases them.'}</p>
             <div className="mt-3 flex flex-wrap gap-2">
               <a href={state.resultLink.replace(/^https?:\/\/[^/]+/, '')} className="inline-flex items-center gap-1.5 rounded-lg bg-[#1F1E1D] px-3 py-2 text-[13px] font-semibold text-white">Open my result page</a>
               <button type="button" onClick={() => { void navigator.clipboard?.writeText(state.resultLink!).catch(() => undefined); }} className="rounded-lg border border-neutral-300 px-3 py-2 text-[13px] font-medium hover:bg-neutral-50">Copy link</button>
@@ -179,6 +179,7 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
       ) : (
         <section className="mt-4 space-y-4 rounded-2xl bg-white p-5 shadow-sm">
           <h2 className="text-[16px] font-semibold">Your answer</h2>
+          {task.codeLanguage && <p className="rounded-xl bg-slate-100 px-3.5 py-3 text-[13.5px] leading-relaxed text-slate-700">This task is <strong>tested automatically</strong>. Write your program in <strong>{task.codeLanguage}</strong> and name the main file <span className="font-mono font-semibold">{task.codeMain}</span> (or send one source file, or a whole folder that contains it). Your program reads its input from the keyboard and prints its answer.</p>}
           <div className="grid gap-3 sm:grid-cols-2">
             {!task.rosterRequired && (
               <label className="block"><span className="mb-1 block text-[13px] font-medium text-neutral-700">Your full name</span>
