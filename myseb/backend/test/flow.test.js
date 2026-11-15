@@ -167,7 +167,7 @@ test('remoteMySebGuard protects an exam site that lives elsewhere (bwenge-style)
     assert.equal(ok.status, 200); assert.equal(await ok.text(), 'hello Rem');
     await call('/api/violation', { method: 'POST', headers: mk(s, 'dev-remote-1'), body: { type: 'leave' } });
     const paused = await fetch(ob + '/f/test', { headers: mk(s, 'dev-remote-1') });
-    assert.equal(paused.status, 403); assert.match(await paused.text(), /Exam paused/);
+    assert.equal(paused.status, 403); assert.equal((await paused.json()).code, 'MYSEB_PAUSED');
   } finally { srv.close(); }
 });
 
@@ -179,5 +179,47 @@ test('verify-code is rate limited per IP (default 10 a minute) so 6-digit codes 
   try {
     const codes = []; for (let i = 0; i < 12; i++) codes.push((await fetch(u, { method: 'POST' })).status);
     assert.deepEqual(codes.slice(0, 10), Array(10).fill(200)); assert.deepEqual(codes.slice(10), [429, 429]);
+  } finally { srv.close(); }
+});
+
+test('service-key gate + soft cookie issuer (what bwenge uses): mobile gets a cookie once, then API calls work with the cookie alone', async () => {
+  const { remoteMySebGuard } = await import('../src/remoteGuard.js');
+  const express = (await import('express')).default;
+  const ex = (await call('/api/exams', { method: 'POST', headers: T, body: { title: 'Svc' } })).json;
+  const other = (await call('/api/exams', { method: 'POST', headers: T, body: { title: 'Other' } })).json;
+  const c = (await call(`/api/exams/${ex.id}/generate-code`, { method: 'POST', headers: T })).json;
+  const phone = (await call('/api/verify-code', { method: 'POST', body: { code: c.code, studentName: 'Pho', deviceId: 'dev-phone-12', clientType: 'mobile' } })).json;
+  const desk = (await call('/api/verify-code', { method: 'POST', body: { code: c.code, studentName: 'Des', deviceId: 'dev-desk-123', clientType: 'desktop' } })).json;
+  const opts = (id) => ({ mysebUrl: base, serviceKey: 'tkey', examIdFor: () => id, cacheMs: 0 });
+  const site = express();
+  site.get('/forms/:id', remoteMySebGuard({ ...opts(ex.id), soft: true }), (_q, r) => r.send('shell'));   // page shell: never denies
+  site.use('/api', remoteMySebGuard({ ...opts(ex.id), bypass: (req) => req.get('x-owner') === '1' }));
+  site.get('/api/data', (req, res) => res.json({ who: req.myseb?.studentName ?? 'owner' }));
+  site.use('/other', remoteMySebGuard(opts(other.id)));
+  site.get('/other/x', (_q, r) => r.send('x'));
+  const srv = site.listen(0); const ob = `http://127.0.0.1:${srv.address().port}`;
+  const MUA = 'Mozilla MySEB/1.0 (mobile; android)';
+  try {
+    // plain browser: the shell loads (it holds no exam content) and the API is locked
+    assert.equal((await fetch(ob + '/forms/abc')).status, 200);
+    const locked = await fetch(ob + '/api/data'); assert.equal(locked.status, 403); assert.equal((await locked.json()).code, 'MYSEB_REQUIRED');
+    assert.equal((await fetch(ob + '/api/data', { headers: { 'x-owner': '1' } })).status, 200, 'owner bypass');
+    // phone: header on the shell request -> cookie
+    const shell = await fetch(ob + '/forms/abc', { headers: { 'X-MySEB-Key': phone.token, 'X-MySEB-Client': 'mobile', 'X-MySEB-Device': 'dev-phone-12', 'User-Agent': MUA } });
+    const cookie = shell.headers.get('set-cookie'); assert.match(cookie, /myseb_s=.*HttpOnly/);
+    // the page's own XHR carries only the cookie (and the app's UA)
+    const xhr = await fetch(ob + '/api/data', { headers: { Cookie: cookie.split(';')[0], 'User-Agent': MUA } });
+    assert.equal(xhr.status, 200); assert.equal((await xhr.json()).who, 'Pho');
+    assert.equal((await fetch(ob + '/api/data', { headers: { Cookie: cookie.split(';')[0], 'User-Agent': 'Chrome' } })).status, 403, 'cookie in normal Chrome');
+    // desktop: header on every request
+    const dh = { 'X-MySEB-Key': desk.token, 'X-MySEB-Client': 'desktop', 'X-MySEB-Device': 'dev-desk-123', 'User-Agent': 'Mozilla MySEB/1.0 (desktop)' };
+    assert.equal((await fetch(ob + '/api/data', { headers: dh })).status, 200);
+    assert.equal((await fetch(ob + '/other/x', { headers: dh })).status, 403, 'a session of exam A is useless on exam B');
+    // wrong service key -> the gate refuses, so the site fails closed
+    const bad = express(); bad.use(remoteMySebGuard({ ...opts(ex.id), serviceKey: 'nope' })); bad.get('/', (_q, r) => r.send('x'));
+    const bs = bad.listen(0); try { assert.equal((await fetch(`http://127.0.0.1:${bs.address().port}/`, { headers: dh })).status, 403); } finally { bs.close(); }
+    // MySEB down -> 503, not a free pass
+    const down = express(); down.use(remoteMySebGuard({ ...opts(ex.id), mysebUrl: 'http://127.0.0.1:9' })); down.get('/', (_q, r) => r.send('x'));
+    const ds = down.listen(0); try { assert.equal((await fetch(`http://127.0.0.1:${ds.address().port}/`, { headers: dh })).status, 503); } finally { ds.close(); }
   } finally { srv.close(); }
 });

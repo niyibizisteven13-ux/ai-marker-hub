@@ -46,6 +46,7 @@ test('tasks: hand-ins are marked as they arrive, released by the teacher, and re
   assert.equal((await svc.publicView(token)).autoMark, true);
 
   const r1 = await svc.submit(token, { studentName: 'Uwase Aline', text: 'x = 4' });
+  await until(() => calls.includes('scheme:scheme.pdf:true')); // the first hand-in creates the examination in the background: let it finish, or a busy machine makes a second one
   const r2 = await svc.submit(token, { studentName: 'Mugisha Eric', studentId: 'S3-014', files: [{ name: 'answers.pdf', data: await pdf() }] });
   assert.match(r1.resultLink, /^https:\/\/www\.bwenge\.space\/a\/[\w-]+\/result\/[\w-]+$/);
   await until(() => calls.includes('start'));
@@ -74,8 +75,10 @@ test('tasks: hand-ins are marked as they arrive, released by the teacher, and re
   // A wrong key or another task's token shows nothing.
   await assert.rejects(svc.publicResult(token, 'not-a-real-key'), /not valid/);
   // Resubmitting keeps the same private link.
-  const again = await svc.submit(token, { studentName: 'Uwase Aline', text: 'x = 4, checked' });
+  const again = await svc.submit(token, { studentName: 'Uwase Aline', receiptCode: r1.receiptId, text: 'x = 4, checked' });   // replacing needs the receipt from the first hand-in
   assert.equal(again.resultLink, r1.resultLink);
+  // Without the receipt, the same name cannot overwrite the first hand-in.
+  await assert.rejects(svc.submit(token, { studentName: 'Uwase Aline', text: 'someone else' }), /receipt code/);
   await until(() => calls.filter((c) => c === 'add:Uwase Aline').length === 2); // let that hand-in's background marking finish before the folder is removed
   await new Promise((r) => setTimeout(r, 30));
 });

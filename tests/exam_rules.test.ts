@@ -45,9 +45,17 @@ test('face watch: several people are reported once per episode', () => {
 
 test('exam settings are bounded and the roster rule needs a class', () => {
   const e = normalizeExam({ enabled: true, minutes: 9999, camera: 'pause', graceSeconds: 1, requireRoster: true, courseId: 'nope', extra: 1 });
-  assert.deepEqual(e, { enabled: true, minutes: 600, camera: 'pause', graceSeconds: 3, requireRoster: false, leaveAction: 'record', maxLeaves: 3, requireFullscreen: false, requireSeb: false, sebKeys: [] });
+  assert.deepEqual(e, { enabled: true, minutes: 600, camera: 'pause', graceSeconds: 3, requireRoster: false, leaveAction: 'record', maxLeaves: 3, requireFullscreen: false, requireSeb: false, sebKeys: [], requireMyseb: false });
   assert.equal(normalizeExam(undefined).enabled, false);
   assert.equal(normalizeExam({ camera: 'weird' }).camera, 'off');
   const ok = normalizeExam({ enabled: true, courseId: '123e4567-e89b-12d3-a456-426614174000', requireRoster: true });
   assert.equal(ok.requireRoster, true);
+});
+
+test('MySEB and Safe Exam Browser are alternatives: both set means Safe Exam Browser wins', () => {
+  assert.equal(normalizeExam({ requireMyseb: true }).requireMyseb, true);
+  const both = normalizeExam({ requireMyseb: true, requireSeb: true });
+  assert.equal(both.requireSeb, true); assert.equal(both.requireMyseb, false);
+  assert.equal(normalizeExam({ mysebExamId: '123e4567-e89b-12d3-a456-426614174000' }).mysebExamId, '123e4567-e89b-12d3-a456-426614174000');
+  assert.equal(normalizeExam({ mysebExamId: 'not-a-uuid' }).mysebExamId, undefined);
 });

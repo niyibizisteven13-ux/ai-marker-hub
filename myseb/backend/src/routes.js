@@ -206,20 +206,31 @@ api.post('/finish', wrap(async (req, res) => {
 
 /**
  * For exam sites that live elsewhere (e.g. bwenge.space): they cannot read our database, so they ask us.
- * They prove who they are with the exam secret that generate-code showed the teacher.
+ * Two ways to prove who they are:
+ *   X-MySEB-Service-Key: the server-to-server key (same as TEACHER_KEY) + body.examId  -> any session of that exam
+ *   X-MySEB-Exam-Secret: the secret generate-code showed the teacher                    -> sessions opened with that code
  */
-api.post('/gate', rateLimit({ windowMs: 60_000, max: 3000 }), wrap(async (req, res) => {
+api.post('/gate', rateLimit({ windowMs: 60_000, max: 6000 }), wrap(async (req, res) => {
   const secret = req.get('x-myseb-exam-secret');
-  const { key, client, device, userAgent } = req.body || {};
-  if (!secret || !key) return res.status(400).json({ allowed: false, reason: 'missing' });
-  const { rows } = await q(
-    `SELECT s.status, s.client_type, s.device_id, s.student_name, e.allow_extension, e.id AS exam_id
-       FROM exam_sessions s JOIN exam_codes c ON c.id=s.code_id JOIN exams e ON e.id=s.exam_id
-      WHERE s.token_hash=$1 AND c.secret_hash=$2`, [tokenHash(String(key)), secretHash(secret)]);
+  const service = req.get('x-myseb-service-key');
+  const { key, client, device, userAgent, examId } = req.body || {};
+  if (!key || (!secret && !service)) return res.status(400).json({ allowed: false, reason: 'missing' });
+  let rows;
+  if (service) {
+    if (!safeEqual(service, config.teacherKey) || !isUuid(examId)) return res.status(401).json({ allowed: false, reason: 'unauthorized' });
+    ({ rows } = await q(
+      `SELECT s.status, s.client_type, s.device_id, s.student_name, e.allow_extension, e.id AS exam_id
+         FROM exam_sessions s JOIN exams e ON e.id=s.exam_id WHERE s.token_hash=$1 AND s.exam_id=$2`, [tokenHash(String(key)), examId]));
+  } else {
+    ({ rows } = await q(
+      `SELECT s.status, s.client_type, s.device_id, s.student_name, e.allow_extension, e.id AS exam_id
+         FROM exam_sessions s JOIN exam_codes c ON c.id=s.code_id JOIN exams e ON e.id=s.exam_id
+        WHERE s.token_hash=$1 AND c.secret_hash=$2`, [tokenHash(String(key)), secretHash(secret)]));
+  }
   const s = rows[0];
   if (!s) return res.json({ allowed: false, reason: 'MySEB Needed' });
   const markerOk = s.client_type === 'extension' ? s.allow_extension && client === 'extension' : /MySEB\//.test(userAgent || '');
   if (client !== s.client_type || !markerOk || (s.client_type !== 'mobile' && device !== s.device_id)) return res.json({ allowed: false, reason: 'MySEB Needed' });
   if (s.status !== 'IN_EXAM') return res.json({ allowed: false, reason: s.status });
-  res.json({ allowed: true, studentName: s.student_name, examId: s.exam_id });
+  res.json({ allowed: true, studentName: s.student_name, examId: s.exam_id, clientType: s.client_type });
 }));

@@ -27,6 +27,7 @@ import { AlignLeft, AtSign, Calendar, CheckSquare, ChevronDownSquare, CircleDot,
 import DynamicForm from './DynamicForm';
 import { copyToClipboard } from '../utils/copyToClipboard';
 import { authFetch } from '../utils/authFetch';
+import MySebPanel from './MySebPanel';
 
 /* ------------------------------------------------------------------ types */
 
@@ -424,7 +425,7 @@ const SparkIcon = () => (
 /* ------------------------------------------------------- small components */
 
 /** Timed test: length, camera rule and the class whose accommodations (extra time, no camera…) apply. */
-function ExamPanel({ exam, onChange }: { exam: ExamSettings; onChange: (e: ExamSettings) => void }) {
+function ExamPanel({ exam, onChange, formId }: { exam: ExamSettings; onChange: (e: ExamSettings) => void; formId?: string }) {
   const [classes, setClasses] = useState<Array<{ id: string; name: string; code: string; students: number }>>([]);
   useEffect(() => {
     if (!exam.enabled) return;
@@ -433,6 +434,8 @@ function ExamPanel({ exam, onChange }: { exam: ExamSettings; onChange: (e: ExamS
   const set = (patch: Partial<ExamSettings>) => onChange(normalizeExam({ ...exam, ...patch }));
   return (
     <div className="space-y-2">
+      <Toggle label="Require MySEB (secure exam app)" checked={exam.requireMyseb} onChange={v => set({ requireMyseb: v, ...(v ? { requireSeb: false } : {}) })} hint="Students can only open this test inside the MySEB app on a laptop or phone (or its Chrome extension). The device is locked, and leaving the test is recorded and can pause it. Works for any quiz or test, timed or not." />
+      {exam.requireMyseb && <MySebPanel formId={formId} onExamId={(id) => onChange(normalizeExam({ ...exam, mysebExamId: id }))} />}
       <Toggle label="Timed test" checked={exam.enabled} onChange={v => set({ enabled: v })} hint="The server keeps the clock. Students start with their registration number, and their time, breaks and camera exemption come from your class list." />
       {exam.enabled && (
         <div className="space-y-3 rounded-lg border border-[#E0E0E0] bg-white p-3">
@@ -460,7 +463,7 @@ function ExamPanel({ exam, onChange }: { exam: ExamSettings; onChange: (e: ExamS
           {(exam.leaveAction === 'pause' || exam.leaveAction === 'end') && (
             <Field label="Allowed times out of the page"><input type="number" min={1} max={20} className={inp} value={exam.maxLeaves} onChange={e => set({ maxLeaves: Number(e.target.value) })} /></Field>
           )}
-          <Toggle label="Require Safe Exam Browser" checked={exam.requireSeb} onChange={v => set({ requireSeb: v })} hint="A free lockdown browser (safeexambrowser.org) that blocks new tabs and other programs. Students must open the test inside it. Needs the key below." />
+          <Toggle label="Require Safe Exam Browser" checked={exam.requireSeb} onChange={v => set({ requireSeb: v, ...(v ? { requireMyseb: false } : {}) })} hint="A free lockdown browser (safeexambrowser.org) that blocks new tabs and other programs. Students must open the test inside it. Needs the key below." />
           {exam.requireSeb && exam.sebKeys.length === 0 && <p role="alert" className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">Add the Browser Exam Key below, or nobody will be able to start this test.</p>}
           {(exam.requireSeb || exam.sebKeys.length > 0) && (
             <Field label="Browser Exam Key(s)" hint="In the SEB configuration tool, copy the Browser Exam Key (64 characters). One per line if students use more than one configuration. Keep it private: it is never sent to students.">
@@ -1173,7 +1176,7 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, onUpda
                 {state.isQuiz && <Toggle label="Show answers after submitting" checked={state.quizShowAnswers} onChange={v => setField('quizShowAnswers', v)} hint="Respondents see their score, which answers were right and the correct ones. Turn off to show the score only." />}
                 <div className="space-y-1 rounded-xl border border-[#E0E0E0] bg-[#F8F9FA] px-3 py-2">
                   <p className="text-xs font-bold uppercase tracking-wider text-[#5F6368]">Test protection</p>
-                  <ExamPanel exam={state.exam} onChange={e => setField('exam', e)} />
+                  <ExamPanel exam={state.exam} onChange={e => setField('exam', e)} formId={/\/forms\/([^/?#]+)/.exec(shareUrl ?? '')?.[1]} />
                   <TestDesignPanel state={state} setField={setField} />
                   <Toggle label="Block pasting into typed answers" checked={state.blockPaste} onChange={v => setField('blockPaste', v)} hint="Students must type short and long answers themselves. Dropping text in is blocked too." />
                   <Toggle label="Shuffle question order" checked={state.shuffleQuestions} onChange={v => setField('shuffleQuestions', v)} hint="Each student sees a different order. Not used when questions depend on earlier answers." />

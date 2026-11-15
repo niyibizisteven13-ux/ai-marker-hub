@@ -27,10 +27,14 @@ export interface ExamSettings {
   requireSeb: boolean;
   /** The Browser Exam Keys of your Safe Exam Browser configuration (64 hex characters each). Never sent to students. */
   sebKeys: string[];
+  /** Students must open this test or assignment inside the MySEB app (or its Chrome extension): the device is locked and leaving is reported. */
+  requireMyseb: boolean;
+  /** The matching exam on the MySEB server. Created the first time the lecturer asks for a code. Never shown to students. */
+  mysebExamId?: string;
 }
 export type LeaveAction = 'record' | 'warn' | 'pause' | 'end';
 
-export const DEFAULT_EXAM: ExamSettings = { enabled: false, minutes: 60, camera: 'off', graceSeconds: 8, requireRoster: false, leaveAction: 'record', maxLeaves: 3, requireFullscreen: false, requireSeb: false, sebKeys: [] };
+export const DEFAULT_EXAM: ExamSettings = { enabled: false, minutes: 60, camera: 'off', graceSeconds: 8, requireRoster: false, leaveAction: 'record', maxLeaves: 3, requireFullscreen: false, requireSeb: false, sebKeys: [], requireMyseb: false };
 
 export function normalizeExam(input: unknown): ExamSettings {
   const o = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
@@ -53,6 +57,9 @@ export function normalizeExam(input: unknown): ExamSettings {
       // Required without a key means nobody can start (it fails closed); the form builder warns about it.
       return { sebKeys: unique, requireSeb: o.requireSeb === true };
     })(),
+    // MySEB and Safe Exam Browser are alternatives: if both were set, Safe Exam Browser wins (a student cannot be inside both).
+    requireMyseb: o.requireMyseb === true && o.requireSeb !== true,
+    ...(typeof o.mysebExamId === 'string' && /^[0-9a-f-]{36}$/i.test(o.mysebExamId) ? { mysebExamId: o.mysebExamId } : {}),
   };
 }
 

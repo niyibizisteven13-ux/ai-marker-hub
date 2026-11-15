@@ -63,3 +63,6 @@ data/assignment-links/
 data/assignment-files/
 __pycache__/
 dump.rdb
+
+# MySEB build output
+myseb/dist/
