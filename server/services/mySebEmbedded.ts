@@ -48,7 +48,11 @@ export async function mountEmbeddedMySeb(app: Express, sitePort: number): Promis
   let child: ChildProcess | null = null, stopping = false, restarts = 0;
   const state: { running: boolean; restarts: number; lastExit: { code: number | null; signal: string | null; at: string } | null } = { running: false, restarts: 0, lastExit: null };
   const start = () => {
-    child = spawn(process.execPath, [script], { env: childEnv, stdio: ['ignore', 'inherit', 'inherit'] });
+    // Every waiting student is an open connection. Where the system allows it, raise this process's limit on open connections to the
+    // maximum, so a big room does not run out ("too many open files") and crash.
+    child = process.platform === 'win32'
+      ? spawn(process.execPath, [script], { env: childEnv, stdio: ['ignore', 'inherit', 'inherit'] })
+      : spawn('sh', ['-c', 'ulimit -n "$(ulimit -Hn)" 2>/dev/null; exec "$0" "$@"', process.execPath, script], { env: childEnv, stdio: ['ignore', 'inherit', 'inherit'] });
     state.running = true;
     child.on('exit', (code, signal) => {
       state.running = false; state.lastExit = { code, signal, at: new Date().toISOString() };
@@ -67,11 +71,18 @@ export async function mountEmbeddedMySeb(app: Express, sitePort: number): Promis
   // Everything under /myseb goes to the MySEB process. Streams straight through (long waits for signalling included).
   const agent = new http.Agent({ keepAlive: true, maxSockets: 2000 });
   // /myseb/_status is answered here (not by MySEB), so it still works while MySEB is down: it says whether it runs and how it last stopped.
-  app.get('/myseb/_status', (_req: Request, res: Response) => { res.set('Cache-Control', 'no-store').json(state); });
+  let inFlight = 0, shed = 0;
+  const MAX_INFLIGHT = Number(e.MYSEB_MAX_INFLIGHT || 1500);
+  app.get('/myseb/_status', (_req: Request, res: Response) => { res.set('Cache-Control', 'no-store').json({ ...state, inFlight, shed }); });
   app.use('/myseb', (req: Request, res: Response) => {
+    // Too many requests at once (an overload): answer "busy, try again" straight away instead of queueing without limit until memory runs out.
+    if (inFlight >= MAX_INFLIGHT) { shed++; res.set('Retry-After', '3').status(503).json({ error: 'MySEB is busy, try again in a moment.' }); return; }
+    inFlight++; let counted = true; const leave = () => { if (counted) { counted = false; inFlight--; } };
+    res.on('close', leave); res.on('finish', leave);
     const headers = { ...req.headers, host: req.headers.host ?? '', 'x-forwarded-for': req.ip || req.socket.remoteAddress || '' } as http.OutgoingHttpHeaders;
     const up = http.request({ host: '127.0.0.1', port, method: req.method, path: req.url || '/', headers, agent }, (r) => { res.writeHead(r.statusCode || 502, r.headers); r.pipe(res); });
     up.on('error', () => { if (!res.headersSent) res.status(502).json({ error: 'MySEB is restarting, try again in a moment.' }); else res.destroy(); });
+    up.setTimeout(40_000, () => up.destroy());      // a request that gets no answer for 40 s is dropped, never held forever
     res.on('close', () => up.destroy());
     req.pipe(up);
   });

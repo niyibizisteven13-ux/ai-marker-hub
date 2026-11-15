@@ -213,7 +213,7 @@ export async function setLiveFaces(load: TargetLoader, on: boolean) {
 const lastLive = new Map<string, number>();
 const lastAnswer = new Map<string, LiveAnswer>();
 export type LiveSource = 'camera' | 'screen' | 'both';
-export interface LiveAnswer { faces: boolean; live: boolean; sound: boolean; source?: LiveSource }
+export interface LiveAnswer { faces: boolean; live: boolean; sound: boolean; source?: LiveSource; pictures?: boolean; every?: number }
 export async function relayLive(sessionId: string, body: any): Promise<LiveAnswer> {
   const now = Date.now();
   if (now - (lastLive.get(sessionId) ?? 0) < 3000) return lastAnswer.get(sessionId) ?? { faces: false, live: false, sound: false };   // at most one report every 3 s per student
@@ -223,7 +223,7 @@ export async function relayLive(sessionId: string, body: any): Promise<LiveAnswe
   const frame = typeof body?.frame === 'string' && body.frame.length <= 16000 ? body.frame : undefined;
   const screen = typeof body?.screen === 'string' && body.screen.length <= 30000 ? body.screen : undefined;
   const r = await mysebFetch(`/sessions/${sessionId}/live`, { method: 'POST', body: { question: q, camera: body?.camera, frame, screen, screenState: body?.screenState } });
-  const answer: LiveAnswer = { faces: !!r.faces, live: !!r.live, sound: !!r.sound, source: (['camera', 'screen', 'both'] as const).includes(r.source) ? r.source : 'camera' };
+  const answer: LiveAnswer = { faces: !!r.faces, live: !!r.live, sound: !!r.sound, source: (['camera', 'screen', 'both'] as const).includes(r.source) ? r.source : 'camera', pictures: r.pictures === true, every: Math.max(3, Math.min(30, Number(r.every) || 5)) };
   lastAnswer.set(sessionId, answer);
   if (lastAnswer.size > 5000) lastAnswer.clear();
   return answer;
@@ -252,9 +252,43 @@ export function iceServers() {
   return { iceServers: list, turn: turn.length > 0 && !!secret };
 }
 
+/** Students waiting for a lecturer message hold one connection each. Past this many, new ones are told to come back later instead of piling up. */
+export const MAX_HELD_PULLS = Number(process.env.MYSEB_MAX_HELD || 6000);
+let heldPulls = 0;
+export const heldPullCount = () => heldPulls;
+export async function heldStudentSignalPull(sid: string, after: number, signal: AbortSignal) {
+  if (heldPulls >= MAX_HELD_PULLS) throw new MySebError('Busy. Try again in a moment.', 503, 'BUSY');
+  heldPulls++;
+  try { return await studentSignalPull(sid, after, signal); } finally { heldPulls--; }
+}
 export const studentSignalPull = (sid: string, after: number, signal: AbortSignal) =>
   mysebFetch(`/sessions/${sid}/from-lecturer?after=${Math.max(0, after | 0)}&wait=20000`, { timeoutMs: 26000, signal });
 export const studentSignalPush = (sid: string, msg: unknown) => mysebFetch(`/sessions/${sid}/to-lecturer`, { method: 'POST', body: { msg } });
+
+/* ---- instant updates: the lecturer's room keeps one stream open and is told the moment something changes ---- */
+const roomStreams = new Map<string, number>();
+export async function streamRoomEvents(load: TargetLoader, res: import('express').Response) {
+  const t = await load();
+  if (!t.mysebExamId) { res.status(204).end(); return; }          // nobody has joined yet: the room checks on a timer until then
+  if (!mySebConfigured()) throw new MySebError('MySEB is not set up on this server (MYSEB_URL and MYSEB_SERVICE_KEY).', 503, 'MYSEB_NOT_CONFIGURED');
+  const examId = t.mysebExamId;
+  const open = roomStreams.get(examId) ?? 0;
+  if (open >= 6) throw new MySebError('Too many live rooms are open for this test.', 429, 'TOO_MANY_STREAMS');
+  const ac = new AbortController(); res.on('close', () => ac.abort());
+  let up: Response;
+  try {
+    up = await fetch(`${MYSEB_URL()}/api/exams/${examId}/events`, { headers: { Authorization: `Bearer ${SERVICE_KEY()}`, Accept: 'text/event-stream' }, signal: ac.signal });
+  } catch { throw new MySebError('The MySEB server cannot be reached.', 502, 'MYSEB_UNREACHABLE'); }
+  if (!up.ok || !up.body) throw new MySebError('Instant updates are not available.', up.status === 503 ? 503 : 502);
+  roomStreams.set(examId, open + 1);
+  res.status(200).set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+  res.flushHeaders();
+  const { Readable } = await import('node:stream');
+  const body = Readable.fromWeb(up.body as any);
+  body.on('error', () => res.end()); body.on('end', () => res.end());
+  res.on('close', () => { roomStreams.set(examId, Math.max(0, (roomStreams.get(examId) ?? 1) - 1)); body.destroy(); });
+  body.pipe(res);
+}
 
 /** Who is in the lecturer's room, remembered for a few seconds so ICE traffic does not ask the database every time. */
 const roomCache = new Map<string, { at: number; sids: Set<string>; examId: string }>();

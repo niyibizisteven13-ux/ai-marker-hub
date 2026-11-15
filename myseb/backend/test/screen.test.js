@@ -83,3 +83,17 @@ test('the lecturer can ask a student for full quality (zoom) or the light pictur
   assert.equal(cleanSignal({ type: 'quality', level: 'high', viewer: 'v1', sdp: 'x'.repeat(20000) }), null, 'oversize messages are refused');
   assert.equal(cleanSignal({ type: 'format-disk' }), null);
 });
+
+test('pictures are asked for only from the students the lecturer is looking at', async () => {
+  const exam = (await call('/api/exams', { method: 'POST', headers: T, body: { title: 'Wanted' } })).json;
+  await call(`/api/exams/${exam.id}`, { method: 'PATCH', headers: T, body: { liveMode: 'live', liveSource: 'both' } });
+  const code = (await call(`/api/exams/${exam.id}/generate-code`, { method: 'POST', headers: T })).json;
+  const mkStudent = async (name, n) => (await call('/api/verify-code', { method: 'POST', body: { code: code.code, studentName: name, deviceId: `dev-${n}-12345678`, clientType: 'desktop' } })).json;
+  const watched = await mkStudent('Watched', 'w'), other = await mkStudent('Other', 'o');
+  const report = (s) => call(`/api/sessions/${s.sessionId}/live`, { method: 'POST', headers: T, body: { question: { index: 1, total: 3, label: 'Q' }, camera: 'on', screenState: 'on' } });
+  assert.equal((await report(watched)).json.pictures, false, 'nobody is looking yet: no pictures');
+  assert.ok((await report(watched)).json.every >= 5, 'the server sets the rhythm');
+  await call(`/api/exams/${exam.id}/frames?ids=${watched.sessionId}`, { headers: T });   // the lecturer's room shows this student's tile
+  assert.equal((await report(watched)).json.pictures, true, 'now this student is asked for pictures');
+  assert.equal((await report(other)).json.pictures, false, 'the others still send only status');
+});

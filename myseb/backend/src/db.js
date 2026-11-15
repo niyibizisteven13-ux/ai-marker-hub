@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import pg from 'pg';
 import { config } from './config.js';
 
-export const pool = new pg.Pool({ connectionString: config.databaseUrl, max: 20 });
+export const pool = new pg.Pool({ connectionString: config.databaseUrl, max: Number(process.env.MYSEB_DB_POOL || 30) });
 export const q = (text, params) => pool.query(text, params);
 
 /** Brings the tables up to date. Safe to run from several servers (or test files) at the same moment: a database lock makes them take turns. */

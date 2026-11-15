@@ -3,13 +3,29 @@ import QRCode from 'qrcode';
 import { q } from './db.js';
 import { config, safeEqual } from './config.js';
 import { newCode, parseCode, codeHash, secretHash, tokenHash, newToken, newSecret, rateLimit, failureGate } from './security.js';
-import { authSession, recordViolation, VIOLATION_TYPES } from './sessions.js';
-import { cleanSignal, dropSignals, forgetAllLive, forgetLive, getLive, pullSignal, pushSignal, saveLive } from './live.js';
+import { authSession, markAlive, recordViolation, VIOLATION_TYPES } from './sessions.js';
+import { liveStats, cleanSignal, dropSignals, forgetAllLive, forgetLive, getLive, liveChanged, picturesWanted, pullSignal, pushSignal, reportEverySeconds, saveLive, wantPictures } from './live.js';
+import { notify, roomVersion, subscribe } from './events.js';
 
 export const api = express.Router();
 const wrap = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 const isUuid = (s) => /^[0-9a-f-]{36}$/i.test(String(s));
 const str = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+
+/** After any change the lecturer makes (end, pause, resume, a new code), the live room is told at once. */
+api.use((req, res, next) => {
+  if (req.method === 'POST' || req.method === 'PATCH') {
+    res.on('finish', () => {
+      if (res.statusCode >= 400) return;
+      examLive.clear();   // the lecturer changed something: the live reports read the settings fresh next time
+      const m = /^\/(exams|sessions)\/([0-9a-f-]{36})\/?(.*)$/i.exec(req.path);
+      if (!m) return;
+      if (m[1] === 'exams') notify(m[2]);
+      else if (m[3] === 'end' || m[3] === 'resume') examOf(m[2]).then((e) => e && notify(e)).catch(() => undefined);
+    });
+  }
+  next();
+});
 
 /* ---------------------------------------------------------------- teacher */
 function requireTeacher(req, res, next) {
@@ -97,23 +113,47 @@ api.post('/exams/:id/end', requireTeacher, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-api.get('/exams/:id/monitor', requireTeacher, wrap(async (req, res) => {
-  if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
-  const ex = (await q('SELECT id, title, status, live_faces, live_mode, live_sound, live_source, require_myseb, leave_action FROM exams WHERE id=$1', [req.params.id])).rows[0];
-  if (!ex) return res.status(404).json({ error: 'not found' });
+/** One copy of the student list is built and shared by every lecturer tab looking at the same test; it is rebuilt after any change. */
+const monitorShared = new Map();
+async function buildMonitor(id, withFrames) {
+  const ex = (await q('SELECT id, title, status, live_faces, live_mode, live_sound, live_source, require_myseb, leave_action FROM exams WHERE id=$1', [id])).rows[0];
+  if (!ex) return null;
   const { rows } = await q(
     `SELECT s.id, s.student_name, s.status, s.client_type, s.platform, s.violation_count, s.pause_reason, s.end_reason,
             s.started_at, s.deadline_at, EXTRACT(EPOCH FROM (now() - s.last_heartbeat))::int AS seen_ago,
             (SELECT type FROM violations v WHERE v.session_id=s.id ORDER BY v.id DESC LIMIT 1) AS last_violation
-       FROM exam_sessions s WHERE s.exam_id=$1 ORDER BY s.started_at`, [req.params.id]);
+       FROM exam_sessions s WHERE s.exam_id=$1 ORDER BY s.started_at`, [id]);
   const counts = { IN_EXAM: 0, PAUSED: 0, LEFT: 0, ENDED: 0 };
   const students = rows.map((r) => {
     counts[r.status]++;
     const l = r.status === 'ENDED' ? null : getLive(r.id);
-    const withFrames = req.query.frames !== '0';   // a big room asks for pictures only for the tiles on screen (see /frames)
     return { ...r, live: l ? { question: l.question, camera: l.camera, screen_state: l.screenState, frame: withFrames && ex.live_faces ? l.frame : null, frame_age: l.frameAt ? Math.round((Date.now() - l.frameAt) / 1000) : null, screen: withFrames && ex.live_faces ? l.screen : null, screen_age: l.screenAt ? Math.round((Date.now() - l.screenAt) / 1000) : null } : null };
   });
-  res.json({ exam: { id: ex.id, title: ex.title, status: ex.status, live_faces: ex.live_faces, live_mode: ex.live_mode, live_sound: ex.live_sound, live_source: ex.live_source, leave_action: ex.leave_action }, counts, students });
+  return { exam: { id: ex.id, title: ex.title, status: ex.status, live_faces: ex.live_faces, live_mode: ex.live_mode, live_sound: ex.live_sound, live_source: ex.live_source, leave_action: ex.leave_action }, counts, students };
+}
+api.get('/exams/:id/monitor', requireTeacher, wrap(async (req, res) => {
+  const id = req.params.id;
+  if (!isUuid(id)) return res.status(400).json({ error: 'bad id' });
+  const withFrames = req.query.frames !== '0';   // a big room asks for pictures only for the tiles on screen (see /frames)
+  const key = `${id}:${withFrames}`;
+  let e = monitorShared.get(key);
+  const v = roomVersion(id);
+  if (!e || e.v !== v || Date.now() - e.at > 1500) {
+    e = { v, at: Date.now(), promise: buildMonitor(id, withFrames) };
+    monitorShared.set(key, e);
+    if (monitorShared.size > 2000) monitorShared.clear();
+  }
+  const payload = await e.promise.catch((err) => { monitorShared.delete(key); throw err; });
+  payload ? res.json(payload) : res.status(404).json({ error: 'not found' });
+}));
+
+/** The live room's instant-update stream (Server-Sent Events). Carries no student data: it only says "something changed, look again". */
+api.get('/exams/:id/events', requireTeacher, wrap(async (req, res) => {
+  if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
+  res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+  if (!subscribe(req.params.id, res)) return res.status(503).set('Retry-After', '10').json({ error: 'too many live rooms open' });
+  res.flushHeaders();
+  res.write('retry: 2000\n\n: connected\n\n');
 }));
 
 /** Everything that happened in an exam, for the lecturer's records and for appeals. Never contains pictures or video. */
@@ -136,6 +176,7 @@ api.get('/exams/:id/frames', requireTeacher, wrap(async (req, res) => {
   const ex = (await q('SELECT live_faces FROM exams WHERE id=$1', [req.params.id])).rows[0];
   if (!ex || !ex.live_faces || !ids.length) return res.json({ frames: {} });
   const mine = (await q('SELECT id FROM exam_sessions WHERE exam_id=$1 AND id = ANY($2::uuid[])', [req.params.id, ids])).rows.map((r) => r.id);
+  wantPictures(mine);   // these students are on the lecturer's screen: their next reports carry pictures
   const frames = {};
   for (const id of mine) { const l = getLive(id); if (l?.frame || l?.screen) frames[id] = { frame: l.frame, age: l.frameAt ? Math.round((Date.now() - l.frameAt) / 1000) : null, screen: l.screen, screen_age: l.screenAt ? Math.round((Date.now() - l.screenAt) / 1000) : null }; }
   res.json({ frames });
@@ -174,18 +215,29 @@ api.post('/sessions/:id/resume', requireTeacher, wrap(async (req, res) => {
 
 /** The exam page (via bwenge) reports the question the student is on and, if the lecturer asked, a small camera picture. */
 // No limit here: only bwenge (the service key) can call it, and bwenge already allows one report per student every 3 seconds.
+const examLive = new Map();
 api.post('/sessions/:id/live', requireTeacher, wrap(async (req, res) => {
   if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
-  const { rows } = await q(`SELECT s.status, s.exam_id, e.live_faces, e.live_mode, e.live_sound, e.live_source, e.leave_action FROM exam_sessions s JOIN exams e ON e.id=s.exam_id WHERE s.id=$1`, [req.params.id]);
+  // Every student reports every few seconds. The exam's live settings are the same for the whole class, so they are read once per
+  // 3 s (not once per student); only the student's own status is looked up.
+  const sess = (await q('SELECT status, exam_id FROM exam_sessions WHERE id=$1', [req.params.id])).rows[0];
+  let cfg = sess && examLive.get(sess.exam_id);
+  if (sess && (!cfg || Date.now() - cfg.at > 3000)) {
+    const r = (await q('SELECT live_faces, live_mode, live_sound, live_source, leave_action FROM exams WHERE id=$1', [sess.exam_id])).rows[0];
+    cfg = { at: Date.now(), row: r }; examLive.set(sess.exam_id, cfg); if (examLive.size > 5000) examLive.clear();
+  }
+  const rows = sess && cfg?.row ? [{ ...cfg.row, status: sess.status, exam_id: sess.exam_id }] : [];
   if (!rows[0]) return res.status(404).json({ error: 'not found' });
   if (rows[0].status === 'ENDED') return res.json({ faces: false, live: false, sound: false, source: 'camera', status: 'ENDED' });
-  const wasSharing = !['denied', 'partial'].includes(getLive(req.params.id)?.screenState);
-  saveLive(req.params.id, req.body || {}, rows[0].live_faces);   // pictures are dropped on the spot when the lecturer has not asked for them
+  const before = getLive(req.params.id);
+  const wasSharing = !['denied', 'partial'].includes(before?.screenState);
+  saveLive(req.params.id, req.body || {}, rows[0].live_faces);
+  if (liveChanged(before, getLive(req.params.id), liveStats().reports >= 300)) notify(rows[0].exam_id, 'live');   // a new question (small rooms), or the camera/screen state changed   // pictures are dropped on the spot when the lecturer has not asked for them
   // The screen must stay shared: stopping it counts as leaving the exam, and the exam's leave policy applies (once per stop).
   if (rows[0].live_faces && rows[0].live_source !== 'camera' && wasSharing && ['denied', 'partial'].includes(getLive(req.params.id)?.screenState) && ['IN_EXAM', 'LEFT'].includes(rows[0].status)) {
     await recordViolation({ id: req.params.id, exam_id: rows[0].exam_id, status: rows[0].status }, { leave_action: rows[0].leave_action }, 'screen_share_stopped', { state: getLive(req.params.id).screenState });
   }
-  res.json({ faces: rows[0].live_faces, live: rows[0].live_mode === 'live', sound: rows[0].live_mode === 'live' && rows[0].live_sound && rows[0].live_source !== 'screen', source: rows[0].live_source, status: rows[0].status });
+  res.json({ faces: rows[0].live_faces, live: rows[0].live_mode === 'live', sound: rows[0].live_mode === 'live' && rows[0].live_sound && rows[0].live_source !== 'screen', source: rows[0].live_source, status: rows[0].status, pictures: picturesWanted(req.params.id), every: reportEverySeconds() });
 }));
 
 /* Live video set-up (WebRTC). Only short messages pass here, in memory. The video goes student -> lecturer directly. */
@@ -266,6 +318,7 @@ api.post('/verify-code',
          VALUES ($1,$2,$3,$4,$5,$6,$7, LEAST(now() + make_interval(mins => $8), COALESCE($9::timestamptz, 'infinity'))) RETURNING *`,
         [row.id, row.code_id, name, tokenHash(token), clientType, str(b.platform, 60), deviceId, row.duration_minutes, row.ends_at])).rows[0];
     }
+    notify(row.id, 'join');
     res.json({
       sessionId: session.id, token, title: row.title, examUrl: row.exam_url,
       status: session.status, requireMyseb: row.require_myseb, heartbeatSeconds: 5,
@@ -285,11 +338,15 @@ api.post('/heartbeat', wrap(async (req, res) => {
   if (session.status === 'ENDED') return res.json({ status: 'ENDED', reason: session.end_reason, remainingSeconds: 0 });
   if (new Date(session.deadline_at) < new Date() || session.exam_status === 'ended') {
     await q(`UPDATE exam_sessions SET status='ENDED', ended_at=now(), end_reason='time_up' WHERE id=$1`, [session.id]);
+    notify(session.exam_id, 'status');
     return res.json({ status: 'ENDED', reason: 'time_up', remainingSeconds: 0 });
   }
   let status = session.status;
   if (status === 'LEFT') status = a.exam.leave_action === 'record' ? 'IN_EXAM' : 'PAUSED';   // back after a lost connection: teacher decides
-  await q(`UPDATE exam_sessions SET last_heartbeat=now(), status=$2 WHERE id=$1`, [session.id, status]);
+  if (status !== session.status) {
+    await q(`UPDATE exam_sessions SET last_heartbeat=now(), status=$2 WHERE id=$1`, [session.id, status]);   // a change is written at once
+    notify(session.exam_id, 'status');
+  } else markAlive(session.id);                                                                             // "still here" is written in a batch
   res.json({ status, reason: status === 'IN_EXAM' ? null : session.pause_reason,
     remainingSeconds: Math.max(0, Math.floor((new Date(session.deadline_at) - Date.now()) / 1000)) });
 }));
@@ -299,6 +356,7 @@ api.post('/violation', wrap(async (req, res) => {
   const type = str(req.body?.type, 40);
   if (!VIOLATION_TYPES.has(type)) return res.status(400).json({ error: 'unknown violation type' });
   await recordViolation(a.session, a.exam, type, req.body?.detail && typeof req.body.detail === 'object' ? req.body.detail : {});
+  notify(a.session.exam_id, 'violation');
   const { rows } = await q('SELECT status, pause_reason FROM exam_sessions WHERE id=$1', [a.session.id]);
   res.json({ status: rows[0].status, reason: rows[0].pause_reason });
 }));
@@ -308,6 +366,7 @@ api.post('/finish', wrap(async (req, res) => {
   const a = await studentAuth(req, res); if (!a) return;
   await q(`UPDATE exam_sessions SET status='ENDED', ended_at=now(), end_reason=$2 WHERE id=$1 AND status<>'ENDED'`,
     [a.session.id, str(req.body?.reason, 40) || 'student']);
+  notify(a.session.exam_id, 'status');
   res.json({ ok: true });
 }));
 

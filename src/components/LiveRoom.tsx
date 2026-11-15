@@ -157,6 +157,45 @@ function useLiveViewers(base: string, enabled: boolean, wanted: string[], listen
   return { streams, screens };
 }
 
+/**
+ * Instant updates: the server keeps one stream open and says "something changed" the moment a student joins, leaves, breaks a rule or
+ * moves to another question; the room then asks for the fresh list at once. If the stream is not available the room falls back to
+ * checking on a timer, so it keeps working either way. Returns whether the stream is connected.
+ */
+function useRoomEvents(base: string, onChange: () => void, roomSize: number): boolean {
+  const [connected, setConnected] = useState(false);
+  const cb = useRef(onChange); cb.current = onChange;
+  const size = useRef(roomSize); size.current = roomSize;
+  useEffect(() => {
+    let stopped = false, wait = 1000, timer = 0, pending = false;
+    const ac = new AbortController();
+    const kick = () => { if (pending) return; pending = true; timer = window.setTimeout(() => { pending = false; cb.current(); }, Math.min(1000, 120 + size.current * 0.5)); };   // a burst becomes one refresh; a big room refreshes a little less often so the list is not downloaded over and over
+    (async () => {
+      while (!stopped) {
+        let idle = wait;
+        try {
+          const r = await authFetch(`${base}/events`, { signal: ac.signal, headers: { Accept: 'text/event-stream' } });
+          if (!r.ok || !r.body || r.status === 204) idle = r.status === 204 ? 5000 : Math.min(30_000, (wait *= 2));
+          else {
+            setConnected(true); wait = 1000;
+            const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = '';
+            for (;;) {
+              const { done, value } = await reader.read(); if (done) break;
+              buf += dec.decode(value, { stream: true });
+              let i: number;
+              while ((i = buf.indexOf('\n\n')) >= 0) { const chunk = buf.slice(0, i); buf = buf.slice(i + 2); if (chunk.includes('data:')) kick(); }
+            }
+          }
+        } catch { if (stopped) return; idle = Math.min(30_000, (wait *= 2)); }
+        setConnected(false);
+        await new Promise((x) => setTimeout(x, idle));
+      }
+    })();
+    return () => { stopped = true; ac.abort(); window.clearTimeout(timer); };
+  }, [base]);
+  return connected;
+}
+
 function LiveVideo({ stream, muted, mirror = true, fit = 'object-cover' }: { stream: MediaStream; muted: boolean; mirror?: boolean; fit?: string }) {
   const ref = useRef<HTMLVideoElement>(null);
   useEffect(() => { if (ref.current && ref.current.srcObject !== stream) ref.current.srcObject = stream; }, [stream]);
@@ -244,8 +283,9 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
   }, [base]);
 
   const refresh = useCallback(() => { call('/monitor?frames=0').then((b) => { setRoom(b); setErr(''); }).catch((e) => setErr(e instanceof Error ? e.message : 'Could not load.')); }, [call]);
-  // Quick for a class (2 s); a very big room slows down to 4 s so the server is not asked for hundreds of students every moment.
-  const every = (room?.students.length ?? 0) > 200 ? 4000 : 2000;
+  // Instant updates arrive on their own stream; the timer is only a safety net (slower while the stream is connected, quick if it is not).
+  const connected = useRoomEvents(base, refresh, room?.students.length ?? 0);
+  const every = connected ? 10_000 : (room?.students.length ?? 0) > 200 ? 4000 : 2000;
   useEffect(() => { document.title = 'Live room · Bwenge'; refresh(); const t = setInterval(refresh, every); return () => clearInterval(t); }, [refresh, every]);
 
   const act = async (fn: () => Promise<unknown>) => { setBusy(true); try { await fn(); refresh(); } catch (e) { setErr(e instanceof Error ? e.message : 'Something went wrong.'); } finally { setBusy(false); } };
@@ -329,7 +369,7 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
                 ? <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-rose-600 px-2.5 py-0.5 text-[11px] font-extrabold tracking-wide text-white"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />LIVE</span>
                 : <span className="shrink-0 rounded-full bg-slate-700 px-2.5 py-0.5 text-[11px] font-bold">Ended</span>}
             </div>
-            <p className="text-xs text-slate-400">{open ? `Updates every ${every / 1000} seconds${mode === 'live' ? ` · ${watching} live picture${watching === 1 ? '' : 's'} open` : ''}` : 'This test has ended'}</p>
+            <p className="text-xs text-slate-400">{open ? `${connected ? 'Instant updates' : `Updates every ${every / 1000} seconds`}${mode === 'live' ? ` · ${watching} live picture${watching === 1 ? '' : 's'} open` : ''}` : 'This test has ended'}</p>
           </div>
           <div className="flex flex-wrap gap-1.5">
             {chips.map(([k, label]) => (
