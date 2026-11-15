@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test": "node --test test/flow.test.js test/verify-limits.test.js test/ops.test.js test/screen.test.js"
+    "test": "node --test test/flow.test.js test/verify-limits.test.js test/ops.test.js test/downloads.test.js test/screen.test.js"
   },
   "dependencies": {
     "express": "^4.21.2",

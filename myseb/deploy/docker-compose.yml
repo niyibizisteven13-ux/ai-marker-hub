@@ -22,6 +22,7 @@ services:
       TRUST_PROXY: "1"
       DISABLE_DASHBOARD: "1"               # bwenge is the lecturer screen
       RETENTION_DAYS: "90"
+      MYSEB_DL_IOS: "${MYSEB_DL_IOS:-}"
     expose: ["4000"]
 
   caddy:                                    # HTTPS certificates are automatic

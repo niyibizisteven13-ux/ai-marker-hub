@@ -69,7 +69,7 @@ jobs:
           path: myseb/mobile/build/app/outputs/flutter-apk/MySEB.apk
 
   release:
-    if: startsWith(github.ref, 'refs/tags/myseb-v')
+    if: startsWith(github.ref, 'refs/tags/myseb-v') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     needs: [desktop, android]
     runs-on: ubuntu-latest
     steps:
@@ -77,4 +77,12 @@ jobs:
         with: { path: apps, merge-multiple: true }
       - name: Publish the release
         env: { GH_TOKEN: '${{ github.token }}' }
-        run: gh release create "${{ github.ref_name }}" apps/* --repo "${{ github.repository }}" --title "MySEB ${{ github.ref_name }}" --notes "Student apps for ${{ env.API_BASE }}"
+        run: |
+          for file in MySEB-win.exe MySEB-mac.dmg MySEB-linux.AppImage MySEB.apk; do
+            test -s "apps/$file" || { echo "Missing installer: $file"; exit 1; }
+          done
+          tag="${{ github.ref_name }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="myseb-v1.0.0-build.${{ github.run_number }}.${{ github.run_attempt }}"
+          fi
+          gh release create "$tag" apps/MySEB-win.exe apps/MySEB-mac.dmg apps/MySEB-linux.AppImage apps/MySEB.apk --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "MySEB $tag" --notes "Student apps for $API_BASE" --latest=false
