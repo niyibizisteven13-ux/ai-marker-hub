@@ -48,6 +48,7 @@ export default function FormResponses({ formId, questions }: { formId: string; q
   const quiz = r.answers._quiz as { score: number; maxScore: number; percent: number; correct: string[] } | undefined;
   const marked = new Set(questions.filter((q) => Number(q.points) > 0 && q.correctAnswer !== undefined && q.correctAnswer !== '').map((q) => q.id));
   const email = typeof r.answers._respondentEmail === 'string' ? r.answers._respondentEmail : '';
+  const flags = ((r.answers._integrity as { flags?: Array<{ code: string; level: 'review' | 'info'; message: string }> } | undefined)?.flags ?? []);
 
   return (
     <section className="rounded-2xl border border-[#E0E0E0] bg-white p-5" aria-label="Individual responses">
@@ -62,6 +63,13 @@ export default function FormResponses({ formId, questions }: { formId: string; q
         <div className="mt-3 flex items-center gap-3 rounded-xl border border-[#E0E0E0] bg-[#F8F9FA] px-4 py-3">
           <span className={`grid h-12 w-12 shrink-0 place-items-center rounded-full text-sm font-bold text-white ${quiz.percent >= 80 ? 'bg-emerald-600' : quiz.percent >= 50 ? 'bg-amber-500' : 'bg-rose-600'}`}>{Math.round(quiz.percent)}%</span>
           <div><p className="text-sm font-semibold text-[#202124]">Score {quiz.score} / {quiz.maxScore}</p><p className="text-xs text-[#5F6368]">Marked against your answer key when it was sent.</p></div>
+        </div>
+      )}
+      {flags.length > 0 && (
+        <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3" role="note" aria-label="Things to look at">
+          <p className="text-sm font-semibold text-amber-900">Worth a look ({flags.filter((f) => f.level === 'review').length} to review)</p>
+          <ul className="mt-1 list-inside list-disc space-y-0.5 text-xs text-amber-900">{flags.map((f, k) => <li key={k} className={f.level === 'info' ? 'text-amber-800/80' : ''}>{f.message}</li>)}</ul>
+          <p className="mt-1.5 text-[11px] text-amber-800/80">These are signals, not proof. Ask the student about the answer before deciding anything. Marks are not changed.</p>
         </div>
       )}
       <dl className="mt-4 space-y-3">

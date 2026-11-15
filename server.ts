@@ -60,6 +60,8 @@ import { rememberBlocked, takeResumable } from './server/services/billing/pendin
 import { makeEmitter } from './server/utils/sseEmitter.js';
 import { contentSecurityPolicy } from './server/utils/csp.js';
 import { validateSubmission } from './server/services/forms/validation.js';
+import { normalizeFields } from './server/services/forms/model.js';
+import { sanitizeReport, integrityFlags } from './shared/formIntegrity.js';
 import { ensureVersion } from './server/services/forms/versions.js';
 import { ownForm } from './server/services/forms/service.js';
 import { useToolAgent } from './server/services/outputs/chatTurn.js';
@@ -2055,6 +2057,17 @@ app.post('/api/forms/:id/submit', publicFormSubmitLimiter, async (req, res) => {
     // Quizzes are marked against the answer key at once; the score is kept with the response for Results and the gradebook.
     const quiz = gradeQuiz(schema, checked.values as Record<string, unknown>);
     if (quiz) normalized._quiz = { score: quiz.score, maxScore: quiz.maxScore, percent: quiz.percent, correct: quiz.items.filter((x) => x.correct).map((x) => x.id) };
+    // Integrity signals (pasting, leaving the page, typing): kept for the lecturer to review, never used to change a mark.
+    if (schema.isQuiz || schema.blockPaste || schema.trackIntegrity) {
+      const all = normalizeFields(schema);
+      const report = sanitizeReport((answers as any)._integrity, new Set(all.map((f) => f.id)));
+      const flags = integrityFlags(report, {
+        labels: Object.fromEntries(all.map((f) => [f.id, f.label])),
+        openIds: new Set(all.filter((f) => f.kind === 'text' || f.kind === 'long_text').map((f) => f.id)),
+        questionCount: Object.keys(checked.values).length, expected: true,
+      });
+      normalized._integrity = { report, flags };
+    }
     const formVersion = await ensureVersion(form.id, schema).catch(() => null);
     const submission = await prisma.formSubmission.create({ data: { formId: form.id, data: JSON.stringify(normalized), formVersion } as any });
     const confirmationMessage = schema.confirmationMessage || 'Your response has been recorded.';

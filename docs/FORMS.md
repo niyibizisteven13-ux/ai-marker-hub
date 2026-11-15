@@ -66,3 +66,11 @@ Run `npx prisma migrate deploy` (migration `20261025000100_form_versions` adds `
 
 Form generation from an uploaded document, conversational (chat-style) filling for respondents, multilingual
 versions, collaboration, a template library and survey weighting.
+
+## Test protection (quizzes and typed answers)
+
+Form settings > Test protection: **block pasting** into typed answers (paste and drop are stopped), **shuffle question order** (within each section; off when questions depend on earlier answers), **shuffle options** of every choice question, and **record activity**. Recording is always on for quizzes and is announced to the student on the form.
+
+Recorded per response (`shared/formIntegrity.ts`): characters typed vs pasted per typed answer, blocked paste attempts, times the page or window was left and for how long, total time. The server re-checks the numbers (known questions only, bounded) and stores flags under `_integrity`: pasted, paste blocked, answer much longer than what was typed, left the page, finished unusually fast, no activity record. The lecturer sees them as "Worth a look" in Individual responses.
+
+These are **signals for review, not proof**: a modified browser can fake them, and they never change a mark. There is deliberately no "AI-written" percentage: text detectors are unreliable and wrongly accuse people who write in a second language. Phase 2 (not built): server-issued start time and time limit, a lecturer-run writing check compared with the student's own earlier answers, and a short oral follow-up list.
