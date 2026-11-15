@@ -97,6 +97,10 @@ async function upload(repoId: string, list: Array<[string, Buffer | string]>) {
     return { tempPath: p, name: rel.split('/').pop()!, relativePath: rel, size: b.length };
   }));
   await knowledgeService.ingest(admin, repoId, { items });
+  await settle(repoId);
+}
+/** Waits until nothing in the repository is still being indexed. Indexing runs in the background, and how long it takes depends on the machine. */
+async function settle(repoId: string) {
   for (let i = 0; i < 400; i++) {
     const s = await knowledgeService.statistics(admin, repoId);
     if (!['uploaded', 'queued', 'extracting', 'chunking', 'embedding', 'indexing'].some((k) => s.byStatus[k])) return;
@@ -114,6 +118,7 @@ await upload(repo.id, [
 ]);
 const privateDir = await db.repositoryDirectory.findFirst({ where: { repositoryId: repo.id, path: 'Private' } });
 await knowledgeService.updateDirectory(admin, privateDir.id, { aiEnabled: false });
+await settle(repo.id);   // switching a folder off queues a background re-index that drops its chunks; the checks below need it finished
 const yields = await db.repositoryFile.findFirst({ where: { repositoryId: repo.id, path: 'Agriculture/2024/yields.csv' } });
 const salaries = await db.repositoryFile.findFirst({ where: { repositoryId: repo.id, path: 'Private/salaries.csv' } });
 
