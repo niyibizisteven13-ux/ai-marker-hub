@@ -827,6 +827,10 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
         acceptingResponses: builderSchema.acceptingResponses,
         allowMultipleResponses: builderSchema.allowMultipleResponses,
         confirmationMessage: builderSchema.confirmationMessage,
+        confirmationTitle: builderSchema.confirmationTitle,
+        showScore: builderSchema.showScore,
+        quizShowAnswers: builderSchema.quizShowAnswers,
+        branding: builderSchema.branding,
         requirements: String(builderSchema.description || '').replace(/<[^>]*>/g, ' ').trim(),
       }),
     });

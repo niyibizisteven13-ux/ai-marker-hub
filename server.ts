@@ -2057,30 +2057,36 @@ app.post('/api/forms/:id/submit', publicFormSubmitLimiter, async (req, res) => {
     if (quiz) normalized._quiz = { score: quiz.score, maxScore: quiz.maxScore, percent: quiz.percent, correct: quiz.items.filter((x) => x.correct).map((x) => x.id) };
     const formVersion = await ensureVersion(form.id, schema).catch(() => null);
     const submission = await prisma.formSubmission.create({ data: { formId: form.id, data: JSON.stringify(normalized), formVersion } as any });
+    const confirmationMessage = schema.confirmationMessage || 'Your response has been recorded.';
+    const confirmationTitle = typeof schema.confirmationTitle === 'string' && schema.confirmationTitle.trim() ? schema.confirmationTitle.trim() : undefined;
     if (quiz) {
+      // The owner decides what the respondent sees: score, and which answers were right with the correct ones.
+      const showScore = schema.showScore !== false;
       res.status(201).json({
         success: true,
         submissionId: submission.id,
-        confirmationMessage: schema.confirmationMessage || 'Your response has been recorded.',
+        confirmationMessage,
+        confirmationTitle,
         isQuiz: true,
-        score: quiz.score,
-        maxScore: quiz.maxScore,
-        scoreLabel: 'Your score',
-        feedback: quiz.percent >= 80 ? 'Excellent work!' : quiz.percent >= 50 ? 'Good effort. Review the questions you missed.' : 'Keep practising. Review the questions you missed.',
-        // Which answers were right, and the correct ones, only when the owner chose to show them.
+        ...(showScore ? {
+          score: quiz.score,
+          maxScore: quiz.maxScore,
+          scoreLabel: 'Your score',
+          feedback: quiz.percent >= 80 ? 'Excellent work!' : quiz.percent >= 50 ? 'Good effort. Review the questions you missed.' : 'Keep practising. Review the questions you missed.',
+        } : {}),
         ...(schema.quizShowAnswers !== false ? { results: quiz.items.map((x) => ({ id: x.id, correct: x.correct, points: x.earned, maxPoints: x.points, yourAnswer: x.given, correctAnswer: x.correctAnswer })) } : {}),
       });
       return;
     }
     await analyticsWorker.extractInsights(submission.id).catch((error) => logger.error('Submission analysis failed:', error));
-    const insight = await prisma.extractedInsight.findUnique({ where: { submissionId: submission.id } });
+    // Feedback forms, surveys and sign-ups are not marked: the respondent only sees the owner's thank-you message.
+    // (The AI analysis above stays private to the owner's Results.)
     res.status(201).json({
       success: true,
       submissionId: submission.id,
-      confirmationMessage: schema.confirmationMessage || 'Your response has been recorded.',
-      isQuiz: Boolean(schema.isQuiz),
-      score: insight?.score ?? null,
-      feedback: insight?.scoringFeedback || insight?.summary || null,
+      confirmationMessage,
+      confirmationTitle,
+      isQuiz: false,
     });
   } catch (error: any) {
     respondError(res, error, 'Failed to submit form.');

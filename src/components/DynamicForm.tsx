@@ -76,6 +76,8 @@ type FormSchema = {
   acceptingResponses?: boolean;
   allowMultipleResponses?: boolean;
   confirmationMessage?: string;
+  confirmationTitle?: string;
+  showScore?: boolean;
 };
 
 type Answers = Record<string, any>;
@@ -94,6 +96,7 @@ type ReviewItem = {
   explanation?: string;
 };
 type SubmitResult = {
+  title?: string;
   message: string;
   score?: number | null;
   maxScore?: number;
@@ -990,6 +993,7 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey }: 
       const fallback = parsedSchema?.confirmationMessage || 'Your response has been recorded.';
       if (res && typeof res === 'object') {
         setResult({
+          title: res.confirmationTitle || parsedSchema?.confirmationTitle || undefined,
           message: res.confirmationMessage || res.message || fallback,
           score: res.score ?? null,
           maxScore: res.maxScore ?? 100,
@@ -998,7 +1002,7 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey }: 
           results: Array.isArray(res.results) ? res.results : undefined,
         });
       } else {
-        setResult({ message: typeof res === 'string' ? res : fallback });
+        setResult({ title: parsedSchema?.confirmationTitle || undefined, message: typeof res === 'string' ? res : fallback });
       }
       try { sessionStorage.removeItem(storageKey); } catch { /* ignore */ }
     } catch (error: any) {
@@ -1081,6 +1085,7 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey }: 
       <div className={shell}>
         {headerCard}
         <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8" aria-live="polite">
+          {result.title && <h2 className="text-xl font-extrabold text-slate-900">{result.title}</h2>}
           <p className="text-sm leading-relaxed text-slate-800">{result.message}</p>
           {result.score !== null && result.score !== undefined && (
             <div className="space-y-1.5 rounded-xl border border-emerald-300 bg-emerald-50 p-4">
