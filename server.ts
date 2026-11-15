@@ -42,6 +42,7 @@ import { analyticsRouter, assessmentRouter, documentsRouter, jobsRouter } from '
 import { examChat, overnightJobQueue, startEducationRuntime } from './server/services/educationRuntime.js';
 import { examsRouter } from './server/routes/examRoutes.js';
 import { createAssignmentsRouter, createPublicAssignmentsRouter } from './server/routes/assignmentRoutes.js';
+import { createCoursesRouter } from './server/routes/courseRoutes.js';
 import { createStorageRouter } from './server/routes/storageRoutes.js';
 import { StorageFullError, ensureStorage } from './server/services/billing/storage.js';
 import { gradeQuiz } from './server/services/forms/quiz.js';
@@ -417,6 +418,8 @@ app.use('/api/exams', requireAuth, examsRouter);
 app.post('/api/assignments/public/:token/submit', assignmentSubmitLimiter);
 app.use('/api/assignments/public', createPublicAssignmentsRouter());
 app.use('/api/assignments', requireAuth, createAssignmentsRouter());
+// Courses: the lecturer's named classes (roster, accommodations, tasks and quizzes, dashboard).
+app.use('/api/courses', requireAuth, createCoursesRouter());
 app.use('/api/storage', requireAuth, createStorageRouter());
 app.use('/api/outputs/shared', sharedOutputsRouter);
 app.use('/api/outputs', requireAuth, outputsRouter);

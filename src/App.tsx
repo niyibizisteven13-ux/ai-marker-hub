@@ -81,6 +81,7 @@ const CurationViewPage = React.lazy(() => import('./pages/CurationViewPage'));
 const OutputsLibrary = React.lazy(() => import('./components/OutputsLibrary'));
 const MarkPage = React.lazy(() => import('./components/MarkPage'));
 const AssignmentsPage = React.lazy(() => import('./components/AssignmentsPage'));
+const CoursesPage = React.lazy(() => import('./components/CoursesPage'));
 const FormsPage = React.lazy(() => import('./components/FormsPage'));
 const AssignmentSubmitPage = React.lazy(() => import('./pages/AssignmentSubmitPage'));
 const TaskResultPage = React.lazy(() => import('./pages/TaskResultPage'));
@@ -274,6 +275,8 @@ export default function App() {
     // ?mark=1 (the chat's "Mark all" link) goes straight on to the Mark page with the class loaded.
     return m ? { id: m[1] ?? null, mark: !!m[1] && new URLSearchParams(window.location.search).get('mark') === '1' } : null;
   });
+  // Courses: /courses (the lecturer's named classes with roster, accommodations and marks).
+  const [coursesOpen, setCoursesOpen] = useState<boolean>(() => /^\/courses\/?$/.test(window.location.pathname));
   const [previewAttachment, setPreviewAttachment] = useState<PreviewSource | null>(null);
   const [formsOpen, setFormsOpen] = useState(() => /^\/forms\/?$/.test(window.location.pathname));
   // Camera opened from the Mark page: its pages go back to that page (one folder per student), not to the old hub.
@@ -1894,6 +1897,7 @@ export default function App() {
           onOpenPublicLibrary={() => { setLibraryTab('library'); setLibraryOpen(true); }}
           onOpenMark={() => setMarkOpen(true)}
           onOpenAssignments={() => setAssignmentsOpen({ id: null })}
+          onOpenCourses={() => { setCoursesOpen(true); window.history.pushState({}, '', '/courses'); }}
           onOpenForms={() => { setFormsOpen(true); window.history.pushState({}, '', '/forms'); }}
           collapsed={sidebarCollapsed}
           setCollapsed={setSidebarCollapsed}
@@ -2011,6 +2015,11 @@ export default function App() {
       {authenticatedUser && formsOpen && (
         <Suspense fallback={null}>
           <FormsPage onClose={() => { setFormsOpen(false); if (/^\/forms\/?$/.test(window.location.pathname)) window.history.replaceState({}, '', '/'); }} />
+        </Suspense>
+      )}
+      {authenticatedUser && coursesOpen && (
+        <Suspense fallback={null}>
+          <CoursesPage onClose={() => { setCoursesOpen(false); if (/^\/courses/.test(window.location.pathname)) window.history.replaceState({}, '', '/'); }} />
         </Suspense>
       )}
       {authenticatedUser && assignmentsOpen && (
