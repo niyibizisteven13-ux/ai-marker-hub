@@ -30,7 +30,7 @@ test('a teacher sets a task and gets a link; students without an account see onl
   const a = await svc.create('t1', { title: 'Algebra homework', instructions: 'Solve questions 1 to 5. Show your working.', dueAt: new Date(Date.now() + 86_400_000).toISOString(), files: [{ name: 'Questions.pdf', data: await pdf(1) }] });
   assert.match(a.link, /^https:\/\/www\.bwenge\.space\/a\/[\w-]{16}$/);
   const pub = await svc.publicView(tokenOf(a.link));
-  assert.deepEqual(Object.keys(pub).sort(), ['autoMark', 'dueAt', 'instructions', 'open', 'taskFiles', 'title']);
+  assert.deepEqual(Object.keys(pub).sort(), ['autoMark', 'dueAt', 'hardDeadline', 'instructions', 'open', 'rosterRequired', 'taskFiles', 'title']);
   assert.equal(pub.taskFiles[0].name, 'Questions.pdf');
   assert.equal((await svc.publicTaskFile(tokenOf(a.link), 0)).name, 'Questions.pdf');
   await assert.rejects(svc.publicView('not-a-real-token-123'), /not valid/);
@@ -50,7 +50,10 @@ test('students hand in any format; a second hand-in replaces the first; wrong fi
   assert.equal(r1.replaced, false);
   await svc.submit(token, { studentName: 'Mugisha Eric', files: [{ name: 'answer.pdf', data: await pdf(2) }], text: 'Extra: evaporation, condensation.' });
   await svc.submit(token, { studentName: 'Keza', text: 'The water cycle has four stages.' });
-  const r2 = await svc.submit(token, { studentName: 'Uwase Aline', studentId: 's4b-001', files: [{ name: 'final.jpg', data: photo }] });
+  // Knowing a student's number is not enough to overwrite their work: replacing needs the receipt code.
+  await assert.rejects(svc.submit(token, { studentName: 'Someone Else', studentId: 'S4B-001', text: 'sabotage' }), /receipt code/);
+  await assert.rejects(svc.submit(token, { studentName: 'Uwase Aline', studentId: 'S4B-001', receiptCode: 'WRONG123', text: 'x' }), /receipt code/);
+  const r2 = await svc.submit(token, { studentName: 'Uwase Aline', studentId: 's4b-001', receiptCode: r1.receiptId.toLowerCase(), files: [{ name: 'final.jpg', data: photo }] });
   assert.equal(r2.replaced, true, 'same student id: the latest hand-in replaces the earlier one');
 
   const dash = await svc.get('t1', a.id);
@@ -172,7 +175,7 @@ test('storage: hand-ins count against the owner\'s storage, a replaced or remove
   const a = await s.create('small', { title: 'Storage', instructions: 'Hand in one photo.' });
   const token = tokenOf(a.link);
   await s.submit(token, { studentName: 'Aline', files: [{ name: 'a.jpg', data: photo }] });
-  await s.submit(token, { studentName: 'Eric', files: [{ name: 'e.jpg', data: photo }] });
+  const eric = await s.submit(token, { studentName: 'Eric', files: [{ name: 'e.jpg', data: photo }] });
   await assert.rejects(s.submit(token, { studentName: 'Keza', files: [{ name: 'k.jpg', data: photo }] }), (e: any) => e.code === 'STORAGE_FULL' && /shared this task/.test(e.message));
   assert.equal(store.size, 2, 'a refused hand-in stores nothing');
   await s.submit(token, { studentName: 'Keza', text: 'Typed answers need no storage.' });
@@ -180,7 +183,7 @@ test('storage: hand-ins count against the owner\'s storage, a replaced or remove
   // Eric hands in again: his first photo is deleted, so the owner's storage does not grow.
   store.set('placeholder', { owner: 'other', size: 1 });
   limits.small = 3 * photo.length;
-  await s.submit(token, { studentName: 'Eric', files: [{ name: 'e2.jpg', data: photo }] });
+  await s.submit(token, { studentName: 'Eric', receiptCode: eric.receiptId, files: [{ name: 'e2.jpg', data: photo }] });
   assert.equal(used('small'), 2 * photo.length);
   const dash = await s.get('small', a.id);
   await s.removeSubmission('small', a.id, dash.submissions.find((x) => x.studentName === 'Aline')!.id);
@@ -202,4 +205,40 @@ test('voice answers: a recording is accepted (checked by its bytes) and left out
   assert.equal(prep.scripts.length, 1, 'Aline\'s photo is marked; the recording is heard in the dashboard');
   assert.equal(prep.skipped[0].studentName, 'Eric');
   assert.match(prep.skipped[0].reason, /voice recording/);
+});
+
+test('class list: only listed students hand in, under their own name; the lecturer sees who is missing and exports marks', async () => {
+  const roster = 'Registration,Name\n222001234, Uwase Aline\n222005678;Mugisha Eric\n222005678,Duplicate Row\nbad line\n222009999\tKeza Divine';
+  const a = await svc.create('t1', { title: 'Calculus CAT', instructions: 'Solve all.', roster });
+  assert.deepEqual(a.roster.map((r) => r.id), ['222001234', '222005678', '222009999'], 'header, duplicates and bad lines are skipped');
+  const token = tokenOf(a.link);
+  assert.equal((await svc.publicView(token)).rosterRequired, true);
+  await assert.rejects(svc.submit(token, { studentName: 'Nobody', text: 'x' }), /registration number/);
+  await assert.rejects(svc.submit(token, { studentName: 'Nobody', studentId: '999', text: 'x' }), /not on the class list/);
+  const r = await svc.submit(token, { studentName: 'typed wrongly', studentId: '222001234', text: 'answer' });
+  const dash = await svc.get('t1', a.id);
+  assert.equal(dash.submissions[0].studentName, 'Uwase Aline', 'the name comes from the list');
+  assert.equal(dash.submissions[0].receiptCode, r.receiptId, 'the lecturer can read out the receipt code');
+  assert.deepEqual(dash.notSubmitted.map((x) => x.id), ['222005678', '222009999']);
+
+  const wb = await svc.exportWorkbook('t1', a.id);
+  assert.match(wb.name, /Calculus CAT marks\.xlsx/);
+  const ExcelJS = (await import('exceljs')).default;
+  const book = new ExcelJS.Workbook();
+  await book.xlsx.load(wb.data as any);
+  const rows = book.getWorksheet('Marks')!.getSheetValues().slice(2) as any[];
+  assert.equal(rows.length, 3);
+  assert.deepEqual(rows.map((x) => x[3]).sort(), ['Handed in', 'Not handed in', 'Not handed in']);
+  await assert.rejects(svc.exportWorkbook('t2', a.id), /not found/i);
+
+  // The lecturer removes a hand-in (for example when a student lost the receipt code) and the student can hand in again.
+  await svc.removeSubmission('t1', a.id, dash.submissions[0].id);
+  await svc.submit(token, { studentName: 'x', studentId: '222001234', text: 'again' });
+});
+
+test('hard deadline: no hand-ins after the due date', async () => {
+  const a = await svc.create('t1', { title: 'Strict', instructions: 'Answer.', dueAt: new Date(Date.now() - 60_000).toISOString(), hardDeadline: true });
+  await assert.rejects(svc.submit(tokenOf(a.link), { studentName: 'Brian', text: '42' }), /deadline has passed/);
+  await svc.update('t1', a.id, { hardDeadline: false });
+  assert.equal((await svc.submit(tokenOf(a.link), { studentName: 'Brian', text: '42' })).late, true, 'turned off: late hand-ins are accepted and flagged');
 });

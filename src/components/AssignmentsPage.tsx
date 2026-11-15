@@ -13,8 +13,8 @@ import { Card, Empty, PageShell, Stat, StatRow, Toolbar, primaryBtn, relative } 
 
 interface StoredFile { id: string; name: string; mime: string; size: number }
 interface MarkStatus { state: 'queued' | 'marking' | 'marked' | 'needs_review' | 'failed' | 'waiting_scheme'; total: number | null; maxTotal: number | null; percent: number | null; released: boolean; error?: string }
-interface Submission { id: string; studentName: string; studentId?: string; files: StoredFile[]; text?: string; submittedAt: string; late: boolean; resubmissions: number; marking?: MarkStatus; resultLink?: string }
-interface Assignment { id: string; title: string; instructions: string; taskFiles: StoredFile[]; dueAt: string | null; open: boolean; link: string; createdAt: string; submissions: Submission[]; counts: { submitted: number; late: number }; autoMark?: boolean; schemeFiles?: StoredFile[]; examId?: string | null }
+interface Submission { id: string; studentName: string; studentId?: string; files: StoredFile[]; text?: string; submittedAt: string; late: boolean; resubmissions: number; marking?: MarkStatus; resultLink?: string; receiptCode?: string }
+interface Assignment { id: string; title: string; instructions: string; taskFiles: StoredFile[]; dueAt: string | null; open: boolean; link: string; createdAt: string; submissions: Submission[]; counts: { submitted: number; late: number }; roster?: Array<{ id: string; name: string }>; hardDeadline?: boolean; notSubmitted?: Array<{ id: string; name: string }>; autoMark?: boolean; schemeFiles?: StoredFile[]; examId?: string | null }
 
 /** The automatic marking state of one hand-in, as a small coloured label. */
 function MarkChip({ m }: { m?: MarkStatus }) {
@@ -138,6 +138,8 @@ function CreateForm({ onCreated, onCancel }: { onCreated: (a: Assignment) => voi
   const [dueAt, setDueAt] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [autoMark, setAutoMark] = useState(false);
+  const [roster, setRoster] = useState('');
+  const [hardDeadline, setHardDeadline] = useState(false);
   const [scheme, setScheme] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -148,6 +150,8 @@ function CreateForm({ onCreated, onCancel }: { onCreated: (a: Assignment) => voi
       form.append('title', title);
       form.append('instructions', instructions);
       if (dueAt) form.append('dueAt', new Date(dueAt).toISOString());
+      if (roster.trim()) form.append('roster', roster);
+      if (dueAt && hardDeadline) form.append('hardDeadline', 'true');
       for (const f of files) form.append('files', f, f.name);
       if (autoMark) { form.append('autoMark', 'true'); for (const f of scheme) form.append('scheme', f, f.name); }
       onCreated(await json<Assignment>(await authFetch('/api/assignments', { method: 'POST', body: form })));
@@ -186,6 +190,18 @@ function CreateForm({ onCreated, onCancel }: { onCreated: (a: Assignment) => voi
           <label htmlFor="as-due" className="mb-1.5 block text-[12.5px] font-medium text-neutral-300">Due <span className="text-neutral-500">(optional; late submissions are accepted and flagged)</span></label>
           <input id="as-due" type="datetime-local" value={dueAt} onChange={(e) => setDueAt(e.target.value)} className={`${field} [color-scheme:dark]`} />
         </div>
+      </div>
+      <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-white/[0.1] bg-white/[0.02] p-3">
+        <input type="checkbox" checked={hardDeadline} disabled={!dueAt} onChange={(e) => setHardDeadline(e.target.checked)} className="mt-1 h-4 w-4 accent-[var(--brand)]" />
+        <span>
+          <span className="block text-[13.5px] font-semibold text-neutral-100">Stop taking hand-ins at the due time</span>
+          <span className="block text-[12px] leading-relaxed text-neutral-400">{dueAt ? 'After the deadline the link refuses hand-ins. Leave off to accept late work and flag it.' : 'Set a due date first.'}</span>
+        </span>
+      </label>
+      <div className="rounded-xl border border-white/[0.1] bg-white/[0.02] p-3">
+        <label htmlFor="as-roster" className="block text-[13.5px] font-semibold text-neutral-100">Class list <span className="font-normal text-neutral-500">(optional)</span></label>
+        <p className="mb-2 text-[12px] leading-relaxed text-neutral-400">Paste from Excel: registration number, then name, one student per line. Only these students can hand in, under their own name, and you see who has not handed in.</p>
+        <textarea id="as-roster" value={roster} onChange={(e) => setRoster(e.target.value)} rows={4} placeholder={'222001234\tUwase Aline\n222005678\tMugisha Eric'} className={`${field} resize-y font-mono text-[12.5px]`} />
       </div>
       <div className="rounded-xl border border-white/[0.1] bg-white/[0.02] p-3">
         <label className="flex cursor-pointer items-start gap-3">
@@ -229,6 +245,18 @@ function Dashboard({ id, onBack, onMarkAll, autoMark = false }: { id: string; on
   const [releasing, setReleasing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const toRelease = a?.submissions.filter((x) => x.marking && (x.marking.state === 'marked' || x.marking.state === 'needs_review') && !x.marking.released).length ?? 0;
+  /** Downloads the marks sheet (requests carry the sign-in, so a plain link cannot be used). */
+  const exportSheet = async () => {
+    try {
+      const res = await authFetch(`/api/assignments/${id}/export.xlsx`);
+      if (!res.ok) throw new Error(`Could not make the sheet (${res.status}).`);
+      const url = URL.createObjectURL(await res.blob());
+      const link = document.createElement('a');
+      link.href = url; link.download = `${(a?.title || 'task').replace(/[^\w\- ]+/g, '').trim() || 'task'} marks.xlsx`;
+      document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not make the sheet.'); }
+  };
   const release = async () => {
     setReleasing(true); setError(null); setNotice(null);
     try {
@@ -286,6 +314,7 @@ function Dashboard({ id, onBack, onMarkAll, autoMark = false }: { id: string; on
             <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold ${a.open ? 'bg-emerald-500/15 text-emerald-300' : 'bg-white/10 text-neutral-300'}`}>{a.open ? 'Open for submissions' : 'Closed'}</span>
           </p>
         </div>
+        <a href={`/api/assignments/${a.id}/export.xlsx`} onClick={(e) => { e.preventDefault(); void exportSheet(); }} className="inline-flex items-center gap-1.5 rounded-xl border border-white/[0.14] px-3 py-2 text-[13px] text-neutral-200 hover:bg-white/5"><Download size={14} />Marks (Excel)</a>
         <button type="button" onClick={() => void toggle()} className="inline-flex items-center gap-1.5 rounded-xl border border-white/[0.14] px-3 py-2 text-[13px] text-neutral-200 hover:bg-white/5">{a.open ? <Lock size={14} /> : <Unlock size={14} />}{a.open ? 'Close submissions' : 'Reopen'}</button>
         {a.autoMark ? (
           <>
@@ -305,6 +334,13 @@ function Dashboard({ id, onBack, onMarkAll, autoMark = false }: { id: string; on
       {error && <p className="mt-3 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[13px] text-rose-300">{error}</p>}
 
       <div className="mt-4"><ShareBox link={a.link} title={a.title} /></div>
+
+      {a.notSubmitted && a.notSubmitted.length > 0 && (
+        <details className="mt-4 rounded-[14px] border border-amber-500/25 bg-amber-500/[0.06] px-4 py-3">
+          <summary className="cursor-pointer text-[13px] font-semibold text-amber-200">{a.notSubmitted.length} of {a.roster?.length} students have not handed in</summary>
+          <ul className="mt-2 grid gap-x-4 gap-y-1 text-[12.5px] text-neutral-300 sm:grid-cols-2">{a.notSubmitted.map((r) => <li key={r.id}><span className="font-mono text-neutral-400">{r.id}</span> · {r.name}</li>)}</ul>
+        </details>
+      )}
 
       <section aria-label="Summary" className="mt-4 grid grid-cols-3 gap-2.5">
         {[[a.counts.submitted, 'submitted'], [a.counts.late, 'late'], [fileCount, 'files and typed answers']].map(([v, l]) => (
@@ -338,7 +374,7 @@ function Dashboard({ id, onBack, onMarkAll, autoMark = false }: { id: string; on
                     {s.late && <span className="shrink-0 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10.5px] font-semibold text-amber-300">Late</span>}
                     <MarkChip m={s.marking} />
                   </span>
-                  <span className="block truncate text-[11.5px] text-neutral-400">{s.studentId ? `${s.studentId} · ` : ''}{when(s.submittedAt)}{s.resubmissions ? ` · submitted ${s.resubmissions + 1} times` : ''}</span>
+                  <span className="block truncate text-[11.5px] text-neutral-400">{s.studentId ? `${s.studentId} · ` : ''}{when(s.submittedAt)}{s.receiptCode ? ` · receipt ${s.receiptCode}` : ''}{s.resubmissions ? ` · submitted ${s.resubmissions + 1} times` : ''}</span>
                   <span className="mt-2 flex gap-1.5 overflow-hidden">
                     {s.files.slice(0, 4).map((f) => <Thumb key={f.id} assignmentId={a.id} file={f} />)}
                     {s.text && <span className="flex h-16 w-24 shrink-0 overflow-hidden rounded-md border border-black/20 bg-[#FBFAF6] p-1.5 text-[8.5px] leading-tight text-neutral-700">{s.text.slice(0, 160)}</span>}
