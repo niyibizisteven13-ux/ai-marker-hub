@@ -15,6 +15,7 @@
     "electron-builder": "^25.1.8"
   },
   "build": {
+    "extraResources": [{ "from": "../extension", "to": "chrome-extension" }],
     "appId": "space.bwenge.myseb",
     "productName": "MySEB",
     "files": ["src/**", "renderer/**", "config.json", "package.json"],

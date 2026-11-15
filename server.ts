@@ -44,6 +44,8 @@ import { examsRouter } from './server/routes/examRoutes.js';
 import { createAssignmentsRouter, createPublicAssignmentsRouter } from './server/routes/assignmentRoutes.js';
 import { createCoursesRouter } from './server/routes/courseRoutes.js';
 import { createPublicFormExamRouter, createOwnerFormExamRouter } from './server/routes/formExamRoutes.js';
+import { createMySebAssignmentOwnerRouter, createMySebOwnerRouter, createMySebPublicRouter } from './server/routes/mySebRoutes.js';
+import { mySebGuard, mySebShell } from './server/services/mySeb.js';
 import { formExamService } from './server/services/formExam/runtime.js';
 import { ExamError } from './server/services/formExam/service.js';
 import { sebAllowed } from './server/services/formExam/seb.js';
@@ -401,6 +403,24 @@ app.use('/api/studio/projects', requireAuth, studioRoutes);
 // have been hitting.
 app.use('/api/agent', requireAuth, generalLimiter, agentRoutes);
 app.use('/api/payments', paymentRoutes);
+// MySEB (device lock). Students' routes for reading/answering a form check the MySEB session first when the form asks for it.
+{
+  const mysebGuard = mySebGuard();
+  app.get(['/forms/:id', '/apply/:id'], mySebShell());           // page shell: only hands the phone app its cookie, never blocks
+  app.get('/api/forms/:id', mysebGuard);
+  app.get('/api/public/forms/:id', mysebGuard);
+  app.post('/api/forms/:id/submit', mysebGuard);
+  app.post('/api/forms/:id/upload', mysebGuard);
+  app.post('/api/form-exams/public/:formId/start', mysebGuard);
+  // Hand-in links (/a/<token>): the task text and files, and the hand-in itself. A student's own result page is not locked.
+  const mysebTask = mySebGuard('assignment');
+  app.get('/a/:token', mySebShell('assignment'));
+  app.get('/api/assignments/public/:token', mysebTask);
+  app.get('/api/assignments/public/:token/files/:index', mysebTask);
+  app.post('/api/assignments/public/:token/submit', mysebTask);
+}
+app.use('/api/myseb', createMySebPublicRouter());
+app.use('/api/forms', createMySebOwnerRouter());
 app.use('/api/forms', formRoutes);
 // Stored files: a signed link works for anyone holding it; without one, the signed-in owner (Bearer token) can open
 // their own files. (The user id is userId on the verified token; the old lookup of user.id never matched.)
@@ -423,6 +443,7 @@ app.use('/api/exams', requireAuth, examsRouter);
 // Assignments: students hand in through the shared link without an account; the rest is the teacher's.
 app.post('/api/assignments/public/:token/submit', assignmentSubmitLimiter);
 app.use('/api/assignments/public', createPublicAssignmentsRouter());
+app.use('/api/assignments', createMySebAssignmentOwnerRouter());
 app.use('/api/assignments', requireAuth, createAssignmentsRouter());
 // Courses: the lecturer's named classes (roster, accommodations, tasks and quizzes, dashboard).
 app.use('/api/courses', requireAuth, createCoursesRouter());
@@ -1964,7 +1985,7 @@ ${augmentedQuery}`;
 const sanitizePublicFormSchema = (value: any): any => {
   const privateKeys = new Set([
     'answer', 'answerkey', 'correct', 'correctanswer', 'correctanswers', 'expectedanswer', 'modelanswer',
-    'rubric', 'scoringrubric', 'selectionsettings', 'requirements', 'solution',
+    'rubric', 'scoringrubric', 'selectionsettings', 'requirements', 'solution', 'mysebexamid',
     // Safe Exam Browser keys: anyone who knew one could fake the header.
     'sebkeys',
   ]);

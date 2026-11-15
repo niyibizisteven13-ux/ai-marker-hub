@@ -5,9 +5,10 @@ import { tokenHash } from './security.js';
 export const VIOLATION_TYPES = new Set([
   'leave', 'blur', 'background', 'visibility_hidden', 'fullscreen_exit', 'split_screen', 'screen_recording',
   'screenshot', 'copy', 'paste', 'cut', 'devtools', 'close_attempt', 'shortcut', 'heartbeat_lost', 'token_misuse',
+  'extra_display', 'forbidden_app',
 ]);
 /** Violations that mean "the student was not looking at the exam": exam.leave_action decides what happens. */
-const LEAVE_LIKE = new Set(['leave', 'blur', 'background', 'visibility_hidden', 'fullscreen_exit', 'split_screen', 'screen_recording']);
+const LEAVE_LIKE = new Set(['leave', 'blur', 'background', 'visibility_hidden', 'fullscreen_exit', 'split_screen', 'screen_recording', 'extra_display', 'forbidden_app']);
 
 const MARK = /MySEB\//;
 

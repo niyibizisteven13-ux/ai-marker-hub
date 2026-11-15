@@ -5,6 +5,7 @@ import { PdfViewer } from './PdfViewer';
 import { FileThumb, PreviewDialog, type PreviewSource } from './FilePreview';
 import { Card, Empty, PageShell, SectionTabs, Stat, StatRow, Toolbar, primaryBtn, relative } from './workspace/Shell';
 import CoursesPage from './CoursesPage';
+import MySebPanel from './MySebPanel';
 import CodeTestsEditor, { BLANK_CONFIG, type CodeTestsConfig } from './CodeTestsEditor';
 
 /**
@@ -18,7 +19,7 @@ interface MarkStatus { state: 'queued' | 'marking' | 'marked' | 'needs_review' |
 interface Submission { id: string; studentName: string; studentId?: string; files: StoredFile[]; text?: string; submittedAt: string; late: boolean; resubmissions: number; marking?: MarkStatus; resultLink?: string; receiptCode?: string; codeResult?: CodeResultView }
 interface CodeTestView { name: string; passed: boolean; hidden: boolean; points: number; earned: number; ms: number; reason?: string; got?: string; expected?: string; input?: string; stderr?: string }
 interface CodeResultView { runner: string; compileError?: string; error?: string; earned: number; max: number; passed: number; total: number; tests: CodeTestView[] }
-interface Assignment { id: string; title: string; instructions: string; taskFiles: StoredFile[]; dueAt: string | null; open: boolean; link: string; createdAt: string; submissions: Submission[]; counts: { submitted: number; late: number }; roster?: Array<{ id: string; name: string }>; hardDeadline?: boolean; notSubmitted?: Array<{ id: string; name: string }>; autoMark?: boolean; schemeFiles?: StoredFile[]; examId?: string | null; codeTests?: (CodeTestsConfig & { tests: Array<{ name: string; input: string; expected: string; points: number; hidden: boolean }> }) | null }
+interface Assignment { id: string; title: string; instructions: string; taskFiles: StoredFile[]; dueAt: string | null; open: boolean; link: string; createdAt: string; submissions: Submission[]; counts: { submitted: number; late: number }; roster?: Array<{ id: string; name: string }>; hardDeadline?: boolean; requireMyseb?: boolean; notSubmitted?: Array<{ id: string; name: string }>; autoMark?: boolean; schemeFiles?: StoredFile[]; examId?: string | null; codeTests?: (CodeTestsConfig & { tests: Array<{ name: string; input: string; expected: string; points: number; hidden: boolean }> }) | null }
 
 /** The automatic marking state of one hand-in, as a small coloured label. */
 function MarkChip({ m }: { m?: MarkStatus }) {
@@ -279,6 +280,30 @@ function CodeResultPanel({ r }: { r: CodeResultView }) {
 }
 
 /** The tests of a task: run them again, or change them (for example after fixing a wrong expected output). */
+/** Require MySEB: hand-ins only from inside the secure exam app (device locked, leaving reported). */
+function MySebCard({ a, onChanged }: { a: Assignment; onChanged: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const set = async (on: boolean) => {
+    setBusy(true); setMsg(null);
+    try { await json(await authFetch(`/api/assignments/${a.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requireMyseb: on }) })); await onChanged(); }
+    catch (e) { setMsg(e instanceof Error ? e.message : 'Could not change this.'); } finally { setBusy(false); }
+  };
+  return (
+    <Card>
+      <label className="flex cursor-pointer items-start gap-3">
+        <input type="checkbox" checked={!!a.requireMyseb} disabled={busy} onChange={(e) => void set(e.target.checked)} className="mt-1 h-4 w-4 accent-[var(--brand)]" />
+        <span>
+          <span className="block text-[13.5px] font-semibold text-neutral-100">Require MySEB (secure exam app)</span>
+          <span className="block text-[12px] leading-relaxed text-neutral-400">Students can only open this task and hand in from inside the MySEB app on a laptop or phone (or its Chrome extension). Their device is locked, and opening another app, window or tab is recorded and pauses them. Best for work done in class.</span>
+        </span>
+      </label>
+      {msg && <p role="alert" className="mt-2 text-[12px] text-rose-400">{msg}</p>}
+      {a.requireMyseb && <div className="mt-3"><MySebPanel base={`/api/assignments/${a.id}/myseb`} onExamId={() => void onChanged()} /></div>}
+    </Card>
+  );
+}
+
 function CodeTestsCard({ a, onChanged }: { a: Assignment; onChanged: () => Promise<void> }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<CodeTestsConfig>(() => a.codeTests as CodeTestsConfig);
@@ -415,6 +440,7 @@ function Dashboard({ id, onBack, onMarkAll, autoMark = false }: { id: string; on
       {error && <p className="mt-3 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[13px] text-rose-300">{error}</p>}
 
       <div className="mt-4"><ShareBox link={a.link} title={a.title} /></div>
+      <div className="mt-4"><MySebCard a={a} onChanged={load} /></div>
       {a.codeTests && <div className="mt-4"><CodeTestsCard a={a} onChanged={load} /></div>}
 
       {a.notSubmitted && a.notSubmitted.length > 0 && (

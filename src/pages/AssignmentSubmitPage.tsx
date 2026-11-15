@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowRight, CalendarClock, Camera, CheckCircle2, Download, E
 import { FileThumb, PreviewDialog, type PreviewSource } from '../components/FilePreview';
 import VoiceRecorder from '../components/VoiceRecorder';
 import { getApiUrl } from '../utils/authFetch';
+import MySebRequired from '../components/MySebRequired';
 import { HAND_IN_ACCEPT } from '../../shared/handInTypes';
 import { folderToZip } from '../utils/folderToZip';
 import logoUrl from '../assets/bwenge-logo.svg';
@@ -25,6 +26,7 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
   const api = (p = '') => getApiUrl(`/api/assignments/public/${encodeURIComponent(token)}${p}`);
   const [task, setTask] = useState<Task | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [mysebBlock, setMysebBlock] = useState('');   // this task needs MySEB and the student is not inside it
   const [name, setName] = useState('');
   const [studentId, setStudentId] = useState('');
   const [text, setText] = useState('');
@@ -37,7 +39,7 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
 
   useEffect(() => {
     document.title = 'Submit · Bwenge';
-    fetch(api()).then(async (r) => { const b = await r.json().catch(() => ({})); if (!r.ok) throw new Error(b.error || 'This link is not valid.'); setTask(b); })
+    fetch(api()).then(async (r) => { const b = await r.json().catch(() => ({})); if (!r.ok) { if (typeof b.code === 'string' && b.code.startsWith('MYSEB_')) { setMysebBlock(b.code); return; } throw new Error(b.error || 'This link is not valid.'); } setTask(b); })
       .catch((e) => setLoadError(e instanceof Error ? e.message : 'This link is not valid.'));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // Nothing is remembered on the device: people often share phones, and a remembered name or number would
@@ -116,6 +118,7 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
     </div>
   );
 
+  if (mysebBlock) return shell(<MySebRequired code={mysebBlock} />);
   if (loadError) return shell(<div className="rounded-2xl bg-white p-6 text-center shadow-sm"><Lock className="mx-auto text-neutral-400" /><p className="mt-3 font-semibold">This link does not work</p><p className="mt-1 text-[14px] text-neutral-500">{loadError} Ask the person who shared it for the link again.</p></div>);
   if (!task) return shell(<div className="flex justify-center py-24 text-neutral-400"><Loader2 className="animate-spin" /></div>);
 

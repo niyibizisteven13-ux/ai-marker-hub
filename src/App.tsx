@@ -83,6 +83,7 @@ const MarkPage = React.lazy(() => import('./components/MarkPage'));
 const AssignmentsPage = React.lazy(() => import('./components/AssignmentsPage'));
 const FormsPage = React.lazy(() => import('./components/FormsPage'));
 const AssignmentSubmitPage = React.lazy(() => import('./pages/AssignmentSubmitPage'));
+const MySebRequired = React.lazy(() => import('./components/MySebRequired'));
 const ExamRunner = React.lazy(() => import('./components/ExamRunner'));
 const TaskResultPage = React.lazy(() => import('./pages/TaskResultPage'));
 type MarkIncoming = import('./components/MarkPage').MarkIncoming;
@@ -329,6 +330,7 @@ export default function App() {
   const [publicForm, setPublicForm] = useState<any | null>(null);
   const [publicFormLoading, setPublicFormLoading] = useState(false);
   const [publicFormError, setPublicFormError] = useState('');
+  const [mysebBlock, setMysebBlock] = useState('');
   const [publicFormSubmitted, setPublicFormSubmitted] = useState(false);
   const [publicFormSubmitError, setPublicFormSubmitError] = useState('');
   const [publicFormLinkCopied, setPublicFormLinkCopied] = useState(false);
@@ -465,12 +467,21 @@ export default function App() {
       setActiveFormId(formId);
       setPublicFormLoading(true);
       setPublicFormError('');
+      setMysebBlock('');
       authFetch(`/api/public/forms/${formId}`)
-        .then((res) => {
-          if (!res.ok) throw new Error('Form not found');
+        .then(async (res) => {
+          if (!res.ok) {
+            // A test that needs MySEB answers 403 { code: 'MYSEB_*' } to anyone outside the app: show how to get it.
+            const body = await res.json().catch(() => ({} as any));
+            if (res.status === 403 || res.status === 503) {
+              if (typeof body.code === 'string' && body.code.startsWith('MYSEB_')) { setMysebBlock(body.code); setPublicFormLoading(false); return null; }
+            }
+            throw new Error('Form not found');
+          }
           return res.json();
         })
         .then((data) => {
+          if (!data) return;
           setPublicForm(data);
           setPublicFormLoading(false);
         })
@@ -1456,6 +1467,10 @@ export default function App() {
   if (handIn) {
     return <Suspense fallback={null}><AssignmentSubmitPage token={handIn[1]} /></Suspense>;
   }
+  // Where students get MySEB (apps + Chrome extension).
+  if (window.location.pathname === '/myseb') {
+    return <div className="min-h-[100dvh] bg-slate-50 px-4"><Suspense fallback={null}><MySebRequired page /></Suspense></div>;
+  }
   if (window.location.pathname === '/terms') {
     return <TermsPage />;
   }
@@ -1762,7 +1777,7 @@ export default function App() {
     );
   }
 
-  if (publicFormLoading || publicFormError || publicForm) {
+  if (publicFormLoading || publicFormError || publicForm || mysebBlock) {
     // The page people open from a shared form link, in the form's own design (template, light or dark, logo,
     // background), never the visitor's app theme.
     const formBrand = brandingOf(publicForm);
@@ -1814,6 +1829,8 @@ export default function App() {
             <div className="mx-auto max-w-2xl rounded-2xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500 shadow-sm">
               Loading form…
             </div>
+          ) : mysebBlock ? (
+            <Suspense fallback={null}><MySebRequired code={mysebBlock} /></Suspense>
           ) : publicFormError ? (
             <div className="mx-auto max-w-2xl rounded-2xl border border-rose-200 bg-white p-8 text-center space-y-3 shadow-sm">
               <p className="text-base font-bold text-rose-600">{publicFormError}</p>

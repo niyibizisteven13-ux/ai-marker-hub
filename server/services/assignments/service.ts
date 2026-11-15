@@ -61,6 +61,10 @@ export interface AssignmentRecord extends OwnedRecord {
   roster?: RosterEntry[];
   /** Refuse hand-ins after the due date instead of marking them late. */
   hardDeadline?: boolean;
+  /** Students must hand in from inside the MySEB app (or its Chrome extension). */
+  requireMyseb?: boolean;
+  /** The matching exam on the MySEB server, created when the lecturer first asks for a code. */
+  mysebExamId?: string;
 }
 
 export interface RosterEntry { id: string; name: string }
@@ -194,7 +198,7 @@ export function createAssignmentService(deps: {
     id: a.id, title: a.title, instructions: a.instructions, taskFiles: a.taskFiles, dueAt: a.dueAt, open: a.open,
     link: linkOf(a.token), createdAt: a.createdAt, updatedAt: a.updatedAt,
     autoMark: !!a.autoMark, schemeFiles: a.schemeFiles ?? [], examId: a.examId ?? null, codeTests: a.codeTests ?? null,
-    roster: a.roster ?? [], hardDeadline: !!a.hardDeadline, notSubmitted: notSubmitted(a),
+    roster: a.roster ?? [], hardDeadline: !!a.hardDeadline, requireMyseb: !!a.requireMyseb, notSubmitted: notSubmitted(a),
     submissions: [...a.submissions].sort((x, y) => y.submittedAt.localeCompare(x.submittedAt)).map(({ resultToken, ...x }) => ({ ...x, receiptCode: x.id.slice(0, 8).toUpperCase(), ...(resultToken ? { resultLink: resultLinkOf(a.token, resultToken) } : {}) })),
     counts: { submitted: a.submissions.length, late: a.submissions.filter((s) => s.late).length },
   });
@@ -289,7 +293,7 @@ export function createAssignmentService(deps: {
       return deps.marker.release(ownerId, a, submissionIds?.length ? submissionIds : 'all');
     },
 
-    async update(ownerId: string, id: string, patch: { open?: unknown; dueAt?: unknown; title?: unknown; instructions?: unknown; roster?: unknown; hardDeadline?: unknown; codeTests?: unknown }) {
+    async update(ownerId: string, id: string, patch: { open?: unknown; dueAt?: unknown; title?: unknown; instructions?: unknown; roster?: unknown; hardDeadline?: unknown; codeTests?: unknown; requireMyseb?: unknown }) {
       await load(ownerId, id);
       const tests = patch.codeTests === null ? null : patch.codeTests !== undefined ? normalizeCodeTests(patch.codeTests) : undefined;
       if (patch.codeTests !== undefined && patch.codeTests !== null && !tests) throw new AssignmentError('BAD_TESTS', 'Add at least one test with an expected output.');
@@ -301,6 +305,7 @@ export function createAssignmentService(deps: {
         if (typeof patch.instructions === 'string') r.instructions = clean(patch.instructions, LIMITS.instructions);
         if (typeof patch.roster === 'string') { const list = parseRoster(patch.roster); if (list.length) r.roster = list; else delete r.roster; }
         if (typeof patch.hardDeadline === 'boolean') { if (patch.hardDeadline) r.hardDeadline = true; else delete r.hardDeadline; }
+        if (typeof patch.requireMyseb === 'boolean') { if (patch.requireMyseb) r.requireMyseb = true; else delete r.requireMyseb; }
         if (tests === null) delete r.codeTests; else if (tests) r.codeTests = tests;
       });
       return view(a!);
@@ -385,6 +390,21 @@ export function createAssignmentService(deps: {
       const known = [...a.taskFiles, ...a.submissions.flatMap((s) => s.files)].some((f) => f.id === fileId);
       if (!known) throw new AssignmentError('NOT_FOUND', 'File not found.', 404);
       return deps.files.read(ownerId, fileId);
+    },
+
+    // ── MySEB (device lock) ─────────────────────────────────────────────
+    /** What the MySEB wiring needs about one of the lecturer's tasks. */
+    async mysebInfo(ownerId: string, id: string) {
+      const a = await load(ownerId, id);
+      return { title: a.title, link: linkOf(a.token), requireMyseb: !!a.requireMyseb, mysebExamId: a.mysebExamId ?? null, dueAt: a.dueAt };
+    },
+    async setMysebExamId(ownerId: string, id: string, examId: string) {
+      await load(ownerId, id);
+      await deps.store.update(id, ownerId, (r) => { r.mysebExamId = examId; r.requireMyseb = true; });
+    },
+    /** For the guard in front of the student routes: does this link need MySEB, and who owns it (the owner may preview). Never throws. */
+    async mysebForToken(token: string): Promise<{ requireMyseb: boolean; mysebExamId: string | null; ownerId: string } | null> {
+      try { const a = await byToken(token); return { requireMyseb: !!a.requireMyseb, mysebExamId: a.mysebExamId ?? null, ownerId: a.ownerId }; } catch { return null; }
     },
 
     // ── Student side (the shared link) ──────────────────────────────────
