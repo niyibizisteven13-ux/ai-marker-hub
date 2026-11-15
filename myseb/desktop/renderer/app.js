@@ -47,6 +47,7 @@ function onStatus(s) {
   }
 }
 window.myseb.onStatus(onStatus);
+window.myseb.onNotice((n) => { if (!ended) overlay(String(n.title || ''), String(n.text || ''), [['OK', 'primary', () => { if (!paused && !closing) hideOverlay(); }]]); });
 
 window.myseb.onCloseAttempt(() => {
   if (ended) return window.myseb.confirmExit();

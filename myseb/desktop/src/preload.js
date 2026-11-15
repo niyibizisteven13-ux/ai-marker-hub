@@ -7,5 +7,6 @@ contextBridge.exposeInMainWorld('myseb', {
   confirmExit: () => ipcRenderer.invoke('confirm-exit'),
   quitIdle: () => ipcRenderer.invoke('quit-idle'),
   onStatus: (cb) => ipcRenderer.on('status', (_e, s) => cb(s)),
+  onNotice: (cb) => ipcRenderer.on('notice', (_e, n) => cb(n)),
   onCloseAttempt: (cb) => ipcRenderer.on('close-attempt', () => cb()),
 });

@@ -3,6 +3,7 @@ import { Camera, CameraOff, Clock, Pause, ShieldCheck, TriangleAlert } from 'luc
 import DynamicForm from './DynamicForm';
 import { FaceWatch, frameStatus, normalizeExam, type FrameStatus, type WatchState } from '../../shared/examRules';
 import { createFaceDetector, type FaceDetector } from '../lib/faceDetector';
+import { cameraErrorMessage } from '../utils/cameraErrors';
 
 /**
  * A timed test on the student's side. The clock belongs to the server: this page asks for the time left every few
@@ -186,8 +187,10 @@ export default function ExamRunner({ schema, uploadFile, onSubmit }: Props) {
         }, 600);
       } catch (e) {
         if (stop) return;
-        const denied = (e as DOMException)?.name === 'NotAllowedError' || (e as DOMException)?.name === 'NotFoundError';
-        setCamError(denied ? 'The camera is blocked or missing. Allow the camera for this page, then try again. If you cannot use a camera, tell your lecturer: they can set you up without it.' : 'The camera check could not start on this device. Try again, or tell your lecturer.');
+        const reason = cameraErrorMessage(e);
+        setCamError(stream
+          ? 'The camera works, but the face check could not start on this device. Try again, or tell your lecturer.'
+          : `${reason} If you cannot use a camera, tell your lecturer: they can set you up without it.`);
         sendEvent('camera_denied');
       }
     })();

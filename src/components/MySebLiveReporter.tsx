@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from 'react';
  * student to agree; then it sends one small picture (about 5 KB) every 10 seconds. Pictures are not recorded or saved.
  */
 const inMySeb = () => typeof navigator !== 'undefined' && (/MySEB\//.test(navigator.userAgent) || document.documentElement.dataset.myseb === '1');
+import { cameraErrorMessage } from '../utils/cameraErrors';
 type Cam = 'off' | 'ask' | 'on' | 'denied';
 type Screen = 'off' | 'ask' | 'on' | 'denied' | 'partial';   // partial: they shared a window or tab, not the whole screen
 type Source = 'camera' | 'screen' | 'both';
@@ -36,6 +37,7 @@ export default function MySebLiveReporter({ kind, refId, total, status }: { kind
   const haveAudio = useRef(false);
   const pcs = useRef(new Map<string, RTCPeerConnection>());
   const [cam, setCam] = useState<Cam>('off');
+  const [camWhy, setCamWhy] = useState('');
   const camRef = useRef<Cam>('off');
   const [source, setSource] = useState<Source>('camera');
   const [screen, setScreen] = useState<Screen>('off');
@@ -177,9 +179,9 @@ export default function MySebLiveReporter({ kind, refId, total, status }: { kind
       haveAudio.current = s.getAudioTracks().length > 0;
       streamRef.current = s;
       if (videoRef.current) { videoRef.current.srcObject = s; await videoRef.current.play().catch(() => undefined); }
-      s.getVideoTracks()[0]?.addEventListener('ended', () => setCam('denied'));
+      s.getVideoTracks()[0]?.addEventListener('ended', () => { setCamWhy('The camera stopped. Check it is not being used by another program.'); setCam('denied'); });
       setCam('on');
-    } catch { setCam('denied'); }
+    } catch (e) { setCamWhy(cameraErrorMessage(e)); setCam('denied'); }
   };
   /** The whole screen, never a window or a tab: the lecturer must see what the student sees. */
   const turnOnScreen = async () => {
@@ -233,7 +235,7 @@ export default function MySebLiveReporter({ kind, refId, total, status }: { kind
       )}
       {needCamera && cam === 'denied' && (
         <div role="alert" className="fixed inset-x-3 bottom-3 z-[80] mx-auto max-w-md rounded-2xl border border-amber-300 bg-amber-50 p-3 text-[13px] text-amber-900 shadow-lg">
-          The camera is off or blocked. Your lecturer can see that. Allow the camera for this app, or tell your lecturer.
+          {camWhy || 'The camera is off or blocked.'} Your lecturer can see that.
           <button type="button" onClick={turnOnCamera} className="ml-2 font-semibold underline">Try again</button>
         </div>
       )}
