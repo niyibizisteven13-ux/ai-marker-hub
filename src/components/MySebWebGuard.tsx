@@ -22,6 +22,8 @@ const BAD_KEY = (e: KeyboardEvent) => {
   return null;
 };
 const GRACE_MS = 5000;           // a face may be out of the picture this long (looking down to write) before the test ends
+const LEFT = ['background', 'visibility_hidden', 'blur', 'fullscreen_exit'];
+const STRICT_REASONS = ['face_missing', 'camera_off', ...LEFT];
 const WHY: Record<string, string> = {
   face_missing: 'Your face left the camera.', camera_off: 'Your camera was turned off.', background: 'You left the test page or closed it.',
   visibility_hidden: 'You left the test page (another app or tab).', blur: 'You left the test page.', fullscreen_exit: 'You left full screen.',
@@ -103,7 +105,7 @@ export default function MySebWebGuard() {
 
       // Leaving the page: another tab, another app, the screen locked. A glance shorter than 1.5 s is not reported
       // (strict rules: a longer glance ends the test; closing the page does at once).
-      on(document, 'visibilitychange', () => { window.clearTimeout(hidden); if (document.hidden) hidden = window.setTimeout(() => void report('visibility_hidden'), strictOn ? 800 : 1500); });
+      on(document, 'visibilitychange', () => { window.clearTimeout(hidden); if (document.hidden) hidden = window.setTimeout(() => void report('visibility_hidden'), strictOn ? 0 : 1500); });   // strict: at once, no glance allowed
       on(window, 'blur', () => { window.clearTimeout(blur); blur = window.setTimeout(() => { if (!document.hasFocus() && !document.hidden) void report('blur'); }, 1500); });
       on(window, 'focus', () => window.clearTimeout(blur));
       on(window, 'pagehide', () => { void report('background'); });
@@ -163,6 +165,7 @@ export default function MySebWebGuard() {
 
   if (phase === 'off') return null;
   const needCam = strict && phase === 'active' && cam !== 'ok';
+  const cheat = phase === 'ended' && strict && !!reason && STRICT_REASONS.includes(reason);
   const covered = phase !== 'active' || needCam;
   return (
     <>
@@ -192,9 +195,12 @@ export default function MySebWebGuard() {
               </>
             ) : (
               <>
-                <p className="text-xl font-bold">{phase === 'ended' ? (reason && WHY[reason] && strict && ['face_missing', 'camera_off', 'background', 'visibility_hidden', 'blur', 'fullscreen_exit'].includes(reason) ? 'Your test has been ended' : 'Your test has ended') : phase === 'lost' ? 'The connection to your test was lost' : 'Your test is paused'}</p>
+                <p className="text-xl font-bold">{phase === 'ended' ? (cheat ? 'You are disqualified from this quiz' : 'Your test has ended') : phase === 'lost' ? 'The connection to your test was lost' : 'Your test is paused'}</p>
                 <p className="text-sm text-slate-300">
-                  {phase === 'ended' ? `${reason && WHY[reason] ? `${WHY[reason]} ` : ''}${strict && reason && ['face_missing', 'camera_off', 'background', 'visibility_hidden', 'blur', 'fullscreen_exit'].includes(reason) ? 'Under the strict rules the test cannot be started again. Your lecturer has been told.' : 'You can close this page.'}` : phase === 'lost' ? 'Reload this page. If it does not come back, tell your lecturer.' : 'You left the test page, so your lecturer was told. Wait for them to let you continue.'}
+                  {phase === 'ended' ? (cheat
+                    ? `${LEFT.includes(reason!) ? 'You opened another app or another tab, or left the test page.' : WHY[reason!] ?? ''} This is treated as cheating, so you are disqualified and cannot start this quiz again. Your lecturer has been told.`
+                    : `${reason && WHY[reason] ? `${WHY[reason]} ` : ''}You can close this page.`)
+                    : phase === 'lost' ? 'Reload this page. If it does not come back, tell your lecturer.' : 'You left the test page, so your lecturer was told. Wait for them to let you continue.'}
                 </p>
               </>
             )}

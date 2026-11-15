@@ -24,6 +24,7 @@ const WHY: Record<string, string> = {
   copy: 'Tried to copy', paste: 'Tried to paste', cut: 'Tried to cut', devtools: 'Opened developer tools', shortcut: 'Pressed a blocked key', close_attempt: 'Tried to close the app',
   extra_display: 'Second screen', forbidden_app: 'Remote or recording app', fullscreen_exit: 'Left full screen', split_screen: 'Split screen', screen_recording: 'Screen recording',
   visibility_hidden: 'Hid the tab', screen_share_stopped: 'Stopped sharing the screen', token_misuse: 'Used the key from another place', teacher: 'Paused by you',
+  face_missing: 'Face left the camera', camera_off: 'Turned the camera off', multiple_faces: 'More than one face', face_check_unavailable: 'Face check could not load',
 };
 const why = (k: string | null) => (k ? WHY[k] ?? k : '');
 
@@ -503,7 +504,7 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
             {shown.map((s) => {
               const q = s.live?.question;
               const pct = q?.index && q.total ? Math.min(100, Math.round((q.index / q.total) * 100)) : 0;
-              const qText = s.status === 'ENDED' ? (s.end_reason === 'student_exit' ? 'Student ended it' : s.end_reason === 'time_up' ? 'Time is up' : s.end_reason === 'teacher' ? 'Ended by you' : 'Finished')
+              const qText = s.status === 'ENDED' ? (s.end_reason === 'student_exit' ? 'Student ended it' : s.end_reason === 'time_up' ? 'Time is up' : s.end_reason === 'teacher' ? 'Ended by you' : s.end_reason && s.end_reason !== 'exam_ended' && WHY[s.end_reason] ? `Disqualified · ${WHY[s.end_reason]}` : 'Finished')
                 : q ? `${q.index ? `Q${q.index}${q.total ? ` of ${q.total}` : ''}` : ''}${q.label ? `${q.index ? ' · ' : ''}${q.label}` : ''}` || '…' : 'Not started';
               return (
                 <li key={s.id} data-sid={s.id} ref={watchTile} className={`group flex flex-col overflow-hidden rounded-2xl border bg-slate-900 ${RING_D[s.status]}`}>
