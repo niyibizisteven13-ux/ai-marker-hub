@@ -1,4 +1,5 @@
 'use strict';
+const { postFollowingRedirects } = require('./post');
 const { app, BrowserWindow, Menu, ipcMain, session, clipboard, screen, desktopCapturer } = require('electron');
 const { execFile } = require('node:child_process');
 const path = require('node:path');
@@ -73,10 +74,11 @@ const toRenderer = (ch, payload) => { if (win && !win.isDestroyed()) win.webCont
 
 /* ------------------------------------------------------------------ server calls */
 async function post(pathname, body, { auth = true } = {}) {
-  const res = await fetch(cfg.apiBase + pathname, {
+  const { res, base } = await postFollowingRedirects(fetch, cfg.apiBase, pathname, {
     method: 'POST', body: JSON.stringify(body ?? {}), signal: AbortSignal.timeout(8000),
     headers: auth ? headersFor() : { 'Content-Type': 'application/json', 'User-Agent': `MySEB/${VERSION} (desktop)` },
   });
+  cfg.apiBase = base;   // the site moved (www or not): talk to the right address from now on
   const json = await res.json().catch(() => ({}));
   return { ok: res.ok, status: res.status, json };
 }

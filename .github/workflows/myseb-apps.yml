@@ -7,7 +7,7 @@ on:
     inputs:
       api_base:
         description: Address of the MySEB server the apps will talk to
-        default: https://www.bwenge.space/myseb
+        default: https://bwenge.space/myseb
   push:
     tags: ['myseb-v*']
 
@@ -15,7 +15,7 @@ permissions:
   contents: write
 
 env:
-  API_BASE: ${{ inputs.api_base || 'https://www.bwenge.space/myseb' }}
+  API_BASE: ${{ inputs.api_base || 'https://bwenge.space/myseb' }}
 
 jobs:
   desktop:
