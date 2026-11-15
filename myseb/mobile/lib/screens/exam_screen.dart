@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui' show FontFeature;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../services/api.dart';
 import '../services/lock.dart';
@@ -63,10 +64,24 @@ class _ExamScreenState extends State<ExamScreen> with WidgetsBindingObserver {
   Future<void> _initWebView() async {
     _wc = WebViewController(
       // The exam page may use the camera (and microphone) only if the lecturer turned on live pictures or video (the page shows its own notice first).
-      onPermissionRequest: (request) {
+      onPermissionRequest: (request) async {
         // Camera and microphone only for live video / listening, which the lecturer turns on and the page asks the student about first.
         final ok = request.types.every((t) => t == WebViewPermissionResourceType.camera || t == WebViewPermissionResourceType.microphone);
-        ok ? request.grant() : request.deny();
+        if (!ok) { request.deny(); return; }
+        // Android only lets the web view use the camera once the PHONE has asked the student and the student said yes: granting
+        // inside the web view is not enough. The system question is another screen, so leaving to it must not count as leaving the exam.
+        _pickUntil = DateTime.now().add(const Duration(seconds: 60));
+        final need = <Permission>[
+          if (request.types.contains(WebViewPermissionResourceType.camera)) Permission.camera,
+          if (request.types.contains(WebViewPermissionResourceType.microphone)) Permission.microphone,
+        ];
+        var allowed = true;
+        for (final p in need) {
+          final status = await p.request();
+          if (!status.isGranted) allowed = false;
+        }
+        _pickUntil = DateTime.now().add(const Duration(seconds: 3));
+        allowed ? request.grant() : request.deny();
       },
     )
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
