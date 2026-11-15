@@ -835,6 +835,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
         shuffleQuestions: builderSchema.shuffleQuestions,
         shuffleAllOptions: builderSchema.shuffleAllOptions,
         trackIntegrity: builderSchema.trackIntegrity,
+        exam: builderSchema.exam,
         quizShowAnswers: builderSchema.quizShowAnswers,
         branding: builderSchema.branding,
         requirements: String(builderSchema.description || '').replace(/<[^>]*>/g, ' ').trim(),

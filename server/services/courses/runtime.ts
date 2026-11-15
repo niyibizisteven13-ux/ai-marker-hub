@@ -28,8 +28,11 @@ export const liveSources: CourseSources = {
       attempts: subs.map((sub: any) => {
         const data = parse(sub.data);
         const q = data._quiz;
-        const flags = Array.isArray(data._integrity?.flags) ? data._integrity.flags.filter((f: any) => f.level === 'review').length : 0;
-        return { studentId: idField ? String(data[String(idField.id)] ?? '').trim().slice(0, 40) || null : null, submittedAt: new Date(sub.createdAt).toISOString(), percent: q ? q.percent : null, score: q ? q.score : null, maxScore: q ? q.maxScore : null, flags };
+        const flags = (Array.isArray(data._integrity?.flags) ? data._integrity.flags.filter((f: any) => f.level === 'review').length : 0)
+          + (data._exam ? Number(data._exam.faceLost > 0) + Number(data._exam.multipleFaces > 0) + Number(data._exam.cameraProblems > 0) : 0);
+        // A timed test knows who sat it (the registration number they started with); otherwise the question that asks for it.
+        const sid = typeof data._exam?.studentId === 'string' ? data._exam.studentId : idField ? String(data[String(idField.id)] ?? '').trim().slice(0, 40) || null : null;
+        return { studentId: sid, submittedAt: new Date(sub.createdAt).toISOString(), percent: q ? q.percent : null, score: q ? q.score : null, maxScore: q ? q.maxScore : null, flags };
       }),
     };
   },

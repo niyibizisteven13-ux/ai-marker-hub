@@ -119,6 +119,10 @@ export type DynamicFormProps = {
   onSubmit: (data: any) => void | Promise<any>;
   uploadFile?: (file: File, onProgress?: (percent: number) => void) => Promise<string>;
   draftKey?: string;
+  /** Timed tests: lets the page above send what the student has when time is up (required questions are not enforced). */
+  controlRef?: React.MutableRefObject<{ submitNow: () => Promise<void> } | null>;
+  /** Timed tests: no typing or clicking while the test is paused. */
+  locked?: boolean;
 };
 
 /* ---------------------------------------------------------------- helpers */
@@ -737,7 +741,7 @@ const QuestionCard = memo(function QuestionCard(props: CardProps) {
 
 /* ------------------------------------------------------------------- main */
 
-export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey }: DynamicFormProps) {
+export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey, controlRef, locked }: DynamicFormProps) {
   const parsed = useMemo(() => parseSchema(schema), [schema]);
   const parsedSchema = parsed.schema;
 
@@ -1069,22 +1073,24 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey }: 
     goTo(Math.min(safeIdx + 1, livePages.length - 1));
   };
 
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
+  /** `force` (time is up): send what there is, without the checks for required or unfinished questions. */
+  const runSubmit = async (force: boolean) => {
     if (submitting) return;
-    if (parsedSchema?.acceptingResponses === false) { setSubmitError('This form is no longer accepting responses.'); return; }
-    if (!isLast) { handleNext(); return; }
+    if (!force && parsedSchema?.acceptingResponses === false) { setSubmitError('This form is no longer accepting responses.'); return; }
+    if (!force && !isLast) { handleNext(); return; }
 
-    const everyField = livePages.flatMap(p => pageFields(p));
-    const found = validateFields(everyField);
-    setErrors(found);
-    const first = everyField.find(f => found[f.id]);
-    if (first) {
-      setShowSummary(true);
-      const pageOfFirst = livePages.findIndex(p => p.items.some(i => i.kind === 'field' && i.field.id === first.id));
-      if (pageOfFirst !== safeIdx) setPageIdx(pageOfFirst);
-      focusField(first.id);
-      return;
+    if (!force) {
+      const everyField = livePages.flatMap(p => pageFields(p));
+      const found = validateFields(everyField);
+      setErrors(found);
+      const first = everyField.find(f => found[f.id]);
+      if (first) {
+        setShowSummary(true);
+        const pageOfFirst = livePages.findIndex(p => p.items.some(i => i.kind === 'field' && i.field.id === first.id));
+        if (pageOfFirst !== safeIdx) setPageIdx(pageOfFirst);
+        focusField(first.id);
+        return;
+      }
     }
 
     setSubmitting(true);
@@ -1112,6 +1118,13 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey }: 
       setSubmitting(false);
     }
   };
+  const handleSubmit = async (event: React.FormEvent) => { event.preventDefault(); await runSubmit(false); };
+  // The page above (a timed test) can send the answers when the time is up. Set on every render so it sees the latest answers.
+  useEffect(() => {
+    if (!controlRef) return;
+    controlRef.current = { submitNow: () => runSubmit(true) };
+    return () => { controlRef.current = null; };
+  });
 
   const resetAll = () => {
     setAnswers({}); setErrors({}); setUploads({}); setSubmitError(''); setShowSummary(false);
@@ -1331,7 +1344,7 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey }: 
             value={answers[field.id]}
             otherText={answers[`${field.id}::other`] ?? ''}
             error={errors[field.id]}
-            disabled={submitting}
+            disabled={submitting || !!locked}
             accent={accent}
             options={optionLists[field.id] || []}
             upload={uploads[field.id]}

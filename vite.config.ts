@@ -1,11 +1,39 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import fs from 'fs';
 import {defineConfig} from 'vite';
+
+/**
+ * Face detection for timed tests runs in the student's browser with files served by us (no third-party host, so
+ * nothing about a test leaves our server). The WebAssembly files come from the pinned package at build time; the
+ * small model file is committed under public/vendor/mediapipe.
+ */
+function mediapipeWasm() {
+  const dir = path.resolve(__dirname, 'node_modules/@mediapipe/tasks-vision/wasm');
+  const files = ['vision_wasm_internal.js', 'vision_wasm_internal.wasm', 'vision_wasm_nosimd_internal.js', 'vision_wasm_nosimd_internal.wasm'];
+  return {
+    name: 'mediapipe-wasm',
+    configureServer(server: any) {
+      server.middlewares.use('/vendor/mediapipe/wasm', (req: any, res: any, next: any) => {
+        const name = decodeURIComponent((req.url || '').split('?')[0]).replace(/^\//, '');
+        if (!files.includes(name)) return next();
+        res.setHeader('Content-Type', name.endsWith('.wasm') ? 'application/wasm' : 'text/javascript');
+        fs.createReadStream(path.join(dir, name)).pipe(res);
+      });
+    },
+    closeBundle() {
+      const out = path.resolve(__dirname, 'dist/vendor/mediapipe/wasm');
+      if (!fs.existsSync(dir)) return;
+      fs.mkdirSync(out, { recursive: true });
+      for (const f of files) fs.copyFileSync(path.join(dir, f), path.join(out, f));
+    },
+  };
+}
 
 export default defineConfig(() => {
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [react(), tailwindcss(), mediapipeWasm()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

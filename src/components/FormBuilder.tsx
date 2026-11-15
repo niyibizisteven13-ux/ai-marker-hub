@@ -18,12 +18,14 @@
  * strip them before sending the schema to respondents.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { DEFAULT_EXAM, normalizeExam, type ExamSettings } from '../../shared/examRules';
 import { DEFAULT_BRANDING, normalizeBranding, type FormBranding } from '../../shared/formBranding';
 import { FormDesignPanel } from './forms/FormDesignPanel';
 import { FormCanvas } from './forms/FormCanvas';
 import { AlignLeft, AtSign, Calendar, CheckSquare, ChevronDownSquare, CircleDot, Clock, Grid2x2Check, Grid3x3, Hash, Link2, Phone, SlidersHorizontal, Star, Type, Upload, type LucideIcon } from 'lucide-react';
 import DynamicForm from './DynamicForm';
 import { copyToClipboard } from '../utils/copyToClipboard';
+import { authFetch } from '../utils/authFetch';
 
 /* ------------------------------------------------------------------ types */
 
@@ -114,6 +116,8 @@ export type BuilderState = {
   shuffleQuestions: boolean;
   shuffleAllOptions: boolean;
   trackIntegrity: boolean;
+  /** A timed test: the clock is kept by the server; the camera rule; the class whose accommodations apply. */
+  exam: ExamSettings;
   /** Quizzes: show the respondent their score after submitting (off = they only see the thank-you message). */
   showScore: boolean;
   /** Quizzes: show each respondent which answers were right, with the correct answer, after they submit. */
@@ -187,6 +191,7 @@ export const blankState = (): BuilderState => ({
   shuffleQuestions: false,
   shuffleAllOptions: false,
   trackIntegrity: false,
+  exam: { ...DEFAULT_EXAM },
   quizShowAnswers: true,
   branding: { ...DEFAULT_BRANDING },
   items: [],
@@ -255,6 +260,7 @@ export function fromSchema(input: any): BuilderState {
     shuffleQuestions: !!s.shuffleQuestions,
     shuffleAllOptions: !!s.shuffleAllOptions,
     trackIntegrity: !!s.trackIntegrity,
+    exam: normalizeExam(s.exam),
     quizShowAnswers: s.quizShowAnswers !== false,
     branding: normalizeBranding(s.branding ?? { mode: 'dark' }),
     items,
@@ -335,6 +341,7 @@ export function buildSchema(s: BuilderState): any {
     shuffleQuestions: s.shuffleQuestions,
     shuffleAllOptions: s.shuffleAllOptions,
     trackIntegrity: s.trackIntegrity,
+    ...(s.exam.enabled ? { exam: s.exam } : { exam: { ...s.exam, enabled: false } }),
     quizShowAnswers: s.quizShowAnswers,
     branding: s.branding,
     fields,
@@ -390,6 +397,46 @@ const SparkIcon = () => (
 );
 
 /* ------------------------------------------------------- small components */
+
+/** Timed test: length, camera rule and the class whose accommodations (extra time, no camera…) apply. */
+function ExamPanel({ exam, onChange }: { exam: ExamSettings; onChange: (e: ExamSettings) => void }) {
+  const [classes, setClasses] = useState<Array<{ id: string; name: string; code: string; students: number }>>([]);
+  useEffect(() => {
+    if (!exam.enabled) return;
+    authFetch('/api/courses').then((r) => (r.ok ? r.json() : { courses: [] })).then((b) => setClasses(b.courses ?? [])).catch(() => undefined);
+  }, [exam.enabled]);
+  const set = (patch: Partial<ExamSettings>) => onChange(normalizeExam({ ...exam, ...patch }));
+  return (
+    <div className="space-y-2">
+      <Toggle label="Timed test" checked={exam.enabled} onChange={v => set({ enabled: v })} hint="The server keeps the clock. Students start with their registration number, and their time, breaks and camera exemption come from your class list." />
+      {exam.enabled && (
+        <div className="space-y-3 rounded-lg border border-[#E0E0E0] bg-white p-3">
+          <Field label="Time allowed (minutes)"><input type="number" min={5} max={600} className={inp} value={exam.minutes} onChange={e => set({ minutes: Number(e.target.value) })} /></Field>
+          <Field label="Camera rule" hint="Face detection runs on the student's own device. No picture or video is sent or stored; only events like “face out of frame for 9 s”.">
+            <select className={inp} value={exam.camera} onChange={e => set({ camera: e.target.value as ExamSettings['camera'] })}>
+              <option value="off">No camera</option>
+              <option value="warn">Watch only: record when the face leaves the frame</option>
+              <option value="pause">Pause the test when the face leaves the frame (you decide)</option>
+            </select>
+          </Field>
+          {exam.camera !== 'off' && (
+            <Field label="Seconds out of frame before it counts" hint="People look down to think. A short look away only shows a countdown.">
+              <input type="number" min={3} max={60} className={inp} value={exam.graceSeconds} onChange={e => set({ graceSeconds: Number(e.target.value) })} />
+            </Field>
+          )}
+          <Field label="Class" hint="Students on this class's list get their own accommodations. Choose a class to require that students are on the list.">
+            <select className={inp} value={exam.courseId ?? ''} onChange={e => set({ courseId: e.target.value || undefined })}>
+              <option value="">No class (anyone with the link, no accommodations)</option>
+              {classes.map(c => <option key={c.id} value={c.id}>{c.name}{c.code ? ` (${c.code})` : ''} · {c.students} students</option>)}
+            </select>
+          </Field>
+          {exam.courseId && <Toggle label="Only students on the class list can start" checked={exam.requireRoster} onChange={v => set({ requireRoster: v })} />}
+          <p className="text-xs text-[#5F6368]">You watch the test live in this form's Results: who is sitting, who is paused and why. You resume, add time or end it for one student.</p>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function Field({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
   return (
@@ -1045,6 +1092,7 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, onUpda
                 {state.isQuiz && <Toggle label="Show answers after submitting" checked={state.quizShowAnswers} onChange={v => setField('quizShowAnswers', v)} hint="Respondents see their score, which answers were right and the correct ones. Turn off to show the score only." />}
                 <div className="space-y-1 rounded-xl border border-[#E0E0E0] bg-[#F8F9FA] px-3 py-2">
                   <p className="text-xs font-bold uppercase tracking-wider text-[#5F6368]">Test protection</p>
+                  <ExamPanel exam={state.exam} onChange={e => setField('exam', e)} />
                   <Toggle label="Block pasting into typed answers" checked={state.blockPaste} onChange={v => setField('blockPaste', v)} hint="Students must type short and long answers themselves. Dropping text in is blocked too." />
                   <Toggle label="Shuffle question order" checked={state.shuffleQuestions} onChange={v => setField('shuffleQuestions', v)} hint="Each student sees a different order. Not used when questions depend on earlier answers." />
                   <Toggle label="Shuffle the options of every choice question" checked={state.shuffleAllOptions} onChange={v => setField('shuffleAllOptions', v)} hint="Avoid options like “All of the above” when this is on." />

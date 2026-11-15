@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { normalizeBranding } from '../../shared/formBranding.js';
+import { normalizeExam } from '../../shared/examRules.js';
 import { FormOrchestrator } from '../services/FormOrchestrator.js';
 import { ResultsPdfService } from '../services/ResultsPdfService.js';
 import { GradingService } from '../services/GradingService.js';
@@ -37,6 +38,7 @@ router.post('/', requireAuth, async (req, res) => {
       shuffleQuestions = false,
       shuffleAllOptions = false,
       trackIntegrity = false,
+      exam,
       quizShowAnswers = true,
       branding,
     } = req.body || {};
@@ -65,6 +67,7 @@ router.post('/', requireAuth, async (req, res) => {
       confirmationTitle: String(confirmationTitle || '').trim().slice(0, 120),
       showScore: showScore !== false,
       blockPaste: blockPaste === true, shuffleQuestions: shuffleQuestions === true, shuffleAllOptions: shuffleAllOptions === true, trackIntegrity: trackIntegrity === true,
+      ...(exam ? { exam: normalizeExam(exam) } : {}),
       quizShowAnswers: quizShowAnswers !== false,
       ...(branding ? { branding: normalizeBranding(branding) } : {}),
       ...(req.body.requirements ? { requirements: String(req.body.requirements).slice(0, 12000) } : {}),
@@ -121,6 +124,7 @@ router.put('/:id', requireAuth, async (req, res) => {
       shuffleQuestions = prevSchema.shuffleQuestions ?? false,
       shuffleAllOptions = prevSchema.shuffleAllOptions ?? false,
       trackIntegrity = prevSchema.trackIntegrity ?? false,
+      exam = prevSchema.exam,
       requirements = prevSchema.requirements || '',
       quizShowAnswers = prevSchema.quizShowAnswers ?? true,
       branding = prevSchema.branding,
@@ -147,6 +151,7 @@ router.put('/:id', requireAuth, async (req, res) => {
       confirmationTitle: String(confirmationTitle || '').trim().slice(0, 120),
       showScore: showScore !== false,
       blockPaste: blockPaste === true, shuffleQuestions: shuffleQuestions === true, shuffleAllOptions: shuffleAllOptions === true, trackIntegrity: trackIntegrity === true,
+      ...(exam ? { exam: normalizeExam(exam) } : {}),
       requirements: String(requirements || '').slice(0, 12000),
       quizShowAnswers: quizShowAnswers !== false,
       ...(branding ? { branding: normalizeBranding(branding) } : {}),
@@ -229,6 +234,7 @@ router.put('/:id/schema', requireAuth, async (req, res) => {
     if (Buffer.byteLength(JSON.stringify(schema)) > 4_000_000) return res.status(413).json({ error: 'The form is too large. Use smaller pictures.' });
     const { schema: prev } = await ownForm(userId, req.params.id);
     if (schema.branding !== undefined) schema.branding = normalizeBranding(schema.branding);
+    if (schema.exam !== undefined) schema.exam = normalizeExam(schema.exam);
     if (schema.confirmationTitle !== undefined) schema.confirmationTitle = String(schema.confirmationTitle || '').trim().slice(0, 120);
     if (schema.confirmationMessage !== undefined) schema.confirmationMessage = String(schema.confirmationMessage || 'Your response has been recorded.').slice(0, 1000);
     // Saving from the editor never silently opens or closes the form, and keeps scoring settings.

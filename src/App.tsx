@@ -83,11 +83,39 @@ const MarkPage = React.lazy(() => import('./components/MarkPage'));
 const AssignmentsPage = React.lazy(() => import('./components/AssignmentsPage'));
 const FormsPage = React.lazy(() => import('./components/FormsPage'));
 const AssignmentSubmitPage = React.lazy(() => import('./pages/AssignmentSubmitPage'));
+const ExamRunner = React.lazy(() => import('./components/ExamRunner'));
 const TaskResultPage = React.lazy(() => import('./pages/TaskResultPage'));
 type MarkIncoming = import('./components/MarkPage').MarkIncoming;
 type MarkScanTarget = import('./components/MarkPage').MarkScanTarget;
 const MarkingDrawer = React.lazy(() => import('./components/ChatMarkingCard').then((m) => ({ default: m.MarkingDrawer })));
 const openMarking = (examId: string) => window.dispatchEvent(new CustomEvent('bwenge:open-marking', { detail: { examId } }));
+
+
+/** A file answered in a public form goes up on its own (with progress); the answer keeps a link to the stored copy. */
+function uploadPublicFormFile(formId: string, file: File, onProgress?: (percent: number) => void): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `/api/forms/${encodeURIComponent(formId)}/upload`);
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(Math.round((e.loaded / e.total) * 100)); };
+    xhr.onload = () => {
+      let body: any = {};
+      try { body = JSON.parse(xhr.responseText); } catch { /* not JSON */ }
+      if (xhr.status >= 200 && xhr.status < 300 && body.url) resolve(body.url); else reject(new Error(body.error || 'The file could not be uploaded.'));
+    };
+    xhr.onerror = () => reject(new Error('No connection. Try again.'));
+    const fd = new FormData();
+    fd.append('file', file, file.name);
+    xhr.send(fd);
+  });
+}
+
+/** Sends a respondent's answers to a public form. */
+async function submitPublicForm(formId: string, answers: any) {
+  const res = await fetch(`/api/forms/${formId}/submit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answers }) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Failed to submit form response.');
+  return data;
+}
 
 import { Suspense } from 'react';
 const DocumentScannerLazy = React.lazy(() => import('./components/DocumentScanner'));
@@ -1803,36 +1831,20 @@ export default function App() {
             </div>
           ) : (
             <Suspense fallback={<div className="mx-auto max-w-2xl p-8 text-center text-sm text-slate-500">Loading form…</div>}>
-              <DynamicForm
-                schema={publicForm}
-                // Files go up on their own (with progress) and the answer keeps a link to the stored copy.
-                uploadFile={(file, onProgress) => new Promise<string>((resolve, reject) => {
-                  const xhr = new XMLHttpRequest();
-                  xhr.open('POST', `/api/forms/${encodeURIComponent(publicForm.id)}/upload`);
-                  xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(Math.round((e.loaded / e.total) * 100)); };
-                  xhr.onload = () => {
-                    let body: any = {};
-                    try { body = JSON.parse(xhr.responseText); } catch { /* not JSON */ }
-                    if (xhr.status >= 200 && xhr.status < 300 && body.url) resolve(body.url); else reject(new Error(body.error || 'The file could not be uploaded.'));
-                  };
-                  xhr.onerror = () => reject(new Error('No connection. Try again.'));
-                  const fd = new FormData();
-                  fd.append('file', file, file.name);
-                  xhr.send(fd);
-                })}
-                onSubmit={async (answers) => {
-                  const res = await fetch(`/api/forms/${publicForm.id}/submit`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ answers }),
-                  });
-                  const data = await res.json().catch(() => ({}));
-                  if (!res.ok) {
-                    throw new Error(data.error || 'Failed to submit form response.');
-                  }
-                  return data;
-                }}
-              />
+              {publicForm.exam?.enabled ? (
+                <ExamRunner
+                  schema={publicForm}
+                  uploadFile={(file, onProgress) => uploadPublicFormFile(publicForm.id, file, onProgress)}
+                  onSubmit={(answers: any) => submitPublicForm(publicForm.id, answers)}
+                />
+              ) : (
+                <DynamicForm
+                  schema={publicForm}
+                  // Files go up on their own (with progress) and the answer keeps a link to the stored copy.
+                  uploadFile={(file, onProgress) => uploadPublicFormFile(publicForm.id, file, onProgress)}
+                  onSubmit={(answers) => submitPublicForm(publicForm.id, answers)}
+                />
+              )}
             </Suspense>
           )}
           <p className="mx-auto mt-10 max-w-2xl text-center text-[11.5px] text-neutral-500">Made with Bwenge · Never share passwords in a form.</p>
