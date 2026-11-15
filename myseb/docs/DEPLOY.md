@@ -34,3 +34,8 @@ Build the apps pointing at `https://<MYSEB_DOMAIN>` (desktop `config.json` `apiB
 | More than one server | Not yet: live-room pictures and video set-up live in one server's memory. Run one MySEB server (tested to 3,000 simultaneous students on one 4-core machine) |
 
 The compose file passes `docker compose config`. The image itself was not built or run in the build environment (no Docker daemon): do a first start on a test machine.
+
+## Getting the apps to students
+Actions tab → **Build MySEB apps** → Run workflow (the address defaults to `https://www.bwenge.space/myseb`). It builds the Windows installer, macOS dmg, Linux AppImage and Android APK, and attaches them to the run. Push a tag such as `myseb-v1.0.0` to also publish them as a GitHub Release.
+Then set `MYSEB_DL_PAGE` (a https link to where students download, for example the release page) so the code page shows a **Download MySEB** button.
+The Windows and Mac installers are not code-signed, so Windows SmartScreen and macOS Gatekeeper warn students once ("More info → Run anyway"). Signing needs a paid certificate. The Android APK is sideloaded (students allow "install from this source"); the Play Store needs a developer account.

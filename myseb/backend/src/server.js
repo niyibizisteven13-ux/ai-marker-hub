@@ -48,12 +48,13 @@ app.use('/api', (_req, res) => res.status(404).json({ error: 'not found' }));
 
 app.get('/join/:code', (req, res) => {
   const code = /^\d{6}$/.test(req.params.code) ? req.params.code : '';
+  const dl = /^https:\/\/[^\s"'<>]+$/.test(process.env.MYSEB_DL_PAGE || '') ? process.env.MYSEB_DL_PAGE : '';
   res.set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'").type('html').send(
     `<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Join exam</title>
 <body style="font-family:system-ui;text-align:center;padding:32px"><h2>Open MySEB</h2><p>Your exam code is</p>
 <p style="font-size:34px;letter-spacing:4px;font-weight:700">${code || '—'}</p>
 <p><a href="myseb://join?code=${code}&api=${encodeURIComponent(config.publicUrl)}" style="font-size:18px">Open in the MySEB app</a></p>
-<p style="color:#666">Exams cannot be taken in the browser. Install MySEB, then enter the code.</p>`);
+<p style="color:#666">Exams cannot be taken in the browser. Install MySEB, then enter the code.</p>${dl ? `<p><a href="${dl}" style="font-size:18px">Download MySEB</a></p>` : ''}`);
 });
 
 if (config.dashboardEnabled) app.use('/dashboard', express.static(path.join(here, '../public/dashboard'), {
