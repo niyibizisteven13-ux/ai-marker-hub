@@ -44,7 +44,7 @@ import { examsRouter } from './server/routes/examRoutes.js';
 import { createAssignmentsRouter, createPublicAssignmentsRouter } from './server/routes/assignmentRoutes.js';
 import { createCoursesRouter } from './server/routes/courseRoutes.js';
 import { createPublicFormExamRouter, createOwnerFormExamRouter } from './server/routes/formExamRoutes.js';
-import { createMySebAssignmentOwnerRouter, createMySebOwnerRouter, createMySebPublicRouter, liveReportHandler } from './server/routes/mySebRoutes.js';
+import { createMySebAssignmentOwnerRouter, createMySebOwnerRouter, createMySebPublicRouter, liveIceHandler, liveReportHandler, liveSignalPullHandler, liveSignalPushHandler } from './server/routes/mySebRoutes.js';
 import { mySebGuard, mySebShell } from './server/services/mySeb.js';
 import { formExamService } from './server/services/formExam/runtime.js';
 import { ExamError } from './server/services/formExam/service.js';
@@ -421,6 +421,13 @@ app.use('/api/payments', paymentRoutes);
   // The page tells the live room which question the student is on (and a small picture if the lecturer asked for it).
   app.post('/api/myseb/live/form/:id', mysebGuard, liveReportHandler);
   app.post('/api/myseb/live/task/:token', mysebTask, liveReportHandler);
+  // Live video set-up (the video itself goes student -> lecturer directly).
+  app.get('/api/myseb/live/form/:id/signal', mysebGuard, liveSignalPullHandler);
+  app.post('/api/myseb/live/form/:id/signal', mysebGuard, liveSignalPushHandler);
+  app.get('/api/myseb/live/form/:id/ice', mysebGuard, liveIceHandler);
+  app.get('/api/myseb/live/task/:token/signal', mysebTask, liveSignalPullHandler);
+  app.post('/api/myseb/live/task/:token/signal', mysebTask, liveSignalPushHandler);
+  app.get('/api/myseb/live/task/:token/ice', mysebTask, liveIceHandler);
 }
 app.use('/api/myseb', createMySebPublicRouter());
 app.use('/api/forms', createMySebOwnerRouter());
