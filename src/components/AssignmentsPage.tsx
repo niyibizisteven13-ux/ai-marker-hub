@@ -335,6 +335,34 @@ function CodeTestsCard({ a, onChanged }: { a: Assignment; onChanged: () => Promi
   );
 }
 
+interface SchemeView { state: 'needs_confirmation' | 'invalid' | 'confirmed'; summary: string | null; warnings: string[]; errors: string[] }
+type MarkNowResult =
+  | { kind: 'started' } | { kind: 'already_running' } | { kind: 'nothing_to_mark' } | { kind: 'no_papers' } | { kind: 'reading' }
+  | { kind: 'needs_confirmation'; scheme: SchemeView } | { kind: 'invalid'; scheme: SchemeView };
+
+/** Shown when the marking scheme needs the lecturer's OK: what was read, what to check, and one click to confirm and mark everything. */
+function SchemeCheck({ scheme, busy, onConfirm, onClose }: { scheme: SchemeView; busy: boolean; onConfirm: () => void; onClose: () => void }) {
+  return (
+    <div role="dialog" aria-modal="true" aria-label="Check the marking scheme" className="fixed inset-0 z-[90] flex items-end justify-center bg-black/60 p-3 sm:items-center" onClick={onClose}>
+      <div className="max-h-[85dvh] w-full max-w-lg overflow-auto rounded-2xl border border-white/[0.12] bg-[var(--ws-card)] p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <h2 className="text-[17px] font-bold text-white">Check the marking scheme</h2>
+        <p className="mt-1 text-[13px] leading-relaxed text-neutral-400">This is how Bwenge read your marking scheme. Every paper will be marked against it, so make sure it is right.</p>
+        {scheme.summary && <pre className="mt-3 max-h-56 overflow-auto whitespace-pre-wrap rounded-xl bg-black/30 p-3 text-[12.5px] leading-relaxed text-neutral-200">{scheme.summary}</pre>}
+        {scheme.warnings.length > 0 && (
+          <div className="mt-3 rounded-xl border border-amber-400/30 bg-amber-400/10 p-3 text-[13px] text-amber-100">
+            <p className="font-semibold">Please check:</p>
+            <ul className="mt-1 list-disc space-y-1 pl-5">{scheme.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
+          </div>
+        )}
+        <div className="mt-4 flex flex-wrap justify-end gap-2">
+          <button type="button" onClick={onClose} className="rounded-xl border border-white/[0.14] px-4 py-2 text-[13px] text-neutral-200 hover:bg-white/5">Not yet</button>
+          <button type="button" disabled={busy} onClick={onConfirm} className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--brand)] px-4 py-2 text-[13px] font-semibold text-white hover:bg-[var(--brand-hover,var(--brand))] disabled:opacity-60">{busy ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}Confirm and mark all papers</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Dashboard({ id, onBack, onMarkAll, autoMark = false }: { id: string; onBack: () => void; onMarkAll: (p: PreparedMarking) => void; autoMark?: boolean }) {
   const [a, setA] = useState<Assignment | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -375,6 +403,24 @@ function Dashboard({ id, onBack, onMarkAll, autoMark = false }: { id: string; on
     if (!window.confirm(`Remove ${s.studentName}'s submission?`)) return;
     setA(await json<Assignment>(await authFetch(`/api/assignments/${id}/submissions/${s.id}`, { method: 'DELETE' })));
     setOpen(null);
+  };
+  // One click: mark every paper. A scheme that needs the lecturer's OK is shown first (never confirmed behind their back).
+  const [asking, setAsking] = useState<SchemeView | null>(null);
+  const [markingNow, setMarkingNow] = useState(false);
+  const markNow = async (confirm = false) => {
+    setMarkingNow(true); setError(null); setNotice(null);
+    try {
+      const r = await json<MarkNowResult>(await authFetch(`/api/assignments/${id}/mark-now`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm }) }));
+      if (r.kind === 'needs_confirmation') { setAsking(r.scheme); return; }
+      setAsking(null);
+      if (r.kind === 'started') setNotice('Marking has started. Each paper shows its mark here as it finishes.');
+      else if (r.kind === 'already_running') setNotice('Marking is already running. Results appear here as papers finish.');
+      else if (r.kind === 'nothing_to_mark') setNotice('Every paper that can be marked has been marked.');
+      else if (r.kind === 'no_papers') setNotice('Nobody has handed in yet.');
+      else if (r.kind === 'reading') setNotice('Still reading your marking scheme. Try again in a minute.');
+      else if (r.kind === 'invalid') setError(`The marking scheme could not be read${r.scheme.errors.length ? `: ${r.scheme.errors.join('; ')}` : '.'} Attach a clearer marking scheme to this task and try again.`);
+      await load();
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not start the marking.'); } finally { setMarkingNow(false); }
   };
   const markAll = async () => {
     setPreparing(true); setError(null);
@@ -423,6 +469,9 @@ function Dashboard({ id, onBack, onMarkAll, autoMark = false }: { id: string; on
         <button type="button" onClick={() => void toggle()} className="inline-flex items-center gap-1.5 rounded-xl border border-white/[0.14] px-3 py-2 text-[13px] text-neutral-200 hover:bg-white/5">{a.open ? <Lock size={14} /> : <Unlock size={14} />}{a.open ? 'Close submissions' : 'Reopen'}</button>
         {a.autoMark ? (
           <>
+            <button type="button" disabled={!a.submissions.length || markingNow} onClick={() => void markNow(false)} title="Mark every paper handed in" className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--brand)] px-3.5 py-2 text-[13px] font-semibold text-white hover:opacity-90 disabled:opacity-50">
+              {markingNow ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}Mark all papers
+            </button>
             {a.examId && <a href={`/exams/${a.examId}/review`} className="inline-flex items-center gap-1.5 rounded-xl border border-white/[0.14] px-3 py-2 text-[13px] text-neutral-200 hover:bg-white/5"><Eye size={14} />Check marked papers</a>}
             <button type="button" disabled={!toRelease || releasing} onClick={() => void release()} className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--brand)] px-3.5 py-2 text-[13px] font-semibold text-white hover:bg-[var(--brand-strong)] disabled:opacity-40">
               {releasing ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}Release results{toRelease ? ` (${toRelease})` : ''}
@@ -435,6 +484,13 @@ function Dashboard({ id, onBack, onMarkAll, autoMark = false }: { id: string; on
         )}
       </div>
       {a.autoMark && <p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-[var(--brand)]/12 px-2.5 py-1 text-[11.5px] font-semibold text-[var(--brand-soft)]"><Sparkles size={12} />Automatic marking is on: each hand-in is marked as it arrives{a.schemeFiles?.length ? ` with ${a.schemeFiles.map((f) => f.name).join(', ')}` : ''}</p>}
+      {a.autoMark && a.submissions.some((x) => x.marking?.state === 'waiting_scheme') && (
+        <div role="status" className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-2.5 text-[13px] text-amber-100">
+          <span className="min-w-0 flex-1">Marking is waiting for you to check the marking scheme. Papers are marked as soon as you confirm it.</span>
+          <button type="button" disabled={markingNow} onClick={() => void markNow(false)} className="shrink-0 rounded-lg bg-amber-300 px-3 py-1.5 text-[12.5px] font-semibold text-black hover:bg-amber-200 disabled:opacity-60">Check scheme and mark</button>
+        </div>
+      )}
+      {asking && <SchemeCheck scheme={asking} busy={markingNow} onConfirm={() => void markNow(true)} onClose={() => setAsking(null)} />}
       {notice && <p role="status" className="mt-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[13px] text-emerald-200">{notice}</p>}
       {error && <p className="mt-3 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[13px] text-rose-300">{error}</p>}
 

@@ -14,7 +14,10 @@ const APP = [
   "font-src 'self' data: https://fonts.gstatic.com",
   "img-src 'self' data: blob: https:",
   "media-src 'self' data: blob: https:",
-  "connect-src 'self' https: wss:",
+  // blob: lets the PDF viewer read a file the page itself just downloaded (a submitted paper is fetched with the
+  // sign-in, turned into a blob: address and opened). Only this page's own script can make a blob: address, so it opens
+  // nothing to the outside. Without it, every PDF preview fails in production while working in development.
+  "connect-src 'self' blob: https: wss:",
   "worker-src 'self' blob:",
   "frame-src 'self' blob: data: https://www.youtube-nocookie.com",
   "object-src 'none'",

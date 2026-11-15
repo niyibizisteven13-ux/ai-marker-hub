@@ -95,3 +95,11 @@ test('network helpers for live video: STUN alone, or short-lived TURN passwords'
   assert.equal(t.credential, createHmac('sha1', 'shared-secret').update(t.username).digest('base64'), 'coturn use-auth-secret format');
   assert.ok(!JSON.stringify(r).includes('shared-secret'), 'the secret itself is never sent');
 });
+
+test('the live room always gets an exam block, even before any MySEB exam exists', async () => {
+  const { monitor } = await import('../server/services/mySeb.js');
+  const r: any = await monitor(async () => ({ mysebExamId: null, title: 'Quiz 1' } as any));
+  assert.equal(r.exam.status, 'active');
+  assert.equal(r.exam.title, 'Quiz 1');
+  assert.deepEqual(r.students, []);
+});

@@ -18,6 +18,22 @@ test('CSP: enforced in production, strict scripts for the app, sandbox policy fo
   assert.equal(contentSecurityPolicy('/', { NODE_ENV: 'development' } as any), null);
 });
 
+test('CSP: the viewer can read a file the page downloaded (blob:), so submitted PDFs preview in production; scripts and AI-made HTML stay locked down', () => {
+  const app = contentSecurityPolicy('/', { NODE_ENV: 'production' } as NodeJS.ProcessEnv)!.value;
+  const directive = (name: string) => (app.split('; ').find((d) => d.startsWith(`${name} `)) ?? '').split(' ').slice(1);
+  // A submitted paper is fetched with the sign-in, made into a blob: address and opened by the PDF viewer (pdf.js reads it with
+  // fetch/XHR, which connect-src governs). Without blob: here every PDF preview fails in production but works in development.
+  assert.ok(directive('connect-src').includes('blob:'), 'connect-src must allow blob:');
+  assert.ok(directive('worker-src').includes('blob:'));
+  assert.ok(directive('img-src').includes('blob:'), 'thumbnails of submitted photos');
+  // and it did not loosen anything that matters
+  assert.ok(!directive('script-src').includes("'unsafe-inline'") && !directive('script-src').includes("'unsafe-eval'"));
+  assert.ok(!directive('connect-src').includes('*') && !directive('connect-src').includes('http:'), 'no plain-http or wildcard connections');
+  assert.deepEqual(directive('object-src'), ["'none'"]);
+  const sandbox = contentSecurityPolicy('/sandbox.html', { NODE_ENV: 'production' } as NodeJS.ProcessEnv)!.value;
+  assert.match(sandbox, /connect-src 'none'/, 'AI-made HTML still cannot connect anywhere');
+});
+
 test('cluster roles: one primary runs the site-wide schedules; other servers are web nodes', async () => {
   const { nodeRole, isPrimary } = await import('../server/utils/cluster.ts');
   const prev = process.env.NODE_ROLE;

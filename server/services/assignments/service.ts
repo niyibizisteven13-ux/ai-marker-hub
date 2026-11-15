@@ -392,6 +392,13 @@ export function createAssignmentService(deps: {
       return deps.files.read(ownerId, fileId);
     },
 
+    /** One click: mark every paper handed in. See TaskMarker.markNow for the rules about the marking scheme. */
+    async markNow(ownerId: string, id: string, input: { confirm?: unknown }) {
+      const a = await load(ownerId, id);
+      if (!deps.marker?.markNow || !a.autoMark) throw new AssignmentError('NOT_AUTO', 'Automatic marking is not turned on for this task. Use "Mark all with AI" instead.', 409);
+      return deps.marker.markNow(ownerId, a, { confirm: input?.confirm === true });
+    },
+
     // ── MySEB (device lock) ─────────────────────────────────────────────
     /** What the MySEB wiring needs about one of the lecturer's tasks. */
     async mysebInfo(ownerId: string, id: string) {
