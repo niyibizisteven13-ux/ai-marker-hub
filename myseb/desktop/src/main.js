@@ -178,6 +178,7 @@ function lockGuest(wc) {
 /* ------------------------------------------------------------------ the one window */
 function createWindow() {
   win = new BrowserWindow({
+    icon: path.join(__dirname, '..', 'renderer', 'icon.png'),
     fullscreen: !DEV, kiosk: !DEV, frame: false, autoHideMenuBar: true,
     alwaysOnTop: !DEV, skipTaskbar: false, show: false, backgroundColor: '#0f172a',
     minimizable: false, maximizable: false, closable: true, resizable: DEV,

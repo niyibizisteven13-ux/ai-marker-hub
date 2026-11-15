@@ -78,6 +78,7 @@ class _StartScreenState extends State<StartScreen> {
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 400),
                 child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  Padding(padding: const EdgeInsets.only(bottom: 8), child: Center(child: ClipRRect(borderRadius: BorderRadius.circular(26), child: Image.asset('assets/logo.png', width: 96, height: 96)))),
                   GestureDetector(
                     onLongPress: _serverDialog, // hidden: change the server (testing on a LAN)
                     child: const Text('MySEB', textAlign: TextAlign.center, style: TextStyle(fontSize: 52, fontWeight: FontWeight.w800, color: Color(0xFF60A5FA), letterSpacing: 2)),
