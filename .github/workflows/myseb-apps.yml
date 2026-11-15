@@ -8,9 +8,6 @@ on:
       api_base:
         description: Address of the MySEB server the apps will talk to
         default: https://www.bwenge.space/myseb
-      release_tag:
-        description: Publish the apps as a GitHub Release with this tag (for example myseb-v1.0.0). Leave empty to only build them.
-        default: ''
   push:
     tags: ['myseb-v*']
 
@@ -79,7 +76,13 @@ jobs:
       - uses: actions/download-artifact@v4
         with: { path: apps, merge-multiple: true }
       - name: Publish the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.release_tag || github.ref_name }}
-        run: gh release create "$TAG" apps/* --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "MySEB $TAG" --notes "Student apps for ${{ env.API_BASE }}"
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          for file in MySEB-win.exe MySEB-mac.dmg MySEB-linux.AppImage MySEB.apk; do
+            test -s "apps/$file" || { echo "Missing installer: $file"; exit 1; }
+          done
+          tag="${{ github.ref_name }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="myseb-v1.0.0-build.${{ github.run_number }}.${{ github.run_attempt }}"
+          fi
+          gh release create "$tag" apps/MySEB-win.exe apps/MySEB-mac.dmg apps/MySEB-linux.AppImage apps/MySEB.apk --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "MySEB $tag" --notes "Student apps for $API_BASE" --latest=false
