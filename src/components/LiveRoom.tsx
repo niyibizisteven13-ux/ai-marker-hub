@@ -157,7 +157,7 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
     const r = await authFetch(`${base}/report.xlsx`);
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Could not make the report.');
     const url = URL.createObjectURL(await r.blob());
-    const a = document.createElement('a'); a.href = url; a.download = `${room?.exam.title ?? 'Test'} MySEB report.xlsx`; a.click();
+    const a = document.createElement('a'); a.href = url; a.download = `${room?.exam?.title ?? 'Test'} MySEB report.xlsx`; a.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 2000);
   });
   const makeCode = () => act(async () => { setCode(await call('/code', 'POST')); setShowCode(true); });
@@ -165,9 +165,9 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
   const needs = (s: Student) => s.status === 'PAUSED' || s.status === 'LEFT' || s.live?.camera === 'denied';
   const shown = [...students].filter((s) => !onlyAttention || needs(s)).sort((a, b) => Number(needs(b)) - Number(needs(a)) || a.student_name.localeCompare(b.student_name));
   const attention = students.filter(needs).length;
-  const open = room?.exam.status !== 'ended';
-  const mode = room?.exam.live_mode ?? (room?.exam.live_faces ? 'pictures' : 'off');
-  const sound = !!room?.exam.live_sound && mode === 'live';
+  const open = room?.exam?.status !== 'ended';
+  const mode = room?.exam?.live_mode ?? (room?.exam?.live_faces ? 'pictures' : 'off');
+  const sound = !!room?.exam?.live_sound && mode === 'live';
   // Who gets live video: the tiles on screen (needs-attention first), up to MAX_LIVE, plus the one you listen to.
   const wanted = useMemo(() => {
     if (mode !== 'live') return [];
@@ -199,7 +199,7 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-3">
           <button type="button" onClick={onBack} className={btn} aria-label="Back">←</button>
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-lg font-bold">{room?.exam.title ?? 'Live room'}</h1>
+            <h1 className="truncate text-lg font-bold">{room?.exam?.title ?? 'Live room'}</h1>
             <p className="text-xs text-slate-500">{open ? 'Live: updates every few seconds' : 'This test has ended'}</p>
           </div>
           <div className="flex flex-wrap gap-1.5 text-[12px] font-bold text-white">

@@ -1,5 +1,6 @@
 import logger from '../../utils/logger.js';
 import type { AssignmentRecord, AssignmentSubmission } from './service.js';
+import { schemeSummary } from '../exams/scheme.js';
 
 /**
  * Marking a task's hand-ins as they arrive. Each task with automatic marking gets one examination (its marking
@@ -15,6 +16,13 @@ export interface MarkStatus {
   released: boolean;
   error?: string;
 }
+
+/** What was read from the lecturer's marking scheme, for the "check it, then mark" step. */
+export interface SchemeView { state: 'needs_confirmation' | 'invalid' | 'confirmed'; summary: string | null; warnings: string[]; errors: string[] }
+/** The outcome of "Mark all papers" (always a normal answer, never an error: the page decides what to say). */
+export type MarkNowResult =
+  | { kind: 'started' } | { kind: 'already_running' } | { kind: 'nothing_to_mark' } | { kind: 'no_papers' } | { kind: 'reading' }
+  | { kind: 'needs_confirmation'; scheme: SchemeView } | { kind: 'invalid'; scheme: SchemeView };
 
 export interface StudentResult {
   state: 'not_marked' | 'marking' | 'waiting' | 'released';
@@ -47,6 +55,11 @@ export interface TaskMarker {
   statuses(ownerId: string, a: AssignmentRecord): Promise<Record<string, MarkStatus>>;
   release(ownerId: string, a: AssignmentRecord, submissionIds: string[] | 'all'): Promise<{ released: number; skipped: Array<{ studentName: string; reason: string }> }>;
   result(ownerId: string, a: AssignmentRecord, s: AssignmentSubmission): Promise<StudentResult>;
+  /**
+   * One click: start marking every paper now. A scheme that needs the lecturer's OK is never confirmed by itself: it is shown
+   * first, and only `confirm: true` (the lecturer pressed "Confirm and mark" after reading it) confirms it.
+   */
+  markNow?(ownerId: string, a: AssignmentRecord, opts: { confirm: boolean }): Promise<MarkNowResult>;
 }
 
 /** The subset of the examination service used here. */
@@ -59,7 +72,8 @@ type Exams = {
   reviewList(e: any): Array<{ submissionId: string; total: number; maxTotal: number; percent: number; released: boolean; releasedAt: string | null; openFlags: number }>;
   release(userId: string, examId: string, refs: string[] | 'all'): Promise<{ released: string[]; skipped: Array<{ candidateId: string; reason: string }> } | any>;
   candidateView(userId: string, examId: string, ref: string): Promise<any>;
-  latestScheme(e: any): { status: string } | null | undefined;
+  latestScheme(e: any): { status: string; version?: number; scheme?: any; warnings?: string[]; errors?: string[] } | null | undefined;
+  confirmScheme(userId: string, examId: string, version?: number): Promise<unknown>;
 };
 
 const ID_OK = /^[A-Za-z0-9][\w./-]{0,31}$/;
@@ -140,6 +154,28 @@ export function createTaskMarker(exams: () => Exams, opts: { retryMs?: number; m
       const e = await exams().load(ownerId, a.examId);
       const nameOf = (cid: string) => e.submissions.find((x: any) => x.candidateId === cid)?.candidateName ?? cid;
       return { released: (out.released ?? []).length, skipped: (out.skipped ?? []).map((k: any) => ({ studentName: nameOf(k.candidateId), reason: k.reason })) };
+    },
+
+    async markNow(ownerId, a, { confirm }) {
+      if (!a.examId) return { kind: 'no_papers' };                      // nobody has handed in yet
+      const x = exams();
+      const sv = x.latestScheme(await x.load(ownerId, a.examId));
+      if (!sv) return { kind: 'reading' };                              // the scheme file is still being read
+      const view: SchemeView = {
+        state: sv.status === 'confirmed' ? 'confirmed' : sv.status === 'invalid' ? 'invalid' : 'needs_confirmation',
+        summary: sv.scheme ? schemeSummary(sv.scheme) : null, warnings: (sv.warnings ?? []).slice(0, 12).map(String), errors: (sv.errors ?? []).slice(0, 12).map(String),
+      };
+      if (view.state === 'invalid') return { kind: 'invalid', scheme: view };
+      if (view.state === 'needs_confirmation') {
+        if (!confirm) return { kind: 'needs_confirmation', scheme: view };
+        await x.confirmScheme(ownerId, a.examId, sv.version);
+      }
+      try { await x.startMarking(ownerId, a.examId); return { kind: 'started' }; }
+      catch (e: any) {
+        if (e?.code === 'NOTHING_TO_MARK') return { kind: 'nothing_to_mark' };
+        if (e?.code === 'RUN_IN_PROGRESS') return { kind: 'already_running' };
+        throw e;
+      }
     },
 
     async result(ownerId, a, s) {

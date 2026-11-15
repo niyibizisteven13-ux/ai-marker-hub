@@ -163,7 +163,7 @@ export async function generateCode(load: TargetLoader) {
 
 export async function monitor(load: TargetLoader, opts: { frames?: boolean } = {}) {
   const t = await load();
-  if (!t.mysebExamId) return { counts: { IN_EXAM: 0, PAUSED: 0, LEFT: 0, ENDED: 0 }, students: [] };
+  if (!t.mysebExamId) return { exam: { title: (t as { title?: string }).title ?? 'Live room', status: 'active', live_faces: false, live_mode: 'off', live_sound: false }, counts: { IN_EXAM: 0, PAUSED: 0, LEFT: 0, ENDED: 0 }, students: [] };
   return mysebFetch(`/exams/${t.mysebExamId}/monitor${opts.frames === false ? '?frames=0' : ''}`);
 }
 /** Camera pictures for the students whose tiles are on screen. */
