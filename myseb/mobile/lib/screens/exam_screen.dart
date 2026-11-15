@@ -61,16 +61,17 @@ class _ExamScreenState extends State<ExamScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _initWebView() async {
-    _wc = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(Colors.white)
-      ..enableZoom(false)
+    _wc = WebViewController(
       // The exam page may use the camera (and microphone) only if the lecturer turned on live pictures or video (the page shows its own notice first).
-      ..setOnPlatformPermissionRequest((request) {
+      onPermissionRequest: (request) {
         // Camera and microphone only for live video / listening, which the lecturer turns on and the page asks the student about first.
         final ok = request.types.every((t) => t == WebViewPermissionResourceType.camera || t == WebViewPermissionResourceType.microphone);
         ok ? request.grant() : request.deny();
-      })
+      },
+    )
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(Colors.white)
+      ..enableZoom(false)
       ..addJavaScriptChannel('MySEB', onMessageReceived: (m) {
         if (m.message == 'file_open') { _pickUntil = DateTime.now().add(const Duration(seconds: 60)); return; }
         _violation(m.message, {'via': 'page'});
