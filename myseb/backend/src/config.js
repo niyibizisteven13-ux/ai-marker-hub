@@ -12,6 +12,8 @@ export const config = {
   port: Number(process.env.PORT || 4000),
   databaseUrl: process.env.DATABASE_URL || 'postgres://myseb:myseb@localhost:5432/myseb',
   publicUrl: (process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 4000}`).replace(/\/$/, ''),
+  // Where this server is reachable on its public address, when it sits behind a prefix such as /myseb.
+  get basePath() { try { return new URL(this.publicUrl).pathname.replace(/\/$/, ''); } catch { return ''; } },
   teacherKey: need('TEACHER_KEY', 'dev-teacher-key'),
   pepper: need('PEPPER', 'dev-pepper-not-for-production'),
   heartbeatTimeoutSeconds: Number(process.env.HEARTBEAT_TIMEOUT_SECONDS || 20),

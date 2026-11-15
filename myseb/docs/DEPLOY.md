@@ -2,7 +2,9 @@
 
 ## Easiest: inside the existing bwenge server (nothing new to set up)
 If `MYSEB_URL` is **not** set, bwenge runs MySEB itself under `https://<your site>/myseb`, in the same process and the same PostgreSQL database (its own tables). Secrets are derived from `JWT_SECRET`, so there is nothing to configure: deploy, open the live room, get a code. Set `APP_URL` to your public address if you can. Build the apps with `apiBase` = `https://<your site>/myseb`. Set `MYSEB_EMBED=0` to turn this off.
-This suits a school or a few hundred students at a time. Live video for many students is better on its own machine (below), which also needs TURN for students behind strict networks.
+MySEB runs as its own process on the same machine (its own CPU core and event loop), and `/myseb` is passed through to it, so a crowd of students cannot slow the website. If it crashes it restarts by itself.
+Measured with `node myseb/scripts/loadtest.mjs <url> <teacherKey> <students>` on a 4-core test machine that also ran the load generator, with students sending heartbeats and a lecturer watching the room: 2,000 students: heartbeat p95 6 ms, 4,000: p95 12 ms, 8,000: p95 262 ms and the site page p95 120 ms, zero errors in all. That does not include live camera pictures or video set-up, so plan for about 2,000 at once on one machine until you have run the test on your own server.
+This suits a school or a few thousand students at a time. Live video for many students is better on its own machine (below), which also needs TURN for students behind strict networks.
 
 ## Separate server (bigger exams, live video)
 
