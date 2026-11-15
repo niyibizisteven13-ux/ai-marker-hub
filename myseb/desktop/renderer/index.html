@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:">
+<title>MySEB</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body oncontextmenu="return false">
+<section id="start" class="screen">
+  <div class="logo">MySEB</div>
+  <p class="tag">Secure exam browser</p>
+  <form id="form" autocomplete="off">
+    <label>Your name<input id="name" maxlength="80" required></label>
+    <label>Enter Exam Code<input id="code" class="codein" placeholder="8492-KIGALI-77" maxlength="24" required autofocus></label>
+    <button id="go" class="primary">Start exam</button>
+    <p id="err" class="err" role="alert"></p>
+  </form>
+  <p class="note">Your device will be locked until the exam ends. Leaving the app is recorded and may pause your exam.</p>
+  <button id="quitIdle" class="link">Exit MySEB</button>
+</section>
+
+<section id="examView" class="screen" hidden>
+  <div id="bar"><span id="dot"></span><b id="title"></b><span id="timer"></span></div>
+  <webview id="wv" partition="myseb-exam"></webview>
+</section>
+
+<div id="overlay" class="overlay" hidden>
+  <div class="panel"><h2 id="oTitle"></h2><p id="oText"></p><div id="oBtns"></div></div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

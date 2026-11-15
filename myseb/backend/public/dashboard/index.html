@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MySEB Teacher Dashboard</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header><h1>MySEB <small>Teacher dashboard</small></h1><button id="logout" hidden>Sign out</button></header>
+
+<section id="login" class="card narrow">
+  <h2>Sign in</h2>
+  <label>Teacher key <input id="key" type="password" autocomplete="current-password" placeholder="TEACHER_KEY from the server .env"></label>
+  <button id="loginBtn" class="primary">Sign in</button>
+  <p id="loginErr" class="err"></p>
+</section>
+
+<main id="app" hidden>
+  <section class="card">
+    <h2>New exam</h2>
+    <form id="newExam" class="grid">
+      <label>Title <input name="title" required maxlength="200" placeholder="Biology midterm"></label>
+      <label>Exam URL <input name="examUrl" type="url" placeholder="empty = built-in sample exam"></label>
+      <label>Minutes per student <input name="durationMinutes" type="number" min="1" max="600" value="60"></label>
+      <label>If a student leaves
+        <select name="leaveAction"><option value="pause">Pause until I resume</option><option value="record">Only record it</option><option value="end">End their exam</option></select></label>
+      <label class="check"><input type="checkbox" name="requireMyseb" checked> Require MySEB</label>
+      <label class="check"><input type="checkbox" name="allowExtension"> Also allow Chrome extension (low security)</label>
+      <button class="primary">Create exam</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Exams</h2>
+    <div id="exams"></div>
+  </section>
+
+  <section id="codeCard" class="card" hidden>
+    <h2>Exam code</h2>
+    <div class="codebox">
+      <div>
+        <div id="code" class="code"></div>
+        <button id="copy">Copy</button>
+        <p class="muted">Shown once. Students type the 6 digits (or the whole thing) in MySEB. Many students can use one code.</p>
+        <details><summary>Exam secret (for an exam site that checks MySEB itself)</summary><code id="secret"></code></details>
+        <p class="muted">Expires: <span id="expires"></span></p>
+      </div>
+      <div><div id="qr" class="qr"></div><p class="muted center">Scan with the phone</p></div>
+    </div>
+  </section>
+
+  <section id="monitor" class="card" hidden>
+    <h2>Live monitor — <span id="monTitle"></span></h2>
+    <div id="counts" class="counts"></div>
+    <table>
+      <thead><tr><th>Student</th><th>Status</th><th>Device</th><th>Violations</th><th>Last</th><th>Seen</th><th></th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <p id="empty" class="muted">No students yet.</p>
+    <dialog id="vdlg"><h3 id="vtitle"></h3><ul id="vlist"></ul><button onclick="document.getElementById('vdlg').close()">Close</button></dialog>
+  </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

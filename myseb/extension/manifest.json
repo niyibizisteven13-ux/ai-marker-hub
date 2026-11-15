@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "MySEB Extension (low security)",
+  "version": "1.0.0",
+  "description": "Take a MySEB exam in Chrome. For full security use the MySEB desktop app.",
+  "permissions": ["storage", "declarativeNetRequest", "tabs"],
+  "host_permissions": ["http://localhost:4000/*", "https://*/*", "http://*/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_popup": "popup.html", "default_title": "MySEB" },
+  "content_scripts": [
+    { "matches": ["http://*/*", "https://*/*"], "js": ["content.js"], "run_at": "document_start", "all_frames": false }
+  ],
+  "minimum_chrome_version": "110"
+}
