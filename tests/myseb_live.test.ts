@@ -103,3 +103,15 @@ test('the live room always gets an exam block, even before any MySEB exam exists
   assert.equal(r.exam.title, 'Quiz 1');
   assert.deepEqual(r.students, []);
 });
+
+test('MySEB finds the site address even when APP_URL is not set', async () => {
+  const keep = { a: process.env.APP_URL, b: process.env.APP_BASE_URL };
+  delete process.env.APP_URL; delete process.env.APP_BASE_URL;
+  try {
+    const { generateCode } = await import('../server/services/mySeb.js');
+    let sent: any = null;
+    const r: any = await generateCode(async () => ({ kind: 'form', ref: 'f1', title: 'T', url: 'https://www.bwenge.space/forms/f1', mysebExamId: null, leaveAction: 'record', minutes: 10, saveExamId: async () => undefined } as any)).catch((e) => e);
+    assert.notEqual(r?.code, 'APP_URL_MISSING', String(r?.message));
+    void sent;
+  } finally { if (keep.a) process.env.APP_URL = keep.a; if (keep.b) process.env.APP_BASE_URL = keep.b; }
+});

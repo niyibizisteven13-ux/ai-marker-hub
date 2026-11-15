@@ -110,7 +110,12 @@ export interface MySebTarget {
 export type TargetLoader = () => Promise<MySebTarget>;
 
 const LEAVE_MAP = { record: 'record', warn: 'record', pause: 'pause', end: 'end' } as const;
-const appUrl = () => (process.env.APP_URL || '').replace(/\/$/, '');
+/** Public address of this site. APP_URL wins; otherwise the same fallbacks the rest of the app uses, then the live site. */
+const appUrl = () => {
+  const e = process.env;
+  const vercel = e.VERCEL_PROJECT_PRODUCTION_URL ? `https://${e.VERCEL_PROJECT_PRODUCTION_URL}` : '';
+  return (e.APP_URL || e.APP_BASE_URL || e.RENDER_EXTERNAL_URL || vercel || 'https://www.bwenge.space').replace(/\/$/, '');
+};
 
 export const formTarget = (userId: string, formId: string): TargetLoader => async () => {
   const row = await prisma.applicationForm.findFirst({ where: { id: formId, userId } });
@@ -144,7 +149,6 @@ export const assignmentTarget = (userId: string, id: string): TargetLoader => as
 /** Creates the matching MySEB exam the first time a lecturer asks for a code, and remembers it. */
 async function ensureMysebExam(t: MySebTarget): Promise<string> {
   if (t.mysebExamId) return t.mysebExamId;
-  if (!appUrl()) throw new MySebError('APP_URL is not set, so MySEB does not know where this lives.', 500, 'APP_URL_MISSING');
   const created = await mysebFetch('/exams', {
     method: 'POST',
     body: { title: t.title, examUrl: t.url, requireMyseb: true, allowExtension: true, leaveAction: t.leaveAction, durationMinutes: t.minutes },
