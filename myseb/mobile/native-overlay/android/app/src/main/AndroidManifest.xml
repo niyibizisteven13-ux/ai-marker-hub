@@ -3,6 +3,9 @@
     <!-- Camera: for the live room's small pictures, only when the lecturer turns them on (the page asks the student first). -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- Microphone: only when the lecturer allows listening and the student agreed; it stays silent until the lecturer picks that student. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
     <application
         android:label="MySEB"

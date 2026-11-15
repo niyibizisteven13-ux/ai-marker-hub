@@ -65,10 +65,11 @@ class _ExamScreenState extends State<ExamScreen> with WidgetsBindingObserver {
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(Colors.white)
       ..enableZoom(false)
-      // The exam page may use the camera only if the lecturer turned on live pictures (the page shows its own notice first).
+      // The exam page may use the camera (and microphone) only if the lecturer turned on live pictures or video (the page shows its own notice first).
       ..setOnPlatformPermissionRequest((request) {
-        final camera = request.types.contains(WebViewPermissionResourceType.camera);
-        camera ? request.grant() : request.deny();
+        // Camera and microphone only for live video / listening, which the lecturer turns on and the page asks the student about first.
+        final ok = request.types.every((t) => t == WebViewPermissionResourceType.camera || t == WebViewPermissionResourceType.microphone);
+        ok ? request.grant() : request.deny();
       })
       ..addJavaScriptChannel('MySEB', onMessageReceived: (m) {
         if (m.message == 'file_open') { _pickUntil = DateTime.now().add(const Duration(seconds: 60)); return; }
