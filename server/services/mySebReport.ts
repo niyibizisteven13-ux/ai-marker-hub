@@ -61,11 +61,14 @@ export async function reportWorkbook(r: MySebReport): Promise<{ name: string; da
   const sum = wb.addWorksheet('About'); sum.columns = [{ width: 30 }, { width: 70 }];
   sum.addRow([r.exam.title]).font = { bold: true, size: 14 };
   sum.addRow(['Test status', r.exam.status === 'ended' ? 'Ended' : 'Running']); sum.addRow(['When a student left the screen', { record: 'Only recorded', pause: 'Paused until the lecturer resumed', end: 'Their test ended' }[r.exam.leave_action] ?? r.exam.leave_action]);
-  sum.addRow(['Students', r.students.length]); sum.addRow(['Disqualified', r.students.filter((x) => x.status === 'ENDED' && x.end_reason && DISQUALIFIED.has(x.end_reason)).length]); sum.addRow(['Let back in by the lecturer', r.students.filter((x) => (x.reinstated_count ?? 0) > 0).length]); sum.addRow(['Events recorded', r.events.length]);
+  sum.addRow(['Students', r.students.length]); sum.addRow(['Events recorded', r.events.length]);
   sum.addRow([]);
   sum.addRow(['This is a record of what the MySEB app and server saw. It is evidence to consider, not proof: a lost connection can be a real network fault. It contains no pictures, video or sound.']).alignment = { wrapText: true };
   sum.mergeCells(`A${sum.rowCount}:B${sum.rowCount}`); sum.getRow(sum.rowCount).height = 48;
   sum.addRow([`Made by Bwenge on ${new Date().toISOString().slice(0, 10)}`]);
+  sum.addRow([]);
+  sum.addRow(['Disqualified', r.students.filter((x) => x.status === 'ENDED' && x.end_reason && DISQUALIFIED.has(x.end_reason)).length]);
+  sum.addRow(['Let back in by the lecturer', r.students.filter((x) => (x.reinstated_count ?? 0) > 0).length]);
   const name = `${String(r.exam.title).replace(/[\\/:*?"<>|\r\n]+/g, ' ').trim().slice(0, 80) || 'Test'} MySEB report.xlsx`;
   return { name, data: Buffer.from(await wb.xlsx.writeBuffer()) };
 }
