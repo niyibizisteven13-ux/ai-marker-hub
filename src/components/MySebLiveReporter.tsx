@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from 'react';
 const inMySeb = () => typeof navigator !== 'undefined' && (/MySEB\//.test(navigator.userAgent) || document.documentElement.dataset.myseb === '1');
 import { cameraErrorMessage } from '../utils/cameraErrors';
 import { isBusyCameraError, openCamera } from '../utils/openCamera';
+import { clampQuality, qualityParams, type Quality } from '../utils/liveQuality';
 /** The browser guard owns the camera in strict browser mode (it needs it for the face check). The live reporter shares it and never stops it. */
 const guardCamera = (): MediaStream | null => { const s = (window as unknown as { __mysebCam?: MediaStream }).__mysebCam; return s && s.getVideoTracks()[0]?.readyState === 'live' ? s : null; };
 const haltStream = (s: MediaStream | null | undefined) => { if (s && s !== guardCamera()) s.getTracks().forEach((t) => t.stop()); };
@@ -150,18 +151,15 @@ function LiveReporter({ kind, refId, total, status }: ReporterProps) {
     const close = (viewer: string) => { pcs.current.get(viewer)?.close(); pcs.current.delete(viewer); quality.delete(viewer); };
     // Two sizes per viewer: the grid gets a small, light picture; the lecturer who zooms in on this student gets full size.
     // The student captures at full size once; each lecturer tab is sent a scaled-down copy unless it asked for HD.
-    const quality = new Map<string, 'low' | 'high'>();
+    const quality = new Map<string, Quality>();
     const applyQuality = (pc: RTCPeerConnection, viewer: string) => {
-      const hd = quality.get(viewer) === 'high';
+      const level = quality.get(viewer) ?? 'low';
       for (const snd of pc.getSenders()) {
         if (snd.track?.kind !== 'video') continue;
         const isScreen = !!screenStreamRef.current && screenStreamRef.current.getVideoTracks().includes(snd.track);
         const p = snd.getParameters();
         if (!p.encodings?.length) p.encodings = [{}];
-        p.encodings[0] = { ...p.encodings[0],
-          maxBitrate: isScreen ? (hd ? 1_800_000 : 120_000) : (hd ? 600_000 : 120_000),
-          maxFramerate: isScreen ? (hd ? 8 : 3) : (hd ? 15 : 8),
-          scaleResolutionDownBy: hd ? 1 : isScreen ? 4 : 2 };
+        p.encodings[0] = { ...p.encodings[0], ...qualityParams(level, isScreen) };      // tiny when the lecturer has hundreds of students live
         snd.setParameters(p).catch(() => undefined);
       }
     };
@@ -188,7 +186,7 @@ function LiveReporter({ kind, refId, total, status }: ReporterProps) {
       } else if (m.type === 'ice') {
         const pc = pcs.current.get(viewer); if (pc && m.candidate) await pc.addIceCandidate(m.candidate).catch(() => undefined);
       } else if (m.type === 'quality') {
-        quality.set(viewer, m.level === 'high' ? 'high' : 'low');
+        quality.set(viewer, clampQuality(m.level));
         const pc = pcs.current.get(viewer); if (pc) applyQuality(pc, viewer);
       } else if (m.type === 'unwatch') {
         close(viewer);

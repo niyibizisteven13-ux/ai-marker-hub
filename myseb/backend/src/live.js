@@ -90,17 +90,19 @@ export function cleanSignal(m) {
     out.candidate = c;
   }
   if (typeof m.screenStream === 'string') out.screenStream = m.screenStream.replace(/[^\w{}-]/g, '').slice(0, 80);
-  if (m.type === 'quality') out.level = m.level === 'high' ? 'high' : 'low';
+  if (m.type === 'quality') out.level = m.level === 'high' ? 'high' : m.level === 'tiny' ? 'tiny' : 'low';
   if (typeof m.on === 'boolean') out.on = m.on;
   if (typeof m.audio === 'boolean') out.audio = m.audio;
   if (typeof m.state === 'string') out.state = m.state.slice(0, 20);
   return out;
 }
 
+// One lecturer's inbox collects the offers and network candidates of every student they watch (about 10 each): 500 live students need room for a few thousand.
+export const SIGNAL_CAP = Number(process.env.MYSEB_SIGNAL_CAP) > 0 ? Number(process.env.MYSEB_SIGNAL_CAP) : 6000;
 export function pushSignal(key, msg) {
   const b = box(key);
   b.msgs.push({ n: b.next++, at: Date.now(), msg });
-  if (b.msgs.length > 300) b.msgs.splice(0, b.msgs.length - 300);
+  if (b.msgs.length > SIGNAL_CAP) b.msgs.splice(0, b.msgs.length - SIGNAL_CAP);
   for (const w of [...b.waiters]) w();
 }
 

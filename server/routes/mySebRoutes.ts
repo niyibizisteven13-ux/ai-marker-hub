@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import { requireAuth } from '../../production/auth.js';
+import { liveRoomLimiter } from '../../production/rateLimiter.js';
 import { reportWorkbook } from '../services/mySebReport.js';
 import logger from '../utils/logger.js';
 import { getAgent, setAgent } from '../services/mySebAgent.js';
@@ -54,6 +55,7 @@ export const liveReportHandler = (req: Request, res: Response) => {
 function createMySebOwnerRouterFor(target: (userId: string, id: string) => TargetLoader) {
   const r = Router();
   const t = (req: Request) => target(userIdOf(req), p(req, 'id'));
+  r.use('/:id/myseb', liveRoomLimiter);   // the live room has its own (generous) limit: hundreds of live students send thousands of small messages
   r.post('/:id/myseb/code', requireAuth, run(async (req, res) => { res.status(201).json(await generateCode(t(req))); }));
   // Instant updates (Server-Sent Events): one open stream per live room; it only says "something changed".
   r.get('/:id/myseb/events', requireAuth, run(async (req, res) => { await streamRoomEvents(t(req), res); }));

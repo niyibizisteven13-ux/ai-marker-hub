@@ -91,6 +91,20 @@ test('a camera that another app is holding is shown to the lecturer as "busy", i
   await live('something-else'); assert.equal((await seen()).live.camera, 'off', 'unknown values are ignored');
 });
 
+test('500 live students fit: the tiny level is accepted and the lecturer\'s inbox holds every offer and candidate', async () => {
+  assert.equal(cleanSignal({ type: 'quality', level: 'tiny', viewer: 'v1' }).level, 'tiny');
+  const { pushSignal, pullSignal, SIGNAL_CAP } = await import('../src/live.js');
+  assert.ok(SIGNAL_CAP >= 5000, 'room for 500 students x about 10 messages each');
+  const key = 'room-500-' + Date.now();
+  for (let i = 0; i < 500; i++) { pushSignal(key, { type: 'offer', sid: 's' + i, sdp: 'x' }); for (let c = 0; c < 9; c++) pushSignal(key, { type: 'ice', sid: 's' + i }); }
+  const all = await pullSignal(key, 0, 0, undefined);
+  assert.equal(all.msgs.length, 5000, 'nothing was dropped');
+  assert.equal(all.msgs.filter((m) => m.type === 'offer').length, 500, 'every student\'s offer is there');
+  const small = 'room-flood-' + Date.now();
+  for (let i = 0; i < SIGNAL_CAP + 50; i++) pushSignal(small, { type: 'ice', sid: 'x' });
+  assert.equal((await pullSignal(small, 0, 0, undefined)).msgs.length, SIGNAL_CAP, 'a flood is still bounded');
+});
+
 test('the lecturer can ask a student for full quality (zoom) or the light picture; nothing else sneaks through', () => {
   assert.deepEqual(cleanSignal({ type: 'quality', level: 'high', viewer: 'v1' }), { type: 'quality', viewer: 'v1', level: 'high' });
   assert.equal(cleanSignal({ type: 'quality', level: 'ultra', viewer: 'v1' }).level, 'low', 'an unknown level means the light picture');
