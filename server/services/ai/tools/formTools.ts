@@ -7,6 +7,7 @@ import { editForm, generateForm } from '../../forms/generate.js';
 import { reviewForm, type Review } from '../../forms/review.js';
 import { createForm, formDataset, formLinks, FormError, listForms, ownForm, saveForm, setOpen } from '../../forms/service.js';
 import { recordUsage } from '../../billing/usage.js';
+import { keepMysebLink, normalizeExam } from '../../../../shared/examRules.js';
 
 /**
  * Forms through conversation: create from a description, change, review, publish, list, analyse the responses
@@ -233,5 +234,37 @@ export function formTools(services: ToolServices & { formAi?: () => AI } = {}): 
     },
   };
 
-  return [createFormTool, editFormTool, reviewTool, publishTool, listTool, analyzeTool, reportTool];
+  const rulesTool: Tool = {
+    definition: {
+      name: 'set_test_rules',
+      description: "Turn one of the user's forms into a timed, protected test, or change its rules: the time limit in minutes, MySEB (students must use the exam app or the browser mode; the live room and codes come after), the face check (camera: off, warn, pause), what happens when a student leaves the page (record, warn, pause, end) and full screen. Only change what the user asked for. After MySEB is on, use live_room_code to make the code and the link for students.",
+      parameters: {
+        type: 'object', required: ['formId'],
+        properties: {
+          formId: { type: 'string' },
+          minutes: { type: 'number', description: 'Time limit in minutes (5 to 600). Setting it makes the form a timed test.' },
+          requireMyseb: { type: 'boolean' },
+          camera: { type: 'string', enum: ['off', 'warn', 'pause'] },
+          leaveAction: { type: 'string', enum: ['record', 'warn', 'pause', 'end'] },
+          requireFullscreen: { type: 'boolean' },
+        },
+      },
+    },
+    async execute(input, ctx) {
+      try {
+        const id = String(input.formId);
+        const { schema } = await ownForm(ctx.userId, id);
+        const prev = normalizeExam((schema as any).exam);
+        const patch: Record<string, unknown> = {};
+        for (const k of ['minutes', 'requireMyseb', 'camera', 'leaveAction', 'requireFullscreen'] as const) if (input[k] !== undefined) patch[k] = input[k];
+        if (!Object.keys(patch).length) return err('Say what to change: minutes, requireMyseb, camera, leaveAction or requireFullscreen.');
+        const next = keepMysebLink({ ...prev, ...patch, enabled: prev.enabled || patch.minutes !== undefined || patch.camera !== undefined }, prev);
+        await saveForm(ctx.userId, id, { ...schema, exam: next });
+        const l = formLinks(id);
+        return { text: `Test rules for "${(schema as any).title}": ${next.enabled ? `timed, ${next.minutes} minutes` : 'not timed'}; MySEB ${next.requireMyseb ? 'required' : 'not required'}; face check ${next.camera}; when a student leaves: ${next.leaveAction}; full screen ${next.requireFullscreen ? 'required' : 'not required'}. Form: ${l.fill}${next.requireMyseb ? '\nNext: call live_room_code for the code and the link for students.' : ''}` };
+      } catch (e) { return fail(e); }
+    },
+  };
+
+  return [createFormTool, editFormTool, reviewTool, publishTool, rulesTool, listTool, analyzeTool, reportTool];
 }
