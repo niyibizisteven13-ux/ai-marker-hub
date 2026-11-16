@@ -426,11 +426,12 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
   const watching = Object.keys(streams).length + Object.keys(screens).length;
   const isPhone = useMedia('(max-width: 767px)');
   const [moreOpen, setMoreOpen] = useState(false);
+  const [view, setView] = useState<'room' | 'needs'>('room');
   const post = (extra: Record<string, unknown>) => act(() => call('/settings', 'POST', { liveMode: mode, liveSound: sound, liveSource: source, leaveAction, ...extra }));
   const endAll = () => { if (confirm('End the test for everyone? The code stops working.')) void act(() => call('/end', 'POST')); };
   const codeLabel = code ? (showCode ? 'Hide code' : 'Show code') : 'Get code for students';
   const onCode = () => (code ? setShowCode((v) => !v) : void makeCode());
-  const tileMin = isPhone ? 0 : tileSize === 'S' ? 150 : tileSize === 'L' ? 330 : 210;
+  const tileMin = isPhone ? 0 : tileSize === 'S' ? 140 : tileSize === 'L' ? 300 : 175;
   const columns = isPhone ? `repeat(${tileSize === 'L' ? 1 : 2},minmax(0,1fr))` : `repeat(auto-fill,minmax(${tileMin}px,1fr))`;
   const tab = (k: typeof filter) => `min-h-11 flex-1 whitespace-nowrap px-3 text-sm font-semibold md:min-h-10 md:flex-none md:px-3.5 ${FOCUS} ${filter === k ? (k === 'attention' ? 'bg-amber-500 text-slate-950' : 'bg-white text-slate-950') : 'bg-white/5 text-slate-200 hover:bg-white/10'}`;
 
@@ -499,90 +500,48 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
     </div>
   );
 
-  return (
-    <div className="min-h-[100dvh] bg-slate-950 text-slate-100 antialiased">
-      <header className="sticky top-0 z-20 border-b border-white/10 bg-slate-950/90 pt-[env(safe-area-inset-top)] backdrop-blur">
-        <div className="mx-auto max-w-[1800px] space-y-2.5 px-3 pb-3 pt-2.5 md:space-y-3 md:px-4">
-          <div className="flex items-center gap-2.5">
-            <button type="button" onClick={onBack} className={`${dBtn} !px-0 w-11 shrink-0 text-lg md:w-10`} aria-label="Back">←</button>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <h1 className="truncate text-base font-bold leading-tight md:text-lg">{room?.exam?.title ?? 'Live room'}</h1>
-                {open
-                  ? <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-extrabold tracking-wide text-white"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />LIVE</span>
-                  : <span className="shrink-0 rounded-full bg-slate-700 px-2 py-0.5 text-[10px] font-bold">Ended</span>}
-              </div>
-              <p className="truncate text-xs text-slate-400">{open ? `${connected ? 'Instant updates' : `Updates every ${every / 1000} s`}${mode === 'live' ? ` · ${watching} live picture${watching === 1 ? '' : 's'}` : ''}` : 'This test has ended'}</p>
-            </div>
-            <div className="hidden items-center gap-2 md:flex">
-              <button type="button" className={dPrimary} onClick={onCode} disabled={busy || !open}>{codeLabel}</button>
-              <button type="button" className={dBtn} disabled={busy || !open} onClick={() => act(() => call('/pause-all', 'POST'))}>Pause everyone</button>
-              <button type="button" className={dBtn} disabled={busy || !open} onClick={() => act(() => call('/resume-all', 'POST'))}>Let everyone continue</button>
-              <button type="button" aria-expanded={settingsOpen} className={`${dBtn} ${settingsOpen ? '!bg-white/15' : ''}`} onClick={() => setSettingsOpen((v) => !v)}>Settings</button>
-              <button type="button" className={dBtn} disabled={busy || students.length === 0} title="Who joined, when, and everything the app saw, as an Excel file" onClick={() => void downloadReport()}>Report (Excel)</button>
-              <button type="button" className="min-h-10 rounded-xl border border-rose-500/60 px-3.5 text-sm font-bold text-rose-300 hover:bg-rose-500/10 disabled:opacity-40" disabled={busy || !open} onClick={endAll}>End test</button>
-            </div>
-          </div>
+  const needsCount = alerts.length + idq.length;
+  const menu: Array<{ label: string; hint?: string; onClick: () => void; disabled?: boolean; danger?: boolean }> = [
+    { label: 'Pause everyone', hint: 'Stops every student until you let them continue', disabled: busy || !open, onClick: () => void act(() => call('/pause-all', 'POST')) },
+    { label: 'Let everyone continue', hint: 'Lets every paused student carry on', disabled: busy || !open, onClick: () => void act(() => call('/resume-all', 'POST')) },
+    { label: 'Room assistant', hint: agent?.rules.on ? 'On: handles routine moments' : 'Off', onClick: () => { setView('needs'); setAgentOpen(true); } },
+    { label: 'Settings', hint: 'Browsers, rules, tile size', onClick: () => setSettingsOpen(true) },
+    { label: 'Report (Excel)', hint: 'Who joined, when, everything MySEB saw', disabled: busy || students.length === 0, onClick: () => void downloadReport() },
+    { label: 'End test for everyone', danger: true, disabled: busy || !open, onClick: endAll },
+  ];
+  const menuButton = (m: (typeof menu)[number]) => (
+    <button key={m.label} type="button" disabled={m.disabled} onClick={() => { setMoreOpen(false); m.onClick(); }}
+      className={`flex min-h-12 w-full flex-col items-start justify-center rounded-xl px-3.5 py-2 text-left text-sm font-semibold hover:bg-white/10 active:bg-white/15 disabled:opacity-40 ${m.danger ? 'text-rose-300' : 'text-slate-100'} ${FOCUS}`}>
+      {m.label}{m.hint && <span className="mt-0.5 text-xs font-normal text-slate-400">{m.hint}</span>}
+    </button>
+  );
+  const navItem = (id: 'room' | 'needs' | 'code' | 'more', label: string, icon: string, active: boolean, onClick: () => void, badge = 0) => (
+    <button key={id} type="button" onClick={onClick} aria-current={active ? 'page' : undefined} aria-label={badge ? `${label}, ${badge} waiting` : label}
+      className={`relative flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 rounded-xl text-[11px] font-semibold ${active ? 'text-white' : 'text-slate-400'} ${FOCUS}`}>
+      <span className={`relative flex h-7 w-12 items-center justify-center rounded-full ${active ? 'bg-white/10' : ''}`}>
+        <svg aria-hidden viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d={icon} /></svg>
+        {badge > 0 && <span className="absolute -right-0.5 -top-0.5 min-w-[18px] rounded-full bg-rose-600 px-1 text-center text-[10px] font-bold leading-[18px] text-white">{badge}</span>}
+      </span>
+      {label}
+    </button>
+  );
+  const ICON = {
+    room: 'M4 5h7v7H4zM13 5h7v7h-7zM4 14h7v5H4zM13 14h7v5h-7z',
+    needs: 'M6 9a6 6 0 0 1 12 0c0 6 2 7 2 7H4s2-1 2-7M10 20a2 2 0 0 0 4 0',
+    code: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h3v3h-3zM19 14v3M14 19h6',
+    more: 'M12 5.5v.01M12 12v.01M12 18.5v.01',
+  };
 
-          <div className="grid grid-cols-4 gap-1.5 md:flex md:flex-wrap md:gap-2" aria-label="How many students are where">
-            {chips.map(([k, label]) => (
-              <div key={k} className="flex min-w-0 flex-col-reverse items-start rounded-xl border border-white/10 bg-white/[0.04] px-2.5 py-1.5 md:flex-row md:items-center md:gap-2 md:rounded-full md:px-3.5 md:py-1">
-                <p className="flex min-w-0 items-center gap-1.5 text-[10px] font-semibold text-slate-400 md:text-[12px] md:text-slate-200"><span className={`h-1.5 w-1.5 shrink-0 md:h-2 md:w-2 rounded-full ${DOT[k]}`} /><span className="truncate">{isPhone ? SHORT[k] : label}</span></p>
-                <p className="text-lg font-bold leading-none tabular-nums text-white md:text-sm">{room?.counts[k] ?? 0}</p>
-              </div>
-            ))}
-          </div>
-
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find a student" aria-label="Find a student" enterKeyHint="search"
-              className="min-h-11 w-full rounded-xl border border-white/15 bg-slate-900 px-3.5 text-base text-slate-100 outline-none placeholder:text-slate-500 focus:border-blue-400 sm:max-w-xs md:min-h-10 md:text-sm" />
-            <div role="tablist" aria-label="Who to show" className="flex overflow-hidden rounded-xl border border-white/15">
-              <button type="button" role="tab" aria-selected={filter === 'all'} onClick={() => setFilter('all')} className={tab('all')}>Everyone <span className="opacity-70">{students.length}</span></button>
-              <button type="button" role="tab" aria-selected={filter === 'attention'} onClick={() => setFilter('attention')} className={tab('attention')}>Needs attention{attention ? <span className="ml-1 rounded-full bg-rose-600 px-1.5 text-[11px] font-bold text-white">{attention}</span> : null}</button>
-              <button type="button" role="tab" aria-selected={filter === 'testing'} onClick={() => setFilter('testing')} className={tab('testing')}>In the test</button>
-            </div>
-          </div>
-        </div>
-        {!isPhone && settingsOpen && (
-          <div className="border-t border-white/10 bg-slate-900/70"><div className="mx-auto max-w-[1800px] px-4 py-4">{settingsBody}</div></div>
-        )}
-      </header>
-
-      <main className="mx-auto max-w-[1800px] px-3 pb-32 pt-4 md:px-4 md:pb-8 md:pt-5">
-        {showCode && code && (
-          <section className="mb-5 flex flex-col gap-5 rounded-2xl border border-white/10 bg-slate-900 p-4 sm:p-5 md:flex-row md:items-start md:gap-8">
-            <div className="min-w-0 flex-1">
-              <p className="text-sm text-slate-400">Students type this in MySEB</p>
-              <p className="my-1.5 break-words font-mono text-[1.9rem] font-bold leading-tight tracking-wider text-white sm:text-4xl md:text-5xl">{code.display}</p>
-              <div className="mt-2 grid grid-cols-2 gap-2 sm:flex">
-                <button type="button" className={dBtn} onClick={async () => { await navigator.clipboard.writeText(code.display); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>{copied ? 'Copied' : 'Copy'}</button>
-                <button type="button" className={dBtn} onClick={() => void makeCode()}>New code</button>
-              </div>
-              {code.joinUrl && (
-                <div className="mt-4 max-w-md rounded-xl border border-white/10 bg-white/[0.04] p-3">
-                  <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Link for students</p>
-                  <p className="mt-1 break-all font-mono text-sm text-white" data-testid="join-link">{code.joinUrl}</p>
-                  <div className="mt-2.5 grid grid-cols-2 gap-2 sm:flex">
-                    <button type="button" className={dPrimary} onClick={async () => { await navigator.clipboard.writeText(code.joinUrl!); setLinkCopied(true); setTimeout(() => setLinkCopied(false), 1500); }}>{linkCopied ? 'Link copied' : 'Copy link'}</button>
-                    <a className={`${dBtn} inline-flex items-center justify-center`} target="_blank" rel="noreferrer" href={`https://wa.me/?text=${encodeURIComponent(`Join your test: ${code.joinUrl}`)}`}>Share on WhatsApp</a>
-                  </div>
-                  <p className="mt-2.5 text-xs leading-relaxed text-slate-400">One link for everyone. On a laptop or an Android phone it opens MySEB with the code filled in, and downloads MySEB first if it is missing. On an iPhone it starts the test in the browser{room?.exam?.allow_web ? '' : ' (needs Settings → Browsers)'}.</p>
-                  {!room?.exam?.allow_web && <button type="button" disabled={busy || !open} className={`${dBtn} mt-2.5 w-full sm:w-auto`} onClick={() => void post({ allowWeb: true })}>Turn on browsers for iPhones</button>}
-                </div>
-              )}
-              <p className="mt-3 max-w-sm text-xs leading-relaxed text-slate-400">One code works for the whole class. It expires {new Date(code.expiresAt).toLocaleString()} or when you end the test. Install links: <a className="underline" href="/myseb/download" target="_blank" rel="noreferrer">bwenge.space/myseb/download</a>.</p>
-            </div>
-            <img alt="QR code: open MySEB on a phone" className="mx-auto h-44 w-44 shrink-0 rounded-xl bg-white p-1.5 md:mx-0 md:h-40 md:w-40" src={`data:image/svg+xml;utf8,${encodeURIComponent(code.qrSvg)}`} />
-          </section>
-        )}
-
-        {err && <p role="alert" className="mb-4 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm font-semibold text-rose-200">{err}</p>}
+  const needsPanel = (
+    <div className="space-y-3">
+      <h2 className="flex items-center justify-between text-sm font-bold md:text-base">Needs you<span className={`rounded-full px-2 py-0.5 text-xs font-bold ${needsCount ? 'bg-rose-600 text-white' : 'bg-white/10 text-slate-300'}`}>{needsCount}</span></h2>
+      {needsCount === 0 && <p className="rounded-2xl border border-dashed border-white/15 px-4 py-6 text-center text-sm text-slate-400">Nothing needs you right now. Alerts, student cards and what the assistant could not decide appear here.</p>}
         {idq.length > 0 && (
-          <section aria-label="Student cards to check" className="mb-4 rounded-2xl border border-sky-400/40 bg-sky-500/10 p-3">
+          <section aria-label="Student cards to check" className="rounded-2xl border border-sky-400/40 bg-sky-500/10 p-3">
             <p className="mb-2 text-sm font-bold text-sky-100">{idq.length} student{idq.length === 1 ? '' : 's'} showed a card. Check the name and photo, then let them in.</p>
-            <ul className="-mx-1 flex snap-x gap-3 overflow-x-auto px-1 pb-1 md:flex-wrap md:overflow-visible">
+            <ul className="-mx-1 flex snap-x gap-3 overflow-x-auto px-1 pb-1 md:mx-0 md:flex-col md:overflow-visible md:px-0">
               {idq.map((c) => (
-                <li key={c.id} className="w-64 shrink-0 snap-start overflow-hidden rounded-xl border border-white/10 bg-slate-900 md:w-60">
+                <li key={c.id} className="w-64 shrink-0 snap-start overflow-hidden rounded-xl border border-white/10 bg-slate-900 md:w-full">
                   <img src={c.image} alt={`Card shown by ${c.student_name}`} className="aspect-[4/3] w-full object-cover" />
                   <div className="space-y-2 p-2.5"><p className="truncate text-sm font-bold text-white" title={c.student_name}>Typed name: {c.student_name}</p>
                     <div className="flex gap-2">
@@ -595,11 +554,11 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
           </section>
         )}
         {alerts.length > 0 && (
-          <ul aria-live="assertive" className="mb-4 space-y-2">
-            {alerts.slice(0, isPhone ? 2 : 6).map((a) => (
-              <li key={a.id} className="rounded-xl border border-rose-500/50 bg-rose-500/10 p-3 md:flex md:flex-wrap md:items-center md:gap-3 md:px-4">
-                <p className="flex min-w-0 flex-1 items-start gap-2.5 text-sm font-semibold text-rose-100"><span className="mt-1.5 h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-rose-500" /><span className="min-w-0"><strong>{a.name}</strong>: {a.text}</span></p>
-                <div className="mt-2.5 flex flex-wrap gap-2 md:mt-0">
+          <ul aria-live="assertive" className="space-y-2">
+            {alerts.slice(0, 30).map((a) => (
+              <li key={a.id} className="rounded-xl border border-rose-500/50 bg-rose-500/10 p-3">
+                <p className="flex min-w-0 items-start gap-2.5 text-sm font-semibold text-rose-100"><span className="mt-1.5 h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-rose-500" /><span className="min-w-0"><strong>{a.name}</strong>: {a.text}</span></p>
+                <div className="mt-2.5 flex flex-wrap gap-2">
                   {!a.ended && <button type="button" disabled={busy} onClick={() => act(() => call(`/sessions/${a.id}/resume`, 'POST'))} className={`${dBtn} flex-1 !min-h-10 text-xs md:flex-none`}>Let them continue</button>}
                   {!a.ended && <button type="button" disabled={busy} onClick={() => { setAlerts((c) => c.filter((x) => x.id !== a.id)); void act(() => call(`/sessions/${a.id}/end`, 'POST')); }} className={`${dDanger} flex-1 !min-h-10 text-xs md:flex-none`}>End test now</button>}
                   <button type="button" onClick={() => setAlerts((c) => c.filter((x) => x.id !== a.id))} className={`${dBtn} flex-1 !min-h-10 text-xs md:flex-none`}>Dismiss</button>
@@ -608,13 +567,8 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
             ))}
           </ul>
         )}
-        {alerts.length > (isPhone ? 2 : 6) && <p className="-mt-2 mb-4 text-xs font-semibold text-rose-300">{alerts.length - (isPhone ? 2 : 6)} more need you: open “Needs attention”.</p>}
-        {mode !== 'off' && <p className="mb-4 text-xs leading-relaxed text-slate-500">
-          Students were told what is shown ({source === 'camera' ? 'their camera' : source === 'screen' ? 'their whole screen' : 'their screen and camera'}) and must agree.{showScreen ? ' If a student stops sharing the screen it counts as leaving the test.' : ''} {mode === 'live' ? `Live video is shown for the ${maxLive} students on screen at a time; tap a student to zoom in and see them in full quality; the rest show a small picture. Nothing is recorded or saved.${sound ? ' Press Listen on a tile to hear that student; they see a notice while you do.' : ''}` : 'Pictures are small, replaced every 10 seconds, and never saved.'}
-        </p>}
-
         {room && (
-          <section aria-label="Room assistant" className="mb-4 rounded-2xl border border-white/10 bg-slate-900 p-3 sm:p-4">
+          <section aria-label="Room assistant" className="rounded-2xl border border-white/10 bg-slate-900 p-3 sm:p-4">
             <div className="flex flex-wrap items-center gap-2.5">
               <span aria-hidden className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${agent?.rules.on ? 'bg-emerald-500/15 text-emerald-300' : 'bg-white/5 text-slate-400'}`}>
                 <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z" /><path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z" /></svg>
@@ -625,9 +579,9 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
                   ? `Lets a student back in after ${agent.rules.afterSeconds} s when the reason is small (face left the camera, lost connection), up to ${agent.rules.maxResumes} time${agent.rules.maxResumes === 1 ? '' : 's'} each${agent.rules.endAfterMax ? ', then ends their test' : ', then tells you'}. Let back in so far: ${agent.resumed}.`
                   : 'Handles the routine moments for you and lists only what needs you. It never touches anyone you paused or anyone who looks like cheating.'}</p>
               </div>
-              <div className="flex w-full gap-2 sm:w-auto">
-                <button type="button" className={`${agent?.rules.on ? dBtn : dPrimary} flex-1 sm:flex-none`} disabled={busy || !open} onClick={() => void setRules({ on: !agent?.rules.on })}>{agent?.rules.on ? 'Turn off' : 'Turn on'}</button>
-                <button type="button" aria-expanded={agentOpen} className={`${dBtn} flex-1 sm:flex-none`} onClick={() => setAgentOpen((v) => !v)}>Rules</button>
+              <div className="flex w-full gap-2">
+                <button type="button" className={`${agent?.rules.on ? dBtn : dPrimary} flex-1`} disabled={busy || !open} onClick={() => void setRules({ on: !agent?.rules.on })}>{agent?.rules.on ? 'Turn off' : 'Turn on'}</button>
+                <button type="button" aria-expanded={agentOpen} className={`${dBtn} flex-1`} onClick={() => setAgentOpen((v) => !v)}>Rules</button>
               </div>
             </div>
             {agentOpen && (
@@ -664,93 +618,187 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
           </section>
         )}
 
-        {!room ? <p className="py-20 text-center text-slate-500">Loading…</p> : students.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-white/15 px-4 py-14 text-center">
-            <svg aria-hidden viewBox="0 0 24 24" className="mx-auto mb-3 h-10 w-10 text-slate-600" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20c.6-3.4 3.3-5.5 6.5-5.5s5.9 2.1 6.5 5.5" /><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.8c2 .7 3.2 2.4 3.5 5.2" /></svg>
-            <p className="text-lg font-semibold">Nobody is in yet</p>
-            <p className="mx-auto mt-1 max-w-sm text-sm text-slate-400">Get a code, show it to your students, and they will appear here as they join MySEB.</p>
-            {open && <button type="button" className={`${dPrimary} mt-4`} onClick={() => void makeCode()} disabled={busy}>Get code for students</button>}
+    </div>
+  );
+
+  return (
+    <div className="min-h-[100dvh] bg-slate-950 text-slate-100 antialiased">
+      <header className="sticky top-0 z-20 border-b border-white/10 bg-slate-950/90 pt-[env(safe-area-inset-top)] backdrop-blur">
+        <div className="mx-auto flex max-w-[1800px] items-center gap-2.5 px-3 py-2.5 md:gap-3 md:px-4 md:py-3">
+          <button type="button" onClick={onBack} className={`${dBtn} !px-0 w-11 shrink-0 text-lg md:w-10`} aria-label="Back">←</button>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <h1 className="truncate text-base font-bold leading-tight md:text-lg">{room?.exam?.title ?? 'Live room'}</h1>
+              {open
+                ? <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-extrabold tracking-wide text-white"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />LIVE</span>
+                : <span className="shrink-0 rounded-full bg-slate-700 px-2 py-0.5 text-[10px] font-bold">Ended</span>}
+            </div>
+            <p className="truncate text-xs text-slate-400">{open ? `${students.length} student${students.length === 1 ? '' : 's'} · ${connected ? 'instant updates' : `updates every ${every / 1000} s`}${mode === 'live' ? ` · ${watching} live picture${watching === 1 ? '' : 's'}` : ''}` : 'This test has ended'}</p>
           </div>
-        ) : shown.length === 0 ? <p className="py-16 text-center text-slate-500">{filter === 'attention' ? 'Nobody needs attention right now.' : 'No student matches.'}</p> : (
-          <ul className="grid gap-2.5 md:gap-3" style={{ gridTemplateColumns: columns }}>
-            {shown.map((s) => {
-              const q = s.live?.question;
-              const pct = q?.index && q.total ? Math.min(100, Math.round((q.index / q.total) * 100)) : 0;
-              const qText = s.status === 'ENDED' ? (s.end_reason === 'student_exit' ? 'Student ended it' : s.end_reason === 'time_up' ? 'Time is up' : s.end_reason === 'teacher' ? 'Ended by you' : s.end_reason && s.end_reason !== 'exam_ended' && WHY[s.end_reason] ? `Disqualified · ${WHY[s.end_reason]}` : 'Finished')
-                : q ? `${q.index ? `Q${q.index}${q.total ? ` of ${q.total}` : ''}` : ''}${q.label ? `${q.index ? ' · ' : ''}${q.label}` : ''}` || '…' : 'Not started';
-              const act2 = 'min-h-11 flex-1 rounded-lg px-3 text-xs font-semibold md:min-h-9 md:flex-none disabled:opacity-40 ' + FOCUS;
-              return (
-                <li key={s.id} data-sid={s.id} ref={watchTile} className={`group flex min-w-0 flex-col overflow-hidden rounded-2xl border bg-slate-900 ${RING_D[s.status]}`}>
-                  <div role="button" tabIndex={0} aria-label={`Zoom in on ${s.student_name}`} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setFocus(s.id); } }}
-                    className={`relative cursor-zoom-in bg-slate-800 ${FOCUS} ${showScreen ? 'aspect-video' : 'aspect-[4/3]'}`} onClick={() => setFocus(s.id)}>
-                    {showScreen && (screens[s.id] || pics[s.id]?.screen) ? (
-                      <>
-                        {screens[s.id] ? <LiveVideo stream={screens[s.id]} muted mirror={false} fit="object-contain" /> : <img src={pics[s.id]?.screen ?? ''} alt={`Screen: ${s.student_name}`} className="h-full w-full object-contain" />}
-                        {source === 'both' && (streams[s.id] || pics[s.id]?.frame) && (
-                          <div className="absolute bottom-9 right-2 h-1/3 w-[28%] overflow-hidden rounded-lg border-2 border-white/80 shadow">
-                            {streams[s.id] ? <LiveVideo stream={streams[s.id]} muted={listen !== s.id} /> : <img src={pics[s.id]?.frame ?? ''} alt={`Camera: ${s.student_name}`} className="h-full w-full -scale-x-100 object-cover" />}
-                          </div>
-                        )}
-                      </>
-                    ) : streams[s.id] ? <LiveVideo stream={streams[s.id]} muted={listen !== s.id} /> : pics[s.id]?.frame ? <img src={pics[s.id].frame ?? ''} alt={`Camera: ${s.student_name}`} className="h-full w-full -scale-x-100 object-cover" /> : (
-                      <div className="flex h-full items-center justify-center px-3 text-center text-xs font-medium text-slate-500">
-                        {mode === 'off' ? 'Live view is off' : s.live?.screen_state === 'partial' ? 'Shared a window, not the whole screen' : s.live?.screen_state === 'denied' ? 'Screen sharing is off' : s.live?.camera === 'denied' ? 'Camera blocked' : s.live?.camera === 'ask' ? 'Waiting for the student to agree' : s.status === 'ENDED' ? 'Finished' : 'No picture yet'}
+          <div className="relative hidden items-center gap-2 md:flex">
+            <button type="button" className={dPrimary} onClick={onCode} disabled={busy || !open}>{codeLabel}</button>
+            <button type="button" className={dBtn} onClick={() => setSettingsOpen(true)}>Settings</button>
+            <button type="button" className={`${dBtn} !px-0 w-10`} aria-haspopup="menu" aria-expanded={moreOpen} aria-label="More actions" onClick={() => setMoreOpen((v) => !v)}>
+              <svg aria-hidden viewBox="0 0 24 24" className="mx-auto h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d={ICON.more} /></svg>
+            </button>
+            {moreOpen && !isPhone && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setMoreOpen(false)} />
+                <div role="menu" className="absolute right-0 top-full z-40 mt-2 w-72 rounded-2xl border border-white/10 bg-slate-900 p-1.5 shadow-2xl">
+                  {menu.slice(0, 5).map(menuButton)}
+                  <div className="my-1 border-t border-white/10" />
+                  {menu.slice(5).map(menuButton)}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-[1800px] px-3 pb-28 pt-3 md:px-4 md:pb-8 md:pt-4">
+        {err && <p role="alert" className="mb-3 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm font-semibold text-rose-200">{err}</p>}
+        <div className="md:grid md:grid-cols-[minmax(0,1fr)_340px] md:items-start md:gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+          <section aria-label="Students" className={`min-w-0 ${view === 'needs' ? 'hidden md:block' : ''}`}>
+            <div className="mb-3 grid grid-cols-4 gap-1.5 md:flex md:flex-wrap md:gap-2" aria-label="How many students are where">
+              {chips.map(([k, label]) => (
+                <div key={k} className="flex min-w-0 flex-col-reverse items-start rounded-xl border border-white/10 bg-white/[0.04] px-2.5 py-1.5 md:flex-row md:items-center md:gap-2 md:rounded-full md:px-3.5 md:py-1">
+                  <p className="flex min-w-0 items-center gap-1.5 text-[10px] font-semibold text-slate-400 md:text-[12px] md:text-slate-200"><span className={`h-1.5 w-1.5 shrink-0 md:h-2 md:w-2 rounded-full ${DOT[k]}`} /><span className="truncate">{isPhone ? SHORT[k] : label}</span></p>
+                  <p className="text-lg font-bold leading-none tabular-nums text-white md:text-sm">{room?.counts[k] ?? 0}</p>
+                </div>
+              ))}
+            </div>
+            <div className="mb-3 flex flex-col gap-2">
+              <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find a student" aria-label="Find a student" enterKeyHint="search"
+                className="min-h-11 w-full rounded-xl border border-white/15 bg-slate-900 px-3.5 text-base text-slate-100 outline-none placeholder:text-slate-500 focus:border-blue-400 md:min-h-10 md:text-sm" />
+              <div role="tablist" aria-label="Who to show" className="flex overflow-hidden rounded-xl border border-white/15">
+                <button type="button" role="tab" aria-selected={filter === 'all'} onClick={() => setFilter('all')} className={tab('all')}>Everyone <span className="opacity-70">{students.length}</span></button>
+                <button type="button" role="tab" aria-selected={filter === 'attention'} onClick={() => setFilter('attention')} className={tab('attention')}>Paused or away{attention ? <span className="ml-1 rounded-full bg-amber-500 px-1.5 text-[11px] font-bold text-slate-950">{attention}</span> : null}</button>
+                <button type="button" role="tab" aria-selected={filter === 'testing'} onClick={() => setFilter('testing')} className={tab('testing')}>In the test</button>
+              </div>
+            </div>
+        {mode !== 'off' && <p className="mb-4 text-xs leading-relaxed text-slate-500">
+          Students were told what is shown ({source === 'camera' ? 'their camera' : source === 'screen' ? 'their whole screen' : 'their screen and camera'}) and must agree.{showScreen ? ' If a student stops sharing the screen it counts as leaving the test.' : ''} {mode === 'live' ? `Live video is shown for the ${maxLive} students on screen at a time; tap a student to zoom in and see them in full quality; the rest show a small picture. Nothing is recorded or saved.${sound ? ' Press Listen on a tile to hear that student; they see a notice while you do.' : ''}` : 'Pictures are small, replaced every 10 seconds, and never saved.'}
+        </p>}
+
+          {!room ? <p className="py-20 text-center text-slate-500">Loading…</p> : students.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-white/15 px-4 py-14 text-center">
+              <svg aria-hidden viewBox="0 0 24 24" className="mx-auto mb-3 h-10 w-10 text-slate-600" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20c.6-3.4 3.3-5.5 6.5-5.5s5.9 2.1 6.5 5.5" /><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.8c2 .7 3.2 2.4 3.5 5.2" /></svg>
+              <p className="text-lg font-semibold">Nobody is in yet</p>
+              <p className="mx-auto mt-1 max-w-sm text-sm text-slate-400">Get a code, show it to your students, and they will appear here as they join MySEB.</p>
+              {open && <button type="button" className={`${dPrimary} mt-4`} onClick={() => void makeCode()} disabled={busy}>Get code for students</button>}
+            </div>
+          ) : shown.length === 0 ? <p className="py-16 text-center text-slate-500">{filter === 'attention' ? 'Nobody needs attention right now.' : 'No student matches.'}</p> : (
+            <ul className="grid gap-2.5 md:gap-3" style={{ gridTemplateColumns: columns }}>
+              {shown.map((s) => {
+                const q = s.live?.question;
+                const pct = q?.index && q.total ? Math.min(100, Math.round((q.index / q.total) * 100)) : 0;
+                const qText = s.status === 'ENDED' ? (s.end_reason === 'student_exit' ? 'Student ended it' : s.end_reason === 'time_up' ? 'Time is up' : s.end_reason === 'teacher' ? 'Ended by you' : s.end_reason && s.end_reason !== 'exam_ended' && WHY[s.end_reason] ? `Disqualified · ${WHY[s.end_reason]}` : 'Finished')
+                  : q ? `${q.index ? `Q${q.index}${q.total ? ` of ${q.total}` : ''}` : ''}${q.label ? `${q.index ? ' · ' : ''}${q.label}` : ''}` || '…' : 'Not started';
+                const act2 = 'min-h-11 flex-1 rounded-lg px-3 text-xs font-semibold md:min-h-9 md:flex-none disabled:opacity-40 ' + FOCUS;
+                return (
+                  <li key={s.id} data-sid={s.id} ref={watchTile} className={`group flex min-w-0 flex-col overflow-hidden rounded-2xl border bg-slate-900 ${RING_D[s.status]}`}>
+                    <div role="button" tabIndex={0} aria-label={`Zoom in on ${s.student_name}`} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setFocus(s.id); } }}
+                      className={`relative cursor-zoom-in bg-slate-800 ${FOCUS} ${showScreen ? 'aspect-video' : 'aspect-[4/3]'}`} onClick={() => setFocus(s.id)}>
+                      {showScreen && (screens[s.id] || pics[s.id]?.screen) ? (
+                        <>
+                          {screens[s.id] ? <LiveVideo stream={screens[s.id]} muted mirror={false} fit="object-contain" /> : <img src={pics[s.id]?.screen ?? ''} alt={`Screen: ${s.student_name}`} className="h-full w-full object-contain" />}
+                          {source === 'both' && (streams[s.id] || pics[s.id]?.frame) && (
+                            <div className="absolute bottom-9 right-2 h-1/3 w-[28%] overflow-hidden rounded-lg border-2 border-white/80 shadow">
+                              {streams[s.id] ? <LiveVideo stream={streams[s.id]} muted={listen !== s.id} /> : <img src={pics[s.id]?.frame ?? ''} alt={`Camera: ${s.student_name}`} className="h-full w-full -scale-x-100 object-cover" />}
+                            </div>
+                          )}
+                        </>
+                      ) : streams[s.id] ? <LiveVideo stream={streams[s.id]} muted={listen !== s.id} /> : pics[s.id]?.frame ? <img src={pics[s.id].frame ?? ''} alt={`Camera: ${s.student_name}`} className="h-full w-full -scale-x-100 object-cover" /> : (
+                        <div className="flex h-full items-center justify-center px-3 text-center text-xs font-medium text-slate-500">
+                          {mode === 'off' ? 'Live view is off' : s.live?.screen_state === 'partial' ? 'Shared a window, not the whole screen' : s.live?.screen_state === 'denied' ? 'Screen sharing is off' : s.live?.camera === 'denied' ? 'Camera blocked' : s.live?.camera === 'ask' ? 'Waiting for the student to agree' : s.status === 'ENDED' ? 'Finished' : 'No picture yet'}
+                        </div>
+                      )}
+                      <span className="absolute left-2 top-2 inline-flex items-center gap-1.5 rounded-full bg-slate-950/80 px-2 py-0.5 text-[10px] font-bold text-white backdrop-blur md:px-2.5 md:text-[11px]"><span className={`h-1.5 w-1.5 rounded-full ${DOT[s.status]}`} />{LABEL[s.status]}</span>
+                      {(streams[s.id] || screens[s.id]) && <span className="absolute right-2 top-2 flex items-center gap-1 rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-bold text-white"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />LIVE</span>}
+                      {!streams[s.id] && !screens[s.id] && pics[s.id]?.age != null && (pics[s.id].age as number) > 30 && <span className="absolute right-2 top-2 rounded bg-black/60 px-1.5 text-[10px] text-white">{pics[s.id].age}s ago</span>}
+                      <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent px-2.5 pb-2 pt-9 md:px-3 md:pb-2.5 md:pt-10">
+                        <p className="truncate text-sm font-bold text-white" title={s.student_name}>{s.student_name}</p>
+                        <p className="truncate text-[11px] text-slate-300" title={q?.label}>{qText}</p>
                       </div>
-                    )}
-                    <span className="absolute left-2 top-2 inline-flex items-center gap-1.5 rounded-full bg-slate-950/80 px-2 py-0.5 text-[10px] font-bold text-white backdrop-blur md:px-2.5 md:text-[11px]"><span className={`h-1.5 w-1.5 rounded-full ${DOT[s.status]}`} />{LABEL[s.status]}</span>
-                    {(streams[s.id] || screens[s.id]) && <span className="absolute right-2 top-2 flex items-center gap-1 rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-bold text-white"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />LIVE</span>}
-                    {!streams[s.id] && !screens[s.id] && pics[s.id]?.age != null && (pics[s.id].age as number) > 30 && <span className="absolute right-2 top-2 rounded bg-black/60 px-1.5 text-[10px] text-white">{pics[s.id].age}s ago</span>}
-                    <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent px-2.5 pb-2 pt-9 md:px-3 md:pb-2.5 md:pt-10">
-                      <p className="truncate text-sm font-bold text-white" title={s.student_name}>{s.student_name}</p>
-                      <p className="truncate text-[11px] text-slate-300" title={q?.label}>{qText}</p>
+                      {q?.total ? <div className="absolute inset-x-0 bottom-0 h-1 bg-white/10"><div className="h-full bg-emerald-400" style={{ width: `${pct}%` }} /></div> : null}
+                      <button type="button" tabIndex={-1} aria-hidden onClick={(e) => { e.stopPropagation(); setFocus(s.id); }} className="absolute bottom-9 left-2 hidden rounded-full bg-black/60 px-2.5 py-0.5 text-[11px] font-bold text-white opacity-0 hover:bg-black/80 group-hover:opacity-100 md:block">Zoom</button>
                     </div>
-                    {q?.total ? <div className="absolute inset-x-0 bottom-0 h-1 bg-white/10"><div className="h-full bg-emerald-400" style={{ width: `${pct}%` }} /></div> : null}
-                    <button type="button" tabIndex={-1} aria-hidden onClick={(e) => { e.stopPropagation(); setFocus(s.id); }} className="absolute bottom-9 left-2 hidden rounded-full bg-black/60 px-2.5 py-0.5 text-[11px] font-bold text-white opacity-0 hover:bg-black/80 group-hover:opacity-100 md:block">Zoom</button>
-                  </div>
-                  <div className="flex flex-1 flex-col gap-1.5 p-2.5">
-                    <p className="truncate text-[11px] text-slate-500">{s.client_type === 'web' ? 'browser' : s.client_type}{s.platform ? ` · ${s.platform}` : ''}{s.status !== 'ENDED' && s.seen_ago > 15 ? ` · seen ${s.seen_ago}s ago` : ''}</p>
-                    {(s.status === 'PAUSED' || s.status === 'LEFT') && <p className="text-xs font-semibold text-amber-300">{why(s.pause_reason ?? s.last_violation)}</p>}
-                    {s.id_status === 'pending' && s.status !== 'ENDED' && <p className="text-xs font-semibold text-sky-300">Showing their student card</p>}
-                    {(s.aside_seconds ?? 0) >= 10 && s.status !== 'ENDED' && <p className="text-xs text-slate-400" title="How long their face was turned well away from the camera. Only a number for you to judge: it never disqualifies anyone.">Looked aside {s.aside_seconds} s</p>}
-                    {(s.reinstated_count ?? 0) > 0 && <p className="text-xs text-slate-400">Let back in {s.reinstated_count === 1 ? 'once' : `${s.reinstated_count} times`}</p>}
-                    <div className="mt-auto flex flex-wrap gap-1.5 pt-1">
-                      {(s.status === 'PAUSED' || s.status === 'LEFT') && <button type="button" className={`${act2} bg-blue-500 font-bold text-white hover:bg-blue-400`} disabled={busy} onClick={() => act(() => call(`/sessions/${s.id}/resume`, 'POST'))}>Resume</button>}
-                      {sound && streams[s.id] && <button type="button" className={`${listen === s.id ? 'bg-white text-slate-950' : 'border border-white/15 bg-white/5 text-slate-100 hover:bg-white/10'} ${act2}`} onClick={() => setListen(listen === s.id ? null : s.id)}>{listen === s.id ? 'Stop listening' : 'Listen'}</button>}
-                      {s.status === 'ENDED' && s.end_reason && !['teacher', 'time_up', 'exam_ended', 'student', 'student_exit'].includes(s.end_reason) && <button type="button" className={`${act2} bg-emerald-500 font-bold text-white hover:bg-emerald-400`} disabled={busy} title="Use this when the rule was broken by mistake: the student continues where they were. It is written in their log." onClick={() => { if (confirm(`Let ${s.student_name} back in? It is recorded in their log.`)) void act(() => call(`/sessions/${s.id}/reinstate`, 'POST')); }}>Let back in</button>}
-                      {s.status !== 'ENDED' && <button type="button" className={`${act2} ${needs(s) ? 'bg-rose-600 font-bold text-white hover:bg-rose-500' : 'border border-white/15 bg-white/5 text-rose-300 hover:bg-white/10'}`} disabled={busy} onClick={() => { if (confirm(`End the test for ${s.student_name}?`)) void act(() => call(`/sessions/${s.id}/end`, 'POST')); }}>End</button>}
-                      {s.has_partial && <button type="button" className={`${act2} border border-emerald-400/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20`} title="What this student had typed, saved every few seconds" onClick={async () => { try { const d = await call(`/sessions/${s.id}/partial`); const show = (v: unknown) => (Array.isArray(v) ? v.join(', ') : v !== null && typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')); setSaved({ name: s.student_name, at: d.saved_at ?? null, rows: Object.entries(d.answers ?? {}).map(([id, v]) => ({ q: (d.labels ?? {})[id] || id, a: show(v) })) }); } catch (e) { setErr(e instanceof Error ? e.message : 'Could not load.'); } }}>Saved answers</button>}
-                      <button type="button" className={`${act2} border border-white/15 bg-white/5 text-slate-200 hover:bg-white/10`} onClick={async () => { try { setLog({ name: s.student_name, rows: await call(`/sessions/${s.id}/violations`) }); } catch (e) { setErr(e instanceof Error ? e.message : 'Could not load.'); } }}>
-                        {s.violation_count === 0 ? 'No problems' : `${s.violation_count} problem${s.violation_count === 1 ? '' : 's'}`}
-                      </button>
+                    <div className="flex flex-1 flex-col gap-1.5 p-2.5">
+                      <p className="truncate text-[11px] text-slate-500">{s.client_type === 'web' ? 'browser' : s.client_type}{s.platform ? ` · ${s.platform}` : ''}{s.status !== 'ENDED' && s.seen_ago > 15 ? ` · seen ${s.seen_ago}s ago` : ''}</p>
+                      {(s.status === 'PAUSED' || s.status === 'LEFT') && <p className="text-xs font-semibold text-amber-300">{why(s.pause_reason ?? s.last_violation)}</p>}
+                      {s.id_status === 'pending' && s.status !== 'ENDED' && <p className="text-xs font-semibold text-sky-300">Showing their student card</p>}
+                      {(s.aside_seconds ?? 0) >= 10 && s.status !== 'ENDED' && <p className="text-xs text-slate-400" title="How long their face was turned well away from the camera. Only a number for you to judge: it never disqualifies anyone.">Looked aside {s.aside_seconds} s</p>}
+                      {(s.reinstated_count ?? 0) > 0 && <p className="text-xs text-slate-400">Let back in {s.reinstated_count === 1 ? 'once' : `${s.reinstated_count} times`}</p>}
+                      <div className="mt-auto flex flex-wrap gap-1.5 pt-1">
+                        {(s.status === 'PAUSED' || s.status === 'LEFT') && <button type="button" className={`${act2} bg-blue-500 font-bold text-white hover:bg-blue-400`} disabled={busy} onClick={() => act(() => call(`/sessions/${s.id}/resume`, 'POST'))}>Resume</button>}
+                        {sound && streams[s.id] && <button type="button" className={`${listen === s.id ? 'bg-white text-slate-950' : 'border border-white/15 bg-white/5 text-slate-100 hover:bg-white/10'} ${act2}`} onClick={() => setListen(listen === s.id ? null : s.id)}>{listen === s.id ? 'Stop listening' : 'Listen'}</button>}
+                        {s.status === 'ENDED' && s.end_reason && !['teacher', 'time_up', 'exam_ended', 'student', 'student_exit'].includes(s.end_reason) && <button type="button" className={`${act2} bg-emerald-500 font-bold text-white hover:bg-emerald-400`} disabled={busy} title="Use this when the rule was broken by mistake: the student continues where they were. It is written in their log." onClick={() => { if (confirm(`Let ${s.student_name} back in? It is recorded in their log.`)) void act(() => call(`/sessions/${s.id}/reinstate`, 'POST')); }}>Let back in</button>}
+                        {s.status !== 'ENDED' && <button type="button" className={`${act2} ${needs(s) ? 'bg-rose-600 font-bold text-white hover:bg-rose-500' : 'border border-white/15 bg-white/5 text-rose-300 hover:bg-white/10'}`} disabled={busy} onClick={() => { if (confirm(`End the test for ${s.student_name}?`)) void act(() => call(`/sessions/${s.id}/end`, 'POST')); }}>End</button>}
+                        {s.has_partial && <button type="button" className={`${act2} border border-emerald-400/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20`} title="What this student had typed, saved every few seconds" onClick={async () => { try { const d = await call(`/sessions/${s.id}/partial`); const show = (v: unknown) => (Array.isArray(v) ? v.join(', ') : v !== null && typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')); setSaved({ name: s.student_name, at: d.saved_at ?? null, rows: Object.entries(d.answers ?? {}).map(([id, v]) => ({ q: (d.labels ?? {})[id] || id, a: show(v) })) }); } catch (e) { setErr(e instanceof Error ? e.message : 'Could not load.'); } }}>Saved answers</button>}
+                        <button type="button" className={`${act2} border border-white/15 bg-white/5 text-slate-200 hover:bg-white/10`} onClick={async () => { try { setLog({ name: s.student_name, rows: await call(`/sessions/${s.id}/violations`) }); } catch (e) { setErr(e instanceof Error ? e.message : 'Could not load.'); } }}>
+                          {s.violation_count === 0 ? 'No problems' : `${s.violation_count} problem${s.violation_count === 1 ? '' : 's'}`}
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          </section>
+          <aside aria-label="Needs you" className={`min-w-0 md:sticky md:top-[76px] md:max-h-[calc(100dvh-92px)] md:overflow-y-auto md:overscroll-contain md:pr-0.5 ${view === 'room' ? 'hidden md:block' : ''}`}>{needsPanel}</aside>
+        </div>
       </main>
 
-      {/* Phone: the three things used most are always under the thumb. Everything else is in "More". */}
-      <nav aria-label="Room actions" className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-slate-950/95 px-3 pt-2.5 backdrop-blur md:hidden" style={{ paddingBottom: 'max(0.625rem, env(safe-area-inset-bottom))' }}>
-        <div className="mx-auto grid max-w-md grid-cols-[1.4fr_1fr_1fr] gap-2">
-          <button type="button" className={dPrimary} onClick={onCode} disabled={busy || !open}>{code ? (showCode ? 'Hide code' : 'Show code') : 'Get code'}</button>
-          <button type="button" className={dBtn} disabled={busy || !open} onClick={() => act(() => call('/pause-all', 'POST'))}>Pause all</button>
-          <button type="button" className={dBtn} aria-haspopup="dialog" onClick={() => setMoreOpen(true)}>More</button>
+      {/* Phone: a bottom bar with four places. Desktop: the same things are in the header and the side panel. */}
+      <nav aria-label="Live room" className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-slate-950/95 px-2 pt-1.5 backdrop-blur md:hidden" style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}>
+        <div className="mx-auto flex max-w-md items-stretch">
+          {navItem('room', 'Students', ICON.room, view === 'room', () => setView('room'))}
+          {navItem('needs', 'Needs you', ICON.needs, view === 'needs', () => setView('needs'), needsCount)}
+          {navItem('code', code ? 'Code' : 'Get code', ICON.code, false, onCode)}
+          {navItem('more', 'More', ICON.more, false, () => setMoreOpen(true))}
         </div>
       </nav>
 
       {isPhone && moreOpen && (
-        <Sheet title="Room actions" onClose={() => setMoreOpen(false)}>
-          <div className="space-y-2.5">
-            <button type="button" className={`${dBtn} w-full text-left`} disabled={busy || !open} onClick={() => { setMoreOpen(false); void act(() => call('/resume-all', 'POST')); }}>Let everyone continue</button>
-            <button type="button" className={`${dBtn} w-full text-left`} onClick={() => { setMoreOpen(false); setSettingsOpen(true); }}>Settings</button>
-            <button type="button" className={`${dBtn} w-full text-left`} disabled={busy || students.length === 0} onClick={() => { setMoreOpen(false); void downloadReport(); }}>Report (Excel)</button>
-            <button type="button" className="min-h-11 w-full rounded-xl border border-rose-500/60 px-4 text-left text-sm font-bold text-rose-300 hover:bg-rose-500/10 disabled:opacity-40" disabled={busy || !open} onClick={() => { setMoreOpen(false); endAll(); }}>End test for everyone</button>
+        <Sheet title="More" onClose={() => setMoreOpen(false)}>
+          <div className="space-y-0.5">
+            {menu.slice(0, 5).map(menuButton)}
+            <div className="my-1.5 border-t border-white/10" />
+            {menu.slice(5).map(menuButton)}
           </div>
         </Sheet>
       )}
-      {isPhone && settingsOpen && <Sheet title="Settings" onClose={() => setSettingsOpen(false)}>{settingsBody}</Sheet>}
+      {showCode && code && (
+        <Sheet title="Code for students" wide onClose={() => setShowCode(false)}>
+          <div className="flex flex-col gap-5 md:flex-row md:items-start md:gap-8">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm text-slate-400">Students type this in MySEB</p>
+              <p className="my-1.5 break-words font-mono text-[1.9rem] font-bold leading-tight tracking-wider text-white sm:text-4xl md:text-5xl">{code.display}</p>
+              <div className="mt-2 grid grid-cols-2 gap-2 sm:flex">
+                <button type="button" className={dBtn} onClick={async () => { await navigator.clipboard.writeText(code.display); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>{copied ? 'Copied' : 'Copy'}</button>
+                <button type="button" className={dBtn} onClick={() => void makeCode()}>New code</button>
+              </div>
+              {code.joinUrl && (
+                <div className="mt-4 max-w-md rounded-xl border border-white/10 bg-white/[0.04] p-3">
+                  <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Link for students</p>
+                  <p className="mt-1 break-all font-mono text-sm text-white" data-testid="join-link">{code.joinUrl}</p>
+                  <div className="mt-2.5 grid grid-cols-2 gap-2 sm:flex">
+                    <button type="button" className={dPrimary} onClick={async () => { await navigator.clipboard.writeText(code.joinUrl!); setLinkCopied(true); setTimeout(() => setLinkCopied(false), 1500); }}>{linkCopied ? 'Link copied' : 'Copy link'}</button>
+                    <a className={`${dBtn} inline-flex items-center justify-center`} target="_blank" rel="noreferrer" href={`https://wa.me/?text=${encodeURIComponent(`Join your test: ${code.joinUrl}`)}`}>Share on WhatsApp</a>
+                  </div>
+                  <p className="mt-2.5 text-xs leading-relaxed text-slate-400">One link for everyone. On a laptop or an Android phone it opens MySEB with the code filled in, and downloads MySEB first if it is missing. On an iPhone it starts the test in the browser{room?.exam?.allow_web ? '' : ' (needs Settings → Browsers)'}.</p>
+                  {!room?.exam?.allow_web && <button type="button" disabled={busy || !open} className={`${dBtn} mt-2.5 w-full sm:w-auto`} onClick={() => void post({ allowWeb: true })}>Turn on browsers for iPhones</button>}
+                </div>
+              )}
+              <p className="mt-3 max-w-sm text-xs leading-relaxed text-slate-400">One code works for the whole class. It expires {new Date(code.expiresAt).toLocaleString()} or when you end the test. Install links: <a className="underline" href="/myseb/download" target="_blank" rel="noreferrer">bwenge.space/myseb/download</a>.</p>
+            </div>
+            <img alt="QR code: open MySEB on a phone" className="mx-auto h-44 w-44 shrink-0 rounded-xl bg-white p-1.5 md:mx-0 md:h-40 md:w-40" src={`data:image/svg+xml;utf8,${encodeURIComponent(code.qrSvg)}`} />
+          </div>
+
+        </Sheet>
+      )}
+      {settingsOpen && <Sheet title="Settings" wide onClose={() => setSettingsOpen(false)}>{settingsBody}</Sheet>}
 
       {focus && (() => {
         const s = students.find((x) => x.id === focus);
