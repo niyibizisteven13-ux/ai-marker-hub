@@ -11,7 +11,7 @@ export function cleanLive(body = {}) {
   const q = body.question && typeof body.question === 'object' ? body.question : null;
   const num = (v, max) => (Number.isFinite(Number(v)) ? Math.max(0, Math.min(max, Math.round(Number(v)))) : null);
   const question = q ? { index: num(q.index, 10_000), total: num(q.total, 10_000), label: String(q.label ?? '').replace(/\s+/g, ' ').trim().slice(0, 120) } : null;
-  const camera = ['on', 'off', 'denied', 'ask'].includes(body.camera) ? body.camera : 'off';
+  const camera = ['on', 'off', 'denied', 'ask', 'busy'].includes(body.camera) ? body.camera : 'off';
   const frame = typeof body.frame === 'string' && body.frame.length <= MAX_FRAME && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(body.frame) ? body.frame : null;
   const screen = typeof body.screen === 'string' && body.screen.length <= MAX_SCREEN && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(body.screen) ? body.screen : null;
   const screenState = ['on', 'off', 'denied', 'ask', 'partial'].includes(body.screenState) ? body.screenState : 'off';

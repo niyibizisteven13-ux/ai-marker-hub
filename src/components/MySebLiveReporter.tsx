@@ -11,12 +11,13 @@ import { useEffect, useRef, useState } from 'react';
  */
 const inMySeb = () => typeof navigator !== 'undefined' && (/MySEB\//.test(navigator.userAgent) || document.documentElement.dataset.myseb === '1');
 import { cameraErrorMessage } from '../utils/cameraErrors';
+import { isBusyCameraError, openCamera } from '../utils/openCamera';
 /** The browser guard owns the camera in strict browser mode (it needs it for the face check). The live reporter shares it and never stops it. */
 const guardCamera = (): MediaStream | null => { const s = (window as unknown as { __mysebCam?: MediaStream }).__mysebCam; return s && s.getVideoTracks()[0]?.readyState === 'live' ? s : null; };
 const haltStream = (s: MediaStream | null | undefined) => { if (s && s !== guardCamera()) s.getTracks().forEach((t) => t.stop()); };
 /** A slow or metered connection (2G / 3G / data saver): send fewer and smaller pictures. */
 const slowNetwork = () => { const c = (navigator as unknown as { connection?: { saveData?: boolean; effectiveType?: string } }).connection; return !!c && (!!c.saveData || /(^|-)2g$|3g/.test(c.effectiveType ?? '')); };
-type Cam = 'off' | 'ask' | 'on' | 'denied';
+type Cam = 'off' | 'ask' | 'on' | 'denied' | 'busy';   // busy: another app is using the camera; MySEB keeps trying
 type Screen = 'off' | 'ask' | 'on' | 'denied' | 'partial';   // partial: they shared a window or tab, not the whole screen
 type Source = 'camera' | 'screen' | 'both';
 
@@ -211,20 +212,37 @@ function LiveReporter({ kind, refId, total, status }: ReporterProps) {
     return () => { stopped = true; ac.abort(); pcs.current.forEach((pc) => pc.close()); pcs.current.clear(); streamRef.current?.getAudioTracks().forEach((t) => { t.enabled = false; }); setListening(false); };
   }, [live, kind, refId, liveVideo, cam, screen, needCamera, needScreen]);
 
-  const turnOnCamera = async () => {
+  const openingRef = useRef(false);
+  const turnOnCamera = async (auto = false) => {
+    if (openingRef.current) return;
+    openingRef.current = true;
     try {
       const wantAudio = soundRef.current && liveRef.current;
       closeAllRef.current();                                   // peers hold the old tracks: the lecturer's room reconnects on its own
       haltStream(streamRef.current);
-      const s = guardCamera() ?? await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 12 } }, audio: wantAudio ? { echoCancellation: true, noiseSuppression: true } : false });
+      // Another app may be using the camera: this tries simpler settings and each camera on the phone, then once more after a moment.
+      const s = guardCamera() ?? await openCamera({ video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 12 } }, audio: wantAudio ? { echoCancellation: true, noiseSuppression: true } : false, rounds: auto ? 1 : 2 });
       s.getAudioTracks().forEach((t) => { t.enabled = false; });   // silent until the lecturer chooses to listen to this student
       haveAudio.current = s.getAudioTracks().length > 0;
       streamRef.current = s;
       if (videoRef.current) { videoRef.current.srcObject = s; await videoRef.current.play().catch(() => undefined); }
-      s.getVideoTracks()[0]?.addEventListener('ended', () => { setCamWhy('The camera stopped. Check it is not being used by another program.'); setCam('denied'); });
+      // Another app took the camera (a call came in, the camera app opened): say so, and keep trying by itself until it is free again.
+      s.getVideoTracks()[0]?.addEventListener('ended', () => { setCamWhy(cameraErrorMessage({ name: 'NotReadableError' })); setCam('busy'); });
       setCam('on');
-    } catch (e) { setCamWhy(cameraErrorMessage(e)); setCam('denied'); }
+    } catch (e) { setCamWhy(cameraErrorMessage(e)); setCam(isBusyCameraError(e) ? 'busy' : 'denied'); }
+    finally { openingRef.current = false; }
   };
+  const turnOnRef = useRef(turnOnCamera); turnOnRef.current = turnOnCamera;
+  // The camera is busy: try again every few seconds while the page is in front, and at once when the student comes back to it.
+  useEffect(() => {
+    if (!live || !needCamera || cam !== 'busy') return;
+    let tries = 0;
+    const go = () => { if (document.hidden || tries >= 20) return; tries++; void turnOnRef.current(true); };
+    const t = window.setInterval(go, 4000);
+    const vis = () => { if (!document.hidden) go(); };
+    document.addEventListener('visibilitychange', vis);
+    return () => { window.clearInterval(t); document.removeEventListener('visibilitychange', vis); };
+  }, [live, needCamera, cam]);
   /** The whole screen, never a window or a tab: the lecturer must see what the student sees. */
   const turnOnScreen = async () => {
     try {
@@ -276,10 +294,10 @@ function LiveReporter({ kind, refId, total, status }: ReporterProps) {
           <span className="h-2 w-2 animate-pulse rounded-full bg-white" />Your lecturer is listening
         </div>
       )}
-      {needCamera && cam === 'denied' && (
+      {needCamera && (cam === 'denied' || cam === 'busy') && (
         <div role="alert" className="fixed inset-x-3 bottom-3 z-[80] mx-auto max-w-md rounded-2xl border border-amber-300 bg-amber-50 p-3 text-[13px] text-amber-900 shadow-lg">
-          {camWhy || 'The camera is off or blocked.'} Your lecturer can see that.
-          <button type="button" onClick={turnOnCamera} className="ml-2 font-semibold underline">Try again</button>
+          {camWhy || 'The camera is off or blocked.'} Your lecturer can see that.{cam === 'busy' && ' MySEB keeps trying and will turn your camera on by itself.'}
+          <button type="button" onClick={() => void turnOnCamera()} className="ml-2 font-semibold underline">Try again</button>
         </div>
       )}
       {needScreen && (screen === 'denied' || screen === 'partial') && (

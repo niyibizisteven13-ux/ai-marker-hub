@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 import '../services/api.dart';
 import '../services/lock.dart';
 import 'start_screen.dart';
@@ -43,6 +44,7 @@ class _ExamScreenState extends State<ExamScreen> with WidgetsBindingObserver {
   bool get _picking => DateTime.now().isBefore(_pickUntil);
   late final String _origin;
   StreamSubscription<String>? _native;
+  Completer<void>? _back; // completed when the student returns to the app (for example from the phone's Settings)
 
   Session get s => widget.session;
 
@@ -54,11 +56,65 @@ class _ExamScreenState extends State<ExamScreen> with WidgetsBindingObserver {
     _remaining = s.remainingSeconds;
     _origin = Uri.parse(s.examUrl).origin;
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    Lock.lock().then((v) { if (mounted) setState(() => _locked = v); });
+    _startUp();
     _native = Lock.events.listen(_onNative);
     _initWebView();
     _hb = Timer.periodic(const Duration(seconds: 5), (_) => _beat());
     _clock = Timer.periodic(const Duration(seconds: 1), (_) { if (mounted && _remaining > 0) setState(() => _remaining--); });
+  }
+
+
+  /// Ask for the camera first, then lock the phone. The system question and the way to the Settings page both need the phone to be free,
+  /// and once it is locked the student cannot leave to answer them. Nothing is turned on here: the camera only starts when the lecturer
+  /// asks for it and the student agrees on the exam page.
+  Future<void> _startUp() async {
+    try { await _prepareCamera(); } catch (_) {}
+    final v = await Lock.lock();
+    if (mounted) setState(() => _locked = v);
+  }
+
+  Future<void> _prepareCamera() async {
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    var status = await Permission.camera.status;
+    if (status.isGranted) return;
+    _pickUntil = DateTime.now().add(const Duration(seconds: 120)); // the system question is another screen: not a violation
+    final go = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Allow the camera?'),
+        content: const Text('Your lecturer may ask to see you during the test. The camera is only on when they ask and you agree. Allow it now so the test is not interrupted later.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Not now')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Allow')),
+        ],
+      ),
+    );
+    if (go != true || !mounted) { _pickUntil = DateTime.now(); return; }
+    status = await Permission.camera.request();
+    if (!status.isGranted && status.isPermanentlyDenied && mounted) {
+      final open = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          title: const Text('The camera is blocked'),
+          content: const Text('Your phone is not letting MySEB use the camera. Open Settings, choose Permissions, then Camera, and allow it. Then come back to MySEB.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Not now')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Open Settings')),
+          ],
+        ),
+      );
+      if (open == true) {
+        _pickUntil = DateTime.now().add(const Duration(minutes: 5)); // going to Settings and back: not a violation
+        _back = Completer<void>();
+        await openAppSettings();
+        await _back!.future.timeout(const Duration(minutes: 5), onTimeout: () {});
+        _back = null;
+      }
+    }
+    _pickUntil = DateTime.now().add(const Duration(seconds: 3));
   }
 
   Future<void> _initWebView() async {
@@ -96,6 +152,11 @@ class _ExamScreenState extends State<ExamScreen> with WidgetsBindingObserver {
         onNavigationRequest: (r) => (r.url.startsWith(_origin) || r.url.startsWith('about:') || r.url.startsWith('data:')) ? NavigationDecision.navigate : NavigationDecision.prevent,
         onPageFinished: (_) => _wc.runJavaScript(_hookJs),
       ));
+    final platform = _wc.platform;
+    if (platform is AndroidWebViewController) {
+      // The page's small camera preview must start without a tap, or no pictures reach the lecturer.
+      await platform.setMediaPlaybackRequiresUserGesture(false);
+    }
     final ua = (await _wc.getUserAgent()) ?? '';
     // A plain Chrome tab never sends this marker, so the server can tell it apart.
     await _wc.setUserAgent('$ua ${widget.api.userAgent}');
@@ -156,6 +217,7 @@ class _ExamScreenState extends State<ExamScreen> with WidgetsBindingObserver {
         break;
       case AppLifecycleState.resumed:
         _leave?.cancel();
+        if (_back != null && !_back!.isCompleted) _back!.complete();
         _beat();
         break;
       default:

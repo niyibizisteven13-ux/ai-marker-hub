@@ -366,7 +366,7 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
     return () => { live = false; };
   }, [waitingIds, call]);
   const decideId = (sid: string, allow: boolean) => act(async () => { await call(`/sessions/${sid}/id-decision`, 'POST', { allow }); setIdq((c) => c.filter((x) => x.id !== sid)); });
-  const needs = (s: Student) => s.status === 'PAUSED' || s.status === 'LEFT' || s.live?.camera === 'denied' || s.live?.screen_state === 'denied' || s.live?.screen_state === 'partial';
+  const needs = (s: Student) => s.status === 'PAUSED' || s.status === 'LEFT' || s.live?.camera === 'denied' || s.live?.camera === 'busy' || s.live?.screen_state === 'denied' || s.live?.screen_state === 'partial';
   const shown = [...students].filter((s) => (filter === 'all' || (filter === 'attention' ? needs(s) : s.status === 'IN_EXAM')) && (!query.trim() || s.student_name.toLowerCase().includes(query.trim().toLowerCase()))).sort((a, b) => Number(needs(b)) - Number(needs(a)) || a.student_name.localeCompare(b.student_name));
   const attention = students.filter(needs).length;
   const open = room?.exam?.status !== 'ended';
@@ -710,7 +710,7 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
                         </>
                       ) : streams[s.id] ? <LiveVideo stream={streams[s.id]} muted={listen !== s.id} /> : pics[s.id]?.frame ? <img src={pics[s.id].frame ?? ''} alt={`Camera: ${s.student_name}`} className="h-full w-full -scale-x-100 object-cover" /> : (
                         <div className="flex h-full items-center justify-center px-3 text-center text-xs font-medium text-slate-500">
-                          {mode === 'off' ? 'Live view is off' : s.live?.screen_state === 'partial' ? 'Shared a window, not the whole screen' : s.live?.screen_state === 'denied' ? 'Screen sharing is off' : s.live?.camera === 'denied' ? 'Camera blocked' : s.live?.camera === 'ask' ? 'Waiting for the student to agree' : s.status === 'ENDED' ? 'Finished' : 'No picture yet'}
+                          {mode === 'off' ? 'Live view is off' : s.live?.screen_state === 'partial' ? 'Shared a window, not the whole screen' : s.live?.screen_state === 'denied' ? 'Screen sharing is off' : s.live?.camera === 'busy' ? 'Another app is using the camera' : s.live?.camera === 'denied' ? 'Camera blocked' : s.live?.camera === 'ask' ? 'Waiting for the student to agree' : s.status === 'ENDED' ? 'Finished' : 'No picture yet'}
                         </div>
                       )}
                       <span className="absolute left-2 top-2 inline-flex items-center gap-1.5 rounded-full bg-slate-950/80 px-2 py-0.5 text-[10px] font-bold text-white backdrop-blur md:px-2.5 md:text-[11px]"><span className={`h-1.5 w-1.5 rounded-full ${DOT[s.status]}`} />{LABEL[s.status]}</span>

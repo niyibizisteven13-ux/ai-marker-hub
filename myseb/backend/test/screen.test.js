@@ -77,6 +77,20 @@ test('stopping the screen share counts as leaving, once per stop, and the leave 
   assert.equal((await q("SELECT count(*)::int n FROM violations WHERE session_id=$1 AND type='screen_share_stopped'", [a.sessionId])).rows[0].n, 1);
 });
 
+test('a camera that another app is holding is shown to the lecturer as "busy", is not a rule break, and an unknown value is ignored', async () => {
+  const exam = (await call('/api/exams', { method: 'POST', headers: T, body: { title: 'Busy camera' } })).json;
+  await call(`/api/exams/${exam.id}`, { method: 'PATCH', headers: T, body: { liveMode: 'pictures', liveSource: 'camera' } });
+  const code = (await call(`/api/exams/${exam.id}/generate-code`, { method: 'POST', headers: T })).json;
+  const a = (await call('/api/verify-code', { method: 'POST', body: { code: code.code, studentName: 'Dee', deviceId: 'dev-dee-123456', clientType: 'mobile' } })).json;
+  const live = (camera) => call(`/api/sessions/${a.sessionId}/live`, { method: 'POST', headers: T, body: { camera } });
+  const seen = async () => (await call(`/api/exams/${exam.id}/monitor?frames=0`, { headers: T })).json.students[0];
+  await live('busy');
+  let s = await seen();
+  assert.equal(s.live.camera, 'busy'); assert.equal(s.status, 'IN_EXAM', 'a busy camera on its own does not pause or end the test');
+  await live('on'); assert.equal((await seen()).live.camera, 'on', 'it goes back to on by itself once the other app lets go');
+  await live('something-else'); assert.equal((await seen()).live.camera, 'off', 'unknown values are ignored');
+});
+
 test('the lecturer can ask a student for full quality (zoom) or the light picture; nothing else sneaks through', () => {
   assert.deepEqual(cleanSignal({ type: 'quality', level: 'high', viewer: 'v1' }), { type: 'quality', viewer: 'v1', level: 'high' });
   assert.equal(cleanSignal({ type: 'quality', level: 'ultra', viewer: 'v1' }).level, 'low', 'an unknown level means the light picture');

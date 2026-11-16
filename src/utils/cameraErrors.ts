@@ -10,7 +10,8 @@ export function cameraErrorMessage(err: unknown): string {
     : mac ? ' On a Mac: System Settings → Privacy & Security → Camera → turn on MySEB (or your browser).' : '';
   if (typeof window !== 'undefined' && !window.isSecureContext) return 'The camera only works on the secure (https) address of this site.';
   if (name === 'NotReadableError' || name === 'TrackStartError' || name === 'AbortError') {
-    return 'Another program is using your camera (a call, a screen recorder, another browser tab). Close it, then try again.' + system;
+    const phone = android || (typeof navigator !== 'undefined' && /iPhone|iPad|iPod/i.test(navigator.userAgent));
+    return (phone ? 'Another app is using your camera (a video call, the camera app, a screen recorder). Close it, or swipe it away from your recent apps, then try again.' : 'Another program is using your camera (a call, a screen recorder, another browser tab). Close it, then try again.') + system;
   }
   if (name === 'NotFoundError' || name === 'DevicesNotFoundError' || name === 'OverconstrainedError') {
     return 'No camera was found. Plug one in or check it is switched on, then try again.' + system;
