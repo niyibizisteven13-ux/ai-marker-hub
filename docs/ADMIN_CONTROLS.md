@@ -15,6 +15,14 @@ Exam server status (running, restarts, requests in flight, turned away as busy, 
 ## Users
 **Details** on a person: plan and credits, storage (with **extra room** you can grant), signed-in devices, and a read-only list of what they made (forms, tasks, classes, marked exams). **Sign out everywhere**, **download their data (JSON)**, and **Erase**: removes name, email, sign-in links, memory and Telegram link, deletes their tasks and classes, and stops their forms taking answers (answers already given stay). Payments and usage records stay without a name. Erasing needs the person's email typed and cannot be undone. (There is no "view as this user": support is read-only on purpose.)
 
+## MySEB sales (Admin → MySEB sales)
+MySEB is sold. A lecturer needs **access** to get a code for students; students never pay, and administrators are never charged.
+- **Plans:** *Monthly* (default US$5, shown in RWF at today's rate): unlimited tests for 30 days per month paid; paying before the end adds to it. *One test* (default 1,500 RWF): one test credit; the first code for a test takes it and every later code for that same test is free.
+- **How a lecturer pays (until online payment is set up):** in the live room, **Get code for students** opens a panel with the two prices, the Mobile Money code (default **2191184**, name **Niyibizi Steven**), a WhatsApp button for the screenshot, and **I have paid**. They are then told it takes a few minutes, and the page carries on by itself and gets the code as soon as you enable them. The chat gives the same steps when a lecturer asks it for a code.
+- **What you do:** check the screenshot or your Mobile Money message, then in **Waiting for you** press **Enable** (you can change the plan and how many months or tests), or type their email under **Enable someone by email** (they must have signed in once). **Remove** takes access away. Every grant, rejection and removal is in the audit log.
+- **Already set:** Mobile Money code 2191184 (Niyibizi Steven) and WhatsApp +250 799 691 108. Change any of them, or the prices, under **Prices and where to pay** (a number with spaces or dashes is fine; clearing the WhatsApp number makes lecturers ask you for it).
+- **Switch:** *Charge for MySEB* turns the whole paywall off (free for everyone) and back on. It is on by default, so lecturers who had no access before need to be enabled, or switch it off while you enable the ones who already use MySEB.
+
 ## Content & organisations
 Every form on the platform (search by title or owner), **Close** one with a reason. Organisations: rename, add members by email (they need an account), remove members, remove the organisation.
 

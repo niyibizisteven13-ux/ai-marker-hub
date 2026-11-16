@@ -83,7 +83,11 @@ export function platformTools(services: ToolServices): Tool[] {
         const c = await pf.roomCode(ctx.userId, i.kind, String(i.id));
         await note(ctx.userId, 'LIVE_ROOM_CODE', String(i.id), { kind: i.kind });
         return { text: `Code: ${c.display} (valid until ${String(c.expiresAt).slice(0, 16).replace('T', ' ')} UTC).\nLink for students: ${c.joinUrl}\nLive room: ${roomLink(i.kind, i.id)}\nGive the user the code and the link. The same link works on every device. iPhones and iPads start in the browser only if browsers are allowed for this test (live_room_settings, allowBrowsers). A new code does not stop the old one working.` };
-      } catch (e) { return err(`Could not make a code: ${problem(e)}`); }
+      } catch (e) {
+        // MySEB is sold: the message holds the prices and how to pay; relay it whole (the usual short cut-off would drop the steps).
+        if ((e as { code?: string })?.code === 'MYSEB_PAYMENT_REQUIRED') return err(`${(e as Error).message}\nTell the user these payment steps (price, Mobile Money code, WhatsApp). Do not try again until they say they have paid and been given access.`);
+        return err(`Could not make a code: ${problem(e)}`);
+      }
     },
   };
 

@@ -26,6 +26,7 @@ export const FLAGS: FlagInfo[] = [
   { id: 'chat.images', label: 'Chat: make pictures', hint: 'The chat can generate pictures.', group: 'Chat abilities', tools: ['generate_image'] },
   { id: 'chat.3d', label: 'Chat: 3D models', hint: 'The chat can build interactive 3D models.', group: 'Chat abilities', tools: ['create_3d_model', 'analyze_3d_model'] },
   { id: 'myseb.enabled', label: 'MySEB: new exam sign-ins', hint: 'Off: nobody can start MySEB tests (students already in a test carry on). Use it in an emergency or while the exam server is being fixed.', group: 'MySEB (exams)' },
+  { id: 'myseb.requirePayment', label: 'MySEB: charge for codes', hint: 'On: a lecturer needs a monthly plan or a test credit (Admin → MySEB sales) to get a code for students. Off: MySEB is free for everyone. Administrators are never charged.', group: 'MySEB (exams)' },
   { id: 'myseb.browserMode', label: 'MySEB: browser mode', hint: 'Off: students cannot use the browser (iPhones) to join a test; they must use the app.', group: 'MySEB (exams)' },
 ];
 export const FLAG_IDS = FLAGS.map((f) => f.id);

@@ -22,7 +22,7 @@ export const mySebConfigured = () => Boolean(MYSEB_URL() && SERVICE_KEY());
 const NO_SUCH_EXAM = '00000000-0000-0000-0000-000000000000';
 
 export class MySebError extends Error {
-  constructor(message: string, public status = 400, public code = 'MYSEB_ERROR') { super(message); }
+  constructor(message: string, public status = 400, public code = 'MYSEB_ERROR', public data?: unknown) { super(message); }
 }
 
 async function mysebFetch(path: string, init: { method?: string; body?: unknown; timeoutMs?: number; signal?: AbortSignal } = {}) {
@@ -104,6 +104,8 @@ export const mySebShell = (kind: MySebKind = 'form'): RequestHandler => guardFor
 /* ------------------------------------------------------------------ lecturer actions */
 /** The thing being protected: a form or a hand-in task, as far as MySEB cares. */
 export interface MySebTarget {
+  /** Who owns the test: they are the one who pays for MySEB. */
+  ownerId: string;
   kind: MySebKind; ref: string; title: string; url: string; mysebExamId: string | null;
   leaveAction: 'record' | 'pause' | 'end'; minutes: number;
   saveExamId(id: string): Promise<void>;
@@ -125,7 +127,7 @@ export const formTarget = (userId: string, formId: string): TargetLoader => asyn
   try { schema = JSON.parse(row.schema || '{}'); } catch { schema = {}; }
   const exam = normalizeExam(schema.exam);
   return {
-    kind: 'form', ref: formId, title: row.title, url: `${appUrl()}/forms/${formId}`, mysebExamId: exam.mysebExamId ?? null,
+    ownerId: userId, kind: 'form', ref: formId, title: row.title, url: `${appUrl()}/forms/${formId}`, mysebExamId: exam.mysebExamId ?? null,
     leaveAction: LEAVE_MAP[exam.leaveAction], minutes: exam.enabled ? exam.minutes : 180,
     async saveExamId(id) {
       schema.exam = { ...normalizeExam(schema.exam), requireMyseb: true, mysebExamId: id };
@@ -141,7 +143,7 @@ export const assignmentTarget = (userId: string, id: string): TargetLoader => as
   // A hand-in is a sitting: from the first hand-in screen to the due time (3 hours when there is no due time).
   const left = info.dueAt ? Math.round((Date.parse(info.dueAt) - Date.now()) / 60000) : 180;
   return {
-    kind: 'assignment', ref: id, title: info.title, url: info.link, mysebExamId: info.mysebExamId,
+    ownerId: userId, kind: 'assignment', ref: id, title: info.title, url: info.link, mysebExamId: info.mysebExamId,
     leaveAction: 'pause', minutes: Math.max(30, Math.min(600, left)),
     async saveExamId(examId) { await svc.setMysebExamId(userId, id, examId); },
   };
@@ -161,7 +163,10 @@ async function ensureMysebExam(t: MySebTarget): Promise<string> {
 
 export async function generateCode(load: TargetLoader) {
   if (!flagOn('myseb.enabled')) throw new MySebError('MySEB is paused by the platform administrator. Try again later.', 503, 'MYSEB_PAUSED');
-  const examId = await ensureMysebExam(await load());
+  const target = await load();
+  // MySEB is sold: a code needs a monthly plan or a test credit (administrators and a switched-off paywall are exempt).
+  await (await import('./mySebAccess.js')).requireMySebAccess(target.ownerId, `${target.kind}:${target.ref}`);
+  const examId = await ensureMysebExam(target);
   const r = await mysebFetch(`/exams/${examId}/generate-code`, { method: 'POST' });
   // The exam secret is for per-code gating; bwenge uses the service key, so it is not passed on to the browser.
   return { mysebExamId: examId, code: r.code, display: r.display, qrSvg: r.qrSvg, joinUrl: r.joinUrl, expiresAt: r.expiresAt };

@@ -66,6 +66,9 @@ Object.assign(process.env, {
   CLAUDE_AGENT_MODEL: 'claude-haiku-5-5', CLAUDE_FALLBACK_TO_GONKA: 'false', GONKA_API_KEY: 'test-gonka-key', GONKA_BASE_URL: 'http://127.0.0.1:9/gonka/v1', LIBRARY_AUTO_ROUTE: 'false',
   MYSEB_URL: `http://127.0.0.1:${(myseb.address() as AddressInfo).port}`, MYSEB_SERVICE_KEY: 'svc-key', APP_BASE_URL: 'https://www.bwenge.space',
 });
+// MySEB is a paid service (see tests/myseb_access.test.ts); these scenarios are about the chat, so charging is switched off here.
+const platformSettings = await import('../server/services/platform/settings.js');
+platformSettings.__setPlatformSettingsForTests({ ...platformSettings.DEFAULT_SETTINGS, flags: { 'myseb.requirePayment': false } });
 const { prisma } = await import('../server/db.js');
 const db = prisma as any;
 const { AiService, fileJobQueue } = await import('../server/services/AiService.js');

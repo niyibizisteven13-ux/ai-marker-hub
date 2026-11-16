@@ -11,6 +11,9 @@ test('MySEB runs next to the bwenge server under /myseb, with its secrets derive
   process.env.DATABASE_URL = DB; process.env.JWT_SECRET = 'test-secret-for-embedding'; process.env.APP_URL = 'https://www.bwenge.space';
   const { mountEmbeddedMySeb } = await import('../server/services/mySebEmbedded.js');
   const { mySebConfigured, generateCode } = await import('../server/services/mySeb.js');
+  // MySEB is a paid service (tests/myseb_access.test.ts covers that); this test is about running MySEB inside the server.
+  const platformSettings = await import('../server/services/platform/settings.js');
+  platformSettings.__setPlatformSettingsForTests({ ...platformSettings.DEFAULT_SETTINGS, flags: { 'myseb.requirePayment': false } });
   // The child process inherits these fixtures. Never follow a real installer download in CI.
   const downloadKeys = ['MYSEB_DL_ANDROID', 'MYSEB_DL_WINDOWS', 'MYSEB_DL_IOS'] as const;
   const previousDownloads = Object.fromEntries(downloadKeys.map(k => [k, process.env[k]]));

@@ -102,6 +102,7 @@ import billingRoutes, { momoCallbackRouter } from './server/routes/billingRoutes
 import adminBillingRoutes from './server/routes/adminBillingRoutes.js';
 import adminPlatformRoutes from './server/routes/adminPlatformRoutes.js';
 import adminMySebRoutes from './server/routes/adminMySebRoutes.js';
+import { adminRouter as mySebAccessAdminRoutes, lecturerRouter as mySebAccessRoutes } from './server/routes/mySebAccessRoutes.js';
 import { startPlatformSettings } from './server/services/platform/settings.js';
 import { platformGate, platformStatus } from './server/services/platform/gate.js';
 import { startMySebSync } from './server/services/mySebAdmin.js';
@@ -455,7 +456,9 @@ app.use('/api/admin/knowledge', requireAuth, requireRole('ADMIN'), knowledgeAdmi
 app.use('/api/knowledge', requireAuth, knowledgeSourcesRouter);
 app.use('/api/curation', requireAuth, curationViewRouter);
 app.use('/api/admin/platform', requireAuth, requireRole('ADMIN'), adminPlatformRoutes);
+app.use('/api/admin/myseb-access', requireAuth, requireRole('ADMIN'), mySebAccessAdminRoutes);
 app.use('/api/admin/myseb', requireAuth, requireRole('ADMIN'), adminMySebRoutes);
+app.use('/api/myseb-access', requireAuth, mySebAccessRoutes);
 app.use('/api/admin', requireAuth, requireRole('ADMIN'), adminRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/ollama', requireAuth, ollamaRoutes);
