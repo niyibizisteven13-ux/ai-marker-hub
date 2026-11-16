@@ -85,7 +85,7 @@ import { validate, examSchema, markScriptSchema, batchGradeSchema, chatSchema } 
 import { getFileUrlSecret, getJwtSecret } from './server/auth/secrets.js';
 
 import { requireAuth, requireRole, writeAuditLog } from './production/auth.js';
-import { generalLimiter, gradingLimiter, publicFormSubmitLimiter, batchGradingLimiter, assignmentSubmitLimiter } from './production/rateLimiter.js';
+import { generalLimiter, gradingLimiter, publicFormSubmitLimiter, batchGradingLimiter, assignmentSubmitLimiter, studentLiveLimiter } from './production/rateLimiter.js';
 import authRoutes from './server/routes/authRoutes.ts';
 import userRoutes from './server/routes/userRoutes.ts';
 import agentRoutes from './server/routes/agentRoutes.ts';
@@ -434,15 +434,15 @@ app.use('/api/payments', paymentRoutes);
   app.get('/api/assignments/public/:token/files/:index', mysebTask);
   app.post('/api/assignments/public/:token/submit', mysebTask);
   // The page tells the live room which question the student is on (and a small picture if the lecturer asked for it).
-  app.post('/api/myseb/live/form/:id', mysebGuard, liveReportHandler);
-  app.post('/api/myseb/live/task/:token', mysebTask, liveReportHandler);
+  app.post('/api/myseb/live/form/:id', mysebGuard, studentLiveLimiter, liveReportHandler);
+  app.post('/api/myseb/live/task/:token', mysebTask, studentLiveLimiter, liveReportHandler);
   // Live video set-up (the video itself goes student -> lecturer directly).
-  app.get('/api/myseb/live/form/:id/signal', mysebGuard, liveSignalPullHandler);
-  app.post('/api/myseb/live/form/:id/signal', mysebGuard, liveSignalPushHandler);
-  app.get('/api/myseb/live/form/:id/ice', mysebGuard, liveIceHandler);
-  app.get('/api/myseb/live/task/:token/signal', mysebTask, liveSignalPullHandler);
-  app.post('/api/myseb/live/task/:token/signal', mysebTask, liveSignalPushHandler);
-  app.get('/api/myseb/live/task/:token/ice', mysebTask, liveIceHandler);
+  app.get('/api/myseb/live/form/:id/signal', mysebGuard, studentLiveLimiter, liveSignalPullHandler);
+  app.post('/api/myseb/live/form/:id/signal', mysebGuard, studentLiveLimiter, liveSignalPushHandler);
+  app.get('/api/myseb/live/form/:id/ice', mysebGuard, studentLiveLimiter, liveIceHandler);
+  app.get('/api/myseb/live/task/:token/signal', mysebTask, studentLiveLimiter, liveSignalPullHandler);
+  app.post('/api/myseb/live/task/:token/signal', mysebTask, studentLiveLimiter, liveSignalPushHandler);
+  app.get('/api/myseb/live/task/:token/ice', mysebTask, studentLiveLimiter, liveIceHandler);
 }
 app.use('/api/myseb', createMySebPublicRouter());
 app.use('/api/forms/from-file', requireAuth, createFormFromFileRouter());   // before the generic form routes

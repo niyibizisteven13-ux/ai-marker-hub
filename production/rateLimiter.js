@@ -39,6 +39,13 @@ export function userKey(req) {
   } catch { return null; }
 }
 
+/**
+ * The live room (MySEB). A room with hundreds of live students sends thousands of small set-up messages, and a class of hundreds on one
+ * school network reports every few seconds from a single address, so the general limits below would refuse them. These paths have their
+ * own limits (liveRoomLimiter for the lecturer, studentLiveLimiter for each student's MySEB session).
+ */
+export const LIVE_PATH = /^\/api\/(?:myseb\/live\/|(?:forms|assignments)\/[^/]+\/myseb\/)/;
+
 export const generalLimiter = isDev
   ? (req, res, next) => next()
   : rateLimit({
@@ -47,8 +54,8 @@ export const generalLimiter = isDev
       // Per signed-in person; per network address for everything else.
       limit: (req) => (userKey(req) ? 1500 : 600),
       keyGenerator: (req) => userKey(req) ?? ipKeyGenerator(req.ip ?? ''),
-      // Staying signed in has its own limits (authLimiter) and must never be refused by this one.
-      skip: (req) => (req.originalUrl || '').startsWith('/api/auth/refresh'),
+      // Staying signed in has its own limits (authLimiter) and must never be refused by this one. Live rooms have their own (below).
+      skip: (req) => (req.originalUrl || '').startsWith('/api/auth/refresh') || LIVE_PATH.test(req.originalUrl || ''),
       standardHeaders: true,
       legacyHeaders: false,
     });
@@ -133,4 +140,30 @@ export const batchGradingLimiter = isDev
       standardHeaders: true,
       legacyHeaders: false,
       message: { error: 'Too many batch grading uploads from this network. Please wait and try again.' },
+    });
+
+/** The lecturer's live room: counted per signed-in person, generous enough for 500 live students (set-up messages, pictures, updates). */
+export const liveRoomLimiter = isDev
+  ? (req, res, next) => next()
+  : rateLimit({
+      store: store('live-room'),
+      windowMs: 15 * 60 * 1000,
+      limit: (req) => (userKey(req) ? (Number(process.env.LIVE_ROOM_MAX) > 0 ? Number(process.env.LIVE_ROOM_MAX) : 40_000) : 600),
+      keyGenerator: (req) => userKey(req) ?? ipKeyGenerator(req.ip ?? ''),
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { error: 'The live room is asking for too much. Wait a moment.', code: 'RATE_LIMITED' },
+    });
+
+/** A student's page in the live room: counted per MySEB session, never per network address (a whole class can share one). */
+export const studentLiveLimiter = isDev
+  ? (req, res, next) => next()
+  : rateLimit({
+      store: store('student-live'),
+      windowMs: 15 * 60 * 1000,
+      limit: (req) => (req.myseb?.sessionId ? (Number(process.env.STUDENT_LIVE_MAX) > 0 ? Number(process.env.STUDENT_LIVE_MAX) : 4000) : 20_000),
+      keyGenerator: (req) => (req.myseb?.sessionId ? `sid:${String(req.myseb.sessionId).slice(0, 60)}` : `ip:${ipKeyGenerator(req.ip ?? '')}`),
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { error: 'Slow down for a moment.', code: 'RATE_LIMITED' },
     });
