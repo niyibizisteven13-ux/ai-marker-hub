@@ -203,6 +203,33 @@ export class FileJobQueue {
     return job;
   }
 
+  /**
+   * For the administrator: how many jobs are in each state, and the jobs that need a look (running, waiting, failed). Never includes a job's
+   * payload or result (they hold people's files and answers).
+   */
+  async snapshot(limit = 60): Promise<{ counts: Record<JobStatus, number>; byType: Record<string, number>; jobs: Array<Pick<FileJob, 'id' | 'type' | 'ownerId' | 'status' | 'attempts' | 'maxAttempts' | 'createdAt' | 'updatedAt' | 'startedAt' | 'finishedAt' | 'progress' | 'error'>> }> {
+    await this.init();
+    const counts: Record<JobStatus, number> = { queued: 0, processing: 0, completed: 0, failed: 0, cancelled: 0 };
+    const byType: Record<string, number> = {};
+    for (const j of this.jobs.values()) { counts[j.status]++; if (j.status === 'queued' || j.status === 'processing') byType[j.type] = (byType[j.type] ?? 0) + 1; }
+    const attention = [...this.jobs.values()].filter((j) => j.status === 'queued' || j.status === 'processing' || j.status === 'failed')
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)).slice(0, limit);
+    return { counts, byType, jobs: attention.map((j) => ({ id: j.id, type: j.type, ownerId: j.ownerId, status: j.status, attempts: j.attempts, maxAttempts: j.maxAttempts, createdAt: j.createdAt, updatedAt: j.updatedAt, startedAt: j.startedAt, finishedAt: j.finishedAt, progress: j.progress, error: j.error })) };
+  }
+
+  /** The administrator stops a job whoever owns it. Returns the job, or null when there is none with that id. */
+  async adminCancel(id: string): Promise<FileJob | null> {
+    const job = await this.getJob(id);
+    return job ? this.cancel(id, job.ownerId) : null;
+  }
+
+  /** The administrator starts a failed or cancelled job again as a new job with the same input. Returns the new job. */
+  async adminRetry(id: string): Promise<FileJob | null> {
+    const job = await this.getJob(id);
+    if (!job || (job.status !== 'failed' && job.status !== 'cancelled')) return null;
+    return (await this.submit({ type: job.type, ownerId: job.ownerId, payload: job.payload, maxAttempts: job.maxAttempts })).job;
+  }
+
   /** Removes expired jobs. Returns their ids so callers can delete linked artifacts. */
   async purgeExpired(): Promise<string[]> {
     await this.init();

@@ -160,6 +160,8 @@ export interface ToolServices {
     }>;
     markedExams(userId: string): Promise<Array<{ examId: string; title: string; updatedAt: string; candidates: number; marked: number; released: number; needsReview: number }>>;
   };
+  /** Records what the chat changed on someone's behalf in the audit log (action names start with CHAT_). */
+  audit?: (userId: string, action: string, resourceType: string, resourceId: string | null, details?: unknown) => Promise<void>;
   /** Doing the work in the chat: marking a task's hand-ins, releasing results, classes, exam results and Excel files. Every call is scoped to the signed-in user. */
   work?: {
     taskResults(userId: string, id: string): Promise<{

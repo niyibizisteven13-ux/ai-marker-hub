@@ -6,6 +6,7 @@ import { ingestUploads, type IngestOptions, type UploadedFile } from './ingest.j
 import { OpenAICompatibleAdapter, type OpenAICompatibleOptions } from './providers/openaiCompatible.js';
 import type { ProviderAdapter } from './providers/types.js';
 import { buildToolkit } from './tools/index.js';
+import { disabledTools } from '../platform/settings.js';
 import type { AgentEvent, AgentResult, AgentTraceRecord, ChatMessage, ToolServices } from './types.js';
 
 const ephemeralTraceHashSecret = randomBytes(32);
@@ -104,7 +105,9 @@ export function createAiAgent(cfg: AiAgentConfig) {
         ...(input.history ?? []).map((h) => ({ role: h.role, content: h.text }) as ChatMessage),
         { role: 'user', content: ingested.parts.length === 1 && ingested.parts[0].type === 'text' ? ingested.parts[0].text : ingested.parts },
       ];
-      const available = input.toolNames ? tools.names().filter((n) => input.toolNames!.includes(n)) : tools.names();
+      // The administrator can switch whole groups of tools off (Admin → Platform controls); it takes effect on the next message.
+      const off = disabledTools();
+      const available = (input.toolNames ? tools.names().filter((n) => input.toolNames!.includes(n)) : tools.names()).filter((n) => !off.has(n));
       // Claude's own web search runs on tool turns of web-research models (see AnthropicAdapter webTools).
       const web = available.length > 0 && !available.includes('web_search') && !!cfg.webResearch?.(input.model ?? cfg.model);
       const system = `${input.system}\n\n${buildCapabilitiesPrompt({ tools: web ? [...available, 'web_search'] : available, locale: input.locale })}`;
@@ -204,7 +207,7 @@ export function createAiAgent(cfg: AiAgentConfig) {
           temperature: input.temperature ?? cfg.temperature,
           maxTokens: input.maxTokens ?? cfg.maxTokens,
           maxTurns: input.maxTurns,
-          toolNames: input.toolNames,
+          toolNames: off.size || input.toolNames ? available : undefined,
           requestId: input.requestId,
           fallbackModel: input.fallbackModel,
           onRetry: () => { retries += 1; },

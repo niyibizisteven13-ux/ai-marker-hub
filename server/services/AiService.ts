@@ -358,6 +358,7 @@ export const bwengeAgent = createAiAgent({
       list: async (userId) => (await import('./assignments/runtime.js')).assignmentService().list(userId),
       get: async (userId, id) => (await import('./assignments/runtime.js')).assignmentService().get(userId, id),
     },
+    audit: async (userId, action, resourceType, resourceId, details) => { await (await import('./platform/audit.js')).auditAction(userId, action, resourceType, resourceId, details); },
     // Doing the work in the chat: marking a task, releasing results, classes, marked exams and Excel files (lazy imports, like the services above).
     work: {
       taskResults: async (userId, id) => {

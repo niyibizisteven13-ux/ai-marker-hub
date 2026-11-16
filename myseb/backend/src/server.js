@@ -9,6 +9,7 @@ import { api } from './routes.js';
 import { mySebGuard } from './guard.js';
 import { flushHeartbeats, purgeOld, sweep } from './sessions.js';
 import { liveStats } from './live.js';
+import { loadControls, retentionDays } from './admin.js';
 import { eventStats } from './events.js';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 const loopDelay = monitorEventLoopDelay({ resolution: 20 }); loopDelay.enable();
@@ -130,11 +131,12 @@ app.use((err, _req, res, _next) => {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   await migrate();
+  await loadControls();
   const tick = () => sweep().catch((e) => console.error('sweep', e));
   setInterval(tick, 5000).unref();
   setInterval(() => flushHeartbeats().catch((e) => console.error('heartbeats', e)), 2000).unref();   // "still here" times, written for everyone at once
   // Retention: once at start, then every hour.
-  const purge = () => purgeOld().then((r) => { if (r.sessions || r.exams) console.log(`retention: removed ${r.sessions} finished students and ${r.exams} old exams (older than ${config.retentionDays} days)`); }).catch((e) => console.error('purge', e));
+  const purge = () => purgeOld().then((r) => { if (r.sessions || r.exams) console.log(`retention: removed ${r.sessions} finished students and ${r.exams} old exams (older than ${retentionDays()} days)`); }).catch((e) => console.error('purge', e));
   purge(); setInterval(purge, 3_600_000).unref();
   const server = app.listen(config.port, process.env.HOST || '0.0.0.0', () => console.log(`MySEB backend on :${config.port}${config.dashboardEnabled ? `  dashboard: ${config.publicUrl}/dashboard/` : '  (standalone dashboard off)'}`));
   // Graceful stop (deploys, restarts): stop taking new work, let short requests finish, drop waiting long-polls after 3 s.
