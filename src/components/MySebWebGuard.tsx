@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createFaceDetector } from '../lib/faceDetector';
 import { FaceWatch, frameStatus } from '../../shared/examRules';
 import { cameraErrorMessage } from '../utils/cameraErrors';
+import { isBusyCameraError, openCamera } from '../utils/openCamera';
 
 /**
  * "MySEB Web": the browser way in, for iPhones and for anyone without the app, on tests the lecturer opened to browsers.
@@ -67,7 +68,8 @@ export default function MySebWebGuard() {
   const [warn, setWarn] = useState<number | null>(null);      // seconds left before a missing face ends the test
   const [weak, setWeak] = useState(false);                    // the connection is weak: the page keeps trying, nobody is rejected for it
   const videoRef = useRef<HTMLVideoElement>(null);
-  const startCamRef = useRef<() => void>(() => undefined);
+  const startCamRef = useRef<(auto?: boolean) => void>(() => undefined);
+  const [camBusy, setCamBusy] = useState(false);   // the camera is held by another app: the page keeps trying by itself before the test opens
   const sendIdRef = useRef<() => void>(() => undefined);
   const idStatusRef = useRef<(s: string) => void>(() => undefined);   // the heartbeat tells the page what the lecturer decided about the student card
 
@@ -177,15 +179,16 @@ export default function MySebWebGuard() {
       // Strict rules: the camera must stay on with the student's face in it. Nothing is recorded or uploaded by this check.
       if (strictOn && me.status !== 'ENDED') {
         setCam('ask');
-        startCamRef.current = async () => {
-          setCam('loading'); setCamWhy('');
+        startCamRef.current = async (auto = false) => {
+          if (!auto) { setCam('loading'); setCamWhy(''); }
+          setCamBusy(false);
           try {
             stream?.getTracks().forEach((t) => t.stop());
-            stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 360 }, frameRate: { ideal: 12 } }, audio: false });
+            stream = await openCamera({ video: { width: { ideal: 480 }, height: { ideal: 360 }, frameRate: { ideal: 12 } }, rounds: auto ? 1 : 2 });   // copes with another app holding the camera (simpler settings, each camera, a second round)
             (window as unknown as { __mysebCam?: MediaStream }).__mysebCam = stream;       // the live room's reporter shares this camera
             const v = videoRef.current; if (v) { v.srcObject = stream; await v.play().catch(() => undefined); }
             stream.getVideoTracks()[0]?.addEventListener('ended', () => { if (!stopped && !ended) void report('camera_off'); });
-          } catch (e) { setCam('denied'); setCamWhy(cameraErrorMessage(e)); return; }
+          } catch (e) { setCam('denied'); setCamWhy(cameraErrorMessage(e)); setCamBusy(isBusyCameraError(e)); return; }
           // The face model is about 10 MB the first time (then kept by the browser). On a weak connection it may be slow: say so, and if it
           // cannot load at all, the camera stays required but the face check is skipped (the lecturer is told); nobody is rejected for it.
           let det: Awaited<ReturnType<typeof createFaceDetector>> | null = null;
@@ -229,6 +232,17 @@ export default function MySebWebGuard() {
     return () => { stopped = true; window.clearTimeout(hb); window.clearTimeout(hidden); window.clearTimeout(blur); window.clearInterval(faceTimer); detector?.close(); undo.forEach((f) => f()); };
   }, []);
 
+  // Before the test opens, a camera held by another app is tried again by itself every few seconds (and when the student comes back to this page).
+  useEffect(() => {
+    if (cam !== 'denied' || !camBusy) return;
+    let tries = 0;
+    const go = () => { if (document.hidden || tries >= 20) return; tries++; startCamRef.current(true); };
+    const t = window.setInterval(go, 4000);
+    const vis = () => { if (!document.hidden) go(); };
+    document.addEventListener('visibilitychange', vis);
+    return () => { window.clearInterval(t); document.removeEventListener('visibilitychange', vis); };
+  }, [cam, camBusy]);
+
   // Once the test is over, nothing needs the camera any more.
   useEffect(() => {
     if (phase !== 'ended') return;
@@ -266,7 +280,7 @@ export default function MySebWebGuard() {
                   {cam === 'id' ? (idSent ? 'Your lecturer is looking at your card. Stay on this page: the test opens when they accept it.' : 'Hold your student card in front of the camera so your name and photo can be read, then press the button. Your lecturer sees this one picture. It is deleted as soon as they decide.')
                     : cam === 'loading' ? 'Getting ready… the first time this loads a face check (about 10 MB). It stays on your phone: nothing is recorded or sent.'
                     : cam === 'setup' ? 'Hold your phone steady and put your face in the picture in the corner. The test starts when you are seen.'
-                    : cam === 'denied' ? camWhy || 'The camera is blocked. Allow it in your browser settings, then try again.'
+                    : cam === 'denied' ? (camWhy || 'The camera is blocked. Allow it in your browser settings, then try again.') + (camBusy ? ' This page keeps trying and starts your camera by itself as soon as the other app lets go.' : '')
                     : 'This test needs your camera. Your face must stay in it the whole time. Nothing is recorded or sent. If you leave the page, close it or take your face away for more than a few seconds, your test ends and you cannot start again.'}
                 </p>
                 {(cam === 'ask' || cam === 'denied') && (
