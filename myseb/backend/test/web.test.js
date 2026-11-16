@@ -163,7 +163,7 @@ test('more than one face, the card check, looking aside and letting a student ba
   assert.equal((await call(`/api/sessions/${coraId}/id-decision`, { method: 'POST', headers: T, body: { allow: true } })).json.ok, true);
   assert.equal((await call('/api/heartbeat', { method: 'POST', headers: H(c) })).json.idStatus, 'approved');
   assert.equal((await call(`/api/exams/${exam.id}/id-checks`, { headers: T })).json.pending.length, 0);
-  const { rows } = await pool.query('SELECT id_image FROM exam_sessions WHERE id=$1', [coraId]); assert.equal(rows[0].id_image, null, 'the picture is gone once decided');
+  assert.equal((await call(`/api/exams/${exam.id}/id-checks`, { headers: T })).json.pending.some((x) => x.id === coraId), false, 'the picture is gone once decided');
   // refused: the student is out
   const d = await join('Dan');
   await call('/api/id-check', { method: 'POST', headers: H(d), body: { image: JPG } });

@@ -4,7 +4,7 @@ import { q } from './db.js';
 import { config, safeEqual, sha } from './config.js';
 import { newCode, parseCode, codeHash, secretHash, tokenHash, newToken, newSecret, rateLimit, failureGate } from './security.js';
 import { authSession, markAlive, recordViolation, VIOLATION_TYPES } from './sessions.js';
-import { liveStats, cleanSignal, dropSignals, forgetAllLive, forgetLive, getAside, setAside, getLive, liveChanged, picturesWanted, pullSignal, pushSignal, reportEverySeconds, saveLive, wantPictures } from './live.js';
+import { liveStats, cleanSignal, dropSignals, forgetAllLive, forgetLive, getAside, setAside, setIdPic, getIdPic, dropIdPic, getLive, liveChanged, picturesWanted, pullSignal, pushSignal, reportEverySeconds, saveLive, wantPictures } from './live.js';
 import { notify, roomVersion, subscribe } from './events.js';
 
 export const api = express.Router();
@@ -214,13 +214,18 @@ api.post('/sessions/:id/end', requireTeacher, wrap(async (req, res) => {
 /** Students waiting for the lecturer to look at their card. */
 api.get('/exams/:id/id-checks', requireTeacher, wrap(async (req, res) => {
   if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
-  const { rows } = await q(`SELECT id, student_name, id_image AS image FROM exam_sessions WHERE exam_id=$1 AND id_status='pending' AND status<>'ENDED' ORDER BY started_at LIMIT 40`, [req.params.id]);
-  res.set('Cache-Control', 'no-store'); res.json({ pending: rows });
+  const { rows } = await q(`SELECT id, student_name FROM exam_sessions WHERE exam_id=$1 AND id_status='pending' AND status<>'ENDED' ORDER BY started_at LIMIT 40`, [req.params.id]);
+  const pending = []; const lost = [];
+  for (const r of rows) { const image = getIdPic(r.id); if (image) pending.push({ ...r, image }); else lost.push(r.id); }
+  // A picture that is no longer in memory (the server restarted) goes back to not-sent: the student page asks for it again.
+  if (lost.length) await q(`UPDATE exam_sessions SET id_status='none' WHERE id = ANY($1::uuid[]) AND id_status='pending'`, [lost]);
+  res.set('Cache-Control', 'no-store'); res.json({ pending });
 }));
 api.post('/sessions/:id/id-decision', requireTeacher, wrap(async (req, res) => {
   if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
   const allow = req.body?.allow === true;
-  const r = await q(`UPDATE exam_sessions SET id_status=$2, id_image=NULL,
+  dropIdPic(req.params.id);
+  const r = await q(`UPDATE exam_sessions SET id_status=$2,
       status = CASE WHEN $2='refused' THEN 'ENDED' ELSE status END,
       ended_at = CASE WHEN $2='refused' THEN now() ELSE ended_at END,
       end_reason = CASE WHEN $2='refused' THEN 'id_refused' ELSE end_reason END
@@ -389,7 +394,8 @@ api.post('/id-check', wrap(async (req, res) => {
   const image = typeof req.body?.image === 'string' ? req.body.image : '';
   if (!/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(image) || image.length > 140_000) return res.status(400).json({ error: 'That picture could not be used.' });
   if (a.session.status === 'ENDED' || a.session.id_status === 'approved') return res.json({ idStatus: a.session.id_status });
-  await q(`UPDATE exam_sessions SET id_image=$2, id_status='pending' WHERE id=$1`, [a.session.id, image]);
+  setIdPic(a.session.id, image);
+  await q(`UPDATE exam_sessions SET id_status='pending' WHERE id=$1`, [a.session.id]);
   notify(a.session.exam_id, 'status');
   res.json({ idStatus: 'pending' });
 }));

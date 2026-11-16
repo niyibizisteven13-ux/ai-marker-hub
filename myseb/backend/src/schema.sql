@@ -77,10 +77,9 @@ ALTER TABLE exams ADD COLUMN IF NOT EXISTS allow_web boolean NOT NULL DEFAULT fa
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS web_strict boolean NOT NULL DEFAULT true;
 -- More than one face in the camera (browsers): off, warn (a warning, recorded) or end (disqualified after a few seconds).
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS multi_face text NOT NULL DEFAULT 'warn';
--- Student card check at the start (browsers): one picture the lecturer approves or refuses. The picture is deleted at the decision.
+-- Student card check at the start (browsers): the lecturer approves or refuses. The picture itself is never stored in the database: it waits in server memory until the decision.
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS id_check boolean NOT NULL DEFAULT false;
 ALTER TABLE exam_sessions ADD COLUMN IF NOT EXISTS id_status text NOT NULL DEFAULT 'none';
-ALTER TABLE exam_sessions ADD COLUMN IF NOT EXISTS id_image text;
 ALTER TABLE exam_sessions ADD COLUMN IF NOT EXISTS reinstated_count int NOT NULL DEFAULT 0;
 ALTER TABLE exam_sessions ADD COLUMN IF NOT EXISTS ua_hash text;
 DO $$ BEGIN

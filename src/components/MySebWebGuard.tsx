@@ -153,7 +153,7 @@ export default function MySebWebGuard() {
           let gateOpen = false;
           const openGate = () => { gateOpen = true; setCam('ok'); watch.reset(); };
           const afterFace = () => { if (needId) setCam('id'); else openGate(); };
-          idStatusRef.current = (st) => { if (st === 'approved' && !gateOpen) openGate(); };
+          idStatusRef.current = (st) => { if (st === 'approved' && !gateOpen) openGate(); else if (st === 'none') setIdSent(false); };   // none again: the picture was lost (server restart), send it again
           sendIdRef.current = async () => {
             const v = videoRef.current; if (!v || !v.videoWidth) return;
             const c = document.createElement('canvas'); c.width = 640; c.height = Math.round(640 * v.videoHeight / v.videoWidth);
