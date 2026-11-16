@@ -60,3 +60,14 @@ test('the route: the owner downloads it; another lecturer, a visitor and a test 
     assert.equal((await fetch(`${base}/${empty.id}/myseb/report.xlsx`, { headers: bearer(owner) })).status, 404);
   } finally { srv.close(); fakeSrv.close(); }
 });
+
+test('the report keeps what disqualified browser students had typed, in its own sheet', async () => {
+  const f = await reportWorkbook({ ...REPORT, partial: [
+    { session_id: S2, student_name: 'Eric Mugisha', labels: { q1: 'What makes energy?' }, answers: { q1: 'Mitochondria', q2: ['a', 'c'], q3: 'x'.repeat(6000) }, partial_at: '2026-11-15T08:29:00Z' },
+  ] });
+  const ws = (await load(f.data)).getWorksheet('Saved answers')!;
+  assert.deepEqual([ws.getRow(2).getCell(1).value, ws.getRow(2).getCell(2).value, ws.getRow(2).getCell(3).value], ['Eric Mugisha', 'What makes energy?', 'Mitochondria']);
+  assert.equal(ws.getRow(3).getCell(2).value, 'q2', 'a question without wording shows its id'); assert.equal(ws.getRow(3).getCell(3).value, 'a, c');
+  assert.equal(String(ws.getRow(4).getCell(3).value).length, 5000, 'very long answers are cut');
+  assert.equal((await load((await reportWorkbook(REPORT)).data)).getWorksheet('Saved answers'), undefined, 'no sheet when nothing was saved');
+});

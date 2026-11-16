@@ -49,7 +49,9 @@ app.get('/exam/:examId([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 app.use('/exam/:examId([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})', mySebGuard((req) => req.params.examId), examRouter);
 
 process.on('unhandledRejection', (e) => console.error('unhandledRejection', e));   // one bad request must never take the exam server down
-app.use('/api', express.json({ limit: '100kb' }), api);
+// Saved answers may be longer than everything else the API takes (a long essay); the route itself caps them at 200 KB.
+const smallJson = express.json({ limit: '100kb' }); const answersJson = express.json({ limit: '260kb' });
+app.use('/api', (req, res, next) => (req.path === '/partial' ? answersJson : smallJson)(req, res, next), api);
 app.use('/api', (_req, res) => res.status(404).json({ error: 'not found' }));
 
 
@@ -101,7 +103,7 @@ function openApp(name){
 }
 function joinBrowser(name){
   msg('Starting your test…');$('go').disabled=true;$('web').disabled=true;
-  fetch(base+'/api/verify-code',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:CODE,studentName:name,deviceId:device(),clientType:'web',platform:navigator.platform||'browser'})})
+  fetch(base+'/api/verify-code',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:CODE,studentName:name,deviceId:device(),clientType:'web',touch:(navigator.maxTouchPoints||0)>1,platform:navigator.platform||'browser'})})
    .then(function(r){return r.json().then(function(j){return{ok:r.ok,j:j}})})
    .then(function(x){if(!x.ok)throw new Error(x.j.error||'That did not work.');location.href=x.j.examUrl})
    .catch(function(e){$('go').disabled=false;$('web').disabled=false;var t=(e&&e.message)||'That did not work.';if(/not allowed/.test(t))t=ios?'Your lecturer has not turned on the browser for this test yet. Ask them to, or use a laptop or an Android phone with MySEB.':'Your lecturer has not turned on the browser for this test. Use the MySEB app.';msg(t,true)});
@@ -119,7 +121,12 @@ if (config.dashboardEnabled) app.use('/dashboard', express.static(path.join(here
 }));
 app.get('/', (_req, res) => (config.dashboardEnabled ? res.redirect(`${config.basePath}/dashboard/`) : res.json({ name: 'MySEB', ok: true })));
 
-app.use((err, _req, res, _next) => { console.error(err); res.status(500).json({ error: 'server error' }); });
+app.use((err, _req, res, _next) => {
+  // A body that is too big or not JSON is the caller's mistake (4xx), not a server error.
+  const status = Number(err?.status ?? err?.statusCode);
+  if (status >= 400 && status < 500) return res.status(status).json({ error: status === 413 ? 'That is too big.' : 'Bad request.' });
+  console.error(err); res.status(500).json({ error: 'server error' });
+});
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   await migrate();

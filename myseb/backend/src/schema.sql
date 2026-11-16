@@ -81,6 +81,11 @@ ALTER TABLE exams ADD COLUMN IF NOT EXISTS multi_face text NOT NULL DEFAULT 'war
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS id_check boolean NOT NULL DEFAULT false;
 ALTER TABLE exam_sessions ADD COLUMN IF NOT EXISTS id_status text NOT NULL DEFAULT 'none';
 ALTER TABLE exam_sessions ADD COLUMN IF NOT EXISTS reinstated_count int NOT NULL DEFAULT 0;
+-- Which devices may use the browser (when browsers are allowed): any, or only iPhones and iPads (everyone else uses the app).
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS web_devices text NOT NULL DEFAULT 'any';
+-- The answers a browser student had typed, saved every few seconds, so leaving (or a crash) does not lose them. Answers are the lecturer's data and go with the session.
+ALTER TABLE exam_sessions ADD COLUMN IF NOT EXISTS partial_answers jsonb;
+ALTER TABLE exam_sessions ADD COLUMN IF NOT EXISTS partial_at timestamptz;
 ALTER TABLE exam_sessions ADD COLUMN IF NOT EXISTS ua_hash text;
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exam_sessions_client_type_check' AND pg_get_constraintdef(oid) LIKE '%web%') THEN

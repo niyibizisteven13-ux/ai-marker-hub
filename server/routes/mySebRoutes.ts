@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { requireAuth } from '../../production/auth.js';
 import { reportWorkbook } from '../services/mySebReport.js';
 import logger from '../utils/logger.js';
-import { MySebError, assignmentTarget, downloadLinks, endAll, formTarget, frames, generateCode, iceServers, idChecks, idDecision, reinstate, lecturerSignalPull, lecturerSignalPush, monitor, report, mySebConfigured, pauseAll, relayLive, resumeAll, sessionAction, setLiveMode, studentSignalPull, heldStudentSignalPull, streamRoomEvents, studentSignalPush, violations, type TargetLoader } from '../services/mySeb.js';
+import { MySebError, assignmentTarget, downloadLinks, endAll, formTarget, frames, generateCode, iceServers, idChecks, idDecision, reinstate, savedAnswers, lecturerSignalPull, lecturerSignalPush, monitor, report, mySebConfigured, pauseAll, relayLive, resumeAll, sessionAction, setLiveMode, studentSignalPull, heldStudentSignalPull, streamRoomEvents, studentSignalPush, violations, type TargetLoader } from '../services/mySeb.js';
 
 const userIdOf = (req: Request): string => (req as any).user?.userId;
 const run = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response) => {
@@ -62,6 +62,7 @@ function createMySebOwnerRouterFor(target: (userId: string, id: string) => Targe
   r.post('/:id/myseb/sessions/:sid/resume', requireAuth, run(async (req, res) => { res.json(await sessionAction(t(req), p(req, 'sid'), 'resume')); }));
   r.post('/:id/myseb/sessions/:sid/end', requireAuth, run(async (req, res) => { res.json(await sessionAction(t(req), p(req, 'sid'), 'end')); }));
   r.post('/:id/myseb/sessions/:sid/reinstate', requireAuth, run(async (req, res) => { res.json(await reinstate(t(req), p(req, 'sid'))); }));
+  r.get('/:id/myseb/sessions/:sid/partial', requireAuth, run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await savedAnswers(t(req), p(req, 'sid'))); }));
   r.get('/:id/myseb/id-checks', requireAuth, run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await idChecks(t(req))); }));
   r.post('/:id/myseb/sessions/:sid/id-decision', requireAuth, run(async (req, res) => { res.json(await idDecision(t(req), p(req, 'sid'), req.body?.allow === true)); }));
   r.get('/:id/myseb/report.xlsx', requireAuth, run(async (req, res) => {
@@ -74,7 +75,7 @@ function createMySebOwnerRouterFor(target: (userId: string, id: string) => Targe
   r.post('/:id/myseb/resume-all', requireAuth, run(async (req, res) => { res.json(await resumeAll(t(req))); }));
   r.post('/:id/myseb/settings', requireAuth, run(async (req, res) => {
     const mode = ['off', 'pictures', 'live'].includes(req.body?.liveMode) ? req.body.liveMode : req.body?.liveFaces === true ? 'pictures' : 'off';
-    res.json(await setLiveMode(t(req), mode, req.body?.liveSound === true, { source: req.body?.liveSource, leaveAction: req.body?.leaveAction, allowWeb: req.body?.allowWeb, webStrict: req.body?.webStrict, multiFace: req.body?.multiFace, idCheck: req.body?.idCheck }));
+    res.json(await setLiveMode(t(req), mode, req.body?.liveSound === true, { source: req.body?.liveSource, leaveAction: req.body?.leaveAction, allowWeb: req.body?.allowWeb, webStrict: req.body?.webStrict, multiFace: req.body?.multiFace, idCheck: req.body?.idCheck, webDevices: req.body?.webDevices }));
   }));
   // Live video set-up: the lecturer's room listens for offers/ICE from students and sends watch/answer/ice back.
   r.get('/:id/myseb/ice', requireAuth, (_req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(iceServers()); });

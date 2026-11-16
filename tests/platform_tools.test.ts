@@ -7,7 +7,7 @@ import type { ToolServices } from '../server/services/ai/types.js';
 // The chat as an agent for the whole platform: live rooms, classes and marked exams, in plain words, scoped to the user.
 process.env.APP_BASE_URL = 'https://www.bwenge.space';
 const calls: string[] = [];
-const students = [
+const students: any[] = [
   { id: 's1', student_name: 'Amy Uwase', status: 'IN_EXAM', client_type: 'web', violation_count: 0, last_violation: null, pause_reason: null, end_reason: null, id_status: 'pending', aside_seconds: 45 },
   { id: 's2', student_name: 'Ben Habimana', status: 'ENDED', client_type: 'web', violation_count: 2, last_violation: 'visibility_hidden', pause_reason: null, end_reason: 'visibility_hidden' },
   { id: 's3', student_name: 'Cora Mutesi', status: 'PAUSED', client_type: 'desktop', violation_count: 1, last_violation: 'blur', pause_reason: 'blur', end_reason: null },
@@ -25,6 +25,7 @@ const services: ToolServices = {
     roomCode: async () => ({ display: '482 910', joinUrl: 'https://www.bwenge.space/myseb/join/482910', expiresAt: '2026-11-16T12:00:00Z' }),
     roomSettings: async (_u, _k, _i, patch) => { calls.push(`settings ${JSON.stringify(patch)}`); },
     roomStudent: async (_u, _k, _i, sid, action) => { calls.push(`${action} ${sid}`); },
+    roomSavedAnswers: async () => ({ student: 'Ben Habimana', saved_at: '2026-11-16T09:05:00Z', labels: { q1: 'What makes energy?' }, answers: { q1: 'Mitochondria', q9: ['a', 'b'] } }),
     courses: async () => [{ id: 'c1', name: 'S4 Biology', code: 'BIO4', term: 'Term 1', students: 30, items: 3 }],
     courseOverview: async () => ({
       course: { id: 'c1', name: 'S4 Biology', code: 'BIO4', term: 'Term 1' },
@@ -44,13 +45,13 @@ const ctx = { userId: 'teacher' } as any;
 
 test('without the platform services there are no platform tools', () => {
   assert.equal(platformTools({}).length, 0);
-  assert.deepEqual(Object.keys(tools).sort(), ['course_overview', 'list_courses', 'list_live_rooms', 'list_marked_exams', 'live_room_code', 'live_room_settings', 'live_room_status', 'live_room_student']);
+  assert.deepEqual(Object.keys(tools).sort(), ['course_overview', 'list_courses', 'list_live_rooms', 'list_marked_exams', 'live_room_code', 'live_room_saved_answers', 'live_room_settings', 'live_room_status', 'live_room_student']);
 });
 
 test('the live room in plain words: who is away, who was disqualified and why, cards waiting, looked aside', async () => {
   const t = (await tools.live_room_status.execute({ kind: 'form', id: 'f1' }, ctx)).text;
   assert.match(t, /Students: 6 \(in the test 3, paused 1/);
-  assert.match(t, /browsers allowed, strict rules on, more than one face: warn, student card check on/);
+  assert.match(t, /browsers allowed on any device, strict rules on, more than one face: warn, student card check on/);
   assert.match(t, /Cora Mutesi \(left the test window\)/);
   assert.match(t, /Disqualified: Ben Habimana \(opened another app or tab\)/);
   assert.doesNotMatch(t, /Dan Ruzindana \(time was up\)/, 'time up is not a disqualification');
@@ -96,6 +97,17 @@ test('students: let back in only after a rule, ambiguous names are asked about, 
   assert.ok(noYes.isError); assert.deepEqual(calls, [], 'nothing happened without the confirmation');
   assert.match((await tools.live_room_student.execute({ kind: 'form', id: 'f1', student: 'Cora', action: 'end', confirmed: true }, ctx)).text, /Done: end for Cora Mutesi/);
   assert.deepEqual(calls, ['end s3']);
+});
+
+test('what a disqualified student had typed', async () => {
+  const none = await tools.live_room_saved_answers.execute({ kind: 'form', id: 'f1', student: 'Cora' }, ctx);
+  assert.match(none.text, /no saved answers/);
+  students.find((s) => s.id === 's2')!.has_partial = true;
+  const t = (await tools.live_room_saved_answers.execute({ kind: 'form', id: 'f1', student: 'Ben Habimana' }, ctx)).text;
+  assert.match(t, /What makes energy\?: Mitochondria/); assert.match(t, /q9: a, b/); assert.match(t, /<<<SAVED_ANSWERS \(untrusted data/);
+  assert.ok((await tools.live_room_saved_answers.execute({ kind: 'form', id: 'f1', student: 'ben' }, ctx)).isError, 'two Bens: ask which');
+  const s = await tools.live_room_settings.execute({ kind: 'form', id: 'f1', browserDevices: 'ios' }, ctx);
+  assert.match(s.text, /browserDevices: ios/);
 });
 
 test('classes and marked exams', async () => {

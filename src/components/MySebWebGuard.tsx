@@ -32,6 +32,29 @@ const WHY: Record<string, string> = {
   teacher: 'Your lecturer ended your test.', time_up: 'Your time is up.', exam_ended: 'The test has ended.',
 };
 
+/**
+ * What the student has typed, read from the form's own autosaved draft (the quiz keeps it in sessionStorage as `dynamicform:<key>`) and the
+ * wording of each question from the page. Sent to the lecturer's side every few seconds, so leaving or a crash does not lose it.
+ */
+function collectAnswers(): { key: string; answers: Record<string, unknown>; labels: Record<string, string> } | null {
+  let best: { key: string; answers: Record<string, unknown>; n: number } | null = null;
+  try {
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const k = sessionStorage.key(i);
+      if (!k || !k.startsWith('dynamicform:') || k.endsWith(':activity')) continue;
+      const a = JSON.parse(sessionStorage.getItem(k) || 'null')?.answers;
+      if (a && typeof a === 'object') { const n = Object.keys(a).length; if (n && (!best || n > best.n)) best = { key: k, answers: a, n }; }
+    }
+  } catch { /* storage unavailable */ }
+  if (!best) return null;
+  const labels: Record<string, string> = {};
+  document.querySelectorAll<HTMLElement>('[id$="-label"]').forEach((el) => {
+    const id = el.id.slice(0, -6);
+    if (id in best!.answers) labels[id] = (el.textContent ?? '').replace(/\s+/g, ' ').replace(/^\d+\.\s*/, '').replace(/\*\s*\(required\)$/, '').trim().slice(0, 300);
+  });
+  return { key: best.key, answers: best.answers, labels };
+}
+
 export default function MySebWebGuard() {
   const [phase, setPhase] = useState<Phase>('off');
   const [reason, setReason] = useState<string | null>(null);
@@ -61,15 +84,24 @@ export default function MySebWebGuard() {
       if (!me?.active || stopped) return;
       document.documentElement.dataset.myseb = '1';                 // the live room's camera / screen sharing looks for this
       window.dispatchEvent(new Event('myseb-web-active'));
+      // The lecturer let this student back in after the tab was closed: put the saved answers back where the form looks for them, then load once more.
+      try {
+        const rs = me.restore as { key?: string; answers?: Record<string, unknown> } | null;
+        if (rs?.key && rs.answers && rs.key.startsWith('dynamicform:') && !sessionStorage.getItem('myseb-restored')) {
+          const have = JSON.parse(sessionStorage.getItem(rs.key) || 'null')?.answers;
+          if (!have || !Object.keys(have).length) { sessionStorage.setItem(rs.key, JSON.stringify({ answers: rs.answers })); sessionStorage.setItem('myseb-restored', '1'); window.location.reload(); return; }
+        }
+      } catch { /* storage unavailable */ }
       const strictOn = !!me.strict;
       setStrict(strictOn);
       const multiRule: string = me.multi ?? 'warn';
       const needId = !!me.idCheck && me.idStatus !== 'approved';
 
-      let ended = false; let canReturn = false; let asideMs = 0;
+      let ended = false; let canReturn = false; let asideMs = 0; let ready = false;   // ready: set-up finished (the first status is read before the helpers exist)
       const apply = (status: string, why?: string | null, reload = false) => {
         const next: Phase = status === 'IN_EXAM' ? 'active' : status === 'ENDED' ? 'ended' : 'paused';
         if (next === 'active' && ended) { window.location.reload(); return; }       // the lecturer let this student back in: start fresh (camera and all)
+        if (next === 'ended' && !ended && ready) void saveAnswers();                         // the last words before the test closed
         if (next === 'ended') { ended = true; setReason(why ?? null); canReturn = !!why && ['face_missing', 'camera_off', 'multiple_faces', 'background', 'visibility_hidden', 'blur', 'fullscreen_exit'].includes(why); }
         setPhase((cur) => { if (reload && cur === 'paused' && next === 'active') window.setTimeout(() => window.location.reload(), 50); return next; });
       };
@@ -114,12 +146,22 @@ export default function MySebWebGuard() {
         await flush();
       };
 
+      // Saving what the student typed: every 15 s (30 s on a weak connection) when it changed, and once more right when they leave.
+      let lastSaved = '';
+      function saveAnswers() {
+        const c = collectAnswers(); if (!c) return Promise.resolve();
+        const json = JSON.stringify(c); if (json === lastSaved || json.length > 190_000) return Promise.resolve();
+        return post('partial', c).then((r) => { if (r && r.status === 200) lastSaved = json; });
+      }
+      const saver = window.setInterval(() => { if (!ended) void saveAnswers(); }, 15_000);
+      undo.push(() => window.clearInterval(saver));
+      ready = true;
       // Leaving the page: another tab, another app, the screen locked. A glance shorter than 1.5 s is not reported
       // (strict rules: a longer glance ends the test; closing the page does at once).
-      on(document, 'visibilitychange', () => { window.clearTimeout(hidden); if (document.hidden) hidden = window.setTimeout(() => void report('visibility_hidden'), strictOn ? 0 : 1500); });   // strict: at once, no glance allowed
+      on(document, 'visibilitychange', () => { window.clearTimeout(hidden); if (document.hidden) { void saveAnswers(); hidden = window.setTimeout(() => void report('visibility_hidden'), strictOn ? 0 : 1500); } });   // strict: at once, no glance allowed
       on(window, 'blur', () => { window.clearTimeout(blur); blur = window.setTimeout(() => { if (!document.hasFocus() && !document.hidden) void report('blur'); }, 1500); });
       on(window, 'focus', () => window.clearTimeout(blur));
-      on(window, 'pagehide', () => { void report('background'); });
+      on(window, 'pagehide', () => { void saveAnswers(); void report('background'); });
       // No copying, pasting or right-click; developer-tool and print shortcuts are caught.
       for (const t of ['copy', 'cut', 'paste']) on(document, t, (e) => { e.preventDefault(); void report(t); }, true);
       on(document, 'contextmenu', (e) => e.preventDefault(), true);

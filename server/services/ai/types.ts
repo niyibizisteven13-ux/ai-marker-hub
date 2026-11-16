@@ -143,12 +143,13 @@ export interface ToolServices {
   platform?: {
     liveRooms(userId: string): Promise<Array<{ kind: 'form' | 'task'; id: string; title: string; hasRoom: boolean }>>;
     roomStatus(userId: string, kind: 'form' | 'task', id: string): Promise<{
-      exam: { title: string; status: string; live_mode?: string; allow_web?: boolean; web_strict?: boolean; multi_face?: string; id_check?: boolean; leave_action?: string };
+      exam: { title: string; status: string; live_mode?: string; allow_web?: boolean; web_devices?: string; web_strict?: boolean; multi_face?: string; id_check?: boolean; leave_action?: string };
       counts: Record<string, number>;
-      students: Array<{ id: string; student_name: string; status: string; client_type: string; violation_count: number; last_violation: string | null; pause_reason: string | null; end_reason: string | null; id_status?: string; aside_seconds?: number; reinstated_count?: number }>;
+      students: Array<{ id: string; student_name: string; status: string; client_type: string; violation_count: number; last_violation: string | null; pause_reason: string | null; end_reason: string | null; id_status?: string; aside_seconds?: number; reinstated_count?: number; has_partial?: boolean }>;
     }>;
+    roomSavedAnswers(userId: string, kind: 'form' | 'task', id: string, studentId: string): Promise<{ student: string; saved_at: string | null; labels: Record<string, string>; answers: Record<string, unknown> }>;
     roomCode(userId: string, kind: 'form' | 'task', id: string): Promise<{ display: string; joinUrl: string; expiresAt: string }>;
-    roomSettings(userId: string, kind: 'form' | 'task', id: string, patch: { allowBrowsers?: boolean; strictBrowsers?: boolean; faces?: 'off' | 'warn' | 'end'; studentCard?: boolean; ifStudentLeaves?: 'record' | 'pause' | 'end' | 'pause_then_end' }): Promise<void>;
+    roomSettings(userId: string, kind: 'form' | 'task', id: string, patch: { allowBrowsers?: boolean; strictBrowsers?: boolean; faces?: 'off' | 'warn' | 'end'; studentCard?: boolean; browserDevices?: 'any' | 'ios'; ifStudentLeaves?: 'record' | 'pause' | 'end' | 'pause_then_end' }): Promise<void>;
     roomStudent(userId: string, kind: 'form' | 'task', id: string, studentId: string, action: 'let_back_in' | 'resume' | 'end'): Promise<void>;
     courses(userId: string): Promise<Array<{ id: string; name: string; code: string; term: string; students: number; items: number }>>;
     courseOverview(userId: string, id: string): Promise<{

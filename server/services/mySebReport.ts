@@ -8,6 +8,8 @@ export interface MySebReport {
   exam: { title: string; status: string; leave_action: string; live_mode: string; created_at: string; ends_at: string | null };
   students: Array<{ id: string; student_name: string; status: string; client_type: string; platform: string | null; started_at: string; deadline_at: string; ended_at: string | null; end_reason: string | null; violation_count: number; reinstated_count?: number; id_status?: string }>;
   events: Array<{ session_id: string; type: string; detail: unknown; created_at: string }>;
+  /** What disqualified browser students had typed when they left (the lecturer's data; no pictures). */
+  partial?: Array<{ session_id: string; student_name: string; labels: Record<string, string> | null; answers: Record<string, unknown> | null; partial_at: string | null }>;
 }
 
 export const EVENT_TEXT: Record<string, string> = {
@@ -57,6 +59,14 @@ export async function reportWorkbook(r: MySebReport): Promise<{ name: string; da
   for (const e of r.events) { const row = wt.addRow([new Date(e.created_at), byId.get(e.session_id)?.student_name ?? 'Unknown', EVENT_TEXT[e.type] ?? e.type, detailText(e.detail)]); row.getCell(1).numFmt = 'yyyy-mm-dd hh:mm:ss'; }
   wt.getRow(1).font = { bold: true };
   if (wt.rowCount > 1) wt.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 4 } };
+
+  if (r.partial?.length) {
+    const wp = wb.addWorksheet('Saved answers', { views: [{ state: 'frozen', ySplit: 1 }] });
+    wp.columns = [{ header: 'Student', width: 28 }, { header: 'Question', width: 50 }, { header: 'What they had typed', width: 70 }, { header: 'Last saved', width: 19 }];
+    const show = (v: unknown) => (Array.isArray(v) ? v.join(', ') : v !== null && typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')).slice(0, 5000);
+    for (const p of r.partial) for (const [id, v] of Object.entries(p.answers ?? {})) { const row = wp.addRow([p.student_name, (p.labels ?? {})[id] || id, show(v), asDate(p.partial_at)]); row.getCell(3).alignment = { wrapText: true, vertical: 'top' }; row.getCell(4).numFmt = 'yyyy-mm-dd hh:mm:ss'; }
+    wp.getRow(1).font = { bold: true };
+  }
 
   const sum = wb.addWorksheet('About'); sum.columns = [{ width: 30 }, { width: 70 }];
   sum.addRow([r.exam.title]).font = { bold: true, size: 14 };

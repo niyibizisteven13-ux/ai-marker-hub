@@ -392,7 +392,7 @@ export const bwengeAgent = createAiAgent({
         const cur: any = (await my.monitor(load, { frames: false })).exam ?? {};
         const mode = ['off', 'pictures', 'live'].includes(cur.live_mode) ? cur.live_mode : 'off';
         await my.setLiveMode(load, mode, !!cur.live_sound, {
-          source: cur.live_source, leaveAction: patch.ifStudentLeaves, allowWeb: patch.allowBrowsers, webStrict: patch.strictBrowsers, multiFace: patch.faces, idCheck: patch.studentCard,
+          source: cur.live_source, leaveAction: patch.ifStudentLeaves, allowWeb: patch.allowBrowsers, webStrict: patch.strictBrowsers, multiFace: patch.faces, idCheck: patch.studentCard, webDevices: patch.browserDevices,
         });
       },
       roomStudent: async (userId, kind, id, studentId, action) => {
@@ -400,6 +400,10 @@ export const bwengeAgent = createAiAgent({
         const load = kind === 'form' ? my.formTarget(userId, id) : my.assignmentTarget(userId, id);
         if (action === 'let_back_in') await my.reinstate(load, studentId);
         else await my.sessionAction(load, studentId, action);
+      },
+      roomSavedAnswers: async (userId, kind, id, studentId) => {
+        const my = await import('./mySeb.js');
+        return my.savedAnswers(kind === 'form' ? my.formTarget(userId, id) : my.assignmentTarget(userId, id), studentId) as any;
       },
       courses: async (userId) => (await import('./courses/runtime.js')).courseService().list(userId),
       courseOverview: async (userId, id) => (await import('./courses/runtime.js')).courseService().dashboard(userId, id) as any,

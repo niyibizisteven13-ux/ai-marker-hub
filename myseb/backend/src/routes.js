@@ -3,7 +3,7 @@ import QRCode from 'qrcode';
 import { q } from './db.js';
 import { config, safeEqual, sha } from './config.js';
 import { newCode, parseCode, codeHash, secretHash, tokenHash, newToken, newSecret, rateLimit, failureGate } from './security.js';
-import { authSession, markAlive, recordViolation, VIOLATION_TYPES } from './sessions.js';
+import { authSession, isIosDevice, markAlive, recordViolation, VIOLATION_TYPES } from './sessions.js';
 import { liveStats, cleanSignal, dropSignals, forgetAllLive, forgetLive, getAside, setAside, setIdPic, getIdPic, dropIdPic, getLive, liveChanged, picturesWanted, pullSignal, pushSignal, reportEverySeconds, saveLive, wantPictures } from './live.js';
 import { notify, roomVersion, subscribe } from './events.js';
 
@@ -70,6 +70,7 @@ api.patch('/exams/:id', requireTeacher, wrap(async (req, res) => {
   if (typeof b.allowExtension === 'boolean') add('allow_extension', b.allowExtension);
   if (typeof b.allowWeb === 'boolean') add('allow_web', b.allowWeb);
   if (typeof b.webStrict === 'boolean') add('web_strict', b.webStrict);
+  if (['any', 'ios'].includes(b.webDevices)) add('web_devices', b.webDevices);
   if (['off', 'warn', 'end'].includes(b.multiFace)) add('multi_face', b.multiFace);
   if (typeof b.idCheck === 'boolean') add('id_check', b.idCheck);
   if (['record', 'pause', 'end', 'pause_then_end'].includes(b.leaveAction)) add('leave_action', b.leaveAction);
@@ -120,11 +121,11 @@ api.post('/exams/:id/end', requireTeacher, wrap(async (req, res) => {
 /** One copy of the student list is built and shared by every lecturer tab looking at the same test; it is rebuilt after any change. */
 const monitorShared = new Map();
 async function buildMonitor(id, withFrames) {
-  const ex = (await q('SELECT id, title, status, live_faces, live_mode, live_sound, live_source, require_myseb, allow_web, web_strict, multi_face, id_check, leave_action FROM exams WHERE id=$1', [id])).rows[0];
+  const ex = (await q('SELECT id, title, status, live_faces, live_mode, live_sound, live_source, require_myseb, allow_web, web_strict, web_devices, multi_face, id_check, leave_action FROM exams WHERE id=$1', [id])).rows[0];
   if (!ex) return null;
   const { rows } = await q(
     `SELECT s.id, s.student_name, s.status, s.client_type, s.platform, s.violation_count, s.pause_reason, s.end_reason,
-            s.started_at, s.deadline_at, s.id_status, s.reinstated_count, EXTRACT(EPOCH FROM (now() - s.last_heartbeat))::int AS seen_ago,
+            s.started_at, s.deadline_at, s.id_status, s.reinstated_count, (s.partial_at IS NOT NULL) AS has_partial, EXTRACT(EPOCH FROM (now() - s.last_heartbeat))::int AS seen_ago,
             (SELECT type FROM violations v WHERE v.session_id=s.id ORDER BY v.id DESC LIMIT 1) AS last_violation
        FROM exam_sessions s WHERE s.exam_id=$1 ORDER BY s.started_at`, [id]);
   const counts = { IN_EXAM: 0, PAUSED: 0, LEFT: 0, ENDED: 0 };
@@ -133,7 +134,7 @@ async function buildMonitor(id, withFrames) {
     const l = r.status === 'ENDED' ? null : getLive(r.id);
     return { ...r, aside_seconds: getAside(r.id), live: l ? { question: l.question, camera: l.camera, screen_state: l.screenState, frame: withFrames && ex.live_faces ? l.frame : null, frame_age: l.frameAt ? Math.round((Date.now() - l.frameAt) / 1000) : null, screen: withFrames && ex.live_faces ? l.screen : null, screen_age: l.screenAt ? Math.round((Date.now() - l.screenAt) / 1000) : null } : null };
   });
-  return { exam: { id: ex.id, title: ex.title, status: ex.status, live_faces: ex.live_faces, live_mode: ex.live_mode, live_sound: ex.live_sound, live_source: ex.live_source, allow_web: ex.allow_web, web_strict: ex.web_strict, multi_face: ex.multi_face, id_check: ex.id_check, leave_action: ex.leave_action }, counts, students };
+  return { exam: { id: ex.id, title: ex.title, status: ex.status, live_faces: ex.live_faces, live_mode: ex.live_mode, live_sound: ex.live_sound, live_source: ex.live_source, allow_web: ex.allow_web, web_strict: ex.web_strict, web_devices: ex.web_devices, multi_face: ex.multi_face, id_check: ex.id_check, leave_action: ex.leave_action }, counts, students };
 }
 api.get('/exams/:id/monitor', requireTeacher, wrap(async (req, res) => {
   const id = req.params.id;
@@ -170,7 +171,11 @@ api.get('/exams/:id/report', requireTeacher, wrap(async (req, res) => {
        FROM exam_sessions WHERE exam_id=$1 ORDER BY student_name, started_at`, [req.params.id])).rows;
   const events = (await q(
     `SELECT v.session_id, v.type, v.detail, v.created_at FROM violations v WHERE v.exam_id=$1 ORDER BY v.created_at, v.id LIMIT 20000`, [req.params.id])).rows;
-  res.json({ exam: ex, students, events });
+  // What disqualified students had typed (the lecturer's data; never pictures).
+  const partial = (await q(
+    `SELECT id AS session_id, student_name, partial_answers->'labels' AS labels, partial_answers->'answers' AS answers, partial_at
+       FROM exam_sessions WHERE exam_id=$1 AND partial_answers IS NOT NULL AND status='ENDED' ORDER BY student_name`, [req.params.id])).rows;
+  res.json({ exam: ex, students, events, partial });
 }));
 
 /** Camera pictures for some students only (the tiles on screen), so a big room does not send every picture every few seconds. */
@@ -196,6 +201,14 @@ api.post('/exams/:id/resume-all', requireTeacher, wrap(async (req, res) => {
   if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
   const r = await q(`UPDATE exam_sessions SET status='IN_EXAM', pause_reason=NULL, last_heartbeat=now() WHERE exam_id=$1 AND status IN ('PAUSED','LEFT')`, [req.params.id]);
   res.json({ ok: true, changed: r.rowCount });
+}));
+
+api.get('/sessions/:id/partial', requireTeacher, wrap(async (req, res) => {
+  if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
+  const r = (await q(`SELECT student_name, status, end_reason, partial_answers, partial_at FROM exam_sessions WHERE id=$1`, [req.params.id])).rows[0];
+  if (!r) return res.status(404).json({ error: 'not found' });
+  res.set('Cache-Control', 'no-store');
+  res.json({ student: r.student_name, status: r.status, end_reason: r.end_reason, saved_at: r.partial_at, labels: r.partial_answers?.labels ?? {}, answers: r.partial_answers?.answers ?? {} });
 }));
 
 api.get('/sessions/:id/violations', requireTeacher, wrap(async (req, res) => {
@@ -337,6 +350,8 @@ api.post('/verify-code',
       return bad(404, 'That code is not valid or has expired.');
     if (clientType === 'web' && !row.allow_web)
       return res.status(403).json({ error: 'Your lecturer has not allowed the browser for this test. Use the MySEB app.' });
+    if (clientType === 'web' && row.web_devices === 'ios' && !isIosDevice(req.get('user-agent') || '', b.touch === true))
+      return res.status(403).json({ error: 'On this test the browser is only for iPhones and iPads. Use the MySEB app on your laptop or Android phone.' });
     if (row.require_myseb && clientType === 'extension' && !row.allow_extension)
       return res.status(403).json({ error: 'This exam needs the MySEB app (the browser extension is not allowed).' });
 
@@ -383,7 +398,7 @@ api.get('/web/me', wrap(async (req, res) => {
   res.set('Cache-Control', 'no-store');
   const a = await authSession(req, { allowCookie: true });
   if (a.error || a.session.client_type !== 'web') return res.status(401).json({ active: false });
-  res.json({ active: true, status: a.session.status, title: a.session.title, heartbeatSeconds: 5, strict: !!a.session.web_strict, multi: a.session.multi_face ?? 'warn', idCheck: !!a.session.id_check, idStatus: a.session.id_status, reason: a.session.status === 'ENDED' ? a.session.end_reason : null,
+  res.json({ active: true, status: a.session.status, title: a.session.title, heartbeatSeconds: 5, strict: !!a.session.web_strict, restore: a.session.reinstated_count > 0 && a.session.partial_answers ? { key: a.session.partial_answers.key, answers: a.session.partial_answers.answers } : null, multi: a.session.multi_face ?? 'warn', idCheck: !!a.session.id_check, idStatus: a.session.id_status, reason: a.session.status === 'ENDED' ? a.session.end_reason : null,
     remainingSeconds: Math.max(0, Math.floor((new Date(a.session.deadline_at) - Date.now()) / 1000)) });
 }));
 
@@ -398,6 +413,26 @@ api.post('/id-check', wrap(async (req, res) => {
   await q(`UPDATE exam_sessions SET id_status='pending' WHERE id=$1`, [a.session.id]);
   notify(a.session.exam_id, 'status');
   res.json({ idStatus: 'pending' });
+}));
+
+/**
+ * The answers a browser student has typed so far, saved every few seconds (and once more when they are disqualified), so leaving or a crash
+ * does not lose them. The lecturer reads them in the live room and the report; a student the lecturer lets back in gets them back.
+ * A session that just ended may still save for 10 minutes (the last words before leaving), no longer.
+ */
+api.post('/partial', wrap(async (req, res) => {
+  const a = await studentAuth(req, res); if (!a) return;
+  const s = a.session;
+  if (s.status === 'ENDED' && !(s.ended_at && Date.now() - new Date(s.ended_at).getTime() < 10 * 60_000)) return res.status(409).json({ error: 'This test has ended.' });
+  const body = req.body ?? {};
+  const answers = body.answers && typeof body.answers === 'object' && !Array.isArray(body.answers) ? body.answers : null;
+  const labels = body.labels && typeof body.labels === 'object' && !Array.isArray(body.labels) ? body.labels : {};
+  if (!answers) return res.status(400).json({ error: 'No answers.' });
+  const doc = { key: str(body.key, 200), answers, labels };
+  const json = JSON.stringify(doc);
+  if (json.length > 200_000) return res.status(413).json({ error: 'Too much to save.' });
+  await q(`UPDATE exam_sessions SET partial_answers=$2::jsonb, partial_at=now() WHERE id=$1`, [s.id, json]);
+  res.json({ ok: true });
 }));
 
 api.post('/heartbeat', wrap(async (req, res) => {
@@ -468,7 +503,7 @@ api.post('/gate', (req, res, next) => (req.get('x-myseb-service-key') ? next() :
   const s = rows[0];
   // Tells the exam site whether to offer "use your browser" on its "MySEB needed" page.
   let webAllowed = false;
-  if (service && isUuid(examId)) webAllowed = !!(await q('SELECT allow_web FROM exams WHERE id=$1', [examId])).rows[0]?.allow_web;
+  if (service && isUuid(examId)) { const ex = (await q('SELECT allow_web, web_devices FROM exams WHERE id=$1', [examId])).rows[0]; webAllowed = !!ex?.allow_web && (ex.web_devices !== 'ios' || isIosDevice(userAgent || '')); }
   if (!s) return res.json({ allowed: false, reason: 'MySEB Needed', webAllowed });
   // client "cookie": the exam site only saw a cookie, so the stored kind of session decides which rules apply.
   const kind = client === 'cookie' ? s.client_type : client;
