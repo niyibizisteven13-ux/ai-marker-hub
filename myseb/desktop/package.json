@@ -17,6 +17,7 @@
   "build": {
     "extraResources": [{ "from": "../extension", "to": "chrome-extension" }],
     "appId": "space.bwenge.myseb",
+    "protocols": [{ "name": "MySEB", "schemes": ["myseb"] }],
     "productName": "MySEB",
     "artifactName": "MySEB-${os}.${ext}",
     "files": ["src/**", "renderer/**", "config.json", "package.json"],

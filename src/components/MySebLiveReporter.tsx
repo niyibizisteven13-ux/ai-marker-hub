@@ -11,6 +11,11 @@ import { useEffect, useRef, useState } from 'react';
  */
 const inMySeb = () => typeof navigator !== 'undefined' && (/MySEB\//.test(navigator.userAgent) || document.documentElement.dataset.myseb === '1');
 import { cameraErrorMessage } from '../utils/cameraErrors';
+/** The browser guard owns the camera in strict browser mode (it needs it for the face check). The live reporter shares it and never stops it. */
+const guardCamera = (): MediaStream | null => { const s = (window as unknown as { __mysebCam?: MediaStream }).__mysebCam; return s && s.getVideoTracks()[0]?.readyState === 'live' ? s : null; };
+const haltStream = (s: MediaStream | null | undefined) => { if (s && s !== guardCamera()) s.getTracks().forEach((t) => t.stop()); };
+/** A slow or metered connection (2G / 3G / data saver): send fewer and smaller pictures. */
+const slowNetwork = () => { const c = (navigator as unknown as { connection?: { saveData?: boolean; effectiveType?: string } }).connection; return !!c && (!!c.saveData || /(^|-)2g$|3g/.test(c.effectiveType ?? '')); };
 type Cam = 'off' | 'ask' | 'on' | 'denied';
 type Screen = 'off' | 'ask' | 'on' | 'denied' | 'partial';   // partial: they shared a window or tab, not the whole screen
 type Source = 'camera' | 'screen' | 'both';
@@ -77,13 +82,13 @@ function LiveReporter({ kind, refId, total, status }: ReporterProps) {
     closeAllRef.current = closeAll;
     const frame = (): string | undefined => {
       const v = videoRef.current;
-      if (!picturesRef.current || !v || camRef.current !== 'on' || !facesRef.current || !v.videoWidth || Date.now() - lastFrame.current < 9500) return undefined;
+      if (!picturesRef.current || !v || camRef.current !== 'on' || !facesRef.current || !v.videoWidth || Date.now() - lastFrame.current < (slowNetwork() ? 19500 : 9500)) return undefined;
       const c = document.createElement('canvas'); c.width = 160; c.height = 120;
       const ctx = c.getContext('2d'); if (!ctx) return undefined;
       const r = Math.max(160 / v.videoWidth, 120 / v.videoHeight);   // fill the picture, cropping the edges
       ctx.drawImage(v, (160 - v.videoWidth * r) / 2, (120 - v.videoHeight * r) / 2, v.videoWidth * r, v.videoHeight * r);
       lastFrame.current = Date.now();
-      return c.toDataURL('image/jpeg', 0.45);
+      return c.toDataURL('image/jpeg', slowNetwork() ? 0.3 : 0.45);
     };
     const screenFrame = (): string | undefined => {
       const v = screenVideoRef.current;
@@ -94,7 +99,7 @@ function LiveReporter({ kind, refId, total, status }: ReporterProps) {
       lastScreen.current = Date.now();
       return c.toDataURL('image/jpeg', 0.5);
     };
-    const stopCamera = () => { closeAll(); streamRef.current?.getTracks().forEach((t) => t.stop()); streamRef.current = null; haveAudio.current = false; setCam('off'); };
+    const stopCamera = () => { closeAll(); haltStream(streamRef.current); streamRef.current = null; haveAudio.current = false; setCam('off'); };
     const stopScreen = () => { closeAll(); screenStreamRef.current?.getTracks().forEach((t) => t.stop()); screenStreamRef.current = null; setScreen('off'); };
     const send = async () => {
       if (stopped) return;
@@ -118,7 +123,7 @@ function LiveReporter({ kind, refId, total, status }: ReporterProps) {
           setFaces(b.faces); setLiveVideo(!!b.live); setSound(!!b.sound); setSource(src);
           const wantCam = b.faces && src !== 'screen', wantScreen = b.faces && src !== 'camera';
           if (wantCam && camRef.current === 'off') setCam('ask');
-          else if (wantCam && camRef.current === 'on' && b.sound && !haveAudio.current) setCam('ask');   // the lecturer added sound after the student agreed to video: ask again
+          else if (wantCam && camRef.current === 'on' && b.sound && !haveAudio.current && !guardCamera()) setCam('ask');   // the lecturer added sound after the student agreed to video: ask again
           if (wantScreen && screenRef.current === 'off') setScreen('ask');
           if (!wantCam && camRef.current !== 'off') stopCamera();
           if (!wantScreen && screenRef.current !== 'off') stopScreen();
@@ -127,9 +132,9 @@ function LiveReporter({ kind, refId, total, status }: ReporterProps) {
     };
     void send();
     let t = 0;
-    const tick = () => { t = window.setTimeout(async () => { await send(); if (!stopped) tick(); }, everyRef.current * 1000); };
+    const tick = () => { t = window.setTimeout(async () => { await send(); if (!stopped) tick(); }, everyRef.current * (slowNetwork() ? 2 : 1) * 1000); };
     tick();
-    return () => { stopped = true; window.clearTimeout(t); closeAll(); streamRef.current?.getTracks().forEach((x) => x.stop()); streamRef.current = null; screenStreamRef.current?.getTracks().forEach((x) => x.stop()); screenStreamRef.current = null; };
+    return () => { stopped = true; window.clearTimeout(t); closeAll(); haltStream(streamRef.current); streamRef.current = null; screenStreamRef.current?.getTracks().forEach((x) => x.stop()); screenStreamRef.current = null; };
   }, [live, kind, refId, total]);
 
   // Live video: answer the lecturer's "watch" with a small stream.
@@ -210,8 +215,8 @@ function LiveReporter({ kind, refId, total, status }: ReporterProps) {
     try {
       const wantAudio = soundRef.current && liveRef.current;
       closeAllRef.current();                                   // peers hold the old tracks: the lecturer's room reconnects on its own
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-      const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 12 } }, audio: wantAudio ? { echoCancellation: true, noiseSuppression: true } : false });
+      haltStream(streamRef.current);
+      const s = guardCamera() ?? await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 12 } }, audio: wantAudio ? { echoCancellation: true, noiseSuppression: true } : false });
       s.getAudioTracks().forEach((t) => { t.enabled = false; });   // silent until the lecturer chooses to listen to this student
       haveAudio.current = s.getAudioTracks().length > 0;
       streamRef.current = s;

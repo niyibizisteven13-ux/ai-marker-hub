@@ -31,7 +31,7 @@ test('a browser can join only when the lecturer allows it, and its key is a secu
   assert.equal(me.json.active, true); assert.equal(me.json.status, 'IN_EXAM');
   // heartbeat and violation work with the cookie alone
   assert.equal((await call('/api/heartbeat', { method: 'POST', headers: { Cookie: ck, 'User-Agent': SAFARI } })).json.status, 'IN_EXAM');
-  assert.equal((await call('/api/violation', { method: 'POST', headers: { Cookie: ck, 'User-Agent': SAFARI }, body: { type: 'visibility_hidden', detail: {} } })).status, 200);
+  assert.equal((await call('/api/violation', { method: 'POST', headers: { Cookie: ck, 'User-Agent': SAFARI }, body: { type: 'paste', detail: {} } })).status, 200);
   // the cookie taken to a different browser is refused, and the lecturer is told
   assert.equal((await call('/api/web/me', { headers: { Cookie: ck, 'User-Agent': CHROME } })).status, 401);
   assert.equal((await call('/api/heartbeat', { method: 'POST', headers: { Cookie: ck, 'User-Agent': CHROME } })).status, 403);
@@ -58,4 +58,54 @@ test('the lecturer sees a browser student, and can end them', async () => {
   assert.equal(mon.exam.allow_web, true); assert.equal(mon.students[0].client_type, 'web');
   await call(`/api/sessions/${j.json.sessionId}/end`, { method: 'POST', headers: T });
   assert.equal((await call('/api/heartbeat', { method: 'POST', headers: { Cookie: j.cookie.split(';')[0], 'User-Agent': SAFARI } })).json.status, 'ENDED');
+});
+
+test('the link a lecturer shares: one page for every device, with the code and nothing secret', async () => {
+  const get = async (path, ua) => { const r = await fetch(base + path, { headers: { 'User-Agent': ua } }); return { status: r.status, csp: r.headers.get('content-security-policy') || '', text: await r.text() }; };
+  const ok = await get('/join/482910', 'Mozilla/5.0 (Windows NT 10.0) Chrome/120');
+  assert.equal(ok.status, 200);
+  assert.match(ok.text, /482 910/, 'the code is shown');
+  assert.match(ok.text, /myseb:\/\/join\?code='\+CODE/, 'it can open the app with the code');
+  assert.match(ok.text, /\/download/, 'and download the app when it is missing');
+  assert.match(ok.text, /clientType:'web'/, 'and start in the browser (iPhones)');
+  assert.match(ok.csp, /connect-src 'self'/); assert.match(ok.csp, /frame-ancestors 'none'/); assert.doesNotMatch(ok.csp, /unsafe-eval/);
+  assert.doesNotMatch(ok.text, /tkey|testpepper|myseb_s=/, 'no secret on the page');
+  // anything that is not a six-digit code is not rendered into the page (no injection through the address)
+  for (const bad of ['abc', '12345', '1234567', encodeURIComponent('</script><script>alert(1)</script>')]) {
+    const r = await get(`/join/${bad}`, 'Mozilla/5.0 (iPhone)');
+    assert.match(r.text, /This link is not valid/); assert.doesNotMatch(r.text, /<script>alert|var CODE/);
+  }
+});
+
+test('strict browser rules: leaving, a lost face or a closed camera ends the test, once, and a weak connection does not', async () => {
+  const exam = (await call('/api/exams', { method: 'POST', headers: T, body: { title: 'Strict', leaveAction: 'record' } })).json;
+  await call(`/api/exams/${exam.id}`, { method: 'PATCH', headers: T, body: { allowWeb: true } });
+  const code = (await call(`/api/exams/${exam.id}/generate-code`, { method: 'POST', headers: T })).json;
+  const join = (name, device) => call('/api/verify-code', { method: 'POST', headers: { 'User-Agent': SAFARI }, body: { code: code.code, studentName: name, deviceId: device, clientType: 'web' } });
+  const H = (j) => ({ Cookie: j.cookie.split(';')[0], 'User-Agent': SAFARI });
+  const viol = (j, type) => call('/api/violation', { method: 'POST', headers: H(j), body: { type, detail: {} } });
+
+  assert.equal((await call(`/api/exams/${exam.id}/monitor`, { headers: T })).json.exam.web_strict, true, 'strict is the default');
+  for (const [i, type] of ['background', 'visibility_hidden', 'face_missing', 'camera_off'].entries()) {
+    const j = await join(`Strict ${i}`, `strict-dev-${i}-123456`);
+    assert.equal((await call('/api/web/me', { headers: H(j) })).json.strict, true);
+    const r = await viol(j, type);
+    assert.equal(r.json.status, 'ENDED', `${type} ends the test`); assert.equal(r.json.reason, type);
+    assert.equal((await call('/api/heartbeat', { method: 'POST', headers: H(j) })).json.status, 'ENDED');
+    assert.equal((await call('/api/web/me', { headers: H(j) })).json.reason, type, 'the page can show why after a reload');
+  }
+  // one attempt: the same browser cannot come back under another name, nor under the same name
+  assert.equal((await join('Someone Else', 'strict-dev-0-123456')).status, 409);
+  assert.equal((await join('Strict 0', 'strict-dev-0-123456')).status, 409);
+  // not rejected: copy / paste are only recorded, a face check that could not load is only recorded, a lost heartbeat follows the lecturer's rule
+  const ok = await join('Calm', 'strict-dev-calm-123456');
+  assert.equal((await viol(ok, 'paste')).json.status, 'IN_EXAM');
+  assert.equal((await viol(ok, 'face_check_unavailable')).json.status, 'IN_EXAM');
+  assert.equal((await viol(ok, 'multiple_faces')).json.status, 'IN_EXAM');
+  // gentler rules: the lecturer's own "If a student leaves" rule applies instead
+  await call(`/api/exams/${exam.id}`, { method: 'PATCH', headers: T, body: { webStrict: false } });
+  const soft = await join('Soft', 'strict-dev-soft-123456');
+  assert.equal((await call('/api/web/me', { headers: H(soft) })).json.strict, false);
+  assert.equal((await viol(soft, 'visibility_hidden')).json.status, 'IN_EXAM', 'record only');
+  assert.equal((await viol(soft, 'face_missing')).json.status, 'IN_EXAM');
 });

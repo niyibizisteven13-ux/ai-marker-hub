@@ -126,6 +126,10 @@ test('expired jobs are hidden and purged', async () => {
   const q = new FileJobQueue({ storageDir: dir, ttlMs: 1 });
   q.register('t', async () => 'ok');
   const { job } = await q.submit({ type: 't', ownerId: 'u', payload: {} });
+  // A job that is still running is never purged, and how long it takes to finish depends on the machine: wait for it first
+  // (getJob, because get() already hides an expired job), then let the 1 ms lifetime pass.
+  for (let i = 0; i < 500 && (await q.getJob(job.id))?.status !== 'completed'; i++) await new Promise((r) => setTimeout(r, 10));
+  assert.equal((await q.getJob(job.id))?.status, 'completed', 'the job finished');
   await new Promise((r) => setTimeout(r, 30));
   assert.equal(await q.get(job.id, 'u'), null);
   assert.deepEqual(await q.purgeExpired(), [job.id]);

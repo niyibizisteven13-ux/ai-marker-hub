@@ -46,6 +46,14 @@ function onStatus(s) {
     if (!closing || wasPaused) { closing = false; hideOverlay(); }   // a heartbeat must not dismiss the "Are you sure?" prompt
   }
 }
+// A link from the lecturer: fill in the code and name and start (only on the start screen, never during a test).
+function applyJoin(j) {
+  if (!j || ended || !$('examView').hidden) return;
+  $('code').value = String(j.code || ''); if (j.name) $('name').value = j.name;
+  if (j.code && j.name) $('form').requestSubmit(); else (j.name ? $('code') : $('name')).focus();
+}
+window.myseb.onJoinLink(applyJoin);
+window.myseb.pendingJoin().then(applyJoin).catch(() => undefined);
 window.myseb.onStatus(onStatus);
 window.myseb.onNotice((n) => { if (!ended) overlay(String(n.title || ''), String(n.text || ''), [['OK', 'primary', () => { if (!paused && !closing) hideOverlay(); }]]); });
 
