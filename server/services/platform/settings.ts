@@ -80,6 +80,8 @@ export async function loadPlatformSettings(force = false): Promise<PlatformSetti
   } catch (e) { logger.warn('[platform] settings unavailable, keeping the last known', { error: (e as Error)?.message }); }
   return cached;
 }
+/** Tests set the settings directly (the stored copy is read from the database, which the quick test run does not have). */
+export const __setPlatformSettingsForTests = (s: PlatformSettings) => { cached = normalise(s); loadedAt = Date.now() + 3600_000; };
 /** The settings as last read: for code that cannot wait (every request, every chat turn). */
 export const platformSettings = (): PlatformSettings => cached;
 export const onPlatformSettings = (fn: (s: PlatformSettings) => void) => { listeners.push(fn); return () => { listeners = listeners.filter((l) => l !== fn); }; };

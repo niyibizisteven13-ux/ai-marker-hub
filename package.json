@@ -23,7 +23,7 @@
     "prisma": "prisma",
     "db:migrate": "prisma migrate dev --name init",
     "typecheck": "tsc --noEmit -p .",
-    "test:db": "node --test --import tsx tests/context_awareness.test.ts tests/orchestrator_integration.test.ts"
+    "test:db": "node --test --import tsx tests/context_awareness.test.ts tests/orchestrator_integration.test.ts tests/admin_platform.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",

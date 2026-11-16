@@ -260,6 +260,7 @@ export function formTools(services: ToolServices & { formAi?: () => AI } = {}): 
         if (!Object.keys(patch).length) return err('Say what to change: minutes, requireMyseb, camera, leaveAction or requireFullscreen.');
         const next = keepMysebLink({ ...prev, ...patch, enabled: prev.enabled || patch.minutes !== undefined || patch.camera !== undefined }, prev);
         await saveForm(ctx.userId, id, { ...schema, exam: next });
+        await services.audit?.(ctx.userId, 'CHAT_SET_TEST_RULES', 'form', id, { minutes: next.enabled ? next.minutes : null, myseb: next.requireMyseb, camera: next.camera, leaveAction: next.leaveAction }).catch(() => undefined);
         const l = formLinks(id);
         return { text: `Test rules for "${(schema as any).title}": ${next.enabled ? `timed, ${next.minutes} minutes` : 'not timed'}; MySEB ${next.requireMyseb ? 'required' : 'not required'}; face check ${next.camera}; when a student leaves: ${next.leaveAction}; full screen ${next.requireFullscreen ? 'required' : 'not required'}. Form: ${l.fill}${next.requireMyseb ? '\nNext: call live_room_code for the code and the link for students.' : ''}` };
       } catch (e) { return fail(e); }

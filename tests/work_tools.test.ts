@@ -144,3 +144,18 @@ test('practice classes: the join code, a new class, and the anonymous overview',
   assert.match(o, /14 student\(s\), 9 active in the last 7 days/); assert.match(o, /Linear equations: 12 students, accuracy 62%, mastery 48% \(struggling 4, developing 6, secure 2\); common mistakes: sign errors \(5\)/);
   assert.match(o, /fewer than 5 students are not shown/);
 });
+
+test('what the chat changes is written to the audit log, and a failing log never stops the action', async () => {
+  const audit: string[] = [];
+  const t = Object.fromEntries(workTools({ work, audit: async (u, a, type, id, d) => { audit.push(`${u}|${a}|${type}|${id}|${JSON.stringify(d)}`); } }).map((x) => [x.definition.name, x]));
+  await t.release_task_results.execute({ assignmentId: 'a1', confirmed: true }, ctx);
+  await t.task_settings.execute({ assignmentId: 'a1', open: false, instructions: 'a long secret rewrite' }, ctx);
+  await t.create_class.execute({ name: 'S4 Biology', students: '1, A' }, ctx);
+  await t.release_exam_results.execute({ examId: 'e1', confirmed: true }, ctx);
+  assert.deepEqual(audit.map((a) => a.split('|').slice(0, 4).join('|')), ['teacher|CHAT_RELEASE_TASK_RESULTS|task|a1', 'teacher|CHAT_TASK_SETTINGS|task|a1', 'teacher|CHAT_CREATE_CLASS|class|c1', 'teacher|CHAT_RELEASE_EXAM_RESULTS|exam|e1']);
+  assert.match(audit[1], /"instructions":"\(rewritten\)"/, 'the text itself is not copied into the log'); assert.doesNotMatch(audit[1], /secret rewrite/);
+  const noisy = Object.fromEntries(workTools({ work, audit: async () => { throw new Error('log is down'); } }).map((x) => [x.definition.name, x]));
+  assert.match((await noisy.release_exam_results.execute({ examId: 'e1', confirmed: true }, ctx)).text, /Released 1 result/, 'the action still succeeds');
+  const noRelease = await t.release_task_results.execute({ assignmentId: 'a1' }, ctx);
+  assert.ok(noRelease.isError); assert.equal(audit.length, 4, 'a refused action is not logged as done');
+});

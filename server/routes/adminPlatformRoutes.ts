@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../db.js';
 import logger from '../utils/logger.js';
-import { FLAGS, flagOn, loadPlatformSettings, savePlatformSettings, settingsPatchSchema } from '../services/platform/settings.js';
+import { FLAGS, FLAG_IDS, flagOn, loadPlatformSettings, savePlatformSettings, settingsPatchSchema } from '../services/platform/settings.js';
 import { auditAction } from '../services/platform/audit.js';
 import { clientIp } from '../services/platform/security.js';
 import { usageSummary } from '../services/billing/usage.js';
@@ -39,6 +39,8 @@ router.put('/settings', wrap(async (req, res) => {
   const parsed = settingsPatchSchema.safeParse(req.body ?? {});
   if (!parsed.success) return bad(res, 400, `Not valid: ${parsed.error.issues.slice(0, 3).map((i) => `${i.path.join('.')} ${i.message}`).join('; ')}`);
   const patch = parsed.data;
+  const unknown = Object.keys(patch.flags ?? {}).filter((k) => !FLAG_IDS.includes(k));
+  if (unknown.length) return bad(res, 400, `Unknown switch: ${unknown.join(', ')}`);
   if (patch.blockedIps) {
     const mine = clientIp(req);
     if (mine && patch.blockedIps.some((b) => (b.endsWith('.') || b.endsWith(':') ? mine.startsWith(b) : mine === b))) return bad(res, 400, 'That would block your own address.');
@@ -181,7 +183,7 @@ router.post('/content/forms/:id/close', wrap(async (req, res) => {
 }));
 router.post('/content/tasks/:ownerId/:id/close', wrap(async (req, res) => {
   const svc = (await import('../services/assignments/runtime.js')).assignmentService();
-  await svc.update(String(req.params.ownerId), String(req.params.id), { open: false }).catch(() => { throw new Error('Task not found for that owner.'); });
+  try { await svc.update(String(req.params.ownerId), String(req.params.id), { open: false }); } catch { return bad(res, 404, 'Task not found for that owner.'); }
   await auditAction(adminOf(req), 'CLOSE_TASK', 'task', String(req.params.id), { owner: req.params.ownerId, reason: String(req.body?.reason ?? '').slice(0, 200) });
   res.json({ success: true });
 }));
@@ -211,7 +213,8 @@ router.delete('/organizations/:id/members/:userId', wrap(async (req, res) => {
 router.patch('/organizations/:id', wrap(async (req, res) => {
   const p = z.object({ name: z.string().trim().min(1).max(120) }).safeParse(req.body);
   if (!p.success) return bad(res, 400, 'Give the new name.');
-  await db.organization.update({ where: { id: String(req.params.id) }, data: { name: p.data.name } }).catch(() => { throw new Error('Organisation not found.'); });
+  const done = await db.organization.updateMany({ where: { id: String(req.params.id) }, data: { name: p.data.name } });
+  if (!done.count) return bad(res, 404, 'Organisation not found.');
   await auditAction(adminOf(req), 'ORG_RENAME', 'organization', String(req.params.id), { name: p.data.name });
   res.json({ success: true });
 }));
@@ -247,7 +250,8 @@ router.post('/jobs/queue/:which/:id/retry', wrap(async (req, res) => {
   res.json({ success: true, data: { jobId: job.id } });
 }));
 router.post('/jobs/failed/:id/resolve', wrap(async (req, res) => {
-  await db.failedJob.update({ where: { id: String(req.params.id) }, data: { status: 'resolved' } }).catch(() => { throw new Error('No such failed job.'); });
+  const done = await db.failedJob.updateMany({ where: { id: String(req.params.id), status: 'needs_review' }, data: { status: 'resolved' } });
+  if (!done.count) return bad(res, 404, 'No such failed job waiting for review.');
   await auditAction(adminOf(req), 'RESOLVE_FAILED_JOB', 'job', String(req.params.id), {});
   res.json({ success: true });
 }));

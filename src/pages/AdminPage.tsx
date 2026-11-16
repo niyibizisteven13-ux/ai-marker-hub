@@ -7,6 +7,13 @@ import {
 } from 'lucide-react';
 import KnowledgeExplorer from '../components/knowledge/KnowledgeExplorer';
 import BillingAdmin from '../components/admin/BillingAdmin';
+import PlatformControls from '../components/admin/PlatformControls';
+import MySebAdmin from '../components/admin/MySebAdmin';
+import ContentAdmin from '../components/admin/ContentAdmin';
+import JobsAdmin from '../components/admin/JobsAdmin';
+import SecurityAdmin from '../components/admin/SecurityAdmin';
+import AuditAdmin from '../components/admin/AuditAdmin';
+import UserDetail from '../components/admin/UserDetail';
 import { adminApi, type AdminQualitySummary } from '../api/admin';
 import { useStore } from '../store/useStore';
 import { API_BASE_URL, getAccessToken, refreshAccessToken } from '../utils/authFetch';
@@ -15,7 +22,7 @@ import { API_BASE_URL, getAccessToken, refreshAccessToken } from '../utils/authF
 type Env = 'draft' | 'testing' | 'production';
 type TabId = 'overview' | 'finetune' | 'datasets' | 'models' | 'knowledge' | 'documents' | 'playground'
   | 'review' | 'verified' | 'retrieval' | 'prompts' | 'providers' | 'analytics' | 'quality' | 'users' | 'logs' | 'settings'
-  | 'feedback' | 'communication' | 'billing';
+  | 'feedback' | 'communication' | 'billing' | 'mysebAdmin' | 'content' | 'jobs' | 'security';
 
 const DATASET_FILE_ACCEPT = '.pdf,.docx,.txt,.md,.csv,.json,.xlsx,.xls,.png,.jpg,.jpeg,.webp,.gif,.js,.ts,.tsx,.jsx,.py,.java,.kt,.cpp,.c,.h,.cs,.rs,.go,.sql,.html,.css,.yaml,.yml,.sh';
 
@@ -66,8 +73,18 @@ const NAV_CATEGORIES: NavCategory[] = [
       { id: 'feedback', label: 'Feedback & Support', icon: <MessageSquare size={16} /> },
       { id: 'billing', label: 'Upgrades & Subscriptions', icon: <ShieldCheck size={16} /> },
       { id: 'communication', label: 'Email Communication', icon: <Mail size={16} /> },
-      { id: 'logs', label: 'System Audit Logs', icon: <Activity size={16} /> },
-      { id: 'settings', label: 'Control Plane', icon: <Settings size={16} /> },
+      { id: 'logs', label: 'Audit log', icon: <Activity size={16} /> },
+    ],
+  },
+  {
+    title: 'Platform control',
+    icon: <Settings size={15} className="text-[#F2C230]" />,
+    items: [
+      { id: 'settings', label: 'Platform controls', icon: <Settings size={16} /> },
+      { id: 'mysebAdmin', label: 'MySEB (exams)', icon: <ShieldCheck size={16} /> },
+      { id: 'content', label: 'Content & organisations', icon: <FolderTree size={16} /> },
+      { id: 'jobs', label: 'Jobs & Telegram', icon: <Cpu size={16} /> },
+      { id: 'security', label: 'Security', icon: <KeyRound size={16} /> },
     ],
   },
 ];
@@ -241,6 +258,7 @@ export default function AdminPage({ onBack, initialTab = 'overview' }: { onBack:
   const [feedbackDatasetId, setFeedbackDatasetId] = useState('');
   const [feedbackCorrections, setFeedbackCorrections] = useState<Record<string, string>>({});
   const [userSearch, setUserSearch] = useState('');
+  const [userDetailId, setUserDetailId] = useState<string | null>(null);
   const [broadcastSubject, setBroadcastSubject] = useState('');
   const [broadcastText, setBroadcastText] = useState('');
   const [broadcasting, setBroadcasting] = useState(false);
@@ -2946,6 +2964,7 @@ export default function AdminPage({ onBack, initialTab = 'overview' }: { onBack:
                             </td>
                             <td className="p-4">
                               <div className="flex items-center gap-2">
+                                <button type="button" className={`${btnGhost} min-h-9 px-3 py-1.5 text-xs`} onClick={() => setUserDetailId(u.id)}>Details</button>
                                 <select
                                   className="bg-[#0B1020] text-xs font-bold text-white border border-[#2E3A63] rounded-xl px-3 py-2 cursor-pointer shadow-inner"
                                   value={u.role}
@@ -2989,56 +3008,35 @@ export default function AdminPage({ onBack, initialTab = 'overview' }: { onBack:
                   </div>
                 </Section>
               )}
+              {userDetailId && <UserDetail userId={userDetailId} notify={notify} onClose={() => setUserDetailId(null)} onChanged={() => void loadData(true)} />}
+
 
               {/* ── AUDIT LOGS TAB ── */}
-              {tab === 'logs' && (
-                <Section title="System Audit Logs" hint="Immutable database audit trail of administrative and adapter actions.">
-                  <div className={`${card} overflow-x-auto`}>
-                    <table className="w-full text-left text-sm font-mono text-xs min-w-[760px]">
-                      <thead className="bg-[#141C36] text-[#9AA6C9] uppercase border-b border-[#263052] font-bold">
-                        <tr>
-                          <th className="p-4">Timestamp</th>
-                          <th className="p-4">Actor ID</th>
-                          <th className="p-4">Action</th>
-                          <th className="p-4">Resource Type</th>
-                          <th className="p-4">Details</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-[#263052]">
-                        {auditLogs.map((l) => (
-                          <tr key={l.id} className="hover:bg-[#18213D]/60 transition-colors">
-                            <td className="p-4 text-[#6C789E] whitespace-nowrap">{new Date(l.createdAt).toLocaleString()}</td>
-                            <td className="p-4 text-[#7CC4EE] truncate max-w-[130px]">{l.actorId}</td>
-                            <td className="p-4 text-white font-bold truncate max-w-[180px]">{l.action}</td>
-                            <td className="p-4 text-[#9AA6C9] truncate max-w-[130px]">{l.resourceType}</td>
-                            <td className="p-4 text-[#6C789E] truncate max-w-[280px]" title={l.details}>{l.details}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </Section>
-              )}
+              {tab === 'logs' && <AuditAdmin notify={notify} />}
 
               {/* ── SETTINGS TAB ── */}
               {tab === 'settings' && (
-                <Section title="Control Plane Settings" hint="Database synchronization and system control actions.">
-                  <div className={`${card} p-8 max-w-xl space-y-6 min-w-0`}>
-                    <p className="text-sm text-[#9AA6C9] leading-relaxed">
-                      Bwenge AI Admin Console is connected to live Forms, Submissions, Student Scripts, Knowledge Chunks, Datasets, and prompt adapters.
-                    </p>
-                    <button
-                      onClick={async () => {
-                        await loadData();
-                        notify('Synchronized all tables with live database');
-                      }}
-                      className={btnPrimary + ' w-full py-3.5'}
-                    >
-                      <RefreshCw size={16} /> Force Full Database Sync
-                    </button>
-                  </div>
-                </Section>
+                <div className="space-y-5">
+                  <PlatformControls notify={notify} />
+                  <Section title="Database" hint="Re-reads every table shown in this console from the live database.">
+                    <div className={`${card} p-5 max-w-xl`}>
+                      <button
+                        onClick={async () => {
+                          await loadData();
+                          notify('Synchronized all tables with live database');
+                        }}
+                        className={btnPrimary + ' w-full py-3.5'}
+                      >
+                        <RefreshCw size={16} /> Force Full Database Sync
+                      </button>
+                    </div>
+                  </Section>
+                </div>
               )}
+              {tab === 'mysebAdmin' && <MySebAdmin notify={notify} />}
+              {tab === 'content' && <ContentAdmin notify={notify} />}
+              {tab === 'jobs' && <JobsAdmin notify={notify} />}
+              {tab === 'security' && <SecurityAdmin notify={notify} />}
             </>
           )}
         </main>
