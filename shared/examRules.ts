@@ -74,7 +74,7 @@ export function keepMysebLink(next: unknown, prev: unknown): ExamSettings {
 }
 
 /** A detected face as the detector reports it: a box in 0..1 of the picture. */
-export interface FaceBox { x: number; y: number; w: number; h: number }
+export interface FaceBox { x: number; y: number; w: number; h: number; /** How far the face is turned from the camera: 0 straight on, about ±0.5 and beyond when it looks well to one side. Absent when the detector gave no landmarks. */ yaw?: number }
 export type FrameStatus = 'ok' | 'no_face' | 'partial' | 'multiple';
 
 /**

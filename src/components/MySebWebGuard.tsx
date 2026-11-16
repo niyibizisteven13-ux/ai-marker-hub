@@ -14,7 +14,8 @@ import { cameraErrorMessage } from '../utils/cameraErrors';
  * camera / screen sharing of the live room works too (it reuses this camera).
  */
 type Phase = 'off' | 'active' | 'paused' | 'ended' | 'lost';
-type Cam = 'none' | 'ask' | 'loading' | 'setup' | 'ok' | 'denied';
+type Cam = 'none' | 'ask' | 'loading' | 'setup' | 'id' | 'ok' | 'denied';
+const ASIDE_YAW = 0.5;           // a face turned this far from the camera counts as looking aside (a number for the lecturer, never a penalty)
 const BAD_KEY = (e: KeyboardEvent) => {
   const k = e.key.toLowerCase(); const ctrl = e.ctrlKey || e.metaKey;
   if (k === 'f12' || (ctrl && e.shiftKey && ['i', 'j', 'c'].includes(k))) return 'devtools';
@@ -23,10 +24,11 @@ const BAD_KEY = (e: KeyboardEvent) => {
 };
 const GRACE_MS = 5000;           // a face may be out of the picture this long (looking down to write) before the test ends
 const LEFT = ['background', 'visibility_hidden', 'blur', 'fullscreen_exit'];
-const STRICT_REASONS = ['face_missing', 'camera_off', ...LEFT];
+const STRICT_REASONS = ['face_missing', 'camera_off', 'multiple_faces', ...LEFT];
 const WHY: Record<string, string> = {
   face_missing: 'Your face left the camera.', camera_off: 'Your camera was turned off.', background: 'You left the test page or closed it.',
   visibility_hidden: 'You left the test page (another app or tab).', blur: 'You left the test page.', fullscreen_exit: 'You left full screen.',
+  multiple_faces: 'More than one person was in the camera.', id_refused: 'Your student card was not accepted.',
   teacher: 'Your lecturer ended your test.', time_up: 'Your time is up.', exam_ended: 'The test has ended.',
 };
 
@@ -36,10 +38,15 @@ export default function MySebWebGuard() {
   const [strict, setStrict] = useState(false);
   const [cam, setCam] = useState<Cam>('none');
   const [camWhy, setCamWhy] = useState('');
+  const [honest, setHonest] = useState(false);              // the student accepted the honesty statement
+  const [idSent, setIdSent] = useState(false);               // the student card picture is with the lecturer, waiting
+  const [multi, setMulti] = useState<number | 'warn' | null>(null);   // several faces: seconds left (disqualify rule) or just a warning
   const [warn, setWarn] = useState<number | null>(null);      // seconds left before a missing face ends the test
   const [weak, setWeak] = useState(false);                    // the connection is weak: the page keeps trying, nobody is rejected for it
   const videoRef = useRef<HTMLVideoElement>(null);
   const startCamRef = useRef<() => void>(() => undefined);
+  const sendIdRef = useRef<() => void>(() => undefined);
+  const idStatusRef = useRef<(s: string) => void>(() => undefined);   // the heartbeat tells the page what the lecturer decided about the student card
 
   useEffect(() => {
     let stopped = false; let hb = 0; let hidden = 0; let blur = 0; let faceTimer = 0;
@@ -56,11 +63,14 @@ export default function MySebWebGuard() {
       window.dispatchEvent(new Event('myseb-web-active'));
       const strictOn = !!me.strict;
       setStrict(strictOn);
+      const multiRule: string = me.multi ?? 'warn';
+      const needId = !!me.idCheck && me.idStatus !== 'approved';
 
-      let ended = false;
+      let ended = false; let canReturn = false; let asideMs = 0;
       const apply = (status: string, why?: string | null, reload = false) => {
         const next: Phase = status === 'IN_EXAM' ? 'active' : status === 'ENDED' ? 'ended' : 'paused';
-        if (next === 'ended') { ended = true; setReason(why ?? null); }
+        if (next === 'active' && ended) { window.location.reload(); return; }       // the lecturer let this student back in: start fresh (camera and all)
+        if (next === 'ended') { ended = true; setReason(why ?? null); canReturn = !!why && ['face_missing', 'camera_off', 'multiple_faces', 'background', 'visibility_hidden', 'blur', 'fullscreen_exit'].includes(why); }
         setPhase((cur) => { if (reload && cur === 'paused' && next === 'active') window.setTimeout(() => window.location.reload(), 50); return next; });
       };
       apply(me.status, me.reason);
@@ -81,17 +91,18 @@ export default function MySebWebGuard() {
         }
       };
       const beat = async () => {
-        if (beating || stopped || ended) return; beating = true;
+        if (beating || stopped || (ended && !canReturn)) return; beating = true;
         const t0 = performance.now();
-        const r = await post('heartbeat');
+        const r = await post('heartbeat', strictOn && !ended ? { aside: Math.round(asideMs / 1000) } : {});
         beating = false;
         if (!r) { misses++; if (misses >= 2) setWeak(true); gap = Math.min(15000, gap + 2500); }
         else {
           misses = 0; const rtt = performance.now() - t0; setWeak(rtt > 3000); gap = rtt > 3000 ? 10000 : 5000;
-          if (r.status === 401 || r.status === 403) setPhase('lost'); else if (r.json?.status) apply(r.json.status, r.json.reason, true);
+          if (r.status === 401 || r.status === 403) setPhase('lost'); else if (r.json?.status) { apply(r.json.status, r.json.reason, true); if (r.json.idStatus) idStatusRef.current(r.json.idStatus); }
+          if (ended && canReturn) gap = 6000;                       // waiting to see whether the lecturer lets this student back in
           void flush();
         }
-        if (!stopped && !ended) hb = window.setTimeout(beat, gap);
+        if (!stopped && (!ended || canReturn)) hb = window.setTimeout(beat, gap);
       };
       hb = window.setTimeout(beat, 1000);
       on(window, 'online', () => { setWeak(false); void flush(); void beat(); });
@@ -138,18 +149,37 @@ export default function MySebWebGuard() {
           let det: Awaited<ReturnType<typeof createFaceDetector>> | null = null;
           try { det = await Promise.race([createFaceDetector(), new Promise<null>((r) => window.setTimeout(() => r(null), 90_000))]); } catch { det = null; }
           if (stopped || ended) { det?.close(); return; }
-          if (!det) { void report('face_check_unavailable'); setCam('ok'); return; }
+          // The camera is on. Before the test opens: the student card (if the lecturer asked), then the quiz. The face rules start when it opens.
+          let gateOpen = false;
+          const openGate = () => { gateOpen = true; setCam('ok'); watch.reset(); };
+          const afterFace = () => { if (needId) setCam('id'); else openGate(); };
+          idStatusRef.current = (st) => { if (st === 'approved' && !gateOpen) openGate(); };
+          sendIdRef.current = async () => {
+            const v = videoRef.current; if (!v || !v.videoWidth) return;
+            const c = document.createElement('canvas'); c.width = 640; c.height = Math.round(640 * v.videoHeight / v.videoWidth);
+            c.getContext('2d')?.drawImage(v, 0, 0, c.width, c.height);          // not mirrored: the card must read the right way round
+            const r = await post('id-check', { image: c.toDataURL('image/jpeg', 0.7) });
+            if (r && r.status === 200) setIdSent(true); else setCamWhy('The picture could not be sent. Check your connection and try again.');
+          };
+          const watch = new FaceWatch(GRACE_MS); let okSince: number | null = null; let ready = false; let multiSince: number | null = null; let multiReported = false;
+          if (!det) { void report('face_check_unavailable'); afterFace(); return; }
           detector = det;
           setCam('setup');
-          const watch = new FaceWatch(GRACE_MS); let okSince: number | null = null; let ready = false;
           faceTimer = window.setInterval(() => {
             const v = videoRef.current; if (!v || !det || ended) return;
-            const status = frameStatus(det.detect(v, performance.now()));
-            if (!ready) { if (status === 'ok') { okSince ??= Date.now(); if (Date.now() - okSince >= 1500) { ready = true; watch.reset(); setCam('ok'); } } else okSince = null; return; }
-            if (document.hidden) return;                          // leaving the page is handled above
+            const faces = det.detect(v, performance.now()); const status = frameStatus(faces);
+            if (!ready) { if (status === 'ok') { okSince ??= Date.now(); if (Date.now() - okSince >= 1500) { ready = true; afterFace(); } } else okSince = null; return; }
+            if (!gateOpen || document.hidden) return;             // waiting for the card to be approved, or the page is hidden (leaving is handled above)
+            if (faces.length === 1 && faces[0].yaw !== undefined && Math.abs(faces[0].yaw) > ASIDE_YAW) asideMs += 500;   // looking well to one side: counted for the lecturer
             const { state, events } = watch.feed(status, Date.now());
             setWarn(state.state === 'warning' && state.secondsLeft < Math.ceil(GRACE_MS / 1000) ? state.secondsLeft : null);
-            for (const e of events) if (e.type === 'face_lost') void report('face_missing', { seconds: e.seconds }); else if (e.type === 'multiple_faces') void report('multiple_faces');
+            for (const e of events) if (e.type === 'face_lost') void report('face_missing', { seconds: e.seconds });
+            // More than one person in the camera: off, a warning (recorded), or a countdown then disqualified, as the lecturer chose.
+            if (status === 'multiple' && multiRule !== 'off') {
+              multiSince ??= Date.now();
+              if (multiRule === 'warn') { setMulti('warn'); if (!multiReported) { multiReported = true; void report('multiple_faces'); } }
+              else { const left = Math.ceil((GRACE_MS - (Date.now() - multiSince)) / 1000); setMulti(Math.max(0, left)); if (left <= 0 && !multiReported) { multiReported = true; void report('multiple_faces'); } }
+            } else { multiSince = null; multiReported = false; setMulti(null); }
           }, 500);
         };
       }
@@ -176,6 +206,11 @@ export default function MySebWebGuard() {
       {strict && phase !== 'ended' && (
         <video ref={videoRef} muted playsInline autoPlay aria-label="Your camera" className="fixed bottom-3 right-3 z-[110] h-24 w-[72px] -scale-x-100 rounded-lg border-2 border-white/70 bg-slate-900 object-cover shadow-lg" />
       )}
+      {strict && phase === 'active' && cam === 'ok' && multi !== null && (
+        <div role="alert" className="fixed inset-x-3 top-24 z-[105] rounded-xl bg-rose-700 p-3 text-center text-sm font-bold text-white shadow-lg">
+          {multi === 'warn' ? 'More than one person is in the camera. Only you may be in view. This is recorded for your lecturer.' : `More than one person is in the camera: your test ends in ${multi} s`}
+        </div>
+      )}
       {strict && phase === 'active' && warn !== null && cam === 'ok' && (
         <div role="alert" className="fixed inset-x-3 top-10 z-[105] rounded-xl bg-rose-700 p-3 text-center text-sm font-bold text-white shadow-lg">Put your face back in the camera: your test ends in {warn} s</div>
       )}
@@ -184,21 +219,31 @@ export default function MySebWebGuard() {
           <div className="max-w-sm space-y-3">
             {needCam ? (
               <>
-                <p className="text-xl font-bold">{cam === 'setup' ? 'Show your face to begin' : 'Turn on your camera to begin'}</p>
+                <p className="text-xl font-bold">{cam === 'id' ? 'Show your student card' : cam === 'setup' ? 'Show your face to begin' : 'Turn on your camera to begin'}</p>
                 <p className="text-sm text-slate-300">
-                  {cam === 'loading' ? 'Getting ready… the first time this loads a face check (about 10 MB). It stays on your phone: nothing is recorded or sent.'
+                  {cam === 'id' ? (idSent ? 'Your lecturer is looking at your card. Stay on this page: the test opens when they accept it.' : 'Hold your student card in front of the camera so your name and photo can be read, then press the button. Your lecturer sees this one picture. It is deleted as soon as they decide.')
+                    : cam === 'loading' ? 'Getting ready… the first time this loads a face check (about 10 MB). It stays on your phone: nothing is recorded or sent.'
                     : cam === 'setup' ? 'Hold your phone steady and put your face in the picture in the corner. The test starts when you are seen.'
                     : cam === 'denied' ? camWhy || 'The camera is blocked. Allow it in your browser settings, then try again.'
                     : 'This test needs your camera. Your face must stay in it the whole time. Nothing is recorded or sent. If you leave the page, close it or take your face away for more than a few seconds, your test ends and you cannot start again.'}
                 </p>
-                {(cam === 'ask' || cam === 'denied') && <button type="button" onClick={() => startCamRef.current()} className="min-h-11 rounded-xl bg-white px-5 text-sm font-bold text-slate-900">Turn on my camera</button>}
+                {(cam === 'ask' || cam === 'denied') && (
+                  <>
+                    <label className="flex cursor-pointer items-start gap-2 text-left text-xs text-slate-300">
+                      <input type="checkbox" checked={honest} onChange={(e) => setHonest(e.target.checked)} className="mt-0.5 h-5 w-5 shrink-0" />
+                      <span>I will do this test alone, with no other person, app, device or notes. I understand that leaving the page or breaking a rule disqualifies me, and that my lecturer can see this.</span>
+                    </label>
+                    <button type="button" disabled={!honest} onClick={() => startCamRef.current()} className="min-h-11 rounded-xl bg-white px-5 text-sm font-bold text-slate-900 disabled:opacity-40">Turn on my camera</button>
+                  </>
+                )}
+                {cam === 'id' && !idSent && <button type="button" onClick={() => sendIdRef.current()} className="min-h-11 rounded-xl bg-white px-5 text-sm font-bold text-slate-900">Send the picture of my card</button>}
               </>
             ) : (
               <>
                 <p className="text-xl font-bold">{phase === 'ended' ? (cheat ? 'You are disqualified from this quiz' : 'Your test has ended') : phase === 'lost' ? 'The connection to your test was lost' : 'Your test is paused'}</p>
                 <p className="text-sm text-slate-300">
                   {phase === 'ended' ? (cheat
-                    ? `${LEFT.includes(reason!) ? 'You opened another app or another tab, or left the test page.' : WHY[reason!] ?? ''} This is treated as cheating, so you are disqualified and cannot start this quiz again. Your lecturer has been told.`
+                    ? `${LEFT.includes(reason!) ? 'You opened another app or another tab, or left the test page.' : WHY[reason!] ?? ''} This is treated as cheating, so you are disqualified and cannot start this quiz again unless your lecturer lets you back in. Your lecturer has been told. If this is a mistake, tell them: this page continues by itself if they allow it.`
                     : `${reason && WHY[reason] ? `${WHY[reason]} ` : ''}You can close this page.`)
                     : phase === 'lost' ? 'Reload this page. If it does not come back, tell your lecturer.' : 'You left the test page, so your lecturer was told. Wait for them to let you continue.'}
                 </p>

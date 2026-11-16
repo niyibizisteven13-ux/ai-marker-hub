@@ -11,7 +11,7 @@ export const VIOLATION_TYPES = new Set([
   'face_missing', 'camera_off', 'multiple_faces', 'face_check_unavailable',
 ]);
 /** In a browser with strict rules (the default), these end the test on the spot: nothing is paused for the lecturer to forgive. */
-const STRICT_END = new Set(['face_missing', 'camera_off']);
+const STRICT_END = new Set(['face_missing', 'camera_off']);   // 'multiple_faces' ends the test only when the lecturer chose it (multi_face = 'end')
 /** Violations that mean "the student was not looking at the exam": exam.leave_action decides what happens. */
 const LEAVE_LIKE = new Set(['leave', 'blur', 'background', 'visibility_hidden', 'fullscreen_exit', 'split_screen', 'screen_recording', 'extra_display', 'forbidden_app', 'screen_share_stopped']);
 
@@ -34,7 +34,7 @@ export async function authSession(req, { allowCookie = false } = {}) {
   if (!key || key.length > 100) return { error: 'missing' };
 
   const { rows } = await q(
-    `SELECT s.*, e.title, e.exam_url, e.require_myseb, e.allow_extension, e.allow_web, e.web_strict, e.leave_action, e.status AS exam_status
+    `SELECT s.*, e.title, e.exam_url, e.require_myseb, e.allow_extension, e.allow_web, e.web_strict, e.multi_face, e.id_check, e.leave_action, e.status AS exam_status
        FROM exam_sessions s JOIN exams e ON e.id = s.exam_id WHERE s.token_hash = $1`, [tokenHash(key)]);
   const row = rows[0];
   if (!row) return { error: 'invalid' };
@@ -62,7 +62,7 @@ export async function recordViolation(session, exam, type, detail = {}) {
   await q('INSERT INTO violations (session_id, exam_id, type, detail) VALUES ($1,$2,$3,$4)', [session.id, session.exam_id, type, json]);
   await q('UPDATE exam_sessions SET violation_count = violation_count + 1 WHERE id = $1', [session.id]);
   const strict = session.client_type === 'web' && exam.web_strict !== false;
-  if (session.status === 'ENDED' || !LEAVE_LIKE.has(type) && type !== 'heartbeat_lost' && !(strict && STRICT_END.has(type))) { notify(session.exam_id, 'violation'); return; }
+  if (session.status === 'ENDED' || !LEAVE_LIKE.has(type) && type !== 'heartbeat_lost' && !(strict && (STRICT_END.has(type) || (type === 'multiple_faces' && exam.multi_face === 'end')))) { notify(session.exam_id, 'violation'); return; }
   let action = exam.leave_action;
   // A weak connection is not a reason to reject anyone: a lost heartbeat still follows the lecturer's own leave rule.
   if (strict && type !== 'heartbeat_lost') action = 'end';

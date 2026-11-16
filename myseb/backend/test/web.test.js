@@ -109,3 +109,66 @@ test('strict browser rules: leaving, a lost face or a closed camera ends the tes
   assert.equal((await viol(soft, 'visibility_hidden')).json.status, 'IN_EXAM', 'record only');
   assert.equal((await viol(soft, 'face_missing')).json.status, 'IN_EXAM');
 });
+
+test('more than one face, the card check, looking aside and letting a student back in', async () => {
+  const exam = (await call('/api/exams', { method: 'POST', headers: T, body: { title: 'Phase 2', leaveAction: 'record' } })).json;
+  await call(`/api/exams/${exam.id}`, { method: 'PATCH', headers: T, body: { allowWeb: true } });
+  const code = (await call(`/api/exams/${exam.id}/generate-code`, { method: 'POST', headers: T })).json;
+  const join = (name) => call('/api/verify-code', { method: 'POST', headers: { 'User-Agent': SAFARI }, body: { code: code.code, studentName: name, deviceId: `p2-${name}-1234567`, clientType: 'web' } });
+  const H = (j) => ({ Cookie: j.cookie.split(';')[0], 'User-Agent': SAFARI });
+  const viol = (j, type) => call('/api/violation', { method: 'POST', headers: H(j), body: { type, detail: {} } });
+  const mon = async () => (await call(`/api/exams/${exam.id}/monitor`, { headers: T })).json;
+  const patch = (body) => call(`/api/exams/${exam.id}`, { method: 'PATCH', headers: T, body });
+
+  // several faces: warn is the default (recorded, not ended); end disqualifies; off records nothing special
+  const a = await join('Amy');
+  assert.equal((await call('/api/web/me', { headers: H(a) })).json.multi, 'warn');
+  assert.equal((await viol(a, 'multiple_faces')).json.status, 'IN_EXAM');
+  await patch({ multiFace: 'end' });
+  const b = await join('Ben');
+  assert.equal((await call('/api/web/me', { headers: H(b) })).json.multi, 'end');
+  assert.equal((await viol(b, 'multiple_faces')).json.status, 'ENDED');
+  assert.equal((await patch({ multiFace: 'nonsense' })).status, 400, 'an unknown value changes nothing');
+  assert.equal((await mon()).exam.multi_face, 'end');
+
+  // looking aside: a number for the lecturer, written by the heartbeat
+  await call('/api/heartbeat', { method: 'POST', headers: H(a), body: { aside: 42 } });
+  await new Promise((r) => setTimeout(r, 1700));   // the room's shared list is rebuilt at least every 1.5 s
+  assert.equal((await mon()).students.find((s) => s.student_name === 'Amy').aside_seconds, 42);
+
+  // letting a disqualified student back in: only for rule breaks, recorded, and the student's page sees it on its next heartbeat
+  const benId = (await mon()).students.find((s) => s.student_name === 'Ben').id;
+  assert.equal((await call('/api/heartbeat', { method: 'POST', headers: H(b) })).json.status, 'ENDED');
+  assert.equal((await call(`/api/sessions/${benId}/reinstate`, { method: 'POST', headers: T })).status, 200);
+  assert.equal((await call('/api/heartbeat', { method: 'POST', headers: H(b) })).json.status, 'IN_EXAM');
+  const ben = (await mon()).students.find((s) => s.student_name === 'Ben'); assert.equal(ben.reinstated_count, 1);
+  assert.ok((await call(`/api/sessions/${benId}/violations`, { headers: T })).json.some((v) => v.type === 'reinstated'), 'it is in the log');
+  assert.equal((await call(`/api/sessions/${benId}/reinstate`, { method: 'POST', headers: T })).status, 409, 'not ended: nothing to undo');
+  await call(`/api/sessions/${benId}/end`, { method: 'POST', headers: T });
+  assert.equal((await call(`/api/sessions/${benId}/reinstate`, { method: 'POST', headers: T })).status, 409, 'a lecturer who ended a student is not undone');
+
+  // the card check: off by default; on, the picture waits for the lecturer and is deleted at the decision
+  const JPG = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBD';
+  assert.equal((await call('/api/id-check', { method: 'POST', headers: H(a), body: { image: JPG } })).status, 400, 'no card check on this test');
+  await patch({ idCheck: true });
+  const c = await join('Cora');
+  const me = (await call('/api/web/me', { headers: H(c) })).json; assert.equal(me.idCheck, true); assert.equal(me.idStatus, 'none');
+  assert.equal((await call('/api/id-check', { method: 'POST', headers: H(c), body: { image: 'not a picture' } })).status, 400);
+  assert.equal((await call('/api/id-check', { method: 'POST', headers: H(c), body: { image: 'data:image/png;base64,AAAA' } })).status, 400, 'JPEG only');
+  assert.equal((await call('/api/id-check', { method: 'POST', headers: H(c), body: { image: JPG } })).json.idStatus, 'pending');
+  assert.equal((await call('/api/heartbeat', { method: 'POST', headers: H(c) })).json.idStatus, 'pending');
+  assert.equal((await call(`/api/exams/${exam.id}/id-checks`)).status, 401, 'only the lecturer sees the card');
+  const waiting = (await call(`/api/exams/${exam.id}/id-checks`, { headers: T })).json.pending; assert.equal(waiting.length, 1); assert.equal(waiting[0].image, JPG);
+  const coraId = waiting[0].id;
+  assert.equal((await call(`/api/sessions/${coraId}/id-decision`, { method: 'POST', headers: T, body: { allow: true } })).json.ok, true);
+  assert.equal((await call('/api/heartbeat', { method: 'POST', headers: H(c) })).json.idStatus, 'approved');
+  assert.equal((await call(`/api/exams/${exam.id}/id-checks`, { headers: T })).json.pending.length, 0);
+  const { rows } = await pool.query('SELECT id_image FROM exam_sessions WHERE id=$1', [coraId]); assert.equal(rows[0].id_image, null, 'the picture is gone once decided');
+  // refused: the student is out
+  const d = await join('Dan');
+  await call('/api/id-check', { method: 'POST', headers: H(d), body: { image: JPG } });
+  const danId = (await call(`/api/exams/${exam.id}/id-checks`, { headers: T })).json.pending[0].id;
+  await call(`/api/sessions/${danId}/id-decision`, { method: 'POST', headers: T, body: { allow: false } });
+  assert.equal((await call('/api/heartbeat', { method: 'POST', headers: H(d) })).json.status, 'ENDED');
+  assert.equal((await mon()).students.find((s) => s.student_name === 'Dan').end_reason, 'id_refused');
+});
