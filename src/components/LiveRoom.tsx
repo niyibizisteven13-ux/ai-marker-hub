@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { authFetch } from '../utils/authFetch';
+import MySebPayPanel, { type Payment } from './MySebPayPanel';
 
 /**
  * The live room: every student in a MySEB test or hand-in on one screen. A tile per student shows the camera picture (if you
@@ -262,6 +263,7 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
   const [query, setQuery] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [pay, setPay] = useState<Payment | null>(null);
   const [saved, setSaved] = useState<{ name: string; at: string | null; rows: Array<{ q: string; a: string }> } | null>(null);
   const [log, setLog] = useState<{ name: string; rows: Array<{ id: number; type: string; created_at: string }> } | null>(null);
   const [copied, setCopied] = useState(false);
@@ -282,7 +284,7 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
   const call = useCallback(async (path: string, method = 'GET', body?: unknown) => {
     const r = await authFetch(`${base}${path}`, { method, ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}) });
     const b = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(b.error || 'Something went wrong.');
+    if (!r.ok) throw Object.assign(new Error(b.error || 'Something went wrong.'), { payment: b.payment as Payment | undefined, code: b.code as string | undefined });
     return b;
   }, [base]);
 
@@ -300,7 +302,10 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
     const a = document.createElement('a'); a.href = url; a.download = `${room?.exam?.title ?? 'Test'} MySEB report.xlsx`; a.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 2000);
   });
-  const makeCode = () => act(async () => { setCode(await call('/code', 'POST')); setShowCode(true); });
+  // MySEB is sold: without a plan or a test credit the server answers 402 with how to pay, and the payment panel opens instead of an error.
+  const makeCode = () => act(async () => {
+    try { setCode(await call('/code', 'POST')); setShowCode(true); setPay(null); } catch (e) { const p = (e as { payment?: Payment }).payment; if (p) setPay(p); else throw e; }
+  });
   const students = room?.students ?? [];
   // Student cards waiting for a look (browsers, when the card check is on). Fetched only while someone is waiting; each picture is deleted at the decision.
   const [idq, setIdq] = useState<Array<{ id: string; student_name: string; image: string }>>([]);
@@ -618,6 +623,7 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
         );
       })()}
 
+      {pay && <MySebPayPanel payment={pay} onClose={() => setPay(null)} onAccess={() => { setPay(null); void makeCode(); }} />}
       {saved && (
         <div role="dialog" aria-label="Saved answers" className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-3 sm:items-center" onClick={() => setSaved(null)}>
           <div className="max-h-[85dvh] w-full max-w-xl overflow-auto rounded-2xl border border-white/10 bg-slate-900 p-5 text-slate-100 shadow-2xl" onClick={(e) => e.stopPropagation()}>

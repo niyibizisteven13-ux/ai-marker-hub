@@ -8,7 +8,7 @@ const userIdOf = (req: Request): string => (req as any).user?.userId;
 const run = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'no-store');
   fn(req, res).catch((err) => {
-    if (err instanceof MySebError) return res.status(err.status).json({ code: err.code, error: err.message });
+    if (err instanceof MySebError) return res.status(err.status).json({ code: err.code, error: err.message, ...(err.data ? { payment: err.data } : {}) });
     logger.error('[myseb] request failed', { errorType: (err as Error)?.name });
     res.status(500).json({ code: 'INTERNAL_ERROR', error: 'The request could not be completed.' });
   });
