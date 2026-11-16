@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { recordAuthFailure } from '../services/platform/security.js';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../db.js';
@@ -301,6 +302,7 @@ export async function emailVerify(req: Request, res: Response) {
     const isValid = await verifyEmailCode(normalized, code);
 
     if (!isValid) {
+      void recordAuthFailure(req, 'code_invalid', { email: normalized });
       return res.status(400).json({ error: { code: 'code_invalid', message: 'That code is incorrect or expired.' } });
     }
 
@@ -341,6 +343,7 @@ export async function emailVerify(req: Request, res: Response) {
       });
     } else {
       if (user.disabledAt) {
+        void recordAuthFailure(req, 'disabled_account', { email: normalized, userId: user.id });
         return res.status(400).json({ error: { code: 'code_invalid', message: 'That code is incorrect or expired.' } });
       }
 

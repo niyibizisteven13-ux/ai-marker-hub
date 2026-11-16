@@ -1,5 +1,6 @@
 import { prisma } from '../../db.js';
 import { PLANS, planFor, type PlanId, type PlanInfo } from './plans.js';
+import { platformSettings } from '../platform/settings.js';
 
 /**
  * Storage sold with the plans: every file a user keeps (chat uploads, task files and the work students hand in
@@ -15,7 +16,9 @@ export interface StorageState { usedBytes: number; files: number; limitBytes: nu
 export async function storageState(userId: string): Promise<StorageState> {
   const plan = await planFor(userId);
   const agg = await db.fileRecord.aggregate({ where: { userId }, _sum: { size: true }, _count: { _all: true } }).catch(() => null);
-  return { usedBytes: Number(agg?._sum?.size ?? 0), files: Number(agg?._count?._all ?? 0), limitBytes: plan.limits.storageMb * MB, plan };
+  // The administrator can give one person extra room on top of their plan (Admin → Users).
+  const extraMb = platformSettings().storageOverridesMb[userId] ?? 0;
+  return { usedBytes: Number(agg?._sum?.size ?? 0), files: Number(agg?._count?._all ?? 0), limitBytes: (plan.limits.storageMb + extraMb) * MB, plan };
 }
 
 export const formatSize = (bytes: number) => (bytes >= 1024 * MB ? `${(bytes / (1024 * MB)).toFixed(bytes >= 10 * 1024 * MB ? 0 : 1)} GB` : `${Math.max(bytes ? 1 : 0, Math.round(bytes / MB))} MB`);

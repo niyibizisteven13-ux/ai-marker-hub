@@ -6,6 +6,7 @@ import { newCode, parseCode, codeHash, secretHash, tokenHash, newToken, newSecre
 import { authSession, isIosDevice, markAlive, recordViolation, VIOLATION_TYPES } from './sessions.js';
 import { liveStats, cleanSignal, dropSignals, forgetAllLive, forgetLive, getAside, setAside, setIdPic, getIdPic, dropIdPic, getLive, liveChanged, picturesWanted, pullSignal, pushSignal, reportEverySeconds, saveLive, wantPictures } from './live.js';
 import { notify, roomVersion, subscribe } from './events.js';
+import { getControls, overview as adminOverview, retentionDays, saveControls } from './admin.js';
 
 export const api = express.Router();
 const wrap = (fn) => (req, res, next) => fn(req, res, next).catch(next);
@@ -35,6 +36,18 @@ function requireTeacher(req, res, next) {
 }
 const teacherLimiter = rateLimit({ windowMs: 60_000, max: 30, keyFn: (r) => 'tk:' + r.ip });
 api.use('/teacher/login', teacherLimiter);
+/* The platform administrator's view and switches (service key only; bwenge relays them from Admin → MySEB). */
+api.get('/admin/overview', requireTeacher, wrap(async (_req, res) => { res.set('Cache-Control', 'no-store'); res.json(await adminOverview()); }));
+api.put('/admin/controls', requireTeacher, wrap(async (req, res) => {
+  const b = req.body || {};
+  const patch = {};
+  if (typeof b.enabled === 'boolean') patch.enabled = b.enabled;
+  if (typeof b.browserMode === 'boolean') patch.browserMode = b.browserMode;
+  if (b.retentionDays === null || (Number.isInteger(b.retentionDays) && b.retentionDays >= 7 && b.retentionDays <= 3650)) patch.retentionDays = b.retentionDays;
+  if (!Object.keys(patch).length) return res.status(400).json({ error: 'nothing to change' });
+  res.json(await saveControls(patch));
+}));
+api.post('/admin/purge', requireTeacher, wrap(async (_req, res) => { const { purgeOld } = await import('./sessions.js'); res.json({ ...(await purgeOld()), days: retentionDays() }); }));
 api.post('/teacher/login', requireTeacher, (_req, res) => res.json({ ok: true }));
 
 api.post('/exams', requireTeacher, wrap(async (req, res) => {
@@ -348,6 +361,9 @@ api.post('/verify-code',
     const row = rows[0];
     if (!row || row.revoked_at || new Date(row.expires_at) < new Date() || row.status !== 'active')
       return bad(404, 'That code is not valid or has expired.');
+    // The platform administrator can pause new sign-ins, or browser mode alone (students already inside a test are not affected).
+    if (!getControls().enabled) return res.status(503).json({ error: 'MySEB is paused by the platform administrator. Try again later.' });
+    if (clientType === 'web' && !getControls().browserMode) return res.status(403).json({ error: 'Browser mode is turned off for now. Use the MySEB app.' });
     if (clientType === 'web' && !row.allow_web)
       return res.status(403).json({ error: 'Your lecturer has not allowed the browser for this test. Use the MySEB app.' });
     if (clientType === 'web' && row.web_devices === 'ios' && !isIosDevice(req.get('user-agent') || '', b.touch === true))

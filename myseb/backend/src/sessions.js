@@ -3,6 +3,7 @@ import { config, sha } from './config.js';
 import { tokenHash } from './security.js';
 import { forgetLive, sweepLive, sweepSignals } from './live.js';
 import { notify } from './events.js';
+import { retentionDays } from './admin.js';
 
 export const VIOLATION_TYPES = new Set([
   'leave', 'blur', 'background', 'visibility_hidden', 'fullscreen_exit', 'split_screen', 'screen_recording',
@@ -119,7 +120,7 @@ export const _sha = sha;
  * Privacy: a finished exam's students, their violation logs and its codes are deleted after RETENTION_DAYS (default 90).
  * Nothing about a student is kept longer than the lecturer can need it for an appeal.
  */
-export async function purgeOld(days = config.retentionDays) {
+export async function purgeOld(days = retentionDays()) {
   if (!(days > 0)) return { sessions: 0, exams: 0 };
   const sessions = await q(`DELETE FROM exam_sessions WHERE ended_at IS NOT NULL AND ended_at < now() - make_interval(days => $1)`, [days]);
   const exams = await q(`DELETE FROM exams WHERE status = 'ended' AND ends_at < now() - make_interval(days => $1)`, [days]);

@@ -25,6 +25,11 @@ const work: NonNullable<ToolServices['work']> = {
   exportCourse: async () => ({ name: 'S4 Biology gradebook.xlsx', data: Buffer.from('book') }),
   examResults: async () => ({ title: 'Mock exam', rows: [{ candidateId: 'S001', candidateName: 'Ann', total: 40, maxTotal: 50, percent: 80, released: false, openFlags: 1, lowConfidence: 2 }, { candidateId: 'S002', candidateName: null, total: 20, maxTotal: 50, percent: 40, released: true, openFlags: 0, lowConfidence: 0 }] }),
   releaseExam: async () => ({ released: 1, skipped: [{ candidateId: 'S003', reason: 'question 2 has no mark' }] }),
+  examCandidate: async () => null,
+  changeExamMark: async () => undefined,
+  practiceClasses: async () => [{ id: 'p1', name: 'S3 Algebra', code: 'K7QX2', students: 14 }],
+  createPracticeClass: async (_u, name) => { log.push(`practice ${name}`); return { id: 'p2', name, code: 'M3ZT9' }; },
+  practiceClassOverview: async () => ({ class: { name: 'S3 Algebra', code: 'K7QX2' }, students: 14, active7d: 9, topics: [{ topic: 'Linear equations', learners: 12, accuracy: 0.62, meanMastery: 0.48, bands: { struggling: 4, developing: 6, secure: 2 }, misconceptions: [{ tag: 'sign errors', learners: 5 }] }], note: '2 topic(s) practised by fewer than 5 students are not shown, to keep results anonymous.' }),
 };
 const tools = Object.fromEntries(workTools({ work }).map((t) => [t.definition.name, t]));
 const saved: Array<{ name: string; kind: string }> = [];
@@ -32,7 +37,7 @@ const ctx = { userId: 'teacher', files: { put: async (f: any) => { saved.push({ 
 
 test('no work tools without the services', () => {
   assert.equal(workTools({}).length, 0);
-  assert.equal(Object.keys(tools).length, 11);
+  assert.equal(Object.keys(tools).length, 16);
 });
 
 test('the marks in plain words: who is marked, released, late, still being marked', async () => {
@@ -112,4 +117,45 @@ test('the instructions send the chat to do the work, and ask before anything stu
   const on = buildCapabilitiesPrompt({ tools: Object.keys(tools) });
   assert.match(on, /Doing the work in the chat/); assert.match(on, /mark_task/); assert.match(on, /wait for a clear yes/);
   assert.doesNotMatch(buildCapabilitiesPrompt({ tools: ['create_document'] }), /Doing the work in the chat/);
+});
+
+test('one candidate question by question, and changing a mark needs a reason', async () => {
+  const w2: NonNullable<ToolServices['work']> = {
+    ...work,
+    examCandidate: async (_u, _e, c) => (c === 'nobody' ? null : { candidateId: 'S001', candidateName: 'Ann', total: 40, maxTotal: 50, percent: 80, passed: true, questions: [{ number: '1', maxMarks: 10, marks: 10, outcome: 'full', flags: 0 }, { number: '2', maxMarks: 10, marks: 4, outcome: 'partial', flags: 1 }, { number: '3', maxMarks: 5, marks: null, outcome: 'unmarked', flags: 0 }] }),
+    changeExamMark: async (_u, e, c, q, m, r) => { log.push(`mark ${e}|${c}|${q}|${m}|${r}`); },
+  };
+  const t2 = Object.fromEntries(workTools({ work: w2 }).map((t) => [t.definition.name, t]));
+  const c = (await t2.exam_candidate.execute({ examId: 'e1', candidate: 'S001' }, ctx)).text;
+  assert.match(c, /Ann \(S001\): 40\/50 \(80%\), passed/); assert.match(c, /Question 2: 4\/10 \(partial\), 1 flagged/); assert.match(c, /Question 3: not marked/);
+  assert.match((await t2.exam_candidate.execute({ examId: 'e1', candidate: 'nobody' }, ctx)).text, /no marked script/);
+  log.length = 0;
+  assert.ok((await t2.change_exam_mark.execute({ examId: 'e1', candidate: 'S001', question: '2', marks: 6, reason: '  ' }, ctx)).isError, 'a reason is needed');
+  assert.deepEqual(log, []);
+  assert.match((await t2.change_exam_mark.execute({ examId: 'e1', candidate: 'S001', question: '2', marks: 6, reason: 'the working was right' }, ctx)).text, /Question 2 for S001 is now 6 mark/);
+  assert.deepEqual(log, ['mark e1|S001|2|6|the working was right']);
+});
+
+test('practice classes: the join code, a new class, and the anonymous overview', async () => {
+  assert.match((await tools.list_practice_classes.execute({}, ctx)).text, /S3 Algebra: join code K7QX2, 14 student/);
+  log.length = 0;
+  assert.match((await tools.create_practice_class.execute({ name: 'S4 Geometry' }, ctx)).text, /code M3ZT9/); assert.deepEqual(log, ['practice S4 Geometry']);
+  const o = (await tools.practice_class_overview.execute({ classId: 'p1' }, ctx)).text;
+  assert.match(o, /14 student\(s\), 9 active in the last 7 days/); assert.match(o, /Linear equations: 12 students, accuracy 62%, mastery 48% \(struggling 4, developing 6, secure 2\); common mistakes: sign errors \(5\)/);
+  assert.match(o, /fewer than 5 students are not shown/);
+});
+
+test('what the chat changes is written to the audit log, and a failing log never stops the action', async () => {
+  const audit: string[] = [];
+  const t = Object.fromEntries(workTools({ work, audit: async (u, a, type, id, d) => { audit.push(`${u}|${a}|${type}|${id}|${JSON.stringify(d)}`); } }).map((x) => [x.definition.name, x]));
+  await t.release_task_results.execute({ assignmentId: 'a1', confirmed: true }, ctx);
+  await t.task_settings.execute({ assignmentId: 'a1', open: false, instructions: 'a long secret rewrite' }, ctx);
+  await t.create_class.execute({ name: 'S4 Biology', students: '1, A' }, ctx);
+  await t.release_exam_results.execute({ examId: 'e1', confirmed: true }, ctx);
+  assert.deepEqual(audit.map((a) => a.split('|').slice(0, 4).join('|')), ['teacher|CHAT_RELEASE_TASK_RESULTS|task|a1', 'teacher|CHAT_TASK_SETTINGS|task|a1', 'teacher|CHAT_CREATE_CLASS|class|c1', 'teacher|CHAT_RELEASE_EXAM_RESULTS|exam|e1']);
+  assert.match(audit[1], /"instructions":"\(rewritten\)"/, 'the text itself is not copied into the log'); assert.doesNotMatch(audit[1], /secret rewrite/);
+  const noisy = Object.fromEntries(workTools({ work, audit: async () => { throw new Error('log is down'); } }).map((x) => [x.definition.name, x]));
+  assert.match((await noisy.release_exam_results.execute({ examId: 'e1', confirmed: true }, ctx)).text, /Released 1 result/, 'the action still succeeds');
+  const noRelease = await t.release_task_results.execute({ assignmentId: 'a1' }, ctx);
+  assert.ok(noRelease.isError); assert.equal(audit.length, 4, 'a refused action is not logged as done');
 });

@@ -23,6 +23,7 @@ const NOT_RULES = new Set(['teacher', 'time_up', 'exam_ended', 'student', 'stude
 export function platformTools(services: ToolServices): Tool[] {
   const pf = services.platform;
   if (!pf) return [];
+  const note = (userId: string, action: string, id: string, details: unknown) => services.audit?.(userId, `CHAT_${action}`, 'live_room', id, details).catch(() => undefined);
 
   const rooms: Tool = {
     definition: {
@@ -80,6 +81,7 @@ export function platformTools(services: ToolServices): Tool[] {
       const i = input as { kind: 'form' | 'task'; id: string };
       try {
         const c = await pf.roomCode(ctx.userId, i.kind, String(i.id));
+        await note(ctx.userId, 'LIVE_ROOM_CODE', String(i.id), { kind: i.kind });
         return { text: `Code: ${c.display} (valid until ${String(c.expiresAt).slice(0, 16).replace('T', ' ')} UTC).\nLink for students: ${c.joinUrl}\nLive room: ${roomLink(i.kind, i.id)}\nGive the user the code and the link. The same link works on every device. iPhones and iPads start in the browser only if browsers are allowed for this test (live_room_settings, allowBrowsers). A new code does not stop the old one working.` };
       } catch (e) { return err(`Could not make a code: ${problem(e)}`); }
     },
@@ -106,6 +108,7 @@ export function platformTools(services: ToolServices): Tool[] {
       if (!Object.values(patch).some((v) => v !== undefined)) return err('Say what to change (allowBrowsers, strictBrowsers, faces, studentCard, browserDevices or ifStudentLeaves).');
       try {
         await pf.roomSettings(ctx.userId, i.kind, String(i.id), patch);
+        await note(ctx.userId, 'LIVE_ROOM_SETTINGS', String(i.id), { kind: i.kind, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) });
         const done = Object.entries(patch).filter(([, v]) => v !== undefined).map(([k, v]) => `${k}: ${v}`).join(', ');
         return { text: `Changed: ${done}. Tell the user what changed in plain words. Browser rules only apply when browsers are allowed.` };
       } catch (e) { return err(`Could not change the settings: ${problem(e)}`); }
@@ -138,6 +141,7 @@ export function platformTools(services: ToolServices): Tool[] {
         if (i.action === 'end' && i.confirmed !== true) return err(`Ending ${s.student_name}'s test cannot be undone. Ask the user to confirm, then call again with confirmed true.`);
         if (i.action === 'let_back_in' && !(s.status === 'ENDED' && s.end_reason && !NOT_RULES.has(s.end_reason))) return err(`${s.student_name} was not disqualified for a rule (status ${s.status}${s.end_reason ? `, ${why(s.end_reason)}` : ''}), so there is nothing to undo.`);
         await pf.roomStudent(ctx.userId, i.kind, String(i.id), s.id, i.action);
+        await note(ctx.userId, `LIVE_ROOM_${i.action.toUpperCase()}`, String(i.id), { kind: i.kind, student: s.student_name, session: s.id });
         return { text: `Done: ${i.action.replace(/_/g, ' ')} for ${s.student_name}.${i.action === 'let_back_in' ? ' It is written in their log, and their page restarts by itself.' : ''}` };
       } catch (e) { return err(`Could not do that: ${problem(e)}`); }
     },

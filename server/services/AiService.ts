@@ -9,6 +9,7 @@ import { MemoryService } from './MemoryService.js';
 import { toKnowledgePassage } from './knowledge/citations.js';
 import { asksAboutDatasets } from './knowledge/published.js';
 import { needsResearch } from './ai/research.js';
+import { needsPlatformTools } from './ai/platformIntent.js';
 import { recordUsage } from './billing/usage.js';
 import { retrieveKnowledgeChunks } from './KnowledgeRetrievalService.js';
 import { ExecutionSandbox } from './ExecutionSandbox.js';
@@ -358,6 +359,7 @@ export const bwengeAgent = createAiAgent({
       list: async (userId) => (await import('./assignments/runtime.js')).assignmentService().list(userId),
       get: async (userId, id) => (await import('./assignments/runtime.js')).assignmentService().get(userId, id),
     },
+    audit: async (userId, action, resourceType, resourceId, details) => { await (await import('./platform/audit.js')).auditAction(userId, action, resourceType, resourceId, details); },
     // Doing the work in the chat: marking a task, releasing results, classes, marked exams and Excel files (lazy imports, like the services above).
     work: {
       taskResults: async (userId, id) => {
@@ -393,6 +395,15 @@ export const bwengeAgent = createAiAgent({
         const e: any = await svc.load(userId, examId);
         return { title: e.title, rows: svc.reviewList(e).map((r: any) => ({ candidateId: r.candidateId, candidateName: r.candidateName ?? null, total: r.total, maxTotal: r.maxTotal, percent: r.percent, released: !!r.released, openFlags: r.openFlags ?? 0, lowConfidence: r.lowConfidence ?? 0 })) };
       },
+      practiceClasses: async (userId) => (await (await import('./learning/practice.js')).myClasses(userId)).teaching,
+      createPracticeClass: async (userId, name) => { const c: any = await (await import('./learning/practice.js')).createClass(userId, name); return { id: c.id, name: c.name, code: c.code }; },
+      practiceClassOverview: async (userId, id) => (await import('./learning/practice.js')).classDashboard(userId, id) as any,
+      examCandidate: async (userId, examId, candidate) => {
+        const v: any = await (await import('./educationRuntime.js')).examService.candidateView(userId, examId, candidate);
+        const s = v.summary; if (!s) return null;
+        return { candidateId: s.candidateId, candidateName: s.candidateName ?? null, total: s.total, maxTotal: s.maxTotal, percent: s.percent, passed: s.passed, questions: s.questions.map((q: any) => ({ number: q.number, maxMarks: q.maxMarks, marks: q.marks, outcome: q.outcome, flags: q.flags?.length ?? 0 })) };
+      },
+      changeExamMark: async (userId, examId, candidate, question, marks, reason) => { await (await import('./educationRuntime.js')).examService.overrideMark(userId, examId, { submission: candidate, question }, { marks, reason }); },
       releaseExam: async (userId, examId) => {
         const r: any = await (await import('./educationRuntime.js')).examService.release(userId, examId, 'all');
         return { released: Array.isArray(r.released) ? r.released.length : Number(r.released) || 0, skipped: r.skipped ?? [] };
@@ -1019,7 +1030,7 @@ export class AiService {
     const memoryService = MemoryService.getInstance();
     const currentQuery = extractPlainText(options.messages[options.messages.length - 1]?.content || '');
     const dataTurnP = options.extractSchema ? Promise.resolve(false)
-      : assignmentTurn || needsResearch(userText) ? Promise.resolve(true) : asksAboutDatasets(userText, options.userId).catch(() => false);
+      : assignmentTurn || needsPlatformTools(userText) || needsResearch(userText) ? Promise.resolve(true) : asksAboutDatasets(userText, options.userId).catch(() => false);
     // Memory across chats (PRO): save what the user states or asks to keep (facts and the episode trace are saved
     // in the background), then recall what is relevant.
     const memoryP = (async () => {

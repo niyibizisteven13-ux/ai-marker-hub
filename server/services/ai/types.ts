@@ -160,6 +160,8 @@ export interface ToolServices {
     }>;
     markedExams(userId: string): Promise<Array<{ examId: string; title: string; updatedAt: string; candidates: number; marked: number; released: number; needsReview: number }>>;
   };
+  /** Records what the chat changed on someone's behalf in the audit log (action names start with CHAT_). */
+  audit?: (userId: string, action: string, resourceType: string, resourceId: string | null, details?: unknown) => Promise<void>;
   /** Doing the work in the chat: marking a task's hand-ins, releasing results, classes, exam results and Excel files. Every call is scoped to the signed-in user. */
   work?: {
     taskResults(userId: string, id: string): Promise<{
@@ -176,6 +178,11 @@ export interface ToolServices {
     exportCourse(userId: string, id: string): Promise<{ name: string; data: Buffer }>;
     examResults(userId: string, examId: string): Promise<{ title: string; rows: Array<{ candidateId: string; candidateName: string | null; total: number; maxTotal: number; percent: number; released: boolean; openFlags: number; lowConfidence: number }> }>;
     releaseExam(userId: string, examId: string): Promise<{ released: number; skipped: Array<{ candidateId: string; reason: string }> }>;
+    practiceClasses(userId: string): Promise<Array<{ id: string; name: string; code: string; students: number }>>;
+    createPracticeClass(userId: string, name: string): Promise<{ id: string; name: string; code: string }>;
+    practiceClassOverview(userId: string, id: string): Promise<{ class: { name: string; code: string }; students: number; active7d: number | null; topics: Array<{ topic: string; learners: number; accuracy: number | null; meanMastery: number; bands: { struggling: number; developing: number; secure: number }; misconceptions: Array<{ tag: string; learners: number }> }>; note: string | null }>;
+    examCandidate(userId: string, examId: string, candidate: string): Promise<{ candidateId: string; candidateName: string | null; total: number; maxTotal: number; percent: number; passed: boolean | null; questions: Array<{ number: string; maxMarks: number; marks: number | null; outcome: string; flags: number }> } | null>;
+    changeExamMark(userId: string, examId: string, candidate: string, question: string, marks: number, reason: string): Promise<void>;
   };
   /** Universal output engine (server/services/outputs). */
   outputs?: {

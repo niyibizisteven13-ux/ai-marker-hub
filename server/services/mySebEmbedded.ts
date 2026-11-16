@@ -27,6 +27,10 @@ const ready = async (port: number, ms = 20_000) => {
   return false;
 };
 
+/** How the embedded MySEB process is doing, for the administrator (null when MySEB runs elsewhere). */
+let snapshot: (() => Record<string, unknown>) | null = null;
+export const embeddedStatus = () => (snapshot ? snapshot() : null);
+
 export interface EmbeddedHandle { port: number; stop(): void }
 
 export async function mountEmbeddedMySeb(app: Express, sitePort: number): Promise<EmbeddedHandle | null> {
@@ -74,6 +78,7 @@ export async function mountEmbeddedMySeb(app: Express, sitePort: number): Promis
   // /myseb/_status is answered here (not by MySEB), so it still works while MySEB is down: it says whether it runs and how it last stopped.
   let inFlight = 0, shed = 0;
   const MAX_INFLIGHT = Number(e.MYSEB_MAX_INFLIGHT || 1500);
+  snapshot = () => ({ ...state, inFlight, shed, maxInFlight: MAX_INFLIGHT, port });
   app.get('/myseb/_status', (_req: Request, res: Response) => { res.set('Cache-Control', 'no-store').json({ ...state, inFlight, shed }); });
   app.use('/myseb', (req: Request, res: Response) => {
     // Too many requests at once (an overload): answer "busy, try again" straight away instead of queueing without limit until memory runs out.

@@ -14,6 +14,7 @@ const STATE: Record<string, string> = { queued: 'waiting to be marked', marking:
 export function workTools(services: ToolServices): Tool[] {
   const w = services.work;
   if (!w) return [];
+  const note = (userId: string, action: string, type: string, id: string, details: unknown) => services.audit?.(userId, `CHAT_${action}`, type, id, details).catch(() => undefined);
   const TASK = { type: 'string', description: 'The task id (from list_assignments).' } as const;
 
   const results: Tool = {
@@ -46,6 +47,7 @@ export function workTools(services: ToolServices): Tool[] {
       if (!Object.values(patch).some((v) => v !== undefined)) return err('Say what to change: open, dueAt, title or instructions.');
       try {
         const a = await w.taskSettings(ctx.userId, String(i.assignmentId), patch);
+        await note(ctx.userId, 'TASK_SETTINGS', 'task', String(i.assignmentId), { open: patch.open, dueAt: patch.dueAt, title: patch.title, instructions: patch.instructions !== undefined ? '(rewritten)' : undefined });
         return { text: `Task "${a.title}" is now ${a.open ? 'open' : 'closed'} for hand-ins${a.dueAt ? `, due ${a.dueAt.slice(0, 16).replace('T', ' ')} UTC` : ', with no due date'}.` };
       } catch (e) { return err(`Could not change the task: ${problem(e)}`); }
     },
@@ -65,7 +67,7 @@ export function workTools(services: ToolServices): Tool[] {
       try {
         const r = await w.markTask(ctx.userId, String(i.assignmentId), { scheme: i.scheme?.trim() || undefined, confirm: i.confirm === true });
         switch (r.kind) {
-          case 'started': return { text: `Marking started for ${r.count ?? 'all'} hand-in(s). It runs in the background and each paper is marked in about a minute. Tell the user, then call task_results in a little while to report the marks.` };
+          case 'started': await note(ctx.userId, 'MARK_TASK', 'task', String(i.assignmentId), { handIns: r.count ?? null, newScheme: !!i.scheme }); return { text: `Marking started for ${r.count ?? 'all'} hand-in(s). It runs in the background and each paper is marked in about a minute. Tell the user, then call task_results in a little while to report the marks.` };
           case 'already_running': return { text: 'Marking is already running for this task. Call task_results to see how far it is.' };
           case 'nothing_to_mark': return { text: 'Everything handed in so far is already marked. Call task_results to show the marks.' };
           case 'no_papers': return { text: 'Nobody has handed in yet, so there is nothing to mark.' };
@@ -82,7 +84,7 @@ export function workTools(services: ToolServices): Tool[] {
     definition: {
       name: 'release_task_results',
       description: "Show marked results to students (each student sees only their own, through their private result link). This is visible to students, so ask the user first and call it with confirmed true only after they said yes. Release everyone, or only the named students (by registration number).",
-      parameters: { type: 'object', required: ['assignmentId', 'confirmed'], properties: { assignmentId: TASK, confirmed: { type: 'boolean' }, studentIds: { type: 'array', items: { type: 'string' }, description: 'Registration numbers; leave out to release everyone marked.' } } },
+      parameters: { type: 'object', required: ['assignmentId'], properties: { assignmentId: TASK, confirmed: { type: 'boolean', description: 'true only after the user said yes.' }, studentIds: { type: 'array', items: { type: 'string' }, description: 'Registration numbers; leave out to release everyone marked.' } } },
     },
     async execute(input, ctx) {
       const i = input as { assignmentId: string; confirmed?: boolean; studentIds?: string[] };
@@ -96,6 +98,7 @@ export function workTools(services: ToolServices): Tool[] {
           if (!ids.length) return err('None of those registration numbers handed in to this task.');
         }
         const r = await w.releaseTask(ctx.userId, String(i.assignmentId), ids);
+        await note(ctx.userId, 'RELEASE_TASK_RESULTS', 'task', String(i.assignmentId), { released: r.released, some: ids ? ids.length : 'all' });
         return { text: `Released ${r.released} result(s) to students.${r.skipped.length ? ` Not released: ${r.skipped.slice(0, 10).map((s) => `${s.studentName} (${s.reason})`).join('; ')}.` : ''}` };
       } catch (e) { return err(`Could not release the results: ${problem(e)}`); }
     },
@@ -126,6 +129,7 @@ export function workTools(services: ToolServices): Tool[] {
       const i = input as { name: string; code?: string; term?: string; students?: string };
       try {
         const c = await w.createCourse(ctx.userId, { name: i.name, code: i.code, term: i.term, students: i.students });
+        await note(ctx.userId, 'CREATE_CLASS', 'class', c.id, { name: c.name, students: c.students });
         return { text: `Class "${c.name}" made with ${c.students} student(s) (courseId ${c.id}). Next the user can link tasks and quizzes to it (link_class_work) to see marks by student.` };
       } catch (e) { return err(`Could not make the class: ${problem(e)}`); }
     },
@@ -141,6 +145,7 @@ export function workTools(services: ToolServices): Tool[] {
       const i = input as { courseId: string; students: string };
       try {
         const r = await w.addCourseStudents(ctx.userId, String(i.courseId), String(i.students));
+        await note(ctx.userId, 'ADD_CLASS_STUDENTS', 'class', String(i.courseId), r);
         return { text: `Added ${r.added} student(s), updated ${r.updated}.` };
       } catch (e) { return err(`Could not add the students: ${problem(e)}`); }
     },
@@ -156,6 +161,7 @@ export function workTools(services: ToolServices): Tool[] {
       const i = input as { courseId: string; items: Array<{ kind: 'task' | 'quiz'; id: string }> };
       try {
         await w.linkCourseWork(ctx.userId, String(i.courseId), i.items ?? []);
+        await note(ctx.userId, 'LINK_CLASS_WORK', 'class', String(i.courseId), { items: (i.items ?? []).length });
         return { text: `The class now counts ${(i.items ?? []).length} task(s) and quiz(zes). Use course_overview to see the marks.` };
       } catch (e) { return err(`Could not link the work: ${problem(e)}`); }
     },
@@ -192,21 +198,101 @@ export function workTools(services: ToolServices): Tool[] {
     },
   };
 
+  const practiceList: Tool = {
+    definition: {
+      name: 'list_practice_classes',
+      description: "The user's practice classes (Learn): classes where students join with a code and practise topics; the lecturer sees an anonymous overview. Call it for 'my practice classes', 'what is the class code for students to join'.",
+      parameters: { type: 'object', properties: {} },
+    },
+    async execute(_i, ctx) {
+      try {
+        const rows = await w.practiceClasses(ctx.userId);
+        if (!rows.length) return { text: 'The user has no practice classes yet. create_practice_class makes one and gives the code students join with.' };
+        return { text: untrusted('PRACTICE_CLASSES', rows.map((r) => `- ${r.name}: join code ${r.code}, ${r.students} student(s) (classId ${r.id})`).join('\n')) };
+      } catch (e) { return err(`Could not list the practice classes: ${problem(e)}`); }
+    },
+  };
+
+  const practiceCreate: Tool = {
+    definition: {
+      name: 'create_practice_class',
+      description: 'Make a practice class and get the code students use to join it (Learn → classes). Call it when the user wants students to practise topics with adaptive questions and see how they are doing.',
+      parameters: { type: 'object', required: ['name'], properties: { name: { type: 'string' } } },
+    },
+    async execute(input, ctx) {
+      try {
+        const c = await w.createPracticeClass(ctx.userId, String((input as { name: string }).name));
+        await note(ctx.userId, 'CREATE_PRACTICE_CLASS', 'practice_class', c.id, { name: c.name });
+        return { text: `Practice class "${c.name}" made. Students join with the code ${c.code} (Learn → Join a class). Give the user the code. classId ${c.id}.` };
+      } catch (e) { return err(`Could not make the class: ${problem(e)}`); }
+    },
+  };
+
+  const practiceOverview: Tool = {
+    definition: {
+      name: 'practice_class_overview',
+      description: "How a practice class is doing: how many students were active this week and, for each topic with enough students, accuracy, mastery bands (struggling, developing, secure) and shared misconceptions. Results are anonymous by design (small groups are hidden): never try to identify students from it.",
+      parameters: { type: 'object', required: ['classId'], properties: { classId: { type: 'string' } } },
+    },
+    async execute(input, ctx) {
+      try {
+        const d = await w.practiceClassOverview(ctx.userId, String((input as { classId: string }).classId));
+        const lines = d.topics.map((t) => `- ${t.topic}: ${t.learners} students, accuracy ${t.accuracy === null ? 'n/a' : `${Math.round(t.accuracy * 100)}%`}, mastery ${Math.round(t.meanMastery * 100)}% (struggling ${t.bands.struggling}, developing ${t.bands.developing}, secure ${t.bands.secure})${t.misconceptions.length ? `; common mistakes: ${t.misconceptions.map((m) => `${m.tag} (${m.learners})`).join(', ')}` : ''}`);
+        return { text: `${d.class.name} (code ${d.class.code}): ${d.students} student(s)${d.active7d !== null ? `, ${d.active7d} active in the last 7 days` : ''}.\n${untrusted('PRACTICE_OVERVIEW', lines.join('\n') || 'No topic has enough students yet.')}${d.note ? `\n${d.note}` : ''}` };
+      } catch (e) { return err(`Could not read the class: ${problem(e)}`); }
+    },
+  };
+
+  const examCand: Tool = {
+    definition: {
+      name: 'exam_candidate',
+      description: "One candidate of a marked exam, question by question: marks out of the maximum, whether it is full, partial or zero, and how many questions are flagged for a look. Use it for 'why did Ann get 40', 'show me Ann's marks per question'. The candidate is the registration number or the name as in exam_results.",
+      parameters: { type: 'object', required: ['examId', 'candidate'], properties: { examId: { type: 'string' }, candidate: { type: 'string' } } },
+    },
+    async execute(input, ctx) {
+      const i = input as { examId: string; candidate: string };
+      try {
+        const c = await w.examCandidate(ctx.userId, String(i.examId), String(i.candidate));
+        if (!c) return { text: 'That candidate has no marked script yet.' };
+        const rows = c.questions.map((q) => `- Question ${q.number}: ${q.marks === null ? 'not marked' : `${q.marks}/${q.maxMarks}`} (${q.outcome})${q.flags ? `, ${q.flags} flagged for a look` : ''}`);
+        return { text: `${c.candidateName ?? c.candidateId} (${c.candidateId}): ${c.total}/${c.maxTotal} (${pct(c.percent)})${c.passed === null ? '' : c.passed ? ', passed' : ', not passed'}.\n${untrusted('CANDIDATE', rows.join('\n'))}` };
+      } catch (e) { return err(`Could not read the candidate: ${problem(e)}`); }
+    },
+  };
+
+  const changeMark: Tool = {
+    definition: {
+      name: 'change_exam_mark',
+      description: "Change one mark on a marked exam, with a reason (kept in the record). Use it when the lecturer says a mark should be different ('give Ann 4 for question 3, the working was right'). It cannot be undone by the chat, so say what you will change and call it only after the user asked for exactly that.",
+      parameters: { type: 'object', required: ['examId', 'candidate', 'question', 'marks', 'reason'], properties: { examId: { type: 'string' }, candidate: { type: 'string' }, question: { type: 'string', description: 'The question number, as in exam_candidate.' }, marks: { type: 'number' }, reason: { type: 'string', description: "Why, in the lecturer's words." } } },
+    },
+    async execute(input, ctx) {
+      const i = input as { examId: string; candidate: string; question: string; marks: number; reason: string };
+      if (!String(i.reason ?? '').trim()) return err('A reason is needed: ask the user why the mark changes.');
+      try {
+        await w.changeExamMark(ctx.userId, String(i.examId), String(i.candidate), String(i.question), Number(i.marks), String(i.reason).trim());
+        await note(ctx.userId, 'CHANGE_EXAM_MARK', 'exam', String(i.examId), { candidate: i.candidate, question: i.question, marks: i.marks, reason: String(i.reason).trim().slice(0, 300) });
+        return { text: `Question ${i.question} for ${i.candidate} is now ${i.marks} mark(s). The reason is in the record. Use exam_candidate to show the new total.` };
+      } catch (e) { return err(`Could not change the mark: ${problem(e)}`); }
+    },
+  };
+
   const releaseExam: Tool = {
     definition: {
       name: 'release_exam_results',
       description: "Release a marked exam set's results so students can see them. Visible to students: ask first and call it with confirmed true only after the user said yes. Candidates with an unmarked question are skipped and listed.",
-      parameters: { type: 'object', required: ['examId', 'confirmed'], properties: { examId: { type: 'string' }, confirmed: { type: 'boolean' } } },
+      parameters: { type: 'object', required: ['examId'], properties: { examId: { type: 'string' }, confirmed: { type: 'boolean', description: 'true only after the user said yes.' } } },
     },
     async execute(input, ctx) {
       const i = input as { examId: string; confirmed?: boolean };
       if (i.confirmed !== true) return err('Releasing shows the results to students. Ask the user to confirm, then call again with confirmed true.');
       try {
         const r = await w.releaseExam(ctx.userId, String(i.examId));
+        await note(ctx.userId, 'RELEASE_EXAM_RESULTS', 'exam', String(i.examId), { released: r.released, skipped: r.skipped.length });
         return { text: `Released ${r.released} result(s).${r.skipped.length ? ` Skipped: ${r.skipped.slice(0, 10).map((s) => `${s.candidateId} (${s.reason})`).join('; ')}.` : ''}` };
       } catch (e) { return err(`Could not release the results: ${problem(e)}`); }
     },
   };
 
-  return [results, settings, mark, release, exportTask, createClass, addStudents, link, exportClass, examRes, releaseExam];
+  return [results, settings, mark, release, exportTask, createClass, addStudents, link, exportClass, practiceList, practiceCreate, practiceOverview, examRes, examCand, changeMark, releaseExam];
 }

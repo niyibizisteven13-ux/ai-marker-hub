@@ -5,6 +5,7 @@ import { prisma } from '../db.js';
 import { getJwtSecret } from '../auth/secrets.js';
 import { normalizeExam } from '../../shared/examRules.js';
 import { assignmentService } from './assignments/runtime.js';
+import { flagOn } from './platform/settings.js';
 // The same guard MySEB ships for external exam sites (myseb/backend/src/remoteGuard.js).
 import { remoteMySebGuard } from '../../myseb/backend/src/remoteGuard.js';
 
@@ -159,6 +160,7 @@ async function ensureMysebExam(t: MySebTarget): Promise<string> {
 }
 
 export async function generateCode(load: TargetLoader) {
+  if (!flagOn('myseb.enabled')) throw new MySebError('MySEB is paused by the platform administrator. Try again later.', 503, 'MYSEB_PAUSED');
   const examId = await ensureMysebExam(await load());
   const r = await mysebFetch(`/exams/${examId}/generate-code`, { method: 'POST' });
   // The exam secret is for per-code gating; bwenge uses the service key, so it is not passed on to the browser.

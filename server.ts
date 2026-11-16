@@ -100,6 +100,11 @@ import memoryRoutes from './server/routes/memoryRoutes.js';
 import learnRoutes from './server/routes/learnRoutes.js';
 import billingRoutes, { momoCallbackRouter } from './server/routes/billingRoutes.js';
 import adminBillingRoutes from './server/routes/adminBillingRoutes.js';
+import adminPlatformRoutes from './server/routes/adminPlatformRoutes.js';
+import adminMySebRoutes from './server/routes/adminMySebRoutes.js';
+import { startPlatformSettings } from './server/services/platform/settings.js';
+import { platformGate, platformStatus } from './server/services/platform/gate.js';
+import { startMySebSync } from './server/services/mySebAdmin.js';
 import { startBillingJobs } from './server/services/billing/payments.js';
 import feedbackRoutes from './server/routes/feedbackRoutes.ts';
 import chatSseRoutes from './server/routes/chatSseRoutes.js';
@@ -394,6 +399,10 @@ app.get('/api/health', async (_req, res) => {
   }
 });
 
+// The administrator's platform controls (Admin → Platform controls): blocked addresses and maintenance mode, before any work is done.
+app.use('/api', platformGate);
+app.get('/api/platform/status', platformStatus);
+
 // Global rate limiting restored — this was commented out, which meant
 // every route below (including the most expensive one, /api/ai/chat) had
 // no request-volume protection beyond whatever requireAuth incidentally
@@ -445,6 +454,8 @@ app.use('/api/files', (req, res, next) => (req.method === 'GET' && req.get('auth
 app.use('/api/admin/knowledge', requireAuth, requireRole('ADMIN'), knowledgeAdminRouter);
 app.use('/api/knowledge', requireAuth, knowledgeSourcesRouter);
 app.use('/api/curation', requireAuth, curationViewRouter);
+app.use('/api/admin/platform', requireAuth, requireRole('ADMIN'), adminPlatformRoutes);
+app.use('/api/admin/myseb', requireAuth, requireRole('ADMIN'), adminMySebRoutes);
 app.use('/api/admin', requireAuth, requireRole('ADMIN'), adminRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/ollama', requireAuth, ollamaRoutes);
@@ -2969,6 +2980,8 @@ async function startServer() {
     getRedis();
     listenForGuardChanges();
     // Recover persisted background jobs and start periodic cleanup of expired jobs/artifacts.
+    startPlatformSettings();
+    startMySebSync();
     startEducationRuntime().catch((err) => logger.error('Background job runtime failed to start', { errorType: err?.name }));
     // Mobile Money: confirm pending payments (missed callbacks) and send renewal reminders (primary only).
     if (isPrimary()) startBillingJobs();
