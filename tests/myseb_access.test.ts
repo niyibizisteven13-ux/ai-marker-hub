@@ -35,7 +35,7 @@ app.use('/api/myseb-access', as, lecturerRouter); app.use('/api/admin/myseb-acce
 const server = app.listen(0); const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 const admin = `adm-${randomUUID().slice(0, 8)}`; const lect = `lec-${randomUUID().slice(0, 8)}`; const other = `oth-${randomUUID().slice(0, 8)}`;
 for (const [id, role] of [[admin, 'ADMIN'], [lect, 'INSTRUCTOR'], [other, 'INSTRUCTOR']] as const) await db.user.create({ data: { id, email: `${id}@test.local`, name: `Name ${id}`, passwordHash: 'x', role } });
-baseTest.after(async () => { await S.savePaymentConfig({ monthUsd: 5, testRwf: 1500, momoCode: '2191184', momoName: 'Niyibizi Steven', whatsapp: '' }, admin).catch(() => undefined); settings.__setPlatformSettingsForTests(settings.DEFAULT_SETTINGS); server.close(); fake.close(); });
+baseTest.after(async () => { await S.savePaymentConfig({ monthUsd: 5, testRwf: 1500, momoCode: '2191184', momoName: 'Niyibizi Steven', whatsapp: '250799691108' }, admin).catch(() => undefined); settings.__setPlatformSettingsForTests(settings.DEFAULT_SETTINGS); server.close(); fake.close(); });
 const call = async (p: string, method = 'GET', body?: unknown, who: string | null = lect) => {
   const r = await fetch(`${base}${p}`, { method, headers: { 'Content-Type': 'application/json', ...(who ? { 'x-test-user': who } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
   return { status: r.status, json: await r.json().catch(() => ({})) };
@@ -44,8 +44,10 @@ const A = '/api/admin/myseb-access'; const L = '/api/myseb-access';
 const target = (ownerId: string, ref: string) => async () => ({ ownerId, kind: 'form' as const, ref, title: 'Biology', url: 'https://www.bwenge.space/forms/x', mysebExamId: randomUUID(), leaveAction: 'record' as const, minutes: 45, async saveExamId() {} });
 
 test('the price and where to pay are the ones you gave, and the month is shown in RWF too', async () => {
+  await db.appSetting.deleteMany({ where: { key: 'myseb-payment' } });   // nothing set yet: the defaults
   const cfg = await S.paymentConfig();
-  assert.deepEqual({ ...cfg, whatsapp: '' }, { monthUsd: 5, testRwf: 1500, momoCode: '2191184', momoName: 'Niyibizi Steven', whatsapp: '' });
+  assert.deepEqual(cfg, { monthUsd: 5, testRwf: 1500, momoCode: '2191184', momoName: 'Niyibizi Steven', whatsapp: '250799691108' }, 'the Mobile Money code and the WhatsApp number are there from the start');
+  assert.match(S.paymentInfo(cfg).whatsappLink!, /^https:\/\/wa\.me\/250799691108\?text=/);
   assert.equal(S.monthRwf({ ...cfg, monthUsd: 5 }) % 100, 0); assert.ok(S.monthRwf(cfg) > 6000 && S.monthRwf(cfg) < 9000);
   const info = S.paymentInfo({ ...cfg, whatsapp: '250788123456' }, { email: 'a@b.co' });
   assert.match(info.whatsappLink!, /^https:\/\/wa\.me\/250788123456\?text=/); assert.match(decodeURIComponent(info.whatsappLink!), /a@b\.co/);

@@ -9,6 +9,10 @@ import { OwnedRecordStore } from '../server/services/storage/ownedRecordStore.js
 import { AssignmentError, createAssignmentService, type AssignmentFiles, type AssignmentRecord } from '../server/services/assignments/service.js';
 import { setAssignmentService } from '../server/services/assignments/runtime.js';
 
+// MySEB is a paid service (see tests/myseb_access.test.ts); these tests are about the task mechanics, so charging is switched off here.
+const platformSettings = await import('../server/services/platform/settings.js');
+platformSettings.__setPlatformSettingsForTests({ ...platformSettings.DEFAULT_SETTINGS, flags: { 'myseb.requirePayment': false } });
+
 // Hand-in links behind MySEB: the task text, its files and the hand-in itself are locked; the lecturer drives MySEB from bwenge.
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'myseb-asg-'));
 const mem = new Map<string, { owner: string; name: string; mime: string; data: Buffer }>();

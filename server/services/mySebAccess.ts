@@ -15,7 +15,7 @@ import { MySebError } from './mySeb.js';
 const db = prisma as any;
 export type AccessPlan = 'MONTH' | 'TEST';
 export interface PaymentConfig { monthUsd: number; testRwf: number; momoCode: string; momoName: string; whatsapp: string }
-export const DEFAULT_PAYMENT: PaymentConfig = { monthUsd: 5, testRwf: 1500, momoCode: '2191184', momoName: 'Niyibizi Steven', whatsapp: '' };
+export const DEFAULT_PAYMENT: PaymentConfig = { monthUsd: 5, testRwf: 1500, momoCode: '2191184', momoName: 'Niyibizi Steven', whatsapp: '250799691108' };
 export interface AccessRecord { monthUntil: string | null; tests: number; usedExams: string[]; history: Array<{ at: string; plan: AccessPlan; by: string; note?: string; months?: number; tests?: number }> }
 export interface AccessRequest { id: string; userId: string; email: string; name: string; plan: AccessPlan; note: string; status: 'pending' | 'approved' | 'rejected'; createdAt: string; decidedAt?: string; decidedBy?: string }
 const EMPTY: AccessRecord = { monthUntil: null, tests: 0, usedExams: [], history: [] };
@@ -34,7 +34,8 @@ export async function paymentConfig(): Promise<PaymentConfig> {
     monthUsd: num(v?.monthUsd, DEFAULT_PAYMENT.monthUsd, 1, 1000), testRwf: Math.round(num(v?.testRwf, DEFAULT_PAYMENT.testRwf, 100, 1_000_000)),
     momoCode: typeof v?.momoCode === 'string' && v.momoCode ? v.momoCode.slice(0, 20) : DEFAULT_PAYMENT.momoCode,
     momoName: typeof v?.momoName === 'string' && v.momoName ? v.momoName.slice(0, 80) : DEFAULT_PAYMENT.momoName,
-    whatsapp: String(v?.whatsapp ?? process.env.MYSEB_WHATSAPP ?? '').replace(/\D/g, '').slice(0, 15),
+    // The administrator's own setting wins (even an empty one), then the server setting, then the number given when MySEB went on sale.
+    whatsapp: String(v?.whatsapp ?? process.env.MYSEB_WHATSAPP ?? DEFAULT_PAYMENT.whatsapp).replace(/\D/g, '').slice(0, 15),
   };
 }
 export const savePaymentConfig = async (patch: Partial<PaymentConfig>, by: string) => { const next = { ...(await paymentConfig()), ...patch }; await put('myseb-payment', next, by); return paymentConfig(); };
