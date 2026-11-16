@@ -31,12 +31,42 @@ const WHY: Record<string, string> = {
 const why = (k: string | null) => (k ? WHY[k] ?? k : '');
 
 /* The live room is a dark "control room": pictures stand out, and the lecturer's eyes are not tired after an hour of watching. */
-const dBtn = 'min-h-10 rounded-xl border border-white/15 bg-white/5 px-3.5 text-sm font-semibold text-slate-100 hover:bg-white/10 disabled:opacity-40';
-const dPrimary = 'min-h-10 rounded-xl bg-blue-500 px-4 text-sm font-bold text-white hover:bg-blue-400 disabled:opacity-40';
-const dDanger = 'min-h-10 rounded-xl bg-rose-600 px-3.5 text-sm font-bold text-white hover:bg-rose-500 disabled:opacity-40';
-const dSelect = 'min-h-9 w-full min-w-0 truncate rounded-lg border border-white/15 bg-slate-800 px-2.5 text-sm font-semibold text-slate-100 outline-none focus:border-blue-400';
+const FOCUS = 'touch-manipulation outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950';
+const dBtn = `min-h-11 rounded-xl border border-white/15 bg-white/5 px-4 text-sm font-semibold text-slate-100 hover:bg-white/10 active:bg-white/15 disabled:opacity-40 md:min-h-10 md:px-3.5 ${FOCUS}`;
+const dPrimary = `min-h-11 rounded-xl bg-blue-500 px-4 text-sm font-bold text-white hover:bg-blue-400 active:bg-blue-600 disabled:opacity-40 md:min-h-10 ${FOCUS}`;
+const dDanger = `min-h-11 rounded-xl bg-rose-600 px-4 text-sm font-bold text-white hover:bg-rose-500 active:bg-rose-700 disabled:opacity-40 md:min-h-10 md:px-3.5 ${FOCUS}`;
+const dSelect = 'min-h-11 w-full min-w-0 truncate rounded-lg border border-white/15 bg-slate-800 px-2.5 text-base font-semibold text-slate-100 outline-none focus:border-blue-400 md:min-h-9 md:text-sm';
 const RING_D: Record<Status, string> = { IN_EXAM: 'border-slate-800', PAUSED: 'border-amber-500/70 ring-2 ring-amber-500/25', LEFT: 'border-rose-500/70 ring-2 ring-rose-500/25', ENDED: 'border-slate-800 opacity-60' };
+const SHORT: Record<Status, string> = { IN_EXAM: 'In test', PAUSED: 'Paused', LEFT: 'Left', ENDED: 'Done' };
 const DOT: Record<Status, string> = { IN_EXAM: 'bg-emerald-400', PAUSED: 'bg-amber-400', LEFT: 'bg-rose-400', ENDED: 'bg-slate-400' };
+
+/** True while the screen matches the query (for example a phone). Layout that CSS alone cannot switch, such as where the settings live. */
+function useMedia(query: string): boolean {
+  const get = () => (typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? window.matchMedia(query).matches : false);
+  const [on, setOn] = useState(get);
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const m = window.matchMedia(query); const f = () => setOn(m.matches); f();
+    m.addEventListener('change', f); return () => m.removeEventListener('change', f);
+  }, [query]);
+  return on;
+}
+
+/** A panel that slides up from the bottom on a phone (easy to reach with a thumb) and is a centred dialog on a bigger screen. */
+function Sheet({ title, onClose, children, wide = false }: { title: string; onClose: () => void; children: React.ReactNode; wide?: boolean }) {
+  useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [onClose]);
+  return (
+    <div role="dialog" aria-modal="true" aria-label={title} className="fixed inset-0 z-50 flex items-end justify-center bg-black/65 backdrop-blur-[2px] sm:items-center sm:p-4" onClick={onClose}>
+      <div className={`flex max-h-[90dvh] w-full flex-col overflow-hidden rounded-t-3xl border border-white/10 bg-slate-900 text-slate-100 shadow-2xl sm:rounded-2xl ${wide ? 'sm:max-w-3xl' : 'sm:max-w-xl'}`} onClick={(e) => e.stopPropagation()}>
+        <div className="shrink-0 border-b border-white/10 px-4 pb-3 pt-2.5">
+          <span aria-hidden className="mx-auto mb-2 block h-1 w-10 rounded-full bg-white/20 sm:hidden" />
+          <div className="flex items-center justify-between gap-3"><h2 className="min-w-0 truncate text-base font-bold">{title}</h2><button type="button" className={`${dBtn} !min-h-10 shrink-0`} onClick={onClose}>Close</button></div>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 pb-[max(1rem,env(safe-area-inset-bottom))]">{children}</div>
+      </div>
+    </div>
+  );
+}
 
 function Setting({ label, hint, children }: { label: string; hint: string; children: React.ReactNode }) {
   return (
@@ -220,31 +250,39 @@ function ZoomView(p: {
   const wantsScreen = p.source !== 'camera' && (p.screen || p.screenPic);
   const q = s.live?.question;
   const hd = p.live && (p.screen || p.camera);
+  const zb = 'min-h-11 shrink-0 rounded-lg bg-white/10 px-3.5 text-xs font-semibold hover:bg-white/20 active:bg-white/25 disabled:opacity-40 md:min-h-9 ' + FOCUS;
   return (
     <div role="dialog" aria-label={`${s.student_name}, zoomed in`} className="fixed inset-0 z-40 flex flex-col bg-slate-950 text-white">
-      <div className="flex flex-wrap items-center gap-2 border-b border-white/10 px-4 py-2.5">
-        <p className="min-w-0 flex-1 truncate text-sm font-bold">{s.student_name}<span className="ml-2 text-xs font-medium text-slate-400">{q ? `${q.index ? `Q${q.index}${q.total ? ` of ${q.total}` : ''}` : ''}${q.label ? ` · ${q.label}` : ''}` : ''}</span></p>
-        <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${TONE[s.status]}`}>{LABEL[s.status]}</span>
-        {hd ? <span className="rounded-full bg-emerald-600 px-2.5 py-0.5 text-[11px] font-bold">HD live</span> : <span className="rounded-full bg-slate-700 px-2.5 py-0.5 text-[11px] font-bold">Small picture</span>}
-        <div className="flex items-center gap-1" aria-label="Zoom">
-          <button type="button" aria-label="Zoom out" className="min-h-9 w-9 rounded-lg bg-white/10 text-lg font-bold hover:bg-white/20 disabled:opacity-40" disabled={zoom <= 1} onClick={() => setZoom((z) => Math.max(1, z - 0.5))}>−</button>
-          <span className="w-12 text-center text-xs font-semibold tabular-nums">{Math.round(zoom * 100)}%</span>
-          <button type="button" aria-label="Zoom in" className="min-h-9 w-9 rounded-lg bg-white/10 text-lg font-bold hover:bg-white/20 disabled:opacity-40" disabled={zoom >= 4} onClick={() => setZoom((z) => Math.min(4, z + 0.5))}>+</button>
+      <div className="shrink-0 border-b border-white/10 bg-slate-950/95 pt-[env(safe-area-inset-top)]">
+        <div className="flex items-center gap-2 px-3 py-2.5 md:px-4">
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-bold">{s.student_name}</p>
+            <p className="truncate text-xs text-slate-400">{q ? `${q.index ? `Question ${q.index}${q.total ? ` of ${q.total}` : ''}` : ''}${q.label ? `${q.index ? ' · ' : ''}${q.label}` : ''}` : 'Not started'}</p>
+          </div>
+          <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-bold ${TONE[s.status]}`}>{LABEL[s.status]}</span>
+          {hd ? <span className="hidden shrink-0 rounded-full bg-emerald-600 px-2.5 py-0.5 text-[11px] font-bold sm:inline">HD live</span> : <span className="hidden shrink-0 rounded-full bg-slate-700 px-2.5 py-0.5 text-[11px] font-bold sm:inline">Small picture</span>}
+          <button type="button" onClick={p.onClose} aria-label="Close" className={`${zb} !px-4`}>Close<span className="hidden md:inline"> (Esc)</span></button>
         </div>
-        {(s.status === 'PAUSED' || s.status === 'LEFT') && <button type="button" disabled={p.busy} onClick={p.onResume} className="min-h-9 rounded-lg bg-white/10 px-3 text-xs font-semibold hover:bg-white/20">Resume</button>}
-        {p.canListen && <button type="button" onClick={p.onListen} className="min-h-9 rounded-lg bg-white/10 px-3 text-xs font-semibold hover:bg-white/20">{p.listening ? 'Stop listening' : 'Listen'}</button>}
-        {s.status !== 'ENDED' && <button type="button" disabled={p.busy} onClick={p.onEnd} className="min-h-9 rounded-lg bg-rose-600 px-3 text-xs font-bold hover:bg-rose-700 disabled:opacity-40">End test</button>}
-        <button type="button" onClick={p.onClose} className="min-h-9 rounded-lg bg-white/10 px-3 text-xs font-semibold hover:bg-white/20">Close (Esc)</button>
+        <div className="flex items-center gap-2 overflow-x-auto px-3 pb-2.5 md:px-4 [scrollbar-width:none]">
+          <div className="flex shrink-0 items-center gap-1" role="group" aria-label="Zoom">
+            <button type="button" aria-label="Zoom out" className={`${zb} w-11 !px-0 text-lg font-bold`} disabled={zoom <= 1} onClick={() => setZoom((z) => Math.max(1, z - 0.5))}>−</button>
+            <span className="w-12 text-center text-xs font-semibold tabular-nums">{Math.round(zoom * 100)}%</span>
+            <button type="button" aria-label="Zoom in" className={`${zb} w-11 !px-0 text-lg font-bold`} disabled={zoom >= 4} onClick={() => setZoom((z) => Math.min(4, z + 0.5))}>+</button>
+          </div>
+          {(s.status === 'PAUSED' || s.status === 'LEFT') && <button type="button" disabled={p.busy} onClick={p.onResume} className={`${zb} !bg-blue-500 font-bold hover:!bg-blue-400`}>Resume</button>}
+          {p.canListen && <button type="button" onClick={p.onListen} className={zb}>{p.listening ? 'Stop listening' : 'Listen'}</button>}
+          {s.status !== 'ENDED' && <button type="button" disabled={p.busy} onClick={p.onEnd} className={`${zb} !bg-rose-600 font-bold hover:!bg-rose-700`}>End test</button>}
+        </div>
       </div>
-      {!p.live && <p className="bg-amber-500/20 px-4 py-1.5 text-xs text-amber-200">Small picture, refreshed every few seconds. For a sharp, moving picture, <button type="button" className="font-bold underline" onClick={p.onLive}>switch to Live video</button>.</p>}
-      <div ref={box} className="relative min-h-0 flex-1 overflow-auto">
-        <div style={{ width: `${zoom * 100}%`, aspectRatio: wantsScreen ? '16 / 9' : '4 / 3', maxWidth: zoom === 1 ? '100%' : undefined, maxHeight: zoom === 1 ? '100%' : undefined, margin: '0 auto' }} className="relative">
+      {!p.live && <p className="bg-amber-500/15 px-4 py-2 text-xs text-amber-200">Small picture, refreshed every few seconds. For a sharp, moving picture, <button type="button" className="font-bold underline" onClick={p.onLive}>switch to Live video</button>.</p>}
+      <div ref={box} className="relative flex min-h-0 flex-1 overflow-auto overscroll-contain">
+        <div style={{ width: `${zoom * 100}%`, aspectRatio: wantsScreen ? '16 / 9' : '4 / 3', maxWidth: zoom === 1 ? '100%' : undefined, maxHeight: zoom === 1 ? '100%' : undefined, margin: 'auto', flex: 'none' }} className="relative">
           {wantsScreen ? (p.screen ? <LiveVideo stream={p.screen} muted mirror={false} fit="object-contain" /> : <img src={p.screenPic ?? ''} alt={`Screen: ${s.student_name}`} className="h-full w-full object-contain" />)
             : p.camera ? <LiveVideo stream={p.camera} muted={!p.listening} /> : p.cameraPic ? <img src={p.cameraPic} alt={`Camera: ${s.student_name}`} className="h-full w-full -scale-x-100 object-contain" />
             : <div className="flex h-full items-center justify-center text-sm text-slate-400">No picture yet</div>}
         </div>
         {wantsScreen && p.source === 'both' && (p.camera || p.cameraPic) && (
-          <div className="pointer-events-none absolute bottom-3 right-3 h-40 w-52 overflow-hidden rounded-xl border-2 border-white shadow-xl">
+          <div className="pointer-events-none absolute bottom-3 right-3 h-24 w-32 overflow-hidden rounded-xl border-2 border-white shadow-xl sm:h-40 sm:w-52">
             {p.camera ? <LiveVideo stream={p.camera} muted={!p.listening} /> : <img src={p.cameraPic ?? ''} alt="" className="h-full w-full -scale-x-100 object-cover" />}
           </div>
         )}
@@ -375,126 +413,170 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
 
   const chips: Array<[Status, string]> = [['IN_EXAM', 'In the test'], ['PAUSED', 'Paused'], ['LEFT', 'Left'], ['ENDED', 'Finished']];
   const watching = Object.keys(streams).length + Object.keys(screens).length;
+  const isPhone = useMedia('(max-width: 767px)');
+  const [moreOpen, setMoreOpen] = useState(false);
+  const post = (extra: Record<string, unknown>) => act(() => call('/settings', 'POST', { liveMode: mode, liveSound: sound, liveSource: source, leaveAction, ...extra }));
+  const endAll = () => { if (confirm('End the test for everyone? The code stops working.')) void act(() => call('/end', 'POST')); };
+  const codeLabel = code ? (showCode ? 'Hide code' : 'Show code') : 'Get code for students';
+  const onCode = () => (code ? setShowCode((v) => !v) : void makeCode());
+  const tileMin = isPhone ? 0 : tileSize === 'S' ? 150 : tileSize === 'L' ? 330 : 210;
+  const columns = isPhone ? `repeat(${tileSize === 'L' ? 1 : 2},minmax(0,1fr))` : `repeat(auto-fill,minmax(${tileMin}px,1fr))`;
+  const tab = (k: typeof filter) => `min-h-11 flex-1 whitespace-nowrap px-3 text-sm font-semibold md:min-h-10 md:flex-none md:px-3.5 ${FOCUS} ${filter === k ? (k === 'attention' ? 'bg-amber-500 text-slate-950' : 'bg-white text-slate-950') : 'bg-white/5 text-slate-200 hover:bg-white/10'}`;
+
+  /* The settings are the same on every screen: a panel under the header on a computer, a sheet from the bottom on a phone. */
+  const settingsBody = (
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      <Setting label="Show" hint="What each student shares with you.">
+        <select className={dSelect} style={{ colorScheme: 'dark' }} aria-label="Show" value={source} disabled={busy || !open} onChange={(e) => act(() => call('/settings', 'POST', { liveMode: mode === 'off' ? 'pictures' : mode, liveSound: sound, liveSource: e.target.value, leaveAction }))}>
+          <option value="camera">Face</option><option value="screen">Screen</option><option value="both">Face and screen</option>
+        </select>
+      </Setting>
+      <Setting label="View" hint="Live video moves smoothly; pictures refresh every few seconds and use much less internet.">
+        <select className={dSelect} style={{ colorScheme: 'dark' }} aria-label="View" value={mode} disabled={busy || !open} onChange={(e) => act(() => call('/settings', 'POST', { liveMode: e.target.value, liveSound: sound, liveSource: source, leaveAction }))}>
+          <option value="off">Off</option><option value="pictures">Pictures (every 10 s)</option><option value="live">Live video</option>
+        </select>
+      </Setting>
+      <Setting label="If a student leaves" hint="When a student switches window or stops sharing the screen.">
+        <select className={dSelect} style={{ colorScheme: 'dark' }} aria-label="If a student leaves" value={leaveAction} disabled={busy || !open} onChange={(e) => void post({ leaveAction: e.target.value })}>
+          <option value="record">Only record it</option><option value="pause">Pause them</option><option value="pause_then_end">Pause, then end the second time</option><option value="end">End their test at once</option>
+        </select>
+      </Setting>
+      <Setting label="Tile size" hint="Small tiles fit a big class on one screen.">
+        <select className={dSelect} style={{ colorScheme: 'dark' }} aria-label="Tile size" value={tileSize} onChange={(e) => setTileSize(e.target.value as 'S' | 'M' | 'L')}>
+          <option value="S">Small</option><option value="M">Medium</option><option value="L">Large</option>
+        </select>
+      </Setting>
+      <Setting label="Live at once" hint="How many students move live. Tap one to zoom in at full quality. More needs a stronger device.">
+        <select className={dSelect} style={{ colorScheme: 'dark' }} aria-label="Live at once" value={maxLive} disabled={mode !== 'live'} onChange={(e) => setMaxLive(Number(e.target.value))}>
+          <option value={12}>12 students</option><option value={24}>24 students</option><option value={48}>48 students</option>
+        </select>
+      </Setting>
+      <Setting label="Browsers" hint="Lets students without the app (for example on an iPhone) take the test in their browser. It cannot lock their device, only watch it.">
+        <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm font-semibold md:min-h-9">
+          <input type="checkbox" className="h-5 w-5 accent-blue-500" checked={!!room?.exam?.allow_web} disabled={busy || !open} onChange={(e) => void post({ allowWeb: e.target.checked })} />
+          Allow browsers
+        </label>
+      </Setting>
+      <Setting label="Browsers on" hint="Which devices may use the browser. iPhone and iPad only: laptops and Android phones must use the MySEB app (a device can claim to be an iPhone, so this stops ordinary students, not a determined one).">
+        <select className={dSelect} style={{ colorScheme: 'dark' }} aria-label="Browsers on" value={room?.exam?.web_devices ?? 'any'} disabled={busy || !open || !room?.exam?.allow_web} onChange={(e) => void post({ webDevices: e.target.value })}>
+          <option value="any">Any device</option><option value="ios">iPhone and iPad only</option>
+        </select>
+      </Setting>
+      <Setting label="Browser rules" hint="Strict (recommended): a student in a browser is rejected at once if they leave the page, close the tab, turn the camera off or their face leaves the camera. They get one attempt. Gentler: your 'If a student leaves' rule applies.">
+        <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm font-semibold md:min-h-9">
+          <input type="checkbox" className="h-5 w-5 accent-blue-500" checked={room?.exam?.web_strict !== false} disabled={busy || !open || !room?.exam?.allow_web} onChange={(e) => void post({ webStrict: e.target.checked })} />
+          Strict for browsers
+        </label>
+      </Setting>
+      <Setting label="Faces in the camera" hint="Browsers only. If more than one person is in the camera: do nothing, warn the student (recorded), or disqualify them after 5 seconds.">
+        <select className={dSelect} style={{ colorScheme: 'dark' }} aria-label="Faces in the camera" value={room?.exam?.multi_face ?? 'warn'} disabled={busy || !open || !room?.exam?.allow_web} onChange={(e) => void post({ multiFace: e.target.value })}>
+          <option value="off">Ignore</option><option value="warn">Warn and record</option><option value="end">Disqualify</option>
+        </select>
+      </Setting>
+      <Setting label="Student card" hint="Browsers only. Before the test opens, each student shows their student card to the camera and you let them in or refuse. You see one picture, and it is deleted when you decide.">
+        <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm font-semibold md:min-h-9">
+          <input type="checkbox" className="h-5 w-5 accent-blue-500" checked={!!room?.exam?.id_check} disabled={busy || !open || !room?.exam?.allow_web} onChange={(e) => void post({ idCheck: e.target.checked })} />
+          Check the student card
+        </label>
+      </Setting>
+      <Setting label="Listening" hint="Lets you hear one student at a time. They see a notice while you do.">
+        <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm font-semibold md:min-h-9">
+          <input type="checkbox" className="h-5 w-5 accent-blue-500" checked={sound} disabled={busy || !open || mode !== 'live' || source === 'screen'} onChange={(e) => act(() => call('/settings', 'POST', { liveMode: 'live', liveSound: e.target.checked, liveSource: source, leaveAction }))} />
+          Allow listening
+        </label>
+      </Setting>
+    </div>
+  );
 
   return (
-    <div className="min-h-[100dvh] bg-slate-950 text-slate-100">
-      <header className="sticky top-0 z-20 border-b border-white/10 bg-slate-950/90 backdrop-blur">
-        <div className="mx-auto flex max-w-[1800px] flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
-          <button type="button" onClick={onBack} className={dBtn} aria-label="Back">←</button>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2.5">
-              <h1 className="truncate text-lg font-bold">{room?.exam?.title ?? 'Live room'}</h1>
-              {open
-                ? <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-rose-600 px-2.5 py-0.5 text-[11px] font-extrabold tracking-wide text-white"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />LIVE</span>
-                : <span className="shrink-0 rounded-full bg-slate-700 px-2.5 py-0.5 text-[11px] font-bold">Ended</span>}
+    <div className="min-h-[100dvh] bg-slate-950 text-slate-100 antialiased">
+      <header className="sticky top-0 z-20 border-b border-white/10 bg-slate-950/90 pt-[env(safe-area-inset-top)] backdrop-blur">
+        <div className="mx-auto max-w-[1800px] space-y-2.5 px-3 pb-3 pt-2.5 md:space-y-3 md:px-4">
+          <div className="flex items-center gap-2.5">
+            <button type="button" onClick={onBack} className={`${dBtn} !px-0 w-11 shrink-0 text-lg md:w-10`} aria-label="Back">←</button>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <h1 className="truncate text-base font-bold leading-tight md:text-lg">{room?.exam?.title ?? 'Live room'}</h1>
+                {open
+                  ? <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-extrabold tracking-wide text-white"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />LIVE</span>
+                  : <span className="shrink-0 rounded-full bg-slate-700 px-2 py-0.5 text-[10px] font-bold">Ended</span>}
+              </div>
+              <p className="truncate text-xs text-slate-400">{open ? `${connected ? 'Instant updates' : `Updates every ${every / 1000} s`}${mode === 'live' ? ` · ${watching} live picture${watching === 1 ? '' : 's'}` : ''}` : 'This test has ended'}</p>
             </div>
-            <p className="text-xs text-slate-400">{open ? `${connected ? 'Instant updates' : `Updates every ${every / 1000} seconds`}${mode === 'live' ? ` · ${watching} live picture${watching === 1 ? '' : 's'} open` : ''}` : 'This test has ended'}</p>
+            <div className="hidden items-center gap-2 md:flex">
+              <button type="button" className={dPrimary} onClick={onCode} disabled={busy || !open}>{codeLabel}</button>
+              <button type="button" className={dBtn} disabled={busy || !open} onClick={() => act(() => call('/pause-all', 'POST'))}>Pause everyone</button>
+              <button type="button" className={dBtn} disabled={busy || !open} onClick={() => act(() => call('/resume-all', 'POST'))}>Let everyone continue</button>
+              <button type="button" aria-expanded={settingsOpen} className={`${dBtn} ${settingsOpen ? '!bg-white/15' : ''}`} onClick={() => setSettingsOpen((v) => !v)}>Settings</button>
+              <button type="button" className={dBtn} disabled={busy || students.length === 0} title="Who joined, when, and everything the app saw, as an Excel file" onClick={() => void downloadReport()}>Report (Excel)</button>
+              <button type="button" className="min-h-10 rounded-xl border border-rose-500/60 px-3.5 text-sm font-bold text-rose-300 hover:bg-rose-500/10 disabled:opacity-40" disabled={busy || !open} onClick={endAll}>End test</button>
+            </div>
           </div>
-          <div className="flex flex-wrap gap-1.5">
+
+          <div className="grid grid-cols-4 gap-1.5 md:flex md:flex-wrap md:gap-2" aria-label="How many students are where">
             {chips.map(([k, label]) => (
-              <span key={k} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[12px] font-semibold">
-                <span className={`h-2 w-2 rounded-full ${DOT[k]}`} />{label}<b className="tabular-nums text-white">{room?.counts[k] ?? 0}</b>
-              </span>
+              <div key={k} className="flex min-w-0 flex-col-reverse items-start rounded-xl border border-white/10 bg-white/[0.04] px-2.5 py-1.5 md:flex-row md:items-center md:gap-2 md:rounded-full md:px-3.5 md:py-1">
+                <p className="flex min-w-0 items-center gap-1.5 text-[10px] font-semibold text-slate-400 md:text-[12px] md:text-slate-200"><span className={`h-1.5 w-1.5 shrink-0 md:h-2 md:w-2 rounded-full ${DOT[k]}`} /><span className="truncate">{isPhone ? SHORT[k] : label}</span></p>
+                <p className="text-lg font-bold leading-none tabular-nums text-white md:text-sm">{room?.counts[k] ?? 0}</p>
+              </div>
             ))}
           </div>
-        </div>
-        <div className="mx-auto flex max-w-[1800px] flex-wrap items-center gap-2 px-4 pb-3">
-          <button type="button" className={dPrimary} onClick={() => (code ? setShowCode((v) => !v) : void makeCode())} disabled={busy || !open}>{code ? (showCode ? 'Hide code' : 'Show code') : 'Get code for students'}</button>
-          <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find a student" aria-label="Find a student"
-            className="min-h-10 w-44 rounded-xl border border-white/15 bg-slate-900 px-3 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-blue-400 sm:w-56" />
-          <div role="tablist" aria-label="Who to show" className="flex overflow-hidden rounded-xl border border-white/15">
-            {([['all', `Everyone (${students.length})`], ['attention', `Needs attention${attention ? ` (${attention})` : ''}`], ['testing', 'In the test']] as const).map(([k, label]) => (
-              <button key={k} type="button" role="tab" aria-selected={filter === k} onClick={() => setFilter(k)}
-                className={`min-h-10 px-3.5 text-sm font-semibold ${filter === k ? (k === 'attention' ? 'bg-amber-500 text-slate-950' : 'bg-white text-slate-950') : 'bg-white/5 text-slate-200 hover:bg-white/10'}`}>{label}</button>
-            ))}
-          </div>
-          <span className="flex-1" />
-          <button type="button" className={dBtn} disabled={busy || !open} onClick={() => act(() => call('/pause-all', 'POST'))}>Pause everyone</button>
-          <button type="button" className={dBtn} disabled={busy || !open} onClick={() => act(() => call('/resume-all', 'POST'))}>Let everyone continue</button>
-          <button type="button" aria-expanded={settingsOpen} className={`${dBtn} ${settingsOpen ? '!bg-white/15' : ''}`} onClick={() => setSettingsOpen((v) => !v)}>Settings</button>
-          <button type="button" className={dBtn} disabled={busy || students.length === 0} title="Who joined, when, and everything the app saw, as an Excel file" onClick={() => void downloadReport()}>Report (Excel)</button>
-          <button type="button" className="min-h-10 rounded-xl border border-rose-500/60 px-3.5 text-sm font-bold text-rose-300 hover:bg-rose-500/10 disabled:opacity-40" disabled={busy || !open} onClick={() => { if (confirm('End the test for everyone? The code stops working.')) void act(() => call('/end', 'POST')); }}>End test</button>
-        </div>
-        {settingsOpen && (
-          <div className="border-t border-white/10 bg-slate-900/70">
-            <div className="mx-auto grid max-w-[1800px] gap-3 px-4 py-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7">
-              <Setting label="Show" hint="What each student shares with you.">
-                <select className={dSelect} style={{ colorScheme: 'dark' }} aria-label="Show" value={source} disabled={busy || !open} onChange={(e) => act(() => call('/settings', 'POST', { liveMode: mode === 'off' ? 'pictures' : mode, liveSound: sound, liveSource: e.target.value, leaveAction }))}>
-                  <option value="camera">Face</option><option value="screen">Screen</option><option value="both">Face and screen</option>
-                </select>
-              </Setting>
-              <Setting label="View" hint="Live video moves smoothly; pictures refresh every few seconds and use much less internet.">
-                <select className={dSelect} style={{ colorScheme: 'dark' }} aria-label="View" value={mode} disabled={busy || !open} onChange={(e) => act(() => call('/settings', 'POST', { liveMode: e.target.value, liveSound: sound, liveSource: source, leaveAction }))}>
-                  <option value="off">Off</option><option value="pictures">Pictures (every 10 s)</option><option value="live">Live video</option>
-                </select>
-              </Setting>
-              <Setting label="If a student leaves" hint="When a student switches window or stops sharing the screen.">
-                <select className={dSelect} style={{ colorScheme: 'dark' }} aria-label="If a student leaves" value={leaveAction} disabled={busy || !open} onChange={(e) => act(() => call('/settings', 'POST', { liveMode: mode, liveSound: sound, liveSource: source, leaveAction: e.target.value }))}>
-                  <option value="record">Only record it</option><option value="pause">Pause them</option><option value="pause_then_end">Pause, then end the second time</option><option value="end">End their test at once</option>
-                </select>
-              </Setting>
-              <Setting label="Tile size" hint="Small tiles fit a big class on one screen.">
-                <select className={dSelect} style={{ colorScheme: 'dark' }} aria-label="Tile size" value={tileSize} onChange={(e) => setTileSize(e.target.value as 'S' | 'M' | 'L')}>
-                  <option value="S">Small</option><option value="M">Medium</option><option value="L">Large</option>
-                </select>
-              </Setting>
-              <Setting label="Live at once" hint="How many students move live. Click one to zoom in at full quality. More needs a stronger computer.">
-                <select className={dSelect} style={{ colorScheme: 'dark' }} aria-label="Live at once" value={maxLive} disabled={mode !== 'live'} onChange={(e) => setMaxLive(Number(e.target.value))}>
-                  <option value={12}>12 students</option><option value={24}>24 students</option><option value={48}>48 students</option>
-                </select>
-              </Setting>
-              <Setting label="Browsers" hint="Lets students without the app (for example on an iPhone) take the test in their browser. It cannot lock their device, only watch it.">
-                <label className="flex min-h-9 cursor-pointer items-center gap-2 text-sm font-semibold">
-                  <input type="checkbox" className="h-4 w-4" checked={!!room?.exam?.allow_web} disabled={busy || !open} onChange={(e) => act(() => call('/settings', 'POST', { liveMode: mode, liveSound: sound, liveSource: source, leaveAction, allowWeb: e.target.checked }))} />
-                  Allow browsers
-                </label>
-              </Setting>
-              <Setting label="Browsers on" hint="Which devices may use the browser. iPhone and iPad only: laptops and Android phones must use the MySEB app (a device can claim to be an iPhone, so this stops ordinary students, not a determined one).">
-                <select className={dSelect} style={{ colorScheme: 'dark' }} aria-label="Browsers on" value={room?.exam?.web_devices ?? 'any'} disabled={busy || !open || !room?.exam?.allow_web} onChange={(e) => act(() => call('/settings', 'POST', { liveMode: mode, liveSound: sound, liveSource: source, leaveAction, webDevices: e.target.value }))}>
-                  <option value="any">Any device</option><option value="ios">iPhone and iPad only</option>
-                </select>
-              </Setting>
-              <Setting label="Browser rules" hint="Strict (recommended): a student in a browser is rejected at once if they leave the page, close the tab, turn the camera off or their face leaves the camera. They get one attempt. Gentler: your 'If a student leaves' rule applies.">
-                <label className="flex min-h-9 cursor-pointer items-center gap-2 text-sm font-semibold">
-                  <input type="checkbox" className="h-4 w-4" checked={room?.exam?.web_strict !== false} disabled={busy || !open || !room?.exam?.allow_web} onChange={(e) => act(() => call('/settings', 'POST', { liveMode: mode, liveSound: sound, liveSource: source, leaveAction, webStrict: e.target.checked }))} />
-                  Strict for browsers
-                </label>
-              </Setting>
-              <Setting label="Faces in the camera" hint="Browsers only. If more than one person is in the camera: do nothing, warn the student (recorded), or disqualify them after 5 seconds.">
-                <select className={dSelect} style={{ colorScheme: 'dark' }} aria-label="Faces in the camera" value={room?.exam?.multi_face ?? 'warn'} disabled={busy || !open || !room?.exam?.allow_web} onChange={(e) => act(() => call('/settings', 'POST', { liveMode: mode, liveSound: sound, liveSource: source, leaveAction, multiFace: e.target.value }))}>
-                  <option value="off">Ignore</option><option value="warn">Warn and record</option><option value="end">Disqualify</option>
-                </select>
-              </Setting>
-              <Setting label="Student card" hint="Browsers only. Before the test opens, each student shows their student card to the camera and you let them in or refuse. You see one picture, and it is deleted when you decide.">
-                <label className="flex min-h-9 cursor-pointer items-center gap-2 text-sm font-semibold">
-                  <input type="checkbox" className="h-4 w-4" checked={!!room?.exam?.id_check} disabled={busy || !open || !room?.exam?.allow_web} onChange={(e) => act(() => call('/settings', 'POST', { liveMode: mode, liveSound: sound, liveSource: source, leaveAction, idCheck: e.target.checked }))} />
-                  Check the student card
-                </label>
-              </Setting>
-              <Setting label="Listening" hint="Lets you hear one student at a time. They see a notice while you do.">
-                <label className="flex min-h-9 cursor-pointer items-center gap-2 text-sm font-semibold">
-                  <input type="checkbox" className="h-4 w-4" checked={sound} disabled={busy || !open || mode !== 'live' || source === 'screen'} onChange={(e) => act(() => call('/settings', 'POST', { liveMode: 'live', liveSound: e.target.checked, liveSource: source, leaveAction }))} />
-                  Allow listening
-                </label>
-              </Setting>
+
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find a student" aria-label="Find a student" enterKeyHint="search"
+              className="min-h-11 w-full rounded-xl border border-white/15 bg-slate-900 px-3.5 text-base text-slate-100 outline-none placeholder:text-slate-500 focus:border-blue-400 sm:max-w-xs md:min-h-10 md:text-sm" />
+            <div role="tablist" aria-label="Who to show" className="flex overflow-hidden rounded-xl border border-white/15">
+              <button type="button" role="tab" aria-selected={filter === 'all'} onClick={() => setFilter('all')} className={tab('all')}>Everyone <span className="opacity-70">{students.length}</span></button>
+              <button type="button" role="tab" aria-selected={filter === 'attention'} onClick={() => setFilter('attention')} className={tab('attention')}>Needs attention{attention ? <span className="ml-1 rounded-full bg-rose-600 px-1.5 text-[11px] font-bold text-white">{attention}</span> : null}</button>
+              <button type="button" role="tab" aria-selected={filter === 'testing'} onClick={() => setFilter('testing')} className={tab('testing')}>In the test</button>
             </div>
           </div>
+        </div>
+        {!isPhone && settingsOpen && (
+          <div className="border-t border-white/10 bg-slate-900/70"><div className="mx-auto max-w-[1800px] px-4 py-4">{settingsBody}</div></div>
         )}
       </header>
 
-      <main className="mx-auto max-w-[1800px] px-4 py-5">
+      <main className="mx-auto max-w-[1800px] px-3 pb-32 pt-4 md:px-4 md:pb-8 md:pt-5">
+        {showCode && code && (
+          <section className="mb-5 flex flex-col gap-5 rounded-2xl border border-white/10 bg-slate-900 p-4 sm:p-5 md:flex-row md:items-start md:gap-8">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm text-slate-400">Students type this in MySEB</p>
+              <p className="my-1.5 break-words font-mono text-[1.9rem] font-bold leading-tight tracking-wider text-white sm:text-4xl md:text-5xl">{code.display}</p>
+              <div className="mt-2 grid grid-cols-2 gap-2 sm:flex">
+                <button type="button" className={dBtn} onClick={async () => { await navigator.clipboard.writeText(code.display); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>{copied ? 'Copied' : 'Copy'}</button>
+                <button type="button" className={dBtn} onClick={() => void makeCode()}>New code</button>
+              </div>
+              {code.joinUrl && (
+                <div className="mt-4 max-w-md rounded-xl border border-white/10 bg-white/[0.04] p-3">
+                  <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Link for students</p>
+                  <p className="mt-1 break-all font-mono text-sm text-white" data-testid="join-link">{code.joinUrl}</p>
+                  <div className="mt-2.5 grid grid-cols-2 gap-2 sm:flex">
+                    <button type="button" className={dPrimary} onClick={async () => { await navigator.clipboard.writeText(code.joinUrl!); setLinkCopied(true); setTimeout(() => setLinkCopied(false), 1500); }}>{linkCopied ? 'Link copied' : 'Copy link'}</button>
+                    <a className={`${dBtn} inline-flex items-center justify-center`} target="_blank" rel="noreferrer" href={`https://wa.me/?text=${encodeURIComponent(`Join your test: ${code.joinUrl}`)}`}>Share on WhatsApp</a>
+                  </div>
+                  <p className="mt-2.5 text-xs leading-relaxed text-slate-400">One link for everyone. On a laptop or an Android phone it opens MySEB with the code filled in, and downloads MySEB first if it is missing. On an iPhone it starts the test in the browser{room?.exam?.allow_web ? '' : ' (needs Settings → Browsers)'}.</p>
+                  {!room?.exam?.allow_web && <button type="button" disabled={busy || !open} className={`${dBtn} mt-2.5 w-full sm:w-auto`} onClick={() => void post({ allowWeb: true })}>Turn on browsers for iPhones</button>}
+                </div>
+              )}
+              <p className="mt-3 max-w-sm text-xs leading-relaxed text-slate-400">One code works for the whole class. It expires {new Date(code.expiresAt).toLocaleString()} or when you end the test. Install links: <a className="underline" href="/myseb/download" target="_blank" rel="noreferrer">bwenge.space/myseb/download</a>.</p>
+            </div>
+            <img alt="QR code: open MySEB on a phone" className="mx-auto h-44 w-44 shrink-0 rounded-xl bg-white p-1.5 md:mx-0 md:h-40 md:w-40" src={`data:image/svg+xml;utf8,${encodeURIComponent(code.qrSvg)}`} />
+          </section>
+        )}
+
         {err && <p role="alert" className="mb-4 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm font-semibold text-rose-200">{err}</p>}
         {idq.length > 0 && (
-          <section aria-label="Student cards to check" className="mb-3 rounded-2xl border border-sky-400/40 bg-sky-500/10 p-3">
+          <section aria-label="Student cards to check" className="mb-4 rounded-2xl border border-sky-400/40 bg-sky-500/10 p-3">
             <p className="mb-2 text-sm font-bold text-sky-100">{idq.length} student{idq.length === 1 ? '' : 's'} showed a card. Check the name and photo, then let them in.</p>
-            <ul className="flex flex-wrap gap-3">
+            <ul className="-mx-1 flex snap-x gap-3 overflow-x-auto px-1 pb-1 md:flex-wrap md:overflow-visible">
               {idq.map((c) => (
-                <li key={c.id} className="w-60 overflow-hidden rounded-xl border border-white/10 bg-slate-900">
+                <li key={c.id} className="w-64 shrink-0 snap-start overflow-hidden rounded-xl border border-white/10 bg-slate-900 md:w-60">
                   <img src={c.image} alt={`Card shown by ${c.student_name}`} className="aspect-[4/3] w-full object-cover" />
                   <div className="space-y-2 p-2.5"><p className="truncate text-sm font-bold text-white" title={c.student_name}>Typed name: {c.student_name}</p>
                     <div className="flex gap-2">
-                      <button type="button" disabled={busy} onClick={() => void decideId(c.id, true)} className="min-h-9 flex-1 rounded-lg bg-emerald-500 px-3 text-xs font-bold text-white hover:bg-emerald-400 disabled:opacity-40">Let in</button>
-                      <button type="button" disabled={busy} onClick={() => void decideId(c.id, false)} className="min-h-9 flex-1 rounded-lg bg-rose-600 px-3 text-xs font-bold text-white hover:bg-rose-500 disabled:opacity-40">Refuse</button>
+                      <button type="button" disabled={busy} onClick={() => void decideId(c.id, true)} className={`min-h-11 flex-1 rounded-lg bg-emerald-500 px-3 text-sm font-bold text-white hover:bg-emerald-400 disabled:opacity-40 md:min-h-9 md:text-xs ${FOCUS}`}>Let in</button>
+                      <button type="button" disabled={busy} onClick={() => void decideId(c.id, false)} className={`min-h-11 flex-1 rounded-lg bg-rose-600 px-3 text-sm font-bold text-white hover:bg-rose-500 disabled:opacity-40 md:min-h-9 md:text-xs ${FOCUS}`}>Refuse</button>
                     </div></div>
                 </li>
               ))}
@@ -503,62 +585,42 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
         )}
         {alerts.length > 0 && (
           <ul aria-live="assertive" className="mb-4 space-y-2">
-            {alerts.map((a) => (
-              <li key={a.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-rose-500/50 bg-rose-500/10 px-4 py-3">
-                <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-rose-500" />
-                <p className="min-w-0 flex-1 text-sm font-semibold text-rose-100"><strong>{a.name}</strong>: {a.text}</p>
-                {!a.ended && <button type="button" disabled={busy} onClick={() => act(() => call(`/sessions/${a.id}/resume`, 'POST'))} className={`${dBtn} !min-h-9 text-xs`}>Let them continue</button>}
-                {!a.ended && <button type="button" disabled={busy} onClick={() => { setAlerts((c) => c.filter((x) => x.id !== a.id)); void act(() => call(`/sessions/${a.id}/end`, 'POST')); }} className={`${dDanger} !min-h-9 text-xs`}>End {a.name}'s test now</button>}
-                <button type="button" onClick={() => setAlerts((c) => c.filter((x) => x.id !== a.id))} className={`${dBtn} !min-h-9 text-xs`}>Dismiss</button>
+            {alerts.slice(0, isPhone ? 2 : 6).map((a) => (
+              <li key={a.id} className="rounded-xl border border-rose-500/50 bg-rose-500/10 p-3 md:flex md:flex-wrap md:items-center md:gap-3 md:px-4">
+                <p className="flex min-w-0 flex-1 items-start gap-2.5 text-sm font-semibold text-rose-100"><span className="mt-1.5 h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-rose-500" /><span className="min-w-0"><strong>{a.name}</strong>: {a.text}</span></p>
+                <div className="mt-2.5 flex flex-wrap gap-2 md:mt-0">
+                  {!a.ended && <button type="button" disabled={busy} onClick={() => act(() => call(`/sessions/${a.id}/resume`, 'POST'))} className={`${dBtn} flex-1 !min-h-10 text-xs md:flex-none`}>Let them continue</button>}
+                  {!a.ended && <button type="button" disabled={busy} onClick={() => { setAlerts((c) => c.filter((x) => x.id !== a.id)); void act(() => call(`/sessions/${a.id}/end`, 'POST')); }} className={`${dDanger} flex-1 !min-h-10 text-xs md:flex-none`}>End test now</button>}
+                  <button type="button" onClick={() => setAlerts((c) => c.filter((x) => x.id !== a.id))} className={`${dBtn} flex-1 !min-h-10 text-xs md:flex-none`}>Dismiss</button>
+                </div>
               </li>
             ))}
           </ul>
         )}
-        {mode !== 'off' && <p className="mb-4 text-xs text-slate-500">
-          Students were told what is shown ({source === 'camera' ? 'their camera' : source === 'screen' ? 'their whole screen' : 'their screen and camera'}) and must agree.{showScreen ? ' If a student stops sharing the screen it counts as leaving the test.' : ''} {mode === 'live' ? `Live video is shown for the ${maxLive} students on screen at a time; click a student to zoom in and see them in full quality; the rest show a small picture. Nothing is recorded or saved.${sound ? ' Press Listen on a tile to hear that student; they see a notice while you do.' : ''}` : 'Pictures are small, replaced every 10 seconds, and never saved.'}
+        {alerts.length > (isPhone ? 2 : 6) && <p className="-mt-2 mb-4 text-xs font-semibold text-rose-300">{alerts.length - (isPhone ? 2 : 6)} more need you: open “Needs attention”.</p>}
+        {mode !== 'off' && <p className="mb-4 text-xs leading-relaxed text-slate-500">
+          Students were told what is shown ({source === 'camera' ? 'their camera' : source === 'screen' ? 'their whole screen' : 'their screen and camera'}) and must agree.{showScreen ? ' If a student stops sharing the screen it counts as leaving the test.' : ''} {mode === 'live' ? `Live video is shown for the ${maxLive} students on screen at a time; tap a student to zoom in and see them in full quality; the rest show a small picture. Nothing is recorded or saved.${sound ? ' Press Listen on a tile to hear that student; they see a notice while you do.' : ''}` : 'Pictures are small, replaced every 10 seconds, and never saved.'}
         </p>}
 
-        {showCode && code && (
-          <section className="mb-5 flex flex-wrap items-center gap-6 rounded-2xl border border-white/10 bg-slate-900 p-5">
-            <div>
-              <p className="text-sm text-slate-400">Students type this in MySEB</p>
-              <p className="my-1 font-mono text-4xl font-bold tracking-wider text-white sm:text-5xl">{code.display}</p>
-              <button type="button" className={dBtn} onClick={async () => { await navigator.clipboard.writeText(code.display); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>{copied ? 'Copied' : 'Copy'}</button>
-              <button type="button" className={`${dBtn} ml-2`} onClick={() => void makeCode()}>New code</button>
-              {code.joinUrl && (
-                <div className="mt-4 max-w-md rounded-xl border border-white/10 bg-white/[0.04] p-3">
-                  <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Link for students</p>
-                  <p className="mt-1 break-all font-mono text-sm text-white" data-testid="join-link">{code.joinUrl}</p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <button type="button" className={dPrimary} onClick={async () => { await navigator.clipboard.writeText(code.joinUrl!); setLinkCopied(true); setTimeout(() => setLinkCopied(false), 1500); }}>{linkCopied ? 'Link copied' : 'Copy link'}</button>
-                    <a className={`${dBtn} inline-flex items-center`} target="_blank" rel="noreferrer" href={`https://wa.me/?text=${encodeURIComponent(`Join your test: ${code.joinUrl}`)}`}>Share on WhatsApp</a>
-                  </div>
-                  <p className="mt-2 text-xs leading-relaxed text-slate-400">One link for everyone. On a laptop or an Android phone it opens MySEB with the code filled in, and downloads MySEB first if it is missing. On an iPhone it starts the test in the browser{room?.exam?.allow_web ? '' : ' (needs Settings → Browsers)'}.</p>
-                  {!room?.exam?.allow_web && <button type="button" disabled={busy || !open} className={`${dBtn} mt-2`} onClick={() => act(() => call('/settings', 'POST', { liveMode: mode, liveSound: sound, liveSource: source, leaveAction, allowWeb: true }))}>Turn on browsers for iPhones</button>}
-                </div>
-              )}
-              <p className="mt-2 max-w-sm text-xs text-slate-400">One code works for the whole class. It expires {new Date(code.expiresAt).toLocaleString()} or when you end the test. Install links: <a className="underline" href="/myseb/download" target="_blank" rel="noreferrer">bwenge.space/myseb/download</a>.</p>
-            </div>
-            <img alt="QR code: open MySEB on a phone" className="h-40 w-40 rounded-xl bg-white p-1" src={`data:image/svg+xml;utf8,${encodeURIComponent(code.qrSvg)}`} />
-          </section>
-        )}
-
         {!room ? <p className="py-20 text-center text-slate-500">Loading…</p> : students.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-white/15 py-16 text-center">
+          <div className="rounded-2xl border border-dashed border-white/15 px-4 py-14 text-center">
+            <svg aria-hidden viewBox="0 0 24 24" className="mx-auto mb-3 h-10 w-10 text-slate-600" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20c.6-3.4 3.3-5.5 6.5-5.5s5.9 2.1 6.5 5.5" /><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.8c2 .7 3.2 2.4 3.5 5.2" /></svg>
             <p className="text-lg font-semibold">Nobody is in yet</p>
             <p className="mx-auto mt-1 max-w-sm text-sm text-slate-400">Get a code, show it to your students, and they will appear here as they join MySEB.</p>
             {open && <button type="button" className={`${dPrimary} mt-4`} onClick={() => void makeCode()} disabled={busy}>Get code for students</button>}
           </div>
         ) : shown.length === 0 ? <p className="py-16 text-center text-slate-500">{filter === 'attention' ? 'Nobody needs attention right now.' : 'No student matches.'}</p> : (
-          <ul className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill,minmax(${tileSize === 'S' ? 150 : tileSize === 'L' ? 330 : 210}px,1fr))` }}>
+          <ul className="grid gap-2.5 md:gap-3" style={{ gridTemplateColumns: columns }}>
             {shown.map((s) => {
               const q = s.live?.question;
               const pct = q?.index && q.total ? Math.min(100, Math.round((q.index / q.total) * 100)) : 0;
               const qText = s.status === 'ENDED' ? (s.end_reason === 'student_exit' ? 'Student ended it' : s.end_reason === 'time_up' ? 'Time is up' : s.end_reason === 'teacher' ? 'Ended by you' : s.end_reason && s.end_reason !== 'exam_ended' && WHY[s.end_reason] ? `Disqualified · ${WHY[s.end_reason]}` : 'Finished')
                 : q ? `${q.index ? `Q${q.index}${q.total ? ` of ${q.total}` : ''}` : ''}${q.label ? `${q.index ? ' · ' : ''}${q.label}` : ''}` || '…' : 'Not started';
+              const act2 = 'min-h-11 flex-1 rounded-lg px-3 text-xs font-semibold md:min-h-9 md:flex-none disabled:opacity-40 ' + FOCUS;
               return (
-                <li key={s.id} data-sid={s.id} ref={watchTile} className={`group flex flex-col overflow-hidden rounded-2xl border bg-slate-900 ${RING_D[s.status]}`}>
-                  <div className={`relative cursor-zoom-in bg-slate-800 ${showScreen ? 'aspect-video' : 'aspect-[4/3]'}`} onClick={() => setFocus(s.id)}>
+                <li key={s.id} data-sid={s.id} ref={watchTile} className={`group flex min-w-0 flex-col overflow-hidden rounded-2xl border bg-slate-900 ${RING_D[s.status]}`}>
+                  <div role="button" tabIndex={0} aria-label={`Zoom in on ${s.student_name}`} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setFocus(s.id); } }}
+                    className={`relative cursor-zoom-in bg-slate-800 ${FOCUS} ${showScreen ? 'aspect-video' : 'aspect-[4/3]'}`} onClick={() => setFocus(s.id)}>
                     {showScreen && (screens[s.id] || pics[s.id]?.screen) ? (
                       <>
                         {screens[s.id] ? <LiveVideo stream={screens[s.id]} muted mirror={false} fit="object-contain" /> : <img src={pics[s.id]?.screen ?? ''} alt={`Screen: ${s.student_name}`} className="h-full w-full object-contain" />}
@@ -573,29 +635,29 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
                         {mode === 'off' ? 'Live view is off' : s.live?.screen_state === 'partial' ? 'Shared a window, not the whole screen' : s.live?.screen_state === 'denied' ? 'Screen sharing is off' : s.live?.camera === 'denied' ? 'Camera blocked' : s.live?.camera === 'ask' ? 'Waiting for the student to agree' : s.status === 'ENDED' ? 'Finished' : 'No picture yet'}
                       </div>
                     )}
-                    <span className={`absolute left-2 top-2 inline-flex items-center gap-1.5 rounded-full bg-slate-950/80 px-2.5 py-0.5 text-[11px] font-bold text-white backdrop-blur`}><span className={`h-1.5 w-1.5 rounded-full ${DOT[s.status]}`} />{LABEL[s.status]}</span>
+                    <span className="absolute left-2 top-2 inline-flex items-center gap-1.5 rounded-full bg-slate-950/80 px-2 py-0.5 text-[10px] font-bold text-white backdrop-blur md:px-2.5 md:text-[11px]"><span className={`h-1.5 w-1.5 rounded-full ${DOT[s.status]}`} />{LABEL[s.status]}</span>
                     {(streams[s.id] || screens[s.id]) && <span className="absolute right-2 top-2 flex items-center gap-1 rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-bold text-white"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />LIVE</span>}
                     {!streams[s.id] && !screens[s.id] && pics[s.id]?.age != null && (pics[s.id].age as number) > 30 && <span className="absolute right-2 top-2 rounded bg-black/60 px-1.5 text-[10px] text-white">{pics[s.id].age}s ago</span>}
-                    <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent px-3 pb-2.5 pt-10">
+                    <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent px-2.5 pb-2 pt-9 md:px-3 md:pb-2.5 md:pt-10">
                       <p className="truncate text-sm font-bold text-white" title={s.student_name}>{s.student_name}</p>
                       <p className="truncate text-[11px] text-slate-300" title={q?.label}>{qText}</p>
                     </div>
                     {q?.total ? <div className="absolute inset-x-0 bottom-0 h-1 bg-white/10"><div className="h-full bg-emerald-400" style={{ width: `${pct}%` }} /></div> : null}
-                    <button type="button" aria-label={`Zoom in on ${s.student_name}`} onClick={(e) => { e.stopPropagation(); setFocus(s.id); }} className="absolute bottom-9 left-2 rounded-full bg-black/60 px-2.5 py-0.5 text-[11px] font-bold text-white opacity-100 hover:bg-black/80 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">Zoom</button>
+                    <button type="button" tabIndex={-1} aria-hidden onClick={(e) => { e.stopPropagation(); setFocus(s.id); }} className="absolute bottom-9 left-2 hidden rounded-full bg-black/60 px-2.5 py-0.5 text-[11px] font-bold text-white opacity-0 hover:bg-black/80 group-hover:opacity-100 md:block">Zoom</button>
                   </div>
                   <div className="flex flex-1 flex-col gap-1.5 p-2.5">
-                    <p className="text-[11px] text-slate-500">{s.client_type === 'web' ? 'browser' : s.client_type}{s.platform ? ` · ${s.platform}` : ''}{s.status !== 'ENDED' && s.seen_ago > 15 ? ` · seen ${s.seen_ago}s ago` : ''}</p>
+                    <p className="truncate text-[11px] text-slate-500">{s.client_type === 'web' ? 'browser' : s.client_type}{s.platform ? ` · ${s.platform}` : ''}{s.status !== 'ENDED' && s.seen_ago > 15 ? ` · seen ${s.seen_ago}s ago` : ''}</p>
                     {(s.status === 'PAUSED' || s.status === 'LEFT') && <p className="text-xs font-semibold text-amber-300">{why(s.pause_reason ?? s.last_violation)}</p>}
                     {s.id_status === 'pending' && s.status !== 'ENDED' && <p className="text-xs font-semibold text-sky-300">Showing their student card</p>}
                     {(s.aside_seconds ?? 0) >= 10 && s.status !== 'ENDED' && <p className="text-xs text-slate-400" title="How long their face was turned well away from the camera. Only a number for you to judge: it never disqualifies anyone.">Looked aside {s.aside_seconds} s</p>}
                     {(s.reinstated_count ?? 0) > 0 && <p className="text-xs text-slate-400">Let back in {s.reinstated_count === 1 ? 'once' : `${s.reinstated_count} times`}</p>}
-                    <div className="mt-auto flex flex-wrap gap-1.5">
-                      {(s.status === 'PAUSED' || s.status === 'LEFT') && <button type="button" className="min-h-9 rounded-lg bg-blue-500 px-3 text-xs font-bold text-white hover:bg-blue-400 disabled:opacity-40" disabled={busy} onClick={() => act(() => call(`/sessions/${s.id}/resume`, 'POST'))}>Resume</button>}
-                      {sound && streams[s.id] && <button type="button" className={`${listen === s.id ? 'bg-white text-slate-950' : 'border border-white/15 bg-white/5 text-slate-100 hover:bg-white/10'} min-h-9 rounded-lg px-3 text-xs font-semibold`} onClick={() => setListen(listen === s.id ? null : s.id)}>{listen === s.id ? 'Stop listening' : 'Listen'}</button>}
-                      {s.status === 'ENDED' && s.end_reason && !['teacher', 'time_up', 'exam_ended', 'student', 'student_exit'].includes(s.end_reason) && <button type="button" className="min-h-9 rounded-lg bg-emerald-500 px-3 text-xs font-bold text-white hover:bg-emerald-400 disabled:opacity-40" disabled={busy} title="Use this when the rule was broken by mistake: the student continues where they were. It is written in their log." onClick={() => { if (confirm(`Let ${s.student_name} back in? It is recorded in their log.`)) void act(() => call(`/sessions/${s.id}/reinstate`, 'POST')); }}>Let back in</button>}
-                      {s.status !== 'ENDED' && <button type="button" className={needs(s) ? 'min-h-9 rounded-lg bg-rose-600 px-3 text-xs font-bold text-white hover:bg-rose-500 disabled:opacity-40' : 'min-h-9 rounded-lg border border-white/15 bg-white/5 px-3 text-xs font-semibold text-rose-300 hover:bg-white/10 disabled:opacity-40'} disabled={busy} onClick={() => { if (confirm(`End the test for ${s.student_name}?`)) void act(() => call(`/sessions/${s.id}/end`, 'POST')); }}>End</button>}
-                      {s.has_partial && <button type="button" className="min-h-9 rounded-lg border border-emerald-400/40 bg-emerald-500/10 px-3 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/20" title="What this student had typed, saved every few seconds" onClick={async () => { try { const d = await call(`/sessions/${s.id}/partial`); const show = (v: unknown) => (Array.isArray(v) ? v.join(', ') : v !== null && typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')); setSaved({ name: s.student_name, at: d.saved_at ?? null, rows: Object.entries(d.answers ?? {}).map(([id, v]) => ({ q: (d.labels ?? {})[id] || id, a: show(v) })) }); } catch (e) { setErr(e instanceof Error ? e.message : 'Could not load.'); } }}>Saved answers</button>}
-                      <button type="button" className="min-h-9 rounded-lg border border-white/15 bg-white/5 px-3 text-xs font-semibold text-slate-200 hover:bg-white/10" onClick={async () => { try { setLog({ name: s.student_name, rows: await call(`/sessions/${s.id}/violations`) }); } catch (e) { setErr(e instanceof Error ? e.message : 'Could not load.'); } }}>
+                    <div className="mt-auto flex flex-wrap gap-1.5 pt-1">
+                      {(s.status === 'PAUSED' || s.status === 'LEFT') && <button type="button" className={`${act2} bg-blue-500 font-bold text-white hover:bg-blue-400`} disabled={busy} onClick={() => act(() => call(`/sessions/${s.id}/resume`, 'POST'))}>Resume</button>}
+                      {sound && streams[s.id] && <button type="button" className={`${listen === s.id ? 'bg-white text-slate-950' : 'border border-white/15 bg-white/5 text-slate-100 hover:bg-white/10'} ${act2}`} onClick={() => setListen(listen === s.id ? null : s.id)}>{listen === s.id ? 'Stop listening' : 'Listen'}</button>}
+                      {s.status === 'ENDED' && s.end_reason && !['teacher', 'time_up', 'exam_ended', 'student', 'student_exit'].includes(s.end_reason) && <button type="button" className={`${act2} bg-emerald-500 font-bold text-white hover:bg-emerald-400`} disabled={busy} title="Use this when the rule was broken by mistake: the student continues where they were. It is written in their log." onClick={() => { if (confirm(`Let ${s.student_name} back in? It is recorded in their log.`)) void act(() => call(`/sessions/${s.id}/reinstate`, 'POST')); }}>Let back in</button>}
+                      {s.status !== 'ENDED' && <button type="button" className={`${act2} ${needs(s) ? 'bg-rose-600 font-bold text-white hover:bg-rose-500' : 'border border-white/15 bg-white/5 text-rose-300 hover:bg-white/10'}`} disabled={busy} onClick={() => { if (confirm(`End the test for ${s.student_name}?`)) void act(() => call(`/sessions/${s.id}/end`, 'POST')); }}>End</button>}
+                      {s.has_partial && <button type="button" className={`${act2} border border-emerald-400/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20`} title="What this student had typed, saved every few seconds" onClick={async () => { try { const d = await call(`/sessions/${s.id}/partial`); const show = (v: unknown) => (Array.isArray(v) ? v.join(', ') : v !== null && typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')); setSaved({ name: s.student_name, at: d.saved_at ?? null, rows: Object.entries(d.answers ?? {}).map(([id, v]) => ({ q: (d.labels ?? {})[id] || id, a: show(v) })) }); } catch (e) { setErr(e instanceof Error ? e.message : 'Could not load.'); } }}>Saved answers</button>}
+                      <button type="button" className={`${act2} border border-white/15 bg-white/5 text-slate-200 hover:bg-white/10`} onClick={async () => { try { setLog({ name: s.student_name, rows: await call(`/sessions/${s.id}/violations`) }); } catch (e) { setErr(e instanceof Error ? e.message : 'Could not load.'); } }}>
                         {s.violation_count === 0 ? 'No problems' : `${s.violation_count} problem${s.violation_count === 1 ? '' : 's'}`}
                       </button>
                     </div>
@@ -606,6 +668,27 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
           </ul>
         )}
       </main>
+
+      {/* Phone: the three things used most are always under the thumb. Everything else is in "More". */}
+      <nav aria-label="Room actions" className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-slate-950/95 px-3 pt-2.5 backdrop-blur md:hidden" style={{ paddingBottom: 'max(0.625rem, env(safe-area-inset-bottom))' }}>
+        <div className="mx-auto grid max-w-md grid-cols-[1.4fr_1fr_1fr] gap-2">
+          <button type="button" className={dPrimary} onClick={onCode} disabled={busy || !open}>{code ? (showCode ? 'Hide code' : 'Show code') : 'Get code'}</button>
+          <button type="button" className={dBtn} disabled={busy || !open} onClick={() => act(() => call('/pause-all', 'POST'))}>Pause all</button>
+          <button type="button" className={dBtn} aria-haspopup="dialog" onClick={() => setMoreOpen(true)}>More</button>
+        </div>
+      </nav>
+
+      {isPhone && moreOpen && (
+        <Sheet title="Room actions" onClose={() => setMoreOpen(false)}>
+          <div className="space-y-2.5">
+            <button type="button" className={`${dBtn} w-full text-left`} disabled={busy || !open} onClick={() => { setMoreOpen(false); void act(() => call('/resume-all', 'POST')); }}>Let everyone continue</button>
+            <button type="button" className={`${dBtn} w-full text-left`} onClick={() => { setMoreOpen(false); setSettingsOpen(true); }}>Settings</button>
+            <button type="button" className={`${dBtn} w-full text-left`} disabled={busy || students.length === 0} onClick={() => { setMoreOpen(false); void downloadReport(); }}>Report (Excel)</button>
+            <button type="button" className="min-h-11 w-full rounded-xl border border-rose-500/60 px-4 text-left text-sm font-bold text-rose-300 hover:bg-rose-500/10 disabled:opacity-40" disabled={busy || !open} onClick={() => { setMoreOpen(false); endAll(); }}>End test for everyone</button>
+          </div>
+        </Sheet>
+      )}
+      {isPhone && settingsOpen && <Sheet title="Settings" onClose={() => setSettingsOpen(false)}>{settingsBody}</Sheet>}
 
       {focus && (() => {
         const s = students.find((x) => x.id === focus);
@@ -625,25 +708,19 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
 
       {pay && <MySebPayPanel payment={pay} onClose={() => setPay(null)} onAccess={() => { setPay(null); void makeCode(); }} />}
       {saved && (
-        <div role="dialog" aria-label="Saved answers" className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-3 sm:items-center" onClick={() => setSaved(null)}>
-          <div className="max-h-[85dvh] w-full max-w-xl overflow-auto rounded-2xl border border-white/10 bg-slate-900 p-5 text-slate-100 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="mb-1 flex items-center justify-between"><h2 className="font-bold">{saved.name}: saved answers</h2><button type="button" className={dBtn} onClick={() => setSaved(null)}>Close</button></div>
-            <p className="mb-3 text-xs text-slate-400">What the student had typed{saved.at ? `, last saved ${new Date(saved.at).toLocaleTimeString()}` : ''}. Saved every few seconds, so the last few seconds may be missing. Files are not included.</p>
-            {saved.rows.length === 0 ? <p className="text-sm text-slate-400">Nothing was saved.</p> : (
-              <ol className="space-y-3 text-sm">{saved.rows.map((r, i) => <li key={i}><p className="font-semibold text-slate-200">{r.q}</p><p className="mt-0.5 whitespace-pre-wrap break-words text-slate-300">{r.a || '(empty)'}</p></li>)}</ol>
-            )}
-          </div>
-        </div>
+        <Sheet title={`${saved.name}: saved answers`} onClose={() => setSaved(null)}>
+          <p className="mb-3 text-xs text-slate-400">What the student had typed{saved.at ? `, last saved ${new Date(saved.at).toLocaleTimeString()}` : ''}. Saved every few seconds, so the last few seconds may be missing. Files are not included.</p>
+          {saved.rows.length === 0 ? <p className="text-sm text-slate-400">Nothing was saved.</p> : (
+            <ol className="space-y-3 text-sm">{saved.rows.map((r, i) => <li key={i} className="rounded-xl bg-white/[0.04] p-3"><p className="font-semibold text-slate-200">{r.q}</p><p className="mt-1 whitespace-pre-wrap break-words text-slate-300">{r.a || '(empty)'}</p></li>)}</ol>
+          )}
+        </Sheet>
       )}
       {log && (
-        <div role="dialog" aria-label="What happened" className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-3 sm:items-center" onClick={() => setLog(null)}>
-          <div className="max-h-[80dvh] w-full max-w-md overflow-auto rounded-2xl border border-white/10 bg-slate-900 p-5 text-slate-100 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="mb-3 flex items-center justify-between"><h2 className="font-bold">{log.name}: what happened</h2><button type="button" className={dBtn} onClick={() => setLog(null)}>Close</button></div>
-            {log.rows.length === 0 ? <p className="text-sm text-slate-400">Nothing to report.</p> : (
-              <ul className="space-y-1.5 text-sm">{log.rows.map((v) => <li key={v.id} className="flex justify-between gap-3"><span>{why(v.type)}</span><span className="text-slate-400">{new Date(v.created_at).toLocaleTimeString()}</span></li>)}</ul>
-            )}
-          </div>
-        </div>
+        <Sheet title={`${log.name}: what happened`} onClose={() => setLog(null)}>
+          {log.rows.length === 0 ? <p className="text-sm text-slate-400">Nothing to report.</p> : (
+            <ul className="divide-y divide-white/10 text-sm">{log.rows.map((v) => <li key={v.id} className="flex justify-between gap-3 py-2.5"><span>{why(v.type)}</span><span className="shrink-0 text-slate-400">{new Date(v.created_at).toLocaleTimeString()}</span></li>)}</ul>
+          )}
+        </Sheet>
       )}
     </div>
   );
