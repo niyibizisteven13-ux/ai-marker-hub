@@ -71,7 +71,7 @@ export function assignmentTools(services: ToolServices): Tool[] {
   const mark: Tool = {
     definition: {
       name: 'mark_assignment',
-      description: 'Start marking every submission of a task with AI. Returns a link that opens the Mark page with everyone loaded (one PDF per person, names kept); the user adds the marking scheme or the question paper there and presses Mark, and marking runs live in the chat. Call it when the user asks to mark or correct a task.',
+      description: 'Only when the user wants to OPEN the Mark page themselves (to work through it there): otherwise use mark_task, which marks here in the chat. Returns a link that opens the Mark page with everyone loaded (one PDF per person, names kept); the user adds the marking scheme or the question paper there and presses Mark, and marking runs live in the chat. Call it when the user asks to mark or correct a task.',
       parameters: { type: 'object', required: ['assignmentId'], properties: { assignmentId: { type: 'string' } } },
     },
     async execute(input, ctx) {
