@@ -2985,6 +2985,7 @@ async function startServer() {
     // Recover persisted background jobs and start periodic cleanup of expired jobs/artifacts.
     startPlatformSettings();
     startMySebSync();
+    if (isPrimary()) void import('./server/services/mySebAgent.js').then((m) => m.startMySebAgent());
     startEducationRuntime().catch((err) => logger.error('Background job runtime failed to start', { errorType: err?.name }));
     // Mobile Money: confirm pending payments (missed callbacks) and send renewal reminders (primary only).
     if (isPrimary()) startBillingJobs();

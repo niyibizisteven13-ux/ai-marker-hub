@@ -230,5 +230,118 @@ export function platformTools(services: ToolServices): Tool[] {
     },
   };
 
-  return [rooms, status, code, settings, student, savedAnswers, courses, overview, marked];
+  const AGENT_NOTE = 'The assistant only lets students back in for small reasons (face left the camera, lost connection, switched window). It never touches a student the lecturer paused or anyone who looks like cheating; those are listed for the lecturer. It ends a test only if endAfterMax was switched on.';
+  const assistant: Tool = {
+    definition: {
+      name: 'room_assistant',
+      description: "The room assistant works during a live test by the lecturer's rules, so the lecturer only deals with what really needs a person. Call it with no changes to see the rules and what the assistant did; call it with changes to set the rules. on: switch it on or off. afterSeconds: how long a student who is paused for a small reason and is connected again waits before being let back in (5-300, default 30). maxResumes: how many times each student may be let back in (1-5, default 2). endAfterMax: when a student is paused again after the limit, end their test (only if the lecturer clearly asked for that; otherwise leave it off and the lecturer is told). " + AGENT_NOTE,
+      parameters: {
+        type: 'object', required: ['kind', 'id'],
+        properties: { kind: KIND, id: ID, on: { type: 'boolean' }, autoResume: { type: 'boolean' }, afterSeconds: { type: 'number' }, maxResumes: { type: 'number' }, endAfterMax: { type: 'boolean' } },
+      },
+    },
+    async execute(input, ctx) {
+      const i = input as { kind: 'form' | 'task'; id: string; on?: boolean; autoResume?: boolean; afterSeconds?: number; maxResumes?: number; endAfterMax?: boolean };
+      const patch = { on: i.on, autoResume: i.autoResume, afterSeconds: i.afterSeconds, maxResumes: i.maxResumes, endAfterMax: i.endAfterMax };
+      const changing = Object.values(patch).some((v) => v !== undefined);
+      try {
+        const v = await pf.roomAssistant(ctx.userId, i.kind, String(i.id), changing ? patch : undefined);
+        if (changing) await note(ctx.userId, 'ROOM_ASSISTANT', String(i.id), { kind: i.kind, ...Object.fromEntries(Object.entries(patch).filter(([, x]) => x !== undefined)) });
+        const r = v.rules;
+        const lines = [
+          `Room assistant: ${r.on ? 'ON' : 'off'}. ${r.autoResume ? `It lets a student back in after ${r.afterSeconds} s when the reason is small, up to ${r.maxResumes} time${r.maxResumes === 1 ? '' : 's'} each${r.endAfterMax ? ', then ends their test' : ', then tells the lecturer'}.` : 'Letting students back in by itself is off.'} Let back in so far: ${v.resumed}.`,
+          v.log.length ? `What it did (newest first):\n${v.log.slice(0, 15).map((e) => `- ${String(e.at).slice(11, 16)} ${e.student ? `${e.student}: ` : ''}${e.text}`).join('\n')}` : 'Nothing yet.',
+          AGENT_NOTE,
+        ];
+        return { text: untrusted('ROOM_ASSISTANT', lines.join('\n')) };
+      } catch (e) { return err(`Could not read or change the room assistant: ${problem(e)}`); }
+    },
+  };
+
+  const launch: Tool = {
+    definition: {
+      name: 'launch_test',
+      description: "Start a test for students in one step: set its rules, switch the room assistant on if asked, make the code and the one link for students, and give a ready WhatsApp message to share. Use it when the lecturer says to start, run, open or launch a test, after the quiz exists and is published (make it with create_form and open it with publish_form first, asking the lecturer before publishing). Pass only the rules the lecturer asked for; leave the rest as they are. It does not send anything to students: the lecturer shares the link (the WhatsApp button opens their own WhatsApp).",
+      parameters: {
+        type: 'object', required: ['kind', 'id'],
+        properties: {
+          kind: KIND, id: ID,
+          allowBrowsers: { type: 'boolean' }, strictBrowsers: { type: 'boolean' }, faces: { type: 'string', enum: ['off', 'warn', 'end'] }, studentCard: { type: 'boolean' },
+          browserDevices: { type: 'string', enum: ['any', 'ios'] }, ifStudentLeaves: { type: 'string', enum: ['record', 'pause', 'end', 'pause_then_end'] },
+          assistant: { type: 'boolean', description: 'Switch the room assistant on (lets students back in after small problems; see room_assistant).' },
+          afterSeconds: { type: 'number' }, maxResumes: { type: 'number' },
+        },
+      },
+    },
+    async execute(input, ctx) {
+      const i = input as { kind: 'form' | 'task'; id: string; allowBrowsers?: boolean; strictBrowsers?: boolean; faces?: 'off' | 'warn' | 'end'; studentCard?: boolean; browserDevices?: 'any' | 'ios'; ifStudentLeaves?: 'record' | 'pause' | 'end' | 'pause_then_end'; assistant?: boolean; afterSeconds?: number; maxResumes?: number };
+      const rules = { allowBrowsers: i.allowBrowsers, strictBrowsers: i.strictBrowsers, faces: i.faces, studentCard: i.studentCard, browserDevices: i.browserDevices, ifStudentLeaves: i.ifStudentLeaves };
+      const steps: string[] = [];
+      try {
+        // The code comes first: without a plan or a test credit nothing else should be changed (and the payment steps are what the lecturer needs).
+        const c = await pf.roomCode(ctx.userId, i.kind, String(i.id));
+        steps.push('code made');
+        if (Object.values(rules).some((v) => v !== undefined)) { await pf.roomSettings(ctx.userId, i.kind, String(i.id), rules); steps.push('rules set'); }
+        if (i.assistant !== undefined || i.afterSeconds !== undefined || i.maxResumes !== undefined) {
+          const v = await pf.roomAssistant(ctx.userId, i.kind, String(i.id), { on: i.assistant ?? true, afterSeconds: i.afterSeconds, maxResumes: i.maxResumes });
+          steps.push(v.rules.on ? 'room assistant on' : 'room assistant off');
+        }
+        const m = await pf.roomStatus(ctx.userId, i.kind, String(i.id)).catch(() => null);
+        const title = m?.exam?.title || 'the test';
+        const wa = `https://wa.me/?text=${encodeURIComponent(`Join ${title}: ${c.joinUrl}\nCode: ${c.display}\nOn a laptop or an Android phone it opens MySEB (and downloads it if needed). On an iPhone it starts in the browser.`)}`;
+        await note(ctx.userId, 'LAUNCH_TEST', String(i.id), { kind: i.kind, steps });
+        return { text: [
+          `The test is ready (${steps.join(', ')}).`,
+          `Code: ${c.display} (valid until ${String(c.expiresAt).slice(0, 16).replace('T', ' ')} UTC).`,
+          `Link for students: ${c.joinUrl}`,
+          `Share on WhatsApp (opens the lecturer's own WhatsApp with the message ready): ${wa}`,
+          `Live room: ${roomLink(i.kind, i.id)}`,
+          'Tell the lecturer what is set, give the code and link, and say you can watch the room, answer "how is it going", and write the debrief when the test ends.',
+        ].join('\n') };
+      } catch (e) {
+        if ((e as { code?: string })?.code === 'MYSEB_PAYMENT_REQUIRED') return err(`${(e as Error).message}\nTell the user these payment steps (price, Mobile Money code, WhatsApp). Do not try again until they say they have paid and been given access.`);
+        return err(`Could not start the test${steps.length ? ` (done so far: ${steps.join(', ')})` : ''}: ${problem(e)}`);
+      }
+    },
+  };
+
+  const debrief: Tool = {
+    definition: {
+      name: 'test_debrief',
+      description: "The debrief after a test (or at any moment): how many took part and finished, who broke a rule and how, who the lecturer may want to talk to (ranked), what the room assistant did, what is still waiting, and the next steps. Use it when the lecturer asks how the test went, for a summary, or after ending a test. It only reports what MySEB saw; looking aside or a rule trigger is information to judge, never proof of cheating, and you must say so.",
+      parameters: { type: 'object', required: ['kind', 'id'], properties: { kind: KIND, id: ID } },
+    },
+    async execute(input, ctx) {
+      const i = input as { kind: 'form' | 'task'; id: string };
+      try {
+        const m = await pf.roomStatus(ctx.userId, i.kind, String(i.id));
+        const c = m.counts ?? {};
+        const ag = await pf.roomAssistant(ctx.userId, i.kind, String(i.id)).catch(() => null);
+        const score = (s: (typeof m.students)[number]) => (s.status === 'ENDED' && s.end_reason && !NOT_RULES.has(s.end_reason) ? 3 : 0) + Math.min(s.violation_count, 6) + ((s.aside_seconds ?? 0) >= 60 ? 1 : 0) + (s.reinstated_count ? 1 : 0);
+        const ranked = m.students.map((s) => ({ s, n: score(s) })).filter((x) => x.n > 0).sort((a, b) => b.n - a.n).slice(0, 10);
+        const detail: string[] = [];
+        for (const { s } of ranked.slice(0, 6)) {
+          const v = await pf.roomViolations(ctx.userId, i.kind, String(i.id), s.id).catch(() => []);
+          const tally = new Map<string, number>(); for (const x of v) tally.set(x.type, (tally.get(x.type) ?? 0) + 1);
+          detail.push(`- ${s.student_name}: ${[...tally].map(([k, n]) => `${why(k)}${n > 1 ? ` x${n}` : ''}`).join(', ') || 'no details'}${s.status === 'ENDED' && s.end_reason && !NOT_RULES.has(s.end_reason) ? ` (disqualified: ${why(s.end_reason)})` : ''}${s.reinstated_count ? `, let back in ${s.reinstated_count}x` : ''}${(s.aside_seconds ?? 0) >= 30 ? `, looked aside ${s.aside_seconds}s` : ''}`);
+        }
+        const clean = m.students.length - ranked.length;
+        const waiting = m.students.filter((s) => s.id_status === 'pending' && s.status !== 'ENDED').map((s) => s.student_name);
+        const away = m.students.filter((s) => s.status === 'PAUSED' || s.status === 'LEFT').map((s) => `${s.student_name} (${why(s.pause_reason ?? s.last_violation) || s.status})`);
+        const lines = [
+          `Test: ${m.exam.title} (${m.exam.status === 'ended' ? 'ended' : 'still running'}).`,
+          `Took part: ${m.students.length}. In the test ${c.IN_EXAM ?? 0}, paused ${c.PAUSED ?? 0}, connection lost ${c.LEFT ?? 0}, finished or ended ${c.ENDED ?? 0}. Nothing to report for ${Math.max(0, clean)}.`,
+          ranked.length ? `Worth a conversation (most first):\n${detail.join('\n')}${ranked.length > 6 ? `\n(and ${ranked.length - 6} more with fewer flags)` : ''}` : 'Nobody was flagged.',
+          ag ? `Room assistant: ${ag.rules.on ? 'on' : 'off'}; it let students back in ${ag.resumed} time${ag.resumed === 1 ? '' : 's'}. ${ag.log.filter((e) => e.kind === 'needs_you' || e.kind === 'ended').length ? `It left for the lecturer: ${ag.log.filter((e) => e.kind === 'needs_you' || e.kind === 'ended').slice(0, 6).map((e) => `${e.student ?? ''} ${e.text}`.trim()).join('; ')}.` : ''}` : '',
+          away.length ? `Still paused or away: ${away.join('; ')}.` : '',
+          waiting.length ? `Student cards still waiting for a decision: ${waiting.join(', ')}.` : '',
+          `Next: live_room_student can let a student back in if a rule was broken by mistake; the full Excel report is in the live room (${roomLink(i.kind, i.id)}); for marks use analyze_form or the marking tools.`,
+          'Say clearly: these are things MySEB saw, to judge together with the lecturer. They are not proof that anyone cheated.',
+        ].filter(Boolean);
+        return { text: untrusted('DEBRIEF', lines.join('\n')) };
+      } catch (e) { return err(`Could not write the debrief: ${problem(e)}`); }
+    },
+  };
+
+  return [rooms, status, code, settings, student, savedAnswers, assistant, launch, debrief, courses, overview, marked];
 }

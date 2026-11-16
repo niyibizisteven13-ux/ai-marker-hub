@@ -54,6 +54,7 @@ const myseb = http.createServer((req, res) => {
     if (req.url === `/api/sessions/${benSession}/reinstate` && req.method === 'POST') { benEnded = false; return json({ ok: true }); }
     if (req.url === `/api/exams/${examId}/generate-code` && req.method === 'POST') return json({ code: '482910', display: '482 910', qrSvg: '<svg/>', joinUrl: 'https://www.bwenge.space/myseb/join/482910', expiresAt: '2026-11-17T12:00:00Z' });
     if (req.url === `/api/exams/${examId}` && req.method === 'PATCH') return json({ ok: true });
+    if (req.url === `/api/sessions/${benSession}/violations`) return json([{ id: 1, type: 'visibility_hidden', created_at: '2026-11-16T09:01:00Z' }]);
     if (req.url === `/api/sessions/${benSession}/partial`) return json({ student: 'Ben Habimana', saved_at: '2026-11-16T09:05:00Z', labels: { q1: 'What makes energy in a cell?' }, answers: { q1: 'Mitochondria' } });
     res.writeHead(404).end('{"error":"not found"}');
   });
@@ -152,6 +153,30 @@ test('a code and a rule change from the chat, without opening any page', async (
   const patch = mysebCalls.find((c) => c.startsWith(`PATCH /api/exams/${examId}`))!;
   assert.match(patch, /"multiFace":"end"/); assert.match(patch, /"idCheck":true/); assert.match(patch, /"webDevices":"any"/);
   assert.match(patch, /"liveMode":"pictures"/, 'the live mode the lecturer had is kept');
+});
+
+test('a whole test from one message: start it with the room assistant on, then the debrief, with the lecturer\'s rules and no page opened', async () => {
+  claudeRequests.length = 0; mysebCalls.length = 0; benEnded = true;
+  script.push(
+    { tools: [{ id: 't1', name: 'launch_test', input: { kind: 'form', id: formId, allowBrowsers: true, ifStudentLeaves: 'pause', assistant: true, afterSeconds: 20, maxResumes: 2 } }] },
+    { tools: [{ id: 't2', name: 'test_debrief', input: { kind: 'form', id: formId } }] },
+    { text: 'Your test is open and here is how it went.' },
+  );
+  await ask('Start my biology test now. Let browsers in, pause students who leave, and have the assistant let them back in after 20 seconds. Then tell me how it went.');
+  assert.equal(claudeRequests.length, 3);
+  const names: string[] = claudeRequests[0].tools.map((t: any) => t.name);
+  for (const n of ['launch_test', 'test_debrief', 'room_assistant']) assert.ok(names.includes(n), `${n} is offered`);
+  assert.match(JSON.stringify(claudeRequests[0].system), /Running a test from start to end in the chat/);
+  const launch = toolResults(claudeRequests[1])[0];
+  assert.match(launch, /code made, rules set, room assistant on/); assert.match(launch, /Code: 482 910/);
+  assert.match(launch, /https:\/\/wa\.me\/\?text=Join%20Biology%20midterm/);
+  const patch = mysebCalls.find((c) => c.startsWith(`PATCH /api/exams/${examId}`))!;
+  assert.match(patch, /"leaveAction":"pause"/); assert.match(patch, /"allowWeb":true/);
+  const debrief = toolResults(claudeRequests[2])[0];
+  assert.match(debrief, /Worth a conversation[\s\S]*Ben Habimana: opened another app or tab/); assert.match(debrief, /Room assistant: on/); assert.match(debrief, /not proof that anyone cheated/);
+  // the assistant's rules were really saved for this test, and for nobody else's
+  const saved = await db.appSetting.findUnique({ where: { key: `myseb-agent:form:${formId}` } });
+  assert.equal(saved?.value?.rules?.on, true); assert.equal(saved?.value?.rules?.afterSeconds, 20); assert.equal(saved?.value?.ownerId, user);
 });
 
 test('marking a task from the chat: the scheme is read back for a yes, marks are reported, releasing waits for a yes, Excel arrives attached', async () => {

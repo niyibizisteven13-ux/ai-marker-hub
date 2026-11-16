@@ -16,6 +16,7 @@ interface Student {
   live: { question: { index: number | null; total: number | null; label: string } | null; camera: string; screen_state?: string; frame: string | null; frame_age: number | null; screen?: string | null; screen_age?: number | null } | null;
 }
 interface Room { exam: { title: string; status: string; live_faces: boolean; live_mode?: 'off' | 'pictures' | 'live'; live_sound?: boolean; live_source?: Source; leave_action?: string; allow_web?: boolean; web_strict?: boolean; multi_face?: 'off' | 'warn' | 'end'; id_check?: boolean; web_devices?: 'any' | 'ios' }; counts: Record<Status, number>; students: Student[] }
+interface AgentView { rules: { on: boolean; autoResume: boolean; afterSeconds: number; maxResumes: number; endAfterMax: boolean }; resumed: number; log: Array<{ at: string; kind: string; student?: string; text: string }> }
 interface Code { display: string; qrSvg: string; expiresAt: string; joinUrl?: string }
 
 const LABEL: Record<Status, string> = { IN_EXAM: 'In the test', PAUSED: 'Paused', LEFT: 'Left', ENDED: 'Finished' };
@@ -300,6 +301,8 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
   const [filter, setFilter] = useState<'all' | 'attention' | 'testing'>('all');
   const [query, setQuery] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [agent, setAgent] = useState<AgentView | null>(null);
+  const [agentOpen, setAgentOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [pay, setPay] = useState<Payment | null>(null);
   const [saved, setSaved] = useState<{ name: string; at: string | null; rows: Array<{ q: string; a: string }> } | null>(null);
@@ -345,6 +348,14 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
     try { setCode(await call('/code', 'POST')); setShowCode(true); setPay(null); } catch (e) { const p = (e as { payment?: Payment }).payment; if (p) setPay(p); else throw e; }
   });
   const students = room?.students ?? [];
+  // The room assistant (rules and what it did). Read with every refresh while it is on or its panel is open; one small read.
+  useEffect(() => {
+    if (!room || (agent && !agent.rules.on && !agentOpen)) return;
+    let live = true;
+    call('/agent').then((b) => { if (live && b?.data) setAgent(b.data); }).catch(() => undefined);
+    return () => { live = false; };
+  }, [room, call]); // eslint-disable-line react-hooks/exhaustive-deps
+  const setRules = (patch: Partial<AgentView['rules']>) => act(async () => { const b = await call('/agent', 'PUT', patch); if (b?.data) setAgent(b.data); });
   // Student cards waiting for a look (browsers, when the card check is on). Fetched only while someone is waiting; each picture is deleted at the decision.
   const [idq, setIdq] = useState<Array<{ id: string; student_name: string; image: string }>>([]);
   const waitingIds = students.filter((s) => s.id_status === 'pending' && s.status !== 'ENDED').map((s) => s.id).join(',');
@@ -601,6 +612,57 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
         {mode !== 'off' && <p className="mb-4 text-xs leading-relaxed text-slate-500">
           Students were told what is shown ({source === 'camera' ? 'their camera' : source === 'screen' ? 'their whole screen' : 'their screen and camera'}) and must agree.{showScreen ? ' If a student stops sharing the screen it counts as leaving the test.' : ''} {mode === 'live' ? `Live video is shown for the ${maxLive} students on screen at a time; tap a student to zoom in and see them in full quality; the rest show a small picture. Nothing is recorded or saved.${sound ? ' Press Listen on a tile to hear that student; they see a notice while you do.' : ''}` : 'Pictures are small, replaced every 10 seconds, and never saved.'}
         </p>}
+
+        {room && (
+          <section aria-label="Room assistant" className="mb-4 rounded-2xl border border-white/10 bg-slate-900 p-3 sm:p-4">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <span aria-hidden className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${agent?.rules.on ? 'bg-emerald-500/15 text-emerald-300' : 'bg-white/5 text-slate-400'}`}>
+                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z" /><path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z" /></svg>
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="flex items-center gap-2 text-sm font-bold">Room assistant <span className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold tracking-wide ${agent?.rules.on ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-slate-200'}`}>{agent?.rules.on ? 'ON' : 'OFF'}</span></p>
+                <p className="text-xs leading-snug text-slate-400">{agent?.rules.on
+                  ? `Lets a student back in after ${agent.rules.afterSeconds} s when the reason is small (face left the camera, lost connection), up to ${agent.rules.maxResumes} time${agent.rules.maxResumes === 1 ? '' : 's'} each${agent.rules.endAfterMax ? ', then ends their test' : ', then tells you'}. Let back in so far: ${agent.resumed}.`
+                  : 'Handles the routine moments for you and lists only what needs you. It never touches anyone you paused or anyone who looks like cheating.'}</p>
+              </div>
+              <div className="flex w-full gap-2 sm:w-auto">
+                <button type="button" className={`${agent?.rules.on ? dBtn : dPrimary} flex-1 sm:flex-none`} disabled={busy || !open} onClick={() => void setRules({ on: !agent?.rules.on })}>{agent?.rules.on ? 'Turn off' : 'Turn on'}</button>
+                <button type="button" aria-expanded={agentOpen} className={`${dBtn} flex-1 sm:flex-none`} onClick={() => setAgentOpen((v) => !v)}>Rules</button>
+              </div>
+            </div>
+            {agentOpen && (
+              <div className="mt-3 grid gap-3 border-t border-white/10 pt-3 sm:grid-cols-3">
+                <Setting label="Wait before letting back in" hint="They must be connected again.">
+                  <select className={dSelect} style={{ colorScheme: 'dark' }} aria-label="Wait before letting back in" value={agent?.rules.afterSeconds ?? 30} disabled={busy || !open} onChange={(e) => void setRules({ afterSeconds: Number(e.target.value) })}>
+                    {[10, 20, 30, 60, 120].map((n) => <option key={n} value={n}>{n} seconds</option>)}
+                  </select>
+                </Setting>
+                <Setting label="Times each student" hint="After this it tells you instead.">
+                  <select className={dSelect} style={{ colorScheme: 'dark' }} aria-label="Times each student" value={agent?.rules.maxResumes ?? 2} disabled={busy || !open} onChange={(e) => void setRules({ maxResumes: Number(e.target.value) })}>
+                    {[1, 2, 3, 5].map((n) => <option key={n} value={n}>{n} time{n === 1 ? '' : 's'}</option>)}
+                  </select>
+                </Setting>
+                <Setting label="After the limit" hint="Off: you are told and decide. On: their test ends by itself.">
+                  <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm font-semibold md:min-h-9">
+                    <input type="checkbox" className="h-5 w-5 accent-blue-500" checked={!!agent?.rules.endAfterMax} disabled={busy || !open} onChange={(e) => { if (!e.target.checked || confirm('End a student\'s test by itself when they have used all their chances?')) void setRules({ endAfterMax: e.target.checked }); }} />
+                    End their test
+                  </label>
+                </Setting>
+              </div>
+            )}
+            {agent && agent.log.length > 0 && (
+              <ul className="mt-3 divide-y divide-white/10 border-t border-white/10 text-sm" aria-label="What the assistant did">
+                {agent.log.slice(0, 6).map((e, i) => (
+                  <li key={`${e.at}-${i}`} className="flex items-start gap-2.5 py-2">
+                    <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${e.kind === 'resumed' ? 'bg-emerald-400' : e.kind === 'needs_you' || e.kind === 'card' ? 'bg-amber-400' : e.kind === 'ended' ? 'bg-rose-400' : 'bg-slate-500'}`} />
+                    <p className="min-w-0 flex-1 text-slate-200">{e.student && <strong className="font-semibold text-white">{e.student}: </strong>}{e.text}</p>
+                    <time className="shrink-0 text-xs tabular-nums text-slate-500" dateTime={e.at}>{new Date(e.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
 
         {!room ? <p className="py-20 text-center text-slate-500">Loading…</p> : students.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-white/15 px-4 py-14 text-center">
