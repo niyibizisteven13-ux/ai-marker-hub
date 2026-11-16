@@ -16,6 +16,8 @@ const STRICT_END = new Set(['face_missing', 'camera_off']);   // 'multiple_faces
 const LEAVE_LIKE = new Set(['leave', 'blur', 'background', 'visibility_hidden', 'fullscreen_exit', 'split_screen', 'screen_recording', 'extra_display', 'forbidden_app', 'screen_share_stopped']);
 
 const MARK = /MySEB\//;
+/** iPhone, iPad, iPod. An iPad in desktop mode sends a Mac user agent: the page says it has a touch screen (a claim the server cannot check). */
+export const isIosDevice = (ua = '', claimsTouch = false) => /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && claimsTouch);
 
 /**
  * Finds the session for a request and decides whether this client is allowed to use its key.
@@ -34,7 +36,7 @@ export async function authSession(req, { allowCookie = false } = {}) {
   if (!key || key.length > 100) return { error: 'missing' };
 
   const { rows } = await q(
-    `SELECT s.*, e.title, e.exam_url, e.require_myseb, e.allow_extension, e.allow_web, e.web_strict, e.multi_face, e.id_check, e.leave_action, e.status AS exam_status
+    `SELECT s.*, e.title, e.exam_url, e.require_myseb, e.allow_extension, e.allow_web, e.web_strict, e.web_devices, e.multi_face, e.id_check, e.leave_action, e.status AS exam_status
        FROM exam_sessions s JOIN exams e ON e.id = s.exam_id WHERE s.token_hash = $1`, [tokenHash(key)]);
   const row = rows[0];
   if (!row) return { error: 'invalid' };

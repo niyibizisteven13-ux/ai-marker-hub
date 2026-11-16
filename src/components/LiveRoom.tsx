@@ -11,10 +11,10 @@ interface Alert { id: string; name: string; text: string; ended: boolean }
 interface Student {
   id: string; student_name: string; status: Status; client_type: string; platform: string | null; violation_count: number;
   last_violation: string | null; pause_reason: string | null; end_reason: string | null; seen_ago: number;
-  aside_seconds?: number; reinstated_count?: number; id_status?: string;
+  aside_seconds?: number; reinstated_count?: number; id_status?: string; has_partial?: boolean;
   live: { question: { index: number | null; total: number | null; label: string } | null; camera: string; screen_state?: string; frame: string | null; frame_age: number | null; screen?: string | null; screen_age?: number | null } | null;
 }
-interface Room { exam: { title: string; status: string; live_faces: boolean; live_mode?: 'off' | 'pictures' | 'live'; live_sound?: boolean; live_source?: Source; leave_action?: string; allow_web?: boolean; web_strict?: boolean; multi_face?: 'off' | 'warn' | 'end'; id_check?: boolean }; counts: Record<Status, number>; students: Student[] }
+interface Room { exam: { title: string; status: string; live_faces: boolean; live_mode?: 'off' | 'pictures' | 'live'; live_sound?: boolean; live_source?: Source; leave_action?: string; allow_web?: boolean; web_strict?: boolean; multi_face?: 'off' | 'warn' | 'end'; id_check?: boolean; web_devices?: 'any' | 'ios' }; counts: Record<Status, number>; students: Student[] }
 interface Code { display: string; qrSvg: string; expiresAt: string; joinUrl?: string }
 
 const LABEL: Record<Status, string> = { IN_EXAM: 'In the test', PAUSED: 'Paused', LEFT: 'Left', ENDED: 'Finished' };
@@ -262,6 +262,7 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
   const [query, setQuery] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState<{ name: string; at: string | null; rows: Array<{ q: string; a: string }> } | null>(null);
   const [log, setLog] = useState<{ name: string; rows: Array<{ id: number; type: string; created_at: string }> } | null>(null);
   const [copied, setCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
@@ -443,6 +444,11 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
                   Allow browsers
                 </label>
               </Setting>
+              <Setting label="Browsers on" hint="Which devices may use the browser. iPhone and iPad only: laptops and Android phones must use the MySEB app (a device can claim to be an iPhone, so this stops ordinary students, not a determined one).">
+                <select className={dSelect} style={{ colorScheme: 'dark' }} aria-label="Browsers on" value={room?.exam?.web_devices ?? 'any'} disabled={busy || !open || !room?.exam?.allow_web} onChange={(e) => act(() => call('/settings', 'POST', { liveMode: mode, liveSound: sound, liveSource: source, leaveAction, webDevices: e.target.value }))}>
+                  <option value="any">Any device</option><option value="ios">iPhone and iPad only</option>
+                </select>
+              </Setting>
               <Setting label="Browser rules" hint="Strict (recommended): a student in a browser is rejected at once if they leave the page, close the tab, turn the camera off or their face leaves the camera. They get one attempt. Gentler: your 'If a student leaves' rule applies.">
                 <label className="flex min-h-9 cursor-pointer items-center gap-2 text-sm font-semibold">
                   <input type="checkbox" className="h-4 w-4" checked={room?.exam?.web_strict !== false} disabled={busy || !open || !room?.exam?.allow_web} onChange={(e) => act(() => call('/settings', 'POST', { liveMode: mode, liveSound: sound, liveSource: source, leaveAction, webStrict: e.target.checked }))} />
@@ -583,6 +589,7 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
                       {sound && streams[s.id] && <button type="button" className={`${listen === s.id ? 'bg-white text-slate-950' : 'border border-white/15 bg-white/5 text-slate-100 hover:bg-white/10'} min-h-9 rounded-lg px-3 text-xs font-semibold`} onClick={() => setListen(listen === s.id ? null : s.id)}>{listen === s.id ? 'Stop listening' : 'Listen'}</button>}
                       {s.status === 'ENDED' && s.end_reason && !['teacher', 'time_up', 'exam_ended', 'student', 'student_exit'].includes(s.end_reason) && <button type="button" className="min-h-9 rounded-lg bg-emerald-500 px-3 text-xs font-bold text-white hover:bg-emerald-400 disabled:opacity-40" disabled={busy} title="Use this when the rule was broken by mistake: the student continues where they were. It is written in their log." onClick={() => { if (confirm(`Let ${s.student_name} back in? It is recorded in their log.`)) void act(() => call(`/sessions/${s.id}/reinstate`, 'POST')); }}>Let back in</button>}
                       {s.status !== 'ENDED' && <button type="button" className={needs(s) ? 'min-h-9 rounded-lg bg-rose-600 px-3 text-xs font-bold text-white hover:bg-rose-500 disabled:opacity-40' : 'min-h-9 rounded-lg border border-white/15 bg-white/5 px-3 text-xs font-semibold text-rose-300 hover:bg-white/10 disabled:opacity-40'} disabled={busy} onClick={() => { if (confirm(`End the test for ${s.student_name}?`)) void act(() => call(`/sessions/${s.id}/end`, 'POST')); }}>End</button>}
+                      {s.has_partial && <button type="button" className="min-h-9 rounded-lg border border-emerald-400/40 bg-emerald-500/10 px-3 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/20" title="What this student had typed, saved every few seconds" onClick={async () => { try { const d = await call(`/sessions/${s.id}/partial`); const show = (v: unknown) => (Array.isArray(v) ? v.join(', ') : v !== null && typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')); setSaved({ name: s.student_name, at: d.saved_at ?? null, rows: Object.entries(d.answers ?? {}).map(([id, v]) => ({ q: (d.labels ?? {})[id] || id, a: show(v) })) }); } catch (e) { setErr(e instanceof Error ? e.message : 'Could not load.'); } }}>Saved answers</button>}
                       <button type="button" className="min-h-9 rounded-lg border border-white/15 bg-white/5 px-3 text-xs font-semibold text-slate-200 hover:bg-white/10" onClick={async () => { try { setLog({ name: s.student_name, rows: await call(`/sessions/${s.id}/violations`) }); } catch (e) { setErr(e instanceof Error ? e.message : 'Could not load.'); } }}>
                         {s.violation_count === 0 ? 'No problems' : `${s.violation_count} problem${s.violation_count === 1 ? '' : 's'}`}
                       </button>
@@ -611,6 +618,17 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
         );
       })()}
 
+      {saved && (
+        <div role="dialog" aria-label="Saved answers" className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-3 sm:items-center" onClick={() => setSaved(null)}>
+          <div className="max-h-[85dvh] w-full max-w-xl overflow-auto rounded-2xl border border-white/10 bg-slate-900 p-5 text-slate-100 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-1 flex items-center justify-between"><h2 className="font-bold">{saved.name}: saved answers</h2><button type="button" className={dBtn} onClick={() => setSaved(null)}>Close</button></div>
+            <p className="mb-3 text-xs text-slate-400">What the student had typed{saved.at ? `, last saved ${new Date(saved.at).toLocaleTimeString()}` : ''}. Saved every few seconds, so the last few seconds may be missing. Files are not included.</p>
+            {saved.rows.length === 0 ? <p className="text-sm text-slate-400">Nothing was saved.</p> : (
+              <ol className="space-y-3 text-sm">{saved.rows.map((r, i) => <li key={i}><p className="font-semibold text-slate-200">{r.q}</p><p className="mt-0.5 whitespace-pre-wrap break-words text-slate-300">{r.a || '(empty)'}</p></li>)}</ol>
+            )}
+          </div>
+        </div>
+      )}
       {log && (
         <div role="dialog" aria-label="What happened" className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-3 sm:items-center" onClick={() => setLog(null)}>
           <div className="max-h-[80dvh] w-full max-w-md overflow-auto rounded-2xl border border-white/10 bg-slate-900 p-5 text-slate-100 shadow-2xl" onClick={(e) => e.stopPropagation()}>

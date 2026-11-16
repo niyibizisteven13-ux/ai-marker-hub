@@ -172,3 +172,60 @@ test('more than one face, the card check, looking aside and letting a student ba
   assert.equal((await call('/api/heartbeat', { method: 'POST', headers: H(d) })).json.status, 'ENDED');
   assert.equal((await mon()).students.find((s) => s.student_name === 'Dan').end_reason, 'id_refused');
 });
+
+test('browsers for iPhones and iPads only, and answers saved so leaving does not lose them', async () => {
+  const exam = (await call('/api/exams', { method: 'POST', headers: T, body: { title: 'Phase 3', leaveAction: 'record' } })).json;
+  await call(`/api/exams/${exam.id}`, { method: 'PATCH', headers: T, body: { allowWeb: true } });
+  const code = (await call(`/api/exams/${exam.id}/generate-code`, { method: 'POST', headers: T })).json;
+  const join = (name, ua, extra = {}) => call('/api/verify-code', { method: 'POST', headers: { 'User-Agent': ua }, body: { code: code.code, studentName: name, deviceId: `p3-${name}-1234567`, clientType: 'web', ...extra } });
+  const MAC = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/17.0 Safari/605.1.15';
+  const H = (j, ua = SAFARI) => ({ Cookie: j.cookie.split(';')[0], 'User-Agent': ua });
+  const patch = (body) => call(`/api/exams/${exam.id}`, { method: 'PATCH', headers: T, body });
+  const mon = async () => (await call(`/api/exams/${exam.id}/monitor`, { headers: T })).json;
+
+  // any device by default; ios only: a laptop browser is refused with a clear reason, an iPhone and a (claimed) iPad in desktop mode are fine
+  assert.equal((await mon()).exam.web_devices, 'any');
+  assert.equal((await join('Lap0', CHROME)).status, 200);
+  assert.equal((await patch({ webDevices: 'nonsense' })).status, 400);
+  await patch({ webDevices: 'ios' });
+  assert.equal((await mon()).exam.web_devices, 'ios');
+  const laptop = await join('Lap1', CHROME); assert.equal(laptop.status, 403); assert.match(laptop.json.error, /only for iPhones and iPads/);
+  assert.equal((await join('Mac1', MAC)).status, 403, 'a Mac without a touch screen');
+  assert.equal((await join('Pad1', MAC, { touch: true })).status, 200, 'an iPad in desktop mode says it has a touch screen');
+  const phone = await join('Phone1', SAFARI); assert.equal(phone.status, 200);
+  // the gate's offer of the browser is only made to devices that could use it
+  const gate = (ua) => call('/api/gate', { method: 'POST', headers: { 'X-MySEB-Service-Key': 'tkey' }, body: { key: 'x'.repeat(30), client: 'cookie', device: '', userAgent: ua, examId: exam.id } });
+  assert.equal((await gate(CHROME)).json.webAllowed, false); assert.equal((await gate(SAFARI)).json.webAllowed, true);
+
+  // saved answers: any time while in the test, bounded in size, only the owner reads them
+  const sid = (await mon()).students.find((s) => s.student_name === 'Phone1').id;
+  assert.equal((await call('/api/partial', { method: 'POST', headers: H(phone), body: { nonsense: 1 } })).status, 400);
+  assert.equal((await call('/api/partial', { method: 'POST', headers: H(phone), body: { answers: { huge: 'x'.repeat(250_000) } } })).status, 413);
+  const first = { key: 'dynamicform:f1', answers: { q1: 'Mitochondria', q2: ['a', 'c'] }, labels: { q1: 'What makes energy?', q2: 'Pick two' } };
+  assert.equal((await call('/api/partial', { method: 'POST', headers: H(phone), body: first })).status, 200);
+  assert.equal((await call('/api/partial', { method: 'POST', headers: { 'User-Agent': SAFARI }, body: first })).status, 401, 'needs the browser session');
+  await new Promise((r) => setTimeout(r, 1700));
+  assert.equal((await mon()).students.find((s) => s.id === sid).has_partial, true);
+  assert.equal((await call(`/api/sessions/${sid}/partial`)).status, 401, 'only the lecturer reads them');
+  const got = (await call(`/api/sessions/${sid}/partial`, { headers: T })).json;
+  assert.deepEqual(got.answers, first.answers); assert.deepEqual(got.labels, first.labels); assert.equal(got.student, 'Phone1');
+
+  // disqualified: the last words still arrive; they are in the report and the lecturer can see them
+  const last = { ...first, answers: { ...first.answers, q1: 'Mitochondria and chloroplasts' } };
+  assert.equal((await call('/api/violation', { method: 'POST', headers: H(phone), body: { type: 'visibility_hidden', detail: {} } })).json.status, 'ENDED');
+  assert.equal((await call('/api/partial', { method: 'POST', headers: H(phone), body: last })).status, 200, 'a final save right after leaving');
+  assert.equal((await call(`/api/sessions/${sid}/partial`, { headers: T })).json.answers.q1, 'Mitochondria and chloroplasts');
+  const rep = (await call(`/api/exams/${exam.id}/report`, { headers: T })).json;
+  assert.equal(rep.partial.length, 1); assert.equal(rep.partial[0].student_name, 'Phone1'); assert.equal(rep.partial[0].answers.q1, 'Mitochondria and chloroplasts');
+  // a long time after the end it is refused
+  await pool.query(`UPDATE exam_sessions SET ended_at = now() - interval '11 minutes' WHERE id=$1`, [sid]);
+  assert.equal((await call('/api/partial', { method: 'POST', headers: H(phone), body: first })).status, 409);
+  assert.equal((await call(`/api/sessions/${sid}/partial`, { headers: T })).json.answers.q1, 'Mitochondria and chloroplasts', 'nothing was overwritten');
+
+  // let back in: the page is told what to put back, and only then
+  assert.equal((await call('/api/web/me', { headers: H(phone) })).json.restore, null, 'not reinstated: nothing to restore');
+  await pool.query(`UPDATE exam_sessions SET ended_at = now() WHERE id=$1`, [sid]);
+  assert.equal((await call(`/api/sessions/${sid}/reinstate`, { method: 'POST', headers: T })).status, 200);
+  const me = (await call('/api/web/me', { headers: H(phone) })).json;
+  assert.equal(me.status, 'IN_EXAM'); assert.equal(me.restore.key, 'dynamicform:f1'); assert.equal(me.restore.answers.q1, 'Mitochondria and chloroplasts');
+});
