@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { requireAuth } from '../../production/auth.js';
 import { reportWorkbook } from '../services/mySebReport.js';
 import logger from '../utils/logger.js';
+import { getAgent, setAgent } from '../services/mySebAgent.js';
 import { MySebError, assignmentTarget, downloadLinks, endAll, formTarget, frames, generateCode, iceServers, idChecks, idDecision, reinstate, savedAnswers, lecturerSignalPull, lecturerSignalPush, monitor, report, mySebConfigured, pauseAll, relayLive, resumeAll, sessionAction, setLiveMode, studentSignalPull, heldStudentSignalPull, streamRoomEvents, studentSignalPush, violations, type TargetLoader } from '../services/mySeb.js';
 
 const userIdOf = (req: Request): string => (req as any).user?.userId;
@@ -76,6 +77,12 @@ function createMySebOwnerRouterFor(target: (userId: string, id: string) => Targe
   r.post('/:id/myseb/settings', requireAuth, run(async (req, res) => {
     const mode = ['off', 'pictures', 'live'].includes(req.body?.liveMode) ? req.body.liveMode : req.body?.liveFaces === true ? 'pictures' : 'off';
     res.json(await setLiveMode(t(req), mode, req.body?.liveSound === true, { source: req.body?.liveSource, leaveAction: req.body?.leaveAction, allowWeb: req.body?.allowWeb, webStrict: req.body?.webStrict, multiFace: req.body?.multiFace, idCheck: req.body?.idCheck, webDevices: req.body?.webDevices }));
+  }));
+  // The room assistant: the lecturer's rules for routine moments, and what it did.
+  r.get('/:id/myseb/agent', requireAuth, run(async (req, res) => { res.json({ success: true, data: await getAgent(t(req)) }); }));
+  r.put('/:id/myseb/agent', requireAuth, run(async (req, res) => {
+    const b = req.body ?? {};
+    res.json({ success: true, data: await setAgent(t(req), { on: b.on, autoResume: b.autoResume, afterSeconds: b.afterSeconds, maxResumes: b.maxResumes, reasons: b.reasons, endAfterMax: b.endAfterMax }, userIdOf(req)) });
   }));
   // Live video set-up: the lecturer's room listens for offers/ICE from students and sends watch/answer/ice back.
   r.get('/:id/myseb/ice', requireAuth, (_req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(iceServers()); });

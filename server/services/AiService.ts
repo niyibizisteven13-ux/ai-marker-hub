@@ -452,6 +452,16 @@ export const bwengeAgent = createAiAgent({
         if (action === 'let_back_in') await my.reinstate(load, studentId);
         else await my.sessionAction(load, studentId, action);
       },
+      roomAssistant: async (userId, kind, id, patch) => {
+        const my = await import('./mySeb.js'); const ag = await import('./mySebAgent.js');
+        const load = kind === 'form' ? my.formTarget(userId, id) : my.assignmentTarget(userId, id);
+        const v = patch && Object.values(patch).some((x) => x !== undefined) ? await ag.setAgent(load, patch, userId) : await ag.getAgent(load);
+        return { rules: v.rules, resumed: v.resumed, log: v.log };
+      },
+      roomViolations: async (userId, kind, id, studentId) => {
+        const my = await import('./mySeb.js');
+        return (await my.violations(kind === 'form' ? my.formTarget(userId, id) : my.assignmentTarget(userId, id), studentId)) as any;
+      },
       roomSavedAnswers: async (userId, kind, id, studentId) => {
         const my = await import('./mySeb.js');
         return my.savedAnswers(kind === 'form' ? my.formTarget(userId, id) : my.assignmentTarget(userId, id), studentId) as any;

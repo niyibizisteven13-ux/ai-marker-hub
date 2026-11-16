@@ -4,7 +4,7 @@
  * It errs towards giving the tools: a missed request is worse than one tool turn that was not needed.
  */
 // Terms that only mean the platform: enough on their own.
-const STRONG = /(?<![\p{L}])(my ?seb|live[- ]?room|live exam|gradebook|grade[- ]?book|roster|disqualif\w*|join link|link for students|code for students|student card|browser mode|saved answers|practice class(?:es)?|join code|class code|kuri live|ibyemezo by'abanyeshuri|salle en direct|liste de classe|carnet de notes(?![\p{L}]))|(?<![\p{L}])let [\w'.-]+(?: [\w'.-]+)? back in(?![\p{L}])/iu;
+const STRONG = /(?<![\p{L}])(room assistant|debrief|launch (?:my |the |a )?(?:test|exam|quiz)|run (?:my |the |a )?(?:test|exam|quiz)|start (?:my |the |a )?(?:test|exam|quiz)|my ?seb|live[- ]?room|live exam|gradebook|grade[- ]?book|roster|disqualif\w*|join link|link for students|code for students|student card|browser mode|saved answers|practice class(?:es)?|join code|class code|kuri live|ibyemezo by'abanyeshuri|salle en direct|liste de classe|carnet de notes(?![\p{L}]))|(?<![\p{L}])let [\w'.-]+(?: [\w'.-]+)? back in(?![\p{L}])/iu;
 // Things the platform holds.
 const NOUN = /(?<![\p{L}])(exams?|tests?|quiz(?:zes)?|class(?:es)?|courses?|students?|learners?|pupils?|marks?|marking|grades?|results?|scores?|forms?|surveys?|questionnaires?|tasks?|assignments?|homework|submissions?|scripts?|papers?|candidates?|examen|examens|classe|classes|[ée]tudiants?|[ée]l[èe]ves?|notes?|r[ée]sultats?|ikizamini|ibizamini|abanyeshuri|umunyeshuri|ishuri|amanota|ibisubizo|umukoro|imikoro(?![\p{L}]))/iu;
 // Asking about it or doing something with it (not just talking about the subject in general).

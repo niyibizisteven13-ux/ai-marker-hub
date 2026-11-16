@@ -25,6 +25,11 @@ const services: ToolServices = {
     roomCode: async () => ({ display: '482 910', joinUrl: 'https://www.bwenge.space/myseb/join/482910', expiresAt: '2026-11-16T12:00:00Z' }),
     roomSettings: async (_u, _k, _i, patch) => { calls.push(`settings ${JSON.stringify(patch)}`); },
     roomStudent: async (_u, _k, _i, sid, action) => { calls.push(`${action} ${sid}`); },
+    roomAssistant: async (_u, _k, _i, patch) => {
+      if (patch) calls.push(`assistant ${JSON.stringify(patch)}`);
+      return { rules: { on: patch?.on ?? false, autoResume: true, afterSeconds: patch?.afterSeconds ?? 30, maxResumes: patch?.maxResumes ?? 2, endAfterMax: !!patch?.endAfterMax }, resumed: 3, log: [{ at: '2026-11-16T09:10:00Z', kind: 'resumed', student: 'Cora Mutesi', text: 'Let back in: switched window (1 of 2).' }, { at: '2026-11-16T09:12:00Z', kind: 'needs_you', student: 'Ben Habimana', text: 'more than one face: only you can decide this' }] };
+    },
+    roomViolations: async (_u, _k, _i, sid) => (sid === 's2' ? [{ type: 'visibility_hidden', created_at: '2026-11-16T09:01:00Z' }, { type: 'visibility_hidden', created_at: '2026-11-16T09:02:00Z' }] : [{ type: 'blur', created_at: '2026-11-16T09:03:00Z' }]),
     roomSavedAnswers: async () => ({ student: 'Ben Habimana', saved_at: '2026-11-16T09:05:00Z', labels: { q1: 'What makes energy?' }, answers: { q1: 'Mitochondria', q9: ['a', 'b'] } }),
     courses: async () => [{ id: 'c1', name: 'S4 Biology', code: 'BIO4', term: 'Term 1', students: 30, items: 3 }],
     courseOverview: async () => ({
@@ -45,7 +50,7 @@ const ctx = { userId: 'teacher' } as any;
 
 test('without the platform services there are no platform tools', () => {
   assert.equal(platformTools({}).length, 0);
-  assert.deepEqual(Object.keys(tools).sort(), ['course_overview', 'list_courses', 'list_live_rooms', 'list_marked_exams', 'live_room_code', 'live_room_saved_answers', 'live_room_settings', 'live_room_status', 'live_room_student']);
+  assert.deepEqual(Object.keys(tools).sort(), ['course_overview', 'launch_test', 'list_courses', 'list_live_rooms', 'list_marked_exams', 'live_room_code', 'live_room_saved_answers', 'live_room_settings', 'live_room_status', 'live_room_student', 'room_assistant', 'test_debrief']);
 });
 
 test('the live room in plain words: who is away, who was disqualified and why, cards waiting, looked aside', async () => {
@@ -124,4 +129,39 @@ test('the instructions teach the chat to use them, and only when the tools exist
   const on = buildCapabilitiesPrompt({ tools: Object.keys(tools) });
   assert.match(on, /The whole platform, from here/); assert.match(on, /live_room_status/); assert.match(on, /always ask before ending/);
   assert.doesNotMatch(buildCapabilitiesPrompt({ tools: ['create_document'] }), /The whole platform, from here/);
+});
+
+test('launch_test: rules, assistant, code, student link and a ready WhatsApp message in one step; payment steps pass through', async () => {
+  calls.length = 0;
+  const t = (await tools.launch_test.execute({ kind: 'form', id: 'f1', allowBrowsers: true, ifStudentLeaves: 'pause', assistant: true, afterSeconds: 20 }, ctx)).text;
+  assert.match(t, /code made, rules set, room assistant on/);
+  assert.match(t, /Code: 482 910/);
+  assert.match(t, /Link for students: https:\/\/www\.bwenge\.space\/myseb\/join\/482910/);
+  assert.match(t, /https:\/\/wa\.me\/\?text=Join%20S4%20Biology%20midterm/);
+  assert.ok(calls.some((c) => c.startsWith('settings') && c.includes('"allowBrowsers":true') && c.includes('"ifStudentLeaves":"pause"')));
+  assert.ok(calls.some((c) => c.startsWith('assistant') && c.includes('"on":true') && c.includes('"afterSeconds":20')));
+  // not paid: nothing else is changed, and the steps are relayed
+  const paid = platformTools({ platform: { ...services.platform!, roomCode: async () => { throw Object.assign(new Error('MySEB is a paid service. Pay to code 2191184.'), { code: 'MYSEB_PAYMENT_REQUIRED' }); } } }).find((x) => x.definition.name === 'launch_test')!;
+  calls.length = 0;
+  const r = await paid.execute({ kind: 'form', id: 'f1', allowBrowsers: true }, ctx);
+  assert.match(r.text, /paid service.*2191184/s); assert.equal(calls.length, 0, 'rules are not changed before the code works');
+});
+
+test('room_assistant: shows the rules and what it did; changing them is recorded and never mentions ending unless asked', async () => {
+  calls.length = 0;
+  const seen = (await tools.room_assistant.execute({ kind: 'form', id: 'f1' }, ctx)).text;
+  assert.match(seen, /Room assistant: off/); assert.match(seen, /Cora Mutesi: Let back in/); assert.match(seen, /never touches a student the lecturer paused/);
+  assert.equal(calls.length, 0, 'reading changes nothing');
+  const set = (await tools.room_assistant.execute({ kind: 'form', id: 'f1', on: true, afterSeconds: 45, maxResumes: 3 }, ctx)).text;
+  assert.match(set, /Room assistant: ON/); assert.match(set, /after 45 s/); assert.match(set, /up to 3 times each, then tells the lecturer/);
+  assert.ok(calls.includes('assistant {"on":true,"afterSeconds":45,"maxResumes":3}'));
+});
+
+test('test_debrief: ranks who to talk to, adds the assistant\'s work, and says it is not proof', async () => {
+  const t = (await tools.test_debrief.execute({ kind: 'form', id: 'f1' }, ctx)).text;
+  assert.match(t, /Worth a conversation[\s\S]*Ben Habimana: opened another app or tab x2 \(disqualified: opened another app or tab\)/);
+  assert.match(t, /Cora Mutesi/); assert.match(t, /let students back in 3 times/);
+  assert.match(t, /It left for the lecturer: Ben Habimana more than one face/);
+  assert.match(t, /not proof that anyone cheated/);
+  assert.doesNotMatch(t, /Dan Ruzindana/, 'finished on time with nothing flagged');
 });
