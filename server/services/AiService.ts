@@ -358,6 +358,46 @@ export const bwengeAgent = createAiAgent({
       list: async (userId) => (await import('./assignments/runtime.js')).assignmentService().list(userId),
       get: async (userId, id) => (await import('./assignments/runtime.js')).assignmentService().get(userId, id),
     },
+    // Doing the work in the chat: marking a task, releasing results, classes, marked exams and Excel files (lazy imports, like the services above).
+    work: {
+      taskResults: async (userId, id) => {
+        const a: any = await (await import('./assignments/runtime.js')).assignmentService().get(userId, id);
+        return { title: a.title, open: !!a.open, dueAt: a.dueAt ?? null, autoMark: !!a.autoMark, link: a.link, submissions: a.submissions.map((x: any) => ({ id: x.id, studentName: x.studentName, studentId: x.studentId, late: !!x.late, marking: x.marking })) };
+      },
+      taskSettings: async (userId, id, patch) => {
+        const svc = (await import('./assignments/runtime.js')).assignmentService();
+        await svc.update(userId, id, patch);
+        const a: any = await svc.get(userId, id);
+        return { title: a.title, open: !!a.open, dueAt: a.dueAt ?? null };
+      },
+      markTask: async (userId, id, input) => {
+        const svc = (await import('./assignments/runtime.js')).assignmentService();
+        const before: any = await svc.get(userId, id);
+        if (input.scheme) await svc.setAutoMark(userId, id, { autoMark: true, scheme: [{ name: 'marking-scheme.txt', data: Buffer.from(input.scheme, 'utf8') }] });
+        else if (!before.autoMark) await svc.setAutoMark(userId, id, { autoMark: true });
+        const r: any = await svc.markNow(userId, id, { confirm: input.confirm === true });
+        if (r.kind === 'needs_confirmation' || r.kind === 'invalid') return { kind: r.kind, summary: r.scheme?.summary ?? null, warnings: r.scheme?.warnings ?? [], errors: r.scheme?.errors ?? [] };
+        return { kind: r.kind, count: before.submissions.length };
+      },
+      releaseTask: async (userId, id, ids) => (await import('./assignments/runtime.js')).assignmentService().release(userId, id, ids),
+      exportTask: async (userId, id) => (await import('./assignments/runtime.js')).assignmentService().exportWorkbook(userId, id),
+      createCourse: async (userId, input) => {
+        const c: any = await (await import('./courses/runtime.js')).courseService().create(userId, { name: input.name, code: input.code, term: input.term, roster: input.students });
+        return { id: c.id, name: c.name, students: c.students };
+      },
+      addCourseStudents: async (userId, id, text) => (await import('./courses/runtime.js')).courseService().addStudents(userId, id, text),
+      linkCourseWork: async (userId, id, items) => { await (await import('./courses/runtime.js')).courseService().setItems(userId, id, items); },
+      exportCourse: async (userId, id) => (await import('./courses/runtime.js')).courseService().exportWorkbook(userId, id),
+      examResults: async (userId, examId) => {
+        const svc = (await import('./educationRuntime.js')).examService;
+        const e: any = await svc.load(userId, examId);
+        return { title: e.title, rows: svc.reviewList(e).map((r: any) => ({ candidateId: r.candidateId, candidateName: r.candidateName ?? null, total: r.total, maxTotal: r.maxTotal, percent: r.percent, released: !!r.released, openFlags: r.openFlags ?? 0, lowConfidence: r.lowConfidence ?? 0 })) };
+      },
+      releaseExam: async (userId, examId) => {
+        const r: any = await (await import('./educationRuntime.js')).examService.release(userId, examId, 'all');
+        return { released: Array.isArray(r.released) ? r.released.length : Number(r.released) || 0, skipped: r.skipped ?? [] };
+      },
+    },
     // The rest of the platform for the chat: live rooms (MySEB), classes and marked exams (lazy imports, like the services above).
     platform: {
       liveRooms: async (userId) => {

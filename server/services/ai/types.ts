@@ -160,6 +160,23 @@ export interface ToolServices {
     }>;
     markedExams(userId: string): Promise<Array<{ examId: string; title: string; updatedAt: string; candidates: number; marked: number; released: number; needsReview: number }>>;
   };
+  /** Doing the work in the chat: marking a task's hand-ins, releasing results, classes, exam results and Excel files. Every call is scoped to the signed-in user. */
+  work?: {
+    taskResults(userId: string, id: string): Promise<{
+      title: string; open: boolean; dueAt: string | null; autoMark: boolean; link: string;
+      submissions: Array<{ id: string; studentName: string; studentId?: string; late: boolean; marking?: { state: string; total: number | null; maxTotal: number | null; percent: number | null; released: boolean; error?: string } }>;
+    }>;
+    taskSettings(userId: string, id: string, patch: { open?: boolean; dueAt?: string | null; title?: string; instructions?: string }): Promise<{ title: string; open: boolean; dueAt: string | null }>;
+    markTask(userId: string, id: string, input: { scheme?: string; confirm?: boolean }): Promise<{ kind: string; summary?: string | null; warnings?: string[]; errors?: string[]; count?: number }>;
+    releaseTask(userId: string, id: string, studentIds?: string[]): Promise<{ released: number; skipped: Array<{ studentName: string; reason: string }> }>;
+    exportTask(userId: string, id: string): Promise<{ name: string; data: Buffer }>;
+    createCourse(userId: string, input: { name: string; code?: string; term?: string; students?: string }): Promise<{ id: string; name: string; students: number }>;
+    addCourseStudents(userId: string, id: string, text: string): Promise<{ added: number; updated: number }>;
+    linkCourseWork(userId: string, id: string, items: Array<{ kind: 'task' | 'quiz'; id: string }>): Promise<void>;
+    exportCourse(userId: string, id: string): Promise<{ name: string; data: Buffer }>;
+    examResults(userId: string, examId: string): Promise<{ title: string; rows: Array<{ candidateId: string; candidateName: string | null; total: number; maxTotal: number; percent: number; released: boolean; openFlags: number; lowConfidence: number }> }>;
+    releaseExam(userId: string, examId: string): Promise<{ released: number; skipped: Array<{ candidateId: string; reason: string }> }>;
+  };
   /** Universal output engine (server/services/outputs). */
   outputs?: {
     create(userId: string, spec: unknown): Promise<{ artifact: any; reused: boolean }>;
