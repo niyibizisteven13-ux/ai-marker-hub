@@ -57,10 +57,21 @@ export function saveLive(sessionId, body, keepFrames) {
   pictureBytes += size(next) - size(prev);
   store.set(sessionId, next);
 }
+// How long (seconds) a browser student's face was turned well away from the camera: a number for the lecturer to judge, never a penalty.
+const aside = new Map();
+export const setAside = (id, secs) => { if (Number.isFinite(secs) && secs >= 0 && secs < 86_400) aside.set(id, Math.round(secs)); };
+// Student card pictures waiting for the lecturer: server memory only (never the database), dropped at the decision or after 30 minutes.
+const idPics = new Map();
+export const setIdPic = (id, image) => { if (idPics.size < 3000 || idPics.has(id)) idPics.set(id, { image, at: Date.now() }); };
+export const getIdPic = (id) => idPics.get(id)?.image ?? null;
+export const dropIdPic = (id) => { idPics.delete(id); };
+export const sweepIdPics = () => { const old = Date.now() - 30 * 60_000; for (const [k, v] of idPics) if (v.at < old) idPics.delete(k); };
+export const getAside = (id) => aside.get(id) ?? 0;
 export const getLive = (sessionId) => store.get(sessionId) ?? null;
 export const forgetLive = (sessionId) => { pictureBytes -= size(store.get(sessionId)); store.delete(sessionId); };
+export const forgetAside = (id) => { aside.delete(id); };
 export function forgetAllLive(sessionIds) { for (const id of sessionIds) forgetLive(id); }
-export function sweepLive() { const now = Date.now(); for (const [k, until] of wanted) if (until < now) wanted.delete(k); const old = Date.now() - 180_000; for (const [k, v] of store) if (v.at < old) { pictureBytes -= size(v); store.delete(k); } }
+export function sweepLive() { sweepIdPics(); const now = Date.now(); for (const [k, until] of wanted) if (until < now) wanted.delete(k); const old = Date.now() - 180_000; for (const [k, v] of store) if (v.at < old) { pictureBytes -= size(v); store.delete(k); } }
 
 /* ---------------------------------------------------------------------------------------------------------------------
  * Set-up messages for live video (WebRTC). The video itself never touches this server: the student's browser sends it to

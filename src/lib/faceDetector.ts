@@ -27,7 +27,11 @@ export async function createFaceDetector(): Promise<FaceDetector> {
       const out = det.detectForVideo(video, ts);
       return out.detections.flatMap((d) => {
         const b = d.boundingBox;
-        return b ? [{ x: b.originX / w, y: b.originY / h, w: b.width / w, h: b.height / h }] : [];
+        if (!b) return [];
+        // BlazeFace landmarks: right eye, left eye, nose, mouth, ears. How far the nose sits from the middle of the eyes, in eye-distances, says how far the face is turned.
+        const k = d.keypoints;
+        const yaw = k && k.length >= 3 && Math.abs(k[1].x - k[0].x) > 0.005 ? (k[2].x - (k[0].x + k[1].x) / 2) / Math.abs(k[1].x - k[0].x) : undefined;
+        return [{ x: b.originX / w, y: b.originY / h, w: b.width / w, h: b.height / h, ...(yaw !== undefined ? { yaw } : {}) }];
       });
     },
     close() { try { det.close(); } catch { /* already closed */ } },

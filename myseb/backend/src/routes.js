@@ -4,7 +4,7 @@ import { q } from './db.js';
 import { config, safeEqual, sha } from './config.js';
 import { newCode, parseCode, codeHash, secretHash, tokenHash, newToken, newSecret, rateLimit, failureGate } from './security.js';
 import { authSession, markAlive, recordViolation, VIOLATION_TYPES } from './sessions.js';
-import { liveStats, cleanSignal, dropSignals, forgetAllLive, forgetLive, getLive, liveChanged, picturesWanted, pullSignal, pushSignal, reportEverySeconds, saveLive, wantPictures } from './live.js';
+import { liveStats, cleanSignal, dropSignals, forgetAllLive, forgetLive, getAside, setAside, setIdPic, getIdPic, dropIdPic, getLive, liveChanged, picturesWanted, pullSignal, pushSignal, reportEverySeconds, saveLive, wantPictures } from './live.js';
 import { notify, roomVersion, subscribe } from './events.js';
 
 export const api = express.Router();
@@ -70,6 +70,8 @@ api.patch('/exams/:id', requireTeacher, wrap(async (req, res) => {
   if (typeof b.allowExtension === 'boolean') add('allow_extension', b.allowExtension);
   if (typeof b.allowWeb === 'boolean') add('allow_web', b.allowWeb);
   if (typeof b.webStrict === 'boolean') add('web_strict', b.webStrict);
+  if (['off', 'warn', 'end'].includes(b.multiFace)) add('multi_face', b.multiFace);
+  if (typeof b.idCheck === 'boolean') add('id_check', b.idCheck);
   if (['record', 'pause', 'end', 'pause_then_end'].includes(b.leaveAction)) add('leave_action', b.leaveAction);
   if (['camera', 'screen', 'both'].includes(b.liveSource)) add('live_source', b.liveSource);
   if (typeof b.liveFaces === 'boolean') { add('live_faces', b.liveFaces); add('live_mode', b.liveFaces ? 'pictures' : 'off'); }
@@ -118,20 +120,20 @@ api.post('/exams/:id/end', requireTeacher, wrap(async (req, res) => {
 /** One copy of the student list is built and shared by every lecturer tab looking at the same test; it is rebuilt after any change. */
 const monitorShared = new Map();
 async function buildMonitor(id, withFrames) {
-  const ex = (await q('SELECT id, title, status, live_faces, live_mode, live_sound, live_source, require_myseb, allow_web, web_strict, leave_action FROM exams WHERE id=$1', [id])).rows[0];
+  const ex = (await q('SELECT id, title, status, live_faces, live_mode, live_sound, live_source, require_myseb, allow_web, web_strict, multi_face, id_check, leave_action FROM exams WHERE id=$1', [id])).rows[0];
   if (!ex) return null;
   const { rows } = await q(
     `SELECT s.id, s.student_name, s.status, s.client_type, s.platform, s.violation_count, s.pause_reason, s.end_reason,
-            s.started_at, s.deadline_at, EXTRACT(EPOCH FROM (now() - s.last_heartbeat))::int AS seen_ago,
+            s.started_at, s.deadline_at, s.id_status, s.reinstated_count, EXTRACT(EPOCH FROM (now() - s.last_heartbeat))::int AS seen_ago,
             (SELECT type FROM violations v WHERE v.session_id=s.id ORDER BY v.id DESC LIMIT 1) AS last_violation
        FROM exam_sessions s WHERE s.exam_id=$1 ORDER BY s.started_at`, [id]);
   const counts = { IN_EXAM: 0, PAUSED: 0, LEFT: 0, ENDED: 0 };
   const students = rows.map((r) => {
     counts[r.status]++;
     const l = r.status === 'ENDED' ? null : getLive(r.id);
-    return { ...r, live: l ? { question: l.question, camera: l.camera, screen_state: l.screenState, frame: withFrames && ex.live_faces ? l.frame : null, frame_age: l.frameAt ? Math.round((Date.now() - l.frameAt) / 1000) : null, screen: withFrames && ex.live_faces ? l.screen : null, screen_age: l.screenAt ? Math.round((Date.now() - l.screenAt) / 1000) : null } : null };
+    return { ...r, aside_seconds: getAside(r.id), live: l ? { question: l.question, camera: l.camera, screen_state: l.screenState, frame: withFrames && ex.live_faces ? l.frame : null, frame_age: l.frameAt ? Math.round((Date.now() - l.frameAt) / 1000) : null, screen: withFrames && ex.live_faces ? l.screen : null, screen_age: l.screenAt ? Math.round((Date.now() - l.screenAt) / 1000) : null } : null };
   });
-  return { exam: { id: ex.id, title: ex.title, status: ex.status, live_faces: ex.live_faces, live_mode: ex.live_mode, live_sound: ex.live_sound, live_source: ex.live_source, allow_web: ex.allow_web, web_strict: ex.web_strict, leave_action: ex.leave_action }, counts, students };
+  return { exam: { id: ex.id, title: ex.title, status: ex.status, live_faces: ex.live_faces, live_mode: ex.live_mode, live_sound: ex.live_sound, live_source: ex.live_source, allow_web: ex.allow_web, web_strict: ex.web_strict, multi_face: ex.multi_face, id_check: ex.id_check, leave_action: ex.leave_action }, counts, students };
 }
 api.get('/exams/:id/monitor', requireTeacher, wrap(async (req, res) => {
   const id = req.params.id;
@@ -164,7 +166,7 @@ api.get('/exams/:id/report', requireTeacher, wrap(async (req, res) => {
   const ex = (await q('SELECT id, title, status, leave_action, live_mode, created_at, ends_at FROM exams WHERE id=$1', [req.params.id])).rows[0];
   if (!ex) return res.status(404).json({ error: 'not found' });
   const students = (await q(
-    `SELECT id, student_name, status, client_type, platform, started_at, deadline_at, ended_at, end_reason, violation_count
+    `SELECT id, student_name, status, client_type, platform, started_at, deadline_at, ended_at, end_reason, violation_count, reinstated_count, id_status
        FROM exam_sessions WHERE exam_id=$1 ORDER BY student_name, started_at`, [req.params.id])).rows;
   const events = (await q(
     `SELECT v.session_id, v.type, v.detail, v.created_at FROM violations v WHERE v.exam_id=$1 ORDER BY v.created_at, v.id LIMIT 20000`, [req.params.id])).rows;
@@ -207,6 +209,38 @@ api.post('/sessions/:id/end', requireTeacher, wrap(async (req, res) => {
   await q(`UPDATE exam_sessions SET status='ENDED', ended_at=now(), end_reason='teacher' WHERE id=$1 AND status<>'ENDED'`, [req.params.id]);
   forgetLive(req.params.id);
   dropSignals([`s:${req.params.id}`]);
+  res.json({ ok: true });
+}));
+/** Students waiting for the lecturer to look at their card. */
+api.get('/exams/:id/id-checks', requireTeacher, wrap(async (req, res) => {
+  if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
+  const { rows } = await q(`SELECT id, student_name FROM exam_sessions WHERE exam_id=$1 AND id_status='pending' AND status<>'ENDED' ORDER BY started_at LIMIT 40`, [req.params.id]);
+  const pending = []; const lost = [];
+  for (const r of rows) { const image = getIdPic(r.id); if (image) pending.push({ ...r, image }); else lost.push(r.id); }
+  // A picture that is no longer in memory (the server restarted) goes back to not-sent: the student page asks for it again.
+  if (lost.length) await q(`UPDATE exam_sessions SET id_status='none' WHERE id = ANY($1::uuid[]) AND id_status='pending'`, [lost]);
+  res.set('Cache-Control', 'no-store'); res.json({ pending });
+}));
+api.post('/sessions/:id/id-decision', requireTeacher, wrap(async (req, res) => {
+  if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
+  const allow = req.body?.allow === true;
+  dropIdPic(req.params.id);
+  const r = await q(`UPDATE exam_sessions SET id_status=$2,
+      status = CASE WHEN $2='refused' THEN 'ENDED' ELSE status END,
+      ended_at = CASE WHEN $2='refused' THEN now() ELSE ended_at END,
+      end_reason = CASE WHEN $2='refused' THEN 'id_refused' ELSE end_reason END
+    WHERE id=$1 AND id_status='pending' RETURNING exam_id`, [req.params.id, allow ? 'approved' : 'refused']);
+  if (r.rows[0]) notify(r.rows[0].exam_id, 'status');
+  res.json({ ok: !!r.rows[0] });
+}));
+/** The safety valve: a disqualified student is let back in (a false alarm: they looked down, the phone glitched). Recorded in their log. */
+api.post('/sessions/:id/reinstate', requireTeacher, wrap(async (req, res) => {
+  if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
+  const r = await q(`UPDATE exam_sessions SET status='IN_EXAM', ended_at=NULL, end_reason=NULL, pause_reason=NULL, last_heartbeat=now(), reinstated_count=reinstated_count+1
+      WHERE id=$1 AND status='ENDED' AND end_reason NOT IN ('teacher','time_up','exam_ended','student','student_exit') AND deadline_at > now() RETURNING exam_id`, [req.params.id]);
+  if (!r.rows[0]) return res.status(409).json({ error: 'This student cannot be let back in (their time is over, or you ended them yourself).' });
+  await q(`INSERT INTO violations (session_id, exam_id, type, detail) VALUES ($1,$2,'reinstated','{}')`, [req.params.id, r.rows[0].exam_id]);
+  notify(r.rows[0].exam_id, 'status');
   res.json({ ok: true });
 }));
 api.post('/sessions/:id/resume', requireTeacher, wrap(async (req, res) => {
@@ -349,13 +383,27 @@ api.get('/web/me', wrap(async (req, res) => {
   res.set('Cache-Control', 'no-store');
   const a = await authSession(req, { allowCookie: true });
   if (a.error || a.session.client_type !== 'web') return res.status(401).json({ active: false });
-  res.json({ active: true, status: a.session.status, title: a.session.title, heartbeatSeconds: 5, strict: !!a.session.web_strict, reason: a.session.status === 'ENDED' ? a.session.end_reason : null,
+  res.json({ active: true, status: a.session.status, title: a.session.title, heartbeatSeconds: 5, strict: !!a.session.web_strict, multi: a.session.multi_face ?? 'warn', idCheck: !!a.session.id_check, idStatus: a.session.id_status, reason: a.session.status === 'ENDED' ? a.session.end_reason : null,
     remainingSeconds: Math.max(0, Math.floor((new Date(a.session.deadline_at) - Date.now()) / 1000)) });
+}));
+
+/** The student card picture (browsers, when the lecturer turned the check on). One small JPEG, kept only until the lecturer decides. */
+api.post('/id-check', wrap(async (req, res) => {
+  const a = await studentAuth(req, res); if (!a) return;
+  if (!a.exam.id_check || a.session.client_type !== 'web') return res.status(400).json({ error: 'No card check for this test.' });
+  const image = typeof req.body?.image === 'string' ? req.body.image : '';
+  if (!/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(image) || image.length > 140_000) return res.status(400).json({ error: 'That picture could not be used.' });
+  if (a.session.status === 'ENDED' || a.session.id_status === 'approved') return res.json({ idStatus: a.session.id_status });
+  setIdPic(a.session.id, image);
+  await q(`UPDATE exam_sessions SET id_status='pending' WHERE id=$1`, [a.session.id]);
+  notify(a.session.exam_id, 'status');
+  res.json({ idStatus: 'pending' });
 }));
 
 api.post('/heartbeat', wrap(async (req, res) => {
   const a = await studentAuth(req, res); if (!a) return;
   let { session } = a;
+  if (typeof req.body?.aside === 'number') setAside(session.id, req.body.aside);
   if (session.status === 'ENDED') return res.json({ status: 'ENDED', reason: session.end_reason, remainingSeconds: 0 });
   if (new Date(session.deadline_at) < new Date() || session.exam_status === 'ended') {
     await q(`UPDATE exam_sessions SET status='ENDED', ended_at=now(), end_reason='time_up' WHERE id=$1`, [session.id]);
@@ -368,7 +416,7 @@ api.post('/heartbeat', wrap(async (req, res) => {
     await q(`UPDATE exam_sessions SET last_heartbeat=now(), status=$2 WHERE id=$1`, [session.id, status]);   // a change is written at once
     notify(session.exam_id, 'status');
   } else markAlive(session.id);                                                                             // "still here" is written in a batch
-  res.json({ status, reason: status === 'IN_EXAM' ? null : session.pause_reason,
+  res.json({ status, idStatus: session.id_status, reason: status === 'IN_EXAM' ? null : session.pause_reason,
     remainingSeconds: Math.max(0, Math.floor((new Date(session.deadline_at) - Date.now()) / 1000)) });
 }));
 

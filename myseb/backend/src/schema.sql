@@ -75,6 +75,12 @@ END $$;
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS allow_web boolean NOT NULL DEFAULT false;
 -- Strict rules for students in a browser (iPhones): leaving the page, closing the tab, losing the camera or the face ends the test at once.
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS web_strict boolean NOT NULL DEFAULT true;
+-- More than one face in the camera (browsers): off, warn (a warning, recorded) or end (disqualified after a few seconds).
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS multi_face text NOT NULL DEFAULT 'warn';
+-- Student card check at the start (browsers): the lecturer approves or refuses. The picture itself is never stored in the database: it waits in server memory until the decision.
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS id_check boolean NOT NULL DEFAULT false;
+ALTER TABLE exam_sessions ADD COLUMN IF NOT EXISTS id_status text NOT NULL DEFAULT 'none';
+ALTER TABLE exam_sessions ADD COLUMN IF NOT EXISTS reinstated_count int NOT NULL DEFAULT 0;
 ALTER TABLE exam_sessions ADD COLUMN IF NOT EXISTS ua_hash text;
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exam_sessions_client_type_check' AND pg_get_constraintdef(oid) LIKE '%web%') THEN

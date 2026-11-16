@@ -11,9 +11,10 @@ interface Alert { id: string; name: string; text: string; ended: boolean }
 interface Student {
   id: string; student_name: string; status: Status; client_type: string; platform: string | null; violation_count: number;
   last_violation: string | null; pause_reason: string | null; end_reason: string | null; seen_ago: number;
+  aside_seconds?: number; reinstated_count?: number; id_status?: string;
   live: { question: { index: number | null; total: number | null; label: string } | null; camera: string; screen_state?: string; frame: string | null; frame_age: number | null; screen?: string | null; screen_age?: number | null } | null;
 }
-interface Room { exam: { title: string; status: string; live_faces: boolean; live_mode?: 'off' | 'pictures' | 'live'; live_sound?: boolean; live_source?: Source; leave_action?: string; allow_web?: boolean; web_strict?: boolean }; counts: Record<Status, number>; students: Student[] }
+interface Room { exam: { title: string; status: string; live_faces: boolean; live_mode?: 'off' | 'pictures' | 'live'; live_sound?: boolean; live_source?: Source; leave_action?: string; allow_web?: boolean; web_strict?: boolean; multi_face?: 'off' | 'warn' | 'end'; id_check?: boolean }; counts: Record<Status, number>; students: Student[] }
 interface Code { display: string; qrSvg: string; expiresAt: string; joinUrl?: string }
 
 const LABEL: Record<Status, string> = { IN_EXAM: 'In the test', PAUSED: 'Paused', LEFT: 'Left', ENDED: 'Finished' };
@@ -23,7 +24,7 @@ const WHY: Record<string, string> = {
   leave: 'Left the test screen', background: 'Left the app', blur: 'Switched window', heartbeat_lost: 'Lost connection', screenshot: 'Tried a screenshot',
   copy: 'Tried to copy', paste: 'Tried to paste', cut: 'Tried to cut', devtools: 'Opened developer tools', shortcut: 'Pressed a blocked key', close_attempt: 'Tried to close the app',
   extra_display: 'Second screen', forbidden_app: 'Remote or recording app', fullscreen_exit: 'Left full screen', split_screen: 'Split screen', screen_recording: 'Screen recording',
-  visibility_hidden: 'Hid the tab', screen_share_stopped: 'Stopped sharing the screen', token_misuse: 'Used the key from another place', teacher: 'Paused by you',
+  id_refused: 'Student card refused', visibility_hidden: 'Hid the tab', screen_share_stopped: 'Stopped sharing the screen', token_misuse: 'Used the key from another place', teacher: 'Paused by you',
   face_missing: 'Face left the camera', camera_off: 'Turned the camera off', multiple_faces: 'More than one face', face_check_unavailable: 'Face check could not load',
 };
 const why = (k: string | null) => (k ? WHY[k] ?? k : '');
@@ -300,6 +301,16 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
   });
   const makeCode = () => act(async () => { setCode(await call('/code', 'POST')); setShowCode(true); });
   const students = room?.students ?? [];
+  // Student cards waiting for a look (browsers, when the card check is on). Fetched only while someone is waiting; each picture is deleted at the decision.
+  const [idq, setIdq] = useState<Array<{ id: string; student_name: string; image: string }>>([]);
+  const waitingIds = students.filter((s) => s.id_status === 'pending' && s.status !== 'ENDED').map((s) => s.id).join(',');
+  useEffect(() => {
+    if (!waitingIds) { setIdq([]); return; }
+    let live = true;
+    call('/id-checks').then((b) => { if (live) setIdq(b.pending ?? []); }).catch(() => undefined);
+    return () => { live = false; };
+  }, [waitingIds, call]);
+  const decideId = (sid: string, allow: boolean) => act(async () => { await call(`/sessions/${sid}/id-decision`, 'POST', { allow }); setIdq((c) => c.filter((x) => x.id !== sid)); });
   const needs = (s: Student) => s.status === 'PAUSED' || s.status === 'LEFT' || s.live?.camera === 'denied' || s.live?.screen_state === 'denied' || s.live?.screen_state === 'partial';
   const shown = [...students].filter((s) => (filter === 'all' || (filter === 'attention' ? needs(s) : s.status === 'IN_EXAM')) && (!query.trim() || s.student_name.toLowerCase().includes(query.trim().toLowerCase()))).sort((a, b) => Number(needs(b)) - Number(needs(a)) || a.student_name.localeCompare(b.student_name));
   const attention = students.filter(needs).length;
@@ -438,6 +449,17 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
                   Strict for browsers
                 </label>
               </Setting>
+              <Setting label="Faces in the camera" hint="Browsers only. If more than one person is in the camera: do nothing, warn the student (recorded), or disqualify them after 5 seconds.">
+                <select className={dSelect} style={{ colorScheme: 'dark' }} aria-label="Faces in the camera" value={room?.exam?.multi_face ?? 'warn'} disabled={busy || !open || !room?.exam?.allow_web} onChange={(e) => act(() => call('/settings', 'POST', { liveMode: mode, liveSound: sound, liveSource: source, leaveAction, multiFace: e.target.value }))}>
+                  <option value="off">Ignore</option><option value="warn">Warn and record</option><option value="end">Disqualify</option>
+                </select>
+              </Setting>
+              <Setting label="Student card" hint="Browsers only. Before the test opens, each student shows their student card to the camera and you let them in or refuse. You see one picture, and it is deleted when you decide.">
+                <label className="flex min-h-9 cursor-pointer items-center gap-2 text-sm font-semibold">
+                  <input type="checkbox" className="h-4 w-4" checked={!!room?.exam?.id_check} disabled={busy || !open || !room?.exam?.allow_web} onChange={(e) => act(() => call('/settings', 'POST', { liveMode: mode, liveSound: sound, liveSource: source, leaveAction, idCheck: e.target.checked }))} />
+                  Check the student card
+                </label>
+              </Setting>
               <Setting label="Listening" hint="Lets you hear one student at a time. They see a notice while you do.">
                 <label className="flex min-h-9 cursor-pointer items-center gap-2 text-sm font-semibold">
                   <input type="checkbox" className="h-4 w-4" checked={sound} disabled={busy || !open || mode !== 'live' || source === 'screen'} onChange={(e) => act(() => call('/settings', 'POST', { liveMode: 'live', liveSound: e.target.checked, liveSource: source, leaveAction }))} />
@@ -451,6 +473,23 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
 
       <main className="mx-auto max-w-[1800px] px-4 py-5">
         {err && <p role="alert" className="mb-4 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm font-semibold text-rose-200">{err}</p>}
+        {idq.length > 0 && (
+          <section aria-label="Student cards to check" className="mb-3 rounded-2xl border border-sky-400/40 bg-sky-500/10 p-3">
+            <p className="mb-2 text-sm font-bold text-sky-100">{idq.length} student{idq.length === 1 ? '' : 's'} showed a card. Check the name and photo, then let them in.</p>
+            <ul className="flex flex-wrap gap-3">
+              {idq.map((c) => (
+                <li key={c.id} className="w-60 overflow-hidden rounded-xl border border-white/10 bg-slate-900">
+                  <img src={c.image} alt={`Card shown by ${c.student_name}`} className="aspect-[4/3] w-full object-cover" />
+                  <div className="space-y-2 p-2.5"><p className="truncate text-sm font-bold text-white" title={c.student_name}>Typed name: {c.student_name}</p>
+                    <div className="flex gap-2">
+                      <button type="button" disabled={busy} onClick={() => void decideId(c.id, true)} className="min-h-9 flex-1 rounded-lg bg-emerald-500 px-3 text-xs font-bold text-white hover:bg-emerald-400 disabled:opacity-40">Let in</button>
+                      <button type="button" disabled={busy} onClick={() => void decideId(c.id, false)} className="min-h-9 flex-1 rounded-lg bg-rose-600 px-3 text-xs font-bold text-white hover:bg-rose-500 disabled:opacity-40">Refuse</button>
+                    </div></div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
         {alerts.length > 0 && (
           <ul aria-live="assertive" className="mb-4 space-y-2">
             {alerts.map((a) => (
@@ -536,9 +575,13 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
                   <div className="flex flex-1 flex-col gap-1.5 p-2.5">
                     <p className="text-[11px] text-slate-500">{s.client_type === 'web' ? 'browser' : s.client_type}{s.platform ? ` · ${s.platform}` : ''}{s.status !== 'ENDED' && s.seen_ago > 15 ? ` · seen ${s.seen_ago}s ago` : ''}</p>
                     {(s.status === 'PAUSED' || s.status === 'LEFT') && <p className="text-xs font-semibold text-amber-300">{why(s.pause_reason ?? s.last_violation)}</p>}
+                    {s.id_status === 'pending' && s.status !== 'ENDED' && <p className="text-xs font-semibold text-sky-300">Showing their student card</p>}
+                    {(s.aside_seconds ?? 0) >= 10 && s.status !== 'ENDED' && <p className="text-xs text-slate-400" title="How long their face was turned well away from the camera. Only a number for you to judge: it never disqualifies anyone.">Looked aside {s.aside_seconds} s</p>}
+                    {(s.reinstated_count ?? 0) > 0 && <p className="text-xs text-slate-400">Let back in {s.reinstated_count === 1 ? 'once' : `${s.reinstated_count} times`}</p>}
                     <div className="mt-auto flex flex-wrap gap-1.5">
                       {(s.status === 'PAUSED' || s.status === 'LEFT') && <button type="button" className="min-h-9 rounded-lg bg-blue-500 px-3 text-xs font-bold text-white hover:bg-blue-400 disabled:opacity-40" disabled={busy} onClick={() => act(() => call(`/sessions/${s.id}/resume`, 'POST'))}>Resume</button>}
                       {sound && streams[s.id] && <button type="button" className={`${listen === s.id ? 'bg-white text-slate-950' : 'border border-white/15 bg-white/5 text-slate-100 hover:bg-white/10'} min-h-9 rounded-lg px-3 text-xs font-semibold`} onClick={() => setListen(listen === s.id ? null : s.id)}>{listen === s.id ? 'Stop listening' : 'Listen'}</button>}
+                      {s.status === 'ENDED' && s.end_reason && !['teacher', 'time_up', 'exam_ended', 'student', 'student_exit'].includes(s.end_reason) && <button type="button" className="min-h-9 rounded-lg bg-emerald-500 px-3 text-xs font-bold text-white hover:bg-emerald-400 disabled:opacity-40" disabled={busy} title="Use this when the rule was broken by mistake: the student continues where they were. It is written in their log." onClick={() => { if (confirm(`Let ${s.student_name} back in? It is recorded in their log.`)) void act(() => call(`/sessions/${s.id}/reinstate`, 'POST')); }}>Let back in</button>}
                       {s.status !== 'ENDED' && <button type="button" className={needs(s) ? 'min-h-9 rounded-lg bg-rose-600 px-3 text-xs font-bold text-white hover:bg-rose-500 disabled:opacity-40' : 'min-h-9 rounded-lg border border-white/15 bg-white/5 px-3 text-xs font-semibold text-rose-300 hover:bg-white/10 disabled:opacity-40'} disabled={busy} onClick={() => { if (confirm(`End the test for ${s.student_name}?`)) void act(() => call(`/sessions/${s.id}/end`, 'POST')); }}>End</button>}
                       <button type="button" className="min-h-9 rounded-lg border border-white/15 bg-white/5 px-3 text-xs font-semibold text-slate-200 hover:bg-white/10" onClick={async () => { try { setLog({ name: s.student_name, rows: await call(`/sessions/${s.id}/violations`) }); } catch (e) { setErr(e instanceof Error ? e.message : 'Could not load.'); } }}>
                         {s.violation_count === 0 ? 'No problems' : `${s.violation_count} problem${s.violation_count === 1 ? '' : 's'}`}

@@ -189,6 +189,22 @@ export async function sessionAction(load: TargetLoader, sid: string, action: 're
   return mysebFetch(`/sessions/${sid}/${action}`, { method: 'POST' });
 }
 
+/** Disqualified for breaking a rule (not ended by the lecturer): let the student back in. Recorded in their log. */
+export async function reinstate(load: TargetLoader, sid: string) {
+  await ownStudent(load, sid);
+  return mysebFetch(`/sessions/${sid}/reinstate`, { method: 'POST' });
+}
+/** Student cards waiting for a look (browsers, when the card check is on), and the lecturer's decision. */
+export async function idChecks(load: TargetLoader) {
+  const t = await load();
+  if (!t.mysebExamId) return { pending: [] };
+  return mysebFetch(`/exams/${t.mysebExamId}/id-checks`);
+}
+export async function idDecision(load: TargetLoader, sid: string, allow: boolean) {
+  await ownStudent(load, sid);
+  return mysebFetch(`/sessions/${sid}/id-decision`, { method: 'POST', body: { allow } });
+}
+
 export async function endAll(load: TargetLoader) {
   const t = await load();
   if (!t.mysebExamId) return { ok: true };
@@ -231,11 +247,11 @@ export async function relayLive(sessionId: string, body: any): Promise<LiveAnswe
 
 /** Camera in the live room: off, small pictures, or live video; and whether the lecturer may listen. */
 export const LEAVE_ACTIONS = ['record', 'pause', 'end', 'pause_then_end'] as const;
-export async function setLiveMode(load: TargetLoader, mode: 'off' | 'pictures' | 'live', sound: boolean, extra: { source?: unknown; leaveAction?: unknown; allowWeb?: unknown; webStrict?: unknown } = {}) {
+export async function setLiveMode(load: TargetLoader, mode: 'off' | 'pictures' | 'live', sound: boolean, extra: { source?: unknown; leaveAction?: unknown; allowWeb?: unknown; webStrict?: unknown; multiFace?: unknown; idCheck?: unknown } = {}) {
   const examId = await ensureMysebExam(await load());
   const source = (['camera', 'screen', 'both'] as const).find((x) => x === extra.source);
   const leaveAction = LEAVE_ACTIONS.find((x) => x === extra.leaveAction);
-  return mysebFetch(`/exams/${examId}`, { method: 'PATCH', body: { liveMode: mode, liveSound: mode === 'live' && sound && source !== 'screen', ...(source ? { liveSource: source } : {}), ...(leaveAction ? { leaveAction } : {}), ...(typeof extra.allowWeb === 'boolean' ? { allowWeb: extra.allowWeb } : {}), ...(typeof extra.webStrict === 'boolean' ? { webStrict: extra.webStrict } : {}) } });
+  return mysebFetch(`/exams/${examId}`, { method: 'PATCH', body: { liveMode: mode, liveSound: mode === 'live' && sound && source !== 'screen', ...(source ? { liveSource: source } : {}), ...(leaveAction ? { leaveAction } : {}), ...(typeof extra.allowWeb === 'boolean' ? { allowWeb: extra.allowWeb } : {}), ...(typeof extra.webStrict === 'boolean' ? { webStrict: extra.webStrict } : {}), ...(extra.multiFace === 'off' || extra.multiFace === 'warn' || extra.multiFace === 'end' ? { multiFace: extra.multiFace } : {}), ...(typeof extra.idCheck === 'boolean' ? { idCheck: extra.idCheck } : {}) } });
 }
 
 /* ---- live video: only the short set-up messages pass through here; the video goes student -> lecturer directly ---- */
