@@ -204,6 +204,16 @@ test('chat tools: create, edit, review, publish, analyse and report a form', asy
   assert.match(p.text, /Published "Course evaluation" \(version 1\)/);
   assert.match(p.text, /\/forms\/[0-9a-f-]{36}$/m);
 
+  // A quiz becomes a timed, protected test in one request; the MySEB link already made is never lost.
+  assert.equal((await tools.set_test_rules.execute({ formId }, ctx)).isError, true, 'nothing to change');
+  const rules = await tools.set_test_rules.execute({ formId, minutes: 45, requireMyseb: true, leaveAction: 'end', camera: 'warn' }, ctx);
+  assert.match(rules.text, /timed, 45 minutes; MySEB required; face check warn; when a student leaves: end/);
+  assert.match(rules.text, /live_room_code/);
+  const withRules = JSON.parse((await db.applicationForm.findUnique({ where: { id: formId } })).schema);
+  assert.equal(withRules.exam.enabled, true); assert.equal(withRules.exam.minutes, 45); assert.equal(withRules.exam.requireMyseb, true); assert.equal(withRules.acceptingResponses, true, 'publishing is untouched');
+  assert.equal((await tools.set_test_rules.execute({ formId, minutes: 30 }, { ...ctx, userId: 'someone-else' })).isError, true, 'only the owner');
+  assert.match((await tools.set_test_rules.execute({ formId, minutes: 60 }, ctx)).text, /60 minutes; MySEB required/, 'a change keeps the other rules');
+
   assert.match((await tools.analyze_form.execute({ formId }, ctx)).text, /no responses yet/);
   for (const [course, sat] of [['Micro', 4], ['Micro', 5], ['Macro', 2], ['Macro', 3], ['Micro', 4]] as const) {
     await db.formSubmission.create({ data: { id: randomUUID(), formId, data: JSON.stringify({ q1: course, q2: sat }), formVersion: 1, createdAt: new Date() } });

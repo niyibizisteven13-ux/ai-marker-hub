@@ -358,6 +358,53 @@ export const bwengeAgent = createAiAgent({
       list: async (userId) => (await import('./assignments/runtime.js')).assignmentService().list(userId),
       get: async (userId, id) => (await import('./assignments/runtime.js')).assignmentService().get(userId, id),
     },
+    // The rest of the platform for the chat: live rooms (MySEB), classes and marked exams (lazy imports, like the services above).
+    platform: {
+      liveRooms: async (userId) => {
+        const { normalizeExam } = await import('../../shared/examRules.js');
+        const forms = await prisma.applicationForm.findMany({ where: { userId }, select: { id: true, title: true, schema: true }, orderBy: { updatedAt: 'desc' }, take: 100 });
+        const out: Array<{ kind: 'form' | 'task'; id: string; title: string; hasRoom: boolean }> = [];
+        for (const f of forms) {
+          let ex: any = {};
+          try { ex = normalizeExam(JSON.parse(f.schema || '{}').exam); } catch { ex = {}; }
+          out.push({ kind: 'form', id: f.id, title: f.title, hasRoom: !!ex.requireMyseb });
+        }
+        const svc = (await import('./assignments/runtime.js')).assignmentService();
+        const tasks = await svc.list(userId).catch(() => []);
+        for (const t of tasks.slice(0, 60)) {
+          const info = await svc.mysebInfo(userId, t.id).catch(() => null);
+          out.push({ kind: 'task', id: t.id, title: t.title, hasRoom: !!info?.requireMyseb });
+        }
+        return out.sort((a, b) => Number(b.hasRoom) - Number(a.hasRoom));
+      },
+      roomStatus: async (userId, kind, id) => {
+        const my = await import('./mySeb.js');
+        return my.monitor(kind === 'form' ? my.formTarget(userId, id) : my.assignmentTarget(userId, id), { frames: false });
+      },
+      roomCode: async (userId, kind, id) => {
+        const my = await import('./mySeb.js');
+        const c = await my.generateCode(kind === 'form' ? my.formTarget(userId, id) : my.assignmentTarget(userId, id));
+        return { display: c.display, joinUrl: c.joinUrl, expiresAt: c.expiresAt };
+      },
+      roomSettings: async (userId, kind, id, patch) => {
+        const my = await import('./mySeb.js');
+        const load = kind === 'form' ? my.formTarget(userId, id) : my.assignmentTarget(userId, id);
+        const cur: any = (await my.monitor(load, { frames: false })).exam ?? {};
+        const mode = ['off', 'pictures', 'live'].includes(cur.live_mode) ? cur.live_mode : 'off';
+        await my.setLiveMode(load, mode, !!cur.live_sound, {
+          source: cur.live_source, leaveAction: patch.ifStudentLeaves, allowWeb: patch.allowBrowsers, webStrict: patch.strictBrowsers, multiFace: patch.faces, idCheck: patch.studentCard,
+        });
+      },
+      roomStudent: async (userId, kind, id, studentId, action) => {
+        const my = await import('./mySeb.js');
+        const load = kind === 'form' ? my.formTarget(userId, id) : my.assignmentTarget(userId, id);
+        if (action === 'let_back_in') await my.reinstate(load, studentId);
+        else await my.sessionAction(load, studentId, action);
+      },
+      courses: async (userId) => (await import('./courses/runtime.js')).courseService().list(userId),
+      courseOverview: async (userId, id) => (await import('./courses/runtime.js')).courseService().dashboard(userId, id) as any,
+      markedExams: async (userId) => (await import('./educationRuntime.js')).examService.listExams(userId),
+    },
     // Datasets from Admin → Datasets & Curations (lazy import: educationRuntime imports this module).
     datasets: {
       catalog: async (userId) => (await import('./educationRuntime.js')).knowledgeService.assistantCatalog(userId),

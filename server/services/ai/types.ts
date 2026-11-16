@@ -139,6 +139,26 @@ export interface ToolServices {
     list(userId: string): Promise<Array<{ id: string; title: string; dueAt: string | null; open: boolean; link: string; submitted: number; lastSubmissionAt: string | null }>>;
     get(userId: string, id: string): Promise<{ id: string; title: string; instructions: string; dueAt: string | null; open: boolean; link: string; submissions: Array<{ studentName: string; studentId?: string; files: Array<{ name: string }>; text?: string; submittedAt: string; late: boolean }> }>;
   };
+  /** The rest of the platform, for the chat to read and act on: live rooms (MySEB), classes and marked exams. Every call is scoped to the signed-in user. */
+  platform?: {
+    liveRooms(userId: string): Promise<Array<{ kind: 'form' | 'task'; id: string; title: string; hasRoom: boolean }>>;
+    roomStatus(userId: string, kind: 'form' | 'task', id: string): Promise<{
+      exam: { title: string; status: string; live_mode?: string; allow_web?: boolean; web_strict?: boolean; multi_face?: string; id_check?: boolean; leave_action?: string };
+      counts: Record<string, number>;
+      students: Array<{ id: string; student_name: string; status: string; client_type: string; violation_count: number; last_violation: string | null; pause_reason: string | null; end_reason: string | null; id_status?: string; aside_seconds?: number; reinstated_count?: number }>;
+    }>;
+    roomCode(userId: string, kind: 'form' | 'task', id: string): Promise<{ display: string; joinUrl: string; expiresAt: string }>;
+    roomSettings(userId: string, kind: 'form' | 'task', id: string, patch: { allowBrowsers?: boolean; strictBrowsers?: boolean; faces?: 'off' | 'warn' | 'end'; studentCard?: boolean; ifStudentLeaves?: 'record' | 'pause' | 'end' | 'pause_then_end' }): Promise<void>;
+    roomStudent(userId: string, kind: 'form' | 'task', id: string, studentId: string, action: 'let_back_in' | 'resume' | 'end'): Promise<void>;
+    courses(userId: string): Promise<Array<{ id: string; name: string; code: string; term: string; students: number; items: number }>>;
+    courseOverview(userId: string, id: string): Promise<{
+      course: { id: string; name: string; code: string; term: string };
+      columns: Array<{ kind: string; title: string; dueAt: string | null; average: number | null; submitted: number; flagged: number }>;
+      students: Array<{ id: string; name: string; status: string; average: number | null; missing: number; flagged: number; late: number; risk: string; hasAccommodation: boolean }>;
+      totals: { students: number; withAccommodations: number; needAttention: number; flaggedResponses: number; average: number | null };
+    }>;
+    markedExams(userId: string): Promise<Array<{ examId: string; title: string; updatedAt: string; candidates: number; marked: number; released: number; needsReview: number }>>;
+  };
   /** Universal output engine (server/services/outputs). */
   outputs?: {
     create(userId: string, spec: unknown): Promise<{ artifact: any; reused: boolean }>;
