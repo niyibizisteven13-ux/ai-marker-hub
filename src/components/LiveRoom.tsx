@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { authFetch } from '../utils/authFetch';
 import MySebPayPanel, { type Payment } from './MySebPayPanel';
 import { WATCH_BATCH, WATCH_GAP_MS, gridQuality, startUpMs, type Quality } from '../utils/liveQuality';
+import { helpFor, reasonWords, type HelpAction } from '../utils/studentHelp';
 
 /**
  * The live room: every student in a MySEB test or hand-in on one screen. A tile per student shows the camera picture (if you
@@ -30,6 +31,7 @@ const WHY: Record<string, string> = {
   id_refused: 'Student card refused', visibility_hidden: 'Hid the tab', screen_share_stopped: 'Stopped sharing the screen', token_misuse: 'Used the key from another place', teacher: 'Paused by you',
   face_missing: 'Face left the camera', camera_off: 'Turned the camera off', multiple_faces: 'More than one face', face_check_unavailable: 'Face check could not load',
 };
+const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 const why = (k: string | null) => (k ? WHY[k] ?? k : '');
 
 /* The live room is a dark "control room": pictures stand out, and the lecturer's eyes are not tired after an hour of watching. */
@@ -320,6 +322,9 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
   const [pay, setPay] = useState<Payment | null>(null);
   const [saved, setSaved] = useState<{ name: string; at: string | null; rows: Array<{ q: string; a: string }> } | null>(null);
   const [log, setLog] = useState<{ name: string; rows: Array<{ id: number; type: string; created_at: string }> } | null>(null);
+  const [helpId, setHelpId] = useState<string | null>(null);   // the student whose help sheet is open
+  const [helpLog, setHelpLog] = useState<Array<{ id: number; type: string; created_at: string }> | null>(null);
+  const [notice, setNotice] = useState('');
   const [copied, setCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [visible, setVisible] = useState<Set<string>>(new Set());
@@ -380,6 +385,20 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
     return () => { live = false; };
   }, [waitingIds, call]);
   const decideId = (sid: string, allow: boolean) => act(async () => { await call(`/sessions/${sid}/id-decision`, 'POST', { allow }); setIdq((c) => c.filter((x) => x.id !== sid)); });
+  // What happened to the student whose help sheet is open (their last problems, in plain words).
+  useEffect(() => {
+    if (!helpId) { setHelpLog(null); return; }
+    let live = true;
+    call(`/sessions/${helpId}/violations`).then((rows) => { if (live) setHelpLog(Array.isArray(rows) ? rows : []); }).catch(() => { if (live) setHelpLog([]); });
+    return () => { live = false; };
+  }, [helpId, call]);
+  useEffect(() => { if (!notice) return; const t = window.setTimeout(() => setNotice(''), 3500); return () => window.clearTimeout(t); }, [notice]);
+  /** The fix the lecturer chose in the help sheet. The server writes it in the student's log; the sheet closes and says what happened. */
+  const doFix = (sid: string, name: string, what: HelpAction) => act(async () => {
+    if (what === 'resume') { await call(`/sessions/${sid}/resume`, 'POST'); setNotice(`${name} can continue`); }
+    else if (what === 'reinstate') { await call(`/sessions/${sid}/reinstate`, 'POST'); setNotice(`${name} is back in. It is written in their log.`); }
+    setHelpId(null);
+  });
   const needs = (s: Student) => s.status === 'PAUSED' || s.status === 'LEFT' || s.live?.camera === 'denied' || s.live?.camera === 'busy' || s.live?.screen_state === 'denied' || s.live?.screen_state === 'partial';
   const shown = [...students].filter((s) => (filter === 'all' || (filter === 'attention' ? needs(s) : s.status === 'IN_EXAM')) && (!query.trim() || s.student_name.toLowerCase().includes(query.trim().toLowerCase()))).sort((a, b) => Number(needs(b)) - Number(needs(a)) || a.student_name.localeCompare(b.student_name));
   const attention = students.filter(needs).length;
@@ -739,7 +758,19 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
                       <button type="button" tabIndex={-1} aria-hidden onClick={(e) => { e.stopPropagation(); setFocus(s.id); }} className="absolute bottom-9 left-2 hidden rounded-full bg-black/60 px-2.5 py-0.5 text-[11px] font-bold text-white opacity-0 hover:bg-black/80 group-hover:opacity-100 md:block">Zoom</button>
                     </div>
                     {!dense && <div className="flex flex-1 flex-col gap-1.5 p-2.5">
-                      <p className="truncate text-[11px] text-slate-500">{s.client_type === 'web' ? 'browser' : s.client_type}{s.platform ? ` · ${s.platform}` : ''}{s.status !== 'ENDED' && s.seen_ago > 15 ? ` · seen ${s.seen_ago}s ago` : ''}</p>
+                      {(() => {
+                      const h = helpFor(s);
+                      return (
+                        <div className="flex items-center gap-2">
+                          <p className="min-w-0 flex-1 truncate text-[11px] text-slate-500">{s.client_type === 'web' ? 'browser' : s.client_type}{s.platform ? ` · ${s.platform}` : ''}{s.status !== 'ENDED' && s.seen_ago > 15 ? ` · seen ${s.seen_ago}s ago` : ''}</p>
+                          <button type="button" onClick={() => setHelpId(s.id)} aria-label={`Help ${s.student_name}: ${h.title}`} title={h.level === 'ok' ? 'Help' : h.title}
+                            className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${h.level === 'fix' ? 'bg-amber-400 text-slate-950 hover:bg-amber-300' : h.level === 'info' ? 'bg-sky-500/20 text-sky-200 ring-1 ring-sky-400/40 hover:bg-sky-500/30' : 'bg-white/5 text-slate-400 hover:bg-white/10'} ${FOCUS}`}>
+                            <svg aria-hidden viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="3.4" /><path d="M5.7 5.7l3.9 3.9M14.4 14.4l3.9 3.9M18.3 5.7l-3.9 3.9M9.6 14.4l-3.9 3.9" /></svg>
+                            {h.level === 'fix' && <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 animate-pulse rounded-full bg-rose-500 ring-2 ring-slate-900" />}
+                          </button>
+                        </div>
+                      );
+                    })()}
                       {(s.status === 'PAUSED' || s.status === 'LEFT') && <p className="text-xs font-semibold text-amber-300">{why(s.pause_reason ?? s.last_violation)}</p>}
                       {s.id_status === 'pending' && s.status !== 'ENDED' && <p className="text-xs font-semibold text-sky-300">Showing their student card</p>}
                       {(s.aside_seconds ?? 0) >= 10 && s.status !== 'ENDED' && <p className="text-xs text-slate-400" title="How long their face was turned well away from the camera. Only a number for you to judge: it never disqualifies anyone.">Looked aside {s.aside_seconds} s</p>}
@@ -832,6 +863,63 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
       })()}
 
       {pay && <MySebPayPanel payment={pay} onClose={() => setPay(null)} onAccess={() => { setPay(null); void makeCode(); }} />}
+      {helpId && (() => {
+        const st = students.find((x) => x.id === helpId);
+        if (!st) return null;
+        const h = helpFor(st);
+        const first = st.student_name.split(' ')[0] || st.student_name;
+        const card = idq.find((c) => c.id === st.id);
+        const tone = h.level === 'fix' ? 'border-amber-400/40 bg-amber-400/10' : h.level === 'info' ? 'border-sky-400/40 bg-sky-500/10' : 'border-white/10 bg-white/[0.04]';
+        return (
+          <Sheet title={`Help ${st.student_name}`} onClose={() => setHelpId(null)}>
+            <div className="space-y-4">
+              <section className={`rounded-2xl border p-3.5 ${tone}`}>
+                <p className="flex items-center gap-2 text-sm font-bold"><span className={`h-2.5 w-2.5 rounded-full ${h.level === 'fix' ? 'bg-amber-400' : h.level === 'info' ? 'bg-sky-400' : 'bg-emerald-400'}`} />{h.title}</p>
+                <p className="mt-1.5 text-sm leading-relaxed text-slate-200">{h.why}</p>
+                {h.careful && <p className="mt-2 rounded-lg bg-amber-400/15 px-2.5 py-1.5 text-xs leading-snug text-amber-100">This reason could be more than a slip. Look at what happened below before you let them continue.</p>}
+              </section>
+
+              {h.can.length > 0 && (
+                <section aria-label="What you can do" className="space-y-2">
+                  <h3 className="text-xs font-bold uppercase tracking-wide text-slate-400">What you can do</h3>
+                  {h.can.includes('card') && card && (
+                    <div className="overflow-hidden rounded-xl border border-white/10 bg-slate-950">
+                      <img src={card.image} alt={`Card shown by ${card.student_name}`} className="aspect-[4/3] w-full object-cover" />
+                      <div className="flex gap-2 p-2.5">
+                        <button type="button" disabled={busy} onClick={() => { void decideId(card.id, true); setHelpId(null); setNotice(`${first} is let in`); }} className={`min-h-11 flex-1 rounded-xl bg-emerald-500 px-3 text-sm font-bold text-white hover:bg-emerald-400 disabled:opacity-40 ${FOCUS}`}>Let in</button>
+                        <button type="button" disabled={busy} onClick={() => { void decideId(card.id, false); setHelpId(null); setNotice(`${first}'s card was refused`); }} className={`min-h-11 flex-1 rounded-xl bg-rose-600 px-3 text-sm font-bold text-white hover:bg-rose-500 disabled:opacity-40 ${FOCUS}`}>Refuse</button>
+                      </div>
+                    </div>
+                  )}
+                  {h.can.includes('card') && !card && <p className="text-sm text-slate-400">Loading their card…</p>}
+                  {h.can.includes('resume') && <button type="button" disabled={busy || !open} onClick={() => void doFix(st.id, first, 'resume')} className={`${dPrimary} w-full`}>{st.status === 'LEFT' ? `Let ${first} continue (once they are connected)` : `Let ${first} continue`}</button>}
+                  {h.can.includes('reinstate') && <button type="button" disabled={busy || !open} onClick={() => { if (!h.careful || confirm(`${first} ${reasonWords(st.end_reason)}. Let them back in anyway? It is recorded in their log.`)) void doFix(st.id, first, 'reinstate'); }} className={`${dPrimary} w-full`}>Let {first} back in</button>}
+                  <p className="text-xs leading-snug text-slate-500">Everything you do here is written in {first}'s log.</p>
+                </section>
+              )}
+
+              {h.tell && (
+                <section aria-label="What to tell them" className="space-y-2">
+                  <h3 className="text-xs font-bold uppercase tracking-wide text-slate-400">{h.can.length ? 'Tell them' : 'Only they can fix this: tell them'}</h3>
+                  <p className="rounded-xl bg-white/[0.05] p-3 text-sm leading-relaxed text-slate-200">{h.tell}</p>
+                  <div className="flex gap-2">
+                    <button type="button" className={`${dBtn} flex-1`} onClick={async () => { try { await navigator.clipboard.writeText(h.tell!); setNotice('Message copied'); } catch { /* the text is on screen */ } }}>Copy message</button>
+                    <a className={`${dBtn} flex flex-1 items-center justify-center`} target="_blank" rel="noreferrer" href={`https://wa.me/?text=${encodeURIComponent(h.tell)}`}>WhatsApp</a>
+                  </div>
+                </section>
+              )}
+
+              <section aria-label="What happened" className="space-y-1.5">
+                <h3 className="text-xs font-bold uppercase tracking-wide text-slate-400">What happened</h3>
+                {helpLog === null ? <p className="text-sm text-slate-500">Loading…</p>
+                  : helpLog.length === 0 ? <p className="text-sm text-slate-400">Nothing was recorded for {first}.</p>
+                  : <ul className="divide-y divide-white/10 text-sm">{[...helpLog].slice(-6).reverse().map((v) => <li key={v.id} className="flex justify-between gap-3 py-2"><span>{cap(reasonWords(v.type))}</span><span className="shrink-0 text-slate-400 tabular-nums">{new Date(v.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></li>)}</ul>}
+              </section>
+            </div>
+          </Sheet>
+        );
+      })()}
+      {notice && <div role="status" className="pointer-events-none fixed inset-x-0 bottom-24 z-[60] flex justify-center px-3 md:bottom-6"><p className="max-w-sm rounded-full bg-emerald-600 px-4 py-2.5 text-center text-sm font-semibold text-white shadow-xl">{notice}</p></div>}
       {saved && (
         <Sheet title={`${saved.name}: saved answers`} onClose={() => setSaved(null)}>
           <p className="mb-3 text-xs text-slate-400">What the student had typed{saved.at ? `, last saved ${new Date(saved.at).toLocaleTimeString()}` : ''}. Saved every few seconds, so the last few seconds may be missing. Files are not included.</p>
