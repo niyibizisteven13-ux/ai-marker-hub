@@ -73,7 +73,7 @@ export default function LandingPage({ onLoginSuccess }: { onLoginSuccess: (user?
             />}
 
             {!waitingForPasskey && (
-              <a className="getapp" href="/myseb/download">
+              <a className="getapp" href="/get-app">
                 <b>{t('getApp')}</b>
                 <span>{t('getAppSub')}</span>
               </a>
