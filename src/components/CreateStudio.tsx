@@ -80,63 +80,12 @@ interface CreateStudioProps {
 
 const sourceOf = attachmentSource;
 
-function ModePicker({ selected, onSelect }: { selected: string; onSelect: (val: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const modes = [
-    { id: 'auto', label: 'Auto (Balanced)', short: 'Auto' },
-    { id: 'fast', label: 'Fast (Real-time)', short: 'Fast' },
-    { id: 'deep', label: 'Deep (Reasoning)', short: 'Deep' },
-  ];
-
-  const selectedMode = modes.find((m) => m.id === selected) || modes[0];
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleOutside = (e: PointerEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    if (open) {
-      document.addEventListener('pointerdown', handleOutside);
-    }
-    return () => document.removeEventListener('pointerdown', handleOutside);
-  }, [open]);
-
-  return (
-    <div className="relative" ref={dropdownRef}>
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-[var(--app-muted)] hover:bg-white/5 transition-colors border border-white/10 bg-[var(--app-panel)]"
-      >
-        <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-        <span>{selectedMode.short}</span>
-        <ChevronDown size={12} className="opacity-60" />
-      </button>
-
-      {open && (
-        <div className="absolute bottom-full right-0 mb-2 w-48 rounded-2xl border border-white/15 bg-[var(--app-panel)] shadow-2xl p-1 z-50 animate-in fade-in slide-in-from-bottom-2 duration-150">
-          {modes.map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              onClick={() => {
-                onSelect(m.id);
-                setOpen(false);
-              }}
-              className={`w-full text-left px-3 py-2 rounded-xl text-xs font-medium transition-colors ${
-                selected === m.id ? 'bg-[#5DCAA5]/20 text-white' : 'text-[var(--app-muted)] hover:bg-white/5 hover:text-white'
-              }`}
-            >
-              {m.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+/** How hard the assistant thinks. Chosen from the conversation menu, so the header can stay almost empty. */
+const ANSWER_MODES = [
+  { id: 'auto', label: 'Auto', hint: 'Balanced' },
+  { id: 'fast', label: 'Fast', hint: 'Real-time' },
+  { id: 'deep', label: 'Deep', hint: 'Reasoning' },
+] as const;
 
 export default function CreateStudio({
   messages,
@@ -341,9 +290,21 @@ export default function CreateStudio({
     if (files.length > 0) onStageAttachments?.(files);
   };
 
+  // The header slides away while you read down a conversation and comes back when you scroll up (or reach the top).
+  const [headerHidden, setHeaderHidden] = useState(false);
+  const lastScrollTop = useRef(0);
+  const userScrollUntil = useRef(0);          // set while the reader is scrolling by hand (wheel, touch, keys), so the page's own scrolling to the newest message never hides the header
+  const markUserScroll = () => { userScrollUntil.current = Date.now() + 300; };
+  useEffect(() => { if (messages.length === 0) setHeaderHidden(false); }, [messages.length]);
   const handleScroll = () => {
     const el = scrollContainerRef.current;
     if (!el) return;
+    const top = el.scrollTop; const delta = top - lastScrollTop.current; lastScrollTop.current = top;
+    if (messages.length > 0) {
+      if (top < 48) setHeaderHidden(false);
+      else if (delta > 10 && Date.now() < userScrollUntil.current) setHeaderHidden(true);
+      else if (delta < -10) setHeaderHidden(false);
+    }
     const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     const isNearBottom = distanceToBottom <= 80;
     stickToBottomRef.current = isNearBottom;
@@ -392,7 +353,11 @@ export default function CreateStudio({
     >
       {isDraggingAttachments && <div className="absolute inset-3 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-emerald-400/70 bg-[var(--app-sunken)]/95 text-sm font-medium text-emerald-200 pointer-events-none">Drop documents to attach</div>}
       {/* Header */}
-      <header className="flex h-[calc(56px+env(safe-area-inset-top,0px))] shrink-0 items-center justify-between border-b border-white/[0.06] bg-[var(--app-panel-2)]/95 px-3 pt-[env(safe-area-inset-top,0px)] backdrop-blur-md">
+      <header
+        style={{ marginTop: headerHidden ? 'calc(-44px - env(safe-area-inset-top, 0px))' : 0, opacity: headerHidden ? 0 : 1 }}
+        aria-hidden={headerHidden}
+        className="flex h-[calc(44px+env(safe-area-inset-top,0px))] shrink-0 items-center justify-between bg-[var(--app-bg)] px-2 pt-[env(safe-area-inset-top,0px)] transition-[margin-top,opacity] duration-200"
+      >
         {/* Left: Menu button on mobile */}
         <div className="flex items-center gap-2">
           <button
@@ -404,7 +369,7 @@ export default function CreateStudio({
             <PanelLeft className="h-5 w-5" />
           </button>
           <div className="hidden lg:flex items-center gap-2">
-            <span className="text-sm font-semibold tracking-tight text-[var(--app-text)]">
+            <span className="text-[13px] font-medium tracking-tight text-[var(--app-muted)]">
               {messages.length > 0 && truncatedTitle ? truncatedTitle : 'New Chat'}
             </span>
           </div>
@@ -413,15 +378,13 @@ export default function CreateStudio({
         {/* Center: Truncated conversation title on mobile */}
         <div className="flex-1 px-2 text-center lg:hidden truncate">
           {messages.length > 0 && truncatedTitle && (
-            <span className="text-sm font-medium text-[var(--app-text)] truncate">{truncatedTitle}</span>
+            <span className="text-[13px] font-medium text-[var(--app-muted)] truncate">{truncatedTitle}</span>
           )}
         </div>
 
         {/* Right: Mode Picker, Upgrade / Sign in, More Menu */}
         <div className="flex items-center gap-2">
           {isTemporaryChat && <span className="hidden rounded-full border border-[#F0A12C]/25 bg-[#F0A12C]/10 px-2.5 py-1 text-[10px] font-semibold text-[#F6B94A] sm:inline-flex">Temporary</span>}
-          <ModePicker selected={selectedProvider} onSelect={(val) => onProviderChange?.(val)} />
-
           <button
             type="button"
             onClick={onNewChat}
@@ -432,14 +395,7 @@ export default function CreateStudio({
             <SquarePen className="h-5 w-5" />
           </button>
 
-          {user ? (billing && billing.plan !== 'FREE' && billing.plan !== 'GO' ? null : (
-            <button
-              onClick={() => (window as any).openUpgradeModal?.()}
-              className="hidden sm:flex bg-gradient-to-r from-amber-500/20 to-orange-600/10 hover:from-amber-500/30 hover:to-orange-600/20 text-amber-400 font-medium px-3.5 py-1.5 rounded-xl border border-amber-500/30 text-xs transition-all shadow-md items-center gap-1.5"
-            >
-              <Sparkles size={13} /> Upgrade
-            </button>
-          )) : (
+          {!user && (
             <button
               onClick={onOpenLoginModal}
               className="flex bg-[var(--brand)] hover:bg-[var(--brand-strong)] text-white font-medium px-3.5 py-1.5 rounded-xl text-xs transition-all shadow-md items-center gap-1.5"
@@ -555,6 +511,13 @@ export default function CreateStudio({
 
                 {/* Answers Section */}
                 <div className="px-3 pb-1.5 pt-1 font-bold text-[10px] tracking-[.14em] uppercase text-neutral-400">Answer preferences</div>
+                <div role="radiogroup" aria-label="Answer mode" className="mb-1 flex gap-1 px-2">
+                  {ANSWER_MODES.map((m) => (
+                    <button key={m.id} type="button" role="radio" aria-checked={(selectedProvider ?? 'auto') === m.id} onClick={() => onProviderChange?.(m.id)}
+                      className={`min-h-9 flex-1 rounded-lg px-2 text-xs font-semibold transition-colors ${(selectedProvider ?? 'auto') === m.id ? 'bg-[#5DCAA5]/20 text-white' : 'text-neutral-300 hover:bg-white/[.07]'}`}
+                      title={m.hint}>{m.label}</button>
+                  ))}
+                </div>
                 <button
                   type="button"
                   aria-pressed={showSources}
@@ -626,6 +589,9 @@ export default function CreateStudio({
       <div
         ref={scrollContainerRef}
         onScroll={handleScroll}
+        onWheel={markUserScroll}
+        onTouchMove={markUserScroll}
+        onKeyDown={markUserScroll}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-hidden relative"
       >
         <div className="mx-auto w-full max-w-2xl flex flex-col gap-6 px-4 py-6">
