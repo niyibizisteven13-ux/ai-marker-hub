@@ -486,8 +486,8 @@ export const bwengeAgent = createAiAgent({
       roomAssistant: async (userId, kind, id, patch) => {
         const my = await import('./mySeb.js'); const ag = await import('./mySebAgent.js');
         const load = kind === 'form' ? my.formTarget(userId, id) : my.assignmentTarget(userId, id);
-        const { confirmedAutopilot, ...rules } = patch ?? {};
-        const v = patch && Object.values(rules).some((x) => x !== undefined) ? await ag.setAgent(load, rules, userId, { confirmedAutopilot }) : await ag.getAgent(load);
+        const { confirmedAutopilot, confirmedVision, ...rules } = patch ?? {};
+        const v = patch && Object.values(rules).some((x) => x !== undefined) ? await ag.setAgent(load, rules, userId, { confirmedAutopilot, confirmedVision }) : await ag.getAgent(load);
         return { rules: v.rules, usage: v.usage, report: v.report, resumed: v.resumed, log: v.log };
       },
       roomReview: async (userId, kind, id, decide) => {
@@ -1047,6 +1047,21 @@ export class AiService {
       ...options.messages,
       { role: 'assistant', content: [{ type: 'text', text: r.text }] as any },
     ];
+  }
+
+  /**
+   * One small camera picture of a student, looked at by the agent model for the picture checks of a live test: how many people, whether a
+   * face is visible, whether a phone is clearly in view. Returns the model's JSON text; the caller decides what it means. No memory, no tools.
+   */
+  public async describeProctorPicture(userId: string, dataUrl: string, system: string): Promise<string> {
+    const m = /^data:(image\/jpeg|image\/png);base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+    if (!m || m[2].length > 200_000) throw new Error('Not a usable picture.');
+    const agent = agentTarget();
+    const r = await bwengeAgent.run({
+      userId, system, prompt: 'Look at this picture and answer with the JSON only.', uploads: [{ type: 'image', base64: m[2], mediaType: m[1] }],
+      toolNames: [], vision: true, maxTurns: 1, ...(agent.provider === 'anthropic' ? { model: agent.model } : {}),
+    });
+    return r.text ?? '';
   }
 
   public async generalAssist(options: {

@@ -201,6 +201,11 @@ export async function reinstate(load: TargetLoader, sid: string, minutes?: numbe
   await ownStudent(load, sid);
   return mysebFetch(`/sessions/${sid}/reinstate`, { method: 'POST', ...(minutes ? { body: { minutes } } : {}) });
 }
+/** Keep the pictures the server holds for this student right now as evidence (memory only on the MySEB server). */
+export async function captureEvidenceFor(load: TargetLoader, sid: string, type: string): Promise<boolean> {
+  await ownStudent(load, sid);
+  return Boolean(((await mysebFetch(`/sessions/${sid}/capture`, { method: 'POST', body: { type } })) as { kept?: boolean }).kept);
+}
 /** How many evidence pictures the server holds per student (memory only on the MySEB server), and the pictures of one student. */
 export async function evidenceCounts(load: TargetLoader): Promise<Record<string, number>> {
   const t = await load();

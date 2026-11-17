@@ -62,6 +62,9 @@ const fake = http.createServer((req, res) => {
     if (req.url?.startsWith(`/api/exams/${EXAM}/report`)) return json({ exam: { title: 'Biology', status: examStatus }, students: students.map((x) => ({ ...x, id: x.id })), events: reportEvents });
     if (req.url?.startsWith(`/api/exams/${EXAM}/evidence`)) return req.url.includes('sessionId=') ? json({ items: [{ at: 'x', type: 'screenshot', frame: 'data:image/jpeg;base64,AA==', screen: null }] }) : json({ counts: evidenceBy });
     if (/\/api\/exams\/[^/]+\/generate-code$/.test(req.url ?? '') && req.method === 'POST') { actions.push('generate-code'); return json({ code: '123456', display: '1234-ABC-01', joinUrl: 'https://x.test/join/123456', qrSvg: '', expiresAt: '2026-12-01T00:00:00Z' }); }
+    if (req.url?.startsWith(`/api/exams/${EXAM}/frames`)) return json({ frames: Object.fromEntries(students.map((x) => [x.id, { frame: 'data:image/jpeg;base64,AAAA', age: 3 }])) });
+    const cap = /\/api\/sessions\/([^/]+)\/capture$/.exec(req.url ?? '');
+    if (cap && req.method === 'POST') { actions.push(`capture ${cap[1]} ${body}`); return json({ ok: true, kept: true }); }
     const rein = /\/api\/sessions\/([^/]+)\/reinstate$/.exec(req.url ?? '');
     if (rein && req.method === 'POST') { actions.push(`reinstate ${rein[1]} ${body}`); return json({ ok: true }); }
     const vio = /\/api\/sessions\/([^/]+)\/violations$/.exec(req.url ?? '');
@@ -356,4 +359,46 @@ test('alerts carry one-tap buttons: let a student back in, pause all, add time; 
   const first = seen.kb.inline_keyboard[0][0].callback_data.slice(3); const t = await takeToken(first, owner);
   assert.ok(t.ok && t.token.sid === 'sa' && t.token.action === 'back_in' && t.token.ref === formId);
   A.__setNotifyDepsForTests(null);
+});
+
+test('picture checks: opt-in with a confirmation, students are told, a repeated finding becomes a note with the picture kept, nobody is ended, and credits and the picture limit are respected', async () => {
+  const load = formTarget(owner, formId); const told: string[] = []; let credits = true; let calls = 0; let answer = '{"people":2,"face":true,"phone":false,"note":"two people"}';
+  A.__setAlertOwnerForTests(async (_r, entries) => { told.push(...entries.map((e) => e.text)); });
+  A.__setVisionDepsForTests({ describe: async () => { calls++; return answer; }, canSpend: async () => credits, spent: async () => undefined });
+  { const key = `myseb-agent:form:${formId}`; const cur = (await db.appSetting.findUnique({ where: { key } })).value; await db.appSetting.update({ where: { key }, data: { value: { ...cur, mem: undefined, visionUsed: 0 } } }); }
+  A.__resetAgentMemoryForTests(); actions.length = 0; examStatus = 'active';
+  await A.setAgent(load, { on: true, level: 'assist', dryRun: false, vision: false }, owner);
+  await assert.rejects(A.setAgent(load, { vision: true }, owner), /Confirm/i); assert.equal((await A.getAgent(load)).rules.vision, false);
+  await A.setAgent(load, { vision: true, maxPictures: 20 }, owner, { confirmedVision: true });
+  const amy = person({ student_name: 'Amy', status: 'IN_EXAM', pause_reason: null, violation_count: 0 });
+  students = [amy]; const t0 = Date.now();
+  await A.runRoom(await rowOf(), t0);
+  assert.ok(actions.some((a) => a.startsWith('notice') && /AI assistant may check small camera pictures/.test(a)), 'the students were told');
+  assert.equal(calls, 1, 'one picture checked');
+  await A.runRoom(await rowOf(), t0 + 10_000); assert.equal(calls, 1, 'not again within a minute');
+  await A.runRoom(await rowOf(), t0 + 65_000);
+  const row = await rowOf();
+  assert.ok(row.log.some((e: any) => e.kind === 'vision' && e.student === 'Amy' && /second person/.test(e.text) && /not proof/.test(e.text)), 'the second picture repeated it');
+  assert.ok(actions.some((a) => a === `capture ${amy.id} {"type":"vision_second_person"}`), 'the picture was kept as evidence');
+  assert.ok(told.some((t) => /second person/.test(t)), 'the lecturer was told');
+  assert.ok(!actions.some((a) => a.startsWith('end ') || a.startsWith('pause-all')), 'nobody was ended or paused');
+  assert.equal(row.visionUsed, 2);
+  // it is a lead in the review queue
+  const R = await import('../server/services/mySebReview.js');
+  students = [{ ...amy, status: 'IN_EXAM' }]; reportEvents = []; evidenceBy = {};
+  const q = await R.getReview(load, (await A.getAgent(load)).log);
+  assert.ok(q.items.some((i) => i.name === 'Amy' && i.timeline.some((t) => t.kind === 'vision')), 'it appears in the queue');
+  // no credits: paused, the lecturer is told once
+  credits = false; calls = 0; told.length = 0; A.__resetAgentMemoryForTests();
+  await A.runRoom(await rowOf(), t0 + 200_000); await A.runRoom(await rowOf(), t0 + 300_000);
+  assert.equal(calls, 0); assert.equal(told.filter((t) => /no credits left/.test(t)).length, 1);
+  // the limit the lecturer set
+  credits = true; A.__resetAgentMemoryForTests(); await A.setAgent(load, { maxPictures: 20 }, owner);
+  { const key = `myseb-agent:form:${formId}`; const cur = (await db.appSetting.findUnique({ where: { key } })).value; await db.appSetting.update({ where: { key }, data: { value: { ...cur, visionUsed: 20, mem: undefined } } }); }
+  told.length = 0; await A.runRoom(await rowOf(), t0 + 400_000);
+  assert.equal(calls, 0, 'no more pictures past the limit'); assert.ok(told.some((t) => /pictures you allowed were used/.test(t)));
+  // practice mode: nothing is sent to the model
+  await A.setAgent(load, { dryRun: true }, owner); A.__resetAgentMemoryForTests(); calls = 0;
+  await A.runRoom(await rowOf(), t0 + 500_000); assert.equal(calls, 0);
+  A.__setAlertOwnerForTests(async () => undefined);
 });
