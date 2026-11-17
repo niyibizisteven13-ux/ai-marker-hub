@@ -27,7 +27,7 @@ const services: ToolServices = {
     roomStudent: async (_u, _k, _i, sid, action) => { calls.push(`${action} ${sid}`); },
     roomAssistant: async (_u, _k, _i, patch) => {
       if (patch) calls.push(`assistant ${JSON.stringify(patch)}`);
-      return { rules: { on: patch?.on ?? false, autoResume: true, afterSeconds: patch?.afterSeconds ?? 30, maxResumes: patch?.maxResumes ?? 2, endAfterMax: !!patch?.endAfterMax, level: patch?.level ?? 'assist', dryRun: !!patch?.dryRun, maxAddMinutes: patch?.maxAddMinutes ?? 15, maxRoomPauses: patch?.maxRoomPauses ?? 2 }, usage: { roomPauses: 1, addedMinutes: 5, notices: 2 }, resumed: 3, log: [{ at: '2026-11-16T09:10:00Z', kind: 'resumed', student: 'Cora Mutesi', text: 'Let back in: switched window (1 of 2).' }, { at: '2026-11-16T09:12:00Z', kind: 'needs_you', student: 'Ben Habimana', text: 'more than one face: only you can decide this' }] };
+      return { rules: { on: patch?.on ?? false, autoResume: true, afterSeconds: patch?.afterSeconds ?? 30, maxResumes: patch?.maxResumes ?? 2, endAfterMax: !!patch?.endAfterMax, level: patch?.level ?? 'assist', dryRun: !!patch?.dryRun, maxAddMinutes: patch?.maxAddMinutes ?? 15, maxRoomPauses: patch?.maxRoomPauses ?? 2, serious: patch?.serious ?? 'flag', seriousStrikes: patch?.seriousStrikes ?? 2, autoClose: patch?.autoClose ?? true }, usage: { roomPauses: 1, addedMinutes: 5, notices: 2 }, resumed: 3, log: [{ at: '2026-11-16T09:10:00Z', kind: 'resumed', student: 'Cora Mutesi', text: 'Let back in: switched window (1 of 2).' }, { at: '2026-11-16T09:12:00Z', kind: 'needs_you', student: 'Ben Habimana', text: 'more than one face: only you can decide this' }] };
     },
     roomAction: async (_u, _k, _i, a) => { calls.push(`room ${JSON.stringify(a)}`); return a.action === 'add_time' && (a.minutes ?? 0) > 60 ? { ok: false, text: 'Time can be added in whole minutes, 1 to 60 at a time.' } : { ok: true, text: `Done: ${a.action}` }; },
     roomViolations: async (_u, _k, _i, sid) => (sid === 's2' ? [{ type: 'visibility_hidden', created_at: '2026-11-16T09:01:00Z' }, { type: 'visibility_hidden', created_at: '2026-11-16T09:02:00Z' }] : [{ type: 'blur', created_at: '2026-11-16T09:03:00Z' }]),
@@ -176,4 +176,12 @@ test('live_room_action: pause, more time and a message are passed on, recorded, 
   const bad: any = await t.execute({ kind: 'form', id: 'f1', action: 'add_time', minutes: 90 }, ctx);
   assert.ok(bad.isError); assert.match(bad.text, /1 to 60/);
   assert.ok(calls.some((c) => c.startsWith('room {"action":"pause_room"') && c.includes('power cut')));
+});
+
+test('room_assistant: autopilot passes its policy and the lecturer\'s confirmation through, and the answer says what it does and what it cannot', async () => {
+  calls.length = 0;
+  const set = (await tools.room_assistant.execute({ kind: 'form', id: 'f1', on: true, level: 'run', serious: 'end', seriousStrikes: 2, confirmedAutopilot: true }, ctx)).text;
+  assert.ok(calls.some((c) => c.startsWith('assistant') && c.includes('"level":"run"') && c.includes('"serious":"end"') && c.includes('"confirmedAutopilot":true')));
+  assert.match(set, /AUTOPILOT: runs the test without the lecturer/); assert.match(set, /the test ends after 2 strikes, with a warning first/);
+  assert.match(set, /cannot guarantee that nobody cheats/);
 });

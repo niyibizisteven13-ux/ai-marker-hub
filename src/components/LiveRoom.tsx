@@ -18,7 +18,7 @@ interface Student {
   live: { question: { index: number | null; total: number | null; label: string } | null; camera: string; screen_state?: string; frame: string | null; frame_age: number | null; screen?: string | null; screen_age?: number | null } | null;
 }
 interface Room { exam: { title: string; status: string; live_faces: boolean; live_mode?: 'off' | 'pictures' | 'live'; live_sound?: boolean; live_source?: Source; leave_action?: string; allow_web?: boolean; web_strict?: boolean; multi_face?: 'off' | 'warn' | 'end'; id_check?: boolean; web_devices?: 'any' | 'ios' }; counts: Record<Status, number>; students: Student[] }
-interface AgentView { rules: { on: boolean; autoResume: boolean; afterSeconds: number; maxResumes: number; endAfterMax: boolean; level: 'watch' | 'assist'; dryRun: boolean; maxAddMinutes: number; maxRoomPauses: number }; usage: { roomPauses: number; addedMinutes: number; notices: number }; resumed: number; log: Array<{ at: string; kind: string; student?: string; text: string }> }
+interface AgentView { rules: { on: boolean; autoResume: boolean; afterSeconds: number; maxResumes: number; endAfterMax: boolean; level: 'watch' | 'assist' | 'run'; dryRun: boolean; maxAddMinutes: number; maxRoomPauses: number; serious: 'flag' | 'end'; seriousStrikes: number; autoClose: boolean }; report?: { at: string; text: string }; usage: { roomPauses: number; addedMinutes: number; notices: number }; resumed: number; log: Array<{ at: string; kind: string; student?: string; text: string }> }
 interface Code { display: string; qrSvg: string; expiresAt: string; joinUrl?: string }
 
 const LABEL: Record<Status, string> = { IN_EXAM: 'In the test', PAUSED: 'Paused', LEFT: 'Left', ENDED: 'Finished' };
@@ -450,12 +450,12 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
   const students = room?.students ?? [];
   // The room assistant (rules and what it did). Read with every refresh while it is on or its panel is open; one small read.
   useEffect(() => {
-    if (!room || (agent && !agent.rules.on && !agentOpen)) return;
+    if (!room || (agent && !agent.rules.on && !agentOpen && !(room.exam?.status === 'ended' && agent.rules.level === 'run' && !agent.report))) return;
     let live = true;
     call('/agent').then((b) => { if (live && b?.data) setAgent(b.data); }).catch(() => undefined);
     return () => { live = false; };
   }, [room, call]); // eslint-disable-line react-hooks/exhaustive-deps
-  const setRules = (patch: Partial<AgentView['rules']>) => act(async () => { const b = await call('/agent', 'PUT', patch); if (b?.data) setAgent(b.data); });
+  const setRules = (patch: Partial<AgentView['rules']> & { confirmAutopilot?: boolean }) => act(async () => { const b = await call('/agent', 'PUT', patch); if (b?.data) setAgent(b.data); });
   // Acting in the room: pause or release everyone, more time, a message to the students.
   const [roomMsg, setRoomMsg] = useState('');
   const [roomNote, setRoomNote] = useState('');
@@ -727,10 +727,30 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
                   </select>
                 </Setting>
                 <Setting label="What it may do" hint="Watch: it only looks and tells you. Assist: it also lets students back in.">
-                  <select className={dSelect} style={{ colorScheme: 'dark' }} aria-label="What the assistant may do" value={agent?.rules.level ?? 'assist'} disabled={busy || !open} onChange={(e) => void setRules({ level: e.target.value as 'watch' | 'assist' })}>
-                    <option value="assist">Assist</option><option value="watch">Watch only</option>
+                  <select className={dSelect} style={{ colorScheme: 'dark' }} aria-label="What the assistant may do" value={agent?.rules.level ?? 'assist'} disabled={busy || !open} onChange={(e) => { const level = e.target.value as 'watch' | 'assist' | 'run'; if (level !== 'run') { void setRules({ level }); return; } if (confirm('Autopilot runs this test without you: it warns students, lets a warned student carry on, gives time if many connections drop, announces the time left, closes the test when everyone has finished and sends you the report. It cannot see everything (a phone out of view, help by voice), so it reduces cheating but cannot stop all of it. Switch it on?')) void setRules({ level: 'run', confirmAutopilot: true } as never); }}>
+                    <option value="assist">Assist</option><option value="watch">Watch only</option><option value="run">Autopilot (no lecturer needed)</option>
                   </select>
                 </Setting>
+                {agent?.rules.level === 'run' && (
+                  <>
+                    <Setting label="When serious rules are broken" hint="Screenshot, recording app, second person, pasting. The first one only gets a warning.">
+                      <select className={dSelect} style={{ colorScheme: 'dark' }} aria-label="Autopilot policy for serious signals" value={agent.rules.serious} disabled={busy || !open} onChange={(e) => { if (e.target.value !== 'end' || confirm('Autopilot will END a student\'s test by itself at the strike limit. You can let them back in from the live room while time remains. Continue?')) void setRules({ serious: e.target.value as 'flag' | 'end' }); }}>
+                        <option value="flag">Warn and record only</option><option value="end">End their test at the limit</option>
+                      </select>
+                    </Setting>
+                    <Setting label="Serious signals allowed" hint="Before the policy applies. Earlier ones get a warning.">
+                      <select className={dSelect} style={{ colorScheme: 'dark' }} aria-label="Serious signals allowed" value={agent.rules.seriousStrikes} disabled={busy || !open} onChange={(e) => void setRules({ seriousStrikes: Number(e.target.value) })}>
+                        {[1, 2, 3].map((n) => <option key={n} value={n}>{n}</option>)}
+                      </select>
+                    </Setting>
+                    <Setting label="Close the test" hint="When everyone has finished, after two quiet minutes.">
+                      <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm font-semibold md:min-h-9">
+                        <input type="checkbox" className="h-5 w-5 accent-blue-500" checked={agent.rules.autoClose} disabled={busy || !open} onChange={(e) => void setRules({ autoClose: e.target.checked })} />
+                        Close it by itself
+                      </label>
+                    </Setting>
+                  </>
+                )}
                 <Setting label="Practice mode" hint="It writes what it would do and does nothing. Good for a first test.">
                   <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm font-semibold md:min-h-9">
                     <input type="checkbox" className="h-5 w-5 accent-blue-500" checked={!!agent?.rules.dryRun} disabled={busy || !open} onChange={(e) => void setRules({ dryRun: e.target.checked })} />
@@ -771,11 +791,17 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
                 {agent?.rules.on && <p className="text-xs text-slate-400">By itself so far: paused {agent.usage.roomPauses} of {agent.rules.maxRoomPauses} times, {agent.usage.addedMinutes} of {agent.rules.maxAddMinutes} minutes added.</p>}
               </div>
             )}
+            {agent?.report && (
+              <div className="mt-3 rounded-xl border border-emerald-400/30 bg-emerald-500/10 p-3" aria-label="Final report">
+                <p className="text-xs font-bold uppercase tracking-wide text-emerald-300">Final report · {new Date(agent.report.at).toLocaleString([], { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })}</p>
+                <pre className="mt-2 whitespace-pre-wrap font-sans text-sm leading-relaxed text-slate-100">{agent.report.text}</pre>
+              </div>
+            )}
             {agent && agent.log.length > 0 && (
               <ul className="mt-3 divide-y divide-white/10 border-t border-white/10 text-sm" aria-label="What the assistant did">
                 {agent.log.slice(0, 6).map((e, i) => (
                   <li key={`${e.at}-${i}`} className="flex items-start gap-2.5 py-2">
-                    <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${e.kind === 'resumed' || e.kind === 'room' ? 'bg-emerald-400' : e.kind === 'would' ? 'bg-sky-400' : e.kind === 'refused' ? 'bg-rose-400' : e.kind === 'needs_you' || e.kind === 'card' ? 'bg-amber-400' : e.kind === 'ended' ? 'bg-rose-400' : 'bg-slate-500'}`} />
+                    <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${e.kind === 'resumed' || e.kind === 'room' || e.kind === 'report' ? 'bg-emerald-400' : e.kind === 'warned' ? 'bg-amber-400' : e.kind === 'would' ? 'bg-sky-400' : e.kind === 'refused' ? 'bg-rose-400' : e.kind === 'needs_you' || e.kind === 'card' ? 'bg-amber-400' : e.kind === 'ended' ? 'bg-rose-400' : 'bg-slate-500'}`} />
                     <p className="min-w-0 flex-1 text-slate-200">{e.student && <strong className="font-semibold text-white">{e.student}: </strong>}{e.text}</p>
                     <time className="shrink-0 text-xs tabular-nums text-slate-500" dateTime={e.at}>{new Date(e.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
                   </li>
