@@ -2671,6 +2671,23 @@ Break down into specific criteria whose total points sum to ${maxMarks}.`;
   }
 });
 
+// What the user might ask next: a short suggestion shown faintly in the chat box after an answer (see services/nextPrompt.ts).
+const nextPromptUsed = new Map<string, number[]>();
+app.post('/api/ai/next-prompt', requireAuth, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const userId = String((req as any).user?.userId ?? '');
+    if (!userId) return res.status(401).json({ error: 'Authentication required.' });
+    // A suggestion comes with every answer, so it is capped (60 an hour) and costs the user no credits.
+    const now = Date.now(); const recent = (nextPromptUsed.get(userId) ?? []).filter((t) => now - t < 3_600_000);
+    if (recent.length >= 60) return res.json({ suggestion: null });
+    nextPromptUsed.set(userId, [...recent, now]); if (nextPromptUsed.size > 5000) nextPromptUsed.clear();
+    const { suggestNextPrompt } = await import('./server/services/nextPrompt.js');
+    const suggestion = await suggestNextPrompt({ text: async (system, user) => String(await aiService.sendGonkaChat(user, { system, maxTokens: 48, timeoutMs: 8000 }) ?? '') }, String(req.body?.lastUser ?? ''), String(req.body?.lastAssistant ?? ''));
+    res.json({ suggestion });
+  } catch { res.json({ suggestion: null }); }
+});
+
 app.post('/api/ai/summarize', requireAuth, gradingLimiter, async (req, res) => {
   try {
     const { text } = req.body;

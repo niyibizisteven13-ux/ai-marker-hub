@@ -31,6 +31,8 @@ import {
   Copy, X, FolderUp, Coins,
 } from 'lucide-react';
 import { creditMeter, useBillingMe } from './PlanStatus';
+import { useNextPrompt } from '../hooks/useNextPrompt';
+import { nextPromptEnabled, setNextPromptEnabled, suggestionAction } from '../utils/nextPrompt';
 import { LearningModeBanner, LearningModePicker, speakText, speechLang, useLearningMode, useSpeechInput } from './LearningMode';
 import type { LearningSettings } from '../lib/learning/presets';
 import { Message as MessageType, ChatAttachment, ResponseFeedbackDetails } from '../types';
@@ -192,6 +194,10 @@ export default function CreateStudio({
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
   const plusMenuRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // The box is a slim single line while you read an answer, and opens up when you click into it or start typing.
+  const [focused, setFocused] = useState(false);
+  const [suggestOn, setSuggestOn] = useState(nextPromptEnabled);
+  const suggestion = useNextPrompt({ messages: messages as any, isTyping: !!isTyping, enabled: suggestOn && !isTemporaryChat });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const [zipping, setZipping] = useState(false);
@@ -273,6 +279,10 @@ export default function CreateStudio({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Like a code editor's ghost text: Tab fills the suggested next message, Enter sends it (only while the box is empty).
+    const act = suggestionAction(e.key, e.shiftKey, inputValue, suggestion);
+    if (act === 'fill' && suggestion) { e.preventDefault(); setInputValue(suggestion); return; }
+    if (act === 'send' && suggestion && !isTyping && window.matchMedia('(min-width: 1024px)').matches) { e.preventDefault(); onSendMessage(suggestion, stagedAttachments, { answerLanguage, learning }); stickToBottomRef.current = true; return; }
     const isDesktop = window.matchMedia('(min-width: 1024px)').matches;
     if (isDesktop && e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -369,6 +379,8 @@ export default function CreateStudio({
   }, [isTyping, messages, learning.mode, speakReplies, voiceLang]);
 
   const canSend = Boolean(inputValue.trim() || stagedAttachments.length > 0 || isTyping);
+  // Slim once there is a conversation and you are not writing: just the line, the plus, the mic and send.
+  const compact = messages.length > 0 && !focused && !inputValue && stagedAttachments.length === 0 && !speech.listening && !plusMenuOpen && learning.mode === 'normal';
 
   return (
     <div
@@ -760,7 +772,11 @@ export default function CreateStudio({
         <div className="mx-auto w-full max-w-2xl relative">
           <LearningModeBanner value={learning} onExit={() => setLearning({ mode: 'normal' })} speak={speakReplies} onToggleSpeak={() => { setSpeakReplies((v) => !v); window.speechSynthesis?.cancel(); }}
             onFeedback={() => onSendMessage('End the roleplay and give me my feedback.', [], { answerLanguage, learning })} />
-          <div className="rounded-[28px] border border-white/10 bg-[var(--app-panel)] p-3 shadow-[0_4px_24px_rgba(0,0,0,0.25)]">
+          <div
+            onFocusCapture={() => setFocused(true)}
+            onBlurCapture={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false); }}
+            className={`border border-white/10 bg-[var(--app-panel)] shadow-[0_4px_24px_rgba(0,0,0,0.25)] transition-[padding,border-radius] duration-200 ${compact ? 'rounded-full px-2 py-1.5' : 'rounded-[28px] p-3'}`}
+          >
             {stagedAttachments.length > 0 && (
               <div className="mb-2.5 flex gap-2.5 overflow-x-auto px-1 pb-1 pt-2">
                 {stagedAttachments.map((meta: any, idx: number) => {
@@ -845,10 +861,32 @@ export default function CreateStudio({
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={handleKeyDown}
                   onPaste={handleComposerPaste}
-                  placeholder={typeof window !== 'undefined' && window.innerWidth < 640 ? 'Ask Bwenge anything…' : 'Ask anything, or attach files and datasets…'}
+                  placeholder={suggestion && !isTyping ? suggestion : messages.length > 0 ? 'Reply to Bwenge…' : typeof window !== 'undefined' && window.innerWidth < 640 ? 'Ask Bwenge anything…' : 'Ask anything, or attach files and datasets…'}
+                  aria-describedby={suggestion && !inputValue ? 'next-prompt-hint' : undefined}
                   className="w-full bg-transparent border-0 resize-none text-base leading-6 text-[var(--app-text)] placeholder-[var(--app-faint)] outline-none px-1 py-1 scrollbar-hidden"
                 />
               </div>
+              {suggestion && !inputValue && !isTyping && (
+                <button
+                  type="button"
+                  id="next-prompt-hint"
+                  onClick={() => { setInputValue(suggestion); window.setTimeout(() => textareaRef.current?.focus(), 0); }}
+                  className="mb-0.5 hidden h-8 shrink-0 items-center gap-1 rounded-full border border-white/10 px-2.5 text-[11px] font-semibold text-[var(--app-muted)] hover:bg-white/5 hover:text-white sm:inline-flex"
+                  title="Use the suggested message (Tab)"
+                >
+                  <kbd className="rounded border border-white/15 px-1 text-[10px]">Tab</kbd> use
+                </button>
+              )}
+              {suggestion && !inputValue && !isTyping && (
+                <button
+                  type="button"
+                  onClick={() => { setInputValue(suggestion); window.setTimeout(() => textareaRef.current?.focus(), 0); }}
+                  className="mb-0.5 inline-flex h-8 shrink-0 items-center rounded-full border border-white/10 px-2.5 text-[11px] font-semibold text-[var(--app-muted)] hover:bg-white/5 sm:hidden"
+                  aria-label="Use the suggested message"
+                >
+                  Use
+                </button>
+              )}
 
               {/* Mic & Send Buttons */}
               <div className="flex items-center gap-1.5 shrink-0">
@@ -890,26 +928,18 @@ export default function CreateStudio({
               </div>
             </div>
 
-            {/* Sources Toggle and Answer In Language under box */}
-            <div className="mt-2.5 pt-2 border-t border-white/5 flex items-center justify-between text-[11px] text-neutral-400">
-              <div className="flex items-center gap-3">
-                <LearningModePicker value={learning} onChange={setLearning} />
+            {/* Under the box (only while you are writing): the learning mode and the next-message suggestion switch */}
+            {!compact && (
+              <div className="mt-2.5 pt-2 border-t border-white/5 flex items-center justify-between text-[11px] text-neutral-400">
+                <div className="flex items-center gap-3">
+                  <LearningModePicker value={learning} onChange={setLearning} />
+                </div>
+                <label className="flex cursor-pointer items-center gap-1.5">
+                  <input type="checkbox" className="h-3.5 w-3.5 accent-[var(--brand)]" checked={suggestOn} onChange={(e) => { setSuggestOn(e.target.checked); setNextPromptEnabled(e.target.checked); }} />
+                  <span>Suggest my next message</span>
+                </label>
               </div>
-
-              <div className="flex items-center gap-1.5">
-                <span>Answer in:</span>
-                <select
-                  value={answerLanguage}
-                  onChange={(e) => setAnswerLanguage(e.target.value)}
-                  className="bg-[var(--app-panel-2)] text-[11px] text-neutral-200 border border-white/15 rounded px-2 py-0.5 outline-none"
-                >
-                  <option value="Auto">Auto</option>
-                  <option value="Kinyarwanda">Kinyarwanda</option>
-                  <option value="English">English</option>
-                  <option value="French">French</option>
-                </select>
-              </div>
-            </div>
+            )}
           </div>
 
           {/* Credits left (plan) and disclaimer */}
