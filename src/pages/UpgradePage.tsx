@@ -13,6 +13,7 @@ import { creditMeter } from '../components/PlanStatus';
 interface PlanLimits { daily: number; weekly: number; monthly: number; perDay: { tool: number; vision: number; artifact: number; marking: number }; maxUploadMb: number; maxAttachments: number; storageMb?: number; memory: boolean; memoryItems: number }
 interface Pack { id: string; rwf: number; credits: number; usd: number }
 interface PlansResponse {
+  manual?: { momoCode: string; momoName: string; whatsapp: string | null } | null;
   fxUsdRwf: number; payments: 'live' | 'sandbox' | 'simulated' | 'off';
   /** Set by an admin with "Pause upgrades": no new purchases until it is turned off. */
   sales?: { paused: boolean; message: string | null };
@@ -99,13 +100,15 @@ export default function UpgradePage({ jobId, onBack, onSuccess }: UpgradePagePro
   const free = plan('FREE');
   const pack = go?.packs?.find((p) => p.id === packId);
   const salesPaused = data?.sales?.paused === true;
-  const paymentsOff = data?.payments === 'off' || salesPaused;
+  const manual = !salesPaused && data?.payments === 'off' ? data.manual ?? null : null;     // no online payment yet: pay by hand
+  const paymentsOff = salesPaused || (data?.payments === 'off' && !manual);
   const current = me?.plan ?? 'FREE';
 
   return (
     <div className="flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-y-auto bg-[var(--bg)] font-sans text-[var(--text)] antialiased upgrade-scrollbar">
       {orgOpen && <OrganisationRequestDialog isOpen={orgOpen} onClose={() => setOrgOpen(false)} />}
-      {checkout && <CheckoutDialog checkout={checkout} onClose={() => setCheckout(null)} onDone={onSuccess} />}
+      {checkout && manual && <ManualPayDialog checkout={checkout} manual={manual} onClose={() => setCheckout(null)} />}
+      {checkout && !manual && <CheckoutDialog checkout={checkout} onClose={() => setCheckout(null)} onDone={onSuccess} />}
 
       <div className="sticky top-0 z-30 flex items-center justify-between border-b border-[var(--line)] bg-[var(--bg)]/90 px-4 py-4 backdrop-blur sm:px-8">
         <button onClick={onBack} className="flex items-center gap-2 rounded-lg px-3 py-2 text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--text)]">
@@ -141,6 +144,10 @@ export default function UpgradePage({ jobId, onBack, onSuccess }: UpgradePagePro
         {salesPaused ? (
           <div role="status" className="mx-auto flex max-w-3xl items-start gap-3 rounded-2xl border border-[var(--accent)]/40 bg-[var(--surface)] p-4 text-sm text-[var(--text)]">
             <AlertCircle size={18} className="mt-0.5 shrink-0 text-[var(--accent)]" /> {data?.sales?.message}
+          </div>
+        ) : manual ? (
+          <div role="status" className="mx-auto flex max-w-3xl items-start gap-3 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4 text-sm text-[var(--muted)]">
+            <AlertCircle size={18} className="mt-0.5 shrink-0 text-[var(--accent)]" /> Online payment is not open yet. Choose a plan, pay by MTN Mobile Money to code <b className="text-[var(--text)]">{manual.momoCode}</b>, then send the screenshot on WhatsApp. We activate your plan within a few minutes.
           </div>
         ) : paymentsOff && (
           <div className="mx-auto flex max-w-3xl items-start gap-3 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4 text-sm text-[var(--muted)]">
@@ -218,13 +225,36 @@ export default function UpgradePage({ jobId, onBack, onSuccess }: UpgradePagePro
         <section className="mx-auto grid max-w-4xl grid-cols-1 gap-3 sm:grid-cols-3">
           {[
             ['What is a credit?', 'A chat reply is about 1 credit. Marking one handwritten paper is about 12; overnight marking (results by the next morning) costs half.'],
-            ['How do I pay?', 'Enter your MTN MoMo number, then approve the prompt on your phone with your PIN. Your plan or credits are added as soon as MTN confirms.'],
+            ['How do I pay?', manual ? 'Choose a plan, pay the amount by MTN Mobile Money to our code, then send the payment screenshot and your email on WhatsApp. We activate it within a few minutes.' : 'Enter your MTN MoMo number, then approve the prompt on your phone with your PIN. Your plan or credits are added as soon as MTN confirms.'],
             ['Receipts and renewal', 'A receipt is emailed and sent to Telegram. Mobile Money never renews automatically: we remind you 3 days before your plan ends.'],
           ].map(([q, a]) => (
             <div key={q} className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4"><h3 className="text-sm font-semibold text-[var(--text)]">{q}</h3><p className="mt-1 text-xs leading-relaxed text-[var(--muted)]">{a}</p></div>
           ))}
         </section>
       </main>
+    </div>
+  );
+}
+
+/** Manual payment (until online payment is set up): the amount, where to send it, and the screenshot on WhatsApp. An administrator then activates the plan or credits. */
+function ManualPayDialog({ checkout, manual, onClose }: { checkout: Checkout; manual: { momoCode: string; momoName: string; whatsapp: string | null }; onClose: () => void }) {
+  const text = `Hello, I paid for my Bwenge upgrade: ${checkout.title}, ${rwf(checkout.amountRwf)}. My email on Bwenge: ______. Payment screenshot attached.`;
+  const link = manual.whatsapp ? `https://wa.me/${manual.whatsapp}?text=${encodeURIComponent(text)}` : null;
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Pay by Mobile Money" onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <h2 className={`${SERIF} text-2xl font-normal text-[var(--text)]`}>Pay by Mobile Money</h2>
+        <p className="mt-1 text-sm text-[var(--muted)]">{checkout.title}</p>
+        <ol className="mt-4 space-y-3 text-sm text-[var(--text)]">
+          <li><b>1. Send {rwf(checkout.amountRwf)}</b> by MTN Mobile Money to code <b className="select-all rounded bg-[var(--surface-2)] px-1.5 py-0.5 font-mono">{manual.momoCode}</b> (name: {manual.momoName}).</li>
+          <li><b>2. Send the payment screenshot</b> and your Bwenge email on WhatsApp{manual.whatsapp ? ` to +${manual.whatsapp}` : ''}.</li>
+          <li><b>3. We activate it</b> within a few minutes. Then reload Bwenge.</li>
+        </ol>
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button type="button" onClick={onClose} className="min-h-11 rounded-xl border border-[var(--line)] px-4 text-sm text-[var(--text)] hover:bg-[var(--hover)]">Close</button>
+          {link && <a href={link} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-emerald-500 px-5 text-sm font-semibold text-white hover:bg-emerald-400">I have paid: open WhatsApp</a>}
+        </div>
+      </div>
     </div>
   );
 }

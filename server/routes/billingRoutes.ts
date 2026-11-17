@@ -27,10 +27,13 @@ router.get('/plans', async (_req, res) => {
   await refreshBillingSettings();
   const P = PLANS;
   const sales = await salesState();
+  // Until online payment is configured people pay by hand: Mobile Money to this code, then the screenshot on WhatsApp.
+  const manual = momoMode() === 'off' ? await (await import('../services/mySebAccess.js')).paymentConfig().then((c) => ({ momoCode: c.momoCode, momoName: c.momoName, whatsapp: c.whatsapp || null })).catch(() => null) : null;
   res.json({
     success: true,
     fxUsdRwf: fxUsdRwf(),
     payments: momoMode(),
+    manual,
     sales: { paused: sales.paused, message: sales.paused ? pauseMessage(sales) : null },
     plans: [
       { id: 'FREE', name: 'Free', priceUsd: 0, priceRwf: 0, period: 'forever', limits: P.FREE.limits },
