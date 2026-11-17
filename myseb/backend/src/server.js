@@ -1,4 +1,5 @@
 import express from 'express';
+import { updateRouter } from './updates.js';
 import { downloadRouter } from './downloads.js';
 import { favicon, markImg } from './brand.js';
 import path from 'node:path';
@@ -57,6 +58,7 @@ app.use('/api', (_req, res) => res.status(404).json({ error: 'not found' }));
 
 
 app.use('/download', downloadRouter);
+app.use('/updates', updateRouter);
 
 /**
  * The link a lecturer shares with students (/join/<code>, also the QR). One link for everyone:

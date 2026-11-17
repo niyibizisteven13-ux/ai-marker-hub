@@ -1,5 +1,5 @@
 import { approveManualPayment, MANUAL_PAYMENT, startManualPayment } from '../services/billing/manual.js';
-import { BillingError, notifyReceipt } from '../services/billing/payments.js';
+import { BillingError, notifyReceipt, receiptDelivery } from '../services/billing/payments.js';
 import { randomUUID } from 'node:crypto';
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
@@ -53,7 +53,7 @@ router.post('/payments/:id/receipt', async (req, res) => {
     if (!p?.fulfilledAt || p.status !== 'SUCCESSFUL') return res.status(404).json({ error: 'Paid receipt not found.' });
     await notifyReceipt(p);
     const after = await db.billingPayment.findUnique({ where: { id: p.id } });
-    res.json({ success: true, payment: publicPayment(after) });
+    res.json({ success: true, payment: { ...publicPayment(after), receiptEmail: await receiptDelivery(after) } });
   } catch (e) { fail(res, e); }
 });
 
@@ -158,7 +158,7 @@ router.get('/payments', async (req, res) => {
     const rows = await db.billingPayment.findMany({ where: q.status ? { status: q.status } : {}, orderBy: { createdAt: 'desc' }, take: q.limit ?? 100 });
     const users = await db.user.findMany({ where: { id: { in: [...new Set(rows.map((r: any) => r.userId))] } }, select: { id: true, email: true, name: true } });
     const byId = new Map(users.map((u: any) => [u.id, u]));
-    res.json({ success: true, payments: rows.map((r: any) => ({ ...publicPayment(r), user: byId.get(r.userId) ?? { id: r.userId } })) });
+    res.json({ success: true, payments: await Promise.all(rows.map(async (r: any) => ({ ...publicPayment(r), receiptEmail: await receiptDelivery(r), user: byId.get(r.userId) ?? { id: r.userId } }))) });
   } catch (e) { fail(res, e); }
 });
 

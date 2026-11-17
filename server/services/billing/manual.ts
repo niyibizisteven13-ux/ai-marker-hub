@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../../db.js';
-import { BillingError, fulfil, publicPayment, quote, type Purpose } from './payments.js';
+import { BillingError, fulfil, publicPayment, receiptDelivery, quote, type Purpose } from './payments.js';
 import { pauseMessage, salesState } from './sales.js';
 import logger from '../../utils/logger.js';
 
@@ -34,5 +34,5 @@ export async function approveManualPayment(id: string, transactionId: string, ad
   if (!row.fulfilledAt && await db.appSetting.findUnique({ where: { key: `manual-momo-transaction:${transactionId}` } })) throw new BillingError('This MoMo transaction has already been used.', 409, 'DUPLICATE_TRANSACTION');
   const done = await fulfil(row, transactionId, adminId);
   logger.info('[admin billing] manual payment verified', { admin: adminId, paymentId: id, userId: row.userId });
-  return publicPayment(done);
+  return { ...publicPayment(done), receiptEmail: await receiptDelivery(done) };
 }

@@ -16,7 +16,7 @@ interface Overview {
   momo: { mode: 'live' | 'sandbox' | 'simulated' | 'off'; targetEnv: string; currency: string; callback: boolean };
 }
 interface Effective { fxUsdRwf: number; goPacks: Array<{ id: string; rwf: number; credits: number }>; plans: Record<PlanId, { name: string; sold: boolean; priceUsd: number | null; priceRwf: number | null; limits: Limits }> }
-interface AdminPayment { provider: string; emailedAt: string | null; id: string; createdAt: string; paidAt: string | null; purpose: string; months: number; credits: number; amountRwf: number; currency: string; phoneMasked: string; status: string; reason: string | null; receiptNumber: string | null; user: { email?: string; name?: string } }
+interface AdminPayment { receiptEmail?: { status: 'sent' | 'pending' | 'unavailable'; email: string | null; sentAt: string | null }; provider: string; emailedAt: string | null; id: string; createdAt: string; paidAt: string | null; purpose: string; months: number; credits: number; amountRwf: number; currency: string; phoneMasked: string; status: string; reason: string | null; receiptNumber: string | null; user: { email?: string; name?: string } }
 interface AdminUser { id: string; email: string; name: string; plan: PlanId; subscription: { planType: string; status: string; endDate: string | null } | null; wallet: number; usedToday: number; dailyLimit: number; telegram: boolean; payCode?: string }
 
 const card = 'rounded-2xl border border-[#263052] bg-[#0E1426] p-5';
@@ -58,7 +58,7 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
 
   const run = async (fn: () => Promise<unknown>, ok: string) => {
     setBusy(true);
-    try { await fn(); notify(ok); await Promise.all([loadOverview(), loadPayments(), loadUsers()]); } catch (e) { notify((e as Error).message, true); } finally { setBusy(false); }
+    try { const result: any = await fn(); const receipt = result?.payment?.receiptEmail; notify(receipt ? receipt.status === 'sent' ? `Purchase active. Receipt sent${receipt.email ? ` to ${receipt.email}` : ''}.` : receipt.status === 'pending' ? `Purchase active. Receipt to ${receipt.email} is pending; delivery will retry.` : 'Purchase active. Receipt email unavailable: this account has no login email.' : ok); await Promise.all([loadOverview(), loadPayments(), loadUsers()]); } catch (e) { notify((e as Error).message, true); } finally { setBusy(false); }
   };
 
   const recordPurchase = (u: AdminUser) => {
@@ -250,7 +250,7 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
                   <td className="px-2 tabular-nums">{p.amountRwf.toLocaleString('en-US')} {p.currency}</td>
                   <td className="px-2">{p.phoneMasked}</td>
                   <td className="px-2"><span className={`rounded-md px-1.5 py-0.5 font-semibold ${p.status === 'SUCCESSFUL' ? 'bg-emerald-500/15 text-emerald-300' : p.status === 'PENDING' ? 'bg-amber-500/15 text-amber-300' : 'bg-rose-500/15 text-rose-300'}`}>{p.status}</span>{p.reason ? <span className="ml-1 text-[#8A97C2]">{p.reason}</span> : null}</td>
-                  <td className="px-2">{p.receiptNumber ?? '—'}{p.status === 'SUCCESSFUL' && <div className="mt-1 text-[10px]">{p.emailedAt ? 'Receipt emailed' : 'Email pending'}{!p.emailedAt && <button className="ml-2 underline" disabled={busy} onClick={() => void run(() => api(`/api/admin/billing/payments/${p.id}/receipt`, { method: 'POST' }), 'Receipt delivery retried; check the email status.')}>Retry email</button>}</div>}</td>
+                  <td className="px-2">{p.receiptNumber ?? '—'}{p.status === 'SUCCESSFUL' && <div className="mt-1 text-[10px]">{p.emailedAt ? `Receipt sent${p.receiptEmail?.email ? ` to ${p.receiptEmail.email}` : ''}` : p.receiptEmail?.email ? `Receipt to ${p.receiptEmail.email} pending` : 'Receipt email unavailable'}{p.receiptEmail?.sentAt && <div>{new Date(p.receiptEmail.sentAt).toLocaleString()}</div>}{!p.emailedAt && <button className="ml-2 underline" disabled={busy} onClick={() => void run(() => api(`/api/admin/billing/payments/${p.id}/receipt`, { method: 'POST' }), 'Receipt delivery retried; check the email status.')}>Retry email</button>}</div>}</td>
                   <td className="px-2">{p.status === 'PENDING' && p.provider === 'MTN_MOMO_MANUAL' && <button className={`${btn} bg-emerald-500/15 text-emerald-300`} disabled={busy} onClick={() => { const transactionId = window.prompt(`Verify ${rwf(p.amountRwf)} received for ${p.user?.email}. Enter the MTN transaction ID from the payment proof:`); if (transactionId?.trim()) void run(() => api(`/api/admin/billing/payments/${p.id}/approve`, { method: 'POST', body: JSON.stringify({ transactionId: transactionId.trim() }) }), 'Purchase activated. Check receipt email status.'); }}>Verify & activate</button>}{p.status === 'PENDING' && p.provider !== 'MTN_MOMO_MANUAL' && <button className={`${btn} bg-[#1A2240] text-[#C9D3F0]`} disabled={busy} onClick={() => void run(() => api(`/api/admin/billing/payments/${p.id}/recheck`, { method: 'POST' }), 'Checked with MTN')}><RefreshCw size={12} /> Check</button>}</td>
                 </tr>
               ))}

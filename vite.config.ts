@@ -2,6 +2,7 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import fs from 'fs';
+import { execFileSync } from 'node:child_process';
 import {defineConfig} from 'vite';
 
 /**
@@ -32,8 +33,10 @@ function mediapipeWasm() {
 }
 
 export default defineConfig(() => {
+  const build = (process.env.APP_BUILD || process.env.VERCEL_GIT_COMMIT_SHA || process.env.GIT_COMMIT || process.env.SOURCE_VERSION || (() => { try { return execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(); } catch { return String(Date.now()); } })()).slice(0, 12);
   return {
-    plugins: [react(), tailwindcss(), mediapipeWasm()],
+    define: { __BWENGE_BUILD__: JSON.stringify(build) },
+    plugins: [react(), tailwindcss(), mediapipeWasm(), { name: 'bwenge-build', generateBundle() { this.emitFile({ type: 'asset', fileName: 'build.json', source: JSON.stringify({ build }) }); } }],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
