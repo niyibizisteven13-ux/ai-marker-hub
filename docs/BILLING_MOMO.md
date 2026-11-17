@@ -173,3 +173,33 @@ The panel has two controls:
   - **Everyone except admins:** only when the mode is "everyone" and total cost is above revenue plus the free budget.
 
 "Paying" means an active PRO or Institution plan, GO credits bought, or a payment this month. Actions already running finish; only new ones are refused. The guard lives in `server/services/billing/aiGuard.ts`; every AI action passes through it in `checkUsage`.
+
+
+## Manual MoMo Pay while Collections is not configured
+
+Automatic checkout now defaults to paused. Existing MTN callback verification remains available for payments
+already started. No database migration is required.
+
+- Upgrade → choose a plan/period or a credit pack → pay the server-quoted RWF total with **MTN MoMo Pay 2191184**, **Niyibizi Steven**.
+- The checkout creates a pending manual purchase. It never grants access based on a buyer clicking “paid”.
+- Open WhatsApp to **+250799691108**. The message includes the signed-in account's login email, account code,
+  purchase reference, item and total. The customer attaches a payment screenshot or confirmation SMS themselves.
+- Admin → Upgrades & Subscriptions → Mobile Money payments → **Verify & activate**, after independently checking
+  the recipient, amount and transaction ID. Enter the MTN transaction ID. One transaction ID can fund only one
+  purchase. Repeating approval of the same purchase does not grant it twice.
+- If the customer only sent WhatsApp proof without creating a purchase, search their login email under Users
+  and choose **Record MoMo purchase & receipt**. Choose the purchased plan/pack and duration, then enter the
+  verified transaction ID. Existing plan buttons remain complimentary grants and do not claim money was paid.
+- Successful approval records revenue and a numbered receipt, grants the exact plan/duration or top-up,
+  invalidates the assistant's cached account context, and sends the existing receipt email to the login email.
+  The customer dialog detects approval and offers the receipt. Settings → Billing includes manual receipts.
+- Email delivery failures leave access active and are retried every 30 seconds for seven days. Administrators
+  can see “Email pending” or “Receipt emailed” and use **Retry email**. SMTP must still be configured.
+- Manual purchases are excluded from automatic MTN status checks and the 15-minute phone-prompt expiry.
+- Admin → Payment method can enable automatic checkout after production Collections is ready. Alternatively,
+  `BILLING_AUTOMATIC_PAYMENTS_ENABLED=true` opts in when no saved payment-method setting exists. The saved
+  admin setting takes precedence. The separate Pause upgrades switch still stops all new customer purchases;
+  verified administrator fulfilment remains available during a pause.
+
+Deploy through the existing VPS workflow in DEPLOY.md (`npm ci`, `npm run build`, reload PM2). This change does
+not provision SMTP or MTN credentials and does not send WhatsApp messages automatically.

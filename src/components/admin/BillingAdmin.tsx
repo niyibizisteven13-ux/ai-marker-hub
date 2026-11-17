@@ -16,7 +16,7 @@ interface Overview {
   momo: { mode: 'live' | 'sandbox' | 'simulated' | 'off'; targetEnv: string; currency: string; callback: boolean };
 }
 interface Effective { fxUsdRwf: number; goPacks: Array<{ id: string; rwf: number; credits: number }>; plans: Record<PlanId, { name: string; sold: boolean; priceUsd: number | null; priceRwf: number | null; limits: Limits }> }
-interface AdminPayment { id: string; createdAt: string; paidAt: string | null; purpose: string; months: number; credits: number; amountRwf: number; currency: string; phoneMasked: string; status: string; reason: string | null; receiptNumber: string | null; user: { email?: string; name?: string } }
+interface AdminPayment { provider: string; emailedAt: string | null; id: string; createdAt: string; paidAt: string | null; purpose: string; months: number; credits: number; amountRwf: number; currency: string; phoneMasked: string; status: string; reason: string | null; receiptNumber: string | null; user: { email?: string; name?: string } }
 interface AdminUser { id: string; email: string; name: string; plan: PlanId; subscription: { planType: string; status: string; endDate: string | null } | null; wallet: number; usedToday: number; dailyLimit: number; telegram: boolean; payCode?: string }
 
 const card = 'rounded-2xl border border-[#263052] bg-[#0E1426] p-5';
@@ -61,6 +61,20 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
     try { await fn(); notify(ok); await Promise.all([loadOverview(), loadPayments(), loadUsers()]); } catch (e) { notify((e as Error).message, true); } finally { setBusy(false); }
   };
 
+  const recordPurchase = (u: AdminUser) => {
+    const purpose = window.prompt('Purchased item: STARTER, PRO, PLUS or GO_PACK', 'PRO')?.trim().toUpperCase();
+    if (!purpose || !['STARTER', 'PRO', 'PLUS', 'GO_PACK'].includes(purpose)) return;
+    const packId = purpose === 'GO_PACK' ? window.prompt(`Pack ID: ${eff?.goPacks.map((p) => `${p.id} (${rwf(p.rwf)})`).join(', ')}`)?.trim() : undefined;
+    if (purpose === 'GO_PACK' && !packId) return;
+    const months = purpose !== 'GO_PACK' ? Number(window.prompt('Months purchased (1–12):', '1')) : undefined;
+    if (months !== undefined && (!Number.isInteger(months) || months < 1 || months > 12)) return;
+    const amount = purpose === 'GO_PACK' ? eff?.goPacks.find((p) => p.id === packId)?.rwf : (eff?.plans[purpose as SoldPlan]?.priceRwf ?? 0) * (months ?? 1);
+    if (!amount) return;
+    const transactionId = window.prompt(`Confirm ${rwf(amount)} received for ${u.email}. Enter the verified MTN transaction ID:`)?.trim();
+    if (!transactionId) return;
+    void run(() => api(`/api/admin/billing/users/${u.id}/manual-payment`, { method: 'POST', body: JSON.stringify({ purpose, packId, months, transactionId }) }), 'Paid purchase activated. Check receipt email status.');
+  };
+
   const saveSettings = () => eff && run(() => api('/api/admin/billing/settings', {
     method: 'PUT',
     body: JSON.stringify({
@@ -86,6 +100,7 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
     <div className="space-y-6">
       <AiGuardPanel notify={notify} />
       <SalesPanel notify={notify} />
+      <PaymentMethodPanel notify={notify} />
 
       {/* Overview */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -194,6 +209,7 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
                   <td className="px-2">{u.telegram ? 'Linked' : '—'}</td>
                   <td className="px-2">
                     <div className="flex flex-wrap gap-1">
+                      <button className={`${btn} bg-emerald-500/15 text-emerald-300`} disabled={busy} onClick={() => recordPurchase(u)}>Record MoMo purchase & receipt</button>
                       {(['STARTER', 'PRO', 'PLUS', 'INSTITUTION'] as const).map((id) => (
                         <button key={id} className={`${btn} ${id === 'INSTITUTION' ? 'bg-indigo-500/15 text-indigo-300' : 'bg-amber-500/15 text-amber-300'}`} disabled={busy} onClick={() => { const d = window.prompt(`Grant ${eff?.plans[id].name ?? id} for how many days?`, '30'); if (d) void run(() => api(`/api/admin/billing/users/${u.id}/plan`, { method: 'POST', body: JSON.stringify({ plan: id, days: Number(d) }) }), `${eff?.plans[id].name ?? id} granted to ${u.email}`); }}>{id === 'INSTITUTION' ? 'Inst.' : id === 'PRO' ? 'Pro' : id === 'PLUS' ? 'Plus' : 'Starter'}</button>
                       ))}
@@ -217,7 +233,7 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
       {/* Payments */}
       <div className={`${card} space-y-3`}>
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="flex items-center gap-2 text-base font-semibold text-white"><Banknote size={16} /> Mobile Money payments</h3>
+          <h3 className="flex items-center gap-2 text-base font-semibold text-white"><Banknote size={16} /> Mobile Money payments</h3><button className={`${btn} bg-[#1A2240] text-white`} disabled={busy} onClick={() => void run(async () => {}, 'Payments refreshed')}>Refresh</button>
           <select className={`${input} w-auto`} value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Payment status">
             <option value="">All statuses</option><option value="SUCCESSFUL">Paid</option><option value="PENDING">Pending</option><option value="FAILED">Failed</option><option value="EXPIRED">Not approved</option>
           </select>
@@ -229,13 +245,13 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
               {payments.map((p) => (
                 <tr key={p.id} className="border-t border-[#1E2848] text-[#C9D3F0]">
                   <td className="px-2 py-2">{new Date(p.paidAt ?? p.createdAt).toLocaleString()}</td>
-                  <td className="px-2">{p.user?.email ?? '—'}</td>
+                  <td className="px-2">{p.user?.email ?? '—'}<div className="mt-1 select-all break-all font-mono text-[10px] text-[#8A97C2]">{p.id}</div></td>
                   <td className="px-2">{p.purpose === 'GO_PACK' ? `GO · ${p.credits} credits` : `${p.purpose} · ${p.months} mo`}</td>
                   <td className="px-2 tabular-nums">{p.amountRwf.toLocaleString('en-US')} {p.currency}</td>
                   <td className="px-2">{p.phoneMasked}</td>
                   <td className="px-2"><span className={`rounded-md px-1.5 py-0.5 font-semibold ${p.status === 'SUCCESSFUL' ? 'bg-emerald-500/15 text-emerald-300' : p.status === 'PENDING' ? 'bg-amber-500/15 text-amber-300' : 'bg-rose-500/15 text-rose-300'}`}>{p.status}</span>{p.reason ? <span className="ml-1 text-[#8A97C2]">{p.reason}</span> : null}</td>
-                  <td className="px-2">{p.receiptNumber ?? '—'}</td>
-                  <td className="px-2">{p.status === 'PENDING' && <button className={`${btn} bg-[#1A2240] text-[#C9D3F0]`} disabled={busy} onClick={() => void run(() => api(`/api/admin/billing/payments/${p.id}/recheck`, { method: 'POST' }), 'Checked with MTN')}><RefreshCw size={12} /> Check</button>}</td>
+                  <td className="px-2">{p.receiptNumber ?? '—'}{p.status === 'SUCCESSFUL' && <div className="mt-1 text-[10px]">{p.emailedAt ? 'Receipt emailed' : 'Email pending'}{!p.emailedAt && <button className="ml-2 underline" disabled={busy} onClick={() => void run(() => api(`/api/admin/billing/payments/${p.id}/receipt`, { method: 'POST' }), 'Receipt delivery retried; check the email status.')}>Retry email</button>}</div>}</td>
+                  <td className="px-2">{p.status === 'PENDING' && p.provider === 'MTN_MOMO_MANUAL' && <button className={`${btn} bg-emerald-500/15 text-emerald-300`} disabled={busy} onClick={() => { const transactionId = window.prompt(`Verify ${rwf(p.amountRwf)} received for ${p.user?.email}. Enter the MTN transaction ID from the payment proof:`); if (transactionId?.trim()) void run(() => api(`/api/admin/billing/payments/${p.id}/approve`, { method: 'POST', body: JSON.stringify({ transactionId: transactionId.trim() }) }), 'Purchase activated. Check receipt email status.'); }}>Verify & activate</button>}{p.status === 'PENDING' && p.provider !== 'MTN_MOMO_MANUAL' && <button className={`${btn} bg-[#1A2240] text-[#C9D3F0]`} disabled={busy} onClick={() => void run(() => api(`/api/admin/billing/payments/${p.id}/recheck`, { method: 'POST' }), 'Checked with MTN')}><RefreshCw size={12} /> Check</button>}</td>
                 </tr>
               ))}
               {!payments.length && <tr><td colSpan={8} className="px-2 py-6 text-center text-[#8A97C2]">No payments yet.</td></tr>}
@@ -397,4 +413,15 @@ function SalesPanel({ notify }: { notify: (msg: string, error?: boolean) => void
       {state.paused && message.trim() !== (state.message ?? '') && <button className={`${btn} bg-[#1A2240] text-[#C9D3F0] hover:bg-[#222C50]`} disabled={busy} onClick={() => void set(true)}><Save size={13} /> Update message</button>}
     </div>
   );
+}
+
+function PaymentMethodPanel({ notify }: { notify: (msg: string, error?: boolean) => void }) {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { void api<{ automaticEnabled: boolean }>('/api/admin/billing/payment-method').then((b) => setEnabled(b.automaticEnabled)).catch((e) => notify(e.message, true)); }, [notify]);
+  const save = async () => {
+    setBusy(true);
+    try { const b = await api<{ automaticEnabled: boolean }>('/api/admin/billing/payment-method', { method: 'PUT', body: JSON.stringify({ automaticEnabled: !enabled }) }); setEnabled(b.automaticEnabled); notify(b.automaticEnabled ? 'Automatic checkout enabled. Confirm production MTN configuration.' : 'Manual MoMo Pay checkout enabled.'); } catch (e) { notify((e as Error).message, true); } finally { setBusy(false); }
+  };
+  return <section className={`${card} space-y-3`}><h3 className="text-base font-semibold text-white">Payment method · {enabled === null ? 'Loading…' : enabled ? 'Automatic checkout' : 'Manual MoMo Pay'}</h3><p className="text-sm text-[#C9D3F0]">MTN MoMo Pay <b>2191184</b> · Niyibizi Steven. Customers send a screenshot or confirmation SMS and login email to WhatsApp <b>+250799691108</b>.</p><p className="text-xs text-[#8A97C2]">Verify the amount and transaction ID in the payments table below, then choose Verify & activate. This adds the purchased plan or credits and emails a receipt. For a customer who only sent proof on WhatsApp, search their login email under Users and choose Record MoMo purchase & receipt. The other plan buttons grant complimentary access.</p><button disabled={busy || enabled === null} onClick={() => void save()} className={`${btn} bg-emerald-500/15 text-emerald-300`}>{enabled ? 'Pause automatic checkout · use manual payments' : 'Enable automatic checkout'}</button></section>;
 }

@@ -1,3 +1,5 @@
+import { approveManualPayment, automaticPaymentsEnabled, MANUAL_PAYMENT, startManualPayment } from '../services/billing/manual.js';
+import { BillingError, notifyReceipt } from '../services/billing/payments.js';
 import { randomUUID } from 'node:crypto';
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
@@ -18,7 +20,41 @@ import { DEFAULT_PAUSE_MESSAGE, salesState, setSalesPaused } from '../services/b
 const router = Router();
 const db = prisma as any;
 const adminId = (req: Request) => (req as any).user?.userId as string;
-const fail = (res: Response, e: any) => (e instanceof z.ZodError ? res.status(400).json({ error: 'Invalid request.', details: e.issues.slice(0, 5) }) : res.status(500).json({ error: e?.message ?? 'Failed.' }));
+const fail = (res: Response, e: any) => (e instanceof z.ZodError ? res.status(400).json({ error: 'Invalid request.', details: e.issues.slice(0, 5) }) : e instanceof BillingError ? res.status(e.status).json({ error: e.message, code: e.code }) : e?.code === 'P2002' ? res.status(409).json({ error: 'This MoMo transaction has already been used.' }) : res.status(500).json({ error: e?.message ?? 'Failed.' }));
+
+router.get('/payment-method', async (_req, res) => {
+  try { res.json({ success: true, automaticEnabled: await automaticPaymentsEnabled(), manual: MANUAL_PAYMENT }); } catch (e) { fail(res, e); }
+});
+router.put('/payment-method', async (req, res) => {
+  try {
+    const { automaticEnabled } = z.object({ automaticEnabled: z.boolean() }).strict().parse(req.body);
+    await db.appSetting.upsert({ where: { key: 'billing-automatic-payments' }, create: { key: 'billing-automatic-payments', value: { enabled: automaticEnabled }, updatedBy: adminId(req) }, update: { value: { enabled: automaticEnabled }, updatedBy: adminId(req) } });
+    res.json({ success: true, automaticEnabled, manual: MANUAL_PAYMENT });
+  } catch (e) { fail(res, e); }
+});
+router.post('/users/:id/manual-payment', async (req, res) => {
+  try {
+    const body = z.object({ purpose: z.enum(['STARTER', 'PRO', 'PLUS', 'GO_PACK']), packId: z.string().max(40).optional(), months: z.number().int().min(1).max(12).optional(), transactionId: z.string().trim().min(3).max(100).regex(/^[a-zA-Z0-9-]+$/) }).strict().parse(req.body);
+    if (!(await db.user.findUnique({ where: { id: req.params.id } }))) return res.status(404).json({ error: 'User not found.' });
+    const p = await startManualPayment(req.params.id, body, true);
+    res.json({ success: true, payment: await approveManualPayment(p.id, body.transactionId.toUpperCase(), adminId(req)) });
+  } catch (e) { fail(res, e); }
+});
+router.post('/payments/:id/approve', async (req, res) => {
+  try {
+    const { transactionId } = z.object({ transactionId: z.string().trim().min(3).max(100).regex(/^[a-zA-Z0-9-]+$/) }).strict().parse(req.body);
+    res.json({ success: true, payment: await approveManualPayment(req.params.id, transactionId.toUpperCase(), adminId(req)) });
+  } catch (e) { fail(res, e); }
+});
+router.post('/payments/:id/receipt', async (req, res) => {
+  try {
+    const p = await db.billingPayment.findUnique({ where: { id: req.params.id } });
+    if (!p?.fulfilledAt || p.status !== 'SUCCESSFUL') return res.status(404).json({ error: 'Paid receipt not found.' });
+    await notifyReceipt(p);
+    const after = await db.billingPayment.findUnique({ where: { id: p.id } });
+    res.json({ success: true, payment: publicPayment(after) });
+  } catch (e) { fail(res, e); }
+});
 
 router.get('/overview', async (_req, res) => {
   try {
@@ -142,7 +178,7 @@ router.post('/momo/test', async (_req, res) => {
 router.get('/users', async (req, res) => {
   try {
     const q = String(req.query.q ?? '').trim().toLowerCase().slice(0, 100);
-    const all = await db.user.findMany({ orderBy: { createdAt: 'desc' }, take: 500, select: { id: true, email: true, name: true, role: true, createdAt: true } });
+    const all = await db.user.findMany({ ...(q && !looksLikePayRef(q) ? { where: { OR: [{ email: { contains: q, mode: 'insensitive' } }, { name: { contains: q, mode: 'insensitive' } }] } } : {}), orderBy: { createdAt: 'desc' }, ...(q && looksLikePayRef(q) ? {} : { take: q ? 25 : 500 }), select: { id: true, email: true, name: true, role: true, createdAt: true } });
     // A payment code (BW-4F7K2A) from the person's WhatsApp message finds exactly that person.
     const byCode = looksLikePayRef(q) ? normalizePayRef(q) : null;
     const list = all.filter((u: any) => !String(u.email).endsWith('@users.invalid') && (byCode ? payRef(u.id) === byCode : !q || `${u.email} ${u.name}`.toLowerCase().includes(q))).slice(0, 25);
@@ -171,6 +207,7 @@ router.post('/users/:id/plan', async (req, res) => {
       else await db.subscription.create({ data: { id: randomUUID(), userId, planType, status: 'ACTIVE', startDate: now, endDate, createdAt: now, updatedAt: now } });
     }
     logger.info('[admin billing] plan changed', { admin: adminId(req), userId, plan: body.plan, days: body.days });
+    void import('../services/platformContext.js').then((m) => m.invalidatePlatformContext(userId)).catch(() => undefined);
     res.json({ success: true, plan: (await planFor(userId)).id });
   } catch (e) { fail(res, e); }
 });

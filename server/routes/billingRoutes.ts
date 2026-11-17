@@ -1,3 +1,4 @@
+import { paymentOptions, startManualPayment } from '../services/billing/manual.js';
 import { Router, type Request, type Response } from 'express';
 import { pauseMessage, salesState } from '../services/billing/sales.js';
 import { z } from 'zod';
@@ -28,13 +29,11 @@ router.get('/plans', async (_req, res) => {
   await refreshBillingSettings();
   const P = PLANS;
   const sales = await salesState();
-  // Until online payment is configured people pay by hand: Mobile Money to this code, then the screenshot on WhatsApp.
-  const manual = momoMode() === 'off' ? await (await import('../services/mySebAccess.js')).paymentConfig().then((c) => ({ momoCode: c.momoCode, momoName: c.momoName, whatsapp: c.whatsapp || null })).catch(() => null) : null;
+  const options = await paymentOptions();
   res.json({
     success: true,
     fxUsdRwf: fxUsdRwf(),
-    payments: momoMode(),
-    manual,
+    ...options,
     sales: { paused: sales.paused, message: sales.paused ? pauseMessage(sales) : null },
     plans: [
       { id: 'FREE', name: 'Free', priceUsd: 0, priceRwf: 0, period: 'forever', limits: P.FREE.limits },
@@ -68,6 +67,13 @@ router.get('/pay-ref', async (req, res) => {
   } catch (e) { fail(res, e); }
 });
 
+router.post('/manual-checkout', async (req, res) => {
+  try {
+    const body = z.object({ purpose: z.enum(PURPOSES as [Purpose, ...Purpose[]]), packId: z.string().max(40).optional(), months: z.number().int().min(1).max(12).optional() }).strict().parse(req.body ?? {});
+    res.json({ success: true, payment: await startManualPayment(userIdOf(req), body) });
+  } catch (e) { fail(res, e); }
+});
+
 router.post('/checkout', async (req, res) => {
   try {
     const body = z.object({ purpose: z.enum(PURPOSES as [Purpose, ...Purpose[]]), packId: z.string().max(40).optional(), months: z.number().int().min(1).max(12).optional(), phone: z.string().min(6).max(32) }).strict().parse(req.body ?? {});
@@ -94,7 +100,7 @@ router.get('/payments/:id/receipt', async (req, res) => {
     if (!p || p.userId !== userIdOf(req) || p.status !== 'SUCCESSFUL') return res.status(404).json({ error: 'Receipt not found.' });
     const { receiptEmail } = await import('../services/billing/emails.js');
     const user = await db.user.findUnique({ where: { id: p.userId }, select: { name: true } });
-    const item = p.purpose === 'GO_PACK' ? `GO credits · ${p.credits} credits` : `${p.purpose === 'INSTITUTION' ? 'Institution' : 'PRO'} plan · ${p.months} month${p.months > 1 ? 's' : ''}`;
+    const item = p.purpose === 'GO_PACK' ? `GO credits · ${p.credits} credits` : `${PLANS[p.purpose as keyof typeof PLANS]?.name ?? p.purpose} plan · ${p.months} month${p.months > 1 ? 's' : ''}`;
     const r = receiptEmail({ name: user?.name ?? '', receiptNumber: p.receiptNumber, paidAt: new Date(p.fulfilledAt), item, amountRwf: p.amountRwf, amountUsd: p.amountUsd, currency: p.currency, phoneMasked: p.phoneMasked, transactionId: p.financialTransactionId, grant: '' });
     res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; img-src data:");
     res.type('html').send(r.html);
