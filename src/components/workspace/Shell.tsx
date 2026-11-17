@@ -7,7 +7,7 @@ import { ArrowLeft, Search } from 'lucide-react';
  * colours everywhere, so the product feels like one tool.
  */
 
-export const ACCENT = '#D97757';
+export const ACCENT = '#E9A23B';
 
 export function PageShell({ icon, title, subtitle, actions, onBack, backLabel = 'Back to chat', children, wide = false }: {
   icon: ReactNode; title: string; subtitle?: string; actions?: ReactNode; onBack?: () => void; backLabel?: string; children: ReactNode; wide?: boolean;

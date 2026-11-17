@@ -1,5 +1,5 @@
 /* Bwenge Scan: neutral ink + the brand orange (the "amber" token). Every class is prefixed bsc- so it cannot clash with the old ds-* styles. */
-.bsc-root{--ink:#141414;--s1:#1B1B1B;--s2:#232323;--line:#2E2E2E;--line2:#343434;--text:#F5F4EF;--muted:#A3A39C;--amber:#D97757;--on-amber:#FFFFFF;--ok:#34D399;--danger:#F87171;
+.bsc-root{--ink:#141414;--s1:#1B1B1B;--s2:#232323;--line:#2E2E2E;--line2:#343434;--text:#F5F4EF;--muted:#A3A39C;--amber:#E9A23B;--on-amber:#101822;--ok:#34D399;--danger:#F87171;
   position:fixed;inset:0;z-index:1000;height:100vh;height:100dvh;width:100vw;display:flex;flex-direction:column;background:var(--ink);color:var(--text);
   font-family:"Instrument Sans",system-ui,-apple-system,"Segoe UI",sans-serif;overflow:hidden;-webkit-tap-highlight-color:transparent}
 .bsc-root *{box-sizing:border-box}

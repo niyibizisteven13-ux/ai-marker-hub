@@ -192,7 +192,7 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
         <button type="button" onClick={onClose} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-neutral-400 hover:bg-white/5 hover:text-white"><ArrowLeft size={16} />Back to chat</button>
       </header>
       <main className="mx-auto flex w-full max-w-[840px] flex-1 flex-col px-4 pb-28 sm:px-6 sm:pb-10">
-        <h1 className="mt-1 text-center sm:mt-4 font-serif text-[28px] font-medium tracking-tight sm:text-[32px]">What are we <span className="text-[var(--brand)]">marking</span> today?</h1>
+        <h1 className="mt-1 text-center sm:mt-4 font-display text-[28px] font-medium tracking-tight sm:text-[32px]">What are we <span className="text-[var(--brand)]">marking</span> today?</h1>
         <p className="mx-auto mt-2 hidden max-w-xl text-center text-[14px] text-neutral-400 sm:block">Add the students' scripts and the marking scheme or the question paper. Bwenge reads the handwriting, marks every question in red pen, and shows you each step in the chat.</p>
 
         <section className={`mt-5 overflow-hidden sm:mt-7 rounded-[20px] border bg-[var(--app-panel)] shadow-[0_12px_40px_rgba(0,0,0,.25)] transition-colors ${dragging ? 'border-[var(--brand)]/70' : 'border-white/[0.12]'}`}>

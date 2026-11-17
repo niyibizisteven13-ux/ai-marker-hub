@@ -20,11 +20,16 @@ export interface Appearance {
   veil: number;
 }
 
-export const DEFAULT_APPEARANCE: Appearance = { mode: 'dark', color: '#D97757', style: 'neutral', background: 'none', veil: 0.72 };
+/** The Bwenge look: ink navy surfaces with the gold of the logo as the accent. */
+export const BRAND_GOLD = '#E9A23B';
+/** The look before the redesign (warm taupe surfaces and a clay accent). A saved appearance that is exactly this and nothing else was never customised, so it moves to the new default. */
+const LEGACY_DEFAULT_COLOR = '#d97757';
+export const DEFAULT_APPEARANCE: Appearance = { mode: 'dark', color: BRAND_GOLD, style: 'neutral', background: 'none', veil: 0.72 };
 
 /** Chrome-like colour choices. */
 export const PRESET_COLORS: Array<{ id: string; name: string; color: string }> = [
-  { id: 'clay', name: 'Bwenge clay', color: '#D97757' },
+  { id: 'bwenge', name: 'Bwenge gold', color: BRAND_GOLD },
+  { id: 'clay', name: 'Clay', color: '#D97757' },
   { id: 'green', name: 'Green', color: '#1E9E5A' },
   { id: 'teal', name: 'Teal', color: '#0F9D8F' },
   { id: 'cyan', name: 'Cyan', color: '#0EA5C6' },
@@ -34,7 +39,7 @@ export const PRESET_COLORS: Array<{ id: string; name: string; color: string }> =
   { id: 'pink', name: 'Pink', color: '#DB4F8E' },
   { id: 'red', name: 'Red', color: '#D93F3F' },
   { id: 'orange', name: 'Orange', color: '#EA7A1A' },
-  { id: 'gold', name: 'Gold', color: '#C9A227' },
+  { id: 'gold', name: 'Brass', color: '#C9A227' },
   { id: 'grey', name: 'Grey', color: '#71717A' },
 ];
 
@@ -78,8 +83,9 @@ const luminance = (c: string) => { const [r, g, b] = rgb(c).map((v) => { v /= 25
 
 /* ---------------------------------------------------------------- palette ---------------------------------------------------------------- */
 
-const DARK_BASE = { bg: '#262624', panel: '#30302E', panelHover: '#363634', panel2: '#1F1E1D', sunken: '#141413', text: '#FAF9F5', muted: '#C2C0B6', faint: '#9C9A92', ws: '#0F1012', wsCard: '#16171B', wsHover: '#191A1F', wsSunken: '#111216', wsText: '#ECECEE', invert: '#ECECEE' };
-const LIGHT_BASE = { bg: '#F7F6F2', panel: '#FFFFFF', panelHover: '#F3F2EE', panel2: '#EFEDE7', sunken: '#E8E5DE', text: '#1F1E1D', muted: '#46443F', faint: '#6E6B64', ws: '#F5F5F3', wsCard: '#FFFFFF', wsHover: '#F2F2EF', wsSunken: '#ECECE8', wsText: '#1B1C1F', invert: '#1F1E1D' };
+// Cool ink surfaces (the logo's navy), not warm taupe: the same navy family as the landing page, so the whole product reads as one brand.
+const DARK_BASE = { bg: '#0C131D', panel: '#121B27', panelHover: '#172230', panel2: '#0E1620', sunken: '#080D14', text: '#EAF0F6', muted: '#B4C0CE', faint: '#8494A8', ws: '#090F16', wsCard: '#111A25', wsHover: '#152030', wsSunken: '#0B121A', wsText: '#EAF0F6', invert: '#EAF0F6' };
+const LIGHT_BASE = { bg: '#F5F7FA', panel: '#FFFFFF', panelHover: '#F0F3F7', panel2: '#EBEFF4', sunken: '#E3E8EF', text: '#0E1722', muted: '#3E4B5C', faint: '#617085', ws: '#F3F5F8', wsCard: '#FFFFFF', wsHover: '#EEF1F5', wsSunken: '#E8ECF1', wsText: '#0E1722', invert: '#0E1722' };
 
 export function isDark(a: Appearance): boolean {
   if (a.mode === 'system') return typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-color-scheme: dark)').matches;
@@ -95,7 +101,7 @@ export function paletteFor(a: Appearance): Record<string, string> {
   const brand = original && dark ? '#D97757' : withLightness(base, dark ? clamp(toHsl(rgb(base))[2], 0.52, 0.66) : clamp(toHsl(rgb(base))[2], 0.36, 0.48));
   const soft = original && dark ? '#F0A586' : dark ? withLightness(brand, 0.74) : withLightness(brand, 0.34);
   const strong = original && dark ? '#C96A4C' : mix(brand, dark ? '#000000' : '#000000', 0.12);
-  const on = luminance(brand) > 0.45 ? '#141413' : '#FFFFFF';
+  const on = luminance(brand) > 0.45 ? '#0E1722' : '#FFFFFF';
   const B = dark ? DARK_BASE : LIGHT_BASE;
   // How much of the colour goes into the backgrounds: none (neutral), a hint (tinted), clearly coloured (vibrant).
   const t = a.style === 'vibrant' ? (dark ? 0.16 : 0.12) : a.style === 'tinted' ? (dark ? 0.07 : 0.05) : 0;
@@ -131,9 +137,10 @@ const KEY = 'bwenge.appearance';
 
 export function normalizeAppearance(v: unknown): Appearance {
   const o = (v && typeof v === 'object' ? v : {}) as Partial<Appearance>;
+  const pristineLegacy = isHex(o.color) && o.color.toLowerCase() === LEGACY_DEFAULT_COLOR && (o.style === undefined || o.style === 'neutral') && (!o.background || o.background === 'none');
   return {
     mode: o.mode === 'light' || o.mode === 'system' ? o.mode : 'dark',
-    color: isHex(o.color) ? o.color : DEFAULT_APPEARANCE.color,
+    color: isHex(o.color) && !pristineLegacy ? o.color : DEFAULT_APPEARANCE.color,
     style: o.style === 'tinted' || o.style === 'vibrant' ? o.style : 'neutral',
     background: typeof o.background === 'string' && (o.background === 'image' || o.background === 'none' || SCENES.some((s) => s.id === o.background)) ? o.background : 'none',
     ...(typeof o.image === 'string' && o.image.startsWith('data:image/') ? { image: o.image } : {}),

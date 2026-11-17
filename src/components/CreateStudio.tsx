@@ -589,7 +589,7 @@ export default function CreateStudio({
               </div>
 
               {/* Greeting */}
-              <h1 className="font-serif text-[26px] sm:text-[32px] font-normal tracking-tight text-[var(--app-text)] mb-6">
+              <h1 className="font-display text-[26px] sm:text-[32px] font-normal tracking-tight text-[var(--app-text)] mb-6">
                 {getGreeting()}
               </h1>
 

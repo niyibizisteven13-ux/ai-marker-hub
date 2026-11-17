@@ -45,7 +45,7 @@ export default function TaskResultPage({ token, resultToken }: { token: string; 
   const pdf = useMemo<PreviewSource | null>(() => (r?.markedPdfUrl ? { name: `${r.title} - marked.pdf`, type: 'application/pdf', url: r.markedPdfUrl } : null), [r?.markedPdfUrl, r?.title]);
 
   const shell = (body: React.ReactNode) => (
-    <div className="scroll-area h-[100dvh] overflow-y-auto bg-[#F4F3EF] text-[#1F1E1D]">
+    <div className="scroll-area h-[100dvh] overflow-y-auto bg-[#F4F3EF] text-[#0E1722]">
       <header className="flex items-center gap-2 px-5 py-4"><img src={logoUrl} alt="" className="h-7 w-7" /><span className="text-[13px] font-semibold text-neutral-600">Bwenge · Result</span></header>
       <main className="mx-auto max-w-2xl px-4 pb-16">{body}</main>
     </div>
@@ -64,7 +64,7 @@ export default function TaskResultPage({ token, resultToken }: { token: string; 
 
   if (r.state === 'code') {
     const c = r.code;
-    if (!c || c.running) return shell(<div className="space-y-3">{head}<div className="rounded-2xl bg-white p-6 text-center shadow-sm"><Loader2 size={36} className="mx-auto animate-spin text-[#D97757]" /><p className="mt-3 font-semibold">Testing your program</p><p className="mx-auto mt-1 max-w-sm text-[14px] text-neutral-500">This page updates by itself.</p></div></div>);
+    if (!c || c.running) return shell(<div className="space-y-3">{head}<div className="rounded-2xl bg-white p-6 text-center shadow-sm"><Loader2 size={36} className="mx-auto animate-spin text-amber-700" /><p className="mt-3 font-semibold">Testing your program</p><p className="mx-auto mt-1 max-w-sm text-[14px] text-neutral-500">This page updates by itself.</p></div></div>);
     if (c.hidden) return shell(<div className="space-y-3">{head}<div className="rounded-2xl bg-white p-6 text-center shadow-sm"><CheckCircle2 size={36} className="mx-auto text-emerald-600" /><p className="mt-3 font-semibold">Your program was tested</p><p className="mx-auto mt-1 max-w-sm text-[14px] text-neutral-500">Your teacher will share the result.</p></div></div>);
     const pct = c.max ? Math.round(((c.earned ?? 0) / c.max) * 100) : 0;
     return shell(
@@ -97,7 +97,7 @@ export default function TaskResultPage({ token, resultToken }: { token: string; 
     const [Icon, title, text] = r.state === 'waiting' ? [CheckCircle2, 'Marked, waiting for your teacher', 'Your paper has been marked. Your teacher checks the marks first; they appear here as soon as they are released.']
       : r.state === 'marking' ? [Loader2, 'Being marked', 'Your answer is being marked now. This page updates by itself; you can also come back later.']
         : [Clock, 'Not marked yet', 'Your teacher will mark this task. Keep this link: your result appears here when it is ready.'];
-    return shell(<div className="space-y-3">{head}<div className="rounded-2xl bg-white p-6 text-center shadow-sm"><Icon size={36} className={`mx-auto ${r.state === 'marking' ? 'animate-spin text-[#D97757]' : r.state === 'waiting' ? 'text-emerald-600' : 'text-neutral-400'}`} /><p className="mt-3 font-semibold">{title}</p><p className="mx-auto mt-1 max-w-sm text-[14px] text-neutral-500">{text}</p></div></div>);
+    return shell(<div className="space-y-3">{head}<div className="rounded-2xl bg-white p-6 text-center shadow-sm"><Icon size={36} className={`mx-auto ${r.state === 'marking' ? 'animate-spin text-amber-700' : r.state === 'waiting' ? 'text-emerald-600' : 'text-neutral-400'}`} /><p className="mt-3 font-semibold">{title}</p><p className="mx-auto mt-1 max-w-sm text-[14px] text-neutral-500">{text}</p></div></div>);
   }
 
   const pct = Math.round(r.percent ?? 0);
@@ -113,7 +113,7 @@ export default function TaskResultPage({ token, resultToken }: { token: string; 
       </div>
       {pdf && (
         <div className="flex items-center gap-4 rounded-2xl bg-white p-4 shadow-sm">
-          <div className="rounded-xl bg-[#1F1E1D] p-1"><AttachmentCard src={pdf} size={96} onOpen={() => setViewing(true)} /></div>
+          <div className="rounded-xl bg-[#0E1722] p-1"><AttachmentCard src={pdf} size={96} onOpen={() => setViewing(true)} /></div>
           <div className="min-w-0 flex-1"><p className="text-[14px] font-semibold">Your marked paper</p><p className="text-[13px] text-neutral-500">Every page with the red-pen ticks, crosses and corrections. Opens here; no download needed.</p></div>
         </div>
       )}
