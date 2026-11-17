@@ -1,0 +1,98 @@
+import { useEffect, useRef, useState } from 'react';
+import { ChevronLeft, ChevronRight, Heart, Loader2, MessageCircle, Pin, Send, ShoppingBag } from 'lucide-react';
+import { publicApi } from '../../biz/api';
+import { rwf, type PublicBusiness, type PublicPost } from '../../biz/types';
+
+/**
+ * The public feed, laid out like Instagram: a header with the business, the photos or videos you swipe through (double-tap to love), then love,
+ * comment, share and Order, the number of loves, the caption, the comments and the time. Anyone can love and comment (a name and a few words, no sign-in);
+ * a post can carry an Order button for one product. In the owner's preview nothing is sent.
+ */
+const ago = (iso: string) => { const s = Math.max(1, Math.round((Date.now() - Date.parse(iso)) / 1000)); if (s < 60) return 'JUST NOW'; if (s < 3600) return `${Math.round(s / 60)} MINUTES AGO`; if (s < 86400) return `${Math.round(s / 3600)} HOURS AGO`; if (s < 7 * 86400) return `${Math.round(s / 86400)} DAYS AGO`; return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' }).toUpperCase(); };
+const initials = (n: string) => n.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase()).join('') || 'B';
+const remembered = () => { try { return localStorage.getItem('bz-visitor-name') ?? ''; } catch { return ''; } };
+
+export function Carousel({ items, src, onOpen, onDoubleTap }: { items: PublicPost['media']; src: (id: string) => string; onOpen: (i: number) => void; onDoubleTap: () => void }) {
+  const ref = useRef<HTMLUListElement>(null); const [i, setI] = useState(0); const last = useRef(0);
+  const go = (n: number) => { const el = ref.current; if (el) el.scrollTo({ left: n * el.clientWidth, behavior: 'smooth' }); };
+  if (!items.length) return null;
+  return (
+    <div className="group relative bg-[#F0F2F5]">
+      <ul ref={ref} onScroll={(e) => { const el = e.currentTarget; setI(Math.round(el.scrollLeft / Math.max(1, el.clientWidth))); }} className="flex snap-x snap-mandatory overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+        {items.map((m, k) => (
+          <li key={m.id} className="aspect-square w-full shrink-0 snap-center">
+            {m.kind === 'video' ? <video src={`${src(m.id)}#t=0.1`} controls playsInline preload="metadata" className="h-full w-full bg-black object-contain" />
+              : <button type="button" aria-label="Open photo" className="block h-full w-full" onClick={() => { const t = Date.now(); if (t - last.current < 320) { onDoubleTap(); last.current = 0; } else { last.current = t; window.setTimeout(() => { if (last.current === t) onOpen(k); }, 330); } }}><img src={src(m.id)} alt={m.caption || ''} loading="lazy" draggable={false} className="h-full w-full object-cover" /></button>}
+          </li>))}
+      </ul>
+      {items.length > 1 && <>
+        <span className="absolute right-3 top-3 rounded-full bg-black/60 px-2.5 py-1 text-xs font-medium text-white">{i + 1}/{items.length}</span>
+        {i > 0 && <button type="button" aria-label="Previous" onClick={() => go(i - 1)} className="absolute left-2 top-1/2 hidden h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-white/90 shadow sm:flex"><ChevronLeft size={18} /></button>}
+        {i < items.length - 1 && <button type="button" aria-label="Next" onClick={() => go(i + 1)} className="absolute right-2 top-1/2 hidden h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-white/90 shadow sm:flex"><ChevronRight size={18} /></button>}
+        <div className="absolute inset-x-0 bottom-2.5 flex justify-center gap-1.5" aria-hidden="true">{items.map((m, k) => <span key={m.id} className={`h-1.5 w-1.5 rounded-full ${k === i ? 'bg-[var(--acc)]' : 'bg-white/70'}`} />)}</div></>}
+    </div>
+  );
+}
+
+function PostCard({ b, p, mediaSrc, preview, onOrder, onOpen, onShare }: { b: PublicBusiness; p: PublicPost; mediaSrc: (id: string) => string; preview: boolean; onOrder: (productId: string) => void; onOpen: (items: PublicPost['media'], i: number) => void; onShare: (p: PublicPost) => void }) {
+  const [liked, setLiked] = useState(p.liked); const [likes, setLikes] = useState(p.likes); const [burst, setBurst] = useState(false); const [open, setOpen] = useState(false); const [more, setMore] = useState(false);
+  const [comments, setComments] = useState<Array<{ id: string; name: string; text: string; at: string; owner?: boolean }> | null>(null); const [count, setCount] = useState(p.comments);
+  const [name, setName] = useState(remembered); const [text, setText] = useState(''); const [hp, setHp] = useState(''); const [busy, setBusy] = useState(false); const [err, setErr] = useState(''); const input = useRef<HTMLInputElement>(null);
+  const product = p.productId ? b.products.find((x) => x.id === p.productId) : undefined;
+  const love = async (force?: boolean) => {
+    if (force && liked) { setBurst(true); window.setTimeout(() => setBurst(false), 700); return; }
+    const next = !liked; setLiked(next); setLikes((n) => Math.max(0, n + (next ? 1 : -1))); if (next) { setBurst(true); window.setTimeout(() => setBurst(false), 700); }
+    if (preview) return; try { const r = await publicApi.like(b.slug, p.id); setLiked(r.liked); setLikes(r.likes); } catch { setLiked(!next); setLikes((n) => Math.max(0, n + (next ? -1 : 1))); }
+  };
+  const loadComments = async () => { if (preview) { setComments([]); return; } try { setComments(await publicApi.comments(b.slug, p.id)); } catch { setComments([]); } };
+  const toggle = () => { const o = !open; setOpen(o); if (o && comments === null) void loadComments(); if (o) window.setTimeout(() => input.current?.focus(), 80); };
+  const send = async (e: React.FormEvent) => {
+    e.preventDefault(); if (preview || busy || !text.trim()) return; setBusy(true); setErr('');
+    try { const c = await publicApi.comment(b.slug, p.id, { name, text, website: hp }); try { localStorage.setItem('bz-visitor-name', name); } catch { /* optional */ } setComments((l) => [...(l ?? []), c]); setCount((n) => n + 1); setText(''); }
+    catch (x) { setErr(x instanceof Error ? x.message : 'Your comment could not be sent.'); } finally { setBusy(false); }
+  };
+  const long = p.text.length > 140 && !more;
+  return (
+    <li id={`post-${p.id}`} className="scroll-mt-20 overflow-hidden rounded-2xl border border-[#E7EAEE] bg-white shadow-sm">
+      <div className="flex items-center gap-3 px-3.5 py-3">
+        <span className="rounded-full bg-gradient-to-tr from-[var(--acc)] to-[#DB4F8E] p-[2.5px]"><span className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-[var(--acc)] text-xs font-bold text-[var(--on)]">{b.logo ? <img src={mediaSrc(b.logo.id)} alt="" className="h-full w-full object-cover" /> : initials(b.name)}</span></span>
+        <div className="min-w-0 flex-1 leading-tight"><p className="truncate text-sm font-semibold">{b.name}</p>{product && <p className="truncate text-xs text-[#667085]">{product.name}</p>}</div>
+        {p.pinned && <span className="inline-flex items-center gap-1 text-xs text-[#667085]"><Pin size={13} />Pinned</span>}
+      </div>
+      <div className="relative">
+        <Carousel items={p.media} src={mediaSrc} onOpen={(k) => onOpen(p.media, k)} onDoubleTap={() => void love(true)} />
+        {burst && <Heart aria-hidden="true" className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 fill-white text-white drop-shadow-lg" size={96} style={{ animation: 'bzpop 0.7s ease-out forwards' }} />}
+      </div>
+      <div className="flex items-center gap-1 px-2 pt-2">
+        <button type="button" aria-label={liked ? 'Remove love' : 'Love'} aria-pressed={liked} onClick={() => void love()} className="flex h-10 w-10 items-center justify-center rounded-full hover:bg-[#F6F7F9]"><Heart size={25} className={liked ? 'fill-[#E11D48] text-[#E11D48]' : 'text-[#0E1722]'} /></button>
+        <button type="button" aria-label="Comments" onClick={toggle} className="flex h-10 w-10 items-center justify-center rounded-full hover:bg-[#F6F7F9]"><MessageCircle size={24} /></button>
+        <button type="button" aria-label="Share" onClick={() => onShare(p)} className="flex h-10 w-10 items-center justify-center rounded-full hover:bg-[#F6F7F9]"><Send size={23} /></button>
+        {product && product.available && <button type="button" onClick={() => onOrder(product.id)} className="ml-auto inline-flex min-h-10 items-center gap-2 rounded-xl bg-[var(--acc)] px-4 text-sm font-semibold text-[var(--on)] hover:opacity-90"><ShoppingBag size={16} />Order{product.price !== null ? ` · ${rwf(product.price)}` : ''}</button>}
+        {product && !product.available && <span className="ml-auto pr-2 text-xs font-medium text-[#667085]">Out of stock</span>}
+      </div>
+      <div className="px-3.5 pb-3.5">
+        {likes > 0 && <p className="text-sm font-semibold">{likes.toLocaleString('en-US')} {likes === 1 ? 'love' : 'loves'}</p>}
+        {p.text && <p className="mt-1 whitespace-pre-wrap text-[15px] leading-snug"><b className="mr-1.5">{b.name}</b>{long ? <>{p.text.slice(0, 140)}… <button type="button" onClick={() => setMore(true)} className="text-[#667085]">more</button></> : p.text}</p>}
+        {count > 0 && !open && <button type="button" onClick={toggle} className="mt-1.5 text-sm text-[#667085]">View all {count} comment{count === 1 ? '' : 's'}</button>}
+        {open && (
+          <div className="mt-2.5 space-y-2">
+            {comments === null ? <Loader2 size={16} className="animate-spin text-[#667085]" /> : comments.map((c) => <p key={c.id} className="text-sm leading-snug"><b className="mr-1.5">{c.name}</b>{c.owner && <span className="mr-1.5 rounded bg-[var(--acc)]/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase">Business</span>}{c.text}</p>)}
+            <form onSubmit={send} className="space-y-2 pt-1" noValidate>
+              {!remembered() && <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" aria-label="Your name" maxLength={40} className="w-full rounded-xl border border-[#D5DBE3] px-3 py-2.5 text-sm outline-none focus:border-[var(--acc)]" />}
+              <div className="flex items-center gap-2"><input ref={input} value={text} onChange={(e) => setText(e.target.value)} placeholder="Add a comment…" aria-label="Add a comment" maxLength={300} className="min-w-0 flex-1 rounded-xl border border-[#D5DBE3] px-3 py-2.5 text-sm outline-none focus:border-[var(--acc)]" />
+                <button type="submit" disabled={preview || busy || !text.trim() || !name.trim()} className="min-h-10 rounded-xl px-3 text-sm font-semibold text-[var(--acc)] disabled:opacity-40" style={{ color: 'var(--acc)' }}>{busy ? <Loader2 size={16} className="animate-spin" /> : 'Post'}</button></div>
+              <div aria-hidden="true" style={{ position: 'absolute', left: '-9999px', height: 0, overflow: 'hidden' }}><label>Website<input tabIndex={-1} autoComplete="off" value={hp} onChange={(e) => setHp(e.target.value)} /></label></div>
+              {err && <p role="alert" className="text-xs text-[#9B1C1C]">{err}</p>}
+            </form>
+          </div>)}
+        <p className="mt-2 text-[10.5px] font-medium tracking-wide text-[#98A2B3]">{ago(p.at)}</p>
+      </div>
+    </li>
+  );
+}
+
+export default function FeedSection({ b, posts, mediaSrc, preview, onOrder, onOpen, onShare }: { b: PublicBusiness; posts: PublicPost[]; mediaSrc: (id: string) => string; preview: boolean; onOrder: (productId: string) => void; onOpen: (items: PublicPost['media'], i: number) => void; onShare: (p: PublicPost) => void }) {
+  useEffect(() => { if (document.getElementById('bz-keyframes')) return; const s = document.createElement('style'); s.id = 'bz-keyframes'; s.textContent = '@keyframes bzpop{0%{opacity:0;transform:translate(-50%,-50%) scale(.4)}25%{opacity:1;transform:translate(-50%,-50%) scale(1.15)}60%{opacity:1;transform:translate(-50%,-50%) scale(1)}100%{opacity:0;transform:translate(-50%,-50%) scale(1)}}'; document.head.appendChild(s); }, []);
+  if (!posts.length) return null;
+  return <ul className="mx-auto max-w-[520px] space-y-5">{posts.map((p) => <PostCard key={p.id} b={b} p={p} mediaSrc={mediaSrc} preview={preview} onOrder={onOrder} onOpen={onOpen} onShare={onShare} />)}</ul>;
+}

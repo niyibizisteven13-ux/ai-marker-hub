@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Megaphone, ImagePlus, Lock, Camera, Bot, BellRing, ArrowDownRight, ArrowUpRight, Banknote, Check, Copy, Download, EyeOff, Globe, KeyRound, Loader2, Package, Plus, Receipt, Send, Share2, ShieldCheck, Smartphone, Sparkles, Trash2, TrendingUp, Users, Wallet, X, AlertTriangle, ShoppingBag, CircleCheck, Clock, Ban } from 'lucide-react';
+import { MessageCircle, Heart, Megaphone, ImagePlus, Lock, Camera, Bot, BellRing, ArrowDownRight, ArrowUpRight, Banknote, Check, Copy, Download, EyeOff, Globe, KeyRound, Loader2, Package, Plus, Receipt, Send, Share2, ShieldCheck, Smartphone, Sparkles, Trash2, TrendingUp, Users, Wallet, X, AlertTriangle, ShoppingBag, CircleCheck, Clock, Ban } from 'lucide-react';
 import { ownerApi, prepareImage } from '../../biz/api';
 import type { Mine } from '../../biz/api';
 import { pageUrl, rwf, type AgentSettings, type Business, type Dashboard, type LedgerEntry, type SecretsStatus } from '../../biz/types';
 import { btn, btnGhost, btnPrimary, card, input, msg, rwfShort, Tag, Title } from './ui';
+import PostComposer from './PostComposer';
 
 type Go = (view: string) => void;
 const money = (n: number) => `RWF ${n.toLocaleString('en-US')}`;
@@ -355,45 +356,61 @@ export function LockedGate({ mine, onRefresh }: { mine: Mine; onRefresh: () => v
   );
 }
 
-/* ------------------------------------------------------------------ the public feed */
+/* ------------------------------------------------------------------ the public feed (Instagram-style) */
 const ago = (iso: string) => { const s = Math.max(1, Math.round((Date.now() - Date.parse(iso)) / 1000)); return s < 3600 ? `${Math.max(1, Math.round(s / 60))} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }); };
+type OwnerPost = import('../../biz/types').Post & { likes: number; comments: number };
+function OwnerPostCard({ b, p, urls, kinds, onChange, copy }: { b: Business; p: OwnerPost; urls: Record<string, string>; kinds: Record<string, 'image' | 'video'>; onChange: () => void; copy: (t: string, w: string) => void }) {
+  const [open, setOpen] = useState(false); const [list, setList] = useState<Array<{ id: string; name: string; text: string; at: string; owner?: boolean }> | null>(null); const [reply, setReply] = useState(''); const [err, setErr] = useState(''); const [edit, setEdit] = useState(false); const [cap, setCap] = useState(p.text);
+  const first = p.mediaIds[0]; const product = b.products.find((x) => x.id === p.productId);
+  const run = async (fn: () => Promise<unknown>) => { setErr(''); try { await fn(); onChange(); } catch (e) { setErr(msg(e)); } };
+  const loadC = () => { void ownerApi.postComments(b.id, p.id).then(setList).catch((e) => setErr(msg(e))); };
+  return (
+    <article className={`${card} !p-0 overflow-hidden`}>
+      <div className="grid sm:grid-cols-[180px_1fr]">
+        <div className="relative aspect-square bg-[var(--app-bg)] sm:aspect-auto">{first && urls[first] ? (kinds[first] === 'video' ? <video src={`${urls[first]}#t=0.1`} muted playsInline preload="metadata" className="h-full w-full object-cover" /> : <img src={urls[first]} alt="" className="h-full w-full object-cover" />) : <div className="flex h-full min-h-[120px] items-center justify-center p-4 text-center text-sm text-[var(--app-muted)]">{p.text.slice(0, 80) || 'Post'}</div>}
+          {p.mediaIds.length > 1 && <span className="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-[11px] text-white">1/{p.mediaIds.length}</span>}</div>
+        <div className="min-w-0 p-4">
+          <div className="flex items-center justify-between gap-2 text-xs text-[var(--app-muted)]"><span>{ago(p.at)}{p.pinned && <span className="ml-2 rounded-full bg-[var(--brand)]/20 px-2 py-0.5 font-semibold text-[var(--app-text)]">Pinned</span>}{product && <span className="ml-2 inline-flex items-center gap-1"><ShoppingBag size={12} />{product.name}</span>}</span></div>
+          {edit ? <div className="mt-2 space-y-2"><textarea className={input} rows={3} maxLength={1500} value={cap} onChange={(e) => setCap(e.target.value)} aria-label="Caption" /><div className="flex gap-2"><button type="button" className={`${btnPrimary} !min-h-9`} onClick={() => void run(async () => { await ownerApi.setPost(b.id, p.id, { text: cap }); setEdit(false); })}>Save</button><button type="button" className={`${btnGhost} !min-h-9`} onClick={() => { setEdit(false); setCap(p.text); }}>Cancel</button></div></div> : p.text ? <p className="mt-2 line-clamp-4 whitespace-pre-wrap text-[15px]">{p.text}</p> : null}
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-sm"><span className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-3 py-1.5 font-semibold text-rose-700"><Heart size={15} className="fill-rose-600 text-rose-600" />{p.likes}</span>
+            <button type="button" onClick={() => { const o = !open; setOpen(o); if (o && !list) loadC(); }} className="inline-flex items-center gap-1.5 rounded-full bg-[var(--app-bg)] px-3 py-1.5 font-semibold"><MessageCircle size={15} />{p.comments}</button></div>
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            <button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => void run(() => ownerApi.setPost(b.id, p.id, { pinned: !p.pinned }))}>{p.pinned ? 'Unpin' : 'Pin'}</button>
+            <button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => setEdit(true)}>Edit caption</button>
+            {b.products.length > 0 && <select aria-label="Tagged product" className={`${input} !w-auto !min-h-9 !py-1.5 text-xs`} value={p.productId ?? ''} onChange={(e) => void run(() => ownerApi.setPost(b.id, p.id, { productId: e.target.value }))}><option value="">No Order button</option>{b.products.filter((x) => !x.hidden).map((x) => <option key={x.id} value={x.id}>Order: {x.name}</option>)}</select>}
+            <button type="button" aria-label="Copy link to this post" className={`${btnGhost} !min-h-9 !px-2.5`} onClick={() => copy(`${pageUrl(b.slug)}?post=${p.id}#post-${p.id}`, 'Post link')}><Copy size={14} /></button>
+            <button type="button" aria-label="Delete post" className={`${btnGhost} !min-h-9 !px-2.5 text-rose-600`} onClick={() => { if (confirm('Delete this post with its photos, loves and comments?')) void run(() => ownerApi.removePost(b.id, p.id)); }}><Trash2 size={14} /></button></div>
+          {err && <p role="alert" className="mt-2 text-xs text-rose-600">{err}</p>}
+        </div>
+      </div>
+      {open && <div className="border-t border-[var(--app-line)] bg-[var(--app-bg)]/60 p-4">
+        {!list ? <Loader2 size={16} className="animate-spin" /> : !list.length ? <p className="text-sm text-[var(--app-muted)]">No comments yet.</p> : <ul className="space-y-2.5">{list.map((c) => <li key={c.id} className="flex items-start gap-2 text-sm"><p className="min-w-0 flex-1"><b>{c.name}</b>{c.owner && <span className="ml-1.5 rounded bg-[var(--brand)]/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase">You</span>} <span className="text-[var(--app-muted)]">{ago(c.at)}</span><br />{c.text}</p><button type="button" aria-label="Delete comment" className="text-[var(--app-faint)] hover:text-rose-600" onClick={() => void run(async () => { await ownerApi.removeComment(b.id, c.id); loadC(); })}><Trash2 size={14} /></button></li>)}</ul>}
+        <form className="mt-3 flex gap-2" onSubmit={(e) => { e.preventDefault(); if (!reply.trim()) return; void run(async () => { await ownerApi.replyComment(b.id, p.id, reply); setReply(''); loadC(); }); }}><input className={input} value={reply} maxLength={300} placeholder="Reply as your business…" aria-label="Reply" onChange={(e) => setReply(e.target.value)} /><button type="submit" disabled={!reply.trim()} className={btnPrimary}>Reply</button></form>
+      </div>}
+    </article>
+  );
+}
+
 export function FeedView({ b, onChange }: { b: Business; onChange: () => void }) {
-  const [posts, setPosts] = useState<import('../../biz/types').Post[] | null>(null); const [urls, setUrls] = useState<Record<string, string>>({}); const [text, setText] = useState(''); const [files, setFiles] = useState<Array<{ blob: Blob; name: string; url: string }>>([]);
-  const [busy, setBusy] = useState(''); const [err, setErr] = useState(''); const [note, setNote] = useState(''); const link = `${pageUrl(b.slug)}#updates`;
+  const [posts, setPosts] = useState<OwnerPost[] | null>(null); const [urls, setUrls] = useState<Record<string, string>>({}); const [err, setErr] = useState(''); const [note, setNote] = useState(''); const [compose, setCompose] = useState(false); const link = `${pageUrl(b.slug)}#updates`;
   const load = useCallback(() => { ownerApi.posts(b.id).then(setPosts).catch((e) => setErr(msg(e))); void ownerApi.mediaUrls(b.id).then(setUrls).catch(() => undefined); }, [b.id]);
-  useEffect(() => { load(); }, [load]);
-  const pick = async (list: FileList | null) => { if (!list) return; setErr(''); const next = [...files]; for (const f of Array.from(list)) { if (next.length >= 4) { setErr('A post can have up to 4 photos.'); break; } if (!f.type.startsWith('image/')) { setErr('Only photos can go in a post. Videos go in Public page → Photos and videos.'); continue; } const p = await prepareImage(f); next.push({ ...p, url: URL.createObjectURL(p.blob) }); } setFiles(next); };
-  const post = async (e: React.FormEvent) => {
-    e.preventDefault(); if (!text.trim() && !files.length) return; setErr(''); setBusy('Posting…');
-    try { const ids: string[] = []; for (const [i, f] of files.entries()) { setBusy(`Uploading photo ${i + 1} of ${files.length}…`); ids.push((await ownerApi.upload(b.id, f.blob, f.name, () => undefined, 'feed')).id); } setBusy('Posting…'); await ownerApi.addPost(b.id, { text, mediaIds: ids }); setText(''); files.forEach((f) => URL.revokeObjectURL(f.url)); setFiles([]); load(); onChange(); }
-    catch (x) { setErr(msg(x)); } finally { setBusy(''); }
-  };
-  const act = async (fn: () => Promise<unknown>) => { setErr(''); try { await fn(); load(); } catch (x) { setErr(msg(x)); } };
+  useEffect(() => { load(); }, [load, b.updatedAt]);
+  const kinds = useMemo(() => Object.fromEntries(b.media.map((m) => [m.id, m.kind])) as Record<string, 'image' | 'video'>, [b.media]);
   const copy = async (t: string, what: string) => { try { await navigator.clipboard.writeText(t); setNote(`${what} copied`); } catch { setNote('Copy it by hand'); } };
+  const total = (posts ?? []).reduce((a, p) => ({ likes: a.likes + p.likes, comments: a.comments + p.comments }), { likes: 0, comments: 0 });
   return (
     <div className="space-y-5">
-      <div><h1 className="font-display text-2xl font-semibold tracking-tight">Feed</h1><Tag kind="public" /></div>
-      <div className={card}><p className="text-sm text-[var(--app-muted)]">Everything you post here appears on your public page under <b className="text-[var(--app-text)]">Updates</b>, newest first. Share the feed link so customers follow what is new.</p>
+      <div className="flex flex-wrap items-center justify-between gap-3"><div><h1 className="font-display text-2xl font-semibold tracking-tight">Feed</h1><Tag kind="public" /></div><button type="button" className={btnPrimary} onClick={() => setCompose(true)}><Plus size={16} />New post</button></div>
+      <div className="grid gap-3 sm:grid-cols-3">{[['Posts', posts?.length], ['Loves', total.likes], ['Comments', total.comments]].map(([l, v]) => <div key={l as string} className={`${card} !p-4`}><p className="text-xs text-[var(--app-muted)]">{l}</p><p className="font-display text-2xl font-semibold">{v ?? '…'}</p></div>)}</div>
+      <div className={card}><p className="text-sm text-[var(--app-muted)]">Posts appear on your public page under <b className="text-[var(--app-text)]">Updates</b> like Instagram: swipe photos, love, comment and <b className="text-[var(--app-text)]">Order</b>. Share the feed link so customers follow what is new.</p>
         <p className="mt-3 break-all rounded-xl bg-[var(--app-bg)] px-4 py-3 font-mono text-[14px]">{link.replace(/^https?:\/\//, '')}</p>
         <div className="mt-3 flex flex-wrap gap-2"><button type="button" className={btnGhost} onClick={() => void copy(link, 'Feed link')}><Copy size={15} />Copy feed link</button><a className={btnGhost} target="_blank" rel="noreferrer" href={`https://wa.me/?text=${encodeURIComponent(`${b.name}: what's new\n${link}`)}`}><Share2 size={15} />Share on WhatsApp</a><a className={btnGhost} target="_blank" rel="noreferrer" href={link}><Globe size={15} />Open</a></div>{note && <p role="status" className="mt-2 text-xs text-[var(--app-muted)]">{note}</p>}
         {!b.published && <p className="mt-3 rounded-xl bg-amber-500/10 px-3 py-2 text-xs">Your page is not published yet, so nobody can see the feed. Publish it from the Dashboard.</p>}</div>
-      <form onSubmit={post} className={card}>
-        <h2 className="mb-3 font-display text-lg font-semibold">New update</h2>
-        <textarea className={input} rows={4} maxLength={1000} value={text} placeholder="What's new? A fresh batch, a promotion, opening hours for a holiday…" aria-label="Update text" onChange={(e) => setText(e.target.value)} /><p className="mt-1 text-right text-xs text-[var(--app-faint)]">{text.length}/1000</p>
-        {files.length > 0 && <ul className="mb-3 flex flex-wrap gap-2">{files.map((f, i) => <li key={f.url} className="relative"><img src={f.url} alt="" className="h-20 w-20 rounded-xl object-cover" /><button type="button" aria-label="Remove photo" onClick={() => setFiles(files.filter((_, j) => j !== i))} className="absolute -right-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-[#0E1722] text-white"><X size={12} /></button></li>)}</ul>}
-        {err && <p role="alert" className="mb-2 text-sm text-rose-600">{err}</p>}
-        <div className="flex flex-wrap items-center gap-2"><input id="bz-feed-photos" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple className="sr-only" onChange={(e) => { void pick(e.target.files); e.target.value = ''; }} /><label htmlFor="bz-feed-photos" className={`${btnGhost} cursor-pointer`}><ImagePlus size={16} />Add photos</label>
-          <button type="submit" disabled={!!busy || (!text.trim() && !files.length)} className={`${btnPrimary} ml-auto`}>{busy ? <><Loader2 size={16} className="animate-spin" />{busy}</> : <><Send size={16} />Post update</>}</button></div>
-      </form>
-      <div className="space-y-3">
-        {posts === null ? <Loader2 className="animate-spin text-[var(--brand)]" /> : !posts.length ? <p className={`${card} text-sm text-[var(--app-muted)]`}>No updates yet. Post your first one above: a photo of today's best product works well.</p> : [...posts].sort((a, c) => Number(!!c.pinned) - Number(!!a.pinned)).map((p) => (
-          <article key={p.id} className={card}>
-            <div className="flex items-center justify-between gap-2 text-xs text-[var(--app-muted)]"><span>{ago(p.at)}{p.pinned && <span className="ml-2 rounded-full bg-[var(--brand)]/20 px-2 py-0.5 font-semibold text-[var(--app-text)]">Pinned</span>}</span>
-              <div className="flex gap-1.5"><button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => void act(() => ownerApi.setPost(b.id, p.id, { pinned: !p.pinned }))}>{p.pinned ? 'Unpin' : 'Pin'}</button><button type="button" aria-label="Copy link to this post" className={`${btnGhost} !min-h-9 !px-2.5`} onClick={() => void copy(`${pageUrl(b.slug)}?post=${p.id}#post-${p.id}`, 'Post link')}><Copy size={14} /></button><button type="button" aria-label="Delete post" className={`${btnGhost} !min-h-9 !px-2.5 text-rose-600`} onClick={() => { if (confirm('Delete this update?')) void act(() => ownerApi.removePost(b.id, p.id)); }}><Trash2 size={14} /></button></div></div>
-            {p.text && <p className="mt-2 whitespace-pre-wrap text-[15px]">{p.text}</p>}
-            {p.mediaIds.length > 0 && <ul className={`mt-3 grid gap-2 ${p.mediaIds.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>{p.mediaIds.map((id) => <li key={id} className="overflow-hidden rounded-xl bg-[var(--app-bg)]">{urls[id] ? <img src={urls[id]} alt="" className="max-h-72 w-full object-cover" /> : <div className="h-32" />}</li>)}</ul>}
-          </article>))}
-      </div>
+      {err && <p role="alert" className="text-sm text-rose-600">{err}</p>}
+      <div className="space-y-4">{posts === null ? <Loader2 className="animate-spin text-[var(--brand)]" /> : !posts.length ? (
+        <div className={`${card} py-10 text-center`}><ImagePlus size={42} className="mx-auto text-[var(--app-muted)]" /><p className="mt-3 font-display text-lg font-semibold">Share your first post</p><p className="mx-auto mt-1 max-w-sm text-sm text-[var(--app-muted)]">A photo of today's best product works well. Tag the product so customers can order straight from the post.</p><button type="button" className={`${btnPrimary} mt-4`} onClick={() => setCompose(true)}><Plus size={16} />New post</button></div>
+      ) : [...posts].sort((a, c) => Number(!!c.pinned) - Number(!!a.pinned) || c.at.localeCompare(a.at)).map((p) => <OwnerPostCard key={p.id} b={b} p={p} urls={urls} kinds={kinds} onChange={() => { load(); onChange(); }} copy={(t, w) => void copy(t, w)} />)}</div>
+      {compose && <PostComposer b={b} onClose={() => setCompose(false)} onPosted={() => { load(); onChange(); }} />}
     </div>
   );
 }

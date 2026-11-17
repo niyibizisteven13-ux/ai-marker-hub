@@ -240,9 +240,9 @@ export function bizTools(getSvc: () => Promise<BizService> | BizService = async 
   };
   const post: Tool = {
     definition: { name: 'biz_post', description: "Post an update to the business's public feed (it appears on the public page under Updates, newest first): a new product, a promotion, opening hours for a holiday, news. It is PUBLIC: post only what the owner asked to post, in their words (you may tidy spelling). Text up to 1,000 characters. Photos are added by the owner in Studio → Feed.",
-      parameters: { type: 'object', required: ['text'], properties: { business: BUSINESS, text: { type: 'string' } } } },
+      parameters: { type: 'object', required: ['text'], properties: { business: BUSINESS, text: { type: 'string', description: 'The caption, like an Instagram caption.' }, product: { type: 'string', description: 'A product on the page this post sells: the post then has an Order button.' } } } },
     async execute(input, ctx) {
-      try { const b = await pick(ctx.userId, input.business); if ('error' in b) return err(b.error); const p = await (await svc()).addPost(ctx.userId, b.id, { text: input.text }); return { text: `Posted to the feed${b.published ? '' : ' (not public until the page is published)'}. Feed link: ${linkOf(b)}#updates` }; } catch (e) { return failure(e); }
+      try { const b = await pick(ctx.userId, input.business); if ('error' in b) return err(b.error); const q = String(input.product ?? '').trim().toLowerCase(); const prod = q ? b.products.find((x) => x.name.toLowerCase() === q) ?? b.products.find((x) => x.name.toLowerCase().includes(q)) : undefined; const p = await (await svc()).addPost(ctx.userId, b.id, { text: input.text, productId: prod?.id }); return { text: `Posted to the feed${b.published ? '' : ' (not public until the page is published)'}. Feed link: ${linkOf(b)}#updates` }; } catch (e) { return failure(e); }
     },
   };
   return [get, create, update, addProduct, changeProduct, addMedia, publish, link, messages, record('sale'), record('expense'), dashboard, orders, requestPay, payStatus, paySetup, report, stock, agent, post];

@@ -177,3 +177,24 @@ test('location: valid coordinates become public, junk is ignored, clearing remov
   await svc.update('o', b.id, { lat: 999, lng: 30 }); assert.deepEqual((await svc.publicBySlug(b.slug))!.location, { lat: -1.944123, lng: 30.0619 }, 'out of range is ignored'); await svc.update('o', b.id, { lat: 'abc', lng: 'x' }); assert.ok((await svc.publicBySlug(b.slug))!.location);
   await svc.update('o', b.id, { lat: null, lng: null }); assert.equal((await svc.publicBySlug(b.slug))!.location, undefined);
 });
+
+// ---- Instagram-style feed: love, comments, order
+test('feed: love is one per visitor and toggles, comments are validated and limited, the owner can reply and delete, a tagged product gives the post an Order button, deleting a post removes its likes and comments', async () => {
+  const notes: any[] = []; const kv = memKv(); const svc = createBizService({ kv, media: memoryMediaStore(), isPaid: async () => true, now: () => T0, notify: async (_o, n) => { notes.push(n); } }); resetBizLimitsForTests();
+  const b = await svc.create('o', { name: 'Cafe' }); const prod = await svc.addProduct('o', b.id, { name: 'Coffee', price: 1000 }); await svc.update('o', b.id, { about: 'x' }); await svc.setPublished('o', b.id, true); await svc.setAgent('o', b.id, { level: 'watch', alerts: true });
+  const post = await svc.addPost('o', b.id, { text: 'New coffee', productId: prod.id }); const other = await svc.addPost('o', b.id, { text: 'Hello', productId: 'not-a-product' });
+  assert.equal(post.productId, prod.id); assert.equal(other.productId, undefined);
+  assert.deepEqual(await svc.like(b.slug, post.id, 'ann'), { liked: true, likes: 1 }); assert.deepEqual(await svc.like(b.slug, post.id, 'bob'), { liked: true, likes: 2 }); assert.deepEqual(await svc.like(b.slug, post.id, 'ann'), { liked: false, likes: 1 });
+  await assert.rejects(svc.like(b.slug, 'nope', 'ann'), (e: any) => e.status === 404);
+  let feed = await svc.publicPosts(b.slug, { visitor: 'bob' }); const f = feed.find((x) => x.id === post.id)!; assert.equal(f.likes, 1); assert.equal(f.liked, true); assert.equal(f.productId, prod.id); assert.equal((await svc.publicPosts(b.slug, { visitor: 'zed' })).find((x) => x.id === post.id)!.liked, false);
+  assert.ok(!JSON.stringify(await svc.publicPosts(b.slug)).includes('ann'), 'who liked is never exposed');
+  await assert.rejects(svc.addComment(b.slug, post.id, { name: '', text: 'x' }, 'v'), /name/); await assert.rejects(svc.addComment(b.slug, post.id, { name: 'A', text: ' ' }, 'v'), /comment/); await assert.rejects(svc.addComment(b.slug, post.id, { name: 'A', text: 'x', website: 'spam' }, 'v'), /Not accepted/);
+  const c = await svc.addComment(b.slug, post.id, { name: 'Ann', text: 'Looks delicious!' }, 'v1'); await new Promise((r) => setImmediate(r)); assert.match(notes[0].title, /New comment/);
+  assert.equal((await svc.publicPosts(b.slug)).find((x) => x.id === post.id)!.comments, 1);
+  const r = await svc.replyComment('o', b.id, post.id, 'Thank you!'); assert.equal(r.owner, true); const pub = await svc.publicComments(b.slug, post.id); assert.deepEqual(pub.map((x) => x.text), ['Looks delicious!', 'Thank you!']); assert.equal(pub[1].owner, true); assert.ok(!('postId' in pub[0]));
+  await assert.rejects(svc.replyComment('intruder', b.id, post.id, 'x'), (e: any) => e.status === 404);
+  for (let i = 0; i < 12; i++) await svc.addComment(b.slug, post.id, { name: 'Spam', text: `m${i}` }, 'busy').catch(() => undefined); await assert.rejects(svc.addComment(b.slug, post.id, { name: 'Spam', text: 'more' }, 'busy'), (e: any) => e.status === 429);
+  await svc.removeComment('o', b.id, c.id); assert.ok(!(await svc.publicComments(b.slug, post.id)).some((x) => x.id === c.id));
+  await svc.removePost('o', b.id, post.id); assert.equal(await kv.get(`biz-comments:${b.id}`) && ((await kv.get<any>(`biz-comments:${b.id}`)).items as any[]).filter((x) => x.postId === post.id).length, 0); assert.equal(((await kv.get<any>(`biz-likes:${b.id}`))?.by ?? {})[post.id], undefined);
+  await svc.setPublished('o', b.id, false); await assert.rejects(svc.like(b.slug, other.id, 'q'), (e: any) => e.status === 404); assert.deepEqual(await svc.publicComments(b.slug, other.id), []);
+});

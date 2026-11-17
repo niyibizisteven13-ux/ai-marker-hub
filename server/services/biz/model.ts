@@ -26,10 +26,11 @@ export interface Hours { day: Day; open: string; close: string; closed?: boolean
 export interface Product { id: string; name: string; price: number | null; unit?: string; description?: string; mediaId?: string; available: boolean; hidden?: boolean; /** Private: units in stock and the level that raises a low-stock alert. Never in publicView. */ stock?: number; lowAt?: number }
 export type MediaKind = 'image' | 'video';
 export interface Media { id: string; kind: MediaKind; mime: string; size: number; name: string; caption?: string; createdAt: string; visible: boolean; /** 'feed': uploaded for an update post; not in the gallery, public only while a post shows it. */ scope?: 'feed' }
-/** An update the owner posted to the public feed: some text and up to four photos from their own uploads. */
-export interface Post { id: string; at: string; text: string; mediaIds: string[]; pinned?: boolean }
-export interface PublicPost { id: string; at: string; text: string; media: PublicMedia[]; pinned?: boolean }
-export const MAX_POST_TEXT = 1000, MAX_POST_MEDIA = 4, MAX_POSTS = 300;
+/** An update the owner posted to the public feed, like an Instagram post: a caption and up to ten photos or short videos, optionally tagged with a product. */
+export interface Post { id: string; at: string; text: string; mediaIds: string[]; pinned?: boolean; /** The product this post sells: gives the post an Order button. */ productId?: string }
+export interface PublicPost { id: string; at: string; text: string; media: PublicMedia[]; pinned?: boolean; productId?: string; likes: number; comments: number; liked: boolean }
+export interface PostComment { id: string; postId: string; name: string; text: string; at: string; /** Written by the business itself (a reply). */ owner?: boolean }
+export const MAX_POST_TEXT = 1500, MAX_POST_MEDIA = 10, MAX_POSTS = 300, MAX_COMMENTS = 2000;
 export interface Business {
   id: string; ownerId: string; slug: string; name: string; category: Category; tagline: string; about: string; theme: Theme;
   logoId?: string; coverId?: string;
@@ -55,9 +56,9 @@ export interface Enquiry { id: string; at: string; name: string; contact: string
 export interface DayStats { views: number; whatsapp: number; calls: number; shares: number; enquiries: number }
 
 /* ---------------------------------------------------------------- limits */
-export interface Limits { businesses: number; products: number; images: number; videos: number; totalMediaMb: number; enquiries: number }
-export const FREE_LIMITS: Limits = { businesses: 1, products: 30, images: 12, videos: 2, totalMediaMb: 80, enquiries: 200 };
-export const PAID_LIMITS: Limits = { businesses: 3, products: 200, images: 60, videos: 10, totalMediaMb: 600, enquiries: 500 };
+export interface Limits { businesses: number; products: number; images: number; videos: number; totalMediaMb: number; /** Photos and videos uploaded for feed posts (they are not in the gallery). */ feed: number; enquiries: number }
+export const FREE_LIMITS: Limits = { businesses: 1, products: 30, images: 12, videos: 2, totalMediaMb: 80, feed: 60, enquiries: 200 };
+export const PAID_LIMITS: Limits = { businesses: 3, products: 200, images: 60, videos: 10, totalMediaMb: 600, feed: 400, enquiries: 500 };
 export const limitsFor = (paid: boolean): Limits => (paid ? PAID_LIMITS : FREE_LIMITS);
 export const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
 export const MAX_VIDEO_BYTES = 25 * 1024 * 1024;

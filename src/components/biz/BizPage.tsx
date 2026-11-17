@@ -4,6 +4,7 @@ import { publicApi } from '../../biz/api';
 import { DAYS, THEMES, pageUrl, rwf, CATEGORIES, type PublicBusiness, type PublicMedia, type PublicPost } from '../../biz/types';
 import { presetFor } from './presets';
 import MapTile from './MapTile';
+import FeedSection from './Feed';
 
 /**
  * A business's public page (bwenge4biz). Phone first: a cover, the name and the buttons people tap (WhatsApp, Call, Directions, Share), then the
@@ -258,17 +259,8 @@ export default function BizPage({ business: b, openNow, mediaSrc, preview = fals
               <section className="grid grid-cols-3 gap-2 rounded-2xl bg-[#F6F7F9] p-3 text-center text-[12.5px] font-medium text-[#475467] sm:text-sm">{preset.highlights.map((h) => <span key={h} className="flex items-center justify-center gap-1.5 px-1 py-1.5"><Check size={14} className="shrink-0 text-emerald-600" />{h}</span>)}</section>
 
               {/* updates (the feed) */}
-              {posts.length > 0 && (
-                <section id="updates" className="scroll-mt-20"><h2 className="mb-4 font-display text-2xl font-semibold tracking-tight">Updates</h2>
-                  <ul className="space-y-4">{posts.map((p) => (
-                    <li key={p.id} id={`post-${p.id}`} className="scroll-mt-20 overflow-hidden rounded-2xl border border-[#E7EAEE] bg-white shadow-sm">
-                      <div className="flex items-center gap-3 px-4 pt-4"><span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[var(--acc)] text-sm font-bold text-[var(--on)]">{b.logo ? <img src={mediaSrc(b.logo.id)} alt="" className="h-full w-full object-cover" /> : initials(b.name)}</span>
-                        <div className="min-w-0 flex-1"><p className="truncate text-[15px] font-semibold">{b.name}</p><p className="text-xs text-[#667085]">{agoText(p.at)}{p.pinned ? ' · Pinned' : ''}</p></div>
-                        <button type="button" aria-label="Share this update" onClick={() => void sharePost(p)} className="flex h-10 w-10 items-center justify-center rounded-xl text-[#667085] hover:bg-[#F0F2F5]"><Share2 size={17} /></button></div>
-                      {p.text && <p className="whitespace-pre-wrap px-4 pb-3 pt-3 text-[15.5px] leading-relaxed text-[#344054]">{p.text}</p>}
-                      {p.media.length > 0 && <ul className={`grid gap-0.5 ${p.media.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>{p.media.map((m, i) => <li key={m.id}><button type="button" onClick={() => setPostBox({ items: p.media, i })} aria-label="Open photo" className={`block w-full overflow-hidden bg-[#F0F2F5] ${p.media.length === 1 ? 'max-h-[28rem]' : 'aspect-square'}`}><img src={mediaSrc(m.id)} alt="" loading="lazy" className="h-full w-full object-cover" /></button></li>)}</ul>}
-                      {!p.media.length && <div className="pb-1" />}
-                    </li>))}</ul></section>)}
+              {posts.length > 0 && <section id="updates" className="scroll-mt-20"><h2 className="mb-4 font-display text-2xl font-semibold tracking-tight">Updates</h2>
+                <FeedSection b={b} posts={posts} mediaSrc={mediaSrc} preview={preview} onOrder={(pid) => { setCart((x) => ({ ...x, [pid]: Math.max(1, x[pid] ?? 0) })); setCheckout('order'); }} onOpen={(items, i) => setPostBox({ items, i })} onShare={(p) => void sharePost(p)} /></section>}
 
               {/* gallery */}
               {media.length > 0 && (
