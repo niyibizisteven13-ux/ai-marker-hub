@@ -237,24 +237,41 @@ export function platformTools(services: ToolServices): Tool[] {
       description: "The room assistant works during a live test by the lecturer's rules, so the lecturer only deals with what really needs a person. Call it with no changes to see the rules and what the assistant did; call it with changes to set the rules. on: switch it on or off. afterSeconds: how long a student who is paused for a small reason and is connected again waits before being let back in (5-300, default 30). maxResumes: how many times each student may be let back in (1-5, default 2). endAfterMax: when a student is paused again after the limit, end their test (only if the lecturer clearly asked for that; otherwise leave it off and the lecturer is told). " + AGENT_NOTE,
       parameters: {
         type: 'object', required: ['kind', 'id'],
-        properties: { kind: KIND, id: ID, on: { type: 'boolean' }, autoResume: { type: 'boolean' }, afterSeconds: { type: 'number' }, maxResumes: { type: 'number' }, endAfterMax: { type: 'boolean' } },
+        properties: { kind: KIND, id: ID, on: { type: 'boolean' }, autoResume: { type: 'boolean' }, afterSeconds: { type: 'number' }, maxResumes: { type: 'number' }, endAfterMax: { type: 'boolean' }, level: { type: 'string', enum: ['watch', 'assist'], description: 'watch: only looks and tells the lecturer. assist: also lets students back in after small problems.' }, dryRun: { type: 'boolean', description: 'Practice mode: it writes what it would do and does nothing. Suggest it for a first test.' }, maxAddMinutes: { type: 'number', description: 'Most minutes the assistant may add by itself in total (1-60, default 15).' }, maxRoomPauses: { type: 'number', description: 'Most times the assistant may pause the whole room by itself (0-5, default 2).' } },
       },
     },
     async execute(input, ctx) {
-      const i = input as { kind: 'form' | 'task'; id: string; on?: boolean; autoResume?: boolean; afterSeconds?: number; maxResumes?: number; endAfterMax?: boolean };
-      const patch = { on: i.on, autoResume: i.autoResume, afterSeconds: i.afterSeconds, maxResumes: i.maxResumes, endAfterMax: i.endAfterMax };
+      const i = input as { kind: 'form' | 'task'; id: string; on?: boolean; autoResume?: boolean; afterSeconds?: number; maxResumes?: number; endAfterMax?: boolean; level?: 'watch' | 'assist'; dryRun?: boolean; maxAddMinutes?: number; maxRoomPauses?: number };
+      const patch = { on: i.on, autoResume: i.autoResume, afterSeconds: i.afterSeconds, maxResumes: i.maxResumes, endAfterMax: i.endAfterMax, level: i.level, dryRun: i.dryRun, maxAddMinutes: i.maxAddMinutes, maxRoomPauses: i.maxRoomPauses };
       const changing = Object.values(patch).some((v) => v !== undefined);
       try {
         const v = await pf.roomAssistant(ctx.userId, i.kind, String(i.id), changing ? patch : undefined);
         if (changing) await note(ctx.userId, 'ROOM_ASSISTANT', String(i.id), { kind: i.kind, ...Object.fromEntries(Object.entries(patch).filter(([, x]) => x !== undefined)) });
         const r = v.rules;
         const lines = [
-          `Room assistant: ${r.on ? 'ON' : 'off'}. ${r.autoResume ? `It lets a student back in after ${r.afterSeconds} s when the reason is small, up to ${r.maxResumes} time${r.maxResumes === 1 ? '' : 's'} each${r.endAfterMax ? ', then ends their test' : ', then tells the lecturer'}.` : 'Letting students back in by itself is off.'} Let back in so far: ${v.resumed}.`,
+          `Room assistant: ${r.on ? 'ON' : 'off'}${r.level === 'watch' ? ' (watch mode: only looks and tells the lecturer)' : ''}${r.dryRun ? ' (PRACTICE MODE: it writes what it would do and does nothing)' : ''}. ${r.autoResume ? `It lets a student back in after ${r.afterSeconds} s when the reason is small, up to ${r.maxResumes} time${r.maxResumes === 1 ? '' : 's'} each${r.endAfterMax ? ', then ends their test' : ', then tells the lecturer'}.` : 'Letting students back in by itself is off.'} Let back in so far: ${v.resumed}. In the room by itself so far: paused ${v.usage.roomPauses} of ${r.maxRoomPauses} times, ${v.usage.addedMinutes} of ${r.maxAddMinutes} minutes added, ${v.usage.notices} messages.`,
           v.log.length ? `What it did (newest first):\n${v.log.slice(0, 15).map((e) => `- ${String(e.at).slice(11, 16)} ${e.student ? `${e.student}: ` : ''}${e.text}`).join('\n')}` : 'Nothing yet.',
           AGENT_NOTE,
         ];
         return { text: untrusted('ROOM_ASSISTANT', lines.join('\n')) };
       } catch (e) { return err(`Could not read or change the room assistant: ${problem(e)}`); }
+    },
+  };
+
+  const roomDo: Tool = {
+    definition: {
+      name: 'live_room_action',
+      description: "Act in a running test for the lecturer: pause_room (everyone who is in the test is paused: use for an incident such as a power cut or a wrong question, and say why), resume_room (let everyone back in), add_time (1-60 minutes more for everyone still in the test, or for one student with studentId: for a lost connection or an accommodation) and notice (a short message on the students' screens, all or one). The lecturer must have asked for it in this conversation. Never pause the room because of one student: use live_room_student for one. After it, say in one line what happened.",
+      parameters: { type: 'object', required: ['kind', 'id', 'action'], properties: { kind: KIND, id: ID, action: { type: 'string', enum: ['pause_room', 'resume_room', 'add_time', 'notice'] }, minutes: { type: 'number', description: 'For add_time: 1-60.' }, text: { type: 'string', description: 'For notice: up to 300 characters, plain and kind.' }, studentId: { type: 'string', description: 'For add_time or notice to one student (from live_room_status).' }, reason: { type: 'string', description: 'For pause_room: why, in a few words.' } } },
+    },
+    async execute(input, ctx) {
+      const i = input as { kind: 'form' | 'task'; id: string; action: 'pause_room' | 'resume_room' | 'add_time' | 'notice'; minutes?: number; text?: string; studentId?: string; reason?: string };
+      try {
+        const r = await pf.roomAction(ctx.userId, i.kind, String(i.id), { action: i.action, minutes: i.minutes, text: i.text, studentId: i.studentId, reason: i.reason });
+        if (!r.ok) return err(r.text);
+        await note(ctx.userId, `ROOM_${i.action.toUpperCase()}`, String(i.id), { kind: i.kind, minutes: i.minutes, studentId: i.studentId, reason: i.reason });
+        return { text: r.text };
+      } catch (e) { return err(`Could not do that in the room: ${problem(e)}`); }
     },
   };
 
@@ -343,5 +360,5 @@ export function platformTools(services: ToolServices): Tool[] {
     },
   };
 
-  return [rooms, status, code, settings, student, savedAnswers, assistant, launch, debrief, courses, overview, marked];
+  return [rooms, status, code, settings, student, roomDo, savedAnswers, assistant, launch, debrief, courses, overview, marked];
 }

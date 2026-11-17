@@ -152,9 +152,11 @@ export interface ToolServices {
     roomSettings(userId: string, kind: 'form' | 'task', id: string, patch: { allowBrowsers?: boolean; strictBrowsers?: boolean; faces?: 'off' | 'warn' | 'end'; studentCard?: boolean; browserDevices?: 'any' | 'ios'; ifStudentLeaves?: 'record' | 'pause' | 'end' | 'pause_then_end' }): Promise<void>;
     roomStudent(userId: string, kind: 'form' | 'task', id: string, studentId: string, action: 'let_back_in' | 'resume' | 'end'): Promise<void>;
     /** The room assistant: rules the lecturer sets for routine moments during a test, and the log of what it did. */
-    roomAssistant(userId: string, kind: 'form' | 'task', id: string, patch?: { on?: boolean; autoResume?: boolean; afterSeconds?: number; maxResumes?: number; endAfterMax?: boolean }): Promise<{
-      rules: { on: boolean; autoResume: boolean; afterSeconds: number; maxResumes: number; endAfterMax: boolean }; resumed: number; log: Array<{ at: string; kind: string; student?: string; text: string }>;
+    roomAssistant(userId: string, kind: 'form' | 'task', id: string, patch?: { on?: boolean; autoResume?: boolean; afterSeconds?: number; maxResumes?: number; endAfterMax?: boolean; level?: 'watch' | 'assist'; dryRun?: boolean; maxAddMinutes?: number; maxRoomPauses?: number }): Promise<{
+      rules: { on: boolean; autoResume: boolean; afterSeconds: number; maxResumes: number; endAfterMax: boolean; level: 'watch' | 'assist'; dryRun: boolean; maxAddMinutes: number; maxRoomPauses: number }; usage: { roomPauses: number; addedMinutes: number; notices: number }; resumed: number; log: Array<{ at: string; kind: string; student?: string; text: string }>;
     }>;
+    /** Pause or release everyone, add time, or send a message to students: done for the lecturer, logged and audited. */
+    roomAction(userId: string, kind: 'form' | 'task', id: string, a: { action: 'pause_room' | 'resume_room' | 'add_time' | 'notice'; minutes?: number; text?: string; studentId?: string; reason?: string }): Promise<{ ok: boolean; text: string }>;
     /** What one student's problems were, newest last (for the debrief). */
     roomViolations(userId: string, kind: 'form' | 'task', id: string, studentId: string): Promise<Array<{ type: string; created_at: string }>>;
     courses(userId: string): Promise<Array<{ id: string; name: string; code: string; term: string; students: number; items: number }>>;

@@ -56,6 +56,8 @@ const fake = http.createServer((req, res) => {
   req.on('end', () => {
     const json = (o: unknown) => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(o));
     if (req.url?.startsWith(`/api/exams/${EXAM}/monitor`)) return json({ exam: { title: 'Biology', status: examStatus }, counts: {}, students });
+    const room = /\/api\/exams\/[^/]+\/(pause-all|resume-all|extend|notice)$/.exec(req.url ?? '');
+    if (room && req.method === 'POST') { actions.push(`${room[1]} ${body}`); return json({ ok: true, changed: 4 }); }
     const m = /\/api\/sessions\/([^/]+)\/(resume|end)$/.exec(req.url ?? '');
     if (m && req.method === 'POST') { actions.push(`${m[2]} ${m[1]}`); return json({ ok: true }); }
     res.writeHead(404).end('{}');
@@ -140,4 +142,50 @@ test('tickAgents only looks at rooms that are switched on', async () => {
   students = [person({ student_name: 'Amy' })];
   await A.tickAgents(Date.now() + 99_000);               // the assistant was switched off by the test above
   assert.deepEqual(actions, []);
+});
+
+test('practice mode writes what it would do and does nothing; watch mode only tells the lecturer', async () => {
+  A.__resetAgentMemoryForTests(); actions.length = 0;
+  await A.setAgent(formTarget(owner, formId), { on: true, endAfterMax: false, dryRun: true, level: 'assist' }, owner);
+  const amy = person({ student_name: 'Amy' }); students = [amy];
+  const t0 = Date.now();
+  await A.runRoom(await rowOf(), t0); await A.runRoom(await rowOf(), t0 + 40_000); await A.runRoom(await rowOf(), t0 + 50_000);
+  assert.deepEqual(actions, [], 'nothing was done');
+  const row = await rowOf();
+  assert.equal(row.log.filter((e: any) => e.kind === 'would' && e.student === 'Amy').length, 1, 'said once');
+  assert.match(row.log.find((e: any) => e.kind === 'would').text, /Would have let back in/);
+  assert.ok(!row.counts[amy.id], 'it did not count a let-back-in that did not happen');
+  A.__resetAgentMemoryForTests();
+  await A.setAgent(formTarget(owner, formId), { dryRun: false, level: 'watch' }, owner);
+  await A.runRoom(await rowOf(), t0); await A.runRoom(await rowOf(), t0 + 40_000);
+  assert.deepEqual(actions, [], 'watch mode lets nobody back in');
+  assert.ok((await rowOf()).log.some((e: any) => e.kind === 'needs_you' && /watch mode/.test(e.text)));
+});
+
+test('room actions: the lecturer may always; the assistant only within its limits; practice mode does nothing; everything is logged and counted', async () => {
+  actions.length = 0;
+  const load = formTarget(owner, formId);
+  await A.setAgent(load, { on: true, level: 'assist', dryRun: false, maxAddMinutes: 15, maxRoomPauses: 1 }, owner);
+  const lec = await A.roomAction(load, { action: 'add_time', minutes: 30 }, 'lecturer', owner);
+  assert.ok(lec.ok); assert.match(lec.text, /4 students got 30 more minutes/); assert.ok(actions.some((a) => a.startsWith('extend') && a.includes('"minutes":30')));
+  assert.equal((await A.getAgent(load)).usage.addedMinutes, 0, 'the lecturer\'s own actions do not use up the assistant\'s limit');
+  assert.ok((await A.roomAction(load, { action: 'add_time', minutes: 10 }, 'agent', owner)).ok);
+  const more = await A.roomAction(load, { action: 'add_time', minutes: 10 }, 'agent', owner);
+  assert.ok(!more.ok); assert.match(more.text, /limit of 15 minutes/);
+  assert.ok((await A.roomAction(load, { action: 'pause_room', reason: 'power cut' }, 'agent', owner)).ok);
+  assert.ok(!(await A.roomAction(load, { action: 'pause_room' }, 'agent', owner)).ok, 'one pause is the limit');
+  assert.ok((await A.roomAction(load, { action: 'notice', text: 'Ten more minutes were added.' }, 'agent', owner)).ok);
+  assert.equal(actions.filter((a) => a.startsWith('pause-all')).length, 1);
+  assert.deepEqual((await A.getAgent(load)).usage, { roomPauses: 1, addedMinutes: 10, notices: 1 });
+  const kinds = (await A.getAgent(load)).log.map((e) => e.kind);
+  assert.ok(kinds.includes('room') && kinds.includes('refused'));
+  // practice mode: chosen, written down, not done
+  await A.setAgent(load, { dryRun: true }, owner); actions.length = 0;
+  const dry = await A.roomAction(load, { action: 'resume_room' }, 'agent', owner);
+  assert.ok(dry.ok && dry.dry); assert.deepEqual(actions, []);
+  assert.ok((await A.getAgent(load)).log.some((e) => e.kind === 'would' && /let everyone back in/.test(e.text)));
+  // the lecturer is not stopped by practice mode
+  assert.ok((await A.roomAction(load, { action: 'resume_room' }, 'lecturer', owner)).ok); assert.ok(actions.some((a) => a.startsWith('resume-all')));
+  // someone else's test cannot be touched
+  await assert.rejects(A.roomAction(formTarget(stranger, formId), { action: 'pause_room' }, 'lecturer', stranger), /not found/i);
 });

@@ -18,7 +18,7 @@ interface Student {
   live: { question: { index: number | null; total: number | null; label: string } | null; camera: string; screen_state?: string; frame: string | null; frame_age: number | null; screen?: string | null; screen_age?: number | null } | null;
 }
 interface Room { exam: { title: string; status: string; live_faces: boolean; live_mode?: 'off' | 'pictures' | 'live'; live_sound?: boolean; live_source?: Source; leave_action?: string; allow_web?: boolean; web_strict?: boolean; multi_face?: 'off' | 'warn' | 'end'; id_check?: boolean; web_devices?: 'any' | 'ios' }; counts: Record<Status, number>; students: Student[] }
-interface AgentView { rules: { on: boolean; autoResume: boolean; afterSeconds: number; maxResumes: number; endAfterMax: boolean }; resumed: number; log: Array<{ at: string; kind: string; student?: string; text: string }> }
+interface AgentView { rules: { on: boolean; autoResume: boolean; afterSeconds: number; maxResumes: number; endAfterMax: boolean; level: 'watch' | 'assist'; dryRun: boolean; maxAddMinutes: number; maxRoomPauses: number }; usage: { roomPauses: number; addedMinutes: number; notices: number }; resumed: number; log: Array<{ at: string; kind: string; student?: string; text: string }> }
 interface Code { display: string; qrSvg: string; expiresAt: string; joinUrl?: string }
 
 const LABEL: Record<Status, string> = { IN_EXAM: 'In the test', PAUSED: 'Paused', LEFT: 'Left', ENDED: 'Finished' };
@@ -456,6 +456,13 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
     return () => { live = false; };
   }, [room, call]); // eslint-disable-line react-hooks/exhaustive-deps
   const setRules = (patch: Partial<AgentView['rules']>) => act(async () => { const b = await call('/agent', 'PUT', patch); if (b?.data) setAgent(b.data); });
+  // Acting in the room: pause or release everyone, more time, a message to the students.
+  const [roomMsg, setRoomMsg] = useState('');
+  const [roomNote, setRoomNote] = useState('');
+  const roomDo = (body: Record<string, unknown>, done: string) => act(async () => {
+    try { await call('/room-action', 'POST', body); setRoomNote(done); if (body.action === 'notice') setRoomMsg(''); const b = await call('/agent', 'GET'); if (b?.data) setAgent(b.data); }
+    catch (e) { setRoomNote(`Not done: ${(e as Error).message}`); }
+  });
   // Student cards waiting for a look (browsers, when the card check is on). Fetched only while someone is waiting; each picture is deleted at the decision.
   const [idq, setIdq] = useState<Array<{ id: string; student_name: string; image: string }>>([]);
   const waitingIds = students.filter((s) => s.id_status === 'pending' && s.status !== 'ENDED').map((s) => s.id).join(',');
@@ -719,6 +726,27 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
                     {[1, 2, 3, 5].map((n) => <option key={n} value={n}>{n} time{n === 1 ? '' : 's'}</option>)}
                   </select>
                 </Setting>
+                <Setting label="What it may do" hint="Watch: it only looks and tells you. Assist: it also lets students back in.">
+                  <select className={dSelect} style={{ colorScheme: 'dark' }} aria-label="What the assistant may do" value={agent?.rules.level ?? 'assist'} disabled={busy || !open} onChange={(e) => void setRules({ level: e.target.value as 'watch' | 'assist' })}>
+                    <option value="assist">Assist</option><option value="watch">Watch only</option>
+                  </select>
+                </Setting>
+                <Setting label="Practice mode" hint="It writes what it would do and does nothing. Good for a first test.">
+                  <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm font-semibold md:min-h-9">
+                    <input type="checkbox" className="h-5 w-5 accent-blue-500" checked={!!agent?.rules.dryRun} disabled={busy || !open} onChange={(e) => void setRules({ dryRun: e.target.checked })} />
+                    Practice only
+                  </label>
+                </Setting>
+                <Setting label="Most time it may add" hint="In total, by itself. You are never limited.">
+                  <select className={dSelect} style={{ colorScheme: 'dark' }} aria-label="Most minutes the assistant may add" value={agent?.rules.maxAddMinutes ?? 15} disabled={busy || !open} onChange={(e) => void setRules({ maxAddMinutes: Number(e.target.value) })}>
+                    {[5, 10, 15, 30, 60].map((n) => <option key={n} value={n}>{n} minutes</option>)}
+                  </select>
+                </Setting>
+                <Setting label="Times it may pause the room" hint="For an incident. 0 means never by itself.">
+                  <select className={dSelect} style={{ colorScheme: 'dark' }} aria-label="Times the assistant may pause the room" value={agent?.rules.maxRoomPauses ?? 2} disabled={busy || !open} onChange={(e) => void setRules({ maxRoomPauses: Number(e.target.value) })}>
+                    {[0, 1, 2, 3, 5].map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </Setting>
                 <Setting label="After the limit" hint="Off: you are told and decide. On: their test ends by itself.">
                   <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm font-semibold md:min-h-9">
                     <input type="checkbox" className="h-5 w-5 accent-blue-500" checked={!!agent?.rules.endAfterMax} disabled={busy || !open} onChange={(e) => { if (!e.target.checked || confirm('End a student\'s test by itself when they have used all their chances?')) void setRules({ endAfterMax: e.target.checked }); }} />
@@ -727,11 +755,27 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
                 </Setting>
               </div>
             )}
+            {open && (
+              <div className="mt-3 grid gap-2 border-t border-white/10 pt-3" aria-label="Act in the room">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">The whole room</p>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" className={dBtn} disabled={busy} onClick={() => { if (confirm('Pause everyone who is in the test?')) void roomDo({ action: 'pause_room', reason: 'paused by the lecturer' }, 'Everyone is paused.'); }}>Pause everyone</button>
+                  <button type="button" className={dBtn} disabled={busy} onClick={() => void roomDo({ action: 'resume_room' }, 'Everyone is let back in.')}>Let everyone back in</button>
+                  {[5, 10].map((n) => <button key={n} type="button" className={dBtn} disabled={busy} onClick={() => { if (confirm(`Add ${n} minutes for everyone still in the test?`)) void roomDo({ action: 'add_time', minutes: n }, `${n} minutes added for everyone.`); }}>+{n} min for all</button>)}
+                </div>
+                <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (roomMsg.trim()) void roomDo({ action: 'notice', text: roomMsg.trim() }, 'Message sent to the students.'); }}>
+                  <input className={`${dSelect} min-w-0 flex-1`} aria-label="Message to all students" maxLength={300} placeholder="Message to all students" value={roomMsg} onChange={(e) => setRoomMsg(e.target.value)} />
+                  <button type="submit" className={dPrimary} disabled={busy || !roomMsg.trim()}>Send</button>
+                </form>
+                {roomNote && <p role="status" className="text-xs text-slate-300">{roomNote}</p>}
+                {agent?.rules.on && <p className="text-xs text-slate-400">By itself so far: paused {agent.usage.roomPauses} of {agent.rules.maxRoomPauses} times, {agent.usage.addedMinutes} of {agent.rules.maxAddMinutes} minutes added.</p>}
+              </div>
+            )}
             {agent && agent.log.length > 0 && (
               <ul className="mt-3 divide-y divide-white/10 border-t border-white/10 text-sm" aria-label="What the assistant did">
                 {agent.log.slice(0, 6).map((e, i) => (
                   <li key={`${e.at}-${i}`} className="flex items-start gap-2.5 py-2">
-                    <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${e.kind === 'resumed' ? 'bg-emerald-400' : e.kind === 'needs_you' || e.kind === 'card' ? 'bg-amber-400' : e.kind === 'ended' ? 'bg-rose-400' : 'bg-slate-500'}`} />
+                    <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${e.kind === 'resumed' || e.kind === 'room' ? 'bg-emerald-400' : e.kind === 'would' ? 'bg-sky-400' : e.kind === 'refused' ? 'bg-rose-400' : e.kind === 'needs_you' || e.kind === 'card' ? 'bg-amber-400' : e.kind === 'ended' ? 'bg-rose-400' : 'bg-slate-500'}`} />
                     <p className="min-w-0 flex-1 text-slate-200">{e.student && <strong className="font-semibold text-white">{e.student}: </strong>}{e.text}</p>
                     <time className="shrink-0 text-xs tabular-nums text-slate-500" dateTime={e.at}>{new Date(e.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
                   </li>
