@@ -1,6 +1,7 @@
 import ExcelJS from 'exceljs';
 import { gradeQuiz, type QuizItem } from './quiz.js';
 import { identityFields } from '../gradebook.js';
+import { normalizeFields } from './model.js';
 
 /**
  * A quiz's results as an Excel file for the lecturer:
@@ -99,4 +100,66 @@ export async function quizWorkbook(input: { title: string; schema: any; submissi
 
   const name = `${String(input.title).replace(/[\\/:*?"<>|\r\n]+/g, ' ').trim().slice(0, 80) || 'Quiz'} marks.xlsx`;
   return { name, data: Buffer.from(await wb.xlsx.writeBuffer()), students: latest.length };
+}
+
+/* ------------------------------------------------------------------ every response, for any form */
+const shown = (v: unknown): string => {
+  if (v === null || v === undefined || v === '') return '';
+  if (Array.isArray(v)) return v.map(shown).filter(Boolean).join('; ');
+  if (typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    if (typeof o.name === 'string' && typeof o.url === 'string') return o.name;                 // an attached file: its name (the file itself is in the form's results)
+    return Object.entries(o).map(([k, x]) => `${k}: ${shown(x)}`).join('; ');
+  }
+  return String(v);
+};
+const EXAM_COLUMNS: Array<[string, string]> = [['faceLost', 'Face left the camera (times)'], ['multipleFaces', 'More than one face (times)'], ['cameraProblems', 'Camera problems (times)'], ['tabHidden', 'Left the page (times)'], ['pauses', 'Pauses']];
+
+/**
+ * Every response to any form (a survey, a registration, a test that is not marked as a quiz) as an Excel file: one row per response with
+ * the time, the name and registration number when the form asks for them, and every answer in its own column. A test taken with the
+ * camera and screen rules adds how often each rule was triggered. Nothing is marked and nothing is hidden: it is the data as collected.
+ */
+export async function responsesWorkbook(input: { title: string; schema: any; submissions: Submission[] }): Promise<{ name: string; data: Buffer; responses: number }> {
+  const fields = normalizeFields(input.schema);
+  const raw: any[] = Array.isArray(input.schema?.fields) ? input.schema.fields : Array.isArray(input.schema?.questions) ? input.schema.questions : [];
+  const { nameField, idField } = identityFields(raw);
+  const subs = [...input.submissions].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  const parsed = subs.map((s) => { let v: any = {}; try { v = JSON.parse(s.data || '{}'); } catch { v = {}; } return { s, v }; });
+  const examCols = EXAM_COLUMNS.filter(([k]) => parsed.some((p) => typeof p.v?._exam?.[k] === 'number'));
+  const wb = new ExcelJS.Workbook(); wb.creator = 'Bwenge'; wb.created = new Date();
+
+  const ws = wb.addWorksheet('Responses', { views: [{ state: 'frozen', xSplit: 1, ySplit: 1 }] });
+  const idOf = (f: { id: string }) => String(f.id);
+  const identity = new Set([nameField && String(nameField.id), idField && String(idField.id)].filter(Boolean) as string[]);
+  ws.columns = [
+    { header: '#', key: 'n', width: 5 }, { header: 'Submitted', key: 'at', width: 19 },
+    ...(nameField ? [{ header: 'Name', key: 'name', width: 26 }] : []), ...(idField ? [{ header: 'Registration no.', key: 'sid', width: 18 }] : []),
+    ...fields.filter((f) => !identity.has(idOf(f))).map((f) => ({ header: f.label.slice(0, 60), key: `f_${idOf(f)}`, width: 24 })),
+    ...examCols.map(([k, h]) => ({ header: h, key: `x_${k}`, width: 16 })),
+  ];
+  parsed.forEach(({ s, v }, i) => {
+    const row = ws.addRow({
+      n: i + 1, at: s.createdAt, name: nameField ? shown(v[String(nameField.id)]) : undefined, sid: idField ? shown(v[String(idField.id)]) : undefined,
+      ...Object.fromEntries(fields.filter((f) => !identity.has(idOf(f))).map((f) => [`f_${idOf(f)}`, shown(v[idOf(f)])])),
+      ...Object.fromEntries(examCols.map(([k]) => [`x_${k}`, typeof v?._exam?.[k] === 'number' ? v._exam[k] : ''])),
+    });
+    row.getCell('at').numFmt = 'yyyy-mm-dd hh:mm';
+  });
+  ws.getRow(1).font = { bold: true }; ws.getRow(1).alignment = { wrapText: true, vertical: 'top' };
+  if (ws.rowCount > 1) ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: ws.columnCount } };
+
+  const sum = wb.addWorksheet('Summary');
+  sum.columns = [{ width: 30 }, { width: 40 }];
+  sum.addRow([String(input.title)]).font = { bold: true, size: 14 };
+  sum.addRow(['Responses', parsed.length]);
+  if (parsed.length) { sum.addRow(['First response', subs[0].createdAt]); sum.addRow(['Last response', subs[subs.length - 1].createdAt]); }
+  sum.addRow(['Questions', fields.length]);
+  sum.addRow([]);
+  sum.addRow(['This is every response as collected. This form is not marked as a quiz, so there are no marks; turn on "Make this a quiz" and give the questions points and answers to get marks.']);
+  sum.mergeCells(`A${sum.rowCount}:B${sum.rowCount}`); sum.getCell(`A${sum.rowCount}`).alignment = { wrapText: true, vertical: 'top' }; sum.getRow(sum.rowCount).height = 48;
+  sum.addRow([`Made by Bwenge on ${new Date().toISOString().slice(0, 10)}`]);
+
+  const name = `${String(input.title).replace(/[\\/:*?"<>|\r\n]+/g, ' ').trim().slice(0, 80) || 'Form'} responses.xlsx`;
+  return { name, data: Buffer.from(await wb.xlsx.writeBuffer()), responses: parsed.length };
 }

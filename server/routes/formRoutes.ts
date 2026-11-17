@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { normalizeBranding } from '../../shared/formBranding.js';
 import { keepMysebLink, normalizeExam } from '../../shared/examRules.js';
-import { NotAQuizError, quizWorkbook } from '../services/forms/resultsWorkbook.js';
+import { NotAQuizError, quizWorkbook, responsesWorkbook } from '../services/forms/resultsWorkbook.js';
 import { normalizePicks } from '../../shared/formPool.js';
 
 /** Test-design settings the creator chooses: one question at a time, no going back, a timer per question, no copying, question pools. */
@@ -470,7 +470,7 @@ router.patch('/:id/settings', requireAuth, async (req, res) => {
   }
 });
 
-/** A quiz's marks as an Excel file: results per student and question, how the class did on each question, and a summary. */
+/** A quiz's marks as an Excel file (results per student and question, how the class did on each question, a summary); any other form: every response. */
 router.get('/:id/results/export.xlsx', requireAuth, async (req, res) => {
   try {
     const userId = (req as any).user?.userId || (req as any).teacher?.teacherId;
@@ -479,7 +479,9 @@ router.get('/:id/results/export.xlsx', requireAuth, async (req, res) => {
     if (!userId || form.userId !== userId) return res.status(403).json({ error: 'You do not have access to this form.' });
     let schema: any = {}; try { schema = JSON.parse(form.schema || '{}'); } catch { schema = {}; }
     const submissions = await prisma.formSubmission.findMany({ where: { formId: form.id }, orderBy: { createdAt: 'asc' } });
-    const file = await quizWorkbook({ title: String(schema.title || form.title || 'Quiz'), schema, submissions });
+    // A marked quiz gets its marks; any other form (a test with camera and screen rules that is not a quiz, a survey) gets every response.
+    const title = String(schema.title || form.title || 'Quiz');
+    const file = schema.isQuiz ? await quizWorkbook({ title, schema, submissions }) : await responsesWorkbook({ title, schema, submissions });
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${file.name.replace(/[^\x20-\x7e]/g, '_').replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(file.name)}`);
     res.setHeader('Cache-Control', 'no-store');
