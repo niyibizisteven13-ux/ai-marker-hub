@@ -29,7 +29,8 @@ import { summarize } from '../services/forms/analysis.js';
 import { listVersions } from '../services/forms/versions.js';
 import { normalizeFields, CHOICE_KINDS } from '../services/forms/model.js';
 import { gradeQuiz } from '../services/forms/quiz.js';
-import { classReview, type ReviewQuestion, type ReviewResponse } from '../services/forms/classReview.js';
+import { classReview } from '../services/forms/classReview.js';
+import { reviewInputs } from '../services/forms/classReviewInput.js';
 import { applyPool } from '../../shared/formPool.js';
 
 const router = Router();
@@ -258,17 +259,7 @@ router.get('/:id/class-review', requireAuth, async (req, res) => {
     const userId = (req as any).user?.userId;
     const { schema } = await ownForm(userId, req.params.id);
     const rows = await prisma.formSubmission.findMany({ where: { formId: req.params.id }, orderBy: { createdAt: 'asc' }, take: 400 });
-    const fields = normalizeFields(schema);
-    const questions: ReviewQuestion[] = fields.map((f) => ({ id: f.id, label: f.label, kind: f.kind === 'text' || f.kind === 'long_text' ? f.kind : CHOICE_KINDS.has(f.kind) ? 'choice' : 'other' }));
-    const responses: ReviewResponse[] = rows.map((row: any, i: number) => {
-      let data: any = {};
-      try { data = JSON.parse(row.data || '{}'); } catch { data = {}; }
-      const seed = String(data._exam?.sessionId || data._pool?.seed || '');
-      const given = schema.poolPicks && Object.keys(schema.poolPicks).length && seed ? applyPool(schema, seed) : schema;
-      const wrong = new Set<string>(schema.isQuiz ? (gradeQuiz(given, data)?.items ?? []).filter((x) => !x.correct).map((x) => x.id) : []);
-      const who = String(data._exam?.studentId || data._respondentEmail || `Response ${i + 1}`);
-      return { id: row.id, who, submittedAt: new Date(row.createdAt).getTime(), answers: data, wrong, device: data._device?.id, network: data._device?.net };
-    });
+    const { questions, responses } = reviewInputs(schema, rows);
     res.json({ flags: classReview(questions, responses) });
   } catch (e) { studioFail(res, e); }
 });

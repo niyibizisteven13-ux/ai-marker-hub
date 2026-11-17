@@ -287,11 +287,12 @@ export function platformTools(services: ToolServices): Tool[] {
         const deciding = i.studentId && i.decision;
         const v = await pf.roomReview(ctx.userId, i.kind, String(i.id), deciding ? { studentId: i.studentId!, decision: i.decision!, note: i.note, giveMinutes: i.giveMinutes } : undefined);
         if (deciding) await note(ctx.userId, 'ROOM_REVIEW', String(i.id), { kind: i.kind, student: i.studentId, decision: i.decision, giveMinutes: i.giveMinutes });
-        const lines = v.items.slice(0, 15).map((x) => `- [${x.studentId}] ${x.name}: ${x.decision.toUpperCase()}${x.ended ? `, test ended (${x.ended.words})` : ''}, ${x.signals} signal${x.signals === 1 ? '' : 's'}${x.strikes ? `, ${x.strikes} serious` : ''}${x.evidence ? `, ${x.evidence} picture${x.evidence === 1 ? '' : 's'} kept` : ''}${x.canRestore ? ', can be let back in' : ''}\n    ${x.timeline.slice(-6).map((t) => `${t.at.slice(11, 16)} ${t.words}`).join(' > ')}${x.note ? `\n    Lecturer's note: ${x.note}` : ''}`);
+        const lines = v.items.slice(0, 15).map((x) => `- [${x.studentId}] ${x.name}: ${x.decision.toUpperCase()}${x.ended ? `, test ended (${x.ended.words})` : ''}, ${x.signals} signal${x.signals === 1 ? '' : 's'}${x.strikes ? `, ${x.strikes} serious` : ''}${x.evidence ? `, ${x.evidence} picture${x.evidence === 1 ? '' : 's'} kept` : ''}${x.answerFlags?.length ? `, answer checks: ${x.answerFlags.join(' ')}` : ''}${x.canRestore ? ', can be let back in' : ''}\n    ${x.timeline.slice(-6).map((t) => `${t.at.slice(11, 16)} ${t.words}`).join(' > ')}${x.note ? `\n    Lecturer's note: ${x.note}` : ''}`);
         return { text: untrusted('REVIEW_QUEUE', [
           deciding ? `Recorded: ${i.decision}${v.decided?.gaveMinutes ? `, and ${v.decided.gaveMinutes} minutes given back` : ''}.` : '',
           `${v.open} of ${v.total} flagged student${v.total === 1 ? '' : 's'} still need a decision${v.testOpen ? '' : ' (the test is closed)'}.`,
           lines.join('\n') || 'Nobody was flagged.',
+          v.unmatchedAnswerFlags?.length ? `Answer checks not matched to one live-room student (no clear name): ${v.unmatchedAnswerFlags.slice(0, 8).map((u) => `${u.name}: ${u.message}`).join(' | ')}` : '',
           'These are signals, not proof. The pictures can be opened in the live room (Review).',
         ].filter(Boolean).join('\n')) };
       } catch (e) { return err(`Could not read or change the review queue: ${problem(e)}`); }

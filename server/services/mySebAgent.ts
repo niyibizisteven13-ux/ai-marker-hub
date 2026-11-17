@@ -2,8 +2,9 @@ import { prisma } from '../db.js';
 import logger from '../utils/logger.js';
 import { auditAction } from './platform/audit.js';
 import { flagOn } from './platform/settings.js';
-import { MySebError, assignmentTarget, endAll, extendTime, formTarget, generateCode, monitor, pauseAll, resumeAll, sendNotice, sessionAction, violations as roomViolations, type TargetLoader } from './mySeb.js';
+import { MySebError, assignmentTarget, endAll, extendTime, formTarget, generateCode, monitor, pauseAll, resumeAll, sendNotice, report as fullReport, sessionAction, violations as roomViolations, type TargetLoader } from './mySeb.js';
 import { reasonWords } from '../../src/utils/studentHelp.js';
+import { answerChecks } from './mySebAnswerChecks.js';
 
 /**
  * The room assistant. The lecturer tells it, in the live room or in the chat, how routine moments should be handled while a test runs;
@@ -199,7 +200,7 @@ export function minutesLeft(deadlines: Array<string | null | undefined>, now: nu
 export interface ReportStudent { student_name: string; status: string; end_reason: string | null; violation_count: number; last_violation: string | null; reinstated_count?: number; aside_seconds?: number }
 const NOT_RULE_ENDS = new Set(['teacher', 'time_up', 'exam_ended', 'student', 'student_exit']);
 /** The report the lecturer reads after the test: plain, ranked, honest about what the signals mean. */
-export function buildReport(title: string, students: ReportStudent[], row: Pick<Row, 'serious' | 'usage' | 'log' | 'counts' | 'rules'>): string {
+export function buildReport(title: string, students: ReportStudent[], row: Pick<Row, 'serious' | 'usage' | 'log' | 'counts' | 'rules'>, answerLines: string[] = []): string {
   const n = students.length;
   const byRule = students.filter((s) => s.status === 'ENDED' && s.end_reason && !NOT_RULE_ENDS.has(s.end_reason));
   const timeUp = students.filter((s) => s.end_reason === 'time_up').length;
@@ -214,6 +215,7 @@ export function buildReport(title: string, students: ReportStudent[], row: Pick<
     `${title}: final report`,
     n === 0 ? 'Nobody took part.' : `${n} student${n === 1 ? '' : 's'} took part: ${finished} finished, ${timeUp} ran out of time, ${byRule.length} had their test ended by a rule.`,
     ranked.length ? `Worth a look (most first):\n${ranked.slice(0, 12).map(({ s }) => `- ${s.student_name}: ${s.violation_count} signal${s.violation_count === 1 ? '' : 's'}${s.last_violation ? `, last: ${reasonWords(s.last_violation)}` : ''}${strikes(s) ? `, ${strikes(s)} serious` : ''}${byRule.includes(s) ? `, test ended (${reasonWords(s.end_reason)})` : ''}${s.reinstated_count ? `, let back in ${s.reinstated_count}x` : ''}`).join('\n')}${ranked.length > 12 ? `\n(and ${ranked.length - 12} more with fewer signals)` : ''}` : 'Nobody was flagged.',
+    ...(answerLines.length ? [`Answers to check (alike, the same wrong answers, one device, or very fast):\n${answerLines.slice(0, 12).map((l) => `- ${l}`).join('\n')}${answerLines.length > 12 ? `\n(and ${answerLines.length - 12} more)` : ''}`] : []),
     `What the assistant did: let ${did} back in, warned ${warned}, ended ${ended} test${ended === 1 ? '' : 's'}, added ${row.usage?.addedMinutes ?? 0} minute${row.usage?.addedMinutes === 1 ? '' : 's'}, sent ${row.usage?.notices ?? 0} message${row.usage?.notices === 1 ? '' : 's'}.`,
     'Review each flagged student in the live room (Review): you see what happened in order and the pictures kept at those moments, and you confirm or dismiss. These are signals, not proof. A phone propped up, a second person out of view, or answers passed by voice cannot be seen by MySEB. Please look at the flagged students before you decide anything, and talk to them. The full timeline is in the live room.',
   ];
@@ -359,7 +361,15 @@ async function finishWithReport(row: Row, m: any): Promise<void> {
   const fresh = (await read(row.kind, row.ref)) ?? row;
   if (fresh.reported) return;
   const title = String(m?.exam?.title || 'The test');
-  const text = buildReport(title, (m?.students ?? []) as ReportStudent[], { serious: fresh.serious, usage: fresh.usage, log: fresh.log, counts: fresh.counts, rules: fresh.rules });
+  // Answer-pattern checks need the handed-in quiz and the full record (start and finish times); if either is missing the report still goes.
+  let answerLines: string[] = [];
+  try {
+    const rep: any = await fullReport(loaderOf(row));
+    const a = await answerChecks(loaderOf(row), rep.students ?? []);
+    const nameOf = new Map<string, string>((rep.students ?? []).map((x: any) => [x.id, x.student_name]));
+    answerLines = [...Object.entries(a.byStudent).map(([id, fl]) => `${nameOf.get(id) ?? 'A student'}: ${fl.map((f) => f.message).join(' ')}`), ...a.unmatched.map((u) => `${u.name}: ${u.message} (not matched to one live-room student)`)];
+  } catch { /* the report is still sent without them */ }
+  const text = buildReport(title, (m?.students ?? []) as ReportStudent[], { serious: fresh.serious, usage: fresh.usage, log: fresh.log, counts: fresh.counts, rules: fresh.rules }, answerLines);
   await mutate(row.kind, row.ref, row.ownerId, (r) => { r.reported = true; r.report = { at: new Date().toISOString(), text }; r.log.push(entry('report', 'The test is over: the report was sent to you.')); }, 'agent');
   await auditAction(row.ownerId, 'MYSEB_AGENT_REPORT', 'live_room', row.ref, { students: (m?.students ?? []).length }).catch(() => undefined);
   void reportOwner(row, title, text).catch(() => undefined);
