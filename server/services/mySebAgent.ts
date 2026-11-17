@@ -52,9 +52,12 @@ export const MAX_AGENT_NOTICES = 20;
 export interface AgentLogEntry { at: string; kind: 'started' | 'stopped' | 'resumed' | 'needs_you' | 'ended' | 'card' | 'finished' | 'would' | 'room' | 'refused' | 'warned' | 'report'; student?: string; text: string }
 interface Row { ownerId: string; kind: 'form' | 'task'; ref: string; rules: AgentRules; counts: Record<string, number>; log: AgentLogEntry[]; usage?: AgentUsage;
   /** Serious signals counted per student, and how many of each student's violations were already looked at. */
-  serious?: Record<string, number>; vseen?: Record<string, number>; reported?: boolean; report?: { at: string; text: string } }
+  serious?: Record<string, number>; vseen?: Record<string, number>;
+  /** What must survive a server restart so nothing is announced or done twice: announcements made, the cards shown, the last incident, the quiet-time start. */
+  mem?: { told: string[]; quiet?: number; incident?: number }; reported?: boolean; report?: { at: string; text: string } }
 
 const cleanUsage = (u: any): AgentUsage => ({ roomPauses: clamp(u?.roomPauses, 0, 1e6, 0), addedMinutes: clamp(u?.addedMinutes, 0, 1e6, 0), notices: clamp(u?.notices, 0, 1e6, 0) });
+const cleanMem = (m: any): Row['mem'] => (m && typeof m === 'object' ? { told: Array.isArray(m.told) ? m.told.filter((x: unknown) => typeof x === 'string').slice(-200) : [], ...(typeof m.quiet === 'number' ? { quiet: m.quiet } : {}), ...(typeof m.incident === 'number' ? { incident: m.incident } : {}) } : undefined);
 const numMap = (m: any): Record<string, number> => (m && typeof m === 'object' ? Object.fromEntries(Object.entries(m).filter(([, n]) => typeof n === 'number')) as Record<string, number> : {});
 const keyOf = (kind: string, ref: string) => `myseb-agent:${kind}:${ref}`;
 const LOG_MAX = 60;
@@ -121,7 +124,7 @@ async function read(kind: string, ref: string): Promise<Row | null> {
   const r = await db.appSetting.findUnique({ where: { key: keyOf(kind, ref) } }).catch(() => null);
   const v = r?.value;
   if (!v || typeof v !== 'object') return null;
-  return { ownerId: String(v.ownerId), kind: v.kind, ref: String(v.ref), rules: cleanRules(v.rules), counts: v.counts && typeof v.counts === 'object' ? v.counts : {}, log: Array.isArray(v.log) ? v.log.slice(-LOG_MAX) : [], usage: cleanUsage(v.usage), serious: numMap(v.serious), vseen: numMap(v.vseen), reported: v.reported === true, report: v.report && typeof v.report.text === 'string' ? { at: String(v.report.at), text: v.report.text } : undefined };
+  return { ownerId: String(v.ownerId), kind: v.kind, ref: String(v.ref), rules: cleanRules(v.rules), counts: v.counts && typeof v.counts === 'object' ? v.counts : {}, log: Array.isArray(v.log) ? v.log.slice(-LOG_MAX) : [], usage: cleanUsage(v.usage), mem: cleanMem(v.mem), serious: numMap(v.serious), vseen: numMap(v.vseen), reported: v.reported === true, report: v.report && typeof v.report.text === 'string' ? { at: String(v.report.at), text: v.report.text } : undefined };
 }
 async function write(row: Row, by: string) {
   const key = keyOf(row.kind, row.ref);
@@ -325,14 +328,63 @@ async function finishWithReport(row: Row, m: any): Promise<void> {
   void reportOwner(row, title, text).catch(() => undefined);
 }
 
-/** One look at one room. Returns what it did (for tests and the log). */
+const hydrated = new Set<string>();
+const REMEMBER = /:(ann\d+|card)$/;
+/** Puts back what a restart forgot (only what would otherwise be done or announced twice). */
+function hydrate(row: Row) {
+  if (hydrated.has(row.ref)) return; hydrated.add(row.ref);
+  for (const k of row.mem?.told ?? []) told.add(k);
+  if (row.mem?.quiet && !quietSince.has(row.ref)) quietSince.set(row.ref, row.mem.quiet);
+  if (row.mem?.incident && !incidentAt.has(row.ref)) incidentAt.set(row.ref, row.mem.incident);
+}
+const snapshot = (ref: string): NonNullable<Row['mem']> => ({ told: [...told].filter((k) => k.startsWith(`${ref}:`) && REMEMBER.test(k)).slice(-200), ...(quietSince.has(ref) ? { quiet: quietSince.get(ref) } : {}), ...(incidentAt.has(ref) ? { incident: incidentAt.get(ref) } : {}) });
+
+/* ---- health: the assistant must never fail silently */
+export const MAX_ERRORS = 3;       // looks in a row that fail inside the assistant: autopilot falls back to watch mode
+export const MAX_UNREACHABLE = 6;  // looks in a row where MySEB could not be reached: the lecturer is told once
+const errors = new Map<string, number>(); const unreachable = new Map<string, number>(); const toldUnreachable = new Set<string>();
+let fault: ((row: Row) => void) | null = null;   // tests only
+export const __injectFaultForTests = (fn: ((row: Row) => void) | null) => { fault = fn; };
+
+/** One look at one room, with a safety net: repeated failures never leave the lecturer thinking the test is watched when it is not. */
 export async function runRoom(row: Row, now = Date.now()): Promise<AgentLogEntry[]> {
+  try {
+    const made = await runRoomInner(row, now);
+    errors.delete(row.ref);
+    return made;
+  } catch (e) {
+    const n = (errors.get(row.ref) ?? 0) + 1; errors.set(row.ref, n);
+    logger.warn?.('[myseb-agent] room failed', { error: (e as Error)?.message, times: n });
+    if (n >= MAX_ERRORS) {
+      errors.delete(row.ref);
+      const why = row.rules.level === 'run' ? 'Autopilot hit a problem it could not get past, so it switched to watch mode: it only looks and tells you, and does nothing else until you switch it back.' : 'The room assistant hit a problem it could not get past, so it switched itself off.';
+      const next = entry('stopped', why);
+      await mutate(row.kind, row.ref, row.ownerId, (r) => { r.rules = row.rules.level === 'run' ? { ...r.rules, level: 'watch' } : { ...r.rules, on: false }; r.log.push(next); }, 'agent').catch(() => undefined);
+      await auditAction(row.ownerId, 'MYSEB_AGENT_FALLBACK', 'live_room', row.ref, { level: row.rules.level }).catch(() => undefined);
+      void alertOwner(row, [next]).catch(() => undefined);
+    }
+    return [];
+  }
+}
+
+async function runRoomInner(row: Row, now = Date.now()): Promise<AgentLogEntry[]> {
+  hydrate(row);
+  fault?.(row);
   const load = loaderOf(row);
   const run = row.rules.level === 'run';
   let m: any;
-  try { m = await monitor(load, { frames: false }); }
+  try { m = await monitor(load, { frames: false }); unreachable.delete(row.ref); toldUnreachable.delete(row.ref); }
   catch (e) {
     if (e instanceof MySebError && e.status === 404) await mutate(row.kind, row.ref, row.ownerId, (r) => { r.rules = { ...r.rules, on: false }; r.log.push(entry('stopped', 'The test no longer exists, so the assistant stopped.')); }, 'agent').catch(() => undefined);
+    else {
+      const n = (unreachable.get(row.ref) ?? 0) + 1; unreachable.set(row.ref, n);
+      if (n >= MAX_UNREACHABLE && !toldUnreachable.has(row.ref)) {
+        toldUnreachable.add(row.ref);
+        const lost = entry('needs_you', 'The assistant cannot reach the test server, so nobody is watching this room automatically. Please check the live room yourself.');
+        await mutate(row.kind, row.ref, row.ownerId, (r) => { r.log.push(lost); }, 'agent').catch(() => undefined);
+        void alertOwner(row, [lost]).catch(() => undefined);
+      }
+    }
     return [];
   }
   const made: AgentLogEntry[] = [];
@@ -442,6 +494,9 @@ export async function runRoom(row: Row, now = Date.now()): Promise<AgentLogEntry
       }
     } else quietSince.delete(row.ref);
   }
+  // What a restart must not forget (announcements already made, the quiet-time start, the last incident).
+  const mem = snapshot(row.ref);
+  if (JSON.stringify(mem) !== JSON.stringify(row.mem ?? { told: [] })) await mutate(row.kind, row.ref, row.ownerId, (r) => { r.mem = mem; }, 'agent').catch(() => undefined);
   return made;
 }
 
@@ -459,4 +514,4 @@ export async function tickAgents(now = Date.now()) {
 
 let timer: ReturnType<typeof setInterval> | undefined;
 export function startMySebAgent() { timer ??= setInterval(() => void tickAgents().catch(() => undefined), 10_000); timer.unref?.(); }
-export const __resetAgentMemoryForTests = () => { pausedSince.clear(); told.clear(); quietSince.clear(); incidentAt.clear(); };
+export const __resetAgentMemoryForTests = () => { pausedSince.clear(); told.clear(); quietSince.clear(); incidentAt.clear(); hydrated.clear(); errors.clear(); unreachable.clear(); toldUnreachable.clear(); fault = null; };
