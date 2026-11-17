@@ -169,7 +169,9 @@ jobs:
           cp "apps/MySEB-$version-win.exe" apps/MySEB-win.exe
           cp "apps/MySEB-$version-mac.dmg" apps/MySEB-mac.dmg
           cp "apps/MySEB-$version-linux.AppImage" apps/MySEB-linux.AppImage
-          for file in MySEB-win.exe MySEB-mac.dmg MySEB-linux.AppImage MySEB.apk MySEB-extension.zip latest.yml latest-linux.yml; do
+          # Never replace the public Android installer with an ephemeral debug-signed build.
+          if [ ! -s apps/MySEB-android-update.json ]; then rm -f apps/MySEB.apk; fi
+          for file in MySEB-win.exe MySEB-mac.dmg MySEB-linux.AppImage MySEB-extension.zip latest.yml latest-linux.yml; do
             test -s "apps/$file" || { echo "Missing installer or update feed: $file"; exit 1; }
           done
           gh release create "$MYSEB_VERSION" apps/* --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "MySEB $MYSEB_VERSION" --notes "Student apps for $API_BASE. Desktop update feeds included. Android in-app update discovery requires the persistent signing marker." --latest=false

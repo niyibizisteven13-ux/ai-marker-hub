@@ -35,7 +35,7 @@ Android upgrades must use a persistent signing key and a higher versionCode. Con
 GitHub Actions secrets: MYSEB_ANDROID_KEYSTORE_BASE64, MYSEB_ANDROID_STORE_PASSWORD,
 MYSEB_ANDROID_KEY_ALIAS, MYSEB_ANDROID_KEY_PASSWORD. The build uses that key from temporary runner storage.
 Only persistently signed builds publish MySEB-android-update.json, which enables Android update discovery.
-Builds without a configured key remain testing downloads and are not advertised as compatible in-app updates.
+Builds without a configured key remain CI testing artifacts; the release omits their APK so the existing public Android installer is not replaced by an incompatible build. They are not advertised as compatible in-app updates.
 An APK installed previously using an unrelated temporary debug key cannot accept a differently signed update.
 Do not uninstall an existing app merely to work around signing: release with its existing signing key.
 
