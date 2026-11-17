@@ -80,14 +80,18 @@ test('a page is public only when published and not hidden by Bwenge; an unpublis
 });
 
 test('photos and videos: right types, size and count limits, the first photo becomes the cover, only shown files are served, removal deletes the file', async () => {
-  const { svc, media } = make(false); const b = await svc.create('o', { name: 'Photo Shop' }); await svc.update('o', b.id, { about: 'x' }); await svc.setPublished('o', b.id, true);
+  const { svc, media } = make(true); const b = await svc.create('o', { name: 'Photo Shop' }); await svc.update('o', b.id, { about: 'x' }); await svc.setPublished('o', b.id, true);
   await assert.rejects(svc.addMedia('o', b.id, { name: 'logo.png', data: Buffer.from('<svg><script>alert(1)</script></svg>') }), (e: any) => e.code === 'TYPE', 'an SVG named .png is refused');
   await assert.rejects(svc.addMedia('o', b.id, { name: 'big.png', data: png(7 * 1048576) }), (e: any) => e.code === 'TOO_LARGE'); await assert.rejects(svc.addMedia('o', b.id, { name: 'big.mp4', data: mp4(26 * 1048576) }), (e: any) => e.code === 'TOO_LARGE');
   const m1 = await svc.addMedia('o', b.id, { name: 'front.jpg', data: jpg(), caption: ' Our shop ' }); assert.equal(m1.caption, 'Our shop'); assert.equal((await svc.get('o', b.id)).coverId, m1.id);
   const v = await svc.addMedia('o', b.id, { name: 'tour.mp4', data: mp4() }); assert.equal(v.kind, 'video');
   assert.ok(await svc.mediaFor(b.slug, m1.id)); assert.equal(await svc.mediaFor(b.slug, 'nope'), null);
   await svc.updateMedia('o', b.id, v.id, { visible: false }); assert.equal(await svc.mediaFor(b.slug, v.id), null, 'a hidden video is not served');
-  await svc.addMedia('o', b.id, { name: 'c.mp4', data: mp4() }); await assert.rejects(svc.addMedia('o', b.id, { name: 'd.mp4', data: mp4() }), (e: any) => e.status === 402, 'Free: 2 videos');
+  await svc.addMedia('o', b.id, { name: 'c.mp4', data: mp4() });
+  const free = make(false); const fb = await free.svc.create('f', { name: 'Free Shop' }); assert.ok(await free.svc.addMedia('f', fb.id, { name: 'a.jpg', data: jpg() }), 'photos are free');
+  for (const scope of [undefined, 'feed']) await assert.rejects(free.svc.addMedia('f', fb.id, { name: 'v.mp4', data: mp4(), scope }), (e: any) => e.status === 402 && e.code === 'VIDEO_PAID', 'videos need a paid plan, in the gallery and in the feed');
+  await assert.rejects(free.svc.setAgent('f', fb.id, { level: 'watch' }), (e: any) => e.code === 'UPGRADE_REQUIRED'); assert.equal((await free.svc.setAgent('f', fb.id, { level: 'off' })).level, 'off');
+  await assert.rejects(free.svc.saveSecrets('f', fb.id, 'mtn', { subscriptionKey: 'k', apiUser: '3f2b8c1e-aaaa-bbbb-cccc-1234567890ab', apiKey: 'x' }), (e: any) => e.code === 'UPGRADE_REQUIRED'); await assert.rejects(free.svc.requestPayment('f', fb.id, { phone: '0788123456', amount: 1000 }), (e: any) => e.code === 'UPGRADE_REQUIRED');
   assert.ok([...media.files.keys()].some((k) => k.endsWith(`${m1.id}.jpg`))); await svc.removeMedia('o', b.id, m1.id); assert.ok(![...media.files.keys()].some((k) => k.includes(m1.id)), 'the file is gone'); assert.equal((await svc.get('o', b.id)).coverId, undefined);
   const s = await svc.mediaFor(b.slug, (await svc.get('o', b.id)).media.find((m) => m.visible && m.kind === 'video')!.id); const range = await s!.open({ start: 2, end: 9 }); const chunks: Buffer[] = []; for await (const c of range.stream) chunks.push(c as Buffer); assert.equal(Buffer.concat(chunks).length, 8, 'a video can be read in parts, so it can be sought');
   const total = make(false); const t = await total.svc.create('o', { name: 'Big' }); for (let i = 0; i < 4; i++) await total.svc.addMedia('o', t.id, { name: `a${i}.mp4`, data: mp4(20 * 1048576) }).catch(() => undefined);
@@ -100,7 +104,7 @@ test('visitor messages: valid, limited, private to the owner; robots and hidden 
   assert.equal((await svc.enquiries('o', b.id)).length, 0);
   await assert.rejects(svc.submitEnquiry(b.slug, { name: 'Jean', contact: 'nope', message: 'Hi' }, 'v1'), /phone number or an email/); await assert.rejects(svc.submitEnquiry(b.slug, { contact: '0788111222', message: '  ' }, 'v1'), /Write your message/);
   assert.equal((await svc.submitEnquiry(b.slug, { name: 'Jean', contact: '0788111222', message: 'Do you deliver?' }, 'v1')).saved, true);
-  const [e] = await svc.enquiries('o', b.id); assert.deepEqual([e.name, e.contact, e.message, e.status], ['Jean', '0788111222', 'Do you deliver?', 'new']);
+  const [e] = await svc.enquiries('o', b.id); assert.deepEqual([e.name, e.contact, e.message, e.status], ['Jean', '250788111222', 'Do you deliver?', 'new']);
   assert.equal((await svc.setEnquiry('o', b.id, e.id, 'done')).status, 'done'); assert.equal((await svc.stats('o', b.id)).newMessages, 0);
   for (let i = 0; i < 4; i++) await svc.submitEnquiry(b.slug, { contact: 'a@b.rw', message: `m${i}` }, 'v1'); await assert.rejects(svc.submitEnquiry(b.slug, { contact: 'a@b.rw', message: 'again' }, 'v1'), (e2: any) => e2.status === 429);
   await svc.setPublished('o', b.id, false); await assert.rejects(svc.submitEnquiry(b.slug, { contact: 'a@b.rw', message: 'hi' }, 'v2'), (e3: any) => e3.status === 404);

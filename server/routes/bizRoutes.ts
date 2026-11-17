@@ -79,6 +79,10 @@ export function createBizRouter(): Router {
     res.type('image/svg+xml').setHeader('Cache-Control', 'public, max-age=3600');
     res.send(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" fill="${t.accent}"/><text x="256" y="300" font-family="Arial,Helvetica,sans-serif" font-size="210" font-weight="700" text-anchor="middle" fill="${t.on}">${ini || 'B'}</text></svg>`);
   }));
+  r.get('/public/:slug/posts', run(async (req, res) => { res.setHeader('Cache-Control', 'private, no-cache'); res.json({ posts: await svc().publicPosts(req.params.slug, { limit: Number(req.query.limit) || 20, postId: typeof req.query.post === 'string' ? req.query.post : undefined, visitor: who(req) }) }); }));
+  r.post('/public/:slug/posts/:pid/like', run(async (req, res) => res.json(await svc().like(req.params.slug, req.params.pid, who(req)))));
+  r.get('/public/:slug/posts/:pid/comments', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json({ comments: await svc().publicComments(req.params.slug, req.params.pid) }); }));
+  r.post('/public/:slug/posts/:pid/comments', run(async (req, res) => res.status(201).json({ comment: await svc().addComment(req.params.slug, req.params.pid, req.body ?? {}, who(req)) })));
   r.post('/public/:slug/track', run(async (req, res) => { const k = ['whatsapp', 'call', 'share'].includes(String(req.body?.kind)) ? req.body.kind : null; if (!k) return res.status(400).json({ error: 'Unknown kind.' }); res.json({ ok: await svc().track(req.params.slug, k, who(req)) }); }));
   r.post('/public/:slug/enquiry', run(async (req, res) => { const out = await svc().submitEnquiry(req.params.slug, req.body ?? {}, who(req)); res.status(out.saved ? 201 : 200).json({ ok: true }); }));
   r.post('/public/:slug/order', run(async (req, res) => { const out = await svc().submitOrder(req.params.slug, req.body ?? {}, who(req)); res.status(out.saved ? 201 : 200).json({ ok: true, total: out.total }); }));
@@ -95,8 +99,13 @@ export function createBizRouter(): Router {
   /* ------------------------------------------------------------ owner */
   r.use(requireAuth);
   r.get('/mine', run(async (req, res) => {
-    const plan = await planFor(me(req)).catch(() => null); const paid = !!plan && plan.id !== 'FREE';
-    res.json({ businesses: await svc().list(me(req)), limits: paid ? PAID_LIMITS : FREE_LIMITS, plan: plan?.name ?? 'Free' });
+    const plan = await planFor(me(req)).catch(() => null); const paid = !!plan && plan.id !== 'FREE'; const { bizAllowed } = await import('../services/biz/runtime.js');
+    if (!(await bizAllowed(me(req)))) {
+      // Locked: the dashboard needs a paid plan. Say so, with the price from the plan table; show only the names of businesses already made.
+      const { PLANS } = await import('../services/billing/plans.js'); const list = await svc().list(me(req));
+      return res.json({ locked: true, businesses: list.map((b) => ({ id: b.id, name: b.name, slug: b.slug, published: b.published })), limits: FREE_LIMITS, plan: plan?.name ?? 'Free', upgrade: { plan: 'STARTER', name: PLANS.STARTER.name, priceRwf: PLANS.STARTER.priceRwf, priceNote: PLANS.STARTER.priceNote, url: '/upgrade' } });
+    }
+    res.json({ locked: false, paid, businesses: await svc().list(me(req)), limits: paid ? PAID_LIMITS : FREE_LIMITS, plan: plan?.name ?? 'Free', upgradeUrl: '/upgrade' });
   }));
   r.post('/', run(async (req, res) => res.status(201).json({ business: await svc().create(me(req), req.body ?? {}) })));
   r.get('/:id', run(async (req, res) => res.json({ business: await svc().get(me(req), req.params.id) })));
@@ -113,13 +122,20 @@ export function createBizRouter(): Router {
     next();
   }), run(async (req, res) => {
     const file = (req as any).file as { originalname: string; buffer: Buffer } | undefined; if (!file) return res.status(400).json({ error: 'Choose a photo or a video first.' });
-    res.status(201).json({ media: await svc().addMedia(me(req), req.params.id, { name: file.originalname, data: file.buffer, caption: req.body?.caption }) });
+    res.status(201).json({ media: await svc().addMedia(me(req), req.params.id, { name: file.originalname, data: file.buffer, caption: req.body?.caption, scope: req.body?.scope }) });
   }));
   r.patch('/:id/media/:mid', run(async (req, res) => res.json({ media: await svc().updateMedia(me(req), req.params.id, req.params.mid, req.body ?? {}) })));
   r.delete('/:id/media/:mid', run(async (req, res) => { await svc().removeMedia(me(req), req.params.id, req.params.mid); res.status(204).end(); }));
   r.get('/:id/media-urls', run(async (req, res) => { const b = await svc().get(me(req), req.params.id); res.json({ urls: Object.fromEntries(b.media.map((m) => [m.id, signedMediaUrl(b.id, m.id)])) }); }));
   r.get('/:id/preview', run(async (req, res) => { const b = await svc().get(me(req), req.params.id); res.json({ business: publicView(b), openNow: openNowFor(b.hours) }); }));
 
+  r.get('/:id/posts', run(async (req, res) => res.json({ posts: await svc().posts(me(req), req.params.id) })));
+  r.post('/:id/posts', run(async (req, res) => res.status(201).json({ post: await svc().addPost(me(req), req.params.id, req.body ?? {}) })));
+  r.patch('/:id/posts/:pid', run(async (req, res) => res.json({ post: await svc().setPost(me(req), req.params.id, req.params.pid, req.body ?? {}) })));
+  r.delete('/:id/posts/:pid', run(async (req, res) => { await svc().removePost(me(req), req.params.id, req.params.pid); res.status(204).end(); }));
+  r.get('/:id/posts/:pid/comments', run(async (req, res) => res.json({ comments: await svc().comments(me(req), req.params.id, req.params.pid) })));
+  r.post('/:id/posts/:pid/comments', run(async (req, res) => res.status(201).json({ comment: await svc().replyComment(me(req), req.params.id, req.params.pid, req.body?.text) })));
+  r.delete('/:id/comments/:cid', run(async (req, res) => { await svc().removeComment(me(req), req.params.id, req.params.cid); res.status(204).end(); }));
   r.get('/:id/enquiries', run(async (req, res) => res.json({ enquiries: await svc().enquiries(me(req), req.params.id) })));
   r.patch('/:id/enquiries/:eid', run(async (req, res) => res.json({ enquiry: await svc().setEnquiry(me(req), req.params.id, req.params.eid, req.body?.status) })));
   r.get('/:id/ledger', run(async (req, res) => res.json({ entries: await svc().ledger(me(req), req.params.id, { type: req.query.type === 'sale' || req.query.type === 'expense' ? req.query.type : undefined, days: Math.min(400, Math.max(0, Number(req.query.days) || 0)) || undefined }) })));

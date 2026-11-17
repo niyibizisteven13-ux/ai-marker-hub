@@ -18,3 +18,8 @@ export function Tag({ kind }: { kind: 'public' | 'private' }) {
 export const Title = ({ children, kind, hint }: { children: ReactNode; kind?: 'public' | 'private'; hint?: string }) => (
   <div className="mb-4"><div className="flex flex-wrap items-center gap-2"><h2 className="font-display text-lg font-semibold tracking-tight">{children}</h2>{kind && <Tag kind={kind} />}</div>{hint && <p className="mt-1 text-sm text-[var(--app-muted)]">{hint}</p>}</div>
 );
+
+/** Shown where a feature needs a paid plan (videos, the business agent, online payments). Photos, the page, the notebook and the feed stay free. */
+export const PaidNote = ({ what, url = '/upgrade' }: { what: string; url?: string }) => (
+  <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-[var(--brand)]/40 bg-[var(--brand)]/10 px-4 py-3 text-sm"><Lock size={16} className="shrink-0" aria-hidden="true" /><p className="min-w-0 flex-1"><b>{what}</b> {what.endsWith('s') ? 'are' : 'is'} for paid plans. Everything else here is free.</p><a href={url} className="rounded-xl bg-[var(--brand)] px-4 py-2 text-sm font-semibold text-[var(--brand-on)]">See plans</a></div>
+);

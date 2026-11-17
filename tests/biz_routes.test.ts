@@ -15,7 +15,7 @@ import { publicView } from '../server/services/biz/model.js';
 // bwenge4biz over HTTP: what a visitor can reach, what only the owner can, and video that can be played and sought.
 const data = new Map<string, unknown>();
 const kv: Kv = { async get<T>(k: string) { return (data.has(k) ? JSON.parse(JSON.stringify(data.get(k))) : null) as T | null; }, async put(k, v) { data.set(k, JSON.parse(JSON.stringify(v))); }, async del(k) { data.delete(k); } };
-setBizServiceForTests(createBizService({ kv, media: memoryMediaStore(), isPaid: async () => false }));
+setBizServiceForTests(createBizService({ kv, media: memoryMediaStore(), isPaid: async () => true }));
 const db = prisma as any;
 const mkUser = async (id: string) => { await db.user.create({ data: { id, email: `${id}@t.rw`, name: id, passwordHash: 'x', role: 'INSTRUCTOR' } }).catch(() => undefined); return jwt.sign({ userId: id, email: `${id}@t.rw`, role: 'user' }, getJwtSecret(), { algorithm: 'HS256', issuer: 'bwenge', audience: 'bwenge-web', expiresIn: '10m' }); };
 const app = express(); app.use(express.json()); app.use('/api/biz', createBizRouter());

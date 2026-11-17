@@ -1,4 +1,4 @@
-export type { Business, PublicBusiness, PublicMedia, Product, Media, Enquiry, DayStats, Hours, Day, Theme, Category } from '../../server/services/biz/model';
+export type { Post, PublicPost, Business, PublicBusiness, PublicMedia, Product, Media, Enquiry, DayStats, Hours, Day, Theme, Category } from '../../server/services/biz/model';
 export const CATEGORIES: Array<{ id: string; label: string }> = [
   { id: 'shop', label: 'Shop' }, { id: 'restaurant', label: 'Restaurant or café' }, { id: 'salon', label: 'Salon or barber' }, { id: 'farm', label: 'Farm' },
   { id: 'services', label: 'Services' }, { id: 'school', label: 'School or training' }, { id: 'health', label: 'Health' }, { id: 'transport', label: 'Transport' }, { id: 'craft', label: 'Crafts' }, { id: 'other', label: 'Other' },

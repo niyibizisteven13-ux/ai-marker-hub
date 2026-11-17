@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Camera, Bot, BellRing, ArrowDownRight, ArrowUpRight, Banknote, Check, Copy, Download, EyeOff, Globe, KeyRound, Loader2, Package, Plus, Receipt, Send, Share2, ShieldCheck, Smartphone, Sparkles, Trash2, TrendingUp, Users, Wallet, X, AlertTriangle, ShoppingBag, CircleCheck, Clock, Ban } from 'lucide-react';
+import { MessageCircle, Heart, Megaphone, ImagePlus, Lock, Camera, Bot, BellRing, ArrowDownRight, ArrowUpRight, Banknote, Check, Copy, Download, EyeOff, Globe, KeyRound, Loader2, Package, Plus, Receipt, Send, Share2, ShieldCheck, Smartphone, Sparkles, Trash2, TrendingUp, Users, Wallet, X, AlertTriangle, ShoppingBag, CircleCheck, Clock, Ban } from 'lucide-react';
 import { ownerApi, prepareImage } from '../../biz/api';
+import type { Mine } from '../../biz/api';
 import { pageUrl, rwf, type AgentSettings, type Business, type Dashboard, type LedgerEntry, type SecretsStatus } from '../../biz/types';
-import { btn, btnGhost, btnPrimary, card, input, msg, rwfShort, Tag, Title } from './ui';
+import { btn, btnGhost, btnPrimary, card, input, msg, PaidNote, rwfShort, Tag, Title } from './ui';
+import PostComposer from './PostComposer';
 
 type Go = (view: string) => void;
 const money = (n: number) => `RWF ${n.toLocaleString('en-US')}`;
@@ -221,7 +223,7 @@ export function ReportsView({ b }: { b: Business }) {
 }
 
 /* ------------------------------------------------------------------ secrets: payment keys, write-only */
-export function SecretsView({ b, secrets, reload }: { b: Business; secrets: SecretsStatus | null; reload: () => void }) {
+export function SecretsView({ b, secrets, reload, paid }: { b: Business; secrets: SecretsStatus | null; reload: () => void; paid: boolean }) {
   const [open, setOpen] = useState<'mtn' | 'airtel' | null>(null); const [vals, setVals] = useState<Record<string, string>>({}); const [env, setEnv] = useState('production'); const [busy, setBusy] = useState(''); const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   if (!secrets) return <Loader2 className="animate-spin text-[var(--brand)]" />;
   const NAME = { mtn: 'MTN MoMo', airtel: 'Airtel Money' } as const; const ENVS = { mtn: [['production', 'Live (real money)'], ['sandbox', 'Sandbox (testing)']], airtel: [['production', 'Live (real money)'], ['staging', 'Staging (testing)']] } as const;
@@ -231,6 +233,7 @@ export function SecretsView({ b, secrets, reload }: { b: Business; secrets: Secr
   return (
     <div className="space-y-5">
       <div><h1 className="font-display text-2xl font-semibold tracking-tight">Secrets and payments</h1><Tag kind="private" /></div>
+      {!paid && <PaidNote what="Online payments" />}
       <div className={`${card} flex gap-4`}><ShieldCheck className="mt-0.5 shrink-0 text-emerald-700" /><div className="text-sm leading-relaxed text-[var(--app-muted)]"><p className="font-semibold text-[var(--app-text)]">Your keys are write-only and encrypted.</p><p className="mt-1">Once you save them, nobody can read them back, not you, not Bwenge staff, and not the assistant. They are used only to ask MTN or Airtel to send a payment prompt to your customer's phone. Money goes straight to your own account; Bwenge never holds it. Never paste keys in the chat.</p></div></div>
 
       {(['mtn', 'airtel'] as const).map((p) => { const st = secrets[p]; return (
@@ -267,7 +270,7 @@ const LEVEL_INFO: Array<{ id: AgentSettings['level']; name: string; text: string
   { id: 'assist', name: 'Assist', text: 'Watches, and suggests changes you approve with one tap on Telegram.', can: ['Everything in Watch', 'Proposes: confirm an order, restock, mark out of stock, ask a customer to pay'], cannot: 'Nothing happens until you tap Do it.' },
   { id: 'run', name: 'Run', text: 'Assist, plus safe housekeeping done for you.', can: ['Everything in Assist', 'Settles payments MTN or Airtel say are paid', 'Marks messages as seen'], cannot: 'Still asks before anything that moves money or changes your page.' },
 ];
-export function AgentView({ b }: { b: Business }) {
+export function AgentView({ b, paid }: { b: Business; paid: boolean }) {
   const [a, setA] = useState<AgentSettings | null>(null); const [busy, setBusy] = useState(false); const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   useEffect(() => { void ownerApi.agent(b.id).then(setA).catch((e) => setNote({ ok: false, text: msg(e) })); }, [b.id]);
   const save = async (patch: Partial<AgentSettings>) => { if (!a) return; const prev = a; setA({ ...a, ...patch }); setBusy(true); setNote(null); try { setA(await ownerApi.setAgent(b.id, patch)); setNote({ ok: true, text: 'Saved.' }); } catch (e) { setA(prev); setNote({ ok: false, text: msg(e) }); } finally { setBusy(false); } };
@@ -276,6 +279,7 @@ export function AgentView({ b }: { b: Business }) {
   return (
     <div className="space-y-5">
       <div><h1 className="font-display text-2xl font-semibold tracking-tight">Business agent</h1><Tag kind="private" /></div>
+      {!paid && <PaidNote what="The business agent" />}
       <div className={`${card} flex gap-4`}><Bot className="mt-0.5 shrink-0 text-[var(--brand-strong,var(--brand))]" /><p className="text-sm leading-relaxed text-[var(--app-muted)]">Your Bwenge assistant can look after the business while you are away. It reads your real notebook and stock, and messages you on Telegram (or email, or here in the chat). <b className="text-[var(--app-text)]">It can never publish your page, delete anything, change prices, touch your payment keys, or send a payment request without your yes.</b></p></div>
       <div className="grid gap-3 sm:grid-cols-2">{LEVEL_INFO.map((l) => (
         <button key={l.id} type="button" aria-pressed={a.level === l.id} disabled={busy} onClick={() => void save({ level: l.id })} className={`rounded-2xl border p-4 text-left transition ${a.level === l.id ? 'border-[var(--brand)] bg-[var(--brand)]/10 ring-2 ring-[var(--brand)]/30' : 'border-[var(--app-line)] bg-[var(--app-panel)] hover:bg-[var(--app-panel-hover)]'}`}>
@@ -330,6 +334,85 @@ export function AgentChatView({ b, onChange }: { b: Business; onChange: () => vo
           <button type="submit" disabled={busy || !text.trim()} aria-label="Send" className={`${btnPrimary} !px-4`}>{busy ? <Loader2 size={17} className="animate-spin" /> : <Send size={17} />}</button>
         </form>
       </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ the dashboard needs a paid plan */
+export function LockedGate({ mine, onRefresh }: { mine: Mine; onRefresh: () => void }) {
+  const u = mine.upgrade; const names = mine.businesses.map((b) => b.name);
+  return (
+    <div className="mx-auto max-w-xl py-6">
+      <div className={`${card} text-center`}>
+        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--brand)]/15 text-[var(--brand-strong,var(--brand))]"><Lock size={26} aria-hidden="true" /></span>
+        <h1 className="mt-4 font-display text-2xl font-semibold tracking-tight">Unlock your business dashboard</h1>
+        <p className="mx-auto mt-2 max-w-md text-[15px] text-[var(--app-muted)]">{names.length ? <>Your page <b className="text-[var(--app-text)]">{names[0]}</b> is still visible to customers. To manage it again you need a plan.</> : 'Run your business here: a public page and link, a sales and expenses notebook, stock, customer orders, mobile-money payments, and an agent that looks after it all.'}</p>
+        <ul className="mx-auto mt-5 max-w-sm space-y-2 text-left text-sm">{['Public page with short link, QR code and feed', 'Sales, expenses, stock and customers', 'Customers order and pay by MTN or Airtel', 'Business agent: daily plan, alerts, one-tap approvals'].map((t) => <li key={t} className="flex gap-2"><Check size={16} className="mt-0.5 shrink-0 text-emerald-700" />{t}</li>)}</ul>
+        {u && <p className="mt-6 font-display text-3xl font-semibold">{u.priceRwf ? `${u.priceRwf.toLocaleString('en-US')} RWF` : u.name}<span className="ml-1.5 text-base font-normal text-[var(--app-muted)]">{u.priceNote}</span></p>}
+        {u && <p className="mt-1 text-xs text-[var(--app-muted)]">{u.name} plan or higher. It also gives you the Bwenge assistant credits.</p>}
+        <a href={u?.url ?? '/upgrade'} className={`${btnPrimary} mt-5 w-full`}>Choose a plan and pay</a>
+        <button type="button" onClick={onRefresh} className={`${btnGhost} mt-2.5 w-full`}>I have paid, check again</button>
+        <p className="mt-4 text-xs text-[var(--app-faint)]">Pay by mobile money from the upgrade page. Once your payment is confirmed this page unlocks by itself.</p>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ the public feed (Instagram-style) */
+const ago = (iso: string) => { const s = Math.max(1, Math.round((Date.now() - Date.parse(iso)) / 1000)); return s < 3600 ? `${Math.max(1, Math.round(s / 60))} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }); };
+type OwnerPost = import('../../biz/types').Post & { likes: number; comments: number };
+function OwnerPostCard({ b, p, urls, kinds, onChange, copy }: { b: Business; p: OwnerPost; urls: Record<string, string>; kinds: Record<string, 'image' | 'video'>; onChange: () => void; copy: (t: string, w: string) => void }) {
+  const [open, setOpen] = useState(false); const [list, setList] = useState<Array<{ id: string; name: string; text: string; at: string; owner?: boolean }> | null>(null); const [reply, setReply] = useState(''); const [err, setErr] = useState(''); const [edit, setEdit] = useState(false); const [cap, setCap] = useState(p.text);
+  const first = p.mediaIds[0]; const product = b.products.find((x) => x.id === p.productId);
+  const run = async (fn: () => Promise<unknown>) => { setErr(''); try { await fn(); onChange(); } catch (e) { setErr(msg(e)); } };
+  const loadC = () => { void ownerApi.postComments(b.id, p.id).then(setList).catch((e) => setErr(msg(e))); };
+  return (
+    <article className={`${card} !p-0 overflow-hidden`}>
+      <div className="grid sm:grid-cols-[180px_1fr]">
+        <div className="relative aspect-square bg-[var(--app-bg)] sm:aspect-auto">{first && urls[first] ? (kinds[first] === 'video' ? <video src={`${urls[first]}#t=0.1`} muted playsInline preload="metadata" className="h-full w-full object-cover" /> : <img src={urls[first]} alt="" className="h-full w-full object-cover" />) : <div className="flex h-full min-h-[120px] items-center justify-center p-4 text-center text-sm text-[var(--app-muted)]">{p.text.slice(0, 80) || 'Post'}</div>}
+          {p.mediaIds.length > 1 && <span className="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-[11px] text-white">1/{p.mediaIds.length}</span>}</div>
+        <div className="min-w-0 p-4">
+          <div className="flex items-center justify-between gap-2 text-xs text-[var(--app-muted)]"><span>{ago(p.at)}{p.pinned && <span className="ml-2 rounded-full bg-[var(--brand)]/20 px-2 py-0.5 font-semibold text-[var(--app-text)]">Pinned</span>}{product && <span className="ml-2 inline-flex items-center gap-1"><ShoppingBag size={12} />{product.name}</span>}</span></div>
+          {edit ? <div className="mt-2 space-y-2"><textarea className={input} rows={3} maxLength={1500} value={cap} onChange={(e) => setCap(e.target.value)} aria-label="Caption" /><div className="flex gap-2"><button type="button" className={`${btnPrimary} !min-h-9`} onClick={() => void run(async () => { await ownerApi.setPost(b.id, p.id, { text: cap }); setEdit(false); })}>Save</button><button type="button" className={`${btnGhost} !min-h-9`} onClick={() => { setEdit(false); setCap(p.text); }}>Cancel</button></div></div> : p.text ? <p className="mt-2 line-clamp-4 whitespace-pre-wrap text-[15px]">{p.text}</p> : null}
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-sm"><span className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-3 py-1.5 font-semibold text-rose-700"><Heart size={15} className="fill-rose-600 text-rose-600" />{p.likes}</span>
+            <button type="button" onClick={() => { const o = !open; setOpen(o); if (o && !list) loadC(); }} className="inline-flex items-center gap-1.5 rounded-full bg-[var(--app-bg)] px-3 py-1.5 font-semibold"><MessageCircle size={15} />{p.comments}</button></div>
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            <button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => void run(() => ownerApi.setPost(b.id, p.id, { pinned: !p.pinned }))}>{p.pinned ? 'Unpin' : 'Pin'}</button>
+            <button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => setEdit(true)}>Edit caption</button>
+            {b.products.length > 0 && <select aria-label="Tagged product" className={`${input} !w-auto !min-h-9 !py-1.5 text-xs`} value={p.productId ?? ''} onChange={(e) => void run(() => ownerApi.setPost(b.id, p.id, { productId: e.target.value }))}><option value="">No Order button</option>{b.products.filter((x) => !x.hidden).map((x) => <option key={x.id} value={x.id}>Order: {x.name}</option>)}</select>}
+            <button type="button" aria-label="Copy link to this post" className={`${btnGhost} !min-h-9 !px-2.5`} onClick={() => copy(`${pageUrl(b.slug)}?post=${p.id}#post-${p.id}`, 'Post link')}><Copy size={14} /></button>
+            <button type="button" aria-label="Delete post" className={`${btnGhost} !min-h-9 !px-2.5 text-rose-600`} onClick={() => { if (confirm('Delete this post with its photos, loves and comments?')) void run(() => ownerApi.removePost(b.id, p.id)); }}><Trash2 size={14} /></button></div>
+          {err && <p role="alert" className="mt-2 text-xs text-rose-600">{err}</p>}
+        </div>
+      </div>
+      {open && <div className="border-t border-[var(--app-line)] bg-[var(--app-bg)]/60 p-4">
+        {!list ? <Loader2 size={16} className="animate-spin" /> : !list.length ? <p className="text-sm text-[var(--app-muted)]">No comments yet.</p> : <ul className="space-y-2.5">{list.map((c) => <li key={c.id} className="flex items-start gap-2 text-sm"><p className="min-w-0 flex-1"><b>{c.name}</b>{c.owner && <span className="ml-1.5 rounded bg-[var(--brand)]/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase">You</span>} <span className="text-[var(--app-muted)]">{ago(c.at)}</span><br />{c.text}</p><button type="button" aria-label="Delete comment" className="text-[var(--app-faint)] hover:text-rose-600" onClick={() => void run(async () => { await ownerApi.removeComment(b.id, c.id); loadC(); })}><Trash2 size={14} /></button></li>)}</ul>}
+        <form className="mt-3 flex gap-2" onSubmit={(e) => { e.preventDefault(); if (!reply.trim()) return; void run(async () => { await ownerApi.replyComment(b.id, p.id, reply); setReply(''); loadC(); }); }}><input className={input} value={reply} maxLength={300} placeholder="Reply as your business…" aria-label="Reply" onChange={(e) => setReply(e.target.value)} /><button type="submit" disabled={!reply.trim()} className={btnPrimary}>Reply</button></form>
+      </div>}
+    </article>
+  );
+}
+
+export function FeedView({ b, onChange, canVideo }: { b: Business; onChange: () => void; canVideo: boolean }) {
+  const [posts, setPosts] = useState<OwnerPost[] | null>(null); const [urls, setUrls] = useState<Record<string, string>>({}); const [err, setErr] = useState(''); const [note, setNote] = useState(''); const [compose, setCompose] = useState(false); const link = `${pageUrl(b.slug)}#updates`;
+  const load = useCallback(() => { ownerApi.posts(b.id).then(setPosts).catch((e) => setErr(msg(e))); void ownerApi.mediaUrls(b.id).then(setUrls).catch(() => undefined); }, [b.id]);
+  useEffect(() => { load(); }, [load, b.updatedAt]);
+  const kinds = useMemo(() => Object.fromEntries(b.media.map((m) => [m.id, m.kind])) as Record<string, 'image' | 'video'>, [b.media]);
+  const copy = async (t: string, what: string) => { try { await navigator.clipboard.writeText(t); setNote(`${what} copied`); } catch { setNote('Copy it by hand'); } };
+  const total = (posts ?? []).reduce((a, p) => ({ likes: a.likes + p.likes, comments: a.comments + p.comments }), { likes: 0, comments: 0 });
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3"><div><h1 className="font-display text-2xl font-semibold tracking-tight">Feed</h1><Tag kind="public" /></div><button type="button" className={btnPrimary} onClick={() => setCompose(true)}><Plus size={16} />New post</button></div>
+      <div className="grid gap-3 sm:grid-cols-3">{[['Posts', posts?.length], ['Loves', total.likes], ['Comments', total.comments]].map(([l, v]) => <div key={l as string} className={`${card} !p-4`}><p className="text-xs text-[var(--app-muted)]">{l}</p><p className="font-display text-2xl font-semibold">{v ?? '…'}</p></div>)}</div>
+      <div className={card}><p className="text-sm text-[var(--app-muted)]">Posts appear on your public page under <b className="text-[var(--app-text)]">Updates</b> like Instagram: swipe photos, love, comment and <b className="text-[var(--app-text)]">Order</b>. Share the feed link so customers follow what is new.</p>
+        <p className="mt-3 break-all rounded-xl bg-[var(--app-bg)] px-4 py-3 font-mono text-[14px]">{link.replace(/^https?:\/\//, '')}</p>
+        <div className="mt-3 flex flex-wrap gap-2"><button type="button" className={btnGhost} onClick={() => void copy(link, 'Feed link')}><Copy size={15} />Copy feed link</button><a className={btnGhost} target="_blank" rel="noreferrer" href={`https://wa.me/?text=${encodeURIComponent(`${b.name}: what's new\n${link}`)}`}><Share2 size={15} />Share on WhatsApp</a><a className={btnGhost} target="_blank" rel="noreferrer" href={link}><Globe size={15} />Open</a></div>{note && <p role="status" className="mt-2 text-xs text-[var(--app-muted)]">{note}</p>}
+        {!b.published && <p className="mt-3 rounded-xl bg-amber-500/10 px-3 py-2 text-xs">Your page is not published yet, so nobody can see the feed. Publish it from the Dashboard.</p>}</div>
+      {err && <p role="alert" className="text-sm text-rose-600">{err}</p>}
+      <div className="space-y-4">{posts === null ? <Loader2 className="animate-spin text-[var(--brand)]" /> : !posts.length ? (
+        <div className={`${card} py-10 text-center`}><ImagePlus size={42} className="mx-auto text-[var(--app-muted)]" /><p className="mt-3 font-display text-lg font-semibold">Share your first post</p><p className="mx-auto mt-1 max-w-sm text-sm text-[var(--app-muted)]">A photo of today's best product works well. Tag the product so customers can order straight from the post.</p><button type="button" className={`${btnPrimary} mt-4`} onClick={() => setCompose(true)}><Plus size={16} />New post</button></div>
+      ) : [...posts].sort((a, c) => Number(!!c.pinned) - Number(!!a.pinned) || c.at.localeCompare(a.at)).map((p) => <OwnerPostCard key={p.id} b={b} p={p} urls={urls} kinds={kinds} onChange={() => { load(); onChange(); }} copy={(t, w) => void copy(t, w)} />)}</div>
+      {compose && <PostComposer canVideo={canVideo} b={b} onClose={() => setCompose(false)} onPosted={() => { load(); onChange(); }} />}
     </div>
   );
 }
