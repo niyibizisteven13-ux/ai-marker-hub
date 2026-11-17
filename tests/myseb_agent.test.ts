@@ -51,12 +51,13 @@ const NO_PG = !process.env.DATABASE_URL && 'needs PostgreSQL (DATABASE_URL); CI 
 const test = (name: string, fn: () => Promise<void>) => baseTest(name, { skip: NO_PG }, fn);
 const EXAM = randomUUID();
 const violationsOf: Record<string, string[]> = {};
-let reportEvents: any[] = []; let evidenceBy: Record<string, number> = {};
+let monitorDown = false; let reportEvents: any[] = []; let evidenceBy: Record<string, number> = {};
 let students: any[] = []; let examStatus = 'active'; const actions: string[] = [];
 const fake = http.createServer((req, res) => {
   let body = ''; req.on('data', (c) => { body += c; });
   req.on('end', () => {
     const json = (o: unknown) => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(o));
+    if (req.url?.startsWith(`/api/exams/${EXAM}/monitor`) && monitorDown) { res.writeHead(503).end('{"error":"down"}'); return; }
     if (req.url?.startsWith(`/api/exams/${EXAM}/monitor`)) return json({ exam: { title: 'Biology', status: examStatus }, counts: {}, students });
     if (req.url?.startsWith(`/api/exams/${EXAM}/report`)) return json({ exam: { title: 'Biology', status: examStatus }, students: students.map((x) => ({ ...x, id: x.id })), events: reportEvents });
     if (req.url?.startsWith(`/api/exams/${EXAM}/evidence`)) return req.url.includes('sessionId=') ? json({ items: [{ at: 'x', type: 'screenshot', frame: 'data:image/jpeg;base64,AA==', screen: null }] }) : json({ counts: evidenceBy });
@@ -272,4 +273,39 @@ test('the review queue: the lecturer decides, time can be given back, someone el
   const row = (await db.appSetting.findUnique({ where: { key: `myseb-review:form:${formId}` } })).value; assert.equal(row.items[ben.id].by, owner);
   assert.equal((await R.getEvidence(load, ben.id)).length, 1);
   await db.appSetting.deleteMany({ where: { key: `myseb-review:form:${formId}` } });
+});
+
+test('a restart does not repeat announcements or the connection-loss time', async () => {
+  const load = formTarget(owner, formId);
+  { const key = `myseb-agent:form:${formId}`; const cur = (await db.appSetting.findUnique({ where: { key } })).value; await db.appSetting.update({ where: { key }, data: { value: { ...cur, mem: undefined } } }); }   // a fresh test
+  A.__resetAgentMemoryForTests(); actions.length = 0; examStatus = 'active';
+  await A.setAgent(load, { on: true, level: 'run', dryRun: false, maxAddMinutes: 60 }, owner, { confirmedAutopilot: true });
+  const t0 = Date.now();
+  const mk = (i: number, gone: boolean) => person({ student_name: `R${i}`, status: gone ? 'LEFT' : 'IN_EXAM', pause_reason: null, violation_count: 0, seen_ago: gone ? 90 : 2, deadline_at: new Date(t0 + 30_000).toISOString() });
+  students = Array.from({ length: 8 }, (_, i) => mk(i, i < 4));
+  await A.runRoom(await rowOf(), t0);
+  const first = actions.length; assert.ok(first >= 2, 'the announcement and the extra time happened');
+  assert.ok((await rowOf()).mem.told.some((k: string) => /:ann1$/.test(k)), 'remembered in the database');
+  A.__resetAgentMemoryForTests();                       // the server restarted: memory is empty
+  await A.runRoom(await rowOf(), t0 + 10_000);
+  assert.equal(actions.length, first, 'nothing was said or added a second time');
+});
+
+test('the assistant never fails silently: repeated errors drop autopilot to watch mode and tell the lecturer; an unreachable test server is reported once', async () => {
+  const load = formTarget(owner, formId);
+  const told: string[] = []; A.__setAlertOwnerForTests(async (_r, entries) => { told.push(...entries.map((e) => e.text)); });
+  A.__resetAgentMemoryForTests(); actions.length = 0; examStatus = 'active'; students = [];
+  await A.setAgent(load, { on: true, level: 'run', dryRun: false }, owner, { confirmedAutopilot: true });
+  A.__injectFaultForTests(() => { throw new Error('boom'); });
+  for (let i = 0; i < 2; i++) { await A.runRoom(await rowOf(), Date.now()); assert.equal((await rowOf()).rules.level, 'run', 'two failures are tolerated'); }
+  await A.runRoom(await rowOf(), Date.now());
+  const row = await rowOf(); assert.equal(row.rules.level, 'watch'); assert.equal(row.rules.on, true, 'still watching');
+  assert.ok(row.log.some((e: any) => e.kind === 'stopped' && /switched to watch mode/.test(e.text))); assert.ok(told.some((t) => /watch mode/.test(t)));
+  A.__injectFaultForTests(null);
+  // MySEB cannot be reached
+  A.__resetAgentMemoryForTests(); told.length = 0; monitorDown = true;
+  for (let i = 0; i < 8; i++) await A.runRoom(await rowOf(), Date.now());
+  monitorDown = false;
+  assert.equal(told.filter((t) => /cannot reach the test server/.test(t)).length, 1, 'told once, not every ten seconds');
+  A.__setAlertOwnerForTests(async () => undefined);
 });

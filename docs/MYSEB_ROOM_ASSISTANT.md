@@ -43,3 +43,8 @@ Not yet: a model reading camera pictures; the apps do not show messages yet (bro
 - **Review queue** (live room → under the assistant; chat tool `live_room_review`): everyone with a serious signal, a test ended by a rule, 3+ signals, or a let-back-in, most serious first. Each shows what happened in order (including what the assistant did), the pictures, and the lecturer's decision: **Confirm**, **Dismiss**, **Dismiss and give 10 minutes** (lets a student ended by a rule back in even if their time ran out, while the test is still open), **Reopen**, with a note. The agent never decides this; decisions are in the audit log (`MYSEB_REVIEW`).
 - **Keep the test open for review:** Autopilot → "Keep it open after the last student" (2-120 minutes). After the test is closed nobody can be let back in.
 - Pictures exist only if camera pictures were on during the test; without them the queue shows the timeline only.
+
+## Never fails silently (autopilot v3, part 2)
+- **Survives a server restart:** announcements already made, student cards already shown, the last connection-loss incident and the quiet-time start are saved with the room, so a restart never repeats a message or adds time twice. (Serious-signal counts were already saved.)
+- **Falls back safely:** if the assistant itself fails 3 looks in a row, autopilot drops to **watch mode** (it only looks and tells you; any other level switches itself off), writes it in the room log and tells you on Telegram or email. You switch it back on yourself.
+- **Tells you when it is blind:** if the test server cannot be reached for about a minute (6 looks), you get one message that nobody is watching the room automatically.
