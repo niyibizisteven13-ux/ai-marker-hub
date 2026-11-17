@@ -35,3 +35,20 @@ Measured in headless Chrome (loopback, fake camera, a simulated full-HD screen):
 
 ## A relay (TURN) for students on mobile data
 Live video goes straight from each student to the lecturer. On home and campus Wi-Fi that works with only a STUN server. Students on mobile data (many carriers share one address between many phones) or behind strict school firewalls need a TURN relay, or their tile shows the small picture ("Picture only"). The live room warns the lecturer when the server has no relay. To set one up: run coturn with `use-auth-secret` and set `MYSEB_TURN_URLS` and `MYSEB_TURN_SECRET` (the same secret) in the server's environment (see myseb/docs/BWENGE.md). A relay carries every relayed student's video, so size it for the students it will carry: 500 students at the tiny level is about 20 Mbit/s in and 20 Mbit/s out.
+
+## Server size (measured)
+The video does not pass through your server: each student's picture goes straight to the lecturer. The server only carries small messages (joining, a heartbeat every 5 s, a live report every 3 s, the set-up messages for live video). `myseb/backend/scripts/loadtest.mjs` measures that part: it joins N students, has the lecturer ask them all to go live 6 at a time (offer, answer and 9 network candidates each way), then runs the steady traffic.
+
+Result on a 4-core, 16 GB machine (the same size class as a Hetzner CX33: 4 shared vCPU, 8 GB), exam server and PostgreSQL on the same machine:
+
+| Students | Requests/s | Exam server CPU | Memory | PostgreSQL CPU | Typical answer | Errors |
+|---|---|---|---|---|---|---|
+| 500 | 267 | 21% of one core (5% of the machine) | 213 MB | 1% of one core | 2-3 ms (room list 11 ms) | 0 |
+| 1,000 | 533 | 34% of one core (9% of the machine) | 278 MB | 4% of one core | 2-4 ms (room list 17 ms) | 0 |
+
+Starting 1,000 students live (1,000 offers, 18,000 network candidates, 1,000 requests to go live) took 60 s at the pace the live room uses, with every answer under 150 ms.
+
+Not measured, and worth knowing:
+- The website part of your server (bwenge: sign-in, the relay of each live report, the lecturer's requests, anything else running at the same time such as AI marking) sits in front of this. It adds work per request but the same small number of requests; watch `top` during the first big exam.
+- A **TURN relay** (coturn) on the same machine carries the video of every student who cannot connect directly (many on mobile data). For 500 students at the tiny level that is about 20 Mbit/s in and 20 Mbit/s out (about 9 GB per hour of exam sent); the lecturer you zoom in on adds 1 to 2.5 Mbit/s. That is small for a 1 Gbit/s port and for the 20 TB a month included in the EU locations (the US and Singapore locations include much less). Open UDP 3478 and the relay range, and TCP 5349/443. Shared vCPU plans can be slowed when the host is busy: check the "st" (steal) value in `top` during an exam.
+- Distance: from Rwanda to a European data centre the round trip is about 150-250 ms. That is fine for watching students, but a relay adds it to the video.
