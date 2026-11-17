@@ -143,6 +143,8 @@ test('launch_test: rules, assistant, code, student link and a ready WhatsApp mes
   assert.match(t, /Code: 482 910/);
   assert.match(t, /Link for students: https:\/\/www\.bwenge\.space\/myseb\/join\/482910/);
   assert.match(t, /https:\/\/wa\.me\/\?text=Join%20S4%20Biology%20midterm/);
+  assert.match(t, /Where students get the MySEB app .*: https:\/\/www\.bwenge\.space\/myseb\/download/);
+  assert.match(decodeURIComponent(t.match(/wa\.me\/\?text=(\S+)/)![1]), /Get the MySEB app .*https:\/\/www\.bwenge\.space\/myseb\/download/);
   assert.ok(calls.some((c) => c.startsWith('settings') && c.includes('"allowBrowsers":true') && c.includes('"ifStudentLeaves":"pause"')));
   assert.ok(calls.some((c) => c.startsWith('assistant') && c.includes('"on":true') && c.includes('"afterSeconds":20')));
   // not paid: nothing else is changed, and the steps are relayed

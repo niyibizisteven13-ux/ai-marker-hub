@@ -25,3 +25,15 @@ back to the screen; if the answer changed, a banner offers **Update** (a reload)
 
 Not done: update notices inside the MySEB desktop and phone apps. They carry no build number, so that needs a CI change (pass the build number into the apps) and
 a rebuild; and an update pop-up must never interrupt an exam.
+
+## When a lecturer opens a live test
+The message shared with students (live room → **Share on WhatsApp**, the chat's `launch_test` message, and the autopilot's "test is open" message to the lecturer)
+is built by `shared/mysebShare.ts` and now carries **where to get the MySEB app**: `https://<site>/myseb/download`, which picks the installer for the device
+that opens it. The live room also shows that link under the student link. Example:
+
+```
+Join S4 Biology midterm: https://www.bwenge.space/myseb/join/482910
+Code: 482 910
+Get the MySEB app (Windows, Android, Linux, Mac): https://www.bwenge.space/myseb/download
+On a laptop or an Android phone the link above opens MySEB. On an iPhone it starts in the browser.
+```

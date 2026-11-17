@@ -27,13 +27,20 @@ test('every kind of device is told apart (an iPad asking for the desktop site is
 
 test('downloads are counted per app and device, per day, and shown newest-total first', async () => {
   const day = Date.parse('2026-11-17T10:00:00Z');
+  // The test database keeps its data between runs, so compare with what was there before.
+  const before = await summary(day + 3600_000);
+  const was = (app: string, platform: string) => before.rows.find((r) => r.app === app && r.platform === platform) ?? { click: 0, installed: 0, last7: 0, last30: 0 };
+  const wasDay = before.days.find((x) => x.day === '2026-11-17')?.click ?? 0;
   await count('myseb', 'windows', 'click', day); await count('myseb', 'windows', 'click', day + 60_000); await count('myseb', 'windows', 'click', day - 3 * 86_400_000);
   await count('bwenge', 'android', 'click', day); await count('bwenge', 'android', 'installed', day);
   const s = await summary(day + 3600_000);
-  const w = s.rows.find((r) => r.app === 'myseb' && r.platform === 'windows')!; assert.deepEqual([w.click, w.installed, w.last7, w.last30], [3, 0, 3, 3]);
-  const a = s.rows.find((r) => r.app === 'bwenge' && r.platform === 'android')!; assert.deepEqual([a.click, a.installed], [1, 1]);
-  assert.equal(s.rows[0].app, 'myseb', 'the most downloaded is first'); assert.ok(s.total.click >= 4 && s.total.installed >= 1);
-  const d = s.days.find((x) => x.day === '2026-11-17')!; assert.equal(d.click, 3, 'two myseb + one bwenge on the day');
+  const w = s.rows.find((r) => r.app === 'myseb' && r.platform === 'windows')!, w0 = was('myseb', 'windows');
+  assert.deepEqual([w.click - w0.click, w.installed - w0.installed, w.last7 - w0.last7, w.last30 - w0.last30], [3, 0, 3, 3]);
+  const a = s.rows.find((r) => r.app === 'bwenge' && r.platform === 'android')!, a0 = was('bwenge', 'android');
+  assert.deepEqual([a.click - a0.click, a.installed - a0.installed], [1, 1]);
+  assert.deepEqual(s.rows.map((r) => r.click), [...s.rows.map((r) => r.click)].sort((x, y) => y - x), 'the most downloaded is first');
+  assert.equal(s.total.click - before.total.click, 4); assert.equal(s.total.installed - before.total.installed, 1);
+  assert.equal(s.days.find((x) => x.day === '2026-11-17')!.click - wasDay, 3, 'two myseb + one bwenge on the day');
 });
 
 test('the same person pressing twice within a minute is one download', () => {
