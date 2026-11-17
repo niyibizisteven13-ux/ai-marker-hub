@@ -58,6 +58,8 @@ import { createStorageRouter } from './server/routes/storageRoutes.js';
 import { StorageFullError, ensureStorage } from './server/services/billing/storage.js';
 import { explanationOf, gradeQuiz, quizRecord } from './server/services/forms/quiz.js';
 import { markSubmissionWithAi } from './server/services/forms/aiMarking.js';
+import { allowAi, chargeAi, AI_PRICE } from './server/services/billing/aiMeter.js';
+import { checkUsage as checkPlanUsage } from './server/services/billing/usage.js';
 import { normalizeAssessment } from './shared/assessment.js';
 import { uploadLimitBytes, uploadTooLargeMessage } from './server/services/billing/plans.js';
 import { outputsRouter, sharedOutputsRouter } from './server/routes/outputRoutes.js';
@@ -2062,7 +2064,9 @@ app.post('/api/forms/generate', requireAuth, async (req, res) => {
     const { intent } = req.body;
     const userId = (req as any).user?.userId;
     if (!userId) return res.status(401).json({ error: 'Authentication required.' });
+    if (!(await allowAi(res, userId, 'artifact'))) return;
     const form = await formOrchestrator.generateFormSchema(userId, intent);
+    void chargeAi(userId, { kind: 'artifact', input: String(intent ?? ''), output: JSON.stringify(form ?? '').length, minCredits: AI_PRICE.formFromDescription });
     res.json({ success: true, form });
   } catch (error: any) {
     respondError(res, error, 'Failed to generate form.');
@@ -2174,7 +2178,11 @@ app.post('/api/forms/:id/submit', publicFormSubmitLimiter, async (req, res) => {
       if (summary) await prisma.formSubmission.update({ where: { id: submission.id }, data: { data: JSON.stringify({ ...normalized, _exam: { ...(normalized._exam as object), ...summary } }) } as any }).catch(() => undefined);
     }
     // Written answers are marked by AI in the background when the lecturer chose that; the lecturer checks them in Results.
-    if (quiz && quiz.pending > 0 && normalizeAssessment(schema.assessment).aiMarking) void markSubmissionWithAi(prisma, submission.id, schema).catch((e) => logger.warn('AI marking failed', { errorType: (e as Error)?.name }));
+    if (quiz && quiz.pending > 0 && normalizeAssessment(schema.assessment).aiMarking) void markSubmissionWithAi(prisma, submission.id, schema, undefined, {
+      // The lecturer pays: when their credits are used up, the written answers wait for them (and for an upgrade) instead of being marked.
+      gate: async () => !!form.userId && !!(await checkPlanUsage(form.userId, { kind: 'marking' })).allowed,
+      charge: (n) => void chargeAi(form.userId, { kind: 'marking', minCredits: Math.max(1, n) * AI_PRICE.markOneWrittenAnswer }),
+    }).catch((e) => logger.warn('AI marking failed', { errorType: (e as Error)?.name }));
     const confirmationMessage = schema.confirmationMessage || 'Your response has been recorded.';
     const confirmationTitle = typeof schema.confirmationTitle === 'string' && schema.confirmationTitle.trim() ? schema.confirmationTitle.trim() : undefined;
     if (quiz) {
@@ -2678,7 +2686,10 @@ app.post('/api/ai/next-prompt', requireAuth, async (req, res) => {
   try {
     const userId = String((req as any).user?.userId ?? '');
     if (!userId) return res.status(401).json({ error: 'Authentication required.' });
-    // A suggestion comes with every answer, so it is capped (60 an hour) and costs the user no credits.
+    // A suggestion comes with every answer, so it is capped (60 an hour) and costs the paying user no credits.
+    // Suggestions are a paid feature (the Free plan's credits are for answers): no suggestion, and no cost, on Free.
+    const { planFor: planOf } = await import('./server/services/billing/plans.js');
+    if ((await planOf(userId).catch(() => null))?.id === 'FREE') return res.json({ suggestion: null });
     const now = Date.now(); const recent = (nextPromptUsed.get(userId) ?? []).filter((t) => now - t < 3_600_000);
     if (recent.length >= 60) return res.json({ suggestion: null });
     nextPromptUsed.set(userId, [...recent, now]); if (nextPromptUsed.size > 5000) nextPromptUsed.clear();
@@ -2692,6 +2703,8 @@ app.post('/api/ai/summarize', requireAuth, gradingLimiter, async (req, res) => {
   try {
     const { text } = req.body;
     if (!text) return res.status(400).json({ error: 'Text required' });
+    if (!(await allowAi(res, (req as any).user?.userId, 'tool'))) return;
+    void chargeAi((req as any).user.userId, { kind: 'tool', input: String(text), output: 300, minCredits: AI_PRICE.summary });
 
     const response = await aiService.generateContent({
       contents: `Summarize the following text into 1 concise, high-impact bullet point insight for academic study:\n\n"${text}"`,
@@ -2709,6 +2722,8 @@ app.post('/api/ai/translate', requireAuth, gradingLimiter, async (req, res) => {
   try {
     const { text, targetLanguage } = req.body;
     if (!text || !targetLanguage) return res.status(400).json({ error: 'Text and targetLanguage required' });
+    if (!(await allowAi(res, (req as any).user?.userId, 'tool'))) return;
+    void chargeAi((req as any).user.userId, { kind: 'tool', input: String(text), output: String(text), minCredits: AI_PRICE.translation });
 
     const response = await aiService.generateContent({
       contents: `Translate the following academic text accurately into ${targetLanguage}:\n\n"${text}"`,

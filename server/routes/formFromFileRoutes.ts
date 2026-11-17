@@ -4,6 +4,7 @@ import logger from '../utils/logger.js';
 import { AiService } from '../services/AiService.js';
 import { extractText } from '../services/ai/files/extract.js';
 import { createForm } from '../services/forms/service.js';
+import { allowAi, chargeAi, AI_PRICE } from '../services/billing/aiMeter.js';
 import { FromFileError, draftQuiz, type QuizAi } from '../services/forms/fromFile.js';
 
 /** The same model route the form generator uses; only the question-writing prompt differs. */
@@ -22,7 +23,15 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
  * Reads the lecturer's file, has the model draft questions from it, checks every one against the file, and saves a CLOSED
  * quiz in the form builder together with a review of what to check. Mounted behind requireAuth.
  */
-export function createFormFromFileRouter(deps: { ai?: QuizAi } = {}) {
+/** What the credits check and the charge do; tests replace them. */
+export interface FromFileMeter { allow: (res: Response, userId: string) => Promise<boolean>; charge: (userId: string, inputChars: number, outputChars: number) => void }
+const realMeter: FromFileMeter = {
+  allow: (res, userId) => allowAi(res, userId, 'artifact'),
+  charge: (userId, input, output) => void chargeAi(userId, { kind: 'artifact', input, output, minCredits: AI_PRICE.quizFromFile }),
+};
+
+export function createFormFromFileRouter(deps: { ai?: QuizAi; meter?: FromFileMeter } = {}) {
+  const meter = deps.meter ?? realMeter;
   const r = Router();
   const ai = deps.ai ?? defaultAi;
   // Drafting costs money, so only requests that actually reach the model count: a wrong file type or a scan costs nothing.
@@ -57,7 +66,9 @@ export function createFormFromFileRouter(deps: { ai?: QuizAi } = {}) {
         return res.status(422).json({ code: 'NO_TEXT', error: read.note?.includes('scan') ? 'This PDF is a scan with no text we can read. Upload a version with selectable text, or a Word file.' : (read.note || 'We could not read any text in this file.') });
       }
       if (!allow(String(userId))) return res.status(429).json({ code: 'RATE_LIMITED', error: 'You have made several quizzes from files in the last hour. Please wait a while and try again.' });
+      if (!(await meter.allow(res, String(userId)))) return;
       const draft = await draftQuiz({ text: read.text, fileName: name, options: { count: req.body?.count, kinds: req.body?.kinds, points: req.body?.points, longPoints: req.body?.longPoints, title: req.body?.title }, ai });
+      meter.charge(String(userId), read.text.length, JSON.stringify(draft.schema).length);
       const formId = await createForm(userId, { ...draft.schema, importReview: draft.review });
       res.status(201).json({ formId, review: draft.review });
     } catch (e) {

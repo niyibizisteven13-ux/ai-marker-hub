@@ -20,12 +20,13 @@ const REPLY = { title: 'Photosynthesis', questions: [
   { type: 'short', question: 'Which pigment makes leaves green?', answer: 'chlorophyll', sourceQuote: 'contain the green pigment chlorophyll' },
   { type: 'truefalse', question: 'Respiration happens only in animals.', answer: 'False', sourceQuote: 'It happens in all living cells' },
 ] };
+const charged: Array<{ userId: string; i: number; o: number }> = [];
 let calls = 0; let aiMode: 'ok' | 'fail' = 'ok';
 const ai = { json: async () => { calls++; if (aiMode === 'fail') throw new Error('down'); return REPLY; } };
 
 const app = express();
 app.use((req, _res, next) => { (req as any).user = { userId: req.get('x-user') || 'lect1' }; next(); });
-app.use('/api/forms/from-file', createFormFromFileRouter({ ai }));
+app.use('/api/forms/from-file', createFormFromFileRouter({ ai, meter: { allow: async (res, userId) => { if (userId === 'broke') { res.status(402).json({ code: 'UPGRADE_REQUIRED', error: 'Used up. Pro is 4,500 RWF.', upgrade: { plan: 'PRO', url: '/upgrade?reason=limit' } }); return false; } return true; }, charge: (userId, i, o) => { charged.push({ userId, i, o }); } } }));
 const srv = app.listen(0); const base = `http://127.0.0.1:${(srv.address() as any).port}/api/forms/from-file`;
 test.after(() => srv.close());
 
@@ -75,4 +76,13 @@ test('students can never see the review (it is on the private list of the public
   const list = src.slice(src.indexOf('const sanitizePublicFormSchema'), src.indexOf('const sanitizePublicFormSchema') + 900);
   assert.match(list, /'importreview'/); assert.match(list, /'explanation'/, 'an explanation is hidden from the public form until the student has submitted');
   assert.match(src, /explanationOf\(schema, x\.id\)/, 'and is sent only inside the student\'s own results');
+});
+
+test('a lecturer out of credits is asked to upgrade: no model call, no quiz made, nothing charged; a made quiz is charged once', async () => {
+  const before = calls; const chargedBefore = charged.length;
+  const r = await send('notes.txt', NOTES.join('\n'), { count: '3' }, 'broke');
+  assert.equal(r.status, 402); assert.equal(r.body.code, 'UPGRADE_REQUIRED'); assert.equal(r.body.upgrade.url, '/upgrade?reason=limit');
+  assert.equal(calls, before, 'the model was not asked'); assert.equal(charged.length, chargedBefore, 'no charge');
+  const ok = await send('notes.txt', NOTES.join('\n'), { count: '3' }, 'lect-paid');
+  assert.equal(ok.status, 201); assert.equal(charged.length, chargedBefore + 1); assert.equal(charged.at(-1)!.userId, 'lect-paid');
 });
