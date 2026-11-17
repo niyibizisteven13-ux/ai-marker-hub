@@ -3,6 +3,7 @@ import { auditAction } from './platform/audit.js';
 import { MySebError, evidenceCounts, evidenceOf, reinstate, report, type TargetLoader } from './mySeb.js';
 import { SERIOUS, ATTEMPTS, strikeScore } from './mySebAgent.js';
 import { reasonWords } from '../../src/utils/studentHelp.js';
+import { answerChecks, NO_CHECKS, type AnswerChecks } from './mySebAnswerChecks.js';
 
 /**
  * The review queue: everyone the room flagged, with what happened in order, the pictures kept at those moments (memory only on the
@@ -14,11 +15,11 @@ export type Decision = 'open' | 'confirmed' | 'dismissed';
 export interface StoredDecision { decision: Decision; note: string; at: string; by: string; gaveMinutes?: number }
 const NOT_RULE = new Set(['teacher', 'time_up', 'exam_ended', 'student', 'student_exit']);
 
-export interface TimelineItem { at: string; type: string; words: string; kind: 'serious' | 'attempt' | 'small' | 'lecturer' | 'assistant' }
+export interface TimelineItem { at: string; type: string; words: string; kind: 'serious' | 'attempt' | 'small' | 'lecturer' | 'assistant' | 'answers' }
 export interface ReviewItem {
   studentId: string; name: string; score: number; strikes: number; signals: number;
   ended: { reason: string; words: string } | null; reinstated: number;
-  timeline: TimelineItem[]; evidence: number; canRestore: boolean;
+  timeline: TimelineItem[]; evidence: number; canRestore: boolean; answerFlags: string[];
   decision: Decision; note: string; decidedAt?: string; gaveMinutes?: number;
 }
 
@@ -32,6 +33,7 @@ export function buildReview(
   decisions: Record<string, StoredDecision>,
   evidence: Record<string, number>,
   assistantLog: Array<{ at: string; kind: string; student?: string; text: string }> = [],
+  answers: AnswerChecks = NO_CHECKS,
 ): ReviewItem[] {
   const open = rep.exam?.status !== 'ended';
   const items: ReviewItem[] = [];
@@ -41,16 +43,18 @@ export function buildReview(
     const strikes = strikeScore(types);
     const endedByRule = s.status === 'ENDED' && s.end_reason && !NOT_RULE.has(s.end_reason);
     const signals = mine.filter((e) => e.type !== 'reinstated').length;
-    if (!strikes && !endedByRule && signals < 3 && !s.reinstated_count) continue;
+    const answerFlags = (answers.byStudent[s.id] ?? []).map((f) => f.message);
+    if (!strikes && !endedByRule && signals < 3 && !s.reinstated_count && !answerFlags.length) continue;
     const timeline: TimelineItem[] = mine.map((e) => ({ at: e.created_at, type: e.type, words: words(e.type), kind: e.type === 'reinstated' ? 'lecturer' : kindOf(e.type) }));
     for (const a of assistantLog) if (a.student === s.student_name && ['warned', 'resumed', 'ended'].includes(a.kind)) timeline.push({ at: a.at, type: a.kind, words: a.text, kind: 'assistant' });
+    for (const f of answers.byStudent[s.id] ?? []) timeline.push({ at: s.ended_at ?? s.started_at ?? new Date().toISOString(), type: f.code, words: `Answer check: ${f.message}`, kind: 'answers' });
     timeline.sort((a, b) => a.at.localeCompare(b.at));
     const d = decisions[s.id];
-    const score = (endedByRule ? 3 : 0) + Math.min(signals, 6) + strikes * 2 + (s.reinstated_count ? 1 : 0);
+    const score = (endedByRule ? 3 : 0) + Math.min(signals, 6) + strikes * 2 + (s.reinstated_count ? 1 : 0) + answerFlags.length * 2;
     items.push({
       studentId: s.id, name: s.student_name, score, strikes, signals,
       ended: endedByRule ? { reason: s.end_reason, words: reasonWords(s.end_reason) || s.end_reason } : null, reinstated: s.reinstated_count ?? 0,
-      timeline, evidence: evidence[s.id] ?? 0,
+      timeline, evidence: evidence[s.id] ?? 0, answerFlags,
       canRestore: !!endedByRule && (open || (s.deadline_at && Date.parse(s.deadline_at) > Date.now())),
       decision: d?.decision ?? 'open', note: d?.note ?? '', decidedAt: d?.at, gaveMinutes: d?.gaveMinutes,
     });
@@ -74,8 +78,9 @@ async function writeDecisions(kind: string, ref: string, items: Record<string, S
 export async function getReview(load: TargetLoader, assistantLog: Parameters<typeof buildReview>[3] = []) {
   const t = await load(); const kind = t.kind === 'form' ? 'form' : 'task';
   const [rep, decisions, counts] = await Promise.all([report(load) as Promise<any>, readDecisions(kind, t.ref), evidenceCounts(load).catch(() => ({}))]);
-  const items = buildReview(rep, decisions, counts, assistantLog);
-  return { items, open: items.filter((i) => i.decision === 'open').length, total: items.length, testOpen: rep.exam?.status !== 'ended' };
+  const answers = await answerChecks(load, rep.students ?? []).catch(() => NO_CHECKS);
+  const items = buildReview(rep, decisions, counts, assistantLog, answers);
+  return { items, open: items.filter((i) => i.decision === 'open').length, total: items.length, testOpen: rep.exam?.status !== 'ended', unmatchedAnswerFlags: answers.unmatched.slice(0, 20) };
 }
 
 /** The lecturer's decision. "dismissed" with giveMinutes also lets a student ended by a rule back in with that much time. */

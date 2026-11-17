@@ -74,15 +74,15 @@ function Sheet({ title, onClose, children, wide = false }: { title: string; onCl
 
 
 /* ------------------------------------------------------------------ review queue */
-interface ReviewItem { studentId: string; name: string; score: number; strikes: number; signals: number; ended: { reason: string; words: string } | null; reinstated: number; timeline: Array<{ at: string; type: string; words: string; kind: string }>; evidence: number; canRestore: boolean; decision: 'open' | 'confirmed' | 'dismissed'; note: string; decidedAt?: string; gaveMinutes?: number }
+interface ReviewItem { studentId: string; name: string; score: number; strikes: number; signals: number; ended: { reason: string; words: string } | null; reinstated: number; timeline: Array<{ at: string; type: string; words: string; kind: string }>; evidence: number; canRestore: boolean; answerFlags?: string[]; decision: 'open' | 'confirmed' | 'dismissed'; note: string; decidedAt?: string; gaveMinutes?: number }
 interface Evidence { at: string; type: string; frame: string | null; screen: string | null }
-const KIND_DOT: Record<string, string> = { serious: 'bg-rose-400', attempt: 'bg-amber-400', small: 'bg-slate-500', lecturer: 'bg-sky-400', assistant: 'bg-emerald-400' };
+const KIND_DOT: Record<string, string> = { serious: 'bg-rose-400', attempt: 'bg-amber-400', small: 'bg-slate-500', lecturer: 'bg-sky-400', assistant: 'bg-emerald-400', answers: 'bg-violet-400' };
 const localInput = (iso: string | null) => { if (!iso) return ''; const d = new Date(iso); return Number.isNaN(d.getTime()) ? '' : new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16); };
 const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string));
 const clock = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
 function ReviewQueue({ call, title, refreshKey }: { call: (path: string, method?: string, body?: unknown) => Promise<any>; title: string; refreshKey: string }) {
-  const [data, setData] = useState<{ items: ReviewItem[]; open: number; total: number; testOpen: boolean } | null>(null);
+  const [data, setData] = useState<{ items: ReviewItem[]; open: number; total: number; testOpen: boolean; unmatchedAnswerFlags?: Array<{ name: string; message: string }> } | null>(null);
   const [shown, setShown] = useState(false);
   const [openId, setOpenId] = useState('');
   const [pics, setPics] = useState<Record<string, Evidence[]>>({});
@@ -153,6 +153,9 @@ function ReviewQueue({ call, title, refreshKey }: { call: (path: string, method?
               </div>
             </li>
           ))}
+          {(data.unmatchedAnswerFlags?.length ?? 0) > 0 && (
+            <li className="py-3 text-sm"><p className="font-semibold">Answer checks with no clear student</p><p className="mt-1 text-xs text-slate-400">The name typed in the quiz did not match exactly one student in the room.</p><ul className="mt-2 space-y-1 text-slate-200">{data.unmatchedAnswerFlags!.map((u, i) => <li key={i}>{u.name}: {u.message}</li>)}</ul></li>
+          )}
           <li className="pt-3 text-xs text-slate-500">Pictures are only held in memory on the server for a few hours (and lost if it restarts): download what you need to keep. These are signals, not proof.</li>
         </ul>
       )}
