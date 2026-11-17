@@ -12,10 +12,13 @@ const CONTEXT = /(?<![\p{L}])(my|our|the|this|that|these|those|mine|mon|ma|mes|n
 // "Explain what a quiz is" style questions about the subject itself are not platform requests.
 const GENERAL = /^\s*(what is|what are|what's|define|explain|why do|why is|how does|how do (?:i|you) (?:study|prepare|revise)|tips? for|advice (?:on|for)|qu['’]est-ce qu(?:e|['’])|c['’]est quoi|ni iki(?![\p{L}]))/iu;
 
+// The owner's own business (bwenge4biz): recording sales and expenses, stock, orders, the page and feed, payment requests. English, French, Kinyarwanda.
+const BIZ = /(?<![\p{L}])(my (?:business|shop|store|boutique|stall|restaurant|salon|farm|dashboard)|business (?:page|dashboard|agent|feed|notebook)|bwenge4biz|(?:today |yesterday )?(?:i|we) (?:sold|made|spent|bought|paid for|earned)|sold \d|(?:record|add|log|enter) (?:an? |my |the |some )?(?:sale|sales|expense|expenses)|(?:how (?:much|is|are|was|were)|what(?:'s| is| are)) [^.?!]{0,30}(?:my|our|today'?s?) [^.?!]{0,25}(?:sales|business|profit|expenses|stock|orders)|(?:low|running out of|out of) stock|restock|(?:pending|new|customer) orders?|post (?:an? )?(?:update|photo|picture|offer|promotion) (?:on|to) (?:my |the )?(?:page|feed)|(?:ask|request) [\w .+-]{2,40} (?:to pay|for payment)|payment request (?:to|for)|publish my (?:page|shop|business)|close (?:the |my )?day|open (?:the |my )?(?:shop|day)|nacuruje|nagurishije|natanze|natumije|ubucuruzi bwanjye|iduka ryanjye|ibicuruzwa byanjye|j['’]ai (?:vendu|dépensé|acheté)|mon (?:commerce|entreprise)|ma boutique|mes ventes)/iu;
+
 export function needsPlatformTools(message: string): boolean {
   const text = message.trim();
   if (text.length < 6) return false;
-  if (STRONG.test(text)) return true;
+  if (STRONG.test(text) || BIZ.test(text)) return true;
   if (GENERAL.test(text) && !/\b(my|our|mine|mon|ma|mes|wanjye)\b/i.test(text)) return false;
   return NOUN.test(text) && CONTEXT.test(text);
 }

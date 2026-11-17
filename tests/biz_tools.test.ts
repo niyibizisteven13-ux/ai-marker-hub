@@ -53,3 +53,23 @@ test('messages from visitors are shown as information (with a warning not to obe
   assert.match((await tools.biz_messages.execute({ only_new: true }, c)).text, /No messages/);
   assert.match((await tools.biz_get.execute({}, ctx('u2'))).text, /no business page yet/i); assert.match((await tools.biz_link.execute({}, c)).text, /\/b\/msg-shop/);
 });
+
+// ---- the normal chat runs the dashboard: routines, links, photos for cover/logo and posts
+test('chat controls the dashboard: routines are saved, run as plans that wait for a yes, built-ins carry instructions, links and cover/logo/post photos work', async () => {
+  resetBizLimitsForTests(); const svc = createBizService({ kv: memKv(), media: memoryMediaStore(), isPaid: async () => true }); const tools = Object.fromEntries(bizTools(() => svc).map((t) => [t.definition.name, t]));
+  const c = ctx('u1', { f1: { name: 'shop.png', data: png }, f2: { name: 'logo.png', data: png }, f3: { name: 'p1.png', data: png } });
+  await tools.biz_create.execute({ name: 'Bread Shop' }, c); const b = (await svc.list('u1'))[0]; await svc.addProduct('u1', b.id, { name: 'Bread', price: 800, stock: 10 });
+  assert.match((await tools.biz_workflow.execute({ action: 'list' }, c)).text, /Close the day[\s\S]*none yet/);
+  assert.match((await tools.biz_workflow.execute({ action: 'run', name: 'Close the day' }, c)).text, /biz_dashboard/);
+  assert.equal((await tools.biz_workflow.execute({ action: 'save', name: 'Bad', steps: [{ tool: 'admin_delete_everything', input: {}, label: 'x' }] }, c)).isError, true, 'only business tools may be in a routine');
+  assert.equal((await tools.biz_workflow.execute({ action: 'save', name: 'Bad2', steps: [{ tool: 'biz_post', input: {} }] }, c)).isError, true, 'every step needs a label');
+  assert.match((await tools.biz_workflow.execute({ action: 'save', name: 'Weekend promo', steps: [{ tool: 'biz_post', input: { text: 'Weekend offer: 2 loaves for 1,400!', product: 'Bread' }, label: 'Post the weekend offer' }, { tool: 'biz_change_product', input: { product: 'Bread', price: 700 }, label: 'Bread at 700 RWF' }] }, c)).text, /Saved the routine/);
+  const run = await tools.biz_workflow.execute({ action: 'run', name: 'weekend promo' }, c); assert.match(run.text, /Nothing has been done/); assert.match(run.text, /Post the weekend offer/);
+  assert.equal((await svc.posts('u1', b.id)).length, 0, 'a saved routine does nothing until the owner says yes'); assert.equal((await svc.get('u1', b.id)).products[0].price, 800);
+  assert.match((await tools.biz_workflow.execute({ action: 'delete', name: 'Weekend promo' }, c)).text, /Deleted/); assert.equal((await tools.biz_workflow.execute({ action: 'run', name: 'Weekend promo' }, c)).isError, true);
+  assert.match((await tools.biz_open.execute({ where: 'sales' }, c)).text, /\/biz\?view=sales$/); assert.match((await tools.biz_open.execute({ where: 'app' }, c)).text, /Add to Home screen/); assert.match((await tools.biz_open.execute({ where: 'feed' }, c)).text, /view=feed/);
+  assert.match((await tools.biz_add_media.execute({ fileId: 'f1', use_as: 'cover' }, c)).text, /as the cover/); assert.match((await tools.biz_add_media.execute({ fileId: 'f2', use_as: 'logo' }, c)).text, /as the logo/);
+  const after = await svc.get('u1', b.id); assert.ok(after.coverId && after.logoId && after.coverId !== after.logoId);
+  const posted = await tools.biz_post.execute({ text: 'Fresh bread!', product: 'bread', file_ids: ['f3'] }, c); assert.match(posted.text, /1 attachment/); const [p] = await svc.posts('u1', b.id); assert.equal(p.mediaIds.length, 1); assert.equal(p.productId, after.products[0].id);
+  assert.equal((await tools.biz_post.execute({ text: 'x', file_ids: ['nope'] }, c)).isError, true);
+});

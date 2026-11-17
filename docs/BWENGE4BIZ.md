@@ -22,6 +22,13 @@ sees a private side the public never sees. Photos and short videos the owner add
 ## Money notebook (private)
 Sales and expenses are kept per business (`biz-ledger:<id>`, newest first, up to 5,000 entries), never part of `publicView`. A completed sale of a product with a stock count lowers the stock; cancelling gives it back; a product that reaches zero is marked out of stock on the page. Pending orders from the page are not income until confirmed or paid.
 
+## Running the dashboard from the normal Bwenge chat
+The ordinary chat can do everything the dashboard does (`biz_*` tools). Business messages now route to the tool-using assistant (`server/services/ai/platformIntent.ts`: "today I sold…", "how are my sales", "restock", "post an update to my page", "ask 0788… to pay", "close the day", and the French and Kinyarwanda equivalents; general questions such as "what is profit margin" stay on the cheap chat).
+* **Routines (`biz_workflow`)**: built in, *Open the day*, *Close the day*, *Weekly review* (the assistant carries them out with the read tools and proposes any change); the owner can save their own ("remember this as Weekend promo": steps limited to business tools), and a saved routine is shown as a plan and runs only on the owner's yes, with undo where possible.
+* **Plans may now contain business actions** (`biz_orders`, `biz_change_product`, `biz_stock`, `biz_post`, `biz_request_payment`, …); the same plan mechanism serves the business agent's suggestions, the one-tap order confirm on Telegram and saved routines.
+* **Photos by chat**: attach a photo and say "make this my logo/cover" (`biz_add_media use_as`) or "post this with the caption…" (`biz_post file_ids`, with an optional product tag for the Order button).
+* **Links (`biz_open`)** to any dashboard screen (`/biz?view=sales`, `feed`, `agent`, …), the page, and the installable app. "Update my app" means updating the page (name, colour, logo, products, hours): the installed app is the page, so it updates itself.
+
 ## The business agent
 The owner has a **dedicated Business Agent chat** inside the Studio (Ask the agent): one agent for one business, with only the `biz_*` tools (no general chat tools), a business-manager persona, and a photo button for sales books and receipts. It is separate from the general Bwenge chat (which can still do the same by tool). `POST /api/biz/:id/agent/chat` runs it, gated and charged like any assistant action.
 A standing helper (Studio → Business agent, or by chat: "turn on my business agent in assist mode"). It runs as the owner's assistant with a short, level-based tool list (`server/services/biz/agent.ts`):

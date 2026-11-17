@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { MediaError, maxBytesFor, sniff, type MediaStore } from './media.js';
-import { cleanAgent, type AgentSettings } from './agent.js';
+import { cleanAgent, cleanWorkflow, MAX_WORKFLOWS, type AgentSettings, type Workflow } from './agent.js';
 import { FIELDS, PROVIDERS, cleanSecrets, keyFrom, open as openSecret, seal, type Provider, type SecretsDoc } from './secrets.js';
 import { PayError, gatewayFor, maskPhone, msisdn, providerOf, realFetch, type Fetch, type Gateway } from './payments.js';
 import { MAX_ENTRIES, cleanEntry, summarize, type LedgerEntry } from './ledger.js';
@@ -155,7 +155,7 @@ export function createBizService(deps: Deps) {
       const b = await mine(ownerId, id);
       await deps.syncAgenda?.({ ...b, agent: undefined }).catch(() => undefined);
       await media.removeAll(b.id).catch(() => undefined);
-      await Promise.all([kv.del(`biz:${b.id}`), kv.del(`biz-slug:${b.slug}`), kv.del(`biz-enq:${b.id}`), kv.del(`biz-stats:${b.id}`), kv.del(`biz-ledger:${b.id}`), kv.del(`biz-secrets:${b.id}`), kv.del(`biz-posts:${b.id}`), kv.del(`biz-likes:${b.id}`), kv.del(`biz-comments:${b.id}`)]);
+      await Promise.all([kv.del(`biz:${b.id}`), kv.del(`biz-slug:${b.slug}`), kv.del(`biz-enq:${b.id}`), kv.del(`biz-stats:${b.id}`), kv.del(`biz-ledger:${b.id}`), kv.del(`biz-secrets:${b.id}`), kv.del(`biz-posts:${b.id}`), kv.del(`biz-likes:${b.id}`), kv.del(`biz-workflows:${b.id}`), kv.del(`biz-comments:${b.id}`)]);
       const ids = (await kv.get<{ ids: string[] }>(`biz-owner:${ownerId}`))?.ids ?? []; await kv.put(`biz-owner:${ownerId}`, { ids: ids.filter((x) => x !== b.id) });
       const all = (await kv.get<{ ids: string[] }>('biz-index'))?.ids ?? []; await kv.put('biz-index', { ids: all.filter((x) => x !== b.id) });
     },
@@ -324,6 +324,19 @@ export function createBizService(deps: Deps) {
       await kv.put(`biz-comments:${b.id}`, { items: doc.items.filter((c) => c.id !== commentId) });
     },
 
+    /* ------------------------------------------------------------ routines (workflows) the owner saves and runs by chat */
+    async workflows(ownerId: string, id: string): Promise<Workflow[]> { const b = await mine(ownerId, id); return (await kv.get<{ items: Workflow[] }>(`biz-workflows:${b.id}`))?.items ?? []; },
+    async saveWorkflow(ownerId: string, id: string, input: unknown): Promise<Workflow> {
+      const b = await mine(ownerId, id); const c = cleanWorkflow(input); if ('error' in c) throw new BizError(c.error);
+      const doc = (await kv.get<{ items: Workflow[] }>(`biz-workflows:${b.id}`)) ?? { items: [] }; const i = doc.items.findIndex((w) => w.name.toLowerCase() === c.name.toLowerCase());
+      if (i < 0 && doc.items.length >= MAX_WORKFLOWS) throw new BizError(`You can keep ${MAX_WORKFLOWS} routines. Delete one first.`);
+      const w: Workflow = { id: i >= 0 ? doc.items[i].id : randomUUID(), ...c, createdAt: i >= 0 ? doc.items[i].createdAt : iso() }; if (i >= 0) doc.items[i] = w; else doc.items.push(w);
+      await kv.put(`biz-workflows:${b.id}`, doc); return w;
+    },
+    async deleteWorkflow(ownerId: string, id: string, name: string): Promise<boolean> {
+      const b = await mine(ownerId, id); const doc = (await kv.get<{ items: Workflow[] }>(`biz-workflows:${b.id}`)) ?? { items: [] }; const n = doc.items.length;
+      doc.items = doc.items.filter((w) => w.name.toLowerCase() !== String(name).trim().toLowerCase() && w.id !== name); await kv.put(`biz-workflows:${b.id}`, doc); return doc.items.length < n;
+    },
     /* ------------------------------------------------------------ the business agent */
     async agent(ownerId: string, id: string): Promise<AgentSettings> { return cleanAgent(null, (await mine(ownerId, id)).agent); },
     async setAgent(ownerId: string, id: string, patch: unknown): Promise<AgentSettings> {
