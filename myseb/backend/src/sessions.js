@@ -1,3 +1,4 @@
+import { captureEvidence, sweepEvidence } from './evidence.js';
 import { q } from './db.js';
 import { config, sha } from './config.js';
 import { tokenHash } from './security.js';
@@ -64,6 +65,7 @@ export async function recordViolation(session, exam, type, detail = {}) {
   if (json.length > 2000) json = JSON.stringify({ truncated: json.slice(0, 1900) });
   await q('INSERT INTO violations (session_id, exam_id, type, detail) VALUES ($1,$2,$3,$4)', [session.id, session.exam_id, type, json]);
   await q('UPDATE exam_sessions SET violation_count = violation_count + 1 WHERE id = $1', [session.id]);
+  captureEvidence(session.id, session.exam_id, type);   // the pictures on the server right now (memory only), for the lecturer's review
   const strict = session.client_type === 'web' && exam.web_strict !== false;
   if (session.status === 'ENDED' || !LEAVE_LIKE.has(type) && type !== 'heartbeat_lost' && !(strict && (STRICT_END.has(type) || (type === 'multiple_faces' && exam.multi_face === 'end')))) { notify(session.exam_id, 'violation'); return; }
   let action = exam.leave_action;
@@ -109,7 +111,7 @@ export async function sweep() {
   }
   const timedOut = await q(`UPDATE exam_sessions SET status='ENDED', ended_at=now(), end_reason='time_up' WHERE status <> 'ENDED' AND deadline_at < now() RETURNING id, exam_id`);
   timedOut.rows.forEach((r) => { forgetLive(r.id); notify(r.exam_id, 'status'); });
-  sweepLive();
+  sweepLive(); sweepEvidence();
   sweepSignals();
   await q(`UPDATE exams SET status='ended', ends_at=COALESCE(ends_at, now()) WHERE status='active' AND ends_at IS NOT NULL AND ends_at < now()`);
 }

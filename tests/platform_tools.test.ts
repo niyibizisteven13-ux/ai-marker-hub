@@ -27,9 +27,13 @@ const services: ToolServices = {
     roomStudent: async (_u, _k, _i, sid, action) => { calls.push(`${action} ${sid}`); },
     roomAssistant: async (_u, _k, _i, patch) => {
       if (patch) calls.push(`assistant ${JSON.stringify(patch)}`);
-      return { rules: { on: patch?.on ?? false, autoResume: true, afterSeconds: patch?.afterSeconds ?? 30, maxResumes: patch?.maxResumes ?? 2, endAfterMax: !!patch?.endAfterMax, level: patch?.level ?? 'assist', dryRun: !!patch?.dryRun, maxAddMinutes: patch?.maxAddMinutes ?? 15, maxRoomPauses: patch?.maxRoomPauses ?? 2, serious: patch?.serious ?? 'flag', seriousStrikes: patch?.seriousStrikes ?? 2, autoClose: patch?.autoClose ?? true }, usage: { roomPauses: 1, addedMinutes: 5, notices: 2 }, resumed: 3, log: [{ at: '2026-11-16T09:10:00Z', kind: 'resumed', student: 'Cora Mutesi', text: 'Let back in: switched window (1 of 2).' }, { at: '2026-11-16T09:12:00Z', kind: 'needs_you', student: 'Ben Habimana', text: 'more than one face: only you can decide this' }] };
+      return { rules: { on: patch?.on ?? false, autoResume: true, afterSeconds: patch?.afterSeconds ?? 30, maxResumes: patch?.maxResumes ?? 2, endAfterMax: !!patch?.endAfterMax, level: patch?.level ?? 'assist', dryRun: !!patch?.dryRun, maxAddMinutes: patch?.maxAddMinutes ?? 15, maxRoomPauses: patch?.maxRoomPauses ?? 2, serious: patch?.serious ?? 'flag', seriousStrikes: patch?.seriousStrikes ?? 2, autoClose: patch?.autoClose ?? true, closeAfterMinutes: patch?.closeAfterMinutes ?? 2 }, usage: { roomPauses: 1, addedMinutes: 5, notices: 2 }, resumed: 3, log: [{ at: '2026-11-16T09:10:00Z', kind: 'resumed', student: 'Cora Mutesi', text: 'Let back in: switched window (1 of 2).' }, { at: '2026-11-16T09:12:00Z', kind: 'needs_you', student: 'Ben Habimana', text: 'more than one face: only you can decide this' }] };
     },
     roomAction: async (_u, _k, _i, a) => { calls.push(`room ${JSON.stringify(a)}`); return a.action === 'add_time' && (a.minutes ?? 0) > 60 ? { ok: false, text: 'Time can be added in whole minutes, 1 to 60 at a time.' } : { ok: true, text: `Done: ${a.action}` }; },
+    roomReview: async (_u, _k, _i, decide) => {
+      if (decide) calls.push(`review ${JSON.stringify(decide)}`);
+      return { items: [{ studentId: 's2', name: 'Ben Habimana', score: 9, strikes: 2, signals: 4, ended: { words: 'tried a screenshot' }, timeline: [{ at: '2026-11-16T09:01:00Z', words: 'tried a screenshot', kind: 'serious' }, { at: '2026-11-16T09:02:00Z', words: 'Warning sent', kind: 'assistant' }], evidence: 2, canRestore: true, decision: decide ? decide.decision : 'open', note: decide?.note ?? '' }], open: decide ? 0 : 1, total: 1, testOpen: true, ...(decide?.giveMinutes ? { decided: { gaveMinutes: decide.giveMinutes } } : {}) };
+    },
     roomViolations: async (_u, _k, _i, sid) => (sid === 's2' ? [{ type: 'visibility_hidden', created_at: '2026-11-16T09:01:00Z' }, { type: 'visibility_hidden', created_at: '2026-11-16T09:02:00Z' }] : [{ type: 'blur', created_at: '2026-11-16T09:03:00Z' }]),
     roomSavedAnswers: async () => ({ student: 'Ben Habimana', saved_at: '2026-11-16T09:05:00Z', labels: { q1: 'What makes energy?' }, answers: { q1: 'Mitochondria', q9: ['a', 'b'] } }),
     courses: async () => [{ id: 'c1', name: 'S4 Biology', code: 'BIO4', term: 'Term 1', students: 30, items: 3 }],
@@ -51,7 +55,7 @@ const ctx = { userId: 'teacher' } as any;
 
 test('without the platform services there are no platform tools', () => {
   assert.equal(platformTools({}).length, 0);
-  assert.deepEqual(Object.keys(tools).sort(), ['course_overview', 'launch_test', 'list_courses', 'list_live_rooms', 'list_marked_exams', 'live_room_action', 'live_room_code', 'live_room_saved_answers', 'live_room_settings', 'live_room_status', 'live_room_student', 'room_assistant', 'test_debrief']);
+  assert.deepEqual(Object.keys(tools).sort(), ['course_overview', 'launch_test', 'list_courses', 'list_live_rooms', 'list_marked_exams', 'live_room_action', 'live_room_code', 'live_room_review', 'live_room_saved_answers', 'live_room_settings', 'live_room_status', 'live_room_student', 'room_assistant', 'test_debrief']);
 });
 
 test('the live room in plain words: who is away, who was disqualified and why, cards waiting, looked aside', async () => {
@@ -184,4 +188,14 @@ test('room_assistant: autopilot passes its policy and the lecturer\'s confirmati
   assert.ok(calls.some((c) => c.startsWith('assistant') && c.includes('"level":"run"') && c.includes('"serious":"end"') && c.includes('"confirmedAutopilot":true')));
   assert.match(set, /AUTOPILOT: runs the test without the lecturer/); assert.match(set, /the test ends after 2 strikes, with a warning first/);
   assert.match(set, /cannot guarantee that nobody cheats/);
+});
+
+test('live_room_review: lists the flagged with their timeline; a decision (and time given back) is passed on and recorded; it says signals are not proof', async () => {
+  calls.length = 0;
+  const list = (await tools.live_room_review.execute({ kind: 'form', id: 'f1' }, ctx)).text;
+  assert.match(list, /1 of 1 flagged student still need a decision/); assert.match(list, /Ben Habimana: OPEN, test ended \(tried a screenshot\), 4 signals, 2 serious, 2 pictures kept, can be let back in/);
+  assert.match(list, /09:01 tried a screenshot > 09:02 Warning sent/); assert.match(list, /signals, not proof/); assert.equal(calls.length, 0, 'listing changes nothing');
+  const done = (await tools.live_room_review.execute({ kind: 'form', id: 'f1', studentId: 's2', decision: 'dismissed', giveMinutes: 10, note: 'phone call from the head' }, ctx)).text;
+  assert.match(done, /Recorded: dismissed, and 10 minutes given back/);
+  assert.ok(calls.some((c) => c.startsWith('review') && c.includes('"giveMinutes":10') && c.includes('dismissed')));
 });

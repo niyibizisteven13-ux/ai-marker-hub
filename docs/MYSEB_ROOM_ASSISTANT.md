@@ -37,3 +37,9 @@ Everything is in the room log and the audit log (`MYSEB_AGENT_*`).
 ### What it cannot do
 It **reduces cheating, it cannot guarantee that nobody cheats.** MySEB cannot see a phone out of view, a second person off camera, or answers passed by voice. Browser tests (especially on phones) are weaker than the app. Treat the report as a list of people to look at, never as proof. Marks are not changed and results are not released by the agent.
 Not yet: a model reading camera pictures; the apps do not show messages yet (browser tests do).
+
+## Review queue and evidence (autopilot v3, part 1)
+- **Evidence:** when a rule is broken and camera/screen pictures are on, the MySEB server keeps the pictures it holds at that moment (up to 6 per student: the first and the newest). **Memory only**, like every picture here: capped (`MYSEB_MAX_EVIDENCE_MB`, default 100), forgotten after 12 hours or at a restart. The lecturer downloads what they need ("Download evidence": one page with the timeline and the pictures).
+- **Review queue** (live room → under the assistant; chat tool `live_room_review`): everyone with a serious signal, a test ended by a rule, 3+ signals, or a let-back-in, most serious first. Each shows what happened in order (including what the assistant did), the pictures, and the lecturer's decision: **Confirm**, **Dismiss**, **Dismiss and give 10 minutes** (lets a student ended by a rule back in even if their time ran out, while the test is still open), **Reopen**, with a note. The agent never decides this; decisions are in the audit log (`MYSEB_REVIEW`).
+- **Keep the test open for review:** Autopilot → "Keep it open after the last student" (2-120 minutes). After the test is closed nobody can be let back in.
+- Pictures exist only if camera pictures were on during the test; without them the queue shows the timeline only.

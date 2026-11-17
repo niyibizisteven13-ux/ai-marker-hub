@@ -18,7 +18,7 @@ interface Student {
   live: { question: { index: number | null; total: number | null; label: string } | null; camera: string; screen_state?: string; frame: string | null; frame_age: number | null; screen?: string | null; screen_age?: number | null } | null;
 }
 interface Room { exam: { title: string; status: string; live_faces: boolean; live_mode?: 'off' | 'pictures' | 'live'; live_sound?: boolean; live_source?: Source; leave_action?: string; allow_web?: boolean; web_strict?: boolean; multi_face?: 'off' | 'warn' | 'end'; id_check?: boolean; web_devices?: 'any' | 'ios' }; counts: Record<Status, number>; students: Student[] }
-interface AgentView { rules: { on: boolean; autoResume: boolean; afterSeconds: number; maxResumes: number; endAfterMax: boolean; level: 'watch' | 'assist' | 'run'; dryRun: boolean; maxAddMinutes: number; maxRoomPauses: number; serious: 'flag' | 'end'; seriousStrikes: number; autoClose: boolean }; report?: { at: string; text: string }; usage: { roomPauses: number; addedMinutes: number; notices: number }; resumed: number; log: Array<{ at: string; kind: string; student?: string; text: string }> }
+interface AgentView { rules: { on: boolean; autoResume: boolean; afterSeconds: number; maxResumes: number; endAfterMax: boolean; level: 'watch' | 'assist' | 'run'; dryRun: boolean; maxAddMinutes: number; maxRoomPauses: number; serious: 'flag' | 'end'; seriousStrikes: number; autoClose: boolean; closeAfterMinutes: number }; report?: { at: string; text: string }; usage: { roomPauses: number; addedMinutes: number; notices: number }; resumed: number; log: Array<{ at: string; kind: string; student?: string; text: string }> }
 interface Code { display: string; qrSvg: string; expiresAt: string; joinUrl?: string }
 
 const LABEL: Record<Status, string> = { IN_EXAM: 'In the test', PAUSED: 'Paused', LEFT: 'Left', ENDED: 'Finished' };
@@ -69,6 +69,94 @@ function Sheet({ title, onClose, children, wide = false }: { title: string; onCl
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 pb-[max(1rem,env(safe-area-inset-bottom))]">{children}</div>
       </div>
     </div>
+  );
+}
+
+
+/* ------------------------------------------------------------------ review queue */
+interface ReviewItem { studentId: string; name: string; score: number; strikes: number; signals: number; ended: { reason: string; words: string } | null; reinstated: number; timeline: Array<{ at: string; type: string; words: string; kind: string }>; evidence: number; canRestore: boolean; decision: 'open' | 'confirmed' | 'dismissed'; note: string; decidedAt?: string; gaveMinutes?: number }
+interface Evidence { at: string; type: string; frame: string | null; screen: string | null }
+const KIND_DOT: Record<string, string> = { serious: 'bg-rose-400', attempt: 'bg-amber-400', small: 'bg-slate-500', lecturer: 'bg-sky-400', assistant: 'bg-emerald-400' };
+const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string));
+const clock = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+function ReviewQueue({ call, title, refreshKey }: { call: (path: string, method?: string, body?: unknown) => Promise<any>; title: string; refreshKey: string }) {
+  const [data, setData] = useState<{ items: ReviewItem[]; open: number; total: number; testOpen: boolean } | null>(null);
+  const [shown, setShown] = useState(false);
+  const [openId, setOpenId] = useState('');
+  const [pics, setPics] = useState<Record<string, Evidence[]>>({});
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState('');
+  const [err, setErr] = useState('');
+  const load = useCallback(() => call('/review').then((b) => { setData(b.data); setErr(''); }).catch((e) => { setData(null); setErr(e instanceof Error ? e.message : 'Could not load the review queue.'); }), [call]);
+  useEffect(() => { void load(); }, [load, refreshKey, shown]);
+  const showPics = (id: string) => { setOpenId((c) => (c === id ? '' : id)); if (!pics[id]) call(`/evidence/${id}`).then((b) => setPics((c) => ({ ...c, [id]: b.data ?? [] }))).catch(() => setPics((c) => ({ ...c, [id]: [] }))); };
+  const decide = async (it: ReviewItem, decision: 'open' | 'confirmed' | 'dismissed', giveMinutes?: number) => {
+    if (giveMinutes && !confirm(`Let ${it.name} back in with ${giveMinutes} more minutes?`)) return;
+    setBusy(it.studentId + decision);
+    try { await call(`/review/${it.studentId}`, 'POST', { decision, note: notes[it.studentId] ?? it.note, ...(giveMinutes ? { giveMinutes } : {}) }); await load(); }
+    catch (e) { setErr(e instanceof Error ? e.message : 'Could not save.'); } finally { setBusy(''); }
+  };
+  // The lecturer keeps the evidence themselves: a single page with the timeline and the pictures (they are only held in memory on the server).
+  const download = async (it: ReviewItem) => {
+    const p = pics[it.studentId] ?? (await call(`/evidence/${it.studentId}`).then((b) => b.data as Evidence[]).catch(() => []));
+    const html = `<!doctype html><meta charset="utf-8"><title>${esc(it.name)}: evidence</title><body style="font:15px system-ui;max-width:760px;margin:24px auto;padding:0 12px"><h1>${esc(it.name)}: ${esc(title)}</h1><p>${it.signals} signals, ${it.strikes} serious. Decision: ${it.decision}${it.note ? ` (${esc(it.note)})` : ''}. These are signals, not proof.</p><ol>${it.timeline.map((t) => `<li>${esc(clock(t.at))} ${esc(t.words)}</li>`).join('')}</ol>${p.map((e) => `<h3>${esc(clock(e.at))}: ${esc(e.type)}</h3>${e.frame ? `<img src="${e.frame}" alt="camera" style="max-width:48%">` : ''}${e.screen ? `<img src="${e.screen}" alt="screen" style="max-width:48%">` : ''}`).join('')}</body>`;
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([html], { type: 'text/html' })); a.download = `evidence-${it.name.replace(/[^\w-]+/g, '_')}.html`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  };
+  if (!data && !err) return null;
+  return (
+    <section aria-label="Review queue" className="rounded-2xl border border-white/10 bg-slate-900 p-3 sm:p-4">
+      <button type="button" aria-expanded={shown} onClick={() => setShown((v) => !v)} className="flex w-full items-center gap-2.5 text-left">
+        <span className="min-w-0 flex-1"><span className="block text-sm font-bold">Review queue</span><span className="block text-xs text-slate-400">{data ? (data.total === 0 ? 'Nobody has been flagged.' : `${data.open} of ${data.total} flagged student${data.total === 1 ? '' : 's'} still need your decision`) : err}</span></span>
+        {data && data.open > 0 && <span className="rounded-full bg-amber-500 px-2 py-0.5 text-xs font-extrabold text-slate-950">{data.open}</span>}
+        <span aria-hidden className="text-slate-400">{shown ? '▴' : '▾'}</span>
+      </button>
+      {shown && data && (
+        <ul className="mt-3 divide-y divide-white/10 border-t border-white/10">
+          {data.items.length === 0 && <li className="py-3 text-sm text-slate-300">Nobody has been flagged. These are signals, not proof.</li>}
+          {data.items.map((it) => (
+            <li key={it.studentId} className="py-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="min-w-0 flex-1 text-sm font-semibold">{it.name} <span className="font-normal text-slate-400">· {it.signals} signal{it.signals === 1 ? '' : 's'}{it.strikes ? `, ${it.strikes} serious` : ''}{it.ended ? `, test ended (${it.ended.words})` : ''}</span></p>
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide ${it.decision === 'open' ? 'bg-amber-500 text-slate-950' : it.decision === 'confirmed' ? 'bg-rose-600 text-white' : 'bg-emerald-600 text-white'}`}>{it.decision === 'open' ? 'Needs you' : it.decision === 'confirmed' ? 'Confirmed' : 'Dismissed'}</span>
+              </div>
+              <ol className="mt-2 space-y-1 text-sm" aria-label={`What happened to ${it.name}`}>
+                {it.timeline.slice(-8).map((t, i) => (
+                  <li key={`${t.at}-${i}`} className="flex items-start gap-2"><span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${KIND_DOT[t.kind] ?? 'bg-slate-500'}`} /><span className="min-w-0 flex-1 text-slate-200">{t.words}</span><time className="shrink-0 text-xs tabular-nums text-slate-500" dateTime={t.at}>{clock(t.at)}</time></li>
+                ))}
+              </ol>
+              {it.evidence > 0
+                ? <button type="button" aria-expanded={openId === it.studentId} className={`${dBtn} mt-2 !min-h-9 text-xs`} onClick={() => showPics(it.studentId)}>{openId === it.studentId ? 'Hide' : 'Show'} {it.evidence} picture{it.evidence === 1 ? '' : 's'}</button>
+                : <p className="mt-2 text-xs text-slate-500">No pictures were kept (camera pictures must be on during the test).</p>}
+              {openId === it.studentId && (
+                <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {(pics[it.studentId] ?? []).map((e, i) => (
+                    <figure key={`${e.at}-${i}`} className="overflow-hidden rounded-lg border border-white/10 bg-slate-950">
+                      {e.frame && <img src={e.frame} alt={`Camera at ${clock(e.at)}`} className="w-full" />}
+                      {e.screen && <img src={e.screen} alt={`Screen at ${clock(e.at)}`} className="w-full" />}
+                      <figcaption className="px-2 py-1 text-[11px] text-slate-400">{clock(e.at)} · {e.type.replace(/_/g, ' ')}</figcaption>
+                    </figure>
+                  ))}
+                  {pics[it.studentId] === undefined && <p className="col-span-full text-xs text-slate-400">Loading…</p>}
+                </div>
+              )}
+              <label className="mt-2 block text-xs text-slate-400">Your note
+                <input className={`${dSelect} mt-1`} maxLength={500} aria-label={`Note about ${it.name}`} placeholder="Optional: what you found" value={notes[it.studentId] ?? it.note} onChange={(e) => setNotes((c) => ({ ...c, [it.studentId]: e.target.value }))} />
+              </label>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button type="button" className={`${dBtn} flex-1`} disabled={!!busy || it.decision === 'confirmed'} onClick={() => void decide(it, 'confirmed')}>Confirm</button>
+                <button type="button" className={`${dBtn} flex-1`} disabled={!!busy || it.decision === 'dismissed'} onClick={() => void decide(it, 'dismissed')}>Dismiss</button>
+                {it.canRestore && <button type="button" className={`${dPrimary} flex-1`} disabled={!!busy} onClick={() => void decide(it, 'dismissed', 10)}>Dismiss and give 10 min</button>}
+                {it.decision !== 'open' && <button type="button" className={dBtn} disabled={!!busy} onClick={() => void decide(it, 'open')}>Reopen</button>}
+                <button type="button" className={dBtn} disabled={!!busy} onClick={() => void download(it)}>Download evidence</button>
+              </div>
+            </li>
+          ))}
+          <li className="pt-3 text-xs text-slate-500">Pictures are only held in memory on the server for a few hours (and lost if it restarts): download what you need to keep. These are signals, not proof.</li>
+        </ul>
+      )}
+      {err && shown && <p role="alert" className="mt-2 text-xs text-rose-300">{err}</p>}
+    </section>
   );
 }
 
@@ -749,6 +837,13 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
                         Close it by itself
                       </label>
                     </Setting>
+                    {agent.rules.autoClose && (
+                      <Setting label="Keep it open after the last student" hint="A longer wait lets you review flags and give time back before it closes.">
+                        <select className={dSelect} style={{ colorScheme: 'dark' }} aria-label="Minutes to keep the test open after everyone has finished" value={agent.rules.closeAfterMinutes} disabled={busy || !open} onChange={(e) => void setRules({ closeAfterMinutes: Number(e.target.value) })}>
+                          {[2, 10, 30, 60].map((n) => <option key={n} value={n}>{n} minutes</option>)}
+                        </select>
+                      </Setting>
+                    )}
                   </>
                 )}
                 <Setting label="Practice mode" hint="It writes what it would do and does nothing. Good for a first test.">
@@ -810,6 +905,7 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
             )}
           </section>
         )}
+        {room && <ReviewQueue call={call} title={room.exam?.title ?? 'Test'} refreshKey={`${room.exam?.status}:${students.filter((x) => x.status === 'ENDED').length}`} />}
 
     </div>
   );

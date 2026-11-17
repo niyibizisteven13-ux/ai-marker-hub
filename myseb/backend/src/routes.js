@@ -7,6 +7,7 @@ import { authSession, isIosDevice, markAlive, recordViolation, VIOLATION_TYPES }
 import { liveStats, cleanSignal, dropSignals, forgetAllLive, forgetLive, getAside, setAside, setIdPic, getIdPic, dropIdPic, getLive, liveChanged, picturesWanted, pullSignal, pushSignal, reportEverySeconds, saveLive, wantPictures } from './live.js';
 import { notify, roomVersion, subscribe } from './events.js';
 import { noticeFor, setNotice } from './notices.js';
+import { evidenceCounts, evidenceOf } from './evidence.js';
 import { getControls, overview as adminOverview, retentionDays, saveControls } from './admin.js';
 
 export const api = express.Router();
@@ -286,13 +287,30 @@ api.post('/sessions/:id/id-decision', requireTeacher, wrap(async (req, res) => {
 /** The safety valve: a disqualified student is let back in (a false alarm: they looked down, the phone glitched). Recorded in their log. */
 api.post('/sessions/:id/reinstate', requireTeacher, wrap(async (req, res) => {
   if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
-  const r = await q(`UPDATE exam_sessions SET status='IN_EXAM', ended_at=NULL, end_reason=NULL, pause_reason=NULL, last_heartbeat=now(), reinstated_count=reinstated_count+1
-      WHERE id=$1 AND status='ENDED' AND end_reason NOT IN ('teacher','time_up','exam_ended','student','student_exit') AND deadline_at > now() RETURNING exam_id`, [req.params.id]);
-  if (!r.rows[0]) return res.status(409).json({ error: 'This student cannot be let back in (their time is over, or you ended them yourself).' });
-  await q(`INSERT INTO violations (session_id, exam_id, type, detail) VALUES ($1,$2,'reinstated','{}')`, [req.params.id, r.rows[0].exam_id]);
+  // `minutes` (1-60): after a review, give the student that long from now even if their time ran out, while the test is still open.
+  const minutes = req.body?.minutes === undefined ? null : Math.round(Number(req.body.minutes));
+  if (minutes !== null && !(Number.isFinite(minutes) && minutes >= 1 && minutes <= 60)) return res.status(400).json({ error: 'minutes must be 1 to 60' });
+  const r = await q(`UPDATE exam_sessions s SET status='IN_EXAM', ended_at=NULL, end_reason=NULL, pause_reason=NULL, last_heartbeat=now(), reinstated_count=reinstated_count+1,
+        deadline_at = CASE WHEN $2::int IS NULL THEN s.deadline_at ELSE GREATEST(s.deadline_at, now()) + make_interval(mins => $2::int) END
+      FROM exams e WHERE s.id=$1 AND e.id=s.exam_id AND s.status='ENDED' AND s.end_reason NOT IN ('teacher','time_up','exam_ended','student','student_exit')
+        AND (s.deadline_at > now() OR ($2::int IS NOT NULL AND e.status='active')) RETURNING s.exam_id`, [req.params.id, minutes]);
+  if (!r.rows[0]) return res.status(409).json({ error: 'This student cannot be let back in (their time is over and the test is closed, or you ended them yourself).' });
+  await q(`INSERT INTO violations (session_id, exam_id, type, detail) VALUES ($1,$2,'reinstated',$3)`, [req.params.id, r.rows[0].exam_id, JSON.stringify(minutes ? { minutes } : {})]);
   notify(r.rows[0].exam_id, 'status');
   res.json({ ok: true });
 }));
+/** The pictures kept as evidence (memory only) for the lecturer: counts for the whole test, or the pictures of one student. */
+api.get('/exams/:id/evidence', requireTeacher, wrap(async (req, res) => {
+  if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
+  res.set('Cache-Control', 'no-store');
+  const sid = req.query.sessionId;
+  if (sid === undefined) return res.json({ counts: evidenceCounts(req.params.id) });
+  if (!isUuid(String(sid))) return res.status(400).json({ error: 'bad session' });
+  const owns = (await q('SELECT 1 FROM exam_sessions WHERE id=$1 AND exam_id=$2', [sid, req.params.id])).rows[0];
+  if (!owns) return res.status(404).json({ error: 'not found' });
+  res.json({ items: evidenceOf(String(sid)) });
+}));
+
 api.post('/sessions/:id/resume', requireTeacher, wrap(async (req, res) => {
   if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
   await q(`UPDATE exam_sessions SET status='IN_EXAM', pause_reason=NULL, last_heartbeat=now() WHERE id=$1 AND status IN ('PAUSED','LEFT')`, [req.params.id]);

@@ -237,12 +237,12 @@ export function platformTools(services: ToolServices): Tool[] {
       description: "The room assistant works during a live test by the lecturer's rules, so the lecturer only deals with what really needs a person. Call it with no changes to see the rules and what the assistant did; call it with changes to set the rules. on: switch it on or off. afterSeconds: how long a student who is paused for a small reason and is connected again waits before being let back in (5-300, default 30). maxResumes: how many times each student may be let back in (1-5, default 2). endAfterMax: when a student is paused again after the limit, end their test (only if the lecturer clearly asked for that; otherwise leave it off and the lecturer is told). " + AGENT_NOTE,
       parameters: {
         type: 'object', required: ['kind', 'id'],
-        properties: { kind: KIND, id: ID, on: { type: 'boolean' }, autoResume: { type: 'boolean' }, afterSeconds: { type: 'number' }, maxResumes: { type: 'number' }, endAfterMax: { type: 'boolean' }, level: { type: 'string', enum: ['watch', 'assist', 'run'], description: "watch: only looks and tells the lecturer. assist: also lets students back in after small problems. run: AUTOPILOT: runs the whole test without the lecturer (warns students, lets a warned student carry on, ends a test at the strike limit only if serious='end', gives time when many connections drop, announces the time left, closes the test when everyone has finished) and sends the final report to the lecturer's Telegram or email. Only when the lecturer clearly asks for it; tell them the policy first and set confirmedAutopilot only after they say yes." }, serious: { type: 'string', enum: ['flag', 'end'], description: "Autopilot policy for serious signals (screenshot, recording app, second person, pasting): flag = warn and record only; end = end the student's test at the strike limit. Ask the lecturer which; never choose end for them." }, seriousStrikes: { type: 'number', description: 'Serious signals allowed before the policy applies (1-3, default 2: the first ones only get a warning).' }, autoClose: { type: 'boolean', description: 'Close the test when everyone has finished (default true).' }, confirmedAutopilot: { type: 'boolean', description: 'true only after the lecturer said yes to autopilot and its policy in this conversation.' }, dryRun: { type: 'boolean', description: 'Practice mode: it writes what it would do and does nothing. Suggest it for a first test.' }, maxAddMinutes: { type: 'number', description: 'Most minutes the assistant may add by itself in total (1-60, default 15).' }, maxRoomPauses: { type: 'number', description: 'Most times the assistant may pause the whole room by itself (0-5, default 2).' } },
+        properties: { kind: KIND, id: ID, on: { type: 'boolean' }, autoResume: { type: 'boolean' }, afterSeconds: { type: 'number' }, maxResumes: { type: 'number' }, endAfterMax: { type: 'boolean' }, level: { type: 'string', enum: ['watch', 'assist', 'run'], description: "watch: only looks and tells the lecturer. assist: also lets students back in after small problems. run: AUTOPILOT: runs the whole test without the lecturer (warns students, lets a warned student carry on, ends a test at the strike limit only if serious='end', gives time when many connections drop, announces the time left, closes the test when everyone has finished) and sends the final report to the lecturer's Telegram or email. Only when the lecturer clearly asks for it; tell them the policy first and set confirmedAutopilot only after they say yes." }, serious: { type: 'string', enum: ['flag', 'end'], description: "Autopilot policy for serious signals (screenshot, recording app, second person, pasting): flag = warn and record only; end = end the student's test at the strike limit. Ask the lecturer which; never choose end for them." }, seriousStrikes: { type: 'number', description: 'Serious signals allowed before the policy applies (1-3, default 2: the first ones only get a warning).' }, autoClose: { type: 'boolean', description: 'Close the test when everyone has finished (default true).' }, closeAfterMinutes: { type: 'number', description: 'How long the test stays open after everyone has finished (2-120, default 2). A longer window lets the lecturer review flags and give time back.' }, confirmedAutopilot: { type: 'boolean', description: 'true only after the lecturer said yes to autopilot and its policy in this conversation.' }, dryRun: { type: 'boolean', description: 'Practice mode: it writes what it would do and does nothing. Suggest it for a first test.' }, maxAddMinutes: { type: 'number', description: 'Most minutes the assistant may add by itself in total (1-60, default 15).' }, maxRoomPauses: { type: 'number', description: 'Most times the assistant may pause the whole room by itself (0-5, default 2).' } },
       },
     },
     async execute(input, ctx) {
-      const i = input as { kind: 'form' | 'task'; id: string; on?: boolean; autoResume?: boolean; afterSeconds?: number; maxResumes?: number; endAfterMax?: boolean; level?: 'watch' | 'assist' | 'run'; dryRun?: boolean; maxAddMinutes?: number; maxRoomPauses?: number; serious?: 'flag' | 'end'; seriousStrikes?: number; autoClose?: boolean; confirmedAutopilot?: boolean };
-      const patch = { on: i.on, autoResume: i.autoResume, afterSeconds: i.afterSeconds, maxResumes: i.maxResumes, endAfterMax: i.endAfterMax, level: i.level, dryRun: i.dryRun, maxAddMinutes: i.maxAddMinutes, maxRoomPauses: i.maxRoomPauses, serious: i.serious, seriousStrikes: i.seriousStrikes, autoClose: i.autoClose, confirmedAutopilot: i.confirmedAutopilot };
+      const i = input as { kind: 'form' | 'task'; id: string; on?: boolean; autoResume?: boolean; afterSeconds?: number; maxResumes?: number; endAfterMax?: boolean; level?: 'watch' | 'assist' | 'run'; dryRun?: boolean; maxAddMinutes?: number; maxRoomPauses?: number; serious?: 'flag' | 'end'; seriousStrikes?: number; autoClose?: boolean; closeAfterMinutes?: number; confirmedAutopilot?: boolean };
+      const patch = { on: i.on, autoResume: i.autoResume, afterSeconds: i.afterSeconds, maxResumes: i.maxResumes, endAfterMax: i.endAfterMax, level: i.level, dryRun: i.dryRun, maxAddMinutes: i.maxAddMinutes, maxRoomPauses: i.maxRoomPauses, serious: i.serious, seriousStrikes: i.seriousStrikes, autoClose: i.autoClose, closeAfterMinutes: i.closeAfterMinutes, confirmedAutopilot: i.confirmedAutopilot };
       const changing = Object.values(patch).some((v) => v !== undefined);
       try {
         const v = await pf.roomAssistant(ctx.userId, i.kind, String(i.id), changing ? patch : undefined);
@@ -272,6 +272,29 @@ export function platformTools(services: ToolServices): Tool[] {
         await note(ctx.userId, `ROOM_${i.action.toUpperCase()}`, String(i.id), { kind: i.kind, minutes: i.minutes, studentId: i.studentId, reason: i.reason });
         return { text: r.text };
       } catch (e) { return err(`Could not do that in the room: ${problem(e)}`); }
+    },
+  };
+
+  const review: Tool = {
+    definition: {
+      name: 'live_room_review',
+      description: "The review queue of a test: the students the room flagged, most serious first, each with what happened in order (and what the assistant did), how many pictures were kept, and the lecturer's decision. Call it with no decision to list. To record the lecturer's decision on one student pass studentId and decision: 'confirmed' (the flag stands), 'dismissed' (it was nothing) or 'open' (look again); 'dismissed' with giveMinutes (1-60) also lets a student whose test was ended by a rule back in with that much time, while the test is open. Only decide when the lecturer said what they decide; never decide for them. Everything is a signal to judge, never proof.",
+      parameters: { type: 'object', required: ['kind', 'id'], properties: { kind: KIND, id: ID, studentId: { type: 'string' }, decision: { type: 'string', enum: ['open', 'confirmed', 'dismissed'] }, note: { type: 'string' }, giveMinutes: { type: 'number' } } },
+    },
+    async execute(input, ctx) {
+      const i = input as { kind: 'form' | 'task'; id: string; studentId?: string; decision?: 'open' | 'confirmed' | 'dismissed'; note?: string; giveMinutes?: number };
+      try {
+        const deciding = i.studentId && i.decision;
+        const v = await pf.roomReview(ctx.userId, i.kind, String(i.id), deciding ? { studentId: i.studentId!, decision: i.decision!, note: i.note, giveMinutes: i.giveMinutes } : undefined);
+        if (deciding) await note(ctx.userId, 'ROOM_REVIEW', String(i.id), { kind: i.kind, student: i.studentId, decision: i.decision, giveMinutes: i.giveMinutes });
+        const lines = v.items.slice(0, 15).map((x) => `- [${x.studentId}] ${x.name}: ${x.decision.toUpperCase()}${x.ended ? `, test ended (${x.ended.words})` : ''}, ${x.signals} signal${x.signals === 1 ? '' : 's'}${x.strikes ? `, ${x.strikes} serious` : ''}${x.evidence ? `, ${x.evidence} picture${x.evidence === 1 ? '' : 's'} kept` : ''}${x.canRestore ? ', can be let back in' : ''}\n    ${x.timeline.slice(-6).map((t) => `${t.at.slice(11, 16)} ${t.words}`).join(' > ')}${x.note ? `\n    Lecturer's note: ${x.note}` : ''}`);
+        return { text: untrusted('REVIEW_QUEUE', [
+          deciding ? `Recorded: ${i.decision}${v.decided?.gaveMinutes ? `, and ${v.decided.gaveMinutes} minutes given back` : ''}.` : '',
+          `${v.open} of ${v.total} flagged student${v.total === 1 ? '' : 's'} still need a decision${v.testOpen ? '' : ' (the test is closed)'}.`,
+          lines.join('\n') || 'Nobody was flagged.',
+          'These are signals, not proof. The pictures can be opened in the live room (Review).',
+        ].filter(Boolean).join('\n')) };
+      } catch (e) { return err(`Could not read or change the review queue: ${problem(e)}`); }
     },
   };
 
@@ -360,5 +383,5 @@ export function platformTools(services: ToolServices): Tool[] {
     },
   };
 
-  return [rooms, status, code, settings, student, roomDo, savedAnswers, assistant, launch, debrief, courses, overview, marked];
+  return [rooms, status, code, settings, student, roomDo, review, savedAnswers, assistant, launch, debrief, courses, overview, marked];
 }

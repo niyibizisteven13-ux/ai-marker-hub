@@ -84,3 +84,8 @@ test('the report: who took part, who to look at (most first), what the assistant
   assert.match(text, /signals, not proof/); assert.match(text, /phone propped up/);
   assert.match(buildReport('X', [], { serious: {}, usage: EMPTY_USAGE, log: [], counts: {}, rules: DEFAULT_RULES }), /Nobody took part/);
 });
+
+test('the test can stay open for review after everyone has finished: 2 to 120 minutes, default 2', () => {
+  assert.equal(DEFAULT_RULES.closeAfterMinutes, 2); assert.equal(cleanRules({ closeAfterMinutes: 30 }).closeAfterMinutes, 30);
+  assert.equal(cleanRules({ closeAfterMinutes: 0 }).closeAfterMinutes, 2); assert.equal(cleanRules({ closeAfterMinutes: 9999 }).closeAfterMinutes, 120);
+});
