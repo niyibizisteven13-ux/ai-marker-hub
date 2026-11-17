@@ -7,7 +7,7 @@ import { authSession, isIosDevice, markAlive, recordViolation, VIOLATION_TYPES }
 import { liveStats, cleanSignal, dropSignals, forgetAllLive, forgetLive, getAside, setAside, setIdPic, getIdPic, dropIdPic, getLive, liveChanged, picturesWanted, pullSignal, pushSignal, reportEverySeconds, saveLive, wantPictures } from './live.js';
 import { notify, roomVersion, subscribe } from './events.js';
 import { noticeFor, setNotice } from './notices.js';
-import { evidenceCounts, evidenceOf } from './evidence.js';
+import { captureEvidence, evidenceCounts, evidenceOf } from './evidence.js';
 import { getControls, overview as adminOverview, retentionDays, saveControls } from './admin.js';
 
 export const api = express.Router();
@@ -298,6 +298,15 @@ api.post('/sessions/:id/reinstate', requireTeacher, wrap(async (req, res) => {
   await q(`INSERT INTO violations (session_id, exam_id, type, detail) VALUES ($1,$2,'reinstated',$3)`, [req.params.id, r.rows[0].exam_id, JSON.stringify(minutes ? { minutes } : {})]);
   notify(r.rows[0].exam_id, 'status');
   res.json({ ok: true });
+}));
+/** Keep the pictures held right now as evidence of something the lecturer's assistant noticed (memory only, like all evidence). */
+api.post('/sessions/:id/capture', requireTeacher, wrap(async (req, res) => {
+  if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
+  const type = String(req.body?.type ?? '');
+  if (!/^[a-z_]{3,40}$/.test(type)) return res.status(400).json({ error: 'bad type' });
+  const exam = await examOf(req.params.id);
+  if (!exam) return res.status(404).json({ error: 'not found' });
+  res.json({ ok: true, kept: captureEvidence(req.params.id, exam, type) });
 }));
 /** The pictures kept as evidence (memory only) for the lecturer: counts for the whole test, or the pictures of one student. */
 api.get('/exams/:id/evidence', requireTeacher, wrap(async (req, res) => {

@@ -2,9 +2,10 @@ import { prisma } from '../db.js';
 import logger from '../utils/logger.js';
 import { auditAction } from './platform/audit.js';
 import { flagOn } from './platform/settings.js';
-import { MySebError, assignmentTarget, endAll, extendTime, formTarget, generateCode, monitor, pauseAll, resumeAll, sendNotice, report as fullReport, sessionAction, violations as roomViolations, type TargetLoader } from './mySeb.js';
+import { MySebError, assignmentTarget, captureEvidenceFor, endAll, frames as roomFrames, extendTime, formTarget, generateCode, monitor, pauseAll, resumeAll, sendNotice, report as fullReport, sessionAction, violations as roomViolations, type TargetLoader } from './mySeb.js';
 import { reasonWords } from '../../src/utils/studentHelp.js';
 import { answerChecks } from './mySebAnswerChecks.js';
+import { FLAG_WORDS, FRESH, VISION_SYSTEM, parseFinding, pickSamples, update as visionUpdate, type VState } from './mySebVision.js';
 
 /**
  * The room assistant. The lecturer tells it, in the live room or in the chat, how routine moments should be handled while a test runs;
@@ -46,16 +47,18 @@ export interface AgentRules {
   closeAfterMinutes: number;
   /** Autopilot makes the join code at this time and sends it to the lecturer, and closes the test at the end time (ISO, or null). */
   opensAt: string | null; closesAt: string | null;
+  /** Opt-in: an AI model looks at a small sample of the camera pictures (see mySebVision.ts). It only adds notes for the lecturer. */
+  vision: boolean; maxPictures: number;
 }
-export const DEFAULT_RULES: AgentRules = { on: false, autoResume: true, afterSeconds: 30, maxResumes: 2, reasons: [...AUTO_REASONS], endAfterMax: false, level: 'assist', dryRun: false, maxAddMinutes: 15, maxRoomPauses: 2, serious: 'flag', seriousStrikes: 2, autoClose: true, closeAfterMinutes: 2, opensAt: null, closesAt: null };
+export const DEFAULT_RULES: AgentRules = { on: false, autoResume: true, afterSeconds: 30, maxResumes: 2, reasons: [...AUTO_REASONS], endAfterMax: false, level: 'assist', dryRun: false, maxAddMinutes: 15, maxRoomPauses: 2, serious: 'flag', seriousStrikes: 2, autoClose: true, closeAfterMinutes: 2, opensAt: null, closesAt: null, vision: false, maxPictures: 200 };
 /** What the assistant has already done in the room (counted against the limits above). */
 export interface AgentUsage { roomPauses: number; addedMinutes: number; notices: number }
 export const EMPTY_USAGE: AgentUsage = { roomPauses: 0, addedMinutes: 0, notices: 0 };
 export const MAX_AGENT_NOTICES = 20;
-export interface AgentLogEntry { at: string; kind: 'started' | 'stopped' | 'resumed' | 'needs_you' | 'ended' | 'card' | 'finished' | 'would' | 'room' | 'refused' | 'warned' | 'report'; student?: string; sid?: string; text: string }
+export interface AgentLogEntry { at: string; kind: 'started' | 'stopped' | 'resumed' | 'needs_you' | 'ended' | 'card' | 'finished' | 'would' | 'room' | 'refused' | 'warned' | 'report' | 'vision'; student?: string; sid?: string; text: string }
 interface Row { ownerId: string; kind: 'form' | 'task'; ref: string; rules: AgentRules; counts: Record<string, number>; log: AgentLogEntry[]; usage?: AgentUsage;
   /** Serious signals counted per student, and how many of each student's violations were already looked at. */
-  serious?: Record<string, number>; vseen?: Record<string, number>;
+  serious?: Record<string, number>; vseen?: Record<string, number>; visionUsed?: number;
   /** What must survive a server restart so nothing is announced or done twice: announcements made, the cards shown, the last incident, the quiet-time start. */
   mem?: { told: string[]; quiet?: number; incident?: number }; reported?: boolean; report?: { at: string; text: string } }
 
@@ -88,6 +91,7 @@ export function cleanRules(input: Partial<AgentRules> | undefined, base: AgentRu
     autoClose: typeof v.autoClose === 'boolean' ? v.autoClose : base.autoClose,
     closeAfterMinutes: clamp(v.closeAfterMinutes, 2, 120, base.closeAfterMinutes),
     opensAt: cleanWhen(v.opensAt, base.opensAt), closesAt: cleanWhen(v.closesAt, base.closesAt),
+    vision: typeof v.vision === 'boolean' ? v.vision : base.vision, maxPictures: clamp(v.maxPictures, 20, 2000, base.maxPictures),
   };
 }
 
@@ -131,7 +135,7 @@ async function read(kind: string, ref: string): Promise<Row | null> {
   const r = await db.appSetting.findUnique({ where: { key: keyOf(kind, ref) } }).catch(() => null);
   const v = r?.value;
   if (!v || typeof v !== 'object') return null;
-  return { ownerId: String(v.ownerId), kind: v.kind, ref: String(v.ref), rules: cleanRules(v.rules), counts: v.counts && typeof v.counts === 'object' ? v.counts : {}, log: Array.isArray(v.log) ? v.log.slice(-LOG_MAX) : [], usage: cleanUsage(v.usage), mem: cleanMem(v.mem), serious: numMap(v.serious), vseen: numMap(v.vseen), reported: v.reported === true, report: v.report && typeof v.report.text === 'string' ? { at: String(v.report.at), text: v.report.text } : undefined };
+  return { ownerId: String(v.ownerId), kind: v.kind, ref: String(v.ref), rules: cleanRules(v.rules), counts: v.counts && typeof v.counts === 'object' ? v.counts : {}, log: Array.isArray(v.log) ? v.log.slice(-LOG_MAX) : [], usage: cleanUsage(v.usage), mem: cleanMem(v.mem), serious: numMap(v.serious), vseen: numMap(v.vseen), visionUsed: clamp(v.visionUsed, 0, 1e6, 0), reported: v.reported === true, report: v.report && typeof v.report.text === 'string' ? { at: String(v.report.at), text: v.report.text } : undefined };
 }
 async function write(row: Row, by: string) {
   const key = keyOf(row.kind, row.ref);
@@ -155,11 +159,12 @@ export async function getAgent(load: TargetLoader): Promise<AgentView> {
   const t = await load();
   return view(await read(t.kind === 'form' ? 'form' : 'task', t.ref));
 }
-export async function setAgent(load: TargetLoader, patch: Partial<AgentRules>, by: string, opts: { confirmedAutopilot?: boolean } = {}): Promise<AgentView> {
+export async function setAgent(load: TargetLoader, patch: Partial<AgentRules>, by: string, opts: { confirmedAutopilot?: boolean; confirmedVision?: boolean } = {}): Promise<AgentView> {
   const t = await load();
   const kind = t.kind === 'form' ? 'form' : 'task';
   const prev = await read(kind, t.ref);
   const next = cleanRules(patch, prev?.rules ?? DEFAULT_RULES);
+  if (next.vision && next.on && !(prev?.rules.on && prev.rules.vision) && !opts.confirmedVision) throw new MySebError('Picture checks send small camera pictures of students to the AI provider. Students are told when they start. Confirm to switch them on.', 400, 'CONFIRM_VISION');
   if (next.opensAt && next.closesAt && Date.parse(next.closesAt) <= Date.parse(next.opensAt)) throw new MySebError('The test must close after it opens.', 400, 'BAD_REQUEST');
   // Autopilot acts on students without the lecturer, so it needs a clear yes each time it is switched on.
   if (next.level === 'run' && next.on && !(prev?.rules.on && prev.rules.level === 'run') && !opts.confirmedAutopilot) throw new MySebError('Autopilot needs your confirmation: it will run the test without you and act on students by the policy you set. Confirm to switch it on.', 400, 'CONFIRM_AUTOPILOT');
@@ -352,6 +357,63 @@ export let tellOwner = async (row: Row, title: string, text: string, link?: { te
 };
 export const __setTellOwnerForTests = (fn: typeof tellOwner) => { tellOwner = fn; };
 
+/** Picture checks: where the model, the credits and the evidence come from. Replaceable in tests. */
+export interface VisionDeps {
+  describe(userId: string, dataUrl: string): Promise<string>;
+  canSpend(userId: string): Promise<boolean>;
+  spent(userId: string): Promise<void>;
+}
+let visionDeps: VisionDeps = {
+  async describe(userId, dataUrl) { return (await import('./AiService.js')).AiService.getInstance().describeProctorPicture(userId, dataUrl, VISION_SYSTEM); },
+  async canSpend(userId) { const g = await (await import('./billing/usage.js')).checkUsage(userId, { kind: 'vision', attachments: 1 }).catch(() => null); return !!g?.allowed; },
+  async spent(userId) { await (await import('./billing/usage.js')).recordUsage(userId, { kind: 'vision', channel: 'web' }).catch(() => undefined); },
+};
+export const __setVisionDepsForTests = (d: VisionDeps | null) => { if (d) visionDeps = d; };
+const visionStates = new Map<string, Map<string, VState>>();
+const PICTURES_PER_LOOK = 4;     // at most 4 pictures every 10 seconds
+
+/** One round of picture checks. Never ends or pauses anyone: a repeated finding becomes a note for the lecturer, with the picture kept. */
+async function visionPass(row: Row, load: TargetLoader, students: Array<StudentView & { violation_count?: number; aside_seconds?: number }>, now: number): Promise<{ entries: AgentLogEntry[]; used: number }> {
+  const entries: AgentLogEntry[] = [];
+  const used0 = row.visionUsed ?? 0;
+  let used = used0;
+  const left = row.rules.maxPictures - used;
+  if (left <= 0) {
+    if (!told.has(`${row.ref}:visionlimit`)) { told.add(`${row.ref}:visionlimit`); entries.push(entry('needs_you', `Picture checks stopped: the ${row.rules.maxPictures} pictures you allowed were used.`)); }
+    return { entries, used };
+  }
+  if (!told.has(`${row.ref}:visionnotice`)) {
+    told.add(`${row.ref}:visionnotice`);
+    if (!row.rules.dryRun) await sendNotice(load, 'An AI assistant may check small camera pictures during this test. Nothing is decided by it alone.').catch(() => undefined);
+    entries.push(entry('room', row.rules.dryRun ? 'Practice mode: picture checks would start now and students would be told.' : 'Picture checks started and the students were told.'));
+  }
+  if (row.rules.dryRun) return { entries, used };
+  if (!(await visionDeps.canSpend(row.ownerId))) {
+    if (!told.has(`${row.ref}:visioncredits`)) { told.add(`${row.ref}:visioncredits`); entries.push(entry('needs_you', 'Picture checks are paused: your plan has no credits left for them.')); }
+    return { entries, used };
+  }
+  const states = visionStates.get(row.ref) ?? new Map<string, VState>(); visionStates.set(row.ref, states);
+  const ids = pickSamples(students.map((s) => ({ id: s.id, status: s.status, violation_count: s.violation_count, aside_seconds: s.aside_seconds })), states, now, Math.min(PICTURES_PER_LOOK, left));
+  if (!ids.length) return { entries, used };
+  const got: any = await roomFrames(load, ids).catch(() => ({ frames: {} }));
+  for (const id of ids) {
+    const f = got?.frames?.[id];
+    if (!f?.frame || (f.age ?? 0) > 30) continue;          // no fresh picture yet: it was asked for, try again next look
+    const name = students.find((s) => s.id === id)?.student_name;
+    let finding: ReturnType<typeof parseFinding> = null;
+    try { finding = parseFinding(await visionDeps.describe(row.ownerId, f.frame)); } catch { /* a failed look is simply skipped */ }
+    used++; await visionDeps.spent(row.ownerId);
+    const r = visionUpdate(states.get(id) ?? FRESH, finding ?? { people: null, face: null, phone: null, note: '' }, now);
+    states.set(id, finding ? r.state : { ...(states.get(id) ?? FRESH), last: now });
+    if (!finding) continue;
+    for (const kind of r.flags) {
+      await captureEvidenceFor(load, id, `vision_${kind}`).catch(() => false);
+      entries.push(entry('vision', `Picture check: ${FLAG_WORDS[kind]}${finding.note ? ` (${finding.note})` : ''}. The picture was kept. This is a lead, not proof.`, name, id));
+    }
+  }
+  return { entries, used };
+}
+
 const quietSince = new Map<string, number>();
 const incidentAt = new Map<string, number>();
 const ADVICE_NOTE = 'This was recorded for your lecturer.';
@@ -376,7 +438,7 @@ async function finishWithReport(row: Row, m: any): Promise<void> {
 }
 
 const hydrated = new Set<string>();
-const REMEMBER = /:(ann\d+|card|opened|closed)$/;
+const REMEMBER = /:(ann\d+|card|opened|closed|visionnotice|visionlimit|visioncredits)$/;
 /** Puts back what a restart forgot (only what would otherwise be done or announced twice). */
 function hydrate(row: Row) {
   if (hydrated.has(row.ref)) return; hydrated.add(row.ref);
@@ -566,6 +628,16 @@ async function runRoomInner(row: Row, now = Date.now()): Promise<AgentLogEntry[]
       }
     } else quietSince.delete(row.ref);
   }
+  // Picture checks (opt-in): a few small pictures each look, notes only.
+  if (row.rules.vision) {
+    const v = await visionPass(row, load, students as any, now).catch((e) => { logger.debug?.('[myseb-agent] vision failed', { error: (e as Error)?.message }); return null; });
+    if (v && (v.entries.length || v.used !== (row.visionUsed ?? 0))) {
+      await mutate(row.kind, row.ref, row.ownerId, (r) => { r.visionUsed = v.used; r.log.push(...v.entries); }, 'agent');
+      made.push(...v.entries);
+      const notable = v.entries.filter((e) => e.kind === 'vision' || e.kind === 'needs_you');
+      if (notable.length) void alertOwner(row, notable).catch(() => undefined);
+    }
+  }
   // What a restart must not forget (announcements already made, the quiet-time start, the last incident).
   const mem = snapshot(row.ref);
   if (JSON.stringify(mem) !== JSON.stringify(row.mem ?? { told: [] })) await mutate(row.kind, row.ref, row.ownerId, (r) => { r.mem = mem; }, 'agent').catch(() => undefined);
@@ -586,4 +658,4 @@ export async function tickAgents(now = Date.now()) {
 
 let timer: ReturnType<typeof setInterval> | undefined;
 export function startMySebAgent() { timer ??= setInterval(() => void tickAgents().catch(() => undefined), 10_000); timer.unref?.(); }
-export const __resetAgentMemoryForTests = () => { pausedSince.clear(); told.clear(); quietSince.clear(); incidentAt.clear(); hydrated.clear(); errors.clear(); unreachable.clear(); toldUnreachable.clear(); fault = null; };
+export const __resetAgentMemoryForTests = () => { pausedSince.clear(); told.clear(); quietSince.clear(); incidentAt.clear(); hydrated.clear(); visionStates.clear(); errors.clear(); unreachable.clear(); toldUnreachable.clear(); fault = null; };
