@@ -279,13 +279,16 @@ export function createBizService(deps: Deps) {
       await save(fresh);
     },
     /** The public feed: pinned first, then newest. `visitor` only decides which hearts are filled for this person. */
-    async publicPosts(slug: string, o: { limit?: number; visitor?: string } = {}): Promise<PublicPost[]> {
+    async publicPosts(slug: string, o: { limit?: number; visitor?: string; postId?: string } = {}): Promise<PublicPost[]> {
       const b = await publicLive(slug); if (!b) return []; const items = (await kv.get<{ items: Post[] }>(`biz-posts:${b.id}`))?.items ?? [];
       const likes = (await kv.get<{ by: Record<string, string[]> }>(`biz-likes:${b.id}`))?.by ?? {}; const com = (await kv.get<{ items: PostComment[] }>(`biz-comments:${b.id}`))?.items ?? [];
       const me = o.visitor ? vhash(o.visitor) : '';
       const pm = (mid: string) => { const m = b.media.find((x) => x.id === mid); return m ? { id: m.id, kind: m.kind, ...(m.caption ? { caption: m.caption } : {}) } : null; };
       const out: PublicPost[] = items.map((p) => ({ id: p.id, at: p.at, text: p.text, media: p.mediaIds.map(pm).filter((x): x is NonNullable<typeof x> => !!x), ...(p.pinned ? { pinned: true } : {}), ...(p.productId && b.products.some((x) => x.id === p.productId && !x.hidden) ? { productId: p.productId } : {}), likes: likes[p.id]?.length ?? 0, comments: com.filter((c) => c.postId === p.id).length, liked: !!me && !!likes[p.id]?.includes(me) }));
-      out.sort((a, c) => Number(!!c.pinned) - Number(!!a.pinned) || c.at.localeCompare(a.at)); return out.slice(0, Math.min(50, Math.max(1, o.limit ?? 20)));
+      out.sort((a, c) => Number(!!c.pinned) - Number(!!a.pinned) || c.at.localeCompare(a.at)); const page = out.slice(0, Math.min(50, Math.max(1, o.limit ?? 20)));
+      const shared = o.postId ? out.find((p) => p.id === o.postId) : undefined;
+      if (shared && !page.some((p) => p.id === shared.id)) page.push(shared);
+      return page;
     },
     /** Love: one per visitor per post, tapping again takes it back. Visitors are only a short hash, never stored as who. */
     async like(slug: string, postId: string, visitor: string): Promise<{ liked: boolean; likes: number }> {
