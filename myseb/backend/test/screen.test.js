@@ -93,6 +93,7 @@ test('a camera that another app is holding is shown to the lecturer as "busy", i
 
 test('500 live students fit: the tiny level is accepted and the lecturer\'s inbox holds every offer and candidate', async () => {
   assert.equal(cleanSignal({ type: 'quality', level: 'tiny', viewer: 'v1' }).level, 'tiny');
+  assert.equal(cleanSignal({ type: 'quality', level: 'mid', viewer: 'v1' }).level, 'mid');
   const { pushSignal, pullSignal, SIGNAL_CAP } = await import('../src/live.js');
   assert.ok(SIGNAL_CAP >= 5000, 'room for 500 students x about 10 messages each');
   const key = 'room-500-' + Date.now();
