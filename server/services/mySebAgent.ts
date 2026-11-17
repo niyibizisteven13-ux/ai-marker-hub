@@ -41,8 +41,10 @@ export interface AgentRules {
   seriousStrikes: number;
   /** Autopilot closes the test when everyone has finished. */
   autoClose: boolean;
+  /** How long after everyone has finished the test stays open (minutes), so flags can be reviewed and students let back in. */
+  closeAfterMinutes: number;
 }
-export const DEFAULT_RULES: AgentRules = { on: false, autoResume: true, afterSeconds: 30, maxResumes: 2, reasons: [...AUTO_REASONS], endAfterMax: false, level: 'assist', dryRun: false, maxAddMinutes: 15, maxRoomPauses: 2, serious: 'flag', seriousStrikes: 2, autoClose: true };
+export const DEFAULT_RULES: AgentRules = { on: false, autoResume: true, afterSeconds: 30, maxResumes: 2, reasons: [...AUTO_REASONS], endAfterMax: false, level: 'assist', dryRun: false, maxAddMinutes: 15, maxRoomPauses: 2, serious: 'flag', seriousStrikes: 2, autoClose: true, closeAfterMinutes: 2 };
 /** What the assistant has already done in the room (counted against the limits above). */
 export interface AgentUsage { roomPauses: number; addedMinutes: number; notices: number }
 export const EMPTY_USAGE: AgentUsage = { roomPauses: 0, addedMinutes: 0, notices: 0 };
@@ -75,6 +77,7 @@ export function cleanRules(input: Partial<AgentRules> | undefined, base: AgentRu
     serious: v.serious === 'end' || v.serious === 'flag' ? v.serious : base.serious,
     seriousStrikes: clamp(v.seriousStrikes, 1, 3, base.seriousStrikes),
     autoClose: typeof v.autoClose === 'boolean' ? v.autoClose : base.autoClose,
+    closeAfterMinutes: clamp(v.closeAfterMinutes, 2, 120, base.closeAfterMinutes),
   };
 }
 
@@ -202,7 +205,7 @@ export function buildReport(title: string, students: ReportStudent[], row: Pick<
     n === 0 ? 'Nobody took part.' : `${n} student${n === 1 ? '' : 's'} took part: ${finished} finished, ${timeUp} ran out of time, ${byRule.length} had their test ended by a rule.`,
     ranked.length ? `Worth a look (most first):\n${ranked.slice(0, 12).map(({ s }) => `- ${s.student_name}: ${s.violation_count} signal${s.violation_count === 1 ? '' : 's'}${s.last_violation ? `, last: ${reasonWords(s.last_violation)}` : ''}${strikes(s) ? `, ${strikes(s)} serious` : ''}${byRule.includes(s) ? `, test ended (${reasonWords(s.end_reason)})` : ''}${s.reinstated_count ? `, let back in ${s.reinstated_count}x` : ''}`).join('\n')}${ranked.length > 12 ? `\n(and ${ranked.length - 12} more with fewer signals)` : ''}` : 'Nobody was flagged.',
     `What the assistant did: let ${did} back in, warned ${warned}, ended ${ended} test${ended === 1 ? '' : 's'}, added ${row.usage?.addedMinutes ?? 0} minute${row.usage?.addedMinutes === 1 ? '' : 's'}, sent ${row.usage?.notices ?? 0} message${row.usage?.notices === 1 ? '' : 's'}.`,
-    'These are signals, not proof. A phone propped up, a second person out of view, or answers passed by voice cannot be seen by MySEB. Please look at the flagged students before you decide anything, and talk to them. The full timeline is in the live room.',
+    'Review each flagged student in the live room (Review): you see what happened in order and the pictures kept at those moments, and you confirm or dismiss. These are signals, not proof. A phone propped up, a second person out of view, or answers passed by voice cannot be seen by MySEB. Please look at the flagged students before you decide anything, and talk to them. The full timeline is in the live room.',
   ];
   return lines.join('\n');
 }
@@ -432,7 +435,7 @@ export async function runRoom(row: Row, now = Date.now()): Promise<AgentLogEntry
     // Everyone has finished: close the test after a short pause, so nobody joins late; the next look sends the report.
     if (row.rules.autoClose && students.length > 0 && students.every((s) => s.status === 'ENDED')) {
       const since = quietSince.get(row.ref) ?? now; quietSince.set(row.ref, since);
-      if (now - since >= 120_000) {
+      if (now - since >= row.rules.closeAfterMinutes * 60_000) {
         quietSince.delete(row.ref);
         if (row.rules.dryRun) await mutate(row.kind, row.ref, row.ownerId, (r) => { r.log.push(entry('would', 'Would have closed the test: everyone has finished.')); }, 'agent');
         else { await endAll(load).catch(() => undefined); await mutate(row.kind, row.ref, row.ownerId, (r) => { r.log.push(entry('finished', 'Everyone has finished: the test was closed.')); }, 'agent'); }

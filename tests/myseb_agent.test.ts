@@ -51,12 +51,17 @@ const NO_PG = !process.env.DATABASE_URL && 'needs PostgreSQL (DATABASE_URL); CI 
 const test = (name: string, fn: () => Promise<void>) => baseTest(name, { skip: NO_PG }, fn);
 const EXAM = randomUUID();
 const violationsOf: Record<string, string[]> = {};
+let reportEvents: any[] = []; let evidenceBy: Record<string, number> = {};
 let students: any[] = []; let examStatus = 'active'; const actions: string[] = [];
 const fake = http.createServer((req, res) => {
   let body = ''; req.on('data', (c) => { body += c; });
   req.on('end', () => {
     const json = (o: unknown) => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(o));
     if (req.url?.startsWith(`/api/exams/${EXAM}/monitor`)) return json({ exam: { title: 'Biology', status: examStatus }, counts: {}, students });
+    if (req.url?.startsWith(`/api/exams/${EXAM}/report`)) return json({ exam: { title: 'Biology', status: examStatus }, students: students.map((x) => ({ ...x, id: x.id })), events: reportEvents });
+    if (req.url?.startsWith(`/api/exams/${EXAM}/evidence`)) return req.url.includes('sessionId=') ? json({ items: [{ at: 'x', type: 'screenshot', frame: 'data:image/jpeg;base64,AA==', screen: null }] }) : json({ counts: evidenceBy });
+    const rein = /\/api\/sessions\/([^/]+)\/reinstate$/.exec(req.url ?? '');
+    if (rein && req.method === 'POST') { actions.push(`reinstate ${rein[1]} ${body}`); return json({ ok: true }); }
     const vio = /\/api\/sessions\/([^/]+)\/violations$/.exec(req.url ?? '');
     if (vio) return json((violationsOf[vio[1]] ?? []).map((type, i) => ({ type, created_at: new Date(1700000000000 + i * 1000).toISOString() })));
     if (/\/api\/exams\/[^/]+\/end$/.test(req.url ?? '') && req.method === 'POST') { actions.push('closeall'); examStatus = 'ended'; return json({ ok: true }); }
@@ -246,4 +251,25 @@ test('autopilot gives time when many connections drop, and announces the time le
   const n = actions.length; await A.runRoom(await rowOf(), t0 + 10_000);
   assert.equal(actions.length, n, 'neither is repeated');
   assert.ok((await A.getAgent(load)).usage.addedMinutes <= 60, 'within the limit the lecturer set');
+});
+
+test('the review queue: the lecturer decides, time can be given back, someone else\'s test cannot be touched, and decisions are remembered', async () => {
+  const R = await import('../server/services/mySebReview.js');
+  const load = formTarget(owner, formId); actions.length = 0; examStatus = 'active';
+  const ben = person({ student_name: 'Ben', status: 'ENDED', end_reason: 'screenshot', violation_count: 2, pause_reason: null });
+  students = [ben]; reportEvents = [{ session_id: ben.id, type: 'screenshot', created_at: '2026-11-17T09:01:00Z' }, { session_id: ben.id, type: 'devtools', created_at: '2026-11-17T09:02:00Z' }]; evidenceBy = { [ben.id]: 2 };
+  const q1 = await R.getReview(load);
+  assert.equal(q1.open, 1); assert.equal(q1.items[0].name, 'Ben'); assert.equal(q1.items[0].evidence, 2); assert.ok(q1.items[0].canRestore);
+  await assert.rejects(R.decideReview(load, ben.id, { decision: 'confirmed' as any, giveMinutes: 10 }, owner), /only be given back when you dismiss/);
+  await assert.rejects(R.decideReview(load, ben.id, { decision: 'dismissed', giveMinutes: 90 }, owner), /1 to 60/);
+  await assert.rejects(R.decideReview(load, 'not-a-student', { decision: 'dismissed' }, owner), /not in this test/);
+  await assert.rejects(R.decideReview(formTarget(stranger, formId), ben.id, { decision: 'dismissed' }, stranger), /not found/i);
+  assert.deepEqual(actions.filter((a) => a.startsWith('reinstate')), [], 'nothing was done by the refused calls');
+  const ok = await R.decideReview(load, ben.id, { decision: 'dismissed', giveMinutes: 10, note: 'The head set a task' }, owner);
+  assert.equal(ok.gaveMinutes, 10); assert.ok(actions.some((a) => a === `reinstate ${ben.id} {"minutes":10}`));
+  const q2 = await R.getReview(load);
+  assert.equal(q2.open, 0); assert.equal(q2.items[0].decision, 'dismissed'); assert.equal(q2.items[0].note, 'The head set a task'); assert.equal(q2.items[0].gaveMinutes, 10);
+  const row = (await db.appSetting.findUnique({ where: { key: `myseb-review:form:${formId}` } })).value; assert.equal(row.items[ben.id].by, owner);
+  assert.equal((await R.getEvidence(load, ben.id)).length, 1);
+  await db.appSetting.deleteMany({ where: { key: `myseb-review:form:${formId}` } });
 });

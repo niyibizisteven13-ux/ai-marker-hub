@@ -3,6 +3,7 @@ import { requireAuth } from '../../production/auth.js';
 import { liveRoomLimiter } from '../../production/rateLimiter.js';
 import { reportWorkbook } from '../services/mySebReport.js';
 import logger from '../utils/logger.js';
+import { decideReview, getEvidence, getReview } from '../services/mySebReview.js';
 import { getAgent, roomAction, roomActionFrom, setAgent } from '../services/mySebAgent.js';
 import { MySebError, assignmentTarget, downloadLinks, endAll, formTarget, frames, generateCode, iceServers, idChecks, idDecision, reinstate, savedAnswers, lecturerSignalPull, lecturerSignalPush, monitor, report, mySebConfigured, pauseAll, relayLive, resumeAll, sessionAction, setLiveMode, studentSignalPull, heldStudentSignalPull, streamRoomEvents, studentSignalPush, violations, type TargetLoader } from '../services/mySeb.js';
 
@@ -84,8 +85,15 @@ function createMySebOwnerRouterFor(target: (userId: string, id: string) => Targe
   r.get('/:id/myseb/agent', requireAuth, run(async (req, res) => { res.json({ success: true, data: await getAgent(t(req)) }); }));
   r.put('/:id/myseb/agent', requireAuth, run(async (req, res) => {
     const b = req.body ?? {};
-    res.json({ success: true, data: await setAgent(t(req), { on: b.on, autoResume: b.autoResume, afterSeconds: b.afterSeconds, maxResumes: b.maxResumes, reasons: b.reasons, endAfterMax: b.endAfterMax, level: b.level, dryRun: b.dryRun, maxAddMinutes: b.maxAddMinutes, maxRoomPauses: b.maxRoomPauses, serious: b.serious, seriousStrikes: b.seriousStrikes, autoClose: b.autoClose }, userIdOf(req), { confirmedAutopilot: b.confirmAutopilot === true }) });
+    res.json({ success: true, data: await setAgent(t(req), { on: b.on, autoResume: b.autoResume, afterSeconds: b.afterSeconds, maxResumes: b.maxResumes, reasons: b.reasons, endAfterMax: b.endAfterMax, level: b.level, dryRun: b.dryRun, maxAddMinutes: b.maxAddMinutes, maxRoomPauses: b.maxRoomPauses, serious: b.serious, seriousStrikes: b.seriousStrikes, autoClose: b.autoClose, closeAfterMinutes: b.closeAfterMinutes }, userIdOf(req), { confirmedAutopilot: b.confirmAutopilot === true }) });
   }));
+  // Review queue: everyone the room flagged, in order, with the pictures kept at those moments; the lecturer decides.
+  r.get('/:id/myseb/review', requireAuth, run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json({ success: true, data: await getReview(t(req), (await getAgent(t(req))).log) }); }));
+  r.post('/:id/myseb/review/:sid', requireAuth, run(async (req, res) => {
+    const b = req.body ?? {};
+    res.json({ success: true, data: await decideReview(t(req), p(req, 'sid'), { decision: b.decision, note: b.note, giveMinutes: b.giveMinutes }, userIdOf(req)) });
+  }));
+  r.get('/:id/myseb/evidence/:sid', requireAuth, run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json({ success: true, data: await getEvidence(t(req), p(req, 'sid')) }); }));
   // The lecturer acts in the room: pause or release everyone, more time, a message to the students.
   r.post('/:id/myseb/room-action', requireAuth, run(async (req, res) => {
     const b = req.body ?? {};

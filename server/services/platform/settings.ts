@@ -15,7 +15,7 @@ export interface FlagInfo { id: string; label: string; hint: string; group: 'Cha
 
 export const FLAGS: FlagInfo[] = [
   { id: 'chat.platformTools', label: 'Chat: live rooms, classes, marked exams', hint: 'The chat can read and change live rooms, classes and marked exams.', group: 'Chat abilities',
-    tools: ['list_live_rooms', 'live_room_status', 'live_room_action', 'live_room_code', 'live_room_settings', 'live_room_student', 'live_room_saved_answers', 'list_courses', 'course_overview', 'list_marked_exams'] },
+    tools: ['list_live_rooms', 'live_room_status', 'live_room_action', 'live_room_review', 'live_room_code', 'live_room_settings', 'live_room_student', 'live_room_saved_answers', 'list_courses', 'course_overview', 'list_marked_exams'] },
   { id: 'chat.workTools', label: 'Chat: mark tasks, release results, build classes', hint: 'The chat can mark a task, release results, manage classes and change exam marks.', group: 'Chat abilities',
     tools: ['task_results', 'task_settings', 'mark_task', 'release_task_results', 'export_task_results', 'create_class', 'add_class_students', 'link_class_work', 'export_class_gradebook', 'list_practice_classes', 'create_practice_class', 'practice_class_overview', 'exam_results', 'exam_candidate', 'change_exam_mark', 'release_exam_results'] },
   { id: 'chat.agendaTools', label: 'Chat: scheduled tasks and plans', hint: 'The chat can schedule tasks (morning brief), propose plans and run them after a yes, and send alerts to Telegram.', group: 'Chat abilities',

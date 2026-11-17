@@ -490,6 +490,13 @@ export const bwengeAgent = createAiAgent({
         const v = patch && Object.values(rules).some((x) => x !== undefined) ? await ag.setAgent(load, rules, userId, { confirmedAutopilot }) : await ag.getAgent(load);
         return { rules: v.rules, usage: v.usage, report: v.report, resumed: v.resumed, log: v.log };
       },
+      roomReview: async (userId, kind, id, decide) => {
+        const my = await import('./mySeb.js'); const ag = await import('./mySebAgent.js'); const rv = await import('./mySebReview.js');
+        const load = kind === 'form' ? my.formTarget(userId, id) : my.assignmentTarget(userId, id);
+        const decided = decide ? await rv.decideReview(load, decide.studentId, { decision: decide.decision, note: decide.note, giveMinutes: decide.giveMinutes }, userId) : undefined;
+        const v = await rv.getReview(load, (await ag.getAgent(load)).log);
+        return { ...v, ...(decided ? { decided: { gaveMinutes: decided.gaveMinutes } } : {}) } as any;
+      },
       roomAction: async (userId, kind, id, a) => {
         const my = await import('./mySeb.js'); const ag = await import('./mySebAgent.js');
         const load = kind === 'form' ? my.formTarget(userId, id) : my.assignmentTarget(userId, id);

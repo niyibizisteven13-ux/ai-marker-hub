@@ -197,9 +197,21 @@ export async function sessionAction(load: TargetLoader, sid: string, action: 're
 }
 
 /** Disqualified for breaking a rule (not ended by the lecturer): let the student back in. Recorded in their log. */
-export async function reinstate(load: TargetLoader, sid: string) {
+export async function reinstate(load: TargetLoader, sid: string, minutes?: number) {
   await ownStudent(load, sid);
-  return mysebFetch(`/sessions/${sid}/reinstate`, { method: 'POST' });
+  return mysebFetch(`/sessions/${sid}/reinstate`, { method: 'POST', ...(minutes ? { body: { minutes } } : {}) });
+}
+/** How many evidence pictures the server holds per student (memory only on the MySEB server), and the pictures of one student. */
+export async function evidenceCounts(load: TargetLoader): Promise<Record<string, number>> {
+  const t = await load();
+  if (!t.mysebExamId) return {};
+  return ((await mysebFetch(`/exams/${t.mysebExamId}/evidence`)) as { counts?: Record<string, number> }).counts ?? {};
+}
+export async function evidenceOf(load: TargetLoader, sid: string): Promise<Array<{ at: string; type: string; frame: string | null; screen: string | null }>> {
+  const t = await load();
+  if (!t.mysebExamId) return [];
+  await ownStudent(load, sid);
+  return ((await mysebFetch(`/exams/${t.mysebExamId}/evidence?sessionId=${encodeURIComponent(sid)}`, { timeoutMs: 20000 })) as { items?: any[] }).items ?? [];
 }
 /** What a student had typed when they left (saved every few seconds by their browser). */
 export async function savedAnswers(load: TargetLoader, sid: string) {
