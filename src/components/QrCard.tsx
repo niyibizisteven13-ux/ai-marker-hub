@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 
 const DOMAIN = 'bwenge.space';
 const SITE_URL = 'https://' + DOMAIN;
-/** Scanning goes straight to the app downloader, which picks the installer for the phone or laptop that opened it. */
-export const APP_DOWNLOAD_URL = SITE_URL + '/myseb/download';
+/** Scanning opens the Bwenge app download: an Android phone gets the app at once; other devices get the ways to add Bwenge to the home screen. */
+export const APP_DOWNLOAD_URL = SITE_URL + '/get-app';
 const NAVY = '#0B1420';
 const TEAL = '#0F766E';
 const MARGIN = 3;
