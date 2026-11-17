@@ -4,6 +4,8 @@ import type { BizService } from '../../biz/service.js';
 import { BizError } from '../../biz/service.js';
 import { MediaError } from '../../biz/media.js';
 import type { Business } from '../../biz/model.js';
+import { BUILTIN_WORKFLOWS, WORKFLOW_TOOLS } from '../../biz/agent.js';
+import { planText, proposalStore, validateSteps } from '../../agenda/proposals.js';
 
 /**
  * bwenge4biz in the chat: the owner builds and runs their public page by talking ("add rice at 1,500", "we close at 8 on Saturdays", "add this photo").
@@ -90,13 +92,14 @@ export function bizTools(getSvc: () => Promise<BizService> | BizService = async 
   };
   const addMedia: Tool = {
     definition: { name: 'biz_add_media', description: "Put a photo or short video the user attached in this chat onto their business page gallery (JPEG, PNG, WebP, GIF photos up to 6 MB; MP4 or WebM videos up to 25 MB). Use the fileId of the attachment. A first photo becomes the cover. The user can see it publicly once the page is published.",
-      parameters: { type: 'object', required: ['fileId'], properties: { business: BUSINESS, fileId: { type: 'string' }, caption: { type: 'string' } } } },
+      parameters: { type: 'object', required: ['fileId'], properties: { business: BUSINESS, fileId: { type: 'string' }, caption: { type: 'string' }, use_as: { type: 'string', enum: ['gallery', 'cover', 'logo'], description: 'Where it goes: the gallery (default), the big cover picture, or the logo (photos only).' } } } },
     async execute(input, ctx) {
       try {
         const b = await pick(ctx.userId, input.business); if ('error' in b) return err(b.error);
-        const { meta, data } = await ctx.files.read(String(input.fileId), ctx.userId);
+        const { meta, data } = await ctx.files.read(String(input.fileId), ctx.userId); const use = ['cover', 'logo'].includes(input.use_as) ? input.use_as : 'gallery';
         const m = await (await svc()).addMedia(ctx.userId, b.id, { name: meta.name, data: Buffer.from(data), caption: input.caption });
-        return { text: `Added the ${m.kind} to the page${b.published ? '' : ' (not public until the page is published)'}.` };
+        if (use !== 'gallery') { if (m.kind !== 'image') return err('A cover or logo must be a photo.'); await (await svc()).update(ctx.userId, b.id, use === 'cover' ? { coverId: m.id } : { logoId: m.id }); }
+        return { text: `Added the ${m.kind} as the ${use}${use === 'gallery' ? ' in the gallery' : ''}${b.published ? '' : ' (not public until the page is published)'}.` };
       } catch (e) { return failure(e); }
     },
   };
@@ -239,11 +242,43 @@ export function bizTools(getSvc: () => Promise<BizService> | BizService = async 
     },
   };
   const post: Tool = {
-    definition: { name: 'biz_post', description: "Post an update to the business's public feed (it appears on the public page under Updates, newest first): a new product, a promotion, opening hours for a holiday, news. It is PUBLIC: post only what the owner asked to post, in their words (you may tidy spelling). Text up to 1,000 characters. Photos are added by the owner in Studio → Feed.",
-      parameters: { type: 'object', required: ['text'], properties: { business: BUSINESS, text: { type: 'string', description: 'The caption, like an Instagram caption.' }, product: { type: 'string', description: 'A product on the page this post sells: the post then has an Order button.' } } } },
+    definition: { name: 'biz_post', description: "Post an update to the business's public feed (it appears on the public page under Updates, newest first): a new product, a promotion, opening hours for a holiday, news. It is PUBLIC: post only what the owner asked to post, in their words (you may tidy spelling). Text up to 1,000 characters. They can attach photos in this chat (pass their fileIds) or add them in Studio → Feed.",
+      parameters: { type: 'object', required: ['text'], properties: { business: BUSINESS, text: { type: 'string', description: 'The caption, like an Instagram caption.' }, product: { type: 'string', description: 'A product on the page this post sells: the post then has an Order button.' }, file_ids: { type: 'array', items: { type: 'string' }, description: 'fileIds of photos (or videos, paid plans) the user attached in this chat, up to 10.' } } } },
     async execute(input, ctx) {
-      try { const b = await pick(ctx.userId, input.business); if ('error' in b) return err(b.error); const q = String(input.product ?? '').trim().toLowerCase(); const prod = q ? b.products.find((x) => x.name.toLowerCase() === q) ?? b.products.find((x) => x.name.toLowerCase().includes(q)) : undefined; const p = await (await svc()).addPost(ctx.userId, b.id, { text: input.text, productId: prod?.id }); return { text: `Posted to the feed${b.published ? '' : ' (not public until the page is published)'}. Feed link: ${linkOf(b)}#updates` }; } catch (e) { return failure(e); }
+      try { const b = await pick(ctx.userId, input.business); if ('error' in b) return err(b.error); const q = String(input.product ?? '').trim().toLowerCase(); const prod = q ? b.products.find((x) => x.name.toLowerCase() === q) ?? b.products.find((x) => x.name.toLowerCase().includes(q)) : undefined; const ids: string[] = []; for (const fid of (Array.isArray(input.file_ids) ? input.file_ids : []).slice(0, 10)) { const { meta, data } = await ctx.files.read(String(fid), ctx.userId); ids.push((await (await svc()).addMedia(ctx.userId, b.id, { name: meta.name, data: Buffer.from(data), scope: 'feed' })).id); }
+        const p = await (await svc()).addPost(ctx.userId, b.id, { text: input.text, mediaIds: ids, productId: prod?.id }); return { text: `Posted to the feed${ids.length ? ` with ${ids.length} attachment${ids.length === 1 ? '' : 's'}` : ''}${b.published ? '' : ' (not public until the page is published)'}. Feed link: ${linkOf(b)}#updates` }; } catch (e) { return failure(e); }
     },
   };
-  return [get, create, update, addProduct, changeProduct, addMedia, publish, link, messages, record('sale'), record('expense'), dashboard, orders, requestPay, payStatus, paySetup, report, stock, agent, post];
+  const open: Tool = {
+    definition: { name: 'biz_open', description: "Give the owner a direct link to a part of their business dashboard, the public page, the feed or the installable app. Use it as an extra after you have answered or done the thing in chat, or when they ask to 'open' or 'show me' a screen.",
+      parameters: { type: 'object', required: ['where'], properties: { business: BUSINESS, where: { type: 'string', enum: ['dashboard', 'sales', 'expenses', 'products', 'customers', 'reports', 'messages', 'public', 'feed', 'agent', 'secrets', 'settings', 'chat', 'page', 'app'] } } } },
+    async execute(input, ctx) {
+      try {
+        const b = await pick(ctx.userId, input.business); if ('error' in b) return err(b.error); const w = String(input.where);
+        if (w === 'page') return { text: `${linkOf(b)}${b.published ? '' : ' (not published yet)'}` }; if (w === 'app') return { text: `The business app is the page itself: ${linkOf(b)}. On a phone, open it and choose "Add to Home screen" (or Install app on a computer); it installs named "${b.name}" in the business colour. It updates itself whenever the page changes, so there is nothing to update by hand.` };
+        const view = w === 'dashboard' ? '' : `?view=${w === 'feed' ? 'feed' : w}`; return { text: `${site()}/biz${view}` };
+      } catch (e) { return failure(e); }
+    },
+  };
+  const workflow: Tool = {
+    definition: { name: 'biz_workflow', description: "Routines for the business, run by chat. action 'list' shows the built-in ones (Open the day, Close the day, Weekly review) and the owner's saved ones. 'run' with a name: a built-in one gives you instructions to carry out now with the read tools; a saved one becomes a plan the owner sees first and approves with a yes (use run_proposal after their yes). 'save' stores a new routine (name + steps; steps use only: " + WORKFLOW_TOOLS.join(', ') + "); 'delete' removes one. Use it when the owner says things like 'close the day', 'do my usual weekly promo', or 'remember this routine'.",
+      parameters: { type: 'object', required: ['action'], properties: { business: BUSINESS, action: { type: 'string', enum: ['list', 'run', 'save', 'delete'] }, name: { type: 'string' }, description: { type: 'string' }, steps: { type: 'array', items: { type: 'object', required: ['tool', 'input', 'label'], properties: { tool: { type: 'string' }, input: { type: 'object' }, label: { type: 'string', description: 'What this step does, in plain words the owner reads.' } } } } } } },
+    async execute(input, ctx) {
+      try {
+        const b = await pick(ctx.userId, input.business); if ('error' in b) return err(b.error); const s = await svc(); const act = String(input.action); const name = String(input.name ?? '').trim();
+        if (act === 'list') { const mine = await s.workflows(ctx.userId, b.id); return { text: `Built in:\n${BUILTIN_WORKFLOWS.map((w) => `- ${w.name}: ${w.description}`).join('\n')}\nSaved:\n${mine.length ? mine.map((w) => `- ${w.name} (${w.steps.length} steps): ${w.description || w.steps.map((x) => x.label).join('; ')}`).join('\n') : '- none yet'}` }; }
+        if (act === 'save') { const w = await s.saveWorkflow(ctx.userId, b.id, { name, description: input.description, steps: input.steps }); return { text: `Saved the routine "${w.name}" (${w.steps.length} steps). Say its name to run it; each run is shown as a plan first.` }; }
+        if (act === 'delete') return (await s.deleteWorkflow(ctx.userId, b.id, name)) ? { text: `Deleted "${name}".` } : err(`No routine called "${name}".`);
+        if (act === 'run') {
+          const built = BUILTIN_WORKFLOWS.find((w) => w.name.toLowerCase() === name.toLowerCase() || w.id === name.toLowerCase()); if (built) return { text: `Carry out "${built.name}" now: ${built.how}` };
+          const w = (await s.workflows(ctx.userId, b.id)).find((x) => x.name.toLowerCase() === name.toLowerCase()); if (!w) return err(`No routine called "${name}". Use action list to see them.`);
+          const steps = w.steps.map((x) => ({ ...x, input: { business: b.slug, ...x.input } })); const v = validateSteps(steps); if (v.ok === false) return err(v.error);
+          const p = await proposalStore().create(ctx.userId, `${w.name}: ${b.name}`, v.steps);
+          return { text: `Plan saved (id ${p.id}). Nothing has been done.\n${planText(p)}\nAsk the owner to confirm (or tap "Do it" on Telegram). After their yes, call run_proposal with this id.` };
+        }
+        return err('Unknown action.');
+      } catch (e) { return failure(e); }
+    },
+  };
+  return [get, create, update, addProduct, changeProduct, addMedia, publish, link, messages, record('sale'), record('expense'), dashboard, orders, requestPay, payStatus, paySetup, report, stock, agent, post, open, workflow];
 }

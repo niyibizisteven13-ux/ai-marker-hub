@@ -17,3 +17,11 @@ const no = [
 ];
 test('platform requests get the tools', () => { for (const m of yes) assert.ok(needsPlatformTools(m), `should be a platform request: ${m}`); });
 test('general questions do not', () => { for (const m of no) assert.ok(!needsPlatformTools(m), `should not be a platform request: ${m}`); });
+
+import { needsPlatformTools as needs } from '../server/services/ai/platformIntent.js';
+test('business messages get the tools (the normal chat can run the dashboard), general talk about business does not', () => {
+  for (const m of ['Today I sold 5 loaves for 4,000', 'i spent 8000 on flour', 'how is my business doing today?', 'what are my sales this week', 'what is running out? restock rice', 'post an update to my page with a promotion', 'ask 0788 123 456 to pay 3,000', 'publish my page', 'close the day', 'nacuruje ibiro 5 ku 4000', "j'ai vendu 3 gâteaux", 'show pending orders', 'record a sale of 2,500', 'add an expense of 1,000 for transport'])
+    assert.equal(needs(m), true, m);
+  for (const m of ['What is profit margin?', 'Explain how to start a small business', 'hello there my friend', 'write a poem about the sea'])
+    assert.equal(needs(m), false, m);
+});

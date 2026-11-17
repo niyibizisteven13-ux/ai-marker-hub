@@ -214,3 +214,9 @@ test('shared links include older posts outside the feed page and respect publica
   await svc.setPublished('o', b.id, false);
   assert.deepEqual(await svc.publicPosts(b.slug, { postId: shared.id }), []);
 });
+
+import { validateSteps } from '../server/services/agenda/proposals.js';
+test('plans may contain the business tools the agent and routines propose (and still refuse anything else)', () => {
+  for (const tool of ['biz_orders', 'biz_change_product', 'biz_stock', 'biz_request_payment', 'biz_post', 'biz_record_expense']) assert.equal(validateSteps([{ tool, input: {}, label: 'x' }]).ok, true, tool);
+  for (const tool of ['biz_agent', 'biz_payment_setup', 'rm_rf', 'biz_get']) assert.equal(validateSteps([{ tool, input: {}, label: 'x' }]).ok, false, tool);
+});
