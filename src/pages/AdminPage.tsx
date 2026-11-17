@@ -2788,7 +2788,7 @@ export default function AdminPage({ onBack, initialTab = 'overview' }: { onBack:
               {tab === 'billing' && (
                 <Section
                   title="Upgrades & Subscriptions"
-                  hint="Prices, RWF exchange rate, GO packs and limits; MTN Mobile Money payments and receipts; grant plans or credits. Payment statuses are only changed by verified checks with MTN."
+                  hint="Prices, RWF exchange rate, GO packs and limits; MTN Mobile Money payments and receipts; grant plans or credits. Automatic payments are checked with MTN; manual MoMo Pay purchases are verified by an administrator before activation and receipt delivery."
                 >
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                     <Stat label="Active subscriptions" value={billingData.subscriptions.filter((subscription) => subscription.status === 'ACTIVE').length} detail="Across BUSINESS, PRO, and ORGANIZATION" />

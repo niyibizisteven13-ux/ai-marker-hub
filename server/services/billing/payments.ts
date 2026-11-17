@@ -3,6 +3,7 @@ import { prisma } from '../../db.js';
 import logger from '../../utils/logger.js';
 import { EmailService } from '../EmailService.js';
 import { PLANS, SOLD_PLANS, currentGoPacks, fxUsdRwf, planFor, planIdForSubscription, refreshBillingSettings, subscriptionTypeFor, walletBalance, type SoldPlanId } from './plans.js';
+import { automaticPaymentsEnabled } from './manual.js';
 import { pauseMessage, salesState } from './sales.js';
 import { MomoError, momoConfig, momoReady, normalizeMsisdn, paymentStatus, requestToPay } from './momo.js';
 import { expiredEmail, paymentFailedEmail, receiptEmail, renewalReminderEmail, type Email } from './emails.js';
@@ -45,7 +46,7 @@ export async function quote(purpose: Purpose, opts: { packId?: string; months?: 
 
 export function publicPayment(p: any) {
   return {
-    id: p.id, purpose: p.purpose, packId: p.packId, months: p.months, credits: p.credits, amountRwf: p.amountRwf, amountUsd: p.amountUsd, currency: p.currency,
+    id: p.id, provider: p.provider, emailedAt: p.emailedAt ?? null, purpose: p.purpose, packId: p.packId, months: p.months, credits: p.credits, amountRwf: p.amountRwf, amountUsd: p.amountUsd, currency: p.currency,
     phoneMasked: p.phoneMasked, status: p.status, reason: p.providerReason, receiptNumber: p.receiptNumber, transactionId: p.financialTransactionId,
     createdAt: new Date(p.createdAt).toISOString(), paidAt: p.fulfilledAt ? new Date(p.fulfilledAt).toISOString() : null,
   };
@@ -55,6 +56,7 @@ export function publicPayment(p: any) {
 export async function startPayment(userId: string, input: { purpose: Purpose; packId?: string; months?: number; phone: string }) {
   const sales = await salesState();
   if (sales.paused) throw new BillingError(pauseMessage(sales), 503, 'SALES_PAUSED');
+  if (!(await automaticPaymentsEnabled())) throw new BillingError('Automatic payments are paused. Pay with MTN MoMo Pay and send your proof on WhatsApp.', 503, 'MANUAL_PAYMENT_REQUIRED');
   if (!momoReady()) throw new BillingError('Mobile Money payments are being set up. Please try again soon.', 503, 'NOT_CONFIGURED');
   const q = await quote(input.purpose, input);
   let phone;
@@ -82,7 +84,7 @@ export async function startPayment(userId: string, input: { purpose: Purpose; pa
 export async function checkPayment(paymentId: string, userId?: string) {
   const p = await db.billingPayment.findUnique({ where: { id: paymentId } });
   if (!p || (userId && p.userId !== userId)) throw new BillingError('Payment not found.', 404, 'NOT_FOUND');
-  if (p.status !== 'PENDING') return publicPayment(p);
+  if (p.status !== 'PENDING' || p.provider === 'MTN_MOMO_MANUAL') return publicPayment(p);
   const r = await paymentStatus(p.id);
   if (r.status === 'SUCCESSFUL') return publicPayment(await fulfil(p, r.financialTransactionId));
   const expired = Date.now() - new Date(p.createdAt).getTime() > PENDING_TTL_MS;
@@ -100,32 +102,44 @@ export async function checkPayment(paymentId: string, userId?: string) {
 const receiptNumberFor = (p: any, at: Date) => `BW-${at.toISOString().slice(0, 10).replace(/-/g, '')}-${String(p.id).replace(/-/g, '').slice(0, 6).toUpperCase()}`;
 
 /** Grants what was paid for, exactly once (the first caller wins the conditional update). */
-export async function fulfil(p: any, financialTransactionId?: string) {
+export async function fulfil(p: any, financialTransactionId?: string, approvedBy?: string) {
   const now = new Date();
-  const won = await db.billingPayment.updateMany({
-    where: { id: p.id, fulfilledAt: null },
-    data: { status: 'SUCCESSFUL', providerStatus: 'SUCCESSFUL', fulfilledAt: now, receiptNumber: receiptNumberFor(p, now), financialTransactionId: financialTransactionId ?? null, updatedAt: now },
+  const done = await db.$transaction(async (tx: any) => {
+    const existing = await tx.billingPayment.findUnique({ where: { id: p.id } });
+    if (existing?.fulfilledAt) return existing;
+    const won = await tx.billingPayment.updateMany({
+      where: { id: p.id, status: 'PENDING', fulfilledAt: null },
+      data: { status: 'SUCCESSFUL', providerStatus: 'SUCCESSFUL', fulfilledAt: now, receiptNumber: receiptNumberFor(p, now), financialTransactionId: financialTransactionId ?? null, updatedAt: now },
+    });
+    if (Number(won?.count ?? 0) === 0) return tx.billingPayment.findUnique({ where: { id: p.id } });
+    if (approvedBy && financialTransactionId) {
+      // AppSetting.key is unique in PostgreSQL. Reserve the transaction ID in the same transaction as
+      // the entitlement so two administrators cannot use one MoMo transfer for two purchases.
+      const key = `manual-momo-transaction:${financialTransactionId}`;
+      const used = await tx.appSetting.findUnique({ where: { key } });
+      if (used) throw new BillingError('This MoMo transaction has already been used.', 409, 'DUPLICATE_TRANSACTION');
+      await tx.appSetting.create({ data: { key, value: { paymentId: p.id }, updatedBy: approvedBy } });
+    }
+    if (p.purpose === 'GO_PACK') {
+      await tx.creditLedger.create({ data: { id: randomUUID(), userId: p.userId, delta: p.credits, reason: 'purchase', paymentId: p.id, note: p.packId, createdAt: now } });
+    } else {
+      // Older payments may say INSTITUTION; they keep granting that plan.
+      const planType = subscriptionTypeFor(planIdForSubscription(p.purpose) ?? 'PRO');
+      const sub = await tx.subscription.findUnique({ where: { userId: p.userId } });
+      const stillActive = sub && sub.status === 'ACTIVE' && sub.planType === planType && sub.endDate && new Date(sub.endDate).getTime() > now.getTime();
+      const from = stillActive ? new Date(sub.endDate).getTime() : now.getTime();
+      const endDate = new Date(from + Math.max(1, p.months) * MONTH_MS);
+      if (sub) await tx.subscription.update({ where: { userId: p.userId }, data: { planType, status: 'ACTIVE', endDate, ...(stillActive ? {} : { startDate: now }) } });
+      else await tx.subscription.create({ data: { id: randomUUID(), userId: p.userId, planType, status: 'ACTIVE', startDate: now, endDate, createdAt: now, updatedAt: now } });
+    }
+    return tx.billingPayment.findUnique({ where: { id: p.id } });
   });
-  if (Number(won?.count ?? 0) === 0) return db.billingPayment.findUnique({ where: { id: p.id } });
-
-  if (p.purpose === 'GO_PACK') {
-    await db.creditLedger.create({ data: { id: randomUUID(), userId: p.userId, delta: p.credits, reason: 'purchase', paymentId: p.id, note: p.packId, createdAt: now } });
-  } else {
-    // Older payments may say INSTITUTION; they keep granting that plan.
-    const planType = subscriptionTypeFor(planIdForSubscription(p.purpose) ?? 'PRO');
-    const sub = await db.subscription.findUnique({ where: { userId: p.userId } });
-    const stillActive = sub && sub.status === 'ACTIVE' && sub.planType === planType && sub.endDate && new Date(sub.endDate).getTime() > now.getTime();
-    const from = stillActive ? new Date(sub.endDate).getTime() : now.getTime();
-    const endDate = new Date(from + Math.max(1, p.months) * MONTH_MS);
-    if (sub) await db.subscription.update({ where: { userId: p.userId }, data: { planType, status: 'ACTIVE', endDate, ...(stillActive ? {} : { startDate: now }) } });
-    else await db.subscription.create({ data: { id: randomUUID(), userId: p.userId, planType, status: 'ACTIVE', startDate: now, endDate, createdAt: now, updatedAt: now } });
-  }
-  const done = await db.billingPayment.findUnique({ where: { id: p.id } });
+  if (!done?.fulfilledAt || done.status !== 'SUCCESSFUL') return done;
   // The assistant sees the new plan and credits on the very next message (imported lazily: platformContext imports this file).
   void import('../platformContext.js').then((m) => m.invalidatePlatformContext(p.userId)).catch(() => undefined);
-  void notifyReceipt(done).catch((e) => logger.warn('[billing] receipt notification failed', { errorType: e?.name }));
+  await notifyReceipt(done).catch((e) => logger.warn('[billing] receipt notification failed', { errorType: e?.name }));
   logger.info('[billing] payment fulfilled', { paymentId: p.id, purpose: p.purpose });
-  return done;
+  return db.billingPayment.findUnique({ where: { id: done.id } });
 }
 
 // ── Notifications (each sent once; NotificationLog keys) ─────────────────────
@@ -215,8 +229,10 @@ export function startBillingJobs() {
   started = true;
   setInterval(async () => {
     try {
-      const pending = await db.billingPayment.findMany({ where: { status: 'PENDING', createdAt: { gte: new Date(Date.now() - 30 * 60_000) } }, take: 50 });
+      const pending = await db.billingPayment.findMany({ where: { status: 'PENDING', provider: 'MTN_MOMO', createdAt: { gte: new Date(Date.now() - 30 * 60_000) } }, take: 50 });
       for (const p of pending) await checkPayment(p.id).catch(() => undefined);
+      const receipts = await db.billingPayment.findMany({ where: { status: 'SUCCESSFUL', emailedAt: null, fulfilledAt: { gte: new Date(Date.now() - 7 * 86_400_000) } }, take: 50 });
+      for (const p of receipts) await notifyReceipt(p).catch(() => undefined);
     } catch (e) { logger.warn('[billing] poller failed', { errorType: (e as Error)?.name }); }
   }, 30_000).unref();
   setInterval(() => void runRenewalSweep().catch((e) => logger.warn('[billing] renewal sweep failed', { errorType: e?.name })), 3600_000).unref();

@@ -42,7 +42,7 @@ fake.get('/collection/v1_0/requesttopay/:id', (req, res) => {
 const server: Server = await new Promise((resolve) => { const s = fake.listen(0, () => resolve(s)); });
 const mtnUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
-Object.assign(process.env, { MOMO_BASE_URL: mtnUrl, MOMO_COLLECTION_PRIMARY_KEY: 'sub-key', MOMO_API_USER: randomUUID(), MOMO_API_KEY: 'api-key', MOMO_TARGET_ENV: 'sandbox', MOMO_CALLBACK_HOST: 'https://pay.example.test' });
+Object.assign(process.env, { BILLING_AUTOMATIC_PAYMENTS_ENABLED: 'true', MOMO_BASE_URL: mtnUrl, MOMO_COLLECTION_PRIMARY_KEY: 'sub-key', MOMO_API_USER: randomUUID(), MOMO_API_KEY: 'api-key', MOMO_TARGET_ENV: 'sandbox', MOMO_CALLBACK_HOST: 'https://pay.example.test' });
 delete process.env.MOMO_SIMULATE;
 
 const { prisma } = await import('../server/db.js');
@@ -470,4 +470,100 @@ test('Pause upgrades: no new plan or top-up can be bought until an admin resumes
   resetMomo();
   const { payment } = await startPayment(userId, { purpose: 'STARTER', months: 1, phone: '0788123457' });
   assert.equal(payment.status, 'PENDING', 'resumed: buying works again');
+});
+
+test('manual checkout is the default even with MTN keys; automatic checkout can be explicitly resumed', async () => {
+  const { paymentOptions, startManualPayment } = await import('../server/services/billing/manual.js');
+  delete process.env.BILLING_AUTOMATIC_PAYMENTS_ENABLED;
+  try {
+    const options = await paymentOptions();
+    assert.equal(options.payments, 'off');
+    assert.deepEqual(options.manual, { momoCode: '2191184', momoName: 'Niyibizi Steven', whatsapp: '250799691108' });
+    const userId = await newUser();
+    const sent = mtn.requests.size;
+    await assert.rejects(startPayment(userId, { purpose: 'PRO', phone: '0788123456' }), (e: any) => e.code === 'MANUAL_PAYMENT_REQUIRED');
+    const p = await startManualPayment(userId, { purpose: 'PLUS', months: 3 });
+    assert.equal(p.amountRwf, PLANS.PLUS.priceRwf! * 3);
+    assert.equal(p.status, 'PENDING');
+    assert.equal((await planFor(userId)).id, 'FREE');
+    assert.equal((await startManualPayment(userId, { purpose: 'PLUS', months: 3 })).id, p.id, 'reopening reuses pending purchase');
+    await db.billingPayment.update({ where: { id: p.id }, data: { createdAt: new Date(Date.now() - 3600_000) } });
+    assert.equal((await checkPayment(p.id, userId)).status, 'PENDING', 'manual approval does not expire like a phone prompt');
+    assert.equal(mtn.requests.size, sent, 'no automatic charge');
+  } finally { process.env.BILLING_AUTOMATIC_PAYMENTS_ENABLED = 'true'; }
+});
+
+test('manual approval activates the quoted plan once and emails a real receipt to the login email', async () => {
+  const { startManualPayment, approveManualPayment } = await import('../server/services/billing/manual.js');
+  const userId = await newUser();
+  const p = await startManualPayment(userId, { purpose: 'STARTER', months: 3 }, true);
+  const tx = `TX-${randomUUID()}`;
+  const done = await approveManualPayment(p.id, tx, 'admin-test');
+  assert.equal(done.status, 'SUCCESSFUL');
+  assert.ok(done.emailedAt);
+  assert.equal((await planFor(userId)).id, 'STARTER');
+  const end = (await db.subscription.findUnique({ where: { userId } })).endDate;
+  await approveManualPayment(p.id, tx, 'admin-test');
+  assert.equal(new Date((await db.subscription.findUnique({ where: { userId } })).endDate).getTime(), new Date(end).getTime());
+  assert.equal(mailsTo(userId).length, 1);
+  assert.match(mailsTo(userId)[0].text, /Starter plan · 3 months/);
+  assert.match(mailsTo(userId)[0].text, /MoMo Pay 2191184/);
+  await assert.rejects(approveManualPayment(p.id, 'OTHER-TX', 'admin-test'), /different transaction/);
+  const other = await startManualPayment(await newUser(), { purpose: 'PRO', months: 1 }, true);
+  await assert.rejects(approveManualPayment(other.id, tx, 'admin-test'), (e: any) => e.code === 'DUPLICATE_TRANSACTION');
+  assert.equal((await checkPayment(other.id)).status, 'PENDING');
+});
+
+test('manual credit purchases grant exact pack credits; failed receipt delivery can be retried without granting again', async () => {
+  const { startManualPayment, approveManualPayment } = await import('../server/services/billing/manual.js');
+  const { notifyReceipt } = await import('../server/services/billing/payments.js');
+  const userId = await newUser();
+  const pack = currentGoPacks()[0];
+  const p = await startManualPayment(userId, { purpose: 'GO_PACK', packId: pack.id }, true);
+  EmailService.setTestTransport({ sendMail: async () => { throw new Error('SMTP unavailable'); } } as any);
+  const tx = `GO-${randomUUID()}`;
+  try {
+    const done = await approveManualPayment(p.id, tx, 'admin-test');
+    assert.equal(done.status, 'SUCCESSFUL');
+    assert.equal(done.emailedAt, null);
+    assert.equal(await walletBalance(userId), pack.credits);
+  } finally { EmailService.setTestTransport({ sendMail: async (m: any) => { mails.push(m); return { messageId: randomUUID() }; } } as any); }
+  await notifyReceipt(await db.billingPayment.findUnique({ where: { id: p.id } }));
+  await approveManualPayment(p.id, tx, 'admin-test');
+  assert.equal(await walletBalance(userId), pack.credits);
+  assert.equal(mailsTo(userId).length, 1);
+  assert.ok((await db.billingPayment.findUnique({ where: { id: p.id } })).emailedAt);
+});
+
+test('manual purchase APIs require authentication, reserve approval for admins and reject buyer-supplied prices', async () => {
+  const { default: jwt } = await import('jsonwebtoken');
+  const { getJwtSecret } = await import('../server/auth/secrets.js');
+  const { requireAuth, requireRole } = await import('../production/auth.js');
+  const { default: billing } = await import('../server/routes/billingRoutes.js');
+  const { default: adminBilling } = await import('../server/routes/adminBillingRoutes.js');
+  const userId = await newUser();
+  const other = await newUser();
+  const admin = await newUser({ role: 'ADMIN' });
+  const token = (id: string) => jwt.sign({ userId: id }, getJwtSecret(), { issuer: 'bwenge', audience: 'bwenge-web', expiresIn: '5m' });
+  const app = express().use(express.json()).use('/api/billing', billing).use('/api/admin/billing', requireAuth, requireRole('ADMIN'), adminBilling);
+  const srv = app.listen(0);
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  const call = async (path: string, who?: string, body?: object) => fetch(`${base}${path}`, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', ...(who ? { Authorization: `Bearer ${token(who)}` } : {}) }, body: body ? JSON.stringify(body) : undefined });
+  delete process.env.BILLING_AUTOMATIC_PAYMENTS_ENABLED;
+  try {
+    assert.equal((await call('/api/billing/manual-checkout', undefined, { purpose: 'PRO' })).status, 401);
+    assert.equal((await call('/api/billing/manual-checkout', userId, { purpose: 'PRO', amountRwf: 1 })).status, 400);
+    const checkout = await call('/api/billing/manual-checkout', userId, { purpose: 'PLUS', months: 1 });
+    assert.equal(checkout.status, 200);
+    const p = (await checkout.json()).payment;
+    assert.equal(p.amountRwf, PLANS.PLUS.priceRwf);
+    assert.equal((await call(`/api/billing/payments/${p.id}`, other)).status, 404);
+    assert.equal((await call(`/api/admin/billing/payments/${p.id}/approve`, userId, { transactionId: 'FORGED-1' })).status, 403);
+    assert.equal((await call(`/api/admin/billing/payments/${p.id}/approve`, admin, { transactionId: `REAL-${randomUUID()}` })).status, 200);
+    const receipt = await call(`/api/billing/payments/${p.id}/receipt`, userId);
+    assert.equal(receipt.status, 200);
+    assert.match(await receipt.text(), /Pro Plus plan/);
+    assert.equal((await call(`/api/billing/payments/${p.id}/receipt`, other)).status, 404);
+    assert.equal((await planFor(userId)).id, 'PLUS');
+  } finally { process.env.BILLING_AUTOMATIC_PAYMENTS_ENABLED = 'true'; srv.close(); }
 });

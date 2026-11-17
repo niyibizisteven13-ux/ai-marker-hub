@@ -107,7 +107,7 @@ export default function UpgradePage({ jobId, onBack, onSuccess }: UpgradePagePro
   return (
     <div className="flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-y-auto bg-[var(--bg)] font-sans text-[var(--text)] antialiased upgrade-scrollbar">
       {orgOpen && <OrganisationRequestDialog isOpen={orgOpen} onClose={() => setOrgOpen(false)} />}
-      {checkout && manual && <ManualPayDialog checkout={checkout} manual={manual} onClose={() => setCheckout(null)} />}
+      {checkout && manual && <ManualPayDialog checkout={checkout} manual={manual} onClose={() => setCheckout(null)} onDone={onSuccess} />}
       {checkout && !manual && <CheckoutDialog checkout={checkout} onClose={() => setCheckout(null)} onDone={onSuccess} />}
 
       <div className="sticky top-0 z-30 flex items-center justify-between border-b border-[var(--line)] bg-[var(--bg)]/90 px-4 py-4 backdrop-blur sm:px-8">
@@ -225,8 +225,8 @@ export default function UpgradePage({ jobId, onBack, onSuccess }: UpgradePagePro
         <section className="mx-auto grid max-w-4xl grid-cols-1 gap-3 sm:grid-cols-3">
           {[
             ['What is a credit?', 'A chat reply is about 1 credit. Marking one handwritten paper is about 12; overnight marking (results by the next morning) costs half.'],
-            ['How do I pay?', manual ? 'Choose a plan, pay the amount by MTN Mobile Money to our code, then send the payment screenshot and your email on WhatsApp. We activate it within a few minutes.' : 'Enter your MTN MoMo number, then approve the prompt on your phone with your PIN. Your plan or credits are added as soon as MTN confirms.'],
-            ['Receipts and renewal', 'A receipt is emailed and sent to Telegram. Mobile Money never renews automatically: we remind you 3 days before your plan ends.'],
+            ['How do I pay?', manual ? 'Choose a plan, pay with MTN MoMo Pay to code 2191184 (Niyibizi Steven), then send the screenshot or payment confirmation SMS and your login email to +250799691108 on WhatsApp. Access is activated after verification.' : 'Enter your MTN MoMo number, then approve the prompt on your phone with your PIN. Your plan or credits are added as soon as MTN confirms.'],
+            ['Receipts and renewal', 'After payment is verified and your purchase is activated, a receipt is emailed to your login email and sent to Telegram if connected. Mobile Money never renews automatically: we remind you 3 days before your plan ends.'],
           ].map(([q, a]) => (
             <div key={q} className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4"><h3 className="text-sm font-semibold text-[var(--text)]">{q}</h3><p className="mt-1 text-xs leading-relaxed text-[var(--muted)]">{a}</p></div>
           ))}
@@ -237,27 +237,47 @@ export default function UpgradePage({ jobId, onBack, onSuccess }: UpgradePagePro
 }
 
 /** Manual payment (until online payment is set up): the amount, where to send it, and the screenshot on WhatsApp. An administrator then activates the plan or credits. */
-function ManualPayDialog({ checkout, manual, onClose }: { checkout: Checkout; manual: { momoCode: string; momoName: string; whatsapp: string | null }; onClose: () => void }) {
-  // The person's own payment code (BW-…): the administrator types it into Admin → Billing → Users to find the account and give access.
+function ManualPayDialog({ checkout, manual, onClose, onDone }: { checkout: Checkout; manual: { momoCode: string; momoName: string; whatsapp: string | null }; onClose: () => void; onDone: () => void }) {
   const [ref, setRef] = useState<{ code: string; email: string | null } | null>(null);
-  useEffect(() => { void authFetch('/api/billing/pay-ref').then((r) => r.json()).then((b) => { if (b?.code) setRef({ code: b.code, email: b.email ?? null }); }).catch(() => undefined); }, []);
-  const code = ref?.code ?? '';
-  const text = `Hello, I paid for my Bwenge upgrade: ${checkout.title}, ${rwf(checkout.amountRwf)}. My payment code: ${code || '______'}${ref?.email ? `. My email: ${ref.email}` : ''}. Payment screenshot attached.`;
-  const link = manual.whatsapp ? `https://wa.me/${manual.whatsapp}?text=${encodeURIComponent(text)}` : null;
+  const [payment, setPayment] = useState<Payment | null>(null);
+  const [error, setError] = useState('');
+  const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    let active = true;
+    void Promise.all([
+      authFetch('/api/billing/pay-ref').then(async (r) => { if (!r.ok) throw new Error('Sign in to continue.'); return r.json(); }),
+      authFetch('/api/billing/manual-checkout', { method: 'POST', body: JSON.stringify({ purpose: checkout.purpose, packId: checkout.packId, months: checkout.months || undefined }) }).then(async (r) => { const b = await r.json(); if (!r.ok) throw new Error(b.error || 'Could not prepare your payment.'); return b.payment; }),
+    ]).then(([r, p]) => { if (active) { setRef(r); setPayment(p); setError(''); } }).catch((e) => { if (active) setError(e.message); });
+    return () => { active = false; };
+  }, [checkout, retry]);
+  useEffect(() => {
+    if (!payment || payment.status !== 'PENDING') return;
+    const check = async () => {
+      try { const r = await authFetch(`/api/billing/payments/${payment.id}`); if (r.ok) { const b = await r.json(); setPayment(b.payment); if (b.payment.status === 'SUCCESSFUL') window.dispatchEvent(new Event('bwenge:usage')); } } catch { /* Retry on next tick. */ }
+    };
+    const timer = window.setInterval(() => void check(), 10000);
+    window.addEventListener('focus', check);
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', check); };
+  }, [payment?.id, payment?.status]);
+  const text = `Hello, I paid for my Bwenge upgrade: ${checkout.title}, ${rwf(payment?.amountRwf ?? checkout.amountRwf)}. Login email: ${ref?.email ?? ''}. Account code: ${ref?.code ?? ''}. Purchase reference: ${payment?.id ?? ''}. Paid to MTN MoMo Pay ${manual.momoCode} (${manual.momoName}). I will attach my payment screenshot or confirmation SMS. Please verify and activate my purchase.`;
+  const link = manual.whatsapp && payment && ref?.email ? `https://wa.me/${manual.whatsapp}?text=${encodeURIComponent(text)}` : null;
+  const paid = payment?.status === 'SUCCESSFUL';
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Pay by Mobile Money" onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <h2 className={`${SERIF} text-2xl font-normal text-[var(--text)]`}>Pay by Mobile Money</h2>
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Pay with MTN MoMo Pay">
+      <div className="max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-5 shadow-2xl">
+        <div className="flex items-start justify-between gap-3"><h2 className={`${SERIF} text-2xl font-normal text-[var(--text)]`}>{paid ? 'Your purchase is active' : 'Pay with MTN MoMo Pay'}</h2><button onClick={onClose} aria-label="Close" className="p-2"><X size={18} /></button></div>
         <p className="mt-1 text-sm text-[var(--muted)]">{checkout.title}</p>
-        <ol className="mt-4 space-y-3 text-sm text-[var(--text)]">
-          <li><b>1. Send {rwf(checkout.amountRwf)}</b> by MTN Mobile Money to code <b className="select-all rounded bg-[var(--surface-2)] px-1.5 py-0.5 font-mono">{manual.momoCode}</b> (name: {manual.momoName}).</li>
-          <li><b>2. Message us on WhatsApp</b>{manual.whatsapp ? ` (+${manual.whatsapp})` : ''} with the payment screenshot and your payment code: <b className="select-all rounded bg-[var(--surface-2)] px-1.5 py-0.5 font-mono">{code || '…'}</b></li>
-          <li><b>3. We give you access</b> as soon as we see the payment, usually within a few minutes. Then reload Bwenge.</li>
-        </ol>
-        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <button type="button" onClick={onClose} className="min-h-11 rounded-xl border border-[var(--line)] px-4 text-sm text-[var(--text)] hover:bg-[var(--hover)]">Close</button>
-          {link && <a href={link} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-emerald-500 px-5 text-sm font-semibold text-white hover:bg-emerald-400">I have paid: open WhatsApp</a>}
-        </div>
+        {paid ? <div className="mt-5 space-y-3 text-sm"><CheckCircle2 className="text-emerald-500" /><p>Payment verified. Your plan or credits are ready.</p><p>Receipt {payment.receiptNumber}. Check your login email for your receipt.</p><button onClick={() => void openReceipt(payment.id)} className="underline">View receipt</button><button onClick={onDone} className="ml-4 underline">Continue to workspace</button></div> : <>
+          <p className="mt-4 rounded-xl bg-[var(--surface-2)] p-3 text-xs text-[var(--muted)]">Automatic payments are temporarily paused. Pay below and we will activate your purchase as soon as we verify your payment.</p>
+          <ol className="mt-4 space-y-4 text-sm text-[var(--text)]">
+            <li><b>1. Pay {rwf(payment?.amountRwf ?? checkout.amountRwf)}</b><p className="mt-1">Use MTN MoMo Pay merchant code:</p><p className="mt-2 select-all rounded-xl bg-[var(--surface-2)] p-3 font-mono text-2xl font-bold tracking-wider">{manual.momoCode}</p><p className="mt-1">Confirm the recipient is <b>{manual.momoName}</b> before paying.</p></li>
+            <li><b>2. Send proof on WhatsApp</b><p className="mt-1">Send your payment screenshot or confirmation SMS to <b>+{manual.whatsapp}</b>, together with your <b>login email</b> and the purchase reference below. Attach the proof yourself after opening WhatsApp.</p></li>
+            <li><b>3. Receive access and your receipt</b><p className="mt-1">We activate your purchase immediately after verification. Your receipt is emailed to your login email. This page checks for approval automatically.</p></li>
+          </ol>
+          <div className="mt-4 break-all rounded-xl border border-[var(--line)] p-3 text-xs"><p>Login email: <b>{ref?.email ?? 'Loading…'}</b></p><p className="mt-1">Purchase reference: <span className="select-all font-mono">{payment?.id ?? 'Loading…'}</span></p><p className="mt-1">Account code: <span className="select-all font-mono">{ref?.code ?? 'Loading…'}</span></p></div>
+          {error && <div role="alert" className="mt-3 text-sm text-[var(--danger)]">{error} <button onClick={() => setRetry((n) => n + 1)} className="underline">Retry</button></div>}
+          <div className="mt-5 flex flex-col gap-2">{link ? <a href={link} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white hover:bg-emerald-500">I have paid · Send proof on WhatsApp</a> : <button disabled className="min-h-11 rounded-xl bg-[var(--surface-2)] text-sm opacity-60">Preparing payment details…</button>}<button onClick={onClose} className="min-h-11 rounded-xl border border-[var(--line)] text-sm">Close</button></div>
+        </>}
       </div>
     </div>
   );
