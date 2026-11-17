@@ -57,7 +57,7 @@ export interface DayStats { views: number; whatsapp: number; calls: number; shar
 
 /* ---------------------------------------------------------------- limits */
 export interface Limits { businesses: number; products: number; images: number; videos: number; totalMediaMb: number; /** Photos and videos uploaded for feed posts (they are not in the gallery). */ feed: number; enquiries: number }
-export const FREE_LIMITS: Limits = { businesses: 1, products: 30, images: 12, videos: 2, totalMediaMb: 80, feed: 60, enquiries: 200 };
+export const FREE_LIMITS: Limits = { businesses: 1, products: 30, images: 12, videos: 0, totalMediaMb: 80, feed: 60, enquiries: 200 };
 export const PAID_LIMITS: Limits = { businesses: 3, products: 200, images: 60, videos: 10, totalMediaMb: 600, feed: 400, enquiries: 500 };
 export const limitsFor = (paid: boolean): Limits => (paid ? PAID_LIMITS : FREE_LIMITS);
 export const MAX_IMAGE_BYTES = 6 * 1024 * 1024;

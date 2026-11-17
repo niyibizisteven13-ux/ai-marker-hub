@@ -3,7 +3,7 @@ import { Megaphone, MapPin, Sparkles, Bot, ArrowLeft, BarChart3, Check, External
 import BizPage from '../components/biz/BizPage';
 import MapTile, { parseCoords } from '../components/biz/MapTile';
 import { FeedView, LockedGate, AgentChatView, AgentView, DashboardView, NotebookView, CustomersView, ReportsView, SecretsView, EntrySheet, type EntryKind } from '../components/biz/Workspace';
-import { btn, btnGhost, btnPrimary, card, input, msg, Tag, Title } from '../components/biz/ui';
+import { btn, btnGhost, btnPrimary, card, input, msg, PaidNote, Tag, Title } from '../components/biz/ui';
 import { BizApiError, ownerApi, prepareImage, type Mine } from '../biz/api';
 import { CATEGORIES, DAYS, THEMES, rwf, type Business, type Enquiry, type Hours, type PublicBusiness, type SecretsStatus } from '../biz/types';
 
@@ -123,7 +123,7 @@ function GalleryTab({ b, urls, onChange, limits }: { b: Business; urls: Record<s
   const upload = async (files: FileList | null) => {
     if (!files?.length) return; setErr('');
     for (const file of Array.from(files)) {
-      const isVideo = file.type.startsWith('video/'); if (isVideo && file.size > 25 * 1048576) { setErr(`${file.name} is ${(file.size / 1048576).toFixed(0)} MB. A video can be up to 25 MB: record a shorter clip.`); continue; }
+      const isVideo = file.type.startsWith('video/'); if (isVideo && limits.videos === 0) { setErr('Videos are for paid plans. Photos are free. See plans to add videos.'); continue; } if (isVideo && file.size > 25 * 1048576) { setErr(`${file.name} is ${(file.size / 1048576).toFixed(0)} MB. A video can be up to 25 MB: record a shorter clip.`); continue; }
       const prepared = isVideo ? { blob: file as Blob, name: file.name } : await prepareImage(file); const idx = Date.now() + Math.random();
       setJobs((j) => [...j, { name: file.name, progress: 0, _id: idx } as any]);
       try { await ownerApi.upload(b.id, prepared.blob, prepared.name, (p) => setJobs((j) => j.map((x: any) => (x._id === idx ? { ...x, progress: p } : x)))); setJobs((j) => j.filter((x: any) => x._id !== idx)); onChange(); }
@@ -134,9 +134,10 @@ function GalleryTab({ b, urls, onChange, limits }: { b: Business; urls: Record<s
   const act = async (fn: () => Promise<unknown>) => { setErr(''); try { await fn(); onChange(); } catch (e) { setErr(msg(e)); } };
   return (
     <div className="space-y-5">
-      <div className={card}><Title kind="public" hint={`Photos up to 6 MB, short videos up to 25 MB (about 30 seconds). ${images}/${limits.images} photos, ${videos}/${limits.videos} videos, ${(used / 1048576).toFixed(0)} of ${limits.totalMediaMb} MB used.`}>Add photos and videos</Title>
-        <input ref={fileRef} type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm" className="sr-only" id="biz-upload" onChange={(e) => void upload(e.target.files)} />
-        <label htmlFor="biz-upload" className={`${btnPrimary} cursor-pointer`}><Upload size={16} />Choose photos or videos</label>
+      <div className={card}><Title kind="public" hint={limits.videos > 0 ? `Photos up to 6 MB, short videos up to 25 MB (about 30 seconds). ${images}/${limits.images} photos, ${videos}/${limits.videos} videos, ${(used / 1048576).toFixed(0)} of ${limits.totalMediaMb} MB used.` : `Photos up to 6 MB. ${images}/${limits.images} photos, ${(used / 1048576).toFixed(0)} of ${limits.totalMediaMb} MB used.`}>{limits.videos > 0 ? 'Add photos and videos' : 'Add photos'}</Title>
+        {limits.videos === 0 && <div className="mb-3"><PaidNote what="Videos" /></div>}
+        <input ref={fileRef} type="file" multiple accept={limits.videos > 0 ? 'image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm' : 'image/jpeg,image/png,image/webp,image/gif'} className="sr-only" id="biz-upload" onChange={(e) => void upload(e.target.files)} />
+        <label htmlFor="biz-upload" className={`${btnPrimary} cursor-pointer`}><Upload size={16} />{limits.videos > 0 ? 'Choose photos or videos' : 'Choose photos'}</label>
         <p className="mt-2 text-xs text-[var(--app-faint)]">Big photos are shrunk on your phone before sending. iPhone photos in HEIC format are not accepted: use “Most Compatible” in the camera settings, or take a screenshot.</p>
         {jobs.map((j: any) => <div key={j._id} className="mt-3 text-sm"><div className="flex justify-between"><span className="truncate">{j.name}</span><span className={j.error ? 'text-rose-600' : 'text-[var(--app-muted)]'}>{j.error ? 'Failed' : `${Math.round(j.progress * 100)}%`}</span></div>{j.error ? <p role="alert" className="text-xs text-rose-600">{j.error}</p> : <div className="mt-1 h-1.5 rounded bg-[var(--app-bg)]"><div className="h-1.5 rounded bg-[var(--brand)]" style={{ width: `${j.progress * 100}%` }} /></div>}</div>)}
         {err && <p role="alert" className="mt-3 text-sm text-rose-600">{err}</p>}
@@ -278,10 +279,10 @@ export default function BizStudioPage({ onBack }: { onBack: () => void }) {
               {view === 'reports' && <ReportsView b={b} />}
               {view === 'products' && <><h1 className="mb-4 font-display text-2xl font-semibold tracking-tight">Products and stock</h1><ProductsTab b={b} urls={urls} onChange={reload} /></>}
               {view === 'messages' && <><h1 className="mb-4 font-display text-2xl font-semibold tracking-tight">Messages</h1><MessagesTab b={b} onChange={reload} /></>}
-              {view === 'feed' && <FeedView b={b} onChange={reload} />}
+              {view === 'feed' && <FeedView b={b} onChange={reload} canVideo={mine.limits.videos > 0} />}
               {view === 'chat' && <AgentChatView b={b} onChange={reload} />}
-              {view === 'agent' && <AgentView b={b} />}
-              {view === 'secrets' && <SecretsView b={b} secrets={secrets} reload={() => { loadSecrets(); void load(); }} />}
+              {view === 'agent' && <AgentView b={b} paid={mine.paid !== false} />}
+              {view === 'secrets' && <SecretsView b={b} secrets={secrets} paid={mine.paid !== false} reload={() => { loadSecrets(); void load(); }} />}
               {view === 'settings' && <><h1 className="mb-4 font-display text-2xl font-semibold tracking-tight">Settings</h1><SettingsTab b={b} onChange={reload} onDeleted={() => { setView('dashboard'); void load(); }} /></>}
               {view === 'public' && (<>
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h1 className="font-display text-2xl font-semibold tracking-tight">Public page</h1><Tag kind="public" /></div>

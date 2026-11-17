@@ -45,6 +45,8 @@ export function createBizService(deps: Deps) {
   const iso = () => new Date(now()).toISOString();
   /** An instant alert to the owner, only when their agent is on and alerts are enabled. Never blocks or fails the action that caused it. */
   const alert = (b: Business, n: BizNotice) => { const a = b.agent; if (!a || a.level === 'off' || !a.alerts || !deps.notify) return; void deps.notify(b.ownerId, n).catch(() => undefined); };
+  /** The business agent and online payments are paid features (photos, the page, the notebook and the feed are not). */
+  const needPaid = async (ownerId: string, what: string) => { if (!(await deps.isPaid(ownerId))) throw new BizError(`${what} needs a paid plan. Choose a plan to unlock it.`, 402, 'UPGRADE_REQUIRED'); };
   const secretKey = () => deps.secretKey ?? keyFrom(process.env.BIZ_SECRETS_KEY || process.env.JWT_SECRET || 'bwenge-dev');
 
   const load = async (id: string): Promise<Business | null> => kv.get<Business>(`biz:${id}`);
@@ -182,6 +184,7 @@ export function createBizService(deps: Deps) {
       const b = await mine(ownerId, id); const lim = await limits(ownerId);
       const kind = sniff(file.data); if (!kind) throw new BizError('Use a JPEG, PNG, WebP or GIF photo, or an MP4 or WebM video.', 415, 'TYPE');
       if (file.data.length > maxBytesFor(kind.kind)) throw new BizError(kind.kind === 'image' ? 'A photo can be up to 6 MB.' : 'A video can be up to 25 MB. Record a shorter clip.', 413, 'TOO_LARGE');
+      if (kind.kind === 'video' && !(await deps.isPaid(ownerId))) throw new BizError('Videos are for paid plans. Photos are free. Choose a plan to add videos.', 402, 'VIDEO_PAID');
       const feedUpload = file.scope === 'feed';
       if (feedUpload) { if (b.media.filter((m) => m.scope === 'feed').length >= lim.feed) throw new BizError(`That is the most feed photos and videos your plan keeps (${lim.feed}). Delete old posts to make room.`, 402, 'LIMIT'); }
       const count = b.media.filter((m) => m.kind === kind.kind && m.scope !== 'feed').length;
@@ -321,7 +324,7 @@ export function createBizService(deps: Deps) {
     /* ------------------------------------------------------------ the business agent */
     async agent(ownerId: string, id: string): Promise<AgentSettings> { return cleanAgent(null, (await mine(ownerId, id)).agent); },
     async setAgent(ownerId: string, id: string, patch: unknown): Promise<AgentSettings> {
-      const b = await mine(ownerId, id); b.agent = cleanAgent(patch, b.agent); await save(b); await deps.syncAgenda?.(b).catch(() => undefined); return b.agent;
+      const b = await mine(ownerId, id); const next = cleanAgent(patch, b.agent); if (next.level !== 'off') await needPaid(ownerId, 'The business agent'); b.agent = next; await save(b); await deps.syncAgenda?.(b).catch(() => undefined); return b.agent;
     },
     /* ------------------------------------------------------------ payment secrets and online payments */
     /** What the owner may see about saved keys: whether each provider is set, the last four characters, the environment, the date. Never the keys. */
@@ -331,7 +334,7 @@ export function createBizService(deps: Deps) {
       return { mtn: one('mtn'), airtel: one('airtel'), acceptPay: b.acceptPay === true, payOpen: b.payOpen === true, fields: FIELDS };
     },
     async saveSecrets(ownerId: string, id: string, provider: unknown, input: unknown) {
-      const b = await mine(ownerId, id); if (!PROVIDERS.includes(provider as Provider)) throw new BizError('Choose MTN or Airtel.'); const p = provider as Provider;
+      const b = await mine(ownerId, id); await needPaid(ownerId, 'Online payments'); if (!PROVIDERS.includes(provider as Provider)) throw new BizError('Choose MTN or Airtel.'); const p = provider as Provider;
       const c = cleanSecrets(p, input); if ('error' in c) throw new BizError(c.error);
       const doc = (await kv.get<SecretsDoc>(`biz-secrets:${b.id}`)) ?? {}; doc[p] = { sealed: seal(JSON.stringify(c.fields), secretKey()), hint: c.hint, environment: c.environment, at: iso() };
       await kv.put(`biz-secrets:${b.id}`, doc);
@@ -349,7 +352,7 @@ export function createBizService(deps: Deps) {
     },
     /** The owner types a customer's number and an amount; the customer approves on their phone. */
     async requestPayment(ownerId: string, id: string, input: { phone?: unknown; amount?: unknown; item?: unknown; customer?: unknown }): Promise<LedgerEntry> {
-      const b = await mine(ownerId, id); return startPayment(b, { phone: String(input.phone ?? ''), amount: Math.round(Number(String(input.amount ?? '').replace(/[,\s]/g, ''))), item: clean(input.item, 60) || 'Payment', customer: clean(input.customer, 60) || undefined, src: 'studio' });
+      const b = await mine(ownerId, id); await needPaid(ownerId, 'Online payments'); return startPayment(b, { phone: String(input.phone ?? ''), amount: Math.round(Number(String(input.amount ?? '').replace(/[,\s]/g, ''))), item: clean(input.item, 60) || 'Payment', customer: clean(input.customer, 60) || undefined, src: 'studio' });
     },
     async refreshPayment(ownerId: string, id: string, entryId: string): Promise<LedgerEntry> { const b = await mine(ownerId, id); const e = await settle(b, entryId); if (!e) throw new BizError('That payment was not found.', 404); return e; },
 

@@ -25,7 +25,7 @@ export const publicApi = {
   report: async (slug: string, body: { reason: string; detail: string }) => read<{ ok: boolean }>(await fetch(getApiUrl(`/api/biz/public/${encodeURIComponent(slug)}/report`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })),
 };
 
-export interface Mine { locked?: boolean; upgrade?: { plan: string; name: string; priceRwf: number | null; priceNote: string; url: string }; businesses: Business[]; limits: { businesses: number; products: number; images: number; videos: number; totalMediaMb: number }; plan: string }
+export interface Mine { locked?: boolean; paid?: boolean; upgradeUrl?: string; upgrade?: { plan: string; name: string; priceRwf: number | null; priceNote: string; url: string }; businesses: Business[]; limits: { businesses: number; products: number; images: number; videos: number; totalMediaMb: number }; plan: string }
 export const ownerApi = {
   mine: async () => read<Mine>(await authFetch('/api/biz/mine')),
   create: async (body: { name: string; category?: string; slug?: string }) => read<{ business: Business }>(await authFetch('/api/biz', json('POST', body))),

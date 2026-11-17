@@ -26,7 +26,7 @@ async function cropImage(file: File, r: number | null): Promise<{ blob: Blob; na
   return prepareImage(file);
 }
 
-export default function PostComposer({ b, onClose, onPosted }: { b: Business; onClose: () => void; onPosted: () => void }) {
+export default function PostComposer({ b, onClose, onPosted, canVideo }: { b: Business; onClose: () => void; onPosted: () => void; canVideo: boolean }) {
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1); const [items, setItems] = useState<Item[]>([]); const [ratio, setRatio] = useState<Ratio>('square'); const [cur, setCur] = useState(0);
   const [caption, setCaption] = useState(''); const [productId, setProductId] = useState(''); const [busy, setBusy] = useState(''); const [err, setErr] = useState(''); const [drag, setDrag] = useState(false); const fileRef = useRef<HTMLInputElement>(null);
   const urls = useRef<string[]>([]); useEffect(() => () => { urls.current.forEach((u) => URL.revokeObjectURL(u)); }, []);
@@ -35,7 +35,8 @@ export default function PostComposer({ b, onClose, onPosted }: { b: Business; on
     if (!list) return; setErr(''); const next = [...items];
     for (const f of Array.from(list)) {
       if (next.length >= MAX_ITEMS) { setErr(`A post can have up to ${MAX_ITEMS} photos or videos.`); break; }
-      const kind = f.type.startsWith('video/') ? 'video' : f.type.startsWith('image/') ? 'image' : null; if (!kind) { setErr('Choose photos or videos.'); continue; }
+      const kind = f.type.startsWith('video/') ? 'video' : f.type.startsWith('image/') ? 'image' : null; if (!kind) { setErr(canVideo ? 'Choose photos or videos.' : 'Choose photos.'); continue; }
+      if (kind === 'video' && !canVideo) { setErr('Videos are for paid plans. Photos are free.'); continue; }
       if (kind === 'video' && f.size > MAX_VIDEO) { setErr(`${f.name} is over 25 MB. Record a shorter clip.`); continue; }
       const url = URL.createObjectURL(f); urls.current.push(url); next.push({ id: `${Date.now()}-${Math.random()}`, file: f, kind, url });
     }
@@ -68,17 +69,17 @@ export default function PostComposer({ b, onClose, onPosted }: { b: Business; on
         <div className="min-h-0 flex-1 overflow-y-auto">
           {step === 1 && (
             <div className={`m-4 flex min-h-[320px] flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed p-8 text-center transition ${drag ? 'border-[var(--brand)] bg-[var(--brand)]/10' : 'border-[var(--app-line)]'}`} onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={(e) => { e.preventDefault(); setDrag(false); add(e.dataTransfer.files); }}>
-              <ImagePlus size={54} className="text-[var(--app-muted)]" aria-hidden="true" /><p className="font-display text-lg font-semibold">Drag photos and videos here</p>
-              <input ref={fileRef} type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm" className="sr-only" id="bz-post-files" onChange={(e) => { add(e.target.files); e.target.value = ''; }} />
+              <ImagePlus size={54} className="text-[var(--app-muted)]" aria-hidden="true" /><p className="font-display text-lg font-semibold">{canVideo ? 'Drag photos and videos here' : 'Drag photos here'}</p>
+              <input ref={fileRef} type="file" multiple accept={canVideo ? 'image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm' : 'image/jpeg,image/png,image/webp,image/gif'} className="sr-only" id="bz-post-files" onChange={(e) => { add(e.target.files); e.target.value = ''; }} />
               <label htmlFor="bz-post-files" className={`${btnPrimary} cursor-pointer`}><Upload size={16} />Select from this device</label>
-              <p className="max-w-xs text-xs text-[var(--app-faint)]">Up to {MAX_ITEMS} photos or short videos (25 MB each). On a phone this opens your camera roll or the camera.</p>
+              <p className="max-w-xs text-xs text-[var(--app-faint)]">Up to {MAX_ITEMS} {canVideo ? 'photos or short videos (25 MB each)' : 'photos'}. On a phone this opens your camera roll or the camera.{!canVideo && <> <a href="/upgrade" className="underline">Videos are for paid plans.</a></>}</p>
               {err && <p role="alert" className="text-sm text-rose-600">{err}</p>}
             </div>)}
           {step === 2 && it && (<div>{stage}
             <div className="flex items-center justify-between gap-2 border-b border-[var(--app-line)] px-4 py-3"><div className="inline-flex rounded-xl bg-[var(--app-bg)] p-1" role="tablist" aria-label="Crop">{(Object.keys(RATIO) as Ratio[]).map((r) => <button key={r} type="button" role="tab" aria-selected={ratio === r} onClick={() => setRatio(r)} className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${ratio === r ? 'bg-[var(--brand)] text-[var(--brand-on)]' : 'text-[var(--app-muted)]'}`}>{RATIO[r].label}</button>)}</div>
               <div className="flex gap-1"><button type="button" aria-label="Move earlier" disabled={cur === 0} onClick={() => move(cur, -1)} className={`${btnGhost} !min-h-9 !px-2.5 disabled:opacity-30`}><ChevronLeft size={16} /></button><button type="button" aria-label="Move later" disabled={cur === items.length - 1} onClick={() => move(cur, 1)} className={`${btnGhost} !min-h-9 !px-2.5 disabled:opacity-30`}><ChevronRight size={16} /></button><button type="button" aria-label="Remove" onClick={() => remove(cur)} className={`${btnGhost} !min-h-9 !px-2.5 text-rose-600`}><Trash2 size={15} /></button></div></div>
             <div className="flex gap-2 overflow-x-auto px-4 py-3">{items.map((x, k) => <button key={x.id} type="button" aria-label={`Photo ${k + 1}`} onClick={() => setCur(k)} className={`relative h-16 w-16 shrink-0 overflow-hidden rounded-xl border-2 ${k === cur ? 'border-[var(--brand)]' : 'border-transparent'}`}>{x.kind === 'video' ? <video src={x.url} className="h-full w-full object-cover" /> : <img src={x.url} alt="" className="h-full w-full object-cover" />}</button>)}
-              {items.length < MAX_ITEMS && <label htmlFor="bz-post-files" className="flex h-16 w-16 shrink-0 cursor-pointer items-center justify-center rounded-xl border-2 border-dashed border-[var(--app-line)] text-[var(--app-muted)]" aria-label="Add more"><ImagePlus size={20} /><input id="bz-post-files" type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm" className="sr-only" onChange={(e) => { add(e.target.files); e.target.value = ''; }} /></label>}</div>
+              {items.length < MAX_ITEMS && <label htmlFor="bz-post-files" className="flex h-16 w-16 shrink-0 cursor-pointer items-center justify-center rounded-xl border-2 border-dashed border-[var(--app-line)] text-[var(--app-muted)]" aria-label="Add more"><ImagePlus size={20} /><input id="bz-post-files" type="file" multiple accept={canVideo ? 'image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm' : 'image/jpeg,image/png,image/webp,image/gif'} className="sr-only" onChange={(e) => { add(e.target.files); e.target.value = ''; }} /></label>}</div>
             {err && <p role="alert" className="px-4 pb-3 text-sm text-rose-600">{err}</p>}
           </div>)}
           {step === 3 && (<div className="grid gap-0 sm:grid-cols-[1fr_1fr]">

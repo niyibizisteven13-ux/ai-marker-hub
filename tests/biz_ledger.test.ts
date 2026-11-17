@@ -80,7 +80,7 @@ test('MTN and Airtel adapters call the documented endpoints and map the answers'
 test('online payment end to end: keys saved sealed, never readable, customer pays by QR page, state settles the sale and stock', async () => {
   const kv = memKv(); const log: any[] = []; let state = 'PENDING';
   const f: Fetch = async (url, init) => { log.push(url); if (url.includes('/token/')) return { status: 200, json: async () => ({ access_token: 'T' }), text: async () => '' }; if (init.method === 'POST') return { status: 202, json: async () => ({}), text: async () => '' }; return { status: 200, json: async () => ({ status: state }), text: async () => '' }; };
-  let clock = T0; const svc = createBizService({ kv, media: memoryMediaStore(), isPaid: async () => false, now: () => clock, secretKey: keyFrom('t'), fetchImpl: f }); resetBizLimitsForTests();
+  let clock = T0; const svc = createBizService({ kv, media: memoryMediaStore(), isPaid: async () => true, now: () => clock, secretKey: keyFrom('t'), fetchImpl: f }); resetBizLimitsForTests();
   const b = await svc.create('o', { name: 'Cafe' }); const p = await svc.addProduct('o', b.id, { name: 'Coffee', price: 1000, stock: 5 }); await svc.update('o', b.id, { about: 'x', acceptPay: true }); await svc.setPublished('o', b.id, true);
   assert.equal((await svc.publicBySlug(b.slug))!.payOnline, undefined, 'no keys yet');
   await assert.rejects(svc.submitPayment(b.slug, { name: 'A', phone: '0788123456', items: [{ productId: p.id, qty: 1 }] }, 'v'), (e: any) => e.status === 409);
@@ -120,7 +120,7 @@ test('agent: settings are cleaned, the schedule follows them, and the tools it m
 
 test('agent alerts: instant notices only when the agent is on with alerts; a new order brings a one-tap confirm plan; a failing notifier never breaks the sale', async () => {
   const kv = memKv(); const notes: any[] = []; let boom = false; const synced: any[] = [];
-  const svc = createBizService({ kv, media: memoryMediaStore(), isPaid: async () => false, now: () => T0, notify: async (o, n) => { if (boom) throw new Error('telegram down'); notes.push({ o, n }); }, syncAgenda: async (b) => { synced.push(b.agent?.level ?? 'gone'); } }); resetBizLimitsForTests();
+  const svc = createBizService({ kv, media: memoryMediaStore(), isPaid: async () => true, now: () => T0, notify: async (o, n) => { if (boom) throw new Error('telegram down'); notes.push({ o, n }); }, syncAgenda: async (b) => { synced.push(b.agent?.level ?? 'gone'); } }); resetBizLimitsForTests();
   const b = await svc.create('o', { name: 'Cafe' }); const p = await svc.addProduct('o', b.id, { name: 'Coffee', price: 1000, stock: 6, lowAt: 5 }); await svc.update('o', b.id, { about: 'x' }); await svc.setPublished('o', b.id, true);
   await svc.submitOrder(b.slug, { name: 'Jo', contact: '0788123456', items: [{ productId: p.id, qty: 1 }] }, 'v1'); await new Promise((r) => setImmediate(r)); assert.equal(notes.length, 0, 'agent off: silent');
   await assert.rejects(svc.setAgent('intruder', b.id, { level: 'run' }), (e: any) => e.status === 404);

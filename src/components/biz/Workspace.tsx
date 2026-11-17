@@ -3,7 +3,7 @@ import { MessageCircle, Heart, Megaphone, ImagePlus, Lock, Camera, Bot, BellRing
 import { ownerApi, prepareImage } from '../../biz/api';
 import type { Mine } from '../../biz/api';
 import { pageUrl, rwf, type AgentSettings, type Business, type Dashboard, type LedgerEntry, type SecretsStatus } from '../../biz/types';
-import { btn, btnGhost, btnPrimary, card, input, msg, rwfShort, Tag, Title } from './ui';
+import { btn, btnGhost, btnPrimary, card, input, msg, PaidNote, rwfShort, Tag, Title } from './ui';
 import PostComposer from './PostComposer';
 
 type Go = (view: string) => void;
@@ -223,7 +223,7 @@ export function ReportsView({ b }: { b: Business }) {
 }
 
 /* ------------------------------------------------------------------ secrets: payment keys, write-only */
-export function SecretsView({ b, secrets, reload }: { b: Business; secrets: SecretsStatus | null; reload: () => void }) {
+export function SecretsView({ b, secrets, reload, paid }: { b: Business; secrets: SecretsStatus | null; reload: () => void; paid: boolean }) {
   const [open, setOpen] = useState<'mtn' | 'airtel' | null>(null); const [vals, setVals] = useState<Record<string, string>>({}); const [env, setEnv] = useState('production'); const [busy, setBusy] = useState(''); const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   if (!secrets) return <Loader2 className="animate-spin text-[var(--brand)]" />;
   const NAME = { mtn: 'MTN MoMo', airtel: 'Airtel Money' } as const; const ENVS = { mtn: [['production', 'Live (real money)'], ['sandbox', 'Sandbox (testing)']], airtel: [['production', 'Live (real money)'], ['staging', 'Staging (testing)']] } as const;
@@ -233,6 +233,7 @@ export function SecretsView({ b, secrets, reload }: { b: Business; secrets: Secr
   return (
     <div className="space-y-5">
       <div><h1 className="font-display text-2xl font-semibold tracking-tight">Secrets and payments</h1><Tag kind="private" /></div>
+      {!paid && <PaidNote what="Online payments" />}
       <div className={`${card} flex gap-4`}><ShieldCheck className="mt-0.5 shrink-0 text-emerald-700" /><div className="text-sm leading-relaxed text-[var(--app-muted)]"><p className="font-semibold text-[var(--app-text)]">Your keys are write-only and encrypted.</p><p className="mt-1">Once you save them, nobody can read them back, not you, not Bwenge staff, and not the assistant. They are used only to ask MTN or Airtel to send a payment prompt to your customer's phone. Money goes straight to your own account; Bwenge never holds it. Never paste keys in the chat.</p></div></div>
 
       {(['mtn', 'airtel'] as const).map((p) => { const st = secrets[p]; return (
@@ -269,7 +270,7 @@ const LEVEL_INFO: Array<{ id: AgentSettings['level']; name: string; text: string
   { id: 'assist', name: 'Assist', text: 'Watches, and suggests changes you approve with one tap on Telegram.', can: ['Everything in Watch', 'Proposes: confirm an order, restock, mark out of stock, ask a customer to pay'], cannot: 'Nothing happens until you tap Do it.' },
   { id: 'run', name: 'Run', text: 'Assist, plus safe housekeeping done for you.', can: ['Everything in Assist', 'Settles payments MTN or Airtel say are paid', 'Marks messages as seen'], cannot: 'Still asks before anything that moves money or changes your page.' },
 ];
-export function AgentView({ b }: { b: Business }) {
+export function AgentView({ b, paid }: { b: Business; paid: boolean }) {
   const [a, setA] = useState<AgentSettings | null>(null); const [busy, setBusy] = useState(false); const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   useEffect(() => { void ownerApi.agent(b.id).then(setA).catch((e) => setNote({ ok: false, text: msg(e) })); }, [b.id]);
   const save = async (patch: Partial<AgentSettings>) => { if (!a) return; const prev = a; setA({ ...a, ...patch }); setBusy(true); setNote(null); try { setA(await ownerApi.setAgent(b.id, patch)); setNote({ ok: true, text: 'Saved.' }); } catch (e) { setA(prev); setNote({ ok: false, text: msg(e) }); } finally { setBusy(false); } };
@@ -278,6 +279,7 @@ export function AgentView({ b }: { b: Business }) {
   return (
     <div className="space-y-5">
       <div><h1 className="font-display text-2xl font-semibold tracking-tight">Business agent</h1><Tag kind="private" /></div>
+      {!paid && <PaidNote what="The business agent" />}
       <div className={`${card} flex gap-4`}><Bot className="mt-0.5 shrink-0 text-[var(--brand-strong,var(--brand))]" /><p className="text-sm leading-relaxed text-[var(--app-muted)]">Your Bwenge assistant can look after the business while you are away. It reads your real notebook and stock, and messages you on Telegram (or email, or here in the chat). <b className="text-[var(--app-text)]">It can never publish your page, delete anything, change prices, touch your payment keys, or send a payment request without your yes.</b></p></div>
       <div className="grid gap-3 sm:grid-cols-2">{LEVEL_INFO.map((l) => (
         <button key={l.id} type="button" aria-pressed={a.level === l.id} disabled={busy} onClick={() => void save({ level: l.id })} className={`rounded-2xl border p-4 text-left transition ${a.level === l.id ? 'border-[var(--brand)] bg-[var(--brand)]/10 ring-2 ring-[var(--brand)]/30' : 'border-[var(--app-line)] bg-[var(--app-panel)] hover:bg-[var(--app-panel-hover)]'}`}>
@@ -391,7 +393,7 @@ function OwnerPostCard({ b, p, urls, kinds, onChange, copy }: { b: Business; p: 
   );
 }
 
-export function FeedView({ b, onChange }: { b: Business; onChange: () => void }) {
+export function FeedView({ b, onChange, canVideo }: { b: Business; onChange: () => void; canVideo: boolean }) {
   const [posts, setPosts] = useState<OwnerPost[] | null>(null); const [urls, setUrls] = useState<Record<string, string>>({}); const [err, setErr] = useState(''); const [note, setNote] = useState(''); const [compose, setCompose] = useState(false); const link = `${pageUrl(b.slug)}#updates`;
   const load = useCallback(() => { ownerApi.posts(b.id).then(setPosts).catch((e) => setErr(msg(e))); void ownerApi.mediaUrls(b.id).then(setUrls).catch(() => undefined); }, [b.id]);
   useEffect(() => { load(); }, [load, b.updatedAt]);
@@ -410,7 +412,7 @@ export function FeedView({ b, onChange }: { b: Business; onChange: () => void })
       <div className="space-y-4">{posts === null ? <Loader2 className="animate-spin text-[var(--brand)]" /> : !posts.length ? (
         <div className={`${card} py-10 text-center`}><ImagePlus size={42} className="mx-auto text-[var(--app-muted)]" /><p className="mt-3 font-display text-lg font-semibold">Share your first post</p><p className="mx-auto mt-1 max-w-sm text-sm text-[var(--app-muted)]">A photo of today's best product works well. Tag the product so customers can order straight from the post.</p><button type="button" className={`${btnPrimary} mt-4`} onClick={() => setCompose(true)}><Plus size={16} />New post</button></div>
       ) : [...posts].sort((a, c) => Number(!!c.pinned) - Number(!!a.pinned) || c.at.localeCompare(a.at)).map((p) => <OwnerPostCard key={p.id} b={b} p={p} urls={urls} kinds={kinds} onChange={() => { load(); onChange(); }} copy={(t, w) => void copy(t, w)} />)}</div>
-      {compose && <PostComposer b={b} onClose={() => setCompose(false)} onPosted={() => { load(); onChange(); }} />}
+      {compose && <PostComposer canVideo={canVideo} b={b} onClose={() => setCompose(false)} onPosted={() => { load(); onChange(); }} />}
     </div>
   );
 }
