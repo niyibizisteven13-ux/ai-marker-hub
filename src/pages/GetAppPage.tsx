@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, CheckCircle2, Download, Monitor, Share, Smartphone, SquarePlus } from 'lucide-react';
 import { PLATFORM_LABEL, detectPlatform, type Platform } from '../utils/device';
 import { getApiUrl } from '../utils/authFetch';
+import { StarsDisplay } from '../components/Stars';
+import AppFeedbackForm from '../components/AppFeedbackForm';
 
 /**
  * /get-app (public): get Bwenge on this device. The landing page's QR code and button lead here.
@@ -21,6 +23,20 @@ const MYSEB: Array<{ id: Exclude<Platform, 'other' | 'ios'>; name: string; file:
   { id: 'windows', name: 'Windows', file: '.exe installer' }, { id: 'android', name: 'Android', file: '.apk app' },
   { id: 'linux', name: 'Linux', file: '.AppImage' }, { id: 'mac', name: 'Mac', file: '.dmg' },
 ];
+interface AppStat { downloads: number; installs: number; rating: { average: number | null; count: number } }
+/** The numbers people see: the average rating and how many downloaded. Honest: "No ratings yet" until someone rates. */
+function StatsRow({ stat }: { stat: AppStat | undefined }) {
+  if (!stat) return null;
+  const n = (x: number) => x.toLocaleString('en-US');
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-neutral-300">
+      {stat.rating.average !== null
+        ? <span className="inline-flex items-center gap-1.5"><StarsDisplay value={stat.rating.average} size={14} /><b className="text-white">{stat.rating.average.toFixed(1)}</b><span className="text-neutral-400">({n(stat.rating.count)} {stat.rating.count === 1 ? 'rating' : 'ratings'})</span></span>
+        : <span className="text-neutral-500">No ratings yet</span>}
+      <span className="inline-flex items-center gap-1.5"><Download size={13} className="text-neutral-400" /><b className="text-white">{n(stat.downloads)}</b><span className="text-neutral-400">{stat.downloads === 1 ? 'download' : 'downloads'}</span></span>
+    </div>
+  );
+}
 const card = 'rounded-2xl border border-white/10 bg-white/[0.04] p-5';
 const primary = 'inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#F6B94A] px-5 text-sm font-semibold text-black hover:opacity-90 disabled:opacity-60';
 
@@ -37,11 +53,13 @@ function HowTo({ platform }: { platform: Platform }) {
 export default function GetAppPage() {
   const me = useMemo<Platform>(() => detectPlatform(navigator.userAgent, navigator.maxTouchPoints ?? 0), []);
   const [prompt, setPrompt] = useState<Prompt | null>(null);
+  const [stats, setStats] = useState<Record<'bwenge' | 'myseb', AppStat> | null>(null);
   const [installed, setInstalled] = useState(() => { try { return window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone === true; } catch { return false; } });
   const count_ = me === 'other' ? 'windows' : me;                     // the device name used for counting (an unknown computer counts as a computer)
 
   useEffect(() => {
     document.title = 'Get Bwenge';
+    void fetch(getApiUrl('/api/app/stats')).then((r) => (r.ok ? r.json() : null)).then((b) => { if (b?.apps) setStats(b.apps); }).catch(() => undefined);
     const onPrompt = (e: Event) => { e.preventDefault(); setPrompt(e as Prompt); };
     const onInstalled = () => { setInstalled(true); setPrompt(null); count('bwenge', count_, 'installed'); };
     window.addEventListener('beforeinstallprompt', onPrompt); window.addEventListener('appinstalled', onInstalled);
@@ -60,6 +78,7 @@ export default function GetAppPage() {
         <section className={card} aria-labelledby="bwenge-h">
           <h2 id="bwenge-h" className="flex items-center gap-2 text-base font-semibold"><Smartphone size={18} className="text-[#F6B94A]" />Bwenge app</h2>
           <p className="mt-1 text-xs text-neutral-400">Works on every phone and computer and updates itself each time you open it.</p>
+          <StatsRow stat={stats?.bwenge} />
           <div className="mt-4 space-y-3">
             {installed ? <p className="flex items-center gap-2 text-sm text-emerald-300"><CheckCircle2 size={18} />Bwenge is installed on this device.</p>
               : prompt ? <button type="button" className={primary} onClick={() => void install()}><Download size={18} />Install Bwenge on {PLATFORM_LABEL[me]}</button>
@@ -72,6 +91,7 @@ export default function GetAppPage() {
         <section className={card} aria-labelledby="myseb-h">
           <h2 id="myseb-h" className="flex items-center gap-2 text-base font-semibold"><Monitor size={18} className="text-[#F6B94A]" />MySEB: the app for taking an exam</h2>
           <p className="mt-1 text-xs text-neutral-400">For students. Your lecturer gives you the exam code. Choose your device:</p>
+          <StatsRow stat={stats?.myseb} />
           {me === 'ios' && <p className="mt-3 rounded-lg bg-white/5 p-3 text-xs text-neutral-300">MySEB has no iPhone or iPad app yet. Use a laptop, an Android phone, or ask your lecturer.</p>}
           <ul className="mt-4 grid grid-cols-2 gap-2">
             {mysebFirst.map((p, i) => (
@@ -79,6 +99,12 @@ export default function GetAppPage() {
                 {p.name}<span className="text-[11px] font-normal text-neutral-400">{p.file}{i === 0 && p.id === me ? ' · for you' : ''}</span></a></li>
             ))}
           </ul>
+        </section>
+
+        <section className={card} aria-labelledby="fb-h">
+          <h2 id="fb-h" className="text-base font-semibold">How is it working for you?</h2>
+          <p className="mb-5 mt-1 text-xs text-neutral-400">Your rating helps others, and your comments help us improve.</p>
+          <AppFeedbackForm platform={me} />
         </section>
       </main>
     </div>

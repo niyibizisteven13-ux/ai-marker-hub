@@ -121,6 +121,17 @@ router.get('/downloads', wrap(async (_req, res) => {
   res.json({ success: true, data: await summary() });
 }));
 
+/** The ratings and survey answers sent from the Get the app page (and the same as a CSV file). */
+router.get('/feedback', wrap(async (_req, res) => {
+  const { adminFeedback } = await import('../services/appFeedback.js');
+  res.json({ success: true, data: await adminFeedback() });
+}));
+router.get('/feedback.csv', wrap(async (_req, res) => {
+  const { adminFeedback, feedbackCsv } = await import('../services/appFeedback.js');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="app-feedback.csv"');
+  res.send(feedbackCsv((await adminFeedback()).items));
+}));
+
 /** For someone who lost their phone and their recovery codes: removes their passkeys and the sign-in step, then revokes their sessions. The administrator must have checked who is asking. */
 router.post('/users/:id/reset-passkeys', wrap(async (req, res) => {
   const id = String(req.params.id);

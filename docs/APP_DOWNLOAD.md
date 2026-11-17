@@ -37,3 +37,15 @@ Code: 482 910
 Get the MySEB app (Windows, Android, Linux, Mac): https://www.bwenge.space/myseb/download
 On a laptop or an Android phone the link above opens MySEB. On an iPhone it starts in the browser.
 ```
+
+## Ratings, download numbers and the feedback survey
+On `/get-app` each app card shows its **average rating** (stars, number of ratings) and **number of downloads**; until someone rates it says "No ratings yet" (no made-up numbers).
+At the bottom, **How is it working for you?** takes a star rating (required) and an optional one-minute survey: how easy it was to install, what it is used for, what to
+improve, and an email or phone number only if the person wants a reply (used only if they tick the permission).
+
+* Public numbers only: downloads, installs, average and count (`GET /api/app/stats`, cached for a minute). Comments and contact details are never public.
+* Anyone can send one (no account), so it is protected (`server/services/appFeedback.ts`): a hidden field that robots fill, at most 6 attempts an hour, **one rating per
+  visitor per app per day**, short fields, known choices only. No IP address is stored (only an in-memory hash for the daily limit). Anonymous ratings can still be
+  gamed by someone determined; they are for orientation, not proof.
+* **Admin → Settings → Platform controls → Ratings and feedback**: averages with a star histogram, the latest answers, and **Download CSV**
+  (`GET /api/admin/platform/feedback` and `.csv`; spreadsheet formulas from visitors are neutralised).
