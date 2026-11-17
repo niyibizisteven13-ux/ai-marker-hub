@@ -66,7 +66,7 @@ const en: Copy = {
   commands: [
     { command: 'start', description: 'Home menu' }, { command: 'mark', description: 'Mark exams with the camera' }, { command: 'new', description: 'Start a fresh conversation' }, { command: 'files', description: 'My files' },
     { command: 'settings', description: 'Language and account' }, { command: 'transcribe', description: 'Transcribe handwriting' }, { command: 'scan', description: 'Open the document scanner' },
-    { command: 'grade', description: 'Batch grading' }, { command: 'help', description: 'How to use Bwenge' },
+    { command: 'brief', description: 'What needs me today' }, { command: 'agenda', description: 'Scheduled tasks and plans' }, { command: 'grade', description: 'Batch grading' }, { command: 'help', description: 'How to use Bwenge' },
   ],
 };
 

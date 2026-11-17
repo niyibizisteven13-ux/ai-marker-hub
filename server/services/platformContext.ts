@@ -19,7 +19,19 @@ const href = (path: string, channel: Channel) => (channel === 'telegram' || base
 const cache = new Map<string, { at: number; text: string }>();
 const TTL_MS = 20_000;
 
+/** The block above (cached), plus what the assistant found while the user was away and could not send to their phone. */
 export async function platformContext(userId: string | null | undefined, channel: Channel = 'web'): Promise<string> {
+  const base = await platformContextBase(userId, channel);
+  if (!userId || channel !== 'web') return base;
+  try {
+    const { appSettingKV } = await import('./agenda/store.js');
+    const waiting = ((await appSettingKV().get(`agenda-outbox:${userId}`)) as { items?: unknown[] } | undefined)?.items?.length ?? 0;
+    if (waiting) return `${base}\n\n[${waiting} result${waiting === 1 ? '' : 's'} from scheduled tasks ${waiting === 1 ? 'is' : 'are'} waiting for the user (they could not be sent to a phone). Call list_agenda at the start of your reply and tell them what it found.]`;
+  } catch { /* nothing waiting */ }
+  return base;
+}
+
+async function platformContextBase(userId: string | null | undefined, channel: Channel = 'web'): Promise<string> {
   if (!userId) return '';
   const key = `${userId}:${channel}`;
   const hit = cache.get(key);

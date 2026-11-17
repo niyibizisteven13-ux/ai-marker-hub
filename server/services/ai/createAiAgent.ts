@@ -67,6 +67,7 @@ export function createAiAgent(cfg: AiAgentConfig) {
 
   return {
     tools,
+    services: cfg.services ?? {},
     async run(input: AgentRunInput): Promise<AgentResult & { fileIds: string[]; warnings: string[] }> {
       const requestStartedAt = performance.now();
       const ctx = { userId: input.userId, chatId: input.chatId, locale: input.locale, signal: input.signal, files: cfg.files, services: cfg.services ?? {} };

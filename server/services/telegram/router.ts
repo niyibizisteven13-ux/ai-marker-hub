@@ -305,6 +305,8 @@ export async function handleUpdate(update: any, legacy: LegacyHooks, api: Telegr
         await api.sendMessage(chatId, card('💬', lang === 'rw' ? 'Ikiganiro gisanzwe' : lang === 'fr' ? 'Mode normal' : 'Normal mode', esc(lang === 'rw' ? 'Nsubiye ku kiganiro gisanzwe.' : lang === 'fr' ? 'Retour au mode normal.' : 'Back to normal answers.')));
         return;
       }
+      case '/brief': await runAssistantTurn({ chatId, session, text: (await import('./agentic.js')).BRIEF_COMMAND_TEXT, replyTo: msg.message_id }); return;
+      case '/agenda': await (await import('./agentic.js')).showAgenda(api, chatId, session); return;
       case '/chat': case '/ask':
         if (rest.length) await runAssistantTurn({ chatId, session, text: rest.join(' '), replyTo: msg.message_id });
         else await api.sendMessage(chatId, guideCard(lang, 'create'), { keyboard: backKeyboard(lang) });
@@ -405,6 +407,14 @@ async function handleCallback(q: any, legacy: LegacyHooks, api: TelegramApi) {
         }
         pending.delete(chatId);
         await runAssistantTurn({ chatId, session, text: QUICK_PROMPTS[arg]?.[lang] ?? QUICK_PROMPTS.sum[lang], files: queued.files });
+        return;
+      }
+      case 'pp': case 'ap': {
+        // Do it / Cancel / Undo on a plan, Approve / Reject on a payment request: the tap is the yes.
+        const [action, id = ''] = arg.split(':');
+        const mod = await import('./agentic.js');
+        const note = kind === 'pp' ? await mod.planCallback(api, chatId, session, action, id, target) : await mod.paymentCallback(api, chatId, session, action, id, target);
+        await api.answerCallback(q.id, note);
         return;
       }
       default:
