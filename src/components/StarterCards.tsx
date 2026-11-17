@@ -1,5 +1,5 @@
 import React from 'react';
-import { Database, GraduationCap, LayoutDashboard, Languages, LucideIcon } from 'lucide-react';
+import { GraduationCap, Languages, Store, TrendingUp, LucideIcon } from 'lucide-react';
 
 interface StarterCardItem {
   id: string;
@@ -16,37 +16,39 @@ interface StarterCardsProps {
 }
 
 export const StarterCards: React.FC<StarterCardsProps> = ({ onSelectPrompt, lang = 'en' }) => {
+  const L = <T,>(en: T, rw: T, fr: T): T => (lang === 'rw' ? rw : lang === 'fr' ? fr : en);
+  // What people mostly do here: run and grow a business by chatting, mark and run exams, and write or translate in three languages.
   const cards: StarterCardItem[] = [
     {
       id: 'card1',
-      icon: Database,
-      title: lang === 'rw' ? "Sesengura amakuru" : lang === 'fr' ? "Explorer un jeu de données" : "Explore a dataset",
-      description: lang === 'rw' ? "Shakisha, soma kandi usesengure amakuru" : lang === 'fr' ? "Chercher, lire et analyser des données" : "Search, read and analyse curated data",
-      prompt: "Which datasets are available, and what are the most important insights in them?",
+      icon: Store,
+      title: L('Run my business', 'Kuyobora ubucuruzi bwanjye', 'Gérer mon commerce'),
+      description: L('Tell me today\'s sales and costs, I keep the books', 'Mbwira ibyo wacuruje n\'ibyo watanze, nanditse', 'Dites-moi vos ventes et dépenses, je tiens les comptes'),
+      prompt: 'How is my business doing today? Show my sales, costs, profit, low stock and any pending orders.',
       action: 'chat',
     },
     {
       id: 'card2',
-      icon: GraduationCap,
-      title: lang === 'rw' ? "Kosora ikizamini" : lang === 'fr' ? "Corriger un examen" : "Mark an exam",
-      description: lang === 'rw' ? "Shyiramo impapuro, ubone amanota" : lang === 'fr' ? "Importez les copies, obtenez les notes" : "Upload papers, get marks",
-      prompt: "Mark this student exam script against the rubric and provide detailed grading feedback.",
-      action: 'marking',
+      icon: TrendingUp,
+      title: L('Grow my business', 'Guteza imbere ubucuruzi', 'Développer mon commerce'),
+      description: L('Posts, offers and a page customers can order from', 'Ibyo gutangaza, ibishya n\'urupapuro abakiriya bategeraho', 'Publications, offres et une page où commander'),
+      prompt: 'Help me grow my business: look at my numbers, suggest one promotion for this week and write a short update to post on my page.',
+      action: 'chat',
     },
     {
       id: 'card3',
-      icon: LayoutDashboard,
-      title: lang === 'rw' ? "Kora dashboard" : lang === 'fr' ? "Créer un tableau de bord" : "Build a live dashboard",
-      description: lang === 'rw' ? "Hindura imibare paji ya HTML" : lang === 'fr' ? "Des chiffres en page HTML interactive" : "Turn figures into an interactive HTML page",
-      prompt: "Create an interactive HTML dashboard that demonstrates student performance: class A averaged 62%, 68% and 74% in terms 1 to 3, and class B 58%, 61% and 70%. Include KPIs, a chart, a table and the key insights.",
-      action: 'chat',
+      icon: GraduationCap,
+      title: L('Mark an exam', 'Kosora ikizamini', 'Corriger un examen'),
+      description: L('Scan or add the scripts, watch the red pen', 'Shyiramo impapuro, ubone amanota', 'Importez les copies, obtenez les notes'),
+      prompt: 'Mark this student exam script against the rubric and provide detailed grading feedback.',
+      action: 'marking',
     },
     {
       id: 'card4',
       icon: Languages,
-      title: lang === 'rw' ? "Andika cyangwa uhindure" : lang === 'fr' ? "Rédiger ou traduire" : "Write or translate",
-      description: lang === 'rw' ? "Icyongereza, Igifaransa, Kinyarwanda" : lang === 'fr' ? "Anglais, français, kinyarwanda" : "English, French, Kinyarwanda",
-      prompt: "Draft a professional policy memo in Kinyarwanda and English regarding digital education standards.",
+      title: L('Write or translate', 'Andika cyangwa uhindure', 'Rédiger ou traduire'),
+      description: L('English, French & Kinyarwanda, or turn my page into Kinyarwanda', 'Icyongereza, Igifaransa, Kinyarwanda, cyangwa uhindure urupapuro rwanjye', 'Anglais, français, kinyarwanda, ou traduire ma page'),
+      prompt: 'Translate my business page into Kinyarwanda.',
       action: 'chat',
     },
   ];
