@@ -15,8 +15,20 @@ class Session {
 }
 
 class HeartbeatResult {
-  HeartbeatResult(this.status, this.reason, this.remainingSeconds);
+  HeartbeatResult(this.status, this.reason, this.remainingSeconds, [this.noticeId, this.notice]);
   final String status; final String? reason; final int remainingSeconds;
+  /// A short message from the teacher (or their assistant), carried by the heartbeat. Shown until the student taps OK.
+  final String? noticeId, notice;
+
+  /// The notice in a server answer, or nulls. Never trusts the shape: only two short strings are read.
+  static List<String?> noticeOf(dynamic j) {
+    final n = j is Map ? j['notice'] : null;
+    if (n is Map && n['id'] is String && n['text'] is String) {
+      final text = (n['text'] as String).trim();
+      return text.isEmpty ? [null, null] : [(n['id'] as String), text.length > 300 ? text.substring(0, 300) : text];
+    }
+    return [null, null];
+  }
 }
 
 class ApiException implements Exception {
@@ -77,7 +89,8 @@ class Api {
       final r = await http.post(Uri.parse('$base/api/heartbeat'), headers: authHeaders(s.token), body: '{}').timeout(const Duration(seconds: 6));
       if (r.statusCode != 200) return null;
       final j = jsonDecode(r.body);
-      return HeartbeatResult(j['status'], j['reason'], j['remainingSeconds'] ?? 0);
+      final n = HeartbeatResult.noticeOf(j);
+      return HeartbeatResult(j['status'], j['reason'], j['remainingSeconds'] ?? 0, n[0], n[1]);
     } catch (_) {
       return null;
     }

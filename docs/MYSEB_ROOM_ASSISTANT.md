@@ -20,7 +20,7 @@ The quiz owner is the one charged for MySEB (see ADMIN_CONTROLS.md).
 - **Level**: *Assist* (default: lets students back in after small problems) or *Watch only* (it only looks and tells you; what it would have done becomes a "needs you" note).
 - **Practice mode** (`dryRun`): it writes what it WOULD do ("Would have let back in …") and does nothing. Use it on a small first test.
 - **Acting in the room** (`POST /:id/myseb/room-action`, chat tool `live_room_action`, buttons in the live room): pause everyone, let everyone back in, add 1-60 minutes (everyone or one student), send a short message to all students or one. The lecturer can always do these. The assistant itself will use them in the next steps, only within your limits (**most minutes it may add in total**, **times it may pause the room**, 20 messages), checked in code (`checkRoomAction`), every action logged in the room log and the audit log.
-- **Students see messages** in the browser test page (carried by the heartbeat, kept 10 minutes in memory on the MySEB server). **The phone and desktop apps do not show them yet**; that comes with the apps build in step 3. Added time does work in the apps (their countdown follows the server).
+- **Students see messages** in the browser test page (carried by the heartbeat, kept 10 minutes in memory on the MySEB server). The **phone and laptop apps** show them too (from build 19 on; older installs do not). Added time works in all of them (their countdown follows the server).
 - Not done yet (next steps): the assistant choosing these actions itself (judgement loop), Telegram buttons for them, and scheduled open/close.
 
 ## Autopilot (step 2): the test runs without the lecturer
@@ -36,7 +36,7 @@ Everything is in the room log and the audit log (`MYSEB_AGENT_*`).
 
 ### What it cannot do
 It **reduces cheating, it cannot guarantee that nobody cheats.** MySEB cannot see a phone out of view, a second person off camera, or answers passed by voice. Browser tests (especially on phones) are weaker than the app. Treat the report as a list of people to look at, never as proof. Marks are not changed and results are not released by the agent.
-Not yet: a model reading camera pictures; the apps do not show messages yet (browser tests do).
+Messages reach students in the browser test page, the phone app and the laptop app (not the Chrome extension).
 
 ## Review queue and evidence (autopilot v3, part 1)
 - **Evidence:** when a rule is broken and camera/screen pictures are on, the MySEB server keeps the pictures it holds at that moment (up to 6 per student: the first and the newest). **Memory only**, like every picture here: capped (`MYSEB_MAX_EVIDENCE_MB`, default 100), forgotten after 12 hours or at a restart. The lecturer downloads what they need ("Download evidence": one page with the timeline and the pictures).
@@ -68,3 +68,6 @@ Rules → **Check pictures** (or ask the chat). Needs a clear confirmation, came
 - **Limits you choose:** most pictures per test (default 200, 20-2000); it stops and tells you when they are used, and when your plan has no credits left for it. Each picture is one `vision` use of your plan.
 - **Honest limits:** the pictures are about 160x120, so only plain things can be seen: a phone held low, a second person out of view, a screen below the camera, or someone whispering will not be. The model can be wrong in both directions, which is why nothing happens without you.
 - **Privacy:** the pictures go to the AI provider the platform uses for the agent model. Say so to your students and your school before you switch it on.
+
+## Messages in the apps (autopilot v3, part 6)
+A message from you or the assistant (a warning, "10 minutes left", extra time added, the join notice for picture checks) rides on the students' heartbeat (5 s) and is shown **once** until they tap OK: a banner in the phone app (Android), an overlay in the laptop app, and the banner in the browser test page. It is kept 10 minutes on the MySEB server, so a student who reconnects within that time still sees it. The Chrome extension (the low-security option) does not show messages. Apps built before this change ignore them; install the new build for tests where you rely on warnings.

@@ -38,6 +38,8 @@ class _ExamScreenState extends State<ExamScreen> with WidgetsBindingObserver {
   late String _status;
   String? _reason;
   bool _offline = false, _locked = false, _ended = false;
+  String? _noticeId, _notice; // a message from the teacher, shown until the student taps OK
+  String _seenNotice = '';
   int _fails = 0;
   final _lastSent = <String, DateTime>{};
   DateTime _pickUntil = DateTime.fromMillisecondsSinceEpoch(0); // the system file/photo picker is open: leaving to it is not a violation
@@ -194,7 +196,10 @@ class _ExamScreenState extends State<ExamScreen> with WidgetsBindingObserver {
   void _apply(HeartbeatResult r) {
     if (!mounted) return;
     final wasPaused = _status != 'IN_EXAM';
-    setState(() { _status = r.status; _reason = r.reason; if (r.status != 'ENDED') _remaining = r.remainingSeconds > 0 ? r.remainingSeconds : _remaining; });
+    setState(() {
+      _status = r.status; _reason = r.reason; if (r.status != 'ENDED') _remaining = r.remainingSeconds > 0 ? r.remainingSeconds : _remaining;
+      if (r.noticeId != null && r.noticeId != _noticeId) { _noticeId = r.noticeId; _notice = r.notice; }
+    });
     if (r.status == 'ENDED') _finish(r.reason);
     if (r.status == 'IN_EXAM' && wasPaused) _load(); // teacher let us continue: reopen the exam
   }
@@ -303,6 +308,18 @@ class _ExamScreenState extends State<ExamScreen> with WidgetsBindingObserver {
               ),
               Expanded(child: WebViewWidget(controller: _wc)),
             ]),
+            if (_notice != null && _noticeId != _seenNotice)
+              Positioned(left: 12, right: 12, top: 44, child: Material(
+                color: const Color(0xFF0F172A), elevation: 6, borderRadius: BorderRadius.circular(12),
+                child: Padding(padding: const EdgeInsets.fromLTRB(14, 10, 8, 10), child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Text('MESSAGE FROM YOUR TEACHER', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF7DD3FC), letterSpacing: 0.6)),
+                    const SizedBox(height: 4),
+                    Text(_notice!, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                  ])),
+                  TextButton(onPressed: () => setState(() => _seenNotice = _noticeId ?? ''), child: const Text('OK')),
+                ])),
+              )),
             if (blocked) Positioned.fill(child: _overlay()),
           ]),
         ),
