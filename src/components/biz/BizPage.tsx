@@ -170,7 +170,7 @@ export default function BizPage({ business: b, openNow, mediaSrc, preview = fals
   useEffect(() => { let alive = true; void import('qrcode').then((m: any) => (m.default ?? m).toDataURL(url, { margin: 1, width: 420, color: { dark: '#0E1722', light: '#FFFFFF' } })).then((d: string) => { if (alive) setQr(d); }).catch(() => undefined); return () => { alive = false; }; }, [url]);
   useEffect(() => { const h = (e: Event) => { e.preventDefault(); setInstallEvt(e); }; window.addEventListener('beforeinstallprompt', h); return () => window.removeEventListener('beforeinstallprompt', h); }, []);
   useEffect(() => { if (!preview && window.location.hash === '#pay' && b.payOnline) setCheckout('pay'); }, [preview, b.payOnline]);
-  useEffect(() => { let alive = true; void publicApi.posts(b.slug).then((p) => { if (alive) setPosts(p); }).catch(() => undefined); return () => { alive = false; }; }, [b.slug, b.updatedAt]);
+  useEffect(() => { let alive = true; void publicApi.posts(b.slug, new URLSearchParams(window.location.search).get('post') ?? undefined).then((p) => { if (alive) setPosts(p); }).catch(() => undefined); return () => { alive = false; }; }, [b.slug, b.updatedAt]);
   useEffect(() => { if (!posts.length) return; const h = window.location.hash; if (h.startsWith('#post-') || h === '#updates') window.setTimeout(() => document.getElementById(h.slice(1))?.scrollIntoView({ block: 'start' }), 300); }, [posts.length]);
   const install = async () => { try { await installEvt.prompt(); } catch { /* dismissed */ } setInstallEvt(null); };
   const add = (id: string, d = 1) => setCart((x) => ({ ...x, [id]: Math.max(0, Math.min(99, (x[id] ?? 0) + d)) }));

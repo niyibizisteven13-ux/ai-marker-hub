@@ -198,3 +198,19 @@ test('feed: love is one per visitor and toggles, comments are validated and limi
   await svc.removePost('o', b.id, post.id); assert.equal(await kv.get(`biz-comments:${b.id}`) && ((await kv.get<any>(`biz-comments:${b.id}`)).items as any[]).filter((x) => x.postId === post.id).length, 0); assert.equal(((await kv.get<any>(`biz-likes:${b.id}`))?.by ?? {})[post.id], undefined);
   await svc.setPublished('o', b.id, false); await assert.rejects(svc.like(b.slug, other.id, 'q'), (e: any) => e.status === 404); assert.deepEqual(await svc.publicComments(b.slug, other.id), []);
 });
+
+
+test('shared links include older posts outside the feed page and respect publication', async () => {
+  let clock = T0;
+  const svc = createBizService({ kv: memKv(), media: memoryMediaStore(), isPaid: async () => true, now: () => clock }); resetBizLimitsForTests();
+  const b = await svc.create('o', { name: 'Cafe' }); await svc.update('o', b.id, { about: 'x' }); await svc.setPublished('o', b.id, true);
+  const shared = await svc.addPost('o', b.id, { text: 'Shared offer' });
+  for (let i = 0; i < 25; i++) { clock += 60_000; await svc.addPost('o', b.id, { text: `Update ${i}` }); }
+  assert.equal((await svc.publicPosts(b.slug)).some(p => p.id === shared.id), false);
+  const page = await svc.publicPosts(b.slug, { postId: shared.id });
+  assert.equal(page.length, 21); assert.equal(page.filter(p => p.id === shared.id).length, 1);
+  assert.equal((await svc.publicPosts(b.slug, { postId: page[0].id })).length, 20);
+  assert.equal((await svc.publicPosts(b.slug, { postId: 'missing' })).length, 20);
+  await svc.setPublished('o', b.id, false);
+  assert.deepEqual(await svc.publicPosts(b.slug, { postId: shared.id }), []);
+});
