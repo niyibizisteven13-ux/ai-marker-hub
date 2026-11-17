@@ -31,6 +31,8 @@ import {
   Copy, X, FolderUp, Coins,
 } from 'lucide-react';
 import { creditMeter, useBillingMe } from './PlanStatus';
+import { useNextPrompt } from '../hooks/useNextPrompt';
+import { nextPromptEnabled, setNextPromptEnabled, suggestionAction } from '../utils/nextPrompt';
 import { LearningModeBanner, LearningModePicker, speakText, speechLang, useLearningMode, useSpeechInput } from './LearningMode';
 import type { LearningSettings } from '../lib/learning/presets';
 import { Message as MessageType, ChatAttachment, ResponseFeedbackDetails } from '../types';
@@ -78,64 +80,6 @@ interface CreateStudioProps {
 
 const sourceOf = attachmentSource;
 
-function ModePicker({ selected, onSelect }: { selected: string; onSelect: (val: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const modes = [
-    { id: 'auto', label: 'Auto (Balanced)', short: 'Auto' },
-    { id: 'fast', label: 'Fast (Real-time)', short: 'Fast' },
-    { id: 'deep', label: 'Deep (Reasoning)', short: 'Deep' },
-  ];
-
-  const selectedMode = modes.find((m) => m.id === selected) || modes[0];
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleOutside = (e: PointerEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    if (open) {
-      document.addEventListener('pointerdown', handleOutside);
-    }
-    return () => document.removeEventListener('pointerdown', handleOutside);
-  }, [open]);
-
-  return (
-    <div className="relative" ref={dropdownRef}>
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-[var(--app-muted)] hover:bg-white/5 transition-colors border border-white/10 bg-[var(--app-panel)]"
-      >
-        <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-        <span>{selectedMode.short}</span>
-        <ChevronDown size={12} className="opacity-60" />
-      </button>
-
-      {open && (
-        <div className="absolute bottom-full right-0 mb-2 w-48 rounded-2xl border border-white/15 bg-[var(--app-panel)] shadow-2xl p-1 z-50 animate-in fade-in slide-in-from-bottom-2 duration-150">
-          {modes.map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              onClick={() => {
-                onSelect(m.id);
-                setOpen(false);
-              }}
-              className={`w-full text-left px-3 py-2 rounded-xl text-xs font-medium transition-colors ${
-                selected === m.id ? 'bg-[#5DCAA5]/20 text-white' : 'text-[var(--app-muted)] hover:bg-white/5 hover:text-white'
-              }`}
-            >
-              {m.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function CreateStudio({
   messages,
   onSendMessage,
@@ -177,7 +121,8 @@ export default function CreateStudio({
   const [renameValue, setRenameValue] = useState('');
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   const [showSources, setShowSources] = useState(true);
-  const [answerLanguage, setAnswerLanguage] = useState('Auto');
+  // The answer language follows the language you write in; there is no picker for it any more.
+  const answerLanguage = 'Auto';
   const [learning, setLearning] = useLearningMode();
   const [speakReplies, setSpeakReplies] = useState(true);
   const voiceLang = speechLang(learning.mode === 'roleplay' ? learning.language : undefined, answerLanguage === 'Auto' ? undefined : answerLanguage);
@@ -192,6 +137,10 @@ export default function CreateStudio({
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
   const plusMenuRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // The box is a slim single line while you read an answer, and opens up when you click into it or start typing.
+  const [focused, setFocused] = useState(false);
+  const [suggestOn, setSuggestOn] = useState(nextPromptEnabled);
+  const suggestion = useNextPrompt({ messages: messages as any, isTyping: !!isTyping, enabled: suggestOn && !isTemporaryChat });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const [zipping, setZipping] = useState(false);
@@ -273,6 +222,10 @@ export default function CreateStudio({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Like a code editor's ghost text: Tab fills the suggested next message, Enter sends it (only while the box is empty).
+    const act = suggestionAction(e.key, e.shiftKey, inputValue, suggestion);
+    if (act === 'fill' && suggestion) { e.preventDefault(); setInputValue(suggestion); return; }
+    if (act === 'send' && suggestion && !isTyping && window.matchMedia('(min-width: 1024px)').matches) { e.preventDefault(); onSendMessage(suggestion, stagedAttachments, { answerLanguage, learning }); stickToBottomRef.current = true; return; }
     const isDesktop = window.matchMedia('(min-width: 1024px)').matches;
     if (isDesktop && e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -330,9 +283,21 @@ export default function CreateStudio({
     if (files.length > 0) onStageAttachments?.(files);
   };
 
+  // The header slides away while you read down a conversation and comes back when you scroll up (or reach the top).
+  const [headerHidden, setHeaderHidden] = useState(false);
+  const lastScrollTop = useRef(0);
+  const userScrollUntil = useRef(0);          // set while the reader is scrolling by hand (wheel, touch, keys), so the page's own scrolling to the newest message never hides the header
+  const markUserScroll = () => { userScrollUntil.current = Date.now() + 300; };
+  useEffect(() => { if (messages.length === 0) setHeaderHidden(false); }, [messages.length]);
   const handleScroll = () => {
     const el = scrollContainerRef.current;
     if (!el) return;
+    const top = el.scrollTop; const delta = top - lastScrollTop.current; lastScrollTop.current = top;
+    if (messages.length > 0) {
+      if (top < 48) setHeaderHidden(false);
+      else if (delta > 10 && Date.now() < userScrollUntil.current) setHeaderHidden(true);
+      else if (delta < -10) setHeaderHidden(false);
+    }
     const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     const isNearBottom = distanceToBottom <= 80;
     stickToBottomRef.current = isNearBottom;
@@ -369,6 +334,8 @@ export default function CreateStudio({
   }, [isTyping, messages, learning.mode, speakReplies, voiceLang]);
 
   const canSend = Boolean(inputValue.trim() || stagedAttachments.length > 0 || isTyping);
+  // Slim once there is a conversation and you are not writing: just the line, the plus, the mic and send.
+  const compact = messages.length > 0 && !focused && !inputValue && stagedAttachments.length === 0 && !speech.listening && !plusMenuOpen && learning.mode === 'normal';
 
   return (
     <div
@@ -379,7 +346,11 @@ export default function CreateStudio({
     >
       {isDraggingAttachments && <div className="absolute inset-3 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-emerald-400/70 bg-[var(--app-sunken)]/95 text-sm font-medium text-emerald-200 pointer-events-none">Drop documents to attach</div>}
       {/* Header */}
-      <header className="flex h-[calc(56px+env(safe-area-inset-top,0px))] shrink-0 items-center justify-between border-b border-white/[0.06] bg-[var(--app-panel-2)]/95 px-3 pt-[env(safe-area-inset-top,0px)] backdrop-blur-md">
+      <header
+        style={{ marginTop: headerHidden ? 'calc(-44px - env(safe-area-inset-top, 0px))' : 0, opacity: headerHidden ? 0 : 1 }}
+        aria-hidden={headerHidden}
+        className="flex h-[calc(44px+env(safe-area-inset-top,0px))] shrink-0 items-center justify-between bg-[var(--app-bg)] px-2 pt-[env(safe-area-inset-top,0px)] transition-[margin-top,opacity] duration-200"
+      >
         {/* Left: Menu button on mobile */}
         <div className="flex items-center gap-2">
           <button
@@ -391,7 +362,7 @@ export default function CreateStudio({
             <PanelLeft className="h-5 w-5" />
           </button>
           <div className="hidden lg:flex items-center gap-2">
-            <span className="text-sm font-semibold tracking-tight text-[var(--app-text)]">
+            <span className="text-[13px] font-medium tracking-tight text-[var(--app-muted)]">
               {messages.length > 0 && truncatedTitle ? truncatedTitle : 'New Chat'}
             </span>
           </div>
@@ -400,15 +371,13 @@ export default function CreateStudio({
         {/* Center: Truncated conversation title on mobile */}
         <div className="flex-1 px-2 text-center lg:hidden truncate">
           {messages.length > 0 && truncatedTitle && (
-            <span className="text-sm font-medium text-[var(--app-text)] truncate">{truncatedTitle}</span>
+            <span className="text-[13px] font-medium text-[var(--app-muted)] truncate">{truncatedTitle}</span>
           )}
         </div>
 
         {/* Right: Mode Picker, Upgrade / Sign in, More Menu */}
         <div className="flex items-center gap-2">
           {isTemporaryChat && <span className="hidden rounded-full border border-[#F0A12C]/25 bg-[#F0A12C]/10 px-2.5 py-1 text-[10px] font-semibold text-[#F6B94A] sm:inline-flex">Temporary</span>}
-          <ModePicker selected={selectedProvider} onSelect={(val) => onProviderChange?.(val)} />
-
           <button
             type="button"
             onClick={onNewChat}
@@ -419,14 +388,7 @@ export default function CreateStudio({
             <SquarePen className="h-5 w-5" />
           </button>
 
-          {user ? (billing && billing.plan !== 'FREE' && billing.plan !== 'GO' ? null : (
-            <button
-              onClick={() => (window as any).openUpgradeModal?.()}
-              className="hidden sm:flex bg-gradient-to-r from-amber-500/20 to-orange-600/10 hover:from-amber-500/30 hover:to-orange-600/20 text-amber-400 font-medium px-3.5 py-1.5 rounded-xl border border-amber-500/30 text-xs transition-all shadow-md items-center gap-1.5"
-            >
-              <Sparkles size={13} /> Upgrade
-            </button>
-          )) : (
+          {!user && (
             <button
               onClick={onOpenLoginModal}
               className="flex bg-[var(--brand)] hover:bg-[var(--brand-strong)] text-white font-medium px-3.5 py-1.5 rounded-xl text-xs transition-all shadow-md items-center gap-1.5"
@@ -553,19 +515,6 @@ export default function CreateStudio({
                     {showSources ? 'On' : 'Off'}
                   </span>
                 </button>
-                <label className="flex min-h-10 items-center justify-between gap-3 rounded-xl px-3 text-neutral-200 hover:bg-white/[.07]">
-                  <span className="flex items-center gap-3"><Languages className="h-4 w-4 text-[#F0A12C]" /> Answer language</span>
-                  <select
-                    value={answerLanguage}
-                    onChange={(e) => setAnswerLanguage(e.target.value)}
-                    className="max-w-32 rounded-lg border border-white/10 bg-[var(--app-sunken)] px-2.5 py-1.5 text-xs text-neutral-200 outline-none focus:border-[#F0A12C]/60 focus:ring-2 focus:ring-[#F0A12C]/15"
-                  >
-                    <option value="Auto">Auto</option>
-                    <option value="Kinyarwanda">Kinyarwanda</option>
-                    <option value="English">English</option>
-                    <option value="French">French</option>
-                  </select>
-                </label>
 
                 <div className="my-2 border-t border-white/[.08]"></div>
 
@@ -626,6 +575,9 @@ export default function CreateStudio({
       <div
         ref={scrollContainerRef}
         onScroll={handleScroll}
+        onWheel={markUserScroll}
+        onTouchMove={markUserScroll}
+        onKeyDown={markUserScroll}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-hidden relative"
       >
         <div className="mx-auto w-full max-w-2xl flex flex-col gap-6 px-4 py-6">
@@ -760,7 +712,11 @@ export default function CreateStudio({
         <div className="mx-auto w-full max-w-2xl relative">
           <LearningModeBanner value={learning} onExit={() => setLearning({ mode: 'normal' })} speak={speakReplies} onToggleSpeak={() => { setSpeakReplies((v) => !v); window.speechSynthesis?.cancel(); }}
             onFeedback={() => onSendMessage('End the roleplay and give me my feedback.', [], { answerLanguage, learning })} />
-          <div className="rounded-[28px] border border-white/10 bg-[var(--app-panel)] p-3 shadow-[0_4px_24px_rgba(0,0,0,0.25)]">
+          <div
+            onFocusCapture={() => setFocused(true)}
+            onBlurCapture={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false); }}
+            className={`border border-white/10 bg-[var(--app-panel)] shadow-[0_4px_24px_rgba(0,0,0,0.25)] transition-[padding,border-radius] duration-200 ${compact ? 'rounded-full px-2 py-1.5' : 'rounded-[28px] p-3'}`}
+          >
             {stagedAttachments.length > 0 && (
               <div className="mb-2.5 flex gap-2.5 overflow-x-auto px-1 pb-1 pt-2">
                 {stagedAttachments.map((meta: any, idx: number) => {
@@ -845,10 +801,32 @@ export default function CreateStudio({
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={handleKeyDown}
                   onPaste={handleComposerPaste}
-                  placeholder={typeof window !== 'undefined' && window.innerWidth < 640 ? 'Ask Bwenge anything…' : 'Ask anything, or attach files and datasets…'}
+                  placeholder={suggestion && !isTyping ? suggestion : messages.length > 0 ? 'Reply to Bwenge…' : typeof window !== 'undefined' && window.innerWidth < 640 ? 'Ask Bwenge anything…' : 'Ask anything, or attach files and datasets…'}
+                  aria-describedby={suggestion && !inputValue ? 'next-prompt-hint' : undefined}
                   className="w-full bg-transparent border-0 resize-none text-base leading-6 text-[var(--app-text)] placeholder-[var(--app-faint)] outline-none px-1 py-1 scrollbar-hidden"
                 />
               </div>
+              {suggestion && !inputValue && !isTyping && (
+                <button
+                  type="button"
+                  id="next-prompt-hint"
+                  onClick={() => { setInputValue(suggestion); window.setTimeout(() => textareaRef.current?.focus(), 0); }}
+                  className="mb-0.5 hidden h-8 shrink-0 items-center gap-1 rounded-full border border-white/10 px-2.5 text-[11px] font-semibold text-[var(--app-muted)] hover:bg-white/5 hover:text-white sm:inline-flex"
+                  title="Use the suggested message (Tab)"
+                >
+                  <kbd className="rounded border border-white/15 px-1 text-[10px]">Tab</kbd> use
+                </button>
+              )}
+              {suggestion && !inputValue && !isTyping && (
+                <button
+                  type="button"
+                  onClick={() => { setInputValue(suggestion); window.setTimeout(() => textareaRef.current?.focus(), 0); }}
+                  className="mb-0.5 inline-flex h-8 shrink-0 items-center rounded-full border border-white/10 px-2.5 text-[11px] font-semibold text-[var(--app-muted)] hover:bg-white/5 sm:hidden"
+                  aria-label="Use the suggested message"
+                >
+                  Use
+                </button>
+              )}
 
               {/* Mic & Send Buttons */}
               <div className="flex items-center gap-1.5 shrink-0">
@@ -890,26 +868,18 @@ export default function CreateStudio({
               </div>
             </div>
 
-            {/* Sources Toggle and Answer In Language under box */}
-            <div className="mt-2.5 pt-2 border-t border-white/5 flex items-center justify-between text-[11px] text-neutral-400">
-              <div className="flex items-center gap-3">
-                <LearningModePicker value={learning} onChange={setLearning} />
+            {/* Under the box (only while you are writing): the learning mode and the next-message suggestion switch */}
+            {!compact && (
+              <div className="mt-2.5 pt-2 border-t border-white/5 flex items-center justify-between text-[11px] text-neutral-400">
+                <div className="flex items-center gap-3">
+                  <LearningModePicker value={learning} onChange={setLearning} />
+                </div>
+                <label className="flex cursor-pointer items-center gap-1.5">
+                  <input type="checkbox" className="h-3.5 w-3.5 accent-[var(--brand)]" checked={suggestOn} onChange={(e) => { setSuggestOn(e.target.checked); setNextPromptEnabled(e.target.checked); }} />
+                  <span>Suggest my next message</span>
+                </label>
               </div>
-
-              <div className="flex items-center gap-1.5">
-                <span>Answer in:</span>
-                <select
-                  value={answerLanguage}
-                  onChange={(e) => setAnswerLanguage(e.target.value)}
-                  className="bg-[var(--app-panel-2)] text-[11px] text-neutral-200 border border-white/15 rounded px-2 py-0.5 outline-none"
-                >
-                  <option value="Auto">Auto</option>
-                  <option value="Kinyarwanda">Kinyarwanda</option>
-                  <option value="English">English</option>
-                  <option value="French">French</option>
-                </select>
-              </div>
-            </div>
+            )}
           </div>
 
           {/* Credits left (plan) and disclaimer */}

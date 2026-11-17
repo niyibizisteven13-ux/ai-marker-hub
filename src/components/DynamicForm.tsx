@@ -120,6 +120,8 @@ type SubmitResult = {
   scoreLabel?: string;
   feedback?: string | null;
   results?: ReviewItem[];
+  /** The scored result: percentage, grade, the mark out of a round number (a CAT), pass or fail, and a note while written answers wait to be marked. */
+  percent?: number; grade?: string; passed?: boolean; mark?: number; outOf?: number; pendingNote?: string;
 };
 
 export type DynamicFormProps = {
@@ -1173,6 +1175,8 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey, co
           scoreLabel: res.scoreLabel,
           feedback: res.feedback ?? null,
           results: Array.isArray(res.results) ? res.results : undefined,
+          percent: typeof res.percent === 'number' ? res.percent : undefined, grade: typeof res.grade === 'string' ? res.grade : undefined, passed: typeof res.passed === 'boolean' ? res.passed : undefined,
+          mark: typeof res.mark === 'number' ? res.mark : undefined, outOf: typeof res.outOf === 'number' ? res.outOf : undefined, pendingNote: typeof res.pendingNote === 'string' ? res.pendingNote : undefined,
         });
       } else {
         setResult({ title: parsedSchema?.confirmationTitle || undefined, message: typeof res === 'string' ? res : fallback });
@@ -1300,6 +1304,15 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey, co
                 <span className="text-xs font-bold uppercase tracking-wider text-emerald-900">{result.scoreLabel || 'Your score'}</span>
                 <span className="text-lg font-black text-emerald-800">{result.score} / {max}</span>
               </div>
+              {(result.percent !== undefined || result.grade) && (
+                <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm font-semibold text-emerald-900">
+                  {result.percent !== undefined && <span>{result.percent}%</span>}
+                  {result.outOf ? <span>Mark {result.mark} / {result.outOf}</span> : null}
+                  {result.grade && <span>Grade {result.grade}</span>}
+                  {result.passed !== undefined && <span className={result.passed ? 'text-emerald-800' : 'text-rose-700'}>{result.passed ? 'Passed' : 'Not passed'}</span>}
+                </p>
+              )}
+              {result.pendingNote && <p role="status" className="rounded-lg bg-amber-100 px-3 py-2 text-xs font-semibold text-amber-900">{result.pendingNote}</p>}
               {result.feedback && <p className="text-xs leading-relaxed text-emerald-900">{result.feedback}</p>}
             </div>
           )}

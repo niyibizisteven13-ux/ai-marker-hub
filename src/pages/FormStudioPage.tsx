@@ -68,7 +68,7 @@ function SummaryCard({ s }: { s: any }) {
 
 /** After "Upload a file, get a quiz": what to check before publishing. Shown until the lecturer dismisses it. */
 /** A quiz's marks as an Excel file. The request carries the sign-in, so it is fetched and saved, not opened as a plain link. */
-function MarksExcel({ formId, title }: { formId: string; title: string }) {
+function MarksExcel({ formId, title, quiz }: { formId: string; title: string; quiz: boolean }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const run = async () => {
@@ -77,13 +77,13 @@ function MarksExcel({ formId, title }: { formId: string; title: string }) {
       const r = await authFetch(`/api/forms/${encodeURIComponent(formId)}/results/export.xlsx`);
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Could not make the Excel file.');
       const url = URL.createObjectURL(await r.blob());
-      const a = document.createElement('a'); a.href = url; a.download = `${title || 'Quiz'} marks.xlsx`; a.click();
+      const a = document.createElement('a'); a.href = url; a.download = `${title || (quiz ? 'Quiz' : 'Form')} ${quiz ? 'marks' : 'responses'}.xlsx`; a.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 2000);
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not make the Excel file.'); } finally { setBusy(false); }
   };
   return (
     <>
-      <button type="button" disabled={busy} onClick={() => void run()} className="inline-flex items-center gap-2 rounded-xl bg-[#B4502F] px-3.5 py-2 text-sm font-semibold text-white hover:bg-[#C45A37] disabled:opacity-60">{busy ? <Loader2 size={15} className="animate-spin" /> : <FileSpreadsheet size={15} />}Marks (Excel)</button>
+      <button type="button" disabled={busy} onClick={() => void run()} className="inline-flex items-center gap-2 rounded-xl bg-[#B4502F] px-3.5 py-2 text-sm font-semibold text-white hover:bg-[#C45A37] disabled:opacity-60">{busy ? <Loader2 size={15} className="animate-spin" /> : <FileSpreadsheet size={15} />}{quiz ? "Marks (Excel)" : "All results (Excel)"}</button>
       {error && <span role="alert" className="text-xs font-semibold text-rose-700">{error}</span>}
     </>
   );
@@ -238,7 +238,7 @@ export default function FormStudioPage({ formId, onBack }: { formId: string; onB
 
           <section className="flex flex-wrap items-center gap-2">
             <a href={`/api/forms/${formId}/results/export.csv`} className="inline-flex items-center gap-2 rounded-xl border border-[#DADCE0] bg-white px-3.5 py-2 text-sm font-medium hover:bg-[#F8F9FA]"><Download size={15} /> Responses (CSV)</a>
-            {data.form.schema?.isQuiz && <MarksExcel formId={formId} title={String(data.form.schema?.title || data.form.title || '')} />}
+            <MarksExcel formId={formId} quiz={!!data.form.schema?.isQuiz} title={String(data.form.schema?.title || data.form.title || '')} />
             {data.form.open && <a href={data.links.fill} target="_blank" rel="noreferrer" className="rounded-xl border border-[#DADCE0] bg-white px-3.5 py-2 text-sm font-medium hover:bg-[#F8F9FA]">Open the form</a>}
             <span className="text-xs text-[#5F6368]">For the HTML report and the Excel file with the data dictionary, ask Bwenge.</span>
           </section>
@@ -249,7 +249,7 @@ export default function FormStudioPage({ formId, onBack }: { formId: string; onB
             ? <p className="rounded-2xl border border-dashed border-[#DADCE0] bg-white p-6 text-center text-sm text-[#5F6368]">No responses yet. {data.form.open ? 'Share the form link to start collecting.' : 'Publish the form to start collecting.'}</p>
             : data.summaries.map((s) => <SummaryCard key={s.variable} s={s} />)}
 
-          {data.responses > 0 && <FormResponses formId={formId} questions={(data.form.schema?.questions ?? data.form.schema?.fields ?? []) as any[]} />}
+          {data.responses > 0 && <FormResponses formId={formId} aiMarking={!!data.form.schema?.isQuiz && !!data.form.schema?.assessment?.aiMarking} questions={(data.form.schema?.questions ?? data.form.schema?.fields ?? []) as any[]} />}
 
           <details className="rounded-2xl border border-[#E0E0E0] bg-white p-5">
             <summary className="cursor-pointer font-semibold">Data dictionary ({data.codebook.length} variables)</summary>

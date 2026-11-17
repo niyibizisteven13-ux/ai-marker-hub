@@ -20,6 +20,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_EXAM, normalizeExam, type ExamSettings } from '../../shared/examRules';
 import { normalizePicks, poolGroups } from '../../shared/formPool';
+import { DEFAULT_ASSESSMENT, normalizeAssessment, type Assessment } from '../../shared/assessment';
 import { DEFAULT_BRANDING, normalizeBranding, type FormBranding } from '../../shared/formBranding';
 import { FormDesignPanel } from './forms/FormDesignPanel';
 import { FormCanvas } from './forms/FormCanvas';
@@ -110,6 +111,8 @@ export type BuilderState = {
   descriptionImageUrl: string;
   themeColor: string;
   isQuiz: boolean;
+  /** How a quiz is scored and reported (CAT, exam, out of how many, pass mark, AI marking of written answers). */
+  assessment: Assessment;
   collectEmail: boolean;
   acceptingResponses: boolean;
   allowMultipleResponses: boolean;
@@ -192,6 +195,7 @@ export const blankState = (): BuilderState => ({
   descriptionImageUrl: '',
   themeColor: '#D97757',
   isQuiz: false,
+  assessment: DEFAULT_ASSESSMENT,
   collectEmail: false,
   acceptingResponses: true,
   allowMultipleResponses: true,
@@ -267,6 +271,7 @@ export function fromSchema(input: any): BuilderState {
     descriptionImageUrl: s.descriptionImageUrl || '',
     themeColor: s.themeColor || '#D97757',
     isQuiz: !!s.isQuiz,
+    assessment: normalizeAssessment(s.assessment),
     collectEmail: !!s.collectEmail,
     acceptingResponses: s.acceptingResponses !== false,
     allowMultipleResponses: s.allowMultipleResponses !== false,
@@ -355,6 +360,7 @@ export function buildSchema(s: BuilderState): any {
     description: s.description,
     themeColor: s.themeColor,
     isQuiz: s.isQuiz,
+    ...(s.isQuiz ? { assessment: normalizeAssessment(s.assessment) } : {}),
     collectEmail: s.collectEmail,
     acceptingResponses: s.acceptingResponses,
     allowMultipleResponses: s.allowMultipleResponses,
@@ -393,7 +399,7 @@ function findProblems(s: BuilderState): Problem[] {
     if (GRID.has(q.type) && (!clean(q.rows).length || !clean(q.columns).length)) out.push({ id: q.id, text: `${n}: add at least one row and one column.` });
     if (q.type === 'linear_scale' && q.scaleMax <= q.scaleMin) out.push({ id: q.id, text: `${n}: the scale maximum must be above the minimum.` });
     if (q.pattern) { try { new RegExp(q.pattern); } catch { out.push({ id: q.id, text: `${n}: the format pattern is not valid.` }); } }
-    if (s.isQuiz && q.points && !(Array.isArray(q.correctAnswer) ? q.correctAnswer.length : q.correctAnswer)) {
+    if (s.isQuiz && q.points && q.type !== 'long_text' && !(Array.isArray(q.correctAnswer) ? q.correctAnswer.length : q.correctAnswer)) {
       out.push({ id: q.id, text: `${n}: choose the correct answer or set points to 0.` });
     }
   });
@@ -861,6 +867,10 @@ function QuestionEditor({ q, quiz, patch, uploadFile }: {
                   <input className={inp} value={typeof q.correctAnswer === 'string' ? q.correctAnswer : ''} onChange={e => patch({ correctAnswer: e.target.value })} />
                 </Field>
               )
+            ) : q.type === 'long_text' ? (
+              <Field label="Model answer or marking points" hint="What a full-mark answer says. Used when AI marks written answers, and shown to you when you mark. Students do not see it unless you show answers.">
+                <textarea rows={3} maxLength={2000} className={inp} value={typeof q.correctAnswer === 'string' ? q.correctAnswer : ''} onChange={e => patch({ correctAnswer: e.target.value })} placeholder="e.g. Osmosis is the movement of water across a semi-permeable membrane from low to high solute concentration. 1 mark for each correct point." />
+              </Field>
             ) : <p className="self-end text-xs text-[#5F6368]">This question type is not graded automatically.</p>}
           </div>
           <Field label="Explanation (optional)" hint="Why the answer is right. Students see it after they submit, next to the correct answer, never before.">
@@ -1201,7 +1211,21 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, onUpda
             <details className={`${card} !p-0`}>
               <summary className="min-h-11 cursor-pointer list-none px-5 py-3 text-sm font-bold text-[#202124] sm:px-6">Form settings</summary>
               <div className="space-y-1 border-t border-[#E0E0E0] px-5 py-4 sm:px-6">
-                <Toggle label="Make this a quiz" checked={state.isQuiz} onChange={v => setField('isQuiz', v)} hint="Give each question points and a correct answer. Bwenge marks every response the moment it is sent; scores appear in Results." />
+                <Toggle label="Will this be marked (a quiz, CAT or exam)?" checked={state.isQuiz} onChange={v => setField('isQuiz', v)} hint="Give each question points and a correct answer. Bwenge marks every response the moment it is sent and gives the score, percentage, grade and pass or fail; scores appear in Results." />
+                {state.isQuiz && (
+                  <div className="space-y-3 rounded-xl border border-[#E0E0E0] bg-white px-3 py-3" aria-label="Scoring">
+                    <p className="text-xs font-bold uppercase tracking-wider text-[#5F6368]">Scoring and result</p>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Field label="What is it?"><select className={inp} value={state.assessment.kind} onChange={e => setField('assessment', { ...state.assessment, kind: e.target.value as Assessment['kind'] })}>
+                        <option value="QUIZ">Quiz</option><option value="CAT">CAT (continuous assessment test)</option><option value="TEST">Test</option><option value="EXAM">Exam</option>
+                      </select></Field>
+                      <Field label="Name on the result" hint='For example "CAT 1" or "Mid-term".'><input className={inp} maxLength={60} value={state.assessment.title} onChange={e => setField('assessment', { ...state.assessment, title: e.target.value })} placeholder={state.assessment.kind === 'CAT' ? 'CAT 1' : ''} /></Field>
+                      <Field label="Report out of" hint="Leave empty to report the total of the question points. A CAT is often out of 10, 20 or 30."><input type="number" min={1} max={1000} className={inp} value={state.assessment.outOf ?? ''} onChange={e => setField('assessment', { ...state.assessment, outOf: e.target.value === '' ? null : Number(e.target.value) })} /></Field>
+                      <Field label="Pass mark (%)"><input type="number" min={1} max={100} className={inp} value={state.assessment.passPercent} onChange={e => setField('assessment', { ...state.assessment, passPercent: Number(e.target.value) || 50 })} /></Field>
+                    </div>
+                    <Toggle label="Mark written answers with AI" checked={state.assessment.aiMarking} onChange={v => setField('assessment', { ...state.assessment, aiMarking: v })} hint="Choice and short answers are always marked at once. With this on, long written answers are also marked by AI against your model answer, with feedback. They are shown as AI marks for you to check and change, and students are told their score may change. Without it, you mark written answers yourself." />
+                  </div>
+                )}
                 {state.isQuiz && <Toggle label="Show score after submitting" checked={state.showScore} onChange={v => setField('showScore', v)} hint="Turn off to keep scores private: respondents only see your thank-you message, and you still see every score in Results." />}
                 {state.isQuiz && <Toggle label="Show answers after submitting" checked={state.quizShowAnswers} onChange={v => setField('quizShowAnswers', v)} hint="Respondents see their score, which answers were right and the correct ones. Turn off to show the score only." />}
                 <div className="space-y-1 rounded-xl border border-[#E0E0E0] bg-[#F8F9FA] px-3 py-2">

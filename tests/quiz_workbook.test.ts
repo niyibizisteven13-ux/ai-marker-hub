@@ -4,7 +4,7 @@ import ExcelJS from 'exceljs';
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import { randomUUID } from 'node:crypto';
-import { NotAQuizError, quizWorkbook } from '../server/services/forms/resultsWorkbook.js';
+import { NotAQuizError, quizWorkbook, responsesWorkbook } from '../server/services/forms/resultsWorkbook.js';
 import { prisma } from '../server/db.js';
 import { getJwtSecret } from '../server/auth/secrets.js';
 import formRoutes from '../server/routes/formRoutes.js';
@@ -111,6 +111,34 @@ test('the route: the owner gets the file; another signed-in user and a visitor d
     assert.equal((await load(Buffer.from(await ok.arrayBuffer()))).getWorksheet('Results')!.rowCount, 6);
     assert.equal((await fetch(`${base}/${form.id}/results/export.xlsx`, { headers: bearer(other) })).status, 403, 'another lecturer');
     assert.equal((await fetch(`${base}/${form.id}/results/export.xlsx`)).status, 401, 'no sign-in');
-    assert.equal((await fetch(`${base}/${plain.id}/results/export.xlsx`, { headers: bearer(owner) })).status, 409, 'not a quiz');
+    // a form that is not a quiz still gives the lecturer every response (it used to be refused, so a proctored test had no Excel file)
+    const all = await fetch(`${base}/${plain.id}/results/export.xlsx`, { headers: bearer(owner) });
+    assert.equal(all.status, 200); assert.match(all.headers.get('content-disposition') ?? '', /Survey responses\.xlsx/);
+    assert.ok((await load(Buffer.from(await all.arrayBuffer()))).getWorksheet('Responses'));
   } finally { srv.close(); }
+});
+
+test('every response to any form as one Excel file: names, answers, times, and how often each camera and screen rule was triggered', async () => {
+  const sch = { title: 'Midterm (camera and screen)', fields: [
+    { id: 'n', type: 'text', label: 'Full name' }, { id: 'r', type: 'text', label: 'Registration number' },
+    { id: 'q1', type: 'radio', label: 'Powerhouse of the cell?', options: ['Nucleus', 'Mitochondria'] }, { id: 'q2', type: 'checkbox', label: 'Which are organelles?', options: ['Nucleus', 'Vacuole', 'Atom'] },
+    { id: 'q3', type: 'file', label: 'Working' },
+  ] };
+  const subs = [
+    sub('Uwase Aline', 'S3-001', { q1: 'Mitochondria', q2: ['Nucleus', 'Vacuole'], q3: { name: 'work.pdf', url: 'data:application/pdf;base64,AA==' }, _exam: { faceLost: 2, multipleFaces: 0, cameraProblems: 1, tabHidden: 3, pauses: 0 } }, 1),
+    sub('Habimana Eric', 'S3-002', { q1: 'Nucleus', _exam: { faceLost: 0, multipleFaces: 1, cameraProblems: 0, tabHidden: 0, pauses: 1 } }, 5),
+  ];
+  const file = await responsesWorkbook({ title: sch.title, schema: sch, submissions: subs });
+  assert.equal(file.responses, 2); assert.equal(file.name, 'Midterm (camera and screen) responses.xlsx');
+  const wb = await load(file.data); const ws = wb.getWorksheet('Responses')!;
+  const header = (ws.getRow(1).values as any[]).slice(1).map(String);
+  assert.deepEqual(header, ['#', 'Submitted', 'Name', 'Registration no.', 'Powerhouse of the cell?', 'Which are organelles?', 'Working', 'Face left the camera (times)', 'More than one face (times)', 'Camera problems (times)', 'Left the page (times)', 'Pauses']);
+  const row = (n: number) => (ws.getRow(n).values as any[]).slice(1);
+  assert.deepEqual([row(2)[0], row(2)[2], row(2)[3], row(2)[4], row(2)[5], row(2)[6], row(2)[7], row(2)[9], row(2)[10]], [1, 'Uwase Aline', 'S3-001', 'Mitochondria', 'Nucleus; Vacuole', 'work.pdf', 2, 1, 3], 'one row per student, files by name, rule counts');
+  assert.deepEqual([row(3)[2], row(3)[4], row(3)[5], row(3)[8], row(3)[11]], ['Habimana Eric', 'Nucleus', '', 1, 1], 'an unanswered question is an empty cell');
+  assert.equal(wb.getWorksheet('Summary')!.getRow(2).getCell(2).value, 2);
+  // no proctoring data and no name question: only the columns that mean something
+  const plainFile = await responsesWorkbook({ title: 'Poll', schema: { fields: [{ id: 'a', type: 'text', label: 'Your idea' }] }, submissions: [{ id: 'x', createdAt: at(1), data: JSON.stringify({ a: 'Free wifi' }) }] });
+  assert.deepEqual(((await load(plainFile.data)).getWorksheet('Responses')!.getRow(1).values as any[]).slice(1).map(String), ['#', 'Submitted', 'Your idea']);
+  const none = await responsesWorkbook({ title: 'Empty', schema: { fields: [] }, submissions: [] }); assert.equal(none.responses, 0); assert.ok((await load(none.data)).getWorksheet('Responses'));
 });
