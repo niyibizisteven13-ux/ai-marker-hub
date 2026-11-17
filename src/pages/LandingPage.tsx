@@ -10,11 +10,14 @@ import { AuthFlow } from '../components/AuthFlow';
 import { NewAccountBlock } from '../components/NewAccountBlock';
 import { ScanMarkBanner } from '../components/ScanMarkBanner';
 import { QrCard } from '../components/QrCard';
+import { MfaStep } from '../components/MfaStep';
 
 export default function LandingPage({ onLoginSuccess }: { onLoginSuccess: (user?: any) => void }) {
   const { lang, setLang, t } = useLang();
   const { theme, toggleTheme } = useTheme();
 
+  // Back from Google with a passkey still to be checked (the server held the sign-in): show the second step instead of the sign-in form.
+  const waitingForPasskey = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('mfa') === '1';
   const bannerLabels = { s1: t('s1'), s2: t('s2'), s3: t('s3'), mark: t('bMark'), marking: t('bMarking'), done: t('bDone') };
 
   useEffect(() => {
@@ -54,7 +57,7 @@ export default function LandingPage({ onLoginSuccess }: { onLoginSuccess: (user?
           <div className="mid">
             <p className="sub">{t('sub')}</p>
 
-            <AuthFlow
+            {waitingForPasskey ? <MfaStep onDone={(next) => { window.location.href = next; }} /> : <AuthFlow
               t={t}
               onLoginSuccess={onLoginSuccess}
               onCreateAccount={() => {
@@ -67,16 +70,23 @@ export default function LandingPage({ onLoginSuccess }: { onLoginSuccess: (user?
               onPrivacy={() => {
                 window.location.href = '/privacy';
               }}
-            />
+            />}
 
-            <NewAccountBlock
+            {!waitingForPasskey && (
+              <a className="getapp" href="/myseb/download">
+                <b>{t('getApp')}</b>
+                <span>{t('getAppSub')}</span>
+              </a>
+            )}
+
+            {!waitingForPasskey && <NewAccountBlock
               title={t('newh')}
               createText={t('create')}
               onCreate={() => {
                 window.history.pushState({}, '', '/signup');
                 window.dispatchEvent(new Event('open-signup-modal'));
               }}
-            />
+            />}
           </div>
 
           <div className="foot">

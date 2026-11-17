@@ -132,3 +132,9 @@ button,input{font-family:inherit}
 @keyframes qrscan{0%{top:-22%}100%{top:100%}}
 @keyframes qrglow{0%,100%{box-shadow:0 0 0 0 rgba(45,212,191,0)}50%{box-shadow:0 0 22px 2px rgba(45,212,191,.35)}}
 @media (prefers-reduced-motion:reduce){.qr .qr-scan,.qr .qr-box{animation:none}}
+
+/* Download the app: a button for phones (which cannot scan their own screen) next to the QR code on large screens */
+.getapp{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:48px;margin-top:14px;padding:10px 16px;border:1px solid var(--border);border-radius:14px;background:var(--surface);color:var(--text);text-decoration:none;text-align:center}
+.getapp b{font-size:14px;font-weight:600}
+.getapp span{font-size:11px;color:var(--muted)}
+.getapp:hover{border-color:var(--teal,#1FB3A6)}

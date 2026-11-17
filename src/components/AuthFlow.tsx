@@ -2,8 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { authService, AuthError, User } from '../auth/authService';
 import { Spinner } from './Spinner';
 import { sanitizeNext } from '../auth/sanitizeNext';
+import { MfaStep } from './MfaStep';
 
-export type AuthFlowStep = 'start' | 'email' | 'code' | 'name' | 'success';
+export type AuthFlowStep = 'start' | 'email' | 'code' | 'name' | 'success' | 'mfa';
 
 export function AuthFlow({
   t,
@@ -128,7 +129,8 @@ export function AuthFlow({
       }
     } catch (err: any) {
       if (err instanceof AuthError) {
-        if (err.code === 'rate_limited') setErrorMessage(t('errRate'));
+        if (err.code === 'mfa_required') setStep('mfa');
+        else if (err.code === 'rate_limited') setErrorMessage(t('errRate'));
         else setErrorMessage(t('errCode'));
       } else {
         setErrorMessage(t('errCode'));
@@ -166,6 +168,7 @@ export function AuthFlow({
 
   return (
     <div className="auth" aria-busy={loading}>
+      {step === 'mfa' && <MfaStep onDone={(next) => { window.location.href = sanitizeNext(next); }} />}
       {step === 'start' && (
         <>
           <button type="button" className="pill" onClick={handleGoogleClick} disabled={loading} style={{ minHeight: '48px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>

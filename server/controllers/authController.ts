@@ -10,11 +10,12 @@ import { getEmailSender, getVerificationEmailContent, ConsoleEmailSender } from 
 import { sanitizeNext } from '../auth/sanitizeNext.js';
 import { isPublicSignupAllowed } from '../auth/publicSignup.js';
 import { getJwtSecret } from '../auth/secrets.js';
+import { hasSecondFactor, issueTicket } from '../auth/passkeys.js';
 
 const JWT_SECRET = getJwtSecret();
 const ACCESS_TOKEN_TTL = '15m';
 
-function buildAuthenticatedUser(user: any) {
+export function buildAuthenticatedUser(user: any) {
   const role = user.role || 'user';
   return {
     id: user.id,
@@ -62,6 +63,32 @@ function clearRefreshCookie(res: Response) {
     sameSite: 'lax',
     path: '/',
   });
+}
+
+/** Creates the sign-in session (refresh token in an HttpOnly cookie). Used after the first step, or after the second step when the account has a passkey. */
+export async function startSession(req: Request, res: Response, userId: string) {
+  const refreshToken = crypto.randomBytes(32).toString('base64url');
+  const tokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
+  const now = new Date();
+  await prisma.refreshSession.create({
+    data: {
+      userId, familyId: crypto.randomUUID(), tokenHash,
+      userAgent: req.headers['user-agent'] || null, ip: req.ip || null,
+      expiresAt: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000), absoluteExpiresAt: new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000),
+    },
+  });
+  setRefreshCookie(res, refreshToken);
+}
+
+export function signAccessToken(user: { id: string; email: string; role?: string | null }) {
+  return jwt.sign({ userId: user.id, email: user.email, role: user.role || 'user' }, JWT_SECRET, { expiresIn: ACCESS_TOKEN_TTL, algorithm: 'HS256', issuer: 'bwenge', audience: 'bwenge-web' });
+}
+
+/** First step done but the account asks for a passkey: no session yet, only a short-lived ticket (HttpOnly cookie) for the second step. */
+export async function holdForSecondFactor(res: Response, userId: string, next: string) {
+  const ticket = await issueTicket(userId, next);
+  const isProd = process.env.NODE_ENV === 'production';
+  res.cookie('mfa_ticket', ticket, { httpOnly: true, secure: isProd, sameSite: 'lax', path: '/api/auth/passkey', maxAge: 5 * 60 * 1000 });
 }
 
 // ── Google Auth ──────────────────────────────────────────────
@@ -188,34 +215,20 @@ export async function googleCallback(req: Request, res: Response) {
       return res.redirect(302, `/?auth_error=google_failed`);
     }
 
+    // The account asks for a passkey (fingerprint or face) after Google: no session until it is checked.
+    if (await hasSecondFactor(user.id)) {
+      await holdForSecondFactor(res, user.id, sanitizeNext(cookieParsed.next, postLoginRoute));
+      await writeAuditLog(user.id, 'LOGIN_GOOGLE_PASSKEY_PENDING', 'User', user.id, {});
+      return res.redirect(302, '/?mfa=1');
+    }
+
     // Update last login
     await prisma.user.update({
       where: { id: user.id },
       data: { lastLoginAt: new Date() },
     });
 
-    // Create session
-    const refreshTokenBytes = crypto.randomBytes(32);
-    const refreshToken = refreshTokenBytes.toString('base64url');
-    const tokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
-    const familyId = crypto.randomUUID();
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-    const absoluteExpiresAt = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
-
-    await prisma.refreshSession.create({
-      data: {
-        userId: user.id,
-        familyId,
-        tokenHash,
-        userAgent: req.headers['user-agent'] || null,
-        ip: req.ip || null,
-        expiresAt,
-        absoluteExpiresAt,
-      },
-    });
-
-    setRefreshCookie(res, refreshToken);
+    await startSession(req, res, user.id);
     await writeAuditLog(user.id, 'LOGIN_GOOGLE', 'User', user.id, { email: normalizedEmail });
 
     const safeNext = sanitizeNext(cookieParsed.next, postLoginRoute);
@@ -375,35 +388,16 @@ export async function emailVerify(req: Request, res: Response) {
       }
     }
 
-    // Create session
-    const refreshTokenBytes = crypto.randomBytes(32);
-    const refreshToken = refreshTokenBytes.toString('base64url');
-    const tokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
-    const familyId = crypto.randomUUID();
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-    const absoluteExpiresAt = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
+    if (await hasSecondFactor(user.id)) {
+      await holdForSecondFactor(res, user.id, '/chat');
+      await writeAuditLog(user.id, 'LOGIN_EMAIL_PASSKEY_PENDING', 'User', user.id, { email: normalized });
+      return res.json({ mfaRequired: true });
+    }
 
-    await prisma.refreshSession.create({
-      data: {
-        userId: user.id,
-        familyId,
-        tokenHash,
-        userAgent: req.headers['user-agent'] || null,
-        ip: req.ip || null,
-        expiresAt,
-        absoluteExpiresAt,
-      },
-    });
-
-    setRefreshCookie(res, refreshToken);
+    await startSession(req, res, user.id);
     await writeAuditLog(user.id, 'LOGIN_EMAIL', 'User', user.id, { email: normalized });
 
-    const accessToken = jwt.sign(
-      { userId: user.id, email: user.email, role: user.role || 'user' },
-      JWT_SECRET,
-      { expiresIn: ACCESS_TOKEN_TTL, algorithm: 'HS256', issuer: 'bwenge', audience: 'bwenge-web' }
-    );
+    const accessToken = signAccessToken(user);
 
     return res.json({
       accessToken,
