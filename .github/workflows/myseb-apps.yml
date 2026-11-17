@@ -3,6 +3,8 @@ name: Build MySEB apps
 # Builds the student apps pointing at your site: Windows installer, macOS dmg, Linux AppImage and an Android APK.
 # Run it from the Actions tab ("Run workflow"), or push a tag like myseb-v1.0.0 to also publish a GitHub Release.
 on:
+  pull_request:
+    paths: ['myseb/**', '.github/workflows/myseb-apps.yml']
   workflow_dispatch:
     inputs:
       api_base:
@@ -16,6 +18,7 @@ permissions:
 
 env:
   API_BASE: ${{ inputs.api_base || 'https://bwenge.space/myseb' }}
+  MYSEB_VERSION: ${{ startsWith(github.ref, 'refs/tags/myseb-v') && github.ref_name || format('myseb-v1.0.{0}', github.run_number) }}
 
 jobs:
   desktop:
@@ -33,6 +36,8 @@ jobs:
         run: |
           printf '{ "apiBase": "%s" }\n' "$API_BASE" > config.json
           cat config.json
+      - name: Stamp the release version
+        run: npm version "${MYSEB_VERSION#myseb-v}" --no-git-tag-version --allow-same-version
       - run: npm ci
       - run: npx electron-builder --publish never
         env: { CSC_IDENTITY_AUTO_DISCOVERY: 'false' }
@@ -43,6 +48,9 @@ jobs:
             myseb/desktop/dist/*.exe
             myseb/desktop/dist/*.dmg
             myseb/desktop/dist/*.AppImage
+            myseb/desktop/dist/*.zip
+            myseb/desktop/dist/*.yml
+            myseb/desktop/dist/*.blockmap
 
   android:
     runs-on: ubuntu-latest
@@ -61,12 +69,31 @@ jobs:
           mkdir -p ~/.gradle/init.d
           printf 'allprojects { tasks.configureEach { t -> if (t.name.startsWith("lintVital") || t.name.startsWith("lintAnalyze")) t.enabled = false } }\n' > ~/.gradle/init.d/no-lint.gradle
       - run: bash setup.sh
-      - run: flutter build apk --release --dart-define=MYSEB_API=${{ env.API_BASE }}
+      - name: Configure persistent Android release signing
+        env:
+          KEYSTORE: ${{ secrets.MYSEB_ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.MYSEB_ANDROID_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.MYSEB_ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.MYSEB_ANDROID_KEY_PASSWORD }}
+        run: python3 scripts/configure-signing.py
+      - name: Build Android installer
+        env:
+          STORE_PASSWORD: ${{ secrets.MYSEB_ANDROID_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.MYSEB_ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.MYSEB_ANDROID_KEY_PASSWORD }}
+        run: flutter build apk --release --build-name="${MYSEB_VERSION#myseb-v}" --build-number=${{ github.run_number }} --dart-define=MYSEB_VERSION="${MYSEB_VERSION#myseb-v}" --dart-define=MYSEB_API=${{ env.API_BASE }}
+      - name: Advertise compatible in-app Android updates only for persistently signed builds
+        env:
+          KEYSTORE: ${{ secrets.MYSEB_ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE" ]; then printf '{"version":"%s"}\n' "${MYSEB_VERSION#myseb-v}" > build/app/outputs/flutter-apk/MySEB-android-update.json; fi
       - run: mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/MySEB.apk
       - uses: actions/upload-artifact@v4
         with:
           name: myseb-android
-          path: myseb/mobile/build/app/outputs/flutter-apk/MySEB.apk
+          path: |
+            myseb/mobile/build/app/outputs/flutter-apk/MySEB.apk
+            myseb/mobile/build/app/outputs/flutter-apk/MySEB-android-update.json
 
   # iPhone. Always builds an unsigned copy to prove the app compiles (kept as a download of this run only: an unsigned iPhone app
   # cannot be installed normally and is never published). If the Apple secrets are set (see myseb/docs/IOS.md), it also signs the app
@@ -85,7 +112,7 @@ jobs:
         with: { channel: stable }
       - run: bash setup.sh
       - name: Build (unsigned)
-        run: flutter build ios --release --no-codesign --build-number=${{ github.run_number }} --dart-define=MYSEB_API=${{ env.API_BASE }}
+        run: flutter build ios --release --no-codesign --build-name="${MYSEB_VERSION#myseb-v}" --dart-define=MYSEB_VERSION="${MYSEB_VERSION#myseb-v}" --build-number=${{ github.run_number }} --dart-define=MYSEB_API=${{ env.API_BASE }}
       - name: Keep the unsigned copy of this run
         run: |
           mkdir Payload && cp -R build/ios/iphoneos/Runner.app Payload/ && zip -qry MySEB-iphone-unsigned.ipa Payload
@@ -136,11 +163,11 @@ jobs:
       - name: Publish the release
         env: { GH_TOKEN: '${{ github.token }}' }
         run: |
-          for file in MySEB-win.exe MySEB-mac.dmg MySEB-linux.AppImage MySEB.apk MySEB-extension.zip; do
-            test -s "apps/$file" || { echo "Missing installer: $file"; exit 1; }
+          version="${MYSEB_VERSION#myseb-v}"
+          cp "apps/MySEB-$version-win.exe" apps/MySEB-win.exe
+          cp "apps/MySEB-$version-mac.dmg" apps/MySEB-mac.dmg
+          cp "apps/MySEB-$version-linux.AppImage" apps/MySEB-linux.AppImage
+          for file in MySEB-win.exe MySEB-mac.dmg MySEB-linux.AppImage MySEB.apk MySEB-extension.zip latest.yml latest-linux.yml; do
+            test -s "apps/$file" || { echo "Missing installer or update feed: $file"; exit 1; }
           done
-          tag="${{ github.ref_name }}"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            tag="myseb-v1.0.0-build.${{ github.run_number }}.${{ github.run_attempt }}"
-          fi
-          gh release create "$tag" apps/MySEB-win.exe apps/MySEB-mac.dmg apps/MySEB-linux.AppImage apps/MySEB.apk apps/MySEB-extension.zip --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "MySEB $tag" --notes "Student apps for $API_BASE" --latest=false
+          gh release create "$MYSEB_VERSION" apps/* --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "MySEB $MYSEB_VERSION" --notes "Student apps for $API_BASE. Desktop update feeds included. Android in-app update discovery requires the persistent signing marker." --latest=false

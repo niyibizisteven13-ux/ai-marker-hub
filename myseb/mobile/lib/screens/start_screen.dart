@@ -1,5 +1,8 @@
 import 'dart:async';
 import 'dart:io' show Platform;
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:flutter/services.dart';
 import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
 import '../services/api.dart';
@@ -11,17 +14,53 @@ class StartScreen extends StatefulWidget {
   State<StartScreen> createState() => _StartScreenState();
 }
 
-class _StartScreenState extends State<StartScreen> {
+class _StartScreenState extends State<StartScreen> with WidgetsBindingObserver {
   final _code = TextEditingController();
   final _name = TextEditingController();
   String? _error;
   bool _busy = false;
   StreamSubscription<Uri>? _links;
+  Timer? _updateTimer;
+  Map<String, dynamic>? _update;
+  bool _checkingUpdate = false;
+  String? _updateMessage;
+  static const _updates = MethodChannel('myseb/updates');
 
   @override
   void initState() {
     super.initState();
     _initLinks();
+    WidgetsBinding.instance.addObserver(this);
+    _checkUpdates();
+    _updateTimer = Timer.periodic(const Duration(minutes: 5), (_) => _checkUpdates());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _checkUpdates();
+  }
+
+  Future<void> _checkUpdates({bool manual = false}) async {
+    if (_busy || _checkingUpdate || !Platform.isAndroid) return;
+    _checkingUpdate = true;
+    try {
+      final base = await Api.savedBase();
+      final response = await http.get(Uri.parse('$base/updates/check?platform=android&version=$appVersion')).timeout(const Duration(seconds: 8));
+      if (response.statusCode != 200) throw Exception('Update unavailable');
+      final info = jsonDecode(response.body) as Map<String, dynamic>;
+      if (!mounted || _busy) return;
+      setState(() { _update = info['available'] == true ? info : null; _updateMessage = manual && _update == null ? 'MySEB is up to date, or no compatible update has been published yet.' : null; });
+    } catch (_) {
+      if (mounted && manual) setState(() => _updateMessage = 'Could not check for updates. Check your internet connection and try again.');
+    } finally { _checkingUpdate = false; }
+  }
+
+  Future<void> _installUpdate() async {
+    if (_busy || _update == null) return;
+    final url = Uri.tryParse(_update!['downloadUrl']?.toString() ?? '');
+    if (url == null || url.scheme != 'https' || url.host != 'github.com' || !url.path.startsWith('/niyibizisteven13-ux/ai-marker-hub/releases/download/')) return;
+    try { await _updates.invokeMethod('openDownload', {'url': url.toString()}); }
+    catch (_) { if (mounted) setState(() => _updateMessage = 'Could not open the installer. Try again after reconnecting.'); }
   }
 
   // The teacher's QR opens myseb://join?code=849277 : we only prefill the code, never switch server from a link.
@@ -72,7 +111,7 @@ class _StartScreenState extends State<StartScreen> {
   }
 
   @override
-  void dispose() { _links?.cancel(); _code.dispose(); _name.dispose(); super.dispose(); }
+  void dispose() { WidgetsBinding.instance.removeObserver(this); _updateTimer?.cancel(); _links?.cancel(); _code.dispose(); _name.dispose(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -89,6 +128,13 @@ class _StartScreenState extends State<StartScreen> {
                     child: const Text('MySEB', textAlign: TextAlign.center, style: TextStyle(fontSize: 52, fontWeight: FontWeight.w800, color: Color(0xFF60A5FA), letterSpacing: 2)),
                   ),
                   const Text('Secure exam browser', textAlign: TextAlign.center, style: TextStyle(color: Colors.white54)),
+                  if (_update != null) Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
+                    Text('MySEB ${_update!['version']} is available', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    const Text('Download the update, then confirm installation in Android. Keep your existing MySEB app installed.'),
+                    Row(mainAxisAlignment: MainAxisAlignment.end, children: [TextButton(onPressed: () => setState(() => _update = null), child: const Text('Later')), FilledButton(onPressed: _busy ? null : _installUpdate, child: const Text('Download & install'))]),
+                  ]))),
+                  if (Platform.isAndroid) TextButton(onPressed: _busy ? null : () => _checkUpdates(manual: true), child: const Text('Check for updates')),
+                  if (_updateMessage != null) Text(_updateMessage!, textAlign: TextAlign.center),
                   const SizedBox(height: 32),
                   TextField(controller: _name, textCapitalization: TextCapitalization.words, decoration: const InputDecoration(labelText: 'Your name', border: OutlineInputBorder())),
                   const SizedBox(height: 14),

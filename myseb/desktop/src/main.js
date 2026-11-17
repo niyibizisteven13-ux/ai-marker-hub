@@ -2,14 +2,27 @@
 const { postFollowingRedirects } = require('./post');
 const { parseJoin } = require('./joinlink');
 const { pickNotice } = require('./notice');
-const { app, BrowserWindow, Menu, ipcMain, session, clipboard, screen, desktopCapturer, systemPreferences } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, session, clipboard, screen, desktopCapturer, systemPreferences, shell } = require('electron');
 const { execFile } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
 
 const DEV = process.env.MYSEB_DEV === '1';          // dev: windowed, devtools allowed. NEVER ship with this set.
-const VERSION = '1.0.0';
+const VERSION = app.getVersion();
+let appUpdater = null;
+let macUpdateUrl = null;
+async function checkMacUpdate() {
+  if (exam && exam.status !== 'ENDED') return { status: 'idle' };
+  try {
+    const response = await fetch(`${cfg.apiBase}/updates/check?platform=mac&version=${VERSION}`, { signal: AbortSignal.timeout(8000) });
+    if (!response.ok) throw new Error();
+    const b = await response.json();
+    const u = b.available ? new URL(b.downloadUrl) : null;
+    macUpdateUrl = u?.protocol === 'https:' && u.hostname === 'github.com' && u.pathname.startsWith('/niyibizisteven13-ux/ai-marker-hub/releases/download/') ? u.href : null;
+    return macUpdateUrl ? { status: 'available', version: b.version, manual: true } : { status: 'current' };
+  } catch { return { status: 'error', message: 'Could not check for updates. Try again later.' }; }
+}
 const BLUR_LIMIT_MS = 1500;
 const PARTITION = 'myseb-exam';                      // in-memory: nothing from an exam survives the app
 
@@ -228,6 +241,12 @@ function createWindow() {
 }
 
 /* ------------------------------------------------------------------ IPC (the renderer never sees the token) */
+ipcMain.handle('update-check', () => process.platform === 'darwin' ? checkMacUpdate() : appUpdater?.check() ?? { status: 'unsupported', message: 'Install the latest MySEB from bwenge.space/myseb/download.' });
+ipcMain.handle('update-download', async () => {
+  if (process.platform === 'darwin' && macUpdateUrl && (!exam || exam.status === 'ENDED')) { await shell.openExternal(macUpdateUrl); return { status: 'manual', message: 'Download opened. Install the new MySEB in Applications when you are ready.' }; }
+  return appUpdater?.download() ?? { status: 'unsupported' };
+});
+ipcMain.handle('update-install', () => appUpdater?.install() ?? false);
 ipcMain.handle('info', () => ({ apiBase: cfg.apiBase, version: VERSION, dev: DEV }));
 
 ipcMain.handle('verify', async (_e, { code, name }) => {
@@ -320,5 +339,18 @@ app.whenReady().then(() => {
     }).catch(() => cb({}));
   }, { useSystemPicker: false });
   createWindow();
+  if (app.isPackaged && process.platform === 'darwin') {
+    const check = async () => { const s = await checkMacUpdate(); if (s.status === 'available') toRenderer('app-update', s); };
+    win.webContents.once('did-finish-load', () => void check());
+    setInterval(() => void check(), 5 * 60_000).unref();
+  }
+  if (app.isPackaged && !DEV && ['win32', 'linux'].includes(process.platform)) {
+    const { autoUpdater } = require('electron-updater');
+    autoUpdater.setFeedURL({ provider: 'generic', url: `${cfg.apiBase}/updates/` });
+    appUpdater = require('./updater').createUpdater({ updater: autoUpdater, active: () => Boolean(exam && exam.status !== 'ENDED'), notify: (s) => toRenderer('app-update', s), beforeInstall: () => { allowQuit = true; } });
+    win.webContents.once('did-finish-load', () => void appUpdater.check());
+    setInterval(() => void appUpdater.check(), 5 * 60_000).unref();
+    win.on('focus', () => { if (!exam) void appUpdater.check(); });
+  }
 });
 app.on('window-all-closed', () => app.quit());

@@ -4,7 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 const _defaultApi = String.fromEnvironment('MYSEB_API', defaultValue: 'http://10.0.2.2:4000'); // 10.0.2.2 = laptop, from the Android emulator
-const appVersion = '1.0.0';
+const appVersion = String.fromEnvironment('MYSEB_VERSION', defaultValue: '1.0.1');
 
 class Session {
   Session({required this.token, required this.sessionId, required this.title, required this.examUrl,

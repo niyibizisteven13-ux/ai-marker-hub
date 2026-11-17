@@ -1,6 +1,8 @@
 package space.bwenge.myseb
 
 import android.app.ActivityManager
+import android.content.Intent
+import android.net.Uri
 import android.content.Context
 import android.content.res.Configuration
 import android.os.Bundle
@@ -28,6 +30,17 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "myseb/updates").setMethodCallHandler { call, result ->
+            if (call.method != "openDownload") { result.notImplemented(); return@setMethodCallHandler }
+            val url = call.argument<String>("url") ?: ""
+            val uri = Uri.parse(url)
+            if (examActive || uri.scheme != "https" || uri.host != "github.com" || !uri.path.orEmpty().startsWith("/niyibizisteven13-ux/ai-marker-hub/releases/download/")) {
+                result.error("NOT_ALLOWED", "Updates are allowed only before an exam and from the official release.", null)
+            } else {
+                try { startActivity(Intent(Intent.ACTION_VIEW, uri)); result.success(true) }
+                catch (_: Exception) { result.error("NO_INSTALLER", "Cannot open the download.", null) }
+            }
+        }
         channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "myseb/lock").also { ch ->
             ch.setMethodCallHandler { call, result ->
                 when (call.method) {

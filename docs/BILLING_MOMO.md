@@ -203,3 +203,11 @@ already started. No database migration is required.
 
 Deploy through the existing VPS workflow in DEPLOY.md (`npm ci`, `npm run build`, reload PM2). This change does
 not provision SMTP or MTN credentials and does not send WhatsApp messages automatically.
+
+### Receipt confirmation in the administrator dashboard
+
+Approval waits for the email send attempt before it responds. A successful send records the actual recipient
+and send time, then the dashboard shows **Receipt sent to person@example.com**. An SMTP failure leaves the
+purchase active and shows **Receipt to person@example.com pending**, with automatic retry and Retry email.
+The recorded recipient remains correct if the customer later changes their login email. “Sent” means the mail
+server accepted the message; delivery to an inbox still depends on that mail server and the recipient's filters.

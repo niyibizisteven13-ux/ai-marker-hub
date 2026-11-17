@@ -67,3 +67,22 @@ window.myseb.onCloseAttempt(() => {
   ]);
 });
 $('quitIdle').onclick = () => window.myseb.quitIdle();
+
+// Update controls live only on the start screen; main also refuses installation while an exam is active.
+function showUpdate(s) {
+  if (!$('examView').hidden) return;
+  $('updateInfo').hidden = false; $('updateAction').hidden = true;
+  $('updateText').textContent = s.status === 'available' ? `MySEB ${s.version} is ready. Download the update now?`
+    : s.status === 'downloaded' ? 'Update downloaded. Install and restart MySEB now?'
+    : s.status === 'downloading' ? `Downloading update… ${s.percent ?? 0}%`
+    : s.status === 'checking' ? 'Checking for updates…'
+    : s.status === 'current' ? 'MySEB is up to date.' : s.message || 'Updates are not available for this build.';
+  if (s.status === 'available' || s.status === 'downloaded') {
+    $('updateAction').hidden = false;
+    $('updateAction').textContent = s.status === 'downloaded' ? 'Install & restart' : 'Download update';
+    $('updateAction').onclick = () => s.status === 'downloaded' ? window.myseb.installUpdate() : window.myseb.downloadUpdate().then(showUpdate);
+  }
+}
+window.myseb.onUpdate(showUpdate);
+$('checkUpdate').onclick = () => window.myseb.checkUpdate().then(showUpdate);
+$('updateLater').onclick = () => { $('updateInfo').hidden = true; };

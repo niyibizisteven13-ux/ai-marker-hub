@@ -182,10 +182,24 @@ export async function notifyReceipt(p: any) {
   const g = await grantText(p);
   const item = (await quote(p.purpose, { packId: p.packId ?? undefined, months: p.months || 1 }).catch(() => null))?.item ?? p.purpose;
   const email = receiptEmail({ name: c.name, receiptNumber: p.receiptNumber, paidAt: new Date(p.fulfilledAt), item, amountRwf: p.amountRwf, amountUsd: p.amountUsd, currency: p.currency, phoneMasked: p.phoneMasked, transactionId: p.financialTransactionId, grant: g.grant, balanceNote: g.balanceNote });
-  const mailed = await once(`receipt:${p.id}:email`, p.userId, 'email', () => sendMail(c.email, email));
-  if (mailed) await db.billingPayment.update({ where: { id: p.id }, data: { emailedAt: new Date() } }).catch(() => undefined);
+  const deliveryKey = `receipt-email:${p.id}`;
+  const delivered = await db.appSetting.findUnique({ where: { key: deliveryKey } });
+  if (!delivered && !p.emailedAt && c.email && await sendMail(c.email, email)) {
+    const sentAt = new Date();
+    await db.$transaction(async (tx: any) => {
+      await tx.appSetting.upsert({ where: { key: deliveryKey }, create: { key: deliveryKey, value: { email: c.email, sentAt: sentAt.toISOString() } }, update: {} });
+      await tx.billingPayment.update({ where: { id: p.id }, data: { emailedAt: sentAt } });
+    });
+  }
   await once(`receipt:${p.id}:telegram`, p.userId, 'telegram', () => sendTelegram(c.chatId,
     `✅ <b>Payment received</b>\n\n${htmlEsc(item)} · <b>${p.amountRwf.toLocaleString('en-US')} ${htmlEsc(p.currency)}</b>\n${htmlEsc(g.grant)}${g.balanceNote ? `\n${htmlEsc(g.balanceNote)}` : ''}\n\n<i>Receipt ${htmlEsc(p.receiptNumber)}</i>`));
+}
+
+/** The recorded recipient is retained even if the account email changes later. */
+export async function receiptDelivery(p: any) {
+  const row = await db.appSetting.findUnique({ where: { key: `receipt-email:${p.id}` } });
+  const c = await contact(p.userId);
+  return { status: p.emailedAt ? 'sent' : c.email ? 'pending' : 'unavailable', email: row?.value?.email ?? (p.emailedAt ? null : c.email), sentAt: row?.value?.sentAt ?? p.emailedAt ?? null };
 }
 
 async function notifyFailed(p: any) {

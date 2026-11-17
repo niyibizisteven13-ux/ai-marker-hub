@@ -567,3 +567,15 @@ test('manual purchase APIs require authentication, reserve approval for admins a
     assert.equal((await planFor(userId)).id, 'PLUS');
   } finally { process.env.BILLING_AUTOMATIC_PAYMENTS_ENABLED = 'true'; srv.close(); }
 });
+
+test('receipt delivery records the actual email address and reports pending on SMTP failure', async () => {
+  const { startManualPayment, approveManualPayment } = await import('../server/services/billing/manual.js');
+  const { receiptDelivery } = await import('../server/services/billing/payments.js');
+  const userId = await newUser();
+  const email = (await db.user.findUnique({ where: { id: userId } })).email;
+  const p = await startManualPayment(userId, { purpose: 'PRO' }, true);
+  const done = await approveManualPayment(p.id, `RECEIPT-${randomUUID()}`, 'admin-test');
+  assert.equal(done.receiptEmail.status, 'sent'); assert.equal(done.receiptEmail.email, email); assert.ok(done.receiptEmail.sentAt);
+  await db.user.update({ where: { id: userId }, data: { email: `changed-${randomUUID()}@test.local` } });
+  assert.equal((await receiptDelivery(await db.billingPayment.findUnique({ where: { id: p.id } }))).email, email, 'historical recipient is not rewritten when the login email changes');
+});

@@ -1,7 +1,7 @@
 {
   "name": "myseb-desktop",
   "productName": "MySEB",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "MySEB secure exam browser (desktop)",
   "main": "src/main.js",
   "private": true,
@@ -15,14 +15,54 @@
     "electron-builder": "^25.1.8"
   },
   "build": {
-    "extraResources": [{ "from": "../extension", "to": "chrome-extension" }],
+    "extraResources": [
+      {
+        "from": "../extension",
+        "to": "chrome-extension"
+      }
+    ],
     "appId": "space.bwenge.myseb",
-    "protocols": [{ "name": "MySEB", "schemes": ["myseb"] }],
+    "protocols": [
+      {
+        "name": "MySEB",
+        "schemes": [
+          "myseb"
+        ]
+      }
+    ],
     "productName": "MySEB",
-    "artifactName": "MySEB-${os}.${ext}",
-    "files": ["src/**", "renderer/**", "config.json", "package.json"],
-    "win": { "target": "nsis" },
-    "mac": { "target": "dmg", "category": "public.app-category.education", "extendInfo": { "NSCameraUsageDescription": "MySEB uses the camera when your lecturer asks to see you during the exam.", "NSMicrophoneUsageDescription": "MySEB uses the microphone only when your lecturer chooses to listen during the exam." } },
-    "linux": { "target": "AppImage" }
+    "artifactName": "MySEB-${version}-${os}.${ext}",
+    "files": [
+      "src/**",
+      "renderer/**",
+      "config.json",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.education",
+      "extendInfo": {
+        "NSCameraUsageDescription": "MySEB uses the camera when your lecturer asks to see you during the exam.",
+        "NSMicrophoneUsageDescription": "MySEB uses the microphone only when your lecturer chooses to listen during the exam."
+      }
+    },
+    "linux": {
+      "target": "AppImage"
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://bwenge.space/myseb/updates/"
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "^6.6.2"
   }
 }

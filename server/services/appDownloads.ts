@@ -77,6 +77,7 @@ let buildId: string | null = null;
 /** A short id of the site that is running: APP_BUILD or the commit, else a hash of the built index page (it changes with every build). */
 export function siteBuild(env: NodeJS.ProcessEnv = process.env, distDir = path.join(process.cwd(), 'dist')): string {
   if (buildId) return buildId;
+  try { const built = JSON.parse(fs.readFileSync(path.join(distDir, 'build.json'), 'utf8')); if (typeof built.build === 'string') return (buildId = built.build); } catch { /* older build */ }
   const fromEnv = env.APP_BUILD || env.VERCEL_GIT_COMMIT_SHA || env.GIT_COMMIT || env.SOURCE_VERSION;
   if (fromEnv) return (buildId = String(fromEnv).slice(0, 12));
   try { return (buildId = crypto.createHash('sha256').update(fs.readFileSync(path.join(distDir, 'index.html'))).digest('hex').slice(0, 12)); } catch { return (buildId = 'dev'); }
