@@ -72,6 +72,7 @@ const FormStudioPage = lazyPage(() => import('./pages/FormStudioPage'));
 const ModelPage = lazyPage(() => import('./pages/ModelPage'));
 const LearnPage = lazyPage(() => import('./pages/LearnPage'));
 const TermsPage = lazyPage(() => import('./pages/TermsPage'));
+const GetAppPage = lazyPage(() => import('./pages/GetAppPage'));
 const PrivacyPage = lazyPage(() => import('./pages/PrivacyPage'));
 const LoginModal = React.lazy(() => import('./components/LoginModal'));
 const UpgradeModal = React.lazy(() => import('./components/UpgradeModal'));
@@ -1477,6 +1478,8 @@ export default function App() {
   if (window.location.pathname === '/myseb') {
     return <div className="min-h-[100dvh] bg-slate-50 px-4"><Suspense fallback={null}><MySebRequired page /></Suspense></div>;
   }
+  // Get the app (public): the landing page's QR code and download button lead here.
+  if (window.location.pathname === '/get-app') return <GetAppPage />;
   if (window.location.pathname === '/terms') {
     return <TermsPage />;
   }
