@@ -104,6 +104,7 @@ export async function createRequest(user: { id: string; email: string; name: str
   const mine = rows.map((r: any) => r.value as AccessRequest).find((r: AccessRequest) => r.userId === user.id && r.status === 'pending');
   const req: AccessRequest = { id: mine?.id ?? randomUUID(), userId: user.id, email: user.email, name: user.name, plan, note: note.slice(0, 300), status: 'pending', createdAt: mine?.createdAt ?? new Date().toISOString() };
   await put(`myseb-req:${req.id}`, req, user.id);
+  if (!mine) void import('./telegram/agentic.js').then((m) => m.notifyAdminsOfPayment(req)).catch(() => undefined);   // the administrator gets it on Telegram with Approve / Reject
   return req;
 }
 export async function listRequests(status?: AccessRequest['status'], take = 100): Promise<AccessRequest[]> {

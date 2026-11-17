@@ -190,6 +190,19 @@ export interface ToolServices {
     examCandidate(userId: string, examId: string, candidate: string): Promise<{ candidateId: string; candidateName: string | null; total: number; maxTotal: number; percent: number; passed: boolean | null; questions: Array<{ number: string; maxMarks: number; marks: number | null; outcome: string; flags: number }> } | null>;
     changeExamMark(userId: string, examId: string, candidate: string, question: string, marks: number, reason: string): Promise<void>;
   };
+  /** Scheduled tasks, plans that wait for a yes, and what the chat may tell the owner of the platform. */
+  agenda?: {
+    /** Runs one tool as this user (a plan step). Used only after the user's yes. */
+    exec(userId: string, tool: string, input: Record<string, unknown>): Promise<{ ok: boolean; text: string }>;
+    has(tool: string): boolean;
+  };
+  /** Platform owner tools: only offered to administrators (checked on every call). */
+  admin?: {
+    isAdmin(userId: string): Promise<boolean>;
+    pendingPayments(): Promise<Array<{ id: string; name: string; email: string; plan: string; note: string; createdAt: string }>>;
+    decidePayment(id: string, approve: boolean, by: string, grant?: { months?: number; tests?: number }): Promise<{ ok: boolean; text: string }>;
+    overview(): Promise<{ users: number; newUsers7d: number; pendingPayments: number; liveExams: number | null; liveStudents: number | null; subscribers: number }>;
+  };
   /** Universal output engine (server/services/outputs). */
   outputs?: {
     create(userId: string, spec: unknown): Promise<{ artifact: any; reused: boolean }>;

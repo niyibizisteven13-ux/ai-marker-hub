@@ -10,7 +10,7 @@ const { buildToolkit } = await import('../server/services/ai/tools/index.js');
 test.after(() => S.__setPlatformSettingsForTests(S.DEFAULT_SETTINGS));
 
 test('the switch list covers every chat ability, and every tool name in it is a real tool', () => {
-  const real = new Set(buildToolkit({ platform: {} as any, work: {} as any, assignments: {} as any, memory: {} as any, outputs: {} as any, datasets: {} as any, webSearch: {} as any, python: {} as any, image: {} as any, formAi: (() => ({})) as any } as any).names());
+  const real = new Set(buildToolkit({ platform: {} as any, admin: {} as any, agenda: {} as any, work: {} as any, assignments: {} as any, memory: {} as any, outputs: {} as any, datasets: {} as any, webSearch: {} as any, python: {} as any, image: {} as any, formAi: (() => ({})) as any } as any).names());
   process.env.ENABLE_AGENT_WEB_TOOLS = 'true'; process.env.ENABLE_AGENT_PYTHON_TOOL = 'true';
   const all = new Set(buildToolkit({ platform: {} as any, work: {} as any, assignments: {} as any, memory: {} as any, webSearch: { search: async () => [], fetchUrl: async () => '' } as any, python: { execute: async () => ({ stdout: '' }) } as any, formAi: (() => ({ adapter: {}, model: 'm' })) as any } as any).names());
   for (const f of S.FLAGS) for (const t of f.tools ?? []) assert.ok(real.has(t) || all.has(t) || t === 'generate_image', `switch ${f.id} lists ${t}, which is not a tool`);

@@ -123,6 +123,15 @@ const told = new Set<string>();
 const loaderOf = (r: Row): TargetLoader => (r.kind === 'form' ? formTarget(r.ownerId, r.ref) : assignmentTarget(r.ownerId, r.ref));
 
 /** One look at one room. Returns what it did (for tests and the log). */
+/** Replaceable in tests. */
+export let alertOwner = async (row: Row, entries: AgentLogEntry[]): Promise<void> => {
+  const [{ notifyUser, liveNotifyDeps }, { notifyPrefs }] = await Promise.all([import('./agenda/notify.js'), import('./agenda/store.js')]);
+  if (!(await notifyPrefs().get(row.ownerId)).liveAlerts) return;
+  const base = (process.env.APP_BASE_URL || '').replace(/\/$/, '');
+  const lines = entries.slice(0, 8).map((e) => `• ${e.student ? `${e.student}: ` : ''}${e.text}`);
+  await notifyUser(row.ownerId, { title: 'Live room: needs you', text: `${lines.join('\n')}${entries.length > 8 ? `\n…and ${entries.length - 8} more` : ''}`, buttons: base ? [[{ text: 'Open the live room', url: `${base}/live/${row.kind}/${encodeURIComponent(row.ref)}` }]] : undefined }, await liveNotifyDeps());
+};
+export const __setAlertOwnerForTests = (fn: typeof alertOwner) => { alertOwner = fn; };
 export async function runRoom(row: Row, now = Date.now()): Promise<AgentLogEntry[]> {
   const load = loaderOf(row);
   let m: any;
@@ -160,6 +169,9 @@ export async function runRoom(row: Row, now = Date.now()): Promise<AgentLogEntry
   }
   for (const a of actions) await a().catch((e) => logger.debug?.('[myseb-agent] action failed', { error: (e as Error)?.message }));
   if (made.length) await mutate(row.kind, row.ref, row.ownerId, (r) => { r.counts = { ...r.counts, ...counts }; r.log.push(...made); }, 'agent');
+  // What only the lecturer can decide goes to their phone too (Telegram, else email), one message per look, if they have alerts on.
+  const needs = made.filter((e) => e.kind === 'needs_you' || e.kind === 'card');
+  if (needs.length) void alertOwner(row, needs).catch(() => undefined);
   return made;
 }
 

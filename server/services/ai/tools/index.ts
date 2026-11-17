@@ -10,6 +10,8 @@ import { memoryTools } from './memoryTools.js';
 import { sceneTools } from './sceneTools.js';
 import { formTools } from './formTools.js';
 import { platformTools } from './platformTools.js';
+import { agendaTools } from './agendaTools.js';
+import { adminTools } from './adminTools.js';
 import { workTools } from './workTools.js';
 import { analyzeDocument, viewPages } from './documentTools.js';
 
@@ -30,6 +32,8 @@ export function buildToolkit(services: ToolServices = {}): ToolRegistry {
     ...(process.env.ENABLE_ASSIGNMENT_TOOLS === 'false' ? [] : assignmentTools(services)),
     ...(process.env.ENABLE_PLATFORM_TOOLS === 'false' ? [] : platformTools(services)),
     ...(process.env.ENABLE_WORK_TOOLS === 'false' ? [] : workTools(services)),
+    ...(process.env.ENABLE_AGENDA_TOOLS === 'false' ? [] : agendaTools(services)),
+    ...adminTools(services),
     ...memoryTools(services),
     ...(enabled('ENABLE_AGENT_WEB_TOOLS') ? webTools(services) : []),
     enabled('ENABLE_AGENT_PYTHON_TOOL') ? pythonTool(services) : null,

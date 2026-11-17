@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { evaluateStudentSubmission as deepseekEvaluate } from '../../src/services/deepseekMarker.js';
 import { BWENGE_CHAT_RESPONSE_RULES, BWENGE_GENERAL_SYSTEM_PROMPT } from './prompts/bwengeGeneralPrompt.js';
 import { platformContext } from './platformContext.js';
+import { disabledTools } from './platform/settings.js';
 import { learningModePrompt } from './learning/modes.js';
 import { looksMathematical, mathStyle } from './prompts/mathStyle.js';
 import { MemoryService } from './MemoryService.js';
@@ -360,6 +361,36 @@ export const bwengeAgent = createAiAgent({
       get: async (userId, id) => (await import('./assignments/runtime.js')).assignmentService().get(userId, id),
     },
     audit: async (userId, action, resourceType, resourceId, details) => { await (await import('./platform/audit.js')).auditAction(userId, action, resourceType, resourceId, details); },
+    // Plans that wait for a yes, and the platform owner's tools (lazy imports, like the services above).
+    agenda: {
+      has: (tool) => !!bwengeAgent.tools.get(tool) && !disabledTools().has(tool),
+      exec: async (userId, tool, input) => {
+        const t = bwengeAgent.tools.get(tool);
+        if (!t || disabledTools().has(tool)) return { ok: false, text: `"${tool}" is not available.` };
+        const bad = bwengeAgent.tools.validate(tool, input);
+        if (bad) return { ok: false, text: `Invalid input: ${bad}` };
+        const out: any = await t.execute(input, { userId, files: fileStore, services: bwengeAgent.services });
+        return { ok: !out?.isError, text: String(out?.text ?? '').slice(0, 500) };
+      },
+    },
+    admin: {
+      isAdmin: async (userId) => (await prisma.user.findUnique({ where: { id: userId }, select: { role: true } }))?.role === 'ADMIN',
+      pendingPayments: async () => (await (await import('./mySebAccess.js')).listRequests('pending', 20)).map((r) => ({ id: r.id, name: r.name, email: r.email, plan: r.plan, note: r.note, createdAt: r.createdAt })),
+      decidePayment: async (id, approve, by, grant) => {
+        const r = await (await import('./mySebAccess.js')).decideRequest(id, approve, by, grant);
+        return r ? { ok: true, text: `${approve ? 'Approved' : 'Rejected'}: ${r.name} <${r.email}>.` } : { ok: false, text: 'That request was not found or was already decided.' };
+      },
+      overview: async () => {
+        const acc = await import('./mySebAccess.js');
+        const since = new Date(Date.now() - 7 * 86_400_000);
+        const [users, newUsers7d, pending, subs, my] = await Promise.all([
+          prisma.user.count(), prisma.user.count({ where: { createdAt: { gte: since } } }), acc.listRequests('pending', 100), acc.listSubscribers().catch(() => []),
+          (await import('./mySebAdmin.js')).mySebOverview().catch(() => null) as Promise<any>,
+        ]);
+        const t = my?.overview?.totals;
+        return { users, newUsers7d, pendingPayments: pending.length, subscribers: subs.length, liveExams: t ? t.activeExams : null, liveStudents: t ? t.inExam : null };
+      },
+    },
     // Doing the work in the chat: marking a task, releasing results, classes, marked exams and Excel files (lazy imports, like the services above).
     work: {
       taskResults: async (userId, id) => {
@@ -1021,6 +1052,8 @@ export class AiService {
     learning?: import('./learning/modes.js').LearningSettings;
     /** Files attached earlier in this conversation (stored ids), readable with read_attachment. */
     contextFiles?: Array<{ fileId: string; name: string }>;
+    /** A scheduled run with nobody watching: only these tools, and this extra instruction (see agenda/runner.ts). */
+    unattended?: { toolNames: string[]; system: string };
   }) {
     const useGonka = process.env.AI_PROVIDER === 'gonkarouter' || await this.providerAvailable('gonkarouter');
     const allowFallback = process.env.ALLOW_GEMINI_FALLBACK === 'true';
@@ -1121,9 +1154,11 @@ export class AiService {
       return { ...this.parseModelJson(r.text), _usage: r.usage };
     }
 
+    if (options.unattended) systemPrompt += `\n\n${options.unattended.system}`;
     const run = (correction?: { previousText: string; note: string }) => bwengeAgent.run({
       userId: options.userId,
       system: systemPrompt,
+      ...(options.unattended ? { toolNames: options.unattended.toolNames, maxTurns: 12 } : {}),
       history: correction ? [...history, { role: 'user', text: prompt }, { role: 'assistant', text: correction.previousText || '(no reply)' }] : history,
       prompt: correction ? correction.note : prompt,
       uploads: correction ? [] : uploads,

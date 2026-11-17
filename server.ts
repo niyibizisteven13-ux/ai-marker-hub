@@ -2986,6 +2986,7 @@ async function startServer() {
     startPlatformSettings();
     startMySebSync();
     if (isPrimary()) void import('./server/services/mySebAgent.js').then((m) => m.startMySebAgent());
+    if (isPrimary()) void import('./server/services/agenda/runner.js').then((m) => m.startAgenda());
     startEducationRuntime().catch((err) => logger.error('Background job runtime failed to start', { errorType: err?.name }));
     // Mobile Money: confirm pending payments (missed callbacks) and send renewal reminders (primary only).
     if (isPrimary()) startBillingJobs();
