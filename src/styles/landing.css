@@ -41,8 +41,11 @@ button,input{font-family:inherit}
 .icon-btn{width:32px;height:32px;border-radius:50%;border:1px solid var(--border);background:transparent;color:var(--muted);display:flex;align-items:center;justify-content:center;cursor:pointer}
 .icon-btn:hover{color:var(--text)}
 .page h1 em{font-style:normal;color:var(--teal)}
-.page .h1{font-family:"Bricolage Grotesque Variable","Bricolage Grotesque","Plus Jakarta Sans Variable",system-ui,sans-serif;font-weight:700;font-size:clamp(28px,min(3.3vw,5.2vh),44px);line-height:1.06;letter-spacing:-.026em;margin:0 0 clamp(10px,1.8vh,16px);max-width:17em;text-wrap:balance;color:var(--text)}
-.sub{color:var(--muted);font-size:16px;line-height:1.55;max-width:540px;margin:0 0 clamp(14px,3vh,30px)}
+/* The one idea of the page: two words in the brand's gold and teal, moving slowly. Deeper tones on light so it stays readable. */
+.page .h1{font-family:"Bricolage Grotesque Variable","Bricolage Grotesque","Plus Jakarta Sans Variable",system-ui,sans-serif;font-weight:700;font-size:clamp(36px,min(5.2vw,8vh),68px);line-height:1.02;letter-spacing:-.03em;margin:0 0 clamp(10px,1.8vh,18px);text-wrap:balance}
+.shine{background:linear-gradient(100deg,var(--accent-text) 0%,var(--teal) 38%,var(--accent-text) 72%,var(--teal) 100%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;animation:shine 8s linear infinite;padding-bottom:.08em}
+@keyframes shine{to{background-position:200% 0}}
+.sub{color:var(--muted);font-size:clamp(17px,2.2vh,20px);line-height:1.5;max-width:540px;margin:0 0 clamp(18px,3.4vh,36px)}
 .auth{width:100%;max-width:576px;display:flex;flex-direction:column;gap:clamp(8px,1.6vh,14px)}
 .pill{display:flex;align-items:center;justify-content:center;gap:10px;height:clamp(40px,6vh,52px);border-radius:999px;border:1px solid var(--btn-border);background:var(--btn-bg);color:var(--btn-text);font-size:16px;font-weight:600;cursor:pointer;transition:background .15s}
 .pill:hover{background:var(--btn-hover)}
@@ -118,13 +121,15 @@ button,input{font-family:inherit}
   .left{height:100%;overflow:hidden}
 }
 @media (max-height:700px){
-  .sub,.new h2{display:none}
-  .page .h1{font-size:clamp(24px,5vh,34px);margin-bottom:12px}
+  .new h2{display:none}
+  .page .h1{font-size:clamp(28px,6vh,40px);margin-bottom:8px}
+  .sub{margin-bottom:14px}
   .new{margin-top:clamp(10px,2vh,18px)}
 }
 @media (prefers-reduced-motion:reduce){
   .draw{animation:none;stroke-dashoffset:0}
   .smb-hero,.qr{animation:none}
+  .shine{animation:none}
 }
 
 .qr .qr-box{position:relative;overflow:hidden;border-radius:12px;background:#fff;aspect-ratio:1/1;line-height:0;animation:qrglow 3.2s ease-in-out infinite}

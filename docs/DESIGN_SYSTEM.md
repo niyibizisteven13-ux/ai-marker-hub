@@ -18,3 +18,6 @@ One brand across the landing page, the signed-in app, the public pages and the l
   contents list that follows reading, print-friendly); the wording is the owner's and unchanged.
 * The landing page has its own light and dark tokens (`src/styles/landing.css`). Signed-out visitors no longer get the account theme painted over them: that
   mixed a dark page with light cards for visitors whose device is set to a light colour scheme.
+
+## Landing page
+One idea: the words **Learning companion** in the brand's gold and teal, moving slowly (deeper tones on light; no motion for people who asked for reduced motion), and one line under it: *Run whole tests, marking, quizzes.* The long headline, the long paragraph and the tagline under the logo were removed. Texts: `src/i18n/landing.ts` (`h1`, `sub`; Kinyarwanda and French need a native review).
