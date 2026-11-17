@@ -13,7 +13,9 @@ export interface LedgerEntry {
   pay?: { provider: 'mtn' | 'airtel'; phone: string; state: 'pending' | 'success' | 'failed' };
 }
 export const MAX_ENTRIES = 5000;
-export const EXPENSE_CATEGORIES = ['stock', 'rent', 'transport', 'salaries', 'utilities', 'marketing', 'other'] as const;
+/** Suggested expense categories; an owner may use their own word (up to 24 letters), for example "server" or "investment". */
+export const EXPENSE_CATEGORIES = ['stock', 'rent', 'transport', 'salaries', 'utilities', 'marketing', 'software', 'investment', 'other'] as const;
+export const cleanCategory = (v: unknown): string => { const c = String(v ?? '').toLowerCase().replace(/[^\p{L}\p{N} -]/gu, '').replace(/\s+/g, ' ').trim().slice(0, 24); return c || 'other'; };
 
 const KIGALI = 2 * 3600_000;
 export const dayOf = (t: number | string) => new Date((typeof t === 'string' ? Date.parse(t) : t) + KIGALI).toISOString().slice(0, 10);
@@ -31,7 +33,7 @@ export function cleanEntry(input: any, id: string, nowMs: number, products: Prod
   const customer = clean(input?.customer, 60); if (customer) e.customer = customer;
   if (input?.method) e.method = oneOf(['cash', 'momo', 'card', 'credit'] as const, input.method, 'cash');
   const note = clean(input?.note, 200); if (note) e.note = note;
-  if (type === 'expense') e.category = oneOf(EXPENSE_CATEGORIES, input?.category, 'other');
+  if (type === 'expense') e.category = cleanCategory(input?.category);
   return e;
 }
 
@@ -62,4 +64,38 @@ export function summarize(entries: LedgerEntry[], products: Product[], nowMs: nu
     lowStock: products.filter((p) => typeof p.stock === 'number' && p.stock <= (p.lowAt ?? 5)).map((p) => ({ id: p.id, name: p.name, stock: p.stock as number, unit: p.unit ?? '' })).slice(0, 8),
     recent: entries.slice(0, 12),
   };
+}
+
+/* ------------------------------------------------------------------ costs and spending: months, budgets, recurring costs */
+export const monthOf = (t: number | string) => dayOf(t).slice(0, 7);
+export interface Recurring { id: string; name: string; amount: number; category: string; every: 'week' | 'month'; /** Day of the month (1-28) or of the week (0 = Sunday ... 6). */ on: number; lastDay?: string; paused?: boolean; createdAt: string }
+export interface Budgets { monthly: Record<string, number> }
+const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+
+/** The days a recurring cost has come due since it last ran (at most 12), oldest first. A new one first falls due on its next matching day. Pure. */
+export function dueDays(r: Recurring, nowMs: number): string[] {
+  if (r.paused) return []; const today = dayOf(nowMs); const start = r.lastDay ? addDays(r.lastDay, 1) : dayOf(Date.parse(r.createdAt));
+  const out: string[] = []; for (let d = start; d <= today && out.length < 12; d = addDays(d, 1)) { const dt = new Date(`${d}T12:00:00Z`); if (r.every === 'month' ? dt.getUTCDate() === r.on : dt.getUTCDay() === r.on) out.push(d); }
+  return out;
+}
+
+export function cleanRecurring(input: any, id: string, nowMs: number): Recurring | { error: string } {
+  const name = String(input?.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 60); if (!name) return { error: 'Give the recurring cost a name, for example "Server".' };
+  const n = Number(String(input?.amount ?? '').replace(/[,\s]/g, '')); if (!Number.isFinite(n) || n <= 0 || n > 1_000_000_000) return { error: 'The amount must be a number of RWF above zero.' };
+  const every = input?.every === 'week' ? 'week' : 'month'; const on = Math.round(Number(input?.on));
+  if (every === 'month' && !(on >= 1 && on <= 28)) return { error: 'Choose a day of the month from 1 to 28.' }; if (every === 'week' && !(on >= 0 && on <= 6)) return { error: 'Choose a day of the week (0 = Sunday … 6 = Saturday).' };
+  return { id, name, amount: Math.round(n), category: cleanCategory(input?.category), every, on, createdAt: new Date(nowMs).toISOString() };
+}
+
+/** Everything the "Costs and spending" screen shows. Pure. */
+export function summarizeCosts(entries: LedgerEntry[], nowMs: number, budgets: Budgets = { monthly: {} }, recurring: Recurring[] = []) {
+  const exp = entries.filter((e) => e.type === 'expense'); const cur = monthOf(nowMs); const prev = monthOf(Date.parse(`${cur}-01T12:00:00Z`) - 5 * 86_400_000);
+  const by = (m: string) => { const rows = new Map<string, number>(); let total = 0; for (const e of exp) if (monthOf(e.at) === m) { total += e.amount; const k = e.category ?? 'other'; rows.set(k, (rows.get(k) ?? 0) + e.amount); } return { total, byCategory: [...rows.entries()].map(([category, amount]) => ({ category, amount })).sort((a, b) => b.amount - a.amount) }; };
+  const month = by(cur), last = by(prev);
+  const trend = Array.from({ length: 6 }, (_, i) => { const d = new Date(`${cur}-01T12:00:00Z`); d.setUTCMonth(d.getUTCMonth() - (5 - i)); const m = d.toISOString().slice(0, 7); return { month: m, total: by(m).total }; });
+  const budgetRows = Object.entries(budgets.monthly).map(([category, limit]) => { const spent = month.byCategory.find((c) => c.category === category)?.amount ?? 0; return { category, limit, spent, pct: limit > 0 ? Math.round((spent / limit) * 100) : 0 }; }).sort((a, b) => b.pct - a.pct);
+  const top = exp.filter((e) => monthOf(e.at) === cur).sort((a, b) => b.amount - a.amount).slice(0, 5);
+  const sales = entries.filter((e) => e.type === 'sale' && e.status === 'completed' && monthOf(e.at) === cur).reduce((a, e) => a + e.amount, 0);
+  const monthlyCommitted = recurring.filter((r) => !r.paused).reduce((a, r) => a + (r.every === 'month' ? r.amount : r.amount * 4), 0);
+  return { month: { key: cur, ...month, sales, profit: sales - month.total }, lastMonth: { key: prev, ...last }, change: last.total > 0 ? Math.round(((month.total - last.total) / last.total) * 1000) / 10 : null, trend, budgets: budgetRows, top, recurring, monthlyCommitted };
 }

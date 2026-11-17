@@ -1,5 +1,5 @@
 import { authFetch, getAccessToken, getApiUrl } from '../utils/authFetch';
-import type { Post, PublicPost, AgentSettings, SecretsStatus, Business, DayStats, Enquiry, Product, PublicBusiness, LedgerEntry, Dashboard } from './types';
+import type { Costs, Post, PublicPost, AgentSettings, SecretsStatus, Business, DayStats, Enquiry, Product, PublicBusiness, LedgerEntry, Dashboard } from './types';
 
 /** Calls to /api/biz. Public calls need no sign-in; the others use the person's own session. */
 export class BizApiError extends Error { constructor(message: string, public status: number, public code?: string) { super(message); } }
@@ -54,6 +54,11 @@ export const ownerApi = {
   addPost: async (id: string, body: { text: string; mediaIds: string[]; productId?: string }) => (await read<{ post: Post }>(await authFetch(`/api/biz/${id}/posts`, json('POST', body)))).post,
   setPost: async (id: string, pid: string, body: { pinned?: boolean; text?: string; productId?: string }) => read(await authFetch(`/api/biz/${id}/posts/${pid}`, json('PATCH', body))),
   removePost: async (id: string, pid: string) => { const r = await authFetch(`/api/biz/${id}/posts/${pid}`, json('DELETE')); if (!r.ok) await read(r); },
+  costs: async (id: string) => read<Costs>(await authFetch(`/api/biz/${id}/costs`)),
+  setBudget: async (id: string, category: string, amount: number | null) => read<Costs>(await authFetch(`/api/biz/${id}/budgets`, json('PUT', { category, amount }))),
+  addRecurring: async (id: string, body: { name: string; amount: number; every: 'month' | 'week'; on: number; category: string }) => read(await authFetch(`/api/biz/${id}/recurring`, json('POST', body))),
+  setRecurring: async (id: string, rid: string, body: { paused?: boolean; remove?: boolean }) => read(await authFetch(`/api/biz/${id}/recurring/${rid}`, json('PATCH', body))),
+  updateEntry: async (id: string, eid: string, body: Record<string, unknown>) => read<{ entry: LedgerEntry }>(await authFetch(`/api/biz/${id}/ledger/${eid}/edit`, json('PATCH', body))),
   agent: async (id: string) => (await read<{ agent: AgentSettings }>(await authFetch(`/api/biz/${id}/agent`))).agent,
   setAgent: async (id: string, body: Partial<AgentSettings>) => (await read<{ agent: AgentSettings }>(await authFetch(`/api/biz/${id}/agent`, json('PUT', body)))).agent,
   secrets: async (id: string) => read<SecretsStatus>(await authFetch(`/api/biz/${id}/secrets`)),

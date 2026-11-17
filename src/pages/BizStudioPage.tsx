@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Megaphone, MapPin, Sparkles, Bot, ArrowLeft, BarChart3, Check, ExternalLink, Eye, EyeOff, Film, Globe, ImagePlus, Inbox, KeyRound, LayoutDashboard, Loader2, MessageCircle, MoreHorizontal, Package, Palette, Plus, Receipt, Settings, ShoppingBag, Store, Trash2, Upload, Users } from 'lucide-react';
 import BizPage from '../components/biz/BizPage';
 import MapTile, { parseCoords } from '../components/biz/MapTile';
-import { FeedView, LockedGate, AgentChatView, AgentView, DashboardView, NotebookView, CustomersView, ReportsView, SecretsView, EntrySheet, type EntryKind } from '../components/biz/Workspace';
+import { CostsView, FeedView, LockedGate, AgentChatView, AgentView, DashboardView, NotebookView, CustomersView, ReportsView, SecretsView, EntrySheet, type EntryKind } from '../components/biz/Workspace';
 import { btn, btnGhost, btnPrimary, card, input, msg, PaidNote, Tag, Title } from '../components/biz/ui';
 import { BizApiError, ownerApi, prepareImage, type Mine } from '../biz/api';
 import { CATEGORIES, DAYS, THEMES, rwf, type Business, type Enquiry, type Hours, type PublicBusiness, type SecretsStatus } from '../biz/types';
@@ -212,7 +212,7 @@ function SettingsTab({ b, onChange, onDeleted }: { b: Business; onChange: () => 
 /* ------------------------------------------------------------------ the workspace */
 type View = 'feed' | 'chat' | 'agent' | 'dashboard' | 'sales' | 'expenses' | 'products' | 'customers' | 'reports' | 'messages' | 'public' | 'secrets' | 'settings';
 const NAV: Array<{ id: View; label: string; icon: typeof Globe; group?: string }> = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard }, { id: 'chat', label: 'Ask the agent', icon: Sparkles }, { id: 'sales', label: 'Sales and orders', icon: ShoppingBag }, { id: 'expenses', label: 'Expenses', icon: Receipt },
+  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard }, { id: 'chat', label: 'Ask the agent', icon: Sparkles }, { id: 'sales', label: 'Sales and orders', icon: ShoppingBag }, { id: 'expenses', label: 'Costs and spending', icon: Receipt },
   { id: 'products', label: 'Products and stock', icon: Package }, { id: 'customers', label: 'Customers', icon: Users }, { id: 'reports', label: 'Reports', icon: BarChart3 },
   { id: 'messages', label: 'Messages', icon: Inbox }, { id: 'public', label: 'Public page', icon: Globe }, { id: 'feed', label: 'Feed', icon: Megaphone }, { id: 'agent', label: 'Business agent', icon: Bot }, { id: 'secrets', label: 'Secrets and payments', icon: KeyRound }, { id: 'settings', label: 'Settings', icon: Settings },
 ];
@@ -274,7 +274,7 @@ export default function BizStudioPage({ onBack }: { onBack: () => void }) {
             {b && mine && (<>
               {view === 'dashboard' && <DashboardView key={tick} b={b} go={go} onChange={reload} secrets={secrets} open={setSheet} />}
               {view === 'sales' && <NotebookView key={tick} b={b} type="sale" open={setSheet} onChange={reload} />}
-              {view === 'expenses' && <NotebookView key={tick} b={b} type="expense" open={setSheet} onChange={reload} />}
+              {view === 'expenses' && <CostsView key={tick} b={b} open={setSheet} onChange={reload} />}
               {view === 'customers' && <CustomersView b={b} />}
               {view === 'reports' && <ReportsView b={b} />}
               {view === 'products' && <><h1 className="mb-4 font-display text-2xl font-semibold tracking-tight">Products and stock</h1><ProductsTab b={b} urls={urls} onChange={reload} /></>}

@@ -142,6 +142,12 @@ export function createBizRouter(): Router {
   r.post('/:id/ledger', run(async (req, res) => res.status(201).json(await svc().addEntry(me(req), req.params.id, { ...(req.body ?? {}), src: 'studio' }))));
   r.patch('/:id/ledger/:eid', run(async (req, res) => res.json({ entry: await svc().setEntryStatus(me(req), req.params.id, req.params.eid, req.body?.status) })));
   r.delete('/:id/ledger/:eid', run(async (req, res) => { await svc().removeEntry(me(req), req.params.id, req.params.eid); res.status(204).end(); }));
+  r.patch('/:id/ledger/:eid/edit', run(async (req, res) => res.json({ entry: await svc().updateEntry(me(req), req.params.id, req.params.eid, req.body ?? {}) })));
+  r.get('/:id/costs', run(async (req, res) => res.json(await svc().costs(me(req), req.params.id))));
+  r.put('/:id/budgets', run(async (req, res) => { await svc().setBudget(me(req), req.params.id, req.body?.category, req.body?.amount); res.json(await svc().costs(me(req), req.params.id)); }));
+  r.get('/:id/recurring', run(async (req, res) => res.json({ recurring: await svc().recurring(me(req), req.params.id) })));
+  r.post('/:id/recurring', run(async (req, res) => res.status(201).json({ recurring: await svc().addRecurring(me(req), req.params.id, req.body ?? {}) })));
+  r.patch('/:id/recurring/:rid', run(async (req, res) => { if (!(await svc().setRecurring(me(req), req.params.id, req.params.rid, req.body ?? {}))) return res.status(404).json({ error: 'That recurring cost was not found.' }); res.json({ ok: true }); }));
   r.get('/:id/dashboard', run(async (req, res) => res.json(await svc().dashboard(me(req), req.params.id, [7, 30, 90].includes(Number(req.query.days)) ? Number(req.query.days) : 7))));
   /** The owner's own Business Agent chat (a dedicated agent for this business, not the general chat). Spends credits like any assistant action. */
   r.post('/:id/agent/chat', run(async (req, res) => {

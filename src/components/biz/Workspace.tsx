@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { MessageCircle, Heart, Megaphone, ImagePlus, Lock, Camera, Bot, BellRing, ArrowDownRight, ArrowUpRight, Banknote, Check, Copy, Download, EyeOff, Globe, KeyRound, Loader2, Package, Plus, Receipt, Send, Share2, ShieldCheck, Smartphone, Sparkles, Trash2, TrendingUp, Users, Wallet, X, AlertTriangle, ShoppingBag, CircleCheck, Clock, Ban } from 'lucide-react';
 import { ownerApi, prepareImage } from '../../biz/api';
 import type { Mine } from '../../biz/api';
-import { pageUrl, rwf, type AgentSettings, type Business, type Dashboard, type LedgerEntry, type SecretsStatus } from '../../biz/types';
+import { pageUrl, rwf, type Costs, type AgentSettings, type Business, type Dashboard, type LedgerEntry, type SecretsStatus } from '../../biz/types';
 import { btn, btnGhost, btnPrimary, card, input, msg, PaidNote, rwfShort, Tag, Title } from './ui';
 import PostComposer from './PostComposer';
 
@@ -50,17 +50,17 @@ function SalesChart({ series }: { series: Dashboard['series'] }) {
 /* ------------------------------------------------------------------ a small sheet for recording things */
 export type EntryKind = 'sale' | 'expense' | 'pay';
 export function EntrySheet({ b, kind, onClose, onDone, secrets }: { b: Business; kind: EntryKind; onClose: () => void; onDone: () => void; secrets: SecretsStatus | null }) {
-  const [f, setF] = useState({ amount: '', item: '', qty: '', customer: '', phone: '', method: 'cash', category: 'stock', productId: '', status: 'completed' }); const [busy, setBusy] = useState(false); const [err, setErr] = useState('');
+  const [f, setF] = useState({ amount: '', item: '', qty: '', customer: '', phone: '', method: 'cash', category: 'stock', productId: '', status: 'completed' }); const [busy, setBusy] = useState(false); const [err, setErr] = useState(''); const [dup, setDup] = useState(false);
   const payReady = !!secrets && (secrets.mtn.set || secrets.airtel.set); const set = (k: keyof typeof f, v: string) => setF((x) => ({ ...x, [k]: v }));
   const pick = (id: string) => { const p = b.products.find((x) => x.id === id); setF((x) => ({ ...x, productId: id, item: p?.name ?? x.item, amount: p && p.price && !x.amount ? String(p.price * (Number(x.qty) || 1)) : x.amount })); };
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault(); setBusy(true); setErr('');
+  const submit = async (e: React.FormEvent | null, force = false) => {
+    e?.preventDefault(); setBusy(true); setErr(''); setDup(false);
     try {
       const amount = Number(f.amount.replace(/[,\s]/g, ''));
       if (kind === 'pay') await ownerApi.requestPayment(b.id, { phone: f.phone, amount, item: f.item || undefined, customer: f.customer || undefined });
-      else await ownerApi.addEntry(b.id, { type: kind, amount, item: f.item, qty: f.qty ? Number(f.qty) : undefined, customer: f.customer, method: kind === 'sale' ? f.method : undefined, category: kind === 'expense' ? f.category : undefined, productId: f.productId || undefined, status: kind === 'sale' ? f.status : undefined });
+      else await ownerApi.addEntry(b.id, { type: kind, amount, item: f.item, qty: f.qty ? Number(f.qty) : undefined, customer: f.customer, method: kind === 'sale' ? f.method : undefined, category: kind === 'expense' ? f.category : undefined, productId: f.productId || undefined, status: kind === 'sale' ? f.status : undefined, ...(force ? { force: true } : {}) });
       onDone(); onClose();
-    } catch (x) { setErr(msg(x)); } finally { setBusy(false); }
+    } catch (x) { setErr(msg(x)); setDup((x as { status?: number })?.status === 409); } finally { setBusy(false); }
   };
   const title = kind === 'sale' ? 'New sale' : kind === 'expense' ? 'Add expense' : 'Request a payment';
   return (
@@ -83,6 +83,7 @@ export function EntrySheet({ b, kind, onClose, onDone, secrets }: { b: Business;
           {kind === 'expense' && <label className="block text-sm"><span className="mb-1.5 block text-[var(--app-muted)]">Category</span><select className={input} value={f.category} onChange={(e) => set('category', e.target.value)}>{['stock', 'rent', 'transport', 'salaries', 'utilities', 'marketing', 'other'].map((c) => <option key={c} value={c}>{c[0].toUpperCase() + c.slice(1)}</option>)}</select></label>}
           {kind === 'pay' && <p className="rounded-xl bg-[var(--app-bg)] p-3 text-xs text-[var(--app-muted)]">The customer gets a prompt on their phone and approves with their PIN. Money goes straight to your own MTN or Airtel account.</p>}
           {err && <p role="alert" className="text-sm text-rose-600">{err}</p>}
+          {dup && <button type="button" className={`${btnGhost} w-full`} disabled={busy} onClick={() => void submit(null, true)}>It is a second one: save anyway</button>}
           <button type="submit" disabled={busy || !f.amount} className={`${btnPrimary} w-full`}>{busy ? <Loader2 size={16} className="animate-spin" /> : kind === 'pay' ? <Send size={16} /> : <Check size={16} />}{kind === 'pay' ? 'Send payment request' : 'Save'}</button>
         </div>)}
       </form>
@@ -170,9 +171,72 @@ export function EntryRow({ e, actions }: { e: LedgerEntry; actions?: React.React
   );
 }
 
+/* ------------------------------------------------------------------ fixing an entry in place */
+const CATS = ['stock', 'rent', 'transport', 'salaries', 'utilities', 'marketing', 'software', 'investment', 'other'];
+function EditEntry({ b, e, onDone, onCancel }: { b: Business; e: LedgerEntry; onDone: () => void; onCancel: () => void }) {
+  const [f, setF] = useState({ item: e.item ?? '', amount: String(e.amount), category: e.category ?? 'other', note: e.note ?? '', date: e.at.slice(0, 10) }); const [busy, setBusy] = useState(false); const [err, setErr] = useState('');
+  const save = async (ev: React.FormEvent) => { ev.preventDefault(); setBusy(true); setErr(''); try { await ownerApi.updateEntry(b.id, e.id, { item: f.item, amount: Number(f.amount.replace(/[,\s]/g, '')), note: f.note, ...(e.type === 'expense' ? { category: f.category } : {}), ...(f.date !== e.at.slice(0, 10) ? { date: `${f.date}T12:00:00Z` } : {}) }); onDone(); } catch (x) { setErr(msg(x)); } finally { setBusy(false); } };
+  return (
+    <li className="bg-[var(--app-bg)]/70 px-1 py-3"><form onSubmit={save} className="grid gap-2.5 sm:grid-cols-[2fr_1fr_1fr_1fr_auto] sm:items-end">
+      <label className="block text-xs"><span className="mb-1 block text-[var(--app-muted)]">What</span><input className={input} value={f.item} maxLength={80} onChange={(x) => setF({ ...f, item: x.target.value })} /></label>
+      <label className="block text-xs"><span className="mb-1 block text-[var(--app-muted)]">Amount (RWF)</span><input className={input} inputMode="numeric" value={f.amount} onChange={(x) => setF({ ...f, amount: x.target.value.replace(/[^\d,\s]/g, '') })} /></label>
+      {e.type === 'expense' ? <label className="block text-xs"><span className="mb-1 block text-[var(--app-muted)]">Category</span><input className={input} list="bz-cats" value={f.category} maxLength={24} onChange={(x) => setF({ ...f, category: x.target.value })} /><datalist id="bz-cats">{CATS.map((c) => <option key={c} value={c} />)}</datalist></label> : <span />}
+      <label className="block text-xs"><span className="mb-1 block text-[var(--app-muted)]">Date</span><input type="date" className={input} value={f.date} onChange={(x) => setF({ ...f, date: x.target.value })} /></label>
+      <div className="flex gap-2"><button type="submit" disabled={busy} className={`${btnPrimary} !min-h-10`}>{busy ? <Loader2 size={15} className="animate-spin" /> : 'Save'}</button><button type="button" className={`${btnGhost} !min-h-10`} onClick={onCancel}>Cancel</button></div>
+      {err && <p role="alert" className="text-xs text-rose-600 sm:col-span-5">{err}</p>}
+    </form></li>
+  );
+}
+
+/* ------------------------------------------------------------------ costs and spending */
+export function CostsView({ b, open, onChange }: { b: Business; open: (k: EntryKind) => void; onChange: () => void }) {
+  const [c, setC] = useState<Costs | null>(null); const [err, setErr] = useState(''); const [bud, setBud] = useState({ category: '', amount: '' }); const [rec, setRec] = useState({ name: '', amount: '', every: 'month' as 'month' | 'week', on: '1', category: 'utilities' }); const [tick, setTick] = useState(0);
+  const load = useCallback(() => { ownerApi.costs(b.id).then(setC).catch((e) => setErr(msg(e))); }, [b.id]);
+  useEffect(() => { load(); }, [load, b.updatedAt, tick]);
+  const act = async (fn: () => Promise<unknown>) => { setErr(''); try { await fn(); load(); setTick((t) => t + 1); onChange(); } catch (e) { setErr(msg(e)); } };
+  const maxT = Math.max(1, ...(c?.trend.map((t) => t.total) ?? [1])); const cats = c ? [...new Set([...c.month.byCategory.map((x) => x.category), ...c.budgets.map((x) => x.category)])] : [];
+  const monthName = (k: string) => new Date(`${k}-01T12:00:00Z`).toLocaleDateString('en-GB', { month: 'short', timeZone: 'UTC' });
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3"><div><h1 className="font-display text-2xl font-semibold tracking-tight">Costs and spending</h1><Tag kind="private" /></div><button type="button" className={btnPrimary} onClick={() => open('expense')}><Plus size={16} />Add expense</button></div>
+      {err && <p role="alert" className="rounded-xl bg-rose-500/10 px-4 py-2.5 text-sm text-rose-600">{err}</p>}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Kpi icon={Receipt} label="Spent this month" value={c ? money(c.month.total) : '…'} tint="bg-gradient-to-br from-rose-50 to-white">{c && (c.change === null ? <span className="text-xs text-[var(--app-muted)]">no costs last month</span> : <span className={`text-xs font-semibold ${c.change <= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>{c.change >= 0 ? '+' : ''}{c.change}% <span className="font-normal text-[var(--app-muted)]">vs last month</span></span>)}</Kpi>
+        <Kpi icon={Wallet} label="Sales this month" value={c ? money(c.month.sales) : '…'} tint="bg-gradient-to-br from-emerald-50 to-white" />
+        <Kpi icon={TrendingUp} label="Profit (est.)" value={c ? money(c.month.profit) : '…'} tint="bg-gradient-to-br from-amber-50 to-white" />
+        <Kpi icon={Clock} label="Recurring a month" value={c ? money(c.monthlyCommitted) : '…'} tint="bg-gradient-to-br from-sky-50 to-white"><span className="text-xs text-[var(--app-muted)]">{c?.recurring.filter((r) => !r.paused).length ?? 0} recurring costs</span></Kpi>
+      </div>
+      <div className="grid gap-5 lg:grid-cols-2">
+        <div className={card}><h2 className="mb-3 font-display text-lg font-semibold">Last 6 months</h2>
+          {c ? <div className="flex h-36 items-end gap-2" aria-label="Spending per month">{c.trend.map((t) => <div key={t.month} className="flex h-full flex-1 flex-col items-center justify-end gap-1"><span className="text-[10px] text-[var(--app-muted)]">{t.total ? rwfShort(t.total) : ''}</span><div title={`${t.month}: ${t.total.toLocaleString('en-US')}`} className={`w-full rounded-t ${t.month === c.month.key ? 'bg-[var(--brand)]' : 'bg-[var(--brand)]/40'}`} style={{ height: `${Math.max(3, (t.total / maxT) * 72)}%` }} /><span className="text-[11px] text-[var(--app-muted)]">{monthName(t.month)}</span></div>)}</div> : <div className="h-36 animate-pulse rounded-xl bg-[var(--app-bg)]" />}</div>
+        <div className={card}><h2 className="mb-3 font-display text-lg font-semibold">Where the money goes</h2>
+          {!c || !cats.length ? <p className="text-sm text-[var(--app-muted)]">{c ? 'No costs this month yet. Press Add expense, or tell the agent: “today I paid 7,000 for the server”.' : '…'}</p> : <ul className="space-y-3.5">{cats.map((k) => { const spent = c.month.byCategory.find((x) => x.category === k)?.amount ?? 0; const bud2 = c.budgets.find((x) => x.category === k); const pct = bud2 ? Math.min(100, bud2.pct) : c.month.total ? (spent / c.month.total) * 100 : 0; return (
+            <li key={k}><div className="flex items-baseline justify-between gap-2 text-sm"><span className="font-medium capitalize">{k}</span><span><b>{money(spent)}</b>{bud2 && <span className="text-[var(--app-muted)]"> of {money(bud2.limit)}</span>}</span></div>
+              <div className="mt-1 h-2 overflow-hidden rounded-full bg-[var(--app-bg)]"><div className={`h-full rounded-full ${bud2 && bud2.pct >= 100 ? 'bg-rose-500' : bud2 && bud2.pct >= 80 ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${pct}%` }} /></div></li>); })}</ul>}</div>
+      </div>
+      <div className="grid gap-5 lg:grid-cols-2">
+        <div className={card}><h2 className="font-display text-lg font-semibold">Monthly budgets</h2><p className="mb-3 text-sm text-[var(--app-muted)]">You get an alert at 80% and 100% of a budget.</p>
+          {c && c.budgets.length > 0 && <ul className="mb-3 space-y-2 text-sm">{c.budgets.map((x) => <li key={x.category} className="flex items-center justify-between gap-2 rounded-xl bg-[var(--app-bg)] px-3 py-2"><span className="capitalize">{x.category}</span><span className="text-[var(--app-muted)]">{money(x.spent)} / {money(x.limit)} · {x.pct}%</span><button type="button" aria-label={`Remove ${x.category} budget`} className="text-[var(--app-faint)] hover:text-rose-600" onClick={() => void act(() => ownerApi.setBudget(b.id, x.category, null))}><X size={15} /></button></li>)}</ul>}
+          <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); if (!bud.category.trim() || !bud.amount) return; void act(async () => { await ownerApi.setBudget(b.id, bud.category, Number(bud.amount.replace(/[,\s]/g, ''))); setBud({ category: '', amount: '' }); }); }}>
+            <input className={`${input} !w-40`} list="bz-cats2" placeholder="Category" aria-label="Budget category" value={bud.category} maxLength={24} onChange={(e) => setBud({ ...bud, category: e.target.value })} /><datalist id="bz-cats2">{CATS.map((x) => <option key={x} value={x} />)}</datalist>
+            <input className={`${input} !w-36`} inputMode="numeric" placeholder="RWF per month" aria-label="Budget amount" value={bud.amount} onChange={(e) => setBud({ ...bud, amount: e.target.value.replace(/[^\d,\s]/g, '') })} /><button type="submit" className={btnPrimary} disabled={!bud.category.trim() || !bud.amount}>Set budget</button></form></div>
+        <div className={card}><h2 className="font-display text-lg font-semibold">Recurring costs</h2><p className="mb-3 text-sm text-[var(--app-muted)]">Rent, a server, salaries: they record themselves on their day, so you never forget one.</p>
+          {c && c.recurring.length > 0 && <ul className="mb-3 space-y-2 text-sm">{c.recurring.map((r) => <li key={r.id} className={`flex flex-wrap items-center gap-2 rounded-xl bg-[var(--app-bg)] px-3 py-2 ${r.paused ? 'opacity-60' : ''}`}><span className="min-w-0 flex-1"><b>{r.name}</b> · {money(r.amount)} every {r.every}{r.every === 'month' ? `, day ${r.on}` : `, ${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][r.on]}`} · <span className="capitalize">{r.category}</span></span>
+            <button type="button" className={`${btnGhost} !min-h-8 !px-2.5 text-xs`} onClick={() => void act(() => ownerApi.setRecurring(b.id, r.id, { paused: !r.paused }))}>{r.paused ? 'Resume' : 'Pause'}</button><button type="button" aria-label={`Remove ${r.name}`} className="text-[var(--app-faint)] hover:text-rose-600" onClick={() => { if (confirm(`Remove ${r.name}? Entries already recorded stay.`)) void act(() => ownerApi.setRecurring(b.id, r.id, { remove: true })); }}><Trash2 size={15} /></button></li>)}</ul>}
+          <form className="grid gap-2 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); if (!rec.name.trim() || !rec.amount) return; void act(async () => { await ownerApi.addRecurring(b.id, { name: rec.name, amount: Number(rec.amount.replace(/[,\s]/g, '')), every: rec.every, on: Number(rec.on), category: rec.category }); setRec({ ...rec, name: '', amount: '' }); }); }}>
+            <input className={input} placeholder="Name, e.g. Server" aria-label="Recurring cost name" maxLength={60} value={rec.name} onChange={(e) => setRec({ ...rec, name: e.target.value })} /><input className={input} inputMode="numeric" placeholder="Amount (RWF)" aria-label="Recurring amount" value={rec.amount} onChange={(e) => setRec({ ...rec, amount: e.target.value.replace(/[^\d,\s]/g, '') })} />
+            <select className={input} aria-label="How often" value={rec.every} onChange={(e) => setRec({ ...rec, every: e.target.value as 'month' | 'week', on: e.target.value === 'month' ? '1' : '1' })}><option value="month">Every month</option><option value="week">Every week</option></select>
+            {rec.every === 'month' ? <select className={input} aria-label="Day of the month" value={rec.on} onChange={(e) => setRec({ ...rec, on: e.target.value })}>{Array.from({ length: 28 }, (_, i) => <option key={i + 1} value={i + 1}>Day {i + 1}</option>)}</select> : <select className={input} aria-label="Day of the week" value={rec.on} onChange={(e) => setRec({ ...rec, on: e.target.value })}>{['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((d, i) => <option key={d} value={i}>{d}</option>)}</select>}
+            <input className={input} list="bz-cats3" placeholder="Category" aria-label="Category" value={rec.category} maxLength={24} onChange={(e) => setRec({ ...rec, category: e.target.value })} /><datalist id="bz-cats3">{CATS.map((x) => <option key={x} value={x} />)}</datalist><button type="submit" className={btnPrimary} disabled={!rec.name.trim() || !rec.amount}>Add recurring cost</button></form></div>
+      </div>
+      <NotebookView b={b} type="expense" open={open} onChange={() => { load(); onChange(); }} embedded />
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ sales & orders, expenses */
-export function NotebookView({ b, type, open, onChange }: { b: Business; type: 'sale' | 'expense'; open: (k: EntryKind) => void; onChange: () => void }) {
-  const [list, setList] = useState<LedgerEntry[] | null>(null); const [days, setDays] = useState(30); const [err, setErr] = useState(''); const [filter, setFilter] = useState<'all' | LedgerEntry['status']>('all');
+export function NotebookView({ b, type, open, onChange, embedded = false }: { b: Business; type: 'sale' | 'expense'; open: (k: EntryKind) => void; onChange: () => void; embedded?: boolean }) {
+  const [list, setList] = useState<LedgerEntry[] | null>(null); const [days, setDays] = useState(30); const [err, setErr] = useState(''); const [filter, setFilter] = useState<'all' | LedgerEntry['status']>('all'); const [editing, setEditing] = useState('');
   const load = useCallback(() => { ownerApi.ledger(b.id, { type, days }).then(setList).catch((e) => setErr(msg(e))); }, [b.id, type, days]);
   useEffect(() => { load(); }, [load, b.updatedAt]);
   const act = async (fn: () => Promise<unknown>) => { setErr(''); try { await fn(); load(); onChange(); } catch (e) { setErr(msg(e)); } };
@@ -180,7 +244,7 @@ export function NotebookView({ b, type, open, onChange }: { b: Business; type: '
   const csv = () => { const rows = [['Date', 'Type', 'Item', 'Qty', 'Amount RWF', 'Status', 'Customer', 'Method', 'Category'], ...(list ?? []).map((e) => [e.at, e.type, e.item ?? '', e.qty ?? '', e.amount, e.status, e.customer ?? '', e.pay ? e.pay.provider : e.method ?? '', e.category ?? ''])]; const t = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n'); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([t], { type: 'text/csv' })); a.download = `${b.slug}-${type === 'sale' ? 'sales' : 'expenses'}.csv`; a.click(); URL.revokeObjectURL(a.href); };
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3"><div><h1 className="font-display text-2xl font-semibold tracking-tight">{type === 'sale' ? 'Sales and orders' : 'Expenses'}</h1><Tag kind="private" /></div>
+      <div className="flex flex-wrap items-center justify-between gap-3">{embedded ? <h2 className="font-display text-lg font-semibold">All expenses</h2> : <div><h1 className="font-display text-2xl font-semibold tracking-tight">{type === 'sale' ? 'Sales and orders' : 'Expenses'}</h1><Tag kind="private" /></div>}
         <div className="flex flex-wrap gap-2">{type === 'sale' && <button type="button" className={btnGhost} onClick={() => open('pay')}><Smartphone size={16} />Request payment</button>}<button type="button" className={btnPrimary} onClick={() => open(type)}><Plus size={16} />{type === 'sale' ? 'New sale' : 'Add expense'}</button></div></div>
       <div className={card}>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -188,11 +252,11 @@ export function NotebookView({ b, type, open, onChange }: { b: Business; type: '
           <div className="flex items-center gap-2"><select aria-label="Period" className={`${input} !w-auto !py-1.5`} value={days} onChange={(e) => setDays(Number(e.target.value))}><option value={7}>Last 7 days</option><option value={30}>Last 30 days</option><option value={90}>Last 90 days</option><option value={365}>Last year</option></select><button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={csv} disabled={!list?.length}><Download size={14} />CSV</button></div></div>
         {err && <p role="alert" className="mb-2 text-sm text-rose-600">{err}</p>}
         {!list ? <Loader2 className="animate-spin text-[var(--brand)]" /> : !shown.length ? <p className="py-6 text-center text-sm text-[var(--app-muted)]">Nothing here yet. {type === 'sale' ? 'Press New sale, or tell the assistant what you sold.' : 'Press Add expense, or tell the assistant what you spent.'}</p> : (
-          <><ul className="divide-y divide-[var(--app-line)]">{shown.slice(0, 200).map((e) => <EntryRow key={e.id} e={e} actions={<div className="flex gap-1.5">
+          <><ul className="divide-y divide-[var(--app-line)]">{shown.slice(0, 200).map((e) => <Fragment key={e.id}><EntryRow e={e} actions={<div className="flex gap-1.5"><button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => setEditing(editing === e.id ? '' : e.id)}>Edit</button>
             {type === 'sale' && e.status === 'pending' && e.pay?.state !== 'pending' && <button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => void act(() => ownerApi.setEntry(b.id, e.id, 'completed'))}>Confirm</button>}
             {e.pay?.state === 'pending' && <button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => void act(() => ownerApi.refreshPayment(b.id, e.id))}>Check</button>}
             {type === 'sale' && e.status === 'pending' && <button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => void act(() => ownerApi.setEntry(b.id, e.id, 'cancelled'))}>Cancel</button>}
-            <button type="button" aria-label="Delete entry" className={`${btnGhost} !min-h-9 !px-2.5 text-rose-600`} onClick={() => { if (confirm('Delete this entry?')) void act(() => ownerApi.removeEntry(b.id, e.id)); }}><Trash2 size={14} /></button></div>} />)}</ul>
+            <button type="button" aria-label="Delete entry" className={`${btnGhost} !min-h-9 !px-2.5 text-rose-600`} onClick={() => { if (confirm('Delete this entry?')) void act(() => ownerApi.removeEntry(b.id, e.id)); }}><Trash2 size={14} /></button></div>} />{editing === e.id && <EditEntry b={b} e={e} onDone={() => { setEditing(''); load(); onChange(); }} onCancel={() => setEditing('')} />}</Fragment>)}</ul>
             <p className="mt-3 border-t border-[var(--app-line)] pt-3 text-right text-sm text-[var(--app-muted)]">{type === 'sale' ? 'Completed in this list' : 'Total'}: <b className="text-[var(--app-text)]">{money(type === 'sale' ? total : shown.reduce((a, e) => a + e.amount, 0))}</b></p></>)}
       </div>
     </div>
