@@ -15,3 +15,10 @@ Tools: `create_form` → `review_form` → `publish_form` (ask first) → `launc
 `launch_test` makes the code first: when the lecturer has not paid it changes nothing and relays the payment steps. It does not send anything to students (no WhatsApp API); the lecturer shares the link.
 `test_debrief` ranks who may be worth a conversation (a number to judge, never proof), adds what the assistant did, and what is still waiting.
 The quiz owner is the one charged for MySEB (see ADMIN_CONTROLS.md).
+
+## Levels, practice mode and acting in the room (step 1 of the exam agent)
+- **Level**: *Assist* (default: lets students back in after small problems) or *Watch only* (it only looks and tells you; what it would have done becomes a "needs you" note).
+- **Practice mode** (`dryRun`): it writes what it WOULD do ("Would have let back in …") and does nothing. Use it on a small first test.
+- **Acting in the room** (`POST /:id/myseb/room-action`, chat tool `live_room_action`, buttons in the live room): pause everyone, let everyone back in, add 1-60 minutes (everyone or one student), send a short message to all students or one. The lecturer can always do these. The assistant itself will use them in the next steps, only within your limits (**most minutes it may add in total**, **times it may pause the room**, 20 messages), checked in code (`checkRoomAction`), every action logged in the room log and the audit log.
+- **Students see messages** in the browser test page (carried by the heartbeat, kept 10 minutes in memory on the MySEB server). **The phone and desktop apps do not show them yet**; that comes with the apps build in step 3. Added time does work in the apps (their countdown follows the server).
+- Not done yet (next steps): the assistant choosing these actions itself (judgement loop), Telegram buttons for them, and scheduled open/close.

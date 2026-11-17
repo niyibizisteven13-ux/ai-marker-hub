@@ -487,7 +487,14 @@ export const bwengeAgent = createAiAgent({
         const my = await import('./mySeb.js'); const ag = await import('./mySebAgent.js');
         const load = kind === 'form' ? my.formTarget(userId, id) : my.assignmentTarget(userId, id);
         const v = patch && Object.values(patch).some((x) => x !== undefined) ? await ag.setAgent(load, patch, userId) : await ag.getAgent(load);
-        return { rules: v.rules, resumed: v.resumed, log: v.log };
+        return { rules: v.rules, usage: v.usage, resumed: v.resumed, log: v.log };
+      },
+      roomAction: async (userId, kind, id, a) => {
+        const my = await import('./mySeb.js'); const ag = await import('./mySebAgent.js');
+        const load = kind === 'form' ? my.formTarget(userId, id) : my.assignmentTarget(userId, id);
+        const act = ag.roomActionFrom(a);
+        if (!act) return { ok: false, text: 'Unknown action, or the minutes or the message are missing.' };
+        return ag.roomAction(load, act, 'lecturer', userId);
       },
       roomViolations: async (userId, kind, id, studentId) => {
         const my = await import('./mySeb.js');

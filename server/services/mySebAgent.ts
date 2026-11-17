@@ -2,7 +2,7 @@ import { prisma } from '../db.js';
 import logger from '../utils/logger.js';
 import { auditAction } from './platform/audit.js';
 import { flagOn } from './platform/settings.js';
-import { MySebError, assignmentTarget, formTarget, monitor, sessionAction, type TargetLoader } from './mySeb.js';
+import { MySebError, assignmentTarget, extendTime, formTarget, monitor, pauseAll, resumeAll, sendNotice, sessionAction, type TargetLoader } from './mySeb.js';
 
 /**
  * The room assistant. The lecturer tells it, in the live room or in the chat, how routine moments should be handled while a test runs;
@@ -21,11 +21,25 @@ const db = prisma as any;
 
 /** The only reasons the assistant may clear by itself. Everything else (including "teacher") is left for the lecturer. */
 export const AUTO_REASONS = ['face_missing', 'camera_off', 'heartbeat_lost', 'leave', 'blur', 'background', 'fullscreen_exit', 'screen_share_stopped'] as const;
-export interface AgentRules { on: boolean; autoResume: boolean; afterSeconds: number; maxResumes: number; reasons: string[]; endAfterMax: boolean }
-export const DEFAULT_RULES: AgentRules = { on: false, autoResume: true, afterSeconds: 30, maxResumes: 2, reasons: [...AUTO_REASONS], endAfterMax: false };
-export interface AgentLogEntry { at: string; kind: 'started' | 'stopped' | 'resumed' | 'needs_you' | 'ended' | 'card' | 'finished'; student?: string; text: string }
-interface Row { ownerId: string; kind: 'form' | 'task'; ref: string; rules: AgentRules; counts: Record<string, number>; log: AgentLogEntry[] }
+/** watch: only looks and tells the lecturer. assist: also lets students back in after small problems (and, when the lecturer chose, acts in the room within the limits below). */
+export const LEVELS = ['watch', 'assist'] as const;
+export interface AgentRules {
+  on: boolean; autoResume: boolean; afterSeconds: number; maxResumes: number; reasons: string[]; endAfterMax: boolean;
+  level: (typeof LEVELS)[number];
+  /** Write what it WOULD have done, and do nothing: for trying it on a small test first. */
+  dryRun: boolean;
+  /** Hard limits for what it may do in the room by itself (the lecturer is never limited). */
+  maxAddMinutes: number; maxRoomPauses: number;
+}
+export const DEFAULT_RULES: AgentRules = { on: false, autoResume: true, afterSeconds: 30, maxResumes: 2, reasons: [...AUTO_REASONS], endAfterMax: false, level: 'assist', dryRun: false, maxAddMinutes: 15, maxRoomPauses: 2 };
+/** What the assistant has already done in the room (counted against the limits above). */
+export interface AgentUsage { roomPauses: number; addedMinutes: number; notices: number }
+export const EMPTY_USAGE: AgentUsage = { roomPauses: 0, addedMinutes: 0, notices: 0 };
+export const MAX_AGENT_NOTICES = 20;
+export interface AgentLogEntry { at: string; kind: 'started' | 'stopped' | 'resumed' | 'needs_you' | 'ended' | 'card' | 'finished' | 'would' | 'room' | 'refused'; student?: string; text: string }
+interface Row { ownerId: string; kind: 'form' | 'task'; ref: string; rules: AgentRules; counts: Record<string, number>; log: AgentLogEntry[]; usage?: AgentUsage }
 
+const cleanUsage = (u: any): AgentUsage => ({ roomPauses: clamp(u?.roomPauses, 0, 1e6, 0), addedMinutes: clamp(u?.addedMinutes, 0, 1e6, 0), notices: clamp(u?.notices, 0, 1e6, 0) });
 const keyOf = (kind: string, ref: string) => `myseb-agent:${kind}:${ref}`;
 const LOG_MAX = 60;
 const clamp = (n: unknown, lo: number, hi: number, d: number) => (typeof n === 'number' && Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.round(n))) : d);
@@ -40,6 +54,10 @@ export function cleanRules(input: Partial<AgentRules> | undefined, base: AgentRu
     maxResumes: clamp(v.maxResumes, 1, 5, base.maxResumes),
     reasons: reasons.length ? [...new Set(reasons)] : base.reasons,
     endAfterMax: typeof v.endAfterMax === 'boolean' ? v.endAfterMax : base.endAfterMax,
+    level: (LEVELS as readonly string[]).includes(String(v.level)) ? (v.level as AgentRules['level']) : base.level,
+    dryRun: typeof v.dryRun === 'boolean' ? v.dryRun : base.dryRun,
+    maxAddMinutes: clamp(v.maxAddMinutes, 1, 60, base.maxAddMinutes),
+    maxRoomPauses: clamp(v.maxRoomPauses, 0, 5, base.maxRoomPauses),
   };
 }
 
@@ -58,6 +76,11 @@ export const niceReason = (r: string | null | undefined) => (r ? NICE[r] ?? r : 
  * already let them back in.
  */
 export function decide(s: StudentView, rules: AgentRules, waited: number, resumed: number): Decision {
+  const d = decideInner(s, rules, waited, resumed);
+  // Watch mode only looks: what it would have done becomes something for the lecturer.
+  return rules.level === 'watch' && (d.action === 'resume' || d.action === 'end') ? { action: 'needs_you', why: `${d.why} (watch mode: you decide)` } : d;
+}
+function decideInner(s: StudentView, rules: AgentRules, waited: number, resumed: number): Decision {
   if (!rules.on || !rules.autoResume) return { action: 'none' };
   if (s.status !== 'PAUSED' && s.status !== 'LEFT') return { action: 'none' };
   const reason = s.pause_reason ?? (s.status === 'LEFT' ? 'heartbeat_lost' : '');
@@ -78,7 +101,7 @@ async function read(kind: string, ref: string): Promise<Row | null> {
   const r = await db.appSetting.findUnique({ where: { key: keyOf(kind, ref) } }).catch(() => null);
   const v = r?.value;
   if (!v || typeof v !== 'object') return null;
-  return { ownerId: String(v.ownerId), kind: v.kind, ref: String(v.ref), rules: cleanRules(v.rules), counts: v.counts && typeof v.counts === 'object' ? v.counts : {}, log: Array.isArray(v.log) ? v.log.slice(-LOG_MAX) : [] };
+  return { ownerId: String(v.ownerId), kind: v.kind, ref: String(v.ref), rules: cleanRules(v.rules), counts: v.counts && typeof v.counts === 'object' ? v.counts : {}, log: Array.isArray(v.log) ? v.log.slice(-LOG_MAX) : [], usage: cleanUsage(v.usage) };
 }
 async function write(row: Row, by: string) {
   const key = keyOf(row.kind, row.ref);
@@ -95,8 +118,8 @@ async function mutate(kind: 'form' | 'task', ref: string, ownerId: string, fn: (
 const entry = (kind: AgentLogEntry['kind'], text: string, student?: string): AgentLogEntry => ({ at: new Date().toISOString(), kind, text, ...(student ? { student } : {}) });
 
 /* ------------------------------------------------------------------ what the lecturer (and the chat) use */
-export interface AgentView { rules: AgentRules; log: AgentLogEntry[]; resumed: number }
-const view = (row: Row | null): AgentView => ({ rules: row?.rules ?? DEFAULT_RULES, log: (row?.log ?? []).slice(-30).reverse(), resumed: Object.values(row?.counts ?? {}).reduce((a, b) => a + b, 0) });
+export interface AgentView { rules: AgentRules; log: AgentLogEntry[]; resumed: number; usage: AgentUsage }
+const view = (row: Row | null): AgentView => ({ rules: row?.rules ?? DEFAULT_RULES, log: (row?.log ?? []).slice(-30).reverse(), resumed: Object.values(row?.counts ?? {}).reduce((a, b) => a + b, 0), usage: row?.usage ?? EMPTY_USAGE });
 
 export async function getAgent(load: TargetLoader): Promise<AgentView> {
   const t = await load();
@@ -109,11 +132,87 @@ export async function setAgent(load: TargetLoader, patch: Partial<AgentRules>, b
   const next = cleanRules(patch, prev?.rules ?? DEFAULT_RULES);
   const row = await mutate(kind, t.ref, t.ownerId, (r) => {
     r.ownerId = t.ownerId; r.rules = next;
-    if (!prev?.rules.on && next.on) r.log.push(entry('started', `Room assistant is on: it lets students back in after ${next.afterSeconds} s (up to ${next.maxResumes} times each) when the reason is small${next.endAfterMax ? ', and ends a test after that' : ''}. Anything else is left for you.`));
+    if (!prev?.rules.on && next.on) r.log.push(entry('started', `Room assistant is on${next.level === 'watch' ? ' in watch mode (it only looks and tells you)' : ''}${next.dryRun ? ', in practice mode (it writes what it would do and does nothing)' : ''}: it lets students back in after ${next.afterSeconds} s (up to ${next.maxResumes} times each) when the reason is small${next.endAfterMax ? ', and ends a test after that' : ''}. Anything else is left for you.`));
     if (prev?.rules.on && !next.on) r.log.push(entry('stopped', 'Room assistant is off.'));
   }, by);
   await auditAction(by, 'MYSEB_AGENT_RULES', 'live_room', t.ref, { kind, ...next }).catch(() => undefined);
   return view(row);
+}
+
+/* ------------------------------------------------------------------ acting in the room (pause everyone, more time, a message) */
+export type RoomAction =
+  | { action: 'pause_room'; reason?: string }
+  | { action: 'resume_room' }
+  | { action: 'add_time'; minutes: number; studentId?: string }
+  | { action: 'notice'; text: string; studentId?: string };
+export type Actor = 'lecturer' | 'agent';
+export const ROOM_ACTIONS = ['pause_room', 'resume_room', 'add_time', 'notice'] as const;
+
+/** A room action from untrusted input (a request body or the model), or null. */
+export function roomActionFrom(b: any): RoomAction | null {
+  const studentId = typeof b?.studentId === 'string' && b.studentId ? b.studentId : undefined;
+  switch (b?.action) {
+    case 'pause_room': return { action: 'pause_room', ...(typeof b.reason === 'string' && b.reason ? { reason: b.reason.slice(0, 80) } : {}) };
+    case 'resume_room': return { action: 'resume_room' };
+    case 'add_time': { const minutes = Number(b.minutes); return Number.isInteger(minutes) ? { action: 'add_time', minutes, studentId } : null; }
+    case 'notice': { const text = typeof b.text === 'string' ? b.text.trim().slice(0, 300) : ''; return text ? { action: 'notice', text, studentId } : null; }
+    default: return null;
+  }
+}
+export function describeRoomAction(a: RoomAction): string {
+  if (a.action === 'pause_room') return `pause the whole room${a.reason ? ` (${a.reason})` : ''}`;
+  if (a.action === 'resume_room') return 'let everyone back in';
+  if (a.action === 'add_time') return `add ${a.minutes} minute${a.minutes === 1 ? '' : 's'} for ${a.studentId ? 'one student' : 'everyone still in the test'}`;
+  return `tell ${a.studentId ? 'one student' : 'all students'}: "${a.text.slice(0, 80)}"`;
+}
+/**
+ * Is this allowed? The lecturer may always (within what MySEB accepts: 1-60 minutes, a short message). The assistant may only act
+ * when it is on and not in watch mode, and only within the limits the lecturer set: these are checked here in code, not by the model.
+ */
+export function checkRoomAction(rules: AgentRules, usage: AgentUsage, a: RoomAction, actor: Actor): { ok: true } | { ok: false; reason: string } {
+  if (a.action === 'add_time' && !(Number.isInteger(a.minutes) && a.minutes >= 1 && a.minutes <= 60)) return { ok: false, reason: 'Time can be added in whole minutes, 1 to 60 at a time.' };
+  if (a.action === 'notice' && !String(a.text ?? '').trim()) return { ok: false, reason: 'A message needs some text.' };
+  if (actor === 'lecturer') return { ok: true };
+  if (!rules.on) return { ok: false, reason: 'The room assistant is off.' };
+  if (rules.level === 'watch') return { ok: false, reason: 'The room assistant is in watch mode: it only looks and tells you.' };
+  if (a.action === 'pause_room' && usage.roomPauses >= rules.maxRoomPauses) return { ok: false, reason: `It already paused the room ${usage.roomPauses} time${usage.roomPauses === 1 ? '' : 's'} (your limit is ${rules.maxRoomPauses}).` };
+  if (a.action === 'add_time' && usage.addedMinutes + a.minutes > rules.maxAddMinutes) return { ok: false, reason: `Adding ${a.minutes} minutes would pass your limit of ${rules.maxAddMinutes} minutes in total (${usage.addedMinutes} already added).` };
+  if (a.action === 'notice' && usage.notices >= MAX_AGENT_NOTICES) return { ok: false, reason: `It already sent ${MAX_AGENT_NOTICES} messages.` };
+  return { ok: true };
+}
+
+/** Does one action in the room, for the lecturer (chat or button) or for the assistant. Everything is logged and audited. */
+export async function roomAction(load: TargetLoader, a: RoomAction, actor: Actor, by: string): Promise<{ ok: boolean; dry?: boolean; text: string }> {
+  const t = await load();
+  const kind = t.kind === 'form' ? 'form' : 'task';
+  const prev = await read(kind, t.ref);
+  const rules = prev?.rules ?? DEFAULT_RULES; const usage = prev?.usage ?? EMPTY_USAGE;
+  const what = describeRoomAction(a);
+  const who = actor === 'agent' ? 'Assistant' : 'You';
+  const chk = checkRoomAction(rules, usage, a, actor);
+  if (chk.ok === false) {
+    if (actor === 'agent') await mutate(kind, t.ref, t.ownerId, (r) => { r.log.push(entry('refused', `Could not ${what}: ${chk.reason}`)); }, by);
+    return { ok: false, text: chk.reason };
+  }
+  if (actor === 'agent' && rules.dryRun) {
+    await mutate(kind, t.ref, t.ownerId, (r) => { r.log.push(entry('would', `Would have chosen to ${what}.`)); }, by);
+    return { ok: true, dry: true, text: `Practice mode: would have chosen to ${what}. Nothing was done.` };
+  }
+  let result = '';
+  if (a.action === 'pause_room') { const r: any = await pauseAll(load); result = `${r?.changed ?? 0} student${r?.changed === 1 ? '' : 's'} paused`; }
+  else if (a.action === 'resume_room') { const r: any = await resumeAll(load); result = `${r?.changed ?? 0} student${r?.changed === 1 ? '' : 's'} let back in`; }
+  else if (a.action === 'add_time') { const r: any = await extendTime(load, a.minutes, a.studentId); result = `${r?.changed ?? 0} student${r?.changed === 1 ? '' : 's'} got ${a.minutes} more minute${a.minutes === 1 ? '' : 's'}`; }
+  else { await sendNotice(load, a.text, a.studentId); result = 'message sent'; }
+  await mutate(kind, t.ref, t.ownerId, (r) => {
+    r.ownerId = r.ownerId || t.ownerId;
+    if (actor === 'agent') {
+      const u = r.usage ?? { ...EMPTY_USAGE };
+      r.usage = { roomPauses: u.roomPauses + (a.action === 'pause_room' ? 1 : 0), addedMinutes: u.addedMinutes + (a.action === 'add_time' ? a.minutes : 0), notices: u.notices + (a.action === 'notice' ? 1 : 0) };
+    }
+    r.log.push(entry('room', `${who}: ${what} (${result}).`));
+  }, by);
+  await auditAction(by, 'MYSEB_ROOM_ACTION', 'live_room', t.ref, { kind, actor, ...a }).catch(() => undefined);
+  return { ok: true, text: `Done: ${what} (${result}).` };
 }
 
 /* ------------------------------------------------------------------ the loop */
@@ -154,7 +253,13 @@ export async function runRoom(row: Row, now = Date.now()): Promise<AgentLogEntry
     if (!pausedSince.has(k)) pausedSince.set(k, now);
     const waited = Math.round((now - (pausedSince.get(k) ?? now)) / 1000);
     const d = decide(s, row.rules, waited, counts[s.id] ?? 0);
-    if (d.action === 'resume') {
+    if ((d.action === 'resume' || d.action === 'end') && row.rules.dryRun) {
+      // Practice mode: say what it would do, once per pause, and do nothing.
+      if (!told.has(`${k}:w${pausedSince.get(k)}`)) {
+        told.add(`${k}:w${pausedSince.get(k)}`);
+        made.push(entry('would', `${d.action === 'resume' ? 'Would have let back in' : 'Would have ended the test'}: ${d.why}.`, s.student_name));
+      }
+    } else if (d.action === 'resume') {
       counts[s.id] = (counts[s.id] ?? 0) + 1; pausedSince.delete(k);
       made.push(entry('resumed', `Let back in: ${d.why} (${counts[s.id]} of ${row.rules.maxResumes}).`, s.student_name));
       actions.push(async () => { await sessionAction(load, s.id, 'resume'); await auditAction(row.ownerId, 'MYSEB_AGENT_RESUME', 'live_room', row.ref, { student: s.student_name, why: d.why }).catch(() => undefined); });

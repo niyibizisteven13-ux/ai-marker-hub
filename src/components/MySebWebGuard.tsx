@@ -66,6 +66,8 @@ export default function MySebWebGuard() {
   const [idSent, setIdSent] = useState(false);               // the student card picture is with the lecturer, waiting
   const [multi, setMulti] = useState<number | 'warn' | null>(null);   // several faces: seconds left (disqualify rule) or just a warning
   const [warn, setWarn] = useState<number | null>(null);      // seconds left before a missing face ends the test
+  const [notice, setNotice] = useState<{ id: string; text: string } | null>(null);   // a message from the lecturer (carried by the heartbeat)
+  const [seenNotice, setSeenNotice] = useState('');
   const [weak, setWeak] = useState(false);                    // the connection is weak: the page keeps trying, nobody is rejected for it
   const videoRef = useRef<HTMLVideoElement>(null);
   const startCamRef = useRef<(auto?: boolean) => void>(() => undefined);
@@ -133,6 +135,7 @@ export default function MySebWebGuard() {
         else {
           misses = 0; const rtt = performance.now() - t0; setWeak(rtt > 3000); gap = rtt > 3000 ? 10000 : 5000;
           if (r.status === 401 || r.status === 403) setPhase('lost'); else if (r.json?.status) { apply(r.json.status, r.json.reason, true); if (r.json.idStatus) idStatusRef.current(r.json.idStatus); }
+          if (r.json?.notice?.id && typeof r.json.notice.text === 'string') setNotice((n) => (n?.id === r.json.notice.id ? n : { id: String(r.json.notice.id), text: String(r.json.notice.text).slice(0, 300) }));
           if (ended && canReturn) gap = 6000;                       // waiting to see whether the lecturer lets this student back in
           void flush();
         }
@@ -259,6 +262,12 @@ export default function MySebWebGuard() {
         {strict ? 'Browser test, strict rules: stay on this page with your face in the camera. Leaving ends your test.' : 'You are taking this test in the browser (lighter security). Stay on this page.'}
         {weak && <span className="ml-2 rounded bg-amber-950/40 px-1.5 py-0.5">Weak connection: stay on this page, it keeps trying</span>}
       </div>
+      {notice && notice.id !== seenNotice && (
+        <div role="status" aria-live="polite" className="fixed inset-x-3 top-10 z-[120] flex items-start gap-3 rounded-xl bg-slate-900 p-3 text-sm font-semibold text-white shadow-lg ring-1 ring-white/20">
+          <span className="min-w-0 flex-1"><span className="block text-[11px] font-bold uppercase tracking-wide text-sky-300">Message from your lecturer</span>{notice.text}</span>
+          <button type="button" className="min-h-9 shrink-0 rounded-lg bg-white/10 px-3 text-xs font-bold" onClick={() => setSeenNotice(notice.id)}>OK</button>
+        </div>
+      )}
       {strict && phase !== 'ended' && (
         <video ref={videoRef} muted playsInline autoPlay aria-label="Your camera" className="fixed bottom-3 right-3 z-[110] h-24 w-[72px] -scale-x-100 rounded-lg border-2 border-white/70 bg-slate-900 object-cover shadow-lg" />
       )}

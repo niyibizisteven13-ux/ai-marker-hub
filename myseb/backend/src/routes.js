@@ -6,6 +6,7 @@ import { newCode, parseCode, codeHash, secretHash, tokenHash, newToken, newSecre
 import { authSession, isIosDevice, markAlive, recordViolation, VIOLATION_TYPES } from './sessions.js';
 import { liveStats, cleanSignal, dropSignals, forgetAllLive, forgetLive, getAside, setAside, setIdPic, getIdPic, dropIdPic, getLive, liveChanged, picturesWanted, pullSignal, pushSignal, reportEverySeconds, saveLive, wantPictures } from './live.js';
 import { notify, roomVersion, subscribe } from './events.js';
+import { noticeFor, setNotice } from './notices.js';
 import { getControls, overview as adminOverview, retentionDays, saveControls } from './admin.js';
 
 export const api = express.Router();
@@ -216,6 +217,29 @@ api.post('/exams/:id/resume-all', requireTeacher, wrap(async (req, res) => {
   res.json({ ok: true, changed: r.rowCount });
 }));
 
+/** More time: for everyone still in the test, or for one student (1-60 minutes each time). */
+api.post('/exams/:id/extend', requireTeacher, wrap(async (req, res) => {
+  if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
+  const minutes = Math.round(Number(req.body?.minutes));
+  if (!Number.isFinite(minutes) || minutes < 1 || minutes > 60) return res.status(400).json({ error: 'minutes must be 1 to 60' });
+  const sid = req.body?.sessionId;
+  if (sid !== undefined && !isUuid(sid)) return res.status(400).json({ error: 'bad session' });
+  const r = sid
+    ? await q(`UPDATE exam_sessions SET deadline_at = deadline_at + make_interval(mins => $3) WHERE id=$1 AND exam_id=$2 AND status <> 'ENDED'`, [sid, req.params.id, minutes])
+    : await q(`UPDATE exam_sessions SET deadline_at = deadline_at + make_interval(mins => $2) WHERE exam_id=$1 AND status <> 'ENDED'`, [req.params.id, minutes]);
+  // The test itself stays open as long as the longest student deadline (the code sweep must not close it early).
+  if (!sid) await q(`UPDATE exams SET ends_at = ends_at + make_interval(mins => $2) WHERE id=$1 AND ends_at IS NOT NULL AND status='active'`, [req.params.id, minutes]);
+  res.json({ ok: true, changed: r.rowCount, minutes });
+}));
+/** A short message shown on the students' screens (all of them, or one). */
+api.post('/exams/:id/notice', requireTeacher, wrap(async (req, res) => {
+  if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
+  const sid = req.body?.sessionId;
+  if (sid !== undefined && !isUuid(sid)) return res.status(400).json({ error: 'bad session' });
+  const n = setNotice(req.params.id, req.body?.text, sid);
+  if (!n) return res.status(400).json({ error: 'write a message (up to 300 characters)' });
+  res.json({ ok: true, id: n.id });
+}));
 api.get('/sessions/:id/partial', requireTeacher, wrap(async (req, res) => {
   if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
   const r = (await q(`SELECT student_name, status, end_reason, partial_answers, partial_at FROM exam_sessions WHERE id=$1`, [req.params.id])).rows[0];
@@ -468,7 +492,7 @@ api.post('/heartbeat', wrap(async (req, res) => {
     notify(session.exam_id, 'status');
   } else markAlive(session.id);                                                                             // "still here" is written in a batch
   res.json({ status, idStatus: session.id_status, reason: status === 'IN_EXAM' ? null : session.pause_reason,
-    remainingSeconds: Math.max(0, Math.floor((new Date(session.deadline_at) - Date.now()) / 1000)) });
+    remainingSeconds: Math.max(0, Math.floor((new Date(session.deadline_at) - Date.now()) / 1000)), notice: noticeFor(session.exam_id, session.id) });
 }));
 
 api.post('/violation', wrap(async (req, res) => {

@@ -3,7 +3,7 @@ import { requireAuth } from '../../production/auth.js';
 import { liveRoomLimiter } from '../../production/rateLimiter.js';
 import { reportWorkbook } from '../services/mySebReport.js';
 import logger from '../utils/logger.js';
-import { getAgent, setAgent } from '../services/mySebAgent.js';
+import { getAgent, roomAction, roomActionFrom, setAgent } from '../services/mySebAgent.js';
 import { MySebError, assignmentTarget, downloadLinks, endAll, formTarget, frames, generateCode, iceServers, idChecks, idDecision, reinstate, savedAnswers, lecturerSignalPull, lecturerSignalPush, monitor, report, mySebConfigured, pauseAll, relayLive, resumeAll, sessionAction, setLiveMode, studentSignalPull, heldStudentSignalPull, streamRoomEvents, studentSignalPush, violations, type TargetLoader } from '../services/mySeb.js';
 
 const userIdOf = (req: Request): string => (req as any).user?.userId;
@@ -84,7 +84,15 @@ function createMySebOwnerRouterFor(target: (userId: string, id: string) => Targe
   r.get('/:id/myseb/agent', requireAuth, run(async (req, res) => { res.json({ success: true, data: await getAgent(t(req)) }); }));
   r.put('/:id/myseb/agent', requireAuth, run(async (req, res) => {
     const b = req.body ?? {};
-    res.json({ success: true, data: await setAgent(t(req), { on: b.on, autoResume: b.autoResume, afterSeconds: b.afterSeconds, maxResumes: b.maxResumes, reasons: b.reasons, endAfterMax: b.endAfterMax }, userIdOf(req)) });
+    res.json({ success: true, data: await setAgent(t(req), { on: b.on, autoResume: b.autoResume, afterSeconds: b.afterSeconds, maxResumes: b.maxResumes, reasons: b.reasons, endAfterMax: b.endAfterMax, level: b.level, dryRun: b.dryRun, maxAddMinutes: b.maxAddMinutes, maxRoomPauses: b.maxRoomPauses }, userIdOf(req)) });
+  }));
+  // The lecturer acts in the room: pause or release everyone, more time, a message to the students.
+  r.post('/:id/myseb/room-action', requireAuth, run(async (req, res) => {
+    const b = req.body ?? {};
+    const a = roomActionFrom(b);
+    if (!a) return res.status(400).json({ success: false, error: 'Unknown action, or the minutes or the message are missing.' });
+    const out = await roomAction(t(req), a, 'lecturer', userIdOf(req));
+    res.status(out.ok ? 200 : 400).json({ success: out.ok, ...(out.ok ? { data: out } : { error: out.text }) });
   }));
   // Live video set-up: the lecturer's room listens for offers/ICE from students and sends watch/answer/ice back.
   r.get('/:id/myseb/ice', requireAuth, (_req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(iceServers()); });

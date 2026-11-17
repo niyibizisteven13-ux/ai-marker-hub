@@ -231,6 +231,20 @@ export async function resumeAll(load: TargetLoader) {
   const t = await load();
   return t.mysebExamId ? mysebFetch(`/exams/${t.mysebExamId}/resume-all`, { method: 'POST' }) : { ok: true, changed: 0 };
 }
+/** More time for everyone still in the test, or for one student (1-60 minutes). */
+export async function extendTime(load: TargetLoader, minutes: number, sid?: string) {
+  const t = await load();
+  if (!t.mysebExamId) throw new MySebError('This test has no live room yet.', 404, 'NOT_FOUND');
+  if (sid) await ownStudent(load, sid);
+  return mysebFetch(`/exams/${t.mysebExamId}/extend`, { method: 'POST', body: { minutes, ...(sid ? { sessionId: sid } : {}) } });
+}
+/** A short message on the students' screens (all of them, or one). */
+export async function sendNotice(load: TargetLoader, text: string, sid?: string) {
+  const t = await load();
+  if (!t.mysebExamId) throw new MySebError('This test has no live room yet.', 404, 'NOT_FOUND');
+  if (sid) await ownStudent(load, sid);
+  return mysebFetch(`/exams/${t.mysebExamId}/notice`, { method: 'POST', body: { text, ...(sid ? { sessionId: sid } : {}) } });
+}
 /** The lecturer asks for (or stops) small camera pictures in the live room. Made on the MySEB exam, created first if needed. */
 export async function setLiveFaces(load: TargetLoader, on: boolean) {
   const examId = await ensureMysebExam(await load());
