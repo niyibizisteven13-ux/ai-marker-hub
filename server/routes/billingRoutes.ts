@@ -7,6 +7,7 @@ import { PLANS, SOLD_PLANS, currentGoPacks, fxUsdRwf, refreshBillingSettings } f
 import { momoMode } from '../services/billing/momo.js';
 import { BillingError, PURPOSES, billingState, checkPayment, publicPayment, startPayment, type Purpose } from '../services/billing/payments.js';
 import { usageSummary } from '../services/billing/usage.js';
+import { payRef } from '../services/billing/payRef.js';
 
 /**
  * Billing API (/api/billing): plans and prices (USD and RWF), the user's state, Mobile Money checkout,
@@ -55,6 +56,15 @@ router.get('/me', async (req, res) => {
       db.telegramSession.findFirst({ where: { userId } }).catch(() => null),
     ]);
     res.json({ success: true, ...state, usage: { day: usage.credits.day, week: usage.credits.week, month: usage.credits.month }, memory: usage.limits.memory, telegram: { linked: Boolean(telegram) } });
+  } catch (e) { fail(res, e); }
+});
+
+/** The code this person quotes when they pay by hand and message the administrator on WhatsApp. */
+router.get('/pay-ref', async (req, res) => {
+  try {
+    const userId = userIdOf(req);
+    const u = await db.user.findUnique({ where: { id: userId }, select: { email: true } }).catch(() => null);
+    res.json({ success: true, code: payRef(userId), email: u?.email ?? null });
   } catch (e) { fail(res, e); }
 });
 

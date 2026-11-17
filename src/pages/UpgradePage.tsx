@@ -238,7 +238,11 @@ export default function UpgradePage({ jobId, onBack, onSuccess }: UpgradePagePro
 
 /** Manual payment (until online payment is set up): the amount, where to send it, and the screenshot on WhatsApp. An administrator then activates the plan or credits. */
 function ManualPayDialog({ checkout, manual, onClose }: { checkout: Checkout; manual: { momoCode: string; momoName: string; whatsapp: string | null }; onClose: () => void }) {
-  const text = `Hello, I paid for my Bwenge upgrade: ${checkout.title}, ${rwf(checkout.amountRwf)}. My email on Bwenge: ______. Payment screenshot attached.`;
+  // The person's own payment code (BW-…): the administrator types it into Admin → Billing → Users to find the account and give access.
+  const [ref, setRef] = useState<{ code: string; email: string | null } | null>(null);
+  useEffect(() => { void authFetch('/api/billing/pay-ref').then((r) => r.json()).then((b) => { if (b?.code) setRef({ code: b.code, email: b.email ?? null }); }).catch(() => undefined); }, []);
+  const code = ref?.code ?? '';
+  const text = `Hello, I paid for my Bwenge upgrade: ${checkout.title}, ${rwf(checkout.amountRwf)}. My payment code: ${code || '______'}${ref?.email ? `. My email: ${ref.email}` : ''}. Payment screenshot attached.`;
   const link = manual.whatsapp ? `https://wa.me/${manual.whatsapp}?text=${encodeURIComponent(text)}` : null;
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Pay by Mobile Money" onClick={onClose}>
@@ -247,8 +251,8 @@ function ManualPayDialog({ checkout, manual, onClose }: { checkout: Checkout; ma
         <p className="mt-1 text-sm text-[var(--muted)]">{checkout.title}</p>
         <ol className="mt-4 space-y-3 text-sm text-[var(--text)]">
           <li><b>1. Send {rwf(checkout.amountRwf)}</b> by MTN Mobile Money to code <b className="select-all rounded bg-[var(--surface-2)] px-1.5 py-0.5 font-mono">{manual.momoCode}</b> (name: {manual.momoName}).</li>
-          <li><b>2. Send the payment screenshot</b> and your Bwenge email on WhatsApp{manual.whatsapp ? ` to +${manual.whatsapp}` : ''}.</li>
-          <li><b>3. We activate it</b> within a few minutes. Then reload Bwenge.</li>
+          <li><b>2. Message us on WhatsApp</b>{manual.whatsapp ? ` (+${manual.whatsapp})` : ''} with the payment screenshot and your payment code: <b className="select-all rounded bg-[var(--surface-2)] px-1.5 py-0.5 font-mono">{code || '…'}</b></li>
+          <li><b>3. We give you access</b> as soon as we see the payment, usually within a few minutes. Then reload Bwenge.</li>
         </ol>
         <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button type="button" onClick={onClose} className="min-h-11 rounded-xl border border-[var(--line)] px-4 text-sm text-[var(--text)] hover:bg-[var(--hover)]">Close</button>

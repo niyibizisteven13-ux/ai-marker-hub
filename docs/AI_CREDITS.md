@@ -24,7 +24,9 @@ There is no WhatsApp bot: people pay by Mobile Money and send the screenshot to 
 ## Paying by hand (until online Mobile Money is set up)
 
 While the MTN keys are not set (`payments: "off"`), the Upgrade page opens a **Pay by Mobile Money** dialog instead of the MoMo prompt:
-the amount, the Mobile Money code and name, and an **I have paid** button that opens WhatsApp to the payment number with the plan and amount
-written. The code, name and number are the ones in Admin → MySEB sales → payment settings (the same as the live room).
-An administrator then activates the plan or adds credits in **Admin → Billing → Users** (`POST /api/admin/billing/users/:id/plan` and `/credits`).
+the amount, the Mobile Money code and name, the person's **payment code** (like `BW-4F7K2A`), and an **I have paid** button that opens WhatsApp to the
+payment number with the plan, amount and payment code already written. The code, name and number are the ones in Admin → MySEB sales → payment settings (the same as the live room).
+The administrator types the code into **Admin → Billing → Users** (search accepts a payment code as well as name or email), sees the person, and presses the plan
+button (days are asked) or adds credits (`POST /api/admin/billing/users/:id/plan` and `/credits`). The code is worked out from the account id (`payRef`), so it never
+changes and nothing is stored; it identifies an account to the administrator and opens nothing.
 When the MTN keys are added the page switches to the online prompt by itself.
