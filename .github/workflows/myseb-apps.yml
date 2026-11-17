@@ -123,7 +123,7 @@ jobs:
           name: myseb-iphone-unsigned
           path: myseb/mobile/MySEB-iphone-unsigned.ipa
       - name: Sign and send to TestFlight
-        if: ${{ env.ASC_KEY_P8 != '' && env.ASC_KEY_ID != '' && env.ASC_ISSUER_ID != '' && env.APPLE_TEAM_ID != '' }}
+        if: ${{ github.event_name != 'pull_request' && env.ASC_KEY_P8 != '' && env.ASC_KEY_ID != '' && env.ASC_ISSUER_ID != '' && env.APPLE_TEAM_ID != '' }}
         run: |
           printf '%s' "$ASC_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
           flutter build ios --config-only --release --no-codesign --build-number=${{ github.run_number }} --dart-define=MYSEB_API=${{ env.API_BASE }}

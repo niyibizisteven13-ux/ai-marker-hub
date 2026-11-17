@@ -17,6 +17,8 @@ project = Path('android/app/build.gradle.kts')
 if not project.exists():
     raise SystemExit('Expected Flutter Kotlin Gradle runner for persistent signing.')
 s = project.read_text()
+if '    buildTypes {' not in s or 'signingConfigs.getByName("debug")' not in s:
+    raise SystemExit('Flutter signing configuration changed; refusing to advertise an unsigned update.')
 # Put declarations after plugins; use environment values only so credentials never enter source or logs.
 s = s.replace('    buildTypes {', '''    signingConfigs {
         create("mysebRelease") {
