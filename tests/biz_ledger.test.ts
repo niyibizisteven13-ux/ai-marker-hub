@@ -12,7 +12,7 @@ const make = () => { const kv = memKv(); const svc = createBizService({ kv, medi
 test('entries: an amount above zero, no future dates, expense categories', () => {
   assert.ok('error' in (cleanEntry({ type: 'sale', amount: 0 }, 'x', T0) as any)); assert.ok('error' in (cleanEntry({ amount: 'abc' }, 'x', T0) as any));
   assert.ok('error' in (cleanEntry({ amount: 5, at: '2027-01-01' }, 'x', T0) as any));
-  const e = cleanEntry({ type: 'expense', amount: '8,000', item: ' flour ', category: 'weird' }, 'x', T0) as LedgerEntry; assert.equal(e.amount, 8000); assert.equal(e.item, 'flour'); assert.equal(e.category, 'other');
+  const e = cleanEntry({ type: 'expense', amount: '8,000', item: ' flour ', category: 'weird' }, 'x', T0) as LedgerEntry; assert.equal(e.amount, 8000); assert.equal(e.item, 'flour'); assert.equal(e.category, 'weird', 'an owner may use their own category word');
 });
 
 test('summary: today against yesterday, profit, top sellers, orders by status, customers, low stock', () => {
@@ -219,4 +219,52 @@ import { validateSteps } from '../server/services/agenda/proposals.js';
 test('plans may contain the business tools the agent and routines propose (and still refuse anything else)', () => {
   for (const tool of ['biz_orders', 'biz_change_product', 'biz_stock', 'biz_request_payment', 'biz_post', 'biz_record_expense']) assert.equal(validateSteps([{ tool, input: {}, label: 'x' }]).ok, true, tool);
   for (const tool of ['biz_agent', 'biz_payment_setup', 'rm_rf', 'biz_get']) assert.equal(validateSteps([{ tool, input: {}, label: 'x' }]).ok, false, tool);
+});
+
+// ---- costs and spending, fixing the notebook, honesty checks
+import { dueDays, summarizeCosts, cleanRecurring, cleanCategory } from '../server/services/biz/ledger.js';
+test('costs: custom categories, months against each other, budgets, recurring due days (pure)', () => {
+  assert.equal(cleanCategory('  Server!! '), 'server'); assert.equal(cleanCategory(''), 'other'); assert.equal(cleanCategory('x'.repeat(40)).length, 24);
+  const T = Date.parse('2026-11-17T10:00:00Z'); const e = (o: Partial<LedgerEntry>): LedgerEntry => ({ id: Math.random().toString(), type: 'expense', amount: 1000, at: '2026-11-10T08:00:00Z', status: 'completed', src: 'chat', category: 'utilities', ...o });
+  const c = summarizeCosts([e({ amount: 7000, category: 'server' }), e({ amount: 3000 }), e({ at: '2026-10-12T08:00:00Z', amount: 5000 }), { ...e({}), type: 'sale', amount: 20000, category: undefined }], T, { monthly: { server: 7000, utilities: 5000 } });
+  assert.equal(c.month.total, 10000); assert.equal(c.lastMonth.total, 5000); assert.equal(c.change, 100); assert.equal(c.month.profit, 10000); assert.deepEqual(c.month.byCategory.map((x) => x.category), ['server', 'utilities']);
+  assert.equal(c.budgets[0].category, 'server'); assert.equal(c.budgets[0].pct, 100); assert.equal(c.trend.length, 6); assert.equal(c.trend[5].total, 10000); assert.equal(c.trend[4].total, 5000);
+  const r = cleanRecurring({ name: 'Server', amount: '7,000', every: 'month', on: 15 }, 'r', Date.parse('2026-09-20T00:00:00Z')) as any; assert.equal(r.amount, 7000);
+  assert.deepEqual(dueDays(r, T), ['2026-10-15', '2026-11-15']); assert.deepEqual(dueDays({ ...r, lastDay: '2026-11-15' }, T), []); assert.deepEqual(dueDays({ ...r, paused: true }, T), []);
+});
+
+test('fixing the notebook: a repeated expense is refused (unless forced), entries can be edited and deleted, budgets alert, recurring costs record themselves', async () => {
+  let clock = Date.parse('2026-11-17T10:00:00Z'); const notes: any[] = []; const kv = memKv();
+  const svc = createBizService({ kv, media: memoryMediaStore(), isPaid: async () => true, now: () => clock, notify: async (_o, n) => { notes.push(n); } }); resetBizLimitsForTests();
+  const b = await svc.create('o', { name: 'Cafe' }); await svc.setAgent('o', b.id, { level: 'watch', alerts: true });
+  const a = await svc.addEntry('o', b.id, { type: 'expense', amount: 7000, item: 'Server bwenge.space', category: 'Server', src: 'chat' }); assert.equal(a.entry.category, 'server');
+  await assert.rejects(svc.addEntry('o', b.id, { type: 'expense', amount: 7000, item: 'server bwenge.space', category: 'server', src: 'chat' }), (e: any) => e.status === 409 && e.code === 'DUPLICATE' && e.message.includes(a.entry.id.slice(0, 8)));
+  const forced = await svc.addEntry('o', b.id, { type: 'expense', amount: 7000, item: 'Server bwenge.space', src: 'chat', force: true }); assert.equal((await svc.dashboard('o', b.id)).today.expenses, 14000);
+  await svc.removeEntry('o', b.id, forced.entry.id); assert.equal((await svc.dashboard('o', b.id)).today.expenses, 7000, 'the total follows');
+  const fixed = await svc.updateEntry('o', b.id, a.entry.id, { amount: 7500, note: 'July server' }); assert.equal(fixed.amount, 7500); assert.equal(fixed.type, 'expense'); assert.equal(fixed.category, 'server'); assert.equal((await svc.dashboard('o', b.id)).today.expenses, 7500);
+  await assert.rejects(svc.updateEntry('o', b.id, a.entry.id, { amount: -5 }), /amount/); await assert.rejects(svc.updateEntry('intruder', b.id, a.entry.id, { amount: 1 }), (e: any) => e.status === 404);
+  const sale1 = await svc.addEntry('o', b.id, { type: 'sale', amount: 1000, item: 'Bread', src: 'studio' }); const sale2 = await svc.addEntry('o', b.id, { type: 'sale', amount: 1000, item: 'Bread', src: 'studio' }); assert.ok(sale1 && sale2, 'repeat sales in the studio are never blocked');
+  await assert.rejects(svc.addEntry('o', b.id, { type: 'sale', amount: 1000, item: 'Bread', src: 'chat' }).then(() => svc.addEntry('o', b.id, { type: 'sale', amount: 1000, item: 'Bread', src: 'chat' })), (e: any) => e.code === 'DUPLICATE', 'the same chat sale twice within two minutes');
+  await svc.setBudget('o', b.id, 'stock', 10000); await svc.addEntry('o', b.id, { type: 'expense', amount: 8500, item: 'Flour', category: 'stock', src: 'studio' }); await new Promise((r) => setImmediate(r)); assert.ok(notes.some((n) => /Budget/.test(n.title) && /85%/.test(n.text)), '80% alert');
+  await svc.addEntry('o', b.id, { type: 'expense', amount: 2000, item: 'Sugar', category: 'stock', src: 'studio' }); await new Promise((r) => setImmediate(r)); assert.ok(notes.some((n) => /105%/.test(n.text)), '100% alert');
+  await assert.rejects(svc.setBudget('o', b.id, 'stock', 'abc'), /budget/); await svc.setBudget('o', b.id, 'stock', 0); assert.equal((await svc.costs('o', b.id)).budgets.length, 0);
+  const rec = await svc.addRecurring('o', b.id, { name: 'Server', amount: 7000, every: 'month', on: 20, category: 'server' }); const before = (await svc.costs('o', b.id)).month.total;
+  clock = Date.parse('2026-11-21T10:00:00Z'); const after = await svc.costs('o', b.id); assert.equal(after.month.total, before + 7000, 'the 20th came and the cost recorded itself'); assert.equal((await svc.costs('o', b.id)).month.total, before + 7000, 'only once');
+  assert.ok((await svc.ledger('o', b.id)).some((e) => e.item === 'Server' && e.note === 'Recurring cost' && e.at.startsWith('2026-11-20')));
+  await svc.setRecurring('o', b.id, rec.id, { paused: true }); clock = Date.parse('2026-12-21T10:00:00Z'); assert.equal((await svc.costs('o', b.id)).recurring[0].paused, true); assert.ok(!(await svc.ledger('o', b.id)).some((e) => e.at.startsWith('2026-12-20')), 'paused: nothing recorded');
+});
+
+import { bizTools as bizToolsHonest } from '../server/services/ai/tools/bizTools.js';
+test('chat tools tell the truth: a record returns the id and the checked totals, a duplicate is explained, delete needs confirmation, entries can be listed to verify', async () => {
+  const kv = memKv(); const svc = createBizService({ kv, media: memoryMediaStore(), isPaid: async () => true, now: () => Date.parse('2026-11-17T10:00:00Z') }); resetBizLimitsForTests();
+  const tools = Object.fromEntries(bizToolsHonest(() => svc).map((t) => [t.definition.name, t])); const c: any = { userId: 'u', files: {} };
+  await tools.biz_create.execute({ name: 'Bwenge' }, c);
+  const r1 = await tools.biz_record_expense.execute({ amount: 7000, item: 'bwenge.space server', category: 'server' }, c); assert.match(r1.text, /Entry id [0-9a-f]{8}/); assert.match(r1.text, /today's expenses 7,000 RWF/);
+  const dup = await tools.biz_record_expense.execute({ amount: 7000, item: 'bwenge.space server', category: 'server' }, c); assert.equal(dup.isError, true); assert.match(dup.text, /same expense/);
+  const l = await tools.biz_entries.execute({ action: 'list' }, c); const id = /^([0-9a-f]{8}) ·/m.exec(l.text)![1]; assert.match(l.text, /Totals now: today's sales 0 RWF, expenses 7,000 RWF/);
+  const noConfirm = await tools.biz_entries.execute({ action: 'delete', id }, c); assert.equal(noConfirm.isError, true); assert.equal((await svc.ledger('u', (await svc.list('u'))[0].id)).length, 1);
+  assert.match((await tools.biz_entries.execute({ action: 'edit', id, amount: 6500 }, c)).text, /6,500/); assert.match((await tools.biz_entries.execute({ action: 'delete', id, confirm: true }, c)).text, /expenses 0 RWF/);
+  assert.equal((await tools.biz_entries.execute({ action: 'delete', id: 'zzzzzzzz', confirm: true }, c)).isError, true);
+  assert.match((await tools.biz_recurring.execute({ action: 'add', name: 'Server', amount: 7000, every: 'month', on: 15, category: 'server' }, c)).text, /Added Server/); assert.match((await tools.biz_budget.execute({ category: 'server', amount: 8000 }, c)).text, /server: .* of 8,000 RWF/);
+  assert.match((await tools.biz_costs.execute({}, c)).text, /Budgets: server/);
 });

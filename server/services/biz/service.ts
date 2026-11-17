@@ -3,7 +3,7 @@ import { MediaError, maxBytesFor, sniff, type MediaStore } from './media.js';
 import { cleanAgent, cleanWorkflow, MAX_WORKFLOWS, type AgentSettings, type Workflow } from './agent.js';
 import { FIELDS, PROVIDERS, cleanSecrets, keyFrom, open as openSecret, seal, type Provider, type SecretsDoc } from './secrets.js';
 import { PayError, gatewayFor, maskPhone, msisdn, providerOf, realFetch, type Fetch, type Gateway } from './payments.js';
-import { MAX_ENTRIES, cleanEntry, summarize, type LedgerEntry } from './ledger.js';
+import { MAX_ENTRIES, cleanCategory, cleanEntry, cleanRecurring, dayOf, dueDays, monthOf, summarize, summarizeCosts, type Budgets, type LedgerEntry, type Recurring } from './ledger.js';
 import {
   CATEGORIES, applyProfile, clean, cleanEmail, cleanPhone, cleanProduct, isLive, limitsFor, newBusiness, oneOf, publicView, slugFrom, validSlug,
   type Business, type Category, type DayStats, type Enquiry, type PublicBusiness, type Product, type Post, type PublicPost, type PostComment, MAX_POST_MEDIA, MAX_POST_TEXT, MAX_POSTS, MAX_COMMENTS,
@@ -73,6 +73,21 @@ export function createBizService(deps: Deps) {
     return p;
   }
 
+
+
+  /** Recurring costs that have come due become real expense entries (checked whenever the owner's numbers are read, so nothing needs a timer). */
+  async function materialize(b: Business): Promise<number> {
+    const doc = await kv.get<{ items: Recurring[] }>(`biz-recurring:${b.id}`); if (!doc?.items.length) return 0; let made = 0; const t = now(); const ledger = (await kv.get<{ items: LedgerEntry[] }>(`biz-ledger:${b.id}`)) ?? { items: [] };
+    for (const r of doc.items) for (const d of dueDays(r, t)) { const e = cleanEntry({ type: 'expense', amount: r.amount, item: r.name, category: r.category, at: `${d}T12:00:00Z`, note: 'Recurring cost', src: 'studio' }, randomUUID(), t); if (!('error' in e)) { ledger.items.push(e); made++; } r.lastDay = d; }
+    if (made || doc.items.some((r) => !r.paused)) { ledger.items.sort((a, c) => c.at.localeCompare(a.at)); await kv.put(`biz-ledger:${b.id}`, { items: ledger.items.slice(0, MAX_ENTRIES) }); await kv.put(`biz-recurring:${b.id}`, doc); }
+    return made;
+  }
+  /** A budget alert when a category's spending this month passes 80% or 100% of its limit with this expense. */
+  async function budgetAlert(b: Business, e: LedgerEntry, all: LedgerEntry[]) {
+    if (e.type !== 'expense') return; const cat = e.category ?? 'other'; const limit = (await kv.get<Budgets>(`biz-budgets:${b.id}`))?.monthly[cat]; if (!limit) return;
+    const spent = all.filter((x) => x.type === 'expense' && (x.category ?? 'other') === cat && monthOf(x.at) === monthOf(now())).reduce((a, x) => a + x.amount, 0); const before = spent - e.amount;
+    for (const t of [100, 80]) if (before < (limit * t) / 100 && spent >= (limit * t) / 100) { alert(b, { title: `Budget · ${b.name}`, text: `${cat}: ${spent.toLocaleString('en-US')} of ${limit.toLocaleString('en-US')} RWF this month (${Math.round((spent / limit) * 100)}%).` }); return; }
+  }
   /** The decrypted keys of one provider, only to call that provider; never returned to anyone. */
   async function gateway(b: Business, p: Provider): Promise<Gateway | null> {
     const doc = await kv.get<SecretsDoc>(`biz-secrets:${b.id}`); const e = doc?.[p]; if (!e) return null;
@@ -155,7 +170,7 @@ export function createBizService(deps: Deps) {
       const b = await mine(ownerId, id);
       await deps.syncAgenda?.({ ...b, agent: undefined }).catch(() => undefined);
       await media.removeAll(b.id).catch(() => undefined);
-      await Promise.all([kv.del(`biz:${b.id}`), kv.del(`biz-slug:${b.slug}`), kv.del(`biz-enq:${b.id}`), kv.del(`biz-stats:${b.id}`), kv.del(`biz-ledger:${b.id}`), kv.del(`biz-secrets:${b.id}`), kv.del(`biz-posts:${b.id}`), kv.del(`biz-likes:${b.id}`), kv.del(`biz-workflows:${b.id}`), kv.del(`biz-comments:${b.id}`)]);
+      await Promise.all([kv.del(`biz:${b.id}`), kv.del(`biz-slug:${b.slug}`), kv.del(`biz-enq:${b.id}`), kv.del(`biz-stats:${b.id}`), kv.del(`biz-ledger:${b.id}`), kv.del(`biz-secrets:${b.id}`), kv.del(`biz-posts:${b.id}`), kv.del(`biz-likes:${b.id}`), kv.del(`biz-workflows:${b.id}`), kv.del(`biz-recurring:${b.id}`), kv.del(`biz-budgets:${b.id}`), kv.del(`biz-comments:${b.id}`)]);
       const ids = (await kv.get<{ ids: string[] }>(`biz-owner:${ownerId}`))?.ids ?? []; await kv.put(`biz-owner:${ownerId}`, { ids: ids.filter((x) => x !== b.id) });
       const all = (await kv.get<{ ids: string[] }>('biz-index'))?.ids ?? []; await kv.put('biz-index', { ids: all.filter((x) => x !== b.id) });
     },
@@ -212,16 +227,47 @@ export function createBizService(deps: Deps) {
 
     /* ------------------------------------------------------------ money notebook: owner only */
     async ledger(ownerId: string, id: string, o: { type?: 'sale' | 'expense'; days?: number } = {}): Promise<LedgerEntry[]> {
-      const b = await mine(ownerId, id); let items = (await kv.get<{ items: LedgerEntry[] }>(`biz-ledger:${b.id}`))?.items ?? [];
+      const b = await mine(ownerId, id); await materialize(b); let items = (await kv.get<{ items: LedgerEntry[] }>(`biz-ledger:${b.id}`))?.items ?? [];
       if (o.type) items = items.filter((e) => e.type === o.type); if (o.days) { const t = now() - o.days * 86_400_000; items = items.filter((e) => Date.parse(e.at) >= t); } return items;
     },
     async addEntry(ownerId: string, id: string, input: unknown): Promise<{ entry: LedgerEntry; product?: Product }> {
       const b = await mine(ownerId, id); const e = cleanEntry(input, randomUUID(), now(), b.products); if ('error' in e) throw new BizError(e.error);
       const doc = (await kv.get<{ items: LedgerEntry[] }>(`biz-ledger:${b.id}`)) ?? { items: [] };
+      // The same expense twice within 15 minutes (or the same sale twice within 2 minutes from the chat) is almost always a repeat, a double tap or a retried message: refuse it unless the owner insists. Ordinary repeat sales in the studio are never blocked.
+      const twin = (input as any)?.force === true ? null : doc.items.find((x) => x.type === e.type && x.amount === e.amount && (x.item ?? '').toLowerCase() === (e.item ?? '').toLowerCase() && Math.abs(Date.parse(x.at) - Date.parse(e.at)) < (e.type === 'expense' ? 15 : 2) * 60_000 && now() - Date.parse(x.at) < (e.type === 'expense' ? 15 : 2) * 60_000 && x.src !== 'page' && (e.type === 'expense' || e.src === 'chat'));
+      if (twin) throw new BizError(`That looks like the same ${e.type} you already recorded (entry ${twin.id.slice(0, 8)}, ${twin.amount.toLocaleString('en-US')} RWF${twin.item ? `, ${twin.item}` : ''}). Not recorded again. Send it again with force only if it really is a second one.`, 409, 'DUPLICATE');
       doc.items.unshift(e); doc.items.sort((a, c) => c.at.localeCompare(a.at)); await kv.put(`biz-ledger:${b.id}`, { items: doc.items.slice(0, MAX_ENTRIES) });
       let product: Product | undefined;
       if (e.type === 'sale' && e.status === 'completed' && e.productId) product = await adjustStock(b, e.productId, -(e.qty ?? 1));
+      await budgetAlert(b, e, doc.items);
       return { entry: e, product };
+    },
+
+
+    /** Fixing the notebook: change an entry (amount, item, category, note, customer, date) or delete it. A sale's stock effect is put back when it is deleted. */
+    async updateEntry(ownerId: string, id: string, entryId: string, patch: Record<string, unknown>): Promise<LedgerEntry> {
+      const b = await mine(ownerId, id); const doc = (await kv.get<{ items: LedgerEntry[] }>(`biz-ledger:${b.id}`)) ?? { items: [] }; const i = doc.items.findIndex((x) => x.id === entryId); if (i < 0) throw new BizError('That entry was not found.', 404);
+      const old = doc.items[i]; const merged = cleanEntry({ ...old, ...Object.fromEntries(['amount', 'item', 'qty', 'customer', 'note', 'category', 'method'].filter((k) => patch[k] !== undefined).map((k) => [k, patch[k]])), ...(patch.date ? { at: patch.date } : {}), type: old.type, status: old.status, src: old.src, productId: old.productId }, old.id, now(), b.products);
+      if ('error' in merged) throw new BizError(merged.error); if (old.pay) merged.pay = old.pay; doc.items[i] = merged; doc.items.sort((a, c) => c.at.localeCompare(a.at)); await kv.put(`biz-ledger:${b.id}`, doc); return merged;
+    },
+    /** Costs and spending: this month against last, by category, six months of trend, budgets and recurring costs. */
+    async costs(ownerId: string, id: string) {
+      const b = await mine(ownerId, id); await materialize(b); const items = (await kv.get<{ items: LedgerEntry[] }>(`biz-ledger:${b.id}`))?.items ?? [];
+      return summarizeCosts(items, now(), (await kv.get<Budgets>(`biz-budgets:${b.id}`)) ?? { monthly: {} }, (await kv.get<{ items: Recurring[] }>(`biz-recurring:${b.id}`))?.items ?? []);
+    },
+    async setBudget(ownerId: string, id: string, category: unknown, amount: unknown): Promise<Budgets> {
+      const b = await mine(ownerId, id); const cat = cleanCategory(category); const doc = (await kv.get<Budgets>(`biz-budgets:${b.id}`)) ?? { monthly: {} }; const n = Number(String(amount ?? '').replace(/[,\s]/g, ''));
+      if (amount === null || amount === '' || n === 0) delete doc.monthly[cat]; else if (Number.isFinite(n) && n > 0 && n <= 1_000_000_000) { if (!doc.monthly[cat] && Object.keys(doc.monthly).length >= 30) throw new BizError('That is plenty of budgets. Remove one first.'); doc.monthly[cat] = Math.round(n); } else throw new BizError('The budget must be a number of RWF.');
+      await kv.put(`biz-budgets:${b.id}`, doc); return doc;
+    },
+    async recurring(ownerId: string, id: string): Promise<Recurring[]> { const b = await mine(ownerId, id); return (await kv.get<{ items: Recurring[] }>(`biz-recurring:${b.id}`))?.items ?? []; },
+    async addRecurring(ownerId: string, id: string, input: unknown): Promise<Recurring> {
+      const b = await mine(ownerId, id); const r = cleanRecurring(input, randomUUID(), now()); if ('error' in r) throw new BizError(r.error);
+      const doc = (await kv.get<{ items: Recurring[] }>(`biz-recurring:${b.id}`)) ?? { items: [] }; if (doc.items.length >= 30) throw new BizError('That is plenty of recurring costs. Remove one first.'); doc.items.push(r); await kv.put(`biz-recurring:${b.id}`, doc); return r;
+    },
+    async setRecurring(ownerId: string, id: string, rid: string, patch: { paused?: unknown; remove?: unknown }): Promise<boolean> {
+      const b = await mine(ownerId, id); const doc = (await kv.get<{ items: Recurring[] }>(`biz-recurring:${b.id}`)) ?? { items: [] }; const r = doc.items.find((x) => x.id === rid || x.name.toLowerCase() === String(rid).toLowerCase()); if (!r) return false;
+      if (patch.remove === true) doc.items = doc.items.filter((x) => x !== r); else if (patch.paused !== undefined) r.paused = patch.paused === true; await kv.put(`biz-recurring:${b.id}`, doc); return true;
     },
     async setEntryStatus(ownerId: string, id: string, entryId: string, status: 'completed' | 'pending' | 'cancelled'): Promise<LedgerEntry> {
       const b = await mine(ownerId, id); const doc = (await kv.get<{ items: LedgerEntry[] }>(`biz-ledger:${b.id}`)) ?? { items: [] }; const e = doc.items.find((x) => x.id === entryId);
@@ -238,7 +284,7 @@ export function createBizService(deps: Deps) {
     },
     /** The numbers behind the dashboard: today against yesterday, a chart, top sellers, orders, customers, low stock. */
     async dashboard(ownerId: string, id: string, days = 7) {
-      const b = await mine(ownerId, id); const items = (await kv.get<{ items: LedgerEntry[] }>(`biz-ledger:${b.id}`))?.items ?? [];
+      const b = await mine(ownerId, id); await materialize(b); const items = (await kv.get<{ items: LedgerEntry[] }>(`biz-ledger:${b.id}`))?.items ?? [];
       const enq = (await kv.get<{ items: Enquiry[] }>(`biz-enq:${b.id}`))?.items ?? [];
       return { ...summarize(items, b.products, now(), days), newMessages: enq.filter((e) => e.status === 'new').length, entries: items.length };
     },

@@ -135,14 +135,15 @@ export function bizTools(getSvc: () => Promise<BizService> | BizService = async 
         ? "Write a sale into the owner's PRIVATE money notebook (never public). Use when the user says they sold or made money: \"today I sold 5 loaves for 4,000\", or from a photo of a sales book they attached (read the photo yourself, list the lines you read, get a clear yes from the user, then record each line). One call per sale; amount is the total in whole RWF. If the item is a product on the page, pass its name in item and the quantity so stock goes down. Never guess an amount: ask."
         : "Write an expense (money spent) into the owner's PRIVATE notebook: \"bought flour for 8,000\", \"paid transport 2,000\". Amount in whole RWF. Never guess an amount: ask.",
       parameters: { type: 'object', required: ['amount'], properties: { business: BUSINESS, amount: { type: 'number', description: 'Total in whole RWF.' }, item: { type: 'string' }, qty: { type: 'number' }, customer: { type: 'string' }, method: { type: 'string', enum: ['cash', 'momo', 'card', 'credit'] }, note: { type: 'string' }, date: { type: 'string', description: 'ISO date/time when it was not today.' },
-        ...(type === 'expense' ? { category: { type: 'string', enum: ['stock', 'rent', 'transport', 'salaries', 'utilities', 'marketing', 'other'] } } : {}), ...(type === 'sale' ? { status: { type: 'string', enum: ['completed', 'pending', 'cancelled'] } } : {}) } } },
+        ...(type === 'expense' ? { category: { type: 'string', description: 'stock, rent, transport, salaries, utilities, marketing, software, investment, other, or the owner\'s own word (for example server).' } } : {}), force: { type: 'boolean', description: 'Only true when the owner confirms it really is a second identical entry after you were told it looks like a duplicate.' }, ...(type === 'sale' ? { status: { type: 'string', enum: ['completed', 'pending', 'cancelled'] } } : {}) } } },
     async execute(input, ctx) {
       try {
         const b = await pick(ctx.userId, input.business); if ('error' in b) return err(b.error); const q = String(input.item ?? '').trim().toLowerCase();
         const product = type === 'sale' && q ? b.products.find((p) => p.name.toLowerCase() === q) : undefined;
-        const r = await (await svc()).addEntry(ctx.userId, b.id, { type, amount: input.amount, item: input.item, qty: input.qty, customer: input.customer, method: input.method, note: input.note, at: input.date, category: input.category, status: input.status, productId: product?.id, src: 'chat' });
+        const r = await (await svc()).addEntry(ctx.userId, b.id, { type, amount: input.amount, item: input.item, qty: input.qty, customer: input.customer, method: input.method, note: input.note, at: input.date, category: input.category, status: input.status, productId: product?.id, src: 'chat', force: input.force === true });
         const low = r.product && typeof r.product.stock === 'number' && r.product.stock <= (r.product.lowAt ?? 5) ? ` Heads up: only ${r.product.stock} ${r.product.name} left.` : '';
-        return { text: `Recorded ${type === 'sale' ? 'sale' : 'expense'} of ${rwf(r.entry.amount)}${r.entry.item ? ` (${r.entry.item})` : ''}. This is private: only the owner sees it.${low}` };
+        const d = await (await svc()).dashboard(ctx.userId, b.id, 7);
+        return { text: `Recorded ${type === 'sale' ? 'sale' : 'expense'} of ${rwf(r.entry.amount)}${r.entry.item ? ` (${r.entry.item})` : ''}${r.entry.category && type === 'expense' ? ` under ${r.entry.category}` : ''}. Entry id ${r.entry.id.slice(0, 8)}. Checked: today's sales are now ${rwf(d.today.sales)} and today's expenses ${rwf(d.today.expenses)}. This is private: only the owner sees it.${low}` };
       } catch (e) { return failure(e); }
     },
   });
@@ -280,5 +281,59 @@ export function bizTools(getSvc: () => Promise<BizService> | BizService = async 
       } catch (e) { return failure(e); }
     },
   };
-  return [get, create, update, addProduct, changeProduct, addMedia, publish, link, messages, record('sale'), record('expense'), dashboard, orders, requestPay, payStatus, paySetup, report, stock, agent, post, open, workflow];
+  const entries: Tool = {
+    definition: { name: 'biz_entries', description: "Look at, correct or delete entries in the owner's private notebook. action 'list' shows recent entries with their ids (use it to verify what is recorded and to find a duplicate); 'edit' changes an entry by id (amount, item, category, note, customer, date); 'delete' removes one by id and ONLY after the owner clearly asked for that specific entry to be deleted (say which entry first if there is any doubt). Always report the new totals afterwards.",
+      parameters: { type: 'object', required: ['action'], properties: { business: BUSINESS, action: { type: 'string', enum: ['list', 'edit', 'delete'] }, type: { type: 'string', enum: ['sale', 'expense'] }, days: { type: 'number', description: 'For list: how many days back (default 3).' }, id: { type: 'string', description: 'The entry id (the first 8 characters are enough).' }, amount: { type: 'number' }, item: { type: 'string' }, category: { type: 'string' }, note: { type: 'string' }, customer: { type: 'string' }, date: { type: 'string' }, confirm: { type: 'boolean', description: 'For delete: true only when the owner asked for this deletion.' } } } },
+    async execute(input, ctx) {
+      try {
+        const b = await pick(ctx.userId, input.business); if ('error' in b) return err(b.error); const s = await svc(); const act = String(input.action);
+        const list = await s.ledger(ctx.userId, b.id, { type: input.type, days: Math.min(60, Number(input.days) || 3) });
+        const line = (e: (typeof list)[number]) => `${e.id.slice(0, 8)} · ${e.at.slice(0, 16).replace('T', ' ')} · ${e.type} ${rwf(e.amount)}${e.item ? ` · ${e.item}` : ''}${e.category ? ` · ${e.category}` : ''}${e.status !== 'completed' ? ` · ${e.status}` : ''}`;
+        const totals = async () => { const d = await s.dashboard(ctx.userId, b.id, 7); return `Totals now: today's sales ${rwf(d.today.sales)}, expenses ${rwf(d.today.expenses)}, profit ${rwf(d.today.profit)}.`; };
+        if (act === 'list') return { text: `${list.slice(0, 25).map(line).join('\n') || 'No entries.'}\n${await totals()}` };
+        const hit = (await s.ledger(ctx.userId, b.id, { days: 400 })).filter((e) => input.id && (e.id === input.id || e.id.startsWith(String(input.id))));
+        if (hit.length !== 1) return err(hit.length ? 'Several entries match that id. Use more characters.' : 'No entry matches that id. Use action list first.');
+        const e = hit[0];
+        if (act === 'edit') { const u = await s.updateEntry(ctx.userId, b.id, e.id, { amount: input.amount, item: input.item, category: input.category, note: input.note, customer: input.customer, date: input.date }); return { text: `Updated: ${line(u)}. ${await totals()}` }; }
+        if (act === 'delete') { if (input.confirm !== true) return err(`Deleting cannot be undone. Ask the owner to confirm deleting: ${line(e)}. Then call again with confirm true.`); await s.removeEntry(ctx.userId, b.id, e.id); return { text: `Deleted: ${line(e)}. ${await totals()}` }; }
+        return err('Unknown action.');
+      } catch (e) { return failure(e); }
+    },
+  };
+  const costs: Tool = {
+    definition: { name: 'biz_costs', description: "Costs and spending for the owner: this month against last month, spending by category, the biggest costs, six months of trend, budgets with how much is used, and recurring costs. Use for \"what am I spending on\", \"am I over budget\", \"how much are my costs this month\".",
+      parameters: { type: 'object', properties: { business: BUSINESS } } },
+    async execute(input, ctx) {
+      try {
+        const b = await pick(ctx.userId, input.business); if ('error' in b) return err(b.error); const c = await (await svc()).costs(ctx.userId, b.id);
+        return { text: [`${b.name} costs, ${c.month.key}: ${rwf(c.month.total)}${c.change === null ? '' : ` (${c.change >= 0 ? '+' : ''}${c.change}% vs last month ${rwf(c.lastMonth.total)})`}. Sales this month ${rwf(c.month.sales)}, profit (estimate) ${rwf(c.month.profit)}.`,
+          `By category: ${c.month.byCategory.map((x) => `${x.category} ${rwf(x.amount)}`).join('; ') || 'nothing yet'}.`, `Biggest: ${c.top.map((e) => `${e.item ?? e.category ?? 'cost'} ${rwf(e.amount)}`).join('; ') || 'none'}.`,
+          `Budgets: ${c.budgets.map((x) => `${x.category} ${rwf(x.spent)} of ${rwf(x.limit)} (${x.pct}%)`).join('; ') || 'none set'}.`, `Recurring: ${c.recurring.map((r) => `${r.name} ${rwf(r.amount)} every ${r.every}${r.paused ? ' (paused)' : ''}`).join('; ') || 'none'} (about ${rwf(c.monthlyCommitted)} a month). Screen: ${site()}/biz?view=expenses`].join('\n') };
+      } catch (e) { return failure(e); }
+    },
+  };
+  const recurring: Tool = {
+    definition: { name: 'biz_recurring', description: "Recurring costs that record themselves (rent, a server, salaries, a subscription). action 'list'; 'add' (name, amount, every month/week, on = day of month 1-28 or weekday 0 Sunday-6, category); 'pause', 'resume' or 'remove' by name. After adding, tell the owner the next date it will be recorded.",
+      parameters: { type: 'object', required: ['action'], properties: { business: BUSINESS, action: { type: 'string', enum: ['list', 'add', 'pause', 'resume', 'remove'] }, name: { type: 'string' }, amount: { type: 'number' }, every: { type: 'string', enum: ['month', 'week'] }, on: { type: 'number' }, category: { type: 'string' } } } },
+    async execute(input, ctx) {
+      try {
+        const b = await pick(ctx.userId, input.business); if ('error' in b) return err(b.error); const s = await svc(); const act = String(input.action); const name = String(input.name ?? '').trim();
+        if (act === 'list') { const l = await s.recurring(ctx.userId, b.id); return { text: l.map((r) => `${r.name}: ${rwf(r.amount)} every ${r.every} on ${r.every === 'month' ? `day ${r.on}` : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][r.on]} · ${r.category}${r.paused ? ' · paused' : ''}`).join('\n') || 'No recurring costs.' }; }
+        if (act === 'add') { const r = await s.addRecurring(ctx.userId, b.id, { name, amount: input.amount, every: input.every, on: input.on, category: input.category }); return { text: `Added ${r.name}: ${rwf(r.amount)} every ${r.every}. It records itself on the matching day (the first time on its next matching day).` }; }
+        const done = await s.setRecurring(ctx.userId, b.id, name, act === 'remove' ? { remove: true } : { paused: act === 'pause' }); return done ? { text: `${act === 'remove' ? 'Removed' : act === 'pause' ? 'Paused' : 'Resumed'} ${name}.` } : err(`No recurring cost called "${name}".`);
+      } catch (e) { return failure(e); }
+    },
+  };
+  const budget: Tool = {
+    definition: { name: 'biz_budget', description: "Set or remove a monthly budget for a spending category (for example server 10,000, stock 200,000). The owner gets an alert when a category passes 80% and 100% of its budget. Amount 0 removes it. Call with no category to list budgets and how much is used.",
+      parameters: { type: 'object', properties: { business: BUSINESS, category: { type: 'string' }, amount: { type: 'number' } } } },
+    async execute(input, ctx) {
+      try {
+        const b = await pick(ctx.userId, input.business); if ('error' in b) return err(b.error); const s = await svc();
+        if (input.category && input.amount !== undefined) await s.setBudget(ctx.userId, b.id, input.category, input.amount);
+        const c = await s.costs(ctx.userId, b.id); return { text: c.budgets.map((x) => `${x.category}: ${rwf(x.spent)} of ${rwf(x.limit)} this month (${x.pct}%)`).join('\n') || 'No budgets set.' };
+      } catch (e) { return failure(e); }
+    },
+  };
+  return [get, create, update, addProduct, changeProduct, addMedia, publish, link, messages, record('sale'), record('expense'), dashboard, orders, requestPay, payStatus, paySetup, report, stock, agent, post, open, workflow, entries, costs, recurring, budget];
 }

@@ -32,3 +32,10 @@ export interface SecretsStatus {
 }
 
 export interface AgentSettings { level: 'off' | 'watch' | 'assist' | 'run'; alerts: boolean; morning: boolean; evening: boolean; weekly: boolean }
+
+export interface Recurring { id: string; name: string; amount: number; category: string; every: 'week' | 'month'; on: number; paused?: boolean }
+export interface Costs {
+  month: { key: string; total: number; byCategory: Array<{ category: string; amount: number }>; sales: number; profit: number }; lastMonth: { key: string; total: number };
+  change: number | null; trend: Array<{ month: string; total: number }>; budgets: Array<{ category: string; limit: number; spent: number; pct: number }>;
+  top: LedgerEntry[]; recurring: Recurring[]; monthlyCommitted: number;
+}
