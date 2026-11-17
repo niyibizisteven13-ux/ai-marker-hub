@@ -1,0 +1,173 @@
+/**
+ * bwenge4biz: a business page on Bwenge (bwenge.space/b/<name>) and the private side the owner uses to run it.
+ *
+ * THE RULE: the public sees only what `publicView` returns. Everything else on a business (visitor enquiries, visit counts, drafts, hidden
+ * products, notes, reports, the owner's account) is private to the owner and never leaves through a public route. All public routes
+ * answer with `publicView` and nothing else, so adding a private field here can never leak by accident.
+ */
+
+export const SLUG_MIN = 3;
+export const SLUG_MAX = 32;
+/** Names that would look like part of Bwenge or like the site's own pages. */
+export const RESERVED_SLUGS = new Set([
+  'admin', 'api', 'app', 'apps', 'b', 'biz', 'bwenge', 'bwenge4biz', 'chat', 'dashboard', 'download', 'help', 'home', 'login', 'logout', 'mail', 'myseb', 'new',
+  'official', 'pay', 'payment', 'payments', 'privacy', 'root', 'settings', 'signup', 'sign-in', 'status', 'support', 'terms', 'test', 'upgrade', 'www',
+]);
+
+export const CATEGORIES = ['shop', 'restaurant', 'salon', 'farm', 'services', 'school', 'health', 'transport', 'craft', 'other'] as const;
+export type Category = (typeof CATEGORIES)[number];
+export const THEMES = ['gold', 'teal', 'green', 'blue', 'rose', 'violet', 'ink'] as const;
+export type Theme = (typeof THEMES)[number];
+export const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
+export type Day = (typeof DAYS)[number];
+
+export interface Hours { day: Day; open: string; close: string; closed?: boolean }
+export interface Product { id: string; name: string; price: number | null; unit?: string; description?: string; mediaId?: string; available: boolean; hidden?: boolean }
+export type MediaKind = 'image' | 'video';
+export interface Media { id: string; kind: MediaKind; mime: string; size: number; name: string; caption?: string; createdAt: string; visible: boolean }
+export interface Business {
+  id: string; ownerId: string; slug: string; name: string; category: Category; tagline: string; about: string; theme: Theme;
+  logoId?: string; coverId?: string;
+  whatsapp?: string; phone?: string; email?: string; address?: string; mapUrl?: string; website?: string; instagram?: string; facebook?: string;
+  hours: Hours[];
+  /** MoMo Pay code and name, shown to visitors only when `showPay` is on. */
+  momoCode?: string; momoName?: string; showPay: boolean;
+  products: Product[]; media: Media[];
+  /** Private to the owner. */
+  notes: string;
+  published: boolean;
+  /** Set by an administrator: the page is hidden whatever the owner does. */
+  suspended?: { at: string; reason: string };
+  createdAt: string; updatedAt: string;
+}
+export interface Enquiry { id: string; at: string; name: string; contact: string; message: string; productId?: string; status: 'new' | 'seen' | 'done' }
+export interface DayStats { views: number; whatsapp: number; calls: number; shares: number; enquiries: number }
+
+/* ---------------------------------------------------------------- limits */
+export interface Limits { businesses: number; products: number; images: number; videos: number; totalMediaMb: number; enquiries: number }
+export const FREE_LIMITS: Limits = { businesses: 1, products: 30, images: 12, videos: 2, totalMediaMb: 80, enquiries: 200 };
+export const PAID_LIMITS: Limits = { businesses: 3, products: 200, images: 60, videos: 10, totalMediaMb: 600, enquiries: 500 };
+export const limitsFor = (paid: boolean): Limits => (paid ? PAID_LIMITS : FREE_LIMITS);
+export const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
+export const MAX_VIDEO_BYTES = 25 * 1024 * 1024;
+
+/* ---------------------------------------------------------------- cleaning (every text a person types goes through these) */
+export const clean = (v: unknown, max: number) => String(v ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f​-‏‪-‮⁦-⁩]/g, '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim().slice(0, max);
+export const oneOf = <T extends string>(list: readonly T[], v: unknown, fallback: T): T => ((list as readonly string[]).includes(String(v)) ? (String(v) as T) : fallback);
+/** Digits only, with an optional country code, 8 to 15 digits. */
+export const cleanPhone = (v: unknown): string | undefined => { const d = String(v ?? '').replace(/\D/g, ''); return d.length >= 8 && d.length <= 15 ? d : undefined; };
+/** A web address that is https and has no login in it; anything else is dropped (no javascript:, data:, http:). */
+export function cleanUrl(v: unknown, hosts?: RegExp): string | undefined {
+  const s = String(v ?? '').trim(); if (!s || s.length > 300) return undefined;
+  try { const u = new URL(/^https?:\/\//i.test(s) ? s : `https://${s}`); if (u.protocol !== 'https:' || u.username || u.password || !u.hostname.includes('.')) return undefined; if (hosts && !hosts.test(u.hostname)) return undefined; return u.href; } catch { return undefined; }
+}
+export const cleanEmail = (v: unknown): string | undefined => { const s = String(v ?? '').trim().toLowerCase(); return s.length <= 120 && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s) ? s : undefined; };
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+export function validSlug(v: unknown): { ok: true; slug: string } | { ok: false; error: string } {
+  const slug = String(v ?? '').trim().toLowerCase();
+  if (slug.length < SLUG_MIN || slug.length > SLUG_MAX) return { ok: false, error: `The page name must be ${SLUG_MIN} to ${SLUG_MAX} characters.` };
+  if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(slug)) return { ok: false, error: 'Use only letters, numbers and single dashes, for example mama-grace-cafe.' };
+  if (RESERVED_SLUGS.has(slug) || slug.startsWith('bwenge')) return { ok: false, error: 'That name is kept by Bwenge. Choose another.' };
+  return { ok: true, slug };
+}
+/** A page name suggested from a business name ("Mama Grace's Café" gives "mama-graces-cafe"). */
+export function slugFrom(name: string): string {
+  const base = String(name ?? '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/['’]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, SLUG_MAX).replace(/-+$/g, '');
+  return base.length >= SLUG_MIN ? base : `${base || 'my'}-biz`.slice(0, SLUG_MAX);
+}
+
+export function cleanHours(v: unknown): Hours[] {
+  const out: Hours[] = [];
+  for (const h of Array.isArray(v) ? v : []) {
+    const day = oneOf(DAYS, h?.day, 'mon');
+    if (!(DAYS as readonly string[]).includes(String(h?.day)) || out.some((x) => x.day === day)) continue;
+    if (h?.closed === true) { out.push({ day, open: '00:00', close: '00:00', closed: true }); continue; }
+    if (HHMM.test(String(h?.open)) && HHMM.test(String(h?.close))) out.push({ day, open: String(h.open), close: String(h.close) });
+  }
+  return out.sort((a, b) => DAYS.indexOf(a.day) - DAYS.indexOf(b.day));
+}
+
+/** A product as typed by the owner (or the AI): name required, price in RWF (whole francs) or none ("ask"). */
+export function cleanProduct(input: any, id: string, prev?: Product): Product | { error: string } {
+  const name = clean(input?.name ?? prev?.name, 80); if (!name) return { error: 'A product needs a name.' };
+  const raw = input?.price === undefined ? prev?.price ?? null : input.price;
+  let price: number | null = null;
+  if (raw !== null && raw !== '' && raw !== undefined) { const n = Number(String(raw).replace(/[,\s]/g, '')); if (!Number.isFinite(n) || n < 0 || n > 1_000_000_000) return { error: 'The price must be a number of RWF.' }; price = Math.round(n); }
+  const p: Product = { id, name, price, available: input?.available === undefined ? prev?.available ?? true : input.available !== false };
+  const unit = clean(input?.unit ?? prev?.unit, 20); if (unit) p.unit = unit;
+  const description = clean(input?.description ?? prev?.description, 400); if (description) p.description = description;
+  const mediaId = input?.mediaId === undefined ? prev?.mediaId : input.mediaId ? String(input.mediaId).slice(0, 60) : undefined; if (mediaId) p.mediaId = mediaId;
+  const hidden = input?.hidden === undefined ? prev?.hidden : input.hidden === true; if (hidden) p.hidden = true;
+  return p;
+}
+
+/** Applies the fields an owner may change on the page. Unknown fields are ignored; every text is cleaned. */
+export function applyProfile(b: Business, patch: any): void {
+  const set = <K extends keyof Business>(k: K, v: Business[K] | undefined) => { if (v === undefined || v === '') delete (b as any)[k]; else (b as any)[k] = v; };
+  if (patch.name !== undefined) { const n = clean(patch.name, 60); if (n) b.name = n; }
+  if (patch.category !== undefined) b.category = oneOf(CATEGORIES, patch.category, b.category);
+  if (patch.theme !== undefined) b.theme = oneOf(THEMES, patch.theme, b.theme);
+  if (patch.tagline !== undefined) b.tagline = clean(patch.tagline, 120);
+  if (patch.about !== undefined) b.about = clean(patch.about, 1500);
+  if (patch.notes !== undefined) b.notes = clean(patch.notes, 2000);
+  if (patch.whatsapp !== undefined) set('whatsapp', cleanPhone(patch.whatsapp));
+  if (patch.phone !== undefined) set('phone', cleanPhone(patch.phone));
+  if (patch.email !== undefined) set('email', cleanEmail(patch.email));
+  if (patch.address !== undefined) set('address', clean(patch.address, 160));
+  if (patch.mapUrl !== undefined) set('mapUrl', cleanUrl(patch.mapUrl, /(^|\.)(google\.[a-z.]+|goo\.gl|maps\.app\.goo\.gl|openstreetmap\.org|osm\.org|waze\.com)$/i));
+  if (patch.website !== undefined) set('website', cleanUrl(patch.website));
+  if (patch.instagram !== undefined) set('instagram', cleanUrl(patch.instagram, /(^|\.)instagram\.com$/i));
+  if (patch.facebook !== undefined) set('facebook', cleanUrl(patch.facebook, /(^|\.)(facebook\.com|fb\.com|fb\.me)$/i));
+  if (patch.hours !== undefined) b.hours = cleanHours(patch.hours);
+  if (patch.momoCode !== undefined) { const c = String(patch.momoCode ?? '').replace(/\D/g, ''); set('momoCode', c.length >= 3 && c.length <= 20 ? c : undefined); }
+  if (patch.momoName !== undefined) set('momoName', clean(patch.momoName, 60));
+  if (patch.showPay !== undefined) b.showPay = patch.showPay === true && !!b.momoCode;
+}
+
+/* ---------------------------------------------------------------- the public boundary */
+export interface PublicMedia { id: string; kind: MediaKind; caption?: string }
+export interface PublicBusiness {
+  slug: string; name: string; category: Category; tagline: string; about: string; theme: Theme;
+  logo?: PublicMedia; cover?: PublicMedia;
+  contact: { whatsapp?: string; phone?: string; email?: string; address?: string; mapUrl?: string; website?: string; instagram?: string; facebook?: string };
+  hours: Hours[];
+  pay?: { momoCode: string; momoName?: string };
+  products: Array<{ id: string; name: string; price: number | null; unit?: string; description?: string; media?: PublicMedia; available: boolean }>;
+  gallery: PublicMedia[];
+  updatedAt: string;
+}
+
+/** Whether a page may be shown at all. */
+export const isLive = (b: Business) => b.published && !b.suspended;
+
+/** The ONLY description of a business that public routes may return. Built field by field (never by copying the business). */
+export function publicView(b: Business): PublicBusiness {
+  const shown = new Map(b.media.filter((m) => m.visible).map((m) => [m.id, m]));
+  const pm = (id?: string): PublicMedia | undefined => { const m = id ? shown.get(id) : undefined; return m ? { id: m.id, kind: m.kind, ...(m.caption ? { caption: m.caption } : {}) } : undefined; };
+  const contact: PublicBusiness['contact'] = {};
+  for (const k of ['whatsapp', 'phone', 'email', 'address', 'mapUrl', 'website', 'instagram', 'facebook'] as const) if (b[k]) contact[k] = b[k];
+  const out: PublicBusiness = {
+    slug: b.slug, name: b.name, category: b.category, tagline: b.tagline, about: b.about, theme: b.theme, contact, hours: b.hours.map((h) => ({ ...h })),
+    products: b.products.filter((p) => !p.hidden).map((p) => ({ id: p.id, name: p.name, price: p.price, ...(p.unit ? { unit: p.unit } : {}), ...(p.description ? { description: p.description } : {}), ...(pm(p.mediaId) ? { media: pm(p.mediaId) } : {}), available: p.available })),
+    gallery: b.media.filter((m) => m.visible && m.id !== b.logoId && m.id !== b.coverId).map((m) => pm(m.id)!),
+    updatedAt: b.updatedAt,
+  };
+  const logo = pm(b.logoId), cover = pm(b.coverId); if (logo) out.logo = logo; if (cover) out.cover = cover;
+  if (b.showPay && b.momoCode) out.pay = { momoCode: b.momoCode, ...(b.momoName ? { momoName: b.momoName } : {}) };
+  return out;
+}
+
+/** "Open now" for a page, from its hours (the owner's local time is Kigali, UTC+2). */
+export function openNow(hours: Hours[], now = Date.now()): boolean | null {
+  if (!hours.length) return null;
+  const k = new Date(now + 2 * 3600_000); const day = DAYS[(k.getUTCDay() + 6) % 7]; const h = hours.find((x) => x.day === day);
+  if (!h) return null; if (h.closed) return false;
+  const t = k.getUTCHours() * 60 + k.getUTCMinutes(); const [oh, om] = h.open.split(':').map(Number), [ch, cm] = h.close.split(':').map(Number);
+  const o = oh * 60 + om, c = ch * 60 + cm;
+  return c > o ? t >= o && t < c : t >= o || t < c;      // a closing time after midnight counts as the next day
+}
+
+export function newBusiness(id: string, ownerId: string, name: string, slug: string, category: Category, now: string): Business {
+  return { id, ownerId, slug, name, category, tagline: '', about: '', theme: 'gold', hours: [], showPay: false, products: [], media: [], notes: '', published: false, createdAt: now, updatedAt: now };
+}
