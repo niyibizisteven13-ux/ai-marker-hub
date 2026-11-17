@@ -63,3 +63,40 @@ export async function notifyAdminsOfPayment(req: { id: string; name: string; ema
   }
   return n;
 }
+
+/** A button on a live-room message: the tap is the lecturer's decision. Only the person the button was made for can use it. */
+export async function roomButton(api: TelegramApi, chatId: string, session: any, token: string, target?: { id: number }): Promise<string> {
+  const { takeToken } = await import('../agenda/roomTokens.js');
+  const got = await takeToken(token, session?.userId);
+  if (got.ok === false) return got.why === 'not_yours' ? 'This button is not yours.' : got.why === 'expired' ? 'This button has expired: open the live room.' : 'This button was already used.';
+  const { runRoomToken } = await import('../mySebButtons.js');
+  const r = await runRoomToken(got.token);
+  if (target) await api.call('editMessageReplyMarkup', { chat_id: chatId, message_id: target.id, reply_markup: { inline_keyboard: [] } }).catch(() => undefined);
+  await api.sendMessage(chatId, card(r.ok ? '✅' : '⚠️', 'Live room', esc(r.text)));
+  return r.ok ? 'Done' : 'Not done';
+}
+
+/** /room: the live rooms the assistant is watching for this person, with the controls. */
+export async function showRooms(api: TelegramApi, chatId: string, session: any): Promise<void> {
+  const userId: string | undefined = session?.userId;
+  if (!userId) { await api.sendMessage(chatId, card('🎛', 'Live rooms', esc('Link your Bwenge account first (Settings).'))); return; }
+  const [{ makeToken }, my] = await Promise.all([import('../agenda/roomTokens.js'), import('../mySeb.js')]);
+  const db = prisma as any;
+  const rows = (await db.appSetting.findMany({ where: { key: { startsWith: 'myseb-agent:' } }, orderBy: { updatedAt: 'desc' }, take: 200 })).map((r: any) => r.value)
+    .filter((v: any) => v?.ownerId === userId && v?.rules?.on).slice(0, 4);
+  if (!rows.length) { await api.sendMessage(chatId, card('🎛', 'Live rooms', esc('No room is being watched right now. Switch the room assistant on in a live room, or ask me to start a test.'))); return; }
+  for (const v of rows) {
+    const load = v.kind === 'form' ? my.formTarget(userId, v.ref) : my.assignmentTarget(userId, v.ref);
+    const m: any = await my.monitor(load, { frames: false }).catch(() => null);
+    const c = m?.counts ?? {};
+    const common = { userId, kind: v.kind, ref: v.ref } as const;
+    const text = `${esc(m?.exam?.title ?? 'Live room')}\n${esc(`In the test ${c.IN_EXAM ?? 0} · paused ${c.PAUSED ?? 0} · lost connection ${c.LEFT ?? 0} · finished ${c.ENDED ?? 0}`)}\nAssistant: ${esc(v.rules.level === 'run' ? 'autopilot' : v.rules.level === 'watch' ? 'watching only' : 'assisting')}${v.rules.dryRun ? ' (practice mode)' : ''}`;
+    await api.sendMessage(chatId, card('🎛', 'Live room', text), { keyboard: { inline_keyboard: [[
+      { text: '⏸ Pause all', callback_data: `ra:${await makeToken({ ...common, action: 'pause' })}` },
+      { text: '▶ All back in', callback_data: `ra:${await makeToken({ ...common, action: 'resume_all' })}` },
+    ], [
+      { text: '+5 min', callback_data: `ra:${await makeToken({ ...common, action: 'add', minutes: 5 })}` },
+      { text: '+10 min', callback_data: `ra:${await makeToken({ ...common, action: 'add', minutes: 10 })}` },
+    ]] } as any });
+  }
+}

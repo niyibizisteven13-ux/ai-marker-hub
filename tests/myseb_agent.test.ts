@@ -61,6 +61,7 @@ const fake = http.createServer((req, res) => {
     if (req.url?.startsWith(`/api/exams/${EXAM}/monitor`)) return json({ exam: { title: 'Biology', status: examStatus }, counts: {}, students });
     if (req.url?.startsWith(`/api/exams/${EXAM}/report`)) return json({ exam: { title: 'Biology', status: examStatus }, students: students.map((x) => ({ ...x, id: x.id })), events: reportEvents });
     if (req.url?.startsWith(`/api/exams/${EXAM}/evidence`)) return req.url.includes('sessionId=') ? json({ items: [{ at: 'x', type: 'screenshot', frame: 'data:image/jpeg;base64,AA==', screen: null }] }) : json({ counts: evidenceBy });
+    if (/\/api\/exams\/[^/]+\/generate-code$/.test(req.url ?? '') && req.method === 'POST') { actions.push('generate-code'); return json({ code: '123456', display: '1234-ABC-01', joinUrl: 'https://x.test/join/123456', qrSvg: '', expiresAt: '2026-12-01T00:00:00Z' }); }
     const rein = /\/api\/sessions\/([^/]+)\/reinstate$/.exec(req.url ?? '');
     if (rein && req.method === 'POST') { actions.push(`reinstate ${rein[1]} ${body}`); return json({ ok: true }); }
     const vio = /\/api\/sessions\/([^/]+)\/violations$/.exec(req.url ?? '');
@@ -308,4 +309,51 @@ test('the assistant never fails silently: repeated errors drop autopilot to watc
   monitorDown = false;
   assert.equal(told.filter((t) => /cannot reach the test server/.test(t)).length, 1, 'told once, not every ten seconds');
   A.__setAlertOwnerForTests(async () => undefined);
+});
+
+test('the timetable: autopilot makes the join code and sends it when the test opens, closes it at closing time, and does each once', async () => {
+  const load = formTarget(owner, formId); const sent: string[] = [];
+  await (await import('../server/services/mySebAccess.js')).grantAccess({ userId: owner, plan: 'MONTH', months: 1, by: 'test' });   // the code is a paid service
+  A.__setTellOwnerForTests(async (_r, title, text) => { sent.push(`${title}|${text}`); });
+  { const key = `myseb-agent:form:${formId}`; const cur = (await db.appSetting.findUnique({ where: { key } })).value; await db.appSetting.update({ where: { key }, data: { value: { ...cur, mem: undefined } } }); }
+  A.__resetAgentMemoryForTests(); actions.length = 0; examStatus = 'active'; students = [];
+  const t0 = Date.now();
+  await assert.rejects(A.setAgent(load, { on: true, level: 'run', opensAt: new Date(t0 + 3_600_000).toISOString(), closesAt: new Date(t0).toISOString() }, owner, { confirmedAutopilot: true }), /close after it opens/);
+  await A.setAgent(load, { on: true, level: 'run', dryRun: false, opensAt: new Date(t0 + 60_000).toISOString(), closesAt: new Date(t0 + 7_200_000).toISOString() }, owner, { confirmedAutopilot: true });
+  assert.equal((await A.getAgent(load)).rules.closesAt, new Date(t0 + 7_200_000).toISOString());
+  await A.runRoom(await rowOf(), t0); assert.ok(!actions.includes('generate-code'), 'not open yet');
+  await A.runRoom(await rowOf(), t0 + 61_000);
+  assert.equal(actions.filter((a) => a === 'generate-code').length, 1, `the code was made: ${JSON.stringify((await rowOf()).log.slice(-3).map((e: any) => e.text))}`);
+  assert.ok(sent.some((x) => /The test is open\|Code: 1234-ABC-01[\s\S]*https:\/\/x.test\/join\/123456[\s\S]*wa.me/.test(x)), 'and sent to the lecturer');
+  A.__resetAgentMemoryForTests();                                         // a restart: it must not make the code again
+  await A.runRoom(await rowOf(), t0 + 70_000); assert.equal(actions.filter((a) => a === 'generate-code').length, 1);
+  await A.runRoom(await rowOf(), t0 + 7_300_000);
+  assert.ok(actions.includes('closeall'), 'closed at closing time'); assert.equal(actions.filter((a) => a === 'closeall').length, 1);
+  assert.ok((await rowOf()).log.some((e: any) => /Closing time reached/.test(e.text)));
+  // practice mode only writes it down
+  examStatus = 'active'; actions.length = 0;
+  { const key = `myseb-agent:form:${formId}`; const cur = (await db.appSetting.findUnique({ where: { key } })).value; await db.appSetting.update({ where: { key }, data: { value: { ...cur, mem: undefined } } }); }
+  A.__resetAgentMemoryForTests(); await A.setAgent(load, { dryRun: true, level: 'run', on: true }, owner, { confirmedAutopilot: true });
+  await A.runRoom(await rowOf(), t0 + 7_400_000);
+  assert.ok(!actions.includes('generate-code') && !actions.includes('closeall')); assert.ok((await rowOf()).log.filter((e: any) => e.kind === 'would').length >= 2);
+  A.__setTellOwnerForTests(async () => undefined);
+  await db.appSetting.deleteMany({ where: { key: `myseb-access:${owner}` } });
+});
+
+test('alerts carry one-tap buttons: let a student back in, pause all, add time; and for a test the autopilot ended, dismiss with time back or confirm', async () => {
+  const load = formTarget(owner, formId); let seen: any = null;
+  A.__setNotifyDepsForTests(async () => ({ kv: { get: async () => undefined, put: async () => undefined, del: async () => undefined, list: async () => [] }, telegramChat: async () => '123', sendTelegram: async (_c: string, html: string, kb: any) => { seen = { html, kb }; }, email: async () => null, sendEmail: async () => false }) as any);
+  const alertOwner = A.defaultAlertOwner as any;
+  await alertOwner({ ownerId: owner, kind: 'form', ref: formId, rules: A.DEFAULT_RULES, counts: {}, log: [] }, [
+    { at: 'x', kind: 'needs_you', student: 'Amy', sid: 'sa', text: 'face left the camera again' },
+    { at: 'x', kind: 'ended', student: 'Ben', sid: 'sb', text: 'ended by policy' },
+  ]);
+  assert.ok(seen, 'sent'); assert.match(seen.html, /Amy: face left the camera again/);
+  const labels = seen.kb.inline_keyboard.flat().map((b: any) => b.text);
+  assert.ok(labels.some((t: string) => /Let Amy back in/.test(t)) && labels.some((t: string) => /Ben: dismiss, \+10 min/.test(t)) && labels.includes('🚩 Confirm') && labels.includes('⏸ Pause all') && labels.includes('+5 min'));
+  for (const b of seen.kb.inline_keyboard.flat()) if (b.callback_data) assert.ok(b.callback_data.length <= 64 && /^ra:[\w-]+$/.test(b.callback_data), 'fits a Telegram button');
+  const { takeToken } = await import('../server/services/agenda/roomTokens.js');
+  const first = seen.kb.inline_keyboard[0][0].callback_data.slice(3); const t = await takeToken(first, owner);
+  assert.ok(t.ok && t.token.sid === 'sa' && t.token.action === 'back_in' && t.token.ref === formId);
+  A.__setNotifyDepsForTests(null);
 });

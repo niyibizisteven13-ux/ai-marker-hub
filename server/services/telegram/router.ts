@@ -306,6 +306,7 @@ export async function handleUpdate(update: any, legacy: LegacyHooks, api: Telegr
         return;
       }
       case '/brief': await runAssistantTurn({ chatId, session, text: (await import('./agentic.js')).BRIEF_COMMAND_TEXT, replyTo: msg.message_id }); return;
+      case '/room': case '/rooms': await (await import('./agentic.js')).showRooms(api, chatId, session); return;
       case '/agenda': await (await import('./agentic.js')).showAgenda(api, chatId, session); return;
       case '/chat': case '/ask':
         if (rest.length) await runAssistantTurn({ chatId, session, text: rest.join(' '), replyTo: msg.message_id });
@@ -407,6 +408,10 @@ async function handleCallback(q: any, legacy: LegacyHooks, api: TelegramApi) {
         }
         pending.delete(chatId);
         await runAssistantTurn({ chatId, session, text: QUICK_PROMPTS[arg]?.[lang] ?? QUICK_PROMPTS.sum[lang], files: queued.files });
+        return;
+      }
+      case 'ra': {
+        await api.answerCallback(q.id, await (await import('./agentic.js')).roomButton(api, chatId, session, arg, target));
         return;
       }
       case 'pp': case 'ap': {
