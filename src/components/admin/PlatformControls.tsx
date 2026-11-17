@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import DownloadsCard from './DownloadsCard';
 import FeedbackCard from './FeedbackCard';
+import BizCard from './BizCard';
 import { api, btnGhost, btnPrimary, input, Panel, Toggle, useAct, useLoad, when, type Notify } from './adminKit';
 
 /** Admin → Platform controls: switches for chat abilities and MySEB, maintenance mode, the announcement banner, blocked addresses and retention. */
@@ -29,6 +30,7 @@ export default function PlatformControls({ notify }: { notify: Notify }) {
     <div className="space-y-5">
       <DownloadsCard notify={notify} />
       <FeedbackCard notify={notify} />
+      <BizCard notify={notify} />
       <Panel title="Maintenance mode" hint="On: everyone except you is told the site is being updated. Sign-in, these admin pages, the health check and MySEB students already inside a test stay open, so you can always turn it off.">
         <div className="flex flex-wrap items-center gap-3">
           <Toggle on={data.settings.maintenance.on} disabled={busy} label="Maintenance mode" onChange={(v) => { if (!v || confirm('Turn maintenance mode ON? Every user except administrators will see the message below until you turn it off.')) void save({ maintenance: { on: v, message: msg } }, v ? 'Maintenance mode is ON' : 'Maintenance mode is off'); }} />

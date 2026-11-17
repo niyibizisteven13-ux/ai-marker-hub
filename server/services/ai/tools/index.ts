@@ -13,6 +13,7 @@ import { platformTools } from './platformTools.js';
 import { agendaTools } from './agendaTools.js';
 import { adminTools } from './adminTools.js';
 import { workTools } from './workTools.js';
+import { bizTools } from './bizTools.js';
 import { analyzeDocument, viewPages } from './documentTools.js';
 
 /** Builds the full toolkit. Tools that need an optional service are only included when it is provided. */
@@ -33,6 +34,7 @@ export function buildToolkit(services: ToolServices = {}): ToolRegistry {
     ...(process.env.ENABLE_PLATFORM_TOOLS === 'false' ? [] : platformTools(services)),
     ...(process.env.ENABLE_WORK_TOOLS === 'false' ? [] : workTools(services)),
     ...(process.env.ENABLE_AGENDA_TOOLS === 'false' ? [] : agendaTools(services)),
+    ...(process.env.ENABLE_BIZ_TOOLS === 'false' ? [] : bizTools()),
     ...adminTools(services),
     ...memoryTools(services),
     ...(enabled('ENABLE_AGENT_WEB_TOOLS') ? webTools(services) : []),

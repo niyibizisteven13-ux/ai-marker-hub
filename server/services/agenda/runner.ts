@@ -2,6 +2,7 @@ import { agendaStore, notifyPrefs, type AgendaItem, type AgendaStore, type KV, a
 import { nextRun } from './schedule.js';
 import { notifyUser, type NotifyDeps, type Notice } from './notify.js';
 import { proposalStore, planText } from './proposals.js';
+import { bizToolsFor, bizSystem } from '../biz/agent.js';
 
 /**
  * The assistant working while nobody is looking. Every minute the tasks whose time has come run as a chat turn for their owner, with
@@ -17,7 +18,7 @@ export const UNATTENDED_TOOLS = [
   'list_practice_classes', 'practice_class_overview', 'exam_candidate', 'recall_memory', 'list_agenda', 'propose_actions',
   'create_document', 'create_spreadsheet', 'create_chart',
 ];
-export const toolsFor = (item: Pick<AgendaItem, 'allowMarking'>) => (item.allowMarking ? [...UNATTENDED_TOOLS, 'mark_task', 'mark_assignment'] : UNATTENDED_TOOLS);
+export const toolsFor = (item: Pick<AgendaItem, 'allowMarking'> & Partial<Pick<AgendaItem, 'kind' | 'bizLevel'>>) => (item.kind === 'biz' ? bizToolsFor(item.bizLevel) : item.allowMarking ? [...UNATTENDED_TOOLS, 'mark_task', 'mark_assignment'] : UNATTENDED_TOOLS);
 
 export interface RunnerDeps {
   /** One chat turn as the user, with only these tools. Returns the answer text. */
@@ -27,7 +28,8 @@ export interface RunnerDeps {
   now?: () => Date;
 }
 
-const SYSTEM = (item: AgendaItem) => `You are working on a scheduled task the user set up earlier ("${item.title}"). They are not here: write your answer as a message they will read later, short and plain, with the facts first. Never ask them a question you cannot wait for; if something needs their decision, say what you suggest. You cannot change anything directly: to suggest a change use propose_actions (it is shown to them to approve).${item.allowMarking ? ' The user allowed you to mark work by itself; marking is the only change you may make, and never show results to students.' : ''}`;
+const SYSTEM = (item: AgendaItem) => (item.kind === 'biz' ? `${bizSystem(item.bizLevel, item.title.split(':')[0])}\n(${item.title})` : SYSTEM_GENERAL(item));
+const SYSTEM_GENERAL = (item: AgendaItem) => `You are working on a scheduled task the user set up earlier ("${item.title}"). They are not here: write your answer as a message they will read later, short and plain, with the facts first. Never ask them a question you cannot wait for; if something needs their decision, say what you suggest. You cannot change anything directly: to suggest a change use propose_actions (it is shown to them to approve).${item.allowMarking ? ' The user allowed you to mark work by itself; marking is the only change you may make, and never show results to students.' : ''}`;
 
 export async function runItem(item: AgendaItem, deps: RunnerDeps, store: AgendaStore = agendaStore(deps.kv)): Promise<{ ok: boolean; text: string }> {
   const now = (deps.now ?? (() => new Date()))();

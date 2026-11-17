@@ -73,6 +73,8 @@ const ModelPage = lazyPage(() => import('./pages/ModelPage'));
 const LearnPage = lazyPage(() => import('./pages/LearnPage'));
 const TermsPage = lazyPage(() => import('./pages/TermsPage'));
 const GetAppPage = lazyPage(() => import('./pages/GetAppPage'));
+const BizPublicPage = lazyPage(() => import('./pages/BizPublicPage'));
+const BizStudioPage = lazyPage(() => import('./pages/BizStudioPage'));
 const PrivacyPage = lazyPage(() => import('./pages/PrivacyPage'));
 const LoginModal = React.lazy(() => import('./components/LoginModal'));
 const UpgradeModal = React.lazy(() => import('./components/UpgradeModal'));
@@ -1481,6 +1483,9 @@ export default function App() {
   if (window.location.pathname === '/myseb') {
     return <Suspense fallback={null}><MySebRequired page /></Suspense>;
   }
+  // A business's public page (bwenge4biz): open to everyone.
+  const bizPage = /^\/b\/([a-z0-9-]{1,40})\/?$/i.exec(window.location.pathname);
+  if (bizPage) return <Suspense fallback={null}><BizPublicPage slug={bizPage[1].toLowerCase()} /></Suspense>;
   // Get the app (public): the landing page's QR code and download button lead here.
   if (window.location.pathname === '/get-app') return <GetAppPage />;
   if (window.location.pathname === '/terms') {
@@ -1743,6 +1748,8 @@ export default function App() {
   if (authenticatedUser && liveMatch) {
     return <Suspense fallback={null}><LiveRoom kind={liveMatch[1] as 'form' | 'task'} id={decodeURIComponent(liveMatch[2])} onBack={() => { window.history.length > 1 ? window.history.back() : (window.location.href = liveMatch[1] === 'form' ? '/forms' : '/'); }} /></Suspense>;
   }
+  // The owner's studio for their business page: private.
+  if (authenticatedUser && /^\/biz\/?$/.test(window.location.pathname)) return <Suspense fallback={null}><BizStudioPage onBack={() => { window.location.href = '/chat'; }} /></Suspense>;
   const studioMatch = window.location.pathname.match(/^\/forms\/([^/?#]+)\/edit\/?$/);
   if (authenticatedUser && studioMatch) {
     return <FormStudioPage formId={decodeURIComponent(studioMatch[1])} onBack={() => { window.location.href = '/forms'; }} />;
@@ -1942,6 +1949,7 @@ export default function App() {
           onOpenMark={() => setMarkOpen(true)}
           onOpenAssignments={() => setAssignmentsOpen({ id: null })}
           onOpenForms={() => { setFormsOpen(true); window.history.pushState({}, '', '/forms'); }}
+          onOpenBiz={() => { window.location.href = '/biz'; }}
           collapsed={sidebarCollapsed}
           setCollapsed={setSidebarCollapsed}
           user={authenticatedUser}

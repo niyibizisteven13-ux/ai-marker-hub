@@ -50,7 +50,7 @@ jobs:
         run: npm run --silent security:check
 
       - name: No known high or critical vulnerabilities in production dependencies
-        run: npm audit --omit=dev --audit-level=high
+        run: node scripts/audit-gate.mjs
 
       # The code-testing runner puts each student program in its own network namespace (`unshare -rn`). Ubuntu 24.04
       # runners forbid that for unprivileged users, so every program fails to start and is reported as an error.
