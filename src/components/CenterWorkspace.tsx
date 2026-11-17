@@ -558,7 +558,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
   // ── Manual Form Builder state ────────────────────────────────────────
   const [showManualFormBuilder, setShowManualFormBuilder] = useState(false);
   const [formBuilderInitialSchema, setFormBuilderInitialSchema] = useState<any>();
-  const [manualForm, setManualForm] = useState<ManualFormDraft>({ title: '', description: '', questions: [], blocks: [], themeColor: '#D97757' });
+  const [manualForm, setManualForm] = useState<ManualFormDraft>({ title: '', description: '', questions: [], blocks: [], themeColor: '#E9A23B' });
   const [manualBuilderTab, setManualBuilderTab] = useState<'build' | 'preview'>('build');
   const [descriptionSelection, setDescriptionSelection] = useState<{ top: number; left: number } | null>(null);
   const [showImportQuestions, setShowImportQuestions] = useState(false);
@@ -734,7 +734,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
   };
 
   const resetManualBuilder = () => {
-    setManualForm({ title: '', description: '', questions: [], blocks: [], themeColor: '#D97757' });
+    setManualForm({ title: '', description: '', questions: [], blocks: [], themeColor: '#E9A23B' });
     setManualBuilderTab('build');
     setManualSaveError(null);
     setManualPublishedFormId(null);
@@ -781,7 +781,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
           descriptionImageUrl: manualForm.descriptionImageUrl,
           questions: manualForm.questions,
           blocks: manualForm.blocks || [],
-          themeColor: manualForm.themeColor || '#D97757',
+          themeColor: manualForm.themeColor || '#E9A23B',
           requirements: manualForm.description.trim(),
         }),
       });

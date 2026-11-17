@@ -416,12 +416,5 @@ function SalesPanel({ notify }: { notify: (msg: string, error?: boolean) => void
 }
 
 function PaymentMethodPanel({ notify }: { notify: (msg: string, error?: boolean) => void }) {
-  const [enabled, setEnabled] = useState<boolean | null>(null);
-  const [busy, setBusy] = useState(false);
-  useEffect(() => { void api<{ automaticEnabled: boolean }>('/api/admin/billing/payment-method').then((b) => setEnabled(b.automaticEnabled)).catch((e) => notify(e.message, true)); }, [notify]);
-  const save = async () => {
-    setBusy(true);
-    try { const b = await api<{ automaticEnabled: boolean }>('/api/admin/billing/payment-method', { method: 'PUT', body: JSON.stringify({ automaticEnabled: !enabled }) }); setEnabled(b.automaticEnabled); notify(b.automaticEnabled ? 'Automatic checkout enabled. Confirm production MTN configuration.' : 'Manual MoMo Pay checkout enabled.'); } catch (e) { notify((e as Error).message, true); } finally { setBusy(false); }
-  };
-  return <section className={`${card} space-y-3`}><h3 className="text-base font-semibold text-white">Payment method · {enabled === null ? 'Loading…' : enabled ? 'Automatic checkout' : 'Manual MoMo Pay'}</h3><p className="text-sm text-[#C9D3F0]">MTN MoMo Pay <b>2191184</b> · Niyibizi Steven. Customers send a screenshot or confirmation SMS and login email to WhatsApp <b>+250799691108</b>.</p><p className="text-xs text-[#8A97C2]">Verify the amount and transaction ID in the payments table below, then choose Verify & activate. This adds the purchased plan or credits and emails a receipt. For a customer who only sent proof on WhatsApp, search their login email under Users and choose Record MoMo purchase & receipt. The other plan buttons grant complimentary access.</p><button disabled={busy || enabled === null} onClick={() => void save()} className={`${btn} bg-emerald-500/15 text-emerald-300`}>{enabled ? 'Pause automatic checkout · use manual payments' : 'Enable automatic checkout'}</button></section>;
+  return <section className={`${card} space-y-3`}><h3 className="text-base font-semibold text-white">Payment method · Manual MoMo Pay</h3><p className="text-sm text-[#C9D3F0]">Automatic MTN payment is not available. Customers pay manually to MTN MoMo Pay <b>2191184</b> · Niyibizi Steven, then send a screenshot or confirmation SMS and their login email to WhatsApp <b>+250799691108</b>.</p><p className="text-xs text-[#8A97C2]">Verify the amount and transaction ID below, then choose Verify & activate. For a WhatsApp payment without a purchase reference, search the login email under Users and choose Record MoMo purchase & receipt.</p></section>;
 }

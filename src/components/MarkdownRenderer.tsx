@@ -66,13 +66,13 @@ function ImageGraphicArtifact({ artifact }: { artifact: any }) {
   const title = artifact.title || 'Generated Visual Asset';
   const style = artifact.style || 'Digital Illustration';
   const aspectRatio = artifact.aspectRatio || '16:9';
-  const palette: string[] = Array.isArray(artifact.palette) ? artifact.palette : ['#0D2B24', '#10B981', '#D97757', '#FAF9F5'];
+  const palette: string[] = Array.isArray(artifact.palette) ? artifact.palette : ['#0D2B24', '#10B981', '#E9A23B', '#FAF9F5'];
   const defaultSvg = `<svg viewBox="0 0 800 450" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
         <stop offset="0%" stop-color="${palette[0] || '#0D2B24'}" />
         <stop offset="60%" stop-color="#141824" />
-        <stop offset="100%" stop-color="${palette[2] || '#D97757'}" stop-opacity="0.5" />
+        <stop offset="100%" stop-color="${palette[2] || '#E9A23B'}" stop-opacity="0.5" />
       </linearGradient>
       <radialGradient id="glow" cx="65%" cy="40%" r="45%">
         <stop offset="0%" stop-color="${palette[1] || '#10B981'}" stop-opacity="0.38" />
@@ -83,7 +83,7 @@ function ImageGraphicArtifact({ artifact }: { artifact: any }) {
     <rect width="800" height="450" rx="18" fill="url(#glow)" />
     <circle cx="540" cy="210" r="120" fill="none" stroke="${palette[1] || '#10B981'}" stroke-width="1.5" stroke-opacity="0.4" />
     <circle cx="540" cy="210" r="80" fill="${palette[1] || '#10B981'}" fill-opacity="0.12" stroke="${palette[1] || '#10B981'}" stroke-width="2" />
-    <path d="M 120 330 Q 280 180 440 270 T 720 160" fill="none" stroke="${palette[2] || '#D97757'}" stroke-width="3" />
+    <path d="M 120 330 Q 280 180 440 270 T 720 160" fill="none" stroke="${palette[2] || '#E9A23B'}" stroke-width="3" />
     <text x="64" y="130" fill="#FAF9F5" font-family="Georgia, serif" font-size="34" font-weight="600">${String(title).replace(/[<>&]/g, '')}</text>
     <text x="64" y="168" fill="#A3A39E" font-family="sans-serif" font-size="16">${String(style).replace(/[<>&]/g, '')} · GonkaRouter Visual Synthesis</text>
   </svg>`;

@@ -98,7 +98,7 @@ export default function SettingsPage({ user, onUpdateUser, onLogout, onBack }: S
           <div className="w-7 h-7 rounded-lg bg-[var(--accent)]/15 text-[var(--accent)] flex items-center justify-center">
             <Sparkles size={14} />
           </div>
-          <span className="text-sm font-semibold font-['Georgia',serif]">Bwenge Studio Settings</span>
+          <span className="text-sm font-semibold font-display">Bwenge Studio Settings</span>
         </div>
       </div>
 

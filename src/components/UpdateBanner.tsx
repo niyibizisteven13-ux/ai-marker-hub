@@ -40,9 +40,9 @@ export default function UpdateBanner() {
     } catch { setError('Could not download the update. Please try again.'); setBusy(false); }
   };
   if (!ready) return null;
-  return <div role="status" className="fixed inset-x-3 bottom-3 z-[250] mx-auto max-w-md rounded-2xl border border-white/10 bg-[#14161b] p-4 text-sm text-white shadow-2xl">
-    <div className="flex items-center gap-3"><RefreshCw size={18} className="shrink-0 text-[#F6B94A]" /><div className="min-w-0 flex-1"><b>Bwenge update available</b><p className="mt-1 text-xs text-neutral-300">Update to get the latest changes. Finish or save your work first; the app will reload.</p></div></div>
+  return <div role="status" className="fixed inset-x-3 bottom-3 z-[250] mx-auto max-w-md rounded-2xl border border-[var(--app-line)] bg-[var(--app-panel)] p-4 text-sm text-[var(--app-text)] shadow-2xl">
+    <div className="flex items-center gap-3"><RefreshCw size={18} className="shrink-0 text-[var(--brand)]" /><div className="min-w-0 flex-1"><b>Bwenge update available</b><p className="mt-1 text-xs text-[var(--app-muted)]">Update to get the latest changes. Finish or save your work first; the app will reload.</p></div></div>
     {error && <p role="alert" className="mt-2 text-xs text-red-300">{error}</p>}
-    <div className="mt-3 flex justify-end gap-2"><button disabled={busy} onClick={() => { deferredBuild.current = pendingBuild.current; setReady(false); }} className="min-h-10 rounded-xl px-4 text-neutral-300">Later</button><button disabled={busy} onClick={() => void update()} className="min-h-10 rounded-xl bg-[#F6B94A] px-4 font-semibold text-black">{busy ? 'Updating…' : 'Update now'}</button></div>
+    <div className="mt-3 flex justify-end gap-2"><button type="button" disabled={busy} onClick={() => { deferredBuild.current = pendingBuild.current; setReady(false); }} className="min-h-10 rounded-xl px-4 text-[var(--app-muted)]">Later</button><button type="button" disabled={busy} onClick={() => void update()} className="min-h-10 rounded-xl bg-[var(--brand)] px-4 font-semibold text-[var(--brand-on)]">{busy ? 'Updating…' : 'Update now'}</button></div>
   </div>;
 }

@@ -58,7 +58,7 @@ export default function SecuritySection() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-normal text-[var(--text)] font-['Georgia',serif]">Security</h2>
+        <h2 className="text-xl font-normal text-[var(--text)] font-display">Security</h2>
         <p className="mt-1 text-xs text-[var(--muted)]">Keep marks, student work and results safe with your fingerprint or face. A passkey stays in your phone: Bwenge never sees your fingerprint.</p>
       </div>
 

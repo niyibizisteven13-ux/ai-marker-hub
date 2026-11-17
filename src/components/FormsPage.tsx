@@ -180,7 +180,7 @@ export default function FormsPage({ onClose }: { onClose: () => void }) {
                 {!shown.length ? <p className="py-10 text-center text-[13px] text-neutral-500">No form matches.</p> : (
                   <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     {shown.map((r) => {
-                      const color = /^#[0-9a-f]{6}$/i.test(r.schema?.themeColor ?? '') ? r.schema.themeColor! : '#D97757';
+                      const color = /^#[0-9a-f]{6}$/i.test(r.schema?.themeColor ?? '') ? r.schema.themeColor! : '#E9A23B';
                       const n = r.schema?.questions?.length ?? 0;
                       return (
                         <li key={r.id}>

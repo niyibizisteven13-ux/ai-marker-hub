@@ -1,0 +1,7 @@
+[
+  {
+    "advisory": "https://github.com/advisories/GHSA-fc5q-39xc-vjpf",
+    "reason": "picomatch ReDoS through single-branch repeated extglobs. Reached only through vite's file matching with fixed patterns from our own config, never user input. No patched release exists yet (4.0.7 is the latest). Remove when picomatch publishes a fix.",
+    "expires": "2026-12-17"
+  }
+]

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { PreviewDialog, attachmentSource, type PreviewSource } from './components/FilePreview';
 import { keyOf, thumbnailFor } from './utils/fileKinds';
 import { FormCanvas, brandingOf } from './components/forms/FormCanvas';
-import { applyAppearance, isDark, loadAppearance, normalizeAppearance, saveAppearanceLocally, type Appearance } from './theme/appearance';
+import { applyAppearance, clearAppearance, isDark, loadAppearance, normalizeAppearance, saveAppearanceLocally, type Appearance } from './theme/appearance';
 import bwengeLogo from './assets/bwenge-logo.svg';
 import { useStore } from './store/useStore';
 import {
@@ -73,6 +73,8 @@ const ModelPage = lazyPage(() => import('./pages/ModelPage'));
 const LearnPage = lazyPage(() => import('./pages/LearnPage'));
 const TermsPage = lazyPage(() => import('./pages/TermsPage'));
 const GetAppPage = lazyPage(() => import('./pages/GetAppPage'));
+const BizPublicPage = lazyPage(() => import('./pages/BizPublicPage'));
+const BizStudioPage = lazyPage(() => import('./pages/BizStudioPage'));
 const PrivacyPage = lazyPage(() => import('./pages/PrivacyPage'));
 const LoginModal = React.lazy(() => import('./components/LoginModal'));
 const UpgradeModal = React.lazy(() => import('./components/UpgradeModal'));
@@ -230,9 +232,12 @@ export default function App() {
   }, []);
   const darkMode = isDark(appearance);
   useEffect(() => {
+    // Nobody is signed in: the sign-in page and the public pages use their own colours (light or dark by the visitor's choice). Applying the
+    // account theme here painted a dark page under the sign-in page's light cards for visitors whose device is set to a light colour scheme.
+    if (authStatus === 'anonymous') { clearAppearance(); return; }
     applyAppearance(appearance);
     saveAppearanceLocally(appearance);
-  }, [appearance, systemDark]);
+  }, [appearance, systemDark, authStatus]);
   useEffect(() => {
     // The account's saved appearance wins over this browser's copy (it follows the user to other devices).
     const saved = authenticatedUser?.settings?.appearance;
@@ -1476,8 +1481,11 @@ export default function App() {
   if (transcriptLink) return <Suspense fallback={null}><TranscriptPage token={transcriptLink[1]} /></Suspense>;
   // Where students get MySEB (apps + Chrome extension).
   if (window.location.pathname === '/myseb') {
-    return <div className="min-h-[100dvh] bg-slate-50 px-4"><Suspense fallback={null}><MySebRequired page /></Suspense></div>;
+    return <Suspense fallback={null}><MySebRequired page /></Suspense>;
   }
+  // A business's public page (bwenge4biz): open to everyone.
+  const bizPage = /^\/b\/([a-z0-9-]{1,40})\/?$/i.exec(window.location.pathname);
+  if (bizPage) return <Suspense fallback={null}><BizPublicPage slug={bizPage[1].toLowerCase()} /></Suspense>;
   // Get the app (public): the landing page's QR code and download button lead here.
   if (window.location.pathname === '/get-app') return <GetAppPage />;
   if (window.location.pathname === '/terms') {
@@ -1740,6 +1748,8 @@ export default function App() {
   if (authenticatedUser && liveMatch) {
     return <Suspense fallback={null}><LiveRoom kind={liveMatch[1] as 'form' | 'task'} id={decodeURIComponent(liveMatch[2])} onBack={() => { window.history.length > 1 ? window.history.back() : (window.location.href = liveMatch[1] === 'form' ? '/forms' : '/'); }} /></Suspense>;
   }
+  // The owner's studio for their business page: private.
+  if (authenticatedUser && /^\/biz\/?$/.test(window.location.pathname)) return <Suspense fallback={null}><BizStudioPage onBack={() => { window.location.href = '/chat'; }} /></Suspense>;
   const studioMatch = window.location.pathname.match(/^\/forms\/([^/?#]+)\/edit\/?$/);
   if (authenticatedUser && studioMatch) {
     return <FormStudioPage formId={decodeURIComponent(studioMatch[1])} onBack={() => { window.location.href = '/forms'; }} />;
@@ -1939,6 +1949,7 @@ export default function App() {
           onOpenMark={() => setMarkOpen(true)}
           onOpenAssignments={() => setAssignmentsOpen({ id: null })}
           onOpenForms={() => { setFormsOpen(true); window.history.pushState({}, '', '/forms'); }}
+          onOpenBiz={() => { window.location.href = '/biz'; }}
           collapsed={sidebarCollapsed}
           setCollapsed={setSidebarCollapsed}
           user={authenticatedUser}
@@ -2097,7 +2108,7 @@ export default function App() {
         </Suspense>
       )}
       {settingsOpen && (
-        <div className="fixed inset-0 z-[150] bg-[#FAF9F5]">
+        <div className="fixed inset-0 z-[150] bg-[var(--bg)]">
           <SettingsPage
             user={authenticatedUser}
             onUpdateUser={(u) => {

@@ -579,3 +579,23 @@ test('receipt delivery records the actual email address and reports pending on S
   await db.user.update({ where: { id: userId }, data: { email: `changed-${randomUUID()}@test.local` } });
   assert.equal((await receiptDelivery(await db.billingPayment.findUnique({ where: { id: p.id } }))).email, email, 'historical recipient is not rewritten when the login email changes');
 });
+
+test('customer API disables automatic MTN requests even when legacy gateway settings are enabled', async () => {
+  const { default: jwt } = await import('jsonwebtoken');
+  const { getJwtSecret } = await import('../server/auth/secrets.js');
+  const { default: billing } = await import('../server/routes/billingRoutes.js');
+  const userId = await newUser();
+  const token = jwt.sign({ userId }, getJwtSecret(), { issuer: 'bwenge', audience: 'bwenge-web', expiresIn: '5m' });
+  const app = express().use(express.json()).use('/api/billing', billing);
+  const server = app.listen(0);
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/billing`;
+  try {
+    const plans = await (await fetch(`${base}/plans`)).json();
+    assert.equal(plans.payments, 'off'); assert.equal(plans.manual.momoCode, '2191184');
+    const sent = mtn.requests.size;
+    const r = await fetch(`${base}/checkout`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ purpose: 'PLUS', months: 1, phone: '0788123456' }) });
+    assert.equal(r.status, 503); const body = await r.json();
+    assert.equal(body.code, 'MANUAL_PAYMENT_REQUIRED'); assert.equal(body.manual.whatsapp, '250799691108');
+    assert.equal(mtn.requests.size, sent, 'no prompt or charge reaches MTN');
+  } finally { server.close(); }
+});

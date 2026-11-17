@@ -211,3 +211,17 @@ and send time, then the dashboard shows **Receipt sent to person@example.com**. 
 purchase active and shows **Receipt to person@example.com pending**, with automatic retry and Retry email.
 The recorded recipient remains correct if the customer later changes their login email. “Sent” means the mail
 server accepted the message; delivery to an inbox still depends on that mail server and the recipient's filters.
+
+
+### Manual-only checkout while MTN is unavailable
+
+The Upgrade page no longer renders the automatic phone-number checkout. It always shows manual MoMo Pay
+instructions, even if an older server advertises live payments. The customer checkout endpoint rejects
+new automatic payment requests and returns the manual payment details; existing payment status/callbacks
+remain available. Saved gateway settings cannot change the public plans response away from manual payment,
+and the administrator cannot re-enable the automatic method in this release.
+
+If the manual purchase API is unavailable on an older server, the WhatsApp proof flow remains available with
+the login email. Users can enter their login email if it cannot be loaded. Administrators use the existing
+Record MoMo purchase & receipt action to verify those payments. A purchase reference is helpful but optional.
+This manual-only policy supersedes the earlier opt-in instructions above until MTN is configured and tested.

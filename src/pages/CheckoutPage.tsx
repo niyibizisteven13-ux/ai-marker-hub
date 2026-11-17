@@ -11,7 +11,7 @@ interface CheckoutPageProps {
   onSuccess: () => void;
 }
 
-const SERIF = "font-['Georgia','Tiempos_Headline','Times_New_Roman',serif]";
+const SERIF = "font-display";
 
 export default function CheckoutPage({ batchId, service, planType, amountUsd = 0.20, onBack, onSuccess }: CheckoutPageProps) {
   const [phone, setPhone] = useState('');

@@ -50,7 +50,7 @@ export default function GeneralSection({ user, onUpdateUser, onDirtyChange, onSa
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-normal text-[var(--text)] font-[\'Georgia\',serif]">General Settings</h2>
+        <h2 className="text-xl font-normal text-[var(--text)] font-display">General Settings</h2>
         <p className="mt-1 text-xs text-[var(--muted)]">Your name and language. Colours, light or dark mode and backgrounds are under Appearance.</p>
       </div>
       <div className="divide-y divide-[var(--line)] border-y border-[var(--line)]">

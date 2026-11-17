@@ -28,17 +28,17 @@ export default function UpgradeDialog() {
   if (!info) return null;
   return (
     <div className="fixed inset-0 z-[300] flex items-end justify-center bg-black/50 p-4 sm:items-center" role="dialog" aria-modal="true" aria-label="Upgrade to continue" onClick={() => setInfo(null)}>
-      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[var(--app-surface,#14161b)] p-5 text-[var(--app-text,#fff)] shadow-2xl" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-md rounded-2xl border border-[var(--app-line)] bg-[var(--app-panel)] p-5 text-[var(--app-text,#fff)] shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-3">
-          <p className="flex items-center gap-2 text-[15px] font-semibold"><Sparkles size={17} className="text-[var(--accent,#f59e0b)]" />Upgrade to keep going</p>
-          <button type="button" onClick={() => setInfo(null)} aria-label="Close" className="rounded-lg p-1 text-neutral-400 hover:bg-white/10"><X size={16} /></button>
+          <p className="flex items-center gap-2 text-[15px] font-semibold"><Sparkles size={17} className="text-[var(--brand)]" />Upgrade to keep going</p>
+          <button type="button" onClick={() => setInfo(null)} aria-label="Close" className="rounded-lg p-1 text-[var(--app-muted)] hover:bg-[var(--app-panel-hover)]"><X size={16} /></button>
         </div>
-        <p className="mt-3 text-[13.5px] leading-relaxed text-neutral-300">{info.message}</p>
-        <p className="mt-2 text-[12.5px] text-neutral-500">You pay by Mobile Money{info.whatsappLink ? ', then send the screenshot on WhatsApp to get access' : ''}.</p>
+        <p className="mt-3 text-[13.5px] leading-relaxed text-[var(--app-muted)]">{info.message}</p>
+        <p className="mt-2 text-[12.5px] text-[var(--app-faint)]">You pay by Mobile Money{info.whatsappLink ? ', then send the screenshot on WhatsApp to get access' : ''}.</p>
         <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <button type="button" onClick={() => setInfo(null)} className="min-h-11 rounded-xl border border-white/15 px-4 text-sm text-neutral-200 hover:bg-white/5">Not now</button>
+          <button type="button" onClick={() => setInfo(null)} className="min-h-11 rounded-xl border border-[var(--app-line)] px-4 text-sm text-[var(--app-text)] hover:bg-[var(--app-panel-hover)]">Not now</button>
           {info.whatsappLink && <a href={info.whatsappLink} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-white hover:bg-emerald-400">Pay on WhatsApp</a>}
-          <a href={info.url} className="inline-flex min-h-11 items-center justify-center rounded-xl bg-[var(--accent,#f59e0b)] px-5 text-sm font-semibold text-[var(--on-accent,#000)] hover:opacity-90">See plans</a>
+          <a href={info.url} className="inline-flex min-h-11 items-center justify-center rounded-xl bg-[var(--brand)] px-5 text-sm font-semibold text-[var(--brand-on)] hover:opacity-90">See plans</a>
         </div>
       </div>
     </div>

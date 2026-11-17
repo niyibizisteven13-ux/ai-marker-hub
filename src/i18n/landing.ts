@@ -1,7 +1,8 @@
 export const dictionaries = {
   en: {
     tag: "Your education, research & data companion",
-    sub: "Scan handwritten scripts, mark them in one tap and explore your data with charts and ready-to-share files.",
+    h1: "Learning companion",
+    sub: "Run whole tests, marking, quizzes.",
     phone: "Continue with phone",
     google: "Continue with Google",
     or: "or",
@@ -92,7 +93,8 @@ export const dictionaries = {
   },
   rw: {
     tag: "Mugenzi wawe mu burezi, ubushakashatsi n'imibare",
-    sub: "Sikana impapuro zanditswe n'intoki, uzikosore ukanze rimwe, kandi usesengure amakuru yawe ukoresheje ibishushanyo na dosiye zisangizwa.",
+    h1: "Mugenzi mu kwiga",
+    sub: "Ibizamini byose, gusuzuma n'ibibazo.",
     phone: "Komeza ukoresheje telefoni",
     google: "Komeza ukoresheje Google",
     or: "cyangwa",
@@ -183,7 +185,8 @@ export const dictionaries = {
   },
   fr: {
     tag: "Votre compagnon pour l'éducation, la recherche et les données",
-    sub: "Scannez des copies manuscrites, corrigez-les en un geste et explorez vos données avec des graphiques et des fichiers prêts à partager.",
+    h1: "Compagnon d'apprentissage",
+    sub: "Examens complets, correction, quiz.",
     phone: "Continuer avec le téléphone",
     google: "Continuer avec Google",
     or: "ou",

@@ -1,6 +1,13 @@
 @import "tailwindcss";
 @import "./theme/theme.css";
 @import "./theme/light-layer.css";
+
+/* Type: one interface face, one heading face, one face for codes. Headings use the `font-display` class. */
+@theme {
+  --font-sans: 'Plus Jakarta Sans Variable', 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Bricolage Grotesque Variable', 'Bricolage Grotesque', 'Plus Jakarta Sans Variable', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, 'Cascadia Code', monospace;
+}
 /* The signed-in app is one consistent dark theme: "dark:" styles follow the .dark app shell, not the OS setting. */
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -49,8 +56,13 @@
     box-sizing: border-box;
   }
 
+  /* Headings never leave a single word alone on the last line. */
+  h1, h2, h3 { text-wrap: balance; }
+
   body {
-    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    font-family: var(--font-sans);
+    font-optical-sizing: auto;
+    text-rendering: optimizeLegibility;
     overflow-x: hidden;
   }
 }
@@ -238,7 +250,7 @@
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  font-family: ui-monospace, 'Cascadia Code', 'Fira Mono', monospace;
+  font-family: var(--font-mono);
   color: var(--teal);
   opacity: 0.8;
 }
@@ -394,7 +406,7 @@ button.bw-line:hover { color: #f5f5f4; }
 .form-dark input:not([type=radio]):not([type=checkbox]):not([type=range]):not([type=color]),
 .form-dark textarea,
 .form-dark select { background-color: #111216; color: #ececee; border-color: #2c2f36; }
-.form-dark input[type=radio], .form-dark input[type=checkbox] { accent-color: #D97757; }
+.form-dark input[type=radio], .form-dark input[type=checkbox] { accent-color: #E9A23B; }
 .form-dark .shadow-sm, .form-dark .shadow, .form-dark .shadow-md { box-shadow: 0 1px 0 rgba(255,255,255,0.03), 0 8px 24px rgba(0,0,0,0.35); }
 .form-dark .bg-white,
 .form-dark .bg-\[\#FFFFFF\],
@@ -437,7 +449,7 @@ button.bw-line:hover { color: #f5f5f4; }
 .form-dark .hover\:border-\[\#DADCE0\]:hover { border-color: #2c2f36; }
 .form-dark .focus\:border-slate-700:focus,
 .form-dark .focus\:border-slate-500:focus,
-.form-dark .focus\:border-\[\#D97757\]:focus { border-color: #D97757; }
+.form-dark .focus\:border-\[\#E9A23B\]:focus { border-color: #E9A23B; }
 .form-dark .ring-slate-500,
 .form-dark .focus-within\:ring-slate-500:focus-within,
 .form-dark .focus\:ring-slate-200:focus { --tw-ring-color: rgba(217,119,87,0.45); }
@@ -460,7 +472,7 @@ button.bw-line:hover { color: #f5f5f4; }
 .form-dark .bg-\[\#FCE9E2\] { background-color: rgba(217,119,87,0.16); }
 .form-dark .text-\[\#B4502F\] { color: #f0a586; }
 .form-dark .border-\[\#F0C9BA\] { border-color: rgba(217,119,87,0.4); }
-.form-dark :is(input, textarea, select):focus { border-color: #D97757 !important; outline: none; }
+.form-dark :is(input, textarea, select):focus { border-color: #E9A23B !important; outline: none; }
 .form-dark.bg-\[\#F4F4F1\], .form-dark .min-h-\[100dvh\].bg-\[\#F4F4F1\] { background-color: #0d0e10; }
 
 /* Scrolling everywhere, without visible scrollbars (wheel, trackpad, touch and keyboard still scroll). */

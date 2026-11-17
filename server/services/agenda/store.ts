@@ -43,7 +43,9 @@ export interface AgendaItem {
   /** What to do, in the user's own words (read by the assistant when the time comes). */
   prompt: string;
   schedule: Schedule; tz: string;
-  kind: 'task' | 'brief';
+  kind: 'task' | 'brief' | 'biz';
+  /** Set for the business agent's digests (bwenge4biz): which business, and how much the agent may do. */
+  bizId?: string; bizLevel?: 'watch' | 'assist' | 'run';
   /** The user said yes to marking by itself (it only marks; showing results to students always needs a yes). */
   allowMarking: boolean;
   enabled: boolean;
@@ -71,7 +73,7 @@ export function agendaStore(kv: KV = appSettingKV()) {
 }
 export type AgendaStore = ReturnType<typeof agendaStore>;
 
-export function newItem(input: { userId: string; title: string; prompt: string; schedule: Schedule; tz?: string; kind?: 'task' | 'brief'; allowMarking?: boolean }, now: Date = new Date()): AgendaItem {
+export function newItem(input: { userId: string; title: string; prompt: string; schedule: Schedule; tz?: string; kind?: 'task' | 'brief' | 'biz'; allowMarking?: boolean }, now: Date = new Date()): AgendaItem {
   const tz = input.tz ?? DEFAULT_TZ;
   return {
     id: randomUUID(), userId: input.userId, title: input.title.slice(0, 80), prompt: input.prompt.slice(0, 2000), schedule: input.schedule, tz,

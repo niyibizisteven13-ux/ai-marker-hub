@@ -12,7 +12,7 @@ export function brandingOf(schema: any): FormBranding {
 
 export function FormCanvas({ schema, children, className = '', fullPage = false }: { schema: any; children: ReactNode; className?: string; fullPage?: boolean }) {
   const b = brandingOf(schema);
-  const accent = /^#[0-9a-f]{6}$/i.test(schema?.themeColor ?? '') ? schema.themeColor : '#D97757';
+  const accent = /^#[0-9a-f]{6}$/i.test(schema?.themeColor ?? '') ? schema.themeColor : '#E9A23B';
   const dark = b.mode === 'dark';
   const base = dark ? '#0d0e10' : '#f4f4f1';
   const veil = dark ? 'rgb(13 14 16 / 0.78)' : 'rgb(244 244 241 / 0.72)';

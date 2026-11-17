@@ -1,6 +1,7 @@
 ﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   X,
+  Store,
   Settings,
   Trash2,
   MessageSquare,
@@ -44,6 +45,7 @@ interface LeftSidebarProps {
   /** Opens Assignments (set a task, share a link, see every hand-in, mark the class). */
   onOpenAssignments?: () => void;
   onOpenForms?: () => void;
+  onOpenBiz?: () => void;
   onLogout: () => void;
   user: User | null;
   sessions: ChatSession[];
@@ -119,6 +121,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   onOpenMark,
   onOpenAssignments,
   onOpenForms,
+  onOpenBiz,
   onLogout = () => {},
   user = null,
   sessions = [],
@@ -167,6 +170,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
       ...(user && onOpenMark ? [{ label: 'Mark', icon: PenLine, onClick: onOpenMark }] : []),
       ...(user && onOpenAssignments ? [{ label: 'Tasks', icon: ClipboardList, onClick: onOpenAssignments }] : []),
       ...(user && onOpenForms ? [{ label: 'Forms', icon: ClipboardCheck, onClick: onOpenForms }] : []),
+      ...(user && onOpenBiz ? [{ label: 'My business', icon: Store, onClick: onOpenBiz }] : []),
       ...(user ? [{ label: 'Results', icon: BarChart3, onClick: goTo('/exams'), active: /^\/exams/.test(path) }] : []),
     ] },
     { title: 'Files', items: [
@@ -205,7 +209,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
               <img src={logoUrl} alt="" className="h-full w-full object-cover" />
             </div>
             <div className="min-w-0 leading-tight">
-              <div className="font-serif text-[17px] font-medium tracking-tight text-white">Bwenge</div>
+              <div className="font-display text-[17px] font-medium tracking-tight text-white">Bwenge</div>
               <div className="text-[11px] text-[var(--app-faint)]">Education · Research · Data</div>
             </div>
           </div>

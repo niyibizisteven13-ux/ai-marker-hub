@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../../db.js';
-import { momoMode } from './momo.js';
 import { BillingError, fulfil, publicPayment, receiptDelivery, quote, type Purpose } from './payments.js';
 import { pauseMessage, salesState } from './sales.js';
 import logger from '../../utils/logger.js';
@@ -12,10 +11,10 @@ export const automaticPaymentsEnabled = async () => {
   const row = await db.appSetting.findUnique({ where: { key: 'billing-automatic-payments' } });
   return row ? row.value?.enabled === true : process.env.BILLING_AUTOMATIC_PAYMENTS_ENABLED === 'true';
 };
+// Customer checkout stays manual until MTN production collection has been configured and verified.
+// Saved settings and leftover gateway credentials must not reopen the phone-prompt form.
 export async function paymentOptions() {
-  const mode = momoMode();
-  const automatic = await automaticPaymentsEnabled();
-  return { payments: automatic ? mode : 'off', manual: !automatic || mode === 'off' ? MANUAL_PAYMENT : null };
+  return { payments: 'off' as const, manual: MANUAL_PAYMENT };
 }
 export async function startManualPayment(userId: string, input: { purpose: Purpose; packId?: string; months?: number }, admin = false) {
   const sales = await salesState();

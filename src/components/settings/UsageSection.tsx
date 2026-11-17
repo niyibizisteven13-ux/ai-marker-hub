@@ -84,7 +84,7 @@ export default function UsageSection() {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="font-['Georgia',serif] text-xl font-normal text-[var(--text)]">Usage & limits</h2>
+          <h2 className="font-display text-xl font-normal text-[var(--text)]">Usage & limits</h2>
           <p className="mt-0.5 text-xs text-[var(--muted)]">Credits measure AI work: a chat reply is 1 credit, heavier work such as reading scans or building dashboards uses a few more.</p>
         </div>
         <span className="inline-flex shrink-0 items-center gap-1.5 self-start rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1 text-xs font-semibold text-[var(--text)]">
@@ -113,7 +113,7 @@ export default function UsageSection() {
                 <span className="flex items-center gap-1.5 text-xs font-medium text-[var(--muted)]"><Icon size={14} /> {label}</span>
                 <span className={`text-xs font-bold ${left === 0 ? 'text-[var(--danger)]' : 'text-[var(--text)]'}`}>{n(left)} left</span>
               </div>
-              <div className="font-['Georgia',serif] text-2xl font-normal text-[var(--text)]">
+              <div className="font-display text-2xl font-normal text-[var(--text)]">
                 {n(m.used)} <span className="text-xs font-normal text-[var(--muted)]">/ {n(m.limit)} credits</span>
               </div>
               <Bar used={m.used} limit={m.limit} />

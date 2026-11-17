@@ -45,7 +45,6 @@ export default function LandingPage({ onLoginSuccess }: { onLoginSuccess: (user?
               <BrandLogo />
               <div>
                 <b>Bwenge</b>
-                <span>{t('tag')}</span>
               </div>
             </div>
             <div className="ctrls">
@@ -55,6 +54,7 @@ export default function LandingPage({ onLoginSuccess }: { onLoginSuccess: (user?
           </div>
 
           <div className="mid">
+            <h1 className="h1 shine">{t('h1')}</h1>
             <p className="sub">{t('sub')}</p>
 
             {waitingForPasskey ? <MfaStep onDone={(next) => { window.location.href = next; }} /> : <AuthFlow

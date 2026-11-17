@@ -100,6 +100,7 @@ import adminRoutes from './server/routes/adminRoutes.ts';
 import ollamaRoutes from './server/routes/ollamaRoutes.ts';
 import passkeyRoutes from './server/routes/passkeyRoutes.ts';
 import appRoutes from './server/routes/appRoutes.ts';
+import bizRoutes from './server/routes/bizRoutes.ts';
 import telegramBotRoutes from './server/routes/telegramBotRoutes.ts';
 import settingsBillingRoutes from './server/routes/settingsBillingRoutes.ts';
 import memoryRoutes from './server/routes/memoryRoutes.js';
@@ -416,6 +417,7 @@ app.get('/api/platform/status', platformStatus);
 // provides.
 app.use('/api', generalLimiter);
 
+app.use('/api/biz', bizRoutes);                   // bwenge4biz: business pages (public routes first, then the owner's)
 app.use('/api/app', appRoutes);                   // download counter and the app version (for the "new version" notice)
 app.use('/api/auth/passkey', passkeyRoutes);
 app.use('/api/auth', authRoutes);
@@ -3009,6 +3011,16 @@ async function startServer() {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get(['/forms/:id', '/apply/:id'], (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
+    // A business page: the same app, with the business's own name, tagline and cover photo in the head so a link shared on WhatsApp looks right.
+    app.get('/b/:slug', async (req, res) => {
+      try {
+        const html = await fs.readFile(path.join(distPath, 'index.html'), 'utf8');
+        const { bizService } = await import('./server/services/biz/runtime.js'); const { renderShell } = await import('./server/services/biz/shell.js');
+        const b = await bizService().publicBySlug(String(req.params.slug));
+        res.status(b ? 200 : 404).type('html').setHeader('Cache-Control', 'no-cache');
+        res.send(b ? renderShell(html, b, process.env.APP_BASE_URL || `${req.protocol}://${req.get('host')}`) : html);
+      } catch { res.sendFile(path.join(distPath, 'index.html')); }
+    });
 
     // Unmatched API routes should 404 as JSON, not fall through to the SPA
     // shell — otherwise a mistyped or removed endpoint looks like a 200 to

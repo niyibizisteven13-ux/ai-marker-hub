@@ -1,5 +1,9 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
+// Self-hosted fonts (no third-party requests): Plus Jakarta Sans for the interface, Bricolage Grotesque for headings, JetBrains Mono for codes.
+import '@fontsource-variable/plus-jakarta-sans';
+import '@fontsource-variable/bricolage-grotesque';
+import '@fontsource-variable/jetbrains-mono';
 import App from './App.tsx';
 import PlatformNotice from './components/PlatformNotice';
 import UpgradeDialog from './components/UpgradeDialog';

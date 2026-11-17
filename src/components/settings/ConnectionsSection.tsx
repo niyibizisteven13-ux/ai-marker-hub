@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Send, CheckCircle2, Link2, Unlink, Loader2, RefreshCw, ExternalLink } from 'lucide-react';
 import { authFetch } from '../../utils/authFetch';
+import BizConnection from './BizConnection';
 
 type TelegramConnection = { connected: boolean; chatId: string | null; botUsername: string; botConfigured: boolean };
 
@@ -82,7 +83,7 @@ export default function ConnectionsSection() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-normal text-[var(--text)] font-['Georgia',serif]">Connected Apps & Integrations</h2>
+        <h2 className="text-xl font-normal text-[var(--text)] font-display">Connected Apps & Integrations</h2>
         <p className="mt-1 text-xs text-[var(--muted)]">Link your Bwenge account to Telegram for instant batch grading, forms, and AI companion notifications.</p>
       </div>
 
@@ -165,6 +166,8 @@ export default function ConnectionsSection() {
           </div>
         </div>
       </div>
+
+      <BizConnection />
 
       {message && (
         <div role="status" className={`rounded-xl p-3 text-xs flex items-center gap-2 ${message.error ? 'bg-[var(--danger)]/10 text-[var(--danger)]' : 'bg-[var(--teal)]/10 text-[var(--teal)]'}`}>

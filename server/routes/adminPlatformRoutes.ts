@@ -121,6 +121,14 @@ router.get('/downloads', wrap(async (_req, res) => {
   res.json({ success: true, data: await summary() });
 }));
 
+/** Business pages (bwenge4biz): every page with the number of reports against it, and the reports. */
+router.get('/biz', wrap(async (_req, res) => { const { bizService } = await import('../services/biz/runtime.js'); res.json({ success: true, data: await bizService().adminOverview() }); }));
+/** Hides a business page (body { reason }) or shows it again (body { reason: null }). */
+router.post('/biz/:slug/suspend', wrap(async (req, res) => {
+  const { bizService } = await import('../services/biz/runtime.js'); const slug = String(req.params.slug); const reason = typeof req.body?.reason === 'string' && req.body.reason.trim() ? req.body.reason.trim() : null;
+  await bizService().adminSuspend(slug, reason); await auditAction(adminOf(req), reason ? 'SUSPEND_BIZ_PAGE' : 'RESTORE_BIZ_PAGE', 'biz', slug, { reason }); res.json({ success: true });
+}));
+
 /** The ratings and survey answers sent from the Get the app page (and the same as a CSV file). */
 router.get('/feedback', wrap(async (_req, res) => {
   const { adminFeedback } = await import('../services/appFeedback.js');
