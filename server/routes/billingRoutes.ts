@@ -1,12 +1,11 @@
-import { paymentOptions, startManualPayment } from '../services/billing/manual.js';
+import { MANUAL_PAYMENT, paymentOptions, startManualPayment } from '../services/billing/manual.js';
 import { Router, type Request, type Response } from 'express';
 import { pauseMessage, salesState } from '../services/billing/sales.js';
 import { z } from 'zod';
 import { prisma } from '../db.js';
 import { requireAuth } from '../../production/auth.js';
 import { PLANS, SOLD_PLANS, currentGoPacks, fxUsdRwf, refreshBillingSettings } from '../services/billing/plans.js';
-import { momoMode } from '../services/billing/momo.js';
-import { BillingError, PURPOSES, billingState, checkPayment, publicPayment, startPayment, type Purpose } from '../services/billing/payments.js';
+import { BillingError, PURPOSES, billingState, checkPayment, publicPayment, type Purpose } from '../services/billing/payments.js';
 import { usageSummary } from '../services/billing/usage.js';
 import { payRef } from '../services/billing/payRef.js';
 
@@ -74,12 +73,9 @@ router.post('/manual-checkout', async (req, res) => {
   } catch (e) { fail(res, e); }
 });
 
-router.post('/checkout', async (req, res) => {
-  try {
-    const body = z.object({ purpose: z.enum(PURPOSES as [Purpose, ...Purpose[]]), packId: z.string().max(40).optional(), months: z.number().int().min(1).max(12).optional(), phone: z.string().min(6).max(32) }).strict().parse(req.body ?? {});
-    const r = await startPayment(userIdOf(req), body as { purpose: Purpose; packId?: string; months?: number; phone: string });
-    res.status(r.reused ? 200 : 201).json({ success: true, ...r, message: 'Approve the payment on your phone with your Mobile Money PIN. If no prompt appears, check pending approvals in your MoMo menu.' });
-  } catch (e) { fail(res, e); }
+// Retained for older app versions: reject automatic charging and provide the manual alternative.
+router.post('/checkout', (_req, res) => {
+  res.status(503).json({ success: false, code: 'MANUAL_PAYMENT_REQUIRED', error: 'Automatic MTN payment is not available. Please pay manually using MTN MoMo Pay code 2191184 (Niyibizi Steven), then send your payment screenshot or confirmation SMS and login email to WhatsApp +250799691108.', manual: MANUAL_PAYMENT });
 });
 
 router.get('/payments', async (req, res) => {
