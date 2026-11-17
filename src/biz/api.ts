@@ -1,5 +1,5 @@
 import { authFetch, getAccessToken, getApiUrl } from '../utils/authFetch';
-import type { Business, DayStats, Enquiry, Product, PublicBusiness } from './types';
+import type { Business, DayStats, Enquiry, Product, PublicBusiness, LedgerEntry, Dashboard } from './types';
 
 /** Calls to /api/biz. Public calls need no sign-in; the others use the person's own session. */
 export class BizApiError extends Error { constructor(message: string, public status: number, public code?: string) { super(message); } }
@@ -34,6 +34,11 @@ export const ownerApi = {
   removeMedia: async (id: string, mid: string) => { const r = await authFetch(`/api/biz/${id}/media/${mid}`, json('DELETE')); if (!r.ok) await read(r); },
   enquiries: async (id: string) => (await read<{ enquiries: Enquiry[] }>(await authFetch(`/api/biz/${id}/enquiries`))).enquiries,
   setEnquiry: async (id: string, eid: string, status: Enquiry['status']) => read(await authFetch(`/api/biz/${id}/enquiries/${eid}`, json('PATCH', { status }))),
+  dashboard: async (id: string, days = 7) => read<Dashboard>(await authFetch(`/api/biz/${id}/dashboard?days=${days}`)),
+  ledger: async (id: string, q: { type?: 'sale' | 'expense'; days?: number } = {}) => (await read<{ entries: LedgerEntry[] }>(await authFetch(`/api/biz/${id}/ledger?${new URLSearchParams(Object.entries(q).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)]))}`))).entries,
+  addEntry: async (id: string, body: Record<string, unknown>) => read<{ entry: LedgerEntry }>(await authFetch(`/api/biz/${id}/ledger`, json('POST', body))),
+  setEntry: async (id: string, eid: string, status: LedgerEntry['status']) => read(await authFetch(`/api/biz/${id}/ledger/${eid}`, json('PATCH', { status }))),
+  removeEntry: async (id: string, eid: string) => { const r = await authFetch(`/api/biz/${id}/ledger/${eid}`, json('DELETE')); if (!r.ok) await read(r); },
   stats: async (id: string) => read<{ last30: DayStats; days: Array<{ day: string } & DayStats>; newMessages: number }>(await authFetch(`/api/biz/${id}/stats`)),
   /** Uploads a photo or video with a progress report (a video on a slow phone connection can take a while). */
   upload: (id: string, file: File | Blob, name: string, onProgress: (fraction: number) => void) => new Promise<void>((resolve, reject) => {

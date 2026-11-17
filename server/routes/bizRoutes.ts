@@ -11,6 +11,8 @@ import logger from '../utils/logger.js';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { getJwtSecret } from '../auth/secrets.js';
 import { openNow as openNowFor, publicView } from '../services/biz/model.js';
+import { THEME_COLOR } from '../services/biz/shell.js';
+const THEMES_FOR_ICON: Record<string, { accent: string; on: string }> = { gold: { accent: '#E9A23B', on: '#1A1405' }, teal: { accent: '#0F9D8F', on: '#FFFFFF' }, green: { accent: '#1E9E5A', on: '#FFFFFF' }, blue: { accent: '#2F6FED', on: '#FFFFFF' }, rose: { accent: '#DB4F8E', on: '#FFFFFF' }, violet: { accent: '#7C5CF0', on: '#FFFFFF' }, ink: { accent: '#0E1722', on: '#FFFFFF' } };
 
 /**
  * /api/biz
@@ -64,8 +66,24 @@ export function createBizRouter(): Router {
     const f = await svc().mediaFor(req.params.slug, req.params.mid); if (!f) return res.status(404).end();
     await send(req, res, f, 'public, max-age=3600');
   }));
+  // The business's own installable app (a home-screen app that opens its page). Built only from public fields.
+  r.get('/public/:slug/manifest.webmanifest', run(async (req, res) => {
+    const b = await svc().publicBySlug(req.params.slug); if (!b) return res.status(404).end(); const slug = encodeURIComponent(b.slug);
+    res.type('application/manifest+json').setHeader('Cache-Control', 'public, max-age=600');
+    res.json({ name: b.name, short_name: b.name.slice(0, 12), description: b.tagline || undefined, id: `/b/${slug}`, start_url: `/b/${slug}?source=app`, scope: `/b/${slug}`, display: 'standalone', orientation: 'portrait',
+      background_color: '#FFFFFF', theme_color: THEME_COLOR[b.theme] ?? '#0E1722', icons: [{ src: `/api/biz/public/${slug}/icon.svg`, sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' }] });
+  }));
+  r.get('/public/:slug/icon.svg', run(async (req, res) => {
+    const b = await svc().publicBySlug(req.params.slug); if (!b) return res.status(404).end();
+    const t = THEMES_FOR_ICON[b.theme] ?? { accent: '#0E1722', on: '#FFFFFF' }; const ini = b.name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase().replace(/[<>&"']/g, '');
+    res.type('image/svg+xml').setHeader('Cache-Control', 'public, max-age=3600');
+    res.send(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" fill="${t.accent}"/><text x="256" y="300" font-family="Arial,Helvetica,sans-serif" font-size="210" font-weight="700" text-anchor="middle" fill="${t.on}">${ini || 'B'}</text></svg>`);
+  }));
   r.post('/public/:slug/track', run(async (req, res) => { const k = ['whatsapp', 'call', 'share'].includes(String(req.body?.kind)) ? req.body.kind : null; if (!k) return res.status(400).json({ error: 'Unknown kind.' }); res.json({ ok: await svc().track(req.params.slug, k, who(req)) }); }));
   r.post('/public/:slug/enquiry', run(async (req, res) => { const out = await svc().submitEnquiry(req.params.slug, req.body ?? {}, who(req)); res.status(out.saved ? 201 : 200).json({ ok: true }); }));
+  r.post('/public/:slug/order', run(async (req, res) => { const out = await svc().submitOrder(req.params.slug, req.body ?? {}, who(req)); res.status(out.saved ? 201 : 200).json({ ok: true, total: out.total }); }));
+  r.post('/public/:slug/pay', run(async (req, res) => res.status(201).json(await svc().submitPayment(req.params.slug, req.body ?? {}, who(req)))));
+  r.get('/public/:slug/pay/:ref', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await svc().publicPayStatus(req.params.slug, req.params.ref)); }));
   r.post('/public/:slug/report', run(async (req, res) => { await svc().report(req.params.slug, req.body ?? {}, who(req)); res.json({ ok: true }); }));
 
   r.get('/owner-media/:bizId/:mid', run(async (req, res) => {
@@ -104,6 +122,17 @@ export function createBizRouter(): Router {
 
   r.get('/:id/enquiries', run(async (req, res) => res.json({ enquiries: await svc().enquiries(me(req), req.params.id) })));
   r.patch('/:id/enquiries/:eid', run(async (req, res) => res.json({ enquiry: await svc().setEnquiry(me(req), req.params.id, req.params.eid, req.body?.status) })));
+  r.get('/:id/ledger', run(async (req, res) => res.json({ entries: await svc().ledger(me(req), req.params.id, { type: req.query.type === 'sale' || req.query.type === 'expense' ? req.query.type : undefined, days: Math.min(400, Math.max(0, Number(req.query.days) || 0)) || undefined }) })));
+  r.post('/:id/ledger', run(async (req, res) => res.status(201).json(await svc().addEntry(me(req), req.params.id, { ...(req.body ?? {}), src: 'studio' }))));
+  r.patch('/:id/ledger/:eid', run(async (req, res) => res.json({ entry: await svc().setEntryStatus(me(req), req.params.id, req.params.eid, req.body?.status) })));
+  r.delete('/:id/ledger/:eid', run(async (req, res) => { await svc().removeEntry(me(req), req.params.id, req.params.eid); res.status(204).end(); }));
+  r.get('/:id/dashboard', run(async (req, res) => res.json(await svc().dashboard(me(req), req.params.id, [7, 30, 90].includes(Number(req.query.days)) ? Number(req.query.days) : 7))));
+  r.get('/:id/secrets', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await svc().secretsStatus(me(req), req.params.id)); }));
+  r.put('/:id/secrets/:provider', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); await svc().saveSecrets(me(req), req.params.id, req.params.provider, req.body ?? {}); res.json(await svc().secretsStatus(me(req), req.params.id)); }));
+  r.delete('/:id/secrets/:provider', run(async (req, res) => { await svc().clearSecrets(me(req), req.params.id, req.params.provider); res.json(await svc().secretsStatus(me(req), req.params.id)); }));
+  r.post('/:id/secrets/:provider/test', run(async (req, res) => res.json(await svc().testSecrets(me(req), req.params.id, req.params.provider))));
+  r.post('/:id/pay', run(async (req, res) => res.status(201).json({ entry: await svc().requestPayment(me(req), req.params.id, req.body ?? {}) })));
+  r.post('/:id/pay/:eid/refresh', run(async (req, res) => res.json({ entry: await svc().refreshPayment(me(req), req.params.id, req.params.eid) })));
   r.get('/:id/stats', run(async (req, res) => res.json(await svc().stats(me(req), req.params.id))));
   return r;
 }

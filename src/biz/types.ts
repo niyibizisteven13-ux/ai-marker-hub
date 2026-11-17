@@ -13,3 +13,15 @@ export const THEMES: Record<string, { label: string; accent: string; on: string 
 };
 export const rwf = (n: number | null | undefined) => (n === null || n === undefined ? 'Ask for price' : `${n.toLocaleString('en-US')} RWF`);
 export const pageUrl = (slug: string, origin = typeof window !== 'undefined' ? window.location.origin : 'https://www.bwenge.space') => `${origin}/b/${slug}`;
+
+export interface LedgerEntry {
+  id: string; type: 'sale' | 'expense'; amount: number; at: string; status: 'completed' | 'pending' | 'cancelled'; src: 'studio' | 'chat' | 'scan' | 'page';
+  item?: string; qty?: number; productId?: string; customer?: string; method?: 'cash' | 'momo' | 'card' | 'credit'; note?: string; category?: string;
+}
+export interface Dashboard {
+  today: { sales: number; expenses: number; orders: number; profit: number }; yesterday: { sales: number; expenses: number; orders: number; profit: number };
+  change: { sales: number | null; orders: number | null; profit: number | null }; range: { days: number; sales: number; expenses: number; profit: number };
+  series: Array<{ day: string; sales: number; expenses: number }>; top: Array<{ name: string; amount: number; qty: number }>;
+  orders: { completed: number; pending: number; cancelled: number }; customers: number; lowStock: Array<{ id: string; name: string; stock: number; unit: string }>;
+  recent: LedgerEntry[]; newMessages: number; entries: number;
+}

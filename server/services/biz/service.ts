@@ -1,5 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { MediaError, maxBytesFor, sniff, type MediaStore } from './media.js';
+import { FIELDS, PROVIDERS, cleanSecrets, keyFrom, open as openSecret, seal, type Provider, type SecretsDoc } from './secrets.js';
+import { PayError, gatewayFor, maskPhone, msisdn, providerOf, realFetch, type Fetch, type Gateway } from './payments.js';
+import { MAX_ENTRIES, cleanEntry, summarize, type LedgerEntry } from './ledger.js';
 import {
   CATEGORIES, applyProfile, clean, cleanEmail, cleanPhone, cleanProduct, isLive, limitsFor, newBusiness, oneOf, publicView, slugFrom, validSlug,
   type Business, type Category, type DayStats, type Enquiry, type PublicBusiness, type Product,
@@ -13,7 +16,7 @@ import {
  */
 export interface Kv { get<T>(key: string): Promise<T | null>; put(key: string, value: unknown): Promise<void>; del(key: string): Promise<void> }
 export class BizError extends Error { constructor(message: string, public status = 400, public code = 'BIZ') { super(message); } }
-export interface Deps { kv: Kv; media: MediaStore; isPaid: (ownerId: string) => Promise<boolean>; now?: () => number }
+export interface Deps { kv: Kv; media: MediaStore; isPaid: (ownerId: string) => Promise<boolean>; now?: () => number; secretKey?: Buffer; fetchImpl?: Fetch }
 export interface Report { id: string; at: string; slug: string; reason: string; detail: string }
 
 const MAX_STATS_DAYS = 62, MAX_REPORTS = 300;
@@ -33,6 +36,7 @@ function tooMany(key: string, max: number, now: number, windowMs = 3_600_000) {
 export function createBizService(deps: Deps) {
   const { kv, media } = deps; const now = () => (deps.now ?? Date.now)();
   const iso = () => new Date(now()).toISOString();
+  const secretKey = () => deps.secretKey ?? keyFrom(process.env.BIZ_SECRETS_KEY || process.env.JWT_SECRET || 'bwenge-dev');
 
   const load = async (id: string): Promise<Business | null> => kv.get<Business>(`biz:${id}`);
   const save = async (b: Business) => { b.updatedAt = iso(); await kv.put(`biz:${b.id}`, b); };
@@ -48,6 +52,42 @@ export function createBizService(deps: Deps) {
     for (const old of Object.keys(s.days).sort().slice(0, Math.max(0, Object.keys(s.days).length - MAX_STATS_DAYS))) delete s.days[old];
     await kv.put(`biz-stats:${id}`, s);
   };
+  /** Moves a product's private stock count (only when it has one); a product that runs out is marked out of stock on the page. */
+  async function adjustStock(b: Business, productId: string, delta: number): Promise<Product | undefined> {
+    const fresh = await load(b.id); const p = fresh?.products.find((x) => x.id === productId); if (!fresh || !p || typeof p.stock !== 'number') return undefined;
+    p.stock = Math.max(0, Math.round((p.stock + delta) * 100) / 100); if (p.stock === 0 && delta < 0) p.available = false; if (p.stock > 0 && delta > 0) p.available = true;
+    await save(fresh); return p;
+  }
+
+  /** The decrypted keys of one provider, only to call that provider; never returned to anyone. */
+  async function gateway(b: Business, p: Provider): Promise<Gateway | null> {
+    const doc = await kv.get<SecretsDoc>(`biz-secrets:${b.id}`); const e = doc?.[p]; if (!e) return null;
+    try { return gatewayFor(p, JSON.parse(openSecret(e.sealed, secretKey())), e.environment, deps.fetchImpl ?? realFetch); } catch { return null; }
+  }
+  async function payReady(b: Business): Promise<boolean> { const doc = await kv.get<SecretsDoc>(`biz-secrets:${b.id}`); return !!(b.acceptPay && (doc?.mtn || doc?.airtel)); }
+  const withPay = async (b: Business, v: PublicBusiness): Promise<PublicBusiness> => ((await payReady(b)) ? { ...v, payOnline: { open: b.payOpen === true } } : v);
+  async function startPayment(b: Business, o: { phone: string; amount: number; item: string; customer?: string; src: LedgerEntry['src']; note?: string }): Promise<LedgerEntry> {
+    const n = msisdn(o.phone); if (!n) throw new BizError('Enter a valid MTN or Airtel number, like 0788 123 456.');
+    if (!Number.isInteger(o.amount) || o.amount < 100 || o.amount > 2_000_000) throw new BizError('The amount must be between 100 and 2,000,000 RWF.');
+    const provider = providerOf(n); const gw = await gateway(b, provider);
+    if (!gw) throw new BizError(`This business does not accept ${provider === 'mtn' ? 'MTN MoMo' : 'Airtel Money'} payments yet.`, 409, 'NO_PROVIDER');
+    const id = randomUUID();
+    try { await gw.request({ amount: o.amount, phone: n, ref: id, note: `${b.name}: ${o.item}`.slice(0, 80) }); } catch (e) { if (e instanceof PayError) throw new BizError(e.message, 502, 'PROVIDER'); throw e; }
+    const e: LedgerEntry = { id, type: 'sale', amount: o.amount, at: iso(), status: 'pending', src: o.src, item: o.item.slice(0, 80), method: 'momo', pay: { provider, phone: maskPhone(n), state: 'pending' }, ...(o.customer ? { customer: o.customer } : {}), ...(o.note ? { note: o.note } : {}) };
+    const doc = (await kv.get<{ items: LedgerEntry[] }>(`biz-ledger:${b.id}`)) ?? { items: [] }; doc.items.unshift(e); await kv.put(`biz-ledger:${b.id}`, { items: doc.items.slice(0, MAX_ENTRIES) });
+    return e;
+  }
+  /** Asks the provider how a payment went and settles the sale: paid -> completed (stock goes down), failed -> cancelled. */
+  async function settle(b: Business, entryId: string): Promise<LedgerEntry | null> {
+    const doc = (await kv.get<{ items: LedgerEntry[] }>(`biz-ledger:${b.id}`)) ?? { items: [] }; const e = doc.items.find((x) => x.id === entryId); if (!e?.pay) return e ?? null;
+    if (e.pay.state !== 'pending') return e;
+    const gw = await gateway(b, e.pay.provider); if (!gw) return e;
+    let st; try { st = await gw.status(e.id); } catch { return e; }                         // the provider is slow: stay pending and ask again later
+    if (st === 'pending') { if (now() - Date.parse(e.at) > 15 * 60_000) st = 'failed'; else return e; }
+    e.pay.state = st; e.status = st === 'success' ? 'completed' : 'cancelled'; await kv.put(`biz-ledger:${b.id}`, doc);
+    if (st === 'success' && e.productId) await adjustStock(b, e.productId, -(e.qty ?? 1));
+    return e;
+  }
   async function publicLive(slug: string): Promise<Business | null> {
     const id = await slugOwner(String(slug).toLowerCase()); if (!id) return null; const b = await load(id); return b && isLive(b) ? b : null;
   }
@@ -98,7 +138,7 @@ export function createBizService(deps: Deps) {
     async remove(ownerId: string, id: string): Promise<void> {
       const b = await mine(ownerId, id);
       await media.removeAll(b.id).catch(() => undefined);
-      await Promise.all([kv.del(`biz:${b.id}`), kv.del(`biz-slug:${b.slug}`), kv.del(`biz-enq:${b.id}`), kv.del(`biz-stats:${b.id}`)]);
+      await Promise.all([kv.del(`biz:${b.id}`), kv.del(`biz-slug:${b.slug}`), kv.del(`biz-enq:${b.id}`), kv.del(`biz-stats:${b.id}`), kv.del(`biz-ledger:${b.id}`), kv.del(`biz-secrets:${b.id}`)]);
       const ids = (await kv.get<{ ids: string[] }>(`biz-owner:${ownerId}`))?.ids ?? []; await kv.put(`biz-owner:${ownerId}`, { ids: ids.filter((x) => x !== b.id) });
       const all = (await kv.get<{ ids: string[] }>('biz-index'))?.ids ?? []; await kv.put('biz-index', { ids: all.filter((x) => x !== b.id) });
     },
@@ -148,6 +188,70 @@ export function createBizService(deps: Deps) {
       for (const p of b.products) if (p.mediaId === mediaId) delete p.mediaId; await save(b);
     },
 
+
+    /* ------------------------------------------------------------ money notebook: owner only */
+    async ledger(ownerId: string, id: string, o: { type?: 'sale' | 'expense'; days?: number } = {}): Promise<LedgerEntry[]> {
+      const b = await mine(ownerId, id); let items = (await kv.get<{ items: LedgerEntry[] }>(`biz-ledger:${b.id}`))?.items ?? [];
+      if (o.type) items = items.filter((e) => e.type === o.type); if (o.days) { const t = now() - o.days * 86_400_000; items = items.filter((e) => Date.parse(e.at) >= t); } return items;
+    },
+    async addEntry(ownerId: string, id: string, input: unknown): Promise<{ entry: LedgerEntry; product?: Product }> {
+      const b = await mine(ownerId, id); const e = cleanEntry(input, randomUUID(), now(), b.products); if ('error' in e) throw new BizError(e.error);
+      const doc = (await kv.get<{ items: LedgerEntry[] }>(`biz-ledger:${b.id}`)) ?? { items: [] };
+      doc.items.unshift(e); doc.items.sort((a, c) => c.at.localeCompare(a.at)); await kv.put(`biz-ledger:${b.id}`, { items: doc.items.slice(0, MAX_ENTRIES) });
+      let product: Product | undefined;
+      if (e.type === 'sale' && e.status === 'completed' && e.productId) product = await adjustStock(b, e.productId, -(e.qty ?? 1));
+      return { entry: e, product };
+    },
+    async setEntryStatus(ownerId: string, id: string, entryId: string, status: 'completed' | 'pending' | 'cancelled'): Promise<LedgerEntry> {
+      const b = await mine(ownerId, id); const doc = (await kv.get<{ items: LedgerEntry[] }>(`biz-ledger:${b.id}`)) ?? { items: [] }; const e = doc.items.find((x) => x.id === entryId);
+      if (!e || e.type !== 'sale') throw new BizError('That sale was not found.', 404); const was = e.status; e.status = oneOf(['completed', 'pending', 'cancelled'] as const, status, was); await kv.put(`biz-ledger:${b.id}`, doc);
+      if (e.productId && was !== 'completed' && e.status === 'completed') await adjustStock(b, e.productId, -(e.qty ?? 1));
+      if (e.productId && was === 'completed' && e.status !== 'completed') await adjustStock(b, e.productId, e.qty ?? 1);
+      return e;
+    },
+    async removeEntry(ownerId: string, id: string, entryId: string): Promise<void> {
+      const b = await mine(ownerId, id); const doc = (await kv.get<{ items: LedgerEntry[] }>(`biz-ledger:${b.id}`)) ?? { items: [] }; const e = doc.items.find((x) => x.id === entryId);
+      if (!e) throw new BizError('That entry was not found.', 404);
+      await kv.put(`biz-ledger:${b.id}`, { items: doc.items.filter((x) => x.id !== entryId) });
+      if (e.type === 'sale' && e.status === 'completed' && e.productId) await adjustStock(b, e.productId, e.qty ?? 1);
+    },
+    /** The numbers behind the dashboard: today against yesterday, a chart, top sellers, orders, customers, low stock. */
+    async dashboard(ownerId: string, id: string, days = 7) {
+      const b = await mine(ownerId, id); const items = (await kv.get<{ items: LedgerEntry[] }>(`biz-ledger:${b.id}`))?.items ?? [];
+      const enq = (await kv.get<{ items: Enquiry[] }>(`biz-enq:${b.id}`))?.items ?? [];
+      return { ...summarize(items, b.products, now(), days), newMessages: enq.filter((e) => e.status === 'new').length, entries: items.length };
+    },
+
+    /* ------------------------------------------------------------ payment secrets and online payments */
+    /** What the owner may see about saved keys: whether each provider is set, the last four characters, the environment, the date. Never the keys. */
+    async secretsStatus(ownerId: string, id: string) {
+      const b = await mine(ownerId, id); const doc = (await kv.get<SecretsDoc>(`biz-secrets:${b.id}`)) ?? {};
+      const one = (p: Provider) => (doc[p] ? { set: true, hint: doc[p]!.hint, environment: doc[p]!.environment, at: doc[p]!.at } : { set: false });
+      return { mtn: one('mtn'), airtel: one('airtel'), acceptPay: b.acceptPay === true, payOpen: b.payOpen === true, fields: FIELDS };
+    },
+    async saveSecrets(ownerId: string, id: string, provider: unknown, input: unknown) {
+      const b = await mine(ownerId, id); if (!PROVIDERS.includes(provider as Provider)) throw new BizError('Choose MTN or Airtel.'); const p = provider as Provider;
+      const c = cleanSecrets(p, input); if ('error' in c) throw new BizError(c.error);
+      const doc = (await kv.get<SecretsDoc>(`biz-secrets:${b.id}`)) ?? {}; doc[p] = { sealed: seal(JSON.stringify(c.fields), secretKey()), hint: c.hint, environment: c.environment, at: iso() };
+      await kv.put(`biz-secrets:${b.id}`, doc);
+    },
+    async clearSecrets(ownerId: string, id: string, provider: unknown) {
+      const b = await mine(ownerId, id); if (!PROVIDERS.includes(provider as Provider)) throw new BizError('Choose MTN or Airtel.');
+      const doc = (await kv.get<SecretsDoc>(`biz-secrets:${b.id}`)) ?? {}; delete doc[provider as Provider]; await kv.put(`biz-secrets:${b.id}`, doc);
+      if (!doc.mtn && !doc.airtel && b.acceptPay) { delete b.acceptPay; await save(b); }
+    },
+    /** Proves the saved keys work (gets an access token). Moves no money. */
+    async testSecrets(ownerId: string, id: string, provider: unknown): Promise<{ ok: true }> {
+      const b = await mine(ownerId, id); if (!PROVIDERS.includes(provider as Provider)) throw new BizError('Choose MTN or Airtel.');
+      const gw = await gateway(b, provider as Provider); if (!gw) throw new BizError('Save the keys first.', 409);
+      try { await gw.ping(); } catch (e) { throw new BizError(e instanceof PayError ? e.message : 'The test did not work.', 502, 'PROVIDER'); } return { ok: true };
+    },
+    /** The owner types a customer's number and an amount; the customer approves on their phone. */
+    async requestPayment(ownerId: string, id: string, input: { phone?: unknown; amount?: unknown; item?: unknown; customer?: unknown }): Promise<LedgerEntry> {
+      const b = await mine(ownerId, id); return startPayment(b, { phone: String(input.phone ?? ''), amount: Math.round(Number(String(input.amount ?? '').replace(/[,\s]/g, ''))), item: clean(input.item, 60) || 'Payment', customer: clean(input.customer, 60) || undefined, src: 'studio' });
+    },
+    async refreshPayment(ownerId: string, id: string, entryId: string): Promise<LedgerEntry> { const b = await mine(ownerId, id); const e = await settle(b, entryId); if (!e) throw new BizError('That payment was not found.', 404); return e; },
+
     /* messages from visitors, and counts: owner only */
     async enquiries(ownerId: string, id: string): Promise<Enquiry[]> { const b = await mine(ownerId, id); return (await kv.get<{ items: Enquiry[] }>(`biz-enq:${b.id}`))?.items ?? []; },
     async setEnquiry(ownerId: string, id: string, enqId: string, status: Enquiry['status']) {
@@ -165,7 +269,7 @@ export function createBizService(deps: Deps) {
     /* ------------------------------------------------------------ public */
     /** The public page, and one more view. Null when there is no such live page (an unpublished or hidden page looks like a missing one). */
     async publicBySlug(slug: string, opts: { count?: boolean } = {}): Promise<PublicBusiness | null> {
-      const b = await publicLive(slug); if (!b) return null; if (opts.count) await bump(b.id, 'views').catch(() => undefined); return publicView(b);
+      const b = await publicLive(slug); if (!b) return null; if (opts.count) await bump(b.id, 'views').catch(() => undefined); return withPay(b, publicView(b));
     },
     async track(slug: string, kind: 'whatsapp' | 'call' | 'share', visitor: string): Promise<boolean> {
       const b = await publicLive(slug); if (!b) return false; const k = `${visitor}|${b.id}|${kind}`; const t = now();
@@ -178,7 +282,7 @@ export function createBizService(deps: Deps) {
       return { mime: m.mime, size: m.size, open: (range?: { start: number; end: number }) => media.open(b.id, m.id, sniffExt(m.mime), range) };
     },
     /** How the page looks to visitors, for the owner, also before it is published. */
-    async preview(ownerId: string, id: string): Promise<PublicBusiness> { return publicView(await mine(ownerId, id)); },
+    async preview(ownerId: string, id: string): Promise<PublicBusiness> { const b = await mine(ownerId, id); return withPay(b, publicView(b)); },
     /** A photo or video of a live page, only if the owner shows it. */
     async mediaFor(slug: string, mediaId: string) {
       const b = await publicLive(slug); const m = b?.media.find((x) => x.id === mediaId && x.visible); if (!b || !m) return null;
@@ -197,6 +301,40 @@ export function createBizService(deps: Deps) {
       doc.items.unshift({ id: randomUUID(), at: iso(), name: name || 'Visitor', contact, message, ...(productId ? { productId } : {}), status: 'new' });
       await kv.put(`biz-enq:${b.id}`, { items: doc.items.slice(0, lim.enquiries) }); await bump(b.id, 'enquiries').catch(() => undefined);
       return { saved: true };
+    },
+
+    /** A customer's order from the public page: saved as a pending sale the owner confirms. Counts against the same spam limit as messages. */
+    async submitOrder(slug: string, input: { name?: unknown; contact?: unknown; note?: unknown; items?: unknown; website?: unknown }, visitor: string): Promise<{ saved: boolean; total: number }> {
+      if (clean(input.website, 40)) return { saved: false, total: 0 };
+      const b = await publicLive(slug); if (!b) throw new BizError('This page is not available.', 404, 'NOT_FOUND');
+      const name = clean(input.name, 60); const contactRaw = clean(input.contact, 120); const contact = cleanEmail(contactRaw) ?? cleanPhone(contactRaw) ?? '';
+      if (!name) throw new BizError('Add your name.'); if (!contact) throw new BizError('Add a phone number or an email so the business can reach you.');
+      const lines = (Array.isArray(input.items) ? input.items : []).slice(0, 30).map((x: any) => ({ p: b.products.find((p) => p.id === x?.productId && !p.hidden && p.available), qty: Math.round(Number(x?.qty)) })).filter((x) => x.p && x.qty >= 1 && x.qty <= 999);
+      if (!lines.length) throw new BizError('Choose at least one product.');
+      if (tooMany(`ord|${visitor}`, 5, now())) throw new BizError('You sent several orders already. Please try again later.', 429, 'RATE');
+      const total = lines.reduce((a, l) => a + (l.p!.price ?? 0) * l.qty, 0); const lim = await limits(b.ownerId);
+      const entry: LedgerEntry = { id: randomUUID(), type: 'sale', amount: Math.max(1, total), at: iso(), status: 'pending', src: 'page', item: lines.map((l) => `${l.p!.name} x${l.qty}`).join(', ').slice(0, 80), customer: name, note: clean(`${contact}${input.note ? ` · ${clean(input.note, 120)}` : ''}`, 200) };
+      const doc = (await kv.get<{ items: LedgerEntry[] }>(`biz-ledger:${b.id}`)) ?? { items: [] }; doc.items.unshift(entry);
+      await kv.put(`biz-ledger:${b.id}`, { items: doc.items.slice(0, Math.max(MAX_ENTRIES, lim.enquiries)) }); await bump(b.id, 'enquiries').catch(() => undefined);
+      return { saved: true, total };
+    },
+
+    /** A customer pays online from the page (the QR code leads here). The amount is worked out on the server from the products, never taken from the browser, unless the owner allowed any amount. */
+    async submitPayment(slug: string, input: { name?: unknown; phone?: unknown; items?: unknown; amount?: unknown; website?: unknown }, visitor: string): Promise<{ ref: string; total: number }> {
+      if (clean(input.website, 40)) throw new BizError('Not accepted.');
+      const b = await publicLive(slug); if (!b) throw new BizError('This page is not available.', 404, 'NOT_FOUND'); if (!(await payReady(b))) throw new BizError('This business does not take online payments.', 409, 'NO_PAY');
+      const lines = (Array.isArray(input.items) ? input.items : []).slice(0, 30).map((x: any) => ({ p: b.products.find((p) => p.id === x?.productId && !p.hidden && p.available && p.price !== null), qty: Math.round(Number(x?.qty)) })).filter((x) => x.p && x.qty >= 1 && x.qty <= 999);
+      let total = lines.reduce((a, l) => a + l.p!.price! * l.qty, 0); let item = lines.map((l) => `${l.p!.name} x${l.qty}`).join(', ');
+      if (!lines.length) { if (!b.payOpen) throw new BizError('Choose at least one product.'); total = Math.round(Number(String(input.amount ?? '').replace(/[,\s]/g, ''))); item = 'Payment at the shop'; }
+      if (tooMany(`pay|${visitor}`, 6, now())) throw new BizError('Too many payment attempts. Please wait a little.', 429, 'RATE');
+      const e = await startPayment(b, { phone: String(input.phone ?? ''), amount: total, item, customer: clean(input.name, 60) || undefined, src: 'page', ...(lines.length === 1 && lines[0].p ? { note: undefined } : {}) });
+      if (lines.length === 1) { const doc = (await kv.get<{ items: LedgerEntry[] }>(`biz-ledger:${b.id}`))!; const x = doc.items.find((y) => y.id === e.id); if (x) { x.productId = lines[0].p!.id; x.qty = lines[0].qty; await kv.put(`biz-ledger:${b.id}`, doc); } }
+      return { ref: e.id, total };
+    },
+    /** What a paying customer's screen asks while waiting: only the state, for a reference only that customer holds. */
+    async publicPayStatus(slug: string, ref: string): Promise<{ state: 'pending' | 'success' | 'failed' }> {
+      const b = await publicLive(slug); if (!b) throw new BizError('This page is not available.', 404, 'NOT_FOUND'); const e = await settle(b, String(ref).slice(0, 64));
+      if (!e?.pay || e.src !== 'page') throw new BizError('Payment not found.', 404); return { state: e.pay.state };
     },
     async report(slug: string, input: { reason?: unknown; detail?: unknown }, visitor: string): Promise<void> {
       const b = await publicLive(slug); if (!b) throw new BizError('This page is not available.', 404, 'NOT_FOUND');

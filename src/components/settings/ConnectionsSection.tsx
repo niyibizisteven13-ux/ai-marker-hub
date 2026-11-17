@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Send, CheckCircle2, Link2, Unlink, Loader2, RefreshCw, ExternalLink } from 'lucide-react';
 import { authFetch } from '../../utils/authFetch';
+import BizConnection from './BizConnection';
 
 type TelegramConnection = { connected: boolean; chatId: string | null; botUsername: string; botConfigured: boolean };
 
@@ -165,6 +166,8 @@ export default function ConnectionsSection() {
           </div>
         </div>
       </div>
+
+      <BizConnection />
 
       {message && (
         <div role="status" className={`rounded-xl p-3 text-xs flex items-center gap-2 ${message.error ? 'bg-[var(--danger)]/10 text-[var(--danger)]' : 'bg-[var(--teal)]/10 text-[var(--teal)]'}`}>

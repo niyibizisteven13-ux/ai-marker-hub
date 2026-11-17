@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, BookOpen, Check, Copy, Download, Eye, EyeOff, ExternalLink, Film, Globe, ImagePlus, Inbox, LayoutDashboard, Loader2, Lock, MessageCircle, Package, Palette, Plus, Settings, Share2, Sparkles, Trash2, Upload } from 'lucide-react';
 import BizPage from '../components/biz/BizPage';
+import { btn, btnGhost, btnPrimary, card, input, msg, Tag, Title } from '../components/biz/ui';
 import { BizApiError, ownerApi, prepareImage, type Mine } from '../biz/api';
 import { CATEGORIES, DAYS, THEMES, pageUrl, rwf, type Business, type DayStats, type Enquiry, type Hours, type PublicBusiness } from '../biz/types';
 
@@ -14,22 +15,6 @@ const TABS: Array<{ id: Tab; label: string; icon: typeof Globe; kind: 'public' |
   { id: 'gallery', label: 'Photos and videos', icon: ImagePlus, kind: 'public' }, { id: 'messages', label: 'Messages', icon: Inbox, kind: 'private' }, { id: 'preview', label: 'Preview', icon: Eye, kind: 'public' },
   { id: 'settings', label: 'Settings', icon: Settings, kind: 'private' }, { id: 'notebook', label: 'Notebook', icon: BookOpen, kind: 'private' },
 ];
-const card = 'rounded-2xl border border-[var(--app-line)] bg-[var(--app-panel)] p-5';
-const input = 'w-full rounded-xl border border-[var(--app-line)] bg-[var(--app-bg)] px-3.5 py-2.5 text-sm text-[var(--app-text)] outline-none placeholder:text-[var(--app-faint)] focus:border-[var(--brand)]';
-const btn = 'inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold disabled:opacity-50';
-const btnPrimary = `${btn} bg-[var(--brand)] text-[var(--brand-on)] hover:opacity-90`;
-const btnGhost = `${btn} border border-[var(--app-line)] text-[var(--app-text)] hover:bg-[var(--app-panel-hover)]`;
-const msg = (e: unknown) => (e instanceof Error ? e.message : 'Something went wrong. Please try again.');
-
-function Tag({ kind }: { kind: 'public' | 'private' }) {
-  return kind === 'public'
-    ? <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-300"><Globe size={11} />Visitors see this</span>
-    : <span className="inline-flex items-center gap-1 rounded-full bg-[var(--app-panel-hover)] px-2 py-0.5 text-[11px] font-medium text-[var(--app-muted)]"><Lock size={11} />Only you see this</span>;
-}
-const Title = ({ children, kind, hint }: { children: React.ReactNode; kind?: 'public' | 'private'; hint?: string }) => (
-  <div className="mb-4"><div className="flex flex-wrap items-center gap-2"><h2 className="font-display text-xl font-semibold tracking-tight">{children}</h2>{kind && <Tag kind={kind} />}</div>{hint && <p className="mt-1 text-sm text-[var(--app-muted)]">{hint}</p>}</div>
-);
-
 /* ------------------------------------------------------------------ overview */
 function Overview({ b, go, onChange, urlBase }: { b: Business; go: (t: Tab) => void; onChange: () => void; urlBase: string }) {
   const [stats, setStats] = useState<{ last30: DayStats; days: Array<{ day: string } & DayStats>; newMessages: number } | null>(null);
@@ -45,7 +30,7 @@ function Overview({ b, go, onChange, urlBase }: { b: Business; go: (t: Tab) => v
     <div className="space-y-5">
       <div className={`${card} flex flex-wrap items-center justify-between gap-4`}>
         <div className="min-w-0"><p className="text-sm text-[var(--app-muted)]">Your page is</p><p className="font-display text-2xl font-semibold">{b.suspended ? 'Hidden by Bwenge' : b.published ? 'Live' : 'Not published yet'}</p>
-          {b.suspended ? <p className="mt-1 text-sm text-rose-300">{b.suspended.reason}. Contact support.</p> : <p className="mt-1 text-sm text-[var(--app-muted)]">{b.published ? 'Anyone with the link can see it.' : 'Nobody can see it until you publish.'}</p>}</div>
+          {b.suspended ? <p className="mt-1 text-sm text-rose-600">{b.suspended.reason}. Contact support.</p> : <p className="mt-1 text-sm text-[var(--app-muted)]">{b.published ? 'Anyone with the link can see it.' : 'Nobody can see it until you publish.'}</p>}</div>
         <button type="button" disabled={busy || !!b.suspended} onClick={() => void toggle()} className={b.published ? btnGhost : btnPrimary}>{busy ? <Loader2 size={16} className="animate-spin" /> : b.published ? <EyeOff size={16} /> : <Globe size={16} />}{b.published ? 'Unpublish' : 'Publish my page'}</button>
       </div>
       {note && <p role="status" className="rounded-xl bg-[var(--app-panel)] px-4 py-2.5 text-sm text-[var(--app-muted)]">{note}</p>}
@@ -129,7 +114,7 @@ function PageTab({ b, onChange }: { b: Business; onChange: () => void }) {
       </div>
       <div className="sticky bottom-3 z-10 flex flex-wrap items-center gap-3 rounded-2xl border border-[var(--app-line)] bg-[var(--app-panel)]/95 p-3 backdrop-blur">
         <button type="button" disabled={!dirty || busy} onClick={() => void save()} className={btnPrimary}>{busy ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}Save changes</button>
-        <span className="text-sm text-[var(--app-muted)]">{dirty ? 'You have changes that are not saved.' : note?.ok ? 'Saved.' : 'Everything is saved.'}</span>{note && !note.ok && <span role="alert" className="text-sm text-rose-300">{note.text}</span>}
+        <span className="text-sm text-[var(--app-muted)]">{dirty ? 'You have changes that are not saved.' : note?.ok ? 'Saved.' : 'Everything is saved.'}</span>{note && !note.ok && <span role="alert" className="text-sm text-rose-600">{note.text}</span>}
       </div>
     </div>
   );
@@ -153,7 +138,7 @@ function ProductsTab({ b, urls, onChange }: { b: Business; urls: Record<string, 
         {photos.length > 0 && <div className="mt-3"><p className="mb-1.5 text-sm text-[var(--app-muted)]">Photo (optional)</p><div className="flex gap-2 overflow-x-auto pb-1">{photos.map((m) => <button key={m.id} type="button" aria-pressed={draft.mediaId === m.id} onClick={() => setDraft({ ...draft, mediaId: draft.mediaId === m.id ? '' : m.id })} className={`h-16 w-16 shrink-0 overflow-hidden rounded-xl border-2 ${draft.mediaId === m.id ? 'border-[var(--brand)]' : 'border-transparent'}`}>{urls[m.id] ? <img src={urls[m.id]} alt={m.caption || m.name} className="h-full w-full object-cover" /> : null}</button>)}</div></div>}
         <button type="submit" disabled={!draft.name.trim() || busy === 'add'} className={`${btnPrimary} mt-4`}>{busy === 'add' ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}Add product</button>
       </form>
-      {err && <p role="alert" className="rounded-xl bg-rose-500/10 px-4 py-2.5 text-sm text-rose-300">{err}</p>}
+      {err && <p role="alert" className="rounded-xl bg-rose-500/10 px-4 py-2.5 text-sm text-rose-600">{err}</p>}
       <div className={card}><Title kind="public">Your products ({b.products.length})</Title>
         {!b.products.length ? <p className="text-sm text-[var(--app-muted)]">No products yet. Add your first one above, or tell the assistant: “add tomatoes 1,200 per kg”.</p> : (
           <ul className="divide-y divide-[var(--app-line)]">{b.products.map((p) => (
@@ -163,7 +148,7 @@ function ProductsTab({ b, urls, onChange }: { b: Business; urls: Record<string, 
               <input aria-label={`Price of ${p.name}`} defaultValue={p.price ?? ''} inputMode="numeric" className={`${input} !w-28`} onBlur={(e) => { const v = e.target.value.replace(/[,\s]/g, ''); if (v !== String(p.price ?? '')) void run(p.id, () => ownerApi.updateProduct(b.id, p.id, { price: v === '' ? null : Number(v) })); }} />
               <button type="button" className={btnGhost} onClick={() => void run(p.id, () => ownerApi.updateProduct(b.id, p.id, { available: !p.available }))}>{p.available ? 'Mark out of stock' : 'Back in stock'}</button>
               <button type="button" className={btnGhost} aria-label={p.hidden ? `Show ${p.name}` : `Hide ${p.name}`} onClick={() => void run(p.id, () => ownerApi.updateProduct(b.id, p.id, { hidden: !p.hidden }))}>{p.hidden ? <Eye size={16} /> : <EyeOff size={16} />}</button>
-              <button type="button" className={`${btnGhost} text-rose-300`} aria-label={`Delete ${p.name}`} onClick={() => { if (confirm(`Delete ${p.name}?`)) void run(p.id, () => ownerApi.removeProduct(b.id, p.id)); }}><Trash2 size={16} /></button>
+              <button type="button" className={`${btnGhost} text-rose-600`} aria-label={`Delete ${p.name}`} onClick={() => { if (confirm(`Delete ${p.name}?`)) void run(p.id, () => ownerApi.removeProduct(b.id, p.id)); }}><Trash2 size={16} /></button>
             </li>))}</ul>)}
       </div>
     </div>
@@ -192,8 +177,8 @@ function GalleryTab({ b, urls, onChange, limits }: { b: Business; urls: Record<s
         <input ref={fileRef} type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm" className="sr-only" id="biz-upload" onChange={(e) => void upload(e.target.files)} />
         <label htmlFor="biz-upload" className={`${btnPrimary} cursor-pointer`}><Upload size={16} />Choose photos or videos</label>
         <p className="mt-2 text-xs text-[var(--app-faint)]">Big photos are shrunk on your phone before sending. iPhone photos in HEIC format are not accepted: use “Most Compatible” in the camera settings, or take a screenshot.</p>
-        {jobs.map((j: any) => <div key={j._id} className="mt-3 text-sm"><div className="flex justify-between"><span className="truncate">{j.name}</span><span className={j.error ? 'text-rose-300' : 'text-[var(--app-muted)]'}>{j.error ? 'Failed' : `${Math.round(j.progress * 100)}%`}</span></div>{j.error ? <p role="alert" className="text-xs text-rose-300">{j.error}</p> : <div className="mt-1 h-1.5 rounded bg-[var(--app-bg)]"><div className="h-1.5 rounded bg-[var(--brand)]" style={{ width: `${j.progress * 100}%` }} /></div>}</div>)}
-        {err && <p role="alert" className="mt-3 text-sm text-rose-300">{err}</p>}
+        {jobs.map((j: any) => <div key={j._id} className="mt-3 text-sm"><div className="flex justify-between"><span className="truncate">{j.name}</span><span className={j.error ? 'text-rose-600' : 'text-[var(--app-muted)]'}>{j.error ? 'Failed' : `${Math.round(j.progress * 100)}%`}</span></div>{j.error ? <p role="alert" className="text-xs text-rose-600">{j.error}</p> : <div className="mt-1 h-1.5 rounded bg-[var(--app-bg)]"><div className="h-1.5 rounded bg-[var(--brand)]" style={{ width: `${j.progress * 100}%` }} /></div>}</div>)}
+        {err && <p role="alert" className="mt-3 text-sm text-rose-600">{err}</p>}
       </div>
       <div className={card}><Title kind="public" hint="Hidden files stay in your studio. The cover is the big picture at the top of your page.">Your photos and videos ({b.media.length})</Title>
         {!b.media.length ? <p className="text-sm text-[var(--app-muted)]">Nothing yet. A good first photo: your shop front or your best product.</p> : (
@@ -207,7 +192,7 @@ function GalleryTab({ b, urls, onChange, limits }: { b: Business; urls: Record<s
                   {m.kind === 'image' && b.coverId !== m.id && <button type="button" className={`${btnGhost} !min-h-9 !px-2.5 text-xs`} onClick={() => void act(() => ownerApi.update(b.id, { coverId: m.id }))}>Make cover</button>}
                   {m.kind === 'image' && b.logoId !== m.id && <button type="button" className={`${btnGhost} !min-h-9 !px-2.5 text-xs`} onClick={() => void act(() => ownerApi.update(b.id, { logoId: m.id }))}>Make logo</button>}
                   <button type="button" className={`${btnGhost} !min-h-9 !px-2.5 text-xs`} onClick={() => void act(() => ownerApi.updateMedia(b.id, m.id, { visible: !m.visible }))}>{m.visible ? 'Hide' : 'Show'}</button>
-                  <button type="button" aria-label="Delete" className={`${btnGhost} !min-h-9 !px-2.5 text-rose-300`} onClick={() => { if (confirm('Delete this file for good?')) void act(() => ownerApi.removeMedia(b.id, m.id)); }}><Trash2 size={14} /></button>
+                  <button type="button" aria-label="Delete" className={`${btnGhost} !min-h-9 !px-2.5 text-rose-600`} onClick={() => { if (confirm('Delete this file for good?')) void act(() => ownerApi.removeMedia(b.id, m.id)); }}><Trash2 size={14} /></button>
                 </div></div>
             </li>))}</ul>)}
       </div>
@@ -224,7 +209,7 @@ function MessagesTab({ b, onChange }: { b: Business; onChange: () => void }) {
   const reach = (c: string) => (c.includes('@') ? { href: `mailto:${c}`, label: c } : { href: `https://wa.me/${c}`, label: `+${c}` });
   return (
     <div className="space-y-5"><div className={card}><Title kind="private" hint="Messages sent from your page's form. Only you see them. Reply by WhatsApp or email.">Messages from visitors</Title>
-      {err && <p role="alert" className="mb-3 text-sm text-rose-300">{err}</p>}
+      {err && <p role="alert" className="mb-3 text-sm text-rose-600">{err}</p>}
       {!list ? <Loader2 className="animate-spin text-[var(--brand)]" /> : !list.length ? <p className="text-sm text-[var(--app-muted)]">No messages yet. Share your link to get customers writing to you.</p> : (
         <ul className="space-y-3">{list.map((e) => { const r = reach(e.contact); const p = b.products.find((x) => x.id === e.productId); return (
           <li key={e.id} className={`rounded-xl border p-4 ${e.status === 'new' ? 'border-[var(--brand)]/60 bg-[var(--brand)]/5' : 'border-[var(--app-line)]'}`}>
@@ -242,7 +227,7 @@ function MessagesTab({ b, onChange }: { b: Business; onChange: () => void }) {
 function PreviewTab({ b, urls }: { b: Business; urls: Record<string, string> }) {
   const [p, setP] = useState<{ business: PublicBusiness; openNow: boolean | null } | null>(null); const [err, setErr] = useState('');
   useEffect(() => { ownerApi.preview(b.id).then(setP).catch((e) => setErr(msg(e))); }, [b.id, b.updatedAt]);
-  return <div><Title kind="public" hint="Exactly what visitors see, also before you publish. Phone-size on a phone, wide on a computer.">Preview</Title>{err && <p role="alert" className="text-sm text-rose-300">{err}</p>}{!p ? <Loader2 className="animate-spin text-[var(--brand)]" /> : <div className="overflow-hidden rounded-2xl border border-[var(--app-line)]"><BizPage business={p.business} openNow={p.openNow} mediaSrc={(id) => urls[id] ?? ''} preview /></div>}</div>;
+  return <div><Title kind="public" hint="Exactly what visitors see, also before you publish. Phone-size on a phone, wide on a computer.">Preview</Title>{err && <p role="alert" className="text-sm text-rose-600">{err}</p>}{!p ? <Loader2 className="animate-spin text-[var(--brand)]" /> : <div className="overflow-hidden rounded-2xl border border-[var(--app-line)]"><BizPage business={p.business} openNow={p.openNow} mediaSrc={(id) => urls[id] ?? ''} preview /></div>}</div>;
 }
 function SettingsTab({ b, onChange, onDeleted }: { b: Business; onChange: () => void; onDeleted: () => void }) {
   const [slug, setSlug] = useState(b.slug); const [notes, setNotes] = useState(b.notes); const [busy, setBusy] = useState(''); const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null); const [confirm, setConfirm] = useState('');
@@ -255,7 +240,7 @@ function SettingsTab({ b, onChange, onDeleted }: { b: Business; onChange: () => 
         <p className="mt-2 text-xs text-[var(--app-faint)]">3 to 32 letters, numbers and dashes. If you change it, links you already shared stop working.</p></div>
       <div className={card}><Title kind="private" hint="For you: suppliers, ideas, reminders. Never shown on your page.">Private notes</Title>
         <textarea className={input} rows={5} maxLength={2000} value={notes} onChange={(e) => setNotes(e.target.value)} /><button type="button" className={`${btnGhost} mt-3`} disabled={notes === b.notes || busy === 'notes'} onClick={() => void run('notes', () => ownerApi.update(b.id, { notes }), 'Notes saved.')}>Save notes</button></div>
-      {note && <p role="status" className={`text-sm ${note.ok ? 'text-emerald-300' : 'text-rose-300'}`}>{note.text}</p>}
+      {note && <p role="status" className={`text-sm ${note.ok ? 'text-emerald-700' : 'text-rose-600'}`}>{note.text}</p>}
       <div className={`${card} border-rose-500/30`}><Title kind="private">Delete this business page</Title><p className="text-sm text-[var(--app-muted)]">This removes the page, its link, all photos and videos and all messages. It cannot be undone. Type <b>{b.name}</b> to confirm.</p>
         <div className="mt-3 flex flex-wrap gap-2"><input className={`${input} !w-64`} value={confirm} onChange={(e) => setConfirm(e.target.value)} aria-label="Type the business name to confirm" /><button type="button" disabled={confirm.trim() !== b.name || busy === 'del'} className={`${btn} bg-rose-500 text-white`} onClick={() => void run('del', async () => { await ownerApi.remove(b.id); onDeleted(); }, 'Deleted.')}>Delete for good</button></div></div>
     </div>
@@ -282,7 +267,7 @@ export default function BizStudioPage({ onBack }: { onBack: () => void }) {
         <button type="button" onClick={onBack} className="mb-5 inline-flex items-center gap-2 text-sm text-[var(--app-muted)] hover:text-[var(--app-text)]"><ArrowLeft size={15} />Back to Bwenge</button>
         <header className="mb-6"><p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--brand)]">Bwenge4biz</p><h1 className="font-display text-3xl font-semibold tracking-tight sm:text-4xl">{b ? b.name : 'Your business page'}</h1>
           {mine && mine.businesses.length > 1 && <select aria-label="Choose business" className={`${input} mt-3 !w-auto`} value={sel} onChange={(e) => { setSel(e.target.value); setTab('overview'); }}>{mine.businesses.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>}</header>
-        {error && <p role="alert" className="mb-4 rounded-xl bg-rose-500/10 px-4 py-3 text-sm text-rose-300">{error}</p>}
+        {error && <p role="alert" className="mb-4 rounded-xl bg-rose-500/10 px-4 py-3 text-sm text-rose-600">{error}</p>}
 
         {mine && !b && (
           <form onSubmit={create} className={`${card} max-w-xl`}><h2 className="font-display text-2xl font-semibold">Give your business a page</h2>

@@ -22,7 +22,7 @@ export const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
 export type Day = (typeof DAYS)[number];
 
 export interface Hours { day: Day; open: string; close: string; closed?: boolean }
-export interface Product { id: string; name: string; price: number | null; unit?: string; description?: string; mediaId?: string; available: boolean; hidden?: boolean }
+export interface Product { id: string; name: string; price: number | null; unit?: string; description?: string; mediaId?: string; available: boolean; hidden?: boolean; /** Private: units in stock and the level that raises a low-stock alert. Never in publicView. */ stock?: number; lowAt?: number }
 export type MediaKind = 'image' | 'video';
 export interface Media { id: string; kind: MediaKind; mime: string; size: number; name: string; caption?: string; createdAt: string; visible: boolean }
 export interface Business {
@@ -32,6 +32,8 @@ export interface Business {
   hours: Hours[];
   /** MoMo Pay code and name, shown to visitors only when `showPay` is on. */
   momoCode?: string; momoName?: string; showPay: boolean;
+  /** Pay online (customer approves on their phone): the page offers it only when the owner turned it on AND keys are saved. `payOpen` lets visitors type any amount. */
+  acceptPay?: boolean; payOpen?: boolean;
   products: Product[]; media: Media[];
   /** Private to the owner. */
   notes: string;
@@ -99,6 +101,10 @@ export function cleanProduct(input: any, id: string, prev?: Product): Product | 
   const description = clean(input?.description ?? prev?.description, 400); if (description) p.description = description;
   const mediaId = input?.mediaId === undefined ? prev?.mediaId : input.mediaId ? String(input.mediaId).slice(0, 60) : undefined; if (mediaId) p.mediaId = mediaId;
   const hidden = input?.hidden === undefined ? prev?.hidden : input.hidden === true; if (hidden) p.hidden = true;
+  const stock = input?.stock === undefined ? prev?.stock : input.stock === null || input.stock === '' ? undefined : Number(input.stock);
+  if (stock !== undefined) { if (!Number.isFinite(stock) || stock < 0 || stock > 1_000_000) return { error: 'Stock must be a number from 0 up.' }; p.stock = Math.round(stock * 100) / 100; }
+  const lowAt = input?.lowAt === undefined ? prev?.lowAt : input.lowAt === null || input.lowAt === '' ? undefined : Number(input.lowAt);
+  if (lowAt !== undefined && Number.isFinite(lowAt) && lowAt >= 0) p.lowAt = Math.round(lowAt);
   return p;
 }
 
@@ -122,6 +128,8 @@ export function applyProfile(b: Business, patch: any): void {
   if (patch.hours !== undefined) b.hours = cleanHours(patch.hours);
   if (patch.momoCode !== undefined) { const c = String(patch.momoCode ?? '').replace(/\D/g, ''); set('momoCode', c.length >= 3 && c.length <= 20 ? c : undefined); }
   if (patch.momoName !== undefined) set('momoName', clean(patch.momoName, 60));
+  if (patch.acceptPay !== undefined) set('acceptPay', patch.acceptPay === true ? true : undefined);
+  if (patch.payOpen !== undefined) set('payOpen', patch.payOpen === true ? true : undefined);
   if (patch.showPay !== undefined) b.showPay = patch.showPay === true && !!b.momoCode;
 }
 
@@ -133,6 +141,8 @@ export interface PublicBusiness {
   contact: { whatsapp?: string; phone?: string; email?: string; address?: string; mapUrl?: string; website?: string; instagram?: string; facebook?: string };
   hours: Hours[];
   pay?: { momoCode: string; momoName?: string };
+  /** Present when visitors can pay online right on the page. */
+  payOnline?: { open: boolean };
   products: Array<{ id: string; name: string; price: number | null; unit?: string; description?: string; media?: PublicMedia; available: boolean }>;
   gallery: PublicMedia[];
   updatedAt: string;
