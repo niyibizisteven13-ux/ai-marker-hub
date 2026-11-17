@@ -7,8 +7,16 @@
  * alternatives separated by "|" (e.g. "4|four").
  */
 
-export interface QuizItem { id: string; title: string; points: number; earned: number; correct: boolean; given: unknown; correctAnswer: unknown }
-export interface QuizResult { score: number; maxScore: number; percent: number; items: QuizItem[] }
+import { normalizeAssessment, report, type Assessment } from '../../../shared/assessment.js';
+
+export interface QuizItem {
+  id: string; title: string; points: number; earned: number; correct: boolean; given: unknown; correctAnswer: unknown;
+  /** A written answer: marked by AI or by the lecturer, not by comparing with a key. */
+  written?: boolean; pending?: boolean; by?: 'ai' | 'lecturer'; feedback?: string; confidence?: 'high' | 'low';
+}
+export interface QuizResult { score: number; maxScore: number; percent: number; items: QuizItem[]; /** Written answers still waiting for a mark. */ pending: number }
+/** The marks given to written answers, kept with the response: { questionId: { marks, feedback, by } }. */
+export type WrittenMarks = Record<string, { marks: number; feedback?: string; by: 'ai' | 'lecturer'; confidence?: 'high' | 'low' }>;
 
 const fold = (v: unknown) => String(v ?? '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 const asNumber = (v: unknown) => { const s = String(v ?? '').replace(/,/g, '.').replace(/\s/g, ''); return s !== '' && Number.isFinite(Number(s)) ? Number(s) : null; };
@@ -32,20 +40,40 @@ function matches(given: unknown, key: unknown): boolean {
 export function gradeQuiz(schema: any, values: Record<string, unknown>): QuizResult | null {
   if (!schema?.isQuiz) return null;
   const list: any[] = Array.isArray(schema.fields) ? schema.fields : Array.isArray(schema.questions) ? schema.questions : [];
+  const written: WrittenMarks = values?._written && typeof values._written === 'object' ? (values._written as WrittenMarks) : {};
+  const aiOn = normalizeAssessment(schema.assessment).aiMarking;
   const items: QuizItem[] = [];
+  let pending = 0;
   for (const [i, q] of list.entries()) {
     const points = Number(q?.points);
     const key = q?.correctAnswer;
-    if (!(points > 0) || key === undefined || key === null || key === '' || (Array.isArray(key) && !key.length)) continue;
     const id = String(q.id ?? q.number ?? i + 1);
     const given = values[id];
+    // A written answer is marked by AI (when the lecturer chose that) or by the lecturer; before it is marked it waits and counts as 0.
+    if (q?.type === 'long_text' && points > 0 && (aiOn || written[id])) {
+      const w = written[id];
+      const earned = w && Number.isFinite(Number(w.marks)) ? Math.max(0, Math.min(points, Math.round(Number(w.marks) * 2) / 2)) : 0;
+      const wait = !w && given !== undefined && given !== null && String(given).trim() !== '';
+      if (wait) pending++;
+      items.push({ id, title: String(q.label ?? q.title ?? q.text ?? `Question ${i + 1}`), points, earned, correct: !!w && earned >= points, given: given ?? null, correctAnswer: typeof key === 'string' ? key : null, written: true, pending: wait, ...(w ? { by: w.by, ...(w.feedback ? { feedback: String(w.feedback).slice(0, 600) } : {}), ...(w.confidence ? { confidence: w.confidence } : {}) } : {}) });
+      continue;
+    }
+    if (q?.type === 'long_text') continue;                       // a paragraph is never matched word for word: only AI or the lecturer mark it
+    if (!(points > 0) || key === undefined || key === null || key === '' || (Array.isArray(key) && !key.length)) continue;
     const correct = matches(given, key);
     items.push({ id, title: String(q.label ?? q.title ?? q.text ?? `Question ${i + 1}`), points, earned: correct ? points : 0, correct, given: given ?? null, correctAnswer: key });
   }
   if (!items.length) return null;
   const maxScore = items.reduce((a, x) => a + x.points, 0);
   const score = items.reduce((a, x) => a + x.earned, 0);
-  return { score, maxScore, percent: maxScore ? Math.round((score / maxScore) * 1000) / 10 : 0, items };
+  return { score, maxScore, percent: maxScore ? Math.round((score / maxScore) * 1000) / 10 : 0, items, pending };
+}
+
+/** What is kept with a response and shown in Results, the gradebook and the student's result: score, percent, and the CAT report. */
+export function quizRecord(quiz: QuizResult, assessment?: unknown) {
+  const a: Assessment = normalizeAssessment(assessment);
+  const r = report(quiz.score, quiz.maxScore, a);
+  return { score: quiz.score, maxScore: quiz.maxScore, percent: quiz.percent, correct: quiz.items.filter((x) => x.correct).map((x) => x.id), pending: quiz.pending, mark: r.mark, outOf: r.outOf, grade: r.grade, passed: r.passed };
 }
 
 /**

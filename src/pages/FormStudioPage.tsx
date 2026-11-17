@@ -249,7 +249,7 @@ export default function FormStudioPage({ formId, onBack }: { formId: string; onB
             ? <p className="rounded-2xl border border-dashed border-[#DADCE0] bg-white p-6 text-center text-sm text-[#5F6368]">No responses yet. {data.form.open ? 'Share the form link to start collecting.' : 'Publish the form to start collecting.'}</p>
             : data.summaries.map((s) => <SummaryCard key={s.variable} s={s} />)}
 
-          {data.responses > 0 && <FormResponses formId={formId} questions={(data.form.schema?.questions ?? data.form.schema?.fields ?? []) as any[]} />}
+          {data.responses > 0 && <FormResponses formId={formId} aiMarking={!!data.form.schema?.isQuiz && !!data.form.schema?.assessment?.aiMarking} questions={(data.form.schema?.questions ?? data.form.schema?.fields ?? []) as any[]} />}
 
           <details className="rounded-2xl border border-[#E0E0E0] bg-white p-5">
             <summary className="cursor-pointer font-semibold">Data dictionary ({data.codebook.length} variables)</summary>

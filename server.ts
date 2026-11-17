@@ -56,7 +56,9 @@ import { normalizeExam } from './shared/examRules.js';
 import { applyPool } from './shared/formPool.js';
 import { createStorageRouter } from './server/routes/storageRoutes.js';
 import { StorageFullError, ensureStorage } from './server/services/billing/storage.js';
-import { explanationOf, gradeQuiz } from './server/services/forms/quiz.js';
+import { explanationOf, gradeQuiz, quizRecord } from './server/services/forms/quiz.js';
+import { markSubmissionWithAi } from './server/services/forms/aiMarking.js';
+import { normalizeAssessment } from './shared/assessment.js';
 import { uploadLimitBytes, uploadTooLargeMessage } from './server/services/billing/plans.js';
 import { outputsRouter, sharedOutputsRouter } from './server/routes/outputRoutes.js';
 import { curationViewRouter, knowledgeAdminRouter, knowledgeSourcesRouter } from './server/routes/knowledgeRepositoryRoutes.js';
@@ -2152,7 +2154,7 @@ app.post('/api/forms/:id/submit', publicFormSubmitLimiter, async (req, res) => {
     if (/^[\w-]{8,64}$/.test(deviceId) && (schema.isQuiz || schema.exam?.enabled)) {
       normalized._device = { id: deviceId, net: crypto.createHmac('sha256', process.env.JWT_SECRET || 'dev-secret').update(String(req.ip || '')).digest('hex').slice(0, 12) };
     }
-    if (quiz) normalized._quiz = { score: quiz.score, maxScore: quiz.maxScore, percent: quiz.percent, correct: quiz.items.filter((x) => x.correct).map((x) => x.id) };
+    if (quiz) normalized._quiz = quizRecord(quiz, schema.assessment);
     // Integrity signals (pasting, leaving the page, typing): kept for the lecturer to review, never used to change a mark.
     if (schema.isQuiz || schema.blockPaste || schema.trackIntegrity) {
       const all = normalizeFields(given);
@@ -2171,6 +2173,8 @@ app.post('/api/forms/:id/submit', publicFormSubmitLimiter, async (req, res) => {
       const summary = await formExamService().markSubmitted(examSessionId).catch((e) => { logger.warn('Exam session could not be closed', { errorType: (e as Error)?.name }); return null; });
       if (summary) await prisma.formSubmission.update({ where: { id: submission.id }, data: { data: JSON.stringify({ ...normalized, _exam: { ...(normalized._exam as object), ...summary } }) } as any }).catch(() => undefined);
     }
+    // Written answers are marked by AI in the background when the lecturer chose that; the lecturer checks them in Results.
+    if (quiz && quiz.pending > 0 && normalizeAssessment(schema.assessment).aiMarking) void markSubmissionWithAi(prisma, submission.id, schema).catch((e) => logger.warn('AI marking failed', { errorType: (e as Error)?.name }));
     const confirmationMessage = schema.confirmationMessage || 'Your response has been recorded.';
     const confirmationTitle = typeof schema.confirmationTitle === 'string' && schema.confirmationTitle.trim() ? schema.confirmationTitle.trim() : undefined;
     if (quiz) {
@@ -2185,7 +2189,9 @@ app.post('/api/forms/:id/submit', publicFormSubmitLimiter, async (req, res) => {
         ...(showScore ? {
           score: quiz.score,
           maxScore: quiz.maxScore,
-          scoreLabel: 'Your score',
+          percent: quiz.percent,
+          ...(() => { const r = quizRecord(quiz, schema.assessment); const a = normalizeAssessment(schema.assessment); return { grade: r.grade, passed: r.passed, ...(r.outOf ? { mark: r.mark, outOf: r.outOf } : {}), assessmentTitle: a.title || (a.kind === 'QUIZ' ? '' : a.kind), pending: quiz.pending, ...(quiz.pending > 0 ? { pendingNote: a.aiMarking ? 'Your written answers are being marked by AI. Your lecturer will check them, so this score may change.' : 'Your written answers are marked by your lecturer, so this score is not final.' } : {}) }; })(),
+          scoreLabel: normalizeAssessment(schema.assessment).title ? `Your score (${normalizeAssessment(schema.assessment).title})` : 'Your score',
           feedback: quiz.percent >= 80 ? 'Excellent work!' : quiz.percent >= 50 ? 'Good effort. Review the questions you missed.' : 'Keep practising. Review the questions you missed.',
         } : {}),
         ...(schema.quizShowAnswers !== false ? { results: quiz.items.map((x) => ({ id: x.id, correct: x.correct, points: x.earned, maxPoints: x.points, yourAnswer: x.given, correctAnswer: x.correctAnswer, ...(explanationOf(schema, x.id) ? { explanation: explanationOf(schema, x.id) } : {}) })) } : {}),

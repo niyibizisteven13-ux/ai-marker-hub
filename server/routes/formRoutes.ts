@@ -29,6 +29,8 @@ import { summarize } from '../services/forms/analysis.js';
 import { listVersions } from '../services/forms/versions.js';
 import { normalizeFields, CHOICE_KINDS } from '../services/forms/model.js';
 import { gradeQuiz } from '../services/forms/quiz.js';
+import { applyWrittenMarks, markSubmissionWithAi } from '../services/forms/aiMarking.js';
+import { normalizeAssessment } from '../../shared/assessment.js';
 import { classReview } from '../services/forms/classReview.js';
 import { reviewInputs } from '../services/forms/classReviewInput.js';
 import { applyPool } from '../../shared/formPool.js';
@@ -487,6 +489,48 @@ router.get('/:id/results/export.xlsx', requireAuth, async (req, res) => {
     logger.error('Failed to export quiz marks', { errorType: error?.name });
     res.status(500).json({ error: 'Failed to export the marks.' });
   }
+});
+
+
+/** Marks for a written answer, set by the lecturer (they always win over an AI mark). */
+router.put('/:id/responses/:submissionId/marks', requireAuth, async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId;
+    const { schema } = await ownForm(userId, req.params.id);
+    const row = await prisma.formSubmission.findFirst({ where: { id: req.params.submissionId, formId: req.params.id } });
+    if (!row) return res.status(404).json({ error: 'Response not found.' });
+    let data: any = {}; try { data = JSON.parse(row.data || '{}'); } catch { data = {}; }
+    const seed = String(data._exam?.sessionId || data._pool?.seed || '');
+    const given = schema.poolPicks && Object.keys(schema.poolPicks).length && seed ? applyPool(schema, seed) : schema;
+    const list: any[] = Array.isArray(given.fields) ? given.fields : Array.isArray(given.questions) ? given.questions : [];
+    const qid = String(req.body?.questionId ?? '');
+    const q = list.find((x, i) => String(x?.id ?? x?.number ?? i + 1) === qid);
+    if (!schema.isQuiz || !q || q.type !== 'long_text' || !(Number(q.points) > 0)) return res.status(400).json({ error: 'Only a written question with points can be marked by hand.' });
+    const marks = Number(req.body?.marks);
+    if (!Number.isFinite(marks) || marks < 0 || marks > Number(q.points)) return res.status(400).json({ error: `Marks must be between 0 and ${q.points}.` });
+    const feedback = String(req.body?.feedback ?? '').replace(/[\u0000-\u001f]+/g, ' ').trim().slice(0, 400);
+    const next = applyWrittenMarks(schema, data, { [qid]: { marks: Math.round(marks * 2) / 2, ...(feedback ? { feedback } : {}), by: 'lecturer' } });
+    await prisma.formSubmission.update({ where: { id: row.id }, data: { data: JSON.stringify(next) } });
+    res.json({ success: true, quiz: next._quiz, written: next._written });
+  } catch (error: any) { studioFail(res, error); }
+});
+
+/** Mark every response's unmarked written answers with AI now (for responses that came in before AI marking was switched on). */
+router.post('/:id/marks/ai', requireAuth, async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId;
+    const { schema } = await ownForm(userId, req.params.id);
+    if (!schema.isQuiz || !normalizeAssessment(schema.assessment).aiMarking) return res.status(409).json({ error: 'Switch on "Mark written answers with AI" for this quiz first.' });
+    const rows = await prisma.formSubmission.findMany({ where: { formId: req.params.id }, orderBy: { createdAt: 'asc' }, take: 400 });
+    let marked = 0; let left = 0;
+    for (const row of rows) {
+      let d: any = {}; try { d = JSON.parse(row.data || '{}'); } catch { continue; }
+      if (!d._quiz || !(d._quiz.pending > 0)) continue;
+      if (marked >= 40) { left++; continue; }                        // a batch at a time: marking costs time and credits
+      if (await markSubmissionWithAi(prisma, row.id, schema).catch(() => false)) marked++;
+    }
+    res.json({ success: true, marked, left });
+  } catch (error: any) { studioFail(res, error); }
 });
 
 router.get('/:id/results/export.csv', requireAuth, async (req, res) => {
