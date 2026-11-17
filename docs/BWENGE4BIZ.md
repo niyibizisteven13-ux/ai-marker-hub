@@ -16,6 +16,13 @@ sees a private side the public never sees. Photos and short videos the owner add
 ## Money notebook (private)
 Sales and expenses are kept per business (`biz-ledger:<id>`, newest first, up to 5,000 entries), never part of `publicView`. A completed sale of a product with a stock count lowers the stock; cancelling gives it back; a product that reaches zero is marked out of stock on the page. Pending orders from the page are not income until confirmed or paid.
 
+## The business agent
+A standing helper (Studio → Business agent, or by chat: "turn on my business agent in assist mode"). It runs as the owner's assistant with a short, level-based tool list (`server/services/biz/agent.ts`):
+* **Watch**: reads the real numbers and reports. A morning plan (07:30), a closing summary (19:30), a weekly review (Monday 08:00), and instant alerts (new order, payment received, low stock, new message) on Telegram, else email, else in the chat.
+* **Assist**: also proposes changes (confirm an order, restock, mark out of stock, ask a customer to pay) as plans the owner approves with one tap (Do it / Cancel), with undo where possible. A new order arrives with a ready "Confirm" button.
+* **Run**: also settles payments the provider reports as paid and marks messages seen.
+* At every level an unattended run is never given the tools to publish, delete, change prices, record sales, send payment requests or touch keys; those exist only in the chat (and in plans the owner approves). Customer messages and order notes are treated as information, never as instructions. Each run spends the owner's credits like any assistant action.
+
 ## Secrets and payments
 * Keys for MTN MoMo (Collections: subscription key, API user, API key) and Airtel Money (client id and secret) are entered **only** in Studio → Secrets. They are encrypted with AES-256-GCM (`BIZ_SECRETS_KEY`, falling back to the server's JWT secret) and can be written, tested and removed but **never read back** by any route, the studio, or the assistant (the studio shows the last four characters). The assistant is told never to accept keys in chat.
 * "Test keys" only asks the provider for an access token. A payment moves money from the customer straight to the owner's own account; Bwenge never holds funds.

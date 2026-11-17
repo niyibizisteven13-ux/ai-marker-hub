@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowDownRight, ArrowUpRight, Banknote, Check, Copy, Download, EyeOff, Globe, KeyRound, Loader2, Package, Plus, Receipt, Send, Share2, ShieldCheck, Smartphone, Sparkles, Trash2, TrendingUp, Users, Wallet, X, AlertTriangle, ShoppingBag, CircleCheck, Clock, Ban } from 'lucide-react';
+import { Bot, BellRing, ArrowDownRight, ArrowUpRight, Banknote, Check, Copy, Download, EyeOff, Globe, KeyRound, Loader2, Package, Plus, Receipt, Send, Share2, ShieldCheck, Smartphone, Sparkles, Trash2, TrendingUp, Users, Wallet, X, AlertTriangle, ShoppingBag, CircleCheck, Clock, Ban } from 'lucide-react';
 import { ownerApi } from '../../biz/api';
-import { pageUrl, rwf, type Business, type Dashboard, type LedgerEntry, type SecretsStatus } from '../../biz/types';
+import { pageUrl, rwf, type AgentSettings, type Business, type Dashboard, type LedgerEntry, type SecretsStatus } from '../../biz/types';
 import { btn, btnGhost, btnPrimary, card, input, msg, rwfShort, Tag, Title } from './ui';
 
 type Go = (view: string) => void;
@@ -148,7 +148,7 @@ export function DashboardView({ b, go, onChange, secrets, open }: { b: Business;
           {!(secrets?.mtn.set || secrets?.airtel.set) && <button type="button" onClick={() => go('secrets')} className="mt-3 flex w-full items-center gap-2 rounded-xl bg-[var(--app-bg)] px-3 py-2.5 text-left text-xs text-[var(--app-muted)] hover:bg-[var(--app-panel-hover)]"><KeyRound size={14} className="shrink-0 text-[var(--brand-strong,var(--brand))]" />Let customers pay by MTN or Airtel from your page: add your keys in Secrets.</button>}
         </div>
       </div>
-      <div className={`${card} flex flex-wrap items-center gap-4`}><Sparkles className="text-[var(--brand-strong,var(--brand))]" /><div className="min-w-0 flex-1"><p className="font-semibold">Ask your Bwenge assistant</p><p className="text-sm text-[var(--app-muted)]">“Today I sold 5 loaves for 4,000”, “how is my week?”, “what is running out?”, “ask 0788 123 456 to pay 3,000”.</p></div><a className={btnGhost} href="/chat">Open the assistant</a></div>
+      <div className={`${card} flex flex-wrap items-center gap-4`}><Sparkles className="text-[var(--brand-strong,var(--brand))]" /><div className="min-w-0 flex-1"><p className="font-semibold">Ask your Bwenge assistant</p><p className="text-sm text-[var(--app-muted)]">“Today I sold 5 loaves for 4,000”, “how is my week?”, “what is running out?”, “ask 0788 123 456 to pay 3,000”.</p></div><div className="flex flex-wrap gap-2"><button type="button" className={btnPrimary} onClick={() => go('agent')}><Bot size={16} />Business agent</button><a className={btnGhost} href="/chat">Open the assistant</a></div></div>
     </div>
   );
 }
@@ -256,6 +256,40 @@ export function SecretsView({ b, secrets, reload }: { b: Business; secrets: Secr
       <div className={card}><h2 className="mb-2 font-display text-lg font-semibold">Where to get the keys</h2>
         <ul className="space-y-2 text-sm text-[var(--app-muted)]"><li><b className="text-[var(--app-text)]">MTN MoMo:</b> register on the MTN MoMo developer portal, subscribe to <i>Collections</i> for your country, create an API user and API key. For live payments MTN asks you to complete their go-live checks.</li><li><b className="text-[var(--app-text)]">Airtel Money:</b> register on the Airtel Africa Open API portal, create an application with the <i>Collection</i> product and copy the client ID and secret. Live use needs Airtel's approval.</li></ul>
         <p className="mt-3 text-xs text-[var(--app-faint)]">Bwenge sends payment requests exactly as MTN and Airtel describe them. Test with the sandbox keys first; live payments depend on your provider's approval of your account.</p></div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ the business agent */
+const LEVEL_INFO: Array<{ id: AgentSettings['level']; name: string; text: string; can: string[]; cannot: string }> = [
+  { id: 'off', name: 'Off', text: 'The agent does nothing on its own. You can still ask the assistant anything in the chat.', can: [], cannot: '' },
+  { id: 'watch', name: 'Watch', text: 'Looks after the numbers and tells you. Never changes anything.', can: ['Morning plan, closing summary, weekly review', 'Instant alerts: new order, payment received, low stock, new message'], cannot: 'Cannot change anything.' },
+  { id: 'assist', name: 'Assist', text: 'Watches, and suggests changes you approve with one tap on Telegram.', can: ['Everything in Watch', 'Proposes: confirm an order, restock, mark out of stock, ask a customer to pay'], cannot: 'Nothing happens until you tap Do it.' },
+  { id: 'run', name: 'Run', text: 'Assist, plus safe housekeeping done for you.', can: ['Everything in Assist', 'Settles payments MTN or Airtel say are paid', 'Marks messages as seen'], cannot: 'Still asks before anything that moves money or changes your page.' },
+];
+export function AgentView({ b }: { b: Business }) {
+  const [a, setA] = useState<AgentSettings | null>(null); const [busy, setBusy] = useState(false); const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => { void ownerApi.agent(b.id).then(setA).catch((e) => setNote({ ok: false, text: msg(e) })); }, [b.id]);
+  const save = async (patch: Partial<AgentSettings>) => { if (!a) return; const prev = a; setA({ ...a, ...patch }); setBusy(true); setNote(null); try { setA(await ownerApi.setAgent(b.id, patch)); setNote({ ok: true, text: 'Saved.' }); } catch (e) { setA(prev); setNote({ ok: false, text: msg(e) }); } finally { setBusy(false); } };
+  if (!a) return <Loader2 className="animate-spin text-[var(--brand)]" />;
+  const on = a.level !== 'off';
+  return (
+    <div className="space-y-5">
+      <div><h1 className="font-display text-2xl font-semibold tracking-tight">Business agent</h1><Tag kind="private" /></div>
+      <div className={`${card} flex gap-4`}><Bot className="mt-0.5 shrink-0 text-[var(--brand-strong,var(--brand))]" /><p className="text-sm leading-relaxed text-[var(--app-muted)]">Your Bwenge assistant can look after the business while you are away. It reads your real notebook and stock, and messages you on Telegram (or email, or here in the chat). <b className="text-[var(--app-text)]">It can never publish your page, delete anything, change prices, touch your payment keys, or send a payment request without your yes.</b></p></div>
+      <div className="grid gap-3 sm:grid-cols-2">{LEVEL_INFO.map((l) => (
+        <button key={l.id} type="button" aria-pressed={a.level === l.id} disabled={busy} onClick={() => void save({ level: l.id })} className={`rounded-2xl border p-4 text-left transition ${a.level === l.id ? 'border-[var(--brand)] bg-[var(--brand)]/10 ring-2 ring-[var(--brand)]/30' : 'border-[var(--app-line)] bg-[var(--app-panel)] hover:bg-[var(--app-panel-hover)]'}`}>
+          <p className="flex items-center justify-between font-display text-lg font-semibold">{l.name}{a.level === l.id && <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--brand)] text-[var(--brand-on)]"><Check size={14} /></span>}</p>
+          <p className="mt-1 text-sm text-[var(--app-muted)]">{l.text}</p>
+          {l.can.length > 0 && <ul className="mt-2.5 space-y-1 text-[13px]">{l.can.map((c) => <li key={c} className="flex gap-2"><Check size={14} className="mt-0.5 shrink-0 text-emerald-700" />{c}</li>)}</ul>}
+          {l.cannot && <p className="mt-2 text-xs font-medium text-[var(--app-muted)]">{l.cannot}</p>}
+        </button>))}</div>
+      {on && <div className={card}><Title hint="Times are Rwanda time (Kigali).">What it sends you</Title>
+        <ul className="space-y-3.5 text-sm">{([['alerts', BellRing, 'Instant alerts', 'New order, payment received, low stock, new message'], ['morning', Clock, 'Morning plan · 07:30', 'Yesterday in one line, and what needs you today'], ['evening', Receipt, 'Closing summary · 19:30', 'Today’s sales, expenses and profit, and what to prepare'], ['weekly', TrendingUp, 'Weekly review · Monday 08:00', 'The week against your usual, best and worst days, suggestions']] as const).map(([k, Icon, t, d]) => (
+          <li key={k}><label className="flex cursor-pointer items-start gap-3"><input type="checkbox" className="mt-1 h-5 w-5 accent-[var(--brand)]" checked={a[k]} disabled={busy} onChange={(e) => void save({ [k]: e.target.checked } as Partial<AgentSettings>)} /><span><span className="flex items-center gap-2 font-semibold"><Icon size={15} aria-hidden="true" />{t}</span><span className="block text-[var(--app-muted)]">{d}</span></span></label></li>))}</ul>
+        <p className="mt-4 rounded-xl bg-[var(--app-bg)] p-3 text-xs text-[var(--app-muted)]">Each message uses a few of your Bwenge credits. Link Telegram in Settings → Connections to get them on your phone at once.</p></div>}
+      {note && <p role="status" className={`rounded-xl px-4 py-2.5 text-sm ${note.ok ? 'bg-emerald-500/10 text-emerald-700' : 'bg-rose-500/10 text-rose-600'}`}>{note.text}</p>}
+      <div className={card}><h2 className="mb-2 font-display text-lg font-semibold">Or just tell it</h2><ul className="space-y-1.5 text-sm text-[var(--app-muted)]"><li>“Turn on my business agent in assist mode.”</li><li>“Today I sold 5 loaves for 4,000 and bought flour for 8,000.”</li><li>“Ask 0788 123 456 to pay 3,000 for the cake.”</li><li>“What is running out? Order more of anything under 5.”</li></ul><a className={`${btnGhost} mt-3`} href="/chat">Open the assistant</a></div>
     </div>
   );
 }

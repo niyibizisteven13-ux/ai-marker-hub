@@ -1,3 +1,4 @@
+import type { AgentSettings } from './agent.js';
 /**
  * bwenge4biz: a business page on Bwenge (bwenge.space/b/<name>) and the private side the owner uses to run it.
  *
@@ -34,6 +35,8 @@ export interface Business {
   momoCode?: string; momoName?: string; showPay: boolean;
   /** Pay online (customer approves on their phone): the page offers it only when the owner turned it on AND keys are saved. `payOpen` lets visitors type any amount. */
   acceptPay?: boolean; payOpen?: boolean;
+  /** The business agent's settings (private): see agent.ts. */
+  agent?: AgentSettings;
   products: Product[]; media: Media[];
   /** Private to the owner. */
   notes: string;

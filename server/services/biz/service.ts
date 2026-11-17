@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { MediaError, maxBytesFor, sniff, type MediaStore } from './media.js';
+import { cleanAgent, type AgentSettings } from './agent.js';
 import { FIELDS, PROVIDERS, cleanSecrets, keyFrom, open as openSecret, seal, type Provider, type SecretsDoc } from './secrets.js';
 import { PayError, gatewayFor, maskPhone, msisdn, providerOf, realFetch, type Fetch, type Gateway } from './payments.js';
 import { MAX_ENTRIES, cleanEntry, summarize, type LedgerEntry } from './ledger.js';
@@ -16,7 +17,12 @@ import {
  */
 export interface Kv { get<T>(key: string): Promise<T | null>; put(key: string, value: unknown): Promise<void>; del(key: string): Promise<void> }
 export class BizError extends Error { constructor(message: string, public status = 400, public code = 'BIZ') { super(message); } }
-export interface Deps { kv: Kv; media: MediaStore; isPaid: (ownerId: string) => Promise<boolean>; now?: () => number; secretKey?: Buffer; fetchImpl?: Fetch }
+export interface Deps { kv: Kv; media: MediaStore; isPaid: (ownerId: string) => Promise<boolean>; now?: () => number; secretKey?: Buffer; fetchImpl?: Fetch;
+  /** Tells the owner something at once (Telegram, email or the chat outbox). `plan` becomes a Do it / Cancel plan the owner approves. */
+  notify?: (ownerId: string, n: BizNotice) => Promise<void>;
+  /** Keeps the business agent's scheduled digests in line with its settings. */
+  syncAgenda?: (b: Business) => Promise<void> }
+export interface BizNotice { title: string; text: string; plan?: { title: string; steps: Array<{ tool: string; input: Record<string, unknown>; label: string }> } }
 export interface Report { id: string; at: string; slug: string; reason: string; detail: string }
 
 const MAX_STATS_DAYS = 62, MAX_REPORTS = 300;
@@ -36,6 +42,8 @@ function tooMany(key: string, max: number, now: number, windowMs = 3_600_000) {
 export function createBizService(deps: Deps) {
   const { kv, media } = deps; const now = () => (deps.now ?? Date.now)();
   const iso = () => new Date(now()).toISOString();
+  /** An instant alert to the owner, only when their agent is on and alerts are enabled. Never blocks or fails the action that caused it. */
+  const alert = (b: Business, n: BizNotice) => { const a = b.agent; if (!a || a.level === 'off' || !a.alerts || !deps.notify) return; void deps.notify(b.ownerId, n).catch(() => undefined); };
   const secretKey = () => deps.secretKey ?? keyFrom(process.env.BIZ_SECRETS_KEY || process.env.JWT_SECRET || 'bwenge-dev');
 
   const load = async (id: string): Promise<Business | null> => kv.get<Business>(`biz:${id}`);
@@ -56,7 +64,9 @@ export function createBizService(deps: Deps) {
   async function adjustStock(b: Business, productId: string, delta: number): Promise<Product | undefined> {
     const fresh = await load(b.id); const p = fresh?.products.find((x) => x.id === productId); if (!fresh || !p || typeof p.stock !== 'number') return undefined;
     p.stock = Math.max(0, Math.round((p.stock + delta) * 100) / 100); if (p.stock === 0 && delta < 0) p.available = false; if (p.stock > 0 && delta > 0) p.available = true;
-    await save(fresh); return p;
+    await save(fresh);
+    if (delta < 0 && p.stock <= (p.lowAt ?? 5)) alert(fresh, { title: `Low stock · ${fresh.name}`, text: `${p.name}: ${p.stock === 0 ? 'sold out' : `only ${p.stock}${p.unit ? ' ' + p.unit : ''} left`}.`, ...(p.stock === 0 ? {} : {}) });
+    return p;
   }
 
   /** The decrypted keys of one provider, only to call that provider; never returned to anyone. */
@@ -86,6 +96,7 @@ export function createBizService(deps: Deps) {
     if (st === 'pending') { if (now() - Date.parse(e.at) > 15 * 60_000) st = 'failed'; else return e; }
     e.pay.state = st; e.status = st === 'success' ? 'completed' : 'cancelled'; await kv.put(`biz-ledger:${b.id}`, doc);
     if (st === 'success' && e.productId) await adjustStock(b, e.productId, -(e.qty ?? 1));
+    if (st === 'success') alert(b, { title: `Paid · ${b.name}`, text: `${e.amount.toLocaleString('en-US')} RWF received by ${e.pay.provider === 'mtn' ? 'MTN MoMo' : 'Airtel Money'}${e.customer ? ` from ${e.customer}` : ''} (${e.item ?? 'payment'}).` });
     return e;
   }
   async function publicLive(slug: string): Promise<Business | null> {
@@ -137,6 +148,7 @@ export function createBizService(deps: Deps) {
 
     async remove(ownerId: string, id: string): Promise<void> {
       const b = await mine(ownerId, id);
+      await deps.syncAgenda?.({ ...b, agent: undefined }).catch(() => undefined);
       await media.removeAll(b.id).catch(() => undefined);
       await Promise.all([kv.del(`biz:${b.id}`), kv.del(`biz-slug:${b.slug}`), kv.del(`biz-enq:${b.id}`), kv.del(`biz-stats:${b.id}`), kv.del(`biz-ledger:${b.id}`), kv.del(`biz-secrets:${b.id}`)]);
       const ids = (await kv.get<{ ids: string[] }>(`biz-owner:${ownerId}`))?.ids ?? []; await kv.put(`biz-owner:${ownerId}`, { ids: ids.filter((x) => x !== b.id) });
@@ -222,6 +234,11 @@ export function createBizService(deps: Deps) {
       return { ...summarize(items, b.products, now(), days), newMessages: enq.filter((e) => e.status === 'new').length, entries: items.length };
     },
 
+    /* ------------------------------------------------------------ the business agent */
+    async agent(ownerId: string, id: string): Promise<AgentSettings> { return cleanAgent(null, (await mine(ownerId, id)).agent); },
+    async setAgent(ownerId: string, id: string, patch: unknown): Promise<AgentSettings> {
+      const b = await mine(ownerId, id); b.agent = cleanAgent(patch, b.agent); await save(b); await deps.syncAgenda?.(b).catch(() => undefined); return b.agent;
+    },
     /* ------------------------------------------------------------ payment secrets and online payments */
     /** What the owner may see about saved keys: whether each provider is set, the last four characters, the environment, the date. Never the keys. */
     async secretsStatus(ownerId: string, id: string) {
@@ -300,6 +317,7 @@ export function createBizService(deps: Deps) {
       const productId = typeof input.productId === 'string' && b.products.some((p) => p.id === input.productId) ? input.productId : undefined;
       doc.items.unshift({ id: randomUUID(), at: iso(), name: name || 'Visitor', contact, message, ...(productId ? { productId } : {}), status: 'new' });
       await kv.put(`biz-enq:${b.id}`, { items: doc.items.slice(0, lim.enquiries) }); await bump(b.id, 'enquiries').catch(() => undefined);
+      alert(b, { title: `New message · ${b.name}`, text: `${name || 'A visitor'} wrote: "${message.slice(0, 200)}" Contact: ${contact}.` });
       return { saved: true };
     },
 
@@ -313,9 +331,10 @@ export function createBizService(deps: Deps) {
       if (!lines.length) throw new BizError('Choose at least one product.');
       if (tooMany(`ord|${visitor}`, 5, now())) throw new BizError('You sent several orders already. Please try again later.', 429, 'RATE');
       const total = lines.reduce((a, l) => a + (l.p!.price ?? 0) * l.qty, 0); const lim = await limits(b.ownerId);
-      const entry: LedgerEntry = { id: randomUUID(), type: 'sale', amount: Math.max(1, total), at: iso(), status: 'pending', src: 'page', item: lines.map((l) => `${l.p!.name} x${l.qty}`).join(', ').slice(0, 80), customer: name, note: clean(`${contact}${input.note ? ` · ${clean(input.note, 120)}` : ''}`, 200) };
+      const entry: LedgerEntry = { id: randomUUID(), type: 'sale', amount: Math.max(1, total), at: iso(), status: 'pending', src: 'page', item: lines.map((l) => `${l.p!.name} x${l.qty}`).join(', ').slice(0, 80), customer: name, note: clean(`${contact}${input.note ? ` · ${clean(input.note, 120)}` : ''}`, 200), ...(lines.length === 1 ? { productId: lines[0].p!.id, qty: lines[0].qty } : {}) };
       const doc = (await kv.get<{ items: LedgerEntry[] }>(`biz-ledger:${b.id}`)) ?? { items: [] }; doc.items.unshift(entry);
       await kv.put(`biz-ledger:${b.id}`, { items: doc.items.slice(0, Math.max(MAX_ENTRIES, lim.enquiries)) }); await bump(b.id, 'enquiries').catch(() => undefined);
+      alert(b, { title: `New order · ${b.name}`, text: `${name} ordered ${entry.item}${total ? ` (${total.toLocaleString('en-US')} RWF)` : ''}. Contact: ${contact}.`, plan: { title: `Confirm ${name}'s order`, steps: [{ tool: 'biz_orders', input: { business: b.slug, confirm_ids: [entry.id] }, label: `Confirm the order from ${name}: ${entry.item}` }] } });
       return { saved: true, total };
     },
 

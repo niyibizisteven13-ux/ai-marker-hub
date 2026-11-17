@@ -100,3 +100,36 @@ test('online payment end to end: keys saved sealed, never readable, customer pay
   await svc.saveSecrets('o', b.id, 'mtn', { subscriptionKey: 'SKEY123', apiUser: '3f2b8c1e-aaaa-bbbb-cccc-1234567890ab', apiKey: 'APIKEY9999' }); state = 'PENDING';
   const o = await svc.requestPayment('o', b.id, { phone: '0788 123 456', amount: 3000, item: 'Cakes' }); assert.equal(o.status, 'pending'); clock += 16 * 60_000; assert.equal((await svc.refreshPayment('o', b.id, o.id)).status, 'cancelled');
 });
+
+// ---- the business agent
+import { cleanAgent, syncBizAgenda, bizToolsFor, bizSystem } from '../server/services/biz/agent.js';
+import { agendaStore, memoryKV } from '../server/services/agenda/store.js';
+import { toolsFor } from '../server/services/agenda/runner.js';
+
+test('agent: settings are cleaned, the schedule follows them, and the tools it may use grow only with the level', async () => {
+  assert.equal(cleanAgent({ level: 'god' }).level, 'off'); assert.deepEqual(cleanAgent({ level: 'assist', alerts: true, weekly: false }), { level: 'assist', alerts: true, morning: true, evening: true, weekly: false });
+  const store = agendaStore(memoryKV()); const b = { id: 'b1', ownerId: 'o', name: 'Cafe', agent: cleanAgent({ level: 'assist', alerts: true, weekly: false }) };
+  assert.equal(await syncBizAgenda(store, b, new Date('2026-11-17T08:00:00Z')), 2); let items = await store.list('o'); assert.deepEqual(items.map((i) => i.title).sort(), ['Cafe: closing summary', 'Cafe: morning plan']); assert.ok(items.every((i) => i.kind === 'biz' && i.bizId === 'b1' && i.bizLevel === 'assist'));
+  assert.equal(await syncBizAgenda(store, b, new Date('2026-11-17T08:00:00Z')), 2); assert.equal((await store.list('o')).length, 2, 'idempotent');
+  await store.put({ ...(await store.list('o'))[0], id: 'other', bizId: 'b2' }); await syncBizAgenda(store, { ...b, agent: cleanAgent({ level: 'off' }) }); items = await store.list('o'); assert.deepEqual(items.map((i) => i.bizId), ['b2'], 'only this business’s items are removed');
+  const watch = bizToolsFor('watch'), assist = bizToolsFor('assist'), run = bizToolsFor('run');
+  for (const t of [watch, assist, run]) for (const bad of ['biz_request_payment', 'biz_record_sale', 'biz_publish', 'biz_update', 'biz_change_product', 'biz_orders', 'biz_agent']) assert.ok(!t.includes(bad), `${bad} is never given to an unattended run`);
+  assert.ok(!watch.includes('propose_actions') && assist.includes('propose_actions') && !assist.includes('biz_payment_status') && run.includes('biz_payment_status'));
+  assert.deepEqual(toolsFor({ allowMarking: false, kind: 'biz', bizLevel: 'watch' }), watch); assert.ok(bizSystem('run', 'Cafe').includes('Never: publish'));
+});
+
+test('agent alerts: instant notices only when the agent is on with alerts; a new order brings a one-tap confirm plan; a failing notifier never breaks the sale', async () => {
+  const kv = memKv(); const notes: any[] = []; let boom = false; const synced: any[] = [];
+  const svc = createBizService({ kv, media: memoryMediaStore(), isPaid: async () => false, now: () => T0, notify: async (o, n) => { if (boom) throw new Error('telegram down'); notes.push({ o, n }); }, syncAgenda: async (b) => { synced.push(b.agent?.level ?? 'gone'); } }); resetBizLimitsForTests();
+  const b = await svc.create('o', { name: 'Cafe' }); const p = await svc.addProduct('o', b.id, { name: 'Coffee', price: 1000, stock: 6, lowAt: 5 }); await svc.update('o', b.id, { about: 'x' }); await svc.setPublished('o', b.id, true);
+  await svc.submitOrder(b.slug, { name: 'Jo', contact: '0788123456', items: [{ productId: p.id, qty: 1 }] }, 'v1'); await new Promise((r) => setImmediate(r)); assert.equal(notes.length, 0, 'agent off: silent');
+  await assert.rejects(svc.setAgent('intruder', b.id, { level: 'run' }), (e: any) => e.status === 404);
+  await svc.setAgent('o', b.id, { level: 'assist', alerts: true }); assert.deepEqual(synced, ['assist']);
+  await svc.submitOrder(b.slug, { name: 'Ann', contact: '0788123456', items: [{ productId: p.id, qty: 2 }] }, 'v2'); await new Promise((r) => setImmediate(r));
+  assert.equal(notes.length, 1); assert.match(notes[0].n.title, /New order/); assert.equal(notes[0].n.plan.steps[0].tool, 'biz_orders'); assert.equal(notes[0].n.plan.steps[0].input.confirm_ids.length, 1);
+  await svc.submitEnquiry(b.slug, { name: 'Zed', contact: 'z@x.rw', message: 'Do you open on Sunday?' }, 'v3'); await new Promise((r) => setImmediate(r)); assert.match(notes[1].n.title, /New message/);
+  const pending = (await svc.ledger('o', b.id)).find((e) => e.customer === 'Ann')!; await svc.setEntryStatus('o', b.id, pending.id, 'completed'); await svc.addEntry('o', b.id, { type: 'sale', amount: 1000, productId: p.id, qty: 1 }); await new Promise((r) => setImmediate(r));
+  assert.ok(notes.some((x) => /Low stock/.test(x.n.title)), 'stock at or below the alert level warns');
+  boom = true; const r = await svc.submitOrder(b.slug, { name: 'Bo', contact: '0788123456', items: [{ productId: p.id, qty: 1 }] }, 'v4'); assert.equal(r.saved, true);
+  await svc.remove('o', b.id); assert.equal(synced[synced.length - 1], 'gone', 'deleting the business removes its scheduled digests');
+});

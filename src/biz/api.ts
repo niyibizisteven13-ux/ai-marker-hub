@@ -1,5 +1,5 @@
 import { authFetch, getAccessToken, getApiUrl } from '../utils/authFetch';
-import type { SecretsStatus, Business, DayStats, Enquiry, Product, PublicBusiness, LedgerEntry, Dashboard } from './types';
+import type { AgentSettings, SecretsStatus, Business, DayStats, Enquiry, Product, PublicBusiness, LedgerEntry, Dashboard } from './types';
 
 /** Calls to /api/biz. Public calls need no sign-in; the others use the person's own session. */
 export class BizApiError extends Error { constructor(message: string, public status: number, public code?: string) { super(message); } }
@@ -42,6 +42,8 @@ export const ownerApi = {
   addEntry: async (id: string, body: Record<string, unknown>) => read<{ entry: LedgerEntry }>(await authFetch(`/api/biz/${id}/ledger`, json('POST', body))),
   setEntry: async (id: string, eid: string, status: LedgerEntry['status']) => read(await authFetch(`/api/biz/${id}/ledger/${eid}`, json('PATCH', { status }))),
   removeEntry: async (id: string, eid: string) => { const r = await authFetch(`/api/biz/${id}/ledger/${eid}`, json('DELETE')); if (!r.ok) await read(r); },
+  agent: async (id: string) => (await read<{ agent: AgentSettings }>(await authFetch(`/api/biz/${id}/agent`))).agent,
+  setAgent: async (id: string, body: Partial<AgentSettings>) => (await read<{ agent: AgentSettings }>(await authFetch(`/api/biz/${id}/agent`, json('PUT', body)))).agent,
   secrets: async (id: string) => read<SecretsStatus>(await authFetch(`/api/biz/${id}/secrets`)),
   saveSecrets: async (id: string, provider: 'mtn' | 'airtel', body: Record<string, string>) => read<SecretsStatus>(await authFetch(`/api/biz/${id}/secrets/${provider}`, json('PUT', body))),
   clearSecrets: async (id: string, provider: 'mtn' | 'airtel') => read<SecretsStatus>(await authFetch(`/api/biz/${id}/secrets/${provider}`, json('DELETE'))),

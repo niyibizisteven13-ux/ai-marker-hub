@@ -14,5 +14,13 @@ export const appSettingKv: Kv = {
   async del(key: string) { await db.appSetting.delete({ where: { key } }).catch(() => undefined); },
 };
 let svc: BizService | null = null;
-export const bizService = (): BizService => (svc ??= createBizService({ kv: appSettingKv, media: diskMediaStore(), isPaid: async (userId) => { const p = await planFor(userId).catch(() => null); return !!p && p.id !== 'FREE'; } }));
+/** Instant alerts and the agent's schedule use the same machinery as the rest of the assistant: Telegram first, then email, then the chat. */
+async function notifyOwner(ownerId: string, n: import('./service.js').BizNotice) {
+  const [{ liveNotifyDeps, notifyUser }, { proposalStore }] = [await import('../agenda/notify.js').then(async (m) => ({ liveNotifyDeps: m.liveNotifyDeps, notifyUser: m.notifyUser })), await import('../agenda/proposals.js')];
+  let buttons: Array<Array<{ text: string; callback_data: string }>> | undefined;
+  if (n.plan) { const p = await proposalStore().create(ownerId, n.plan.title, n.plan.steps); buttons = [[{ text: `✅ ${n.plan.title.slice(0, 40)}`, callback_data: `pp:run:${p.id}` }, { text: '✖', callback_data: `pp:no:${p.id}` }]]; }
+  await notifyUser(ownerId, { title: n.title, text: n.text, buttons }, await liveNotifyDeps());
+}
+async function syncAgenda(b: import('./model.js').Business) { const [{ agendaStore }, { syncBizAgenda }] = await Promise.all([import('../agenda/store.js'), import('./agent.js')]); await syncBizAgenda(agendaStore(), b); }
+export const bizService = (): BizService => (svc ??= createBizService({ kv: appSettingKv, notify: notifyOwner, syncAgenda, media: diskMediaStore(), isPaid: async (userId) => { const p = await planFor(userId).catch(() => null); return !!p && p.id !== 'FREE'; } }));
 export const setBizServiceForTests = (s: BizService | null) => { svc = s; };

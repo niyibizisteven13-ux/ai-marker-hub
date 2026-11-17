@@ -30,3 +30,5 @@ export interface SecretsStatus {
   mtn: { set: boolean; hint?: string; environment?: string; at?: string }; airtel: { set: boolean; hint?: string; environment?: string; at?: string };
   acceptPay: boolean; payOpen: boolean; fields: Record<'mtn' | 'airtel', Array<{ id: string; label: string; secret: boolean; help: string }>>;
 }
+
+export interface AgentSettings { level: 'off' | 'watch' | 'assist' | 'run'; alerts: boolean; morning: boolean; evening: boolean; weekly: boolean }

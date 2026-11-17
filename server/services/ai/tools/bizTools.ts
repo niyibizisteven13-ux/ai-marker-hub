@@ -227,5 +227,16 @@ export function bizTools(getSvc: () => Promise<BizService> | BizService = async 
       } catch (e) { return failure(e); }
     },
   };
-  return [get, create, update, addProduct, changeProduct, addMedia, publish, link, messages, record('sale'), record('expense'), dashboard, orders, requestPay, payStatus, paySetup, report, stock];
+  const agent: Tool = {
+    definition: { name: 'biz_agent', description: "See or change how much the business agent looks after the business when the owner is away. Levels: off; watch (reports only: morning plan, closing summary, weekly review, instant alerts); assist (also proposes changes the owner approves with one tap on Telegram); run (also settles paid payments and marks messages seen by itself). The agent can never publish, delete, change prices, touch payment keys or send a payment request without a yes. Change only what the owner asked for. Call with no fields to read.",
+      parameters: { type: 'object', properties: { business: BUSINESS, level: { type: 'string', enum: ['off', 'watch', 'assist', 'run'] }, alerts: { type: 'boolean', description: 'Instant alerts: new order, payment received, low stock, new message.' }, morning: { type: 'boolean' }, evening: { type: 'boolean' }, weekly: { type: 'boolean' } } } },
+    async execute(input, ctx) {
+      try {
+        const b = await pick(ctx.userId, input.business); if ('error' in b) return err(b.error); const s = await svc(); const has = ['level', 'alerts', 'morning', 'evening', 'weekly'].some((k) => input[k] !== undefined);
+        const a = has ? await s.setAgent(ctx.userId, b.id, { level: input.level, alerts: input.alerts, morning: input.morning, evening: input.evening, weekly: input.weekly }) : await s.agent(ctx.userId, b.id);
+        return { text: `${has ? 'Updated. ' : ''}Business agent for ${b.name}: ${a.level.toUpperCase()}${a.level === 'off' ? '' : `. Instant alerts ${a.alerts ? 'on' : 'off'}. Sends: ${[a.morning && 'morning plan 07:30', a.evening && 'closing summary 19:30', a.weekly && 'weekly review Monday 08:00'].filter(Boolean).join(', ') || 'no digests'}. They arrive on Telegram if linked, otherwise email, otherwise in this chat.`}` };
+      } catch (e) { return failure(e); }
+    },
+  };
+  return [get, create, update, addProduct, changeProduct, addMedia, publish, link, messages, record('sale'), record('expense'), dashboard, orders, requestPay, payStatus, paySetup, report, stock, agent];
 }

@@ -127,6 +127,8 @@ export function createBizRouter(): Router {
   r.patch('/:id/ledger/:eid', run(async (req, res) => res.json({ entry: await svc().setEntryStatus(me(req), req.params.id, req.params.eid, req.body?.status) })));
   r.delete('/:id/ledger/:eid', run(async (req, res) => { await svc().removeEntry(me(req), req.params.id, req.params.eid); res.status(204).end(); }));
   r.get('/:id/dashboard', run(async (req, res) => res.json(await svc().dashboard(me(req), req.params.id, [7, 30, 90].includes(Number(req.query.days)) ? Number(req.query.days) : 7))));
+  r.get('/:id/agent', run(async (req, res) => res.json({ agent: await svc().agent(me(req), req.params.id) })));
+  r.put('/:id/agent', run(async (req, res) => res.json({ agent: await svc().setAgent(me(req), req.params.id, req.body ?? {}) })));
   r.get('/:id/secrets', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await svc().secretsStatus(me(req), req.params.id)); }));
   r.put('/:id/secrets/:provider', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); await svc().saveSecrets(me(req), req.params.id, req.params.provider, req.body ?? {}); res.json(await svc().secretsStatus(me(req), req.params.id)); }));
   r.delete('/:id/secrets/:provider', run(async (req, res) => { await svc().clearSecrets(me(req), req.params.id, req.params.provider); res.json(await svc().secretsStatus(me(req), req.params.id)); }));

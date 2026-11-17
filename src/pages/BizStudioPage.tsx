@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, BarChart3, Check, ExternalLink, Eye, EyeOff, Film, Globe, ImagePlus, Inbox, KeyRound, LayoutDashboard, Loader2, MessageCircle, MoreHorizontal, Package, Palette, Plus, Receipt, Settings, ShoppingBag, Store, Trash2, Upload, Users } from 'lucide-react';
+import { Bot, ArrowLeft, BarChart3, Check, ExternalLink, Eye, EyeOff, Film, Globe, ImagePlus, Inbox, KeyRound, LayoutDashboard, Loader2, MessageCircle, MoreHorizontal, Package, Palette, Plus, Receipt, Settings, ShoppingBag, Store, Trash2, Upload, Users } from 'lucide-react';
 import BizPage from '../components/biz/BizPage';
-import { DashboardView, NotebookView, CustomersView, ReportsView, SecretsView, EntrySheet, type EntryKind } from '../components/biz/Workspace';
+import { AgentView, DashboardView, NotebookView, CustomersView, ReportsView, SecretsView, EntrySheet, type EntryKind } from '../components/biz/Workspace';
 import { btn, btnGhost, btnPrimary, card, input, msg, Tag, Title } from '../components/biz/ui';
 import { BizApiError, ownerApi, prepareImage, type Mine } from '../biz/api';
 import { CATEGORIES, DAYS, THEMES, rwf, type Business, type Enquiry, type Hours, type PublicBusiness, type SecretsStatus } from '../biz/types';
@@ -190,11 +190,11 @@ function SettingsTab({ b, onChange, onDeleted }: { b: Business; onChange: () => 
 }
 
 /* ------------------------------------------------------------------ the workspace */
-type View = 'dashboard' | 'sales' | 'expenses' | 'products' | 'customers' | 'reports' | 'messages' | 'public' | 'secrets' | 'settings';
+type View = 'agent' | 'dashboard' | 'sales' | 'expenses' | 'products' | 'customers' | 'reports' | 'messages' | 'public' | 'secrets' | 'settings';
 const NAV: Array<{ id: View; label: string; icon: typeof Globe; group?: string }> = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard }, { id: 'sales', label: 'Sales and orders', icon: ShoppingBag }, { id: 'expenses', label: 'Expenses', icon: Receipt },
   { id: 'products', label: 'Products and stock', icon: Package }, { id: 'customers', label: 'Customers', icon: Users }, { id: 'reports', label: 'Reports', icon: BarChart3 },
-  { id: 'messages', label: 'Messages', icon: Inbox }, { id: 'public', label: 'Public page', icon: Globe }, { id: 'secrets', label: 'Secrets and payments', icon: KeyRound }, { id: 'settings', label: 'Settings', icon: Settings },
+  { id: 'messages', label: 'Messages', icon: Inbox }, { id: 'public', label: 'Public page', icon: Globe }, { id: 'agent', label: 'Business agent', icon: Bot }, { id: 'secrets', label: 'Secrets and payments', icon: KeyRound }, { id: 'settings', label: 'Settings', icon: Settings },
 ];
 /** The studio opens in a light surface whatever the app theme is: the same tokens the screens use, redefined here. */
 const LIGHT = { '--app-bg': '#F2F5FA', '--app-panel': '#FFFFFF', '--app-panel-hover': '#F1F4F9', '--app-line': '#E3E8F0', '--app-text': '#0E1722', '--app-muted': '#5B6776', '--app-faint': '#8A94A3' } as React.CSSProperties;
@@ -256,6 +256,7 @@ export default function BizStudioPage({ onBack }: { onBack: () => void }) {
               {view === 'reports' && <ReportsView b={b} />}
               {view === 'products' && <><h1 className="mb-4 font-display text-2xl font-semibold tracking-tight">Products and stock</h1><ProductsTab b={b} urls={urls} onChange={reload} /></>}
               {view === 'messages' && <><h1 className="mb-4 font-display text-2xl font-semibold tracking-tight">Messages</h1><MessagesTab b={b} onChange={reload} /></>}
+              {view === 'agent' && <AgentView b={b} />}
               {view === 'secrets' && <SecretsView b={b} secrets={secrets} reload={() => { loadSecrets(); void load(); }} />}
               {view === 'settings' && <><h1 className="mb-4 font-display text-2xl font-semibold tracking-tight">Settings</h1><SettingsTab b={b} onChange={reload} onDeleted={() => { setView('dashboard'); void load(); }} /></>}
               {view === 'public' && (<>
