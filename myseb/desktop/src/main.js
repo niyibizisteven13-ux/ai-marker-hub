@@ -1,6 +1,7 @@
 'use strict';
 const { postFollowingRedirects } = require('./post');
 const { parseJoin } = require('./joinlink');
+const { pickNotice } = require('./notice');
 const { app, BrowserWindow, Menu, ipcMain, session, clipboard, screen, desktopCapturer, systemPreferences } = require('electron');
 const { execFile } = require('node:child_process');
 const path = require('node:path');
@@ -102,6 +103,7 @@ async function sendViolation(type, detail = {}) {
   } catch { /* the heartbeat will report us missing if we are really offline */ }
 }
 
+let lastNoticeId = '';
 async function heartbeat() {
   if (!exam) return;
   try {
@@ -109,6 +111,8 @@ async function heartbeat() {
     if (!r.ok) throw new Error('hb ' + r.status);
     hbFails = 0;
     applyStatus(r.json);
+    const note = pickNotice(r.json, lastNoticeId);          // a message from the teacher, shown once until the student taps OK
+    if (note) { lastNoticeId = note.id; toRenderer('notice', { title: note.title, text: note.text }); }
   } catch {
     if (++hbFails >= 2) toRenderer('status', { status: exam?.status, offline: true });
   }
@@ -117,7 +121,7 @@ async function heartbeat() {
 function startExam(data) {
   exam = { token: data.token, sessionId: data.sessionId, title: data.title, status: data.status, examOrigin: originOf(data.examUrl) };
   clipboard.clear();                                       // nothing copied before the exam can be pasted into it
-  hbFails = 0;
+  hbFails = 0; lastNoticeId = '';
   clearInterval(hbTimer);
   hbTimer = setInterval(heartbeat, (data.heartbeatSeconds || 5) * 1000);
   clearInterval(watchTimer); watchTimer = setInterval(checkEnvironment, 20000); checkEnvironment();
