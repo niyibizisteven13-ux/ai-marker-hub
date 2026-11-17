@@ -62,7 +62,7 @@ export default function AppearanceSection({ user, onUpdateUser }: { user: User |
     <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="font-['Georgia',serif] text-xl font-normal text-[var(--text)]">Appearance</h2>
+          <h2 className="font-display text-xl font-normal text-[var(--text)]">Appearance</h2>
           <p className="mt-1 text-xs text-[var(--muted)]">Make Bwenge yours. Changes show straight away and follow your account to other devices.</p>
         </div>
         <span className="text-xs text-[var(--muted)]" role="status" aria-live="polite">

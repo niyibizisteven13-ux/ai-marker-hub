@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { PreviewDialog, attachmentSource, type PreviewSource } from './components/FilePreview';
 import { keyOf, thumbnailFor } from './utils/fileKinds';
 import { FormCanvas, brandingOf } from './components/forms/FormCanvas';
-import { applyAppearance, isDark, loadAppearance, normalizeAppearance, saveAppearanceLocally, type Appearance } from './theme/appearance';
+import { applyAppearance, clearAppearance, isDark, loadAppearance, normalizeAppearance, saveAppearanceLocally, type Appearance } from './theme/appearance';
 import bwengeLogo from './assets/bwenge-logo.svg';
 import { useStore } from './store/useStore';
 import {
@@ -230,9 +230,12 @@ export default function App() {
   }, []);
   const darkMode = isDark(appearance);
   useEffect(() => {
+    // Nobody is signed in: the sign-in page and the public pages use their own colours (light or dark by the visitor's choice). Applying the
+    // account theme here painted a dark page under the sign-in page's light cards for visitors whose device is set to a light colour scheme.
+    if (authStatus === 'anonymous') { clearAppearance(); return; }
     applyAppearance(appearance);
     saveAppearanceLocally(appearance);
-  }, [appearance, systemDark]);
+  }, [appearance, systemDark, authStatus]);
   useEffect(() => {
     // The account's saved appearance wins over this browser's copy (it follows the user to other devices).
     const saved = authenticatedUser?.settings?.appearance;
@@ -1476,7 +1479,7 @@ export default function App() {
   if (transcriptLink) return <Suspense fallback={null}><TranscriptPage token={transcriptLink[1]} /></Suspense>;
   // Where students get MySEB (apps + Chrome extension).
   if (window.location.pathname === '/myseb') {
-    return <div className="min-h-[100dvh] bg-slate-50 px-4"><Suspense fallback={null}><MySebRequired page /></Suspense></div>;
+    return <Suspense fallback={null}><MySebRequired page /></Suspense>;
   }
   // Get the app (public): the landing page's QR code and download button lead here.
   if (window.location.pathname === '/get-app') return <GetAppPage />;
@@ -2097,7 +2100,7 @@ export default function App() {
         </Suspense>
       )}
       {settingsOpen && (
-        <div className="fixed inset-0 z-[150] bg-[#FAF9F5]">
+        <div className="fixed inset-0 z-[150] bg-[var(--bg)]">
           <SettingsPage
             user={authenticatedUser}
             onUpdateUser={(u) => {

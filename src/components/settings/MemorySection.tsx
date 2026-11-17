@@ -82,7 +82,7 @@ export default function MemorySection() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="font-['Georgia',serif] text-xl font-normal text-[var(--text)]">Memory</h2>
+        <h2 className="font-display text-xl font-normal text-[var(--text)]">Memory</h2>
         <p className="mt-0.5 text-xs text-[var(--muted)]">Bwenge remembers who you are, how you like answers and what you worked on, across all your chats on the web and in Telegram.</p>
       </div>
 

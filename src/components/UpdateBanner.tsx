@@ -31,11 +31,11 @@ export default function UpdateBanner() {
 
   if (!ready) return null;
   return (
-    <div role="status" className="fixed inset-x-3 bottom-3 z-[250] mx-auto flex max-w-md items-center gap-3 rounded-2xl border border-white/10 bg-[#14161b] p-3 text-sm text-white shadow-2xl">
-      <RefreshCw size={18} className="shrink-0 text-[#F6B94A]" />
+    <div role="status" className="fixed inset-x-3 bottom-3 z-[250] mx-auto flex max-w-md items-center gap-3 rounded-2xl border border-[var(--app-line)] bg-[var(--app-panel)] p-3 text-sm text-[var(--app-text)] shadow-2xl">
+      <RefreshCw size={18} className="shrink-0 text-[var(--brand)]" />
       <span className="min-w-0 flex-1">A new version of Bwenge is ready.</span>
-      <button type="button" onClick={() => window.location.reload()} className="min-h-10 shrink-0 rounded-xl bg-[#F6B94A] px-4 text-sm font-semibold text-black">Update</button>
-      <button type="button" onClick={() => setReady(false)} aria-label="Later" className="shrink-0 px-1 text-neutral-400 hover:text-white">Later</button>
+      <button type="button" onClick={() => window.location.reload()} className="min-h-10 shrink-0 rounded-xl bg-[var(--brand)] px-4 text-sm font-semibold text-[var(--brand-on)]">Update</button>
+      <button type="button" onClick={() => setReady(false)} aria-label="Later" className="shrink-0 px-1 text-[var(--app-muted)] hover:text-white">Later</button>
     </div>
   );
 }

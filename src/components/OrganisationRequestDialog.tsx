@@ -7,7 +7,7 @@ interface OrganisationRequestDialogProps {
   onClose: () => void;
 }
 
-const SERIF = "font-['Georgia','Tiempos_Headline','Times_New_Roman',serif]";
+const SERIF = "font-display";
 
 export default function OrganisationRequestDialog({ isOpen, onClose }: OrganisationRequestDialogProps) {
   const [organizationName, setOrganizationName] = useState('');

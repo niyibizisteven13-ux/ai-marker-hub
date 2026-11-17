@@ -205,7 +205,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
               <img src={logoUrl} alt="" className="h-full w-full object-cover" />
             </div>
             <div className="min-w-0 leading-tight">
-              <div className="font-serif text-[17px] font-medium tracking-tight text-white">Bwenge</div>
+              <div className="font-display text-[17px] font-medium tracking-tight text-white">Bwenge</div>
               <div className="text-[11px] text-[var(--app-faint)]">Education · Research · Data</div>
             </div>
           </div>

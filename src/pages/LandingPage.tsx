@@ -55,6 +55,7 @@ export default function LandingPage({ onLoginSuccess }: { onLoginSuccess: (user?
           </div>
 
           <div className="mid">
+            <h1 className="h1">{t('h1')}</h1>
             <p className="sub">{t('sub')}</p>
 
             {waitingForPasskey ? <MfaStep onDone={(next) => { window.location.href = next; }} /> : <AuthFlow

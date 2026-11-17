@@ -32,7 +32,7 @@ export function explain(e: unknown): string {
   return 'This device could not be used. Please try again.';
 }
 
-export const status = () => call<PasskeyStatus>('/status');
+export const status = async (): Promise<PasskeyStatus> => { const b = await call<Partial<PasskeyStatus>>('/status'); return { creds: Array.isArray(b?.creds) ? b.creds : [], required: b?.required === true, recoveryLeft: Number(b?.recoveryLeft) || 0 }; };
 export async function addPasskey(name?: string): Promise<{ recoveryCodes: string[] | null } & PasskeyStatus> {
   const optionsJSON = await call('/register/options', json({}));
   const response = await startRegistration({ optionsJSON });

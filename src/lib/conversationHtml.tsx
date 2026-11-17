@@ -96,7 +96,7 @@ export async function conversationHtml(messages: Message[], title: string, get: 
 <title>${esc(title)}</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.19.0/dist/katex.min.css">
 <style>
-:root{--bg:#FAF9F5;--card:#fff;--text:#1F1E1D;--muted:#6B6A64;--line:#E6E3DA;--user:#F0EEE6;--accent:#C96442;--code:#F4F2EC}
+:root{--bg:#FAF9F5;--card:#fff;--text:#1F1E1D;--muted:#6B6A64;--line:#E6E3DA;--user:#F0EEE6;--accent:#B7791F;--code:#F4F2EC}
 @media (prefers-color-scheme:dark){:root{--bg:#262624;--card:#30302E;--text:#ECEBE6;--muted:#A3A29C;--line:#3D3C39;--user:#3A3936;--accent:#E08A6A;--code:#1F1E1D}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15.5px/1.65 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
 header{max-width:780px;margin:0 auto;padding:28px 16px 8px}header h1{font-size:22px;margin:0 0 4px}header p{margin:0;color:var(--muted);font-size:13px}

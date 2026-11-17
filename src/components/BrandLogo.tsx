@@ -1,6 +1,10 @@
 export function BrandLogo() {
   return (
     <svg className="logo" viewBox="0 0 528 536" role="img" aria-label="Bwenge">
+      <defs>
+        <linearGradient id="goldGrad" x1="10%" y1="0%" x2="90%" y2="100%"><stop offset="0%" stopColor="#F6B94A" /><stop offset="100%" stopColor="#E08C1E" /></linearGradient>
+        <linearGradient id="tealGrad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor="#4CE5D6" /><stop offset="100%" stopColor="#1FB3A6" /></linearGradient>
+      </defs>
       <rect width="528" height="536" rx="100" fill="#0B1420" />
       <g transform="translate(0,536) scale(0.1,-0.1)">
         <path

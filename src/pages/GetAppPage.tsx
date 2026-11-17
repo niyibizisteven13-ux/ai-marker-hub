@@ -3,6 +3,7 @@ import { ArrowLeft, CheckCircle2, Download, Monitor, Share, Smartphone, SquarePl
 import { PLATFORM_LABEL, detectPlatform, type Platform } from '../utils/device';
 import { getApiUrl } from '../utils/authFetch';
 import { StarsDisplay } from '../components/Stars';
+import { PublicFooter, PublicHeader, PublicPage } from '../components/PublicChrome';
 import AppFeedbackForm from '../components/AppFeedbackForm';
 
 /**
@@ -29,25 +30,25 @@ function StatsRow({ stat }: { stat: AppStat | undefined }) {
   if (!stat) return null;
   const n = (x: number) => x.toLocaleString('en-US');
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-neutral-300">
+    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--app-muted)]">
       {stat.rating.average !== null
-        ? <span className="inline-flex items-center gap-1.5"><StarsDisplay value={stat.rating.average} size={14} /><b className="text-white">{stat.rating.average.toFixed(1)}</b><span className="text-neutral-400">({n(stat.rating.count)} {stat.rating.count === 1 ? 'rating' : 'ratings'})</span></span>
-        : <span className="text-neutral-500">No ratings yet</span>}
-      <span className="inline-flex items-center gap-1.5"><Download size={13} className="text-neutral-400" /><b className="text-white">{n(stat.downloads)}</b><span className="text-neutral-400">{stat.downloads === 1 ? 'download' : 'downloads'}</span></span>
+        ? <span className="inline-flex items-center gap-1.5"><StarsDisplay value={stat.rating.average} size={14} /><b className="text-[var(--app-text)]">{stat.rating.average.toFixed(1)}</b><span className="text-[var(--app-muted)]">({n(stat.rating.count)} {stat.rating.count === 1 ? 'rating' : 'ratings'})</span></span>
+        : <span className="text-[var(--app-faint)]">No ratings yet</span>}
+      <span className="inline-flex items-center gap-1.5"><Download size={13} className="text-[var(--app-muted)]" /><b className="text-[var(--app-text)]">{n(stat.downloads)}</b><span className="text-[var(--app-muted)]">{stat.downloads === 1 ? 'download' : 'downloads'}</span></span>
     </div>
   );
 }
-const card = 'rounded-2xl border border-white/10 bg-white/[0.04] p-5';
-const primary = 'inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#F6B94A] px-5 text-sm font-semibold text-black hover:opacity-90 disabled:opacity-60';
+const card = 'rounded-2xl border border-[var(--app-line)] bg-[var(--app-panel)] p-5 sm:p-6';
+const primary = 'inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[var(--brand)] px-5 text-sm font-semibold text-[var(--brand-on)] hover:opacity-90 disabled:opacity-60';
 
 function HowTo({ platform }: { platform: Platform }) {
   if (platform === 'ios') return (
-    <ol className="space-y-2 text-sm text-neutral-300">
-      <li className="flex gap-2"><Share size={16} className="mt-0.5 shrink-0 text-[#F6B94A]" /><span>Open this page in <b>Safari</b> and tap the <b>Share</b> button.</span></li>
-      <li className="flex gap-2"><SquarePlus size={16} className="mt-0.5 shrink-0 text-[#F6B94A]" /><span>Choose <b>Add to Home Screen</b>, then <b>Add</b>. Bwenge opens like an app.</span></li>
+    <ol className="space-y-2 text-sm text-[var(--app-muted)]">
+      <li className="flex gap-2"><Share size={16} className="mt-0.5 shrink-0 text-[var(--brand)]" /><span>Open this page in <b>Safari</b> and tap the <b>Share</b> button.</span></li>
+      <li className="flex gap-2"><SquarePlus size={16} className="mt-0.5 shrink-0 text-[var(--brand)]" /><span>Choose <b>Add to Home Screen</b>, then <b>Add</b>. Bwenge opens like an app.</span></li>
     </ol>
   );
-  return <p className="text-sm text-neutral-300">Open the browser menu (⋮ or the install icon in the address bar) and choose <b>Install Bwenge</b>{platform === 'android' ? ' or Add to Home screen' : ''}. Chrome and Edge can install it; some other browsers cannot.</p>;
+  return <p className="text-sm text-[var(--app-muted)]">Open the browser menu (⋮ or the install icon in the address bar) and choose <b>Install Bwenge</b>{platform === 'android' ? ' or Add to Home screen' : ''}. Chrome and Edge can install it; some other browsers cannot.</p>;
 }
 
 export default function GetAppPage() {
@@ -70,43 +71,47 @@ export default function GetAppPage() {
   const mysebFirst = [...MYSEB].sort((a, b) => Number(b.id === me) - Number(a.id === me));
 
   return (
-    <div className="min-h-[100dvh] overflow-y-auto bg-[#0B1420] px-4 py-8 text-white">
-      <main className="mx-auto w-full max-w-xl space-y-6">
-        <a href="/" className="inline-flex items-center gap-2 text-xs text-neutral-400 hover:text-white"><ArrowLeft size={14} />Back to Bwenge</a>
-        <header><h1 className="text-2xl font-semibold">Get Bwenge</h1><p className="mt-1 text-sm text-neutral-400">Mark, make quizzes and explore your data. We found: <b className="text-white">{PLATFORM_LABEL[me]}</b>.</p></header>
+    <PublicPage>
+      <PublicHeader />
+      <main className="mx-auto w-full max-w-xl flex-1 space-y-6 px-5 pb-16 pt-10 sm:pt-14">
+        <header>
+          <h1 className="font-display text-4xl font-semibold tracking-tight sm:text-5xl">Get Bwenge</h1>
+          <p className="mt-3 text-base text-[var(--app-muted)]">Mark, make quizzes and explore your data. We found: <b className="text-[var(--app-text)]">{PLATFORM_LABEL[me]}</b>.</p>
+        </header>
 
         <section className={card} aria-labelledby="bwenge-h">
-          <h2 id="bwenge-h" className="flex items-center gap-2 text-base font-semibold"><Smartphone size={18} className="text-[#F6B94A]" />Bwenge app</h2>
-          <p className="mt-1 text-xs text-neutral-400">Works on every phone and computer and updates itself each time you open it.</p>
+          <h2 id="bwenge-h" className="flex items-center gap-2 text-base font-semibold"><Smartphone size={18} className="text-[var(--brand)]" />Bwenge app</h2>
+          <p className="mt-1 text-xs text-[var(--app-muted)]">Works on every phone and computer and updates itself each time you open it.</p>
           <StatsRow stat={stats?.bwenge} />
           <div className="mt-4 space-y-3">
             {installed ? <p className="flex items-center gap-2 text-sm text-emerald-300"><CheckCircle2 size={18} />Bwenge is installed on this device.</p>
               : prompt ? <button type="button" className={primary} onClick={() => void install()}><Download size={18} />Install Bwenge on {PLATFORM_LABEL[me]}</button>
               : <HowTo platform={me} />}
-            {!installed && !prompt && me !== 'ios' && <a href="/" className="block text-center text-xs text-neutral-400 underline">Or just open Bwenge in the browser</a>}
+            {!installed && !prompt && me !== 'ios' && <a href="/" className="block text-center text-xs text-[var(--app-muted)] underline">Or just open Bwenge in the browser</a>}
           </div>
-          {me !== 'ios' && <details className="mt-4 text-xs text-neutral-400"><summary className="cursor-pointer">iPhone or iPad?</summary><div className="mt-2"><HowTo platform="ios" /></div></details>}
+          {me !== 'ios' && <details className="mt-4 text-xs text-[var(--app-muted)]"><summary className="cursor-pointer">iPhone or iPad?</summary><div className="mt-2"><HowTo platform="ios" /></div></details>}
         </section>
 
         <section className={card} aria-labelledby="myseb-h">
-          <h2 id="myseb-h" className="flex items-center gap-2 text-base font-semibold"><Monitor size={18} className="text-[#F6B94A]" />MySEB: the app for taking an exam</h2>
-          <p className="mt-1 text-xs text-neutral-400">For students. Your lecturer gives you the exam code. Choose your device:</p>
+          <h2 id="myseb-h" className="flex items-center gap-2 text-base font-semibold"><Monitor size={18} className="text-[var(--brand)]" />MySEB: the app for taking an exam</h2>
+          <p className="mt-1 text-xs text-[var(--app-muted)]">For students. Your lecturer gives you the exam code. Choose your device:</p>
           <StatsRow stat={stats?.myseb} />
-          {me === 'ios' && <p className="mt-3 rounded-lg bg-white/5 p-3 text-xs text-neutral-300">MySEB has no iPhone or iPad app yet. Use a laptop, an Android phone, or ask your lecturer.</p>}
+          {me === 'ios' && <p className="mt-3 rounded-lg bg-[var(--app-panel-hover)] p-3 text-xs text-[var(--app-muted)]">MySEB has no iPhone or iPad app yet. Use a laptop, an Android phone, or ask your lecturer.</p>}
           <ul className="mt-4 grid grid-cols-2 gap-2">
             {mysebFirst.map((p, i) => (
-              <li key={p.id}><a href={`/api/app/go/myseb/${p.id}`} className={`flex min-h-14 flex-col items-center justify-center rounded-xl border px-2 text-center text-sm ${p.id === me ? 'border-[#F6B94A] bg-[#F6B94A]/10 font-semibold' : 'border-white/10 hover:bg-white/5'}`}>
-                {p.name}<span className="text-[11px] font-normal text-neutral-400">{p.file}{i === 0 && p.id === me ? ' · for you' : ''}</span></a></li>
+              <li key={p.id}><a href={`/api/app/go/myseb/${p.id}`} className={`flex min-h-14 flex-col items-center justify-center rounded-xl border px-2 text-center text-sm ${p.id === me ? 'border-[var(--brand)] bg-[var(--brand)]/10 font-semibold' : 'border-[var(--app-line)] hover:bg-[var(--app-panel-hover)]'}`}>
+                {p.name}<span className="text-[11px] font-normal text-[var(--app-muted)]">{p.file}{i === 0 && p.id === me ? ' · for you' : ''}</span></a></li>
             ))}
           </ul>
         </section>
 
         <section className={card} aria-labelledby="fb-h">
           <h2 id="fb-h" className="text-base font-semibold">How is it working for you?</h2>
-          <p className="mb-5 mt-1 text-xs text-neutral-400">Your rating helps others, and your comments help us improve.</p>
+          <p className="mb-5 mt-1 text-xs text-[var(--app-muted)]">Your rating helps others, and your comments help us improve.</p>
           <AppFeedbackForm platform={me} />
         </section>
       </main>
-    </div>
+      <PublicFooter />
+    </PublicPage>
   );
 }

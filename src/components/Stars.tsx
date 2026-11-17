@@ -9,8 +9,8 @@ export function StarsDisplay({ value, size = 16 }: { value: number; size?: numbe
         const fill = Math.max(0, Math.min(1, value - (n - 1)));
         return (
           <span key={n} className="relative inline-block" style={{ width: size, height: size }}>
-            <Star size={size} className="absolute inset-0 text-white/20" />
-            <span className="absolute inset-0 overflow-hidden" style={{ width: `${fill * 100}%` }}><Star size={size} className="fill-[#F6B94A] text-[#F6B94A]" /></span>
+            <Star size={size} className="absolute inset-0 text-[var(--app-faint)]/40" />
+            <span className="absolute inset-0 overflow-hidden" style={{ width: `${fill * 100}%` }}><Star size={size} className="fill-[var(--brand)] text-[var(--brand)]" /></span>
           </span>
         );
       })}
@@ -29,12 +29,12 @@ export function StarsInput({ value, onChange, label }: { value: number; onChange
           <button key={n} type="button" role="radio" aria-checked={value === n} aria-label={`${n} ${n === 1 ? 'star' : 'stars'}: ${WORDS[n]}`} tabIndex={value === n || (!value && n === 1) ? 0 : -1}
             onMouseEnter={() => setHover(n)} onClick={() => onChange(n)}
             onKeyDown={(e) => { if (e.key === 'ArrowRight' || e.key === 'ArrowUp') { e.preventDefault(); onChange(Math.min(5, (value || 0) + 1)); } else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') { e.preventDefault(); onChange(Math.max(1, (value || 2) - 1)); } }}
-            className="flex h-11 w-11 items-center justify-center rounded-lg outline-none transition-transform hover:scale-110 focus-visible:ring-2 focus-visible:ring-[#F6B94A]">
-            <Star size={30} className={n <= shown ? 'fill-[#F6B94A] text-[#F6B94A]' : 'text-white/25'} />
+            className="flex h-11 w-11 items-center justify-center rounded-lg outline-none transition-transform hover:scale-110 focus-visible:ring-2 focus-visible:ring-[var(--brand)]">
+            <Star size={30} className={n <= shown ? 'fill-[var(--brand)] text-[var(--brand)]' : 'text-[var(--app-faint)]/50'} />
           </button>
         ))}
       </div>
-      <p className="mt-1 h-5 text-sm text-neutral-300" aria-live="polite">{shown ? WORDS[shown] : 'Tap a star'}</p>
+      <p className="mt-1 h-5 text-sm text-[var(--app-muted)]" aria-live="polite">{shown ? WORDS[shown] : 'Tap a star'}</p>
     </div>
   );
 }

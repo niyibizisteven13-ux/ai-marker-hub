@@ -3,29 +3,29 @@
  * like Chrome's colour themes. These defaults are the original Bwenge look; src/theme/appearance.ts overrides them.
  */
 :root {
-  --brand: #D97757;
-  --brand-soft: #F0A586;
-  --brand-strong: #C96A4C;
-  --brand-on: #FFFFFF;
+  --brand: #E9A23B;
+  --brand-soft: #F2C27A;
+  --brand-strong: #D48A1E;
+  --brand-on: #141B26;
 
   /* Chat */
-  --app-bg: #262624;
-  --app-panel: #30302E;
-  --app-panel-hover: #363634;
-  --app-panel-2: #1F1E1D;
-  --app-sunken: #141413;
-  --app-text: #FAF9F5;
-  --app-muted: #C2C0B6;
-  --app-faint: #9C9A92;
+  --app-bg: #0C131D;
+  --app-panel: #121B27;
+  --app-panel-hover: #172230;
+  --app-panel-2: #0E1620;
+  --app-sunken: #080D14;
+  --app-text: #EAF0F6;
+  --app-muted: #B4C0CE;
+  --app-faint: #8494A8;
   --app-line: rgb(255 255 255 / 0.10);
 
   /* Workspace pages (Tasks, Forms, Practice, Classes) */
-  --ws-bg: #0F1012;
-  --ws-card: #16171B;
-  --ws-card-hover: #191A1F;
-  --ws-sunken: #111216;
-  --ws-text: #ECECEE;
-  --invert-bg: #ECECEE;
+  --ws-bg: #090F16;
+  --ws-card: #111A25;
+  --ws-card-hover: #152030;
+  --ws-sunken: #0B121A;
+  --ws-text: #EAF0F6;
+  --invert-bg: #EAF0F6;
 }
 
 /*

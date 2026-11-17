@@ -6,7 +6,7 @@ interface UpgradeSheetProps {
   onSelectPlan: (plan: 'individual' | 'business' | 'organisation') => void;
 }
 
-const SERIF = "font-['Georgia','Tiempos_Headline','Times_New_Roman',serif]";
+const SERIF = "font-display";
 
 export default function UpgradeSheet({ isOpen, onClose, onSelectPlan }: UpgradeSheetProps) {
   if (!isOpen) return null;

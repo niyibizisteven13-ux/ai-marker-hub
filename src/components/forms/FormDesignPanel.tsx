@@ -49,7 +49,7 @@ export function FormDesignPanel({ color, branding, onColor, onBranding, onClose,
         <div className="space-y-3">
           <p className={label}>Colour</p>
           <div className="flex flex-wrap items-center gap-2">
-            {['#D97757', '#1E7A4F', '#2F6FED', '#1F3A68', '#8B5CF6', '#DB4F8E', '#D93F3F', '#EA7A1A', '#0F9D8F', '#3F3F46'].map((c) => (
+            {['#E9A23B', '#D97757', '#1E7A4F', '#2F6FED', '#1F3A68', '#8B5CF6', '#DB4F8E', '#D93F3F', '#EA7A1A', '#0F9D8F', '#3F3F46'].map((c) => (
               <button key={c} type="button" aria-label={`Colour ${c}`} onClick={() => onColor(c)} className={`h-8 w-8 rounded-full ring-offset-2 ${color.toLowerCase() === c.toLowerCase() ? 'ring-2 ring-[#202124]' : ''}`} style={{ backgroundColor: c }} />
             ))}
             <label className="relative h-8 w-8 cursor-pointer overflow-hidden rounded-full" title="Any colour" style={{ background: 'conic-gradient(#f43f5e, #f59e0b, #22c55e, #06b6d4, #6366f1, #d946ef, #f43f5e)' }}>

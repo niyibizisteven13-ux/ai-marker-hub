@@ -8,7 +8,7 @@ import { openReceipt } from '../../pages/UpgradePage';
 interface Me { plan: 'FREE' | 'GO' | 'STARTER' | 'PRO' | 'PLUS' | 'INSTITUTION'; planName: string; wallet: number; subscription: { planType: string; endDate: string | null; daysLeft: number | null } | null; payments: 'ready' | 'unavailable' }
 interface Payment { id: string; purpose: string; months: number; credits: number; amountRwf: number; currency: string; status: string; receiptNumber: string | null; createdAt: string; paidAt: string | null; phoneMasked: string }
 
-const SERIF = "font-['Georgia','Tiempos_Headline','Times_New_Roman',serif]";
+const SERIF = "font-display";
 const STATUS: Record<string, { label: string; icon: React.ReactNode; tone: string }> = {
   SUCCESSFUL: { label: 'Paid', icon: <CheckCircle2 size={13} />, tone: 'text-[var(--teal)]' },
   PENDING: { label: 'Pending', icon: <Clock size={13} />, tone: 'text-[var(--accent)]' },

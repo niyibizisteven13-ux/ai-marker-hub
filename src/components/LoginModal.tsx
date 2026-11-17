@@ -132,7 +132,7 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess, defaultIsS
         <div className="mb-6 flex items-center gap-3.5">
           <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--brand)]/15 text-[var(--brand)] text-xl">✦</span>
           <div>
-            <h2 className="text-xl font-serif font-medium">{isSignUp ? 'Create account' : 'Sign in to Bwenge'}</h2>
+            <h2 className="text-xl font-display font-medium">{isSignUp ? 'Create account' : 'Sign in to Bwenge'}</h2>
             <p className="text-xs text-neutral-400">Secure AI grading workspace for teachers</p>
           </div>
         </div>

@@ -277,7 +277,7 @@ async function audioThumb(blob: Blob): Promise<Thumb> {
     const c = document.createElement('canvas');
     c.width = 288; c.height = 160;
     const g = c.getContext('2d')!;
-    g.fillStyle = '#D97757';
+    g.fillStyle = '#E9A23B';
     const w = c.width / bars;
     peaks.forEach((p, i) => { const h = Math.max(4, (p / top) * c.height * 0.7); g.fillRect(i * w + w * 0.2, (c.height - h) / 2, w * 0.6, h); });
     return { image: c.toDataURL('image/png'), meta: mmss(audio.duration) };

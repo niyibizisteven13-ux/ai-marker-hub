@@ -109,7 +109,7 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
   const totalBytes = files.reduce((a, f) => a + f.file.size, 0);
 
   const shell = (body: React.ReactNode) => (
-    <div className="scroll-area h-dvh overflow-y-auto overscroll-contain bg-[#F5F3EE] text-[#1F1E1D]">
+    <div className="scroll-area h-dvh overflow-y-auto overscroll-contain bg-[#F5F3EE] text-[#0E1722]">
       <header className="mx-auto flex max-w-xl items-center gap-2 px-4 pt-5">
         <img src={logoUrl} alt="" className="h-7 w-7 rounded-lg" />
         <span className="text-[14px] font-semibold">Bwenge</span>
@@ -140,7 +140,7 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
             <p className="text-[13.5px] font-semibold text-neutral-900">Your result</p>
             <p className="mt-1 text-[13px] text-neutral-600">{state.codeTests && !state.autoMark ? 'Your program is being tested now. Keep this private link: the result appears there in a moment.' : 'Your answer is being marked. Keep this private link: your marks, feedback and marked paper appear there when your teacher releases them.'}</p>
             <div className="mt-3 flex flex-wrap gap-2">
-              <a href={state.resultLink.replace(/^https?:\/\/[^/]+/, '')} className="inline-flex items-center gap-1.5 rounded-lg bg-[#1F1E1D] px-3 py-2 text-[13px] font-semibold text-white">Open my result page</a>
+              <a href={state.resultLink.replace(/^https?:\/\/[^/]+/, '')} className="inline-flex items-center gap-1.5 rounded-lg bg-[#0E1722] px-3 py-2 text-[13px] font-semibold text-white">Open my result page</a>
               <button type="button" onClick={() => { void navigator.clipboard?.writeText(state.resultLink!).catch(() => undefined); }} className="rounded-lg border border-neutral-300 px-3 py-2 text-[13px] font-medium hover:bg-neutral-50">Copy link</button>
             </div>
           </div>

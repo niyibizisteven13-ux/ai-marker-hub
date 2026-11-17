@@ -82,7 +82,7 @@ export default function ConnectionsSection() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-normal text-[var(--text)] font-['Georgia',serif]">Connected Apps & Integrations</h2>
+        <h2 className="text-xl font-normal text-[var(--text)] font-display">Connected Apps & Integrations</h2>
         <p className="mt-1 text-xs text-[var(--muted)]">Link your Bwenge account to Telegram for instant batch grading, forms, and AI companion notifications.</p>
       </div>
 

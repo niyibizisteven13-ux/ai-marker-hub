@@ -38,14 +38,14 @@ export default function AppLock() {
   useEffect(() => { document.documentElement.style.overflow = locked ? 'hidden' : ''; return () => { document.documentElement.style.overflow = ''; }; }, [locked]);
   if (!locked) return null;
   return (
-    <div role="dialog" aria-modal="true" aria-label="App locked" className="fixed inset-0 z-[500] flex flex-col items-center justify-center gap-5 bg-[#060B12] px-6 text-center text-white">
-      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/10"><Lock size={28} /></div>
-      <div><h1 className="text-xl font-semibold">Bwenge is locked</h1><p className="mt-1 text-sm text-white/60">Use your fingerprint or face to continue.</p></div>
-      <button type="button" onClick={() => void unlock()} disabled={busy} className="inline-flex min-h-12 items-center gap-2 rounded-2xl bg-[#F6B94A] px-6 text-sm font-semibold text-black disabled:opacity-60">
+    <div role="dialog" aria-modal="true" aria-label="App locked" className="fixed inset-0 z-[500] flex flex-col items-center justify-center gap-5 bg-[var(--app-bg)] px-6 text-center text-[var(--app-text)]">
+      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[var(--app-panel-hover)]"><Lock size={28} /></div>
+      <div><h1 className="text-xl font-semibold">Bwenge is locked</h1><p className="mt-1 text-sm text-[var(--app-muted)]">Use your fingerprint or face to continue.</p></div>
+      <button type="button" onClick={() => void unlock()} disabled={busy} className="inline-flex min-h-12 items-center gap-2 rounded-2xl bg-[var(--brand)] px-6 text-sm font-semibold text-[var(--brand-on)] disabled:opacity-60">
         {busy ? <Loader2 size={18} className="animate-spin" /> : <Fingerprint size={20} />} Unlock
       </button>
-      {msg && <p role="alert" className="max-w-xs text-sm text-rose-300">{msg}</p>}
-      <button type="button" onClick={() => void (async () => { await authService.logout().catch(() => undefined); writeAppLock({ on: false, minutes: 1 }); window.location.href = '/'; })()} className="text-xs text-white/50 underline">Can’t unlock? Sign out and sign in again</button>
+      {msg && <p role="alert" className="max-w-xs text-sm text-[var(--danger)]">{msg}</p>}
+      <button type="button" onClick={() => void (async () => { await authService.logout().catch(() => undefined); writeAppLock({ on: false, minutes: 1 }); window.location.href = '/'; })()} className="text-xs text-[var(--app-faint)] underline">Can’t unlock? Sign out and sign in again</button>
     </div>
   );
 }

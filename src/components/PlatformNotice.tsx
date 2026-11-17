@@ -14,7 +14,7 @@ export default function PlatformNotice() {
   useEffect(() => {
     try { setHidden(sessionStorage.getItem(seenKey) ?? ''); } catch { /* storage unavailable */ }
     let stop = false;
-    const load = () => fetch('/api/platform/status', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).then((j) => { if (!stop && j) setS(j); }).catch(() => undefined);
+    const load = () => fetch('/api/platform/status', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).then((j) => { if (!stop && j && typeof j === 'object') setS({ maintenance: { on: j.maintenance?.on === true, message: typeof j.maintenance?.message === 'string' ? j.maintenance.message : undefined }, announcement: j.announcement && typeof j.announcement.text === 'string' && j.announcement.text ? { text: j.announcement.text, level: (['info', 'warning', 'critical'] as const).includes(j.announcement.level) ? j.announcement.level : 'info' } : null }); }).catch(() => undefined);
     void load(); const t = window.setInterval(load, 60_000);
     return () => { stop = true; window.clearInterval(t); };
   }, []);

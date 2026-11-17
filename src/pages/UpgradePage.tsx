@@ -33,7 +33,7 @@ interface UpgradePageProps {
   onSuccess: () => void;
 }
 
-const SERIF = "font-['Georgia','Tiempos_Headline','Times_New_Roman',serif]";
+const SERIF = "font-display";
 const rwf = (n: number) => `${Math.round(n).toLocaleString('en-US')} RWF`;
 const usd = (n: number) => `$${Number.isInteger(n) ? n : n.toFixed(2)}`;
 const REASONS: Record<string, { title: string; body: string }> = {
