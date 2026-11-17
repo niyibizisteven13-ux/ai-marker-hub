@@ -80,13 +80,6 @@ interface CreateStudioProps {
 
 const sourceOf = attachmentSource;
 
-/** How hard the assistant thinks. Chosen from the conversation menu, so the header can stay almost empty. */
-const ANSWER_MODES = [
-  { id: 'auto', label: 'Auto', hint: 'Balanced' },
-  { id: 'fast', label: 'Fast', hint: 'Real-time' },
-  { id: 'deep', label: 'Deep', hint: 'Reasoning' },
-] as const;
-
 export default function CreateStudio({
   messages,
   onSendMessage,
@@ -511,13 +504,6 @@ export default function CreateStudio({
 
                 {/* Answers Section */}
                 <div className="px-3 pb-1.5 pt-1 font-bold text-[10px] tracking-[.14em] uppercase text-neutral-400">Answer preferences</div>
-                <div role="radiogroup" aria-label="Answer mode" className="mb-1 flex gap-1 px-2">
-                  {ANSWER_MODES.map((m) => (
-                    <button key={m.id} type="button" role="radio" aria-checked={(selectedProvider ?? 'auto') === m.id} onClick={() => onProviderChange?.(m.id)}
-                      className={`min-h-9 flex-1 rounded-lg px-2 text-xs font-semibold transition-colors ${(selectedProvider ?? 'auto') === m.id ? 'bg-[#5DCAA5]/20 text-white' : 'text-neutral-300 hover:bg-white/[.07]'}`}
-                      title={m.hint}>{m.label}</button>
-                  ))}
-                </div>
                 <button
                   type="button"
                   aria-pressed={showSources}
