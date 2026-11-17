@@ -45,7 +45,7 @@ The MySEB build workflow stamps desktop and mobile versions consistently. A tag 
 1.2.3; a manual build uses 1.0.<workflow run number>. It uploads versioned desktop installers, compatibility
 aliases for the existing download links, and the updater manifests. It excludes draft, prerelease, unrelated,
 and older releases from update discovery. Pull requests touching MySEB compile the native clients without
-publishing a release. Merge alone changes the site source; publish a MySEB release to distribute native code.
+publishing a release. Changes under myseb/ or its build workflow on main automatically build and publish the next native release. Site-only changes do not rebuild native installers. Tags and manual runs remain available.
 
 Existing MySEB installations without this update feature require one installation of a new supported build
 before they can offer future updates. Merging web changes does not retrofit native code into an old APK/EXE.
