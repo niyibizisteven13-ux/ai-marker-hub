@@ -24,6 +24,7 @@ export type AuthErrorCode =
   | 'network'
   | 'server_error'
   | 'unauthorized'
+  | 'mfa_required'
   | 'unknown';
 
 export class AuthError extends Error {
@@ -93,6 +94,7 @@ export const authService: AuthService = {
         body: JSON.stringify({ email, code }),
       });
       const data = await res.json().catch(() => ({}));
+      if (res.ok && data.mfaRequired) throw new AuthError('mfa_required', 'A passkey is needed to finish signing in');
       if (!res.ok || !data.user) {
         throw new AuthError(data.error?.code || 'code_invalid', 'Invalid or expired code');
       }

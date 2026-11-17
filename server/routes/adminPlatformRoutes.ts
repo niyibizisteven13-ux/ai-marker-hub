@@ -115,6 +115,16 @@ router.post('/users/:id/revoke-sessions', wrap(async (req, res) => {
   res.json({ success: true, data: { revoked: r.count } });
 }));
 
+/** For someone who lost their phone and their recovery codes: removes their passkeys and the sign-in step, then revokes their sessions. The administrator must have checked who is asking. */
+router.post('/users/:id/reset-passkeys', wrap(async (req, res) => {
+  const id = String(req.params.id);
+  const { resetAll } = await import('../auth/passkeys.js');
+  await resetAll(id);
+  const r = await db.refreshSession.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
+  await auditAction(adminOf(req), 'RESET_USER_PASSKEYS', 'user', id, { sessions: r.count });
+  res.json({ success: true, data: { reset: true, revoked: r.count } });
+}));
+
 router.post('/users/:id/storage', wrap(async (req, res) => {
   const p = z.object({ extraMb: z.number().int().min(0).max(1_000_000) }).safeParse(req.body);
   if (!p.success) return bad(res, 400, 'Give the extra storage in MB (0 removes it).');

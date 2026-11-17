@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 
 const DOMAIN = 'bwenge.space';
 const SITE_URL = 'https://' + DOMAIN;
+/** Scanning goes straight to the app downloader, which picks the installer for the phone or laptop that opened it. */
+export const APP_DOWNLOAD_URL = SITE_URL + '/myseb/download';
 const NAVY = '#0B1420';
 const TEAL = '#0F766E';
 const MARGIN = 3;
@@ -13,7 +15,7 @@ export function QrCard({ qrTitle }: { qrTitle: string }) {
     let alive = true;
     import('qrcode').then((mod: any) => {
       const QR = mod.default ?? mod;
-      const qr = QR.create(SITE_URL, { errorCorrectionLevel: 'H' });
+      const qr = QR.create(APP_DOWNLOAD_URL, { errorCorrectionLevel: 'H' });
       const size: number = qr.modules.size;
       const g: boolean[][] = [];
       for (let r = 0; r < size; r++) {
@@ -46,7 +48,7 @@ export function QrCard({ qrTitle }: { qrTitle: string }) {
           <svg
             viewBox={`${-MARGIN} ${-MARGIN} ${n + MARGIN * 2} ${n + MARGIN * 2}`}
             role="img"
-            aria-label={`QR code for ${DOMAIN}`}
+            aria-label={`QR code: download the app from ${DOMAIN}`}
           >
             {grid.map((row, r) =>
               row.map((on, c) =>

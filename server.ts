@@ -98,6 +98,7 @@ import formRoutes from './server/routes/formRoutes.ts';
 import studioRoutes from './server/routes/studioRoutes.ts';
 import adminRoutes from './server/routes/adminRoutes.ts';
 import ollamaRoutes from './server/routes/ollamaRoutes.ts';
+import passkeyRoutes from './server/routes/passkeyRoutes.ts';
 import telegramBotRoutes from './server/routes/telegramBotRoutes.ts';
 import settingsBillingRoutes from './server/routes/settingsBillingRoutes.ts';
 import memoryRoutes from './server/routes/memoryRoutes.js';
@@ -414,6 +415,7 @@ app.get('/api/platform/status', platformStatus);
 // provides.
 app.use('/api', generalLimiter);
 
+app.use('/api/auth/passkey', passkeyRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/user', requireAuth, userRoutes);
 app.use('/api/studio/projects', requireAuth, studioRoutes);

@@ -42,6 +42,7 @@ export default function UserDetail({ userId, onClose, notify, onChanged }: { use
               {d.organizations.length > 0 && <p className="text-xs text-[#9AA6C9]">Organisations: {d.organizations.map((o) => `${o.name} (${o.role})`).join(', ')}{d.telegramLinked ? ' · Telegram linked' : ''}</p>}</section>
             <section className="flex flex-wrap items-center gap-2 border-t border-[#263052] pt-3">
               <button type="button" className={btnGhost} disabled={busy} onClick={() => { if (confirm(`Sign ${d.user.email} out of every device?`)) void act(() => post(`${U}/revoke-sessions`), 'Signed out everywhere', reload); }}>Sign out everywhere</button>
+              <button type="button" className={btnGhost} disabled={busy} onClick={() => { if (confirm(`Remove ${d.user.email}'s passkeys and sign them out everywhere? Only do this after you are sure who is asking (they lost their phone and recovery codes).`)) void act(() => post(`${U}/reset-passkeys`), 'Passkeys removed', reload); }}>Reset passkeys</button>
               <button type="button" className={btnGhost} disabled={busy} onClick={() => void act(() => download(`${U}/export`, `user-${userId}.json`), 'Downloaded')}>Download their data (JSON)</button>
             </section>
             <section className="space-y-2 rounded-xl border border-[#5A2030] bg-[#1A0D14] p-3">
