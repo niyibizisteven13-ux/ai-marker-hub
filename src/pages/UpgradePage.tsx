@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, ArrowLeft, Building2, Check, CheckCircle2, Coins, GraduationCap, Loader2, Lock, ShieldCheck, Smartphone, Sparkles, X, Zap } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { AlertCircle, ArrowLeft, Building2, Check, CheckCircle2, Coins, GraduationCap, Loader2, Lock, ShieldCheck, Sparkles, X, Zap } from 'lucide-react';
 import { authFetch } from '../utils/authFetch';
 import OrganisationRequestDialog from '../components/OrganisationRequestDialog';
 import { creditMeter } from '../components/PlanStatus';
@@ -100,22 +100,22 @@ export default function UpgradePage({ jobId, onBack, onSuccess }: UpgradePagePro
   const free = plan('FREE');
   const pack = go?.packs?.find((p) => p.id === packId);
   const salesPaused = data?.sales?.paused === true;
-  const manual = !salesPaused && data?.payments === 'off' ? data.manual ?? null : null;     // no online payment yet: pay by hand
-  const paymentsOff = salesPaused || (data?.payments === 'off' && !manual);
+  // This release deliberately uses manual payment, including against an older server advertising live checkout.
+  const manual = !salesPaused ? { momoCode: '2191184', momoName: 'Niyibizi Steven', whatsapp: '250799691108' } : null;
+  const paymentsOff = salesPaused;
   const current = me?.plan ?? 'FREE';
 
   return (
     <div className="flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-y-auto bg-[var(--bg)] font-sans text-[var(--text)] antialiased upgrade-scrollbar">
       {orgOpen && <OrganisationRequestDialog isOpen={orgOpen} onClose={() => setOrgOpen(false)} />}
       {checkout && manual && <ManualPayDialog checkout={checkout} manual={manual} onClose={() => setCheckout(null)} onDone={onSuccess} />}
-      {checkout && !manual && <CheckoutDialog checkout={checkout} onClose={() => setCheckout(null)} onDone={onSuccess} />}
 
       <div className="sticky top-0 z-30 flex items-center justify-between border-b border-[var(--line)] bg-[var(--bg)]/90 px-4 py-4 backdrop-blur sm:px-8">
         <button onClick={onBack} className="flex items-center gap-2 rounded-lg px-3 py-2 text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--text)]">
           <ArrowLeft size={16} /> <span className="whitespace-nowrap text-sm font-medium"><span className="sm:hidden">Back</span><span className="hidden sm:inline">Back to workspace</span></span>
         </button>
         <div className="flex items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1.5 text-xs font-medium text-[var(--muted)]">
-          <ShieldCheck size={14} className="text-[var(--teal)]" /> <span className="whitespace-nowrap">Secure MTN Mobile Money</span>
+          <ShieldCheck size={14} className="text-[var(--teal)]" /> <span className="whitespace-nowrap">Manual MTN MoMo Pay</span>
         </div>
       </div>
 
@@ -147,7 +147,7 @@ export default function UpgradePage({ jobId, onBack, onSuccess }: UpgradePagePro
           </div>
         ) : manual ? (
           <div role="status" className="mx-auto flex max-w-3xl items-start gap-3 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4 text-sm text-[var(--muted)]">
-            <AlertCircle size={18} className="mt-0.5 shrink-0 text-[var(--accent)]" /> Online payment is not open yet. Choose a plan, pay by MTN Mobile Money to code <b className="text-[var(--text)]">{manual.momoCode}</b>, then send the screenshot on WhatsApp. We activate your plan within a few minutes.
+            <AlertCircle size={18} className="mt-0.5 shrink-0 text-[var(--accent)]" /> Automatic MTN payment is not available. Pay manually to MoMo Pay code <b className="text-[var(--text)]">{manual.momoCode} · {manual.momoName}</b>, then send your screenshot or confirmation SMS and login email to WhatsApp +{manual.whatsapp}. Your purchase is activated after verification.
           </div>
         ) : paymentsOff && (
           <div className="mx-auto flex max-w-3xl items-start gap-3 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4 text-sm text-[var(--muted)]">
@@ -242,12 +242,12 @@ function ManualPayDialog({ checkout, manual, onClose, onDone }: { checkout: Chec
   const [payment, setPayment] = useState<Payment | null>(null);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
+  const [loginEmail, setLoginEmail] = useState('');
+  const [emailLoaded, setEmailLoaded] = useState(false);
   useEffect(() => {
     let active = true;
-    void Promise.all([
-      authFetch('/api/billing/pay-ref').then(async (r) => { if (!r.ok) throw new Error('Sign in to continue.'); return r.json(); }),
-      authFetch('/api/billing/manual-checkout', { method: 'POST', body: JSON.stringify({ purpose: checkout.purpose, packId: checkout.packId, months: checkout.months || undefined }) }).then(async (r) => { const b = await r.json(); if (!r.ok) throw new Error(b.error || 'Could not prepare your payment.'); return b.payment; }),
-    ]).then(([r, p]) => { if (active) { setRef(r); setPayment(p); setError(''); } }).catch((e) => { if (active) setError(e.message); });
+    void authFetch('/api/billing/pay-ref').then(async (r) => { if (!r.ok) throw new Error(); return r.json(); }).then((r) => { if (active) { setRef(r); setLoginEmail(r.email ?? ''); } }).catch(() => undefined).finally(() => { if (active) setEmailLoaded(true); });
+    void authFetch('/api/billing/manual-checkout', { method: 'POST', body: JSON.stringify({ purpose: checkout.purpose, packId: checkout.packId, months: checkout.months || undefined }) }).then(async (r) => { const b = await r.json(); if (!r.ok) throw new Error(); return b.payment; }).then((p) => { if (active) { setPayment(p); setError(''); } }).catch(() => { if (active) setError('You can still send your payment proof and login email on WhatsApp. We will find your account and activate the purchase manually.'); });
     return () => { active = false; };
   }, [checkout, retry]);
   useEffect(() => {
@@ -259,24 +259,25 @@ function ManualPayDialog({ checkout, manual, onClose, onDone }: { checkout: Chec
     window.addEventListener('focus', check);
     return () => { window.clearInterval(timer); window.removeEventListener('focus', check); };
   }, [payment?.id, payment?.status]);
-  const text = `Hello, I paid for my Bwenge upgrade: ${checkout.title}, ${rwf(payment?.amountRwf ?? checkout.amountRwf)}. Login email: ${ref?.email ?? ''}. Account code: ${ref?.code ?? ''}. Purchase reference: ${payment?.id ?? ''}. Paid to MTN MoMo Pay ${manual.momoCode} (${manual.momoName}). I will attach my payment screenshot or confirmation SMS. Please verify and activate my purchase.`;
-  const link = manual.whatsapp && payment && ref?.email ? `https://wa.me/${manual.whatsapp}?text=${encodeURIComponent(text)}` : null;
+  const text = `Hello, I paid for my Bwenge upgrade: ${checkout.title}, ${rwf(payment?.amountRwf ?? checkout.amountRwf)}. Login email: ${loginEmail.trim()}.${ref?.code ? ` Account code: ${ref.code}.` : ''}${payment?.id ? ` Purchase reference: ${payment.id}.` : ''} Paid to MTN MoMo Pay ${manual.momoCode} (${manual.momoName}). I will attach my payment screenshot or confirmation SMS. Please verify and activate my purchase.`;
+  const link = manual.whatsapp && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginEmail.trim()) ? `https://wa.me/${manual.whatsapp}?text=${encodeURIComponent(text)}` : null;
   const paid = payment?.status === 'SUCCESSFUL';
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Pay with MTN MoMo Pay">
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Pay manually with MTN MoMo Pay">
       <div className="max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-5 shadow-2xl">
-        <div className="flex items-start justify-between gap-3"><h2 className={`${SERIF} text-2xl font-normal text-[var(--text)]`}>{paid ? 'Your purchase is active' : 'Pay with MTN MoMo Pay'}</h2><button onClick={onClose} aria-label="Close" className="p-2"><X size={18} /></button></div>
+        <div className="flex items-start justify-between gap-3"><h2 className={`${SERIF} text-2xl font-normal text-[var(--text)]`}>{paid ? 'Your purchase is active' : 'Pay manually with MTN MoMo Pay'}</h2><button onClick={onClose} aria-label="Close" className="p-2"><X size={18} /></button></div>
         <p className="mt-1 text-sm text-[var(--muted)]">{checkout.title}</p>
         {paid ? <div className="mt-5 space-y-3 text-sm"><CheckCircle2 className="text-emerald-500" /><p>Payment verified. Your plan or credits are ready.</p><p>Receipt {payment.receiptNumber}. Check your login email for your receipt.</p><button onClick={() => void openReceipt(payment.id)} className="underline">View receipt</button><button onClick={onDone} className="ml-4 underline">Continue to workspace</button></div> : <>
-          <p className="mt-4 rounded-xl bg-[var(--surface-2)] p-3 text-xs text-[var(--muted)]">Automatic payments are temporarily paused. Pay below and we will activate your purchase as soon as we verify your payment.</p>
+          <p className="mt-4 rounded-xl bg-[var(--surface-2)] p-3 text-xs text-[var(--muted)]">Automatic MTN payment is not available. Please pay manually using the details below. We activate your purchase after verifying the payment.</p>
           <ol className="mt-4 space-y-4 text-sm text-[var(--text)]">
             <li><b>1. Pay {rwf(payment?.amountRwf ?? checkout.amountRwf)}</b><p className="mt-1">Use MTN MoMo Pay merchant code:</p><p className="mt-2 select-all rounded-xl bg-[var(--surface-2)] p-3 font-mono text-2xl font-bold tracking-wider">{manual.momoCode}</p><p className="mt-1">Confirm the recipient is <b>{manual.momoName}</b> before paying.</p></li>
-            <li><b>2. Send proof on WhatsApp</b><p className="mt-1">Send your payment screenshot or confirmation SMS to <b>+{manual.whatsapp}</b>, together with your <b>login email</b> and the purchase reference below. Attach the proof yourself after opening WhatsApp.</p></li>
-            <li><b>3. Receive access and your receipt</b><p className="mt-1">We activate your purchase immediately after verification. Your receipt is emailed to your login email. This page checks for approval automatically.</p></li>
+            <li><b>2. Send proof on WhatsApp</b><p className="mt-1">Send your payment screenshot or confirmation SMS to <b>+{manual.whatsapp}</b>, together with your <b>login email</b> and your purchase reference if shown below. Attach the proof yourself after opening WhatsApp.</p></li>
+            <li><b>3. Receive access and your receipt</b><p className="mt-1">We activate your purchase immediately after verification. Your receipt is emailed to your login email. {payment ? 'This page checks for approval automatically.' : 'Refresh Bwenge after we confirm activation.'}</p></li>
           </ol>
-          <div className="mt-4 break-all rounded-xl border border-[var(--line)] p-3 text-xs"><p>Login email: <b>{ref?.email ?? 'Loading…'}</b></p><p className="mt-1">Purchase reference: <span className="select-all font-mono">{payment?.id ?? 'Loading…'}</span></p><p className="mt-1">Account code: <span className="select-all font-mono">{ref?.code ?? 'Loading…'}</span></p></div>
+          <div className="mt-4 break-all rounded-xl border border-[var(--line)] p-3 text-xs"><p>Login email: <b>{loginEmail || (emailLoaded ? 'Enter below' : 'Loading…')}</b></p><p className="mt-1">Purchase reference: <span className="select-all font-mono">{payment?.id ?? 'Your login email identifies your account'}</span></p><p className="mt-1">Account code: <span className="select-all font-mono">{ref?.code ?? 'Optional'}</span></p></div>
+          {emailLoaded && !ref?.email && <label className="mt-3 block text-sm">Your Bwenge login email<input type="email" autoComplete="email" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} placeholder="Enter the email you use to log in" className="mt-1 min-h-11 w-full rounded-xl border border-[var(--line)] bg-[var(--surface-2)] px-3" /></label>}
           {error && <div role="alert" className="mt-3 text-sm text-[var(--danger)]">{error} <button onClick={() => setRetry((n) => n + 1)} className="underline">Retry</button></div>}
-          <div className="mt-5 flex flex-col gap-2">{link ? <a href={link} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white hover:bg-emerald-500">I have paid · Send proof on WhatsApp</a> : <button disabled className="min-h-11 rounded-xl bg-[var(--surface-2)] text-sm opacity-60">Preparing payment details…</button>}<button onClick={onClose} className="min-h-11 rounded-xl border border-[var(--line)] text-sm">Close</button></div>
+          <div className="mt-5 flex flex-col gap-2">{link ? <a href={link} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white hover:bg-emerald-500">I have paid · Send proof on WhatsApp</a> : <button disabled className="min-h-11 rounded-xl bg-[var(--surface-2)] text-sm opacity-60">Enter your login email to continue</button>}<button onClick={onClose} className="min-h-11 rounded-xl border border-[var(--line)] text-sm">Close</button></div>
         </>}
       </div>
     </div>
@@ -312,113 +313,4 @@ export async function openReceipt(paymentId: string) {
   const url = URL.createObjectURL(new Blob([await res.text()], { type: 'text/html' }));
   window.open(url, '_blank', 'noopener');
   window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-}
-
-/** Phone number → MTN prompt → live status until MTN confirms (or declines). */
-function CheckoutDialog({ checkout, onClose, onDone }: { checkout: Checkout; onClose: () => void; onDone: () => void }) {
-  const [phone, setPhone] = useState('');
-  const [state, setState] = useState<'form' | 'starting' | 'pending' | 'success' | 'failed'>('form');
-  const [error, setError] = useState<string | null>(null);
-  const [payment, setPayment] = useState<Payment | null>(null);
-  const timer = useRef<number | null>(null);
-  useEffect(() => () => { if (timer.current) window.clearTimeout(timer.current); }, []);
-
-  const poll = (id: string, n = 0) => {
-    timer.current = window.setTimeout(async () => {
-      try {
-        const res = await authFetch(`/api/billing/payments/${id}`);
-        const body = await res.json();
-        const p: Payment | undefined = body.payment;
-        if (p) setPayment(p);
-        if (p?.status === 'SUCCESSFUL') { setState('success'); window.dispatchEvent(new Event('bwenge:usage')); return; }
-        if (p && (p.status === 'FAILED' || p.status === 'EXPIRED')) {
-          setState('failed');
-          setError(p.reason === 'NOT_ENOUGH_FUNDS' ? 'There is not enough balance on this Mobile Money account.' : p.status === 'EXPIRED' ? 'The payment was not approved in time.' : 'The payment was declined or did not go through. No money was taken.');
-          return;
-        }
-      } catch { /* retry */ }
-      if (n < 90) poll(id, n + 1);
-      else { setState('failed'); setError('We could not confirm the payment yet. If you approved it, it will appear shortly; you will get a receipt by email.'); }
-    }, 3000);
-  };
-
-  const pay = async () => {
-    setError(null);
-    setState('starting');
-    try {
-      const res = await authFetch('/api/billing/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ purpose: checkout.purpose, packId: checkout.packId, months: checkout.months || undefined, phone }) });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || 'The payment could not start.');
-      setPayment(body.payment);
-      setState('pending');
-      poll(body.payment.id);
-    } catch (e) {
-      setState('form');
-      setError(e instanceof Error ? e.message : 'The payment could not start.');
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Pay with Mobile Money">
-      <div className="w-full max-w-md rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-6 shadow-2xl">
-        <div className="mb-4 flex items-start justify-between gap-3">
-          <div>
-            <h2 className={`${SERIF} text-2xl font-normal text-[var(--text)]`}>{state === 'success' ? 'Payment received' : 'Pay with MTN MoMo'}</h2>
-            <p className="mt-0.5 text-xs text-[var(--muted)]">{checkout.title}</p>
-          </div>
-          {state !== 'pending' && <button onClick={state === 'success' ? onDone : onClose} aria-label="Close" className="grid h-8 w-8 place-items-center rounded-lg text-[var(--muted)] hover:bg-[var(--hover)]"><X size={16} /></button>}
-        </div>
-
-        <div className="mb-5 flex items-center justify-between rounded-xl border border-[var(--line)] bg-[var(--bg)] px-4 py-3">
-          <span className="text-xs text-[var(--muted)]">Total</span>
-          <span className="text-right"><b className="text-lg text-[var(--text)]">{rwf(checkout.amountRwf)}</b><span className="block text-[11px] text-[var(--muted)]">≈ {usd(checkout.amountUsd)}</span></span>
-        </div>
-
-        {(state === 'form' || state === 'starting') && (
-          <form onSubmit={(e) => { e.preventDefault(); void pay(); }} className="space-y-3">
-            <label className="block text-xs font-medium text-[var(--muted)]">MTN Mobile Money number
-              <div className="mt-1.5 flex items-center gap-2 rounded-xl border border-[var(--line)] bg-[var(--bg)] px-3 focus-within:border-[var(--accent)]">
-                <Smartphone size={16} className="text-[var(--muted)]" />
-                <input autoFocus inputMode="tel" autoComplete="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="078 123 4567" aria-label="MTN Mobile Money number"
-                  className="min-w-0 flex-1 bg-transparent py-3 text-sm text-[var(--text)] placeholder:text-[var(--muted)] focus:outline-none" />
-              </div>
-            </label>
-            {error && <p role="alert" className="text-xs text-[var(--danger)]">{error}</p>}
-            <button type="submit" disabled={state === 'starting' || phone.replace(/\D/g, '').length < 9} className="flex min-h-[46px] w-full items-center justify-center gap-2 rounded-xl bg-[var(--accent)] py-3 text-sm font-semibold text-[var(--on-accent)] disabled:opacity-50">
-              {state === 'starting' ? <Loader2 size={16} className="animate-spin" /> : <ShieldCheck size={16} />} Pay {rwf(checkout.amountRwf)}
-            </button>
-            <p className="text-center text-[11px] text-[var(--muted)]">You will get a prompt on your phone. Approve it with your MoMo PIN.</p>
-          </form>
-        )}
-
-        {state === 'pending' && (
-          <div className="space-y-3 py-2 text-center">
-            <Loader2 size={30} className="mx-auto animate-spin text-[var(--accent)]" />
-            <p className="text-sm font-medium text-[var(--text)]">Approve the payment on your phone</p>
-            <p className="text-xs text-[var(--muted)]">We sent a request to {payment?.phoneMasked}. Enter your MoMo PIN to confirm. This page updates by itself.</p>
-          </div>
-        )}
-
-        {state === 'success' && (
-          <div className="space-y-3 py-2 text-center">
-            <CheckCircle2 size={34} className="mx-auto text-[var(--teal)]" />
-            <p className="text-sm font-medium text-[var(--text)]">{checkout.purpose === 'GO_PACK' ? `${payment?.credits?.toLocaleString('en-US')} credits were added.` : 'Your plan is active.'}</p>
-            {payment?.receiptNumber && <p className="text-xs text-[var(--muted)]">Receipt {payment.receiptNumber}. A copy was sent to your email{payment ? ' and Telegram (if connected)' : ''}.</p>}
-            <div className="flex gap-2">
-              {payment && <button type="button" onClick={() => void openReceipt(payment.id)} className="flex-1 rounded-xl border border-[var(--line)] py-2.5 text-sm text-[var(--text)]">View receipt</button>}
-              <button onClick={onDone} className="flex-1 rounded-xl bg-[var(--accent)] py-2.5 text-sm font-semibold text-[var(--on-accent)]">Continue</button>
-            </div>
-          </div>
-        )}
-
-        {state === 'failed' && (
-          <div className="space-y-3 py-2 text-center">
-            <AlertCircle size={30} className="mx-auto text-[var(--danger)]" />
-            <p className="text-sm text-[var(--text)]">{error}</p>
-            <button onClick={() => { setState('form'); setError(null); }} className="w-full rounded-xl bg-[var(--accent)] py-2.5 text-sm font-semibold text-[var(--on-accent)]">Try again</button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
 }

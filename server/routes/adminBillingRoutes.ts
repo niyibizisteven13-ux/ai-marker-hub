@@ -1,4 +1,4 @@
-import { approveManualPayment, automaticPaymentsEnabled, MANUAL_PAYMENT, startManualPayment } from '../services/billing/manual.js';
+import { approveManualPayment, MANUAL_PAYMENT, startManualPayment } from '../services/billing/manual.js';
 import { BillingError, notifyReceipt } from '../services/billing/payments.js';
 import { randomUUID } from 'node:crypto';
 import { Router, type Request, type Response } from 'express';
@@ -23,11 +23,12 @@ const adminId = (req: Request) => (req as any).user?.userId as string;
 const fail = (res: Response, e: any) => (e instanceof z.ZodError ? res.status(400).json({ error: 'Invalid request.', details: e.issues.slice(0, 5) }) : e instanceof BillingError ? res.status(e.status).json({ error: e.message, code: e.code }) : e?.code === 'P2002' ? res.status(409).json({ error: 'This MoMo transaction has already been used.' }) : res.status(500).json({ error: e?.message ?? 'Failed.' }));
 
 router.get('/payment-method', async (_req, res) => {
-  try { res.json({ success: true, automaticEnabled: await automaticPaymentsEnabled(), manual: MANUAL_PAYMENT }); } catch (e) { fail(res, e); }
+  try { res.json({ success: true, automaticEnabled: false, manual: MANUAL_PAYMENT }); } catch (e) { fail(res, e); }
 });
 router.put('/payment-method', async (req, res) => {
   try {
     const { automaticEnabled } = z.object({ automaticEnabled: z.boolean() }).strict().parse(req.body);
+    if (automaticEnabled) return res.status(409).json({ error: 'Automatic MTN payment is not available. Manual MoMo Pay is the active payment method.' });
     await db.appSetting.upsert({ where: { key: 'billing-automatic-payments' }, create: { key: 'billing-automatic-payments', value: { enabled: automaticEnabled }, updatedBy: adminId(req) }, update: { value: { enabled: automaticEnabled }, updatedBy: adminId(req) } });
     res.json({ success: true, automaticEnabled, manual: MANUAL_PAYMENT });
   } catch (e) { fail(res, e); }
