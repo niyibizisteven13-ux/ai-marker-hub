@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { studentInvite } from '../../shared/mysebShare';
 import { authFetch } from '../utils/authFetch';
 import MySebPayPanel, { type Payment } from './MySebPayPanel';
 import { WATCH_BATCH, WATCH_GAP_MS, gridQuality, startUpMs, tileLiveState, tuneOpus, type Quality, type QualityPref } from '../utils/liveQuality';
@@ -1113,8 +1114,9 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
                   <p className="mt-1 break-all font-mono text-sm text-white" data-testid="join-link">{code.joinUrl}</p>
                   <div className="mt-2.5 grid grid-cols-2 gap-2 sm:flex">
                     <button type="button" className={dPrimary} onClick={async () => { await navigator.clipboard.writeText(code.joinUrl!); setLinkCopied(true); setTimeout(() => setLinkCopied(false), 1500); }}>{linkCopied ? 'Link copied' : 'Copy link'}</button>
-                    <a className={`${dBtn} inline-flex items-center justify-center`} target="_blank" rel="noreferrer" href={`https://wa.me/?text=${encodeURIComponent(`Join your test: ${code.joinUrl}`)}`}>Share on WhatsApp</a>
+                    <a className={`${dBtn} inline-flex items-center justify-center`} target="_blank" rel="noreferrer" href={`https://wa.me/?text=${encodeURIComponent(studentInvite({ title: room?.exam?.title, joinUrl: code.joinUrl, code: code.display, site: window.location.origin }))}`}>Share on WhatsApp</a>
                   </div>
+                  <p className="mt-2.5 text-xs text-slate-400">Students without the app get it here: <a className="break-all underline" href="/myseb/download" target="_blank" rel="noreferrer">{window.location.origin}/myseb/download</a></p>
                   <p className="mt-2.5 text-xs leading-relaxed text-slate-400">One link for everyone. On a laptop or an Android phone it opens MySEB with the code filled in, and downloads MySEB first if it is missing. On an iPhone it starts the test in the browser{room?.exam?.allow_web ? '' : ' (needs Settings → Browsers)'}.</p>
                   {!room?.exam?.allow_web && <button type="button" disabled={busy || !open} className={`${dBtn} mt-2.5 w-full sm:w-auto`} onClick={() => void post({ allowWeb: true })}>Turn on browsers for iPhones</button>}
                 </div>

@@ -1,4 +1,5 @@
 import { prisma } from '../db.js';
+import { mysebDownloadUrl, studentInvite } from '../../shared/mysebShare.js';
 import logger from '../utils/logger.js';
 import { auditAction } from './platform/audit.js';
 import { flagOn } from './platform/settings.js';
@@ -516,8 +517,8 @@ async function runRoomInner(row: Row, now = Date.now()): Promise<AgentLogEntry[]
         try {
           const c = await generateCode(load);
           made.push(entry('room', 'The test opened: the join code was made and sent to you.'));
-          const wa = `https://wa.me/?text=${encodeURIComponent(`Join ${m?.exam?.title ?? 'the test'}: ${c.joinUrl}\nCode: ${c.display}`)}`;
-          void tellOwner(row, 'The test is open', `Code: ${c.display}\nLink for students: ${c.joinUrl}\nShare on WhatsApp: ${wa}`, base ? { text: 'Open the live room', url: `${base}/live/${row.kind}/${encodeURIComponent(row.ref)}` } : undefined).catch(() => undefined);
+          const wa = `https://wa.me/?text=${encodeURIComponent(studentInvite({ title: m?.exam?.title, joinUrl: c.joinUrl, code: c.display, site: base }))}`;
+          void tellOwner(row, 'The test is open', `Code: ${c.display}\nLink for students: ${c.joinUrl}\nWhere students get the MySEB app: ${mysebDownloadUrl(base)}\nShare on WhatsApp: ${wa}`, base ? { text: 'Open the live room', url: `${base}/live/${row.kind}/${encodeURIComponent(row.ref)}` } : undefined).catch(() => undefined);
         } catch (e) {
           const why = String((e as Error)?.message ?? e).slice(0, 200);
           const f = entry('needs_you', `The test should have opened now but the join code could not be made: ${why}`);

@@ -6,6 +6,8 @@ import { err, untrusted } from './helpers.js';
  * classes (roster, marks, who is missing work) and marked exams. The user asks in plain words and gets the answer or the action,
  * with a link only as a bonus. Everything is scoped to the signed-in user by the services behind it.
  */
+import { mysebDownloadUrl, studentInvite } from '../../../../shared/mysebShare.js';
+
 const app = () => (process.env.APP_BASE_URL || '').replace(/\/$/, '');
 const roomLink = (kind: 'form' | 'task', id: string) => `${app()}/live/${kind}/${encodeURIComponent(id)}`;
 const problem = (e: unknown) => String((e as Error)?.message ?? e).slice(0, 240);
@@ -329,12 +331,14 @@ export function platformTools(services: ToolServices): Tool[] {
         }
         const m = await pf.roomStatus(ctx.userId, i.kind, String(i.id)).catch(() => null);
         const title = m?.exam?.title || 'the test';
-        const wa = `https://wa.me/?text=${encodeURIComponent(`Join ${title}: ${c.joinUrl}\nCode: ${c.display}\nOn a laptop or an Android phone it opens MySEB (and downloads it if needed). On an iPhone it starts in the browser.`)}`;
+        const invite = studentInvite({ title, joinUrl: c.joinUrl, code: c.display, site: app() });
+        const wa = `https://wa.me/?text=${encodeURIComponent(invite)}`;
         await note(ctx.userId, 'LAUNCH_TEST', String(i.id), { kind: i.kind, steps });
         return { text: [
           `The test is ready (${steps.join(', ')}).`,
           `Code: ${c.display} (valid until ${String(c.expiresAt).slice(0, 16).replace('T', ' ')} UTC).`,
           `Link for students: ${c.joinUrl}`,
+          `Where students get the MySEB app (Windows, Android, Linux, Mac): ${mysebDownloadUrl(app())}`,
           `Share on WhatsApp (opens the lecturer's own WhatsApp with the message ready): ${wa}`,
           `Live room: ${roomLink(i.kind, i.id)}`,
           'Tell the lecturer what is set, give the code and link, and say you can watch the room, answer "how is it going", and write the debrief when the test ends.',

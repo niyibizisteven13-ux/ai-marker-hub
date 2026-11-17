@@ -115,6 +115,12 @@ router.post('/users/:id/revoke-sessions', wrap(async (req, res) => {
   res.json({ success: true, data: { revoked: r.count } });
 }));
 
+/** How many times the apps were downloaded or installed from the "Get the app" page (by app and device, and per day). */
+router.get('/downloads', wrap(async (_req, res) => {
+  const { summary } = await import('../services/appDownloads.js');
+  res.json({ success: true, data: await summary() });
+}));
+
 /** For someone who lost their phone and their recovery codes: removes their passkeys and the sign-in step, then revokes their sessions. The administrator must have checked who is asking. */
 router.post('/users/:id/reset-passkeys', wrap(async (req, res) => {
   const id = String(req.params.id);
