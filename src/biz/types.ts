@@ -16,7 +16,7 @@ export const pageUrl = (slug: string, origin = typeof window !== 'undefined' ? w
 
 export interface LedgerEntry {
   id: string; type: 'sale' | 'expense'; amount: number; at: string; status: 'completed' | 'pending' | 'cancelled'; src: 'studio' | 'chat' | 'scan' | 'page';
-  item?: string; qty?: number; productId?: string; customer?: string; method?: 'cash' | 'momo' | 'card' | 'credit'; note?: string; category?: string;
+  item?: string; qty?: number; productId?: string; customer?: string; method?: 'cash' | 'momo' | 'card' | 'credit'; note?: string; category?: string; pay?: { provider: 'mtn' | 'airtel'; phone: string; state: 'pending' | 'success' | 'failed' };
 }
 export interface Dashboard {
   today: { sales: number; expenses: number; orders: number; profit: number }; yesterday: { sales: number; expenses: number; orders: number; profit: number };
@@ -24,4 +24,9 @@ export interface Dashboard {
   series: Array<{ day: string; sales: number; expenses: number }>; top: Array<{ name: string; amount: number; qty: number }>;
   orders: { completed: number; pending: number; cancelled: number }; customers: number; lowStock: Array<{ id: string; name: string; stock: number; unit: string }>;
   recent: LedgerEntry[]; newMessages: number; entries: number;
+}
+
+export interface SecretsStatus {
+  mtn: { set: boolean; hint?: string; environment?: string; at?: string }; airtel: { set: boolean; hint?: string; environment?: string; at?: string };
+  acceptPay: boolean; payOpen: boolean; fields: Record<'mtn' | 'airtel', Array<{ id: string; label: string; secret: boolean; help: string }>>;
 }

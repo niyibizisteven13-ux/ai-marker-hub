@@ -7,15 +7,20 @@ sees a private side the public never sees. Photos and short videos the owner add
 
 | Page | Address | Who | What it is |
 | --- | --- | --- | --- |
-| **Public page** | `/b/<name>` | Everyone | The business's page: cover and logo, name, one-line tagline, buttons (WhatsApp, Call, Directions, Share), about, products or menu with prices and photos, photo and video gallery, opening hours (with "Open now"), address and map, MoMo Pay code (only if the owner turns it on), a "Send us a message" form, a small "Report this page". |
-| **Studio: Overview** | `/biz` | Owner only | The page link with a copy button, a QR code and "Share on WhatsApp"; the Publish switch; this month's visits and taps on WhatsApp, Call and Share; new messages waiting. |
-| **Studio: Page** | `/biz` → Page | Owner only | Edit the name, tagline, about, category, colour, contact numbers, address, map link, opening hours, MoMo Pay code and whether to show it. A live preview shows exactly what visitors see. |
-| **Studio: Products** | `/biz` → Products | Owner only | Add, price, photograph, hide or mark "out of stock". |
-| **Studio: Photos and videos** | `/biz` → Gallery | Owner only | Upload photos and small videos (a short clip up to 25 MB), choose the cover and logo, show or hide each, add a caption. |
-| **Studio: Messages** | `/biz` → Messages | Owner only | Messages visitors sent (name, how to reach them, what they want), marked new, seen or done. |
-| **Studio: Settings** | `/biz` → Settings | Owner only | The page name (the short link), private notes, unpublish, delete. |
-| **Notebook** (next phase) | `/biz` → Notebook | Owner only | The money record: "today I made 45,000"; scanned sales sheets; reports. Never public. |
-| **The assistant** | the Bwenge chat | Owner only | "Add 12 kg of tomatoes at 1,200", "open until 8 pm on Saturdays", "publish my page", "what messages came in?" |
+| **Public page** | `/b/<name>` | Everyone | A page that follows the kind of business (restaurant: Menu, Order now, Book a table; salon: Services, Book now; farm: Produce; school: Courses; and so on). Cover and logo, open now, quick buttons (order, pay online, WhatsApp, call, directions, share), products with a cart, gallery, about, hours, map link, contact, MoMo Pay code (if turned on), a QR code of the page and an "Install app" button, a message form, "Report this page". |
+| **Customer checkout** | on the public page | Everyone | Send an order (saved as a pending order and opened in WhatsApp) or **Pay now** with MTN MoMo / Airtel Money: the customer types their number, approves on their phone, the page shows paid. The amount is always worked out on the server from the products. |
+| **Studio** | `/biz` (also Settings → Connections → Bwenge4biz) | Owner only | A dashboard: **Dashboard** (sales, orders, customers, profit against yesterday, sales chart, top products, quick actions, orders today, low-stock alerts, recent activity, link and QR), **Sales and orders**, **Expenses**, **Products and stock**, **Customers**, **Reports** (CSV), **Messages**, **Public page** (details, photos and videos, preview), **Secrets and payments**, **Settings**. |
+| **The assistant** | the Bwenge chat | Owner only | "Today I sold 5 loaves for 4,000", "bought flour for 8,000", "how is my week?", "what is running out?", "ask 0788 123 456 to pay 3,000", "add this photo", "publish my page". It can also read a photo of a sales book the owner attached (it lists what it read and asks before recording). |
+| **The business's own app** | `/b/<name>` installed | Customers | Each page has its own web app manifest, name, colour and icon, so a customer can "Add to Home screen" and it opens as that business's app. It is a home-screen web app, not an app-store app. |
+
+## Money notebook (private)
+Sales and expenses are kept per business (`biz-ledger:<id>`, newest first, up to 5,000 entries), never part of `publicView`. A completed sale of a product with a stock count lowers the stock; cancelling gives it back; a product that reaches zero is marked out of stock on the page. Pending orders from the page are not income until confirmed or paid.
+
+## Secrets and payments
+* Keys for MTN MoMo (Collections: subscription key, API user, API key) and Airtel Money (client id and secret) are entered **only** in Studio → Secrets. They are encrypted with AES-256-GCM (`BIZ_SECRETS_KEY`, falling back to the server's JWT secret) and can be written, tested and removed but **never read back** by any route, the studio, or the assistant (the studio shows the last four characters). The assistant is told never to accept keys in chat.
+* "Test keys" only asks the provider for an access token. A payment moves money from the customer straight to the owner's own account; Bwenge never holds funds.
+* Online payment on the page needs keys saved **and** the owner's switch on. "Any amount" (for a counter QR at `#pay`) is a second switch.
+* The MTN and Airtel adapters follow the providers' published APIs and are tested against recorded replies; **they have not been run against a live MTN or Airtel account** (live use needs the providers' own approval of the business).
 
 ## What the public sees and what only the owner sees
 
@@ -49,7 +54,7 @@ Tools in the chat (`biz_*`): see and update the page, add and change products, a
 Each costs credits like any assistant action. Nothing is published without the owner saying so.
 
 ## Not built yet (and honest limits)
-* **The notebook** (money records, scanning a sales sheet, MoMo statements, reports). It needs real database tables, not the light storage used for pages.
+* **Scanning a sales sheet by the studio** (the assistant can read a photo in chat; a studio upload button comes next), MoMo statement import, bookings and staff accounts. The notebook lives in the light key/value storage (5,000 entries per business); a business that outgrows it needs real database tables.
 * **A separate domain** such as `bwenge4biz.com`: today the link is `bwenge.space/b/<name>`. A business sub-domain (`<name>.bwenge.space`) needs a wildcard DNS record.
 * Staff accounts, orders and payment tracking, video conversion, page search on Google (pages are public, but not yet submitted to search engines), custom templates.
 * Free storage is a promise of this server's disk: back it up like the rest of the data.
