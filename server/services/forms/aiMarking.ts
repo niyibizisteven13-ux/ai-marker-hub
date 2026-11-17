@@ -77,12 +77,16 @@ export function applyWrittenMarks(schema: any, data: any, extra: WrittenMarks): 
 }
 
 /** After a response is saved: mark its written answers with AI, in the background, and keep the new score with it. */
-export async function markSubmissionWithAi(db: any, submissionId: string, schema: any, ai: WrittenAi = defaultWrittenAi): Promise<boolean> {
+/** `meter` lets the caller refuse (the lecturer's credits are used up) and charge for the answers marked. */
+export interface MarkMeter { gate: () => Promise<boolean>; charge: (answers: number) => void }
+export async function markSubmissionWithAi(db: any, submissionId: string, schema: any, ai: WrittenAi = defaultWrittenAi, meter?: MarkMeter): Promise<boolean> {
   const row = await db.formSubmission.findUnique({ where: { id: submissionId } });
   if (!row) return false;
   let data: any; try { data = JSON.parse(row.data || '{}'); } catch { return false; }
+  if (meter && !(await meter.gate().catch(() => false))) return false;     // out of credits: the answers stay waiting for the lecturer
   const marks = await aiMarksFor(givenSchema(schema, data), data, ai);
   if (!Object.keys(marks).length) return false;
+  meter?.charge(Object.keys(marks).length);
   // read again: the lecturer may have marked something while the model was thinking, and their mark wins
   const fresh = await db.formSubmission.findUnique({ where: { id: submissionId } });
   let now: any = data; try { now = JSON.parse(fresh?.data || row.data); } catch { /* keep the first read */ }

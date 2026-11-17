@@ -159,5 +159,13 @@ export async function authFetch(input: RequestInfo, init?: RequestInit): Promise
     }
   }
 
+  // Out of credits for an AI feature: one dialog for the whole app tells the person and offers the upgrade (the chat shows its own).
+  if (response.status === 402 && typeof window !== 'undefined' && !url.includes('/api/ai/chat')) {
+    try {
+      const b = await response.clone().json();
+      if (b?.code === 'UPGRADE_REQUIRED') window.dispatchEvent(new CustomEvent('bwenge:upgrade-required', { detail: { message: String(b.error ?? ''), url: String(b.upgrade?.url ?? '/upgrade?reason=limit'), plan: b.plan, whatsappLink: b.whatsappLink ?? null } }));
+    } catch { /* not JSON */ }
+  }
+
   return response;
 }

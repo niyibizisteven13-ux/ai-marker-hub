@@ -57,7 +57,7 @@ const storageLabel = (mb: number) => (mb >= 1024 ? `${Math.round((mb / 1024) * 1
 function features(id: PlanId, l: PlanLimits): string[] {
   const n = (x: number) => x.toLocaleString('en-US');
   const storage = l.storageMb ? `${storageLabel(l.storageMb)} storage for your files and students' hand-ins` : null;
-  if (id === 'FREE') return [`${n(l.monthly)} credits a month for chat, scans and documents`, 'Try marking with a top-up', `Uploads up to ${l.maxUploadMb} MB`, ...(storage ? [storage] : [])];
+  if (id === 'FREE') return [`${n(l.monthly)} credits a month for chat, scans and documents`, 'Try marking with a top-up', 'Paid plans add marking and quizzes from files', `Uploads up to ${l.maxUploadMb} MB`, ...(storage ? [storage] : [])];
   return [
     `${n(l.monthly)} credits a month for chat, documents, research and files`,
     `≈ ${n(Math.floor(l.monthly / CREDITS_PER_SCRIPT))} handwritten papers marked in red pen, or twice that overnight`,

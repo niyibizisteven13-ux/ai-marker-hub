@@ -29,6 +29,7 @@ import { summarize } from '../services/forms/analysis.js';
 import { listVersions } from '../services/forms/versions.js';
 import { normalizeFields, CHOICE_KINDS } from '../services/forms/model.js';
 import { gradeQuiz } from '../services/forms/quiz.js';
+import { allowAi, chargeAi, AI_PRICE } from '../services/billing/aiMeter.js';
 import { applyWrittenMarks, markSubmissionWithAi } from '../services/forms/aiMarking.js';
 import { normalizeAssessment } from '../../shared/assessment.js';
 import { classReview } from '../services/forms/classReview.js';
@@ -524,12 +525,14 @@ router.post('/:id/marks/ai', requireAuth, async (req, res) => {
     const { schema } = await ownForm(userId, req.params.id);
     if (!schema.isQuiz || !normalizeAssessment(schema.assessment).aiMarking) return res.status(409).json({ error: 'Switch on "Mark written answers with AI" for this quiz first.' });
     const rows = await prisma.formSubmission.findMany({ where: { formId: req.params.id }, orderBy: { createdAt: 'asc' }, take: 400 });
+    if (!(await allowAi(res, userId, 'marking'))) return;
     let marked = 0; let left = 0;
+    const meter = { gate: async () => true, charge: (n: number) => void chargeAi(userId, { kind: 'marking', minCredits: Math.max(1, n) * AI_PRICE.markOneWrittenAnswer }) };
     for (const row of rows) {
       let d: any = {}; try { d = JSON.parse(row.data || '{}'); } catch { continue; }
       if (!d._quiz || !(d._quiz.pending > 0)) continue;
       if (marked >= 40) { left++; continue; }                        // a batch at a time: marking costs time and credits
-      if (await markSubmissionWithAi(prisma, row.id, schema).catch(() => false)) marked++;
+      if (await markSubmissionWithAi(prisma, row.id, schema, undefined, meter).catch(() => false)) marked++;
     }
     res.json({ success: true, marked, left });
   } catch (error: any) { studioFail(res, error); }
@@ -561,9 +564,10 @@ router.get('/:id/results/export.csv', requireAuth, async (req, res) => {
 router.post('/create-from-chat', requireAuth, async (req, res) => {
   try {
     const { description } = req.body;
-    const userId = (req as any).user?.userId || 'anonymous';
-
+    const userId = (req as any).user?.userId;
+    if (!(await allowAi(res, userId, 'artifact'))) return;
     const form = await formOrchestrator.generateFormSchema(userId, description);
+    void chargeAi(userId, { kind: 'artifact', input: String(description ?? ''), output: JSON.stringify(form ?? '').length, minCredits: AI_PRICE.formFromDescription });
 
     res.json({
       success: true,
