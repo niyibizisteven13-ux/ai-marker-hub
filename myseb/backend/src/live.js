@@ -90,7 +90,7 @@ export function cleanSignal(m) {
     out.candidate = c;
   }
   if (typeof m.screenStream === 'string') out.screenStream = m.screenStream.replace(/[^\w{}-]/g, '').slice(0, 80);
-  if (m.type === 'quality') out.level = m.level === 'high' ? 'high' : m.level === 'tiny' ? 'tiny' : 'low';
+  if (m.type === 'quality') out.level = ['high', 'mid', 'tiny'].includes(m.level) ? m.level : 'low';
   if (typeof m.on === 'boolean') out.on = m.on;
   if (typeof m.audio === 'boolean') out.audio = m.audio;
   if (typeof m.state === 'string') out.state = m.state.slice(0, 20);

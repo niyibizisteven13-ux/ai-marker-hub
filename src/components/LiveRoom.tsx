@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { authFetch } from '../utils/authFetch';
 import MySebPayPanel, { type Payment } from './MySebPayPanel';
-import { WATCH_BATCH, WATCH_GAP_MS, gridQuality, startUpMs, type Quality } from '../utils/liveQuality';
+import { WATCH_BATCH, WATCH_GAP_MS, gridQuality, startUpMs, tileLiveState, tuneOpus, type Quality, type QualityPref } from '../utils/liveQuality';
 import { helpFor, reasonWords, type HelpAction } from '../utils/studentHelp';
 
 /**
@@ -91,7 +91,7 @@ const btnDark = 'min-h-10 rounded-xl bg-slate-900 px-3.5 text-sm font-semibold t
  * set-up messages. Only the tiles on screen (up to the number chosen in Settings, at most 500) connect, so a class of hundreds is fine: everyone else shows the
  * small picture. Sound is silent until you press Listen on one tile, so you hear one student at a time.
  */
-function useLiveViewers(base: string, enabled: boolean, wanted: string[], listen: string | null, focus: string | null) {
+function useLiveViewers(base: string, enabled: boolean, wanted: string[], listen: string | null, focus: string | null, grid: Quality) {
   const [streams, setStreams] = useState<Record<string, MediaStream>>({});
   const [screens, setScreens] = useState<Record<string, MediaStream>>({});
   const screenIds = useRef(new Map<string, string>());   // which of a student's streams is their screen (the student says so in the offer)
@@ -99,13 +99,16 @@ function useLiveViewers(base: string, enabled: boolean, wanted: string[], listen
   const viewer = useRef('v' + Math.random().toString(36).slice(2, 8));
   const pcs = useRef(new Map<string, RTCPeerConnection>());
   const requested = useRef(new Set<string>());
+  const askedAt = useRef(new Map<string, number>());   // when each student was asked to go live (for "Connecting…" and "Showing a picture")
+  const [turn, setTurn] = useState<boolean | null>(null);   // does the server have a relay for students behind strict networks?
+  const [focusStats, setFocusStats] = useState<FocusStats | null>(null);
+  const prevBytes = useRef<{ at: number; bytes: number } | null>(null);
   const pending = useRef(new Map<string, RTCIceCandidateInit[]>());
   const wantedRef = useRef(new Set<string>());
   const iceRef = useRef<RTCIceServer[] | null>(null);
   const listening = useRef<string | null>(null);
   const focused = useRef<string | null>(null);   // the student being zoomed in on gets the full-quality picture
   wantedRef.current = new Set(wanted);
-  const grid: Quality = gridQuality(wanted.length);   // beyond 48 live students the grid pictures are tiny
   const gridRef = useRef<Quality>(grid); gridRef.current = grid;
 
   const post = useCallback((sid: string, msg: Record<string, unknown>) =>
@@ -114,14 +117,14 @@ function useLiveViewers(base: string, enabled: boolean, wanted: string[], listen
     pcs.current.get(sid)?.close(); pcs.current.delete(sid); requested.current.delete(sid); pending.current.delete(sid);
     setStreams((s) => { if (!(sid in s)) return s; const n = { ...s }; delete n[sid]; return n; });
     setScreens((s) => { if (!(sid in s)) return s; const n = { ...s }; delete n[sid]; return n; });
-    screenIds.current.delete(sid);
+    screenIds.current.delete(sid); askedAt.current.delete(sid);
   }, []);
 
   // Messages from students (offers and network candidates), by long poll.
   useEffect(() => {
     if (!enabled) return;
     let stopped = false; const ac = new AbortController();
-    const ice = async () => { if (!iceRef.current) { try { iceRef.current = (await (await authFetch(`${base}/ice`)).json()).iceServers ?? []; } catch { iceRef.current = []; } } return iceRef.current!; };
+    const ice = async () => { if (!iceRef.current) { try { const j = await (await authFetch(`${base}/ice`)).json(); iceRef.current = j.iceServers ?? []; setTurn(!!j.turn); } catch { iceRef.current = []; } } return iceRef.current!; };
     const onMsg = async (m: any) => {
       if (m.viewer && m.viewer !== viewer.current) return;
       const sid = String(m.sid);
@@ -139,11 +142,13 @@ function useLiveViewers(base: string, enabled: boolean, wanted: string[], listen
         await pc.setRemoteDescription({ type: 'offer', sdp: m.sdp });
         for (const c of pending.current.get(sid) ?? []) await pc.addIceCandidate(c).catch(() => undefined);
         pending.current.delete(sid);
-        await pc.setLocalDescription(await pc.createAnswer());
+        // The sound settings in the answer tell the student's phone how to send: a voice over a weak connection (repair lost packets, nothing while silent, one channel, 32 kbit/s).
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription({ type: 'answer', sdp: tuneOpus(answer.sdp ?? '') });
         void post(sid, { type: 'answer', sdp: pc.localDescription?.sdp });
         if (listening.current === sid) void post(sid, { type: 'listen', on: true });
         if (focused.current === sid) void post(sid, { type: 'quality', level: 'high' });
-        else if (gridRef.current === 'tiny') void post(sid, { type: 'quality', level: 'tiny' });
+        else if (gridRef.current !== 'low') void post(sid, { type: 'quality', level: gridRef.current });      // the student starts at the usual grid size: tell it the sharper or tinier one
       } else if (m.type === 'ice' && m.candidate) {
         const pc = pcs.current.get(sid);
         if (pc?.remoteDescription) await pc.addIceCandidate(m.candidate).catch(() => undefined);
@@ -173,7 +178,7 @@ function useLiveViewers(base: string, enabled: boolean, wanted: string[], listen
     const fresh = wanted.filter((sid) => !requested.current.has(sid));
     let i = 0; let batch: number | undefined;
     const next = () => {
-      for (const sid of fresh.slice(i, i + WATCH_BATCH)) if (wantedRef.current.has(sid) && !requested.current.has(sid)) { requested.current.add(sid); void post(sid, { type: 'watch' }); }
+      for (const sid of fresh.slice(i, i + WATCH_BATCH)) if (wantedRef.current.has(sid) && !requested.current.has(sid)) { requested.current.add(sid); askedAt.current.set(sid, Date.now()); void post(sid, { type: 'watch' }); }
       i += WATCH_BATCH;
       if (i < fresh.length) batch = window.setTimeout(next, WATCH_GAP_MS);
     };
@@ -202,8 +207,29 @@ function useLiveViewers(base: string, enabled: boolean, wanted: string[], listen
     if (listen) void post(listen, { type: 'listen', on: true });
   }, [listen, post]);
 
+  // What the zoomed-in student's picture really is right now (size, pictures per second, bits per second, lost packets).
+  useEffect(() => {
+    prevBytes.current = null; setFocusStats(null);
+    if (!focus) return;
+    let stop = false;
+    const read = async () => {
+      const pc = pcs.current.get(focus); if (!pc || stop) return;
+      let w = 0, h = 0, fps = 0, bytes = 0, lost = 0, packets = 0;
+      try {
+        (await pc.getStats()).forEach((r) => {
+          if (r.type === 'inbound-rtp' && r.kind === 'video' && (r.frameWidth ?? 0) > w) { w = r.frameWidth; h = r.frameHeight ?? 0; fps = r.framesPerSecond ?? 0; bytes = r.bytesReceived ?? 0; lost = r.packetsLost ?? 0; packets = r.packetsReceived ?? 0; }
+        });
+      } catch { return; }
+      if (!w || stop) return;
+      const now = Date.now(); const prev = prevBytes.current; prevBytes.current = { at: now, bytes };
+      setFocusStats({ width: w, height: h, fps: Math.round(fps), kbps: prev && now > prev.at ? Math.round(((bytes - prev.bytes) * 8) / (now - prev.at)) : 0, lossPct: packets + lost > 0 ? Math.round((lost / (packets + lost)) * 100) : 0 });
+    };
+    const t = window.setInterval(read, 2000); void read();
+    return () => { stop = true; window.clearInterval(t); };
+  }, [focus]);
+
   useEffect(() => () => { pcs.current.forEach((pc) => pc.close()); [...requested.current].forEach((sid) => void post(sid, { type: 'unwatch' })); if (listening.current) void post(listening.current, { type: 'listen', on: false }); }, [post]);
-  return { streams, screens };
+  return { streams, screens, askedAt: askedAt.current, turn, focusStats };
 }
 
 /**
@@ -245,9 +271,55 @@ function useRoomEvents(base: string, onChange: () => void, roomSize: number): bo
   return connected;
 }
 
-function LiveVideo({ stream, muted, mirror = true, fit = 'object-cover' }: { stream: MediaStream; muted: boolean; mirror?: boolean; fit?: string }) {
+export interface FocusStats { width: number; height: number; fps: number; kbps: number; lossPct: number }
+
+/** How loud the student's sound is right now (0 to 1), so the lecturer can see that the student is heard while listening. */
+function useAudioLevel(stream: MediaStream | null | undefined, on: boolean): number {
+  const [level, setLevel] = useState(0);
+  useEffect(() => {
+    if (!on || !stream || stream.getAudioTracks().length === 0) { setLevel(0); return; }
+    const AC = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AC) return;
+    let ctx: AudioContext | null = null; let raf = 0; let last = 0;
+    try {
+      ctx = new AC(); void ctx.resume().catch(() => undefined);
+      const src = ctx.createMediaStreamSource(stream); const an = ctx.createAnalyser(); an.fftSize = 512; src.connect(an);
+      const buf = new Uint8Array(an.fftSize);
+      const tick = (t: number) => {
+        raf = requestAnimationFrame(tick);
+        if (t - last < 80) return; last = t;
+        an.getByteTimeDomainData(buf);
+        let sum = 0; for (const v of buf) { const d = (v - 128) / 128; sum += d * d; }
+        setLevel(Math.min(1, Math.sqrt(sum / buf.length) * 4));
+      };
+      raf = requestAnimationFrame(tick);
+    } catch { /* no meter: the sound still plays */ }
+    return () => { cancelAnimationFrame(raf); void ctx?.close().catch(() => undefined); setLevel(0); };
+  }, [stream, on]);
+  return level;
+}
+
+/** Five small bars that move with the student's voice. */
+function LevelMeter({ level, className = '' }: { level: number; className?: string }) {
+  return (
+    <span aria-label="Sound level" role="img" className={`inline-flex h-4 items-end gap-[2px] ${className}`}>
+      {[0.12, 0.28, 0.45, 0.62, 0.8].map((th, i) => <span key={i} className={`w-[3px] rounded-sm transition-[height,background-color] duration-100 ${level >= th ? 'bg-emerald-400' : 'bg-slate-400/50'}`} style={{ height: `${40 + i * 15}%` }} />)}
+    </span>
+  );
+}
+
+/** The tile's Listen button: while it is on, five bars move with the student's voice. */
+function ListenButton({ stream, on, className, onClick }: { stream: MediaStream; on: boolean; className: string; onClick: () => void }) {
+  const level = useAudioLevel(stream, on);
+  return <button type="button" aria-pressed={on} className={`${className} inline-flex items-center justify-center gap-2`} onClick={onClick}>{on ? <><LevelMeter level={level} />Stop listening</> : 'Listen'}</button>;
+}
+
+function LiveVideo({ stream, muted, mirror = true, fit = 'object-cover', volume = 1 }: { stream: MediaStream; muted: boolean; mirror?: boolean; fit?: string; volume?: number }) {
   const ref = useRef<HTMLVideoElement>(null);
   useEffect(() => { if (ref.current && ref.current.srcObject !== stream) ref.current.srcObject = stream; }, [stream]);
+  useEffect(() => { if (ref.current) ref.current.volume = Math.min(1, Math.max(0, volume)); }, [volume, stream]);
+  // The browser may start a picture with sound switched off until the lecturer has touched the page: the lecturer pressed Listen, so start it.
+  useEffect(() => { if (!muted && ref.current) void ref.current.play().catch(() => undefined); }, [muted, stream]);
   return <video ref={ref} autoPlay playsInline muted={muted} className={`h-full w-full ${mirror ? '-scale-x-100' : ''} ${fit}`} />;
 }
 
@@ -257,9 +329,13 @@ function LiveVideo({ stream, muted, mirror = true, fit = 'object-cover' }: { str
  */
 function ZoomView(p: {
   student: Student; screen: MediaStream | null; camera: MediaStream | null; screenPic: string | null; cameraPic: string | null; live: boolean; source: Source;
-  busy: boolean; listening: boolean; canListen: boolean; onListen: () => void; onResume: () => void; onEnd: () => void; onLive: () => void; onClose: () => void;
+  busy: boolean; listening: boolean; canListen: boolean; stats: FocusStats | null; onListen: () => void; onResume: () => void; onEnd: () => void; onLive: () => void; onClose: () => void;
 }) {
   const [zoom, setZoom] = useState(1);
+  const [volume, setVolume] = useState(1);
+  const level = useAudioLevel(p.camera, p.listening);
+  const root = useRef<HTMLDivElement>(null);
+  const full = () => { const el = root.current; if (!el) return; if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined); else void el.requestFullscreen?.().catch(() => undefined); };
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === 'Escape') p.onClose(); else if (e.key === '+' || e.key === '=') setZoom((z) => Math.min(4, z + 0.5)); else if (e.key === '-') setZoom((z) => Math.max(1, z - 0.5)); }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [p.onClose]); // eslint-disable-line react-hooks/exhaustive-deps
   const s = p.student;
@@ -268,7 +344,7 @@ function ZoomView(p: {
   const hd = p.live && (p.screen || p.camera);
   const zb = 'min-h-11 shrink-0 rounded-lg bg-white/10 px-3.5 text-xs font-semibold hover:bg-white/20 active:bg-white/25 disabled:opacity-40 md:min-h-9 ' + FOCUS;
   return (
-    <div role="dialog" aria-label={`${s.student_name}, zoomed in`} className="fixed inset-0 z-40 flex flex-col bg-slate-950 text-white">
+    <div ref={root} role="dialog" aria-label={`${s.student_name}, zoomed in`} className="fixed inset-0 z-40 flex flex-col bg-slate-950 text-white">
       <div className="shrink-0 border-b border-white/10 bg-slate-950/95 pt-[env(safe-area-inset-top)]">
         <div className="flex items-center gap-2 px-3 py-2.5 md:px-4">
           <div className="min-w-0 flex-1">
@@ -276,7 +352,8 @@ function ZoomView(p: {
             <p className="truncate text-xs text-slate-400">{q ? `${q.index ? `Question ${q.index}${q.total ? ` of ${q.total}` : ''}` : ''}${q.label ? `${q.index ? ' · ' : ''}${q.label}` : ''}` : 'Not started'}</p>
           </div>
           <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-bold ${TONE[s.status]}`}>{LABEL[s.status]}</span>
-          {hd ? <span className="hidden shrink-0 rounded-full bg-emerald-600 px-2.5 py-0.5 text-[11px] font-bold sm:inline">HD live</span> : <span className="hidden shrink-0 rounded-full bg-slate-700 px-2.5 py-0.5 text-[11px] font-bold sm:inline">Small picture</span>}
+          {hd ? <span title="The picture you are getting right now" className="hidden shrink-0 rounded-full bg-emerald-600 px-2.5 py-0.5 text-[11px] font-bold tabular-nums sm:inline">{p.stats ? `${p.stats.width}×${p.stats.height} · ${p.stats.fps} fps${p.stats.kbps ? ` · ${p.stats.kbps >= 1000 ? `${(p.stats.kbps / 1000).toFixed(1)} Mbit/s` : `${p.stats.kbps} kbit/s`}` : ''}` : 'HD live'}</span> : <span className="hidden shrink-0 rounded-full bg-slate-700 px-2.5 py-0.5 text-[11px] font-bold sm:inline">Small picture</span>}
+          {hd && p.stats && p.stats.lossPct >= 5 && <span title="Pictures lost on the way: the connection is weak" className="hidden shrink-0 rounded-full bg-amber-500 px-2.5 py-0.5 text-[11px] font-bold text-slate-950 sm:inline">Weak connection</span>}
           <button type="button" onClick={p.onClose} aria-label="Close" className={`${zb} !px-4`}>Close<span className="hidden md:inline"> (Esc)</span></button>
         </div>
         <div className="flex items-center gap-2 overflow-x-auto px-3 pb-2.5 md:px-4 [scrollbar-width:none]">
@@ -286,7 +363,9 @@ function ZoomView(p: {
             <button type="button" aria-label="Zoom in" className={`${zb} w-11 !px-0 text-lg font-bold`} disabled={zoom >= 4} onClick={() => setZoom((z) => Math.min(4, z + 0.5))}>+</button>
           </div>
           {(s.status === 'PAUSED' || s.status === 'LEFT') && <button type="button" disabled={p.busy} onClick={p.onResume} className={`${zb} !bg-blue-500 font-bold hover:!bg-blue-400`}>Resume</button>}
-          {p.canListen && <button type="button" onClick={p.onListen} className={zb}>{p.listening ? 'Stop listening' : 'Listen'}</button>}
+          {p.canListen && <button type="button" onClick={p.onListen} className={`${zb} inline-flex items-center gap-2 ${p.listening ? '!bg-white !text-slate-950' : ''}`}>{p.listening ? <><LevelMeter level={level} />Stop listening</> : 'Listen'}</button>}
+          {p.listening && <label className="flex shrink-0 items-center gap-2 text-xs font-semibold text-slate-300">Volume<input type="range" min={0} max={1} step={0.05} value={volume} aria-label="Volume" onChange={(e) => setVolume(Number(e.target.value))} className="h-6 w-24 accent-emerald-400" /></label>}
+          <button type="button" onClick={full} className={zb}>Full screen</button>
           {s.status !== 'ENDED' && <button type="button" disabled={p.busy} onClick={p.onEnd} className={`${zb} !bg-rose-600 font-bold hover:!bg-rose-700`}>End test</button>}
         </div>
       </div>
@@ -294,12 +373,12 @@ function ZoomView(p: {
       <div ref={box} className="relative flex min-h-0 flex-1 overflow-auto overscroll-contain">
         <div style={{ width: `${zoom * 100}%`, aspectRatio: wantsScreen ? '16 / 9' : '4 / 3', maxWidth: zoom === 1 ? '100%' : undefined, maxHeight: zoom === 1 ? '100%' : undefined, margin: 'auto', flex: 'none' }} className="relative">
           {wantsScreen ? (p.screen ? <LiveVideo stream={p.screen} muted mirror={false} fit="object-contain" /> : <img src={p.screenPic ?? ''} alt={`Screen: ${s.student_name}`} className="h-full w-full object-contain" />)
-            : p.camera ? <LiveVideo stream={p.camera} muted={!p.listening} /> : p.cameraPic ? <img src={p.cameraPic} alt={`Camera: ${s.student_name}`} className="h-full w-full -scale-x-100 object-contain" />
+            : p.camera ? <LiveVideo stream={p.camera} muted={!p.listening} volume={volume} /> : p.cameraPic ? <img src={p.cameraPic} alt={`Camera: ${s.student_name}`} className="h-full w-full -scale-x-100 object-contain" />
             : <div className="flex h-full items-center justify-center text-sm text-slate-400">No picture yet</div>}
         </div>
         {wantsScreen && p.source === 'both' && (p.camera || p.cameraPic) && (
           <div className="pointer-events-none absolute bottom-3 right-3 h-24 w-32 overflow-hidden rounded-xl border-2 border-white shadow-xl sm:h-40 sm:w-52">
-            {p.camera ? <LiveVideo stream={p.camera} muted={!p.listening} /> : <img src={p.cameraPic ?? ''} alt="" className="h-full w-full -scale-x-100 object-cover" />}
+            {p.camera ? <LiveVideo stream={p.camera} muted={!p.listening} volume={volume} /> : <img src={p.cameraPic ?? ''} alt="" className="h-full w-full -scale-x-100 object-cover" />}
           </div>
         )}
       </div>
@@ -337,6 +416,8 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
   const [maxLive, setMaxLiveState] = useState<number>(() => LIVE_CHOICES.includes(Number(stored('maxLive', '24'))) ? Number(stored('maxLive', '24')) : 24);
   const [tileSize, setTileSizeState] = useState<'XS' | 'S' | 'M' | 'L'>(() => (['XS', 'S', 'M', 'L'].includes(stored('size', 'M')) ? (stored('size', 'M') as 'XS' | 'S' | 'M' | 'L') : 'M'));
   const remember = (k: string, v: string) => { try { localStorage.setItem(`liveroom.${k}`, v); } catch { /* a private window: fine */ } };
+  const [qualityPref, setQualityPrefState] = useState<QualityPref>(() => (['auto', 'sharp', 'light'].includes(stored('quality', 'auto')) ? (stored('quality', 'auto') as QualityPref) : 'auto'));
+  const setQualityPref = (v: QualityPref) => { setQualityPrefState(v); remember('quality', v); };
   const setMaxLive = (n: number) => { setMaxLiveState(n); remember('maxLive', String(n)); };
   const setTileSize = (v: 'XS' | 'S' | 'M' | 'L') => { setTileSizeState(v); remember('size', v); };
   const seen = useRef<Map<string, { v: number; st: Status }> | null>(null);
@@ -425,7 +506,10 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
     void get(); const t = setInterval(get, 5000);
     return () => { stop = true; clearInterval(t); };
   }, [mode, picKey, call]);
-  const { streams, screens } = useLiveViewers(base, mode === 'live', wanted, sound ? listen : null, focus);
+  const gridLevel = gridQuality(wanted.length, tileSize, qualityPref);   // sharper with few students or big tiles, tiny beyond 48
+  const { streams, screens, askedAt, turn, focusStats } = useLiveViewers(base, mode === 'live', wanted, sound ? listen : null, focus, gridLevel);
+  const [clock, setClock] = useState(0);   // so "Connecting…" can turn into "Showing a picture" without waiting for the next update
+  useEffect(() => { if (mode !== 'live') return; const t = window.setInterval(() => setClock((c) => c + 1), 5000); return () => window.clearInterval(t); }, [mode]);
 
   // A student who leaves the test, or whose quiz was closed by the rule, appears at the top with a one-click End. Short beep and a flashing tab title.
   useEffect(() => {
@@ -495,6 +579,11 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
       <Setting label="Live at once" hint={maxLive > 48 ? 'Only the tiles on screen are live, so scroll to see more. Over 48 the pictures are tiny and need a strong computer (Chrome on a laptop with 16 GB and a wired connection). If the page gets slow, choose fewer, or set View to Pictures.' : 'How many students move live. Tap one to zoom in at full quality. More needs a stronger device.'}>
         <select className={dSelect} style={{ colorScheme: 'dark' }} aria-label="Live at once" value={maxLive} disabled={mode !== 'live'} onChange={(e) => setMaxLive(Number(e.target.value))}>
           {LIVE_CHOICES.map((n) => <option key={n} value={n}>{n} students</option>)}
+        </select>
+      </Setting>
+      <Setting label="Picture quality" hint="Auto: sharp when few students are live or the tiles are big, lighter as the number grows. Sharper: clearer text on shared screens (up to 24 students). Lighter: saves your internet and computer. Zoom is always full quality.">
+        <select className={dSelect} style={{ colorScheme: 'dark' }} aria-label="Picture quality" value={qualityPref} disabled={mode !== 'live'} onChange={(e) => setQualityPref(e.target.value as QualityPref)}>
+          <option value="auto">Auto (recommended)</option><option value="sharp">Sharper</option><option value="light">Lighter</option>
         </select>
       </Setting>
       <Setting label="Browsers" hint="Lets students without the app (for example on an iPhone) take the test in their browser. It cannot lock their device, only watch it.">
@@ -690,6 +779,11 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
       </header>
 
       <main className="mx-auto max-w-[1800px] px-3 pb-28 pt-3 md:px-4 md:pb-8 md:pt-4">
+        {mode === 'live' && turn === false && (
+          <p role="note" className="mb-3 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3.5 py-2.5 text-xs leading-relaxed text-amber-100">
+            <strong className="font-bold">Some students may only show a picture.</strong> Live video needs a relay server (TURN) for students on mobile data or strict school networks, and none is set up on this server. Those students show the small picture instead; everything else works. Set it up once for the whole site: see docs/MYSEB_LIVE_SCALE.md.
+          </p>
+        )}
         {err && <p role="alert" className="mb-3 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm font-semibold text-rose-200">{err}</p>}
         <div className="md:grid md:grid-cols-[minmax(0,1fr)_340px] md:items-start md:gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
           <section aria-label="Students" className={`min-w-0 ${view === 'needs' ? 'hidden md:block' : ''}`}>
@@ -750,6 +844,12 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
                       <span title={LABEL[s.status]} className="absolute left-1.5 top-1.5 inline-flex items-center gap-1.5 rounded-full bg-slate-950/80 px-2 py-0.5 text-[10px] font-bold text-white backdrop-blur md:px-2.5 md:text-[11px]"><span className={`h-1.5 w-1.5 rounded-full ${DOT[s.status]}`} />{!dense && LABEL[s.status]}</span>
                       {(streams[s.id] || screens[s.id]) && <span className="absolute right-2 top-2 flex items-center gap-1 rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-bold text-white"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />LIVE</span>}
                       {!streams[s.id] && !screens[s.id] && pics[s.id]?.age != null && (pics[s.id].age as number) > 30 && <span className="absolute right-2 top-2 rounded bg-black/60 px-1.5 text-[10px] text-white">{pics[s.id].age}s ago</span>}
+                      {mode === 'live' && !dense && !streams[s.id] && !screens[s.id] && visible.has(s.id) && (s.status === 'IN_EXAM' || s.status === 'PAUSED') && (() => {
+                        const st = tileLiveState(false, askedAt.get(s.id), Date.now() + clock * 0, startUpMs(wanted.length));
+                        return st === 'connecting'
+                          ? <span className="absolute bottom-10 right-2 flex items-center gap-1.5 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-semibold text-slate-200"><span className="h-2.5 w-2.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />Connecting live…</span>
+                          : <span title="Live video could not start for this student (strict network or no relay). The small picture is shown instead." className="absolute bottom-10 right-2 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-semibold text-amber-200">Picture only</span>;
+                      })()}
                       <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent px-2.5 pb-2 pt-9 md:px-3 md:pb-2.5 md:pt-10">
                         <p className={`truncate font-bold text-white ${dense ? 'text-[11px] leading-tight' : 'text-sm'}`} title={s.student_name}>{s.student_name}</p>
                         {!dense && <p className="truncate text-[11px] text-slate-300" title={q?.label}>{qText}</p>}
@@ -777,7 +877,7 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
                       {(s.reinstated_count ?? 0) > 0 && <p className="text-xs text-slate-400">Let back in {s.reinstated_count === 1 ? 'once' : `${s.reinstated_count} times`}</p>}
                       <div className="mt-auto flex flex-wrap gap-1.5 pt-1">
                         {(s.status === 'PAUSED' || s.status === 'LEFT') && <button type="button" className={`${act2} bg-blue-500 font-bold text-white hover:bg-blue-400`} disabled={busy} onClick={() => act(() => call(`/sessions/${s.id}/resume`, 'POST'))}>Resume</button>}
-                        {sound && streams[s.id] && <button type="button" className={`${listen === s.id ? 'bg-white text-slate-950' : 'border border-white/15 bg-white/5 text-slate-100 hover:bg-white/10'} ${act2}`} onClick={() => setListen(listen === s.id ? null : s.id)}>{listen === s.id ? 'Stop listening' : 'Listen'}</button>}
+                        {sound && streams[s.id] && <ListenButton stream={streams[s.id]} on={listen === s.id} className={`${listen === s.id ? 'bg-white text-slate-950' : 'border border-white/15 bg-white/5 text-slate-100 hover:bg-white/10'} ${act2}`} onClick={() => setListen(listen === s.id ? null : s.id)} />}
                         {s.status === 'ENDED' && s.end_reason && !['teacher', 'time_up', 'exam_ended', 'student', 'student_exit'].includes(s.end_reason) && <button type="button" className={`${act2} bg-emerald-500 font-bold text-white hover:bg-emerald-400`} disabled={busy} title="Use this when the rule was broken by mistake: the student continues where they were. It is written in their log." onClick={() => { if (confirm(`Let ${s.student_name} back in? It is recorded in their log.`)) void act(() => call(`/sessions/${s.id}/reinstate`, 'POST')); }}>Let back in</button>}
                         {s.status !== 'ENDED' && <button type="button" className={`${act2} ${needs(s) ? 'bg-rose-600 font-bold text-white hover:bg-rose-500' : 'border border-white/15 bg-white/5 text-rose-300 hover:bg-white/10'}`} disabled={busy} onClick={() => { if (confirm(`End the test for ${s.student_name}?`)) void act(() => call(`/sessions/${s.id}/end`, 'POST')); }}>End</button>}
                         {s.has_partial && <button type="button" className={`${act2} border border-emerald-400/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20`} title="What this student had typed, saved every few seconds" onClick={async () => { try { const d = await call(`/sessions/${s.id}/partial`); const show = (v: unknown) => (Array.isArray(v) ? v.join(', ') : v !== null && typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')); setSaved({ name: s.student_name, at: d.saved_at ?? null, rows: Object.entries(d.answers ?? {}).map(([id, v]) => ({ q: (d.labels ?? {})[id] || id, a: show(v) })) }); } catch (e) { setErr(e instanceof Error ? e.message : 'Could not load.'); } }}>Saved answers</button>}
@@ -852,7 +952,7 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
         return (
           <ZoomView
             student={s} screen={screens[s.id] ?? null} camera={streams[s.id] ?? null} screenPic={pics[s.id]?.screen ?? s.live?.screen ?? null} cameraPic={pics[s.id]?.frame ?? s.live?.frame ?? null}
-            live={mode === 'live'} source={source} busy={busy} listening={listen === s.id} canListen={sound && !!streams[s.id]}
+            live={mode === 'live'} source={source} busy={busy} listening={listen === s.id} canListen={sound && !!streams[s.id]} stats={focusStats}
             onListen={() => setListen(listen === s.id ? null : s.id)}
             onResume={() => act(() => call(`/sessions/${s.id}/resume`, 'POST'))}
             onEnd={() => { void act(() => call(`/sessions/${s.id}/end`, 'POST')); }}
