@@ -14,7 +14,7 @@ test('marking by hand updates the score, grade and pass; strangers and wrong que
   const formRoutes = (await import('../server/routes/formRoutes.js')).default;
   const db = prisma as any;
   const owner = `lect-${randomUUID().slice(0, 8)}`; const other = `lect-${randomUUID().slice(0, 8)}`;
-  for (const id of [owner, other]) await db.user.create({ data: { id, email: `${id}@example.org`, passwordHash: 'x' } }).catch(() => undefined);
+  for (const id of [owner, other]) await db.user.create({ data: { id, email: `${id}@test.local`, name: id, passwordHash: 'x', role: 'INSTRUCTOR' } });   // not swallowed: a missing user must fail here, not later
   const schema = { title: 'CAT 1', isQuiz: true, assessment: { kind: 'CAT', title: 'CAT 1', outOf: 20, passPercent: 50, aiMarking: true }, fields: [
     { id: 'n', type: 'text', label: 'Full name' },
     { id: 'q1', type: 'radio', label: 'Powerhouse?', options: ['Nucleus', 'Mitochondria'], points: 4, correctAnswer: 'Mitochondria' },
@@ -41,5 +41,10 @@ test('marking by hand updates the score, grade and pass; strangers and wrong que
     // the AI batch needs the switch on
     const off = await db.applicationForm.create({ data: { id: randomUUID(), userId: owner, title: 'Plain', schema: JSON.stringify({ title: 'Plain', isQuiz: true, fields: [] }) } });
     assert.equal((await fetch(`${base}/${off.id}/marks/ai`, { method: 'POST', headers: bearer(owner) })).status, 409);
-  } finally { srv.close(); }
+  } finally {
+    srv.close();
+    await db.formSubmission.deleteMany({ where: { form: { userId: owner } } }).catch(() => undefined);
+    await db.applicationForm.deleteMany({ where: { userId: owner } }).catch(() => undefined);
+    await db.user.deleteMany({ where: { id: { in: [owner, other] } } }).catch(() => undefined);
+  }
 });
