@@ -100,7 +100,7 @@ test('visitor messages: valid, limited, private to the owner; robots and hidden 
   assert.equal((await svc.enquiries('o', b.id)).length, 0);
   await assert.rejects(svc.submitEnquiry(b.slug, { name: 'Jean', contact: 'nope', message: 'Hi' }, 'v1'), /phone number or an email/); await assert.rejects(svc.submitEnquiry(b.slug, { contact: '0788111222', message: '  ' }, 'v1'), /Write your message/);
   assert.equal((await svc.submitEnquiry(b.slug, { name: 'Jean', contact: '0788111222', message: 'Do you deliver?' }, 'v1')).saved, true);
-  const [e] = await svc.enquiries('o', b.id); assert.deepEqual([e.name, e.contact, e.message, e.status], ['Jean', '0788111222', 'Do you deliver?', 'new']);
+  const [e] = await svc.enquiries('o', b.id); assert.deepEqual([e.name, e.contact, e.message, e.status], ['Jean', '250788111222', 'Do you deliver?', 'new']);
   assert.equal((await svc.setEnquiry('o', b.id, e.id, 'done')).status, 'done'); assert.equal((await svc.stats('o', b.id)).newMessages, 0);
   for (let i = 0; i < 4; i++) await svc.submitEnquiry(b.slug, { contact: 'a@b.rw', message: `m${i}` }, 'v1'); await assert.rejects(svc.submitEnquiry(b.slug, { contact: 'a@b.rw', message: 'again' }, 'v1'), (e2: any) => e2.status === 429);
   await svc.setPublished('o', b.id, false); await assert.rejects(svc.submitEnquiry(b.slug, { contact: 'a@b.rw', message: 'hi' }, 'v2'), (e3: any) => e3.status === 404);

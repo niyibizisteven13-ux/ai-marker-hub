@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronLeft, ChevronRight, Clock, Copy, Download, Flag, Globe, Image as ImageIcon, Instagram, Facebook, Loader2, Mail, MapPin, MessageCircle, Minus, Phone, Play, Plus, QrCode, Send, Share2, ShoppingBag, Smartphone, X } from 'lucide-react';
 import { publicApi } from '../../biz/api';
-import { DAYS, THEMES, pageUrl, rwf, CATEGORIES, type PublicBusiness, type PublicMedia } from '../../biz/types';
+import { DAYS, THEMES, pageUrl, rwf, CATEGORIES, type PublicBusiness, type PublicMedia, type PublicPost } from '../../biz/types';
 import { presetFor } from './presets';
+import MapTile from './MapTile';
 
 /**
  * A business's public page (bwenge4biz). Phone first: a cover, the name and the buttons people tap (WhatsApp, Call, Directions, Share), then the
  * products, the photos and videos, the hours and a message form. The same component is the preview in the owner's studio (`preview`: nothing is
  * counted or sent). The business picks the accent colour; everything else is Bwenge's own clean, light style so every page is easy to read.
  */
+const agoText = (iso: string) => { const sec = Math.max(1, Math.round((Date.now() - Date.parse(iso)) / 1000)); return sec < 3600 ? `${Math.max(1, Math.round(sec / 60))} min ago` : sec < 86400 ? `${Math.round(sec / 3600)} h ago` : new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }); };
 const initials = (n: string) => n.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase()).join('') || 'B';
 
 function Lightbox({ items, index, src, onClose, onIndex }: { items: PublicMedia[]; index: number; src: (id: string) => string; onClose: () => void; onIndex: (i: number) => void }) {
@@ -151,26 +153,29 @@ function Checkout({ b, cart, setCart, onClose, preview, startPay, waLink }: { b:
 export default function BizPage({ business: b, openNow, mediaSrc, preview = false }: { business: PublicBusiness; openNow: boolean | null; mediaSrc: (id: string) => string; preview?: boolean }) {
   const theme = THEMES[b.theme] ?? THEMES.gold; const preset = presetFor(b.category);
   const [box, setBox] = useState<number | null>(null); const [report, setReport] = useState(false); const [toast, setToast] = useState(''); const [cart, setCart] = useState<Cart>({}); const [checkout, setCheckout] = useState<null | 'order' | 'pay'>(null);
-  const [qr, setQr] = useState(''); const [installEvt, setInstallEvt] = useState<any>(null); const toastTimer = useRef<number | undefined>(undefined);
+  const [posts, setPosts] = useState<PublicPost[]>([]); const [postBox, setPostBox] = useState<{ items: PublicMedia[]; i: number } | null>(null); const [qr, setQr] = useState(''); const [installEvt, setInstallEvt] = useState<any>(null); const toastTimer = useRef<number | undefined>(undefined);
   const say = (t: string) => { setToast(t); window.clearTimeout(toastTimer.current); toastTimer.current = window.setTimeout(() => setToast(''), 2200); };
   const track = (k: 'whatsapp' | 'call' | 'share') => { if (!preview) publicApi.track(b.slug, k); };
   const todayKey = useMemo(() => new Date().toLocaleDateString('en-US', { weekday: 'short', timeZone: 'Africa/Kigali' }).toLowerCase().slice(0, 3), []);
   const c = b.contact; const category = CATEGORIES.find((x) => x.id === b.category)?.label ?? 'Business'; const media = b.gallery; const url = pageUrl(b.slug);
   const waBase = (text: string) => (c.whatsapp ? `https://wa.me/${c.whatsapp}?text=${encodeURIComponent(text)}` : null);
   const waLink = waBase(`Hello ${b.name}, I saw your page on Bwenge.`);
-  const mapLink = c.mapUrl || (c.address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${b.name} ${c.address}`)}` : null);
+  const loc = b.location; const mapLink = loc ? `https://www.google.com/maps/dir/?api=1&destination=${loc.lat},${loc.lng}` : c.mapUrl || (c.address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${b.name} ${c.address}`)}` : null);
   const lines = cartLines(b, cart); const count = lines.reduce((a, l) => a + l.qty, 0); const total = lines.reduce((a, l) => a + (l.p.price ?? 0) * l.qty, 0);
   const todayHours = b.hours.find((h) => h.day === todayKey);
+  const sharePost = async (p: PublicPost) => { const u = `${url}?post=${p.id}#post-${p.id}`; track('share'); try { if (navigator.share) { await navigator.share({ title: b.name, text: p.text.slice(0, 120) || b.name, url: u }); return; } await navigator.clipboard.writeText(u); say('Link copied'); } catch { /* cancelled */ } };
   const share = async () => { track('share'); try { if (navigator.share) { await navigator.share({ title: b.name, text: b.tagline || b.name, url }); return; } await navigator.clipboard.writeText(url); say('Link copied'); } catch { /* cancelled */ } };
   const copy = async (text: string, what: string) => { try { await navigator.clipboard.writeText(text); say(`${what} copied`); } catch { say('Could not copy'); } };
   useEffect(() => { let alive = true; void import('qrcode').then((m: any) => (m.default ?? m).toDataURL(url, { margin: 1, width: 420, color: { dark: '#0E1722', light: '#FFFFFF' } })).then((d: string) => { if (alive) setQr(d); }).catch(() => undefined); return () => { alive = false; }; }, [url]);
   useEffect(() => { const h = (e: Event) => { e.preventDefault(); setInstallEvt(e); }; window.addEventListener('beforeinstallprompt', h); return () => window.removeEventListener('beforeinstallprompt', h); }, []);
   useEffect(() => { if (!preview && window.location.hash === '#pay' && b.payOnline) setCheckout('pay'); }, [preview, b.payOnline]);
+  useEffect(() => { let alive = true; void publicApi.posts(b.slug).then((p) => { if (alive) setPosts(p); }).catch(() => undefined); return () => { alive = false; }; }, [b.slug, b.updatedAt]);
+  useEffect(() => { if (!posts.length) return; const h = window.location.hash; if (h.startsWith('#post-') || h === '#updates') window.setTimeout(() => document.getElementById(h.slice(1))?.scrollIntoView({ block: 'start' }), 300); }, [posts.length]);
   const install = async () => { try { await installEvt.prompt(); } catch { /* dismissed */ } setInstallEvt(null); };
   const add = (id: string, d = 1) => setCart((x) => ({ ...x, [id]: Math.max(0, Math.min(99, (x[id] ?? 0) + d)) }));
   const go = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
-  const tabs: Array<[string, string, boolean]> = [['top', 'Overview', true], ['items', preset.itemsTitle, b.products.length > 0], ['gallery', 'Gallery', media.length > 0], ['about', 'About', true], ['contact', 'Contact', true]];
+  const tabs: Array<[string, string, boolean]> = [['top', 'Overview', true], ['items', preset.itemsTitle, b.products.length > 0], ['updates', 'Updates', posts.length > 0], ['gallery', 'Gallery', media.length > 0], ['about', 'About', true], ['contact', 'Contact', true]];
   const tile = 'flex flex-col items-center justify-center gap-2 rounded-2xl border border-[#E7EAEE] bg-white px-2 py-4 text-center text-[13px] font-semibold text-[#0E1722] shadow-sm transition hover:-translate-y-0.5 hover:shadow-md';
   const iconWrap = 'flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--acc)]/15 text-[#0E1722]';
   const panel = 'rounded-3xl border border-[#E7EAEE] bg-white p-5 shadow-sm';
@@ -252,6 +257,19 @@ export default function BizPage({ business: b, openNow, mediaSrc, preview = fals
               {/* highlights */}
               <section className="grid grid-cols-3 gap-2 rounded-2xl bg-[#F6F7F9] p-3 text-center text-[12.5px] font-medium text-[#475467] sm:text-sm">{preset.highlights.map((h) => <span key={h} className="flex items-center justify-center gap-1.5 px-1 py-1.5"><Check size={14} className="shrink-0 text-emerald-600" />{h}</span>)}</section>
 
+              {/* updates (the feed) */}
+              {posts.length > 0 && (
+                <section id="updates" className="scroll-mt-20"><h2 className="mb-4 font-display text-2xl font-semibold tracking-tight">Updates</h2>
+                  <ul className="space-y-4">{posts.map((p) => (
+                    <li key={p.id} id={`post-${p.id}`} className="scroll-mt-20 overflow-hidden rounded-2xl border border-[#E7EAEE] bg-white shadow-sm">
+                      <div className="flex items-center gap-3 px-4 pt-4"><span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[var(--acc)] text-sm font-bold text-[var(--on)]">{b.logo ? <img src={mediaSrc(b.logo.id)} alt="" className="h-full w-full object-cover" /> : initials(b.name)}</span>
+                        <div className="min-w-0 flex-1"><p className="truncate text-[15px] font-semibold">{b.name}</p><p className="text-xs text-[#667085]">{agoText(p.at)}{p.pinned ? ' · Pinned' : ''}</p></div>
+                        <button type="button" aria-label="Share this update" onClick={() => void sharePost(p)} className="flex h-10 w-10 items-center justify-center rounded-xl text-[#667085] hover:bg-[#F0F2F5]"><Share2 size={17} /></button></div>
+                      {p.text && <p className="whitespace-pre-wrap px-4 pb-3 pt-3 text-[15.5px] leading-relaxed text-[#344054]">{p.text}</p>}
+                      {p.media.length > 0 && <ul className={`grid gap-0.5 ${p.media.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>{p.media.map((m, i) => <li key={m.id}><button type="button" onClick={() => setPostBox({ items: p.media, i })} aria-label="Open photo" className={`block w-full overflow-hidden bg-[#F0F2F5] ${p.media.length === 1 ? 'max-h-[28rem]' : 'aspect-square'}`}><img src={mediaSrc(m.id)} alt="" loading="lazy" className="h-full w-full object-cover" /></button></li>)}</ul>}
+                      {!p.media.length && <div className="pb-1" />}
+                    </li>))}</ul></section>)}
+
               {/* gallery */}
               {media.length > 0 && (
                 <section id="gallery" className="scroll-mt-20"><h2 className="mb-4 font-display text-2xl font-semibold tracking-tight">Gallery</h2>
@@ -269,7 +287,7 @@ export default function BizPage({ business: b, openNow, mediaSrc, preview = fals
 
             {/* sidebar */}
             <aside className="space-y-4">
-              {(c.address || mapLink) && <div className={panel}><h3 className="font-display text-lg font-semibold">Find us</h3><div className="mt-3 flex h-28 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#E6EEF6,#F3F6FA)] text-[#98A2B3]"><MapPin size={34} /></div>
+              {(c.address || mapLink || loc) && <div className={panel}><h3 className="font-display text-lg font-semibold">Find us</h3>{loc ? <a href={mapLink!} target="_blank" rel="noreferrer" aria-label="Open in maps" className="mt-3 block overflow-hidden rounded-2xl"><MapTile lat={loc.lat} lng={loc.lng} height={150} /></a> : <div className="mt-3 flex h-28 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#E6EEF6,#F3F6FA)] text-[#98A2B3]"><MapPin size={34} /></div>}
                 {c.address && <p className="mt-3 flex gap-2 text-[15px]"><MapPin size={17} className="mt-0.5 shrink-0 text-[#667085]" />{c.address}</p>}{mapLink && <a href={mapLink} target="_blank" rel="noreferrer" className="mt-3 flex min-h-11 items-center justify-center gap-2 rounded-xl border border-[#D5DBE3] text-sm font-semibold hover:bg-[#F6F7F9]"><MapPin size={16} />Open map</a>}</div>}
               {b.hours.length > 0 && <div id="hours" className={`${panel} scroll-mt-20`}><div className="flex items-center justify-between"><h3 className="font-display text-lg font-semibold">Opening hours</h3>{openNow !== null && <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${openNow ? 'bg-[#E8F6EE] text-[#14532D]' : 'bg-[#F0F2F5] text-[#475467]'}`}>{openNow ? 'Open now' : 'Closed'}</span>}</div>
                 <ul className="mt-3 divide-y divide-[#EEF0F3] text-[14.5px]">{DAYS.map((d) => { const h = b.hours.find((x) => x.day === d.id); const today = d.id === todayKey; return <li key={d.id} className={`flex justify-between py-2 ${today ? 'font-semibold' : ''}`}><span>{d.label}</span><span className={h?.closed ? 'text-[#98A2B3]' : ''}>{!h ? '–' : h.closed ? 'Closed' : `${h.open} – ${h.close}`}</span></li>; })}</ul></div>}
@@ -298,6 +316,7 @@ export default function BizPage({ business: b, openNow, mediaSrc, preview = fals
       {/* cart bar */}
       {count > 0 && !checkout && <div className="fixed inset-x-0 bottom-0 z-40 p-3 sm:p-4"><button type="button" onClick={() => setCheckout('order')} className="mx-auto flex min-h-14 w-full max-w-xl items-center justify-between gap-3 rounded-2xl bg-[#0E1722] px-5 text-white shadow-2xl"><span className="inline-flex items-center gap-2.5 text-[15px] font-semibold"><span className="flex h-7 min-w-7 items-center justify-center rounded-full bg-[var(--acc)] px-1.5 text-sm text-[var(--on)]">{count}</span>View your order</span><b>{lines.every((l) => l.p.price !== null) ? `${total.toLocaleString('en-US')} RWF` : ''}</b></button></div>}
       {checkout && <Checkout b={b} cart={cart} setCart={setCart} preview={preview} startPay={checkout === 'pay'} waLink={waBase} onClose={() => setCheckout(null)} />}
+      {postBox && <Lightbox items={postBox.items} index={postBox.i} src={mediaSrc} onClose={() => setPostBox(null)} onIndex={(i) => setPostBox({ ...postBox, i })} />}
       {box !== null && media.length > 0 && <Lightbox items={media} index={box} src={mediaSrc} onClose={() => setBox(null)} onIndex={setBox} />}
       {report && <ReportDialog slug={b.slug} onClose={() => setReport(false)} />}
       {toast && <p role="status" className="fixed bottom-24 left-1/2 z-[500] -translate-x-1/2 rounded-full bg-[#0E1722] px-4 py-2 text-sm text-white shadow-lg">{toast}</p>}

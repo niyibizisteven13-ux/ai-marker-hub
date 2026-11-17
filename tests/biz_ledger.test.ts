@@ -141,3 +141,39 @@ test('the Business Agent chat: its tool list is exactly business tools that exis
   for (const t of CHAT_TOOLS) assert.ok(names.has(t), `${t} exists`); assert.ok(CHAT_TOOLS.every((t) => t.startsWith('biz_')), 'nothing outside the business toolbox'); assert.ok(!CHAT_TOOLS.includes('biz_add_media'), 'no file ids in this chat');
   const sys = chatSystem({ name: 'Cafe', slug: 'cafe-1', category: 'restaurant' }); assert.ok(sys.includes('cafe-1') && /never ask for or accept payment keys/.test(sys) && /not a general chatbot/.test(sys));
 });
+
+// ---- paid gate, feed, location
+test('the dashboard is paid: owner side refused with UPGRADE_REQUIRED until allowed; the public page is never affected', async () => {
+  let ok = true; const kv = memKv();
+  const svc = createBizService({ kv, media: memoryMediaStore(), isPaid: async () => false, now: () => T0, allowed: async () => ok }); resetBizLimitsForTests();
+  const b = await svc.create('o', { name: 'Cafe' }); await svc.update('o', b.id, { about: 'x' }); await svc.setPublished('o', b.id, true);
+  ok = false;
+  for (const call of [() => svc.get('o', b.id), () => svc.update('o', b.id, { about: 'y' }), () => svc.dashboard('o', b.id), () => svc.addEntry('o', b.id, { type: 'sale', amount: 5 }), () => svc.create('o', { name: 'Two' }), () => svc.addPost('o', b.id, { text: 'hi' })])
+    await assert.rejects(call(), (e: any) => e.status === 402 && e.code === 'UPGRADE_REQUIRED');
+  assert.equal((await svc.list('o')).length, 1, 'the names can still be listed so the screen can say what is paused'); assert.ok(await svc.publicBySlug(b.slug), 'customers still see the page');
+  ok = true; assert.equal((await svc.get('o', b.id)).name, 'Cafe');
+});
+
+test('feed: owner posts text and photos, the public sees them newest first with the pinned one on top, feed-only photos are public only while a post shows them', async () => {
+  let clock = T0; const kv = memKv(); const store = memoryMediaStore(); const svc = createBizService({ kv, media: store, isPaid: async () => true, now: () => clock }); resetBizLimitsForTests();
+  const b = await svc.create('o', { name: 'Cafe' }); await svc.update('o', b.id, { about: 'x' }); await svc.setPublished('o', b.id, true);
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(80, 1)]);
+  const m = await svc.addMedia('o', b.id, { name: 'a.png', data: png, scope: 'feed' }); assert.equal(m.visible, false); assert.equal((await svc.get('o', b.id)).coverId, undefined, 'a post photo never becomes the cover');
+  assert.equal(await svc.mediaFor(b.slug, m.id), null, 'not public before a post shows it'); assert.equal((await svc.publicBySlug(b.slug))!.gallery.length, 0, 'not in the gallery');
+  await assert.rejects(svc.addPost('o', b.id, { text: '  ' }), /Write something/);
+  const p1 = await svc.addPost('o', b.id, { text: 'Fresh bread today', mediaIds: [m.id, 'nope'] }); clock += 60_000; const p2 = await svc.addPost('o', b.id, { text: 'Closed Monday' });
+  assert.ok(await svc.mediaFor(b.slug, m.id), 'public once a post shows it');
+  let feed = await svc.publicPosts(b.slug); assert.deepEqual(feed.map((x) => x.id), [p2.id, p1.id]); assert.equal(feed[1].media.length, 1);
+  await svc.setPost('o', b.id, p1.id, { pinned: true }); feed = await svc.publicPosts(b.slug); assert.equal(feed[0].id, p1.id);
+  await assert.rejects(svc.addPost('intruder', b.id, { text: 'x' }), (e: any) => e.status === 404);
+  await svc.removePost('o', b.id, p1.id); assert.equal(await svc.mediaFor(b.slug, m.id), null, 'the post’s own photo goes with it'); assert.equal((await svc.get('o', b.id)).media.length, 0);
+  await svc.setPublished('o', b.id, false); assert.deepEqual(await svc.publicPosts(b.slug), [], 'an unpublished page shows no feed');
+});
+
+test('location: valid coordinates become public, junk is ignored, clearing removes them', async () => {
+  const svc = createBizService({ kv: memKv(), media: memoryMediaStore(), isPaid: async () => true, now: () => T0 }); resetBizLimitsForTests();
+  const b = await svc.create('o', { name: 'Cafe' }); await svc.update('o', b.id, { about: 'x', lat: '-1.9441234567', lng: 30.0619 }); await svc.setPublished('o', b.id, true);
+  assert.deepEqual((await svc.publicBySlug(b.slug))!.location, { lat: -1.944123, lng: 30.0619 });
+  await svc.update('o', b.id, { lat: 999, lng: 30 }); assert.deepEqual((await svc.publicBySlug(b.slug))!.location, { lat: -1.944123, lng: 30.0619 }, 'out of range is ignored'); await svc.update('o', b.id, { lat: 'abc', lng: 'x' }); assert.ok((await svc.publicBySlug(b.slug))!.location);
+  await svc.update('o', b.id, { lat: null, lng: null }); assert.equal((await svc.publicBySlug(b.slug))!.location, undefined);
+});

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Sparkles, Bot, ArrowLeft, BarChart3, Check, ExternalLink, Eye, EyeOff, Film, Globe, ImagePlus, Inbox, KeyRound, LayoutDashboard, Loader2, MessageCircle, MoreHorizontal, Package, Palette, Plus, Receipt, Settings, ShoppingBag, Store, Trash2, Upload, Users } from 'lucide-react';
+import { Megaphone, MapPin, Sparkles, Bot, ArrowLeft, BarChart3, Check, ExternalLink, Eye, EyeOff, Film, Globe, ImagePlus, Inbox, KeyRound, LayoutDashboard, Loader2, MessageCircle, MoreHorizontal, Package, Palette, Plus, Receipt, Settings, ShoppingBag, Store, Trash2, Upload, Users } from 'lucide-react';
 import BizPage from '../components/biz/BizPage';
-import { AgentChatView, AgentView, DashboardView, NotebookView, CustomersView, ReportsView, SecretsView, EntrySheet, type EntryKind } from '../components/biz/Workspace';
+import MapTile, { parseCoords } from '../components/biz/MapTile';
+import { FeedView, LockedGate, AgentChatView, AgentView, DashboardView, NotebookView, CustomersView, ReportsView, SecretsView, EntrySheet, type EntryKind } from '../components/biz/Workspace';
 import { btn, btnGhost, btnPrimary, card, input, msg, Tag, Title } from '../components/biz/ui';
 import { BizApiError, ownerApi, prepareImage, type Mine } from '../biz/api';
 import { CATEGORIES, DAYS, THEMES, rwf, type Business, type Enquiry, type Hours, type PublicBusiness, type SecretsStatus } from '../biz/types';
@@ -11,8 +12,24 @@ import { CATEGORIES, DAYS, THEMES, rwf, type Business, type Enquiry, type Hours,
  * Everything the owner can do here the Bwenge assistant can also do by chat.
  */
 /* ------------------------------------------------------------------ page */
+function LocationEditor({ lat, lng, onChange }: { lat: string; lng: string; onChange: (lat: string, lng: string) => void }) {
+  const [paste, setPaste] = useState(''); const [note, setNote] = useState(''); const [busy, setBusy] = useState(false);
+  const la = Number(lat), lo = Number(lng); const has = lat !== '' && lng !== '' && Number.isFinite(la) && Number.isFinite(lo);
+  const here = () => { setNote(''); if (!navigator.geolocation) return setNote('This device cannot share its location. Paste a Google Maps link instead.'); setBusy(true); navigator.geolocation.getCurrentPosition((p) => { onChange(String(Math.round(p.coords.latitude * 1e6) / 1e6), String(Math.round(p.coords.longitude * 1e6) / 1e6)); setBusy(false); setNote(`Location found (about ${Math.round(p.coords.accuracy)} m accurate). Press Save changes.`); }, (e) => { setBusy(false); setNote(e.code === 1 ? 'Location is blocked. Allow it in your browser, or paste a Google Maps link.' : 'Could not find your location. Try outside, or paste a link.'); }, { enableHighAccuracy: true, timeout: 15000 }); };
+  const apply = (text: string) => { setPaste(text); const c = parseCoords(text); if (c) { onChange(String(c.lat), String(c.lng)); setNote('Location read from the link. Press Save changes.'); } else if (text.trim()) setNote(/goo\.gl|maps\.app/.test(text) ? 'Short links hide the place. Open the link, copy the long address from the browser bar, or press “Use my current location”.' : 'No coordinates found in that.'); };
+  return (
+    <div className="space-y-3">
+      {has && <div className="overflow-hidden rounded-2xl border border-[var(--app-line)]"><MapTile lat={la} lng={lo} height={180} /></div>}
+      <div className="flex flex-wrap gap-2"><button type="button" className={btnPrimary} disabled={busy} onClick={here}>{busy ? <Loader2 size={16} className="animate-spin" /> : <MapPin size={16} />}Use my current location</button>{has && <button type="button" className={btnGhost} onClick={() => { onChange('', ''); setNote('Location removed. Press Save changes.'); }}>Remove</button>}</div>
+      <input className={input} value={paste} placeholder="Or paste a Google Maps link, or coordinates like -1.9441, 30.0619" aria-label="Google Maps link or coordinates" onChange={(e) => apply(e.target.value)} />
+      <div className="grid grid-cols-2 gap-3"><label className="block text-sm"><span className="mb-1 block text-[var(--app-muted)]">Latitude</span><input className={`${input} font-mono`} inputMode="decimal" value={lat} onChange={(e) => onChange(e.target.value, lng)} /></label><label className="block text-sm"><span className="mb-1 block text-[var(--app-muted)]">Longitude</span><input className={`${input} font-mono`} inputMode="decimal" value={lng} onChange={(e) => onChange(lat, e.target.value)} /></label></div>
+      {note && <p role="status" className="text-sm text-[var(--app-muted)]">{note}</p>}
+    </div>
+  );
+}
+
 function PageTab({ b, onChange }: { b: Business; onChange: () => void }) {
-  const init = useMemo(() => ({ name: b.name, category: b.category, theme: b.theme, tagline: b.tagline, about: b.about, whatsapp: b.whatsapp ?? '', phone: b.phone ?? '', email: b.email ?? '', address: b.address ?? '', mapUrl: b.mapUrl ?? '', website: b.website ?? '', instagram: b.instagram ?? '', facebook: b.facebook ?? '', momoCode: b.momoCode ?? '', momoName: b.momoName ?? '', showPay: b.showPay }), [b]);
+  const init = useMemo(() => ({ name: b.name, category: b.category, theme: b.theme, tagline: b.tagline, about: b.about, whatsapp: b.whatsapp ?? '', phone: b.phone ?? '', email: b.email ?? '', address: b.address ?? '', mapUrl: b.mapUrl ?? '', lat: b.lat === undefined ? '' : String(b.lat), lng: b.lng === undefined ? '' : String(b.lng), website: b.website ?? '', instagram: b.instagram ?? '', facebook: b.facebook ?? '', momoCode: b.momoCode ?? '', momoName: b.momoName ?? '', showPay: b.showPay }), [b]);
   const [f, setF] = useState(init); const [hours, setHours] = useState<Hours[]>(b.hours); const [busy, setBusy] = useState(false); const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   useEffect(() => { setF(init); setHours(b.hours); }, [init, b.hours]);
   const dirty = JSON.stringify(f) !== JSON.stringify(init) || JSON.stringify(hours) !== JSON.stringify(b.hours);
@@ -38,6 +55,8 @@ function PageTab({ b, onChange }: { b: Business; onChange: () => void }) {
             <label key={k} className="block text-sm"><span className="mb-1.5 block text-[var(--app-muted)]">{l}</span><input className={input} value={f[k]} placeholder={p} inputMode={k === 'whatsapp' || k === 'phone' ? 'tel' : undefined} onChange={(e) => set(k, e.target.value)} /></label>))}
         </div>
       </div>
+      <div className={card}><Title kind="public" hint="Visitors see a small map with a Directions button. Stand at your shop and press the button, or paste a Google Maps link.">Location on the map</Title>
+        <LocationEditor lat={f.lat} lng={f.lng} onChange={(la, lo) => setF((x) => ({ ...x, lat: la, lng: lo }))} /></div>
       <div className={card}><Title kind="public" hint="Closed days are shown as closed. Leave a day empty to show nothing for it.">Opening hours</Title>
         <ul className="divide-y divide-[var(--app-line)]">{DAYS.map((d) => { const h = hourOf(d.id); return (
           <li key={d.id} className="flex flex-wrap items-center gap-3 py-2.5 text-sm"><span className="w-24 font-medium">{d.label}</span>
@@ -190,28 +209,28 @@ function SettingsTab({ b, onChange, onDeleted }: { b: Business; onChange: () => 
 }
 
 /* ------------------------------------------------------------------ the workspace */
-type View = 'chat' | 'agent' | 'dashboard' | 'sales' | 'expenses' | 'products' | 'customers' | 'reports' | 'messages' | 'public' | 'secrets' | 'settings';
+type View = 'feed' | 'chat' | 'agent' | 'dashboard' | 'sales' | 'expenses' | 'products' | 'customers' | 'reports' | 'messages' | 'public' | 'secrets' | 'settings';
 const NAV: Array<{ id: View; label: string; icon: typeof Globe; group?: string }> = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard }, { id: 'chat', label: 'Ask the agent', icon: Sparkles }, { id: 'sales', label: 'Sales and orders', icon: ShoppingBag }, { id: 'expenses', label: 'Expenses', icon: Receipt },
   { id: 'products', label: 'Products and stock', icon: Package }, { id: 'customers', label: 'Customers', icon: Users }, { id: 'reports', label: 'Reports', icon: BarChart3 },
-  { id: 'messages', label: 'Messages', icon: Inbox }, { id: 'public', label: 'Public page', icon: Globe }, { id: 'agent', label: 'Business agent', icon: Bot }, { id: 'secrets', label: 'Secrets and payments', icon: KeyRound }, { id: 'settings', label: 'Settings', icon: Settings },
+  { id: 'messages', label: 'Messages', icon: Inbox }, { id: 'public', label: 'Public page', icon: Globe }, { id: 'feed', label: 'Feed', icon: Megaphone }, { id: 'agent', label: 'Business agent', icon: Bot }, { id: 'secrets', label: 'Secrets and payments', icon: KeyRound }, { id: 'settings', label: 'Settings', icon: Settings },
 ];
 /** The studio opens in a light surface whatever the app theme is: the same tokens the screens use, redefined here. */
 const LIGHT = { '--app-bg': '#F2F5FA', '--app-panel': '#FFFFFF', '--app-panel-hover': '#F1F4F9', '--app-line': '#E3E8F0', '--app-text': '#0E1722', '--app-muted': '#5B6776', '--app-faint': '#8A94A3' } as React.CSSProperties;
 
 export default function BizStudioPage({ onBack }: { onBack: () => void }) {
-  const [mine, setMine] = useState<Mine | null>(null); const [error, setError] = useState(''); const [sel, setSel] = useState(''); const [view, setView] = useState<View>(() => { const v = new URLSearchParams(window.location.search).get('view'); return (['chat', 'agent', 'sales', 'expenses', 'products', 'customers', 'reports', 'messages', 'public', 'secrets', 'settings'] as string[]).includes(v ?? '') ? (v as View) : 'dashboard'; }); const [sub, setSub] = useState<'page' | 'gallery' | 'preview'>('page');
+  const [mine, setMine] = useState<Mine | null>(null); const [error, setError] = useState(''); const [sel, setSel] = useState(''); const [view, setView] = useState<View>(() => { const v = new URLSearchParams(window.location.search).get('view'); return (['feed', 'chat', 'agent', 'sales', 'expenses', 'products', 'customers', 'reports', 'messages', 'public', 'secrets', 'settings'] as string[]).includes(v ?? '') ? (v as View) : 'dashboard'; }); const [sub, setSub] = useState<'page' | 'gallery' | 'preview'>('page');
   const [urls, setUrls] = useState<Record<string, string>>({}); const [secrets, setSecrets] = useState<SecretsStatus | null>(null); const [sheet, setSheet] = useState<EntryKind | null>(null); const [more, setMore] = useState(false);
-  const [creating, setCreating] = useState({ name: '', category: 'shop' }); const [busy, setBusy] = useState(false); const [tick, setTick] = useState(0);
+  const [creating, setCreating] = useState({ name: '', category: 'shop', whatsapp: '', lat: '', lng: '' }); const [busy, setBusy] = useState(false); const [tick, setTick] = useState(0);
   const load = useCallback(async () => { try { const m = await ownerApi.mine(); setMine(m); setSel((s) => (m.businesses.some((b) => b.id === s) ? s : m.businesses[0]?.id ?? '')); } catch (e) { setError(msg(e)); } }, []);
   useEffect(() => { document.title = 'My business · Bwenge'; void load(); }, [load]);
-  const b = mine?.businesses.find((x) => x.id === sel) ?? null;
+  const b = mine?.locked ? null : mine?.businesses.find((x) => x.id === sel) ?? null;
   useEffect(() => { if (b) void ownerApi.mediaUrls(b.id).then(setUrls).catch(() => undefined); else setUrls({}); }, [b?.id, b?.updatedAt]);   // eslint-disable-line react-hooks/exhaustive-deps
   const loadSecrets = useCallback(() => { if (b) void ownerApi.secrets(b.id).then(setSecrets).catch(() => undefined); }, [b?.id]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { loadSecrets(); }, [loadSecrets, b?.updatedAt]);
   const reload = () => { void load(); setTick((t) => t + 1); };
   const go = (v: string) => { setView(v as View); setMore(false); window.scrollTo?.(0, 0); };
-  const create = async (e: React.FormEvent) => { e.preventDefault(); setBusy(true); setError(''); try { const r = await ownerApi.create(creating); await load(); setSel(r.business.id); setView('public'); setSub('page'); } catch (x) { setError(msg(x)); } finally { setBusy(false); } };
+  const create = async (e: React.FormEvent) => { e.preventDefault(); setBusy(true); setError(''); try { const r = await ownerApi.create({ name: creating.name, category: creating.category }); const extra: Record<string, unknown> = {}; if (creating.whatsapp.trim()) extra.whatsapp = creating.whatsapp; if (creating.lat && creating.lng) { extra.lat = creating.lat; extra.lng = creating.lng; } if (Object.keys(extra).length) await ownerApi.update(r.business.id, extra).catch(() => undefined); await load(); setSel(r.business.id); setView('dashboard'); } catch (x) { setError(msg(x)); } finally { setBusy(false); } };
 
   if (!mine && !error) return <div className="flex min-h-[100dvh] items-center justify-center bg-[#F2F5FA]"><Loader2 className="animate-spin text-[var(--brand)]" /></div>;
   const phoneNav: View[] = ['dashboard', 'chat', 'sales', 'products']; const item = (n: (typeof NAV)[number]) => NAV.find((x) => x.id === n.id)!;
@@ -240,11 +259,14 @@ export default function BizStudioPage({ onBack }: { onBack: () => void }) {
         <main className="min-h-0 flex-1 overflow-y-auto px-4 pb-28 pt-5 sm:px-6 lg:pb-10">
           <div className="mx-auto w-full max-w-6xl">
             {error && <p role="alert" className="mb-4 rounded-xl bg-rose-500/10 px-4 py-3 text-sm text-rose-600">{error}</p>}
-            {mine && !b && (
+            {mine?.locked && <LockedGate mine={mine} onRefresh={() => void load()} />}
+            {mine && !b && !mine.locked && (
               <form onSubmit={create} className={`${card} mx-auto max-w-xl`}><p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--brand-strong,var(--brand))]">Bwenge4biz</p><h2 className="mt-1 font-display text-2xl font-semibold">Give your business a page and a notebook</h2>
                 <p className="mt-2 text-[15px] text-[var(--app-muted)]">Customers get one short link to your products, photos, hours and WhatsApp. You get a private dashboard for sales, expenses and stock, and an assistant that writes it all down when you talk to it.</p>
                 <label className="mt-5 block text-sm"><span className="mb-1.5 block text-[var(--app-muted)]">Business name</span><input autoFocus className={input} value={creating.name} maxLength={60} placeholder="Mama Grace Café" onChange={(e) => setCreating({ ...creating, name: e.target.value })} /></label>
                 <label className="mt-4 block text-sm"><span className="mb-1.5 block text-[var(--app-muted)]">Kind of business</span><select className={input} value={creating.category} onChange={(e) => setCreating({ ...creating, category: e.target.value })}>{CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</select></label>
+                <label className="mt-4 block text-sm"><span className="mb-1.5 block text-[var(--app-muted)]">WhatsApp number customers will use (optional)</span><input className={input} inputMode="tel" value={creating.whatsapp} placeholder="0788 123 456" onChange={(e) => setCreating({ ...creating, whatsapp: e.target.value })} /></label>
+                <div className="mt-4"><span className="mb-1.5 block text-sm text-[var(--app-muted)]">Where are you? (optional, shown as a map)</span><LocationEditor lat={creating.lat} lng={creating.lng} onChange={(la, lo) => setCreating((c) => ({ ...c, lat: la, lng: lo }))} /></div>
                 <button type="submit" disabled={!creating.name.trim() || busy} className={`${btnPrimary} mt-5`}>{busy ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}Create my page</button>
                 <p className="mt-4 text-xs text-[var(--app-faint)]">Or just tell the Bwenge assistant: “make a page for my shop”.</p></form>)}
 
@@ -256,6 +278,7 @@ export default function BizStudioPage({ onBack }: { onBack: () => void }) {
               {view === 'reports' && <ReportsView b={b} />}
               {view === 'products' && <><h1 className="mb-4 font-display text-2xl font-semibold tracking-tight">Products and stock</h1><ProductsTab b={b} urls={urls} onChange={reload} /></>}
               {view === 'messages' && <><h1 className="mb-4 font-display text-2xl font-semibold tracking-tight">Messages</h1><MessagesTab b={b} onChange={reload} /></>}
+              {view === 'feed' && <FeedView b={b} onChange={reload} />}
               {view === 'chat' && <AgentChatView b={b} onChange={reload} />}
               {view === 'agent' && <AgentView b={b} />}
               {view === 'secrets' && <SecretsView b={b} secrets={secrets} reload={() => { loadSecrets(); void load(); }} />}

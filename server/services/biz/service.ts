@@ -6,7 +6,7 @@ import { PayError, gatewayFor, maskPhone, msisdn, providerOf, realFetch, type Fe
 import { MAX_ENTRIES, cleanEntry, summarize, type LedgerEntry } from './ledger.js';
 import {
   CATEGORIES, applyProfile, clean, cleanEmail, cleanPhone, cleanProduct, isLive, limitsFor, newBusiness, oneOf, publicView, slugFrom, validSlug,
-  type Business, type Category, type DayStats, type Enquiry, type PublicBusiness, type Product,
+  type Business, type Category, type DayStats, type Enquiry, type PublicBusiness, type Product, type Post, type PublicPost, MAX_POST_MEDIA, MAX_POST_TEXT, MAX_POSTS,
 } from './model.js';
 
 /**
@@ -17,7 +17,7 @@ import {
  */
 export interface Kv { get<T>(key: string): Promise<T | null>; put(key: string, value: unknown): Promise<void>; del(key: string): Promise<void> }
 export class BizError extends Error { constructor(message: string, public status = 400, public code = 'BIZ') { super(message); } }
-export interface Deps { kv: Kv; media: MediaStore; isPaid: (ownerId: string) => Promise<boolean>; now?: () => number; secretKey?: Buffer; fetchImpl?: Fetch;
+export interface Deps { /** Who may use the owner side (the business dashboard is a paid feature). Absent: everyone. The public page never needs it. */ allowed?: (ownerId: string) => Promise<boolean>; kv: Kv; media: MediaStore; isPaid: (ownerId: string) => Promise<boolean>; now?: () => number; secretKey?: Buffer; fetchImpl?: Fetch;
   /** Tells the owner something at once (Telegram, email or the chat outbox). `plan` becomes a Do it / Cancel plan the owner approves. */
   notify?: (ownerId: string, n: BizNotice) => Promise<void>;
   /** Keeps the business agent's scheduled digests in line with its settings. */
@@ -50,6 +50,7 @@ export function createBizService(deps: Deps) {
   const save = async (b: Business) => { b.updatedAt = iso(); await kv.put(`biz:${b.id}`, b); };
   /** The owner's own business, or a plain "not found" (never says whether someone else's exists). */
   async function mine(ownerId: string, id: string): Promise<Business> {
+    if (deps.allowed && !(await deps.allowed(ownerId))) throw new BizError('The business dashboard needs a paid plan. Choose a plan to unlock it.', 402, 'UPGRADE_REQUIRED');
     const b = await load(String(id)); if (!b || b.ownerId !== ownerId) throw new BizError('That business was not found.', 404, 'NOT_FOUND'); return b;
   }
   const slugOwner = async (slug: string) => (await kv.get<{ id: string }>(`biz-slug:${slug}`))?.id ?? null;
@@ -112,6 +113,7 @@ export function createBizService(deps: Deps) {
     get: mine,
 
     async create(ownerId: string, input: { name?: unknown; slug?: unknown; category?: unknown }): Promise<Business> {
+      if (deps.allowed && !(await deps.allowed(ownerId))) throw new BizError('The business dashboard needs a paid plan. Choose a plan to unlock it.', 402, 'UPGRADE_REQUIRED');
       const name = clean(input.name, 60); if (!name) throw new BizError('Give the business a name.');
       const lim = await limits(ownerId); const have = await this.list(ownerId);
       if (have.length >= lim.businesses) throw new BizError(`Your plan has room for ${lim.businesses} business${lim.businesses === 1 ? '' : 'es'}. Upgrade to add more.`, 402, 'LIMIT');
@@ -150,7 +152,7 @@ export function createBizService(deps: Deps) {
       const b = await mine(ownerId, id);
       await deps.syncAgenda?.({ ...b, agent: undefined }).catch(() => undefined);
       await media.removeAll(b.id).catch(() => undefined);
-      await Promise.all([kv.del(`biz:${b.id}`), kv.del(`biz-slug:${b.slug}`), kv.del(`biz-enq:${b.id}`), kv.del(`biz-stats:${b.id}`), kv.del(`biz-ledger:${b.id}`), kv.del(`biz-secrets:${b.id}`)]);
+      await Promise.all([kv.del(`biz:${b.id}`), kv.del(`biz-slug:${b.slug}`), kv.del(`biz-enq:${b.id}`), kv.del(`biz-stats:${b.id}`), kv.del(`biz-ledger:${b.id}`), kv.del(`biz-secrets:${b.id}`), kv.del(`biz-posts:${b.id}`)]);
       const ids = (await kv.get<{ ids: string[] }>(`biz-owner:${ownerId}`))?.ids ?? []; await kv.put(`biz-owner:${ownerId}`, { ids: ids.filter((x) => x !== b.id) });
       const all = (await kv.get<{ ids: string[] }>('biz-index'))?.ids ?? []; await kv.put('biz-index', { ids: all.filter((x) => x !== b.id) });
     },
@@ -175,7 +177,7 @@ export function createBizService(deps: Deps) {
     },
 
     /* photos and videos */
-    async addMedia(ownerId: string, id: string, file: { name: string; data: Buffer; caption?: string }): Promise<Business['media'][number]> {
+    async addMedia(ownerId: string, id: string, file: { name: string; data: Buffer; caption?: string; scope?: unknown }): Promise<Business['media'][number]> {
       const b = await mine(ownerId, id); const lim = await limits(ownerId);
       const kind = sniff(file.data); if (!kind) throw new BizError('Use a JPEG, PNG, WebP or GIF photo, or an MP4 or WebM video.', 415, 'TYPE');
       if (file.data.length > maxBytesFor(kind.kind)) throw new BizError(kind.kind === 'image' ? 'A photo can be up to 6 MB.' : 'A video can be up to 25 MB. Record a shorter clip.', 413, 'TOO_LARGE');
@@ -183,9 +185,10 @@ export function createBizService(deps: Deps) {
       if (count >= (kind.kind === 'image' ? lim.images : lim.videos)) throw new BizError(`Your plan has room for ${kind.kind === 'image' ? lim.images + ' photos' : lim.videos + ' videos'}. Remove one or upgrade.`, 402, 'LIMIT');
       const used = b.media.reduce((a, m) => a + m.size, 0);
       if (used + file.data.length > lim.totalMediaMb * 1048576) throw new BizError(`That would pass your ${lim.totalMediaMb} MB of photos and videos. Remove some or upgrade.`, 402, 'LIMIT');
-      const m = { id: randomUUID(), kind: kind.kind, mime: kind.mime, size: file.data.length, name: clean(file.name, 80) || `${kind.kind}.${kind.ext}`, ...(clean(file.caption, 120) ? { caption: clean(file.caption, 120) } : {}), createdAt: iso(), visible: true };
+      const m: Business['media'][number] = { id: randomUUID(), kind: kind.kind, mime: kind.mime, size: file.data.length, name: clean(file.name, 80) || `${kind.kind}.${kind.ext}`, ...(clean(file.caption, 120) ? { caption: clean(file.caption, 120) } : {}), createdAt: iso(), visible: true };
       await media.put(b.id, m.id, kind.ext, file.data);
-      b.media.push(m); if (kind.kind === 'image' && !b.coverId) b.coverId = m.id; await save(b); return m;
+      if (file.scope === 'feed') { m.visible = false; m.scope = 'feed'; }
+      b.media.push(m); if (kind.kind === 'image' && !b.coverId && m.scope !== 'feed') b.coverId = m.id; await save(b); return m;
     },
     async updateMedia(ownerId: string, id: string, mediaId: string, patch: { caption?: unknown; visible?: unknown }) {
       const b = await mine(ownerId, id); const m = b.media.find((x) => x.id === mediaId); if (!m) throw new BizError('That photo or video was not found.', 404);
@@ -232,6 +235,41 @@ export function createBizService(deps: Deps) {
       const b = await mine(ownerId, id); const items = (await kv.get<{ items: LedgerEntry[] }>(`biz-ledger:${b.id}`))?.items ?? [];
       const enq = (await kv.get<{ items: Enquiry[] }>(`biz-enq:${b.id}`))?.items ?? [];
       return { ...summarize(items, b.products, now(), days), newMessages: enq.filter((e) => e.status === 'new').length, entries: items.length };
+    },
+
+    /* ------------------------------------------------------------ the public feed (updates the owner posts) */
+    async posts(ownerId: string, id: string): Promise<Post[]> { const b = await mine(ownerId, id); return (await kv.get<{ items: Post[] }>(`biz-posts:${b.id}`))?.items ?? []; },
+    async addPost(ownerId: string, id: string, input: { text?: unknown; mediaIds?: unknown }): Promise<Post> {
+      const b = await mine(ownerId, id); const text = clean(input.text, MAX_POST_TEXT);
+      const ids = [...new Set((Array.isArray(input.mediaIds) ? input.mediaIds : []).map(String))].filter((m) => b.media.some((x) => x.id === m && x.kind === 'image')).slice(0, MAX_POST_MEDIA);
+      if (!text && !ids.length) throw new BizError('Write something or add a photo.');
+      const doc = (await kv.get<{ items: Post[] }>(`biz-posts:${b.id}`)) ?? { items: [] }; const post: Post = { id: randomUUID(), at: iso(), text, mediaIds: ids };
+      doc.items.unshift(post); const drop = doc.items.slice(MAX_POSTS); doc.items = doc.items.slice(0, MAX_POSTS); await kv.put(`biz-posts:${b.id}`, doc);
+      for (const d of drop) await this.dropFeedMedia(b, d, doc.items);
+      return post;
+    },
+    async setPost(ownerId: string, id: string, postId: string, patch: { pinned?: unknown; text?: unknown }): Promise<Post> {
+      const b = await mine(ownerId, id); const doc = (await kv.get<{ items: Post[] }>(`biz-posts:${b.id}`)) ?? { items: [] }; const p = doc.items.find((x) => x.id === postId); if (!p) throw new BizError('That post was not found.', 404);
+      if (patch.pinned !== undefined) { for (const x of doc.items) delete x.pinned; if (patch.pinned === true) p.pinned = true; }
+      if (patch.text !== undefined) { const t = clean(patch.text, MAX_POST_TEXT); if (!t && !p.mediaIds.length) throw new BizError('A post needs text or a photo.'); p.text = t; }
+      await kv.put(`biz-posts:${b.id}`, doc); return p;
+    },
+    async removePost(ownerId: string, id: string, postId: string): Promise<void> {
+      const b = await mine(ownerId, id); const doc = (await kv.get<{ items: Post[] }>(`biz-posts:${b.id}`)) ?? { items: [] }; const p = doc.items.find((x) => x.id === postId); if (!p) throw new BizError('That post was not found.', 404);
+      doc.items = doc.items.filter((x) => x.id !== postId); await kv.put(`biz-posts:${b.id}`, doc); await this.dropFeedMedia(b, p, doc.items);
+    },
+    /** Photos uploaded only for a post are deleted with it (unless another post still shows them). */
+    async dropFeedMedia(b: Business, p: Post, remaining: Post[]) {
+      const fresh = (await load(b.id)); if (!fresh) return;
+      for (const mid of p.mediaIds) { const m = fresh.media.find((x) => x.id === mid); if (!m || m.scope !== 'feed' || remaining.some((r) => r.mediaIds.includes(mid))) continue; await media.remove(fresh.id, m.id, sniffExt(m.mime)).catch(() => undefined); fresh.media = fresh.media.filter((x) => x.id !== mid); }
+      await save(fresh);
+    },
+    /** The public feed: newest first, the pinned post on top. Only for a live page. */
+    async publicPosts(slug: string, o: { limit?: number } = {}): Promise<PublicPost[]> {
+      const b = await publicLive(slug); if (!b) return []; const items = (await kv.get<{ items: Post[] }>(`biz-posts:${b.id}`))?.items ?? [];
+      const pm = (mid: string) => { const m = b.media.find((x) => x.id === mid); return m ? { id: m.id, kind: m.kind, ...(m.caption ? { caption: m.caption } : {}) } : null; };
+      const out = items.map((p) => ({ id: p.id, at: p.at, text: p.text, media: p.mediaIds.map(pm).filter((x): x is NonNullable<typeof x> => !!x), ...(p.pinned ? { pinned: true } : {}) }));
+      out.sort((a, c) => Number(!!c.pinned) - Number(!!a.pinned) || c.at.localeCompare(a.at)); return out.slice(0, Math.min(50, Math.max(1, o.limit ?? 20)));
     },
 
     /* ------------------------------------------------------------ the business agent */
@@ -302,7 +340,8 @@ export function createBizService(deps: Deps) {
     async preview(ownerId: string, id: string): Promise<PublicBusiness> { const b = await mine(ownerId, id); return withPay(b, publicView(b)); },
     /** A photo or video of a live page, only if the owner shows it. */
     async mediaFor(slug: string, mediaId: string) {
-      const b = await publicLive(slug); const m = b?.media.find((x) => x.id === mediaId && x.visible); if (!b || !m) return null;
+      const b = await publicLive(slug); const m = b?.media.find((x) => x.id === mediaId); if (!b || !m) return null;
+      if (!m.visible && !((await kv.get<{ items: Post[] }>(`biz-posts:${b.id}`))?.items ?? []).some((p) => p.mediaIds.includes(m.id))) return null;
       return { mime: m.mime, size: m.size, open: (range?: { start: number; end: number }) => media.open(b.id, m.id, sniffExt(m.mime), range) };
     },
     async submitEnquiry(slug: string, input: { name?: unknown; contact?: unknown; message?: unknown; productId?: unknown; website?: unknown }, visitor: string): Promise<{ saved: boolean }> {

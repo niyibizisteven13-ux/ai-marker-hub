@@ -25,10 +25,16 @@ export type Day = (typeof DAYS)[number];
 export interface Hours { day: Day; open: string; close: string; closed?: boolean }
 export interface Product { id: string; name: string; price: number | null; unit?: string; description?: string; mediaId?: string; available: boolean; hidden?: boolean; /** Private: units in stock and the level that raises a low-stock alert. Never in publicView. */ stock?: number; lowAt?: number }
 export type MediaKind = 'image' | 'video';
-export interface Media { id: string; kind: MediaKind; mime: string; size: number; name: string; caption?: string; createdAt: string; visible: boolean }
+export interface Media { id: string; kind: MediaKind; mime: string; size: number; name: string; caption?: string; createdAt: string; visible: boolean; /** 'feed': uploaded for an update post; not in the gallery, public only while a post shows it. */ scope?: 'feed' }
+/** An update the owner posted to the public feed: some text and up to four photos from their own uploads. */
+export interface Post { id: string; at: string; text: string; mediaIds: string[]; pinned?: boolean }
+export interface PublicPost { id: string; at: string; text: string; media: PublicMedia[]; pinned?: boolean }
+export const MAX_POST_TEXT = 1000, MAX_POST_MEDIA = 4, MAX_POSTS = 300;
 export interface Business {
   id: string; ownerId: string; slug: string; name: string; category: Category; tagline: string; about: string; theme: Theme;
   logoId?: string; coverId?: string;
+  /** Where the business is on the map (public when set). */
+  lat?: number; lng?: number;
   whatsapp?: string; phone?: string; email?: string; address?: string; mapUrl?: string; website?: string; instagram?: string; facebook?: string;
   hours: Hours[];
   /** MoMo Pay code and name, shown to visitors only when `showPay` is on. */
@@ -60,7 +66,8 @@ export const MAX_VIDEO_BYTES = 25 * 1024 * 1024;
 export const clean = (v: unknown, max: number) => String(v ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f​-‏‪-‮⁦-⁩]/g, '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim().slice(0, max);
 export const oneOf = <T extends string>(list: readonly T[], v: unknown, fallback: T): T => ((list as readonly string[]).includes(String(v)) ? (String(v) as T) : fallback);
 /** Digits only, with an optional country code, 8 to 15 digits. */
-export const cleanPhone = (v: unknown): string | undefined => { const d = String(v ?? '').replace(/\D/g, ''); return d.length >= 8 && d.length <= 15 ? d : undefined; };
+/** Digits only, with the country code. A local number (one leading 0, ten digits) gets BIZ_COUNTRY_CODE (default 250, Rwanda), so wa.me and tel: links work. */
+export const cleanPhone = (v: unknown): string | undefined => { let d = String(v ?? '').replace(/\D/g, ''); if (/^0\d{9}$/.test(d)) d = `${process.env.BIZ_COUNTRY_CODE || '250'}${d.slice(1)}`; return d.length >= 8 && d.length <= 15 ? d : undefined; };
 /** A web address that is https and has no login in it; anything else is dropped (no javascript:, data:, http:). */
 export function cleanUrl(v: unknown, hosts?: RegExp): string | undefined {
   const s = String(v ?? '').trim(); if (!s || s.length > 300) return undefined;
@@ -128,6 +135,11 @@ export function applyProfile(b: Business, patch: any): void {
   if (patch.website !== undefined) set('website', cleanUrl(patch.website));
   if (patch.instagram !== undefined) set('instagram', cleanUrl(patch.instagram, /(^|\.)instagram\.com$/i));
   if (patch.facebook !== undefined) set('facebook', cleanUrl(patch.facebook, /(^|\.)(facebook\.com|fb\.com|fb\.me)$/i));
+  if (patch.lat !== undefined || patch.lng !== undefined) {
+    const la = patch.lat === null || patch.lat === '' ? null : Number(patch.lat), lo = patch.lng === null || patch.lng === '' ? null : Number(patch.lng);
+    if (la === null || lo === null) { delete b.lat; delete b.lng; }
+    else if (Number.isFinite(la) && Number.isFinite(lo) && Math.abs(la) <= 90 && Math.abs(lo) <= 180) { b.lat = Math.round(la * 1e6) / 1e6; b.lng = Math.round(lo * 1e6) / 1e6; }
+  }
   if (patch.hours !== undefined) b.hours = cleanHours(patch.hours);
   if (patch.momoCode !== undefined) { const c = String(patch.momoCode ?? '').replace(/\D/g, ''); set('momoCode', c.length >= 3 && c.length <= 20 ? c : undefined); }
   if (patch.momoName !== undefined) set('momoName', clean(patch.momoName, 60));
@@ -144,6 +156,7 @@ export interface PublicBusiness {
   contact: { whatsapp?: string; phone?: string; email?: string; address?: string; mapUrl?: string; website?: string; instagram?: string; facebook?: string };
   hours: Hours[];
   pay?: { momoCode: string; momoName?: string };
+  location?: { lat: number; lng: number };
   /** Present when visitors can pay online right on the page. */
   payOnline?: { open: boolean };
   products: Array<{ id: string; name: string; price: number | null; unit?: string; description?: string; media?: PublicMedia; available: boolean }>;
@@ -166,6 +179,7 @@ export function publicView(b: Business): PublicBusiness {
     gallery: b.media.filter((m) => m.visible && m.id !== b.logoId && m.id !== b.coverId).map((m) => pm(m.id)!),
     updatedAt: b.updatedAt,
   };
+  if (typeof b.lat === 'number' && typeof b.lng === 'number') out.location = { lat: b.lat, lng: b.lng };
   const logo = pm(b.logoId), cover = pm(b.coverId); if (logo) out.logo = logo; if (cover) out.cover = cover;
   if (b.showPay && b.momoCode) out.pay = { momoCode: b.momoCode, ...(b.momoName ? { momoName: b.momoName } : {}) };
   return out;

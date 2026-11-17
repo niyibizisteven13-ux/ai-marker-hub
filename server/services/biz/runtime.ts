@@ -22,5 +22,11 @@ async function notifyOwner(ownerId: string, n: import('./service.js').BizNotice)
   await notifyUser(ownerId, { title: n.title, text: n.text, buttons }, await liveNotifyDeps());
 }
 async function syncAgenda(b: import('./model.js').Business) { const [{ agendaStore }, { syncBizAgenda }] = await Promise.all([import('../agenda/store.js'), import('./agent.js')]); await syncBizAgenda(agendaStore(), b); }
-export const bizService = (): BizService => (svc ??= createBizService({ kv: appSettingKv, notify: notifyOwner, syncAgenda, media: diskMediaStore(), isPaid: async (userId) => { const p = await planFor(userId).catch(() => null); return !!p && p.id !== 'FREE'; } }));
+/** The business dashboard is a paid feature: a Starter plan or higher (administrators count as Institution). BIZ_REQUIRE_PAID=false opens it to everyone. */
+export const PAID_PLANS = ['STARTER', 'PRO', 'PLUS', 'INSTITUTION'];
+export async function bizAllowed(userId: string): Promise<boolean> {
+  if (process.env.BIZ_REQUIRE_PAID === 'false') return true;
+  const p = await planFor(userId).catch(() => null); return !!p && PAID_PLANS.includes(p.id);
+}
+export const bizService = (): BizService => (svc ??= createBizService({ allowed: bizAllowed, kv: appSettingKv, notify: notifyOwner, syncAgenda, media: diskMediaStore(), isPaid: async (userId) => { const p = await planFor(userId).catch(() => null); return !!p && p.id !== 'FREE'; } }));
 export const setBizServiceForTests = (s: BizService | null) => { svc = s; };

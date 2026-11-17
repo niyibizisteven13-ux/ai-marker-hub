@@ -13,6 +13,12 @@ sees a private side the public never sees. Photos and short videos the owner add
 | **The assistant** | the Bwenge chat | Owner only | "Today I sold 5 loaves for 4,000", "bought flour for 8,000", "how is my week?", "what is running out?", "ask 0788 123 456 to pay 3,000", "add this photo", "publish my page". It can also read a photo of a sales book the owner attached (it lists what it read and asks before recording). |
 | **The business's own app** | `/b/<name>` installed | Customers | Each page has its own web app manifest, name, colour and icon, so a customer can "Add to Home screen" and it opens as that business's app. It is a home-screen web app, not an app-store app. |
 
+## Paid dashboard, onboarding, feed and map
+* **The business dashboard needs a paid plan** (Starter or higher; administrators count as Institution; `BIZ_REQUIRE_PAID=false` turns the gate off). Without one, `/biz` shows an unlock screen with the Starter price (read from the plan table) and the normal upgrade and manual mobile-money payment flow; every owner action and agent tool answers 402 `UPGRADE_REQUIRED`. The public page keeps working for customers.
+* **Onboarding** asks for the business name and kind, the WhatsApp number (a local 0788… number is stored with `BIZ_COUNTRY_CODE`, default 250) and the location.
+* **Feed**: the owner posts updates (text up to 1,000 characters and up to four photos) in Studio → Feed, or by chat (`biz_post`, text only). They appear on the public page under **Updates** (pinned first, then newest), each with a share link (`/b/<name>?post=<id>`); the feed link is `/b/<name>#updates`. Photos uploaded for a post are not in the gallery, are public only while a post shows them, and are deleted with the post.
+* **Map**: latitude and longitude (Use my current location, paste a Google Maps link or coordinates). The public page shows a small OpenStreetMap tile map with a pin and a Directions button; it is an image of OpenStreetMap tiles (keep use light and keep the attribution; use your own tile server at scale).
+
 ## Money notebook (private)
 Sales and expenses are kept per business (`biz-ledger:<id>`, newest first, up to 5,000 entries), never part of `publicView`. A completed sale of a product with a stock count lowers the stock; cancelling gives it back; a product that reaches zero is marked out of stock on the page. Pending orders from the page are not income until confirmed or paid.
 

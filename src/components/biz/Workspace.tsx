@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Camera, Bot, BellRing, ArrowDownRight, ArrowUpRight, Banknote, Check, Copy, Download, EyeOff, Globe, KeyRound, Loader2, Package, Plus, Receipt, Send, Share2, ShieldCheck, Smartphone, Sparkles, Trash2, TrendingUp, Users, Wallet, X, AlertTriangle, ShoppingBag, CircleCheck, Clock, Ban } from 'lucide-react';
+import { Megaphone, ImagePlus, Lock, Camera, Bot, BellRing, ArrowDownRight, ArrowUpRight, Banknote, Check, Copy, Download, EyeOff, Globe, KeyRound, Loader2, Package, Plus, Receipt, Send, Share2, ShieldCheck, Smartphone, Sparkles, Trash2, TrendingUp, Users, Wallet, X, AlertTriangle, ShoppingBag, CircleCheck, Clock, Ban } from 'lucide-react';
 import { ownerApi, prepareImage } from '../../biz/api';
+import type { Mine } from '../../biz/api';
 import { pageUrl, rwf, type AgentSettings, type Business, type Dashboard, type LedgerEntry, type SecretsStatus } from '../../biz/types';
 import { btn, btnGhost, btnPrimary, card, input, msg, rwfShort, Tag, Title } from './ui';
 
@@ -329,6 +330,69 @@ export function AgentChatView({ b, onChange }: { b: Business; onChange: () => vo
           <textarea value={text} rows={1} maxLength={2000} placeholder="Tell your agent…" aria-label="Message to your agent" onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); } }} className={`${input} max-h-32 min-h-11 resize-none`} />
           <button type="submit" disabled={busy || !text.trim()} aria-label="Send" className={`${btnPrimary} !px-4`}>{busy ? <Loader2 size={17} className="animate-spin" /> : <Send size={17} />}</button>
         </form>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ the dashboard needs a paid plan */
+export function LockedGate({ mine, onRefresh }: { mine: Mine; onRefresh: () => void }) {
+  const u = mine.upgrade; const names = mine.businesses.map((b) => b.name);
+  return (
+    <div className="mx-auto max-w-xl py-6">
+      <div className={`${card} text-center`}>
+        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--brand)]/15 text-[var(--brand-strong,var(--brand))]"><Lock size={26} aria-hidden="true" /></span>
+        <h1 className="mt-4 font-display text-2xl font-semibold tracking-tight">Unlock your business dashboard</h1>
+        <p className="mx-auto mt-2 max-w-md text-[15px] text-[var(--app-muted)]">{names.length ? <>Your page <b className="text-[var(--app-text)]">{names[0]}</b> is still visible to customers. To manage it again you need a plan.</> : 'Run your business here: a public page and link, a sales and expenses notebook, stock, customer orders, mobile-money payments, and an agent that looks after it all.'}</p>
+        <ul className="mx-auto mt-5 max-w-sm space-y-2 text-left text-sm">{['Public page with short link, QR code and feed', 'Sales, expenses, stock and customers', 'Customers order and pay by MTN or Airtel', 'Business agent: daily plan, alerts, one-tap approvals'].map((t) => <li key={t} className="flex gap-2"><Check size={16} className="mt-0.5 shrink-0 text-emerald-700" />{t}</li>)}</ul>
+        {u && <p className="mt-6 font-display text-3xl font-semibold">{u.priceRwf ? `${u.priceRwf.toLocaleString('en-US')} RWF` : u.name}<span className="ml-1.5 text-base font-normal text-[var(--app-muted)]">{u.priceNote}</span></p>}
+        {u && <p className="mt-1 text-xs text-[var(--app-muted)]">{u.name} plan or higher. It also gives you the Bwenge assistant credits.</p>}
+        <a href={u?.url ?? '/upgrade'} className={`${btnPrimary} mt-5 w-full`}>Choose a plan and pay</a>
+        <button type="button" onClick={onRefresh} className={`${btnGhost} mt-2.5 w-full`}>I have paid, check again</button>
+        <p className="mt-4 text-xs text-[var(--app-faint)]">Pay by mobile money from the upgrade page. Once your payment is confirmed this page unlocks by itself.</p>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ the public feed */
+const ago = (iso: string) => { const s = Math.max(1, Math.round((Date.now() - Date.parse(iso)) / 1000)); return s < 3600 ? `${Math.max(1, Math.round(s / 60))} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }); };
+export function FeedView({ b, onChange }: { b: Business; onChange: () => void }) {
+  const [posts, setPosts] = useState<import('../../biz/types').Post[] | null>(null); const [urls, setUrls] = useState<Record<string, string>>({}); const [text, setText] = useState(''); const [files, setFiles] = useState<Array<{ blob: Blob; name: string; url: string }>>([]);
+  const [busy, setBusy] = useState(''); const [err, setErr] = useState(''); const [note, setNote] = useState(''); const link = `${pageUrl(b.slug)}#updates`;
+  const load = useCallback(() => { ownerApi.posts(b.id).then(setPosts).catch((e) => setErr(msg(e))); void ownerApi.mediaUrls(b.id).then(setUrls).catch(() => undefined); }, [b.id]);
+  useEffect(() => { load(); }, [load]);
+  const pick = async (list: FileList | null) => { if (!list) return; setErr(''); const next = [...files]; for (const f of Array.from(list)) { if (next.length >= 4) { setErr('A post can have up to 4 photos.'); break; } if (!f.type.startsWith('image/')) { setErr('Only photos can go in a post. Videos go in Public page → Photos and videos.'); continue; } const p = await prepareImage(f); next.push({ ...p, url: URL.createObjectURL(p.blob) }); } setFiles(next); };
+  const post = async (e: React.FormEvent) => {
+    e.preventDefault(); if (!text.trim() && !files.length) return; setErr(''); setBusy('Posting…');
+    try { const ids: string[] = []; for (const [i, f] of files.entries()) { setBusy(`Uploading photo ${i + 1} of ${files.length}…`); ids.push((await ownerApi.upload(b.id, f.blob, f.name, () => undefined, 'feed')).id); } setBusy('Posting…'); await ownerApi.addPost(b.id, { text, mediaIds: ids }); setText(''); files.forEach((f) => URL.revokeObjectURL(f.url)); setFiles([]); load(); onChange(); }
+    catch (x) { setErr(msg(x)); } finally { setBusy(''); }
+  };
+  const act = async (fn: () => Promise<unknown>) => { setErr(''); try { await fn(); load(); } catch (x) { setErr(msg(x)); } };
+  const copy = async (t: string, what: string) => { try { await navigator.clipboard.writeText(t); setNote(`${what} copied`); } catch { setNote('Copy it by hand'); } };
+  return (
+    <div className="space-y-5">
+      <div><h1 className="font-display text-2xl font-semibold tracking-tight">Feed</h1><Tag kind="public" /></div>
+      <div className={card}><p className="text-sm text-[var(--app-muted)]">Everything you post here appears on your public page under <b className="text-[var(--app-text)]">Updates</b>, newest first. Share the feed link so customers follow what is new.</p>
+        <p className="mt-3 break-all rounded-xl bg-[var(--app-bg)] px-4 py-3 font-mono text-[14px]">{link.replace(/^https?:\/\//, '')}</p>
+        <div className="mt-3 flex flex-wrap gap-2"><button type="button" className={btnGhost} onClick={() => void copy(link, 'Feed link')}><Copy size={15} />Copy feed link</button><a className={btnGhost} target="_blank" rel="noreferrer" href={`https://wa.me/?text=${encodeURIComponent(`${b.name}: what's new\n${link}`)}`}><Share2 size={15} />Share on WhatsApp</a><a className={btnGhost} target="_blank" rel="noreferrer" href={link}><Globe size={15} />Open</a></div>{note && <p role="status" className="mt-2 text-xs text-[var(--app-muted)]">{note}</p>}
+        {!b.published && <p className="mt-3 rounded-xl bg-amber-500/10 px-3 py-2 text-xs">Your page is not published yet, so nobody can see the feed. Publish it from the Dashboard.</p>}</div>
+      <form onSubmit={post} className={card}>
+        <h2 className="mb-3 font-display text-lg font-semibold">New update</h2>
+        <textarea className={input} rows={4} maxLength={1000} value={text} placeholder="What's new? A fresh batch, a promotion, opening hours for a holiday…" aria-label="Update text" onChange={(e) => setText(e.target.value)} /><p className="mt-1 text-right text-xs text-[var(--app-faint)]">{text.length}/1000</p>
+        {files.length > 0 && <ul className="mb-3 flex flex-wrap gap-2">{files.map((f, i) => <li key={f.url} className="relative"><img src={f.url} alt="" className="h-20 w-20 rounded-xl object-cover" /><button type="button" aria-label="Remove photo" onClick={() => setFiles(files.filter((_, j) => j !== i))} className="absolute -right-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-[#0E1722] text-white"><X size={12} /></button></li>)}</ul>}
+        {err && <p role="alert" className="mb-2 text-sm text-rose-600">{err}</p>}
+        <div className="flex flex-wrap items-center gap-2"><input id="bz-feed-photos" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple className="sr-only" onChange={(e) => { void pick(e.target.files); e.target.value = ''; }} /><label htmlFor="bz-feed-photos" className={`${btnGhost} cursor-pointer`}><ImagePlus size={16} />Add photos</label>
+          <button type="submit" disabled={!!busy || (!text.trim() && !files.length)} className={`${btnPrimary} ml-auto`}>{busy ? <><Loader2 size={16} className="animate-spin" />{busy}</> : <><Send size={16} />Post update</>}</button></div>
+      </form>
+      <div className="space-y-3">
+        {posts === null ? <Loader2 className="animate-spin text-[var(--brand)]" /> : !posts.length ? <p className={`${card} text-sm text-[var(--app-muted)]`}>No updates yet. Post your first one above: a photo of today's best product works well.</p> : [...posts].sort((a, c) => Number(!!c.pinned) - Number(!!a.pinned)).map((p) => (
+          <article key={p.id} className={card}>
+            <div className="flex items-center justify-between gap-2 text-xs text-[var(--app-muted)]"><span>{ago(p.at)}{p.pinned && <span className="ml-2 rounded-full bg-[var(--brand)]/20 px-2 py-0.5 font-semibold text-[var(--app-text)]">Pinned</span>}</span>
+              <div className="flex gap-1.5"><button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => void act(() => ownerApi.setPost(b.id, p.id, { pinned: !p.pinned }))}>{p.pinned ? 'Unpin' : 'Pin'}</button><button type="button" aria-label="Copy link to this post" className={`${btnGhost} !min-h-9 !px-2.5`} onClick={() => void copy(`${pageUrl(b.slug)}?post=${p.id}#post-${p.id}`, 'Post link')}><Copy size={14} /></button><button type="button" aria-label="Delete post" className={`${btnGhost} !min-h-9 !px-2.5 text-rose-600`} onClick={() => { if (confirm('Delete this update?')) void act(() => ownerApi.removePost(b.id, p.id)); }}><Trash2 size={14} /></button></div></div>
+            {p.text && <p className="mt-2 whitespace-pre-wrap text-[15px]">{p.text}</p>}
+            {p.mediaIds.length > 0 && <ul className={`mt-3 grid gap-2 ${p.mediaIds.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>{p.mediaIds.map((id) => <li key={id} className="overflow-hidden rounded-xl bg-[var(--app-bg)]">{urls[id] ? <img src={urls[id]} alt="" className="max-h-72 w-full object-cover" /> : <div className="h-32" />}</li>)}</ul>}
+          </article>))}
       </div>
     </div>
   );

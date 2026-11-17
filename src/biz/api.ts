@@ -1,5 +1,5 @@
 import { authFetch, getAccessToken, getApiUrl } from '../utils/authFetch';
-import type { AgentSettings, SecretsStatus, Business, DayStats, Enquiry, Product, PublicBusiness, LedgerEntry, Dashboard } from './types';
+import type { Post, PublicPost, AgentSettings, SecretsStatus, Business, DayStats, Enquiry, Product, PublicBusiness, LedgerEntry, Dashboard } from './types';
 
 /** Calls to /api/biz. Public calls need no sign-in; the others use the person's own session. */
 export class BizApiError extends Error { constructor(message: string, public status: number, public code?: string) { super(message); } }
@@ -15,13 +15,14 @@ export const publicApi = {
   mediaUrl: (slug: string, id: string) => getApiUrl(`/api/biz/public/${encodeURIComponent(slug)}/media/${encodeURIComponent(id)}`),
   track: (slug: string, kind: 'whatsapp' | 'call' | 'share') => { try { const body = JSON.stringify({ kind }); const url = getApiUrl(`/api/biz/public/${encodeURIComponent(slug)}/track`); if (!navigator.sendBeacon?.(url, new Blob([body], { type: 'application/json' }))) void fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true }); } catch { /* counting never blocks a tap */ } },
   enquiry: async (slug: string, body: { name: string; contact: string; message: string; productId?: string; website?: string }) => read<{ ok: boolean }>(await fetch(getApiUrl(`/api/biz/public/${encodeURIComponent(slug)}/enquiry`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })),
+  posts: async (slug: string) => (await read<{ posts: PublicPost[] }>(await fetch(getApiUrl(`/api/biz/public/${encodeURIComponent(slug)}/posts`)))).posts,
   order: async (slug: string, body: { name: string; contact: string; note?: string; items: Array<{ productId: string; qty: number }>; website?: string }) => read<{ ok: boolean; total: number }>(await fetch(getApiUrl(`/api/biz/public/${encodeURIComponent(slug)}/order`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })),
   pay: async (slug: string, body: { name: string; phone: string; items?: Array<{ productId: string; qty: number }>; amount?: number; website?: string }) => read<{ ref: string; total: number }>(await fetch(getApiUrl(`/api/biz/public/${encodeURIComponent(slug)}/pay`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })),
   payStatus: async (slug: string, ref: string) => read<{ state: 'pending' | 'success' | 'failed' }>(await fetch(getApiUrl(`/api/biz/public/${encodeURIComponent(slug)}/pay/${encodeURIComponent(ref)}`))),
   report: async (slug: string, body: { reason: string; detail: string }) => read<{ ok: boolean }>(await fetch(getApiUrl(`/api/biz/public/${encodeURIComponent(slug)}/report`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })),
 };
 
-export interface Mine { businesses: Business[]; limits: { businesses: number; products: number; images: number; videos: number; totalMediaMb: number }; plan: string }
+export interface Mine { locked?: boolean; upgrade?: { plan: string; name: string; priceRwf: number | null; priceNote: string; url: string }; businesses: Business[]; limits: { businesses: number; products: number; images: number; videos: number; totalMediaMb: number }; plan: string }
 export const ownerApi = {
   mine: async () => read<Mine>(await authFetch('/api/biz/mine')),
   create: async (body: { name: string; category?: string; slug?: string }) => read<{ business: Business }>(await authFetch('/api/biz', json('POST', body))),
@@ -43,6 +44,10 @@ export const ownerApi = {
   setEntry: async (id: string, eid: string, status: LedgerEntry['status']) => read(await authFetch(`/api/biz/${id}/ledger/${eid}`, json('PATCH', { status }))),
   removeEntry: async (id: string, eid: string) => { const r = await authFetch(`/api/biz/${id}/ledger/${eid}`, json('DELETE')); if (!r.ok) await read(r); },
   agentChat: async (id: string, body: { message: string; history: Array<{ role: 'user' | 'assistant'; text: string }>; image?: string }) => (await read<{ reply: string }>(await authFetch(`/api/biz/${id}/agent/chat`, json('POST', body)))).reply,
+  posts: async (id: string) => (await read<{ posts: Post[] }>(await authFetch(`/api/biz/${id}/posts`))).posts,
+  addPost: async (id: string, body: { text: string; mediaIds: string[] }) => (await read<{ post: Post }>(await authFetch(`/api/biz/${id}/posts`, json('POST', body)))).post,
+  setPost: async (id: string, pid: string, body: { pinned?: boolean; text?: string }) => read(await authFetch(`/api/biz/${id}/posts/${pid}`, json('PATCH', body))),
+  removePost: async (id: string, pid: string) => { const r = await authFetch(`/api/biz/${id}/posts/${pid}`, json('DELETE')); if (!r.ok) await read(r); },
   agent: async (id: string) => (await read<{ agent: AgentSettings }>(await authFetch(`/api/biz/${id}/agent`))).agent,
   setAgent: async (id: string, body: Partial<AgentSettings>) => (await read<{ agent: AgentSettings }>(await authFetch(`/api/biz/${id}/agent`, json('PUT', body)))).agent,
   secrets: async (id: string) => read<SecretsStatus>(await authFetch(`/api/biz/${id}/secrets`)),
@@ -53,13 +58,13 @@ export const ownerApi = {
   refreshPayment: async (id: string, eid: string) => (await read<{ entry: LedgerEntry }>(await authFetch(`/api/biz/${id}/pay/${eid}/refresh`, json('POST', {})))).entry,
   stats: async (id: string) => read<{ last30: DayStats; days: Array<{ day: string } & DayStats>; newMessages: number }>(await authFetch(`/api/biz/${id}/stats`)),
   /** Uploads a photo or video with a progress report (a video on a slow phone connection can take a while). */
-  upload: (id: string, file: File | Blob, name: string, onProgress: (fraction: number) => void) => new Promise<void>((resolve, reject) => {
+  upload: (id: string, file: File | Blob, name: string, onProgress: (fraction: number) => void, scope?: 'feed') => new Promise<{ id: string }>((resolve, reject) => {
     const x = new XMLHttpRequest(); x.open('POST', getApiUrl(`/api/biz/${id}/media`));
     const t = getAccessToken(); if (t) x.setRequestHeader('Authorization', `Bearer ${t}`);
     x.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
-    x.onload = () => { if (x.status >= 200 && x.status < 300) return resolve(); let msg = 'The upload did not work. Please try again.'; try { msg = JSON.parse(x.responseText)?.error || msg; } catch { /* keep */ } reject(new BizApiError(msg, x.status)); };
+    x.onload = () => { if (x.status >= 200 && x.status < 300) { try { return resolve(JSON.parse(x.responseText).media); } catch { return resolve({ id: '' }); } } let msg = 'The upload did not work. Please try again.'; try { msg = JSON.parse(x.responseText)?.error || msg; } catch { /* keep */ } reject(new BizApiError(msg, x.status)); };
     x.onerror = () => reject(new BizApiError('The connection dropped. Check your network and try again.', 0));
-    const f = new FormData(); f.append('file', file, name); x.send(f);
+    const f = new FormData(); f.append('file', file, name); if (scope) f.append('scope', scope); x.send(f);
   }),
 };
 
