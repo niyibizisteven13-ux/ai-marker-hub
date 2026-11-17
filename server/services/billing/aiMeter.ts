@@ -1,6 +1,7 @@
 import type { Response } from 'express';
 import { checkUsage, recordUsage, type GateResult } from './usage.js';
 import type { UsageKind } from './plans.js';
+import { payRef } from './payRef.js';
 
 /**
  * One gate for every AI feature that is not the chat itself (making a quiz from a file, making a form from a
@@ -36,7 +37,7 @@ export function upgradeBody(g: GateResult): { status: number; body: UpgradeBody 
 }
 
 /** A wa.me link to the payment number with a ready message. Pure, for tests. */
-export const whatsappLinkFor = (number: string, planName: string) => `https://wa.me/${number.replace(/\D/g, '')}?text=${encodeURIComponent(`Hello, I want to upgrade my Bwenge account (now on ${planName}). My email on Bwenge: ______`)}`;
+export const whatsappLinkFor = (number: string, planName: string, code = '______') => `https://wa.me/${number.replace(/\D/g, '')}?text=${encodeURIComponent(`Hello, I want to upgrade my Bwenge account (now on ${planName}). My payment code: ${code}`)}`;
 
 /** Checks the limit; when the user is over it, answers with the upgrade message and returns false. */
 export async function allowAi(res: Response, userId: string | undefined, kind: UsageKind = 'tool'): Promise<boolean> {
@@ -47,7 +48,7 @@ export async function allowAi(res: Response, userId: string | undefined, kind: U
   if (status === 402) {
     const { paymentConfig } = await import('../mySebAccess.js');
     const number = (await paymentConfig().catch(() => null))?.whatsapp;
-    body.whatsappLink = number ? whatsappLinkFor(number, g.plan.name) : null;
+    body.whatsappLink = number ? whatsappLinkFor(number, g.plan.name, payRef(userId!)) : null;
   }
   res.status(status).json(body);
   return false;

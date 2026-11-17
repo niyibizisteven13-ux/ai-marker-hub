@@ -17,8 +17,8 @@ test('over the limit is a 402 with an upgrade link; a pause or a profit guard is
 test('tokens are estimated at four characters each', () => { assert.equal(estimateTokens('abcd'), 1); assert.equal(estimateTokens('abcde'), 2); assert.equal(estimateTokens(400), 100); assert.equal(estimateTokens(''), 0); });
 
 test('the upgrade message opens WhatsApp to the one payment number (the live room’s), with a ready message', () => {
-  const link = whatsappLinkFor('+250 799 691 108', 'Free');
-  assert.ok(link.startsWith('https://wa.me/250799691108?text=')); assert.match(decodeURIComponent(link), /upgrade my Bwenge account \(now on Free\)/);
+  const link = whatsappLinkFor('+250 799 691 108', 'Free', 'BW-4F7K2A');
+  assert.ok(link.startsWith('https://wa.me/250799691108?text=')); assert.match(decodeURIComponent(link), /upgrade my Bwenge account \(now on Free\)\. My payment code: BW-4F7K2A/);
 });
 
 test('the Free plan keeps a small daily allowance and no AI marking', () => {

@@ -17,7 +17,7 @@ interface Overview {
 }
 interface Effective { fxUsdRwf: number; goPacks: Array<{ id: string; rwf: number; credits: number }>; plans: Record<PlanId, { name: string; sold: boolean; priceUsd: number | null; priceRwf: number | null; limits: Limits }> }
 interface AdminPayment { id: string; createdAt: string; paidAt: string | null; purpose: string; months: number; credits: number; amountRwf: number; currency: string; phoneMasked: string; status: string; reason: string | null; receiptNumber: string | null; user: { email?: string; name?: string } }
-interface AdminUser { id: string; email: string; name: string; plan: PlanId; subscription: { planType: string; status: string; endDate: string | null } | null; wallet: number; usedToday: number; dailyLimit: number; telegram: boolean }
+interface AdminUser { id: string; email: string; name: string; plan: PlanId; subscription: { planType: string; status: string; endDate: string | null } | null; wallet: number; usedToday: number; dailyLimit: number; telegram: boolean; payCode?: string }
 
 const card = 'rounded-2xl border border-[#263052] bg-[#0E1426] p-5';
 const input = 'w-full rounded-lg border border-[#2A3760] bg-[#0A1020] px-2.5 py-1.5 text-sm text-white outline-none focus:border-[#3FA7E0]';
@@ -178,7 +178,7 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
       <div className={`${card} space-y-3`}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="flex items-center gap-2 text-base font-semibold text-white"><Users size={16} /> Users, plans and GO credits</h3>
-          <label className="flex items-center gap-2 rounded-lg border border-[#2A3760] bg-[#0A1020] px-2.5 text-[#8A97C2]"><Search size={14} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name or email" className="bg-transparent py-1.5 text-sm text-white outline-none" /></label>
+          <label className="flex items-center gap-2 rounded-lg border border-[#2A3760] bg-[#0A1020] px-2.5 text-[#8A97C2]"><Search size={14} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, email or payment code (BW-…)" className="bg-transparent py-1.5 text-sm text-white outline-none" /></label>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[820px] text-xs">
@@ -186,7 +186,7 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
             <tbody>
               {users.map((u) => (
                 <tr key={u.id} className="border-t border-[#1E2848] text-[#C9D3F0]">
-                  <td className="px-2 py-2"><div className="font-medium text-white">{u.name}</div><div className="text-[#8A97C2]">{u.email}</div></td>
+                  <td className="px-2 py-2"><div className="font-medium text-white">{u.name}</div><div className="text-[#8A97C2]">{u.email}</div>{u.payCode && <div className="mt-0.5 font-mono text-[10px] text-amber-300">{u.payCode}</div>}</td>
                   <td className="px-2"><span className="rounded-md bg-[#1A2240] px-1.5 py-0.5 font-bold">{u.plan}</span></td>
                   <td className="px-2">{u.subscription?.endDate && u.subscription.status === 'ACTIVE' ? new Date(u.subscription.endDate).toLocaleDateString() : '—'}</td>
                   <td className="px-2 tabular-nums">{u.wallet.toLocaleString('en-US')}</td>

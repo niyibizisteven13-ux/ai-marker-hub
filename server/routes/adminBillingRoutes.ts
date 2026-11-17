@@ -7,6 +7,7 @@ import { DEFAULT_GO_PACKS, PLANS, SOLD_PLANS, currentGoPacks, planIdForSubscript
 import { momoConfig, momoHealth, momoMode } from '../services/billing/momo.js';
 import { checkPayment, publicPayment, runRenewalSweep } from '../services/billing/payments.js';
 import { periods, usedTotals } from '../services/billing/usage.js';
+import { looksLikePayRef, normalizePayRef, payRef } from '../services/billing/payRef.js';
 import { guardState, saveGuardSettings } from '../services/billing/aiGuard.js';
 import { DEFAULT_PAUSE_MESSAGE, salesState, setSalesPaused } from '../services/billing/sales.js';
 
@@ -142,10 +143,12 @@ router.get('/users', async (req, res) => {
   try {
     const q = String(req.query.q ?? '').trim().toLowerCase().slice(0, 100);
     const all = await db.user.findMany({ orderBy: { createdAt: 'desc' }, take: 500, select: { id: true, email: true, name: true, role: true, createdAt: true } });
-    const list = all.filter((u: any) => !String(u.email).endsWith('@users.invalid') && (!q || `${u.email} ${u.name}`.toLowerCase().includes(q))).slice(0, 25);
+    // A payment code (BW-4F7K2A) from the person's WhatsApp message finds exactly that person.
+    const byCode = looksLikePayRef(q) ? normalizePayRef(q) : null;
+    const list = all.filter((u: any) => !String(u.email).endsWith('@users.invalid') && (byCode ? payRef(u.id) === byCode : !q || `${u.email} ${u.name}`.toLowerCase().includes(q))).slice(0, 25);
     const out = await Promise.all(list.map(async (u: any) => {
       const [plan, sub, wallet, used, tg] = await Promise.all([planFor(u.id), db.subscription.findUnique({ where: { userId: u.id } }).catch(() => null), walletBalance(u.id), usedTotals(u.id), db.telegramSession.findFirst({ where: { userId: u.id } }).catch(() => null)]);
-      return { ...u, plan: plan.id, subscription: sub ? { planType: sub.planType, status: sub.status, endDate: sub.endDate } : null, wallet, usedToday: used.used.day, dailyLimit: plan.limits.daily, telegram: Boolean(tg) };
+      return { ...u, payCode: payRef(u.id), plan: plan.id, subscription: sub ? { planType: sub.planType, status: sub.status, endDate: sub.endDate } : null, wallet, usedToday: used.used.day, dailyLimit: plan.limits.daily, telegram: Boolean(tg) };
     }));
     res.json({ success: true, users: out });
   } catch (e) { fail(res, e); }
