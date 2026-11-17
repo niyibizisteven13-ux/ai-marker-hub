@@ -84,7 +84,7 @@ function createMySebOwnerRouterFor(target: (userId: string, id: string) => Targe
   r.get('/:id/myseb/agent', requireAuth, run(async (req, res) => { res.json({ success: true, data: await getAgent(t(req)) }); }));
   r.put('/:id/myseb/agent', requireAuth, run(async (req, res) => {
     const b = req.body ?? {};
-    res.json({ success: true, data: await setAgent(t(req), { on: b.on, autoResume: b.autoResume, afterSeconds: b.afterSeconds, maxResumes: b.maxResumes, reasons: b.reasons, endAfterMax: b.endAfterMax, level: b.level, dryRun: b.dryRun, maxAddMinutes: b.maxAddMinutes, maxRoomPauses: b.maxRoomPauses }, userIdOf(req)) });
+    res.json({ success: true, data: await setAgent(t(req), { on: b.on, autoResume: b.autoResume, afterSeconds: b.afterSeconds, maxResumes: b.maxResumes, reasons: b.reasons, endAfterMax: b.endAfterMax, level: b.level, dryRun: b.dryRun, maxAddMinutes: b.maxAddMinutes, maxRoomPauses: b.maxRoomPauses, serious: b.serious, seriousStrikes: b.seriousStrikes, autoClose: b.autoClose }, userIdOf(req), { confirmedAutopilot: b.confirmAutopilot === true }) });
   }));
   // The lecturer acts in the room: pause or release everyone, more time, a message to the students.
   r.post('/:id/myseb/room-action', requireAuth, run(async (req, res) => {

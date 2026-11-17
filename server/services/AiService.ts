@@ -486,8 +486,9 @@ export const bwengeAgent = createAiAgent({
       roomAssistant: async (userId, kind, id, patch) => {
         const my = await import('./mySeb.js'); const ag = await import('./mySebAgent.js');
         const load = kind === 'form' ? my.formTarget(userId, id) : my.assignmentTarget(userId, id);
-        const v = patch && Object.values(patch).some((x) => x !== undefined) ? await ag.setAgent(load, patch, userId) : await ag.getAgent(load);
-        return { rules: v.rules, usage: v.usage, resumed: v.resumed, log: v.log };
+        const { confirmedAutopilot, ...rules } = patch ?? {};
+        const v = patch && Object.values(rules).some((x) => x !== undefined) ? await ag.setAgent(load, rules, userId, { confirmedAutopilot }) : await ag.getAgent(load);
+        return { rules: v.rules, usage: v.usage, report: v.report, resumed: v.resumed, log: v.log };
       },
       roomAction: async (userId, kind, id, a) => {
         const my = await import('./mySeb.js'); const ag = await import('./mySebAgent.js');

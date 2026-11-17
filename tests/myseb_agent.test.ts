@@ -50,12 +50,16 @@ baseTest('the limit: after it the lecturer is told, and a test is ended only if 
 const NO_PG = !process.env.DATABASE_URL && 'needs PostgreSQL (DATABASE_URL); CI provides it';
 const test = (name: string, fn: () => Promise<void>) => baseTest(name, { skip: NO_PG }, fn);
 const EXAM = randomUUID();
+const violationsOf: Record<string, string[]> = {};
 let students: any[] = []; let examStatus = 'active'; const actions: string[] = [];
 const fake = http.createServer((req, res) => {
   let body = ''; req.on('data', (c) => { body += c; });
   req.on('end', () => {
     const json = (o: unknown) => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(o));
     if (req.url?.startsWith(`/api/exams/${EXAM}/monitor`)) return json({ exam: { title: 'Biology', status: examStatus }, counts: {}, students });
+    const vio = /\/api\/sessions\/([^/]+)\/violations$/.exec(req.url ?? '');
+    if (vio) return json((violationsOf[vio[1]] ?? []).map((type, i) => ({ type, created_at: new Date(1700000000000 + i * 1000).toISOString() })));
+    if (/\/api\/exams\/[^/]+\/end$/.test(req.url ?? '') && req.method === 'POST') { actions.push('closeall'); examStatus = 'ended'; return json({ ok: true }); }
     const room = /\/api\/exams\/[^/]+\/(pause-all|resume-all|extend|notice)$/.exec(req.url ?? '');
     if (room && req.method === 'POST') { actions.push(`${room[1]} ${body}`); return json({ ok: true, changed: 4 }); }
     const m = /\/api\/sessions\/([^/]+)\/(resume|end)$/.exec(req.url ?? '');
@@ -188,4 +192,58 @@ test('room actions: the lecturer may always; the assistant only within its limit
   assert.ok((await A.roomAction(load, { action: 'resume_room' }, 'lecturer', owner)).ok); assert.ok(actions.some((a) => a.startsWith('resume-all')));
   // someone else's test cannot be touched
   await assert.rejects(A.roomAction(formTarget(stranger, formId), { action: 'pause_room' }, 'lecturer', stranger), /not found/i);
+});
+
+test('autopilot: needs a confirmation, warns, lets a warned student carry on, ends at the strike limit, closes the test and sends the report once', async () => {
+  const load = formTarget(owner, formId);
+  A.__resetAgentMemoryForTests(); actions.length = 0; examStatus = 'active';
+  await assert.rejects(A.setAgent(load, { on: true, level: 'run', serious: 'end', seriousStrikes: 2, afterSeconds: 20, dryRun: false }, owner), /confirm/i);
+  assert.equal((await A.getAgent(load)).rules.level, 'assist', 'nothing changed without the confirmation');
+  const v = await A.setAgent(load, { on: true, level: 'run', serious: 'end', seriousStrikes: 2, afterSeconds: 20, dryRun: false, autoClose: true }, owner, { confirmedAutopilot: true });
+  assert.equal(v.rules.level, 'run'); assert.match(v.log[0].text, /AUTOPILOT/);
+  const amy = person({ student_name: 'Amy', status: 'IN_EXAM', pause_reason: null, violation_count: 1, last_violation: 'screenshot' });
+  const ben = person({ student_name: 'Ben', status: 'PAUSED', pause_reason: 'screenshot', violation_count: 1, last_violation: 'screenshot' });
+  violationsOf[amy.id] = ['screenshot']; violationsOf[ben.id] = ['screenshot'];
+  students = [amy, ben];
+  const t0 = Date.now();
+  await A.runRoom(await rowOf(), t0);
+  assert.ok(actions.some((a) => a.startsWith('notice') && a.includes(amy.id) && /Warning/.test(a)), 'Amy was warned');
+  assert.ok(!actions.some((a) => a.startsWith('end')), 'nobody ended on a first strike');
+  const n1 = actions.length;
+  await A.runRoom(await rowOf(), t0 + 10_000); assert.equal(actions.length, n1, 'not warned again for the same signal');
+  await A.runRoom(await rowOf(), t0 + 25_000);
+  assert.ok(actions.includes(`resume ${ben.id}`), 'Ben, warned once, carries on after the wait');
+  // a second serious signal: the policy the lecturer chose applies
+  violationsOf[amy.id] = ['screenshot', 'devtools']; amy.violation_count = 2; amy.last_violation = 'devtools';
+  await A.runRoom(await rowOf(), t0 + 30_000);
+  assert.ok(actions.includes(`end ${amy.id}`), 'Amy\'s test ended at the second strike');
+  const row = await rowOf(); assert.equal(row.serious[amy.id], 2);
+  assert.ok(row.log.some((e: any) => e.kind === 'ended' && /autopilot policy/.test(e.text)) && row.log.some((e: any) => e.kind === 'warned'));
+  // everyone finished: after two quiet minutes the test is closed, then the next look sends the report once
+  let reports: string[] = []; A.__setReportOwnerForTests(async (_r, title, text) => { reports.push(`${title}|${text}`); });
+  students = [{ ...amy, status: 'ENDED', end_reason: 'devtools' }, { ...ben, status: 'ENDED', end_reason: 'student' }];
+  await A.runRoom(await rowOf(), t0 + 40_000); assert.ok(!actions.includes('closeall'), 'not at once');
+  await A.runRoom(await rowOf(), t0 + 170_000); assert.ok(actions.includes('closeall'), 'closed after two quiet minutes');
+  await A.runRoom(await rowOf(), t0 + 180_000);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(reports.length, 1); assert.match(reports[0], /^Biology\|Biology: final report/); assert.match(reports[0], /Amy/);
+  const done = await rowOf(); assert.equal(done.reported, true); assert.match(done.report.text, /signals, not proof/); assert.equal(done.rules.on, false, 'it stops when the test is over');
+  assert.equal((await A.getAgent(load)).report?.text, done.report.text);
+  examStatus = 'active';
+});
+
+test('autopilot gives time when many connections drop, and announces the time left', async () => {
+  const load = formTarget(owner, formId);
+  A.__resetAgentMemoryForTests(); actions.length = 0; examStatus = 'active';
+  await A.setAgent(load, { on: true, level: 'run', dryRun: false, maxAddMinutes: 60 }, owner, { confirmedAutopilot: true });
+  const t0 = Date.now();
+  const mk = (i: number, gone: boolean) => person({ student_name: `S${i}`, status: gone ? 'LEFT' : 'IN_EXAM', pause_reason: null, violation_count: 0, seen_ago: gone ? 90 : 2, deadline_at: new Date(t0 + 30_000).toISOString() });
+  students = Array.from({ length: 8 }, (_, i) => mk(i, i < 4));
+  await A.runRoom(await rowOf(), t0);
+  assert.ok(actions.some((a) => a.startsWith('extend') && a.includes('"minutes":10')), 'ten minutes added');
+  assert.ok(actions.some((a) => a.startsWith('notice') && /Many connections were lost/.test(a)));
+  assert.ok(actions.some((a) => a.startsWith('notice') && /1 minute left/.test(a)), 'the last minute is announced');
+  const n = actions.length; await A.runRoom(await rowOf(), t0 + 10_000);
+  assert.equal(actions.length, n, 'neither is repeated');
+  assert.ok((await A.getAgent(load)).usage.addedMinutes <= 60, 'within the limit the lecturer set');
 });
