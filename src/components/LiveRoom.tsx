@@ -18,7 +18,7 @@ interface Student {
   live: { question: { index: number | null; total: number | null; label: string } | null; camera: string; screen_state?: string; frame: string | null; frame_age: number | null; screen?: string | null; screen_age?: number | null } | null;
 }
 interface Room { exam: { title: string; status: string; live_faces: boolean; live_mode?: 'off' | 'pictures' | 'live'; live_sound?: boolean; live_source?: Source; leave_action?: string; allow_web?: boolean; web_strict?: boolean; multi_face?: 'off' | 'warn' | 'end'; id_check?: boolean; web_devices?: 'any' | 'ios' }; counts: Record<Status, number>; students: Student[] }
-interface AgentView { rules: { on: boolean; autoResume: boolean; afterSeconds: number; maxResumes: number; endAfterMax: boolean; level: 'watch' | 'assist' | 'run'; dryRun: boolean; maxAddMinutes: number; maxRoomPauses: number; serious: 'flag' | 'end'; seriousStrikes: number; autoClose: boolean; closeAfterMinutes: number }; report?: { at: string; text: string }; usage: { roomPauses: number; addedMinutes: number; notices: number }; resumed: number; log: Array<{ at: string; kind: string; student?: string; text: string }> }
+interface AgentView { rules: { on: boolean; autoResume: boolean; afterSeconds: number; maxResumes: number; endAfterMax: boolean; level: 'watch' | 'assist' | 'run'; dryRun: boolean; maxAddMinutes: number; maxRoomPauses: number; serious: 'flag' | 'end'; seriousStrikes: number; autoClose: boolean; closeAfterMinutes: number; opensAt: string | null; closesAt: string | null }; report?: { at: string; text: string }; usage: { roomPauses: number; addedMinutes: number; notices: number }; resumed: number; log: Array<{ at: string; kind: string; student?: string; text: string }> }
 interface Code { display: string; qrSvg: string; expiresAt: string; joinUrl?: string }
 
 const LABEL: Record<Status, string> = { IN_EXAM: 'In the test', PAUSED: 'Paused', LEFT: 'Left', ENDED: 'Finished' };
@@ -77,6 +77,7 @@ function Sheet({ title, onClose, children, wide = false }: { title: string; onCl
 interface ReviewItem { studentId: string; name: string; score: number; strikes: number; signals: number; ended: { reason: string; words: string } | null; reinstated: number; timeline: Array<{ at: string; type: string; words: string; kind: string }>; evidence: number; canRestore: boolean; decision: 'open' | 'confirmed' | 'dismissed'; note: string; decidedAt?: string; gaveMinutes?: number }
 interface Evidence { at: string; type: string; frame: string | null; screen: string | null }
 const KIND_DOT: Record<string, string> = { serious: 'bg-rose-400', attempt: 'bg-amber-400', small: 'bg-slate-500', lecturer: 'bg-sky-400', assistant: 'bg-emerald-400' };
+const localInput = (iso: string | null) => { if (!iso) return ''; const d = new Date(iso); return Number.isNaN(d.getTime()) ? '' : new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16); };
 const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string));
 const clock = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
@@ -543,7 +544,7 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
     call('/agent').then((b) => { if (live && b?.data) setAgent(b.data); }).catch(() => undefined);
     return () => { live = false; };
   }, [room, call]); // eslint-disable-line react-hooks/exhaustive-deps
-  const setRules = (patch: Partial<AgentView['rules']> & { confirmAutopilot?: boolean }) => act(async () => { const b = await call('/agent', 'PUT', patch); if (b?.data) setAgent(b.data); });
+  const setRules = (patch: Partial<Omit<AgentView['rules'], 'opensAt' | 'closesAt'>> & { opensAt?: string | null; closesAt?: string | null; confirmAutopilot?: boolean }) => act(async () => { const b = await call('/agent', 'PUT', patch); if (b?.data) setAgent(b.data); });
   // Acting in the room: pause or release everyone, more time, a message to the students.
   const [roomMsg, setRoomMsg] = useState('');
   const [roomNote, setRoomNote] = useState('');
@@ -836,6 +837,12 @@ export default function LiveRoom({ kind, id, onBack }: { kind: 'form' | 'task'; 
                         <input type="checkbox" className="h-5 w-5 accent-blue-500" checked={agent.rules.autoClose} disabled={busy || !open} onChange={(e) => void setRules({ autoClose: e.target.checked })} />
                         Close it by itself
                       </label>
+                    </Setting>
+                    <Setting label="Opens at" hint="Autopilot makes the join code then and sends it to you. Keep the assistant on until then.">
+                      <input type="datetime-local" className={dSelect} style={{ colorScheme: 'dark' }} aria-label="When the test opens" value={localInput(agent.rules.opensAt)} disabled={busy || !open} onChange={(e) => void setRules({ opensAt: e.target.value ? new Date(e.target.value).toISOString() : null })} />
+                    </Setting>
+                    <Setting label="Closes at" hint="The test is closed then, and the report follows.">
+                      <input type="datetime-local" className={dSelect} style={{ colorScheme: 'dark' }} aria-label="When the test closes" value={localInput(agent.rules.closesAt)} disabled={busy || !open} onChange={(e) => void setRules({ closesAt: e.target.value ? new Date(e.target.value).toISOString() : null })} />
                     </Setting>
                     {agent.rules.autoClose && (
                       <Setting label="Keep it open after the last student" hint="A longer wait lets you review flags and give time back before it closes.">

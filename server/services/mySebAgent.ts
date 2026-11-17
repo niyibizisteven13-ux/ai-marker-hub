@@ -2,7 +2,7 @@ import { prisma } from '../db.js';
 import logger from '../utils/logger.js';
 import { auditAction } from './platform/audit.js';
 import { flagOn } from './platform/settings.js';
-import { MySebError, assignmentTarget, endAll, extendTime, formTarget, monitor, pauseAll, resumeAll, sendNotice, sessionAction, violations as roomViolations, type TargetLoader } from './mySeb.js';
+import { MySebError, assignmentTarget, endAll, extendTime, formTarget, generateCode, monitor, pauseAll, resumeAll, sendNotice, sessionAction, violations as roomViolations, type TargetLoader } from './mySeb.js';
 import { reasonWords } from '../../src/utils/studentHelp.js';
 
 /**
@@ -43,13 +43,15 @@ export interface AgentRules {
   autoClose: boolean;
   /** How long after everyone has finished the test stays open (minutes), so flags can be reviewed and students let back in. */
   closeAfterMinutes: number;
+  /** Autopilot makes the join code at this time and sends it to the lecturer, and closes the test at the end time (ISO, or null). */
+  opensAt: string | null; closesAt: string | null;
 }
-export const DEFAULT_RULES: AgentRules = { on: false, autoResume: true, afterSeconds: 30, maxResumes: 2, reasons: [...AUTO_REASONS], endAfterMax: false, level: 'assist', dryRun: false, maxAddMinutes: 15, maxRoomPauses: 2, serious: 'flag', seriousStrikes: 2, autoClose: true, closeAfterMinutes: 2 };
+export const DEFAULT_RULES: AgentRules = { on: false, autoResume: true, afterSeconds: 30, maxResumes: 2, reasons: [...AUTO_REASONS], endAfterMax: false, level: 'assist', dryRun: false, maxAddMinutes: 15, maxRoomPauses: 2, serious: 'flag', seriousStrikes: 2, autoClose: true, closeAfterMinutes: 2, opensAt: null, closesAt: null };
 /** What the assistant has already done in the room (counted against the limits above). */
 export interface AgentUsage { roomPauses: number; addedMinutes: number; notices: number }
 export const EMPTY_USAGE: AgentUsage = { roomPauses: 0, addedMinutes: 0, notices: 0 };
 export const MAX_AGENT_NOTICES = 20;
-export interface AgentLogEntry { at: string; kind: 'started' | 'stopped' | 'resumed' | 'needs_you' | 'ended' | 'card' | 'finished' | 'would' | 'room' | 'refused' | 'warned' | 'report'; student?: string; text: string }
+export interface AgentLogEntry { at: string; kind: 'started' | 'stopped' | 'resumed' | 'needs_you' | 'ended' | 'card' | 'finished' | 'would' | 'room' | 'refused' | 'warned' | 'report'; student?: string; sid?: string; text: string }
 interface Row { ownerId: string; kind: 'form' | 'task'; ref: string; rules: AgentRules; counts: Record<string, number>; log: AgentLogEntry[]; usage?: AgentUsage;
   /** Serious signals counted per student, and how many of each student's violations were already looked at. */
   serious?: Record<string, number>; vseen?: Record<string, number>;
@@ -62,6 +64,9 @@ const numMap = (m: any): Record<string, number> => (m && typeof m === 'object' ?
 const keyOf = (kind: string, ref: string) => `myseb-agent:${kind}:${ref}`;
 const LOG_MAX = 60;
 const clamp = (n: unknown, lo: number, hi: number, d: number) => (typeof n === 'number' && Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.round(n))) : d);
+
+/** An ISO date and time, or null to clear; anything else keeps the old value. */
+const cleanWhen = (v: unknown, old: string | null): string | null => (v === null || v === '' ? null : typeof v === 'string' && Number.isFinite(Date.parse(v)) ? new Date(v).toISOString() : old);
 
 export function cleanRules(input: Partial<AgentRules> | undefined, base: AgentRules = DEFAULT_RULES): AgentRules {
   const v = input ?? {};
@@ -81,6 +86,7 @@ export function cleanRules(input: Partial<AgentRules> | undefined, base: AgentRu
     seriousStrikes: clamp(v.seriousStrikes, 1, 3, base.seriousStrikes),
     autoClose: typeof v.autoClose === 'boolean' ? v.autoClose : base.autoClose,
     closeAfterMinutes: clamp(v.closeAfterMinutes, 2, 120, base.closeAfterMinutes),
+    opensAt: cleanWhen(v.opensAt, base.opensAt), closesAt: cleanWhen(v.closesAt, base.closesAt),
   };
 }
 
@@ -138,7 +144,7 @@ async function mutate(kind: 'form' | 'task', ref: string, ownerId: string, fn: (
   const row = (await read(kind, ref)) ?? { ownerId, kind, ref, rules: DEFAULT_RULES, counts: {}, log: [] };
   fn(row); await write(row, by); return row;
 }
-const entry = (kind: AgentLogEntry['kind'], text: string, student?: string): AgentLogEntry => ({ at: new Date().toISOString(), kind, text, ...(student ? { student } : {}) });
+const entry = (kind: AgentLogEntry['kind'], text: string, student?: string, sid?: string): AgentLogEntry => ({ at: new Date().toISOString(), kind, text, ...(student ? { student } : {}), ...(sid ? { sid } : {}) });
 
 /* ------------------------------------------------------------------ what the lecturer (and the chat) use */
 export interface AgentView { rules: AgentRules; log: AgentLogEntry[]; resumed: number; usage: AgentUsage; report?: { at: string; text: string } }
@@ -153,6 +159,7 @@ export async function setAgent(load: TargetLoader, patch: Partial<AgentRules>, b
   const kind = t.kind === 'form' ? 'form' : 'task';
   const prev = await read(kind, t.ref);
   const next = cleanRules(patch, prev?.rules ?? DEFAULT_RULES);
+  if (next.opensAt && next.closesAt && Date.parse(next.closesAt) <= Date.parse(next.opensAt)) throw new MySebError('The test must close after it opens.', 400, 'BAD_REQUEST');
   // Autopilot acts on students without the lecturer, so it needs a clear yes each time it is switched on.
   if (next.level === 'run' && next.on && !(prev?.rules.on && prev.rules.level === 'run') && !opts.confirmedAutopilot) throw new MySebError('Autopilot needs your confirmation: it will run the test without you and act on students by the policy you set. Confirm to switch it on.', 400, 'CONFIRM_AUTOPILOT');
   const row = await mutate(kind, t.ref, t.ownerId, (r) => {
@@ -296,14 +303,37 @@ const told = new Set<string>();
 const loaderOf = (r: Row): TargetLoader => (r.kind === 'form' ? formTarget(r.ownerId, r.ref) : assignmentTarget(r.ownerId, r.ref));
 
 /** One look at one room. Returns what it did (for tests and the log). */
+/** Replaceable in tests: where alerts go (the real Telegram / email / outbox by default). */
+let notifyDeps: () => Promise<import('./agenda/notify.js').NotifyDeps> = async () => (await import('./agenda/notify.js')).liveNotifyDeps();
+export const __setNotifyDepsForTests = (fn: typeof notifyDeps | null) => { notifyDeps = fn ?? (async () => (await import('./agenda/notify.js')).liveNotifyDeps()); };
+
 /** Replaceable in tests. */
-export let alertOwner = async (row: Row, entries: AgentLogEntry[]): Promise<void> => {
-  const [{ notifyUser, liveNotifyDeps }, { notifyPrefs }] = await Promise.all([import('./agenda/notify.js'), import('./agenda/store.js')]);
+export const defaultAlertOwner = async (row: Row, entries: AgentLogEntry[]): Promise<void> => {
+  const [{ notifyUser }, { notifyPrefs }, { makeToken }] = await Promise.all([import('./agenda/notify.js'), import('./agenda/store.js'), import('./agenda/roomTokens.js')]);
   if (!(await notifyPrefs().get(row.ownerId)).liveAlerts) return;
   const base = (process.env.APP_BASE_URL || '').replace(/\/$/, '');
   const lines = entries.slice(0, 8).map((e) => `• ${e.student ? `${e.student}: ` : ''}${e.text}`);
-  await notifyUser(row.ownerId, { title: 'Live room: needs you', text: `${lines.join('\n')}${entries.length > 8 ? `\n…and ${entries.length - 8} more` : ''}`, buttons: base ? [[{ text: 'Open the live room', url: `${base}/live/${row.kind}/${encodeURIComponent(row.ref)}` }]] : undefined }, await liveNotifyDeps());
+  // One tap from the phone: let a student back in, or (for a test the autopilot ended) dismiss with 10 minutes back / confirm; and the room controls.
+  const common = { userId: row.ownerId, kind: row.kind, ref: row.ref } as const;
+  const buttons: Array<Array<{ text: string; callback_data?: string; url?: string }>> = [];
+  const seen = new Set<string>();
+  for (const e of entries) {
+    if (!e.sid || !e.student || seen.has(e.sid) || seen.size >= 3) continue; seen.add(e.sid);
+    if (e.kind === 'ended') buttons.push([
+      { text: `✅ ${e.student.slice(0, 18)}: dismiss, +10 min`, callback_data: `ra:${await makeToken({ ...common, action: 'dismiss_give', sid: e.sid, name: e.student, minutes: 10 })}` },
+      { text: '🚩 Confirm', callback_data: `ra:${await makeToken({ ...common, action: 'confirm', sid: e.sid, name: e.student })}` },
+    ]);
+    else if (e.kind === 'needs_you') buttons.push([{ text: `▶ Let ${e.student.slice(0, 22)} back in`, callback_data: `ra:${await makeToken({ ...common, action: 'back_in', sid: e.sid, name: e.student })}` }]);
+  }
+  buttons.push([
+    { text: '⏸ Pause all', callback_data: `ra:${await makeToken({ ...common, action: 'pause' })}` },
+    { text: '▶ All back in', callback_data: `ra:${await makeToken({ ...common, action: 'resume_all' })}` },
+    { text: '+5 min', callback_data: `ra:${await makeToken({ ...common, action: 'add', minutes: 5 })}` },
+  ]);
+  if (base) buttons.push([{ text: 'Open the live room', url: `${base}/live/${row.kind}/${encodeURIComponent(row.ref)}` }]);
+  await notifyUser(row.ownerId, { title: 'Live room: needs you', text: `${lines.join('\n')}${entries.length > 8 ? `\n…and ${entries.length - 8} more` : ''}`, buttons }, await notifyDeps());
 };
+export let alertOwner = defaultAlertOwner;
 export const __setAlertOwnerForTests = (fn: typeof alertOwner) => { alertOwner = fn; };
 /** Replaceable in tests: the final report goes to the owner (Telegram, else email, else the chat). */
 export let reportOwner = async (row: Row, title: string, text: string): Promise<void> => {
@@ -312,6 +342,13 @@ export let reportOwner = async (row: Row, title: string, text: string): Promise<
   await notifyUser(row.ownerId, { title: `${title}: report`, text, buttons: base ? [[{ text: 'Open the live room', url: `${base}/live/${row.kind}/${encodeURIComponent(row.ref)}` }]] : undefined }, await liveNotifyDeps());
 };
 export const __setReportOwnerForTests = (fn: typeof reportOwner) => { reportOwner = fn; };
+
+/** Replaceable in tests: a plain message to the owner (the code when the test opens, a note when it closes). */
+export let tellOwner = async (row: Row, title: string, text: string, link?: { text: string; url: string }): Promise<void> => {
+  const { notifyUser, liveNotifyDeps } = await import('./agenda/notify.js');
+  await notifyUser(row.ownerId, { title, text, buttons: link ? [[{ text: link.text, url: link.url }]] : undefined }, await liveNotifyDeps());
+};
+export const __setTellOwnerForTests = (fn: typeof tellOwner) => { tellOwner = fn; };
 
 const quietSince = new Map<string, number>();
 const incidentAt = new Map<string, number>();
@@ -329,7 +366,7 @@ async function finishWithReport(row: Row, m: any): Promise<void> {
 }
 
 const hydrated = new Set<string>();
-const REMEMBER = /:(ann\d+|card)$/;
+const REMEMBER = /:(ann\d+|card|opened|closed)$/;
 /** Puts back what a restart forgot (only what would otherwise be done or announced twice). */
 function hydrate(row: Row) {
   if (hydrated.has(row.ref)) return; hydrated.add(row.ref);
@@ -397,11 +434,36 @@ async function runRoomInner(row: Row, now = Date.now()): Promise<AgentLogEntry[]
     quietSince.delete(row.ref);
     return [entry('finished', 'ended')];
   }
+  // The lecturer's timetable: make the code when the test opens (and send it), and close the test when time is up.
+  if (run) {
+    const base = (process.env.APP_BASE_URL || '').replace(/\/$/, '');
+    if (row.rules.opensAt && now >= Date.parse(row.rules.opensAt) && !told.has(`${row.ref}:opened`)) {
+      told.add(`${row.ref}:opened`);
+      if (row.rules.dryRun) made.push(entry('would', 'Would have made the join code now: the test opens.'));
+      else {
+        try {
+          const c = await generateCode(load);
+          made.push(entry('room', 'The test opened: the join code was made and sent to you.'));
+          const wa = `https://wa.me/?text=${encodeURIComponent(`Join ${m?.exam?.title ?? 'the test'}: ${c.joinUrl}\nCode: ${c.display}`)}`;
+          void tellOwner(row, 'The test is open', `Code: ${c.display}\nLink for students: ${c.joinUrl}\nShare on WhatsApp: ${wa}`, base ? { text: 'Open the live room', url: `${base}/live/${row.kind}/${encodeURIComponent(row.ref)}` } : undefined).catch(() => undefined);
+        } catch (e) {
+          const why = String((e as Error)?.message ?? e).slice(0, 200);
+          const f = entry('needs_you', `The test should have opened now but the join code could not be made: ${why}`);
+          made.push(f); void alertOwner(row, [f]).catch(() => undefined);
+        }
+      }
+    }
+    if (row.rules.closesAt && now >= Date.parse(row.rules.closesAt) && !told.has(`${row.ref}:closed`)) {
+      told.add(`${row.ref}:closed`);
+      if (row.rules.dryRun) made.push(entry('would', 'Would have closed the test now: closing time reached.'));
+      else { await endAll(load).catch(() => undefined); made.push(entry('finished', 'Closing time reached: the test was closed. The report follows.')); }
+    }
+  }
   const students = (m?.students ?? []) as Array<StudentView & { id_status?: string; violation_count?: number; last_violation?: string | null; deadline_at?: string }>;
   let fetched = 0;
   for (const s of students) {
     const k = `${row.ref}:${s.id}`;
-    if (s.id_status === 'pending' && s.status !== 'ENDED' && !told.has(`${k}:card`)) { told.add(`${k}:card`); made.push(entry('card', 'Showed a student card: check it in the live room.', s.student_name)); }
+    if (s.id_status === 'pending' && s.status !== 'ENDED' && !told.has(`${k}:card`)) { told.add(`${k}:card`); made.push(entry('card', 'Showed a student card: check it in the live room.', s.student_name, s.id)); }
     // Autopilot: count serious signals (a screenshot, a recording app, a second person, pasting ...) and apply the lecturer's policy.
     if (run && s.status !== 'ENDED' && (s.violation_count ?? 0) > (vseen[s.id] ?? 0) && fetched < 20) {
       fetched++;
@@ -415,7 +477,7 @@ async function runRoomInner(row: Row, now = Date.now()): Promise<AgentLogEntry[]
           const what = reasonWords(s.last_violation) || 'a serious signal';
           if (row.rules.dryRun) made.push(entry('would', `Would have ${verdict === 'end' ? 'ended the test' : 'warned the student'}: ${what} (strike ${score} of ${row.rules.seriousStrikes}).`, s.student_name));
           else if (verdict === 'end') {
-            made.push(entry('ended', `Test ended by your autopilot policy: ${what} (strike ${score} of ${row.rules.seriousStrikes}). You can let them back in from the live room while the time is not over.`, s.student_name));
+            made.push(entry('ended', `Test ended by your autopilot policy: ${what} (strike ${score} of ${row.rules.seriousStrikes}). You can let them back in from the live room while the time is not over.`, s.student_name, s.id));
             actions.push(async () => { await sessionAction(load, s.id, 'end'); await auditAction(row.ownerId, 'MYSEB_AGENT_END', 'live_room', row.ref, { student: s.student_name, why: what, strikes: score, autopilot: true }).catch(() => undefined); });
             continue;
           } else {
@@ -450,14 +512,14 @@ async function runRoomInner(row: Row, now = Date.now()): Promise<AgentLogEntry[]
       actions.push(async () => { await sessionAction(load, s.id, 'end'); await auditAction(row.ownerId, 'MYSEB_AGENT_END', 'live_room', row.ref, { student: s.student_name, why: d.why }).catch(() => undefined); });
     } else if (d.action === 'needs_you' && !told.has(`${k}:p${pausedSince.get(k)}`)) {
       told.add(`${k}:p${pausedSince.get(k)}`);
-      made.push(entry('needs_you', d.why, s.student_name));
+      made.push(entry('needs_you', d.why, s.student_name, s.id));
     }
   }
   for (const a of actions) await a().catch((e) => logger.debug?.('[myseb-agent] action failed', { error: (e as Error)?.message }));
   if (made.length || Object.keys(serious).length !== Object.keys(row.serious ?? {}).length || Object.keys(vseen).length !== Object.keys(row.vseen ?? {}).length)
     await mutate(row.kind, row.ref, row.ownerId, (r) => { r.counts = { ...r.counts, ...counts }; r.serious = { ...(r.serious ?? {}), ...serious }; r.vseen = { ...(r.vseen ?? {}), ...vseen }; r.log.push(...made); }, 'agent');
   // What only the lecturer can decide goes to their phone too (Telegram, else email), one message per look, if they have alerts on.
-  const needs = made.filter((e) => e.kind === 'needs_you' || e.kind === 'card');
+  const needs = made.filter((e) => e.kind === 'needs_you' || e.kind === 'card' || (e.kind === 'ended' && run && !!e.sid));
   if (needs.length) void alertOwner(row, needs).catch(() => undefined);
 
   if (run) {

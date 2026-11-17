@@ -85,7 +85,7 @@ function createMySebOwnerRouterFor(target: (userId: string, id: string) => Targe
   r.get('/:id/myseb/agent', requireAuth, run(async (req, res) => { res.json({ success: true, data: await getAgent(t(req)) }); }));
   r.put('/:id/myseb/agent', requireAuth, run(async (req, res) => {
     const b = req.body ?? {};
-    res.json({ success: true, data: await setAgent(t(req), { on: b.on, autoResume: b.autoResume, afterSeconds: b.afterSeconds, maxResumes: b.maxResumes, reasons: b.reasons, endAfterMax: b.endAfterMax, level: b.level, dryRun: b.dryRun, maxAddMinutes: b.maxAddMinutes, maxRoomPauses: b.maxRoomPauses, serious: b.serious, seriousStrikes: b.seriousStrikes, autoClose: b.autoClose, closeAfterMinutes: b.closeAfterMinutes }, userIdOf(req), { confirmedAutopilot: b.confirmAutopilot === true }) });
+    res.json({ success: true, data: await setAgent(t(req), { on: b.on, autoResume: b.autoResume, afterSeconds: b.afterSeconds, maxResumes: b.maxResumes, reasons: b.reasons, endAfterMax: b.endAfterMax, level: b.level, dryRun: b.dryRun, maxAddMinutes: b.maxAddMinutes, maxRoomPauses: b.maxRoomPauses, serious: b.serious, seriousStrikes: b.seriousStrikes, autoClose: b.autoClose, closeAfterMinutes: b.closeAfterMinutes, opensAt: b.opensAt, closesAt: b.closesAt }, userIdOf(req), { confirmedAutopilot: b.confirmAutopilot === true }) });
   }));
   // Review queue: everyone the room flagged, in order, with the pictures kept at those moments; the lecturer decides.
   r.get('/:id/myseb/review', requireAuth, run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json({ success: true, data: await getReview(t(req), (await getAgent(t(req))).log) }); }));
