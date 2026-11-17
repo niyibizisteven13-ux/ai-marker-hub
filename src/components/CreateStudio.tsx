@@ -179,7 +179,8 @@ export default function CreateStudio({
   const [renameValue, setRenameValue] = useState('');
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   const [showSources, setShowSources] = useState(true);
-  const [answerLanguage, setAnswerLanguage] = useState('Auto');
+  // The answer language follows the language you write in; there is no picker for it any more.
+  const answerLanguage = 'Auto';
   const [learning, setLearning] = useLearningMode();
   const [speakReplies, setSpeakReplies] = useState(true);
   const voiceLang = speechLang(learning.mode === 'roleplay' ? learning.language : undefined, answerLanguage === 'Auto' ? undefined : answerLanguage);
@@ -565,19 +566,6 @@ export default function CreateStudio({
                     {showSources ? 'On' : 'Off'}
                   </span>
                 </button>
-                <label className="flex min-h-10 items-center justify-between gap-3 rounded-xl px-3 text-neutral-200 hover:bg-white/[.07]">
-                  <span className="flex items-center gap-3"><Languages className="h-4 w-4 text-[#F0A12C]" /> Answer language</span>
-                  <select
-                    value={answerLanguage}
-                    onChange={(e) => setAnswerLanguage(e.target.value)}
-                    className="max-w-32 rounded-lg border border-white/10 bg-[var(--app-sunken)] px-2.5 py-1.5 text-xs text-neutral-200 outline-none focus:border-[#F0A12C]/60 focus:ring-2 focus:ring-[#F0A12C]/15"
-                  >
-                    <option value="Auto">Auto</option>
-                    <option value="Kinyarwanda">Kinyarwanda</option>
-                    <option value="English">English</option>
-                    <option value="French">French</option>
-                  </select>
-                </label>
 
                 <div className="my-2 border-t border-white/[.08]"></div>
 
