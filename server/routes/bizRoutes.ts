@@ -127,6 +127,23 @@ export function createBizRouter(): Router {
   r.patch('/:id/ledger/:eid', run(async (req, res) => res.json({ entry: await svc().setEntryStatus(me(req), req.params.id, req.params.eid, req.body?.status) })));
   r.delete('/:id/ledger/:eid', run(async (req, res) => { await svc().removeEntry(me(req), req.params.id, req.params.eid); res.status(204).end(); }));
   r.get('/:id/dashboard', run(async (req, res) => res.json(await svc().dashboard(me(req), req.params.id, [7, 30, 90].includes(Number(req.query.days)) ? Number(req.query.days) : 7))));
+  /** The owner's own Business Agent chat (a dedicated agent for this business, not the general chat). Spends credits like any assistant action. */
+  r.post('/:id/agent/chat', run(async (req, res) => {
+    const b = await svc().get(me(req), req.params.id);
+    const message = String(req.body?.message ?? '').trim().slice(0, 2000); if (!message) return res.status(400).json({ error: 'Write a message first.' });
+    const { allowAi } = await import('../services/billing/aiMeter.js'); if (!(await allowAi(res, me(req), 'chat'))) return;
+    const history = (Array.isArray(req.body?.history) ? req.body.history : []).slice(-12).map((h: any) => ({ role: h?.role === 'assistant' ? 'assistant' : 'user', content: String(h?.text ?? '').slice(0, 2500) })).filter((h: any) => h.content);
+    let files: Array<{ type: 'image'; base64: string; mediaType: string }> | undefined;
+    const img = typeof req.body?.image === 'string' ? req.body.image : '';
+    if (img) {
+      const buf = Buffer.from(img.replace(/^data:[^,]+,/, ''), 'base64'); const { sniff } = await import('../services/biz/media.js'); const m = sniff(buf);
+      if (!m || m.kind !== 'image' || buf.length > 6 * 1024 * 1024) return res.status(400).json({ error: 'Attach a photo (JPEG, PNG or WebP) up to 6 MB.' });
+      files = [{ type: 'image', base64: buf.toString('base64'), mediaType: m.mime }];
+    }
+    const { CHAT_TOOLS, chatSystem } = await import('../services/biz/agent.js'); const { AiService } = await import('../services/AiService.js');
+    const out: any = await (AiService.getInstance() as any).generalAssist({ userId: me(req), messages: [...history, { role: 'user', content: message }], planText: message, files, unattended: { toolNames: CHAT_TOOLS, system: chatSystem(b) }, channel: 'web' });
+    res.json({ reply: String(out?.content?.[0]?.text ?? '').trim() || 'I could not answer that. Please try again.' });
+  }));
   r.get('/:id/agent', run(async (req, res) => res.json({ agent: await svc().agent(me(req), req.params.id) })));
   r.put('/:id/agent', run(async (req, res) => res.json({ agent: await svc().setAgent(me(req), req.params.id, req.body ?? {}) })));
   r.get('/:id/secrets', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await svc().secretsStatus(me(req), req.params.id)); }));

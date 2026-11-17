@@ -133,3 +133,11 @@ test('agent alerts: instant notices only when the agent is on with alerts; a new
   boom = true; const r = await svc.submitOrder(b.slug, { name: 'Bo', contact: '0788123456', items: [{ productId: p.id, qty: 1 }] }, 'v4'); assert.equal(r.saved, true);
   await svc.remove('o', b.id); assert.equal(synced[synced.length - 1], 'gone', 'deleting the business removes its scheduled digests');
 });
+
+import { CHAT_TOOLS, chatSystem } from '../server/services/biz/agent.js';
+import { bizTools } from '../server/services/ai/tools/bizTools.js';
+test('the Business Agent chat: its tool list is exactly business tools that exist, and its prompt keeps it to one business and keeps secrets out of chat', () => {
+  const names = new Set(bizTools(async () => ({}) as any).map((t) => t.definition.name));
+  for (const t of CHAT_TOOLS) assert.ok(names.has(t), `${t} exists`); assert.ok(CHAT_TOOLS.every((t) => t.startsWith('biz_')), 'nothing outside the business toolbox'); assert.ok(!CHAT_TOOLS.includes('biz_add_media'), 'no file ids in this chat');
+  const sys = chatSystem({ name: 'Cafe', slug: 'cafe-1', category: 'restaurant' }); assert.ok(sys.includes('cafe-1') && /never ask for or accept payment keys/.test(sys) && /not a general chatbot/.test(sys));
+});

@@ -42,6 +42,7 @@ export const ownerApi = {
   addEntry: async (id: string, body: Record<string, unknown>) => read<{ entry: LedgerEntry }>(await authFetch(`/api/biz/${id}/ledger`, json('POST', body))),
   setEntry: async (id: string, eid: string, status: LedgerEntry['status']) => read(await authFetch(`/api/biz/${id}/ledger/${eid}`, json('PATCH', { status }))),
   removeEntry: async (id: string, eid: string) => { const r = await authFetch(`/api/biz/${id}/ledger/${eid}`, json('DELETE')); if (!r.ok) await read(r); },
+  agentChat: async (id: string, body: { message: string; history: Array<{ role: 'user' | 'assistant'; text: string }>; image?: string }) => (await read<{ reply: string }>(await authFetch(`/api/biz/${id}/agent/chat`, json('POST', body)))).reply,
   agent: async (id: string) => (await read<{ agent: AgentSettings }>(await authFetch(`/api/biz/${id}/agent`))).agent,
   setAgent: async (id: string, body: Partial<AgentSettings>) => (await read<{ agent: AgentSettings }>(await authFetch(`/api/biz/${id}/agent`, json('PUT', body)))).agent,
   secrets: async (id: string) => read<SecretsStatus>(await authFetch(`/api/biz/${id}/secrets`)),

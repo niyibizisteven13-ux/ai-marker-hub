@@ -17,6 +17,7 @@ sees a private side the public never sees. Photos and short videos the owner add
 Sales and expenses are kept per business (`biz-ledger:<id>`, newest first, up to 5,000 entries), never part of `publicView`. A completed sale of a product with a stock count lowers the stock; cancelling gives it back; a product that reaches zero is marked out of stock on the page. Pending orders from the page are not income until confirmed or paid.
 
 ## The business agent
+The owner has a **dedicated Business Agent chat** inside the Studio (Ask the agent): one agent for one business, with only the `biz_*` tools (no general chat tools), a business-manager persona, and a photo button for sales books and receipts. It is separate from the general Bwenge chat (which can still do the same by tool). `POST /api/biz/:id/agent/chat` runs it, gated and charged like any assistant action.
 A standing helper (Studio → Business agent, or by chat: "turn on my business agent in assist mode"). It runs as the owner's assistant with a short, level-based tool list (`server/services/biz/agent.ts`):
 * **Watch**: reads the real numbers and reports. A morning plan (07:30), a closing summary (19:30), a weekly review (Monday 08:00), and instant alerts (new order, payment received, low stock, new message) on Telegram, else email, else in the chat.
 * **Assist**: also proposes changes (confirm an order, restock, mark out of stock, ask a customer to pay) as plans the owner approves with one tap (Do it / Cancel), with undo where possible. A new order arrives with a ready "Confirm" button.

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Bot, BellRing, ArrowDownRight, ArrowUpRight, Banknote, Check, Copy, Download, EyeOff, Globe, KeyRound, Loader2, Package, Plus, Receipt, Send, Share2, ShieldCheck, Smartphone, Sparkles, Trash2, TrendingUp, Users, Wallet, X, AlertTriangle, ShoppingBag, CircleCheck, Clock, Ban } from 'lucide-react';
-import { ownerApi } from '../../biz/api';
+import { Camera, Bot, BellRing, ArrowDownRight, ArrowUpRight, Banknote, Check, Copy, Download, EyeOff, Globe, KeyRound, Loader2, Package, Plus, Receipt, Send, Share2, ShieldCheck, Smartphone, Sparkles, Trash2, TrendingUp, Users, Wallet, X, AlertTriangle, ShoppingBag, CircleCheck, Clock, Ban } from 'lucide-react';
+import { ownerApi, prepareImage } from '../../biz/api';
 import { pageUrl, rwf, type AgentSettings, type Business, type Dashboard, type LedgerEntry, type SecretsStatus } from '../../biz/types';
 import { btn, btnGhost, btnPrimary, card, input, msg, rwfShort, Tag, Title } from './ui';
 
@@ -148,7 +148,7 @@ export function DashboardView({ b, go, onChange, secrets, open }: { b: Business;
           {!(secrets?.mtn.set || secrets?.airtel.set) && <button type="button" onClick={() => go('secrets')} className="mt-3 flex w-full items-center gap-2 rounded-xl bg-[var(--app-bg)] px-3 py-2.5 text-left text-xs text-[var(--app-muted)] hover:bg-[var(--app-panel-hover)]"><KeyRound size={14} className="shrink-0 text-[var(--brand-strong,var(--brand))]" />Let customers pay by MTN or Airtel from your page: add your keys in Secrets.</button>}
         </div>
       </div>
-      <div className={`${card} flex flex-wrap items-center gap-4`}><Sparkles className="text-[var(--brand-strong,var(--brand))]" /><div className="min-w-0 flex-1"><p className="font-semibold">Ask your Bwenge assistant</p><p className="text-sm text-[var(--app-muted)]">“Today I sold 5 loaves for 4,000”, “how is my week?”, “what is running out?”, “ask 0788 123 456 to pay 3,000”.</p></div><div className="flex flex-wrap gap-2"><button type="button" className={btnPrimary} onClick={() => go('agent')}><Bot size={16} />Business agent</button><a className={btnGhost} href="/chat">Open the assistant</a></div></div>
+      <div className={`${card} flex flex-wrap items-center gap-4`}><Sparkles className="text-[var(--brand-strong,var(--brand))]" /><div className="min-w-0 flex-1"><p className="font-semibold">Ask your Bwenge assistant</p><p className="text-sm text-[var(--app-muted)]">“Today I sold 5 loaves for 4,000”, “how is my week?”, “what is running out?”, “ask 0788 123 456 to pay 3,000”.</p></div><div className="flex flex-wrap gap-2"><button type="button" className={btnPrimary} onClick={() => go('agent')}><Bot size={16} />Business agent</button><button type="button" className={btnGhost} onClick={() => go('chat')}>Ask the agent</button></div></div>
     </div>
   );
 }
@@ -290,6 +290,46 @@ export function AgentView({ b }: { b: Business }) {
         <p className="mt-4 rounded-xl bg-[var(--app-bg)] p-3 text-xs text-[var(--app-muted)]">Each message uses a few of your Bwenge credits. Link Telegram in Settings → Connections to get them on your phone at once.</p></div>}
       {note && <p role="status" className={`rounded-xl px-4 py-2.5 text-sm ${note.ok ? 'bg-emerald-500/10 text-emerald-700' : 'bg-rose-500/10 text-rose-600'}`}>{note.text}</p>}
       <div className={card}><h2 className="mb-2 font-display text-lg font-semibold">Or just tell it</h2><ul className="space-y-1.5 text-sm text-[var(--app-muted)]"><li>“Turn on my business agent in assist mode.”</li><li>“Today I sold 5 loaves for 4,000 and bought flour for 8,000.”</li><li>“Ask 0788 123 456 to pay 3,000 for the cake.”</li><li>“What is running out? Order more of anything under 5.”</li></ul><a className={`${btnGhost} mt-3`} href="/chat">Open the assistant</a></div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ chat with the business agent */
+interface ChatMsg { role: 'user' | 'assistant'; text: string; image?: string }
+const toDataUrl = (b: Blob) => new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = () => rej(new Error('Could not read that photo.')); r.readAsDataURL(b); });
+export function AgentChatView({ b, onChange }: { b: Business; onChange: () => void }) {
+  const key = `bz-chat-${b.id}`; const [msgs, setMsgs] = useState<ChatMsg[]>(() => { try { return JSON.parse(sessionStorage.getItem(key) ?? '[]'); } catch { return []; } });
+  const [text, setText] = useState(''); const [photo, setPhoto] = useState<{ url: string; name: string } | null>(null); const [busy, setBusy] = useState(false); const [err, setErr] = useState(''); const end = useMemo(() => ({ current: null as HTMLDivElement | null }), []);
+  useEffect(() => { try { sessionStorage.setItem(key, JSON.stringify(msgs.slice(-30).map((m) => ({ role: m.role, text: m.text })))); } catch { /* storage is optional */ } end.current?.scrollIntoView({ block: 'end' }); }, [msgs, key, end]);
+  const pick = async (f: File | undefined) => { if (!f) return; setErr(''); try { const p = await prepareImage(f); if (p.blob.size > 5.5 * 1024 * 1024) throw new Error('That photo is too big. Take it again closer, or smaller.'); setPhoto({ url: await toDataUrl(p.blob), name: f.name }); } catch (e) { setErr(msg(e)); } };
+  const send = async (t = text) => {
+    const message = t.trim(); if (!message || busy) return; const image = photo?.url; setErr(''); setText(''); setPhoto(null); setBusy(true);
+    const history = msgs.map((m) => ({ role: m.role, text: m.text })); setMsgs((m) => [...m, { role: 'user', text: message, image }]);
+    try { const reply = await ownerApi.agentChat(b.id, { message, history, ...(image ? { image } : {}) }); setMsgs((m) => [...m, { role: 'assistant', text: reply }]); onChange(); }
+    catch (e) { setErr(msg(e)); } finally { setBusy(false); }
+  };
+  const chips = ['How is my business today?', 'Today I sold 5 loaves for 4,000', 'What is running out?', 'How was my week?', 'Show my pending orders'];
+  return (
+    <div className="flex h-[calc(100dvh-9.5rem)] min-h-[420px] flex-col lg:h-[calc(100dvh-8rem)]">
+      <div className="mb-3 flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--brand)] text-[var(--brand-on)]"><Bot size={22} /></span><div className="min-w-0 flex-1"><h1 className="font-display text-xl font-semibold leading-tight">Business Agent</h1><p className="truncate text-xs text-[var(--app-muted)]">Runs {b.name} with you · records sales, watches stock, sends payment requests · private</p></div>
+        {msgs.length > 0 && <button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => { setMsgs([]); try { sessionStorage.removeItem(key); } catch { /* ignore */ } }}>New chat</button>}</div>
+      <div className={`${card} flex min-h-0 flex-1 flex-col !p-0`}>
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4" aria-live="polite">
+          {!msgs.length && <div className="py-6 text-center"><p className="font-display text-lg font-semibold">What shall we do today?</p><p className="mx-auto mt-1 max-w-sm text-sm text-[var(--app-muted)]">Tell me what you sold or spent, send a photo of your sales book, or ask how the business is doing.</p>
+            <div className="mt-4 flex flex-wrap justify-center gap-2">{chips.map((c) => <button key={c} type="button" onClick={() => void send(c)} className="rounded-full border border-[var(--app-line)] bg-[var(--app-bg)] px-3.5 py-2 text-sm font-medium hover:bg-[var(--app-panel-hover)]">{c}</button>)}</div></div>}
+          {msgs.map((m, i) => <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[88%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed ${m.role === 'user' ? 'bg-[var(--brand)] text-[var(--brand-on)]' : 'bg-[var(--app-bg)]'}`}>{m.image && <img src={m.image} alt="Your photo" className="mb-2 max-h-48 rounded-xl" />}{m.text}</div></div>)}
+          {busy && <div className="flex justify-start"><div className="inline-flex items-center gap-2 rounded-2xl bg-[var(--app-bg)] px-4 py-2.5 text-sm text-[var(--app-muted)]"><Loader2 size={15} className="animate-spin" />Working on it…</div></div>}
+          <div ref={(el) => { end.current = el; }} />
+        </div>
+        {err && <p role="alert" className="border-t border-[var(--app-line)] px-4 py-2 text-sm text-rose-600">{err}</p>}
+        {photo && <div className="flex items-center gap-3 border-t border-[var(--app-line)] px-4 py-2"><img src={photo.url} alt="" className="h-12 w-12 rounded-lg object-cover" /><span className="min-w-0 flex-1 truncate text-sm text-[var(--app-muted)]">{photo.name}</span><button type="button" aria-label="Remove photo" onClick={() => setPhoto(null)} className="flex h-9 w-9 items-center justify-center rounded-lg hover:bg-[var(--app-panel-hover)]"><X size={16} /></button></div>}
+        <form onSubmit={(e) => { e.preventDefault(); void send(); }} className="flex items-end gap-2 border-t border-[var(--app-line)] p-3">
+          <input id="bz-chat-photo" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" className="sr-only" onChange={(e) => { void pick(e.target.files?.[0]); e.target.value = ''; }} />
+          <label htmlFor="bz-chat-photo" aria-label="Attach a photo of your sales book" className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-xl border border-[var(--app-line)] hover:bg-[var(--app-panel-hover)]"><Camera size={18} /></label>
+          <textarea value={text} rows={1} maxLength={2000} placeholder="Tell your agent…" aria-label="Message to your agent" onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); } }} className={`${input} max-h-32 min-h-11 resize-none`} />
+          <button type="submit" disabled={busy || !text.trim()} aria-label="Send" className={`${btnPrimary} !px-4`}>{busy ? <Loader2 size={17} className="animate-spin" /> : <Send size={17} />}</button>
+        </form>
+      </div>
     </div>
   );
 }
