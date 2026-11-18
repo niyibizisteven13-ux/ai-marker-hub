@@ -37,7 +37,7 @@ test('AI marking asks the lecturer’s meter first: with no credits nothing is s
 test('AI marking charges the lecturer for the answers it marked', async () => {
   const schema = { isQuiz: true, assessment: { aiMarking: true }, fields: [{ id: 'q', type: 'long_text', label: 'Explain', points: 4 }] };
   let data = JSON.stringify({ q: 'An answer' });
-  const db: any = { formSubmission: { findUnique: async () => ({ id: 's1', data }), update: async (a: any) => { data = a.data.data; } } };
+  const db: any = { formSubmission: { findUnique: async () => ({ id: 's1', data }), updateMany: async (a: any) => { data = a.data.data; return { count: 1 }; } } };
   const ai = { async json() { return { marks: 3, feedback: 'ok', confidence: 'high' }; } };
   let charged = 0;
   assert.equal(await markSubmissionWithAi(db, 's1', schema, ai, { gate: async () => true, charge: (n) => { charged += n; } }), true);

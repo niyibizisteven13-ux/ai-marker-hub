@@ -56,8 +56,9 @@ import { normalizeExam } from './shared/examRules.js';
 import { applyPool } from './shared/formPool.js';
 import { createStorageRouter } from './server/routes/storageRoutes.js';
 import { StorageFullError, ensureStorage } from './server/services/billing/storage.js';
-import { explanationOf, gradeQuiz, quizRecord } from './server/services/forms/quiz.js';
+import { gradeQuiz, quizRecord } from './server/services/forms/quiz.js';
 import { markSubmissionWithAi } from './server/services/forms/aiMarking.js';
+import { completeWrittenReview, matchesQuizReceipt, newQuizReceipt, quizCompletion, quizReview } from './server/services/forms/quizReceipt.js';
 import { allowAi, chargeAi, AI_PRICE } from './server/services/billing/aiMeter.js';
 import { checkUsage as checkPlanUsage } from './server/services/billing/usage.js';
 import { normalizeAssessment } from './shared/assessment.js';
@@ -2028,7 +2029,7 @@ const sanitizePublicFormSchema = (value: any): any => {
     'answer', 'answerkey', 'correct', 'correctanswer', 'correctanswers', 'expectedanswer', 'modelanswer',
     'rubric', 'scoringrubric', 'selectionsettings', 'requirements', 'solution', 'mysebexamid', 'importreview', 'explanation',
     // Safe Exam Browser keys: anyone who knew one could fake the header.
-    'sebkeys',
+    'sebkeys', 'correctfeedback', 'incorrectfeedback',
   ]);
   if (Array.isArray(value)) return value.map(sanitizePublicFormSchema);
   if (!value || typeof value !== 'object') return value;
@@ -2154,6 +2155,7 @@ app.post('/api/forms/:id/submit', publicFormSubmitLimiter, async (req, res) => {
     const checked = validateSubmission(given, answers as Record<string, unknown>);
     if ('error' in checked) return res.status(400).json({ error: checked.error, fieldId: checked.fieldId });
     Object.assign(normalized, checked.values);
+    delete normalized._quizReceipt;
     if (examInfo) normalized._exam = { sessionId: examSessionId, studentId: examInfo.studentId, studentName: examInfo.studentName, timeUp: examInfo.timeUp };
     if (!Object.keys(checked.values).length && !examInfo?.timeUp) return res.status(400).json({ error: 'Answer at least one question before submitting.' });
     // Quizzes are marked against the answer key at once; the score is kept with the response for Results and the gradebook.
@@ -2164,7 +2166,12 @@ app.post('/api/forms/:id/submit', publicFormSubmitLimiter, async (req, res) => {
     if (/^[\w-]{8,64}$/.test(deviceId) && (schema.isQuiz || schema.exam?.enabled)) {
       normalized._device = { id: deviceId, net: crypto.createHmac('sha256', process.env.JWT_SECRET || 'dev-secret').update(String(req.ip || '')).digest('hex').slice(0, 12) };
     }
-    if (quiz) normalized._quiz = quizRecord(quiz, schema.assessment);
+    const score = quiz ? quizRecord(quiz, schema.assessment) : undefined;
+    const showScore = schema.showScore !== false;
+    const review = quiz && schema.quizShowAnswers !== false ? quizReview(quiz, schema) : undefined;
+    const receipt = score && score.pending > 0 && (showScore || review) ? newQuizReceipt() : undefined;
+    if (score) normalized._quiz = score;
+    if (receipt) normalized._quizReceipt = { digest: receipt.digest, showScore, review, assessment: normalizeAssessment(schema.assessment) };
     // Integrity signals (pasting, leaving the page, typing): kept for the lecturer to review, never used to change a mark.
     if (schema.isQuiz || schema.blockPaste || schema.trackIntegrity) {
       const all = normalizeFields(given);
@@ -2187,30 +2194,21 @@ app.post('/api/forms/:id/submit', publicFormSubmitLimiter, async (req, res) => {
     if (quiz && quiz.pending > 0 && normalizeAssessment(schema.assessment).aiMarking) void markSubmissionWithAi(prisma, submission.id, schema, undefined, {
       // The lecturer pays: when their credits are used up, the written answers wait for them (and for an upgrade) instead of being marked.
       gate: async () => !!form.userId && !!(await checkPlanUsage(form.userId, { kind: 'marking' })).allowed,
-      charge: (n) => void chargeAi(form.userId, { kind: 'marking', minCredits: Math.max(1, n) * AI_PRICE.markOneWrittenAnswer }),
+      charge: (n) => chargeAi(form.userId, { kind: 'marking', minCredits: Math.max(1, n) * AI_PRICE.markOneWrittenAnswer }),
     }).catch((e) => logger.warn('AI marking failed', { errorType: (e as Error)?.name }));
     const confirmationMessage = schema.confirmationMessage || 'Your response has been recorded.';
     const confirmationTitle = typeof schema.confirmationTitle === 'string' && schema.confirmationTitle.trim() ? schema.confirmationTitle.trim() : undefined;
-    if (quiz) {
-      // The owner decides what the respondent sees: score, and which answers were right with the correct ones.
-      const showScore = schema.showScore !== false;
-      res.status(201).json({
+    if (score) {
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(201).json({
         success: true,
         submissionId: submission.id,
         confirmationMessage,
         confirmationTitle,
         isQuiz: true,
-        ...(showScore ? {
-          score: quiz.score,
-          maxScore: quiz.maxScore,
-          percent: quiz.percent,
-          ...(() => { const r = quizRecord(quiz, schema.assessment); const a = normalizeAssessment(schema.assessment); return { grade: r.grade, passed: r.passed, ...(r.outOf ? { mark: r.mark, outOf: r.outOf } : {}), assessmentTitle: a.title || (a.kind === 'QUIZ' ? '' : a.kind), pending: quiz.pending, ...(quiz.pending > 0 ? { pendingNote: a.aiMarking ? 'Your written answers are being marked by AI. Your lecturer will check them, so this score may change.' : 'Your written answers are marked by your lecturer, so this score is not final.' } : {}) }; })(),
-          scoreLabel: normalizeAssessment(schema.assessment).title ? `Your score (${normalizeAssessment(schema.assessment).title})` : 'Your score',
-          feedback: quiz.percent >= 80 ? 'Excellent work!' : quiz.percent >= 50 ? 'Good effort. Review the questions you missed.' : 'Keep practising. Review the questions you missed.',
-        } : {}),
-        ...(schema.quizShowAnswers !== false ? { results: quiz.items.map((x) => ({ id: x.id, correct: x.correct, points: x.earned, maxPoints: x.points, yourAnswer: x.given, correctAnswer: x.correctAnswer, ...(explanationOf(schema, x.id) ? { explanation: explanationOf(schema, x.id) } : {}) })) } : {}),
+        ...quizCompletion(score, schema.assessment, showScore, review),
+        ...(receipt ? { quizReceipt: { formId: form.id, submissionId: submission.id, token: receipt.token } } : {}),
       });
-      return;
     }
     await analyticsWorker.extractInsights(submission.id).catch((error) => logger.error('Submission analysis failed:', error));
     // Feedback forms, surveys and sign-ups are not marked: the respondent only sees the owner's thank-you message.
@@ -2224,6 +2222,30 @@ app.post('/api/forms/:id/submit', publicFormSubmitLimiter, async (req, res) => {
     });
   } catch (error: any) {
     respondError(res, error, 'Failed to submit form.');
+  }
+});
+app.post('/api/forms/:id/quiz-result', studentLiveLimiter, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const { submissionId, token } = req.body || {};
+    if (typeof submissionId !== 'string' || !/^[\w-]{1,64}$/.test(submissionId) || typeof token !== 'string' || !/^[\w-]{43}$/.test(token)) {
+      return res.status(404).json({ error: 'Quiz result unavailable.' });
+    }
+    const row = await prisma.formSubmission.findUnique({ where: { id: submissionId }, select: { formId: true, data: true, form: { select: { schema: true } } } });
+    if (!row || row.formId !== req.params.id) return res.status(404).json({ error: 'Quiz result unavailable.' });
+    const data = JSON.parse(row.data);
+    const receipt = data._quizReceipt;
+    if (!data._quiz || !matchesQuizReceipt(token, receipt?.digest)) return res.status(404).json({ error: 'Quiz result unavailable.' });
+    const schema = JSON.parse(row.form.schema || '{}');
+    const showScore = schema.isQuiz && schema.showScore !== false && receipt.showScore;
+    const review = schema.isQuiz && schema.quizShowAnswers !== false && Array.isArray(receipt.review)
+      ? completeWrittenReview(receipt.review, data._written) : undefined;
+    if (!showScore && !review) return res.status(404).json({ error: 'Quiz result unavailable.' });
+    const completion = quizCompletion(data._quiz, receipt.assessment, showScore, review, receipt.aiFinished === true);
+    const usedAi = Object.values(data._written ?? {}).some(mark => (mark as { by?: string })?.by === 'ai');
+    return res.json({ ...completion, ...(!('pending' in completion) && usedAi && showScore ? { feedback: 'AI marks can be reviewed by your teacher.' } : {}) });
+  } catch (error) {
+    respondError(res, error, 'Quiz result unavailable.');
   }
 });
 app.get('/api/public/forms/:id', async (req, res) => {

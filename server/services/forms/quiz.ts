@@ -7,7 +7,8 @@
  * alternatives separated by "|" (e.g. "4|four").
  */
 
-import { normalizeAssessment, report, type Assessment } from '../../../shared/assessment.js';
+import { normalizeAssessment, report, usesAiGrading, type Assessment } from '../../../shared/assessment.js';
+import { kindOf } from './model.js';
 
 export interface QuizItem {
   id: string; title: string; points: number; earned: number; correct: boolean; given: unknown; correctAnswer: unknown;
@@ -41,24 +42,26 @@ export function gradeQuiz(schema: any, values: Record<string, unknown>): QuizRes
   if (!schema?.isQuiz) return null;
   const list: any[] = Array.isArray(schema.fields) ? schema.fields : Array.isArray(schema.questions) ? schema.questions : [];
   const written: WrittenMarks = values?._written && typeof values._written === 'object' ? (values._written as WrittenMarks) : {};
-  const aiOn = normalizeAssessment(schema.assessment).aiMarking;
+  const assessment = normalizeAssessment(schema.assessment);
   const items: QuizItem[] = [];
   let pending = 0;
   for (const [i, q] of list.entries()) {
     const points = Number(q?.points);
     const key = q?.correctAnswer;
+    const kind = kindOf(q?.type);
+    const aiGrades = usesAiGrading(kind, q, assessment.aiMarking);
     const id = String(q.id ?? q.number ?? i + 1);
     const given = values[id];
     // A written answer is marked by AI (when the lecturer chose that) or by the lecturer; before it is marked it waits and counts as 0.
-    if (q?.type === 'long_text' && points > 0 && (aiOn || written[id])) {
+    if (points > 0 && Number.isFinite(points) && (aiGrades || (kind === 'long_text' && assessment.manualWritten) || (kind === 'long_text' || kind === 'text') && written[id])) {
       const w = written[id];
       const earned = w && Number.isFinite(Number(w.marks)) ? Math.max(0, Math.min(points, Math.round(Number(w.marks) * 2) / 2)) : 0;
       const wait = !w && given !== undefined && given !== null && String(given).trim() !== '';
       if (wait) pending++;
-      items.push({ id, title: String(q.label ?? q.title ?? q.text ?? `Question ${i + 1}`), points, earned, correct: !!w && earned >= points, given: given ?? null, correctAnswer: typeof key === 'string' ? key : null, written: true, pending: wait, ...(w ? { by: w.by, ...(w.feedback ? { feedback: String(w.feedback).slice(0, 600) } : {}), ...(w.confidence ? { confidence: w.confidence } : {}) } : {}) });
+      items.push({ id, title: String(q.label ?? q.title ?? q.text ?? `Question ${i + 1}`), points, earned, correct: !!w && earned >= points, given: given ?? null, correctAnswer: typeof key === 'string' && (!aiGrades || q.aiGradingBasis !== 'knowledge') ? key : null, written: true, pending: wait, ...(w ? { by: w.by, ...(w.feedback ? { feedback: String(w.feedback).slice(0, 600) } : {}), ...(w.confidence ? { confidence: w.confidence } : {}) } : {}) });
       continue;
     }
-    if (q?.type === 'long_text') continue;                       // a paragraph is never matched word for word: only AI or the lecturer mark it
+    if (kind === 'long_text') continue;
     if (!(points > 0) || key === undefined || key === null || key === '' || (Array.isArray(key) && !key.length)) continue;
     const correct = matches(given, key);
     items.push({ id, title: String(q.label ?? q.title ?? q.text ?? `Question ${i + 1}`), points, earned: correct ? points : 0, correct, given: given ?? null, correctAnswer: key });
@@ -81,7 +84,20 @@ export function quizRecord(quiz: QuizResult, assessment?: unknown) {
  * student can read it only through their own results after they submit (and only if the lecturer shows answers).
  */
 export function explanationOf(schema: any, id: string): string | undefined {
+  return reviewerText(questionOf(schema, id)?.explanation);
+}
+
+export function answerFeedbackOf(schema: unknown, item: QuizItem): string | undefined {
+  if (item.written) return item.feedback;
+  const question = questionOf(schema, item.id);
+  return reviewerText(item.correct ? question?.correctFeedback : question?.incorrectFeedback);
+}
+
+function questionOf(schema: any, id: string) {
   const list: any[] = Array.isArray(schema?.fields) ? schema.fields : Array.isArray(schema?.questions) ? schema.questions : [];
-  const e = list.find((f, i) => String(f?.id ?? f?.number ?? i + 1) === String(id))?.explanation;
-  return typeof e === 'string' && e.trim() ? e.trim().slice(0, 600) : undefined;
+  return list.find((field, i) => String(field?.id ?? field?.number ?? i + 1) === id);
+}
+
+function reviewerText(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim().slice(0, 600) : undefined;
 }

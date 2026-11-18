@@ -6,6 +6,11 @@
  * course. The default scale below is the common one for Rwandan universities and schools; it is only a default and is shown on the result.
  */
 export type AssessmentKind = 'QUIZ' | 'CAT' | 'TEST' | 'EXAM';
+export type AiGradingBasis = 'guide' | 'knowledge';
+export function usesAiGrading(kind: unknown, question: { aiGradeShortAnswer?: unknown }, enabled: boolean): boolean {
+  return enabled && (kind === 'long_text' || (kind === 'text' && question.aiGradeShortAnswer === true));
+}
+
 export interface Assessment {
   kind: AssessmentKind;
   /** What it is called on results, for example "CAT 1" or "Mid-term". */
@@ -16,6 +21,8 @@ export interface Assessment {
   passPercent: number;
   /** Written answers (long text) are marked by AI against the lecturer's model answer, and shown to the lecturer to confirm. */
   aiMarking: boolean;
+  /** Count written questions toward the total while the teacher reviews them. */
+  manualWritten?: boolean;
 }
 export const DEFAULT_ASSESSMENT: Assessment = { kind: 'QUIZ', title: '', outOf: null, passPercent: 50, aiMarking: false };
 const KINDS: AssessmentKind[] = ['QUIZ', 'CAT', 'TEST', 'EXAM'];
@@ -31,6 +38,7 @@ export function normalizeAssessment(input: unknown): Assessment {
     outOf: Number.isFinite(outOfN) && outOfN >= 1 && outOfN <= 1000 && o.outOf !== null && o.outOf !== '' ? Math.round(outOfN * 100) / 100 : null,
     passPercent: Number.isFinite(passN) && passN >= 1 && passN <= 100 ? Math.round(passN) : DEFAULT_ASSESSMENT.passPercent,
     aiMarking: o.aiMarking === true,
+    ...(o.manualWritten === true ? { manualWritten: true } : {}),
   };
 }
 
