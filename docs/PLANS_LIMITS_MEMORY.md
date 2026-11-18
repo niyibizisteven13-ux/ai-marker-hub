@@ -1,35 +1,26 @@
 # Plans, usage limits and memory
 
-## Credits
+## Credits and default plans
 
-- **What a credit is:** 1 credit = $0.001 of real AI model cost, and every action costs at least 1 credit.
-- **How they're counted:** every reply is metered from its actual token usage, on the web and in Telegram. Each one is stored as a `UsageRecord` (migration `20261023000200_usage_records`).
-- **Model prices:** set in `server/services/billing/usage.ts`. Claude Haiku 5.5 costs $0.10 / $0.50 per million tokens. Unlisted model rates come from `AI_PRICE_IN_PER_MTOK` / `AI_PRICE_OUT_PER_MTOK`; the defaults are deliberately conservative.
+Each credit represents up to $0.001 of modeled provider spend. The meter rounds up and counts at least one credit per AI action. Claude's reported usage is adjusted per call for caching, long Haiku 5.5 prompts, and web-search fees. Features without provider usage can charge a minimum estimate.
 
-## Plans (`server/services/billing/plans.ts`)
+| Plan | RWF/month | Five hours | Day | Week | Month |
+|---|---:|---:|---:|---:|---:|
+| Free | 0 | 10 | 15 | 40 | 50 |
+| Top-up | Pay as you go | 10 | 15 | 40 | 50 |
+| Starter | 3,000 | 35 | 90 | 180 | 600 |
+| Pro | 6,500 | 115 | 290 | 650 | 2,200 |
+| Pro Plus | 10,000 | 190 | 475 | 1,050 | 3,600 |
+| Institution | By arrangement | 190 | 475 | 1,050 | 3,600 |
 
-| Plan | Price | Credits per day / week / month | Daily feature caps (tool · vision · files · marking) | Memory |
-|---|---|---|---|---|
-| Free | 0 | 20 / 80 / 250 | 5 · 5 · 2 · 3 | — |
-| GO | packs from 500 RWF | 60 / 300 / 1,000 | 20 · 30 · 8 · 15 | — |
-| PRO | ~~$9~~ $3/month (≈ 4,400 RWF) | 120 / 500 / 1,000 | 60 · 100 · 25 · 60 | 2,000 memories |
-| Institution | $50+/month, 25 seats | 400 / 1,800 / 5,000 per member | 200 · 300 · 80 · 300 | 10,000 memories |
-
-- **Message limits:** each plan also caps message length, attachments per message and upload size.
-- **Which plan a user is on:** active subscriptions map to plans: `PRO` and `BUSINESS` → PRO, `ORGANIZATION` → Institution, `GO` → GO. Admins get Institution limits.
-- **Time zone:** periods follow Kigali time. Days start at midnight, weeks on Monday, months on the 1st.
-- **RWF prices:** `FX_USD_RWF` (default 1470) converts USD prices, rounded to the nearest 100 RWF.
+Settings can override default prices and allowances. Existing invoices and wallet balances keep the values agreed at purchase. Version 2 settings matching the old defaults follow the new catalog. Other overrides carry forward.
 
 ## Enforcement
 
-- **Before each reply:** the web chat (`/api/ai/chat`) and the Telegram assistant check the user's limits.
-- **When a limit is reached:**
-  - the web chat replies with a "Limit reached" message: when the credits renew, and an Upgrade link;
-  - Telegram sends a card with an Upgrade button.
-- **Settings → Usage** shows:
-  - today, this week and this month;
-  - the daily feature caps and the plan's limits;
-  - recent activity.
+- Calendar days, Monday-to-Sunday weeks and calendar months follow Kigali time. Five-hour windows run continuously, and their next reset is shown in **Settings → Usage**.
+- When a plan allowance runs low, the wallet can cover the remainder up to its own window caps. The wallet has at least 50 credits available per five-hour window and 200 per week, or the plan’s limit for each window if higher and the wallet has sufficient credit. Unspent credits stay in the wallet.
+- The usage gate checks available credits before new actions. Known-cost form and quiz creation checks its minimum. Settlement records the provider spend and caps wallet debits in a serializable transaction. An action that is already running can cost more than its admission estimate.
+- **Settings → Usage** shows plan and wallet meters, their reset times, daily feature caps, and recent activity.
 
 ## Memory across all chats (`server/services/MemoryService.ts`)
 

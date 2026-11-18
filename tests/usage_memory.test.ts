@@ -61,16 +61,16 @@ test('limits: daily, weekly and monthly credits, per-feature daily caps, message
   const d = await checkUsage(daily, { kind: 'chat' }, now);
   assert.equal(d.allowed, false);
   assert.equal(d.code, 'DAILY');
-  assert.match(d.message!, /today's 15 credits/);
-  assert.match(d.message!, /Pro \(4,500 RWF a month, about \$3\.06\) gives 1,700 credits a month/);
+  assert.match(d.message!, /today's 15-credit limit/);
+  assert.match(d.message!, /Pro \(6,500 RWF a month, about \$4\.42\) gives 2,200 credits a month/);
   assert.deepEqual(d.upgrade, { plan: 'PRO', url: '/upgrade?reason=limit' });
   assert.equal(d.resetsAt, '2026-10-21T22:00:00.000Z');
 
   const weekly = await newUser();
-  await addUsage(weekly, 14, day(2)); // Monday
-  await addUsage(weekly, 14, day(1)); // Tuesday
-  await addUsage(weekly, 11, day(0));
-  assert.equal((await checkUsage(weekly, { kind: 'chat' }, now)).allowed, true, '39 of 40 this week, 11 of 15 today');
+  await addUsage(weekly, 15, day(2)); // Monday
+  await addUsage(weekly, 15, day(1)); // Tuesday
+  await addUsage(weekly, 9, day(0));
+  assert.equal((await checkUsage(weekly, { kind: 'chat' }, now)).allowed, true, '39 of 40 this week, 9 in the window');
   await addUsage(weekly, 1, day(0));
   assert.equal((await checkUsage(weekly, { kind: 'chat' }, now)).code, 'WEEKLY', 'the week is checked before the day');
 
@@ -91,14 +91,15 @@ test('limits: daily, weekly and monthly credits, per-feature daily caps, message
   assert.equal((await checkUsage(fresh, { kind: 'chat', attachments: 3 }, now)).code, 'TOO_MANY_ATTACHMENTS');
   assert.equal((await checkUsage(fresh, { kind: 'vision', attachments: 2 }, now)).allowed, true);
 
-  // Paid plans: a whole class can be marked in one evening; the monthly credits are the limit.
   const pro = await newUser('PRO');
-  await addUsage(pro, 1_600, day(0));
-  assert.equal((await checkUsage(pro, { kind: 'marking' }, now)).allowed, true, 'Pro allows 1,600 credits in one day');
-  await addUsage(pro, 100, day(0));
+  await addUsage(pro, 114, day(0));
+  assert.equal((await checkUsage(pro, { kind: 'chat' }, now)).allowed, true);
+  assert.equal((await checkUsage(pro, { kind: 'chat', minCredits: 2 }, now)).code, 'FIVE_HOURS');
+  await addUsage(pro, 1, day(0));
   const p = await checkUsage(pro, { kind: 'chat' }, now);
-  assert.equal(p.code, 'MONTHLY');
-  assert.match(p.message!, /Pro Plus \(7,000 RWF a month/);
+  assert.equal(p.code, 'FIVE_HOURS');
+  assert.equal(p.resetsAt, periods(now).resets.fiveHours.toISOString());
+  assert.match(p.message!, /Pro Plus \(10,000 RWF a month/);
 });
 
 test('metering records real usage; the summary shows plan, meters, features and the Pro offer', async () => {
@@ -113,7 +114,7 @@ test('metering records real usage; the summary shows plan, meters, features and 
   assert.deepEqual(s.features.find((f) => f.kind === 'tool'), { kind: 'tool', label: 'data and tool answers', used: 1, limit: 3 });
   assert.deepEqual(s.recent.map((r) => [r.kind, r.credits, r.channel]), [['chat', 1, 'telegram'], ['tool', 6, 'web']]);
   assert.equal(s.limits.memory, false);
-  assert.deepEqual(s.pro, { id: 'PRO', name: 'Pro', priceUsd: 3.06, listPriceUsd: null, priceRwf: 4_500, daily: 1_700, monthly: 1_700, memory: true });
+  assert.deepEqual(s.pro, { id: 'PRO', name: 'Pro', priceUsd: 4.42, listPriceUsd: null, priceRwf: 6_500, daily: 290, monthly: 2_200, memory: true });
 });
 
 test('memory: facts and preferences are recognised; secrets are not', () => {
@@ -171,7 +172,7 @@ test('memory API: Free sees an upgrade offer (402 with price); PRO turns it on, 
     current = await newUser();
     const view = await (await call('')).json();
     assert.equal(view.available, false);
-    assert.deepEqual(view.pro, { name: 'Pro', priceUsd: 3.06, priceRwf: 4_500 });
+    assert.deepEqual(view.pro, { name: 'Pro', priceUsd: 4.42, priceRwf: 6_500 });
     const on = await call('/settings', 'PATCH', { enabled: true });
     assert.equal(on.status, 402);
     const body = await on.json();
@@ -198,33 +199,39 @@ test('memory API: Free sees an upgrade offer (402 with price); PRO turns it on, 
   }
 });
 
-test('plan catalog: Starter 1,500 / Pro 4,500 / Pro Plus 7,000 RWF; Free has no marking; top-ups at about 2.3 RWF a credit', () => {
-  assert.deepEqual([PLANS.STARTER.priceRwf, PLANS.PRO.priceRwf, PLANS.PLUS.priceRwf], [1_500, 4_500, 7_000]);
-  assert.deepEqual([PLANS.FREE.limits.monthly, PLANS.STARTER.limits.monthly, PLANS.PRO.limits.monthly, PLANS.PLUS.limits.monthly], [50, 400, 1_700, 2_800]);
+test('plan catalog includes the updated renewal and top-up prices', () => {
+  assert.deepEqual([PLANS.STARTER.priceRwf, PLANS.PRO.priceRwf, PLANS.PLUS.priceRwf], [3_000, 6_500, 10_000]);
+  assert.deepEqual([PLANS.FREE.limits.monthly, PLANS.STARTER.limits.monthly, PLANS.PRO.limits.monthly, PLANS.PLUS.limits.monthly], [50, 600, 2_200, 3_600]);
   assert.equal(PLANS.FREE.limits.autonomousMarking, false);
   assert.equal(PLANS.STARTER.limits.memory, false);
   assert.equal(PLANS.PRO.limits.memory, true);
   assert.equal(PLANS.PLUS.limits.memory, true);
   assert.equal(PLANS.GO.priceRwf, null);
   assert.equal(PLANS.INSTITUTION.priceRwf, null, 'Institution is no longer sold online');
-  for (const p of currentGoPacks()) assert.ok(Math.abs(p.rwf / p.credits - 2.3) < 0.05, p.id);
-  for (const p of Object.values(PLANS)) assert.ok(p.limits.daily <= p.limits.weekly && p.limits.weekly <= p.limits.monthly, p.id);
+  for (const p of currentGoPacks()) assert.ok(p.rwf / p.credits >= 3.125, p.id);
+  for (const p of Object.values(PLANS)) assert.ok(p.limits.fiveHours <= p.limits.daily && p.limits.daily <= p.limits.weekly && p.limits.weekly <= p.limits.monthly, p.id);
 });
 
 test('billing settings saved before the new price list keep only the exchange rate; new ones set RWF prices', () => {
   try {
     applyBillingSettings({ fxUsdRwf: 1500, pro: { priceUsd: 3 }, limits: { PRO: { monthly: 1_000 } }, goPacks: [{ id: 'go-500', rwf: 500, credits: 100 }] } as any);
-    assert.equal(PLANS.PRO.priceRwf, 4_500);
-    assert.equal(PLANS.PRO.priceUsd, 3);
-    assert.equal(PLANS.PRO.limits.monthly, 1_700, 'old limits are ignored');
-    assert.equal(currentGoPacks()[0].credits, 215, 'old packs are ignored');
+    assert.equal(PLANS.PRO.priceRwf, 6_500);
+    assert.equal(PLANS.PRO.priceUsd, 4.33);
+    assert.equal(PLANS.PRO.limits.monthly, 2_200, 'old limits are ignored');
+    assert.equal(currentGoPacks()[0].credits, 140, 'old packs are ignored');
     applyBillingSettings({ schema: 2, prices: { PLUS: { priceRwf: 7_500 } }, limits: { STARTER: { monthly: 450 } } });
     assert.equal(PLANS.PLUS.priceRwf, 7_500);
     assert.equal(PLANS.STARTER.limits.monthly, 450);
+    applyBillingSettings({ schema: 2, prices: { PRO: { priceRwf: 4500 } }, limits: { PRO: { weekly: 1700 } }, goPacks: [{ id: 'go-500', rwf: 500, credits: 215 }] });
+    assert.equal(PLANS.PRO.priceRwf, 6500);
+    assert.equal(PLANS.PRO.limits.weekly, 650);
+    assert.equal(currentGoPacks()[0].credits, 140);
+    applyBillingSettings({ schema: 3, prices: { PRO: { priceRwf: 4500 } } });
+    assert.equal(PLANS.PRO.priceRwf, 4500, 'an explicit post-migration override stays in place');
   } finally {
     applyBillingSettings({});
   }
-  assert.equal(PLANS.PLUS.priceRwf, 7_000);
+  assert.equal(PLANS.PLUS.priceRwf, 10_000);
 });
 
 test('storage: each plan keeps a set amount of files; a full Free account is refused with the plan that has more', async () => {
@@ -255,4 +262,35 @@ test('a script\'s reading is charged with its marking: one record, both costs, t
   assert.ok(rows[0].costUsd > 0);
   const s = await usageSummary(userId);
   assert.equal(s.features.find((f: any) => f.kind === 'marking').used, 1, 'counts as one marked script');
+});
+
+
+test('purchased credits are split from plan usage and held at the per-window wallet cap', async () => {
+  const user = await newUser();
+  const now = Date.now();
+  const start = periods(now).fiveHours;
+  await addUsage(user, 8, start);
+  await db.creditLedger.create({ data: { id: randomUUID(), userId: user, reason: 'purchase', delta: 300, createdAt: start } });
+  assert.equal((await checkUsage(user, { kind: 'chat', minCredits: 52 }, now)).wallet, true);
+  assert.equal(await recordUsage(user, { kind: 'chat', minCredits: 52 }), 52);
+  const view = await usageSummary(user, now);
+  assert.equal(view.credits.fiveHours.used, 10);
+  assert.equal(view.wallet.credits, 250);
+  assert.equal(view.wallet.fiveHours.used, 50);
+  assert.equal(view.wallet.available, 0);
+  assert.equal((await checkUsage(user, { kind: 'chat' }, now)).code, 'FIVE_HOURS');
+  assert.equal(periods(now).resets.fiveHours.getTime() - start.getTime(), 5 * 3_600_000);
+});
+
+test('wallet balance carries through the weekly cap without spending more until renewal', async () => {
+  const user = await newUser();
+  const now = Date.parse('2026-10-22T10:30:00Z');
+  const p = periods(now);
+  await addUsage(user, 10, p.fiveHours);
+  await db.creditLedger.create({ data: { id: randomUUID(), userId: user, reason: 'purchase', delta: 900, createdAt: p.week } });
+  await db.creditLedger.create({ data: { id: randomUUID(), userId: user, reason: 'usage', delta: -200, createdAt: p.week } });
+  const blocked = await checkUsage(user, { kind: 'chat' }, now);
+  assert.equal(blocked.code, 'WEEKLY');
+  assert.equal(blocked.resetsAt, p.resets.week.toISOString());
+  assert.equal((await usageSummary(user, now)).wallet.credits, 700);
 });

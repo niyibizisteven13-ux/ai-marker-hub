@@ -13,7 +13,8 @@ export const SOLD_PLANS = ['STARTER', 'PRO', 'PLUS'] as const;
 export type SoldPlanId = (typeof SOLD_PLANS)[number];
 
 export interface PlanLimits {
-  /** Credits per calendar day, ISO week (Monday) and calendar month, in Kigali time. */
+  /** Credits per five-hour window, calendar day, ISO week and month. */
+  fiveHours: number;
   daily: number;
   weekly: number;
   monthly: number;
@@ -45,34 +46,33 @@ export interface PlanInfo {
   limits: PlanLimits;
 }
 
-// Paid plans keep high daily caps (a whole class can be marked in one evening); the monthly credits are the
-// cost control. 1 credit ≈ $0.001 of model spend, so 1,700 credits ≈ 120 Haiku-marked scripts plus chat.
+// Paid plans spread their monthly allowance across weeks and five-hour windows.
 export const PLANS: Record<PlanId, PlanInfo> = {
   FREE: {
     id: 'FREE', name: 'Free', priceRwf: 0, priceUsd: 0, priceNote: 'Free forever',
-    limits: { daily: 15, weekly: 40, monthly: 50, perDay: { tool: 3, vision: 3, artifact: 1, marking: 0 }, maxMessageChars: 8_000, maxAttachments: 2, maxUploadMb: 100, storageMb: 200, memory: false, memoryItems: 0, autonomousMarking: false },
+    limits: { fiveHours: 10, daily: 15, weekly: 40, monthly: 50, perDay: { tool: 3, vision: 3, artifact: 1, marking: 0 }, maxMessageChars: 8_000, maxAttachments: 2, maxUploadMb: 100, storageMb: 200, memory: false, memoryItems: 0, autonomousMarking: false },
   },
   // GO = the Free allowance plus purchased credits: once the allowance or a daily feature cap is used up,
   // further actions are paid from the credit wallet instead of being refused.
   GO: {
     id: 'GO', name: 'Top-up', priceRwf: null, priceUsd: null, priceNote: 'Pay as you go, from 500 RWF',
-    limits: { daily: 15, weekly: 40, monthly: 50, perDay: { tool: 3, vision: 3, artifact: 1, marking: 0 }, maxMessageChars: 20_000, maxAttachments: 5, maxUploadMb: 100, storageMb: 500, memory: false, memoryItems: 0, autonomousMarking: true },
+    limits: { fiveHours: 10, daily: 15, weekly: 40, monthly: 50, perDay: { tool: 3, vision: 3, artifact: 1, marking: 0 }, maxMessageChars: 20_000, maxAttachments: 5, maxUploadMb: 100, storageMb: 500, memory: false, memoryItems: 0, autonomousMarking: true },
   },
   STARTER: {
-    id: 'STARTER', name: 'Starter', priceRwf: 1_500, priceUsd: 1, priceNote: 'per month',
-    limits: { daily: 400, weekly: 400, monthly: 400, perDay: { tool: 60, vision: 100, artifact: 15, marking: 60 }, maxMessageChars: 20_000, maxAttachments: 10, maxUploadMb: 100, storageMb: 2_048, memory: false, memoryItems: 0, autonomousMarking: true },
+    id: 'STARTER', name: 'Starter', priceRwf: 3_000, priceUsd: 2, priceNote: 'per month',
+    limits: { fiveHours: 35, daily: 90, weekly: 180, monthly: 600, perDay: { tool: 60, vision: 100, artifact: 15, marking: 60 }, maxMessageChars: 20_000, maxAttachments: 10, maxUploadMb: 100, storageMb: 2_048, memory: false, memoryItems: 0, autonomousMarking: true },
   },
   PRO: {
-    id: 'PRO', name: 'Pro', priceRwf: 4_500, priceUsd: 3, priceNote: 'per month',
-    limits: { daily: 1_700, weekly: 1_700, monthly: 1_700, perDay: { tool: 200, vision: 300, artifact: 40, marking: 200 }, maxMessageChars: 40_000, maxAttachments: 20, maxUploadMb: 100, storageMb: 10_240, memory: true, memoryItems: 2_000, autonomousMarking: true },
+    id: 'PRO', name: 'Pro', priceRwf: 6_500, priceUsd: 4.33, priceNote: 'per month',
+    limits: { fiveHours: 115, daily: 290, weekly: 650, monthly: 2_200, perDay: { tool: 200, vision: 300, artifact: 40, marking: 200 }, maxMessageChars: 40_000, maxAttachments: 20, maxUploadMb: 100, storageMb: 10_240, memory: true, memoryItems: 2_000, autonomousMarking: true },
   },
   PLUS: {
-    id: 'PLUS', name: 'Pro Plus', priceRwf: 7_000, priceUsd: 4.75, priceNote: 'per month',
-    limits: { daily: 2_800, weekly: 2_800, monthly: 2_800, perDay: { tool: 300, vision: 500, artifact: 60, marking: 400 }, maxMessageChars: 60_000, maxAttachments: 20, maxUploadMb: 200, storageMb: 25_600, memory: true, memoryItems: 5_000, autonomousMarking: true },
+    id: 'PLUS', name: 'Pro Plus', priceRwf: 10_000, priceUsd: 6.67, priceNote: 'per month',
+    limits: { fiveHours: 190, daily: 475, weekly: 1_050, monthly: 3_600, perDay: { tool: 300, vision: 500, artifact: 60, marking: 400 }, maxMessageChars: 60_000, maxAttachments: 20, maxUploadMb: 200, storageMb: 25_600, memory: true, memoryItems: 5_000, autonomousMarking: true },
   },
   INSTITUTION: {
     id: 'INSTITUTION', name: 'Institution', priceRwf: null, priceUsd: null, priceNote: 'by arrangement',
-    limits: { daily: 2_800, weekly: 2_800, monthly: 2_800, perDay: { tool: 300, vision: 500, artifact: 80, marking: 400 }, maxMessageChars: 60_000, maxAttachments: 20, maxUploadMb: 200, storageMb: 51_200, memory: true, memoryItems: 10_000, autonomousMarking: true },
+    limits: { fiveHours: 190, daily: 475, weekly: 1_050, monthly: 3_600, perDay: { tool: 300, vision: 500, artifact: 80, marking: 400 }, maxMessageChars: 60_000, maxAttachments: 20, maxUploadMb: 200, storageMb: 51_200, memory: true, memoryItems: 10_000, autonomousMarking: true },
   },
 };
 
@@ -107,17 +107,17 @@ export function planIdForSubscription(planType: string | null | undefined): Plan
 export const subscriptionTypeFor = (id: PlanId) => (id === 'INSTITUTION' ? 'ORGANIZATION' : id);
 
 export interface GoPack { id: string; rwf: number; credits: number }
-// About 2.3 RWF per credit: dearer than a plan's credits, so a plan stays the better deal for regular use.
+// Packs carry a higher price per credit than Pro and Pro Plus.
 export const DEFAULT_GO_PACKS: GoPack[] = [
-  { id: 'go-500', rwf: 500, credits: 215 },
-  { id: 'go-1000', rwf: 1_000, credits: 430 },
-  { id: 'go-2500', rwf: 2_500, credits: 1_080 },
-  { id: 'go-5000', rwf: 5_000, credits: 2_170 },
+  { id: 'go-500', rwf: 500, credits: 140 },
+  { id: 'go-1000', rwf: 1_000, credits: 300 },
+  { id: 'go-2500', rwf: 2_500, credits: 800 },
+  { id: 'go-5000', rwf: 5_000, credits: 1_600 },
 ];
 
 /** Admin-editable billing settings (AppSetting "billing"), applied over the defaults above. */
 export interface BillingSettings {
-  /** 2 = saved for the Starter / Pro / Pro Plus price list. Older saves keep only the exchange rate. */
+  /** Version 3 saves overrides against the five-hour and weekly plan catalog. */
   schema?: number;
   fxUsdRwf?: number;
   /** Monthly price in RWF per plan sold online. */
@@ -140,10 +140,40 @@ export async function refreshBillingSettings(force = false): Promise<BillingSett
   return settings;
 }
 
+const previousCatalog = {
+  STARTER: { priceRwf: 1_500, monthly: 400 },
+  PRO: { priceRwf: 4_500, monthly: 1_700 },
+  PLUS: { priceRwf: 7_000, monthly: 2_800 },
+  INSTITUTION: { priceRwf: null, monthly: 2_800 },
+} as const;
+
+function migrateBillingSettings(next: BillingSettings): BillingSettings {
+  if ((next.schema ?? 1) < 2) return { fxUsdRwf: next.fxUsdRwf };
+  if (next.schema !== 2) return next;
+  const prices = { ...next.prices };
+  const limits = { ...next.limits };
+  for (const id of SOLD_PLANS) {
+    if (prices[id]?.priceRwf === previousCatalog[id].priceRwf) delete prices[id];
+  }
+  for (const id of ['STARTER', 'PRO', 'PLUS', 'INSTITUTION'] as const) {
+    if (!limits[id]) continue;
+    const saved = { ...limits[id] };
+    // The previous catalog used its monthly cap for all three periods.
+    for (const key of ['daily', 'weekly', 'monthly'] as const) {
+      if (saved[key] === previousCatalog[id].monthly) delete saved[key];
+    }
+    limits[id] = saved;
+  }
+  const oldPacks = new Map([[500, 215], [1000, 430], [2500, 1080], [5000, 2170]]);
+  const goPacks = next.goPacks?.map(pack => {
+    if (pack.id !== `go-${pack.rwf}` || oldPacks.get(pack.rwf) !== pack.credits) return pack;
+    return DEFAULT_GO_PACKS.find(item => item.id === pack.id) ?? pack;
+  });
+  return { ...next, schema: 3, prices, limits, goPacks };
+}
+
 export function applyBillingSettings(next: BillingSettings) {
-  next = next ?? {};
-  // Prices, packs and limits saved before the new price list would otherwise override it.
-  settings = (next.schema ?? 1) >= 2 ? next : { fxUsdRwf: next.fxUsdRwf };
+  settings = migrateBillingSettings(next ?? {});
   for (const id of Object.keys(DEFAULTS) as PlanId[]) {
     const base = JSON.parse(JSON.stringify(DEFAULTS[id])) as PlanInfo;
     const o = settings.limits?.[id];
