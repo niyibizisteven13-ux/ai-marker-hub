@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BarChart3, Check, ClipboardCheck, ExternalLink, FileSignature, Link2, ListChecks, Loader2, MessageSquareHeart, PencilLine, Plus, Sparkles, Trash2, Upload, UserPlus, Wand2 } from 'lucide-react';
 import { authFetch } from '../utils/authFetch';
 import { Card, Empty, PageShell, Stat, StatRow, Toolbar, ghostBtn, iconBtn, primaryBtn, relative } from './workspace/Shell';
@@ -11,8 +11,9 @@ import { Card, Empty, PageShell, Stat, StatRow, Toolbar, ghostBtn, iconBtn, prim
 
 interface FormRow { id: string; title: string; schema: { description?: string; questions?: unknown[]; themeColor?: string; acceptingResponses?: boolean; isQuiz?: boolean }; updatedAt: string; createdAt: string; responseCount: number }
 
-type Q = { id: string; type: string; title: string; required?: boolean; options?: string[]; description?: string; scaleMin?: number; scaleMax?: number };
-const TEMPLATES: Array<{ id: string; icon: React.ReactNode; name: string; text: string; form: { title: string; description: string; isQuiz?: boolean; questions: Q[] } }> = [
+type FormDraft = { title: string; description: string; isQuiz?: boolean; questions: Q[]; acceptingResponses?: boolean; quizShowAnswers?: boolean; assessment?: { aiMarking: boolean; manualWritten?: boolean } };
+type Q = { aiGradingBasis?: 'guide' | 'knowledge'; points?: number; id: string; type: string; title: string; required?: boolean; options?: string[]; description?: string; scaleMin?: number; scaleMax?: number };
+const TEMPLATES: Array<{ id: string; icon: React.ReactNode; name: string; text: string; form: FormDraft }> = [
   { id: 'consent', icon: <FileSignature size={16} />, name: 'Consent slip', text: 'Parent or guardian permission for a trip or activity', form: { title: 'Permission slip', description: 'Please complete and submit before the due date.', questions: [
     { id: 'q1', type: 'short_text', title: "Student's full name", required: true },
     { id: 'q2', type: 'short_text', title: 'Class', required: true },
@@ -31,10 +32,10 @@ const TEMPLATES: Array<{ id: string; icon: React.ReactNode; name: string; text: 
     { id: 'q2', type: 'checkbox', title: 'What helped you most?', options: ['Explanations in class', 'Practice questions', 'Group work', 'Notes and handouts'] },
     { id: 'q3', type: 'paragraph', title: 'What should we change?' },
   ] } },
-  { id: 'quiz', icon: <ListChecks size={16} />, name: 'Quick quiz', text: 'A short self-marking quiz for a lesson', form: { title: 'Quick quiz', description: 'Answer every question. You will see your score at the end.', isQuiz: true, questions: [
+  { id: 'quiz', icon: <ListChecks size={16} />, name: 'Quick quiz', text: 'A short self-marking quiz for a lesson', form: { title: 'Quick quiz', description: 'Answer every question. You will see your score at the end.', isQuiz: true, acceptingResponses: false, quizShowAnswers: false, assessment: { aiMarking: false, manualWritten: true }, questions: [
     { id: 'q1', type: 'short_text', title: 'Your name', required: true },
-    { id: 'q2', type: 'multiple_choice', title: 'Question 1', required: true, options: ['Option A', 'Option B', 'Option C', 'Option D'] },
-    { id: 'q3', type: 'multiple_choice', title: 'Question 2', required: true, options: ['Option A', 'Option B', 'Option C', 'Option D'] },
+    { id: 'q2', type: 'multiple_choice', title: 'Question 1', points: 1, required: true, options: ['Option A', 'Option B', 'Option C', 'Option D'] },
+    { id: 'q3', type: 'multiple_choice', title: 'Question 2', points: 1, required: true, options: ['Option A', 'Option B', 'Option C', 'Option D'] },
   ] } },
 ];
 
@@ -99,6 +100,9 @@ export default function FormsPage({ onClose }: { onClose: () => void }) {
   const [filter, setFilter] = useState<'all' | 'open' | 'closed'>('all');
   const [prompt, setPrompt] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
+  const setup = useRef<HTMLDialogElement>(null);
+  const [kind, setKind] = useState<'form' | 'quiz' | null>(null);
+  const [aiMarking, setAiMarking] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -106,7 +110,7 @@ export default function FormsPage({ onClose }: { onClose: () => void }) {
   }, []);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape' && !setup.current?.open) onClose(); };
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
   }, [onClose]);
@@ -124,7 +128,7 @@ export default function FormsPage({ onClose }: { onClose: () => void }) {
     try { openEditor((await json<{ formId: string }>(await authFetch('/api/forms/create-from-chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ description: prompt.trim() }) }))).formId); }
     catch (e) { setError(e instanceof Error ? e.message : 'The AI could not write that form. Try describing it differently.'); setBusy(null); }
   };
-  const createFrom = async (key: string, form: { title: string; description: string; isQuiz?: boolean; questions: Q[] }) => {
+  const createFrom = async (key: string, form: FormDraft) => {
     setBusy(key); setError(null);
     try { openEditor((await json<{ form: { id: string } }>(await authFetch('/api/forms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) }))).form.id); }
     catch (e) { setError(e instanceof Error ? e.message : 'Could not create the form.'); setBusy(null); }
@@ -135,12 +139,58 @@ export default function FormsPage({ onClose }: { onClose: () => void }) {
     try { await json(await authFetch(`/api/forms/${r.id}`, { method: 'DELETE' })); setRows((cur) => (cur ?? []).filter((x) => x.id !== r.id)); } catch (e) { setError(e instanceof Error ? e.message : 'Could not delete the form.'); }
   };
 
-  const blank = { title: 'Untitled form', description: '', questions: [{ id: 'q1', type: 'short_text', title: 'Your name', required: true }] };
+  const startBlank = () => {
+    if (!kind || busy) return;
+    const isQuiz = kind === 'quiz';
+    void createFrom('blank', {
+      title: isQuiz ? 'Untitled quiz' : 'Untitled form', description: '', isQuiz,
+      acceptingResponses: false,
+      ...(isQuiz ? { quizShowAnswers: false, assessment: { aiMarking, manualWritten: !aiMarking }, questions: [{ id: 'name', type: 'short_text', title: 'Student name', required: true }, { id: 'q1', type: aiMarking ? 'long_text' : 'multiple_choice', title: 'Question 1', points: 1, required: true, ...(aiMarking ? { aiGradingBasis: 'guide' } : { options: ['Option 1', 'Option 2'] }) }] }
+        : { questions: [{ id: 'q1', type: 'short_text', title: 'Your name', required: true }] }),
+    });
+  };
+  const setupOption = 'flex min-h-11 cursor-pointer items-start gap-3 rounded-xl border border-white/15 p-3 has-[:checked]:border-[var(--brand)] has-[:checked]:bg-[var(--brand)]/10';
   return (
     <div className="fixed inset-0 z-[70] overflow-y-auto bg-[var(--ws-bg)]">
       <PageShell icon={<ClipboardCheck size={20} />} title="Forms" onBack={onClose} wide
         subtitle="Surveys, registrations, consent slips and quizzes. Share one link; answers arrive here with charts, and download to Excel."
-        actions={<button type="button" disabled={!!busy} onClick={() => void createFrom('blank', blank)} className={ghostBtn}>{busy === 'blank' ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}Blank form</button>}>
+        actions={<button type="button" disabled={!!busy} onClick={() => { setKind(null); setAiMarking(false); setError(null); setup.current?.showModal(); }} className={ghostBtn}>{busy === 'blank' ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}Blank form</button>}>
+
+        <dialog ref={setup} aria-labelledby="blank-form-title" onCancel={e => { if (busy) e.preventDefault(); }}
+          className="fixed inset-0 m-auto w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] max-w-lg overflow-y-auto rounded-2xl border border-white/15 bg-[var(--ws-card)] p-5 text-white shadow-2xl backdrop:bg-black/65 sm:p-6">
+          <form onSubmit={e => { e.preventDefault(); startBlank(); }} className="space-y-4">
+            <h2 id="blank-form-title" className="text-xl font-semibold">Start from blank</h2>
+            <fieldset disabled={!!busy} className="space-y-2">
+              <legend className="mb-2 text-sm font-medium">What are you making?</legend>
+              <label className={setupOption}>
+                <input type="radio" name="blank-form-kind" checked={kind === 'form'} onChange={() => setKind('form')} className="mt-1 accent-[var(--brand)]" />
+                <span><strong className="block text-sm">Form</strong><span className="text-xs text-neutral-400">Collect feedback, registrations or other responses.</span></span>
+              </label>
+              <label className={setupOption}>
+                <input type="radio" name="blank-form-kind" checked={kind === 'quiz'} onChange={() => setKind('quiz')} className="mt-1 accent-[var(--brand)]" />
+                <span><strong className="block text-sm">Quiz</strong><span className="text-xs text-neutral-400">Grade answers and report student scores.</span></span>
+              </label>
+            </fieldset>
+            {kind === 'quiz' && (
+              <fieldset disabled={!!busy} className="space-y-2">
+                <legend className="mb-2 text-sm font-medium">How should it be marked?</legend>
+                <label className={setupOption}>
+                  <input type="radio" name="blank-quiz-marking" checked={!aiMarking} onChange={() => setAiMarking(false)} className="mt-1 accent-[var(--brand)]" />
+                  <span><strong className="block text-sm">Set answers manually</strong><span className="text-xs text-neutral-400">Add the correct answer and points to each question.</span></span>
+                </label>
+                <label className={setupOption}>
+                  <input type="radio" name="blank-quiz-marking" checked={aiMarking} onChange={() => setAiMarking(true)} className="mt-1 accent-[var(--brand)]" />
+                  <span><strong className="block text-sm">Use AI for written answers</strong><span className="text-xs text-neutral-400">AI scores written answers after submission. Choice questions use an answer key.</span></span>
+                </label>
+              </fieldset>
+            )}
+            {error && <p role="alert" className="text-sm text-rose-300">{error}</p>}
+            <div className="flex flex-wrap justify-end gap-2">
+              <button type="button" disabled={!!busy} onClick={() => setup.current?.close()} className={ghostBtn}>Cancel</button>
+              <button disabled={!kind || !!busy} className={primaryBtn}>{busy === 'blank' ? 'Creating…' : 'Continue to questions'}</button>
+            </div>
+          </form>
+        </dialog>
 
         <FromFileCard onError={setError} />
 

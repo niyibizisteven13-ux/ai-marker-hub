@@ -147,14 +147,15 @@ export default function FormStudioPage({ formId, onBack }: { formId: string; onB
 
   const save = useCallback(async (schema: any) => {
     const json = JSON.stringify(schema);
-    if (json === lastSaved.current) return;
+    if (json === lastSaved.current) return true;
     setSaving('saving');
     const res = await api(`/${formId}/schema`, { method: 'PUT', body: JSON.stringify({ schema }) });
-    if (!res.ok) { setSaving('error'); return; }
+    if (!res.ok) { setSaving('error'); return false; }
     lastSaved.current = json;
     const body = await res.json().catch(() => null);
     setData((d) => (d ? { ...d, form: { ...d.form, title: schema.title || d.form.title, schema: { ...d.form.schema, ...schema } }, review: body?.review ?? d.review } : d));
     setSaving('saved');
+    return true;
   }, [formId]);
   const onChange = useCallback((schema: any) => {
     // The builder reports its normalised schema once on mount: that is the saved form, not an edit.
@@ -173,10 +174,10 @@ export default function FormStudioPage({ formId, onBack }: { formId: string; onB
   };
   const onPublish = async (schema: any) => {
     window.clearTimeout(timer.current);
-    await save(schema);
+    if (!await save(schema)) throw new Error("The changes couldn’t be saved. Try publishing again.");
     const body = await setOpen(true);
     void load(false);
-    return { shareUrl: body?.links?.fill };
+    return { shareUrl: body?.links?.fill, acceptingResponses: true };
   };
 
   if (error) {
@@ -249,7 +250,7 @@ export default function FormStudioPage({ formId, onBack }: { formId: string; onB
             ? <p className="rounded-2xl border border-dashed border-[#DADCE0] bg-white p-6 text-center text-sm text-[#5F6368]">No responses yet. {data.form.open ? 'Share the form link to start collecting.' : 'Publish the form to start collecting.'}</p>
             : data.summaries.map((s) => <SummaryCard key={s.variable} s={s} />)}
 
-          {data.responses > 0 && <FormResponses formId={formId} aiMarking={!!data.form.schema?.isQuiz && !!data.form.schema?.assessment?.aiMarking} questions={(data.form.schema?.questions ?? data.form.schema?.fields ?? []) as any[]} />}
+          {data.responses > 0 && <FormResponses formId={formId} aiMarking={!!data.form.schema?.isQuiz && !!data.form.schema?.assessment?.aiMarking} questions={(data.form.schema?.fields ?? data.form.schema?.questions ?? [])} />}
 
           <details className="rounded-2xl border border-[#E0E0E0] bg-white p-5">
             <summary className="cursor-pointer font-semibold">Data dictionary ({data.codebook.length} variables)</summary>

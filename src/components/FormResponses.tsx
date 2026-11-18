@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, FileText, Loader2 } from 'lucide-react';
+import { usesAiGrading } from '../../shared/assessment';
 import { authFetch } from '../utils/authFetch';
 import { FileThumb, PreviewDialog, type PreviewSource } from './FilePreview';
 
@@ -8,7 +9,7 @@ import { FileThumb, PreviewDialog, type PreviewSource } from './FilePreview';
  * Files people attached open in place, full screen, without downloading.
  */
 
-type Question = { id: string; title?: string; label?: string; type?: string; points?: number; correctAnswer?: unknown };
+type Question = { id: string; title?: string; label?: string; type?: string; points?: number; aiGradeShortAnswer?: boolean; correctAnswer?: unknown };
 type Written = Record<string, { marks: number; feedback?: string; by: 'ai' | 'lecturer'; confidence?: 'high' | 'low' }>;
 type QuizRec = { score: number; maxScore: number; percent: number; correct: string[]; pending?: number; mark?: number; outOf?: number | null; grade?: string; passed?: boolean };
 type Response = { id: string; submittedAt: string; answers: Record<string, unknown> };
@@ -77,7 +78,10 @@ export default function FormResponses({ formId, questions, aiMarking = false }: 
   const order = [...questions.map((q) => q.id), ...Object.keys(r.answers).filter((k) => !titleOf.has(k) && !k.startsWith('_'))];
   const quiz = r.answers._quiz as QuizRec | undefined;
   const written = (r.answers._written ?? {}) as Written;
-  const writtenIds = new Set(questions.filter((q) => q.type === 'long_text' && Number(q.points) > 0).map((q) => q.id));
+  const writtenIds = new Set(questions.filter(q => {
+    const kind = q.type?.toLowerCase() === 'short_text' ? 'text' : q.type?.toLowerCase();
+    return Number(q.points) > 0 && (kind === 'long_text' || usesAiGrading(kind, q, aiMarking) || (kind === 'text' && written[q.id]));
+  }).map(q => q.id));
   const anyPending = (rows ?? []).some((x) => ((x.answers._quiz as QuizRec | undefined)?.pending ?? 0) > 0);
   const marked = new Set(questions.filter((q) => Number(q.points) > 0 && q.correctAnswer !== undefined && q.correctAnswer !== '').map((q) => q.id));
   const email = typeof r.answers._respondentEmail === 'string' ? r.answers._respondentEmail : '';

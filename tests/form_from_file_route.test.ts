@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import express from 'express';
 import { Document, Packer, Paragraph } from 'docx';
 import { PDFDocument } from 'pdf-lib';
+import { sanitizePublicFormSchema } from '../server/services/forms/publicSchema.js';
+import { gradeQuiz, quizRecord } from '../server/services/forms/quiz.js';
+import { quizCompletion, quizReview } from '../server/services/forms/quizReceipt.js';
 
 process.env.FROM_FILE_PER_HOUR = '5';
 const { createFormFromFileRouter } = await import('../server/routes/formFromFileRoutes.js');
@@ -71,11 +73,24 @@ test('a lecturer who makes too many in an hour is slowed down; failed uploads do
   assert.equal((await send('notes.txt', NOTES.join('\n'), { count: '3' }, 'other-lecturer')).status, 201);
 });
 
-test('students can never see the review (it is on the private list of the public form route)', () => {
-  const src = fs.readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
-  const list = src.slice(src.indexOf('const sanitizePublicFormSchema'), src.indexOf('const sanitizePublicFormSchema') + 900);
-  assert.match(list, /'importreview'/); assert.match(list, /'explanation'/, 'an explanation is hidden from the public form until the student has submitted');
-  assert.match(src, /explanationOf\(schema, x\.id\)/, 'and is sent only inside the student\'s own results');
+test('public forms hide private review and graded feedback appears only with answer review enabled', () => {
+  const schema = {
+    isQuiz: true,
+    importReview: { fileName: 'notes.txt' },
+    fields: [{
+      id: 'q1', type: 'radio', label: 'Which gas do plants absorb?', points: 1,
+      correctAnswer: 'Carbon dioxide', explanation: 'Plants absorb carbon dioxide.', correctFeedback: 'Good work.',
+    }],
+  };
+  assert.deepEqual(sanitizePublicFormSchema(schema), {
+    isQuiz: true, fields: [{ id: 'q1', type: 'radio', label: 'Which gas do plants absorb?', points: 1 }],
+  });
+  const quiz = gradeQuiz(schema, { q1: 'Carbon dioxide' })!;
+  const score = quizRecord(quiz);
+  assert.equal('results' in quizCompletion(score, undefined, true), false);
+  const withReview = quizCompletion(score, undefined, true, quizReview(quiz, schema));
+  assert.equal('results' in withReview && withReview.results?.[0].explanation, 'Plants absorb carbon dioxide.');
+  assert.equal('results' in withReview && withReview.results?.[0].feedback, 'Good work.');
 });
 
 test('a lecturer out of credits is asked to upgrade: no model call, no quiz made, nothing charged; a made quiz is charged once', async () => {

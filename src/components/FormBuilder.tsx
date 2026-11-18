@@ -20,7 +20,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_EXAM, normalizeExam, type ExamSettings } from '../../shared/examRules';
 import { normalizePicks, poolGroups } from '../../shared/formPool';
-import { DEFAULT_ASSESSMENT, normalizeAssessment, type Assessment } from '../../shared/assessment';
+import { DEFAULT_ASSESSMENT, normalizeAssessment, usesAiGrading, type AiGradingBasis, type Assessment } from '../../shared/assessment';
 import { DEFAULT_BRANDING, normalizeBranding, type FormBranding } from '../../shared/formBranding';
 import { FormDesignPanel } from './forms/FormDesignPanel';
 import { FormCanvas } from './forms/FormCanvas';
@@ -64,6 +64,10 @@ type Question = {
   required: boolean;
   points?: number;
   correctAnswer?: string | string[];
+  aiGradeShortAnswer?: boolean;
+  aiGradingBasis?: AiGradingBasis;
+  correctFeedback?: string;
+  incorrectFeedback?: string;
   /** Why the answer is right. Students see it after they submit, never before. */
   explanation?: string;
   options: string[];
@@ -144,7 +148,7 @@ export type BuilderState = {
 export type FormBuilderProps = {
   initialSchema?: any;
   onChange?: (schema: any) => void;
-  onPublish?: (schema: any) => void | { shareUrl?: string } | Promise<void | { shareUrl?: string }>;
+  onPublish?: (schema: any) => void | { shareUrl?: string; acceptingResponses?: boolean } | Promise<void | { shareUrl?: string; acceptingResponses?: boolean }>;
   onUpdateSettings?: (settings: { acceptingResponses: boolean }) => Promise<void>;
   shareUrl?: string;
   uploadFile?: (file: File) => Promise<string>;
@@ -250,6 +254,10 @@ export function fromSchema(input: any): BuilderState {
       required: !!f.required,
       points: f.points !== undefined ? Number(f.points) : undefined,
       correctAnswer: f.correctAnswer,
+      aiGradeShortAnswer: type === 'text' && f.aiGradeShortAnswer === true,
+      aiGradingBasis: f.aiGradingBasis === 'guide' || f.aiGradingBasis === 'knowledge' ? f.aiGradingBasis : undefined,
+      correctFeedback: typeof f.correctFeedback === 'string' ? f.correctFeedback : undefined,
+      incorrectFeedback: typeof f.incorrectFeedback === 'string' ? f.incorrectFeedback : undefined,
       explanation: typeof f.explanation === 'string' ? f.explanation : undefined,
       options: GRID.has(type) ? [] : labels,
       rows: f.rows || q.rows,
@@ -337,7 +345,11 @@ export function buildSchema(s: BuilderState): any {
       if (it.points) f.points = it.points;
       const a = it.correctAnswer;
       if (Array.isArray(a) ? a.length : a) f.correctAnswer = a;
+      if (it.type === 'text' && it.aiGradeShortAnswer) f.aiGradeShortAnswer = true;
+      if ((it.type === 'text' || it.type === 'long_text') && it.aiGradingBasis) f.aiGradingBasis = it.aiGradingBasis;
       if (typeof it.explanation === 'string' && it.explanation.trim()) f.explanation = it.explanation.trim().slice(0, 600);
+      if (it.correctFeedback?.trim()) f.correctFeedback = it.correctFeedback.trim().slice(0, 600);
+      if (it.incorrectFeedback?.trim()) f.incorrectFeedback = it.incorrectFeedback.trim().slice(0, 600);
     }
     if (it.imageUrl) f.imageUrl = it.imageUrl;
     if (it.showIf && s.items.some((x) => x.kind === 'question' && x.id === it.showIf!.fieldId)) f.showIf = it.showIf;
@@ -392,6 +404,7 @@ function findProblems(s: BuilderState): Problem[] {
   if (!s.title.trim()) out.push({ text: 'Add a form title.' });
   const questions = s.items.filter((i): i is Question => i.kind === 'question');
   if (!questions.length) out.push({ text: 'Add at least one question.' });
+  if (s.isQuiz && questions.length && !questions.some(q => Number(q.points) > 0)) out.push({ text: 'Give at least one quiz question points.' });
   questions.forEach((q, i) => {
     const n = `Question ${i + 1}`;
     if (!q.label.trim()) out.push({ id: q.id, text: `${n}: add the question text.` });
@@ -399,8 +412,16 @@ function findProblems(s: BuilderState): Problem[] {
     if (GRID.has(q.type) && (!clean(q.rows).length || !clean(q.columns).length)) out.push({ id: q.id, text: `${n}: add at least one row and one column.` });
     if (q.type === 'linear_scale' && q.scaleMax <= q.scaleMin) out.push({ id: q.id, text: `${n}: the scale maximum must be above the minimum.` });
     if (q.pattern) { try { new RegExp(q.pattern); } catch { out.push({ id: q.id, text: `${n}: the format pattern is not valid.` }); } }
-    if (s.isQuiz && q.points && q.type !== 'long_text' && !(Array.isArray(q.correctAnswer) ? q.correctAnswer.length : q.correctAnswer)) {
-      out.push({ id: q.id, text: `${n}: choose the correct answer or set points to 0.` });
+    const marked = s.isQuiz && Number(q.points) > 0;
+    const aiGrades = usesAiGrading(q.type, q, s.assessment.aiMarking);
+    if (marked && aiGrades && q.aiGradingBasis === 'guide' && (typeof q.correctAnswer !== 'string' || !q.correctAnswer.trim())) {
+      out.push({ id: q.id, text: `${n}: add a marking guide or choose AI subject knowledge.` });
+    }
+    if (marked && !aiGrades && q.type !== 'long_text') {
+      const keys = Array.isArray(q.correctAnswer) ? q.correctAnswer : typeof q.correctAnswer === 'string' ? [q.correctAnswer] : [];
+      if (!keys.length || keys.some(key => typeof key !== 'string' || !key.trim() || (CHOICE.has(q.type) && !clean(q.options).includes(key)))) {
+        out.push({ id: q.id, text: `${n}: set a valid answer key or set points to 0.` });
+      }
     }
   });
   return out;
@@ -722,12 +743,15 @@ function RichDescription({ html, onChange, imageUrl, onImage, uploadFile }: {
 
 /* ------------------------------------------------------ question editors */
 
-function QuestionEditor({ q, quiz, patch, uploadFile }: {
-  q: Question; quiz: boolean; patch: (p: Partial<Question>) => void; uploadFile?: (f: File) => Promise<string>;
+function QuestionEditor({ q, quiz, aiMarking, patch, uploadFile }: {
+  q: Question; quiz: boolean; aiMarking: boolean; patch: (p: Partial<Question>) => void; uploadFile?: (f: File) => Promise<string>;
 }) {
   const [media, setMedia] = useState<'none' | 'image' | 'video'>(q.imageUrl ? 'image' : q.videoUrl || q.videoDataUrl ? 'video' : 'none');
   const cleanOptions = clean(q.options);
-  const gradable = CHOICE.has(q.type) || q.type === 'text' || q.type === 'number';
+  const aiGrades = usesAiGrading(q.type, q, aiMarking);
+  const guide = typeof q.correctAnswer === 'string' ? q.correctAnswer : '';
+  const basis = q.aiGradingBasis ?? (guide.trim() ? 'guide' : 'knowledge');
+  const gradable = !aiGrades && (CHOICE.has(q.type) || q.type === 'text' || q.type === 'number');
 
   return (
     <div className="space-y-5">
@@ -744,6 +768,8 @@ function QuestionEditor({ q, quiz, patch, uploadFile }: {
               rows: GRID.has(next.type) ? (q.rows.length ? q.rows : next.rows) : q.rows,
               columns: GRID.has(next.type) ? (q.columns.length ? q.columns : next.columns) : q.columns,
               correctAnswer: undefined,
+              aiGradeShortAnswer: undefined,
+              aiGradingBasis: undefined,
             });
           }}>
             {QUESTION_TYPES.map(t => <option key={t.type} value={t.type}>{t.label}</option>)}
@@ -754,11 +780,6 @@ function QuestionEditor({ q, quiz, patch, uploadFile }: {
       <Field label="Description (optional)">
         <input className={inp} value={q.description} placeholder="Help text shown under the question" onChange={e => patch({ description: e.target.value })} />
       </Field>
-      {quiz && (
-        <Field label="Question pool (optional)" hint="Give questions the same pool name, for example A, then choose in Form settings how many of that pool each student gets.">
-          <input className={`${inp} sm:w-40`} maxLength={30} value={q.poolGroup ?? ''} placeholder="A" onChange={e => patch({ poolGroup: e.target.value })} />
-        </Field>
-      )}
 
       {CHOICE.has(q.type) && (
         <div className="space-y-3">
@@ -835,9 +856,26 @@ function QuestionEditor({ q, quiz, patch, uploadFile }: {
       )}
 
       {quiz && (
-        <div className="space-y-3 rounded-lg bg-[#F8F9FA] p-3">
+        <div className="space-y-3 rounded-xl border border-[#E9D2C9] bg-[#FFF9F6] p-4">
+          <h3 className="text-sm font-bold text-[#202124]">{aiGrades ? 'AI marking guide' : q.type === 'long_text' ? 'Written marking guide' : 'Answer key'}</h3>
+          {q.type === 'text' && aiMarking && (
+            <Field label="How to mark this answer">
+              <select className={inp} value={aiGrades ? 'ai' : 'key'} onChange={e => patch({ aiGradeShortAnswer: e.target.value === 'ai', aiGradingBasis: e.target.value === 'ai' ? q.aiGradingBasis ?? 'guide' : q.aiGradingBasis })}>
+                <option value="key">Match the answer key</option>
+                <option value="ai">Use AI for this answer</option>
+              </select>
+            </Field>
+          )}
+          {aiGrades && (
+            <Field label="What should AI use?" hint="AI marks this question after the student submits.">
+              <select className={inp} value={basis} onChange={e => patch({ aiGradingBasis: e.target.value as AiGradingBasis })}>
+                <option value="guide">My model answer or marking guide</option>
+                <option value="knowledge">AI subject knowledge</option>
+              </select>
+            </Field>
+          )}
           <div className="grid gap-3 sm:grid-cols-[8rem_1fr]">
-            <Field label="Points"><input type="number" min={0} className={inp} value={q.points ?? ''} onChange={e => patch({ points: num(e.target.value) })} /></Field>
+            <Field label="Points" hint="0 = ungraded"><input type="number" min={0} step="0.5" className={inp} value={q.points ?? ''} onChange={e => patch({ points: num(e.target.value) })} /></Field>
             {gradable ? (
               CHOICE.has(q.type) ? (
                 q.type === 'checkbox' ? (
@@ -863,20 +901,49 @@ function QuestionEditor({ q, quiz, patch, uploadFile }: {
                   </Field>
                 )
               ) : (
-                <Field label="Correct answer" hint="Matched exactly when graded.">
+                <Field label="Correct answer" hint="Use | between accepted alternatives, for example 4 | four.">
                   <input className={inp} value={typeof q.correctAnswer === 'string' ? q.correctAnswer : ''} onChange={e => patch({ correctAnswer: e.target.value })} />
                 </Field>
               )
-            ) : q.type === 'long_text' ? (
-              <Field label="Model answer or marking points" hint="What a full-mark answer says. Used when AI marks written answers, and shown to you when you mark. Students do not see it unless you show answers.">
-                <textarea rows={3} maxLength={2000} className={inp} value={typeof q.correctAnswer === 'string' ? q.correctAnswer : ''} onChange={e => patch({ correctAnswer: e.target.value })} placeholder="e.g. Osmosis is the movement of water across a semi-permeable membrane from low to high solute concentration. 1 mark for each correct point." />
+            ) : aiGrades && basis === 'knowledge' ? (
+              <p className="self-end text-sm text-[#5F6368]">AI will judge the response against the question and award up to the points you set.</p>
+            ) : aiGrades || q.type === 'long_text' ? (
+              <Field label="Model answer or marking points" hint={aiGrades ? "Set what earns full or partial marks." : "Optional. Use this guide when marking in Results."}>
+                <textarea rows={3} maxLength={2000} className={inp} value={guide} onChange={e => patch({ correctAnswer: e.target.value })} placeholder="e.g. 1 point for the definition, 1 point for a correct example." />
               </Field>
             ) : <p className="self-end text-xs text-[#5F6368]">This question type is not graded automatically.</p>}
           </div>
-          <Field label="Explanation (optional)" hint="Why the answer is right. Students see it after they submit, next to the correct answer, never before.">
-            <textarea rows={2} maxLength={600} className={inp} value={q.explanation ?? ''} onChange={e => patch({ explanation: e.target.value })} placeholder="e.g. Mitochondria release energy from glucose, so they are called the powerhouse of the cell." />
-          </Field>
+          <details className="rounded-lg border border-[#E9D2C9] bg-white p-3">
+            <summary className="cursor-pointer text-sm font-semibold text-[#202124]">Answer feedback (optional)</summary>
+            <p className="mt-2 text-xs text-[#5F6368]">Students see feedback when answer review is enabled under After submission.</p>
+            <div className="mt-3 grid gap-3">
+              {gradable && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="When the answer is correct">
+                    <textarea rows={2} maxLength={600} className={inp} value={q.correctFeedback ?? ''} onChange={e => patch({ correctFeedback: e.target.value })} />
+                  </Field>
+                  <Field label="When the answer is incorrect">
+                    <textarea rows={2} maxLength={600} className={inp} value={q.incorrectFeedback ?? ''} onChange={e => patch({ incorrectFeedback: e.target.value })} />
+                  </Field>
+                </div>
+              )}
+              <Field label="Explanation for everyone">
+                <textarea rows={2} maxLength={600} className={inp} value={q.explanation ?? ''} onChange={e => patch({ explanation: e.target.value })} />
+              </Field>
+            </div>
+          </details>
         </div>
+      )}
+
+      {quiz && (
+        <details className="rounded-lg border border-[#E0E0E0] p-3">
+          <summary className="cursor-pointer text-sm font-semibold text-[#202124]">Question pool</summary>
+          <div className="mt-3">
+            <Field label="Pool name" hint="Group questions by giving them the same pool name. Set how many students see under Form settings.">
+              <input className={`${inp} sm:w-40`} maxLength={30} value={q.poolGroup ?? ''} placeholder="A" onChange={e => patch({ poolGroup: e.target.value })} />
+            </Field>
+          </div>
+        </details>
       )}
 
       <div className="space-y-3 border-t border-[#E0E0E0] pt-4">
@@ -916,7 +983,10 @@ const AGENT_CHIPS = [
 
 export default function FormBuilder({ initialSchema, onChange, onPublish, onUpdateSettings, shareUrl, uploadFile, onBack, onResults, onRunAgent }: FormBuilderProps) {
   const [state, setState] = useState<BuilderState>(() => (initialSchema ? fromSchema(initialSchema) : blankState()));
-  const [activeId, setActiveId] = useState<string | null>(() => state.items[0]?.id ?? null);
+  const [activeId, setActiveId] = useState<string | null>(() => {
+    const firstScored = state.isQuiz && !state.acceptingResponses ? state.items.find(item => item.kind === 'question' && Number(item.points) > 0) : undefined;
+    return (firstScored ?? state.items[0])?.id ?? null;
+  });
   const [view, setView] = useState<'build' | 'preview'>('build');
   const [problems, setProblems] = useState<Problem[]>([]);
   const [publishing, setPublishing] = useState(false);
@@ -997,7 +1067,9 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, onUpda
       const url = (res && typeof res === 'object' && res.shareUrl) || shareUrl || publishedUrl;
       setPublishedUrl(url);
       setAnnouncement(`Hi! Please fill in "${schema.title}"${url ? `: ${url}` : '.'}`);
-      setPublishedJson(schemaJson);
+      const acceptingResponses = res && typeof res === 'object' ? res.acceptingResponses : undefined;
+      if (acceptingResponses !== undefined) setField('acceptingResponses', acceptingResponses);
+      setPublishedJson(acceptingResponses === undefined ? schemaJson : JSON.stringify({ ...schema, acceptingResponses }));
       setShareOpen(true);
     } catch (e: any) {
       setProblems([{ text: e?.message || 'Publishing failed. Please try again.' }]);
@@ -1161,9 +1233,9 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, onUpda
             <FormCanvas schema={schema} className="p-4 sm:p-6">
               <DynamicForm
                 key={schemaJson.length}
-                schema={schema}
+                schema={{ ...schema, acceptingResponses: true }}
                 draftKey="__builder_preview__"
-                onSubmit={async () => ({ message: 'Preview only: this response was not saved.' })}
+                onSubmit={async () => ({ confirmationMessage: state.confirmationMessage, confirmationTitle: state.confirmationTitle, ...(state.isQuiz && state.showScore ? { score: 8, maxScore: 10, scoreLabel: 'Example score' } : {}) })}
               />
             </FormCanvas>
           </div>
@@ -1211,7 +1283,7 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, onUpda
             <details className={`${card} !p-0`}>
               <summary className="min-h-11 cursor-pointer list-none px-5 py-3 text-sm font-bold text-[#202124] sm:px-6">Form settings</summary>
               <div className="space-y-1 border-t border-[#E0E0E0] px-5 py-4 sm:px-6">
-                <Toggle label="Will this be marked (a quiz, CAT or exam)?" checked={state.isQuiz} onChange={v => setField('isQuiz', v)} hint="Give each question points and a correct answer. Bwenge marks every response the moment it is sent and gives the score, percentage, grade and pass or fail; scores appear in Results." />
+                <Toggle label="Will this be marked (a quiz, CAT or exam)?" checked={state.isQuiz} onChange={isQuiz => setState(s => ({ ...s, isQuiz, ...(!s.isQuiz && isQuiz ? { showScore: true, quizShowAnswers: false, assessment: { ...s.assessment, manualWritten: true } } : {}) }))} hint="Use a quiz to score answers. Choose what students see under After submission." />
                 {state.isQuiz && (
                   <div className="space-y-3 rounded-xl border border-[#E0E0E0] bg-white px-3 py-3" aria-label="Scoring">
                     <p className="text-xs font-bold uppercase tracking-wider text-[#5F6368]">Scoring and result</p>
@@ -1223,28 +1295,57 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, onUpda
                       <Field label="Report out of" hint="Leave empty to report the total of the question points. A CAT is often out of 10, 20 or 30."><input type="number" min={1} max={1000} className={inp} value={state.assessment.outOf ?? ''} onChange={e => setField('assessment', { ...state.assessment, outOf: e.target.value === '' ? null : Number(e.target.value) })} /></Field>
                       <Field label="Pass mark (%)"><input type="number" min={1} max={100} className={inp} value={state.assessment.passPercent} onChange={e => setField('assessment', { ...state.assessment, passPercent: Number(e.target.value) || 50 })} /></Field>
                     </div>
-                    <Toggle label="Mark written answers with AI" checked={state.assessment.aiMarking} onChange={v => setField('assessment', { ...state.assessment, aiMarking: v })} hint="Choice and short answers are always marked at once. With this on, long written answers are also marked by AI against your model answer, with feedback. They are shown as AI marks for you to check and change, and students are told their score may change. Without it, you mark written answers yourself." />
+                    <Field label="Marking method" hint="Choice and numeric questions use answer keys. With AI on, paragraphs and selected short answers are marked at submission.">
+                      <select className={inp} value={state.assessment.aiMarking ? 'ai' : state.assessment.manualWritten ? 'manual' : 'key'} onChange={e => setField('assessment', { ...state.assessment, aiMarking: e.target.value === 'ai', manualWritten: e.target.value === 'manual' })}>
+                        {!state.assessment.aiMarking && !state.assessment.manualWritten && <option value="key">Answer key only</option>}
+                        <option value="manual">Answer key and teacher review for paragraphs</option>
+                        <option value="ai">AI for written answers</option>
+                      </select>
+                    </Field>
                   </div>
                 )}
-                {state.isQuiz && <Toggle label="Show score after submitting" checked={state.showScore} onChange={v => setField('showScore', v)} hint="Turn off to keep scores private: respondents only see your thank-you message, and you still see every score in Results." />}
-                {state.isQuiz && <Toggle label="Show answers after submitting" checked={state.quizShowAnswers} onChange={v => setField('quizShowAnswers', v)} hint="Respondents see their score, which answers were right and the correct ones. Turn off to show the score only." />}
-                <div className="space-y-1 rounded-xl border border-[#E0E0E0] bg-[#F8F9FA] px-3 py-2">
-                  <p className="text-xs font-bold uppercase tracking-wider text-[#5F6368]">Test protection</p>
-                  <ExamPanel exam={state.exam} onChange={e => setField('exam', e)} formId={/\/forms\/([^/?#]+)/.exec(shareUrl ?? '')?.[1]} />
-                  <TestDesignPanel state={state} setField={setField} />
-                  <Toggle label="Block pasting into typed answers" checked={state.blockPaste} onChange={v => setField('blockPaste', v)} hint="Students must type short and long answers themselves. Dropping text in is blocked too." />
-                  <Toggle label="Shuffle question order" checked={state.shuffleQuestions} onChange={v => setField('shuffleQuestions', v)} hint="Each student sees a different order. Not used when questions depend on earlier answers." />
-                  <Toggle label="Shuffle the options of every choice question" checked={state.shuffleAllOptions} onChange={v => setField('shuffleAllOptions', v)} hint="Avoid options like “All of the above” when this is on." />
-                  <Toggle label="Record pasting and leaving the page" checked={state.trackIntegrity || state.isQuiz || state.blockPaste} onChange={v => setField('trackIntegrity', v)} hint="Always on for quizzes. You see flags next to each response. They are signals to look at, not proof, and never change a mark. Students are told this is recorded." />
-                </div>
+                <details className="rounded-xl border border-[#E0E0E0] bg-[#F8F9FA] px-3 py-2">
+                  <summary className="cursor-pointer py-1 text-sm font-semibold text-[#202124]">Test protection and question order</summary>
+                  <div className="mt-2 space-y-1">
+                    <ExamPanel exam={state.exam} onChange={e => setField('exam', e)} formId={/\/forms\/([^/?#]+)/.exec(shareUrl ?? '')?.[1]} />
+                    <TestDesignPanel state={state} setField={setField} />
+                    <Toggle label="Block pasting into typed answers" checked={state.blockPaste} onChange={v => setField('blockPaste', v)} hint="Students must type short and long answers themselves. Dropping text in is blocked too." />
+                    <Toggle label="Shuffle question order" checked={state.shuffleQuestions} onChange={v => setField('shuffleQuestions', v)} hint="Each student sees a different order. Not used when questions depend on earlier answers." />
+                    <Toggle label="Shuffle the options of every choice question" checked={state.shuffleAllOptions} onChange={v => setField('shuffleAllOptions', v)} hint="Avoid options like “All of the above” when this is on." />
+                    <Toggle label="Record pasting and leaving the page" checked={state.trackIntegrity || state.isQuiz || state.blockPaste} onChange={v => setField('trackIntegrity', v)} hint="Always on for quizzes. You see flags next to each response. They are signals to look at, not proof, and never change a mark. Students are told this is recorded." />
+                  </div>
+                </details>
                 <Toggle label="Collect email addresses" checked={state.collectEmail} onChange={v => setField('collectEmail', v)} />
                 <Toggle label="Accepting responses" checked={state.acceptingResponses} onChange={v => setField('acceptingResponses', v)} />
                 <Toggle label="Allow more than one response per person" checked={state.allowMultipleResponses} onChange={v => setField('allowMultipleResponses', v)} hint="Also enforce this on your server." />
-                <div className="space-y-2 pt-2">
-                  <p className="text-xs font-bold uppercase tracking-wider text-[#5F6368]">After submitting</p>
-                  <Field label="Thank-you heading (optional)"><input className={inp} maxLength={120} placeholder="Thank you for your feedback!" value={state.confirmationTitle} onChange={e => setField('confirmationTitle', e.target.value)} /></Field>
-                  <Field label="Thank-you message"><textarea rows={3} maxLength={1000} className={inp} value={state.confirmationMessage} onChange={e => setField('confirmationMessage', e.target.value)} /></Field>
-                  {!state.isQuiz && <p className="text-xs text-[#5F6368]">Respondents only see this message. Feedback forms and surveys are never shown a score. Changes apply to the published link as soon as you save.</p>}
+              </div>
+            </details>
+
+            <details className={`${card} !p-0`}>
+              <summary className="min-h-11 cursor-pointer px-5 py-3 text-sm font-bold text-[#202124] sm:px-6">After submission</summary>
+              <div className="space-y-4 border-t border-[#E0E0E0] px-5 py-4 sm:px-6">
+                {state.isQuiz && (
+                  <Field label="What should students see?" hint="Answer-key scores appear immediately. With AI marking, the score appears as soon as the written answers are marked.">
+                    <select className={inp} value={state.showScore ? (state.quizShowAnswers ? 'review' : 'score') : (state.quizShowAnswers ? 'answers' : 'message')}
+                      onChange={e => {
+                        const display = e.target.value;
+                        setState(s => ({ ...s, showScore: display === 'score' || display === 'review', quizShowAnswers: display === 'review' || display === 'answers' }));
+                      }}>
+                      <option value="message">Confirmation message only</option>
+                      <option value="score">Message and score</option>
+                      <option value="review">Message, score and answer review</option>
+                      {!state.showScore && state.quizShowAnswers && <option value="answers">Message and answer review</option>}
+                    </select>
+                  </Field>
+                )}
+                <Field label="Confirmation heading (optional)"><input className={inp} maxLength={120} placeholder={state.isQuiz ? "Quiz submitted" : "Thank you for your feedback"} value={state.confirmationTitle} onChange={e => setField('confirmationTitle', e.target.value)} /></Field>
+                <Field label="Confirmation message"><textarea rows={3} maxLength={1000} className={inp} value={state.confirmationMessage} onChange={e => setField('confirmationMessage', e.target.value)} /></Field>
+                <div className="rounded-xl border border-[#E0E0E0] bg-[#F8F9FA] p-3 text-sm text-[#202124]">
+                  <p className="mb-1 text-xs font-semibold text-[#5F6368]">Completion preview</p>
+                  {state.confirmationTitle.trim() && <p className="font-semibold">{state.confirmationTitle}</p>}
+                  <p className="whitespace-pre-wrap">{state.confirmationMessage.trim() || 'Your response has been recorded.'}</p>
+                  {state.isQuiz && state.showScore && <p className="mt-2 font-semibold text-emerald-800">Your score · 8 / 10 (example)</p>}
+                  {state.isQuiz && state.quizShowAnswers && <p className="mt-1 text-xs text-[#5F6368]">Answer review · points and correct answers per question</p>}
                 </div>
               </div>
             </details>
@@ -1289,7 +1390,7 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, onUpda
                     <div className="mt-4 border-t border-[#E0E0E0] pt-4">
                       {isQ ? (
                         <>
-                          <QuestionEditor q={item as Question} quiz={state.isQuiz} patch={p => patchItem(item.id, p)} uploadFile={uploadFile} />
+                          <QuestionEditor q={item as Question} quiz={state.isQuiz} aiMarking={state.assessment.aiMarking} patch={p => patchItem(item.id, p)} uploadFile={uploadFile} />
                           <div className="mt-5 border-t border-[#E0E0E0] pt-3">
                             <Toggle label="Required" checked={(item as Question).required} onChange={required => patchItem(item.id, { required })} />
                           </div>
@@ -1308,7 +1409,7 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, onUpda
               <h2 className={eyebrow}>Add a question</h2>
               <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
                 {QUESTION_TYPES.map(t => (
-                  <button key={t.type} type="button" onClick={() => insert(makeQuestion(t.type))}
+                  <button key={t.type} type="button" onClick={() => insert({ ...makeQuestion(t.type), ...(state.isQuiz && (CHOICE.has(t.type) || ['text', 'number', 'long_text'].includes(t.type)) ? { points: 1 } : {}), ...(state.isQuiz && state.assessment.aiMarking && t.type === 'long_text' ? { aiGradingBasis: 'guide' } : {}) })}
                     className={`flex min-h-12 items-center gap-3 rounded-xl border border-[#E0E0E0] bg-[#F8F9FA] px-3 text-left text-sm font-medium text-[#202124] hover:border-[var(--brand)] ${ring}`}>
                     <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#FCE9E2] text-[#B4502F]">{React.createElement((t as { icon: LucideIcon }).icon, { size: 16, strokeWidth: 2 })}</span>
                     {t.label}

@@ -17,11 +17,13 @@
  * IMPORTANT (server side): never send `correctAnswer` to the browser and grade on the server.
  * This component deletes `correctAnswer` from its own copy, but it was already in the network response.
  */
+import { LoaderCircle } from 'lucide-react';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { normalizeBranding } from '../../shared/formBranding';
 import type { FieldActivity, IntegrityReport } from '../../shared/formIntegrity';
 import { applyPool } from '../../shared/formPool';
 import { folderToZip } from '../utils/folderToZip';
+import { getApiUrl } from '../utils/authFetch';
 import { FileThumb, PreviewDialog, type PreviewSource } from './FilePreview';
 
 /* ------------------------------------------------------------------ types */
@@ -111,7 +113,10 @@ type ReviewItem = {
   yourAnswer?: any;
   correctAnswer?: any;
   explanation?: string;
+  written?: boolean;
+  feedback?: string;
 };
+type QuizReceipt = { formId: string; submissionId: string; token: string };
 type SubmitResult = {
   title?: string;
   message: string;
@@ -120,9 +125,27 @@ type SubmitResult = {
   scoreLabel?: string;
   feedback?: string | null;
   results?: ReviewItem[];
+  quizReceipt?: QuizReceipt;
   /** The scored result: percentage, grade, the mark out of a round number (a CAT), pass or fail, and a note while written answers wait to be marked. */
-  percent?: number; grade?: string; passed?: boolean; mark?: number; outOf?: number; pendingNote?: string;
+  percent?: number; grade?: string; passed?: boolean; mark?: number; outOf?: number; pendingNote?: string; markingWithAi?: boolean;
 };
+
+function resultFields(res: any): Partial<SubmitResult> {
+  return {
+    score: typeof res.score === 'number' ? res.score : null,
+    maxScore: res.maxScore,
+    scoreLabel: res.scoreLabel,
+    feedback: res.feedback ?? null,
+    results: Array.isArray(res.results) ? res.results : undefined,
+    percent: typeof res.percent === 'number' ? res.percent : undefined,
+    grade: typeof res.grade === 'string' ? res.grade : undefined,
+    passed: typeof res.passed === 'boolean' ? res.passed : undefined,
+    mark: typeof res.mark === 'number' ? res.mark : undefined,
+    outOf: typeof res.outOf === 'number' ? res.outOf : undefined,
+    pendingNote: typeof res.pendingNote === 'string' ? res.pendingNote : undefined,
+    markingWithAi: res.markingWithAi === true,
+  };
+}
 
 export type DynamicFormProps = {
   schema: string | any;
@@ -853,6 +876,50 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey, co
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [result, setResult] = useState<SubmitResult | null>(null);
+  const [resultCheck, setResultCheck] = useState(0);
+  const [canCheckResult, setCanCheckResult] = useState(false);
+  const receipt = result?.quizReceipt;
+  useEffect(() => {
+    if (!receipt) return;
+    let timer: ReturnType<typeof setTimeout>;
+    const controller = new AbortController();
+    const fastUntil = Date.now() + 25_000;
+    const stopAt = Date.now() + 120_000;
+    const poll = async () => {
+      try {
+        const response = await fetch(getApiUrl(`/api/forms/${encodeURIComponent(receipt.formId)}/quiz-result`), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ submissionId: receipt.submissionId, token: receipt.token }),
+          signal: controller.signal,
+        });
+        if (response.status === 404) {
+          setResult(current => current?.quizReceipt === receipt ? { ...current, quizReceipt: undefined, markingWithAi: false, pendingNote: 'The result is unavailable. Contact your teacher.' } : current);
+          return;
+        }
+        if (response.ok) {
+          const next = await response.json();
+          if (controller.signal.aborted) return;
+          if (!next.pending) {
+            setResult(current => current?.quizReceipt === receipt ? { ...current, ...resultFields(next), quizReceipt: undefined } : current);
+            return;
+          }
+          setResult(current => current?.quizReceipt === receipt && current.markingWithAi !== next.markingWithAi
+            ? { ...current, markingWithAi: next.markingWithAi === true, pendingNote: next.pendingNote } : current);
+        }
+      } catch { /* A temporary error does not invalidate the saved submission. */ }
+      if (controller.signal.aborted) return;
+      if (Date.now() < stopAt) timer = setTimeout(poll, Date.now() < fastUntil ? 1800 : 5000);
+      else {
+        setCanCheckResult(true);
+        setResult(current => current?.quizReceipt === receipt && current.markingWithAi
+          ? { ...current, markingWithAi: false, pendingNote: 'Your response is saved. Marking is taking longer than usual. Check again for your result.' } : current);
+      }
+    };
+    setCanCheckResult(false);
+    timer = setTimeout(poll, resultCheck ? 0 : 850);
+    return () => { controller.abort(); clearTimeout(timer); };
+  }, [receipt, resultCheck]);
   const [confirmClear, setConfirmClear] = useState(false);
   const [restored, setRestored] = useState(false);
 
@@ -862,6 +929,10 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey, co
   uploadRef.current = uploadFile;
   const pendingFocus = useRef<string | null>(null);
   const topRef = useRef<HTMLDivElement>(null);
+  const submitted = result !== null;
+  useEffect(() => {
+    if (submitted) topRef.current?.scrollIntoView?.({ block: 'start' });
+  }, [submitted]);
 
   /* Test protection: what was typed, pasted and how often the page was left (see shared/formIntegrity.ts). */
   const integrityOn = Boolean(parsedSchema?.isQuiz || parsedSchema?.blockPaste || parsedSchema?.trackIntegrity);
@@ -1168,15 +1239,10 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey, co
       const fallback = parsedSchema?.confirmationMessage || 'Your response has been recorded.';
       if (res && typeof res === 'object') {
         setResult({
+          ...resultFields(res),
           title: res.confirmationTitle || parsedSchema?.confirmationTitle || undefined,
           message: res.confirmationMessage || res.message || fallback,
-          score: res.score ?? null,
-          maxScore: res.maxScore ?? 100,
-          scoreLabel: res.scoreLabel,
-          feedback: res.feedback ?? null,
-          results: Array.isArray(res.results) ? res.results : undefined,
-          percent: typeof res.percent === 'number' ? res.percent : undefined, grade: typeof res.grade === 'string' ? res.grade : undefined, passed: typeof res.passed === 'boolean' ? res.passed : undefined,
-          mark: typeof res.mark === 'number' ? res.mark : undefined, outOf: typeof res.outOf === 'number' ? res.outOf : undefined, pendingNote: typeof res.pendingNote === 'string' ? res.pendingNote : undefined,
+          quizReceipt: res.quizReceipt,
         });
       } else {
         setResult({ title: parsedSchema?.confirmationTitle || undefined, message: typeof res === 'string' ? res : fallback });
@@ -1293,11 +1359,21 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey, co
   if (result) {
     const max = result.maxScore ?? 100;
     return (
-      <div className={shell}>
+      <div className={shell} ref={topRef}>
         {headerCard}
         <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8" aria-live="polite">
           {result.title && <h2 className="text-xl font-extrabold text-slate-900">{result.title}</h2>}
-          <p className="text-sm leading-relaxed text-slate-800">{result.message}</p>
+          <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{result.message}</p>
+          {result.pendingNote && (
+            <div role="status" className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+              {result.markingWithAi && <LoaderCircle className="mt-0.5 h-5 w-5 shrink-0 motion-safe:animate-spin" aria-hidden="true" />}
+              <div>
+                <p className="font-bold">{result.markingWithAi ? 'Marking your answers' : 'Result pending'}</p>
+                <p className="mt-1">{result.pendingNote}</p>
+              </div>
+            </div>
+          )}
+          {result.quizReceipt && canCheckResult && <button type="button" onClick={() => setResultCheck(check => check + 1)} className="min-h-11 rounded-lg border px-3 text-sm font-semibold text-slate-800">Check result</button>}
           {result.score !== null && result.score !== undefined && (
             <div className="space-y-1.5 rounded-xl border border-emerald-300 bg-emerald-50 p-4">
               <div className="flex items-center justify-between">
@@ -1312,7 +1388,6 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey, co
                   {result.passed !== undefined && <span className={result.passed ? 'text-emerald-800' : 'text-rose-700'}>{result.passed ? 'Passed' : 'Not passed'}</span>}
                 </p>
               )}
-              {result.pendingNote && <p role="status" className="rounded-lg bg-amber-100 px-3 py-2 text-xs font-semibold text-amber-900">{result.pendingNote}</p>}
               {result.feedback && <p className="text-xs leading-relaxed text-emerald-900">{result.feedback}</p>}
             </div>
           )}
@@ -1320,7 +1395,7 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey, co
             <ul className="space-y-3">
               {result.results.map(item => {
                 const field = fieldMap[String(item.id)];
-                const status = item.correct === true ? 'Correct' : item.correct === false ? 'Incorrect' : 'Reviewed';
+                const status = item.written ? 'Marked' : item.correct === true ? 'Correct' : item.correct === false ? 'Incorrect' : 'Reviewed';
                 return (
                   <li key={item.id} className={`rounded-xl border p-4 text-sm ${item.correct === false ? 'border-rose-400' : 'border-slate-200'}`}>
                     <div className="flex items-start justify-between gap-3">
@@ -1331,6 +1406,7 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey, co
                     </div>
                     {item.yourAnswer !== undefined && <p className="mt-2 text-slate-700">Your answer: <strong>{showAnswer(item.yourAnswer)}</strong></p>}
                     {item.correct === false && item.correctAnswer !== undefined && <p className="mt-1 text-slate-700">Correct answer: <strong>{showAnswer(item.correctAnswer)}</strong></p>}
+                    {item.feedback && <p className="mt-2 text-slate-700">{item.feedback}</p>}
                     {item.explanation && <p className="mt-2 rounded-lg bg-slate-50 p-3 text-slate-700">{item.explanation}</p>}
                   </li>
                 );
@@ -1338,7 +1414,7 @@ export default function DynamicForm({ schema, onSubmit, uploadFile, draftKey, co
             </ul>
           )}
           {parsedSchema.allowMultipleResponses !== false && (
-            <button type="button" onClick={() => { resetAll(); setResult(null); }}
+            <button type="button" onClick={() => { resetAll(); setResultCheck(0); setResult(null); }}
               style={{ color: accent }} className="min-h-11 text-sm font-semibold underline-offset-2 hover:underline">
               Submit another response
             </button>

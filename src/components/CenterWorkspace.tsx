@@ -825,6 +825,7 @@ export const CenterWorkspace: React.FC<CenterWorkspaceProps> = ({
         blocks: builderSchema.blocks || [],
         themeColor: builderSchema.themeColor,
         isQuiz: builderSchema.isQuiz,
+        assessment: builderSchema.assessment,
         collectEmail: builderSchema.collectEmail,
         acceptingResponses: builderSchema.acceptingResponses,
         allowMultipleResponses: builderSchema.allowMultipleResponses,

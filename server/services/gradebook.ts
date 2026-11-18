@@ -112,7 +112,9 @@ export async function buildGradebook(ownerId: string, classId: string): Promise<
         const sid = idField ? String(data[String(idField.id)] ?? '').trim().slice(0, 40) || null : null;
         // The latest attempt counts (responses are in time order).
         // A quiz that hides scores from students (showScore off) is never released to a transcript either.
-        row(name, sid).cells[key] = { percent: round1(q.percent), label: `${q.score}/${q.maxScore}`, state: 'marked', released: hit.s.showScore !== false };
+        row(name, sid).cells[key] = q.pending > 0
+          ? { percent: null, label: 'Marking pending', state: 'submitted' }
+          : { percent: round1(q.percent), label: `${q.score}/${q.maxScore}`, state: 'marked', released: hit.s.showScore !== false };
       }
       columns.push({ key, kind: 'quiz', id: item.id, title: String(hit.s.title || hit.f.title || 'Quiz'), average: null, count: 0 });
     }

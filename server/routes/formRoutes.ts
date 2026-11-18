@@ -27,11 +27,12 @@ import { reviewForm } from '../services/forms/review.js';
 import { codebook } from '../services/forms/model.js';
 import { summarize } from '../services/forms/analysis.js';
 import { listVersions } from '../services/forms/versions.js';
-import { normalizeFields, CHOICE_KINDS } from '../services/forms/model.js';
+import { normalizeFields, CHOICE_KINDS, kindOf } from '../services/forms/model.js';
 import { gradeQuiz } from '../services/forms/quiz.js';
+import { checkUsage } from '../services/billing/usage.js';
 import { allowAi, chargeAi, AI_PRICE } from '../services/billing/aiMeter.js';
 import { applyWrittenMarks, markSubmissionWithAi } from '../services/forms/aiMarking.js';
-import { normalizeAssessment } from '../../shared/assessment.js';
+import { normalizeAssessment, usesAiGrading } from '../../shared/assessment.js';
 import { classReview } from '../services/forms/classReview.js';
 import { reviewInputs } from '../services/forms/classReviewInput.js';
 import { applyPool } from '../../shared/formPool.js';
@@ -84,6 +85,7 @@ router.post('/', requireAuth, async (req, res) => {
       blocks: Array.isArray(blocks) ? blocks.slice(0, 100) : [],
       themeColor: safeThemeColor,
       isQuiz: Boolean(isQuiz),
+      ...(isQuiz && req.body.assessment ? { assessment: normalizeAssessment(req.body.assessment) } : {}),
       collectEmail: Boolean(collectEmail),
       acceptingResponses: acceptingResponses !== false,
       allowMultipleResponses: allowMultipleResponses !== false,
@@ -139,6 +141,7 @@ router.put('/:id', requireAuth, async (req, res) => {
       blocks = prevSchema.blocks || [],
       themeColor = prevSchema.themeColor || '#D97757',
       isQuiz = prevSchema.isQuiz ?? false,
+      assessment = prevSchema.assessment,
       collectEmail = prevSchema.collectEmail ?? false,
       acceptingResponses = prevSchema.acceptingResponses ?? true,
       allowMultipleResponses = prevSchema.allowMultipleResponses ?? true,
@@ -170,6 +173,7 @@ router.put('/:id', requireAuth, async (req, res) => {
       blocks: Array.isArray(blocks) ? blocks.slice(0, 100) : [],
       themeColor: safeThemeColor,
       isQuiz: Boolean(isQuiz),
+      ...(isQuiz && assessment ? { assessment: normalizeAssessment(assessment) } : {}),
       collectEmail: Boolean(collectEmail),
       acceptingResponses: acceptingResponses !== false,
       allowMultipleResponses: allowMultipleResponses !== false,
@@ -508,12 +512,14 @@ router.put('/:id/responses/:submissionId/marks', requireAuth, async (req, res) =
     const list: any[] = Array.isArray(given.fields) ? given.fields : Array.isArray(given.questions) ? given.questions : [];
     const qid = String(req.body?.questionId ?? '');
     const q = list.find((x, i) => String(x?.id ?? x?.number ?? i + 1) === qid);
-    if (!schema.isQuiz || !q || q.type !== 'long_text' || !(Number(q.points) > 0)) return res.status(400).json({ error: 'Only a written question with points can be marked by hand.' });
+    const kind = kindOf(q?.type);
+    if (!schema.isQuiz || !q || (kind !== 'long_text' && !usesAiGrading(kind, q, normalizeAssessment(schema.assessment).aiMarking) && !(kind === 'text' && data._written?.[qid])) || !(Number(q.points) > 0)) return res.status(400).json({ error: 'Only a written question with points can be marked by hand.' });
     const marks = Number(req.body?.marks);
     if (!Number.isFinite(marks) || marks < 0 || marks > Number(q.points)) return res.status(400).json({ error: `Marks must be between 0 and ${q.points}.` });
     const feedback = String(req.body?.feedback ?? '').replace(/[\u0000-\u001f]+/g, ' ').trim().slice(0, 400);
     const next = applyWrittenMarks(schema, data, { [qid]: { marks: Math.round(marks * 2) / 2, ...(feedback ? { feedback } : {}), by: 'lecturer' } });
-    await prisma.formSubmission.update({ where: { id: row.id }, data: { data: JSON.stringify(next) } });
+    const saved = await prisma.formSubmission.updateMany({ where: { id: row.id, data: row.data }, data: { data: JSON.stringify(next) } });
+    if (!saved.count) return res.status(409).json({ error: 'The marks changed while you were editing. Try saving again.' });
     res.json({ success: true, quiz: next._quiz, written: next._written });
   } catch (error: any) { studioFail(res, error); }
 });
@@ -527,7 +533,7 @@ router.post('/:id/marks/ai', requireAuth, async (req, res) => {
     const rows = await prisma.formSubmission.findMany({ where: { formId: req.params.id }, orderBy: { createdAt: 'asc' }, take: 400 });
     if (!(await allowAi(res, userId, 'marking'))) return;
     let marked = 0; let left = 0;
-    const meter = { gate: async () => true, charge: (n: number) => void chargeAi(userId, { kind: 'marking', minCredits: Math.max(1, n) * AI_PRICE.markOneWrittenAnswer }) };
+    const meter = { gate: async () => (await checkUsage(userId, { kind: 'marking' })).allowed, charge: (n: number) => chargeAi(userId, { kind: 'marking', minCredits: Math.max(1, n) * AI_PRICE.markOneWrittenAnswer }) };
     for (const row of rows) {
       let d: any = {}; try { d = JSON.parse(row.data || '{}'); } catch { continue; }
       if (!d._quiz || !(d._quiz.pending > 0)) continue;
