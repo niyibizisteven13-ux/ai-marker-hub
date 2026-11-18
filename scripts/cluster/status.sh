@@ -28,7 +28,7 @@ echo "web server:     $(grep -i '^server:' <<<"$H" | cut -d' ' -f2- | tr -d '\r'
 echo "TLS expires:    $(echo | openssl s_client -servername www.bwenge.space -connect www.bwenge.space:443 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)"
 
 echo "== Settings present (values not shown)"
-for k in NODE_ENV DATABASE_URL JWT_SECRET FILE_URL_SECRET APP_BASE_URL ANTHROPIC_API_KEY GONKA_API_KEY TELEGRAM_BOT_TOKEN EMAIL_SMTP_URL SMTP_HOST MOMO_TARGET_ENV REDIS_URL; do printf '%-18s %s\n' "$k" "$(has "$k")"; done
+for k in NODE_ENV DATABASE_URL JWT_SECRET FILE_URL_SECRET APP_BASE_URL ANTHROPIC_API_KEY TELEGRAM_BOT_TOKEN EMAIL_SMTP_URL SMTP_HOST MOMO_TARGET_ENV REDIS_URL; do printf '%-18s %s\n' "$k" "$(has "$k")"; done
 echo "MoMo mode:      $(grep -E '^MOMO_TARGET_ENV=' "$ENV_FILE" | cut -d= -f2)"
 
 echo "== Machine"

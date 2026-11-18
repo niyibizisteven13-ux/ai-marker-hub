@@ -12,7 +12,6 @@ import ExcelJS from 'exceljs';
 type Call = { method: string; body: any; files: Record<string, { name: string; type: string; data: Buffer }> };
 const calls: Call[] = [];
 const claudeRequests: any[] = [];
-const gonkaRequests: any[] = [];
 const CSV = 'district,score\nGasabo,71\nHuye,64\nMusanze,58\n';
 let msgSeq = 1000;
 
@@ -50,6 +49,9 @@ type Turn = { text?: string; tools?: Array<{ id: string; name: string; input: un
 const rows = [{ Category: 'A', Value: 10 }, { Category: 'B', Value: 20 }, { Category: 'C', Value: 15 }];
 const src = [{ type: 'user', label: 'Values given by the user' }];
 function script(p: any): Turn | 'fail' {
+  if (/Learning mode: Socratic guide/.test(JSON.stringify(p.system ?? p.messages[0]))) {
+    return { text: 'What denominator could both fractions share?' };
+  }
   const last = p.messages.at(-1);
   const lastText = JSON.stringify(last.content);
   if (last.role === 'tool' || (Array.isArray(last.content) && last.content.some((b: any) => b.type === 'tool_result'))) return { text: '## Done\n\nHere are your **chart** and *Excel workbook*:\n\n- B is highest (20)\n- A is lowest (10)' };
@@ -65,22 +67,6 @@ function script(p: any): Turn | 'fail' {
 
 const claude = http.createServer(async (req, res) => {
   const p = JSON.parse((await readBody(req)).toString());
-  if (req.url?.endsWith('/chat/completions')) {
-    gonkaRequests.push(p);
-    const turn = /Learning mode/.test(JSON.stringify(p.messages?.[0] ?? ''))
-      ? { text: 'What denominator could both fractions share?' } : script(p);
-    if (turn === 'fail') { res.writeHead(500, { 'content-type': 'application/json' }).end('{"error":{"message":"boom"}}'); return; }
-    res.writeHead(200, { 'content-type': 'text/event-stream' });
-    const send = (delta: object, finish: string | null = null) =>
-      res.write(`data: ${JSON.stringify({ id: 'g', choices: [{ index: 0, delta, finish_reason: finish }], ...(finish ? { usage: { prompt_tokens: 5, completion_tokens: 7 } } : {}) })}\n\n`);
-    if (turn.text) send({ content: turn.text });
-    for (const [index, tool] of (turn.tools ?? []).entries()) {
-      send({ tool_calls: [{ index, id: tool.id, type: 'function', function: { name: tool.name, arguments: JSON.stringify(tool.input) } }] });
-    }
-    send({}, turn.tools?.length ? 'tool_calls' : 'stop');
-    res.end('data: [DONE]\n\n');
-    return;
-  }
   if (!req.url?.endsWith('/messages')) { res.writeHead(400, { 'content-type': 'application/json' }).end('{"error":{"message":"stub"}}'); return; }
   claudeRequests.push(p);
   const turn = script(p);
@@ -100,9 +86,8 @@ const port = (s: http.Server) => (s.address() as AddressInfo).port;
 
 Object.assign(process.env, {
   TELEGRAM_BOT_TOKEN: 'test-bot-token', TELEGRAM_API_BASE: `http://127.0.0.1:${port(telegram)}`, TELEGRAM_BOT_USERNAME: 'BwengeTestBot',
-  AI_PROVIDER: 'gonkarouter', AI_AGENT_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'test-key', ANTHROPIC_BASE_URL: `http://127.0.0.1:${port(claude)}`,
-  CLAUDE_AGENT_MODEL: 'claude-haiku-5-5', CLAUDE_FALLBACK_TO_GONKA: 'false', AI_MAX_ATTEMPTS: '1',
-  GONKA_API_KEY: 'test-gonka', GONKA_BASE_URL: `http://127.0.0.1:${port(claude)}/gonka/v1`,
+  AI_PROVIDER: 'anthropic', AI_AGENT_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'test-key', ANTHROPIC_BASE_URL: `http://127.0.0.1:${port(claude)}`,
+  CLAUDE_AGENT_MODEL: 'claude-haiku-5-5', AI_MAX_ATTEMPTS: '1',
 });
 delete process.env.TELEGRAM_BOT_SECRET_TOKEN;
 
@@ -209,8 +194,8 @@ test('acceptance: "bar chart + Excel" gives live progress, a formatted answer, a
   assert.match(final.body.text, /2 files below/);
   assert.ok(htmlBalanced(final.body.text));
   assert.deepEqual(final.body.reply_markup.inline_keyboard[0].map((b: any) => b.callback_data), ['a:regen', 'fp:0', 'm:home']);
-  assert.equal(claudeRequests.length, 0, 'the paid text agent stays on GonkaRouter');
-  assert.ok(gonkaRequests.at(-1).messages.some((m: any) => m.role === 'tool'));
+  assert.equal(claudeRequests[0].model, 'claude-haiku-5-5');
+  assert.ok(claudeRequests.at(-1).messages.at(-1).content.some((block: any) => block.type === 'tool_result'));
 
   const photo = turn.find((c) => c.method === 'sendPhoto')!;
   assert.ok(photo, 'chart sent as a photo');
@@ -238,7 +223,7 @@ test('files: a CSV without caption gets quick actions; the action runs the assis
   const answer = await until(() => since(n).find((c) => c.method === 'editMessageText' && /Statistics: mean score/.test(c.body.text)));
   assert.match(answer.body.text, /<b>64\.3<\/b>/);
   assert.match(answer.body.text, /read scores\.csv/, 'the model received the file content');
-  assert.match(JSON.stringify(gonkaRequests.at(-1).messages), /\[Attached file: scores\.csv \(fileId /);
+  assert.match(JSON.stringify(claudeRequests.at(-1).messages), /\[Attached file: scores\.csv \(fileId /);
 });
 
 test('my files: list with send buttons; another user\'s file is refused', async () => {
@@ -429,7 +414,7 @@ test('learning modes: /socratic, /roleplay presets and /normal change the instru
   n = mark();
   await sendText('What is 1/2 + 1/3?');
   await until(() => since(n).find((c) => c.method === 'editMessageText' && /denominator could both/.test(c.body.text)));
-  const system = JSON.stringify(gonkaRequests.at(-1).messages[0]);
+  const system = JSON.stringify(claudeRequests.at(-1).system);
   assert.match(system, /Learning mode: Socratic guide · topic: fractions/);
   assert.match(system, /Do not give the final answer/);
 
@@ -454,7 +439,7 @@ test('learning modes: /socratic, /roleplay presets and /normal change the instru
 test('limits: over the daily credit limit, the bot answers with a limit card and an Upgrade button', async () => {
   const session = await db.telegramSession.findUnique({ where: { chatId: String(chat) } });
   await db.subscription.deleteMany({ where: { userId: session.userId } });
-  await db.usageRecord.create({ data: { id: `ur-${Date.now()}`, userId: session.userId, kind: 'chat', credits: 25, model: 'gonka', inputTokens: 0, outputTokens: 0, costUsd: 0, channel: 'telegram', createdAt: new Date() } });
+  await db.usageRecord.create({ data: { id: `ur-${Date.now()}`, userId: session.userId, kind: 'chat', credits: 25, model: 'claude-haiku-5-5', inputTokens: 0, outputTokens: 0, costUsd: 0, channel: 'telegram', createdAt: new Date() } });
   const n = mark();
   await sendText('Explain photosynthesis please');
   const limit = await until(() => since(n).find((c) => c.method === 'sendMessage' && /Limit reached/.test(c.body.text)));

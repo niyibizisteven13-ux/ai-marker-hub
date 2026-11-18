@@ -1,7 +1,7 @@
 /**
  * Strips <think>...</think> / <thinking>...</thinking> reasoning blocks
  * that some models (notably open-weight reasoning models served through
- * routers like GonkaRouter) emit inline in their output. These are meant
+ * OpenAI-compatible providers) emit inline in their output. These are meant
  * for internal reasoning, not for the end user, and must never reach a
  * Telegram message or any other user-facing surface.
  *

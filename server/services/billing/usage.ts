@@ -17,7 +17,7 @@ const KIGALI_OFFSET_MS = 2 * 3600_000;
 const DAY = 86_400_000;
 export const USD_PER_CREDIT = 0.001;
 
-/** USD per million tokens [input, output]. Gonka and unknown models use GONKA_PRICE_* (conservative defaults). */
+/** USD per million tokens [input, output]. Unknown models use AI_PRICE_* (conservative defaults). */
 function pricePerMTok(model?: string | null): [number, number] {
   const m = (model ?? '').toLowerCase();
   if (m.includes('haiku')) return [0.10, 0.50];
@@ -25,7 +25,7 @@ function pricePerMTok(model?: string | null): [number, number] {
   if (m.includes('opus')) return [4, 20];
   if (m.includes('fable') || m.includes('mythos')) return [10, 50];
   const env = (k: string, d: number) => (Number(process.env[k]) >= 0 && process.env[k] ? Number(process.env[k]) : d);
-  return [env('GONKA_PRICE_IN_PER_MTOK', 0.10), env('GONKA_PRICE_OUT_PER_MTOK', 0.40)];
+  return [env('AI_PRICE_IN_PER_MTOK', 0.10), env('AI_PRICE_OUT_PER_MTOK', 0.50)];
 }
 
 export function costUsd(model: string | null | undefined, inputTokens: number, outputTokens: number): number {

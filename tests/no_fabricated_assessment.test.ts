@@ -45,9 +45,9 @@ test('grading with no configured AI provider rejects instead of creating a marke
 test('grading timeout rejects without returning scores or feedback', async () => {
   const aiService = AiService.getInstance();
   const previousProvider = process.env.AI_PROVIDER;
-  process.env.AI_PROVIDER = 'gonkarouter';
-  const restoreAvailability = overrideMethod(aiService, 'providerAvailable', async (name: string) => name === 'gonkarouter');
-  const restoreGonka = overrideMethod(aiService, 'sendGonkaChat', async () => {
+  process.env.AI_PROVIDER = 'anthropic';
+  const restoreAvailability = overrideMethod(aiService, 'providerAvailable', async (name: string) => name === 'anthropic');
+  const restoreCompletion = overrideMethod(aiService, 'completeText', async () => {
     throw Object.assign(new Error('upstream timeout'), { timeout: true, timeoutKind: 'request' });
   });
 
@@ -57,7 +57,7 @@ test('grading timeout rejects without returning scores or feedback', async () =>
       /remains pending/
     );
   } finally {
-    restoreGonka();
+    restoreCompletion();
     restoreAvailability();
     if (previousProvider === undefined) delete process.env.AI_PROVIDER;
     else process.env.AI_PROVIDER = previousProvider;
@@ -67,9 +67,9 @@ test('grading timeout rejects without returning scores or feedback', async () =>
 test('incomplete model grading output rejects instead of becoming a zero-mark result', async () => {
   const aiService = AiService.getInstance();
   const previousProvider = process.env.AI_PROVIDER;
-  process.env.AI_PROVIDER = 'gonkarouter';
-  const restoreAvailability = overrideMethod(aiService, 'providerAvailable', async (name: string) => name === 'gonkarouter');
-  const restoreGonka = overrideMethod(aiService, 'sendGonkaChat', async () => '[]');
+  process.env.AI_PROVIDER = 'anthropic';
+  const restoreAvailability = overrideMethod(aiService, 'providerAvailable', async (name: string) => name === 'anthropic');
+  const restoreCompletion = overrideMethod(aiService, 'completeText', async () => '[]');
 
   try {
     await assert.rejects(
@@ -77,7 +77,7 @@ test('incomplete model grading output rejects instead of becoming a zero-mark re
       /remains pending/
     );
   } finally {
-    restoreGonka();
+    restoreCompletion();
     restoreAvailability();
     if (previousProvider === undefined) delete process.env.AI_PROVIDER;
     else process.env.AI_PROVIDER = previousProvider;
@@ -86,7 +86,7 @@ test('incomplete model grading output rejects instead of becoming a zero-mark re
 
 test('form scoring failure rejects instead of inventing a score or feedback', async () => {
   const aiService = AiService.getInstance();
-  const restoreGonka = overrideMethod(aiService, 'sendGonkaChat', async () => {
+  const restoreCompletion = overrideMethod(aiService, 'completeText', async () => {
     throw new Error('upstream unavailable');
   });
 
@@ -99,19 +99,19 @@ test('form scoring failure rejects instead of inventing a score or feedback', as
       /remains unscored/
     );
   } finally {
-    restoreGonka();
+    restoreCompletion();
   }
 });
 
 test('form generation failure rejects instead of creating substitute questions', async () => {
   const aiService = AiService.getInstance();
-  const restoreGonka = overrideMethod(aiService, 'sendGonkaChat', async () => {
+  const restoreCompletion = overrideMethod(aiService, 'completeText', async () => {
     throw new Error('upstream unavailable');
   });
 
   try {
     await assert.rejects(FormOrchestrator.getInstance().reason('Create a science assessment', {}), /could not be completed/);
   } finally {
-    restoreGonka();
+    restoreCompletion();
   }
 });

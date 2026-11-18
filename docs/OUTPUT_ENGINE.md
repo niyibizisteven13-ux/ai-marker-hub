@@ -127,17 +127,13 @@ unless the user asks for several.
 
 | Path | Has tools | Taken when |
 |---|---|---|
-| Agent (`AiService.generalAssist` → `bwengeAgent`) | Yes | Either rule matches (`useToolAgent` in `server/services/outputs/chatTurn.ts`):<br>• Original rule: general intent, an Anthropic key, and `AI_PROVIDER` is not `gonkarouter`.<br>• Added rule: the planner says the message needs a file, chart or computed numbers (`plan.artifact` or `plan.needsComputation`), and an agent model is configured (Claude agent or `GONKA_API_KEY`). A provider explicitly chosen in the UI that cannot run tools (Ollama) is respected. |
+| Agent (`AiService.generalAssist` → `bwengeAgent`) | Yes | Claude receives tools when the request needs a file, computed result, attachment analysis, or platform data. |
 | Legacy text stream | No | Everything else (unchanged). |
-
-Before this fix, `AI_PROVIDER=gonkarouter` (the default in `.env.example`) sent every message, including "make a chart and
-an Excel file", to the legacy stream. That stream has no tools, and the persona prompt asks for ```` ```artifact-json ````
-blocks, so the model answered with CSV text and told the user to save it as Excel.
 
 Inside `generalAssist`, a tool turn works like this:
 
 1. The turn runs on the agent model: Claude (`CLAUDE_AGENT_MODEL`, default `claude-haiku-5-5`) when
-   `AI_AGENT_PROVIDER=anthropic` and `ANTHROPIC_API_KEY` are set, otherwise Gonka. Everyday chat stays on Gonka.
+   `ANTHROPIC_API_KEY` is configured. Everyday chat also uses Claude.
    `ANTHROPIC_BASE_URL` is honoured by the SDK for an Anthropic-compatible endpoint.
 2. The system prompt gets the planner hint, which lists every requested deliverable (for example "a chart (SVG) and an XLSX
    file"). It also gets rules that override the older `artifact-json` persona instructions: files exist only through tool

@@ -16,7 +16,7 @@ function hashTraceIdentifier(value: string, secret?: string): string {
 }
 
 export interface AiAgentConfig {
-  /** An existing adapter, or options to build an OpenAI-compatible one (GonkaRouter, NVIDIA NIM, OpenRouter, OpenAI). */
+  /** An existing adapter, or options to build an OpenAI-compatible one (NVIDIA NIM, OpenRouter, OpenAI). */
   provider: ProviderAdapter | OpenAICompatibleOptions;
   model: string;
   files: FileStore;

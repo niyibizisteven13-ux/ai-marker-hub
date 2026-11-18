@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type } from '@google/genai';
-import Anthropic from '@anthropic-ai/sdk';
+import type Anthropic from '@anthropic-ai/sdk';
 import { evaluateStudentSubmission as deepseekEvaluate } from '../../src/services/deepseekMarker.js';
 import { BWENGE_CHAT_RESPONSE_RULES, BWENGE_GENERAL_SYSTEM_PROMPT } from './prompts/bwengeGeneralPrompt.js';
 import { platformContext } from './platformContext.js';
@@ -13,11 +13,11 @@ import { needsResearch } from './ai/research.js';
 import { needsPlatformTools } from './ai/platformIntent.js';
 import { recordUsage } from './billing/usage.js';
 import { planFor, type PlanId } from './billing/plans.js';
-import { needsScanRecognition } from './exams/scanPolicy.js';
-import { isSmallTalkMessage } from './intentRouter.js';
 import { retrieveKnowledgeChunks } from './KnowledgeRetrievalService.js';
 import { ExecutionSandbox } from './ExecutionSandbox.js';
-import { createAiAgent, FileStore, OpenAICompatibleAdapter, AnthropicAdapter, loadClaudeAgentConfig, ReliableProviderAdapter, ModelDispatchAdapter, ModelPolicyManager, TaskClassifier, loadComplexProvider, loadModelPolicies, TaskRouter, FileJobQueue, NisrIngestionPipeline, isStatisticsQuery, BudgetManager, DocumentPipeline, DeterministicTools } from './ai/index.js';
+import { createAiAgent, FileStore, OpenAICompatibleAdapter, AnthropicAdapter, loadClaudeAgentConfig, ReliableProviderAdapter, ModelDispatchAdapter, ModelPolicyManager, TaskClassifier, loadComplexProvider, TaskRouter, FileJobQueue, NisrIngestionPipeline, isStatisticsQuery, BudgetManager, DocumentPipeline, DeterministicTools } from './ai/index.js';
+import { DEFAULT_CLAUDE_MODEL } from './ai/router/agentProvider.js';
+import type { ProviderAdapter } from './ai/providers/types.js';
 import { prisma } from '../db.js';
 import { getFileUrlSecret } from '../auth/secrets.js';
 import { extractJsonFragment, stripThinkingTags } from '../utils/textSanitizers.js';
@@ -40,11 +40,7 @@ const NVIDIA_MODELS = {
   FAST: 'meta/llama-4-scout-17b-16e-instruct',
 };
 
-const GONKA_MODELS = {
-  DEFAULT: 'zai-org/GLM-5.3-Flash',
-};
-
-type ProviderKey = 'gemini' | 'openai' | 'deepseek' | 'openrouter' | 'anthropic' | 'ollama' | 'nvidianim' | 'gonkarouter';
+type ProviderKey = 'gemini' | 'openai' | 'deepseek' | 'openrouter' | 'anthropic' | 'ollama' | 'nvidianim';
 
 const DEFAULT_FETCH_TIMEOUT_MS = 30_000;
 
@@ -124,7 +120,7 @@ function envMs(name: string, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-// One reliability policy for every Gonka call: transient-only retries before first output,
+// One reliability policy for every provider call: transient-only retries before first output,
 // Retry-After, a total deadline below the 60s proxy limit, a per-model circuit breaker and
 // an optional configured fallback. See docs/AI_RELIABILITY.md.
 const providerLog = (e: { event: string }) => {
@@ -150,138 +146,90 @@ const httpTimeouts = {
 // One reliability policy for every provider call: transient-only retries before first output,
 // Retry-After, a total deadline below the 60s proxy limit, a per-model circuit breaker and
 // an optional configured fallback. See docs/AI_RELIABILITY.md.
-export const gonkaAdapter = new ReliableProviderAdapter({
-  primary: new OpenAICompatibleAdapter({
-    name: 'GonkaRouter',
-    baseUrl: process.env.GONKA_BASE_URL ?? 'https://api.gonkarouter.io/v1',
-    apiKey: process.env.GONKA_API_KEY ?? '',
-    ...httpTimeouts,
-  }),
+const { config: claudeConfig } = loadClaudeAgentConfig();
+const claudeModel = claudeConfig?.model ?? DEFAULT_CLAUDE_MODEL;
+const claudeWebSearch = process.env.CLAUDE_WEB_SEARCH === 'false' ? false as const : { maxUses: Number(process.env.CLAUDE_WEB_SEARCH_MAX_USES) > 0 ? Number(process.env.CLAUDE_WEB_SEARCH_MAX_USES) : 5 };
+
+function claudeUnavailable() {
+  return Object.assign(new Error('Claude is not configured.'), { code: 'AI_UNAVAILABLE' });
+}
+
+const unavailableProvider: ProviderAdapter = {
+  name: 'Claude',
+  async *stream() { throw claudeUnavailable(); },
+};
+
+export const claudeAdapter = new ReliableProviderAdapter({
+  primary: claudeConfig
+    ? new AnthropicAdapter({ apiKey: claudeConfig.apiKey, name: 'Claude', effort: claudeConfig.effort, requestTimeoutMs: envMs('CLAUDE_REQUEST_TIMEOUT_MS', 900_000), webTools: claudeWebSearch })
+    : unavailableProvider,
   ...reliability,
 });
 
-// Everyday chat stays on Gonka. Big tasks (COMPLEX, ARTIFACT_SPEC) can go to a second provider
-// (AI_COMPLEX_PROVIDER), which falls back to Gonka's complex-task model if it is unavailable.
 const complexProvider = loadComplexProvider();
-logger.info('[AI routing] big-task provider', { provider: complexProvider.config?.name ?? 'gonka', model: complexProvider.config?.model, reason: complexProvider.reason });
 export const complexAdapter = complexProvider.config
   ? new ReliableProviderAdapter({
     primary: new OpenAICompatibleAdapter({ name: complexProvider.config.name, baseUrl: complexProvider.config.baseUrl, apiKey: complexProvider.config.apiKey, ...httpTimeouts, requestTimeoutMs: envMs('AI_COMPLEX_REQUEST_TIMEOUT_MS', 900_000) }),
     ...reliability,
-    fallbackAdapter: complexProvider.config.fallbackToGonka ? gonkaAdapter : undefined,
-    fallbackModel: complexProvider.config.fallbackToGonka ? loadModelPolicies(process.env, GONKA_MODELS.DEFAULT).COMPLEX.model : undefined,
+    fallbackAdapter: complexProvider.config.fallbackToClaude ? claudeAdapter : undefined,
+    fallbackModel: complexProvider.config.fallbackToClaude && claudeConfig ? claudeModel : undefined,
   })
   : null;
 
+const chatPolicies = new ModelPolicyManager();
+const chatRouter = new TaskRouter(chatPolicies);
 export const taskRouter = new TaskRouter(
-  new ModelPolicyManager(),
+  chatPolicies,
   new TaskClassifier(),
   (process.env.AI_MODEL_ROUTING ?? 'on').toLowerCase() !== 'off',
-  process.env.GONKA_FALLBACK_SUPPORTS_VISION === 'true',
+  true,
   complexProvider.config,
 );
 
-// Agent tasks (tool loops, rubric assessment, report interpretation) can run on Claude
-// (AI_AGENT_PROVIDER=anthropic, default model claude-haiku-5-5). Transient Claude failures fall back
-// to Gonka's standard model when CLAUDE_FALLBACK_TO_GONKA is on; refusals never fall back.
-const claudeAgent = loadClaudeAgentConfig();
-logger.info('[AI routing] agent provider', { provider: claudeAgent.config ? 'anthropic' : 'gonka', model: claudeAgent.config?.model, reason: claudeAgent.reason });
-const gonkaStandardModel = loadModelPolicies(process.env, GONKA_MODELS.DEFAULT).STANDARD.model;
-/** Claude researches the web itself on agent turns (CLAUDE_WEB_SEARCH=false turns it off). */
-const claudeWebSearch = process.env.CLAUDE_WEB_SEARCH === 'false' ? false as const : { maxUses: Number(process.env.CLAUDE_WEB_SEARCH_MAX_USES) > 0 ? Number(process.env.CLAUDE_WEB_SEARCH_MAX_USES) : 5 };
-export const claudeAdapter = claudeAgent.config
-  ? new ReliableProviderAdapter({
-    primary: new AnthropicAdapter({ apiKey: claudeAgent.config.apiKey, name: 'Claude', effort: claudeAgent.config.effort, requestTimeoutMs: envMs('CLAUDE_REQUEST_TIMEOUT_MS', 900_000), webTools: claudeWebSearch }),
+const agentProvider = new ModelDispatchAdapter(claudeAdapter, new Map(
+  complexProvider.config && complexAdapter ? [[complexProvider.config.model, complexAdapter]] : [],
+));
+
+function specializedClaudeAdapter(name: string, effort: NonNullable<typeof claudeConfig>['effort']) {
+  if (!claudeConfig || effort === claudeConfig.effort) return claudeAdapter;
+  return new ReliableProviderAdapter({
+    primary: new AnthropicAdapter({ apiKey: claudeConfig.apiKey, name, effort, requestTimeoutMs: envMs('CLAUDE_REQUEST_TIMEOUT_MS', 900_000) }),
     ...reliability,
-    fallbackAdapter: claudeAgent.config.fallbackToGonka ? gonkaAdapter : undefined,
-    fallbackModel: claudeAgent.config.fallbackToGonka ? gonkaStandardModel : undefined,
-  })
-  : null;
-
-// Examination marking can use a larger Claude model and effort (CLAUDE_MARKING_MODEL, CLAUDE_MARKING_EFFORT).
-const ownMarkingModel = claudeAgent.config && (claudeAgent.config.markingModel !== claudeAgent.config.model || claudeAgent.config.markingEffort !== claudeAgent.config.effort)
-  ? claudeAgent.config : null;
-if (ownMarkingModel) logger.info('[AI routing] marking model', { model: ownMarkingModel.markingModel, effort: ownMarkingModel.markingEffort });
-const markingAdapter = ownMarkingModel
-  ? new ReliableProviderAdapter({
-    primary: new AnthropicAdapter({ apiKey: ownMarkingModel.apiKey, name: 'Claude (marking)', effort: ownMarkingModel.markingEffort, requestTimeoutMs: envMs('CLAUDE_REQUEST_TIMEOUT_MS', 900_000) }),
-    ...reliability,
-    fallbackAdapter: ownMarkingModel.fallbackToGonka ? gonkaAdapter : undefined,
-    fallbackModel: ownMarkingModel.fallbackToGonka ? gonkaStandardModel : undefined,
-  })
-  : claudeAdapter;
-
-const agentProvider = new ModelDispatchAdapter(
-  gonkaAdapter,
-  new Map([
-    ...(complexProvider.config && complexAdapter ? [[complexProvider.config.model, complexAdapter] as const] : []),
-    ...(claudeAgent.config && claudeAdapter ? [[claudeAgent.config.model, claudeAdapter] as const] : []),
-  ]),
-);
-const markingProvider = markingAdapter && claudeAgent.config
-  ? new ModelDispatchAdapter(gonkaAdapter, new Map([[claudeAgent.config.markingModel, markingAdapter] as const]))
-  : agentProvider;
-
-// Reading handwriting uses its own (by default cheaper) model and effort: CLAUDE_READING_MODEL, CLAUDE_READING_EFFORT.
-const readingProvider = claudeAgent.config
-  ? (() => {
-    const c = claudeAgent.config;
-    if (c.readingModel === c.markingModel && c.readingEffort === c.markingEffort) return markingProvider;
-    logger.info('[AI routing] reading model', { model: c.readingModel, effort: c.readingEffort });
-    const reading = new ReliableProviderAdapter({
-      primary: new AnthropicAdapter({ apiKey: c.apiKey, name: 'Claude (reading)', effort: c.readingEffort, requestTimeoutMs: envMs('CLAUDE_REQUEST_TIMEOUT_MS', 900_000) }),
-      ...reliability,
-      fallbackAdapter: c.fallbackToGonka ? gonkaAdapter : undefined,
-      fallbackModel: c.fallbackToGonka ? gonkaStandardModel : undefined,
-    });
-    return new ModelDispatchAdapter(gonkaAdapter, new Map([[c.readingModel, reading] as const]));
-  })()
-  : agentProvider;
-
-/** Adapter + model for reading handwriting (page images to text): the reading model when Claude is set up. */
-export function readingTarget(): ReturnType<typeof markingTarget> {
-  return claudeAgent.config
-    ? { adapter: readingProvider, model: claudeAgent.config.readingModel, provider: 'anthropic', fallbackModel: undefined }
-    : markingTarget();
+  });
 }
 
-/** Adapter + model for examination marking: the marking model when set, otherwise the agent target. */
-export function markingTarget(): { adapter: typeof agentProvider; model: string; provider: 'anthropic' | 'gonka'; fallbackModel: string | null | undefined } {
-  return claudeAgent.config
-    ? { adapter: markingProvider, model: claudeAgent.config.markingModel, provider: 'anthropic', fallbackModel: undefined }
-    : agentTarget();
+const markingAdapter = specializedClaudeAdapter('Claude (marking)', claudeConfig?.markingEffort ?? 'medium');
+const readingAdapter = specializedClaudeAdapter('Claude (reading)', claudeConfig?.readingEffort ?? 'medium');
+
+export function userChatAvailable(): boolean {
+  return Boolean(claudeConfig);
 }
 
-/** Adapter + model for agent tasks: Claude when configured, otherwise Gonka's standard model. */
-export function agentTarget(): { adapter: typeof agentProvider; model: string; provider: 'anthropic' | 'gonka'; fallbackModel: string | null | undefined } {
-  return claudeAgent.config
-    ? { adapter: agentProvider, model: claudeAgent.config.model, provider: 'anthropic', fallbackModel: undefined }
-    : { adapter: agentProvider, model: gonkaStandardModel, provider: 'gonka', fallbackModel: null };
+export function agentTarget() {
+  return { adapter: claudeAdapter, model: claudeModel, provider: 'anthropic' as const, fallbackModel: null };
 }
 
-// User chat uses Gonka or Claude. Other configured big-task providers are for legacy/internal callers.
-const gonkaChatPolicies = new ModelPolicyManager();
-const gonkaChatRouter = new TaskRouter(gonkaChatPolicies);
-type UserAiOptions = { highDemand?: boolean; hasImages?: boolean; hasFiles?: boolean };
+export function markingTarget() {
+  return { ...agentTarget(), adapter: markingAdapter, model: claudeConfig?.markingModel ?? claudeModel };
+}
+
+export function readingTarget() {
+  return { ...agentTarget(), adapter: readingAdapter, model: claudeConfig?.readingModel ?? claudeModel };
+}
+
+type UserAiOptions = { hasImages?: boolean; hasFiles?: boolean };
 
 export function userChatTarget(plan: PlanId, prompt: string, options: UserAiOptions = {}) {
-  const route = gonkaChatRouter.route({ prompt, hasFiles: options.hasFiles, hasImages: options.hasImages });
-  const highDemand = options.highDemand || options.hasImages || prompt.trim().length >= 6000;
-  const casual = isSmallTalkMessage(prompt, options.hasFiles || options.hasImages);
-  if (plan !== 'FREE' && highDemand && !casual && claudeAdapter && claudeAgent.config) {
-    return {
-      adapter: claudeAdapter, provider: 'anthropic' as const, model: claudeAgent.config.model,
-      fallbackModel: options.hasImages && process.env.GONKA_FALLBACK_SUPPORTS_VISION !== 'true' ? null : undefined,
-      maxOutputTokens: Math.max(route.maxOutputTokens, gonkaChatPolicies.getPolicy('COMPLEX').maxOutputTokens),
-    };
-  }
-  return { ...route, adapter: gonkaAdapter, provider: 'gonka' as const };
+  if (!userChatAvailable()) throw claudeUnavailable();
+  const route = chatRouter.route({ prompt, ...options });
+  return {
+    ...route, adapter: claudeAdapter, provider: 'anthropic' as const,
+    maxOutputTokens: plan === 'FREE' ? route.maxOutputTokens : chatPolicies.getPolicy('COMPLEX').maxOutputTokens,
+  };
 }
 
-/** Use the account's current entitlement for a nested tool or feature request. */
 export async function userAgentTarget(userId: string, prompt: string, options: UserAiOptions = {}) {
-  const plan = await planFor(userId).then(p => p.id).catch(() => 'FREE' as const);
-  return userChatTarget(plan, prompt, options);
+  return userChatTarget((await planFor(userId)).id, prompt, options);
 }
 
 /** Picks model and fallback for a chat request and logs the decision (never the prompt). */
@@ -296,7 +244,7 @@ function routeChat(prompt: string, opts: { hasImages?: boolean; hasTools?: boole
  * marking model when DOCUMENT_MODEL=marking (the larger model), otherwise on the agent model; usage is charged.
  */
 async function completeForTools(req: { system: string; prompt: string; maxTokens?: number; userId: string; signal?: AbortSignal }): Promise<string> {
-  const t = await userAgentTarget(req.userId, req.prompt, { highDemand: true });
+  const t = await userAgentTarget(req.userId, req.prompt);
   let text = '';
   let input = 0;
   let output = 0;
@@ -313,13 +261,13 @@ export const bwengeAgent = createAiAgent({
   // The adapter owns retry policy; the runtime only retries a stream that broke after partial output.
   // Tool results up to 120k characters, so a 60k-character read of a book arrives whole with its "continue at" line.
   runtime: { maxRetries: 1, retryDelayMs: 1000, maxToolResultChars: 120_000 },
-  model: process.env.GONKA_MODEL ?? GONKA_MODELS.DEFAULT,
+  model: claudeModel,
   files: fileStore,
   temperature: 0.3,
   maxTokens: 8192,
   promptVersion: 'bwenge-general-v1',
   traceHashSecret: process.env.TRACE_HASH_SECRET || fileStoreSecret,
-  webResearch: (model) => !!claudeWebSearch && !!claudeAgent.config && model === claudeAgent.config.model,
+  webResearch: (model) => !!claudeWebSearch && !!claudeConfig && model === claudeConfig.model,
   // Scanned PDFs on turns whose model cannot see images (Tesseract, loaded only when needed).
   ocr: async (png) => (await import('./documents/ocr.js')).tesseractOcr(png),
   writeTrace: async (trace) => {
@@ -579,11 +527,9 @@ export const bwengeAgent = createAiAgent({
 export class AiService {
   private static instance: AiService;
   private geminiClient: GoogleGenAI | null = null;
-  private anthropicClient: Anthropic | null = null;
 
   private constructor() {
     this.initializeGemini();
-    this.initializeAnthropic();
   }
 
   public static getInstance(): AiService {
@@ -607,20 +553,12 @@ export class AiService {
     }
   }
 
-  private initializeAnthropic() {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (apiKey) {
-      this.anthropicClient = new Anthropic({ apiKey });
-    }
-  }
-
   public async providerAvailable(name: ProviderKey): Promise<boolean> {
-    if (name === 'gonkarouter') return Boolean(process.env.GONKA_API_KEY);
     if (name === 'gemini') return Boolean(process.env.GEMINI_API_KEY);
     if (name === 'openai') return Boolean(process.env.OPENAI_API_KEY);
     if (name === 'deepseek') return Boolean(process.env.DEEPSEEK_API_KEY);
     if (name === 'openrouter') return Boolean(process.env.OPENROUTER_API_KEY);
-    if (name === 'anthropic') return Boolean(process.env.ANTHROPIC_API_KEY);
+    if (name === 'anthropic') return userChatAvailable();
     if (name === 'nvidianim') return Boolean(process.env.NVIDIA_NIM_API_KEY);
     if (name === 'ollama') {
       try {
@@ -779,7 +717,7 @@ export class AiService {
     return (data.message?.content || '').trim();
   }
 
-  public async sendGonkaChat(prompt: string, options: {
+  public async completeText(prompt: string, options: {
     system?: string;
     history?: Array<{ role: 'user' | 'assistant'; text: string }>;
     images?: Array<{ base64: string; mediaType: string }>;
@@ -788,17 +726,20 @@ export class AiService {
     model?: string;
     signal?: AbortSignal;
   } = {}) {
+    if (!userChatAvailable()) throw claudeUnavailable();
     const uploads = options.images?.map(img => ({ type: 'image' as const, base64: img.base64, mediaType: img.mediaType }));
     const r = await bwengeAgent.run({
       userId: 'system',
-      provider: gonkaAdapter,
+      provider: claudeAdapter,
+      model: options.model ?? claudeModel,
       system: options.system || BWENGE_GENERAL_SYSTEM_PROMPT,
       history: options.history,
       prompt,
       uploads,
       toolNames: [],
+      vision: true,
       maxTokens: options.maxTokens,
-      signal: options.signal,
+      signal: options.signal ?? (options.timeoutMs ? AbortSignal.timeout(options.timeoutMs) : undefined),
     });
     return r.text;
   }
@@ -808,27 +749,29 @@ export class AiService {
     images: Array<{ base64: string; mediaType: string }>;
     maxTokens?: number;
   }) {
-    const target = userChatTarget(planId, prompt, { hasImages: true, hasFiles: true });
+    const route = userChatTarget(planId, prompt, { hasImages: true, hasFiles: true });
+    const target = readingTarget();
     const r = await bwengeAgent.run({
       userId, system: options.system, prompt,
       uploads: options.images.map(image => ({ type: 'image', ...image })),
-      toolNames: [], maxTurns: 1, maxTokens: options.maxTokens ?? target.maxOutputTokens,
+      toolNames: [], maxTurns: 1, maxTokens: options.maxTokens ?? route.maxOutputTokens,
       provider: target.adapter, model: target.model, fallbackModel: target.fallbackModel,
-      vision: target.provider === 'anthropic' || process.env.DOC_VISION_GONKA === 'true',
+      vision: true,
     });
     void recordUsage(userId, { kind: 'vision', model: target.model, inputTokens: r.usage.input_tokens, outputTokens: r.usage.output_tokens });
     return r.text;
   }
 
-  public async streamGonkaChat(prompt: string, options: {
+  public async streamUserChat(prompt: string, options: {
     model?: string; system?: string; history?: any[]; images?: Array<{ base64: string; mediaType: string }>;
     onToken: (token: string) => void; onReset?: () => void; tools?: any[];
     temperature?: number; max_tokens?: number;
     signal?: AbortSignal;
-    userId?: string; requestId?: string; routingPrompt?: string;
+    userId?: string; requestId?: string; routingPrompt?: string; planId?: PlanId;
   }) {
     const uploads = options.images?.map(img => ({ type: 'image' as const, base64: img.base64, mediaType: img.mediaType }));
-    const route = userChatTarget('FREE', options.routingPrompt ?? prompt, { hasFiles: !!uploads?.length, hasImages: !!uploads?.length });
+    const plan = options.planId ?? 'FREE';
+    const route = userChatTarget(plan, options.routingPrompt ?? prompt, { hasFiles: !!uploads?.length, hasImages: !!uploads?.length });
     const model = options.model ?? route.model;
     const result = await bwengeAgent.run({
       userId: options.userId || 'system',
@@ -844,7 +787,7 @@ export class AiService {
       model,
       fallbackModel: options.model ? null : route.fallbackModel,
       requestId: options.requestId,
-      vision: process.env.DOC_VISION_GONKA === 'true',
+      vision: true,
       signal: options.signal,
       onEvent: (e) => {
         if (e.type === 'text') {
@@ -854,10 +797,10 @@ export class AiService {
         }
       },
     });
-    return { model, usage: result.usage };
+    return { model, provider: route.provider, usage: result.usage };
   }
 
-  public async runGonkaAgentLoop(options: {
+  public async runTextAgentLoop(options: {
     prompt: string;
     system: string;
     history?: any[];
@@ -868,12 +811,7 @@ export class AiService {
     signal?: AbortSignal;
     requestId?: string;
   }) {
-    // options.model is ignored as before. Agent loops run on Claude when AI_AGENT_PROVIDER=anthropic;
-    // otherwise the task router picks Gonka or the big-task provider.
-    const agent = agentTarget();
-    const route = agent.provider === 'anthropic'
-      ? { model: agent.model, fallbackModel: agent.fallbackModel }
-      : routeChat(options.prompt, { hasTools: true, requestId: options.requestId });
+    const route = routeChat(options.prompt, { hasTools: true, requestId: options.requestId });
     const r = await bwengeAgent.run({
       userId: 'system',
       system: options.system,
@@ -897,8 +835,7 @@ export class AiService {
   }) {
     const promptText = options.prompt || (options.history?.length ? options.history[options.history.length - 1].text : '');
     const history = options.history?.slice(0, -1);
-    // options.model is an NVIDIA model id; Gonka chooses its own model via the task router.
-    await this.streamGonkaChat(promptText, {
+    await this.streamUserChat(promptText, {
       system: options.system,
       history,
       onToken: options.onToken,
@@ -919,7 +856,7 @@ export class AiService {
     model?: string;
     signal?: AbortSignal;
   }) {
-    return this.runGonkaAgentLoop(options);
+    return this.runTextAgentLoop(options);
   }
 
   public async runDeepResearch(options: {
@@ -942,7 +879,7 @@ export class AiService {
   }
 
   public async streamOllamaChat(prompt: string, options: { model?: string; system?: string; onToken: (token: string) => void; signal?: AbortSignal }) {
-    await this.streamGonkaChat(prompt, {
+    await this.streamUserChat(prompt, {
       system: options.system,
       onToken: options.onToken,
       signal: options.signal,
@@ -998,7 +935,7 @@ export class AiService {
       promptText = JSON.stringify(options.contents);
     }
     const systemPrompt = options.config?.systemInstruction || '';
-    const text = await this.sendGonkaChat(promptText, { system: systemPrompt, signal: options.signal });
+    const text = await this.completeText(promptText, { system: systemPrompt, signal: options.signal });
     return { text };
   }
 
@@ -1011,13 +948,13 @@ export class AiService {
     config?: any;
     signal?: AbortSignal;
   }) {
-    const text = await this.sendGonkaChat(options.userInput, { system: options.systemInstruction, signal: options.signal });
+    const text = await this.completeText(options.userInput, { system: options.systemInstruction, signal: options.signal });
     return { text };
   }
 
   public async streamClaudeChat(options: { system: string; messages: any[]; max_tokens?: number; model?: string; signal?: AbortSignal; onToken?: (token: string) => void }) {
     const promptText = options.messages.map((m: any) => extractPlainText(m.content)).join('\n');
-    await this.streamGonkaChat(promptText, {
+    await this.streamUserChat(promptText, {
       system: options.system,
       onToken: options.onToken || (() => {}),
       signal: options.signal,
@@ -1036,11 +973,11 @@ export class AiService {
       promptText = typeof promptOrOptions === 'object' ? JSON.stringify(promptOrOptions) : String(promptOrOptions);
     }
 
-    const text = await this.sendGonkaChat(promptText, { system: systemPrompt, signal: options.signal });
+    const text = await this.completeText(promptText, { system: systemPrompt, model: options.model, maxTokens: options.max_tokens, signal: options.signal });
     return {
       text,
       usage: { input_tokens: 0, output_tokens: 0 },
-      model: GONKA_MODELS.DEFAULT,
+      model: options.model ?? claudeModel,
       content: [{ type: 'text', text }],
     };
   }
@@ -1059,6 +996,7 @@ export class AiService {
       prompt: options.question,
       uploads: [{ type: 'image', base64: options.base64, mediaType: options.mediaType }],
       toolNames: [],
+      vision: true,
       signal: options.signal,
     });
     return r.text;
@@ -1106,7 +1044,6 @@ export class AiService {
     const m = /^data:(image\/jpeg|image\/png);base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
     if (!m || m[2].length > 200_000) throw new Error('Not a usable picture.');
     const route = await userAgentTarget(userId, '', { hasImages: true });
-    if (route.provider === 'gonka' && process.env.DOC_VISION_GONKA !== 'true') throw new Error('No vision model is available on this plan.');
     const r = await bwengeAgent.run({
       userId, system, prompt: 'Look at this picture and answer with the JSON only.', uploads: [{ type: 'image', base64: m[2], mediaType: m[1] }],
       toolNames: [], vision: true, maxTurns: 1,
@@ -1170,24 +1107,9 @@ export class AiService {
     const toolTurn = !!plan && (plan.artifact || plan.needsComputation) || dataTurn;
     const visualUpload = (options.files ?? []).some(f => f.type === 'image' || /^image\/|application\/pdf/.test(f.mediaType));
     const earlierFiles = (options.contextFiles ?? []).slice(-5);
-    const planId = options.planId ?? await planFor(options.userId).then(p => p.id).catch(() => 'FREE' as const);
-    let needsVision = false;
-    if (planId !== 'FREE' && claudeAdapter) {
-      for (const file of options.files ?? []) {
-        if (file.type === 'image' || file.mediaType.startsWith('image/') ||
-            (file.mediaType === 'application/pdf' && await needsScanRecognition({
-              buffer: Buffer.from(file.base64, 'base64'), name: file.name ?? 'attachment.pdf', mime: file.mediaType,
-            }))) {
-          needsVision = true;
-          break;
-        }
-      }
-    }
-    const route = userChatTarget(planId, userText, { hasFiles: !!options.files?.length, hasImages: needsVision });
-    const vision = route.provider === 'anthropic' || process.env.DOC_VISION_GONKA === 'true';
-    if (route.provider === 'gonka' && !process.env.GONKA_API_KEY) {
-      throw Object.assign(new Error('GonkaRouter API key is not configured.'), { code: 'AI_UNAVAILABLE' });
-    }
+    const planId = options.planId ?? (await planFor(options.userId)).id;
+    const route = userChatTarget(planId, userText, { hasFiles: !!options.files?.length });
+    const vision = true;
 
     let memoryContext = '';
     try {

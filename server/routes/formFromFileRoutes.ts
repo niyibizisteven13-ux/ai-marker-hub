@@ -11,7 +11,7 @@ import { FromFileError, draftQuiz, type QuizAi } from '../services/forms/fromFil
 const defaultAi: QuizAi = {
   async json(system, user) {
     const ai = AiService.getInstance();
-    return ai.parseModelJson(await ai.sendGonkaChat(user, { system }));
+    return ai.parseModelJson(await ai.completeText(user, { system }));
   },
 };
 

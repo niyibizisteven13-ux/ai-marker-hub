@@ -1,5 +1,7 @@
 # AI Capability Audit
 
+> Historical audit. See [current provider routing](EDUCATION_AI_BACKEND.md#2-provider-routing) for deployment settings.
+
 **Audit scope:** current working tree on `main` (the branch is one commit ahead of `origin/main` and has pre-existing modified and untracked files). Findings describe that working tree, not a clean checkout. No application code was changed for this audit; this document is the requested Phase 1 deliverable.
 
 **Status note:** the findings below describe the pre-hardening audit snapshot. The remediation status and remaining deployment checks are recorded in [Hardening update](#hardening-update).

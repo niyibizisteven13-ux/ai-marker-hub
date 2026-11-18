@@ -18,18 +18,17 @@ Backend only. No frontend files or frontend dependencies changed, and no new npm
 
 | Traffic | Provider |
 |---|---|
-| Free accounts, routine chat and ordinary text agents on paid accounts | **GonkaRouter**, including Free chat that needs tools. |
-| Scan reading, long inputs and specialized high-demand workflows on non-Free plans | **Claude** (`CLAUDE_AGENT_MODEL`) when `AI_AGENT_PROVIDER=anthropic` and `ANTHROPIC_API_KEY` are set. Otherwise, GonkaRouter handles the request. |
+| Free and paid chat, agents, and scan reading | **Claude** using `ANTHROPIC_API_KEY`. Account limits continue to apply. |
 | Calculations, chart data, totals, quote checks, rubric checks | Deterministic code. The model is never trusted for these. |
 
 How the Claude adapter (`providers/anthropicAdapter.ts`) behaves:
 
 - **Sampling and effort:** it never sends `temperature`/`top_p`/`top_k`, which current Claude models reject. Effort is set with `CLAUDE_EFFORT`.
 - **Prompt caching:** the stable prefix is cached automatically (`cache_control: ephemeral`).
-- **Thinking and tool blocks:** they are replayed unchanged within a tool loop, via `ChatMessage.providerState`. This metadata is stripped before any request goes to Gonka.
+- **Thinking and tool blocks:** they are replayed unchanged within a tool loop, via `ChatMessage.providerState`.
 - **Structured output:** structured tasks use `output_config.format` (JSON schema), and the result is validated again in code.
 - **Retries:** SDK retries are off; `ReliableProviderAdapter` is the single retry/fallback policy.
-- **Fallback:** transient Claude errors fall back to Gonka (`CLAUDE_FALLBACK_TO_GONKA`).
+- **Fallback:** simple and standard turns may use a configured Claude fallback model on supported transient errors.
 - **Refusals:** a `refusal` stop is final. It becomes `CONTENT_REFUSED`, with no retry and no fallback.
 - **Truncated tool calls:** a tool call cut off by `max_tokens` is never executed.
 
@@ -117,7 +116,7 @@ Example report request: `{ "title": "Scores by district", "researchQuestion": "â
 
 ## 7. Configuration, storage and operations
 
-New variables are listed with safe defaults in `.env.example`: `AI_AGENT_PROVIDER`, `ANTHROPIC_API_KEY`, `CLAUDE_AGENT_MODEL`, `CLAUDE_EFFORT`, `CLAUDE_FALLBACK_TO_GONKA`, `CLAUDE_REQUEST_TIMEOUT_MS`, `JOBS_DIR`, `JOBS_CONCURRENCY`, `JOBS_MAX_ACTIVE_PER_USER`, `ASSESSMENTS_DIR`.
+New variables are listed with safe defaults in `.env.example`: `ANTHROPIC_API_KEY`, `CLAUDE_AGENT_MODEL`, `CLAUDE_EFFORT`, `CLAUDE_REQUEST_TIMEOUT_MS`, `JOBS_DIR`, `JOBS_CONCURRENCY`, `JOBS_MAX_ACTIVE_PER_USER`, `ASSESSMENTS_DIR`.
 
 **Storage:**
 - **Location:** `FILE_STORE_DIR` (datasets, submissions, reports), `JOBS_DIR` and `ASSESSMENTS_DIR` must be on durable storage. They are git-ignored.
@@ -131,7 +130,7 @@ New variables are listed with safe defaults in `.env.example`: `AI_AGENT_PROVIDE
 
 **Migrations:** none. Nothing new in the database.
 
-**Rollback:** set `AI_AGENT_PROVIDER=gonka` (Claude off) and restart, or revert the commit. The data directories are inert without the code.
+**Production check:** run `node --import tsx scripts/claude-smoke.ts` in the configured deployment environment to verify authentication, model access, and streaming.
 
 **Monitoring:** watch the `[jobs]`, `[AI provider]` and `[AI routing]` log lines and `GET /api/admin/ai/provider-metrics`, which includes Claude when it is enabled.
 
@@ -151,7 +150,7 @@ The tests cover:
 - **Data handling:** malformed, empty, oversized and ragged files.
 - **Artifacts:** HTML injection through titles, category labels and citations; the validator, including entity-encoded `javascript:`; chart validation; and rejection of AI narrative that adds numbers.
 - **Assessment:** rubric parsing and validation, quote verification, out-of-range and level-mismatch marks, totals, and review/confirm.
-- **Claude adapter:** message conversion, thinking-block replay, absence of sampling params, refusal with no fallback, `max_tokens`-truncated tool calls, error mapping, and fallback to Gonka.
+- **Claude adapter:** message conversion, thinking-block replay, absence of sampling params, refusal with no fallback, `max_tokens`-truncated tool calls, error mapping, and explicit fallback behavior.
 - **Jobs:** idempotency, owner isolation, retries, deadlines (including handlers that ignore cancellation), restart recovery and expiry.
 - **HTTP:** an end-to-end report download through signed URLs, a tampered signature (403), and cross-user 404s.
 

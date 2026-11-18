@@ -93,8 +93,8 @@ export class ContextAwareService {
           : '';
 
       return {
-        modelName: activeFtModel?.baseModel || 'zai-org/GLM-5.3-Flash',
-        baseModel: activeFtModel?.baseModel || 'zai-org/GLM-5.3-Flash',
+        modelName: activeFtModel?.baseModel || (process.env.CLAUDE_AGENT_MODEL || 'claude-haiku-5-5'),
+        baseModel: activeFtModel?.baseModel || (process.env.CLAUDE_AGENT_MODEL || 'claude-haiku-5-5'),
         adapterPrompt,
         fewShotBlock,
         exampleCount: approvedExamples.length,
@@ -102,8 +102,8 @@ export class ContextAwareService {
     } catch (err) {
       logger.warn('Failed to load dataset-grounded prompt adapter context:', err);
       return {
-        modelName: 'zai-org/GLM-5.3-Flash',
-        baseModel: 'zai-org/GLM-5.3-Flash',
+        modelName: (process.env.CLAUDE_AGENT_MODEL || 'claude-haiku-5-5'),
+        baseModel: (process.env.CLAUDE_AGENT_MODEL || 'claude-haiku-5-5'),
         adapterPrompt: '',
         fewShotBlock: '',
         exampleCount: 0,

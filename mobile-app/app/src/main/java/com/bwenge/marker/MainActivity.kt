@@ -24,7 +24,7 @@ class MainActivity : AppCompatActivity() {
 
     private val phrases = listOf(
         "Connecting to Bwenge AI Gateway...",
-        "Routing request to GonkaRouter (GLM-5.3-Flash)...",
+        "Connecting to Bwenge...",
         "Analyzing with high-speed intelligence...",
         "Formulating structured response...",
         "Writing output..."
@@ -56,7 +56,7 @@ class MainActivity : AppCompatActivity() {
     private fun sendToBwengeBackend(prompt: String, resultView: TextView, loader: View) {
         val json = JSONObject().apply {
             put("query", prompt)
-            put("provider", "gonkarouter")
+            put("provider", "anthropic")
         }
 
         val body = json.toString().toRequestBody("application/json".toMediaType())

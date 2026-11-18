@@ -1,17 +1,6 @@
+import { AiService } from './AiService.js';
 import logger from '../utils/logger.js';
 import { parseModelJson } from '../utils/textSanitizers.js';
-
-const DEFAULT_FETCH_TIMEOUT_MS = 15_000;
-
-async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try { return await fetch(url, { ...init, signal: controller.signal }); }
-  catch (err: any) {
-    if (err?.name === 'AbortError') throw new Error(`Request to ${url} timed out after ${timeoutMs}ms`);
-    throw err;
-  } finally { clearTimeout(timer); }
-}
 
 export type EmotionalTone = 'neutral' | 'frustrated' | 'confused' | 'excited' | 'stressed' | 'sad' | 'grateful' | 'angry';
 export type PersonaMode = 'professional' | 'empathetic' | 'encouraging' | 'gentle' | 'celebratory' | 'socratic';
@@ -62,15 +51,8 @@ The user is in a learning mindset. Prioritize:
 
 export class SentimentService {
   private static instance: SentimentService;
-  private baseUrl: string;
-  private apiKey: string;
-  private model: string;
 
-  private constructor() {
-    this.apiKey = process.env.GONKA_API_KEY || '';
-    this.baseUrl = (process.env.GONKA_BASE_URL || 'https://api.gonkarouter.io/v1').replace(/\/$/, '') + '/chat/completions';
-    this.model = process.env.GONKA_MODEL || 'zai-org/GLM-5.3-Flash';
-  }
+  private constructor() {}
 
   public static getInstance(): SentimentService {
     if (!SentimentService.instance) SentimentService.instance = new SentimentService();
@@ -79,14 +61,14 @@ export class SentimentService {
 
   /**
    * Analyzes the emotional tone of a user message.
-   * Uses a fast, lightweight Gonka call (~200ms target).
+   * Uses a fast, lightweight Claude call (~200ms target).
    */
   public async analyze(message: string): Promise<SentimentResult> {
     const fallback: SentimentResult = {
       tone: 'neutral', intensity: 0.3, suggestedPersona: 'professional',
       systemPromptAddendum: '',
     };
-    if (!this.apiKey || !message.trim()) return fallback;
+    if (!process.env.ANTHROPIC_API_KEY || !message.trim()) return fallback;
 
     const systemPrompt = `You are an emotional tone classifier. Analyze the message and return ONLY valid JSON:
 {
@@ -97,25 +79,7 @@ export class SentimentService {
 Do NOT include any text outside the JSON object.`;
 
     try {
-      const response = await fetchWithTimeout(this.baseUrl, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: this.model,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: message.slice(0, 500) }, // cap to avoid excess tokens
-          ],
-          temperature: 0.0,
-          max_tokens: 256,
-          stream: false,
-        }),
-      }, 15_000);
-
-      const data: any = await response.json();
-      if (!response.ok) throw new Error(`Sentiment API error: ${data?.error?.message}`);
-
-      const raw = (data?.choices?.[0]?.message?.content || '').trim();
+      const raw = (await AiService.getInstance().completeText(message.slice(0, 500), { system: systemPrompt, maxTokens: 256, timeoutMs: 15_000 })).trim();
       const json = parseModelJson(raw);
 
       const tone = json.tone as EmotionalTone || 'neutral';

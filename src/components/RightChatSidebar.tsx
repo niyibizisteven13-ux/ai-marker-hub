@@ -116,7 +116,7 @@ export default function RightChatSidebar({
   isTyping = false,
   onUpgradeClick,
   onRetry,
-  selectedProvider = 'gonkarouter',
+  selectedProvider = 'anthropic',
   onProviderChange,
   onInsightAction,
 }: RightChatSidebarProps) {

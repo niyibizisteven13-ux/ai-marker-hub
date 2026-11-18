@@ -89,8 +89,8 @@ test('tools: output tools are registered by default, exposed to Claude with sche
   assert.match(calls[0].system, /create_output/, 'capabilities prompt names the tool');
 });
 
-test('routing: file/chart requests reach the tool agent even when AI_PROVIDER=gonkarouter and no Claude key', () => {
-  const base = { intent: 'general_assist', service: 'general', isSmallTalk: false, requestedProvider: null, hasClaudeKey: false, aiProvider: 'gonkarouter', agentAvailable: true };
+test('routing: file/chart requests reach the tool agent even when AI_PROVIDER=anthropic', () => {
+  const base = { intent: 'general_assist', service: 'general', isSmallTalk: false, requestedProvider: null, hasClaudeKey: false, aiProvider: 'anthropic', agentAvailable: true };
   const plan = planOutput({ message: ACCEPTANCE });
   assert.equal(useToolAgent({ ...base, plan }), true, 'the reported failure: this used to take the tool-less legacy stream');
   assert.equal(useToolAgent({ ...base, plan: planOutput({ message: 'What is photosynthesis?' }) }), false, 'everyday chat unchanged');

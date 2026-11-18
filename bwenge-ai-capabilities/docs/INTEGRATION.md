@@ -9,7 +9,7 @@
 ```
 FILE_STORE_DIR=./data/generated        # persistent volume in production
 FILE_URL_SECRET=<32+ random characters>
-GONKA_API_KEY=...  GONKA_BASE_URL=...  GONKA_MODEL=zai-org/GLM-5.3-Flash
+OPENAI_API_KEY=...  OPENAI_BASE_URL=...  OPENAI_MODEL=gpt-4.1-mini
 # optional image generation (OpenAI-compatible /images/generations)
 IMAGE_API_KEY=  IMAGE_BASE_URL=  IMAGE_MODEL=
 ```
@@ -26,8 +26,8 @@ import { ExecutionSandbox } from '../ExecutionSandbox.js';
 export const fileStore = new FileStore({ dir: process.env.FILE_STORE_DIR ?? './data/generated', secret: process.env.FILE_URL_SECRET! });
 
 export const agent = createAiAgent({
-  provider: { name: 'GonkaRouter', baseUrl: process.env.GONKA_BASE_URL ?? 'https://api.gonkarouter.io/v1', apiKey: process.env.GONKA_API_KEY },
-  model: process.env.GONKA_MODEL ?? 'zai-org/GLM-5.3-Flash',
+  provider: { name: 'OpenAI-compatible provider', baseUrl: process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1', apiKey: process.env.OPENAI_API_KEY },
+  model: process.env.OPENAI_MODEL ?? 'gpt-4.1-mini',
   files: fileStore,
   temperature: 0.3,
   maxTokens: 8192,
@@ -50,7 +50,7 @@ export const agent = createAiAgent({
   },
 });
 ```
-The GonkaRouter request shape (OpenAI-compatible `/chat/completions` with SSE) is the assumption already noted in your code. Confirm the base URL, SSE framing, and tool-call support. If the gateway rejects `stream_options`, pass `includeUsage: false` in the provider options.
+The compatibility adapter uses `/chat/completions` with SSE. Check that your endpoint supports tool calls. If the gateway rejects `stream_options`, pass `includeUsage: false` in the provider options.
 
 ## 3. Mount downloads and cleanup
 
@@ -60,12 +60,12 @@ app.use('/api/files', createFileRouter(fileStore, { getUserId: (req) => (req as 
 setInterval(() => fileStore.purgeExpired().catch(() => {}), 60 * 60 * 1000);
 ```
 
-## 4. Replace the Gonka branch of `generalAssist`
+## 4. Replace the OpenAI-compatible branch of `generalAssist`
 
 Keep your memory and pinned-syllabus logic; replace the manual message and file handling:
 
 ```ts
-if (useGonka) {
+if (useCompatibleProvider) {
   const memoryContext = await memoryService.getLongTermContext(options.userId, currentQuery).catch(() => '');
   const system = BWENGE_GENERAL_SYSTEM_PROMPT + memoryContext +
     (options.pinnedSyllabus ? `\n\n[MASTER CONTEXT]: ${options.pinnedSyllabus}` : '');
@@ -82,10 +82,10 @@ if (useGonka) {
     uploads: options.files?.map((f) => ({ type: f.type, base64: f.base64, mediaType: f.mediaType })),
     onEvent: options.onEvent,           // text, tool_call, tool_result, attachment, sources, turn_reset, usage, done
   });
-  return { content: [{ type: 'text', text: r.text }], model: process.env.GONKA_MODEL, attachments: r.attachments, sources: r.sources, _usage: r.usage };
+  return { content: [{ type: 'text', text: r.text }], model: process.env.OPENAI_MODEL, attachments: r.attachments, sources: r.sources, _usage: r.usage };
 }
 ```
-`options.tools` / `options.executeTool` from the old signature are no longer needed for Gonka: the registry holds the tools. To keep your own tools (for example `build_form`, `cross_reference_visuals`), add them with `agent.tools.add({ definition, execute })` using the `Tool` shape.
+`options.tools` / `options.executeTool` from the old signature are no longer needed for the compatible adapter: the registry holds the tools. To keep your own tools (for example `build_form`, `cross_reference_visuals`), add them with `agent.tools.add({ definition, execute })` using the `Tool` shape.
 
 ## 5. Stream events to the browser
 

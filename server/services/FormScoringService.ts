@@ -73,7 +73,7 @@ export class FormScoringService {
       ? JSON.stringify(rubric)
       : 'No formal rubric was supplied. Assess each response against the form purpose and all explicit selection requirements in the schema. Score completeness, depth, relevance, and evidence on a 0-100 scale.';
 
-    const systemPrompt = `You are Bwenge Admissions & Form Scoring Agent powered by GonkaRouter.
+    const systemPrompt = `You are Bwenge Admissions & Form Scoring Agent powered by Claude.
 Grade this form submission strictly against the form questions, answer keys, and rubric.
 Calculate a totalScore (0-100) and provide concise, actionable feedback.
 
@@ -92,7 +92,7 @@ OUTPUT JSON ONLY:
     const prompt = `FORM TITLE: ${form.title}\nFORM DEFINITION: ${form.schema}\nSUBMISSION DATA: ${JSON.stringify(redactFormAnswersForAi(schema, submissionData))}`;
 
     try {
-      const raw = await this.aiService.sendGonkaChat(prompt, { system: systemPrompt });
+      const raw = await this.aiService.completeText(prompt, { system: systemPrompt });
       const parsed = this.aiService.parseModelJson(raw);
       const score = Number(parsed?.totalScore);
       if (!Number.isFinite(score) || typeof parsed?.feedback !== 'string' || !parsed.feedback.trim()) {

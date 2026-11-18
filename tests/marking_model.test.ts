@@ -28,9 +28,8 @@ const fake = http.createServer((req, res) => {
 await new Promise((r) => fake.once('listening', r));
 const base = `http://127.0.0.1:${(fake.address() as AddressInfo).port}`;
 Object.assign(process.env, {
-  AI_PROVIDER: 'gonkarouter', AI_AGENT_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'test-key', ANTHROPIC_BASE_URL: base,
-  CLAUDE_AGENT_MODEL: 'claude-haiku-5-5', CLAUDE_EFFORT: 'medium', CLAUDE_MARKING_MODEL: 'claude-opus-5-5', CLAUDE_MARKING_EFFORT: 'high',
-  CLAUDE_FALLBACK_TO_GONKA: 'false', AI_MAX_ATTEMPTS: '1', GONKA_API_KEY: 'test-gonka', GONKA_BASE_URL: `${base}/gonka/v1`,
+  AI_PROVIDER: 'anthropic', AI_AGENT_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'test-key', ANTHROPIC_BASE_URL: base,
+  CLAUDE_AGENT_MODEL: 'claude-haiku-5-5', CLAUDE_EFFORT: 'medium', CLAUDE_MARKING_MODEL: 'claude-opus-5-5', CLAUDE_MARKING_EFFORT: 'high', AI_MAX_ATTEMPTS: '1',
 });
 
 const { agentTarget, markingTarget, fileJobQueue } = await import('../server/services/AiService.js');

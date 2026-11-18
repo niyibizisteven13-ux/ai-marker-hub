@@ -204,7 +204,7 @@ export const ToolRegistry: Record<string, ToolDefinition> = {
     preferredProvider: 'nvidianim'
   },
 
-  // ── NEW FRONTIER-LEVEL TOOLS (Gonka Router powered) ──────────────────────
+  // ── NEW FRONTIER-LEVEL TOOLS (Bwenge) ──────────────────────
 
   fact_check: {
     metadata: {
@@ -327,7 +327,7 @@ export const ToolRegistry: Record<string, ToolDefinition> = {
   generate_image_graphic: {
     metadata: {
       name: 'generate_image_graphic',
-      description: 'Generates images, digital paintings, logos, graphic design layouts, and marketing assets via GonkaRouter Visual (Nano Banana Pro).',
+      description: 'Generates images, digital paintings, logos, graphic design layouts, and marketing assets as SVG layouts.',
       input_schema: {
         type: 'object',
         properties: {
@@ -346,7 +346,7 @@ export const ToolRegistry: Record<string, ToolDefinition> = {
   generate_video_animation: {
     metadata: {
       name: 'generate_video_animation',
-      description: 'Generates animated scenes, talking characters, and short-form video ads or clips via GonkaRouter Motion (Flow Engine).',
+      description: 'Generates animated scenes, talking characters, and short-form video ads or clips as motion previews.',
       input_schema: {
         type: 'object',
         properties: {

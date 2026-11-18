@@ -42,8 +42,8 @@ const fake = http.createServer((req, res) => {
 await new Promise((r) => fake.once('listening', r));
 const base = `http://127.0.0.1:${(fake.address() as AddressInfo).port}`;
 Object.assign(process.env, {
-  AI_PROVIDER: 'gonkarouter', AI_AGENT_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'test-key', ANTHROPIC_BASE_URL: base,
-  CLAUDE_AGENT_MODEL: 'claude-haiku-5-5', CLAUDE_FALLBACK_TO_GONKA: 'false', GONKA_API_KEY: 'test-gonka', GONKA_BASE_URL: `${base}/gonka/v1`,
+  AI_PROVIDER: 'anthropic', AI_AGENT_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'test-key', ANTHROPIC_BASE_URL: base,
+  CLAUDE_AGENT_MODEL: 'claude-haiku-5-5',
 });
 
 const { ingestUploads } = await import('../server/services/ai/ingest.js');
@@ -94,7 +94,7 @@ test('ingest: long scans are capped and the model is told which pages it sees', 
 
 test('chat: a scanned PDF goes to the agent path and reaches Claude as images, even for a plain question', async () => {
   const plain = planOutput({ message: 'answer that question' });
-  const base = { intent: 'general_assist', service: 'general', isSmallTalk: false, requestedProvider: null, hasClaudeKey: true, aiProvider: 'gonkarouter', agentAvailable: true, plan: plain };
+  const base = { intent: 'general_assist', service: 'general', isSmallTalk: false, requestedProvider: null, hasClaudeKey: true, aiProvider: 'anthropic', agentAvailable: true, plan: plain };
   assert.equal(useToolAgent(base), false, 'plain text without files keeps the legacy route');
   assert.equal(useToolAgent({ ...base, hasVisualFiles: true }), true, 'attached photos/PDFs need the agent path');
 

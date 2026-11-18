@@ -1,7 +1,7 @@
 import { FileJobQueue, JobError } from './ai/jobs/fileJobQueue.js';
 import { isOvernight } from './ai/batchMode.js';
 import path from 'node:path';
-import { fileJobQueue, fileStore, markingTarget, readingTarget, userAgentTarget } from './AiService.js';
+import { fileJobQueue, fileStore, markingTarget, readingTarget, userAgentTarget, userChatAvailable } from './AiService.js';
 import { createAnalyticsService } from './analytics/service.js';
 import { createAssessmentService, type AssessmentRecord } from './assessment/service.js';
 import { OwnedRecordStore } from './storage/ownedRecordStore.js';
@@ -26,39 +26,25 @@ const forbiddenStrings = [process.cwd(), path.resolve(process.env.FILE_STORE_DIR
 
 export const analyticsService = createAnalyticsService({
   fileStore, queue: fileJobQueue, forbiddenStrings,
-  agent: userId => userAgentTarget(userId, '', { highDemand: true }),
+  agent: userId => userAgentTarget(userId, ''),
 });
 
 export const assessmentStore = new OwnedRecordStore<AssessmentRecord>(process.env.ASSESSMENTS_DIR ?? './data/assessments');
 
 export const assessmentService = createAssessmentService({
   fileStore, queue: fileJobQueue, store: assessmentStore, forbiddenStrings,
-  agent: userId => userAgentTarget(userId, '', { highDemand: true }),
+  agent: userId => userAgentTarget(userId, ''),
 });
 
 export const documentStore = new OwnedRecordStore<DocumentRecord>(process.env.DOCUMENTS_DIR ?? './data/documents');
 
-/**
- * Handwriting recognition needs a vision model: Claude when AI_AGENT_PROVIDER=anthropic, or the Gonka
- * model only if DOC_VISION_GONKA=true says it accepts images. Image requests are only sent to a
- * fallback model that is known to accept images (GONKA_FALLBACK_SUPPORTS_VISION=true).
- */
 function visionTarget() {
-  // Handwriting is read by the reading model (CLAUDE_READING_MODEL; by default cheaper than an Opus marking model).
-  const a = readingTarget();
-  if (a.provider === 'anthropic') return { adapter: a.adapter, model: a.model, fallbackModel: process.env.GONKA_FALLBACK_SUPPORTS_VISION === 'true' ? undefined : null };
-  if (process.env.DOC_VISION_GONKA === 'true') return { adapter: a.adapter, model: process.env.DOC_VISION_MODEL?.trim() || a.model, fallbackModel: null };
-  return null;
+  return userChatAvailable() ? readingTarget() : null;
 }
 
 export const documentService = createDocumentService({
   fileStore, queue: fileJobQueue, store: documentStore, forbiddenStrings,
-  vision: async userId => {
-    const route = await userAgentTarget(userId, '', { hasImages: true });
-    if (route.provider === 'anthropic') return visionTarget();
-    if (process.env.DOC_VISION_GONKA !== 'true') return null;
-    return { adapter: route.adapter, model: process.env.DOC_VISION_MODEL?.trim() || route.model, fallbackModel: null };
-  },
+  vision: async () => visionTarget(),
   agent: userId => userAgentTarget(userId, ''),
   ocr: process.env.DOC_OCR_CROSSCHECK === 'false' ? undefined : tesseractOcr,
   maxPages: Number(process.env.DOC_MAX_PAGES) > 0 ? Number(process.env.DOC_MAX_PAGES) : 40,
@@ -73,7 +59,7 @@ const num = (v: string | undefined, d: number) => (Number(v) > 0 ? Number(v) : d
  * Overnight marking runs: Claude requests sent as half-price batches that can take hours, so they run on their
  * own queue with a long deadline and never hold the slots of live jobs. Only with Claude as the marking model.
  */
-export const overnightJobQueue = markingTarget().provider === 'anthropic' && process.env.OVERNIGHT_MARKING !== 'false'
+export const overnightJobQueue = userChatAvailable() && process.env.OVERNIGHT_MARKING !== 'false'
   ? new FileJobQueue({
     storageDir: process.env.OVERNIGHT_JOBS_DIR ?? './data/jobs-overnight',
     concurrency: num(process.env.OVERNIGHT_JOBS_CONCURRENCY, 6),
@@ -83,11 +69,8 @@ export const overnightJobQueue = markingTarget().provider === 'anthropic' && pro
   })
   : undefined;
 
-async function examAiTarget(userId: string) {
-  const route = await userAgentTarget(userId, '', { highDemand: true });
-  return route.provider === 'anthropic'
-    ? { ...markingTarget(), supportsVision: true }
-    : { ...route, supportsVision: process.env.DOC_VISION_GONKA === 'true' };
+function examAiTarget() {
+  return { ...markingTarget(), supportsVision: userChatAvailable() };
 }
 
 export const examService = createExamService({

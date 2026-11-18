@@ -39,7 +39,7 @@ export class HighVolumeBatchService {
 
   private constructor() {}
 
-  private async extractGonkaPdfText(buffer: Buffer): Promise<string> {
+  private async extractClaudePdfText(buffer: Buffer): Promise<string> {
     const parser = new PDFParse({ data: buffer as Uint8Array });
     let worker: Worker | null = null;
     try {
@@ -115,17 +115,17 @@ Return a valid JSON array of GradedResult matching this exact structure:
 ]`;
 
     try {
-      if (await this.aiService.providerAvailable('gonkarouter')) {
-        logger.info(`[HighVolumeBatchService] Routing batch via GonkaRouter (GLM-5.3-Flash)`);
+      if (await this.aiService.providerAvailable('anthropic')) {
+        logger.info(`[HighVolumeBatchService] Routing batch via Claude`);
         const paperIsPdf = papersBuffer.subarray(0, 5).toString() === '%PDF-';
         const rubricIsPdf = rubricBuffer.subarray(0, 5).toString() === '%PDF-';
-        const paperText = paperIsPdf ? await this.extractGonkaPdfText(papersBuffer) : '';
-        const rubricText = rubricIsPdf ? await this.extractGonkaPdfText(rubricBuffer) : '';
+        const paperText = paperIsPdf ? await this.extractClaudePdfText(papersBuffer) : '';
+        const rubricText = rubricIsPdf ? await this.extractClaudePdfText(rubricBuffer) : '';
 
         const paperIsImage = /^image\/(jpeg|png|webp|gif)$/i.test(paperMimeType);
         const rubricIsImage = /^image\/(jpeg|png|webp|gif)$/i.test(rubricMimeType);
         const textPrompt = `${prompt}\n\nSTUDENT PAPERS:\n${paperIsPdf ? paperText : (paperIsImage ? '[Read the attached student paper image.]' : '[Paper attachment is not a supported image or PDF.]')}\n\nRUBRIC:\n${rubricIsPdf ? rubricText : (rubricIsImage ? '[Read the attached rubric image.]' : '[Rubric attachment is not a supported image or PDF.]')}`;
-        const rawResponse = await this.aiService.sendGonkaChat(textPrompt, {
+        const rawResponse = await this.aiService.completeText(textPrompt, {
           images: [
             ...(!paperIsPdf && paperIsImage ? [{ base64: papersBuffer.toString('base64'), mediaType: paperMimeType }] : []),
             ...(!rubricIsPdf && rubricIsImage ? [{ base64: rubricBuffer.toString('base64'), mediaType: rubricMimeType }] : []),
@@ -133,7 +133,7 @@ Return a valid JSON array of GradedResult matching this exact structure:
         });
         const rawJson = this.aiService.parseModelJson(typeof rawResponse === 'string' ? rawResponse : (rawResponse as any).text || '');
         const results: GradedStudentResult[] = Array.isArray(rawJson) ? rawJson : (rawJson.results || []);
-        logger.info(`[HighVolumeBatchService] GonkaRouter batch successfully processed: ${results.length} students graded.`);
+        logger.info(`[HighVolumeBatchService] Claude batch successfully processed: ${results.length} students graded.`);
         return results;
       }
 

@@ -4,7 +4,7 @@
 
 - **What a credit is:** 1 credit = $0.001 of real AI model cost, and every action costs at least 1 credit.
 - **How they're counted:** every reply is metered from its actual token usage, on the web and in Telegram. Each one is stored as a `UsageRecord` (migration `20261023000200_usage_records`).
-- **Model prices:** set in `server/services/billing/usage.ts`. Claude Haiku 5.5 costs $0.10 / $0.50 per million tokens. Gonka rates come from `GONKA_PRICE_IN_PER_MTOK` / `GONKA_PRICE_OUT_PER_MTOK`; the defaults are deliberately conservative.
+- **Model prices:** set in `server/services/billing/usage.ts`. Claude Haiku 5.5 costs $0.10 / $0.50 per million tokens. Unlisted model rates come from `AI_PRICE_IN_PER_MTOK` / `AI_PRICE_OUT_PER_MTOK`; the defaults are deliberately conservative.
 
 ## Plans (`server/services/billing/plans.ts`)
 

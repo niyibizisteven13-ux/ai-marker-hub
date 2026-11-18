@@ -1,7 +1,7 @@
 import { ProviderAdapter, ProviderChunk, ProviderError, ProviderRequest } from './types.js';
 
 export interface OpenAICompatibleOptions {
-  /** Display name for logs/events, e.g. "GonkaRouter". */
+  /** Display name for logs/events, e.g. "Claude". */
   name: string;
   /** Full chat-completions URL or a base URL ending in /v1 (the path is added automatically). */
   baseUrl: string;
@@ -18,7 +18,7 @@ export interface OpenAICompatibleOptions {
 }
 
 /**
- * One streaming adapter for every OpenAI-compatible gateway: GonkaRouter, NVIDIA NIM, OpenRouter, OpenAI.
+ * One streaming adapter for every OpenAI-compatible gateway: NVIDIA NIM, OpenRouter, OpenAI.
  * Handles SSE framing, tool-call deltas, JSON (non-SSE) fallbacks, mid-stream errors, and idle timeouts.
  */
 export class OpenAICompatibleAdapter implements ProviderAdapter {
