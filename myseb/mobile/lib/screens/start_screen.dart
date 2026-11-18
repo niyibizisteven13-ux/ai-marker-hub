@@ -7,6 +7,7 @@ import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
 import '../services/api.dart';
 import 'exam_screen.dart';
+import 'link_room_screen.dart';
 
 class StartScreen extends StatefulWidget {
   const StartScreen({super.key});
@@ -149,6 +150,18 @@ class _StartScreenState extends State<StartScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _openRoom(String view) async {
+    setState(() => _busy = true);
+    try {
+      final base = await Api.savedBase();
+      if (!mounted) return;
+      final uri = Uri.parse('$base/liveroom/').replace(queryParameters: {'client':'app', 'view':view});
+      await Navigator.of(context).push(MaterialPageRoute(builder: (_) => LinkRoomScreen(address:uri)));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _serverDialog() async {
     final c = TextEditingController(text: await Api.savedBase());
     if (!mounted) return;
@@ -206,6 +219,8 @@ class _StartScreenState extends State<StartScreen> with WidgetsBindingObserver {
                   ),
                   const SizedBox(height: 18),
                   FilledButton(onPressed: _busy ? null : _join, child: Padding(padding: const EdgeInsets.all(14), child: Text(_busy ? 'Checking…' : 'Start exam'))),
+                  TextButton(onPressed: _busy ? null : () => _openRoom('direct'), child: const Text('Open a link')),
+                  TextButton(onPressed: _busy ? null : () => _openRoom('join'), child: const Text('LiveRoom')),
                   if (_error != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(_error!, textAlign: TextAlign.center, style: const TextStyle(color: Color(0xFFF87171)))),
                   const SizedBox(height: 24),
                   const Text('Your phone will be locked until the exam ends. Leaving the app is recorded and pauses your exam.',

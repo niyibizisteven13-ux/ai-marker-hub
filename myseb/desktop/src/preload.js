@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('myseb', {
   downloadUpdate: () => ipcRenderer.invoke('update-download'),
   installUpdate: () => ipcRenderer.invoke('update-install'),
   onUpdate: (cb) => ipcRenderer.on('app-update', (_e, s) => cb(s)),
+  openLinkRoom: view => ipcRenderer.invoke('open-link-room', view),
   info: () => ipcRenderer.invoke('info'),
   verify: (code, name) => ipcRenderer.invoke('verify', { code, name }),
   confirmExit: () => ipcRenderer.invoke('confirm-exit'),

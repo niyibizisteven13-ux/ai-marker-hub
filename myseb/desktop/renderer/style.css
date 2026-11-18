@@ -16,3 +16,5 @@ button.link{border:0;background:none;color:#94a3b8;text-decoration:underline;mar
 .overlay{position:fixed;inset:0;background:rgba(2,6,23,.96);display:grid;place-items:center;z-index:10}
 .panel{max-width:460px;text-align:center;padding:28px}.panel h2{margin:0 0 8px;font-size:28px}.panel p{color:#cbd5e1}
 #oBtns{display:flex;gap:10px;justify-content:center;margin-top:18px}
+
+#start{overflow-y:auto;justify-content:safe center;padding:16px 0}#start>*{flex-shrink:0}

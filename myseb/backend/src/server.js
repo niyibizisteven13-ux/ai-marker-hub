@@ -15,6 +15,7 @@ import { eventStats } from './events.js';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 const loopDelay = monitorEventLoopDelay({ resolution: 20 }); loopDelay.enable();
 import { q } from './db.js';
+import { linkRooms } from './linkRooms.js';
 import { examRouter } from './exam.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -53,6 +54,10 @@ app.use('/exam/:examId([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 process.on('unhandledRejection', (e) => console.error('unhandledRejection', e));   // one bad request must never take the exam server down
 // Saved answers may be longer than everything else the API takes (a long essay); the route itself caps them at 200 KB.
 const smallJson = express.json({ limit: '100kb' }); const answersJson = express.json({ limit: '260kb' });
+app.use('/liveroom/api', smallJson, linkRooms);
+app.use('/liveroom', express.static(path.join(here, '../public/liveroom'), {
+  setHeaders: res => res.set('Content-Security-Policy', "default-src 'self'; img-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'"),
+}));
 app.use('/api', (req, res, next) => (req.path === '/partial' ? answersJson : smallJson)(req, res, next), api);
 app.use('/api', (_req, res) => res.status(404).json({ error: 'not found' }));
 
@@ -138,7 +143,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   setInterval(tick, 5000).unref();
   setInterval(() => flushHeartbeats().catch((e) => console.error('heartbeats', e)), 2000).unref();   // "still here" times, written for everyone at once
   // Retention: once at start, then every hour.
-  const purge = () => purgeOld().then((r) => { if (r.sessions || r.exams) console.log(`retention: removed ${r.sessions} finished students and ${r.exams} old exams (older than ${retentionDays()} days)`); }).catch((e) => console.error('purge', e));
+  const purge = () => q('DELETE FROM link_rooms WHERE expires_at <= now()').then(() => purgeOld()).then((r) => { if (r.sessions || r.exams) console.log(`retention: removed ${r.sessions} finished students and ${r.exams} old exams (older than ${retentionDays()} days)`); }).catch((e) => console.error('purge', e));
   purge(); setInterval(purge, 3_600_000).unref();
   const server = app.listen(config.port, process.env.HOST || '0.0.0.0', () => console.log(`MySEB backend on :${config.port}${config.dashboardEnabled ? `  dashboard: ${config.publicUrl}/dashboard/` : '  (standalone dashboard off)'}`));
   // Graceful stop (deploys, restarts): stop taking new work, let short requests finish, drop waiting long-polls after 3 s.
