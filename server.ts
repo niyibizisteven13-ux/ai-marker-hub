@@ -58,6 +58,7 @@ import { createStorageRouter } from './server/routes/storageRoutes.js';
 import { StorageFullError, ensureStorage } from './server/services/billing/storage.js';
 import { gradeQuiz, quizRecord } from './server/services/forms/quiz.js';
 import { markSubmissionWithAi } from './server/services/forms/aiMarking.js';
+import { sanitizePublicFormSchema } from './server/services/forms/publicSchema.js';
 import { completeWrittenReview, matchesQuizReceipt, newQuizReceipt, quizCompletion, quizReview } from './server/services/forms/quizReceipt.js';
 import { allowAi, chargeAi, AI_PRICE } from './server/services/billing/aiMeter.js';
 import { checkUsage as checkPlanUsage } from './server/services/billing/usage.js';
@@ -2023,20 +2024,6 @@ ${augmentedQuery}`;
     res.end();
   }
 });
-
-const sanitizePublicFormSchema = (value: any): any => {
-  const privateKeys = new Set([
-    'answer', 'answerkey', 'correct', 'correctanswer', 'correctanswers', 'expectedanswer', 'modelanswer',
-    'rubric', 'scoringrubric', 'selectionsettings', 'requirements', 'solution', 'mysebexamid', 'importreview', 'explanation',
-    // Safe Exam Browser keys: anyone who knew one could fake the header.
-    'sebkeys', 'correctfeedback', 'incorrectfeedback',
-  ]);
-  if (Array.isArray(value)) return value.map(sanitizePublicFormSchema);
-  if (!value || typeof value !== 'object') return value;
-  return Object.fromEntries(Object.entries(value)
-    .filter(([key]) => !privateKeys.has(key.toLowerCase().replace(/[_\s-]/g, '')))
-    .map(([key, item]) => [key, sanitizePublicFormSchema(item)]));
-};
 
 app.get('/api/forms/:id', async (req, res) => {
   try {
