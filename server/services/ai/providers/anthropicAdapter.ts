@@ -44,10 +44,34 @@ export function webSources(content: Anthropic.ContentBlock[]): string {
  * (0.05x on Opus 5.5, 0.025x on Fable 5.1 / Mythos 5.1, 0.1x elsewhere) and cache writes (5-minute) cost 1.25x.
  * Counting every cached token at full price overcharged credits and overstated the cost the profit guard sees.
  */
-export function billableInput(model: string, u: { input_tokens?: number | null; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null }): number {
+type ClaudeUsage = {
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  cache_read_input_tokens?: number | null;
+  cache_creation_input_tokens?: number | null;
+  cache_creation?: { ephemeral_1h_input_tokens?: number } | null;
+  server_tool_use?: { web_search_requests?: number } | null;
+};
+
+/** Normalizes one provider call to standard-rate token equivalents for the shared credit meter. */
+function billableUsage(model: string, u: ClaudeUsage) {
   const m = model.toLowerCase();
+  const input = u.input_tokens ?? 0;
+  const read = u.cache_read_input_tokens ?? 0;
+  const written = u.cache_creation_input_tokens ?? 0;
+  const longWrite = Math.min(written, u.cache_creation?.ephemeral_1h_input_tokens ?? 0);
   const readFactor = /fable-5-1|mythos-5-1/.test(m) ? 0.025 : /opus-5-5/.test(m) ? 0.05 : 0.1;
-  return Math.round((u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) * readFactor + (u.cache_creation_input_tokens ?? 0) * 1.25);
+  const longPromptMultiplier = m.includes('haiku-5-5') && input + read + written > 100_000 ? 5 : 1;
+  const inputRate = m.includes('haiku') ? 0.10 : m.includes('sonnet') ? 2 : m.includes('opus') ? 4 : 10;
+  const searchEquivalent = (u.server_tool_use?.web_search_requests ?? 0) * (10_000 / inputRate);
+  return {
+    input: Math.round((input + read * readFactor + (written - longWrite) * 1.25 + longWrite * 2) * longPromptMultiplier + searchEquivalent),
+    output: (u.output_tokens ?? 0) * longPromptMultiplier,
+  };
+}
+
+export function billableInput(model: string, usage: ClaudeUsage): number {
+  return billableUsage(model, usage).input;
 }
 
 type MessageParam = Anthropic.MessageParam;
@@ -208,8 +232,9 @@ export class AnthropicAdapter implements ProviderAdapter {
           if (b.type === 'thinking' && b.thinking) yield { type: 'reasoning', text: b.thinking };
           else if (b.type === 'text' && b.text) yield { type: 'text', text: b.text };
         }
-        usage.input += billableInput(params.model, finalMessage.usage);
-        usage.output += finalMessage.usage.output_tokens ?? 0;
+        const billable = billableUsage(params.model, finalMessage.usage);
+        usage.input += billable.input;
+        usage.output += billable.output;
         break;
       }
       try {
@@ -237,8 +262,9 @@ export class AnthropicAdapter implements ProviderAdapter {
       } catch (err) {
         throw mapError(this.name, err, req.signal);
       }
-      usage.input += billableInput(params.model, finalMessage.usage);
-      usage.output += finalMessage.usage.output_tokens ?? 0;
+      const billable = billableUsage(params.model, finalMessage.usage);
+      usage.input += billable.input;
+      usage.output += billable.output;
       if (finalMessage.stop_reason !== 'pause_turn' || resume >= MAX_RESUMES) break;
       // Resume the paused turn: send it back as is; the API continues where it stopped.
       before.push(...finalMessage.content);

@@ -85,9 +85,9 @@ test('MoMo mode and phone numbers: sandbox accepts test numbers, production only
 test('quotes come from the server price list: Starter / Pro / Pro Plus in RWF, top-ups, months capped at 12', async () => {
   const pro = await quote('PRO', { months: 3 });
   assert.equal(PLANS.PRO.name, 'Pro');
-  assert.equal(pro.amountRwf, 4_500 * 3);
-  assert.equal((await quote('STARTER')).amountRwf, 1_500);
-  assert.equal((await quote('PLUS')).amountRwf, 7_000);
+  assert.equal(pro.amountRwf, 6_500 * 3);
+  assert.equal((await quote('STARTER')).amountRwf, 3_000);
+  assert.equal((await quote('PLUS')).amountRwf, 10_000);
   assert.match((await quote('PLUS')).item, /Pro Plus plan · 1 month/);
   await assert.rejects(quote('INSTITUTION' as any), /not available for online payment/);
   assert.equal((await quote('PRO', { months: 99 })).months, 12);
@@ -104,7 +104,7 @@ test('PRO purchase: request-to-pay reaches MTN, status is confirmed with MTN, pl
   const { payment } = await startPayment(userId, { purpose: 'PRO', months: 1, phone: '0788123456' });
   const sent = mtn.requests.get(payment.id);
   assert.ok(sent, 'MTN received the request with our payment id as X-Reference-Id');
-  assert.equal(sent.body.amount, '4500');
+  assert.equal(sent.body.amount, '6500');
   assert.equal(sent.body.payer.partyId, '250788123456');
   assert.equal(sent.headers['x-target-environment'], 'sandbox');
   assert.equal(sent.headers['x-callback-url'], `https://pay.example.test/api/billing/momo/callback/${payment.id}`);
@@ -254,9 +254,9 @@ test('GO credits: purchase adds to the wallet, which is spent only after the pla
   assert.equal(await walletBalance(userId), pack.credits);
   assert.equal((await planFor(userId)).id, 'GO');
 
-  const daily = PLANS.GO.limits.daily;
-  await recordUsage(userId, { kind: 'chat', minCredits: daily, model: 'gonka', channel: 'web' });
-  assert.equal(await walletBalance(userId), pack.credits, 'within the daily allowance the wallet is untouched');
+  const window = PLANS.GO.limits.fiveHours;
+  await recordUsage(userId, { kind: 'chat', minCredits: window, model: 'gonka', channel: 'web' });
+  assert.equal(await walletBalance(userId), pack.credits, 'within the five-hour allowance the wallet is untouched');
   const gate = await checkUsage(userId, { kind: 'chat' });
   assert.equal(gate.allowed, true);
   assert.equal(gate.wallet, true);
@@ -332,8 +332,8 @@ test('platform context: the AI knows the plan, credits left, real links, and whe
   const web = await platformContext(free, 'web');
   assert.match(web, /Free plan/);
   assert.match(web, /Credits left: \d+ of 15 today/);
-  assert.match(web, /Starter 1,500 RWF a month/);
-  assert.match(web, /Pro 4,500 RWF a month/);
+  assert.match(web, /Starter 3,000 RWF a month/);
+  assert.match(web, /Pro 6,500 RWF a month/);
   assert.match(web, /overnight marking/);
   assert.match(web, /\[Open the scanner\]\([^)]*\/scan\)/);
   assert.match(web, /\[The results page\]\([^)]*\/exams\)/);

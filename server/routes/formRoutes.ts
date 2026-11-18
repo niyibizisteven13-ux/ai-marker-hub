@@ -571,7 +571,7 @@ router.post('/create-from-chat', requireAuth, async (req, res) => {
   try {
     const { description } = req.body;
     const userId = (req as any).user?.userId;
-    if (!(await allowAi(res, userId, 'artifact'))) return;
+    if (!(await allowAi(res, userId, 'artifact', AI_PRICE.formFromDescription))) return;
     const form = await formOrchestrator.generateFormSchema(userId, description);
     void chargeAi(userId, { kind: 'artifact', input: String(description ?? ''), output: JSON.stringify(form ?? '').length, minCredits: AI_PRICE.formFromDescription });
 

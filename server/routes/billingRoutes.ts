@@ -53,7 +53,7 @@ router.get('/me', async (req, res) => {
       usageSummary(userId),
       db.telegramSession.findFirst({ where: { userId } }).catch(() => null),
     ]);
-    res.json({ success: true, ...state, usage: { day: usage.credits.day, week: usage.credits.week, month: usage.credits.month }, memory: usage.limits.memory, telegram: { linked: Boolean(telegram) } });
+    res.json({ success: true, ...state, usage: usage.credits, walletUsage: usage.wallet, memory: usage.limits.memory, telegram: { linked: Boolean(telegram) } });
   } catch (e) { fail(res, e); }
 });
 

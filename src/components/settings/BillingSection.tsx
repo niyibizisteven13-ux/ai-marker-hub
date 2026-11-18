@@ -5,7 +5,7 @@ import { openReceipt } from '../../pages/UpgradePage';
 
 /** Settings → Billing: current plan and renewal, GO credits, and Mobile Money payments with receipts. */
 
-interface Me { plan: 'FREE' | 'GO' | 'STARTER' | 'PRO' | 'PLUS' | 'INSTITUTION'; planName: string; wallet: number; subscription: { planType: string; endDate: string | null; daysLeft: number | null } | null; payments: 'ready' | 'unavailable' }
+interface Me { plan: 'FREE' | 'GO' | 'STARTER' | 'PRO' | 'PLUS' | 'INSTITUTION'; planName: string; wallet: number; walletUsage?: { available: number; fiveHours: { limit: number }; week: { limit: number } }; subscription: { planType: string; endDate: string | null; daysLeft: number | null } | null; payments: 'ready' | 'unavailable' }
 interface Payment { id: string; purpose: string; months: number; credits: number; amountRwf: number; currency: string; status: string; receiptNumber: string | null; createdAt: string; paidAt: string | null; phoneMasked: string }
 
 const SERIF = "font-display";
@@ -69,7 +69,7 @@ export default function BillingSection() {
         <div className="space-y-3 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-5 shadow-sm">
           <span className="flex items-center gap-1.5 text-xs font-medium text-[var(--muted)]"><Coins size={14} /> Top-up credits</span>
           <div className={`${SERIF} text-2xl font-normal text-[var(--text)]`}>{me.wallet.toLocaleString('en-US')} <span className="text-xs text-[var(--muted)]">credits</span></div>
-          <p className="text-xs text-[var(--muted)]">Used automatically when your plan's daily, weekly or monthly allowance runs out.</p>
+          {me.walletUsage && <p className="text-xs text-[var(--muted)]">{me.walletUsage.available.toLocaleString('en-US')} available now. Wallet limits are {me.walletUsage.fiveHours.limit.toLocaleString('en-US')} per five hours and {me.walletUsage.week.limit.toLocaleString('en-US')} per week.</p>}
           <a href="/upgrade" className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--line)] px-4 py-2 text-xs font-semibold text-[var(--text)] hover:bg-[var(--hover)]">Buy credits from 500 RWF <ArrowUpRight size={14} /></a>
         </div>
       </div>

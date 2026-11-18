@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Anthropic from '@anthropic-ai/sdk';
-import { AnthropicAdapter, toAnthropicMessages } from '../server/services/ai/providers/anthropicAdapter.js';
+import { AnthropicAdapter, billableInput, toAnthropicMessages } from '../server/services/ai/providers/anthropicAdapter.js';
 import { ReliableProviderAdapter } from '../server/services/ai/providers/reliableAdapter.js';
 import { ProviderMetrics } from '../server/services/ai/observability/providerMetrics.js';
 import { isRetryable, type ProviderAdapter, type ProviderChunk } from '../server/services/ai/providers/types.js';
@@ -168,4 +168,16 @@ test('Marking can use its own, larger Claude model', () => {
   const bad = loadClaudeAgentConfig({ AI_AGENT_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'k', CLAUDE_MARKING_MODEL: 'bad model!' });
   assert.equal(bad.config!.markingModel, 'claude-haiku-5-5');
   assert.match(bad.reason, /CLAUDE_MARKING_MODEL/);
+});
+
+
+test('Haiku meter counts cache pricing, long-context rates and search fees per call', async () => {
+  const model = 'claude-haiku-5-5';
+  const usage = { input_tokens: 20_000, output_tokens: 500, cache_read_input_tokens: 80_000, cache_creation_input_tokens: 1_000,
+    cache_creation: { ephemeral_1h_input_tokens: 1000, ephemeral_5m_input_tokens: 0 }, server_tool_use: { web_search_requests: 1 } };
+  assert.equal(billableInput(model, usage), 250_000);
+  const { client } = fakeClient([{ final: { content: [], usage: usage as unknown as Anthropic.Usage } }]);
+  const result = await collect(new AnthropicAdapter({ client }).stream({ model, messages: [{ role: 'user', content: 'Hi' }] }));
+  assert.deepEqual(result.find(chunk => chunk.type === 'usage'), { type: 'usage', input: 250_000, output: 2500 });
+  assert.equal(billableInput(model, { input_tokens: 100_000 }), 100_000);
 });

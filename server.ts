@@ -1969,7 +1969,7 @@ app.post('/api/forms/generate', requireAuth, async (req, res) => {
     const { intent } = req.body;
     const userId = (req as any).user?.userId;
     if (!userId) return res.status(401).json({ error: 'Authentication required.' });
-    if (!(await allowAi(res, userId, 'artifact'))) return;
+    if (!(await allowAi(res, userId, 'artifact', AI_PRICE.formFromDescription))) return;
     const form = await formOrchestrator.generateFormSchema(userId, intent);
     void chargeAi(userId, { kind: 'artifact', input: String(intent ?? ''), output: JSON.stringify(form ?? '').length, minCredits: AI_PRICE.formFromDescription });
     res.json({ success: true, form });
