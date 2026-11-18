@@ -93,3 +93,6 @@ function showUpdate(s) {
 }
 window.myseb.onUpdate(showUpdate);
 $('checkUpdate').onclick = () => { dismissedUpdateVersion = undefined; window.myseb.checkUpdate().then(showUpdate); };
+
+document.getElementById('directLink').onclick = () => window.myseb.openLinkRoom('direct');
+document.getElementById('liveRoom').onclick = () => window.myseb.openLinkRoom('join');

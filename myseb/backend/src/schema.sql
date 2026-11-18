@@ -93,3 +93,21 @@ DO $$ BEGIN
     ALTER TABLE exam_sessions ADD CONSTRAINT exam_sessions_client_type_check CHECK (client_type IN ('desktop','mobile','extension','web'));
   END IF;
 END $$;
+
+CREATE TABLE IF NOT EXISTS link_rooms (
+  code text PRIMARY KEY,
+  host_hash text NOT NULL,
+  title text NOT NULL,
+  mode text NOT NULL,
+  sites jsonb NOT NULL,
+  activities jsonb NOT NULL,
+  active integer,
+  expires_at timestamptz NOT NULL DEFAULT now() + interval '24 hours'
+);
+CREATE TABLE IF NOT EXISTS link_room_members (
+  room text REFERENCES link_rooms(code) ON DELETE CASCADE,
+  member_hash text NOT NULL,
+  name text NOT NULL,
+  opened integer,
+  PRIMARY KEY (room, member_hash)
+);

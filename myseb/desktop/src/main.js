@@ -250,9 +250,17 @@ ipcMain.handle('update-download', async () => {
 ipcMain.handle('update-install', () => appUpdater?.install() ?? false);
 ipcMain.handle('info', () => ({ apiBase: cfg.apiBase, version: VERSION, dev: DEV }));
 
+let linkRoomWindow;
+ipcMain.handle('open-link-room', (event, view) => {
+  if (event.sender !== win.webContents || exam || joiningExam) return;
+  if (linkRoomWindow) return linkRoomWindow.focus();
+  linkRoomWindow = require('./linkRoom').openRoom(win, cfg.apiBase, view === 'direct' ? 'direct' : 'join');
+  linkRoomWindow.on('closed', () => { linkRoomWindow = null; });
+});
+
 ipcMain.handle('verify', async (_e, { code, name }) => {
   if (typeof code !== 'string' || typeof name !== 'string') return { error: 'Enter your name and code.' };
-  if (joiningExam || appUpdater?.state().status === 'installing') return { error: 'Please wait for MySEB to finish.' };
+  if (linkRoomWindow || joiningExam || appUpdater?.state().status === 'installing') return { error: 'Please wait for MySEB to finish.' };
   joiningExam = true;
   try {
     const r = await post('/api/verify-code', {
@@ -286,7 +294,7 @@ offerJoin(parseJoin(process.argv.find((a) => String(a).startsWith('myseb://'))))
 app.on('second-instance', (_e, argv) => { offerJoin(parseJoin(argv.find((a) => String(a).startsWith('myseb://')))); if (win) { win.show(); win.focus(); } });
 
 app.on('web-contents-created', (_e, contents) => {
-  guardInput(contents);
+  if (!require('./linkRoom').roomSessions.has(contents.session)) guardInput(contents);
   if (!DEV) contents.on('devtools-opened', () => contents.closeDevTools());
   contents.on('will-attach-webview', (ev, prefs, params) => {
     // Only the exam site, only in our partition, with no preload and no Node.
