@@ -1,1 +1,56 @@
-LyoqCiAqIFJ1biBmcm9tIHRoZSBCd2VuZ2UgcmVwbyB3aXRoIHRoZSBzYW1lIGVudmlyb25tZW50IGFzIHRoZSBzZXJ2ZXI6CiAqICAgbm9kZSAtLWltcG9ydCB0c3ggc2NyaXB0cy9nb25rYS1zbW9rZS50cwogKgogKiBHT05LQV9BUElfS0VZIGNvbWVzIGZyb20gdGhlIHByb2Nlc3MgZW52aXJvbm1lbnQgb3IgdGhlIGlnbm9yZWQgbG9jYWwgLmVudi4KICogVGhlIGNoZWNrIHNlbmRzIG9ubHkgYSBzeW50aGV0aWMgZ3JlZXRpbmcgYW5kIG5ldmVyIHByaW50cyB0aGUga2V5IG9yIHVwc3RyZWFtIGJvZHkuCiAqLwppbXBvcnQgJ2RvdGVudi9jb25maWcnOwppbXBvcnQgeyBPcGVuQUlDb21wYXRpYmxlQWRhcHRlciB9IGZyb20gJy4uL3NlcnZlci9zZXJ2aWNlcy9haS9wcm92aWRlcnMvb3BlbmFpQ29tcGF0aWJsZS5qcyc7CmltcG9ydCB7IG5vcm1hbGl6ZUVycm9yLCBQcm92aWRlckVycm9yIH0gZnJvbSAnLi4vc2VydmVyL3NlcnZpY2VzL2FpL3Byb3ZpZGVycy90eXBlcy5qcyc7CmltcG9ydCB7IGxvYWRNb2RlbFBvbGljaWVzIH0gZnJvbSAnLi4vc2VydmVyL3NlcnZpY2VzL2FpL3JvdXRlci9tb2RlbFBvbGljeS5qcyc7Cgphc3luYyBmdW5jdGlvbiBtYWluKCkgewogIGNvbnN0IGFwaUtleSA9IHByb2Nlc3MuZW52LkdPTktBX0FQSV9LRVk/LnRyaW0oKTsKICBpZiAoIWFwaUtleSkgewogICAgY29uc29sZS5lcnJvcignR29ua2FSb3V0ZXIgY2hlY2sgZmFpbGVkLiBHT05LQV9BUElfS0VZIGlzIG1pc3NpbmcuJyk7CiAgICBwcm9jZXNzLmV4aXRDb2RlID0gMTsKICAgIHJldHVybjsKICB9CgogIGNvbnN0IGJhc2VVcmwgPSBwcm9jZXNzLmVudi5HT05LQV9CQVNFX1VSTCB8fCAnaHR0cHM6Ly9hcGkuZ29ua2Fyb3V0ZXIuaW8vdjEnOwogIGNvbnN0IG1vZGVsID0gbG9hZE1vZGVsUG9saWNpZXMoKS5TSU1QTEUubW9kZWw7CiAgY29uc3QgYWRhcHRlciA9IG5ldyBPcGVuQUlDb21wYXRpYmxlQWRhcHRlcih7CiAgICBuYW1lOiAnR29ua2FSb3V0ZXInLAogICAgYmFzZVVybCwKICAgIGFwaUtleSwKICAgIGNvbm5lY3RUaW1lb3V0TXM6IDEyXzAwMCwKICAgIGlkbGVUaW1lb3V0TXM6IDEyXzAwMCwKICAgIHJlcXVlc3RUaW1lb3V0TXM6IDI1XzAwMCwKICB9KTsKICBjb25zdCBzdGFydCA9IERhdGUubm93KCk7CiAgdHJ5IHsKICAgIGxldCBoYXNSZXBseSA9IGZhbHNlOwogICAgZm9yIGF3YWl0IChjb25zdCBldmVudCBvZiBhZGFwdGVyLnN0cmVhbSh7CiAgICAgIG1vZGVsLAogICAgICBtZXNzYWdlczogW3sgcm9sZTogJ3VzZXInLCBjb250ZW50OiAnUmVwbHkgd2l0aCBPSy4nIH1dLAogICAgICBtYXhUb2tlbnM6IDY0LAogICAgfSkpIHsKICAgICAgaWYgKGV2ZW50LnR5cGUgPT09ICd0ZXh0JyAmJiBldmVudC50ZXh0LnRyaW0oKSkgaGFzUmVwbHkgPSB0cnVlOwogICAgfQogICAgaWYgKCFoYXNSZXBseSkgewogICAgICBjb25zb2xlLmVycm9yKGBHb25rYVJvdXRlciBjaGVjayBmYWlsZWQuIFRoZSAke21vZGVsfSBzdHJlYW0gcmV0dXJuZWQgbm8gcmVwbHkuYCk7CiAgICAgIHByb2Nlc3MuZXhpdENvZGUgPSAxOwogICAgICByZXR1cm47CiAgICB9CiAgICBjb25zb2xlLmxvZyhgR29ua2FSb3V0ZXIgcmV0dXJuZWQgYSBzdHJlYW1lZCByZXBseSBmcm9tICR7bW9kZWx9IGluICR7RGF0ZS5ub3coKSAtIHN0YXJ0fSBtcy5gKTsKICB9IGNhdGNoIChlcnJvcikgewogICAgY29uc3QgeyBjYXRlZ29yeSwgc3RhdHVzQ29kZSB9ID0gbm9ybWFsaXplRXJyb3IoZXJyb3IpOwogICAgY29uc3QgdGltZW91dEtpbmQgPSBlcnJvciBpbnN0YW5jZW9mIFByb3ZpZGVyRXJyb3IgPyBlcnJvci50aW1lb3V0S2luZCA6IHVuZGVmaW5lZDsKICAgIGNvbnN0IGRldGFpbHMgPSBbY2F0ZWdvcnksIHN0YXR1c0NvZGUgJiYgYEhUVFAgJHtzdGF0dXNDb2RlfWAsIHRpbWVvdXRLaW5kICYmIGAke3RpbWVvdXRLaW5kfSB0aW1lb3V0YF0uZmlsdGVyKEJvb2xlYW4pLmpvaW4oJywgJyk7CiAgICBjb25zb2xlLmVycm9yKGBHb25rYVJvdXRlciBjaGVjayBmYWlsZWQgZm9yICR7bW9kZWx9ICgke2RldGFpbHN9LCAke0RhdGUubm93KCkgLSBzdGFydH0gbXMpLmApOwogICAgcHJvY2Vzcy5leGl0Q29kZSA9IDE7CiAgfQp9Cgphd2FpdCBtYWluKCk7Cg==
+/**
+ * Run from the Bwenge repo with the same environment as the server:
+ *   node --import tsx scripts/gonka-smoke.ts
+ *
+ * GONKA_API_KEY comes from the process environment or the ignored local .env.
+ * The check sends only a synthetic greeting and never prints the key or upstream body.
+ */
+import 'dotenv/config';
+import { OpenAICompatibleAdapter } from '../server/services/ai/providers/openaiCompatible.js';
+import { normalizeError, ProviderError } from '../server/services/ai/providers/types.js';
+import { loadModelPolicies } from '../server/services/ai/router/modelPolicy.js';
+
+async function main() {
+  const apiKey = process.env.GONKA_API_KEY?.trim();
+  if (!apiKey) {
+    console.error('GonkaRouter check failed. GONKA_API_KEY is missing.');
+    process.exitCode = 1;
+    return;
+  }
+
+  const baseUrl = process.env.GONKA_BASE_URL || 'https://api.gonkarouter.io/v1';
+  const model = loadModelPolicies().SIMPLE.model;
+  const adapter = new OpenAICompatibleAdapter({
+    name: 'GonkaRouter',
+    baseUrl,
+    apiKey,
+    connectTimeoutMs: 12_000,
+    idleTimeoutMs: 12_000,
+    requestTimeoutMs: 25_000,
+  });
+  const start = Date.now();
+  try {
+    let hasReply = false;
+    for await (const event of adapter.stream({
+      model,
+      messages: [{ role: 'user', content: 'Reply with OK.' }],
+      maxTokens: 64,
+    })) {
+      if (event.type === 'text' && event.text.trim()) hasReply = true;
+    }
+    if (!hasReply) {
+      console.error(`GonkaRouter check failed. The ${model} stream returned no reply.`);
+      process.exitCode = 1;
+      return;
+    }
+    console.log(`GonkaRouter returned a streamed reply from ${model} in ${Date.now() - start} ms.`);
+  } catch (error) {
+    const { category, statusCode } = normalizeError(error);
+    const timeoutKind = error instanceof ProviderError ? error.timeoutKind : undefined;
+    const details = [category, statusCode && `HTTP ${statusCode}`, timeoutKind && `${timeoutKind} timeout`].filter(Boolean).join(', ');
+    console.error(`GonkaRouter check failed for ${model} (${details}, ${Date.now() - start} ms).`);
+    process.exitCode = 1;
+  }
+}
+
+await main();
