@@ -14,7 +14,7 @@ export interface AnalyticsDeps {
   fileStore: FileStore;
   queue: FileJobQueue;
   /** Model used for optional report interpretation; null = deterministic text only. */
-  agent?: () => { adapter: ProviderAdapter; model: string; fallbackModel?: string | null } | null;
+  agent?: (userId: string) => { adapter: ProviderAdapter; model: string; fallbackModel?: string | null } | null | Promise<{ adapter: ProviderAdapter; model: string; fallbackModel?: string | null } | null>;
   /** Strings that must never appear in an artifact (server paths). */
   forbiddenStrings?: string[];
   datasetTtlMs?: number;
@@ -98,7 +98,7 @@ export function createAnalyticsService(deps: AnalyticsDeps) {
 
     let interpretation: ReportJobResult['interpretation'] = 'deterministic';
     if (request.interpretation === 'ai') {
-      const agent = deps.agent?.();
+      const agent = await deps.agent?.(job.ownerId);
       if (!agent) warnings.push('AI interpretation was requested but no agent model is configured; the report uses calculated text only.');
       else {
         await ctx.progress('writing interpretation', 55);

@@ -454,26 +454,23 @@ const SparkIcon = () => (
 
 /* ------------------------------------------------------- small components */
 
-/** One choice instead of several switches: how students must take this test. */
-function SecureMode({ exam, set, formId }: { exam: ExamSettings; set: (p: Partial<ExamSettings>) => void; formId?: string }) {
+/** Optional secure access for any form, independent of scoring or timing. */
+function FormAccess({ exam, set, publishedFormId }: { exam: ExamSettings; set: (p: Partial<ExamSettings>) => void; publishedFormId?: string }) {
   const mode = exam.requireSeb ? 'seb' : exam.requireMyseb ? 'myseb' : 'normal';
-  const pick = (m: 'normal' | 'myseb' | 'seb') => set({ requireMyseb: m === 'myseb', requireSeb: m === 'seb' });
-  const card = (m: 'normal' | 'myseb' | 'seb', title: string, text: string) => (
-    <label key={m} className={`flex min-h-11 cursor-pointer items-start gap-3 rounded-xl border p-3 text-sm ${mode === m ? 'border-[var(--brand)] bg-[var(--brand)]/5' : 'border-[#E0E0E0] bg-white'}`}>
-      <input type="radio" name="secure-mode" checked={mode === m} onChange={() => pick(m)} className="mt-1 h-4 w-4 accent-[var(--brand)]" />
-      <span><span className="font-semibold text-[#202124]">{title}</span><span className="block text-xs text-[#5F6368]">{text}</span></span>
-    </label>
-  );
   return (
-    <fieldset className="space-y-2">
-      <legend className="mb-1 text-sm font-semibold text-[#202124]">How students take this test</legend>
-      {card('normal', 'Normal', 'Anyone with the link, in any browser.')}
-      {card('myseb', 'MySEB (recommended)', 'Students use the MySEB app on a laptop or phone. Their device is locked, and you watch everyone live.')}
-      {mode === 'seb' && <p role="alert" className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">This test still uses the old Safe Exam Browser setting, which is being retired. Choose MySEB above to switch.</p>}
-      {mode === 'seb' && card('seb', 'Safe Exam Browser (old)', 'Needs the other app and its key. Only kept so existing tests keep working.')}
-      {mode === 'myseb' && (formId
-        ? <a href={`/live/form/${encodeURIComponent(formId)}`} className="flex min-h-11 items-center justify-center rounded-xl bg-[#B4502F] px-4 text-sm font-bold text-white hover:bg-[#C45A37]">Open live room: get the code and watch students</a>
-        : <p className="rounded-lg bg-[#F8F9FA] px-3 py-2 text-xs text-[#5F6368]">Save and publish the form first. Then you can open the live room and get the code.</p>)}
+    <section aria-label="Form access" className="space-y-2 rounded-xl border border-[#E0E0E0] bg-[#F8F9FA] px-3 py-2">
+      <h3 className="pt-1 text-sm font-semibold text-[#202124]">Form access</h3>
+      <Toggle label="Require MySEB (optional)" checked={mode === 'myseb'} onChange={requireMyseb => set({ requireMyseb, requireSeb: false })}
+        hint={mode === 'myseb' ? 'Respondents will use MySEB. Set up the live room to get their access code.' : 'Keep this off to allow normal browser access.'} />
+      {mode === 'seb' && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <p className="flex-1">This form uses the legacy Safe Exam Browser setting.</p>
+          <button type="button" className={btn} onClick={() => set({ requireSeb: false })}>Allow normal browsers</button>
+        </div>
+      )}
+      {mode === 'myseb' && (publishedFormId
+        ? <a href={`/live/form/${encodeURIComponent(publishedFormId)}`} className="inline-flex min-h-10 items-center rounded-lg bg-[#B4502F] px-4 text-sm font-semibold text-white hover:bg-[#C45A37]">Open MySEB live room</a>
+        : <p className="text-xs text-[#5F6368]">Publish this setting to open the MySEB live room and get the access code.</p>)}
       {mode === 'seb' && (
         <div className="space-y-2">
           {exam.sebKeys.length === 0 && <p role="alert" className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">Add the Browser Exam Key below, or nobody will be able to start this test.</p>}
@@ -482,12 +479,12 @@ function SecureMode({ exam, set, formId }: { exam: ExamSettings; set: (p: Partia
           </Field>
         </div>
       )}
-    </fieldset>
+    </section>
   );
 }
 
 /** Timed test: length, camera rule and the class whose accommodations (extra time, no camera…) apply. */
-function ExamPanel({ exam, onChange, formId }: { exam: ExamSettings; onChange: (e: ExamSettings) => void; formId?: string }) {
+function ExamPanel({ exam, onChange }: { exam: ExamSettings; onChange: (e: ExamSettings) => void }) {
   const [classes, setClasses] = useState<Array<{ id: string; name: string; code: string; students: number }>>([]);
   useEffect(() => {
     if (!exam.enabled) return;
@@ -496,7 +493,6 @@ function ExamPanel({ exam, onChange, formId }: { exam: ExamSettings; onChange: (
   const set = (patch: Partial<ExamSettings>) => onChange(normalizeExam({ ...exam, ...patch }));
   return (
     <div className="space-y-2">
-      <SecureMode exam={exam} set={set} formId={formId} />
       <Toggle label="Timed test" checked={exam.enabled} onChange={v => set({ enabled: v })} hint="The server keeps the clock. Students start with their registration number, and their time, breaks and camera exemption come from your class list." />
       {exam.enabled && (
         <div className="space-y-3 rounded-lg border border-[#E0E0E0] bg-white p-3">
@@ -1283,6 +1279,8 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, onUpda
             <details className={`${card} !p-0`}>
               <summary className="min-h-11 cursor-pointer list-none px-5 py-3 text-sm font-bold text-[#202124] sm:px-6">Form settings</summary>
               <div className="space-y-1 border-t border-[#E0E0E0] px-5 py-4 sm:px-6">
+                <FormAccess exam={state.exam} set={patch => setField('exam', normalizeExam({ ...state.exam, ...patch }))}
+                  publishedFormId={publishedJson === schemaJson ? /\/forms\/([^/?#]+)/.exec(publishedUrl ?? '')?.[1] : undefined} />
                 <Toggle label="Will this be marked (a quiz, CAT or exam)?" checked={state.isQuiz} onChange={isQuiz => setState(s => ({ ...s, isQuiz, ...(!s.isQuiz && isQuiz ? { showScore: true, quizShowAnswers: false, assessment: { ...s.assessment, manualWritten: true } } : {}) }))} hint="Use a quiz to score answers. Choose what students see under After submission." />
                 {state.isQuiz && (
                   <div className="space-y-3 rounded-xl border border-[#E0E0E0] bg-white px-3 py-3" aria-label="Scoring">
@@ -1307,7 +1305,7 @@ export default function FormBuilder({ initialSchema, onChange, onPublish, onUpda
                 <details className="rounded-xl border border-[#E0E0E0] bg-[#F8F9FA] px-3 py-2">
                   <summary className="cursor-pointer py-1 text-sm font-semibold text-[#202124]">Test protection and question order</summary>
                   <div className="mt-2 space-y-1">
-                    <ExamPanel exam={state.exam} onChange={e => setField('exam', e)} formId={/\/forms\/([^/?#]+)/.exec(shareUrl ?? '')?.[1]} />
+                    <ExamPanel exam={state.exam} onChange={e => setField('exam', e)} />
                     <TestDesignPanel state={state} setField={setField} />
                     <Toggle label="Block pasting into typed answers" checked={state.blockPaste} onChange={v => setField('blockPaste', v)} hint="Students must type short and long answers themselves. Dropping text in is blocked too." />
                     <Toggle label="Shuffle question order" checked={state.shuffleQuestions} onChange={v => setField('shuffleQuestions', v)} hint="Each student sees a different order. Not used when questions depend on earlier answers." />

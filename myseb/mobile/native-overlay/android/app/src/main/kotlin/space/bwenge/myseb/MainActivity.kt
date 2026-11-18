@@ -1,11 +1,15 @@
 package space.bwenge.myseb
 
 import android.app.ActivityManager
+import android.app.DownloadManager
 import android.content.Intent
 import android.net.Uri
 import android.content.Context
 import android.content.res.Configuration
 import android.os.Bundle
+import android.os.Build
+import android.os.Environment
+import android.provider.Settings
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -31,14 +35,68 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "myseb/updates").setMethodCallHandler { call, result ->
-            if (call.method != "openDownload") { result.notImplemented(); return@setMethodCallHandler }
-            val url = call.argument<String>("url") ?: ""
-            val uri = Uri.parse(url)
-            if (examActive || uri.scheme != "https" || uri.host != "github.com" || !uri.path.orEmpty().startsWith("/niyibizisteven13-ux/ai-marker-hub/releases/download/")) {
-                result.error("NOT_ALLOWED", "Updates are allowed only before an exam and from the official release.", null)
-            } else {
-                try { startActivity(Intent(Intent.ACTION_VIEW, uri)); result.success(true) }
-                catch (_: Exception) { result.error("NO_INSTALLER", "Cannot open the download.", null) }
+            if (examActive) {
+                result.error("EXAM_ACTIVE", "Updates can only be installed outside an exam.", null)
+                return@setMethodCallHandler
+            }
+            val downloads = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            val prefs = getSharedPreferences("myseb_updates", MODE_PRIVATE)
+            val downloadId = prefs.getLong("download_id", -1L)
+            try {
+                when (call.method) {
+                    "start" -> {
+                        val uri = Uri.parse(call.argument<String>("url").orEmpty())
+                        val path = uri.path.orEmpty()
+                        if (uri.scheme != "https" || uri.host != "github.com" ||
+                            !Regex("/niyibizisteven13-ux/ai-marker-hub/releases/download/myseb-v[0-9]+[.][0-9]+[.][0-9]+/MySEB[.]apk").matches(path)) {
+                            result.error("NOT_ALLOWED", "Choose an official MySEB release.", null)
+                        } else if (downloadId != -1L && prefs.getString("download_url", null) == uri.toString()) {
+                            result.success(null)
+                        } else {
+                            if (downloadId != -1L) downloads.remove(downloadId)
+                            val release = uri.pathSegments[3]
+                            val id = downloads.enqueue(DownloadManager.Request(uri)
+                                .setTitle("MySEB update")
+                                .setMimeType("application/vnd.android.package-archive")
+                                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
+                                .setDestinationInExternalFilesDir(this, Environment.DIRECTORY_DOWNLOADS, "$release.apk"))
+                            prefs.edit().putLong("download_id", id).putString("download_url", uri.toString()).apply()
+                            result.success(null)
+                        }
+                    }
+                    "status" -> {
+                        if (downloadId == -1L || call.argument<String>("url") != prefs.getString("download_url", null)) {
+                            result.success("idle")
+                            return@setMethodCallHandler
+                        }
+                        val status = downloads.query(DownloadManager.Query().setFilterById(downloadId)).use { cursor ->
+                            if (cursor == null || !cursor.moveToFirst()) { prefs.edit().clear().apply(); "idle" }
+                            else when (cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))) {
+                                DownloadManager.STATUS_SUCCESSFUL -> "ready"
+                                DownloadManager.STATUS_FAILED -> { downloads.remove(downloadId); prefs.edit().clear().apply(); "failed" }
+                                else -> "downloading"
+                            }
+                        }
+                        result.success(status)
+                    }
+                    "install" -> {
+                        val uri = downloads.getUriForDownloadedFile(downloadId)
+                        if (uri == null || call.argument<String>("url") != prefs.getString("download_url", null)) {
+                            result.error("NOT_READY", "The update has not finished downloading.", null)
+                        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+                            startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+                            result.success("permission")
+                        } else {
+                            startActivity(Intent(Intent.ACTION_VIEW)
+                                .setDataAndType(uri, "application/vnd.android.package-archive")
+                                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+                            result.success("opened")
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            } catch (_: Exception) {
+                result.error("UPDATE_FAILED", "Could not open the MySEB update.", null)
             }
         }
         channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "myseb/lock").also { ch ->

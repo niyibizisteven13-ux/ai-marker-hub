@@ -1,12 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Camera, Check, CheckCircle2, FileText, Loader2, Paperclip, Users, X } from 'lucide-react';
+import { Camera, Check, CheckCircle2, FileText, Loader2, Paperclip, X } from 'lucide-react';
 import DocumentScanner, { type PageItem } from '../components/DocumentScanner';
 import { buildPdf } from './TelegramScanApp';
-import { scansToZip } from '../utils/scansToZip';
 
 /**
- * Mark, inside Telegram (scanner.html?mode=mark): the marking scheme or the question paper (one is required), then the students with the live camera
- * (one tap per page, "Next student"), optional instructions, then Mark. Everything goes up in one request with
+ * Mark, inside Telegram: attach a scheme or question paper and typed answers. Everything goes up in one request with
  * each file's role; marking then runs in the Telegram chat with live progress, and the red-pen PDFs and the
  * Excel results arrive there.
  */
@@ -27,7 +25,6 @@ const tg = (): Tg | undefined => {
 };
 
 type Scheme = { kind: 'scan'; pages: PageItem[] } | { kind: 'file'; file: File };
-type Student = { key: string; name: string; pages: PageItem[] };
 
 const SUGGESTIONS = ['Give half marks when the method is right.', 'Do not take marks off for spelling.', 'Accept any correct method, even if it is not in the scheme.'];
 
@@ -37,15 +34,13 @@ export default function TelegramMarkApp() {
   const [scheme, setScheme] = useState<Scheme | null>(null);
   // What step 1 holds: the marking scheme, or the question paper Bwenge writes the scheme from.
   const [guideKind, setGuideKind] = useState<'scheme' | 'paper'>('scheme');
-  const [students, setStudents] = useState<Student[]>([]);
   const [scriptFiles, setScriptFiles] = useState<File[]>([]);
   const [instructions, setInstructions] = useState('');
   const [strict, setStrict] = useState(false);
-  const [scanning, setScanning] = useState<'scheme' | 'scripts' | null>(null);
+  const [scanning, setScanning] = useState(false);
   const [state, setState] = useState<{ kind: 'idle' } | { kind: 'sending' } | { kind: 'started'; students: number } | { kind: 'error'; message: string }>({ kind: 'idle' });
   const schemeInput = useRef<HTMLInputElement>(null);
   const scriptsInput = useRef<HTMLInputElement>(null);
-  const scanRound = useRef(0);
 
   useEffect(() => {
     if (!app) return;
@@ -72,22 +67,7 @@ export default function TelegramMarkApp() {
     );
   }
 
-  const pageCount = students.reduce((n, s) => n + s.pages.length, 0);
-  const total = students.length + scriptFiles.length;
-
-  const onScanned = async (pages: PageItem[]) => {
-    if (scanning === 'scheme') { setScheme({ kind: 'scan', pages }); return; }
-    // Each camera round numbers its students from 1 again: keep them apart from earlier rounds.
-    const round = ++scanRound.current;
-    const groups = new Map<string, Student>();
-    for (const p of pages) {
-      const key = `${round}-${p.candidateId || p.studentName || 'student'}`;
-      const g = groups.get(key) ?? { key, name: p.studentName || `Student ${students.length + groups.size + 1}`, pages: [] };
-      g.pages.push(p);
-      groups.set(key, g);
-    }
-    setStudents((cur) => [...cur, ...groups.values()]);
-  };
+  const total = scriptFiles.length;
 
   const submit = async () => {
     setState({ kind: 'sending' });
@@ -95,10 +75,6 @@ export default function TelegramMarkApp() {
       const form = new FormData();
       if (scheme?.kind === 'file') form.append(guideKind, scheme.file, scheme.file.name);
       else if (scheme?.kind === 'scan') form.append(guideKind, await buildPdf(scheme.pages), guideKind === 'paper' ? 'Question paper.pdf' : 'Marking scheme.pdf');
-      if (students.length) {
-        const pages = students.flatMap((s) => s.pages.map((p) => ({ ...p, candidateId: s.key, studentName: s.name })));
-        form.append('scripts', await scansToZip(pages));
-      }
       for (const f of scriptFiles) form.append('scripts', f, f.name);
       if (instructions.trim()) form.append('instructions', instructions.trim());
       form.append('credit', strict ? 'strict' : 'partial');
@@ -145,7 +121,7 @@ export default function TelegramMarkApp() {
           ) : (
             <>
               <div className="grid grid-cols-2 gap-2">
-                <Btn primary onClick={() => setScanning('scheme')}><Camera size={16} />Photograph</Btn>
+                <Btn primary onClick={() => setScanning(true)}><Camera size={16} />Photograph</Btn>
                 <Btn onClick={() => schemeInput.current?.click()}><Paperclip size={16} />Choose file</Btn>
               </div>
               <p className="mt-2 text-[12px] text-[var(--app-faint)]">Required. With the question paper, Bwenge writes the scheme first, then marks.</p>
@@ -159,13 +135,6 @@ export default function TelegramMarkApp() {
           <div className="mb-2 flex items-center gap-2 text-[13px] font-semibold"><Step n={2} done={total > 0} />Students' scripts</div>
           {total > 0 && (
             <ul className="mb-2 space-y-1">
-              {students.map((s) => (
-                <li key={s.key} className="flex items-center gap-2 rounded-xl bg-white/[0.04] px-3 py-2 text-[13px]">
-                  <Users size={14} className="text-[var(--brand)]" /><span className="min-w-0 flex-1 truncate">{s.name}</span>
-                  <span className="text-[12px] text-[var(--app-faint)]">{s.pages.length} page{s.pages.length === 1 ? '' : 's'}</span>
-                  <button type="button" aria-label={`Remove ${s.name}`} onClick={() => setStudents((cur) => cur.filter((x) => x.key !== s.key))} className="rounded p-1 text-[var(--app-faint)]"><X size={14} /></button>
-                </li>
-              ))}
               {scriptFiles.map((f, i) => (
                 <li key={`${f.name}-${i}`} className="flex items-center gap-2 rounded-xl bg-white/[0.04] px-3 py-2 text-[13px]">
                   <FileText size={14} className="text-[var(--brand)]" /><span className="min-w-0 flex-1 truncate">{f.name}</span>
@@ -175,11 +144,10 @@ export default function TelegramMarkApp() {
             </ul>
           )}
           <div className="grid grid-cols-2 gap-2">
-            <Btn primary={total === 0} onClick={() => setScanning('scripts')}><Camera size={16} />{total ? 'Scan more' : 'Scan students'}</Btn>
             <Btn onClick={() => scriptsInput.current?.click()}><Paperclip size={16} />Choose files</Btn>
           </div>
-          <p className="mt-2 text-[12px] text-[var(--app-faint)]">One tap per page, <b className="text-[var(--app-muted)]">Next student</b> between students.</p>
-          <input ref={scriptsInput} type="file" hidden multiple accept=".pdf,.zip,.docx,image/*" onChange={(e) => { const fs = [...(e.target.files ?? [])]; if (fs.length) setScriptFiles((cur) => [...cur, ...fs].slice(0, 9)); e.target.value = ''; }} />
+          <p className="mt-2 text-[12px] text-[var(--app-faint)]">Add typed answers as Word files, text files, text-based PDFs or a ZIP.</p>
+          <input ref={scriptsInput} type="file" hidden multiple accept=".pdf,.zip,.docx,.txt,.odt,.rtf" onChange={(e) => { const fs = [...(e.target.files ?? [])]; if (fs.length) setScriptFiles((cur) => [...cur, ...fs].slice(0, 9)); e.target.value = ''; }} />
         </section>
 
         {/* 3. Instructions */}
@@ -201,7 +169,7 @@ export default function TelegramMarkApp() {
       <footer className="fixed inset-x-0 bottom-0 border-t border-white/10 bg-[var(--ws-bg)]/95 px-4 pb-[calc(12px+env(safe-area-inset-bottom))] pt-3 backdrop-blur">
         <div className="mx-auto flex max-w-md items-center gap-3">
           <span className="min-w-0 flex-1 text-[12px] leading-tight text-[var(--app-faint)]">
-            {total ? <>{scheme ? (guideKind === 'paper' ? 'Question paper ready' : 'Scheme ready') : 'Add the scheme or question paper'}<br />{total} student{total === 1 ? '' : 's'}{pageCount ? ` · ${pageCount} pages` : ''}</> : 'Add the students to start'}
+            {total ? <>{scheme ? (guideKind === 'paper' ? 'Question paper ready' : 'Scheme ready') : 'Add the scheme or question paper'}<br />{total} student{total === 1 ? '' : 's'}</> : 'Add the students to start'}
           </span>
           <button type="button" disabled={!total || !scheme || state.kind === 'sending'} onClick={() => void submit()} className="inline-flex items-center gap-2 rounded-xl bg-[var(--brand)] px-5 py-3 text-[15px] font-semibold text-white disabled:opacity-40">
             {state.kind === 'sending' ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
@@ -217,9 +185,10 @@ export default function TelegramMarkApp() {
             aiTools={false}
             allowExport={false}
             quick
-            saveLabel={scanning === 'scheme' ? (guideKind === 'paper' ? 'Use as question paper' : 'Use as marking scheme') : 'Add these students'}
-            onSavePages={onScanned}
-            onClose={() => setScanning(null)}
+            single={guideKind === 'paper' ? 'Question paper' : 'Marking scheme'}
+            saveLabel={guideKind === 'paper' ? 'Use as question paper' : 'Use as marking scheme'}
+            onSavePages={pages => setScheme({ kind: 'scan', pages })}
+            onClose={() => setScanning(false)}
           />
         </div>
       )}

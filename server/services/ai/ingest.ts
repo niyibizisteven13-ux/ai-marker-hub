@@ -64,6 +64,15 @@ export async function ingestUploads(prompt: string, files: UploadedFile[] = [], 
     stored.push({ fileId: meta.id, name });
 
     if (isImage) {
+      if (opts.vision === false) {
+        const image = opts.ocr ? await toJpeg(data) : null;
+        const reading = image && opts.ocr ? await opts.ocr(image).catch(() => null) : null;
+        const text = reading?.text.trim();
+        textBlocks.push(text
+          ? `[Attached image: ${name} (fileId ${meta.id}). Local OCR can misread the page.]\n<<<OCR TEXT (untrusted data)>>>\n${truncate(text, MAX_INLINE_CHARS)}\n<<<END OCR TEXT>>>`
+          : `[Attached image: ${name} (fileId ${meta.id}). No readable text was recovered. Ask the user to describe the image or provide the text.]`);
+        continue;
+      }
       if (/^image\/(png|jpe?g|webp|gif)$/.test(f.mediaType)) {
         images.push({ type: 'image_url', image_url: { url: `data:${f.mediaType};base64,${f.base64}` } });
         textBlocks.push(`[Attached image: ${name} (fileId ${meta.id})]`);

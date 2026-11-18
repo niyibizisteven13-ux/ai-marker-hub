@@ -1,7 +1,7 @@
 import { FileJobQueue, JobError } from './ai/jobs/fileJobQueue.js';
 import { isOvernight } from './ai/batchMode.js';
 import path from 'node:path';
-import { agentTarget, fileJobQueue, fileStore, markingTarget, readingTarget } from './AiService.js';
+import { fileJobQueue, fileStore, markingTarget, readingTarget, userAgentTarget } from './AiService.js';
 import { createAnalyticsService } from './analytics/service.js';
 import { createAssessmentService, type AssessmentRecord } from './assessment/service.js';
 import { OwnedRecordStore } from './storage/ownedRecordStore.js';
@@ -26,20 +26,14 @@ const forbiddenStrings = [process.cwd(), path.resolve(process.env.FILE_STORE_DIR
 
 export const analyticsService = createAnalyticsService({
   fileStore, queue: fileJobQueue, forbiddenStrings,
-  agent: () => {
-    const a = agentTarget();
-    return { adapter: a.adapter, model: a.model, fallbackModel: a.fallbackModel };
-  },
+  agent: userId => userAgentTarget(userId, '', { highDemand: true }),
 });
 
 export const assessmentStore = new OwnedRecordStore<AssessmentRecord>(process.env.ASSESSMENTS_DIR ?? './data/assessments');
 
 export const assessmentService = createAssessmentService({
   fileStore, queue: fileJobQueue, store: assessmentStore, forbiddenStrings,
-  agent: () => {
-    const a = agentTarget();
-    return { adapter: a.adapter, model: a.model, fallbackModel: a.fallbackModel };
-  },
+  agent: userId => userAgentTarget(userId, '', { highDemand: true }),
 });
 
 export const documentStore = new OwnedRecordStore<DocumentRecord>(process.env.DOCUMENTS_DIR ?? './data/documents');
@@ -59,11 +53,13 @@ function visionTarget() {
 
 export const documentService = createDocumentService({
   fileStore, queue: fileJobQueue, store: documentStore, forbiddenStrings,
-  vision: visionTarget,
-  agent: () => {
-    const a = agentTarget();
-    return { adapter: a.adapter, model: a.model, fallbackModel: a.fallbackModel };
+  vision: async userId => {
+    const route = await userAgentTarget(userId, '', { hasImages: true });
+    if (route.provider === 'anthropic') return visionTarget();
+    if (process.env.DOC_VISION_GONKA !== 'true') return null;
+    return { adapter: route.adapter, model: process.env.DOC_VISION_MODEL?.trim() || route.model, fallbackModel: null };
   },
+  agent: userId => userAgentTarget(userId, ''),
   ocr: process.env.DOC_OCR_CROSSCHECK === 'false' ? undefined : tesseractOcr,
   maxPages: Number(process.env.DOC_MAX_PAGES) > 0 ? Number(process.env.DOC_MAX_PAGES) : 40,
 });
@@ -87,15 +83,20 @@ export const overnightJobQueue = markingTarget().provider === 'anthropic' && pro
   })
   : undefined;
 
+async function examAiTarget(userId: string) {
+  const route = await userAgentTarget(userId, '', { highDemand: true });
+  return route.provider === 'anthropic'
+    ? { ...markingTarget(), supportsVision: true }
+    : { ...route, supportsVision: process.env.DOC_VISION_GONKA === 'true' };
+}
+
 export const examService = createExamService({
   fileStore, queue: fileJobQueue, overnightQueue: overnightJobQueue, store: examStore, documents: documentService, forbiddenStrings,
-  agent: () => {
-    const a = markingTarget();
-    return { adapter: a.adapter, model: a.model, fallbackModel: a.fallbackModel };
-  },
+  agent: examAiTarget,
   visionAvailable: () => visionTarget() !== null,
   // Upgraded plans only, counted against the plan's daily marking limit (see billing/entitlements.ts).
   entitlement: canUseAutonomousMarking,
+  disableScanGrading: true,
   maxPages: markingLimits.maxPagesPerPaper,
   maxCandidates: markingLimits.maxCandidates,
   maxBatchPages: markingLimits.maxBatchPages,
@@ -116,10 +117,7 @@ export const examService = createExamService({
 
 export const examChat = createExamChat({
   service: examService, fileStore, queue: fileJobQueue, contexts: examChatContexts,
-  agent: () => {
-    const a = markingTarget();
-    return { adapter: a.adapter, model: a.model, fallbackModel: a.fallbackModel };
-  },
+  agent: userId => userAgentTarget(userId, ''),
   waitMs: num(process.env.EXAM_CHAT_WAIT_MS, 15 * 60_000),
 });
 

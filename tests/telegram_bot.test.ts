@@ -52,7 +52,7 @@ const src = [{ type: 'user', label: 'Values given by the user' }];
 function script(p: any): Turn | 'fail' {
   const last = p.messages.at(-1);
   const lastText = JSON.stringify(last.content);
-  if (Array.isArray(last.content) && last.content.some((b: any) => b.type === 'tool_result')) return { text: '## Done\n\nHere are your **chart** and *Excel workbook*:\n\n- B is highest (20)\n- A is lowest (10)' };
+  if (last.role === 'tool' || (Array.isArray(last.content) && last.content.some((b: any) => b.type === 'tool_result'))) return { text: '## Done\n\nHere are your **chart** and *Excel workbook*:\n\n- B is highest (20)\n- A is lowest (10)' };
   if (/FAIL/.test(lastText)) return 'fail';
   if (/bar chart/.test(lastText)) return {
     text: 'Building them now.', tools: [
@@ -65,12 +65,19 @@ function script(p: any): Turn | 'fail' {
 
 const claude = http.createServer(async (req, res) => {
   const p = JSON.parse((await readBody(req)).toString());
-  if (req.url?.endsWith('/chat/completions') && /Learning mode/.test(JSON.stringify(p.messages?.[0] ?? ''))) {
-    // Everyday chat runs on the OpenAI-compatible Gonka endpoint; answered here only for the learning-mode test.
+  if (req.url?.endsWith('/chat/completions')) {
     gonkaRequests.push(p);
+    const turn = /Learning mode/.test(JSON.stringify(p.messages?.[0] ?? ''))
+      ? { text: 'What denominator could both fractions share?' } : script(p);
+    if (turn === 'fail') { res.writeHead(500, { 'content-type': 'application/json' }).end('{"error":{"message":"boom"}}'); return; }
     res.writeHead(200, { 'content-type': 'text/event-stream' });
-    res.write(`data: ${JSON.stringify({ id: 'g', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { role: 'assistant', content: 'What denominator could both fractions share?' }, finish_reason: null }] })}\n\n`);
-    res.write(`data: ${JSON.stringify({ id: 'g', object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 5, completion_tokens: 7 } })}\n\n`);
+    const send = (delta: object, finish: string | null = null) =>
+      res.write(`data: ${JSON.stringify({ id: 'g', choices: [{ index: 0, delta, finish_reason: finish }], ...(finish ? { usage: { prompt_tokens: 5, completion_tokens: 7 } } : {}) })}\n\n`);
+    if (turn.text) send({ content: turn.text });
+    for (const [index, tool] of (turn.tools ?? []).entries()) {
+      send({ tool_calls: [{ index, id: tool.id, type: 'function', function: { name: tool.name, arguments: JSON.stringify(tool.input) } }] });
+    }
+    send({}, turn.tools?.length ? 'tool_calls' : 'stop');
     res.end('data: [DONE]\n\n');
     return;
   }
@@ -184,6 +191,9 @@ test('home: /start shows the branded banner with the menu; menus and language sw
 });
 
 test('acceptance: "bar chart + Excel" gives live progress, a formatted answer, a chart photo and a real .xlsx', async () => {
+  // This account has upgraded before using the advanced chart and scanner tools.
+  const owner = (await db.telegramSession.findUnique({ where: { chatId: String(chat) } })).userId;
+  await db.subscription.create({ data: { id: `sub-${Date.now()}`, userId: owner, planType: 'PRO', status: 'ACTIVE', startDate: new Date(), endDate: new Date(Date.now() + 86_400_000) } });
   const n = mark();
   await sendText('Make a bar chart comparing A=10, B=20, C=15 and give me an Excel file.');
   const doc = await until(() => since(n).find((c) => c.method === 'sendDocument'));
@@ -199,7 +209,8 @@ test('acceptance: "bar chart + Excel" gives live progress, a formatted answer, a
   assert.match(final.body.text, /2 files below/);
   assert.ok(htmlBalanced(final.body.text));
   assert.deepEqual(final.body.reply_markup.inline_keyboard[0].map((b: any) => b.callback_data), ['a:regen', 'fp:0', 'm:home']);
-  assert.equal(claudeRequests.at(-1).model, 'claude-haiku-5-5', 'runs on the configured Claude model');
+  assert.equal(claudeRequests.length, 0, 'the paid text agent stays on GonkaRouter');
+  assert.ok(gonkaRequests.at(-1).messages.some((m: any) => m.role === 'tool'));
 
   const photo = turn.find((c) => c.method === 'sendPhoto')!;
   assert.ok(photo, 'chart sent as a photo');
@@ -227,7 +238,7 @@ test('files: a CSV without caption gets quick actions; the action runs the assis
   const answer = await until(() => since(n).find((c) => c.method === 'editMessageText' && /Statistics: mean score/.test(c.body.text)));
   assert.match(answer.body.text, /<b>64\.3<\/b>/);
   assert.match(answer.body.text, /read scores\.csv/, 'the model received the file content');
-  assert.match(JSON.stringify(claudeRequests.at(-1).messages), /\[Attached file: scores\.csv \(fileId /);
+  assert.match(JSON.stringify(gonkaRequests.at(-1).messages), /\[Attached file: scores\.csv \(fileId /);
 });
 
 test('my files: list with send buttons; another user\'s file is refused', async () => {
@@ -330,11 +341,7 @@ test('scanner: uploads are signed (Mini App initData or link token) and arrive a
   assert.equal(sent.files.document.name, 'Aline Uwase.pdf');
   assert.match(sent.body.caption, /📷 <b>Aline Uwase\.pdf<\/b>/);
   assert.match(sent.body.caption, /Scanned PDF · 2 pages/);
-  assert.deepEqual(sent.body.reply_markup.inline_keyboard.flat().map((b: any) => b.callback_data), ['q:sum', 'q:tr', 'q:mark']);
-
-  // Three PDFs go to the assistant together below; the Free plan allows 2 attachments per message, PRO 10.
-  const owner = (await db.telegramSession.findUnique({ where: { chatId: String(chat) } })).userId;
-  await db.subscription.create({ data: { id: `sub-${Date.now()}`, userId: owner, planType: 'PRO', status: 'ACTIVE', startDate: new Date(), endDate: new Date(Date.now() + 86_400_000) } });
+  assert.deepEqual(sent.body.reply_markup.inline_keyboard.flat().map((b: any) => b.callback_data), ['q:sum', 'q:tr']);
 
   // A /scan link token works for several uploads (one PDF per student) until it expires.
   const token = issueScanToken(String(chat));
@@ -354,7 +361,7 @@ test('mark: /mark opens the Mark app; its upload starts marking in the chat with
   let n = mark();
   await sendText('/mark');
   const card = await until(() => since(n).find((c) => c.method === 'sendMessage' && /Mark exams/.test(c.body.text)));
-  assert.match(card.body.text, /one tap per page/);
+  assert.match(card.body.text, /typed student answers/);
   assert.deepEqual(card.body.reply_markup.inline_keyboard[0][0].web_app, { url: 'https://www.bwenge.space/scanner.html?mode=mark' });
   n = mark();
   await tap('m:mark');

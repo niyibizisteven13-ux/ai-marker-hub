@@ -32,7 +32,7 @@ const fakeExams = {
   latestScheme() { return scheme; },
 };
 const svc = createAssignmentService({ store: new OwnedRecordStore<AssignmentRecord>(path.join(dir, 'records')), files, tokenDir: path.join(dir, 'links'), baseUrl: () => 'https://www.bwenge.space', marker: createTaskMarker(() => fakeExams as any, { retryMs: 5, maxRetries: 0 }) });
-const pdf = async () => { const d = await PDFDocument.create(); d.addPage([595, 842]); return Buffer.from(await d.save()); };
+const pdf = async () => { const d = await PDFDocument.create(); d.addPage([595, 842]).drawText('My typed answer.'); return Buffer.from(await d.save()); };
 const until = async (ok: () => boolean) => { const end = Date.now() + 5000; while (!ok() && Date.now() < end) await new Promise((r) => setTimeout(r, 10)); };
 
 const owner = 'lect-1';

@@ -83,6 +83,7 @@ test.after(async () => { await fileJobQueue.stop(); claude.close(); myseb.close(
 
 const user = `lect-${randomUUID().slice(0, 8)}`;
 await db.user.create({ data: { id: user, email: `${user}@test.local`, name: 'Lecturer', passwordHash: 'x', role: 'INSTRUCTOR' } });
+await db.subscription.create({ data: { id: randomUUID(), userId: user, planType: 'PRO', status: 'ACTIVE', endDate: new Date(Date.now() + 86_400_000) } });
 const formId = randomUUID();
 await db.applicationForm.create({ data: { id: formId, userId: user, title: 'Biology midterm', schema: JSON.stringify({ title: 'Biology midterm', fields: [], exam: { enabled: true, minutes: 45, requireMyseb: true, mysebExamId: examId } }), rubric: null, selectionSettings: null, createdAt: new Date(), updatedAt: new Date() } });
 
@@ -113,7 +114,8 @@ setAssignmentService(tasks);
 setCourseService(createCourseService({ store: new OwnedRecordStore<any>(path.join(dir, 'c')), sources: { available: async () => ({ tasks: [], quizzes: [] }), task: async (o: string, id: string) => { const a: any = await tasks.get(o, id); return { title: a.title, dueAt: a.dueAt, submissions: a.submissions.map((s: any) => ({ studentId: s.studentId, late: s.late, marking: s.marking })) } as any; }, quiz: async () => null } as any }));
 
 const toolResults = (req: any) => (req.messages.at(-1).content as any[]).filter((b) => b.type === 'tool_result').map((b) => (typeof b.content === 'string' ? b.content : JSON.stringify(b.content)));
-const ask = (text: string, history: any[] = []) => ai.generalAssist({ userId: user, messages: [...history, { role: 'user', content: text }], onEvent: () => undefined }) as Promise<any>;
+const largeRequest = (message: string) => message + '\n\n' + 'Additional document context. '.repeat(215);
+const ask = (text: string, history: any[] = []) => ai.generalAssist({ userId: user, messages: [...history, { role: 'user', content: largeRequest(text) }], onEvent: () => undefined }) as Promise<any>;
 
 test('"how is my exam going" reaches the tools, and the live room is read, changed and explained from the chat', async () => {
   claudeRequests.length = 0; mysebCalls.length = 0;
@@ -201,7 +203,7 @@ test('marking a task from the chat: the scheme is read back for a yes, marks are
     { text: 'Marked: Aline 18/20, Eric 12/20. The Excel sheet is attached. Release to students?' },
   );
   const events: any[] = [];
-  const out: any = await ai.generalAssist({ userId: user, messages: [...history, { role: 'user', content: 'Yes, mark them, show me the marks and send me the Excel sheet.' }], onEvent: (e) => events.push(e) });
+  const out: any = await ai.generalAssist({ userId: user, messages: [...history, { role: 'user', content: largeRequest('Yes, mark them, show me the marks and send me the Excel sheet.') }], onEvent: (e) => events.push(e) });
   assert.match(toolResults(claudeRequests[1])[0], /Marking started for 2 hand-in/);
   const [results, release, exported] = toolResults(claudeRequests[2]);
   assert.match(results, /2 handed in, 2 marked, average 75%/); assert.match(results, /Aline Uwase \(2201\): marked, 18\/20 \(90%\), not released yet/);
@@ -236,6 +238,6 @@ test('a class from a pasted list, linked to the task, read back as numbers', asy
 
 test('general questions stay on the everyday chat model', async () => {
   claudeRequests.length = 0;
-  await assert.rejects(ask('What is photosynthesis?'));
+  await assert.rejects(ai.generalAssist({ userId: user, messages: [{ role: 'user', content: 'What is photosynthesis?' }] }));
   assert.equal(claudeRequests.length, 0, 'no tool model for a general question');
 });

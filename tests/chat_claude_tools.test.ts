@@ -6,7 +6,7 @@ import ExcelJS from 'exceljs';
 
 // generalAssist (the web chat's agent path) end to end over HTTP against a local fake Anthropic Messages
 // API speaking the real SSE stream format. Config mirrors production: AI_PROVIDER=gonkarouter for everyday
-// chat, AI_AGENT_PROVIDER=anthropic with Claude Haiku for tool turns. No network, SYNTHETIC values.
+// chat, AI_AGENT_PROVIDER=anthropic with Claude Haiku for high-demand turns. No network, SYNTHETIC values.
 const requests: any[] = [];
 const gonkaRequests: any[] = [];
 type Turn = { text?: string; tools?: Array<{ id: string; name: string; input: unknown }> };
@@ -37,7 +37,16 @@ const fake = http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => { body += c; });
   req.on('end', () => {
-    if (req.url === '/gonka/v1/chat/completions') { gonkaRequests.push(JSON.parse(body)); res.writeHead(400, { 'content-type': 'application/json' }).end('{"error":{"message":"test gonka stub"}}'); return; }
+    if (req.url === '/gonka/v1/chat/completions') {
+      gonkaRequests.push(JSON.parse(body));
+      if (body.includes('routing-fixture')) {
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        res.end('data: {"choices":[{"delta":{"content":"Reply from Gonka."},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
+      } else {
+        res.writeHead(400, { 'content-type': 'application/json' }).end('{"error":{"message":"test gonka stub"}}');
+      }
+      return;
+    }
     if (req.url !== '/v1/messages') { res.writeHead(404).end(); return; }
     requests.push(JSON.parse(body));
     sse(res, script.shift() ?? { text: 'Done.' });
@@ -65,6 +74,8 @@ const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.s
 const rows = [{ Category: 'A', Value: 10 }, { Category: 'B', Value: 20 }, { Category: 'C', Value: 15 }];
 const src = [{ type: 'user', label: 'Values given by the user' }];
 
+const largeRequest = (message: string) => message + '\n\n' + 'Additional document context. '.repeat(215);
+
 test('web chat tool turn: Claude Haiku receives the tools, its tool calls run, real chart + xlsx are attached', async () => {
   const user = `claude-chat-${Date.now()}`;
   script.push(
@@ -75,7 +86,7 @@ test('web chat tool turn: Claude Haiku receives the tools, its tool calls run, r
     { text: 'Your bar chart and Excel workbook are attached.' },
   );
   const events: any[] = [];
-  const out: any = await ai.generalAssist({ userId: user, messages: [{ role: 'user', content: 'Make a bar chart comparing A=10, B=20, C=15 and give me an Excel file.' }], onEvent: (e) => events.push(e) });
+  const out: any = await ai.generalAssist({ userId: user, planId: 'PRO', messages: [{ role: 'user', content: largeRequest('Make a bar chart comparing A=10, B=20, C=15 and give me an Excel file.') }], onEvent: (e) => events.push(e) });
 
   // The request reached Claude Haiku (not Gonka) with the output tools and the delivery rules.
   assert.equal(requests.length, 2);
@@ -111,7 +122,7 @@ test('web chat tool turn: a model that answers with CSV instead of calling tools
     { text: 'The workbook is attached. The chart could not be made in this reply.' },
   );
   const events: any[] = [];
-  const out: any = await ai.generalAssist({ userId: user, messages: [{ role: 'user', content: 'Make a bar chart comparing A=10, B=20, C=15 and give me an Excel file.' }], onEvent: (e) => events.push(e) });
+  const out: any = await ai.generalAssist({ userId: user, planId: 'PRO', messages: [{ role: 'user', content: largeRequest('Make a bar chart comparing A=10, B=20, C=15 and give me an Excel file.') }], onEvent: (e) => events.push(e) });
   assert.ok(events.some((e) => e.type === 'turn_reset'), 'CSV answer is cleared on the client');
   assert.match(JSON.stringify(requests[1].messages.at(-1)), /Delivery check[\s\S]*chart \(SVG\) and XLSX file/);
   assert.equal(out.attachments.length, 1);
@@ -136,9 +147,28 @@ test('earlier turns reach Claude with their text, also when given in the chat-hi
     { role: 'user', text: 'My class is Senior 4 B and the scheme gives half marks for method.' },
     { role: 'assistant', text: 'Noted: Senior 4 B, half marks for method.' },
   ];
-  await ai.generalAssist({ userId: `history-${Date.now()}`, messages: [...history, { role: 'user', content: 'Make a bar chart of A=1, B=2 as an Excel file.' }], onEvent: () => undefined });
+  await ai.generalAssist({ userId: `history-${Date.now()}`, planId: 'PRO', messages: [...history, { role: 'user', content: largeRequest('Make a bar chart of A=1, B=2 as an Excel file.') }], onEvent: () => undefined });
   const sent = JSON.stringify(requests[0].messages);
   assert.match(sent, /Senior 4 B and the scheme gives half marks/);
   assert.match(sent, /Noted: Senior 4 B/);
   assert.ok(requests[0].messages.every((m: any) => JSON.stringify(m.content) !== '""'), 'no empty turns');
+});
+
+
+test('free advanced chat and paid routine chat reach Gonka even when Claude is configured', async () => {
+  const before = requests.length;
+  const gonkaBefore = gonkaRequests.length;
+  const advanced = await ai.generalAssist({
+    userId: 'free-route-test', planId: 'FREE',
+    messages: [{ role: 'user', content: largeRequest('Compare these two reports for the routing-fixture.') }],
+  });
+  const routine = await ai.generalAssist({
+    userId: 'paid-route-test', planId: 'PRO',
+    planText: 'Hello', contextFiles: [{ fileId: 'earlier-file', name: 'Previous report.pdf' }],
+    messages: [{ role: 'user', content: 'Hello. Internal context routing-fixture.' }],
+  });
+  assert.equal(advanced.content[0].text, 'Reply from Gonka.');
+  assert.equal(routine.content[0].text, 'Reply from Gonka.');
+  assert.equal(requests.length, before);
+  assert.equal(gonkaRequests.length, gonkaBefore + 2);
 });

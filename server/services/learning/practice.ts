@@ -1,4 +1,5 @@
 import { randomInt } from 'node:crypto';
+import type { PlanId } from '../billing/plans.js';
 import { prisma } from '../../db.js';
 import { checkUsage, recordUsage } from '../billing/usage.js';
 import { brier, calibrationNote, generateQuestion, gradeObjective, gradeOpen, newId, topicKeyOf, updateSkill, type GeneratedQuestion } from './adaptive.js';
@@ -46,6 +47,7 @@ async function skillFor(userId: string, topic: string) {
 async function gate(userId: string) {
   const g = await checkUsage(userId, { kind: 'chat' });
   if (!g.allowed) throw new LearnError('LIMIT', g.message ?? 'Usage limit reached.', { code: g.code, upgrade: g.upgrade, resetsAt: g.resetsAt });
+  return g.plan.id;
 }
 
 export async function listSkills(userId: string) {
@@ -54,14 +56,14 @@ export async function listSkills(userId: string) {
 }
 
 /** The next question: an unanswered one for this topic if there is one, else a new one at the learner's level. */
-export async function nextItem(ai: () => AiTarget, userId: string, input: { topic: string; language?: string }) {
+export async function nextItem(ai: (planId: PlanId) => AiTarget, userId: string, input: { topic: string; language?: string }) {
   const skill = await skillFor(userId, input.topic);
   const open = await db.practiceItem.findFirst({ where: { userId, topicKey: skill.topicKey, answeredAt: null }, orderBy: { createdAt: 'desc' } });
   if (open) return { item: publicItem(open), skill: publicSkill(skill) };
-  await gate(userId);
+  const planId = await gate(userId);
   const recent = await db.practiceItem.findMany({ where: { userId, topicKey: skill.topicKey }, orderBy: { createdAt: 'desc' }, take: 8 });
   const foundation = skill.misses >= 2 && skill.level === 1;
-  const t = ai();
+  const t = ai(planId);
   const { question: q, usage } = await generateQuestion(t, { topic: skill.topic, level: skill.level, foundation, recent: recent.map((r: any) => r.question), language: input.language });
   void recordUsage(userId, { kind: 'chat', model: t.model, inputTokens: usage?.input, outputTokens: usage?.output });
   const choices = q.kind === 'mcq' ? shuffle(q.choices) : [];
@@ -94,7 +96,7 @@ export async function revealHint(userId: string, id: string) {
   return { item: publicItem(updated) };
 }
 
-export async function answerItem(ai: () => AiTarget, userId: string, id: string, input: { response: string; confidence?: number | null }) {
+export async function answerItem(ai: (planId: PlanId) => AiTarget, userId: string, id: string, input: { response: string; confidence?: number | null }) {
   const it = await ownItem(userId, id);
   if (it.answeredAt) throw new LearnError('DONE', 'This question is already answered.');
   const response = input.response.trim().slice(0, 2000);
@@ -111,8 +113,8 @@ export async function answerItem(ai: () => AiTarget, userId: string, id: string,
     misconception = score < 1 ? arr<{ answer: string; tag: string }>(it.misconceptions).find((m) => m.answer.trim().toLowerCase() === chosen.trim().toLowerCase())?.tag ?? null : null;
     feedback = score >= 1 ? 'Correct.' : misconception ? `Not quite: this answer usually comes from "${misconception}".` : 'Not quite.';
   } else {
-    await gate(userId);
-    const t = ai();
+    const planId = await gate(userId);
+    const t = ai(planId);
     const g = await gradeOpen(t, { question: it.question, answer: it.answer, acceptable: item.acceptable }, response);
     void recordUsage(userId, { kind: 'chat', model: t.model, inputTokens: g.usage?.input, outputTokens: g.usage?.output });
     ({ score, feedback, misconception } = g);

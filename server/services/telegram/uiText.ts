@@ -40,14 +40,14 @@ const en: Copy = {
   fileMissing: 'That file is no longer available.', nothingToRegenerate: 'There is no earlier request to repeat.', languageSet: 'Language updated',
   receivedFile: (n) => `Received <b>${n}</b>. What should I do with it?`, readyCaption: 'Ready',
   markApp: {
-    title: 'Mark exams', body: 'Mark a whole class from your phone camera.',
-    steps: ['Photograph the marking scheme or the question paper (one is required: from the question paper, Bwenge writes the scheme first)', 'Photograph each student: one tap per page, <b>Next student</b> between students', 'Add instructions if you like, then tap <b>Mark</b>'],
+    title: 'Mark exams', body: 'Grade typed student answers.',
+    steps: ['Photograph the marking scheme or the question paper (one is required: from the question paper, Bwenge writes the scheme first)', 'Attach typed student answers as Word or text-based PDFs', 'Add instructions if you like, then tap <b>Mark</b>'],
     footer: 'Marking runs here: each student appears with a tick as it is marked, then the red-pen PDFs and the Excel results arrive.', open: '📝 Open Mark',
   },
   scan: {
     title: 'Document scanner', body: 'Scan exam scripts, marking schemes or any handwritten page with your phone camera.',
     steps: ['Point the camera at the page; the edges are found for you', 'Adjust the corners and pick a filter if needed', 'Add more pages or another student, then tap <b>Send to Telegram</b>'],
-    footer: 'The scan arrives here as one PDF per student, ready to transcribe or mark.', open: '📷 Open scanner',
+    footer: 'The scan arrives here as one PDF per student, ready to transcribe or share.', open: '📷 Open scanner',
     groupHint: 'The link works for 30 minutes.', received: (p) => `Scanned PDF · ${p}. What should I do with it?`,
   },
   profile: {
@@ -88,14 +88,14 @@ const rw: Copy = {
   fileMissing: 'Iyo dosiye ntikiboneka.', nothingToRegenerate: 'Nta busabe bwabanje bwo gusubiramo.', languageSet: 'Ururimi rwahinduwe',
   receivedFile: (n) => `Nakiriye <b>${n}</b>. Nkore iki?`, readyCaption: 'Byarangiye',
   markApp: {
-    title: 'Gukosora ibizamini', body: 'Kosora ishuri ryose ukoresheje kamera ya telefoni yawe.',
-    steps: ['Fotora marking scheme cyangwa urupapuro rw’ibibazo (kimwe kirakenewe: ku rupapuro rw’ibibazo, Bwenge ibanza kwandika marking scheme)', 'Fotora buri munyeshuri: gukanda rimwe ku rupapuro, <b>Umunyeshuri ukurikira</b> hagati y’abanyeshuri', 'Ongeraho amabwiriza niba ubishaka, hanyuma ukande <b>Kosora</b>'],
+    title: 'Gukosora ibizamini', body: 'Kosora ibisubizo byanditse kuri mudasobwa.',
+    steps: ['Fotora marking scheme cyangwa urupapuro rw’ibibazo (kimwe kirakenewe: ku rupapuro rw’ibibazo, Bwenge ibanza kwandika marking scheme)', 'Ongeraho ibisubizo byanditse kuri mudasobwa muri Word cyangwa PDF', 'Ongeraho amabwiriza niba ubishaka, hanyuma ukande <b>Kosora</b>'],
     footer: 'Gukosora bibera hano: buri munyeshuri agaragara afite akamenyetso iyo arangije gukosorwa, hanyuma PDF zikosoye n’amanota muri Excel bikaza.', open: '📝 Fungura Gukosora',
   },
   scan: {
     title: 'Scanner y’inyandiko', body: 'Sikana impapuro z’ibizamini, marking scheme cyangwa urupapuro rwandikishijwe intoki ukoresheje kamera ya telefoni.',
     steps: ['Erekeza kamera ku rupapuro; impande ziboneka ubwazo', 'Hindura inguni uhitemo filter niba bikenewe', 'Ongeraho izindi mpapuro cyangwa undi munyeshuri, hanyuma ukande <b>Ohereza kuri Telegram</b>'],
-    footer: 'Bizagera hano ari PDF imwe kuri buri munyeshuri, yiteguye kwandikwa cyangwa gukosorwa.', open: '📷 Fungura scanner',
+    footer: 'Bizagera hano ari PDF imwe kuri buri munyeshuri, yiteguye kwandikwa cyangwa gusangizwa.', open: '📷 Fungura scanner',
     groupHint: 'Iyi link imara iminota 30.', received: (p) => `PDF yasikanwe · ${p}. Nkore iki?`,
   },
   profile: {
@@ -136,14 +136,14 @@ const fr: Copy = {
   fileMissing: 'Ce fichier n’est plus disponible.', nothingToRegenerate: 'Aucune demande précédente à relancer.', languageSet: 'Langue mise à jour',
   receivedFile: (n) => `<b>${n}</b> reçu. Que dois-je en faire ?`, readyCaption: 'Prêt',
   markApp: {
-    title: 'Corriger des copies', body: 'Corrigez toute une classe avec l’appareil photo de votre téléphone.',
-    steps: ['Photographiez le barème ou le sujet (l’un des deux est requis : à partir du sujet, Bwenge rédige d’abord le barème)', 'Photographiez chaque élève : une touche par page, <b>Élève suivant</b> entre deux élèves', 'Ajoutez des consignes si vous le souhaitez, puis touchez <b>Corriger</b>'],
+    title: 'Corriger des copies', body: 'Corrigez des réponses saisies au clavier.',
+    steps: ['Photographiez le barème ou le sujet (l’un des deux est requis : à partir du sujet, Bwenge rédige d’abord le barème)', 'Joignez les réponses saisies dans Word ou dans un PDF texte', 'Ajoutez des consignes si vous le souhaitez, puis touchez <b>Corriger</b>'],
     footer: 'La correction se déroule ici : chaque élève apparaît coché dès qu’il est corrigé, puis arrivent les PDF annotés en rouge et les résultats Excel.', open: '📝 Ouvrir Corriger',
   },
   scan: {
     title: 'Scanner de documents', body: 'Scannez des copies, des barèmes ou toute page manuscrite avec l’appareil photo de votre téléphone.',
     steps: ['Visez la page : les bords sont détectés automatiquement', 'Ajustez les coins et choisissez un filtre si besoin', 'Ajoutez des pages ou un autre élève, puis touchez <b>Envoyer sur Telegram</b>'],
-    footer: 'Le scan arrive ici, un PDF par élève, prêt à transcrire ou à corriger.', open: '📷 Ouvrir le scanner',
+    footer: 'Le scan arrive ici, un PDF par élève, prêt à transcrire ou à partager.', open: '📷 Ouvrir le scanner',
     groupHint: 'Le lien est valable 30 minutes.', received: (p) => `PDF scanné · ${p}. Que dois-je en faire ?`,
   },
   profile: {

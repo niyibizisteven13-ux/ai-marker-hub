@@ -24,9 +24,9 @@ export interface DocumentDeps {
   queue: FileJobQueue;
   store: OwnedRecordStore<DocumentRecord>;
   /** Vision-capable model for recognition, or null when none is configured. */
-  vision: () => { adapter: ProviderAdapter; model: string; fallbackModel?: string | null } | null;
+  vision: (userId: string) => { adapter: ProviderAdapter; model: string; fallbackModel?: string | null } | null | Promise<{ adapter: ProviderAdapter; model: string; fallbackModel?: string | null } | null>;
   /** Text model for questions (may be the same). */
-  agent: () => { adapter: ProviderAdapter; model: string; fallbackModel?: string | null };
+  agent: (userId: string) => { adapter: ProviderAdapter; model: string; fallbackModel?: string | null } | Promise<{ adapter: ProviderAdapter; model: string; fallbackModel?: string | null }>;
   ocr?: IndependentOcr;
   forbiddenStrings?: string[];
   maxPages?: number;
@@ -100,7 +100,7 @@ export function createDocumentService(deps: DocumentDeps) {
     } catch {
       throw new JobError('SOURCE_UNAVAILABLE', 'The uploaded document is no longer available. Upload it again.');
     }
-    const vision = deps.vision();
+    const vision = await deps.vision(job.ownerId);
     if (!vision) throw new JobError('VISION_MODEL_UNAVAILABLE', 'No vision-capable model is configured for handwriting recognition.');
     let result: DocumentResult;
     try {
@@ -122,7 +122,7 @@ export function createDocumentService(deps: DocumentDeps) {
   deps.queue.register<DocumentJobPayload, unknown>('document.process', runJob);
 
   async function submit(userId: string, file: { originalname: string; mimetype?: string; buffer: Buffer }, opts: { languageHint?: string; forceRecognition?: boolean; crossCheck?: boolean; tiling?: 'auto' | 'always' | 'off'; notifyTelegramChatId?: string }) {
-    if (!deps.vision()) throw new JobError('VISION_MODEL_UNAVAILABLE', 'Handwriting recognition needs a vision-capable model. Set AI_AGENT_PROVIDER=anthropic (Claude) or DOC_VISION_GONKA=true if your Gonka model accepts images.');
+    if (!(await deps.vision(userId))) throw new JobError('VISION_MODEL_UNAVAILABLE', 'Handwriting recognition needs a vision-capable model on your plan.');
     // Validate format and page count before queueing.
     try {
       await loadPages(file.buffer, file.originalname, { maxPages: deps.maxPages });
@@ -154,7 +154,7 @@ export function createDocumentService(deps: DocumentDeps) {
     const id = `${key.slice(0, 8)}-${key.slice(8, 12)}-4${key.slice(13, 16)}-8${key.slice(17, 20)}-${key.slice(20, 32)}`;
     const existing = await deps.store.get(id, userId);
     if (existing) return { record: existing, cached: true, key };
-    const vision = deps.vision();
+    const vision = await deps.vision(userId);
     if (!vision) throw new JobError('VISION_MODEL_UNAVAILABLE', 'No vision-capable model is configured for handwriting recognition.');
     let result: DocumentResult;
     try {
@@ -186,7 +186,7 @@ export function createDocumentService(deps: DocumentDeps) {
   async function ask(userId: string, id: string, question: string, language?: string, signal?: AbortSignal, supportCheck = true) {
     const rec = await deps.store.get(id, userId);
     if (!rec) return null;
-    const agent = deps.agent();
+    const agent = await deps.agent(userId);
     try {
       return await answerFromDocument(agent.adapter, agent.model, rec.result, rec.corrections, question, { language, signal, fallbackModel: agent.fallbackModel, supportCheck });
     } catch (e) {

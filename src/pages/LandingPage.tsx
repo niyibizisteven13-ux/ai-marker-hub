@@ -8,7 +8,6 @@ import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { AuthFlow } from '../components/AuthFlow';
 import { NewAccountBlock } from '../components/NewAccountBlock';
-import { ScanMarkBanner } from '../components/ScanMarkBanner';
 import { QrCard } from '../components/QrCard';
 import { MfaStep } from '../components/MfaStep';
 
@@ -18,7 +17,6 @@ export default function LandingPage({ onLoginSuccess }: { onLoginSuccess: (user?
 
   // Back from Google with a passkey still to be checked (the server held the sign-in): show the second step instead of the sign-in form.
   const waitingForPasskey = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('mfa') === '1';
-  const bannerLabels = { s1: t('s1'), s2: t('s2'), s3: t('s3'), mark: t('bMark'), marking: t('bMarking'), done: t('bDone') };
 
   useEffect(() => {
     document.title = 'Bwenge — Sign in';
@@ -108,7 +106,6 @@ export default function LandingPage({ onLoginSuccess }: { onLoginSuccess: (user?
 
         <aside className="hero" aria-hidden="true">
           <LogoHeroOutline />
-          <ScanMarkBanner className="smb-hero" labels={bannerLabels} />
           <QrCard qrTitle={t('qr')} />
         </aside>
       </div>
