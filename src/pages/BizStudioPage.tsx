@@ -224,7 +224,7 @@ export default function BizStudioPage({ onBack }: { onBack: () => void }) {
   const [urls, setUrls] = useState<Record<string, string>>({}); const [secrets, setSecrets] = useState<SecretsStatus | null>(null); const [sheet, setSheet] = useState<EntryKind | null>(null); const [more, setMore] = useState(false);
   const [creating, setCreating] = useState({ name: '', category: 'shop', whatsapp: '', lat: '', lng: '' }); const [busy, setBusy] = useState(false); const [tick, setTick] = useState(0);
   const load = useCallback(async () => { try { const m = await ownerApi.mine(); setMine(m); setSel((s) => (m.businesses.some((b) => b.id === s) ? s : m.businesses[0]?.id ?? '')); } catch (e) { setError(msg(e)); } }, []);
-  useEffect(() => { document.title = 'My business · Bwenge'; void load(); }, [load]);
+  useEffect(() => { document.title = 'Ventures · Bwenge'; void load(); }, [load]);
   const b = mine?.locked ? null : mine?.businesses.find((x) => x.id === sel) ?? null;
   useEffect(() => { if (b) void ownerApi.mediaUrls(b.id).then(setUrls).catch(() => undefined); else setUrls({}); }, [b?.id, b?.updatedAt]);   // eslint-disable-line react-hooks/exhaustive-deps
   const loadSecrets = useCallback(() => { if (b) void ownerApi.secrets(b.id).then(setSecrets).catch(() => undefined); }, [b?.id]);   // eslint-disable-line react-hooks/exhaustive-deps
@@ -262,7 +262,7 @@ export default function BizStudioPage({ onBack }: { onBack: () => void }) {
             {error && <p role="alert" className="mb-4 rounded-xl bg-rose-500/10 px-4 py-3 text-sm text-rose-600">{error}</p>}
             {mine?.locked && <LockedGate mine={mine} onRefresh={() => void load()} />}
             {mine && !b && !mine.locked && (
-              <form onSubmit={create} className={`${card} mx-auto max-w-xl`}><p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--brand-strong,var(--brand))]">Bwenge4biz</p><h2 className="mt-1 font-display text-2xl font-semibold">Give your business a page and a notebook</h2>
+              <form onSubmit={create} className={`${card} mx-auto max-w-xl`}><p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--brand-strong,var(--brand))]">Bwenge Ventures</p><h2 className="mt-1 font-display text-2xl font-semibold">Give your business a page and a notebook</h2>
                 <p className="mt-2 text-[15px] text-[var(--app-muted)]">Customers get one short link to your products, photos, hours and WhatsApp. You get a private dashboard for sales, expenses and stock, and an assistant that writes it all down when you talk to it.</p>
                 <label className="mt-5 block text-sm"><span className="mb-1.5 block text-[var(--app-muted)]">Business name</span><input autoFocus className={input} value={creating.name} maxLength={60} placeholder="Mama Grace Café" onChange={(e) => setCreating({ ...creating, name: e.target.value })} /></label>
                 <label className="mt-4 block text-sm"><span className="mb-1.5 block text-[var(--app-muted)]">Kind of business</span><select className={input} value={creating.category} onChange={(e) => setCreating({ ...creating, category: e.target.value })}>{CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</select></label>
