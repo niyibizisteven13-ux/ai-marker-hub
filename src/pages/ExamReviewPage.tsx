@@ -216,7 +216,7 @@ export default function ExamReviewPage({ onBack }: { onBack: () => void }) {
               <p className="text-lg font-semibold text-white">Mark a class in one message</p>
               <ol className="mt-4 space-y-3 text-sm text-neutral-300">
                 <li className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--brand)]/20 text-xs font-bold text-[var(--brand-soft)]">1</span>Attach the students' scripts in the chat: PDFs, phone photos, Word files or a ZIP folder. Add the marking scheme if you have one.</li>
-                <li className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--brand)]/20 text-xs font-bold text-[var(--brand-soft)]">2</span>Say "mark these". Bwenge reads the handwriting, marks every question and corrects each script in red pen.</li>
+                <li className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--brand)]/20 text-xs font-bold text-[var(--brand-soft)]">2</span>Say "mark these". Bwenge grades typed answers and shows the marks for review.</li>
                 <li className="flex gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--brand)]/20 text-xs font-bold text-[var(--brand-soft)]">3</span>The marked PDFs come back in the chat, with the Excel results. Every class appears here to review and share.</li>
               </ol>
               <div className="mt-6 flex flex-wrap gap-2">

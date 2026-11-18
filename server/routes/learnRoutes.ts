@@ -1,8 +1,9 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
-import { agentTarget } from '../services/AiService.js';
+import { userChatTarget } from '../services/AiService.js';
 import { LearnError, answerItem, archiveClass, classDashboard, createClass, joinClass, leaveClass, listSkills, myClasses, nextItem, revealHint, type AiTarget } from '../services/learning/practice.js';
 import { buildGradebook, gradebookWorkbook, setGradebookItems, type GradebookItem } from '../services/gradebook.js';
+import type { PlanId } from '../services/billing/plans.js';
 import { regenerateLink, transcriptLinks } from '../services/transcripts.js';
 
 /**
@@ -11,7 +12,7 @@ import { regenerateLink, transcriptLinks } from '../services/transcripts.js';
  * Classes: GET /classes, POST /classes, POST /classes/join, DELETE /classes/:id/membership, DELETE /classes/:id,
  * GET /classes/:id/dashboard (owner only, anonymised).
  */
-export function createLearnRouter(ai: () => AiTarget = () => { const a = agentTarget(); return { adapter: a.adapter, model: a.model, fallbackModel: a.fallbackModel }; }) {
+export function createLearnRouter(ai: (planId: PlanId) => AiTarget = planId => userChatTarget(planId, '')) {
   const router = Router();
   const userIdOf = (req: Request) => (req as any).user?.userId as string;
 

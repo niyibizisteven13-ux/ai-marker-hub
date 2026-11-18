@@ -193,21 +193,15 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
       </header>
       <main className="mx-auto flex w-full max-w-[840px] flex-1 flex-col px-4 pb-28 sm:px-6 sm:pb-10">
         <h1 className="mt-1 text-center sm:mt-4 font-display text-[28px] font-medium tracking-tight sm:text-[32px]">What are we <span className="text-[var(--brand)]">marking</span> today?</h1>
-        <p className="mx-auto mt-2 hidden max-w-xl text-center text-[14px] text-neutral-400 sm:block">Add the students' scripts and the marking scheme or the question paper. Bwenge reads the handwriting, marks every question in red pen, and shows you each step in the chat.</p>
+        <p className="mx-auto mt-2 hidden max-w-xl text-center text-[14px] text-neutral-400 sm:block">Add the students' scripts and the marking scheme or the question paper. Bwenge grades typed answers and shows each step in the chat.</p>
 
         <section className={`mt-5 overflow-hidden sm:mt-7 rounded-[20px] border bg-[var(--app-panel)] shadow-[0_12px_40px_rgba(0,0,0,.25)] transition-colors ${dragging ? 'border-[var(--brand)]/70' : 'border-white/[0.12]'}`}>
           {items.length === 0 ? (
-            // Two ways in, side by side: the camera (one tap per page) and files (or drop them here on a computer).
+            // Files can be chosen or dropped here.
             <div className="grid gap-2.5 p-3.5 sm:grid-cols-2">
-              {onScan && (
-                <button type="button" onClick={() => onScan('scripts')} className="flex items-center gap-3 rounded-2xl bg-[var(--brand)] px-4 py-4 text-left text-white hover:bg-[var(--brand-strong)] sm:flex-col sm:items-start sm:py-6">
-                  <span className="rounded-xl bg-white/15 p-2.5"><Camera size={22} /></span>
-                  <span><span className="block text-[15px] font-semibold">Scan papers</span><span className="block text-[12.5px] text-white/80">One tap per page, then next student</span></span>
-                </button>
-              )}
-              <button type="button" onClick={() => input.current?.click()} className={`flex items-center gap-3 rounded-2xl border border-dashed border-white/[0.16] px-4 py-4 text-left hover:bg-white/[0.03] sm:flex-col sm:items-start sm:py-6 ${onScan ? '' : 'sm:col-span-2'}`}>
+              <button type="button" onClick={() => input.current?.click()} className={`flex items-center gap-3 rounded-2xl border border-dashed border-white/[0.16] px-4 py-4 text-left hover:bg-white/[0.03] sm:flex-col sm:items-start sm:py-6 sm:col-span-2`}>
                 <span className="rounded-xl bg-white/[0.06] p-2.5 text-neutral-300"><Paperclip size={22} /></span>
-                <span><span className="block text-[15px] font-semibold">Choose files</span><span className="block text-[12.5px] text-neutral-400"><span className="hidden sm:inline">or drop them here: </span>scripts, scheme, question paper (PDF, photos, Word, ZIP)</span></span>
+                <span><span className="block text-[15px] font-semibold">Choose files</span><span className="block text-[12.5px] text-neutral-400"><span className="hidden sm:inline">or drop them here: </span>Typed scripts, Word files or text-based PDFs. Add the scheme or question paper separately.</span></span>
               </button>
             </div>
           ) : (
@@ -299,7 +293,6 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
 
           <div className="flex items-center gap-2 overflow-x-auto border-t border-white/[0.08] px-3.5 py-2.5 [&>*]:shrink-0 sm:flex-wrap sm:overflow-visible">
             {items.length > 0 && <button type="button" onClick={() => input.current?.click()} className="inline-flex items-center gap-1.5 rounded-[10px] border border-white/[0.12] px-3 py-1.5 text-[12.5px] text-neutral-300 hover:bg-white/5"><Paperclip size={14} />Add files</button>}
-            {onScan && items.length > 0 && <button type="button" onClick={() => onScan('scripts')} className="inline-flex items-center gap-1.5 rounded-[10px] border border-white/[0.12] px-3 py-1.5 text-[12.5px] text-neutral-300 hover:bg-white/5"><Camera size={14} />Scan papers</button>}
             <select aria-label="Credit" value={credit} onChange={(e) => setCredit(e.target.value as 'partial' | 'strict')} className="h-[30px] rounded-[10px] border border-white/[0.12] bg-[var(--app-panel)] px-2 text-[12.5px] text-neutral-300">
               <option value="partial">Part marks allowed</option><option value="strict">Strict marking</option>
             </select>
@@ -325,17 +318,17 @@ export default function MarkPage({ onClose, onMark, onScan, incoming, covered = 
             <Stat value={scheme || paper ? '✓' : '!'} label={scheme ? 'marking scheme attached' : paper ? 'question paper: Bwenge writes the scheme from it' : 'add the marking scheme or the question paper'} tone={scheme || paper ? 'ok' : 'warn'} />
             <Stat value={summary.students || '—'} label={`student${summary.students === 1 ? '' : 's'} found`} />
             <Stat value={summary.checking ? '…' : summary.pages} label={summary.checking ? 'checking pages' : `pages, ${summary.handwritten} handwritten or scanned`} />
-            <Stat value={summary.retake} label={summary.retake ? 'photos to retake (marking still works)' : 'photos to retake'} tone={summary.retake ? 'warn' : undefined} />
+            <Stat value={summary.retake} label="photos to retake" tone={summary.retake ? 'warn' : undefined} />
           </section>
         )}
-        {summary.retake > 0 && <p className="mt-3 flex items-center gap-1.5 text-[12.5px] text-amber-300 sm:hidden"><AlertTriangle size={13} />{summary.retake} photo{summary.retake === 1 ? '' : 's'} to retake (marking still works)</p>}
+        {summary.retake > 0 && <p className="mt-3 flex items-center gap-1.5 text-[12.5px] text-amber-300 sm:hidden"><AlertTriangle size={13} />{summary.retake} photo{summary.retake === 1 ? '' : 's'} to retake</p>}
         {failed.length > 0 && <p className="mt-3 text-[12.5px] text-rose-300">{failed.length} file{failed.length === 1 ? '' : 's'} could not be uploaded. Remove {failed.length === 1 ? 'it' : 'them'} or add {failed.length === 1 ? 'it' : 'them'} again.</p>}
         {/* Phone: the Mark button stays in reach at the bottom of the screen. */}
         <div className="fixed inset-x-0 bottom-0 z-10 flex items-center gap-3 border-t border-white/[0.08] bg-[var(--app-bg)]/95 px-4 pb-[calc(12px+env(safe-area-inset-bottom))] pt-3 backdrop-blur sm:hidden">
           <span className="min-w-0 flex-1 text-[12px] leading-tight text-neutral-400">
             {items.length
               ? <><span className="block truncate">{!scripts.length ? 'Next: the students\' scripts' : scheme ? 'Scheme attached' : paper ? 'Question paper attached' : 'Next: scheme or question paper'}</span><span className="block truncate">{summary.students || 0} student{summary.students === 1 ? '' : 's'} · {summary.pages} page{summary.pages === 1 ? '' : 's'}</span></>
-              : 'Scan or add the scripts to start'}
+              : 'Add typed scripts to start'}
           </span>
           <button type="button" disabled={!canMark} onClick={submit} className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-[var(--brand)] px-4 py-2.5 text-[14px] font-semibold text-white disabled:opacity-40">
             {uploading ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}{canMark || uploading ? markLabel : !scripts.length ? 'Add scripts' : 'Add scheme'}

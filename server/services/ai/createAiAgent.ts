@@ -50,6 +50,8 @@ export interface AgentRunInput {
   maxTurns?: number;
   temperature?: number;
   maxTokens?: number;
+  /** Server-selected provider for this run. */
+  provider?: ProviderAdapter;
   /** Overrides the configured model for this run (set by the task router). */
   model?: string;
   /** Per-run fallback model from the routing policy; null disables fallback. */
@@ -69,6 +71,8 @@ export function createAiAgent(cfg: AiAgentConfig) {
     tools,
     services: cfg.services ?? {},
     async run(input: AgentRunInput): Promise<AgentResult & { fileIds: string[]; warnings: string[] }> {
+      const runAdapter = input.provider ?? adapter;
+      const runRuntime = runAdapter === adapter ? runtime : new AgentRuntime(runAdapter, tools, cfg.runtime);
       const requestStartedAt = performance.now();
       const ctx = { userId: input.userId, chatId: input.chatId, locale: input.locale, signal: input.signal, files: cfg.files, services: cfg.services ?? {} };
       let ingested: Awaited<ReturnType<typeof ingestUploads>>;
@@ -84,7 +88,7 @@ export function createAiAgent(cfg: AiAgentConfig) {
               chatIdHash: input.chatId ? hashTraceIdentifier(input.chatId, cfg.traceHashSecret) : null,
               capability: input.uploads?.length ? 'D' : 'UNCLASSIFIED',
               model: input.model ?? cfg.model,
-              provider: adapter.name,
+              provider: runAdapter.name,
               promptVersion: cfg.promptVersion ?? 'unversioned',
               toolCalls: [],
               retries: 0,
@@ -180,7 +184,7 @@ export function createAiAgent(cfg: AiAgentConfig) {
           chatIdHash: input.chatId ? hashTraceIdentifier(input.chatId, cfg.traceHashSecret) : null,
           capability,
           model: input.model ?? cfg.model,
-          provider: adapter.name,
+          provider: runAdapter.name,
           promptVersion: cfg.promptVersion ?? 'unversioned',
           toolCalls,
           retries,
@@ -203,7 +207,7 @@ export function createAiAgent(cfg: AiAgentConfig) {
       };
 
       try {
-        const result = await runtime.run({
+        const result = await runRuntime.run({
           system, messages, ctx, model: input.model ?? cfg.model, onEvent: emit,
           temperature: input.temperature ?? cfg.temperature,
           maxTokens: input.maxTokens ?? cfg.maxTokens,

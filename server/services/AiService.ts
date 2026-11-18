@@ -12,6 +12,9 @@ import { asksAboutDatasets } from './knowledge/published.js';
 import { needsResearch } from './ai/research.js';
 import { needsPlatformTools } from './ai/platformIntent.js';
 import { recordUsage } from './billing/usage.js';
+import { planFor, type PlanId } from './billing/plans.js';
+import { needsScanRecognition } from './exams/scanPolicy.js';
+import { isSmallTalkMessage } from './intentRouter.js';
 import { retrieveKnowledgeChunks } from './KnowledgeRetrievalService.js';
 import { ExecutionSandbox } from './ExecutionSandbox.js';
 import { createAiAgent, FileStore, OpenAICompatibleAdapter, AnthropicAdapter, loadClaudeAgentConfig, ReliableProviderAdapter, ModelDispatchAdapter, ModelPolicyManager, TaskClassifier, loadComplexProvider, loadModelPolicies, TaskRouter, FileJobQueue, NisrIngestionPipeline, isStatisticsQuery, BudgetManager, DocumentPipeline, DeterministicTools } from './ai/index.js';
@@ -256,6 +259,31 @@ export function agentTarget(): { adapter: typeof agentProvider; model: string; p
     : { adapter: agentProvider, model: gonkaStandardModel, provider: 'gonka', fallbackModel: null };
 }
 
+// User chat uses Gonka or Claude. Other configured big-task providers are for legacy/internal callers.
+const gonkaChatPolicies = new ModelPolicyManager();
+const gonkaChatRouter = new TaskRouter(gonkaChatPolicies);
+type UserAiOptions = { highDemand?: boolean; hasImages?: boolean; hasFiles?: boolean };
+
+export function userChatTarget(plan: PlanId, prompt: string, options: UserAiOptions = {}) {
+  const route = gonkaChatRouter.route({ prompt, hasFiles: options.hasFiles, hasImages: options.hasImages });
+  const highDemand = options.highDemand || options.hasImages || prompt.trim().length >= 6000;
+  const casual = isSmallTalkMessage(prompt, options.hasFiles || options.hasImages);
+  if (plan !== 'FREE' && highDemand && !casual && claudeAdapter && claudeAgent.config) {
+    return {
+      adapter: claudeAdapter, provider: 'anthropic' as const, model: claudeAgent.config.model,
+      fallbackModel: options.hasImages && process.env.GONKA_FALLBACK_SUPPORTS_VISION !== 'true' ? null : undefined,
+      maxOutputTokens: Math.max(route.maxOutputTokens, gonkaChatPolicies.getPolicy('COMPLEX').maxOutputTokens),
+    };
+  }
+  return { ...route, adapter: gonkaAdapter, provider: 'gonka' as const };
+}
+
+/** Use the account's current entitlement for a nested tool or feature request. */
+export async function userAgentTarget(userId: string, prompt: string, options: UserAiOptions = {}) {
+  const plan = await planFor(userId).then(p => p.id).catch(() => 'FREE' as const);
+  return userChatTarget(plan, prompt, options);
+}
+
 /** Picks model and fallback for a chat request and logs the decision (never the prompt). */
 function routeChat(prompt: string, opts: { hasImages?: boolean; hasTools?: boolean; requestId?: string }) {
   const route = taskRouter.route({ prompt, hasFiles: opts.hasImages, hasImages: opts.hasImages, hasTools: opts.hasTools });
@@ -268,7 +296,7 @@ function routeChat(prompt: string, opts: { hasImages?: boolean; hasTools?: boole
  * marking model when DOCUMENT_MODEL=marking (the larger model), otherwise on the agent model; usage is charged.
  */
 async function completeForTools(req: { system: string; prompt: string; maxTokens?: number; userId: string; signal?: AbortSignal }): Promise<string> {
-  const t = process.env.DOCUMENT_MODEL === 'marking' ? markingTarget() : agentTarget();
+  const t = await userAgentTarget(req.userId, req.prompt, { highDemand: true });
   let text = '';
   let input = 0;
   let output = 0;
@@ -763,6 +791,7 @@ export class AiService {
     const uploads = options.images?.map(img => ({ type: 'image' as const, base64: img.base64, mediaType: img.mediaType }));
     const r = await bwengeAgent.run({
       userId: 'system',
+      provider: gonkaAdapter,
       system: options.system || BWENGE_GENERAL_SYSTEM_PROMPT,
       history: options.history,
       prompt,
@@ -774,18 +803,36 @@ export class AiService {
     return r.text;
   }
 
+  public async readScan(userId: string, planId: PlanId, prompt: string, options: {
+    system: string;
+    images: Array<{ base64: string; mediaType: string }>;
+    maxTokens?: number;
+  }) {
+    const target = userChatTarget(planId, prompt, { hasImages: true, hasFiles: true });
+    const r = await bwengeAgent.run({
+      userId, system: options.system, prompt,
+      uploads: options.images.map(image => ({ type: 'image', ...image })),
+      toolNames: [], maxTurns: 1, maxTokens: options.maxTokens ?? target.maxOutputTokens,
+      provider: target.adapter, model: target.model, fallbackModel: target.fallbackModel,
+      vision: target.provider === 'anthropic' || process.env.DOC_VISION_GONKA === 'true',
+    });
+    void recordUsage(userId, { kind: 'vision', model: target.model, inputTokens: r.usage.input_tokens, outputTokens: r.usage.output_tokens });
+    return r.text;
+  }
+
   public async streamGonkaChat(prompt: string, options: {
     model?: string; system?: string; history?: any[]; images?: Array<{ base64: string; mediaType: string }>;
     onToken: (token: string) => void; onReset?: () => void; tools?: any[];
     temperature?: number; max_tokens?: number;
     signal?: AbortSignal;
-    userId?: string; requestId?: string;
+    userId?: string; requestId?: string; routingPrompt?: string;
   }) {
     const uploads = options.images?.map(img => ({ type: 'image' as const, base64: img.base64, mediaType: img.mediaType }));
-    const route = routeChat(prompt, { hasImages: !!uploads?.length, requestId: options.requestId });
+    const route = userChatTarget('FREE', options.routingPrompt ?? prompt, { hasFiles: !!uploads?.length, hasImages: !!uploads?.length });
     const model = options.model ?? route.model;
-    await bwengeAgent.run({
+    const result = await bwengeAgent.run({
       userId: options.userId || 'system',
+      provider: route.adapter,
       system: options.system || BWENGE_GENERAL_SYSTEM_PROMPT,
       history: options.history,
       prompt,
@@ -797,6 +844,7 @@ export class AiService {
       model,
       fallbackModel: options.model ? null : route.fallbackModel,
       requestId: options.requestId,
+      vision: process.env.DOC_VISION_GONKA === 'true',
       signal: options.signal,
       onEvent: (e) => {
         if (e.type === 'text') {
@@ -806,6 +854,7 @@ export class AiService {
         }
       },
     });
+    return { model, usage: result.usage };
   }
 
   public async runGonkaAgentLoop(options: {
@@ -1056,16 +1105,20 @@ export class AiService {
   public async describeProctorPicture(userId: string, dataUrl: string, system: string): Promise<string> {
     const m = /^data:(image\/jpeg|image\/png);base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
     if (!m || m[2].length > 200_000) throw new Error('Not a usable picture.');
-    const agent = agentTarget();
+    const route = await userAgentTarget(userId, '', { hasImages: true });
+    if (route.provider === 'gonka' && process.env.DOC_VISION_GONKA !== 'true') throw new Error('No vision model is available on this plan.');
     const r = await bwengeAgent.run({
       userId, system, prompt: 'Look at this picture and answer with the JSON only.', uploads: [{ type: 'image', base64: m[2], mediaType: m[1] }],
-      toolNames: [], vision: true, maxTurns: 1, ...(agent.provider === 'anthropic' ? { model: agent.model } : {}),
+      toolNames: [], vision: true, maxTurns: 1,
+      provider: route.adapter, model: route.model, fallbackModel: route.fallbackModel,
     });
     return r.text ?? '';
   }
 
   public async generalAssist(options: {
     userId: string;
+    /** Effective plan from the server-side usage check. Other callers look up the plan. */
+    planId?: PlanId;
     messages: Anthropic.MessageParam[];
     files?: { type: 'image' | 'document'; base64: string; mediaType: string; name?: string }[];
     pinnedSyllabus?: string | null;
@@ -1085,8 +1138,6 @@ export class AiService {
     /** A scheduled run with nobody watching: only these tools, and this extra instruction (see agenda/runner.ts). */
     unattended?: { toolNames: string[]; system: string };
   }) {
-    const useGonka = process.env.AI_PROVIDER === 'gonkarouter' || await this.providerAvailable('gonkarouter');
-    const allowFallback = process.env.ALLOW_GEMINI_FALLBACK === 'true';
 
     // Output planner: decides whether this turn must produce files/charts or computed numbers (tool turn).
     // Plan on the user's own words, never on attached-document text or injected context.
@@ -1117,21 +1168,25 @@ export class AiService {
     const platformP = options.extractSchema ? Promise.resolve('') : platformContext(options.userId, options.channel === 'telegram' ? 'telegram' : 'web').catch(() => '');
     const dataTurn = await dataTurnP;
     const toolTurn = !!plan && (plan.artifact || plan.needsComputation) || dataTurn;
-    // Photos and PDFs need a model that can see them (handwriting, scans, diagrams).
-    const visualUpload = (options.files ?? []).some((f) => f.type === 'image' || /^image\/|application\/pdf/.test(f.mediaType));
-    // Files from earlier messages are read with tools, so those turns also run on the agent model.
+    const visualUpload = (options.files ?? []).some(f => f.type === 'image' || /^image\/|application\/pdf/.test(f.mediaType));
     const earlierFiles = (options.contextFiles ?? []).slice(-5);
-    // Tool and vision turns run on the agent model (Claude when AI_AGENT_PROVIDER=anthropic); everyday chat stays on Gonka.
-    const agent = agentTarget();
-    const runModel = (toolTurn || visualUpload || earlierFiles.length > 0) && agent.provider === 'anthropic' ? agent.model : undefined;
-    const vision = Boolean(runModel) || process.env.DOC_VISION_GONKA === 'true';
-
-    if (!runModel && !useGonka && !process.env.GONKA_API_KEY) {
-      if (!allowFallback) {
-        throw new Error('GonkaRouter API key is not configured and ALLOW_GEMINI_FALLBACK is false.');
-      } else {
-        logger.warn('Primary chat provider unavailable; configured secondary provider will be used.');
+    const planId = options.planId ?? await planFor(options.userId).then(p => p.id).catch(() => 'FREE' as const);
+    let needsVision = false;
+    if (planId !== 'FREE' && claudeAdapter) {
+      for (const file of options.files ?? []) {
+        if (file.type === 'image' || file.mediaType.startsWith('image/') ||
+            (file.mediaType === 'application/pdf' && await needsScanRecognition({
+              buffer: Buffer.from(file.base64, 'base64'), name: file.name ?? 'attachment.pdf', mime: file.mediaType,
+            }))) {
+          needsVision = true;
+          break;
+        }
       }
+    }
+    const route = userChatTarget(planId, userText, { hasFiles: !!options.files?.length, hasImages: needsVision });
+    const vision = route.provider === 'anthropic' || process.env.DOC_VISION_GONKA === 'true';
+    if (route.provider === 'gonka' && !process.env.GONKA_API_KEY) {
+      throw Object.assign(new Error('GonkaRouter API key is not configured.'), { code: 'AI_UNAVAILABLE' });
     }
 
     let memoryContext = '';
@@ -1173,6 +1228,8 @@ export class AiService {
     if (options.extractSchema) {
       const r = await bwengeAgent.run({
         userId: options.userId,
+        provider: route.adapter, model: route.model, fallbackModel: route.fallbackModel,
+        maxTokens: route.maxOutputTokens, vision,
         system: `${systemPrompt}\n\nRespond with ONLY valid JSON matching: ${options.extractSchema}`,
         history,
         prompt,
@@ -1180,7 +1237,7 @@ export class AiService {
         toolNames: [],
         signal: options.signal,
       });
-      void recordUsage(options.userId, { kind: 'tool', model: runModel ?? (process.env.GONKA_MODEL || GONKA_MODELS.DEFAULT), inputTokens: r.usage?.input_tokens, outputTokens: r.usage?.output_tokens, channel: options.channel });
+      void recordUsage(options.userId, { kind: 'tool', model: route.model, inputTokens: r.usage?.input_tokens, outputTokens: r.usage?.output_tokens, channel: options.channel });
       return { ...this.parseModelJson(r.text), _usage: r.usage };
     }
 
@@ -1195,22 +1252,23 @@ export class AiService {
       onEvent: options.onEvent,
       signal: options.signal,
       vision,
-      ...(runModel ? { model: runModel } : {}),
+      provider: route.adapter, model: route.model, fallbackModel: route.fallbackModel,
+      maxTokens: route.maxOutputTokens,
     });
     // A requested file only counts when a tool created it; otherwise one corrective turn, then an honest note.
     const checked = plan?.artifact ? await runDeliverableTurn({ plan, run, onEvent: options.onEvent }) : null;
     const r = checked ?? await run();
-    const usedModel = runModel ?? (process.env.GONKA_MODEL || GONKA_MODELS.DEFAULT);
+    const usedModel = route.model;
     const credits = await recordUsage(options.userId, {
       kind: visualUpload ? 'vision' : plan?.artifact ? 'artifact' : toolTurn ? 'tool' : 'chat',
       model: usedModel, inputTokens: r.usage?.input_tokens, outputTokens: r.usage?.output_tokens, channel: options.channel,
     });
     options.onEvent?.({ type: 'usage', data: { input_tokens: r.usage?.input_tokens ?? 0, output_tokens: r.usage?.output_tokens ?? 0, model: usedModel, credits } as any });
-    if (toolTurn) logger.info('[AI chat] tool turn', { model: runModel ?? 'gonka-default', deliverables: plan!.deliverables.length, attachments: r.attachments.length, missing: checked?.missing.length ?? 0 });
+    if (toolTurn) logger.info('[AI chat] tool turn', { model: route.model, deliverables: plan?.deliverables.length ?? 0, attachments: r.attachments.length, missing: checked?.missing.length ?? 0 });
 
     return {
       content: [{ type: 'text', text: r.text }],
-      model: runModel ?? (process.env.GONKA_MODEL || GONKA_MODELS.DEFAULT),
+      model: route.model,
       attachments: r.attachments,
       sources: r.sources,
       _usage: r.usage,

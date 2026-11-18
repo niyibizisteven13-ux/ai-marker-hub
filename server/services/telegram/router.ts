@@ -115,7 +115,7 @@ export async function showMark(api: TelegramApi, chatId: string, session: any, t
 }
 
 /**
- * A scan sent from the scanner page arrives in the chat as a PDF with quick actions (transcribe, mark,
+ * A scan sent from the scanner page arrives in the chat as a PDF with quick actions (transcribe and
  * summarise), exactly like a file the user sent; the next typed message also uses it.
  */
 export async function deliverScan(chatId: string, session: any, pdf: Buffer, name: string, pages: number, api: TelegramApi = telegramApi()) {
@@ -125,7 +125,7 @@ export async function deliverScan(chatId: string, session: any, pdf: Buffer, nam
   const prev = pending.get(chatId);
   const sentPreview = { ...file, telegramId: '' };
   const all = [...(prev && Date.now() - prev.at < PENDING_TTL ? prev.files : []), sentPreview].slice(-MAX_PENDING);
-  const { keyboard, hint } = quickActions(lang, all);
+  const { keyboard, hint } = quickActions(lang, all, false);
   const sent = await api.sendDocument(chatId, { data: pdf, name, mime: 'application/pdf' }, card('📷', name, esc(copy(lang).scan.received(pageLabel)), hint), keyboard);
   sentPreview.telegramId = sent?.document?.file_id ?? '';
   pending.set(chatId, { files: all, at: Date.now() });
@@ -160,7 +160,7 @@ async function showHome(api: TelegramApi, chatId: string, session: any, firstNam
   }
 }
 
-function quickActions(lang: Lang, files: IncomingFile[]) {
+function quickActions(lang: Lang, files: IncomingFile[], canMark = true) {
   const tabular = files.some((f) => /csv|spreadsheet|excel/.test(f.mime) || /\.(csv|xlsx|xls|tsv)$/i.test(f.name));
   const visual = files.some((f) => f.mime.startsWith('image/') || f.mime === 'application/pdf');
   const L = {
@@ -170,7 +170,7 @@ function quickActions(lang: Lang, files: IncomingFile[]) {
   }[lang];
   const rows = [[{ text: L.sum, callback_data: 'q:sum' }, ...(tabular ? [{ text: L.chart, callback_data: 'q:chart' }] : [])]];
   if (tabular) rows.push([{ text: L.stats, callback_data: 'q:stats' }]);
-  if (visual) rows.push([{ text: L.tr, callback_data: 'q:tr' }, { text: L.mark, callback_data: 'q:mark' }]);
+  if (visual) rows.push([{ text: L.tr, callback_data: 'q:tr' }, ...(canMark && files.some(f => f.mime === 'application/pdf') ? [{ text: L.mark, callback_data: 'q:mark' }] : [])]);
   return { keyboard: { inline_keyboard: rows }, hint: L.ask };
 }
 

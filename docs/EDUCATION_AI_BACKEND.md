@@ -18,8 +18,8 @@ Backend only. No frontend files or frontend dependencies changed, and no new npm
 
 | Traffic | Provider |
 |---|---|
-| Everyday chat (`streamGonkaChat`) | Gonka. Optional big-task provider for COMPLEX/ARTIFACT requests, as before. |
-| Agent tasks: tool loops (`runGonkaAgentLoop`, web and Telegram), rubric assessment, AI report interpretation | **Claude** (`CLAUDE_AGENT_MODEL`, default `claude-haiku-5-5`) when `AI_AGENT_PROVIDER=anthropic` and `ANTHROPIC_API_KEY` are set; otherwise Gonka's standard model. |
+| Free accounts, routine chat and ordinary text agents on paid accounts | **GonkaRouter**, including Free chat that needs tools. |
+| Scan reading, long inputs and specialized high-demand workflows on non-Free plans | **Claude** (`CLAUDE_AGENT_MODEL`) when `AI_AGENT_PROVIDER=anthropic` and `ANTHROPIC_API_KEY` are set. Otherwise, GonkaRouter handles the request. |
 | Calculations, chart data, totals, quote checks, rubric checks | Deterministic code. The model is never trusted for these. |
 
 How the Claude adapter (`providers/anthropicAdapter.ts`) behaves:

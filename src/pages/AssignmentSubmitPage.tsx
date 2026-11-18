@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, ArrowRight, CalendarClock, Camera, CheckCircle2, Download, Eye, FileText, FolderUp, Loader2, Lock, Paperclip, Send, Trash2, X } from 'lucide-react';
 import { FileThumb, PreviewDialog, type PreviewSource } from '../components/FilePreview';
 import VoiceRecorder from '../components/VoiceRecorder';
@@ -17,6 +17,7 @@ import logoUrl from '../assets/bwenge-logo.svg';
  */
 
 interface Task { title: string; instructions: string; dueAt: string | null; open: boolean; rosterRequired?: boolean; hardDeadline?: boolean; codeLanguage?: string | null; codeMain?: string | null; taskFiles: Array<{ index: number; name: string; mime: string; size: number }> }
+const DocumentScanner = lazy(() => import('../components/DocumentScanner'));
 const MAX_FILES = 10;
 const MAX_MB = 25;
 const ACCEPT = HAND_IN_ACCEPT;
@@ -34,6 +35,8 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
   const [folderNote, setFolderNote] = useState<string | null>(null);
   const [receiptCode, setReceiptCode] = useState('');
   const [needReceipt, setNeedReceipt] = useState(false);
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const [files, setFiles] = useState<Item[]>([]);
   const [open, setOpen] = useState<{ kind: 'mine'; index: number } | { kind: 'task'; src: PreviewSource } | null>(null);
   const [state, setState] = useState<{ kind: 'idle' } | { kind: 'sending'; percent: number } | { kind: 'error'; message: string } | { kind: 'done'; receiptId: string; submittedAt: string; late: boolean; replaced: boolean; files?: number; resultLink?: string; autoMark?: boolean; codeTests?: boolean }>({ kind: 'idle' });
@@ -47,7 +50,7 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
   // make the next person's submission replace the previous one's.
 
   const add = (list: FileList | File[] | null) => {
-    if (!list) return;
+    if (!list || state.kind === 'sending') return;
     const fresh = [...list];
     const big = fresh.find((f) => f.size > MAX_MB * 1048576);
     if (big) { setState({ kind: 'error', message: `${big.name} is larger than ${MAX_MB} MB.` }); return; }
@@ -199,22 +202,35 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-[var(--brand)] px-3 py-3.5 text-[14.5px] font-semibold text-white active:bg-[var(--brand-strong)]">
-              <Camera size={18} />Take photos
-              <input type="file" accept="image/*" capture="environment" multiple hidden onChange={(e) => { add(e.target.files); e.target.value = ''; }} />
-            </label>
-            <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-neutral-300 px-3 py-3.5 text-[14.5px] font-medium hover:bg-neutral-50">
-              <FolderUp size={18} />Send a folder
-              <input type="file" hidden multiple {...({ webkitdirectory: '', directory: '' } as any)} onChange={(e) => { void addFolder(e.target.files); e.target.value = ''; }} />
-            </label>
-            <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-neutral-300 px-3 py-3.5 text-[14.5px] font-medium hover:bg-neutral-50">
-              <Paperclip size={18} />Choose files
-              <input type="file" accept={ACCEPT} multiple hidden onChange={(e) => { add(e.target.files); e.target.value = ''; }} />
-            </label>
-            <VoiceRecorder className="" onRecorded={(f) => { const dt = new DataTransfer(); dt.items.add(f); add(dt.files); }} onError={(message) => setState({ kind: 'error', message })} />
+          <div
+            className={`rounded-xl border border-dashed p-3 sm:p-4 ${dragging ? 'border-[#176c59] bg-emerald-50' : 'border-neutral-300 bg-[#f8f9f7]'}`}
+            onDragOver={e => {
+              if (!e.dataTransfer.types.includes('Files')) return;
+              e.preventDefault();
+              if (state.kind !== 'sending') setDragging(true);
+            }}
+            onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false); }}
+            onDrop={e => { e.preventDefault(); setDragging(false); add(e.dataTransfer.files); }}
+          >
+            <h3 className="text-[14px] font-semibold">Attach your work</h3>
+            <p className="mb-3 mt-1 text-[12px] text-neutral-600">Up to {MAX_FILES} files, {MAX_MB} MB each. You can also drop files here.</p>
+            <fieldset disabled={files.length >= MAX_FILES || state.kind === 'sending'} className="grid grid-cols-2 gap-2 disabled:opacity-50">
+              <button type="button" onClick={() => setScannerOpen(true)}
+                className="flex min-h-14 items-center gap-2 rounded-lg bg-[#176c59] px-3 text-left text-white hover:bg-[#125747]">
+                <Camera size={17} className="shrink-0" /><span><span className="block text-[13px] font-semibold">Scan pages</span><span className="block text-[11px] text-white/85">Combine into one PDF</span></span>
+              </button>
+              <label className="flex min-h-14 cursor-pointer items-center gap-2 rounded-lg border border-neutral-300 bg-white px-3 text-[13px] font-semibold hover:bg-neutral-50 focus-within:ring-2 focus-within:ring-[#176c59]">
+                <Paperclip size={17} className="shrink-0" />Choose files
+                <input type="file" aria-label="Choose files" accept={ACCEPT} multiple className="sr-only" onChange={e => { add(e.target.files); e.target.value = ''; }} />
+              </label>
+              <label className="flex min-h-10 cursor-pointer items-center gap-2 rounded-lg px-3 text-[13px] font-medium hover:bg-white focus-within:ring-2 focus-within:ring-[#176c59]">
+                <FolderUp size={17} className="shrink-0" />Add a folder
+                <input type="file" aria-label="Add a folder" className="sr-only" multiple {...({ webkitdirectory: '', directory: '' } as any)} onChange={e => { void addFolder(e.target.files); e.target.value = ''; }} />
+              </label>
+              <VoiceRecorder className="" onRecorded={f => add([f])} onError={message => setState({ kind: 'error', message })} />
+            </fieldset>
+            {folderNote && <p className="mt-2 text-[12px] text-neutral-600">{folderNote}</p>}
           </div>
-          <p className="-mt-2 text-[12px] text-neutral-500">Photos of your pages (one per page), PDF, Word, Excel, PowerPoint, code, a whole folder, a voice recording or a video. Up to {MAX_FILES} files, {MAX_MB} MB each.{folderNote ? <span className="mt-1 block text-neutral-600">{folderNote}</span> : null}</p>
 
           {files.length > 0 && (
             <div>
@@ -236,13 +252,28 @@ export default function AssignmentSubmitPage({ token }: { token: string }) {
           <label className="block"><span className="mb-1 block text-[13px] font-medium text-neutral-700">Or type your answer <span className="font-normal text-neutral-400">(optional)</span></span>
             <textarea value={text} onChange={(e) => setText(e.target.value.slice(0, 20000))} rows={5} placeholder="Write your answer here…" className={`${field} resize-y`} /></label>
 
-          {state.kind === 'error' && <p className="rounded-xl bg-rose-50 px-3 py-2 text-[13.5px] text-rose-700">{state.message}</p>}
+          {state.kind === 'error' && <p role="alert" className="rounded-xl bg-rose-50 px-3 py-2 text-[13.5px] text-rose-700">{state.message}</p>}
           <button type="button" disabled={!ready} onClick={() => void submit()} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--app-panel-2)] px-4 py-3.5 text-[15px] font-semibold text-white disabled:opacity-40">
             {state.kind === 'sending' ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}{state.kind === 'sending' ? (state.percent < 99 && files.length ? `Sending… ${state.percent}%` : 'Saving…') : 'Submit'}
           </button>
-          {state.kind === 'sending' && files.length > 0 && <div className="-mt-2 h-1.5 overflow-hidden rounded-full bg-neutral-200" role="progressbar" aria-valuenow={state.percent} aria-valuemin={0} aria-valuemax={100}><div className="h-full bg-[var(--brand)] transition-[width]" style={{ width: `${state.percent}%` }} /></div>}
+          {state.kind === 'sending' && files.length > 0 && <div className="-mt-2 h-1.5 overflow-hidden rounded-full bg-neutral-200" role="progressbar" aria-label="Submission upload progress" aria-valuenow={state.percent} aria-valuemin={0} aria-valuemax={100}><div className="h-full bg-[var(--brand)] transition-[width]" style={{ width: `${state.percent}%` }} /></div>}
           <p className="text-center text-[12px] text-neutral-500">Only the person who shared the task sees what you submit.</p>
         </section>
+      )}
+      {scannerOpen && (
+        <div className="fixed inset-0 z-[80] flex h-[100dvh] flex-col bg-[var(--ws-bg)]" role="dialog" aria-modal="true" aria-label="Scan pages for this task">
+          <Suspense fallback={<button type="button" className="p-4 text-white" onClick={() => setScannerOpen(false)}>Loading scanner… Close</button>}>
+            <DocumentScanner quick single="Task pages" aiTools={false} allowExport={false} saveLabel="Attach PDF to task"
+              onClose={() => setScannerOpen(false)}
+              onSavePages={async pages => {
+                const { buildPdf } = await import('../scanner/TelegramScanApp');
+                const pdf = await buildPdf(pages);
+                if (pdf.size > MAX_MB * 1048576) throw new Error(`This PDF is larger than ${MAX_MB} MB. Attach fewer pages at a time.`);
+                add([new File([pdf], `Scanned answer (${pages.length} page${pages.length === 1 ? '' : 's'}).pdf`, { type: 'application/pdf' })]);
+              }}
+            />
+          </Suspense>
+        </div>
       )}
       {open?.kind === 'task' && <PreviewDialog src={open.src} onClose={() => setOpen(null)} />}
       {open?.kind === 'mine' && files[open.index] && (

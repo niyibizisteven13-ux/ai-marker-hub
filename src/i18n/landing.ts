@@ -2,7 +2,7 @@ export const dictionaries = {
   en: {
     tag: "Your education, research & data companion",
     h1: "Learning companion",
-    sub: "Run whole tests, marking, quizzes.",
+    sub: "Practice, take quizzes and hand in your work.",
     phone: "Continue with phone",
     google: "Continue with Google",
     or: "or",
@@ -94,7 +94,7 @@ export const dictionaries = {
   rw: {
     tag: "Mugenzi wawe mu burezi, ubushakashatsi n'imibare",
     h1: "Mugenzi mu kwiga",
-    sub: "Ibizamini byose, gusuzuma n'ibibazo.",
+    sub: "Itoze, kora ibibazo kandi wohereze imikoro yawe.",
     phone: "Komeza ukoresheje telefoni",
     google: "Komeza ukoresheje Google",
     or: "cyangwa",
@@ -186,7 +186,7 @@ export const dictionaries = {
   fr: {
     tag: "Votre compagnon pour l'éducation, la recherche et les données",
     h1: "Compagnon d'apprentissage",
-    sub: "Examens complets, correction, quiz.",
+    sub: "Entraînez-vous, répondez aux quiz et remettez vos devoirs.",
     phone: "Continuer avec le téléphone",
     google: "Continuer avec Google",
     or: "ou",

@@ -13,9 +13,8 @@ version until reopening the app; a different future version can prompt again.
 ## MySEB desktop
 
 Windows NSIS and Linux AppImage builds include electron-updater. Before an exam, the app checks the official
-`/myseb/updates` feed at launch and every five minutes, and offers Check for updates on the start screen.
-A user chooses Download update, then Install & restart after the verified download finishes. Downloads use
-the release's checksum metadata. Installation and update prompts are blocked while an exam is active or
+`/myseb/updates` feed at launch and every minute, and offers Check for updates on the start screen.
+Update now downloads the release, verifies its checksum and restarts MySEB to install it. If an exam began during the download, the app waits and offers Install & restart afterward. Installation and update prompts are blocked while an exam is active or
 paused, and auto-install-on-quit is disabled. Downgrades are disabled. New installers must be published with
 the generated latest.yml/latest-linux.yml and versioned files; old manifest file names keep pointing at the
 same immutable installer even if another release arrives during download.
@@ -26,8 +25,8 @@ silent updater. iPhone remains subject to the existing TestFlight/App Store dist
 
 ## MySEB Android
 
-The start screen checks on startup, on resume and every five minutes, with Check for updates and Later.
-Download & install opens the official GitHub APK download, and Android asks the user to confirm installation.
+The start screen checks on startup, on resume and every minute, with Check for updates and Later.
+Update now downloads the signed APK in the app. Install update opens Android’s installer for confirmation. Android may ask the user to allow MySEB to install packages the first time.
 The native bridge rejects arbitrary download destinations and refuses to open an update while the exam is
 locked. No update restarts or opens an external installer during an exam.
 

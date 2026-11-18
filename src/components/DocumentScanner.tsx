@@ -15,7 +15,7 @@ type Point = { x: number; y: number };
 type Quad = Record<CornerKey, Point>;
 type FilterId = 'color' | 'gray' | 'bw' | 'auto';
 type Mode = 'home' | 'camera' | 'edit' | 'review';
-type AgentMode = 'ocr' | 'grade' | 'extract_form';
+type AgentMode = 'ocr' | 'extract_form';
 
 /** Field names (studentName, aiScore...) are unchanged so existing consumers keep working. */
 export type PageItem = {
@@ -53,7 +53,6 @@ type ReviewDraft = { id: string; texts: string[]; score: string; max: string };
 
 const MAX_IMAGE_PIXELS = 16_000_000;
 const LEGACY_DRAFT_KEY = 'bwenge.document-scanner.draft.v1';
-const DEFAULT_CRITERIA = 'Score each question accurately on clarity, completeness and correctness (total 100 marks).';
 
 /* ───────────── Draft storage (IndexedDB: large, async, off the typing path) ───────────── */
 const DB_NAME = 'bwenge-scan';
@@ -137,7 +136,6 @@ interface DocumentScannerProps {
   onScanPage?: (dataUrl: string, name: string, mimeType: string) => void;
   onGeneratedForm?: (form: any) => void;
   onSendToChatAgent?: (prompt: string) => void;
-  activeRubricText?: string;
   /** Wording: a preset key ('candidate' | 'student' | 'scholar' | ...) or a full custom LabelSet. */
   labels?: LabelPresetKey | LabelSet;
   /** Shows the "Load sample paper" button. Sample pages can never be saved. Leave off in production. */
@@ -165,7 +163,6 @@ export default function DocumentScanner({
   onSavePages,
   onGeneratedForm,
   onSendToChatAgent,
-  activeRubricText = '',
   labels: labelsProp = DEFAULT_LABEL_PRESET,
   allowSamples = false,
   aiTools = true,
@@ -203,7 +200,6 @@ export default function DocumentScanner({
 
   // AI
   const [aiConsent, setAiConsent] = useState(false);
-  const [criteria, setCriteria] = useState(activeRubricText);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [batchRunning, setBatchRunning] = useState(false);
   const [formResult, setFormResult] = useState<any | null>(null);
@@ -256,7 +252,7 @@ export default function DocumentScanner({
         setActiveId(quick ? stored[stored.length - 1].id : stored[0].id);
         setRestored(stored.some((c) => c.pages.length > 0));
         // Quick capture with an unfinished scan: show it first (keep going, add it, or discard it), never add it unseen.
-        if (quick && stored.some((c) => c.pages.length > 0)) { setMode('home'); showToast('Your last scan was not finished: continue it, add it to marking, or discard it.'); }
+        if (quick && stored.some((c) => c.pages.length > 0)) { setMode('home'); showToast('Continue your unfinished scan or discard it.'); }
       }
       try { localStorage.removeItem(LEGACY_DRAFT_KEY); } catch { /* storage may be disabled */ }
       setDraftReady(true);
@@ -770,87 +766,38 @@ export default function DocumentScanner({
         throw new Error('No form came back for that page.');
       }
 
-      const texts: string[] = [];
-      const reports: any[] = [];
+      const readings: Array<{ text: string; summary?: string; qualityScore?: number }> = [];
       let detectedName = '';
       for (let i = 0; i < cand.pages.length; i++) {
         if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
-        setProcessing(`${agentMode === 'grade' ? `${L.score}: ` : 'Reading: '}${cand.name}, page ${i + 1} of ${cand.pages.length}`);
+        setProcessing(`Reading ${cand.name}, page ${i + 1} of ${cand.pages.length}`);
         const data = await callAgent({
           imageBase64: cand.pages[i].dataUrl,
-          mode: agentMode,
-          studentName: cand.name,
-          rubric: criteria || activeRubricText || DEFAULT_CRITERIA,
+          mode: 'ocr',
           rawTextHint: cand.pages[i].extractedText || '',
         }, signal);
-        texts.push(data.ocrTranscript || data.extractedText || '');
-        reports.push(agentMode === 'grade' ? {
-          ...data,
-          questions: Array.isArray(data.questions) ? data.questions.map((question: any, index: number) => ({
-            number: Number.parseInt(String(question.number || '').replace(/\D/g, ''), 10) || index + 1,
-            question: question.questionText || `Question ${index + 1}`,
-            studentAnswer: question.studentAnswer || '',
-            score: Number(question.awardedMarks) || 0,
-            maxScore: Number(question.maxMarks) || 0,
-            feedback: question.feedback || '',
-          })) : [],
-          summary: data.summary || data.overallFeedback,
-        } : data);
+        readings.push({ text: data.ocrTranscript || data.extractedText || '', summary: data.summary, qualityScore: data.qualityScore });
         const found = data.detectedStudentName || data.studentName;
         if (found && !detectedName && !/^unknown/i.test(found)) detectedName = found;
       }
 
-      // Combine the page results honestly. Totals are summed from per-question scores only;
-      // if the AI gave no per-question scores for a multi-page paper, the total is left blank for a person to enter.
-      const byNumber = new Map<number, QuestionReport>();
-      const notes: string[] = [];
-      reports.forEach((r) => (r.questions || []).forEach((q: QuestionReport, k: number) => {
-        const key = Number.isFinite(q.number) && q.number > 0 ? q.number : 1000 + byNumber.size + k;
-        if (byNumber.has(key)) notes.push(`Question ${key} appears on more than one page; the later page's score was used.`);
-        byNumber.set(key, q);
-      }));
-      const questions = [...byNumber.values()];
-      let totalAwarded: number | undefined;
-      let totalMax: number | undefined;
-      if (questions.length > 0) {
-        totalAwarded = questions.reduce((s, q) => s + (Number(q.score) || 0), 0);
-        totalMax = questions.reduce((s, q) => s + (Number(q.maxScore) || 0), 0);
-      } else if (reports.length === 1) {
-        totalAwarded = reports[0].totalAwardedMarks;
-        totalMax = reports[0].maxTotalMarks;
-      } else if (agentMode === 'grade') {
-        notes.push('The AI gave no per-question scores for this multi-page paper, so no total was calculated. Enter it when you review.');
-      }
-      const feedback = [...new Set(reports.map((r) => r.overallFeedback || r.summary).filter(Boolean))].join(' ');
-      const confidences = reports.map((r) => r.confidence).filter((c): c is number => typeof c === 'number');
-      const combinedText = texts.join('\n\n');
-
-      setCandidates((prev) => prev.map((c) => {
+      setCandidates(prev => prev.map(c => {
         if (c.id !== cand.id) return c;
         const name = detectedName && isDefaultName(c.name) ? detectedName : c.name;
-        const pages = c.pages.map((p, i) => ({
-          ...p,
-          studentName: name,
-          extractedText: texts[i] || p.extractedText || '',
-          aiSummary: reports[i]?.summary || p.aiSummary,
-          qualityScore: reports[i]?.qualityScore ?? p.qualityScore,
-          reviewStatus: 'unreviewed' as const,
-          // one score per paper, kept on the first page so consumers that add pages up do not double count
-          ...(agentMode === 'grade' ? {
-            aiScore: i === 0 ? totalAwarded : undefined,
-            aiMaxScore: i === 0 ? totalMax : undefined,
-            aiFeedback: i === 0 ? feedback || undefined : undefined,
-          } : {}),
-        }));
-        const report: GradeReport = agentMode === 'grade'
-          ? { totalAwarded, totalMax, overallFeedback: feedback || undefined, extractedText: combinedText, confidence: confidences.length ? Math.min(...confidences) : undefined, questions, notes }
-          : { ...(c.aiGradeReport || {}), extractedText: combinedText };
-        return { ...c, name, pages, aiGradeReport: report };
+        return {
+          ...c, name,
+          pages: c.pages.map((p, i) => ({
+            ...p,
+            studentName: name,
+            extractedText: readings[i]?.text || p.extractedText || '',
+            aiSummary: readings[i]?.summary || p.aiSummary,
+            qualityScore: readings[i]?.qualityScore ?? p.qualityScore,
+            reviewStatus: 'unreviewed' as const,
+          })),
+          aiGradeReport: { ...c.aiGradeReport, extractedText: readings.map(r => r.text).join('\n\n') },
+        };
       }));
-
-      showToast(agentMode === 'grade'
-        ? `Suggested ${L.score.toLowerCase()} for ${cand.name}: ${totalAwarded ?? '–'}/${totalMax ?? '–'}. Please review it.`
-        : `Read ${cand.pages.length} page(s). Please check the text.`);
+      showToast(`Read ${cand.pages.length} page(s). Please check the text.`);
       return true;
     } catch (err: any) {
       if (err?.name === 'AbortError') showToast('Stopped.');
@@ -868,7 +815,7 @@ export default function DocumentScanner({
     await processCandidate(cand, agentMode, abortRef.current.signal);
   };
 
-  const runBatch = async (agentMode: 'ocr' | 'grade') => {
+  const readAllPages = async () => {
     if (!requireConsent()) return;
     const targets = candidates.filter((c) => c.pages.length > 0);
     if (targets.length === 0) { showToast('Add at least one page first.'); return; }
@@ -877,7 +824,7 @@ export default function DocumentScanner({
     try {
       for (const cand of targets) {
         if (abortRef.current.signal.aborted) break;
-        await processCandidate(cand, agentMode, abortRef.current.signal);
+        await processCandidate(cand, 'ocr', abortRef.current.signal);
       }
     } finally {
       setBatchRunning(false);
@@ -897,8 +844,8 @@ export default function DocumentScanner({
     if (!reviewing) return;
     const score = reviewing.score.trim() === '' ? undefined : Number(reviewing.score);
     const max = reviewing.max.trim() === '' ? undefined : Number(reviewing.max);
-    if ((score !== undefined && !Number.isFinite(score)) || (max !== undefined && !Number.isFinite(max))) {
-      showToast('Scores must be numbers.');
+    if ((score !== undefined && (!Number.isFinite(score) || score < 0)) || (max !== undefined && (!Number.isFinite(max) || max <= 0))) {
+      showToast('Enter a non-negative mark and a maximum greater than zero.');
       return;
     }
     if (score !== undefined && max !== undefined && score > max) { showToast('The score is higher than the maximum.'); return; }
@@ -908,9 +855,9 @@ export default function DocumentScanner({
         ...p,
         extractedText: reviewing.texts[i] ?? p.extractedText,
         reviewStatus: 'confirmed' as const,
-        ...(i === 0 && c.aiGradeReport ? { aiScore: score, aiMaxScore: max } : {}),
+        ...(i === 0 ? { aiScore: score, aiMaxScore: max } : {}),
       })),
-      aiGradeReport: c.aiGradeReport ? { ...c.aiGradeReport, totalAwarded: score, totalMax: max, extractedText: reviewing.texts.join('\n\n') } : c.aiGradeReport,
+      aiGradeReport: { ...c.aiGradeReport, totalAwarded: score, totalMax: max, extractedText: reviewing.texts.join('\n\n') },
     }));
     setReviewing(null);
     showToast('Confirmed. These pages can now be used.');
@@ -933,6 +880,8 @@ export default function DocumentScanner({
           doc.setFont('helvetica', 'normal'); doc.setFontSize(12); doc.setTextColor(110);
           doc.text(`${cand.pages.length} scanned page${cand.pages.length === 1 ? '' : 's'} follow`, 48, 134);
           doc.setTextColor(0);
+          const report = cand.aiGradeReport;
+          if (report?.totalAwarded !== undefined) doc.text(`Mark: ${report.totalAwarded}${report.totalMax === undefined ? '' : ` / ${report.totalMax}`}`, 48, 157);
           for (const page of cand.pages) {
             doc.addPage();
             doc.addImage(page.dataUrl, 'JPEG', 24, 24, doc.internal.pageSize.getWidth() - 48, doc.internal.pageSize.getHeight() - 48);
@@ -1004,10 +953,10 @@ export default function DocumentScanner({
       <header className="bsc-top">
         <div className="bsc-brand">
           <div className="bsc-logo bsc-d">B</div>
-          <div className="bsc-brand-name bsc-d">Bwenge <span>Mark</span></div>
+          <div className="bsc-brand-name bsc-d">Bwenge <span>Scan</span></div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span className="bsc-chip">{candidates.length} {candidates.length === 1 ? L.person.toLowerCase() : L.people.toLowerCase()} · {totalPages} {totalPages === 1 ? 'page' : 'pages'}</span>
+          <span className="bsc-chip">{!single && `${candidates.length} ${candidates.length === 1 ? L.person.toLowerCase() : L.people.toLowerCase()} · `}{totalPages} {totalPages === 1 ? 'page' : 'pages'}</span>
           <button className="bsc-iconbtn" aria-label="Close scanner" onClick={onClose}><Icon name="close" /></button>
         </div>
       </header>
@@ -1022,20 +971,16 @@ export default function DocumentScanner({
           )}
 
           {aiTools && <section className="bsc-hub" aria-label="AI assistant">
-            <div className="bsc-hub-head"><span className="bsc-dot" /><span className="bsc-hub-title bsc-d">AI Marking Assistant</span></div>
-            <p className="bsc-hub-sub" style={{ margin: 0 }}>Reads every page, suggests {L.score.toLowerCase()}s and flags what it is unsure about. You confirm before anything counts.</p>
+            <div className="bsc-hub-head"><span className="bsc-dot" /><span className="bsc-hub-title bsc-d">Read scanned pages</span></div>
+            <p className="bsc-hub-sub" style={{ margin: 0 }}>Extract text for review, or turn a scanned page into a form.</p>
             <label className="bsc-consent">
               <input type="checkbox" checked={aiConsent} onChange={(e) => setAiConsent(e.target.checked)} />
               <span>I have permission to send these pages to an AI service to be read.</span>
             </label>
             <div className="bsc-row">
-              <button className="bsc-btn bsc-pri" disabled={totalPages === 0 || aiBusy} onClick={() => void runBatch('grade')}><Icon name="sparkle" /> {L.score} all {L.papers.toLowerCase()}</button>
-              <button className="bsc-btn" disabled={totalPages === 0 || aiBusy} onClick={() => void runBatch('ocr')}>Read all pages</button>
+              <button className="bsc-btn" disabled={totalPages === 0 || aiBusy} onClick={() => void readAllPages()}>Read all pages</button>
               {aiBusy && <button className="bsc-btn" onClick={() => abortRef.current?.abort()}>Stop</button>}
             </div>
-            <label className="bsc-field">{L.criteria} (optional)
-              <input className="bsc-input" value={criteria} onChange={(e) => setCriteria(e.target.value)} placeholder={`Paste the ${L.criteria.toLowerCase()} or scoring guide`} />
-            </label>
             {formResult && (
               <div className="bsc-formcard">
                 <div><span className="bsc-chip ok">Form created</span><div style={{ fontWeight: 600, marginTop: 6 }}>{formResult.title} ({formResult.questions?.length || 0} questions)</div></div>
@@ -1047,10 +992,10 @@ export default function DocumentScanner({
             )}
           </section>}
 
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          {!single && <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <button className="bsc-btn bsc-sm" onClick={addCandidate}><Icon name="plus" size={16} /> Add {L.person.toLowerCase()}</button>
             {allowSamples && <button className="bsc-btn bsc-sm" onClick={() => loadSample(candidates[0]?.id)}>Load sample paper (testing only)</button>}
-          </div>
+          </div>}
 
           {candidates.map((cand) => {
             const report = cand.aiGradeReport;
@@ -1058,14 +1003,14 @@ export default function DocumentScanner({
               <article key={cand.id} className="bsc-card">
                 <div className="bsc-card-head">
                   <div className="bsc-avatar">{initials(cand.name)}</div>
-                  <input className="bsc-name" value={cand.name} aria-label={`${L.person} name`} placeholder={`${L.person} name`}
-                    onChange={(e) => { const v = e.target.value; setCandidates((prev) => prev.map((c) => (c.id === cand.id ? { ...c, name: v } : c))); }} />
+                  {single ? <strong className="bsc-name">{single}</strong> : <input className="bsc-name" value={cand.name} aria-label={`${L.person} name`} placeholder={`${L.person} name`}
+                    onChange={(e) => { const v = e.target.value; setCandidates((prev) => prev.map((c) => (c.id === cand.id ? { ...c, name: v } : c))); }} />}
                   {report?.totalAwarded !== undefined && (
                     <span className={`bsc-chip ${cand.pages.every((p) => p.reviewStatus === 'confirmed') ? 'ok' : 'warn'}`}>
                       {cand.pages.every((p) => p.reviewStatus === 'confirmed') ? L.score : 'AI suggestion'}: {report.totalAwarded}/{report.totalMax ?? '–'}
                     </span>
                   )}
-                  {statusChip(cand)}
+                  {!single && statusChip(cand)}
                   {candidates.length > 1 && <button className="bsc-iconbtn" style={{ width: 38, height: 38 }} aria-label={`Remove ${cand.name}`} onClick={() => removeCandidate(cand.id)}><Icon name="close" size={15} /></button>}
                 </div>
 
@@ -1084,11 +1029,11 @@ export default function DocumentScanner({
                 {aiTools && cand.pages.length > 0 && (
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     <button className="bsc-btn bsc-sm" disabled={aiBusy} onClick={() => void runOne(cand, 'ocr')}>{busyId === cand.id ? 'Working…' : 'Read'}</button>
-                    <button className="bsc-btn bsc-sm" disabled={aiBusy} onClick={() => void runOne(cand, 'grade')}>{L.score}</button>
                     <button className="bsc-btn bsc-sm" disabled={aiBusy} onClick={() => void runOne(cand, 'extract_form')}>To form</button>
-                    {cand.pages.some((p) => p.extractedText) && <button className="bsc-btn bsc-sm bsc-pri" onClick={() => openReview(cand)}>Review &amp; confirm</button>}
                   </div>
                 )}
+
+                {!quick && cand.pages.length > 0 && <button className="bsc-btn bsc-sm" onClick={() => openReview(cand)}>Review &amp; enter marks</button>}
 
                 {report && (
                   <div className="bsc-report">
@@ -1115,7 +1060,7 @@ export default function DocumentScanner({
                       </div>
                     )}
                     {report.extractedText && (
-                      <details><summary style={{ cursor: 'pointer', fontWeight: 600 }}>Text the AI read</summary><pre>{report.extractedText}</pre></details>
+                      <details><summary style={{ cursor: 'pointer', fontWeight: 600 }}>Page transcription</summary><pre>{report.extractedText}</pre></details>
                     )}
                   </div>
                 )}
@@ -1238,7 +1183,7 @@ export default function DocumentScanner({
         <div className="bsc-modal-back" onClick={() => setShowSource(false)}>
           <div className="bsc-sheet" role="dialog" aria-label="Add a page" onClick={(e) => e.stopPropagation()}>
             <h3 className="bsc-d" style={{ margin: 0 }}>Add a page</h3>
-            <button className="bsc-source" onClick={launchCamera}><Icon name="sparkle" size={22} /><span><b>Photograph papers to mark</b><small>Full-screen live camera</small></span></button>
+            <button className="bsc-source" onClick={launchCamera}><Icon name="sparkle" size={22} /><span><b>Scan with your camera</b><small>Full-screen live camera</small></span></button>
             <button className="bsc-source" onClick={() => { setShowSource(false); galleryInputRef.current?.click(); }}><Icon name="gallery" size={22} /><span><b>Choose from gallery</b><small>Use a photo you already took</small></span></button>
             {allowSamples && <button className="bsc-source" onClick={() => loadSample(activeId)}><Icon name="sparkle" size={22} /><span><b>Load sample paper</b><small>For testing only. It can never be saved.</small></span></button>}
             <button className="bsc-btn" onClick={() => setShowSource(false)}>Cancel</button>
@@ -1251,7 +1196,7 @@ export default function DocumentScanner({
         <div className="bsc-modal-back" onClick={() => setReviewing(null)}>
           <div className="bsc-sheet" role="dialog" aria-label="Review and confirm" onClick={(e) => e.stopPropagation()}>
             <h3 className="bsc-d" style={{ margin: 0 }}>Review &amp; confirm</h3>
-            <p className="bsc-hub-sub" style={{ margin: 0 }}>Fix anything the AI got wrong. Only confirmed pages should be used to teach or improve Bwenge.</p>
+            <p className="bsc-hub-sub" style={{ margin: 0 }}>Review each page and enter marks yourself if needed.</p>
             {candidates.find((c) => c.id === reviewing.id)?.pages.map((p, i) => (
               <div key={p.id} className="bsc-rev-page">
                 <img src={p.dataUrl} alt={`Page ${i + 1}`} />

@@ -27,7 +27,7 @@ export interface AssessmentDeps {
   fileStore: FileStore;
   queue: FileJobQueue;
   store: OwnedRecordStore<AssessmentRecord>;
-  agent: () => { adapter: ProviderAdapter; model: string; fallbackModel?: string | null };
+  agent: (userId: string) => { adapter: ProviderAdapter; model: string; fallbackModel?: string | null } | Promise<{ adapter: ProviderAdapter; model: string; fallbackModel?: string | null }>;
   forbiddenStrings?: string[];
 }
 
@@ -84,7 +84,7 @@ export function createAssessmentService(deps: AssessmentDeps) {
       throw new JobError('SUBMISSION_UNAVAILABLE', 'The submission is no longer available. Submit it again.');
     }
     await ctx.progress('assessing against the rubric', 15);
-    const agent = deps.agent();
+    const agent = await deps.agent(job.ownerId);
     let outcome: AssessmentOutcome;
     try {
       outcome = await assessSubmission(agent.adapter, agent.model, { rubric: p.rubric, submissionText: text, modelAnswer: p.modelAnswer, courseMaterial: p.courseMaterial, highStakes: p.highStakes }, { signal: ctx.signal, fallbackModel: agent.fallbackModel });

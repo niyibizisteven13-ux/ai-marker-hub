@@ -4,11 +4,10 @@ import { createHash } from 'node:crypto';
 import type { FileStore } from '../ai/files/FileStore.js';
 import { FileJobQueue, JobError } from '../ai/jobs/fileJobQueue.js';
 import { generateStructured } from '../ai/llm/structuredJson.js';
-import type { ProviderAdapter } from '../ai/providers/types.js';
 import type { AttachmentRef } from '../ai/types.js';
 import { OwnedRecordStore, type OwnedRecord } from '../storage/ownedRecordStore.js';
 import { questionKey, schemeSummary } from './scheme.js';
-import { ExamInputError, parseManifest, type ExamService, type UploadFile } from './service.js';
+import { ExamInputError, parseManifest, type ExamAiTarget, type ExamService, type UploadFile } from './service.js';
 import { isImage, isPdf, isTyped, isZip } from './inputs.js';
 import type { CandidateState, ExamRecord } from './types.js';
 
@@ -57,7 +56,7 @@ export interface ExamChatDeps {
   queue: FileJobQueue;
   contexts: OwnedRecordStore<ExamChatContext>;
   /** Optional model for understanding requests the patterns below do not cover. */
-  agent?: () => { adapter: ProviderAdapter; model: string; fallbackModel?: string | null } | null;
+  agent?: (userId: string) => ExamAiTarget | null | Promise<ExamAiTarget | null>;
   /** How long a chat turn waits for a quick job (export, re-mark) before replying. */
   waitMs?: number;
 }
@@ -439,6 +438,7 @@ export function createExamChat(deps: ExamChatDeps) {
       const pagesPerStudent = pagesPerStudentFrom(`${message}\n${explicit?.instructions ?? ''}`);
       const { accepted, rejected } = await s.addSubmissions(userId, exam.id, scripts, mapping, {
         pagesPerStudent,
+        forMarking: true,
         onSplit: (name, n) => { onStatus?.(`Split ${name} into ${n} student${n === 1 ? '' : 's'}`); lines.push(`${name} held the whole class: I split it into ${n} scripts, one per student${pagesPerStudent ? ` (${pagesPerStudent} pages each)` : ''}.`); },
       });
       // A file name without a candidate id gets a new id; its name is kept as a label so the mapping is visible.
@@ -447,6 +447,9 @@ export function createExamChat(deps: ExamChatDeps) {
       }
       onStatus?.(`Received ${accepted.length} script${accepted.length === 1 ? '' : 's'}…`);
       if (rejected.length) lines.push(`Not accepted: ${rejected.map((r) => `${r.fileName}: ${r.reason}`).join(' ')}`);
+      if (!accepted.length && rejected.every(r => r.code === 'SCANNED_PAPER_GRADING_DISABLED')) {
+        return { examId: exam.id, text: lines.join('\n\n'), attachments: [] };
+      }
     }
     if (autoDraft) {
       const job = await s.draftScheme(userId, exam.id, { questionPaper: papers[0] });
@@ -482,7 +485,7 @@ export function createExamChat(deps: ExamChatDeps) {
   }
 
   async function llmCommand(message: string, e: ExamRecord, history: Array<{ role: 'user' | 'assistant'; text: string }> = []): Promise<Command | null> {
-    const a = deps.agent?.();
+    const a = await deps.agent?.(e.ownerId);
     if (!a) return null;
     try {
       const { data } = await generateStructured<{ action: string; candidate: string | null; question: string | null; marks: number | null; reason: string | null; from: string | null; to: string | null; page: number | null; n: number | null }>(a.adapter, {

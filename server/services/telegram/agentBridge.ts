@@ -8,6 +8,7 @@ import { esc, markdownToMessages, caption as fitCaption } from './format.js';
 import { answerKeyboard, card, errorCard, fmtSize, langOf, progressCard, retryKeyboard, type Lang, type StepView } from './ui.js';
 import { copy } from './uiText.js';
 import { checkUsage } from '../billing/usage.js';
+import type { PlanId } from '../billing/plans.js';
 import { fitHistory } from '../ai/chatHistory.js';
 import type { ExplicitMarking } from '../exams/chat.js';
 
@@ -24,7 +25,7 @@ type Turn = { role: 'user' | 'assistant'; text: string };
 export interface BridgeDeps {
   api: TelegramApi;
   fileStore: FileStore;
-  assist: (o: { userId: string; learning?: import('../learning/modes.js').LearningSettings; messages: Array<{ role: 'user' | 'assistant'; content: string }>; files?: Array<{ type: 'image' | 'document'; base64: string; mediaType: string; name?: string }>; planText: string; onEvent: (e: any) => void; signal?: AbortSignal }) => Promise<{ content: Array<{ text: string }>; attachments?: AttachmentRef[] }>;
+  assist: (o: { userId: string; planId?: PlanId; learning?: import('../learning/modes.js').LearningSettings; messages: Array<{ role: 'user' | 'assistant'; content: string }>; files?: Array<{ type: 'image' | 'document'; base64: string; mediaType: string; name?: string }>; planText: string; onEvent: (e: any) => void; signal?: AbortSignal }) => Promise<{ content: Array<{ text: string }>; attachments?: AttachmentRef[] }>;
   exam?: (userId: string, text: string, files: Array<{ name: string; buffer: Buffer; mime?: string }>, onStatus: (t: string) => void, history?: Turn[], marking?: ExplicitMarking) => Promise<{ text: string; attachments: AttachmentRef[] } | null>;
   editIntervalMs?: number;
 }
@@ -186,6 +187,7 @@ export async function runAssistantTurn(input: TurnInput, depsOverride?: BridgeDe
       const { parseLearning } = await import('../learning/modes.js');
       const r = await deps.assist({
         userId,
+        planId: gate?.plan.id ?? 'FREE',
         learning: parseLearning(session?.learning),
         messages: [...fitHistory(historyOf(session)).map((h) => ({ role: h.role, content: h.text })), { role: 'user' as const, content: input.text }],
         files: files.map((f) => ({ type: f.mime.startsWith('image/') ? 'image' as const : 'document' as const, base64: f.data.toString('base64'), mediaType: f.mime, name: f.name })),

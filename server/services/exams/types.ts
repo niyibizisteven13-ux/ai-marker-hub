@@ -58,6 +58,8 @@ export interface Submission {
   recognitionKey?: string;
   /** Typed answers (Word, text…): fileId is the printed PDF made from them; the teacher's file is kept here unchanged. */
   typed?: boolean;
+  /** Image-only paper kept for teacher review. */
+  scanOnly?: boolean;
   originalFileId?: string;
 }
 
