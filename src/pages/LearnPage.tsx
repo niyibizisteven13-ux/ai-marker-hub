@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import Gradebook from '../components/learn/Gradebook';
-import { ArrowLeft, ArrowUpRight, Check, Copy, FlaskConical, GraduationCap, Landmark, Languages, Lightbulb, Loader2, Plus, School, Sigma, Sparkles, Target, TrendingDown, TrendingUp, Users, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ArrowUpRight, Check, ClipboardList, Copy, FlaskConical, GraduationCap, Landmark, Languages, Lightbulb, Link2, Loader2, Plus, School, Sigma, Sparkles, Target, TrendingDown, TrendingUp, Users, X } from 'lucide-react';
 import { authFetch } from '../utils/authFetch';
 import { PageShell } from '../components/workspace/Shell';
 
 /**
- * Adaptive practice and classes (/learn). Practice: pick a topic, answer questions generated at your level, say how
+ * The learning workspace (/learn) opens shared task links and hosts adaptive practice and classes. In practice,
  * sure you are, ask for hints; mastery and level move with each answer. Classes: teachers create a class and see an
  * anonymised dashboard (per topic, no names, small groups hidden); students join with the class code.
  */
@@ -15,6 +15,73 @@ interface Item { id: string; topic: string; level: number; kind: 'mcq' | 'numeri
 interface Result { item: Item; skill: Skill; delta: number; calibration: string | null; levelChange: 'up' | 'down' | null; message: string | null }
 interface Topic { topic: string; learners: number; attempts: number; accuracy: number | null; meanMastery: number; meanLevel: number; bands: { struggling: number; developing: number; secure: number }; misconceptions: Array<{ tag: string; learners: number }> }
 interface Dashboard { class: { id: string; name: string; code: string }; students: number; k: number; active7d: number | null; topics: Topic[]; hidden: number; note: string | null }
+
+const LEARNING_SECTIONS = [
+  { id: 'tasks', label: 'Tasks', icon: ClipboardList },
+  { id: 'classes', label: 'Classes', icon: Users },
+  { id: 'practice', label: 'Practice', icon: Target },
+] as const;
+type LearningSection = typeof LEARNING_SECTIONS[number]['id'];
+
+function LearnerTasks({ onOpenClasses }: { onOpenClasses: () => void }) {
+  const [link, setLink] = useState('');
+  const [error, setError] = useState(false);
+
+  const openTask = () => {
+    const value = link.trim();
+    try {
+      const url = new URL(value, window.location.origin);
+      const trustedOrigin = url.origin === window.location.origin || ['https://bwenge.space', 'https://www.bwenge.space'].includes(url.origin);
+      const taskPath = /^\/a\/[\w-]{16,40}(?:\/result\/[\w-]{8,24})?\/?$/;
+      if (trustedOrigin && !url.username && !url.password && taskPath.test(url.pathname)) {
+        window.location.assign(url.pathname);
+        return;
+      }
+    } catch {
+      // Invalid URLs use the same feedback as unrecognized Bwenge paths.
+    }
+    setError(true);
+  };
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+      <form onSubmit={(event) => { event.preventDefault(); openTask(); }} className="rounded-2xl border border-[var(--brand)]/25 bg-gradient-to-br from-[var(--ws-card-hover)] to-[var(--ws-card)] p-5 sm:p-6">
+        <span className="mb-4 grid h-10 w-10 place-items-center rounded-xl bg-[var(--brand)]/15 text-[var(--brand-soft)]"><Link2 size={19} aria-hidden="true" /></span>
+        <h2 className="text-lg font-semibold text-white">Open a task or result</h2>
+        <p className="mt-1 text-sm leading-relaxed text-neutral-400">Paste your teacher’s hand-in link or the private results link from your submission receipt.</p>
+        <label htmlFor="learner-task-link" className="mt-5 block text-sm font-medium text-white">Bwenge link</label>
+        <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+          <input
+            id="learner-task-link"
+            value={link}
+            onChange={(event) => { setLink(event.target.value); setError(false); }}
+            placeholder="https://www.bwenge.space/a/…"
+            inputMode="url"
+            autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            aria-invalid={error}
+            aria-describedby={error ? 'learner-task-link-error' : undefined}
+            className="min-h-11 min-w-0 flex-1 rounded-xl border border-white/10 bg-[var(--ws-bg)] px-3.5 text-base text-white placeholder:text-neutral-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]"
+          />
+          <button disabled={!link.trim()} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[var(--brand)] px-4 text-sm font-semibold text-[#15110d] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white disabled:opacity-50">
+            Open link <ArrowRight size={16} aria-hidden="true" />
+          </button>
+        </div>
+        {error && <p id="learner-task-link-error" role="alert" className="mt-3 text-sm text-rose-300">Enter a Bwenge hand-in or results link.</p>}
+      </form>
+
+      <section className="rounded-2xl border border-white/[0.09] bg-[var(--ws-card)] p-5 sm:p-6">
+        <span className="mb-4 grid h-10 w-10 place-items-center rounded-xl bg-sky-400/10 text-sky-300"><Users size={19} aria-hidden="true" /></span>
+        <h2 className="text-base font-semibold text-white">Have a class code?</h2>
+        <p className="mt-1 text-sm leading-relaxed text-neutral-400">Use the code from your teacher to join their class.</p>
+        <button type="button" onClick={onOpenClasses} className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-xl border border-white/15 px-3.5 text-sm font-semibold text-white hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]">
+          Go to Classes <ArrowRight size={16} aria-hidden="true" />
+        </button>
+      </section>
+    </div>
+  );
+}
 
 const api = async <T,>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
   const r = await authFetch(`/api/learn${path}`, { ...init, method: init?.method ?? (init?.json !== undefined ? 'POST' : 'GET'), headers: { 'Content-Type': 'application/json' }, body: init?.json !== undefined ? JSON.stringify(init.json) : undefined });
@@ -101,7 +168,7 @@ function Practice() {
           <h2 className="text-[17px] font-semibold text-white">What do you want to practise?</h2>
           <p className="mt-1 text-[13.5px] text-neutral-400">Questions adapt to you: harder after a streak, back to the foundations when something is not clicking. Every answer is explained.</p>
           <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-            <input value={topic} onChange={(e) => setTopic(e.target.value)} maxLength={120} placeholder="Any topic, e.g. balancing chemical equations" className="min-w-0 flex-1 rounded-xl border border-white/[0.1] bg-[var(--ws-bg)] px-4 py-3 text-[14px] text-white placeholder:text-neutral-500 focus:border-[var(--brand)]/60 focus:outline-none" />
+            <input aria-label="Practice topic" value={topic} onChange={(e) => setTopic(e.target.value)} maxLength={120} placeholder="Any topic, e.g. balancing chemical equations" className="min-w-0 flex-1 rounded-xl border border-white/[0.1] bg-[var(--ws-bg)] px-4 py-3 text-[14px] text-white placeholder:text-neutral-500 focus:border-[var(--brand)]/60 focus:outline-none" />
             <button disabled={!topic.trim() || busy === 'next'} className="inline-flex items-center justify-center gap-2 rounded-xl bg-[var(--brand)] px-5 py-3 text-[14px] font-semibold text-white shadow-[0_6px_20px_-8px_rgba(217,119,87,0.7)] hover:bg-[var(--brand-strong)] disabled:opacity-50">
               {busy === 'next' ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />} Start practising
             </button>
@@ -325,36 +392,40 @@ function Classes() {
     );
   }
 
-  const students = data?.teaching.reduce((n, c) => n + c.students, 0) ?? 0;
   return (
     <div className="space-y-5">
-      {data && (data.teaching.length > 0 || data.joined.length > 0) && (
-        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-          <Tile label="You teach" value={data.teaching.length} hint={`class${data.teaching.length === 1 ? '' : 'es'}`} />
-          <Tile label="Students" value={students} hint="joined with your codes" />
-          <Tile label="You joined" value={data.joined.length} hint={`class${data.joined.length === 1 ? '' : 'es'}`} />
-          <Tile label="Privacy" value="Anonymous" hint="no names in dashboards" />
-        </div>
-      )}
-      <div className="grid gap-5 lg:grid-cols-2">
-        <section className="rounded-2xl border border-white/[0.07] bg-[var(--ws-card)] p-5 sm:p-6">
-          <h2 className="flex items-center gap-2 text-[15px] font-semibold text-white"><School size={17} className="text-[var(--brand-soft)]" /> Create a class</h2>
-          <p className="mt-1 text-[13px] text-neutral-400">Students join with a code. You see how the class does per topic and its common misconceptions, never individual names.</p>
-          <form onSubmit={(e) => { e.preventDefault(); if (name.trim()) void act(async () => { await api('/classes', { json: { name } }); setName(''); }); }} className="mt-4 flex gap-2">
-            <input value={name} onChange={(e) => setName(e.target.value)} maxLength={80} placeholder="Class name, e.g. S4 Physics" className="min-w-0 flex-1 rounded-xl border border-white/[0.1] bg-[var(--ws-bg)] px-4 py-2.5 text-[14px] text-white placeholder:text-neutral-500 focus:border-[var(--brand)]/60 focus:outline-none" />
-            <button disabled={!name.trim()} className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--brand)] px-4 text-[13.5px] font-semibold text-white hover:bg-[var(--brand-strong)] disabled:opacity-50"><Plus size={15} /> Create</button>
-          </form>
-        </section>
+      <div className="grid gap-4 lg:grid-cols-2">
         <section className="rounded-2xl border border-white/[0.07] bg-[var(--ws-card)] p-5 sm:p-6">
           <h2 className="flex items-center gap-2 text-[15px] font-semibold text-white"><GraduationCap size={17} className="text-sky-300" /> Join a class</h2>
-          <p className="mt-1 text-[13px] text-neutral-400">Enter the code your teacher shared. They see only anonymous totals for the class, not your answers.</p>
+          <p className="mt-1 text-[13px] text-neutral-400">Enter the code from your teacher. Class practice reports show group totals.</p>
           <form onSubmit={(e) => { e.preventDefault(); if (code.trim()) void act(async () => { await api('/classes/join', { json: { code } }); setCode(''); }); }} className="mt-4 flex gap-2">
-            <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} maxLength={12} placeholder="Class code" className="min-w-0 flex-1 rounded-xl border border-white/[0.1] bg-[var(--ws-bg)] px-4 py-2.5 font-mono text-[14px] tracking-widest text-white placeholder:font-sans placeholder:tracking-normal placeholder:text-neutral-500 focus:border-[var(--brand)]/60 focus:outline-none" />
+            <input aria-label="Class code" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} maxLength={12} placeholder="Class code" className="min-w-0 flex-1 rounded-xl border border-white/[0.1] bg-[var(--ws-bg)] px-4 py-2.5 font-mono text-[14px] tracking-widest text-white placeholder:font-sans placeholder:tracking-normal placeholder:text-neutral-500 focus:border-[var(--brand)]/60 focus:outline-none" />
             <button disabled={code.trim().length < 4} className="rounded-xl bg-[var(--invert-bg)] px-4 text-[13.5px] font-semibold text-[#0f1012] hover:bg-white disabled:opacity-50">Join</button>
           </form>
         </section>
+        <section className="rounded-2xl border border-white/[0.07] bg-[var(--ws-card)] p-5 sm:p-6">
+          <h2 className="mb-3 flex items-center gap-2 text-[15px] font-semibold text-white"><Users size={17} className="text-sky-300" aria-hidden="true" /> My classes</h2>
+          {!data && !error && <p role="status" className="text-sm text-neutral-400">Loading classes…</p>}
+          {data?.joined.length === 0 && <p className="text-sm text-neutral-400">Classes you join will appear here.</p>}
+          <ul className="grid gap-2">
+            {data?.joined.map((c) => (
+              <li key={c.id} className="flex items-center gap-3 rounded-2xl border border-white/[0.07] bg-[var(--ws-card)] px-4 py-3">
+                <Users size={15} className="text-neutral-500" /><span className="flex-1 truncate text-[14px] text-white">{c.name}</span>
+                <button type="button" onClick={() => void act(() => api(`/classes/${c.id}/membership`, { method: 'DELETE' }))} className="text-[12px] text-neutral-400 hover:text-rose-300">Leave</button>
+              </li>
+            ))}
+          </ul>
+        </section>
       </div>
       {error && <p role="alert" className="rounded-xl bg-rose-500/10 px-4 py-2.5 text-[13px] text-rose-200">{error}</p>}
+      <details className="rounded-2xl border border-white/[0.07] bg-[var(--ws-card)] p-5 sm:p-6">
+        <summary className="cursor-pointer text-[15px] font-semibold text-white"><School size={17} aria-hidden="true" className="ml-1 mr-2 inline-block align-text-bottom text-[var(--brand-soft)]" /> Create a class</summary>
+        <p className="mt-1 text-[13px] text-neutral-400">Share a class code with your students. The practice overview shows group progress and common misconceptions.</p>
+        <form onSubmit={(e) => { e.preventDefault(); if (name.trim()) void act(async () => { await api('/classes', { json: { name } }); setName(''); }); }} className="mt-4 flex gap-2">
+          <input value={name} onChange={(e) => setName(e.target.value)} maxLength={80} placeholder="Class name, e.g. S4 Physics" className="min-w-0 flex-1 rounded-xl border border-white/[0.1] bg-[var(--ws-bg)] px-4 py-2.5 text-[14px] text-white placeholder:text-neutral-500 focus:border-[var(--brand)]/60 focus:outline-none" />
+          <button disabled={!name.trim()} className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--brand)] px-4 text-[13.5px] font-semibold text-white hover:bg-[var(--brand-strong)] disabled:opacity-50"><Plus size={15} /> Create</button>
+        </form>
+      </details>
       {data && data.teaching.length > 0 && (
         <section>
           <h3 className="mb-2.5 text-[12px] font-semibold uppercase tracking-wide text-neutral-500">Classes you teach</h3>
@@ -373,20 +444,6 @@ function Classes() {
           </ul>
         </section>
       )}
-      {data && data.joined.length > 0 && (
-        <section>
-          <h3 className="mb-2.5 text-[12px] font-semibold uppercase tracking-wide text-neutral-500">Classes you joined</h3>
-          <ul className="grid gap-2 sm:grid-cols-2">
-            {data.joined.map((c) => (
-              <li key={c.id} className="flex items-center gap-3 rounded-2xl border border-white/[0.07] bg-[var(--ws-card)] px-4 py-3">
-                <Users size={15} className="text-neutral-500" /><span className="flex-1 truncate text-[14px] text-white">{c.name}</span>
-                <button type="button" onClick={() => void act(() => api(`/classes/${c.id}/membership`, { method: 'DELETE' }))} className="text-[12px] text-neutral-400 hover:text-rose-300">Leave</button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-      {data && !data.teaching.length && !data.joined.length && <p className="text-center text-[13px] text-neutral-500">No classes yet. Create one for your students, or join with a code.</p>}
     </div>
   );
 }
@@ -396,22 +453,38 @@ function Stat({ label, value }: { label: string; value: number | string }) {
 }
 
 export default function LearnPage({ onBack }: { onBack: () => void }) {
-  const [tab, setTab] = useState<'practice' | 'classes'>(() => (new URLSearchParams(window.location.search).get('tab') === 'classes' ? 'classes' : 'practice'));
-  useEffect(() => { window.history.replaceState({}, '', tab === 'classes' ? '/learn?tab=classes' : '/learn'); }, [tab]);
-  const tabs = (
-    <nav className="flex rounded-xl border border-white/[0.08] bg-[var(--ws-card)] p-0.5 text-[13px]" aria-label="Learn sections">
-      {(['practice', 'classes'] as const).map((t) => (
-        <button key={t} type="button" aria-current={tab === t ? 'page' : undefined} onClick={() => setTab(t)} className={`rounded-[10px] px-4 py-1.5 font-medium capitalize ${tab === t ? 'bg-white/[0.09] text-white' : 'text-neutral-400 hover:text-neutral-200'}`}>{t}</button>
-      ))}
-    </nav>
-  );
+  const [tab, setTab] = useState<LearningSection>(() => {
+    const requested = new URLSearchParams(window.location.search).get('tab');
+    return LEARNING_SECTIONS.find((section) => section.id === requested)?.id ?? 'practice';
+  });
+  const [visited, setVisited] = useState<ReadonlySet<LearningSection>>(() => new Set([tab]));
+  const openSection = (section: LearningSection) => {
+    setVisited((previous) => previous.has(section) ? previous : new Set([...previous, section]));
+    setTab(section);
+  };
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (tab === 'practice') url.searchParams.delete('tab');
+    else url.searchParams.set('tab', tab);
+    window.history.replaceState(window.history.state, '', url);
+  }, [tab]);
+
   return (
     <div className="relative h-[100dvh] overflow-y-auto bg-[var(--ws-bg)] text-neutral-200">
-      <PageShell onBack={onBack} wide icon={tab === 'practice' ? <Target size={20} /> : <Users size={20} />}
-        title={tab === 'practice' ? 'Practice' : 'Classes'}
-        subtitle={tab === 'practice' ? 'Adaptive questions on any topic, at your level, with hints and explanations. Mastery grows with every answer.' : 'Bring students together with a code and see how the class is doing per topic, anonymously.'}
-        actions={tabs}>
-        {tab === 'practice' ? <Practice /> : <Classes />}
+      <PageShell onBack={onBack} wide icon={<GraduationCap size={22} aria-hidden="true" />}
+        title="Learning"
+        subtitle="Open a teacher’s task, join a class, or practise a topic at your level.">
+        <nav aria-label="Learning sections" className="grid grid-cols-3 gap-1 rounded-2xl border border-white/10 bg-[var(--ws-card)] p-1">
+          {LEARNING_SECTIONS.map(({ id, label, icon: Icon }) => (
+            <button key={id} type="button" aria-current={tab === id ? 'true' : undefined} onClick={() => openSection(id)}
+              className={`flex min-h-11 min-w-0 items-center justify-center gap-1.5 rounded-xl px-1 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)] sm:gap-2 ${tab === id ? 'bg-[var(--brand)]/15 text-[var(--brand-soft)]' : 'text-neutral-400 hover:bg-white/5 hover:text-white'}`}>
+              <Icon size={16} aria-hidden="true" /> {label}
+            </button>
+          ))}
+        </nav>
+        {visited.has('tasks') && <div hidden={tab !== 'tasks'}><LearnerTasks onOpenClasses={() => openSection('classes')} /></div>}
+        {visited.has('classes') && <div hidden={tab !== 'classes'}><Classes /></div>}
+        {visited.has('practice') && <div hidden={tab !== 'practice'}><Practice /></div>}
       </PageShell>
     </div>
   );
