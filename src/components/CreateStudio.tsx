@@ -22,9 +22,6 @@ import {
   Mic,
   Globe,
   BookOpen,
-  Database,
-  LayoutDashboard,
-  Languages,
   HelpCircle,
   ExternalLink,
   LogOut,
@@ -37,6 +34,7 @@ import { LearningModeBanner, LearningModePicker, speakText, speechLang, useLearn
 import type { LearningSettings } from '../lib/learning/presets';
 import { Message as MessageType, ChatAttachment, ResponseFeedbackDetails } from '../types';
 import ChatMessage from './ChatMessage';
+import { StarterCards } from './StarterCards';
 import logoUrl from '../assets/bwenge-logo.svg';
 
 interface CreateStudioProps {
@@ -50,6 +48,10 @@ interface CreateStudioProps {
   onLoadSession: (id: string) => void;
   onOpenSettings?: () => void;
   onOpenForms?: () => void;
+  onOpenPublicLibrary: () => void;
+  onOpenBiz: () => void;
+  onOpenFormsLibrary: () => void;
+  onOpenTasks: () => void;
   onDeleteChat?: () => void;
   onExportChat?: () => void;
   onShare?: () => void;
@@ -87,6 +89,10 @@ export default function CreateStudio({
   onLoadSession,
   onOpenSettings,
   onOpenForms,
+  onOpenPublicLibrary,
+  onOpenBiz,
+  onOpenFormsLibrary,
+  onOpenTasks,
   onDeleteChat,
   onExportChat,
   onShare,
@@ -582,71 +588,30 @@ export default function CreateStudio({
       >
         <div className="mx-auto w-full max-w-2xl flex flex-col gap-6 px-4 py-6">
           {messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center text-center py-10 md:py-16 animate-in fade-in duration-300">
+            <div className="flex flex-col items-center justify-center py-4 text-center sm:py-10 lg:py-16 animate-in fade-in duration-300">
               {/* Logo Mark */}
               <div className="w-12 h-12 rounded-2xl bg-[#0D2B24] flex items-center justify-center overflow-hidden border border-emerald-500/30 shadow-lg mb-4">
                 <img src={logoUrl} alt="Bwenge Logo" className="w-full h-full object-cover" />
               </div>
 
               {/* Greeting */}
-              <h1 className="font-display text-[26px] sm:text-[32px] font-normal tracking-tight text-[var(--app-text)] mb-6">
+              <h1 className="mb-5 font-display text-[26px] font-normal tracking-tight text-[var(--app-text)] sm:mb-7 sm:text-[32px]">
                 {getGreeting()}
               </h1>
 
-              {/* 4 Starter Cards by Task */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-lg text-left">
-                <button
-                  type="button"
-                  onClick={() => onSendMessage("Which datasets are available, and what are the most important insights in them?")}
-                  className="p-3.5 rounded-2xl border border-white/10 bg-[var(--app-panel)]/80 hover:bg-[var(--app-panel)] hover:border-emerald-500/40 transition-all flex flex-col gap-1.5 shadow-sm group"
-                >
-                  <div className="flex items-center gap-2 text-emerald-400 font-semibold text-xs">
-                    <Database size={16} /> Explore a dataset
-                  </div>
-                  <p className="text-[11px] text-[var(--app-muted)] group-hover:text-[var(--app-text)] leading-relaxed">
-                    Search, read and analyse curated data
-                  </p>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => window.dispatchEvent(new Event('bwenge:open-mark'))}
-                  className="p-3.5 rounded-2xl border border-white/10 bg-[var(--app-panel)]/80 hover:bg-[var(--app-panel)] hover:border-amber-500/40 transition-all flex flex-col gap-1.5 shadow-sm group"
-                >
-                  <div className="flex items-center gap-2 text-amber-400 font-semibold text-xs">
-                    <FileText size={16} /> Mark an exam
-                  </div>
-                  <p className="text-[11px] text-[var(--app-muted)] group-hover:text-[var(--app-text)] leading-relaxed">
-                    Scan or add the scripts, watch the red pen
-                  </p>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => onSendMessage("Create an interactive HTML dashboard that demonstrates student performance: class A averaged 62%, 68% and 74% in terms 1 to 3, and class B 58%, 61% and 70%. Include KPIs, a chart, a table and the key insights.")}
-                  className="p-3.5 rounded-2xl border border-white/10 bg-[var(--app-panel)]/80 hover:bg-[var(--app-panel)] hover:border-teal-500/40 transition-all flex flex-col gap-1.5 shadow-sm group"
-                >
-                  <div className="flex items-center gap-2 text-teal-400 font-semibold text-xs">
-                    <LayoutDashboard size={16} /> Build a live dashboard
-                  </div>
-                  <p className="text-[11px] text-[var(--app-muted)] group-hover:text-[var(--app-text)] leading-relaxed">
-                    Turn figures into an interactive HTML page
-                  </p>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => onSendMessage("Help me write or translate technical and official documents between Kinyarwanda, English, and French.")}
-                  className="p-3.5 rounded-2xl border border-white/10 bg-[var(--app-panel)]/80 hover:bg-[var(--app-panel)] hover:border-purple-500/40 transition-all flex flex-col gap-1.5 shadow-sm group"
-                >
-                  <div className="flex items-center gap-2 text-purple-400 font-semibold text-xs">
-                    <Languages size={16} /> Write or translate
-                  </div>
-                  <p className="text-[11px] text-[var(--app-muted)] group-hover:text-[var(--app-text)] leading-relaxed">
-                    Draft and translate in English, French & Kinyarwanda
-                  </p>
-                </button>
-              </div>
+              {user && (
+                <StarterCards
+                  onOpenPublicLibrary={onOpenPublicLibrary}
+                  onOpenBiz={onOpenBiz}
+                  onOpenForms={onOpenFormsLibrary}
+                  onOpenTasks={onOpenTasks}
+                  onStartTutor={() => {
+                    if (learning.mode !== 'socratic') setLearning({ mode: 'socratic' });
+                    textareaRef.current?.focus();
+                  }}
+                  tutorActive={learning.mode === 'socratic'}
+                />
+              )}
             </div>
           ) : (
             messages.map((msg, idx) => (

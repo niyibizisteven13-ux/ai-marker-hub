@@ -1637,12 +1637,21 @@ export default function App() {
     />
   );
 
+  const openPublicLibrary = () => { setLibraryTab('library'); setLibraryOpen(true); };
+  const openFormsLibrary = () => { setFormsOpen(true); window.history.pushState({}, '', '/forms'); };
+  const openTasks = () => setAssignmentsOpen({ id: null });
+  const openBiz = () => { window.location.href = '/biz'; };
+
   const studioProps = {
     messages,
     onSendMessage: handleSendMessage,
     onNewChat: handleNewChat,
     onLoadSession: handleLoadChatSession,
     onOpenSettings: () => setSettingsOpen(true),
+    onOpenPublicLibrary: openPublicLibrary,
+    onOpenBiz: openBiz,
+    onOpenFormsLibrary: openFormsLibrary,
+    onOpenTasks: openTasks,
     onOpenForms: () => {
       setActiveTab('marking_hub');
       setOpenFormRequest((request) => request + 1);
@@ -1945,11 +1954,11 @@ export default function App() {
           activeTab={activeTab}
           setActiveTab={setActiveTab}
           onOpenLibrary={() => { setLibraryTab('mine'); setLibraryOpen(true); }}
-          onOpenPublicLibrary={() => { setLibraryTab('library'); setLibraryOpen(true); }}
+          onOpenPublicLibrary={openPublicLibrary}
           onOpenMark={() => setMarkOpen(true)}
-          onOpenAssignments={() => setAssignmentsOpen({ id: null })}
-          onOpenForms={() => { setFormsOpen(true); window.history.pushState({}, '', '/forms'); }}
-          onOpenBiz={() => { window.location.href = '/biz'; }}
+          onOpenAssignments={openTasks}
+          onOpenForms={openFormsLibrary}
+          onOpenBiz={openBiz}
           collapsed={sidebarCollapsed}
           setCollapsed={setSidebarCollapsed}
           user={authenticatedUser}
