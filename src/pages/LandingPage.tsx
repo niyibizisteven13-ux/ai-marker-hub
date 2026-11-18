@@ -85,6 +85,25 @@ export default function LandingPage({ onLoginSuccess }: { onLoginSuccess: (user?
                 window.dispatchEvent(new Event('open-signup-modal'));
               }}
             />}
+            {!waitingForPasskey && (
+              <section className="ventures-intro" id="ventures" aria-labelledby="ventures-heading">
+                <div className="ventures-intro-top">
+                  <span className="ventures-kicker">{t('venturesName')}</span>
+                  <span className="ventures-icon" aria-hidden="true">✦</span>
+                </div>
+                <h2 id="ventures-heading">{t('venturesTitle')}</h2>
+                <p>{t('venturesDescription')}</p>
+                <ul className="ventures-highlights">
+                  <li>{t('venturesFeaturePage')}</li>
+                  <li>{t('venturesFeatureBooks')}</li>
+                  <li>{t('venturesFeatureAI')}</li>
+                </ul>
+                <div className="ventures-action">
+                  <a className="ventures-cta" href="/biz">{t('venturesCta')} <span aria-hidden="true">→</span></a>
+                  <span className="ventures-note">{t('venturesSignInNote')}</span>
+                </div>
+              </section>
+            )}
           </div>
 
           <div className="foot">
