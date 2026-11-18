@@ -1,6 +1,6 @@
 /**
  * Shared types for the Bwenge AI capability layer.
- * Messages use the OpenAI chat-completions shape internally (Gonka, NVIDIA NIM,
+ * Messages use the OpenAI chat-completions shape internally (NVIDIA NIM,
  * OpenRouter and OpenAI all accept it); other providers are adapted at the edge.
  */
 

@@ -1,17 +1,6 @@
+import { AiService } from './AiService.js';
 import logger from '../utils/logger.js';
 import { parseModelJson } from '../utils/textSanitizers.js';
-
-const DEFAULT_FETCH_TIMEOUT_MS = 10_000;
-
-async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try { return await fetch(url, { ...init, signal: controller.signal }); }
-  catch (err: any) {
-    if (err?.name === 'AbortError') throw new Error(`Request to ${url} timed out after ${timeoutMs}ms`);
-    throw err;
-  } finally { clearTimeout(timer); }
-}
 
 export type SafetyCategory = 'safe' | 'borderline' | 'harmful' | 'illegal';
 
@@ -43,17 +32,10 @@ const INSTANT_BLOCK_PATTERNS = [
 
 export class SafetyService {
   private static instance: SafetyService;
-  private gonkaBaseUrl: string;
-  private gonkaApiKey: string;
-  private gonkaModel: string;
   private auditLog: Array<{ timestamp: string; input: string; result: SafetyResult }> = [];
   private readonly MAX_AUDIT_LOG = 1000;
 
-  private constructor() {
-    this.gonkaApiKey = process.env.GONKA_API_KEY || '';
-    this.gonkaBaseUrl = (process.env.GONKA_BASE_URL || 'https://api.gonkarouter.io/v1').replace(/\/$/, '') + '/chat/completions';
-    this.gonkaModel = process.env.GONKA_MODEL || 'zai-org/GLM-5.3-Flash';
-  }
+  private constructor() {}
 
   public static getInstance(): SafetyService {
     if (!SafetyService.instance) SafetyService.instance = new SafetyService();
@@ -95,11 +77,11 @@ export class SafetyService {
   }
 
   /**
-   * Use Gonka to classify ambiguous or borderline content.
+   * Use Claude to classify ambiguous or borderline content.
    * Only called when instant block patterns don't match.
    */
-  private async classifyWithGonka(text: string): Promise<{ category: SafetyCategory; reason: string }> {
-    if (!this.gonkaApiKey) return { category: 'safe', reason: 'Gonka not configured — defaulting to safe' };
+  private async classifyWithClaude(text: string): Promise<{ category: SafetyCategory; reason: string }> {
+    if (!process.env.ANTHROPIC_API_KEY) return { category: 'safe', reason: 'Claude not configured — defaulting to safe' };
     const systemPrompt = `You are a content safety classifier for an educational AI platform used by teachers and students.
 Classify the user message and return ONLY valid JSON:
 {
@@ -113,22 +95,12 @@ Categories:
 - illegal: requests to help with illegal activities
 Return safe for any normal educational, coding, math, writing, or professional task.`;
     try {
-      const response = await fetchWithTimeout(this.gonkaBaseUrl, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${this.gonkaApiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: this.gonkaModel,
-          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: text.slice(0, 800) }],
-          temperature: 0.0, max_tokens: 256, stream: false,
-        }),
-      }, 10_000);
-      const data: any = await response.json();
-      const raw = (data?.choices?.[0]?.message?.content || '').trim();
+      const raw = (await AiService.getInstance().completeText(text.slice(0, 800), { system: systemPrompt, maxTokens: 256, timeoutMs: 10_000 })).trim();
       const json = parseModelJson(raw);
       const category: SafetyCategory = ['safe', 'borderline', 'harmful', 'illegal'].includes(json.category) ? json.category : 'safe';
       return { category, reason: json.reason || '' };
     } catch (e) {
-      logger.warn('SafetyService.classifyWithGonka error, defaulting to safe', e);
+      logger.warn('SafetyService.classifyWithClaude error, defaulting to safe', e);
       return { category: 'safe', reason: 'Classification failed — defaulting to safe' };
     }
   }
@@ -136,7 +108,7 @@ Return safe for any normal educational, coding, math, writing, or professional t
   /**
    * Full safety scan of a user message.
    * Fast path: instant block patterns (no LLM).
-   * Slow path: Gonka classification for ambiguous content.
+   * Slow path: Claude classification for ambiguous content.
    */
   public async scan(text: string): Promise<SafetyResult> {
     const pii = this.detectPII(text);
@@ -156,7 +128,7 @@ Return safe for any normal educational, coding, math, writing, or professional t
     }
 
     // Slow path: LLM classification
-    const { category, reason } = await this.classifyWithGonka(text);
+    const { category, reason } = await this.classifyWithClaude(text);
     const blocked = category === 'harmful' || category === 'illegal';
     const result: SafetyResult = { category, blocked, reason, piiDetected: pii.detected, piiTypes: pii.types };
 
@@ -182,8 +154,8 @@ Return safe for any normal educational, coding, math, writing, or professional t
   /** Classifies the message in the background and records it in the audit log when it looks harmful. Never throws. */
   public reviewLater(text: string): void {
     const looksRoutine = text.length < 20 || /^(hi|hello|thanks|thank you|ok|yes|no|great|help me with)/i.test(text.trim());
-    if (looksRoutine || !this.gonkaApiKey) return;
-    void this.classifyWithGonka(text).then(({ category, reason }) => {
+    if (looksRoutine || !process.env.ANTHROPIC_API_KEY) return;
+    void this.classifyWithClaude(text).then(({ category, reason }) => {
       if (category === 'harmful' || category === 'illegal') {
         const pii = this.detectPII(text);
         this.audit(text, { category, blocked: false, reason: `flagged after reply: ${reason}`, piiDetected: pii.detected, piiTypes: pii.types });

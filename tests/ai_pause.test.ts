@@ -5,7 +5,7 @@ import { describeChatFailure } from '../server/services/ai/chatFailure.ts';
 import http from 'node:http';
 
 test('AI provider requests are recognised; other traffic is not', () => {
-  for (const u of ['https://api.anthropic.com/v1/messages', 'https://api.gonkarouter.io/v1/chat/completions', 'https://openrouter.ai/api/v1/chat/completions', 'https://generativelanguage.googleapis.com/v1beta/models/x:generateContent', 'https://my-llm.example/v1/chat/completions'])
+  for (const u of ['https://api.anthropic.com/v1/messages', 'https://openrouter.ai/api/v1/chat/completions', 'https://generativelanguage.googleapis.com/v1beta/models/x:generateContent', 'https://my-llm.example/v1/chat/completions'])
     assert.ok(isAiRequest(u), u);
   for (const u of ['https://api.telegram.org/bot123/sendMessage', 'https://sandbox.momodeveloper.mtn.com/collection/v1_0/requesttopay', 'http://127.0.0.1:3000/v1/chat/completions', 'https://api.tavily.com/search'])
     assert.ok(!isAiRequest(u), u);

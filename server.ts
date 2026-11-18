@@ -68,7 +68,7 @@ import { uploadLimitBytes, uploadTooLargeMessage, type PlanId } from './server/s
 import { outputsRouter, sharedOutputsRouter } from './server/routes/outputRoutes.js';
 import { curationViewRouter, knowledgeAdminRouter, knowledgeSourcesRouter } from './server/routes/knowledgeRepositoryRoutes.js';
 import { shutdownOcr } from './server/services/documents/ocr.js';
-import { userChatTarget, fileJobQueue } from './server/services/AiService.js';
+import { userChatAvailable, fileJobQueue } from './server/services/AiService.js';
 import { planOutput } from './server/services/outputs/planner.js';
 import { asksAboutDatasets } from './server/services/knowledge/published.js';
 import { checkUsage, recordUsage } from './server/services/billing/usage.js';
@@ -167,11 +167,7 @@ if (
 ) {
   throw new Error('DATABASE_URL must use PostgreSQL in production; SQLite file: URLs are not supported.');
 }
-if (!process.env.AI_PROVIDER) {
-  process.env.AI_PROVIDER = 'gonkarouter';
-}
-const AI_PROVIDERS = ['GONKA_API_KEY', 'GEMINI_API_KEY', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'NVIDIA_NIM_API_KEY', 'OLLAMA_BASE_URL'];
-const hasChatProvider = AI_PROVIDERS.some((key) => process.env[key]);
+const hasChatProvider = userChatAvailable();
 if (!process.env.GEMINI_API_KEY) {
   logger.warn(
     `GEMINI_API_KEY is not configured; semantic embeddings are unavailable and knowledge retrieval will use lexical matching.${hasChatProvider ? '' : ' No chat provider is configured.'}`,
@@ -666,9 +662,9 @@ if (process.env.NODE_ENV !== 'production') {
 logger.info('Environment Check:', {
   hasGemini: !!process.env.GEMINI_API_KEY,
   hasOpenRouter: !!process.env.OPENROUTER_API_KEY,
-  hasGonka: !!process.env.GONKA_API_KEY,
+  hasClaude: hasChatProvider,
   hasOllama: !!process.env.OLLAMA_BASE_URL,
-  provider: process.env.AI_PROVIDER,
+  provider: 'anthropic',
 });
 
 // Helper: pricing lookup backing the lookup_pricing tool, using the 1.2x margin
@@ -871,7 +867,7 @@ async function executeBackendAgentPostProcess(
           {
             name: 'Inference Latency & Token Efficiency',
             confidence: '92.8%',
-            insight: `Average inference latency across ${usageEvents.length || 1} queries is ${avgLatency}ms via GonkaRouter GLM-5.3-Flash.`,
+            insight: `Average inference latency across ${usageEvents.length || 1} queries is ${avgLatency}ms recorded by Bwenge.`,
           },
         ],
         columns: ['Database Table', 'Live Records', 'Primary Metric', 'Detected Pattern'],
@@ -883,7 +879,7 @@ async function executeBackendAgentPostProcess(
         ],
         promptOptimization: {
           original: q.slice(0, 240),
-          upgraded: `Act as a calibrated GonkaRouter domain specialist grounded in our live database (${examples.length} fine-tune examples, ${submissions.length} submissions). Execute "${q.slice(0, 140)}" with quantitative evidence, zero filler text, and structured schema output.`,
+          upgraded: `Act as a calibrated domain specialist grounded in our live database (${examples.length} fine-tune examples, ${submissions.length} submissions). Execute "${q.slice(0, 140)}" with quantitative evidence, zero filler text, and structured schema output.`,
         },
       };
       sendChunk(`\n\n\`\`\`artifact-json\n${JSON.stringify(datasetArtifact, null, 2)}\n\`\`\``);
@@ -895,12 +891,12 @@ async function executeBackendAgentPostProcess(
 
   // 3. Vector Graphic / Logo / Image Synthesis
   if (/\b(logo|image|vector\s+graphic|poster|banner|illustration|marketing\s+layout|draw\s+a)\b/i.test(qLower)) {
-    const cleanTitle = q.replace(/^(design|create|generate|draw|make)\s+(a|an|the)?\s*/i, '').slice(0, 48) || 'GonkaRouter Vector Graphic';
-    const svg = `<svg viewBox="0 0 800 450" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0B132B"/><stop offset="55%" stop-color="#0D2B24"/><stop offset="100%" stop-color="#1C2541"/></linearGradient><linearGradient id="acc" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#10B981"/><stop offset="50%" stop-color="#3FA7E0"/><stop offset="100%" stop-color="#F59E0B"/></linearGradient></defs><rect width="800" height="450" rx="24" fill="url(#bg)"/><circle cx="650" cy="110" r="140" fill="#10B981" opacity="0.12"/><circle cx="160" cy="360" r="170" fill="#3FA7E0" opacity="0.12"/><g transform="translate(80,95)"><rect x="0" y="0" width="96" height="96" rx="24" fill="url(#acc)"/><path d="M28 66 L48 26 L68 66 Z" fill="#0B132B"/><circle cx="48" cy="52" r="8" fill="#FAF9F5"/><text x="124" y="46" fill="#FAF9F5" font-family="system-ui,sans-serif" font-size="30" font-weight="800">${cleanTitle.replace(/[<>&"']/g, '')}</text><text x="124" y="78" fill="#9AA6C9" font-family="system-ui,sans-serif" font-size="16">Synthesized by GonkaRouter Visual Engine · Scalable Vector Layout</text><rect x="0" y="135" width="640" height="2" fill="url(#acc)" opacity="0.5"/><rect x="0" y="165" width="200" height="90" rx="14" fill="#162238" stroke="#10B981" stroke-opacity="0.4"/><text x="20" y="202" fill="#10B981" font-family="system-ui,sans-serif" font-size="13" font-weight="700">PRECISION DESIGN</text><text x="20" y="228" fill="#E8EAF2" font-family="system-ui,sans-serif" font-size="18" font-weight="700">Vector Ready</text><rect x="220" y="165" width="200" height="90" rx="14" fill="#162238" stroke="#3FA7E0" stroke-opacity="0.4"/><text x="240" y="202" fill="#3FA7E0" font-family="system-ui,sans-serif" font-size="13" font-weight="700">COLOR SYSTEM</text><text x="240" y="228" fill="#E8EAF2" font-family="system-ui,sans-serif" font-size="18" font-weight="700">High Contrast</text><rect x="440" y="165" width="200" height="90" rx="14" fill="#162238" stroke="#F59E0B" stroke-opacity="0.4"/><text x="460" y="202" fill="#F59E0B" font-family="system-ui,sans-serif" font-size="13" font-weight="700">EXPORT FORMAT</text><text x="460" y="228" fill="#E8EAF2" font-family="system-ui,sans-serif" font-size="18" font-weight="700">SVG + PNG</text></g></svg>`;
+    const cleanTitle = q.replace(/^(design|create|generate|draw|make)\s+(a|an|the)?\s*/i, '').slice(0, 48) || 'Bwenge Vector Graphic';
+    const svg = `<svg viewBox="0 0 800 450" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0B132B"/><stop offset="55%" stop-color="#0D2B24"/><stop offset="100%" stop-color="#1C2541"/></linearGradient><linearGradient id="acc" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#10B981"/><stop offset="50%" stop-color="#3FA7E0"/><stop offset="100%" stop-color="#F59E0B"/></linearGradient></defs><rect width="800" height="450" rx="24" fill="url(#bg)"/><circle cx="650" cy="110" r="140" fill="#10B981" opacity="0.12"/><circle cx="160" cy="360" r="170" fill="#3FA7E0" opacity="0.12"/><g transform="translate(80,95)"><rect x="0" y="0" width="96" height="96" rx="24" fill="url(#acc)"/><path d="M28 66 L48 26 L68 66 Z" fill="#0B132B"/><circle cx="48" cy="52" r="8" fill="#FAF9F5"/><text x="124" y="46" fill="#FAF9F5" font-family="system-ui,sans-serif" font-size="30" font-weight="800">${cleanTitle.replace(/[<>&"']/g, '')}</text><text x="124" y="78" fill="#9AA6C9" font-family="system-ui,sans-serif" font-size="16">Synthesized by Bwenge Visual Engine · Scalable Vector Layout</text><rect x="0" y="135" width="640" height="2" fill="url(#acc)" opacity="0.5"/><rect x="0" y="165" width="200" height="90" rx="14" fill="#162238" stroke="#10B981" stroke-opacity="0.4"/><text x="20" y="202" fill="#10B981" font-family="system-ui,sans-serif" font-size="13" font-weight="700">PRECISION DESIGN</text><text x="20" y="228" fill="#E8EAF2" font-family="system-ui,sans-serif" font-size="18" font-weight="700">Vector Ready</text><rect x="220" y="165" width="200" height="90" rx="14" fill="#162238" stroke="#3FA7E0" stroke-opacity="0.4"/><text x="240" y="202" fill="#3FA7E0" font-family="system-ui,sans-serif" font-size="13" font-weight="700">COLOR SYSTEM</text><text x="240" y="228" fill="#E8EAF2" font-family="system-ui,sans-serif" font-size="18" font-weight="700">High Contrast</text><rect x="440" y="165" width="200" height="90" rx="14" fill="#162238" stroke="#F59E0B" stroke-opacity="0.4"/><text x="460" y="202" fill="#F59E0B" font-family="system-ui,sans-serif" font-size="13" font-weight="700">EXPORT FORMAT</text><text x="460" y="228" fill="#E8EAF2" font-family="system-ui,sans-serif" font-size="18" font-weight="700">SVG + PNG</text></g></svg>`;
     const imageArtifact = {
       type: 'image',
       title: cleanTitle,
-      model: 'GonkaRouter Visual · Nano Banana Pro',
+      model: 'Bwenge SVG',
       aspectRatio: '16:9',
       style: 'Vector Brand & Layout Synthesis',
       palette: ['#0D2B24', '#10B981', '#3FA7E0', '#F59E0B'],
@@ -917,7 +913,7 @@ async function executeBackendAgentPostProcess(
     const videoArtifact = {
       type: 'video',
       title: cleanTitle,
-      model: 'GonkaRouter Motion · Flow Engine',
+      model: 'Bwenge Motion Preview',
       aspectRatio: '16:9',
       character: { name: 'Dr. Amina', role: 'AI Lead Narrator', avatarStyle: 'talking_head' },
       scenes: [
@@ -956,7 +952,7 @@ async function executeBackendAgentPostProcess(
 
   // 5. Audio, Speech, Podcast & Music Synthesis
   if (/\b(podcast|voiceover|audio\s+track|music\s+track|sound\s+effect|synth\s+melody)\b/i.test(qLower)) {
-    const cleanTitle = q.slice(0, 52) || 'GonkaRouter Audio Studio';
+    const cleanTitle = q.slice(0, 52) || 'Bwenge Audio Studio';
     const audioArtifact = {
       type: 'audio',
       title: cleanTitle,
@@ -995,14 +991,14 @@ async function executeBackendAgentPostProcess(
       summary: 'End-to-end automated DAG pipeline with live spreadsheet schema and scheduled dispatch sequence.',
       steps: [
         { id: '1', name: 'Ingest & Validate', role: 'Trigger', detail: 'Capture incoming submissions and documents into database', metric: '100% schema check' },
-        { id: '2', name: 'GonkaRouter Fine-Tuned Scoring', role: 'Agent', detail: 'Evaluate against active rubric and fine-tuned weights', metric: '< 350ms latency' },
+        { id: '2', name: 'Bwenge Fine-Tuned Scoring', role: 'Agent', detail: 'Evaluate against active rubric and fine-tuned weights', metric: '< 350ms latency' },
         { id: '3', name: 'Shortlist & Notify', role: 'Action', detail: 'Rank top candidates and trigger automated notifications', metric: 'Auto-dispatched' },
       ],
       spreadsheet: {
         columns: ['Stage', 'Owner', 'SLA', 'Automation Status', 'Target KPI'],
         rows: [
           ['1. Data Capture', 'Ingestion Webhook', 'Instant', 'Active', 'Zero dropped records'],
-          ['2. AI Evaluation', 'GonkaRouter Agent', '< 1 sec', 'Active', '>= 95% rubric agreement'],
+          ['2. AI Evaluation', 'Bwenge Agent', '< 1 sec', 'Active', '>= 95% rubric agreement'],
           ['3. Review & Export', 'Program Lead', '24 hours', 'Automated', '1-click CSV/Excel'],
         ],
       },
@@ -1069,8 +1065,9 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
     const visual = Boolean(req.file && /^image\/|application\/pdf/.test(req.file.mimetype)) || attachments.some((a: any) => /^image\/|application\/pdf/.test(String(a?.mimeType ?? a?.type ?? '')));
     const kind = visual ? 'vision' : earlyPlan.artifact ? 'artifact' : earlyPlan.needsComputation ? 'tool' : 'chat';
     const gate = await checkUsage(userId, { kind, chars: String(query || '').length, attachments: attachments.length + (req.file ? 1 : 0) }).catch(() => null);
-    chatPlan = gate?.plan.id ?? 'FREE';
-    if (gate && !gate.allowed) {
+    if (!gate) return res.status(503).json({ error: 'Bwenge could not verify your plan. Please try again.' });
+    chatPlan = gate.plan.id;
+    if (!gate.allowed) {
       rememberBlocked(userId, req.body, 'your request');
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
@@ -1114,12 +1111,6 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
   }
   // ─────────────────────────────────────────────────────────────────
 
-  // ── SENTIMENT ANALYSIS (parallel, non-blocking) ──────────────────────────
-  // Detect emotional tone to adapt system prompt persona.
-  // Runs fire-and-forget alongside history parsing — only awaited when
-  // building the final system prompt.
-  const sentimentPromise = sentimentService.analyze(query || '').catch(() => null);
-  // ─────────────────────────────────────────────────────────────────
   let parsedHistory: any[] = [];
   try {
     if (Array.isArray(history)) {
@@ -1162,7 +1153,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
   const contextFiles: Array<{ fileId: string; name: string }> = Array.isArray(rawContextFiles)
     ? rawContextFiles.slice(-5).map((f: any) => ({ fileId: String(f.fileId).slice(0, 100), name: String(f.name || 'file').slice(0, 255) }))
     : [];
-  const agentReadsFiles = userChatTarget(chatPlan, query || '', { hasImages: true }).provider === 'anthropic' || Boolean(process.env.GONKA_API_KEY);
+  const agentReadsFiles = userChatAvailable();
   let attachmentBytes = 0;
   for (const attachment of attachments) {
     const extension = path.extname(attachment.name).toLowerCase();
@@ -1430,11 +1421,11 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
   // no tools and could only describe a file instead of creating one.
   const turnPlan = planOutput({ message: planQuery, attachments: attachments.map((a: any) => ({ name: String(a?.name ?? ''), mime: a?.mimeType })), hasDataset: attachments.some((a: any) => /\.(csv|tsv|xlsx|xls|json)$/i.test(String(a?.name ?? ''))) });
 
-  const usePremiumChat = intent === 'general_assist' && service === 'general' &&
-    userChatTarget(chatPlan, planQuery).provider === 'anthropic';
   const hasVisualFiles = serverVisualFiles.length > 0 || contextFiles.length > 0 || Boolean(req.file && /^image\/|application\/pdf/.test(req.file.mimetype));
-  if (usePremiumChat || useToolAgent({
-    intent, service, isSmallTalk, requestedProvider: null, hasClaudeKey: false, aiProvider: 'gonkarouter',
+  const usePaidAgent = chatPlan !== 'FREE' && intent === 'general_assist' && service === 'general' &&
+    (Boolean(extractSchema) || planQuery.trim().length >= 6000);
+  if (usePaidAgent || useToolAgent({
+    intent, service, isSmallTalk, requestedProvider: null, hasClaudeKey: false, aiProvider: 'anthropic',
     agentAvailable: agentReadsFiles, plan: turnPlan, hasVisualFiles,
     asksAboutDatasets: intent === 'general_assist' && !isSmallTalk && (needsPlatformTools(planQuery) || needsResearch(query || '') || await asksAboutDatasets(query || '', userId).catch(() => false)),
   })) {
@@ -1444,6 +1435,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
     // The emitter sends a heartbeat every 15 s, so long tool calls are never cut by a proxy as idle.
     const emitter = makeEmitter(res, { progress: true });
     const keepAlive: ReturnType<typeof setInterval> | undefined = undefined;
+    const sentimentPromise = isSmallTalk ? Promise.resolve(null) : sentimentService.analyze(query || '').catch(() => null);
     announceFiles(emitter);
 
     try {
@@ -1830,7 +1822,7 @@ ${augmentedQuery}`;
     const requireVerifiedCitations = allowedEvidenceIds.length > 0;
 
     let finalStreamedText = '';
-    const recordUsageAndPostProcess = async (model: string, usage: { input_tokens: number; output_tokens: number }) => {
+    const recordUsageAndPostProcess = async ({ model, provider, usage }: Awaited<ReturnType<AiService['streamUserChat']>>) => {
       await executeBackendAgentPostProcess(userId, query || '', finalStreamedText, (delta) => {
         finalStreamedText += delta;
         if (!requireVerifiedCitations) {
@@ -1864,7 +1856,7 @@ ${augmentedQuery}`;
         })
         .catch((err) => logger.warn('Could not persist chat RAG usage event:', err));
       logger.info('Chat RAG response quality recorded', {
-        provider: 'GonkaRouter',
+        provider,
         retrievedEvidenceCount: allowedEvidenceIds.length,
         citedEvidenceCount: citationValidation.citedChunkIds.length,
         invalidCitationCount: citationValidation.invalidChunkIds.length,
@@ -1876,13 +1868,11 @@ ${augmentedQuery}`;
       }
     };
 
-    if (!(await aiService.providerAvailable('gonkarouter'))) {
-      throw Object.assign(new Error('GonkaRouter is not configured.'), { code: 'AI_UNAVAILABLE' });
-    }
-    let gonkaRawText = '';
-    let gonkaVisibleText = '';
-    const gonkaStartedAt = Date.now();
-    const completion = await aiService.streamGonkaChat(prompt, {
+    let rawText = '';
+    let visibleText = '';
+    const generationStartedAt = Date.now();
+    const completion = await aiService.streamUserChat(prompt, {
+      planId: chatPlan,
       system: systemWithContext,
       history: parsedHistory,
       images: serverVisualFiles.length > 0 ? serverVisualFiles.map(f => ({ base64: f.base64, mediaType: f.mediaType })) : undefined,
@@ -1891,34 +1881,34 @@ ${augmentedQuery}`;
       userId,
       requestId: (req as any).requestId,
       onReset: () => {
-        gonkaRawText = '';
-        gonkaVisibleText = '';
+        rawText = '';
+        visibleText = '';
         finalStreamedText = '';
         emitter.send('reset');
       },
       onToken: (token) => {
         if (emitter.isClosed()) return;
-        gonkaRawText += token;
-        const { text } = stripThinkingTags(gonkaRawText);
-        if (!text.startsWith(gonkaVisibleText)) return;
+        rawText += token;
+        const { text } = stripThinkingTags(rawText);
+        if (!text.startsWith(visibleText)) return;
 
-        const delta = text.slice(gonkaVisibleText.length);
+        const delta = text.slice(visibleText.length);
         if (!delta) return;
 
-        if (!gonkaVisibleText) {
-          logger.info('GonkaRouter first visible token received', {
-            elapsedMs: Date.now() - gonkaStartedAt,
+        if (!visibleText) {
+          logger.info('Chat first visible token received', {
+            elapsedMs: Date.now() - generationStartedAt,
           });
         }
-        gonkaVisibleText = text;
+        visibleText = text;
         finalStreamedText = text;
         if (!requireVerifiedCitations) {
           emitter.send('text', { text: delta });
         }
       },
     });
-    if (!gonkaVisibleText.trim()) throw new Error('GonkaRouter returned no visible text.');
-    await recordUsageAndPostProcess(completion.model, completion.usage);
+    if (!visibleText.trim()) throw new Error('Chat provider returned no visible text.');
+    await recordUsageAndPostProcess(completion);
 
     clearInterval(keepAlive);
     emitter.done();
@@ -2269,7 +2259,7 @@ app.post('/api/ai/scan-agent', requireAuth, gradingLimiter, async (req, res) => 
     }
 
     if (mode === 'scan_to_form') {
-      const systemPrompt = `You are Bwenge Scan-to-Form Autonomous Agent powered by GonkaRouter Vision.
+      const systemPrompt = `You are Bwenge Scan-to-Form agent Vision.
 Read the scanned document images or their local OCR text and convert every visible question, field, or prompt into a structured interactive digital form schema, including a scoring rubric.
 Return valid JSON ONLY:
 {
@@ -2573,12 +2563,22 @@ app.post('/api/ai/next-prompt', requireAuth, async (req, res) => {
     // A suggestion comes with every answer, so it is capped (60 an hour) and costs the paying user no credits.
     // Suggestions are a paid feature (the Free plan's credits are for answers): no suggestion, and no cost, on Free.
     const { planFor: planOf } = await import('./server/services/billing/plans.js');
-    if ((await planOf(userId).catch(() => null))?.id === 'FREE') return res.json({ suggestion: null });
+    const plan = await planOf(userId);
+    if (plan.id === 'FREE') return res.json({ suggestion: null });
     const now = Date.now(); const recent = (nextPromptUsed.get(userId) ?? []).filter((t) => now - t < 3_600_000);
     if (recent.length >= 60) return res.json({ suggestion: null });
     nextPromptUsed.set(userId, [...recent, now]); if (nextPromptUsed.size > 5000) nextPromptUsed.clear();
     const { suggestNextPrompt } = await import('./server/services/nextPrompt.js');
-    const suggestion = await suggestNextPrompt({ text: async (system, user) => String(await aiService.sendGonkaChat(user, { system, maxTokens: 48, timeoutMs: 8000 }) ?? '') }, String(req.body?.lastUser ?? ''), String(req.body?.lastAssistant ?? ''));
+    const suggestion = await suggestNextPrompt({
+      text: async (system, prompt) => {
+        let text = '';
+        await aiService.streamUserChat(prompt, {
+          planId: plan.id, system, max_tokens: 48, signal: AbortSignal.timeout(8000),
+          onToken: token => { text += token; },
+        });
+        return text;
+      },
+    }, String(req.body?.lastUser ?? ''), String(req.body?.lastAssistant ?? ''));
     res.json({ suggestion });
   } catch { res.json({ suggestion: null }); }
 });

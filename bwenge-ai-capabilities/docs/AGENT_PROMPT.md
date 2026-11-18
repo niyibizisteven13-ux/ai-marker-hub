@@ -8,7 +8,7 @@ Do, in order:
 1. Copy `src/ai/` to `server/services/ai/`, the four UI files (not the MarkdownRenderer placeholder) into the components folder, and install the dependencies listed in INTEGRATION.md. Add the environment variables to `.env.example` (never commit secrets).
 2. Create `server/services/ai/agent.ts` exactly as in INTEGRATION.md section 2, mapping our `KnowledgeRetrievalService` and `ExecutionSandbox` to the small `ToolServices` shapes. If an API differs, adapt the mapping, not the library.
 3. Mount `createFileRouter` at `/api/files` using our existing auth middleware to get the user id, and add the hourly `purgeExpired` job.
-4. Replace the Gonka branch of `generalAssist` as in INTEGRATION.md section 4. Keep memory context and pinned syllabus behavior. Keep `extractSchema` working (no tools).
+4. Replace the OpenAI-compatible branch of `generalAssist` as in INTEGRATION.md section 4. Keep memory context and pinned syllabus behavior. Keep `extractSchema` working (no tools).
 5. Forward `AgentEvent`s over our existing SSE channel. Update the chat client to handle `attachment`, `sources`, and `turn_reset`, and render `AiResponseView` with `attachments`, `sources`, and `animate={false}` for messages loaded from history.
 6. Persist `attachments` and `sources` with assistant messages; on load, call `fileStore.refresh` for each attachment and show expired files as expired.
 7. Apply the fixes in AISERVICE_FIXES.md that remain relevant after the change (items 3, 7, 8 especially). Make the Gemini fallback explicit and configurable, and show a visible notice when it is used.

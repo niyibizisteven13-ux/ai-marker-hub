@@ -245,7 +245,7 @@ export default function AdminPage({ onBack, initialTab = 'overview' }: { onBack:
   const [quality, setQuality] = useState<AdminQualitySummary | null>(null);
   const [providers, setProviders] = useState<any[]>([]);
   const [providerForms, setProviderForms] = useState<Record<string, { model: string; baseUrl: string }>>({});
-  const [newProvider, setNewProvider] = useState('GONKAROUTER');
+  const [newProvider, setNewProvider] = useState('ANTHROPIC');
   const [newProviderModel, setNewProviderModel] = useState('');
   const [newProviderBaseUrl, setNewProviderBaseUrl] = useState('');
   const [savingProvider, setSavingProvider] = useState(false);
@@ -270,7 +270,7 @@ export default function AdminPage({ onBack, initialTab = 'overview' }: { onBack:
 
   // Dataset-grounded prompt adapter configuration state
   const [ftDatasetId, setFtDatasetId] = useState('');
-  const [ftBaseModel, setFtBaseModel] = useState('zai-org/GLM-5.3-Flash');
+  const [ftBaseModel, setFtBaseModel] = useState('claude-haiku-5-5');
   const [ftSuffix, setFtSuffix] = useState('bwenge-domain-v1');
   const [ftAutoApprove, setFtAutoApprove] = useState(true);
   const [ftStarting, setFtStarting] = useState(false);
@@ -298,7 +298,7 @@ export default function AdminPage({ onBack, initialTab = 'overview' }: { onBack:
   const [newKbDesc, setNewKbDesc] = useState('');
   const [newKbGlobalApproved, setNewKbGlobalApproved] = useState(false);
   const [newModelName, setNewModelName] = useState('');
-  const [newModelBase, setNewModelBase] = useState('zai-org/GLM-5.3-Flash');
+  const [newModelBase, setNewModelBase] = useState('claude-haiku-5-5');
   const [newPromptName, setNewPromptName] = useState('');
   const [newPromptText, setNewPromptText] = useState('');
 
@@ -896,9 +896,8 @@ export default function AdminPage({ onBack, initialTab = 'overview' }: { onBack:
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <Field label="Base Model">
                           <select className={input} value={ftBaseModel} onChange={(e) => setFtBaseModel(e.target.value)}>
-                            <option value="zai-org/GLM-5.3-Flash">zai-org/GLM-5.3-Flash</option>
-                            <option value="gonkarouter/GLM-5-Reasoning">gonkarouter/GLM-5-Reasoning</option>
-                            <option value="gonkarouter/Nano-Banana-Vision">gonkarouter/Nano-Banana-Vision</option>
+                            <option value="claude-haiku-5-5">Claude Haiku 5.5</option>
+                            <option value="claude-sonnet-5-5">Claude Sonnet 5.5</option>
                           </select>
                         </Field>
                         <Field label="Adapter Name Suffix">
@@ -1638,7 +1637,7 @@ export default function AdminPage({ onBack, initialTab = 'overview' }: { onBack:
                           className={input}
                           value={newModelBase}
                           onChange={(e) => setNewModelBase(e.target.value)}
-                          placeholder="zai-org/GLM-5.3-Flash"
+                          placeholder="claude-haiku-5-5"
                         />
                       </Field>
                     </div>
@@ -1650,8 +1649,8 @@ export default function AdminPage({ onBack, initialTab = 'overview' }: { onBack:
                         }
                         await adminApi.createModel({
                           name: newModelName.trim(),
-                          provider: 'GonkaRouter',
-                          baseModel: newModelBase.trim() || 'zai-org/GLM-5.3-Flash',
+                          provider: 'Claude',
+                          baseModel: newModelBase.trim() || 'claude-haiku-5-5',
                           version: 'v1',
                           environment: env,
                         });
@@ -2076,7 +2075,7 @@ export default function AdminPage({ onBack, initialTab = 'overview' }: { onBack:
                         className={btnPrimary + ' w-full py-3.5'}
                         disabled={pgLoading}
                       >
-                        <FlaskConical size={18} /> {pgLoading ? 'Executing on GonkaRouter...' : 'Run Live Query'}
+                        <FlaskConical size={18} /> {pgLoading ? 'Executing on Claude...' : 'Run Live Query'}
                       </button>
                     </div>
 
@@ -2085,7 +2084,7 @@ export default function AdminPage({ onBack, initialTab = 'overview' }: { onBack:
                       {pgResult ? (
                         <div className="space-y-5 text-sm min-w-0">
                           <div className="flex items-center justify-between text-xs text-[#7CC4EE] font-bold">
-                            <span>Model: {pgResult.modelUsed || 'GonkaRouter'}</span>
+                            <span>Model: {pgResult.modelUsed || 'Claude'}</span>
                             <span>Latency: {pgResult.latencyMs || 180}ms</span>
                           </div>
                           <div className="p-4 bg-[#0F1424] rounded-2xl border border-[#2E3A63] min-w-0 shadow-inner">
@@ -2432,7 +2431,7 @@ export default function AdminPage({ onBack, initialTab = 'overview' }: { onBack:
                   >
                     <Field label="Provider">
                       <select className={input} value={newProvider} onChange={(event) => setNewProvider(event.target.value)}>
-                        {['GONKAROUTER', 'GEMINI', 'OPENAI', 'ANTHROPIC', 'DEEPSEEK', 'OPENROUTER', 'NVIDIA NIM', 'OLLAMA'].map((provider) => (
+                        {['GEMINI', 'OPENAI', 'ANTHROPIC', 'DEEPSEEK', 'OPENROUTER', 'NVIDIA NIM', 'OLLAMA'].map((provider) => (
                           <option key={provider} value={provider}>{provider}</option>
                         ))}
                       </select>
@@ -2514,7 +2513,7 @@ export default function AdminPage({ onBack, initialTab = 'overview' }: { onBack:
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                     <Stat label="Total AI Queries" value={analytics.totalQuestions} detail="Logged in database" />
                     <Stat label="Knowledge Grounded" value={`${analytics.answeredRate}%`} detail="Verified context rate" />
-                    <Stat label="Avg Inference Latency" value={`${analytics.avgLatencyMs} ms`} detail="GonkaRouter streaming" />
+                    <Stat label="Avg Inference Latency" value={`${analytics.avgLatencyMs} ms`} detail="Claude streaming" />
                     <Stat label="Estimated Cost" value={`$${analytics.costUsd}`} detail="Estimate from configured token rates" />
                   </div>
                 </Section>

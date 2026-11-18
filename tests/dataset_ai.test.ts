@@ -10,16 +10,17 @@ import { PDFDocument, StandardFonts } from 'pdf-lib';
 
 // Datasets from Admin → Datasets & Curations used by every user's assistant: published by default, hidden when
 // switched off, folders/files switched off for AI stay out. The agent lists, browses, reads and analyses
-// them (fake GonkaRouter scripts the tool calls). SYNTHETIC data only.
+// them (fake Claude scripts the tool calls). SYNTHETIC data only.
 
 const requests: any[] = [];
 
 /** Scripted agent: list → browse (search) → read → analyze → answer from the analysis table. */
 function script(p: any): { text?: string; tool?: { name: string; input: unknown } } {
   const last = p.messages.at(-1);
-  if (last.role !== 'tool') return { tool: { name: 'list_datasets', input: {} } };
-  const text: string = last.content;
-  const prevTool = p.messages.at(-2).tool_calls?.[0]?.function.name;
+  const result = Array.isArray(last.content) && last.content.find((block: any) => block.type === 'tool_result');
+  if (!result) return { tool: { name: 'list_datasets', input: {} } };
+  const text: string = result.content;
+  const prevTool = p.messages.at(-2).content.find((block: any) => block.type === 'tool_use')?.name;
   if (prevTool === 'list_datasets') return { tool: { name: 'browse_dataset', input: { datasetId: /Agriculture Survey \(datasetId ([^)]+)\)/.exec(text)![1], search: 'yields' } } };
   if (prevTool === 'browse_dataset') return { tool: { name: 'read_dataset_file', input: { fileId: /fileId ([\w-]+)/.exec(text)![1] } } };
   if (prevTool === 'read_dataset_file') {
@@ -29,32 +30,35 @@ function script(p: any): { text?: string; tool?: { name: string; input: unknown 
   return { text: `Average maize yield by district (from Agriculture/2024/yields.csv):\n\n${text.includes('Gasabo') ? 'Gasabo and Huye compared' : 'no table'}` };
 }
 
-const gonka = http.createServer((req, res) => {
+const claude = http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => { body += c; });
   req.on('end', () => {
-    if (req.url !== '/v1/chat/completions') { res.writeHead(400, { 'content-type': 'application/json' }).end('{"error":{"message":"stub"}}'); return; }
+    if (req.url !== '/v1/messages') { res.writeHead(400, { 'content-type': 'application/json' }).end('{"error":{"message":"stub"}}'); return; }
     const p = JSON.parse(body);
     requests.push(p);
     const turn = script(p);
     res.writeHead(200, { 'content-type': 'text/event-stream' });
-    const send = (delta: object, finish: string | null = null) =>
-      res.write(`data: ${JSON.stringify({ id: 'g', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`);
+    const send = (type: string, data: object = {}) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`);
+    send('message_start', { message: { id: 'dataset', type: 'message', role: 'assistant', model: p.model, content: [], usage: { input_tokens: 5, output_tokens: 1 } } });
     if (turn.tool) {
-      send({ tool_calls: [{ index: 0, id: `tool_${requests.length}`, type: 'function', function: { name: turn.tool.name, arguments: JSON.stringify(turn.tool.input) } }] });
+      send('content_block_start', { index: 0, content_block: { type: 'tool_use', id: `tool_${requests.length}`, name: turn.tool.name, input: {} } });
+      send('content_block_delta', { index: 0, delta: { type: 'input_json_delta', partial_json: JSON.stringify(turn.tool.input) } });
     } else {
-      send({ content: turn.text });
+      send('content_block_start', { index: 0, content_block: { type: 'text', text: '' } });
+      send('content_block_delta', { index: 0, delta: { type: 'text_delta', text: turn.text } });
     }
-    send({}, turn.tool ? 'tool_calls' : 'stop');
-    res.end('data: [DONE]\n\n');
+    send('content_block_stop', { index: 0 });
+    send('message_delta', { delta: { stop_reason: turn.tool ? 'tool_use' : 'end_turn', stop_sequence: null }, usage: { output_tokens: 10 } });
+    send('message_stop');
+    res.end();
   });
 }).listen(0);
-await new Promise((r) => gonka.once('listening', r));
-const base = `http://127.0.0.1:${(gonka.address() as AddressInfo).port}`;
+await new Promise((r) => claude.once('listening', r));
+const base = `http://127.0.0.1:${(claude.address() as AddressInfo).port}`;
 Object.assign(process.env, {
-  AI_PROVIDER: 'gonkarouter', AI_AGENT_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'test-key', ANTHROPIC_BASE_URL: base,
-  CLAUDE_AGENT_MODEL: 'claude-haiku-5-5', CLAUDE_FALLBACK_TO_GONKA: 'false', GONKA_MODEL: 'test-gonka-model',
-  GONKA_API_KEY: 'test-gonka', GONKA_BASE_URL: `${base}/v1`,
+  ANTHROPIC_API_KEY: 'test-key', ANTHROPIC_BASE_URL: base,
+  CLAUDE_AGENT_MODEL: 'claude-haiku-5-5',
 });
 
 const { prisma } = await import('../server/db.js');
@@ -73,7 +77,7 @@ const tag = randomUUID().slice(0, 8);
 const admin = `admin-ds-${tag}`;
 const user = `user-ds-${tag}`;
 const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dataset-ai-'));
-test.after(async () => { await fileJobQueue.stop(); gonka.close(); await fs.rm(root, { recursive: true, force: true }); });
+test.after(async () => { await fileJobQueue.stop(); claude.close(); await fs.rm(root, { recursive: true, force: true }); });
 
 const CSV = 'district,crop,yield\nGasabo,maize,3.0\nGasabo,maize,3.4\nHuye,maize,2.0\nHuye,maize,2.6\nMusanze,beans,1.5\n';
 async function pdf(text: string) {
@@ -161,24 +165,24 @@ test('search_knowledge reaches published datasets for every user, with the sourc
   assert.equal(fromThisRepo(await retrieveKnowledgeChunks('salary name', { userId: user, limit: 10 })).length, 0, 'AI-disabled files are not indexed');
 });
 
-test('agent: a normal user\'s data question runs on GonkaRouter and lists → browses → reads → analyses the dataset', async () => {
+test('agent: a normal user\'s data question runs on Claude and lists → browses → reads → analyses the dataset', async () => {
   resetPublishedCache();
   const question = 'What is the average maize yield per district in the agriculture survey?';
   assert.equal(await asksAboutDatasets(question), true);
   assert.equal(await asksAboutDatasets('Agriculture Survey please'), true, 'dataset names count');
   assert.equal(await asksAboutDatasets('hello, how are you?'), false);
   const plan = planOutput({ message: 'tell me about the Agriculture Survey' });
-  const route = { intent: 'general_assist', service: 'general', isSmallTalk: false, requestedProvider: null, hasClaudeKey: true, aiProvider: 'gonkarouter', agentAvailable: true, plan };
+  const route = { intent: 'general_assist', service: 'general', isSmallTalk: false, requestedProvider: null, hasClaudeKey: true, aiProvider: 'anthropic', agentAvailable: true, plan };
   assert.equal(useToolAgent({ ...route, asksAboutDatasets: true }), true, 'dataset questions take the tool path');
 
   requests.length = 0;
   const out: any = await AiService.getInstance().generalAssist({ userId: user, planText: question, messages: [{ role: 'user', content: question }] });
-  assert.equal(requests[0].model, 'test-gonka-model');
-  const names = requests[0].tools.map((t: any) => t.function.name);
+  assert.equal(requests[0].model, 'claude-haiku-5-5');
+  const names = requests[0].tools.map((t: any) => t.name);
   for (const n of ['list_datasets', 'browse_dataset', 'read_dataset_file', 'search_knowledge', 'analyze_data']) assert.ok(names.includes(n), `${n} offered`);
-  assert.match(requests[0].messages[0].content, /Public library/);
+  assert.match(JSON.stringify(requests[0].system), /Public library/);
 
-  const results = requests.slice(1).map((r) => r.messages.at(-1).content);
+  const results = requests.slice(1).map((r) => r.messages.at(-1).content.find((block: any) => block.type === 'tool_result').content);
   assert.match(results[0], /Agriculture Survey \(datasetId .*2 files/);
   assert.match(results[1], /Agriculture\/2024\/yields\.csv · CSV/);
   assert.match(results[2], /columns: district, crop, yield/);

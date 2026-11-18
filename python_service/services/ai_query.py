@@ -9,104 +9,77 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-BWENGE_SYSTEM_PROMPT = """You are Bwenge — a highly capable AI assistant powered by GonkaRouter.
+BWENGE_SYSTEM_PROMPT = """You are Bwenge — a highly capable AI assistant powered by Claude.
 You have been provided with document context extracted from user-uploaded files.
 Answer the user's question accurately and thoroughly based on the provided context.
 If the answer is not in the context, say so clearly rather than hallucinating.
 Cite specific file names and sections when referencing content."""
 
 
-class GonkaClient:
-    """Async HTTP client for GonkaRouter — the sole AI provider."""
+class ClaudeClient:
+    """Async Anthropic Messages client for document queries."""
 
     def __init__(self) -> None:
-        if not settings.GONKA_API_KEY:
-            logger.warning("gonka_api_key_missing")
-        self.base_url = settings.GONKA_BASE_URL.rstrip("/")
+        self.url = f"{settings.ANTHROPIC_BASE_URL.rstrip('/')}/v1/messages"
         self.headers = {
-            "Content-Type": "application/json",
+            "content-type": "application/json",
+            "anthropic-version": "2023-06-01",
+            "x-api-key": settings.ANTHROPIC_API_KEY,
         }
-        if settings.GONKA_API_KEY:
-            self.headers["Authorization"] = f"Bearer {settings.GONKA_API_KEY}"
-        self.model = settings.GONKA_MODEL
+
+    def payload(
+        self, system: str, messages: list[dict], max_tokens: int, model: Optional[str], stream: bool,
+    ) -> dict:
+        return {
+            "model": model or settings.CLAUDE_AGENT_MODEL,
+            "system": system,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "stream": stream,
+        }
 
     async def chat(
-        self,
-        system: str,
-        messages: list[dict],
-        max_tokens: int = 4096,
-        temperature: float = 0.3,
-        model: Optional[str] = None,
+        self, system: str, messages: list[dict], max_tokens: int, model: Optional[str],
     ) -> dict:
-        """Non-streaming chat completion."""
-        payload = {
-            "model": model or self.model,
-            "messages": [{"role": "system", "content": system}, *messages],
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "stream": False,
-        }
-        async with httpx.AsyncClient(timeout=settings.GONKA_TIMEOUT) as client:
+        async with httpx.AsyncClient(timeout=settings.CLAUDE_TIMEOUT) as client:
             response = await client.post(
-                f"{self.base_url}/chat/completions",
+                self.url,
                 headers=self.headers,
-                json=payload,
+                json=self.payload(system, messages, max_tokens, model, stream=False),
             )
             response.raise_for_status()
             return response.json()
 
     async def stream_chat(
-        self,
-        system: str,
-        messages: list[dict],
-        max_tokens: int = 4096,
-        temperature: float = 0.3,
-        model: Optional[str] = None,
+        self, system: str, messages: list[dict], max_tokens: int, model: Optional[str],
     ) -> AsyncIterator[str]:
-        """Streaming chat — yields text tokens as they arrive."""
-        payload = {
-            "model": model or self.model,
-            "messages": [{"role": "system", "content": system}, *messages],
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "stream": True,
-        }
-        async with httpx.AsyncClient(timeout=settings.GONKA_TIMEOUT) as client:
+        async with httpx.AsyncClient(timeout=settings.CLAUDE_TIMEOUT) as client:
             async with client.stream(
-                "POST",
-                f"{self.base_url}/chat/completions",
-                headers=self.headers,
-                json=payload,
+                "POST", self.url, headers=self.headers,
+                json=self.payload(system, messages, max_tokens, model, stream=True),
             ) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():
-                    line = line.strip()
-                    if not line or not line.startswith("data:"):
+                    if not line.startswith("data:"):
                         continue
-                    data_str = line[5:].strip()
-                    if data_str == "[DONE]":
-                        break
-                    try:
-                        data = json.loads(data_str)
-                        token = (
-                            data.get("choices", [{}])[0]
-                            .get("delta", {})
-                            .get("content", "")
-                        )
-                        if token:
-                            yield token
-                    except json.JSONDecodeError:
-                        continue
+                    event = json.loads(line[5:])
+                    if event.get("type") == "error":
+                        raise RuntimeError("Claude stream failed")
+                    if event.get("type") == "message_stop":
+                        return
+                    delta = event.get("delta", {})
+                    if event.get("type") == "content_block_delta" and delta.get("type") == "text_delta":
+                        yield delta["text"]
 
 
 class AIQueryEngine:
     """
     Loads document chunks for the requested file_ids,
-    applies context-window injection or RAG, and queries GonkaRouter.
+    applies context-window injection or RAG, and queries Claude.
     """
 
     def __init__(self) -> None:
-        self.gonka = GonkaClient()
+        self.claude = ClaudeClient()
 
     def _build_context_block(self, chunks: list[Chunk]) -> tuple[str, int]:
         """Build the context string and return (context_text, total_tokens)."""
@@ -156,7 +129,6 @@ class AIQueryEngine:
         prompt: str,
         file_records: list[dict],  # List of {file_id, chunks_path, original_name}
         max_tokens: int = 4096,
-        temperature: float = 0.3,
         model: Optional[str] = None,
         stream: bool = False,
     ):
@@ -221,7 +193,6 @@ class AIQueryEngine:
                 system=system,
                 messages=messages,
                 max_tokens=max_tokens,
-                temperature=temperature,
                 model=model,
                 meta={
                     "file_ids_used": file_ids_used,
@@ -232,19 +203,24 @@ class AIQueryEngine:
             )
 
         # Non-streaming
-        response = await self.gonka.chat(
+        response = await self.claude.chat(
             system=system,
             messages=messages,
             max_tokens=max_tokens,
-            temperature=temperature,
             model=model,
         )
-        answer = response.get("choices", [{}])[0].get("message", {}).get("content", "")
-        usage = response.get("usage")
+        answer = "".join(block["text"] for block in response.get("content", []) if block.get("type") == "text")
+        tokens = response.get("usage")
+        usage = None
+        if tokens is not None:
+            prompt_tokens = tokens.get("input_tokens", 0) + tokens.get("cache_read_input_tokens", 0) + tokens.get("cache_creation_input_tokens", 0)
+            completion_tokens = tokens.get("output_tokens", 0)
+            usage = {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens,
+                     "total_tokens": prompt_tokens + completion_tokens}
 
         return {
             "answer": answer,
-            "model": response.get("model", settings.GONKA_MODEL),
+            "model": response.get("model", settings.CLAUDE_AGENT_MODEL),
             "file_ids_used": file_ids_used,
             "context_strategy": context_strategy,
             "chunks_used": len(chunks_to_use),
@@ -257,18 +233,16 @@ class AIQueryEngine:
         system: str,
         messages: list[dict],
         max_tokens: int,
-        temperature: float,
         model: Optional[str],
         meta: dict,
     ) -> AsyncIterator[str]:
         # First yield metadata as SSE comment
         yield f"data: {json.dumps({'type': 'meta', **meta})}\n\n"
 
-        async for token in self.gonka.stream_chat(
+        async for token in self.claude.stream_chat(
             system=system,
             messages=messages,
             max_tokens=max_tokens,
-            temperature=temperature,
             model=model,
         ):
             yield f"data: {json.dumps({'type': 'token', 'text': token})}\n\n"

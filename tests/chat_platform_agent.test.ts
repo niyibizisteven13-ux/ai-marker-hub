@@ -63,8 +63,8 @@ await new Promise((r) => myseb.once('listening', r));
 
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chatagent-'));
 Object.assign(process.env, {
-  AI_PROVIDER: 'gonkarouter', AI_AGENT_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'test-key-not-real', ANTHROPIC_BASE_URL: `http://127.0.0.1:${(claude.address() as AddressInfo).port}`,
-  CLAUDE_AGENT_MODEL: 'claude-haiku-5-5', CLAUDE_FALLBACK_TO_GONKA: 'false', GONKA_API_KEY: 'test-gonka-key', GONKA_BASE_URL: 'http://127.0.0.1:9/gonka/v1', LIBRARY_AUTO_ROUTE: 'false',
+  AI_PROVIDER: 'anthropic', AI_AGENT_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'test-key-not-real', ANTHROPIC_BASE_URL: `http://127.0.0.1:${(claude.address() as AddressInfo).port}`,
+  CLAUDE_AGENT_MODEL: 'claude-haiku-5-5', LIBRARY_AUTO_ROUTE: 'false',
   MYSEB_URL: `http://127.0.0.1:${(myseb.address() as AddressInfo).port}`, MYSEB_SERVICE_KEY: 'svc-key', APP_BASE_URL: 'https://www.bwenge.space',
 });
 // MySEB is a paid service (see tests/myseb_access.test.ts); these scenarios are about the chat, so charging is switched off here.
@@ -236,8 +236,16 @@ test('a class from a pasted list, linked to the task, read back as numbers', asy
   assert.match(overview, /S4 Biology \(BIO4\): 3 students, class average 75%/); assert.match(overview, /2\/3 handed in/);
 });
 
-test('general questions stay on the everyday chat model', async () => {
+test('general web questions stream from Claude without enabling tools', async () => {
   claudeRequests.length = 0;
-  await assert.rejects(ai.generalAssist({ userId: user, messages: [{ role: 'user', content: 'What is photosynthesis?' }] }));
-  assert.equal(claudeRequests.length, 0, 'no tool model for a general question');
+  script.push({ text: 'Photosynthesis allows plants to make sugars from light.' });
+  let text = '';
+  await ai.streamUserChat('What is photosynthesis?', {
+    userId: user,
+    planId: 'FREE',
+    onToken: token => { text += token; },
+  });
+  assert.match(text, /make sugars/);
+  assert.equal(claudeRequests.length, 1);
+  assert.equal(claudeRequests[0].tools, undefined);
 });

@@ -22,12 +22,12 @@ export function setAiPaused(next: boolean) {
   paused = next;
 }
 
-const KNOWN_HOSTS = ['api.anthropic.com', 'api.openai.com', 'openrouter.ai', 'api.gonkarouter.io', 'api.deepseek.com', 'generativelanguage.googleapis.com', 'integrate.api.nvidia.com', 'api.groq.com', 'api.together.xyz', 'api.mistral.ai'];
+const KNOWN_HOSTS = ['api.anthropic.com', 'api.openai.com', 'openrouter.ai', 'api.deepseek.com', 'generativelanguage.googleapis.com', 'integrate.api.nvidia.com', 'api.groq.com', 'api.together.xyz', 'api.mistral.ai'];
 /** Model endpoints of any OpenAI-compatible, Anthropic or Gemini provider, whatever host an admin configured. */
 const MODEL_PATH = /\/(?:chat\/completions|completions|messages|responses|embeddings)(?:[/?]|$)|:(?:stream)?generateContent|:embedContent|:batchEmbedContents|\/api\/(?:chat|generate|embed)(?:[/?]|$)/;
 
 function envHosts(): string[] {
-  return ['GONKA_BASE_URL', 'OPENAI_BASE_URL', 'OLLAMA_BASE_URL', 'ANTHROPIC_BASE_URL', 'AI_COMPLEX_BASE_URL']
+  return ['OPENAI_BASE_URL', 'OLLAMA_BASE_URL', 'ANTHROPIC_BASE_URL', 'AI_COMPLEX_BASE_URL']
     .map((k) => { try { return process.env[k] ? new URL(process.env[k] as string).host : ''; } catch { return ''; } })
     .filter(Boolean);
 }

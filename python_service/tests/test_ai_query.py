@@ -19,7 +19,7 @@ async def test_ai_query_no_files():
                 "stream": False,
             },
         )
-    # Will fail with 500 if GONKA_API_KEY not set, but shape is validated
+    # Will fail with 503 if ANTHROPIC_API_KEY not set, but shape is validated
     assert response.status_code in (200, 500)
 
 

@@ -8,21 +8,21 @@ Scope: backend only. No frontend files are changed. Every API change only adds f
 
 1. **In-stream gateway errors were never retried.** A gateway can answer HTTP 200 and then send `{"error":{"message":"…high demand…"}}` inside the stream with no numeric status. The old `isRetryable` only looked at the HTTP status, so such an error failed immediately. A busy gateway could therefore fail even a one-word prompt on the first try.
 2. **The upstream reason was thrown away.** Non-2xx bodies were never read and `Retry-After` was ignored. Logs could not separate "busy" from "bad request", and retries could not respect the gateway's requested wait.
-3. **Retries were stacked (introduced in commit 7beafae).** `ReliableGonkaAdapter` (3 retries, waits up to 30 s, at least 5 s on 429) sat inside `AgentRuntime` (3 more retries). That allowed up to 16 upstream attempts per message, well past the 60 s window, which overloads a busy gateway further. It also retried after partial output (risking duplicated text) and dropped the timeout details the chat error code depends on.
+3. **Retries were stacked (introduced in commit 7beafae).** `the former provider adapter` (3 retries, waits up to 30 s, at least 5 s on 429) sat inside `AgentRuntime` (3 more retries). That allowed up to 16 upstream attempts per message, well past the 60 s window, which overloads a busy gateway further. It also retried after partial output (risking duplicated text) and dropped the timeout details the chat error code depends on.
 4. **Commit 7beafae left the server unable to start.** `AiService.ts` had a duplicated block and `deterministicTools.ts` contained invalid characters. Both were syntax errors.
 
-**Still hypotheses (need production logs to confirm):** how often Gonka actually returns busy/429, and whether the reverse proxy times out before the app. The new `provider_*` logs and `/api/admin/ai/provider-metrics` exist to answer these questions. Nothing in this change proves the 60-second problem is fixed in production.
+**Still hypotheses (need production logs to confirm):** how often Claude actually returns busy/429, and whether the reverse proxy times out before the app. The new `provider_*` logs and `/api/admin/ai/provider-metrics` exist to answer these questions. Nothing in this change proves the 60-second problem is fixed in production.
 
 ## 2. Request flow
 
 ```
 POST /api/ai/chat ─► request-id middleware (X-Request-Id)
-  └► AiService.streamGonkaChat
+  └► AiService.streamUserChat
        ├► TaskRouter.route(prompt)  → taskClass, reasonCode, model, fallbackModel, maxOutputTokens   [logged: "AI routing"]
        └► bwengeAgent.run(model, fallbackModel, requestId)
             └► AgentRuntime (retries only a stream that broke after partial output; emits turn_reset)
                  └► ReliableProviderAdapter (the single retry policy)
-                      └► OpenAICompatibleAdapter → GonkaRouter
+                      └► AnthropicAdapter → Claude
 ```
 
 `ReliableProviderAdapter` (`server/services/ai/providers/reliableAdapter.ts`):
@@ -33,7 +33,7 @@ POST /api/ai/chat ─► request-id middleware (X-Request-Id)
 - **Total deadline:** no retry starts after `AI_TOTAL_DEADLINE_MS` (default 45 s). It aborts at once when the client disconnects. It does not limit how long an answer may stream.
 - **Long answers:** a streaming answer may run up to `AI_REQUEST_TIMEOUT_MS` (default 15 min). A stream that sends nothing for `AI_IDLE_TIMEOUT_MS` (default 2 min) is treated as dead. Chat streams send a heartbeat every 15 s and `X-Accel-Buffering: no`, so proxies neither cut nor buffer them. Marking in chat waits up to `EXAM_CHAT_WAIT_MS` (default 15 min) while showing each stage.
 - **Per-model circuit breaker:** after `AI_BREAKER_THRESHOLD` consecutive transient failures the model is skipped for `AI_BREAKER_COOLDOWN_MS`, then one trial request is allowed.
-- **Fallback:** only to an explicitly configured `GONKA_FALLBACK_MODEL`, only after transient or model-unavailable failures, and only for SIMPLE/STANDARD/DETERMINISTIC work without images (unless `GONKA_FALLBACK_SUPPORTS_VISION=true`). It is logged as `provider_fallback` and counted in metrics.
+- **Fallback:** only to an explicitly configured `CLAUDE_FALLBACK_MODEL`, only after transient or model-unavailable failures, and only for SIMPLE/STANDARD/DETERMINISTIC work. It is logged as `provider_fallback` and counted in metrics.
 - **Final error** keeps `status`/`timeout`/`timeoutKind` and is marked `exhausted`, so no outer layer retries it again.
 
 ### Error categories
@@ -53,23 +53,23 @@ POST /api/ai/chat ─► request-id middleware (X-Request-Id)
 
 | Class | Chosen when (`reasonCode`) | Model env | Fallback |
 |---|---|---|---|
-| SIMPLE | greetings, short "what is/define/translate" (`GREETING_OR_SHORT_QA`) | `GONKA_ECONOMICAL_MODEL` | `GONKA_FALLBACK_MODEL`, else `GONKA_MODEL` |
-| STANDARD | default, or attached files (`DEFAULT`, `ATTACHED_FILES`) | `GONKA_MODEL` | `GONKA_FALLBACK_MODEL` if set |
-| DETERMINISTIC | calculate/average/median/percent change… (`DETERMINISTIC_CALCULATION`) | `GONKA_MODEL` | `GONKA_FALLBACK_MODEL` if set |
-| COMPLEX | >1500 chars, compare/synthesize/analyze report (`LONG_OR_MULTI_SOURCE`) | `GONKA_PREMIUM_MODEL` | **never** |
-| ARTIFACT_SPEC | chart/graph/diagram/quiz/flashcards (`ARTIFACT_SPECIFICATION`) | `GONKA_PREMIUM_MODEL` | **never** |
+| SIMPLE | greetings, short "what is/define/translate" (`GREETING_OR_SHORT_QA`) | `CLAUDE_ECONOMICAL_MODEL` | `CLAUDE_FALLBACK_MODEL`, else `CLAUDE_AGENT_MODEL` |
+| STANDARD | default, or attached files (`DEFAULT`, `ATTACHED_FILES`) | `CLAUDE_AGENT_MODEL` | `CLAUDE_FALLBACK_MODEL` if set |
+| DETERMINISTIC | calculate/average/median/percent change… (`DETERMINISTIC_CALCULATION`) | `CLAUDE_AGENT_MODEL` | `CLAUDE_FALLBACK_MODEL` if set |
+| COMPLEX | >1500 chars, compare/synthesize/analyze report (`LONG_OR_MULTI_SOURCE`) | `CLAUDE_PREMIUM_MODEL` | **never** |
+| ARTIFACT_SPEC | chart/graph/diagram/quiz/flashcards (`ARTIFACT_SPECIFICATION`) | `CLAUDE_PREMIUM_MODEL` | **never** |
 
 ### Big tasks on a second provider (optional)
 
-Everyday chat always uses Gonka. Set `AI_COMPLEX_PROVIDER=deepseek` (with `DEEPSEEK_API_KEY`) or `openrouter` (with `OPENROUTER_API_KEY` and `OPENROUTER_COMPLEX_MODEL`) to send COMPLEX and ARTIFACT_SPEC requests there instead:
+Everyday chat always uses Claude. Set `AI_COMPLEX_PROVIDER=deepseek` (with `DEEPSEEK_API_KEY`) or `openrouter` (with `OPENROUTER_API_KEY` and `OPENROUTER_COMPLEX_MODEL`) to send COMPLEX and ARTIFACT_SPEC requests there instead:
 
-- **Fallback:** if the big-task provider fails with a transient or model-unavailable error, the same request is answered by Gonka's complex-task model (`GONKA_PREMIUM_MODEL`, else `GONKA_MODEL`). Each request tries Gonka at most once more (bounded, no 3×3 retries). Set `AI_COMPLEX_FALLBACK_TO_GONKA=false` to fail instead. Auth and bad-request errors never fall back.
-- **Images:** requests with images stay on Gonka unless `AI_COMPLEX_SUPPORTS_VISION=true`.
-- **Scope:** routing applies to web chat (`streamGonkaChat`) and the Telegram chat agent loop (`runGonkaAgentLoop`). Grading, forms, analytics and other `sendGonkaChat` callers stay on Gonka, so student submissions are not sent to a second provider unless you extend this.
+- **Fallback:** if the big-task provider fails with a transient or model-unavailable error, the same request is answered by Claude's complex-task model (`CLAUDE_PREMIUM_MODEL`, else `CLAUDE_AGENT_MODEL`). Each request tries Claude at most once more (bounded, no 3×3 retries). Set `AI_COMPLEX_FALLBACK_TO_CLAUDE=false` to fail instead. Auth and bad-request errors never fall back.
+- **Images:** requests with images stay on Claude unless `AI_COMPLEX_SUPPORTS_VISION=true`.
+- **Scope:** web chat and Telegram use Claude. Optional DeepSeek or OpenRouter routing applies to internal tasks that use the legacy agent loop.
 - **Privacy:** the big-task provider receives the full prompt and chat history of those requests. Check its data terms and where it processes data before enabling it.
 - **Model id:** `DEEPSEEK_COMPLEX_MODEL` defaults to `deepseek-chat`. Confirm the current model ids in DeepSeek's docs. Big-task runs appear in metrics and `AiTrace` under that model id; the `[AI routing]` log shows `provider` per request.
 
-Any class model left unset uses `GONKA_MODEL`. With only `GONKA_MODEL` set, behaviour is the same as before routing existed. Invalid model ids in env are ignored. `AI_MODEL_ROUTING=off` disables classification. Per-class output caps (`AI_MAX_OUTPUT_TOKENS_{SIMPLE,STANDARD,COMPLEX}`) apply when the caller does not set its own limit. Routing applies to web chat and the Telegram chat agent loop; other `bwengeAgent.run` callers use `GONKA_MODEL`.
+Any class model left unset uses `CLAUDE_AGENT_MODEL`. With only `CLAUDE_AGENT_MODEL` set, behaviour is the same as before routing existed. Invalid model ids in env are ignored. `AI_MODEL_ROUTING=off` disables classification. Per-class output caps (`AI_MAX_OUTPUT_TOKENS_{SIMPLE,STANDARD,COMPLEX}`) apply when the caller does not set its own limit. Routing applies to web chat and the Telegram assistant; other `bwengeAgent.run` callers use `CLAUDE_AGENT_MODEL`.
 
 `BudgetManager` (concurrency caps, monthly token quota from `AiTrace`, cost estimates from `AI_MODEL_PRICING_JSON`) is implemented and tested but **not enforced on any route yet**.
 
@@ -142,12 +142,12 @@ Rollback options:
 
 | Symptom | Check | Action |
 |---|---|---|
-| Many `PROVIDER_BUSY`/`RATE_LIMITED` | provider-metrics `errorsByCategory`, `breakerOpens` | Configure `GONKA_FALLBACK_MODEL`; reduce traffic; contact the gateway |
-| `MODEL_UNAVAILABLE` | `upstreamMessage` in `provider_attempt_failed` logs | Fix the model id in env (`GONKA_*_MODEL`) |
-| `AUTH_FAILURE` | logs | Rotate `GONKA_API_KEY` |
+| Many `PROVIDER_BUSY`/`RATE_LIMITED` | provider-metrics `errorsByCategory`, `breakerOpens` | Configure `CLAUDE_FALLBACK_MODEL`; reduce traffic; contact the gateway |
+| `MODEL_UNAVAILABLE` | `upstreamMessage` in `provider_attempt_failed` logs | Fix the model id in env (`CLAUDE_*_MODEL`) |
+| `AUTH_FAILURE` | logs | Rotate `ANTHROPIC_API_KEY` |
 | Requests near 60 s | p95/p99 latency, `timeToFirstChunkMs` | Lower `AI_TOTAL_DEADLINE_MS`; check proxy timeout |
 | NISR dataset `failed` | `/api/admin/datasets/nisr/status` | Checksum mismatch → confirm the file, then `--write-checksums` after clearing the old checksum; column errors → fix `table` mapping |
-| Cost spike | `[UsageAccounting]` logs, `AiTrace` | Lower `AI_MAX_OUTPUT_TOKENS_*`; unset `GONKA_PREMIUM_MODEL` |
+| Cost spike | `[UsageAccounting]` logs, `AiTrace` | Lower `AI_MAX_OUTPUT_TOKENS_*`; unset `CLAUDE_PREMIUM_MODEL` |
 
 ## 8. Known limitations
 

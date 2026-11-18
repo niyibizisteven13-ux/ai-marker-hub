@@ -132,7 +132,7 @@ async function cleanupLocalScanFile(localPath: string | null | undefined) {
 
 
 /**
- * Tool executor for conversational bot chat (Gonka path). Deliberately
+ * Tool executor for conversational bot chat. Deliberately
  * covers only the tools that make sense in a text-only Telegram
  * conversation — build_form, generate_visual_annotation,
  * cross_reference_visuals, and generate_browser_extension from
@@ -351,7 +351,7 @@ async function handleNaturalLanguageAction(chatId: string, session: any, message
     return true;
   }
 
-  if (/\b(which|what)\b.*\b(model|provider)\b|\bGonkaRouter\b/i.test(text)) {
+  if (/\b(which|what)\b.*\b(model|provider)\b/i.test(text)) {
     await handleBotCommand(chatId, session, '/model');
     return true;
   }
@@ -369,7 +369,7 @@ const legacyHooks: LegacyHooks = {
     if (!session) {
       const code = String(from?.language_code ?? '').slice(0, 2);
       session = await prisma.telegramSession.create({
-        data: { chatId, provider: process.env.GONKA_API_KEY ? 'gonkarouter' : 'gemini', language: code === 'rw' || code === 'fr' ? code : 'en' },
+        data: { chatId, provider: 'anthropic', language: code === 'rw' || code === 'fr' ? code : 'en' },
       });
     }
     session = await ensureTelegramUser(chatId, session);
@@ -382,8 +382,8 @@ const legacyHooks: LegacyHooks = {
     } catch (e) {
       logger.warn('Failed to initialize Telegram grading quota:', e);
     }
-    if (process.env.GONKA_API_KEY && session.provider !== 'gonkarouter') {
-      session = await prisma.telegramSession.update({ where: { chatId }, data: { provider: 'gonkarouter' } });
+    if (session.provider !== 'anthropic') {
+      session = await prisma.telegramSession.update({ where: { chatId }, data: { provider: 'anthropic' } });
     }
     return session;
   },
@@ -590,7 +590,7 @@ async function handleBotCommand(chatId: string, session: any, text: string) {
         await botService.sendMessage(chatId, `📝 Generating exam paper and marking rubric for: *${arg}*...`);
         try {
           const prompt = `You are a World-Class Assessment Architect. Generate a complete exam paper with matching rubric for: ${arg}. Respond in ${lang === 'rw' ? 'Kinyarwanda' : 'English'}.`;
-          const result = await aiService.sendGonkaChat(prompt, { system: 'Generate complete, accurate assessment materials.' });
+          const result = await aiService.completeText(prompt, { system: 'Generate complete, accurate assessment materials.' });
           await botService.sendMessage(chatId, `✨ **Exam Paper & Rubric Generated**:\n\n${result.slice(0, 3800)}`);
         } catch (err: any) {
           await botService.sendMessage(chatId, `❌ Exam generation failed: ${err.message}`);

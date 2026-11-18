@@ -7,12 +7,12 @@ export type { TaskClass } from './taskClassifier.js';
 export interface RoutingDecision {
   taskClass: TaskClass;
   reasonCode: RoutingReasonCode;
-  /** Provider label for logs: "gonka" or the big-task provider's name. */
+  /** Provider label for logs: "anthropic" or the big-task provider's name. */
   provider: string;
   model: string;
   /**
    * Per-request fallback model. null = no fallback; undefined = use the adapter's own fallback
-   * (the big-task provider falls back to Gonka when AI_COMPLEX_FALLBACK_TO_GONKA is on).
+   * (the big-task provider falls back to Claude when AI_COMPLEX_FALLBACK_TO_CLAUDE is on).
    */
   fallbackModel: string | null | undefined;
   maxOutputTokens: number;
@@ -26,16 +26,16 @@ export interface RouteContext extends ClassificationContext {
 const BIG_TASKS = new Set<TaskClass>(['COMPLEX', 'ARTIFACT_SPEC']);
 
 /**
- * Chooses a model per request from the task class. Everyday chat stays on Gonka; COMPLEX and ARTIFACT_SPEC
+ * Chooses a model per request from the task class. Everyday chat stays on Claude; COMPLEX and ARTIFACT_SPEC
  * go to the big-task provider when one is configured. Disabled with AI_MODEL_ROUTING=off, in which case
- * every request uses the STANDARD Gonka policy (the pre-routing behaviour).
+ * every request uses the STANDARD Claude policy (the pre-routing behaviour).
  */
 export class TaskRouter {
   constructor(
     private policies = new ModelPolicyManager(),
     private classifier = new TaskClassifier(),
     private enabled = (process.env.AI_MODEL_ROUTING ?? 'on').toLowerCase() !== 'off',
-    private fallbackSupportsVision = process.env.GONKA_FALLBACK_SUPPORTS_VISION === 'true',
+    private fallbackSupportsVision = true,
     private complex: ComplexProviderConfig | null = null,
   ) {}
 
@@ -53,7 +53,7 @@ export class TaskRouter {
     return {
       taskClass,
       reasonCode,
-      provider: 'gonka',
+      provider: 'anthropic',
       model: policy.model,
       fallbackModel: fallback && (!ctx.hasImages || this.fallbackSupportsVision) ? fallback : null,
       maxOutputTokens: policy.maxOutputTokens,

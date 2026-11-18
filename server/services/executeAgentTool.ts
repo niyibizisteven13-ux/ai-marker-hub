@@ -273,7 +273,7 @@ export async function executeAgentTool(projectId: string, name: string, input: a
       return JSON.stringify({
         type: 'image',
         title: input.title || 'Generated Visual Asset',
-        model: 'GonkaRouter Visual · Nano Banana Pro',
+        model: 'Bwenge SVG',
         style: input.style || 'Digital Illustration',
         aspectRatio: input.aspect_ratio || '16:9',
         prompt: input.prompt,
@@ -284,7 +284,7 @@ export async function executeAgentTool(projectId: string, name: string, input: a
       return JSON.stringify({
         type: 'video',
         title: input.title || 'Generated Motion Clip',
-        model: 'GonkaRouter Motion · Flow Engine',
+        model: 'Bwenge Motion Preview',
         concept: input.concept,
         motionType: input.motion_type || 'talking_character',
       });

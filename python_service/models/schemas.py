@@ -70,13 +70,20 @@ class AIQueryRequest(BaseModel):
     )
     model: Optional[str] = Field(
         default=None,
-        description="Override the Gonka model. Defaults to GONKA_MODEL env var.",
+        description="Override the Claude model. Defaults to CLAUDE_AGENT_MODEL.",
     )
     max_tokens: int = Field(
         default=4096,
         ge=64,
         le=16384,
     )
+    @field_validator("model")
+    @classmethod
+    def validate_claude_model(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and not value.startswith("claude-"):
+            raise ValueError("Choose a Claude model.")
+        return value
+
     temperature: float = Field(default=0.3, ge=0.0, le=2.0)
 
     @field_validator("file_ids")

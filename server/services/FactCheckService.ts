@@ -1,3 +1,4 @@
+import { AiService } from './AiService.js';
 import crypto from 'crypto';
 import logger from '../utils/logger.js';
 import { parseModelJson } from '../utils/textSanitizers.js';
@@ -25,16 +26,10 @@ export interface FactCheckResult {
 
 export class FactCheckService {
   private static instance: FactCheckService;
-  private gonkaBaseUrl: string;
-  private gonkaApiKey: string;
-  private gonkaModel: string;
   private redis: any = null;
   private readonly CACHE_TTL = 3600; // 1 hour
 
   private constructor() {
-    this.gonkaApiKey = process.env.GONKA_API_KEY || '';
-    this.gonkaBaseUrl = (process.env.GONKA_BASE_URL || 'https://api.gonkarouter.io/v1').replace(/\/$/, '') + '/chat/completions';
-    this.gonkaModel = process.env.GONKA_MODEL || 'zai-org/GLM-5.3-Flash';
     this.initRedis();
   }
 
@@ -87,7 +82,7 @@ export class FactCheckService {
   }
 
   private async synthesizeVerdict(claim: string, sources: Array<{ title: string; url: string; content: string }>): Promise<{ verdict: FactCheckResult['verdict']; confidence: number; explanation: string }> {
-    if (!this.gonkaApiKey) return { verdict: 'UNVERIFIABLE', confidence: 0, explanation: 'Gonka API not configured.' };
+    if (!process.env.ANTHROPIC_API_KEY) return { verdict: 'UNVERIFIABLE', confidence: 0, explanation: 'Claude API not configured.' };
     const sourceText = sources.length
       ? sources.map((s, i) => `[${i + 1}] ${s.title}\n${s.content.slice(0, 300)}`).join('\n\n')
       : 'No web sources found.';
@@ -100,18 +95,7 @@ export class FactCheckService {
 No other text outside the JSON.`;
     const userPrompt = `CLAIM: "${claim}"\n\nWEB EVIDENCE:\n${sourceText}`;
     try {
-      const response = await fetchWithTimeout(this.gonkaBaseUrl, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${this.gonkaApiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: this.gonkaModel,
-          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
-          temperature: 0.0, max_tokens: 256, stream: false,
-        }),
-      }, 20_000);
-      const data: any = await response.json();
-      if (!response.ok) throw new Error(`Gonka error: ${data?.error?.message}`);
-      const raw = (data?.choices?.[0]?.message?.content || '').trim();
+      const raw = await AiService.getInstance().completeText(userPrompt, { system: systemPrompt, maxTokens: 256, timeoutMs: 20_000 });
       const json = parseModelJson(raw);
       return {
         verdict: ['TRUE', 'FALSE', 'PARTIALLY_TRUE', 'UNVERIFIABLE'].includes(json.verdict) ? json.verdict : 'UNVERIFIABLE',
@@ -154,20 +138,10 @@ No other text outside the JSON.`;
    * Returns claims containing statistics, dates, or named entities.
    */
   public async extractCheckableClaims(text: string): Promise<string[]> {
-    if (!this.gonkaApiKey) return [];
+    if (!process.env.ANTHROPIC_API_KEY) return [];
     const systemPrompt = `Extract factual claims from text that could potentially be hallucinations. Look for statistics, dates, named entities, and specific technical facts. Return ONLY a JSON array of strings. Example: ["The Eiffel Tower is 330 meters tall.", "Python was created in 1991."]. Return [] if no checkable claims exist.`;
     try {
-      const response = await fetchWithTimeout(this.gonkaBaseUrl, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${this.gonkaApiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: this.gonkaModel,
-          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: text.slice(0, 1500) }],
-          temperature: 0.0, max_tokens: 512, stream: false,
-        }),
-      }, 20_000);
-      const data: any = await response.json();
-      const raw = (data?.choices?.[0]?.message?.content || '').replace(/```json?/g, '').replace(/```/g, '').trim();
+      const raw = (await AiService.getInstance().completeText(text.slice(0, 1500), { system: systemPrompt, maxTokens: 512, timeoutMs: 20_000 })).replace(/```json?/g, '').replace(/```/g, '').trim();
       return JSON.parse(raw);
     } catch { return []; }
   }

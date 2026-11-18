@@ -25,7 +25,7 @@ export function useToolAgent(o: {
   requestedProvider: string | null;
   hasClaudeKey: boolean;
   aiProvider: string | undefined;
-  /** Some agent model is configured (Claude agent or a Gonka key). */
+  /** Some agent model is configured (Claude). */
   agentAvailable: boolean;
   plan: Pick<OutputPlan, 'artifact' | 'needsComputation'>;
   /** Photos or PDFs attached: only the agent path can look at them. */
@@ -34,11 +34,11 @@ export function useToolAgent(o: {
   asksAboutDatasets?: boolean;
 }): boolean {
   if (o.intent !== 'general_assist' || o.service !== 'general' || o.isSmallTalk) return false;
-  // Original rule: Claude key present and no explicit or Gonka-default provider.
-  if (!o.requestedProvider && o.hasClaudeKey && o.aiProvider !== 'gonkarouter') return true;
+  // Original rule: Claude key present without a configured default provider.
+  if (!o.requestedProvider && o.hasClaudeKey && !o.aiProvider) return true;
   // Files, charts and computed numbers need tools; the legacy text stream has none. Honour an explicit local
   // provider choice (e.g. Ollama), which cannot run the agent tools.
-  const toolProvider = !o.requestedProvider || ['gonkarouter', 'anthropic', 'claude'].includes(o.requestedProvider);
+  const toolProvider = !o.requestedProvider || ['anthropic', 'claude'].includes(o.requestedProvider);
   return toolProvider && o.agentAvailable && (o.plan.artifact || o.plan.needsComputation || Boolean(o.hasVisualFiles) || Boolean(o.asksAboutDatasets));
 }
 

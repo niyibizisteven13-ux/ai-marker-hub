@@ -1,17 +1,6 @@
+import { AiService } from './AiService.js';
 import logger from '../utils/logger.js';
 import { parseModelJson } from '../utils/textSanitizers.js';
-
-const DEFAULT_FETCH_TIMEOUT_MS = 30_000;
-
-async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try { return await fetch(url, { ...init, signal: controller.signal }); }
-  catch (err: any) {
-    if (err?.name === 'AbortError') throw new Error(`Request to ${url} timed out after ${timeoutMs}ms`);
-    throw err;
-  } finally { clearTimeout(timer); }
-}
 
 export type ConfidenceLevel = 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN';
 
@@ -25,40 +14,17 @@ export interface ConfidenceResult {
 
 export class ConfidenceService {
   private static instance: ConfidenceService;
-  private baseUrl: string;
-  private apiKey: string;
-  private model: string;
 
-  private constructor() {
-    this.apiKey = process.env.GONKA_API_KEY || '';
-    this.baseUrl = (process.env.GONKA_BASE_URL || 'https://api.gonkarouter.io/v1').replace(/\/$/, '') + '/chat/completions';
-    this.model = process.env.GONKA_MODEL || 'zai-org/GLM-5.3-Flash';
-  }
+  private constructor() {}
 
   public static getInstance(): ConfidenceService {
     if (!ConfidenceService.instance) ConfidenceService.instance = new ConfidenceService();
     return ConfidenceService.instance;
   }
 
-  private async callGonka(systemPrompt: string, userPrompt: string): Promise<string> {
-    if (!this.apiKey) throw new Error('GONKA_API_KEY is not configured.');
-    const response = await fetchWithTimeout(this.baseUrl, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: this.model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        temperature: 0.1,
-        max_tokens: 1024,
-        stream: false,
-      }),
-    }, 30_000);
-    const data: any = await response.json();
-    if (!response.ok) throw new Error(`Gonka ConfidenceService error (${response.status}): ${data?.error?.message || response.statusText}`);
-    return (data?.choices?.[0]?.message?.content || '').trim();
+  private async callClaude(systemPrompt: string, userPrompt: string): Promise<string> {
+    if (!process.env.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY is not configured.');
+    return (await AiService.getInstance().completeText(userPrompt, { system: systemPrompt, maxTokens: 1024, timeoutMs: 30_000 })).trim();
   }
 
   /**
@@ -66,8 +32,8 @@ export class ConfidenceService {
    * Returns a ConfidenceResult with a score 0-100, level, and list of uncertain claims.
    */
   public async assessConfidence(originalQuery: string, aiResponse: string): Promise<ConfidenceResult> {
-    if (!this.apiKey) {
-      return { score: 50, level: 'UNKNOWN', explanation: 'Gonka API not configured.', uncertainClaims: [] };
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return { score: 50, level: 'UNKNOWN', explanation: 'Claude API not configured.', uncertainClaims: [] };
     }
     const systemPrompt = `You are a rigorous fact-auditor. Your ONLY job is to analyze an AI response and assess its confidence/accuracy.
 Return ONLY valid JSON with this exact shape:
@@ -80,7 +46,7 @@ Return ONLY valid JSON with this exact shape:
 Do NOT include any other text outside the JSON.`;
     const userPrompt = `ORIGINAL QUERY: ${originalQuery}\n\nAI RESPONSE TO AUDIT:\n${aiResponse}`;
     try {
-      const raw = await this.callGonka(systemPrompt, userPrompt);
+      const raw = await this.callClaude(systemPrompt, userPrompt);
       const json = parseModelJson(raw);
       return {
         score: Math.min(100, Math.max(0, Number(json.score) || 50)),
@@ -95,11 +61,11 @@ Do NOT include any other text outside the JSON.`;
   }
 
   /**
-   * Self-correction pass: ask Gonka to review and fix its own output.
+   * Self-correction pass: ask Claude to review and fix its own output.
    * Adds [UNCERTAIN] markers to dubious claims and returns a corrected version.
    */
   public async selfCorrect(originalQuery: string, aiResponse: string): Promise<string> {
-    if (!this.apiKey) return aiResponse;
+    if (!process.env.ANTHROPIC_API_KEY) return aiResponse;
     const systemPrompt = `You are a self-correction engine for an AI assistant named Bwenge.
 Your task: Review the AI response below and:
 1. Add [UNCERTAIN] inline tag immediately before any claim you cannot verify with high confidence.
@@ -110,7 +76,7 @@ Your task: Review the AI response below and:
 Return ONLY the corrected response text. No preamble, no explanation.`;
     const userPrompt = `ORIGINAL QUERY: ${originalQuery}\n\nAI RESPONSE TO SELF-CORRECT:\n${aiResponse}`;
     try {
-      return await this.callGonka(systemPrompt, userPrompt);
+      return await this.callClaude(systemPrompt, userPrompt);
     } catch (e) {
       logger.warn('ConfidenceService.selfCorrect error, returning original', e);
       return aiResponse;

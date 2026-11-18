@@ -1,6 +1,6 @@
 # Bwenge AI capabilities
 
-A tested capability layer for the Bwenge AI service. It gives your model (GonkaRouter / GLM, or any OpenAI-compatible model) the same kinds of abilities that make assistants like Claude useful in practice: it can **create downloadable files, draw, chart, diagram, read uploads, search your knowledge base with citations, run calculations, and work in multi-step tool loops**.
+A tested capability layer for the Bwenge AI service. It gives your model (an OpenAI-compatible endpoint) the same kinds of abilities that make assistants like Claude useful in practice: it can **create downloadable files, draw, chart, diagram, read uploads, search your knowledge base with citations, run calculations, and work in multi-step tool loops**.
 
 > Honest scope: this does not copy any model's intelligence. It is the **tool layer around the model**: files, drawing, reading, sources, retries, security. How well the AI writes, reasons, and draws still depends on the model you connect. The layer is what turns "text in, text out" into "text in, finished files out".
 
@@ -36,7 +36,7 @@ createAiAgent()  --> ingestUploads (extract PDF/DOCX/XLSX text, images as vision
         |           --> capabilities prompt (teaches WHEN/HOW to use tools)
 AgentRuntime  (one loop for every provider: stream, tool calls, parallel tools, retries, idle timeout, turn limits)
         |
-OpenAICompatibleAdapter  (GonkaRouter / NVIDIA NIM / OpenRouter / OpenAI; SSE + JSON fallback)
+OpenAICompatibleAdapter  (NVIDIA NIM / OpenRouter / OpenAI; SSE + JSON fallback)
         |
 ToolRegistry + tools   (JSON-schema validated; errors go back to the model so it can fix and retry)
         |
@@ -52,8 +52,8 @@ import { createAiAgent, FileStore, createFileRouter } from './ai';
 
 const files = new FileStore({ dir: './data/generated', secret: process.env.FILE_URL_SECRET! });
 const agent = createAiAgent({
-  provider: { name: 'GonkaRouter', baseUrl: process.env.GONKA_BASE_URL!, apiKey: process.env.GONKA_API_KEY },
-  model: 'zai-org/GLM-5.3-Flash',
+  provider: { name: 'OpenAI-compatible provider', baseUrl: process.env.OPENAI_BASE_URL!, apiKey: process.env.OPENAI_API_KEY },
+  model: 'gpt-4.1-mini',
   files,
   services: { knowledge, python, webSearch },   // all optional
 });
@@ -72,7 +72,7 @@ See `INTEGRATION.md` for the exact changes to your `AiService.ts`.
 - **Security tests**: 10 hostile SVG samples (scripts, event handlers, foreignObject, external images and URLs, entity bombs, animation) are neutralised; path traversal in ZIP names, forged or expired signed links, other users' files, CSV formula injection, and XSS in HTML output are blocked.
 - **Agent loop tests against a mock streaming server**: split `<think>` tags, fragmented tool-call JSON, parallel tools, bad JSON and invalid arguments recovered by the model, 429/5xx retries, no retry on 401, stalled-stream timeout with reset, plain-JSON gateways, turn limit with a final answer, and an end-to-end run that reads an uploaded PDF and returns a downloadable workbook.
 
-Not verified here: the real GonkaRouter API (your code comments say its request and response shapes are an assumption), Microsoft Office rendering (LibreOffice only), and any real model's output quality.
+Not verified here: Microsoft Office rendering (LibreOffice only), and any real model's output quality.
 
 ## Limits you should know
 

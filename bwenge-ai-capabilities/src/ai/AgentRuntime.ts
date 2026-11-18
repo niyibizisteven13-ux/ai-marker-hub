@@ -24,13 +24,13 @@ export interface RuntimeConfig {
   toolTimeoutMs?: number;
   maxToolResultChars?: number;
   maxParallelTools?: number;
-  /** Label for UI events, e.g. "GonkaRouter". Never shown to normal users by default. */
+  /** Label for UI events, e.g. "Claude". Never shown to normal users by default. */
   providerLabel?: string;
 }
 
 /**
  * One provider-agnostic agent loop: stream -> collect tool calls -> run tools -> repeat.
- * Replaces the separate Gonka / NVIDIA / Anthropic loops with a single tested implementation.
+ * Replaces the separate provider-specific loops with a single tested implementation.
  */
 export class AgentRuntime {
   private cfg: Required<RuntimeConfig>;

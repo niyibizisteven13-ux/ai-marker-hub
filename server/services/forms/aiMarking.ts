@@ -14,7 +14,7 @@ export interface WrittenAi { json(system: string, user: string): Promise<any> }
 export const defaultWrittenAi: WrittenAi = {
   async json(system, user) {
     const ai = AiService.getInstance();
-    return ai.parseModelJson(await ai.sendGonkaChat(user, { system, signal: AbortSignal.timeout(30_000) }));
+    return ai.parseModelJson(await ai.completeText(user, { system, signal: AbortSignal.timeout(30_000) }));
   },
 };
 

@@ -1,3 +1,4 @@
+import { DEFAULT_CLAUDE_MODEL } from './agentProvider.js';
 import { TASK_CLASSES, type TaskClass } from './taskClassifier.js';
 
 export interface ModelPolicyConfig {
@@ -23,20 +24,20 @@ function intEnv(value: string | undefined, fallback: number): number {
 
 /**
  * Builds routing policies from environment variables.
- * Every class uses GONKA_MODEL unless a class-specific model is explicitly configured, so routing
+ * Every class uses CLAUDE_AGENT_MODEL unless a class-specific model is explicitly configured, so routing
  * never sends traffic to a model nobody has verified exists on the gateway.
  *
- *   GONKA_MODEL                default/standard model (required for Gonka)
- *   GONKA_ECONOMICAL_MODEL     optional: simple chat (greetings, short Q&A)
- *   GONKA_PREMIUM_MODEL        optional: complex reasoning and artifact specifications
- *   GONKA_FALLBACK_MODEL       optional: fallback for SIMPLE/STANDARD/DETERMINISTIC on transient failures
+ *   CLAUDE_AGENT_MODEL                default/standard model (Anthropic Messages API)
+ *   CLAUDE_ECONOMICAL_MODEL     optional: simple chat (greetings, short Q&A)
+ *   CLAUDE_PREMIUM_MODEL        optional: complex reasoning and artifact specifications
+ *   CLAUDE_FALLBACK_MODEL       optional: fallback for SIMPLE/STANDARD/DETERMINISTIC on transient failures
  *   AI_MAX_OUTPUT_TOKENS_{SIMPLE,STANDARD,COMPLEX}   optional output caps
  */
-export function loadModelPolicies(env: Env = process.env, defaultModel = 'zai-org/GLM-5.3-Flash'): Record<TaskClass, ModelPolicyConfig> {
-  const standard = cleanModel(env.GONKA_MODEL) ?? defaultModel;
-  const economical = cleanModel(env.GONKA_ECONOMICAL_MODEL) ?? standard;
-  const premium = cleanModel(env.GONKA_PREMIUM_MODEL) ?? standard;
-  const fallback = cleanModel(env.GONKA_FALLBACK_MODEL);
+export function loadModelPolicies(env: Env = process.env, defaultModel = DEFAULT_CLAUDE_MODEL): Record<TaskClass, ModelPolicyConfig> {
+  const standard = cleanModel(env.CLAUDE_AGENT_MODEL) ?? defaultModel;
+  const economical = cleanModel(env.CLAUDE_ECONOMICAL_MODEL) ?? standard;
+  const premium = cleanModel(env.CLAUDE_PREMIUM_MODEL) ?? standard;
+  const fallback = cleanModel(env.CLAUDE_FALLBACK_MODEL);
   const simpleTokens = intEnv(env.AI_MAX_OUTPUT_TOKENS_SIMPLE, 1024);
   const standardTokens = intEnv(env.AI_MAX_OUTPUT_TOKENS_STANDARD, 4096);
   const complexTokens = intEnv(env.AI_MAX_OUTPUT_TOKENS_COMPLEX, 8192);

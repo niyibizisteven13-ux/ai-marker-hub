@@ -53,7 +53,7 @@ test('message conversion: system extracted, tool results merged into one user tu
     { role: 'assistant', content: null, tool_calls: [{ id: 'tu_1', type: 'function', function: { name: 'search_knowledge', arguments: '{"query":"x"}' } }], providerState: { provider: 'anthropic', content: [thinking, toolUse] } },
     { role: 'tool', tool_call_id: 'tu_1', name: 'search_knowledge', content: 'result A' },
     { role: 'tool', tool_call_id: 'tu_2', name: 'other', content: 'result B' },
-    { role: 'assistant', content: 'Gonka answer', tool_calls: [{ id: 'c9', type: 'function', function: { name: 'calc', arguments: 'not json' } }] },
+    { role: 'assistant', content: 'Backup answer', tool_calls: [{ id: 'c9', type: 'function', function: { name: 'calc', arguments: 'not json' } }] },
   ]);
   assert.equal(system, 'You are Bwenge.');
   assert.equal((messages[0].content as any[])[0].type, 'image');
@@ -99,9 +99,9 @@ test('a tool call cut off by max_tokens is never emitted', async () => {
 
 test('a refusal is final: not retried, no fallback, clear category', async () => {
   const { client, calls } = fakeClient([{ final: { content: [], stop_reason: 'refusal', stop_details: { type: 'refusal', category: 'cyber', explanation: null } as any } }]);
-  const gonkaCalls: string[] = [];
-  const gonka: ProviderAdapter = { name: 'gonka', async *stream(req) { gonkaCalls.push(req.model); yield { type: 'text', text: 'x' }; } };
-  const reliable = new ReliableProviderAdapter({ primary: new AnthropicAdapter({ client }), fallbackAdapter: gonka, fallbackModel: 'gonka/std', metrics: new ProviderMetrics(), sleep: async () => {} });
+  const backupCalls: string[] = [];
+  const backup: ProviderAdapter = { name: 'backup', async *stream(req) { backupCalls.push(req.model); yield { type: 'text', text: 'x' }; } };
+  const reliable = new ReliableProviderAdapter({ primary: new AnthropicAdapter({ client }), fallbackAdapter: backup, fallbackModel: 'backup/std', metrics: new ProviderMetrics(), sleep: async () => {} });
   await assert.rejects(collect(reliable.stream({ model: 'claude-haiku-5-5', messages: [{ role: 'user', content: 'x' }] })), (e: any) => {
     assert.equal(e.category, 'CONTENT_REFUSED');
     assert.equal(isRetryable(e), false);
@@ -109,7 +109,7 @@ test('a refusal is final: not retried, no fallback, clear category', async () =>
     return true;
   });
   assert.equal(calls.length, 1);
-  assert.deepEqual(gonkaCalls, []);
+  assert.deepEqual(backupCalls, []);
 });
 
 test('API errors map to provider errors: 429 honours retry-after, 401 is auth, timeouts keep their kind', async () => {
@@ -126,13 +126,13 @@ test('API errors map to provider errors: 429 honours retry-after, 401 is auth, t
   await assert.rejects(collect(new AnthropicAdapter({ client: timeout.client }).stream({ model: 'm', messages: [{ role: 'user', content: 'x' }] })), (e: any) => e.timeout === true && e.timeoutKind === 'request');
 });
 
-test('transient Claude failure falls back to Gonka when configured', async () => {
+test('transient Claude failure falls back to Backup when configured', async () => {
   const overloaded = new Anthropic.InternalServerError(529, { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } } as any, 'overloaded', new Headers());
   const { client } = fakeClient([{ error: overloaded }, { error: overloaded }]);
-  const gonka: ProviderAdapter = { name: 'gonka', async *stream(req) { yield { type: 'text', text: `gonka:${req.model}` }; } };
-  const reliable = new ReliableProviderAdapter({ primary: new AnthropicAdapter({ client }), maxAttempts: 2, fallbackAdapter: gonka, fallbackModel: 'gonka/std', metrics: new ProviderMetrics(), sleep: async () => {} });
+  const backup: ProviderAdapter = { name: 'backup', async *stream(req) { yield { type: 'text', text: `backup:${req.model}` }; } };
+  const reliable = new ReliableProviderAdapter({ primary: new AnthropicAdapter({ client }), maxAttempts: 2, fallbackAdapter: backup, fallbackModel: 'backup/std', metrics: new ProviderMetrics(), sleep: async () => {} });
   const out = await collect(reliable.stream({ model: 'claude-haiku-5-5', messages: [{ role: 'user', content: 'x' }] }));
-  assert.deepEqual(out, [{ type: 'text', text: 'gonka:gonka/std' }]);
+  assert.deepEqual(out, [{ type: 'text', text: 'backup:backup/std' }]);
 });
 
 test('agent loop on Claude: thinking/tool blocks from turn 1 are replayed on turn 2', async () => {
@@ -149,15 +149,14 @@ test('agent loop on Claude: thinking/tool blocks from turn 1 are replayed on tur
   assert.deepEqual(calls[1].messages[2].content[0], { type: 'tool_result', tool_use_id: 'tu_1', content: 'echo hi' });
 });
 
-test('Claude agent config is opt-in and validated', () => {
+test('Claude agent config requires a key and validates model settings', () => {
   assert.equal(loadClaudeAgentConfig({}).config, null);
   assert.match(loadClaudeAgentConfig({ AI_AGENT_PROVIDER: 'anthropic' }).reason, /ANTHROPIC_API_KEY is not set/);
   const c = loadClaudeAgentConfig({ AI_AGENT_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'k' }).config!;
-  assert.deepEqual([c.model, c.effort, c.fallbackToGonka], ['claude-haiku-5-5', 'medium', true]);
-  const d = loadClaudeAgentConfig({ AI_AGENT_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'k', CLAUDE_EFFORT: 'turbo', CLAUDE_FALLBACK_TO_GONKA: 'false' });
+  assert.deepEqual([c.model, c.effort], ['claude-haiku-5-5', 'medium']);
+  const d = loadClaudeAgentConfig({ AI_AGENT_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'k', CLAUDE_EFFORT: 'turbo', });
   assert.equal(d.config!.effort, 'medium');
   assert.match(d.reason, /invalid/);
-  assert.equal(d.config!.fallbackToGonka, false);
   assert.equal(loadClaudeAgentConfig({ AI_AGENT_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'k', CLAUDE_AGENT_MODEL: 'bad model!' }).config, null);
 });
 

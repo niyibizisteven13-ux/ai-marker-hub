@@ -329,7 +329,7 @@ export default function App() {
   const [adminOpen, setAdminOpen] = useState<boolean>(() => window.location.pathname === '/admin');
   // /admin/datasets: Datasets & Curations. Administrators get the full section; everyone else a view-only page.
   const [curationOpen, setCurationOpen] = useState<boolean>(() => /^\/(admin\/)?datasets\/?$/.test(window.location.pathname));
-  const [selectedProvider, setSelectedProvider] = useState<string>('gonkarouter');
+  const [selectedProvider, setSelectedProvider] = useState<string>('anthropic');
   const retryPromptRef = React.useRef<{
     text: string;
     attachment?: File | ChatAttachment | Array<File | ChatAttachment>;
