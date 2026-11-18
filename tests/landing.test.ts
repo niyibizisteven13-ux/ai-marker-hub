@@ -30,3 +30,13 @@ test('i18n dictionary key parity between EN, RW, and FR', () => {
   assert.deepStrictEqual(rwKeys, enKeys, 'RW keys must match EN keys');
   assert.deepStrictEqual(frKeys, enKeys, 'FR keys must match EN keys');
 });
+
+test('Ventures introduction has complete multilingual copy', () => {
+  for (const language of ['en', 'rw', 'fr'] as const) {
+    const d = dictionaries[language];
+    assert.strictEqual(d.venturesName, 'Ventures');
+    for (const key of ['venturesTitle', 'venturesDescription', 'venturesFeaturePage', 'venturesFeatureBooks', 'venturesFeatureAI', 'venturesCta', 'venturesSignInNote'] as const) {
+      assert.ok(d[key].trim().length > 0, `${language} is missing ${key}`);
+    }
+  }
+});
