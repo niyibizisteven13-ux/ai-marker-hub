@@ -172,6 +172,28 @@ export function createPrograms(h: Helpers) {
         await kv.put(k.programs(b.id), { items: (await programsOf(b.id)).filter((p) => p.id !== programId) });
       });
     },
+    /**
+     * Ends the whole program today. Sign-ups close, nobody can be ticked any more, unpaid cards are cancelled and paid cards end as of yesterday (so they show as ended,
+     * with their history kept). Returns who paid and still had days or uses left, so the owner can refund or tell them: Bwenge never holds the money, so refunds are the owner's.
+     */
+    async endProgram(ownerId: string, id: string, programId: string) {
+      const b = await h.mine(ownerId, id);
+      return withLock(`mem|${b.id}`, async () => {
+        const progs = await programsOf(b.id); const p = progs.find((x) => x.id === programId); if (!p) throw new ProgramError('That program was not found.', 404, 'NOT_FOUND');
+        const today = kigaliDate(h.now()); const members = await membersOf(b.id); let cancelledUnpaid = 0; const refund: Array<{ memberId: string; name: string; phone: string; paidRwf: number; daysLeft: number; usesLeft: number }> = [];
+        for (const m of members.filter((x) => x.programId === p.id && x.status !== 'cancelled')) {
+          const st = planState(m, today);
+          if (!m.paid) { m.status = 'cancelled'; m.note = [m.note, 'Program ended'].filter(Boolean).join(' · '); cancelledUnpaid++; continue; }
+          if (st === 'expired') continue;
+          const r = remaining(m, p, today); const left = { memberId: m.id, name: m.name, phone: m.phone, paidRwf: m.paidRwf, daysLeft: r.calendarDays, usesLeft: usesLeft(m, p, r.uses, 0) };
+          m.endDate = addDays(today, -1); if (m.startDate > m.endDate) m.startDate = m.endDate; m.note = [m.note, 'Program ended'].filter(Boolean).join(' · ');
+          if (left.daysLeft > 0 || left.usesLeft > 0) refund.push(left);
+        }
+        p.endedAt = h.iso(); p.active = false;
+        await putMembers(b.id, members); await kv.put(k.programs(b.id), { items: progs });
+        return { ended: p.title, endedAt: p.endedAt, cancelledUnpaid, paidMembersEnded: members.filter((x) => x.programId === p.id && x.paid && x.note?.includes('Program ended')).length, withUnusedDays: refund };
+      });
+    },
     async members(ownerId: string, id: string, o: { programId?: string; state?: string; q?: string } = {}): Promise<MemberView[]> {
       const b = await h.mine(ownerId, id); const today = kigaliDate(h.now()); const progs = await programsOf(b.id); const served = await servedOn(b.id, today);
       const q = String(o.q ?? '').trim().toLowerCase();

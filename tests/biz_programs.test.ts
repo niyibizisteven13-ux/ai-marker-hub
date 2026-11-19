@@ -153,7 +153,7 @@ test('privacy: a pass belongs to its holder, another business cannot read it, st
   await assert.rejects(passView(svc, other.slug, j.token), (e: any) => e.status === 401, 'a sign-in only works on its own business page');
   await assert.rejects(passView(svc, biz.slug, 'x'.repeat(30)), (e: any) => e.status === 401); await assert.rejects(passView(svc, biz.slug, 'short'), (e: any) => e.status === 401);
   for (const call of [() => svc.programs('intruder', biz.id), () => svc.members('intruder', biz.id), () => svc.redeem('intruder', biz.id, { code: j.code }), () => svc.today('intruder', biz.id), () => svc.saveProgram('intruder', biz.id, LUNCH)]) await assert.rejects(call(), (e: any) => e.status === 404);
-  const stored = JSON.stringify([...kv.data.entries()]); assert.ok(!stored.includes(j.token), 'only the hash of the session is stored'); assert.ok(!stored.includes('4821'), 'the passcode is stored only as a salted hash');
+  const stored = JSON.stringify([...kv.data.entries()]); assert.ok(!stored.includes(j.token), 'only the hash of the session is stored'); assert.ok(!stored.includes('"4821"') && !/passcode|"pin"/i.test(stored), 'the passcode is stored only as a salted hash');
   await svc.setPublished('o', biz.id, false); await assert.rejects(passView(svc, biz.slug, j.token), (e: any) => e.status === 404); assert.equal(await svc.publicBySlug(biz.slug), null);
 });
 
@@ -444,4 +444,23 @@ test('customer scan: a wrong tick can be taken back for one minute, only by the 
   await assert.rejects(svc.selfUndo(biz.slug, a.session, aId, t2.useId), (e: any) => e.code === 'TOO_LATE');
   const staff: any = await svc.redeem('o', biz.id, { memberId: (await svc.members('o', biz.id)).find((x) => x.name === 'Bob')!.id }); assert.equal(staff.ok, true);
   await assert.rejects(svc.selfUndo(biz.slug, b.session, await cardIdOf(svc, biz.slug, b.session), staff.useId), (e: any) => e.status === 404, 'a staff tick is not the customer\'s to take back');
+});
+
+test('ending a program: sign-ups close, nobody can be ticked, unpaid cards are cancelled, paid cards end today with history kept, the owner gets the refund list; it stays ended through edits; the assistant needs a confirmation', async () => {
+  const { svc, biz, prog } = await setup({ title: 'Meal card', totalUses: 30 }); const other = await svc.saveProgram('o', biz.id, { ...LUNCH, title: 'Weekend pass' });
+  const a = await joinP(svc, biz.slug, prog.id, { name: 'Aline', phone: '0788500001', remember: true }, 'a'); await joinP(svc, biz.slug, prog.id, { name: 'Eric', phone: '0788500002', remember: true }, 'e'); const c = await joinP(svc, biz.slug, other.id, { name: 'Cleo', phone: '0788500003', remember: true }, 'c');
+  const ms = await svc.members('o', biz.id); const aline = ms.find((x) => x.name === 'Aline')!; const cleo = ms.find((x) => x.name === 'Cleo')!; await svc.confirmPayment('o', biz.id, aline.id, { method: 'cash' }); await svc.confirmPayment('o', biz.id, cleo.id, { method: 'cash' });
+  await svc.redeem('o', biz.id, { memberId: aline.id }); const code = ((await passView(svc, biz.slug, a.session)) as any).qr;
+  await assert.rejects(svc.endProgram('intruder', biz.id, prog.id), (e: any) => e.status === 404); await assert.rejects(svc.endProgram('o', biz.id, 'nope'), (e: any) => e.status === 404);
+  const r = await svc.endProgram('o', biz.id, prog.id); assert.equal(r.ended, 'Meal card'); assert.equal(r.paidMembersEnded, 1); assert.equal(r.cancelledUnpaid, 1);
+  assert.deepEqual(r.withUnusedDays.map((x) => [x.name, x.paidRwf, x.phone]), [['Aline', 40_000, '250788500001']], 'only paid members with days left are listed for refund'); assert.ok(r.withUnusedDays[0].daysLeft > 0);
+  const after = await svc.members('o', biz.id); assert.equal(after.find((x) => x.name === 'Aline')!.state, 'expired'); assert.equal(after.find((x) => x.name === 'Eric')!.state, 'cancelled'); assert.equal(after.find((x) => x.name === 'Cleo')!.state, 'active', 'another program is untouched');
+  assert.equal(((await svc.redeem('o', biz.id, { token: code })) as any).ok, false, 'an ended program serves nobody'); assert.match(String(((await svc.redeem('o', biz.id, { memberId: aline.id })) as any).message), /ended/);
+  const prog2 = (await svc.programs('o', biz.id)).find((p) => p.id === prog.id)!; assert.equal(prog2.active, false); assert.ok(prog2.endedAt); assert.equal((await svc.publicBySlug(biz.slug))!.programs!.some((p) => p.id === prog.id), false, 'no longer on the public page');
+  await assert.rejects(joinP(svc, biz.slug, prog.id, { name: 'Late', phone: '0788500004' }, 'l'), (e: any) => e.status === 404, 'nobody can join an ended program');
+  assert.equal((await svc.saveProgram('o', biz.id, { id: prog.id, title: 'Meal card (old)' })).endedAt, prog2.endedAt, 'editing does not undo it'); assert.equal((await svc.programs('o', biz.id)).find((p) => p.id === prog.id)!.active, false);
+  assert.equal((await svc.saveProgram('o', biz.id, { id: prog.id, active: true })).endedAt, undefined, 'opening sign-ups again starts it afresh');
+  const tools = Object.fromEntries(bizTools(() => svc).map((t) => [t.definition.name, t])) as any; const ctx: any = { userId: 'o', files: {}, services: {} };
+  const ask = await tools.biz_program.execute({ business: biz.id, id: other.id, end: true }, ctx); assert.match(ask.text, /final.*confirm/i); assert.equal((await svc.programs('o', biz.id)).find((p) => p.id === other.id)!.endedAt, undefined, 'asking is not ending');
+  const done = await tools.biz_program.execute({ business: biz.id, id: other.id, end: true, confirm: true }, ctx); assert.match(done.text, /Ended "Weekend pass"/); assert.match(done.text, /Cleo/); assert.ok((await svc.programs('o', biz.id)).find((p) => p.id === other.id)!.endedAt);
 });

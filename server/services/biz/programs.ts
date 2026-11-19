@@ -71,6 +71,8 @@ export interface Program {
   joinCode?: string;
   /** Who ticks the card: the business (scan or code, the default) or the customer themself by tapping today's item on their own card. */
   checkIn?: 'staff' | 'self';
+  /** Set when the owner ended the whole program: nobody can use it any more and it takes no new members (opening sign-ups again starts it afresh). */
+  endedAt?: string;
   active: boolean;
   createdAt: string;
 }
@@ -141,6 +143,7 @@ export function cleanProgram(input: any, id: string, now: string, prev?: Program
   const code = input?.joinCode === undefined ? prev?.joinCode : String(input.joinCode ?? '').replace(/\D/g, '');
   if (input?.joinCode !== undefined && String(input.joinCode ?? '').trim() !== '' && !/^\d{4}$/.test(code ?? '')) return { error: 'The join code must be 4 digits.' };
   if (code && /^\d{4}$/.test(code)) p.joinCode = code;
+  if (prev?.endedAt && input?.active !== true) { p.endedAt = prev.endedAt; p.active = false; }   // an ended program stays ended until the owner opens sign-ups again
   const ci = input?.checkIn === undefined ? prev?.checkIn : input.checkIn; if (ci === 'self') p.checkIn = 'self';
   return p;
 }
@@ -201,7 +204,7 @@ export function remaining(m: Pick<Member, 'startDate' | 'endDate'>, p: Pick<Prog
   return { servingDays, uses: servingDays * p.items.length, calendarDays: today > m.endDate ? 0 : Math.max(0, Math.round((Date.parse(`${m.endDate}T12:00:00Z`) - Date.parse(`${from}T12:00:00Z`)) / 86_400_000) + 1) };
 }
 
-export type DenyCode = 'pending' | 'not_started' | 'expired' | 'paused' | 'cancelled' | 'closed_day' | 'already' | 'outside_window' | 'no_item' | 'no_uses_left';
+export type DenyCode = 'pending' | 'not_started' | 'expired' | 'paused' | 'cancelled' | 'closed_day' | 'already' | 'outside_window' | 'no_item' | 'no_uses_left' | 'program_ended';
 export type ServeResult = { ok: true; item: string } | { ok: false; code: DenyCode; message: string; item?: string; at?: string };
 const DENY_TEXT: Record<'pending' | 'expired' | 'paused' | 'cancelled', string> = {
   pending: 'Not paid yet.', expired: 'This plan has ended.', paused: 'This plan is paused.', cancelled: 'This plan was cancelled.',
@@ -214,6 +217,7 @@ const DENY_TEXT: Record<'pending' | 'expired' | 'paused' | 'cancelled', string> 
  */
 export function canServe(o: { member: Member; program: Program; used: Array<{ item: string; at: string }>; now: number; item?: string; force?: boolean }): ServeResult {
   const { member, program, now } = o; const today = kigaliDate(now); const st = planState(member, today);
+  if (program.endedAt) return { ok: false, code: 'program_ended', message: 'This program has ended.' };
   if (st === 'pending' || st === 'expired' || st === 'paused' || st === 'cancelled') return { ok: false, code: st, message: DENY_TEXT[st] };
   if (st === 'not_started') return { ok: false, code: 'not_started', message: `This plan starts on ${member.startDate}.` };
   if (program.totalUses && (member.used ?? 0) >= program.totalUses) return { ok: false, code: 'no_uses_left', message: `All ${program.totalUses} uses of this program are already taken.` };

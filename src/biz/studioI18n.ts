@@ -218,3 +218,19 @@ Object.assign(SRW, {
   'Get the verified badge': 'Fata ikimenyetso cyo kwemezwa',
   'A check mark next to your name so customers trust your page. One payment, never expires.': 'Ikimenyetso iruhande y’izina ryawe kugira ngo abakiriya bizere urupapuro rwawe. Wishyura rimwe, ntirurangira.',
 });
+Object.assign(SRW, {
+  'End {program}': 'Rangiza {program}',
+  'Sign-ups close, nobody can be ticked any more, unpaid cards are cancelled and paid cards end today.': 'Kwiyandikisha birafunga, nta wuzongera gushyirwaho ikimenyetso, amakarita atishyuwe arahagarikwa naho ayishyuwe arangira uyu munsi.',
+  'You keep the money and the history: refunds are yours to give. This cannot be undone.': 'Ugumana amafaranga n’amateka: gusubiza amafaranga ni wowe ubikora. Ibi ntibisubizwa inyuma.',
+  'Ended': 'Byarangiye',
+  'has ended': 'byarangiye',
+  'paid cards ended today': 'amakarita yishyuwe yarangiye uyu munsi',
+  'unpaid cards cancelled': 'amakarita atishyuwe yahagaritswe',
+  'Sign-ups are closed.': 'Kwiyandikisha byarafunzwe.',
+  'Paid, with days left. You may refund them or tell them:': 'Bishyuye, bafite iminsi isigaye. Ushobora kubasubiza amafaranga cyangwa kubabwira:',
+  'days left': 'iminsi isigaye',
+  'the {program}': '{program}',
+  'at': 'kuri',
+  'We will contact you about the days that were left.': 'Tuzabavugisha ku minsi yari isigaye.',
+  'Nobody had days left to refund.': 'Nta n’umwe wari ufite iminsi isigaye yo gusubizwa.',
+});

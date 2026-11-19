@@ -3,7 +3,7 @@ import { RW_WORDS, fill, wordsOf } from '../../../server/services/biz/programWor
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Camera, KeyRound, Check, CheckCircle2, Copy, Loader2, MessageCircle, Pause, Pencil, Play, Plus, ScanLine, Share2, Trash2, Undo2, Users, UtensilsCrossed, X, XCircle } from 'lucide-react';
 import { ownerApi } from '../../biz/api';
-import type { DayId, MemberInfo, ProgramInfo, ProgramSummary, RedeemResult, TodayInfo } from '../../biz/types';
+import type { DayId, EndProgramResult, MemberInfo, ProgramInfo, ProgramSummary, RedeemResult, TodayInfo } from '../../biz/types';
 import { rwf, type Business } from '../../biz/types';
 import { btn, btnGhost, btnPrimary, card, input, msg, Title } from './ui';
 
@@ -237,11 +237,27 @@ function MembersTab({ b, programs, summary, onChange }: { b: Business; programs:
 const blank = (): Partial<ProgramInfo> => ({ title: '', priceRwf: 30000, days: 30, items: ['Visit'], openDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], active: true });
 function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInfo[]; onChange: () => void }) {
   const { w, t } = useWords(b);
-  const [edit, setEdit] = useState<Partial<ProgramInfo> | null>(programs.length ? null : blank()); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false); const [copied, setCopied] = useState('');
+  const [edit, setEdit] = useState<Partial<ProgramInfo> | null>(programs.length ? null : blank()); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false); const [copied, setCopied] = useState(''); const [ended, setEnded] = useState<EndProgramResult | null>(null);
+  const endIt = async (p: ProgramInfo) => {
+    const n = (p.counts?.active ?? 0) + (p.counts?.pending ?? 0);
+    if (!confirm(`${t("End {program}")} "${p.title}"?\n\n${t("Sign-ups close, nobody can be ticked any more, unpaid cards are cancelled and paid cards end today.")} ${n ? `(${n})` : ''}\n${tx("You keep the money and the history: refunds are yours to give. This cannot be undone.")}`)) return;
+    setBusy(true); setErr(''); try { setEnded(await ownerApi.endProgram(b.id, p.id)); onChange(); } catch (e) { setErr(msg(e)); } finally { setBusy(false); }
+  };
   const save = async () => { if (!edit) return; setBusy(true); setErr(''); try { await ownerApi.saveProgram(b.id, edit as any); setEdit(null); onChange(); } catch (e) { setErr(msg(e)); } finally { setBusy(false); } };
   const copy = async (text: string, id: string) => { try { await navigator.clipboard.writeText(text); setCopied(id); setTimeout(() => setCopied(''), 1600); } catch { /* the link is shown anyway */ } };
   const set = (patch: Partial<ProgramInfo>) => setEdit((e) => ({ ...(e ?? {}), ...patch }));
   return (
+    <>
+    {ended && (
+      <section role="status" className={`${card} mb-4 space-y-3 border-rose-500/30`}>
+        <div className="flex items-start justify-between gap-3"><div><p className="font-display text-lg font-semibold">"{ended.ended}" {tx("has ended")}</p>
+          <p className="text-sm text-[var(--app-muted)]">{ended.paidMembersEnded} {tx("paid cards ended today")} · {ended.cancelledUnpaid} {tx("unpaid cards cancelled")}. {tx("Sign-ups are closed.")}</p></div>
+          <button type="button" aria-label={tx("Close")} className="rounded-full p-1.5 hover:bg-[var(--app-bg)]" onClick={() => setEnded(null)}><X size={16} /></button></div>
+        {ended.withUnusedDays.length > 0 ? <><p className="text-sm font-medium">{tx("Paid, with days left. You may refund them or tell them:")}</p>
+          <ul className="divide-y divide-[var(--app-line)]">{ended.withUnusedDays.map((m) => <li key={m.memberId} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm"><span className="min-w-0"><b>{m.name}</b> <span className="text-[var(--app-muted)]">· {rwf(m.paidRwf)} · {m.daysLeft} {tx("days left")}</span></span>
+            <a className={`${btnGhost} !min-h-9 !px-3 text-xs`} target="_blank" rel="noopener noreferrer" href={waLink(m.phone, `${tx('Hello')} ${m.name}, ${t("the {program}")} "${ended.ended}" ${tx('at')} ${b.name} ${tx('has ended')}. ${tx('We will contact you about the days that were left.')}`)}><MessageCircle size={13} />{tx("WhatsApp")}</a></li>)}</ul></> : <p className="text-sm text-[var(--app-muted)]">{tx("Nobody had days left to refund.")}</p>}
+      </section>)}
+    
     <div className="space-y-4">
       {!b.published && <p className="rounded-xl bg-amber-500/15 px-3 py-2.5 text-sm text-amber-900">{tx("Publish your page first (Public page → Publish), so customers can open the link.")}</p>}
       {programs.map((p) => {
@@ -249,12 +265,13 @@ function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInf
         return (
           <div key={p.id} className={`${card} space-y-3`}>
             <div className="flex flex-wrap items-start justify-between gap-2">
-              <div><p className="font-display text-lg font-semibold">{p.title} {!p.active && <span className="ml-1 rounded-full bg-[var(--app-panel-hover)] px-2 py-0.5 align-middle text-[11px] font-medium text-[var(--app-muted)]">{t("Closed to new {members}")}</span>}</p>
+              <div><p className="font-display text-lg font-semibold">{p.title} {p.endedAt ? <span className="ml-1 rounded-full bg-rose-500/15 px-2 py-0.5 align-middle text-[11px] font-medium text-rose-700">{tx("Ended")} {shortDate(p.endedAt.slice(0, 10))}</span> : !p.active && <span className="ml-1 rounded-full bg-[var(--app-panel-hover)] px-2 py-0.5 align-middle text-[11px] font-medium text-[var(--app-muted)]">{t("Closed to new {members}")}</span>}</p>
                 <p className="text-sm text-[var(--app-muted)]">{rwf(p.priceRwf)} · {p.days} {tx('days')}{p.totalUses ? ` · ${p.totalUses} ${w.uses}` : ''} · {p.items.join(', ')} · {p.openDays.map((d) => tx(DAY_LABEL[d])).join(' ')}</p>
                 <p className="mt-1 text-xs text-[var(--app-muted)]">{p.counts?.active ?? 0} {tx('active')} · {p.counts?.pending ?? 0} {tx('waiting for payment')}</p>
                 {p.joinCode ? <p className="mt-1 text-sm">{tx('Join code')}: <b className="font-mono tracking-[0.3em]">{p.joinCode}</b> <span className="text-xs text-[var(--app-muted)]">{t('Give this code to the {members} you accept. It is not on the public page.')}</span></p> : <p className="mt-1 text-xs text-[var(--app-muted)]">{tx('Anyone with the link can join. Set a join code to accept only the people you choose.')}</p>}</div>
               <div className="flex gap-1.5"><button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => setEdit(p)}><Pencil size={13} />{tx("Edit")}</button>
                 <button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={async () => { try { await ownerApi.saveProgram(b.id, { ...p, active: !p.active }); onChange(); } catch (e) { setErr(msg(e)); } }}>{p.active ? tx('Close signups') : tx('Open signups')}</button>
+                {!p.endedAt && <button type="button" disabled={busy} className={`${btnGhost} !min-h-9 !px-3 text-xs text-rose-700`} onClick={() => void endIt(p)}>{t("End {program}")}</button>}
                 <button type="button" className="px-2 text-rose-600" aria-label={t("Delete {program}")} onClick={async () => { if (!confirm(`${tx('Delete')} "${p.title}"?`)) return; try { await ownerApi.deleteProgram(b.id, p.id); onChange(); } catch (e) { setErr(msg(e)); } }}><Trash2 size={15} /></button></div>
             </div>
             <div className="flex flex-wrap items-center gap-4 rounded-2xl bg-[var(--app-bg)] p-3">
@@ -300,6 +317,7 @@ function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInf
         </form>
       )}
     </div>
+    </>
   );
 }
 

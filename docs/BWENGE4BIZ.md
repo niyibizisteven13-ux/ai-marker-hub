@@ -90,6 +90,16 @@ Each costs credits like any assistant action. Nothing is published without the o
 * Staff accounts, orders and payment tracking, video conversion, page search on Google (pages are public, but not yet submitted to search engines), custom templates.
 * Free storage is a promise of this server's disk: back it up like the rest of the data.
 
+## The 4biz venture page (a worked example)
+
+A **venture page** is an ordinary Bwenge4biz page that presents several products under one aim. The example is **4biz**, the venture behind MySEB, Bwenge AI and Bwenge4biz, with the aim
+**"AI in our context"** (Kinyarwanda: *AI mu byacu*): a name, the one-line aim, a description, the three products, **Our products** (links), **What we help with** (business growth, business records,
+reaching new markets), **Good to know** (who it is for, how to start, what the blue check means), a WhatsApp contact and the blue verified badge. The words are in `server/services/biz/venture.ts`.
+- **Make it**: Admin → Platform controls → Business pages → **Create the 4biz page** (`POST /api/admin/platform/biz/venture`). It asks for the email of the account that should own the page (empty means the signed-in admin), builds the page at `/b/4biz`, publishes it, and gives
+  that admin the blue badge. It is safe to press again: it refreshes the words and never duplicates products or sections. The page name `4biz` belongs to the first account that takes it.
+- **Change it**: edit the page in the studio like any other, or ask the assistant; pressing the admin button again restores the example words.
+- Tests: `tests/biz_venture.test.ts`.
+
 ## Verified badge
 
 A one-time payment of **1,000 RWF** puts a blue check mark next to the owner's name: on every public business page they own (`/b/<page>`), in the studio and on their profile button in the app. It belongs to the
@@ -141,6 +151,11 @@ bus pass, a month of tutoring sessions, a car-wash subscription.
    passcode (or straight away if they are signed in) their card is ticked with the right item, chosen by the serving times (Lunch at noon, Dinner in the evening). A
    customer without a camera types the six digits on their card. Same rules as a staff scan (paid, open day, serving times, one of each item a day, total cap; no override).
    A wrong tick can be taken back for one minute; staff can undo longer from *Today*, where the customer's own ticks are marked.
+5b. **Closing a program**: *Close signups* only stops new members (existing cards keep working until they end). **End program** ends the whole program for everyone today, after a confirmation:
+   sign-ups close, nobody can be ticked any more (scan, code or customer scan are all refused with "This program has ended"), unpaid cards are cancelled, and paid cards end as of yesterday so they show
+   as ended with their history kept. The screen then lists the paid members who still had days or uses left, with a WhatsApp message each, so the owner can refund or tell them: Bwenge never holds the money,
+   so refunds are the owner's to give. It cannot be undone, but opening sign-ups again on that program starts it afresh for new members. The assistant ends a program only with `end` and `confirm` after the
+   owner said yes in plain words (asking first returns the consequences).
 5. **Running it**: *Today* shows who has checked in and who has a program today but has not come yet. *Members* shows payments waiting for
    confirmation, pause / resume, add days (for example after a closure), cancel, search, and a WhatsApp reminder link for programs that are ending.
 
