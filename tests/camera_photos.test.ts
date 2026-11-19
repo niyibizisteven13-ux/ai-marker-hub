@@ -120,3 +120,39 @@ test('chat: a shadowed photo with no desk is still recognised as a page and even
   assert.ok(e.jpeg, 'cleaned');
   assert.ok(e.notes.some((n) => /uneven lighting/.test(n)));
 });
+
+// ---- zoom_image and the handwriting instructions
+import { zoomImage } from '../server/services/ai/tools/documentTools.js';
+
+test('zoom_image: a photo comes back as overlapping close-ups, or one enlarged region; PDFs and strangers are refused', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'zoom-'));
+  try {
+    const files = new FileStore({ dir: root, secret: 'test-secret-1234567890' });
+    const jpeg = await sharp(await onDesk(await withShadow(sheet()))).jpeg({ quality: 90 }).toBuffer();
+    const meta = await files.put({ userId: 'u1', name: 'page.jpg', mime: 'image/jpeg', kind: 'image', data: jpeg });
+    const ctx = { userId: 'u1', files, services: {} } as any;
+    const all = await zoomImage.execute({ fileId: meta.id }, ctx);
+    assert.ok(!all.isError, all.text);
+    assert.equal(all.images?.length, 3);
+    assert.match(all.text, /3 overlapping close-ups/); assert.match(all.text, /cleaned for reading/);
+    for (const im of all.images!) { assert.equal(im.mime, 'image/jpeg'); assert.ok((await sharp(Buffer.from(im.base64, 'base64')).metadata()).width! <= 1800); }
+    const two = await zoomImage.execute({ fileId: meta.id, bands: 2 }, ctx);
+    assert.equal(two.images?.length, 2);
+    const one = await zoomImage.execute({ fileId: meta.id, region: { x0: 100, y0: 200, x1: 600, y1: 400 } }, ctx);
+    assert.equal(one.images?.length, 1); assert.match(one.text, /Close-up/);
+    assert.match((await zoomImage.execute({ fileId: meta.id, region: { x0: 100, y0: 200, x1: 105, y1: 205 } }, ctx)).text, /too small/);
+    assert.match((await zoomImage.execute({ fileId: meta.id }, { ...ctx, userId: 'someone-else' })).text, /not found/);
+    const pdf = await files.put({ userId: 'u1', name: 'a.pdf', mime: 'application/pdf', kind: 'pdf', data: Buffer.from('%PDF-1.4') });
+    assert.match((await zoomImage.execute({ fileId: pdf.id }, ctx)).text, /not an image/);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+import { buildCapabilitiesPrompt } from '../server/services/ai/capabilitiesPrompt.js';
+test('the chat is told how to read handwriting, and to zoom first when it has the tool', () => {
+  const withZoom = buildCapabilitiesPrompt({ tools: ['read_attachment', 'zoom_image'] as any, locale: 'en' } as any);
+  assert.match(withZoom, /Reading handwriting and photos of paper/);
+  assert.match(withZoom, /unclear: best guess\?/);
+  assert.match(withZoom, /call zoom_image/);
+  const without = buildCapabilitiesPrompt({ tools: ['read_attachment'] as any, locale: 'en' } as any);
+  assert.match(without, /Reading handwriting/); assert.doesNotMatch(without, /call zoom_image/);
+});

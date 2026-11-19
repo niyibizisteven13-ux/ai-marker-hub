@@ -134,5 +134,14 @@ ${has('analyze_data') ? '- Numbers from data: call analyze_data (describe, missi
     out.push(`## Reading uploads
 Uploaded file text may already be included in the message; if it is cut off or you need another file, call read_attachment with its fileId (page, find or offset for a later part). For images, look at them directly and describe concrete details (text, numbers, layout) instead of generic summaries.${has('analyze_document') ? '\n- Long documents (books, long reports): when the answer depends on the whole document (summarise the book, every example of X, compare chapters), call analyze_document once with the full task; it reads every page and returns page-cited notes. Never answer about a whole document from its first pages only.' : ''}${has('view_pages') ? '\n- Scanned or handwritten PDFs, diagrams and tables: call view_pages for the pages you need (up to 20 per call); never say a page is unavailable before looking at it.' : ''}`);
   }
+  if (has('zoom_image') || has('read_attachment')) {
+    out.push(`## Reading handwriting and photos of paper
+Read handwriting the way a careful teacher does, in any language the writer uses (English, French, Kinyarwanda, Swahili and others):
+- Transcribe what is written, in order, keeping the writer's own spelling, numbering, layout, tables and working. Do not tidy, correct or complete it. Crossed-out text is shown as ~~struck~~ or left out and said so. Write maths as plain text or LaTeX exactly as written.
+- Use the whole page for context (the subject, the question, the line above and below) to decide between similar letters and digits (a 1 and a 7, an e and a c, 0 and 6), but never invent a word you cannot see.
+- When a word or number is unclear, mark it like [unclear: best guess?] and say what you could not read. Say how sure you are of each answer a mark depends on. One honest "I cannot read this" beats a confident wrong word.
+${has('zoom_image') ? '- If writing is small, dense, faint, cut off or you are unsure, call zoom_image on the file (bands for the whole page, or a region for one spot) BEFORE you answer, and read the close-ups in order. Do not guess from a blurry overview.\n' : ''}- If the photo itself is the problem (blurred, dark, a shadow, cut off, on its side), say so in one sentence and what would fix it (more light, hold the phone parallel to the page, take the photo again), then read what you can.
+- When asked to mark or grade, first show the transcription, then mark against it, so the teacher can see if a misreading caused a mark.`);
+  }
   return out.join('\n\n');
 }

@@ -173,3 +173,14 @@ unchanged; if the cleanup fails the original is sent.
 
 Limits: no perspective correction of a strongly slanted camera angle (only an axis-aligned crop plus deskew), no 90/180° auto-rotation
 (the page is flagged instead), and the output of the cleanup is grayscale, so coloured ink is read from shape, not colour.
+
+### Reading handwriting in chat
+
+The model cannot be fine-tuned from here; reliability comes from what it is given and told:
+
+- **Better pictures**: chat photos are cleaned first (above), and the new `zoom_image` tool returns the cleaned page as 2–4 overlapping
+  close-ups (or one enlarged region) at up to 1800 px, so small or dense writing is read at full detail instead of from a downscaled overview.
+- **A reading protocol** in the chat prompt (`capabilitiesPrompt.ts`, "Reading handwriting and photos of paper"): transcribe faithfully
+  and in order in any language, use context but never invent, mark unclear words `[unclear: best guess?]`, zoom before answering when
+  unsure, name photo problems and how to fix them, and show the transcription before marking.
+- Examination marking keeps its own pipeline (tiles, a second reading, verification, teacher corrections).

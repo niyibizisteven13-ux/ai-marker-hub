@@ -14,7 +14,7 @@ import { agendaTools } from './agendaTools.js';
 import { adminTools } from './adminTools.js';
 import { workTools } from './workTools.js';
 import { bizTools } from './bizTools.js';
-import { analyzeDocument, viewPages } from './documentTools.js';
+import { analyzeDocument, viewPages, zoomImage } from './documentTools.js';
 
 /** Builds the full toolkit. Tools that need an optional service are only included when it is provided. */
 export function buildToolkit(services: ToolServices = {}): ToolRegistry {
@@ -28,6 +28,7 @@ export function buildToolkit(services: ToolServices = {}): ToolRegistry {
     readAttachment,
     services.llm ? analyzeDocument : null,
     viewPages,
+    zoomImage,
     searchKnowledgeTool(services),
     ...datasetTools(services),
     ...(process.env.ENABLE_ASSIGNMENT_TOOLS === 'false' ? [] : assignmentTools(services)),
