@@ -44,3 +44,42 @@ export interface FieldInfo { key: string; label: string; type: 'text' | 'number'
 export interface TrackerInfo { id: string; name: string; description: string; fields: FieldInfo[]; statuses: string[]; records?: number; open?: number }
 export interface TrackerRecordInfo { id: string; at: string; values: Record<string, string | number>; status: string; src: 'studio' | 'chat' | 'page' }
 export interface SectionInfo { id: string; type: 'text' | 'faq' | 'list' | 'links' | 'form'; title: string; body?: string; items?: Array<{ title: string; text?: string; price?: string; url?: string }>; trackerId?: string; button?: string; hidden?: boolean }
+
+/* ---- Programs (a plan sold once and used with a pass): see server/services/biz/programs.ts */
+export type DayId = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+export interface ItemWindow { item: string; from: string; to: string }
+export interface ProgramInfo {
+  id: string; title: string; description?: string; priceRwf: number; days: number; items: string[]; openDays: DayId[]; windows?: ItemWindow[]; terms?: string; maxMembers?: number; totalUses?: number; joinCode?: string; checkIn?: 'staff' | 'self'; active: boolean;
+  counts?: { active: number; pending: number; total: number };
+}
+export type PlanState = 'pending' | 'not_started' | 'active' | 'expired' | 'paused' | 'cancelled';
+export interface MemberInfo {
+  id: string; programId: string; programTitle: string; name: string; phone: string; idNumber?: string; code: string; state: PlanState; startDate: string; endDate: string;
+  paid: boolean; paidRwf: number; payMethod?: 'momo_prompt' | 'momo_manual' | 'cash'; claimed?: { at: string; ref?: string }; note?: string;
+  servingDaysLeft: number; usesLeft: number; totalUses?: number; usedTotal?: number; usedToday: string[]; createdAt: string;
+}
+export interface ProgramSummary {
+  plans: number; members: number; active: number; pending: number; expired: number; soldThisMonth: number; waitingConfirmation: number;
+  expiring: Array<{ memberId: string; name: string; phone: string; endDate: string; program: string }>;
+}
+export interface RedeemResult { ok: boolean; code?: string; message?: string; item?: string; useId?: string; member?: MemberInfo }
+export interface TodayInfo {
+  date: string; open: boolean; servedCount: number; expected: number;
+  served: Array<{ useId: string; memberId: string; name: string; code: string; item: string; at: string; by?: 'scan' | 'code' | 'self'; canUndo: boolean }>;
+  notYet: Array<{ memberId: string; name: string; phone: string; code: string }>;
+}
+export interface CardDay { date: string; dow: DayId; open: boolean; used: string[] }
+/** One card, as the signed-in customer sees it: who it is for, the dates and what was used each day (the grid), and the QR code once it is paid. */
+export interface CardInfo {
+  cardId: string;
+  business: { name: string; slug: string; theme: string };
+  program: { title: string; checkIn?: 'staff' | 'self'; totalUses?: number; items: string[]; openDays: DayId[]; windows?: ItemWindow[]; terms?: string; priceRwf: number; days: number };
+  member: { name: string; phone: string; idNumber?: string; code: string; state: PlanState; startDate: string; endDate: string; daysLeft: number; servingDaysLeft: number; usesLeft: number; usedTotal: number; paid: boolean; paidAt: string | null };
+  qr: string | null;
+  /** Only when the owner set self check-in: what the customer can tap now, and the tick they can still take back. */
+  tick: null | { items: Array<{ item: string; allowed: boolean; reason?: string; message?: string }>; undo: { useId: string; item: string } | null };
+  today: { date: string; openToday: boolean; used: Array<{ item: string; at: string }> };
+  calendar: CardDay[];
+  payment: null | { amount: number; momoCode: string | null; momoName: string | null; online: boolean; promptSent: boolean; claimed: { at: string; ref?: string } | null; whatsapp: string | null };
+}
+export interface MeInfo { name: string; phone: string; username?: string; cards: Array<{ id: string; programTitle: string; state: PlanState; startDate: string; endDate: string; usesLeft: number; paid: boolean }> }

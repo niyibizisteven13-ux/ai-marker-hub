@@ -89,3 +89,65 @@ Each costs credits like any assistant action. Nothing is published without the o
 * **A separate domain** such as `bwenge4biz.com`: today the link is `bwenge.space/b/<name>`. A business sub-domain (`<name>.bwenge.space`) needs a wildcard DNS record.
 * Staff accounts, orders and payment tracking, video conversion, page search on Google (pages are public, but not yet submitted to search engines), custom templates.
 * Free storage is a promise of this server's disk: back it up like the rest of the data.
+
+## Programs (plans customers pay for once and use with a pass)
+
+A business sells a plan once and customers use it again and again with a pass on their phone. It works for any business that sells repeat
+use: a month of lunches at a restaurant near a university (40,000 RWF), a monthly gym pass, four haircuts at a salon, a laundry card, a weekly
+bus pass, a month of tutoring sessions, a car-wash subscription.
+
+**How it works**
+1. **Owner** (Dashboard → *Programs* → *Plans*): makes a plan: a name, the price, how many days it lasts, **what a member gets each day**
+   (an item such as "Lunch", "Entry" or "Haircut"; up to four, one of each per person per day), the days of the week it is available, and
+   optionally the times of day, a **total number of uses** (10 visits, 4 haircuts) and a maximum number of members. Each plan gets a share
+   link (`/b/<page>?plan=<id>`) with a QR code and a WhatsApp share button. The page must be published.
+2. **Customer, first time**: scans the QR code or opens the link. Step 1: name, phone number, the owner's **4-digit join code** (when the owner set
+   one; nobody can join without it) and, if the owner asks for it, an ID. Step 2: the customer **creates a passcode** (4 to 6 digits) and is signed in.
+   From then on they open their card by signing in with **phone number and passcode** (optionally "keep me signed in on this phone for 30 days"). There is
+   no secret link to guard or share. The customer is **proposed a short user name** (3 to 12 letters or numbers, made from their name, for example `aline`; they can change it, and no two are the same at one business). This phone remembers it, so coming back they type **only the passcode** ("Signing in as aline · Not you?"). User name or phone number plus passcode both work. A phone number is one account at that business: a second program on the same number uses the same passcode.
+   A forgotten passcode is reset by the owner (Members → *Reset passcode* gives a temporary one to pass on). Five wrong passcodes lock that phone
+   number for ten minutes.
+3. **Paying**: if the owner has MTN/Airtel keys saved (Secrets and payments) the customer can approve a prompt on their phone and the plan
+   starts by itself; otherwise the pass shows the MoMo code, the customer pays and taps **I have paid** (optionally with the MoMo reference), the
+   owner is told, checks their phone and taps **Confirm payment** (MoMo or cash). Either way the sale appears once in the notebook. Bwenge never
+   holds the money.
+4. **Each time they come** (Programs → *Today*): the owner taps *Scan a pass* (camera) or types the code. The screen says **Allowed: Lunch** in green,
+   or why not in red: not paid, not started, ended, paused, not available today, already used today at 12:41, all uses taken, or outside the
+   times it is available (the owner may *Allow anyway*; nothing else can be overridden). A mistaken scan can be undone for 20 minutes.
+4b. **Who ticks the card is the owner's choice** (per program, set in the plan form or by the assistant with `check_in`). **The business** (default): scan or type the code
+   as above. **The customer**: after signing in they open their card, and today's items (for example *Lunch* and *Dinner*) are big buttons, and also tappable
+   boxes in today's row of the card. One tap ticks it at once, under exactly the same rules as a scan (paid, open day, serving times, one of each item a day, total cap; no
+   override). A wrong tap can be taken back for one minute; staff can undo longer from *Today*, where self ticks are marked. Choose self check-in only where a
+   wrong tick costs little; a customer can tick an item while not on the premises, so for meals or visits that cost you money prefer staff scanning.
+5. **Running it**: *Today* shows who has checked in and who has a program today but has not come yet. *Members* shows payments waiting for
+   confirmation, pause / resume, add days (for example after a closure), cancel, search, and a WhatsApp reminder link for programs that are ending.
+
+**Rules** (`server/services/biz/programs.ts`, tested in `tests/biz_programs.test.ts`): a plan lasts *days* calendar days from its start day (30 days
+starting on the 1st ends on the 30th); days it is not available neither allow a use nor count as missed; one of each item per person per day; with a
+*total uses* cap, no more than that many uses overall; dates are Kigali dates. Unused days are not carried over (add days by hand if you want to).
+
+**The card** looks like the paper one a restaurant hands out: the business name and phone numbers, the person's name and period, a stamp (PAID or NOT PAID),
+then a grid with the dates down the side (15 days to a block, a switch between blocks) and **one column per item** (Morning, Midday, Evening; or just
+Lunch and Supper; up to four), a cross in every box that was used, closed days hatched, today highlighted. Under it: uses left, valid until, the QR code
+(only once paid; tap to enlarge) and the short code.
+
+**Privacy and safety**: the public page shows only the plans (name, price, days, items), never members and never the join code. Passcodes are stored only
+as salted hashes, a session is a long random token kept as a hash and sent in a header (never in an address), the QR secret is stored encrypted, and the
+card pages are marked noindex; the owner side is scoped to the owner like the rest of
+Bwenge4biz. Joining is rate limited, has a hidden spam field, allows one live plan per phone number per plan, and respects the maximum members.
+Joining is also slowed for anyone guessing join codes. Joining and checking in run under a per-business lock, so two scans at the same moment cannot use the same item twice.
+
+**Honest limits**
+- A card can still be screenshotted or a phone handed to a friend, and the passcode can be told to someone. The system allows one use of each item per day, so a shared pass only uses that customer's
+  own allowance, but the owner should still glance at the name on the screen. The pass shows a ticking clock so a still picture is easy to spot.
+- Self check-in trusts the customer: a signed-in customer can tick today's item from anywhere (the rules still stop a second one, an unpaid card, a closed day or the wrong time, so set serving times when you use it). A user name is not secret; the passcode (with its lockout) protects the card.
+- The lock that prevents double use lives in one server process. With several server instances behind a balancer, two scans in the same instant
+  on different instances could both pass; use one instance for the API or move the lock to the database before relying on it at scale.
+- The camera needs HTTPS and a browser that allows it; browsers without a built-in QR reader use the small `jsqr` library, and the code can always
+  be typed.
+- Not included: refunds, carrying unused days over, automatic reminders by SMS or WhatsApp (a ready WhatsApp message link is offered), several
+  businesses honouring one card, and checking a customer against a list.
+- The online MTN/Airtel payment adapters have not yet been run against a live account (see above); manual MoMo and cash work without them.
+- The Kinyarwanda text should be read by a native speaker.
+
+**Assistant**: the chat can list and create programs (`biz_program`) and report how they are doing (`biz_plan_status`).

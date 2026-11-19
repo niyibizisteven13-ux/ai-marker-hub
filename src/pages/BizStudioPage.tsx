@@ -1,6 +1,8 @@
 import { initialStudioLang, saveStudioLang, setStudioLang, tx, type StudioLang } from '../biz/studioI18n';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Table2, Megaphone, MapPin, Sparkles, Bot, ArrowLeft, BarChart3, Check, ExternalLink, Eye, EyeOff, Film, Globe, ImagePlus, Inbox, KeyRound, LayoutDashboard, Loader2, MessageCircle, MoreHorizontal, Package, Palette, Plus, Receipt, Settings, ShoppingBag, Store, Trash2, Upload, Users } from 'lucide-react';
+import { Table2, Megaphone, MapPin, Sparkles, Bot, ArrowLeft, BarChart3, Check, ExternalLink, Eye, EyeOff, Film, Globe, ImagePlus, Inbox, KeyRound, LayoutDashboard, Loader2, MessageCircle, MoreHorizontal, Package, Palette, Plus, Receipt, Settings, ShoppingBag, Store, Trash2, Upload, Users, UtensilsCrossed } from 'lucide-react';
+import { ProgramsView } from '../components/biz/Programs';
+import { plural } from '../../server/services/biz/programWords';
 import BizPage from '../components/biz/BizPage';
 import MapTile, { parseCoords } from '../components/biz/MapTile';
 import { SectionsEditor, TrackersView, CostsView, FeedView, LockedGate, AgentChatView, AgentView, DashboardView, NotebookView, CustomersView, ReportsView, SecretsView, EntrySheet, type EntryKind } from '../components/biz/Workspace';
@@ -223,10 +225,10 @@ function SettingsTab({ b, onChange, onDeleted }: { b: Business; onChange: () => 
 }
 
 /* ------------------------------------------------------------------ the workspace */
-type View = 'trackers' | 'feed' | 'chat' | 'agent' | 'dashboard' | 'sales' | 'expenses' | 'products' | 'customers' | 'reports' | 'messages' | 'public' | 'secrets' | 'settings';
+type View = 'programs' | 'trackers' | 'feed' | 'chat' | 'agent' | 'dashboard' | 'sales' | 'expenses' | 'products' | 'customers' | 'reports' | 'messages' | 'public' | 'secrets' | 'settings';
 const NAV: Array<{ id: View; label: string; icon: typeof Globe; group?: string }> = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard }, { id: 'chat', label: 'Ask the agent', icon: Sparkles }, { id: 'sales', label: 'Sales and orders', icon: ShoppingBag }, { id: 'expenses', label: 'Costs and spending', icon: Receipt },
-  { id: 'products', label: 'Products and stock', icon: Package }, { id: 'customers', label: 'Customers', icon: Users }, { id: 'reports', label: 'Reports', icon: BarChart3 },
+  { id: 'programs', label: 'Programs', icon: UtensilsCrossed }, { id: 'products', label: 'Products and stock', icon: Package }, { id: 'customers', label: 'Customers', icon: Users }, { id: 'reports', label: 'Reports', icon: BarChart3 },
   { id: 'messages', label: 'Messages', icon: Inbox }, { id: 'public', label: 'Public page', icon: Globe }, { id: 'feed', label: 'Feed', icon: Megaphone }, { id: 'trackers', label: 'Trackers', icon: Table2 }, { id: 'agent', label: 'Business agent', icon: Bot }, { id: 'secrets', label: 'Secrets and payments', icon: KeyRound }, { id: 'settings', label: 'Settings', icon: Settings },
 ];
 /** The studio opens in a light surface whatever the app theme is: the same tokens the screens use, redefined here. */
@@ -249,6 +251,8 @@ export default function BizStudioPage({ onBack }: { onBack: () => void }) {
   const create = async (e: React.FormEvent) => { e.preventDefault(); setBusy(true); setError(''); try { const r = await ownerApi.create({ name: creating.name, category: creating.category }); const extra: Record<string, unknown> = {}; if (creating.whatsapp.trim()) extra.whatsapp = creating.whatsapp; if (creating.lat && creating.lng) { extra.lat = creating.lat; extra.lng = creating.lng; } if (Object.keys(extra).length) await ownerApi.update(r.business.id, extra).catch(() => undefined); await load(); setSel(r.business.id); setView('dashboard'); } catch (x) { setError(msg(x)); } finally { setBusy(false); } };
 
   if (!mine && !error) return <div className="flex min-h-[100dvh] items-center justify-center bg-[#F2F5FA]"><Loader2 className="animate-spin text-[var(--brand)]" /></div>;
+  /** The owner's own name for the programs section, when they have chosen one. */
+  const navLabel = (n: { id: View; label: string }) => (n.id === 'programs' && b?.programText?.programs ? b.programText.programs : n.id === 'programs' && b?.programText?.program ? plural(b.programText.program) : tx(n.label));
   const phoneNav: View[] = ['dashboard', 'chat', 'sales', 'products']; const item = (n: (typeof NAV)[number]) => NAV.find((x) => x.id === n.id)!;
   void item;
   return (
@@ -258,7 +262,7 @@ export default function BizStudioPage({ onBack }: { onBack: () => void }) {
         <button type="button" onClick={onBack} className="mb-5 flex items-center gap-2.5 rounded-xl px-2 py-1.5 text-left hover:bg-white/5"><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--brand)] text-[var(--brand-on)]"><Store size={18} /></span><span><span className="block font-display text-[15px] font-semibold leading-tight">Bwenge4biz</span><span className="block text-[11px] text-white/55">{tx("Small business hub")}</span></span></button>
         {mine && mine.businesses.length > 1 && <select aria-label={tx("Choose business")} className="mb-3 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white" value={sel} onChange={(e) => { setSel(e.target.value); setView('dashboard'); }}>{mine.businesses.map((x) => <option key={x.id} value={x.id} className="text-black">{x.name}</option>)}</select>}
         <nav aria-label="Business" className="flex-1 space-y-0.5 overflow-y-auto">{b && NAV.map((n) => { const Icon = n.icon; const on = view === n.id; return (
-          <button key={n.id} type="button" aria-current={on ? 'page' : undefined} onClick={() => go(n.id)} className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[14px] font-medium transition-colors ${on ? 'bg-[var(--brand)] text-[var(--brand-on)] shadow-sm' : 'text-white/70 hover:bg-white/8 hover:text-white'}`}><Icon size={17} aria-hidden="true" />{tx(n.label)}</button>); })}</nav>
+          <button key={n.id} type="button" aria-current={on ? 'page' : undefined} onClick={() => go(n.id)} className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[14px] font-medium transition-colors ${on ? 'bg-[var(--brand)] text-[var(--brand-on)] shadow-sm' : 'text-white/70 hover:bg-white/8 hover:text-white'}`}><Icon size={17} aria-hidden="true" />{navLabel(n)}</button>); })}</nav>
         {mine && <div className="mt-3 rounded-2xl bg-white/5 p-3.5 text-xs"><p className="font-semibold text-white">{mine.plan} plan</p><p className="mt-0.5 text-white/55">{mine.limits.products} products · {mine.limits.images} photos · {mine.limits.videos} videos</p>{mine.plan === 'Free' && <a href="/upgrade" className="mt-2.5 block rounded-lg bg-[var(--brand)] px-3 py-2 text-center text-xs font-semibold text-[var(--brand-on)]">{tx("Upgrade")}</a>}</div>}
         <button type="button" onClick={onBack} className="mt-3 flex items-center gap-2 px-2 py-1 text-xs text-white/55 hover:text-white"><ArrowLeft size={13} />{tx("Back to Bwenge")}</button>
       </aside>
@@ -295,6 +299,7 @@ export default function BizStudioPage({ onBack }: { onBack: () => void }) {
               {view === 'reports' && <ReportsView b={b} />}
               {view === 'products' && <><h1 className="mb-4 font-display text-2xl font-semibold tracking-tight">{tx("Products and stock")}</h1><ProductsTab b={b} urls={urls} onChange={reload} /></>}
               {view === 'messages' && <><h1 className="mb-4 font-display text-2xl font-semibold tracking-tight">{tx("Messages")}</h1><MessagesTab b={b} onChange={reload} /></>}
+              {view === 'programs' && <ProgramsView b={b} onChange={reload} />}
               {view === 'trackers' && <TrackersView b={b} onChange={reload} />}
               {view === 'feed' && <FeedView b={b} onChange={reload} canVideo={mine.limits.videos > 0} />}
               {view === 'chat' && <AgentChatView b={b} onChange={reload} />}
@@ -317,7 +322,7 @@ export default function BizStudioPage({ onBack }: { onBack: () => void }) {
           {phoneNav.map((id) => { const n = NAV.find((x) => x.id === id)!; const Icon = n.icon; const on = view === id; return <button key={id} type="button" aria-current={on ? 'page' : undefined} onClick={() => go(id)} className={`flex flex-col items-center gap-1 py-2.5 text-[11px] font-medium ${on ? 'text-[var(--brand-strong,var(--brand))]' : 'text-[var(--app-muted)]'}`}><Icon size={20} aria-hidden="true" />{tx(n.label).split(' ')[0]}</button>; })}
           <button type="button" onClick={() => setMore(true)} className={`flex flex-col items-center gap-1 py-2.5 text-[11px] font-medium ${!phoneNav.includes(view) ? 'text-[var(--brand-strong,var(--brand))]' : 'text-[var(--app-muted)]'}`}><MoreHorizontal size={20} aria-hidden="true" />{tx("More")}</button>
         </nav>}
-        {more && b && <div className="fixed inset-0 z-[150] flex items-end bg-black/45 lg:hidden" onClick={() => setMore(false)}><div className="w-full rounded-t-3xl bg-[var(--app-panel)] p-4 pb-8" onClick={(e) => e.stopPropagation()}><div className="grid grid-cols-3 gap-3">{NAV.filter((n) => !phoneNav.includes(n.id)).map((n) => { const Icon = n.icon; return <button key={n.id} type="button" onClick={() => go(n.id)} className="flex flex-col items-center gap-2 rounded-2xl border border-[var(--app-line)] bg-[var(--app-bg)] px-2 py-4 text-center text-xs font-semibold"><Icon size={22} className="text-[var(--brand-strong,var(--brand))]" aria-hidden="true" />{tx(n.label)}</button>; })}</div></div></div>}
+        {more && b && <div className="fixed inset-0 z-[150] flex items-end bg-black/45 lg:hidden" onClick={() => setMore(false)}><div className="w-full rounded-t-3xl bg-[var(--app-panel)] p-4 pb-8" onClick={(e) => e.stopPropagation()}><div className="grid grid-cols-3 gap-3">{NAV.filter((n) => !phoneNav.includes(n.id)).map((n) => { const Icon = n.icon; return <button key={n.id} type="button" onClick={() => go(n.id)} className="flex flex-col items-center gap-2 rounded-2xl border border-[var(--app-line)] bg-[var(--app-bg)] px-2 py-4 text-center text-xs font-semibold"><Icon size={22} className="text-[var(--brand-strong,var(--brand))]" aria-hidden="true" />{navLabel(n)}</button>; })}</div></div></div>}
       </div>
       {sheet && b && <EntrySheet b={b} kind={sheet} secrets={secrets} onClose={() => setSheet(null)} onDone={reload} />}
     </div>
