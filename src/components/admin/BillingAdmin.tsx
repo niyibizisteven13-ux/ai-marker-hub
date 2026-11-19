@@ -99,6 +99,7 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
   return (
     <div className="space-y-6">
       <AiGuardPanel notify={notify} />
+      <CostCalibrationPanel notify={notify} />
       <SalesPanel notify={notify} />
       <PaymentMethodPanel notify={notify} />
 
@@ -369,6 +370,102 @@ function AiGuardPanel({ notify }: { notify: (msg: string, error?: boolean) => vo
             <h4 className="mt-4 text-sm font-semibold text-white">Highest cost users</h4>
             <ul className="mt-1 space-y-1 text-xs text-[#C9D3F0]">{e.topUsers.slice(0, 5).map((u) => <li key={u.user} className="flex justify-between gap-2"><span className="truncate">{u.user} <span className={`ml-1 rounded px-1.5 py-px text-[10px] ${u.paying ? 'bg-emerald-500/15 text-emerald-300' : 'bg-white/10 text-[#8A97C2]'}`}>{u.paying ? 'paying' : 'free'}</span></span><span>{u.actions} actions · {usd(u.costUsd)}</span></li>)}</ul>
           </>}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ── Cost calibration: make recorded AI cost match what the provider really charges ──────────────────────────
+interface Calibration {
+  calibration: { multiplier: number; prices: Partial<Record<string, { in: number; out: number }>>; changedAt: string | null; changedBy: string | null };
+  families: Array<{ family: string; table: { in: number; out: number }; override: { in: number; out: number } | null }>;
+  limits: { min: number; max: number };
+  month: { recordedUsd: number; actions: number; byFamily: Record<string, { costUsd: number; actions: number }>; changedThisMonth: boolean };
+}
+interface Reconcile { applied: boolean; suggestion: { suggested: number; ratio: number | null; message: string } }
+
+function CostCalibrationPanel({ notify }: { notify: (msg: string, error?: boolean) => void }) {
+  const [c, setC] = useState<Calibration | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [mult, setMult] = useState('');
+  const [invoice, setInvoice] = useState('');
+  const [result, setResult] = useState<Reconcile | null>(null);
+  const [prices, setPrices] = useState<Record<string, { in: string; out: string }>>({});
+  const apply = (r: Calibration) => {
+    setC(r); setMult(String(r.calibration.multiplier));
+    setPrices(Object.fromEntries(r.families.map((f) => [f.family, { in: String((f.override ?? f.table).in), out: String((f.override ?? f.table).out) }])));
+  };
+  useEffect(() => { void api<Calibration>('/api/admin/billing/cost-calibration').then(apply).catch((e) => notify(e.message, true)); }, [notify]);
+  const put = async (body: object, ok: string) => {
+    setBusy(true);
+    try { apply(await api<Calibration>('/api/admin/billing/cost-calibration', { method: 'PUT', body: JSON.stringify(body) })); setResult(null); notify(ok); }
+    catch (e) { notify((e as Error).message, true); } finally { setBusy(false); }
+  };
+  const reconcile = async (doApply: boolean) => {
+    setBusy(true);
+    try {
+      const r = await api<Calibration & Reconcile>('/api/admin/billing/cost-calibration/reconcile', { method: 'POST', body: JSON.stringify({ invoiceUsd: Number(invoice), apply: doApply }) });
+      setResult({ applied: r.applied, suggestion: r.suggestion });
+      if (doApply) { apply(r); notify(`Multiplier set to ${r.suggestion.suggested}.`); }
+    } catch (e) { notify((e as Error).message, true); } finally { setBusy(false); }
+  };
+  if (!c) return null;
+  const m = c.calibration.multiplier;
+  const multOk = Number(mult) >= c.limits.min && Number(mult) <= c.limits.max;
+  return (
+    <section className={`${card} space-y-4`}>
+      <div>
+        <h3 className="text-base font-semibold text-white">Cost calibration</h3>
+        <p className="mt-1 text-xs text-[#8A97C2]">Credits, the profit guard and every margin figure use a built-in price table. If your provider charges more or less, enter the provider's invoice below (or the real prices): every credit and margin then matches what you actually pay. Applies to new usage within a minute; costs already recorded keep their old figure.</p>
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="space-y-3">
+          <h4 className="text-sm font-semibold text-white">Match your provider invoice</h4>
+          <div className="text-xs text-[#C9D3F0]">Recorded this month: <b>{usd(c.month.recordedUsd)}</b> over {c.month.actions.toLocaleString('en-US')} actions. Multiplier now <b>{m}×</b>{c.calibration.changedAt ? ` (changed ${new Date(c.calibration.changedAt).toLocaleDateString('en-GB')})` : ' (never changed)'}.</div>
+          {c.month.changedThisMonth && <p className="text-xs text-amber-300">The multiplier changed this month, so costs recorded earlier used the old setting: a comparison for this month is approximate. Next month is exact.</p>}
+          <label className="block text-xs text-[#8A97C2]">What the provider charged for this month so far (USD, from their usage page or invoice)
+            <div className="mt-1 flex gap-1.5">
+              <input className={input} inputMode="decimal" placeholder="e.g. 42.50" value={invoice} onChange={(ev) => setInvoice(ev.target.value)} />
+              <button className={`${btn} bg-[#1A2240] text-[#C9D3F0] hover:bg-[#222C50]`} disabled={busy || !(Number(invoice) > 0)} onClick={() => void reconcile(false)}>Compare</button>
+            </div>
+          </label>
+          {result && (
+            <div className="rounded-lg border border-[#2A3760] bg-[#0A1020] p-3 text-xs text-[#C9D3F0]">
+              <p>{result.suggestion.message}</p>
+              {result.suggestion.ratio !== null && Math.abs(result.suggestion.ratio - 1) >= 0.05 && !result.applied && (
+                <button className={`${btn} mt-2 bg-[#3FA7E0] text-white hover:bg-[#59B6EA]`} disabled={busy} onClick={() => void reconcile(true)}>Set multiplier to {result.suggestion.suggested}×</button>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="space-y-3">
+          <h4 className="text-sm font-semibold text-white">Set it by hand</h4>
+          <label className="block text-xs text-[#8A97C2]">Multiplier on all costs ({c.limits.min}–{c.limits.max}; 1 = the table is right, 2 = the provider charges double)
+            <div className="mt-1 flex gap-1.5">
+              <input className={input} inputMode="decimal" value={mult} onChange={(ev) => setMult(ev.target.value)} />
+              <button className={`${btn} bg-[#1A2240] text-[#C9D3F0] hover:bg-[#222C50]`} disabled={busy || !multOk || Number(mult) === m} onClick={() => void put({ multiplier: Number(mult) }, 'Multiplier saved.')}><Save size={13} />Save</button>
+            </div>
+          </label>
+          <div className="text-xs text-[#8A97C2]">Price per million tokens (USD), by model family. Leave as the table, or enter the provider's real price.</div>
+          <table className="w-full text-left text-xs text-[#C9D3F0]">
+            <thead className="text-[#8A97C2]"><tr><th className="py-1">Family</th><th>In</th><th>Out</th><th /></tr></thead>
+            <tbody>{c.families.filter((f) => f.family !== 'other').map((f) => {
+              const p = prices[f.family] ?? { in: '', out: '' };
+              const valid = Number(p.in) >= 0 && Number(p.out) >= 0 && p.in !== '' && p.out !== '';
+              return (
+                <tr key={f.family} className="border-t border-[#263052]">
+                  <td className="py-1.5 capitalize">{f.family}{f.override && <span className="ml-1 rounded bg-amber-500/20 px-1 text-[10px] text-amber-300">custom</span>}</td>
+                  <td><input className={`${input} w-20`} inputMode="decimal" value={p.in} onChange={(ev) => setPrices({ ...prices, [f.family]: { ...p, in: ev.target.value } })} /></td>
+                  <td><input className={`${input} w-20`} inputMode="decimal" value={p.out} onChange={(ev) => setPrices({ ...prices, [f.family]: { ...p, out: ev.target.value } })} /></td>
+                  <td className="whitespace-nowrap pl-2">
+                    <button className={`${btn} bg-[#1A2240] text-[#C9D3F0] hover:bg-[#222C50]`} disabled={busy || !valid} onClick={() => void put({ prices: { [f.family]: { in: Number(p.in), out: Number(p.out) } } }, `${f.family} price saved.`)}>Save</button>
+                    {f.override && <button className={`${btn} ml-1 text-[#8A97C2] hover:text-white`} disabled={busy} onClick={() => void put({ prices: { [f.family]: null } }, `${f.family} back to the table.`)}>Reset</button>}
+                  </td>
+                </tr>
+              );
+            })}</tbody>
+          </table>
         </div>
       </div>
     </section>
