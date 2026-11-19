@@ -21,6 +21,22 @@ export function shouldTile(width: number, height: number, mode: TilingMode, mode
   return Math.max(width, height) / modelMaxSide >= AUTO_TILE_FACTOR;
 }
 
+/**
+ * A second look at a page that is too small to need close-ups: full-width horizontal bands (with a small overlap), each read on its own.
+ * The model sees the writing framed differently and larger, so its mistakes are less likely to repeat the first reading's. The bands are
+ * returned as tiles, so the same merge compares the two readings and flags every difference.
+ */
+export function planBands(width: number, height: number, bands = 2, overlap = 0.1): Tile[] {
+  const n = Math.max(2, Math.min(4, Math.round(bands)));
+  const out: Tile[] = [];
+  for (let i = 0; i < n; i++) {
+    const y0 = Math.max(0, Math.floor(((i / n) - (i === 0 ? 0 : overlap / 2)) * height));
+    const y1 = Math.min(height, Math.ceil((((i + 1) / n) + (i === n - 1 ? 0 : overlap / 2)) * height));
+    out.push({ index: i, row: i, col: 0, x: 0, y: y0, width, height: Math.max(1, y1 - y0), core: { x0: 0, y0: (i / n) * 1000, x1: 1000, y1: ((i + 1) / n) * 1000 } });
+  }
+  return out;
+}
+
 /** Plans a grid of overlapping tiles (pixel coordinates) with each tile's non-overlapping "core" in page space (0–1000). */
 export function planTiles(width: number, height: number, opts: { tileSize?: number; overlap?: number; maxTiles?: number } = {}): Tile[] {
   let size = opts.tileSize ?? 1800;
