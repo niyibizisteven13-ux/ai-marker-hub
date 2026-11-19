@@ -68,6 +68,8 @@ export interface PipelineOptions {
   maxTilesPerPage?: number;
   reviewThreshold?: ReviewThreshold;
   ocrLanguages?: string[];
+  /** Photo cleanup (crop to the sheet, even out lighting). On by default; off only to measure what it is worth. */
+  cleanup?: boolean;
   signal?: AbortSignal;
   progress?: (stage: string, percent: number) => Promise<void>;
 }
@@ -106,7 +108,7 @@ export async function processDocument(data: Buffer, filename: string, deps: Pipe
     if (opts.signal?.aborted) throw opts.signal.reason;
     await step(sp.page, 'preprocessing', 5);
     // Keep up to 4000 px so tiles can read small handwriting at (near) native resolution.
-    const pre = await preprocessPage(sp.image, { maxSide: 4000 });
+    const pre = await preprocessPage(sp.image, { maxSide: 4000, cropPage: opts.cleanup !== false, flattenLighting: opts.cleanup !== false });
 
     if (sp.textLayer.length >= 200 && !opts.forceRecognition) {
       limitations.add('Pages with a PDF text layer were read from that layer, not recognised; handwritten notes added on top of typed pages are not captured unless recognition is forced.');

@@ -19,6 +19,7 @@
     "nisr:index": "tsx scripts/nisr-index.ts",
     "nisr:validate": "tsx scripts/nisr-index.ts --validate",
     "eval:documents": "tsx scripts/eval-documents.ts",
+    "eval:accuracy": "tsx scripts/eval-accuracy.ts",
     "verify": "npm run lint && npm run test && npm run build",
     "prisma": "prisma",
     "db:migrate": "prisma migrate dev --name init",
