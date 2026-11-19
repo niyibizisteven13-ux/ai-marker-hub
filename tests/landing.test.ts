@@ -31,12 +31,15 @@ test('i18n dictionary key parity between EN, RW, and FR', () => {
   assert.deepStrictEqual(frKeys, enKeys, 'FR keys must match EN keys');
 });
 
-test('Ventures introduction has complete multilingual copy', () => {
+test('the landing page says "AI in our context" in every language, and nothing about business', () => {
+  assert.strictEqual(dictionaries.en.h1, 'AI in our context');
+  assert.strictEqual(dictionaries.rw.h1, 'AI mu byacu');
+  assert.strictEqual(dictionaries.fr.h1, "L'IA dans notre contexte");
   for (const language of ['en', 'rw', 'fr'] as const) {
-    const d = dictionaries[language];
-    assert.strictEqual(d.venturesName, 'Ventures');
-    for (const key of ['venturesTitle', 'venturesDescription', 'venturesFeaturePage', 'venturesFeatureBooks', 'venturesFeatureAI', 'venturesCta', 'venturesSignInNote'] as const) {
-      assert.ok(d[key].trim().length > 0, `${language} is missing ${key}`);
-    }
+    const d = dictionaries[language] as Record<string, string>;
+    assert.strictEqual(d.tag, d.h1, `${language}: the tag line is the same words`);
+    assert.ok(!('sub' in d), `${language} has no second headline`);
+    const text = Object.values(d).join(' ');
+    assert.ok(!/business|ubucuruzi|entreprise|venture|learning companion|mugenzi|compagnon/i.test(text), `${language} still mentions business or the old headline`);
   }
 });

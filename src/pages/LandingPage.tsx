@@ -8,7 +8,6 @@ import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { AuthFlow } from '../components/AuthFlow';
 import { NewAccountBlock } from '../components/NewAccountBlock';
-import { GrowthBanner } from '../components/GrowthBanner';
 import { QrCard } from '../components/QrCard';
 import { MfaStep } from '../components/MfaStep';
 
@@ -18,7 +17,6 @@ export default function LandingPage({ onLoginSuccess }: { onLoginSuccess: (user?
 
   // Back from Google with a passkey still to be checked (the server held the sign-in): show the second step instead of the sign-in form.
   const waitingForPasskey = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('mfa') === '1';
-  const bannerLabels = { s1: t('s1'), s2: t('s2'), s3: t('s3'), gUser: t('gUser'), gReply: t('gReply'), gSales: t('gSales'), gProfit: t('gProfit'), gOrder: t('gOrder'), gShop: t('gShop') };
 
   useEffect(() => {
     document.title = 'Bwenge — Sign in';
@@ -55,7 +53,6 @@ export default function LandingPage({ onLoginSuccess }: { onLoginSuccess: (user?
 
           <div className="mid">
             <h1 className="h1 shine">{t('h1')}</h1>
-            <p className="h1 shine h1b">{t('sub')}</p>
 
             {waitingForPasskey ? <MfaStep onDone={(next) => { window.location.href = next; }} /> : <AuthFlow
               t={t}
@@ -87,25 +84,6 @@ export default function LandingPage({ onLoginSuccess }: { onLoginSuccess: (user?
                 window.dispatchEvent(new Event('open-signup-modal'));
               }}
             />}
-            {!waitingForPasskey && (
-              <section className="ventures-intro" id="ventures" aria-labelledby="ventures-heading">
-                <div className="ventures-intro-top">
-                  <span className="ventures-kicker">{t('venturesName')}</span>
-                  <span className="ventures-icon" aria-hidden="true">✦</span>
-                </div>
-                <h2 id="ventures-heading">{t('venturesTitle')}</h2>
-                <p>{t('venturesDescription')}</p>
-                <ul className="ventures-highlights">
-                  <li>{t('venturesFeaturePage')}</li>
-                  <li>{t('venturesFeatureBooks')}</li>
-                  <li>{t('venturesFeatureAI')}</li>
-                </ul>
-                <div className="ventures-action">
-                  <a className="ventures-cta" href="/biz">{t('venturesCta')} <span aria-hidden="true">→</span></a>
-                  <span className="ventures-note">{t('venturesSignInNote')}</span>
-                </div>
-              </section>
-            )}
           </div>
 
           <div className="foot">
@@ -127,7 +105,6 @@ export default function LandingPage({ onLoginSuccess }: { onLoginSuccess: (user?
 
         <aside className="hero" aria-hidden="true">
           <LogoHeroOutline />
-          <GrowthBanner className="smb-hero" labels={bannerLabels} />
           <QrCard qrTitle={t('qr')} />
         </aside>
       </div>
