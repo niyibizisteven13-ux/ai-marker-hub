@@ -68,3 +68,13 @@ test('the assistant can read the report, the evening digest uses it, and it is r
   const r = await tools.biz_day_report.execute({}, c); assert.match(r.text, /Campus Canteen: closing report/); assert.match(r.text, /Sales 5,000 RWF/); assert.match((await tools.biz_day_report.execute({ lang: 'rw' }, c)).text, /raporo y’umunsi/);
   assert.ok(BIZ_READ_TOOLS.includes('biz_day_report') && CHAT_TOOLS.includes('biz_day_report')); assert.match(PROMPTS.evening, /biz_day_report/);
 });
+
+test('verified badge on the public page: shown only when the owner bought it, never leaks the owner, and the studio can tell', async () => {
+  const mk = (verified: boolean) => { const kv = memKv(); const svc = createBizService({ kv, media: memoryMediaStore(), isPaid: async () => true, isVerified: async (id) => verified && id === 'o', now: () => T0, secretKey: keyFrom('t') }); resetBizLimitsForTests(); return svc; };
+  for (const verified of [true, false]) {
+    const svc = mk(verified); const biz = await svc.create('o', { name: 'Heaven', category: 'restaurant' }); await svc.update('o', biz.id, { about: 'Lunch' }); await svc.setPublished('o', biz.id, true);
+    const pub: any = await svc.publicBySlug(biz.slug); assert.equal(pub.verified, verified ? true : undefined); assert.ok(!JSON.stringify(pub).includes('"o"'), 'no owner id on the public page');
+    assert.equal(await svc.verifiedOwner('o'), verified); assert.equal(await svc.verifiedOwner('someone-else'), false);
+  }
+  const none = createBizService({ kv: memKv(), media: memoryMediaStore(), isPaid: async () => true, now: () => T0, secretKey: keyFrom('t') }); assert.equal(await none.verifiedOwner('o'), false, 'without the check wired in, nobody is verified');
+});

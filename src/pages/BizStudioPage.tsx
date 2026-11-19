@@ -7,6 +7,7 @@ import BizPage from '../components/biz/BizPage';
 import MapTile, { parseCoords } from '../components/biz/MapTile';
 import { SectionsEditor, TrackersView, CostsView, FeedView, LockedGate, AgentChatView, AgentView, DashboardView, NotebookView, CustomersView, ReportsView, SecretsView, EntrySheet, type EntryKind } from '../components/biz/Workspace';
 import { btn, btnGhost, btnPrimary, card, input, msg, PaidNote, Tag, Title } from '../components/biz/ui';
+import { VerifiedBadge } from '../components/VerifiedBadge';
 import { BizApiError, ownerApi, prepareImage, type Mine } from '../biz/api';
 import { CATEGORIES, DAYS, THEMES, rwf, type Business, type Enquiry, type Hours, type PublicBusiness, type SecretsStatus } from '../biz/types';
 
@@ -292,6 +293,9 @@ export default function BizStudioPage({ onBack }: { onBack: () => void }) {
                 <p className="mt-4 text-xs text-[var(--app-faint)]">{tx("Or just tell the Bwenge assistant: “make a page for my shop”.")}</p></form>)}
 
             {b && mine && (<>
+              {view === 'dashboard' && mine && !mine.locked && (mine.verified
+                ? <p className="mb-3 inline-flex items-center gap-2 rounded-xl bg-[var(--app-panel)] px-3.5 py-2 text-sm font-semibold"><VerifiedBadge size={18} />{tx("You are verified. The check mark shows next to your name on your pages.")}</p>
+                : <a href={mine.badge?.url ?? '/upgrade#badge'} className="mb-3 flex items-center justify-between gap-3 rounded-2xl border border-[var(--app-line)] bg-[var(--app-panel)] px-4 py-3 text-sm hover:bg-[var(--app-panel-hover,var(--app-bg))]"><span className="flex min-w-0 items-center gap-2.5"><VerifiedBadge size={22} /><span><b className="block">{tx("Get the verified badge")}</b><span className="text-[var(--app-muted)]">{tx("A check mark next to your name so customers trust your page. One payment, never expires.")}</span></span></span><span className="shrink-0 rounded-xl bg-[var(--brand)] px-3.5 py-2 font-semibold text-[var(--brand-on)]">{rwf(mine.badge?.priceRwf ?? 1000)}</span></a>)}
               {view === 'dashboard' && <DashboardView key={tick} b={b} go={go} onChange={reload} secrets={secrets} open={setSheet} />}
               {view === 'sales' && <NotebookView key={tick} b={b} type="sale" open={setSheet} onChange={reload} />}
               {view === 'expenses' && <CostsView key={tick} b={b} open={setSheet} onChange={reload} />}

@@ -213,3 +213,8 @@ Object.assign(SRW, {
   'Same rules as a staff scan: paid, open day, serving times, one of each each day. Show the check-in code on the Today screen. A customer can take back a wrong tick for one minute, and you see on the Today list who ticked it themselves.': 'Amategeko amwe na scan y’abakozi: yishyuwe, umunsi ukora, amasaha, kimwe buri munsi. Werekana kode yo kwemeza ku rupapuro rw’uyu munsi. Umukiliya ashobora gusubiza inyuma ikosa mu munota umwe, kandi ubona ku rutonde uwabyishyiriyeho.',
 });
 Object.assign(SRW, { 'Closing report': 'Raporo y’umunsi', 'Day': 'Umunsi', 'Today': 'Uyu munsi', 'Yesterday': 'Ejo', 'Copy': 'Koporora', 'Copied': 'Byakoporowe', 'Send on WhatsApp': 'Ohereza kuri WhatsApp', 'Copy the text by hand': 'Koporora ayo magambo n’intoki' });
+Object.assign(SRW, {
+  'You are verified. The check mark shows next to your name on your pages.': 'Wemejwe. Ikimenyetso kigaragara iruhande y’izina ryawe ku mpapuro zawe.',
+  'Get the verified badge': 'Fata ikimenyetso cyo kwemezwa',
+  'A check mark next to your name so customers trust your page. One payment, never expires.': 'Ikimenyetso iruhande y’izina ryawe kugira ngo abakiriya bizere urupapuro rwawe. Wishyura rimwe, ntirurangira.',
+});

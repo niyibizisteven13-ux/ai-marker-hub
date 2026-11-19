@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { VerifiedBadge } from '../VerifiedBadge';
 import { Check, ChevronLeft, ChevronRight, Clock, Copy, Download, Flag, Globe, Image as ImageIcon, Instagram, Facebook, Loader2, Mail, MapPin, MessageCircle, Minus, Phone, Play, Plus, QrCode, Send, Share2, ShoppingBag, Smartphone, X } from 'lucide-react';
 import { publicApi } from '../../biz/api';
 import { DAYS, THEMES, type Lang, pageUrl, rwf, CATEGORIES, type PublicBusiness, type PublicMedia, type PublicPost } from '../../biz/types';
@@ -211,7 +212,7 @@ function BizPageInner({ business: b, base, lang, setLang, openNow, mediaSrc, pre
             <div className="absolute inset-x-0 bottom-0 flex items-end gap-4 p-4 sm:gap-5 sm:p-7">
               <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl border-[3px] border-white bg-[var(--acc)] shadow-lg sm:h-28 sm:w-28 sm:rounded-3xl">{b.logo ? <img src={mediaSrc(b.logo.id)} alt={`${b.name} logo`} className="h-full w-full object-cover" /> : <span className="font-display text-3xl font-bold text-[var(--on)] sm:text-4xl">{initials(b.name)}</span>}</div>
               <div className="min-w-0 flex-1 pb-0.5 text-white">
-                <h1 className="font-display text-[26px] font-semibold leading-tight tracking-tight sm:text-4xl">{b.name}</h1>
+                <h1 className="font-display text-[26px] font-semibold leading-tight tracking-tight sm:text-4xl">{b.name}{b.verified && <> <VerifiedBadge label={tx("Verified")} size={26} className="ml-0.5 -translate-y-0.5" /></>}</h1>
                 <p className="mt-1 text-[13px] text-white/85 sm:text-[15px]">{category}{b.tagline ? ` · ${b.tagline}` : ''}</p>
                 <div className="mt-2 flex flex-wrap items-center gap-2 text-[12.5px] sm:text-sm">
                   {openNow !== null && <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-semibold ${openNow ? 'bg-emerald-400/90 text-emerald-950' : 'bg-white/25 text-white'}`}><Clock size={13} />{openNow ? tx('Open now') : tx('Closed now')}{openNow && todayHours && !todayHours.closed ? ` · ${lang === 'rw' ? 'ifunga saa' : 'closes'} ${todayHours.close}` : ''}</span>}

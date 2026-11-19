@@ -62,13 +62,13 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
   };
 
   const recordPurchase = (u: AdminUser) => {
-    const purpose = window.prompt('Purchased item: STARTER, PRO, PLUS or GO_PACK', 'PRO')?.trim().toUpperCase();
-    if (!purpose || !['STARTER', 'PRO', 'PLUS', 'GO_PACK'].includes(purpose)) return;
+    const purpose = window.prompt('Purchased item: STARTER, PRO, PLUS, GO_PACK or VERIFIED_BADGE', 'PRO')?.trim().toUpperCase();
+    if (!purpose || !['STARTER', 'PRO', 'PLUS', 'GO_PACK', 'VERIFIED_BADGE'].includes(purpose)) return;
     const packId = purpose === 'GO_PACK' ? window.prompt(`Pack ID: ${eff?.goPacks.map((p) => `${p.id} (${rwf(p.rwf)})`).join(', ')}`)?.trim() : undefined;
     if (purpose === 'GO_PACK' && !packId) return;
-    const months = purpose !== 'GO_PACK' ? Number(window.prompt('Months purchased (1–12):', '1')) : undefined;
+    const months = purpose !== 'GO_PACK' && purpose !== 'VERIFIED_BADGE' ? Number(window.prompt('Months purchased (1–12):', '1')) : undefined;
     if (months !== undefined && (!Number.isInteger(months) || months < 1 || months > 12)) return;
-    const amount = purpose === 'GO_PACK' ? eff?.goPacks.find((p) => p.id === packId)?.rwf : (eff?.plans[purpose as SoldPlan]?.priceRwf ?? 0) * (months ?? 1);
+    const amount = purpose === 'VERIFIED_BADGE' ? 1000 : purpose === 'GO_PACK' ? eff?.goPacks.find((p) => p.id === packId)?.rwf : (eff?.plans[purpose as SoldPlan]?.priceRwf ?? 0) * (months ?? 1);
     if (!amount) return;
     const transactionId = window.prompt(`Confirm ${rwf(amount)} received for ${u.email}. Enter the verified MTN transaction ID:`)?.trim();
     if (!transactionId) return;

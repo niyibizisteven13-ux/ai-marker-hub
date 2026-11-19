@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { VerifiedBadge } from '../components/VerifiedBadge';
 import { AlertCircle, ArrowLeft, Building2, Check, CheckCircle2, Coins, GraduationCap, Loader2, Lock, ShieldCheck, Sparkles, X, Zap } from 'lucide-react';
 import { authFetch } from '../utils/authFetch';
 import OrganisationRequestDialog from '../components/OrganisationRequestDialog';
@@ -21,9 +22,9 @@ interface PlansResponse {
 }
 type PlanId = 'FREE' | 'GO' | 'STARTER' | 'PRO' | 'PLUS' | 'INSTITUTION';
 type SoldPlan = 'STARTER' | 'PRO' | 'PLUS';
-interface Me { plan: PlanId; planName: string; wallet: number; subscription: { endDate: string | null; daysLeft: number | null } | null; usage: { day: { used: number; limit: number }; month?: { used: number; limit: number } } }
+interface Me { verified?: boolean; plan: PlanId; planName: string; wallet: number; subscription: { endDate: string | null; daysLeft: number | null } | null; usage: { day: { used: number; limit: number }; month?: { used: number; limit: number } } }
 interface Payment { id: string; status: 'PENDING' | 'SUCCESSFUL' | 'FAILED' | 'EXPIRED'; amountRwf: number; currency: string; receiptNumber: string | null; reason: string | null; phoneMasked: string; purpose: string; credits: number; months: number }
-type Checkout = { purpose: SoldPlan | 'GO_PACK'; packId?: string; months: number; title: string; amountRwf: number; amountUsd: number };
+type Checkout = { purpose: SoldPlan | 'GO_PACK' | 'VERIFIED_BADGE'; packId?: string; months: number; title: string; amountRwf: number; amountUsd: number };
 
 interface UpgradePageProps {
   jobId?: string;
@@ -222,6 +223,18 @@ export default function UpgradePage({ jobId, onBack, onSuccess }: UpgradePagePro
             </div>
           </>
         )}
+
+        <section id="badge" className="mx-auto max-w-4xl scroll-mt-20 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-5">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="min-w-0">
+              <h3 className="flex items-center gap-2 text-base font-semibold text-[var(--text)]"><VerifiedBadge size={22} /> Verified badge</h3>
+              <p className="mt-1 max-w-xl text-xs leading-relaxed text-[var(--muted)]">A blue check mark next to your name on your business pages and in your profile, so customers know a real person stands behind it. Pay {rwf(1000)} once; it never expires and it is yours on every plan. It shows that you are a reachable person who paid, not that Bwenge endorses the business.</p>
+            </div>
+            {me?.verified
+              ? <span className="inline-flex min-h-[40px] items-center gap-2 rounded-xl bg-emerald-500/10 px-4 text-sm font-semibold text-emerald-600"><Check size={16} /> You are verified</span>
+              : <button disabled={paymentsOff} onClick={() => setCheckout({ purpose: 'VERIFIED_BADGE', months: 0, title: 'Verified badge · one time', amountRwf: 1000, amountUsd: Math.round((1000 / (data?.fxUsdRwf ?? 1450)) * 100) / 100 })} className="min-h-[40px] rounded-xl bg-[var(--accent)] px-5 text-sm font-semibold text-[var(--accent-on,#fff)] transition-opacity hover:opacity-90 disabled:opacity-50">Get the badge · {rwf(1000)}</button>}
+          </div>
+        </section>
 
         <section className="mx-auto grid max-w-4xl grid-cols-1 gap-3 sm:grid-cols-3">
           {[

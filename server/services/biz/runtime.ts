@@ -28,5 +28,5 @@ export async function bizAllowed(userId: string): Promise<boolean> {
   if (process.env.BIZ_REQUIRE_PAID !== 'true') return true;
   const p = await planFor(userId).catch(() => null); return !!p && PAID_PLANS.includes(p.id);
 }
-export const bizService = (): BizService => (svc ??= createBizService({ allowed: bizAllowed, kv: appSettingKv, notify: notifyOwner, syncAgenda, media: diskMediaStore(), isPaid: async (userId) => { const p = await planFor(userId).catch(() => null); return !!p && p.id !== 'FREE'; } }));
+export const bizService = (): BizService => (svc ??= createBizService({ allowed: bizAllowed, kv: appSettingKv, notify: notifyOwner, syncAgenda, media: diskMediaStore(), isVerified: async (userId) => (await import('../billing/badge.js')).hasBadge(userId), isPaid: async (userId) => { const p = await planFor(userId).catch(() => null); return !!p && p.id !== 'FREE'; } }));
 export const setBizServiceForTests = (s: BizService | null) => { svc = s; };

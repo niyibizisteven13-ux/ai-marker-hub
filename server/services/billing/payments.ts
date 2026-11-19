@@ -7,6 +7,7 @@ import { automaticPaymentsEnabled } from './manual.js';
 import { pauseMessage, salesState } from './sales.js';
 import { MomoError, momoConfig, momoReady, normalizeMsisdn, paymentStatus, requestToPay } from './momo.js';
 import { expiredEmail, paymentFailedEmail, receiptEmail, renewalReminderEmail, type Email } from './emails.js';
+import { VERIFIED_BADGE_RWF, forgetBadge, grantBadgeIn, hasBadge } from './badge.js';
 
 /**
  * Plan and credit purchases over MTN Mobile Money.
@@ -22,8 +23,8 @@ const PENDING_TTL_MS = 15 * 60_000;
 const MONTH_MS = 30 * 86_400_000;
 
 /** A plan sold online, or a GO credit top-up. */
-export type Purpose = SoldPlanId | 'GO_PACK';
-export const PURPOSES: readonly Purpose[] = [...SOLD_PLANS, 'GO_PACK'];
+export type Purpose = SoldPlanId | 'GO_PACK' | 'VERIFIED_BADGE';
+export const PURPOSES: readonly Purpose[] = [...SOLD_PLANS, 'GO_PACK', 'VERIFIED_BADGE'];
 export class BillingError extends Error {
   constructor(message: string, public status = 400, public code = 'BILLING_ERROR') { super(message); }
 }
@@ -33,6 +34,7 @@ export interface Quote { purpose: Purpose; item: string; months: number; credits
 export async function quote(purpose: Purpose, opts: { packId?: string; months?: number } = {}): Promise<Quote> {
   await refreshBillingSettings();
   const months = Math.min(12, Math.max(1, Math.round(opts.months ?? 1)));
+  if (purpose === 'VERIFIED_BADGE') return { purpose, item: 'Verified badge · one time', months: 0, credits: 0, amountRwf: VERIFIED_BADGE_RWF, amountUsd: Math.round((VERIFIED_BADGE_RWF / fxUsdRwf()) * 100) / 100 };
   if (purpose === 'GO_PACK') {
     const pack = currentGoPacks().find((p) => p.id === opts.packId);
     if (!pack) throw new BillingError('Choose a GO credit pack.', 400, 'INVALID_PACK');
@@ -59,6 +61,7 @@ export async function startPayment(userId: string, input: { purpose: Purpose; pa
   if (!(await automaticPaymentsEnabled())) throw new BillingError('Automatic payments are paused. Pay with MTN MoMo Pay and send your proof on WhatsApp.', 503, 'MANUAL_PAYMENT_REQUIRED');
   if (!momoReady()) throw new BillingError('Mobile Money payments are being set up. Please try again soon.', 503, 'NOT_CONFIGURED');
   const q = await quote(input.purpose, input);
+  if (q.purpose === 'VERIFIED_BADGE' && (await hasBadge(userId))) throw new BillingError('You already have the verified badge.', 409, 'ALREADY_VERIFIED');
   let phone;
   try { phone = normalizeMsisdn(input.phone); } catch (e) { throw new BillingError((e as Error).message, 400, 'INVALID_PHONE'); }
   // One request at a time: a second tap while the phone prompt is open would charge twice.
@@ -120,7 +123,9 @@ export async function fulfil(p: any, financialTransactionId?: string, approvedBy
       if (used) throw new BillingError('This MoMo transaction has already been used.', 409, 'DUPLICATE_TRANSACTION');
       await tx.appSetting.create({ data: { key, value: { paymentId: p.id }, updatedBy: approvedBy } });
     }
-    if (p.purpose === 'GO_PACK') {
+    if (p.purpose === 'VERIFIED_BADGE') {
+      await grantBadgeIn(tx, p.userId, p.id, approvedBy ?? 'payment', now);
+    } else if (p.purpose === 'GO_PACK') {
       await tx.creditLedger.create({ data: { id: randomUUID(), userId: p.userId, delta: p.credits, reason: 'purchase', paymentId: p.id, note: p.packId, createdAt: now } });
     } else {
       // Older payments may say INSTITUTION; they keep granting that plan.
@@ -135,6 +140,7 @@ export async function fulfil(p: any, financialTransactionId?: string, approvedBy
     return tx.billingPayment.findUnique({ where: { id: p.id } });
   });
   if (!done?.fulfilledAt || done.status !== 'SUCCESSFUL') return done;
+  if (p.purpose === 'VERIFIED_BADGE') forgetBadge(p.userId);
   // The assistant sees the new plan and credits on the very next message (imported lazily: platformContext imports this file).
   void import('../platformContext.js').then((m) => m.invalidatePlatformContext(p.userId)).catch(() => undefined);
   await notifyReceipt(done).catch((e) => logger.warn('[billing] receipt notification failed', { errorType: e?.name }));
@@ -168,6 +174,7 @@ const appUrl = () => (process.env.APP_BASE_URL || 'https://www.bwenge.space').re
 const htmlEsc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 async function grantText(p: any) {
+  if (p.purpose === 'VERIFIED_BADGE') return { grant: 'Your Verified badge is active. It now shows next to your name on your business pages and in your profile.', balanceNote: undefined };
   if (p.purpose === 'GO_PACK') {
     const balance = await walletBalance(p.userId);
     return { grant: `${p.credits.toLocaleString('en-US')} GO credits were added to your account.`, balanceNote: `Your GO balance is now ${balance.toLocaleString('en-US')} credits.` };
@@ -266,6 +273,7 @@ export async function billingState(userId: string) {
     plan: plan.id, planName: plan.name,
     subscription: active ? { planType: sub.planType, endDate: sub.endDate ? new Date(sub.endDate).toISOString() : null, daysLeft: sub.endDate ? Math.max(0, Math.ceil((new Date(sub.endDate).getTime() - Date.now()) / 86_400_000)) : null } : null,
     wallet,
+    verified: await hasBadge(userId),
     pendingPayment: pending ? publicPayment(pending) : null,
     payments: momoReady() ? 'ready' : 'unavailable',
   };
