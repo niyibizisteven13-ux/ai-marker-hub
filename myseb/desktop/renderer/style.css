@@ -18,3 +18,5 @@ button.link{border:0;background:none;color:#94a3b8;text-decoration:underline;mar
 #oBtns{display:flex;gap:10px;justify-content:center;margin-top:18px}
 
 #start{overflow-y:auto;justify-content:safe center;padding:16px 0}#start>*{flex-shrink:0}
+#keyShow{font-size:12px;color:#94a3b8;font-variant-numeric:tabular-nums;letter-spacing:.03em}
+#submitted{height:24px;padding:0 12px;font-size:12px;border-radius:6px}

@@ -8,6 +8,7 @@ import { liveStats, cleanSignal, dropSignals, forgetAllLive, forgetLive, getAsid
 import { notify, roomVersion, subscribe } from './events.js';
 import { noticeFor, setNotice } from './notices.js';
 import { captureEvidence, evidenceCounts, evidenceOf } from './evidence.js';
+import { analyzeFormUrl, cleanDone, cleanKeyParam, cleanOrigins, examKey, lockFor, withKey } from './forms.js';
 import { getControls, overview as adminOverview, retentionDays, saveControls } from './admin.js';
 
 export const api = express.Router();
@@ -60,13 +61,20 @@ api.post('/exams', requireTeacher, wrap(async (req, res) => {
   if (examUrl && !/^https?:\/\//i.test(examUrl)) return res.status(400).json({ error: 'examUrl must start with http:// or https://' });
   const leave = ['record', 'pause', 'end', 'pause_then_end'].includes(b.leaveAction) ? b.leaveAction : 'pause';
   const minutes = Math.max(1, Math.min(600, parseInt(b.durationMinutes, 10) || 60));
+  // An exam from a form link (Google Forms and others): work out the sites it needs and how a submission looks. The teacher can add to both.
+  let analysis = null, extra = { allowed: [], done: [], keyParam: null, sendKey: true, provider: null };
+  if (examUrl) {
+    analysis = analyzeFormUrl(examUrl); if (!analysis.ok) return res.status(400).json({ error: analysis.error });
+    examUrl = analysis.url;
+    extra = { allowed: [...new Set([...analysis.origins, ...cleanOrigins(b.extraOrigins)])].slice(0, 12), done: cleanDone([...analysis.done, ...cleanDone(b.doneContains)]), keyParam: cleanKeyParam(b.keyParam), sendKey: typeof b.sendKey === 'boolean' ? b.sendKey : analysis.sendKey, provider: analysis.provider.id };
+  }
   const { rows } = await q(
-    `INSERT INTO exams (title, exam_url, require_myseb, allow_extension, leave_action, duration_minutes)
-     VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-    [title, examUrl || 'pending', b.requireMyseb !== false, b.allowExtension === true, leave, minutes]);
+    `INSERT INTO exams (title, exam_url, require_myseb, allow_extension, leave_action, duration_minutes, allowed_origins, done_patterns, key_param, send_key, form_provider)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+    [title, examUrl || 'pending', b.requireMyseb !== false, b.allowExtension === true, leave, minutes, extra.allowed, extra.done, extra.keyParam, extra.sendKey, extra.provider]);
   let exam = rows[0];
   if (!examUrl) exam = (await q('UPDATE exams SET exam_url=$2 WHERE id=$1 RETURNING *', [exam.id, `${config.publicUrl}/exam/${exam.id}/`])).rows[0];
-  res.status(201).json(exam);
+  res.status(201).json({ ...exam, form: analysis ? { provider: analysis.provider, kind: analysis.kind, tips: analysis.tips, keyHint: analysis.keyHint } : null });
 }));
 
 api.get('/exams', requireTeacher, wrap(async (_req, res) => {
@@ -93,12 +101,36 @@ api.patch('/exams/:id', requireTeacher, wrap(async (req, res) => {
   if (typeof b.liveFaces === 'boolean') { add('live_faces', b.liveFaces); add('live_mode', b.liveFaces ? 'pictures' : 'off'); }
   if (['off', 'pictures', 'live'].includes(b.liveMode)) { add('live_mode', b.liveMode); add('live_faces', b.liveMode !== 'off'); }
   if (typeof b.liveSound === 'boolean') add('live_sound', b.liveSound);
+  if (b.extraOrigins !== undefined) { const cur = (await q('SELECT exam_url FROM exams WHERE id=$1', [req.params.id])).rows[0]; if (cur) { const base = analyzeFormUrl(cur.exam_url); add('allowed_origins', [...new Set([...(base.ok ? base.origins : []), ...cleanOrigins(b.extraOrigins)])].slice(0, 12)); } }
+  if (b.doneContains !== undefined) add('done_patterns', cleanDone(b.doneContains));
+  if (b.keyParam !== undefined) add('key_param', cleanKeyParam(b.keyParam));
+  if (typeof b.sendKey === 'boolean') add('send_key', b.sendKey);
   if (!sets.length) return res.status(400).json({ error: 'nothing to change' });
   const { rows } = await q(`UPDATE exams SET ${sets.join(',')} WHERE id=$1 RETURNING *`, vals);
   rows[0] ? res.json(rows[0]) : res.status(404).json({ error: 'not found' });
 }));
 
 /** One code = one exam. Many students may use the same code. The code and the secret are returned ONCE; only hashes are stored. */
+/** What MySEB makes of a form link, before the exam is created (the dashboard shows it as the teacher pastes the address). */
+api.get('/forms/analyze', requireTeacher, wrap(async (req, res) => {
+  const a = analyzeFormUrl(str(req.query.url, 1000)); if (!a.ok) return res.status(400).json({ error: a.error });
+  res.json({ provider: a.provider, kind: a.kind, origins: a.origins, done: a.done, sendKey: a.sendKey, keyHint: a.keyHint, tips: a.tips });
+}));
+
+/** Every student's exam key, and whether they submitted inside MySEB. The teacher matches these keys against the form's responses. */
+api.get('/exams/:id/form-keys', requireTeacher, wrap(async (req, res) => {
+  if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
+  const ex = (await q('SELECT id, title, key_param FROM exams WHERE id=$1', [req.params.id])).rows[0]; if (!ex) return res.status(404).json({ error: 'not found' });
+  const rows = (await q(`SELECT id, student_name, status, started_at, ended_at, end_reason, violation_count FROM exam_sessions WHERE exam_id=$1 ORDER BY student_name, started_at`, [req.params.id])).rows
+    .map((r) => ({ student: r.student_name, key: examKey(r.id), status: r.status, startedAt: r.started_at, endedAt: r.ended_at, submittedInMyseb: r.end_reason === 'submitted', endReason: r.end_reason, violations: r.violation_count }));
+  if (req.query.format === 'csv') {
+    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    res.type('text/csv').set('Content-Disposition', 'attachment; filename="myseb-exam-keys.csv"');
+    return res.send(['Student,Exam key,Status,Submitted in MySEB,Started,Ended,Violations', ...rows.map((r) => [r.student, r.key, r.status, r.submittedInMyseb ? 'yes' : 'no', r.startedAt?.toISOString?.() ?? r.startedAt, r.endedAt?.toISOString?.() ?? r.endedAt ?? '', r.violations].map(esc).join(','))].join('\n'));
+  }
+  res.json({ exam: { id: ex.id, title: ex.title, keyField: ex.key_param }, keys: rows });
+}));
+
 api.post('/exams/:id/generate-code', requireTeacher, wrap(async (req, res) => {
   if (!isUuid(req.params.id)) return res.status(400).json({ error: 'bad id' });
   const { rows } = await q('SELECT * FROM exams WHERE id=$1', [req.params.id]);
@@ -448,7 +480,7 @@ api.post('/verify-code',
     // A browser keeps its key in a secure cookie (the page's own script can never read it). Only for tests the lecturer opened to browsers.
     if (clientType === 'web') res.append('Set-Cookie', `myseb_s=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=43200${config.publicUrl.startsWith('https') ? '; Secure' : ''}`);
     res.json({
-      sessionId: session.id, token, title: row.title, examUrl: row.exam_url,
+      sessionId: session.id, token, title: row.title, examUrl: row.key_param ? withKey(row.exam_url, row.key_param, examKey(session.id)) : row.exam_url, lock: lockFor(row), examKey: row.key_param ? examKey(session.id) : null,
       status: session.status, requireMyseb: row.require_myseb, heartbeatSeconds: 5,
       remainingSeconds: Math.max(0, Math.floor((new Date(session.deadline_at) - Date.now()) / 1000)),
     });

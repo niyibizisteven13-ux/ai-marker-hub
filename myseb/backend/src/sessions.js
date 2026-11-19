@@ -11,6 +11,7 @@ export const VIOLATION_TYPES = new Set([
   'screenshot', 'copy', 'paste', 'cut', 'devtools', 'close_attempt', 'shortcut', 'heartbeat_lost', 'token_misuse',
   'extra_display', 'forbidden_app', 'screen_share_stopped',
   'face_missing', 'camera_off', 'multiple_faces', 'face_check_unavailable',
+  'blocked_navigation',   // the student tried to go to a site the exam does not allow (recorded; the page simply does not open)
 ]);
 /** In a browser with strict rules (the default), these end the test on the spot: nothing is paused for the lecturer to forgive. */
 const STRICT_END = new Set(['face_missing', 'camera_off']);   // 'multiple_faces' ends the test only when the lecturer chose it (multi_face = 'end')

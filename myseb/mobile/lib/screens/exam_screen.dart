@@ -44,7 +44,7 @@ class _ExamScreenState extends State<ExamScreen> with WidgetsBindingObserver {
   final _lastSent = <String, DateTime>{};
   DateTime _pickUntil = DateTime.fromMillisecondsSinceEpoch(0); // the system file/photo picker is open: leaving to it is not a violation
   bool get _picking => DateTime.now().isBefore(_pickUntil);
-  late final String _origin;
+  late final Set<String> _origins;
   StreamSubscription<String>? _native;
   Completer<void>? _back; // completed when the student returns to the app (for example from the phone's Settings)
 
@@ -56,7 +56,7 @@ class _ExamScreenState extends State<ExamScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _status = s.status;
     _remaining = s.remainingSeconds;
-    _origin = Uri.parse(s.examUrl).origin;
+    _origins = <String>{Uri.parse(s.examUrl).origin, ...s.origins};
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _startUp();
     _native = Lock.events.listen(_onNative);
@@ -150,9 +150,13 @@ class _ExamScreenState extends State<ExamScreen> with WidgetsBindingObserver {
         _violation(m.message, {'via': 'page'});
       })
       ..setNavigationDelegate(NavigationDelegate(
-        // The exam site only. Links to anywhere else are dropped.
-        onNavigationRequest: (r) => (r.url.startsWith(_origin) || r.url.startsWith('about:') || r.url.startsWith('data:')) ? NavigationDecision.navigate : NavigationDecision.prevent,
-        onPageFinished: (_) => _wc.runJavaScript(_hookJs),
+        // The exam's own sites only (the exact origin, not "starts with"). Links to anywhere else are dropped and recorded.
+        onNavigationRequest: (r) {
+          if (_allowed(r.url)) return NavigationDecision.navigate;
+          if (r.isMainFrame) _violation('blocked_navigation', {'host': Uri.tryParse(r.url)?.host ?? 'unknown'});
+          return NavigationDecision.prevent;
+        },
+        onPageFinished: (url) { _wc.runJavaScript(_hookJs); _checkDone(url); },
       ));
     final platform = _wc.platform;
     if (platform is AndroidWebViewController) {
@@ -167,9 +171,44 @@ class _ExamScreenState extends State<ExamScreen> with WidgetsBindingObserver {
 
   // The header goes on the page request. Sub-resources (scripts, images, XHR) cannot carry it from a web view, so the
   // server answers with an HttpOnly cookie on this first request and honours it only for this app's user agent.
-  Future<void> _load() => _wc.loadRequest(Uri.parse(s.examUrl), headers: {
-        'X-MySEB-Key': s.token, 'X-MySEB-Client': 'mobile', 'X-MySEB-Device': s.deviceId,
-      });
+  Future<void> _load() => _wc.loadRequest(Uri.parse(s.examUrl), headers: s.sendKey
+      ? {'X-MySEB-Key': s.token, 'X-MySEB-Client': 'mobile', 'X-MySEB-Device': s.deviceId}
+      : const <String, String>{});   // a form tool (Google Forms…) never receives the MySEB key
+
+  bool _allowed(String url) {
+    if (url.startsWith('about:') || url.startsWith('data:')) return true;
+    final u = Uri.tryParse(url);
+    if (u == null || (u.scheme != 'https' && u.scheme != 'http')) return false;
+    return _origins.contains(u.origin);
+  }
+
+  /// A form that shows a "submitted" address (Google Forms: .../formResponse) ends the exam by itself.
+  void _checkDone(String url) {
+    if (_ended || s.done.isEmpty) return;
+    if (s.done.any((d) => d.isNotEmpty && url.contains(d))) _submitted();
+  }
+
+  Future<void> _submitted() async {
+    if (_ended) return;
+    await widget.api.finish(s, 'submitted');
+    _finish('submitted');
+  }
+
+  Future<void> _confirmSubmitted() async {
+    final yes = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        title: const Text('Have you submitted?'),
+        content: const Text('Press Yes only if you pressed Submit in the form and saw the confirmation. Your exam will end and you cannot come back in.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Not yet, keep working')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Yes, I have submitted', style: TextStyle(color: Colors.redAccent))),
+        ],
+      ),
+    );
+    if (yes == true) await _submitted();
+  }
 
   /* ---------------- reporting ---------------- */
   Future<void> _violation(String type, [Map<String, dynamic>? detail]) async {
@@ -302,6 +341,8 @@ class _ExamScreenState extends State<ExamScreen> with WidgetsBindingObserver {
                   Icon(Icons.circle, size: 10, color: blocked ? Colors.amber : Colors.greenAccent),
                   const SizedBox(width: 8),
                   Expanded(child: Text(s.title, overflow: TextOverflow.ellipsis)),
+                  if (s.examKey != null) Padding(padding: const EdgeInsets.only(right: 8), child: Text('Key ${s.examKey}', style: const TextStyle(fontSize: 11, color: Colors.white54))),
+                  if (s.kind == 'form' && !_ended) TextButton(onPressed: _confirmSubmitted, child: const Text('I have submitted')),
                   if (_locked) const Padding(padding: EdgeInsets.only(right: 8), child: Icon(Icons.lock, size: 14, color: Colors.white54)),
                   Text(_mmss, style: const TextStyle(fontFeatures: [FontFeature.tabularFigures()])),
                 ]),

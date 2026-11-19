@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('myseb', {
   info: () => ipcRenderer.invoke('info'),
   verify: (code, name) => ipcRenderer.invoke('verify', { code, name }),
   confirmExit: () => ipcRenderer.invoke('confirm-exit'),
+  formSubmitted: () => ipcRenderer.invoke('form-submitted'),
   quitIdle: () => ipcRenderer.invoke('quit-idle'),
   onStatus: (cb) => ipcRenderer.on('status', (_e, s) => cb(s)),
   pendingJoin: () => ipcRenderer.invoke('pending-join'),
