@@ -5,6 +5,7 @@ import { cleanAgent, cleanWorkflow, MAX_WORKFLOWS, type AgentSettings, type Work
 import { FIELDS, PROVIDERS, cleanSecrets, keyFrom, open as openSecret, seal, type Provider, type SecretsDoc } from './secrets.js';
 import { PayError, gatewayFor, maskPhone, msisdn, providerOf, realFetch, type Fetch, type Gateway } from './payments.js';
 import { MAX_ENTRIES, cleanCategory, cleanEntry, cleanRecurring, dayOf, dueDays, monthOf, summarize, summarizeCosts, type Budgets, type LedgerEntry, type Recurring } from './ledger.js';
+import { createPrograms } from './programsService.js';
 import {
   CATEGORIES, applyProfile, clean, cleanEmail, cleanPhone, cleanProduct, isLive, limitsFor, newBusiness, oneOf, publicView, slugFrom, validSlug,
   type Business, type Category, type DayStats, type Enquiry, type PublicBusiness, type Product, type Post, type PublicPost, type PostComment, type Lang, LANGS, type Translation, type PublicSection, MAX_POST_MEDIA, MAX_POST_TEXT, MAX_POSTS, MAX_COMMENTS,
@@ -103,7 +104,7 @@ export function createBizService(deps: Deps) {
       out.push(p); }
     return out;
   }
-  const withPay = async (b: Business, v: PublicBusiness): Promise<PublicBusiness> => { const sections = await publicSections(b); const out = sections.length ? { ...v, sections } : v; return (await payReady(b)) ? { ...out, payOnline: { open: b.payOpen === true } } : out; };
+  const withPay = async (b: Business, v: PublicBusiness): Promise<PublicBusiness> => { const sections = await publicSections(b); const plans = await programs.publicPrograms(b).catch(() => []); const out = { ...(sections.length ? { ...v, sections } : v), ...(plans.length ? { programs: plans } : {}) }; return (await payReady(b)) ? { ...out, payOnline: { open: b.payOpen === true } } : out; };
   async function startPayment(b: Business, o: { phone: string; amount: number; item: string; customer?: string; src: LedgerEntry['src']; note?: string }): Promise<LedgerEntry> {
     const n = msisdn(o.phone); if (!n) throw new BizError('Enter a valid MTN or Airtel number, like 0788 123 456.');
     if (!Number.isInteger(o.amount) || o.amount < 100 || o.amount > 2_000_000) throw new BizError('The amount must be between 100 and 2,000,000 RWF.');
@@ -131,7 +132,10 @@ export function createBizService(deps: Deps) {
     const id = await slugOwner(String(slug).toLowerCase()); if (!id) return null; const b = await load(id); return b && isLive(b) ? b : null;
   }
 
+  const programs = createPrograms({ kv, now, iso, mine, publicLive, alert, tooMany, payReady, startPayment, settle });
+
   return {
+    ...programs,
     /* ------------------------------------------------------------ owner */
     async list(ownerId: string): Promise<Business[]> {
       const ids = (await kv.get<{ ids: string[] }>(`biz-owner:${ownerId}`))?.ids ?? [];
@@ -179,6 +183,7 @@ export function createBizService(deps: Deps) {
       const b = await mine(ownerId, id);
       await deps.syncAgenda?.({ ...b, agent: undefined }).catch(() => undefined);
       await media.removeAll(b.id).catch(() => undefined);
+      await programs.dropAll(b).catch(() => undefined);
       await Promise.all([kv.del(`biz:${b.id}`), kv.del(`biz-slug:${b.slug}`), kv.del(`biz-enq:${b.id}`), kv.del(`biz-stats:${b.id}`), kv.del(`biz-ledger:${b.id}`), kv.del(`biz-secrets:${b.id}`), kv.del(`biz-posts:${b.id}`), kv.del(`biz-likes:${b.id}`), kv.del(`biz-workflows:${b.id}`), kv.del(`biz-recurring:${b.id}`), kv.del(`biz-trackers:${b.id}`), kv.del(`biz-records:${b.id}`), kv.del(`biz-budgets:${b.id}`), kv.del(`biz-comments:${b.id}`)]);
       const ids = (await kv.get<{ ids: string[] }>(`biz-owner:${ownerId}`))?.ids ?? []; await kv.put(`biz-owner:${ownerId}`, { ids: ids.filter((x) => x !== b.id) });
       const all = (await kv.get<{ ids: string[] }>('biz-index'))?.ids ?? []; await kv.put('biz-index', { ids: all.filter((x) => x !== b.id) });

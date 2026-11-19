@@ -173,6 +173,8 @@ export interface PublicBusiness {
   sections?: PublicSection[];
   /** Present when visitors can pay online right on the page. */
   payOnline?: { open: boolean };
+  /** Plans customers can join (a month of lunches, a weekly pass…): see programs.ts. */
+  programs?: Array<{ id: string; title: string; description?: string; priceRwf: number; days: number; meals: string[]; openDays: Day[]; windows?: Array<{ meal: string; from: string; to: string }>; terms?: string; full: boolean }>;
   products: Array<{ id: string; name: string; price: number | null; unit?: string; description?: string; media?: PublicMedia; available: boolean }>;
   gallery: PublicMedia[];
   updatedAt: string;

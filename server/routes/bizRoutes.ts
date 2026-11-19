@@ -4,6 +4,7 @@ import { requireAuth } from '../../production/auth.js';
 import { visitorKey } from '../services/appFeedback.js';
 import { bizService } from '../services/biz/runtime.js';
 import { BizError } from '../services/biz/service.js';
+import { ProgramError } from '../services/biz/programsService.js';
 import { MediaError } from '../services/biz/media.js';
 import { FREE_LIMITS, PAID_LIMITS, openNow } from '../services/biz/model.js';
 import { planFor } from '../services/billing/plans.js';
@@ -24,6 +25,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 26 
 const who = (req: Request) => visitorKey(String(req.ip ?? req.socket?.remoteAddress ?? ''), String(req.headers['user-agent'] ?? ''));
 const me = (req: Request) => String((req as any).user?.userId ?? '');
 function fail(res: Response, e: unknown) {
+  if (e instanceof ProgramError) return res.status(e.status).json({ error: e.message, code: e.code });
   if (e instanceof BizError || e instanceof MediaError) return res.status(e.status).json({ error: e.message, ...(e instanceof BizError ? { code: e.code } : {}) });
   logger.error('[biz] failed', { errorType: (e as Error)?.name });
   return res.status(500).json({ error: 'Something went wrong. Please try again.' });
@@ -89,6 +91,11 @@ export function createBizRouter(): Router {
   r.post('/public/:slug/order', run(async (req, res) => { const out = await svc().submitOrder(req.params.slug, req.body ?? {}, who(req)); res.status(out.saved ? 201 : 200).json({ ok: true, total: out.total }); }));
   r.post('/public/:slug/pay', run(async (req, res) => res.status(201).json(await svc().submitPayment(req.params.slug, req.body ?? {}, who(req)))));
   r.get('/public/:slug/pay/:ref', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await svc().publicPayStatus(req.params.slug, req.params.ref)); }));
+  // Meal plans and other programs: join from the shared link, pay, and show the pass. The pass link is a secret only its holder has.
+  r.post('/public/:slug/plans/:pid/join', run(async (req, res) => res.status(201).json(await svc().joinProgram(req.params.slug, req.params.pid, req.body ?? {}, who(req)))));
+  r.get('/public/:slug/pass/:token', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Robots-Tag', 'noindex'); res.json(await svc().passView(req.params.slug, req.params.token)); }));
+  r.post('/public/:slug/pass/:token/pay', run(async (req, res) => res.json(await svc().payMember(req.params.slug, req.params.token, req.body ?? {}, who(req)))));
+  r.post('/public/:slug/pass/:token/claim', run(async (req, res) => res.json(await svc().claimPaid(req.params.slug, req.params.token, req.body ?? {}, who(req)))));
   r.post('/public/:slug/report', run(async (req, res) => { await svc().report(req.params.slug, req.body ?? {}, who(req)); res.json({ ok: true }); }));
 
   r.get('/owner-media/:bizId/:mid', run(async (req, res) => {
@@ -114,6 +121,17 @@ export function createBizRouter(): Router {
   r.patch('/:id', run(async (req, res) => res.json({ business: await svc().update(me(req), req.params.id, req.body ?? {}) })));
   r.delete('/:id', run(async (req, res) => { await svc().remove(me(req), req.params.id); res.status(204).end(); }));
   r.post('/:id/publish', run(async (req, res) => res.json({ business: await svc().setPublished(me(req), req.params.id, req.body?.on === true) })));
+
+  // programs (meal plans): the plans, the people on them, serving a meal by scan or code
+  r.get('/:id/programs', run(async (req, res) => res.json({ programs: await svc().programs(me(req), req.params.id), summary: await svc().programSummary(me(req), req.params.id) })));
+  r.post('/:id/programs', run(async (req, res) => res.status(201).json({ program: await svc().saveProgram(me(req), req.params.id, req.body ?? {}) })));
+  r.delete('/:id/programs/:pid', run(async (req, res) => { await svc().deleteProgram(me(req), req.params.id, req.params.pid); res.status(204).end(); }));
+  r.get('/:id/members', run(async (req, res) => res.json({ members: await svc().members(me(req), req.params.id, { programId: typeof req.query.program === 'string' ? req.query.program : undefined, state: typeof req.query.state === 'string' ? req.query.state : undefined, q: typeof req.query.q === 'string' ? req.query.q : undefined }) })));
+  r.post('/:id/members/:mid/confirm', run(async (req, res) => res.json({ member: await svc().confirmPayment(me(req), req.params.id, req.params.mid, req.body ?? {}) })));
+  r.patch('/:id/members/:mid', run(async (req, res) => res.json({ member: await svc().setMember(me(req), req.params.id, req.params.mid, req.body ?? {}) })));
+  r.post('/:id/meals/redeem', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await svc().redeem(me(req), req.params.id, req.body ?? {})); }));
+  r.post('/:id/meals/:mealId/undo', run(async (req, res) => res.json(await svc().undoMeal(me(req), req.params.id, req.params.mealId))));
+  r.get('/:id/meals/today', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await svc().today(me(req), req.params.id)); }));
 
   r.post('/:id/products', run(async (req, res) => res.status(201).json({ product: await svc().addProduct(me(req), req.params.id, req.body ?? {}) })));
   r.patch('/:id/products/:pid', run(async (req, res) => res.json({ product: await svc().updateProduct(me(req), req.params.id, req.params.pid, req.body ?? {}) })));
