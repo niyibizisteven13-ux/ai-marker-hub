@@ -25,7 +25,7 @@ import {
   HelpCircle,
   ExternalLink,
   LogOut,
-  Copy, X, FolderUp, Coins,
+  Copy, X, FolderUp, Coins, Monitor, ClipboardPaste,
 } from 'lucide-react';
 import { creditMeter, useBillingMe } from './PlanStatus';
 import { useNextPrompt } from '../hooks/useNextPrompt';
@@ -150,6 +150,12 @@ export default function CreateStudio({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const [zipping, setZipping] = useState(false);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const plusPanelRef = useRef<HTMLDivElement>(null);
+  const plusButtonRef = useRef<HTMLButtonElement>(null);
+  const [pasteDialog, setPasteDialog] = useState<string | null>(null);
+  const canScreenshot = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getDisplayMedia && !/Android|iPhone|iPad/i.test(navigator.userAgent);
+  const isTouch = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches;
   const billing = useBillingMe(true);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
@@ -266,6 +272,46 @@ export default function CreateStudio({
       setZipping(false);
     }
   };
+
+  // Capture the screen (or a window/tab) once and attach it as a PNG, like Claude's "Take a screenshot".
+  const takeScreenshot = async () => {
+    let stream: MediaStream | null = null;
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      const video = document.createElement('video');
+      video.srcObject = stream;
+      video.muted = true;
+      await video.play();
+      await new Promise((r) => setTimeout(r, 250));
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+      canvas.getContext('2d')?.drawImage(video, 0, 0);
+      const blob: Blob | null = await new Promise((r) => canvas.toBlob(r, 'image/png'));
+      if (blob) onStageAttachments?.([new File([blob], `screenshot-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.png`, { type: 'image/png' })]);
+    } catch { /* cancelled by the user */ } finally {
+      stream?.getTracks().forEach((t) => t.stop());
+    }
+  };
+
+  const closePlusMenu = (restoreFocus = true) => {
+    setPlusMenuOpen(false);
+    if (restoreFocus) plusButtonRef.current?.focus();
+  };
+
+  // Arrow keys move through the menu, Escape closes it and returns focus to the "+" button.
+  const handlePlusMenuKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Escape') { e.preventDefault(); closePlusMenu(); return; }
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Home' && e.key !== 'End') return;
+    const items = Array.from(plusPanelRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') || []);
+    if (!items.length) return;
+    e.preventDefault();
+    const at = items.indexOf(document.activeElement as HTMLElement);
+    const next = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : e.key === 'ArrowDown' ? (at + 1) % items.length : (at - 1 + items.length) % items.length;
+    items[next].focus();
+  };
+  useEffect(() => {
+    if (plusMenuOpen) requestAnimationFrame(() => plusPanelRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus());
+  }, [plusMenuOpen]);
 
   const handleComposerPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const files = Array.from(e.clipboardData.files || []);
@@ -664,6 +710,14 @@ export default function CreateStudio({
         className="hidden"
       />
       <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={handleFileChange}
+        className="hidden"
+      />
+      <input
         ref={folderInputRef}
         type="file"
         multiple
@@ -671,6 +725,26 @@ export default function CreateStudio({
         onChange={(e) => void handleFolderChange(e)}
         className="hidden"
       />
+
+      {pasteDialog !== null && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="Paste text as attachment"
+          onKeyDown={(e) => { if (e.key === 'Escape') setPasteDialog(null); }}>
+          <div className="w-full max-w-lg rounded-2xl border border-white/15 bg-[var(--app-panel-2)] p-4 shadow-2xl">
+            <h2 className="mb-2 text-sm font-semibold text-[var(--app-text)]">Paste text as attachment</h2>
+            <textarea autoFocus value={pasteDialog} onChange={(e) => setPasteDialog(e.target.value)} rows={10} placeholder="Paste or type the text here…"
+              className="w-full resize-none rounded-xl border border-white/10 bg-black/20 p-3 text-sm text-[var(--app-text)] outline-none focus:border-white/30" />
+            <div className="mt-3 flex items-center justify-between">
+              <span className="text-xs text-[var(--app-muted)]">{pasteDialog.length.toLocaleString()} characters</span>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setPasteDialog(null)} className="rounded-full border border-white/10 px-4 py-1.5 text-xs text-neutral-300 hover:bg-white/5">Cancel</button>
+                <button type="button" disabled={!pasteDialog.trim()}
+                  onClick={() => { onStageAttachments?.([new File([pasteDialog], `pasted-text-${new Date().toISOString().slice(11, 19).replace(/:/g, '')}.txt`, { type: 'text/plain' })]); setPasteDialog(null); }}
+                  className="rounded-full bg-white px-4 py-1.5 text-xs font-medium text-black disabled:opacity-40">Attach</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Composer Footer */}
       <footer className="shrink-0 bg-[var(--app-bg)] px-3 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))]">
@@ -703,56 +777,49 @@ export default function CreateStudio({
               {/* Plus Button with Menu Popover */}
               <div className="relative" ref={plusMenuRef}>
                 <button
+                  ref={plusButtonRef}
                   type="button"
+                  aria-haspopup="menu"
+                  aria-expanded={plusMenuOpen}
+                  aria-label="Add files and more"
                   onClick={() => setPlusMenuOpen((prev) => !prev)}
                   className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 text-[var(--app-muted)] hover:bg-white/5 hover:text-white transition-colors"
-                  title="Add attachments or mark papers"
+                  title="Add files and more"
                 >
-                  <Plus size={18} />
+                  <Plus size={18} className={`transition-transform duration-150 ${plusMenuOpen ? 'rotate-45' : ''}`} />
                 </button>
 
                 {plusMenuOpen && (
-                  <div className="absolute bottom-full left-0 mb-2 w-52 rounded-2xl border border-white/15 bg-[var(--app-panel-2)] shadow-2xl z-50 py-1.5 text-xs text-[var(--app-text)] animate-in fade-in slide-in-from-bottom-1">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        fileInputRef.current?.click();
-                        setPlusMenuOpen(false);
-                      }}
-                      className="w-full flex items-center px-3.5 py-2.5 hover:bg-white/5 text-left text-neutral-200"
-                    >
-                      <Paperclip className="mr-3 w-4 h-4 text-amber-400" /> Upload File
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        folderInputRef.current?.click();
-                        setPlusMenuOpen(false);
-                      }}
-                      className="w-full flex items-center px-3.5 py-2.5 hover:bg-white/5 text-left text-neutral-200"
-                    >
-                      <FolderUp className="mr-3 w-4 h-4 text-violet-300" /> Upload Folder
-                    </button>
-                    {onOpenScanner && <button
-                      type="button"
-                      onClick={() => {
-                        onOpenScanner?.();
-                        setPlusMenuOpen(false);
-                      }}
-                      className="w-full flex items-center px-3.5 py-2.5 hover:bg-white/5 text-left text-neutral-200"
-                    >
-                      <Camera className="mr-3 w-4 h-4 text-emerald-400" /> Mark papers with the camera
-                    </button>}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setInputValue((prev) => prev + '[Paste Text Here] ');
-                        setPlusMenuOpen(false);
-                      }}
-                      className="w-full flex items-center px-3.5 py-2.5 hover:bg-white/5 text-left text-neutral-200"
-                    >
-                      <FileText className="mr-3 w-4 h-4 text-sky-400" /> Paste Text
-                    </button>
+                  <div
+                    ref={plusPanelRef}
+                    role="menu"
+                    aria-label="Add to message"
+                    onKeyDown={handlePlusMenuKey}
+                    className="absolute bottom-full left-0 mb-2 w-64 rounded-2xl border border-white/15 bg-[var(--app-panel-2)] shadow-2xl z-50 py-1.5 text-sm text-[var(--app-text)] animate-in fade-in slide-in-from-bottom-2"
+                  >
+                    {([
+                      { key: 'files', icon: <Paperclip className="w-4 h-4 text-amber-400" />, label: 'Add files or photos', hint: 'PDF, Word, slides, sheets, images', run: () => fileInputRef.current?.click(), show: true },
+                      { key: 'camera', icon: <Camera className="w-4 h-4 text-emerald-400" />, label: 'Take a photo', hint: 'Use your camera', run: () => cameraInputRef.current?.click(), show: isTouch },
+                      { key: 'shot', icon: <Monitor className="w-4 h-4 text-sky-400" />, label: 'Take a screenshot', hint: 'Capture a screen or window', run: () => void takeScreenshot(), show: canScreenshot },
+                      { key: 'folder', icon: <FolderUp className="w-4 h-4 text-violet-300" />, label: 'Add a folder', hint: 'Sent as one ZIP', run: () => folderInputRef.current?.click(), show: !isTouch },
+                      { key: 'scan', icon: <Camera className="w-4 h-4 text-emerald-400" />, label: 'Mark papers with the camera', hint: 'Scan and grade student work', run: () => onOpenScanner?.(), show: !!onOpenScanner },
+                      { key: 'text', icon: <ClipboardPaste className="w-4 h-4 text-sky-400" />, label: 'Paste text as attachment', hint: 'Keeps long text out of your message', run: () => setPasteDialog(''), show: true },
+                    ] as const).filter((i) => i.show).map((item) => (
+                      <button
+                        key={item.key}
+                        type="button"
+                        role="menuitem"
+                        onClick={() => { closePlusMenu(false); item.run(); }}
+                        className="w-full flex items-center gap-3 px-3.5 py-2 hover:bg-white/5 focus:bg-white/10 focus:outline-none text-left text-neutral-200"
+                      >
+                        <span className="shrink-0">{item.icon}</span>
+                        <span className="min-w-0">
+                          <span className="block leading-tight">{item.label}</span>
+                          <span className="block text-[11px] leading-tight text-[var(--app-muted)]">{item.hint}</span>
+                        </span>
+                      </button>
+                    ))}
+                    <p className="border-t border-white/10 mt-1 px-3.5 pt-2 pb-1 text-[11px] text-[var(--app-muted)]">Up to 10 files per message. You can also drag files here or paste them.</p>
                   </div>
                 )}
               </div>
