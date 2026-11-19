@@ -102,7 +102,7 @@ export function createBizRouter(): Router {
   r.get('/public/:slug/me/card', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Robots-Tag', 'noindex'); res.json(await svc().card(req.params.slug, sess(req), typeof req.query.card === 'string' ? req.query.card : undefined)); }));
   r.post('/public/:slug/me/pay', run(async (req, res) => res.json(await svc().payCard(req.params.slug, sess(req), String(req.body?.cardId ?? ''), req.body ?? {}, who(req)))));
   r.post('/public/:slug/me/claim', run(async (req, res) => res.json(await svc().claimCard(req.params.slug, sess(req), String(req.body?.cardId ?? ''), req.body ?? {}, who(req)))));
-  r.post('/public/:slug/me/tick', run(async (req, res) => res.json(await svc().selfUse(req.params.slug, sess(req), String(req.body?.cardId ?? ''), req.body ?? {}, who(req)))));
+  r.post('/public/:slug/me/tick', run(async (req, res) => res.json(await svc().selfUse(req.params.slug, sess(req), req.body ?? {}, who(req)))));
   r.post('/public/:slug/me/untick', run(async (req, res) => res.json(await svc().selfUndo(req.params.slug, sess(req), String(req.body?.cardId ?? ''), String(req.body?.useId ?? '')))));
   r.post('/public/:slug/me/passcode', run(async (req, res) => res.json(await svc().changePasscode(req.params.slug, sess(req), req.body ?? {}))));
   r.post('/public/:slug/report', run(async (req, res) => { await svc().report(req.params.slug, req.body ?? {}, who(req)); res.json({ ok: true }); }));
@@ -141,6 +141,7 @@ export function createBizRouter(): Router {
   r.post('/:id/members/:mid/reset-passcode', run(async (req, res) => res.json(await svc().resetPasscode(me(req), req.params.id, req.params.mid))));
   r.post('/:id/members/:mid/confirm', run(async (req, res) => res.json({ member: await svc().confirmPayment(me(req), req.params.id, req.params.mid, req.body ?? {}) })));
   r.patch('/:id/members/:mid', run(async (req, res) => res.json({ member: await svc().setMember(me(req), req.params.id, req.params.mid, req.body ?? {}) })));
+  r.get('/:id/programs/:pid/checkin-code', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await svc().checkinCode(me(req), req.params.id, req.params.pid)); }));
   r.post('/:id/uses/redeem', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await svc().redeem(me(req), req.params.id, req.body ?? {})); }));
   r.post('/:id/uses/:useId/undo', run(async (req, res) => res.json(await svc().undoUse(me(req), req.params.id, req.params.useId))));
   r.get('/:id/uses/today', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await svc().today(me(req), req.params.id)); }));

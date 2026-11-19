@@ -77,7 +77,7 @@ export interface CardInfo {
   member: { name: string; phone: string; idNumber?: string; code: string; state: PlanState; startDate: string; endDate: string; daysLeft: number; servingDaysLeft: number; usesLeft: number; usedTotal: number; paid: boolean; paidAt: string | null };
   qr: string | null;
   /** Only when the owner set self check-in: what the customer can tap now, and the tick they can still take back. */
-  tick: null | { items: Array<{ item: string; allowed: boolean; reason?: string; message?: string }>; undo: { useId: string; item: string } | null };
+  tick: null | { needsCode: true; items: Array<{ item: string; allowed: boolean; reason?: string; message?: string }>; undo: { useId: string; item: string } | null };
   today: { date: string; openToday: boolean; used: Array<{ item: string; at: string }> };
   calendar: CardDay[];
   payment: null | { amount: number; momoCode: string | null; momoName: string | null; online: boolean; promptSent: boolean; claimed: { at: string; ref?: string } | null; whatsapp: string | null };
