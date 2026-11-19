@@ -2899,6 +2899,7 @@ async function startServer() {
         const { bizService } = await import('./server/services/biz/runtime.js'); const { renderShell } = await import('./server/services/biz/shell.js');
         const b = await bizService().publicBySlug(String(req.params.slug));
         res.status(b ? 200 : 404).type('html').setHeader('Cache-Control', 'no-cache');
+        if (typeof req.query.pass === 'string') res.setHeader('X-Robots-Tag', 'noindex, nofollow');   // a meal pass link is a secret: never indexed
         res.send(b ? renderShell(html, b, process.env.APP_BASE_URL || `${req.protocol}://${req.get('host')}`) : html);
       } catch { res.sendFile(path.join(distPath, 'index.html')); }
     });

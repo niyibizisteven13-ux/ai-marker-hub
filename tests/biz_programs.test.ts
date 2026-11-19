@@ -171,3 +171,17 @@ test('the owner sees expiring plans and what was sold; deleting the business rem
   at(Date.parse('2026-12-14T10:00:00Z')); s = await svc.programSummary('o', biz.id); assert.equal(s.expiring.length, 1); assert.equal(s.expiring[0].name, 'Fay');
   await svc.remove('o', biz.id); const left = [...kv.data.keys()].filter((k) => /^biz-(programs|members|pass|meals|served)/.test(k)); assert.deepEqual(left, []);
 });
+
+import { bizTools } from '../server/services/ai/tools/bizTools.js';
+test('the assistant can make a meal plan, give the share link, and report how the plans are doing', async () => {
+  const { svc, kv } = make(); void kv; const tools = Object.fromEntries(bizTools(() => svc).map((t) => [t.definition.name, t])) as any; const c: any = { userId: 'u1', files: {}, services: {} };
+  await tools.biz_create.execute({ name: 'Campus Canteen', category: 'restaurant' }, c);
+  assert.match((await tools.biz_program.execute({}, c)).text, /No plans yet/);
+  const made = await tools.biz_program.execute({ title: 'Lunch plan', price_rwf: 40000, days: 30, meals: ['Lunch'], open_days: ['mon', 'tue', 'wed', 'thu', 'fri'] }, c);
+  assert.match(made.text, /40,000 RWF for 30 days/); assert.match(made.text, /\/b\/campus-canteen\?plan=/); assert.match(made.text, /not published yet/);
+  const bad = await tools.biz_program.execute({ title: 'x', price_rwf: 5 }, c); assert.ok(bad.isError || /price must be between/.test(bad.text), bad.text);
+  const list = await tools.biz_program.execute({}, c); assert.match(list.text, /Lunch plan \(id /); assert.match(list.text, /0 active, 0 waiting for payment/);
+  const status = await tools.biz_plan_status.execute({}, c); assert.match(status.text, /Members: 0 active/); assert.match(status.text, /Nobody is ending within 3 days/);
+  assert.match((await tools.biz_plan_status.execute({ q: 'zzz' }, c)).text, /No member matches/);
+  const other: any = { userId: 'u2', files: {}, services: {} }; assert.match((await tools.biz_program.execute({}, other)).text, /no business page yet|No business/i, 'another person has no access');
+});

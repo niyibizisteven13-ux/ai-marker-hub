@@ -44,3 +44,35 @@ export interface FieldInfo { key: string; label: string; type: 'text' | 'number'
 export interface TrackerInfo { id: string; name: string; description: string; fields: FieldInfo[]; statuses: string[]; records?: number; open?: number }
 export interface TrackerRecordInfo { id: string; at: string; values: Record<string, string | number>; status: string; src: 'studio' | 'chat' | 'page' }
 export interface SectionInfo { id: string; type: 'text' | 'faq' | 'list' | 'links' | 'form'; title: string; body?: string; items?: Array<{ title: string; text?: string; price?: string; url?: string }>; trackerId?: string; button?: string; hidden?: boolean }
+
+/* ---- Programs (meal plans): see server/services/biz/programs.ts */
+export type DayId = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+export interface MealWindow { meal: string; from: string; to: string }
+export interface ProgramInfo {
+  id: string; title: string; description?: string; priceRwf: number; days: number; meals: string[]; openDays: DayId[]; windows?: MealWindow[]; terms?: string; maxMembers?: number; active: boolean;
+  counts?: { active: number; pending: number; total: number };
+}
+export type PlanState = 'pending' | 'not_started' | 'active' | 'expired' | 'paused' | 'cancelled';
+export interface MemberInfo {
+  id: string; programId: string; programTitle: string; name: string; phone: string; studentId?: string; code: string; state: PlanState; startDate: string; endDate: string;
+  paid: boolean; paidRwf: number; payMethod?: 'momo_prompt' | 'momo_manual' | 'cash'; claimed?: { at: string; ref?: string }; note?: string;
+  servingDaysLeft: number; mealsLeft: number; eatenToday: string[]; createdAt: string;
+}
+export interface ProgramSummary {
+  plans: number; members: number; active: number; pending: number; expired: number; soldThisMonth: number; waitingConfirmation: number;
+  expiring: Array<{ memberId: string; name: string; phone: string; endDate: string; program: string }>;
+}
+export interface RedeemResult { ok: boolean; code?: string; message?: string; meal?: string; mealId?: string; member?: MemberInfo }
+export interface TodayInfo {
+  date: string; open: boolean; servedCount: number; expected: number;
+  served: Array<{ mealId: string; memberId: string; name: string; code: string; meal: string; at: string; canUndo: boolean }>;
+  notYet: Array<{ memberId: string; name: string; phone: string; code: string }>;
+}
+export interface PassInfo {
+  business: { name: string; slug: string; theme: string };
+  program: { title: string; meals: string[]; openDays: DayId[]; windows?: MealWindow[]; terms?: string; priceRwf: number };
+  member: { name: string; code: string; state: PlanState; startDate: string; endDate: string; daysLeft: number; servingDaysLeft: number; mealsLeft: number; paid: boolean };
+  today: { date: string; openToday: boolean; eaten: Array<{ meal: string; at: string }> };
+  history: Array<{ date: string; meals: string[] }>;
+  payment: null | { amount: number; momoCode: string | null; momoName: string | null; online: boolean; promptSent: boolean; claimed: { at: string; ref?: string } | null; whatsapp: string | null };
+}

@@ -412,5 +412,32 @@ export function bizTools(getSvc: () => Promise<BizService> | BizService = async 
       } catch (e) { return failure(e); }
     },
   };
-  return [get, create, update, addProduct, changeProduct, addMedia, publish, link, messages, record('sale'), record('expense'), dashboard, orders, requestPay, payStatus, paySetup, report, stock, agent, post, open, workflow, entries, costs, recurring, budget, feature, section, tracker, records, translate, language];
+  const program: Tool = {
+    definition: { name: 'biz_program', description: "Meal plans / subscription programs a business sells once (for example 40,000 RWF for a month of lunches at a restaurant near a university): customers open a link, join, pay, and show a QR pass each day; the owner scans it and serves one meal a day. Call with NO plan fields to list the plans and their share links. To create a plan give title, price_rwf, days (how long it lasts), meals (for example [\"Lunch\"]) and open_days (days of the week served); to change one also give its id. Plans can only be taken by customers while the page is published. Tell the owner the link to share (WhatsApp) after creating.",
+      parameters: { type: 'object', properties: { business: BUSINESS, id: { type: 'string' }, title: { type: 'string' }, price_rwf: { type: 'number' }, days: { type: 'number', description: 'How many days the plan lasts, e.g. 30.' }, meals: { type: 'array', items: { type: 'string' } }, open_days: { type: 'array', items: { type: 'string', enum: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] } }, description: { type: 'string' }, terms: { type: 'string' }, max_members: { type: 'number' }, active: { type: 'boolean', description: 'false closes new sign-ups.' } } } },
+    async execute(input, ctx) {
+      try {
+        const b = await pick(ctx.userId, input.business); if ('error' in b) return err(b.error); const s = await svc();
+        if (input.title || input.price_rwf !== undefined || input.id) {
+          const p = await s.saveProgram(ctx.userId, b.id, { id: input.id, title: input.title, priceRwf: input.price_rwf, days: input.days, meals: input.meals, openDays: input.open_days, description: input.description, terms: input.terms, maxMembers: input.max_members, active: input.active });
+          return { text: `Saved the plan "${p.title}": ${rwf(p.priceRwf)} for ${p.days} days, ${p.meals.join(' + ')}, ${p.openDays.join(' ')}${p.active ? '' : ' (closed to new members)'}. Share this link with students: ${site()}/b/${b.slug}?plan=${p.id}${b.published ? '' : ' (the page is not published yet: publish it first so the link works)'}` };
+        }
+        const list = await s.programs(ctx.userId, b.id);
+        return { text: list.length ? list.map((p) => `${p.title} (id ${p.id}): ${rwf(p.priceRwf)} for ${p.days} days, ${p.meals.join(' + ')}; ${p.counts.active} active, ${p.counts.pending} waiting for payment. Link: ${site()}/b/${b.slug}?plan=${p.id}`).join('\n') : 'No plans yet. Create one with a title, price_rwf, days, meals and open_days.' };
+      } catch (e) { return failure(e); }
+    },
+  };
+  const planStatus: Tool = {
+    definition: { name: 'biz_plan_status', description: "How the meal plans are doing (read-only): active members, who is waiting to be confirmed as paid, plans ending soon, what was sold this month and who was served today. Give q to look up one member by name, phone or code. To confirm a payment or serve meals the owner uses the Meal plans screen in the dashboard.",
+      parameters: { type: 'object', properties: { business: BUSINESS, q: { type: 'string' } } } },
+    async execute(input, ctx) {
+      try {
+        const b = await pick(ctx.userId, input.business); if ('error' in b) return err(b.error); const s = await svc();
+        if (input.q) { const m = await s.members(ctx.userId, b.id, { q: String(input.q) }); return { text: m.length ? m.slice(0, 10).map((x) => `${x.name} (${x.code}): ${x.programTitle}, ${x.state}${x.state === 'active' ? `, ${x.mealsLeft} meals left, until ${x.endDate}` : ''}${x.eatenToday.length ? `, served today: ${x.eatenToday.join(', ')}` : ''}${x.claimed ? ', says they paid' : ''}`).join('\n') : 'No member matches that.' }; }
+        const [sum, today] = await Promise.all([s.programSummary(ctx.userId, b.id), s.today(ctx.userId, b.id)]);
+        return { text: [`Members: ${sum.active} active, ${sum.pending} waiting for payment (${sum.waitingConfirmation} say they paid and need confirming), ${sum.expired} ended. Sold this month: ${rwf(sum.soldThisMonth)}.`, `Today (${today.date}): ${today.servedCount} served, ${today.notYet.length} with a plan today have not come yet${today.open ? '' : ' (no meals are served today)'}.`, sum.expiring.length ? `Ending within 3 days: ${sum.expiring.map((e) => `${e.name} (${e.endDate})`).join(', ')}.` : 'Nobody is ending within 3 days.'].join('\n') };
+      } catch (e) { return failure(e); }
+    },
+  };
+  return [get, create, update, addProduct, changeProduct, addMedia, publish, link, messages, record('sale'), record('expense'), dashboard, orders, requestPay, payStatus, paySetup, report, stock, agent, post, open, workflow, entries, costs, recurring, budget, program, planStatus, feature, section, tracker, records, translate, language];
 }

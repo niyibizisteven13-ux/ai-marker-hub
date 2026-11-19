@@ -16,3 +16,20 @@ export const SRW: Record<string, string> = {
 Object.assign(SRW, { 'Here is how': 'Dore uko', 'is doing today.': 'bimeze uyu munsi.' });
 Object.assign(SRW, { 'Open page': 'Fungura urupapuro', 'vs yesterday': 'ugereranyije n’ejo', 'named in your sales': 'bivugwa mu byacurujwe' });
 export const tx = (s: string): string => (current === 'rw' ? SRW[s] ?? s : s);
+
+// Meal plans (the owner's screens).
+Object.assign(SRW, {
+  'Meal plans': 'Gahunda z’amafunguro', 'Today': 'Uyu munsi', 'Members': 'Abanyamuryango', 'Plans': 'Gahunda', 'Serve a meal': 'Tanga ifunguro', 'Scan a pass': 'Sikana ikarita', 'Serve': 'Tanga', 'Undo': 'Subiza inyuma', 'Next': 'Ukurikira',
+  'Active members': 'Abanyamuryango bakora', 'Waiting for payment': 'Bategereje kwishyura', 'Sold this month': 'Byagurishijwe muri uku kwezi', 'Ending in 3 days': 'Birangira mu minsi 3', 'Active': 'Bakora', 'Ended': 'Byarangiye', 'Paused': 'Byahagaritswe by’agateganyo', 'Cancelled': 'Byakuweho', 'Starts soon': 'Biratangira vuba',
+  'Confirm payment': 'Emeza ubwishyu', 'Paid in cash': 'Yishyuye amafaranga', 'Pause': 'Hagarika by’agateganyo', 'Resume': 'Subukura', 'Add days': 'Ongeraho iminsi', 'Cancel': 'Bireke', 'WhatsApp': 'WhatsApp', 'Says paid': 'Avuga ko yishyuye',
+  'Search name, phone or code': 'Shaka izina, telefoni cyangwa kode', 'All members': 'Abanyamuryango bose', 'All plans': 'Gahunda zose', 'Not yet today': 'Ntibaraza uyu munsi', 'served': 'batanzweho', 'meals left': 'amafunguro asigaye', 'until': 'kugeza ku',
+  'Create a plan': 'Kora gahunda', 'New plan': 'Gahunda nshya', 'Edit plan': 'Hindura gahunda', 'Save plan': 'Bika gahunda', 'Plan name': 'Izina rya gahunda', 'Lunch plan': 'Gahunda y’ifunguro rya saa sita', 'Price (RWF), paid once': 'Igiciro (RWF), kwishyurwa rimwe', 'Lasts (days)': 'Imara (iminsi)',
+  'Meals each day (separate with commas)': 'Amafunguro ya buri munsi (atandukanyijwe n’agakoma)', 'Days you serve': 'Iminsi mutanga amafunguro', 'Serving times (optional)': 'Amasaha yo gutanga (si ngombwa)', 'Maximum members (optional)': 'Umubare ntarengwa w’abanyamuryango (si ngombwa)',
+  'Note for customers (optional)': 'Inyandiko ku bakiriya (si ngombwa)', 'Share this link with students': 'Sangiza abanyeshuri iri huza', 'Copy link': 'Koporora ihuza', 'Copied': 'Byakopowe', 'Share on WhatsApp': 'Sangiza kuri WhatsApp', 'Close signups': 'Hagarika kwiyandikisha', 'Open signups': 'Fungura kwiyandikisha',
+  'Closed to new members': 'Ntibakira abashya', 'Edit': 'Hindura', 'Delete plan': 'Siba gahunda', 'Pass code': 'Kode y’ikarita', 'Camera': 'Kamera', 'Close the camera': 'Funga kamera', 'Unknown pass': 'Ikarita itazwi', 'Serve anyway': 'Tanga uko byagenda kose',
+  'Make your first plan to start serving.': 'Kora gahunda yawe ya mbere kugira ngo utangire.', 'Mon': 'Mbe', 'Tue': 'Kab', 'Wed': 'Gtu', 'Thu': 'Kan', 'Fri': 'Gnu', 'Sat': 'Gnd', 'Sun': 'Cyu',
+  'Sell a plan once, for example a month of lunches. Customers join from a link, pay, and show a pass on their phone. You scan it and serve one meal a day.': 'Gurisha gahunda rimwe, urugero ukwezi k’amafunguro ya saa sita. Abakiriya binjira bakoresheje ihuza, bakishyura, bakerekana ikarita kuri telefoni. Uyisikana ugatanga ifunguro rimwe ku munsi.',
+  "No camera? Type the code shown under the customer's QR code.": 'Nta kamera? Andika kode iri munsi ya QR y’umukiriya.', 'No members yet. Share a plan\'s link from the Plans screen.': 'Nta banyamuryango baraboneka. Sangiza ihuza rya gahunda uri ku rupapuro rwa Gahunda.',
+  'Check your MoMo, then tap Confirm payment.': 'Reba MoMo yawe, hanyuma ukande Emeza ubwishyu.', 'Publish your page first (Public page → Publish), so students can open the link.': 'Banza ushyire paji yawe ahagaragara (Paji rusange → Shyira ahagaragara), kugira ngo abanyeshuri bashobore gufungura ihuza.',
+  'Allow the camera to scan passes, or type the code instead.': 'Emera kamera kugira ngo usikane amakarita, cyangwa wandike kode.', 'This browser cannot open the camera. Type the code instead.': 'Iyi mushakisha ntishobora gufungura kamera. Andika kode.',
+});

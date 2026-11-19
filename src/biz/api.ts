@@ -1,5 +1,5 @@
 import { authFetch, getAccessToken, getApiUrl } from '../utils/authFetch';
-import type { TrackerInfo, TrackerRecordInfo, SectionInfo, Costs, Post, PublicPost, AgentSettings, SecretsStatus, Business, DayStats, Enquiry, Product, PublicBusiness, LedgerEntry, Dashboard } from './types';
+import type { ProgramInfo, MemberInfo, ProgramSummary, RedeemResult, TodayInfo, PassInfo, TrackerInfo, TrackerRecordInfo, SectionInfo, Costs, Post, PublicPost, AgentSettings, SecretsStatus, Business, DayStats, Enquiry, Product, PublicBusiness, LedgerEntry, Dashboard } from './types';
 
 /** Calls to /api/biz. Public calls need no sign-in; the others use the person's own session. */
 export class BizApiError extends Error { constructor(message: string, public status: number, public code?: string) { super(message); } }
@@ -23,6 +23,10 @@ export const publicApi = {
   order: async (slug: string, body: { name: string; contact: string; note?: string; items: Array<{ productId: string; qty: number }>; website?: string }) => read<{ ok: boolean; total: number }>(await fetch(getApiUrl(`/api/biz/public/${encodeURIComponent(slug)}/order`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })),
   pay: async (slug: string, body: { name: string; phone: string; items?: Array<{ productId: string; qty: number }>; amount?: number; website?: string }) => read<{ ref: string; total: number }>(await fetch(getApiUrl(`/api/biz/public/${encodeURIComponent(slug)}/pay`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })),
   payStatus: async (slug: string, ref: string) => read<{ state: 'pending' | 'success' | 'failed' }>(await fetch(getApiUrl(`/api/biz/public/${encodeURIComponent(slug)}/pay/${encodeURIComponent(ref)}`))),
+  join: async (slug: string, pid: string, body: { name: string; phone: string; studentId?: string; startDate?: string; website?: string }) => read<{ token: string; code: string }>(await fetch(getApiUrl(`/api/biz/public/${encodeURIComponent(slug)}/plans/${encodeURIComponent(pid)}/join`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })),
+  pass: async (slug: string, token: string) => read<PassInfo>(await fetch(getApiUrl(`/api/biz/public/${encodeURIComponent(slug)}/pass/${encodeURIComponent(token)}`), { cache: 'no-store' })),
+  payPass: async (slug: string, token: string, phone: string) => read<{ ok: boolean }>(await fetch(getApiUrl(`/api/biz/public/${encodeURIComponent(slug)}/pass/${encodeURIComponent(token)}/pay`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone }) })),
+  claimPass: async (slug: string, token: string, ref: string) => read<{ ok: boolean }>(await fetch(getApiUrl(`/api/biz/public/${encodeURIComponent(slug)}/pass/${encodeURIComponent(token)}/claim`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ref }) })),
   report: async (slug: string, body: { reason: string; detail: string }) => read<{ ok: boolean }>(await fetch(getApiUrl(`/api/biz/public/${encodeURIComponent(slug)}/report`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })),
 };
 
@@ -55,6 +59,15 @@ export const ownerApi = {
   addPost: async (id: string, body: { text: string; mediaIds: string[]; productId?: string }) => (await read<{ post: Post }>(await authFetch(`/api/biz/${id}/posts`, json('POST', body)))).post,
   setPost: async (id: string, pid: string, body: { pinned?: boolean; text?: string; productId?: string }) => read(await authFetch(`/api/biz/${id}/posts/${pid}`, json('PATCH', body))),
   removePost: async (id: string, pid: string) => { const r = await authFetch(`/api/biz/${id}/posts/${pid}`, json('DELETE')); if (!r.ok) await read(r); },
+  programs: async (id: string) => read<{ programs: ProgramInfo[]; summary: ProgramSummary }>(await authFetch(`/api/biz/${id}/programs`)),
+  saveProgram: async (id: string, body: Partial<ProgramInfo> & { id?: string }) => (await read<{ program: ProgramInfo }>(await authFetch(`/api/biz/${id}/programs`, json('POST', body)))).program,
+  deleteProgram: async (id: string, pid: string) => { const r = await authFetch(`/api/biz/${id}/programs/${pid}`, json('DELETE')); if (!r.ok) await read(r); },
+  members: async (id: string, q: { program?: string; state?: string; q?: string } = {}) => (await read<{ members: MemberInfo[] }>(await authFetch(`/api/biz/${id}/members?${new URLSearchParams(Object.entries(q).filter(([, v]) => v) as [string, string][])}`))).members,
+  confirmMember: async (id: string, mid: string, method: 'cash' | 'momo') => (await read<{ member: MemberInfo }>(await authFetch(`/api/biz/${id}/members/${mid}/confirm`, json('POST', { method })))).member,
+  setMember: async (id: string, mid: string, body: { action: 'pause' | 'resume' | 'cancel' | 'extend' | 'note'; days?: number; note?: string }) => (await read<{ member: MemberInfo }>(await authFetch(`/api/biz/${id}/members/${mid}`, json('PATCH', body)))).member,
+  redeem: async (id: string, body: { token?: string; code?: string; memberId?: string; meal?: string; force?: boolean }) => read<RedeemResult>(await authFetch(`/api/biz/${id}/meals/redeem`, json('POST', body))),
+  undoMeal: async (id: string, mealId: string) => read<{ ok: boolean }>(await authFetch(`/api/biz/${id}/meals/${mealId}/undo`, json('POST'))),
+  today: async (id: string) => read<TodayInfo>(await authFetch(`/api/biz/${id}/meals/today`)),
   costs: async (id: string) => read<Costs>(await authFetch(`/api/biz/${id}/costs`)),
   setBudget: async (id: string, category: string, amount: number | null) => read<Costs>(await authFetch(`/api/biz/${id}/budgets`, json('PUT', { category, amount }))),
   addRecurring: async (id: string, body: { name: string; amount: number; every: 'month' | 'week'; on: number; category: string }) => read(await authFetch(`/api/biz/${id}/recurring`, json('POST', body))),

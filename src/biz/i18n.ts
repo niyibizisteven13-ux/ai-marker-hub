@@ -57,3 +57,19 @@ export const initialLang = (b: PublicBusiness): Lang => {
 Object.assign(RW, { 'Sent. The business will contact you.': 'Byoherejwe. Ubucuruzi buzakwandikira.', 'Send': 'Ohereza' });
 Object.assign(RW, { 'love': 'urukundo', 'loves': 'urukundo', 'comment': 'igitekerezo', 'View all': 'Reba byose', 'Language': 'Ururimi' });
 Object.assign(RW, { 'Ask a question or place an order. Leave your phone number or email so the business can reply.': 'Baza ikibazo cyangwa utumize. Shyiraho nimero ya telefoni cyangwa imeri kugira ngo ubucuruzi bugusubize.' });
+
+// Meal plans: the plans, the join form and the student's pass.
+Object.assign(RW, {
+  'Meal plans': 'Gahunda z’amafunguro', 'My meal pass': 'Ikarita yanjye y’ifunguro', 'Pay once, then just show your pass at the counter each day.': 'Ishyura rimwe, hanyuma buri munsi werekane ikarita yawe aho batanga amafunguro.',
+  'for': '', 'days': 'iminsi', 'Every day': 'Buri munsi', 'This plan is full': 'Iyi gahunda yuzuye', 'Preview': 'Reba mbere', 'Join this plan': 'Injira muri iyi gahunda',
+  'Your name': 'Izina ryawe', 'Phone number': 'Numero ya telefoni', 'Student ID (optional)': 'Nomero y’umunyeshuri (si ngombwa)', 'Start on': 'Tangira ku', 'Today': 'Uyu munsi', 'Get my pass': 'Mpa ikarita yanjye',
+  'You will pay on the next screen.': 'Uzishyura ku rupapuro rukurikira.', 'Close': 'Funga', 'ACTIVE': 'IRAKORA', 'WAITING FOR PAYMENT': 'IRATEGEREJE KWISHYURA', 'STARTS SOON': 'IRATANGIRA VUBA', 'PLAN ENDED': 'GAHUNDA YARANGIYE', 'PAUSED': 'YAHAGARITSWE BY’AGATEGANYO', 'CANCELLED': 'YAKUWEHO',
+  'Show this at the counter. If the camera does not work, read the code.': 'Ereka iyi karita aho batanga amafunguro. Niba kamera idakora, soma kode.', 'Not eaten yet today': 'Nta funguro uriye uyu munsi', 'No meals are served today': 'Nta mafunguro atangwa uyu munsi',
+  'Your plan starts on': 'Gahunda yawe itangira ku', 'Meals left': 'Amafunguro asigaye', 'Valid until': 'Igeza ku wa', 'Check your phone and approve the payment.': 'Reba kuri telefoni yawe wemeze kwishyura.',
+  'Pay with your phone (MTN or Airtel)': 'Ishyura ukoresheje telefoni (MTN cyangwa Airtel)', 'Send payment request': 'Ohereza ubusabe bwo kwishyura', 'Send': 'Ohereza', 'by MoMo to': 'kuri MoMo kuri', 'Pay the restaurant at the counter, then tap the button below.': 'Ishyura aho batangira amafunguro, hanyuma ukande buto iri hasi.',
+  'MoMo reference (optional)': 'Nomero y’igikorwa cya MoMo (si ngombwa)', 'I have paid': 'Nishyuye', 'Thank you. The restaurant will confirm your payment, then this pass turns green.': 'Murakoze. Resitora irabyemeza, hanyuma ikarita ihinduke icyatsi.',
+  'Message the restaurant': 'Andikira resitora', 'I joined': 'Nanjiriye muri', 'Your plan ended on': 'Gahunda yawe yarangiye ku', 'Join again from the restaurant page to keep eating with us.': 'Ongera winjire kuri paji ya resitora kugira ngo ukomeze kurya natwe.',
+  'The restaurant paused your plan. Ask them to resume it.': 'Resitora yahagaritse gahunda yawe by’agateganyo. Bayisabe kuyisubukura.', 'This plan was cancelled.': 'Iyi gahunda yakuweho.', 'My meals': 'Amafunguro yanjye', 'Copied': 'Byakopowe', 'Copy my pass link': 'Koporora ihuza ry’ikarita yanjye',
+  'Keep this link safe: anyone who has it can use your meals. Add this page to your home screen to open it fast.': 'Bika iri huza neza: uribonye wese yakoresha amafunguro yawe. Shyira iyi paji kuri ecran ya telefoni kugira ngo uyifungure vuba.',
+  'Mon': 'Mbe', 'Tue': 'Kab', 'Wed': 'Gtu', 'Thu': 'Kan', 'Fri': 'Gnu', 'Sat': 'Gnd', 'Sun': 'Cyu',
+});
