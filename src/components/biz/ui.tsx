@@ -1,3 +1,4 @@
+import { tx } from '../../biz/studioI18n';
 import type { ReactNode } from 'react';
 import { Globe, Lock } from 'lucide-react';
 
@@ -12,8 +13,8 @@ export const rwfShort = (n: number) => (Math.abs(n) >= 1_000_000 ? `${(n / 1_000
 
 export function Tag({ kind }: { kind: 'public' | 'private' }) {
   return kind === 'public'
-    ? <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-700"><Globe size={11} />Visitors see this</span>
-    : <span className="inline-flex items-center gap-1 rounded-full bg-[var(--app-panel-hover)] px-2 py-0.5 text-[11px] font-medium text-[var(--app-muted)]"><Lock size={11} />Only you see this</span>;
+    ? <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-700"><Globe size={11} />{tx("Visitors see this")}</span>
+    : <span className="inline-flex items-center gap-1 rounded-full bg-[var(--app-panel-hover)] px-2 py-0.5 text-[11px] font-medium text-[var(--app-muted)]"><Lock size={11} />{tx("Only you see this")}</span>;
 }
 export const Title = ({ children, kind, hint }: { children: ReactNode; kind?: 'public' | 'private'; hint?: string }) => (
   <div className="mb-4"><div className="flex flex-wrap items-center gap-2"><h2 className="font-display text-lg font-semibold tracking-tight">{children}</h2>{kind && <Tag kind={kind} />}</div>{hint && <p className="mt-1 text-sm text-[var(--app-muted)]">{hint}</p>}</div>
@@ -21,5 +22,5 @@ export const Title = ({ children, kind, hint }: { children: ReactNode; kind?: 'p
 
 /** Shown where a feature needs a paid plan (videos, the business agent, online payments). Photos, the page, the notebook and the feed stay free. */
 export const PaidNote = ({ what, url = '/upgrade' }: { what: string; url?: string }) => (
-  <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-[var(--brand)]/40 bg-[var(--brand)]/10 px-4 py-3 text-sm"><Lock size={16} className="shrink-0" aria-hidden="true" /><p className="min-w-0 flex-1"><b>{what}</b> {what.endsWith('s') ? 'are' : 'is'} for paid plans. Everything else here is free.</p><a href={url} className="rounded-xl bg-[var(--brand)] px-4 py-2 text-sm font-semibold text-[var(--brand-on)]">See plans</a></div>
+  <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-[var(--brand)]/40 bg-[var(--brand)]/10 px-4 py-3 text-sm"><Lock size={16} className="shrink-0" aria-hidden="true" /><p className="min-w-0 flex-1"><b>{what}</b> {what.endsWith('s') ? 'are' : 'is'} for paid plans. Everything else here is free.</p><a href={url} className="rounded-xl bg-[var(--brand)] px-4 py-2 text-sm font-semibold text-[var(--brand-on)]">{tx("See plans")}</a></div>
 );

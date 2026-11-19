@@ -328,3 +328,9 @@ test('public page language: labels translate, unknown labels stay English, the o
   assert.equal(r.sections![0].title, 'Ibibazo'); assert.equal(r.sections![0].items![0].title, 'Murakinguye?'); assert.equal(b.tagline, 'Fresh'); assert.equal(localize(b, 'en'), b);
   assert.equal(localizePosts([{ id: 'x1', text: 'Fresh bread' }, { id: 'x2', text: 'Other' }] as any, b, 'rw')[0].text, 'Imigati mishya'); assert.equal(localizePosts([{ id: 'x2', text: 'Other' }] as any, b, 'rw')[0].text, 'Other');
 });
+
+import { SRW, tx as studioTx, setStudioLang } from '../src/biz/studioI18n.js';
+test('studio language: English by default, Kinyarwanda when chosen, unknown labels stay English, no empty translations', () => {
+  setStudioLang('en'); assert.equal(studioTx('Dashboard'), 'Dashboard'); setStudioLang('rw'); assert.equal(studioTx('Dashboard'), 'Imbonerahamwe'); assert.equal(studioTx('Some label nobody translated'), 'Some label nobody translated');
+  assert.ok(Object.entries(SRW).every(([k, v]) => k.trim().length > 0 && v.trim().length > 0)); assert.ok(Object.keys(SRW).length > 250); setStudioLang('en');
+});
