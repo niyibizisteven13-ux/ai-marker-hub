@@ -32,7 +32,7 @@ test('a plan needs a name, a sensible price and length, at least one item and on
   const p = cleanProgram({ ...LUNCH, priceRwf: '40,000', items: ['Lunch', ' Lunch ', 'Dinner'], windows: [{ item: 'Lunch', from: '11:00', to: '15:00' }, { item: 'Supper', from: '18:00', to: '20:00' }, { item: 'Dinner', from: '20:00', to: '19:00' }] }, 'x', 'n') as Program;
   assert.equal(p.priceRwf, 40000); assert.deepEqual(p.items, ['Lunch', 'Dinner']); assert.deepEqual(p.windows, [{ item: 'Lunch', from: '11:00', to: '15:00' }], 'unknown items and backwards times are dropped');
   assert.deepEqual(cleanJoin({ name: 'A', phone: '0788123456' }), { error: 'Please write your name.' }); assert.ok('error' in (cleanJoin({ name: 'Ann', phone: '12' }) as any));
-  assert.deepEqual(cleanJoin({ name: ' Ann  K ', phone: '0788 123 456', studentId: 'S-77' }), { name: 'Ann K', phone: '250788123456', studentId: 'S-77' });
+  assert.deepEqual(cleanJoin({ name: ' Ann  K ', phone: '0788 123 456', idNumber: 'S-77' }), { name: 'Ann K', phone: '250788123456', idNumber: 'S-77' });
 });
 
 test('dates: a 30-day plan starting on the 1st ends on the 30th; serving days skip closed days', () => {
@@ -75,7 +75,7 @@ test('passes: the token is long and random, only its hash is stored, the QR text
 test('the whole story: owner makes a plan, a student joins from the link, pays, shows the pass, is served once a day, and the money is in the notebook', async () => {
   const { svc, biz, prog, at } = await setup();
   const pub = (await svc.publicBySlug(biz.slug))!; assert.equal(pub.programs!.length, 1); assert.equal(pub.programs![0].priceRwf, 40000);
-  const joined = await svc.joinProgram(biz.slug, prog.id, { name: 'Alice', phone: '0788123456', studentId: 'S1' }, 'v1');
+  const joined = await svc.joinProgram(biz.slug, prog.id, { name: 'Alice', phone: '0788123456', idNumber: 'S1' }, 'v1');
   assert.ok(joined.token.length >= 30); assert.match(joined.code, /^[A-Z0-9]{4}-[A-Z0-9]{4}$/);
   // The student's pass, before paying: tells them how to pay; the money is not counted yet.
   let pass: any = await svc.passView(biz.slug, joined.token);
@@ -228,4 +228,63 @@ test('the wording is general: no message talks about meals, eating or restaurant
   const r: any = await svc.redeem('o', biz.id, { code: j.code }); msgs.push(r.message);
   assert.ok(msgs.length >= 15, `${msgs.length} messages checked`);
   for (const m of msgs) assert.ok(!/meal|restaurant|\beat|lunch plan|served/i.test(m), `a message is not general: "${m}"`);
+});
+
+// ---- the owner chooses every word
+import { cleanProgramText } from '../server/services/biz/programs.js';
+import { DEFAULT_WORDS, RW_WORDS, fill, plural, wordsOf } from '../server/services/biz/programWords.js';
+import { chatSystem } from '../server/services/biz/agent.js';
+
+test('words: plain defaults, a plural worked out from one word, the owner\'s own plural wins, templates fill in three letter-cases, another language has its own base', () => {
+  assert.deepEqual(wordsOf(), DEFAULT_WORDS); assert.equal(wordsOf({}).action, 'Allowed');
+  const w = wordsOf({ program: 'Meal card', member: 'student', use: 'wash', pass: 'ticket', action: 'Serve', idLabel: 'Student ID' });
+  assert.deepEqual([w.programs, w.members, w.uses], ['Meal cards', 'students', 'washes'], 'plural of a custom word');
+  assert.equal(wordsOf({ member: 'umunyeshuri', members: 'abanyeshuri' }).members, 'abanyeshuri', 'the owner\'s own plural');
+  assert.deepEqual(['visit', 'box', 'bus', 'day', 'party'].map(plural), ['visits', 'boxes', 'buses', 'days', 'parties']);
+  assert.equal(fill('{Pass} for the {program}: {uses} left, {PASS}!', w), 'Ticket for the Meal card: washes left, TICKET!');
+  assert.equal(fill('{unknown} stays', w), '{unknown} stays'); assert.equal(fill('{askId}', w), '{askId}', 'only words fill in');
+  assert.equal(wordsOf({}, RW_WORDS).pass, 'ikarita'); assert.equal(wordsOf({ pass: 'tike' }, RW_WORDS).pass, 'tike'); assert.equal(wordsOf({ askId: false, allowOverride: false }).askId, false);
+});
+
+test('the owner\'s words are cleaned: only words, short, an empty one removes the choice', () => {
+  const t = cleanProgramText({ program: '  <b>Meal {card}</b> ', programs: 'x'.repeat(80), member: 'student', action: '', askId: false, allowOverride: true, idLabel: 'Student ID' }, { action: 'Serve', allowOverride: false });
+  assert.equal(t.program, 'bMeal cardb'.length ? t.program : ''); assert.ok(!/[<>{}]/.test(t.program!)); assert.equal(t.programs!.length, 24); assert.equal(t.member, 'student');
+  assert.equal(t.action, undefined, 'empty removes it'); assert.equal(t.askId, false); assert.equal(t.allowOverride, undefined, 'true is the default and is not stored'); assert.equal(t.idLabel, 'Student ID');
+  assert.deepEqual(cleanProgramText({ hacker: 'x', program: 5 }), { program: '5' }, 'unknown keys are ignored');
+});
+
+test('saving the owner\'s words: private to the owner, public only as words, can be removed, and they change what the counter allows and asks', async () => {
+  const { svc, biz, prog, at } = await setup({ windows: [{ item: 'Lunch', from: '13:30', to: '15:00' }] });
+  await assert.rejects(svc.setProgramText('intruder', biz.id, { program: 'x' }), (e: any) => e.status === 404); await assert.rejects(svc.programText('intruder', biz.id), (e: any) => e.status === 404);
+  const saved = await svc.setProgramText('o', biz.id, { program: 'Meal card', programs: 'Meal cards', member: 'student', members: 'students', pass: 'card', use: 'meal', uses: 'meals', action: 'Serve', idLabel: 'Student ID' });
+  assert.equal(saved.program, 'Meal card'); assert.equal((await svc.get('o', biz.id)).programText!.action, 'Serve');
+  const pub: any = await svc.publicBySlug(biz.slug); assert.equal(pub.programText.members, 'students'); assert.deepEqual(Object.keys(pub.programText).sort(), ['action', 'idLabel', 'member', 'members', 'pass', 'program', 'programs', 'use', 'uses']);
+  assert.ok(!JSON.stringify(pub).includes('"o"'), 'nothing private comes with the words');
+  // Not asking for an ID: an ID sent anyway is not kept.
+  await svc.setProgramText('o', biz.id, { askId: false }); await svc.joinProgram(biz.slug, prog.id, { name: 'Ivy', phone: '0788343434', idNumber: 'S-9' }, 'i1');
+  assert.equal((await svc.members('o', biz.id))[0].idNumber, undefined); await svc.setProgramText('o', biz.id, { askId: true });
+  const j = await svc.joinProgram(biz.slug, prog.id, { name: 'Jo', phone: '0788454545', idNumber: 'S-10' }, 'i2'); await svc.confirmPayment('o', biz.id, (await svc.members('o', biz.id)).find((m) => m.name === 'Jo')!.id, { method: 'cash' });
+  assert.equal((await svc.members('o', biz.id, { q: 'Jo' }))[0].idNumber, 'S-10');
+  // Outside the set times (12:00 here, lunch is 13:30-15:00): allowed anyway by default, refused when the owner turned that off.
+  assert.equal(((await svc.redeem('o', biz.id, { code: j.code })) as any).code, 'outside_window');
+  await svc.setProgramText('o', biz.id, { allowOverride: false }); assert.equal(((await svc.redeem('o', biz.id, { code: j.code, force: true })) as any).code, 'outside_window', 'staff may not override');
+  await svc.setProgramText('o', biz.id, { allowOverride: true }); assert.equal(((await svc.redeem('o', biz.id, { code: j.code, force: true })) as any).ok, true); void at;
+  // Remove every word again.
+  await svc.setProgramText('o', biz.id, Object.fromEntries(['program', 'programs', 'member', 'members', 'pass', 'use', 'uses', 'action', 'idLabel'].map((k) => [k, ''])));
+  assert.equal(((await svc.publicBySlug(biz.slug)) as any).programText, undefined);
+});
+
+test('the assistant sets the owner\'s words, then speaks them; its instructions tell it to ask the owner and suggest words that fit', async () => {
+  const { svc } = make(); const tools = Object.fromEntries(bizTools(() => svc).map((t) => [t.definition.name, t])) as any; const c: any = { userId: 'u9', files: {}, services: {} };
+  await tools.biz_create.execute({ name: 'Campus Canteen', category: 'restaurant' }, c);
+  const named = await tools.biz_program.execute({ names: { program: 'Meal card', programs: 'Meal cards', member: 'student', members: 'students', pass: 'card', use: 'meal', uses: 'meals', action: 'Serve', id_label: 'Student ID' } }, c);
+  assert.match(named.text, /called "Meal cards" \(one: "Meal card"\)/); assert.match(named.text, /the people are "students"/); assert.match(named.text, /the check-in word is "Serve"/); assert.match(named.text, /asks for "Student ID"/);
+  const both = await tools.biz_program.execute({ title: 'Lunch card', price_rwf: 40000, days: 30, items: ['Lunch'], open_days: ['mon', 'tue', 'wed', 'thu', 'fri'], names: { ask_id: false, allow_override: false } }, c);
+  assert.match(both.text, /does not ask for an ID/); assert.match(both.text, /may not allow a use outside/); assert.match(both.text, /Saved the plan "Lunch card"/);
+  const list = await tools.biz_program.execute({}, c); assert.match(list.text, /Words in use: Meal cards \/ students \/ card \/ meals \/ check-in "Serve"/);
+  const status = await tools.biz_plan_status.execute({}, c); assert.match(status.text, /^Students: 0 active/); assert.match(await tools.biz_plan_status.execute({ q: 'zzz' }, c).then((r: any) => r.text), /No student matches/);
+  const bz = await svc.create('u9', { name: 'Tmp Co' }); void bz;
+  const prompt = chatSystem({ name: 'Campus Canteen', slug: 'campus-canteen', category: 'restaurant', programText: { program: 'Meal card', member: 'student' } });
+  assert.match(prompt, /THE OWNER NAMES EVERYTHING/); assert.match(prompt, /ask in one short message what they want to call/); assert.match(prompt, /program=Meal card, member=student/); assert.match(prompt, /gym: "Membership"/); assert.match(prompt, /never invent a price/);
+  assert.match(chatSystem({ name: 'X', slug: 'x', category: 'shop' }), /none are set yet/);
 });

@@ -119,3 +119,22 @@ Object.assign(RW, {
   'Sat': 'Gnd',
   'Sun': 'Cyu',
 });
+
+// Programs: templates that carry the owner's own words.
+Object.assign(RW, {
+  'My {pass}': '{Pass} yanjye',
+  'Pay once, then just show your {pass} each time.': 'Ishyura rimwe, hanyuma ujye werekana {pass} yawe buri gihe.',
+  'This {program} is full': '{Program} yuzuye',
+  'Join this {program}': 'Injira muri iyi {program}',
+  'Get my {pass}': 'Mpa {pass} yanjye',
+  'ALL {USES} TAKEN': '{USES} ZOSE ZARARANGIYE',
+  'Your {program} starts on': '{Program} yawe itangira ku',
+  '{Uses} left': '{Uses} zisigaye',
+  'Thank you. The business will confirm your payment, then this {pass} turns green.': 'Murakoze. Ubucuruzi buzemeza ubwishyu bwawe, hanyuma {pass} ihinduke icyatsi.',
+  'Your {program} ended on': '{Program} yawe yarangiye ku',
+  'The business paused your {program}. Ask them to resume it.': 'Ubucuruzi bwahagaritse {program} yawe by’agateganyo. Bubaze ko bayisubukura.',
+  'This {program} was cancelled.': 'Iyi {program} yakuweho.',
+  'Copy my {pass} link': 'Koporora ihuza rya {pass} yanjye',
+  'Keep this link safe: anyone who has it can use your {pass}. Add this page to your home screen to open it fast.': 'Bika iri huza neza: uribonye wese yakoresha {pass} yawe. Shyira iyi paji kuri ecran ya telefoni kugira ngo uyifungure vuba.',
+  'optional': 'si ngombwa',
+});

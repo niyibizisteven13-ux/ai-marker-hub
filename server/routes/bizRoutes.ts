@@ -126,6 +126,8 @@ export function createBizRouter(): Router {
   r.get('/:id/programs', run(async (req, res) => res.json({ programs: await svc().programs(me(req), req.params.id), summary: await svc().programSummary(me(req), req.params.id) })));
   r.post('/:id/programs', run(async (req, res) => res.status(201).json({ program: await svc().saveProgram(me(req), req.params.id, req.body ?? {}) })));
   r.delete('/:id/programs/:pid', run(async (req, res) => { await svc().deleteProgram(me(req), req.params.id, req.params.pid); res.status(204).end(); }));
+  r.get('/:id/program-text', run(async (req, res) => res.json({ text: await svc().programText(me(req), req.params.id) })));
+  r.put('/:id/program-text', run(async (req, res) => res.json({ text: await svc().setProgramText(me(req), req.params.id, req.body ?? {}) })));
   r.get('/:id/members', run(async (req, res) => res.json({ members: await svc().members(me(req), req.params.id, { programId: typeof req.query.program === 'string' ? req.query.program : undefined, state: typeof req.query.state === 'string' ? req.query.state : undefined, q: typeof req.query.q === 'string' ? req.query.q : undefined }) })));
   r.post('/:id/members/:mid/confirm', run(async (req, res) => res.json({ member: await svc().confirmPayment(me(req), req.params.id, req.params.mid, req.body ?? {}) })));
   r.patch('/:id/members/:mid', run(async (req, res) => res.json({ member: await svc().setMember(me(req), req.params.id, req.params.mid, req.body ?? {}) })));

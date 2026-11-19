@@ -132,7 +132,7 @@ export function createBizService(deps: Deps) {
     const id = await slugOwner(String(slug).toLowerCase()); if (!id) return null; const b = await load(id); return b && isLive(b) ? b : null;
   }
 
-  const programs = createPrograms({ kv, now, iso, mine, publicLive, alert, tooMany, payReady, startPayment, settle });
+  const programs = createPrograms({ kv, now, iso, mine, save, publicLive, alert, tooMany, payReady, startPayment, settle });
 
   return {
     ...programs,

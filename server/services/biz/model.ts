@@ -1,5 +1,6 @@
 import type { AgentSettings } from './agent.js';
 import type { Section } from './features.js';
+import type { ProgramText } from './programs.js';
 /**
  * bwenge4biz: a business page on Bwenge (bwenge.space/b/<name>) and the private side the owner uses to run it.
  *
@@ -52,6 +53,8 @@ export interface Business {
   agent?: AgentSettings;
   /** Sections the owner or their agent added to the public page (FAQ, price list, a booking form…). */
   sections?: Section[];
+  /** The owner's own words for programs (what they call the program, a member, the pass, one use…): see programs.ts. */
+  programText?: ProgramText;
   /** The language the page opens in, and what is translated (visitors can switch). */
   lang?: Lang; translations?: Partial<Record<Lang, Translation>>;
   products: Product[]; media: Media[];
@@ -173,6 +176,8 @@ export interface PublicBusiness {
   sections?: PublicSection[];
   /** Present when visitors can pay online right on the page. */
   payOnline?: { open: boolean };
+  /** The owner's own words for the programs below (public: they are only words). */
+  programText?: ProgramText;
   /** Programs customers can join (a monthly pass, ten visits, a month of lunches…): see programs.ts. */
   programs?: Array<{ id: string; title: string; description?: string; priceRwf: number; days: number; totalUses?: number; items: string[]; openDays: Day[]; windows?: Array<{ item: string; from: string; to: string }>; terms?: string; full: boolean }>;
   products: Array<{ id: string; name: string; price: number | null; unit?: string; description?: string; media?: PublicMedia; available: boolean }>;
@@ -195,6 +200,7 @@ export function publicView(b: Business): PublicBusiness {
     gallery: b.media.filter((m) => m.visible && m.id !== b.logoId && m.id !== b.coverId).map((m) => pm(m.id)!),
     updatedAt: b.updatedAt,
   };
+  if (b.programText && Object.keys(b.programText).length) out.programText = { ...b.programText };
   if (b.lang && b.lang !== 'en') out.lang = b.lang; if (b.translations && Object.keys(b.translations).length) out.translations = b.translations;
   if (typeof b.lat === 'number' && typeof b.lng === 'number') out.location = { lat: b.lat, lng: b.lng };
   const logo = pm(b.logoId), cover = pm(b.coverId); if (logo) out.logo = logo; if (cover) out.cover = cover;

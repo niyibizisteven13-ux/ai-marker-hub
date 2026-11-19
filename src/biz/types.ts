@@ -54,7 +54,7 @@ export interface ProgramInfo {
 }
 export type PlanState = 'pending' | 'not_started' | 'active' | 'expired' | 'paused' | 'cancelled';
 export interface MemberInfo {
-  id: string; programId: string; programTitle: string; name: string; phone: string; studentId?: string; code: string; state: PlanState; startDate: string; endDate: string;
+  id: string; programId: string; programTitle: string; name: string; phone: string; idNumber?: string; code: string; state: PlanState; startDate: string; endDate: string;
   paid: boolean; paidRwf: number; payMethod?: 'momo_prompt' | 'momo_manual' | 'cash'; claimed?: { at: string; ref?: string }; note?: string;
   servingDaysLeft: number; usesLeft: number; totalUses?: number; usedTotal?: number; usedToday: string[]; createdAt: string;
 }

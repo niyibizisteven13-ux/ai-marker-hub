@@ -14,6 +14,38 @@ import { DAYS, clean, cleanPhone, oneOf, type Day } from './model.js';
 export const MAX_PROGRAMS = 20;
 export const MAX_MEMBERS = 3000;
 export const MAX_PROGRAM_DAYS = 366;
+/**
+ * The owner's own words for this feature, because every business calls it something different: "Meal card" for students at a restaurant, "Membership"
+ * at a gym, "Wash card" at a laundry. Each is optional (the plain defaults are used for any left out). They are only words: no markup, no braces.
+ */
+export interface ProgramText {
+  /** What the owner calls the program, one and many ("Meal card", "Meal cards"). */
+  program?: string; programs?: string;
+  /** What they call the people who join ("student", "members", "client"). */
+  member?: string; members?: string;
+  /** What they call the pass the person shows ("card", "ticket", "voucher"). */
+  pass?: string;
+  /** What one use is called ("meal", "visit", "wash") and many. */
+  use?: string; uses?: string;
+  /** The word on the check-in result and button ("Serve", "Check in", "Redeem"). */
+  action?: string;
+  /** The question asked when joining ("Student ID", "Membership number"); askId false stops asking. */
+  idLabel?: string; askId?: boolean;
+  /** Whether the person at the counter may allow a use outside the set times. Default yes. */
+  allowOverride?: boolean;
+}
+export const TEXT_KEYS = ['program', 'programs', 'member', 'members', 'pass', 'use', 'uses', 'action'] as const;
+const word = (v: unknown, max: number) => clean(v, max).replace(/[{}<>]/g, '').trim();
+/** Cleans what the owner typed (or the assistant sent) and merges it over what was saved; an empty word removes that choice. */
+export function cleanProgramText(input: any, prev: ProgramText = {}): ProgramText {
+  const out: ProgramText = { ...prev };
+  for (const k of TEXT_KEYS) if (input?.[k] !== undefined) { const w = word(input[k], 24); if (w) out[k] = w; else delete out[k]; }
+  if (input?.idLabel !== undefined) { const w = word(input.idLabel, 30); if (w) out.idLabel = w; else delete out.idLabel; }
+  if (typeof input?.askId === 'boolean') { if (input.askId) delete out.askId; else out.askId = false; }
+  if (typeof input?.allowOverride === 'boolean') { if (input.allowOverride) delete out.allowOverride; else out.allowOverride = false; }
+  return out;
+}
+
 export type MemberStatus = 'pending' | 'active' | 'paused' | 'cancelled';
 
 export interface ItemWindow { item: string; from: string; to: string }
@@ -38,7 +70,7 @@ export interface Program {
   createdAt: string;
 }
 export interface Member {
-  id: string; programId: string; name: string; phone: string; studentId?: string;
+  id: string; programId: string; name: string; phone: string; idNumber?: string;
   /** What the owner types or reads out when the camera is not handy: XXXX-XXXX. */
   code: string;
   /** Only a hash of the pass token is kept: the token itself is in the customer's link and QR code. */
@@ -103,11 +135,11 @@ export function cleanProgram(input: any, id: string, now: string, prev?: Program
 }
 
 /** A person joining: name and phone are required (the phone is how the business reaches them and how an online payment is requested). */
-export function cleanJoin(input: any): { name: string; phone: string; studentId?: string } | { error: string } {
+export function cleanJoin(input: any): { name: string; phone: string; idNumber?: string } | { error: string } {
   const name = clean(input?.name, 60); if (name.length < 2) return { error: 'Please write your name.' };
   const phone = cleanPhone(input?.phone); if (!phone) return { error: 'Please write a phone number the business can reach, like 0788 123 456.' };
-  const studentId = clean(input?.studentId, 30);
-  return { name, phone, ...(studentId ? { studentId } : {}) };
+  const idNumber = clean(input?.idNumber, 30);
+  return { name, phone, ...(idNumber ? { idNumber } : {}) };
 }
 
 /* ---------------------------------------------------------------- secrets */

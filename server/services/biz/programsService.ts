@@ -3,7 +3,7 @@ import { clean } from './model.js';
 import type { Business, PublicBusiness } from './model.js';
 import type { LedgerEntry } from './ledger.js';
 import {
-  MAX_MEMBERS, MAX_PROGRAMS, addDays, canServe, cleanJoin, cleanProgram, cleanStart, dayOfWeek, endDateFor, hashToken, kigaliDate, newCode, newToken, normalizeCode,
+  MAX_MEMBERS, MAX_PROGRAMS, addDays, canServe, cleanJoin, cleanProgram, cleanProgramText, cleanStart, dayOfWeek, endDateFor, hashToken, kigaliDate, newCode, newToken, normalizeCode,
   oneOfMethod, planState, remaining, tokenFromPayload, usesLeft, type DenyCode, type Use, type Member, type PlanState, type Program,
 } from './programs.js';
 
@@ -20,6 +20,7 @@ export class ProgramError extends Error { constructor(message: string, public st
 export interface Helpers {
   kv: Kv; now: () => number; iso: () => string;
   mine: (ownerId: string, id: string) => Promise<Business>;
+  save: (b: Business) => Promise<void>;
   publicLive: (slug: string) => Promise<Business | null>;
   alert: (b: Business, n: { title: string; text: string }) => void;
   tooMany: (key: string, max: number, now: number, windowMs?: number) => boolean;
@@ -37,7 +38,7 @@ async function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
 }
 
 export interface MemberView {
-  id: string; programId: string; programTitle: string; name: string; phone: string; studentId?: string; code: string; state: PlanState;
+  id: string; programId: string; programTitle: string; name: string; phone: string; idNumber?: string; code: string; state: PlanState;
   startDate: string; endDate: string; paid: boolean; paidRwf: number; payMethod?: Member['payMethod']; claimed?: Member['claimed']; note?: string;
   servingDaysLeft: number; usesLeft: number; totalUses?: number; usedTotal?: number; usedToday: string[]; createdAt: string;
 }
@@ -55,7 +56,7 @@ export function createPrograms(h: Helpers) {
   function view(m: Member, p: Program | undefined, today: string, used: Use[] = []): MemberView {
     const r = p ? remaining(m, p, today) : { servingDays: 0, uses: 0 };
     return {
-      id: m.id, programId: m.programId, programTitle: p?.title ?? '(removed plan)', name: m.name, phone: m.phone, ...(m.studentId ? { studentId: m.studentId } : {}), code: m.code, state: planState(m, today),
+      id: m.id, programId: m.programId, programTitle: p?.title ?? '(removed plan)', name: m.name, phone: m.phone, ...(m.idNumber ? { idNumber: m.idNumber } : {}), code: m.code, state: planState(m, today),
       startDate: m.startDate, endDate: m.endDate, paid: m.paid, paidRwf: m.paidRwf, ...(m.payMethod ? { payMethod: m.payMethod } : {}), ...(m.claimed ? { claimed: m.claimed } : {}), ...(m.note ? { note: m.note } : {}),
       servingDaysLeft: Math.max(0, r.servingDays - (p && used.length >= p.items.length ? 1 : 0)), usesLeft: p ? usesLeft(m, p, r.uses, used.length) : 0, ...(p?.totalUses ? { totalUses: p.totalUses, usedTotal: m.used ?? 0 } : {}), usedToday: used.map((e) => e.item), createdAt: m.createdAt,
     };
@@ -88,6 +89,13 @@ export function createPrograms(h: Helpers) {
         return { ...p, counts: { active: mine.filter((m) => planState(m, today) === 'active').length, pending: mine.filter((m) => planState(m, today) === 'pending').length, total: mine.filter((m) => m.status !== 'cancelled').length } };
       });
     },
+    /** The owner's own words for this feature, and the questions and permissions around it. */
+    async programText(ownerId: string, id: string) { return { ...((await h.mine(ownerId, id)).programText ?? {}) }; },
+    async setProgramText(ownerId: string, id: string, input: any) {
+      const b = await h.mine(ownerId, id); const next = cleanProgramText(input, b.programText);
+      if (Object.keys(next).length) b.programText = next; else delete b.programText;
+      await h.save(b); return { ...(b.programText ?? {}) };
+    },
     async saveProgram(ownerId: string, id: string, input: any): Promise<Program> {
       const b = await h.mine(ownerId, id);
       return withLock(`prog|${b.id}`, async () => {
@@ -109,7 +117,7 @@ export function createPrograms(h: Helpers) {
     async members(ownerId: string, id: string, o: { programId?: string; state?: string; q?: string } = {}): Promise<MemberView[]> {
       const b = await h.mine(ownerId, id); const today = kigaliDate(h.now()); const progs = await programsOf(b.id); const served = await servedOn(b.id, today);
       const q = String(o.q ?? '').trim().toLowerCase();
-      return (await membersOf(b.id)).filter((m) => (!o.programId || m.programId === o.programId) && (!q || m.name.toLowerCase().includes(q) || m.phone.includes(q.replace(/\D/g, '') || '\u0000') || m.code.toLowerCase().includes(q) || (m.studentId ?? '').toLowerCase().includes(q)))
+      return (await membersOf(b.id)).filter((m) => (!o.programId || m.programId === o.programId) && (!q || m.name.toLowerCase().includes(q) || m.phone.includes(q.replace(/\D/g, '') || '\u0000') || m.code.toLowerCase().includes(q) || (m.idNumber ?? '').toLowerCase().includes(q)))
         .map((m) => view(m, progs.find((p) => p.id === m.programId), today, usedOf(served, m.id))).filter((v) => !o.state || v.state === o.state).sort((a, c) => c.createdAt.localeCompare(a.createdAt));
     },
     /** The owner has the money (cash at the counter, or MoMo they can see on their phone): the plan starts. */
@@ -143,7 +151,7 @@ export function createPrograms(h: Helpers) {
         const m = await findMember(b.id, input); if (!m) return { ok: false as const, code: 'unknown' as const, message: 'This pass was not found. Check the code, or ask the customer to open their pass link.' };
         const p = (await programsOf(b.id)).find((x) => x.id === m.programId); if (!p) return { ok: false as const, code: 'unknown' as const, message: 'This plan no longer exists.' };
         const t = h.now(); const date = kigaliDate(t); const served = await servedOn(b.id, date); const used = usedOf(served, m.id);
-        const r = canServe({ member: m, program: p, used, now: t, item: input.item === undefined || input.item === '' ? undefined : String(input.item), force: input.force === true });
+        const r = canServe({ member: m, program: p, used, now: t, item: input.item === undefined || input.item === '' ? undefined : String(input.item), force: input.force === true && b.programText?.allowOverride !== false });
         if (!r.ok) return { ...r, member: view(m, p, date, used) };
         const use: Use = { id: randomUUID(), memberId: m.id, date, item: r.item, at: new Date(t).toISOString(), by: tokenFromPayload(input.token) || typeof input.token === 'string' ? 'scan' : 'code' };
         await kv.put(k.served(b.id, date), { items: [...served, use] });
@@ -211,11 +219,11 @@ export function createPrograms(h: Helpers) {
       }));
     },
     /** A customer joins from the shared link. They get a pass (waiting for payment) and pay next. */
-    async joinProgram(slug: string, programId: string, input: { name?: unknown; phone?: unknown; studentId?: unknown; startDate?: unknown; website?: unknown }, visitor: string): Promise<{ token: string; code: string }> {
+    async joinProgram(slug: string, programId: string, input: { name?: unknown; phone?: unknown; idNumber?: unknown; startDate?: unknown; website?: unknown }, visitor: string): Promise<{ token: string; code: string }> {
       if (clean(input.website, 40)) throw new ProgramError('Not accepted.');
       const b = await h.publicLive(slug); if (!b) throw new ProgramError('This page is not available.', 404, 'NOT_FOUND');
       if (h.tooMany(`join|${visitor}`, 6, h.now())) throw new ProgramError('Too many tries. Please wait a little and try again.', 429, 'RATE');
-      const who = cleanJoin(input); if ('error' in who) throw new ProgramError(who.error);
+      const who = cleanJoin(input); if ('error' in who) throw new ProgramError(who.error); if (b.programText?.askId === false) delete who.idNumber;
       return withLock(`mem|${b.id}`, async () => {
         const p = (await programsOf(b.id)).find((x) => x.id === programId && x.active); if (!p) throw new ProgramError('This plan is not open.', 404, 'NOT_FOUND');
         const list = await membersOf(b.id); const today = kigaliDate(h.now());
@@ -225,7 +233,7 @@ export function createPrograms(h: Helpers) {
         if (list.length >= MAX_MEMBERS) throw new ProgramError('This business cannot take more members right now.', 409, 'LIMIT');
         const token = newToken(); let code = newCode(); while (list.some((m) => m.code === code)) code = newCode();
         const start = cleanStart(input.startDate, today);
-        const m: Member = { id: randomUUID(), programId: p.id, name: who.name, phone: who.phone, ...(who.studentId ? { studentId: who.studentId } : {}), code, passHash: hashToken(token), status: 'pending', startDate: start, endDate: endDateFor(start, p.days), paidRwf: 0, paid: false, createdAt: h.iso() };
+        const m: Member = { id: randomUUID(), programId: p.id, name: who.name, phone: who.phone, ...(who.idNumber ? { idNumber: who.idNumber } : {}), code, passHash: hashToken(token), status: 'pending', startDate: start, endDate: endDateFor(start, p.days), paidRwf: 0, paid: false, createdAt: h.iso() };
         await putMembers(b.id, [...list, m]); await kv.put(k.pass(m.passHash), { bizId: b.id, memberId: m.id });
         h.alert(b, { title: `New plan member · ${b.name}`, text: `${m.name} joined "${p.title}" (${p.priceRwf.toLocaleString('en-US')} RWF). Waiting for payment.` });
         return { token, code };

@@ -285,7 +285,7 @@ function BizPageInner({ business: b, base, lang, setLang, openNow, mediaSrc, pre
                       {m.kind === 'image' ? <img src={mediaSrc(m.id)} alt={m.caption || ''} loading="lazy" className="h-full w-full object-cover transition group-hover:scale-105" /> : <><video src={`${mediaSrc(m.id)}#t=0.1`} preload="metadata" muted playsInline className="h-full w-full object-cover" /><span className="absolute inset-0 flex items-center justify-center bg-black/25"><span className="flex h-12 w-12 items-center justify-center rounded-full bg-white/90"><Play size={20} className="ml-0.5 text-[#0E1722]" /></span></span></>}
                     </button></li>))}</ul></section>)}
 
-              <PlansSection b={b} preview={preview} onJoin={setJoining} onOpenPass={setPassToken} />
+              <PlansSection b={b} lang={lang} preview={preview} onJoin={setJoining} onOpenPass={setPassToken} />
               <Sections b={b} preview={preview} />
 
               {/* about */}
@@ -325,8 +325,8 @@ function BizPageInner({ business: b, base, lang, setLang, openNow, mediaSrc, pre
 
       {/* cart bar */}
       {count > 0 && !checkout && <div className="fixed inset-x-0 bottom-0 z-40 p-3 sm:p-4"><button type="button" onClick={() => setCheckout('order')} className="mx-auto flex min-h-14 w-full max-w-xl items-center justify-between gap-3 rounded-2xl bg-[#0E1722] px-5 text-white shadow-2xl"><span className="inline-flex items-center gap-2.5 text-[15px] font-semibold"><span className="flex h-7 min-w-7 items-center justify-center rounded-full bg-[var(--acc)] px-1.5 text-sm text-[var(--on)]">{count}</span>{tx("View your order")}</span><b>{lines.every((l) => l.p.price !== null) ? `${total.toLocaleString('en-US')} RWF` : ''}</b></button></div>}
-      {joining && <JoinDialog b={b} program={joining} onClose={() => setJoining(null)} onJoined={(token) => { setJoining(null); setPassToken(token); try { window.history.replaceState({}, '', `${window.location.pathname}?pass=${token}`); } catch { /* optional */ } }} />}
-      {passToken && <PassView b={b} token={passToken} onClose={() => { setPassToken(null); try { window.history.replaceState({}, '', window.location.pathname); } catch { /* optional */ } }} />}
+      {joining && <JoinDialog b={b} lang={lang} program={joining} onClose={() => setJoining(null)} onJoined={(token) => { setJoining(null); setPassToken(token); try { window.history.replaceState({}, '', `${window.location.pathname}?pass=${token}`); } catch { /* optional */ } }} />}
+      {passToken && <PassView b={b} lang={lang} token={passToken} onClose={() => { setPassToken(null); try { window.history.replaceState({}, '', window.location.pathname); } catch { /* optional */ } }} />}
       {checkout && <Checkout b={b} cart={cart} setCart={setCart} preview={preview} startPay={checkout === 'pay'} waLink={waBase} onClose={() => setCheckout(null)} />}
       {postBox && <Lightbox items={postBox.items} index={postBox.i} src={mediaSrc} onClose={() => setPostBox(null)} onIndex={(i) => setPostBox({ ...postBox, i })} />}
       {box !== null && media.length > 0 && <Lightbox items={media} index={box} src={mediaSrc} onClose={() => setBox(null)} onIndex={setBox} />}
