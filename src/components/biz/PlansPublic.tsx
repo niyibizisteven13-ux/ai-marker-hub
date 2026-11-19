@@ -144,7 +144,7 @@ export function SignIn({ b, lang, onClose, onDone }: { b: PublicBusiness; lang: 
 
 /* ---- the card, laid out like the paper one ---- */
 const BLOCK = 15;
-function PaperCard({ b, card, w, onTick }: { b: PublicBusiness; card: CardInfo; w: ReturnType<typeof wordsOf>; onTick?: (item: string) => void }) {
+function PaperCard({ b, card, w }: { b: PublicBusiness; card: CardInfo; w: ReturnType<typeof wordsOf> }) {
   const tx = useTx(); const theme = THEMES[b.theme] ?? THEMES.gold; const cat = CATEGORIES.find((c) => c.id === b.category)?.label ?? '';
   const cal = card.calendar; const blocks = Math.max(1, Math.ceil(cal.length / BLOCK)); const todayIdx = cal.findIndex((d) => d.date === card.today.date);
   const [blk, setBlk] = useState(() => (todayIdx >= 0 ? Math.floor(todayIdx / BLOCK) : card.today.date > (cal[cal.length - 1]?.date ?? '') ? blocks - 1 : 0));
@@ -177,7 +177,7 @@ function PaperCard({ b, card, w, onTick }: { b: PublicBusiness; card: CardInfo; 
                 <th scope="row" className="border-b border-r px-1 py-1 text-left text-xs font-bold" style={{ borderColor: line }}><span className="text-base tabular-nums">{dayNum(d.date)}</span> <span className="font-semibold opacity-70">{tx(DAY[d.dow])}</span>{isToday && <span className="sr-only"> {tx('today')}</span>}</th>
                 {items.map((it) => { const used = d.used.includes(it); const at = card.today.date === d.date ? card.today.used.find((u) => u.item === it)?.at : undefined;
                   return <td key={it} title={used ? `${it}${at ? ` ${clock(at)}` : ''}` : undefined} className="h-9 border-b border-r p-0 text-lg last:border-r-0" style={{ borderColor: line, ...(!d.open ? { background: `repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in srgb, ${ink} 14%, transparent) 4px 5px)` } : {}) }}>
-                    {used ? <span aria-label={`${it} ✓`} className="font-bold italic" style={{ color: '#2848C8', fontFamily: 'cursive' }}>✗</span> : isToday && onTick && card.tick?.items.find((x) => x.item === it)?.allowed ? <button type="button" onClick={() => onTick(it)} aria-label={`${tx('Tick')} ${it}`} className="grid h-full min-h-9 w-full place-items-center border-2 border-dashed text-[10px] font-extrabold uppercase" style={{ borderColor: theme.accent, color: ink }}>{tx('Tap')}</button> : !d.open ? <span className="text-xs opacity-50" aria-label={tx('Closed')}>—</span> : null}</td>; })}
+                    {used ? <span aria-label={`${it} ✓`} className="font-bold italic" style={{ color: '#2848C8', fontFamily: 'cursive' }}>✗</span> : !d.open ? <span className="text-xs opacity-50" aria-label={tx('Closed')}>—</span> : null}</td>; })}
               </tr>); })}
           </tbody>
         </table>
@@ -189,15 +189,19 @@ function PaperCard({ b, card, w, onTick }: { b: PublicBusiness; card: CardInfo; 
 }
 
 /* ---- the customer's dashboard ---- */
-export function Dashboard({ b, lang, onClose, onSignedOut }: { b: PublicBusiness; lang: Lang; onClose: () => void; onSignedOut: () => void }) {
+export function Dashboard({ b, lang, onClose, onSignedOut, scanCode }: { b: PublicBusiness; lang: Lang; onClose: () => void; onSignedOut: () => void; scanCode?: string }) {
   const { tx, t, w } = useWords(b, lang); const theme = THEMES[b.theme] ?? THEMES.gold; const slug = b.slug;
   const [me, setMe] = useState<MeInfo | null>(null); const [card, setCard] = useState<CardInfo | null>(null); const [sel, setSel] = useState<string | undefined>(); const [err, setErr] = useState('');
   const [phone, setPhone] = useState(''); const [ref, setRef] = useState(''); const [busy, setBusy] = useState(false); const [big, setBig] = useState(false); const [pinOpen, setPinOpen] = useState(false); const [pins, setPins] = useState({ cur: '', next: '' }); const [pinMsg, setPinMsg] = useState('');
   const waiting = useRef(false); const session = () => loadSession(slug);
+  const [typed, setTyped] = useState(''); const [flash, setFlash] = useState('');
   const fail = useCallback((e: unknown) => { const m = e instanceof Error ? e.message : tx('Something went wrong. Please try again.'); if (/sign in again/i.test(m)) { clearSession(slug); onSignedOut(); return; } setErr(m); }, [slug, onSignedOut, tx]);
   const load = useCallback(async () => { const s = session(); if (!s) { onSignedOut(); return; } try { const [m, c] = await Promise.all([publicApi.me(slug, s), publicApi.card(slug, s, sel)]); setMe(m); setCard(c); setErr(''); waiting.current = !!c.payment?.promptSent; if (!sel) setSel(c.cardId); } catch (e) { fail(e); } }, [slug, sel, fail, onSignedOut]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { void load(); const i = window.setInterval(() => void load(), waiting.current ? 4000 : 15_000); return () => window.clearInterval(i); }, [load, card?.payment?.promptSent]);
   const act = async (fn: (s: string, id: string) => Promise<unknown>) => { const s = session(); if (!s || !card) return; setBusy(true); setErr(''); try { await fn(s, card.cardId); await load(); } catch (e) { fail(e); } finally { setBusy(false); } };
+  const doTick = async (code: string) => { const s = session(); if (!s) return; setBusy(true); setErr(''); setFlash(''); try { const r = await publicApi.tick(slug, s, code, card?.cardId); setTyped(''); setFlash(`${r.item} ${tx('ticked')}`); setSel(r.cardId); await load(); } catch (e) { fail(e); } finally { setBusy(false); } };
+  // The business's QR code opens this page with the code in the address: tick straight away, once, then tidy the address.
+  const auto = useRef(false); useEffect(() => { if (!scanCode || auto.current || !card) return; auto.current = true; void doTick(scanCode).finally(() => { try { const u = new URL(window.location.href); u.searchParams.delete('tick'); window.history.replaceState({}, '', u.pathname + u.search); } catch { /* optional */ } }); }, [scanCode, card]); // eslint-disable-line react-hooks/exhaustive-deps
   const m = card?.member; const usedUp = !!card && m?.state === 'active' && !!card.program.totalUses && m.usesLeft === 0;
   const tone = !m ? '#5B6470' : usedUp ? '#B91C1C' : m.state === 'active' ? '#15803D' : m.state === 'pending' || m.state === 'not_started' ? '#B45309' : '#B91C1C';
   const label = !m ? '' : usedUp ? t('ALL {USES} TAKEN') : ({ active: tx('ACTIVE'), pending: tx('WAITING FOR PAYMENT'), not_started: tx('STARTS SOON'), expired: tx('PLAN ENDED'), paused: tx('PAUSED'), cancelled: tx('CANCELLED') } as Record<string, string>)[m.state];
@@ -215,23 +219,21 @@ export function Dashboard({ b, lang, onClose, onSignedOut }: { b: PublicBusiness
         {me && me.cards.length > 1 && <div className="mb-3 flex gap-2 overflow-x-auto" role="tablist">{me.cards.map((c) => <button key={c.id} role="tab" aria-selected={card?.cardId === c.id} type="button" onClick={() => { setSel(c.id); setCard(null); }} className={`shrink-0 rounded-xl px-3 py-2 text-sm font-semibold ${card?.cardId === c.id ? 'bg-[#0E1722] text-white' : 'bg-white'}`}>{c.programTitle}</button>)}</div>}
         {!card && !err && <div className="grid place-items-center py-24"><Loader2 className="animate-spin" aria-label={tx('Loading')} /></div>}
         {err && <p role="alert" className="mb-3 rounded-2xl bg-rose-50 p-4 text-sm text-rose-700">{err}</p>}
+        {flash && <p role="status" className="mb-3 flex items-center gap-2 rounded-2xl bg-emerald-50 p-4 text-base font-semibold text-emerald-800"><CheckCircle2 size={20} aria-hidden="true" />{flash}</p>}
         {card && m && (
           <div className="space-y-3">
             <div className="rounded-full px-4 py-2 text-center text-sm font-bold tracking-wide text-white" style={{ background: tone }}>{label}</div>
             {m.state === 'active' && card.tick && (
               <div className="rounded-2xl bg-white p-4" aria-live="polite">
-                <p className="font-display text-lg font-semibold">{tx('Tick today')}</p>
-                <p className="mb-3 text-sm text-[#5B6470]">{tx('Tap what you are taking now. It is ticked on your card at once.')}</p>
-                <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${Math.min(2, card.tick.items.length)}, minmax(0, 1fr))` }}>
-                  {card.tick.items.map((x) => { const done = card.today.used.find((u) => u.item === x.item);
-                    return <button key={x.item} type="button" disabled={busy || !x.allowed} onClick={() => void act((s, id) => publicApi.tick(slug, s, id, x.item))} style={x.allowed ? { background: theme.accent, color: theme.on } : undefined} className={`flex min-h-16 flex-col items-center justify-center rounded-2xl px-2 py-2 text-lg font-semibold ${x.allowed ? '' : 'bg-[#F2F4F7] text-[#5B6470]'} disabled:opacity-80`}>
-                      <span className="flex items-center gap-1.5">{done && <CheckCircle2 size={18} aria-hidden="true" />}{x.item}</span>
-                      {done ? <span className="text-xs font-normal">{tx('Ticked')} {clock(done.at)}</span> : !x.allowed && <span className="text-xs font-normal">{x.message}</span>}
-                    </button>; })}
-                </div>
+                <p className="font-display text-lg font-semibold">{tx('Scan the business\'s code')}</p>
+                <p className="mb-3 text-sm text-[#5B6470]">{tx('Point your phone camera at the code shown at the business. Your card is ticked at once. No camera? Type the 6 digits.')}</p>
+                <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (/^\d{6}$/.test(typed)) void doTick(typed); }}>
+                  <input className={`${field} !mt-0 font-mono text-2xl tracking-[0.3em]`} value={typed} onChange={(e) => setTyped(e.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" maxLength={6} placeholder="••••••" aria-label={tx('Code shown at the business')} />
+                  <button type="submit" disabled={busy || typed.length !== 6} style={{ background: theme.accent, color: theme.on }} className="min-h-12 shrink-0 rounded-xl px-5 text-base font-semibold disabled:opacity-50">{busy ? <Loader2 className="mx-auto animate-spin" size={18} /> : tx('Tick')}</button></form>
+                <div className="mt-3 flex flex-wrap gap-2">{card.tick.items.map((x) => { const done = card.today.used.find((u) => u.item === x.item); return <span key={x.item} className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-semibold ${done ? 'bg-emerald-50 text-emerald-800' : 'bg-[#F2F4F7] text-[#5B6470]'}`}>{done && <CheckCircle2 size={14} aria-hidden="true" />}{x.item}{done ? ` ${clock(done.at)}` : ''}</span>; })}</div>
                 {card.tick.undo && <p role="status" className="mt-3 flex items-center justify-between gap-2 rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-900"><span>{card.tick.undo.item} {tx('ticked')}. {tx('Wrong tap?')}</span><button type="button" disabled={busy} onClick={() => void act((s, id) => publicApi.untick(slug, s, id, card.tick!.undo!.useId))} className="min-h-9 px-2 font-semibold underline">{tx('Undo')}</button></p>}
               </div>)}
-            <PaperCard b={b} card={card} w={w} onTick={card.tick && m.state === 'active' ? (item) => void act((s, id) => publicApi.tick(slug, s, id, item)) : undefined} />
+            <PaperCard b={b} card={card} w={w} />
             {(m.state === 'active' || m.state === 'not_started') && card.qr && (
               <div className="rounded-2xl bg-white p-4 text-center">
                 <button type="button" onClick={() => setBig(true)} aria-label={tx('Tap to enlarge')} className="mx-auto block"><Qr text={card.qr} size={168} /></button>

@@ -204,3 +204,11 @@ Object.assign(SRW, {
   'Same rules as a scan: paid, open day, serving times, one of each each day. The customer can take back a wrong tap for one minute. You see who ticked it themselves on the Today list.': 'Amategeko amwe na scan: yishyuwe, umunsi ukora, amasaha, kimwe buri munsi. Umukiliya ashobora gusubiza inyuma ikosa mu munota umwe. Ubona ababyishyiriyeho ku rutonde rw’uyu munsi.',
   'ticked by the customer': 'byashyizweho n’umukiliya',
 });
+Object.assign(SRW, {
+  'Check-in code': 'Kode yo kwemeza',
+  'New code in': 'Kode nshya mu',
+  'The customer scans': 'Umukiliya arasikana',
+  'You show a code that changes every minute. They scan it with their phone and it is ticked at once.': 'Werekana kode ihinduka buri munota. Barayisikana na telefoni yabo igahita ishyirwaho ikimenyetso.',
+  'Show this where your {members} can see it. They scan it with their phone camera (or type the digits) and their {pass} is ticked. It changes every minute, so a photo of it does not work later.': 'Yishyire aho {members} bawe bayibona. Barayisikana na kamera ya telefoni (cyangwa bakandika imibare) maze {pass} yabo igashyirwaho ikimenyetso. Ihinduka buri munota, bityo ifoto yayo ntikora nyuma.',
+  'Same rules as a staff scan: paid, open day, serving times, one of each each day. Show the check-in code on the Today screen. A customer can take back a wrong tick for one minute, and you see on the Today list who ticked it themselves.': 'Amategeko amwe na scan y’abakozi: yishyuwe, umunsi ukora, amasaha, kimwe buri munsi. Werekana kode yo kwemeza ku rupapuro rw’uyu munsi. Umukiliya ashobora gusubiza inyuma ikosa mu munota umwe, kandi ubona ku rutonde uwabyishyiriyeho.',
+});

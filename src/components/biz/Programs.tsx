@@ -97,7 +97,7 @@ export function ProgramsView({ b, onChange }: { b: Business; onChange: () => voi
       <div className="inline-flex rounded-xl bg-[var(--app-bg)] p-1" role="tablist" aria-label={t("{Programs}")}>
         {tabs.map((t) => { const Icon = t.icon; return <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)} className={`inline-flex min-h-10 items-center gap-1.5 rounded-lg px-3.5 text-sm font-semibold ${tab === t.id ? 'bg-[var(--app-panel)] shadow-sm' : 'text-[var(--app-muted)]'}`}><Icon size={15} aria-hidden="true" />{t.label}</button>; })}
       </div>
-      {tab === 'today' && <TodayTab b={b} hasPlans={data.programs.length > 0} onChange={() => { void load(); onChange(); }} goPlans={() => setTab('plans')} />}
+      {tab === 'today' && <TodayTab b={b} hasPlans={data.programs.length > 0} selfPrograms={data.programs.filter((p) => p.checkIn === 'self' && p.active)} onChange={() => { void load(); onChange(); }} goPlans={() => setTab('plans')} />}
       {tab === 'members' && <MembersTab b={b} programs={data.programs} summary={s} onChange={() => { void load(); onChange(); }} />}
       {tab === 'names' && <NamesTab b={b} onChange={() => { void load(); onChange(); }} />}
       {tab === 'plans' && <PlansTab b={b} programs={data.programs} onChange={() => { void load(); onChange(); }} />}
@@ -106,7 +106,24 @@ export function ProgramsView({ b, onChange }: { b: Business; onChange: () => voi
 }
 
 /* ---------- Today: scan a pass, or type a code ---------- */
-function TodayTab({ b, hasPlans, onChange, goPlans }: { b: Business; hasPlans: boolean; onChange: () => void; goPlans: () => void }) {
+/** The code the business shows for customers who tick their own card by scanning: a QR code and 6 digits that change every minute. */
+function CheckinCode({ b, programs }: { b: Business; programs: ProgramInfo[] }) {
+  const { t } = useWords(b); const [pid, setPid] = useState(programs[0]?.id ?? ''); const [c, setC] = useState<{ code: string; expiresInSec: number } | null>(null); const [err, setErr] = useState(''); const [left, setLeft] = useState(0);
+  useEffect(() => { let on = true; let timer = 0; const run = async () => { try { const r = await ownerApi.checkinCode(b.id, pid); if (!on) return; setC(r); setLeft(r.expiresInSec); setErr(''); timer = window.setTimeout(run, Math.max(3, r.expiresInSec) * 1000); } catch (e) { if (on) { setErr(msg(e)); timer = window.setTimeout(run, 15_000); } } }; void run(); return () => { on = false; window.clearTimeout(timer); }; }, [b.id, pid]);
+  useEffect(() => { const i = window.setInterval(() => setLeft((v) => Math.max(0, v - 1)), 1000); return () => window.clearInterval(i); }, []);
+  const url = c ? `${window.location.origin}/b/${b.slug}?tick=${c.code}` : '';
+  return (
+    <section className={`${card} space-y-3 text-center lg:col-span-2`} aria-label={tx("Check-in code")}>
+      <Title>{tx("Check-in code")}</Title>
+      <p className="text-sm text-[var(--app-muted)]">{t("Show this where your {members} can see it. They scan it with their phone camera (or type the digits) and their {pass} is ticked. It changes every minute, so a photo of it does not work later.")}</p>
+      {programs.length > 1 && <div className="flex flex-wrap justify-center gap-2" role="tablist">{programs.map((p) => <button key={p.id} type="button" role="tab" aria-selected={pid === p.id} onClick={() => { setPid(p.id); setC(null); }} className={`${pid === p.id ? btnPrimary : btnGhost} !min-h-9 !px-3 text-sm`}>{p.title}</button>)}</div>}
+      {err && <p role="alert" className="text-sm text-rose-600"><AlertTriangle size={14} className="mr-1 inline" />{err}</p>}
+      {c ? <div className="mx-auto w-fit"><QrImage text={url} size={220} /><p className="mt-2 font-mono text-4xl font-semibold tracking-[0.25em]" aria-live="off">{c.code.slice(0, 3)} {c.code.slice(3)}</p><p className="text-xs text-[var(--app-muted)]">{tx("New code in")} {left}s</p></div> : !err && <Loader2 className="mx-auto animate-spin" aria-label={tx("Loading")} />}
+    </section>
+  );
+}
+
+function TodayTab({ b, hasPlans, selfPrograms, onChange, goPlans }: { b: Business; hasPlans: boolean; selfPrograms: ProgramInfo[]; onChange: () => void; goPlans: () => void }) {
   const { w, t } = useWords(b);
   const [camera, setCamera] = useState(false); const [code, setCode] = useState(''); const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<(RedeemResult & { token?: string }) | null>(null); const [today, setToday] = useState<TodayInfo | null>(null); const [err, setErr] = useState('');
@@ -121,6 +138,7 @@ function TodayTab({ b, hasPlans, onChange, goPlans }: { b: Business; hasPlans: b
   const m = result?.member;
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      {selfPrograms.length > 0 && <CheckinCode b={b} programs={selfPrograms} />}
       <section className={`${card} space-y-3`} aria-label={t("Scan a {pass}")}>
         <Title>{t("Check a {pass}")}</Title>
         {result ? (
@@ -273,9 +291,9 @@ function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInf
             <span className="mt-1 block text-xs font-normal text-[var(--app-muted)]">{t("4 digits. People must write it to join, so only the {members} you give it to can join.")}</span></div>
           <div className="block text-sm font-medium">{tx("Who ticks the card")}
             <div className="mt-1 grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label={tx("Who ticks the card")}>
-              {([['staff', tx('The business'), tx('You scan the QR code or type the code.')], ['self', tx('The customer'), tx('They sign in and tap today\'s item. It is ticked at once.')]] as const).map(([v, label, hint]) => (
+              {([['staff', tx('The business'), tx('You scan the QR code or type the code.')], ['self', tx('The customer scans'), tx('You show a code that changes every minute. They scan it with their phone and it is ticked at once.')]] as const).map(([v, label, hint]) => (
                 <button key={v} type="button" role="radio" aria-checked={(edit.checkIn ?? 'staff') === v} onClick={() => set({ checkIn: v })} className={`rounded-xl border-2 p-3 text-left ${(edit.checkIn ?? 'staff') === v ? 'border-[var(--app-accent,#0E1722)] bg-[var(--app-soft,#F2F4F7)]' : 'border-[var(--app-line,#D9DEE5)]'}`}><b className="block text-sm">{label}</b><span className="block text-xs font-normal text-[var(--app-muted)]">{hint}</span></button>))}</div>
-            {edit.checkIn === 'self' && <p className="mt-1 text-xs font-normal text-[var(--app-muted)]">{t("Same rules as a scan: paid, open day, serving times, one of each each day. The customer can take back a wrong tap for one minute. You see who ticked it themselves on the Today list.")}</p>}</div>
+            {edit.checkIn === 'self' && <p className="mt-1 text-xs font-normal text-[var(--app-muted)]">{t("Same rules as a staff scan: paid, open day, serving times, one of each each day. Show the check-in code on the Today screen. A customer can take back a wrong tick for one minute, and you see on the Today list who ticked it themselves.")}</p>}</div>
           <label className="block text-sm font-medium">{tx("Note for customers (optional)")}<textarea className={`${input} mt-1`} rows={2} maxLength={300} value={edit.terms ?? ''} onChange={(e) => set({ terms: e.target.value })} placeholder={tx("One use a day. Show your pass each time.")} /></label>
           {err && <p role="alert" className="text-sm text-rose-600"><AlertTriangle size={14} className="mr-1 inline" />{err}</p>}
           <div className="flex gap-2"><button type="submit" disabled={busy} className={btnPrimary}>{busy ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}{t("Save {program}")}</button>{programs.length > 0 && <button type="button" className={btnGhost} onClick={() => { setEdit(null); setErr(''); }}>{tx("Cancel")}</button>}</div>

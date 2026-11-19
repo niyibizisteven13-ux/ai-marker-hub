@@ -1,4 +1,4 @@
-import { randomInt, randomUUID } from 'node:crypto';
+import { createHmac, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import { clean, cleanPhone } from './model.js';
 import { open as openSecret, seal } from './secrets.js';
 import type { Business, PublicBusiness } from './model.js';
@@ -47,6 +47,8 @@ export interface MemberView {
 export interface PublicProgram { checkIn: 'staff' | 'self'; needsCode: boolean; id: string; title: string; description?: string; priceRwf: number; days: number; items: string[]; openDays: Program['openDays']; windows?: Program['windows']; terms?: string; full: boolean }
 
 const SELF_UNDO_MS = 60_000;
+/** The business's check-in code changes every minute, so a photo of it is useless a little later. The previous one is still accepted, for a slow scan. */
+const CODE_WINDOW_MS = 60_000;
 export function createPrograms(h: Helpers) {
   const { kv } = h;
   const k = { programs: (b: string) => `biz-programs:${b}`, members: (b: string) => `biz-members:${b}`, pass: (hash: string) => `biz-pass:${hash}`, uses: (b: string, m: string) => `biz-uses:${b}:${m}`, served: (b: string, d: string) => `biz-served:${b}:${d}`, days: (b: string) => `biz-served-days:${b}`, people: (b: string) => `biz-people:${b}`, sess: (hash: string) => `biz-sess:${hash}`, sessions: (b: string) => `biz-sessions:${b}` };
@@ -91,6 +93,13 @@ export function createPrograms(h: Helpers) {
     const all = await membersOf(bizId); const mm = all.find((x) => x.id === m.id); if (mm) { mm.used = (mm.used ?? 0) + 1; m.used = mm.used; await putMembers(bizId, all); }
     return use;
   }
+  /** The 6-digit check-in code a business shows for one program in a given minute: an HMAC of the program and the minute, with a key only the server has. */
+  const venueCode = (bizId: string, programId: string, win: number) => String(createHmac('sha256', h.secretKey()).update(`checkin|${bizId}|${programId}|${win}`).digest().readUInt32BE(0) % 1_000_000).padStart(6, '0');
+  const venueCodeOk = (bizId: string, programId: string, given: unknown, t: number) => {
+    const g = String(given ?? '').replace(/\D/g, ''); if (g.length !== 6) return false; const win = Math.floor(t / CODE_WINDOW_MS); let ok = false;
+    for (const w of [win, win - 1]) { const a = Buffer.from(venueCode(bizId, programId, w)); const b = Buffer.from(g); if (a.length === b.length && timingSafeEqual(a, b)) ok = true; }
+    return ok;
+  };
   /** What the customer may tap on their own card right now (only for programs the owner set to self check-in): each item, whether it can be ticked, and why not. */
   function tickOptions(m: Member, p: Program, own: Use[], t: number) {
     const date = kigaliDate(t); const todays = own.filter((x) => x.date === date && !x.undone); const lastSelf = todays.filter((x) => x.by === 'self').sort((a, c) => c.at.localeCompare(a.at))[0];
@@ -193,6 +202,12 @@ export function createPrograms(h: Helpers) {
       });
     },
     /** Scan (token) or type (code) a pass: the system says whether this person may be served now, and records the item. */
+    /** The code the business shows right now for a program that customers tick by scanning (it changes every minute). */
+    async checkinCode(ownerId: string, id: string, programId: string): Promise<{ code: string; expiresInSec: number; program: string }> {
+      const b = await h.mine(ownerId, id); const p = (await programsOf(b.id)).find((x) => x.id === programId); if (!p) throw new ProgramError('That program was not found.', 404, 'NOT_FOUND');
+      if (p.checkIn !== 'self') throw new ProgramError('This program is ticked by your staff. Turn on "The customer scans" in the program to use a check-in code.', 409, 'STAFF_ONLY');
+      const t = h.now(); const win = Math.floor(t / CODE_WINDOW_MS); return { code: venueCode(b.id, p.id, win), expiresInSec: Math.max(1, Math.ceil(((win + 1) * CODE_WINDOW_MS - t) / 1000)), program: p.title };
+    },
     async redeem(ownerId: string, id: string, input: { token?: unknown; code?: unknown; memberId?: unknown; item?: unknown; force?: unknown }) {
       const b = await h.mine(ownerId, id);
       return withLock(`mem|${b.id}`, async () => {
@@ -364,7 +379,7 @@ export function createPrograms(h: Helpers) {
           program: { title: p.title, checkIn: p.checkIn === 'self' ? 'self' : 'staff', ...(p.totalUses ? { totalUses: p.totalUses } : {}), items: p.items, openDays: p.openDays, ...(p.windows ? { windows: p.windows } : {}), ...(p.terms ? { terms: p.terms } : {}), priceRwf: p.priceRwf, days: p.days },
           member: { name: m.name, phone: m.phone, ...(m.idNumber ? { idNumber: m.idNumber } : {}), code: m.code, state: st, startDate: m.startDate, endDate: m.endDate, daysLeft: r.calendarDays, servingDaysLeft: Math.max(0, r.servingDays - (ateToday >= p.items.length ? 1 : 0)), usesLeft: usesLeft(m, p, r.uses, ateToday), usedTotal: m.used ?? 0, paid: m.paid, paidAt: m.confirmedAt ?? null },
           qr,
-          tick: p.checkIn === 'self' ? tickOptions(m, p, own, t) : null,
+          tick: p.checkIn === 'self' ? { needsCode: true as const, ...tickOptions(m, p, own, t) } : null,
           today: { date, openToday: p.openDays.includes(dayOfWeek(date)), used: own.filter((x) => x.date === date).map((x) => ({ item: x.item, at: x.at })) },
           calendar: cardCalendar(m, p, own.map((x) => ({ date: x.date, item: x.item })).slice(-1500)),
           history: [],
@@ -375,20 +390,26 @@ export function createPrograms(h: Helpers) {
         };
       });
     },
-    /** The customer taps today's item on their own card (only when the owner chose self check-in): same rules as a scan, no override, ticked at once. */
-    async selfUse(slug: string, session: string, cardId: string, input: { item?: unknown }, visitor: string) {
+    /** The customer scans the business's rotating code (only when the owner chose self check-in): same rules as a staff scan, no override, ticked at once. */
+    async selfUse(slug: string, session: string, input: { cardId?: unknown; code?: unknown; item?: unknown }, visitor: string) {
       const b = await h.publicLive(slug); if (!b) throw new ProgramError('This page is not available.', 404, 'NOT_FOUND'); const me = await sessionOf(b.id, session);
       if (h.tooMany(`tick|${visitor}`, 30, h.now())) throw new ProgramError('Too many tries. Please wait a little.', 429, 'RATE');
       return withLock(`mem|${b.id}`, async () => {
-        const m = (await membersOf(b.id)).find((x) => x.id === cardId && x.phone === me.phone && x.status !== 'cancelled'); const p = m && (await programsOf(b.id)).find((x) => x.id === m.programId);
-        if (!m || !p) throw new ProgramError('This card was not found.', 404, 'NOT_FOUND');
-        if (p.checkIn !== 'self') throw new ProgramError('At this business the staff ticks your card. Show your QR code.', 403, 'STAFF_ONLY');
-        const t = h.now(); const date = kigaliDate(t); const served = await servedOn(b.id, date); const used = usedOf(served, m.id);
-        const item = clean(input.item, 24); if (!item) throw new ProgramError('Choose which one to tick.', 400, 'NO_ITEM');
+        const progs = await programsOf(b.id); const cardId = clean(input.cardId, 60);
+        const mine = (await membersOf(b.id)).filter((x) => x.phone === me.phone && x.status !== 'cancelled' && (!cardId || x.id === cardId));
+        const cards = mine.map((m) => ({ m, p: progs.find((x) => x.id === m.programId) })).filter((x): x is { m: Member; p: Program } => !!x.p);
+        if (!cards.length) throw new ProgramError('This card was not found.', 404, 'NOT_FOUND');
+        const selfCards = cards.filter((x) => x.p.checkIn === 'self'); if (!selfCards.length) throw new ProgramError('At this business the staff ticks your card. Show your QR code.', 403, 'STAFF_ONLY');
+        const t = h.now();
+        // The customer proves they are at the business by the code it shows: it changes every minute and cannot be guessed.
+        if (h.tooMany(`tickcode|${visitor}`, 15, t)) throw new ProgramError('Too many wrong codes. Please wait a little.', 429, 'RATE');
+        const hit = selfCards.find((x) => venueCodeOk(b.id, x.p.id, input.code, t)); if (!hit) throw new ProgramError('That code is not right, or it has changed. Scan the business\'s code again.', 403, 'BAD_CODE');
+        const { m, p } = hit; const date = kigaliDate(t); const served = await servedOn(b.id, date); const used = usedOf(served, m.id);
+        const item = clean(input.item, 24) || undefined;
         const r = canServe({ member: m, program: p, used, now: t, item });
         if (r.ok !== true) { const d = r as Exclude<typeof r, { ok: true }>; throw new ProgramError(d.message, 409, d.code === 'already' ? 'ALREADY' : 'DENIED'); }
         const use = await record(b.id, m, date, t, r.item, served, 'self');
-        return { ok: true as const, item: r.item, useId: use.id };
+        return { ok: true as const, item: r.item, useId: use.id, cardId: m.id };
       });
     },
     /** Takes back the customer's own tick, for a minute only (a wrong tap). Staff can still undo any tick for longer. */
