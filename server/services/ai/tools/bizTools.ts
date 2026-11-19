@@ -400,5 +400,17 @@ export function bizTools(getSvc: () => Promise<BizService> | BizService = async 
       } catch (e) { return failure(e); }
     },
   };
-  return [get, create, update, addProduct, changeProduct, addMedia, publish, link, messages, record('sale'), record('expense'), dashboard, orders, requestPay, payStatus, paySetup, report, stock, agent, post, open, workflow, entries, costs, recurring, budget, feature, section, tracker, records, translate];
+  const language: Tool = {
+    definition: { name: 'biz_language', description: "Change a language setting when the owner asks: studio_language = the language of the owner's own dashboard screens (en or rw, Kinyarwanda); page_language = the language the PUBLIC page opens in for customers (en or rw; visitors can still switch). Example: 'put my dashboard in Kinyarwanda' -> studio_language rw; 'make my page open in Kinyarwanda' -> page_language rw (the page needs a Kinyarwanda translation first: use biz_translate). Say which one you changed. The change shows when the owner's screen refreshes (it usually does at once). The chat language itself follows the language the owner writes in.",
+      parameters: { type: 'object', properties: { business: BUSINESS, studio_language: { type: 'string', enum: ['en', 'rw'] }, page_language: { type: 'string', enum: ['en', 'rw'] } } } },
+    async execute(input, ctx) {
+      try {
+        if (!input.studio_language && !input.page_language) return err('Say which: studio_language (the owner\'s dashboard) or page_language (the public page).'); const s = await svc(); const out: string[] = [];
+        if (input.studio_language) { const p = await s.setPrefs(ctx.userId, { studioLang: input.studio_language }); out.push(`The dashboard is now in ${p.studioLang === 'rw' ? 'Kinyarwanda' : 'English'}.`); }
+        if (input.page_language) { const b = await pick(ctx.userId, input.business); if ('error' in b) return err(b.error); const l = await s.setLang(ctx.userId, b.id, input.page_language); const has = !!(await s.get(ctx.userId, b.id)).translations?.rw; out.push(`The public page now opens in ${l === 'rw' ? 'Kinyarwanda' : 'English'}.${l === 'rw' && !has ? ' It has no Kinyarwanda translation of the owner\'s own words yet: offer to translate it with biz_translate.' : ''}`); }
+        return { text: out.join(' ') };
+      } catch (e) { return failure(e); }
+    },
+  };
+  return [get, create, update, addProduct, changeProduct, addMedia, publish, link, messages, record('sale'), record('expense'), dashboard, orders, requestPay, payStatus, paySetup, report, stock, agent, post, open, workflow, entries, costs, recurring, budget, feature, section, tracker, records, translate, language];
 }

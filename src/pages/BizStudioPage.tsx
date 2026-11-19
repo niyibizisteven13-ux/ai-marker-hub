@@ -234,11 +234,11 @@ const LIGHT = { '--app-bg': '#F2F5FA', '--app-panel': '#FFFFFF', '--app-panel-ho
 
 export default function BizStudioPage({ onBack }: { onBack: () => void }) {
   const [slang, setSlang] = useState<StudioLang>(initialStudioLang); setStudioLang(slang);
-  const pickLang = (l: StudioLang) => { setSlang(l); saveStudioLang(l); };
+  const pickLang = (l: StudioLang) => { setSlang(l); saveStudioLang(l); void ownerApi.setPrefs({ studioLang: l }).catch(() => undefined); };
   const [mine, setMine] = useState<Mine | null>(null); const [error, setError] = useState(''); const [sel, setSel] = useState(''); const [view, setView] = useState<View>(() => { const v = new URLSearchParams(window.location.search).get('view'); return (['trackers', 'feed', 'chat', 'agent', 'sales', 'expenses', 'products', 'customers', 'reports', 'messages', 'public', 'secrets', 'settings'] as string[]).includes(v ?? '') ? (v as View) : 'dashboard'; }); const [sub, setSub] = useState<'page' | 'gallery' | 'preview'>('page');
   const [urls, setUrls] = useState<Record<string, string>>({}); const [secrets, setSecrets] = useState<SecretsStatus | null>(null); const [sheet, setSheet] = useState<EntryKind | null>(null); const [more, setMore] = useState(false);
   const [creating, setCreating] = useState({ name: '', category: 'shop', whatsapp: '', lat: '', lng: '' }); const [busy, setBusy] = useState(false); const [tick, setTick] = useState(0);
-  const load = useCallback(async () => { try { const m = await ownerApi.mine(); setMine(m); setSel((s) => (m.businesses.some((b) => b.id === s) ? s : m.businesses[0]?.id ?? '')); } catch (e) { setError(msg(e)); } }, []);
+  const load = useCallback(async () => { try { const m = await ownerApi.mine(); setMine(m); if (m.prefs?.studioLang) { setSlang(m.prefs.studioLang); saveStudioLang(m.prefs.studioLang); } setSel((s) => (m.businesses.some((b) => b.id === s) ? s : m.businesses[0]?.id ?? '')); } catch (e) { setError(msg(e)); } }, []);
   useEffect(() => { document.title = 'Ventures · Bwenge'; void load(); }, [load]);
   const b = mine?.locked ? null : mine?.businesses.find((x) => x.id === sel) ?? null;
   useEffect(() => { if (b) void ownerApi.mediaUrls(b.id).then(setUrls).catch(() => undefined); else setUrls({}); }, [b?.id, b?.updatedAt]);   // eslint-disable-line react-hooks/exhaustive-deps

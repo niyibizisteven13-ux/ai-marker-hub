@@ -25,3 +25,8 @@ test('business messages get the tools (the normal chat can run the dashboard), g
   for (const m of ['What is profit margin?', 'Explain how to start a small business', 'hello there my friend', 'write a poem about the sea'])
     assert.equal(needs(m), false, m);
 });
+
+test('language change requests reach the tools', () => {
+  for (const m of ['put my dashboard in Kinyarwanda', 'switch my page to english', 'change my dashboard to French', 'make my business page open in Kinyarwanda', 'hindura ururimi', 'shyira dashboard mu kinyarwanda']) assert.equal(needs(m), true, m);
+  assert.equal(needs('what is the Kinyarwanda word for stock?'), false);
+});

@@ -334,3 +334,14 @@ test('studio language: English by default, Kinyarwanda when chosen, unknown labe
   setStudioLang('en'); assert.equal(studioTx('Dashboard'), 'Dashboard'); setStudioLang('rw'); assert.equal(studioTx('Dashboard'), 'Imbonerahamwe'); assert.equal(studioTx('Some label nobody translated'), 'Some label nobody translated');
   assert.ok(Object.entries(SRW).every(([k, v]) => k.trim().length > 0 && v.trim().length > 0)); assert.ok(Object.keys(SRW).length > 250); setStudioLang('en');
 });
+
+test('the agent changes language: the owner’s dashboard language is remembered per person, the page language per business, and messages about it reach the tools', async () => {
+  const svc = createBizService({ kv: memKv(), media: memoryMediaStore(), isPaid: async () => true, now: () => T0 }); resetBizLimitsForTests();
+  const tools = Object.fromEntries(bizToolsHonest(() => svc).map((t) => [t.definition.name, t])); const c: any = { userId: 'u', files: {} };
+  assert.deepEqual(await svc.prefs('u'), {}); assert.equal((await tools.biz_language.execute({}, c)).isError, true);
+  assert.match((await tools.biz_language.execute({ studio_language: 'rw' }, c)).text, /dashboard is now in Kinyarwanda/); assert.deepEqual(await svc.prefs('u'), { studioLang: 'rw' }); assert.deepEqual(await svc.prefs('other'), {}, 'per person');
+  assert.deepEqual(await svc.setPrefs('u', { studioLang: 'xx' }), { studioLang: 'rw' }, 'junk is ignored');
+  assert.equal((await tools.biz_language.execute({ page_language: 'rw' }, c)).isError, true, 'the page language needs a business');
+  await tools.biz_create.execute({ name: 'Cafe' }, c); const r = await tools.biz_language.execute({ page_language: 'rw' }, c); assert.match(r.text, /opens in Kinyarwanda/); assert.match(r.text, /biz_translate/); assert.equal((await svc.get('u', (await svc.list('u'))[0].id)).lang, 'rw');
+  assert.match((await tools.biz_language.execute({ studio_language: 'en', page_language: 'en' }, c)).text, /English.*English/);
+});

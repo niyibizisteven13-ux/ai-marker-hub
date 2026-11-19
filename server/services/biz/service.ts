@@ -457,6 +457,10 @@ export function createBizService(deps: Deps) {
       b.translations = { ...(b.translations ?? {}), [l]: t }; await save(b); return t;
     },
 
+    /* ------------------------------------------------------------ the owner's own preferences (per person, not per business) */
+    async prefs(userId: string): Promise<{ studioLang?: Lang }> { const p = await kv.get<{ studioLang?: Lang }>(`biz-prefs:${userId}`); return p && LANGS.includes(p.studioLang as Lang) ? { studioLang: p.studioLang } : {}; },
+    async setPrefs(userId: string, patch: { studioLang?: unknown }): Promise<{ studioLang?: Lang }> { const cur = await this.prefs(userId); if (LANGS.includes(patch.studioLang as Lang)) cur.studioLang = patch.studioLang as Lang; await kv.put(`biz-prefs:${userId}`, cur); return cur; },
+
     /* ------------------------------------------------------------ routines (workflows) the owner saves and runs by chat */
     async workflows(ownerId: string, id: string): Promise<Workflow[]> { const b = await mine(ownerId, id); return (await kv.get<{ items: Workflow[] }>(`biz-workflows:${b.id}`))?.items ?? []; },
     async saveWorkflow(ownerId: string, id: string, input: unknown): Promise<Workflow> {
