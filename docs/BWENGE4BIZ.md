@@ -98,6 +98,10 @@ reaching new markets), **Good to know** (who it is for, how to start, what the b
 - **Make it**: Admin → Platform controls → Business pages → **Create the 4biz page** (`POST /api/admin/platform/biz/venture`). It asks for the email of the account that should own the page (empty means the signed-in admin), builds the page at `/b/4biz`, publishes it, and gives
   that admin the blue badge. It is safe to press again: it refreshes the words and never duplicates products or sections. The page name `4biz` belongs to the first account that takes it.
 - **Change it**: edit the page in the studio like any other, or ask the assistant; pressing the admin button again restores the example words.
+- **Bwenge AI can do it too** (any account, not only the admin): the tool `biz_venture` builds or refreshes a venture page from what the person tells it (name, one-line aim, description, products, what it helps with, links, FAQ, WhatsApp,
+  Kinyarwanda words). It stays private until the owner says "publish", never duplicates on a second run, and cannot give the badge. The same code builds the 4biz example (`ensureVenturePage`). Bwenge AI's instructions
+  (`server/services/ai/capabilitiesPrompt.ts`) also teach it Programs (naming, who ticks, End program with a confirmation), the closing report and the verified badge, and
+  `platformIntent.ts` routes those requests to the business tools.
 - Tests: `tests/biz_venture.test.ts`.
 
 ## Verified badge
