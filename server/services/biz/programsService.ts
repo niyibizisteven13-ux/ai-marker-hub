@@ -1,9 +1,10 @@
-import { randomUUID } from 'node:crypto';
-import { clean } from './model.js';
+import { randomInt, randomUUID } from 'node:crypto';
+import { clean, cleanPhone } from './model.js';
+import { open as openSecret, seal } from './secrets.js';
 import type { Business, PublicBusiness } from './model.js';
 import type { LedgerEntry } from './ledger.js';
 import {
-  MAX_MEMBERS, MAX_PROGRAMS, addDays, canServe, cleanJoin, cleanProgram, cleanProgramText, cleanStart, dayOfWeek, endDateFor, hashToken, kigaliDate, newCode, newToken, normalizeCode,
+  LOCK_MINUTES, MAX_MEMBERS, MAX_PIN_FAILS, MAX_PROGRAMS, REMEMBER_DAYS, SESSION_HOURS, addDays, canServe, cardCalendar, cleanJoin, cleanProgram, cleanProgramText, hashPasscode, hashSession, newJoinCode, newSalt, sameCode, validPasscode, cleanStart, dayOfWeek, endDateFor, hashToken, kigaliDate, newCode, newToken, normalizeCode,
   oneOfMethod, planState, remaining, tokenFromPayload, usesLeft, type DenyCode, type Use, type Member, type PlanState, type Program,
 } from './programs.js';
 
@@ -19,6 +20,7 @@ export class ProgramError extends Error { constructor(message: string, public st
 
 export interface Helpers {
   kv: Kv; now: () => number; iso: () => string;
+  secretKey: () => Buffer;
   mine: (ownerId: string, id: string) => Promise<Business>;
   save: (b: Business) => Promise<void>;
   publicLive: (slug: string) => Promise<Business | null>;
@@ -42,15 +44,43 @@ export interface MemberView {
   startDate: string; endDate: string; paid: boolean; paidRwf: number; payMethod?: Member['payMethod']; claimed?: Member['claimed']; note?: string;
   servingDaysLeft: number; usesLeft: number; totalUses?: number; usedTotal?: number; usedToday: string[]; createdAt: string;
 }
-export interface PublicProgram { id: string; title: string; description?: string; priceRwf: number; days: number; items: string[]; openDays: Program['openDays']; windows?: Program['windows']; terms?: string; full: boolean }
+export interface PublicProgram { needsCode: boolean; id: string; title: string; description?: string; priceRwf: number; days: number; items: string[]; openDays: Program['openDays']; windows?: Program['windows']; terms?: string; full: boolean }
 
 export function createPrograms(h: Helpers) {
   const { kv } = h;
-  const k = { programs: (b: string) => `biz-programs:${b}`, members: (b: string) => `biz-members:${b}`, pass: (hash: string) => `biz-pass:${hash}`, uses: (b: string, m: string) => `biz-uses:${b}:${m}`, served: (b: string, d: string) => `biz-served:${b}:${d}`, days: (b: string) => `biz-served-days:${b}` };
+  const k = { programs: (b: string) => `biz-programs:${b}`, members: (b: string) => `biz-members:${b}`, pass: (hash: string) => `biz-pass:${hash}`, uses: (b: string, m: string) => `biz-uses:${b}:${m}`, served: (b: string, d: string) => `biz-served:${b}:${d}`, days: (b: string) => `biz-served-days:${b}`, people: (b: string) => `biz-people:${b}`, sess: (hash: string) => `biz-sess:${hash}`, sessions: (b: string) => `biz-sessions:${b}` };
   const programsOf = async (bizId: string) => (await kv.get<{ items: Program[] }>(k.programs(bizId)))?.items ?? [];
   const membersOf = async (bizId: string) => (await kv.get<{ items: Member[] }>(k.members(bizId)))?.items ?? [];
   const putMembers = (bizId: string, items: Member[]) => kv.put(k.members(bizId), { items });
   const servedOn = async (bizId: string, date: string) => (await kv.get<{ items: Use[] }>(k.served(bizId, date)))?.items ?? [];
+  /* ---- the customer's own account at this business: a phone number and a passcode they chose, never stored in the clear */
+  interface Person { phone: string; hash: string; salt: string; fails: number; lockedUntil?: number; createdAt: string }
+  const peopleOf = async (bizId: string) => (await kv.get<{ items: Person[] }>(k.people(bizId)))?.items ?? [];
+  const putPeople = (bizId: string, items: Person[]) => kv.put(k.people(bizId), { items });
+  const BAD_LOGIN = () => new ProgramError('The phone number or passcode is not right.', 401, 'BAD_LOGIN');
+  /** Checks a passcode, counting wrong tries: five wrong ones lock that phone number for ten minutes. Saves the counters. */
+  async function checkPasscode(bizId: string, people: Person[], person: Person, pin: unknown): Promise<void> {
+    const t = h.now();
+    if (person.lockedUntil && person.lockedUntil > t) throw new ProgramError(`Too many wrong passcodes. Try again in ${Math.max(1, Math.ceil((person.lockedUntil - t) / 60_000))} minutes, or ask the business to reset it.`, 429, 'LOCKED');
+    const ok = validPasscode(pin) && (await hashPasscode(String(pin), person.salt)) === person.hash;
+    if (ok) { if (person.fails || person.lockedUntil) { person.fails = 0; delete person.lockedUntil; await putPeople(bizId, people); } return; }
+    person.fails = (person.fails ?? 0) + 1;
+    if (person.fails >= MAX_PIN_FAILS) { person.fails = 0; person.lockedUntil = t + LOCK_MINUTES * 60_000; }
+    await putPeople(bizId, people); throw BAD_LOGIN();
+  }
+  /** A sign-in that lasts 12 hours (30 days when the customer asks to be remembered on this phone). Only a hash of it is stored. */
+  async function newSession(bizId: string, phone: string, remember: boolean) {
+    const token = newToken(); const exp = h.now() + (remember ? REMEMBER_DAYS * 86_400_000 : SESSION_HOURS * 3_600_000); const hash = hashSession(token);
+    await kv.put(k.sess(hash), { bizId, phone, exp });
+    const idx = (await kv.get<{ hashes: string[] }>(k.sessions(bizId)))?.hashes ?? []; await kv.put(k.sessions(bizId), { hashes: [...idx, hash].slice(-5000) });
+    return { token, expiresAt: new Date(exp).toISOString() };
+  }
+  async function sessionOf(bizId: string, token: unknown): Promise<{ phone: string }> {
+    const t = String(token ?? ''); if (!/^[A-Za-z0-9_-]{20,64}$/.test(t)) throw new ProgramError('Please sign in again.', 401, 'SESSION');
+    const s = await kv.get<{ bizId: string; phone: string; exp: number }>(k.sess(hashSession(t)));
+    if (!s || s.bizId !== bizId || s.exp < h.now()) throw new ProgramError('Please sign in again.', 401, 'SESSION');
+    return { phone: s.phone };
+  }
   const usedOf = (list: Use[], memberId: string) => list.filter((m) => m.memberId === memberId && !m.undone).sort((a, b) => a.at.localeCompare(b.at));
 
   function view(m: Member, p: Program | undefined, today: string, used: Use[] = []): MemberView {
@@ -207,45 +237,89 @@ export function createPrograms(h: Helpers) {
       const members = await membersOf(b.id);
       for (const m of members) { await kv.del(k.pass(m.passHash)); await kv.del(k.uses(b.id, m.id)); }
       for (const d of (await kv.get<{ dates: string[] }>(k.days(b.id)))?.dates ?? []) await kv.del(k.served(b.id, d));
-      await kv.del(k.days(b.id)); await kv.del(k.members(b.id)); await kv.del(k.programs(b.id));
+      for (const hh of (await kv.get<{ hashes: string[] }>(k.sessions(b.id)))?.hashes ?? []) await kv.del(k.sess(hh));
+      await kv.del(k.sessions(b.id)); await kv.del(k.people(b.id)); await kv.del(k.days(b.id)); await kv.del(k.members(b.id)); await kv.del(k.programs(b.id));
     },
 
     /* ---------------------------------------------------------------- public */
     async publicPrograms(b: Business): Promise<PublicProgram[]> {
       const members = await membersOf(b.id);
       return (await programsOf(b.id)).filter((p) => p.active).map((p) => ({
-        id: p.id, title: p.title, ...(p.description ? { description: p.description } : {}), priceRwf: p.priceRwf, days: p.days, ...(p.totalUses ? { totalUses: p.totalUses } : {}), items: p.items, openDays: p.openDays, ...(p.windows ? { windows: p.windows } : {}), ...(p.terms ? { terms: p.terms } : {}),
+        needsCode: !!p.joinCode, id: p.id, title: p.title, ...(p.description ? { description: p.description } : {}), priceRwf: p.priceRwf, days: p.days, ...(p.totalUses ? { totalUses: p.totalUses } : {}), items: p.items, openDays: p.openDays, ...(p.windows ? { windows: p.windows } : {}), ...(p.terms ? { terms: p.terms } : {}),
         full: !!p.maxMembers && members.filter((m) => m.programId === p.id && m.status !== 'cancelled' && planState(m, kigaliDate(h.now())) !== 'expired').length >= p.maxMembers,
       }));
     },
-    /** A customer joins from the shared link. They get a pass (waiting for payment) and pay next. */
-    async joinProgram(slug: string, programId: string, input: { name?: unknown; phone?: unknown; idNumber?: unknown; startDate?: unknown; website?: unknown }, visitor: string): Promise<{ token: string; code: string }> {
+    /** A customer joins from the shared link: name, phone, the owner's 4-digit join code (when the owner set one) and a passcode of their own. They are signed in at once. */
+    async joinProgram(slug: string, programId: string, input: { name?: unknown; phone?: unknown; idNumber?: unknown; startDate?: unknown; joinCode?: unknown; passcode?: unknown; remember?: unknown; website?: unknown }, visitor: string): Promise<{ session: string; expiresAt: string; cardId: string; code: string }> {
       if (clean(input.website, 40)) throw new ProgramError('Not accepted.');
       const b = await h.publicLive(slug); if (!b) throw new ProgramError('This page is not available.', 404, 'NOT_FOUND');
-      if (h.tooMany(`join|${visitor}`, 6, h.now())) throw new ProgramError('Too many tries. Please wait a little and try again.', 429, 'RATE');
+      if (h.tooMany(`join|${visitor}`, 10, h.now())) throw new ProgramError('Too many tries. Please wait a little and try again.', 429, 'RATE');
       const who = cleanJoin(input); if ('error' in who) throw new ProgramError(who.error); if (b.programText?.askId === false) delete who.idNumber;
+      if (!validPasscode(input.passcode)) throw new ProgramError('Choose a passcode of 4 to 6 digits. You will use it every time you open your card.');
       return withLock(`mem|${b.id}`, async () => {
         const p = (await programsOf(b.id)).find((x) => x.id === programId && x.active); if (!p) throw new ProgramError('This plan is not open.', 404, 'NOT_FOUND');
+        // The owner's join code: nobody joins without it, and guessing is slowed down.
+        if (p.joinCode) {
+          if (h.tooMany(`jc|${p.id}|${visitor}`, 8, h.now())) throw new ProgramError('Too many wrong codes. Please wait a while, or ask the business for the code again.', 429, 'RATE');
+          if (!sameCode(input.joinCode, p.joinCode)) throw new ProgramError('That join code is not right. Ask the business for the code.', 403, 'BAD_CODE');
+        }
         const list = await membersOf(b.id); const today = kigaliDate(h.now());
         const live = list.filter((m) => m.programId === p.id && m.status !== 'cancelled' && planState(m, today) !== 'expired');
-        if (live.some((m) => m.phone === who.phone)) throw new ProgramError('This phone number already has this plan. Ask the business to send you your pass link.', 409, 'EXISTS');
+        if (live.some((m) => m.phone === who.phone)) throw new ProgramError('This phone number already has this plan. Sign in with your passcode to open it.', 409, 'EXISTS');
         if (p.maxMembers && live.length >= p.maxMembers) throw new ProgramError('This plan is full.', 409, 'FULL');
         if (list.length >= MAX_MEMBERS) throw new ProgramError('This business cannot take more members right now.', 409, 'LIMIT');
-        const token = newToken(); let code = newCode(); while (list.some((m) => m.code === code)) code = newCode();
+        // The customer's account: a new phone number sets its passcode now; a phone number that already has one must use it.
+        const people = await peopleOf(b.id); const existing = people.find((x) => x.phone === who.phone);
+        if (existing) await checkPasscode(b.id, people, existing, input.passcode);
+        else { const salt = newSalt(); people.push({ phone: who.phone, salt, hash: await hashPasscode(String(input.passcode), salt), fails: 0, createdAt: h.iso() }); await putPeople(b.id, people); }
+        const secret = newToken(); let code = newCode(); while (list.some((m) => m.code === code)) code = newCode();
         const start = cleanStart(input.startDate, today);
-        const m: Member = { id: randomUUID(), programId: p.id, name: who.name, phone: who.phone, ...(who.idNumber ? { idNumber: who.idNumber } : {}), code, passHash: hashToken(token), status: 'pending', startDate: start, endDate: endDateFor(start, p.days), paidRwf: 0, paid: false, createdAt: h.iso() };
+        const m: Member = { id: randomUUID(), programId: p.id, name: who.name, phone: who.phone, ...(who.idNumber ? { idNumber: who.idNumber } : {}), code, passHash: hashToken(secret), passSealed: seal(secret, h.secretKey()), status: 'pending', startDate: start, endDate: endDateFor(start, p.days), paidRwf: 0, paid: false, createdAt: h.iso() };
         await putMembers(b.id, [...list, m]); await kv.put(k.pass(m.passHash), { bizId: b.id, memberId: m.id });
         h.alert(b, { title: `New plan member · ${b.name}`, text: `${m.name} joined "${p.title}" (${p.priceRwf.toLocaleString('en-US')} RWF). Waiting for payment.` });
-        return { token, code };
+        const s = await newSession(b.id, who.phone, input.remember === true);
+        return { session: s.token, expiresAt: s.expiresAt, cardId: m.id, code };
       });
     },
-    async passView(slug: string, token: string) {
+    /** Signing in again: phone number and the passcode the customer chose. Wrong tries are counted and lock the phone number for a while. */
+    async login(slug: string, input: { phone?: unknown; passcode?: unknown; remember?: unknown }, visitor: string): Promise<{ session: string; expiresAt: string }> {
       const b = await h.publicLive(slug); if (!b) throw new ProgramError('This page is not available.', 404, 'NOT_FOUND');
-      if (!/^[A-Za-z0-9_-]{20,64}$/.test(String(token))) throw new ProgramError('This pass was not found.', 404, 'NOT_FOUND');
+      if (h.tooMany(`login|${visitor}`, 20, h.now())) throw new ProgramError('Too many tries. Please wait a little and try again.', 429, 'RATE');
+      const phone = cleanPhone(input.phone); if (!phone) throw BAD_LOGIN();
       return withLock(`mem|${b.id}`, async () => {
-        const ref = await kv.get<{ bizId: string; memberId: string }>(k.pass(hashToken(token))); if (!ref || ref.bizId !== b.id) throw new ProgramError('This pass was not found.', 404, 'NOT_FOUND');
-        const list = await membersOf(b.id); const m = list.find((x) => x.id === ref.memberId); const p = m && (await programsOf(b.id)).find((x) => x.id === m.programId);
-        if (!m || !p) throw new ProgramError('This pass was not found.', 404, 'NOT_FOUND');
+        const people = await peopleOf(b.id); const person = people.find((x) => x.phone === phone);
+        if (!person) { await hashPasscode(String(input.passcode ?? ''), 'x'.repeat(32)).catch(() => undefined); throw BAD_LOGIN(); }   // the same work and the same answer whether or not the number exists
+        await checkPasscode(b.id, people, person, input.passcode);
+        if (!(await membersOf(b.id)).some((m) => m.phone === phone && m.status !== 'cancelled')) throw BAD_LOGIN();
+        const s = await newSession(b.id, phone, input.remember === true); return { session: s.token, expiresAt: s.expiresAt };
+      });
+    },
+    async logout(slug: string, session: string): Promise<{ ok: true }> {
+      const b = await h.publicLive(slug); if (!b) throw new ProgramError('This page is not available.', 404, 'NOT_FOUND');
+      await kv.del(k.sess(hashSession(String(session ?? '')))); return { ok: true as const };
+    },
+    async changePasscode(slug: string, session: string, input: { current?: unknown; next?: unknown }): Promise<{ ok: true }> {
+      const b = await h.publicLive(slug); if (!b) throw new ProgramError('This page is not available.', 404, 'NOT_FOUND'); const me = await sessionOf(b.id, session);
+      if (!validPasscode(input.next)) throw new ProgramError('Choose a passcode of 4 to 6 digits.');
+      return withLock(`mem|${b.id}`, async () => {
+        const people = await peopleOf(b.id); const person = people.find((x) => x.phone === me.phone); if (!person) throw BAD_LOGIN();
+        await checkPasscode(b.id, people, person, input.current); person.salt = newSalt(); person.hash = await hashPasscode(String(input.next), person.salt); await putPeople(b.id, people); return { ok: true as const };
+      });
+    },
+    /** The signed-in customer's dashboard: their name and their cards. */
+    async me(slug: string, session: string) {
+      const b = await h.publicLive(slug); if (!b) throw new ProgramError('This page is not available.', 404, 'NOT_FOUND'); const me = await sessionOf(b.id, session);
+      const today = kigaliDate(h.now()); const progs = await programsOf(b.id); const served = await servedOn(b.id, today);
+      const mine = (await membersOf(b.id)).filter((m) => m.phone === me.phone && m.status !== 'cancelled').sort((x, y) => y.createdAt.localeCompare(x.createdAt));
+      return { name: mine[0]?.name ?? '', phone: me.phone, cards: mine.map((m) => { const v = view(m, progs.find((p) => p.id === m.programId), today, usedOf(served, m.id)); return { id: v.id, programTitle: v.programTitle, state: v.state, startDate: v.startDate, endDate: v.endDate, usesLeft: v.usesLeft, paid: v.paid }; }) };
+    },
+    /** One card, in full: who it is for, the dates and what was used each day (the grid), the QR code, and how to pay while it is unpaid. */
+    async card(slug: string, session: string, cardId?: string) {
+      const b = await h.publicLive(slug); if (!b) throw new ProgramError('This page is not available.', 404, 'NOT_FOUND'); const me = await sessionOf(b.id, session);
+      return withLock(`mem|${b.id}`, async () => {
+        const list = await membersOf(b.id); const mine = list.filter((x) => x.phone === me.phone && x.status !== 'cancelled');
+        const m = cardId ? mine.find((x) => x.id === cardId) : mine.length === 1 ? mine[0] : mine.sort((x, y) => y.createdAt.localeCompare(x.createdAt))[0];
+        const p = m && (await programsOf(b.id)).find((x) => x.id === m.programId); if (!m || !p) throw new ProgramError('This card was not found.', 404, 'NOT_FOUND');
         // A payment prompt that was approved on the phone: settle it now (the customer's screen asks about it while waiting).
         let prompt = false;
         if (!m.paid && m.payRef) {
@@ -254,14 +328,17 @@ export function createPrograms(h: Helpers) {
           else if (e?.pay?.state === 'failed') { delete m.payRef; await putMembers(b.id, list); } else prompt = true;
         }
         const t = h.now(); const date = kigaliDate(t); const own = ((await kv.get<{ items: Use[] }>(k.uses(b.id, m.id)))?.items ?? []).filter((x) => !x.undone);
-        const byDate = new Map<string, string[]>(); for (const x of own.slice(-120)) byDate.set(x.date, [...(byDate.get(x.date) ?? []), x.item]);
         const r = remaining(m, p, date); const st = planState(m, date); const ateToday = own.filter((x) => x.date === date).length;
+        let qr: string | null = null; if (m.paid && (st === 'active' || st === 'not_started') && m.passSealed) { try { qr = `BWPASS:${openSecret(m.passSealed, h.secretKey())}`; } catch { qr = null; } }
         return {
+          cardId: m.id,
           business: { name: b.name, slug: b.slug, theme: b.theme },
-          program: { title: p.title, ...(p.totalUses ? { totalUses: p.totalUses } : {}), items: p.items, openDays: p.openDays, ...(p.windows ? { windows: p.windows } : {}), ...(p.terms ? { terms: p.terms } : {}), priceRwf: p.priceRwf },
-          member: { name: m.name, code: m.code, state: st, startDate: m.startDate, endDate: m.endDate, daysLeft: r.calendarDays, servingDaysLeft: Math.max(0, r.servingDays - (ateToday >= p.items.length ? 1 : 0)), usesLeft: usesLeft(m, p, r.uses, ateToday), usedTotal: m.used ?? 0, paid: m.paid },
+          program: { title: p.title, ...(p.totalUses ? { totalUses: p.totalUses } : {}), items: p.items, openDays: p.openDays, ...(p.windows ? { windows: p.windows } : {}), ...(p.terms ? { terms: p.terms } : {}), priceRwf: p.priceRwf, days: p.days },
+          member: { name: m.name, phone: m.phone, ...(m.idNumber ? { idNumber: m.idNumber } : {}), code: m.code, state: st, startDate: m.startDate, endDate: m.endDate, daysLeft: r.calendarDays, servingDaysLeft: Math.max(0, r.servingDays - (ateToday >= p.items.length ? 1 : 0)), usesLeft: usesLeft(m, p, r.uses, ateToday), usedTotal: m.used ?? 0, paid: m.paid, paidAt: m.confirmedAt ?? null },
+          qr,
           today: { date, openToday: p.openDays.includes(dayOfWeek(date)), used: own.filter((x) => x.date === date).map((x) => ({ item: x.item, at: x.at })) },
-          history: [...byDate.entries()].slice(-31).map(([d, items]) => ({ date: d, items })),
+          calendar: cardCalendar(m, p, own.map((x) => ({ date: x.date, item: x.item })).slice(-1500)),
+          history: [],
           payment: m.paid ? null : {
             amount: p.priceRwf, momoCode: b.showPay ? b.momoCode ?? null : null, momoName: b.showPay ? b.momoName ?? null : null, online: await h.payReady(b), promptSent: prompt, claimed: m.claimed ?? null,
             whatsapp: b.whatsapp ?? null,
@@ -270,12 +347,11 @@ export function createPrograms(h: Helpers) {
       });
     },
     /** The customer asks for a payment prompt on their phone (only when the owner takes online payments). */
-    async payMember(slug: string, token: string, input: { phone?: unknown }, visitor: string): Promise<{ ok: true }> {
-      const b = await h.publicLive(slug); if (!b) throw new ProgramError('This page is not available.', 404, 'NOT_FOUND');
+    async payCard(slug: string, session: string, cardId: string, input: { phone?: unknown }, visitor: string): Promise<{ ok: true }> {
+      const b = await h.publicLive(slug); if (!b) throw new ProgramError('This page is not available.', 404, 'NOT_FOUND'); const me = await sessionOf(b.id, session);
       if (h.tooMany(`planpay|${visitor}`, 6, h.now())) throw new ProgramError('Too many payment attempts. Please wait a little.', 429, 'RATE');
       return withLock(`mem|${b.id}`, async () => {
-        const ref = await kv.get<{ bizId: string; memberId: string }>(k.pass(hashToken(String(token)))); if (!ref || ref.bizId !== b.id) throw new ProgramError('This pass was not found.', 404, 'NOT_FOUND');
-        const list = await membersOf(b.id); const m = list.find((x) => x.id === ref.memberId); const p = m && (await programsOf(b.id)).find((x) => x.id === m.programId); if (!m || !p) throw new ProgramError('This pass was not found.', 404, 'NOT_FOUND');
+        const list = await membersOf(b.id); const m = list.find((x) => x.id === cardId && x.phone === me.phone); const p = m && (await programsOf(b.id)).find((x) => x.id === m.programId); if (!m || !p) throw new ProgramError('This card was not found.', 404, 'NOT_FOUND');
         if (m.paid) throw new ProgramError('This plan is already paid.', 409, 'PAID');
         if (!(await h.payReady(b))) throw new ProgramError('This business does not take online payments. Pay with MoMo or cash and tap "I have paid".', 409, 'NO_PAY');
         const e = await h.startPayment(b, { phone: String(input.phone ?? m.phone), amount: p.priceRwf, item: `Program: ${p.title}`, customer: m.name, src: 'page' });
@@ -283,16 +359,25 @@ export function createPrograms(h: Helpers) {
       });
     },
     /** "I have paid" (by MoMo code or cash): the owner is told, and confirms when the money is there. */
-    async claimPaid(slug: string, token: string, input: { ref?: unknown }, visitor: string): Promise<{ ok: true }> {
-      const b = await h.publicLive(slug); if (!b) throw new ProgramError('This page is not available.', 404, 'NOT_FOUND');
+    async claimCard(slug: string, session: string, cardId: string, input: { ref?: unknown }, visitor: string): Promise<{ ok: true }> {
+      const b = await h.publicLive(slug); if (!b) throw new ProgramError('This page is not available.', 404, 'NOT_FOUND'); const me = await sessionOf(b.id, session);
       if (h.tooMany(`claim|${visitor}`, 8, h.now())) throw new ProgramError('Too many tries. Please wait a little.', 429, 'RATE');
       return withLock(`mem|${b.id}`, async () => {
-        const ref = await kv.get<{ bizId: string; memberId: string }>(k.pass(hashToken(String(token)))); if (!ref || ref.bizId !== b.id) throw new ProgramError('This pass was not found.', 404, 'NOT_FOUND');
-        const list = await membersOf(b.id); const m = list.find((x) => x.id === ref.memberId); const p = m && (await programsOf(b.id)).find((x) => x.id === m.programId); if (!m || !p) throw new ProgramError('This pass was not found.', 404, 'NOT_FOUND');
+        const list = await membersOf(b.id); const m = list.find((x) => x.id === cardId && x.phone === me.phone); const p = m && (await programsOf(b.id)).find((x) => x.id === m.programId); if (!m || !p) throw new ProgramError('This card was not found.', 404, 'NOT_FOUND');
         if (m.paid) throw new ProgramError('This plan is already paid.', 409, 'PAID');
         const r = clean(input.ref, 40); m.claimed = { at: h.iso(), ...(r ? { ref: r } : {}) }; await putMembers(b.id, list);
         h.alert(b, { title: `Says paid · ${b.name}`, text: `${m.name} says they paid ${p.priceRwf.toLocaleString('en-US')} RWF for "${p.title}"${r ? ` (ref ${r})` : ''}. Check your MoMo and confirm.` });
         return { ok: true as const };
+      });
+    },
+    /** The owner gives a customer who forgot their passcode a new temporary one (shown once to the owner, who tells the customer). */
+    async resetPasscode(ownerId: string, id: string, memberId: string): Promise<{ passcode: string }> {
+      const b = await h.mine(ownerId, id);
+      return withLock(`mem|${b.id}`, async () => {
+        const m = (await membersOf(b.id)).find((x) => x.id === memberId); if (!m) throw new ProgramError('That member was not found.', 404, 'NOT_FOUND');
+        const people = await peopleOf(b.id); const pin = String(randomInt(1000, 10_000)); const salt = newSalt(); const hash = await hashPasscode(pin, salt); const existing = people.find((x) => x.phone === m.phone);
+        if (existing) { existing.salt = salt; existing.hash = hash; existing.fails = 0; delete existing.lockedUntil; } else people.push({ phone: m.phone, salt, hash, fails: 0, createdAt: h.iso() });
+        await putPeople(b.id, people); return { passcode: pin };
       });
     },
   };

@@ -178,3 +178,19 @@ Object.assign(SRW, {
   'Join this {program}': 'Injira muri iyi {program}',
   'My {pass}': '{Pass} yanjye',
 });
+
+// Programs: sign-up, passcode and card.
+Object.assign(SRW, {
+  '4 digits. People must write it to join, so only the {members} you give it to can join.': 'Imibare 4. Abantu bagomba kuyandika kugira ngo binjire, bityo gusa {members} uyihaye nibo bashobora kwinjira.',
+  'Anyone with the link can join. Set a join code to accept only the people you choose.': 'Uwo ari we wese ufite ihuza ashobora kwinjira. Shyiraho kode yo kwinjira kugira ngo wemere abo uhisemo gusa.',
+  'Give a new temporary passcode': 'Tanga passcode nshya y’agateganyo',
+  'Give this code to the {members} you accept. It is not on the public page.': 'Tanga iyi kode ku {members} wemera. Ntiri ku rupapuro rusange.',
+  'Join code': 'Kode yo kwinjira',
+  'Join code (optional)': 'Kode yo kwinjira (si ngombwa)',
+  'Make a code': 'Kora kode',
+  'No code': 'Nta kode',
+  'Reset passcode': 'Subiramo passcode',
+  'Reset the passcode of': 'Subiramo passcode ya',
+  'Tell them, and ask them to change it after signing in.': 'Ubibabwire, ubasabe kuyihindura nyuma yo kwinjira.',
+  'new passcode': 'passcode nshya',
+});

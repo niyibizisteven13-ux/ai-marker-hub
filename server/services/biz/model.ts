@@ -179,7 +179,7 @@ export interface PublicBusiness {
   /** The owner's own words for the programs below (public: they are only words). */
   programText?: ProgramText;
   /** Programs customers can join (a monthly pass, ten visits, a month of lunches…): see programs.ts. */
-  programs?: Array<{ id: string; title: string; description?: string; priceRwf: number; days: number; totalUses?: number; items: string[]; openDays: Day[]; windows?: Array<{ item: string; from: string; to: string }>; terms?: string; full: boolean }>;
+  programs?: Array<{ id: string; title: string; description?: string; priceRwf: number; days: number; totalUses?: number; items: string[]; openDays: Day[]; windows?: Array<{ item: string; from: string; to: string }>; terms?: string; full: boolean; needsCode: boolean }>;
   products: Array<{ id: string; name: string; price: number | null; unit?: string; description?: string; media?: PublicMedia; available: boolean }>;
   gallery: PublicMedia[];
   updatedAt: string;

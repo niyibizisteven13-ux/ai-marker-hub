@@ -1,4 +1,5 @@
-import { randomBytes, createHash } from 'node:crypto';
+import { randomBytes, createHash, scrypt, timingSafeEqual } from 'node:crypto';
+import type { Sealed } from './secrets.js';
 import { DAYS, clean, cleanPhone, oneOf, type Day } from './model.js';
 
 /**
@@ -66,6 +67,8 @@ export interface Program {
   maxMembers?: number;
   /** An optional cap on the total number of uses over the whole plan (ten visits, four haircuts). Without it the only limit is one of each item per day. */
   totalUses?: number;
+  /** A 4-digit code the owner gives out (in person, on a poster, by WhatsApp). When set, nobody can join without it. Private: never shown on the public page. */
+  joinCode?: string;
   active: boolean;
   createdAt: string;
 }
@@ -75,6 +78,8 @@ export interface Member {
   code: string;
   /** Only a hash of the pass token is kept: the token itself is in the customer's link and QR code. */
   passHash: string;
+  /** The pass secret (what the QR code holds), encrypted, so the customer can be shown their QR code again after signing in. */
+  passSealed?: Sealed;
   status: MemberStatus;
   startDate: string; endDate: string;
   paidRwf: number; paid: boolean;
@@ -131,6 +136,9 @@ export function cleanProgram(input: any, id: string, now: string, prev?: Program
   if (max !== undefined && Number.isFinite(max) && max >= 1 && max <= MAX_MEMBERS) p.maxMembers = max;
   const cap = input?.totalUses === undefined ? prev?.totalUses : input.totalUses === null || input.totalUses === '' ? undefined : Math.round(Number(input.totalUses));
   if (cap !== undefined && Number.isFinite(cap) && cap >= 1 && cap <= 1000) p.totalUses = cap;
+  const code = input?.joinCode === undefined ? prev?.joinCode : String(input.joinCode ?? '').replace(/\D/g, '');
+  if (input?.joinCode !== undefined && String(input.joinCode ?? '').trim() !== '' && !/^\d{4}$/.test(code ?? '')) return { error: 'The join code must be 4 digits.' };
+  if (code && /^\d{4}$/.test(code)) p.joinCode = code;
   return p;
 }
 
@@ -146,6 +154,9 @@ export function cleanJoin(input: any): { name: string; phone: string; idNumber?:
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';        // no 0/O, 1/I/L: a code read aloud or typed on a phone is not misread
 export const newCode = () => { const b = randomBytes(8); let s = ''; for (let i = 0; i < 8; i++) s += CODE_ALPHABET[b[i] % CODE_ALPHABET.length]; return `${s.slice(0, 4)}-${s.slice(4)}`; };
 export const normalizeCode = (v: unknown) => { const s = String(v ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/0/g, 'O').replace(/[1I]/g, 'L'); void s; const t = String(v ?? '').toUpperCase().replace(/[^A-Z0-9]/g, ''); return t.length === 8 ? `${t.slice(0, 4)}-${t.slice(4)}` : null; };
+/** A new 4-digit join code. */
+export const newJoinCode = () => String(randomBytes(4).readUInt32BE() % 10000).padStart(4, '0');
+export const sameCode = (a: unknown, b: unknown) => { const x = Buffer.from(String(a ?? '').replace(/\D/g, '').padEnd(8, '#')), y = Buffer.from(String(b ?? '').replace(/\D/g, '').padEnd(8, '#')); return x.length === y.length && timingSafeEqual(x, y); };
 export const newToken = () => randomBytes(24).toString('base64url');
 export const hashToken = (token: string) => createHash('sha256').update(`biz-pass|${token}`).digest('hex');
 /** The text inside the QR code: the pass link's own token, nothing else, so a scanner (or a person) cannot be tricked by other content. */
@@ -208,3 +219,20 @@ const hhmm = (iso?: string) => { if (!iso) return ''; const k = new Date(Date.pa
 /** A start date the customer chose: today to a week ahead, nothing in the past. */
 export function cleanStart(v: unknown, today: string): string { return isDate(v) && v >= today && v <= addDays(today, 7) ? v : today; }
 export const oneOfMethod = (v: unknown) => oneOf(['momo_prompt', 'momo_manual', 'cash'] as const, v, 'momo_manual');
+
+/* ---------------------------------------------------------------- the customer's own passcode and sign-in */
+/** A passcode is 4 to 6 digits the customer chooses; it is checked on every sign-in, with a lockout after wrong tries (see programsService). */
+export const validPasscode = (v: unknown): v is string => /^\d{4,6}$/.test(String(v ?? '').trim());
+export const hashSession = (token: string) => createHash('sha256').update(`biz-sess|${token}`).digest('hex');
+export const hashPasscode = (pin: string, salt: string): Promise<string> => new Promise((resolve, reject) => scrypt(String(pin).trim(), salt, 32, (e, k) => (e ? reject(e) : resolve(k.toString('hex')))));
+export const newSalt = () => randomBytes(16).toString('hex');
+export const SESSION_HOURS = 12, REMEMBER_DAYS = 30, MAX_PIN_FAILS = 5, LOCK_MINUTES = 10;
+
+/** One row of the card: a calendar day of the plan with whether it is available and what was used that day. */
+export interface CardDay { date: string; dow: Day; open: boolean; used: string[] }
+export function cardCalendar(m: Pick<Member, 'startDate' | 'endDate'>, p: Pick<Program, 'openDays'>, uses: Array<{ date: string; item: string }>, cap = 124): CardDay[] {
+  const by = new Map<string, string[]>(); for (const u of uses) by.set(u.date, [...(by.get(u.date) ?? []), u.item]);
+  const out: CardDay[] = [];
+  for (let d = m.startDate; d <= m.endDate && out.length < cap; d = addDays(d, 1)) out.push({ date: d, dow: dayOfWeek(d), open: p.openDays.includes(dayOfWeek(d)), used: by.get(d) ?? [] });
+  return out;
+}

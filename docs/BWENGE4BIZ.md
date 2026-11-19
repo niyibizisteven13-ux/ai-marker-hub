@@ -101,9 +101,12 @@ bus pass, a month of tutoring sessions, a car-wash subscription.
    (an item such as "Lunch", "Entry" or "Haircut"; up to four, one of each per person per day), the days of the week it is available, and
    optionally the times of day, a **total number of uses** (10 visits, 4 haircuts) and a maximum number of members. Each plan gets a share
    link (`/b/<page>?plan=<id>`) with a QR code and a WhatsApp share button. The page must be published.
-2. **Customer** opens the link, writes name and phone (and an ID if they like), picks a start day (today to a week ahead) and gets a **pass**: the
-   same page with `?pass=<secret>`. It shows a QR code and a short code (`XXXX-XXXX`); no sign-in or app is needed. They keep the link (or add it
-   to the home screen).
+2. **Customer, first time**: scans the QR code or opens the link. Step 1: name, phone number, the owner's **4-digit join code** (when the owner set
+   one; nobody can join without it) and, if the owner asks for it, an ID. Step 2: the customer **creates a passcode** (4 to 6 digits) and is signed in.
+   From then on they open their card by signing in with **phone number and passcode** (optionally "keep me signed in on this phone for 30 days"). There is
+   no secret link to guard or share. A phone number is one account at that business: a second program on the same number uses the same passcode.
+   A forgotten passcode is reset by the owner (Members → *Reset passcode* gives a temporary one to pass on). Five wrong passcodes lock that phone
+   number for ten minutes.
 3. **Paying**: if the owner has MTN/Airtel keys saved (Secrets and payments) the customer can approve a prompt on their phone and the plan
    starts by itself; otherwise the pass shows the MoMo code, the customer pays and taps **I have paid** (optionally with the MoMo reference), the
    owner is told, checks their phone and taps **Confirm payment** (MoMo or cash). Either way the sale appears once in the notebook. Bwenge never
@@ -118,13 +121,19 @@ bus pass, a month of tutoring sessions, a car-wash subscription.
 starting on the 1st ends on the 30th); days it is not available neither allow a use nor count as missed; one of each item per person per day; with a
 *total uses* cap, no more than that many uses overall; dates are Kigali dates. Unused days are not carried over (add days by hand if you want to).
 
-**Privacy and safety**: the public page shows only the plans (name, price, days, items), never members. A pass token is long and random and only its
-hash is stored; a pass only opens on its own business page and its URL is marked noindex; the owner side is scoped to the owner like the rest of
+**The card** looks like the paper one a restaurant hands out: the business name and phone numbers, the person's name and period, a stamp (PAID or NOT PAID),
+then a grid with the dates down the side (15 days to a block, a switch between blocks) and **one column per item** (Morning, Midday, Evening; or just
+Lunch and Supper; up to four), a cross in every box that was used, closed days hatched, today highlighted. Under it: uses left, valid until, the QR code
+(only once paid; tap to enlarge) and the short code.
+
+**Privacy and safety**: the public page shows only the plans (name, price, days, items), never members and never the join code. Passcodes are stored only
+as salted hashes, a session is a long random token kept as a hash and sent in a header (never in an address), the QR secret is stored encrypted, and the
+card pages are marked noindex; the owner side is scoped to the owner like the rest of
 Bwenge4biz. Joining is rate limited, has a hidden spam field, allows one live plan per phone number per plan, and respects the maximum members.
-Joining and checking in run under a per-business lock, so two scans at the same moment cannot use the same item twice.
+Joining is also slowed for anyone guessing join codes. Joining and checking in run under a per-business lock, so two scans at the same moment cannot use the same item twice.
 
 **Honest limits**
-- A pass is a link: a customer can share a screenshot. The system allows one use of each item per day, so a shared pass only uses that customer's
+- A card can still be screenshotted or a phone handed to a friend, and the passcode can be told to someone. The system allows one use of each item per day, so a shared pass only uses that customer's
   own allowance, but the owner should still glance at the name on the screen. The pass shows a ticking clock so a still picture is easy to spot.
 - The lock that prevents double use lives in one server process. With several server instances behind a balancer, two scans in the same instant
   on different instances could both pass; use one instance for the API or move the lock to the database before relying on it at scale.

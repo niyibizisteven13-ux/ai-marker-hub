@@ -21,6 +21,12 @@ async function setup(over: Record<string, unknown> = {}) {
   const prog = await m.svc.saveProgram('o', biz.id, { ...LUNCH, ...over });
   return { ...m, biz, prog };
 }
+/** Joining now needs a passcode the customer chooses; `token` is kept as the name of the signed-in session. */
+const joinP = async (svc: any, slug: string, pid: string, input: any, visitor: string) => { const r = await svc.joinProgram(slug, pid, { passcode: '4821', ...input }, visitor); return { ...r, token: r.session as string }; };
+const passView = (svc: any, slug: string, session: string) => svc.card(slug, session);
+const cardIdOf = async (svc: any, slug: string, session: string) => (await svc.card(slug, session)).cardId as string;
+const payMember = async (svc: any, slug: string, session: string, input: any, visitor: string) => svc.payCard(slug, session, await cardIdOf(svc, slug, session), input, visitor);
+const claimPaid = async (svc: any, slug: string, session: string, input: any, visitor: string) => svc.claimCard(slug, session, await cardIdOf(svc, slug, session), input, visitor);
 const member = (o: Partial<Member> = {}): Member => ({ id: 'm1', programId: 'p', name: 'Ann', phone: '250788123456', code: 'ABCD-2345', passHash: 'h', status: 'active', startDate: '2026-11-17', endDate: '2026-12-16', paidRwf: 40000, paid: true, createdAt: '2026-11-16T00:00:00Z', ...o });
 const program = (o: Partial<Program> = {}): Program => ({ id: 'p', title: 'Lunch', priceRwf: 40000, days: 30, items: ['Lunch'], openDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat'], active: true, createdAt: '', ...o });
 
@@ -75,27 +81,28 @@ test('passes: the token is long and random, only its hash is stored, the QR text
 test('the whole story: owner makes a plan, a student joins from the link, pays, shows the pass, is served once a day, and the money is in the notebook', async () => {
   const { svc, biz, prog, at } = await setup();
   const pub = (await svc.publicBySlug(biz.slug))!; assert.equal(pub.programs!.length, 1); assert.equal(pub.programs![0].priceRwf, 40000);
-  const joined = await svc.joinProgram(biz.slug, prog.id, { name: 'Alice', phone: '0788123456', idNumber: 'S1' }, 'v1');
+  const joined = await joinP(svc, biz.slug, prog.id, { name: 'Alice', phone: '0788123456', idNumber: 'S1' }, 'v1');
   assert.ok(joined.token.length >= 30); assert.match(joined.code, /^[A-Z0-9]{4}-[A-Z0-9]{4}$/);
   // The student's pass, before paying: tells them how to pay; the money is not counted yet.
-  let pass: any = await svc.passView(biz.slug, joined.token);
+  let pass: any = await passView(svc, biz.slug, joined.token);
   assert.equal(pass.member.state, 'pending'); assert.equal(pass.payment.amount, 40000); assert.equal(pass.payment.momoCode, '123456'); assert.equal(pass.payment.online, false);
   assert.equal((await svc.dashboard('o', biz.id)).today.sales, 0);
   // The counter refuses an unpaid pass.
   const unpaid: any = await svc.redeem('o', biz.id, { code: joined.code }); assert.equal(unpaid.ok, false); assert.equal(unpaid.code, 'pending'); assert.equal(unpaid.member.name, 'Alice');
   // She says she paid; the owner is told; the owner confirms.
-  await svc.claimPaid(biz.slug, joined.token, { ref: 'TX99' }, 'v1'); assert.equal((await svc.programSummary('o', biz.id)).waitingConfirmation, 1);
+  await claimPaid(svc, biz.slug, joined.token, { ref: 'TX99' }, 'v1'); assert.equal((await svc.programSummary('o', biz.id)).waitingConfirmation, 1);
   const m0 = (await svc.members('o', biz.id))[0]; assert.equal(m0.claimed!.ref, 'TX99');
   const paid = await svc.confirmPayment('o', biz.id, m0.id, { method: 'momo' }); assert.equal(paid.state, 'active'); assert.equal(paid.paidRwf, 40000);
   assert.equal((await svc.dashboard('o', biz.id)).today.sales, 40000, 'the plan is a sale in the notebook'); await assert.rejects(svc.confirmPayment('o', biz.id, m0.id), (e: any) => e.status === 409, 'cannot be confirmed twice');
   // Scan the pass: served. Scan again: already served, with the time.
-  const first: any = await svc.redeem('o', biz.id, { token: passPayload(joined.token) }); assert.equal(first.ok, true); assert.equal(first.item, 'Lunch'); assert.equal(first.member.usesLeft, 25, 'today\'s lunch is used'); assert.equal(((await svc.passView(biz.slug, joined.token)) as any).member.usesLeft, 25);
-  const second: any = await svc.redeem('o', biz.id, { token: passPayload(joined.token) }); assert.equal(second.ok, false); assert.equal(second.code, 'already'); assert.match(second.message, /12:00/);
+  const qr = ((await passView(svc, biz.slug, joined.token)) as any).qr as string; assert.match(qr, /^BWPASS:/);
+  const first: any = await svc.redeem('o', biz.id, { token: qr }); assert.equal(first.ok, true); assert.equal(first.item, 'Lunch'); assert.equal(first.member.usesLeft, 25, 'today\'s lunch is used'); assert.equal(((await passView(svc, biz.slug, joined.token)) as any).member.usesLeft, 25);
+  const second: any = await svc.redeem('o', biz.id, { token: qr }); assert.equal(second.ok, false); assert.equal(second.code, 'already'); assert.match(second.message, /12:00/);
   assert.equal(((await svc.redeem('o', biz.id, { code: joined.code.toLowerCase() })) as any).code, 'already', 'by code, any case');
   assert.equal(((await svc.redeem('o', biz.id, { code: 'ZZZZ-9999' })) as any).code, 'unknown');
   // Today and the student's own view.
   const today = await svc.today('o', biz.id); assert.equal(today.servedCount, 1); assert.equal(today.served[0].name, 'Alice'); assert.equal(today.notYet.length, 0);
-  pass = await svc.passView(biz.slug, joined.token); assert.equal(pass.member.state, 'active'); assert.equal(pass.today.used.length, 1); assert.equal(pass.payment, null); assert.equal(pass.history[0].items[0], 'Lunch');
+  pass = await passView(svc, biz.slug, joined.token); assert.equal(pass.member.state, 'active'); assert.equal(pass.today.used.length, 1); assert.equal(pass.payment, null); assert.ok(pass.calendar.find((d: any) => d.date === pass.today.date).used.includes('Lunch'));
   // Tomorrow she can eat again; she is "not yet" until she does.
   at(T0 + 86_400_000); assert.equal((await svc.today('o', biz.id)).notYet.length, 1);
   assert.equal(((await svc.redeem('o', biz.id, { code: joined.code })) as any).ok, true);
@@ -107,7 +114,7 @@ test('the whole story: owner makes a plan, a student joins from the link, pays, 
 
 test('a mistaken scan can be undone for 20 minutes; an old one cannot; the owner can pause, extend and cancel', async () => {
   const { svc, biz, prog, at } = await setup();
-  const j = await svc.joinProgram(biz.slug, prog.id, { name: 'Bob', phone: '0788222333' }, 'v'); const m = (await svc.members('o', biz.id))[0]; await svc.confirmPayment('o', biz.id, m.id, { method: 'cash' });
+  const j = await joinP(svc, biz.slug, prog.id, { name: 'Bob', phone: '0788222333' }, 'v'); const m = (await svc.members('o', biz.id))[0]; await svc.confirmPayment('o', biz.id, m.id, { method: 'cash' });
   assert.equal((await svc.dashboard('o', biz.id)).recent.some((e) => e.method === 'cash'), true);
   const r: any = await svc.redeem('o', biz.id, { code: j.code }); at(T0 + 5 * 60_000); await svc.undoUse('o', biz.id, r.useId);
   assert.equal(((await svc.redeem('o', biz.id, { code: j.code })) as any).ok, true, 'served again after the undo'); assert.equal((await svc.today('o', biz.id)).servedCount, 1);
@@ -121,33 +128,33 @@ test('a mistaken scan can be undone for 20 minutes; an old one cannot; the owner
 
 test('two scans at the same moment serve exactly one item', async () => {
   const { svc, biz, prog } = await setup();
-  const j = await svc.joinProgram(biz.slug, prog.id, { name: 'Cy', phone: '0788333444' }, 'v'); await svc.confirmPayment('o', biz.id, (await svc.members('o', biz.id))[0].id, { method: 'cash' });
+  const j = await joinP(svc, biz.slug, prog.id, { name: 'Cy', phone: '0788333444' }, 'v'); await svc.confirmPayment('o', biz.id, (await svc.members('o', biz.id))[0].id, { method: 'cash' });
   const results: any[] = await Promise.all(Array.from({ length: 6 }, () => svc.redeem('o', biz.id, { code: j.code })));
   assert.equal(results.filter((r) => r.ok).length, 1); assert.equal(results.filter((r) => r.code === 'already').length, 5); assert.equal((await svc.today('o', biz.id)).servedCount, 1);
 });
 
 test('joining: one plan per phone, a full plan closes, a closed plan is gone, spam is refused, and the page never shows other people', async () => {
   const { svc, biz, prog } = await setup({ maxMembers: 2 });
-  await svc.joinProgram(biz.slug, prog.id, { name: 'A1', phone: '0788000001' }, 'v1');
-  await assert.rejects(svc.joinProgram(biz.slug, prog.id, { name: 'A1 again', phone: '0788000001' }, 'v2'), (e: any) => e.code === 'EXISTS');
-  await svc.joinProgram(biz.slug, prog.id, { name: 'A2', phone: '0788000002' }, 'v3'); assert.equal((await svc.publicBySlug(biz.slug))!.programs![0].full, true);
-  await assert.rejects(svc.joinProgram(biz.slug, prog.id, { name: 'A3', phone: '0788000003' }, 'v4'), (e: any) => e.code === 'FULL');
-  await assert.rejects(svc.joinProgram(biz.slug, prog.id, { name: 'Bot', phone: '0788000009', website: 'spam.com' }, 'v5'), /Not accepted/);
+  await joinP(svc, biz.slug, prog.id, { name: 'A1', phone: '0788000001' }, 'v1');
+  await assert.rejects(joinP(svc, biz.slug, prog.id, { name: 'A1 again', phone: '0788000001' }, 'v2'), (e: any) => e.code === 'EXISTS');
+  await joinP(svc, biz.slug, prog.id, { name: 'A2', phone: '0788000002' }, 'v3'); assert.equal((await svc.publicBySlug(biz.slug))!.programs![0].full, true);
+  await assert.rejects(joinP(svc, biz.slug, prog.id, { name: 'A3', phone: '0788000003' }, 'v4'), (e: any) => e.code === 'FULL');
+  await assert.rejects(joinP(svc, biz.slug, prog.id, { name: 'Bot', phone: '0788000009', website: 'spam.com' }, 'v5'), /Not accepted/);
   const pubJson = JSON.stringify(await svc.publicBySlug(biz.slug)); assert.ok(!pubJson.includes('0788000001') && !pubJson.includes('250788000001') && !pubJson.includes('A1') && !pubJson.includes('passHash'));
-  await svc.saveProgram('o', biz.id, { ...prog, id: prog.id, active: false }); assert.equal((await svc.publicBySlug(biz.slug))!.programs, undefined); await assert.rejects(svc.joinProgram(biz.slug, prog.id, { name: 'A4', phone: '0788000004' }, 'v6'), (e: any) => e.status === 404);
+  await svc.saveProgram('o', biz.id, { ...prog, id: prog.id, active: false }); assert.equal((await svc.publicBySlug(biz.slug))!.programs, undefined); await assert.rejects(joinP(svc, biz.slug, prog.id, { name: 'A4', phone: '0788000004' }, 'v6'), (e: any) => e.status === 404);
   await assert.rejects(svc.deleteProgram('o', biz.id, prog.id), (e: any) => e.code === 'HAS_MEMBERS');
-  const { svc: s2, biz: b2, prog: p2 } = await setup(); for (let i = 0; i < 6; i++) await s2.joinProgram(b2.slug, p2.id, { name: `N${i}`, phone: `07882000${i}0` }, 'same');
-  await assert.rejects(s2.joinProgram(b2.slug, p2.id, { name: 'N7', phone: '0788200070' }, 'same'), (e: any) => e.status === 429);
+  const { svc: s2, biz: b2, prog: p2 } = await setup(); for (let i = 0; i < 10; i++) await joinP(s2, b2.slug, p2.id, { name: `N${i}`, phone: `07882${String(i).padStart(5, '0')}` }, 'same');
+  await assert.rejects(joinP(s2, b2.slug, p2.id, { name: 'N11', phone: '0788299999' }, 'same'), (e: any) => e.status === 429);
 });
 
 test('privacy: a pass belongs to its holder, another business cannot read it, strangers cannot use the owner side, and an unpublished page has no plans', async () => {
-  const { svc, biz, prog, kv } = await setup(); const j = await svc.joinProgram(biz.slug, prog.id, { name: 'Dee', phone: '0788444555' }, 'v');
+  const { svc, biz, prog, kv } = await setup(); const j = await joinP(svc, biz.slug, prog.id, { name: 'Dee', phone: '0788444555' }, 'v');
   const other = await svc.create('o2', { name: 'Other Cafe' }); await svc.update('o2', other.id, { about: 'x' }); await svc.setPublished('o2', other.id, true);
-  await assert.rejects(svc.passView(other.slug, j.token), (e: any) => e.status === 404, 'a pass only opens on its own business page');
-  await assert.rejects(svc.passView(biz.slug, 'x'.repeat(30)), (e: any) => e.status === 404); await assert.rejects(svc.passView(biz.slug, 'short'), (e: any) => e.status === 404);
+  await assert.rejects(passView(svc, other.slug, j.token), (e: any) => e.status === 401, 'a sign-in only works on its own business page');
+  await assert.rejects(passView(svc, biz.slug, 'x'.repeat(30)), (e: any) => e.status === 401); await assert.rejects(passView(svc, biz.slug, 'short'), (e: any) => e.status === 401);
   for (const call of [() => svc.programs('intruder', biz.id), () => svc.members('intruder', biz.id), () => svc.redeem('intruder', biz.id, { code: j.code }), () => svc.today('intruder', biz.id), () => svc.saveProgram('intruder', biz.id, LUNCH)]) await assert.rejects(call(), (e: any) => e.status === 404);
-  const stored = JSON.stringify([...kv.data.entries()]); assert.ok(!stored.includes(j.token), 'only the hash of the pass token is stored');
-  await svc.setPublished('o', biz.id, false); await assert.rejects(svc.passView(biz.slug, j.token), (e: any) => e.status === 404); assert.equal(await svc.publicBySlug(biz.slug), null);
+  const stored = JSON.stringify([...kv.data.entries()]); assert.ok(!stored.includes(j.token), 'only the hash of the session is stored'); assert.ok(!stored.includes('4821'), 'the passcode is stored only as a salted hash');
+  await svc.setPublished('o', biz.id, false); await assert.rejects(passView(svc, biz.slug, j.token), (e: any) => e.status === 404); assert.equal(await svc.publicBySlug(biz.slug), null);
 });
 
 test('paying by phone prompt: the customer approves, the plan starts, and the sale is counted once', async () => {
@@ -155,18 +162,18 @@ test('paying by phone prompt: the customer approves, the plan starts, and the sa
   const f: Fetch = async (url, init) => { if (url.includes('/token/')) return { status: 200, json: async () => ({ access_token: 'T' }), text: async () => '' }; if (init.method === 'POST') return { status: 202, json: async () => ({}), text: async () => '' }; return { status: 200, json: async () => ({ status: state }), text: async () => '' }; };
   const svc = createBizService({ kv, media: memoryMediaStore(), isPaid: async () => true, now: () => T0, secretKey: keyFrom('t'), fetchImpl: f }); resetBizLimitsForTests();
   const biz = await svc.create('o', { name: 'Uni Canteen' }); await svc.update('o', biz.id, { about: 'x', acceptPay: true }); await svc.setPublished('o', biz.id, true); const prog = await svc.saveProgram('o', biz.id, LUNCH);
-  const j = await svc.joinProgram(biz.slug, prog.id, { name: 'Eve', phone: '0788555666' }, 'v');
-  await assert.rejects(svc.payMember(biz.slug, j.token, {}, 'v'), (e: any) => e.code === 'NO_PAY', 'no keys yet');
+  const j = await joinP(svc, biz.slug, prog.id, { name: 'Eve', phone: '0788555666' }, 'v');
+  await assert.rejects(payMember(svc, biz.slug, j.token, {}, 'v'), (e: any) => e.code === 'NO_PAY', 'no keys yet');
   await svc.saveSecrets('o', biz.id, 'mtn', { subscriptionKey: 'SKEY123', apiUser: '3f2b8c1e-aaaa-bbbb-cccc-1234567890ab', apiKey: 'APIKEY9999', environment: 'production' });
-  assert.equal(((await svc.passView(biz.slug, j.token)) as any).payment.online, true);
-  await svc.payMember(biz.slug, j.token, {}, 'v'); let pass: any = await svc.passView(biz.slug, j.token); assert.equal(pass.payment.promptSent, true); assert.equal(pass.member.state, 'pending');
-  state = 'SUCCESSFUL'; pass = await svc.passView(biz.slug, j.token); assert.equal(pass.member.state, 'active'); assert.equal(pass.payment, null);
+  assert.equal(((await passView(svc, biz.slug, j.token)) as any).payment.online, true);
+  await payMember(svc, biz.slug, j.token, {}, 'v'); let pass: any = await passView(svc, biz.slug, j.token); assert.equal(pass.payment.promptSent, true); assert.equal(pass.member.state, 'pending');
+  state = 'SUCCESSFUL'; pass = await passView(svc, biz.slug, j.token); assert.equal(pass.member.state, 'active'); assert.equal(pass.payment, null);
   assert.equal((await svc.dashboard('o', biz.id)).today.sales, 40000, 'one sale, not two'); assert.equal((await svc.members('o', biz.id))[0].payMethod, 'momo_prompt');
   assert.equal(((await svc.redeem('o', biz.id, { code: j.code })) as any).ok, true);
 });
 
 test('the owner sees expiring plans and what was sold; deleting the business removes every pass and record', async () => {
-  const { svc, biz, prog, kv, at } = await setup(); const j = await svc.joinProgram(biz.slug, prog.id, { name: 'Fay', phone: '0788666777', startDate: '2026-11-17' }, 'v'); await svc.confirmPayment('o', biz.id, (await svc.members('o', biz.id))[0].id, { method: 'cash' });
+  const { svc, biz, prog, kv, at } = await setup(); const j = await joinP(svc, biz.slug, prog.id, { name: 'Fay', phone: '0788666777', startDate: '2026-11-17' }, 'v'); await svc.confirmPayment('o', biz.id, (await svc.members('o', biz.id))[0].id, { method: 'cash' });
   await svc.redeem('o', biz.id, { code: j.code }); let s = await svc.programSummary('o', biz.id); assert.equal(s.active, 1); assert.equal(s.soldThisMonth, 40000); assert.equal(s.expiring.length, 0);
   at(Date.parse('2026-12-14T10:00:00Z')); s = await svc.programSummary('o', biz.id); assert.equal(s.expiring.length, 1); assert.equal(s.expiring[0].name, 'Fay');
   await svc.remove('o', biz.id); const left = [...kv.data.keys()].filter((k) => /^biz-(programs|members|pass|items|served)/.test(k)); assert.deepEqual(left, []);
@@ -189,7 +196,7 @@ test('the assistant can make a program, give the share link, and report how the 
 test('it is not only for restaurants: a gym pass and a salon with four haircuts in total', async () => {
   // A gym: a monthly pass, one entry a day, every day.
   const gym = await setup({ title: 'Monthly gym pass', priceRwf: 25_000, items: ['Entry'], openDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] });
-  const g = await gym.svc.joinProgram(gym.biz.slug, gym.prog.id, { name: 'Gina', phone: '0788777888' }, 'g'); await gym.svc.confirmPayment('o', gym.biz.id, (await gym.svc.members('o', gym.biz.id))[0].id, { method: 'cash' });
+  const g = await joinP(gym.svc, gym.biz.slug, gym.prog.id, { name: 'Gina', phone: '0788777888', remember: true }, 'g'); await gym.svc.confirmPayment('o', gym.biz.id, (await gym.svc.members('o', gym.biz.id))[0].id, { method: 'cash' });
   const in1: any = await gym.svc.redeem('o', gym.biz.id, { code: g.code }); assert.equal(in1.ok, true); assert.equal(in1.item, 'Entry');
   const in2: any = await gym.svc.redeem('o', gym.biz.id, { code: g.code }); assert.equal(in2.code, 'already'); assert.match(in2.message, /Already used today at/);
   gym.at(Date.parse('2026-11-22T10:00:00Z')); assert.equal(((await gym.svc.redeem('o', gym.biz.id, { code: g.code })) as any).ok, true, 'a gym is open on Sunday');
@@ -197,13 +204,13 @@ test('it is not only for restaurants: a gym pass and a salon with four haircuts 
   // A salon: four haircuts over two months, never more than one a day.
   const salon = await setup({ title: '4 haircuts', priceRwf: 12_000, days: 60, items: ['Haircut'], totalUses: 4, openDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat'] });
   assert.equal((await salon.svc.publicBySlug(salon.biz.slug))!.programs![0].totalUses, 4);
-  const s = await salon.svc.joinProgram(salon.biz.slug, salon.prog.id, { name: 'Sam', phone: '0788999000' }, 's'); await salon.svc.confirmPayment('o', salon.biz.id, (await salon.svc.members('o', salon.biz.id))[0].id, { method: 'momo' });
+  const s = await joinP(salon.svc, salon.biz.slug, salon.prog.id, { name: 'Sam', phone: '0788999000', remember: true }, 's'); await salon.svc.confirmPayment('o', salon.biz.id, (await salon.svc.members('o', salon.biz.id))[0].id, { method: 'momo' });
   const dayAt = (n: number) => T0 + n * 86_400_000;
-  const left = async () => ((await salon.svc.passView(salon.biz.slug, s.token)) as any).member.usesLeft;
+  const left = async () => ((await passView(salon.svc, salon.biz.slug, s.token)) as any).member.usesLeft;
   assert.equal(await left(), 4);
   for (let i = 0; i < 4; i++) { salon.at(dayAt(i)); const r: any = await salon.svc.redeem('o', salon.biz.id, { code: s.code }); assert.equal(r.ok, true, `visit ${i + 1}`); assert.equal(r.member.usesLeft, 3 - i); }
   salon.at(dayAt(4)); const fifth: any = await salon.svc.redeem('o', salon.biz.id, { code: s.code }); assert.equal(fifth.ok, false); assert.equal(fifth.code, 'no_uses_left'); assert.match(fifth.message, /All 4 uses/);
-  const pass: any = await salon.svc.passView(salon.biz.slug, s.token); assert.equal(pass.member.usesLeft, 0); assert.equal(pass.member.usedTotal, 4); assert.equal(pass.program.totalUses, 4);
+  const pass: any = await passView(salon.svc, salon.biz.slug, s.token); assert.equal(pass.member.usesLeft, 0); assert.equal(pass.member.usedTotal, 4); assert.equal(pass.program.totalUses, 4);
   // A mistaken visit undone gives the use back.
   salon.at(dayAt(3) + 60_000 * 5); const today = await salon.svc.today('o', salon.biz.id); void today;
   salon.at(dayAt(3) + 60_000); const served = (await salon.svc.today('o', salon.biz.id)).served[0]; await salon.svc.undoUse('o', salon.biz.id, served.useId);
@@ -223,8 +230,8 @@ test('the wording is general: no message talks about meals, eating or restaurant
   const mk = (o: any) => canServe({ member: member(o.m ?? {}), program: program(o.p ?? {}), used: o.used ?? [], now: o.now ?? T0, ...(o.extra ?? {}) });
   for (const o of [{ m: { paid: false, status: 'pending' } }, { m: { endDate: '2026-11-16' } }, { m: { status: 'paused' } }, { m: { status: 'cancelled' } }, { m: { startDate: '2026-11-30', endDate: '2026-12-29' } }, { now: Date.parse('2026-11-22T10:00:00Z') },
     { used: [{ item: 'Lunch', at: new Date(T0).toISOString() }] }, { p: { windows: [{ item: 'Lunch', from: '13:30', to: '15:00' }] } }, { extra: { item: 'Other' } }, { p: { totalUses: 1 }, m: { used: 1 } }, { p: { items: ['A', 'B'] }, used: [{ item: 'A', at: new Date(T0).toISOString() }, { item: 'B', at: new Date(T0).toISOString() }] }]) { const r: any = mk(o); if (!r.ok) msgs.push(r.message); }
-  const { svc, biz, prog } = await setup(); const j = await svc.joinProgram(biz.slug, prog.id, { name: 'Zed', phone: '0788121212' }, 'z');
-  for (const f of [() => svc.joinProgram(biz.slug, prog.id, { name: 'Zed', phone: '0788121212' }, 'z2'), () => svc.joinProgram(biz.slug, prog.id, { name: 'Q', phone: '1' }, 'z3'), () => svc.redeem('o', biz.id, { code: 'ZZZZ-2222' }), () => svc.payMember(biz.slug, j.token, {}, 'z4'), () => svc.saveProgram('o', biz.id, { title: '', priceRwf: 1 }), () => svc.saveProgram('o', biz.id, { title: 'x', priceRwf: 500, items: [] }), () => svc.saveProgram('o', biz.id, { title: 'x', priceRwf: 500, openDays: [] })]) { try { await f(); } catch (e: any) { msgs.push(e.message); } }
+  const { svc, biz, prog } = await setup(); const j = await joinP(svc, biz.slug, prog.id, { name: 'Zed', phone: '0788121212' }, 'z');
+  for (const f of [() => joinP(svc, biz.slug, prog.id, { name: 'Zed', phone: '0788121212' }, 'z2'), () => joinP(svc, biz.slug, prog.id, { name: 'Q', phone: '1' }, 'z3'), () => svc.redeem('o', biz.id, { code: 'ZZZZ-2222' }), () => payMember(svc, biz.slug, j.token, {}, 'z4'), () => svc.saveProgram('o', biz.id, { title: '', priceRwf: 1 }), () => svc.saveProgram('o', biz.id, { title: 'x', priceRwf: 500, items: [] }), () => svc.saveProgram('o', biz.id, { title: 'x', priceRwf: 500, openDays: [] })]) { try { await f(); } catch (e: any) { msgs.push(e.message); } }
   const r: any = await svc.redeem('o', biz.id, { code: j.code }); msgs.push(r.message);
   assert.ok(msgs.length >= 15, `${msgs.length} messages checked`);
   for (const m of msgs) assert.ok(!/meal|restaurant|\beat|lunch plan|served/i.test(m), `a message is not general: "${m}"`);
@@ -261,9 +268,9 @@ test('saving the owner\'s words: private to the owner, public only as words, can
   const pub: any = await svc.publicBySlug(biz.slug); assert.equal(pub.programText.members, 'students'); assert.deepEqual(Object.keys(pub.programText).sort(), ['action', 'idLabel', 'member', 'members', 'pass', 'program', 'programs', 'use', 'uses']);
   assert.ok(!JSON.stringify(pub).includes('"o"'), 'nothing private comes with the words');
   // Not asking for an ID: an ID sent anyway is not kept.
-  await svc.setProgramText('o', biz.id, { askId: false }); await svc.joinProgram(biz.slug, prog.id, { name: 'Ivy', phone: '0788343434', idNumber: 'S-9' }, 'i1');
+  await svc.setProgramText('o', biz.id, { askId: false }); await joinP(svc, biz.slug, prog.id, { name: 'Ivy', phone: '0788343434', idNumber: 'S-9' }, 'i1');
   assert.equal((await svc.members('o', biz.id))[0].idNumber, undefined); await svc.setProgramText('o', biz.id, { askId: true });
-  const j = await svc.joinProgram(biz.slug, prog.id, { name: 'Jo', phone: '0788454545', idNumber: 'S-10' }, 'i2'); await svc.confirmPayment('o', biz.id, (await svc.members('o', biz.id)).find((m) => m.name === 'Jo')!.id, { method: 'cash' });
+  const j = await joinP(svc, biz.slug, prog.id, { name: 'Jo', phone: '0788454545', idNumber: 'S-10' }, 'i2'); await svc.confirmPayment('o', biz.id, (await svc.members('o', biz.id)).find((m) => m.name === 'Jo')!.id, { method: 'cash' });
   assert.equal((await svc.members('o', biz.id, { q: 'Jo' }))[0].idNumber, 'S-10');
   // Outside the set times (12:00 here, lunch is 13:30-15:00): allowed anyway by default, refused when the owner turned that off.
   assert.equal(((await svc.redeem('o', biz.id, { code: j.code })) as any).code, 'outside_window');
@@ -287,4 +294,84 @@ test('the assistant sets the owner\'s words, then speaks them; its instructions 
   const prompt = chatSystem({ name: 'Campus Canteen', slug: 'campus-canteen', category: 'restaurant', programText: { program: 'Meal card', member: 'student' } });
   assert.match(prompt, /THE OWNER NAMES EVERYTHING/); assert.match(prompt, /ask in one short message what they want to call/); assert.match(prompt, /program=Meal card, member=student/); assert.match(prompt, /gym: "Membership"/); assert.match(prompt, /never invent a price/);
   assert.match(chatSystem({ name: 'X', slug: 'x', category: 'shop' }), /none are set yet/);
+});
+
+// ---- first visit: name, phone, the owner's join code, the customer's own passcode; then sign in with phone and passcode
+import { cardCalendar, cleanProgram as cleanProg, newJoinCode, sameCode, validPasscode } from '../server/services/biz/programs.js';
+
+test('the owner\'s 4-digit join code: required when set, never shown publicly, wrong guesses are slowed down', async () => {
+  const { svc, biz, prog } = await setup({ joinCode: '4827' });
+  assert.equal(((await svc.programs('o', biz.id))[0] as any).joinCode, '4827', 'the owner sees it');
+  const pub: any = await svc.publicBySlug(biz.slug); assert.equal(pub.programs[0].needsCode, true); assert.ok(!JSON.stringify(pub).includes('4827'), 'never public');
+  await assert.rejects(joinP(svc, biz.slug, prog.id, { name: 'No Code', phone: '0788100001' }, 'a'), (e: any) => e.code === 'BAD_CODE');
+  await assert.rejects(joinP(svc, biz.slug, prog.id, { name: 'Wrong', phone: '0788100002', joinCode: '1111' }, 'a'), (e: any) => e.code === 'BAD_CODE');
+  const ok = await joinP(svc, biz.slug, prog.id, { name: 'Right', phone: '0788100003', joinCode: '4 8 2 7' }, 'a'); assert.ok(ok.session);
+  for (let i = 0; i < 8; i++) await joinP(svc, biz.slug, prog.id, { name: 'Guess', phone: '0788100004', joinCode: String(1000 + i) }, 'bot').catch(() => undefined);
+  await assert.rejects(joinP(svc, biz.slug, prog.id, { name: 'Bot', phone: '0788100005', joinCode: '4827' }, 'bot'), (e: any) => e.status === 429, 'a visitor guessing codes is stopped, even with the right one');
+  // The owner can change or remove it.
+  await svc.saveProgram('o', biz.id, { id: prog.id, ...LUNCH, joinCode: '' }); assert.equal(((await svc.programs('o', biz.id))[0] as any).joinCode, undefined, 'an empty value removes the code'); assert.equal(((await svc.publicBySlug(biz.slug)) as any).programs[0].needsCode, false);
+  assert.ok('error' in (cleanProg({ ...LUNCH, joinCode: '12' }, 'x', 'n') as any)); assert.equal((cleanProg({ ...LUNCH, joinCode: ' 1234 ' }, 'x', 'n') as Program).joinCode, '1234');
+  assert.match(newJoinCode(), /^\d{4}$/); assert.ok(sameCode('12 34', '1234') && !sameCode('1234', '1235') && !sameCode('', '1234'));
+  const open = await setup(); assert.equal(((await open.svc.publicBySlug(open.biz.slug)) as any).programs[0].needsCode, false);
+  assert.ok((await joinP(open.svc, open.biz.slug, open.prog.id, { name: 'Free', phone: '0788100006' }, 'f')).session, 'no code set: anyone can join');
+});
+
+test('the customer\'s passcode: 4 to 6 digits, chosen at joining, stored only as a salted hash, needed to sign in again', async () => {
+  assert.ok(validPasscode('4821') && validPasscode(' 123456 ') && !validPasscode('123') && !validPasscode('1234567') && !validPasscode('12a4') && !validPasscode(''));
+  const { svc, biz, prog, kv } = await setup();
+  await assert.rejects(svc.joinProgram(biz.slug, prog.id, { name: 'Ann', phone: '0788200001', passcode: '12' }, 'p'), /4 to 6 digits/);
+  await assert.rejects(svc.joinProgram(biz.slug, prog.id, { name: 'Ann', phone: '0788200001' }, 'p'), /4 to 6 digits/, 'a passcode is not optional');
+  const j = await joinP(svc, biz.slug, prog.id, { name: 'Ann', phone: '0788200001', passcode: '7392' }, 'p');
+  const first: any = await svc.me(biz.slug, j.session); assert.equal(first.name, 'Ann'); assert.equal(first.cards.length, 1); assert.equal(first.cards[0].state, 'pending');
+  // Sign in again, as on a new phone.
+  const back: any = await svc.login(biz.slug, { phone: '0788 200 001', passcode: '7392' }, 'l1'); assert.ok(back.session && back.session !== j.session); assert.equal(((await svc.me(biz.slug, back.session)) as any).cards.length, 1); assert.ok(!JSON.stringify([...kv.data.entries()]).includes('7392'), 'the passcode is never stored as typed');
+  await assert.rejects(svc.login(biz.slug, { phone: '0788200001', passcode: '0000' }, 'l1'), (e: any) => e.code === 'BAD_LOGIN');
+  await assert.rejects(svc.login(biz.slug, { phone: '0788299999', passcode: '7392' }, 'l1'), (e: any) => e.code === 'BAD_LOGIN', 'an unknown number gets the same answer');
+});
+
+test('wrong passcodes lock the phone number for ten minutes; a long sign-in works; sign-out and expiry end a session; the passcode can be changed', async () => {
+  const { svc, biz, prog, at } = await setup(); const j = await joinP(svc, biz.slug, prog.id, { name: 'Ben', phone: '0788200002', passcode: '5555' }, 'p');
+  for (let i = 0; i < 5; i++) await assert.rejects(svc.login(biz.slug, { phone: '0788200002', passcode: '9999' }, `bad${i}`), (e: any) => e.code === 'BAD_LOGIN');
+  await assert.rejects(svc.login(biz.slug, { phone: '0788200002', passcode: '5555' }, 'good'), (e: any) => e.code === 'LOCKED', 'even the right passcode waits while locked');
+  at(T0 + 11 * 60_000); const unlocked: any = await svc.login(biz.slug, { phone: '0788200002', passcode: '5555' }, 'good'); assert.ok(unlocked.session);
+  // A normal sign-in lasts 12 hours; "remember me" lasts 30 days.
+  const short: any = await svc.login(biz.slug, { phone: '0788200002', passcode: '5555' }, 's'); const long: any = await svc.login(biz.slug, { phone: '0788200002', passcode: '5555', remember: true }, 'l');
+  at(T0 + 13 * 3_600_000); await assert.rejects(svc.me(biz.slug, short.session), (e: any) => e.code === 'SESSION'); assert.ok(await svc.me(biz.slug, long.session));
+  at(T0 + 31 * 86_400_000); await assert.rejects(svc.me(biz.slug, long.session), (e: any) => e.code === 'SESSION');
+  at(T0 + 12 * 3_600_000); const s2: any = await svc.login(biz.slug, { phone: '0788200002', passcode: '5555' }, 'o'); await svc.logout(biz.slug, s2.session); await assert.rejects(svc.me(biz.slug, s2.session), (e: any) => e.code === 'SESSION');
+  const s3: any = await svc.login(biz.slug, { phone: '0788200002', passcode: '5555' }, 'o2');
+  await assert.rejects(svc.changePasscode(biz.slug, s3.session, { current: '1111', next: '2222' }), (e: any) => e.code === 'BAD_LOGIN'); await assert.rejects(svc.changePasscode(biz.slug, s3.session, { current: '5555', next: '12' }), /4 to 6 digits/);
+  await svc.changePasscode(biz.slug, s3.session, { current: '5555', next: '246810' });
+  await assert.rejects(svc.login(biz.slug, { phone: '0788200002', passcode: '5555' }, 'o3'), (e: any) => e.code === 'BAD_LOGIN'); assert.ok(((await svc.login(biz.slug, { phone: '0788200002', passcode: '246810' }, 'o4')) as any).session); void j;
+});
+
+test('a forgotten passcode: the owner gives a new temporary one; the same phone number joining a second program uses the passcode it already has', async () => {
+  const { svc, biz, prog } = await setup(); const second = await svc.saveProgram('o', biz.id, { ...LUNCH, title: 'Weekend pass', priceRwf: 9000 });
+  const a = await joinP(svc, biz.slug, prog.id, { name: 'Cleo', phone: '0788200003', passcode: '3141' }, 'c');
+  await assert.rejects(joinP(svc, biz.slug, second.id, { name: 'Cleo', phone: '0788200003', passcode: '9999' }, 'c'), (e: any) => e.code === 'BAD_LOGIN', 'someone else cannot add a plan to this number with another passcode');
+  const b = await joinP(svc, biz.slug, second.id, { name: 'Cleo', phone: '0788200003', passcode: '3141' }, 'c'); assert.equal(((await svc.me(biz.slug, b.session)) as any).cards.length, 2, 'one account, two cards');
+  const m = (await svc.members('o', biz.id)).find((x) => x.programId === prog.id)!; await assert.rejects(svc.resetPasscode('intruder', biz.id, m.id), (e: any) => e.status === 404);
+  const { passcode } = await svc.resetPasscode('o', biz.id, m.id); assert.match(passcode, /^\d{4}$/);
+  await assert.rejects(svc.login(biz.slug, { phone: '0788200003', passcode: '3141' }, 'x'), (e: any) => e.code === 'BAD_LOGIN'); assert.ok(((await svc.login(biz.slug, { phone: '0788200003', passcode }, 'x')) as any).session); void a;
+});
+
+test('the card: dates down the side, one column per item, closed days marked, a cross for every use, and the QR code only once paid', async () => {
+  // Two units a day (lunch and supper), closed on Sundays: the plan starts on Tuesday 17 Nov 2026.
+  const { svc, biz, prog, at } = await setup({ title: 'Two meals', items: ['Lunch', 'Supper'], days: 10, openDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat'] });
+  const j = await joinP(svc, biz.slug, prog.id, { name: 'Dina', phone: '0788200004', remember: true }, 'd');
+  let card: any = await passView(svc, biz.slug, j.session); assert.equal(card.qr, null, 'no QR code while unpaid'); assert.equal(card.program.items.length, 2); assert.equal(card.calendar.length, 10); assert.equal(card.calendar[0].date, '2026-11-17');
+  await svc.confirmPayment('o', biz.id, (await svc.members('o', biz.id))[0].id, { method: 'momo' }); card = await passView(svc, biz.slug, j.session); assert.match(card.qr, /^BWPASS:/);
+  const lunch: any = await svc.redeem('o', biz.id, { token: card.qr }); assert.equal(lunch.item, 'Lunch'); const supper: any = await svc.redeem('o', biz.id, { token: card.qr }); assert.equal(supper.item, 'Supper', 'the second unit of the day');
+  assert.equal(((await svc.redeem('o', biz.id, { token: card.qr })) as any).code, 'already');
+  at(T0 + 86_400_000); await svc.redeem('o', biz.id, { token: card.qr, item: 'Supper' }); card = await passView(svc, biz.slug, j.session);
+  const by = Object.fromEntries(card.calendar.map((d: any) => [d.date, d])); assert.deepEqual(by['2026-11-17'].used, ['Lunch', 'Supper']); assert.deepEqual(by['2026-11-18'].used, ['Supper']); assert.deepEqual(by['2026-11-19'].used, []);
+  assert.equal(by['2026-11-22'].open, false, 'Sunday is closed'); assert.equal(by['2026-11-22'].dow, 'sun'); assert.equal(card.member.usesLeft, 8 * 2 - 1, 'eight serving days x two, less what was used tomorrow');
+  const cal = cardCalendar({ startDate: '2026-11-17', endDate: '2027-03-31' }, { openDays: ['mon'] }, [], 20); assert.equal(cal.length, 20, 'capped');
+});
+
+test('a customer cannot read or change someone else\'s card, even at the same business', async () => {
+  const { svc, biz, prog } = await setup(); const a = await joinP(svc, biz.slug, prog.id, { name: 'Ann', phone: '0788200005', passcode: '1111' }, 'a'); const b = await joinP(svc, biz.slug, prog.id, { name: 'Bob', phone: '0788200006', passcode: '2222' }, 'b');
+  const aCard = await cardIdOf(svc, biz.slug, a.session);
+  await assert.rejects(svc.card(biz.slug, b.session, aCard), (e: any) => e.status === 404); await assert.rejects(svc.claimCard(biz.slug, b.session, aCard, {}, 'b'), (e: any) => e.status === 404); await assert.rejects(svc.payCard(biz.slug, b.session, aCard, {}, 'b'), (e: any) => e.status === 404);
+  assert.equal(((await svc.me(biz.slug, b.session)) as any).cards.length, 1);
 });

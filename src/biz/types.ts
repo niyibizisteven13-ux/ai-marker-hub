@@ -49,7 +49,7 @@ export interface SectionInfo { id: string; type: 'text' | 'faq' | 'list' | 'link
 export type DayId = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
 export interface ItemWindow { item: string; from: string; to: string }
 export interface ProgramInfo {
-  id: string; title: string; description?: string; priceRwf: number; days: number; items: string[]; openDays: DayId[]; windows?: ItemWindow[]; terms?: string; maxMembers?: number; totalUses?: number; active: boolean;
+  id: string; title: string; description?: string; priceRwf: number; days: number; items: string[]; openDays: DayId[]; windows?: ItemWindow[]; terms?: string; maxMembers?: number; totalUses?: number; joinCode?: string; active: boolean;
   counts?: { active: number; pending: number; total: number };
 }
 export type PlanState = 'pending' | 'not_started' | 'active' | 'expired' | 'paused' | 'cancelled';
@@ -68,11 +68,16 @@ export interface TodayInfo {
   served: Array<{ useId: string; memberId: string; name: string; code: string; item: string; at: string; canUndo: boolean }>;
   notYet: Array<{ memberId: string; name: string; phone: string; code: string }>;
 }
-export interface PassInfo {
+export interface CardDay { date: string; dow: DayId; open: boolean; used: string[] }
+/** One card, as the signed-in customer sees it: who it is for, the dates and what was used each day (the grid), and the QR code once it is paid. */
+export interface CardInfo {
+  cardId: string;
   business: { name: string; slug: string; theme: string };
-  program: { title: string; totalUses?: number; items: string[]; openDays: DayId[]; windows?: ItemWindow[]; terms?: string; priceRwf: number };
-  member: { name: string; code: string; state: PlanState; startDate: string; endDate: string; daysLeft: number; servingDaysLeft: number; usesLeft: number; usedTotal: number; paid: boolean };
+  program: { title: string; totalUses?: number; items: string[]; openDays: DayId[]; windows?: ItemWindow[]; terms?: string; priceRwf: number; days: number };
+  member: { name: string; phone: string; idNumber?: string; code: string; state: PlanState; startDate: string; endDate: string; daysLeft: number; servingDaysLeft: number; usesLeft: number; usedTotal: number; paid: boolean; paidAt: string | null };
+  qr: string | null;
   today: { date: string; openToday: boolean; used: Array<{ item: string; at: string }> };
-  history: Array<{ date: string; items: string[] }>;
+  calendar: CardDay[];
   payment: null | { amount: number; momoCode: string | null; momoName: string | null; online: boolean; promptSent: boolean; claimed: { at: string; ref?: string } | null; whatsapp: string | null };
 }
+export interface MeInfo { name: string; phone: string; cards: Array<{ id: string; programTitle: string; state: PlanState; startDate: string; endDate: string; usesLeft: number; paid: boolean }> }

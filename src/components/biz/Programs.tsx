@@ -1,7 +1,7 @@
 import { getStudioLang, tx } from '../../biz/studioI18n';
 import { RW_WORDS, fill, wordsOf } from '../../../server/services/biz/programWords';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Camera, Check, CheckCircle2, Copy, Loader2, MessageCircle, Pause, Pencil, Play, Plus, ScanLine, Share2, Trash2, Undo2, Users, UtensilsCrossed, X, XCircle } from 'lucide-react';
+import { AlertTriangle, Camera, KeyRound, Check, CheckCircle2, Copy, Loader2, MessageCircle, Pause, Pencil, Play, Plus, ScanLine, Share2, Trash2, Undo2, Users, UtensilsCrossed, X, XCircle } from 'lucide-react';
 import { ownerApi } from '../../biz/api';
 import type { DayId, MemberInfo, ProgramInfo, ProgramSummary, RedeemResult, TodayInfo } from '../../biz/types';
 import { rwf, type Business } from '../../biz/types';
@@ -205,6 +205,7 @@ function MembersTab({ b, programs, summary, onChange }: { b: Business; programs:
                   : <button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => void act(m.id, () => ownerApi.setMember(b.id, m.id, { action: 'pause' }))}><Pause size={13} />{tx("Pause")}</button>)}
                 {m.paid && m.state !== 'cancelled' && <button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => { const n = Number(window.prompt(tx('Add how many days?'), '3')); if (n >= 1) void act(m.id, () => ownerApi.setMember(b.id, m.id, { action: 'extend', days: n })); }}>{tx("Add days")}</button>}
                 {(m.state === 'active' || m.state === 'expired') && <a className={`${btnGhost} !min-h-9 !px-3 text-xs`} href={remind(m)} target="_blank" rel="noopener noreferrer"><MessageCircle size={13} />{tx("WhatsApp")}</a>}
+                <button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} title={tx('Give a new temporary passcode')} onClick={async () => { if (!confirm(`${tx('Reset the passcode of')} ${m.name}?`)) return; try { const pin = await ownerApi.resetPasscode(b.id, m.id); window.alert(`${m.name}: ${tx('new passcode')} ${pin}\n${tx('Tell them, and ask them to change it after signing in.')}`); } catch (e) { setErr(msg(e)); } }}><KeyRound size={13} />{tx("Reset passcode")}</button>
                 {m.state !== 'cancelled' && <button type="button" className="px-2 text-xs text-rose-600 underline" onClick={() => { if (confirm(`${t("Cancel the {program} of")} ${m.name}?`)) void act(m.id, () => ownerApi.setMember(b.id, m.id, { action: 'cancel' })); }}>{tx("Cancel")}</button>}
               </div>
             </div>
@@ -232,7 +233,8 @@ function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInf
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div><p className="font-display text-lg font-semibold">{p.title} {!p.active && <span className="ml-1 rounded-full bg-[var(--app-panel-hover)] px-2 py-0.5 align-middle text-[11px] font-medium text-[var(--app-muted)]">{t("Closed to new {members}")}</span>}</p>
                 <p className="text-sm text-[var(--app-muted)]">{rwf(p.priceRwf)} · {p.days} {tx('days')}{p.totalUses ? ` · ${p.totalUses} ${w.uses}` : ''} · {p.items.join(', ')} · {p.openDays.map((d) => tx(DAY_LABEL[d])).join(' ')}</p>
-                <p className="mt-1 text-xs text-[var(--app-muted)]">{p.counts?.active ?? 0} {tx('active')} · {p.counts?.pending ?? 0} {tx('waiting for payment')}</p></div>
+                <p className="mt-1 text-xs text-[var(--app-muted)]">{p.counts?.active ?? 0} {tx('active')} · {p.counts?.pending ?? 0} {tx('waiting for payment')}</p>
+                {p.joinCode ? <p className="mt-1 text-sm">{tx('Join code')}: <b className="font-mono tracking-[0.3em]">{p.joinCode}</b> <span className="text-xs text-[var(--app-muted)]">{t('Give this code to the {members} you accept. It is not on the public page.')}</span></p> : <p className="mt-1 text-xs text-[var(--app-muted)]">{tx('Anyone with the link can join. Set a join code to accept only the people you choose.')}</p>}</div>
               <div className="flex gap-1.5"><button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => setEdit(p)}><Pencil size={13} />{tx("Edit")}</button>
                 <button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={async () => { try { await ownerApi.saveProgram(b.id, { ...p, active: !p.active }); onChange(); } catch (e) { setErr(msg(e)); } }}>{p.active ? tx('Close signups') : tx('Open signups')}</button>
                 <button type="button" className="px-2 text-rose-600" aria-label={t("Delete {program}")} onClick={async () => { if (!confirm(`${tx('Delete')} "${p.title}"?`)) return; try { await ownerApi.deleteProgram(b.id, p.id); onChange(); } catch (e) { setErr(msg(e)); } }}><Trash2 size={15} /></button></div>
@@ -264,6 +266,11 @@ function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInf
             <p className="mt-1 text-xs text-[var(--app-muted)]">{tx("Outside these times the scan says so, and you can still allow it.")}</p></details>
           <label className="block text-sm font-medium">{t("Maximum {members} (optional)")}<input className={`${input} mt-1 !w-40`} inputMode="numeric" value={edit.maxMembers ?? ''} onChange={(e) => set({ maxMembers: e.target.value ? Number(e.target.value.replace(/\D/g, '')) : undefined })} /></label>
           <label className="block text-sm font-medium">{t("Total {uses} (optional)")}<input className={`${input} mt-1 !w-40`} inputMode="numeric" value={edit.totalUses ?? ''} onChange={(e) => set({ totalUses: e.target.value ? Number(e.target.value.replace(/\D/g, '')) : undefined })} placeholder={tx("No limit")} /><span className="mt-1 block text-xs font-normal text-[var(--app-muted)]">{t("For example 10 visits or 4 haircuts. Leave empty for one {use} of each item per day.")}</span></label>
+          <div className="block text-sm font-medium">{tx("Join code (optional)")}
+            <div className="mt-1 flex flex-wrap items-center gap-2"><input className={`${input} !w-32 font-mono tracking-[0.4em]`} inputMode="numeric" maxLength={4} value={edit.joinCode ?? ''} onChange={(e) => set({ joinCode: e.target.value.replace(/\D/g, '').slice(0, 4) })} placeholder="1234" aria-label={tx("Join code (optional)")} />
+              <button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => set({ joinCode: String(Math.floor(1000 + Math.random() * 9000)) })}>{tx("Make a code")}</button>
+              {edit.joinCode && <button type="button" className="text-xs text-[var(--app-muted)] underline" onClick={() => set({ joinCode: '' })}>{tx("No code")}</button>}</div>
+            <span className="mt-1 block text-xs font-normal text-[var(--app-muted)]">{t("4 digits. People must write it to join, so only the {members} you give it to can join.")}</span></div>
           <label className="block text-sm font-medium">{tx("Note for customers (optional)")}<textarea className={`${input} mt-1`} rows={2} maxLength={300} value={edit.terms ?? ''} onChange={(e) => set({ terms: e.target.value })} placeholder={tx("One use a day. Show your pass each time.")} /></label>
           {err && <p role="alert" className="text-sm text-rose-600"><AlertTriangle size={14} className="mr-1 inline" />{err}</p>}
           <div className="flex gap-2"><button type="submit" disabled={busy} className={btnPrimary}>{busy ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}{t("Save {program}")}</button>{programs.length > 0 && <button type="button" className={btnGhost} onClick={() => { setEdit(null); setErr(''); }}>{tx("Cancel")}</button>}</div>
