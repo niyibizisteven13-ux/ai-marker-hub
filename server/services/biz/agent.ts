@@ -20,7 +20,7 @@ export function cleanAgent(input: any, prev?: AgentSettings): AgentSettings {
 }
 
 /** What a scheduled business run may use. Reading only, plus what the level allows. */
-export const BIZ_READ_TOOLS = ['biz_get', 'biz_dashboard', 'biz_report', 'biz_stock', 'biz_orders', 'biz_payment_setup', 'recall_memory', 'list_agenda'];
+export const BIZ_READ_TOOLS = ['biz_get', 'biz_dashboard', 'biz_day_report', 'biz_report', 'biz_stock', 'biz_orders', 'biz_payment_setup', 'recall_memory', 'list_agenda'];
 export function bizToolsFor(level: AgentLevel | undefined): string[] {
   const read = BIZ_READ_TOOLS.filter((t) => t !== 'biz_orders');   // biz_orders can confirm orders: only through an approved plan, so a run reads orders through the dashboard
   if (level === 'assist') return [...read, 'biz_messages', 'propose_actions'];
@@ -34,7 +34,7 @@ export const bizSystem = (level: AgentLevel | undefined, name: string) =>
 
 export const PROMPTS = {
   morning: 'Prepare the owner\'s day. Use biz_dashboard (7 days) and biz_stock. Give: yesterday in one line (sales, expenses, profit, orders), what needs attention today (pending orders, unpaid or waiting payments, low stock, new messages), and one practical suggestion. If a change is sensible, propose it.',
-  evening: 'Write the closing summary for today. Use biz_dashboard. Give: today\'s sales, expenses and profit against yesterday, the best sellers, orders still pending, anything that looks unusual (a slow day, an expense that is large for this business), what to restock or prepare for tomorrow. End with one thing to do first tomorrow.',
+  evening: 'Write the closing summary for today. Call biz_day_report first: it has today\'s real numbers, including the programs (who was served, who did not come, payments waiting, plans ending), and send its text as it is, then add what is below. Use biz_dashboard only for anything it lacks. Give: today\'s sales, expenses and profit against yesterday, the best sellers, orders still pending, anything that looks unusual (a slow day, an expense that is large for this business), what to restock or prepare for tomorrow. End with one thing to do first tomorrow.',
   weekly: 'Write the weekly review. Use biz_report for 7 days and then 30 days for comparison. Give: sales, expenses and profit this week against the usual week, best and worst days, top products and the ones that did not sell, expense categories that grew, and two or three concrete suggestions for next week.',
 } as const;
 
@@ -54,7 +54,7 @@ export async function syncBizAgenda(store: AgendaStore, b: Pick<Business, 'id' |
 }
 
 /** The tools the owner's own agent chat (Studio → Ask the agent) may use: the whole business toolbox, nothing else on the platform. */
-export const CHAT_TOOLS = ['biz_get', 'biz_update', 'biz_add_product', 'biz_change_product', 'biz_publish', 'biz_link', 'biz_messages', 'biz_record_sale', 'biz_record_expense', 'biz_dashboard', 'biz_orders', 'biz_request_payment', 'biz_payment_status', 'biz_payment_setup', 'biz_report', 'biz_stock', 'biz_agent', 'biz_post', 'biz_workflow', 'biz_open', 'biz_entries', 'biz_costs', 'biz_recurring', 'biz_budget', 'biz_program', 'biz_plan_status', 'biz_feature', 'biz_section', 'biz_tracker', 'biz_records', 'biz_translate', 'biz_language'];
+export const CHAT_TOOLS = ['biz_get', 'biz_update', 'biz_add_product', 'biz_change_product', 'biz_publish', 'biz_link', 'biz_messages', 'biz_record_sale', 'biz_record_expense', 'biz_dashboard', 'biz_orders', 'biz_request_payment', 'biz_payment_status', 'biz_payment_setup', 'biz_report', 'biz_stock', 'biz_agent', 'biz_post', 'biz_workflow', 'biz_open', 'biz_entries', 'biz_costs', 'biz_recurring', 'biz_budget', 'biz_program', 'biz_plan_status', 'biz_day_report', 'biz_feature', 'biz_section', 'biz_tracker', 'biz_records', 'biz_translate', 'biz_language'];
 export const chatSystem = (b: Pick<Business, 'name' | 'slug' | 'category'> & { programText?: Business['programText'] }) =>
   `You are the Business Agent of "${b.name}" (${b.category}, page name "${b.slug}"): the owner's own manager for this one business, inside their Studio. You are not a general chatbot: you run the business with them. Pass business "${b.slug}" to tools.\n` +
   `Talk like a sharp, friendly manager: short, concrete, RWF with thousands separators, the number first. After recording anything say the day's total in one line. Notice what matters (low stock, slow days, pending orders) and suggest one next step.\n` +

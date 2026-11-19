@@ -3,6 +3,7 @@ import { clean, cleanPhone } from './model.js';
 import { open as openSecret, seal } from './secrets.js';
 import type { Business, PublicBusiness } from './model.js';
 import type { LedgerEntry } from './ledger.js';
+import type { ProgramDay } from './report.js';
 import {
   LOCK_MINUTES, MAX_MEMBERS, MAX_PIN_FAILS, MAX_PROGRAMS, REMEMBER_DAYS, SESSION_HOURS, addDays, canServe, cardCalendar, cleanJoin, cleanProgram, cleanProgramText, hashPasscode, hashSession, newJoinCode, cleanUsername, validUsername, suggestUsernames, newSalt, sameCode, validPasscode, cleanStart, dayOfWeek, endDateFor, hashToken, kigaliDate, newCode, newToken, normalizeCode,
   oneOfMethod, planState, remaining, tokenFromPayload, usesLeft, type DenyCode, type Use, type Member, type PlanState, type Program,
@@ -259,6 +260,28 @@ export function createPrograms(h: Helpers) {
         plans: progs.length, members: members.filter((m) => m.status !== 'cancelled').length, active: members.filter((m) => state(m) === 'active').length, pending: members.filter((m) => state(m) === 'pending').length,
         expired: members.filter((m) => state(m) === 'expired').length, soldThisMonth: members.filter((m) => m.paid && (m.confirmedAt ?? m.createdAt).slice(0, 7) === month).reduce((a, m) => a + m.paidRwf, 0),
         waitingConfirmation: members.filter((m) => !m.paid && m.claimed && m.status !== 'cancelled').length, expiring,
+      };
+    },
+    /** One day of the programs, for the closing report: who was served (by item), who did not come (today only), new members, money collected, what waits for the owner. */
+    async dayStats(b: Business, date: string): Promise<ProgramDay | null> {
+      const progs = await programsOf(b.id); if (!progs.length) return null;
+      const members = await membersOf(b.id); const today = kigaliDate(h.now()); const served = (await servedOn(b.id, date)).filter((x) => !x.undone);
+      const byItem = new Map<string, number>(); for (const u of served) byItem.set(u.item, (byItem.get(u.item) ?? 0) + 1);
+      const order = new Map(progs.flatMap((p) => p.items).map((it, i) => [it, i] as const));
+      const dateOf = (iso: string) => kigaliDate(Date.parse(iso)); const open = (p?: Program) => !!p && p.openDays.includes(dayOfWeek(date));
+      let notYet: ProgramDay['notYet'] = null; let expected: number | null = null;
+      if (date === today) {
+        const exp = members.filter((m) => planState(m, date) === 'active' && open(progs.find((p) => p.id === m.programId))); expected = exp.length;
+        notYet = exp.filter((m) => served.filter((s) => s.memberId === m.id).length === 0).map((m) => ({ name: m.name }));
+      }
+      return {
+        byItem: [...byItem.entries()].map(([item, count]) => ({ item, count })).sort((x, y) => (order.get(x.item) ?? 9) - (order.get(y.item) ?? 9)), served: served.length, people: new Set(served.map((u) => u.memberId)).size, bySelf: served.filter((u) => u.by === 'self').length,
+        notYet, expected,
+        newMembers: members.filter((m) => m.status !== 'cancelled' && dateOf(m.createdAt) === date).length,
+        collectedRwf: members.filter((m) => m.paid && dateOf(m.confirmedAt ?? m.createdAt) === date).reduce((a, m) => a + m.paidRwf, 0),
+        waiting: members.filter((m) => !m.paid && m.claimed && m.status !== 'cancelled').slice(0, 20).map((m) => ({ name: m.name, programTitle: progs.find((p) => p.id === m.programId)?.title ?? '' })),
+        expiring: members.filter((m) => planState(m, date) === 'active' && m.endDate <= addDays(date, 3)).slice(0, 20).map((m) => ({ name: m.name, endDate: m.endDate })),
+        plans: progs.length, activeMembers: members.filter((m) => planState(m, today) === 'active').length,
       };
     },
     async dropAll(b: Business): Promise<void> {

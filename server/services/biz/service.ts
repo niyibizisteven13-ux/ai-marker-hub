@@ -6,6 +6,8 @@ import { FIELDS, PROVIDERS, cleanSecrets, keyFrom, open as openSecret, seal, typ
 import { PayError, gatewayFor, maskPhone, msisdn, providerOf, realFetch, type Fetch, type Gateway } from './payments.js';
 import { MAX_ENTRIES, cleanCategory, cleanEntry, cleanRecurring, dayOf, dueDays, monthOf, summarize, summarizeCosts, type Budgets, type LedgerEntry, type Recurring } from './ledger.js';
 import { createPrograms } from './programsService.js';
+import { buildDayReport, reportText } from './report.js';
+import { RW_WORDS, wordsOf } from './programWords.js';
 import {
   CATEGORIES, applyProfile, clean, cleanEmail, cleanPhone, cleanProduct, isLive, limitsFor, newBusiness, oneOf, publicView, slugFrom, validSlug,
   type Business, type Category, type DayStats, type Enquiry, type PublicBusiness, type Product, type Post, type PublicPost, type PostComment, type Lang, LANGS, type Translation, type PublicSection, MAX_POST_MEDIA, MAX_POST_TEXT, MAX_POSTS, MAX_COMMENTS,
@@ -301,6 +303,17 @@ export function createBizService(deps: Deps) {
       const b = await mine(ownerId, id); await materialize(b); const items = (await kv.get<{ items: LedgerEntry[] }>(`biz-ledger:${b.id}`))?.items ?? [];
       const enq = (await kv.get<{ items: Enquiry[] }>(`biz-enq:${b.id}`))?.items ?? [];
       return { ...summarize(items, b.products, now(), days), newMessages: enq.filter((e) => e.status === 'new').length, entries: items.length };
+    },
+
+    /** The closing report for a day (today by default; up to 30 days back): the numbers, and the same thing as a short text for WhatsApp. */
+    async dayReport(ownerId: string, id: string, o: { date?: unknown; lang?: unknown } = {}) {
+      const b = await mine(ownerId, id); await materialize(b); const today = dayOf(now());
+      const d = typeof o.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(o.date) && o.date <= today && o.date >= dayOf(Date.parse(`${today}T12:00:00Z`) - 30 * 86_400_000) ? o.date : today;
+      const entries = (await kv.get<{ items: LedgerEntry[] }>(`biz-ledger:${b.id}`))?.items ?? []; const enq = (await kv.get<{ items: Enquiry[] }>(`biz-enq:${b.id}`))?.items ?? [];
+      const low = b.products.filter((p) => typeof p.stock === 'number' && p.stock <= (p.lowAt ?? 5)).map((p) => ({ name: p.name, stock: p.stock as number, unit: p.unit ?? '' }));
+      const report = buildDayReport({ date: d, name: b.name, entries, lowStock: low, newMessages: enq.filter((e) => e.status === 'new').length, programs: await programs.dayStats(b, d) });
+      const lang = o.lang === 'rw' ? 'rw' : 'en'; const text = reportText(report, wordsOf(b.programText, lang === 'rw' ? RW_WORDS : undefined), lang);
+      return { report, text };
     },
 
     /* ------------------------------------------------------------ the public feed (an Instagram-style feed: photos, love, comments, order) */

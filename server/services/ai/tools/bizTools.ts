@@ -434,6 +434,13 @@ export function bizTools(getSvc: () => Promise<BizService> | BizService = async 
       } catch (e) { return failure(e); }
     },
   };
+  const dayReport: Tool = {
+    definition: { name: 'biz_day_report', description: "The closing report for a day, counted from the owner's own records (no estimates): sales, expenses and profit against yesterday, orders, best sellers, and for the programs who was served (by item), who has a plan today but did not come, new members, money collected, payments waiting for the owner's confirmation, plans ending soon; then what to look at first. Today by default, or a date in the last 30 days. Use for \"how was today\", \"closing report\", \"end of day\". Give the owner the text as it is (it is ready to paste into WhatsApp) and add one short suggestion. Set lang 'rw' when the owner writes Kinyarwanda.",
+      parameters: { type: 'object', properties: { business: BUSINESS, date: { type: 'string', description: 'YYYY-MM-DD (Kigali), default today.' }, lang: { type: 'string', enum: ['en', 'rw'] } } } },
+    async execute(input, ctx) {
+      try { const b = await pick(ctx.userId, input.business); if ('error' in b) return err(b.error); const r = await (await svc()).dayReport(ctx.userId, b.id, { date: input.date, lang: input.lang }); return { text: r.text }; } catch (e) { return failure(e); }
+    },
+  };
   const planStatus: Tool = {
     definition: { name: 'biz_plan_status', description: "How the programs are doing (read-only): active members, who is waiting to be confirmed as paid, programs ending soon, what was sold this month and who has checked in today. Give q to look up one member by name, phone or code. To confirm a payment or check passes in, the owner uses the Programs screen in the dashboard.",
       parameters: { type: 'object', properties: { business: BUSINESS, q: { type: 'string' } } } },
@@ -446,5 +453,5 @@ export function bizTools(getSvc: () => Promise<BizService> | BizService = async 
       } catch (e) { return failure(e); }
     },
   };
-  return [get, create, update, addProduct, changeProduct, addMedia, publish, link, messages, record('sale'), record('expense'), dashboard, orders, requestPay, payStatus, paySetup, report, stock, agent, post, open, workflow, entries, costs, recurring, budget, program, planStatus, feature, section, tracker, records, translate, language];
+  return [get, create, update, addProduct, changeProduct, addMedia, publish, link, messages, record('sale'), record('expense'), dashboard, orders, requestPay, payStatus, paySetup, report, stock, agent, post, open, workflow, entries, costs, recurring, budget, program, planStatus, dayReport, feature, section, tracker, records, translate, language];
 }

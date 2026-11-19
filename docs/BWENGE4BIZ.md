@@ -90,6 +90,17 @@ Each costs credits like any assistant action. Nothing is published without the o
 * Staff accounts, orders and payment tracking, video conversion, page search on Google (pages are public, but not yet submitted to search engines), custom templates.
 * Free storage is a promise of this server's disk: back it up like the rest of the data.
 
+## Closing report (end of the day)
+
+Dashboard → **Closing report** shows today's (or yesterday's) report, with **Copy** and **Send on WhatsApp**. The assistant gives the same text for "how was today" (`biz_day_report`),
+and the scheduled evening summary starts from it. It is counted from the owner's own records, never estimated (`server/services/biz/report.ts`, tests in `tests/biz_report.test.ts`):
+- **Money**: sales, expenses, profit, orders (pending and cancelled sales are not counted as money), best sellers, and sales against the day before.
+- **Programs** (when the business has any, in the owner's own words): how many were served by item, by how many people and how many ticked themselves; who has a plan today but did not
+  come (today only: the past is not reconstructed); new members; money collected for plans (already inside sales, so it is not added twice); payments waiting for the owner's confirmation; plans ending within 3 days.
+- **Look at**: the short list of what needs attention first (pending orders, payments to confirm, no-shows, plans ending, low stock, new messages).
+Today and any day in the last 30 days can be asked for; English or Kinyarwanda (Kinyarwanda needs a native speaker's review). Sending it by itself at a set hour uses the existing
+evening summary of the business agent (Studio → Agent), which needs the agent switched on; the report text itself is deterministic and costs nothing.
+
 ## Programs (plans customers pay for once and use with a pass)
 
 A business sells a plan once and customers use it again and again with a pass on their phone. It works for any business that sells repeat

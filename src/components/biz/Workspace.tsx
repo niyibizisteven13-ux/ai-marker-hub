@@ -1,4 +1,5 @@
 import { tx } from '../../biz/studioI18n';
+import { DayReportCard } from './DayReport';
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { MessageCircle, Heart, Megaphone, ImagePlus, Lock, Camera, Bot, BellRing, ArrowDownRight, ArrowUpRight, Banknote, Check, Copy, Download, EyeOff, Globe, KeyRound, Loader2, Package, Plus, Receipt, Send, Share2, ShieldCheck, Smartphone, Sparkles, Trash2, TrendingUp, Users, Wallet, X, AlertTriangle, ShoppingBag, CircleCheck, Clock, Ban } from 'lucide-react';
 import { ownerApi, prepareImage } from '../../biz/api';
@@ -110,6 +111,7 @@ export function DashboardView({ b, go, onChange, secrets, open }: { b: Business;
         <span className="inline-flex items-center gap-2 rounded-xl border border-[var(--app-line)] bg-[var(--app-panel)] px-3.5 py-2 text-sm font-medium">{new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}</span>
       </div>
       {err && <p role="alert" className="rounded-xl bg-rose-500/10 px-4 py-2.5 text-sm text-rose-600">{err}</p>}
+      <DayReportCard b={b} />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Kpi icon={Wallet} label="Total sales" value={d ? money(d.today.sales) : '…'} tint="bg-gradient-to-br from-emerald-50 to-white"><Change v={d?.change.sales ?? null} /></Kpi>
