@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#102639" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <title>MySEB Room</title>
+    <link rel="stylesheet" href="room.css" />
+  </head>
+  <body>
+    <header>
+      <strong>MySEB <span>Room</span></strong
+      ><span id="brandStatus"></span>
+    </header>
+    <main>
+      <section id="home">
+        <h1>Rooms</h1>
+        <div class="columns">
+          <form id="join">
+            <h2>Join a room</h2>
+            <label
+              >Room code<input
+                name="code"
+                placeholder="RM-…"
+                required
+                maxlength="15" /></label
+            ><label
+              >Your name or laptop label<input
+                name="name"
+                maxlength="80"
+                required
+            /></label>
+            <p>
+              The host sees your connection, current site in MySEB, browsing
+              setting status, and requests during this session.
+            </p>
+            <button>Join room</button>
+            <p id="nativeNote"></p>
+          </form>
+          <form id="create">
+            <h2>Create a room</h2>
+            <label
+              >Room name<input name="title" required maxlength="100"
+            /></label>
+            <div id="initialPolicy"></div>
+            <details>
+              <summary>Schedule</summary>
+              <label
+                >Start time (local)<input
+                  type="datetime-local"
+                  name="start" /></label
+              ><label
+                >Duration in minutes<input
+                  type="number"
+                  name="minutes"
+                  value="60"
+                  min="1"
+                  max="1440"
+                  required
+              /></label>
+            </details>
+            <button>Create room</button>
+          </form>
+        </div>
+        <nav><a href="../liveroom/">Open LiveRoom or a link</a></nav>
+      </section>
+      <section id="host" hidden>
+        <div class="heading">
+          <div>
+            <small id="lifecycle"></small>
+            <h1 id="title"></h1>
+            <div id="invite"></div>
+            <button class="secondary" id="showQr">Show join QR</button
+            ><img
+              id="qr"
+              alt="Scan for room joining information"
+              hidden
+              width="128"
+              height="128"
+            />
+          </div>
+          <button id="end" class="secondary">End room</button>
+        </div>
+        <section class="card">
+          <div class="heading">
+            <div>
+              <h2>Browsing settings</h2>
+              <p id="current"></p>
+            </div>
+            <button id="edit" class="secondary">Edit settings</button>
+          </div>
+          <form id="modify" hidden>
+            <div id="nextPolicy"></div>
+            <button>Apply to all participants</button>
+          </form>
+        </section>
+        <details class="card">
+          <summary>Activity library</summary>
+          <div id="library"></div>
+          <form id="addActivity">
+            <label
+              >Activity name<input required maxlength="100" name="name"
+            /></label>
+            <div id="activityPolicy"></div>
+            <button>Save activity</button>
+          </form>
+        </details>
+        <div class="metrics">
+          <div>Participants<b id="total"></b></div>
+          <div>Connected<b id="online"></b></div>
+          <div>Requests<b id="count"></b></div>
+        </div>
+        <div class="overview">
+          <section class="card">
+            <div class="heading">
+              <h2>Participants</h2>
+              <button class="secondary" id="export">Export report</button>
+            </div>
+            <label
+              >Search participants<input id="search" type="search"
+            /></label>
+            <div id="roster"></div>
+            <div class="heading">
+              <button id="prev" class="secondary">Previous</button
+              ><small id="page"></small
+              ><button id="next" class="secondary">Next</button>
+            </div>
+          </section>
+          <section class="card">
+            <h2>Requests</h2>
+            <div id="queue"></div>
+          </section>
+        </div>
+        <button id="homeBtn" class="secondary" hidden>Back to rooms</button>
+      </section>
+      <section id="participant" hidden>
+        <strong id="sessionTitle"></strong>
+        <div id="policyInfo"></div>
+        <small id="reply" role="status"></small>
+        <div class="actions">
+          <button id="help">Ask for help</button
+          ><button id="exit" class="secondary">Request exit</button>
+        </div>
+      </section>
+      <p id="notice" role="status"></p>
+    </main>
+    <template id="policy"
+      ><label
+        >Activity URL<input
+          required
+          type="url"
+          name="url"
+          placeholder="https://" /></label
+      ><label
+        >Browsing<select name="mode">
+          <option value="single">One approved site</option>
+          <option value="selected">Selected sites</option>
+          <option value="open">Open browsing</option>
+        </select></label
+      ><label hidden
+        >Additional HTTPS sites, one per line<textarea
+          name="sites"
+        ></textarea></label
+    ></template>
+    <script src="room.js"></script>
+  </body>
+</html>
