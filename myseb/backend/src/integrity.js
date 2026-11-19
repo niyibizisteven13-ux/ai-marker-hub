@@ -6,7 +6,7 @@
  */
 const WEIGHT = {
   token_misuse: 60,        // someone replayed the exam key from the wrong place
-  screen_recording: 40, forbidden_app: 35, remote_session: 40, virtual_machine: 30,
+  screen_recording: 40, forbidden_app: 35, remote_session: 40, virtual_machine: 30, lock_unavailable: 10,
   multiple_faces: 30, screen_share_stopped: 25, extra_display: 25, camera_off: 25, face_missing: 15,
   split_screen: 20, screenshot: 15, devtools: 20, blocked_navigation: 12,
   leave: 10, blur: 6, background: 6, visibility_hidden: 6, fullscreen_exit: 8,
@@ -14,7 +14,7 @@ const WEIGHT = {
 };
 const LABEL = {
   token_misuse: 'exam key used from the wrong place', screen_recording: 'screen recording', forbidden_app: 'a blocked app was running',
-  remote_session: 'remote desktop session', virtual_machine: 'running in a virtual machine', multiple_faces: 'more than one face', screen_share_stopped: 'stopped sharing the screen',
+  remote_session: 'remote desktop session', virtual_machine: 'running in a virtual machine', lock_unavailable: 'the Windows lock could not be applied', multiple_faces: 'more than one face', screen_share_stopped: 'stopped sharing the screen',
   extra_display: 'a second screen', camera_off: 'camera turned off', face_missing: 'face not visible', split_screen: 'split screen', screenshot: 'screenshot', devtools: 'developer tools',
   blocked_navigation: 'tried to open a blocked site', leave: 'left the exam', blur: 'switched window', background: 'sent the app to the background', visibility_hidden: 'hid the exam',
   fullscreen_exit: 'left full screen', copy: 'copied', paste: 'pasted', cut: 'cut', shortcut: 'blocked shortcut', close_attempt: 'tried to close the app',

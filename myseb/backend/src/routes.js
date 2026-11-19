@@ -8,7 +8,7 @@ import { liveStats, cleanSignal, dropSignals, forgetAllLive, forgetLive, getAsid
 import { notify, roomVersion, subscribe } from './events.js';
 import { noticeFor, setNotice } from './notices.js';
 import { captureEvidence, evidenceCounts, evidenceOf } from './evidence.js';
-import { analyzeFormUrl, cleanDone, cleanKeyParam, cleanOrigins, examKey, lockFor, withKey } from './forms.js';
+import { analyzeFormUrl, cleanDone, cleanKeyParam, cleanOrigins, cleanWinBlock, examKey, lockFor, withKey } from './forms.js';
 import { assess } from './integrity.js';
 import { getControls, overview as adminOverview, retentionDays, saveControls } from './admin.js';
 
@@ -62,6 +62,8 @@ api.post('/exams', requireTeacher, wrap(async (req, res) => {
   if (examUrl && !/^https?:\/\//i.test(examUrl)) return res.status(400).json({ error: 'examUrl must start with http:// or https://' });
   const leave = ['record', 'pause', 'end', 'pause_then_end'].includes(b.leaveAction) ? b.leaveAction : 'pause';
   const minutes = Math.max(1, Math.min(600, parseInt(b.durationMinutes, 10) || 60));
+  const winLock = b.windowsLock === 'strict' ? 'strict' : 'standard';
+  const winBlock = cleanWinBlock(b.winBlock) ?? ['taskmgr', 'winkey', 'lock', 'snip'];
   // An exam from a form link (Google Forms and others): work out the sites it needs and how a submission looks. The teacher can add to both.
   let analysis = null, extra = { allowed: [], done: [], keyParam: null, sendKey: true, provider: null };
   if (examUrl) {
@@ -70,9 +72,9 @@ api.post('/exams', requireTeacher, wrap(async (req, res) => {
     extra = { allowed: [...new Set([...analysis.origins, ...cleanOrigins(b.extraOrigins)])].slice(0, 12), done: cleanDone([...analysis.done, ...cleanDone(b.doneContains)]), keyParam: cleanKeyParam(b.keyParam), sendKey: typeof b.sendKey === 'boolean' ? b.sendKey : analysis.sendKey, provider: analysis.provider.id };
   }
   const { rows } = await q(
-    `INSERT INTO exams (title, exam_url, require_myseb, allow_extension, leave_action, duration_minutes, allowed_origins, done_patterns, key_param, send_key, form_provider)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-    [title, examUrl || 'pending', b.requireMyseb !== false, b.allowExtension === true, leave, minutes, extra.allowed, extra.done, extra.keyParam, extra.sendKey, extra.provider]);
+    `INSERT INTO exams (title, exam_url, require_myseb, allow_extension, leave_action, duration_minutes, allowed_origins, done_patterns, key_param, send_key, form_provider, windows_lock, win_block)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+    [title, examUrl || 'pending', b.requireMyseb !== false, b.allowExtension === true, leave, minutes, extra.allowed, extra.done, extra.keyParam, extra.sendKey, extra.provider, winLock, winBlock]);
   let exam = rows[0];
   if (!examUrl) exam = (await q('UPDATE exams SET exam_url=$2 WHERE id=$1 RETURNING *', [exam.id, `${config.publicUrl}/exam/${exam.id}/`])).rows[0];
   res.status(201).json({ ...exam, form: analysis ? { provider: analysis.provider, kind: analysis.kind, tips: analysis.tips, keyHint: analysis.keyHint } : null });
@@ -106,6 +108,8 @@ api.patch('/exams/:id', requireTeacher, wrap(async (req, res) => {
   if (b.doneContains !== undefined) add('done_patterns', cleanDone(b.doneContains));
   if (b.keyParam !== undefined) add('key_param', cleanKeyParam(b.keyParam));
   if (typeof b.sendKey === 'boolean') add('send_key', b.sendKey);
+  if (['standard', 'strict'].includes(b.windowsLock)) add('windows_lock', b.windowsLock);
+  if (cleanWinBlock(b.winBlock)) add('win_block', cleanWinBlock(b.winBlock));
   if (!sets.length) return res.status(400).json({ error: 'nothing to change' });
   const { rows } = await q(`UPDATE exams SET ${sets.join(',')} WHERE id=$1 RETURNING *`, vals);
   rows[0] ? res.json(rows[0]) : res.status(404).json({ error: 'not found' });

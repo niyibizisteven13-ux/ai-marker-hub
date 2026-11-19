@@ -9,7 +9,9 @@ function lockOf(data) {
   const origins = new Set(((data && data.lock && data.lock.origins) || []).filter((o) => typeof o === 'string'));
   const examOrigin = originOf(data && data.examUrl); if (examOrigin) origins.add(examOrigin);
   const l = (data && data.lock) || {};
-  return { origins, examOrigin, sendKey: l.sendKey !== false, kind: l.kind === 'form' ? 'form' : 'site', done: Array.isArray(l.done) ? l.done.filter((d) => typeof d === 'string' && d).slice(0, 5) : [] };
+  const w = l.windows || {};
+  const windows = { level: w.level === 'strict' ? 'strict' : 'standard', block: Array.isArray(w.block) ? w.block.filter((b) => typeof b === 'string') : ['taskmgr', 'winkey', 'lock', 'snip'] };
+  return { windows, origins, examOrigin, sendKey: l.sendKey !== false, kind: l.kind === 'form' ? 'form' : 'site', done: Array.isArray(l.done) ? l.done.filter((d) => typeof d === 'string' && d).slice(0, 5) : [] };
 }
 /** May the page go to this address? Only https/http pages on an allowed site (plus blank, data and blob pages the page itself needs). */
 const allowed = (url, lock) => /^(about:|data:|blob:)/.test(url) || (!!lock && lock.origins.has(originOf(url)));

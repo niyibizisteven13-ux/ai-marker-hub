@@ -37,3 +37,20 @@ makes anyone "high", and a device used by **two different students at the same t
 
 It is a triage aid, not a verdict: always look at the reasons and the evidence before acting. Limits: a student can still use a second
 physical device that MySEB cannot see; process checks rely on program names; VM detection catches common guest tools only.
+
+## Windows lock (set per exam)
+
+When you create an exam (or later, in the exam list) choose **Windows computers**:
+
+- **Standard** (default): the exam fills the screen and nothing else can be opened.
+- **Strict**: also, for the length of the exam only, MySEB turns off **Task Manager**, the **Windows key**, the **lock screen** (Win+L)
+  and flags **snipping tools** if they run. You choose which of these. It works the same for Google Forms, any other form tool and your
+  own exam site.
+
+Strict changes Windows policies for the signed-in user only (no administrator rights, nothing installed). MySEB saves the old values first
+and puts them back when the exam ends, when the app closes, and at the next start if the app was killed. If a policy cannot be set the
+lecturer sees a `lock_unavailable` warning on that student.
+
+Limits: this is not a separate Windows desktop. The Ctrl+Alt+Del screen cannot be removed without a driver, Windows may apply the Windows-key
+policy only after the shell re-reads it, and a student with administrator rights can undo a policy. Leaving the exam window is still
+recorded and handled by your "if a student leaves" rule. Mac and phones ignore this setting.

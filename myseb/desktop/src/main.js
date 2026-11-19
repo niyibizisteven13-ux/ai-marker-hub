@@ -54,7 +54,8 @@ async function checkEnvironment() {
   if (!exam || exam.status === 'ENDED') return;
   if (screen.getAllDisplays().length > 1) sendViolation('extra_display', { displays: screen.getAllDisplays().length });
   const running = await runningPrograms();
-  const bad = running.filter((n) => cfg.blockedProcesses.includes(n));
+  const extra = winLock.extraBlockedPrograms(exam.lock.windows.level, exam.lock.windows.block);
+  const bad = running.filter((n) => cfg.blockedProcesses.includes(n) || extra.includes(n));
   if (bad.length) sendViolation('forbidden_app', { apps: [...new Set(bad)].slice(0, 5) });
   if (!reportedOnce.has('vm') && running.some((n) => VM_PROCESSES.includes(n))) { reportedOnce.add('vm'); sendViolation('virtual_machine', { how: 'guest tools running' }); }
   // Windows: a remote desktop session sets SESSIONNAME to RDP-Tcp#n. The exam would be on someone else's screen.
@@ -96,6 +97,7 @@ const headersFor = () => ({
   'X-MySEB-Key': exam.token, 'X-MySEB-Client': 'desktop', 'X-MySEB-Device': DEVICE,
   'User-Agent': `MySEB/${VERSION} (desktop; ${process.platform})`,
 });
+const winLock = require('./winLock');
 const { lockOf, allowed: pageAllowed, isDone, hostOf, originOf } = require('./formLock');
 const toRenderer = (ch, payload) => { if (win && !win.isDestroyed()) win.webContents.send(ch, payload); };
 
@@ -143,8 +145,27 @@ async function heartbeat() {
   }
 }
 
+/* ------------------------------------------------------------------ strict Windows lock (see winLock.js) */
+const regRun = (args) => new Promise((resolve) => execFile('reg', args, { timeout: 8000, windowsHide: true }, (err, out) => resolve({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, out: String(out || '') })));
+const lockFile = () => path.join(app.getPath('userData'), 'win-lock-backup.json');
+let winLockOn = false;
+async function engageWindowsLock(lock) {
+  if (process.platform !== 'win32' || DEV) return;
+  const items = winLock.plan(lock.windows.level, lock.windows.block);
+  if (!items.length) return;
+  const r = await winLock.apply(items, regRun, lockFile());
+  winLockOn = r.applied.length > 0;
+  if (!r.ok) sendViolation('lock_unavailable', { failed: r.failed });
+}
+async function releaseWindowsLock() {
+  if (process.platform !== 'win32') return;
+  winLockOn = false;
+  try { await winLock.restore(regRun, lockFile()); } catch { /* nothing to put back */ }
+}
+
 function startExam(data) {
   const lock = lockOf(data);
+  void engageWindowsLock(lock);
   exam = { token: data.token, sessionId: data.sessionId, title: data.title, status: data.status, examOrigin: lock.examOrigin, lock };
   clipboard.clear();                                       // nothing copied before the exam can be pasted into it
   hbFails = 0; lastNoticeId = '';
@@ -158,7 +179,7 @@ async function finishSubmitted() {
   try { await post('/api/finish', { reason: 'submitted' }); } catch { /* the heartbeat still sees the end */ }
   applyStatus({ status: 'ENDED', reason: 'submitted' });
 }
-function stopExam() { clearInterval(watchTimer); clearInterval(hbTimer); clearTimeout(blurTimer); hbTimer = null; exam = null; reportedOnce.clear(); }
+function stopExam() { clearInterval(watchTimer); clearInterval(hbTimer); clearTimeout(blurTimer); hbTimer = null; exam = null; reportedOnce.clear(); void releaseWindowsLock(); }
 
 /* ------------------------------------------------------------------ keyboard rules (every web contents, incl. the exam <webview>) */
 function blockedKey(input) {
@@ -334,6 +355,7 @@ app.on('web-contents-created', (_e, contents) => {
 });
 
 app.whenReady().then(() => {
+  void releaseWindowsLock();   // a previous run that was killed mid-exam leaves its policies on: put them back first
   cfg = loadConfig(); DEVICE = deviceId();
   const ses = session.fromPartition(PARTITION);
   ses.setUserAgent(`${ses.getUserAgent()} MySEB/${VERSION} (desktop; ${process.platform})`);   // normal Chrome does not send this
@@ -393,3 +415,4 @@ app.whenReady().then(() => {
   }
 });
 app.on('window-all-closed', () => app.quit());
+app.on('will-quit', (e) => { if (winLockOn) { e.preventDefault(); winLockOn = false; releaseWindowsLock().finally(() => app.quit()); } });
