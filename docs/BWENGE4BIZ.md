@@ -95,7 +95,7 @@ Each costs credits like any assistant action. Nothing is published without the o
 A **venture page** is an ordinary Bwenge4biz page that presents several products under one aim. The example is **4biz**, the venture behind MySEB, Bwenge AI and Bwenge4biz, with the aim
 **"AI in our context"** (Kinyarwanda: *AI mu byacu*): a name, the one-line aim, a description, the three products, **Our products** (links), **What we help with** (business growth, business records,
 reaching new markets), **Good to know** (who it is for, how to start, what the blue check means), a WhatsApp contact and the blue verified badge. The words are in `server/services/biz/venture.ts`.
-- **Make it**: Admin → Platform controls → Business pages → **Create the 4biz page** (`POST /api/admin/platform/biz/venture`). It builds the page on the signed-in admin's account at `/b/4biz`, publishes it, and gives
+- **Make it**: Admin → Platform controls → Business pages → **Create the 4biz page** (`POST /api/admin/platform/biz/venture`). It asks for the email of the account that should own the page (empty means the signed-in admin), builds the page at `/b/4biz`, publishes it, and gives
   that admin the blue badge. It is safe to press again: it refreshes the words and never duplicates products or sections. The page name `4biz` belongs to the first account that takes it.
 - **Change it**: edit the page in the studio like any other, or ask the assistant; pressing the admin button again restores the example words.
 - Tests: `tests/biz_venture.test.ts`.

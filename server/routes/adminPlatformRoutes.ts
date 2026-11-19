@@ -127,8 +127,10 @@ router.get('/biz', wrap(async (_req, res) => { const { bizService } = await impo
 /** Makes (or refreshes) the 4biz venture page for the signed-in admin, publishes it and gives them the blue verified badge. Safe to run again. */
 router.post('/biz/venture', wrap(async (req, res) => {
   const [{ bizService }, { ensureVenture }, { setBadge }, { MANUAL_PAYMENT }] = await Promise.all([import('../services/biz/runtime.js'), import('../services/biz/venture.js'), import('../services/billing/badge.js'), import('../services/billing/manual.js')]);
-  const me = adminOf(req); const out = await ensureVenture(bizService(), me, { whatsapp: MANUAL_PAYMENT.whatsapp, grantBadge: (id) => setBadge(id, true, me) });
-  await auditAction(me, 'CREATE_VENTURE_PAGE', 'biz', '4biz', { created: out.created }); res.json({ success: true, data: out });
+  const me = adminOf(req); const { prisma } = await import('../db.js'); const { resolveVentureOwner } = await import('../services/biz/venture.js');
+  let owner: string; try { owner = await resolveVentureOwner(req.body?.email, me, (email) => (prisma as any).user.findFirst({ where: { email: { equals: email, mode: 'insensitive' } }, select: { id: true } })); } catch (e) { return res.status(404).json({ success: false, error: (e as Error).message }); }
+  const out = await ensureVenture(bizService(), owner, { whatsapp: MANUAL_PAYMENT.whatsapp, grantBadge: (id) => setBadge(id, true, me) });
+  await auditAction(me, 'CREATE_VENTURE_PAGE', 'biz', '4biz', { created: out.created, forOtherAccount: owner !== me }); res.json({ success: true, data: out });
 }));
 router.post('/biz/:slug/suspend', wrap(async (req, res) => {
   const { bizService } = await import('../services/biz/runtime.js'); const slug = String(req.params.slug); const reason = typeof req.body?.reason === 'string' && req.body.reason.trim() ? req.body.reason.trim() : null;

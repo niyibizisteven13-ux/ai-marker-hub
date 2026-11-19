@@ -41,6 +41,13 @@ export const venturePage = (site: string = SITE()) => ({
   },
 });
 
+/** Who the venture page is for: the account with the given email, or the caller when none is given. Throws a plain message when there is no such account. */
+export async function resolveVentureOwner(email: unknown, caller: string, findByEmail: (email: string) => Promise<{ id: string } | null>): Promise<string> {
+  const e = String(email ?? '').trim().toLowerCase(); if (!e) return caller;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e)) throw new Error('That does not look like an email address.');
+  const u = await findByEmail(e); if (!u) throw new Error(`No account has the email ${e}. The person must sign up first.`); return u.id;
+}
+
 export interface VentureDeps { grantBadge?: (ownerId: string) => Promise<void>; /** The founder's WhatsApp number, shown as the contact. */ whatsapp?: string }
 export interface VentureResult { url: string; created: boolean; products: number; sections: number; verified: boolean }
 

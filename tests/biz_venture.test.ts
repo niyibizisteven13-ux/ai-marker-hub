@@ -38,3 +38,11 @@ test('another account cannot take the 4biz name, and without a badge grant nobod
   await assert.rejects(ensureVenture(svc, 'someone-else', {}, SITE), (e: any) => /taken/i.test(e.message), 'the name belongs to the first account');
   assert.equal((await svc.list('someone-else')).length, 0);
 });
+
+import { resolveVentureOwner } from '../server/services/biz/venture.js';
+test('the venture page goes to the account with the email given, or to the caller; an unknown or odd email is refused with a plain message', async () => {
+  const find = async (e: string) => (e === 'owner@example.test' ? { id: 'u-owner' } : null);
+  assert.equal(await resolveVentureOwner('  Owner@Example.test ', 'admin-9', find), 'u-owner', 'case and spaces do not matter');
+  assert.equal(await resolveVentureOwner('', 'admin-9', find), 'admin-9'); assert.equal(await resolveVentureOwner(undefined, 'admin-9', find), 'admin-9');
+  await assert.rejects(resolveVentureOwner('nobody@example.test', 'admin-9', find), /No account has the email nobody@example.test/); await assert.rejects(resolveVentureOwner('not an email', 'admin-9', find), /does not look like an email/);
+});
