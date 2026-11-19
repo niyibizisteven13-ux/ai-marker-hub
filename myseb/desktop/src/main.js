@@ -190,6 +190,8 @@ function lockGuest(wc) {
   wc.setWindowOpenHandler(({ url }) => { blocked(url); return { action: 'deny' }; });       // no pop-ups, no new windows/tabs
   wc.on('will-navigate', (e, url) => { if (!allowed(url)) { e.preventDefault(); blocked(url); } });
   wc.on('will-frame-navigate', (e) => { if (e.isMainFrame && !allowed(e.url)) { e.preventDefault(); blocked(e.url); } });
+  // A page on an allowed site that bounces the student to another site (a redirect, not a click) is stopped the same way.
+  wc.on('will-redirect', (e, url, _inPlace, isMainFrame) => { if (isMainFrame !== false && !allowed(url)) { e.preventDefault(); blocked(url); } });
   // A form that shows a "submitted" address (Google Forms: .../formResponse) ends the exam by itself.
   const submitted = (url) => { if (exam && isDone(url, exam.lock)) finishSubmitted(); };
   wc.on('did-navigate', (_e, url) => submitted(url));
