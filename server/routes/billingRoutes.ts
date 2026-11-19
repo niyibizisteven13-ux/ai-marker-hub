@@ -96,7 +96,7 @@ router.get('/payments/:id/receipt', async (req, res) => {
     if (!p || p.userId !== userIdOf(req) || p.status !== 'SUCCESSFUL') return res.status(404).json({ error: 'Receipt not found.' });
     const { receiptEmail } = await import('../services/billing/emails.js');
     const user = await db.user.findUnique({ where: { id: p.userId }, select: { name: true } });
-    const item = p.purpose === 'GO_PACK' ? `GO credits · ${p.credits} credits` : `${PLANS[p.purpose as keyof typeof PLANS]?.name ?? p.purpose} plan · ${p.months} month${p.months > 1 ? 's' : ''}`;
+    const item = p.purpose === 'VERIFIED_BADGE' ? 'Verified badge · one time' : p.purpose === 'GO_PACK' ? `GO credits · ${p.credits} credits` : `${PLANS[p.purpose as keyof typeof PLANS]?.name ?? p.purpose} plan · ${p.months} month${p.months > 1 ? 's' : ''}`;
     const r = receiptEmail({ name: user?.name ?? '', receiptNumber: p.receiptNumber, paidAt: new Date(p.fulfilledAt), item, amountRwf: p.amountRwf, amountUsd: p.amountUsd, currency: p.currency, phoneMasked: p.phoneMasked, transactionId: p.financialTransactionId, grant: '' });
     res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; img-src data:");
     res.type('html').send(r.html);

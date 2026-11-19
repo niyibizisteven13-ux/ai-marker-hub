@@ -178,6 +178,8 @@ export interface PublicBusiness {
   payOnline?: { open: boolean };
   /** The owner's own words for the programs below (public: they are only words). */
   programText?: ProgramText;
+  /** The owner bought the verified badge (a one-time payment): shown as a check mark next to the name. */
+  verified?: true;
   /** Programs customers can join (a monthly pass, ten visits, a month of lunches…): see programs.ts. */
   programs?: Array<{ checkIn: 'staff' | 'self'; id: string; title: string; description?: string; priceRwf: number; days: number; totalUses?: number; items: string[]; openDays: Day[]; windows?: Array<{ item: string; from: string; to: string }>; terms?: string; full: boolean; needsCode: boolean }>;
   products: Array<{ id: string; name: string; price: number | null; unit?: string; description?: string; media?: PublicMedia; available: boolean }>;

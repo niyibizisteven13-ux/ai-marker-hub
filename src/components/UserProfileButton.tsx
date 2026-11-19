@@ -1,4 +1,6 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { VerifiedBadge } from './VerifiedBadge';
+import { authFetch } from '../utils/authFetch';
 
 interface UserProfileButtonProps {
   user?: {
@@ -19,6 +21,8 @@ export default function UserProfileButton({ user, onClick }: UserProfileButtonPr
   };
 
   const initials = getInitials(user?.name);
+  const [verified, setVerified] = useState(false);
+  useEffect(() => { if (!user) { setVerified(false); return; } let on = true; void authFetch('/api/billing/me').then(async (r) => { if (r.ok && on) setVerified((await r.json())?.verified === true); }).catch(() => undefined); return () => { on = false; }; }, [user]);
 
   return (
     <button
@@ -53,7 +57,7 @@ export default function UserProfileButton({ user, onClick }: UserProfileButtonPr
 
       <div className="flex flex-col text-left min-w-0 pr-1">
         <span className="text-xs font-semibold text-slate-200 group-hover:text-orange-400 transition-colors truncate max-w-[110px]">
-          {user?.name || 'Guest User'}
+          {user?.name || 'Guest User'}{verified && <> <VerifiedBadge size={14} className="-translate-y-px" /></>}
         </span>
         <span className="text-[10px] text-slate-400 font-medium truncate max-w-[110px]">
           {user ? 'Logged In' : 'Sign In / Account'}

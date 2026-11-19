@@ -90,6 +90,16 @@ Each costs credits like any assistant action. Nothing is published without the o
 * Staff accounts, orders and payment tracking, video conversion, page search on Google (pages are public, but not yet submitted to search engines), custom templates.
 * Free storage is a promise of this server's disk: back it up like the rest of the data.
 
+## Verified badge
+
+A one-time payment of **1,000 RWF** puts a blue check mark next to the owner's name: on every public business page they own (`/b/<page>`), in the studio and on their profile button in the app. It belongs to the
+person (not one page), never expires and works on any plan. It means "a real, reachable person paid"; it is not an endorsement of the business.
+- **Buying**: Upgrade page → *Verified badge* → the same checkout as plans (manual MoMo today: pay, send the proof, an administrator approves with the transaction ID; online when automatic payments are on). The purpose is `VERIFIED_BADGE`
+  (`server/services/billing/payments.ts`, `badge.ts`); the badge is recorded in the same transaction as the payment, a MoMo transaction cannot be used twice, a second purchase is refused, and the receipt says "Verified badge".
+- **Admin**: *Record a purchase* accepts `VERIFIED_BADGE`; `POST /api/admin/billing/users/:id/badge {active}` gives or takes it back (abuse, a mistake, a gift). The payment is not refunded automatically.
+- **Public page**: `verified: true` appears in the public business only when the owner has it; the owner's id never leaves the server.
+- Tests: `tests/billing_momo.test.ts` (purchase, once only, no plan change, receipt, revoke) and `tests/biz_report.test.ts` (public flag).
+
 ## Closing report (end of the day)
 
 Dashboard → **Closing report** shows today's (or yesterday's) report, with **Copy** and **Send on WhatsApp**. The assistant gives the same text for "how was today" (`biz_day_report`),

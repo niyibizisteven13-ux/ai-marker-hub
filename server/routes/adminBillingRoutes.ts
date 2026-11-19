@@ -36,10 +36,19 @@ router.put('/payment-method', async (req, res) => {
 });
 router.post('/users/:id/manual-payment', async (req, res) => {
   try {
-    const body = z.object({ purpose: z.enum(['STARTER', 'PRO', 'PLUS', 'GO_PACK']), packId: z.string().max(40).optional(), months: z.number().int().min(1).max(12).optional(), transactionId: z.string().trim().min(3).max(100).regex(/^[a-zA-Z0-9-]+$/) }).strict().parse(req.body);
+    const body = z.object({ purpose: z.enum(['STARTER', 'PRO', 'PLUS', 'GO_PACK', 'VERIFIED_BADGE']), packId: z.string().max(40).optional(), months: z.number().int().min(1).max(12).optional(), transactionId: z.string().trim().min(3).max(100).regex(/^[a-zA-Z0-9-]+$/) }).strict().parse(req.body);
     if (!(await db.user.findUnique({ where: { id: req.params.id } }))) return res.status(404).json({ error: 'User not found.' });
     const p = await startManualPayment(req.params.id, body, true);
     res.json({ success: true, payment: await approveManualPayment(p.id, body.transactionId.toUpperCase(), adminId(req)) });
+  } catch (e) { fail(res, e); }
+});
+/** Gives or takes back the verified badge by hand (a mistake, abuse, or a gift); the payment itself is not refunded here. */
+router.post('/users/:id/badge', async (req, res) => {
+  try {
+    const { active } = z.object({ active: z.boolean() }).strict().parse(req.body);
+    if (!(await db.user.findUnique({ where: { id: req.params.id } }))) return res.status(404).json({ error: 'User not found.' });
+    const { setBadge } = await import('../services/billing/badge.js'); await setBadge(req.params.id, active, adminId(req));
+    logger.info('[admin billing] verified badge changed', { admin: adminId(req), userId: req.params.id, active }); res.json({ success: true, active });
   } catch (e) { fail(res, e); }
 });
 router.post('/payments/:id/approve', async (req, res) => {

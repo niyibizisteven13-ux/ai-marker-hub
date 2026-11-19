@@ -122,7 +122,7 @@ export function createBizRouter(): Router {
       const { PLANS } = await import('../services/billing/plans.js'); const list = await svc().list(me(req));
       return res.json({ prefs: await svc().prefs(me(req)), locked: true, businesses: list.map((b) => ({ id: b.id, name: b.name, slug: b.slug, published: b.published })), limits: FREE_LIMITS, plan: plan?.name ?? 'Free', upgrade: { plan: 'STARTER', name: PLANS.STARTER.name, priceRwf: PLANS.STARTER.priceRwf, priceNote: PLANS.STARTER.priceNote, url: '/upgrade' } });
     }
-    res.json({ prefs: await svc().prefs(me(req)), locked: false, paid, businesses: await svc().list(me(req)), limits: paid ? PAID_LIMITS : FREE_LIMITS, plan: plan?.name ?? 'Free', upgradeUrl: '/upgrade' });
+    res.json({ prefs: await svc().prefs(me(req)), locked: false, paid, businesses: await svc().list(me(req)), limits: paid ? PAID_LIMITS : FREE_LIMITS, plan: plan?.name ?? 'Free', upgradeUrl: '/upgrade', verified: await svc().verifiedOwner(me(req)), badge: { priceRwf: (await import('../services/billing/badge.js')).VERIFIED_BADGE_RWF, url: '/upgrade#badge' } });
   }));
   r.put('/prefs', run(async (req, res) => res.json({ prefs: await svc().setPrefs(me(req), req.body ?? {}) })));
   r.post('/', run(async (req, res) => res.status(201).json({ business: await svc().create(me(req), req.body ?? {}) })));

@@ -208,3 +208,4 @@ Object.assign(RW, {
   'Point your phone camera at the code shown at the business. Your card is ticked at once. No camera? Type the 6 digits.': 'Werekeza kamera ya telefoni yawe kuri kode iri ku bucuruzi. Ikarita yawe ihita ishyirwaho ikimenyetso. Nta kamera? Andika imibare 6.',
   'Code shown at the business': 'Kode iri ku bucuruzi',
 });
+Object.assign(RW, { 'Verified': 'Yemejwe' });

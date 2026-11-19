@@ -21,7 +21,7 @@ import {
  */
 export interface Kv { get<T>(key: string): Promise<T | null>; put(key: string, value: unknown): Promise<void>; del(key: string): Promise<void> }
 export class BizError extends Error { constructor(message: string, public status = 400, public code = 'BIZ') { super(message); } }
-export interface Deps { /** Who may use the owner side (the business dashboard is a paid feature). Absent: everyone. The public page never needs it. */ allowed?: (ownerId: string) => Promise<boolean>; kv: Kv; media: MediaStore; isPaid: (ownerId: string) => Promise<boolean>; now?: () => number; secretKey?: Buffer; fetchImpl?: Fetch;
+export interface Deps { /** Who may use the owner side (the business dashboard is a paid feature). Absent: everyone. The public page never needs it. */ allowed?: (ownerId: string) => Promise<boolean>; kv: Kv; media: MediaStore; isPaid: (ownerId: string) => Promise<boolean>; /** Whether the owner bought the verified badge (a one-time payment). Absent: nobody is verified. */ isVerified?: (ownerId: string) => Promise<boolean>; now?: () => number; secretKey?: Buffer; fetchImpl?: Fetch;
   /** Tells the owner something at once (Telegram, email or the chat outbox). `plan` becomes a Do it / Cancel plan the owner approves. */
   notify?: (ownerId: string, n: BizNotice) => Promise<void>;
   /** Keeps the business agent's scheduled digests in line with its settings. */
@@ -106,7 +106,7 @@ export function createBizService(deps: Deps) {
       out.push(p); }
     return out;
   }
-  const withPay = async (b: Business, v: PublicBusiness): Promise<PublicBusiness> => { const sections = await publicSections(b); const plans = await programs.publicPrograms(b).catch(() => []); const out = { ...(sections.length ? { ...v, sections } : v), ...(plans.length ? { programs: plans } : {}) }; return (await payReady(b)) ? { ...out, payOnline: { open: b.payOpen === true } } : out; };
+  const withPay = async (b: Business, v: PublicBusiness): Promise<PublicBusiness> => { const sections = await publicSections(b); const plans = await programs.publicPrograms(b).catch(() => []); const verified = deps.isVerified ? await deps.isVerified(b.ownerId).catch(() => false) : false; const out = { ...(sections.length ? { ...v, sections } : v), ...(plans.length ? { programs: plans } : {}), ...(verified ? { verified: true as const } : {}) }; return (await payReady(b)) ? { ...out, payOnline: { open: b.payOpen === true } } : out; };
   async function startPayment(b: Business, o: { phone: string; amount: number; item: string; customer?: string; src: LedgerEntry['src']; note?: string }): Promise<LedgerEntry> {
     const n = msisdn(o.phone); if (!n) throw new BizError('Enter a valid MTN or Airtel number, like 0788 123 456.');
     if (!Number.isInteger(o.amount) || o.amount < 100 || o.amount > 2_000_000) throw new BizError('The amount must be between 100 and 2,000,000 RWF.');
@@ -299,6 +299,8 @@ export function createBizService(deps: Deps) {
       if (e.type === 'sale' && e.status === 'completed' && e.productId) await adjustStock(b, e.productId, e.qty ?? 1);
     },
     /** The numbers behind the dashboard: today against yesterday, a chart, top sellers, orders, customers, low stock. */
+    /** Whether this owner has the verified badge (the studio shows how to get it when not). */
+    async verifiedOwner(ownerId: string): Promise<boolean> { return deps.isVerified ? deps.isVerified(ownerId).catch(() => false) : false; },
     async dashboard(ownerId: string, id: string, days = 7) {
       const b = await mine(ownerId, id); await materialize(b); const items = (await kv.get<{ items: LedgerEntry[] }>(`biz-ledger:${b.id}`))?.items ?? [];
       const enq = (await kv.get<{ items: Enquiry[] }>(`biz-enq:${b.id}`))?.items ?? [];

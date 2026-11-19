@@ -599,3 +599,19 @@ test('customer API disables automatic MTN requests even when legacy gateway sett
     assert.equal(mtn.requests.size, sent, 'no prompt or charge reaches MTN');
   } finally { server.close(); }
 });
+
+test('verified badge: 1,000 RWF once, granted by the same manual approval, never changes the plan, bought only once, receipt says what it is, and an admin can take it back', async () => {
+  const { startManualPayment, approveManualPayment } = await import('../server/services/billing/manual.js');
+  const { hasBadge, setBadge } = await import('../server/services/billing/badge.js');
+  const q = await quote('VERIFIED_BADGE'); assert.equal(q.amountRwf, 1000); assert.equal(q.months, 0); assert.equal(q.credits, 0); assert.match(q.item, /Verified badge/);
+  const userId = await newUser(); assert.equal(await hasBadge(userId), false); assert.equal((await billingState(userId)).verified, false);
+  const planBefore = (await planFor(userId)).id;
+  const p = await startManualPayment(userId, { purpose: 'VERIFIED_BADGE' }); assert.equal(p.amountRwf, 1000); assert.equal(p.status, 'PENDING'); assert.equal(await hasBadge(userId), false, 'not before the payment is verified');
+  const tx = `TX-${randomUUID()}`; const done: any = await approveManualPayment(p.id, tx, 'admin-1'); assert.equal(done.status, 'SUCCESSFUL');
+  assert.equal(await hasBadge(userId), true); assert.equal((await billingState(userId)).verified, true); assert.equal((await planFor(userId)).id, planBefore, 'a badge is not a plan');
+  assert.equal((await approveManualPayment(p.id, tx, 'admin-1') as any).status, 'SUCCESSFUL'); assert.equal(await db.subscription.count({ where: { userId } }), 0, 'approving again changes nothing');
+  await assert.rejects(startManualPayment(userId, { purpose: 'VERIFIED_BADGE' }), (e: any) => e.code === 'ALREADY_VERIFIED', 'one badge per person');
+  await assert.rejects(startPayment(userId, { purpose: 'VERIFIED_BADGE', phone: '0788123456' }), (e: any) => ['ALREADY_VERIFIED', 'MANUAL_PAYMENT_REQUIRED'].includes(e.code));
+  await settle(); const mail = mailsTo(userId).map((m) => `${m.subject}\n${m.text ?? ''}${m.html ?? ''}`).join('\n'); assert.match(mail, /Verified badge/); assert.ok(!/Pro plan is active|plan is active until/.test(mail), 'the receipt does not talk about a plan');
+  await setBadge(userId, false, 'admin-1'); assert.equal(await hasBadge(userId), false, 'an admin can take it back'); await setBadge(userId, true, 'admin-1'); assert.equal(await hasBadge(userId), true);
+});
