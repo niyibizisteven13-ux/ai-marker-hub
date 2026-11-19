@@ -244,6 +244,9 @@ export function Dashboard({ b, lang, onClose, onSignedOut }: { b: PublicBusiness
             {m.state === 'pending' && card.payment && (
               <div className="space-y-3 rounded-2xl bg-white p-4 text-left">
                 <p className="text-center font-display text-3xl font-semibold tabular-nums">{rwf(card.payment.amount)}</p>
+                {b.products.filter((x) => x.price != null).length > 0 && (
+                  <details className="rounded-xl bg-[#F2F4F7] px-3 py-2 text-sm"><summary className="min-h-9 cursor-pointer py-1.5 font-semibold">{tx('Our prices')}</summary>
+                    <ul className="divide-y divide-[#D9DEE5]">{b.products.filter((x) => x.price != null).slice(0, 40).map((x) => <li key={x.id} className="flex items-baseline justify-between gap-3 py-1.5"><span className={x.available ? '' : 'text-[#5B6470] line-through'}>{x.name}{x.unit ? <span className="text-[#5B6470]"> / {x.unit}</span> : null}</span><b className="shrink-0 tabular-nums">{rwf(x.price as number)}</b></li>)}</ul></details>)}
                 {card.payment.online && (card.payment.promptSent
                   ? <p role="status" className="flex items-center gap-2 rounded-xl bg-amber-50 p-3 text-sm text-amber-900"><Loader2 className="animate-spin" size={16} />{tx('Check your phone and approve the payment.')}</p>
                   : <div className="space-y-2"><label className="block text-sm font-medium">{tx('Pay with your phone (MTN or Airtel)')}<input className={field} value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" placeholder={m.phone ? `0${m.phone.slice(3)}` : '0788 123 456'} /></label>

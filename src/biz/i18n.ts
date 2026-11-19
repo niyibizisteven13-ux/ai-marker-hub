@@ -202,3 +202,4 @@ Object.assign(RW, {
   'Wrong tap?': 'Wakandagiye nabi?',
   'Undo': 'Subiza inyuma',
 });
+Object.assign(RW, { 'Our prices': 'Ibiciro byacu' });
