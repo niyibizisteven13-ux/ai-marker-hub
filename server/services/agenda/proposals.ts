@@ -8,7 +8,7 @@ import { appSettingKV, type KV } from './store.js';
  */
 export const PROPOSABLE = new Set([
   // The owner's business (bwenge4biz): the business agent's suggestions and saved routines. Each plan is shown first and runs only on a yes.
-  'biz_orders', 'biz_change_product', 'biz_add_product', 'biz_stock', 'biz_update', 'biz_post', 'biz_record_sale', 'biz_record_expense', 'biz_request_payment', 'biz_publish',
+  'biz_orders', 'biz_change_product', 'biz_add_product', 'biz_stock', 'biz_update', 'biz_post', 'biz_record_sale', 'biz_record_expense', 'biz_request_payment', 'biz_publish', 'biz_records', 'biz_section', 'biz_translate',
   'publish_form', 'set_test_rules', 'create_form', 'edit_form',
   'create_assignment', 'task_settings', 'mark_task', 'release_task_results',
   'create_class', 'add_class_students', 'link_class_work', 'create_practice_class',
