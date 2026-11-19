@@ -4,15 +4,15 @@ import type { Business, PublicBusiness } from './model.js';
 import type { LedgerEntry } from './ledger.js';
 import {
   MAX_MEMBERS, MAX_PROGRAMS, addDays, canServe, cleanJoin, cleanProgram, cleanStart, dayOfWeek, endDateFor, hashToken, kigaliDate, newCode, newToken, normalizeCode,
-  oneOfMethod, planState, remaining, tokenFromPayload, type DenyCode, type Meal, type Member, type PlanState, type Program,
+  oneOfMethod, planState, remaining, tokenFromPayload, usesLeft, type DenyCode, type Use, type Member, type PlanState, type Program,
 } from './programs.js';
 
 /**
  * Storage and the public/owner boundary for programs (see programs.ts for the rules).
  *   biz-programs:<biz> the plans · biz-members:<biz> the people on them · biz-pass:<hash> -> who holds that pass token
- *   biz-meals:<biz>:<member> one person's meals · biz-served:<biz>:<date> everything served that day · biz-served-days:<biz> which days exist
- * Everything that changes a member or serves a meal runs under a per-business lock, so two scans at the counter at the same moment cannot
- * both serve the same meal.
+ *   biz-uses:<biz>:<member> one person's items · biz-served:<biz>:<date> everything served that day · biz-served-days:<biz> which days exist
+ * Everything that changes a member or serves a item runs under a per-business lock, so two scans at the counter at the same moment cannot
+ * both serve the same item.
  */
 interface Kv { get<T>(key: string): Promise<T | null>; put(key: string, value: unknown): Promise<void>; del(key: string): Promise<void> }
 export class ProgramError extends Error { constructor(message: string, public status = 400, public code = 'PROGRAM') { super(message); } }
@@ -39,25 +39,25 @@ async function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
 export interface MemberView {
   id: string; programId: string; programTitle: string; name: string; phone: string; studentId?: string; code: string; state: PlanState;
   startDate: string; endDate: string; paid: boolean; paidRwf: number; payMethod?: Member['payMethod']; claimed?: Member['claimed']; note?: string;
-  servingDaysLeft: number; mealsLeft: number; eatenToday: string[]; createdAt: string;
+  servingDaysLeft: number; usesLeft: number; totalUses?: number; usedTotal?: number; usedToday: string[]; createdAt: string;
 }
-export interface PublicProgram { id: string; title: string; description?: string; priceRwf: number; days: number; meals: string[]; openDays: Program['openDays']; windows?: Program['windows']; terms?: string; full: boolean }
+export interface PublicProgram { id: string; title: string; description?: string; priceRwf: number; days: number; items: string[]; openDays: Program['openDays']; windows?: Program['windows']; terms?: string; full: boolean }
 
 export function createPrograms(h: Helpers) {
   const { kv } = h;
-  const k = { programs: (b: string) => `biz-programs:${b}`, members: (b: string) => `biz-members:${b}`, pass: (hash: string) => `biz-pass:${hash}`, meals: (b: string, m: string) => `biz-meals:${b}:${m}`, served: (b: string, d: string) => `biz-served:${b}:${d}`, days: (b: string) => `biz-served-days:${b}` };
+  const k = { programs: (b: string) => `biz-programs:${b}`, members: (b: string) => `biz-members:${b}`, pass: (hash: string) => `biz-pass:${hash}`, uses: (b: string, m: string) => `biz-uses:${b}:${m}`, served: (b: string, d: string) => `biz-served:${b}:${d}`, days: (b: string) => `biz-served-days:${b}` };
   const programsOf = async (bizId: string) => (await kv.get<{ items: Program[] }>(k.programs(bizId)))?.items ?? [];
   const membersOf = async (bizId: string) => (await kv.get<{ items: Member[] }>(k.members(bizId)))?.items ?? [];
   const putMembers = (bizId: string, items: Member[]) => kv.put(k.members(bizId), { items });
-  const servedOn = async (bizId: string, date: string) => (await kv.get<{ items: Meal[] }>(k.served(bizId, date)))?.items ?? [];
-  const eatenOf = (list: Meal[], memberId: string) => list.filter((m) => m.memberId === memberId && !m.undone).sort((a, b) => a.at.localeCompare(b.at));
+  const servedOn = async (bizId: string, date: string) => (await kv.get<{ items: Use[] }>(k.served(bizId, date)))?.items ?? [];
+  const usedOf = (list: Use[], memberId: string) => list.filter((m) => m.memberId === memberId && !m.undone).sort((a, b) => a.at.localeCompare(b.at));
 
-  function view(m: Member, p: Program | undefined, today: string, eaten: Meal[] = []): MemberView {
-    const r = p ? remaining(m, p, today) : { servingDays: 0, meals: 0 };
+  function view(m: Member, p: Program | undefined, today: string, used: Use[] = []): MemberView {
+    const r = p ? remaining(m, p, today) : { servingDays: 0, uses: 0 };
     return {
       id: m.id, programId: m.programId, programTitle: p?.title ?? '(removed plan)', name: m.name, phone: m.phone, ...(m.studentId ? { studentId: m.studentId } : {}), code: m.code, state: planState(m, today),
       startDate: m.startDate, endDate: m.endDate, paid: m.paid, paidRwf: m.paidRwf, ...(m.payMethod ? { payMethod: m.payMethod } : {}), ...(m.claimed ? { claimed: m.claimed } : {}), ...(m.note ? { note: m.note } : {}),
-      servingDaysLeft: Math.max(0, r.servingDays - (p && eaten.length >= p.meals.length ? 1 : 0)), mealsLeft: Math.max(0, r.meals - eaten.length), eatenToday: eaten.map((e) => e.meal), createdAt: m.createdAt,
+      servingDaysLeft: Math.max(0, r.servingDays - (p && used.length >= p.items.length ? 1 : 0)), usesLeft: p ? usesLeft(m, p, r.uses, used.length) : 0, ...(p?.totalUses ? { totalUses: p.totalUses, usedTotal: m.used ?? 0 } : {}), usedToday: used.map((e) => e.item), createdAt: m.createdAt,
     };
   }
 
@@ -65,7 +65,7 @@ export function createPrograms(h: Helpers) {
   async function activate(b: Business, p: Program, m: Member, method: NonNullable<Member['payMethod']>, entryId?: string) {
     m.paid = true; m.paidRwf = p.priceRwf; m.status = 'active'; m.payMethod = method; m.confirmedAt = h.iso(); delete m.claimed; delete m.payRef;
     if (!entryId) {
-      const e: LedgerEntry = { id: randomUUID(), type: 'sale', amount: p.priceRwf, at: h.iso(), status: 'completed', src: 'studio', item: `Meal plan: ${p.title}`.slice(0, 80), customer: m.name, method: method === 'cash' ? 'cash' : 'momo', note: `Plan member ${m.code}` };
+      const e: LedgerEntry = { id: randomUUID(), type: 'sale', amount: p.priceRwf, at: h.iso(), status: 'completed', src: 'studio', item: `Program: ${p.title}`.slice(0, 80), customer: m.name, method: method === 'cash' ? 'cash' : 'momo', note: `Plan member ${m.code}` };
       const doc = (await kv.get<{ items: LedgerEntry[] }>(`biz-ledger:${b.id}`)) ?? { items: [] }; doc.items.unshift(e); await kv.put(`biz-ledger:${b.id}`, { items: doc.items.slice(0, 5000) });
     }
   }
@@ -110,7 +110,7 @@ export function createPrograms(h: Helpers) {
       const b = await h.mine(ownerId, id); const today = kigaliDate(h.now()); const progs = await programsOf(b.id); const served = await servedOn(b.id, today);
       const q = String(o.q ?? '').trim().toLowerCase();
       return (await membersOf(b.id)).filter((m) => (!o.programId || m.programId === o.programId) && (!q || m.name.toLowerCase().includes(q) || m.phone.includes(q.replace(/\D/g, '') || '\u0000') || m.code.toLowerCase().includes(q) || (m.studentId ?? '').toLowerCase().includes(q)))
-        .map((m) => view(m, progs.find((p) => p.id === m.programId), today, eatenOf(served, m.id))).filter((v) => !o.state || v.state === o.state).sort((a, c) => c.createdAt.localeCompare(a.createdAt));
+        .map((m) => view(m, progs.find((p) => p.id === m.programId), today, usedOf(served, m.id))).filter((v) => !o.state || v.state === o.state).sort((a, c) => c.createdAt.localeCompare(a.createdAt));
     },
     /** The owner has the money (cash at the counter, or MoMo they can see on their phone): the plan starts. */
     async confirmPayment(ownerId: string, id: string, memberId: string, input: { method?: unknown } = {}): Promise<MemberView> {
@@ -136,35 +136,38 @@ export function createPrograms(h: Helpers) {
         await putMembers(b.id, list); return view(m, p, kigaliDate(h.now()));
       });
     },
-    /** Scan (token) or type (code) a pass: the system says whether this person may be served now, and records the meal. */
-    async redeem(ownerId: string, id: string, input: { token?: unknown; code?: unknown; memberId?: unknown; meal?: unknown; force?: unknown }) {
+    /** Scan (token) or type (code) a pass: the system says whether this person may be served now, and records the item. */
+    async redeem(ownerId: string, id: string, input: { token?: unknown; code?: unknown; memberId?: unknown; item?: unknown; force?: unknown }) {
       const b = await h.mine(ownerId, id);
       return withLock(`mem|${b.id}`, async () => {
         const m = await findMember(b.id, input); if (!m) return { ok: false as const, code: 'unknown' as const, message: 'This pass was not found. Check the code, or ask the customer to open their pass link.' };
         const p = (await programsOf(b.id)).find((x) => x.id === m.programId); if (!p) return { ok: false as const, code: 'unknown' as const, message: 'This plan no longer exists.' };
-        const t = h.now(); const date = kigaliDate(t); const served = await servedOn(b.id, date); const eaten = eatenOf(served, m.id);
-        const r = canServe({ member: m, program: p, eaten, now: t, meal: input.meal === undefined || input.meal === '' ? undefined : String(input.meal), force: input.force === true });
-        if (!r.ok) return { ...r, member: view(m, p, date, eaten) };
-        const meal: Meal = { id: randomUUID(), memberId: m.id, date, meal: r.meal, at: new Date(t).toISOString(), by: tokenFromPayload(input.token) || typeof input.token === 'string' ? 'scan' : 'code' };
-        await kv.put(k.served(b.id, date), { items: [...served, meal] });
+        const t = h.now(); const date = kigaliDate(t); const served = await servedOn(b.id, date); const used = usedOf(served, m.id);
+        const r = canServe({ member: m, program: p, used, now: t, item: input.item === undefined || input.item === '' ? undefined : String(input.item), force: input.force === true });
+        if (!r.ok) return { ...r, member: view(m, p, date, used) };
+        const use: Use = { id: randomUUID(), memberId: m.id, date, item: r.item, at: new Date(t).toISOString(), by: tokenFromPayload(input.token) || typeof input.token === 'string' ? 'scan' : 'code' };
+        await kv.put(k.served(b.id, date), { items: [...served, use] });
         const idx = (await kv.get<{ dates: string[] }>(k.days(b.id)))?.dates ?? []; if (!idx.includes(date)) await kv.put(k.days(b.id), { dates: [...idx, date].slice(-400) });
-        const own = (await kv.get<{ items: Meal[] }>(k.meals(b.id, m.id)))?.items ?? []; await kv.put(k.meals(b.id, m.id), { items: [...own, meal].slice(-1500) });
-        return { ok: true as const, meal: r.meal, mealId: meal.id, member: view(m, p, date, [...eaten, meal]) };
+        const own = (await kv.get<{ items: Use[] }>(k.uses(b.id, m.id)))?.items ?? []; await kv.put(k.uses(b.id, m.id), { items: [...own, use].slice(-1500) });
+        // The pass's running count (for programs with a total number of uses).
+        const all = await membersOf(b.id); const mm = all.find((x) => x.id === m.id); if (mm) { mm.used = (mm.used ?? 0) + 1; m.used = mm.used; await putMembers(b.id, all); }
+        return { ok: true as const, item: r.item, useId: use.id, member: view(m, p, date, [...used, use]) };
       });
     },
     /** A mistaken scan can be undone for a few minutes. */
-    async undoMeal(ownerId: string, id: string, mealId: string): Promise<{ ok: true }> {
+    async undoUse(ownerId: string, id: string, useId: string): Promise<{ ok: true }> {
       const b = await h.mine(ownerId, id);
       return withLock(`mem|${b.id}`, async () => {
         const today = kigaliDate(h.now()); const days = [today, addDays(today, -1)];
         for (const d of days) {
-          const served = await servedOn(b.id, d); const m = served.find((x) => x.id === mealId); if (!m) continue;
-          if (h.now() - Date.parse(m.at) > 20 * 60_000) throw new ProgramError('A meal can only be undone within 20 minutes.', 409, 'TOO_LATE');
+          const served = await servedOn(b.id, d); const m = served.find((x) => x.id === useId); if (!m) continue;
+          if (h.now() - Date.parse(m.at) > 20 * 60_000) throw new ProgramError('A use can only be undone within 20 minutes.', 409, 'TOO_LATE');
           m.undone = true; await kv.put(k.served(b.id, d), { items: served });
-          const own = (await kv.get<{ items: Meal[] }>(k.meals(b.id, m.memberId)))?.items ?? []; const x = own.find((y) => y.id === mealId); if (x) { x.undone = true; await kv.put(k.meals(b.id, m.memberId), { items: own }); }
+          const own = (await kv.get<{ items: Use[] }>(k.uses(b.id, m.memberId)))?.items ?? []; const x = own.find((y) => y.id === useId); if (x) { x.undone = true; await kv.put(k.uses(b.id, m.memberId), { items: own }); }
+          const all = await membersOf(b.id); const mm = all.find((y) => y.id === m.memberId); if (mm) { mm.used = Math.max(0, (mm.used ?? 0) - 1); await putMembers(b.id, all); }
           return { ok: true as const };
         }
-        throw new ProgramError('That meal was not found.', 404, 'NOT_FOUND');
+        throw new ProgramError('That use was not found.', 404, 'NOT_FOUND');
       });
     },
     /** Today at a glance: who has been served, who has a plan today and has not come yet. */
@@ -173,11 +176,11 @@ export function createPrograms(h: Helpers) {
       const byId = new Map(members.map((m) => [m.id, m]));
       const open = (p?: Program) => !!p && p.openDays.includes(dayOfWeek(date));
       const expected = members.filter((m) => planState(m, date) === 'active' && open(progs.find((p) => p.id === m.programId)));
-      const notYet = expected.filter((m) => { const p = progs.find((x) => x.id === m.programId)!; return served.filter((s) => s.memberId === m.id).length < p.meals.length; });
+      const notYet = expected.filter((m) => { const p = progs.find((x) => x.id === m.programId)!; return served.filter((s) => s.memberId === m.id).length < p.items.length; });
       return {
         date, open: progs.some((p) => open(p)),
         servedCount: served.length, expected: expected.length,
-        served: served.slice().reverse().slice(0, 200).map((s) => ({ mealId: s.id, memberId: s.memberId, name: byId.get(s.memberId)?.name ?? '', code: byId.get(s.memberId)?.code ?? '', meal: s.meal, at: s.at, canUndo: t - Date.parse(s.at) <= 20 * 60_000 })),
+        served: served.slice().reverse().slice(0, 200).map((s) => ({ useId: s.id, memberId: s.memberId, name: byId.get(s.memberId)?.name ?? '', code: byId.get(s.memberId)?.code ?? '', item: s.item, at: s.at, canUndo: t - Date.parse(s.at) <= 20 * 60_000 })),
         notYet: notYet.slice(0, 300).map((m) => ({ memberId: m.id, name: m.name, phone: m.phone, code: m.code })),
       };
     },
@@ -194,7 +197,7 @@ export function createPrograms(h: Helpers) {
     },
     async dropAll(b: Business): Promise<void> {
       const members = await membersOf(b.id);
-      for (const m of members) { await kv.del(k.pass(m.passHash)); await kv.del(k.meals(b.id, m.id)); }
+      for (const m of members) { await kv.del(k.pass(m.passHash)); await kv.del(k.uses(b.id, m.id)); }
       for (const d of (await kv.get<{ dates: string[] }>(k.days(b.id)))?.dates ?? []) await kv.del(k.served(b.id, d));
       await kv.del(k.days(b.id)); await kv.del(k.members(b.id)); await kv.del(k.programs(b.id));
     },
@@ -203,7 +206,7 @@ export function createPrograms(h: Helpers) {
     async publicPrograms(b: Business): Promise<PublicProgram[]> {
       const members = await membersOf(b.id);
       return (await programsOf(b.id)).filter((p) => p.active).map((p) => ({
-        id: p.id, title: p.title, ...(p.description ? { description: p.description } : {}), priceRwf: p.priceRwf, days: p.days, meals: p.meals, openDays: p.openDays, ...(p.windows ? { windows: p.windows } : {}), ...(p.terms ? { terms: p.terms } : {}),
+        id: p.id, title: p.title, ...(p.description ? { description: p.description } : {}), priceRwf: p.priceRwf, days: p.days, ...(p.totalUses ? { totalUses: p.totalUses } : {}), items: p.items, openDays: p.openDays, ...(p.windows ? { windows: p.windows } : {}), ...(p.terms ? { terms: p.terms } : {}),
         full: !!p.maxMembers && members.filter((m) => m.programId === p.id && m.status !== 'cancelled' && planState(m, kigaliDate(h.now())) !== 'expired').length >= p.maxMembers,
       }));
     },
@@ -217,9 +220,9 @@ export function createPrograms(h: Helpers) {
         const p = (await programsOf(b.id)).find((x) => x.id === programId && x.active); if (!p) throw new ProgramError('This plan is not open.', 404, 'NOT_FOUND');
         const list = await membersOf(b.id); const today = kigaliDate(h.now());
         const live = list.filter((m) => m.programId === p.id && m.status !== 'cancelled' && planState(m, today) !== 'expired');
-        if (live.some((m) => m.phone === who.phone)) throw new ProgramError('This phone number already has this plan. Ask the restaurant to send you your pass link.', 409, 'EXISTS');
+        if (live.some((m) => m.phone === who.phone)) throw new ProgramError('This phone number already has this plan. Ask the business to send you your pass link.', 409, 'EXISTS');
         if (p.maxMembers && live.length >= p.maxMembers) throw new ProgramError('This plan is full.', 409, 'FULL');
-        if (list.length >= MAX_MEMBERS) throw new ProgramError('This restaurant cannot take more members right now.', 409, 'LIMIT');
+        if (list.length >= MAX_MEMBERS) throw new ProgramError('This business cannot take more members right now.', 409, 'LIMIT');
         const token = newToken(); let code = newCode(); while (list.some((m) => m.code === code)) code = newCode();
         const start = cleanStart(input.startDate, today);
         const m: Member = { id: randomUUID(), programId: p.id, name: who.name, phone: who.phone, ...(who.studentId ? { studentId: who.studentId } : {}), code, passHash: hashToken(token), status: 'pending', startDate: start, endDate: endDateFor(start, p.days), paidRwf: 0, paid: false, createdAt: h.iso() };
@@ -242,15 +245,15 @@ export function createPrograms(h: Helpers) {
           if (e?.pay?.state === 'success') { await activate(b, p, m, 'momo_prompt', e.id); await putMembers(b.id, list); h.alert(b, { title: `Plan paid · ${b.name}`, text: `${m.name} paid ${p.priceRwf.toLocaleString('en-US')} RWF for "${p.title}".` }); }
           else if (e?.pay?.state === 'failed') { delete m.payRef; await putMembers(b.id, list); } else prompt = true;
         }
-        const t = h.now(); const date = kigaliDate(t); const own = ((await kv.get<{ items: Meal[] }>(k.meals(b.id, m.id)))?.items ?? []).filter((x) => !x.undone);
-        const byDate = new Map<string, string[]>(); for (const x of own.slice(-120)) byDate.set(x.date, [...(byDate.get(x.date) ?? []), x.meal]);
+        const t = h.now(); const date = kigaliDate(t); const own = ((await kv.get<{ items: Use[] }>(k.uses(b.id, m.id)))?.items ?? []).filter((x) => !x.undone);
+        const byDate = new Map<string, string[]>(); for (const x of own.slice(-120)) byDate.set(x.date, [...(byDate.get(x.date) ?? []), x.item]);
         const r = remaining(m, p, date); const st = planState(m, date); const ateToday = own.filter((x) => x.date === date).length;
         return {
           business: { name: b.name, slug: b.slug, theme: b.theme },
-          program: { title: p.title, meals: p.meals, openDays: p.openDays, ...(p.windows ? { windows: p.windows } : {}), ...(p.terms ? { terms: p.terms } : {}), priceRwf: p.priceRwf },
-          member: { name: m.name, code: m.code, state: st, startDate: m.startDate, endDate: m.endDate, daysLeft: r.calendarDays, servingDaysLeft: Math.max(0, r.servingDays - (ateToday >= p.meals.length ? 1 : 0)), mealsLeft: Math.max(0, r.meals - ateToday), paid: m.paid },
-          today: { date, openToday: p.openDays.includes(dayOfWeek(date)), eaten: own.filter((x) => x.date === date).map((x) => ({ meal: x.meal, at: x.at })) },
-          history: [...byDate.entries()].slice(-31).map(([d, meals]) => ({ date: d, meals })),
+          program: { title: p.title, ...(p.totalUses ? { totalUses: p.totalUses } : {}), items: p.items, openDays: p.openDays, ...(p.windows ? { windows: p.windows } : {}), ...(p.terms ? { terms: p.terms } : {}), priceRwf: p.priceRwf },
+          member: { name: m.name, code: m.code, state: st, startDate: m.startDate, endDate: m.endDate, daysLeft: r.calendarDays, servingDaysLeft: Math.max(0, r.servingDays - (ateToday >= p.items.length ? 1 : 0)), usesLeft: usesLeft(m, p, r.uses, ateToday), usedTotal: m.used ?? 0, paid: m.paid },
+          today: { date, openToday: p.openDays.includes(dayOfWeek(date)), used: own.filter((x) => x.date === date).map((x) => ({ item: x.item, at: x.at })) },
+          history: [...byDate.entries()].slice(-31).map(([d, items]) => ({ date: d, items })),
           payment: m.paid ? null : {
             amount: p.priceRwf, momoCode: b.showPay ? b.momoCode ?? null : null, momoName: b.showPay ? b.momoName ?? null : null, online: await h.payReady(b), promptSent: prompt, claimed: m.claimed ?? null,
             whatsapp: b.whatsapp ?? null,
@@ -266,8 +269,8 @@ export function createPrograms(h: Helpers) {
         const ref = await kv.get<{ bizId: string; memberId: string }>(k.pass(hashToken(String(token)))); if (!ref || ref.bizId !== b.id) throw new ProgramError('This pass was not found.', 404, 'NOT_FOUND');
         const list = await membersOf(b.id); const m = list.find((x) => x.id === ref.memberId); const p = m && (await programsOf(b.id)).find((x) => x.id === m.programId); if (!m || !p) throw new ProgramError('This pass was not found.', 404, 'NOT_FOUND');
         if (m.paid) throw new ProgramError('This plan is already paid.', 409, 'PAID');
-        if (!(await h.payReady(b))) throw new ProgramError('This restaurant does not take online payments. Pay with MoMo or cash and tap "I have paid".', 409, 'NO_PAY');
-        const e = await h.startPayment(b, { phone: String(input.phone ?? m.phone), amount: p.priceRwf, item: `Meal plan: ${p.title}`, customer: m.name, src: 'page' });
+        if (!(await h.payReady(b))) throw new ProgramError('This business does not take online payments. Pay with MoMo or cash and tap "I have paid".', 409, 'NO_PAY');
+        const e = await h.startPayment(b, { phone: String(input.phone ?? m.phone), amount: p.priceRwf, item: `Program: ${p.title}`, customer: m.name, src: 'page' });
         m.payRef = e.id; await putMembers(b.id, list); return { ok: true as const };
       });
     },

@@ -90,48 +90,49 @@ Each costs credits like any assistant action. Nothing is published without the o
 * Staff accounts, orders and payment tracking, video conversion, page search on Google (pages are public, but not yet submitted to search engines), custom templates.
 * Free storage is a promise of this server's disk: back it up like the rest of the data.
 
-## Meal plans (programs)
+## Programs (plans customers pay for once and use with a pass)
 
-A business sells a plan once and customers use it every day. The case it was built for: restaurants around a university where a student
-pays 40,000 RWF for a month of lunches, instead of the restaurant chasing money every day.
+A business sells a plan once and customers use it again and again with a pass on their phone. It works for any business that sells repeat
+use: a month of lunches at a restaurant near a university (40,000 RWF), a monthly gym pass, four haircuts at a salon, a laundry card, a weekly
+bus pass, a month of tutoring sessions, a car-wash subscription.
 
 **How it works**
-1. **Owner** (Dashboard → *Meal plans* → *Plans*): makes a plan: name, price, how many days it lasts, the meals (Lunch, or Breakfast + Lunch),
-   the days of the week served, optional serving times, optional maximum members. Each plan gets a share link
-   (`/b/<page>?plan=<id>`) with a QR code and a WhatsApp share button. The page must be published.
-2. **Student** opens the link, writes name and phone (and a student ID if they like), picks a start day (today to a week ahead) and gets a
-   **pass**: the same page with `?pass=<secret>`. It is a QR code plus a short code (`XXXX-XXXX`), and no sign-in or app is needed. They keep the link
-   (or add it to the home screen). The link is the only way back to the pass, so it says to keep it safe.
-3. **Paying**: if the owner has MTN/Airtel keys saved (Secrets and payments) the student can approve a prompt on their phone and the plan
-   starts by itself; otherwise the pass shows the MoMo code, the student pays and taps **I have paid** (optionally with the MoMo reference),
-   the owner is told, checks their phone and taps **Confirm payment** (MoMo or cash). Either way the sale appears once in the notebook.
-   Bwenge never holds the money.
-4. **At the counter** (Meal plans → *Today*): the owner taps *Scan a pass* (camera) or types the code. The screen says **Serve: Lunch** in
-   green, or why not in red: not paid, not started, ended, paused, no meals today, already served today at 12:41, outside serving time (the
-   owner may *Serve anyway*; nothing else can be overridden). A mistaken scan can be undone for 20 minutes.
-5. **Running it**: *Today* shows who was served and who has a plan today but has not come yet. *Members* shows payments waiting for
-   confirmation, pause / resume, add days (for example after a closure), cancel, search, and a WhatsApp reminder link for plans that are ending.
+1. **Owner** (Dashboard → *Programs* → *Plans*): makes a plan: a name, the price, how many days it lasts, **what a member gets each day**
+   (an item such as "Lunch", "Entry" or "Haircut"; up to four, one of each per person per day), the days of the week it is available, and
+   optionally the times of day, a **total number of uses** (10 visits, 4 haircuts) and a maximum number of members. Each plan gets a share
+   link (`/b/<page>?plan=<id>`) with a QR code and a WhatsApp share button. The page must be published.
+2. **Customer** opens the link, writes name and phone (and an ID if they like), picks a start day (today to a week ahead) and gets a **pass**: the
+   same page with `?pass=<secret>`. It shows a QR code and a short code (`XXXX-XXXX`); no sign-in or app is needed. They keep the link (or add it
+   to the home screen).
+3. **Paying**: if the owner has MTN/Airtel keys saved (Secrets and payments) the customer can approve a prompt on their phone and the plan
+   starts by itself; otherwise the pass shows the MoMo code, the customer pays and taps **I have paid** (optionally with the MoMo reference), the
+   owner is told, checks their phone and taps **Confirm payment** (MoMo or cash). Either way the sale appears once in the notebook. Bwenge never
+   holds the money.
+4. **Each time they come** (Programs → *Today*): the owner taps *Scan a pass* (camera) or types the code. The screen says **Allowed: Lunch** in green,
+   or why not in red: not paid, not started, ended, paused, not available today, already used today at 12:41, all uses taken, or outside the
+   times it is available (the owner may *Allow anyway*; nothing else can be overridden). A mistaken scan can be undone for 20 minutes.
+5. **Running it**: *Today* shows who has checked in and who has a program today but has not come yet. *Members* shows payments waiting for
+   confirmation, pause / resume, add days (for example after a closure), cancel, search, and a WhatsApp reminder link for programs that are ending.
 
-**Rules** (`server/services/biz/programs.ts`, tested in `tests/biz_programs.test.ts`): a plan lasts *days* calendar days from its start day
-(30 days starting on the 1st ends on the 30th); closed days neither serve nor count as missed; one of each meal per person per day; dates are
-Kigali dates. Missed days are not carried over (add days by hand if you want to).
+**Rules** (`server/services/biz/programs.ts`, tested in `tests/biz_programs.test.ts`): a plan lasts *days* calendar days from its start day (30 days
+starting on the 1st ends on the 30th); days it is not available neither allow a use nor count as missed; one of each item per person per day; with a
+*total uses* cap, no more than that many uses overall; dates are Kigali dates. Unused days are not carried over (add days by hand if you want to).
 
-**Privacy and safety**: the public page shows only the plans (name, price, days, meals), never members. A pass token is long and random and only
-its hash is stored; a pass only opens on its own business page; the owner side is scoped to the owner like the rest of Bwenge4biz. Joining is rate
-limited, has a hidden spam field, allows one live plan per phone number per plan, and respects the maximum members. Serving and joining run
-under a per-business lock, so two scans at the same moment cannot serve one meal twice.
+**Privacy and safety**: the public page shows only the plans (name, price, days, items), never members. A pass token is long and random and only its
+hash is stored; a pass only opens on its own business page and its URL is marked noindex; the owner side is scoped to the owner like the rest of
+Bwenge4biz. Joining is rate limited, has a hidden spam field, allows one live plan per phone number per plan, and respects the maximum members.
+Joining and checking in run under a per-business lock, so two scans at the same moment cannot use the same item twice.
 
 **Honest limits**
-- A pass is a link: a student can share a screenshot. The system allows one meal per person per day, so a shared pass only uses that
-  student's own meal, but the owner should still glance at the name on the screen when serving. The pass shows a ticking clock so a
-  still picture is easy to spot. For stricter checks, ask for the student ID shown on the screen.
-- The lock that prevents double serving lives in one server process. With several server instances behind a balancer, two scans in the same
-  instant on different instances could both pass; use one instance for the API or move the lock to the database before relying on it at scale.
-- The camera needs HTTPS and a browser that allows it; browsers without a built-in QR reader use the small `jsqr` library, and the
-  code can always be typed.
+- A pass is a link: a customer can share a screenshot. The system allows one use of each item per day, so a shared pass only uses that customer's
+  own allowance, but the owner should still glance at the name on the screen. The pass shows a ticking clock so a still picture is easy to spot.
+- The lock that prevents double use lives in one server process. With several server instances behind a balancer, two scans in the same instant
+  on different instances could both pass; use one instance for the API or move the lock to the database before relying on it at scale.
+- The camera needs HTTPS and a browser that allows it; browsers without a built-in QR reader use the small `jsqr` library, and the code can always
+  be typed.
 - Not included: refunds, carrying unused days over, automatic reminders by SMS or WhatsApp (a ready WhatsApp message link is offered), several
-  restaurants honouring one card, and checking a student against a school list.
+  businesses honouring one card, and checking a customer against a list.
 - The online MTN/Airtel payment adapters have not yet been run against a live account (see above); manual MoMo and cash work without them.
 - The Kinyarwanda text should be read by a native speaker.
 
-**Assistant**: the chat can list and create plans (`biz_program`) and report how they are doing (`biz_plan_status`).
+**Assistant**: the chat can list and create programs (`biz_program`) and report how they are doing (`biz_plan_status`).

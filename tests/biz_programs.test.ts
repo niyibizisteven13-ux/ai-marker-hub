@@ -1,4 +1,4 @@
-// Meal plans (programs): a restaurant sells a plan once, students join from a link, pay, and show a pass; the owner scans it and the system serves one meal a day.
+// Programs (programs): a restaurant sells a plan once, students join from a link, pay, and show a pass; the owner scans it and the system serves one item a day.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createBizService, resetBizLimitsForTests, type Kv } from '../server/services/biz/service.js';
@@ -9,7 +9,7 @@ import { addDays, canServe, cleanJoin, cleanProgram, dayOfWeek, endDateFor, hash
 
 const memKv = (): Kv & { data: Map<string, unknown> } => { const data = new Map<string, unknown>(); return { data, async get<T>(k: string) { return (data.has(k) ? JSON.parse(JSON.stringify(data.get(k))) : null) as T | null; }, async put(k: string, v: unknown) { data.set(k, JSON.parse(JSON.stringify(v))); }, async del(k: string) { data.delete(k); } }; };
 const T0 = Date.parse('2026-11-17T10:00:00Z');     // Tuesday, 12:00 in Kigali
-const LUNCH = { title: 'Lunch plan', priceRwf: 40_000, days: 30, meals: ['Lunch'], openDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat'] };
+const LUNCH = { title: 'Lunch plan', priceRwf: 40_000, days: 30, items: ['Lunch'], openDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat'] };
 const make = (paid = true) => {
   const kv = memKv(); let clock = T0;
   const svc = createBizService({ kv, media: memoryMediaStore(), isPaid: async () => paid, now: () => clock, secretKey: keyFrom('t') }); resetBizLimitsForTests();
@@ -22,15 +22,15 @@ async function setup(over: Record<string, unknown> = {}) {
   return { ...m, biz, prog };
 }
 const member = (o: Partial<Member> = {}): Member => ({ id: 'm1', programId: 'p', name: 'Ann', phone: '250788123456', code: 'ABCD-2345', passHash: 'h', status: 'active', startDate: '2026-11-17', endDate: '2026-12-16', paidRwf: 40000, paid: true, createdAt: '2026-11-16T00:00:00Z', ...o });
-const program = (o: Partial<Program> = {}): Program => ({ id: 'p', title: 'Lunch', priceRwf: 40000, days: 30, meals: ['Lunch'], openDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat'], active: true, createdAt: '', ...o });
+const program = (o: Partial<Program> = {}): Program => ({ id: 'p', title: 'Lunch', priceRwf: 40000, days: 30, items: ['Lunch'], openDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat'], active: true, createdAt: '', ...o });
 
-test('a plan needs a name, a sensible price and length, at least one meal and one serving day; serving times are optional and checked', () => {
+test('a plan needs a name, a sensible price and length, at least one item and one serving day; serving times are optional and checked', () => {
   assert.ok('error' in (cleanProgram({ ...LUNCH, title: '' }, 'x', 'n') as any));
   assert.ok('error' in (cleanProgram({ ...LUNCH, priceRwf: 5 }, 'x', 'n') as any));
   assert.ok('error' in (cleanProgram({ ...LUNCH, days: 0 }, 'x', 'n') as any)); assert.ok('error' in (cleanProgram({ ...LUNCH, days: 999 }, 'x', 'n') as any));
-  assert.ok('error' in (cleanProgram({ ...LUNCH, meals: [] }, 'x', 'n') as any)); assert.ok('error' in (cleanProgram({ ...LUNCH, openDays: [] }, 'x', 'n') as any));
-  const p = cleanProgram({ ...LUNCH, priceRwf: '40,000', meals: ['Lunch', ' Lunch ', 'Dinner'], windows: [{ meal: 'Lunch', from: '11:00', to: '15:00' }, { meal: 'Supper', from: '18:00', to: '20:00' }, { meal: 'Dinner', from: '20:00', to: '19:00' }] }, 'x', 'n') as Program;
-  assert.equal(p.priceRwf, 40000); assert.deepEqual(p.meals, ['Lunch', 'Dinner']); assert.deepEqual(p.windows, [{ meal: 'Lunch', from: '11:00', to: '15:00' }], 'unknown meals and backwards times are dropped');
+  assert.ok('error' in (cleanProgram({ ...LUNCH, items: [] }, 'x', 'n') as any)); assert.ok('error' in (cleanProgram({ ...LUNCH, openDays: [] }, 'x', 'n') as any));
+  const p = cleanProgram({ ...LUNCH, priceRwf: '40,000', items: ['Lunch', ' Lunch ', 'Dinner'], windows: [{ item: 'Lunch', from: '11:00', to: '15:00' }, { item: 'Supper', from: '18:00', to: '20:00' }, { item: 'Dinner', from: '20:00', to: '19:00' }] }, 'x', 'n') as Program;
+  assert.equal(p.priceRwf, 40000); assert.deepEqual(p.items, ['Lunch', 'Dinner']); assert.deepEqual(p.windows, [{ item: 'Lunch', from: '11:00', to: '15:00' }], 'unknown items and backwards times are dropped');
   assert.deepEqual(cleanJoin({ name: 'A', phone: '0788123456' }), { error: 'Please write your name.' }); assert.ok('error' in (cleanJoin({ name: 'Ann', phone: '12' }) as any));
   assert.deepEqual(cleanJoin({ name: ' Ann  K ', phone: '0788 123 456', studentId: 'S-77' }), { name: 'Ann K', phone: '250788123456', studentId: 'S-77' });
 });
@@ -39,8 +39,8 @@ test('dates: a 30-day plan starting on the 1st ends on the 30th; serving days sk
   assert.equal(endDateFor('2026-11-01', 30), '2026-11-30'); assert.equal(endDateFor('2026-11-01', 30, 3), '2026-12-03');
   assert.equal(dayOfWeek('2026-11-17'), 'tue'); assert.equal(dayOfWeek('2026-11-22'), 'sun'); assert.equal(addDays('2026-11-30', 1), '2026-12-01');
   const r = remaining(member({ startDate: '2026-11-17', endDate: '2026-12-16' }), program(), '2026-11-17');
-  assert.equal(r.calendarDays, 30); assert.equal(r.servingDays, 26, '30 days with 4 Sundays closed'); assert.equal(r.meals, 26);
-  assert.equal(remaining(member({ endDate: '2026-11-18' }), program({ meals: ['Lunch', 'Dinner'] }), '2026-11-17').meals, 4);
+  assert.equal(r.calendarDays, 30); assert.equal(r.servingDays, 26, '30 days with 4 Sundays closed'); assert.equal(r.uses, 26);
+  assert.equal(remaining(member({ endDate: '2026-11-18' }), program({ items: ['Lunch', 'Dinner'] }), '2026-11-17').uses, 4);
   assert.equal(remaining(member(), program(), '2027-02-01').calendarDays, 0);
 });
 
@@ -51,19 +51,19 @@ test('plan states: unpaid, not started, active, expired, paused, cancelled', () 
 });
 
 test('who may be served now: one lunch a day, never unpaid/expired/paused/cancelled or on a closed day, serving times can be overridden, nothing else can', () => {
-  const ok = (o: any) => canServe({ member: member(), program: program(), eaten: [], now: T0, ...o });
-  assert.deepEqual(ok({}), { ok: true, meal: 'Lunch' });
+  const ok = (o: any) => canServe({ member: member(), program: program(), used: [], now: T0, ...o });
+  assert.deepEqual(ok({}), { ok: true, item: 'Lunch' });
   for (const [m, code] of [[{ paid: false, status: 'pending' }, 'pending'], [{ startDate: '2026-11-30', endDate: '2026-12-29' }, 'not_started'], [{ endDate: '2026-11-16' }, 'expired'], [{ status: 'paused' }, 'paused'], [{ status: 'cancelled' }, 'cancelled']] as const) assert.equal((ok({ member: member(m as any) }) as any).code, code);
-  const again = ok({ eaten: [{ meal: 'Lunch', at: new Date(T0 - 600_000).toISOString() }] }) as any; assert.equal(again.code, 'already'); assert.match(again.message, /Already served today at 11:50/);
+  const again = ok({ used: [{ item: 'Lunch', at: new Date(T0 - 600_000).toISOString() }] }) as any; assert.equal(again.code, 'already'); assert.match(again.message, /Already used today at 11:50/);
   assert.equal((ok({ now: Date.parse('2026-11-22T10:00:00Z') }) as any).code, 'closed_day', 'Sunday');
-  const timed = program({ windows: [{ meal: 'Lunch', from: '12:30', to: '15:00' }] });
+  const timed = program({ windows: [{ item: 'Lunch', from: '12:30', to: '15:00' }] });
   assert.equal((ok({ program: timed }) as any).code, 'outside_window'); assert.match((ok({ program: timed }) as any).message, /12:30–15:00/);
-  assert.deepEqual(ok({ program: timed, force: true }), { ok: true, meal: 'Lunch' }, 'the owner may serve outside the time');
+  assert.deepEqual(ok({ program: timed, force: true }), { ok: true, item: 'Lunch' }, 'the owner may serve outside the time');
   assert.equal((ok({ program: timed, force: true, member: member({ paid: false, status: 'pending' }) }) as any).code, 'pending', 'force never gets past unpaid');
-  const two = program({ meals: ['Breakfast', 'Lunch'], windows: [{ meal: 'Breakfast', from: '06:00', to: '10:00' }, { meal: 'Lunch', from: '11:00', to: '15:00' }] });
-  assert.deepEqual(ok({ program: two }), { ok: true, meal: 'Lunch' }, 'noon is lunch time');
-  assert.deepEqual(ok({ program: two, eaten: [{ meal: 'Lunch', at: new Date(T0).toISOString() }], now: Date.parse('2026-11-17T05:00:00Z') }), { ok: true, meal: 'Breakfast' });
-  assert.equal((ok({ meal: 'Dinner' }) as any).code, 'no_meal');
+  const two = program({ items: ['Breakfast', 'Lunch'], windows: [{ item: 'Breakfast', from: '06:00', to: '10:00' }, { item: 'Lunch', from: '11:00', to: '15:00' }] });
+  assert.deepEqual(ok({ program: two }), { ok: true, item: 'Lunch' }, 'noon is lunch time');
+  assert.deepEqual(ok({ program: two, used: [{ item: 'Lunch', at: new Date(T0).toISOString() }], now: Date.parse('2026-11-17T05:00:00Z') }), { ok: true, item: 'Breakfast' });
+  assert.equal((ok({ item: 'Dinner' }) as any).code, 'no_item');
 });
 
 test('passes: the token is long and random, only its hash is stored, the QR text is recognised and a code survives typing mistakes in case and dashes', () => {
@@ -89,13 +89,13 @@ test('the whole story: owner makes a plan, a student joins from the link, pays, 
   const paid = await svc.confirmPayment('o', biz.id, m0.id, { method: 'momo' }); assert.equal(paid.state, 'active'); assert.equal(paid.paidRwf, 40000);
   assert.equal((await svc.dashboard('o', biz.id)).today.sales, 40000, 'the plan is a sale in the notebook'); await assert.rejects(svc.confirmPayment('o', biz.id, m0.id), (e: any) => e.status === 409, 'cannot be confirmed twice');
   // Scan the pass: served. Scan again: already served, with the time.
-  const first: any = await svc.redeem('o', biz.id, { token: passPayload(joined.token) }); assert.equal(first.ok, true); assert.equal(first.meal, 'Lunch'); assert.equal(first.member.mealsLeft, 25, 'today\'s lunch is used'); assert.equal(((await svc.passView(biz.slug, joined.token)) as any).member.mealsLeft, 25);
+  const first: any = await svc.redeem('o', biz.id, { token: passPayload(joined.token) }); assert.equal(first.ok, true); assert.equal(first.item, 'Lunch'); assert.equal(first.member.usesLeft, 25, 'today\'s lunch is used'); assert.equal(((await svc.passView(biz.slug, joined.token)) as any).member.usesLeft, 25);
   const second: any = await svc.redeem('o', biz.id, { token: passPayload(joined.token) }); assert.equal(second.ok, false); assert.equal(second.code, 'already'); assert.match(second.message, /12:00/);
   assert.equal(((await svc.redeem('o', biz.id, { code: joined.code.toLowerCase() })) as any).code, 'already', 'by code, any case');
   assert.equal(((await svc.redeem('o', biz.id, { code: 'ZZZZ-9999' })) as any).code, 'unknown');
   // Today and the student's own view.
   const today = await svc.today('o', biz.id); assert.equal(today.servedCount, 1); assert.equal(today.served[0].name, 'Alice'); assert.equal(today.notYet.length, 0);
-  pass = await svc.passView(biz.slug, joined.token); assert.equal(pass.member.state, 'active'); assert.equal(pass.today.eaten.length, 1); assert.equal(pass.payment, null); assert.equal(pass.history[0].meals[0], 'Lunch');
+  pass = await svc.passView(biz.slug, joined.token); assert.equal(pass.member.state, 'active'); assert.equal(pass.today.used.length, 1); assert.equal(pass.payment, null); assert.equal(pass.history[0].items[0], 'Lunch');
   // Tomorrow she can eat again; she is "not yet" until she does.
   at(T0 + 86_400_000); assert.equal((await svc.today('o', biz.id)).notYet.length, 1);
   assert.equal(((await svc.redeem('o', biz.id, { code: joined.code })) as any).ok, true);
@@ -109,17 +109,17 @@ test('a mistaken scan can be undone for 20 minutes; an old one cannot; the owner
   const { svc, biz, prog, at } = await setup();
   const j = await svc.joinProgram(biz.slug, prog.id, { name: 'Bob', phone: '0788222333' }, 'v'); const m = (await svc.members('o', biz.id))[0]; await svc.confirmPayment('o', biz.id, m.id, { method: 'cash' });
   assert.equal((await svc.dashboard('o', biz.id)).recent.some((e) => e.method === 'cash'), true);
-  const r: any = await svc.redeem('o', biz.id, { code: j.code }); at(T0 + 5 * 60_000); await svc.undoMeal('o', biz.id, r.mealId);
+  const r: any = await svc.redeem('o', biz.id, { code: j.code }); at(T0 + 5 * 60_000); await svc.undoUse('o', biz.id, r.useId);
   assert.equal(((await svc.redeem('o', biz.id, { code: j.code })) as any).ok, true, 'served again after the undo'); assert.equal((await svc.today('o', biz.id)).servedCount, 1);
-  const r2: any = await svc.redeem('o', biz.id, { code: j.code, meal: 'Lunch' }); void r2; const served = (await svc.today('o', biz.id)).served[0]; at(T0 + 40 * 60_000);
-  await assert.rejects(svc.undoMeal('o', biz.id, served.mealId), (e: any) => e.code === 'TOO_LATE');
+  const r2: any = await svc.redeem('o', biz.id, { code: j.code, item: 'Lunch' }); void r2; const served = (await svc.today('o', biz.id)).served[0]; at(T0 + 40 * 60_000);
+  await assert.rejects(svc.undoUse('o', biz.id, served.useId), (e: any) => e.code === 'TOO_LATE');
   assert.equal((await svc.setMember('o', biz.id, m.id, { action: 'pause' })).state, 'paused'); at(T0 + 86_400_000);
   assert.equal(((await svc.redeem('o', biz.id, { code: j.code })) as any).code, 'paused'); assert.equal((await svc.setMember('o', biz.id, m.id, { action: 'resume' })).state, 'active');
   const before = (await svc.members('o', biz.id))[0].endDate; assert.equal((await svc.setMember('o', biz.id, m.id, { action: 'extend', days: 5 })).endDate, addDays(before, 5));
   await assert.rejects(svc.setMember('o', biz.id, m.id, { action: 'extend', days: 999 }), /1 and 60/); assert.equal((await svc.setMember('o', biz.id, m.id, { action: 'cancel' })).state, 'cancelled');
 });
 
-test('two scans at the same moment serve exactly one meal', async () => {
+test('two scans at the same moment serve exactly one item', async () => {
   const { svc, biz, prog } = await setup();
   const j = await svc.joinProgram(biz.slug, prog.id, { name: 'Cy', phone: '0788333444' }, 'v'); await svc.confirmPayment('o', biz.id, (await svc.members('o', biz.id))[0].id, { method: 'cash' });
   const results: any[] = await Promise.all(Array.from({ length: 6 }, () => svc.redeem('o', biz.id, { code: j.code })));
@@ -169,19 +169,63 @@ test('the owner sees expiring plans and what was sold; deleting the business rem
   const { svc, biz, prog, kv, at } = await setup(); const j = await svc.joinProgram(biz.slug, prog.id, { name: 'Fay', phone: '0788666777', startDate: '2026-11-17' }, 'v'); await svc.confirmPayment('o', biz.id, (await svc.members('o', biz.id))[0].id, { method: 'cash' });
   await svc.redeem('o', biz.id, { code: j.code }); let s = await svc.programSummary('o', biz.id); assert.equal(s.active, 1); assert.equal(s.soldThisMonth, 40000); assert.equal(s.expiring.length, 0);
   at(Date.parse('2026-12-14T10:00:00Z')); s = await svc.programSummary('o', biz.id); assert.equal(s.expiring.length, 1); assert.equal(s.expiring[0].name, 'Fay');
-  await svc.remove('o', biz.id); const left = [...kv.data.keys()].filter((k) => /^biz-(programs|members|pass|meals|served)/.test(k)); assert.deepEqual(left, []);
+  await svc.remove('o', biz.id); const left = [...kv.data.keys()].filter((k) => /^biz-(programs|members|pass|items|served)/.test(k)); assert.deepEqual(left, []);
 });
 
 import { bizTools } from '../server/services/ai/tools/bizTools.js';
-test('the assistant can make a meal plan, give the share link, and report how the plans are doing', async () => {
+test('the assistant can make a program, give the share link, and report how the plans are doing', async () => {
   const { svc, kv } = make(); void kv; const tools = Object.fromEntries(bizTools(() => svc).map((t) => [t.definition.name, t])) as any; const c: any = { userId: 'u1', files: {}, services: {} };
   await tools.biz_create.execute({ name: 'Campus Canteen', category: 'restaurant' }, c);
   assert.match((await tools.biz_program.execute({}, c)).text, /No plans yet/);
-  const made = await tools.biz_program.execute({ title: 'Lunch plan', price_rwf: 40000, days: 30, meals: ['Lunch'], open_days: ['mon', 'tue', 'wed', 'thu', 'fri'] }, c);
+  const made = await tools.biz_program.execute({ title: 'Lunch plan', price_rwf: 40000, days: 30, items: ['Lunch'], open_days: ['mon', 'tue', 'wed', 'thu', 'fri'] }, c);
   assert.match(made.text, /40,000 RWF for 30 days/); assert.match(made.text, /\/b\/campus-canteen\?plan=/); assert.match(made.text, /not published yet/);
   const bad = await tools.biz_program.execute({ title: 'x', price_rwf: 5 }, c); assert.ok(bad.isError || /price must be between/.test(bad.text), bad.text);
   const list = await tools.biz_program.execute({}, c); assert.match(list.text, /Lunch plan \(id /); assert.match(list.text, /0 active, 0 waiting for payment/);
   const status = await tools.biz_plan_status.execute({}, c); assert.match(status.text, /Members: 0 active/); assert.match(status.text, /Nobody is ending within 3 days/);
   assert.match((await tools.biz_plan_status.execute({ q: 'zzz' }, c)).text, /No member matches/);
   const other: any = { userId: 'u2', files: {}, services: {} }; assert.match((await tools.biz_program.execute({}, other)).text, /no business page yet|No business/i, 'another person has no access');
+});
+
+test('it is not only for restaurants: a gym pass and a salon with four haircuts in total', async () => {
+  // A gym: a monthly pass, one entry a day, every day.
+  const gym = await setup({ title: 'Monthly gym pass', priceRwf: 25_000, items: ['Entry'], openDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] });
+  const g = await gym.svc.joinProgram(gym.biz.slug, gym.prog.id, { name: 'Gina', phone: '0788777888' }, 'g'); await gym.svc.confirmPayment('o', gym.biz.id, (await gym.svc.members('o', gym.biz.id))[0].id, { method: 'cash' });
+  const in1: any = await gym.svc.redeem('o', gym.biz.id, { code: g.code }); assert.equal(in1.ok, true); assert.equal(in1.item, 'Entry');
+  const in2: any = await gym.svc.redeem('o', gym.biz.id, { code: g.code }); assert.equal(in2.code, 'already'); assert.match(in2.message, /Already used today at/);
+  gym.at(Date.parse('2026-11-22T10:00:00Z')); assert.equal(((await gym.svc.redeem('o', gym.biz.id, { code: g.code })) as any).ok, true, 'a gym is open on Sunday');
+
+  // A salon: four haircuts over two months, never more than one a day.
+  const salon = await setup({ title: '4 haircuts', priceRwf: 12_000, days: 60, items: ['Haircut'], totalUses: 4, openDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat'] });
+  assert.equal((await salon.svc.publicBySlug(salon.biz.slug))!.programs![0].totalUses, 4);
+  const s = await salon.svc.joinProgram(salon.biz.slug, salon.prog.id, { name: 'Sam', phone: '0788999000' }, 's'); await salon.svc.confirmPayment('o', salon.biz.id, (await salon.svc.members('o', salon.biz.id))[0].id, { method: 'momo' });
+  const dayAt = (n: number) => T0 + n * 86_400_000;
+  const left = async () => ((await salon.svc.passView(salon.biz.slug, s.token)) as any).member.usesLeft;
+  assert.equal(await left(), 4);
+  for (let i = 0; i < 4; i++) { salon.at(dayAt(i)); const r: any = await salon.svc.redeem('o', salon.biz.id, { code: s.code }); assert.equal(r.ok, true, `visit ${i + 1}`); assert.equal(r.member.usesLeft, 3 - i); }
+  salon.at(dayAt(4)); const fifth: any = await salon.svc.redeem('o', salon.biz.id, { code: s.code }); assert.equal(fifth.ok, false); assert.equal(fifth.code, 'no_uses_left'); assert.match(fifth.message, /All 4 uses/);
+  const pass: any = await salon.svc.passView(salon.biz.slug, s.token); assert.equal(pass.member.usesLeft, 0); assert.equal(pass.member.usedTotal, 4); assert.equal(pass.program.totalUses, 4);
+  // A mistaken visit undone gives the use back.
+  salon.at(dayAt(3) + 60_000 * 5); const today = await salon.svc.today('o', salon.biz.id); void today;
+  salon.at(dayAt(3) + 60_000); const served = (await salon.svc.today('o', salon.biz.id)).served[0]; await salon.svc.undoUse('o', salon.biz.id, served.useId);
+  salon.at(dayAt(4)); assert.equal(await left(), 1); assert.equal(((await salon.svc.redeem('o', salon.biz.id, { code: s.code })) as any).ok, true);
+});
+
+test('total uses must be a sensible number; leaving it out means no cap', () => {
+  assert.equal((cleanProgram({ ...LUNCH, totalUses: 10 }, 'x', 'n') as Program).totalUses, 10);
+  assert.equal((cleanProgram({ ...LUNCH, totalUses: 0 }, 'x', 'n') as Program).totalUses, undefined);
+  assert.equal((cleanProgram({ ...LUNCH, totalUses: 5000 }, 'x', 'n') as Program).totalUses, undefined);
+  assert.equal((cleanProgram({ ...LUNCH }, 'x', 'n') as Program).totalUses, undefined);
+  const p = cleanProgram({ ...LUNCH, totalUses: 10 }, 'x', 'n') as Program; assert.equal((cleanProgram({ totalUses: null }, 'x', 'n', p) as Program).totalUses, undefined, 'null removes the cap');
+});
+
+test('the wording is general: no message talks about meals, eating or restaurants', async () => {
+  const msgs: string[] = [];
+  const mk = (o: any) => canServe({ member: member(o.m ?? {}), program: program(o.p ?? {}), used: o.used ?? [], now: o.now ?? T0, ...(o.extra ?? {}) });
+  for (const o of [{ m: { paid: false, status: 'pending' } }, { m: { endDate: '2026-11-16' } }, { m: { status: 'paused' } }, { m: { status: 'cancelled' } }, { m: { startDate: '2026-11-30', endDate: '2026-12-29' } }, { now: Date.parse('2026-11-22T10:00:00Z') },
+    { used: [{ item: 'Lunch', at: new Date(T0).toISOString() }] }, { p: { windows: [{ item: 'Lunch', from: '13:30', to: '15:00' }] } }, { extra: { item: 'Other' } }, { p: { totalUses: 1 }, m: { used: 1 } }, { p: { items: ['A', 'B'] }, used: [{ item: 'A', at: new Date(T0).toISOString() }, { item: 'B', at: new Date(T0).toISOString() }] }]) { const r: any = mk(o); if (!r.ok) msgs.push(r.message); }
+  const { svc, biz, prog } = await setup(); const j = await svc.joinProgram(biz.slug, prog.id, { name: 'Zed', phone: '0788121212' }, 'z');
+  for (const f of [() => svc.joinProgram(biz.slug, prog.id, { name: 'Zed', phone: '0788121212' }, 'z2'), () => svc.joinProgram(biz.slug, prog.id, { name: 'Q', phone: '1' }, 'z3'), () => svc.redeem('o', biz.id, { code: 'ZZZZ-2222' }), () => svc.payMember(biz.slug, j.token, {}, 'z4'), () => svc.saveProgram('o', biz.id, { title: '', priceRwf: 1 }), () => svc.saveProgram('o', biz.id, { title: 'x', priceRwf: 500, items: [] }), () => svc.saveProgram('o', biz.id, { title: 'x', priceRwf: 500, openDays: [] })]) { try { await f(); } catch (e: any) { msgs.push(e.message); } }
+  const r: any = await svc.redeem('o', biz.id, { code: j.code }); msgs.push(r.message);
+  assert.ok(msgs.length >= 15, `${msgs.length} messages checked`);
+  for (const m of msgs) assert.ok(!/meal|restaurant|\beat|lunch plan|served/i.test(m), `a message is not general: "${m}"`);
 });

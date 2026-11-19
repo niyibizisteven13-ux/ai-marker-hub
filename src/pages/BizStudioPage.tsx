@@ -227,7 +227,7 @@ function SettingsTab({ b, onChange, onDeleted }: { b: Business; onChange: () => 
 type View = 'programs' | 'trackers' | 'feed' | 'chat' | 'agent' | 'dashboard' | 'sales' | 'expenses' | 'products' | 'customers' | 'reports' | 'messages' | 'public' | 'secrets' | 'settings';
 const NAV: Array<{ id: View; label: string; icon: typeof Globe; group?: string }> = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard }, { id: 'chat', label: 'Ask the agent', icon: Sparkles }, { id: 'sales', label: 'Sales and orders', icon: ShoppingBag }, { id: 'expenses', label: 'Costs and spending', icon: Receipt },
-  { id: 'programs', label: 'Meal plans', icon: UtensilsCrossed }, { id: 'products', label: 'Products and stock', icon: Package }, { id: 'customers', label: 'Customers', icon: Users }, { id: 'reports', label: 'Reports', icon: BarChart3 },
+  { id: 'programs', label: 'Programs', icon: UtensilsCrossed }, { id: 'products', label: 'Products and stock', icon: Package }, { id: 'customers', label: 'Customers', icon: Users }, { id: 'reports', label: 'Reports', icon: BarChart3 },
   { id: 'messages', label: 'Messages', icon: Inbox }, { id: 'public', label: 'Public page', icon: Globe }, { id: 'feed', label: 'Feed', icon: Megaphone }, { id: 'trackers', label: 'Trackers', icon: Table2 }, { id: 'agent', label: 'Business agent', icon: Bot }, { id: 'secrets', label: 'Secrets and payments', icon: KeyRound }, { id: 'settings', label: 'Settings', icon: Settings },
 ];
 /** The studio opens in a light surface whatever the app theme is: the same tokens the screens use, redefined here. */

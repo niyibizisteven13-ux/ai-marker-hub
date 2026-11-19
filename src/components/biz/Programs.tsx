@@ -7,9 +7,9 @@ import { rwf, type Business } from '../../biz/types';
 import { btn, btnGhost, btnPrimary, card, input, msg, Title } from './ui';
 
 /**
- * Meal plans (programs) in the owner's studio. A restaurant sells a plan once (say 40,000 RWF for a month of lunches), students join from a
+ * Programs (programs) in the owner's studio. A restaurant sells a plan once (say 40,000 RWF for a month of lunches), students join from a
  * shared link and pay, and every day the student shows a pass (QR code); the owner scans it here and the system says whether to serve.
- * Three screens: Today (scan, who has eaten, who has not come), Members (payments, pauses, extensions), Plans (make one, share the link).
+ * Three screens: Today (scan, who has used, who has not come), Members (payments, pauses, extensions), Plans (make one, share the link).
  */
 const DAY_LABEL: Record<DayId, string> = { mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun' };
 const ALL_DAYS: DayId[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
@@ -85,12 +85,12 @@ export function ProgramsView({ b, onChange }: { b: Business; onChange: () => voi
   const s = data.summary; const tabs = [{ id: 'today' as const, label: tx('Today'), icon: ScanLine }, { id: 'members' as const, label: tx('Members'), icon: Users }, { id: 'plans' as const, label: tx('Plans'), icon: UtensilsCrossed }];
   return (
     <div className="space-y-4">
-      <h1 className="font-display text-2xl font-semibold tracking-tight">{tx("Meal plans")}</h1>
-      <p className="max-w-2xl text-sm text-[var(--app-muted)]">{tx("Sell a plan once, for example a month of lunches. Customers join from a link, pay, and show a pass on their phone. You scan it and serve one meal a day.")}</p>
+      <h1 className="font-display text-2xl font-semibold tracking-tight">{tx("Programs")}</h1>
+      <p className="max-w-2xl text-sm text-[var(--app-muted)]">{tx("Sell a plan once, for example a monthly pass. Customers join from a link, pay, and show a pass on their phone. You scan it each time they use it, and it allows one use of each item per day.")}</p>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[[tx('Active members'), String(s.active)], [tx('Waiting for payment'), String(s.pending)], [tx('Sold this month'), rwf(s.soldThisMonth)], [tx('Ending in 3 days'), String(s.expiring.length)]].map(([k, v]) => <div key={k} className={`${card} !p-4`}><p className="text-xs text-[var(--app-muted)]">{k}</p><p className="mt-1 font-display text-xl font-semibold tabular-nums">{v}</p></div>)}
       </div>
-      <div className="inline-flex rounded-xl bg-[var(--app-bg)] p-1" role="tablist" aria-label={tx("Meal plans")}>
+      <div className="inline-flex rounded-xl bg-[var(--app-bg)] p-1" role="tablist" aria-label={tx("Programs")}>
         {tabs.map((t) => { const Icon = t.icon; return <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)} className={`inline-flex min-h-10 items-center gap-1.5 rounded-lg px-3.5 text-sm font-semibold ${tab === t.id ? 'bg-[var(--app-panel)] shadow-sm' : 'text-[var(--app-muted)]'}`}><Icon size={15} aria-hidden="true" />{t.label}</button>; })}
       </div>
       {tab === 'today' && <TodayTab b={b} hasPlans={data.programs.length > 0} onChange={() => { void load(); onChange(); }} goPlans={() => setTab('plans')} />}
@@ -106,26 +106,26 @@ function TodayTab({ b, hasPlans, onChange, goPlans }: { b: Business; hasPlans: b
   const [result, setResult] = useState<(RedeemResult & { token?: string }) | null>(null); const [today, setToday] = useState<TodayInfo | null>(null); const [err, setErr] = useState('');
   const loadToday = useCallback(async () => { try { setToday(await ownerApi.today(b.id)); } catch (e) { setErr(msg(e)); } }, [b.id]);
   useEffect(() => { void loadToday(); const t = window.setInterval(() => void loadToday(), 20_000); return () => window.clearInterval(t); }, [loadToday]);
-  const redeem = useCallback(async (body: { token?: string; code?: string; memberId?: string; force?: boolean; meal?: string }) => {
+  const redeem = useCallback(async (body: { token?: string; code?: string; memberId?: string; force?: boolean; item?: string }) => {
     if (busy) return; setBusy(true);
     try { const r = await ownerApi.redeem(b.id, body); setResult({ ...r, token: body.token }); signal(r.ok); setCode(''); void loadToday(); onChange(); } catch (e) { setErr(msg(e)); } finally { setBusy(false); }
   }, [b.id, busy, loadToday, onChange]);
   const scanner = useScanner(camera && !result, (text) => { void redeem({ token: text }); });
-  if (!hasPlans) return <div className={card}><p className="text-sm">{tx("Make your first plan to start serving.")}</p><button type="button" className={`${btnPrimary} mt-3`} onClick={goPlans}><Plus size={16} />{tx("Create a plan")}</button></div>;
+  if (!hasPlans) return <div className={card}><p className="text-sm">{tx("Make your first program to get started.")}</p><button type="button" className={`${btnPrimary} mt-3`} onClick={goPlans}><Plus size={16} />{tx("Create a plan")}</button></div>;
   const m = result?.member;
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
       <section className={`${card} space-y-3`} aria-label={tx("Scan a pass")}>
-        <Title>{tx("Serve a meal")}</Title>
+        <Title>{tx("Use a pass")}</Title>
         {result ? (
           <div role="status" aria-live="polite" className={`rounded-2xl p-5 text-center ${result.ok ? 'bg-emerald-500/15' : 'bg-rose-500/12'}`}>
             {result.ok ? <CheckCircle2 size={44} className="mx-auto text-emerald-600" aria-hidden="true" /> : <XCircle size={44} className="mx-auto text-rose-600" aria-hidden="true" />}
             <p className="mt-2 font-display text-2xl font-semibold">{m?.name ?? tx('Unknown pass')}</p>
-            <p className={`mt-1 text-base font-semibold ${result.ok ? 'text-emerald-700' : 'text-rose-700'}`}>{result.ok ? `${tx('Serve')}: ${result.meal}` : result.message}</p>
-            {m && <p className="mt-1 text-sm text-[var(--app-muted)]">{m.programTitle} · {m.mealsLeft} {tx('meals left')} · {tx('until')} {shortDate(m.endDate)}</p>}
+            <p className={`mt-1 text-base font-semibold ${result.ok ? 'text-emerald-700' : 'text-rose-700'}`}>{result.ok ? `${tx('Allowed')}: ${result.item}` : result.message}</p>
+            {m && <p className="mt-1 text-sm text-[var(--app-muted)]">{m.programTitle} · {m.usesLeft} {tx('uses left')} · {tx('until')} {shortDate(m.endDate)}</p>}
             <div className="mt-4 flex flex-wrap justify-center gap-2">
-              {result.ok && result.mealId && <button type="button" className={btnGhost} onClick={async () => { try { await ownerApi.undoMeal(b.id, result.mealId!); setResult(null); void loadToday(); onChange(); } catch (e) { setErr(msg(e)); } }}><Undo2 size={15} />{tx("Undo")}</button>}
-              {!result.ok && result.code === 'outside_window' && m && <button type="button" className={btnGhost} onClick={() => void redeem({ memberId: m.id, force: true })}>{tx("Serve anyway")}</button>}
+              {result.ok && result.useId && <button type="button" className={btnGhost} onClick={async () => { try { await ownerApi.undoUse(b.id, result.useId!); setResult(null); void loadToday(); onChange(); } catch (e) { setErr(msg(e)); } }}><Undo2 size={15} />{tx("Undo")}</button>}
+              {!result.ok && result.code === 'outside_window' && m && <button type="button" className={btnGhost} onClick={() => void redeem({ memberId: m.id, force: true })}>{tx("Allow anyway")}</button>}
               <button type="button" className={btnPrimary} onClick={() => setResult(null)}>{tx("Next")}</button>
             </div>
           </div>
@@ -142,7 +142,7 @@ function TodayTab({ b, hasPlans, onChange, goPlans }: { b: Business; hasPlans: b
             {scanner.error && <p role="alert" className="text-sm text-amber-700">{scanner.error}</p>}
             <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (code.trim()) void redeem({ code }); }}>
               <input className={`${input} font-mono uppercase tracking-wider`} value={code} onChange={(e) => setCode(e.target.value)} placeholder="ABCD-2345" inputMode="text" autoCapitalize="characters" autoComplete="off" aria-label={tx("Pass code")} />
-              <button type="submit" disabled={busy || !code.trim()} className={btnPrimary}>{busy ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}{tx("Serve")}</button>
+              <button type="submit" disabled={busy || !code.trim()} className={btnPrimary}>{busy ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}{tx("Check")}</button>
             </form>
             <p className="text-xs text-[var(--app-muted)]">{tx("No camera? Type the code shown under the customer's QR code.")}</p>
           </>
@@ -154,11 +154,11 @@ function TodayTab({ b, hasPlans, onChange, goPlans }: { b: Business; hasPlans: b
         <Title>{tx("Today")}</Title>
         {!today ? <Loader2 className="animate-spin" aria-label={tx("Loading")} /> : (
           <>
-            <p className="text-sm"><b className="text-2xl tabular-nums">{today.servedCount}</b> {tx("served")} · <b className="tabular-nums">{today.notYet.length}</b> {tx("have a plan today and have not come yet")}</p>
-            {!today.open && <p className="rounded-xl bg-[var(--app-bg)] p-3 text-sm text-[var(--app-muted)]">{tx("Your plans do not serve meals today.")}</p>}
+            <p className="text-sm"><b className="text-2xl tabular-nums">{today.servedCount}</b> {tx("checked in")} · <b className="tabular-nums">{today.notYet.length}</b> {tx("have a program today and have not come yet")}</p>
+            {!today.open && <p className="rounded-xl bg-[var(--app-bg)] p-3 text-sm text-[var(--app-muted)]">{tx("Your programs are not available today.")}</p>}
             {today.served.length > 0 && <ul className="max-h-64 divide-y divide-[var(--app-line)] overflow-auto text-sm">{today.served.map((s) => (
-              <li key={s.mealId} className="flex items-center justify-between gap-2 py-2"><span className="min-w-0"><b>{s.name}</b> <span className="text-[var(--app-muted)]">· {s.meal} · {hhmm(s.at)}</span></span>
-                {s.canUndo && <button type="button" className="text-xs text-rose-600 underline" onClick={async () => { try { await ownerApi.undoMeal(b.id, s.mealId); void loadToday(); onChange(); } catch (e) { setErr(msg(e)); } }}>{tx("Undo")}</button>}</li>))}</ul>}
+              <li key={s.useId} className="flex items-center justify-between gap-2 py-2"><span className="min-w-0"><b>{s.name}</b> <span className="text-[var(--app-muted)]">· {s.item} · {hhmm(s.at)}</span></span>
+                {s.canUndo && <button type="button" className="text-xs text-rose-600 underline" onClick={async () => { try { await ownerApi.undoUse(b.id, s.useId); void loadToday(); onChange(); } catch (e) { setErr(msg(e)); } }}>{tx("Undo")}</button>}</li>))}</ul>}
             {today.notYet.length > 0 && <details className="text-sm"><summary className="cursor-pointer font-medium">{tx("Not yet today")} ({today.notYet.length})</summary>
               <ul className="mt-2 max-h-56 divide-y divide-[var(--app-line)] overflow-auto">{today.notYet.map((n) => <li key={n.memberId} className="flex items-center justify-between gap-2 py-1.5"><span>{n.name}</span><span className="font-mono text-xs text-[var(--app-muted)]">{n.code}</span></li>)}</ul></details>}
           </>
@@ -174,7 +174,7 @@ function MembersTab({ b, programs, summary, onChange }: { b: Business; programs:
   const load = useCallback(async () => { try { setList(await ownerApi.members(b.id, { q, state, program })); setErr(''); } catch (e) { setErr(msg(e)); } }, [b.id, q, state, program]);
   useEffect(() => { const t = window.setTimeout(() => void load(), q ? 250 : 0); return () => window.clearTimeout(t); }, [load, q]);
   const act = async (id: string, fn: () => Promise<unknown>) => { setBusy(id); try { await fn(); await load(); onChange(); } catch (e) { setErr(msg(e)); } finally { setBusy(''); } };
-  const remind = (m: MemberInfo) => waLink(m.phone, `${tx('Hello')} ${m.name}, ${tx('your plan at')} ${b.name} ${tx('ends on')} ${shortDate(m.endDate)}. ${tx('Renew to keep eating with us.')}`);
+  const remind = (m: MemberInfo) => waLink(m.phone, `${tx('Hello')} ${m.name}, ${tx('your plan at')} ${b.name} ${tx('ends on')} ${shortDate(m.endDate)}. ${tx('Renew to keep your plan going.')}`);
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap gap-2">
@@ -190,7 +190,7 @@ function MembersTab({ b, programs, summary, onChange }: { b: Business; programs:
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div className="min-w-0"><p className="font-semibold">{m.name} <StateTag s={m.state} /></p>
                 <p className="text-xs text-[var(--app-muted)]">{m.programTitle} · +{m.phone} · <span className="font-mono">{m.code}</span>{m.studentId ? ` · ${m.studentId}` : ''}</p>
-                <p className="mt-1 text-xs text-[var(--app-muted)]">{shortDate(m.startDate)} → {shortDate(m.endDate)}{m.state === 'active' ? ` · ${m.mealsLeft} ${tx('meals left')}` : ''}{m.claimed ? ` · ${tx('says paid')}${m.claimed.ref ? ` (${m.claimed.ref})` : ''}` : ''}</p></div>
+                <p className="mt-1 text-xs text-[var(--app-muted)]">{shortDate(m.startDate)} → {shortDate(m.endDate)}{m.state === 'active' ? ` · ${m.usesLeft} ${tx('uses left')}` : ''}{m.claimed ? ` · ${tx('says paid')}${m.claimed.ref ? ` (${m.claimed.ref})` : ''}` : ''}</p></div>
               <div className="flex flex-wrap gap-1.5">
                 {!m.paid && m.state !== 'cancelled' && <><button type="button" disabled={busy === m.id} className={`${btnPrimary} !min-h-9 !px-3 text-xs`} onClick={() => void act(m.id, () => ownerApi.confirmMember(b.id, m.id, 'momo'))}><Check size={14} />{tx("Confirm payment")} (MoMo)</button>
                   <button type="button" disabled={busy === m.id} className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => void act(m.id, () => ownerApi.confirmMember(b.id, m.id, 'cash'))}>{tx("Paid in cash")}</button></>}
@@ -208,7 +208,7 @@ function MembersTab({ b, programs, summary, onChange }: { b: Business; programs:
 }
 
 /* ---------- Plans: make one, share its link ---------- */
-const blank = (): Partial<ProgramInfo> => ({ title: '', priceRwf: 40000, days: 30, meals: ['Lunch'], openDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat'], active: true });
+const blank = (): Partial<ProgramInfo> => ({ title: '', priceRwf: 30000, days: 30, items: ['Visit'], openDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], active: true });
 function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInfo[]; onChange: () => void }) {
   const [edit, setEdit] = useState<Partial<ProgramInfo> | null>(programs.length ? null : blank()); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false); const [copied, setCopied] = useState('');
   const save = async () => { if (!edit) return; setBusy(true); setErr(''); try { await ownerApi.saveProgram(b.id, edit as any); setEdit(null); onChange(); } catch (e) { setErr(msg(e)); } finally { setBusy(false); } };
@@ -216,14 +216,14 @@ function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInf
   const set = (patch: Partial<ProgramInfo>) => setEdit((e) => ({ ...(e ?? {}), ...patch }));
   return (
     <div className="space-y-4">
-      {!b.published && <p className="rounded-xl bg-amber-500/15 px-3 py-2.5 text-sm text-amber-900">{tx("Publish your page first (Public page → Publish), so students can open the link.")}</p>}
+      {!b.published && <p className="rounded-xl bg-amber-500/15 px-3 py-2.5 text-sm text-amber-900">{tx("Publish your page first (Public page → Publish), so customers can open the link.")}</p>}
       {programs.map((p) => {
-        const link = planLink(b.slug, p.id); const share = `${tx('Join our meal plan')} "${p.title}" ${tx('at')} ${b.name}: ${rwf(p.priceRwf)} ${tx('for')} ${p.days} ${tx('days')}. ${link}`;
+        const link = planLink(b.slug, p.id); const share = `${tx('Join our program')} "${p.title}" ${tx('at')} ${b.name}: ${rwf(p.priceRwf)} ${tx('for')} ${p.days} ${tx('days')}. ${link}`;
         return (
           <div key={p.id} className={`${card} space-y-3`}>
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div><p className="font-display text-lg font-semibold">{p.title} {!p.active && <span className="ml-1 rounded-full bg-[var(--app-panel-hover)] px-2 py-0.5 align-middle text-[11px] font-medium text-[var(--app-muted)]">{tx("Closed to new members")}</span>}</p>
-                <p className="text-sm text-[var(--app-muted)]">{rwf(p.priceRwf)} · {p.days} {tx('days')} · {p.meals.join(', ')} · {p.openDays.map((d) => tx(DAY_LABEL[d])).join(' ')}</p>
+                <p className="text-sm text-[var(--app-muted)]">{rwf(p.priceRwf)} · {p.days} {tx('days')}{p.totalUses ? ` · ${p.totalUses} ${tx('uses')}` : ''} · {p.items.join(', ')} · {p.openDays.map((d) => tx(DAY_LABEL[d])).join(' ')}</p>
                 <p className="mt-1 text-xs text-[var(--app-muted)]">{p.counts?.active ?? 0} {tx('active')} · {p.counts?.pending ?? 0} {tx('waiting for payment')}</p></div>
               <div className="flex gap-1.5"><button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => setEdit(p)}><Pencil size={13} />{tx("Edit")}</button>
                 <button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={async () => { try { await ownerApi.saveProgram(b.id, { ...p, active: !p.active }); onChange(); } catch (e) { setErr(msg(e)); } }}>{p.active ? tx('Close signups') : tx('Open signups')}</button>
@@ -231,7 +231,7 @@ function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInf
             </div>
             <div className="flex flex-wrap items-center gap-4 rounded-2xl bg-[var(--app-bg)] p-3">
               <QrImage text={link} size={112} />
-              <div className="min-w-0 flex-1 space-y-2"><p className="text-xs font-medium text-[var(--app-muted)]">{tx("Share this link with students")}</p>
+              <div className="min-w-0 flex-1 space-y-2"><p className="text-xs font-medium text-[var(--app-muted)]">{tx("Share this link with your customers")}</p>
                 <p className="break-all rounded-lg bg-[var(--app-panel)] px-2.5 py-1.5 font-mono text-xs">{link}</p>
                 <div className="flex flex-wrap gap-2"><button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => void copy(link, p.id)}>{copied === p.id ? <Check size={13} /> : <Copy size={13} />}{copied === p.id ? tx('Copied') : tx('Copy link')}</button>
                   <a className={`${btnPrimary} !min-h-9 !px-3 text-xs`} href={`https://wa.me/?text=${encodeURIComponent(share)}`} target="_blank" rel="noopener noreferrer"><Share2 size={13} />{tx("Share on WhatsApp")}</a></div></div>
@@ -243,19 +243,20 @@ function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInf
       {edit && (
         <form className={`${card} space-y-3`} onSubmit={(e) => { e.preventDefault(); void save(); }}>
           <Title>{edit.id ? tx('Edit plan') : tx('New plan')}</Title>
-          <label className="block text-sm font-medium">{tx("Plan name")}<input className={`${input} mt-1`} value={edit.title ?? ''} onChange={(e) => set({ title: e.target.value })} placeholder={tx("Lunch plan")} required maxLength={60} /></label>
+          <label className="block text-sm font-medium">{tx("Plan name")}<input className={`${input} mt-1`} value={edit.title ?? ''} onChange={(e) => set({ title: e.target.value })} placeholder={tx("Monthly pass")} required maxLength={60} /></label>
           <div className="grid grid-cols-2 gap-3">
             <label className="block text-sm font-medium">{tx("Price (RWF), paid once")}<input className={`${input} mt-1`} inputMode="numeric" value={edit.priceRwf ?? ''} onChange={(e) => set({ priceRwf: Number(e.target.value.replace(/\D/g, '')) })} required /></label>
             <label className="block text-sm font-medium">{tx("Lasts (days)")}<input className={`${input} mt-1`} inputMode="numeric" value={edit.days ?? ''} onChange={(e) => set({ days: Number(e.target.value.replace(/\D/g, '')) })} required /></label>
           </div>
-          <label className="block text-sm font-medium">{tx("Meals each day (separate with commas)")}<input className={`${input} mt-1`} value={(edit.meals ?? []).join(', ')} onChange={(e) => set({ meals: e.target.value.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 4) })} placeholder="Lunch" /></label>
-          <fieldset><legend className="text-sm font-medium">{tx("Days you serve")}</legend><div className="mt-1.5 flex flex-wrap gap-1.5">{ALL_DAYS.map((d) => { const on = (edit.openDays ?? []).includes(d); return <button key={d} type="button" aria-pressed={on} onClick={() => set({ openDays: on ? (edit.openDays ?? []).filter((x) => x !== d) : [...(edit.openDays ?? []), d] })} className={`min-h-10 rounded-xl px-3 text-sm font-semibold ${on ? 'bg-[var(--brand)] text-[var(--brand-on)]' : 'border border-[var(--app-line)] text-[var(--app-muted)]'}`}>{tx(DAY_LABEL[d])}</button>; })}</div></fieldset>
-          <details><summary className="cursor-pointer text-sm font-medium">{tx("Serving times (optional)")}</summary>
-            <div className="mt-2 space-y-2">{(edit.meals ?? []).map((meal) => { const w = (edit.windows ?? []).find((x) => x.meal === meal); const upd = (from: string, to: string) => set({ windows: [...(edit.windows ?? []).filter((x) => x.meal !== meal), ...(from && to ? [{ meal, from, to }] : [])] });
-              return <div key={meal} className="flex items-center gap-2 text-sm"><span className="w-24 truncate">{meal}</span><input type="time" className={`${input} !w-32`} value={w?.from ?? ''} onChange={(e) => upd(e.target.value, w?.to ?? '')} aria-label={`${meal} ${tx('from')}`} />–<input type="time" className={`${input} !w-32`} value={w?.to ?? ''} onChange={(e) => upd(w?.from ?? '', e.target.value)} aria-label={`${meal} ${tx('to')}`} /></div>; })}</div>
-            <p className="mt-1 text-xs text-[var(--app-muted)]">{tx("Outside these times the scan says so, and you can still serve anyway.")}</p></details>
+          <label className="block text-sm font-medium">{tx("What they get each day (separate with commas, for example Lunch or Entry)")}<input className={`${input} mt-1`} value={(edit.items ?? []).join(', ')} onChange={(e) => set({ items: e.target.value.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 4) })} placeholder="Lunch" /></label>
+          <fieldset><legend className="text-sm font-medium">{tx("Days it is available")}</legend><div className="mt-1.5 flex flex-wrap gap-1.5">{ALL_DAYS.map((d) => { const on = (edit.openDays ?? []).includes(d); return <button key={d} type="button" aria-pressed={on} onClick={() => set({ openDays: on ? (edit.openDays ?? []).filter((x) => x !== d) : [...(edit.openDays ?? []), d] })} className={`min-h-10 rounded-xl px-3 text-sm font-semibold ${on ? 'bg-[var(--brand)] text-[var(--brand-on)]' : 'border border-[var(--app-line)] text-[var(--app-muted)]'}`}>{tx(DAY_LABEL[d])}</button>; })}</div></fieldset>
+          <details><summary className="cursor-pointer text-sm font-medium">{tx("Times it is available (optional)")}</summary>
+            <div className="mt-2 space-y-2">{(edit.items ?? []).map((item) => { const w = (edit.windows ?? []).find((x) => x.item === item); const upd = (from: string, to: string) => set({ windows: [...(edit.windows ?? []).filter((x) => x.item !== item), ...(from && to ? [{ item, from, to }] : [])] });
+              return <div key={item} className="flex items-center gap-2 text-sm"><span className="w-24 truncate">{item}</span><input type="time" className={`${input} !w-32`} value={w?.from ?? ''} onChange={(e) => upd(e.target.value, w?.to ?? '')} aria-label={`${item} ${tx('from')}`} />–<input type="time" className={`${input} !w-32`} value={w?.to ?? ''} onChange={(e) => upd(w?.from ?? '', e.target.value)} aria-label={`${item} ${tx('to')}`} /></div>; })}</div>
+            <p className="mt-1 text-xs text-[var(--app-muted)]">{tx("Outside these times the scan says so, and you can still allow it.")}</p></details>
           <label className="block text-sm font-medium">{tx("Maximum members (optional)")}<input className={`${input} mt-1 !w-40`} inputMode="numeric" value={edit.maxMembers ?? ''} onChange={(e) => set({ maxMembers: e.target.value ? Number(e.target.value.replace(/\D/g, '')) : undefined })} /></label>
-          <label className="block text-sm font-medium">{tx("Note for customers (optional)")}<textarea className={`${input} mt-1`} rows={2} maxLength={300} value={edit.terms ?? ''} onChange={(e) => set({ terms: e.target.value })} placeholder={tx("One lunch a day. Show your pass at the counter.")} /></label>
+          <label className="block text-sm font-medium">{tx("Total uses (optional)")}<input className={`${input} mt-1 !w-40`} inputMode="numeric" value={edit.totalUses ?? ''} onChange={(e) => set({ totalUses: e.target.value ? Number(e.target.value.replace(/\D/g, '')) : undefined })} placeholder={tx("No limit")} /><span className="mt-1 block text-xs font-normal text-[var(--app-muted)]">{tx("For example 10 visits or 4 haircuts. Leave empty for one use of each item per day.")}</span></label>
+          <label className="block text-sm font-medium">{tx("Note for customers (optional)")}<textarea className={`${input} mt-1`} rows={2} maxLength={300} value={edit.terms ?? ''} onChange={(e) => set({ terms: e.target.value })} placeholder={tx("One use a day. Show your pass each time.")} /></label>
           {err && <p role="alert" className="text-sm text-rose-600"><AlertTriangle size={14} className="mr-1 inline" />{err}</p>}
           <div className="flex gap-2"><button type="submit" disabled={busy} className={btnPrimary}>{busy ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}{tx("Save plan")}</button>{programs.length > 0 && <button type="button" className={btnGhost} onClick={() => { setEdit(null); setErr(''); }}>{tx("Cancel")}</button>}</div>
         </form>

@@ -2,9 +2,9 @@ import { randomBytes, createHash } from 'node:crypto';
 import { DAYS, clean, cleanPhone, oneOf, type Day } from './model.js';
 
 /**
- * Programs: a business sells a plan once (for example 40,000 RWF for a month of lunches at a restaurant by the university), customers join
+ * Programs: a business sells a plan once (a month of lunches at a restaurant, a monthly gym pass, four haircuts, a laundry card), customers join
  * from a shared link and pay, and from then on each person shows a pass (a QR code on their phone) at the counter. The owner scans it and
- * the system says whether this person may be served now, and records the meal.
+ * the system says whether this person may use it now, and records the use.
  *
  * Pure rules live here (no storage, no clock of their own) so they are tested without a server. Dates are Kigali dates ("YYYY-MM-DD").
  * See service.ts for the storage and the public/owner boundary: a pass token is a secret only its holder has; the owner reaches a member by
@@ -16,22 +16,24 @@ export const MAX_MEMBERS = 3000;
 export const MAX_PROGRAM_DAYS = 366;
 export type MemberStatus = 'pending' | 'active' | 'paused' | 'cancelled';
 
-export interface MealWindow { meal: string; from: string; to: string }
+export interface ItemWindow { item: string; from: string; to: string }
 export interface Program {
   id: string; title: string; description?: string;
   /** What a customer pays once, in RWF. */
   priceRwf: number;
   /** How many calendar days the plan lasts from its start day (30 = a month). */
   days: number;
-  /** The meals served each day, in order (for example ["Lunch"] or ["Breakfast", "Lunch"]). One of each per person per day. */
-  meals: string[];
-  /** Days of the week the restaurant serves. A closed day neither serves nor counts as a missed meal. */
+  /** What a member gets each day, in order (for example ["Lunch"], ["Entry"], ["Haircut"] or ["Breakfast", "Lunch"]). One of each per person per day. */
+  items: string[];
+  /** Days of the week it is available. A day it is closed neither allows a use nor counts as a missed one. */
   openDays: Day[];
-  /** Optional serving times. Without them a meal can be served at any time. */
-  windows?: MealWindow[];
-  /** A short rule shown to the customer ("Show your pass at the counter; one lunch a day"). */
+  /** Optional serving times. Without them a item can be served at any time. */
+  windows?: ItemWindow[];
+  /** A short rule shown to the customer ("Show your pass each time; one use a day"). */
   terms?: string;
   maxMembers?: number;
+  /** An optional cap on the total number of uses over the whole plan (ten visits, four haircuts). Without it the only limit is one of each item per day. */
+  totalUses?: number;
   active: boolean;
   createdAt: string;
 }
@@ -52,10 +54,12 @@ export interface Member {
   confirmedAt?: string;
   /** Days the owner added (for example after a closure). */
   extraDays?: number;
+  /** How many times the pass has been used so far (undone uses do not count). */
+  used?: number;
   note?: string;
   createdAt: string;
 }
-export interface Meal { id: string; memberId: string; date: string; meal: string; at: string; by: 'scan' | 'code'; undone?: boolean }
+export interface Use { id: string; memberId: string; date: string; item: string; at: string; by: 'scan' | 'code'; undone?: boolean }
 
 /* ---------------------------------------------------------------- dates (Kigali, UTC+2) */
 const KIGALI_MS = 2 * 3600_000;
@@ -72,34 +76,36 @@ export const endDateFor = (start: string, days: number, extra = 0) => addDays(st
 
 /* ---------------------------------------------------------------- cleaning */
 export function cleanProgram(input: any, id: string, now: string, prev?: Program): Program | { error: string } {
-  const title = clean(input?.title ?? prev?.title, 60); if (!title) return { error: 'A program needs a name, for example "Lunch plan".' };
+  const title = clean(input?.title ?? prev?.title, 60); if (!title) return { error: 'A program needs a name, for example "Monthly pass".' };
   const price = Math.round(Number(String(input?.priceRwf ?? prev?.priceRwf ?? '').replace(/[,\s]/g, '')));
   if (!Number.isFinite(price) || price < 100 || price > 5_000_000) return { error: 'The price must be between 100 and 5,000,000 RWF.' };
   const days = Math.round(Number(input?.days ?? prev?.days ?? 30));
   if (!Number.isFinite(days) || days < 1 || days > MAX_PROGRAM_DAYS) return { error: `The plan must last between 1 and ${MAX_PROGRAM_DAYS} days.` };
-  const rawMeals: unknown[] = Array.isArray(input?.meals) ? input.meals : prev?.meals ?? ['Lunch'];
-  const meals = [...new Set(rawMeals.map((m) => clean(m, 24)).filter(Boolean))].slice(0, 4); if (!meals.length) return { error: 'Add at least one meal, for example "Lunch".' };
+  const rawItems: unknown[] = Array.isArray(input?.items) ? input.items : prev?.items ?? ['Visit'];
+  const items = [...new Set(rawItems.map((m) => clean(m, 24)).filter(Boolean))].slice(0, 4); if (!items.length) return { error: 'Add at least one item, for example "Lunch" or "Entry".' };
   const rawDays: unknown[] = Array.isArray(input?.openDays) ? input.openDays : prev?.openDays ?? ['mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-  const openDays = DAYS.filter((d) => rawDays.includes(d)); if (!openDays.length) return { error: 'Choose at least one day the restaurant serves.' };
-  let windows: MealWindow[] | undefined;
+  const openDays = DAYS.filter((d) => rawDays.includes(d)); if (!openDays.length) return { error: 'Choose at least one day it is available.' };
+  let windows: ItemWindow[] | undefined;
   if (input?.windows !== undefined || prev?.windows) {
     const w: unknown[] = Array.isArray(input?.windows) ? input.windows : input?.windows === undefined ? prev?.windows ?? [] : [];
-    windows = w.map((x: any) => ({ meal: clean(x?.meal, 24), from: String(x?.from ?? ''), to: String(x?.to ?? '') })).filter((x) => meals.includes(x.meal) && HHMM.test(x.from) && HHMM.test(x.to) && mins(x.to) > mins(x.from));
+    windows = w.map((x: any) => ({ item: clean(x?.item, 24), from: String(x?.from ?? ''), to: String(x?.to ?? '') })).filter((x) => items.includes(x.item) && HHMM.test(x.from) && HHMM.test(x.to) && mins(x.to) > mins(x.from));
     if (!windows.length) windows = undefined;
   }
-  const p: Program = { id, title, priceRwf: price, days, meals, openDays, active: input?.active === undefined ? prev?.active ?? true : input.active !== false, createdAt: prev?.createdAt ?? now };
+  const p: Program = { id, title, priceRwf: price, days, items, openDays, active: input?.active === undefined ? prev?.active ?? true : input.active !== false, createdAt: prev?.createdAt ?? now };
   const description = clean(input?.description ?? prev?.description, 300); if (description) p.description = description;
   const terms = clean(input?.terms ?? prev?.terms, 300); if (terms) p.terms = terms;
   if (windows) p.windows = windows;
   const max = input?.maxMembers === undefined ? prev?.maxMembers : input.maxMembers === null || input.maxMembers === '' ? undefined : Math.round(Number(input.maxMembers));
   if (max !== undefined && Number.isFinite(max) && max >= 1 && max <= MAX_MEMBERS) p.maxMembers = max;
+  const cap = input?.totalUses === undefined ? prev?.totalUses : input.totalUses === null || input.totalUses === '' ? undefined : Math.round(Number(input.totalUses));
+  if (cap !== undefined && Number.isFinite(cap) && cap >= 1 && cap <= 1000) p.totalUses = cap;
   return p;
 }
 
-/** A person joining: name and phone are required (the phone is how the restaurant reaches them and how an online payment is requested). */
+/** A person joining: name and phone are required (the phone is how the business reaches them and how an online payment is requested). */
 export function cleanJoin(input: any): { name: string; phone: string; studentId?: string } | { error: string } {
   const name = clean(input?.name, 60); if (name.length < 2) return { error: 'Please write your name.' };
-  const phone = cleanPhone(input?.phone); if (!phone) return { error: 'Please write a phone number the restaurant can reach, like 0788 123 456.' };
+  const phone = cleanPhone(input?.phone); if (!phone) return { error: 'Please write a phone number the business can reach, like 0788 123 456.' };
   const studentId = clean(input?.studentId, 30);
   return { name, phone, ...(studentId ? { studentId } : {}) };
 }
@@ -124,42 +130,46 @@ export function planState(m: Pick<Member, 'status' | 'paid' | 'startDate' | 'end
   if (today < m.startDate) return 'not_started';
   return 'active';
 }
-/** Serving days left on a plan from today (today included), and the meals that makes. */
-export function remaining(m: Pick<Member, 'startDate' | 'endDate'>, p: Pick<Program, 'openDays' | 'meals'>, today: string) {
+/** Uses a member has left: what the days still allow, less today's uses, never more than the program's total cap allows. */
+export const usesLeft = (m: Pick<Member, 'used'>, p: Pick<Program, 'totalUses'>, daysAllow: number, usedToday: number) => Math.max(0, Math.min(daysAllow - usedToday, p.totalUses ? p.totalUses - (m.used ?? 0) : Infinity));
+
+/** Serving days left on a plan from today (today included), and the items that makes. */
+export function remaining(m: Pick<Member, 'startDate' | 'endDate'>, p: Pick<Program, 'openDays' | 'items'>, today: string) {
   let servingDays = 0; const from = today > m.startDate ? today : m.startDate;
   for (let d = from; d <= m.endDate && servingDays < 800; d = addDays(d, 1)) if (p.openDays.includes(dayOfWeek(d))) servingDays++;
-  return { servingDays, meals: servingDays * p.meals.length, calendarDays: today > m.endDate ? 0 : Math.max(0, Math.round((Date.parse(`${m.endDate}T12:00:00Z`) - Date.parse(`${from}T12:00:00Z`)) / 86_400_000) + 1) };
+  return { servingDays, uses: servingDays * p.items.length, calendarDays: today > m.endDate ? 0 : Math.max(0, Math.round((Date.parse(`${m.endDate}T12:00:00Z`) - Date.parse(`${from}T12:00:00Z`)) / 86_400_000) + 1) };
 }
 
-export type DenyCode = 'pending' | 'not_started' | 'expired' | 'paused' | 'cancelled' | 'closed_day' | 'already' | 'outside_window' | 'no_meal';
-export type ServeResult = { ok: true; meal: string } | { ok: false; code: DenyCode; message: string; meal?: string; at?: string };
+export type DenyCode = 'pending' | 'not_started' | 'expired' | 'paused' | 'cancelled' | 'closed_day' | 'already' | 'outside_window' | 'no_item' | 'no_uses_left';
+export type ServeResult = { ok: true; item: string } | { ok: false; code: DenyCode; message: string; item?: string; at?: string };
 const DENY_TEXT: Record<'pending' | 'expired' | 'paused' | 'cancelled', string> = {
   pending: 'Not paid yet.', expired: 'This plan has ended.', paused: 'This plan is paused.', cancelled: 'This plan was cancelled.',
 };
 
 /**
- * May this person be served now? `eaten` are today's meals already served (not undone). `meal` is the one the owner chose, if any; otherwise the
- * next meal of the day, inside its serving time when times are set. `force` lets the owner serve outside the serving time (never past a plan's end,
- * unpaid, paused, a closed day or a meal already served).
+ * May this person be served now? `used` are today's items already served (not undone). `item` is the one the owner chose, if any; otherwise the
+ * next item of the day, inside its serving time when times are set. `force` lets the owner serve outside the serving time (never past a plan's end,
+ * unpaid, paused, a closed day or a item already served).
  */
-export function canServe(o: { member: Member; program: Program; eaten: Array<{ meal: string; at: string }>; now: number; meal?: string; force?: boolean }): ServeResult {
+export function canServe(o: { member: Member; program: Program; used: Array<{ item: string; at: string }>; now: number; item?: string; force?: boolean }): ServeResult {
   const { member, program, now } = o; const today = kigaliDate(now); const st = planState(member, today);
   if (st === 'pending' || st === 'expired' || st === 'paused' || st === 'cancelled') return { ok: false, code: st, message: DENY_TEXT[st] };
   if (st === 'not_started') return { ok: false, code: 'not_started', message: `This plan starts on ${member.startDate}.` };
-  if (!program.openDays.includes(dayOfWeek(today))) return { ok: false, code: 'closed_day', message: 'No meals are served today.' };
-  const done = new Set(o.eaten.map((e) => e.meal));
-  const open = program.meals.filter((m) => !done.has(m));
-  if (!open.length) { const last = o.eaten[o.eaten.length - 1]; return { ok: false, code: 'already', message: program.meals.length === 1 ? `Already served today at ${hhmm(last?.at)}.` : 'All of today\'s meals are already served.', ...(last ? { meal: last.meal, at: last.at } : {}) }; }
-  if (o.meal !== undefined) {
-    if (!program.meals.includes(o.meal)) return { ok: false, code: 'no_meal', message: 'That meal is not part of this plan.' };
-    if (done.has(o.meal)) { const e = o.eaten.find((x) => x.meal === o.meal)!; return { ok: false, code: 'already', message: `${o.meal} was already served today at ${hhmm(e.at)}.`, meal: o.meal, at: e.at }; }
+  if (program.totalUses && (member.used ?? 0) >= program.totalUses) return { ok: false, code: 'no_uses_left', message: `All ${program.totalUses} uses of this program are already taken.` };
+  if (!program.openDays.includes(dayOfWeek(today))) return { ok: false, code: 'closed_day', message: 'Not available today.' };
+  const done = new Set(o.used.map((e) => e.item));
+  const open = program.items.filter((m) => !done.has(m));
+  if (!open.length) { const last = o.used[o.used.length - 1]; return { ok: false, code: 'already', message: program.items.length === 1 ? `Already used today at ${hhmm(last?.at)}.` : 'All of today\'s uses are already taken.', ...(last ? { item: last.item, at: last.at } : {}) }; }
+  if (o.item !== undefined) {
+    if (!program.items.includes(o.item)) return { ok: false, code: 'no_item', message: 'That item is not part of this program.' };
+    if (done.has(o.item)) { const e = o.used.find((x) => x.item === o.item)!; return { ok: false, code: 'already', message: `${o.item} was already used today at ${hhmm(e.at)}.`, item: o.item, at: e.at }; }
   }
   const minute = kigaliMinutes(now);
-  const inWindow = (m: string) => { const w = program.windows?.find((x) => x.meal === m); return !w || (minute >= mins(w.from) && minute < mins(w.to)); };
-  const pick = o.meal ?? open.find(inWindow) ?? (o.force ? open[0] : undefined);
-  if (!pick) { const w = program.windows?.find((x) => x.meal === open[0]); return { ok: false, code: 'outside_window', message: `${open[0]} is served ${w ? `${w.from}–${w.to}` : 'at set times'}.`, meal: open[0] }; }
-  if (!inWindow(pick) && !o.force) { const w = program.windows!.find((x) => x.meal === pick)!; return { ok: false, code: 'outside_window', message: `${pick} is served ${w.from}–${w.to}.`, meal: pick }; }
-  return { ok: true, meal: pick };
+  const inWindow = (m: string) => { const w = program.windows?.find((x) => x.item === m); return !w || (minute >= mins(w.from) && minute < mins(w.to)); };
+  const pick = o.item ?? open.find(inWindow) ?? (o.force ? open[0] : undefined);
+  if (!pick) { const w = program.windows?.find((x) => x.item === open[0]); return { ok: false, code: 'outside_window', message: `${open[0]} is available ${w ? `${w.from}–${w.to}` : 'at set times'}.`, item: open[0] }; }
+  if (!inWindow(pick) && !o.force) { const w = program.windows!.find((x) => x.item === pick)!; return { ok: false, code: 'outside_window', message: `${pick} is available ${w.from}–${w.to}.`, item: pick }; }
+  return { ok: true, item: pick };
 }
 const hhmm = (iso?: string) => { if (!iso) return ''; const k = new Date(Date.parse(iso) + KIGALI_MS); return `${String(k.getUTCHours()).padStart(2, '0')}:${String(k.getUTCMinutes()).padStart(2, '0')}`; };
 
