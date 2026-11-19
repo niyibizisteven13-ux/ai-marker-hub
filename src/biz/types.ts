@@ -1,4 +1,4 @@
-export type { Post, PublicPost, Business, PublicBusiness, PublicMedia, Product, Media, Enquiry, DayStats, Hours, Day, Theme, Category } from '../../server/services/biz/model';
+export type { Lang, Translation, PublicSection, Post, PublicPost, Business, PublicBusiness, PublicMedia, Product, Media, Enquiry, DayStats, Hours, Day, Theme, Category } from '../../server/services/biz/model';
 export const CATEGORIES: Array<{ id: string; label: string }> = [
   { id: 'shop', label: 'Shop' }, { id: 'restaurant', label: 'Restaurant or café' }, { id: 'salon', label: 'Salon or barber' }, { id: 'farm', label: 'Farm' },
   { id: 'services', label: 'Services' }, { id: 'school', label: 'School or training' }, { id: 'health', label: 'Health' }, { id: 'transport', label: 'Transport' }, { id: 'craft', label: 'Crafts' }, { id: 'other', label: 'Other' },
@@ -39,3 +39,8 @@ export interface Costs {
   change: number | null; trend: Array<{ month: string; total: number }>; budgets: Array<{ category: string; limit: number; spent: number; pct: number }>;
   top: LedgerEntry[]; recurring: Recurring[]; monthlyCommitted: number;
 }
+
+export interface FieldInfo { key: string; label: string; type: 'text' | 'number' | 'date' | 'choice'; options?: string[]; required?: boolean }
+export interface TrackerInfo { id: string; name: string; description: string; fields: FieldInfo[]; statuses: string[]; records?: number; open?: number }
+export interface TrackerRecordInfo { id: string; at: string; values: Record<string, string | number>; status: string; src: 'studio' | 'chat' | 'page' }
+export interface SectionInfo { id: string; type: 'text' | 'faq' | 'list' | 'links' | 'form'; title: string; body?: string; items?: Array<{ title: string; text?: string; price?: string; url?: string }>; trackerId?: string; button?: string; hidden?: boolean }

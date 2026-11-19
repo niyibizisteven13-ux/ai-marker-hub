@@ -83,6 +83,7 @@ export function createBizRouter(): Router {
   r.post('/public/:slug/posts/:pid/like', run(async (req, res) => res.json(await svc().like(req.params.slug, req.params.pid, who(req)))));
   r.get('/public/:slug/posts/:pid/comments', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json({ comments: await svc().publicComments(req.params.slug, req.params.pid) }); }));
   r.post('/public/:slug/posts/:pid/comments', run(async (req, res) => res.status(201).json({ comment: await svc().addComment(req.params.slug, req.params.pid, req.body ?? {}, who(req)) })));
+  r.post('/public/:slug/forms/:sid', run(async (req, res) => { const out = await svc().submitForm(req.params.slug, req.params.sid, req.body ?? {}, who(req)); res.status(out.saved ? 201 : 200).json({ ok: true }); }));
   r.post('/public/:slug/track', run(async (req, res) => { const k = ['whatsapp', 'call', 'share'].includes(String(req.body?.kind)) ? req.body.kind : null; if (!k) return res.status(400).json({ error: 'Unknown kind.' }); res.json({ ok: await svc().track(req.params.slug, k, who(req)) }); }));
   r.post('/public/:slug/enquiry', run(async (req, res) => { const out = await svc().submitEnquiry(req.params.slug, req.body ?? {}, who(req)); res.status(out.saved ? 201 : 200).json({ ok: true }); }));
   r.post('/public/:slug/order', run(async (req, res) => { const out = await svc().submitOrder(req.params.slug, req.body ?? {}, who(req)); res.status(out.saved ? 201 : 200).json({ ok: true, total: out.total }); }));
@@ -148,6 +149,21 @@ export function createBizRouter(): Router {
   r.get('/:id/recurring', run(async (req, res) => res.json({ recurring: await svc().recurring(me(req), req.params.id) })));
   r.post('/:id/recurring', run(async (req, res) => res.status(201).json({ recurring: await svc().addRecurring(me(req), req.params.id, req.body ?? {}) })));
   r.patch('/:id/recurring/:rid', run(async (req, res) => { if (!(await svc().setRecurring(me(req), req.params.id, req.params.rid, req.body ?? {}))) return res.status(404).json({ error: 'That recurring cost was not found.' }); res.json({ ok: true }); }));
+  r.get('/:id/sections', run(async (req, res) => res.json({ sections: await svc().sections(me(req), req.params.id) })));
+  r.post('/:id/sections', run(async (req, res) => res.status(201).json({ section: await svc().saveSection(me(req), req.params.id, req.body ?? {}) })));
+  r.patch('/:id/sections/:sid', run(async (req, res) => res.json({ section: await svc().saveSection(me(req), req.params.id, { ...(req.body ?? {}), id: req.params.sid }) })));
+  r.post('/:id/sections/:sid/move', run(async (req, res) => { await svc().moveSection(me(req), req.params.id, req.params.sid, Number(req.body?.dir) || 0); res.json({ ok: true }); }));
+  r.delete('/:id/sections/:sid', run(async (req, res) => { if (!(await svc().removeSection(me(req), req.params.id, req.params.sid))) return res.status(404).json({ error: 'That section was not found.' }); res.status(204).end(); }));
+  r.get('/:id/trackers', run(async (req, res) => res.json({ trackers: await svc().trackers(me(req), req.params.id) })));
+  r.post('/:id/trackers', run(async (req, res) => res.status(201).json({ tracker: await svc().createTracker(me(req), req.params.id, req.body ?? {}) })));
+  r.post('/:id/features/:kind', run(async (req, res) => res.status(201).json(await svc().addFeature(me(req), req.params.id, req.params.kind, req.body?.lang === 'rw' ? 'rw' : 'en'))));
+  r.delete('/:id/trackers/:tid', run(async (req, res) => { if (!(await svc().deleteTracker(me(req), req.params.id, req.params.tid))) return res.status(404).json({ error: 'That tracker was not found.' }); res.status(204).end(); }));
+  r.get('/:id/trackers/:tid/records', run(async (req, res) => res.json(await svc().records(me(req), req.params.id, req.params.tid, { status: typeof req.query.status === 'string' ? req.query.status : undefined }))));
+  r.post('/:id/trackers/:tid/records', run(async (req, res) => res.status(201).json({ record: await svc().addRecord(me(req), req.params.id, req.params.tid, req.body ?? {}) })));
+  r.patch('/:id/records/:rid', run(async (req, res) => res.json({ record: await svc().updateRecord(me(req), req.params.id, req.params.rid, req.body ?? {}) })));
+  r.delete('/:id/records/:rid', run(async (req, res) => { if (!(await svc().deleteRecord(me(req), req.params.id, req.params.rid))) return res.status(404).json({ error: 'That record was not found.' }); res.status(204).end(); }));
+  r.put('/:id/lang', run(async (req, res) => res.json({ lang: await svc().setLang(me(req), req.params.id, req.body?.lang) })));
+  r.put('/:id/translations/:lang', run(async (req, res) => res.json({ translation: await svc().setTranslation(me(req), req.params.id, req.params.lang, req.body ?? {}) })));
   r.get('/:id/dashboard', run(async (req, res) => res.json(await svc().dashboard(me(req), req.params.id, [7, 30, 90].includes(Number(req.query.days)) ? Number(req.query.days) : 7))));
   /** The owner's own Business Agent chat (a dedicated agent for this business, not the general chat). Spends credits like any assistant action. */
   r.post('/:id/agent/chat', run(async (req, res) => {

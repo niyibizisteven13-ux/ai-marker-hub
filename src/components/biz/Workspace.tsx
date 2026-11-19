@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { MessageCircle, Heart, Megaphone, ImagePlus, Lock, Camera, Bot, BellRing, ArrowDownRight, ArrowUpRight, Banknote, Check, Copy, Download, EyeOff, Globe, KeyRound, Loader2, Package, Plus, Receipt, Send, Share2, ShieldCheck, Smartphone, Sparkles, Trash2, TrendingUp, Users, Wallet, X, AlertTriangle, ShoppingBag, CircleCheck, Clock, Ban } from 'lucide-react';
 import { ownerApi, prepareImage } from '../../biz/api';
 import type { Mine } from '../../biz/api';
-import { pageUrl, rwf, type Costs, type AgentSettings, type Business, type Dashboard, type LedgerEntry, type SecretsStatus } from '../../biz/types';
+import { pageUrl, rwf, type TrackerInfo, type TrackerRecordInfo, type SectionInfo, type Costs, type AgentSettings, type Business, type Dashboard, type LedgerEntry, type SecretsStatus } from '../../biz/types';
 import { btn, btnGhost, btnPrimary, card, input, msg, PaidNote, rwfShort, Tag, Title } from './ui';
 import PostComposer from './PostComposer';
 
@@ -376,6 +376,7 @@ export function AgentChatView({ b, onChange }: { b: Business; onChange: () => vo
     try { const reply = await ownerApi.agentChat(b.id, { message, history, ...(image ? { image } : {}) }); setMsgs((m) => [...m, { role: 'assistant', text: reply }]); onChange(); }
     catch (e) { setErr(msg(e)); } finally { setBusy(false); }
   };
+  useEffect(() => { try { const k = `bz-seed-${b.id}`; const v = sessionStorage.getItem(k); if (v) { sessionStorage.removeItem(k); void send(v); } } catch { /* optional */ } }, []);   // eslint-disable-line react-hooks/exhaustive-deps
   const chips = ['How is my business today?', 'Today I sold 5 loaves for 4,000', 'What is running out?', 'How was my week?', 'Show my pending orders'];
   return (
     <div className="flex h-[calc(100dvh-9.5rem)] min-h-[420px] flex-col lg:h-[calc(100dvh-8rem)]">
@@ -478,5 +479,66 @@ export function FeedView({ b, onChange, canVideo }: { b: Business; onChange: () 
       ) : [...posts].sort((a, c) => Number(!!c.pinned) - Number(!!a.pinned) || c.at.localeCompare(a.at)).map((p) => <OwnerPostCard key={p.id} b={b} p={p} urls={urls} kinds={kinds} onChange={() => { load(); onChange(); }} copy={(t, w) => void copy(t, w)} />)}</div>
       {compose && <PostComposer canVideo={canVideo} b={b} onClose={() => setCompose(false)} onPosted={() => { load(); onChange(); }} />}
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ trackers: private tables the owner or the agent creates */
+const TEMPLATES: Array<[string, string]> = [['booking', 'Bookings (form on your page)'], ['deliveries', 'Deliveries'], ['loans', 'Customer credit']];
+export function TrackersView({ b, onChange }: { b: Business; onChange: () => void }) {
+  const [list, setList] = useState<TrackerInfo[] | null>(null); const [sel, setSel] = useState(''); const [data, setData] = useState<{ tracker: TrackerInfo; records: TrackerRecordInfo[] } | null>(null); const [err, setErr] = useState(''); const [vals, setVals] = useState<Record<string, string>>({});
+  const [make, setMake] = useState(false); const [draft, setDraft] = useState({ name: '', fields: 'Name, text\nPhone, text\nDate, date\nAmount, number' });
+  const load = useCallback(() => { ownerApi.trackers(b.id).then((l) => { setList(l); setSel((s) => (l.some((t) => t.id === s) ? s : l[0]?.id ?? '')); }).catch((e) => setErr(msg(e))); }, [b.id]);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { if (sel) ownerApi.records(b.id, sel).then(setData).catch((e) => setErr(msg(e))); else setData(null); }, [b.id, sel, list]);
+  const act = async (fn: () => Promise<unknown>) => { setErr(''); try { await fn(); load(); onChange(); } catch (e) { setErr(msg(e)); } };
+  const csv = () => { if (!data) return; const rows = [['Date', ...data.tracker.fields.map((f) => f.label), 'Status'], ...data.records.map((r) => [r.at.slice(0, 10), ...data.tracker.fields.map((f) => r.values[f.key] ?? ''), r.status])]; const t = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n'); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([t], { type: 'text/csv' })); a.download = `${data.tracker.name}.csv`; a.click(); URL.revokeObjectURL(a.href); };
+  const build = (e: React.FormEvent) => { e.preventDefault(); const fields = draft.fields.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => { const [label, type, opts] = l.split(',').map((x) => x.trim()); return { label, type: ['text', 'number', 'date', 'choice'].includes(type) ? type : 'text', ...(type === 'choice' && opts ? { options: opts.split('|').map((o) => o.trim()) } : {}) }; }); void act(async () => { await ownerApi.createTracker(b.id, { name: draft.name, fields }); setMake(false); setDraft({ ...draft, name: '' }); }); };
+  const t = data?.tracker;
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3"><div><h1 className="font-display text-2xl font-semibold tracking-tight">Trackers</h1><Tag kind="private" /></div><button type="button" className={btnPrimary} onClick={() => setMake(!make)}><Plus size={16} />New tracker</button></div>
+      <p className="text-sm text-[var(--app-muted)]">A tracker is a private table for anything you want to keep track of: bookings, deliveries, customer credit, equipment. Make one here, or just ask the agent: “track my deliveries”, “add a booking form to my page”.</p>
+      {err && <p role="alert" className="rounded-xl bg-rose-500/10 px-4 py-2.5 text-sm text-rose-600">{err}</p>}
+      {(make || (list && !list.length)) && (
+        <div className={card}><h2 className="mb-3 font-display text-lg font-semibold">Start from a ready-made one</h2><div className="flex flex-wrap gap-2">{TEMPLATES.map(([k, l]) => <button key={k} type="button" className={btnGhost} onClick={() => void act(async () => { await ownerApi.addFeature(b.id, k, 'en'); setMake(false); })}>{l}</button>)}</div>
+          <form onSubmit={build} className="mt-5 space-y-3 border-t border-[var(--app-line)] pt-4"><h3 className="font-display text-base font-semibold">Or make your own</h3><input className={input} placeholder="Name, for example Equipment" aria-label="Tracker name" value={draft.name} maxLength={40} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+            <label className="block text-sm"><span className="mb-1 block text-[var(--app-muted)]">Fields, one per line: name, type (text, number, date, choice), and for choice the options with | between them</span><textarea className={`${input} font-mono text-[13px]`} rows={5} value={draft.fields} onChange={(e) => setDraft({ ...draft, fields: e.target.value })} /></label><button type="submit" disabled={!draft.name.trim()} className={btnPrimary}>Create tracker</button></form></div>)}
+      {list && list.length > 0 && <div className="flex flex-wrap gap-2">{list.map((x) => <button key={x.id} type="button" aria-pressed={sel === x.id} onClick={() => setSel(x.id)} className={`rounded-xl border px-4 py-2.5 text-sm font-semibold ${sel === x.id ? 'border-[var(--brand)] bg-[var(--brand)]/10' : 'border-[var(--app-line)] bg-[var(--app-panel)]'}`}>{x.name} <span className="ml-1 text-xs text-[var(--app-muted)]">{x.records ?? 0}{x.open ? ` · ${x.open} ${x.statuses[0]}` : ''}</span></button>)}</div>}
+      {t && data && (<>
+        <div className={card}>
+          <form className="grid gap-3 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); void act(async () => { await ownerApi.addRecord(b.id, t.id, { values: vals }); setVals({}); }); }}>
+            {t.fields.map((f) => <label key={f.key} className="block text-sm"><span className="mb-1 block text-[var(--app-muted)]">{f.label}{f.required ? ' *' : ''}</span>{f.type === 'choice' ? <select className={input} value={vals[f.key] ?? ''} onChange={(e) => setVals({ ...vals, [f.key]: e.target.value })}><option value="">–</option>{f.options?.map((o) => <option key={o}>{o}</option>)}</select> : <input className={input} type={f.type === 'date' ? 'date' : 'text'} inputMode={f.type === 'number' ? 'decimal' : undefined} value={vals[f.key] ?? ''} onChange={(e) => setVals({ ...vals, [f.key]: e.target.value })} />}</label>)}
+            <div className="sm:col-span-2 flex flex-wrap gap-2"><button type="submit" className={btnPrimary}><Plus size={16} />Add</button><button type="button" className={btnGhost} onClick={csv}><Download size={15} />CSV</button><button type="button" className={`${btnGhost} ml-auto text-rose-600`} onClick={() => { if (confirm(`Delete the tracker ${t.name} and all its records?`)) void act(() => ownerApi.deleteTracker(b.id, t.id)); }}><Trash2 size={15} />Delete tracker</button></div></form></div>
+        <div className={`${card} overflow-x-auto`}>{!data.records.length ? <p className="text-sm text-[var(--app-muted)]">No records yet.</p> : (
+          <table className="w-full text-sm"><thead><tr className="text-left text-xs text-[var(--app-muted)]"><th className="py-2 pr-3 font-medium">Date</th>{t.fields.map((f) => <th key={f.key} className="px-3 font-medium">{f.label}</th>)}<th className="px-3 font-medium">Status</th><th /></tr></thead>
+            <tbody>{data.records.map((r) => <tr key={r.id} className="border-t border-[var(--app-line)]"><td className="py-2 pr-3 whitespace-nowrap text-[var(--app-muted)]">{r.at.slice(0, 10)}{r.src === 'page' ? ' · page' : r.src === 'chat' ? ' · chat' : ''}</td>{t.fields.map((f) => <td key={f.key} className="px-3">{r.values[f.key] ?? '–'}</td>)}
+              <td className="px-3"><select aria-label="Status" className={`${input} !w-auto !py-1.5 text-xs`} value={r.status} onChange={(e) => void act(() => ownerApi.updateRecord(b.id, r.id, { status: e.target.value }))}>{t.statuses.map((s2) => <option key={s2}>{s2}</option>)}</select></td>
+              <td className="pl-2"><button type="button" aria-label="Delete record" className="text-[var(--app-faint)] hover:text-rose-600" onClick={() => { if (confirm('Delete this record?')) void act(() => ownerApi.deleteRecord(b.id, r.id)); }}><Trash2 size={15} /></button></td></tr>)}</tbody></table>)}</div></>)}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ extra sections on the public page */
+export function SectionsEditor({ b, onChange }: { b: Business; onChange: () => void }) {
+  const [list, setList] = useState<SectionInfo[] | null>(null); const [trackers, setTrackers] = useState<TrackerInfo[]>([]); const [err, setErr] = useState(''); const [d, setD] = useState({ type: 'text', title: '', body: '', items: '', trackerId: '', button: '' });
+  const load = useCallback(() => { ownerApi.sections(b.id).then(setList).catch((e) => setErr(msg(e))); void ownerApi.trackers(b.id).then(setTrackers).catch(() => undefined); }, [b.id]);
+  useEffect(() => { load(); }, [load]);
+  const act = async (fn: () => Promise<unknown>) => { setErr(''); try { await fn(); load(); onChange(); } catch (e) { setErr(msg(e)); } };
+  const parseItems = () => d.items.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => { const [title, text, extra] = l.split('|').map((x) => x.trim()); return d.type === 'links' ? { title, url: text } : d.type === 'list' ? { title, text, price: extra } : { title, text }; });
+  const add = (e: React.FormEvent) => { e.preventDefault(); void act(async () => { await ownerApi.saveSection(b.id, { type: d.type, title: d.title, body: d.body || undefined, ...(['faq', 'list', 'links'].includes(d.type) ? { items: parseItems() } : {}), ...(d.type === 'form' ? { trackerId: d.trackerId, button: d.button || undefined } : {}) }); setD({ ...d, title: '', body: '', items: '' }); }); };
+  const hint = d.type === 'faq' ? 'One per line: question | answer' : d.type === 'list' ? 'One per line: name | details | price' : d.type === 'links' ? 'One per line: title | https://address' : '';
+  return (
+    <div className={card}><Title kind="public" hint="Extra parts of your page: a paragraph, questions and answers, a price list, buttons to other sites, or a form whose answers go to a tracker (for example bookings). The agent can make these for you too.">Extra sections</Title>
+      {err && <p role="alert" className="mb-3 text-sm text-rose-600">{err}</p>}
+      {list && list.length > 0 && <ul className="mb-4 divide-y divide-[var(--app-line)] rounded-xl border border-[var(--app-line)]">{list.map((s2, i) => <li key={s2.id} className={`flex flex-wrap items-center gap-2 px-3 py-2.5 text-sm ${s2.hidden ? 'opacity-60' : ''}`}><span className="min-w-0 flex-1"><b>{s2.title}</b> <span className="text-[var(--app-muted)]">· {s2.type}{s2.items ? ` · ${s2.items.length} items` : ''}{s2.hidden ? ' · hidden' : ''}</span></span>
+        <button type="button" aria-label="Move up" disabled={i === 0} className={`${btnGhost} !min-h-8 !px-2 disabled:opacity-30`} onClick={() => void act(() => ownerApi.moveSection(b.id, s2.id, -1))}>↑</button><button type="button" aria-label="Move down" disabled={i === list.length - 1} className={`${btnGhost} !min-h-8 !px-2 disabled:opacity-30`} onClick={() => void act(() => ownerApi.moveSection(b.id, s2.id, 1))}>↓</button>
+        <button type="button" className={`${btnGhost} !min-h-8 !px-2.5 text-xs`} onClick={() => void act(() => ownerApi.saveSection(b.id, { id: s2.id, hidden: !s2.hidden }))}>{s2.hidden ? 'Show' : 'Hide'}</button><button type="button" aria-label="Delete section" className="text-[var(--app-faint)] hover:text-rose-600" onClick={() => { if (confirm(`Delete ${s2.title}?`)) void act(() => ownerApi.removeSection(b.id, s2.id)); }}><Trash2 size={15} /></button></li>)}</ul>}
+      <form onSubmit={add} className="grid gap-3 sm:grid-cols-2">
+        <select className={input} aria-label="Section type" value={d.type} onChange={(e) => setD({ ...d, type: e.target.value })}><option value="text">Text</option><option value="faq">Questions and answers</option><option value="list">Price list</option><option value="links">Buttons to links</option><option value="form">Form (answers go to a tracker)</option></select>
+        <input className={input} placeholder="Title" aria-label="Section title" maxLength={60} value={d.title} onChange={(e) => setD({ ...d, title: e.target.value })} />
+        <textarea className={`${input} sm:col-span-2`} rows={2} placeholder="Short text (optional)" aria-label="Section text" maxLength={1500} value={d.body} onChange={(e) => setD({ ...d, body: e.target.value })} />
+        {hint && <textarea className={`${input} font-mono text-[13px] sm:col-span-2`} rows={4} placeholder={hint} aria-label="Items" value={d.items} onChange={(e) => setD({ ...d, items: e.target.value })} />}
+        {d.type === 'form' && <><select className={input} aria-label="Tracker" value={d.trackerId} onChange={(e) => setD({ ...d, trackerId: e.target.value })}><option value="">Choose a tracker…</option>{trackers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select><input className={input} placeholder="Button text, for example Send request" aria-label="Button" maxLength={30} value={d.button} onChange={(e) => setD({ ...d, button: e.target.value })} /></>}
+        <button type="submit" className={`${btnPrimary} sm:col-span-2`} disabled={!d.title.trim()}><Plus size={16} />Add section</button></form></div>
   );
 }

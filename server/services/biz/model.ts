@@ -1,4 +1,5 @@
 import type { AgentSettings } from './agent.js';
+import type { Section } from './features.js';
 /**
  * bwenge4biz: a business page on Bwenge (bwenge.space/b/<name>) and the private side the owner uses to run it.
  *
@@ -28,9 +29,14 @@ export type MediaKind = 'image' | 'video';
 export interface Media { id: string; kind: MediaKind; mime: string; size: number; name: string; caption?: string; createdAt: string; visible: boolean; /** 'feed': uploaded for an update post; not in the gallery, public only while a post shows it. */ scope?: 'feed' }
 /** An update the owner posted to the public feed, like an Instagram post: a caption and up to ten photos or short videos, optionally tagged with a product. */
 export interface Post { id: string; at: string; text: string; mediaIds: string[]; pinned?: boolean; /** The product this post sells: gives the post an Order button. */ productId?: string }
+export interface PublicSection { id: string; type: Section['type']; title: string; body?: string; items?: Section['items']; button?: string; form?: { fields: Array<{ key: string; label: string; type: string; options?: string[]; required?: boolean }> } }
 export interface PublicPost { id: string; at: string; text: string; media: PublicMedia[]; pinned?: boolean; productId?: string; likes: number; comments: number; liked: boolean }
 export interface PostComment { id: string; postId: string; name: string; text: string; at: string; /** Written by the business itself (a reply). */ owner?: boolean }
 export const MAX_POST_TEXT = 1500, MAX_POST_MEDIA = 10, MAX_POSTS = 300, MAX_COMMENTS = 2000;
+export type Lang = 'en' | 'rw';
+export const LANGS: Lang[] = ['en', 'rw'];
+/** The page's own words in another language (written by the owner or their agent): the public page uses them when a visitor picks that language. */
+export interface Translation { tagline?: string; about?: string; products?: Record<string, { name?: string; description?: string; unit?: string }>; sections?: Record<string, { title?: string; body?: string; button?: string; items?: Array<{ title: string; text?: string; price?: string }> }>; posts?: Record<string, string> }
 export interface Business {
   id: string; ownerId: string; slug: string; name: string; category: Category; tagline: string; about: string; theme: Theme;
   logoId?: string; coverId?: string;
@@ -44,6 +50,10 @@ export interface Business {
   acceptPay?: boolean; payOpen?: boolean;
   /** The business agent's settings (private): see agent.ts. */
   agent?: AgentSettings;
+  /** Sections the owner or their agent added to the public page (FAQ, price list, a booking form…). */
+  sections?: Section[];
+  /** The language the page opens in, and what is translated (visitors can switch). */
+  lang?: Lang; translations?: Partial<Record<Lang, Translation>>;
   products: Product[]; media: Media[];
   /** Private to the owner. */
   notes: string;
@@ -144,6 +154,7 @@ export function applyProfile(b: Business, patch: any): void {
   if (patch.hours !== undefined) b.hours = cleanHours(patch.hours);
   if (patch.momoCode !== undefined) { const c = String(patch.momoCode ?? '').replace(/\D/g, ''); set('momoCode', c.length >= 3 && c.length <= 20 ? c : undefined); }
   if (patch.momoName !== undefined) set('momoName', clean(patch.momoName, 60));
+  if (patch.lang !== undefined) b.lang = oneOf(LANGS, patch.lang, b.lang ?? 'en');
   if (patch.acceptPay !== undefined) set('acceptPay', patch.acceptPay === true ? true : undefined);
   if (patch.payOpen !== undefined) set('payOpen', patch.payOpen === true ? true : undefined);
   if (patch.showPay !== undefined) b.showPay = patch.showPay === true && !!b.momoCode;
@@ -158,6 +169,8 @@ export interface PublicBusiness {
   hours: Hours[];
   pay?: { momoCode: string; momoName?: string };
   location?: { lat: number; lng: number };
+  lang?: Lang; translations?: Partial<Record<Lang, Translation>>;
+  sections?: PublicSection[];
   /** Present when visitors can pay online right on the page. */
   payOnline?: { open: boolean };
   products: Array<{ id: string; name: string; price: number | null; unit?: string; description?: string; media?: PublicMedia; available: boolean }>;
@@ -180,6 +193,7 @@ export function publicView(b: Business): PublicBusiness {
     gallery: b.media.filter((m) => m.visible && m.id !== b.logoId && m.id !== b.coverId).map((m) => pm(m.id)!),
     updatedAt: b.updatedAt,
   };
+  if (b.lang && b.lang !== 'en') out.lang = b.lang; if (b.translations && Object.keys(b.translations).length) out.translations = b.translations;
   if (typeof b.lat === 'number' && typeof b.lng === 'number') out.location = { lat: b.lat, lng: b.lng };
   const logo = pm(b.logoId), cover = pm(b.coverId); if (logo) out.logo = logo; if (cover) out.cover = cover;
   if (b.showPay && b.momoCode) out.pay = { momoCode: b.momoCode, ...(b.momoName ? { momoName: b.momoName } : {}) };

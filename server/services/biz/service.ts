@@ -1,12 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { MediaError, maxBytesFor, sniff, type MediaStore } from './media.js';
+import { MAX_RECORDS, MAX_SECTIONS, MAX_TRACKERS, cleanSection, cleanTracker, cleanValues, template as featureTemplate, type Section, type Tracker, type TrackerRecord } from './features.js';
 import { cleanAgent, cleanWorkflow, MAX_WORKFLOWS, type AgentSettings, type Workflow } from './agent.js';
 import { FIELDS, PROVIDERS, cleanSecrets, keyFrom, open as openSecret, seal, type Provider, type SecretsDoc } from './secrets.js';
 import { PayError, gatewayFor, maskPhone, msisdn, providerOf, realFetch, type Fetch, type Gateway } from './payments.js';
 import { MAX_ENTRIES, cleanCategory, cleanEntry, cleanRecurring, dayOf, dueDays, monthOf, summarize, summarizeCosts, type Budgets, type LedgerEntry, type Recurring } from './ledger.js';
 import {
   CATEGORIES, applyProfile, clean, cleanEmail, cleanPhone, cleanProduct, isLive, limitsFor, newBusiness, oneOf, publicView, slugFrom, validSlug,
-  type Business, type Category, type DayStats, type Enquiry, type PublicBusiness, type Product, type Post, type PublicPost, type PostComment, MAX_POST_MEDIA, MAX_POST_TEXT, MAX_POSTS, MAX_COMMENTS,
+  type Business, type Category, type DayStats, type Enquiry, type PublicBusiness, type Product, type Post, type PublicPost, type PostComment, type Lang, LANGS, type Translation, type PublicSection, MAX_POST_MEDIA, MAX_POST_TEXT, MAX_POSTS, MAX_COMMENTS,
 } from './model.js';
 
 /**
@@ -94,7 +95,15 @@ export function createBizService(deps: Deps) {
     try { return gatewayFor(p, JSON.parse(openSecret(e.sealed, secretKey())), e.environment, deps.fetchImpl ?? realFetch); } catch { return null; }
   }
   async function payReady(b: Business): Promise<boolean> { const doc = await kv.get<SecretsDoc>(`biz-secrets:${b.id}`); return !!(b.acceptPay && (doc?.mtn || doc?.airtel)); }
-  const withPay = async (b: Business, v: PublicBusiness): Promise<PublicBusiness> => ((await payReady(b)) ? { ...v, payOnline: { open: b.payOpen === true } } : v);
+  /** The public sections of a page, with the fields of a form taken from its tracker (never the tracker's records). */
+  async function publicSections(b: Business): Promise<PublicSection[]> {
+    const trackers = (await kv.get<{ items: Tracker[] }>(`biz-trackers:${b.id}`))?.items ?? []; const out: PublicSection[] = [];
+    for (const sec of b.sections ?? []) { if (sec.hidden) continue; const p: PublicSection = { id: sec.id, type: sec.type, title: sec.title, ...(sec.body ? { body: sec.body } : {}), ...(sec.items?.length ? { items: sec.items } : {}) };
+      if (sec.type === 'form') { const t = trackers.find((x) => x.id === sec.trackerId); if (!t) continue; p.button = sec.button; p.form = { fields: t.fields.map((f) => ({ key: f.key, label: f.label, type: f.type, ...(f.options ? { options: f.options } : {}), ...(f.required ? { required: true } : {}) })) }; }
+      out.push(p); }
+    return out;
+  }
+  const withPay = async (b: Business, v: PublicBusiness): Promise<PublicBusiness> => { const sections = await publicSections(b); const out = sections.length ? { ...v, sections } : v; return (await payReady(b)) ? { ...out, payOnline: { open: b.payOpen === true } } : out; };
   async function startPayment(b: Business, o: { phone: string; amount: number; item: string; customer?: string; src: LedgerEntry['src']; note?: string }): Promise<LedgerEntry> {
     const n = msisdn(o.phone); if (!n) throw new BizError('Enter a valid MTN or Airtel number, like 0788 123 456.');
     if (!Number.isInteger(o.amount) || o.amount < 100 || o.amount > 2_000_000) throw new BizError('The amount must be between 100 and 2,000,000 RWF.');
@@ -170,7 +179,7 @@ export function createBizService(deps: Deps) {
       const b = await mine(ownerId, id);
       await deps.syncAgenda?.({ ...b, agent: undefined }).catch(() => undefined);
       await media.removeAll(b.id).catch(() => undefined);
-      await Promise.all([kv.del(`biz:${b.id}`), kv.del(`biz-slug:${b.slug}`), kv.del(`biz-enq:${b.id}`), kv.del(`biz-stats:${b.id}`), kv.del(`biz-ledger:${b.id}`), kv.del(`biz-secrets:${b.id}`), kv.del(`biz-posts:${b.id}`), kv.del(`biz-likes:${b.id}`), kv.del(`biz-workflows:${b.id}`), kv.del(`biz-recurring:${b.id}`), kv.del(`biz-budgets:${b.id}`), kv.del(`biz-comments:${b.id}`)]);
+      await Promise.all([kv.del(`biz:${b.id}`), kv.del(`biz-slug:${b.slug}`), kv.del(`biz-enq:${b.id}`), kv.del(`biz-stats:${b.id}`), kv.del(`biz-ledger:${b.id}`), kv.del(`biz-secrets:${b.id}`), kv.del(`biz-posts:${b.id}`), kv.del(`biz-likes:${b.id}`), kv.del(`biz-workflows:${b.id}`), kv.del(`biz-recurring:${b.id}`), kv.del(`biz-trackers:${b.id}`), kv.del(`biz-records:${b.id}`), kv.del(`biz-budgets:${b.id}`), kv.del(`biz-comments:${b.id}`)]);
       const ids = (await kv.get<{ ids: string[] }>(`biz-owner:${ownerId}`))?.ids ?? []; await kv.put(`biz-owner:${ownerId}`, { ids: ids.filter((x) => x !== b.id) });
       const all = (await kv.get<{ ids: string[] }>('biz-index'))?.ids ?? []; await kv.put('biz-index', { ids: all.filter((x) => x !== b.id) });
     },
@@ -368,6 +377,84 @@ export function createBizService(deps: Deps) {
     async removeComment(ownerId: string, id: string, commentId: string): Promise<void> {
       const b = await mine(ownerId, id); const doc = (await kv.get<{ items: PostComment[] }>(`biz-comments:${b.id}`)) ?? { items: [] }; if (!doc.items.some((c) => c.id === commentId)) throw new BizError('That comment was not found.', 404);
       await kv.put(`biz-comments:${b.id}`, { items: doc.items.filter((c) => c.id !== commentId) });
+    },
+
+
+    /* ------------------------------------------------------------ features the owner or their agent creates: sections (public) and trackers (private) */
+    async sections(ownerId: string, id: string): Promise<Section[]> { return (await mine(ownerId, id)).sections ?? []; },
+    async saveSection(ownerId: string, id: string, input: any): Promise<Section> {
+      const b = await mine(ownerId, id); const list = b.sections ?? []; const i = input?.id ? list.findIndex((x) => x.id === input.id || x.title.toLowerCase() === String(input.id).toLowerCase()) : -1;
+      if (i < 0 && list.length >= MAX_SECTIONS) throw new BizError(`A page can have ${MAX_SECTIONS} extra sections. Remove one first.`);
+      const sec = cleanSection(input, i >= 0 ? list[i].id : randomUUID(), i >= 0 ? list[i] : undefined); if ('error' in sec) throw new BizError(sec.error);
+      if (sec.type === 'form' && !((await kv.get<{ items: Tracker[] }>(`biz-trackers:${b.id}`))?.items ?? []).some((t) => t.id === sec.trackerId)) throw new BizError('That tracker does not exist. Create it first.');
+      if (i >= 0) list[i] = sec; else list.push(sec); b.sections = list; await save(b); return sec;
+    },
+    async removeSection(ownerId: string, id: string, sectionId: string): Promise<boolean> { const b = await mine(ownerId, id); const n = (b.sections ?? []).length; b.sections = (b.sections ?? []).filter((x) => x.id !== sectionId && x.title.toLowerCase() !== sectionId.toLowerCase()); if (b.sections.length === n) return false; if (!b.sections.length) delete b.sections; await save(b); return true; },
+    async moveSection(ownerId: string, id: string, sectionId: string, dir: number): Promise<void> { const b = await mine(ownerId, id); const l = b.sections ?? []; const i = l.findIndex((x) => x.id === sectionId || x.title.toLowerCase() === sectionId.toLowerCase()); const j = i + (dir < 0 ? -1 : 1); if (i < 0 || j < 0 || j >= l.length) return; [l[i], l[j]] = [l[j], l[i]]; b.sections = l; await save(b); },
+    async trackers(ownerId: string, id: string) {
+      const b = await mine(ownerId, id); const ts = (await kv.get<{ items: Tracker[] }>(`biz-trackers:${b.id}`))?.items ?? []; const recs = (await kv.get<{ items: TrackerRecord[] }>(`biz-records:${b.id}`))?.items ?? [];
+      return ts.map((t) => ({ ...t, records: recs.filter((r) => r.trackerId === t.id).length, open: recs.filter((r) => r.trackerId === t.id && r.status === t.statuses[0]).length }));
+    },
+    async createTracker(ownerId: string, id: string, input: unknown): Promise<Tracker> {
+      const b = await mine(ownerId, id); const t = cleanTracker(input, randomUUID(), iso()); if ('error' in t) throw new BizError(t.error);
+      const doc = (await kv.get<{ items: Tracker[] }>(`biz-trackers:${b.id}`)) ?? { items: [] }; if (doc.items.length >= MAX_TRACKERS) throw new BizError(`You can have ${MAX_TRACKERS} trackers. Delete one first.`);
+      if (doc.items.some((x) => x.name.toLowerCase() === t.name.toLowerCase())) throw new BizError(`You already have a tracker called "${t.name}".`, 409, 'EXISTS'); doc.items.push(t); await kv.put(`biz-trackers:${b.id}`, doc); return t;
+    },
+    async deleteTracker(ownerId: string, id: string, trackerId: string): Promise<boolean> {
+      const b = await mine(ownerId, id); const doc = (await kv.get<{ items: Tracker[] }>(`biz-trackers:${b.id}`)) ?? { items: [] }; const t = doc.items.find((x) => x.id === trackerId || x.name.toLowerCase() === trackerId.toLowerCase()); if (!t) return false;
+      doc.items = doc.items.filter((x) => x !== t); await kv.put(`biz-trackers:${b.id}`, doc); const recs = (await kv.get<{ items: TrackerRecord[] }>(`biz-records:${b.id}`))?.items ?? []; await kv.put(`biz-records:${b.id}`, { items: recs.filter((r) => r.trackerId !== t.id) });
+      if (b.sections?.some((x) => x.trackerId === t.id)) { b.sections = b.sections.filter((x) => x.trackerId !== t.id); await save(b); } return true;
+    },
+    async records(ownerId: string, id: string, trackerId: string, o: { status?: string } = {}): Promise<{ tracker: Tracker; records: TrackerRecord[] }> {
+      const b = await mine(ownerId, id); const t = ((await kv.get<{ items: Tracker[] }>(`biz-trackers:${b.id}`))?.items ?? []).find((x) => x.id === trackerId || x.name.toLowerCase() === trackerId.toLowerCase()); if (!t) throw new BizError('That tracker was not found.', 404);
+      return { tracker: t, records: ((await kv.get<{ items: TrackerRecord[] }>(`biz-records:${b.id}`))?.items ?? []).filter((r) => r.trackerId === t.id && (!o.status || r.status === o.status)) };
+    },
+    async addRecord(ownerId: string, id: string, trackerId: string, input: { values?: unknown; status?: unknown }, src: TrackerRecord['src'] = 'studio'): Promise<TrackerRecord> {
+      const { tracker } = await this.records(ownerId, id, trackerId); const b = await mine(ownerId, id); const v = cleanValues(tracker, input.values ?? input); if ('error' in v) throw new BizError(v.error);
+      const r: TrackerRecord = { id: randomUUID(), trackerId: tracker.id, at: iso(), values: v.values, status: tracker.statuses.find((x) => x.toLowerCase() === String(input.status ?? '').toLowerCase()) ?? tracker.statuses[0], src };
+      const doc = (await kv.get<{ items: TrackerRecord[] }>(`biz-records:${b.id}`)) ?? { items: [] }; doc.items.unshift(r); await kv.put(`biz-records:${b.id}`, { items: doc.items.slice(0, MAX_RECORDS) }); return r;
+    },
+    async updateRecord(ownerId: string, id: string, recordId: string, patch: { values?: unknown; status?: unknown }): Promise<TrackerRecord> {
+      const b = await mine(ownerId, id); const doc = (await kv.get<{ items: TrackerRecord[] }>(`biz-records:${b.id}`)) ?? { items: [] }; const r = doc.items.find((x) => x.id === recordId || x.id.startsWith(recordId)); if (!r || recordId.length < 6) throw new BizError('That record was not found.', 404);
+      const t = ((await kv.get<{ items: Tracker[] }>(`biz-trackers:${b.id}`))?.items ?? []).find((x) => x.id === r.trackerId)!;
+      if (patch.values) { const v = cleanValues(t, patch.values, true, r.values); if ('error' in v) throw new BizError(v.error); r.values = v.values; }
+      if (patch.status !== undefined) { const st = t.statuses.find((x) => x.toLowerCase() === String(patch.status).toLowerCase()); if (!st) throw new BizError(`Status must be one of: ${t.statuses.join(', ')}.`); r.status = st; }
+      await kv.put(`biz-records:${b.id}`, doc); return r;
+    },
+    async deleteRecord(ownerId: string, id: string, recordId: string): Promise<boolean> {
+      const b = await mine(ownerId, id); const doc = (await kv.get<{ items: TrackerRecord[] }>(`biz-records:${b.id}`)) ?? { items: [] }; const r = recordId.length >= 6 ? doc.items.find((x) => x.id === recordId || x.id.startsWith(recordId)) : undefined; if (!r) return false;
+      await kv.put(`biz-records:${b.id}`, { items: doc.items.filter((x) => x !== r) }); return true;
+    },
+    /** A visitor fills in a form section: the answer becomes a new record (status: the first one) in the tracker behind it. */
+    async submitForm(slug: string, sectionId: string, input: { values?: unknown; website?: unknown }, visitor: string): Promise<{ saved: boolean }> {
+      if (clean(input.website, 40)) return { saved: false };
+      const b = await publicLive(slug); const sec = b?.sections?.find((x) => x.id === sectionId && x.type === 'form' && !x.hidden); if (!b || !sec) throw new BizError('This form is not available.', 404, 'NOT_FOUND');
+      const t = ((await kv.get<{ items: Tracker[] }>(`biz-trackers:${b.id}`))?.items ?? []).find((x) => x.id === sec.trackerId); if (!t) throw new BizError('This form is not available.', 404, 'NOT_FOUND');
+      const v = cleanValues(t, input.values); if ('error' in v) throw new BizError(v.error); if (!Object.keys(v.values).length) throw new BizError('Fill in the form first.');
+      if (tooMany(`form|${visitor}`, 8, now())) throw new BizError('You sent several requests already. Please try again later.', 429, 'RATE');
+      const r: TrackerRecord = { id: randomUUID(), trackerId: t.id, at: iso(), values: v.values, status: t.statuses[0], src: 'page' }; const doc = (await kv.get<{ items: TrackerRecord[] }>(`biz-records:${b.id}`)) ?? { items: [] }; doc.items.unshift(r); await kv.put(`biz-records:${b.id}`, { items: doc.items.slice(0, MAX_RECORDS) });
+      alert(b, { title: `New ${t.name} · ${b.name}`, text: Object.entries(r.values).map(([k, x]) => `${t.fields.find((f) => f.key === k)?.label ?? k}: ${x}`).join(', ').slice(0, 300) });
+      return { saved: true };
+    },
+    /** Switches on a ready-made feature (booking, faq, price list, deliveries, loans), in English or Kinyarwanda. */
+    async addFeature(ownerId: string, id: string, kind: string, lang: Lang = 'en'): Promise<{ tracker?: Tracker; section?: Section }> {
+      const tpl = featureTemplate(kind, lang); if (!tpl) throw new BizError('Unknown feature.'); const out: { tracker?: Tracker; section?: Section } = {};
+      if (tpl.tracker) out.tracker = await this.createTracker(ownerId, id, tpl.tracker);
+      if (tpl.section) out.section = await this.saveSection(ownerId, id, { ...tpl.section, ...(out.tracker ? { trackerId: out.tracker.id } : {}) });
+      return out;
+    },
+
+    /* ------------------------------------------------------------ language */
+    async setLang(ownerId: string, id: string, lang: unknown): Promise<Lang> { const b = await mine(ownerId, id); b.lang = LANGS.includes(lang as Lang) ? (lang as Lang) : b.lang ?? 'en'; await save(b); return b.lang; },
+    /** Stores the page's words in another language. Only the fields given change; each text is cleaned like the original. */
+    async setTranslation(ownerId: string, id: string, lang: unknown, input: any): Promise<Translation> {
+      const b = await mine(ownerId, id); if (!LANGS.includes(lang as Lang) || lang === 'en') throw new BizError('Choose a language to translate into (rw).'); const l = lang as Lang; const t: Translation = { ...(b.translations?.[l] ?? {}) };
+      if (input?.tagline !== undefined) t.tagline = clean(input.tagline, 120); if (input?.about !== undefined) t.about = clean(input.about, 1500);
+      const map = (src: any, ids: string[], fields: Array<[string, number]>) => { const out: Record<string, any> = {}; for (const [k, v] of Object.entries(src ?? {})) { if (!ids.includes(k) || !v || typeof v !== 'object') continue; const o: Record<string, any> = {}; for (const [f, max] of fields) if ((v as any)[f] !== undefined) o[f] = clean((v as any)[f], max); out[k] = o; } return out; };
+      if (input?.products) t.products = { ...(t.products ?? {}), ...map(input.products, b.products.map((p) => p.id), [['name', 80], ['description', 400], ['unit', 20]]) };
+      if (input?.sections) { const base = map(input.sections, (b.sections ?? []).map((x) => x.id), [['title', 60], ['body', 1500], ['button', 30]]); for (const [k, v] of Object.entries(input.sections as Record<string, any>)) if (base[k] && Array.isArray(v?.items)) base[k].items = v.items.slice(0, 30).map((it: any) => ({ title: clean(it?.title, 100), ...(clean(it?.text, 500) ? { text: clean(it.text, 500) } : {}), ...(clean(it?.price, 30) ? { price: clean(it.price, 30) } : {}) })).filter((it: any) => it.title); t.sections = { ...(t.sections ?? {}), ...base }; }
+      if (input?.posts && typeof input.posts === 'object') { const posts = (await kv.get<{ items: Post[] }>(`biz-posts:${b.id}`))?.items ?? []; t.posts = { ...(t.posts ?? {}) }; for (const [k, v] of Object.entries(input.posts as Record<string, unknown>)) if (posts.some((p) => p.id === k)) t.posts[k] = clean(v, MAX_POST_TEXT); }
+      b.translations = { ...(b.translations ?? {}), [l]: t }; await save(b); return t;
     },
 
     /* ------------------------------------------------------------ routines (workflows) the owner saves and runs by chat */
