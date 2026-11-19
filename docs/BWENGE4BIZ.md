@@ -90,6 +90,16 @@ Each costs credits like any assistant action. Nothing is published without the o
 * Staff accounts, orders and payment tracking, video conversion, page search on Google (pages are public, but not yet submitted to search engines), custom templates.
 * Free storage is a promise of this server's disk: back it up like the rest of the data.
 
+## The 4biz venture page (a worked example)
+
+A **venture page** is an ordinary Bwenge4biz page that presents several products under one aim. The example is **4biz**, the venture behind MySEB, Bwenge AI and Bwenge4biz, with the aim
+**"AI in our context"** (Kinyarwanda: *AI mu byacu*): a name, the one-line aim, a description, the three products, **Our products** (links), **What we help with** (business growth, business records,
+reaching new markets), **Good to know** (who it is for, how to start, what the blue check means), a WhatsApp contact and the blue verified badge. The words are in `server/services/biz/venture.ts`.
+- **Make it**: Admin → Platform controls → Business pages → **Create the 4biz page** (`POST /api/admin/platform/biz/venture`). It builds the page on the signed-in admin's account at `/b/4biz`, publishes it, and gives
+  that admin the blue badge. It is safe to press again: it refreshes the words and never duplicates products or sections. The page name `4biz` belongs to the first account that takes it.
+- **Change it**: edit the page in the studio like any other, or ask the assistant; pressing the admin button again restores the example words.
+- Tests: `tests/biz_venture.test.ts`.
+
 ## Verified badge
 
 A one-time payment of **1,000 RWF** puts a blue check mark next to the owner's name: on every public business page they own (`/b/<page>`), in the studio and on their profile button in the app. It belongs to the
