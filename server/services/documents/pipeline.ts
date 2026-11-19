@@ -14,7 +14,7 @@ import { mapPool, pageConcurrency, visionCalls } from '../../utils/concurrency.j
  * structure + independent checks → structured, source-linked result with review flags.
  */
 
-export const PIPELINE_VERSION = 'bwenge-docai-1.3.0';
+export const PIPELINE_VERSION = 'bwenge-docai-1.4.0';
 
 /** A full-page reading that is worth re-reading in close-ups: unclear writing, or nothing found on a large page. */
 export function needsCloseUp(page: { elements: Array<{ legibility: string; uncertainSpans: unknown[] }> }): boolean {

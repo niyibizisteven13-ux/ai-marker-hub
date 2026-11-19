@@ -5,6 +5,7 @@ import { EXT_KIND } from './tools/helpers.js';
 import { renderPdfPages } from './files/pdfPages.js';
 import JSZip from 'jszip';
 import sharp from 'sharp';
+import { enhancePhoto } from '../documents/photo.js';
 
 export interface UploadedFile {
   type?: 'image' | 'document';
@@ -73,9 +74,14 @@ export async function ingestUploads(prompt: string, files: UploadedFile[] = [], 
           : `[Attached image: ${name} (fileId ${meta.id}). No readable text was recovered. Ask the user to describe the image or provide the text.]`);
         continue;
       }
-      if (/^image\/(png|jpe?g|webp|gif)$/.test(f.mediaType)) {
+      // A phone photo of a written page is cleaned up first (crop to the sheet, even out shadows, straighten, strengthen faint ink).
+      const enh = f.mediaType === 'image/gif' ? null : await enhancePhoto(data);
+      if (enh?.jpeg) {
+        images.push(jpegPart(enh.jpeg));
+        textBlocks.push(`[Attached image: ${name} (fileId ${meta.id}). This is a photo of a page, cleaned up for reading (${enh.notes.map((n) => n.replace(/\s*\(.*$/, '').replace(/[.;]+$/, '')).join('; ')}). Read the writing as it appears; say so when a word is unclear instead of guessing.${enh.warnings.length ? ` Photo quality: ${enh.warnings.join(' ')}` : ''}]`);
+      } else if (/^image\/(png|jpe?g|webp|gif)$/.test(f.mediaType)) {
         images.push({ type: 'image_url', image_url: { url: `data:${f.mediaType};base64,${f.base64}` } });
-        textBlocks.push(`[Attached image: ${name} (fileId ${meta.id})]`);
+        textBlocks.push(`[Attached image: ${name} (fileId ${meta.id})${enh?.warnings.length ? `. Photo quality: ${enh.warnings.join(' ')}` : ''}]`);
       } else {
         // TIFF, BMP, AVIF, HEIF (where the server can decode it) and other photos: shown as JPEG.
         const jpg = await toJpeg(data);

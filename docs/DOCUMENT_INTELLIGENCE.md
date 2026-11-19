@@ -150,3 +150,37 @@ Measure before trusting the pipeline on real handwriting. `npm run eval:document
 - **Arithmetic only, no CAS.** `mathcheck.ts` recomputes numeric expressions. Algebraic steps, equation solving and symbolic equivalence would need SymPy, which needs the Python service deployed.
 - **The support judge is not independent.** It uses the same model family as the answer. The deterministic number and calculation checks are the stronger layer.
 - **Single process.** The job queue persists to disk but runs in one process; per-user job cap of 5; 20 pages per job. `/api/ai/scan-agent` is unchanged and does not use this pipeline.
+
+## Phone photos of paper (pipeline 1.4.0)
+
+A photo taken with a phone is not a scan: the sheet lies on a desk, a shadow or a lamp lights one side, the page is tilted. Before
+recognition (and before a chat photo reaches the model) `preprocess.ts` now:
+
+- **crops to the sheet** when a sharp-edged bright sheet fills 25–88% of the picture (`findPage`); the desk in the corners of a tilted
+  sheet is painted white on the working copy so it is not read as writing. A smooth shadow is never mistaken for a desk edge, so a
+  shadowed page is not cut through its writing;
+- **evens out lighting** when the paper brightness differs by 20% or more across the page (`flattenLighting`): each pixel is divided by
+  the local paper brightness, so pencil in a shadow keeps its contrast;
+- **flags a page on its side** (`uprightness`) with a plain warning, and as before straightens small tilts (deskew), strengthens faint
+  ink (CLAHE) and sharpens blur.
+
+The original image is always kept; every step is listed in `transforms`.
+
+In chat, `ai/ingest.ts` runs `enhancePhoto` (`documents/photo.ts`) on PNG, JPEG and WebP attachments that look like a written page. The
+model gets the cleaned JPEG plus a note saying what was done and what is still wrong ("blurred", "shadow", "on its side"), and is told to
+say when a word is unclear instead of guessing. Pictures that are not pages, GIFs, and pages that need no work are passed through
+unchanged; if the cleanup fails the original is sent.
+
+Limits: no perspective correction of a strongly slanted camera angle (only an axis-aligned crop plus deskew), no 90/180° auto-rotation
+(the page is flagged instead), and the output of the cleanup is grayscale, so coloured ink is read from shape, not colour.
+
+### Reading handwriting in chat
+
+The model cannot be fine-tuned from here; reliability comes from what it is given and told:
+
+- **Better pictures**: chat photos are cleaned first (above), and the new `zoom_image` tool returns the cleaned page as 2–4 overlapping
+  close-ups (or one enlarged region) at up to 1800 px, so small or dense writing is read at full detail instead of from a downscaled overview.
+- **A reading protocol** in the chat prompt (`capabilitiesPrompt.ts`, "Reading handwriting and photos of paper"): transcribe faithfully
+  and in order in any language, use context but never invent, mark unclear words `[unclear: best guess?]`, zoom before answering when
+  unsure, name photo problems and how to fix them, and show the transcription before marking.
+- Examination marking keeps its own pipeline (tiles, a second reading, verification, teacher corrections).

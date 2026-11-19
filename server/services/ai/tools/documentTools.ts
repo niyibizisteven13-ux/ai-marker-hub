@@ -1,6 +1,7 @@
 import { extractText } from '../files/extract.js';
 import { renderPdfPages } from '../files/pdfPages.js';
 import sharp from 'sharp';
+import { enhancePhoto } from '../../documents/photo.js';
 import type { Tool } from '../types.js';
 import { err, untrusted } from './helpers.js';
 
@@ -182,6 +183,60 @@ export const viewPages: Tool = {
       };
     } catch (e: any) {
       return err(`Could not show the pages: ${e?.code === 'forbidden' || e?.code === 'not_found' ? 'file not found' : String(e?.message).slice(0, 200)}`);
+    }
+  },
+};
+
+/** A close-up of handwriting: the whole page cut into overlapping bands, or one region, each at full detail. */
+export const zoomImage: Tool = {
+  definition: {
+    name: 'zoom_image',
+    description: 'Take a close look at handwriting, small print, a table or a diagram in an uploaded image. Use it BEFORE answering whenever writing in a photo is small, dense, faint or you are unsure of a word or number: it returns sharper close-ups (the page cleaned for reading: desk cropped away, shadows evened out). With only fileId it returns the page as 2 to 4 overlapping bands, top to bottom, read them in order. With region it returns that part only, enlarged. Coordinates run 0–1000 from the top-left of the image.',
+    parameters: { type: 'object', required: ['fileId'], properties: {
+      fileId: { type: 'string' },
+      bands: { type: 'integer', minimum: 1, maximum: 4, description: 'How many horizontal bands to cut the page into (default 3).' },
+      region: { type: 'object', description: 'One part of the image to enlarge.', properties: { x0: { type: 'number' }, y0: { type: 'number' }, x1: { type: 'number' }, y1: { type: 'number' } } },
+    } },
+  },
+  async execute(input, ctx) {
+    try {
+      const own = await ctx.files.read(input.fileId, ctx.userId).catch((e: any) => {
+        if (e?.code === 'forbidden' || e?.code === 'not_found') return null;
+        throw e;
+      });
+      if (!own) return err('Could not zoom: file not found');
+      if (!(/^image\//i.test(own.meta.mime) || /\.(png|jpe?g|webp|tiff?|bmp|heic|heif)$/i.test(own.meta.name))) return err(`${own.meta.name} is not an image. For a PDF use view_pages.`);
+      // Clean the photo first (the same cleanup chat photos get), then cut: the close-ups come from the cleaned page.
+      const enh = await enhancePhoto(own.data, { maxSide: 3000 });
+      const base = enh.jpeg ?? await sharp(own.data, { limitInputPixels: 100_000_000 }).rotate().flatten({ background: '#ffffff' }).jpeg({ quality: 92 }).toBuffer();
+      const meta = await sharp(base).metadata();
+      const W = meta.width ?? 0, H = meta.height ?? 0;
+      if (!W || !H) return err('The image could not be opened.');
+      const crop = async (x0: number, y0: number, x1: number, y1: number) => {
+        const left = Math.max(0, Math.floor((x0 / 1000) * W)), top = Math.max(0, Math.floor((y0 / 1000) * H));
+        const width = Math.max(8, Math.min(W - left, Math.ceil(((x1 - x0) / 1000) * W))), height = Math.max(8, Math.min(H - top, Math.ceil(((y1 - y0) / 1000) * H)));
+        return sharp(base).extract({ left, top, width, height }).resize({ width: 1800, height: 1800, fit: 'inside', kernel: 'lanczos3' }).sharpen({ sigma: 0.8 }).jpeg({ quality: 90 }).toBuffer();
+      };
+      const r = input.region;
+      const label = own.meta.name;
+      const note = enh.warnings.length ? ` Photo quality: ${enh.warnings.join(' ')}` : '';
+      if (r && [r.x0, r.y0, r.x1, r.y1].every((n: unknown) => typeof n === 'number' && Number.isFinite(n))) {
+        const x0 = Math.min(r.x0, r.x1), x1 = Math.max(r.x0, r.x1), y0 = Math.min(r.y0, r.y1), y1 = Math.max(r.y0, r.y1);
+        if (x1 - x0 < 10 || y1 - y0 < 10) return err('That region is too small.');
+        const jpg = await crop(Math.max(0, x0 - 10), Math.max(0, y0 - 10), Math.min(1000, x1 + 10), Math.min(1000, y1 + 10));
+        return { text: `Close-up of ${label} (x ${Math.round(x0)}–${Math.round(x1)}, y ${Math.round(y0)}–${Math.round(y1)}).${note}`, images: [{ mime: 'image/jpeg', base64: jpg.toString('base64'), label: `${label}, close-up` }] };
+      }
+      const n = Math.max(1, Math.min(4, Math.round(Number(input.bands) || 3)));
+      const overlap = 60;                                          // a line cut by one band is whole in the next
+      const step = 1000 / n;
+      const images = [];
+      for (let i = 0; i < n; i++) {
+        const jpg = await crop(0, Math.max(0, i * step - overlap / 2), 1000, Math.min(1000, (i + 1) * step + overlap / 2));
+        images.push({ mime: 'image/jpeg', base64: jpg.toString('base64'), label: `${label}, part ${i + 1} of ${n}` });
+      }
+      return { text: `Showing ${label} as ${n} overlapping close-up${n === 1 ? '' : 's'}, top to bottom (a line at the edge of one part appears whole in the next).${enh.notes.length ? ' The page was cleaned for reading first.' : ''}${note}`, images };
+    } catch (e: any) {
+      return err(`Could not zoom: ${String(e?.message ?? e).slice(0, 200)}`);
     }
   },
 };
