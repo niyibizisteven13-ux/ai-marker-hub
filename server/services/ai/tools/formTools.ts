@@ -93,11 +93,10 @@ export function reportSpec(title: string, ds: Dataset, analyses: Array<ReturnTyp
 }
 
 export function formTools(services: ToolServices & { formAi?: () => AI } = {}): Tool[] {
-  const ai = async (): Promise<AI> => {
+  const ai = async (userId: string): Promise<AI> => {
     if (services.formAi) return services.formAi();
-    const { agentTarget } = await import('../../AiService.js');
-    const a = agentTarget();
-    return { adapter: a.adapter, model: a.model, fallbackModel: a.fallbackModel };
+    const { userAgentTarget } = await import('../../AiService.js');
+    return userAgentTarget(userId, '');
   };
   const fail = (e: any) => (e instanceof FormError || e instanceof AnalysisError ? err(e.message) : err(`The form request failed: ${e?.message ?? 'unknown error'}.`));
   const meter = (userId: string, model: string, usage?: { input: number; output: number }) => { void recordUsage(userId, { kind: 'artifact', model, inputTokens: usage?.input, outputTokens: usage?.output }); };
@@ -110,7 +109,7 @@ export function formTools(services: ToolServices & { formAi?: () => AI } = {}): 
     },
     async execute(input, ctx) {
       try {
-        const a = await ai();
+        const a = await ai(ctx.userId);
         const g = await generateForm(a, String(input.description ?? ''), ctx.signal);
         meter(ctx.userId, a.model, g.usage);
         const id = await createForm(ctx.userId, g.schema);
@@ -130,7 +129,7 @@ export function formTools(services: ToolServices & { formAi?: () => AI } = {}): 
     async execute(input, ctx) {
       try {
         const { schema } = await ownForm(ctx.userId, String(input.formId));
-        const a = await ai();
+        const a = await ai(ctx.userId);
         const g = await editForm(a, schema, String(input.change ?? ''), ctx.signal);
         meter(ctx.userId, a.model, g.usage);
         await saveForm(ctx.userId, String(input.formId), g.schema);

@@ -63,8 +63,8 @@ await new Promise((r) => myseb.once('listening', r));
 
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chatagent-'));
 Object.assign(process.env, {
-  AI_PROVIDER: 'gonkarouter', AI_AGENT_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'test-key-not-real', ANTHROPIC_BASE_URL: `http://127.0.0.1:${(claude.address() as AddressInfo).port}`,
-  CLAUDE_AGENT_MODEL: 'claude-haiku-5-5', CLAUDE_FALLBACK_TO_GONKA: 'false', GONKA_API_KEY: 'test-gonka-key', GONKA_BASE_URL: 'http://127.0.0.1:9/gonka/v1', LIBRARY_AUTO_ROUTE: 'false',
+  AI_PROVIDER: 'anthropic', AI_AGENT_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'test-key-not-real', ANTHROPIC_BASE_URL: `http://127.0.0.1:${(claude.address() as AddressInfo).port}`,
+  CLAUDE_AGENT_MODEL: 'claude-haiku-5-5', LIBRARY_AUTO_ROUTE: 'false',
   MYSEB_URL: `http://127.0.0.1:${(myseb.address() as AddressInfo).port}`, MYSEB_SERVICE_KEY: 'svc-key', APP_BASE_URL: 'https://www.bwenge.space',
 });
 // MySEB is a paid service (see tests/myseb_access.test.ts); these scenarios are about the chat, so charging is switched off here.
@@ -83,6 +83,7 @@ test.after(async () => { await fileJobQueue.stop(); claude.close(); myseb.close(
 
 const user = `lect-${randomUUID().slice(0, 8)}`;
 await db.user.create({ data: { id: user, email: `${user}@test.local`, name: 'Lecturer', passwordHash: 'x', role: 'INSTRUCTOR' } });
+await db.subscription.create({ data: { id: randomUUID(), userId: user, planType: 'PRO', status: 'ACTIVE', endDate: new Date(Date.now() + 86_400_000) } });
 const formId = randomUUID();
 await db.applicationForm.create({ data: { id: formId, userId: user, title: 'Biology midterm', schema: JSON.stringify({ title: 'Biology midterm', fields: [], exam: { enabled: true, minutes: 45, requireMyseb: true, mysebExamId: examId } }), rubric: null, selectionSettings: null, createdAt: new Date(), updatedAt: new Date() } });
 
@@ -113,7 +114,8 @@ setAssignmentService(tasks);
 setCourseService(createCourseService({ store: new OwnedRecordStore<any>(path.join(dir, 'c')), sources: { available: async () => ({ tasks: [], quizzes: [] }), task: async (o: string, id: string) => { const a: any = await tasks.get(o, id); return { title: a.title, dueAt: a.dueAt, submissions: a.submissions.map((s: any) => ({ studentId: s.studentId, late: s.late, marking: s.marking })) } as any; }, quiz: async () => null } as any }));
 
 const toolResults = (req: any) => (req.messages.at(-1).content as any[]).filter((b) => b.type === 'tool_result').map((b) => (typeof b.content === 'string' ? b.content : JSON.stringify(b.content)));
-const ask = (text: string, history: any[] = []) => ai.generalAssist({ userId: user, messages: [...history, { role: 'user', content: text }], onEvent: () => undefined }) as Promise<any>;
+const largeRequest = (message: string) => message + '\n\n' + 'Additional document context. '.repeat(215);
+const ask = (text: string, history: any[] = []) => ai.generalAssist({ userId: user, messages: [...history, { role: 'user', content: largeRequest(text) }], onEvent: () => undefined }) as Promise<any>;
 
 test('"how is my exam going" reaches the tools, and the live room is read, changed and explained from the chat', async () => {
   claudeRequests.length = 0; mysebCalls.length = 0;
@@ -201,7 +203,7 @@ test('marking a task from the chat: the scheme is read back for a yes, marks are
     { text: 'Marked: Aline 18/20, Eric 12/20. The Excel sheet is attached. Release to students?' },
   );
   const events: any[] = [];
-  const out: any = await ai.generalAssist({ userId: user, messages: [...history, { role: 'user', content: 'Yes, mark them, show me the marks and send me the Excel sheet.' }], onEvent: (e) => events.push(e) });
+  const out: any = await ai.generalAssist({ userId: user, messages: [...history, { role: 'user', content: largeRequest('Yes, mark them, show me the marks and send me the Excel sheet.') }], onEvent: (e) => events.push(e) });
   assert.match(toolResults(claudeRequests[1])[0], /Marking started for 2 hand-in/);
   const [results, release, exported] = toolResults(claudeRequests[2]);
   assert.match(results, /2 handed in, 2 marked, average 75%/); assert.match(results, /Aline Uwase \(2201\): marked, 18\/20 \(90%\), not released yet/);
@@ -234,8 +236,16 @@ test('a class from a pasted list, linked to the task, read back as numbers', asy
   assert.match(overview, /S4 Biology \(BIO4\): 3 students, class average 75%/); assert.match(overview, /2\/3 handed in/);
 });
 
-test('general questions stay on the everyday chat model', async () => {
+test('general web questions stream from Claude without enabling tools', async () => {
   claudeRequests.length = 0;
-  await assert.rejects(ask('What is photosynthesis?'));
-  assert.equal(claudeRequests.length, 0, 'no tool model for a general question');
+  script.push({ text: 'Photosynthesis allows plants to make sugars from light.' });
+  let text = '';
+  await ai.streamUserChat('What is photosynthesis?', {
+    userId: user,
+    planId: 'FREE',
+    onToken: token => { text += token; },
+  });
+  assert.match(text, /make sugars/);
+  assert.equal(claudeRequests.length, 1);
+  assert.equal(claudeRequests[0].tools, undefined);
 });

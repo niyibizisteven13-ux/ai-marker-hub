@@ -66,7 +66,7 @@ export interface TaskMarker {
 type Exams = {
   createExam(userId: string, input: { title?: string }): Promise<{ id: string }>;
   load(userId: string, examId: string): Promise<any>;
-  addSubmissions(userId: string, examId: string, files: Array<{ name: string; buffer: Buffer; mime: string }>, mapping?: Array<{ fileName: string; candidateId: string; candidateName?: string }>): Promise<{ accepted: Array<{ id: string }>; rejected: Array<{ fileName: string; reason: string }> }>;
+  addSubmissions(userId: string, examId: string, files: Array<{ name: string; buffer: Buffer; mime: string }>, mapping?: Array<{ fileName: string; candidateId: string; candidateName?: string }>, opts?: { forMarking?: boolean }): Promise<{ accepted: Array<{ id: string }>; rejected: Array<{ fileName: string; reason: string }> }>;
   submitSchemeDocuments(userId: string, examId: string, input: { scheme: Array<{ name: string; buffer: Buffer; mime: string }>; autoMark?: boolean }): Promise<unknown>;
   startMarking(userId: string, examId: string): Promise<unknown>;
   reviewList(e: any): Array<{ submissionId: string; total: number; maxTotal: number; percent: number; released: boolean; releasedAt: string | null; openFlags: number }>;
@@ -111,14 +111,13 @@ export function createTaskMarker(exams: () => Exams, opts: { retryMs?: number; m
         if (!examId) {
           examId = (await x.createExam(ownerId, { title: a.title.slice(0, 120) })).id;
           first = true;
-          await ctx.save({ examId });
         }
         const cid = s.studentId && ID_OK.test(s.studentId) ? s.studentId : `T${s.id.replace(/-/g, '').slice(0, 7).toUpperCase()}`;
         const name = `${cid}.pdf`;
         const pdf = await ctx.pdf();
-        const { accepted, rejected } = await x.addSubmissions(ownerId, examId, [{ name, buffer: pdf, mime: 'application/pdf' }], [{ fileName: name, candidateId: cid, candidateName: s.studentName }]);
+        const { accepted, rejected } = await x.addSubmissions(ownerId, examId, [{ name, buffer: pdf, mime: 'application/pdf' }], [{ fileName: name, candidateId: cid, candidateName: s.studentName }], { forMarking: true });
         if (!accepted.length) { await ctx.save({ markError: rejected[0]?.reason ?? 'The hand-in could not be read.' }); return; }
-        await ctx.save({ examSubmissionId: accepted[0].id, markError: null });
+        await ctx.save({ ...(first ? { examId } : {}), examSubmissionId: accepted[0].id, markError: null });
         // The first hand-in brings the scheme; marking starts by itself once it is read and unambiguous.
         if (first) await x.submitSchemeDocuments(ownerId, examId, { scheme: await ctx.scheme(), autoMark: true });
         else kick(ownerId, examId);

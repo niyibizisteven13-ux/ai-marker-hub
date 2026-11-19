@@ -31,6 +31,7 @@ import { upload, batchUpload, chatFileUpload, CHAT_MAX_FILE_BYTES } from './serv
 import multer from 'multer';
 import { isBase64 } from './server/utils/base64.js';
 import { fitHistory, sanitizeHistory } from './server/services/ai/chatHistory.js';
+import { needsPlatformTools } from './server/services/ai/platformIntent.js';
 import { needsResearch } from './server/services/ai/research.js';
 import { ingestDocument } from './server/services/DocumentIngestionService.js';
 import { classifyIntent, isSmallTalkMessage } from './server/services/intentRouter.js';
@@ -56,16 +57,18 @@ import { normalizeExam } from './shared/examRules.js';
 import { applyPool } from './shared/formPool.js';
 import { createStorageRouter } from './server/routes/storageRoutes.js';
 import { StorageFullError, ensureStorage } from './server/services/billing/storage.js';
-import { explanationOf, gradeQuiz, quizRecord } from './server/services/forms/quiz.js';
+import { gradeQuiz, quizRecord } from './server/services/forms/quiz.js';
 import { markSubmissionWithAi } from './server/services/forms/aiMarking.js';
+import { sanitizePublicFormSchema } from './server/services/forms/publicSchema.js';
+import { completeWrittenReview, matchesQuizReceipt, newQuizReceipt, quizCompletion, quizReview } from './server/services/forms/quizReceipt.js';
 import { allowAi, chargeAi, AI_PRICE } from './server/services/billing/aiMeter.js';
 import { checkUsage as checkPlanUsage } from './server/services/billing/usage.js';
 import { normalizeAssessment } from './shared/assessment.js';
-import { uploadLimitBytes, uploadTooLargeMessage } from './server/services/billing/plans.js';
+import { uploadLimitBytes, uploadTooLargeMessage, type PlanId } from './server/services/billing/plans.js';
 import { outputsRouter, sharedOutputsRouter } from './server/routes/outputRoutes.js';
 import { curationViewRouter, knowledgeAdminRouter, knowledgeSourcesRouter } from './server/routes/knowledgeRepositoryRoutes.js';
 import { shutdownOcr } from './server/services/documents/ocr.js';
-import { agentTarget, fileJobQueue } from './server/services/AiService.js';
+import { userChatAvailable, fileJobQueue } from './server/services/AiService.js';
 import { planOutput } from './server/services/outputs/planner.js';
 import { asksAboutDatasets } from './server/services/knowledge/published.js';
 import { checkUsage, recordUsage } from './server/services/billing/usage.js';
@@ -82,7 +85,7 @@ import { ensureVersion } from './server/services/forms/versions.js';
 import { ownForm } from './server/services/forms/service.js';
 import { useToolAgent } from './server/services/outputs/chatTurn.js';
 import { emptyModelOutputError, nonEmptyModelText } from './server/services/ai/modelOutput.js';
-import { validateScanGradeOutput } from './server/services/ai/scanOutput.js';
+import { needsScanRecognition, SCANNED_PAPER_MESSAGE } from './server/services/exams/scanPolicy.js';
 import logger from './server/utils/logger.js';
 
 import { validate, examSchema, markScriptSchema, batchGradeSchema, chatSchema } from './server/middleware/validation.js';
@@ -164,11 +167,7 @@ if (
 ) {
   throw new Error('DATABASE_URL must use PostgreSQL in production; SQLite file: URLs are not supported.');
 }
-if (!process.env.AI_PROVIDER) {
-  process.env.AI_PROVIDER = 'gonkarouter';
-}
-const AI_PROVIDERS = ['GONKA_API_KEY', 'GEMINI_API_KEY', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'NVIDIA_NIM_API_KEY', 'OLLAMA_BASE_URL'];
-const hasChatProvider = AI_PROVIDERS.some((key) => process.env[key]);
+const hasChatProvider = userChatAvailable();
 if (!process.env.GEMINI_API_KEY) {
   logger.warn(
     `GEMINI_API_KEY is not configured; semantic embeddings are unavailable and knowledge retrieval will use lexical matching.${hasChatProvider ? '' : ' No chat provider is configured.'}`,
@@ -663,9 +662,9 @@ if (process.env.NODE_ENV !== 'production') {
 logger.info('Environment Check:', {
   hasGemini: !!process.env.GEMINI_API_KEY,
   hasOpenRouter: !!process.env.OPENROUTER_API_KEY,
-  hasGonka: !!process.env.GONKA_API_KEY,
+  hasClaude: hasChatProvider,
   hasOllama: !!process.env.OLLAMA_BASE_URL,
-  provider: process.env.AI_PROVIDER,
+  provider: 'anthropic',
 });
 
 // Helper: pricing lookup backing the lookup_pricing tool, using the 1.2x margin
@@ -868,7 +867,7 @@ async function executeBackendAgentPostProcess(
           {
             name: 'Inference Latency & Token Efficiency',
             confidence: '92.8%',
-            insight: `Average inference latency across ${usageEvents.length || 1} queries is ${avgLatency}ms via GonkaRouter GLM-5.3-Flash.`,
+            insight: `Average inference latency across ${usageEvents.length || 1} queries is ${avgLatency}ms recorded by Bwenge.`,
           },
         ],
         columns: ['Database Table', 'Live Records', 'Primary Metric', 'Detected Pattern'],
@@ -880,7 +879,7 @@ async function executeBackendAgentPostProcess(
         ],
         promptOptimization: {
           original: q.slice(0, 240),
-          upgraded: `Act as a calibrated GonkaRouter domain specialist grounded in our live database (${examples.length} fine-tune examples, ${submissions.length} submissions). Execute "${q.slice(0, 140)}" with quantitative evidence, zero filler text, and structured schema output.`,
+          upgraded: `Act as a calibrated domain specialist grounded in our live database (${examples.length} fine-tune examples, ${submissions.length} submissions). Execute "${q.slice(0, 140)}" with quantitative evidence, zero filler text, and structured schema output.`,
         },
       };
       sendChunk(`\n\n\`\`\`artifact-json\n${JSON.stringify(datasetArtifact, null, 2)}\n\`\`\``);
@@ -892,12 +891,12 @@ async function executeBackendAgentPostProcess(
 
   // 3. Vector Graphic / Logo / Image Synthesis
   if (/\b(logo|image|vector\s+graphic|poster|banner|illustration|marketing\s+layout|draw\s+a)\b/i.test(qLower)) {
-    const cleanTitle = q.replace(/^(design|create|generate|draw|make)\s+(a|an|the)?\s*/i, '').slice(0, 48) || 'GonkaRouter Vector Graphic';
-    const svg = `<svg viewBox="0 0 800 450" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0B132B"/><stop offset="55%" stop-color="#0D2B24"/><stop offset="100%" stop-color="#1C2541"/></linearGradient><linearGradient id="acc" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#10B981"/><stop offset="50%" stop-color="#3FA7E0"/><stop offset="100%" stop-color="#F59E0B"/></linearGradient></defs><rect width="800" height="450" rx="24" fill="url(#bg)"/><circle cx="650" cy="110" r="140" fill="#10B981" opacity="0.12"/><circle cx="160" cy="360" r="170" fill="#3FA7E0" opacity="0.12"/><g transform="translate(80,95)"><rect x="0" y="0" width="96" height="96" rx="24" fill="url(#acc)"/><path d="M28 66 L48 26 L68 66 Z" fill="#0B132B"/><circle cx="48" cy="52" r="8" fill="#FAF9F5"/><text x="124" y="46" fill="#FAF9F5" font-family="system-ui,sans-serif" font-size="30" font-weight="800">${cleanTitle.replace(/[<>&"']/g, '')}</text><text x="124" y="78" fill="#9AA6C9" font-family="system-ui,sans-serif" font-size="16">Synthesized by GonkaRouter Visual Engine · Scalable Vector Layout</text><rect x="0" y="135" width="640" height="2" fill="url(#acc)" opacity="0.5"/><rect x="0" y="165" width="200" height="90" rx="14" fill="#162238" stroke="#10B981" stroke-opacity="0.4"/><text x="20" y="202" fill="#10B981" font-family="system-ui,sans-serif" font-size="13" font-weight="700">PRECISION DESIGN</text><text x="20" y="228" fill="#E8EAF2" font-family="system-ui,sans-serif" font-size="18" font-weight="700">Vector Ready</text><rect x="220" y="165" width="200" height="90" rx="14" fill="#162238" stroke="#3FA7E0" stroke-opacity="0.4"/><text x="240" y="202" fill="#3FA7E0" font-family="system-ui,sans-serif" font-size="13" font-weight="700">COLOR SYSTEM</text><text x="240" y="228" fill="#E8EAF2" font-family="system-ui,sans-serif" font-size="18" font-weight="700">High Contrast</text><rect x="440" y="165" width="200" height="90" rx="14" fill="#162238" stroke="#F59E0B" stroke-opacity="0.4"/><text x="460" y="202" fill="#F59E0B" font-family="system-ui,sans-serif" font-size="13" font-weight="700">EXPORT FORMAT</text><text x="460" y="228" fill="#E8EAF2" font-family="system-ui,sans-serif" font-size="18" font-weight="700">SVG + PNG</text></g></svg>`;
+    const cleanTitle = q.replace(/^(design|create|generate|draw|make)\s+(a|an|the)?\s*/i, '').slice(0, 48) || 'Bwenge Vector Graphic';
+    const svg = `<svg viewBox="0 0 800 450" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#0B132B"/><stop offset="55%" stop-color="#0D2B24"/><stop offset="100%" stop-color="#1C2541"/></linearGradient><linearGradient id="acc" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#10B981"/><stop offset="50%" stop-color="#3FA7E0"/><stop offset="100%" stop-color="#F59E0B"/></linearGradient></defs><rect width="800" height="450" rx="24" fill="url(#bg)"/><circle cx="650" cy="110" r="140" fill="#10B981" opacity="0.12"/><circle cx="160" cy="360" r="170" fill="#3FA7E0" opacity="0.12"/><g transform="translate(80,95)"><rect x="0" y="0" width="96" height="96" rx="24" fill="url(#acc)"/><path d="M28 66 L48 26 L68 66 Z" fill="#0B132B"/><circle cx="48" cy="52" r="8" fill="#FAF9F5"/><text x="124" y="46" fill="#FAF9F5" font-family="system-ui,sans-serif" font-size="30" font-weight="800">${cleanTitle.replace(/[<>&"']/g, '')}</text><text x="124" y="78" fill="#9AA6C9" font-family="system-ui,sans-serif" font-size="16">Synthesized by Bwenge Visual Engine · Scalable Vector Layout</text><rect x="0" y="135" width="640" height="2" fill="url(#acc)" opacity="0.5"/><rect x="0" y="165" width="200" height="90" rx="14" fill="#162238" stroke="#10B981" stroke-opacity="0.4"/><text x="20" y="202" fill="#10B981" font-family="system-ui,sans-serif" font-size="13" font-weight="700">PRECISION DESIGN</text><text x="20" y="228" fill="#E8EAF2" font-family="system-ui,sans-serif" font-size="18" font-weight="700">Vector Ready</text><rect x="220" y="165" width="200" height="90" rx="14" fill="#162238" stroke="#3FA7E0" stroke-opacity="0.4"/><text x="240" y="202" fill="#3FA7E0" font-family="system-ui,sans-serif" font-size="13" font-weight="700">COLOR SYSTEM</text><text x="240" y="228" fill="#E8EAF2" font-family="system-ui,sans-serif" font-size="18" font-weight="700">High Contrast</text><rect x="440" y="165" width="200" height="90" rx="14" fill="#162238" stroke="#F59E0B" stroke-opacity="0.4"/><text x="460" y="202" fill="#F59E0B" font-family="system-ui,sans-serif" font-size="13" font-weight="700">EXPORT FORMAT</text><text x="460" y="228" fill="#E8EAF2" font-family="system-ui,sans-serif" font-size="18" font-weight="700">SVG + PNG</text></g></svg>`;
     const imageArtifact = {
       type: 'image',
       title: cleanTitle,
-      model: 'GonkaRouter Visual · Nano Banana Pro',
+      model: 'Bwenge SVG',
       aspectRatio: '16:9',
       style: 'Vector Brand & Layout Synthesis',
       palette: ['#0D2B24', '#10B981', '#3FA7E0', '#F59E0B'],
@@ -914,7 +913,7 @@ async function executeBackendAgentPostProcess(
     const videoArtifact = {
       type: 'video',
       title: cleanTitle,
-      model: 'GonkaRouter Motion · Flow Engine',
+      model: 'Bwenge Motion Preview',
       aspectRatio: '16:9',
       character: { name: 'Dr. Amina', role: 'AI Lead Narrator', avatarStyle: 'talking_head' },
       scenes: [
@@ -953,7 +952,7 @@ async function executeBackendAgentPostProcess(
 
   // 5. Audio, Speech, Podcast & Music Synthesis
   if (/\b(podcast|voiceover|audio\s+track|music\s+track|sound\s+effect|synth\s+melody)\b/i.test(qLower)) {
-    const cleanTitle = q.slice(0, 52) || 'GonkaRouter Audio Studio';
+    const cleanTitle = q.slice(0, 52) || 'Bwenge Audio Studio';
     const audioArtifact = {
       type: 'audio',
       title: cleanTitle,
@@ -992,14 +991,14 @@ async function executeBackendAgentPostProcess(
       summary: 'End-to-end automated DAG pipeline with live spreadsheet schema and scheduled dispatch sequence.',
       steps: [
         { id: '1', name: 'Ingest & Validate', role: 'Trigger', detail: 'Capture incoming submissions and documents into database', metric: '100% schema check' },
-        { id: '2', name: 'GonkaRouter Fine-Tuned Scoring', role: 'Agent', detail: 'Evaluate against active rubric and fine-tuned weights', metric: '< 350ms latency' },
+        { id: '2', name: 'Bwenge Fine-Tuned Scoring', role: 'Agent', detail: 'Evaluate against active rubric and fine-tuned weights', metric: '< 350ms latency' },
         { id: '3', name: 'Shortlist & Notify', role: 'Action', detail: 'Rank top candidates and trigger automated notifications', metric: 'Auto-dispatched' },
       ],
       spreadsheet: {
         columns: ['Stage', 'Owner', 'SLA', 'Automation Status', 'Target KPI'],
         rows: [
           ['1. Data Capture', 'Ingestion Webhook', 'Instant', 'Active', 'Zero dropped records'],
-          ['2. AI Evaluation', 'GonkaRouter Agent', '< 1 sec', 'Active', '>= 95% rubric agreement'],
+          ['2. AI Evaluation', 'Bwenge Agent', '< 1 sec', 'Active', '>= 95% rubric agreement'],
           ['3. Review & Export', 'Program Lead', '24 hours', 'Automated', '1-click CSV/Excel'],
         ],
       },
@@ -1048,7 +1047,6 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
     jobId: bodyJobId,
     service: bodyService,
     extractSchema,
-    provider: requestedProvider,
     answerLanguage,
     attachmentIds,
     contextFiles: rawContextFiles,
@@ -1060,13 +1058,16 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
   if (!userId) return res.status(401).json({ error: 'Authentication required.' });
   const hasFile = !!req.file || !!attachmentBase64 || attachments.length > 0;
 
+  let chatPlan: PlanId = 'FREE';
   // ── PLAN LIMITS (daily / weekly / monthly credits, per-feature daily caps, message size) ──
   {
     const earlyPlan = planOutput({ message: query || '' });
     const visual = Boolean(req.file && /^image\/|application\/pdf/.test(req.file.mimetype)) || attachments.some((a: any) => /^image\/|application\/pdf/.test(String(a?.mimeType ?? a?.type ?? '')));
     const kind = visual ? 'vision' : earlyPlan.artifact ? 'artifact' : earlyPlan.needsComputation ? 'tool' : 'chat';
     const gate = await checkUsage(userId, { kind, chars: String(query || '').length, attachments: attachments.length + (req.file ? 1 : 0) }).catch(() => null);
-    if (gate && !gate.allowed) {
+    if (!gate) return res.status(503).json({ error: 'Bwenge could not verify your plan. Please try again.' });
+    chatPlan = gate.plan.id;
+    if (!gate.allowed) {
       rememberBlocked(userId, req.body, 'your request');
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
@@ -1110,12 +1111,6 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
   }
   // ─────────────────────────────────────────────────────────────────
 
-  // ── SENTIMENT ANALYSIS (parallel, non-blocking) ──────────────────────────
-  // Detect emotional tone to adapt system prompt persona.
-  // Runs fire-and-forget alongside history parsing — only awaited when
-  // building the final system prompt.
-  const sentimentPromise = sentimentService.analyze(query || '').catch(() => null);
-  // ─────────────────────────────────────────────────────────────────
   let parsedHistory: any[] = [];
   try {
     if (Array.isArray(history)) {
@@ -1131,8 +1126,6 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
 
   // The whole conversation: recent turns word for word, older ones condensed, within the model's context.
   parsedHistory = fitHistory(sanitizeHistory(parsedHistory));
-
-  const cleanProvider = requestedProvider === 'undefined' || requestedProvider === 'null' || !requestedProvider ? null : requestedProvider;
 
   const intent = await classifyIntent(query || '', hasFile);
   const isSmallTalk = isSmallTalkMessage(query || '', hasFile);
@@ -1160,7 +1153,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
   const contextFiles: Array<{ fileId: string; name: string }> = Array.isArray(rawContextFiles)
     ? rawContextFiles.slice(-5).map((f: any) => ({ fileId: String(f.fileId).slice(0, 100), name: String(f.name || 'file').slice(0, 255) }))
     : [];
-  const agentReadsFiles = agentTarget().provider === 'anthropic' || Boolean(process.env.GONKA_API_KEY);
+  const agentReadsFiles = userChatAvailable();
   let attachmentBytes = 0;
   for (const attachment of attachments) {
     const extension = path.extname(attachment.name).toLowerCase();
@@ -1321,7 +1314,6 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
   logger.info('Chat Request Info:', {
     intent,
     service,
-    requestedProvider: cleanProvider,
     hasServerText: !!serverAttachmentText,
     serverVisualCount: serverVisualFiles.length,
   });
@@ -1425,16 +1417,17 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
     }
   }
 
-  const hasClaude = await aiService.providerAvailable('anthropic');
   // Requests for files, charts or computed numbers need the tool-enabled agent; the legacy stream below has
   // no tools and could only describe a file instead of creating one.
   const turnPlan = planOutput({ message: planQuery, attachments: attachments.map((a: any) => ({ name: String(a?.name ?? ''), mime: a?.mimeType })), hasDataset: attachments.some((a: any) => /\.(csv|tsv|xlsx|xls|json)$/i.test(String(a?.name ?? ''))) });
 
-  if (useToolAgent({
-    intent, service, isSmallTalk, requestedProvider: cleanProvider, hasClaudeKey: hasClaude, aiProvider: process.env.AI_PROVIDER,
-    agentAvailable: agentTarget().provider === 'anthropic' || Boolean(process.env.GONKA_API_KEY), plan: turnPlan,
-    hasVisualFiles: serverVisualFiles.length > 0 || contextFiles.length > 0 || Boolean(req.file && /^image\/|application\/pdf/.test(req.file.mimetype)),
-    asksAboutDatasets: intent === 'general_assist' && !isSmallTalk && (needsResearch(query || '') || await asksAboutDatasets(query || '', userId).catch(() => false)),
+  const hasVisualFiles = serverVisualFiles.length > 0 || contextFiles.length > 0 || Boolean(req.file && /^image\/|application\/pdf/.test(req.file.mimetype));
+  const usePaidAgent = chatPlan !== 'FREE' && intent === 'general_assist' && service === 'general' &&
+    (Boolean(extractSchema) || planQuery.trim().length >= 6000);
+  if (usePaidAgent || useToolAgent({
+    intent, service, isSmallTalk, requestedProvider: null, hasClaudeKey: false, aiProvider: 'anthropic',
+    agentAvailable: agentReadsFiles, plan: turnPlan, hasVisualFiles,
+    asksAboutDatasets: intent === 'general_assist' && !isSmallTalk && (needsPlatformTools(planQuery) || needsResearch(query || '') || await asksAboutDatasets(query || '', userId).catch(() => false)),
   })) {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -1442,6 +1435,7 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
     // The emitter sends a heartbeat every 15 s, so long tool calls are never cut by a proxy as idle.
     const emitter = makeEmitter(res, { progress: true });
     const keepAlive: ReturnType<typeof setInterval> | undefined = undefined;
+    const sentimentPromise = isSmallTalk ? Promise.resolve(null) : sentimentService.analyze(query || '').catch(() => null);
     announceFiles(emitter);
 
     try {
@@ -1499,6 +1493,7 @@ ${augmentedQuery}`;
       await aiService.generalAssist({
 
         userId,
+        planId: chatPlan,
         learning,
         messages: [...parsedHistory.map((h) => ({ role: h.role, content: h.text })), { role: 'user', content: augmentedQuery }],
         files: finalFiles,
@@ -1750,9 +1745,6 @@ ${augmentedQuery}`;
 
   try {
     const requestStartedAt = Date.now();
-    const ftModelCtx = isSmallTalk
-      ? { modelName: '', baseModel: '', adapterPrompt: '', fewShotBlock: '', exampleCount: 0 }
-      : await contextAwareService.getActiveFineTunedModelContext(userId);
     let hydratedContext = '';
     if (!isSmallTalk) {
       try {
@@ -1826,13 +1818,11 @@ ${augmentedQuery}`;
     const modeBlock = learningModePrompt(learning);
     const systemWithContext = `${baseSystemWithContext}${platformBlock ? `\n\n${platformBlock}` : ''}${modeBlock ? `\n\n${modeBlock}` : ''}${languageDirective}`;
 
-    const isOllama = cleanProvider === 'ollama' || (process.env.AI_PROVIDER === 'ollama' && !cleanProvider);
-    const hasOllama = await aiService.providerAvailable('ollama');
     const allowedEvidenceIds = [...hydratedContext.matchAll(/\[EVIDENCE ID: ([^\]]+)\]/g)].map((match) => match[1]);
     const requireVerifiedCitations = allowedEvidenceIds.length > 0;
 
     let finalStreamedText = '';
-    const recordUsageAndPostProcess = async (providerLabel: string) => {
+    const recordUsageAndPostProcess = async ({ model, provider, usage }: Awaited<ReturnType<AiService['streamUserChat']>>) => {
       await executeBackendAgentPostProcess(userId, query || '', finalStreamedText, (delta) => {
         finalStreamedText += delta;
         if (!requireVerifiedCitations) {
@@ -1847,8 +1837,9 @@ ${augmentedQuery}`;
         emitter.send('text', { text: finalStreamedText });
       }
       await recordUsage(userId, {
-        kind: 'chat', model: ftModelCtx.modelName || 'gonka',
-        inputTokens: Math.round((prompt.length + systemWithContext.length) / 4), outputTokens: Math.round(finalStreamedText.length / 4),
+        kind: 'chat', model,
+        inputTokens: usage.input_tokens || Math.round((prompt.length + systemWithContext.length) / 4),
+        outputTokens: usage.output_tokens || Math.round(finalStreamedText.length / 4),
       });
       await prisma.usageEvent
         .create({
@@ -1856,7 +1847,7 @@ ${augmentedQuery}`;
             userId,
             question: String(query || '').slice(0, 500),
             knowledgeBaseId: null,
-            model: ftModelCtx.modelName || 'zai-org/GLM-5.3-Flash',
+            model,
             tokensIn: Math.max(10, Math.round((prompt.length + systemWithContext.length) / 4)),
             tokensOut: Math.max(10, Math.round(finalStreamedText.length / 4)),
             latencyMs: Math.max(25, Date.now() - requestStartedAt),
@@ -1865,7 +1856,7 @@ ${augmentedQuery}`;
         })
         .catch((err) => logger.warn('Could not persist chat RAG usage event:', err));
       logger.info('Chat RAG response quality recorded', {
-        provider: providerLabel,
+        provider,
         retrievedEvidenceCount: allowedEvidenceIds.length,
         citedEvidenceCount: citationValidation.citedChunkIds.length,
         invalidCitationCount: citationValidation.invalidChunkIds.length,
@@ -1877,125 +1868,47 @@ ${augmentedQuery}`;
       }
     };
 
-    const hasGonka = await aiService.providerAvailable('gonkarouter');
-    if (cleanProvider === 'gonkarouter' || (hasGonka && !cleanProvider && !isOllama)) {
-      logger.info(`Streaming web chat with GonkaRouter (${ftModelCtx.modelName})...`);
-      let gonkaRawText = '';
-      let gonkaVisibleText = '';
-      const gonkaStartedAt = Date.now();
-      try {
-        await aiService.streamGonkaChat(prompt, {
-          system: systemWithContext,
-          history: parsedHistory,
-          images: serverVisualFiles.length > 0 ? serverVisualFiles.map(f => ({ base64: f.base64, mediaType: f.mediaType })) : undefined,
-          max_tokens: isSmallTalk ? 256 : 2048,
-          userId,
-          requestId: (req as any).requestId,
-          onReset: () => {
-            gonkaRawText = '';
-            gonkaVisibleText = '';
-            finalStreamedText = '';
-            emitter.send('reset');
-          },
-          onToken: (token) => {
-            if (emitter.isClosed()) return;
-            gonkaRawText += token;
-            const { text } = stripThinkingTags(gonkaRawText);
-            if (!text.startsWith(gonkaVisibleText)) return;
+    let rawText = '';
+    let visibleText = '';
+    const generationStartedAt = Date.now();
+    const completion = await aiService.streamUserChat(prompt, {
+      planId: chatPlan,
+      system: systemWithContext,
+      history: parsedHistory,
+      images: serverVisualFiles.length > 0 ? serverVisualFiles.map(f => ({ base64: f.base64, mediaType: f.mediaType })) : undefined,
+      max_tokens: isSmallTalk ? 256 : 2048,
+      routingPrompt: query || '',
+      userId,
+      requestId: (req as any).requestId,
+      onReset: () => {
+        rawText = '';
+        visibleText = '';
+        finalStreamedText = '';
+        emitter.send('reset');
+      },
+      onToken: (token) => {
+        if (emitter.isClosed()) return;
+        rawText += token;
+        const { text } = stripThinkingTags(rawText);
+        if (!text.startsWith(visibleText)) return;
 
-            const delta = text.slice(gonkaVisibleText.length);
-            if (!delta) return;
+        const delta = text.slice(visibleText.length);
+        if (!delta) return;
 
-            if (!gonkaVisibleText) {
-              logger.info('GonkaRouter first visible token received', {
-                elapsedMs: Date.now() - gonkaStartedAt,
-              });
-            }
-            gonkaVisibleText = text;
-            finalStreamedText = text;
-            if (!requireVerifiedCitations) {
-              emitter.send('text', { text: delta });
-            }
-          },
-        });
-        if (!gonkaVisibleText.trim()) {
-          throw new Error('GonkaRouter returned no visible text.');
-        }
-        await recordUsageAndPostProcess('GonkaRouter');
-        clearInterval(keepAlive);
-        emitter.done();
-        return;
-      } catch (gonkaErr: any) {
-        throw gonkaErr;
-      }
-    }
-
-    if (await aiService.providerAvailable('gemini')) {
-      logger.info('Attempting Gemini streaming...');
-
-      const geminiContents: any[] = [
-        ...parsedHistory.map((h: any) => ({ role: h.role === 'assistant' ? 'model' : 'user', parts: [{ text: h.text }] })),
-      ];
-
-      const currentTurnParts: any[] = [{ text: prompt }];
-
-      if (serverVisualFiles.length > 0) {
-        for (const file of serverVisualFiles) {
-          currentTurnParts.unshift({
-            inlineData: {
-              data: file.base64,
-              mimeType: file.mediaType,
-            },
+        if (!visibleText) {
+          logger.info('Chat first visible token received', {
+            elapsedMs: Date.now() - generationStartedAt,
           });
         }
-      }
-
-      geminiContents.push({ role: 'user', parts: currentTurnParts });
-
-      const stream = await aiService.streamGeminiContent({
-        contents: geminiContents,
-        config: { systemInstruction: systemWithContext, temperature: 0.2 },
-      });
-      for await (const chunk of stream) {
-        if (emitter.isClosed()) break;
-        const rawText = (chunk as any).text;
-        const { text: cleanChunk } = stripThinkingTags(rawText);
-        if (cleanChunk) {
-          finalStreamedText += cleanChunk;
-          if (!requireVerifiedCitations) {
-            emitter.send('text', { text: cleanChunk });
-          }
+        visibleText = text;
+        finalStreamedText = text;
+        if (!requireVerifiedCitations) {
+          emitter.send('text', { text: delta });
         }
-      }
-      await recordUsageAndPostProcess('GonkaRouter');
-    } else if (isOllama && hasOllama) {
-      logger.info('Using Ollama for chat streaming...');
-      await aiService.streamOllamaChat(prompt, {
-        system: systemWithContext,
-        onToken: (rawText) => {
-          const { text: cleanChunk } = stripThinkingTags(rawText);
-          if (cleanChunk) {
-            finalStreamedText += cleanChunk;
-            if (!requireVerifiedCitations) {
-              emitter.send('text', { text: cleanChunk });
-            }
-          }
-        },
-      });
-      await recordUsageAndPostProcess('Ollama');
-    } else if (await aiService.providerAvailable('openrouter')) {
-      const openRouterRes = await aiService.sendOpenRouterChat(prompt, { system: systemWithContext, history: parsedHistory });
-      const rawText = typeof openRouterRes === 'string' ? openRouterRes : openRouterRes.text;
-      const thinkingText = typeof openRouterRes === 'string' ? undefined : openRouterRes.thinkingText;
-      const { text: cleanText, thinkingText: parsedThinking } = stripThinkingTags(rawText);
-      finalStreamedText += cleanText;
-      if (!requireVerifiedCitations) {
-        emitter.send('text', { text: cleanText, thinkingText: thinkingText || parsedThinking });
-      }
-      await recordUsageAndPostProcess('GonkaRouter');
-    } else {
-      throw Object.assign(new Error('No AI provider is configured.'), { code: 'AI_UNAVAILABLE' });
-    }
+      },
+    });
+    if (!visibleText.trim()) throw new Error('Chat provider returned no visible text.');
+    await recordUsageAndPostProcess(completion);
 
     clearInterval(keepAlive);
     emitter.done();
@@ -2022,20 +1935,6 @@ ${augmentedQuery}`;
     res.end();
   }
 });
-
-const sanitizePublicFormSchema = (value: any): any => {
-  const privateKeys = new Set([
-    'answer', 'answerkey', 'correct', 'correctanswer', 'correctanswers', 'expectedanswer', 'modelanswer',
-    'rubric', 'scoringrubric', 'selectionsettings', 'requirements', 'solution', 'mysebexamid', 'importreview', 'explanation',
-    // Safe Exam Browser keys: anyone who knew one could fake the header.
-    'sebkeys',
-  ]);
-  if (Array.isArray(value)) return value.map(sanitizePublicFormSchema);
-  if (!value || typeof value !== 'object') return value;
-  return Object.fromEntries(Object.entries(value)
-    .filter(([key]) => !privateKeys.has(key.toLowerCase().replace(/[_\s-]/g, '')))
-    .map(([key, item]) => [key, sanitizePublicFormSchema(item)]));
-};
 
 app.get('/api/forms/:id', async (req, res) => {
   try {
@@ -2070,7 +1969,7 @@ app.post('/api/forms/generate', requireAuth, async (req, res) => {
     const { intent } = req.body;
     const userId = (req as any).user?.userId;
     if (!userId) return res.status(401).json({ error: 'Authentication required.' });
-    if (!(await allowAi(res, userId, 'artifact'))) return;
+    if (!(await allowAi(res, userId, 'artifact', AI_PRICE.formFromDescription))) return;
     const form = await formOrchestrator.generateFormSchema(userId, intent);
     void chargeAi(userId, { kind: 'artifact', input: String(intent ?? ''), output: JSON.stringify(form ?? '').length, minCredits: AI_PRICE.formFromDescription });
     res.json({ success: true, form });
@@ -2154,6 +2053,7 @@ app.post('/api/forms/:id/submit', publicFormSubmitLimiter, async (req, res) => {
     const checked = validateSubmission(given, answers as Record<string, unknown>);
     if ('error' in checked) return res.status(400).json({ error: checked.error, fieldId: checked.fieldId });
     Object.assign(normalized, checked.values);
+    delete normalized._quizReceipt;
     if (examInfo) normalized._exam = { sessionId: examSessionId, studentId: examInfo.studentId, studentName: examInfo.studentName, timeUp: examInfo.timeUp };
     if (!Object.keys(checked.values).length && !examInfo?.timeUp) return res.status(400).json({ error: 'Answer at least one question before submitting.' });
     // Quizzes are marked against the answer key at once; the score is kept with the response for Results and the gradebook.
@@ -2164,7 +2064,12 @@ app.post('/api/forms/:id/submit', publicFormSubmitLimiter, async (req, res) => {
     if (/^[\w-]{8,64}$/.test(deviceId) && (schema.isQuiz || schema.exam?.enabled)) {
       normalized._device = { id: deviceId, net: crypto.createHmac('sha256', process.env.JWT_SECRET || 'dev-secret').update(String(req.ip || '')).digest('hex').slice(0, 12) };
     }
-    if (quiz) normalized._quiz = quizRecord(quiz, schema.assessment);
+    const score = quiz ? quizRecord(quiz, schema.assessment) : undefined;
+    const showScore = schema.showScore !== false;
+    const review = quiz && schema.quizShowAnswers !== false ? quizReview(quiz, schema) : undefined;
+    const receipt = score && score.pending > 0 && (showScore || review) ? newQuizReceipt() : undefined;
+    if (score) normalized._quiz = score;
+    if (receipt) normalized._quizReceipt = { digest: receipt.digest, showScore, review, assessment: normalizeAssessment(schema.assessment) };
     // Integrity signals (pasting, leaving the page, typing): kept for the lecturer to review, never used to change a mark.
     if (schema.isQuiz || schema.blockPaste || schema.trackIntegrity) {
       const all = normalizeFields(given);
@@ -2187,30 +2092,21 @@ app.post('/api/forms/:id/submit', publicFormSubmitLimiter, async (req, res) => {
     if (quiz && quiz.pending > 0 && normalizeAssessment(schema.assessment).aiMarking) void markSubmissionWithAi(prisma, submission.id, schema, undefined, {
       // The lecturer pays: when their credits are used up, the written answers wait for them (and for an upgrade) instead of being marked.
       gate: async () => !!form.userId && !!(await checkPlanUsage(form.userId, { kind: 'marking' })).allowed,
-      charge: (n) => void chargeAi(form.userId, { kind: 'marking', minCredits: Math.max(1, n) * AI_PRICE.markOneWrittenAnswer }),
+      charge: (n) => chargeAi(form.userId, { kind: 'marking', minCredits: Math.max(1, n) * AI_PRICE.markOneWrittenAnswer }),
     }).catch((e) => logger.warn('AI marking failed', { errorType: (e as Error)?.name }));
     const confirmationMessage = schema.confirmationMessage || 'Your response has been recorded.';
     const confirmationTitle = typeof schema.confirmationTitle === 'string' && schema.confirmationTitle.trim() ? schema.confirmationTitle.trim() : undefined;
-    if (quiz) {
-      // The owner decides what the respondent sees: score, and which answers were right with the correct ones.
-      const showScore = schema.showScore !== false;
-      res.status(201).json({
+    if (score) {
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(201).json({
         success: true,
         submissionId: submission.id,
         confirmationMessage,
         confirmationTitle,
         isQuiz: true,
-        ...(showScore ? {
-          score: quiz.score,
-          maxScore: quiz.maxScore,
-          percent: quiz.percent,
-          ...(() => { const r = quizRecord(quiz, schema.assessment); const a = normalizeAssessment(schema.assessment); return { grade: r.grade, passed: r.passed, ...(r.outOf ? { mark: r.mark, outOf: r.outOf } : {}), assessmentTitle: a.title || (a.kind === 'QUIZ' ? '' : a.kind), pending: quiz.pending, ...(quiz.pending > 0 ? { pendingNote: a.aiMarking ? 'Your written answers are being marked by AI. Your lecturer will check them, so this score may change.' : 'Your written answers are marked by your lecturer, so this score is not final.' } : {}) }; })(),
-          scoreLabel: normalizeAssessment(schema.assessment).title ? `Your score (${normalizeAssessment(schema.assessment).title})` : 'Your score',
-          feedback: quiz.percent >= 80 ? 'Excellent work!' : quiz.percent >= 50 ? 'Good effort. Review the questions you missed.' : 'Keep practising. Review the questions you missed.',
-        } : {}),
-        ...(schema.quizShowAnswers !== false ? { results: quiz.items.map((x) => ({ id: x.id, correct: x.correct, points: x.earned, maxPoints: x.points, yourAnswer: x.given, correctAnswer: x.correctAnswer, ...(explanationOf(schema, x.id) ? { explanation: explanationOf(schema, x.id) } : {}) })) } : {}),
+        ...quizCompletion(score, schema.assessment, showScore, review),
+        ...(receipt ? { quizReceipt: { formId: form.id, submissionId: submission.id, token: receipt.token } } : {}),
       });
-      return;
     }
     await analyticsWorker.extractInsights(submission.id).catch((error) => logger.error('Submission analysis failed:', error));
     // Feedback forms, surveys and sign-ups are not marked: the respondent only sees the owner's thank-you message.
@@ -2224,6 +2120,30 @@ app.post('/api/forms/:id/submit', publicFormSubmitLimiter, async (req, res) => {
     });
   } catch (error: any) {
     respondError(res, error, 'Failed to submit form.');
+  }
+});
+app.post('/api/forms/:id/quiz-result', studentLiveLimiter, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const { submissionId, token } = req.body || {};
+    if (typeof submissionId !== 'string' || !/^[\w-]{1,64}$/.test(submissionId) || typeof token !== 'string' || !/^[\w-]{43}$/.test(token)) {
+      return res.status(404).json({ error: 'Quiz result unavailable.' });
+    }
+    const row = await prisma.formSubmission.findUnique({ where: { id: submissionId }, select: { formId: true, data: true, form: { select: { schema: true } } } });
+    if (!row || row.formId !== req.params.id) return res.status(404).json({ error: 'Quiz result unavailable.' });
+    const data = JSON.parse(row.data);
+    const receipt = data._quizReceipt;
+    if (!data._quiz || !matchesQuizReceipt(token, receipt?.digest)) return res.status(404).json({ error: 'Quiz result unavailable.' });
+    const schema = JSON.parse(row.form.schema || '{}');
+    const showScore = schema.isQuiz && schema.showScore !== false && receipt.showScore;
+    const review = schema.isQuiz && schema.quizShowAnswers !== false && Array.isArray(receipt.review)
+      ? completeWrittenReview(receipt.review, data._written) : undefined;
+    if (!showScore && !review) return res.status(404).json({ error: 'Quiz result unavailable.' });
+    const completion = quizCompletion(data._quiz, receipt.assessment, showScore, review, receipt.aiFinished === true);
+    const usedAi = Object.values(data._written ?? {}).some(mark => (mark as { by?: string })?.by === 'ai');
+    return res.json({ ...completion, ...(!('pending' in completion) && usedAi && showScore ? { feedback: 'AI marks can be reviewed by your teacher.' } : {}) });
+  } catch (error) {
+    respondError(res, error, 'Quiz result unavailable.');
   }
 });
 app.get('/api/public/forms/:id', async (req, res) => {
@@ -2264,7 +2184,7 @@ const handleAnalyzeForm = async (req: express.Request, res: express.Response) =>
 app.get('/api/forms/:id/analyze', requireAuth, handleAnalyzeForm);
 app.post('/api/forms/:id/analyze', requireAuth, handleAnalyzeForm);
 
-// Autonomous LiveScanner AI Agent Endpoint (Vision OCR + Auto-Grading + Scan-to-Form)
+// LiveScanner OCR and scan-to-form
 app.post('/api/ai/scan-agent', requireAuth, gradingLimiter, async (req, res) => {
   if (process.env.ENABLE_AI_SCAN === 'false') {
     return res.status(404).json({ error: 'AI scan is disabled. Set ENABLE_AI_SCAN=true to enable it.' });
@@ -2274,19 +2194,16 @@ app.post('/api/ai/scan-agent', requireAuth, gradingLimiter, async (req, res) => 
     if (!userId) return res.status(401).json({ error: 'Authentication required.' });
 
     const {
-      mode: requestedMode = 'grade',
-      rubricText: rubricTextInput = '',
-      rubric: rubricAlias = '',
-      studentName = '',
+      mode: requestedMode,
       instructions = '',
       rawTextHint = '',
     } = req.body || {};
     const mode = requestedMode === 'extract_form' ? 'scan_to_form' : requestedMode;
-    const rubricText = typeof rubricTextInput === 'string' && rubricTextInput.trim()
-      ? rubricTextInput
-      : typeof rubricAlias === 'string' ? rubricAlias : '';
-    if (!['ocr', 'grade', 'scan_to_form', 'extract_and_grade'].includes(mode)) {
-      return res.status(400).json({ error: 'Unsupported scan action. Choose OCR, grading, or form extraction.' });
+    if (mode === undefined || mode === 'grade' || mode === 'extract_and_grade') {
+      return res.status(410).json({ error: { code: 'SCANNED_PAPER_GRADING_DISABLED', message: SCANNED_PAPER_MESSAGE } });
+    }
+    if (mode !== 'ocr' && mode !== 'scan_to_form') {
+      return res.status(400).json({ error: 'Unsupported scan action. Choose OCR or form extraction.' });
     }
     const pages = Array.isArray(req.body?.pages)
       ? req.body.pages
@@ -2318,9 +2235,12 @@ app.post('/api/ai/scan-agent', requireAuth, gradingLimiter, async (req, res) => 
       return res.status(400).json({ error: 'A scanned page does not match its declared image type. Please capture or upload it again.' });
     }
 
+    const scanGate = await checkUsage(userId, { kind: 'vision', attachments: images.length });
+    if (!scanGate.allowed) return res.status(429).json({ error: { code: scanGate.code ?? 'LIMIT', message: scanGate.message } });
+
     if (mode === 'ocr') {
-      const systemPrompt = `You are a careful OCR assistant. Read only text visible in the supplied image. Do not guess missing or blurred words. Preserve the original language, spelling, line breaks, question numbers, and mathematical notation. Return JSON only with this shape: {"detectedStudentName": null, "ocrTranscript": "verbatim visible text", "summary": "brief description of the page", "qualityScore": 0}. qualityScore is an integer from 0 to 100 for legibility; use null for detectedStudentName when it is not clearly visible.`;
-      const raw = await aiService.sendGonkaChat(
+      const systemPrompt = `You are a careful OCR assistant. Read only text visible in the supplied image or provided by local OCR. Do not guess missing or blurred words. Preserve the original language, spelling, line breaks, question numbers, and mathematical notation. Return JSON only with this shape: {"detectedStudentName": null, "ocrTranscript": "verbatim visible text", "summary": "brief description of the page", "qualityScore": 0}. qualityScore is an integer from 0 to 100 for legibility; use null for detectedStudentName when it is not clearly visible.`;
+      const raw = await aiService.readScan(userId, scanGate.plan.id,
         `Transcribe the text visible on this scanned page. ${rawTextHint ? `Existing OCR hint (verify against the image and correct errors):\\n${String(rawTextHint).slice(0, 12000)}` : ''} ${instructions}`,
         { system: systemPrompt, images, maxTokens: 3000 },
       );
@@ -2339,8 +2259,8 @@ app.post('/api/ai/scan-agent', requireAuth, gradingLimiter, async (req, res) => 
     }
 
     if (mode === 'scan_to_form') {
-      const systemPrompt = `You are Bwenge Scan-to-Form Autonomous Agent powered by GonkaRouter Vision.
-Inspect the scanned document/worksheet image(s) and convert every visible question, field, or prompt into a structured interactive digital form schema, including a scoring rubric.
+      const systemPrompt = `You are Bwenge Scan-to-Form agent Vision.
+Read the scanned document images or their local OCR text and convert every visible question, field, or prompt into a structured interactive digital form schema, including a scoring rubric.
 Return valid JSON ONLY:
 {
   "title": "Extracted Form/Exam Title",
@@ -2360,7 +2280,7 @@ Return valid JSON ONLY:
     ]
   }
 }`;
-      const raw = await aiService.sendGonkaChat(
+      const raw = await aiService.readScan(userId, scanGate.plan.id,
         `Extract all questions and form fields from these ${images.length} scanned page(s) and build a complete digital form schema. ${instructions}`,
         { system: systemPrompt, images }
       );
@@ -2459,58 +2379,6 @@ Return valid JSON ONLY:
       });
     }
 
-    // Default mode: 'extract_and_grade' — Vision OCR + Student Detection + Rubric Grading Agent
-    const systemPrompt = `You are Bwenge LiveScanner Vision & Grading Agent powered by GonkaRouter.
-You are inspecting ${images.length} scanned student answer sheet page(s).
-1. Perform high-accuracy Optical Character Recognition (OCR) on all handwritten and printed text.
-2. Detect the student's name and ID only if visible on the page; otherwise return null for that field.
-3. Segment each question and the student's corresponding answer.
-4. Grade each answer fairly against the provided rubric (or standard academic criteria if no rubric is provided), awarding partial credit where appropriate.
-5. If a question has no visible answer, return an empty string for studentAnswer, award zero for that question, and do not invent a response.
-Return valid JSON ONLY in this exact shape:
-{
-  "detectedStudentName": null,
-  "studentId": null,
-  "ocrTranscript": "Full verbatim transcription of the scanned page(s)...",
-  "totalAwardedMarks": 85,
-  "maxTotalMarks": 100,
-  "percentage": 85,
-  "overallFeedback": "Concise, constructive summary of strengths and areas for improvement",
-  "confidence": 94,
-  "flags": [],
-  "questions": [
-    {
-      "number": "Q1",
-      "questionText": "Question topic or prompt",
-      "studentAnswer": "Transcribed student answer",
-      "awardedMarks": 18,
-      "maxMarks": 20,
-      "feedback": "Specific evidence-based feedback",
-      "flag": "none"
-    }
-  ]
-}`;
-
-    const userPrompt = `Analyze, transcribe (OCR), and grade these ${images.length} scanned page(s) for ${studentName || 'this student'}.
-${rubricText ? `ACTIVE RUBRIC / EXAM CONTEXT:\n${rubricText}` : 'No explicit rubric provided — infer question max marks totaling 100 and grade with academic rigor.'}
-${rawTextHint ? `SUPPLEMENTAL OCR HINT (verify every item against the image; the image is authoritative):\n${String(rawTextHint).slice(0, 12000)}` : ''}
-${instructions ? `ADDITIONAL AGENT INSTRUCTIONS:\n${instructions}` : ''}`;
-
-    const raw = await aiService.sendGonkaChat(userPrompt, { system: systemPrompt, images });
-    const parsed = validateScanGradeOutput(aiService.parseModelJson(raw));
-    if (!parsed) {
-      return res.status(502).json({
-        success: false,
-        error: { code: 'INVALID_MODEL_OUTPUT', message: 'The scan did not produce a complete, valid result. Please retry.' },
-        retryable: true,
-      });
-    }
-
-    return res.json({
-      success: true,
-      provider: 'GonkaRouter',
-      ...parsed,
-    });
   } catch (error: any) {
     logger.error('Scan model request failed.', { errorType: error?.name || 'Error', status: error?.status });
     res.status(502).json({
@@ -2695,12 +2563,22 @@ app.post('/api/ai/next-prompt', requireAuth, async (req, res) => {
     // A suggestion comes with every answer, so it is capped (60 an hour) and costs the paying user no credits.
     // Suggestions are a paid feature (the Free plan's credits are for answers): no suggestion, and no cost, on Free.
     const { planFor: planOf } = await import('./server/services/billing/plans.js');
-    if ((await planOf(userId).catch(() => null))?.id === 'FREE') return res.json({ suggestion: null });
+    const plan = await planOf(userId);
+    if (plan.id === 'FREE') return res.json({ suggestion: null });
     const now = Date.now(); const recent = (nextPromptUsed.get(userId) ?? []).filter((t) => now - t < 3_600_000);
     if (recent.length >= 60) return res.json({ suggestion: null });
     nextPromptUsed.set(userId, [...recent, now]); if (nextPromptUsed.size > 5000) nextPromptUsed.clear();
     const { suggestNextPrompt } = await import('./server/services/nextPrompt.js');
-    const suggestion = await suggestNextPrompt({ text: async (system, user) => String(await aiService.sendGonkaChat(user, { system, maxTokens: 48, timeoutMs: 8000 }) ?? '') }, String(req.body?.lastUser ?? ''), String(req.body?.lastAssistant ?? ''));
+    const suggestion = await suggestNextPrompt({
+      text: async (system, prompt) => {
+        let text = '';
+        await aiService.streamUserChat(prompt, {
+          planId: plan.id, system, max_tokens: 48, signal: AbortSignal.timeout(8000),
+          onToken: token => { text += token; },
+        });
+        return text;
+      },
+    }, String(req.body?.lastUser ?? ''), String(req.body?.lastAssistant ?? ''));
     res.json({ suggestion });
   } catch { res.json({ suggestion: null }); }
 });
@@ -2758,6 +2636,9 @@ app.post('/api/batch/grade', requireAuth, batchGradingLimiter, batchUpload.field
       return res.status(400).json({ error: 'Both papers PDF and rubric image are required.' });
     }
     if (detectRealMimeType(papersFile.buffer) !== 'application/pdf') return res.status(400).json({ error: 'The papers upload must be a valid PDF.' });
+    if (await needsScanRecognition({ name: papersFile.originalname, buffer: papersFile.buffer, mime: 'application/pdf' })) {
+      return res.status(422).json({ code: 'SCANNED_PAPER_GRADING_DISABLED', error: SCANNED_PAPER_MESSAGE });
+    }
     const rubricMime = detectRealMimeType(rubricFile.buffer);
     if (!rubricMime || !rubricMime.startsWith('image/')) return res.status(400).json({ error: 'The rubric upload must be a valid image.' });
     if (!['mcq', 'essay', 'short_answer', 'single'].includes(paperType)) return res.status(400).json({ error: 'Unsupported paper type.' });

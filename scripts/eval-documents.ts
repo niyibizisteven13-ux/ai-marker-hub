@@ -4,7 +4,7 @@
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { agentTarget } from '../server/services/AiService.js';
+import { readingTarget, userChatAvailable } from '../server/services/AiService.js';
 import { processDocument, documentText } from '../server/services/documents/pipeline.js';
 import { characterErrorRate, reviewCalibration, wordErrorRate } from '../server/services/documents/metrics.js';
 import { tesseractOcr, shutdownOcr } from '../server/services/documents/ocr.js';
@@ -13,9 +13,9 @@ const dir = path.resolve('evals/handwriting');
 const useOcr = !process.argv.includes('--no-ocr');
 
 async function main() {
-  const target = agentTarget();
-  if (target.provider !== 'anthropic' && process.env.DOC_VISION_GONKA !== 'true') {
-    console.error('No vision model configured. Set AI_AGENT_PROVIDER=anthropic and ANTHROPIC_API_KEY (or DOC_VISION_GONKA=true).');
+  const target = readingTarget();
+  if (!userChatAvailable()) {
+    console.error('No vision model configured. Set ANTHROPIC_API_KEY.');
     process.exit(2);
   }
   const files = (await fs.readdir(dir)).filter((f) => /\.(png|jpe?g|webp|tiff?|pdf)$/i.test(f)).sort();
@@ -28,7 +28,7 @@ async function main() {
     const truth = await fs.readFile(truthPath, 'utf8').catch(() => null);
     if (truth === null) { console.warn(`skip ${f}: no ${path.basename(truthPath)}`); continue; }
     const started = Date.now();
-    const result = await processDocument(await fs.readFile(path.join(dir, f)), f, { adapter: target.adapter, model: process.env.DOC_VISION_MODEL || target.model, fallbackModel: null, ocr: useOcr ? tesseractOcr : undefined }, { crossCheck: useOcr, forceRecognition: true, tiling: (process.env.DOC_TILING as 'auto' | 'always' | 'off') || 'auto' });
+    const result = await processDocument(await fs.readFile(path.join(dir, f)), f, { adapter: target.adapter, model: target.model, fallbackModel: null, ocr: useOcr ? tesseractOcr : undefined }, { crossCheck: useOcr, forceRecognition: true, tiling: (process.env.DOC_TILING as 'auto' | 'always' | 'off') || 'auto' });
     const hyp = documentText(result).replace(/^--- Page \d+ ---\n/gm, '').replace(/~~/g, '');
     const cer = characterErrorRate(truth, hyp);
     const wer = wordErrorRate(truth, hyp);
@@ -62,7 +62,7 @@ async function main() {
     errorCapture: t.wrong ? t.flaggedWrong / t.wrong : null,
     reviewLoad: t.words ? t.flagged / t.words : null,
   });
-  const summary = { files: rows.length, cer: cerDen ? cerNum / cerDen : null, wer: werDen ? werNum / werDen : null, reviewPolicy: { medium: policy(totals.medium), high: policy(totals.high) }, model: process.env.DOC_VISION_MODEL || target.model, ocrCrossCheck: useOcr };
+  const summary = { files: rows.length, cer: cerDen ? cerNum / cerDen : null, wer: werDen ? werNum / werDen : null, reviewPolicy: { medium: policy(totals.medium), high: policy(totals.high) }, model: target.model, ocrCrossCheck: useOcr };
   console.log(`Overall: CER ${summary.cer === null ? 'n/a' : (summary.cer * 100).toFixed(2) + '%'}  WER ${summary.wer === null ? 'n/a' : (summary.wer * 100).toFixed(2) + '%'} over ${rows.length} file(s)`);
   await fs.mkdir('evals/reports', { recursive: true });
   const out = `evals/reports/handwriting-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;

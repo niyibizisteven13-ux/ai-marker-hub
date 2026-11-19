@@ -40,10 +40,14 @@ export function upgradeBody(g: GateResult): { status: number; body: UpgradeBody 
 export const whatsappLinkFor = (number: string, planName: string, code = '______') => `https://wa.me/${number.replace(/\D/g, '')}?text=${encodeURIComponent(`Hello, I want to upgrade my Bwenge account (now on ${planName}). My payment code: ${code}`)}`;
 
 /** Checks the limit; when the user is over it, answers with the upgrade message and returns false. */
-export async function allowAi(res: Response, userId: string | undefined, kind: UsageKind = 'tool'): Promise<boolean> {
+export async function allowAi(res: Response, userId: string | undefined, kind: UsageKind = 'tool', minCredits = 1): Promise<boolean> {
   if (!userId) { res.status(401).json({ error: 'Authentication required.' }); return false; }
-  const g = await checkUsage(userId, { kind }).catch(() => null);
-  if (!g || g.allowed) return true;
+  const g = await checkUsage(userId, { kind, minCredits }).catch(() => null);
+  if (!g) {
+    res.status(503).json({ code: 'UNAVAILABLE', error: 'Bwenge could not check your AI allowance. Please try again.' });
+    return false;
+  }
+  if (g.allowed) return true;
   const { status, body } = upgradeBody(g);
   if (status === 402) {
     const { paymentConfig } = await import('../mySebAccess.js');

@@ -85,7 +85,7 @@ function ImageGraphicArtifact({ artifact }: { artifact: any }) {
     <circle cx="540" cy="210" r="80" fill="${palette[1] || '#10B981'}" fill-opacity="0.12" stroke="${palette[1] || '#10B981'}" stroke-width="2" />
     <path d="M 120 330 Q 280 180 440 270 T 720 160" fill="none" stroke="${palette[2] || '#E9A23B'}" stroke-width="3" />
     <text x="64" y="130" fill="#FAF9F5" font-family="Georgia, serif" font-size="34" font-weight="600">${String(title).replace(/[<>&]/g, '')}</text>
-    <text x="64" y="168" fill="#A3A39E" font-family="sans-serif" font-size="16">${String(style).replace(/[<>&]/g, '')} · GonkaRouter Visual Synthesis</text>
+    <text x="64" y="168" fill="#A3A39E" font-family="sans-serif" font-size="16">${String(style).replace(/[<>&]/g, '')} · Bwenge Visual Synthesis</text>
   </svg>`;
 
   const rawSvg = typeof artifact.svg === 'string' && artifact.svg.includes('<svg') ? artifact.svg : defaultSvg;
@@ -141,7 +141,7 @@ function ImageGraphicArtifact({ artifact }: { artifact: any }) {
         />
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.06] px-4 py-2.5 text-xs text-[var(--app-faint)]">
-        <span className="truncate">{artifact.model || 'GonkaRouter Visual · Nano Banana Pro'}</span>
+        <span className="truncate">{artifact.model || 'Bwenge SVG'}</span>
         <div className="flex items-center gap-1.5">
           <span>Palette:</span>
           {palette.map((hex, i) => (
@@ -163,7 +163,7 @@ function VideoAnimationArtifact({ artifact }: { artifact: any }) {
         {
           title: 'Scene 1',
           duration: 5,
-          headline: artifact.title || 'GonkaRouter Motion Sequence',
+          headline: artifact.title || 'Bwenge Motion Sequence',
           subtext: artifact.concept || 'Dynamic keyframe animation & talking character synthesis',
           narration: artifact.concept || artifact.title || 'Welcome to Bwenge AI Motion Studio.',
           motionType: artifact.motionType || 'talking_character',
@@ -219,7 +219,7 @@ function VideoAnimationArtifact({ artifact }: { artifact: any }) {
         <div className="flex items-center gap-2">
           <Film className="h-4 w-4 text-amber-400" />
           <span className="text-sm font-semibold text-[var(--app-text)]">{artifact.title || 'Animated Video Studio'}</span>
-          <span className="text-xs text-[var(--app-faint)]">· {scenes.length} {scenes.length === 1 ? 'scene' : 'scenes'} · {artifact.model || 'GonkaRouter Flow Engine'}</span>
+          <span className="text-xs text-[var(--app-faint)]">· {scenes.length} {scenes.length === 1 ? 'scene' : 'scenes'} · {artifact.model || 'Bwenge Flow Engine'}</span>
         </div>
         <button
           type="button"
@@ -446,7 +446,7 @@ function DatasetWorkflowArtifact({ artifact }: { artifact: any }) {
         <div className="flex items-center gap-2">
           {isDataset ? <Database className="h-4 w-4 text-emerald-400" /> : <Workflow className="h-4 w-4 text-amber-400" />}
           <span className="text-sm font-semibold text-[var(--app-text)]">{artifact.title || (isDataset ? 'Dataset Pattern Analysis' : 'Automated Workflow & Data Studio')}</span>
-          <span className="text-xs text-[var(--app-faint)]">· GonkaRouter Intelligence</span>
+          <span className="text-xs text-[var(--app-faint)]">· Bwenge Intelligence</span>
         </div>
         {(columns.length > 0 || rows.length > 0) && (
           <button

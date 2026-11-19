@@ -1,5 +1,7 @@
 # Problems found in the current AiService.ts (and how the new layer fixes them)
 
+> Historical notes. The current Bwenge application uses Claude as its default. See [AI routing](../../docs/EDUCATION_AI_BACKEND.md).
+
 Found by reading the file you shared; I could not run your service, so items marked "verify" depend on a helper whose code was not in the file.
 
 1. **Inconsistent `stripThinkingTags` use (verify).** Some places use `stripThinkingTags(x).text` (a string) and others use `stripThinkingTags(rawTurnText)` directly: `runGonkaAgentLoop` sets `turnMessage.content = stripThinkingTags(rawTurnText)` and emits it as `text`. One of the two is wrong. If the function returns `{ text }`, the assistant message content becomes an object and the next request to the model fails or the UI shows `[object Object]`. Fix: always use one string-returning helper. The new layer uses `ThinkFilter`, which hides `<think>` tags even when split across chunks and emits only the new visible text (your Gonka loop handles splits by re-stripping the whole accumulated text on every token and re-sending it with `replaceFullText`, which works but is heavier; the NVIDIA and plain streaming paths do not strip at all).

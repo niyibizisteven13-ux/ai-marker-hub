@@ -6,6 +6,7 @@ import ExcelJS from 'exceljs';
 import type { OwnedRecord, OwnedRecordStore } from '../storage/ownedRecordStore.js';
 import type { MarkStatus, TaskMarker } from './autoMark.js';
 import { imagesToPdf, typedToPdf } from '../exams/inputs.js';
+import { needsScanRecognition, SCANNED_PAPER_MESSAGE } from '../exams/scanPolicy.js';
 import { CODE_EXT, SHEET_EXT, SLIDE_EXT, VIDEO_EXT, fileToPdf, looksTextual, mergePdfs } from './handIn.js';
 import JSZip from 'jszip';
 import { gradeCode, normalizeCodeTests, redactForStudent, type CodeResult, type CodeTestConfig } from '../codeRunner/grade.js';
@@ -465,7 +466,18 @@ export function createAssignmentService(deps: {
       if (earlier && clean(input.receiptCode, 20).toUpperCase() !== earlier.id.slice(0, 8).toUpperCase()) {
         throw new AssignmentError('ALREADY_SUBMITTED', 'You have already handed in. To replace your work, enter the receipt code from your first hand-in.', 409);
       }
-      const files = await storeUploads(a.ownerId, input.files ?? [], LIMITS.files, true);
+      const uploads = input.files ?? [];
+      const autoMark = !!(a.autoMark && deps.marker && a.schemeFiles?.length);
+      let scanNeedsTeacher = false;
+      if (autoMark) {
+        for (const file of uploads) {
+          if (await needsScanRecognition({ name: file.name, buffer: file.data, mime: MIME[ext(file.name)] })) {
+            scanNeedsTeacher = true;
+            break;
+          }
+        }
+      }
+      const files = await storeUploads(a.ownerId, uploads, LIMITS.files, true);
       const late = !!a.dueAt && Date.now() > Date.parse(a.dueAt);
       const same = (s: AssignmentSubmission) => (studentId && s.studentId ? s.studentId.toLowerCase() === studentId.toLowerCase() : s.studentName.toLowerCase() === studentName.toLowerCase());
       let receipt!: AssignmentSubmission;
@@ -477,13 +489,13 @@ export function createAssignmentService(deps: {
           throw new AssignmentError('ALREADY_SUBMITTED', 'You have already handed in. To replace your work, enter the receipt code from your first hand-in.', 409);
         }
         replaced = prev?.files ?? [];
-        receipt = { id: prev?.id ?? randomUUID(), studentName, ...(studentId ? { studentId } : {}), files, ...(text ? { text } : {}), submittedAt: now(), late, resubmissions: prev ? prev.resubmissions + 1 : 0, resultToken: prev?.resultToken ?? randomBytes(9).toString('base64url') };
+        receipt = { id: prev?.id ?? randomUUID(), studentName, ...(studentId ? { studentId } : {}), files, ...(text ? { text } : {}), submittedAt: now(), late, resubmissions: prev ? prev.resubmissions + 1 : 0, resultToken: prev?.resultToken ?? randomBytes(9).toString('base64url'), ...(scanNeedsTeacher ? { markError: SCANNED_PAPER_MESSAGE } : {}) };
         r.submissions = [...r.submissions.filter((s) => s !== prev), receipt];
       }); } catch (e) { await drop(a.ownerId, files); throw e; }
       // The earlier hand-in's files are no longer shown or marked: free their storage.
       await drop(a.ownerId, replaced);
       // Automatic marking runs in the background; the student does not wait for it.
-      if (a.autoMark && deps.marker && a.schemeFiles?.length) {
+      if (autoMark && deps.marker && !scanNeedsTeacher) {
         const sub = receipt;
         const save = (patch: { examId?: string; examSubmissionId?: string; markError?: string | null }) => deps.store.update(a.id, a.ownerId, (r) => {
           if (patch.examId) r.examId = patch.examId;
@@ -500,7 +512,7 @@ export function createAssignmentService(deps: {
         }).catch((e) => save({ markError: e instanceof Error ? e.message.slice(0, 200) : 'Could not be marked.' }).catch(() => undefined));
       }
       if (a.codeTests) void runCodeTests(a.ownerId, a.id, [receipt.id]);
-      return { receiptId: receipt.id.slice(0, 8).toUpperCase(), submittedAt: receipt.submittedAt, late, replaced: receipt.resubmissions > 0, files: files.length, resultLink: resultLinkOf(a.token, receipt.resultToken!), autoMark: !!a.autoMark, codeTests: !!a.codeTests && a.codeTests.showStudents !== 'none' };
+      return { receiptId: receipt.id.slice(0, 8).toUpperCase(), submittedAt: receipt.submittedAt, late, replaced: receipt.resubmissions > 0, files: files.length, resultLink: resultLinkOf(a.token, receipt.resultToken!), autoMark: autoMark && !scanNeedsTeacher, codeTests: !!a.codeTests && a.codeTests.showStudents !== 'none' };
     },
 
     /**

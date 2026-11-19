@@ -15,6 +15,7 @@ import { verifyMarkedPdf } from './verifyPdf.js';
 import { computeLayout } from './layout.js';
 import { processedToViewed } from './pdfGeometry.js';
 import { expandArchives, InputError, isPdf, isTyped, typedToPdf } from './inputs.js';
+import { needsScanRecognition, SCANNED_PAPER_MESSAGE } from './scanPolicy.js';
 import { splitClassPdf } from './classSplit.js';
 import { loadPages } from '../documents/pages.js';
 import { buildBundle, safeName, type BundleFile } from './bundle.js';
@@ -39,6 +40,13 @@ export class ExamInputError extends Error {
   }
 }
 
+export interface ExamAiTarget {
+  adapter: ProviderAdapter;
+  model: string;
+  fallbackModel?: string | null;
+  supportsVision?: boolean;
+}
+
 export interface ExamDeps {
   fileStore: FileStore;
   queue: FileJobQueue;
@@ -47,7 +55,7 @@ export interface ExamDeps {
   store: OwnedRecordStore<ExamRecord>;
   documents: DocumentService;
   /** Text model for scheme extraction and marking. */
-  agent: () => { adapter: ProviderAdapter; model: string; fallbackModel?: string | null };
+  agent: (userId: string) => ExamAiTarget | Promise<ExamAiTarget>;
   /** Whether handwriting recognition is available (a vision-capable model is configured). */
   visionAvailable: () => boolean;
   forbiddenStrings?: string[];
@@ -55,6 +63,7 @@ export interface ExamDeps {
   maxCandidates?: number;
   maxBatchPages?: number;
   visualEvidence?: boolean;
+  disableScanGrading?: boolean;
   beforeAi?: (userId: string) => Promise<void>;
   candidateConcurrency?: number;
   /** Time a marking job works before handing over to a continuation job (stays under the queue deadline). */
@@ -322,6 +331,7 @@ export function createExamService(deps: ExamDeps) {
       const ex = await load(job.ownerId, p.examId);
       for (const sub of ex.submissions.slice(0, 3)) {
         try {
+          await requireMarkableSubmission(job.ownerId, sub);
           const { record } = await recognizeSubmission(job.ownerId, sub, ctx.signal);
           await mutate(job.ownerId, p.examId, (e) => { const x = e.submissions.find((y) => y.id === sub.id); if (x) x.documentId = record.id; });
           texts.push(`--- Script ${sub.candidateId} ---\n${documentText(record.result, record.corrections)}`);
@@ -336,7 +346,7 @@ export function createExamService(deps: ExamDeps) {
     }
     await ctx.progress('structuring the marking scheme', 50);
     const exam = await load(job.ownerId, p.examId);
-    const agent = deps.agent();
+    const agent = await deps.agent(job.ownerId);
     let extracted: Awaited<ReturnType<typeof extractScheme>>;
     try {
       if (p.draft && !qpText && !texts.join('').trim()) throw new JobError('NO_SOURCE', 'There is nothing to draft from: send the question paper or readable candidate scripts.');
@@ -393,7 +403,7 @@ export function createExamService(deps: ExamDeps) {
    * the file name, otherwise a new sequential id (reported back so the teacher can see the mapping).
    * Never reads identity from handwriting on the page.
    */
-  async function addSubmissions(userId: string, examId: string, files: UploadFile[], mapping: CandidateMapping[] = [], opts: { pagesPerStudent?: number; onSplit?: (fileName: string, students: number) => void } = {}) {
+  async function addSubmissions(userId: string, examId: string, files: UploadFile[], mapping: CandidateMapping[] = [], opts: { pagesPerStudent?: number; onSplit?: (fileName: string, students: number) => void; forMarking?: boolean } = {}) {
     const exam = await load(userId, examId);
     try { files = await expandArchives(files); } catch (e) { if (e instanceof InputError) throw new ExamInputError('UNREADABLE', e.message); throw e; }
     if (!files.length) throw new ExamInputError('NO_FILES', 'Attach at least one candidate script.');
@@ -401,17 +411,24 @@ export function createExamService(deps: ExamDeps) {
     // otherwise where the AI sees a new student start).
     const splitErrors: Array<{ fileName: string; code: string; reason: string }> = [];
     const expanded: UploadFile[] = [];
+    const scans = new Set<UploadFile>();
     for (const f of files) {
+      if (deps.disableScanGrading && await needsScanRecognition(f)) {
+        if (opts.forMarking) splitErrors.push({ fileName: f.name, code: 'SCANNED_PAPER_GRADING_DISABLED', reason: SCANNED_PAPER_MESSAGE });
+        else { scans.add(f); expanded.push(f); }
+        continue;
+      }
       let pages = 0;
       if (isPdf(f)) { try { pages = (await PDFDocument.load(f.buffer, { ignoreEncryption: true })).getPageCount(); } catch { pages = 0; } }
       const perStudent = opts.pagesPerStudent;
       if (!pages || (perStudent ? pages <= perStudent : pages <= (deps.maxPages ?? 20))) { expanded.push(f); continue; }
       try {
-        const agent = deps.agent();
-        const splitModel = process.env.EXAM_SPLIT_MODEL || agent.model;
+        const agent = perStudent ? null : await deps.agent(userId);
+        const splitModel = process.env.EXAM_SPLIT_MODEL || agent?.model;
+        const ai = agent && agent.supportsVision !== false && splitModel ? { adapter: agent.adapter, model: splitModel } : undefined;
         let used = { input: 0, output: 0 };
-        const pieces = await splitClassPdf(f.buffer, f.name, { pagesPerStudent: perStudent, ai: { adapter: agent.adapter, model: splitModel }, onUsage: (u) => { used = { input: used.input + u.input, output: used.output + u.output }; } });
-        if (used.input || used.output) await charge(userId, examId, null, { model: splitModel, ...used, what: 'split' });
+        const pieces = await splitClassPdf(f.buffer, f.name, { pagesPerStudent: perStudent, ai, onUsage: (u) => { used = { input: used.input + u.input, output: used.output + u.output }; } });
+        if (splitModel && (used.input || used.output)) await charge(userId, examId, null, { model: splitModel, ...used, what: 'split' });
         opts.onSplit?.(f.name, pieces.length);
         for (const piece of pieces) expanded.push({ name: piece.name, buffer: piece.buffer, mime: 'application/pdf' });
       } catch (e) {
@@ -456,6 +473,7 @@ export function createExamService(deps: ExamDeps) {
         const sub: Submission = {
           id: randomUUID(), candidateId, candidateName: m?.candidateName?.slice(0, 120), identity, fileId: stored.id, fileName: f.name.slice(0, 200), mime: info.mime,
           sha256: hash, pages: info.pages, uploadedAt: now(), state: 'queued', stateAt: now(),
+          ...(deps.disableScanGrading ? { scanOnly: scans.has(f) } : {}),
           ...(typedOriginal ? { typed: true, originalFileId: (await storeUpload(userId, typedOriginal, 'document')).id } : {}),
         };
         taken.add(candidateId.toLowerCase());
@@ -487,8 +505,10 @@ export function createExamService(deps: ExamDeps) {
     }
     if (!deps.visionAvailable()) throw new ExamInputError('VISION_MODEL_UNAVAILABLE', 'Handwriting recognition needs a vision-capable model (set AI_AGENT_PROVIDER=anthropic).', 503);
     await requirePremium(userId);
-    const ids = (opts.submissionIds?.length ? opts.submissionIds : exam.submissions.filter((s) => opts.remarkAll || s.state === 'queued' || s.state === 'failed' || !exam.results[s.id] || exam.results[s.id].schemeVersion !== sv.version).map((s) => s.id))
+    const requestedIds = (opts.submissionIds?.length ? opts.submissionIds : exam.submissions.filter((s) => opts.remarkAll || s.state === 'queued' || s.state === 'failed' || !exam.results[s.id] || exam.results[s.id].schemeVersion !== sv.version).map((s) => s.id))
       .filter((id) => exam.submissions.some((s) => s.id === id));
+    const ids = deps.disableScanGrading ? requestedIds.filter(id => !exam.submissions.find(s => s.id === id)?.scanOnly) : requestedIds;
+    if (requestedIds.length && !ids.length) throw new ExamInputError('SCANNED_PAPER_GRADING_DISABLED', SCANNED_PAPER_MESSAGE, 422);
     if (!ids.length) throw new ExamInputError('NOTHING_TO_MARK', 'Every script is already marked with the current scheme. Ask to re-mark if you want a fresh run.', 409);
     const active = exam.runs.find((r) => !['completed', 'completed_with_warnings', 'failed', 'cancelled'].includes(r.state));
     if (active) throw new ExamInputError('RUN_IN_PROGRESS', 'A marking run is already in progress for this examination.', 409);
@@ -540,6 +560,15 @@ export function createExamService(deps: ExamDeps) {
     return t ?? undefined;
   }
 
+  async function requireMarkableSubmission(userId: string, sub: Submission) {
+    if (!deps.disableScanGrading || sub.typed || sub.scanOnly === false) return;
+    if (sub.scanOnly) throw new JobError('SCANNED_PAPER_GRADING_DISABLED', SCANNED_PAPER_MESSAGE);
+    const { data } = await deps.fileStore.read(sub.fileId, userId);
+    if (await needsScanRecognition({ buffer: data, name: sub.fileName, mime: sub.mime })) {
+      throw new JobError('SCANNED_PAPER_GRADING_DISABLED', SCANNED_PAPER_MESSAGE);
+    }
+  }
+
   /** Recognise → match → mark → verify one candidate. Safe to re-run: results are keyed by submission. */
   async function processCandidate(userId: string, examId: string, runId: string, submissionId: string, signal: AbortSignal) {
     let exam = await load(userId, examId);
@@ -558,14 +587,16 @@ export function createExamService(deps: ExamDeps) {
       return;
     }
 
+    await requireMarkableSubmission(userId, sub);
     await deps.beforeAi?.(userId);
     const ref = { runId, submissionId: sub.id, candidateId: sub.candidateId };
     await setState(userId, examId, runId, sub.id, 'validating');
     await setState(userId, examId, runId, sub.id, 'recognizing', undefined, { ...ref, type: 'page_processing_started', message: `Reading ${sub.candidateId}'s script (${sub.pages} page${sub.pages === 1 ? '' : 's'}).`, data: { pages: sub.pages } });
+    const agent = await deps.agent(userId);
     const { record, cached, key } = await recognizeSubmission(userId, sub, signal);
     // Reading the handwriting is AI work too: charged with this script's marking, as one action (a reading reused
     // from earlier is free).
-    const readUsage = cached ? [] : [{ model: record.result.model ?? deps.agent().model, input: record.result.usage.input, output: record.result.usage.output }];
+    const readUsage = cached ? [] : [{ model: record.result.model ?? agent.model, input: record.result.usage.input, output: record.result.usage.output }];
     const pages = record.result.pages;
     const elements = pages.flatMap((pg) => pg.elements);
     const unclear = pages.flatMap((pg) => pg.elements.filter((el) => el.uncertainty !== 'low').map(() => pg.page));
@@ -604,13 +635,12 @@ export function createExamService(deps: ExamDeps) {
 
     await setState(userId, examId, runId, sub.id, 'marking', undefined, { ...ref, type: 'marking_started', progress: runProgress(await load(userId, examId), runId), message: `Marking ${sub.candidateId}.` }, { ...ref, type: 'question_detected', message: `${sub.candidateId}: answers found for ${found.length} of ${scheme.questions.length} questions${missing.length ? ` (not found: ${missing.slice(0, 8).join(', ')})` : ''}. Marking now.`, data: { found: found.length, questions: scheme.questions.length, missing: missing.join(', ').slice(0, 120) || null } });
     exam = await load(userId, examId);
-    const agent = deps.agent();
     let marked: Awaited<ReturnType<typeof markCandidate>>;
     try {
       const pref = exam.preferences ?? DEFAULT_PREFERENCES;
       marked = await markCandidate(agent.adapter, agent.model, { scheme, questionIds: scheme.questions.map((q) => q.id), match, questionPaperText: await questionPaperText(userId, exam), runId, schemeVersion: run.schemeVersion, signal, fallbackModel: agent.fallbackModel,
         preferences: { credit: pref.credit, feedback: pref.feedback, instructions: pref.instructions },
-        imagesForQuestions: deps.visualEvidence ? ids => markingImages(userId, examId, sub.id, match, ids) : undefined,
+        imagesForQuestions: deps.visualEvidence && agent.supportsVision !== false ? ids => markingImages(userId, examId, sub.id, match, ids) : undefined,
         checkpoints: existing?.runId === runId ? Object.fromEntries(existing.questions.filter(q => q.ai).map(q => [q.questionId, q.ai!])) : undefined,
         onStartQuestion: async questionId => {
           await mutate(userId, examId, e => {
@@ -659,7 +689,7 @@ export function createExamService(deps: ExamDeps) {
       });
       // The teacher's own pen marks survive re-marking (they are drawn on the page, not tied to the AI's marks).
       e.results[sub.id] = { submissionId: sub.id, candidateId: sub.candidateId, runId, schemeVersion: run.schemeVersion, questions, updatedAt: now(), usage: marked.usage, ...(prev?.pen ? { pen: prev.pen } : {}) };
-      chargeLater = { model: deps.agent().model, input: marked.usage.input, output: marked.usage.output, what: 'mark', batch: run.mode === 'overnight', extra: readUsage, second: marked.secondUsage };
+      chargeLater = { model: agent.model, input: marked.usage.input, output: marked.usage.output, what: 'mark', batch: run.mode === 'overnight', extra: readUsage, second: marked.secondUsage };
       audit(e, { actor: 'bwenge-ai', type: 'marked', submissionId: sub.id, candidateId: sub.candidateId, after: { total: questions.reduce((a, q) => a + (effectiveMarks(q) ?? 0), 0) } });
       const s = e.submissions.find((x) => x.id === sub.id)!;
       s.state = questions.some((q) => openFlags(q).length) ? 'completed_with_warnings' : 'completed';
@@ -920,15 +950,16 @@ export function createExamService(deps: ExamDeps) {
     const sub = exam.submissions.find((s) => s.id === submissionId);
     const res = exam.results[submissionId];
     if (!sub?.documentId || !res) throw new JobError('NOT_MARKED', 'This script has not been marked yet.');
+    await requireMarkableSubmission(userId, sub);
     const doc = await deps.documents.get(userId, sub.documentId);
     if (!doc) throw new JobError('DOCUMENT_EXPIRED', 'The recognised script has expired.');
     const scheme = schemeOf(exam, res.schemeVersion)!;
     const match = matchAnswers(doc.result, doc.corrections, scheme);
-    const agent = deps.agent();
+    const agent = await deps.agent(userId);
     let marked: Awaited<ReturnType<typeof markCandidate>>;
     await deps.beforeAi?.(userId);
     try {
-      marked = await markCandidate(agent.adapter, agent.model, { imagesForQuestions: deps.visualEvidence ? ids => markingImages(userId, examId, sub.id, match, ids) : undefined, scheme, questionIds, match, questionPaperText: await questionPaperText(userId, exam), runId: res.runId, schemeVersion: res.schemeVersion, signal, fallbackModel: agent.fallbackModel });
+      marked = await markCandidate(agent.adapter, agent.model, { imagesForQuestions: deps.visualEvidence && agent.supportsVision !== false ? ids => markingImages(userId, examId, sub.id, match, ids) : undefined, scheme, questionIds, match, questionPaperText: await questionPaperText(userId, exam), runId: res.runId, schemeVersion: res.schemeVersion, signal, fallbackModel: agent.fallbackModel });
     } catch (e) { throw mapProvider(e); }
     const correctedIds = new Set(doc.corrections.map((c) => c.elementId));
     await mutate(userId, examId, (e) => {
@@ -949,7 +980,7 @@ export function createExamService(deps: ExamDeps) {
       }
       r.updatedAt = now();
       r.usage = { input: r.usage.input + marked.usage.input, output: r.usage.output + marked.usage.output };
-      try { deps.onUsage?.(userId, { model: deps.agent().model, input: marked.usage.input, output: marked.usage.output, what: 'remark' }); } catch { /* metering never breaks marking */ }
+      try { deps.onUsage?.(userId, { model: agent.model, input: marked.usage.input, output: marked.usage.output, what: 'remark' }); } catch { /* metering never breaks marking */ }
     });
   }
 

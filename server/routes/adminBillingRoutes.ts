@@ -104,14 +104,14 @@ router.put('/ai-guard', async (req, res) => {
 });
 
 const limitsSchema = z.object({
-  daily: z.number().int().min(1).max(1_000_000), weekly: z.number().int().min(1).max(5_000_000), monthly: z.number().int().min(1).max(20_000_000),
+  fiveHours: z.number().int().min(1).max(1_000_000), daily: z.number().int().min(1).max(1_000_000), weekly: z.number().int().min(1).max(5_000_000), monthly: z.number().int().min(1).max(20_000_000),
   perDay: z.object({ tool: z.number().int().min(0), vision: z.number().int().min(0), artifact: z.number().int().min(0), marking: z.number().int().min(0) }).partial(),
   maxMessageChars: z.number().int().min(500).max(500_000), maxAttachments: z.number().int().min(0).max(100), maxUploadMb: z.number().int().min(1).max(500), storageMb: z.number().int().min(10).max(10_000_000),
   memory: z.boolean(), memoryItems: z.number().int().min(0).max(1_000_000),
 }).partial();
 const priceSchema = z.object({ priceRwf: z.number().int().min(100).max(10_000_000).optional() });
 const settingsSchema = z.object({
-  schema: z.literal(2).default(2),
+  schema: z.union([z.literal(2), z.literal(3)]).default(3),
   fxUsdRwf: z.number().min(100).max(100_000).optional(),
   prices: z.object({ STARTER: priceSchema, PRO: priceSchema, PLUS: priceSchema }).partial().optional(),
   goPacks: z.array(z.object({ id: z.string().regex(/^[a-z0-9-]{2,30}$/), rwf: z.number().int().min(100).max(10_000_000), credits: z.number().int().min(1).max(10_000_000) })).min(1).max(8).optional(),

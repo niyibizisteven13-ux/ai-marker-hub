@@ -1,7 +1,7 @@
 # Bwenge AI on Telegram
 
 The bot is a second front end to the **same assistant as the web chat**:
-- the same model routing (Claude Haiku when `AI_AGENT_PROVIDER=anthropic`);
+- the same Claude chat and tools as the web app, subject to the account’s plan limits;
 - the same tools, file storage and security checks.
 
 Only the presentation is Telegram-specific.
@@ -89,7 +89,7 @@ scanner.html + src/scanner/  the web app's DocumentScanner as a Telegram Mini Ap
 | `TELEGRAM_BOT_USERNAME` | Fallback username for @mention detection in groups (normally read from `getMe`). |
 | `TELEGRAM_API_BASE` | Optional local Bot API server. |
 | `APP_BASE_URL` | Public URL; the webhook is `APP_BASE_URL/api/telegram/webhook` and the scanner `APP_BASE_URL/scanner.html`. Must be HTTPS for the Mini App scanner. |
-| `AI_AGENT_PROVIDER=anthropic`, `ANTHROPIC_API_KEY`, `CLAUDE_AGENT_MODEL` | Run tool turns (files, charts, statistics) on Claude, as in the web chat. |
+| `ANTHROPIC_API_KEY`, `CLAUDE_AGENT_MODEL` | Enable Claude for chat, tools, and scan reading. |
 
 Deployment:
 - Run `prisma migrate deploy`. It applies `20261023000100_telegram_history`, which adds `history` and `lastPrompt`

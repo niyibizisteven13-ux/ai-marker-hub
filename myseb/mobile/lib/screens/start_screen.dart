@@ -7,6 +7,8 @@ import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
 import '../services/api.dart';
 import 'exam_screen.dart';
+import 'link_room_screen.dart';
+import 'managed_room_screen.dart';
 
 class StartScreen extends StatefulWidget {
   const StartScreen({super.key});
@@ -21,6 +23,9 @@ class _StartScreenState extends State<StartScreen> with WidgetsBindingObserver {
   bool _busy = false;
   StreamSubscription<Uri>? _links;
   Timer? _updateTimer;
+  Timer? _downloadTimer;
+  String? _dismissedVersion;
+  String _downloadStatus = 'idle';
   Map<String, dynamic>? _update;
   bool _checkingUpdate = false;
   String? _updateMessage;
@@ -32,12 +37,15 @@ class _StartScreenState extends State<StartScreen> with WidgetsBindingObserver {
     _initLinks();
     WidgetsBinding.instance.addObserver(this);
     _checkUpdates();
-    _updateTimer = Timer.periodic(const Duration(minutes: 5), (_) => _checkUpdates());
+    _updateTimer = Timer.periodic(const Duration(minutes: 1), (_) => _checkUpdates());
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _checkUpdates();
+    if (state == AppLifecycleState.resumed) {
+      _checkUpdates();
+      if (_update != null) _checkDownload();
+    }
   }
 
   Future<void> _checkUpdates({bool manual = false}) async {
@@ -49,18 +57,64 @@ class _StartScreenState extends State<StartScreen> with WidgetsBindingObserver {
       if (response.statusCode != 200) throw Exception('Update unavailable');
       final info = jsonDecode(response.body) as Map<String, dynamic>;
       if (!mounted || _busy) return;
-      setState(() { _update = info['available'] == true ? info : null; _updateMessage = manual && _update == null ? 'MySEB is up to date, or no compatible update has been published yet.' : null; });
+      setState(() {
+        if (manual) _dismissedVersion = null;
+        _update = info['available'] == true ? info : null;
+        _updateMessage = manual && _update == null ? 'MySEB is up to date, or no compatible update has been published yet.' : null;
+      });
+      if (_update != null) await _checkDownload();
     } catch (_) {
       if (mounted && manual) setState(() => _updateMessage = 'Could not check for updates. Check your internet connection and try again.');
     } finally { _checkingUpdate = false; }
   }
 
-  Future<void> _installUpdate() async {
+  Future<void> _checkDownload() async {
     if (_busy || _update == null) return;
-    final url = Uri.tryParse(_update!['downloadUrl']?.toString() ?? '');
-    if (url == null || url.scheme != 'https' || url.host != 'github.com' || !url.path.startsWith('/niyibizisteven13-ux/ai-marker-hub/releases/download/')) return;
-    try { await _updates.invokeMethod('openDownload', {'url': url.toString()}); }
-    catch (_) { if (mounted) setState(() => _updateMessage = 'Could not open the installer. Try again after reconnecting.'); }
+    final url = _update!['downloadUrl']?.toString();
+    try {
+      final status = await _updates.invokeMethod<String>('status', {'url': url}) ?? 'idle';
+      if (!mounted || _busy || _update?['downloadUrl'] != url) return;
+      setState(() {
+        _downloadStatus = status;
+        if (status == 'failed') _updateMessage = 'The download stopped. Choose Update now to try again.';
+      });
+      if (status == 'downloading') {
+        _downloadTimer ??= Timer.periodic(const Duration(seconds: 2), (_) => _checkDownload());
+      } else {
+        _downloadTimer?.cancel();
+        _downloadTimer = null;
+      }
+    } catch (_) {
+      _downloadTimer?.cancel();
+      _downloadTimer = null;
+      if (mounted) setState(() => _downloadStatus = 'idle');
+    }
+  }
+
+  Future<void> _applyUpdate() async {
+    if (_busy || _update == null || _downloadStatus == 'downloading') return;
+    final url = _update!['downloadUrl']?.toString();
+    final ready = _downloadStatus == 'ready';
+    setState(() {
+      _downloadStatus = ready ? 'ready' : 'downloading';
+      _updateMessage = null;
+    });
+    try {
+      if (ready) {
+        final result = await _updates.invokeMethod<String>('install', {'url': url});
+        if (result == 'permission' && mounted) {
+          setState(() => _updateMessage = 'Allow MySEB to install updates in Android settings, then return and tap Install update.');
+        }
+      } else {
+        await _updates.invokeMethod<void>('start', {'url': url});
+        await _checkDownload();
+      }
+    } catch (_) {
+      if (mounted) setState(() {
+        _downloadStatus = ready ? 'ready' : 'idle';
+        _updateMessage = 'Could not open the update. Check your connection and try again.';
+      });
+    }
   }
 
   // The teacher's QR opens myseb://join?code=849277 : we only prefill the code, never switch server from a link.
@@ -97,6 +151,18 @@ class _StartScreenState extends State<StartScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _openRoom(String view) async {
+    setState(() => _busy = true);
+    try {
+      final base = await Api.savedBase();
+      if (!mounted) return;
+      final uri = Uri.parse('$base/liveroom/').replace(queryParameters: {'client':'app', 'view':view});
+      await Navigator.of(context).push(MaterialPageRoute(builder: (_) => view == 'managed' ? ManagedRoomScreen(base: base) : LinkRoomScreen(address:uri)));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _serverDialog() async {
     final c = TextEditingController(text: await Api.savedBase());
     if (!mounted) return;
@@ -111,7 +177,7 @@ class _StartScreenState extends State<StartScreen> with WidgetsBindingObserver {
   }
 
   @override
-  void dispose() { WidgetsBinding.instance.removeObserver(this); _updateTimer?.cancel(); _links?.cancel(); _code.dispose(); _name.dispose(); super.dispose(); }
+  void dispose() { WidgetsBinding.instance.removeObserver(this); _updateTimer?.cancel(); _downloadTimer?.cancel(); _links?.cancel(); _code.dispose(); _name.dispose(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -128,10 +194,17 @@ class _StartScreenState extends State<StartScreen> with WidgetsBindingObserver {
                     child: const Text('MySEB', textAlign: TextAlign.center, style: TextStyle(fontSize: 52, fontWeight: FontWeight.w800, color: Color(0xFF60A5FA), letterSpacing: 2)),
                   ),
                   const Text('Secure exam browser', textAlign: TextAlign.center, style: TextStyle(color: Colors.white54)),
-                  if (_update != null) Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
+                  if (_update != null && _update!['version'] != _dismissedVersion) Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(children: [
                     Text('MySEB ${_update!['version']} is available', style: const TextStyle(fontWeight: FontWeight.bold)),
-                    const Text('Download the update, then confirm installation in Android. Keep your existing MySEB app installed.'),
-                    Row(mainAxisAlignment: MainAxisAlignment.end, children: [TextButton(onPressed: () => setState(() => _update = null), child: const Text('Later')), FilledButton(onPressed: _busy ? null : _installUpdate, child: const Text('Download & install'))]),
+                    Text(_downloadStatus == 'downloading' ? 'Downloading the update…' : 'Android will ask you to confirm installation.'),
+                    if (_downloadStatus == 'downloading') const LinearProgressIndicator(),
+                    Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+                      TextButton(onPressed: () => setState(() => _dismissedVersion = _update!['version']?.toString()), child: const Text('Later')),
+                      FilledButton(
+                        onPressed: _busy || _downloadStatus == 'downloading' ? null : _applyUpdate,
+                        child: Text(_downloadStatus == 'ready' ? 'Install update' : 'Update now'),
+                      ),
+                    ]),
                   ]))),
                   if (Platform.isAndroid) TextButton(onPressed: _busy ? null : () => _checkUpdates(manual: true), child: const Text('Check for updates')),
                   if (_updateMessage != null) Text(_updateMessage!, textAlign: TextAlign.center),
@@ -147,6 +220,9 @@ class _StartScreenState extends State<StartScreen> with WidgetsBindingObserver {
                   ),
                   const SizedBox(height: 18),
                   FilledButton(onPressed: _busy ? null : _join, child: Padding(padding: const EdgeInsets.all(14), child: Text(_busy ? 'Checking…' : 'Start exam'))),
+                  TextButton(onPressed: _busy ? null : () => _openRoom('direct'), child: const Text('Open a link')),
+                  TextButton(onPressed: _busy ? null : () => _openRoom('join'), child: const Text('LiveRoom')),
+                  TextButton(onPressed: _busy ? null : () => _openRoom('managed'), child: const Text('Room')),
                   if (_error != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(_error!, textAlign: TextAlign.center, style: const TextStyle(color: Color(0xFFF87171)))),
                   const SizedBox(height: 24),
                   const Text('Your phone will be locked until the exam ends. Leaving the app is recorded and pauses your exam.',

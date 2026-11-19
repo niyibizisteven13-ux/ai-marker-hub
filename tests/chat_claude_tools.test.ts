@@ -5,10 +5,9 @@ import type { AddressInfo } from 'node:net';
 import ExcelJS from 'exceljs';
 
 // generalAssist (the web chat's agent path) end to end over HTTP against a local fake Anthropic Messages
-// API speaking the real SSE stream format. Config mirrors production: AI_PROVIDER=gonkarouter for everyday
-// chat, AI_AGENT_PROVIDER=anthropic with Claude Haiku for tool turns. No network, SYNTHETIC values.
+// API speaking the real SSE stream format for free and paid accounts.
 const requests: any[] = [];
-const gonkaRequests: any[] = [];
+const paths: string[] = [];
 type Turn = { text?: string; tools?: Array<{ id: string; name: string; input: unknown }> };
 const script: Turn[] = [];
 
@@ -37,23 +36,25 @@ const fake = http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => { body += c; });
   req.on('end', () => {
-    if (req.url === '/gonka/v1/chat/completions') { gonkaRequests.push(JSON.parse(body)); res.writeHead(400, { 'content-type': 'application/json' }).end('{"error":{"message":"test gonka stub"}}'); return; }
+    paths.push(req.url ?? '');
     if (req.url !== '/v1/messages') { res.writeHead(404).end(); return; }
     requests.push(JSON.parse(body));
+    if (body.includes('claude-outage-fixture')) {
+      res.writeHead(503, { 'content-type': 'application/json' }).end('{"type":"error","error":{"type":"overloaded_error","message":"test Claude outage"}}');
+      return;
+    }
     sse(res, script.shift() ?? { text: 'Done.' });
   });
 }).listen(0);
 await new Promise((r) => fake.once('listening', r));
 
 Object.assign(process.env, {
-  AI_PROVIDER: 'gonkarouter',
+  AI_PROVIDER: 'anthropic',
   AI_AGENT_PROVIDER: 'anthropic',
   ANTHROPIC_API_KEY: 'test-key-not-real',
   ANTHROPIC_BASE_URL: `http://127.0.0.1:${(fake.address() as AddressInfo).port}`,
   CLAUDE_AGENT_MODEL: 'claude-haiku-5-5',
-  CLAUDE_FALLBACK_TO_GONKA: 'false',
-  GONKA_BASE_URL: `http://127.0.0.1:${(fake.address() as AddressInfo).port}/gonka/v1`,
-  GONKA_API_KEY: 'test-gonka-key',
+  AI_MAX_ATTEMPTS: '1',
   // Other suites publish library datasets into the same CI database; routing here must not depend on them.
   LIBRARY_AUTO_ROUTE: 'false',
 });
@@ -65,6 +66,8 @@ const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.s
 const rows = [{ Category: 'A', Value: 10 }, { Category: 'B', Value: 20 }, { Category: 'C', Value: 15 }];
 const src = [{ type: 'user', label: 'Values given by the user' }];
 
+const largeRequest = (message: string) => message + '\n\n' + 'Additional document context. '.repeat(215);
+
 test('web chat tool turn: Claude Haiku receives the tools, its tool calls run, real chart + xlsx are attached', async () => {
   const user = `claude-chat-${Date.now()}`;
   script.push(
@@ -75,9 +78,9 @@ test('web chat tool turn: Claude Haiku receives the tools, its tool calls run, r
     { text: 'Your bar chart and Excel workbook are attached.' },
   );
   const events: any[] = [];
-  const out: any = await ai.generalAssist({ userId: user, messages: [{ role: 'user', content: 'Make a bar chart comparing A=10, B=20, C=15 and give me an Excel file.' }], onEvent: (e) => events.push(e) });
+  const out: any = await ai.generalAssist({ userId: user, planId: 'PRO', messages: [{ role: 'user', content: largeRequest('Make a bar chart comparing A=10, B=20, C=15 and give me an Excel file.') }], onEvent: (e) => events.push(e) });
 
-  // The request reached Claude Haiku (not Gonka) with the output tools and the delivery rules.
+  // The request reached Claude Haiku with the output tools and the delivery rules.
   assert.equal(requests.length, 2);
   assert.equal(requests[0].model, 'claude-haiku-5-5');
   assert.equal(out.model, 'claude-haiku-5-5');
@@ -111,7 +114,7 @@ test('web chat tool turn: a model that answers with CSV instead of calling tools
     { text: 'The workbook is attached. The chart could not be made in this reply.' },
   );
   const events: any[] = [];
-  const out: any = await ai.generalAssist({ userId: user, messages: [{ role: 'user', content: 'Make a bar chart comparing A=10, B=20, C=15 and give me an Excel file.' }], onEvent: (e) => events.push(e) });
+  const out: any = await ai.generalAssist({ userId: user, planId: 'PRO', messages: [{ role: 'user', content: largeRequest('Make a bar chart comparing A=10, B=20, C=15 and give me an Excel file.') }], onEvent: (e) => events.push(e) });
   assert.ok(events.some((e) => e.type === 'turn_reset'), 'CSV answer is cleared on the client');
   assert.match(JSON.stringify(requests[1].messages.at(-1)), /Delivery check[\s\S]*chart \(SVG\) and XLSX file/);
   assert.equal(out.attachments.length, 1);
@@ -120,13 +123,11 @@ test('web chat tool turn: a model that answers with CSV instead of calling tools
   assert.match(out.content[0].text, /Not created: chart \(SVG\)\. No download is available for it/);
 });
 
-test('everyday chat is not routed to Claude or forced through tools', async () => {
-  requests.length = 0;
-  // The Gonka stub answers 400, so the call fails; what matters is where it went.
-  await assert.rejects(ai.generalAssist({ userId: 'u-prose', messages: [{ role: 'user', content: 'What is photosynthesis?' }] }));
-  assert.equal(requests.length, 0, 'no Claude call for a plain question');
-  assert.equal(gonkaRequests.length, 1, 'plain questions stay on the Gonka chat model');
-  assert.doesNotMatch(JSON.stringify(gonkaRequests[0].messages[0]), /Deliverables for this turn/);
+test('a plain free question reaches Claude without the deliverable instructions', async () => {
+  script.push({ text: 'Plants use light to make sugars.' });
+  const answer = await ai.generalAssist({ userId: 'u-prose', planId: 'FREE', messages: [{ role: 'user', content: 'What is photosynthesis?' }] });
+  assert.equal(answer.content[0].text, 'Plants use light to make sugars.');
+  assert.doesNotMatch(JSON.stringify(requests.at(-1).system), /Deliverables for this turn/);
 });
 
 test('earlier turns reach Claude with their text, also when given in the chat-history shape { role, text }', async () => {
@@ -136,9 +137,45 @@ test('earlier turns reach Claude with their text, also when given in the chat-hi
     { role: 'user', text: 'My class is Senior 4 B and the scheme gives half marks for method.' },
     { role: 'assistant', text: 'Noted: Senior 4 B, half marks for method.' },
   ];
-  await ai.generalAssist({ userId: `history-${Date.now()}`, messages: [...history, { role: 'user', content: 'Make a bar chart of A=1, B=2 as an Excel file.' }], onEvent: () => undefined });
+  await ai.generalAssist({ userId: `history-${Date.now()}`, planId: 'PRO', messages: [...history, { role: 'user', content: largeRequest('Make a bar chart of A=1, B=2 as an Excel file.') }], onEvent: () => undefined });
   const sent = JSON.stringify(requests[0].messages);
   assert.match(sent, /Senior 4 B and the scheme gives half marks/);
   assert.match(sent, /Noted: Senior 4 B/);
   assert.ok(requests[0].messages.every((m: any) => JSON.stringify(m.content) !== '""'), 'no empty turns');
+});
+
+
+test('free advanced chat and paid routine agents both reach Claude', async () => {
+  const before = requests.length;
+  script.push({ text: 'Free reply.' }, { text: 'Paid reply.' });
+  const advanced = await ai.generalAssist({
+    userId: 'free-route-test', planId: 'FREE',
+    messages: [{ role: 'user', content: largeRequest('Compare these two reports separately.') }],
+  });
+  const routine = await ai.generalAssist({
+    userId: 'paid-route-test', planId: 'PRO',
+    planText: 'Hello', contextFiles: [{ fileId: 'earlier-file', name: 'Previous report.pdf' }],
+    messages: [{ role: 'user', content: 'Hello.' }],
+  });
+  assert.equal(advanced.content[0].text, 'Free reply.');
+  assert.equal(routine.content[0].text, 'Paid reply.');
+  assert.equal(requests.length, before + 2);
+});
+
+test('free and paid greetings stream from Claude and an outage fails cleanly', async () => {
+  const before = paths.length;
+  script.push({ text: 'Hello on Free.' });
+  const free = await ai.streamUserChat('Hi', { planId: 'FREE', onToken: () => undefined });
+  assert.equal(free.provider, 'anthropic');
+  script.push({ text: 'Hello from Claude.' });
+  const tokens: string[] = [];
+  const reply = await ai.streamUserChat('Hi', { planId: 'PRO', onToken: token => tokens.push(token) });
+  assert.equal(tokens.join(''), 'Hello from Claude.');
+  assert.equal(reply.provider, 'anthropic');
+  assert.equal(reply.model, 'claude-haiku-5-5');
+
+  await assert.rejects(ai.streamUserChat('claude-outage-fixture routing-fixture', {
+    planId: 'PRO', onToken: () => assert.fail('An outage should send no text.'),
+  }), { status: 503 });
+  assert.deepEqual(paths.slice(before), ['/v1/messages', '/v1/messages', '/v1/messages']);
 });

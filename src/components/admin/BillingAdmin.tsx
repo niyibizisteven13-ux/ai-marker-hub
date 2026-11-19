@@ -9,7 +9,7 @@ import { authFetch } from '../../utils/authFetch';
 
 type PlanId = 'FREE' | 'GO' | 'STARTER' | 'PRO' | 'PLUS' | 'INSTITUTION';
 type SoldPlan = 'STARTER' | 'PRO' | 'PLUS';
-interface Limits { daily: number; weekly: number; monthly: number; perDay: { tool: number; vision: number; artifact: number; marking: number }; maxMessageChars: number; maxAttachments: number; maxUploadMb: number; storageMb: number; memory: boolean; memoryItems: number }
+interface Limits { fiveHours: number; daily: number; weekly: number; monthly: number; perDay: { tool: number; vision: number; artifact: number; marking: number }; maxMessageChars: number; maxAttachments: number; maxUploadMb: number; storageMb: number; memory: boolean; memoryItems: number }
 interface Overview {
   revenue: { rwf: number; usd: number; payments: number }; aiCost: { usd: number; rwf: number; credits: number }; margin: { usd: number; percent: number | null };
   pendingPayments: number; subscriptions: Record<SoldPlan | 'INSTITUTION', number>; goCredits: { sold: number; used: number };
@@ -78,7 +78,7 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
   const saveSettings = () => eff && run(() => api('/api/admin/billing/settings', {
     method: 'PUT',
     body: JSON.stringify({
-      schema: 2,
+      schema: 3,
       fxUsdRwf: eff.fxUsdRwf,
       prices: Object.fromEntries(SOLD.map((id) => [id, { priceRwf: eff.plans[id].priceRwf ?? 0 }])),
       goPacks: eff.goPacks,
@@ -162,21 +162,21 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
                   <button aria-label="Remove pack" className={`${btn} mb-0.5 text-[#8A97C2] hover:text-rose-300`} disabled={eff.goPacks.length <= 1} onClick={() => setEff({ ...eff, goPacks: eff.goPacks.filter((_, j) => j !== i) })}><Trash2 size={14} /></button>
                 </div>
               ))}
-              {eff.goPacks.length < 8 && <button className={`${btn} bg-[#1A2240] text-[#C9D3F0]`} onClick={() => setEff({ ...eff, goPacks: [...eff.goPacks, { id: `go-${Date.now() % 100000}`, rwf: 10_000, credits: 4_350 }] })}><Plus size={13} /> Add pack</button>}
+              {eff.goPacks.length < 8 && <button className={`${btn} bg-[#1A2240] text-[#C9D3F0]`} onClick={() => setEff({ ...eff, goPacks: [...eff.goPacks, { id: `go-${Date.now() % 100000}`, rwf: 10_000, credits: 3_200 }] })}><Plus size={13} /> Add pack</button>}
             </div>
           </div>
 
           <div className="overflow-x-auto">
             <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#8A97C2]">Limits per plan</h4>
             <table className="w-full min-w-[760px] text-xs">
-              <thead><tr className="text-left text-[#8A97C2]">{['Plan', 'Credits / day', '/ week', '/ month', 'Tool answers / day', 'Scans / day', 'Files / day', 'Marking / day', 'Storage (MB)', 'Memory'].map((h) => <th key={h} className="px-1.5 py-1 font-medium">{h}</th>)}</tr></thead>
+              <thead><tr className="text-left text-[#8A97C2]">{['Plan', 'Credits / 5 hours', '/ day', '/ week', '/ month', 'Tool answers / day', 'Scans / day', 'Files / day', 'Marking / day', 'Storage (MB)', 'Memory'].map((h) => <th key={h} className="px-1.5 py-1 font-medium">{h}</th>)}</tr></thead>
               <tbody>
                 {PLAN_IDS.map((id) => {
                   const l = eff.plans[id].limits;
                   return (
                     <tr key={id} className="border-t border-[#1E2848]">
                       <td className="px-1.5 py-1.5 font-semibold text-white">{eff.plans[id].name}{eff.plans[id].sold ? '' : <span className="block text-[10px] font-normal text-[#8A97C2]">not sold online</span>}</td>
-                      {(['daily', 'weekly', 'monthly'] as const).map((k) => <td key={k} className="px-1"><input className={input} type="number" min={1} value={l[k]} onChange={(e) => setLimit(id, k, Number(e.target.value))} /></td>)}
+                      {(['fiveHours', 'daily', 'weekly', 'monthly'] as const).map((k) => <td key={k} className="px-1"><input className={input} type="number" min={1} value={l[k]} onChange={(e) => setLimit(id, k, Number(e.target.value))} /></td>)}
                       {(['tool', 'vision', 'artifact', 'marking'] as const).map((k) => <td key={k} className="px-1"><input className={input} type="number" min={0} value={l.perDay[k]} onChange={(e) => setLimit(id, `perDay.${k}`, Number(e.target.value))} /></td>)}
                       <td className="px-1"><input className={input} type="number" min={10} step={512} value={l.storageMb ?? 0} onChange={(e) => setLimit(id, 'storageMb', Number(e.target.value))} aria-label={`${id} storage in MB`} /></td>
                       <td className="px-1.5 text-center"><input type="checkbox" checked={l.memory} onChange={(e) => setLimit(id, 'memory', e.target.checked)} aria-label={`${id} memory`} /></td>

@@ -77,10 +77,10 @@ EXAM & RUBRIC: ${JSON.stringify(examPaper, null, 2)}
 STUDENT ANSWERS: ${JSON.stringify(studentScript.answers, null, 2)}`;
 
     try {
-      // Primary Routing: Use GonkaRouter (GLM-5.3-Flash) for all script evaluations when active/available
-      if (await this.aiService.providerAvailable('gonkarouter') || process.env.AI_PROVIDER === 'gonkarouter') {
-        logger.info(`[GradingService] Exclusive Routing: using GonkaRouter (GLM-5.3-Flash) for batch ${batchId}`);
-        const rawResult = await this.aiService.sendGonkaChat(prompt, { system: draftSystemInstruction });
+      // Primary Routing: Use Claude for all script evaluations when active/available
+      if (await this.aiService.providerAvailable('anthropic')) {
+        logger.info(`[GradingService] Exclusive Routing: using Claude for batch ${batchId}`);
+        const rawResult = await this.aiService.completeText(prompt, { system: draftSystemInstruction });
         const results = this.aiService.parseModelJson(typeof rawResult === 'string' ? rawResult : (rawResult as any).text || '');
         return this.processResults(results, studentScript, examPaper);
       }
@@ -219,7 +219,7 @@ STUDENT ANSWERS: ${JSON.stringify(studentScript.answers, null, 2)}`;
         flags: flagsDetected,
         teacherApproved: false,
       },
-      providers: ['GonkaRouter'],
+      providers: ['Claude'],
     };
   }
 

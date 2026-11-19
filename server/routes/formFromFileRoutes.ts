@@ -11,7 +11,7 @@ import { FromFileError, draftQuiz, type QuizAi } from '../services/forms/fromFil
 const defaultAi: QuizAi = {
   async json(system, user) {
     const ai = AiService.getInstance();
-    return ai.parseModelJson(await ai.sendGonkaChat(user, { system }));
+    return ai.parseModelJson(await ai.completeText(user, { system }));
   },
 };
 
@@ -26,7 +26,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 
 /** What the credits check and the charge do; tests replace them. */
 export interface FromFileMeter { allow: (res: Response, userId: string) => Promise<boolean>; charge: (userId: string, inputChars: number, outputChars: number) => void }
 const realMeter: FromFileMeter = {
-  allow: (res, userId) => allowAi(res, userId, 'artifact'),
+  allow: (res, userId) => allowAi(res, userId, 'artifact', AI_PRICE.quizFromFile),
   charge: (userId, input, output) => void chargeAi(userId, { kind: 'artifact', input, output, minCredits: AI_PRICE.quizFromFile }),
 };
 

@@ -13,7 +13,7 @@ const VERSION = app.getVersion();
 let appUpdater = null;
 let macUpdateUrl = null;
 async function checkMacUpdate() {
-  if (exam && exam.status !== 'ENDED') return { status: 'idle' };
+  if (joiningExam || (exam && exam.status !== 'ENDED')) return { status: 'idle' };
   try {
     const response = await fetch(`${cfg.apiBase}/updates/check?platform=mac&version=${VERSION}`, { signal: AbortSignal.timeout(8000) });
     if (!response.ok) throw new Error();
@@ -72,6 +72,7 @@ function deviceId() {
 
 /* ------------------------------------------------------------------ state (the token lives ONLY here, in the main process) */
 let cfg, DEVICE, win;
+let joiningExam = false;
 let exam = null;            // { token, sessionId, examOrigin, title, status }
 let allowQuit = false;
 let hbTimer = null, hbFails = 0, blurTimer = null;
@@ -243,14 +244,25 @@ function createWindow() {
 /* ------------------------------------------------------------------ IPC (the renderer never sees the token) */
 ipcMain.handle('update-check', () => process.platform === 'darwin' ? checkMacUpdate() : appUpdater?.check() ?? { status: 'unsupported', message: 'Install the latest MySEB from bwenge.space/myseb/download.' });
 ipcMain.handle('update-download', async () => {
-  if (process.platform === 'darwin' && macUpdateUrl && (!exam || exam.status === 'ENDED')) { await shell.openExternal(macUpdateUrl); return { status: 'manual', message: 'Download opened. Install the new MySEB in Applications when you are ready.' }; }
-  return appUpdater?.download() ?? { status: 'unsupported' };
+  if (process.platform === 'darwin' && macUpdateUrl && !joiningExam && (!exam || exam.status === 'ENDED')) { await shell.openExternal(macUpdateUrl); return { status: 'manual', message: 'Download opened. Install the new MySEB in Applications when you are ready.' }; }
+  return appUpdater?.apply() ?? { status: 'unsupported' };
 });
 ipcMain.handle('update-install', () => appUpdater?.install() ?? false);
 ipcMain.handle('info', () => ({ apiBase: cfg.apiBase, version: VERSION, dev: DEV }));
 
+let linkRoomWindow;
+ipcMain.handle('open-link-room', (event, view) => {
+  if (event.sender !== win.webContents || exam || joiningExam) return;
+  if (linkRoomWindow) return linkRoomWindow.focus();
+  linkRoomWindow = view === 'managed' ? require('./managedRoom').openManagedRoom(win, cfg.apiBase)
+    : require('./linkRoom').openRoom(win, cfg.apiBase, view === 'direct' ? 'direct' : 'join');
+  linkRoomWindow.on('closed', () => { linkRoomWindow = null; });
+});
+
 ipcMain.handle('verify', async (_e, { code, name }) => {
   if (typeof code !== 'string' || typeof name !== 'string') return { error: 'Enter your name and code.' };
+  if (linkRoomWindow || joiningExam || appUpdater?.state().status === 'installing') return { error: 'Please wait for MySEB to finish.' };
+  joiningExam = true;
   try {
     const r = await post('/api/verify-code', {
       code, studentName: name, deviceId: DEVICE, clientType: 'desktop', platform: process.platform,
@@ -259,6 +271,7 @@ ipcMain.handle('verify', async (_e, { code, name }) => {
     startExam(r.json);
     return { title: r.json.title, examUrl: r.json.examUrl, status: r.json.status, remainingSeconds: r.json.remainingSeconds };
   } catch { return { error: 'Cannot reach the exam server. Check your internet and the server address.' }; }
+  finally { joiningExam = false; }
 });
 
 ipcMain.handle('confirm-exit', async () => {
@@ -282,7 +295,7 @@ offerJoin(parseJoin(process.argv.find((a) => String(a).startsWith('myseb://'))))
 app.on('second-instance', (_e, argv) => { offerJoin(parseJoin(argv.find((a) => String(a).startsWith('myseb://')))); if (win) { win.show(); win.focus(); } });
 
 app.on('web-contents-created', (_e, contents) => {
-  guardInput(contents);
+  if (!require('./linkRoom').roomSessions.has(contents.session)) guardInput(contents);
   if (!DEV) contents.on('devtools-opened', () => contents.closeDevTools());
   contents.on('will-attach-webview', (ev, prefs, params) => {
     // Only the exam site, only in our partition, with no preload and no Node.
@@ -342,14 +355,14 @@ app.whenReady().then(() => {
   if (app.isPackaged && process.platform === 'darwin') {
     const check = async () => { const s = await checkMacUpdate(); if (s.status === 'available') toRenderer('app-update', s); };
     win.webContents.once('did-finish-load', () => void check());
-    setInterval(() => void check(), 5 * 60_000).unref();
+    setInterval(() => void check(), 60_000).unref();
   }
   if (app.isPackaged && !DEV && ['win32', 'linux'].includes(process.platform)) {
     const { autoUpdater } = require('electron-updater');
     autoUpdater.setFeedURL({ provider: 'generic', url: `${cfg.apiBase}/updates/` });
-    appUpdater = require('./updater').createUpdater({ updater: autoUpdater, active: () => Boolean(exam && exam.status !== 'ENDED'), notify: (s) => toRenderer('app-update', s), beforeInstall: () => { allowQuit = true; } });
+    appUpdater = require('./updater').createUpdater({ updater: autoUpdater, active: () => joiningExam || Boolean(exam && exam.status !== 'ENDED'), notify: (s) => toRenderer('app-update', s), beforeInstall: () => { allowQuit = true; } });
     win.webContents.once('did-finish-load', () => void appUpdater.check());
-    setInterval(() => void appUpdater.check(), 5 * 60_000).unref();
+    setInterval(() => void appUpdater.check(), 60_000).unref();
     win.on('focus', () => { if (!exam) void appUpdater.check(); });
   }
 });

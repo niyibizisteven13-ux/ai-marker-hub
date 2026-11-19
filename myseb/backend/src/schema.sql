@@ -93,3 +93,35 @@ DO $$ BEGIN
     ALTER TABLE exam_sessions ADD CONSTRAINT exam_sessions_client_type_check CHECK (client_type IN ('desktop','mobile','extension','web'));
   END IF;
 END $$;
+
+CREATE TABLE IF NOT EXISTS link_rooms (
+  code text PRIMARY KEY,
+  host_hash text NOT NULL,
+  title text NOT NULL,
+  mode text NOT NULL,
+  sites jsonb NOT NULL,
+  activities jsonb NOT NULL,
+  active integer,
+  expires_at timestamptz NOT NULL DEFAULT now() + interval '24 hours'
+);
+CREATE TABLE IF NOT EXISTS link_room_members (
+  room text REFERENCES link_rooms(code) ON DELETE CASCADE,
+  member_hash text NOT NULL,
+  name text NOT NULL,
+  opened integer,
+  PRIMARY KEY (room, member_hash)
+);
+
+CREATE TABLE IF NOT EXISTS managed_rooms (
+  code text PRIMARY KEY, host_hash text NOT NULL, title text NOT NULL,
+  policy jsonb NOT NULL, activities jsonb NOT NULL DEFAULT '[]', revision integer NOT NULL DEFAULT 1,
+  starts_at timestamptz NOT NULL, ends_at timestamptz NOT NULL,
+  closed boolean NOT NULL DEFAULT false
+);
+CREATE TABLE IF NOT EXISTS managed_members (
+  room text REFERENCES managed_rooms(code) ON DELETE CASCADE,
+  id uuid NOT NULL DEFAULT gen_random_uuid(), token_hash text NOT NULL,
+  name text NOT NULL, seen timestamptz NOT NULL DEFAULT now(),
+  current_site text, applied integer NOT NULL DEFAULT 0, request text, reply text, released boolean NOT NULL DEFAULT false,
+  PRIMARY KEY(room,token_hash), UNIQUE(room,id)
+);

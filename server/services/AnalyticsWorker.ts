@@ -85,7 +85,7 @@ EXPECTED JSON:
       // 2. Original Insight Extraction
       let insights: any = {};
       try {
-        const rawInsights = await this.aiService.sendGonkaChat(
+        const rawInsights = await this.aiService.completeText(
           `FORM: ${submission.form.title}\nFORM QUESTIONS: ${submission.form.schema}\nSUBMISSION ANSWERS: ${JSON.stringify(redactFormAnswersForAi(JSON.parse(submission.form.schema || '{}'), JSON.parse(submission.data || '{}')))}`,
           { system: systemPrompt },
         );
@@ -293,9 +293,9 @@ EXPECTED JSON:
 
     if (insightsSummary) {
       try {
-        const rawOverview = await this.aiService.sendGonkaChat(
+        const rawOverview = await this.aiService.completeText(
           `Analyze these ${totalSubmissions} form responses for "${form.title}".\nQUESTION DISTRIBUTIONS:\n${JSON.stringify(questionSummaries.map(q => ({ title: q.title, responseRate: q.responseRate, topOptions: q.distribution.slice(0, 4), accuracyRate: q.accuracyRate })))}\n\nRESPONDENT SUMMARIES:\n${insightsSummary}\n\nReturn JSON ONLY:\n{\n  "executiveSummary": "3-sentence high-signal cohort analysis",\n  "keyPatterns": ["Pattern 1", "Pattern 2", "Pattern 3"]\n}`,
-          { system: 'You are Bwenge Senior Form Analytics Agent powered by GonkaRouter. Return valid JSON only.' }
+          { system: 'You are Bwenge Senior Form Analytics Agent powered by Claude. Return valid JSON only.' }
         );
         const parsedOverview = this.aiService.parseModelJson(rawOverview);
         if (parsedOverview?.executiveSummary) {
@@ -342,9 +342,9 @@ EXPECTED JSON:
         details: (() => { try { return JSON.parse(submission.extractedInsights?.scoringDetails || '{}'); } catch { return {}; } })(),
       }));
       try {
-        const raw = await this.aiService.sendGonkaChat(
+        const raw = await this.aiService.completeText(
           `Evaluate all candidates against the user's requirements. Return a ranked list of the supplied rankIds only, with score 0-100, selected boolean, and concise evidence-based reasoning.\nREQUIREMENTS: ${requirementText}\nCANDIDATES: ${JSON.stringify(evidence)}`,
-          { system: 'You are an impartial admissions and candidate selection analyst powered by GonkaRouter. Return JSON only: {"summary":"...","rankings":[{"rankId":1,"score":85,"selected":true,"reason":"..."}]}' }
+          { system: 'You are an impartial admissions and candidate selection analyst powered by Claude. Return JSON only: {"summary":"...","rankings":[{"rankId":1,"score":85,"selected":true,"reason":"..."}]}' }
         );
         const parsedSel = this.aiService.parseModelJson(raw);
         const rankings = Array.isArray(parsedSel?.rankings) ? parsedSel.rankings : [];

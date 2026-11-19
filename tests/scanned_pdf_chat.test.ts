@@ -42,8 +42,8 @@ const fake = http.createServer((req, res) => {
 await new Promise((r) => fake.once('listening', r));
 const base = `http://127.0.0.1:${(fake.address() as AddressInfo).port}`;
 Object.assign(process.env, {
-  AI_PROVIDER: 'gonkarouter', AI_AGENT_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'test-key', ANTHROPIC_BASE_URL: base,
-  CLAUDE_AGENT_MODEL: 'claude-haiku-5-5', CLAUDE_FALLBACK_TO_GONKA: 'false', GONKA_API_KEY: 'test-gonka', GONKA_BASE_URL: `${base}/gonka/v1`,
+  AI_PROVIDER: 'anthropic', AI_AGENT_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'test-key', ANTHROPIC_BASE_URL: base,
+  CLAUDE_AGENT_MODEL: 'claude-haiku-5-5',
 });
 
 const { ingestUploads } = await import('../server/services/ai/ingest.js');
@@ -94,13 +94,13 @@ test('ingest: long scans are capped and the model is told which pages it sees', 
 
 test('chat: a scanned PDF goes to the agent path and reaches Claude as images, even for a plain question', async () => {
   const plain = planOutput({ message: 'answer that question' });
-  const base = { intent: 'general_assist', service: 'general', isSmallTalk: false, requestedProvider: null, hasClaudeKey: true, aiProvider: 'gonkarouter', agentAvailable: true, plan: plain };
+  const base = { intent: 'general_assist', service: 'general', isSmallTalk: false, requestedProvider: null, hasClaudeKey: true, aiProvider: 'anthropic', agentAvailable: true, plan: plain };
   assert.equal(useToolAgent(base), false, 'plain text without files keeps the legacy route');
   assert.equal(useToolAgent({ ...base, hasVisualFiles: true }), true, 'attached photos/PDFs need the agent path');
 
   const pdf = await imageOnlyPdf(['Question one', 'Question two', 'Question three']);
   const out: any = await AiService.getInstance().generalAssist({
-    userId: 'u-scan-chat', planText: 'answer that question',
+    userId: 'u-scan-chat', planId: 'PRO', planText: 'answer that question',
     messages: [{ role: 'user', content: 'answer that question' }],
     files: [{ type: 'document', base64: pdf.toString('base64'), mediaType: 'application/pdf', name: 'Mugenzi.pdf' }],
   });
@@ -111,4 +111,17 @@ test('chat: a scanned PDF goes to the agent path and reaches Claude as images, e
   assert.equal(user.find((b) => b.type === 'image').source.media_type, 'image/jpeg');
   assert.match(JSON.stringify(user), /Mugenzi\.pdf \(fileId [^)]+\): a scanned or handwritten PDF with 3 pages/);
   assert.match(out.content[0].text, /Question one asks you to solve/);
+});
+
+test('paid scanner OCR sends page images to Claude without enabling grading tools', async () => {
+  const image = await sharp({ create: { width: 120, height: 120, channels: 3, background: 'white' } }).png().toBuffer();
+  const before = requests.length;
+  await AiService.getInstance().readScan('u-scan-ocr', 'PRO', 'Transcribe this page.', {
+    system: 'Read the page.', images: [{ base64: image.toString('base64'), mediaType: 'image/png' }],
+  });
+  assert.equal(requests.length, before + 1);
+  const request = requests.at(-1);
+  assert.equal(request.model, 'claude-haiku-5-5');
+  assert.ok(request.messages.at(-1).content.some((part: any) => part.type === 'image'));
+  assert.equal(request.tools?.length ?? 0, 0);
 });

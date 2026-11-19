@@ -14,6 +14,7 @@ import logger from '../utils/logger.js';
 import { consumeTelegramLink } from '../services/telegramLinkStore.js';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
+import { needsScanRecognition, SCANNED_PAPER_MESSAGE } from '../services/exams/scanPolicy.js';
 import { PDFParse } from 'pdf-parse';
 import fs from 'fs/promises';
 import path from 'path';
@@ -36,11 +37,6 @@ async function startTranscription(chatId: string, session: any, fileId: string, 
 }
 const aiService = AiService.getInstance();
 const paywallService = PaywallService.getInstance();
-
-// Where locally-uploaded (web-scanner) files land before being picked up
-// by checkAndTriggerBatchGrading, alongside Telegram-native uploads.
-const SCAN_UPLOADS_DIR = path.join(process.cwd(), 'uploads', 'telegram-scans');
-
 
 async function ensureTelegramUser(chatId: string, session: any) {
   if (session.userId) {
@@ -136,7 +132,7 @@ async function cleanupLocalScanFile(localPath: string | null | undefined) {
 
 
 /**
- * Tool executor for conversational bot chat (Gonka path). Deliberately
+ * Tool executor for conversational bot chat. Deliberately
  * covers only the tools that make sense in a text-only Telegram
  * conversation — build_form, generate_visual_annotation,
  * cross_reference_visuals, and generate_browser_extension from
@@ -243,41 +239,13 @@ router.post(['/scan-upload', '/scan-upload/:sessionToken'], upload.single('file'
     const filename = (path.basename(req.file.originalname || 'scan.pdf').replace(/[^\p{L}\p{N} ._()-]/gu, '').trim().slice(0, 80)) || 'scan.pdf';
     const data = qualityCheck.correctedBuffer || req.file.buffer;
 
-    if (session.stagedMode !== 'batch') {
-      if (req.file.mimetype !== 'application/pdf') return res.status(415).json({ error: 'The scanner sends PDF files.' });
-      let pages = 1;
-      const parser = new PDFParse({ data: new Uint8Array(data) });
-      try { pages = (await parser.getInfo()).total || 1; } catch { /* label only */ } finally { await parser.destroy().catch(() => undefined); }
-      await deliverScan(chatId, session, data, /\.pdf$/i.test(filename) ? filename : `${filename}.pdf`, pages);
-      return res.json({ success: true, pages });
-    }
+    if (req.file.mimetype !== 'application/pdf') return res.status(415).json({ error: 'The scanner sends PDF files.' });
+    let pages = 1;
+    const parser = new PDFParse({ data: new Uint8Array(data) });
+    try { pages = (await parser.getInfo()).total || 1; } catch { /* label only */ } finally { await parser.destroy().catch(() => undefined); }
+    await deliverScan(chatId, session, data, /\.pdf$/i.test(filename) ? filename : `${filename}.pdf`, pages);
+    return res.json({ success: true, pages });
 
-    await fs.mkdir(SCAN_UPLOADS_DIR, { recursive: true });
-    const isRubric = /rubric|key|scheme|bar[eè]me/i.test(filename);
-    const safeExt = path.extname(filename).replace(/[^a-zA-Z0-9.]/g, '').slice(0, 10) || '.jpg';
-    const storedPath = path.join(SCAN_UPLOADS_DIR, `${isRubric ? 'rubric' : 'paper'}-${chatId}-${crypto.randomUUID()}${safeExt}`);
-
-    await fs.writeFile(storedPath, data);
-
-    if (isRubric) {
-      await prisma.telegramSession.update({
-        where: { chatId },
-        data: { stagedRubricLocalPath: storedPath, stagedRubricName: filename, stagedRubricFileId: null },
-      });
-      await botService.sendMessage(chatId, `📥 **Web Scanner**: Received rubric \`${filename}\`.`);
-    } else {
-      await prisma.telegramSession.update({
-        where: { chatId },
-        data: { stagedPaperLocalPath: storedPath, stagedPaperName: filename, stagedPaperFileId: null },
-      });
-      await botService.sendMessage(chatId, `📥 **Web Scanner**: Received document \`${filename}\`.`);
-    }
-
-    checkAndTriggerBatchGrading(chatId).catch((err) => {
-      logger.error('Post-scan-upload grading trigger failed.', { errorType: err instanceof Error ? err.name : 'Error' });
-    });
-
-    res.json({ success: true, staged: isRubric ? 'rubric' : 'paper' });
   } catch (err: any) {
     logger.error('Web scanner upload failed', err);
     res.status(500).json({ error: process.env.NODE_ENV === 'production' ? 'Scan upload failed. Please retry.' : err.message });
@@ -305,11 +273,8 @@ async function handleNaturalLanguageAction(chatId: string, session: any, message
   const text = message.trim();
   const lower = text.toLowerCase();
 
-  if (/(single|one|this)\s+(script|paper|answer)|handwritten.*(photo|picture)|grade.*(photo|picture)|mark.*(photo|picture)|kosor\w*.*(ifoto|urupapuro)/i.test(lower)) {
-    await prisma.telegramSession.update({ where: { chatId }, data: { stagedMode: 'markphoto' } });
-    await botService.sendMessage(chatId, session.language === 'rw'
-      ? 'Ohereza ifoto y’urupapuro rw’umunyeshuri kugira ngo ndusuzume.'
-      : 'Send the student’s answer photo and I’ll grade it. You can include rubric instructions in the photo caption.');
+  if (/grade.*(photo|picture)|mark.*(photo|picture)|kosor\w*.*(ifoto|urupapuro)/i.test(lower)) {
+    await botService.sendMessage(chatId, SCANNED_PAPER_MESSAGE);
     return true;
   }
 
@@ -386,7 +351,7 @@ async function handleNaturalLanguageAction(chatId: string, session: any, message
     return true;
   }
 
-  if (/\b(which|what)\b.*\b(model|provider)\b|\bGonkaRouter\b/i.test(text)) {
+  if (/\b(which|what)\b.*\b(model|provider)\b/i.test(text)) {
     await handleBotCommand(chatId, session, '/model');
     return true;
   }
@@ -404,7 +369,7 @@ const legacyHooks: LegacyHooks = {
     if (!session) {
       const code = String(from?.language_code ?? '').slice(0, 2);
       session = await prisma.telegramSession.create({
-        data: { chatId, provider: process.env.GONKA_API_KEY ? 'gonkarouter' : 'gemini', language: code === 'rw' || code === 'fr' ? code : 'en' },
+        data: { chatId, provider: 'anthropic', language: code === 'rw' || code === 'fr' ? code : 'en' },
       });
     }
     session = await ensureTelegramUser(chatId, session);
@@ -417,8 +382,8 @@ const legacyHooks: LegacyHooks = {
     } catch (e) {
       logger.warn('Failed to initialize Telegram grading quota:', e);
     }
-    if (process.env.GONKA_API_KEY && session.provider !== 'gonkarouter') {
-      session = await prisma.telegramSession.update({ where: { chatId }, data: { provider: 'gonkarouter' } });
+    if (session.provider !== 'anthropic') {
+      session = await prisma.telegramSession.update({ where: { chatId }, data: { provider: 'anthropic' } });
     }
     return session;
   },
@@ -625,7 +590,7 @@ async function handleBotCommand(chatId: string, session: any, text: string) {
         await botService.sendMessage(chatId, `📝 Generating exam paper and marking rubric for: *${arg}*...`);
         try {
           const prompt = `You are a World-Class Assessment Architect. Generate a complete exam paper with matching rubric for: ${arg}. Respond in ${lang === 'rw' ? 'Kinyarwanda' : 'English'}.`;
-          const result = await aiService.sendGonkaChat(prompt, { system: 'Generate complete, accurate assessment materials.' });
+          const result = await aiService.completeText(prompt, { system: 'Generate complete, accurate assessment materials.' });
           await botService.sendMessage(chatId, `✨ **Exam Paper & Rubric Generated**:\n\n${result.slice(0, 3800)}`);
         } catch (err: any) {
           await botService.sendMessage(chatId, `❌ Exam generation failed: ${err.message}`);
@@ -841,64 +806,8 @@ async function handleIncomingPhoto(chatId: string, session: any, fileId: string,
     /\b(grade|mark|evaluate|correct|kosora)\b/i.test(caption || '');
 
   if (isMarkPhoto) {
-    if (!(await ensurePaywallAccess(chatId, session, 'grading'))) return;
-
-    await botService.sendChatAction(chatId, 'typing');
-    await botService.sendMessage(chatId, '👁️ *Analyzing handwritten student answer page...*');
-
-    const photoFile = await botService.downloadTelegramFile(fileId);
-    if (!photoFile) {
-      const baseUrl = process.env.APP_BASE_URL || 'http://localhost:3000';
-      await botService.sendMessage(chatId, `❌ Failed to download photo from Telegram. Try uploading via Web Scanner: ${baseUrl}/scan.html?chatId=${chatId}`);
-      return;
-    }
-
-    const qualityService = DocumentQualityService.getInstance();
-    const qualityCheck = await qualityService.prepareScannedPage(photoFile.buffer, 'image/jpeg');
-
-    if (!qualityCheck.ok) {
-      await botService.sendMessage(chatId,
-        `⚠️ **Image Quality Gate Rejected**\n\n` +
-        `Reason: ${qualityCheck.reason}\n\n` +
-        `💡 Please retake the photo in good lighting, holding the camera steady and parallel to the paper.`
-      );
-      return;
-    }
-
-    const processedBuffer = qualityCheck.correctedBuffer || photoFile.buffer;
-    const rubricContext = session.stagedRubricText || caption || '';
-
-    const prompt = `You are an expert Academic Evaluator. Grade this single student's handwritten answer sheet. ${
-      rubricContext ? `Rubric/Context: ${rubricContext}.` : ''
-    } Provide: 1) Full Student Transcription, 2) Total Score vs Max Score, 3) Per-criterion Score Breakdown, 4) Explicit Confidence Rating (high/medium/low) with any ambiguous text flagged.`;
-
-    try {
-      const evaluation = await aiService.analyzeImage({
-        base64: processedBuffer.toString('base64'),
-        mediaType: 'image/jpeg',
-        question: prompt,
-      });
-
-      const job = await prisma.batchJob.create({
-        data: {
-          userId: session.userId || `telegram-${chatId}`,
-          telegramChatId: chatId,
-          paperType: 'single',
-          status: 'DONE',
-          detectedCount: 1,
-          summary: evaluation.slice(0, 500),
-        },
-      });
-
-      await prisma.telegramSession.update({
-        where: { chatId },
-        data: { stagedMode: null },
-      });
-
-      await botService.sendMessage(chatId, `🎯 **Single-Script Vision Grading Result (Job \`${job.id.slice(0, 8)}\`)**:\n\n${evaluation}`);
-    } catch (err: any) {
-      await botService.sendMessage(chatId, `❌ Single-script vision grading failed: ${err.message}`);
-    }
+    await prisma.telegramSession.update({ where: { chatId }, data: { stagedMode: null } });
+    await botService.sendMessage(chatId, SCANNED_PAPER_MESSAGE);
     return;
   }
 
@@ -981,9 +890,11 @@ async function checkAndTriggerBatchGrading(chatId: string) {
 
   const rubricIsPdf = rubricFile.buffer.subarray(0, 5).toString() === '%PDF-';
   const papersIsPdf = papersFile.buffer.subarray(0, 5).toString() === '%PDF-';
-  const paperMimeType = papersIsPdf
-    ? 'application/pdf'
-    : (/\.png$/i.test(stagedPaperName || '') ? 'image/png' : (/\.webp$/i.test(stagedPaperName || '') ? 'image/webp' : 'image/jpeg'));
+  if (!papersIsPdf || await needsScanRecognition({ name: 'scripts.pdf', buffer: papersFile.buffer, mime: 'application/pdf' })) {
+    await botService.sendMessage(chatId, SCANNED_PAPER_MESSAGE);
+    return;
+  }
+  const paperMimeType = 'application/pdf';
   let rubricBuffer = rubricFile.buffer;
   const rubricMimeType = rubricIsPdf
     ? 'application/pdf'
@@ -1091,7 +1002,7 @@ async function handleGradeCommand(chatId: string, session: any) {
   await prisma.telegramSession.update({ where: { chatId }, data: { stagedMode: 'batch' } });
   const msg = lang === 'rw'
     ? `📥 **Gahunda y'Ibizamini**:\n1. Ohereza PDF y'ibizamini\n2. Ohereza ifoto cyangwa PDF ya rubric/ipaki y'ibisubizo\n\nAI irahita ikora batch kugihe!`
-    : `📥 **Batch Grading Guide**:\n1. Upload the exam papers PDF file\n2. Upload the rubric image/PDF\n\nAI will automatically trigger high-volume grading and send you the Excel report!`;
+    : `📥 **Batch Grading Guide**:\n1. Upload a text-based PDF of the typed answers\n2. Upload the rubric image/PDF\n\nAI will automatically trigger high-volume grading and send you the Excel report!`;
 
   await botService.sendMessage(chatId, msg, { reply_markup: buildTelegramKeyboard(lang) });
 }

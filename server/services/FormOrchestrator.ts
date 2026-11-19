@@ -53,7 +53,7 @@ OUTPUT JSON:
 }`;
 
     try {
-      const text = await this.aiService.sendGonkaChat(intent, { system: systemPrompt });
+      const text = await this.aiService.completeText(intent, { system: systemPrompt });
       const result = this.aiService.parseModelJson(text);
       if (
         !result ||
@@ -119,7 +119,7 @@ OUTPUT JSON:
     if (action === 'enhance_draft') {
       const currentDraft = payload?.currentDraft || payload?.draft || {};
       const instruction = String(payload?.instruction || 'Add 4 high-signal assessment questions and a scoring rubric.');
-      const systemPrompt = `You are Bwenge Form Architect Agent powered by GonkaRouter.
+      const systemPrompt = `You are Bwenge Form Architect Agent powered by Claude.
 Given the current form draft and the user's instruction, enhance or generate the form schema.
 Return valid JSON ONLY with this exact structure:
 {
@@ -146,7 +146,7 @@ Return valid JSON ONLY with this exact structure:
 }`;
       const prompt = `CURRENT FORM DRAFT:\n${JSON.stringify(currentDraft, null, 2)}\n\nUSER INSTRUCTION FOR AGENT:\n${instruction}`;
       try {
-        const raw = await this.aiService.sendGonkaChat(prompt, { system: systemPrompt });
+        const raw = await this.aiService.completeText(prompt, { system: systemPrompt });
         const parsed = this.aiService.parseModelJson(raw);
         if (
           !parsed ||
@@ -214,7 +214,7 @@ Return valid JSON ONLY with this exact structure:
         correctAnswer: q.correctAnswer || undefined,
       }));
 
-      const systemPrompt = `You are an Autonomous Simulation & Testing Agent powered by GonkaRouter.
+      const systemPrompt = `You are an Autonomous Simulation & Testing Agent powered by Claude.
 Generate ${count} realistic, diverse respondent submissions (ranging from exceptional to average to weak candidates) for the provided form schema.
 Use the EXACT question "key" values as JSON property keys in each submission's "answers" object.
 For MULTIPLE_CHOICE or DROPDOWN questions, pick one of the provided options. For CHECKBOX, provide an array of selected options.
@@ -228,7 +228,7 @@ Return valid JSON ONLY:
 }`;
       let simulatedList: any[];
       try {
-        const raw = await this.aiService.sendGonkaChat(
+        const raw = await this.aiService.completeText(
           `FORM TITLE: ${form.title}\nDESCRIPTION: ${schema.description || ''}\nQUESTIONS:\n${JSON.stringify(questionSpec, null, 2)}`,
           { system: systemPrompt }
         );

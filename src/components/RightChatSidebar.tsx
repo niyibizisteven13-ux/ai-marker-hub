@@ -116,7 +116,7 @@ export default function RightChatSidebar({
   isTyping = false,
   onUpgradeClick,
   onRetry,
-  selectedProvider = 'gonkarouter',
+  selectedProvider = 'anthropic',
   onProviderChange,
   onInsightAction,
 }: RightChatSidebarProps) {
@@ -318,7 +318,7 @@ export default function RightChatSidebar({
                   <div className="text-xs font-medium text-slate-200 group-hover:text-white">
                     Launch BwengeScan
                   </div>
-                  <div className="text-[11px] text-slate-500">Mark handwritten work live</div>
+                  <div className="text-[11px] text-slate-500">Grade typed scripts</div>
                 </div>
               </button>}
             </div>

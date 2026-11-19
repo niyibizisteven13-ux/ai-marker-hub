@@ -68,21 +68,33 @@ window.myseb.onCloseAttempt(() => {
 });
 $('quitIdle').onclick = () => window.myseb.quitIdle();
 
+let dismissedUpdateVersion;
+
 // Update controls live only on the start screen; main also refuses installation while an exam is active.
 function showUpdate(s) {
-  if (!$('examView').hidden) return;
+  if (!$('examView').hidden || (s.status === 'available' && s.version === dismissedUpdateVersion)) return;
+  $('updateLater').onclick = () => {
+    if (s.status === 'available') dismissedUpdateVersion = s.version;
+    $('updateInfo').hidden = true;
+  };
+  $('updateLater').hidden = ['downloading', 'installing'].includes(s.status);
   $('updateInfo').hidden = false; $('updateAction').hidden = true;
-  $('updateText').textContent = s.status === 'available' ? `MySEB ${s.version} is ready. Download the update now?`
+  $('updateText').textContent = s.status === 'available' ? `MySEB ${s.version} is ready. ${s.manual ? 'Download the installer.' : 'MySEB will restart after updating.'}`
     : s.status === 'downloaded' ? 'Update downloaded. Install and restart MySEB now?'
     : s.status === 'downloading' ? `Downloading update… ${s.percent ?? 0}%`
+    : s.status === 'installing' ? 'Restarting MySEB to finish the update…'
     : s.status === 'checking' ? 'Checking for updates…'
     : s.status === 'current' ? 'MySEB is up to date.' : s.message || 'Updates are not available for this build.';
   if (s.status === 'available' || s.status === 'downloaded') {
     $('updateAction').hidden = false;
-    $('updateAction').textContent = s.status === 'downloaded' ? 'Install & restart' : 'Download update';
+    $('updateAction').textContent = s.status === 'downloaded' ? 'Install & restart' : s.manual ? 'Download update' : 'Update now';
     $('updateAction').onclick = () => s.status === 'downloaded' ? window.myseb.installUpdate() : window.myseb.downloadUpdate().then(showUpdate);
   }
 }
 window.myseb.onUpdate(showUpdate);
-$('checkUpdate').onclick = () => window.myseb.checkUpdate().then(showUpdate);
-$('updateLater').onclick = () => { $('updateInfo').hidden = true; };
+$('checkUpdate').onclick = () => { dismissedUpdateVersion = undefined; window.myseb.checkUpdate().then(showUpdate); };
+
+document.getElementById('directLink').onclick = () => window.myseb.openLinkRoom('direct');
+document.getElementById('liveRoom').onclick = () => window.myseb.openLinkRoom('join');
+
+document.getElementById('managedRoom').onclick = () => window.myseb.openLinkRoom('managed');

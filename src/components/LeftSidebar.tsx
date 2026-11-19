@@ -164,13 +164,13 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   const navGroups: { title?: string; items: NavItem[] }[] = [
     { items: [
       { label: 'Chat', icon: MessageSquare, onClick: () => setActiveTab('documents'), active: activeTab === 'documents' && !/^\/(learn|exams)/.test(path) },
-      ...(user ? [{ label: 'Practice', icon: GraduationCap, onClick: goTo('/learn'), active: /^\/learn/.test(path) }] : []),
+      ...(user ? [{ label: 'Learning', icon: GraduationCap, onClick: goTo('/learn?tab=tasks'), active: /^\/learn/.test(path) }] : []),
     ] },
     { title: 'Teaching', items: [
       ...(user && onOpenMark ? [{ label: 'Mark', icon: PenLine, onClick: onOpenMark }] : []),
       ...(user && onOpenAssignments ? [{ label: 'Tasks', icon: ClipboardList, onClick: onOpenAssignments }] : []),
       ...(user && onOpenForms ? [{ label: 'Forms', icon: ClipboardCheck, onClick: onOpenForms }] : []),
-      ...(user && onOpenBiz ? [{ label: 'My business', icon: Store, onClick: onOpenBiz }] : []),
+      ...(user && onOpenBiz ? [{ label: 'Ventures', icon: Store, onClick: onOpenBiz }] : []),
       ...(user ? [{ label: 'Results', icon: BarChart3, onClick: goTo('/exams'), active: /^\/exams/.test(path) }] : []),
     ] },
     { title: 'Files', items: [

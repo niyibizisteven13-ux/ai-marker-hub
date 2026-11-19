@@ -13,15 +13,14 @@ import { PDFDocument, StandardFonts } from 'pdf-lib';
 // them (fake Claude scripts the tool calls). SYNTHETIC data only.
 
 const requests: any[] = [];
-const toolText = (block: any) => (typeof block.content === 'string' ? block.content : (block.content ?? []).map((c: any) => c.text ?? '').join(''));
 
 /** Scripted agent: list → browse (search) → read → analyze → answer from the analysis table. */
 function script(p: any): { text?: string; tool?: { name: string; input: unknown } } {
   const last = p.messages.at(-1);
-  const results = Array.isArray(last.content) ? last.content.filter((b: any) => b.type === 'tool_result') : [];
-  if (!results.length) return { tool: { name: 'list_datasets', input: {} } };
-  const text = toolText(results[0]);
-  const prevTool = p.messages.at(-2).content.find((b: any) => b.type === 'tool_use')?.name;
+  const result = Array.isArray(last.content) && last.content.find((block: any) => block.type === 'tool_result');
+  if (!result) return { tool: { name: 'list_datasets', input: {} } };
+  const text: string = result.content;
+  const prevTool = p.messages.at(-2).content.find((block: any) => block.type === 'tool_use')?.name;
   if (prevTool === 'list_datasets') return { tool: { name: 'browse_dataset', input: { datasetId: /Agriculture Survey \(datasetId ([^)]+)\)/.exec(text)![1], search: 'yields' } } };
   if (prevTool === 'browse_dataset') return { tool: { name: 'read_dataset_file', input: { fileId: /fileId ([\w-]+)/.exec(text)![1] } } };
   if (prevTool === 'read_dataset_file') {
@@ -35,32 +34,31 @@ const claude = http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => { body += c; });
   req.on('end', () => {
-    if (!req.url?.endsWith('/messages')) { res.writeHead(400, { 'content-type': 'application/json' }).end('{"error":{"message":"stub"}}'); return; }
+    if (req.url !== '/v1/messages') { res.writeHead(400, { 'content-type': 'application/json' }).end('{"error":{"message":"stub"}}'); return; }
     const p = JSON.parse(body);
     requests.push(p);
     const turn = script(p);
-    const send = (event: string, data: unknown) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     res.writeHead(200, { 'content-type': 'text/event-stream' });
-    send('message_start', { type: 'message_start', message: { id: 'm', type: 'message', role: 'assistant', model: p.model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 5, output_tokens: 1 } } });
-    if (turn.text) {
-      send('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } });
-      send('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: turn.text } });
-      send('content_block_stop', { type: 'content_block_stop', index: 0 });
+    const send = (type: string, data: object = {}) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`);
+    send('message_start', { message: { id: 'dataset', type: 'message', role: 'assistant', model: p.model, content: [], usage: { input_tokens: 5, output_tokens: 1 } } });
+    if (turn.tool) {
+      send('content_block_start', { index: 0, content_block: { type: 'tool_use', id: `tool_${requests.length}`, name: turn.tool.name, input: {} } });
+      send('content_block_delta', { index: 0, delta: { type: 'input_json_delta', partial_json: JSON.stringify(turn.tool.input) } });
     } else {
-      send('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: `toolu_${requests.length}`, name: turn.tool!.name, input: {} } });
-      send('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: JSON.stringify(turn.tool!.input) } });
-      send('content_block_stop', { type: 'content_block_stop', index: 0 });
+      send('content_block_start', { index: 0, content_block: { type: 'text', text: '' } });
+      send('content_block_delta', { index: 0, delta: { type: 'text_delta', text: turn.text } });
     }
-    send('message_delta', { type: 'message_delta', delta: { stop_reason: turn.text ? 'end_turn' : 'tool_use', stop_sequence: null }, usage: { output_tokens: 9 } });
-    send('message_stop', { type: 'message_stop' });
+    send('content_block_stop', { index: 0 });
+    send('message_delta', { delta: { stop_reason: turn.tool ? 'tool_use' : 'end_turn', stop_sequence: null }, usage: { output_tokens: 10 } });
+    send('message_stop');
     res.end();
   });
 }).listen(0);
 await new Promise((r) => claude.once('listening', r));
 const base = `http://127.0.0.1:${(claude.address() as AddressInfo).port}`;
 Object.assign(process.env, {
-  AI_PROVIDER: 'gonkarouter', AI_AGENT_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'test-key', ANTHROPIC_BASE_URL: base,
-  CLAUDE_AGENT_MODEL: 'claude-haiku-5-5', CLAUDE_FALLBACK_TO_GONKA: 'false', GONKA_API_KEY: 'test-gonka', GONKA_BASE_URL: `${base}/gonka/v1`,
+  ANTHROPIC_API_KEY: 'test-key', ANTHROPIC_BASE_URL: base,
+  CLAUDE_AGENT_MODEL: 'claude-haiku-5-5',
 });
 
 const { prisma } = await import('../server/db.js');
@@ -167,14 +165,14 @@ test('search_knowledge reaches published datasets for every user, with the sourc
   assert.equal(fromThisRepo(await retrieveKnowledgeChunks('salary name', { userId: user, limit: 10 })).length, 0, 'AI-disabled files are not indexed');
 });
 
-test('agent: a normal user\'s data question runs on Claude Haiku and lists → browses → reads → analyses the dataset', async () => {
+test('agent: a normal user\'s data question runs on Claude and lists → browses → reads → analyses the dataset', async () => {
   resetPublishedCache();
   const question = 'What is the average maize yield per district in the agriculture survey?';
   assert.equal(await asksAboutDatasets(question), true);
   assert.equal(await asksAboutDatasets('Agriculture Survey please'), true, 'dataset names count');
   assert.equal(await asksAboutDatasets('hello, how are you?'), false);
   const plan = planOutput({ message: 'tell me about the Agriculture Survey' });
-  const route = { intent: 'general_assist', service: 'general', isSmallTalk: false, requestedProvider: null, hasClaudeKey: true, aiProvider: 'gonkarouter', agentAvailable: true, plan };
+  const route = { intent: 'general_assist', service: 'general', isSmallTalk: false, requestedProvider: null, hasClaudeKey: true, aiProvider: 'anthropic', agentAvailable: true, plan };
   assert.equal(useToolAgent({ ...route, asksAboutDatasets: true }), true, 'dataset questions take the tool path');
 
   requests.length = 0;
@@ -182,9 +180,9 @@ test('agent: a normal user\'s data question runs on Claude Haiku and lists → b
   assert.equal(requests[0].model, 'claude-haiku-5-5');
   const names = requests[0].tools.map((t: any) => t.name);
   for (const n of ['list_datasets', 'browse_dataset', 'read_dataset_file', 'search_knowledge', 'analyze_data']) assert.ok(names.includes(n), `${n} offered`);
-  assert.match(requests[0].system.map?.((b: any) => b.text).join('') ?? String(requests[0].system), /Public library/);
+  assert.match(JSON.stringify(requests[0].system), /Public library/);
 
-  const results = requests.slice(1).map((r) => toolText(r.messages.at(-1).content.find((b: any) => b.type === 'tool_result')));
+  const results = requests.slice(1).map((r) => r.messages.at(-1).content.find((block: any) => block.type === 'tool_result').content);
   assert.match(results[0], /Agriculture Survey \(datasetId .*2 files/);
   assert.match(results[1], /Agriculture\/2024\/yields\.csv · CSV/);
   assert.match(results[2], /columns: district, crop, yield/);

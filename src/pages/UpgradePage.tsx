@@ -10,7 +10,7 @@ import { creditMeter } from '../components/PlanStatus';
  * approves on their phone and the page follows the payment until MTN confirms.
  */
 
-interface PlanLimits { daily: number; weekly: number; monthly: number; perDay: { tool: number; vision: number; artifact: number; marking: number }; maxUploadMb: number; maxAttachments: number; storageMb?: number; memory: boolean; memoryItems: number }
+interface PlanLimits { fiveHours?: number; daily: number; weekly: number; monthly: number; perDay: { tool: number; vision: number; artifact: number; marking: number }; maxUploadMb: number; maxAttachments: number; storageMb?: number; memory: boolean; memoryItems: number }
 interface Pack { id: string; rwf: number; credits: number; usd: number }
 interface PlansResponse {
   manual?: { momoCode: string; momoName: string; whatsapp: string | null } | null;
@@ -37,15 +37,13 @@ const SERIF = "font-display";
 const rwf = (n: number) => `${Math.round(n).toLocaleString('en-US')} RWF`;
 const usd = (n: number) => `$${Number.isInteger(n) ? n : n.toFixed(2)}`;
 const REASONS: Record<string, { title: string; body: string }> = {
-  limit: { title: 'You have used your credits', body: 'Pick a monthly plan for more credits, or top up to keep going right now.' },
+  limit: { title: 'You have used your credits', body: 'Pick a monthly plan for more credits, or use a top-up when wallet credits are available.' },
   usage: { title: 'Get more out of Bwenge', body: 'Monthly plans give you credits for chat, documents, marking and files; Pro adds memory across all chats.' },
   memory: { title: 'Memory across all chats is part of Pro', body: 'Bwenge remembers who you are, how you like answers and what you worked on, on the web and in Telegram.' },
   storage: { title: 'More storage for your files', body: 'Paid plans keep far more files: your uploads, the files you share in tasks and everything students hand in. Each plan below shows how much it keeps.' },
-  marking: { title: 'Automatic marking is part of the paid plans', body: 'From 1,500 RWF a month: Bwenge reads the handwriting, marks each question in red pen and gives you the results.' },
+  marking: { title: 'Automatic marking is part of the paid plans', body: 'From 1,500 RWF a month: Bwenge can grade typed scripts and quizzes and give you the results.' },
 };
 
-/** About 12 credits mark one handwritten script with the standard model (half that overnight). */
-const CREDITS_PER_SCRIPT = 12;
 const SOLD: Array<{ id: SoldPlan; icon: React.ReactNode; blurb: string }> = [
   { id: 'STARTER', icon: <Zap size={18} />, blurb: 'To try it out on your own work' },
   { id: 'PRO', icon: <Sparkles size={18} />, blurb: 'For regular use every week' },
@@ -58,10 +56,13 @@ const storageLabel = (mb: number) => (mb >= 1024 ? `${Math.round((mb / 1024) * 1
 function features(id: PlanId, l: PlanLimits): string[] {
   const n = (x: number) => x.toLocaleString('en-US');
   const storage = l.storageMb ? `${storageLabel(l.storageMb)} storage for your files and students' hand-ins` : null;
-  if (id === 'FREE') return [`${n(l.monthly)} credits a month for chat, scans and documents`, 'Try marking with a top-up', 'Paid plans add marking and quizzes from files', `Uploads up to ${l.maxUploadMb} MB`, ...(storage ? [storage] : [])];
+  const pacing = l.fiveHours != null && l.weekly != null
+    ? [`${n(l.fiveHours)} credits every 5 hours · ${n(l.weekly)} weekly`] : [];
+  if (id === 'FREE') return [`${n(l.monthly)} credits a month for chat, scans and documents`, 'Try marking with a top-up', 'Paid plans add marking and quizzes from files', ...pacing, `Uploads up to ${l.maxUploadMb} MB`, ...(storage ? [storage] : [])];
   return [
     `${n(l.monthly)} credits a month for chat, documents, research and files`,
-    `≈ ${n(Math.floor(l.monthly / CREDITS_PER_SCRIPT))} handwritten papers marked in red pen, or twice that overnight`,
+    ...pacing,
+    'AI grading for typed scripts and quizzes',
     'Practice, forms, tasks shared by link and Excel results',
     l.memory ? `Memory across all chats (${n(l.memoryItems)})` : 'No memory across chats',
     ...(storage ? [storage] : []),
@@ -197,7 +198,7 @@ export default function UpgradePage({ jobId, onBack, onSuccess }: UpgradePagePro
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <h3 className="flex items-center gap-2 text-base font-semibold text-[var(--text)]"><Coins size={16} className="text-[var(--accent)]" /> Top up credits</h3>
-                    <p className="mt-0.5 text-xs text-[var(--muted)]">For any plan, used once your monthly credits run out. Valid 12 months.</p>
+                    <p className="mt-0.5 text-xs text-[var(--muted)]">Top-ups cover extra AI usage within separate five-hour and weekly limits. Unspent credits stay in your wallet.</p>
                   </div>
                   <button disabled={paymentsOff || !pack} onClick={() => pack && setCheckout({ purpose: 'GO_PACK', packId: pack.id, months: 0, title: `Top-up · ${pack.credits.toLocaleString('en-US')} credits`, amountRwf: pack.rwf, amountUsd: pack.usd })}
                     className="min-h-[40px] rounded-xl bg-[var(--surface-2)] px-4 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--hover)] disabled:opacity-50">Buy {pack ? rwf(pack.rwf) : 'credits'}</button>
@@ -224,7 +225,7 @@ export default function UpgradePage({ jobId, onBack, onSuccess }: UpgradePagePro
 
         <section className="mx-auto grid max-w-4xl grid-cols-1 gap-3 sm:grid-cols-3">
           {[
-            ['What is a credit?', 'A chat reply is about 1 credit. Marking one handwritten paper is about 12; overnight marking (results by the next morning) costs half.'],
+            ['What is a credit?', 'A chat reply is about 1 credit. AI credits also cover work such as documents, research and grading typed answers.'],
             ['How do I pay?', manual ? 'Choose a plan, pay with MTN MoMo Pay to code 2191184 (Niyibizi Steven), then send the screenshot or payment confirmation SMS and your login email to +250799691108 on WhatsApp. Access is activated after verification.' : 'Enter your MTN MoMo number, then approve the prompt on your phone with your PIN. Your plan or credits are added as soon as MTN confirms.'],
             ['Receipts and renewal', 'After payment is verified and your purchase is activated, a receipt is emailed to your login email and sent to Telegram if connected. Mobile Money never renews automatically: we remind you 3 days before your plan ends.'],
           ].map(([q, a]) => (

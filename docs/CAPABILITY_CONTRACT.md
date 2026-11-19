@@ -29,7 +29,7 @@ This contract defines proposed measurable behavior for the product's AI surfaces
 
 - Approved overall regression gate: no capability may drop by more than 2 percentage points; zero safety/leakage failures.
 - Data policy: synthetic evaluation data only; retain hashed identifiers and metadata, not raw prompts or outputs. Temporary/opted-out chats must not enter datasets.
-- GonkaRouter may be used for synthetic evaluations only if a positive spend cap is separately approved. The current cap is **$0 per 100 tasks**, so no live provider requests are authorized.
+- A live AI provider may be used for synthetic evaluations only if a positive spend cap is separately approved. The current cap is **$0 per 100 tasks**, so no live provider requests are authorized.
 - Native-speaker and teacher review are not currently available. Kinyarwanda/French quality, teacher-marking agreement, and human-calibrated judge results remain unmeasured and must not be release-gated as if reviewed.
 - Per-capability acceptance thresholds, positive provider budget, and staging/deployment verification remain pending.
 

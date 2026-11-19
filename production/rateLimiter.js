@@ -45,6 +45,7 @@ export function userKey(req) {
  * own limits (liveRoomLimiter for the lecturer, studentLiveLimiter for each student's MySEB session).
  */
 export const LIVE_PATH = /^\/api\/(?:myseb\/live\/|(?:forms|assignments)\/[^/]+\/myseb\/)/;
+const QUIZ_RESULT_PATH = /^\/api\/forms\/[^/]+\/quiz-result\/?(?:\?|$)/;
 
 export const generalLimiter = isDev
   ? (req, res, next) => next()
@@ -55,7 +56,7 @@ export const generalLimiter = isDev
       limit: (req) => (userKey(req) ? 1500 : 600),
       keyGenerator: (req) => userKey(req) ?? ipKeyGenerator(req.ip ?? ''),
       // Staying signed in has its own limits (authLimiter) and must never be refused by this one. Live rooms have their own (below).
-      skip: (req) => (req.originalUrl || '').startsWith('/api/auth/refresh') || LIVE_PATH.test(req.originalUrl || ''),
+      skip: (req) => (req.originalUrl || '').startsWith('/api/auth/refresh') || LIVE_PATH.test(req.originalUrl || '') || QUIZ_RESULT_PATH.test(req.originalUrl || ''),
       standardHeaders: true,
       legacyHeaders: false,
     });

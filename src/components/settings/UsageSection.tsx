@@ -8,7 +8,8 @@ import StorageCard from './StorageCard';
 interface Meter { used: number; limit: number; resetsAt: string }
 interface UsageData {
   plan: { id: 'FREE' | 'GO' | 'STARTER' | 'PRO' | 'PLUS' | 'INSTITUTION'; name: string; priceUsd: number | null; listPriceUsd: number | null; priceRwf: number | null; priceNote: string };
-  credits: { day: Meter; week: Meter; month: Meter };
+  credits: { fiveHours?: Meter; day: Meter; week: Meter; month: Meter };
+  wallet?: { credits: number; available: number; fiveHours: Meter; week: Meter };
   features: Array<{ kind: 'tool' | 'vision' | 'artifact' | 'marking'; label: string; used: number; limit: number }>;
   limits: { maxMessageChars: number; maxAttachments: number; maxUploadMb: number; storageMb?: number; memory: boolean; memoryItems: number };
   recent: Array<{ at: string; kind: string; credits: number; channel: string }>;
@@ -78,6 +79,11 @@ export default function UsageSection() {
     { key: 'week', label: 'This week', icon: CalendarDays, m: usage.credits.week },
     { key: 'month', label: 'This month', icon: CalendarRange, m: usage.credits.month },
   ];
+  if (usage.credits.fiveHours) meters.unshift({ key: 'fiveHours', label: 'Five-hour window', icon: Clock, m: usage.credits.fiveHours });
+  if (usage.wallet && usage.wallet.credits > 0) {
+    meters.push({ key: 'wallet-fiveHours', label: 'Wallet · five hours', icon: Clock, m: usage.wallet.fiveHours });
+    meters.push({ key: 'wallet-week', label: 'Wallet · this week', icon: CalendarDays, m: usage.wallet.week });
+  }
   const isFree = usage.plan.id === 'FREE' || usage.plan.id === 'GO';
 
   return (
@@ -85,7 +91,7 @@ export default function UsageSection() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="font-display text-xl font-normal text-[var(--text)]">Usage & limits</h2>
-          <p className="mt-0.5 text-xs text-[var(--muted)]">Credits measure AI work: a chat reply is 1 credit, heavier work such as reading scans or building dashboards uses a few more.</p>
+          <p className="mt-0.5 text-xs text-[var(--muted)]">A short reply usually uses 1 credit. Long answers, scans and agent tools use more.</p>
         </div>
         <span className="inline-flex shrink-0 items-center gap-1.5 self-start rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1 text-xs font-semibold text-[var(--text)]">
           <Sparkles size={13} className="text-[var(--accent)]" /> {usage.plan.name} plan
@@ -104,7 +110,10 @@ export default function UsageSection() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      {usage.wallet && usage.wallet.credits > 0 && (
+        <p className="text-sm text-[var(--muted)]"><b>{n(usage.wallet.available)} of {n(usage.wallet.credits)} wallet credits available now.</b> The rest stay in your wallet for future windows.</p>
+      )}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {meters.map(({ key, label, icon: Icon, m }) => {
           const left = Math.max(0, m.limit - m.used);
           return (

@@ -1,18 +1,7 @@
+import { AiService } from './AiService.js';
 import crypto from 'crypto';
 import logger from '../utils/logger.js';
 import { parseModelJson } from '../utils/textSanitizers.js';
-
-const DEFAULT_FETCH_TIMEOUT_MS = 60_000;
-
-async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try { return await fetch(url, { ...init, signal: controller.signal }); }
-  catch (err: any) {
-    if (err?.name === 'AbortError') throw new Error(`Request to ${url} timed out after ${timeoutMs}ms`);
-    throw err;
-  } finally { clearTimeout(timer); }
-}
 
 export type TaskStatus = 'pending' | 'running' | 'done' | 'failed';
 
@@ -40,15 +29,8 @@ export interface Plan {
 export class PlannerService {
   private static instance: PlannerService;
   private plans = new Map<string, Plan>();
-  private gonkaBaseUrl: string;
-  private gonkaApiKey: string;
-  private gonkaModel: string;
 
-  private constructor() {
-    this.gonkaApiKey = process.env.GONKA_API_KEY || '';
-    this.gonkaBaseUrl = (process.env.GONKA_BASE_URL || 'https://api.gonkarouter.io/v1').replace(/\/$/, '') + '/chat/completions';
-    this.gonkaModel = process.env.GONKA_MODEL || 'zai-org/GLM-5.3-Flash';
-  }
+  private constructor() {}
 
   public static getInstance(): PlannerService {
     if (!PlannerService.instance) PlannerService.instance = new PlannerService();
@@ -56,7 +38,7 @@ export class PlannerService {
   }
 
   /**
-   * Decompose a high-level goal into a list of micro-tasks using Gonka.
+   * Decompose a high-level goal into a list of micro-tasks using Claude.
    */
   public async decompose(goal: string): Promise<Plan> {
     const planId = crypto.randomUUID();
@@ -80,7 +62,7 @@ Rules:
 - Do NOT include any text outside the JSON object.`;
     const userPrompt = `GOAL: ${goal}`;
 
-    if (!this.gonkaApiKey) {
+    if (!process.env.ANTHROPIC_API_KEY) {
       const plan: Plan = {
         id: planId,
         goal,
@@ -93,18 +75,7 @@ Rules:
     }
 
     try {
-      const response = await fetchWithTimeout(this.gonkaBaseUrl, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${this.gonkaApiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: this.gonkaModel,
-          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
-          temperature: 0.3, max_tokens: 2048, stream: false,
-        }),
-      }, 60_000);
-      const data: any = await response.json();
-      if (!response.ok) throw new Error(`Gonka PlannerService error: ${data?.error?.message}`);
-      const raw = (data?.choices?.[0]?.message?.content || '').trim();
+      const raw = (await AiService.getInstance().completeText(userPrompt, { system: systemPrompt, maxTokens: 2048, timeoutMs: 60_000 })).trim();
       const json = parseModelJson(raw);
       const tasks: PlanTask[] = (json.tasks || []).map((t: any) => ({
         id: t.id || crypto.randomUUID(),
@@ -180,7 +151,7 @@ Rules:
           if (task.tool) {
             result = await executeTool(task.tool, task.toolInput || { query: task.description });
           } else {
-            // Use Gonka to "think through" tasks without a tool
+            // Use Claude to "think through" tasks without a tool
             result = await this.thinkThroughTask(task.description, plan.goal);
           }
           this.updateTaskStatus(planId, task.id, 'done', result);
@@ -204,43 +175,23 @@ Rules:
   }
 
   private async thinkThroughTask(taskDescription: string, overallGoal: string): Promise<string> {
-    if (!this.gonkaApiKey) return `Task: ${taskDescription}`;
+    if (!process.env.ANTHROPIC_API_KEY) return `Task: ${taskDescription}`;
     const systemPrompt = `You are an autonomous task executor. Think through the task below and provide a concrete result or analysis. Be specific and actionable.`;
     const userPrompt = `OVERALL GOAL: ${overallGoal}\n\nTASK: ${taskDescription}\n\nProvide a specific, concrete result for this task.`;
     try {
-      const response = await fetchWithTimeout(this.gonkaBaseUrl, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${this.gonkaApiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: this.gonkaModel,
-          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
-          temperature: 0.3, max_tokens: 1024, stream: false,
-        }),
-      }, 30_000);
-      const data: any = await response.json();
-      return (data?.choices?.[0]?.message?.content || '').trim();
+      return (await AiService.getInstance().completeText(userPrompt, { system: systemPrompt, maxTokens: 1024, timeoutMs: 30_000 })).trim();
     } catch (e: any) {
       return `Could not process task: ${e.message}`;
     }
   }
 
   private async synthesizeSummary(plan: Plan): Promise<string> {
-    if (!this.gonkaApiKey) return `Plan completed: ${plan.goal}`;
+    if (!process.env.ANTHROPIC_API_KEY) return `Plan completed: ${plan.goal}`;
     const taskResults = plan.tasks.map(t => `[${t.status.toUpperCase()}] ${t.title}: ${t.result || t.error || 'No result'}`).join('\n');
     const systemPrompt = `You are a plan synthesizer. Given a goal and task results, write a clear, concise final summary for the user. Use markdown formatting. Be specific about what was achieved.`;
     const userPrompt = `GOAL: ${plan.goal}\n\nTASK RESULTS:\n${taskResults}`;
     try {
-      const response = await fetchWithTimeout(this.gonkaBaseUrl, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${this.gonkaApiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: this.gonkaModel,
-          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
-          temperature: 0.3, max_tokens: 1024, stream: false,
-        }),
-      }, 30_000);
-      const data: any = await response.json();
-      return (data?.choices?.[0]?.message?.content || '').trim();
+      return (await AiService.getInstance().completeText(userPrompt, { system: systemPrompt, maxTokens: 1024, timeoutMs: 30_000 })).trim();
     } catch { return `Plan completed: ${plan.goal}`; }
   }
 }

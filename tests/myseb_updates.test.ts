@@ -18,18 +18,21 @@ test('native updates select a newer stable MySEB release for the correct device 
   const bad = release('3.0.0'); bad.assets[0].browser_download_url = 'https://evil.test/setup.exe';
   assert.equal(updateFor([bad], 'windows', '1.0.0').available, false);
 });
-test('desktop updater asks before downloading and installing; never restarts or prompts during an exam', async () => {
+test('desktop updater waits for consent and defers installation if an exam starts during download', async () => {
   const updater: any = new EventEmitter();
   let active = false, downloads = 0, installs = 0, before = 0, checks = 0;
   const notifications: any[] = [];
   updater.checkForUpdates = async () => { checks++; updater.emit('update-available', { version: '1.0.2' }); };
-  updater.downloadUpdate = async () => { downloads++; updater.emit('update-downloaded', { version: '1.0.2' }); };
+  updater.downloadUpdate = async () => { downloads++; active = true; updater.emit('update-downloaded', { version: '1.0.2' }); };
   updater.quitAndInstall = () => installs++;
   const control = createUpdater({ updater, active: () => active, notify: (s: any) => notifications.push(s), beforeInstall: () => before++ });
   await control.check(); assert.equal(downloads, 0); assert.equal(installs, 0);
-  active = true; await control.check(); await control.download(); assert.equal(control.install(), false);
+  active = true; await control.check(); await control.apply(); assert.equal(control.install(), false);
   assert.equal(checks, 1); assert.equal(downloads, 0);
-  const previous = notifications.length; updater.emit('update-downloaded', { version: '1.0.2' }); assert.equal(notifications.length, previous);
+  const previous = notifications.length;
+  active = false;
+  await control.apply();
+  assert.deepEqual(notifications.slice(previous).map(s => s.status), ['downloading']);
   assert.equal(control.install(), false); assert.equal(installs, 0);
   active = false; assert.equal(control.install(), true); assert.equal(installs, 1); assert.equal(before, 1);
   assert.equal(updater.autoInstallOnAppQuit, false);
@@ -56,4 +59,17 @@ test('update endpoints serve only known release assets and pin versioned install
     assert.equal((await original(`${base}/check?platform=invalid&version=1.0.1`)).status, 400);
     assert.equal((await original(`${base}/other.exe`)).status, 404);
   } finally { globalThis.fetch = original; server.close(); }
+});
+
+test('one desktop update confirmation downloads and restarts when MySEB is idle', async () => {
+  const updater: any = new EventEmitter();
+  let installs = 0;
+  updater.checkForUpdates = async () => updater.emit('update-available', { version: '1.0.4' });
+  updater.downloadUpdate = async () => updater.emit('update-downloaded', { version: '1.0.4' });
+  updater.quitAndInstall = () => installs++;
+  const control = createUpdater({ updater, active: () => false, notify: () => {}, beforeInstall: () => {} });
+  await control.check();
+  assert.equal(installs, 0);
+  assert.equal((await control.apply()).status, 'installing');
+  assert.equal(installs, 1);
 });

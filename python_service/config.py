@@ -17,11 +17,11 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
 
-    # ── Gonka Router (sole AI provider) ──────────────────────────
-    GONKA_API_KEY: str = ""
-    GONKA_BASE_URL: str = "https://api.gonkarouter.io/v1"
-    GONKA_MODEL: str = "zai-org/GLM-5.3-Flash"
-    GONKA_TIMEOUT: int = 120
+    # Claude Messages API
+    ANTHROPIC_API_KEY: str = ""
+    ANTHROPIC_BASE_URL: str = "https://api.anthropic.com"
+    CLAUDE_AGENT_MODEL: str = "claude-haiku-5-5"
+    CLAUDE_TIMEOUT: int = 120
 
     # ── Database ─────────────────────────────────────────────────
     DATABASE_URL: str = "sqlite+aiosqlite:///./file_service.db"

@@ -13,24 +13,33 @@ function createUpdater({ updater, active, notify, beforeInstall }) {
   updater.on('update-downloaded', (info) => send({ status: 'downloaded', version: info.version }));
   updater.on('error', () => send({ status: 'error', message: 'Could not get the update. Check your connection and try again.' }));
   let checking = false;
+  const install = () => {
+    if (active() || state.status !== 'downloaded') return false;
+    send({ status: 'installing' });
+    beforeInstall();
+    updater.quitAndInstall(false, true);
+    return true;
+  };
   return {
     state: () => active() ? { status: 'idle' } : state,
     check: async () => {
-      if (active() || checking || ['available', 'downloading', 'downloaded'].includes(state.status)) return state;
+      if (active() || checking || ['available', 'downloading', 'downloaded', 'installing'].includes(state.status)) return state;
       checking = true;
       try { await updater.checkForUpdates(); } catch { send({ status: 'error', message: 'Update check failed. Please try again later.' }); } finally { checking = false; }
       return state;
     },
-    download: async () => {
+    apply: async () => {
       if (active() || state.status !== 'available') return state;
       send({ status: 'downloading', percent: 0 });
-      try { await updater.downloadUpdate(); } catch { send({ status: 'error', message: 'Download failed. Check your connection and try again.' }); }
+      try {
+        await updater.downloadUpdate();
+        if (install()) return { status: 'installing' };
+      } catch {
+        send({ status: 'error', message: 'Download failed. Check your connection and try again.' });
+      }
       return state;
     },
-    install: () => {
-      if (active() || state.status !== 'downloaded') return false;
-      beforeInstall(); updater.quitAndInstall(false, true); return true;
-    },
+    install,
   };
 }
 module.exports = { createUpdater };

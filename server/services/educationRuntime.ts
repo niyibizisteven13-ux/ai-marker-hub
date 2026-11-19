@@ -1,7 +1,7 @@
 import { FileJobQueue, JobError } from './ai/jobs/fileJobQueue.js';
 import { isOvernight } from './ai/batchMode.js';
 import path from 'node:path';
-import { agentTarget, fileJobQueue, fileStore, markingTarget, readingTarget } from './AiService.js';
+import { fileJobQueue, fileStore, markingTarget, readingTarget, userAgentTarget, userChatAvailable } from './AiService.js';
 import { createAnalyticsService } from './analytics/service.js';
 import { createAssessmentService, type AssessmentRecord } from './assessment/service.js';
 import { OwnedRecordStore } from './storage/ownedRecordStore.js';
@@ -26,44 +26,26 @@ const forbiddenStrings = [process.cwd(), path.resolve(process.env.FILE_STORE_DIR
 
 export const analyticsService = createAnalyticsService({
   fileStore, queue: fileJobQueue, forbiddenStrings,
-  agent: () => {
-    const a = agentTarget();
-    return { adapter: a.adapter, model: a.model, fallbackModel: a.fallbackModel };
-  },
+  agent: userId => userAgentTarget(userId, ''),
 });
 
 export const assessmentStore = new OwnedRecordStore<AssessmentRecord>(process.env.ASSESSMENTS_DIR ?? './data/assessments');
 
 export const assessmentService = createAssessmentService({
   fileStore, queue: fileJobQueue, store: assessmentStore, forbiddenStrings,
-  agent: () => {
-    const a = agentTarget();
-    return { adapter: a.adapter, model: a.model, fallbackModel: a.fallbackModel };
-  },
+  agent: userId => userAgentTarget(userId, ''),
 });
 
 export const documentStore = new OwnedRecordStore<DocumentRecord>(process.env.DOCUMENTS_DIR ?? './data/documents');
 
-/**
- * Handwriting recognition needs a vision model: Claude when AI_AGENT_PROVIDER=anthropic, or the Gonka
- * model only if DOC_VISION_GONKA=true says it accepts images. Image requests are only sent to a
- * fallback model that is known to accept images (GONKA_FALLBACK_SUPPORTS_VISION=true).
- */
 function visionTarget() {
-  // Handwriting is read by the reading model (CLAUDE_READING_MODEL; by default cheaper than an Opus marking model).
-  const a = readingTarget();
-  if (a.provider === 'anthropic') return { adapter: a.adapter, model: a.model, fallbackModel: process.env.GONKA_FALLBACK_SUPPORTS_VISION === 'true' ? undefined : null };
-  if (process.env.DOC_VISION_GONKA === 'true') return { adapter: a.adapter, model: process.env.DOC_VISION_MODEL?.trim() || a.model, fallbackModel: null };
-  return null;
+  return userChatAvailable() ? readingTarget() : null;
 }
 
 export const documentService = createDocumentService({
   fileStore, queue: fileJobQueue, store: documentStore, forbiddenStrings,
-  vision: visionTarget,
-  agent: () => {
-    const a = agentTarget();
-    return { adapter: a.adapter, model: a.model, fallbackModel: a.fallbackModel };
-  },
+  vision: async () => visionTarget(),
+  agent: userId => userAgentTarget(userId, ''),
   ocr: process.env.DOC_OCR_CROSSCHECK === 'false' ? undefined : tesseractOcr,
   maxPages: Number(process.env.DOC_MAX_PAGES) > 0 ? Number(process.env.DOC_MAX_PAGES) : 40,
 });
@@ -77,7 +59,7 @@ const num = (v: string | undefined, d: number) => (Number(v) > 0 ? Number(v) : d
  * Overnight marking runs: Claude requests sent as half-price batches that can take hours, so they run on their
  * own queue with a long deadline and never hold the slots of live jobs. Only with Claude as the marking model.
  */
-export const overnightJobQueue = markingTarget().provider === 'anthropic' && process.env.OVERNIGHT_MARKING !== 'false'
+export const overnightJobQueue = userChatAvailable() && process.env.OVERNIGHT_MARKING !== 'false'
   ? new FileJobQueue({
     storageDir: process.env.OVERNIGHT_JOBS_DIR ?? './data/jobs-overnight',
     concurrency: num(process.env.OVERNIGHT_JOBS_CONCURRENCY, 6),
@@ -87,15 +69,17 @@ export const overnightJobQueue = markingTarget().provider === 'anthropic' && pro
   })
   : undefined;
 
+function examAiTarget() {
+  return { ...markingTarget(), supportsVision: userChatAvailable() };
+}
+
 export const examService = createExamService({
   fileStore, queue: fileJobQueue, overnightQueue: overnightJobQueue, store: examStore, documents: documentService, forbiddenStrings,
-  agent: () => {
-    const a = markingTarget();
-    return { adapter: a.adapter, model: a.model, fallbackModel: a.fallbackModel };
-  },
+  agent: examAiTarget,
   visionAvailable: () => visionTarget() !== null,
   // Upgraded plans only, counted against the plan's daily marking limit (see billing/entitlements.ts).
   entitlement: canUseAutonomousMarking,
+  disableScanGrading: true,
   maxPages: markingLimits.maxPagesPerPaper,
   maxCandidates: markingLimits.maxCandidates,
   maxBatchPages: markingLimits.maxBatchPages,
@@ -116,10 +100,7 @@ export const examService = createExamService({
 
 export const examChat = createExamChat({
   service: examService, fileStore, queue: fileJobQueue, contexts: examChatContexts,
-  agent: () => {
-    const a = markingTarget();
-    return { adapter: a.adapter, model: a.model, fallbackModel: a.fallbackModel };
-  },
+  agent: userId => userAgentTarget(userId, ''),
   waitMs: num(process.env.EXAM_CHAT_WAIT_MS, 15 * 60_000),
 });
 

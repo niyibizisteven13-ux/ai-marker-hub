@@ -7,7 +7,7 @@ import DocumentScanner, { type PageItem } from '../components/DocumentScanner';
  * The document scanner opened from the Telegram bot (Mini App, or a /scan link in a browser). It is the same
  * scanner as the web app (edge detection, perspective correction, filters, several students) without the
  * AI tools, which need a signed-in web session. "Send to Telegram" uploads one PDF per student; each one
- * arrives in the chat with quick actions (transcribe, mark, summarise).
+ * arrives in the chat with quick actions (transcribe, summarise).
  */
 
 type Tg = {
@@ -80,7 +80,7 @@ export default function TelegramScanApp() {
   if (status.kind === 'sent') {
     return (
       <Screen icon={<CheckCircle2 className="h-7 w-7 text-[#5DCAA5]" />} title={status.files > 1 ? `${status.files} PDFs sent` : 'Sent to Telegram'}>
-        Your scan is in the chat. Choose <b className="text-white">Transcribe</b> or <b className="text-white">Mark</b> there, or just type what you need.
+        Your scan is in the chat. Choose <b className="text-white">Transcribe</b> there, or type what you need.
         {!app && <span className="mt-3 block">You can close this tab.</span>}
       </Screen>
     );

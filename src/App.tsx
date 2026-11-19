@@ -34,7 +34,6 @@ import {
 import { TopNavbar } from './components/TopNavbar';
 import { LeftSidebar } from './components/LeftSidebar';
 import { CenterWorkspace } from './components/CenterWorkspace';
-import { registerScannedPapers } from './services/scannedPapers';
 import type { ScanBatch, MarkingContext } from './components/ScanMarkWorkspace';
 import UpgradeSheet from './components/UpgradeSheet';
 import RightChatSidebar from './components/RightChatSidebar';
@@ -317,8 +316,8 @@ export default function App() {
   // Camera opened from the Mark page: its pages go back to that page (one folder per student), not to the old hub.
   const [scanForMark, setScanForMark] = useState(false);
   const [markIncoming, setMarkIncoming] = useState<MarkIncoming | null>(null);
-  // What the camera is photographing for the Mark page: the students' scripts, or one marking scheme / question paper.
-  const [scanTarget, setScanTarget] = useState<MarkScanTarget>('scripts');
+  // The camera can attach a marking scheme or a question paper to the Mark page.
+  const [scanTarget, setScanTarget] = useState<MarkScanTarget>('scheme');
   // "Mark an exam" on the home screen (and anything else) opens the Mark page through this event.
   useEffect(() => {
     const open = () => setMarkOpen(true);
@@ -330,7 +329,7 @@ export default function App() {
   const [adminOpen, setAdminOpen] = useState<boolean>(() => window.location.pathname === '/admin');
   // /admin/datasets: Datasets & Curations. Administrators get the full section; everyone else a view-only page.
   const [curationOpen, setCurationOpen] = useState<boolean>(() => /^\/(admin\/)?datasets\/?$/.test(window.location.pathname));
-  const [selectedProvider, setSelectedProvider] = useState<string>('gonkarouter');
+  const [selectedProvider, setSelectedProvider] = useState<string>('anthropic');
   const retryPromptRef = React.useRef<{
     text: string;
     attachment?: File | ChatAttachment | Array<File | ChatAttachment>;
@@ -416,6 +415,7 @@ export default function App() {
 
     setStagedAttachments(next);
     setAttachmentError(errors.join('. '));
+    return next.length - stagedAttachments.length;
   };
 
   const handleRemoveStagedAttachment = (index: number) => {
@@ -949,71 +949,11 @@ export default function App() {
   const [scannerGeneratedForm, setScannerGeneratedForm] = useState<any | null>(null);
   const [openFormRequest, setOpenFormRequest] = useState(0);
 
-  const handleSaveScannedPages = async (
-    pages: Array<{
-      dataUrl: string;
-      sourceDataUrl?: string;
-      id?: string;
-      filter?: any;
-      candidateId?: string;
-      name?: string;
-      studentName?: string;
-      extractedText?: string;
-      aiSummary?: string;
-      aiScore?: number;
-      aiMaxScore?: number;
-      aiFeedback?: string;
-      file?: File;
-    }>
-  ) => {
-    const saved = await registerScannedPapers(pages.map((p, i) => ({ ...p, id: p.id || `scan-${i}`, filter: p.filter || 'color' })));
-    setScannerOpen(false);
-    try { if (authenticatedUser?.id) sessionStorage.setItem(`bwenge.scan.exam:${authenticatedUser.id}`, saved.examId); } catch {}
-    const now = Date.now();
-
-    const newUploaded: UploadedFile[] = pages.map((p, idx) => ({
-      id: `scan-file-${now}-${idx}`,
-      name: p.name || `${(p.studentName || `Student_${idx + 1}`).replace(/\s+/g, '_')}_Page_${idx + 1}.jpg`,
-      size: '320 KB',
-      type: 'student_paper',
-      uploadDate: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      url: p.dataUrl,
-      fileType: 'image',
-      rawText: p.extractedText || p.aiSummary || 'Scanned student answer page',
-      studentName: p.studentName || `Student ${idx + 1}`,
-      batchBadge: String(idx + 1),
-    }));
-    setUploadedFiles((prev) => [...newUploaded, ...prev]);
-
-    const grouped = new Map<string, typeof pages>();
-    pages.forEach((p, i) => { const id = p.candidateId || p.studentName || `paper-${i}`; grouped.set(id, [...(grouped.get(id) || []), p]); });
-    const newScripts: StudentScript[] = Array.from(grouped.values()).map((paper, idx) => ({
-      id: `scan-script-${now}-${idx}`, sourceFileId: `scan-file-${now}-${pages.indexOf(paper[0])}`,
-      studentName: paper[0].studentName || `Student ${idx + 1}`, studentId: `SCN-${String(idx + 1).padStart(3, '0')}`,
-      submittedAt: new Date().toISOString(), status: 'pending', answers: [],
-    }));
-    setStudentScripts(newScripts);
-    setScanBatch({ id: String(now), examId: saved.examId, pages: pages.map((p, i) => ({ ...p, id: p.id || `scan-${now}-${i}`, filter: p.filter || 'color' })) });
-    setActiveTab('marking_hub');
-
-    const attachments: ChatAttachment[] = pages.map((p, idx) => ({
-      id: 'att-page-' + now + '-' + idx,
-      name: p.name || `${p.studentName || 'Scan'}_${idx + 1}.jpg`,
-      mimeType: 'image/jpeg',
-      previewUrl: p.dataUrl,
-      url: p.dataUrl,
-      fileType: 'image',
-    }));
-
-    // The workspace owns this marking session; do not start a second independent chat grading run.
-    setMessages(prev => [...prev, {
-      id: `scan-message-${now}`, sender: 'user', text: `Mark these scanned papers: ${grouped.size} students, ${pages.length} JPEG pages.`,
-      attachments, timestamp: new Date().toISOString(),
-    }, {
-      id: `scan-reply-${now}`, sender: 'assistant',
-      text: 'Your scanned papers are open in the workspace. Attach a marking scheme there, or choose Use AI draft if the questions are visible. If these pages contain only answers, attach the question paper. Validated red marks will appear as each question is checked.',
-      timestamp: new Date().toISOString(),
-    }]);
+  const handleSaveScannedPages = async (pages: Array<{ dataUrl: string }>) => {
+    const { buildPdf } = await import('./scanner/TelegramScanApp');
+    const pdf = await buildPdf(pages);
+    const count = handleStageAttachments([new File([pdf], 'Scanned pages.pdf', { type: 'application/pdf' })]);
+    if (!count) throw new Error('The PDF could not be attached. Check your attachment count and size limits.');
   };
 
   const handleSendMessage = async (
@@ -1637,12 +1577,21 @@ export default function App() {
     />
   );
 
+  const openPublicLibrary = () => { setLibraryTab('library'); setLibraryOpen(true); };
+  const openFormsLibrary = () => { setFormsOpen(true); window.history.pushState({}, '', '/forms'); };
+  const openTasks = () => setAssignmentsOpen({ id: null });
+  const openBiz = () => { window.location.href = '/biz'; };
+
   const studioProps = {
     messages,
     onSendMessage: handleSendMessage,
     onNewChat: handleNewChat,
     onLoadSession: handleLoadChatSession,
     onOpenSettings: () => setSettingsOpen(true),
+    onOpenPublicLibrary: openPublicLibrary,
+    onOpenBiz: openBiz,
+    onOpenFormsLibrary: openFormsLibrary,
+    onOpenTasks: openTasks,
     onOpenForms: () => {
       setActiveTab('marking_hub');
       setOpenFormRequest((request) => request + 1);
@@ -1904,29 +1853,16 @@ export default function App() {
             onClose={() => { setScannerOpen(false); setScanForMark(false); }}
             onSavePages={scanForMark
               ? async (pages) => {
-                if (scanTarget !== 'scripts') {
-                  const { buildPdf } = await import('./scanner/TelegramScanApp');
-                  const name = scanTarget === 'paper' ? 'Question paper (photographed).pdf' : 'Marking scheme (photographed).pdf';
-                  setMarkIncoming({ id: Date.now(), files: [new File([await buildPdf(pages)], name, { type: 'application/pdf' })], role: scanTarget });
-                  return;
-                }
-                const { scansToZip } = await import('./utils/scansToZip');
-                // Each student's first page comes back too, so the Mark page can show who was scanned.
-                const byStudent = new Map<string, { name: string; pages: number; thumb: string }>();
-                for (const p of pages) {
-                  const key = p.candidateId ?? p.studentName ?? 'student';
-                  const cur = byStudent.get(key);
-                  if (cur) cur.pages++; else byStudent.set(key, { name: p.studentName ?? `Student ${byStudent.size + 1}`, pages: 1, thumb: p.dataUrl });
-                }
-                setMarkIncoming({ id: Date.now(), files: [await scansToZip(pages)], students: [...byStudent.values()] });
+                const { buildPdf } = await import('./scanner/TelegramScanApp');
+                const name = scanTarget === 'paper' ? 'Question paper (photographed).pdf' : 'Marking scheme (photographed).pdf';
+                setMarkIncoming({ id: Date.now(), files: [new File([await buildPdf(pages)], name, { type: 'application/pdf' })], role: scanTarget });
               }
               : handleSaveScannedPages}
             aiTools={!scanForMark}
             quick={scanForMark}
-            single={scanForMark && scanTarget !== 'scripts' ? (scanTarget === 'paper' ? 'Question paper' : 'Marking scheme') : undefined}
+            single={scanForMark ? (scanTarget === 'paper' ? 'Question paper' : 'Marking scheme') : undefined}
             labels={scanForMark ? 'student' : undefined}
-            saveLabel={scanForMark ? (scanTarget === 'scripts' ? 'Add to marking' : scanTarget === 'paper' ? 'Use as question paper' : 'Use as marking scheme') : undefined}
-            activeRubricText={examPaper ? JSON.stringify(examPaper) : ''}
+            saveLabel={scanForMark ? (scanTarget === 'paper' ? 'Use as question paper' : 'Use as marking scheme') : 'Attach scanned PDF'}
             onGeneratedForm={(form) => {
               setScannerGeneratedForm(form);
               setActiveTab('marking_hub');
@@ -1945,11 +1881,11 @@ export default function App() {
           activeTab={activeTab}
           setActiveTab={setActiveTab}
           onOpenLibrary={() => { setLibraryTab('mine'); setLibraryOpen(true); }}
-          onOpenPublicLibrary={() => { setLibraryTab('library'); setLibraryOpen(true); }}
+          onOpenPublicLibrary={openPublicLibrary}
           onOpenMark={() => setMarkOpen(true)}
-          onOpenAssignments={() => setAssignmentsOpen({ id: null })}
-          onOpenForms={() => { setFormsOpen(true); window.history.pushState({}, '', '/forms'); }}
-          onOpenBiz={() => { window.location.href = '/biz'; }}
+          onOpenAssignments={openTasks}
+          onOpenForms={openFormsLibrary}
+          onOpenBiz={openBiz}
           collapsed={sidebarCollapsed}
           setCollapsed={setSidebarCollapsed}
           user={authenticatedUser}

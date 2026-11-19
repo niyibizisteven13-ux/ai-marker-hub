@@ -34,7 +34,7 @@ const fakeExams = {
 };
 const svc = createAssignmentService({ store: new OwnedRecordStore<AssignmentRecord>(path.join(dir, 'records')), files, tokenDir: path.join(dir, 'links'), baseUrl: () => 'https://www.bwenge.space', marker: createTaskMarker(() => fakeExams as any, { retryMs: 5, maxRetries: 2 }) });
 
-const pdf = async () => { const d = await PDFDocument.create(); d.addPage([595, 842]); return Buffer.from(await d.save()); };
+const pdf = async () => { const d = await PDFDocument.create(); d.addPage([595, 842]).drawText('A typed answer.'); return Buffer.from(await d.save()); };
 // Background marking runs after each hand-in returns; wait for it (not a fixed delay, so slow machines pass too).
 const until = async (ok: () => boolean, ms = 5000) => { const end = Date.now() + ms; while (!ok() && Date.now() < end) await new Promise((r) => setTimeout(r, 10)); };
 
@@ -81,4 +81,20 @@ test('tasks: hand-ins are marked as they arrive, released by the teacher, and re
   await assert.rejects(svc.submit(token, { studentName: 'Uwase Aline', text: 'someone else' }), /receipt code/);
   await until(() => calls.filter((c) => c === 'add:Uwase Aline').length === 2); // let that hand-in's background marking finish before the folder is removed
   await new Promise((r) => setTimeout(r, 30));
+});
+
+test('a scanned PDF gets a receipt and stays available for the teacher without calling the marker', async () => {
+  const task = await svc.create('teacher', { title: 'Handwritten answers', instructions: 'Show your work.', autoMark: true, scheme: [{ name: 'scheme.pdf', data: await pdf() }] });
+  const token = task.link.split('/a/')[1];
+  const scan = await PDFDocument.create();
+  const image = await scan.embedPng(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+iP1sAAAAASUVORK5CYII=', 'base64'));
+  scan.addPage().drawImage(image, { x: 0, y: 0, width: 500, height: 600 });
+  const before = calls.length;
+  const receipt = await svc.submit(token, { studentName: 'Aline', files: [{ name: 'Scanned answer.pdf', data: Buffer.from(await scan.save()) }] });
+  assert.equal(receipt.files, 1);
+  assert.equal(receipt.autoMark, false);
+  assert.equal(calls.length, before);
+  const view = await svc.get('teacher', task.id);
+  assert.equal(view.submissions[0].files[0].name, 'Scanned answer.pdf');
+  assert.match(view.submissions[0].marking?.error ?? '', /Scanned papers/);
 });

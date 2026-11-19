@@ -42,7 +42,7 @@ def create_app() -> FastAPI:
         description=(
             "Production-grade file processing and AI query engine. "
             "Supports PDFs, DOCX, CSV, JSON, images, audio, video, and ZIP archives. "
-            "Powered by GonkaRouter."
+            "Powered by Claude."
         ),
         version="1.0.0",
         docs_url="/docs",
@@ -74,7 +74,7 @@ def create_app() -> FastAPI:
         return {
             "status": "ok",
             "service": "bwenge-file-api",
-            "gonka_configured": bool(settings.GONKA_API_KEY),
+            "claude_configured": bool(settings.ANTHROPIC_API_KEY.strip()),
             "storage": settings.STORAGE_DRIVER,
         }
 

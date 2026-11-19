@@ -118,7 +118,7 @@ button,input{font-family:inherit}
 @media (min-width:960px) and (min-height:521px){
   html,body{height:100%;overflow:hidden}
   .page{height:100vh;height:100dvh;min-height:0}
-  .left{height:100%;overflow:hidden}
+  .left{height:100%;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin}
 }
 @media (max-height:700px){
   .new h2{display:none}
@@ -172,3 +172,20 @@ button,input{font-family:inherit}
 @media (prefers-reduced-motion:reduce){.gb .gb-in,.gb .gb-flow,.gb .gb-draw,.gb .gb-dot,.gb .gb-heart,.gb .gb-step span,.gb .gb-step b{animation:none!important;opacity:1!important;stroke-dashoffset:0!important;transform:none}.gb .gb-flow{opacity:.5!important}.gb .gb-step b{width:100%!important}.gb .gb-step span{color:var(--text)!important}}
 .page .h1b{font-size:clamp(22px,min(3.2vw,5vh),40px);margin:0 0 clamp(18px,3.4vh,36px);line-height:1.12}
 @media (max-width:900px){.page .h1b{font-size:clamp(20px,4.2vh,28px);margin-bottom:14px}}
+/* Ventures: compact, accessible introduction on the public sign-in page. */
+.ventures-intro{width:100%;max-width:576px;margin-top:clamp(16px,2.5vh,28px);padding:clamp(16px,2.2vw,22px);border:1px solid var(--border);border-radius:20px;background:linear-gradient(125deg,var(--accent-tint),transparent 60%),var(--surface);box-shadow:0 12px 36px -28px rgba(0,0,0,.45)}
+.ventures-intro-top{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.ventures-kicker{font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--accent-text)}
+.ventures-icon{display:grid;place-items:center;width:30px;height:30px;border:1px solid var(--border);border-radius:10px;color:var(--teal);font-size:18px}
+.ventures-intro h2{margin:8px 0 7px;font-family:"Bricolage Grotesque Variable","Bricolage Grotesque",system-ui,sans-serif;font-size:clamp(20px,2.5vw,26px);line-height:1.16;letter-spacing:-.02em;color:var(--text)}
+.ventures-intro p{margin:0;color:var(--muted);font-size:13.5px;line-height:1.6}
+.ventures-highlights{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;list-style:none;padding:0;margin:15px 0}
+.ventures-highlights li{display:flex;align-items:center;min-width:0;padding:10px;border:1px solid var(--border);border-radius:11px;background:var(--chip-bg);color:var(--text);font-size:11px;font-weight:600;line-height:1.4}
+.ventures-highlights li::before{content:"";flex:none;width:6px;height:6px;margin-right:7px;border-radius:50%;background:var(--teal)}
+.ventures-action{display:flex;align-items:center;flex-wrap:wrap;gap:9px 14px}
+.ventures-cta{display:inline-flex;align-items:center;justify-content:center;gap:12px;min-height:40px;padding:8px 16px;border:1px solid var(--border);border-radius:999px;background:var(--text);color:var(--bg);font-size:13px;font-weight:750;text-decoration:none;transition:opacity .15s,transform .15s}
+.ventures-cta:hover{opacity:.88;transform:translateY(-1px)}
+.ventures-cta:focus-visible{outline:3px solid var(--teal);outline-offset:3px}
+.ventures-note{max-width:250px;color:var(--muted);font-size:11px;line-height:1.4}
+@media(max-width:520px){.ventures-highlights{grid-template-columns:1fr}.ventures-highlights li{padding:8px 10px}.ventures-intro{margin-top:20px}}
+@media(prefers-reduced-motion:reduce){.ventures-cta{transition:none}.ventures-cta:hover{transform:none}}

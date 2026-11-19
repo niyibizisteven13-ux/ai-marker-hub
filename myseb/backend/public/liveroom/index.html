@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MySEB LiveRoom</title><link rel="stylesheet" href="style.css"></head>
+<body><main><header><b>MySEB</b><h1>LiveRoom</h1></header>
+<div id="home">
+<details id="direct"><summary>Open a link</summary><form id="directForm"><label>Web address<input name="url" type="url" placeholder="https://" required></label><button>Open activity</button></form></details>
+<details id="join"><summary>Join a room</summary><form id="joinForm"><label>Room code<input id="code" required maxlength="13" placeholder="LR-0123456789"></label><label>Your name<input name="name" maxlength="80" required></label><button>Join room</button></form></details>
+<details id="create"><summary>Create a room</summary><form id="createForm">
+<label>Room name<input name="title" maxlength="120" required></label>
+<label>Navigation<select id="mode"><option value="single">Activity site only</option><option value="selected">Activity and approved sites</option><option value="open">Open browsing</option></select></label>
+<label id="sitesLabel" hidden>Approved HTTPS sites, one per line<textarea id="sites"></textarea></label>
+<div id="items"></div><button type="button" id="add">Add activity</button>
+<button>Create LiveRoom</button></form></details></div>
+<section id="room" hidden><h2 id="roomTitle"></h2><p id="sharingHint" hidden>Share the code or QR. Participants using the app can enter the code in MySEB → LiveRoom. Rooms expire after 24 hours.</p><p id="roomCode"></p><img id="qr" hidden width="144" height="144" alt="Scan to join"><p id="current"></p><button id="launch" hidden>Open activity</button><div id="controls"></div><p id="members"></p><button id="leave">Leave room</button><button id="end" hidden>End room for everyone</button></section>
+<p id="status" role="status"></p></main><script src="room.js"></script></body></html>

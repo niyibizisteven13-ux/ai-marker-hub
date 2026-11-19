@@ -1,6 +1,8 @@
 from __future__ import annotations
 from typing import AsyncIterator
 
+import httpx
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,7 +27,7 @@ _engine = AIQueryEngine()
     summary="AI query with file context",
     description=(
         "Pass a prompt and an array of file_ids. The engine loads the processed "
-        "document chunks and injects them into GonkaRouter's context window. "
+        "document chunks and injects them into Claude's context window. "
         "For large document sets it automatically switches to RAG retrieval. "
         "Set stream=true for Server-Sent Events (SSE) streaming."
     ),
@@ -35,6 +37,9 @@ async def ai_query(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(verify_jwt),
 ):
+    if not settings.ANTHROPIC_API_KEY.strip():
+        raise HTTPException(status_code=503, detail="Claude is not configured.")
+
     user_id = user.get("sub") or user.get("userId")
 
     # Validate and load file records
@@ -89,16 +94,20 @@ async def ai_query(
     if body.stream:
         # Return SSE stream
         async def generate() -> AsyncIterator[str]:
-            generator = await _engine.query(
-                prompt=body.prompt,
-                file_records=file_records,
-                max_tokens=body.max_tokens,
-                temperature=body.temperature,
-                model=body.model,
-                stream=True,
-            )
-            async for chunk in generator:
-                yield chunk
+            try:
+                generator = await _engine.query(
+                    prompt=body.prompt,
+                    file_records=file_records,
+                    max_tokens=body.max_tokens,
+                    model=body.model,
+                    stream=True,
+                )
+                async for chunk in generator:
+                    yield chunk
+            except (httpx.HTTPError, RuntimeError, ValueError) as exc:
+                logger.warning("claude_stream_failed", error_type=type(exc).__name__)
+                yield 'data: {"type":"error","message":"Bwenge could not complete the AI request."}\n\n'
+
 
         return StreamingResponse(
             generate(),
@@ -110,12 +119,15 @@ async def ai_query(
         )
     else:
         # Non-streaming JSON response
-        result = await _engine.query(
-            prompt=body.prompt,
-            file_records=file_records,
-            max_tokens=body.max_tokens,
-            temperature=body.temperature,
-            model=body.model,
-            stream=False,
-        )
+        try:
+            result = await _engine.query(
+                prompt=body.prompt,
+                file_records=file_records,
+                max_tokens=body.max_tokens,
+                model=body.model,
+                stream=False,
+            )
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("claude_request_failed", error_type=type(exc).__name__)
+            raise HTTPException(status_code=502, detail="Bwenge could not complete the AI request.") from exc
         return AIQueryResponse(**result)

@@ -4,7 +4,7 @@ export type QuestionType = 'mcq' | 'essay' | 'short_answer' | 'math' | 'coding';
 
 export interface ModelRoutingDecision {
   model: string;
-  provider: 'gonkarouter' | 'anthropic' | 'openai' | 'ollama' | 'gemini';
+  provider: 'anthropic' | 'openai' | 'ollama' | 'gemini';
   reason: string;
 }
 
@@ -22,9 +22,9 @@ export class ConfidenceRoutingDispatcher {
 
   public routeQuestion(questionType: QuestionType, difficulty: 'easy' | 'medium' | 'hard' = 'medium'): ModelRoutingDecision {
     return {
-      model: 'zai-org/GLM-5.3-Flash',
-      provider: 'gonkarouter',
-      reason: 'GonkaRouter (GLM-5.3-Flash) configured as exclusive AI provider.',
+      model: process.env.CLAUDE_AGENT_MODEL || 'claude-haiku-5-5',
+      provider: 'anthropic',
+      reason: 'Claude is the default AI provider.',
     };
   }
 
