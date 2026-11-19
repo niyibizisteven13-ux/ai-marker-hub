@@ -26,7 +26,7 @@ export const publicApi = {
   report: async (slug: string, body: { reason: string; detail: string }) => read<{ ok: boolean }>(await fetch(getApiUrl(`/api/biz/public/${encodeURIComponent(slug)}/report`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })),
 };
 
-export interface Mine { locked?: boolean; paid?: boolean; upgradeUrl?: string; upgrade?: { plan: string; name: string; priceRwf: number | null; priceNote: string; url: string }; businesses: Business[]; limits: { businesses: number; products: number; images: number; videos: number; totalMediaMb: number }; plan: string }
+export interface Mine { prefs?: { studioLang?: 'en' | 'rw' }; locked?: boolean; paid?: boolean; upgradeUrl?: string; upgrade?: { plan: string; name: string; priceRwf: number | null; priceNote: string; url: string }; businesses: Business[]; limits: { businesses: number; products: number; images: number; videos: number; totalMediaMb: number }; plan: string }
 export const ownerApi = {
   mine: async () => read<Mine>(await authFetch('/api/biz/mine')),
   create: async (body: { name: string; category?: string; slug?: string }) => read<{ business: Business }>(await authFetch('/api/biz', json('POST', body))),
@@ -73,6 +73,7 @@ export const ownerApi = {
   moveSection: async (id: string, sid: string, dir: number) => read(await authFetch(`/api/biz/${id}/sections/${sid}/move`, json('POST', { dir }))),
   removeSection: async (id: string, sid: string) => { const r = await authFetch(`/api/biz/${id}/sections/${sid}`, json('DELETE')); if (!r.ok) await read(r); },
   setLang: async (id: string, lang: 'en' | 'rw') => read(await authFetch(`/api/biz/${id}/lang`, json('PUT', { lang }))),
+  setPrefs: async (body: { studioLang: 'en' | 'rw' }) => read(await authFetch('/api/biz/prefs', json('PUT', body))),
   agent: async (id: string) => (await read<{ agent: AgentSettings }>(await authFetch(`/api/biz/${id}/agent`))).agent,
   setAgent: async (id: string, body: Partial<AgentSettings>) => (await read<{ agent: AgentSettings }>(await authFetch(`/api/biz/${id}/agent`, json('PUT', body)))).agent,
   secrets: async (id: string) => read<SecretsStatus>(await authFetch(`/api/biz/${id}/secrets`)),

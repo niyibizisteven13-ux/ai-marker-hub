@@ -104,10 +104,11 @@ export function createBizRouter(): Router {
     if (!(await bizAllowed(me(req)))) {
       // Locked: the dashboard needs a paid plan. Say so, with the price from the plan table; show only the names of businesses already made.
       const { PLANS } = await import('../services/billing/plans.js'); const list = await svc().list(me(req));
-      return res.json({ locked: true, businesses: list.map((b) => ({ id: b.id, name: b.name, slug: b.slug, published: b.published })), limits: FREE_LIMITS, plan: plan?.name ?? 'Free', upgrade: { plan: 'STARTER', name: PLANS.STARTER.name, priceRwf: PLANS.STARTER.priceRwf, priceNote: PLANS.STARTER.priceNote, url: '/upgrade' } });
+      return res.json({ prefs: await svc().prefs(me(req)), locked: true, businesses: list.map((b) => ({ id: b.id, name: b.name, slug: b.slug, published: b.published })), limits: FREE_LIMITS, plan: plan?.name ?? 'Free', upgrade: { plan: 'STARTER', name: PLANS.STARTER.name, priceRwf: PLANS.STARTER.priceRwf, priceNote: PLANS.STARTER.priceNote, url: '/upgrade' } });
     }
-    res.json({ locked: false, paid, businesses: await svc().list(me(req)), limits: paid ? PAID_LIMITS : FREE_LIMITS, plan: plan?.name ?? 'Free', upgradeUrl: '/upgrade' });
+    res.json({ prefs: await svc().prefs(me(req)), locked: false, paid, businesses: await svc().list(me(req)), limits: paid ? PAID_LIMITS : FREE_LIMITS, plan: plan?.name ?? 'Free', upgradeUrl: '/upgrade' });
   }));
+  r.put('/prefs', run(async (req, res) => res.json({ prefs: await svc().setPrefs(me(req), req.body ?? {}) })));
   r.post('/', run(async (req, res) => res.status(201).json({ business: await svc().create(me(req), req.body ?? {}) })));
   r.get('/:id', run(async (req, res) => res.json({ business: await svc().get(me(req), req.params.id) })));
   r.patch('/:id', run(async (req, res) => res.json({ business: await svc().update(me(req), req.params.id, req.body ?? {}) })));
