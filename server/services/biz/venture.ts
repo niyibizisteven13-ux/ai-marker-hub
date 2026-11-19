@@ -48,28 +48,57 @@ export async function resolveVentureOwner(email: unknown, caller: string, findBy
   const u = await findByEmail(e); if (!u) throw new Error(`No account has the email ${e}. The person must sign up first.`); return u.id;
 }
 
-export interface VentureDeps { grantBadge?: (ownerId: string) => Promise<void>; /** The founder's WhatsApp number, shown as the contact. */ whatsapp?: string }
-export interface VentureResult { url: string; created: boolean; products: number; sections: number; verified: boolean }
+/** What any venture page is made of. The 4biz page is one of these; Bwenge AI fills one in for anyone who asks for a page like it. */
+export interface VentureSpec {
+  name: string; slug?: string; category?: string; theme?: string;
+  /** The one-line aim, for example "AI in our context". */
+  tagline: string;
+  /** The main description (what the venture is and who it is for). */
+  about: string;
+  products?: Array<{ name: string; description?: string; priceRwf?: number | null }>;
+  /** "What we help with": short headed points. */
+  helps?: Array<{ title: string; text?: string }>;
+  links?: Array<{ title: string; text?: string; url?: string }>;
+  faq?: Array<{ title: string; text: string }>;
+  whatsapp?: string; website?: string;
+  /** Kinyarwanda words, when the owner gave them. */
+  rw?: { tagline?: string; about?: string; products?: Record<string, string> };
+}
+export interface VentureDeps { grantBadge?: (ownerId: string) => Promise<void>; /** The founder's WhatsApp number, shown as the contact. */ whatsapp?: string; /** Publish the page now (the 4biz example does; Bwenge AI only when the owner said so). */ publish?: boolean }
+export interface VentureResult { url: string; created: boolean; products: number; sections: number; verified: boolean; published: boolean }
+
+/** The 4biz page as a spec. */
+export const fourbizSpec = (site: string = SITE()): VentureSpec => { const v = venturePage(site); return {
+  name: v.name, slug: VENTURE_SLUG, category: v.category, theme: v.theme, tagline: v.tagline, about: v.about, website: site, products: v.products,
+  helps: v.sections[1].items!.map((x) => ({ title: x.title, text: x.text })), links: v.sections[0].items!.map((x) => ({ title: x.title, text: x.text, url: x.url })), faq: v.sections[2].items!.map((x) => ({ title: x.title, text: x.text! })), rw: v.rw,
+}; };
+
+/**
+ * Makes (or refreshes) a venture page for one account from a spec: the page, its products, the sections "Our products" (links), "What we help with" and "Good to know", and Kinyarwanda words.
+ * Safe to run again: products and sections are matched by name, never duplicated. The page is published only when `deps.publish` says so.
+ */
+export async function ensureVenturePage(svc: BizService, ownerId: string, spec: VentureSpec, deps: VentureDeps = {}, site: string = SITE()): Promise<VentureResult> {
+  const slug = spec.slug || undefined;
+  const have = (await svc.list(ownerId)).find((b) => (slug ? b.slug === slug : b.name.toLowerCase() === spec.name.toLowerCase()));
+  let created = false; let biz = have;
+  if (!biz) { biz = await svc.create(ownerId, { name: spec.name, ...(slug ? { slug } : {}), category: spec.category ?? 'other' }); created = true; }
+  const whatsapp = spec.whatsapp ?? deps.whatsapp;
+  await svc.update(ownerId, biz.id, { name: spec.name, ...(spec.category ? { category: spec.category } : {}), ...(spec.theme ? { theme: spec.theme } : {}), tagline: spec.tagline, about: spec.about, ...(whatsapp ? { whatsapp } : {}), ...(spec.website ? { website: spec.website } : {}) });
+  const productIds: Record<string, string> = {}; const current = (await svc.list(ownerId)).find((b) => b.id === biz!.id)!.products;
+  for (const p of spec.products ?? []) {
+    const existing = current.find((x) => x.name.toLowerCase() === p.name.toLowerCase());
+    if (existing) { await svc.updateProduct(ownerId, biz.id, existing.id, { description: p.description ?? '', available: true, hidden: false, ...(p.priceRwf !== undefined ? { price: p.priceRwf } : {}) }); productIds[p.name] = existing.id; }
+    else productIds[p.name] = (await svc.addProduct(ownerId, biz.id, { name: p.name, price: p.priceRwf ?? null, description: p.description })).id;
+  }
+  let sections = 0;
+  if (spec.links?.length) { await svc.saveSection(ownerId, biz.id, { id: 'Our products', type: 'links', title: 'Our products', items: spec.links }); sections++; }
+  if (spec.helps?.length) { await svc.saveSection(ownerId, biz.id, { id: 'What we help with', type: 'list', title: 'What we help with', items: spec.helps }); sections++; }
+  if (spec.faq?.length) { await svc.saveSection(ownerId, biz.id, { id: 'Good to know', type: 'faq', title: 'Good to know', items: spec.faq }); sections++; }
+  if (spec.rw && (spec.rw.tagline || spec.rw.about || spec.rw.products)) await svc.setTranslation(ownerId, biz.id, 'rw', { ...(spec.rw.tagline ? { tagline: spec.rw.tagline } : {}), ...(spec.rw.about ? { about: spec.rw.about } : {}), ...(spec.rw.products ? { products: Object.fromEntries(Object.entries(spec.rw.products).filter(([n]) => productIds[n]).map(([n, d]) => [productIds[n], { name: n, description: d }])) } : {}) });
+  let published = false; if (deps.publish) { await svc.setPublished(ownerId, biz.id, true); published = true; }
+  let verified = false; if (deps.grantBadge) { await deps.grantBadge(ownerId); verified = true; }
+  return { url: `${site}/b/${(await svc.list(ownerId)).find((b) => b.id === biz!.id)!.slug}`, created, products: (spec.products ?? []).length, sections, verified, published };
+}
 
 /** Makes (or refreshes) the 4biz page for this account and publishes it; optionally gives the owner the verified badge. Safe to run again. */
-export async function ensureVenture(svc: BizService, ownerId: string, deps: VentureDeps = {}, site: string = SITE()): Promise<VentureResult> {
-  const v = venturePage(site);
-  const have = (await svc.list(ownerId)).find((b) => b.slug === VENTURE_SLUG);
-  let created = false; let biz = have;
-  if (!biz) { biz = await svc.create(ownerId, { name: v.name, slug: VENTURE_SLUG, category: v.category }); created = true; }
-  await svc.update(ownerId, biz.id, { name: v.name, category: v.category, theme: v.theme, tagline: v.tagline, about: v.about, ...(deps.whatsapp ? { whatsapp: deps.whatsapp } : {}), website: site });
-  // Products by name: add the missing ones, refresh the words of the ones already there.
-  const productIds: Record<string, string> = {};
-  const current = (await svc.list(ownerId)).find((b) => b.id === biz!.id)!.products;
-  for (const p of v.products) {
-    const existing = current.find((x) => x.name.toLowerCase() === p.name.toLowerCase());
-    if (existing) { await svc.updateProduct(ownerId, biz.id, existing.id, { description: p.description, available: true, hidden: false }); productIds[p.name] = existing.id; }
-    else productIds[p.name] = (await svc.addProduct(ownerId, biz.id, { name: p.name, price: null, description: p.description })).id;
-  }
-  const sectionIds: Record<string, string> = {};
-  for (const s of v.sections) { const saved = await svc.saveSection(ownerId, biz.id, { id: s.title, ...s }); sectionIds[s.title] = saved.id; }
-  await svc.setTranslation(ownerId, biz.id, 'rw', { tagline: v.rw.tagline, about: v.rw.about, products: Object.fromEntries(Object.entries(v.rw.products).map(([n, d]) => [productIds[n], { name: n, description: d }])) });
-  await svc.setPublished(ownerId, biz.id, true);
-  let verified = false; if (deps.grantBadge) { await deps.grantBadge(ownerId); verified = true; }
-  return { url: `${site}/b/${VENTURE_SLUG}`, created, products: v.products.length, sections: v.sections.length, verified };
-}
+export const ensureVenture = (svc: BizService, ownerId: string, deps: VentureDeps = {}, site: string = SITE()) => ensureVenturePage(svc, ownerId, fourbizSpec(site), { publish: true, ...deps }, site);

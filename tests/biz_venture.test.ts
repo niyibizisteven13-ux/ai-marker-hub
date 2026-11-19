@@ -46,3 +46,31 @@ test('the venture page goes to the account with the email given, or to the calle
   assert.equal(await resolveVentureOwner('', 'admin-9', find), 'admin-9'); assert.equal(await resolveVentureOwner(undefined, 'admin-9', find), 'admin-9');
   await assert.rejects(resolveVentureOwner('nobody@example.test', 'admin-9', find), /No account has the email nobody@example.test/); await assert.rejects(resolveVentureOwner('not an email', 'admin-9', find), /does not look like an email/);
 });
+
+import { bizTools } from '../server/services/ai/tools/bizTools.js';
+import { needsPlatformTools } from '../server/services/ai/platformIntent.js';
+import { buildCapabilitiesPrompt } from '../server/services/ai/capabilitiesPrompt.js';
+import { CHAT_TOOLS, chatSystem } from '../server/services/biz/agent.js';
+
+test('Bwenge AI can build a venture page for anyone: it is private until they say publish, never duplicates on a second run, takes Kinyarwanda, and refuses what is not allowed', async () => {
+  const { svc } = make(); const tools = Object.fromEntries(bizTools(() => svc).map((t) => [t.definition.name, t])) as any; const c: any = { userId: 'u1', files: {}, services: {} };
+  const input = { name: 'Kigali Tech Studio', slug: 'kts', aim: 'Software that fits our shops', description: 'We build small tools for shops in Kigali.', category: 'services', theme: 'teal', whatsapp: '0788111222',
+    products: [{ name: 'ShopBook', description: 'Sales and stock on a phone.', price_rwf: 15000 }, { name: 'QueueMe', description: 'A queue for salons.' }], helps: [{ title: 'Records', text: 'Every sale written down.' }], links: [{ title: 'ShopBook', text: 'See it', url: 'https://shopbook.example.test' }],
+    faq: [{ question: 'Is it free?', answer: 'The first month is.' }], rw: { tagline: 'Porogaramu zijyanye n’amaduka yacu', products: { ShopBook: 'Ibyagurishijwe n’ibisigaye kuri telefoni.' } } };
+  const made = await tools.biz_venture.execute(input, c); assert.match(made.text, /Created the venture page: 2 product\(s\), 3 section\(s\), with Kinyarwanda/); assert.match(made.text, /still private/); assert.match(made.text, /Verified badge \(1,000 RWF/);
+  assert.equal(await svc.publicBySlug('kts'), null, 'nothing is public until the owner says so');
+  const again = await tools.biz_venture.execute({ ...input, publish: true }, c); assert.match(again.text, /Refreshed/); assert.match(again.text, /It is published: .*\/b\/kts/);
+  const pub: any = await svc.publicBySlug('kts'); assert.equal(pub.tagline, 'Software that fits our shops'); assert.equal(pub.products.length, 2); assert.equal(pub.products[0].price, 15000); assert.deepEqual(pub.sections.map((s: any) => s.title), ['Our products', 'What we help with', 'Good to know']); assert.equal(pub.translations.rw.tagline, 'Porogaramu zijyanye n’amaduka yacu');
+  assert.equal((await svc.list('u1')).length, 1, 'one page, however many times it is run'); assert.equal((await svc.list('u1'))[0].products.length, 2);
+  assert.equal(pub.verified, undefined, 'the badge is not something the assistant can give');
+  const noName = await tools.biz_venture.execute({ name: '', aim: 'x', description: 'y' }, c); assert.ok(noName.isError || /name/i.test(noName.text), noName.text);
+  const other = await tools.biz_venture.execute({ ...input }, { userId: 'u2', files: {}, services: {} }); assert.ok(other.isError || /taken/i.test(other.text), 'a name that is already used by another account is refused: ' + other.text); assert.equal((await svc.list('u2')).length, 0);
+});
+
+test('the assistant is taught the venture, programs, report and badge skills, and those requests reach the business tools', () => {
+  const prompt = buildCapabilitiesPrompt({ tools: ['biz_get', 'biz_program', 'biz_venture', 'biz_day_report'] });
+  for (const s of ['biz_venture', 'biz_program', 'biz_day_report', 'END PROGRAM', 'CHECKS? the business|THE CUSTOMER SCANS', 'Verified badge', '1,000 RWF', 'AI in our context']) assert.match(prompt, new RegExp(s, 'i'), s);
+  assert.ok(CHAT_TOOLS.includes('biz_venture')); assert.match(chatSystem({ name: 'X', slug: 'x', category: 'services' }), /biz_venture/);
+  for (const m of ['I want a page for my venture, it has three products', 'create a meal card for students', 'give me the closing report', 'how do I get the verified badge', 'set up my 4biz page', 'end the program please', 'show the check-in code']) assert.equal(needsPlatformTools(m), true, m);
+  for (const m of ['explain photosynthesis', 'what is the capital of Rwanda', 'help me write a poem']) assert.equal(needsPlatformTools(m), false, m);
+});
