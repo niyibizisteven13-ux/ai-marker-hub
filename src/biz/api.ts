@@ -77,6 +77,7 @@ export const ownerApi = {
   redeem: async (id: string, body: { token?: string; code?: string; memberId?: string; item?: string; force?: boolean }) => read<RedeemResult>(await authFetch(`/api/biz/${id}/uses/redeem`, json('POST', body))),
   undoUse: async (id: string, useId: string) => read<{ ok: boolean }>(await authFetch(`/api/biz/${id}/uses/${useId}/undo`, json('POST'))),
   checkinCode: async (id: string, programId: string) => read<{ code: string; expiresInSec: number; program: string }>(await authFetch(`/api/biz/${id}/programs/${encodeURIComponent(programId)}/checkin-code`)),
+  report: async (id: string, date: string | undefined, lang: string) => read<{ report: { date: string; money: { sales: number; expenses: number; profit: number; orders: number; pending: number; salesChangePct: number | null }; programs: { served: number; people: number; notYet: Array<{ name: string }> | null; waiting: Array<unknown>; expiring: Array<unknown> } | null; attention: string[] }; text: string }>(await authFetch(`/api/biz/${id}/report?lang=${lang}${date ? `&date=${date}` : ''}`)),
   today: async (id: string) => read<TodayInfo>(await authFetch(`/api/biz/${id}/uses/today`)),
   costs: async (id: string) => read<Costs>(await authFetch(`/api/biz/${id}/costs`)),
   setBudget: async (id: string, category: string, amount: number | null) => read<Costs>(await authFetch(`/api/biz/${id}/budgets`, json('PUT', { category, amount }))),

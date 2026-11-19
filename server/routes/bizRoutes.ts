@@ -197,6 +197,7 @@ export function createBizRouter(): Router {
   r.put('/:id/lang', run(async (req, res) => res.json({ lang: await svc().setLang(me(req), req.params.id, req.body?.lang) })));
   r.put('/:id/translations/:lang', run(async (req, res) => res.json({ translation: await svc().setTranslation(me(req), req.params.id, req.params.lang, req.body ?? {}) })));
   r.get('/:id/dashboard', run(async (req, res) => res.json(await svc().dashboard(me(req), req.params.id, [7, 30, 90].includes(Number(req.query.days)) ? Number(req.query.days) : 7))));
+  r.get('/:id/report', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await svc().dayReport(me(req), req.params.id, { date: req.query.date, lang: req.query.lang })); }));
   /** The owner's own Business Agent chat (a dedicated agent for this business, not the general chat). Spends credits like any assistant action. */
   r.post('/:id/agent/chat', run(async (req, res) => {
     const b = await svc().get(me(req), req.params.id);
