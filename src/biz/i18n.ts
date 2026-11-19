@@ -63,7 +63,6 @@ Object.assign(RW, {
   'Programs': 'Porogaramu',
   'My pass': 'Ikarita yanjye',
   'Pay once, then just show your pass each time.': 'Ishyura rimwe, hanyuma ujye werekana ikarita yawe buri gihe.',
-  'for': '',
   'days': 'iminsi',
   'uses': 'inshuro',
   'Every day': 'Buri munsi',

@@ -34,7 +34,7 @@ export function PlansSection({ b, preview, onJoin, onOpenPass }: { b: PublicBusi
           <article key={p.id} className="flex flex-col rounded-3xl border border-[#E7EAEE] bg-white p-5">
             <h3 className="font-display text-lg font-semibold">{p.title}</h3>
             <p className="mt-1 font-display text-2xl font-semibold tabular-nums">{rwf(p.priceRwf)}</p>
-            <p className="text-sm text-[#5B6470]">{tx("for")} {p.days} {tx("days")}{p.totalUses ? ` · ${p.totalUses} ${tx('uses')}` : ''} · {p.items.join(' + ')} · {daysText(p.openDays, tx)}</p>
+            <p className="text-sm text-[#5B6470]">{p.days} {tx("days")}{p.totalUses ? ` · ${p.totalUses} ${tx('uses')}` : ''} · {p.items.join(' + ')} · {daysText(p.openDays, tx)}</p>
             {p.windows?.length ? <p className="mt-1 text-xs text-[#5B6470]">{p.windows.map((w) => `${w.item} ${w.from}–${w.to}`).join(' · ')}</p> : null}
             {p.description && <p className="mt-2 text-sm text-[#3A4350]">{p.description}</p>}
             {p.terms && <p className="mt-2 text-xs text-[#5B6470]">{p.terms}</p>}
