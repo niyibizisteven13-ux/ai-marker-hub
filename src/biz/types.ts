@@ -49,7 +49,7 @@ export interface SectionInfo { id: string; type: 'text' | 'faq' | 'list' | 'link
 export type DayId = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
 export interface ItemWindow { item: string; from: string; to: string }
 export interface ProgramInfo {
-  id: string; title: string; description?: string; priceRwf: number; days: number; items: string[]; openDays: DayId[]; windows?: ItemWindow[]; terms?: string; maxMembers?: number; totalUses?: number; joinCode?: string; active: boolean;
+  id: string; title: string; description?: string; priceRwf: number; days: number; items: string[]; openDays: DayId[]; windows?: ItemWindow[]; terms?: string; maxMembers?: number; totalUses?: number; joinCode?: string; checkIn?: 'staff' | 'self'; active: boolean;
   counts?: { active: number; pending: number; total: number };
 }
 export type PlanState = 'pending' | 'not_started' | 'active' | 'expired' | 'paused' | 'cancelled';
@@ -65,7 +65,7 @@ export interface ProgramSummary {
 export interface RedeemResult { ok: boolean; code?: string; message?: string; item?: string; useId?: string; member?: MemberInfo }
 export interface TodayInfo {
   date: string; open: boolean; servedCount: number; expected: number;
-  served: Array<{ useId: string; memberId: string; name: string; code: string; item: string; at: string; canUndo: boolean }>;
+  served: Array<{ useId: string; memberId: string; name: string; code: string; item: string; at: string; by?: 'scan' | 'code' | 'self'; canUndo: boolean }>;
   notYet: Array<{ memberId: string; name: string; phone: string; code: string }>;
 }
 export interface CardDay { date: string; dow: DayId; open: boolean; used: string[] }
@@ -73,11 +73,13 @@ export interface CardDay { date: string; dow: DayId; open: boolean; used: string
 export interface CardInfo {
   cardId: string;
   business: { name: string; slug: string; theme: string };
-  program: { title: string; totalUses?: number; items: string[]; openDays: DayId[]; windows?: ItemWindow[]; terms?: string; priceRwf: number; days: number };
+  program: { title: string; checkIn?: 'staff' | 'self'; totalUses?: number; items: string[]; openDays: DayId[]; windows?: ItemWindow[]; terms?: string; priceRwf: number; days: number };
   member: { name: string; phone: string; idNumber?: string; code: string; state: PlanState; startDate: string; endDate: string; daysLeft: number; servingDaysLeft: number; usesLeft: number; usedTotal: number; paid: boolean; paidAt: string | null };
   qr: string | null;
+  /** Only when the owner set self check-in: what the customer can tap now, and the tick they can still take back. */
+  tick: null | { items: Array<{ item: string; allowed: boolean; reason?: string; message?: string }>; undo: { useId: string; item: string } | null };
   today: { date: string; openToday: boolean; used: Array<{ item: string; at: string }> };
   calendar: CardDay[];
   payment: null | { amount: number; momoCode: string | null; momoName: string | null; online: boolean; promptSent: boolean; claimed: { at: string; ref?: string } | null; whatsapp: string | null };
 }
-export interface MeInfo { name: string; phone: string; cards: Array<{ id: string; programTitle: string; state: PlanState; startDate: string; endDate: string; usesLeft: number; paid: boolean }> }
+export interface MeInfo { name: string; phone: string; username?: string; cards: Array<{ id: string; programTitle: string; state: PlanState; startDate: string; endDate: string; usesLeft: number; paid: boolean }> }

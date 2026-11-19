@@ -31,6 +31,11 @@ export function loadSession(slug: string): string | null {
 export function saveSession(slug: string, token: string, expiresAt: string, remember: boolean) {
   const v = JSON.stringify({ token, exp: Date.parse(expiresAt) }); try { (remember ? localStorage : sessionStorage).setItem(KEY(slug), v); (remember ? sessionStorage : localStorage).removeItem(KEY(slug)); } catch { /* optional */ }
 }
+/** The user name is remembered on this phone, so a returning customer only types the passcode. It is not a secret on its own. */
+const UKEY = (slug: string) => `bz-user:${slug}`;
+export const loadUser = (slug: string): string => { try { return localStorage.getItem(UKEY(slug)) ?? ''; } catch { return ''; } };
+export const saveUser = (slug: string, u: string) => { try { if (u) localStorage.setItem(UKEY(slug), u); } catch { /* optional */ } };
+export const forgetUser = (slug: string) => { try { localStorage.removeItem(UKEY(slug)); } catch { /* optional */ } };
 export function clearSession(slug: string) { try { sessionStorage.removeItem(KEY(slug)); localStorage.removeItem(KEY(slug)); } catch { /* optional */ } }
 
 const field = 'mt-1 min-h-12 w-full rounded-xl border border-[#D9DEE5] bg-white px-3.5 text-base outline-none focus:border-[#0E1722]';
@@ -69,21 +74,22 @@ const useWordsUses = (b: PublicBusiness, lang: Lang) => wordsOf(b.programText, l
 /* ---- first visit: details, then the customer's own passcode ---- */
 export function JoinFlow({ b, lang, program, onClose, onDone }: { b: PublicBusiness; lang: Lang; program: Program; onClose: () => void; onDone: () => void }) {
   const { tx, t, w } = useWords(b, lang); const theme = THEMES[b.theme] ?? THEMES.gold;
-  const [step, setStep] = useState<1 | 2>(1); const [f, setF] = useState({ name: '', phone: '', idNumber: '', joinCode: '', startDate: '', website: '', pin: '', pin2: '', remember: true }); const [busy, setBusy] = useState(false); const [err, setErr] = useState('');
+  const [step, setStep] = useState<1 | 2>(1); const [names, setNames] = useState<string[]>([]); const [f, setF] = useState({ username: '', name: '', phone: '', idNumber: '', joinCode: '', startDate: '', website: '', pin: '', pin2: '', remember: true }); const [busy, setBusy] = useState(false); const [err, setErr] = useState('');
   const days = Array.from({ length: 8 }, (_, i) => new Date(Date.now() + 2 * 3600_000 + i * 86_400_000).toISOString().slice(0, 10));
-  const next = (e: React.FormEvent) => { e.preventDefault(); setErr(''); if (f.name.trim().length < 2) return setErr(tx('Please write your name.')); if (f.phone.replace(/\D/g, '').length < 9) return setErr(tx('Please write a phone number we can reach.')); if (program.needsCode && !/^\d{4}$/.test(f.joinCode.replace(/\D/g, ''))) return setErr(tx('Write the 4-digit join code the business gave you.')); setStep(2); };
+  const next = (e: React.FormEvent) => { e.preventDefault(); setErr(''); if (f.name.trim().length < 2) return setErr(tx('Please write your name.')); if (f.phone.replace(/\D/g, '').length < 9) return setErr(tx('Please write a phone number we can reach.')); if (program.needsCode && !/^\d{4}$/.test(f.joinCode.replace(/\D/g, ''))) return setErr(tx('Write the 4-digit join code the business gave you.')); setStep(2); void publicApi.usernames(b.slug, f.name).then((s) => { setNames(s); setF((p) => (p.username ? p : { ...p, username: s[0] ?? '' })); }).catch(() => undefined); };
   const submit = async (e: React.FormEvent) => {
     e.preventDefault(); setErr('');
+    if (f.username && !/^[a-z0-9]{3,12}$/.test(f.username)) return setErr(tx('A user name is 3 to 12 letters or numbers, with no spaces.'));
     if (!/^\d{4,6}$/.test(f.pin)) return setErr(tx('Choose a passcode of 4 to 6 digits.')); if (f.pin !== f.pin2) return setErr(tx('The two passcodes do not match.'));
     setBusy(true);
-    try { const r = await publicApi.join(b.slug, program.id, { name: f.name, phone: f.phone, passcode: f.pin, joinCode: program.needsCode ? f.joinCode : undefined, idNumber: f.idNumber || undefined, startDate: f.startDate || undefined, remember: f.remember, website: f.website }); saveSession(b.slug, r.session, r.expiresAt, f.remember); onDone(); }
+    try { const r = await publicApi.join(b.slug, program.id, { name: f.name, phone: f.phone, username: f.username || undefined, passcode: f.pin, joinCode: program.needsCode ? f.joinCode : undefined, idNumber: f.idNumber || undefined, startDate: f.startDate || undefined, remember: f.remember, website: f.website }); saveSession(b.slug, r.session, r.expiresAt, f.remember); saveUser(b.slug, r.username); onDone(); }
     catch (x) { const m = x instanceof Error ? x.message : tx('Something went wrong. Please try again.'); setErr(m); if (/join code/i.test(m)) setStep(1); } finally { setBusy(false); }
   };
   return (
     <Sheet label={t("Join this {program}")} onClose={onClose}>
       <div className="flex items-start justify-between gap-3"><div><h2 className="font-display text-xl font-semibold">{program.title}</h2><p className="text-sm text-[#5B6470]">{rwf(program.priceRwf)} · {program.days} {tx("days")}</p></div>
         <button type="button" onClick={onClose} aria-label={tx("Close")} className="rounded-full p-2 hover:bg-[#F2F4F7]"><X size={18} /></button></div>
-      <p className="text-xs font-semibold uppercase tracking-wide text-[#5B6470]">{tx("Step")} {step} / 2 · {step === 1 ? tx('Your details') : tx('Create your passcode')}</p>
+      <p className="text-xs font-semibold uppercase tracking-wide text-[#5B6470]">{tx("Step")} {step} / 2 · {step === 1 ? tx('Your details') : tx('Your user name and passcode')}</p>
       {step === 1 ? (
         <form onSubmit={next} className="space-y-3">
           <label className="block text-sm font-medium">{tx("Your name")}<input className={field} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required maxLength={60} autoComplete="name" /></label>
@@ -97,6 +103,10 @@ export function JoinFlow({ b, lang, program, onClose, onDone }: { b: PublicBusin
         </form>
       ) : (
         <form onSubmit={submit} className="space-y-3">
+          <div className="block text-sm font-medium">{tx("Your user name")}
+            <input className={`${field} font-semibold`} value={f.username} onChange={(e) => setF({ ...f, username: e.target.value.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 12) })} maxLength={12} autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="username" aria-label={tx("Your user name")} />
+            {names.length > 0 && <div className="mt-1.5 flex flex-wrap gap-1.5" role="group" aria-label={tx("Suggestions")}>{names.map((n) => <button key={n} type="button" aria-pressed={f.username === n} onClick={() => setF({ ...f, username: n })} className={`min-h-9 rounded-full border px-3 text-sm font-semibold ${f.username === n ? 'border-[#0E1722] bg-[#0E1722] text-white' : 'border-[#D9DEE5] bg-white'}`}>{n}</button>)}</div>}
+            <span className="mt-1 block text-xs font-normal text-[#5B6470]">{tx("Short, so it is easy to type. This phone will remember it.")}</span></div>
           <p className="rounded-xl bg-[#F2F4F7] p-3 text-sm text-[#3A4350]">{t("You will use this passcode every time you open your {pass}. Do not share it.")}</p>
           <label className="block text-sm font-medium">{tx("Passcode")} <span className="font-normal text-[#5B6470]">({tx("4 to 6 digits")})</span><input className={`${field} font-mono text-xl tracking-[0.4em]`} type="password" value={f.pin} onChange={(e) => setF({ ...f, pin: e.target.value.replace(/\D/g, '').slice(0, 6) })} inputMode="numeric" autoComplete="new-password" required autoFocus /></label>
           <label className="block text-sm font-medium">{tx("Confirm passcode")}<input className={`${field} font-mono text-xl tracking-[0.4em]`} type="password" value={f.pin2} onChange={(e) => setF({ ...f, pin2: e.target.value.replace(/\D/g, '').slice(0, 6) })} inputMode="numeric" autoComplete="new-password" required /></label>
@@ -113,14 +123,16 @@ export function JoinFlow({ b, lang, program, onClose, onDone }: { b: PublicBusin
 
 /* ---- coming back: phone number and passcode ---- */
 export function SignIn({ b, lang, onClose, onDone }: { b: PublicBusiness; lang: Lang; onClose: () => void; onDone: () => void }) {
-  const { tx, t } = useWords(b, lang); const theme = THEMES[b.theme] ?? THEMES.gold; const [f, setF] = useState({ phone: '', pin: '', remember: true }); const [busy, setBusy] = useState(false); const [err, setErr] = useState('');
-  const go = async (e: React.FormEvent) => { e.preventDefault(); setBusy(true); setErr(''); try { const r = await publicApi.login(b.slug, { phone: f.phone, passcode: f.pin, remember: f.remember }); saveSession(b.slug, r.session, r.expiresAt, f.remember); onDone(); } catch (x) { setErr(x instanceof Error ? x.message : tx('Something went wrong. Please try again.')); } finally { setBusy(false); } };
+  const { tx, t } = useWords(b, lang); const theme = THEMES[b.theme] ?? THEMES.gold; const [known, setKnown] = useState(() => loadUser(b.slug)); const [f, setF] = useState({ who: '', pin: '', remember: true }); const [busy, setBusy] = useState(false); const [err, setErr] = useState('');
+  const go = async (e: React.FormEvent) => { e.preventDefault(); setBusy(true); setErr(''); try { const who = (known || f.who).trim(); const byName = /[a-z]/i.test(who); const r = await publicApi.login(b.slug, byName ? { username: who, passcode: f.pin, remember: f.remember } : { phone: who, passcode: f.pin, remember: f.remember }); saveSession(b.slug, r.session, r.expiresAt, f.remember); saveUser(b.slug, r.username); onDone(); } catch (x) { setErr(x instanceof Error ? x.message : tx('Something went wrong. Please try again.')); } finally { setBusy(false); } };
   return (
     <Sheet label={t("Sign in to your {pass}")} onClose={onClose}>
       <div className="flex items-start justify-between gap-3"><h2 className="font-display text-xl font-semibold">{t("Sign in to your {pass}")}</h2><button type="button" onClick={onClose} aria-label={tx("Close")} className="rounded-full p-2 hover:bg-[#F2F4F7]"><X size={18} /></button></div>
       <form onSubmit={go} className="space-y-3">
-        <label className="block text-sm font-medium">{tx("Phone number")}<input className={field} value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} required inputMode="tel" autoComplete="tel" placeholder="0788 123 456" /></label>
-        <label className="block text-sm font-medium">{tx("Passcode")}<input className={`${field} font-mono text-xl tracking-[0.4em]`} type="password" value={f.pin} onChange={(e) => setF({ ...f, pin: e.target.value.replace(/\D/g, '').slice(0, 6) })} inputMode="numeric" autoComplete="current-password" required /></label>
+        {known
+          ? <p className="flex items-center justify-between gap-2 rounded-xl bg-[#F2F4F7] px-3 py-2.5 text-sm"><span>{tx("Signing in as")} <b className="text-base">{known}</b></span><button type="button" onClick={() => { forgetUser(b.slug); setKnown(''); }} className="min-h-9 px-2 font-semibold underline">{tx("Not you?")}</button></p>
+          : <label className="block text-sm font-medium">{tx("User name or phone number")}<input className={field} value={f.who} onChange={(e) => setF({ ...f, who: e.target.value })} required autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="username" /></label>}
+        <label className="block text-sm font-medium">{tx("Passcode")}<input className={`${field} font-mono text-xl tracking-[0.4em]`} type="password" value={f.pin} onChange={(e) => setF({ ...f, pin: e.target.value.replace(/\D/g, '').slice(0, 6) })} inputMode="numeric" autoComplete="current-password" required autoFocus={!!known} /></label>
         <label className="flex items-start gap-3 text-sm"><input type="checkbox" className="mt-0.5 h-5 w-5" checked={f.remember} onChange={(e) => setF({ ...f, remember: e.target.checked })} />{tx("Keep me signed in on this phone for 30 days")}</label>
         {err && <p role="alert" className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">{err}</p>}
         <button type="submit" disabled={busy} style={{ background: theme.accent, color: theme.on }} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl text-base font-semibold disabled:opacity-60">{busy ? <Loader2 className="animate-spin" size={18} /> : <KeyRound size={18} />}{tx("Sign in")}</button>
@@ -132,7 +144,7 @@ export function SignIn({ b, lang, onClose, onDone }: { b: PublicBusiness; lang: 
 
 /* ---- the card, laid out like the paper one ---- */
 const BLOCK = 15;
-function PaperCard({ b, card, w }: { b: PublicBusiness; card: CardInfo; w: ReturnType<typeof wordsOf> }) {
+function PaperCard({ b, card, w, onTick }: { b: PublicBusiness; card: CardInfo; w: ReturnType<typeof wordsOf>; onTick?: (item: string) => void }) {
   const tx = useTx(); const theme = THEMES[b.theme] ?? THEMES.gold; const cat = CATEGORIES.find((c) => c.id === b.category)?.label ?? '';
   const cal = card.calendar; const blocks = Math.max(1, Math.ceil(cal.length / BLOCK)); const todayIdx = cal.findIndex((d) => d.date === card.today.date);
   const [blk, setBlk] = useState(() => (todayIdx >= 0 ? Math.floor(todayIdx / BLOCK) : card.today.date > (cal[cal.length - 1]?.date ?? '') ? blocks - 1 : 0));
@@ -165,7 +177,7 @@ function PaperCard({ b, card, w }: { b: PublicBusiness; card: CardInfo; w: Retur
                 <th scope="row" className="border-b border-r px-1 py-1 text-left text-xs font-bold" style={{ borderColor: line }}><span className="text-base tabular-nums">{dayNum(d.date)}</span> <span className="font-semibold opacity-70">{tx(DAY[d.dow])}</span>{isToday && <span className="sr-only"> {tx('today')}</span>}</th>
                 {items.map((it) => { const used = d.used.includes(it); const at = card.today.date === d.date ? card.today.used.find((u) => u.item === it)?.at : undefined;
                   return <td key={it} title={used ? `${it}${at ? ` ${clock(at)}` : ''}` : undefined} className="h-9 border-b border-r p-0 text-lg last:border-r-0" style={{ borderColor: line, ...(!d.open ? { background: `repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in srgb, ${ink} 14%, transparent) 4px 5px)` } : {}) }}>
-                    {used ? <span aria-label={`${it} ✓`} className="font-bold italic" style={{ color: '#2848C8', fontFamily: 'cursive' }}>✗</span> : !d.open ? <span className="text-xs opacity-50" aria-label={tx('Closed')}>—</span> : null}</td>; })}
+                    {used ? <span aria-label={`${it} ✓`} className="font-bold italic" style={{ color: '#2848C8', fontFamily: 'cursive' }}>✗</span> : isToday && onTick && card.tick?.items.find((x) => x.item === it)?.allowed ? <button type="button" onClick={() => onTick(it)} aria-label={`${tx('Tick')} ${it}`} className="grid h-full min-h-9 w-full place-items-center border-2 border-dashed text-[10px] font-extrabold uppercase" style={{ borderColor: theme.accent, color: ink }}>{tx('Tap')}</button> : !d.open ? <span className="text-xs opacity-50" aria-label={tx('Closed')}>—</span> : null}</td>; })}
               </tr>); })}
           </tbody>
         </table>
@@ -206,7 +218,20 @@ export function Dashboard({ b, lang, onClose, onSignedOut }: { b: PublicBusiness
         {card && m && (
           <div className="space-y-3">
             <div className="rounded-full px-4 py-2 text-center text-sm font-bold tracking-wide text-white" style={{ background: tone }}>{label}</div>
-            <PaperCard b={b} card={card} w={w} />
+            {m.state === 'active' && card.tick && (
+              <div className="rounded-2xl bg-white p-4" aria-live="polite">
+                <p className="font-display text-lg font-semibold">{tx('Tick today')}</p>
+                <p className="mb-3 text-sm text-[#5B6470]">{tx('Tap what you are taking now. It is ticked on your card at once.')}</p>
+                <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${Math.min(2, card.tick.items.length)}, minmax(0, 1fr))` }}>
+                  {card.tick.items.map((x) => { const done = card.today.used.find((u) => u.item === x.item);
+                    return <button key={x.item} type="button" disabled={busy || !x.allowed} onClick={() => void act((s, id) => publicApi.tick(slug, s, id, x.item))} style={x.allowed ? { background: theme.accent, color: theme.on } : undefined} className={`flex min-h-16 flex-col items-center justify-center rounded-2xl px-2 py-2 text-lg font-semibold ${x.allowed ? '' : 'bg-[#F2F4F7] text-[#5B6470]'} disabled:opacity-80`}>
+                      <span className="flex items-center gap-1.5">{done && <CheckCircle2 size={18} aria-hidden="true" />}{x.item}</span>
+                      {done ? <span className="text-xs font-normal">{tx('Ticked')} {clock(done.at)}</span> : !x.allowed && <span className="text-xs font-normal">{x.message}</span>}
+                    </button>; })}
+                </div>
+                {card.tick.undo && <p role="status" className="mt-3 flex items-center justify-between gap-2 rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-900"><span>{card.tick.undo.item} {tx('ticked')}. {tx('Wrong tap?')}</span><button type="button" disabled={busy} onClick={() => void act((s, id) => publicApi.untick(slug, s, id, card.tick!.undo!.useId))} className="min-h-9 px-2 font-semibold underline">{tx('Undo')}</button></p>}
+              </div>)}
+            <PaperCard b={b} card={card} w={w} onTick={card.tick && m.state === 'active' ? (item) => void act((s, id) => publicApi.tick(slug, s, id, item)) : undefined} />
             {(m.state === 'active' || m.state === 'not_started') && card.qr && (
               <div className="rounded-2xl bg-white p-4 text-center">
                 <button type="button" onClick={() => setBig(true)} aria-label={tx('Tap to enlarge')} className="mx-auto block"><Qr text={card.qr} size={168} /></button>

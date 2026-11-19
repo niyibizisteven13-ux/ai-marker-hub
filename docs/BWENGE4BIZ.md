@@ -104,7 +104,7 @@ bus pass, a month of tutoring sessions, a car-wash subscription.
 2. **Customer, first time**: scans the QR code or opens the link. Step 1: name, phone number, the owner's **4-digit join code** (when the owner set
    one; nobody can join without it) and, if the owner asks for it, an ID. Step 2: the customer **creates a passcode** (4 to 6 digits) and is signed in.
    From then on they open their card by signing in with **phone number and passcode** (optionally "keep me signed in on this phone for 30 days"). There is
-   no secret link to guard or share. A phone number is one account at that business: a second program on the same number uses the same passcode.
+   no secret link to guard or share. The customer is **proposed a short user name** (3 to 12 letters or numbers, made from their name, for example `aline`; they can change it, and no two are the same at one business). This phone remembers it, so coming back they type **only the passcode** ("Signing in as aline · Not you?"). User name or phone number plus passcode both work. A phone number is one account at that business: a second program on the same number uses the same passcode.
    A forgotten passcode is reset by the owner (Members → *Reset passcode* gives a temporary one to pass on). Five wrong passcodes lock that phone
    number for ten minutes.
 3. **Paying**: if the owner has MTN/Airtel keys saved (Secrets and payments) the customer can approve a prompt on their phone and the plan
@@ -114,6 +114,11 @@ bus pass, a month of tutoring sessions, a car-wash subscription.
 4. **Each time they come** (Programs → *Today*): the owner taps *Scan a pass* (camera) or types the code. The screen says **Allowed: Lunch** in green,
    or why not in red: not paid, not started, ended, paused, not available today, already used today at 12:41, all uses taken, or outside the
    times it is available (the owner may *Allow anyway*; nothing else can be overridden). A mistaken scan can be undone for 20 minutes.
+4b. **Who ticks the card is the owner's choice** (per program, set in the plan form or by the assistant with `check_in`). **The business** (default): scan or type the code
+   as above. **The customer**: after signing in they open their card, and today's items (for example *Lunch* and *Dinner*) are big buttons, and also tappable
+   boxes in today's row of the card. One tap ticks it at once, under exactly the same rules as a scan (paid, open day, serving times, one of each item a day, total cap; no
+   override). A wrong tap can be taken back for one minute; staff can undo longer from *Today*, where self ticks are marked. Choose self check-in only where a
+   wrong tick costs little; a customer can tick an item while not on the premises, so for meals or visits that cost you money prefer staff scanning.
 5. **Running it**: *Today* shows who has checked in and who has a program today but has not come yet. *Members* shows payments waiting for
    confirmation, pause / resume, add days (for example after a closure), cancel, search, and a WhatsApp reminder link for programs that are ending.
 
@@ -135,6 +140,7 @@ Joining is also slowed for anyone guessing join codes. Joining and checking in r
 **Honest limits**
 - A card can still be screenshotted or a phone handed to a friend, and the passcode can be told to someone. The system allows one use of each item per day, so a shared pass only uses that customer's
   own allowance, but the owner should still glance at the name on the screen. The pass shows a ticking clock so a still picture is easy to spot.
+- Self check-in trusts the customer: a signed-in customer can tick today's item from anywhere (the rules still stop a second one, an unpaid card, a closed day or the wrong time, so set serving times when you use it). A user name is not secret; the passcode (with its lockout) protects the card.
 - The lock that prevents double use lives in one server process. With several server instances behind a balancer, two scans in the same instant
   on different instances could both pass; use one instance for the API or move the lock to the database before relying on it at scale.
 - The camera needs HTTPS and a browser that allows it; browsers without a built-in QR reader use the small `jsqr` library, and the code can always

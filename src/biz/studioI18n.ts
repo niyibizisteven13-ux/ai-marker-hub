@@ -194,3 +194,13 @@ Object.assign(SRW, {
   'Tell them, and ask them to change it after signing in.': 'Ubibabwire, ubasabe kuyihindura nyuma yo kwinjira.',
   'new passcode': 'passcode nshya',
 });
+
+Object.assign(SRW, {
+  'Who ticks the card': 'Ni nde ushyiraho ikimenyetso ku ikarita',
+  'The business': 'Ubucuruzi',
+  'The customer': 'Umukiliya',
+  'You scan the QR code or type the code.': 'Usikana QR code cyangwa wandika kode.',
+  'They sign in and tap today\'s item. It is ticked at once.': 'Binjira bagakanda icyo bafashe uyu munsi. Gihita gishyirwaho ikimenyetso.',
+  'Same rules as a scan: paid, open day, serving times, one of each each day. The customer can take back a wrong tap for one minute. You see who ticked it themselves on the Today list.': 'Amategeko amwe na scan: yishyuwe, umunsi ukora, amasaha, kimwe buri munsi. Umukiliya ashobora gusubiza inyuma ikosa mu munota umwe. Ubona ababyishyiriyeho ku rutonde rw’uyu munsi.',
+  'ticked by the customer': 'byashyizweho n’umukiliya',
+});

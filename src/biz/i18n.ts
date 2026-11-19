@@ -182,3 +182,23 @@ Object.assign(RW, {
   'Your details': 'Amakuru yawe',
   'today': 'uyu munsi',
 });
+
+// Short user names and tapping your own card (Kinyarwanda: please have a native speaker review).
+Object.assign(RW, {
+  'A user name is 3 to 12 letters or numbers, with no spaces.': 'Izina ry’ukoresha rigira inyuguti cyangwa imibare 3 kugeza kuri 12, nta myanya irimo.',
+  'Your user name': 'Izina ryawe ry’ukoresha',
+  'Suggestions': 'Ibyo dutanga',
+  'Short, so it is easy to type. This phone will remember it.': 'Rigufi, kugira ngo byoroshye kurandika. Iyi telefoni izaryibuka.',
+  'Your user name and passcode': 'Izina ryawe n’passcode',
+  'Signing in as': 'Winjiye nka',
+  'Not you?': 'Si wowe?',
+  'User name or phone number': 'Izina ry’ukoresha cyangwa nimero ya telefoni',
+  'Tick': 'Shyiraho ikimenyetso',
+  'Tap': 'Kanda',
+  'Tick today': 'Shyiraho ikimenyetso uyu munsi',
+  'Tap what you are taking now. It is ticked on your card at once.': 'Kanda icyo ufashe ubu. Gihita kigaragara ku ikarita yawe.',
+  'Ticked': 'Byashyizweho',
+  'ticked': 'byashyizweho',
+  'Wrong tap?': 'Wakandagiye nabi?',
+  'Undo': 'Subiza inyuma',
+});

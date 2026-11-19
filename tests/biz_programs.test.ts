@@ -5,7 +5,7 @@ import { createBizService, resetBizLimitsForTests, type Kv } from '../server/ser
 import { memoryMediaStore } from '../server/services/biz/media.js';
 import { keyFrom } from '../server/services/biz/secrets.js';
 import type { Fetch } from '../server/services/biz/payments.js';
-import { addDays, canServe, cleanJoin, cleanProgram, dayOfWeek, endDateFor, hashToken, kigaliDate, newCode, newToken, normalizeCode, passPayload, planState, remaining, tokenFromPayload, type Member, type Program } from '../server/services/biz/programs.js';
+import { suggestUsernames, cleanUsername, addDays, canServe, cleanJoin, cleanProgram, dayOfWeek, endDateFor, hashToken, kigaliDate, newCode, newToken, normalizeCode, passPayload, planState, remaining, tokenFromPayload, type Member, type Program } from '../server/services/biz/programs.js';
 
 const memKv = (): Kv & { data: Map<string, unknown> } => { const data = new Map<string, unknown>(); return { data, async get<T>(k: string) { return (data.has(k) ? JSON.parse(JSON.stringify(data.get(k))) : null) as T | null; }, async put(k: string, v: unknown) { data.set(k, JSON.parse(JSON.stringify(v))); }, async del(k: string) { data.delete(k); } }; };
 const T0 = Date.parse('2026-11-17T10:00:00Z');     // Tuesday, 12:00 in Kigali
@@ -186,6 +186,9 @@ test('the assistant can make a program, give the share link, and report how the 
   assert.match((await tools.biz_program.execute({}, c)).text, /No plans yet/);
   const made = await tools.biz_program.execute({ title: 'Lunch plan', price_rwf: 40000, days: 30, items: ['Lunch'], open_days: ['mon', 'tue', 'wed', 'thu', 'fri'] }, c);
   assert.match(made.text, /40,000 RWF for 30 days/); assert.match(made.text, /\/b\/campus-canteen\?plan=/); assert.match(made.text, /not published yet/);
+  assert.match(made.text, /business ticks the card by scanning/);
+  const id = /id ([\w-]+)\)?/.exec((await tools.biz_program.execute({}, c)).text)![1]; const self = await tools.biz_program.execute({ id, check_in: 'self' }, c);
+  assert.match(self.text, /customer ticks their own card by tapping/); assert.match((await tools.biz_program.execute({}, c)).text, /customers tick their own card/); assert.match((await tools.biz_program.execute({ id, check_in: 'staff' }, c)).text, /business ticks the card by scanning/);
   const bad = await tools.biz_program.execute({ title: 'x', price_rwf: 5 }, c); assert.ok(bad.isError || /price must be between/.test(bad.text), bad.text);
   const list = await tools.biz_program.execute({}, c); assert.match(list.text, /Lunch plan \(id /); assert.match(list.text, /0 active, 0 waiting for payment/);
   const status = await tools.biz_plan_status.execute({}, c); assert.match(status.text, /Members: 0 active/); assert.match(status.text, /Nobody is ending within 3 days/);
@@ -374,4 +377,54 @@ test('a customer cannot read or change someone else\'s card, even at the same bu
   const aCard = await cardIdOf(svc, biz.slug, a.session);
   await assert.rejects(svc.card(biz.slug, b.session, aCard), (e: any) => e.status === 404); await assert.rejects(svc.claimCard(biz.slug, b.session, aCard, {}, 'b'), (e: any) => e.status === 404); await assert.rejects(svc.payCard(biz.slug, b.session, aCard, {}, 'b'), (e: any) => e.status === 404);
   assert.equal(((await svc.me(biz.slug, b.session)) as any).cards.length, 1);
+});
+
+test('short user names: proposed from the name, 3 to 12 letters or numbers, never two the same; sign in by user name or phone with the passcode', async () => {
+  assert.deepEqual(suggestUsernames('Aline Uwase', new Set(), () => 0.5).slice(0, 2), ['aline', 'uwase']); assert.equal(suggestUsernames('Aline Uwase', new Set(['aline', 'uwase']), () => 0.5)[0], 'aline55');
+  assert.deepEqual(suggestUsernames('Zoë', new Set(), () => 0.1).length, 3, 'always three, even from a short or odd name'); assert.equal(cleanUsername(' Al ine_Uw ase!! 123456789 '), 'alineuwase12');
+  const { svc, biz, prog } = await setup(); const sug = (await svc.suggestUsernames(biz.slug, 'Mutoni Grace', 'v')).suggestions; assert.equal(sug[0], 'mutoni');
+  const a = await joinP(svc, biz.slug, prog.id, { name: 'Mutoni Grace', phone: '0788300001', username: 'mutoni', passcode: '2468' }, 'a'); assert.equal(a.username, 'mutoni');
+  assert.ok(!(await svc.suggestUsernames(biz.slug, 'Mutoni Grace', 'v')).suggestions.includes('mutoni'), 'a taken name is no longer proposed');
+  await assert.rejects(joinP(svc, biz.slug, prog.id, { name: 'Other', phone: '0788300002', username: 'Mutoni', passcode: '1357' }, 'b'), (e: any) => e.code === 'USERNAME_TAKEN' && /already taken/.test(e.message));
+  await assert.rejects(joinP(svc, biz.slug, prog.id, { name: 'Other', phone: '0788300002', username: 'a b', passcode: '1357' }, 'b'), (e: any) => e.code === 'BAD_USERNAME');
+  const auto = await joinP(svc, biz.slug, prog.id, { name: 'Kamali Eric', phone: '0788300003', passcode: '1357' }, 'c'); assert.equal(auto.username, 'kamali', 'without one, the first proposal is used');
+  assert.equal(((await svc.login(biz.slug, { username: 'MUTONI', passcode: '2468' }, 'x')) as any).username, 'mutoni', 'user name is not case sensitive');
+  assert.ok(((await svc.login(biz.slug, { phone: '0788300001', passcode: '2468' }, 'x')) as any).session, 'the phone number still works');
+  await assert.rejects(svc.login(biz.slug, { username: 'mutoni', passcode: '0000' }, 'x'), (e: any) => e.code === 'BAD_LOGIN'); await assert.rejects(svc.login(biz.slug, { username: 'nobody', passcode: '2468' }, 'x'), (e: any) => e.code === 'BAD_LOGIN');
+  for (let i = 0; i < 5; i++) await svc.login(biz.slug, { username: 'kamali', passcode: '9999' }, 'y').catch(() => undefined);
+  await assert.rejects(svc.login(biz.slug, { username: 'kamali', passcode: '1357' }, 'y'), (e: any) => e.code === 'LOCKED', 'five wrong passcodes lock the user name too');
+  assert.equal(((await svc.me(biz.slug, a.session)) as any).username, 'mutoni');
+});
+
+test('self check-in: off by default; when the owner sets it the customer taps today\'s item and it is ticked at once, under the same rules as a scan', async () => {
+  const { svc, biz, prog, at } = await setup({ title: 'Two meals', items: ['Lunch', 'Dinner'], windows: [{ item: 'Lunch', from: '11:00', to: '15:00' }, { item: 'Dinner', from: '18:00', to: '21:00' }], totalUses: 3 });
+  assert.equal(prog.checkIn, undefined); const pub = (await svc.publicBySlug(biz.slug))!; assert.equal(pub.programs![0].checkIn, 'staff');
+  const j = await joinP(svc, biz.slug, prog.id, { name: 'Eve', phone: '0788300004', remember: true }, 'e'); const id = await cardIdOf(svc, biz.slug, j.session);
+  await assert.rejects(svc.selfUse(biz.slug, j.session, id, { item: 'Lunch' }, 'e'), (e: any) => e.code === 'STAFF_ONLY'); assert.equal(((await passView(svc, biz.slug, j.session)) as any).tick, null);
+  await svc.saveProgram('o', biz.id, { id: prog.id, checkIn: 'self' }); assert.equal((await svc.programs('o', biz.id))[0].checkIn, 'self'); assert.equal((await svc.publicBySlug(biz.slug))!.programs![0].checkIn, 'self');
+  await assert.rejects(svc.selfUse(biz.slug, j.session, id, { item: 'Lunch' }, 'e'), (e: any) => e.status === 409, 'not while unpaid');
+  await svc.confirmPayment('o', biz.id, (await svc.members('o', biz.id))[0].id, { method: 'cash' });
+  let card: any = await passView(svc, biz.slug, j.session); assert.deepEqual(card.tick.items.map((x: any) => [x.item, x.allowed]), [['Lunch', true], ['Dinner', false]], 'at noon lunch can be ticked, dinner not yet'); assert.equal(card.tick.items[1].reason, 'outside_window');
+  await assert.rejects(svc.selfUse(biz.slug, j.session, id, { item: 'Dinner' }, 'e'), (e: any) => e.code === 'DENIED');
+  const r: any = await svc.selfUse(biz.slug, j.session, id, { item: 'Lunch' }, 'e'); assert.equal(r.ok, true); card = await passView(svc, biz.slug, j.session);
+  assert.deepEqual(card.today.used.map((x: any) => x.item), ['Lunch']); assert.equal(card.tick.items[0].allowed, false); assert.equal(card.tick.undo.useId, r.useId); assert.equal(card.calendar.find((d: any) => d.date === '2026-11-17').used[0], 'Lunch'); assert.equal(card.member.usesLeft, 2);
+  await assert.rejects(svc.selfUse(biz.slug, j.session, id, { item: 'Lunch' }, 'e'), (e: any) => e.code === 'ALREADY', 'one lunch a day, even by tapping twice');
+  assert.equal(((await svc.redeem('o', biz.id, { memberId: (await svc.members('o', biz.id))[0].id, item: 'Lunch' })) as any).code, 'already', 'staff cannot double it either');
+  const day = await svc.today('o', biz.id); assert.equal(day.served[0].by, 'self', 'the owner sees which ticks the customer made');
+  at(T0 + 7 * 3_600_000); const d: any = await svc.selfUse(biz.slug, j.session, id, { item: 'Dinner' }, 'e'); assert.equal(d.item, 'Dinner');
+  at(T0 + 86_400_000 + 3_600_000); await svc.selfUse(biz.slug, j.session, id, { item: 'Lunch' }, 'e'); at(T0 + 2 * 86_400_000 + 3_600_000);
+  await assert.rejects(svc.selfUse(biz.slug, j.session, id, { item: 'Lunch' }, 'e'), (e: any) => /All 3 uses/.test(e.message), 'the total cap holds');
+});
+
+test('self check-in: a wrong tap can be taken back for one minute, only by the owner of that card, only self ticks; and nobody can tick another person\'s card', async () => {
+  const { svc, biz, prog, at } = await setup({ checkIn: 'self' }); assert.equal(prog.checkIn, 'self');
+  const a = await joinP(svc, biz.slug, prog.id, { name: 'Ann', phone: '0788300005', passcode: '1111' }, 'a'); const b = await joinP(svc, biz.slug, prog.id, { name: 'Bob', phone: '0788300006', passcode: '2222' }, 'b');
+  for (const m of await svc.members('o', biz.id)) await svc.confirmPayment('o', biz.id, m.id, { method: 'cash' });
+  const aId = await cardIdOf(svc, biz.slug, a.session); await assert.rejects(svc.selfUse(biz.slug, b.session, aId, { item: 'Lunch' }, 'b'), (e: any) => e.status === 404);
+  const t: any = await svc.selfUse(biz.slug, a.session, aId, { item: 'Lunch' }, 'a'); await assert.rejects(svc.selfUndo(biz.slug, b.session, aId, t.useId), (e: any) => e.status === 404);
+  assert.deepEqual(await svc.selfUndo(biz.slug, a.session, aId, t.useId), { ok: true }); const back: any = await passView(svc, biz.slug, a.session); assert.equal(back.today.used.length, 0); assert.equal(back.member.usesLeft, 26);
+  const t2: any = await svc.selfUse(biz.slug, a.session, aId, { item: 'Lunch' }, 'a'); at(T0 + 61_000); assert.equal(((await passView(svc, biz.slug, a.session)) as any).tick.undo, null);
+  await assert.rejects(svc.selfUndo(biz.slug, a.session, aId, t2.useId), (e: any) => e.code === 'TOO_LATE');
+  const staff: any = await svc.redeem('o', biz.id, { memberId: (await svc.members('o', biz.id)).find((x) => x.name === 'Bob')!.id }); assert.equal(staff.ok, true);
+  await assert.rejects(svc.selfUndo(biz.slug, b.session, await cardIdOf(svc, biz.slug, b.session), staff.useId), (e: any) => e.status === 404, 'a staff tick is not the customer\'s to take back');
 });

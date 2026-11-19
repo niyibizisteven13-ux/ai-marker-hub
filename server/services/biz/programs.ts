@@ -69,6 +69,8 @@ export interface Program {
   totalUses?: number;
   /** A 4-digit code the owner gives out (in person, on a poster, by WhatsApp). When set, nobody can join without it. Private: never shown on the public page. */
   joinCode?: string;
+  /** Who ticks the card: the business (scan or code, the default) or the customer themself by tapping today's item on their own card. */
+  checkIn?: 'staff' | 'self';
   active: boolean;
   createdAt: string;
 }
@@ -96,7 +98,7 @@ export interface Member {
   note?: string;
   createdAt: string;
 }
-export interface Use { id: string; memberId: string; date: string; item: string; at: string; by: 'scan' | 'code'; undone?: boolean }
+export interface Use { id: string; memberId: string; date: string; item: string; at: string; by: 'scan' | 'code' | 'self'; undone?: boolean }
 
 /* ---------------------------------------------------------------- dates (Kigali, UTC+2) */
 const KIGALI_MS = 2 * 3600_000;
@@ -139,7 +141,23 @@ export function cleanProgram(input: any, id: string, now: string, prev?: Program
   const code = input?.joinCode === undefined ? prev?.joinCode : String(input.joinCode ?? '').replace(/\D/g, '');
   if (input?.joinCode !== undefined && String(input.joinCode ?? '').trim() !== '' && !/^\d{4}$/.test(code ?? '')) return { error: 'The join code must be 4 digits.' };
   if (code && /^\d{4}$/.test(code)) p.joinCode = code;
+  const ci = input?.checkIn === undefined ? prev?.checkIn : input.checkIn; if (ci === 'self') p.checkIn = 'self';
   return p;
+}
+
+/* ---------------------------------------------------------------- short user names */
+/** A user name is short (3 to 12 letters or digits), lowercase, easy to type on a phone. */
+export const cleanUsername = (v: unknown): string => String(v ?? '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 12);
+export const validUsername = (v: unknown): boolean => /^[a-z0-9]{3,12}$/.test(String(v ?? ''));
+/** Up to three short proposals from a name, none already taken: "Aline Uwase" gives aline, uwase, aline42. */
+export function suggestUsernames(name: unknown, taken: Set<string>, rand: () => number = Math.random): string[] {
+  const parts = String(name ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const bases = [...new Set(parts.map((p) => p.slice(0, 8)).filter((p) => p.length >= 3))]; if (!bases.length) bases.push('user');
+  const out: string[] = []; const add = (u: string) => { if (validUsername(u) && !taken.has(u) && !out.includes(u)) out.push(u); };
+  for (const b of bases) add(b);
+  for (let i = 0; out.length < 3 && i < 60; i++) add(`${bases[i % bases.length].slice(0, 8)}${10 + Math.floor(rand() * 90)}`);
+  for (let n = 10; out.length < 3 && n < 100; n++) add(`${bases[0].slice(0, 8)}${n}`);   // never fewer than three, even with an unlucky draw
+  return out.slice(0, 3);
 }
 
 /** A person joining: name and phone are required (the phone is how the business reaches them and how an online payment is requested). */

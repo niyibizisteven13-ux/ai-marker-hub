@@ -96,11 +96,14 @@ export function createBizRouter(): Router {
   // The customer's own account: sign in with phone and passcode; the session travels in a header (never in the address).
   const sess = (req: Request) => String(req.get('x-pass-session') ?? '');
   r.post('/public/:slug/login', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await svc().login(req.params.slug, req.body ?? {}, who(req))); }));
+  r.get('/public/:slug/username', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await svc().suggestUsernames(req.params.slug, req.query.name, who(req))); }));
   r.post('/public/:slug/logout', run(async (req, res) => res.json(await svc().logout(req.params.slug, sess(req)))));
   r.get('/public/:slug/me', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Robots-Tag', 'noindex'); res.json(await svc().me(req.params.slug, sess(req))); }));
   r.get('/public/:slug/me/card', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Robots-Tag', 'noindex'); res.json(await svc().card(req.params.slug, sess(req), typeof req.query.card === 'string' ? req.query.card : undefined)); }));
   r.post('/public/:slug/me/pay', run(async (req, res) => res.json(await svc().payCard(req.params.slug, sess(req), String(req.body?.cardId ?? ''), req.body ?? {}, who(req)))));
   r.post('/public/:slug/me/claim', run(async (req, res) => res.json(await svc().claimCard(req.params.slug, sess(req), String(req.body?.cardId ?? ''), req.body ?? {}, who(req)))));
+  r.post('/public/:slug/me/tick', run(async (req, res) => res.json(await svc().selfUse(req.params.slug, sess(req), String(req.body?.cardId ?? ''), req.body ?? {}, who(req)))));
+  r.post('/public/:slug/me/untick', run(async (req, res) => res.json(await svc().selfUndo(req.params.slug, sess(req), String(req.body?.cardId ?? ''), String(req.body?.useId ?? '')))));
   r.post('/public/:slug/me/passcode', run(async (req, res) => res.json(await svc().changePasscode(req.params.slug, sess(req), req.body ?? {}))));
   r.post('/public/:slug/report', run(async (req, res) => { await svc().report(req.params.slug, req.body ?? {}, who(req)); res.json({ ok: true }); }));
 
