@@ -1,0 +1,63 @@
+name: Test merged MySEB Android APK
+on:
+  push:
+    branches: [verify/room-android-release-34]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  android-phone:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: room-test
+        ports: ['5432:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 3s --health-retries 15
+    env:
+      DATABASE_URL: postgres://postgres:room-test@127.0.0.1:5432/postgres
+      PORT: 4897
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 22}
+      - name: Start Room server
+        run: |
+          cd myseb/backend
+          npm ci
+          node src/server.js > "$RUNNER_TEMP/room.log" 2>&1 &
+          for i in {1..30}; do curl -fsS http://127.0.0.1:4897/readyz && exit 0; sleep 1; done
+          exit 1
+      - name: Download the APK built from merged main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in {1..45}; do
+            if gh run download 44465870861 --name myseb-android --dir build-apk; then exit 0; fi
+            sleep 15
+          done
+          exit 1
+      - name: Set up emulator permissions and test driver
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          python -m pip install uiautomator2 pillow
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            adb reverse tcp:4897 tcp:4897
+            adb install "$(find build-apk -name MySEB.apk -print -quit)"
+            python myseb/mobile/test-release-room.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-phone-evidence
+          path: phone-proof
