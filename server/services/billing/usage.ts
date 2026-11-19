@@ -5,6 +5,7 @@ import { PLANS, currentGoPacks, planFor, walletBalance, type PlanId, type PlanIn
 import { BATCH_PRICE_FACTOR } from '../ai/batchMode.js';
 import { guardFor } from './aiGuard.js';
 import { markingEntitled } from './entitlements.js';
+import { calibration, familyOf, loadCalibration, type Family } from './costCalibration.js';
 
 /**
  * Usage metering and plan limits. Every AI action is recorded with its real token usage and priced in
@@ -18,20 +19,26 @@ const DAY = 86_400_000;
 const FIVE_HOURS = 5 * 3_600_000;
 export const USD_PER_CREDIT = 0.001;
 
-/** USD per million tokens [input, output]. Unknown models use AI_PRICE_* (conservative defaults). */
-function pricePerMTok(model?: string | null): [number, number] {
-  const m = (model ?? '').toLowerCase();
-  if (m.includes('haiku')) return [0.10, 0.50];
-  if (m.includes('sonnet')) return [2, 10];
-  if (m.includes('opus')) return [4, 20];
-  if (m.includes('fable') || m.includes('mythos')) return [10, 50];
+/** The built-in price table: USD per million tokens [input, output] by model family. Other models use AI_PRICE_* (defaults below). */
+export function tablePrice(family: Family): [number, number] {
+  if (family === 'haiku') return [0.10, 0.50];
+  if (family === 'sonnet') return [2, 10];
+  if (family === 'opus') return [4, 20];
+  if (family === 'fable') return [10, 50];
   const env = (k: string, d: number) => (Number(process.env[k]) >= 0 && process.env[k] ? Number(process.env[k]) : d);
   return [env('AI_PRICE_IN_PER_MTOK', 0.10), env('AI_PRICE_OUT_PER_MTOK', 0.50)];
 }
 
+/** USD per million tokens [input, output]: the admin's calibration for this model family if set, else the table. */
+function pricePerMTok(model?: string | null): [number, number] {
+  const family = familyOf(model);
+  const override = calibration().prices[family];   // set in Admin → Billing → Cost calibration
+  return override ? [override.in, override.out] : tablePrice(family);
+}
+
 export function costUsd(model: string | null | undefined, inputTokens: number, outputTokens: number): number {
   const [i, o] = pricePerMTok(model);
-  return (Math.max(0, inputTokens) * i + Math.max(0, outputTokens) * o) / 1_000_000;
+  return ((Math.max(0, inputTokens) * i + Math.max(0, outputTokens) * o) / 1_000_000) * calibration().multiplier;
 }
 
 /** Credits for a model call; batch (overnight) calls cost half, like the API price. */
@@ -128,6 +135,7 @@ function upsell(plan: PlanInfo): string {
 
 /** Checks the plan limits before an AI action. Totals are compared before the action is charged. */
 export async function checkUsage(userId: string, req: { kind: UsageKind; chars?: number; attachments?: number; minCredits?: number }, now = Date.now()): Promise<GateResult> {
+  await loadCalibration().catch(() => undefined);
   const plan = await planFor(userId);
   const L = plan.limits;
   const next = nextPlan(plan);
@@ -173,6 +181,7 @@ export async function checkUsage(userId: string, req: { kind: UsageKind; chars?:
 export async function recordUsage(userId: string, u: { kind: UsageKind; model?: string | null; inputTokens?: number; outputTokens?: number; channel?: 'web' | 'telegram'; minCredits?: number; /** Sent as an overnight batch (half price). */ batch?: boolean;
   /** Other model calls that belong to the same action (for example reading a script's handwriting before marking it): charged in this one record, so the action counts once. */
   extra?: Array<{ model: string | null; inputTokens: number; outputTokens: number }> }): Promise<number> {
+  await loadCalibration().catch(() => undefined);
   const input = Math.max(0, Math.round(u.inputTokens ?? 0));
   const output = Math.max(0, Math.round(u.outputTokens ?? 0));
   const extra = (u.extra ?? []).filter((x) => x.inputTokens > 0 || x.outputTokens > 0);

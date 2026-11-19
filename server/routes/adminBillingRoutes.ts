@@ -8,7 +8,8 @@ import logger from '../utils/logger.js';
 import { DEFAULT_GO_PACKS, PLANS, SOLD_PLANS, currentGoPacks, planIdForSubscription, subscriptionTypeFor, fxUsdRwf, planFor, refreshBillingSettings, toRwf, walletBalance, type BillingSettings } from '../services/billing/plans.js';
 import { momoConfig, momoHealth, momoMode } from '../services/billing/momo.js';
 import { checkPayment, publicPayment, runRenewalSweep } from '../services/billing/payments.js';
-import { periods, usedTotals } from '../services/billing/usage.js';
+import { periods, tablePrice, usedTotals } from '../services/billing/usage.js';
+import { FAMILIES, MAX_MULTIPLIER, MIN_MULTIPLIER, calibration, familyOf, loadCalibration, saveCalibration, suggestMultiplier } from '../services/billing/costCalibration.js';
 import { looksLikePayRef, normalizePayRef, payRef } from '../services/billing/payRef.js';
 import { guardState, saveGuardSettings } from '../services/billing/aiGuard.js';
 import { DEFAULT_PAUSE_MESSAGE, salesState, setSalesPaused } from '../services/billing/sales.js';
@@ -100,6 +101,55 @@ router.put('/ai-guard', async (req, res) => {
     }).strict().parse(req.body ?? {});
     await saveGuardSettings(body as any, adminId(req));
     res.json({ success: true, ...(await guardState(true)) });
+  } catch (e) { fail(res, e); }
+});
+
+// Cost calibration: makes recorded AI cost match the provider's real prices (credits, the profit guard and margins all depend on it).
+async function calibrationState() {
+  const cal = await loadCalibration(true);
+  const since = periods().month;
+  const rows: Array<{ model: string | null; costUsd: number | null }> = await db.usageRecord.findMany({ where: { createdAt: { gte: since } }, select: { model: true, costUsd: true } }).catch(() => []);
+  const byFamily: Record<string, { costUsd: number; actions: number }> = {};
+  for (const r of rows) {
+    const f = familyOf(r.model); const e = (byFamily[f] ??= { costUsd: 0, actions: 0 });
+    e.costUsd += Number(r.costUsd ?? 0); e.actions++;
+  }
+  const recordedUsd = Object.values(byFamily).reduce((a, x) => a + x.costUsd, 0);
+  return {
+    calibration: cal,
+    families: FAMILIES.map((f) => ({ family: f, table: { in: tablePrice(f)[0], out: tablePrice(f)[1] }, override: cal.prices[f] ?? null })),
+    limits: { min: MIN_MULTIPLIER, max: MAX_MULTIPLIER },
+    month: { since: since.toISOString(), recordedUsd: Math.round(recordedUsd * 10_000) / 10_000, actions: Object.values(byFamily).reduce((a, x) => a + x.actions, 0), byFamily,
+      /** Costs recorded before the last change used the older setting, so a comparison for this month is approximate. */
+      changedThisMonth: !!cal.changedAt && new Date(cal.changedAt) >= since },
+  };
+}
+router.get('/cost-calibration', async (_req, res) => {
+  try { res.json({ success: true, ...(await calibrationState()) }); } catch (e) { fail(res, e); }
+});
+const modelPriceSchema = z.object({ in: z.number().min(0).max(1000), out: z.number().min(0).max(1000) });
+router.put('/cost-calibration', async (req, res) => {
+  try {
+    const body = z.object({
+      multiplier: z.number().min(MIN_MULTIPLIER).max(MAX_MULTIPLIER).optional(),
+      prices: z.object(Object.fromEntries(FAMILIES.map((f) => [f, modelPriceSchema.nullable().optional()]))).strict().optional(),
+    }).strict().parse(req.body ?? {});
+    await saveCalibration(body as any, adminId(req));
+    logger.info(`AI cost calibration changed by ${adminId(req)}: multiplier ${calibration().multiplier}`);
+    res.json({ success: true, ...(await calibrationState()) });
+  } catch (e) { fail(res, e); }
+});
+router.post('/cost-calibration/reconcile', async (req, res) => {
+  try {
+    const { invoiceUsd, apply } = z.object({ invoiceUsd: z.number().positive().max(10_000_000), apply: z.boolean().optional() }).strict().parse(req.body ?? {});
+    const st = await calibrationState();
+    const suggestion = suggestMultiplier({ invoiceUsd, recordedUsd: st.month.recordedUsd, currentMultiplier: st.calibration.multiplier });
+    if (apply && suggestion.ratio !== null) {
+      await saveCalibration({ multiplier: suggestion.suggested }, adminId(req));
+      logger.info(`AI cost calibration applied from invoice by ${adminId(req)}: multiplier ${suggestion.suggested}`);
+      return res.json({ success: true, applied: true, suggestion, ...(await calibrationState()) });
+    }
+    res.json({ success: true, applied: false, suggestion, ...st });
   } catch (e) { fail(res, e); }
 });
 

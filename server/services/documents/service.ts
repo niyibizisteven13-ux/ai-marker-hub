@@ -148,9 +148,9 @@ export function createDocumentService(deps: DocumentDeps) {
    * derived from owner + content hash + pipeline version + settings, so an unchanged script is never
    * recognised twice and a retried job overwrites its own record.
    */
-  async function recognizeCached(userId: string, file: { buffer: Buffer; name: string; sourceFileId?: string }, opts: { languageHint?: string; tiling?: 'auto' | 'always' | 'off'; crossCheck?: boolean }, ctx: { signal?: AbortSignal; progress?: (stage: string, percent: number) => Promise<void> } = {}) {
+  async function recognizeCached(userId: string, file: { buffer: Buffer; name: string; sourceFileId?: string }, opts: { languageHint?: string; tiling?: 'auto' | 'always' | 'off'; crossCheck?: boolean; secondRead?: 'off' | 'auto' | 'always' }, ctx: { signal?: AbortSignal; progress?: (stage: string, percent: number) => Promise<void> } = {}) {
     const sha = createHash('sha256').update(file.buffer).digest('hex');
-    const key = createHash('sha256').update(JSON.stringify({ userId, sha, v: PIPELINE_VERSION, opts: { languageHint: opts.languageHint ?? null, tiling: opts.tiling ?? null, crossCheck: opts.crossCheck ?? null } })).digest('hex');
+    const key = createHash('sha256').update(JSON.stringify({ userId, sha, v: PIPELINE_VERSION, opts: { languageHint: opts.languageHint ?? null, tiling: opts.tiling ?? null, crossCheck: opts.crossCheck ?? null, secondRead: opts.secondRead ?? null } })).digest('hex');
     const id = `${key.slice(0, 8)}-${key.slice(8, 12)}-4${key.slice(13, 16)}-8${key.slice(17, 20)}-${key.slice(20, 32)}`;
     const existing = await deps.store.get(id, userId);
     if (existing) return { record: existing, cached: true, key };

@@ -30,3 +30,21 @@ The administrator types the code into **Admin → Billing → Users** (search ac
 button (days are asked) or adds credits (`POST /api/admin/billing/users/:id/plan` and `/credits`). The code is worked out from the account id (`payRef`), so it never
 changes and nothing is stored; it identifies an account to the administrator and opens nothing.
 When the MTN keys are added the page switches to the online prompt by itself.
+
+## Cost calibration (Admin → Billing → Cost calibration)
+
+A credit is $0.001 of model cost, worked out from a built-in price table (USD per million tokens, by model family: haiku, sonnet, opus,
+fable, other; see `tablePrice` in `server/services/billing/usage.ts`). If your provider's real prices differ, every credit, the profit guard
+and every margin figure are off by the same factor, and nothing warns you. The calibration fixes that without a code change:
+
+- **Match the invoice**: enter what the provider charged this month so far. The page compares it with the cost recorded for the month and
+  offers the multiplier that makes new usage match (it replaces the current multiplier, it does not stack on it). Overhead the invoice
+  includes (web searches, retries, failed calls) ends up in the multiplier, which is the point: it is the real cost per recorded credit.
+- **Set by hand**: a multiplier (0.1–50) on all costs, and/or the real price per million tokens for one model family.
+- A change applies to new usage within a minute (cached for 60 s on each server). Costs already recorded keep the figure they were recorded
+  with, so a comparison for the month in which you change it is approximate; the page says so.
+- A multiplier above 1 means each action uses more credits, so users reach their plan limits sooner. That is the correct effect when the
+  table was too low; check the plans' credit sizes afterwards (Admin → Billing → Plans) and the profit guard's figures.
+
+Check the multiplier once a month against the provider's invoice. API: `GET/PUT /api/admin/billing/cost-calibration`,
+`POST /api/admin/billing/cost-calibration/reconcile` (`{ invoiceUsd, apply? }`).
