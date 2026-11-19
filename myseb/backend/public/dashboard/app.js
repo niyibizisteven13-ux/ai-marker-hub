@@ -48,15 +48,16 @@ $('examUrl').addEventListener('input', () => {
   }, 450);
 });
 
+$('newExam').elements.windowsLock.onchange = (e) => { $('winBlockBox').hidden = e.target.value !== 'strict'; };
 $('newExam').onsubmit = async (e) => {
   e.preventDefault();
   const f = new FormData(e.target);
   try {
     await api('/exams', { method: 'POST', body: {
-      title: f.get('title'), examUrl: f.get('examUrl'), durationMinutes: f.get('durationMinutes'), leaveAction: f.get('leaveAction'),
+      title: f.get('title'), examUrl: f.get('examUrl'), durationMinutes: f.get('durationMinutes'), leaveAction: f.get('leaveAction'), windowsLock: f.get('windowsLock'), winBlock: f.getAll('winBlock'),
       requireMyseb: f.has('requireMyseb'), allowExtension: f.has('allowExtension'),
       ...(f.get('examUrl') ? { extraOrigins: String(f.get('extraOrigins') || ''), doneContains: String(f.get('doneContains') || '').split('\n').filter(Boolean), keyParam: String(f.get('keyParam') || ''), sendKey: f.has('sendKey') } : {}) } });
-    e.target.reset(); $('formInfo').hidden = true; loadExams();
+    e.target.reset(); $('winBlockBox').hidden = true; $('formInfo').hidden = true; loadExams();
   } catch (err) { alert(err.message); }
 };
 
@@ -72,12 +73,17 @@ async function loadExams() {
     const mon = el('button', { textContent: 'Live monitor' }); mon.onclick = () => monitor(ex);
     const end = el('button', { className: 'danger', textContent: 'End exam', disabled: ex.status === 'ended' });
     end.onclick = async () => { if (confirm('End "' + ex.title + '" for everyone? Codes stop working.')) { await api('/exams/' + ex.id + '/end', { method: 'POST' }); loadExams(); } };
+    const win = el('select', { title: 'Windows computers: standard = full-screen; strict also turns off Task Manager, the Windows key, the lock screen and snipping tools while the exam runs' },
+      el('option', { value: 'standard', textContent: 'Windows: standard' }), el('option', { value: 'strict', textContent: 'Windows: strict lock' }));
+    win.value = ex.windows_lock === 'strict' ? 'strict' : 'standard';
+    win.disabled = ex.status === 'ended';
+    win.onchange = async () => { try { await api('/exams/' + ex.id, { method: 'PATCH', body: { windowsLock: win.value } }); } catch (e) { alert(e.message); win.value = win.value === 'strict' ? 'standard' : 'strict'; } };
     const keys = ex.form_provider ? el('button', { textContent: 'Exam keys (CSV)', title: 'Each student\'s key and whether they submitted inside MySEB: match it with the form\'s responses' }) : null;
     if (keys) keys.onclick = () => downloadKeys(ex);
     box.append(el('div', { className: 'exam' },
       el('div', { className: 't' }, el('b', { textContent: ex.title }),
         el('span', { className: 'muted', textContent: `${ex.students} student(s) · ${ex.duration_minutes} min · on leave: ${ex.leave_action} · ${ex.status}` })),
-      el('label', { className: 'check' }, req, 'Require MySEB'),
+      el('label', { className: 'check' }, req, 'Require MySEB'), win,
       el('div', { className: 'row-actions' }, gen, mon, ...(keys ? [keys] : []), end)));
   }
 }

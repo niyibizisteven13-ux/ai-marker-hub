@@ -11,7 +11,7 @@ export const VIOLATION_TYPES = new Set([
   'screenshot', 'copy', 'paste', 'cut', 'devtools', 'close_attempt', 'shortcut', 'heartbeat_lost', 'token_misuse',
   'extra_display', 'forbidden_app', 'screen_share_stopped',
   'face_missing', 'camera_off', 'multiple_faces', 'face_check_unavailable',
-  'virtual_machine', 'remote_session',   // the desktop app is inside a virtual machine, or is being used through a remote desktop session
+  'virtual_machine', 'remote_session', 'lock_unavailable',   // the desktop app is inside a virtual machine, or is being used through a remote desktop session
   'blocked_navigation',   // the student tried to go to a site the exam does not allow (recorded; the page simply does not open)
 ]);
 /** In a browser with strict rules (the default), these end the test on the spot: nothing is paused for the lecturer to forgive. */

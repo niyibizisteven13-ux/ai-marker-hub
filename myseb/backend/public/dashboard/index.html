@@ -39,6 +39,16 @@
       <label>Minutes per student <input name="durationMinutes" type="number" min="1" max="600" value="60"></label>
       <label>If a student leaves
         <select name="leaveAction"><option value="pause">Pause until I resume</option><option value="record">Only record it</option><option value="end">End their exam</option></select></label>
+      <label>Windows computers
+        <select name="windowsLock"><option value="standard">Standard: full-screen, nothing else can be opened</option><option value="strict">Strict: also turn off Task Manager, Windows key, lock screen and snipping tools during the exam</option></select></label>
+      <fieldset class="winblock" id="winBlockBox" hidden>
+        <legend>Strict lock turns off</legend>
+        <label class="check"><input type="checkbox" name="winBlock" value="taskmgr" checked> Task Manager</label>
+        <label class="check"><input type="checkbox" name="winBlock" value="winkey" checked> Windows key and its shortcuts</label>
+        <label class="check"><input type="checkbox" name="winBlock" value="lock" checked> Lock screen (Win+L)</label>
+        <label class="check"><input type="checkbox" name="winBlock" value="snip" checked> Snipping tools (flagged if opened)</label>
+        <p class="muted">Applies to every exam type: Google Forms, other form tools and your own site. Put back automatically when the exam ends or MySEB closes. Windows only.</p>
+      </fieldset>
       <label class="check"><input type="checkbox" name="requireMyseb" checked> Require MySEB</label>
       <label class="check"><input type="checkbox" name="allowExtension"> Also allow Chrome extension (low security)</label>
       <button class="primary">Create exam</button>

@@ -132,3 +132,8 @@ ALTER TABLE exams ADD COLUMN IF NOT EXISTS done_patterns   text[] NOT NULL DEFAU
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS key_param       text;
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS send_key        boolean NOT NULL DEFAULT true;   -- the secret header goes only to sites that check it (not to Google)
 ALTER TABLE exams ADD COLUMN IF NOT EXISTS form_provider   text;
+
+-- Windows desktop lock: 'standard' = full-screen kiosk (today's behaviour); 'strict' adds Windows policies for the length of the exam
+-- (no Task Manager, no Windows key, no lock screen, no snipping tools). win_block says which of those the lecturer wants.
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS windows_lock text NOT NULL DEFAULT 'standard';
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS win_block text[] NOT NULL DEFAULT '{taskmgr,winkey,lock,snip}';

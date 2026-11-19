@@ -85,8 +85,12 @@ export function withKey(url, param, key) {
 export const isDone = (url, done) => { const s = String(url ?? ''); return (done ?? []).some((d) => d && s.includes(d)); };
 
 /** What the student's app needs to lock itself to this exam. */
+export const WIN_BLOCKS = ['taskmgr', 'winkey', 'lock', 'snip'];
+/** Only known Windows lock choices get through. */
+export const cleanWinBlock = (v) => (Array.isArray(v) ? [...new Set(v.filter((x) => WIN_BLOCKS.includes(x)))] : null);
 export function lockFor(row) {
   const examOrigin = cleanOrigin(row.exam_url) ?? (() => { try { return new URL(row.exam_url).origin; } catch { return null; } })();
   const origins = [...new Set([examOrigin, ...(row.allowed_origins ?? [])].filter(Boolean))];
-  return { origins, sendKey: row.send_key !== false, done: row.done_patterns ?? [], kind: row.send_key === false ? 'form' : 'site', provider: row.form_provider ?? null };
+  return { origins, sendKey: row.send_key !== false, done: row.done_patterns ?? [], kind: row.send_key === false ? 'form' : 'site', provider: row.form_provider ?? null,
+    windows: { level: row.windows_lock === 'strict' ? 'strict' : 'standard', block: cleanWinBlock(row.win_block) ?? WIN_BLOCKS } };
 }
