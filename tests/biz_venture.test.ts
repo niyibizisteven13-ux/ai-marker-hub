@@ -74,3 +74,35 @@ test('the assistant is taught the venture, programs, report and badge skills, an
   for (const m of ['I want a page for my venture, it has three products', 'create a meal card for students', 'give me the closing report', 'how do I get the verified badge', 'set up my 4biz page', 'end the program please', 'show the check-in code']) assert.equal(needsPlatformTools(m), true, m);
   for (const m of ['explain photosynthesis', 'what is the capital of Rwanda', 'help me write a poem']) assert.equal(needsPlatformTools(m), false, m);
 });
+
+import sharp from 'sharp';
+import { artDirectory, fourbizArt } from '../server/services/biz/venture.js';
+test('the brand art is there and the right size: the Bwenge logo, a wide banner, and one picture for each product', async () => {
+  const dir = artDirectory(); assert.ok(dir, 'the images are committed with the code'); const art = fourbizArt(dir)!;
+  const dims = async (a?: { data: Buffer }) => { const m = await sharp(a!.data).metadata(); return `${m.width}x${m.height} ${m.format}`; };
+  assert.equal(await dims(art.logo), '512x512 png'); assert.equal(await dims(art.cover), '2400x600 jpeg'); for (const n of ['MySEB', 'Bwenge AI', 'Bwenge4biz']) assert.equal(await dims(art.products![n]), '1200x900 jpeg', n);
+  for (const a of [art.logo!, art.cover!, ...Object.values(art.products!)]) assert.ok(a.data.length > 5_000 && a.data.length < 1_000_000, `${a.name} is a sensible size`);
+  assert.equal(fourbizArt(null), null, 'no folder, no art');
+});
+
+test('ensureVenture puts the logo, the banner and a picture on every product, keeps them out of the gallery, never uploads twice and drops an old version of the design', async () => {
+  const { svc } = make(); const r = await ensureVenture(svc, 'admin-1', {}, SITE); assert.equal(r.pictures, 5);
+  const biz = (await svc.list('admin-1'))[0]; assert.equal(biz.media.length, 5); assert.ok(biz.logoId && biz.coverId && biz.logoId !== biz.coverId);
+  assert.equal(biz.media.find((m) => m.id === biz.logoId)!.mime, 'image/png'); assert.equal(biz.media.find((m) => m.id === biz.coverId)!.name, '4biz-banner-v1.jpg');
+  assert.ok(biz.products.every((p) => p.mediaId && biz.media.some((m) => m.id === p.mediaId)), 'every product has a picture');
+  const pub: any = await svc.publicBySlug('4biz'); assert.ok(pub.logo && pub.cover, 'logo and banner are on the page'); assert.ok(pub.products.every((p: any) => p.media), 'products show their pictures'); assert.equal(pub.gallery.length, 0, 'the art is not repeated in the photo gallery');
+  const ids = biz.media.map((m) => m.id).sort(); await ensureVenture(svc, 'admin-1', {}, SITE); const again = (await svc.list('admin-1'))[0]; assert.deepEqual(again.media.map((m) => m.id).sort(), ids, 'a second run uploads nothing new');
+  // an owner's own photo is untouched, and an older version of the design is replaced
+  const own = await svc.addMedia('admin-1', biz.id, { name: 'team.jpg', data: await sharp({ create: { width: 40, height: 40, channels: 3, background: '#888' } }).jpeg().toBuffer() }); const old = await svc.addMedia('admin-1', biz.id, { name: '4biz-banner-v0.jpg', data: await sharp({ create: { width: 40, height: 40, channels: 3, background: '#444' } }).jpeg().toBuffer(), gallery: false });
+  await ensureVenture(svc, 'admin-1', {}, SITE); const names = (await svc.list('admin-1'))[0].media.map((m) => m.name); assert.ok(names.includes('team.jpg') && !names.includes('4biz-banner-v0.jpg'), names.join(', ')); void own; void old;
+  assert.equal(((await svc.publicBySlug('4biz')) as any).gallery.length, 1, 'the owner\'s own photo still shows in the gallery');
+});
+
+import { ensureVenturePage } from '../server/services/biz/venture.js';
+test('without the image files the page is still made, just without pictures; and any venture can bring its own pictures', async () => {
+  const { svc } = make(); const spec = { ...fourbizSpecForTest(), art: null }; const r = await ensureVenturePage(svc, 'a', spec as any, { publish: true }, SITE); assert.equal(r.pictures, 0); assert.equal((await svc.list('a'))[0].media.length, 0);
+  const png = await sharp({ create: { width: 64, height: 64, channels: 3, background: '#0B1420' } }).png().toBuffer();
+  const r2 = await ensureVenturePage(svc, 'b', { name: 'Own Venture', slug: 'ownv', tagline: 'x', about: 'y', products: [{ name: 'Thing' }], art: { logo: { name: 'logo.png', data: png }, products: { Thing: { name: 'thing.png', data: png } } } }, {}, SITE); assert.equal(r2.pictures, 2);
+});
+import { fourbizSpec } from '../server/services/biz/venture.js';
+const fourbizSpecForTest = () => fourbizSpec(SITE);

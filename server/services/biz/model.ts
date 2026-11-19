@@ -27,7 +27,7 @@ export type Day = (typeof DAYS)[number];
 export interface Hours { day: Day; open: string; close: string; closed?: boolean }
 export interface Product { id: string; name: string; price: number | null; unit?: string; description?: string; mediaId?: string; available: boolean; hidden?: boolean; /** Private: units in stock and the level that raises a low-stock alert. Never in publicView. */ stock?: number; lowAt?: number }
 export type MediaKind = 'image' | 'video';
-export interface Media { id: string; kind: MediaKind; mime: string; size: number; name: string; caption?: string; createdAt: string; visible: boolean; /** 'feed': uploaded for an update post; not in the gallery, public only while a post shows it. */ scope?: 'feed' }
+export interface Media { id: string; /** false: used as the logo, the banner or a product picture only, so it is left out of the page's photo gallery. */ gallery?: false; kind: MediaKind; mime: string; size: number; name: string; caption?: string; createdAt: string; visible: boolean; /** 'feed': uploaded for an update post; not in the gallery, public only while a post shows it. */ scope?: 'feed' }
 /** An update the owner posted to the public feed, like an Instagram post: a caption and up to ten photos or short videos, optionally tagged with a product. */
 export interface Post { id: string; at: string; text: string; mediaIds: string[]; pinned?: boolean; /** The product this post sells: gives the post an Order button. */ productId?: string }
 export interface PublicSection { id: string; type: Section['type']; title: string; body?: string; items?: Section['items']; button?: string; form?: { fields: Array<{ key: string; label: string; type: string; options?: string[]; required?: boolean }> } }
@@ -199,7 +199,7 @@ export function publicView(b: Business): PublicBusiness {
   const out: PublicBusiness = {
     slug: b.slug, name: b.name, category: b.category, tagline: b.tagline, about: b.about, theme: b.theme, contact, hours: b.hours.map((h) => ({ ...h })),
     products: b.products.filter((p) => !p.hidden).map((p) => ({ id: p.id, name: p.name, price: p.price, ...(p.unit ? { unit: p.unit } : {}), ...(p.description ? { description: p.description } : {}), ...(pm(p.mediaId) ? { media: pm(p.mediaId) } : {}), available: p.available })),
-    gallery: b.media.filter((m) => m.visible && m.id !== b.logoId && m.id !== b.coverId).map((m) => pm(m.id)!),
+    gallery: b.media.filter((m) => m.visible && m.gallery !== false && m.id !== b.logoId && m.id !== b.coverId).map((m) => pm(m.id)!),
     updatedAt: b.updatedAt,
   };
   if (b.programText && Object.keys(b.programText).length) out.programText = { ...b.programText };

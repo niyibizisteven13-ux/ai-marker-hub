@@ -211,7 +211,7 @@ export function createBizService(deps: Deps) {
     },
 
     /* photos and videos */
-    async addMedia(ownerId: string, id: string, file: { name: string; data: Buffer; caption?: string; scope?: unknown }): Promise<Business['media'][number]> {
+    async addMedia(ownerId: string, id: string, file: { name: string; data: Buffer; caption?: string; scope?: unknown; gallery?: boolean }): Promise<Business['media'][number]> {
       const b = await mine(ownerId, id); const lim = await limits(ownerId);
       const kind = sniff(file.data); if (!kind) throw new BizError('Use a JPEG, PNG, WebP or GIF photo, or an MP4 or WebM video.', 415, 'TYPE');
       if (file.data.length > maxBytesFor(kind.kind)) throw new BizError(kind.kind === 'image' ? 'A photo can be up to 6 MB.' : 'A video can be up to 25 MB. Record a shorter clip.', 413, 'TOO_LARGE');
@@ -225,6 +225,7 @@ export function createBizService(deps: Deps) {
       const m: Business['media'][number] = { id: randomUUID(), kind: kind.kind, mime: kind.mime, size: file.data.length, name: clean(file.name, 80) || `${kind.kind}.${kind.ext}`, ...(clean(file.caption, 120) ? { caption: clean(file.caption, 120) } : {}), createdAt: iso(), visible: true };
       await media.put(b.id, m.id, kind.ext, file.data);
       if (file.scope === 'feed') { m.visible = false; m.scope = 'feed'; }
+      if (file.gallery === false && file.scope !== 'feed') m.gallery = false;
       b.media.push(m); if (kind.kind === 'image' && !b.coverId && m.scope !== 'feed') b.coverId = m.id; await save(b); return m;
     },
     async updateMedia(ownerId: string, id: string, mediaId: string, patch: { caption?: unknown; visible?: unknown }) {

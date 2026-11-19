@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { BizService } from './service.js';
 
 /**
@@ -63,14 +66,36 @@ export interface VentureSpec {
   whatsapp?: string; website?: string;
   /** Kinyarwanda words, when the owner gave them. */
   rw?: { tagline?: string; about?: string; products?: Record<string, string> };
+  /** The logo, the banner and a picture for each product. */
+  art?: VentureArt | null;
 }
+/** A picture for the page: its file name (with a version, so a new design replaces the old one) and its bytes. */
+export interface Art { name: string; data: Buffer }
+export interface VentureArt { logo?: Art; cover?: Art; /** By product name. */ products?: Record<string, Art>; /** Pictures whose name starts with this and are no longer wanted are removed (an old version of the design). */ prefix?: string }
+
+/** Where the finished images live (drawn by scripts/venture-art.mjs). Looks next to the working folder first, then next to the code. */
+export function artDirectory(): string | null {
+  const here = (rel: string) => { try { return fileURLToPath(new URL(rel, import.meta.url)); } catch { return ''; } };
+  for (const d of [join(process.cwd(), 'server/assets/venture'), here('../../assets/venture'), here('../server/assets/venture')]) if (d && existsSync(join(d, 'banner.jpg'))) return d;
+  return null;
+}
+const ART_VERSION = 'v1';
+/** The 4biz images: the Bwenge logo, a banner and one picture for each product. Null when the files are not there (the page is still made, without pictures). */
+export function fourbizArt(dir: string | null = artDirectory()): VentureArt | null {
+  if (!dir) return null;
+  const read = (file: string, name: string): Art | undefined => { try { return { name: `4biz-${name}-${ART_VERSION}${file.slice(file.lastIndexOf('.'))}`, data: readFileSync(join(dir, file)) }; } catch { return undefined; } };
+  const logo = read('logo.png', 'logo'); const cover = read('banner.jpg', 'banner');
+  const products: Record<string, Art> = {}; for (const [n, f, k] of [['MySEB', 'myseb.jpg', 'myseb'], ['Bwenge AI', 'bwenge-ai.jpg', 'bwenge-ai'], ['Bwenge4biz', 'bwenge4biz.jpg', 'bwenge4biz']] as const) { const a = read(f, k); if (a) products[n] = a; }
+  return { ...(logo ? { logo } : {}), ...(cover ? { cover } : {}), products, prefix: '4biz-' };
+}
+
 export interface VentureDeps { grantBadge?: (ownerId: string) => Promise<void>; /** The founder's WhatsApp number, shown as the contact. */ whatsapp?: string; /** Publish the page now (the 4biz example does; Bwenge AI only when the owner said so). */ publish?: boolean }
-export interface VentureResult { url: string; created: boolean; products: number; sections: number; verified: boolean; published: boolean }
+export interface VentureResult { url: string; created: boolean; products: number; sections: number; verified: boolean; published: boolean; pictures: number }
 
 /** The 4biz page as a spec. */
 export const fourbizSpec = (site: string = SITE()): VentureSpec => { const v = venturePage(site); return {
   name: v.name, slug: VENTURE_SLUG, category: v.category, theme: v.theme, tagline: v.tagline, about: v.about, website: site, products: v.products,
-  helps: v.sections[1].items!.map((x) => ({ title: x.title, text: x.text })), links: v.sections[0].items!.map((x) => ({ title: x.title, text: x.text, url: x.url })), faq: v.sections[2].items!.map((x) => ({ title: x.title, text: x.text! })), rw: v.rw,
+  helps: v.sections[1].items!.map((x) => ({ title: x.title, text: x.text })), links: v.sections[0].items!.map((x) => ({ title: x.title, text: x.text, url: x.url })), faq: v.sections[2].items!.map((x) => ({ title: x.title, text: x.text! })), rw: v.rw, art: fourbizArt(),
 }; };
 
 /**
@@ -90,6 +115,17 @@ export async function ensureVenturePage(svc: BizService, ownerId: string, spec: 
     if (existing) { await svc.updateProduct(ownerId, biz.id, existing.id, { description: p.description ?? '', available: true, hidden: false, ...(p.priceRwf !== undefined ? { price: p.priceRwf } : {}) }); productIds[p.name] = existing.id; }
     else productIds[p.name] = (await svc.addProduct(ownerId, biz.id, { name: p.name, price: p.priceRwf ?? null, description: p.description })).id;
   }
+  // Pictures: the logo, the banner and one for each product. An image already uploaded under the same name is reused; an old version of the design is removed.
+  let pictures = 0;
+  if (spec.art) {
+    const art = spec.art; const wanted = [art.logo, art.cover, ...Object.values(art.products ?? {})].filter((a): a is Art => !!a);
+    const mediaOf = async () => (await svc.list(ownerId)).find((b) => b.id === biz!.id)!.media;
+    if (art.prefix) for (const m of await mediaOf()) if (m.name.startsWith(art.prefix) && !wanted.some((a) => a.name === m.name)) await svc.removeMedia(ownerId, biz.id, m.id);
+    const put = async (a: Art) => { const have = (await mediaOf()).find((m) => m.name === a.name); if (have) return have.id; return (await svc.addMedia(ownerId, biz!.id, { name: a.name, data: a.data, gallery: false })).id; };
+    const patch: Record<string, unknown> = {}; if (art.logo) { patch.logoId = await put(art.logo); pictures++; } if (art.cover) { patch.coverId = await put(art.cover); pictures++; }
+    if (Object.keys(patch).length) await svc.update(ownerId, biz.id, patch);
+    for (const [n, a] of Object.entries(art.products ?? {})) { if (!productIds[n]) continue; await svc.updateProduct(ownerId, biz.id, productIds[n], { mediaId: await put(a) }); pictures++; }
+  }
   let sections = 0;
   if (spec.links?.length) { await svc.saveSection(ownerId, biz.id, { id: 'Our products', type: 'links', title: 'Our products', items: spec.links }); sections++; }
   if (spec.helps?.length) { await svc.saveSection(ownerId, biz.id, { id: 'What we help with', type: 'list', title: 'What we help with', items: spec.helps }); sections++; }
@@ -97,7 +133,7 @@ export async function ensureVenturePage(svc: BizService, ownerId: string, spec: 
   if (spec.rw && (spec.rw.tagline || spec.rw.about || spec.rw.products)) await svc.setTranslation(ownerId, biz.id, 'rw', { ...(spec.rw.tagline ? { tagline: spec.rw.tagline } : {}), ...(spec.rw.about ? { about: spec.rw.about } : {}), ...(spec.rw.products ? { products: Object.fromEntries(Object.entries(spec.rw.products).filter(([n]) => productIds[n]).map(([n, d]) => [productIds[n], { name: n, description: d }])) } : {}) });
   let published = false; if (deps.publish) { await svc.setPublished(ownerId, biz.id, true); published = true; }
   let verified = false; if (deps.grantBadge) { await deps.grantBadge(ownerId); verified = true; }
-  return { url: `${site}/b/${(await svc.list(ownerId)).find((b) => b.id === biz!.id)!.slug}`, created, products: (spec.products ?? []).length, sections, verified, published };
+  return { url: `${site}/b/${(await svc.list(ownerId)).find((b) => b.id === biz!.id)!.slug}`, created, products: (spec.products ?? []).length, sections, verified, published, pictures };
 }
 
 /** Makes (or refreshes) the 4biz page for this account and publishes it; optionally gives the owner the verified badge. Safe to run again. */
