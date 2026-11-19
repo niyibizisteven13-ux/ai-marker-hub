@@ -67,6 +67,12 @@ class _ManagedRoomScreenState extends State<ManagedRoomScreen> {
     final guest = WebViewController();
     await guest.setJavaScriptMode(JavaScriptMode.unrestricted);
     await guest.setNavigationDelegate(NavigationDelegate(
+      onPageFinished: (raw) {
+        final uri = Uri.tryParse(raw);
+        if (mounted && current == generation && allowed(uri)) {
+          hub.runJavaScript('window.roomSiteChanged(${jsonEncode(uri!.origin)})');
+        }
+      },
       onNavigationRequest: (r) => allowed(Uri.tryParse(r.url))
           ? NavigationDecision.navigate : NavigationDecision.prevent,
       onWebResourceError: (e) {

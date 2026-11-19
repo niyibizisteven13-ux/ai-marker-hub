@@ -78,6 +78,10 @@ ipcMain.handle('room-policy', (event, p) => {
   room.win.contentView.addChildView(view);
   resize(room);
   const wc = view.webContents;
+  wc.on('did-navigate', (_event, url) => {
+    if (room.view === view && permitted(url, p))
+      room.win.webContents.send('room-site', new URL(url).origin);
+  });
   wc.setWindowOpenHandler(({ url }) => {
     if (allowed(url)) wc.loadURL(url).catch(() => {});
     return { action: 'deny' };

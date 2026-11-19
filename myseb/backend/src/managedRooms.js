@@ -61,12 +61,10 @@ managedRooms.post(
       minutes < 1 ||
       minutes > 1440
     )
-      return res
-        .status(400)
-        .json({
-          error:
-            'Check the room name, HTTPS sites, start time and duration (1–1440 minutes).'
-        });
+      return res.status(400).json({
+        error:
+          'Check the room name, HTTPS sites, start time and duration (1–1440 minutes).'
+      });
     const code = 'RM-' + randomBytes(6).toString('hex').toUpperCase(),
       host = newToken();
     await q(
@@ -107,7 +105,7 @@ managedRooms.post(
 managedRooms.post(
   '/:code/sync',
   asyncRoute(async (req, res) => {
-    const { applied, request } = req.body || {};
+    const { applied, request, site } = req.body || {};
     if (
       !Number.isInteger(applied) ||
       applied < 0 ||
@@ -117,10 +115,17 @@ managedRooms.post(
       return res.sendStatus(400);
     const { rows } = await q(
       `UPDATE managed_members m SET seen=now(),applied=$3,
+    current_site=CASE WHEN NOT r.closed AND NOT m.released AND now() BETWEEN r.starts_at AND r.ends_at THEN $5 ELSE NULL END,
     request=COALESCE($4,m.request) FROM managed_rooms r
     WHERE m.room=$1 AND m.token_hash=$2 AND r.code=m.room
     RETURNING r.policy,r.revision,r.title,r.starts_at,r.ends_at,r.closed,m.released,m.request,m.reply,now() AS server_time`,
-      [req.params.code, key(req), applied, request ?? null]
+      [
+        req.params.code,
+        key(req),
+        applied,
+        request ?? null,
+        address(site)?.origin ?? null
+      ]
     );
     if (!rows.length)
       return res.status(404).json({ error: 'Session unavailable.' });
@@ -144,7 +149,7 @@ managedRooms.get(
   '/:code',
   asyncRoute(async (req, res) => {
     const { rows } = await q(
-      `SELECT id,name,applied,request,released,seen,
+      `SELECT id,name,current_site,applied,request,released,seen,
     seen>now()-interval '30 seconds' AND NOT released AS connected FROM managed_members WHERE room=$1 ORDER BY name,id`,
       [req.params.code]
     );

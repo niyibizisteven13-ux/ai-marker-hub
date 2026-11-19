@@ -123,7 +123,17 @@ test('one dashboard controls 500 distinct laptop sessions and keeps legacy entry
       assert.equal(received.status, 200);
     })
   );
+  await call(
+    code + '/sync',
+    'POST',
+    { applied: 2, site: 'https://training.example.org/path?private=1' },
+    keys[0]
+  );
   const state = await get();
+  assert.equal(
+    state.members.find((m) => m.name === 'Laptop 0').current_site,
+    'https://training.example.org'
+  );
   assert.equal(
     state.members.filter((m) => m.connected && m.applied === 2).length,
     500

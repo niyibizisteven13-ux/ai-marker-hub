@@ -16,6 +16,7 @@ let session = JSON.parse(
     localStorage.getItem('managedHost') ||
     'null'
 );
+let currentSite = null;
 let snapshot,
   page = 0,
   timer,
@@ -118,7 +119,9 @@ function members() {
             : !m.connected
               ? 'Reconnecting'
               : m.applied === snapshot.revision
-                ? 'Policy applied'
+                ? m.current_site
+                  ? new URL(m.current_site).host + ' · Policy applied'
+                  : 'Policy applied'
                 : 'Waiting for policy'
         )
       )
@@ -218,6 +221,7 @@ function leave(message) {
   clearTimeout(timer);
   save(null);
   applied = 0;
+  currentSite = null;
   pendingRequest = undefined;
   document.body.classList.remove('viewing');
   screen('home');
@@ -225,7 +229,11 @@ function leave(message) {
 }
 async function participantSync() {
   const request = pendingRequest;
-  const s = await api(session.code + '/sync', 'POST', { applied, request });
+  const s = await api(session.code + '/sync', 'POST', {
+    applied,
+    request,
+    site: currentSite
+  });
   if (request === pendingRequest) pendingRequest = undefined;
   if (
     s.closed ||
@@ -247,6 +255,7 @@ async function participantSync() {
   $('help').textContent =
     s.request === 'help' ? 'Help requested' : 'Ask for help';
   if (!waiting && applied !== s.revision) {
+    currentSite = null;
     await native.apply({
       ...s.policy,
       revision: s.revision,
@@ -435,3 +444,8 @@ $('addActivity').onsubmit = handle(async (e) => {
   e.target.elements.mode.onchange();
   await hostRefresh();
 });
+
+window.roomSiteChanged = (site) => {
+  currentSite = site;
+};
+window.roomDesktop?.onSite?.(window.roomSiteChanged);

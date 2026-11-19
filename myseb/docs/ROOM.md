@@ -8,7 +8,7 @@ Choose one HTTPS site, selected sites, or open HTTPS browsing. An allowed site i
 
 Save additional links in the activity library. Publishing new settings or launching a saved activity replaces the active page on connected clients. Tell participants to submit or save their work first. Third-party services retain their own submission and recovery behavior.
 
-Participants see the monitoring notice before joining. Their device polls about every 4–6 seconds, reports the last applied policy revision, and retains the active navigation restriction if the server becomes unreachable. The dashboard marks a session as reconnecting after 30 seconds without a report. Acknowledgement means the viewer applied the policy. It does not confirm a form submission or a participant's attention.
+Participants see the monitoring notice before joining. Their device polls about every 4–6 seconds, reports the current activity site origin and the last applied policy revision, and retains the active navigation restriction if the server becomes unreachable. The dashboard marks a session as reconnecting after 30 seconds without a report. Acknowledgement means the viewer applied the policy. It does not confirm a form submission or a participant's attention.
 
 The host can answer help requests, approve an individual exit, end the whole room or export a participant status report. Disconnected devices pick up releases and policy changes on reconnection. The viewer also has a local expiry timer. Closed rooms cannot admit new participants. Room data is eligible for automatic cleanup one day after the scheduled end.
 
