@@ -68,6 +68,7 @@ export const ownerApi = {
   removePost: async (id: string, pid: string) => { const r = await authFetch(`/api/biz/${id}/posts/${pid}`, json('DELETE')); if (!r.ok) await read(r); },
   programs: async (id: string) => read<{ programs: ProgramInfo[]; summary: ProgramSummary }>(await authFetch(`/api/biz/${id}/programs`)),
   saveProgram: async (id: string, body: Partial<ProgramInfo> & { id?: string }) => (await read<{ program: ProgramInfo }>(await authFetch(`/api/biz/${id}/programs`, json('POST', body)))).program,
+  endProgram: async (id: string, pid: string) => read<import('./types').EndProgramResult>(await authFetch(`/api/biz/${id}/programs/${pid}/end`, json('POST', {}))),
   deleteProgram: async (id: string, pid: string) => { const r = await authFetch(`/api/biz/${id}/programs/${pid}`, json('DELETE')); if (!r.ok) await read(r); },
   programText: async (id: string, body: Record<string, unknown>) => (await read<{ text: Record<string, unknown> }>(await authFetch(`/api/biz/${id}/program-text`, json('PUT', body)))).text,
   members: async (id: string, q: { program?: string; state?: string; q?: string } = {}) => (await read<{ members: MemberInfo[] }>(await authFetch(`/api/biz/${id}/members?${new URLSearchParams(Object.entries(q).filter(([, v]) => v) as [string, string][])}`))).members,

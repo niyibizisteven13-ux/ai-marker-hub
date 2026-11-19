@@ -141,6 +141,7 @@ export function createBizRouter(): Router {
   r.post('/:id/members/:mid/reset-passcode', run(async (req, res) => res.json(await svc().resetPasscode(me(req), req.params.id, req.params.mid))));
   r.post('/:id/members/:mid/confirm', run(async (req, res) => res.json({ member: await svc().confirmPayment(me(req), req.params.id, req.params.mid, req.body ?? {}) })));
   r.patch('/:id/members/:mid', run(async (req, res) => res.json({ member: await svc().setMember(me(req), req.params.id, req.params.mid, req.body ?? {}) })));
+  r.post('/:id/programs/:pid/end', run(async (req, res) => res.json(await svc().endProgram(me(req), req.params.id, req.params.pid))));
   r.get('/:id/programs/:pid/checkin-code', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await svc().checkinCode(me(req), req.params.id, req.params.pid)); }));
   r.post('/:id/uses/redeem', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await svc().redeem(me(req), req.params.id, req.body ?? {})); }));
   r.post('/:id/uses/:useId/undo', run(async (req, res) => res.json(await svc().undoUse(me(req), req.params.id, req.params.useId))));

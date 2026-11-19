@@ -141,6 +141,11 @@ bus pass, a month of tutoring sessions, a car-wash subscription.
    passcode (or straight away if they are signed in) their card is ticked with the right item, chosen by the serving times (Lunch at noon, Dinner in the evening). A
    customer without a camera types the six digits on their card. Same rules as a staff scan (paid, open day, serving times, one of each item a day, total cap; no override).
    A wrong tick can be taken back for one minute; staff can undo longer from *Today*, where the customer's own ticks are marked.
+5b. **Closing a program**: *Close signups* only stops new members (existing cards keep working until they end). **End program** ends the whole program for everyone today, after a confirmation:
+   sign-ups close, nobody can be ticked any more (scan, code or customer scan are all refused with "This program has ended"), unpaid cards are cancelled, and paid cards end as of yesterday so they show
+   as ended with their history kept. The screen then lists the paid members who still had days or uses left, with a WhatsApp message each, so the owner can refund or tell them: Bwenge never holds the money,
+   so refunds are the owner's to give. It cannot be undone, but opening sign-ups again on that program starts it afresh for new members. The assistant ends a program only with `end` and `confirm` after the
+   owner said yes in plain words (asking first returns the consequences).
 5. **Running it**: *Today* shows who has checked in and who has a program today but has not come yet. *Members* shows payments waiting for
    confirmation, pause / resume, add days (for example after a closure), cancel, search, and a WhatsApp reminder link for programs that are ending.
 

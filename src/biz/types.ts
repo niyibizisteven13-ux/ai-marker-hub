@@ -49,7 +49,7 @@ export interface SectionInfo { id: string; type: 'text' | 'faq' | 'list' | 'link
 export type DayId = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
 export interface ItemWindow { item: string; from: string; to: string }
 export interface ProgramInfo {
-  id: string; title: string; description?: string; priceRwf: number; days: number; items: string[]; openDays: DayId[]; windows?: ItemWindow[]; terms?: string; maxMembers?: number; totalUses?: number; joinCode?: string; checkIn?: 'staff' | 'self'; active: boolean;
+  id: string; title: string; description?: string; priceRwf: number; days: number; items: string[]; openDays: DayId[]; windows?: ItemWindow[]; terms?: string; maxMembers?: number; totalUses?: number; joinCode?: string; checkIn?: 'staff' | 'self'; endedAt?: string; active: boolean;
   counts?: { active: number; pending: number; total: number };
 }
 export type PlanState = 'pending' | 'not_started' | 'active' | 'expired' | 'paused' | 'cancelled';
@@ -83,3 +83,5 @@ export interface CardInfo {
   payment: null | { amount: number; momoCode: string | null; momoName: string | null; online: boolean; promptSent: boolean; claimed: { at: string; ref?: string } | null; whatsapp: string | null };
 }
 export interface MeInfo { name: string; phone: string; username?: string; cards: Array<{ id: string; programTitle: string; state: PlanState; startDate: string; endDate: string; usesLeft: number; paid: boolean }> }
+
+export interface EndProgramResult { ended: string; endedAt: string; cancelledUnpaid: number; paidMembersEnded: number; withUnusedDays: Array<{ memberId: string; name: string; phone: string; paidRwf: number; daysLeft: number; usesLeft: number }> }
