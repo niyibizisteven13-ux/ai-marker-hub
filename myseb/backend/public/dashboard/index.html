@@ -23,7 +23,19 @@
     <h2>New exam</h2>
     <form id="newExam" class="grid">
       <label>Title <input name="title" required maxlength="200" placeholder="Biology midterm"></label>
-      <label>Exam URL <input name="examUrl" type="url" placeholder="empty = built-in sample exam"></label>
+      <label>Exam or form link <input name="examUrl" id="examUrl" type="url" placeholder="Google Forms, Microsoft Forms, Typeform… (empty = built-in sample exam)"></label>
+      <div id="formInfo" class="formInfo" hidden aria-live="polite">
+        <p id="formWhat"></p>
+        <p class="muted" id="formSites"></p>
+        <ul id="formTips" class="muted"></ul>
+        <details><summary>Settings for this form</summary>
+          <label>Extra sites the form needs (one address per line) <textarea name="extraOrigins" rows="2" placeholder="https://school.example.org"></textarea></label>
+          <label>Exam ends when the address contains <input name="doneContains" placeholder="/formResponse (filled in for Google Forms)"></label>
+          <label>Key field (the form field MySEB fills with each student's exam key) <input name="keyParam" placeholder="entry.1234567890"></label>
+          <p class="muted" id="formKeyHint"></p>
+          <label class="check"><input type="checkbox" name="sendKey"> This is my own exam site that checks MySEB (sends the MySEB key to it)</label>
+        </details>
+      </div>
       <label>Minutes per student <input name="durationMinutes" type="number" min="1" max="600" value="60"></label>
       <label>If a student leaves
         <select name="leaveAction"><option value="pause">Pause until I resume</option><option value="record">Only record it</option><option value="end">End their exam</option></select></label>

@@ -125,3 +125,10 @@ CREATE TABLE IF NOT EXISTS managed_members (
   current_site text, applied integer NOT NULL DEFAULT 0, request text, reply text, released boolean NOT NULL DEFAULT false,
   PRIMARY KEY(room,token_hash), UNIQUE(room,id)
 );
+
+-- Exams from a form link (Google Forms and others): the sites the student may use, how a submission looks, and the field that receives the exam key.
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS allowed_origins text[] NOT NULL DEFAULT '{}';
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS done_patterns   text[] NOT NULL DEFAULT '{}';
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS key_param       text;
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS send_key        boolean NOT NULL DEFAULT true;   -- the secret header goes only to sites that check it (not to Google)
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS form_provider   text;

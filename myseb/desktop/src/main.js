@@ -85,7 +85,7 @@ const headersFor = () => ({
   'X-MySEB-Key': exam.token, 'X-MySEB-Client': 'desktop', 'X-MySEB-Device': DEVICE,
   'User-Agent': `MySEB/${VERSION} (desktop; ${process.platform})`,
 });
-const originOf = (u) => { try { return new URL(u).origin; } catch { return null; } };
+const { lockOf, allowed: pageAllowed, isDone, hostOf, originOf } = require('./formLock');
 const toRenderer = (ch, payload) => { if (win && !win.isDestroyed()) win.webContents.send(ch, payload); };
 
 /* ------------------------------------------------------------------ server calls */
@@ -133,12 +133,19 @@ async function heartbeat() {
 }
 
 function startExam(data) {
-  exam = { token: data.token, sessionId: data.sessionId, title: data.title, status: data.status, examOrigin: originOf(data.examUrl) };
+  const lock = lockOf(data);
+  exam = { token: data.token, sessionId: data.sessionId, title: data.title, status: data.status, examOrigin: lock.examOrigin, lock };
   clipboard.clear();                                       // nothing copied before the exam can be pasted into it
   hbFails = 0; lastNoticeId = '';
   clearInterval(hbTimer);
   hbTimer = setInterval(heartbeat, (data.heartbeatSeconds || 5) * 1000);
   clearInterval(watchTimer); watchTimer = setInterval(checkEnvironment, 20000); checkEnvironment();
+}
+/** The student has sent the form (the address said so, or they pressed "I have submitted" and confirmed): tell the server and end the exam. */
+async function finishSubmitted() {
+  if (!exam || exam.status === 'ENDED') return;
+  try { await post('/api/finish', { reason: 'submitted' }); } catch { /* the heartbeat still sees the end */ }
+  applyStatus({ status: 'ENDED', reason: 'submitted' });
 }
 function stopExam() { clearInterval(watchTimer); clearInterval(hbTimer); clearTimeout(blurTimer); hbTimer = null; exam = null; }
 
@@ -178,10 +185,17 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden)log('visibi
 const CSS = '*{-webkit-user-select:none!important;user-select:none!important}input,textarea,[contenteditable="true"]{-webkit-user-select:text!important;user-select:text!important}';
 
 function lockGuest(wc) {
-  const allowed = (url) => /^(about:|data:|blob:)/.test(url) || (exam && originOf(url) === exam.examOrigin);
-  wc.setWindowOpenHandler(() => ({ action: 'deny' }));       // no pop-ups, no new windows/tabs
-  wc.on('will-navigate', (e, url) => { if (!allowed(url)) e.preventDefault(); });
-  wc.on('will-frame-navigate', (e) => { if (e.isMainFrame && !allowed(e.url)) e.preventDefault(); });
+  const allowed = (url) => pageAllowed(url, exam && exam.lock);
+  const blocked = (url) => { if (exam) sendViolation('blocked_navigation', { host: hostOf(url) }); };    // recorded, never pauses: the page simply does not open
+  wc.setWindowOpenHandler(({ url }) => { blocked(url); return { action: 'deny' }; });       // no pop-ups, no new windows/tabs
+  wc.on('will-navigate', (e, url) => { if (!allowed(url)) { e.preventDefault(); blocked(url); } });
+  wc.on('will-frame-navigate', (e) => { if (e.isMainFrame && !allowed(e.url)) { e.preventDefault(); blocked(e.url); } });
+  // A page on an allowed site that bounces the student to another site (a redirect, not a click) is stopped the same way.
+  wc.on('will-redirect', (e, url, _inPlace, isMainFrame) => { if (isMainFrame !== false && !allowed(url)) { e.preventDefault(); blocked(url); } });
+  // A form that shows a "submitted" address (Google Forms: .../formResponse) ends the exam by itself.
+  const submitted = (url) => { if (exam && isDone(url, exam.lock)) finishSubmitted(); };
+  wc.on('did-navigate', (_e, url) => submitted(url));
+  wc.on('did-navigate-in-page', (_e, url) => submitted(url));
   wc.on('context-menu', (e) => e.preventDefault());           // right-click
   wc.on('dom-ready', () => { wc.executeJavaScript(HOOK).catch(() => {}); wc.insertCSS(CSS).catch(() => {}); });
   wc.on('console-message', (...a) => {
@@ -269,11 +283,12 @@ ipcMain.handle('verify', async (_e, { code, name }) => {
     }, { auth: false });
     if (!r.ok) return { error: r.json.error || 'Could not verify the code.' };
     startExam(r.json);
-    return { title: r.json.title, examUrl: r.json.examUrl, status: r.json.status, remainingSeconds: r.json.remainingSeconds };
+    return { title: r.json.title, examUrl: r.json.examUrl, status: r.json.status, remainingSeconds: r.json.remainingSeconds, kind: exam ? exam.lock.kind : 'site', examKey: r.json.examKey ?? null };
   } catch { return { error: 'Cannot reach the exam server. Check your internet and the server address.' }; }
   finally { joiningExam = false; }
 });
 
+ipcMain.handle('form-submitted', async () => { await finishSubmitted(); });
 ipcMain.handle('confirm-exit', async () => {
   if (exam) { try { await post('/api/finish', { reason: 'student_exit' }); } catch { /* server marks us LEFT/ended anyway */ } stopExam(); }
   allowQuit = true; app.quit();
@@ -302,7 +317,7 @@ app.on('web-contents-created', (_e, contents) => {
     delete prefs.preload;
     Object.assign(prefs, { nodeIntegration: false, contextIsolation: true, sandbox: true, devTools: DEV, webSecurity: true });
     params.partition = PARTITION; params.allowpopups = false;
-    if (!exam || originOf(params.src) !== exam.examOrigin) ev.preventDefault();
+    if (!exam || !pageAllowed(params.src, exam.lock)) ev.preventDefault();
   });
   if (contents.getType() === 'webview') lockGuest(contents);
 });
@@ -314,7 +329,7 @@ app.whenReady().then(() => {
   // The secret header goes on every request to the exam site, added here in the main process: page JavaScript can never read it.
   ses.webRequest.onBeforeSendHeaders({ urls: ['<all_urls>'] }, (details, cb) => {
     const h = details.requestHeaders;
-    if (exam && originOf(details.url) === exam.examOrigin) {
+    if (exam && exam.lock.sendKey && originOf(details.url) === exam.examOrigin) {   // only a site that checks MySEB gets the key: never Google, never an unknown form site
       h['X-MySEB-Key'] = exam.token; h['X-MySEB-Client'] = 'desktop'; h['X-MySEB-Device'] = DEVICE;
     }
     cb({ requestHeaders: h });

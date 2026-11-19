@@ -8,8 +8,15 @@ const appVersion = String.fromEnvironment('MYSEB_VERSION', defaultValue: '1.0.1'
 
 class Session {
   Session({required this.token, required this.sessionId, required this.title, required this.examUrl,
-      required this.status, required this.remainingSeconds, required this.deviceId, required this.platform, required this.api});
+      required this.status, required this.remainingSeconds, required this.deviceId, required this.platform, required this.api,
+      this.origins = const <String>[], this.sendKey = true, this.done = const <String>[], this.kind = 'site', this.examKey});
   final String token, sessionId, title, examUrl, deviceId, platform, api;
+  /// An exam on a form tool (Google Forms and others): the sites the student may use, whether the MySEB key goes to the site, how a
+  /// submission looks in the address, and the student's exam key. An older server sends none of this: then the exam's own site only.
+  final List<String> origins, done;
+  final bool sendKey;
+  final String kind;
+  final String? examKey;
   String status;
   int remainingSeconds;
 }
@@ -79,9 +86,15 @@ class Api {
     }
     final j = jsonDecode(r.body) as Map<String, dynamic>;
     if (r.statusCode != 200) throw ApiException((j['error'] ?? 'Could not verify the code.') as String);
+    final lock = (j['lock'] is Map) ? (j['lock'] as Map) : const {};
     return Session(
       token: j['token'], sessionId: j['sessionId'], title: j['title'], examUrl: j['examUrl'], status: j['status'],
-      remainingSeconds: j['remainingSeconds'], deviceId: deviceId, platform: platform, api: base);
+      remainingSeconds: j['remainingSeconds'], deviceId: deviceId, platform: platform, api: base,
+      origins: ((lock['origins'] as List?) ?? const []).whereType<String>().toList(),
+      sendKey: lock['sendKey'] != false,
+      done: ((lock['done'] as List?) ?? const []).whereType<String>().toList(),
+      kind: lock['kind'] == 'form' ? 'form' : 'site',
+      examKey: j['examKey'] is String ? j['examKey'] as String : null);
   }
 
   Future<HeartbeatResult?> heartbeat(Session s) async {

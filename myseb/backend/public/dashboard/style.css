@@ -21,3 +21,5 @@ table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px;bord
 .exam .t{flex:1;min-width:200px}.exam .t b{display:block}.row-actions{display:flex;gap:6px;flex-wrap:wrap}
 dialog{border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink);max-width:520px;width:92%}
 @media (max-width:640px){table,thead,tbody,tr,th,td{display:block}thead{display:none}tr{border-bottom:2px solid var(--line);padding:6px 0}td{border:0;padding:3px 8px}}
+
+.formInfo{grid-column:1/-1;border:1px solid var(--line);border-radius:10px;padding:10px 12px}.formInfo p{margin:0 0 6px}.formInfo ul{margin:6px 0;padding-left:18px}.formInfo details{margin-top:8px}.formInfo textarea{width:100%}

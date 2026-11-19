@@ -23,6 +23,8 @@ $('form').addEventListener('submit', async (e) => {
   $('title').textContent = r.title;
   deadline = Date.now() + r.remainingSeconds * 1000; showTimer(); clearInterval(tick); tick = setInterval(showTimer, 1000);
   $('start').hidden = true; $('examView').hidden = false;
+  $('submitted').hidden = r.kind !== 'form';   // a form tool: the student can also tell MySEB they are done
+  if (r.examKey) { $('keyShow').textContent = 'Exam key ' + r.examKey; $('keyShow').hidden = false; }
   $('wv').src = r.examUrl;                    // the main process adds the secret header; nothing secret is here
   if (r.status !== 'IN_EXAM') onStatus({ status: r.status });
 });
@@ -33,7 +35,7 @@ function onStatus(s) {
   $('dot').className = s.status === 'IN_EXAM' && !s.offline ? '' : 'bad';
   if (s.status === 'ENDED') {
     ended = true; $('wv').remove(); clearInterval(tick);
-    overlay('Exam finished', s.reason === 'time_up' ? 'Time is up.' : 'Your exam has ended. You can close MySEB now.', [['Exit MySEB', 'primary', () => window.myseb.confirmExit()]]);
+    overlay(s.reason === 'submitted' ? 'Submitted' : 'Exam finished', s.reason === 'time_up' ? 'Time is up.' : s.reason === 'submitted' ? 'Your answers were sent. You can close MySEB now.' : 'Your exam has ended. You can close MySEB now.', [['Exit MySEB', 'primary', () => window.myseb.confirmExit()]]);
   } else if (s.offline) {
     closing = false;
     overlay('Connection lost', 'Trying to reconnect… Stay on this screen. Your teacher can see you are offline.');
@@ -67,6 +69,7 @@ window.myseb.onCloseAttempt(() => {
   ]);
 });
 $('quitIdle').onclick = () => window.myseb.quitIdle();
+$('submitted').onclick = () => { closing = true; overlay('Have you submitted?', 'Press Yes only if you pressed Submit in the form and saw the confirmation. Your exam will end and you cannot come back in.', [['Not yet, keep working', 'primary', () => { closing = false; if (!paused && !ended) hideOverlay(); }], ['Yes, I have submitted', 'danger', () => window.myseb.formSubmitted()]]); };
 
 let dismissedUpdateVersion;
 
