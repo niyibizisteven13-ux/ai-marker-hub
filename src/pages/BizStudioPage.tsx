@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Megaphone, MapPin, Sparkles, Bot, ArrowLeft, BarChart3, Check, ExternalLink, Eye, EyeOff, Film, Globe, ImagePlus, Inbox, KeyRound, LayoutDashboard, Loader2, MessageCircle, MoreHorizontal, Package, Palette, Plus, Receipt, Settings, ShoppingBag, Store, Trash2, Upload, Users } from 'lucide-react';
+import { Table2, Megaphone, MapPin, Sparkles, Bot, ArrowLeft, BarChart3, Check, ExternalLink, Eye, EyeOff, Film, Globe, ImagePlus, Inbox, KeyRound, LayoutDashboard, Loader2, MessageCircle, MoreHorizontal, Package, Palette, Plus, Receipt, Settings, ShoppingBag, Store, Trash2, Upload, Users } from 'lucide-react';
 import BizPage from '../components/biz/BizPage';
 import MapTile, { parseCoords } from '../components/biz/MapTile';
-import { CostsView, FeedView, LockedGate, AgentChatView, AgentView, DashboardView, NotebookView, CustomersView, ReportsView, SecretsView, EntrySheet, type EntryKind } from '../components/biz/Workspace';
+import { SectionsEditor, TrackersView, CostsView, FeedView, LockedGate, AgentChatView, AgentView, DashboardView, NotebookView, CustomersView, ReportsView, SecretsView, EntrySheet, type EntryKind } from '../components/biz/Workspace';
 import { btn, btnGhost, btnPrimary, card, input, msg, PaidNote, Tag, Title } from '../components/biz/ui';
 import { BizApiError, ownerApi, prepareImage, type Mine } from '../biz/api';
 import { CATEGORIES, DAYS, THEMES, rwf, type Business, type Enquiry, type Hours, type PublicBusiness, type SecretsStatus } from '../biz/types';
@@ -25,6 +25,18 @@ function LocationEditor({ lat, lng, onChange }: { lat: string; lng: string; onCh
       <div className="grid grid-cols-2 gap-3"><label className="block text-sm"><span className="mb-1 block text-[var(--app-muted)]">Latitude</span><input className={`${input} font-mono`} inputMode="decimal" value={lat} onChange={(e) => onChange(e.target.value, lng)} /></label><label className="block text-sm"><span className="mb-1 block text-[var(--app-muted)]">Longitude</span><input className={`${input} font-mono`} inputMode="decimal" value={lng} onChange={(e) => onChange(lat, e.target.value)} /></label></div>
       {note && <p role="status" className="text-sm text-[var(--app-muted)]">{note}</p>}
     </div>
+  );
+}
+
+function LanguageCard({ b, onChange, onAsk }: { b: Business; onChange: () => void; onAsk: () => void }) {
+  const [busy, setBusy] = useState(false); const [err, setErr] = useState(''); const rw = b.translations?.rw; const done = rw ? [rw.tagline && 'tagline', rw.about && 'about', rw.products && `${Object.keys(rw.products).length} products`, rw.sections && `${Object.keys(rw.sections).length} sections`, rw.posts && `${Object.keys(rw.posts).length} posts`].filter(Boolean) : [];
+  const set = async (l: 'en' | 'rw') => { setBusy(true); setErr(''); try { await ownerApi.setLang(b.id, l); onChange(); } catch (e) { setErr(msg(e)); } finally { setBusy(false); } };
+  return (
+    <div className={card}><Title kind="public" hint="Visitors can switch between English and Kinyarwanda at the top of your page. The labels are translated for you; your own words (description, products, posts) are translated by the agent.">Language</Title>
+      <div className="flex flex-wrap items-center gap-3"><span className="text-sm text-[var(--app-muted)]">Page opens in</span><div className="inline-flex rounded-xl bg-[var(--app-bg)] p-1" role="group">{(['en', 'rw'] as const).map((l) => <button key={l} type="button" disabled={busy} aria-pressed={(b.lang ?? 'en') === l} onClick={() => void set(l)} className={`rounded-lg px-4 py-2 text-sm font-semibold ${(b.lang ?? 'en') === l ? 'bg-[var(--brand)] text-[var(--brand-on)]' : 'text-[var(--app-muted)]'}`}>{l === 'en' ? 'English' : 'Kinyarwanda'}</button>)}</div></div>
+      <p className="mt-3 text-sm text-[var(--app-muted)]">Kinyarwanda version: {done.length ? <b className="text-[var(--app-text)]">{done.join(', ')}</b> : 'not made yet'}.</p>
+      <button type="button" className={`${btnGhost} mt-3`} onClick={() => { try { sessionStorage.setItem(`bz-seed-${b.id}`, 'Translate my business page into Kinyarwanda: the tagline, description, products and my sections.'); } catch { /* optional */ } onAsk(); }}><Sparkles size={15} />{done.length ? 'Update the translation with the agent' : 'Translate my page into Kinyarwanda'}</button>
+      {err && <p role="alert" className="mt-2 text-sm text-rose-600">{err}</p>}</div>
   );
 }
 
@@ -210,17 +222,17 @@ function SettingsTab({ b, onChange, onDeleted }: { b: Business; onChange: () => 
 }
 
 /* ------------------------------------------------------------------ the workspace */
-type View = 'feed' | 'chat' | 'agent' | 'dashboard' | 'sales' | 'expenses' | 'products' | 'customers' | 'reports' | 'messages' | 'public' | 'secrets' | 'settings';
+type View = 'trackers' | 'feed' | 'chat' | 'agent' | 'dashboard' | 'sales' | 'expenses' | 'products' | 'customers' | 'reports' | 'messages' | 'public' | 'secrets' | 'settings';
 const NAV: Array<{ id: View; label: string; icon: typeof Globe; group?: string }> = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard }, { id: 'chat', label: 'Ask the agent', icon: Sparkles }, { id: 'sales', label: 'Sales and orders', icon: ShoppingBag }, { id: 'expenses', label: 'Costs and spending', icon: Receipt },
   { id: 'products', label: 'Products and stock', icon: Package }, { id: 'customers', label: 'Customers', icon: Users }, { id: 'reports', label: 'Reports', icon: BarChart3 },
-  { id: 'messages', label: 'Messages', icon: Inbox }, { id: 'public', label: 'Public page', icon: Globe }, { id: 'feed', label: 'Feed', icon: Megaphone }, { id: 'agent', label: 'Business agent', icon: Bot }, { id: 'secrets', label: 'Secrets and payments', icon: KeyRound }, { id: 'settings', label: 'Settings', icon: Settings },
+  { id: 'messages', label: 'Messages', icon: Inbox }, { id: 'public', label: 'Public page', icon: Globe }, { id: 'feed', label: 'Feed', icon: Megaphone }, { id: 'trackers', label: 'Trackers', icon: Table2 }, { id: 'agent', label: 'Business agent', icon: Bot }, { id: 'secrets', label: 'Secrets and payments', icon: KeyRound }, { id: 'settings', label: 'Settings', icon: Settings },
 ];
 /** The studio opens in a light surface whatever the app theme is: the same tokens the screens use, redefined here. */
 const LIGHT = { '--app-bg': '#F2F5FA', '--app-panel': '#FFFFFF', '--app-panel-hover': '#F1F4F9', '--app-line': '#E3E8F0', '--app-text': '#0E1722', '--app-muted': '#5B6776', '--app-faint': '#8A94A3' } as React.CSSProperties;
 
 export default function BizStudioPage({ onBack }: { onBack: () => void }) {
-  const [mine, setMine] = useState<Mine | null>(null); const [error, setError] = useState(''); const [sel, setSel] = useState(''); const [view, setView] = useState<View>(() => { const v = new URLSearchParams(window.location.search).get('view'); return (['feed', 'chat', 'agent', 'sales', 'expenses', 'products', 'customers', 'reports', 'messages', 'public', 'secrets', 'settings'] as string[]).includes(v ?? '') ? (v as View) : 'dashboard'; }); const [sub, setSub] = useState<'page' | 'gallery' | 'preview'>('page');
+  const [mine, setMine] = useState<Mine | null>(null); const [error, setError] = useState(''); const [sel, setSel] = useState(''); const [view, setView] = useState<View>(() => { const v = new URLSearchParams(window.location.search).get('view'); return (['trackers', 'feed', 'chat', 'agent', 'sales', 'expenses', 'products', 'customers', 'reports', 'messages', 'public', 'secrets', 'settings'] as string[]).includes(v ?? '') ? (v as View) : 'dashboard'; }); const [sub, setSub] = useState<'page' | 'gallery' | 'preview'>('page');
   const [urls, setUrls] = useState<Record<string, string>>({}); const [secrets, setSecrets] = useState<SecretsStatus | null>(null); const [sheet, setSheet] = useState<EntryKind | null>(null); const [more, setMore] = useState(false);
   const [creating, setCreating] = useState({ name: '', category: 'shop', whatsapp: '', lat: '', lng: '' }); const [busy, setBusy] = useState(false); const [tick, setTick] = useState(0);
   const load = useCallback(async () => { try { const m = await ownerApi.mine(); setMine(m); setSel((s) => (m.businesses.some((b) => b.id === s) ? s : m.businesses[0]?.id ?? '')); } catch (e) { setError(msg(e)); } }, []);
@@ -279,6 +291,7 @@ export default function BizStudioPage({ onBack }: { onBack: () => void }) {
               {view === 'reports' && <ReportsView b={b} />}
               {view === 'products' && <><h1 className="mb-4 font-display text-2xl font-semibold tracking-tight">Products and stock</h1><ProductsTab b={b} urls={urls} onChange={reload} /></>}
               {view === 'messages' && <><h1 className="mb-4 font-display text-2xl font-semibold tracking-tight">Messages</h1><MessagesTab b={b} onChange={reload} /></>}
+              {view === 'trackers' && <TrackersView b={b} onChange={reload} />}
               {view === 'feed' && <FeedView b={b} onChange={reload} canVideo={mine.limits.videos > 0} />}
               {view === 'chat' && <AgentChatView b={b} onChange={reload} />}
               {view === 'agent' && <AgentView b={b} paid={mine.paid !== false} />}
@@ -287,7 +300,7 @@ export default function BizStudioPage({ onBack }: { onBack: () => void }) {
               {view === 'public' && (<>
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h1 className="font-display text-2xl font-semibold tracking-tight">Public page</h1><Tag kind="public" /></div>
                   <div className="inline-flex rounded-xl border border-[var(--app-line)] bg-[var(--app-panel)] p-1" role="tablist">{([['page', 'Details'], ['gallery', 'Photos and videos'], ['preview', 'Preview']] as const).map(([id, l]) => <button key={id} type="button" role="tab" aria-selected={sub === id} onClick={() => setSub(id)} className={`rounded-lg px-3.5 py-2 text-sm font-semibold ${sub === id ? 'bg-[var(--brand)] text-[var(--brand-on)]' : 'text-[var(--app-muted)]'}`}>{l}</button>)}</div></div>
-                {sub === 'page' && <PageTab b={b} onChange={reload} />}
+                {sub === 'page' && <><PageTab b={b} onChange={reload} /><div className="mt-5 space-y-5"><LanguageCard b={b} onChange={reload} onAsk={() => setView('chat')} /><SectionsEditor b={b} onChange={reload} /></div></>}
                 {sub === 'gallery' && <GalleryTab b={b} urls={urls} onChange={reload} limits={mine.limits} />}
                 {sub === 'preview' && <PreviewTab b={b} urls={urls} />}
               </>)}

@@ -268,3 +268,63 @@ test('chat tools tell the truth: a record returns the id and the checked totals,
   assert.match((await tools.biz_recurring.execute({ action: 'add', name: 'Server', amount: 7000, every: 'month', on: 15, category: 'server' }, c)).text, /Added Server/); assert.match((await tools.biz_budget.execute({ category: 'server', amount: 8000 }, c)).text, /server: .* of 8,000 RWF/);
   assert.match((await tools.biz_costs.execute({}, c)).text, /Budgets: server/);
 });
+
+// ---- features the owner or agent creates (sections + trackers + forms), Kinyarwanda page
+test('new features without code: a booking template gives a public form and a private tracker; visitors fill it, the owner works the records; checked and limited', async () => {
+  const notes: any[] = []; const svc = createBizService({ kv: memKv(), media: memoryMediaStore(), isPaid: async () => true, now: () => T0, notify: async (_o, n) => { notes.push(n); } }); resetBizLimitsForTests();
+  const b = await svc.create('o', { name: 'Salon Imana' }); await svc.update('o', b.id, { about: 'x' }); await svc.setPublished('o', b.id, true); await svc.setAgent('o', b.id, { level: 'watch', alerts: true });
+  const f = await svc.addFeature('o', b.id, 'booking', 'rw'); assert.equal(f.tracker!.name, 'Gufata igihe'); assert.equal(f.section!.type, 'form'); assert.equal(f.tracker!.statuses[0], 'bishya');
+  await assert.rejects(svc.addFeature('o', b.id, 'booking', 'rw'), (e: any) => e.code === 'EXISTS'); await assert.rejects(svc.addFeature('o', b.id, 'nope'), /Unknown/);
+  const pub = await svc.publicBySlug(b.slug); const sec = pub!.sections!.find((x) => x.type === 'form')!; assert.ok(sec.form!.fields.some((x) => x.type === 'date' && x.required)); assert.ok(!JSON.stringify(pub).includes('trackerId'), 'the tracker id and records are never public');
+  const day = f.tracker!.fields.find((x) => x.type === 'date')!.key; const name = f.tracker!.fields[0].key; const phone = f.tracker!.fields[1].key;
+  await assert.rejects(svc.submitForm(b.slug, sec.id, { values: { [name]: 'Jo' } }, 'v1'), /required/); await assert.rejects(svc.submitForm(b.slug, sec.id, { values: { [name]: 'Jo', [phone]: '0788', [day]: 'tomorrow' } }, 'v1'), /date/);
+  assert.deepEqual(await svc.submitForm(b.slug, sec.id, { values: { [name]: 'Jo', [phone]: '0788123456', [day]: '2026-12-24' }, website: 'spam' }, 'v1'), { saved: false });
+  await svc.submitForm(b.slug, sec.id, { values: { [name]: 'Jo', [phone]: '0788123456', [day]: '2026-12-24' } }, 'v2'); await new Promise((r) => setImmediate(r)); assert.match(notes[0].title, /Gufata igihe/);
+  const { records } = await svc.records('o', b.id, 'Gufata igihe'); assert.equal(records.length, 1); assert.equal(records[0].status, 'bishya'); assert.equal(records[0].src, 'page');
+  const up = await svc.updateRecord('o', b.id, records[0].id.slice(0, 8), { status: 'byemejwe' }); assert.equal(up.status, 'byemejwe'); await assert.rejects(svc.updateRecord('o', b.id, records[0].id, { status: 'nonsense' }), /Status must be/);
+  assert.equal((await svc.trackers('o', b.id))[0].open, 0); assert.equal(await svc.deleteRecord('o', b.id, 'ab'), false, 'a short id never deletes'); assert.equal(await svc.deleteRecord('o', b.id, records[0].id), true);
+  await assert.rejects(svc.records('intruder', b.id, 'Gufata igihe'), (e: any) => e.status === 404);
+  const t = await svc.createTracker('o', b.id, { name: 'Equipment', fields: [{ label: 'Item', type: 'text', required: true }, { label: 'Condition', type: 'choice', options: ['good', 'broken'] }, { label: 'Cost', type: 'number' }] }); assert.deepEqual(t.statuses, ['new', 'confirmed', 'done']);
+  await assert.rejects(svc.createTracker('o', b.id, { name: 'Bad', fields: [{ label: 'Pick', type: 'choice', options: ['one'] }] }), /two options/); await assert.rejects(svc.createTracker('o', b.id, { name: 'Empty', fields: [] }), /at least one field/);
+  assert.equal((await svc.addRecord('o', b.id, 'Equipment', { values: { Item: 'Dryer', Condition: 'GOOD', Cost: '120,000' } })).values.condition, 'good'); await assert.rejects(svc.addRecord('o', b.id, 'Equipment', { values: { Item: 'X', Condition: 'meh' } }), /one of/);
+  const faq = await svc.saveSection('o', b.id, { type: 'faq', title: 'Ibibazo', items: [{ title: 'Mukora ryari?', text: 'Buri munsi' }, { title: '', text: 'ignored' }] }); assert.equal(faq.items!.length, 1);
+  await assert.rejects(svc.saveSection('o', b.id, { type: 'links', title: 'Links', items: [{ title: 'Bad', url: 'javascript:alert(1)' }] }), /link/); assert.ok(await svc.saveSection('o', b.id, { type: 'links', title: 'Links', items: [{ title: 'Instagram', url: 'https://instagram.com/x' }] }));
+  await assert.rejects(svc.saveSection('o', b.id, { type: 'form', title: 'Ghost', trackerId: 'nope' }), /does not exist/); await svc.saveSection('o', b.id, { id: faq.id, hidden: true }); assert.ok(!(await svc.publicBySlug(b.slug))!.sections!.some((x) => x.id === faq.id), 'hidden sections are not public');
+  assert.equal(await svc.deleteTracker('o', b.id, 'Gufata igihe'), true); assert.ok(!(await svc.publicBySlug(b.slug))!.sections!.some((x) => x.type === 'form'), 'deleting a tracker removes its form from the page');
+  await svc.remove('o', b.id);
+});
+
+test('Kinyarwanda page: the owner’s translation is stored cleaned, only for real ids, shown publicly with the default language; English stays the base', async () => {
+  const svc = createBizService({ kv: memKv(), media: memoryMediaStore(), isPaid: async () => true, now: () => T0 }); resetBizLimitsForTests();
+  const b = await svc.create('o', { name: 'Cafe' }); const p = await svc.addProduct('o', b.id, { name: 'Coffee', price: 1000 }); const post = await svc.addPost('o', b.id, { text: 'Fresh bread' }); await svc.update('o', b.id, { about: 'We bake daily', tagline: 'Fresh daily' }); await svc.setPublished('o', b.id, true);
+  assert.equal((await svc.publicBySlug(b.slug))!.translations, undefined); assert.equal((await svc.publicBySlug(b.slug))!.lang, undefined);
+  await assert.rejects(svc.setTranslation('o', b.id, 'en', { tagline: 'x' }), /translate into/); await assert.rejects(svc.setTranslation('o', b.id, 'xx', {}), /translate into/);
+  await svc.setTranslation('o', b.id, 'rw', { tagline: 'Imigati mishya buri munsi', about: 'Dutegura buri munsi', products: { [p.id]: { name: 'Ikawa', description: 'Ishyushye' }, nope: { name: 'x' } }, posts: { [post.id]: 'Imigati mishya!', zzz: 'x' } });
+  const pub = await svc.publicBySlug(b.slug); const tr = pub!.translations!.rw!; assert.equal(tr.tagline, 'Imigati mishya buri munsi'); assert.equal(tr.products![p.id].name, 'Ikawa'); assert.ok(!('nope' in tr.products!)); assert.ok(!('zzz' in tr.posts!)); assert.equal(pub!.tagline, 'Fresh daily', 'the English original is untouched');
+  await svc.setTranslation('o', b.id, 'rw', { tagline: 'Gishya' }); assert.equal((await svc.publicBySlug(b.slug))!.translations!.rw!.about, 'Dutegura buri munsi', 'only the fields given change');
+  assert.equal(await svc.setLang('o', b.id, 'rw'), 'rw'); assert.equal((await svc.publicBySlug(b.slug))!.lang, 'rw'); assert.equal(await svc.setLang('o', b.id, 'zz'), 'rw'); await assert.rejects(svc.setTranslation('intruder', b.id, 'rw', {}), (e: any) => e.status === 404);
+});
+
+test('chat can create features and translate the page; destructive steps need the owner’s word', async () => {
+  const svc = createBizService({ kv: memKv(), media: memoryMediaStore(), isPaid: async () => true, now: () => T0 }); resetBizLimitsForTests();
+  const tools = Object.fromEntries(bizToolsHonest(() => svc).map((t) => [t.definition.name, t])); const c: any = { userId: 'u', files: {} }; await tools.biz_create.execute({ name: 'Salon' }, c);
+  assert.match((await tools.biz_feature.execute({ kind: 'booking', lang: 'rw' }, c)).text, /Gufata igihe/);
+  assert.match((await tools.biz_tracker.execute({ action: 'create', name: 'Deliveries2', fields: [{ label: 'Customer', type: 'text', required: true }, { label: 'Amount', type: 'number' }] }, c)).text, /Created the tracker/);
+  assert.match((await tools.biz_records.execute({ action: 'add', tracker: 'Deliveries2', values: { Customer: 'Ann', Amount: 3000 } }, c)).text, /now has 1 records/);
+  const l = await tools.biz_records.execute({ action: 'list', tracker: 'Deliveries2' }, c); const id = /^([0-9a-f]{8}) /m.exec(l.text)![1]; assert.match((await tools.biz_records.execute({ action: 'update', tracker: 'Deliveries2', id, status: 'done' }, c)).text, /done/);
+  assert.equal((await tools.biz_records.execute({ action: 'delete', tracker: 'Deliveries2', id: 'zz' }, c)).isError, true);
+  assert.match((await tools.biz_section.execute({ action: 'add', type: 'faq', title: 'FAQ', items: [{ title: 'Open?', text: 'Yes' }] }, c)).text, /Added the section/); assert.match((await tools.biz_section.execute({ action: 'list' }, c)).text, /FAQ \(faq/);
+  const b = (await svc.list('u'))[0]; const prod = await svc.addProduct('u', b.id, { name: 'Haircut', price: 3000 });
+  assert.match((await tools.biz_translate.execute({ tagline: 'Dutunganya imisatsi', products: { [prod.id]: { name: 'Gutunganya umusatsi' } }, set_default_language: 'rw' }, c)).text, /opens in Kinyarwanda/); assert.equal((await svc.get('u', b.id)).lang, 'rw');
+  assert.equal((await tools.biz_translate.execute({}, c)).isError, true); assert.match((await tools.biz_open.execute({ where: 'trackers' }, c)).text, /view=trackers/);
+});
+
+import { localize, localizePosts, makeTx, RW } from '../src/biz/i18n.js';
+test('public page language: labels translate, unknown labels stay English, the owner’s translation replaces content, the original is untouched', () => {
+  const b: any = { slug: 's', name: 'Cafe', category: 'shop', tagline: 'Fresh', about: 'We bake', theme: 'gold', contact: {}, hours: [], gallery: [], updatedAt: '', products: [{ id: 'p1', name: 'Coffee', price: 1000, available: true, description: 'Hot' }, { id: 'p2', name: 'Tea', price: 500, available: true }],
+    sections: [{ id: 's1', type: 'faq', title: 'FAQ', items: [{ title: 'Open?', text: 'Yes' }] }], translations: { rw: { tagline: 'Bishya', products: { p1: { name: 'Ikawa' } }, sections: { s1: { title: 'Ibibazo', items: [{ title: 'Murakinguye?', text: 'Yego' }] } }, posts: { x1: 'Imigati mishya' } } } };
+  const tx = makeTx('rw'); assert.equal(tx('Order now'), 'Tumiza ubu'); assert.equal(tx('Something not listed'), 'Something not listed'); assert.equal(makeTx('en')('Order now'), 'Order now'); assert.equal(tx('Monday'), 'Kuwa mbere'); assert.ok(Object.values(RW).every((v) => v.trim().length > 0));
+  const r = localize(b, 'rw'); assert.equal(r.tagline, 'Bishya'); assert.equal(r.about, 'We bake', 'untranslated fields fall back'); assert.equal(r.products[0].name, 'Ikawa'); assert.equal(r.products[0].description, 'Hot'); assert.equal(r.products[1].name, 'Tea');
+  assert.equal(r.sections![0].title, 'Ibibazo'); assert.equal(r.sections![0].items![0].title, 'Murakinguye?'); assert.equal(b.tagline, 'Fresh'); assert.equal(localize(b, 'en'), b);
+  assert.equal(localizePosts([{ id: 'x1', text: 'Fresh bread' }, { id: 'x2', text: 'Other' }] as any, b, 'rw')[0].text, 'Imigati mishya'); assert.equal(localizePosts([{ id: 'x2', text: 'Other' }] as any, b, 'rw')[0].text, 'Other');
+});

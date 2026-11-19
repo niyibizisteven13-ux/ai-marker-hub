@@ -1,5 +1,5 @@
 import { authFetch, getAccessToken, getApiUrl } from '../utils/authFetch';
-import type { Costs, Post, PublicPost, AgentSettings, SecretsStatus, Business, DayStats, Enquiry, Product, PublicBusiness, LedgerEntry, Dashboard } from './types';
+import type { TrackerInfo, TrackerRecordInfo, SectionInfo, Costs, Post, PublicPost, AgentSettings, SecretsStatus, Business, DayStats, Enquiry, Product, PublicBusiness, LedgerEntry, Dashboard } from './types';
 
 /** Calls to /api/biz. Public calls need no sign-in; the others use the person's own session. */
 export class BizApiError extends Error { constructor(message: string, public status: number, public code?: string) { super(message); } }
@@ -19,6 +19,7 @@ export const publicApi = {
   like: async (slug: string, pid: string) => read<{ liked: boolean; likes: number }>(await fetch(getApiUrl(`/api/biz/public/${encodeURIComponent(slug)}/posts/${encodeURIComponent(pid)}/like`), { method: 'POST' })),
   comments: async (slug: string, pid: string) => (await read<{ comments: Array<{ id: string; name: string; text: string; at: string; owner?: boolean }> }>(await fetch(getApiUrl(`/api/biz/public/${encodeURIComponent(slug)}/posts/${encodeURIComponent(pid)}/comments`)))).comments,
   comment: async (slug: string, pid: string, body: { name: string; text: string; website?: string }) => (await read<{ comment: { id: string; name: string; text: string; at: string; owner?: boolean } }>(await fetch(getApiUrl(`/api/biz/public/${encodeURIComponent(slug)}/posts/${encodeURIComponent(pid)}/comments`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))).comment,
+  submitForm: async (slug: string, sid: string, body: { values: Record<string, string>; website?: string }) => read<{ ok: boolean }>(await fetch(getApiUrl(`/api/biz/public/${encodeURIComponent(slug)}/forms/${encodeURIComponent(sid)}`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })),
   order: async (slug: string, body: { name: string; contact: string; note?: string; items: Array<{ productId: string; qty: number }>; website?: string }) => read<{ ok: boolean; total: number }>(await fetch(getApiUrl(`/api/biz/public/${encodeURIComponent(slug)}/order`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })),
   pay: async (slug: string, body: { name: string; phone: string; items?: Array<{ productId: string; qty: number }>; amount?: number; website?: string }) => read<{ ref: string; total: number }>(await fetch(getApiUrl(`/api/biz/public/${encodeURIComponent(slug)}/pay`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })),
   payStatus: async (slug: string, ref: string) => read<{ state: 'pending' | 'success' | 'failed' }>(await fetch(getApiUrl(`/api/biz/public/${encodeURIComponent(slug)}/pay/${encodeURIComponent(ref)}`))),
@@ -59,6 +60,19 @@ export const ownerApi = {
   addRecurring: async (id: string, body: { name: string; amount: number; every: 'month' | 'week'; on: number; category: string }) => read(await authFetch(`/api/biz/${id}/recurring`, json('POST', body))),
   setRecurring: async (id: string, rid: string, body: { paused?: boolean; remove?: boolean }) => read(await authFetch(`/api/biz/${id}/recurring/${rid}`, json('PATCH', body))),
   updateEntry: async (id: string, eid: string, body: Record<string, unknown>) => read<{ entry: LedgerEntry }>(await authFetch(`/api/biz/${id}/ledger/${eid}/edit`, json('PATCH', body))),
+  trackers: async (id: string) => (await read<{ trackers: TrackerInfo[] }>(await authFetch(`/api/biz/${id}/trackers`))).trackers,
+  addFeature: async (id: string, kind: string, lang: 'en' | 'rw') => read(await authFetch(`/api/biz/${id}/features/${kind}`, json('POST', { lang }))),
+  createTracker: async (id: string, body: Record<string, unknown>) => read(await authFetch(`/api/biz/${id}/trackers`, json('POST', body))),
+  deleteTracker: async (id: string, tid: string) => { const r = await authFetch(`/api/biz/${id}/trackers/${tid}`, json('DELETE')); if (!r.ok) await read(r); },
+  records: async (id: string, tid: string) => read<{ tracker: TrackerInfo; records: TrackerRecordInfo[] }>(await authFetch(`/api/biz/${id}/trackers/${tid}/records`)),
+  addRecord: async (id: string, tid: string, body: { values: Record<string, string>; status?: string }) => read(await authFetch(`/api/biz/${id}/trackers/${tid}/records`, json('POST', body))),
+  updateRecord: async (id: string, rid: string, body: { status?: string; values?: Record<string, string> }) => read(await authFetch(`/api/biz/${id}/records/${rid}`, json('PATCH', body))),
+  deleteRecord: async (id: string, rid: string) => { const r = await authFetch(`/api/biz/${id}/records/${rid}`, json('DELETE')); if (!r.ok) await read(r); },
+  sections: async (id: string) => (await read<{ sections: SectionInfo[] }>(await authFetch(`/api/biz/${id}/sections`))).sections,
+  saveSection: async (id: string, body: Record<string, unknown>) => read(await authFetch(`/api/biz/${id}/sections`, json('POST', body))),
+  moveSection: async (id: string, sid: string, dir: number) => read(await authFetch(`/api/biz/${id}/sections/${sid}/move`, json('POST', { dir }))),
+  removeSection: async (id: string, sid: string) => { const r = await authFetch(`/api/biz/${id}/sections/${sid}`, json('DELETE')); if (!r.ok) await read(r); },
+  setLang: async (id: string, lang: 'en' | 'rw') => read(await authFetch(`/api/biz/${id}/lang`, json('PUT', { lang }))),
   agent: async (id: string) => (await read<{ agent: AgentSettings }>(await authFetch(`/api/biz/${id}/agent`))).agent,
   setAgent: async (id: string, body: Partial<AgentSettings>) => (await read<{ agent: AgentSettings }>(await authFetch(`/api/biz/${id}/agent`, json('PUT', body)))).agent,
   secrets: async (id: string) => read<SecretsStatus>(await authFetch(`/api/biz/${id}/secrets`)),
