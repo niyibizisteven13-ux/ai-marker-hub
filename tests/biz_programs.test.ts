@@ -153,7 +153,7 @@ test('privacy: a pass belongs to its holder, another business cannot read it, st
   await assert.rejects(passView(svc, other.slug, j.token), (e: any) => e.status === 401, 'a sign-in only works on its own business page');
   await assert.rejects(passView(svc, biz.slug, 'x'.repeat(30)), (e: any) => e.status === 401); await assert.rejects(passView(svc, biz.slug, 'short'), (e: any) => e.status === 401);
   for (const call of [() => svc.programs('intruder', biz.id), () => svc.members('intruder', biz.id), () => svc.redeem('intruder', biz.id, { code: j.code }), () => svc.today('intruder', biz.id), () => svc.saveProgram('intruder', biz.id, LUNCH)]) await assert.rejects(call(), (e: any) => e.status === 404);
-  const stored = JSON.stringify([...kv.data.entries()]); assert.ok(!stored.includes(j.token), 'only the hash of the session is stored'); assert.ok(!stored.includes('4821'), 'the passcode is stored only as a salted hash');
+  const stored = JSON.stringify([...kv.data.entries()]); assert.ok(!stored.includes(j.token), 'only the hash of the session is stored'); assert.ok(!stored.includes('"4821"') && !/passcode|"pin"/i.test(stored), 'the passcode is stored only as a salted hash');
   await svc.setPublished('o', biz.id, false); await assert.rejects(passView(svc, biz.slug, j.token), (e: any) => e.status === 404); assert.equal(await svc.publicBySlug(biz.slug), null);
 });
 
