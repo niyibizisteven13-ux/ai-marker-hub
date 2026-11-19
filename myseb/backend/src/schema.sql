@@ -111,3 +111,17 @@ CREATE TABLE IF NOT EXISTS link_room_members (
   opened integer,
   PRIMARY KEY (room, member_hash)
 );
+
+CREATE TABLE IF NOT EXISTS managed_rooms (
+  code text PRIMARY KEY, host_hash text NOT NULL, title text NOT NULL,
+  policy jsonb NOT NULL, activities jsonb NOT NULL DEFAULT '[]', revision integer NOT NULL DEFAULT 1,
+  starts_at timestamptz NOT NULL, ends_at timestamptz NOT NULL,
+  closed boolean NOT NULL DEFAULT false
+);
+CREATE TABLE IF NOT EXISTS managed_members (
+  room text REFERENCES managed_rooms(code) ON DELETE CASCADE,
+  id uuid NOT NULL DEFAULT gen_random_uuid(), token_hash text NOT NULL,
+  name text NOT NULL, seen timestamptz NOT NULL DEFAULT now(),
+  applied integer NOT NULL DEFAULT 0, request text, reply text, released boolean NOT NULL DEFAULT false,
+  PRIMARY KEY(room,token_hash), UNIQUE(room,id)
+);

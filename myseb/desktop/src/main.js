@@ -254,7 +254,8 @@ let linkRoomWindow;
 ipcMain.handle('open-link-room', (event, view) => {
   if (event.sender !== win.webContents || exam || joiningExam) return;
   if (linkRoomWindow) return linkRoomWindow.focus();
-  linkRoomWindow = require('./linkRoom').openRoom(win, cfg.apiBase, view === 'direct' ? 'direct' : 'join');
+  linkRoomWindow = view === 'managed' ? require('./managedRoom').openManagedRoom(win, cfg.apiBase)
+    : require('./linkRoom').openRoom(win, cfg.apiBase, view === 'direct' ? 'direct' : 'join');
   linkRoomWindow.on('closed', () => { linkRoomWindow = null; });
 });
 

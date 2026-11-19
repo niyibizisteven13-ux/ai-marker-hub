@@ -96,3 +96,5 @@ $('checkUpdate').onclick = () => { dismissedUpdateVersion = undefined; window.my
 
 document.getElementById('directLink').onclick = () => window.myseb.openLinkRoom('direct');
 document.getElementById('liveRoom').onclick = () => window.myseb.openLinkRoom('join');
+
+document.getElementById('managedRoom').onclick = () => window.myseb.openLinkRoom('managed');
