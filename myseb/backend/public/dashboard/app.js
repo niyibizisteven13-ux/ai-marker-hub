@@ -105,7 +105,7 @@ async function refresh() {
   let d; try { d = await api('/exams/' + current.id + '/monitor'); } catch { return; }
   $('counts').replaceChildren(...['IN_EXAM', 'PAUSED', 'LEFT', 'ENDED'].map((s) => el('span', { className: 'pill ' + s, textContent: `${s.replace('_', ' ')}: ${d.counts[s]}` })));
   $('empty').hidden = d.students.length > 0;
-  $('rows').replaceChildren(...d.students.map((s) => {
+  $('rows').replaceChildren(...[...d.students].sort((a, b) => (b.risk?.score || 0) - (a.risk?.score || 0)).map((s) => {
     const end = el('button', { className: 'danger', textContent: 'End Exam', disabled: s.status === 'ENDED' });
     end.onclick = async () => { if (confirm('End the exam for ' + s.student_name + '?')) { await api('/sessions/' + s.id + '/end', { method: 'POST' }); refresh(); } };
     const resume = el('button', { textContent: 'Resume', hidden: !(s.status === 'PAUSED' || s.status === 'LEFT') });
@@ -115,6 +115,7 @@ async function refresh() {
       el('td', { textContent: s.student_name }),
       el('td', {}, el('span', { className: 'pill ' + s.status, textContent: s.status.replace('_', ' ') })),
       el('td', { textContent: s.client_type + (s.platform ? ' · ' + s.platform : '') }),
+      el('td', {}, el('span', { className: 'risk ' + (s.risk?.level || 'low'), textContent: s.risk ? s.risk.level + ' · ' + s.risk.score : '—', title: (s.risk?.reasons || []).join('\n') || 'Nothing recorded' }), s.risk?.reasons?.length ? el('div', { className: 'why', textContent: s.risk.reasons[0] }) : ''),
       el('td', {}, v), el('td', { textContent: s.last_violation || '—' }),
       el('td', { textContent: s.status === 'ENDED' ? (s.end_reason || '') : s.seen_ago + 's ago' }),
       el('td', {}, el('div', { className: 'row-actions' }, resume, end)));

@@ -9,6 +9,7 @@ import { notify, roomVersion, subscribe } from './events.js';
 import { noticeFor, setNotice } from './notices.js';
 import { captureEvidence, evidenceCounts, evidenceOf } from './evidence.js';
 import { analyzeFormUrl, cleanDone, cleanKeyParam, cleanOrigins, examKey, lockFor, withKey } from './forms.js';
+import { assess } from './integrity.js';
 import { getControls, overview as adminOverview, retentionDays, saveControls } from './admin.js';
 
 export const api = express.Router();
@@ -176,10 +177,18 @@ async function buildMonitor(id, withFrames) {
             (SELECT type FROM violations v WHERE v.session_id=s.id ORDER BY v.id DESC LIMIT 1) AS last_violation
        FROM exam_sessions s WHERE s.exam_id=$1 ORDER BY s.started_at`, [id]);
   const counts = { IN_EXAM: 0, PAUSED: 0, LEFT: 0, ENDED: 0 };
+  const byType = new Map();
+  for (const v of (await q('SELECT session_id, type, count(*)::int AS n FROM violations WHERE exam_id=$1 GROUP BY session_id, type', [id])).rows) {
+    if (!byType.has(v.session_id)) byType.set(v.session_id, {});
+    byType.get(v.session_id)[v.type] = v.n;
+  }
+  // One device used by two different students AT THE SAME TIME (lab computers that students use one after another are fine) (a second person sitting the test on someone else's laptop, or a shared login).
+  const shared = new Set((await q(`SELECT s.id FROM exam_sessions s WHERE s.exam_id=$1 AND EXISTS (SELECT 1 FROM exam_sessions o WHERE o.exam_id=s.exam_id AND o.device_id=s.device_id AND lower(o.student_name) <> lower(s.student_name) AND o.started_at < COALESCE(s.ended_at, now()) AND s.started_at < COALESCE(o.ended_at, now()))`, [id])).rows.map((r) => r.id));
   const students = rows.map((r) => {
     counts[r.status]++;
+    const risk = assess(byType.get(r.id), { sharedDevice: shared.has(r.id) });
     const l = r.status === 'ENDED' ? null : getLive(r.id);
-    return { ...r, aside_seconds: getAside(r.id), live: l ? { question: l.question, camera: l.camera, screen_state: l.screenState, frame: withFrames && ex.live_faces ? l.frame : null, frame_age: l.frameAt ? Math.round((Date.now() - l.frameAt) / 1000) : null, screen: withFrames && ex.live_faces ? l.screen : null, screen_age: l.screenAt ? Math.round((Date.now() - l.screenAt) / 1000) : null } : null };
+    return { ...r, risk, aside_seconds: getAside(r.id), live: l ? { question: l.question, camera: l.camera, screen_state: l.screenState, frame: withFrames && ex.live_faces ? l.frame : null, frame_age: l.frameAt ? Math.round((Date.now() - l.frameAt) / 1000) : null, screen: withFrames && ex.live_faces ? l.screen : null, screen_age: l.screenAt ? Math.round((Date.now() - l.screenAt) / 1000) : null } : null };
   });
   return { exam: { id: ex.id, title: ex.title, status: ex.status, live_faces: ex.live_faces, live_mode: ex.live_mode, live_sound: ex.live_sound, live_source: ex.live_source, allow_web: ex.allow_web, web_strict: ex.web_strict, web_devices: ex.web_devices, multi_face: ex.multi_face, id_check: ex.id_check, leave_action: ex.leave_action }, counts, students };
 }
