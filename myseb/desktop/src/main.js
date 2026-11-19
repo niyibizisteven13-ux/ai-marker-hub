@@ -30,7 +30,13 @@ const PARTITION = 'myseb-exam';                      // in-memory: nothing from 
 // Programs that show the exam to someone else or record it. Matched on the exact program name (no .exe). Add more in config.json "blockedProcesses".
 // Zoom/Teams are NOT listed: many lecturers proctor with them. Add them in config.json if you do not.
 const DEFAULT_BLOCKED = ['teamviewer', 'teamviewer_service', 'anydesk', 'rustdesk', 'ultraviewer', 'parsec', 'parsecd', 'vncviewer', 'vncserver', 'winvnc', 'tightvnc',
-  'remoting_host', 'obs', 'obs64', 'obs-studio', 'bandicam', 'camtasia', 'snagit32', 'snagiteditor', 'sharex', 'screenrec', 'quickassist', 'msra', 'mstsc'];
+  'remoting_host', 'obs', 'obs64', 'obs-studio', 'bandicam', 'camtasia', 'snagit32', 'snagiteditor', 'sharex', 'screenrec', 'quickassist', 'msra', 'mstsc',
+  // Stealth AI answer helpers and screen-sharing "assistants" that draw over the exam.
+  'cluely', 'interviewcoder', 'finalround', 'chatgpt', 'claude', 'copilot', 'perplexity',
+  'chrome_remote_desktop_host', 'remotepc', 'splashtop', 'splashtopsos', 'dwagent', 'supremo', 'ammyy', 'aweray', 'todesk', 'sunloginclient',
+  'screencastify', 'loom', 'xsplit', 'streamlabs'];
+// Virtual machines show a guest tools service. A student inside a VM can run anything the host does without MySEB seeing it.
+const VM_PROCESSES = ['vmtoolsd', 'vmwaretray', 'vmwareuser', 'vboxservice', 'vboxtray', 'vboxclient', 'qemu-ga', 'prl_tools', 'prl_cc', 'xenservice', 'vmsrvc', 'vmusrvc'];
 
 function runningPrograms() {
   return new Promise((resolve) => {
@@ -43,11 +49,16 @@ function runningPrograms() {
     });
   });
 }
+const reportedOnce = new Set();   // a VM or remote session does not change mid-test: tell the lecturer once, not every check
 async function checkEnvironment() {
   if (!exam || exam.status === 'ENDED') return;
   if (screen.getAllDisplays().length > 1) sendViolation('extra_display', { displays: screen.getAllDisplays().length });
-  const bad = (await runningPrograms()).filter((n) => cfg.blockedProcesses.includes(n));
+  const running = await runningPrograms();
+  const bad = running.filter((n) => cfg.blockedProcesses.includes(n));
   if (bad.length) sendViolation('forbidden_app', { apps: [...new Set(bad)].slice(0, 5) });
+  if (!reportedOnce.has('vm') && running.some((n) => VM_PROCESSES.includes(n))) { reportedOnce.add('vm'); sendViolation('virtual_machine', { how: 'guest tools running' }); }
+  // Windows: a remote desktop session sets SESSIONNAME to RDP-Tcp#n. The exam would be on someone else's screen.
+  if (!reportedOnce.has('rdp') && process.platform === 'win32' && /^RDP-/i.test(process.env.SESSIONNAME || '')) { reportedOnce.add('rdp'); sendViolation('remote_session', { how: 'remote desktop' }); }
 }
 
 /* ------------------------------------------------------------------ config + identity */
@@ -147,7 +158,7 @@ async function finishSubmitted() {
   try { await post('/api/finish', { reason: 'submitted' }); } catch { /* the heartbeat still sees the end */ }
   applyStatus({ status: 'ENDED', reason: 'submitted' });
 }
-function stopExam() { clearInterval(watchTimer); clearInterval(hbTimer); clearTimeout(blurTimer); hbTimer = null; exam = null; }
+function stopExam() { clearInterval(watchTimer); clearInterval(hbTimer); clearTimeout(blurTimer); hbTimer = null; exam = null; reportedOnce.clear(); }
 
 /* ------------------------------------------------------------------ keyboard rules (every web contents, incl. the exam <webview>) */
 function blockedKey(input) {

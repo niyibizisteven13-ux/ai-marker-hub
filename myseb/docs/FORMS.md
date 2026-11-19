@@ -27,3 +27,13 @@ MySEB locks the device to that site's own address (add extra sites if it needs t
 
 ## Where it is
 Backend `myseb/backend/src/forms.js` (providers, analysis, exam key), routes in `routes.js` (`POST /exams`, `GET /forms/analyze`, `GET /exams/:id/form-keys`), tests in `test/forms.test.js`; desktop `desktop/src/formLock.js` and `main.js`; mobile `lib/screens/exam_screen.dart`. Not covered yet: the Chrome extension (low security, unchanged), and camera proctoring inside a third-party form (the camera is driven by the exam page, which a form tool does not provide).
+
+## Integrity score (who to look at first)
+
+The live room and dashboard show a **Risk** badge (low, medium, high) for every student, sorted highest first. Hover it to see why.
+It adds up what MySEB recorded: screen recording, blocked apps (remote control, recorders, stealth AI helpers), a second screen,
+a virtual machine, a remote desktop session, blocked sites, leaving the exam and more. Repeats count less, a weak connection alone never
+makes anyone "high", and a device used by **two different students at the same time** is flagged.
+
+It is a triage aid, not a verdict: always look at the reasons and the evidence before acting. Limits: a student can still use a second
+physical device that MySEB cannot see; process checks rely on program names; VM detection catches common guest tools only.

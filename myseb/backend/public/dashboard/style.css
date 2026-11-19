@@ -23,3 +23,7 @@ dialog{border:1px solid var(--line);border-radius:12px;background:var(--card);co
 @media (max-width:640px){table,thead,tbody,tr,th,td{display:block}thead{display:none}tr{border-bottom:2px solid var(--line);padding:6px 0}td{border:0;padding:3px 8px}}
 
 .formInfo{grid-column:1/-1;border:1px solid var(--line);border-radius:10px;padding:10px 12px}.formInfo p{margin:0 0 6px}.formInfo ul{margin:6px 0;padding-left:18px}.formInfo details{margin-top:8px}.formInfo textarea{width:100%}
+
+.risk{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600;background:#e2e8f0;color:#334155}
+.risk.medium{background:#fef3c7;color:#92400e}.risk.high{background:#fee2e2;color:#991b1b}
+.why{font-size:11px;color:#64748b;margin-top:2px;max-width:200px}
