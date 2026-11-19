@@ -209,3 +209,13 @@ Object.assign(RW, {
   'Code shown at the business': 'Kode iri ku bucuruzi',
 });
 Object.assign(RW, { 'Verified': 'Yemejwe' });
+Object.assign(RW, { 'Open': 'Fungura' });
+Object.assign(RW, {
+  'Tap to see what this means': 'Kanda urebe icyo bisobanura',
+  'Verified by Bwenge': 'Byemejwe na Bwenge',
+  'has the Bwenge verified badge.': 'afite ikimenyetso cya Bwenge cyo kwemezwa.',
+  'A real person stands behind this page and can be reached.': 'Hari umuntu nyawe uri inyuma y’uru rupapuro kandi ashobora kuboneka.',
+  'The owner paid a one-time fee to be verified.': 'Nyiri urupapuro yishyuye rimwe kugira ngo yemezwe.',
+  'The badge shows who is behind the page. It does not mean Bwenge endorses the business or its products.': 'Ikimenyetso kigaragaza uri inyuma y’urupapuro. Ntibivuga ko Bwenge yemeza ubucuruzi cyangwa ibicuruzwa byabwo.',
+  'Get the verified badge for your business': 'Fata ikimenyetso cyo kwemezwa ku bucuruzi bwawe',
+});

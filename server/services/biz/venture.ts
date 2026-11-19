@@ -16,9 +16,9 @@ export const venturePage = (site: string = SITE()) => ({
   tagline: 'AI in our context',
   about: '4biz builds AI that fits how we live and work. Three products, one aim: help people and small businesses learn, keep their records straight and reach new markets.\n\nMySEB runs secure online exams. Bwenge AI is a study and work assistant that understands our context, in English and Kinyarwanda. Bwenge4biz gives every business a page, a notebook for sales and stock, programs such as meal cards and passes, and an assistant that helps it grow.',
   products: [
-    { name: 'MySEB', description: 'Secure online exams for lecturers: a live room to watch the class, checks against cheating and results you can trust.' },
-    { name: 'Bwenge AI', description: 'Your study and work assistant, in English and Kinyarwanda: answers, documents, research and marking, made for our context.' },
-    { name: 'Bwenge4biz', description: 'A page for your business, a notebook for sales and stock, programs like meal cards, a closing report every day and an assistant that helps you grow.' },
+    { name: 'MySEB', url: `${site}/myseb`, description: 'Secure online exams for lecturers: a live room to watch the class, checks against cheating and results you can trust.' },
+    { name: 'Bwenge AI', url: `${site}/`, description: 'Your study and work assistant, in English and Kinyarwanda: answers, documents, research and marking, made for our context.' },
+    { name: 'Bwenge4biz', url: `${site}/biz`, description: 'A page for your business, a notebook for sales and stock, programs like meal cards, a closing report every day and an assistant that helps you grow.' },
   ],
   sections: [
     { type: 'links', title: 'Our products', items: [
@@ -58,7 +58,7 @@ export interface VentureSpec {
   tagline: string;
   /** The main description (what the venture is and who it is for). */
   about: string;
-  products?: Array<{ name: string; description?: string; priceRwf?: number | null }>;
+  products?: Array<{ name: string; description?: string; priceRwf?: number | null; /** Where the product or service lives (https): the page shows an Open button to it. */ url?: string }>;
   /** "What we help with": short headed points. */
   helps?: Array<{ title: string; text?: string }>;
   links?: Array<{ title: string; text?: string; url?: string }>;
@@ -89,13 +89,13 @@ export function fourbizArt(dir: string | null = artDirectory()): VentureArt | nu
   return { ...(logo ? { logo } : {}), ...(cover ? { cover } : {}), products, prefix: '4biz-' };
 }
 
-export interface VentureDeps { grantBadge?: (ownerId: string) => Promise<void>; /** The founder's WhatsApp number, shown as the contact. */ whatsapp?: string; /** Publish the page now (the 4biz example does; Bwenge AI only when the owner said so). */ publish?: boolean }
+export interface VentureDeps { grantBadge?: (ownerId: string) => Promise<void>; /** The founder's WhatsApp number, shown as the contact. */ whatsapp?: string; /** Publish the page now (the 4biz example does; Bwenge AI only when the owner said so). */ publish?: boolean; /** Draw a logo, a banner and product pictures when the spec brings none (default true). */ design?: boolean }
 export interface VentureResult { url: string; created: boolean; products: number; sections: number; verified: boolean; published: boolean; pictures: number }
 
 /** The 4biz page as a spec. */
 export const fourbizSpec = (site: string = SITE()): VentureSpec => { const v = venturePage(site); return {
   name: v.name, slug: VENTURE_SLUG, category: v.category, theme: v.theme, tagline: v.tagline, about: v.about, website: site, products: v.products,
-  helps: v.sections[1].items!.map((x) => ({ title: x.title, text: x.text })), links: v.sections[0].items!.map((x) => ({ title: x.title, text: x.text, url: x.url })), faq: v.sections[2].items!.map((x) => ({ title: x.title, text: x.text! })), rw: v.rw, art: fourbizArt(),
+  helps: v.sections[1].items!.map((x) => ({ title: x.title, text: x.text })), links: v.sections[0].items!.map((x) => ({ title: x.title, text: x.text, url: x.url })), faq: v.sections[2].items!.map((x) => ({ title: x.title, text: x.text! })), rw: v.rw, art: fourbizArt() ?? undefined,
 }; };
 
 /**
@@ -109,11 +109,13 @@ export async function ensureVenturePage(svc: BizService, ownerId: string, spec: 
   if (!biz) { biz = await svc.create(ownerId, { name: spec.name, ...(slug ? { slug } : {}), category: spec.category ?? 'other' }); created = true; }
   const whatsapp = spec.whatsapp ?? deps.whatsapp;
   await svc.update(ownerId, biz.id, { name: spec.name, ...(spec.category ? { category: spec.category } : {}), ...(spec.theme ? { theme: spec.theme } : {}), tagline: spec.tagline, about: spec.about, ...(whatsapp ? { whatsapp } : {}), ...(spec.website ? { website: spec.website } : {}) });
+  // No pictures brought: draw them (a monogram logo, a banner, one picture per product) in the page's theme, unless the caller said not to.
+  if (spec.art === undefined && deps.design !== false && (spec.products?.length ?? 0) > 0) { const { renderVentureArt } = await import('./ventureArt.js'); spec = { ...spec, art: await renderVentureArt({ name: spec.name, tagline: spec.tagline, theme: spec.theme, products: (spec.products ?? []).map((p) => ({ name: p.name, description: p.description })) }) }; }
   const productIds: Record<string, string> = {}; const current = (await svc.list(ownerId)).find((b) => b.id === biz!.id)!.products;
   for (const p of spec.products ?? []) {
     const existing = current.find((x) => x.name.toLowerCase() === p.name.toLowerCase());
-    if (existing) { await svc.updateProduct(ownerId, biz.id, existing.id, { description: p.description ?? '', available: true, hidden: false, ...(p.priceRwf !== undefined ? { price: p.priceRwf } : {}) }); productIds[p.name] = existing.id; }
-    else productIds[p.name] = (await svc.addProduct(ownerId, biz.id, { name: p.name, price: p.priceRwf ?? null, description: p.description })).id;
+    if (existing) { await svc.updateProduct(ownerId, biz.id, existing.id, { description: p.description ?? '', available: true, hidden: false, ...(p.priceRwf !== undefined ? { price: p.priceRwf } : {}), ...(p.url !== undefined ? { url: p.url } : {}) }); productIds[p.name] = existing.id; }
+    else productIds[p.name] = (await svc.addProduct(ownerId, biz.id, { name: p.name, price: p.priceRwf ?? null, description: p.description, ...(p.url ? { url: p.url } : {}) })).id;
   }
   // Pictures: the logo, the banner and one for each product. An image already uploaded under the same name is reused; an old version of the design is removed.
   let pictures = 0;

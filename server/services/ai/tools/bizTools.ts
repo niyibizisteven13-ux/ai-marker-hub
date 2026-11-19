@@ -1,4 +1,4 @@
-import type { Tool } from '../types.js';
+import type { Tool, ToolServices } from '../types.js';
 import { err } from './helpers.js';
 import type { BizService } from '../../biz/service.js';
 import { BizError } from '../../biz/service.js';
@@ -19,7 +19,7 @@ const linkOf = (b: Business) => `${site()}/b/${b.slug}`;
 const money = (n: number | null) => (n === null ? 'ask for price' : `${n.toLocaleString('en-US')} RWF`);
 const wa = (b: Business) => `https://wa.me/?text=${encodeURIComponent(`${b.name}${b.tagline ? ` · ${b.tagline}` : ''}\n${linkOf(b)}`)}`;
 
-export function bizTools(getSvc: () => Promise<BizService> | BizService = async () => (await import('../../biz/runtime.js')).bizService()): Tool[] {
+export function bizTools(getSvc: () => Promise<BizService> | BizService = async () => (await import('../../biz/runtime.js')).bizService(), services?: ToolServices): Tool[] {
   const svc = async () => getSvc();
   const failure = (e: unknown) => (e instanceof BizError || e instanceof MediaError ? err(e.message) : err('That did not work. Please try again.'));
   /** The business the user means: the only one, or the one whose page name or name matches `business`. */
@@ -71,14 +71,14 @@ export function bizTools(getSvc: () => Promise<BizService> | BizService = async 
   };
   const addProduct: Tool = {
     definition: { name: 'biz_add_product', description: 'Add a product or menu item to the page. Price in whole RWF (leave out for "ask for price"). Example: "add tomatoes 1,200 per kg" gives name "Tomatoes", price 1200, unit "kg".',
-      parameters: { type: 'object', required: ['name'], properties: { business: BUSINESS, name: { type: 'string' }, price: { type: 'number' }, unit: { type: 'string' }, description: { type: 'string' } } } },
+      parameters: { type: 'object', required: ['name'], properties: { business: BUSINESS, name: { type: 'string' }, price: { type: 'number' }, unit: { type: 'string' }, description: { type: 'string' }, link: { type: 'string', description: 'An https link to this product or service: the page then shows an Open button to it instead of the order button.' } } } },
     async execute(input, ctx) {
-      try { const b = await pick(ctx.userId, input.business); if ('error' in b) return err(b.error); const p = await (await svc()).addProduct(ctx.userId, b.id, { name: input.name, price: input.price, unit: input.unit, description: input.description }); return { text: `Added ${p.name} at ${money(p.price)}${p.unit ? ` per ${p.unit}` : ''}.` }; } catch (e) { return failure(e); }
+      try { const b = await pick(ctx.userId, input.business); if ('error' in b) return err(b.error); const p = await (await svc()).addProduct(ctx.userId, b.id, { name: input.name, price: input.price, unit: input.unit, description: input.description, ...(input.link ? { url: input.link } : {}) }); return { text: `Added ${p.name} at ${money(p.price)}${p.unit ? ` per ${p.unit}` : ''}.` }; } catch (e) { return failure(e); }
     },
   };
   const changeProduct: Tool = {
     definition: { name: 'biz_change_product', description: 'Change or remove a product: new price, new name, out of stock / back in stock (available), hide it from the page (hidden), or remove it. Name the product the way the user did; if several match, ask which.',
-      parameters: { type: 'object', required: ['product'], properties: { business: BUSINESS, product: { type: 'string', description: 'The product name or id.' }, name: { type: 'string' }, price: { type: 'number' }, unit: { type: 'string' }, description: { type: 'string' }, stock: { type: 'number', description: 'Units in stock (private, for low-stock alerts).' }, lowAt: { type: 'number', description: 'Alert when stock is at or below this.' }, available: { type: 'boolean' }, hidden: { type: 'boolean' }, remove: { type: 'boolean' } } } },
+      parameters: { type: 'object', required: ['product'], properties: { business: BUSINESS, product: { type: 'string', description: 'The product name or id.' }, name: { type: 'string' }, price: { type: 'number' }, unit: { type: 'string' }, description: { type: 'string' }, link: { type: 'string', description: 'An https link to this product or service (shown as an Open button); an empty string removes it.' }, stock: { type: 'number', description: 'Units in stock (private, for low-stock alerts).' }, lowAt: { type: 'number', description: 'Alert when stock is at or below this.' }, available: { type: 'boolean' }, hidden: { type: 'boolean' }, remove: { type: 'boolean' } } } },
     async execute(input, ctx) {
       try {
         const b = await pick(ctx.userId, input.business); if ('error' in b) return err(b.error); const q = String(input.product).trim().toLowerCase();
@@ -86,7 +86,7 @@ export function bizTools(getSvc: () => Promise<BizService> | BizService = async 
         if (!hits.length) return err(`No product matches "${input.product}". Products: ${b.products.map((p) => p.name).join(', ') || 'none'}.`);
         if (hits.length > 1) return err(`Several products match: ${hits.map((p) => p.name).join(', ')}. Ask which one.`);
         const p = hits[0]; if (input.remove === true) { await (await svc()).removeProduct(ctx.userId, b.id, p.id); return { text: `Removed ${p.name}.` }; }
-        const patch: Record<string, unknown> = {}; for (const k of ['name', 'price', 'unit', 'description', 'available', 'hidden', 'stock', 'lowAt'] as const) if (input[k] !== undefined) patch[k] = input[k];
+        const patch: Record<string, unknown> = {}; for (const k of ['name', 'price', 'unit', 'description', 'available', 'hidden', 'stock', 'lowAt'] as const) if (input[k] !== undefined) patch[k] = input[k]; if (input.link !== undefined) patch.url = input.link;
         if (!Object.keys(patch).length) return err('Nothing to change was given.');
         const u = await (await svc()).updateProduct(ctx.userId, b.id, p.id, patch); return { text: `Updated ${u.name}: ${money(u.price)}${u.available ? '' : ', out of stock'}${u.hidden ? ', hidden from the page' : ''}.` };
       } catch (e) { return failure(e); }
@@ -450,17 +450,27 @@ export function bizTools(getSvc: () => Promise<BizService> | BizService = async 
   const venture: Tool = {
     definition: { name: 'biz_venture', description: "Builds (or refreshes) a VENTURE PAGE: one public page that presents a venture and its products under one aim, like \"AI in our context\" for 4biz (MySEB, Bwenge AI, Bwenge4biz). Use it when someone says they have a venture, startup, company or several products and want a page for it. Gather in a short chat, then call once: name; the one-line aim (aim); the main description (what it is and who it is for, plain words); the products (each a name and one line, optional price_rwf); what it helps with (three short points, for example growth, records, reaching new markets); links (title, short text, https url, for example each product's page); a few FAQ (question, answer); the WhatsApp number to contact; and Kinyarwanda words (rw) when they want the page in Kinyarwanda. Everything on the page is PUBLIC: never put private notes, customer details or money records in it, and never invent facts or numbers about the venture: ask. It makes the page private first; set publish true ONLY after the owner has read it and said to publish. Running it again with the same name or slug refreshes the page and never duplicates products or sections. The blue verified badge is not something you give: it is a one-time 1,000 RWF purchase in Upgrade → Verified badge (an administrator can also grant it); tell the owner so if they ask for it.",
       parameters: { type: 'object', required: ['name', 'aim', 'description'], properties: { name: { type: 'string' }, slug: { type: 'string', description: 'The page name in the link, for example 4biz (letters, numbers, dashes).' }, aim: { type: 'string', description: 'The one-line aim shown under the name.' }, description: { type: 'string', description: 'The main description, up to 1500 characters.' }, category: { type: 'string', enum: ['shop', 'restaurant', 'salon', 'farm', 'services', 'school', 'health', 'transport', 'craft', 'other'] }, theme: { type: 'string', enum: ['gold', 'teal', 'green', 'blue', 'rose', 'violet', 'ink'] },
-        products: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, description: { type: 'string' }, price_rwf: { type: 'number' } } } }, helps: { type: 'array', items: { type: 'object', properties: { title: { type: 'string' }, text: { type: 'string' } } } }, links: { type: 'array', items: { type: 'object', properties: { title: { type: 'string' }, text: { type: 'string' }, url: { type: 'string' } } } }, faq: { type: 'array', items: { type: 'object', properties: { question: { type: 'string' }, answer: { type: 'string' } } } },
-        whatsapp: { type: 'string' }, website: { type: 'string' }, rw: { type: 'object', description: 'Kinyarwanda words: tagline, about, and products as { "Product name": "description" }.', properties: { tagline: { type: 'string' }, about: { type: 'string' }, products: { type: 'object' } } }, publish: { type: 'boolean', description: 'true only after the owner said to publish.' } } } },
+        products: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, description: { type: 'string' }, price_rwf: { type: 'number' }, link: { type: 'string', description: 'https link to this product or service: the page shows an Open button to it.' } } } }, helps: { type: 'array', items: { type: 'object', properties: { title: { type: 'string' }, text: { type: 'string' } } } }, links: { type: 'array', items: { type: 'object', properties: { title: { type: 'string' }, text: { type: 'string' }, url: { type: 'string' } } } }, faq: { type: 'array', items: { type: 'object', properties: { question: { type: 'string' }, answer: { type: 'string' } } } },
+        whatsapp: { type: 'string' }, website: { type: 'string' }, rw: { type: 'object', description: 'Kinyarwanda words: tagline, about, and products as { "Product name": "description" }.', properties: { tagline: { type: 'string' }, about: { type: 'string' }, products: { type: 'object' } } }, publish: { type: 'boolean', description: 'true only after the owner said to publish.' }, design: { type: 'boolean', description: 'Draw a logo, a banner and a picture for every product (default true). Set false only if the owner wants to add their own photos.' }, for_email: { type: 'string', description: 'ADMINISTRATOR ONLY: the login email of ANOTHER account to build the page for. Leave out to build it for the person you are talking to.' }, give_badge: { type: 'boolean', description: 'ADMINISTRATOR ONLY: also give the account the blue verified badge, only when the administrator clearly asked for it.' } } } },
     async execute(input, ctx) {
       try {
         const { ensureVenturePage } = await import('../../biz/venture.js'); const s = await svc();
-        const r = await ensureVenturePage(s, ctx.userId, { name: String(input.name ?? ''), slug: input.slug ? String(input.slug) : undefined, category: input.category, theme: input.theme, tagline: String(input.aim ?? ''), about: String(input.description ?? ''), whatsapp: input.whatsapp, website: input.website,
-          products: (Array.isArray(input.products) ? input.products : []).map((p: any) => ({ name: String(p?.name ?? ''), description: p?.description, priceRwf: p?.price_rwf === undefined ? undefined : Number(p.price_rwf) })).filter((p: any) => p.name),
+        // Another account, or the badge, is for the platform administrator only (checked on every call).
+        let owner = ctx.userId; let who = '';
+        if (input.for_email || input.give_badge === true) {
+          const a = services?.admin; if (!a || !(await a.isAdmin(ctx.userId).catch(() => false))) return err('Only the platform administrator can build a page for another account or give the verified badge. I can build one for you.');
+          if (input.for_email) { const em = String(input.for_email).trim().toLowerCase(); const u = await a.findUserByEmail?.(em); if (!u) return err(`No account has the email ${em}. The person must sign up first.`); owner = u.id; who = u.name || em; }
+        }
+        const r = await ensureVenturePage(s, owner, { name: String(input.name ?? ''), slug: input.slug ? String(input.slug) : undefined, category: input.category, theme: input.theme, tagline: String(input.aim ?? ''), about: String(input.description ?? ''), whatsapp: input.whatsapp, website: input.website,
+          products: (Array.isArray(input.products) ? input.products : []).map((p: any) => ({ name: String(p?.name ?? ''), description: p?.description, priceRwf: p?.price_rwf === undefined ? undefined : Number(p.price_rwf), url: p?.link ? String(p.link) : undefined })).filter((p: any) => p.name),
           helps: Array.isArray(input.helps) ? input.helps : [], links: Array.isArray(input.links) ? input.links : [], faq: (Array.isArray(input.faq) ? input.faq : []).map((x: any) => ({ title: String(x?.question ?? ''), text: String(x?.answer ?? '') })).filter((x: any) => x.title && x.text),
-          rw: input.rw && typeof input.rw === 'object' ? input.rw : undefined }, { publish: input.publish === true }, site());
-        return { text: `${r.created ? 'Created' : 'Refreshed'} the venture page: ${r.products} product(s), ${r.sections} section(s)${input.rw ? ', with Kinyarwanda words' : ''}. ${r.published ? `It is published: ${r.url}` : `It is still private (only you can see it); say "publish" when you have read it. Link when published: ${r.url}`}. The verified badge is bought in Upgrade → Verified badge (1,000 RWF, once).` };
-      } catch (e) { return failure(e); }
+          rw: input.rw && typeof input.rw === 'object' ? input.rw : undefined }, { publish: input.publish === true, design: input.design !== false, ...(input.give_badge === true && services?.admin?.setVerifiedBadge ? { grantBadge: async (id: string) => { await services.admin!.setVerifiedBadge!(id, true, ctx.userId); } } : {}) }, site());
+        await services?.audit?.(ctx.userId, 'CHAT_VENTURE_PAGE', 'biz', String(input.slug || input.name), { otherAccount: owner !== ctx.userId, badge: r.verified }).catch(() => undefined);
+        return { text: `${r.created ? 'Created' : 'Refreshed'} the venture page${who ? ` for ${who}` : ''}: ${r.products} product(s), ${r.pictures} picture(s), ${r.sections} section(s)${input.rw ? ', with Kinyarwanda words' : ''}${r.verified ? ', and the blue verified badge was given' : ''}. ${r.published ? `It is published: ${r.url}` : `It is still private (only you can see it); say "publish" when you have read it. Link when published: ${r.url}`}. The verified badge is bought in Upgrade → Verified badge (1,000 RWF, once).` };
+      } catch (e) {
+        if (input.for_email && e instanceof BizError && (e as any).code === 'UPGRADE_REQUIRED') return err('That account is on the free plan, and the business dashboard needs a paid plan. Give them a plan first (Admin → Billing → Record a purchase), then run this again.');
+        return failure(e);
+      }
     },
   };
   const planStatus: Tool = {

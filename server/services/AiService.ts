@@ -351,6 +351,8 @@ export const bwengeAgent = createAiAgent({
     },
     admin: {
       isAdmin: async (userId) => (await prisma.user.findUnique({ where: { id: userId }, select: { role: true } }))?.role === 'ADMIN',
+      findUserByEmail: async (email) => { const u = await prisma.user.findFirst({ where: { email: { equals: email.trim().toLowerCase(), mode: 'insensitive' } }, select: { id: true, name: true } }); return u ? { id: u.id, name: u.name ?? '' } : null; },
+      setVerifiedBadge: async (userId, active, by) => { await (await import('./billing/badge.js')).setBadge(userId, active, by); },
       pendingPayments: async () => (await (await import('./mySebAccess.js')).listRequests('pending', 20)).map((r) => ({ id: r.id, name: r.name, email: r.email, plan: r.plan, note: r.note, createdAt: r.createdAt })),
       decidePayment: async (id, approve, by, grant) => {
         const r = await (await import('./mySebAccess.js')).decideRequest(id, approve, by, grant);
