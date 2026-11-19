@@ -5,7 +5,7 @@ import { loadPages } from './pages.js';
 import { cropRegion, preprocessPage, type PageQuality } from './preprocess.js';
 import { recognizePage, type Region } from './recognize.js';
 import { ocrLanguagesFromEnv, reviewThreshold, summarize, verifyPage, type IndependentOcr, type ReviewThreshold, type VerifiedElement } from './verify.js';
-import { mergeTileReadings, planTiles, shouldTile, tileToPage, type Tile, type TileElement, type TilingMode } from './tiling.js';
+import { mergeTileReadings, planBands, planTiles, shouldTile, tileToPage, type Tile, type TileElement, type TilingMode } from './tiling.js';
 import { checkMath, collectAssignments } from './mathcheck.js';
 import { mapPool, pageConcurrency, visionCalls } from '../../utils/concurrency.js';
 
@@ -14,11 +14,17 @@ import { mapPool, pageConcurrency, visionCalls } from '../../utils/concurrency.j
  * structure + independent checks → structured, source-linked result with review flags.
  */
 
-export const PIPELINE_VERSION = 'bwenge-docai-1.4.0';
+export const PIPELINE_VERSION = 'bwenge-docai-1.5.0';
 
 /** A full-page reading that is worth re-reading in close-ups: unclear writing, or nothing found on a large page. */
 export function needsCloseUp(page: { elements: Array<{ legibility: string; uncertainSpans: unknown[] }> }): boolean {
   return !page.elements.length || page.elements.some((e) => e.legibility !== 'clear' || e.uncertainSpans.length > 0);
+}
+
+/** Should this page get a deliberate second reading? Handwriting is where a confident first reading is most often wrong. */
+export function wantSecondRead(mode: 'off' | 'auto' | 'always', page: { elements: Array<{ handwritten: boolean }> }): boolean {
+  if (mode === 'off' || !page.elements.length) return false;
+  return mode === 'always' || page.elements.some((e) => e.handwritten);
 }
 
 export interface ProcessedPage {
@@ -36,6 +42,8 @@ export interface ProcessedPage {
   needsReview: boolean;
   /** Close-up pass statistics when the page was tiled. */
   tiling?: { tiles: number; replaced: number; agreed: number; added: number; duplicatesRemoved: number };
+  /** True when the close-up pass was a deliberate second reading (bands) of a page small enough to need none, not a close-up of a large page. */
+  secondRead?: boolean;
 }
 
 export interface DocumentResult {
@@ -68,6 +76,12 @@ export interface PipelineOptions {
   maxTilesPerPage?: number;
   reviewThreshold?: ReviewThreshold;
   ocrLanguages?: string[];
+  /**
+   * A deliberate second reading of pages that are too small for close-ups, to catch mistakes the first reading is confident about.
+   * 'auto' reads handwritten pages twice (the page, then two framed bands); 'always' every page; 'off' (default) never. Where the readings
+   * differ the element is flagged, with both readings kept. Costs about three times the model calls of one reading on those pages.
+   */
+  secondRead?: 'off' | 'auto' | 'always';
   /** Photo cleanup (crop to the sheet, even out lighting). On by default; off only to measure what it is worth. */
   cleanup?: boolean;
   signal?: AbortSignal;
@@ -88,6 +102,7 @@ function textLayerElements(text: string): VerifiedElement[] {
 export async function processDocument(data: Buffer, filename: string, deps: PipelineDeps, opts: PipelineOptions = {}): Promise<DocumentResult> {
   const { pages: src, format, totalPages } = await loadPages(data, filename, { maxPages: opts.maxPages, pdfScale: Number(process.env.DOC_PDF_SCALE) > 0 ? Number(process.env.DOC_PDF_SCALE) : 3 });
   const threshold = opts.reviewThreshold ?? reviewThreshold();
+  const secondReadMode: 'off' | 'auto' | 'always' = opts.secondRead ?? ((process.env.DOC_SECOND_READ as 'off' | 'auto' | 'always') || 'off');
   const tilingMode: TilingMode = opts.tiling ?? ((process.env.DOC_TILING as TilingMode) || 'auto');
   const usage = { input: 0, output: 0 };
   const pages: ProcessedPage[] = [];
@@ -123,9 +138,9 @@ export async function processDocument(data: Buffer, filename: string, deps: Pipe
     const modelImage = await sharp(pre.processed).resize({ width: MODEL_MAX_SIDE, height: MODEL_MAX_SIDE, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 90 }).toBuffer();
     const full = vision(() => recognizePage(deps.adapter, modelImage, 'image/jpeg', sp.page, { model: deps.model, fallbackModel: deps.fallbackModel, languageHint: opts.languageHint, signal: opts.signal }));
     const plan = () => planTiles(pre.width, pre.height, { maxTiles: opts.maxTilesPerPage ?? (Number(process.env.DOC_MAX_TILES_PER_PAGE) || 4) });
-    const readTiles = (tiles: Tile[]) => Promise.all(tiles.map(async (t) => {
+    const readTiles = (tiles: Tile[], enlarge = false) => Promise.all(tiles.map(async (t) => {
       const crop = await sharp(pre.processed).extract({ left: t.x, top: t.y, width: t.width, height: t.height })
-        .resize({ width: MODEL_MAX_SIDE, height: MODEL_MAX_SIDE, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 92 }).toBuffer();
+        .resize({ width: MODEL_MAX_SIDE, height: MODEL_MAX_SIDE, fit: 'inside', withoutEnlargement: !enlarge }).jpeg({ quality: 92 }).toBuffer();
       if (opts.signal?.aborted) throw opts.signal.reason;
       const tr = await vision(() => recognizePage(deps.adapter, crop, 'image/jpeg', sp.page, {
         model: deps.model, fallbackModel: deps.fallbackModel, languageHint: opts.languageHint, signal: opts.signal,
@@ -154,6 +169,13 @@ export async function processDocument(data: Buffer, filename: string, deps: Pipe
         tiles = plan();
         tileRead = await readTiles(tiles);
       }
+    }
+    // A page too small for close-ups still gets a second, independent look when it is handwritten (or when asked for): any difference is flagged.
+    let secondRead = false;
+    if (!tiles.length && wantSecondRead(secondReadMode, r.page)) {
+      tiles = planBands(pre.width, pre.height);
+      tileRead = await readTiles(tiles, true);
+      secondRead = true;
     }
     usedModel = true;
     usage.input += r.usage.input;
@@ -190,7 +212,7 @@ export async function processDocument(data: Buffer, filename: string, deps: Pipe
     return {
       page: sp.page, source: 'recognition', width: pre.width, height: pre.height, deskewDegrees: pre.deskewDegrees, transforms: pre.transforms, quality,
       elements: v.elements.map((e) => ({ ...e, id: `p${sp.page}-${e.id}` })), readingOrder: v.readingOrder.map((id) => `p${sp.page}-${id}`),
-      languages: r.page.languages, notes: [...r.page.notes, ...v.pageFlags, ...quality.warnings], needsReview: false, ...(tiling ? { tiling } : {}),
+      languages: r.page.languages, notes: [...r.page.notes, ...v.pageFlags, ...quality.warnings], needsReview: false, ...(tiling ? { tiling } : {}), ...(secondRead ? { secondRead } : {}),
     };
   });
   pages.push(...processed);
@@ -226,7 +248,8 @@ export async function processDocument(data: Buffer, filename: string, deps: Pipe
   }
   if (totalPages > src.length) limitations.add(`Only the first ${src.length} of ${totalPages} pages were processed.`);
   if (pages.some((p) => p.source === 'recognition' && !p.tiling && Math.max(p.width, p.height) > MODEL_MAX_SIDE)) limitations.add(`Pages larger than ${MODEL_MAX_SIDE} px were read at reduced size without close-up tiles (tiling was off or not needed by the auto rule).`);
-  if (pages.some((p) => p.tiling)) limitations.add('Dense pages were also read in overlapping close-up tiles. Where the two readings differ the element is flagged; the close-up reading is used when the element lies inside one tile, and the other reading is kept as an alternate.');
+  if (pages.some((p) => p.secondRead)) limitations.add('Handwritten pages were read twice (the whole page, then two framed bands). Where the two readings differ the element is flagged for review with both readings kept; two readings agreeing is stronger evidence than one, not proof.');
+  if (pages.some((p) => p.tiling && !p.secondRead)) limitations.add('Dense pages were also read in overlapping close-up tiles. Where the two readings differ the element is flagged; the close-up reading is used when the element lies inside one tile, and the other reading is kept as an alternate.');
   limitations.add(`Review policy: elements with ${threshold === 'medium' ? 'any' : 'high-severity'} uncertainty signals are flagged (DOC_REVIEW_THRESHOLD). Calibrate this on real handwriting with npm run eval:documents.`);
   return {
     pipelineVersion: PIPELINE_VERSION,
