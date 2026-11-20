@@ -1,9 +1,32 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Send, CheckCircle2, Link2, Unlink, Loader2, RefreshCw, ExternalLink } from 'lucide-react';
+import { Send, CheckCircle2, Link2, Unlink, Loader2, RefreshCw, ExternalLink, ShieldCheck, Store, ArrowUpRight } from 'lucide-react';
+import { setPin, usePins, type Pin } from '../../utils/sidebarPrefs';
 import { authFetch } from '../../utils/authFetch';
 import BizConnection from './BizConnection';
 
 type TelegramConnection = { connected: boolean; chatId: string | null; botUsername: string; botConfigured: boolean };
+
+/** MySEB and Ventures are not in the sidebar by default: add them here if you want a shortcut. */
+function SidebarShortcuts() {
+  const pins = usePins();
+  const rows: Array<{ id: Pin; icon: typeof Store; name: string; text: string; href: string }> = [
+    { id: 'myseb', icon: ShieldCheck, name: 'MySEB', text: 'Secure exams and live rooms for lecturers: your dashboard, tests and tasks.', href: '/lecturer' },
+    { id: 'ventures', icon: Store, name: 'Ventures (Bwenge4biz)', text: 'Your business or creator pages. They are always under Agents; add a shortcut to the main list too.', href: '/biz' },
+  ];
+  return (
+    <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)]">
+      <div className="border-b border-[var(--line)] px-6 py-4"><h3 className="font-display text-base font-semibold text-[var(--text)]">Sidebar shortcuts</h3><p className="text-xs text-[var(--muted)]">Choose what shows in the left sidebar. Bwenge4biz and Bwenge4profile are always under Agents.</p></div>
+      <ul className="divide-y divide-[var(--line)]">{rows.map((r) => { const Icon = r.icon; const on = pins[r.id]; return (
+        <li key={r.id} className="flex flex-wrap items-center gap-4 px-6 py-4">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--accent)]/15 text-[var(--accent)]"><Icon size={18} aria-hidden="true" /></span>
+          <div className="min-w-0 flex-1"><p className="text-sm font-semibold text-[var(--text)]">{r.name}</p><p className="text-xs text-[var(--muted)]">{r.text}</p></div>
+          <a href={r.href} className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--line)] px-3.5 py-2 text-xs font-medium text-[var(--text)] hover:bg-[var(--surface-2)]">Open <ArrowUpRight size={13} aria-hidden="true" /></a>
+          <button type="button" role="switch" aria-checked={on} aria-label={`Show ${r.name} in the sidebar`} onClick={() => setPin(r.id, !on)} className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${on ? 'bg-[var(--accent)]' : 'bg-[var(--surface-2)] ring-1 ring-[var(--line)]'}`}><span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${on ? 'left-[22px]' : 'left-0.5'}`} /></button>
+          <span className="w-24 text-xs text-[var(--muted)]">{on ? 'In the sidebar' : 'Not in the sidebar'}</span>
+        </li>); })}</ul>
+    </div>
+  );
+}
 
 export default function ConnectionsSection() {
   const [telegram, setTelegram] = useState<TelegramConnection>({ connected: false, chatId: null, botUsername: '@Bwengebot', botConfigured: false });
@@ -86,6 +109,7 @@ export default function ConnectionsSection() {
         <h2 className="text-xl font-normal text-[var(--text)] font-display">Connected Apps & Integrations</h2>
         <p className="mt-1 text-xs text-[var(--muted)]">Link your Bwenge account to Telegram for instant batch grading, forms, and AI companion notifications.</p>
       </div>
+      <SidebarShortcuts />
 
       <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-6 shadow-sm transition-all hover:border-[var(--accent)]/30">
         <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
