@@ -74,6 +74,7 @@ const TermsPage = lazyPage(() => import('./pages/TermsPage'));
 const GetAppPage = lazyPage(() => import('./pages/GetAppPage'));
 const BizPublicPage = lazyPage(() => import('./pages/BizPublicPage'));
 const BizStudioPage = lazyPage(() => import('./pages/BizStudioPage'));
+const MySebDashboardPage = lazyPage(() => import('./pages/MySebDashboardPage'));
 const PrivacyPage = lazyPage(() => import('./pages/PrivacyPage'));
 const LoginModal = React.lazy(() => import('./components/LoginModal'));
 const UpgradeModal = React.lazy(() => import('./components/UpgradeModal'));
@@ -1697,6 +1698,8 @@ export default function App() {
   if (authenticatedUser && liveMatch) {
     return <Suspense fallback={null}><LiveRoom kind={liveMatch[1] as 'form' | 'task'} id={decodeURIComponent(liveMatch[2])} onBack={() => { window.history.length > 1 ? window.history.back() : (window.location.href = liveMatch[1] === 'form' ? '/forms' : '/'); }} /></Suspense>;
   }
+  // The lecturer's MySEB dashboard: their rooms, tests and the assistant beside them.
+  if (authenticatedUser && /^\/lecturer\/?$/.test(window.location.pathname)) return <MySebDashboardPage onBack={() => { window.location.href = '/'; }} />;
   // The owner's studio for their business page: private.
   if (authenticatedUser && /^\/biz\/?$/.test(window.location.pathname)) return <Suspense fallback={null}><BizStudioPage onBack={() => { window.location.href = '/chat'; }} /></Suspense>;
   const studioMatch = window.location.pathname.match(/^\/forms\/([^/?#]+)\/edit\/?$/);
