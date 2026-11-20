@@ -2894,6 +2894,15 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
+    // MySEB as its own app: /ms (and the root of a myseb.<domain> host) is the same site with MySEB's own name, icon, colour and manifest in the head.
+    const mysebShell = async (req: express.Request, res: express.Response) => {
+      try {
+        const html = await fs.readFile(path.join(distPath, 'index.html'), 'utf8'); const { renderMySebShell } = await import('./server/services/mysebShell.js');
+        res.type('html').setHeader('Cache-Control', 'no-cache'); res.send(renderMySebShell(html, process.env.APP_BASE_URL || `${req.protocol}://${req.get('host')}`));
+      } catch { res.sendFile(path.join(distPath, 'index.html')); }
+    };
+    app.get('/', (req, res, next) => (/^myseb\./i.test(req.hostname) ? void mysebShell(req, res) : next()));
+    app.get(['/ms', '/ms/'], (req, res) => void mysebShell(req, res));
     app.use(express.static(distPath));
     app.get(['/forms/:id', '/apply/:id'], (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
     // A business page: the same app, with the business's own name, tagline and cover photo in the head so a link shared on WhatsApp looks right.
