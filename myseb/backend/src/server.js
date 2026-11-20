@@ -2,6 +2,7 @@ import express from 'express';
 import { updateRouter } from './updates.js';
 import { downloadRouter } from './downloads.js';
 import { favicon, markImg } from './brand.js';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config, safeEqual } from './config.js';
@@ -23,7 +24,12 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 export const app = express();
 app.set('trust proxy', process.env.TRUST_PROXY ? 1 : false);
 app.disable('x-powered-by');
-app.use((_req, res, next) => { res.set('X-Content-Type-Options', 'nosniff'); res.set('Referrer-Policy', 'no-referrer'); next(); });
+app.use((_req, res, next) => {
+  res.set('X-Content-Type-Options', 'nosniff'); res.set('Referrer-Policy', 'no-referrer');
+  res.set('Permissions-Policy', 'geolocation=(), payment=(), usb=()');
+  if (config.isProd) res.set('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
+  next();
+});
 
 // For a load balancer or an uptime monitor. /healthz: the process is alive. /readyz: and the database answers.
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
@@ -132,7 +138,12 @@ $('web').addEventListener('click',function(){var n=$('name').value.trim();if(!n)
 if (config.dashboardEnabled) app.use('/dashboard', express.static(path.join(here, '../public/dashboard'), {
   setHeaders: (res) => res.set('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'"),
 }));
-app.get('/', (_req, res) => (config.dashboardEnabled ? res.redirect(`${config.basePath}/dashboard/`) : res.json({ name: 'MySEB', ok: true })));
+// Public product page at "/" (links keep working behind a prefix such as /myseb).
+const siteHtml = fs.readFileSync(path.join(here, '../public/site/index.html'), 'utf8').replaceAll('__BASE__', config.basePath);
+if (config.dashboardEnabled) app.use('/site', express.static(path.join(here, '../public/site'), { index: false, maxAge: '1h' }));
+app.get('/', (_req, res) => (config.dashboardEnabled
+  ? res.set('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; style-src 'self'; frame-ancestors 'none'; base-uri 'none'").type('html').send(siteHtml)
+  : res.json({ name: 'MySEB', ok: true })));
 
 app.use((err, _req, res, _next) => {
   // A body that is too big or not JSON is the caller's mistake (4xx), not a server error.
