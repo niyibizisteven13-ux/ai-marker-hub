@@ -75,6 +75,9 @@ const GetAppPage = lazyPage(() => import('./pages/GetAppPage'));
 const BizPublicPage = lazyPage(() => import('./pages/BizPublicPage'));
 const BizStudioPage = lazyPage(() => import('./pages/BizStudioPage'));
 const MySebDashboardPage = lazyPage(() => import('./pages/MySebDashboardPage'));
+const MySebWelcome = lazyPage(() => import('./pages/MySebWelcome'));
+// MySEB as its own app: on a myseb.<domain> host the root is the app (/ms).
+if (typeof window !== 'undefined' && /^myseb\./i.test(window.location.hostname) && window.location.pathname === '/') window.history.replaceState({}, '', '/ms' + window.location.search);
 const PrivacyPage = lazyPage(() => import('./pages/PrivacyPage'));
 const LoginModal = React.lazy(() => import('./components/LoginModal'));
 const UpgradeModal = React.lazy(() => import('./components/UpgradeModal'));
@@ -1420,6 +1423,17 @@ export default function App() {
   // A student's private transcript: no account, the link is the key.
   const transcriptLink = /^\/t\/([\w-]{20,40})\/?$/.exec(window.location.pathname);
   if (transcriptLink) return <Suspense fallback={null}><TranscriptPage token={transcriptLink[1]} /></Suspense>;
+  // MySEB as its own app (/ms): its own front door when signed out, its own dashboard when signed in.
+  if (/^\/ms\/?$/.test(window.location.pathname)) {
+    if (authStatus === 'loading') return <div className="min-h-[100dvh] bg-[#0A1424]" />;
+    if (authenticatedUser) return <Suspense fallback={null}><MySebDashboardPage standalone onBack={() => { window.location.href = '/'; }} onSignOut={() => void handleLogout()} /></Suspense>;
+    return (
+      <Suspense fallback={null}>
+        <MySebWelcome onSignIn={() => { setIsSignUpMode(false); setLoginModalOpen(true); }} onSignUp={() => { setIsSignUpMode(true); setLoginModalOpen(true); }} />
+        {loginModalOpen && <LoginModal isOpen={loginModalOpen} onClose={() => { setLoginModalOpen(false); setIsSignUpMode(false); }} defaultIsSignUp={isSignUpMode} onLoginSuccess={(u) => { setAuthenticatedUser(u); setAuthStatus('authenticated'); setLoginModalOpen(false); setIsSignUpMode(false); }} />}
+      </Suspense>
+    );
+  }
   // Where students get MySEB (apps + Chrome extension).
   if (window.location.pathname === '/myseb') {
     return <Suspense fallback={null}><MySebRequired page /></Suspense>;

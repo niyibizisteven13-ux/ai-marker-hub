@@ -83,9 +83,9 @@ export default function ProfilePage({ business: b, mediaSrc, preview = false }: 
 
   return (
     <div className="min-h-[100dvh] bg-[#EEF0F3] font-sans text-[#0E1722]" style={{ ['--acc' as string]: theme.accent }}>
-      <div className="mx-auto max-w-3xl pb-28 sm:pb-10">
-        <header className="bg-white sm:mt-4 sm:overflow-hidden sm:rounded-3xl sm:shadow-sm">
-          <div className="relative h-32 w-full overflow-hidden sm:h-52" style={{ background: `linear-gradient(135deg, ${theme.accent}, #0E1722)` }}>
+      <div className="mx-auto max-w-3xl pb-28 sm:pb-10 lg:grid lg:max-w-6xl lg:grid-cols-[340px_minmax(0,1fr)] lg:items-start lg:gap-5 lg:px-4">
+        <header className="bg-white sm:mt-4 sm:overflow-hidden sm:rounded-3xl sm:shadow-sm lg:sticky lg:top-4 lg:max-h-[calc(100dvh-2rem)] lg:overflow-y-auto">
+          <div className="relative h-32 w-full overflow-hidden sm:h-52 lg:h-28" style={{ background: `linear-gradient(135deg, ${theme.accent}, #0E1722)` }}>
             {b.cover && <img src={mediaSrc(b.cover.id)} alt="" className="h-full w-full object-cover" />}
             <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/30 to-transparent" />
           </div>
@@ -94,7 +94,7 @@ export default function ProfilePage({ business: b, mediaSrc, preview = false }: 
               <span className="rounded-full bg-gradient-to-tr from-[var(--acc)] via-[#DB4F8E] to-[#F59E0B] p-[3px] shadow-lg">
                 <span className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-full border-[4px] border-white text-3xl font-bold sm:h-28 sm:w-28" style={{ background: theme.accent, color: theme.on }}>{b.logo ? <img src={mediaSrc(b.logo.id)} alt={b.name} className="h-full w-full object-cover" /> : initials(b.name)}</span>
               </span>
-              <div className="hidden gap-2 pb-1 sm:flex">{actions}</div>
+              <div className="hidden gap-2 pb-1 sm:flex lg:hidden">{actions}</div>
             </div>
             <h1 className="mt-3 flex flex-wrap items-center gap-2 font-display text-[26px] font-semibold leading-tight tracking-tight sm:text-3xl">{b.name}{b.verified && <VerifiedBadge size={22} />}</h1>
             {p.headline && <p className="mt-1 text-[16px] font-medium leading-snug text-[#344054] sm:text-[17px]">{p.headline}</p>}
@@ -103,15 +103,15 @@ export default function ProfilePage({ business: b, mediaSrc, preview = false }: 
             <dl className="mt-4 grid grid-cols-3 divide-x divide-[#EEF0F3] rounded-2xl border border-[#EEF0F3] bg-[#FAFBFC] py-3 text-center">
               {[[videoCount, 'Videos'], [timeline.length, 'Journey'], [posts.length, 'Posts']].map(([n, l]) => <div key={l as string}><dt className="sr-only">{tx(l as string)}</dt><dd className="font-display text-[22px] font-semibold leading-none">{n as number}</dd><p className="mt-1 text-[12px] font-medium text-[#667085]" aria-hidden="true">{tx(l as string)}</p></div>)}
             </dl>
-            <div className="mt-3 flex gap-2 sm:hidden">{actions}</div>
+            <div className="mt-3 flex flex-wrap gap-2 sm:hidden lg:flex">{actions}</div>
           </div>
-          <nav aria-label={tx('Sections')} className="flex gap-4 overflow-x-auto border-t border-[#EEF0F3] px-4 py-3.5 sm:px-8" style={{ scrollbarWidth: 'none' }}>
+          <nav aria-label={tx('Sections')} className="flex gap-4 overflow-x-auto border-t border-[#EEF0F3] px-4 py-3.5 sm:px-8 lg:flex-wrap lg:gap-x-3 lg:overflow-visible lg:px-4" style={{ scrollbarWidth: 'none' }}>
             {highlights.map(([id, label, Icon]) => <a key={id} href={`#${id}`} className="flex w-[68px] shrink-0 flex-col items-center gap-1.5 text-center"><span className="rounded-full bg-gradient-to-tr from-[var(--acc)] to-[#DB4F8E] p-[2px]"><span className="flex h-[58px] w-[58px] items-center justify-center rounded-full border-2 border-white bg-[#F4F6F8] text-[#0E1722]"><Icon size={22} aria-hidden="true" /></span></span><span className="text-[11.5px] font-medium text-[#344054]">{tx(label)}</span></a>)}
           </nav>
         </header>
 
-        <main className="space-y-2.5 px-4 pt-2.5 sm:space-y-4 sm:px-0 sm:pt-4">
-          {featured.length > 0 && <section id="watch" aria-label={tx('Featured videos')} className="-mx-4 scroll-mt-4 space-y-3 sm:mx-0"><h2 className={`${h2} px-4 sm:px-0`}>{tx('Watch me')}</h2><div className="grid gap-px bg-[#EEF0F3] sm:gap-3 sm:bg-transparent sm:grid-cols-2">{featured.map((m, k) => <div key={m.id} className="overflow-hidden bg-black sm:rounded-2xl sm:shadow-sm">{m.kind === 'video' ? <VideoPlayer media={m} src={mediaSrc} /> : <button type="button" onClick={() => setView({ items: featured, i: k })} className="block w-full"><img src={mediaSrc(m.id)} alt={m.caption ?? ''} className="w-full object-cover" /></button>}{m.caption && <p className="bg-white px-3.5 py-2.5 text-[14px] text-[#344054]">{m.caption}</p>}</div>)}</div></section>}
+        <main className="min-w-0 space-y-2.5 px-4 pt-2.5 sm:space-y-4 sm:px-0 sm:pt-4">
+          {featured.length > 0 && <section id="watch" aria-label={tx('Featured videos')} className="-mx-4 scroll-mt-4 space-y-3 sm:mx-0"><h2 className={`${h2} px-4 sm:px-0`}>{tx('Watch me')}</h2><div className="grid items-start gap-px bg-[#EEF0F3] sm:grid-cols-2 sm:gap-3 sm:bg-transparent">{featured.map((m, k) => <div key={m.id} className={`overflow-hidden bg-black sm:rounded-2xl sm:shadow-sm ${k === 0 && featured.length % 2 === 1 ? 'sm:col-span-2' : ''}`}>{m.kind === 'video' ? <VideoPlayer media={m} src={mediaSrc} /> : <button type="button" onClick={() => setView({ items: featured, i: k })} className="block w-full"><img src={mediaSrc(m.id)} alt={m.caption ?? ''} className="w-full object-cover" /></button>}{m.caption && <p className="bg-white px-3.5 py-2.5 text-[14px] text-[#344054]">{m.caption}</p>}</div>)}</div></section>}
 
           {b.about && <section className={panel}><h2 className={h2}>{tx('About me')}</h2><p className="mt-3 whitespace-pre-line text-[16px] leading-relaxed text-[#344054]">{b.about}</p></section>}
 
