@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import multer from 'multer';
 import { requireAuth } from '../../production/auth.js';
+import { bizMediaLimiter } from '../../production/rateLimiter.js';
 import { visitorKey } from '../services/appFeedback.js';
 import { bizService } from '../services/biz/runtime.js';
 import { BizError } from '../services/biz/service.js';
@@ -9,6 +10,7 @@ import { MediaError } from '../services/biz/media.js';
 import { FREE_LIMITS, MAX_IMAGE_BYTES, MAX_VIDEO_BYTES, MAX_VIDEO_MB, PAID_LIMITS, openNow } from '../services/biz/model.js';
 import { planFor } from '../services/billing/plans.js';
 import logger from '../utils/logger.js';
+import { pipeline } from 'node:stream/promises';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { getJwtSecret } from '../auth/secrets.js';
 import { openNow as openNowFor, publicView } from '../services/biz/model.js';
@@ -43,19 +45,28 @@ function validSignature(bizId: string, mediaId: string, exp: unknown, sig: unkno
   const want = Buffer.from(sign(bizId, mediaId, e)), got = Buffer.from(sig); return want.length === got.length && timingSafeEqual(want, got);
 }
 
-/** Streams a stored file with a Range answer when asked, so videos can be played and sought. */
-async function send(req: Request, res: Response, f: { mime: string; size: number; open: (range?: { start: number; end: number }) => Promise<{ stream: NodeJS.ReadableStream }> }, cache: string) {
+/**
+ * Streams a stored file the way a video player needs it: byte ranges, a validator so a repeat visit costs nothing (304), a year of caching when the address carries the
+ * file's revision (`?r=`), and the file closed the moment the viewer goes away (a player seeks and abandons many downloads).
+ */
+type Served = { mime: string; size: number; etag?: string; open: (range?: { start: number; end: number }) => Promise<{ stream: NodeJS.ReadableStream }> };
+async function send(req: Request, res: Response, f: Served, cache: string) {
   res.setHeader('Content-Type', f.mime); res.setHeader('Accept-Ranges', 'bytes'); res.setHeader('Cache-Control', cache);
   res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox"); res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  if (f.etag) { res.setHeader('ETag', f.etag); if (String(req.headers['if-none-match'] ?? '') === f.etag && !req.headers.range) { res.status(304); return res.end(); } }
   const m = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ''));
+  let range: { start: number; end: number } | undefined;
   if (m && (m[1] || m[2])) {
-    let start = m[1] ? Number(m[1]) : Math.max(0, f.size - Number(m[2])); let end = m[1] && m[2] ? Number(m[2]) : f.size - 1; end = Math.min(end, f.size - 1);
+    const start = m[1] ? Number(m[1]) : Math.max(0, f.size - Number(m[2])); let end = m[1] && m[2] ? Number(m[2]) : f.size - 1; end = Math.min(end, f.size - 1);
     if (!(start <= end) || start >= f.size) { res.status(416).setHeader('Content-Range', `bytes */${f.size}`); return res.end(); }
-    res.status(206); res.setHeader('Content-Range', `bytes ${start}-${end}/${f.size}`); res.setHeader('Content-Length', String(end - start + 1));
-    (await f.open({ start, end })).stream.pipe(res); return;
-  }
-  res.setHeader('Content-Length', String(f.size)); (await f.open()).stream.pipe(res);
+    range = { start, end }; res.status(206); res.setHeader('Content-Range', `bytes ${start}-${end}/${f.size}`); res.setHeader('Content-Length', String(end - start + 1));
+  } else res.setHeader('Content-Length', String(f.size));
+  const { stream } = await f.open(range); const close = () => { (stream as any).destroy?.(); };
+  res.on('close', close); stream.on('error', () => res.destroy());
+  await pipeline(stream as any, res).catch(() => undefined);
 }
+/** A year, because the address names the revision of the file; otherwise an hour (and a day for plain photos). */
+const mediaCache = (req: Request, kind: 'video' | 'image') => (/^\d{1,15}$/.test(String(req.query.r ?? '')) ? 'public, max-age=31536000, immutable' : kind === 'video' ? 'public, max-age=3600' : 'public, max-age=86400');
 
 export function createBizRouter(): Router {
   const r = Router();
@@ -67,9 +78,14 @@ export function createBizRouter(): Router {
     if (!b) return res.status(404).json({ error: 'This page is not available.' });
     res.setHeader('Cache-Control', 'no-cache'); res.json({ business: b, openNow: openNow(b.hours) });
   }));
-  r.get('/public/:slug/media/:mid', run(async (req, res) => {
-    const f = await svc().mediaFor(req.params.slug, req.params.mid); if (!f) return res.status(404).end();
-    await send(req, res, f, 'public, max-age=3600');
+  // Photos, videos, the light version of a video (?q=lq) and its poster picture (/poster). A viewer's player asks for many pieces of one video, so these have their own generous limit.
+  r.get('/public/:slug/media/:mid', bizMediaLimiter, run(async (req, res) => {
+    const f = await svc().mediaFor(req.params.slug, req.params.mid, req.query.q === 'lq' ? 'lq' : undefined); if (!f) return res.status(404).end();
+    await send(req, res, f, mediaCache(req, f.mime.startsWith('video/') ? 'video' : 'image'));
+  }));
+  r.get('/public/:slug/media/:mid/poster', bizMediaLimiter, run(async (req, res) => {
+    const f = await svc().mediaFor(req.params.slug, req.params.mid, 'poster'); if (!f) return res.status(404).end();
+    await send(req, res, f, mediaCache(req, 'image'));
   }));
   // The business's own installable app (a home-screen app that opens its page). Built only from public fields.
   r.get('/public/:slug/manifest.webmanifest', run(async (req, res) => {
@@ -112,7 +128,7 @@ export function createBizRouter(): Router {
 
   r.get('/owner-media/:bizId/:mid', run(async (req, res) => {
     if (!validSignature(req.params.bizId, req.params.mid, req.query.exp, req.query.sig)) return res.status(403).end();
-    const f = await svc().mediaById(req.params.bizId, req.params.mid); if (!f) return res.status(404).end();
+    const f = await svc().mediaById(req.params.bizId, req.params.mid, req.query.v === 'poster' ? 'poster' : req.query.v === 'lq' ? 'lq' : undefined); if (!f) return res.status(404).end();
     await send(req, res, f, 'private, max-age=600');
   }));
 
@@ -171,7 +187,7 @@ export function createBizRouter(): Router {
   }));
   r.patch('/:id/media/:mid', run(async (req, res) => res.json({ media: await svc().updateMedia(me(req), req.params.id, req.params.mid, req.body ?? {}) })));
   r.delete('/:id/media/:mid', run(async (req, res) => { await svc().removeMedia(me(req), req.params.id, req.params.mid); res.status(204).end(); }));
-  r.get('/:id/media-urls', run(async (req, res) => { const b = await svc().get(me(req), req.params.id); res.json({ urls: Object.fromEntries(b.media.map((m) => [m.id, signedMediaUrl(b.id, m.id)])) }); }));
+  r.get('/:id/media-urls', run(async (req, res) => { const b = await svc().get(me(req), req.params.id); res.json({ urls: Object.fromEntries(b.media.flatMap((m) => [[m.id, signedMediaUrl(b.id, m.id)], ...(m.kind === 'video' && m.video?.poster ? [[`${m.id}:poster`, `${signedMediaUrl(b.id, m.id)}&v=poster`]] : [])])) }); }));
   r.get('/:id/preview', run(async (req, res) => { const b = await svc().get(me(req), req.params.id); res.json({ business: publicView(b), openNow: openNowFor(b.hours) }); }));
 
   r.get('/:id/posts', run(async (req, res) => res.json({ posts: await svc().posts(me(req), req.params.id) })));

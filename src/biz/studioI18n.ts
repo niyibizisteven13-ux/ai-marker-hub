@@ -235,3 +235,4 @@ Object.assign(SRW, {
   'Nobody had days left to refund.': 'Nta n’umwe wari ufite iminsi isigaye yo gusubizwa.',
 });
 Object.assign(SRW, { 'Link to this product or service': 'Rihuza n’iki gicuruzwa cyangwa serivisi', 'Link to it (optional): the page shows an Open button instead of Choose': 'Rihuza naryo (si ngombwa): urupapuro rugaragaza buto yo Gufungura aho kuba Hitamo', 'Link': 'Rihuza' });
+Object.assign(SRW, { 'Preparing…': 'Birimo gutegurwa…', 'Video (as uploaded)': 'Videwo (uko yoherejwe)' });

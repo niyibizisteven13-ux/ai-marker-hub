@@ -81,3 +81,21 @@ test('a feed video of about a minute (tens of MB) uploads over HTTP, and an over
   const huge = await fetch(`${base}/${id}/media`, { method: 'POST', headers: { Authorization: `Bearer ${owner}`, 'Content-Type': 'multipart/form-data; boundary=x', 'Content-Length': String(300 * 1024 * 1024) }, body: '--x--\r\n' }).catch(() => null);
   if (huge) { assert.equal(huge.status, 413); assert.match((await huge.json()).error, /up to 200 MB/); }
 });
+
+test('video delivery is steady: pieces on request, a validator (304) so a repeat costs nothing, a year of caching for an address that names its revision, and an abandoned download does not hurt the server', async () => {
+  const owner = await mkUser('biz-owner-stream'); const created = await (await call('/', { token: owner, body: { name: 'Stream Cafe', category: 'restaurant' } })).json(); const id = created.business.id, slug = created.business.slug;
+  await call(`/${id}`, { method: 'PATCH', token: owner, body: { about: 'Streaming test' } });
+  const big = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypmp42'), Buffer.alloc(3 * 1024 * 1024, 5)]);
+  const up = await (await call(`/${id}/media`, { token: owner, body: upload('long.mp4', big, 'video/mp4') })).json(); await call(`/${id}/publish`, { token: owner, body: { on: true } });
+  const url = `/public/${slug}/media/${up.media.id}`;
+  const first = await call(url); assert.equal(first.status, 200); const etag = first.headers.get('etag'); assert.match(etag ?? '', /^W\/"/); assert.equal(first.headers.get('cache-control'), 'public, max-age=3600'); await first.arrayBuffer();
+  const again = await call(url, { headers: { 'If-None-Match': etag! } }); assert.equal(again.status, 304, 'unchanged: nothing is sent again'); assert.equal((await again.arrayBuffer()).byteLength, 0);
+  const keep = await call(`${url}?r=1700000000000`); assert.equal(keep.headers.get('cache-control'), 'public, max-age=31536000, immutable', 'the revision in the address makes it safe to keep for a year'); await keep.arrayBuffer();
+  const piece = await call(url, { headers: { Range: 'bytes=1048576-2097151', 'If-None-Match': etag! } }); assert.equal(piece.status, 206, 'a player asking for a piece always gets the piece'); assert.equal(piece.headers.get('content-range'), `bytes 1048576-2097151/${big.length}`); assert.equal(Buffer.from(await piece.arrayBuffer()).length, 1048576);
+  const tail = await call(url, { headers: { Range: 'bytes=-100' } }); assert.equal(tail.status, 206); assert.equal(Buffer.from(await tail.arrayBuffer()).length, 100, 'the last 100 bytes: players read the end of a file to find its index');
+  assert.equal((await call(`${url}?q=lq`)).status, 404, 'no light version exists for this upload'); assert.equal((await call(`${url}/poster`)).status, 404, 'and no poster');
+  // a player abandons a download (a seek): the server carries on
+  const ac = new AbortController(); const r = await fetch(base + url, { signal: ac.signal }); const reader = r.body!.getReader(); await reader.read(); ac.abort(); await reader.cancel().catch(() => undefined);
+  const after = await call(url, { headers: { Range: 'bytes=0-9' } }); assert.equal(after.status, 206, 'still serving'); await after.arrayBuffer();
+  assert.equal((await call(`/public/${slug}/media/not-a-real-id`)).status, 404);
+});

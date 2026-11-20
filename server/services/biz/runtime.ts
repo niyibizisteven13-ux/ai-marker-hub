@@ -28,5 +28,24 @@ export async function bizAllowed(userId: string): Promise<boolean> {
   if (process.env.BIZ_REQUIRE_PAID !== 'true') return true;
   const p = await planFor(userId).catch(() => null); return !!p && PAID_PLANS.includes(p.id);
 }
-export const bizService = (): BizService => (svc ??= createBizService({ allowed: bizAllowed, kv: appSettingKv, notify: notifyOwner, syncAgenda, media: diskMediaStore(), isVerified: async (userId) => (await import('../billing/badge.js')).hasBadge(userId), isPaid: async (userId) => { const p = await planFor(userId).catch(() => null); return !!p && p.id !== 'FREE'; } }));
+/** Videos are made to play smoothly in the background (videoPipeline.ts). Started once, with the service; picks up videos that were still being prepared when the server last stopped. */
+let pipeline: import('./videoPipeline.js').VideoPipeline | null = null;
+export const bizService = (): BizService => {
+  if (svc) return svc;
+  const store = diskMediaStore();
+  const made = createBizService({
+    allowed: bizAllowed, kv: appSettingKv, notify: notifyOwner, syncAgenda, media: store,
+    isVerified: async (userId) => (await import('../billing/badge.js')).hasBadge(userId),
+    isPaid: async (userId) => { const p = await planFor(userId).catch(() => null); return !!p && p.id !== 'FREE'; },
+    ...(process.env.BIZ_VIDEO_PIPELINE === '0' ? {} : { onVideo: (job: { biz: string; id: string; ext: string }) => { void startPipeline(store, () => made).then((p) => p.enqueue(job)); } }),
+  });
+  svc = made;
+  if (process.env.NODE_ENV !== 'test' && process.env.BIZ_VIDEO_PIPELINE !== '0') setTimeout(() => { void startPipeline(store, () => made).then(async (p) => { for (const j of await made.pendingVideos().catch(() => [])) p.enqueue(j); }).catch(() => undefined); }, 20_000).unref?.();
+  return made;
+};
+async function startPipeline(store: import('./media.js').MediaStore, get: () => BizService) {
+  if (pipeline) return pipeline;
+  const [{ createVideoPipeline }, { default: logger }] = await Promise.all([import('./videoPipeline.js'), import('../../utils/logger.js')]);
+  return (pipeline = createVideoPipeline({ store, onDone: (biz, id, patch) => get().setVideoInfo(biz, id, patch), log: (m, x) => logger.info(`[biz-video] ${m}`, x) }));
+}
 export const setBizServiceForTests = (s: BizService | null) => { svc = s; };

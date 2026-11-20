@@ -219,3 +219,7 @@ Object.assign(RW, {
   'The badge shows who is behind the page. It does not mean Bwenge endorses the business or its products.': 'Ikimenyetso kigaragaza uri inyuma y’urupapuro. Ntibivuga ko Bwenge yemeza ubucuruzi cyangwa ibicuruzwa byabwo.',
   'Get the verified badge for your business': 'Fata ikimenyetso cyo kwemezwa ku bucuruzi bwawe',
 });
+Object.assign(RW, {
+  'Preparing this video': 'Turimo gutegura iyi videwo', 'It will play smoothly in a minute.': 'Izakina neza mu munota umwe.', 'Video': 'Videwo', 'Play': 'Kina', 'Pause': 'Hagarika', 'Replay': 'Subiramo', 'Mute': 'Hagarika ijwi', 'Unmute': 'Shyiraho ijwi', 'Seek': 'Jya ku gihe', 'Full screen': 'Ecran yose',
+  'This video could not be played.': 'Iyi videwo ntishobora gukina.', 'Try again': 'Ongera ugerageze', 'Slow connection: using a lighter version.': 'Interineti itinda: dukoresheje verisiyo yoroheje.', 'Loading': 'Birimo gufungura',
+});
