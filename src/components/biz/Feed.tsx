@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { VideoPlayer, frameFor } from './VideoPlayer';
 import { ChevronLeft, ChevronRight, Heart, Loader2, MessageCircle, Pin, Send, ShoppingBag } from 'lucide-react';
 import { publicApi } from '../../biz/api';
 import { rwf, type PublicBusiness, type PublicPost } from '../../biz/types';
@@ -15,6 +16,8 @@ const remembered = () => { try { return localStorage.getItem('bz-visitor-name') 
 
 export function Carousel({ items, src, onOpen, onDoubleTap }: { items: PublicPost['media']; src: (id: string) => string; onOpen: (i: number) => void; onDoubleTap: () => void }) {
   const tx = useTx();
+  // A post is as tall as its first picture: a portrait video gets a portrait frame, a landscape one a wide frame, photos stay square. Every slide fits inside it.
+  const first = items[0]; const shape = first?.kind === 'video' ? frameFor(first.video?.w, first.video?.h).aspect : 1;
   const ref = useRef<HTMLUListElement>(null); const [i, setI] = useState(0); const last = useRef(0);
   const go = (n: number) => { const el = ref.current; if (el) el.scrollTo({ left: n * el.clientWidth, behavior: 'smooth' }); };
   if (!items.length) return null;
@@ -22,8 +25,8 @@ export function Carousel({ items, src, onOpen, onDoubleTap }: { items: PublicPos
     <div className="group relative bg-[#F0F2F5]">
       <ul ref={ref} onScroll={(e) => { const el = e.currentTarget; setI(Math.round(el.scrollLeft / Math.max(1, el.clientWidth))); }} className="flex snap-x snap-mandatory overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
         {items.map((m, k) => (
-          <li key={m.id} className="aspect-square w-full shrink-0 snap-center">
-            {m.kind === 'video' ? <video src={`${src(m.id)}#t=0.1`} controls playsInline preload="metadata" className="h-full w-full bg-black object-contain" />
+          <li key={m.id} className="relative w-full shrink-0 snap-center" style={{ aspectRatio: String(shape), maxHeight: '85vh' }}>
+            {m.kind === 'video' ? <VideoPlayer media={m} src={src} fill />
               : <button type="button" aria-label={tx("Open photo")} className="block h-full w-full" onClick={() => { const t = Date.now(); if (t - last.current < 320) { onDoubleTap(); last.current = 0; } else { last.current = t; window.setTimeout(() => { if (last.current === t) onOpen(k); }, 330); } }}><img src={src(m.id)} alt={m.caption || ''} loading="lazy" draggable={false} className="h-full w-full object-cover" /></button>}
           </li>))}
       </ul>

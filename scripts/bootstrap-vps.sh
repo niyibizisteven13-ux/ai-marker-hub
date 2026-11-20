@@ -53,7 +53,7 @@ sshd -t && systemctl restart ssh
 echo "==> Updating system packages..."
 export DEBIAN_FRONTEND=noninteractive
 apt update && apt upgrade -y
-apt install -y ufw curl git ca-certificates gnupg postgresql postgresql-contrib nginx certbot python3-certbot-nginx
+apt install -y ufw curl git ca-certificates gnupg postgresql postgresql-contrib nginx ffmpeg certbot python3-certbot-nginx
 
 echo "==> Configuring UFW Firewall..."
 ufw default deny incoming

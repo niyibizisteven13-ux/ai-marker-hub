@@ -82,6 +82,33 @@ test('the other versions are served and cleaned up: light video and poster only 
   assert.equal(main.mime, 'video/mp4'); assert.equal(lq.mime, 'video/mp4'); assert.equal(poster.mime, 'image/jpeg'); assert.ok(lq.size < main.size); assert.match(main.etag, /^W\/"[\w-]+-\d+-\d+"$/); assert.notEqual(main.etag, lq.etag);
   assert.equal(await svc.mediaFor('serve-me', m.id, 'huge'), null, 'unknown versions do not exist'); assert.equal(await svc.mediaFor('serve-me', 'nope'), null);
   const piece = await main.open({ start: 0, end: 99 }); const chunks: Buffer[] = []; for await (const c of piece.stream as any) chunks.push(Buffer.from(c)); assert.equal(Buffer.concat(chunks).length, 100, 'a piece of 100 bytes');
-  await svc.unpublish?.('o', biz.id).catch(() => undefined); await svc.setPublished('o', biz.id, false); assert.equal(await svc.mediaFor('serve-me', m.id), null, 'unpublishing hides it at once, not after the cache runs out');
+  await svc.setPublished('o', biz.id, false); assert.equal(await svc.mediaFor('serve-me', m.id), null, 'unpublishing hides it at once, not after the cache runs out');
   await svc.removeMedia('o', biz.id, m.id); assert.deepEqual([...store.files.keys()].filter((k) => k.startsWith(biz.id)), [], 'the file, its light version and its poster are all gone');
+});
+
+import React from 'react';
+import { renderToString } from 'react-dom/server';
+import { VideoPlayer, frameFor, startQuality, videoUrls } from '../src/components/biz/VideoPlayer.js';
+
+test('frames: the whole video always fits; portrait sits in a 4:5 frame at most, square in a square, landscape in a wide frame; unknown shapes are treated as wide', () => {
+  assert.deepEqual(frameFor(720, 1280), { kind: 'portrait', aspect: 0.8 }); assert.deepEqual(frameFor(1080, 1350), { kind: 'portrait', aspect: 0.8 }); assert.equal(frameFor(1080, 1920).kind, 'portrait');
+  assert.deepEqual(frameFor(1080, 1080), { kind: 'square', aspect: 1 }); assert.equal(frameFor(1000, 1100).kind, 'square');
+  assert.deepEqual(frameFor(1280, 720), { kind: 'landscape', aspect: 1280 / 720 }); assert.equal(frameFor(1440, 1080).aspect, 1440 / 1080, 'a 4:3 video has a 4:3 frame: no empty bars'); assert.equal(frameFor(2560, 800).aspect, 1.91, 'an ultra-wide video is capped');
+  assert.deepEqual(frameFor(undefined, undefined), { kind: 'landscape', aspect: 16 / 9 }); assert.deepEqual(frameFor(0, 0), { kind: 'landscape', aspect: 16 / 9 });
+});
+
+test('which file to start with, and the addresses: light on slow or data-saving connections, the revision in every address so browsers may keep it for a year', () => {
+  assert.equal(startQuality(true, { effectiveType: '4g', downlink: 10 }), 'hq'); assert.equal(startQuality(true, { saveData: true }), 'lq'); assert.equal(startQuality(true, { effectiveType: '3g' }), 'lq'); assert.equal(startQuality(true, { effectiveType: '4g', downlink: 0.9 }), 'lq');
+  assert.equal(startQuality(false, { saveData: true }), 'hq', 'no light file: nothing to switch to'); assert.equal(startQuality(true, null), 'hq'); assert.equal(startQuality(true, undefined), 'hq');
+  assert.deepEqual(videoUrls('/api/biz/public/x/media/m1', { state: 'ready', lq: true, poster: true, rev: 17 }), { hq: '/api/biz/public/x/media/m1?r=17', lq: '/api/biz/public/x/media/m1?q=lq&r=17', poster: '/api/biz/public/x/media/m1/poster?r=17' });
+  assert.deepEqual(videoUrls('/m/1', { state: 'ready', raw: true }), { hq: '/m/1', lq: null, poster: null }); assert.deepEqual(videoUrls('/m/1', undefined), { hq: '/m/1', lq: null, poster: null }, 'an older video with no information still plays');
+});
+
+test('the player renders each state: preparing placeholder, a portrait frame with a poster behind it, an old video without information', () => {
+  const src = (id: string) => `/api/biz/public/x/media/${id}`;
+  const prep = renderToString(React.createElement(VideoPlayer, { media: { id: 'a', kind: 'video', video: { state: 'processing' } }, src })); assert.match(prep, /Preparing this video/); assert.match(prep, /role="status"/); assert.doesNotMatch(prep, /<video/, 'nothing to play yet');
+  const ok = renderToString(React.createElement(VideoPlayer, { media: { id: 'b', kind: 'video', caption: 'Our kitchen', video: { state: 'ready', w: 720, h: 1280, duration: 42, lq: true, poster: true, rev: 5 } }, src }));
+  assert.match(ok, /data-frame="portrait"/); assert.match(ok, /aspect-ratio:0\.8/); assert.match(ok, /<video[^>]*src="\/api\/biz\/public\/x\/media\/b\?r=5"/); assert.match(ok, /poster="\/api\/biz\/public\/x\/media\/b\/poster\?r=5"/); assert.match(ok, /playsInline|playsinline/i); assert.match(ok, /aria-label="Our kitchen"/); assert.match(ok, /0:00(<!-- -->)? \/ (<!-- -->)?0:42/); assert.match(ok, /blur-2xl/);
+  const old = renderToString(React.createElement(VideoPlayer, { media: { id: 'c', kind: 'video' }, src })); assert.match(old, /data-frame="landscape"/); assert.match(old, /<video[^>]*src="\/api\/biz\/public\/x\/media\/c"/);
+  const fill = renderToString(React.createElement(VideoPlayer, { media: { id: 'd', kind: 'video', video: { state: 'ready', w: 1000, h: 1000 } }, src, fill: true })); assert.match(fill, /absolute inset-0/); assert.doesNotMatch(fill, /aspect-ratio/, 'inside a post the post sets the shape');
 });
