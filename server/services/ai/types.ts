@@ -206,6 +206,10 @@ export interface ToolServices {
     pendingPayments(): Promise<Array<{ id: string; name: string; email: string; plan: string; note: string; createdAt: string }>>;
     decidePayment(id: string, approve: boolean, by: string, grant?: { months?: number; tests?: number }): Promise<{ ok: boolean; text: string }>;
     overview(): Promise<{ users: number; newUsers7d: number; pendingPayments: number; liveExams: number | null; liveStudents: number | null; subscribers: number }>;
+    /** Finds an account by its login email (for building a business page on someone else's account). */
+    findUserByEmail?(email: string): Promise<{ id: string; name: string } | null>;
+    /** Gives or takes back the blue verified badge. */
+    setVerifiedBadge?(userId: string, active: boolean, by: string): Promise<void>;
   };
   /** Universal output engine (server/services/outputs). */
   outputs?: {

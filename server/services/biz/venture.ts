@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { BizService } from './service.js';
 
 /**
@@ -13,9 +16,9 @@ export const venturePage = (site: string = SITE()) => ({
   tagline: 'AI in our context',
   about: '4biz builds AI that fits how we live and work. Three products, one aim: help people and small businesses learn, keep their records straight and reach new markets.\n\nMySEB runs secure online exams. Bwenge AI is a study and work assistant that understands our context, in English and Kinyarwanda. Bwenge4biz gives every business a page, a notebook for sales and stock, programs such as meal cards and passes, and an assistant that helps it grow.',
   products: [
-    { name: 'MySEB', description: 'Secure online exams for lecturers: a live room to watch the class, checks against cheating and results you can trust.' },
-    { name: 'Bwenge AI', description: 'Your study and work assistant, in English and Kinyarwanda: answers, documents, research and marking, made for our context.' },
-    { name: 'Bwenge4biz', description: 'A page for your business, a notebook for sales and stock, programs like meal cards, a closing report every day and an assistant that helps you grow.' },
+    { name: 'MySEB', url: `${site}/myseb`, description: 'Secure online exams for lecturers: a live room to watch the class, checks against cheating and results you can trust.' },
+    { name: 'Bwenge AI', url: `${site}/`, description: 'Your study and work assistant, in English and Kinyarwanda: answers, documents, research and marking, made for our context.' },
+    { name: 'Bwenge4biz', url: `${site}/biz`, description: 'A page for your business, a notebook for sales and stock, programs like meal cards, a closing report every day and an assistant that helps you grow.' },
   ],
   sections: [
     { type: 'links', title: 'Our products', items: [
@@ -55,7 +58,7 @@ export interface VentureSpec {
   tagline: string;
   /** The main description (what the venture is and who it is for). */
   about: string;
-  products?: Array<{ name: string; description?: string; priceRwf?: number | null }>;
+  products?: Array<{ name: string; description?: string; priceRwf?: number | null; /** Where the product or service lives (https): the page shows an Open button to it. */ url?: string }>;
   /** "What we help with": short headed points. */
   helps?: Array<{ title: string; text?: string }>;
   links?: Array<{ title: string; text?: string; url?: string }>;
@@ -63,14 +66,36 @@ export interface VentureSpec {
   whatsapp?: string; website?: string;
   /** Kinyarwanda words, when the owner gave them. */
   rw?: { tagline?: string; about?: string; products?: Record<string, string> };
+  /** The logo, the banner and a picture for each product. */
+  art?: VentureArt | null;
 }
-export interface VentureDeps { grantBadge?: (ownerId: string) => Promise<void>; /** The founder's WhatsApp number, shown as the contact. */ whatsapp?: string; /** Publish the page now (the 4biz example does; Bwenge AI only when the owner said so). */ publish?: boolean }
-export interface VentureResult { url: string; created: boolean; products: number; sections: number; verified: boolean; published: boolean }
+/** A picture for the page: its file name (with a version, so a new design replaces the old one) and its bytes. */
+export interface Art { name: string; data: Buffer }
+export interface VentureArt { logo?: Art; cover?: Art; /** By product name. */ products?: Record<string, Art>; /** Pictures whose name starts with this and are no longer wanted are removed (an old version of the design). */ prefix?: string }
+
+/** Where the finished images live (drawn by scripts/venture-art.mjs). Looks next to the working folder first, then next to the code. */
+export function artDirectory(): string | null {
+  const here = (rel: string) => { try { return fileURLToPath(new URL(rel, import.meta.url)); } catch { return ''; } };
+  for (const d of [join(process.cwd(), 'server/assets/venture'), here('../../assets/venture'), here('../server/assets/venture')]) if (d && existsSync(join(d, 'banner.jpg'))) return d;
+  return null;
+}
+const ART_VERSION = 'v1';
+/** The 4biz images: the Bwenge logo, a banner and one picture for each product. Null when the files are not there (the page is still made, without pictures). */
+export function fourbizArt(dir: string | null = artDirectory()): VentureArt | null {
+  if (!dir) return null;
+  const read = (file: string, name: string): Art | undefined => { try { return { name: `4biz-${name}-${ART_VERSION}${file.slice(file.lastIndexOf('.'))}`, data: readFileSync(join(dir, file)) }; } catch { return undefined; } };
+  const logo = read('logo.png', 'logo'); const cover = read('banner.jpg', 'banner');
+  const products: Record<string, Art> = {}; for (const [n, f, k] of [['MySEB', 'myseb.jpg', 'myseb'], ['Bwenge AI', 'bwenge-ai.jpg', 'bwenge-ai'], ['Bwenge4biz', 'bwenge4biz.jpg', 'bwenge4biz']] as const) { const a = read(f, k); if (a) products[n] = a; }
+  return { ...(logo ? { logo } : {}), ...(cover ? { cover } : {}), products, prefix: '4biz-' };
+}
+
+export interface VentureDeps { grantBadge?: (ownerId: string) => Promise<void>; /** The founder's WhatsApp number, shown as the contact. */ whatsapp?: string; /** Publish the page now (the 4biz example does; Bwenge AI only when the owner said so). */ publish?: boolean; /** Draw a logo, a banner and product pictures when the spec brings none (default true). */ design?: boolean }
+export interface VentureResult { url: string; created: boolean; products: number; sections: number; verified: boolean; published: boolean; pictures: number }
 
 /** The 4biz page as a spec. */
 export const fourbizSpec = (site: string = SITE()): VentureSpec => { const v = venturePage(site); return {
   name: v.name, slug: VENTURE_SLUG, category: v.category, theme: v.theme, tagline: v.tagline, about: v.about, website: site, products: v.products,
-  helps: v.sections[1].items!.map((x) => ({ title: x.title, text: x.text })), links: v.sections[0].items!.map((x) => ({ title: x.title, text: x.text, url: x.url })), faq: v.sections[2].items!.map((x) => ({ title: x.title, text: x.text! })), rw: v.rw,
+  helps: v.sections[1].items!.map((x) => ({ title: x.title, text: x.text })), links: v.sections[0].items!.map((x) => ({ title: x.title, text: x.text, url: x.url })), faq: v.sections[2].items!.map((x) => ({ title: x.title, text: x.text! })), rw: v.rw, art: fourbizArt() ?? undefined,
 }; };
 
 /**
@@ -84,11 +109,24 @@ export async function ensureVenturePage(svc: BizService, ownerId: string, spec: 
   if (!biz) { biz = await svc.create(ownerId, { name: spec.name, ...(slug ? { slug } : {}), category: spec.category ?? 'other' }); created = true; }
   const whatsapp = spec.whatsapp ?? deps.whatsapp;
   await svc.update(ownerId, biz.id, { name: spec.name, ...(spec.category ? { category: spec.category } : {}), ...(spec.theme ? { theme: spec.theme } : {}), tagline: spec.tagline, about: spec.about, ...(whatsapp ? { whatsapp } : {}), ...(spec.website ? { website: spec.website } : {}) });
+  // No pictures brought: draw them (a monogram logo, a banner, one picture per product) in the page's theme, unless the caller said not to.
+  if (spec.art === undefined && deps.design !== false && (spec.products?.length ?? 0) > 0) { const { renderVentureArt } = await import('./ventureArt.js'); spec = { ...spec, art: await renderVentureArt({ name: spec.name, tagline: spec.tagline, theme: spec.theme, products: (spec.products ?? []).map((p) => ({ name: p.name, description: p.description })) }) }; }
   const productIds: Record<string, string> = {}; const current = (await svc.list(ownerId)).find((b) => b.id === biz!.id)!.products;
   for (const p of spec.products ?? []) {
     const existing = current.find((x) => x.name.toLowerCase() === p.name.toLowerCase());
-    if (existing) { await svc.updateProduct(ownerId, biz.id, existing.id, { description: p.description ?? '', available: true, hidden: false, ...(p.priceRwf !== undefined ? { price: p.priceRwf } : {}) }); productIds[p.name] = existing.id; }
-    else productIds[p.name] = (await svc.addProduct(ownerId, biz.id, { name: p.name, price: p.priceRwf ?? null, description: p.description })).id;
+    if (existing) { await svc.updateProduct(ownerId, biz.id, existing.id, { description: p.description ?? '', available: true, hidden: false, ...(p.priceRwf !== undefined ? { price: p.priceRwf } : {}), ...(p.url !== undefined ? { url: p.url } : {}) }); productIds[p.name] = existing.id; }
+    else productIds[p.name] = (await svc.addProduct(ownerId, biz.id, { name: p.name, price: p.priceRwf ?? null, description: p.description, ...(p.url ? { url: p.url } : {}) })).id;
+  }
+  // Pictures: the logo, the banner and one for each product. An image already uploaded under the same name is reused; an old version of the design is removed.
+  let pictures = 0;
+  if (spec.art) {
+    const art = spec.art; const wanted = [art.logo, art.cover, ...Object.values(art.products ?? {})].filter((a): a is Art => !!a);
+    const mediaOf = async () => (await svc.list(ownerId)).find((b) => b.id === biz!.id)!.media;
+    if (art.prefix) for (const m of await mediaOf()) if (m.name.startsWith(art.prefix) && !wanted.some((a) => a.name === m.name)) await svc.removeMedia(ownerId, biz.id, m.id);
+    const put = async (a: Art) => { const have = (await mediaOf()).find((m) => m.name === a.name); if (have) return have.id; return (await svc.addMedia(ownerId, biz!.id, { name: a.name, data: a.data, gallery: false })).id; };
+    const patch: Record<string, unknown> = {}; if (art.logo) { patch.logoId = await put(art.logo); pictures++; } if (art.cover) { patch.coverId = await put(art.cover); pictures++; }
+    if (Object.keys(patch).length) await svc.update(ownerId, biz.id, patch);
+    for (const [n, a] of Object.entries(art.products ?? {})) { if (!productIds[n]) continue; await svc.updateProduct(ownerId, biz.id, productIds[n], { mediaId: await put(a) }); pictures++; }
   }
   let sections = 0;
   if (spec.links?.length) { await svc.saveSection(ownerId, biz.id, { id: 'Our products', type: 'links', title: 'Our products', items: spec.links }); sections++; }
@@ -97,7 +135,7 @@ export async function ensureVenturePage(svc: BizService, ownerId: string, spec: 
   if (spec.rw && (spec.rw.tagline || spec.rw.about || spec.rw.products)) await svc.setTranslation(ownerId, biz.id, 'rw', { ...(spec.rw.tagline ? { tagline: spec.rw.tagline } : {}), ...(spec.rw.about ? { about: spec.rw.about } : {}), ...(spec.rw.products ? { products: Object.fromEntries(Object.entries(spec.rw.products).filter(([n]) => productIds[n]).map(([n, d]) => [productIds[n], { name: n, description: d }])) } : {}) });
   let published = false; if (deps.publish) { await svc.setPublished(ownerId, biz.id, true); published = true; }
   let verified = false; if (deps.grantBadge) { await deps.grantBadge(ownerId); verified = true; }
-  return { url: `${site}/b/${(await svc.list(ownerId)).find((b) => b.id === biz!.id)!.slug}`, created, products: (spec.products ?? []).length, sections, verified, published };
+  return { url: `${site}/b/${(await svc.list(ownerId)).find((b) => b.id === biz!.id)!.slug}`, created, products: (spec.products ?? []).length, sections, verified, published, pictures };
 }
 
 /** Makes (or refreshes) the 4biz page for this account and publishes it; optionally gives the owner the verified badge. Safe to run again. */

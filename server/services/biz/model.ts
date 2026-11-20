@@ -25,9 +25,9 @@ export const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
 export type Day = (typeof DAYS)[number];
 
 export interface Hours { day: Day; open: string; close: string; closed?: boolean }
-export interface Product { id: string; name: string; price: number | null; unit?: string; description?: string; mediaId?: string; available: boolean; hidden?: boolean; /** Private: units in stock and the level that raises a low-stock alert. Never in publicView. */ stock?: number; lowAt?: number }
+export interface Product { id: string; name: string; price: number | null; unit?: string; description?: string; /** A link to this product or service (https): the page shows an Open button to it instead of the order button. */ url?: string; mediaId?: string; available: boolean; hidden?: boolean; /** Private: units in stock and the level that raises a low-stock alert. Never in publicView. */ stock?: number; lowAt?: number }
 export type MediaKind = 'image' | 'video';
-export interface Media { id: string; kind: MediaKind; mime: string; size: number; name: string; caption?: string; createdAt: string; visible: boolean; /** 'feed': uploaded for an update post; not in the gallery, public only while a post shows it. */ scope?: 'feed' }
+export interface Media { id: string; /** false: used as the logo, the banner or a product picture only, so it is left out of the page's photo gallery. */ gallery?: false; kind: MediaKind; mime: string; size: number; name: string; caption?: string; createdAt: string; visible: boolean; /** 'feed': uploaded for an update post; not in the gallery, public only while a post shows it. */ scope?: 'feed' }
 /** An update the owner posted to the public feed, like an Instagram post: a caption and up to ten photos or short videos, optionally tagged with a product. */
 export interface Post { id: string; at: string; text: string; mediaIds: string[]; pinned?: boolean; /** The product this post sells: gives the post an Order button. */ productId?: string }
 export interface PublicSection { id: string; type: Section['type']; title: string; body?: string; items?: Section['items']; button?: string; form?: { fields: Array<{ key: string; label: string; type: string; options?: string[]; required?: boolean }> } }
@@ -123,6 +123,8 @@ export function cleanProduct(input: any, id: string, prev?: Product): Product | 
   const p: Product = { id, name, price, available: input?.available === undefined ? prev?.available ?? true : input.available !== false };
   const unit = clean(input?.unit ?? prev?.unit, 20); if (unit) p.unit = unit;
   const description = clean(input?.description ?? prev?.description, 400); if (description) p.description = description;
+  if (input?.url !== undefined && String(input.url).trim() !== '' && !cleanUrl(input.url)) return { error: 'The link must start with https://, for example https://www.example.com/my-service.' };
+  const url = input?.url === undefined ? prev?.url : cleanUrl(input.url); if (url) p.url = url;
   const mediaId = input?.mediaId === undefined ? prev?.mediaId : input.mediaId ? String(input.mediaId).slice(0, 60) : undefined; if (mediaId) p.mediaId = mediaId;
   const hidden = input?.hidden === undefined ? prev?.hidden : input.hidden === true; if (hidden) p.hidden = true;
   const stock = input?.stock === undefined ? prev?.stock : input.stock === null || input.stock === '' ? undefined : Number(input.stock);
@@ -182,7 +184,7 @@ export interface PublicBusiness {
   verified?: true;
   /** Programs customers can join (a monthly pass, ten visits, a month of lunches…): see programs.ts. */
   programs?: Array<{ checkIn: 'staff' | 'self'; id: string; title: string; description?: string; priceRwf: number; days: number; totalUses?: number; items: string[]; openDays: Day[]; windows?: Array<{ item: string; from: string; to: string }>; terms?: string; full: boolean; needsCode: boolean }>;
-  products: Array<{ id: string; name: string; price: number | null; unit?: string; description?: string; media?: PublicMedia; available: boolean }>;
+  products: Array<{ id: string; name: string; price: number | null; url?: string; unit?: string; description?: string; media?: PublicMedia; available: boolean }>;
   gallery: PublicMedia[];
   updatedAt: string;
 }
@@ -198,8 +200,8 @@ export function publicView(b: Business): PublicBusiness {
   for (const k of ['whatsapp', 'phone', 'email', 'address', 'mapUrl', 'website', 'instagram', 'facebook'] as const) if (b[k]) contact[k] = b[k];
   const out: PublicBusiness = {
     slug: b.slug, name: b.name, category: b.category, tagline: b.tagline, about: b.about, theme: b.theme, contact, hours: b.hours.map((h) => ({ ...h })),
-    products: b.products.filter((p) => !p.hidden).map((p) => ({ id: p.id, name: p.name, price: p.price, ...(p.unit ? { unit: p.unit } : {}), ...(p.description ? { description: p.description } : {}), ...(pm(p.mediaId) ? { media: pm(p.mediaId) } : {}), available: p.available })),
-    gallery: b.media.filter((m) => m.visible && m.id !== b.logoId && m.id !== b.coverId).map((m) => pm(m.id)!),
+    products: b.products.filter((p) => !p.hidden).map((p) => ({ id: p.id, name: p.name, price: p.price, ...(p.unit ? { unit: p.unit } : {}), ...(p.description ? { description: p.description } : {}), ...(p.url ? { url: p.url } : {}), ...(pm(p.mediaId) ? { media: pm(p.mediaId) } : {}), available: p.available })),
+    gallery: b.media.filter((m) => m.visible && m.gallery !== false && m.id !== b.logoId && m.id !== b.coverId).map((m) => pm(m.id)!),
     updatedAt: b.updatedAt,
   };
   if (b.programText && Object.keys(b.programText).length) out.programText = { ...b.programText };

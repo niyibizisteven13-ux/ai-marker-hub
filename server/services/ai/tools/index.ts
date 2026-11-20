@@ -35,7 +35,7 @@ export function buildToolkit(services: ToolServices = {}): ToolRegistry {
     ...(process.env.ENABLE_PLATFORM_TOOLS === 'false' ? [] : platformTools(services)),
     ...(process.env.ENABLE_WORK_TOOLS === 'false' ? [] : workTools(services)),
     ...(process.env.ENABLE_AGENDA_TOOLS === 'false' ? [] : agendaTools(services)),
-    ...(process.env.ENABLE_BIZ_TOOLS === 'false' ? [] : bizTools()),
+    ...(process.env.ENABLE_BIZ_TOOLS === 'false' ? [] : bizTools(undefined, services)),
     ...adminTools(services),
     ...memoryTools(services),
     ...(enabled('ENABLE_AGENT_WEB_TOOLS') ? webTools(services) : []),
