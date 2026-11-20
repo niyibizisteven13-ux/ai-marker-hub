@@ -9,6 +9,7 @@ import Sections from './Sections';
 import { TxContext, initialLang, localize, localizePosts, makeTx, useTx } from '../../biz/i18n';
 import MapTile from './MapTile';
 import FeedSection from './Feed';
+import ProfilePage from './ProfilePage';
 import { Dashboard, JoinFlow, PlansSection, SignIn, loadSession } from './PlansPublic';
 
 /**
@@ -194,7 +195,9 @@ function BizPageInner({ business: b, base, lang, setLang, openNow, mediaSrc, pre
   const add = (id: string, d = 1) => setCart((x) => ({ ...x, [id]: Math.max(0, Math.min(99, (x[id] ?? 0) + d)) }));
   const go = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
-  const tabs: Array<[string, string, boolean]> = [['top', 'Overview', true], ['items', preset.itemsTitle, b.products.length > 0], ['updates', 'Updates', posts.length > 0], ['gallery', 'Gallery', media.length > 0], ['about', 'About', true], ['contact', 'Contact', true]];
+  const tabs: Array<[string, string, boolean]> = b.category === 'creator'
+    ? [['top', 'Overview', true], ['updates', 'Videos and posts', posts.length > 0], ['items', preset.itemsTitle, b.products.length > 0], ['gallery', 'Gallery', media.length > 0], ['about', 'About', true], ['contact', 'Work with me', true]]
+    : [['top', 'Overview', true], ['items', preset.itemsTitle, b.products.length > 0], ['updates', 'Updates', posts.length > 0], ['gallery', 'Gallery', media.length > 0], ['about', 'About', true], ['contact', 'Contact', true]];
   const tile = 'flex flex-col items-center justify-center gap-2 rounded-2xl border border-[#E7EAEE] bg-white px-2 py-4 text-center text-[13px] font-semibold text-[#0E1722] shadow-sm transition hover:-translate-y-0.5 hover:shadow-md';
   const iconWrap = 'flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--acc)]/15 text-[#0E1722]';
   const panel = 'rounded-3xl border border-[#E7EAEE] bg-white p-5 shadow-sm';
@@ -345,5 +348,6 @@ function BizPageInner({ business: b, base, lang, setLang, openNow, mediaSrc, pre
 export default function BizPage(props: { business: PublicBusiness; openNow: boolean | null; mediaSrc: (id: string) => string; preview?: boolean }) {
   const base = props.business; const [lang, setLang] = useState<Lang>(() => initialLang(base)); const b = useMemo(() => localize(base, lang), [base, lang]); const tx = useMemo(() => makeTx(lang), [lang]);
   const change = (l: Lang) => { setLang(l); try { localStorage.setItem('bz-lang', l); } catch { /* optional */ } };
+  if (b.category === 'profile') return <TxContext.Provider value={tx}><ProfilePage business={b} mediaSrc={props.mediaSrc} preview={props.preview} /></TxContext.Provider>;
   return <TxContext.Provider value={tx}><BizPageInner {...props} business={b} base={base} lang={lang} setLang={change} /></TxContext.Provider>;
 }

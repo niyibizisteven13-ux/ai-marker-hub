@@ -15,7 +15,7 @@ import { wordsOf } from '../../biz/programWords.js';
  * for when they said so. These tools never touch private records of any other kind.
  */
 const site = () => (process.env.APP_BASE_URL || 'https://www.bwenge.space').replace(/\/$/, '');
-const linkOf = (b: Business) => `${site()}/b/${b.slug}`;
+const linkOf = (b: Business) => `${site()}/${b.category === 'profile' ? 'p' : 'b'}/${b.slug}`;
 const money = (n: number | null) => (n === null ? 'ask for price' : `${n.toLocaleString('en-US')} RWF`);
 const wa = (b: Business) => `https://wa.me/?text=${encodeURIComponent(`${b.name}${b.tagline ? ` · ${b.tagline}` : ''}\n${linkOf(b)}`)}`;
 
@@ -39,6 +39,7 @@ export function bizTools(getSvc: () => Promise<BizService> | BizService = async 
     `Pay: ${b.momoCode ? `MoMo ${b.momoCode}${b.showPay ? ' (shown on the page)' : ' (not shown)'}` : 'not set'}`,
     `Products (${b.products.length}): ${b.products.slice(0, 40).map((p) => `${p.name} ${money(p.price)}${p.available ? '' : ' [out of stock]'}${p.hidden ? ' [hidden]' : ''}`).join('; ') || 'none'}`,
     `Photos ${b.media.filter((m) => m.kind === 'image').length}, videos ${b.media.filter((m) => m.kind === 'video').length}.`,
+    ...(b.category === 'profile' ? [`Profile: ${b.profile?.headline ?? 'no headline'}; skills ${b.profile?.skills.length ?? 0}; journey items ${b.profile?.timeline.length ?? 0}: ${(b.profile?.timeline ?? []).slice(0, 12).map((t) => `${t.title} [${t.id}]`).join('; ') || 'none'}; links ${b.profile?.links.length ?? 0}.`] : []),
   ].join('\n');
 
   const get: Tool = {
@@ -50,7 +51,7 @@ export function bizTools(getSvc: () => Promise<BizService> | BizService = async 
   };
   const create: Tool = {
     definition: { name: 'biz_create', description: "Make a business page for the user (a name is required; ask for it if missing). The page starts NOT published. After this, offer to fill in a short description, hours, contact and products.",
-      parameters: { type: 'object', required: ['name'], properties: { name: { type: 'string' }, category: { type: 'string', enum: ['shop', 'restaurant', 'salon', 'farm', 'services', 'school', 'health', 'transport', 'craft', 'other'] }, page_name: { type: 'string', description: 'The wanted short link name, like "mama-grace". Leave out to make one from the business name.' } } } },
+      parameters: { type: 'object', required: ['name'], properties: { name: { type: 'string' }, category: { type: 'string', enum: ['shop', 'restaurant', 'salon', 'farm', 'services', 'school', 'health', 'transport', 'craft', 'creator', 'profile', 'other'], description: 'creator: a content creator or social-media account (the studio shows audience, content, brand deals, rates). profile: a personal profile for a student or professional (Bwenge4profile).' }, page_name: { type: 'string', description: 'The wanted short link name, like "mama-grace". Leave out to make one from the business name.' } } } },
     async execute(input, ctx) {
       try { const b = await (await svc()).create(ctx.userId, { name: input.name, category: input.category, slug: input.page_name }); return { text: `Created "${b.name}". Its link will be ${linkOf(b)} once published. It is not published yet.` }; } catch (e) { return failure(e); }
     },
@@ -447,6 +448,35 @@ export function bizTools(getSvc: () => Promise<BizService> | BizService = async 
       try { const b = await pick(ctx.userId, input.business); if ('error' in b) return err(b.error); const r = await (await svc()).dayReport(ctx.userId, b.id, { date: input.date, lang: input.lang }); return { text: r.text }; } catch (e) { return failure(e); }
     },
   };
+  const profile: Tool = {
+    definition: { name: 'biz_profile', description: "Builds or edits a PERSONAL PROFILE page (Bwenge4profile) for a student or a professional: a CV-style page with a headline, short bio, skills, their videos, what they studied, did and attended (the journey), links and contact, with ONE link to put in an application letter or an email. Create it first with biz_create (category 'profile', the person's full name), then use this tool. action 'set': headline (what they study or do), school, field, location, open_to (what they are looking for: internships, jobs), skills (list), links (list of {label, url}, https only), cv_url (a link to their CV, for example Google Drive). action 'add_item': add one thing they did: kind (education, experience, project, event for something they attended, award, certificate, volunteer), title, org (school, company or organiser), place, from and to (YYYY or YYYY-MM; to may be 'present'), text (what they did or learned, in their own words, concrete), url. action 'change_item' (item_id) or 'remove_item' (item_id). Ask short questions in a chat (what do you study, what have you done at university, any events you attended, skills, how to contact you), write it in first person and plain words, never invent facts or dates; if unsure leave a field out. Photos and videos for an item or the featured videos are added by the owner in the Studio (Studio → My profile) or sent in this chat with biz_add_media. Never publish unless asked (biz_publish). Afterwards give the link and say it can be put in an application letter.",
+      parameters: { type: 'object', required: ['action'], properties: { action: { type: 'string', enum: ['set', 'add_item', 'change_item', 'remove_item'] }, business: BUSINESS, headline: { type: 'string' }, school: { type: 'string' }, field: { type: 'string' }, location: { type: 'string' }, open_to: { type: 'string' }, skills: { type: 'array', items: { type: 'string' } }, links: { type: 'array', items: { type: 'object', properties: { label: { type: 'string' }, url: { type: 'string' } } } }, cv_url: { type: 'string' },
+        item_id: { type: 'string' }, kind: { type: 'string', enum: ['education', 'experience', 'project', 'event', 'award', 'certificate', 'volunteer'] }, title: { type: 'string' }, org: { type: 'string' }, place: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' }, text: { type: 'string' }, url: { type: 'string' } } } },
+    async execute(input, ctx) {
+      try {
+        const b = await pick(ctx.userId, input.business); if ('error' in b) return err(b.error);
+        if (b.category !== 'profile') return err('This page is a business page, not a personal profile. Create a profile with biz_create (category "profile") for the person.');
+        const s2 = await svc(); const tl = b.profile?.timeline ?? [];
+        if (input.action === 'set') {
+          const pr: Record<string, unknown> = {}; for (const [k, v] of Object.entries({ headline: input.headline, school: input.school, field: input.field, location: input.location, openTo: input.open_to, skills: input.skills, links: input.links, cvUrl: input.cv_url })) if (v !== undefined) pr[k] = v;
+          if (!Object.keys(pr).length) return err('Nothing to change was given.');
+          const after = await s2.update(ctx.userId, b.id, { profile: pr }); return { text: `Updated the profile.\n${summary(after)}` };
+        }
+        if (input.action === 'add_item') {
+          if (!input.title) return err('A title is required (what they did).');
+          const item = { kind: input.kind ?? 'event', title: input.title, org: input.org, place: input.place, from: input.from, to: input.to, text: input.text, url: input.url };
+          const after = await s2.update(ctx.userId, b.id, { profile: { timeline: [...tl, item] } }); return { text: `Added "${input.title}" to the journey (${after.profile?.timeline.length ?? 0} items).` };
+        }
+        const it = tl.find((t) => t.id === input.item_id); if (!it) return err(`No item "${input.item_id ?? ''}". Use biz_get to see the item ids.`);
+        if (input.action === 'remove_item') { await s2.update(ctx.userId, b.id, { profile: { timeline: tl.filter((t) => t.id !== it.id) } }); return { text: `Removed "${it.title}".` }; }
+        if (input.action === 'change_item') {
+          const next = { ...it, ...Object.fromEntries(Object.entries({ kind: input.kind, title: input.title, org: input.org, place: input.place, from: input.from, to: input.to, text: input.text, url: input.url }).filter(([, v]) => v !== undefined)) };
+          await s2.update(ctx.userId, b.id, { profile: { timeline: tl.map((t) => (t.id === it.id ? next : t)) } }); return { text: `Changed "${next.title}".` };
+        }
+        return err('Unknown action.');
+      } catch (e) { return failure(e); }
+    },
+  };
   const venture: Tool = {
     definition: { name: 'biz_venture', description: "Builds (or refreshes) a VENTURE PAGE: one public page that presents a venture and its products under one aim, like \"AI in our context\" for 4biz (MySEB, Bwenge AI, Bwenge4biz). Use it when someone says they have a venture, startup, company or several products and want a page for it. Gather in a short chat, then call once: name; the one-line aim (aim); the main description (what it is and who it is for, plain words); the products (each a name and one line, optional price_rwf); what it helps with (three short points, for example growth, records, reaching new markets); links (title, short text, https url, for example each product's page); a few FAQ (question, answer); the WhatsApp number to contact; and Kinyarwanda words (rw) when they want the page in Kinyarwanda. Everything on the page is PUBLIC: never put private notes, customer details or money records in it, and never invent facts or numbers about the venture: ask. It makes the page private first; set publish true ONLY after the owner has read it and said to publish. Running it again with the same name or slug refreshes the page and never duplicates products or sections. The blue verified badge is not something you give: it is a one-time 1,000 RWF purchase in Upgrade → Verified badge (an administrator can also grant it); tell the owner so if they ask for it.",
       parameters: { type: 'object', required: ['name', 'aim', 'description'], properties: { name: { type: 'string' }, slug: { type: 'string', description: 'The page name in the link, for example 4biz (letters, numbers, dashes).' }, aim: { type: 'string', description: 'The one-line aim shown under the name.' }, description: { type: 'string', description: 'The main description, up to 1500 characters.' }, category: { type: 'string', enum: ['shop', 'restaurant', 'salon', 'farm', 'services', 'school', 'health', 'transport', 'craft', 'other'] }, theme: { type: 'string', enum: ['gold', 'teal', 'green', 'blue', 'rose', 'violet', 'ink'] },
@@ -485,5 +515,5 @@ export function bizTools(getSvc: () => Promise<BizService> | BizService = async 
       } catch (e) { return failure(e); }
     },
   };
-  return [get, create, update, addProduct, changeProduct, addMedia, publish, link, messages, record('sale'), record('expense'), dashboard, orders, requestPay, payStatus, paySetup, report, stock, agent, post, open, workflow, entries, costs, recurring, budget, program, planStatus, dayReport, venture, feature, section, tracker, records, translate, language];
+  return [get, create, update, addProduct, changeProduct, addMedia, publish, link, messages, record('sale'), record('expense'), dashboard, orders, requestPay, payStatus, paySetup, report, stock, agent, post, open, workflow, entries, costs, recurring, budget, program, planStatus, dayReport, venture, profile, feature, section, tracker, records, translate, language];
 }

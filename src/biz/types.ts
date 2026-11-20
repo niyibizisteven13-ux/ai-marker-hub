@@ -1,7 +1,8 @@
-export type { Lang, Translation, PublicSection, Post, PublicPost, Business, PublicBusiness, PublicMedia, Product, Media, Enquiry, DayStats, Hours, Day, Theme, Category } from '../../server/services/biz/model';
+export type { Lang, Translation, PublicSection, Post, PublicPost, Business, PublicBusiness, PublicMedia, Product, Media, Enquiry, DayStats, Hours, Day, Theme, Category, Kind, ProfileData, PublicProfile, TimelineItem, TimelineKind, ProfileLink } from '../../server/services/biz/model';
+import type { DayStats } from '../../server/services/biz/model';
 export const CATEGORIES: Array<{ id: string; label: string }> = [
   { id: 'shop', label: 'Shop' }, { id: 'restaurant', label: 'Restaurant or café' }, { id: 'salon', label: 'Salon or barber' }, { id: 'farm', label: 'Farm' },
-  { id: 'services', label: 'Services' }, { id: 'school', label: 'School or training' }, { id: 'health', label: 'Health' }, { id: 'transport', label: 'Transport' }, { id: 'craft', label: 'Crafts' }, { id: 'other', label: 'Other' },
+  { id: 'services', label: 'Services' }, { id: 'school', label: 'School or training' }, { id: 'health', label: 'Health' }, { id: 'transport', label: 'Transport' }, { id: 'craft', label: 'Crafts' }, { id: 'creator', label: 'Content creator or social media' }, { id: 'profile', label: 'Personal profile (student or professional)' }, { id: 'other', label: 'Other' },
 ];
 export const DAYS: Array<{ id: 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'; label: string }> = [
   { id: 'mon', label: 'Monday' }, { id: 'tue', label: 'Tuesday' }, { id: 'wed', label: 'Wednesday' }, { id: 'thu', label: 'Thursday' }, { id: 'fri', label: 'Friday' }, { id: 'sat', label: 'Saturday' }, { id: 'sun', label: 'Sunday' },
@@ -12,7 +13,7 @@ export const THEMES: Record<string, { label: string; accent: string; on: string 
   blue: { label: 'Blue', accent: '#2F6FED', on: '#FFFFFF' }, rose: { label: 'Rose', accent: '#DB4F8E', on: '#FFFFFF' }, violet: { label: 'Violet', accent: '#7C5CF0', on: '#FFFFFF' }, ink: { label: 'Ink', accent: '#0E1722', on: '#FFFFFF' },
 };
 export const rwf = (n: number | null | undefined) => (n === null || n === undefined ? 'Ask for price' : `${n.toLocaleString('en-US')} RWF`);
-export const pageUrl = (slug: string, origin = typeof window !== 'undefined' ? window.location.origin : 'https://www.bwenge.space') => `${origin}/b/${slug}`;
+export const pageUrl = (slug: string, origin = typeof window !== 'undefined' ? window.location.origin : 'https://www.bwenge.space', category?: string) => `${origin}/${category === 'profile' ? 'p' : 'b'}/${slug}`;
 
 export interface LedgerEntry {
   id: string; type: 'sale' | 'expense'; amount: number; at: string; status: 'completed' | 'pending' | 'cancelled'; src: 'studio' | 'chat' | 'scan' | 'page';
@@ -24,6 +25,8 @@ export interface Dashboard {
   series: Array<{ day: string; sales: number; expenses: number }>; top: Array<{ name: string; amount: number; qty: number }>;
   orders: { completed: number; pending: number; cancelled: number }; customers: number; lowStock: Array<{ id: string; name: string; stock: number; unit: string }>;
   recent: LedgerEntry[]; newMessages: number; entries: number;
+  /** Attention the page earned: used by the creator and profile dashboards. */
+  audience?: { posts: number; likes: number; comments: number; videos: number; week: DayStats; before: DayStats; series: Array<{ day: string; views: number; taps: number }>; top: Array<{ id: string; text: string; likes: number; comments: number; video: boolean }> };
 }
 
 export interface SecretsStatus {

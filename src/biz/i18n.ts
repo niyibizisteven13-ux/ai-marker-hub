@@ -223,3 +223,10 @@ Object.assign(RW, {
   'Preparing this video': 'Turimo gutegura iyi videwo', 'It will play smoothly in a minute.': 'Izakina neza mu munota umwe.', 'Video': 'Videwo', 'Play': 'Kina', 'Pause': 'Hagarika', 'Replay': 'Subiramo', 'Mute': 'Hagarika ijwi', 'Unmute': 'Shyiraho ijwi', 'Seek': 'Jya ku gihe', 'Full screen': 'Ecran yose',
   'This video could not be played.': 'Iyi videwo ntishobora gukina.', 'Try again': 'Ongera ugerageze', 'Slow connection: using a lighter version.': 'Interineti itinda: dukoresheje verisiyo yoroheje.', 'Loading': 'Birimo gufungura',
 });
+
+Object.assign(RW, {
+  'Get in touch': 'Twandikire', 'View CV': 'Reba CV', 'Share': 'Sangiza', 'Watch me': 'Ndebe', 'About me': 'Ibyanjye', 'Skills': 'Ubumenyi', 'My journey': 'Urugendo rwanjye', 'Photos': 'Amafoto', 'Latest': 'Ibishya', 'Find me online': 'Mbona kuri interineti',
+  'Open the link': 'Fungura rihuza', 'Open the picture': 'Fungura ifoto', 'My profile link': 'Rihuza ry’umwirondoro wanjye', 'Copy link': 'Koporora rihuza', 'Link copied': 'Rihuza ryakoporowe', 'Copy the link by hand': 'Koporora rihuza ukoresheje intoki', 'QR code': 'QR code', 'Made with': 'Byakozwe na',
+  'Your name': 'Izina ryawe', 'Your phone or email': 'Telefone cyangwa imeri yawe', 'Message': 'Ubutumwa', 'Send message': 'Ohereza ubutumwa', 'Thank you. Your message was sent.': 'Murakoze. Ubutumwa bwawe bwoherejwe.', 'This is a preview: nothing is sent.': 'Ni ibyo kureba gusa: nta kintu cyoherejwe.', 'Featured videos': 'Videwo zihariwe',
+  'Education': 'Amashuri', 'Experience': 'Uburambe', 'Project': 'Umushinga', 'Attended': 'Yitabiriye', 'Award': 'Igihembo', 'Volunteering': 'Ubwitange', 'Certificate': 'Icyemezo', 'Videos and posts': 'Videwo n’ibyashyizweho', 'Work with me': 'Dukorane', 'Rates and packages': 'Ibiciro n’ibikoresho', 'Send a collaboration brief': 'Ohereza icyifuzo cy’ubufatanye',
+});

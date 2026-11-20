@@ -109,7 +109,7 @@ export const ownerApi = {
   refreshPayment: async (id: string, eid: string) => (await read<{ entry: LedgerEntry }>(await authFetch(`/api/biz/${id}/pay/${eid}/refresh`, json('POST', {})))).entry,
   stats: async (id: string) => read<{ last30: DayStats; days: Array<{ day: string } & DayStats>; newMessages: number }>(await authFetch(`/api/biz/${id}/stats`)),
   /** Uploads a photo or video with a progress report (a video on a slow phone connection can take a while). */
-  upload: (id: string, file: File | Blob, name: string, onProgress: (fraction: number) => void, scope?: 'feed') => new Promise<{ id: string }>((resolve, reject) => {
+  upload: (id: string, file: File | Blob, name: string, onProgress: (fraction: number) => void, scope?: 'feed' | 'timeline') => new Promise<{ id: string }>((resolve, reject) => {
     const x = new XMLHttpRequest(); x.open('POST', getApiUrl(`/api/biz/${id}/media`));
     const t = getAccessToken(); if (t) x.setRequestHeader('Authorization', `Bearer ${t}`);
     x.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
