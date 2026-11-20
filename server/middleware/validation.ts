@@ -87,7 +87,7 @@ export const chatSchema = z.object({
   // Socratic tutor / roleplay settings (validated again by parseLearning).
   learning: z.object({ mode: z.enum(['normal', 'socratic', 'roleplay']) }).passthrough().optional(),
   // The page the message was sent from (form editor, marked-exam review), with what is open there.
-  surface: z.enum(['chat', 'form', 'exam']).optional(),
+  surface: z.enum(['chat', 'form', 'exam', 'myseb']).optional(),
   surfaceId: z.string().max(100).optional(),
   surfaceSubmissionId: z.string().uuid().optional(),
   surfaceQuestionId: z.string().max(100).optional(),

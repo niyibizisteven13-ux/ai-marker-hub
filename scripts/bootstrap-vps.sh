@@ -155,7 +155,7 @@ server {
     listen [::]:80;
     server_name ${DOMAIN} www.${DOMAIN};
 
-    client_max_body_size 10M;
+    client_max_body_size 220M;
 
     location / {
         proxy_pass http://127.0.0.1:5000;

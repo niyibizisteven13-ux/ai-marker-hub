@@ -71,10 +71,12 @@ export interface DayStats { views: number; whatsapp: number; calls: number; shar
 /* ---------------------------------------------------------------- limits */
 export interface Limits { businesses: number; products: number; images: number; videos: number; totalMediaMb: number; /** Photos and videos uploaded for feed posts (they are not in the gallery). */ feed: number; enquiries: number }
 export const FREE_LIMITS: Limits = { businesses: 1, products: 30, images: 12, videos: 0, totalMediaMb: 80, feed: 60, enquiries: 200 };
-export const PAID_LIMITS: Limits = { businesses: 3, products: 200, images: 60, videos: 10, totalMediaMb: 600, feed: 400, enquiries: 500 };
+export const PAID_LIMITS: Limits = { businesses: 3, products: 200, images: 60, videos: 10, totalMediaMb: 2000, feed: 400, enquiries: 500 };
 export const limitsFor = (paid: boolean): Limits => (paid ? PAID_LIMITS : FREE_LIMITS);
 export const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
-export const MAX_VIDEO_BYTES = 25 * 1024 * 1024;
+/** A video up to 200 MB (paid plans only): about a minute of 1080p from a phone, more at a lower quality. */
+export const MAX_VIDEO_MB = 200;
+export const MAX_VIDEO_BYTES = MAX_VIDEO_MB * 1024 * 1024;
 
 /* ---------------------------------------------------------------- cleaning (every text a person types goes through these) */
 export const clean = (v: unknown, max: number) => String(v ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f​-‏‪-‮⁦-⁩]/g, '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim().slice(0, max);

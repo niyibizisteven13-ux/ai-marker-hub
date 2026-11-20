@@ -21,8 +21,7 @@ import {
   LogIn,
   Sparkles,
   Coins,
-  Building2,
-} from 'lucide-react';
+  Building2, ShieldCheck } from 'lucide-react';
 import { NavigationTab, User, ChatSession } from '../types';
 import logoUrl from '../assets/bwenge-logo.svg';
 import { tokens } from '../utils/designTokens';
@@ -167,6 +166,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
       ...(user ? [{ label: 'Learning', icon: GraduationCap, onClick: goTo('/learn?tab=tasks'), active: /^\/learn/.test(path) }] : []),
     ] },
     { title: 'Teaching', items: [
+      ...(user ? [{ label: 'MySEB', icon: ShieldCheck, onClick: goTo('/lecturer'), active: /^\/lecturer/.test(path) }] : []),
       ...(user && onOpenMark ? [{ label: 'Mark', icon: PenLine, onClick: onOpenMark }] : []),
       ...(user && onOpenAssignments ? [{ label: 'Tasks', icon: ClipboardList, onClick: onOpenAssignments }] : []),
       ...(user && onOpenForms ? [{ label: 'Forms', icon: ClipboardCheck, onClick: onOpenForms }] : []),

@@ -10,7 +10,7 @@ import { buildDayReport, reportText } from './report.js';
 import { RW_WORDS, wordsOf } from './programWords.js';
 import {
   CATEGORIES, applyProfile, clean, cleanEmail, cleanPhone, cleanProduct, isLive, limitsFor, newBusiness, oneOf, publicView, slugFrom, validSlug,
-  type Business, type Category, type DayStats, type Enquiry, type PublicBusiness, type Product, type Post, type PublicPost, type PostComment, type Lang, LANGS, type Translation, type PublicSection, MAX_POST_MEDIA, MAX_POST_TEXT, MAX_POSTS, MAX_COMMENTS,
+  type Business, type Category, type DayStats, type Enquiry, type PublicBusiness, type Product, type Post, type PublicPost, type PostComment, type Lang, LANGS, type Translation, type PublicSection, MAX_POST_MEDIA, MAX_POST_TEXT, MAX_POSTS, MAX_COMMENTS, MAX_VIDEO_BYTES, MAX_VIDEO_MB, MAX_IMAGE_BYTES,
 } from './model.js';
 
 /**
@@ -211,10 +211,12 @@ export function createBizService(deps: Deps) {
     },
 
     /* photos and videos */
+    /** The biggest file this person may upload: a photo on the free plan, a video on a paid one. Checked before the file is read into memory. */
+    async uploadCap(ownerId: string): Promise<number> { return (await deps.isPaid(ownerId)) ? MAX_VIDEO_BYTES : MAX_IMAGE_BYTES; },
     async addMedia(ownerId: string, id: string, file: { name: string; data: Buffer; caption?: string; scope?: unknown; gallery?: boolean }): Promise<Business['media'][number]> {
       const b = await mine(ownerId, id); const lim = await limits(ownerId);
       const kind = sniff(file.data); if (!kind) throw new BizError('Use a JPEG, PNG, WebP or GIF photo, or an MP4 or WebM video.', 415, 'TYPE');
-      if (file.data.length > maxBytesFor(kind.kind)) throw new BizError(kind.kind === 'image' ? 'A photo can be up to 6 MB.' : 'A video can be up to 25 MB. Record a shorter clip.', 413, 'TOO_LARGE');
+      if (file.data.length > maxBytesFor(kind.kind)) throw new BizError(kind.kind === 'image' ? 'A photo can be up to 6 MB.' : `A video can be up to ${MAX_VIDEO_MB} MB (about a minute at 1080p). Record a shorter clip or a lower quality.`, 413, 'TOO_LARGE');
       if (kind.kind === 'video' && !(await deps.isPaid(ownerId))) throw new BizError('Videos are for paid plans. Photos are free. Choose a plan to add videos.', 402, 'VIDEO_PAID');
       const feedUpload = file.scope === 'feed';
       if (feedUpload) { if (b.media.filter((m) => m.scope === 'feed').length >= lim.feed) throw new BizError(`That is the most feed photos and videos your plan keeps (${lim.feed}). Delete old posts to make room.`, 402, 'LIMIT'); }

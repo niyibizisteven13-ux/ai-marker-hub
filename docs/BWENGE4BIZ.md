@@ -67,8 +67,8 @@ This is enforced in one place: public routes answer with `publicView(business)`,
 field and checks it cannot appear in the public answer.
 
 ## Photos and videos
-* Photos up to 6 MB (JPEG, PNG, WebP, GIF) and videos up to 25 MB (MP4, WebM). The file type is checked by its first bytes, not its name; SVG and HTML are refused.
-* **Photos are free; videos need a paid plan** (Starter or higher; Top-up counts as paid). Free: 12 gallery photos, 80 MB in all, 60 feed photos; paid: 60 photos, 10 videos, 600 MB, 400 feed items. A free owner who picks a video, in the gallery or a post, is told videos are for paid plans (server answer 402 `VIDEO_PAID`).
+* Photos up to 6 MB (JPEG, PNG, WebP, GIF) and videos up to 200 MB on a paid plan, about a minute at 1080p (MP4, WebM). The file type is checked by its first bytes, not its name; SVG and HTML are refused.
+* **Photos are free; videos need a paid plan** (Starter or higher; Top-up counts as paid). Free: 12 gallery photos, 80 MB in all, 60 feed photos; paid: 60 photos, 10 videos, 2,000 MB, 400 feed items. A free owner who picks a video, in the gallery or a post, is told videos are for paid plans (server answer 402 `VIDEO_PAID`).
 * The **business agent** and **online payments** (MTN/Airtel keys, payment requests, pay on the page) also need a paid plan (402 `UPGRADE_REQUIRED`). Everything else in the dashboard is free; `BIZ_REQUIRE_PAID=true` puts the whole dashboard behind a paid plan again.
 * Files are stored on the server (`data/biz-media`, or `BIZ_MEDIA_DIR`) and served only for a page that is live and for media marked visible. Videos support seeking.
 * Videos are not converted, so phones should record short clips (about 30 seconds). Converting for slow connections is a later step.

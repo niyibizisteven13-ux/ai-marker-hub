@@ -72,3 +72,12 @@ test('the share preview carries the business’s own words, escaped, and its cov
   assert.ok(html.includes('property="og:image" content="https://www.bwenge.space/api/biz/public/mama-grace/media/c1"')); assert.ok(html.includes('rel="canonical" href="https://www.bwenge.space/b/mama-grace"')); assert.equal((html.match(/name="description"/g) ?? []).length, 1, 'the old description is replaced');
   void publicView;
 });
+
+test('a feed video of about a minute (tens of MB) uploads over HTTP, and an oversized one is refused straight away with a clear message', async () => {
+  const owner = await mkUser('biz-owner-video'); const created = await (await call('/', { token: owner, body: { name: 'Video Cafe', category: 'restaurant' } })).json(); const id = created.business.id;
+  const minute = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypmp42'), Buffer.alloc(40 * 1024 * 1024, 7)]);
+  const ok = await call(`/${id}/media`, { token: owner, body: (() => { const f = upload('minute.mp4', minute, 'video/mp4'); f.append('scope', 'feed'); return f; })() }); assert.equal(ok.status, 201); const j = await ok.json(); assert.equal(j.media.kind, 'video'); assert.equal(j.media.size, minute.length);
+  // the declared size is checked before any of the file is read
+  const huge = await fetch(`${base}/${id}/media`, { method: 'POST', headers: { Authorization: `Bearer ${owner}`, 'Content-Type': 'multipart/form-data; boundary=x', 'Content-Length': String(300 * 1024 * 1024) }, body: '--x--\r\n' }).catch(() => null);
+  if (huge) { assert.equal(huge.status, 413); assert.match((await huge.json()).error, /up to 200 MB/); }
+});

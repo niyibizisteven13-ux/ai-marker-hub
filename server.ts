@@ -113,6 +113,8 @@ import adminBillingRoutes from './server/routes/adminBillingRoutes.js';
 import adminPlatformRoutes from './server/routes/adminPlatformRoutes.js';
 import adminMySebRoutes from './server/routes/adminMySebRoutes.js';
 import { adminRouter as mySebAccessAdminRoutes, lecturerRouter as mySebAccessRoutes } from './server/routes/mySebAccessRoutes.js';
+import mySebDashboardRoutes from './server/routes/mySebDashboardRoutes.js';
+import { MYSEB_DASHBOARD_NOTE } from './server/services/ai/mysebDashboardNote.js';
 import { startPlatformSettings } from './server/services/platform/settings.js';
 import { platformGate, platformStatus } from './server/services/platform/gate.js';
 import { startMySebSync } from './server/services/mySebAdmin.js';
@@ -468,6 +470,7 @@ app.use('/api/admin/platform', requireAuth, requireRole('ADMIN'), adminPlatformR
 app.use('/api/admin/myseb-access', requireAuth, requireRole('ADMIN'), mySebAccessAdminRoutes);
 app.use('/api/admin/myseb', requireAuth, requireRole('ADMIN'), adminMySebRoutes);
 app.use('/api/myseb-access', requireAuth, mySebAccessRoutes);
+app.use('/api/myseb-dashboard', requireAuth, mySebDashboardRoutes);
 app.use('/api/admin', requireAuth, requireRole('ADMIN'), adminRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/ollama', requireAuth, ollamaRoutes);
@@ -1351,7 +1354,8 @@ app.post('/api/ai/chat', requireAuth, upload.single('attachment'), validate(chat
     catch { return res.status(404).json({ error: 'The selected examination or paper is unavailable.' }); }
   }
   /** What the output planner reads: on the form editor every request is form work. */
-  const planQuery = surfaceNote ? `edit my form: ${query || ''}` : query || '';
+  if (surface === 'myseb') surfaceNote = MYSEB_DASHBOARD_NOTE;
+  const planQuery = surfaceNote && surface === 'form' ? `edit my form: ${query || ''}` : query || '';
   // ── Examination marking through the chat ────────────────────────────────
   // Claims only messages that start a marking request or refer to the user's active examination;
   // everything else continues to the normal chat below. Replies reuse the text and attachment events.

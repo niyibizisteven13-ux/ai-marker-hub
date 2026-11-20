@@ -82,7 +82,7 @@ test('a page is public only when published and not hidden by Bwenge; an unpublis
 test('photos and videos: right types, size and count limits, the first photo becomes the cover, only shown files are served, removal deletes the file', async () => {
   const { svc, media } = make(true); const b = await svc.create('o', { name: 'Photo Shop' }); await svc.update('o', b.id, { about: 'x' }); await svc.setPublished('o', b.id, true);
   await assert.rejects(svc.addMedia('o', b.id, { name: 'logo.png', data: Buffer.from('<svg><script>alert(1)</script></svg>') }), (e: any) => e.code === 'TYPE', 'an SVG named .png is refused');
-  await assert.rejects(svc.addMedia('o', b.id, { name: 'big.png', data: png(7 * 1048576) }), (e: any) => e.code === 'TOO_LARGE'); await assert.rejects(svc.addMedia('o', b.id, { name: 'big.mp4', data: mp4(26 * 1048576) }), (e: any) => e.code === 'TOO_LARGE');
+  await assert.rejects(svc.addMedia('o', b.id, { name: 'big.png', data: png(7 * 1048576) }), (e: any) => e.code === 'TOO_LARGE'); await assert.rejects(svc.addMedia('o', b.id, { name: 'big.mp4', data: mp4(201 * 1048576) }), (e: any) => e.code === 'TOO_LARGE');
   const m1 = await svc.addMedia('o', b.id, { name: 'front.jpg', data: jpg(), caption: ' Our shop ' }); assert.equal(m1.caption, 'Our shop'); assert.equal((await svc.get('o', b.id)).coverId, m1.id);
   const v = await svc.addMedia('o', b.id, { name: 'tour.mp4', data: mp4() }); assert.equal(v.kind, 'video');
   assert.ok(await svc.mediaFor(b.slug, m1.id)); assert.equal(await svc.mediaFor(b.slug, 'nope'), null);
@@ -122,4 +122,14 @@ test('deleting a business removes the page, the name, the files and the messages
   const { svc, kv, media } = make(); const b = await svc.create('o', { name: 'Gone Shop' }); await svc.addMedia('o', b.id, { name: 'a.png', data: png() });
   await svc.remove('o', b.id); assert.equal(await svc.publicBySlug(b.slug), null); assert.equal(media.files.size, 0); assert.ok(![...kv.data.keys()].some((k) => k.includes(b.id) || k === `biz-slug:${b.slug}`));
   assert.equal((await svc.create('o', { name: 'Gone Shop', slug: b.slug })).slug, b.slug, 'the name can be used again');
+});
+
+test('a paid plan can upload a video of about a minute (up to 200 MB); a free plan cannot upload any video; the limit is checked before the file is read', async () => {
+  const mp4 = (mb: number) => { const b = Buffer.alloc(mb * 1024 * 1024); b.write('ftypmp42', 4, 'latin1'); return b; };
+  const { svc } = make(true); const biz = await svc.create('o', { name: 'Clip Shop' });
+  assert.equal(await svc.uploadCap('o'), 200 * 1024 * 1024, 'paid: a video up to 200 MB'); assert.equal(await (make(false).svc).uploadCap('o2'), 6 * 1024 * 1024, 'free: a photo up to 6 MB');
+  const big = await svc.addMedia('o', biz.id, { name: 'a-minute-at-1080p.mp4', data: mp4(120), scope: 'feed' }); assert.equal(big.kind, 'video'); assert.equal(big.size, 120 * 1024 * 1024);
+  await assert.rejects(svc.addMedia('o', biz.id, { name: 'too-long.mp4', data: mp4(201) }), (e: any) => e.status === 413 && /up to 200 MB/.test(e.message) && /about a minute/.test(e.message));
+  const free = make(false); const fb = await free.svc.create('f', { name: 'Free Shop' }); await assert.rejects(free.svc.addMedia('f', fb.id, { name: 'x.mp4', data: mp4(1) }), (e: any) => e.code === 'VIDEO_PAID');
+  const { PAID_LIMITS } = await import('../server/services/biz/model.js'); assert.equal(PAID_LIMITS.totalMediaMb, 2000, 'room for a handful of one-minute videos');
 });
