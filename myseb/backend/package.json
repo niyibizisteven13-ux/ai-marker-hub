@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test": "node --test test/flow.test.js test/forms.test.js test/integrity.test.js test/winlock.test.js test/verify-limits.test.js test/ops.test.js test/downloads.test.js test/screen.test.js test/events.test.js test/web.test.js test/admin.test.js test/room-actions.test.js test/link-rooms.test.js test/managed-rooms.test.js"
+    "test": "node --test test/flow.test.js test/forms.test.js test/integrity.test.js test/winlock.test.js test/verify-limits.test.js test/ops.test.js test/site.test.js test/downloads.test.js test/screen.test.js test/events.test.js test/web.test.js test/admin.test.js test/room-actions.test.js test/link-rooms.test.js test/managed-rooms.test.js"
   },
   "dependencies": {
     "express": "^4.21.2",

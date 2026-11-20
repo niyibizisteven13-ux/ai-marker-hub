@@ -8,19 +8,30 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header><h1><img src="logo.svg" alt="" width="28" height="32" style="vertical-align:-6px;margin-right:8px">MySEB <small>Teacher dashboard</small></h1><button id="logout" hidden>Sign out</button></header>
+<header>
+  <h1><img src="logo.svg" alt="" width="26" height="30">MySEB <small>Teacher console</small></h1>
+  <button id="logout" hidden>Sign out</button>
+</header>
 
 <section id="login" class="card narrow">
-  <h2>Sign in</h2>
+  <h2>Sign in to your console</h2>
+  <p class="muted" style="margin:0 0 16px">Use the teacher key your administrator set for this server.</p>
   <label>Teacher key <input id="key" type="password" autocomplete="current-password" placeholder="TEACHER_KEY from the server .env"></label>
-  <button id="loginBtn" class="primary">Sign in</button>
+  <button id="loginBtn" class="primary" style="width:100%;margin-top:16px">Sign in</button>
   <p id="loginErr" class="err"></p>
 </section>
 
+<nav id="side" aria-label="Console" hidden>
+  <button data-go="exams" class="on"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span>Exams</span></button>
+  <button data-go="create"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>New exam</span></button>
+  <button data-go="code" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8l-4 4 4 4M16 8l4 4-4 4"/></svg><span>Code</span></button>
+  <button data-go="monitor" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/></svg><span>Live</span></button>
+  <div class="sidelinks"><a href="../liveroom/">LiveRoom</a><a href="../room/">Rooms</a><a href="../about">Product site</a></div>
+</nav>
 <main id="app" hidden>
-  <section class="card">
-    <a href="../liveroom/">Open MySEB LiveRoom</a> · <a href="../room/">Room dashboard</a>
-    <h2>New exam</h2>
+  <section class="card" data-view="create">
+    <h2>Create an exam</h2>
+    <p class="sub">Paste a Google/Microsoft Form or your own exam link, choose how strict MySEB should be, then generate a code for students.</p>
     <form id="newExam" class="grid">
       <label>Title <input name="title" required maxlength="200" placeholder="Biology midterm"></label>
       <label>Exam or form link <input name="examUrl" id="examUrl" type="url" placeholder="Google Forms, Microsoft Forms, Typeform… (empty = built-in sample exam)"></label>
@@ -55,12 +66,13 @@
     </form>
   </section>
 
-  <section class="card">
-    <h2>Exams</h2>
+  <section class="card" data-view="exams">
+    <h2>Your exams</h2>
+    <p class="sub">Generate codes, watch students live, or end an exam.</p>
     <div id="exams"></div>
   </section>
 
-  <section id="codeCard" class="card" hidden>
+  <section id="codeCard" class="card" data-view="code" hidden>
     <h2>Exam code</h2>
     <div class="codebox">
       <div>
@@ -74,7 +86,7 @@
     </div>
   </section>
 
-  <section id="monitor" class="card" hidden>
+  <section id="monitor" class="card" data-view="monitor" hidden>
     <h2>Live monitor — <span id="monTitle"></span></h2>
     <div id="counts" class="counts"></div>
     <table>
