@@ -138,12 +138,13 @@ $('web').addEventListener('click',function(){var n=$('name').value.trim();if(!n)
 if (config.dashboardEnabled) app.use('/dashboard', express.static(path.join(here, '../public/dashboard'), {
   setHeaders: (res) => res.set('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'"),
 }));
-// Public product page at "/" (links keep working behind a prefix such as /myseb).
+// Public product page at /about ("/" keeps redirecting to the dashboard: the site that embeds MySEB relies on that).
 const siteHtml = fs.readFileSync(path.join(here, '../public/site/index.html'), 'utf8').replaceAll('__BASE__', config.basePath);
 if (config.dashboardEnabled) app.use('/site', express.static(path.join(here, '../public/site'), { index: false, maxAge: '1h' }));
-app.get('/', (_req, res) => (config.dashboardEnabled
+app.get('/about', (_req, res) => (config.dashboardEnabled
   ? res.set('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; style-src 'self'; frame-ancestors 'none'; base-uri 'none'").type('html').send(siteHtml)
-  : res.json({ name: 'MySEB', ok: true })));
+  : res.status(404).json({ error: 'not found' })));
+app.get('/', (_req, res) => (config.dashboardEnabled ? res.redirect(`${config.basePath}/dashboard/`) : res.json({ name: 'MySEB', ok: true })));
 
 app.use((err, _req, res, _next) => {
   // A body that is too big or not JSON is the caller's mistake (4xx), not a server error.

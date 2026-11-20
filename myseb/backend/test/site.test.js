@@ -9,8 +9,10 @@ await migrate();
 const server = app.listen(0); const base = `http://127.0.0.1:${server.address().port}`;
 test.after(() => { server.close(); pool.end(); });
 
-test('"/" is the product page, links carry the public prefix, and it is locked down', async () => {
-  const r = await fetch(base + '/');
+test('"/about" is the product page, links carry the public prefix, and it is locked down; "/" still opens the dashboard', async () => {
+  const root = await fetch(base + '/', { redirect: 'manual' });
+  assert.equal(root.headers.get('location'), '/myseb/dashboard/');
+  const r = await fetch(base + '/about');
   assert.equal(r.status, 200);
   assert.match(r.headers.get('content-type'), /html/);
   assert.match(r.headers.get('content-security-policy'), /frame-ancestors 'none'/);
