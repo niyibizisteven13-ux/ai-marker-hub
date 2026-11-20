@@ -19,6 +19,12 @@ A form link is public. Nothing MySEB does can stop a student from also opening t
 4. *Create exam* → *Generate Code* → share the code. Students open MySEB, enter their name and the code.
 5. After the exam: *Exam keys (CSV)* and compare with the responses.
 
+## On a phone
+On **Android** the app locks the phone for the whole exam: screen pinning (Home and Recents are disabled, the notification shade cannot be pulled down), screenshots and screen recording are black (`FLAG_SECURE`), and the form opens inside the app, which refuses every site that is not the form's own. Leaving the app is recorded and handled by your "if a student leaves" rule. A silent kiosk with no confirmation prompt needs the phone provisioned as device owner (see `MOBILE.md`). On **iPhone** the app cannot force the lock: it asks for Guided Access (only works on school-managed phones), and detects and reports screenshots, recording and leaving the app (see `IOS.md`). A student with no app can use the browser option, which watches and reports but cannot lock. Honest limits: the phone code has been written but not yet run on a real device here, and the camera is driven by the exam page, which a third-party form does not provide.
+
+## Enketo, KoBoToolbox, ODK and Ona
+Enketo is the web form engine behind KoBoToolbox (including the humanitarian server), ODK Central / ODK Cloud and Ona. Their form links (`ee.kobotoolbox.org`, `enke.to/::…`, `enketo.org`, `*.getodk.cloud`, `enketo.ona.io`, `*.humanitarianresponse.info`) are recognised and the phone is locked to those sites. A school's **own** ODK or Enketo server is not on that list: paste its link and MySEB locks the phone to that one site (see "Any other website"). These forms stay on the same page after sending, so students press **I have submitted**.
+
 ## Microsoft Forms, Typeform, Jotform, SurveyMonkey, Tally, KoBoToolbox, Zoho Forms, Formstack, Airtable forms
 Recognised by address, with their own sites and sign-in pages allowed. These tools stay on the same page after sending, so students press **I have submitted**. Add a "MySEB key" question and, where the tool supports pre-filling from the link, name the field in **Key field** (otherwise the student types the key shown in the app's bar).
 

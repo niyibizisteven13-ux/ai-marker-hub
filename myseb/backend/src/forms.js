@@ -26,7 +26,9 @@ export const PROVIDERS = [
   P('jotform', 'Jotform', ['jotform.com'], { suffix: true, tips: ['Students press "I have submitted" in MySEB after the thank-you page.', 'Add a Short text field "MySEB key".'] }),
   P('surveymonkey', 'SurveyMonkey', ['surveymonkey.com'], { suffix: true, tips: ['Students press "I have submitted" in MySEB after the thank-you page.'] }),
   P('tally', 'Tally', ['tally.so'], { suffix: true, tips: ['Students press "I have submitted" in MySEB after the thank-you page.', 'Add a Short answer "MySEB key" (Tally can also fill it from the link).'] }),
-  P('kobo', 'KoBoToolbox', ['kobotoolbox.org', 'enketo.org'], { suffix: true, tips: ['Students press "I have submitted" in MySEB after the form closes.'] }),
+  // Enketo is the web form engine behind KoBoToolbox, ODK Central / ODK Cloud and Ona: their form links live on these hosts (and on enke.to, Enketo's short links).
+  // A school's own ODK or Enketo server is not listed here: paste its link and MySEB locks the phone to that site (see "Any other website").
+  P('kobo', 'KoBoToolbox / Enketo / ODK', ['kobotoolbox.org', 'humanitarianresponse.info', 'enketo.org', 'enke.to', 'ona.io', 'getodk.cloud'], { suffix: true, tips: ['Students press "I have submitted" in MySEB after the form closes.', 'Add a text question "MySEB key" (required) so you can check responses; for Enketo and KoBo, name the question\'s field in "Key field" if the form can be pre-filled from the link.'] }),
   P('zoho', 'Zoho Forms', ['zohopublic.com', 'zohopublic.eu'], { suffix: true, tips: ['Students press "I have submitted" in MySEB after the thank-you page.'] }),
   P('formstack', 'Formstack', ['formstack.com'], { suffix: true, tips: ['Students press "I have submitted" in MySEB after the thank-you page.'] }),
   P('airtable', 'Airtable form', ['airtable.com'], { pathOnly: { 'airtable.com': '/shr' }, tips: ['Students press "I have submitted" in MySEB after the thank-you page.'] }),
