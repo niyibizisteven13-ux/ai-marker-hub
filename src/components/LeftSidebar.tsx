@@ -21,11 +21,13 @@ import {
   LogIn,
   Sparkles,
   Coins,
-  Building2, ShieldCheck } from 'lucide-react';
+  Building2, ShieldCheck, Bot, Target } from 'lucide-react';
 import { NavigationTab, User, ChatSession } from '../types';
 import logoUrl from '../assets/bwenge-logo.svg';
 import { tokens } from '../utils/designTokens';
 import { creditMeter, useBillingMe } from './PlanStatus';
+import AgentsPanel from './sidebar/AgentsPanel';
+import { readMode, saveMode, usePins, type SidebarMode } from '../utils/sidebarPrefs';
 
 interface LeftSidebarProps {
   activeTab: NavigationTab;
@@ -132,6 +134,8 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
 }) => {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [query, setQuery] = useState('');
+  const [mode, setModeState] = useState<SidebarMode>(readMode); const setMode = (m: SidebarMode) => { setModeState(m); saveMode(m); };
+  const pins = usePins();
   const profileRef = useRef<HTMLDivElement>(null);
 
   // The mobile drawer always shows the full layout; "collapsed" only applies on desktop.
@@ -162,16 +166,17 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   type NavItem = { label: string; icon: React.ElementType; onClick: () => void; active?: boolean };
   const navGroups: { title?: string; items: NavItem[] }[] = [
     { items: [
-      { label: 'Chat', icon: MessageSquare, onClick: () => setActiveTab('documents'), active: activeTab === 'documents' && !/^\/(learn|exams)/.test(path) },
-      ...(user ? [{ label: 'Learning', icon: GraduationCap, onClick: goTo('/learn?tab=tasks'), active: /^\/learn/.test(path) }] : []),
+      ...(user ? [{ label: 'Learning', icon: GraduationCap, onClick: goTo('/learn?tab=tasks'), active: /^\/learn/.test(path) && /tab=tasks|tab=classes/.test(typeof window !== 'undefined' ? window.location.search : '') }] : []),
+      ...(user ? [{ label: 'Practice', icon: Target, onClick: goTo('/learn'), active: /^\/learn/.test(path) && !/tab=/.test(typeof window !== 'undefined' ? window.location.search : '') }] : []),
     ] },
     { title: 'Teaching', items: [
-      ...(user ? [{ label: 'MySEB', icon: ShieldCheck, onClick: goTo('/lecturer'), active: /^\/lecturer/.test(path) }] : []),
-      ...(user && onOpenMark ? [{ label: 'Mark', icon: PenLine, onClick: onOpenMark }] : []),
       ...(user && onOpenAssignments ? [{ label: 'Tasks', icon: ClipboardList, onClick: onOpenAssignments }] : []),
       ...(user && onOpenForms ? [{ label: 'Forms', icon: ClipboardCheck, onClick: onOpenForms }] : []),
-      ...(user && onOpenBiz ? [{ label: 'Ventures', icon: Store, onClick: onOpenBiz }] : []),
+      ...(user && onOpenMark ? [{ label: 'Mark', icon: PenLine, onClick: onOpenMark }] : []),
       ...(user ? [{ label: 'Results', icon: BarChart3, onClick: goTo('/exams'), active: /^\/exams/.test(path) }] : []),
+      // MySEB and Ventures are not here unless the person added them in Settings → Connections.
+      ...(user && pins.myseb ? [{ label: 'MySEB', icon: ShieldCheck, onClick: goTo('/lecturer'), active: /^\/lecturer/.test(path) }] : []),
+      ...(user && pins.ventures && onOpenBiz ? [{ label: 'Ventures', icon: Store, onClick: onOpenBiz }] : []),
     ] },
     { title: 'Files', items: [
       ...(user && onOpenLibrary ? [{ label: 'My files', icon: FolderOpen, onClick: onOpenLibrary }] : []),
@@ -253,10 +258,24 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
           </div>
         </div>
 
+        {/* Chat and Agents, as in Claude */}
+        <div role="tablist" aria-label="Sidebar" className={`shrink-0 px-3 pb-2 pt-1 ${c ? 'lg:flex lg:flex-col lg:items-center lg:gap-1' : 'grid grid-cols-2 gap-1'}`}>
+          {([['chat', 'Chat', MessageSquare], ['agents', 'Agents', Bot]] as const).map(([id, text, Icon]) => (
+            <div key={id} className="group relative">
+              <button type="button" role="tab" aria-selected={mode === id} aria-label={text} onClick={() => setMode(id)}
+                className={`flex h-9 items-center justify-center gap-2 rounded-lg text-[13px] font-medium transition-colors ${FOCUS_RING} ${c ? 'w-full lg:w-10' : 'w-full'} ${mode === id ? 'bg-white/[0.09] text-white' : 'text-[var(--app-faint)] hover:bg-white/[0.04] hover:text-white'}`}>
+                <Icon size={15} aria-hidden="true" /><span className={c ? 'lg:hidden' : ''}>{text}</span>
+              </button>
+              <CollapsedTip show={c} label={text} />
+            </div>
+          ))}
+        </div>
+
         {/* Menu and recent chats scroll together, so recent chats always have room on short screens. */}
         <div className={`sidebar-scroll min-h-0 flex-1 overflow-y-auto ${c ? 'lg:overflow-visible' : ''}`}>
         {/* Workspace navigation, in groups: work, marking, files */}
-        <nav aria-label="Workspace" className={`shrink-0 px-3 ${c ? 'lg:flex lg:flex-col lg:items-center' : ''}`}>
+        {mode === 'agents' && !c && <AgentsPanel onGo={onCloseMobile} />}
+        {(mode === 'chat' || c) && <nav aria-label="Workspace" className={`shrink-0 px-3 ${c ? 'lg:flex lg:flex-col lg:items-center' : ''}`}>
           {navGroups.map((g, gi) => (
             <div key={g.title ?? 'main'} className={gi ? 'mt-3 lg:mt-2.5' : ''}>
               {g.title && <h3 className={`px-3 pb-0.5 text-[11px] font-medium text-[var(--app-faint)] lg:text-[11.5px] ${c ? 'lg:hidden' : ''}`}>{g.title}</h3>}
@@ -286,10 +305,10 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
               </div>
             </div>
           ))}
-        </nav>
+        </nav>}
 
         {/* Chat history */}
-        <div className={`mt-3 flex flex-col ${c ? 'lg:hidden' : ''}`}>
+        {mode === 'chat' && <div className={`mt-3 flex flex-col ${c ? 'lg:hidden' : ''}`}>
           {sessions.length > 0 ? (
             <>
               <div className="sticky top-0 z-10 flex shrink-0 items-center justify-between px-6 pb-1 pt-1" style={{ backgroundColor: tokens.bgSidebar }}>
@@ -360,7 +379,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
               <p className="px-6 text-xs text-[var(--app-faint)]/80">Your chats will appear here.</p>
             </>
           )}
-        </div>
+        </div>}
         </div>
 
         {/* Footer: the account (settings, admin, plan and sign-out are in its menu, as in Claude) */}

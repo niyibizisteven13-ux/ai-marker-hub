@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { VideoPlayer, frameFor } from './VideoPlayer';
-import { ChevronLeft, ChevronRight, Heart, Loader2, MessageCircle, Pin, Send, ShoppingBag } from 'lucide-react';
+import { Bookmark, ChevronLeft, ChevronRight, Heart, Loader2, MessageCircle, Pin, Send, ShoppingBag } from 'lucide-react';
 import { publicApi } from '../../biz/api';
 import { rwf, type PublicBusiness, type PublicPost } from '../../biz/types';
 import { useTx } from '../../biz/i18n';
@@ -57,10 +57,12 @@ function PostCard({ b, p, mediaSrc, preview, onOrder, onOpen, onShare }: { b: Pu
     try { const c = await publicApi.comment(b.slug, p.id, { name, text, website: hp }); try { localStorage.setItem('bz-visitor-name', name); } catch { /* optional */ } setComments((l) => [...(l ?? []), c]); setCount((n) => n + 1); setText(''); }
     catch (x) { setErr(x instanceof Error ? x.message : 'Your comment could not be sent.'); } finally { setBusy(false); }
   };
+  const savedKey = `bz-saved:${b.slug}`; const [saved, setSaved] = useState(() => { try { return (JSON.parse(localStorage.getItem(savedKey) ?? '[]') as string[]).includes(p.id); } catch { return false; } });
+  const toggleSaved = () => { const next = !saved; setSaved(next); try { const cur = (JSON.parse(localStorage.getItem(savedKey) ?? '[]') as string[]).filter((x) => x !== p.id); localStorage.setItem(savedKey, JSON.stringify(next ? [...cur, p.id] : cur)); } catch { /* optional */ } };
   const long = p.text.length > 140 && !more;
   return (
-    <li id={`post-${p.id}`} className="scroll-mt-20 overflow-hidden rounded-2xl border border-[#E7EAEE] bg-white shadow-sm">
-      <div className="flex items-center gap-3 px-3.5 py-3">
+    <li id={`post-${p.id}`} className="scroll-mt-20 overflow-hidden bg-white sm:rounded-2xl sm:border sm:border-[#E7EAEE] sm:shadow-sm">
+      <div className="flex items-center gap-3 px-3 py-2.5 sm:px-3.5 sm:py-3">
         <span className="rounded-full bg-gradient-to-tr from-[var(--acc)] to-[#DB4F8E] p-[2.5px]"><span className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-[var(--acc)] text-xs font-bold text-[var(--on)]">{b.logo ? <img src={mediaSrc(b.logo.id)} alt="" className="h-full w-full object-cover" /> : initials(b.name)}</span></span>
         <div className="min-w-0 flex-1 leading-tight"><p className="truncate text-sm font-semibold">{b.name}</p>{product && <p className="truncate text-xs text-[#667085]">{product.name}</p>}</div>
         {p.pinned && <span className="inline-flex items-center gap-1 text-xs text-[#667085]"><Pin size={13} />{tx("Pinned")}</span>}
@@ -75,8 +77,9 @@ function PostCard({ b, p, mediaSrc, preview, onOrder, onOpen, onShare }: { b: Pu
         <button type="button" aria-label={tx("Share")} onClick={() => onShare(p)} className="flex h-10 w-10 items-center justify-center rounded-full hover:bg-[#F6F7F9]"><Send size={23} /></button>
         {product && product.available && <button type="button" onClick={() => onOrder(product.id)} className="ml-auto inline-flex min-h-10 items-center gap-2 rounded-xl bg-[var(--acc)] px-4 text-sm font-semibold text-[var(--on)] hover:opacity-90"><ShoppingBag size={16} />Order{product.price !== null ? ` · ${rwf(product.price)}` : ''}</button>}
         {product && !product.available && <span className="ml-auto pr-2 text-xs font-medium text-[#667085]">{tx("Out of stock")}</span>}
+        {!product && <button type="button" aria-label={saved ? tx("Remove from saved") : tx("Save")} aria-pressed={saved} onClick={toggleSaved} className="ml-auto flex h-10 w-10 items-center justify-center rounded-full hover:bg-[#F6F7F9]"><Bookmark size={24} className={saved ? 'fill-[#0E1722] text-[#0E1722]' : 'text-[#0E1722]'} /></button>}
       </div>
-      <div className="px-3.5 pb-3.5">
+      <div className="px-3 pb-3.5 sm:px-3.5">
         {likes > 0 && <p className="text-sm font-semibold">{likes.toLocaleString('en-US')} {tx(likes === 1 ? 'love' : 'loves')}</p>}
         {p.text && <p className="mt-1 whitespace-pre-wrap text-[15px] leading-snug"><b className="mr-1.5">{b.name}</b>{long ? <>{p.text.slice(0, 140)}… <button type="button" onClick={() => setMore(true)} className="text-[#667085]">{tx("more")}</button></> : p.text}</p>}
         {count > 0 && !open && <button type="button" onClick={toggle} className="mt-1.5 text-sm text-[#667085]">{tx('View all')} {count} {tx(count === 1 ? 'comment' : 'comments')}</button>}
@@ -100,5 +103,5 @@ function PostCard({ b, p, mediaSrc, preview, onOrder, onOpen, onShare }: { b: Pu
 export default function FeedSection({ b, posts, mediaSrc, preview, onOrder, onOpen, onShare }: { b: PublicBusiness; posts: PublicPost[]; mediaSrc: (id: string) => string; preview: boolean; onOrder: (productId: string) => void; onOpen: (items: PublicPost['media'], i: number) => void; onShare: (p: PublicPost) => void }) {
   useEffect(() => { if (document.getElementById('bz-keyframes')) return; const s = document.createElement('style'); s.id = 'bz-keyframes'; s.textContent = '@keyframes bzpop{0%{opacity:0;transform:translate(-50%,-50%) scale(.4)}25%{opacity:1;transform:translate(-50%,-50%) scale(1.15)}60%{opacity:1;transform:translate(-50%,-50%) scale(1)}100%{opacity:0;transform:translate(-50%,-50%) scale(1)}}'; document.head.appendChild(s); }, []);
   if (!posts.length) return null;
-  return <ul className="mx-auto max-w-[520px] space-y-5">{posts.map((p) => <PostCard key={p.id} b={b} p={p} mediaSrc={mediaSrc} preview={preview} onOrder={onOrder} onOpen={onOpen} onShare={onShare} />)}</ul>;
+  return <ul className="mx-auto max-w-[520px] divide-y divide-[#EEF0F3] border-y border-[#EEF0F3] sm:space-y-5 sm:divide-y-0 sm:border-y-0">{posts.map((p) => <PostCard key={p.id} b={b} p={p} mediaSrc={mediaSrc} preview={preview} onOrder={onOrder} onOpen={onOpen} onShare={onShare} />)}</ul>;
 }

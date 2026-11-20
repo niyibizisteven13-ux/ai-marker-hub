@@ -32,8 +32,8 @@ function Lightbox({ items, index, src, onClose, onIndex }: { items: PublicMedia[
   return (
     <div role="dialog" aria-modal="true" aria-label="Photo viewer" className="fixed inset-0 z-[400] flex flex-col bg-black/95" onClick={onClose}>
       <div className="flex items-center justify-between px-4 py-3 text-white"><span className="text-sm text-white/70">{index + 1} / {items.length}</span><button type="button" aria-label={tx("Close")} onClick={onClose} className="flex h-11 w-11 items-center justify-center rounded-full hover:bg-white/10"><X size={22} /></button></div>
-      <div className="relative flex min-h-0 flex-1 items-center justify-center px-2" onClick={(e) => e.stopPropagation()}>
-        {m.kind === 'video' ? <div key={m.id} className="w-full max-w-3xl overflow-hidden rounded-xl"><VideoPlayer media={m} src={src} startUnmuted /></div> : <img key={m.id} src={src(m.id)} alt={m.caption || 'Photo'} className="max-h-full max-w-full rounded-lg object-contain" />}
+      <div className="relative flex min-h-0 flex-1 items-center justify-center sm:px-2" onClick={(e) => e.stopPropagation()}>
+        {m.kind === 'video' ? <div key={m.id} className="w-full max-w-3xl overflow-hidden sm:rounded-xl"><VideoPlayer media={m} src={src} startUnmuted /></div> : <img key={m.id} src={src(m.id)} alt={m.caption || 'Photo'} className="max-h-full max-w-full rounded-lg object-contain" />}
         {items.length > 1 && <>
           <button type="button" aria-label={tx("Previous")} onClick={() => onIndex((index - 1 + items.length) % items.length)} className="absolute left-2 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70"><ChevronLeft /></button>
           <button type="button" aria-label={tx("Next")} onClick={() => onIndex((index + 1) % items.length)} className="absolute right-2 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70"><ChevronRight /></button>
@@ -282,7 +282,7 @@ function BizPageInner({ business: b, base, lang, setLang, openNow, mediaSrc, pre
               <section className="grid grid-cols-3 gap-2 rounded-2xl bg-[#F6F7F9] p-3 text-center text-[12.5px] font-medium text-[#475467] sm:text-sm">{preset.highlights.map((h) => <span key={h} className="flex items-center justify-center gap-1.5 px-1 py-1.5"><Check size={14} className="shrink-0 text-emerald-600" />{tx(h)}</span>)}</section>
 
               {/* updates (the feed) */}
-              {posts.length > 0 && <section id="updates" className="scroll-mt-20"><h2 className="mb-4 font-display text-2xl font-semibold tracking-tight">{tx("Updates")}</h2>
+              {posts.length > 0 && <section id="updates" className="-mx-4 scroll-mt-20 sm:mx-0"><h2 className="mb-3 px-4 font-display text-2xl font-semibold tracking-tight sm:mb-4 sm:px-0">{tx("Updates")}</h2>
                 <FeedSection b={b} posts={posts} mediaSrc={mediaSrc} preview={preview} onOrder={(pid) => { setCart((x) => ({ ...x, [pid]: Math.max(1, x[pid] ?? 0) })); setCheckout('order'); }} onOpen={(items, i) => setPostBox({ items, i })} onShare={(p) => void sharePost(p)} /></section>}
 
               {/* gallery */}
