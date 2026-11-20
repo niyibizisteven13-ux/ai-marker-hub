@@ -70,11 +70,12 @@ export default function ProfilePage({ business: b, mediaSrc, preview = false }: 
   const featured = useMemo(() => (p.featured.length ? p.featured : b.gallery.filter((m) => m.kind === 'video').slice(0, 2)), [p.featured, b.gallery]);
   const wa = c.whatsapp ? `https://wa.me/${c.whatsapp}?text=${encodeURIComponent(`Hello ${b.name}, I saw your profile on Bwenge.`)}` : null;
   const photos = b.gallery.filter((m) => m.kind === 'image' && !featured.some((f) => f.id === m.id)); const hasContact = !!(wa || c.email || c.phone);
-  const h2 = 'font-display text-2xl font-semibold tracking-tight text-[#0E1722]'; const panel = '-mx-4 border-y border-[#E7EAEE] bg-white p-5 sm:mx-0 sm:rounded-3xl sm:border sm:p-6 sm:shadow-sm';
+  // A personal page, not a shop: warm paper background, headings with an accent bar, quiet panels.
+  const h2 = 'flex items-center gap-3 font-display text-[22px] font-semibold tracking-tight text-[#0E1722] before:h-6 before:w-1 before:rounded-full before:bg-[var(--acc)]'; const panel = '-mx-4 border-y border-[#E7EAEE] bg-white p-5 sm:mx-0 sm:rounded-2xl sm:border sm:p-6';
   const meta = [p.school, p.field].filter(Boolean).join(' · ');
 
   const videoCount = useMemo(() => new Set([...featured, ...b.gallery, ...timeline.flatMap((t) => t.media ?? [])].filter((m) => m.kind === 'video').map((m) => m.id)).size, [featured, b.gallery, timeline]);
-  const highlights = ([['watch', 'Watch', Play, featured.length > 0], ['journey', 'Journey', Route, timeline.length > 0], ['skills', 'Skills', Sparkles, p.skills.length > 0], ['updates', 'Posts', Grid3x3, posts.length > 0], ['links', 'Links', Link2, p.links.length > 0], ['contact', 'Contact', MessageCircle, true]] as const).filter((h) => h[3]).map((h) => [h[0], h[1], h[2]] as const);
+  const highlights = ([['updates', 'Updates', Grid3x3, posts.length > 0], ['watch', 'Watch', Play, featured.length > 0], ['journey', 'Journey', Route, timeline.length > 0], ['skills', 'Skills', Sparkles, p.skills.length > 0], ['links', 'Links', Link2, p.links.length > 0], ['contact', 'Contact', MessageCircle, true]] as const).filter((h) => h[3]).map((h) => [h[0], h[1], h[2]] as const);
   const actions = (<>
     {hasContact && <a href="#contact" className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl px-5 text-[15px] font-semibold sm:flex-none" style={{ background: theme.accent, color: theme.on }}><MessageCircle size={18} />{tx('Get in touch')}</a>}
     {p.cvUrl && <a href={p.cvUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-[#D0D5DD] bg-white px-4 text-[15px] font-semibold"><FileText size={18} />{tx('View CV')}</a>}
@@ -82,7 +83,7 @@ export default function ProfilePage({ business: b, mediaSrc, preview = false }: 
   </>);
 
   return (
-    <div className="min-h-[100dvh] bg-[#EEF0F3] font-sans text-[#0E1722]" style={{ ['--acc' as string]: theme.accent }}>
+    <div className="min-h-[100dvh] bg-[#F6F4EF] font-sans text-[#0E1722]" style={{ ['--acc' as string]: theme.accent }}>
       <div className="mx-auto max-w-3xl pb-28 sm:pb-10 lg:grid lg:max-w-6xl lg:grid-cols-[340px_minmax(0,1fr)] lg:items-start lg:gap-5 lg:px-4">
         <header className="bg-white sm:mt-4 sm:overflow-hidden sm:rounded-3xl sm:shadow-sm lg:sticky lg:top-4 lg:max-h-[calc(100dvh-2rem)] lg:overflow-y-auto">
           <div className="relative h-32 w-full overflow-hidden sm:h-52 lg:h-28" style={{ background: `linear-gradient(135deg, ${theme.accent}, #0E1722)` }}>
@@ -111,6 +112,9 @@ export default function ProfilePage({ business: b, mediaSrc, preview = false }: 
         </header>
 
         <main className="min-w-0 space-y-2.5 px-4 pt-2.5 sm:space-y-4 sm:px-0 sm:pt-4">
+          {posts.length > 0 && <section id="updates" className="-mx-4 scroll-mt-4 space-y-3 sm:mx-0"><h2 className={`${h2} px-4 sm:px-1`}>{tx('Updates')}</h2>
+            <FeedSection b={b} posts={posts} mediaSrc={mediaSrc} preview={preview} onOrder={() => undefined} onOpen={(items, i) => setView({ items, i })} onShare={(post) => { const u = `${url}?post=${post.id}#post-${post.id}`; track('share'); void (navigator.share ? navigator.share({ title: b.name, url: u }).catch(() => undefined) : navigator.clipboard.writeText(u).then(() => say(tx('Link copied')))); }} /></section>}
+
           {featured.length > 0 && <section id="watch" aria-label={tx('Featured videos')} className="-mx-4 scroll-mt-4 space-y-3 sm:mx-0"><h2 className={`${h2} px-4 sm:px-0`}>{tx('Watch me')}</h2><div className="grid items-start gap-px bg-[#EEF0F3] sm:grid-cols-2 sm:gap-3 sm:bg-transparent">{featured.map((m, k) => <div key={m.id} className={`overflow-hidden bg-black sm:rounded-2xl sm:shadow-sm ${k === 0 && featured.length % 2 === 1 ? 'sm:col-span-2' : ''}`}>{m.kind === 'video' ? <VideoPlayer media={m} src={mediaSrc} /> : <button type="button" onClick={() => setView({ items: featured, i: k })} className="block w-full"><img src={mediaSrc(m.id)} alt={m.caption ?? ''} className="w-full object-cover" /></button>}{m.caption && <p className="bg-white px-3.5 py-2.5 text-[14px] text-[#344054]">{m.caption}</p>}</div>)}</div></section>}
 
           {b.about && <section className={panel}><h2 className={h2}>{tx('About me')}</h2><p className="mt-3 whitespace-pre-line text-[16px] leading-relaxed text-[#344054]">{b.about}</p></section>}
@@ -134,9 +138,6 @@ export default function ProfilePage({ business: b, mediaSrc, preview = false }: 
               </li>); })}</ol></section>}
 
           {photos.length > 0 && <section className={panel}><h2 className={h2}>{tx('Photos')}</h2><div className="mt-3 grid grid-cols-3 gap-2">{photos.map((m, i) => <button key={m.id} type="button" onClick={() => setView({ items: photos, i })} className="aspect-square overflow-hidden rounded-xl bg-[#EEF0F3]" aria-label={tx('Open the picture')}><img src={mediaSrc(m.id)} alt={m.caption ?? ''} loading="lazy" className="h-full w-full object-cover" /></button>)}</div></section>}
-
-          {posts.length > 0 && <section id="updates" className="-mx-4 scroll-mt-4 space-y-3 sm:mx-0"><h2 className={`${h2} px-4 sm:px-1`}>{tx('Latest')}</h2>
-            <FeedSection b={b} posts={posts} mediaSrc={mediaSrc} preview={preview} onOrder={() => undefined} onOpen={(items, i) => setView({ items, i })} onShare={(post) => { const u = `${url}?post=${post.id}#post-${post.id}`; track('share'); void (navigator.share ? navigator.share({ title: b.name, url: u }).catch(() => undefined) : navigator.clipboard.writeText(u).then(() => say(tx('Link copied')))); }} /></section>}
 
           {p.links.length > 0 && <section id="links" className={`${panel} scroll-mt-4`}><h2 className={h2}>{tx('Find me online')}</h2><ul className="mt-3 grid gap-2 sm:grid-cols-2">{p.links.map((l) => <li key={l.id}><a href={l.url} target="_blank" rel="noreferrer noopener" className="flex min-h-12 items-center gap-3 rounded-xl border border-[#E7EAEE] px-4 text-[15px] font-semibold hover:bg-[#F9FAFB]"><Link2 size={17} className="shrink-0 text-[#667085]" /><span className="truncate">{l.label}</span><ExternalLink size={14} className="ml-auto shrink-0 text-[#98A2B3]" /></a></li>)}</ul></section>}
 
