@@ -171,7 +171,7 @@ export function createBizRouter(): Router {
   r.delete('/:id/products/:pid', run(async (req, res) => { await svc().removeProduct(me(req), req.params.id, req.params.pid); res.status(204).end(); }));
 
   r.post('/:id/media', (req, res, next) => { void (async () => {
-    const cap = await svc().uploadCap(me(req)); const len = Number(req.headers['content-length'] ?? 0);
+    const cap = await svc().uploadCap(me(req), req.params.id); const len = Number(req.headers['content-length'] ?? 0);
     if (len > cap + 1024 * 1024) return res.status(cap > MAX_IMAGE_BYTES ? 413 : 402).json({ error: cap > MAX_IMAGE_BYTES ? `That file is too large. A photo can be up to 6 MB and a video up to ${MAX_VIDEO_MB} MB (about a minute at 1080p).` : 'Photos can be up to 6 MB. Videos are for paid plans: see the plans to add videos.' });
     if (len > BIG_UPLOAD) {
       if (bigUploads >= MAX_BIG_UPLOADS) return res.status(429).json({ error: 'Many videos are uploading right now. Please try again in a minute.' });

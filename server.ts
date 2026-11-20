@@ -2897,7 +2897,7 @@ async function startServer() {
     app.use(express.static(distPath));
     app.get(['/forms/:id', '/apply/:id'], (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
     // A business page: the same app, with the business's own name, tagline and cover photo in the head so a link shared on WhatsApp looks right.
-    app.get('/b/:slug', async (req, res) => {
+    app.get(['/b/:slug', '/p/:slug'], async (req, res) => {
       try {
         const html = await fs.readFile(path.join(distPath, 'index.html'), 'utf8');
         const { bizService } = await import('./server/services/biz/runtime.js'); const { renderShell } = await import('./server/services/biz/shell.js');

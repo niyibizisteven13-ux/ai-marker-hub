@@ -201,3 +201,20 @@ Joining is also slowed for anyone guessing join codes. Joining and checking in r
 - The Kinyarwanda text should be read by a native speaker.
 
 **Assistant**: the chat can list and create programs (`biz_program`) and report how they are doing (`biz_plan_status`).
+
+## Kinds of venture: each gets its own menu and home screen
+The kind comes from the category (`kindOf` in `model.ts`, mirrored by `kindOf` in `src/components/biz/kinds.ts`; a test keeps them equal). Same data and same assistant underneath; the studio menu, its order, its words and the home screen change.
+* **Business that sells** (shop, restaurant, farm, crafts, other): Dashboard with sales, orders, customers, profit and stock; Programs; Products and stock.
+* **Bookings** (salon, health, services, transport): menu starts with *Bookings and requests*, *Services and prices*, *Clients*; income instead of sales.
+* **School or training**: *Enquiries*, *Courses and fees*, *Students*, *Fees received*.
+* **Content creator / social media** (category `creator`): home is **Audience** (views and taps this week against the week before, earnings, loves and comments, a 7-day chart, best posts); menu *Content*, *Brand deals* (messages), *Rates and packages*, *Earnings*, *Content plan*. No Programs. The public page opens on videos and posts and the button says "Work with me".
+* **Personal profile (Bwenge4profile)**: see below.
+A page cannot be switched between business and profile (the allowances are separate); create a new one.
+
+## Bwenge4profile (a student's or professional's own page)
+One link for an application letter, an email signature, a CV or a WhatsApp message: `bwenge.space/p/<name>` (`/b/<name>` shows the same page). Made in the studio (`/biz` or `/profile`, choose "My profile") or by the assistant (`biz_create` with category `profile`, then `biz_profile`).
+* **What it shows**: photo and banner, name (with the blue badge when verified), headline, school and field, place, an "open to" line, **videos first** ("Watch me"), about, skills, **My journey** (education, experience, project, event attended, award, certificate, volunteering; each with dates, text, a link and pictures or videos, newest first), photos, latest posts (the feed), links, a CV link, a contact form and the profile link with a QR code. Link previews (WhatsApp, email, LinkedIn) show the name and headline.
+* **Studio**: Overview (link, views, taps, messages, loves, a 7-day chart and a *profile strength* checklist), My profile (editor), Posts and videos, Public page (photos and videos, preview), Messages, Ask the agent, Settings. No sales, stock or customers.
+* **Free**: a profile is free and does not use the business allowance (1 profile free, 3 on a paid plan). Free profiles keep **4 videos of up to 100 MB** each (about 40 seconds at 1080p), 40 photos, 400 MB in all; paid plans have the usual limits (200 MB videos). Videos go through the same processing as business videos (smooth 720p, a light 360p version, a poster).
+* **Data**: `Business.profile` (`headline, school, field, location, openTo, skills[], links[], cvUrl, featured[], timeline[]`); only fields present in an update change; links must be https; dates are `YYYY` or `YYYY-MM` (`to` may be `present`); journey pictures are uploaded with scope `timeline` (public, not in the gallery, never made the banner); 60 journey items, 12 links, 30 skills, 6 featured videos at most. Everything in `profile` is public once published; the private `notes` are not.
+* **Honest limits**: Kinyarwanda texts for these screens need a native review; a profile has no custom domain; people reach the owner by WhatsApp, email or the contact form (messages appear in Messages).

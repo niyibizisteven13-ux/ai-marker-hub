@@ -1425,7 +1425,7 @@ export default function App() {
     return <Suspense fallback={null}><MySebRequired page /></Suspense>;
   }
   // A business's public page (bwenge4biz): open to everyone.
-  const bizPage = /^\/b\/([a-z0-9-]{1,40})\/?$/i.exec(window.location.pathname);
+  const bizPage = /^\/[bp]\/([a-z0-9-]{1,40})\/?$/i.exec(window.location.pathname);
   if (bizPage) return <Suspense fallback={null}><BizPublicPage slug={bizPage[1].toLowerCase()} /></Suspense>;
   // Get the app (public): the landing page's QR code and download button lead here.
   if (window.location.pathname === '/get-app') return <GetAppPage />;
@@ -1701,7 +1701,7 @@ export default function App() {
   // The lecturer's MySEB dashboard: their rooms, tests and the assistant beside them.
   if (authenticatedUser && /^\/lecturer\/?$/.test(window.location.pathname)) return <MySebDashboardPage onBack={() => { window.location.href = '/'; }} />;
   // The owner's studio for their business page: private.
-  if (authenticatedUser && /^\/biz\/?$/.test(window.location.pathname)) return <Suspense fallback={null}><BizStudioPage onBack={() => { window.location.href = '/chat'; }} /></Suspense>;
+  if (authenticatedUser && /^\/(biz|profile)\/?$/.test(window.location.pathname)) return <Suspense fallback={null}><BizStudioPage onBack={() => { window.location.href = '/chat'; }} /></Suspense>;
   const studioMatch = window.location.pathname.match(/^\/forms\/([^/?#]+)\/edit\/?$/);
   if (authenticatedUser && studioMatch) {
     return <FormStudioPage formId={decodeURIComponent(studioMatch[1])} onBack={() => { window.location.href = '/forms'; }} />;

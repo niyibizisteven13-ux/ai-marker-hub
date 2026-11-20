@@ -14,11 +14,18 @@ export const SLUG_MAX = 32;
 /** Names that would look like part of Bwenge or like the site's own pages. */
 export const RESERVED_SLUGS = new Set([
   'admin', 'api', 'app', 'apps', 'b', 'biz', 'bwenge', 'bwenge4biz', 'chat', 'dashboard', 'download', 'help', 'home', 'login', 'logout', 'mail', 'myseb', 'new',
-  'official', 'pay', 'payment', 'payments', 'privacy', 'root', 'settings', 'signup', 'sign-in', 'status', 'support', 'terms', 'test', 'upgrade', 'www',
+  'official', 'p', 'profile', 'profiles', 'bwenge4profile', 'pay', 'payment', 'payments', 'privacy', 'root', 'settings', 'signup', 'sign-in', 'status', 'support', 'terms', 'test', 'upgrade', 'www',
 ]);
 
-export const CATEGORIES = ['shop', 'restaurant', 'salon', 'farm', 'services', 'school', 'health', 'transport', 'craft', 'other'] as const;
+export const CATEGORIES = ['shop', 'restaurant', 'salon', 'farm', 'services', 'school', 'health', 'transport', 'craft', 'creator', 'profile', 'other'] as const;
 export type Category = (typeof CATEGORIES)[number];
+/**
+ * Which kind of dashboard and page a category gets. `sell`: shops, cafés, farms, crafts (orders, stock, sales); `book`: salons, clinics, services, transport (bookings and requests);
+ * `learn`: schools and training (courses and enrolments); `creator`: social-media and content makers (content, audience, brand deals, rates); `profile`: Bwenge4profile, a person's own page
+ * (students and professionals: what they have done, videos, skills, a link for a letter or an email).
+ */
+export type Kind = 'sell' | 'book' | 'learn' | 'creator' | 'profile';
+export const kindOf = (c: string): Kind => (c === 'profile' ? 'profile' : c === 'creator' ? 'creator' : c === 'school' ? 'learn' : c === 'salon' || c === 'health' || c === 'services' || c === 'transport' ? 'book' : 'sell');
 export const THEMES = ['gold', 'teal', 'green', 'blue', 'rose', 'violet', 'ink'] as const;
 export type Theme = (typeof THEMES)[number];
 export const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
@@ -30,7 +37,7 @@ export type MediaKind = 'image' | 'video';
 /** What the server learned about an uploaded video and what it made from it (see videoPipeline.ts). `processing`: being turned into a smooth 720p file, a 360p file for slow connections and a poster picture; `ready`: done (or kept as uploaded when `raw`); `failed`: kept as uploaded. */
 export interface VideoInfo { state: 'processing' | 'ready' | 'failed'; /** The picture as a viewer sees it (after rotation). */ w?: number; h?: number; duration?: number; lq?: boolean; poster?: boolean; /** Changes whenever the files change, so browsers may keep the old ones for a year. */ rev?: number; /** Played as uploaded: this server could not process it. */ raw?: boolean }
 export type PublicVideo = Pick<VideoInfo, 'state' | 'w' | 'h' | 'duration' | 'lq' | 'poster' | 'rev' | 'raw'>;
-export interface Media { id: string; video?: VideoInfo; /** false: used as the logo, the banner or a product picture only, so it is left out of the page's photo gallery. */ gallery?: false; kind: MediaKind; mime: string; size: number; name: string; caption?: string; createdAt: string; visible: boolean; /** 'feed': uploaded for an update post; not in the gallery, public only while a post shows it. */ scope?: 'feed' }
+export interface Media { id: string; video?: VideoInfo; /** false: used as the logo, the banner or a product picture only, so it is left out of the page's photo gallery. */ gallery?: false; kind: MediaKind; mime: string; size: number; name: string; caption?: string; createdAt: string; visible: boolean; /** 'feed': uploaded for an update post; not in the gallery, public only while a post shows it. */ scope?: 'feed' | 'timeline' }
 /** An update the owner posted to the public feed, like an Instagram post: a caption and up to ten photos or short videos, optionally tagged with a product. */
 export interface Post { id: string; at: string; text: string; mediaIds: string[]; pinned?: boolean; /** The product this post sells: gives the post an Order button. */ productId?: string }
 export interface PublicSection { id: string; type: Section['type']; title: string; body?: string; items?: Section['items']; button?: string; form?: { fields: Array<{ key: string; label: string; type: string; options?: string[]; required?: boolean }> } }
@@ -41,6 +48,14 @@ export type Lang = 'en' | 'rw';
 export const LANGS: Lang[] = ['en', 'rw'];
 /** The page's own words in another language (written by the owner or their agent): the public page uses them when a visitor picks that language. */
 export interface Translation { tagline?: string; about?: string; products?: Record<string, { name?: string; description?: string; unit?: string }>; sections?: Record<string, { title?: string; body?: string; button?: string; items?: Array<{ title: string; text?: string; price?: string }> }>; posts?: Record<string, string> }
+export const TIMELINE_KINDS = ['education', 'experience', 'project', 'award', 'event', 'volunteer', 'certificate'] as const;
+export type TimelineKind = (typeof TIMELINE_KINDS)[number];
+/** One thing a person did: a course, an internship, a project, a prize, a conference they attended. `from`/`to` are `YYYY` or `YYYY-MM`; `to` may be `present`. */
+export interface TimelineItem { id: string; kind: TimelineKind; title: string; org?: string; place?: string; from?: string; to?: string; text?: string; url?: string; mediaIds?: string[] }
+export interface ProfileLink { id: string; label: string; url: string }
+/** Bwenge4profile: what a person shows about themselves (see kindOf). Everything here is public once the page is published. */
+export interface ProfileData { headline?: string; school?: string; field?: string; location?: string; openTo?: string; skills: string[]; timeline: TimelineItem[]; links: ProfileLink[]; featured: string[]; cvUrl?: string }
+export const PROFILE_MAX = { timeline: 60, links: 12, skills: 30, featured: 6 };
 export interface Business {
   id: string; ownerId: string; slug: string; name: string; category: Category; tagline: string; about: string; theme: Theme;
   logoId?: string; coverId?: string;
@@ -58,6 +73,8 @@ export interface Business {
   sections?: Section[];
   /** The owner's own words for programs (what they call the program, a member, the pass, one use…): see programs.ts. */
   programText?: ProgramText;
+  /** Only for category `profile` (Bwenge4profile). */
+  profile?: ProfileData;
   /** The language the page opens in, and what is translated (visitors can switch). */
   lang?: Lang; translations?: Partial<Record<Lang, Translation>>;
   products: Product[]; media: Media[];
@@ -75,7 +92,10 @@ export interface DayStats { views: number; whatsapp: number; calls: number; shar
 export interface Limits { businesses: number; products: number; images: number; videos: number; totalMediaMb: number; /** Photos and videos uploaded for feed posts (they are not in the gallery). */ feed: number; enquiries: number }
 export const FREE_LIMITS: Limits = { businesses: 1, products: 30, images: 12, videos: 0, totalMediaMb: 80, feed: 60, enquiries: 200 };
 export const PAID_LIMITS: Limits = { businesses: 3, products: 200, images: 60, videos: 10, totalMediaMb: 2000, feed: 400, enquiries: 500 };
-export const limitsFor = (paid: boolean): Limits => (paid ? PAID_LIMITS : FREE_LIMITS);
+/** A personal profile is meant for students: a few videos are free (a profile without any video would miss the point), and it does not use up the business allowance. */
+export const PROFILE_FREE_LIMITS: Limits = { businesses: 1, products: 10, images: 40, videos: 4, totalMediaMb: 400, feed: 120, enquiries: 200 };
+export const PROFILE_MAX_VIDEO_MB = 100;
+export const limitsFor = (paid: boolean, category?: string): Limits => (paid ? PAID_LIMITS : category === 'profile' ? PROFILE_FREE_LIMITS : FREE_LIMITS);
 export const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
 /** A video up to 200 MB (paid plans only): about a minute of 1080p from a phone, more at a lower quality. */
 export const MAX_VIDEO_MB = 200;
@@ -170,6 +190,45 @@ export function applyProfile(b: Business, patch: any): void {
   if (patch.showPay !== undefined) b.showPay = patch.showPay === true && !!b.momoCode;
 }
 
+const strs = (v: unknown): string[] => [...new Set((Array.isArray(v) ? v : []).map((x: unknown) => String(x)))];
+const monthOk = (v: unknown) => { const t = String(v ?? '').trim().toLowerCase(); return /^\d{4}(-(0[1-9]|1[0-2]))?$/.test(t) || t === 'present' ? t : ''; };
+const cleanTimeline = (v: unknown, prev: TimelineItem[], mediaIds: Set<string>): TimelineItem[] => {
+  const out: TimelineItem[] = []; const used = new Set<string>();
+  for (const r of (Array.isArray(v) ? v : []).slice(0, PROFILE_MAX.timeline)) {
+    const title = clean(r?.title, 120); if (!title) continue;
+    const kind = (TIMELINE_KINDS as readonly string[]).includes(r?.kind) ? (r.kind as TimelineKind) : 'event';
+    let id = typeof r?.id === 'string' && /^[A-Za-z0-9-]{1,40}$/.test(r.id) && !used.has(r.id) ? r.id : ''; if (!id) id = `t${Date.now().toString(36)}${out.length}${Math.random().toString(36).slice(2, 5)}`; used.add(id);
+    const it: TimelineItem = { id, kind, title }; const old = prev.find((x) => x.id === id);
+    const org = clean(r?.org ?? old?.org, 100); if (org) it.org = org; const place = clean(r?.place ?? old?.place, 80); if (place) it.place = place;
+    const from = monthOk(r?.from); if (from && from !== 'present') it.from = from; const to = monthOk(r?.to); if (to) it.to = to;
+    const text = clean(r?.text, 600); if (text) it.text = text; const url = cleanUrl(r?.url); if (url) it.url = url;
+    const ms = strs(r?.mediaIds).filter((m) => mediaIds.has(m)).slice(0, 6); if (ms.length) it.mediaIds = ms;
+    out.push(it);
+  }
+  return out;
+};
+/** Applies what the owner may change on a profile (Bwenge4profile). Only fields that are present change; every text is cleaned and every link must be https. */
+export function applyProfileData(b: Business, patch: any): { error?: string } {
+  if (!patch || typeof patch !== 'object') return {};
+  const p: ProfileData = b.profile ?? { skills: [], timeline: [], links: [], featured: [] };
+  const txt = (k: 'headline' | 'school' | 'field' | 'location' | 'openTo', max: number) => { if (patch[k] === undefined) return; const v = clean(patch[k], max); if (v) p[k] = v; else delete p[k]; };
+  txt('headline', 90); txt('school', 100); txt('field', 100); txt('location', 80); txt('openTo', 160);
+  if (patch.skills !== undefined) p.skills = [...new Set((Array.isArray(patch.skills) ? patch.skills : String(patch.skills ?? '').split(',')).map((x: unknown) => clean(x, 40)).filter((x: string) => !!x))].slice(0, PROFILE_MAX.skills) as string[];
+  if (patch.links !== undefined) {
+    const links: ProfileLink[] = [];
+    for (const r of (Array.isArray(patch.links) ? patch.links : []).slice(0, PROFILE_MAX.links)) {
+      const url = cleanUrl(r?.url); const label = clean(r?.label, 40); if (!url && (r?.url || label)) return { error: 'Every link must start with https://, for example https://www.linkedin.com/in/your-name.' };
+      if (url) links.push({ id: typeof r?.id === 'string' && /^[A-Za-z0-9-]{1,40}$/.test(r.id) ? r.id : `l${links.length}${Math.random().toString(36).slice(2, 6)}`, label: label || new URL(url).hostname.replace(/^www\./, ''), url });
+    }
+    p.links = links;
+  }
+  if (patch.cvUrl !== undefined) { const u = cleanUrl(patch.cvUrl); if (patch.cvUrl && !u) return { error: 'The CV link must start with https://.' }; if (u) p.cvUrl = u; else delete p.cvUrl; }
+  const have = new Set(b.media.map((m) => m.id));
+  if (patch.timeline !== undefined) p.timeline = cleanTimeline(patch.timeline, p.timeline, have);
+  if (patch.featured !== undefined) p.featured = strs(patch.featured).filter((m) => have.has(m)).slice(0, PROFILE_MAX.featured);
+  b.profile = p; return {};
+}
+
 /* ---------------------------------------------------------------- the public boundary */
 export interface PublicMedia { id: string; kind: MediaKind; caption?: string; video?: PublicVideo }
 /** The public face of one file: its kind, caption and, for a video, what a player needs (size of the picture, whether a light version and a poster exist). */
@@ -193,8 +252,11 @@ export interface PublicBusiness {
   programs?: Array<{ checkIn: 'staff' | 'self'; id: string; title: string; description?: string; priceRwf: number; days: number; totalUses?: number; items: string[]; openDays: Day[]; windows?: Array<{ item: string; from: string; to: string }>; terms?: string; full: boolean; needsCode: boolean }>;
   products: Array<{ id: string; name: string; price: number | null; url?: string; unit?: string; description?: string; media?: PublicMedia; available: boolean }>;
   gallery: PublicMedia[];
+  /** Only for a profile (Bwenge4profile). */
+  profile?: PublicProfile;
   updatedAt: string;
 }
+export interface PublicProfile { headline?: string; school?: string; field?: string; location?: string; openTo?: string; skills: string[]; links: ProfileLink[]; cvUrl?: string; featured: PublicMedia[]; timeline: Array<Omit<TimelineItem, 'mediaIds'> & { media?: PublicMedia[] }> }
 
 /** Whether a page may be shown at all. */
 export const isLive = (b: Business) => b.published && !b.suspended;
@@ -213,6 +275,9 @@ export function publicView(b: Business): PublicBusiness {
   };
   if (b.programText && Object.keys(b.programText).length) out.programText = { ...b.programText };
   if (b.lang && b.lang !== 'en') out.lang = b.lang; if (b.translations && Object.keys(b.translations).length) out.translations = b.translations;
+  if (b.category === 'profile' && b.profile) {
+    const q = b.profile; out.profile = { ...(q.headline ? { headline: q.headline } : {}), ...(q.school ? { school: q.school } : {}), ...(q.field ? { field: q.field } : {}), ...(q.location ? { location: q.location } : {}), ...(q.openTo ? { openTo: q.openTo } : {}), ...(q.cvUrl ? { cvUrl: q.cvUrl } : {}), skills: [...q.skills], links: q.links.map((l) => ({ ...l })), featured: q.featured.map(pm).filter((x): x is PublicMedia => !!x), timeline: q.timeline.map(({ mediaIds, ...t }) => { const ms = (mediaIds ?? []).map(pm).filter((x): x is PublicMedia => !!x); return { ...t, ...(ms.length ? { media: ms } : {}) }; }) };
+  }
   if (typeof b.lat === 'number' && typeof b.lng === 'number') out.location = { lat: b.lat, lng: b.lng };
   const logo = pm(b.logoId), cover = pm(b.coverId); if (logo) out.logo = logo; if (cover) out.cover = cover;
   if (b.showPay && b.momoCode) out.pay = { momoCode: b.momoCode, ...(b.momoName ? { momoName: b.momoName } : {}) };

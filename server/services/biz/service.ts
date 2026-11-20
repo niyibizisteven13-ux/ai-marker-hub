@@ -9,7 +9,7 @@ import { createPrograms } from './programsService.js';
 import { buildDayReport, reportText } from './report.js';
 import { RW_WORDS, wordsOf } from './programWords.js';
 import {
-  CATEGORIES, applyProfile, clean, cleanEmail, cleanPhone, cleanProduct, isLive, limitsFor, newBusiness, oneOf, publicView, slugFrom, validSlug,
+  CATEGORIES, applyProfile, applyProfileData, PROFILE_MAX_VIDEO_MB, clean, cleanEmail, cleanPhone, cleanProduct, isLive, limitsFor, newBusiness, oneOf, publicView, slugFrom, validSlug,
   type Business, type Category, type DayStats, type Enquiry, type PublicBusiness, type Product, type Post, type PublicPost, type PostComment, type Lang, LANGS, type Translation, type PublicSection, MAX_POST_MEDIA, MAX_POST_TEXT, MAX_POSTS, MAX_COMMENTS, MAX_VIDEO_BYTES, MAX_VIDEO_MB, MAX_IMAGE_BYTES, publicMedia, type VideoInfo, type Media,
 } from './model.js';
 
@@ -72,7 +72,16 @@ export function createBizService(deps: Deps) {
     const b = await load(String(id)); if (!b || b.ownerId !== ownerId) throw new BizError('That business was not found.', 404, 'NOT_FOUND'); return b;
   }
   const slugOwner = async (slug: string) => (await kv.get<{ id: string }>(`biz-slug:${slug}`))?.id ?? null;
-  async function limits(ownerId: string) { return limitsFor(await deps.isPaid(ownerId)); }
+  async function audienceOf(b: Business) {
+    const stats = (await kv.get<{ days: Record<string, DayStats> }>(`biz-stats:${b.id}`))?.days ?? {}; const t = now();
+    const sum = (from: number, to: number) => { const o = emptyDay(); const lo = day(t - from * 86_400_000), hi = day(t - to * 86_400_000); for (const [d, v] of Object.entries(stats)) { if (d > lo && d <= hi) for (const k of Object.keys(o) as Array<keyof DayStats>) o[k] += v[k] ?? 0; } return o; };
+    const posts = (await kv.get<{ items: Post[] }>(`biz-posts:${b.id}`))?.items ?? []; const likes = (await kv.get<{ by: Record<string, string[]> }>(`biz-likes:${b.id}`))?.by ?? {}; const com = (await kv.get<{ items: PostComment[] }>(`biz-comments:${b.id}`))?.items ?? [];
+    const series: Array<{ day: string; views: number; taps: number }> = []; for (let i = 6; i >= 0; i--) { const d = day(t - i * 86_400_000); const v = stats[d]; series.push({ day: d, views: v?.views ?? 0, taps: (v?.whatsapp ?? 0) + (v?.calls ?? 0) + (v?.shares ?? 0) }); }
+    const top = posts.map((p) => ({ id: p.id, text: p.text.slice(0, 80), likes: likes[p.id]?.length ?? 0, comments: com.filter((c) => c.postId === p.id).length, video: p.mediaIds.some((m) => b.media.find((x) => x.id === m)?.kind === 'video') })).sort((a, c) => (c.likes + c.comments * 2) - (a.likes + a.comments * 2)).slice(0, 3);
+    const week = sum(7, 0), before = sum(14, 7);
+    return { posts: posts.length, likes: Object.values(likes).reduce((a, l) => a + l.length, 0), comments: com.length, videos: b.media.filter((m) => m.kind === 'video').length, week, before, series, top };
+  }
+  async function limits(ownerId: string, category?: string) { return limitsFor(await deps.isPaid(ownerId), category); }
   const bump = async (id: string, field: keyof DayStats) => {
     const s = (await kv.get<{ days: Record<string, DayStats> }>(`biz-stats:${id}`)) ?? { days: {} }; const d = day(now());
     s.days[d] = { ...emptyDay(), ...s.days[d] }; s.days[d][field] += 1;
@@ -159,13 +168,14 @@ export function createBizService(deps: Deps) {
     async create(ownerId: string, input: { name?: unknown; slug?: unknown; category?: unknown }): Promise<Business> {
       if (deps.allowed && !(await deps.allowed(ownerId))) throw new BizError('The business dashboard needs a paid plan. Choose a plan to unlock it.', 402, 'UPGRADE_REQUIRED');
       const name = clean(input.name, 60); if (!name) throw new BizError('Give the business a name.');
-      const lim = await limits(ownerId); const have = await this.list(ownerId);
-      if (have.length >= lim.businesses) throw new BizError(`Your plan has room for ${lim.businesses} business${lim.businesses === 1 ? '' : 'es'}. Upgrade to add more.`, 402, 'LIMIT');
+      const cat = oneOf(CATEGORIES, input.category, 'other') as Category; const isProfile = cat === 'profile';
+      const lim = await limits(ownerId, cat); const have = (await this.list(ownerId)).filter((x) => (x.category === 'profile') === isProfile);
+      if (have.length >= lim.businesses) throw new BizError(isProfile ? `Your plan has room for ${lim.businesses} profile${lim.businesses === 1 ? '' : 's'}. Upgrade to add more.` : `Your plan has room for ${lim.businesses} business${lim.businesses === 1 ? '' : 'es'}. Upgrade to add more.`, 402, 'LIMIT');
       let slug = slugFrom(name); const wanted = input.slug !== undefined && input.slug !== '' ? validSlug(input.slug) : null;
       if (wanted) { if (wanted.ok === false) throw new BizError(wanted.error); slug = wanted.slug; }
       else { const v = validSlug(slug); if (v.ok === false) slug = `${slug.replace(/^bwenge-?/, '')}-biz`.slice(0, 32); if (validSlug(slug).ok === false) slug = `shop-${randomUUID().slice(0, 6)}`; }
       if (await slugOwner(slug)) { if (wanted) throw new BizError('That page name is taken. Try another.', 409, 'SLUG_TAKEN'); slug = `${slug.slice(0, 26)}-${randomUUID().slice(0, 4)}`; }
-      const b = newBusiness(randomUUID(), ownerId, name, slug, oneOf(CATEGORIES, input.category, 'other') as Category, iso());
+      const b = newBusiness(randomUUID(), ownerId, name, slug, cat, iso());
       await kv.put(`biz-slug:${slug}`, { id: b.id }); await save(b);
       const ids = (await kv.get<{ ids: string[] }>(`biz-owner:${ownerId}`))?.ids ?? []; await kv.put(`biz-owner:${ownerId}`, { ids: [...ids, b.id] });
       const all = (await kv.get<{ ids: string[] }>('biz-index'))?.ids ?? []; await kv.put('biz-index', { ids: [...all, b.id] });
@@ -179,7 +189,9 @@ export function createBizService(deps: Deps) {
         if (await slugOwner(v.slug)) throw new BizError('That page name is taken. Try another.', 409, 'SLUG_TAKEN');
         await kv.del(`biz-slug:${b.slug}`); await kv.put(`biz-slug:${v.slug}`, { id: b.id }); b.slug = v.slug;
       }
+      if (patch.category !== undefined && (String(patch.category) === 'profile') !== (b.category === 'profile') && oneOf(CATEGORIES, patch.category, b.category) !== b.category) throw new BizError('A profile and a business are different pages. Create a new one instead of changing this one.');
       applyProfile(b, patch);
+      if (patch.profile !== undefined) { if (b.category !== 'profile') throw new BizError('Only a profile page has these details.'); const r = applyProfileData(b, patch.profile); if (r.error) throw new BizError(r.error); }
       const pick = (k: 'logoId' | 'coverId') => { if (patch[k] === undefined) return; const m = b.media.find((x) => x.id === patch[k]); if (patch[k] && !(m && m.kind === 'image')) throw new BizError('Choose one of your photos.'); if (patch[k]) b[k] = m!.id; else delete b[k]; };
       pick('logoId'); pick('coverId');
       await save(b); return b;
@@ -188,7 +200,7 @@ export function createBizService(deps: Deps) {
     async setPublished(ownerId: string, id: string, on: boolean): Promise<Business> {
       const b = await mine(ownerId, id);
       if (on && b.suspended) throw new BizError('This page was hidden by Bwenge. Contact support.', 403, 'SUSPENDED');
-      if (on && !b.about && !b.tagline && !b.products.length && !b.media.length) throw new BizError('Add a short description, a product or a photo first, so visitors see something.', 400, 'EMPTY');
+      if (on && !b.about && !b.tagline && !b.products.length && !b.media.length && !b.profile?.timeline.length && !b.profile?.headline) throw new BizError(b.category === 'profile' ? 'Add a short line about you, something you have done, or a photo or video first, so visitors see something.' : 'Add a short description, a product or a photo first, so visitors see something.', 400, 'EMPTY');
       b.published = !!on; await save(b); return b;
     },
 
@@ -223,12 +235,20 @@ export function createBizService(deps: Deps) {
 
     /* photos and videos */
     /** The biggest file this person may upload: a photo on the free plan, a video on a paid one. Checked before the file is read into memory. */
-    async uploadCap(ownerId: string): Promise<number> { return (await deps.isPaid(ownerId)) ? MAX_VIDEO_BYTES : MAX_IMAGE_BYTES; },
+    async uploadCap(ownerId: string, bizId?: string): Promise<number> {
+      if (await deps.isPaid(ownerId)) return MAX_VIDEO_BYTES;
+      if (bizId) { const b = await mine(ownerId, bizId).catch(() => null); if (b?.category === 'profile') return PROFILE_MAX_VIDEO_MB * 1048576; }
+      return MAX_IMAGE_BYTES;
+    },
     async addMedia(ownerId: string, id: string, file: { name: string; data: Buffer; caption?: string; scope?: unknown; gallery?: boolean }): Promise<Business['media'][number]> {
-      const b = await mine(ownerId, id); const lim = await limits(ownerId);
+      const b = await mine(ownerId, id); const lim = await limits(ownerId, b.category); const paid = await deps.isPaid(ownerId);
       const kind = sniff(file.data); if (!kind) throw new BizError('Use a JPEG, PNG, WebP or GIF photo, or an MP4 or WebM video.', 415, 'TYPE');
       if (file.data.length > maxBytesFor(kind.kind)) throw new BizError(kind.kind === 'image' ? 'A photo can be up to 6 MB.' : `A video can be up to ${MAX_VIDEO_MB} MB (about a minute at 1080p). Record a shorter clip or a lower quality.`, 413, 'TOO_LARGE');
-      if (kind.kind === 'video' && !(await deps.isPaid(ownerId))) throw new BizError('Videos are for paid plans. Photos are free. Choose a plan to add videos.', 402, 'VIDEO_PAID');
+      if (kind.kind === 'video' && !paid) {
+        if (b.category !== 'profile') throw new BizError('Videos are for paid plans. Photos are free. Choose a plan to add videos.', 402, 'VIDEO_PAID');
+        if (file.data.length > PROFILE_MAX_VIDEO_MB * 1048576) throw new BizError(`On the free plan a profile video can be up to ${PROFILE_MAX_VIDEO_MB} MB (about 40 seconds at 1080p). Record a shorter clip, or choose a plan for videos up to ${MAX_VIDEO_MB} MB.`, 413, 'TOO_LARGE');
+        if (b.media.filter((m) => m.kind === 'video').length >= lim.videos) throw new BizError(`The free profile keeps ${lim.videos} videos. Remove one, or choose a plan for more.`, 402, 'LIMIT');
+      }
       const feedUpload = file.scope === 'feed';
       if (feedUpload) { if (b.media.filter((m) => m.scope === 'feed').length >= lim.feed) throw new BizError(`That is the most feed photos and videos your plan keeps (${lim.feed}). Delete old posts to make room.`, 402, 'LIMIT'); }
       const count = b.media.filter((m) => m.kind === kind.kind && m.scope !== 'feed').length;
@@ -238,9 +258,10 @@ export function createBizService(deps: Deps) {
       const m: Business['media'][number] = { id: randomUUID(), kind: kind.kind, mime: kind.mime, size: file.data.length, name: clean(file.name, 80) || `${kind.kind}.${kind.ext}`, ...(clean(file.caption, 120) ? { caption: clean(file.caption, 120) } : {}), createdAt: iso(), visible: true };
       await media.put(b.id, m.id, kind.ext, file.data);
       if (file.scope === 'feed') { m.visible = false; m.scope = 'feed'; }
-      if (file.gallery === false && file.scope !== 'feed') m.gallery = false;
+      if ((file.gallery === false || file.scope === 'timeline') && file.scope !== 'feed') m.gallery = false;
+      if (file.scope === 'timeline') m.scope = 'timeline';
       if (kind.kind === 'video' && deps.onVideo) m.video = { state: 'processing' };
-      b.media.push(m); if (kind.kind === 'image' && !b.coverId && m.scope !== 'feed') b.coverId = m.id; await save(b);
+      b.media.push(m); if (kind.kind === 'image' && !b.coverId && m.scope !== 'feed' && m.scope !== 'timeline') b.coverId = m.id; await save(b);
       if (m.video) deps.onVideo?.({ biz: b.id, id: m.id, ext: kind.ext });
       return m;
     },
@@ -320,10 +341,11 @@ export function createBizService(deps: Deps) {
     /** The numbers behind the dashboard: today against yesterday, a chart, top sellers, orders, customers, low stock. */
     /** Whether this owner has the verified badge (the studio shows how to get it when not). */
     async verifiedOwner(ownerId: string): Promise<boolean> { return deps.isVerified ? deps.isVerified(ownerId).catch(() => false) : false; },
+    /** What the page earned in attention (content makers and profiles): views, taps, posts, love and comments. */
     async dashboard(ownerId: string, id: string, days = 7) {
       const b = await mine(ownerId, id); await materialize(b); const items = (await kv.get<{ items: LedgerEntry[] }>(`biz-ledger:${b.id}`))?.items ?? [];
       const enq = (await kv.get<{ items: Enquiry[] }>(`biz-enq:${b.id}`))?.items ?? [];
-      return { ...summarize(items, b.products, now(), days), newMessages: enq.filter((e) => e.status === 'new').length, entries: items.length };
+      return { ...summarize(items, b.products, now(), days), newMessages: enq.filter((e) => e.status === 'new').length, entries: items.length, audience: await audienceOf(b) };
     },
 
     /** The closing report for a day (today by default; up to 30 days back): the numbers, and the same thing as a short text for WhatsApp. */
