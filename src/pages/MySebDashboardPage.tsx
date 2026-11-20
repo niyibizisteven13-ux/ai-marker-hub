@@ -48,7 +48,7 @@ function RoomRow({ r }: { r: Room }) {
   const live = r.live; const busy = !!live && (live.inExam > 0 || live.paused > 0);
   const copy = async () => { try { await navigator.clipboard.writeText(absolute(r.link)); setCopied(true); window.setTimeout(() => setCopied(false), 1600); } catch { /* the link is on the button */ } };
   return (
-    <li className="flex flex-wrap items-center gap-3 py-3">
+    <li className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-2.5 py-3 sm:flex sm:flex-wrap">
       <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${busy ? 'bg-emerald-500/15 text-emerald-700' : 'bg-[var(--app-bg)] text-[var(--app-muted)]'}`}><Radio size={18} /></span>
       <div className="min-w-0 flex-1">
         <p className="truncate font-medium">{r.title} <span className="ml-1 rounded-full bg-[var(--app-bg)] px-2 py-0.5 text-[11px] font-normal text-[var(--app-muted)]">{r.kind === 'form' ? 'Test' : 'Task'}</span></p>
@@ -59,7 +59,7 @@ function RoomRow({ r }: { r: Room }) {
           </> : <span>{live.total ? `${live.total} took it, none in the exam now` : 'No students yet'} · changed {ago(r.updatedAt)}</span>}
         </p>
       </div>
-      <div className="flex shrink-0 gap-2">
+      <div className="col-span-2 flex gap-2 sm:col-span-1 sm:shrink-0 [&>*]:flex-1 sm:[&>*]:flex-none">
         <button type="button" onClick={() => void copy()} className={`${btnGhost} !min-h-9 !px-3 text-xs`} aria-label={`Copy the room link for ${r.title}`}>{copied ? <Check size={14} /> : <Link2 size={14} />}{copied ? 'Copied' : 'Copy link'}</button>
         <a href={r.link} className={`${btnPrimary} !min-h-9 !px-3.5 text-xs`}><Radio size={14} />Open room</a>
       </div>
@@ -70,10 +70,10 @@ function RoomRow({ r }: { r: Room }) {
 function ItemRow({ it, ask }: { it: Item; ask: (q: string) => void }) {
   const href = it.kind === 'form' ? `/forms/${encodeURIComponent(it.id)}/edit` : `/assignments/${encodeURIComponent(it.id)}`;
   return (
-    <li className="flex flex-wrap items-center gap-3 py-3">
+    <li className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-2.5 py-3 sm:flex sm:flex-wrap">
       <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--app-bg)] text-[var(--app-muted)]">{it.kind === 'form' ? <FileText size={18} /> : <ClipboardList size={18} />}</span>
       <div className="min-w-0 flex-1"><p className="truncate font-medium">{it.title}</p><p className="mt-0.5 text-xs text-[var(--app-muted)]">{it.mySeb ? <span className="font-semibold text-emerald-700">Secure (MySEB)</span> : 'Not secured'} · changed {ago(it.updatedAt)}</p></div>
-      <div className="flex shrink-0 gap-2">
+      <div className="col-span-2 flex gap-2 sm:col-span-1 sm:shrink-0 [&>*]:flex-1 sm:[&>*]:flex-none">
         {!it.mySeb && <button type="button" onClick={() => ask(`Turn on MySEB for "${it.title}" and tell me how students join.`)} className={`${btnGhost} !min-h-9 !px-3 text-xs`}><ShieldCheck size={14} />Secure it</button>}
         {it.mySeb && <a href={`/live/${it.kind}/${encodeURIComponent(it.id)}`} className={`${btnGhost} !min-h-9 !px-3 text-xs`}><Radio size={14} />Room</a>}
         <a href={href} className={`${btnGhost} !min-h-9 !px-3 text-xs`}><ExternalLink size={14} />Open</a>
