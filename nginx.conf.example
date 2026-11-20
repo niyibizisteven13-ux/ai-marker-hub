@@ -18,7 +18,7 @@ server {
     add_header Strict-Transport-Security "max-age=31536000" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-    client_max_body_size 100m;
+    client_max_body_size 220m;   # videos of up to 200 MB (paid Bwenge4biz feed)
 
     location / {
         proxy_pass http://127.0.0.1:3000;

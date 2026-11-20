@@ -12,7 +12,7 @@ import { btnGhost, btnPrimary, input, msg } from './ui';
 type Ratio = 'square' | 'portrait' | 'original';
 interface Item { id: string; file: File; kind: 'image' | 'video'; url: string }
 const RATIO: Record<Ratio, { label: string; css: string; r: number | null }> = { square: { label: '1:1', css: '1 / 1', r: 1 }, portrait: { label: '4:5', css: '4 / 5', r: 4 / 5 }, original: { label: 'Original', css: '1 / 1', r: null } };
-const MAX_ITEMS = 10, MAX_VIDEO = 25 * 1048576;
+const MAX_ITEMS = 10, MAX_VIDEO_MB = 200, MAX_VIDEO = MAX_VIDEO_MB * 1048576;
 
 /** Centre-crops a photo to a ratio (null: keep it as it is) and shrinks it to 1440 px, as a JPEG. */
 async function cropImage(file: File, r: number | null): Promise<{ blob: Blob; name: string }> {
@@ -38,7 +38,7 @@ export default function PostComposer({ b, onClose, onPosted, canVideo }: { b: Bu
       if (next.length >= MAX_ITEMS) { setErr(`A post can have up to ${MAX_ITEMS} photos or videos.`); break; }
       const kind = f.type.startsWith('video/') ? 'video' : f.type.startsWith('image/') ? 'image' : null; if (!kind) { setErr(canVideo ? 'Choose photos or videos.' : 'Choose photos.'); continue; }
       if (kind === 'video' && !canVideo) { setErr('Videos are for paid plans. Photos are free.'); continue; }
-      if (kind === 'video' && f.size > MAX_VIDEO) { setErr(`${f.name} is over 25 MB. Record a shorter clip.`); continue; }
+      if (kind === 'video' && f.size > MAX_VIDEO) { setErr(`${f.name} is ${(f.size / 1048576).toFixed(0)} MB. A video can be up to ${MAX_VIDEO_MB} MB (about a minute at 1080p): record a shorter clip or a lower quality.`); continue; }
       const url = URL.createObjectURL(f); urls.current.push(url); next.push({ id: `${Date.now()}-${Math.random()}`, file: f, kind, url });
     }
     setItems(next); if (next.length && step === 1) { setStep(2); setCur(0); }
@@ -73,7 +73,7 @@ export default function PostComposer({ b, onClose, onPosted, canVideo }: { b: Bu
               <ImagePlus size={54} className="text-[var(--app-muted)]" aria-hidden="true" /><p className="font-display text-lg font-semibold">{canVideo ? 'Drag photos and videos here' : 'Drag photos here'}</p>
               <input ref={fileRef} type="file" multiple accept={canVideo ? 'image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm' : 'image/jpeg,image/png,image/webp,image/gif'} className="sr-only" id="bz-post-files" onChange={(e) => { add(e.target.files); e.target.value = ''; }} />
               <label htmlFor="bz-post-files" className={`${btnPrimary} cursor-pointer`}><Upload size={16} />{tx("Select from this device")}</label>
-              <p className="max-w-xs text-xs text-[var(--app-faint)]">Up to {MAX_ITEMS} {canVideo ? 'photos or short videos (25 MB each)' : 'photos'}. On a phone this opens your camera roll or the camera.{!canVideo && <> <a href="/upgrade" className="underline">{tx("Videos are for paid plans.")}</a></>}</p>
+              <p className="max-w-xs text-xs text-[var(--app-faint)]">Up to {MAX_ITEMS} {canVideo ? `photos or videos (videos up to ${MAX_VIDEO_MB} MB, about a minute)` : 'photos'}. On a phone this opens your camera roll or the camera.{!canVideo && <> <a href="/upgrade" className="underline">{tx("Videos are for paid plans.")}</a></>}</p>
               {err && <p role="alert" className="text-sm text-rose-600">{err}</p>}
             </div>)}
           {step === 2 && it && (<div>{stage}

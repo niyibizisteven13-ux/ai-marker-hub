@@ -6,7 +6,7 @@ import { bizService } from '../services/biz/runtime.js';
 import { BizError } from '../services/biz/service.js';
 import { ProgramError } from '../services/biz/programsService.js';
 import { MediaError } from '../services/biz/media.js';
-import { FREE_LIMITS, PAID_LIMITS, openNow } from '../services/biz/model.js';
+import { FREE_LIMITS, MAX_IMAGE_BYTES, MAX_VIDEO_BYTES, MAX_VIDEO_MB, PAID_LIMITS, openNow } from '../services/biz/model.js';
 import { planFor } from '../services/billing/plans.js';
 import logger from '../utils/logger.js';
 import { createHmac, timingSafeEqual } from 'node:crypto';
@@ -21,7 +21,10 @@ const THEMES_FOR_ICON: Record<string, { accent: string; on: string }> = { gold: 
  *   owner (signed in):    GET /mine · POST / · GET|PATCH|DELETE /:id · POST /:id/publish · products · media · messages · stats
  * Public routes answer only with publicView, counts, or a file of a live page that the owner shows. See server/services/biz/model.ts.
  */
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 26 * 1024 * 1024, files: 1 } });
+// A paid plan may upload a video of up to 200 MB (about a minute from a phone). The file is held in memory while it arrives, so: the size is checked from the
+// request header BEFORE any of it is read (a free account never gets past 6 MB), and only a few big uploads run at a time.
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_VIDEO_BYTES + 1024 * 1024, files: 1 } });
+const BIG_UPLOAD = 8 * 1024 * 1024, MAX_BIG_UPLOADS = 4; let bigUploads = 0;
 const who = (req: Request) => visitorKey(String(req.ip ?? req.socket?.remoteAddress ?? ''), String(req.headers['user-agent'] ?? ''));
 const me = (req: Request) => String((req as any).user?.userId ?? '');
 function fail(res: Response, e: unknown) {
@@ -151,8 +154,16 @@ export function createBizRouter(): Router {
   r.patch('/:id/products/:pid', run(async (req, res) => res.json({ product: await svc().updateProduct(me(req), req.params.id, req.params.pid, req.body ?? {}) })));
   r.delete('/:id/products/:pid', run(async (req, res) => { await svc().removeProduct(me(req), req.params.id, req.params.pid); res.status(204).end(); }));
 
-  r.post('/:id/media', (req, res, next) => upload.single('file')(req, res, (err?: any) => {
-    if (err) return res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: err.code === 'LIMIT_FILE_SIZE' ? 'That file is too large. A photo can be up to 6 MB and a video up to 25 MB.' : 'The file could not be uploaded.' });
+  r.post('/:id/media', (req, res, next) => { void (async () => {
+    const cap = await svc().uploadCap(me(req)); const len = Number(req.headers['content-length'] ?? 0);
+    if (len > cap + 1024 * 1024) return res.status(cap > MAX_IMAGE_BYTES ? 413 : 402).json({ error: cap > MAX_IMAGE_BYTES ? `That file is too large. A photo can be up to 6 MB and a video up to ${MAX_VIDEO_MB} MB (about a minute at 1080p).` : 'Photos can be up to 6 MB. Videos are for paid plans: see the plans to add videos.' });
+    if (len > BIG_UPLOAD) {
+      if (bigUploads >= MAX_BIG_UPLOADS) return res.status(429).json({ error: 'Many videos are uploading right now. Please try again in a minute.' });
+      bigUploads++; let freed = false; const free = () => { if (!freed) { freed = true; bigUploads--; } }; res.on('close', free); res.on('finish', free);
+    }
+    next();
+  })().catch((e) => fail(res, e)); }, (req, res, next) => upload.single('file')(req, res, (err?: any) => {
+    if (err) return res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: err.code === 'LIMIT_FILE_SIZE' ? `That file is too large. A photo can be up to 6 MB and a video up to ${MAX_VIDEO_MB} MB.` : 'The file could not be uploaded.' });
     next();
   }), run(async (req, res) => {
     const file = (req as any).file as { originalname: string; buffer: Buffer } | undefined; if (!file) return res.status(400).json({ error: 'Choose a photo or a video first.' });

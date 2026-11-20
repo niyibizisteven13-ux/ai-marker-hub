@@ -141,7 +141,7 @@ function GalleryTab({ b, urls, onChange, limits }: { b: Business; urls: Record<s
   const upload = async (files: FileList | null) => {
     if (!files?.length) return; setErr('');
     for (const file of Array.from(files)) {
-      const isVideo = file.type.startsWith('video/'); if (isVideo && limits.videos === 0) { setErr('Videos are for paid plans. Photos are free. See plans to add videos.'); continue; } if (isVideo && file.size > 25 * 1048576) { setErr(`${file.name} is ${(file.size / 1048576).toFixed(0)} MB. A video can be up to 25 MB: record a shorter clip.`); continue; }
+      const isVideo = file.type.startsWith('video/'); if (isVideo && limits.videos === 0) { setErr('Videos are for paid plans. Photos are free. See plans to add videos.'); continue; } if (isVideo && file.size > 200 * 1048576) { setErr(`${file.name} is ${(file.size / 1048576).toFixed(0)} MB. A video can be up to 200 MB (about a minute at 1080p): record a shorter clip or a lower quality.`); continue; }
       const prepared = isVideo ? { blob: file as Blob, name: file.name } : await prepareImage(file); const idx = Date.now() + Math.random();
       setJobs((j) => [...j, { name: file.name, progress: 0, _id: idx } as any]);
       try { await ownerApi.upload(b.id, prepared.blob, prepared.name, (p) => setJobs((j) => j.map((x: any) => (x._id === idx ? { ...x, progress: p } : x)))); setJobs((j) => j.filter((x: any) => x._id !== idx)); onChange(); }
@@ -152,7 +152,7 @@ function GalleryTab({ b, urls, onChange, limits }: { b: Business; urls: Record<s
   const act = async (fn: () => Promise<unknown>) => { setErr(''); try { await fn(); onChange(); } catch (e) { setErr(msg(e)); } };
   return (
     <div className="space-y-5">
-      <div className={card}><Title kind="public" hint={limits.videos > 0 ? `Photos up to 6 MB, short videos up to 25 MB (about 30 seconds). ${images}/${limits.images} photos, ${videos}/${limits.videos} videos, ${(used / 1048576).toFixed(0)} of ${limits.totalMediaMb} MB used.` : `Photos up to 6 MB. ${images}/${limits.images} photos, ${(used / 1048576).toFixed(0)} of ${limits.totalMediaMb} MB used.`}>{limits.videos > 0 ? 'Add photos and videos' : 'Add photos'}</Title>
+      <div className={card}><Title kind="public" hint={limits.videos > 0 ? `Photos up to 6 MB, videos up to 200 MB (about a minute). ${images}/${limits.images} photos, ${videos}/${limits.videos} videos, ${(used / 1048576).toFixed(0)} of ${limits.totalMediaMb} MB used.` : `Photos up to 6 MB. ${images}/${limits.images} photos, ${(used / 1048576).toFixed(0)} of ${limits.totalMediaMb} MB used.`}>{limits.videos > 0 ? 'Add photos and videos' : 'Add photos'}</Title>
         {limits.videos === 0 && <div className="mb-3"><PaidNote what="Videos" /></div>}
         <input ref={fileRef} type="file" multiple accept={limits.videos > 0 ? 'image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm' : 'image/jpeg,image/png,image/webp,image/gif'} className="sr-only" id="biz-upload" onChange={(e) => void upload(e.target.files)} />
         <label htmlFor="biz-upload" className={`${btnPrimary} cursor-pointer`}><Upload size={16} />{limits.videos > 0 ? 'Choose photos or videos' : 'Choose photos'}</label>

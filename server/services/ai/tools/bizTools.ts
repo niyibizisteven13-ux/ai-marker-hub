@@ -93,7 +93,7 @@ export function bizTools(getSvc: () => Promise<BizService> | BizService = async 
     },
   };
   const addMedia: Tool = {
-    definition: { name: 'biz_add_media', description: "Put a photo or short video the user attached in this chat onto their business page gallery (JPEG, PNG, WebP, GIF photos up to 6 MB; MP4 or WebM videos up to 25 MB). Use the fileId of the attachment. A first photo becomes the cover. The user can see it publicly once the page is published.",
+    definition: { name: 'biz_add_media', description: "Put a photo or short video the user attached in this chat onto their business page gallery (JPEG, PNG, WebP, GIF photos up to 6 MB; MP4 or WebM videos up to 200 MB on a paid plan, about a minute). Use the fileId of the attachment. A first photo becomes the cover. The user can see it publicly once the page is published.",
       parameters: { type: 'object', required: ['fileId'], properties: { business: BUSINESS, fileId: { type: 'string' }, caption: { type: 'string' }, use_as: { type: 'string', enum: ['gallery', 'cover', 'logo'], description: 'Where it goes: the gallery (default), the big cover picture, or the logo (photos only).' } } } },
     async execute(input, ctx) {
       try {
