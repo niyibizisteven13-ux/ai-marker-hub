@@ -46,6 +46,8 @@ export function userKey(req) {
  */
 export const LIVE_PATH = /^\/api\/(?:myseb\/live\/|(?:forms|assignments)\/[^/]+\/myseb\/)/;
 const QUIZ_RESULT_PATH = /^\/api\/forms\/[^/]+\/quiz-result\/?(?:\?|$)/;
+// A video player asks for its file in many pieces: a business page's photos and videos must not use up the allowance of everything else (see bizMediaLimiter).
+const BIZ_MEDIA_PATH = /^\/api\/biz\/public\/[^/]+\/media\//;
 
 export const generalLimiter = isDev
   ? (req, res, next) => next()
@@ -56,7 +58,7 @@ export const generalLimiter = isDev
       limit: (req) => (userKey(req) ? 1500 : 600),
       keyGenerator: (req) => userKey(req) ?? ipKeyGenerator(req.ip ?? ''),
       // Staying signed in has its own limits (authLimiter) and must never be refused by this one. Live rooms have their own (below).
-      skip: (req) => (req.originalUrl || '').startsWith('/api/auth/refresh') || LIVE_PATH.test(req.originalUrl || '') || QUIZ_RESULT_PATH.test(req.originalUrl || ''),
+      skip: (req) => (req.originalUrl || '').startsWith('/api/auth/refresh') || LIVE_PATH.test(req.originalUrl || '') || QUIZ_RESULT_PATH.test(req.originalUrl || '') || BIZ_MEDIA_PATH.test(req.originalUrl || ''),
       standardHeaders: true,
       legacyHeaders: false,
     });
@@ -168,3 +170,8 @@ export const studentLiveLimiter = isDev
       legacyHeaders: false,
       message: { error: 'Slow down for a moment.', code: 'RATE_LIMITED' },
     });
+
+/** Photos and videos of public business pages: one video is many requests (a player reads it in pieces and seeks), so the limit is high, and per network address. */
+export const bizMediaLimiter = isDev
+  ? (req, res, next) => next()
+  : rateLimit({ store: store('biz-media'), windowMs: 15 * 60 * 1000, limit: 6000, keyGenerator: (req) => ipKeyGenerator(req.ip ?? ''), standardHeaders: true, legacyHeaders: false });

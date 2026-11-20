@@ -33,6 +33,8 @@ export interface MediaStore {
   put(businessId: string, mediaId: string, ext: string, data: Buffer): Promise<void>;
   /** A readable stream of the bytes (or a part of them), and the total size. */
   open(businessId: string, mediaId: string, ext: string, range?: { start: number; end: number }): Promise<{ stream: Readable; size: number }>;
+  /** The size in bytes, or null when there is no such file. */
+  size(businessId: string, mediaId: string, ext: string): Promise<number | null>;
   remove(businessId: string, mediaId: string, ext: string): Promise<void>;
   removeAll(businessId: string): Promise<void>;
 }
@@ -47,6 +49,7 @@ export function diskMediaStore(root = process.env.BIZ_MEDIA_DIR || path.resolve(
       const f = file(biz, id, ext); const s = await stat(f).catch(() => null); if (!s) throw new MediaError('Not found.', 404);
       return { stream: createReadStream(f, range ? { start: range.start, end: range.end } : undefined), size: s.size };
     },
+    async size(biz, id, ext) { return (await stat(file(biz, id, ext)).catch(() => null))?.size ?? null; },
     async remove(biz, id, ext) { await rm(file(biz, id, ext), { force: true }); },
     async removeAll(biz) { if (!SAFE.test(biz)) return; await rm(path.join(root, biz), { recursive: true, force: true }); },
   };
@@ -59,6 +62,7 @@ export function memoryMediaStore(): MediaStore & { files: Map<string, Buffer> } 
     files,
     async put(b, i, e, d) { files.set(k(b, i, e), Buffer.from(d)); },
     async open(b, i, e, r) { const d = files.get(k(b, i, e)); if (!d) throw new MediaError('Not found.', 404); const { Readable } = await import('node:stream'); return { stream: Readable.from(r ? d.subarray(r.start, r.end + 1) : d), size: d.length }; },
+    async size(b, i, e) { return files.get(k(b, i, e))?.length ?? null; },
     async remove(b, i, e) { files.delete(k(b, i, e)); },
     async removeAll(b) { for (const key of [...files.keys()]) if (key.startsWith(`${b}/`)) files.delete(key); },
   };

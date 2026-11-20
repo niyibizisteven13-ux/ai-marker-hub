@@ -10,7 +10,7 @@ import { buildDayReport, reportText } from './report.js';
 import { RW_WORDS, wordsOf } from './programWords.js';
 import {
   CATEGORIES, applyProfile, clean, cleanEmail, cleanPhone, cleanProduct, isLive, limitsFor, newBusiness, oneOf, publicView, slugFrom, validSlug,
-  type Business, type Category, type DayStats, type Enquiry, type PublicBusiness, type Product, type Post, type PublicPost, type PostComment, type Lang, LANGS, type Translation, type PublicSection, MAX_POST_MEDIA, MAX_POST_TEXT, MAX_POSTS, MAX_COMMENTS, MAX_VIDEO_BYTES, MAX_VIDEO_MB, MAX_IMAGE_BYTES,
+  type Business, type Category, type DayStats, type Enquiry, type PublicBusiness, type Product, type Post, type PublicPost, type PostComment, type Lang, LANGS, type Translation, type PublicSection, MAX_POST_MEDIA, MAX_POST_TEXT, MAX_POSTS, MAX_COMMENTS, MAX_VIDEO_BYTES, MAX_VIDEO_MB, MAX_IMAGE_BYTES, publicMedia, type VideoInfo, type Media,
 } from './model.js';
 
 /**
@@ -21,7 +21,7 @@ import {
  */
 export interface Kv { get<T>(key: string): Promise<T | null>; put(key: string, value: unknown): Promise<void>; del(key: string): Promise<void> }
 export class BizError extends Error { constructor(message: string, public status = 400, public code = 'BIZ') { super(message); } }
-export interface Deps { /** Who may use the owner side (the business dashboard is a paid feature). Absent: everyone. The public page never needs it. */ allowed?: (ownerId: string) => Promise<boolean>; kv: Kv; media: MediaStore; isPaid: (ownerId: string) => Promise<boolean>; /** Whether the owner bought the verified badge (a one-time payment). Absent: nobody is verified. */ isVerified?: (ownerId: string) => Promise<boolean>; now?: () => number; secretKey?: Buffer; fetchImpl?: Fetch;
+export interface Deps { /** Who may use the owner side (the business dashboard is a paid feature). Absent: everyone. The public page never needs it. */ allowed?: (ownerId: string) => Promise<boolean>; kv: Kv; media: MediaStore; isPaid: (ownerId: string) => Promise<boolean>; /** Whether the owner bought the verified badge (a one-time payment). Absent: nobody is verified. */ isVerified?: (ownerId: string) => Promise<boolean>; /** Called after a video is stored, to make it play smoothly in the background (see videoPipeline.ts). Absent: videos are kept as uploaded. */ onVideo?: (job: { biz: string; id: string; ext: string }) => void; now?: () => number; secretKey?: Buffer; fetchImpl?: Fetch;
   /** Tells the owner something at once (Telegram, email or the chat outbox). `plan` becomes a Do it / Cancel plan the owner approves. */
   notify?: (ownerId: string, n: BizNotice) => Promise<void>;
   /** Keeps the business agent's scheduled digests in line with its settings. */
@@ -54,7 +54,18 @@ export function createBizService(deps: Deps) {
   const secretKey = () => deps.secretKey ?? keyFrom(process.env.BIZ_SECRETS_KEY || process.env.JWT_SECRET || 'bwenge-dev');
 
   const load = async (id: string): Promise<Business | null> => kv.get<Business>(`biz:${id}`);
-  const save = async (b: Business) => { b.updatedAt = iso(); await kv.put(`biz:${b.id}`, b); };
+  type Served = { mime: string; size: number; etag: string; video?: Media['video']; open: (range?: { start: number; end: number }) => Promise<{ stream: NodeJS.ReadableStream }> } | null;
+  const mediaCache = new Map<string, { until: number; file: Served }>();
+  /** The stored file for a photo or video, or one of its other versions: 'lq' (the light video) or 'poster' (a picture of the video). The size comes from the store, so a processed file is always described correctly. */
+  async function fileOf(bizId: string, m: Media, variant?: string): Promise<Served> {
+    let id = m.id, ext = sniffExt(m.mime), mime = m.mime;
+    if (variant === 'lq' && m.kind === 'video' && m.video?.lq) { id = `${m.id}-lq`; ext = 'mp4'; mime = 'video/mp4'; }
+    else if (variant === 'poster' && m.kind === 'video' && m.video?.poster) { id = `${m.id}-poster`; ext = 'jpg'; mime = 'image/jpeg'; }
+    else if (variant) return null;
+    const size = (await media.size(bizId, id, ext)) ?? (id === m.id ? m.size : null); if (size === null) return null;
+    return { mime, size, etag: `W/\"${id}-${m.video?.rev ?? 0}-${size}\"`, ...(m.video ? { video: m.video } : {}), open: (range) => media.open(bizId, id, ext, range) };
+  }
+  const save = async (b: Business) => { b.updatedAt = iso(); mediaCache.clear(); await kv.put(`biz:${b.id}`, b); };
   /** The owner's own business, or a plain "not found" (never says whether someone else's exists). */
   async function mine(ownerId: string, id: string): Promise<Business> {
     if (deps.allowed && !(await deps.allowed(ownerId))) throw new BizError('The business dashboard needs a paid plan. Choose a plan to unlock it.', 402, 'UPGRADE_REQUIRED');
@@ -228,7 +239,10 @@ export function createBizService(deps: Deps) {
       await media.put(b.id, m.id, kind.ext, file.data);
       if (file.scope === 'feed') { m.visible = false; m.scope = 'feed'; }
       if (file.gallery === false && file.scope !== 'feed') m.gallery = false;
-      b.media.push(m); if (kind.kind === 'image' && !b.coverId && m.scope !== 'feed') b.coverId = m.id; await save(b); return m;
+      if (kind.kind === 'video' && deps.onVideo) m.video = { state: 'processing' };
+      b.media.push(m); if (kind.kind === 'image' && !b.coverId && m.scope !== 'feed') b.coverId = m.id; await save(b);
+      if (m.video) deps.onVideo?.({ biz: b.id, id: m.id, ext: kind.ext });
+      return m;
     },
     async updateMedia(ownerId: string, id: string, mediaId: string, patch: { caption?: unknown; visible?: unknown }) {
       const b = await mine(ownerId, id); const m = b.media.find((x) => x.id === mediaId); if (!m) throw new BizError('That photo or video was not found.', 404);
@@ -239,6 +253,8 @@ export function createBizService(deps: Deps) {
     async removeMedia(ownerId: string, id: string, mediaId: string): Promise<void> {
       const b = await mine(ownerId, id); const m = b.media.find((x) => x.id === mediaId); if (!m) throw new BizError('That photo or video was not found.', 404);
       await media.remove(b.id, m.id, sniffExt(m.mime)).catch(() => undefined);
+      if (m.kind === 'video') { await media.remove(b.id, `${m.id}-lq`, 'mp4').catch(() => undefined); await media.remove(b.id, `${m.id}-poster`, 'jpg').catch(() => undefined); }
+      mediaCache.clear();
       b.media = b.media.filter((x) => x.id !== mediaId); if (b.coverId === mediaId) delete b.coverId; if (b.logoId === mediaId) delete b.logoId;
       for (const p of b.products) if (p.mediaId === mediaId) delete p.mediaId; await save(b);
     },
@@ -361,7 +377,7 @@ export function createBizService(deps: Deps) {
       const b = await publicLive(slug); if (!b) return []; const items = (await kv.get<{ items: Post[] }>(`biz-posts:${b.id}`))?.items ?? [];
       const likes = (await kv.get<{ by: Record<string, string[]> }>(`biz-likes:${b.id}`))?.by ?? {}; const com = (await kv.get<{ items: PostComment[] }>(`biz-comments:${b.id}`))?.items ?? [];
       const me = o.visitor ? vhash(o.visitor) : '';
-      const pm = (mid: string) => { const m = b.media.find((x) => x.id === mid); return m ? { id: m.id, kind: m.kind, ...(m.caption ? { caption: m.caption } : {}) } : null; };
+      const pm = (mid: string) => { const m = b.media.find((x) => x.id === mid); return m ? publicMedia(m) : null; };
       const out: PublicPost[] = items.map((p) => ({ id: p.id, at: p.at, text: p.text, media: p.mediaIds.map(pm).filter((x): x is NonNullable<typeof x> => !!x), ...(p.pinned ? { pinned: true } : {}), ...(p.productId && b.products.some((x) => x.id === p.productId && !x.hidden) ? { productId: p.productId } : {}), likes: likes[p.id]?.length ?? 0, comments: com.filter((c) => c.postId === p.id).length, liked: !!me && !!likes[p.id]?.includes(me) }));
       out.sort((a, c) => Number(!!c.pinned) - Number(!!a.pinned) || c.at.localeCompare(a.at)); const page = out.slice(0, Math.min(50, Math.max(1, o.limit ?? 20)));
       const shared = o.postId ? out.find((p) => p.id === o.postId) : undefined;
@@ -557,17 +573,31 @@ export function createBizService(deps: Deps) {
       await bump(b.id, kind === 'call' ? 'calls' : kind === 'whatsapp' ? 'whatsapp' : 'shares').catch(() => undefined); return true;
     },
     /** A file of a business by ids (drafts and hidden files too). Only reachable with a signed link the owner asked for; see bizRoutes. */
-    async mediaById(bizId: string, mediaId: string) {
+    async mediaById(bizId: string, mediaId: string, variant?: string) {
       const b = await load(String(bizId)); const m = b?.media.find((x) => x.id === mediaId); if (!b || !m) return null;
-      return { mime: m.mime, size: m.size, open: (range?: { start: number; end: number }) => media.open(b.id, m.id, sniffExt(m.mime), range) };
+      return fileOf(b.id, m, variant);
+    },
+    /** Called by the video pipeline when it has finished (or given up) on a video: records the picture size, whether the light version and poster exist, and the new file size. */
+    async setVideoInfo(bizId: string, mediaId: string, patch: { mime?: string; size?: number; video: VideoInfo }): Promise<void> {
+      const b = await load(bizId); const m = b?.media.find((x) => x.id === mediaId); if (!b || !m) return;
+      if (patch.mime) m.mime = patch.mime; if (patch.size) m.size = patch.size; m.video = patch.video; mediaCache.clear(); await save(b);
+    },
+    /** Videos that were still being prepared when the server stopped, so they can be queued again. */
+    async pendingVideos(): Promise<Array<{ biz: string; id: string; ext: string }>> {
+      const ids = (await kv.get<{ ids: string[] }>('biz-index'))?.ids ?? []; const out: Array<{ biz: string; id: string; ext: string }> = [];
+      for (const id of ids) { const b = await load(id); for (const m of b?.media ?? []) if (m.kind === 'video' && m.video?.state === 'processing') out.push({ biz: b!.id, id: m.id, ext: sniffExt(m.mime) }); }
+      return out;
     },
     /** How the page looks to visitors, for the owner, also before it is published. */
     async preview(ownerId: string, id: string): Promise<PublicBusiness> { const b = await mine(ownerId, id); return withPay(b, publicView(b)); },
     /** A photo or video of a live page, only if the owner shows it. */
-    async mediaFor(slug: string, mediaId: string) {
+    async mediaFor(slug: string, mediaId: string, variant?: string) {
+      // A video asks for many pieces, one request each: remember who may see what for a few seconds instead of reading the page every time.
+      const ck = `${slug}|${mediaId}|${variant ?? ''}`; const hit = mediaCache.get(ck); if (hit && hit.until > now()) return hit.file;
       const b = await publicLive(slug); const m = b?.media.find((x) => x.id === mediaId); if (!b || !m) return null;
       if (!m.visible && !((await kv.get<{ items: Post[] }>(`biz-posts:${b.id}`))?.items ?? []).some((p) => p.mediaIds.includes(m.id))) return null;
-      return { mime: m.mime, size: m.size, open: (range?: { start: number; end: number }) => media.open(b.id, m.id, sniffExt(m.mime), range) };
+      const file = await fileOf(b.id, m, variant); mediaCache.set(ck, { until: now() + 15_000, file }); if (mediaCache.size > 2000) mediaCache.clear(); return file;
+      return fileOf(b.id, m, variant);
     },
     async submitEnquiry(slug: string, input: { name?: unknown; contact?: unknown; message?: unknown; productId?: unknown; website?: unknown }, visitor: string): Promise<{ saved: boolean }> {
       if (clean(input.website, 40)) return { saved: false };                                                      // a robot filled the hidden field
@@ -635,6 +665,7 @@ export function createBizService(deps: Deps) {
     },
     /** Hides a page (with a reason) or shows it again (reason null). */
     async adminSuspend(slug: string, reason: string | null): Promise<void> {
+      mediaCache.clear();
       const id = await slugOwner(String(slug).toLowerCase()); const b = id ? await load(id) : null; if (!b) throw new BizError('Page not found.', 404);
       if (reason) b.suspended = { at: iso(), reason: clean(reason, 200) || 'Hidden by Bwenge' }; else delete b.suspended; await save(b);
     },
