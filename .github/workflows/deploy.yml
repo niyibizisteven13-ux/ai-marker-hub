@@ -1,0 +1,75 @@
+# Manual deploy to the production VPS over SSH. Run it from the Actions tab ("Run workflow").
+# It pulls the chosen ref on the server, installs, applies database migrations, builds and restarts PM2.
+# A restart fails any batch job that is still running, so deploy when none is in progress.
+#
+# Repository secrets (Settings > Secrets and variables > Actions):
+#   DEPLOY_HOST         server address
+#   DEPLOY_USER         SSH user that owns the app directory
+#   DEPLOY_SSH_KEY      private key for that user (no passphrase)
+#   DEPLOY_KNOWN_HOSTS  output of `ssh-keyscan -H <host>` (pins the server's identity)
+#   DEPLOY_PATH         absolute path of the app checkout on the server
+# Optional: DEPLOY_PORT (default 22), DEPLOY_HEALTH_URL (default https://www.bwenge.space/)
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit to deploy
+        default: main
+        required: true
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 20
+    steps:
+      - name: Set up SSH
+        env:
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_deploy && chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Deploy
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER_NAME: ${{ secrets.DEPLOY_USER }}
+          PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+          APP_PATH: ${{ secrets.DEPLOY_PATH }}
+          REF: ${{ inputs.ref }}
+        run: |
+          # The ref is passed as an argument, never spliced into the script.
+          ssh -i ~/.ssh/id_deploy -p "$PORT" -o StrictHostKeyChecking=yes "$USER_NAME@$HOST" \
+            bash -s -- "$APP_PATH" "$REF" <<'REMOTE'
+          set -euo pipefail
+          cd "$1"
+          git fetch --prune origin
+          git checkout --detach "$(git rev-parse --verify "origin/$2^{commit}" 2>/dev/null || git rev-parse --verify "$2^{commit}")"
+          echo "Deploying $(git rev-parse --short HEAD): $(git log -1 --pretty=%s)"
+          npm ci
+          npx prisma migrate deploy
+          npm run build
+          pm2 startOrReload ecosystem.config.js --update-env
+          pm2 save
+          REMOTE
+
+      - name: Health check
+        env:
+          URL: ${{ secrets.DEPLOY_HEALTH_URL || 'https://www.bwenge.space/' }}
+        run: |
+          for i in 1 2 3 4 5 6; do
+            if curl -fsS -o /dev/null --max-time 15 "$URL"; then echo "Healthy: $URL"; exit 0; fi
+            echo "Attempt $i failed, retrying..."; sleep 10
+          done
+          echo "::error::$URL did not respond after the deploy"; exit 1

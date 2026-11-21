@@ -301,13 +301,23 @@ app.use((req: express.Request, res: express.Response, next: express.NextFunction
 
 // ── CORS ──────────────────────────────────────────────────────────────────
 // Allow requests from configured frontend origins and production domains.
-const allowedOrigins = [
+const baseOrigins = [
   process.env.APP_URL,
+  process.env.APP_BASE_URL,
   'https://www.bwenge.com',
   'https://www.bwenge.space',
   'http://localhost:3000',
   'http://localhost:5173',
-].filter(Boolean) as string[];
+].filter(Boolean).map((o) => String(o).replace(/\/+$/, ''));
+// A site is reachable with and without "www": allow both for every https origin (the admin live WebSocket was refused on the bare domain).
+const allowedOrigins = [...new Set(baseOrigins.flatMap((o) => {
+  try {
+    const u = new URL(o);
+    if (u.protocol !== 'https:' || /^(localhost|\d+\.\d+\.\d+\.\d+)$/.test(u.hostname)) return [u.origin];
+    const alt = u.hostname.startsWith('www.') ? u.hostname.slice(4) : `www.${u.hostname}`;
+    return [u.origin, `${u.protocol}//${alt}${u.port ? `:${u.port}` : ''}`];
+  } catch { return [o]; }
+}))];
 
 app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
   const origin = req.headers.origin as string | undefined;

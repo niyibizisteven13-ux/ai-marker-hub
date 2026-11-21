@@ -1198,7 +1198,9 @@ export default function App() {
             }
             updateAssistant(assistantText, true);
           } else if (event.type === 'error') {
-            throw new Error(event.message || 'Bwenge could not complete your request. Please try again.');
+            // The code and request ID let support find this exact failure in the server log.
+            const ref = [event.code, event.requestId].filter((v: unknown) => typeof v === 'string' && v).join(' · ');
+            throw new Error(`${event.message || 'Bwenge could not complete your request. Please try again.'}${ref ? ` (Ref: ${ref})` : ''}`);
           }
         } catch (error: any) {
           if (error instanceof SyntaxError) return;
