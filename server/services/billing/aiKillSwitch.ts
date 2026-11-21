@@ -16,10 +16,16 @@ const inFlight = new Set<AbortController>();
 
 export const isAiPaused = () => paused;
 
+const resumeListeners = new Set<() => void>();
+/** Runs `fn` each time AI is resumed (for example to reset circuit breakers that opened while it was paused). */
+export function onAiResume(fn: () => void): () => void { resumeListeners.add(fn); return () => resumeListeners.delete(fn); }
+
 /** Called whenever the setting is read or saved. Pausing cancels every AI request in progress. */
 export function setAiPaused(next: boolean) {
   if (next && !paused) for (const c of inFlight) c.abort(new AiPausedError());
+  const wasPaused = paused;
   paused = next;
+  if (wasPaused && !next) for (const fn of resumeListeners) { try { fn(); } catch { /* a listener must never block resuming */ } }
 }
 
 const KNOWN_HOSTS = ['api.anthropic.com', 'api.openai.com', 'openrouter.ai', 'api.deepseek.com', 'generativelanguage.googleapis.com', 'integrate.api.nvidia.com', 'api.groq.com', 'api.together.xyz', 'api.mistral.ai'];

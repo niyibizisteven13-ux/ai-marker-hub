@@ -1,3 +1,4 @@
+import { AiPausedError, isAiPaused, onAiResume } from '../../billing/aiKillSwitch.js';
 import { providerMetrics as defaultMetrics, type ProviderMetrics } from '../observability/providerMetrics.js';
 import {
   normalizeError,
@@ -85,6 +86,8 @@ export class ReliableProviderAdapter implements ProviderAdapter {
       fallbackAdapter: opts.fallbackAdapter,
       log: opts.log,
     };
+    // The admin pause is not a provider outage: forget any failures it caused as soon as AI is resumed.
+    onAiResume(() => this.breakers.clear());
   }
 
   /** Current breaker state, for admin diagnostics. */
@@ -164,6 +167,9 @@ export class ReliableProviderAdapter implements ProviderAdapter {
           return;
         } catch (err) {
           if (req.signal?.aborted) throw err;
+          // The admin "Pause AI" switch refuses calls on purpose. Do not retry, fall back or count it against the
+          // model's circuit breaker, otherwise the breaker stays open after AI is resumed and every request fails.
+          if (isAiPaused() || err instanceof AiPausedError) throw err instanceof AiPausedError ? err : new AiPausedError();
           const n = normalizeError(err);
           lastError = err;
           lastCategory = n.category;
