@@ -1,0 +1,22 @@
+{
+  "id": "/ms",
+  "name": "MySEB: secure exams",
+  "short_name": "MySEB",
+  "description": "Run secure exams: live rooms, tests and results for lecturers.",
+  "start_url": "/ms?source=app",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0A1424",
+  "theme_color": "#0A1424",
+  "categories": ["education", "productivity"],
+  "shortcuts": [
+    { "name": "Live rooms", "short_name": "Rooms", "url": "/ms?view=rooms", "icons": [{ "src": "/myseb/icon-192.png", "sizes": "192x192" }] },
+    { "name": "New secure test", "short_name": "New test", "url": "/forms", "icons": [{ "src": "/myseb/icon-192.png", "sizes": "192x192" }] }
+  ],
+  "icons": [
+    { "src": "/myseb/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/myseb/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/myseb/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -4,6 +4,7 @@ import { authFetch } from '../utils/authFetch';
 import { AgentComposer, AgentThread, useAgentChat } from '../components/AgentChat';
 import MySebPayPanel, { type Payment } from '../components/MySebPayPanel';
 import { btnGhost, btnPrimary, card } from '../components/biz/ui';
+import logoUrl from '../assets/myseb-logo.svg';
 
 /**
  * The lecturer's MySEB dashboard (/lecturer): everything about secure exams in one place, on a phone and on a computer.
@@ -82,8 +83,9 @@ function ItemRow({ it, ask }: { it: Item; ask: (q: string) => void }) {
   );
 }
 
-export default function MySebDashboardPage({ onBack }: { onBack: () => void }) {
-  const [view, setView] = useState<View>('overview');
+/** `standalone`: opened as MySEB's own app (/ms): its own logo and name, no way back to Bwenge's chat, and a sign-out instead. */
+export default function MySebDashboardPage({ onBack, standalone = false, onSignOut }: { onBack: () => void; standalone?: boolean; onSignOut?: () => void }) {
+  const [view, setView] = useState<View>(() => { const v = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '').get('view'); return (['rooms', 'tests', 'tasks', 'marking', 'app', 'access'] as string[]).includes(v ?? '') ? (v as View) : 'overview'; });
   const [data, setData] = useState<Overview | null>(null); const [error, setError] = useState('');
   const [nav, setNav] = useState(false);
   const [agent, setAgent] = useState(() => typeof window !== 'undefined' && window.matchMedia('(min-width: 1280px)').matches);
@@ -118,7 +120,7 @@ export default function MySebDashboardPage({ onBack }: { onBack: () => void }) {
     </nav>
   );
   const brand = (
-    <div className="mb-5 flex items-center gap-2.5 px-2 py-1.5"><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--brand)] text-[var(--brand-on)]"><ShieldCheck size={18} /></span><span><span className="block font-display text-[15px] font-semibold leading-tight text-white">MySEB</span><span className="block text-[11px] text-white/55">Secure exams · Bwenge</span></span></div>
+    <div className="mb-5 flex items-center gap-2.5 px-2 py-1.5">{standalone ? <img src={logoUrl} alt="" className="h-9 w-9 rounded-xl" /> : <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--brand)] text-[var(--brand-on)]"><ShieldCheck size={18} /></span>}<span><span className="block font-display text-[15px] font-semibold leading-tight text-white">MySEB</span><span className="block text-[11px] text-white/55">{standalone ? 'Secure exams' : 'Secure exams · Bwenge'}</span></span></div>
   );
   const accessChip = data && (
     <button type="button" onClick={() => go('access')} className="mt-3 w-full rounded-2xl bg-white/5 p-3.5 text-left text-xs hover:bg-white/10">
@@ -132,7 +134,7 @@ export default function MySebDashboardPage({ onBack }: { onBack: () => void }) {
       {/* sidebar (computers) */}
       <aside className="hidden w-64 shrink-0 flex-col bg-[#0B1424] p-4 lg:flex">
         {brand}{navList}{accessChip}
-        <button type="button" onClick={onBack} className="mt-3 flex items-center gap-2 px-2 py-1 text-xs text-white/55 hover:text-white"><ArrowLeft size={13} />Back to Bwenge</button>
+        {standalone ? (onSignOut && <button type="button" onClick={onSignOut} className="mt-3 flex items-center gap-2 px-2 py-1 text-xs text-white/55 hover:text-white"><ArrowLeft size={13} />Sign out</button>) : (<button type="button" onClick={onBack} className="mt-3 flex items-center gap-2 px-2 py-1 text-xs text-white/55 hover:text-white"><ArrowLeft size={13} />Back to Bwenge</button>)}
       </aside>
 
       {/* sidebar (phones): a drawer */}
@@ -142,7 +144,7 @@ export default function MySebDashboardPage({ onBack }: { onBack: () => void }) {
           <aside className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col bg-[#0B1424] p-4 shadow-2xl">
             <div className="flex items-start justify-between">{brand}<button type="button" onClick={() => setNav(false)} aria-label="Close menu" className="rounded-full p-2 text-white/70 hover:bg-white/10"><X size={18} /></button></div>
             {navList}{accessChip}
-            <button type="button" onClick={onBack} className="mt-3 flex items-center gap-2 px-2 py-1 text-xs text-white/55 hover:text-white"><ArrowLeft size={13} />Back to Bwenge</button>
+            {standalone ? (onSignOut && <button type="button" onClick={onSignOut} className="mt-3 flex items-center gap-2 px-2 py-1 text-xs text-white/55 hover:text-white"><ArrowLeft size={13} />Sign out</button>) : (<button type="button" onClick={onBack} className="mt-3 flex items-center gap-2 px-2 py-1 text-xs text-white/55 hover:text-white"><ArrowLeft size={13} />Back to Bwenge</button>)}
           </aside>
         </div>
       )}
@@ -152,7 +154,7 @@ export default function MySebDashboardPage({ onBack }: { onBack: () => void }) {
           <button type="button" onClick={() => setNav(true)} aria-label="Open menu" className="flex h-10 w-10 items-center justify-center rounded-xl hover:bg-[var(--app-panel-hover)] lg:hidden"><Menu size={19} /></button>
           <div className="min-w-0 flex-1"><h1 className="truncate font-display text-[17px] font-semibold">{title}</h1><p className="hidden text-xs text-[var(--app-muted)] sm:block">{view === 'overview' ? `${hello()}${data?.name ? `, ${data.name}` : ''}` : 'MySEB · secure exams'}</p></div>
           <a href="/forms" className={`${btnGhost} !min-h-10 !px-3.5`}><Plus size={16} /><span className="hidden sm:inline">New secure test</span></a>
-          <button type="button" onClick={() => setAgent((v) => !v)} aria-pressed={agent} className={`${btnPrimary} !min-h-10 !px-3.5`}><Sparkles size={16} /><span className="hidden sm:inline">Ask Bwenge</span></button>
+          <button type="button" onClick={() => setAgent((v) => !v)} aria-pressed={agent} className={`${btnPrimary} !min-h-10 !px-3.5`}><Sparkles size={16} /><span className="hidden sm:inline">{standalone ? 'Assistant' : 'Ask Bwenge'}</span></button>
         </header>
 
         <div className="flex min-h-0 flex-1">

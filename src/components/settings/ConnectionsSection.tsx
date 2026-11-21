@@ -10,7 +10,7 @@ type TelegramConnection = { connected: boolean; chatId: string | null; botUserna
 function SidebarShortcuts() {
   const pins = usePins();
   const rows: Array<{ id: Pin; icon: typeof Store; name: string; text: string; href: string }> = [
-    { id: 'myseb', icon: ShieldCheck, name: 'MySEB', text: 'Secure exams and live rooms for lecturers: your dashboard, tests and tasks.', href: '/lecturer' },
+    { id: 'myseb', icon: ShieldCheck, name: 'MySEB', text: 'Secure exams and live rooms for lecturers. MySEB is its own app: open it, or install it on your phone or computer.', href: '/ms' },
     { id: 'ventures', icon: Store, name: 'Ventures (Bwenge4biz)', text: 'Your business or creator pages. They are always under Agents; add a shortcut to the main list too.', href: '/biz' },
   ];
   return (

@@ -195,9 +195,8 @@ function BizPageInner({ business: b, base, lang, setLang, openNow, mediaSrc, pre
   const add = (id: string, d = 1) => setCart((x) => ({ ...x, [id]: Math.max(0, Math.min(99, (x[id] ?? 0) + d)) }));
   const go = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
-  const tabs: Array<[string, string, boolean]> = b.category === 'creator'
-    ? [['top', 'Overview', true], ['updates', 'Videos and posts', posts.length > 0], ['items', preset.itemsTitle, b.products.length > 0], ['gallery', 'Gallery', media.length > 0], ['about', 'About', true], ['contact', 'Work with me', true]]
-    : [['top', 'Overview', true], ['items', preset.itemsTitle, b.products.length > 0], ['updates', 'Updates', posts.length > 0], ['gallery', 'Gallery', media.length > 0], ['about', 'About', true], ['contact', 'Contact', true]];
+  // The newest updates are the first thing a visitor sees (like a social page); then the offer, the gallery, the story and the contact.
+  const tabs: Array<[string, string, boolean]> = [['updates', b.category === 'creator' ? 'Videos and posts' : 'Updates', posts.length > 0], ['top', 'Overview', true], ['items', preset.itemsTitle, b.products.length > 0], ['gallery', 'Gallery', media.length > 0], ['about', 'About', true], ['contact', b.category === 'creator' ? 'Work with me' : 'Contact', true]];
   const tile = 'flex flex-col items-center justify-center gap-2 rounded-2xl border border-[#E7EAEE] bg-white px-2 py-4 text-center text-[13px] font-semibold text-[#0E1722] shadow-sm transition hover:-translate-y-0.5 hover:shadow-md';
   const iconWrap = 'flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--acc)]/15 text-[#0E1722]';
   const panel = 'rounded-3xl border border-[#E7EAEE] bg-white p-5 shadow-sm';
@@ -236,6 +235,10 @@ function BizPageInner({ business: b, base, lang, setLang, openNow, mediaSrc, pre
 
           <div className="grid gap-6 p-4 sm:p-6 lg:grid-cols-[1fr_340px]">
             <div className="min-w-0 space-y-6">
+              {/* updates (the feed) */}
+              {posts.length > 0 && <section id="updates" className="-mx-4 scroll-mt-20 sm:mx-0"><h2 className="mb-3 px-4 font-display text-2xl font-semibold tracking-tight sm:mb-4 sm:px-0">{tx("Updates")}</h2>
+                <FeedSection b={b} posts={posts} mediaSrc={mediaSrc} preview={preview} onOrder={(pid) => { setCart((x) => ({ ...x, [pid]: Math.max(1, x[pid] ?? 0) })); setCheckout('order'); }} onOpen={(items, i) => setPostBox({ items, i })} onShare={(p) => void sharePost(p)} /></section>}
+
               {/* promo */}
               <section className="relative overflow-hidden rounded-3xl bg-[#0E1722] p-6 text-white sm:p-8" style={{ backgroundImage: `radial-gradient(circle at 85% 20%, ${theme.accent}55, transparent 55%)` }}>
                 <p className="text-xs font-semibold uppercase tracking-[0.14em]" style={{ color: theme.accent }}>{category}</p>
@@ -280,10 +283,6 @@ function BizPageInner({ business: b, base, lang, setLang, openNow, mediaSrc, pre
 
               {/* highlights */}
               <section className="grid grid-cols-3 gap-2 rounded-2xl bg-[#F6F7F9] p-3 text-center text-[12.5px] font-medium text-[#475467] sm:text-sm">{preset.highlights.map((h) => <span key={h} className="flex items-center justify-center gap-1.5 px-1 py-1.5"><Check size={14} className="shrink-0 text-emerald-600" />{tx(h)}</span>)}</section>
-
-              {/* updates (the feed) */}
-              {posts.length > 0 && <section id="updates" className="-mx-4 scroll-mt-20 sm:mx-0"><h2 className="mb-3 px-4 font-display text-2xl font-semibold tracking-tight sm:mb-4 sm:px-0">{tx("Updates")}</h2>
-                <FeedSection b={b} posts={posts} mediaSrc={mediaSrc} preview={preview} onOrder={(pid) => { setCart((x) => ({ ...x, [pid]: Math.max(1, x[pid] ?? 0) })); setCheckout('order'); }} onOpen={(items, i) => setPostBox({ items, i })} onShare={(p) => void sharePost(p)} /></section>}
 
               {/* gallery */}
               {media.length > 0 && (

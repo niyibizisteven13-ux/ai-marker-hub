@@ -1,0 +1,9 @@
+# MySEB as its own app
+
+MySEB (secure exams for lecturers) is an app of its own, with its own name, logo, colour and front door. Students use the separate MySEB student app (download page `/myseb`); this is the lecturer side.
+
+* **Address**: `/ms` on the main site, or the root of a `myseb.<your domain>` host (for example `myseb.bwenge.space`), which the site turns into `/ms`. Signed out, it shows MySEB's own welcome page with sign-in, sign-up and an "Install the app" button. Signed in, it is the MySEB dashboard (rooms, tests, tasks, marking, access) with MySEB's logo, an "Assistant" button instead of "Ask Bwenge", and Sign out instead of a way back to Bwenge's chat. The same account works in both.
+* **Install**: it is a progressive web app with its own manifest (`/myseb.webmanifest`, app id `/ms`, theme `#0A1424`) and icons (`public/myseb/`). On Android and desktop Chrome/Edge the welcome page offers "Install the app"; on iPhone use Share → Add to Home Screen. It installs next to Bwenge, not over it (different app id). The server writes MySEB's name, colour, icon and manifest into the page head for `/ms`, so the home-screen name and a shared link say MySEB (`server/services/mysebShell.ts`).
+* **Own domain (optional)**: point `myseb.<domain>` at the same server and certificate, and add the host to nginx (`server_name myseb.bwenge.space;` with the same proxy block as the main site). Nothing else is needed: the root of that host opens the app.
+* **Shortcuts**: Settings → Connections → Sidebar shortcuts puts MySEB in the Bwenge sidebar if wanted (it opens `/ms`); `/lecturer` keeps working.
+* **Honest limits**: it is a web app you install, not a store app; the exam lock itself is done by the student apps. It shares the site's sign-in and servers. Wrapping it for the Play Store (a Trusted Web Activity) or the App Store needs a developer account and is a separate step.
