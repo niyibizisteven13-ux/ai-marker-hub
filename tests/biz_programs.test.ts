@@ -324,12 +324,12 @@ test('the customer\'s passcode: 4 to 6 digits, chosen at joining, stored only as
   const { svc, biz, prog, kv } = await setup();
   await assert.rejects(svc.joinProgram(biz.slug, prog.id, { name: 'Ann', phone: '0788200001', passcode: '12' }, 'p'), /4 to 6 digits/);
   await assert.rejects(svc.joinProgram(biz.slug, prog.id, { name: 'Ann', phone: '0788200001' }, 'p'), /4 to 6 digits/, 'a passcode is not optional');
-  const j = await joinP(svc, biz.slug, prog.id, { name: 'Ann', phone: '0788200001', passcode: '7392' }, 'p');
+  const j = await joinP(svc, biz.slug, prog.id, { name: 'Ann', phone: '0788200001', passcode: '739204' }, 'p');
   const first: any = await svc.me(biz.slug, j.session); assert.equal(first.name, 'Ann'); assert.equal(first.cards.length, 1); assert.equal(first.cards[0].state, 'pending');
   // Sign in again, as on a new phone.
-  const back: any = await svc.login(biz.slug, { phone: '0788 200 001', passcode: '7392' }, 'l1'); assert.ok(back.session && back.session !== j.session); assert.equal(((await svc.me(biz.slug, back.session)) as any).cards.length, 1); assert.ok(!JSON.stringify([...kv.data.entries()]).includes('7392'), 'the passcode is never stored as typed');
+  const back: any = await svc.login(biz.slug, { phone: '0788 200 001', passcode: '739204' }, 'l1'); assert.ok(back.session && back.session !== j.session); assert.equal(((await svc.me(biz.slug, back.session)) as any).cards.length, 1); assert.ok(!JSON.stringify([...kv.data.entries()]).includes('739204'), 'the passcode is never stored as typed');
   await assert.rejects(svc.login(biz.slug, { phone: '0788200001', passcode: '0000' }, 'l1'), (e: any) => e.code === 'BAD_LOGIN');
-  await assert.rejects(svc.login(biz.slug, { phone: '0788299999', passcode: '7392' }, 'l1'), (e: any) => e.code === 'BAD_LOGIN', 'an unknown number gets the same answer');
+  await assert.rejects(svc.login(biz.slug, { phone: '0788299999', passcode: '739204' }, 'l1'), (e: any) => e.code === 'BAD_LOGIN', 'an unknown number gets the same answer');
 });
 
 test('wrong passcodes lock the phone number for ten minutes; a long sign-in works; sign-out and expiry end a session; the passcode can be changed', async () => {
