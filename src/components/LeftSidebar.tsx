@@ -9,7 +9,6 @@ import {
   BarChart3,
   Shield,
   FolderOpen,
-  Library,
   PenLine,
   ClipboardCheck, ClipboardList,
   PanelLeftClose,
@@ -39,8 +38,6 @@ interface LeftSidebarProps {
   onOpenAdmin?: () => void;
   /** Opens the "My files" library of AI-generated outputs. */
   onOpenLibrary?: () => void;
-  /** Opens the public library (folders and files admins share with everyone). */
-  onOpenPublicLibrary?: () => void;
   /** Opens the Mark page (scripts, marking scheme, instructions → live marking in the chat). */
   onOpenMark?: () => void;
   /** Opens Assignments (set a task, share a link, see every hand-in, mark the class). */
@@ -118,7 +115,6 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   onOpenSettings = () => {},
   onOpenAdmin,
   onOpenLibrary,
-  onOpenPublicLibrary,
   onOpenMark,
   onOpenAssignments,
   onOpenForms,
@@ -180,7 +176,6 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
     ] },
     { title: 'Files', items: [
       ...(user && onOpenLibrary ? [{ label: 'My files', icon: FolderOpen, onClick: onOpenLibrary }] : []),
-      ...(user && onOpenPublicLibrary ? [{ label: 'Public library', icon: Library, onClick: onOpenPublicLibrary }] : []),
     ] },
   ].filter((g) => g.items.length);
 

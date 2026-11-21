@@ -1884,7 +1884,6 @@ export default function App() {
           activeTab={activeTab}
           setActiveTab={setActiveTab}
           onOpenLibrary={() => { setLibraryTab('mine'); setLibraryOpen(true); }}
-          onOpenPublicLibrary={openPublicLibrary}
           onOpenMark={() => setMarkOpen(true)}
           onOpenAssignments={openTasks}
           onOpenForms={openFormsLibrary}
