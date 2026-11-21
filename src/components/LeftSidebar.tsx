@@ -175,7 +175,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
       ...(user && onOpenMark ? [{ label: 'Mark', icon: PenLine, onClick: onOpenMark }] : []),
       ...(user ? [{ label: 'Results', icon: BarChart3, onClick: goTo('/exams'), active: /^\/exams/.test(path) }] : []),
       // MySEB and Ventures are not here unless the person added them in Settings → Connections.
-      ...(user && pins.myseb ? [{ label: 'MySEB', icon: ShieldCheck, onClick: goTo('/lecturer'), active: /^\/lecturer/.test(path) }] : []),
+      ...(user && pins.myseb ? [{ label: 'MySEB', icon: ShieldCheck, onClick: goTo('/ms'), active: /^\/(lecturer|ms)/.test(path) }] : []),
       ...(user && pins.ventures && onOpenBiz ? [{ label: 'Ventures', icon: Store, onClick: onOpenBiz }] : []),
     ] },
     { title: 'Files', items: [

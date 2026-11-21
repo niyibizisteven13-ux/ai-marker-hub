@@ -1,0 +1,9 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img"><title>MySEB</title>
+  <defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#12233B"/><stop offset="1" stop-color="#0A1424"/></linearGradient>
+  <linearGradient id="sh" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4CE5D6"/><stop offset="1" stop-color="#1FB3A6"/></linearGradient></defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <g transform="translate(256 256) scale(.78) translate(-256 -256)"><path d="M256 92 372 134v110c0 78-48 134-116 164-68-30-116-86-116-164V134z" fill="url(#sh)"/>
+  <path d="M256 92 372 134v110c0 78-48 134-116 164z" fill="#000" opacity=".12"/>
+  <path d="m204 252 40 40 72-82" fill="none" stroke="#0A1424" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="392" cy="120" r="22" fill="#F6B94A"/></g>
+</svg>
