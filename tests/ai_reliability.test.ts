@@ -282,3 +282,24 @@ test('provider logs never contain prompt text', async () => {
   assert.doesNotMatch(JSON.stringify(h.logs), /SECRET-PROMPT-CONTENT/);
   assert.doesNotMatch(JSON.stringify(h.metrics.snapshot()), /SECRET-PROMPT-CONTENT/);
 });
+
+test('admin pause does not trip the circuit breaker, and resuming clears it', async () => {
+  const { setAiPaused } = await import('../server/services/billing/aiKillSwitch.js');
+  const { adapter, calls } = scripted([]);
+  const failing: ProviderAdapter = { name: 'fake', async *stream(req) { calls.push(req); throw new ProviderError('fake: fetch failed', undefined, true); } };
+  const rel = new ReliableProviderAdapter({ primary: failing, maxAttempts: 3, breakerThreshold: 2, sleep: async () => undefined });
+  void adapter;
+  setAiPaused(true);
+  try {
+    for (let i = 0; i < 4; i++) await assert.rejects(collect(rel.stream({ model: 'm', messages: [] } as any)));
+    assert.equal(calls.length, 4, 'no retries while paused');
+    assert.deepEqual(rel.breakerState(), {}, 'pause failures are not counted');
+  } finally { setAiPaused(false); }
+  // A breaker that opened just before the pause is cleared on resume.
+  setAiPaused(false);
+  const ok: ProviderAdapter = { name: 'fake', async *stream() { yield { type: 'text', text: 'hi' } as any; } };
+  const rel2 = new ReliableProviderAdapter({ primary: ok });
+  (rel2 as any).breakers.set('m', { failures: 9, openUntil: Date.now() + 60_000 });
+  setAiPaused(true); setAiPaused(false);
+  assert.equal((await collect(rel2.stream({ model: 'm', messages: [] } as any))).length, 1);
+});
