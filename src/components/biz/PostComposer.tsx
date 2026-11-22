@@ -28,7 +28,7 @@ async function cropImage(file: File, r: number | null): Promise<{ blob: Blob; na
 }
 
 export default function PostComposer({ b, onClose, onPosted, canVideo }: { b: Business; onClose: () => void; onPosted: () => void; canVideo: boolean }) {
-  const [step, setStep] = useState<1 | 2 | 3 | 4>(1); const [items, setItems] = useState<Item[]>([]); const [ratio, setRatio] = useState<Ratio>('square'); const [cur, setCur] = useState(0);
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1); const [items, setItems] = useState<Item[]>([]); const [ratio, setRatio] = useState<Ratio>(b.category === 'profile' ? 'original' : 'square'); const [cur, setCur] = useState(0);
   const [caption, setCaption] = useState(''); const [productId, setProductId] = useState(''); const [busy, setBusy] = useState(''); const [err, setErr] = useState(''); const [drag, setDrag] = useState(false); const fileRef = useRef<HTMLInputElement>(null);
   const urls = useRef<string[]>([]); useEffect(() => () => { urls.current.forEach((u) => URL.revokeObjectURL(u)); }, []);
   useEffect(() => { const o = document.body.style.overflow; document.body.style.overflow = 'hidden'; const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && !busy) onClose(); }; window.addEventListener('keydown', k); return () => { document.body.style.overflow = o; window.removeEventListener('keydown', k); }; }, [busy, onClose]);
@@ -54,8 +54,8 @@ export default function PostComposer({ b, onClose, onPosted, canVideo }: { b: Bu
   };
   const it = items[cur]; const css = RATIO[ratio].css; const link = `${pageUrl(b.slug)}#updates`;
   const stage = useMemo(() => (it ? (
-    <div className="relative mx-auto w-full overflow-hidden bg-black" style={{ aspectRatio: ratio === 'original' ? undefined : css, maxHeight: '60dvh' }}>
-      {it.kind === 'video' ? <video src={it.url} controls playsInline className="h-full w-full object-contain" /> : <img src={it.url} alt="" className={`h-full w-full ${ratio === 'original' ? 'max-h-[60dvh] object-contain' : 'object-cover'}`} />}
+    <div className="relative mx-auto w-full overflow-hidden bg-black" style={{ aspectRatio: it.kind === 'video' || ratio === 'original' ? undefined : css, maxHeight: '60dvh' }}>
+      {it.kind === 'video' ? <video src={it.url} controls playsInline className="max-h-[60dvh] w-full object-contain" /> : <img src={it.url} alt="" className={`h-full w-full ${ratio === 'original' ? 'max-h-[60dvh] object-contain' : 'object-cover'}`} />}
       {items.length > 1 && <><button type="button" aria-label={tx("Previous")} disabled={cur === 0} onClick={() => setCur(cur - 1)} className="absolute left-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-white/90 shadow disabled:opacity-30"><ChevronLeft size={18} /></button><button type="button" aria-label={tx("Next")} disabled={cur === items.length - 1} onClick={() => setCur(cur + 1)} className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-white/90 shadow disabled:opacity-30"><ChevronRight size={18} /></button><span className="absolute right-3 top-3 rounded-full bg-black/60 px-2.5 py-1 text-xs text-white">{cur + 1}/{items.length}</span></>}
     </div>) : null), [it, ratio, css, cur, items.length]);
   const title = step === 1 ? 'Create new post' : step === 2 ? 'Crop' : step === 3 ? 'New post' : 'Post shared';

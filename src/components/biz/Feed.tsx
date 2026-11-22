@@ -14,27 +14,30 @@ const ago = (iso: string, tx: (s: string) => string = (x) => x) => { const rw = 
 const initials = (n: string) => n.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase()).join('') || 'B';
 const remembered = () => { try { return localStorage.getItem('bz-visitor-name') ?? ''; } catch { return ''; } };
 
-export function Carousel({ items, src, onOpen, onDoubleTap }: { items: PublicPost['media']; src: (id: string) => string; onOpen: (i: number) => void; onDoubleTap: () => void }) {
+export function Carousel({ items, src, onOpen, onDoubleTap, fitMedia = false }: { items: PublicPost['media']; src: (id: string) => string; onOpen: (i: number) => void; onDoubleTap: () => void; fitMedia?: boolean }) {
   const tx = useTx();
-  // A post is as tall as its first picture: a portrait video gets a portrait frame, a landscape one a wide frame, photos stay square. Every slide fits inside it.
-  const first = items[0]; const shape = first?.kind === 'video' ? frameFor(first.video?.w, first.video?.h).aspect : 1;
   const ref = useRef<HTMLUListElement>(null); const [i, setI] = useState(0); const last = useRef(0);
+  const active = items[fitMedia ? i : 0] ?? items[0];
+  const video = active?.kind === 'video' ? active.video : undefined;
+  const shape = fitMedia && video?.w && video.h ? video.w / video.h
+    : active?.kind === 'video' ? frameFor(video?.w, video?.h).aspect : 1;
+  const single = fitMedia && items.length === 1;
   const go = (n: number) => { const el = ref.current; if (el) el.scrollTo({ left: n * el.clientWidth, behavior: 'smooth' }); };
   if (!items.length) return null;
   return (
     <div className="group relative bg-[#F0F2F5]">
       <ul ref={ref} onScroll={(e) => { const el = e.currentTarget; setI(Math.round(el.scrollLeft / Math.max(1, el.clientWidth))); }} className="flex snap-x snap-mandatory overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
         {items.map((m, k) => (
-          <li key={m.id} className="relative w-full shrink-0 snap-center" style={{ aspectRatio: String(shape), maxHeight: '85vh' }}>
-            {m.kind === 'video' ? <VideoPlayer media={m} src={src} fill />
-              : <button type="button" aria-label={tx("Open photo")} className="block h-full w-full" onClick={() => { const t = Date.now(); if (t - last.current < 320) { onDoubleTap(); last.current = 0; } else { last.current = t; window.setTimeout(() => { if (last.current === t) onOpen(k); }, 330); } }}><img src={src(m.id)} alt={m.caption || ''} loading="lazy" draggable={false} className="h-full w-full object-cover" /></button>}
+          <li key={m.id} className="relative w-full shrink-0 snap-center" style={single ? undefined : { aspectRatio: String(shape), maxHeight: '85dvh' }}>
+            {m.kind === 'video' ? <VideoPlayer media={m} src={src} fill={!single} naturalAspect={fitMedia} />
+              : <button type="button" aria-label={tx("Open photo")} className="block h-full w-full" onClick={() => { const t = Date.now(); if (t - last.current < 320) { onDoubleTap(); last.current = 0; } else { last.current = t; window.setTimeout(() => { if (last.current === t) onOpen(k); }, 330); } }}><img src={src(m.id)} alt={m.caption || ''} loading="lazy" draggable={false} className={single ? "max-h-[85dvh] w-full object-contain" : `h-full w-full ${fitMedia ? "object-contain" : "object-cover"}`} /></button>}
           </li>))}
       </ul>
       {items.length > 1 && <>
-        <span className="absolute right-3 top-3 rounded-full bg-black/60 px-2.5 py-1 text-xs font-medium text-white">{i + 1}/{items.length}</span>
+        <span className="pointer-events-none absolute left-3 top-3 rounded-full bg-black/60 px-2.5 py-1 text-xs font-medium text-white">{i + 1}/{items.length}</span>
         {i > 0 && <button type="button" aria-label={tx("Previous")} onClick={() => go(i - 1)} className="absolute left-2 top-1/2 hidden h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-white/90 shadow sm:flex"><ChevronLeft size={18} /></button>}
         {i < items.length - 1 && <button type="button" aria-label={tx("Next")} onClick={() => go(i + 1)} className="absolute right-2 top-1/2 hidden h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-white/90 shadow sm:flex"><ChevronRight size={18} /></button>}
-        <div className="absolute inset-x-0 bottom-2.5 flex justify-center gap-1.5" aria-hidden="true">{items.map((m, k) => <span key={m.id} className={`h-1.5 w-1.5 rounded-full ${k === i ? 'bg-[var(--acc)]' : 'bg-white/70'}`} />)}</div></>}
+        <div className="pointer-events-none absolute inset-x-0 bottom-2.5 flex justify-center gap-1.5" aria-hidden="true">{items.map((m, k) => <span key={m.id} className={`h-1.5 w-1.5 rounded-full ${k === i ? 'bg-[var(--acc)]' : 'bg-white/70'}`} />)}</div></>}
     </div>
   );
 }
@@ -68,7 +71,7 @@ function PostCard({ b, p, mediaSrc, preview, onOrder, onOpen, onShare }: { b: Pu
         {p.pinned && <span className="inline-flex items-center gap-1 text-xs text-[#667085]"><Pin size={13} />{tx("Pinned")}</span>}
       </div>
       <div className="relative">
-        <Carousel items={p.media} src={mediaSrc} onOpen={(k) => onOpen(p.media, k)} onDoubleTap={() => void love(true)} />
+        <Carousel fitMedia={b.category === 'profile'} items={p.media} src={mediaSrc} onOpen={(k) => onOpen(p.media, k)} onDoubleTap={() => void love(true)} />
         {burst && <Heart aria-hidden="true" className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 fill-white text-white drop-shadow-lg" size={96} style={{ animation: 'bzpop 0.7s ease-out forwards' }} />}
       </div>
       <div className="flex items-center gap-1 px-2 pt-2">

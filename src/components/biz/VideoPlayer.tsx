@@ -32,7 +32,7 @@ const clock = (s: number) => { const t = Math.max(0, Math.floor(s || 0)); return
 /** Only one video plays at a time on a page. */
 let playing: HTMLVideoElement | null = null;
 
-export function VideoPlayer({ media, src, fill = false, autoPlay = true, startUnmuted = false, className = '' }: { media: PublicMedia; src: (id: string) => string; fill?: boolean; autoPlay?: boolean; startUnmuted?: boolean; className?: string }) {
+export function VideoPlayer({ media, src, fill = false, naturalAspect = false, autoPlay = true, startUnmuted = false, className = '' }: { media: PublicMedia; src: (id: string) => string; fill?: boolean; naturalAspect?: boolean; autoPlay?: boolean; startUnmuted?: boolean; className?: string }) {
   const tx = useTx();
   const info = media.video; const urls = useMemo(() => videoUrls(src(media.id), info), [src, media.id, info]);
   const box = useRef<HTMLDivElement>(null); const vid = useRef<HTMLVideoElement>(null);
@@ -41,7 +41,8 @@ export function VideoPlayer({ media, src, fill = false, autoPlay = true, startUn
   const [paused, setPaused] = useState(true); const [muted, setMuted] = useState(!startUnmuted); const [t, setT] = useState(0); const [dur, setDur] = useState(info?.duration ?? 0); const [buf, setBuf] = useState(0);
   const [waiting, setWaiting] = useState(false); const [ended, setEnded] = useState(false); const [failed, setFailed] = useState(false); const [bars, setBars] = useState(true); const [light, setLight] = useState(false);
   const userPaused = useRef(false); const stalls = useRef<number[]>([]); const waitTimer = useRef(0); const hideTimer = useRef(0); const resume = useRef<{ t: number; play: boolean } | null>(null); const visible = useRef(false);
-  const { kind, aspect } = frameFor(dims?.w, dims?.h);
+  const { kind, aspect: defaultAspect } = frameFor(dims?.w, dims?.h);
+  const aspect = naturalAspect && dims ? dims.w / dims.h : defaultAspect;
   const src1 = q === 'lq' && urls.lq ? urls.lq : urls.hq;
 
   const showBars = useCallback(() => { setBars(true); window.clearTimeout(hideTimer.current); hideTimer.current = window.setTimeout(() => setBars(false), 2600); }, []);
@@ -83,13 +84,13 @@ export function VideoPlayer({ media, src, fill = false, autoPlay = true, startUn
   };
 
   if (info?.state === 'processing') return (
-    <div className={`${fill ? 'absolute inset-0' : 'w-full'} flex flex-col items-center justify-center gap-2 bg-[#0B1420] px-6 text-center text-white ${className}`} style={fill ? undefined : { aspectRatio: '4 / 5' }} role="status">
+    <div className={`${fill ? 'absolute inset-0' : 'w-full'} flex flex-col items-center justify-center gap-2 bg-[#0B1420] px-6 text-center text-white ${className}`} style={fill ? undefined : { aspectRatio: naturalAspect ? String(aspect) : '4 / 5', maxHeight: '85dvh' }} role="status">
       <Loader2 className="animate-spin" size={26} aria-hidden="true" /><p className="font-semibold">{tx('Preparing this video')}</p><p className="text-xs text-white/70">{tx('It will play smoothly in a minute.')}</p>
     </div>);
 
   return (
     <div ref={box} tabIndex={0} onKeyDown={key} onMouseMove={showBars} role="group" aria-label={media.caption || tx('Video')} data-frame={kind}
-      className={`${fill ? 'absolute inset-0' : 'relative w-full'} group select-none overflow-hidden bg-black outline-none focus-visible:ring-2 focus-visible:ring-[var(--acc,#fff)] ${className}`} style={fill ? undefined : { aspectRatio: String(aspect), maxHeight: '85vh' }}>
+      className={`${fill ? 'absolute inset-0' : 'relative w-full'} group select-none overflow-hidden bg-black fullscreen:!max-h-none outline-none focus-visible:ring-2 focus-visible:ring-[var(--acc,#fff)] ${className}`} style={fill ? undefined : { aspectRatio: String(aspect), maxHeight: '85dvh' }}>
       {/* the poster, enlarged and blurred, fills whatever the frame leaves empty around the video */}
       {urls.poster ? <img src={urls.poster} alt="" aria-hidden="true" className="absolute inset-0 h-full w-full scale-125 object-cover opacity-60 blur-2xl" /> : <div className="absolute inset-0 bg-gradient-to-br from-[#1b2635] to-black" aria-hidden="true" />}
       <video ref={vid} key={src1} src={src1} poster={urls.poster ?? undefined} muted={muted} playsInline preload={visible.current ? 'auto' : 'metadata'} disablePictureInPicture={false} aria-label={media.caption || tx('Video')}

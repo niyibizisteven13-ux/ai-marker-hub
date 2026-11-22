@@ -29,9 +29,9 @@ function PhotoViewer({ items, i, src, onClose, onIndex }: { items: PublicMedia[]
   const m = items[i]; if (!m) return null;
   return (
     <div role="dialog" aria-modal="true" aria-label="Picture" className="fixed inset-0 z-[400] flex items-center justify-center bg-black/90 p-3" onClick={onClose}>
-      <button type="button" aria-label="Close" onClick={onClose} className="absolute right-3 top-3 flex h-11 w-11 items-center justify-center rounded-full bg-white/15 text-white"><X size={22} /></button>
-      <div className="max-h-full w-full max-w-3xl" onClick={(e) => e.stopPropagation()}>
-        {m.kind === 'video' ? <div className="overflow-hidden rounded-xl"><VideoPlayer media={m} src={src} startUnmuted /></div> : <img src={src(m.id)} alt={m.caption ?? ''} className="mx-auto max-h-[85vh] w-auto rounded-xl object-contain" />}
+      <button type="button" aria-label="Close" onClick={onClose} className="absolute right-3 top-3 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-white/15 text-white"><X size={22} /></button>
+      <div className="max-h-full w-full max-w-3xl overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        {m.kind === 'video' ? <div className="overflow-hidden rounded-xl"><VideoPlayer key={m.id} media={m} src={src} naturalAspect startUnmuted /></div> : <img src={src(m.id)} alt={m.caption ?? ''} className="mx-auto max-h-[85vh] w-auto rounded-xl object-contain" />}
         {m.caption && <p className="mt-2 text-center text-sm text-white/85">{m.caption}</p>}
         {items.length > 1 && <div className="mt-3 flex justify-center gap-1.5">{items.map((x, k) => <button key={x.id} type="button" aria-label={`Show ${k + 1}`} onClick={() => onIndex(k)} className={`h-2 rounded-full ${k === i ? 'w-6 bg-white' : 'w-2 bg-white/40'}`} />)}</div>}
       </div>
@@ -83,9 +83,9 @@ export default function ProfilePage({ business: b, mediaSrc, preview = false }: 
   </>);
 
   return (
-    <div className="min-h-[100dvh] bg-[#F6F4EF] font-sans text-[#0E1722]" style={{ ['--acc' as string]: theme.accent }}>
+    <div className={`${preview ? 'min-h-[100dvh]' : 'h-[100dvh] overflow-y-auto'} bg-[#F6F4EF] font-sans text-[#0E1722]`} style={{ ['--acc' as string]: theme.accent }}>
       <div className="mx-auto max-w-3xl pb-28 sm:pb-10 lg:grid lg:max-w-6xl lg:grid-cols-[340px_minmax(0,1fr)] lg:items-start lg:gap-5 lg:px-4">
-        <header className="bg-white sm:mt-4 sm:overflow-hidden sm:rounded-3xl sm:shadow-sm lg:sticky lg:top-4 lg:max-h-[calc(100dvh-2rem)] lg:overflow-y-auto">
+        <header className="bg-white sm:mt-4 sm:overflow-hidden sm:rounded-3xl sm:shadow-sm">
           <div className="relative h-32 w-full overflow-hidden sm:h-52 lg:h-28" style={{ background: `linear-gradient(135deg, ${theme.accent}, #0E1722)` }}>
             {b.cover && <img src={mediaSrc(b.cover.id)} alt="" className="h-full w-full object-cover" />}
             <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/30 to-transparent" />
@@ -118,7 +118,7 @@ export default function ProfilePage({ business: b, mediaSrc, preview = false }: 
           <nav aria-label={tx('Sections')} className="-mx-4 flex gap-4 overflow-x-auto border-y border-[#EEF0F3] bg-white px-4 py-3.5 sm:hidden" style={{ scrollbarWidth: 'none' }}>
             {highlights.map(([id, label, Icon]) => <a key={id} href={`#${id}`} className="flex w-[68px] shrink-0 flex-col items-center gap-1.5 text-center"><span className="rounded-full bg-gradient-to-tr from-[var(--acc)] to-[#DB4F8E] p-[2px]"><span className="flex h-[58px] w-[58px] items-center justify-center rounded-full border-2 border-white bg-[#F4F6F8] text-[#0E1722]"><Icon size={22} aria-hidden="true" /></span></span><span className="text-[11.5px] font-medium text-[#344054]">{tx(label)}</span></a>)}
           </nav>
-          {featured.length > 0 && <section id="watch" aria-label={tx('Featured videos')} className="-mx-4 scroll-mt-4 space-y-3 sm:mx-0"><h2 className={`${h2} px-4 sm:px-0`}>{tx('Watch me')}</h2><div className="grid items-start gap-px bg-[#EEF0F3] sm:grid-cols-2 sm:gap-3 sm:bg-transparent">{featured.map((m, k) => <div key={m.id} className={`overflow-hidden bg-black sm:rounded-2xl sm:shadow-sm ${k === 0 && featured.length % 2 === 1 ? 'sm:col-span-2' : ''}`}>{m.kind === 'video' ? <VideoPlayer media={m} src={mediaSrc} /> : <button type="button" onClick={() => setView({ items: featured, i: k })} className="block w-full"><img src={mediaSrc(m.id)} alt={m.caption ?? ''} className="w-full object-cover" /></button>}{m.caption && <p className="bg-white px-3.5 py-2.5 text-[14px] text-[#344054]">{m.caption}</p>}</div>)}</div></section>}
+          {featured.length > 0 && <section id="watch" aria-label={tx('Featured videos')} className="-mx-4 scroll-mt-4 space-y-3 sm:mx-0"><h2 className={`${h2} px-4 sm:px-0`}>{tx('Watch me')}</h2><div className="grid items-start gap-px bg-[#EEF0F3] sm:grid-cols-2 sm:gap-3 sm:bg-transparent">{featured.map((m, k) => <div key={m.id} className={`overflow-hidden bg-black sm:rounded-2xl sm:shadow-sm ${k === 0 && featured.length % 2 === 1 ? 'sm:col-span-2' : ''}`}>{m.kind === 'video' ? <VideoPlayer media={m} src={mediaSrc} naturalAspect /> : <button type="button" onClick={() => setView({ items: featured, i: k })} className="block w-full"><img src={mediaSrc(m.id)} alt={m.caption ?? ''} className="w-full object-contain" /></button>}{m.caption && <p className="bg-white px-3.5 py-2.5 text-[14px] text-[#344054]">{m.caption}</p>}</div>)}</div></section>}
 
           {b.about && <section className={panel}><h2 className={h2}>{tx('About me')}</h2><p className="mt-3 whitespace-pre-line text-[16px] leading-relaxed text-[#344054]">{b.about}</p></section>}
 
@@ -133,14 +133,14 @@ export default function ProfilePage({ business: b, mediaSrc, preview = false }: 
                 {(t.org || t.place) && <p className="text-[14.5px] text-[#475467]">{[t.org, t.place].filter(Boolean).join(' · ')}</p>}
                 {t.text && <p className="mt-2 whitespace-pre-line text-[15px] leading-relaxed text-[#344054]">{t.text}</p>}
                 {t.url && <a href={t.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1.5 text-[14px] font-semibold text-[#2F6FED]"><ExternalLink size={14} />{tx('Open the link')}</a>}
-                {all.length > 0 && <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">{all.map((m, i) => m.kind === 'video' && all.length === 1 ? <div key={m.id} className="col-span-2 overflow-hidden rounded-xl sm:col-span-3"><VideoPlayer media={m} src={mediaSrc} /></div> : (
+                {all.length > 0 && <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">{all.map((m, i) => m.kind === 'video' && all.length === 1 ? <div key={m.id} className="col-span-2 overflow-hidden rounded-xl sm:col-span-3"><VideoPlayer media={m} src={mediaSrc} naturalAspect /></div> : (
                   <button key={m.id} type="button" onClick={() => setView({ items: all, i })} className="relative aspect-square overflow-hidden rounded-xl bg-[#EEF0F3]" aria-label={m.kind === 'video' ? tx('Play') : tx('Open the picture')}>
-                    <img src={m.kind === 'video' ? `${mediaSrc(m.id)}/poster${m.video?.rev ? `?r=${m.video.rev}` : ''}` : mediaSrc(m.id)} alt={m.caption ?? ''} loading="lazy" className="h-full w-full object-cover" />
+                    <img src={m.kind === 'video' ? `${mediaSrc(m.id)}/poster${m.video?.rev ? `?r=${m.video.rev}` : ''}` : mediaSrc(m.id)} alt={m.caption ?? ''} loading="lazy" className="h-full w-full object-contain" />
                     {m.kind === 'video' && <span className="absolute inset-0 flex items-center justify-center bg-black/25 text-white"><span className="flex h-11 w-11 items-center justify-center rounded-full bg-black/60 text-xl">▶</span></span>}
                   </button>))}</div>}
               </li>); })}</ol></section>}
 
-          {photos.length > 0 && <section className={panel}><h2 className={h2}>{tx('Photos')}</h2><div className="mt-3 grid grid-cols-3 gap-2">{photos.map((m, i) => <button key={m.id} type="button" onClick={() => setView({ items: photos, i })} className="aspect-square overflow-hidden rounded-xl bg-[#EEF0F3]" aria-label={tx('Open the picture')}><img src={mediaSrc(m.id)} alt={m.caption ?? ''} loading="lazy" className="h-full w-full object-cover" /></button>)}</div></section>}
+          {photos.length > 0 && <section className={panel}><h2 className={h2}>{tx('Photos')}</h2><div className="mt-3 grid grid-cols-3 gap-2">{photos.map((m, i) => <button key={m.id} type="button" onClick={() => setView({ items: photos, i })} className="aspect-square overflow-hidden rounded-xl bg-[#EEF0F3]" aria-label={tx('Open the picture')}><img src={mediaSrc(m.id)} alt={m.caption ?? ''} loading="lazy" className="h-full w-full object-contain" /></button>)}</div></section>}
 
           {p.links.length > 0 && <section id="links" className={`${panel} scroll-mt-4`}><h2 className={h2}>{tx('Find me online')}</h2><ul className="mt-3 grid gap-2 sm:grid-cols-2">{p.links.map((l) => <li key={l.id}><a href={l.url} target="_blank" rel="noreferrer noopener" className="flex min-h-12 items-center gap-3 rounded-xl border border-[#E7EAEE] px-4 text-[15px] font-semibold hover:bg-[#F9FAFB]"><Link2 size={17} className="shrink-0 text-[#667085]" /><span className="truncate">{l.label}</span><ExternalLink size={14} className="ml-auto shrink-0 text-[#98A2B3]" /></a></li>)}</ul></section>}
 
