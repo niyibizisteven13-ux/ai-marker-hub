@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Award, BadgeCheck, Briefcase, CalendarDays, Check, ExternalLink, FileText, GraduationCap, Grid3x3, HeartHandshake, Link2, Loader2, Mail, MapPin, MessageCircle, Play, QrCode, Route, Send, Share2, Sparkles, Trophy, X } from 'lucide-react';
 import { VerifiedBadge } from '../VerifiedBadge';
 import { VideoPlayer } from './VideoPlayer';
@@ -56,6 +56,30 @@ function ContactForm({ slug, preview, accent, onAccent }: { slug: string; previe
   );
 }
 
+function SidebarBio({ about }: { about: string }) {
+  const tx = useTx();
+  const dialog = useRef<HTMLDialogElement>(null);
+
+  return (
+    <section className="hidden border-t border-[#EEF0F3] px-6 py-4 lg:block lg:[@media(max-height:720px)]:py-2.5">
+      <h2 className="border-l-4 border-[var(--acc)] pl-2 font-display text-lg font-semibold leading-tight">{tx('About me')}</h2>
+      <p className="mt-1.5 line-clamp-3 text-sm leading-snug text-[#344054] lg:[@media(max-height:720px)]:line-clamp-2">{about}</p>
+      <button type="button" aria-haspopup="dialog" className="mt-1.5 text-sm font-semibold underline underline-offset-4" onClick={() => dialog.current?.showModal()}>
+        {tx('Read full bio')}
+      </button>
+      <dialog ref={dialog} aria-label={tx('About me')} className="fixed inset-0 m-auto max-h-[85dvh] w-[calc(100%-2rem)] max-w-xl overflow-y-auto rounded-3xl bg-white p-6 text-[#0E1722] shadow-2xl backdrop:bg-black/50" onClick={(event) => { if (event.target === event.currentTarget) dialog.current?.close(); }}>
+        <div className="flex items-start justify-between gap-3">
+          <h2 className="font-display text-xl font-semibold">{tx('About me')}</h2>
+          <form method="dialog">
+            <button type="submit" autoFocus aria-label={tx('Close')} className="rounded-full p-2 hover:bg-[#F4F6F8]"><X size={18} /></button>
+          </form>
+        </div>
+        <p className="mt-3 whitespace-pre-line break-words leading-relaxed text-[#344054]">{about}</p>
+      </dialog>
+    </section>
+  );
+}
+
 export default function ProfilePage({ business: b, mediaSrc, preview = false }: { business: PublicBusiness; mediaSrc: (id: string) => string; preview?: boolean }) {
   const tx = useTx(); const theme = THEMES[b.theme] ?? THEMES.gold; const p = b.profile ?? { skills: [], links: [], featured: [], timeline: [] };
   const [posts, setPosts] = useState<PublicPost[]>([]); const [view, setView] = useState<{ items: PublicMedia[]; i: number } | null>(null); const [toast, setToast] = useState(''); const [qr, setQr] = useState(''); const [showQr, setShowQr] = useState(false);
@@ -86,14 +110,14 @@ export default function ProfilePage({ business: b, mediaSrc, preview = false }: 
     <div className={`${preview ? 'min-h-[100dvh]' : 'h-[100dvh] overflow-y-auto lg:overflow-clip'} bg-[#F6F4EF] font-sans text-[#0E1722]`} style={{ ['--acc' as string]: theme.accent }}>
       <div className={`mx-auto max-w-3xl pb-28 sm:pb-10 lg:grid lg:max-w-6xl lg:grid-cols-[340px_minmax(0,1fr)] lg:items-start lg:gap-5 lg:px-4 ${preview ? '' : 'lg:h-full lg:grid-rows-[minmax(0,1fr)] lg:pb-0'}`}>
         <header className="bg-white sm:mt-4 sm:overflow-hidden sm:rounded-3xl sm:shadow-sm">
-          <div className="relative h-32 w-full overflow-hidden sm:h-52 lg:h-28 lg:[@media(max-height:720px)]:h-20" style={{ background: `linear-gradient(135deg, ${theme.accent}, #0E1722)` }}>
+          <div className="relative h-32 w-full overflow-hidden sm:h-52 lg:h-28 lg:[@media(max-height:720px)]:h-16" style={{ background: `linear-gradient(135deg, ${theme.accent}, #0E1722)` }}>
             {b.cover && <img src={mediaSrc(b.cover.id)} alt="" className="h-full w-full object-cover" />}
             <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/30 to-transparent" />
           </div>
-          <div className="relative px-4 pb-4 sm:px-8 sm:pb-6 lg:[@media(max-height:720px)]:pb-3">
-            <div className="-mt-12 flex items-end justify-between gap-3 sm:-mt-14 lg:[@media(max-height:720px)]:-mt-10">
+          <div className="relative px-4 pb-4 sm:px-8 sm:pb-6 lg:[@media(max-height:720px)]:pb-2">
+            <div className="-mt-12 flex items-end justify-between gap-3 sm:-mt-14 lg:[@media(max-height:720px)]:-mt-8">
               <span className="rounded-full bg-gradient-to-tr from-[var(--acc)] via-[#DB4F8E] to-[#F59E0B] p-[3px] shadow-lg">
-                <span className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-full border-[4px] border-white text-3xl font-bold sm:h-28 sm:w-28 lg:[@media(max-height:720px)]:h-20 lg:[@media(max-height:720px)]:w-20" style={{ background: theme.accent, color: theme.on }}>{b.logo ? <img src={mediaSrc(b.logo.id)} alt={b.name} className="h-full w-full object-cover" /> : initials(b.name)}</span>
+                <span className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-full border-[4px] border-white text-3xl font-bold sm:h-28 sm:w-28 lg:[@media(max-height:720px)]:h-16 lg:[@media(max-height:720px)]:w-20" style={{ background: theme.accent, color: theme.on }}>{b.logo ? <img src={mediaSrc(b.logo.id)} alt={b.name} className="h-full w-full object-cover" /> : initials(b.name)}</span>
               </span>
               <div className="hidden gap-2 pb-1 sm:flex lg:hidden">{actions}</div>
             </div>
@@ -101,14 +125,15 @@ export default function ProfilePage({ business: b, mediaSrc, preview = false }: 
             {p.headline && <p className="mt-1 text-[16px] font-medium leading-snug text-[#344054] sm:text-[17px]">{p.headline}</p>}
             {(meta || p.location) && <p className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[14px] text-[#667085]">{meta && <span className="inline-flex items-center gap-1.5"><GraduationCap size={15} />{meta}</span>}{p.location && <span className="inline-flex items-center gap-1.5"><MapPin size={15} />{p.location}</span>}</p>}
             {p.openTo && <p className="mt-3 inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1.5 text-[13px] font-semibold text-emerald-800"><span className="h-2 w-2 rounded-full bg-emerald-500" />{p.openTo}</p>}
-            <dl className="mt-4 hidden grid-cols-3 divide-x divide-[#EEF0F3] rounded-2xl border border-[#EEF0F3] bg-[#FAFBFC] py-3 text-center sm:grid">
+            <dl className="mt-4 hidden grid-cols-3 divide-x divide-[#EEF0F3] rounded-2xl border border-[#EEF0F3] bg-[#FAFBFC] py-3 text-center sm:grid lg:[@media(max-height:720px)]:mt-2 lg:[@media(max-height:720px)]:py-1.5">
               {[[videoCount, 'Videos'], [timeline.length, 'Journey'], [posts.length, 'Posts']].map(([n, l]) => <div key={l as string}><dt className="sr-only">{tx(l as string)}</dt><dd className="font-display text-[22px] font-semibold leading-none">{n as number}</dd><p className="mt-1 text-[12px] font-medium text-[#667085]" aria-hidden="true">{tx(l as string)}</p></div>)}
             </dl>
-            <div className="mt-3 flex flex-wrap gap-2 sm:hidden lg:flex">{actions}</div>
+            <div className="mt-3 flex flex-wrap gap-2 sm:hidden lg:flex lg:[@media(max-height:720px)]:mt-2 lg:[@media(max-height:720px)]:[&>a]:min-h-9 lg:[@media(max-height:720px)]:[&>button]:min-h-9">{actions}</div>
           </div>
           <nav aria-label={tx('Sections')} className="hidden gap-4 overflow-x-auto border-t border-[#EEF0F3] px-4 py-3.5 sm:px-8 sm:flex lg:flex-wrap lg:gap-1.5 lg:overflow-visible lg:px-4 lg:py-2.5" style={{ scrollbarWidth: 'none' }}>
             {highlights.map(([id, label, Icon]) => <a key={id} href={`#${id}`} className="flex w-[68px] shrink-0 flex-col items-center gap-1.5 text-center lg:w-auto lg:flex-row lg:rounded-full lg:bg-[#F4F6F8] lg:px-2 lg:py-1"><span className="rounded-full bg-gradient-to-tr from-[var(--acc)] to-[#DB4F8E] p-[2px]"><span className="flex h-[58px] w-[58px] items-center justify-center rounded-full border-2 border-white bg-[#F4F6F8] text-[#0E1722] lg:h-6 lg:w-6"><Icon size={22} className="lg:h-3.5 lg:w-3.5" aria-hidden="true" /></span></span><span className="text-[11.5px] font-medium text-[#344054]">{tx(label)}</span></a>)}
           </nav>
+          {b.about && <SidebarBio about={b.about} />}
         </header>
 
         <main tabIndex={preview ? undefined : 0} className={`min-w-0 space-y-2.5 px-4 pt-2.5 sm:space-y-4 sm:px-0 sm:pt-4 ${preview ? '' : 'lg:h-full lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:pb-10'}`}>
@@ -120,7 +145,7 @@ export default function ProfilePage({ business: b, mediaSrc, preview = false }: 
           </nav>
           {featured.length > 0 && <section id="watch" aria-label={tx('Featured videos')} className="-mx-4 scroll-mt-4 space-y-3 sm:mx-0"><h2 className={`${h2} px-4 sm:px-0`}>{tx('Watch me')}</h2><div className="grid items-start gap-px bg-[#EEF0F3] sm:grid-cols-2 sm:gap-3 sm:bg-transparent">{featured.map((m, k) => <div key={m.id} className={`overflow-hidden bg-black sm:rounded-2xl sm:shadow-sm ${k === 0 && featured.length % 2 === 1 ? 'sm:col-span-2' : ''}`}>{m.kind === 'video' ? <VideoPlayer media={m} src={mediaSrc} naturalAspect /> : <button type="button" onClick={() => setView({ items: featured, i: k })} className="block w-full"><img src={mediaSrc(m.id)} alt={m.caption ?? ''} className="w-full object-contain" /></button>}{m.caption && <p className="bg-white px-3.5 py-2.5 text-[14px] text-[#344054]">{m.caption}</p>}</div>)}</div></section>}
 
-          {b.about && <section className={panel}><h2 className={h2}>{tx('About me')}</h2><p className="mt-3 whitespace-pre-line text-[16px] leading-relaxed text-[#344054]">{b.about}</p></section>}
+          {b.about && <section className={`${panel} lg:hidden`}><h2 className={h2}>{tx('About me')}</h2><p className="mt-3 whitespace-pre-line text-[16px] leading-relaxed text-[#344054]">{b.about}</p></section>}
 
           {p.skills.length > 0 && <section id="skills" className={`${panel} scroll-mt-4`}><h2 className={h2}>{tx('Skills')}</h2><ul className="mt-3 flex flex-wrap gap-2">{p.skills.map((s) => <li key={s} className="rounded-full px-3.5 py-1.5 text-[14px] font-medium" style={{ background: `${theme.accent}22`, color: '#0E1722' }}>{s}</li>)}</ul></section>}
 
