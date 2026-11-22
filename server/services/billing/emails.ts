@@ -1,3 +1,5 @@
+import type { PlanInfo } from './plans.js';
+
 /**
  * Billing emails: one branded layout (table-based, inline styles, works in Gmail and Outlook) and the
  * templates for receipts, failed payments, renewal reminders and expiry. Each returns subject, HTML and text.
@@ -64,6 +66,36 @@ export function receiptEmail(d: ReceiptData): Email {
       footnote: `${d.balanceNote ? `${esc(d.balanceNote)} ` : ''}Keep this email as your receipt. You can also find it in Settings → Billing.`,
     }),
     text: text([`Payment received. Thank you!`, `Receipt: ${d.receiptNumber}`, `Date: ${day(d.paidAt)}`, `Item: ${d.item}`, `Amount: ${amount} (about ${usd(d.amountUsd)})`, `Paid with MTN Mobile Money ${d.phoneMasked}`, d.transactionId && `MoMo transaction ID: ${d.transactionId}`, d.grant, d.balanceNote, appUrl()]),
+  };
+}
+
+export function planGrantedEmail({ name, plan, endDate }: { name: string; plan: PlanInfo; endDate: Date }): Email {
+  const { limits } = plan;
+  const number = (value: number) => value.toLocaleString('en-GB');
+  const credits = [limits.fiveHours, limits.daily, limits.weekly, limits.monthly].map(number);
+  const actions = limits.perDay;
+  const items: Array<[string, string]> = [
+    ['Access ends (Kigali time)', endDate.toLocaleString('en-GB', { dateStyle: 'long', timeStyle: 'short', timeZone: 'Africa/Kigali' })],
+    ['AI credits', `${credits[0]} per 5 hours · ${credits[1]} per day · ${credits[2]} per week · ${credits[3]} per month`],
+    ['Daily feature limits', `${number(actions.tool)} tool actions · ${number(actions.vision)} vision actions · ${number(actions.artifact)} artifacts · ${number(actions.marking)} marking actions`],
+    ['Uploads', `${number(limits.maxUploadMb)} MB per file · ${number(limits.maxAttachments)} attachments per message`],
+    ['Storage', `${number(limits.storageMb)} MB`],
+    ['Cross-chat memory', limits.memory ? `Up to ${number(limits.memoryItems)} items` : 'Unavailable'],
+    ['Automatic exam marking', limits.autonomousMarking ? 'Available' : 'Unavailable'],
+  ];
+  const subject = `Your Bwenge ${plan.name} plan is active`;
+  const access = 'Sign in with the email address that received this message to use your plan.';
+  return {
+    subject,
+    html: layout({
+      preheader: subject,
+      title: subject,
+      intro: `Hi ${esc(name || 'there')}, a Bwenge administrator granted you access to ${esc(plan.name)}. ${access}`,
+      body: rows(items.map(([label, value]) => [label, esc(value)])),
+      cta: { label: 'Open Bwenge', url: appUrl() },
+      footnote: 'Bwenge does not charge you for this grant.',
+    }),
+    text: text([subject, `Hi ${name || 'there'}, ${access}`, ...items.map(([label, value]) => `${label}: ${value}`), 'Bwenge does not charge you for this grant.', appUrl()]),
   };
 }
 
