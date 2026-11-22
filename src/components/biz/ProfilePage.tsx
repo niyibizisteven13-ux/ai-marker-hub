@@ -83,17 +83,17 @@ export default function ProfilePage({ business: b, mediaSrc, preview = false }: 
   </>);
 
   return (
-    <div className={`${preview ? 'min-h-[100dvh]' : 'h-[100dvh] overflow-y-auto'} bg-[#F6F4EF] font-sans text-[#0E1722]`} style={{ ['--acc' as string]: theme.accent }}>
-      <div className="mx-auto max-w-3xl pb-28 sm:pb-10 lg:grid lg:max-w-6xl lg:grid-cols-[340px_minmax(0,1fr)] lg:items-start lg:gap-5 lg:px-4">
+    <div className={`${preview ? 'min-h-[100dvh]' : 'h-[100dvh] overflow-y-auto lg:overflow-clip'} bg-[#F6F4EF] font-sans text-[#0E1722]`} style={{ ['--acc' as string]: theme.accent }}>
+      <div className={`mx-auto max-w-3xl pb-28 sm:pb-10 lg:grid lg:max-w-6xl lg:grid-cols-[340px_minmax(0,1fr)] lg:items-start lg:gap-5 lg:px-4 ${preview ? '' : 'lg:h-full lg:grid-rows-[minmax(0,1fr)] lg:pb-0'}`}>
         <header className="bg-white sm:mt-4 sm:overflow-hidden sm:rounded-3xl sm:shadow-sm">
-          <div className="relative h-32 w-full overflow-hidden sm:h-52 lg:h-28" style={{ background: `linear-gradient(135deg, ${theme.accent}, #0E1722)` }}>
+          <div className="relative h-32 w-full overflow-hidden sm:h-52 lg:h-28 lg:[@media(max-height:720px)]:h-20" style={{ background: `linear-gradient(135deg, ${theme.accent}, #0E1722)` }}>
             {b.cover && <img src={mediaSrc(b.cover.id)} alt="" className="h-full w-full object-cover" />}
             <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/30 to-transparent" />
           </div>
-          <div className="relative px-4 pb-4 sm:px-8 sm:pb-6">
-            <div className="-mt-12 flex items-end justify-between gap-3 sm:-mt-14">
+          <div className="relative px-4 pb-4 sm:px-8 sm:pb-6 lg:[@media(max-height:720px)]:pb-3">
+            <div className="-mt-12 flex items-end justify-between gap-3 sm:-mt-14 lg:[@media(max-height:720px)]:-mt-10">
               <span className="rounded-full bg-gradient-to-tr from-[var(--acc)] via-[#DB4F8E] to-[#F59E0B] p-[3px] shadow-lg">
-                <span className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-full border-[4px] border-white text-3xl font-bold sm:h-28 sm:w-28" style={{ background: theme.accent, color: theme.on }}>{b.logo ? <img src={mediaSrc(b.logo.id)} alt={b.name} className="h-full w-full object-cover" /> : initials(b.name)}</span>
+                <span className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-full border-[4px] border-white text-3xl font-bold sm:h-28 sm:w-28 lg:[@media(max-height:720px)]:h-20 lg:[@media(max-height:720px)]:w-20" style={{ background: theme.accent, color: theme.on }}>{b.logo ? <img src={mediaSrc(b.logo.id)} alt={b.name} className="h-full w-full object-cover" /> : initials(b.name)}</span>
               </span>
               <div className="hidden gap-2 pb-1 sm:flex lg:hidden">{actions}</div>
             </div>
@@ -106,12 +106,12 @@ export default function ProfilePage({ business: b, mediaSrc, preview = false }: 
             </dl>
             <div className="mt-3 flex flex-wrap gap-2 sm:hidden lg:flex">{actions}</div>
           </div>
-          <nav aria-label={tx('Sections')} className="hidden gap-4 overflow-x-auto border-t border-[#EEF0F3] px-4 py-3.5 sm:px-8 sm:flex lg:flex-wrap lg:gap-x-3 lg:overflow-visible lg:px-4" style={{ scrollbarWidth: 'none' }}>
-            {highlights.map(([id, label, Icon]) => <a key={id} href={`#${id}`} className="flex w-[68px] shrink-0 flex-col items-center gap-1.5 text-center"><span className="rounded-full bg-gradient-to-tr from-[var(--acc)] to-[#DB4F8E] p-[2px]"><span className="flex h-[58px] w-[58px] items-center justify-center rounded-full border-2 border-white bg-[#F4F6F8] text-[#0E1722]"><Icon size={22} aria-hidden="true" /></span></span><span className="text-[11.5px] font-medium text-[#344054]">{tx(label)}</span></a>)}
+          <nav aria-label={tx('Sections')} className="hidden gap-4 overflow-x-auto border-t border-[#EEF0F3] px-4 py-3.5 sm:px-8 sm:flex lg:flex-wrap lg:gap-1.5 lg:overflow-visible lg:px-4 lg:py-2.5" style={{ scrollbarWidth: 'none' }}>
+            {highlights.map(([id, label, Icon]) => <a key={id} href={`#${id}`} className="flex w-[68px] shrink-0 flex-col items-center gap-1.5 text-center lg:w-auto lg:flex-row lg:rounded-full lg:bg-[#F4F6F8] lg:px-2 lg:py-1"><span className="rounded-full bg-gradient-to-tr from-[var(--acc)] to-[#DB4F8E] p-[2px]"><span className="flex h-[58px] w-[58px] items-center justify-center rounded-full border-2 border-white bg-[#F4F6F8] text-[#0E1722] lg:h-6 lg:w-6"><Icon size={22} className="lg:h-3.5 lg:w-3.5" aria-hidden="true" /></span></span><span className="text-[11.5px] font-medium text-[#344054]">{tx(label)}</span></a>)}
           </nav>
         </header>
 
-        <main className="min-w-0 space-y-2.5 px-4 pt-2.5 sm:space-y-4 sm:px-0 sm:pt-4">
+        <main tabIndex={preview ? undefined : 0} className={`min-w-0 space-y-2.5 px-4 pt-2.5 sm:space-y-4 sm:px-0 sm:pt-4 ${preview ? '' : 'lg:h-full lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:pb-10'}`}>
           {posts.length > 0 && <section id="updates" className="-mx-4 scroll-mt-4 space-y-3 sm:mx-0"><h2 className={`${h2} px-4 sm:px-1`}>{tx('Updates')}</h2>
             <FeedSection b={b} posts={posts} mediaSrc={mediaSrc} preview={preview} onOrder={() => undefined} onOpen={(items, i) => setView({ items, i })} onShare={(post) => { const u = `${url}?post=${post.id}#post-${post.id}`; track('share'); void (navigator.share ? navigator.share({ title: b.name, url: u }).catch(() => undefined) : navigator.clipboard.writeText(u).then(() => say(tx('Link copied')))); }} /></section>}
 
