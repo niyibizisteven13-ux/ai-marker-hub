@@ -1,8 +1,8 @@
 import { hasBadge, setBadge } from '../services/billing/badge.js';
-import { planGrantedEmail } from '../services/billing/emails.js';
+import { badgeGrantedEmail, planGrantedEmail, type Email } from '../services/billing/emails.js';
 import { EmailService } from '../services/EmailService.js';
 import { approveManualPayment, MANUAL_PAYMENT, startManualPayment } from '../services/billing/manual.js';
-import { BillingError, notifyReceipt, receiptDelivery } from '../services/billing/payments.js';
+import { BillingError, notifyReceipt, receiptDelivery, renderPaidReceipt } from '../services/billing/payments.js';
 import { randomUUID } from 'node:crypto';
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
@@ -25,6 +25,13 @@ const router = Router();
 const db = prisma as any;
 const adminId = (req: Request) => (req as any).user?.userId as string;
 const fail = (res: Response, e: any) => (e instanceof z.ZodError ? res.status(400).json({ error: 'Invalid request.', details: e.issues.slice(0, 5) }) : e instanceof BillingError ? res.status(e.status).json({ error: e.message, code: e.code }) : e?.code === 'P2002' ? res.status(409).json({ error: 'This MoMo transaction has already been used.' }) : res.status(500).json({ error: e?.message ?? 'Failed.' }));
+
+async function deliverGrant(user: { email: string | null; name: string }, message: Email) {
+  const email = user.email && !user.email.toLowerCase().endsWith('@users.invalid') ? user.email : null;
+  if (!email) return { status: 'unavailable', email } as const;
+  const result = await EmailService.getInstance().sendEmail({ to: email, ...message }).catch(() => null);
+  return { status: result?.success ? 'sent' : 'failed', email };
+}
 
 router.get('/payment-method', async (_req, res) => {
   try { res.json({ success: true, automaticEnabled: false, manual: MANUAL_PAYMENT }); } catch (e) { fail(res, e); }
@@ -49,15 +56,29 @@ router.post('/users/:id/manual-payment', async (req, res) => {
 router.post('/users/:id/badge', async (req, res) => {
   try {
     const { active } = z.object({ active: z.boolean() }).strict().parse(req.body);
-    if (!(await db.user.findUnique({ where: { id: req.params.id } }))) return res.status(404).json({ error: 'User not found.' });
-    await setBadge(req.params.id, active, adminId(req));
-    logger.info('[admin billing] verified badge changed', { admin: adminId(req), userId: req.params.id, active }); res.json({ success: true, active });
+    const user = await db.user.findUnique({ where: { id: req.params.id }, select: { email: true, name: true } });
+    if (!user) return res.status(404).json({ error: 'User not found.' });
+    const wasVerified = await hasBadge(req.params.id);
+    if (wasVerified !== active) await setBadge(req.params.id, active, adminId(req));
+    const grantEmail = active && !wasVerified ? await deliverGrant(user, badgeGrantedEmail(user.name)) : undefined;
+    logger.info('[admin billing] verified badge changed', { admin: adminId(req), userId: req.params.id, active });
+    res.json({ success: true, active, grantEmail });
   } catch (e) { fail(res, e); }
 });
 router.post('/payments/:id/approve', async (req, res) => {
   try {
     const { transactionId } = z.object({ transactionId: z.string().trim().min(3).max(100).regex(/^[a-zA-Z0-9-]+$/) }).strict().parse(req.body);
     res.json({ success: true, payment: await approveManualPayment(req.params.id, transactionId.toUpperCase(), adminId(req)) });
+  } catch (e) { fail(res, e); }
+});
+router.get('/payments/:id/receipt', async (req, res) => {
+  try {
+    const p = await db.billingPayment.findUnique({ where: { id: req.params.id } });
+    if (!p?.fulfilledAt || p.status !== 'SUCCESSFUL' || !p.receiptNumber) return res.status(404).json({ error: 'Paid receipt not found.' });
+    const user = await db.user.findUnique({ where: { id: p.userId }, select: { name: true } });
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; img-src data:");
+    res.type('html').send(renderPaidReceipt(p, user?.name ?? '').html);
   } catch (e) { fail(res, e); }
 });
 router.post('/payments/:id/receipt', async (req, res) => {
@@ -216,11 +237,13 @@ router.put('/sales', async (req, res) => {
 
 router.get('/payments', async (req, res) => {
   try {
-    const q = z.object({ status: z.enum(['PENDING', 'SUCCESSFUL', 'FAILED', 'EXPIRED']).optional(), limit: z.coerce.number().int().min(1).max(200).optional() }).parse(req.query);
-    const rows = await db.billingPayment.findMany({ where: q.status ? { status: q.status } : {}, orderBy: { createdAt: 'desc' }, take: q.limit ?? 100 });
+    const q = z.object({ purpose: z.enum(['STARTER', 'PRO', 'PLUS', 'GO_PACK', 'VERIFIED_BADGE']).optional(), status: z.enum(['PENDING', 'SUCCESSFUL', 'FAILED', 'EXPIRED']).optional(), limit: z.coerce.number().int().min(1).max(200).optional(), page: z.coerce.number().int().min(1).max(100000).default(1) }).parse(req.query);
+    const limit = q.limit ?? 100;
+    const matches = await db.billingPayment.findMany({ where: { status: q.status, purpose: q.purpose }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], skip: (q.page - 1) * limit, take: limit + 1 });
+    const rows = matches.slice(0, limit);
     const users = await db.user.findMany({ where: { id: { in: [...new Set(rows.map((r: any) => r.userId))] } }, select: { id: true, email: true, name: true } });
     const byId = new Map(users.map((u: any) => [u.id, u]));
-    res.json({ success: true, payments: await Promise.all(rows.map(async (r: any) => ({ ...publicPayment(r), receiptEmail: await receiptDelivery(r), user: byId.get(r.userId) ?? { id: r.userId } }))) });
+    res.json({ success: true, hasMore: matches.length > limit, payments: await Promise.all(rows.map(async (r: any) => ({ ...publicPayment(r), receiptEmail: await receiptDelivery(r), user: byId.get(r.userId) ?? { id: r.userId } }))) });
   } catch (e) { fail(res, e); }
 });
 
@@ -278,18 +301,9 @@ router.post('/users/:id/plan', async (req, res) => {
     void import('../services/platformContext.js').then((m) => m.invalidatePlatformContext(userId)).catch(() => undefined);
     const plan = await planFor(userId);
     if (!endDate) return res.json({ success: true, plan: plan.id });
-    const email = user.email && !String(user.email).toLowerCase().endsWith('@users.invalid') ? String(user.email) : null;
-    let status: 'sent' | 'failed' | 'unavailable' = 'unavailable';
-    if (email) {
-      try {
-        const result = await EmailService.getInstance().sendEmail({ to: email, ...planGrantedEmail({ name: user.name, plan, endDate }) });
-        status = result.success ? 'sent' : 'failed';
-      } catch {
-        status = 'failed';
-      }
-      if (status === 'failed') logger.warn('[admin billing] plan grant email failed', { userId, plan: plan.id });
-    }
-    res.json({ success: true, plan: plan.id, grantEmail: { status, email } });
+    const grantEmail = await deliverGrant(user, planGrantedEmail({ name: user.name, plan, endDate }));
+    if (grantEmail.status === 'failed') logger.warn('[admin billing] plan grant email failed', { userId, plan: plan.id });
+    res.json({ success: true, plan: plan.id, grantEmail });
   } catch (e) { fail(res, e); }
 });
 

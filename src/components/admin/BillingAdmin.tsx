@@ -38,6 +38,9 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
   const [eff, setEff] = useState<Effective | null>(null);
   const [payments, setPayments] = useState<AdminPayment[]>([]);
   const [status, setStatus] = useState('');
+  const [purpose, setPurpose] = useState('');
+  const [paymentPage, setPaymentPage] = useState(1);
+  const [hasMorePayments, setHasMorePayments] = useState(false);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [q, setQ] = useState('');
   const [health, setHealth] = useState<{ ok: boolean; steps: Array<{ step: string; ok: boolean; detail: string }> } | null>(null);
@@ -49,7 +52,14 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
     setOverview(o);
     setEff(s.effective);
   }, []);
-  const loadPayments = useCallback(async () => setPayments((await api<{ payments: AdminPayment[] }>(`/api/admin/billing/payments${status ? `?status=${status}` : ''}`)).payments), [status]);
+  const loadPayments = useCallback(async () => {
+    const query = new URLSearchParams({ page: String(paymentPage), limit: '25' });
+    if (status) query.set('status', status);
+    if (purpose) query.set('purpose', purpose);
+    const result = await api<{ payments: AdminPayment[]; hasMore: boolean }>(`/api/admin/billing/payments?${query}`);
+    setPayments(result.payments);
+    setHasMorePayments(result.hasMore);
+  }, [status, purpose, paymentPage]);
   const loadUsers = useCallback(async () => setUsers((await api<{ users: AdminUser[] }>(`/api/admin/billing/users?q=${encodeURIComponent(q)}`)).users), [q]);
 
   useEffect(() => { void loadOverview().catch((e) => notify(e.message, true)); }, [loadOverview, notify]);
@@ -60,9 +70,24 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
     setBusy(true);
     try { const result: any = await fn(); const receipt = result?.payment?.receiptEmail; const grant = result?.grantEmail;
       if (grant) {
-        const detail = grant.status === 'sent' ? `Plan details emailed to ${grant.email}.` : grant.status === 'failed' ? `Email delivery failed for ${grant.email}.` : 'This account has no login email.';
+        const detail = grant.status === 'sent' ? `Confirmation emailed to ${grant.email}.` : grant.status === 'failed' ? `Email delivery failed for ${grant.email}.` : 'This account has no login email.';
         notify(`${ok}. ${detail}`, grant.status === 'failed');
       } else notify(receipt ? receipt.status === 'sent' ? `Purchase active. Receipt sent${receipt.email ? ` to ${receipt.email}` : ''}.` : receipt.status === 'pending' ? `Purchase active. Receipt to ${receipt.email} is pending; delivery will retry.` : 'Purchase active. Receipt email unavailable: this account has no login email.' : ok); await Promise.all([loadOverview(), loadPayments(), loadUsers()]); } catch (e) { notify((e as Error).message, true); } finally { setBusy(false); }
+  };
+
+  const downloadReceipt = async (p: AdminPayment) => {
+    try {
+      const response = await authFetch(`/api/admin/billing/payments/${p.id}/receipt`);
+      if (!response.ok) throw new Error('The receipt could not be downloaded.');
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${p.receiptNumber}.html`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e) {
+      notify((e as Error).message, true);
+    }
   };
 
   const changeBadge = (u: AdminUser) => {
@@ -249,7 +274,12 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
       <div className={`${card} space-y-3`}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="flex items-center gap-2 text-base font-semibold text-white"><Banknote size={16} /> Mobile Money payments</h3><button className={`${btn} bg-[#1A2240] text-white`} disabled={busy} onClick={() => void run(async () => {}, 'Payments refreshed')}>Refresh</button>
-          <select className={`${input} w-auto`} value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Payment status">
+          <select className={`${input} w-auto`} value={purpose} onChange={(e) => { setPurpose(e.target.value); setPaymentPage(1); }} aria-label="Purchase type">
+            <option value="">All purchase types</option>
+            {SOLD.map((id) => <option key={id} value={id}>{eff?.plans[id].name ?? id}</option>)}
+            <option value="GO_PACK">GO credits</option><option value="VERIFIED_BADGE">Verified badge</option>
+          </select>
+          <select className={`${input} w-auto`} value={status} onChange={(e) => { setStatus(e.target.value); setPaymentPage(1); }} aria-label="Payment status">
             <option value="">All statuses</option><option value="SUCCESSFUL">Paid</option><option value="PENDING">Pending</option><option value="FAILED">Failed</option><option value="EXPIRED">Not approved</option>
           </select>
         </div>
@@ -261,11 +291,11 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
                 <tr key={p.id} className="border-t border-[#1E2848] text-[#C9D3F0]">
                   <td className="px-2 py-2">{new Date(p.paidAt ?? p.createdAt).toLocaleString()}</td>
                   <td className="px-2">{p.user?.email ?? '—'}<div className="mt-1 select-all break-all font-mono text-[10px] text-[#8A97C2]">{p.id}</div></td>
-                  <td className="px-2">{p.purpose === 'GO_PACK' ? `GO · ${p.credits} credits` : `${p.purpose} · ${p.months} mo`}</td>
+                  <td className="px-2">{p.purpose === 'GO_PACK' ? `GO · ${p.credits} credits` : p.purpose === 'VERIFIED_BADGE' ? 'Verified badge' : `${eff?.plans[p.purpose as PlanId]?.name ?? p.purpose} · ${p.months} mo`}</td>
                   <td className="px-2 tabular-nums">{p.amountRwf.toLocaleString('en-US')} {p.currency}</td>
                   <td className="px-2">{p.phoneMasked}</td>
                   <td className="px-2"><span className={`rounded-md px-1.5 py-0.5 font-semibold ${p.status === 'SUCCESSFUL' ? 'bg-emerald-500/15 text-emerald-300' : p.status === 'PENDING' ? 'bg-amber-500/15 text-amber-300' : 'bg-rose-500/15 text-rose-300'}`}>{p.status}</span>{p.reason ? <span className="ml-1 text-[#8A97C2]">{p.reason}</span> : null}</td>
-                  <td className="px-2">{p.receiptNumber ?? '—'}{p.status === 'SUCCESSFUL' && <div className="mt-1 text-[10px]">{p.emailedAt ? `Receipt sent${p.receiptEmail?.email ? ` to ${p.receiptEmail.email}` : ''}` : p.receiptEmail?.email ? `Receipt to ${p.receiptEmail.email} pending` : 'Receipt email unavailable'}{p.receiptEmail?.sentAt && <div>{new Date(p.receiptEmail.sentAt).toLocaleString()}</div>}{!p.emailedAt && <button className="ml-2 underline" disabled={busy} onClick={() => void run(() => api(`/api/admin/billing/payments/${p.id}/receipt`, { method: 'POST' }), 'Receipt delivery retried; check the email status.')}>Retry email</button>}</div>}</td>
+                  <td className="px-2">{p.status === 'SUCCESSFUL' && p.receiptNumber ? <button type="button" className="font-semibold text-sky-300 underline" onClick={() => void downloadReceipt(p)} aria-label={`Download receipt ${p.receiptNumber}`}>{p.receiptNumber}</button> : '—'}{p.status === 'SUCCESSFUL' && <div className="mt-1 text-[10px]">{p.emailedAt ? `Receipt sent${p.receiptEmail?.email ? ` to ${p.receiptEmail.email}` : ''}` : p.receiptEmail?.email ? `Receipt to ${p.receiptEmail.email} pending` : 'Receipt email unavailable'}{p.receiptEmail?.sentAt && <div>{new Date(p.receiptEmail.sentAt).toLocaleString()}</div>}{!p.emailedAt && <button className="ml-2 underline" disabled={busy} onClick={() => void run(() => api(`/api/admin/billing/payments/${p.id}/receipt`, { method: 'POST' }), 'Receipt delivery retried; check the email status.')}>Retry email</button>}</div>}</td>
                   <td className="px-2">{p.status === 'PENDING' && p.provider === 'MTN_MOMO_MANUAL' && <button className={`${btn} bg-emerald-500/15 text-emerald-300`} disabled={busy} onClick={() => { const transactionId = window.prompt(`Verify ${rwf(p.amountRwf)} received for ${p.user?.email}. Enter the MTN transaction ID from the payment proof:`); if (transactionId?.trim()) void run(() => api(`/api/admin/billing/payments/${p.id}/approve`, { method: 'POST', body: JSON.stringify({ transactionId: transactionId.trim() }) }), 'Purchase activated. Check receipt email status.'); }}>Verify & activate</button>}{p.status === 'PENDING' && p.provider !== 'MTN_MOMO_MANUAL' && <button className={`${btn} bg-[#1A2240] text-[#C9D3F0]`} disabled={busy} onClick={() => void run(() => api(`/api/admin/billing/payments/${p.id}/recheck`, { method: 'POST' }), 'Checked with MTN')}><RefreshCw size={12} /> Check</button>}</td>
                 </tr>
               ))}
@@ -274,6 +304,11 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
           </table>
         </div>
       </div>
+      {(paymentPage > 1 || hasMorePayments) && <nav aria-label="Payment pages" className="flex items-center justify-end gap-3 text-sm text-[#C9D3F0]">
+        <button type="button" className={btn} disabled={paymentPage <= 1 || busy} onClick={() => setPaymentPage((page) => page - 1)}>Previous</button>
+        <span>Page {paymentPage}</span>
+        <button type="button" className={btn} disabled={!hasMorePayments || busy} onClick={() => setPaymentPage((page) => page + 1)}>Next</button>
+      </nav>}
       {busy && <div className="fixed bottom-6 right-6 rounded-full bg-[#1A2240] p-2 text-white shadow-lg"><Loader2 size={18} className="animate-spin" /></div>}
     </div>
   );

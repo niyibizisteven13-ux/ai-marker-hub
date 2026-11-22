@@ -12,6 +12,32 @@ export default function BizPublicPage({ slug }: { slug: string }) {
     publicApi.page(slug).then((p) => { if (alive) { setState(p); document.title = `${p.business.name} · Bwenge`; } }).catch((e) => { if (alive) setState(e instanceof BizApiError && e.status === 404 ? 'missing' : 'error'); });
     return () => { alive = false; };
   }, [slug]);
+  useEffect(() => {
+    let alive = true;
+    let pending = false;
+    const refreshBadge = async () => {
+      if (pending || document.visibilityState !== 'visible') return;
+      pending = true;
+      try {
+        const { verified } = await publicApi.badge(slug);
+        if (alive) setState((current) => {
+          if (typeof current === 'string' || current.business.slug !== slug || Boolean(current.business.verified) === verified) return current;
+          return { ...current, business: { ...current.business, verified: verified ? true : undefined } };
+        });
+      } catch {
+        // Keep the last visible state if a refresh fails.
+      } finally {
+        pending = false;
+      }
+    };
+    const timer = window.setInterval(refreshBadge, 15_000);
+    document.addEventListener('visibilitychange', refreshBadge);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', refreshBadge);
+    };
+  }, [slug]);
   // The business's own installable app: while its page is open, the browser sees this business's manifest, colour and name.
   useEffect(() => {
     if (typeof state === 'string') return; const b = state.business; const prev: Array<[Element, string]> = [];

@@ -11,6 +11,7 @@ async function read<T>(res: Response): Promise<T> {
 const json = (method: string, body?: unknown): RequestInit => ({ method, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
 
 export const publicApi = {
+  badge: async (slug: string) => read<{ verified: boolean }>(await fetch(getApiUrl(`/api/biz/public/${encodeURIComponent(slug)}/badge`), { cache: 'no-store' })),
   page: async (slug: string) => read<{ business: PublicBusiness; openNow: boolean | null }>(await fetch(getApiUrl(`/api/biz/public/${encodeURIComponent(slug)}`))),
   mediaUrl: (slug: string, id: string) => getApiUrl(`/api/biz/public/${encodeURIComponent(slug)}/media/${encodeURIComponent(id)}`),
   track: (slug: string, kind: 'whatsapp' | 'call' | 'share') => { try { const body = JSON.stringify({ kind }); const url = getApiUrl(`/api/biz/public/${encodeURIComponent(slug)}/track`); if (!navigator.sendBeacon?.(url, new Blob([body], { type: 'application/json' }))) void fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true }); } catch { /* counting never blocks a tap */ } },

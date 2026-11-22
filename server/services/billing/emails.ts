@@ -69,6 +69,21 @@ export function receiptEmail(d: ReceiptData): Email {
   };
 }
 
+export function badgeGrantedEmail(name: string): Email {
+  const subject = 'Your Bwenge Verified badge is active';
+  const message = 'Your blue check now appears next to your name on your public Bwenge profile and business pages.';
+  return {
+    subject,
+    html: layout({
+      preheader: subject, title: subject,
+      intro: `Hi ${esc(name || 'there')}, a Bwenge administrator granted you the Verified badge.`,
+      body: `<p>${message}</p>`,
+      cta: { label: 'Open Bwenge', url: appUrl() },
+    }),
+    text: text([subject, `Hi ${name || 'there'}, ${message}`, appUrl()]),
+  };
+}
+
 export function planGrantedEmail({ name, plan, endDate }: { name: string; plan: PlanInfo; endDate: Date }): Email {
   const { limits } = plan;
   const number = (value: number) => value.toLocaleString('en-GB');

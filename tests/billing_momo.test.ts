@@ -615,3 +615,22 @@ test('verified badge: 1,000 RWF once, granted by the same manual approval, never
   await settle(); const mail = mailsTo(userId).map((m) => `${m.subject}\n${m.text ?? ''}${m.html ?? ''}`).join('\n'); assert.match(mail, /Verified badge/); assert.ok(!/Pro plan is active|plan is active until/.test(mail), 'the receipt does not talk about a plan');
   await setBadge(userId, false, 'admin-1'); assert.equal(await hasBadge(userId), false, 'an admin can take it back'); await setBadge(userId, true, 'admin-1'); assert.equal(await hasBadge(userId), true);
 });
+
+test('official receipt uses the recorded transaction and labels every purchase type', async () => {
+  const { renderPaidReceipt } = await import('../server/services/billing/payments.js');
+  const kinds = {
+    STARTER: 'Starter plan', PRO: 'Pro plan', PLUS: 'Pro Plus plan',
+    GO_PACK: 'GO credits', VERIFIED_BADGE: 'Verified badge',
+  };
+  for (const [purpose, label] of Object.entries(kinds)) {
+    const mail = renderPaidReceipt({
+      purpose, months: 2, credits: 100, receiptNumber: 'BW-001',
+      fulfilledAt: '2026-11-22T12:00:00Z', amountRwf: 1000, amountUsd: 0.68,
+      currency: 'RWF', phoneMasked: '***123', financialTransactionId: 'MTN-42',
+    }, '<Elie>');
+    assert.ok(mail.subject.includes(label));
+    assert.ok(mail.html.includes('BW-001') && mail.html.includes('MTN-42'));
+    assert.ok(mail.html.includes('&lt;Elie&gt;'));
+    assert.ok(mail.text.includes('1,000 RWF'));
+  }
+});

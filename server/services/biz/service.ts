@@ -594,6 +594,11 @@ export function createBizService(deps: Deps) {
 
     /* ------------------------------------------------------------ public */
     /** The public page, and one more view. Null when there is no such live page (an unpublished or hidden page looks like a missing one). */
+    async publicBadge(slug: string): Promise<boolean | null> {
+      const b = await publicLive(slug);
+      if (!b) return null;
+      return deps.isVerified ? deps.isVerified(b.ownerId) : false;
+    },
     async publicBySlug(slug: string, opts: { count?: boolean } = {}): Promise<PublicBusiness | null> {
       const b = await publicLive(slug); if (!b) return null; if (opts.count) await bump(b.id, 'views').catch(() => undefined); return withPay(b, publicView(b));
     },
