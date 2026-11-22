@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { prisma } from '../db.js';
 import { requireAuth } from '../../production/auth.js';
 import { PLANS, SOLD_PLANS, currentGoPacks, fxUsdRwf, refreshBillingSettings } from '../services/billing/plans.js';
-import { BillingError, PURPOSES, billingState, checkPayment, publicPayment, type Purpose } from '../services/billing/payments.js';
+import { BillingError, PURPOSES, billingState, checkPayment, publicPayment, renderPaidReceipt, type Purpose } from '../services/billing/payments.js';
 import { usageSummary } from '../services/billing/usage.js';
 import { payRef } from '../services/billing/payRef.js';
 
@@ -93,11 +93,10 @@ router.get('/payments/:id', async (req, res) => {
 router.get('/payments/:id/receipt', async (req, res) => {
   try {
     const p = await db.billingPayment.findUnique({ where: { id: req.params.id } });
-    if (!p || p.userId !== userIdOf(req) || p.status !== 'SUCCESSFUL') return res.status(404).json({ error: 'Receipt not found.' });
-    const { receiptEmail } = await import('../services/billing/emails.js');
+    if (!p || p.userId !== userIdOf(req) || p.status !== 'SUCCESSFUL' || !p.fulfilledAt || !p.receiptNumber) return res.status(404).json({ error: 'Receipt not found.' });
     const user = await db.user.findUnique({ where: { id: p.userId }, select: { name: true } });
-    const item = p.purpose === 'VERIFIED_BADGE' ? 'Verified badge · one time' : p.purpose === 'GO_PACK' ? `GO credits · ${p.credits} credits` : `${PLANS[p.purpose as keyof typeof PLANS]?.name ?? p.purpose} plan · ${p.months} month${p.months > 1 ? 's' : ''}`;
-    const r = receiptEmail({ name: user?.name ?? '', receiptNumber: p.receiptNumber, paidAt: new Date(p.fulfilledAt), item, amountRwf: p.amountRwf, amountUsd: p.amountUsd, currency: p.currency, phoneMasked: p.phoneMasked, transactionId: p.financialTransactionId, grant: '' });
+    const r = renderPaidReceipt(p, user?.name ?? '');
+    res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; img-src data:");
     res.type('html').send(r.html);
   } catch (e) { fail(res, e); }

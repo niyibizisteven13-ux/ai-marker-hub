@@ -184,11 +184,25 @@ async function grantText(p: any) {
   return { grant: `Your ${PLANS[planIdForSubscription(p.purpose) ?? 'PRO'].name} plan is active${until ? ` until ${until}` : ''}.`, balanceNote: undefined };
 }
 
+export function receiptItem(p: any): string {
+  if (p.purpose === 'VERIFIED_BADGE') return 'Verified badge · one time';
+  if (p.purpose === 'GO_PACK') return `GO credits · ${p.credits.toLocaleString('en-US')} credits`;
+  return `${PLANS[planIdForSubscription(p.purpose) ?? 'PRO'].name} plan · ${p.months} month${p.months === 1 ? '' : 's'}`;
+}
+
+export function renderPaidReceipt(p: any, name: string, confirmation?: { grant: string; balanceNote?: string }) {
+  return receiptEmail({
+    name, receiptNumber: p.receiptNumber, paidAt: new Date(p.fulfilledAt), item: receiptItem(p),
+    amountRwf: p.amountRwf, amountUsd: p.amountUsd, currency: p.currency, phoneMasked: p.phoneMasked,
+    transactionId: p.financialTransactionId, grant: confirmation?.grant ?? '', balanceNote: confirmation?.balanceNote,
+  });
+}
+
 export async function notifyReceipt(p: any) {
   const c = await contact(p.userId);
   const g = await grantText(p);
-  const item = (await quote(p.purpose, { packId: p.packId ?? undefined, months: p.months || 1 }).catch(() => null))?.item ?? p.purpose;
-  const email = receiptEmail({ name: c.name, receiptNumber: p.receiptNumber, paidAt: new Date(p.fulfilledAt), item, amountRwf: p.amountRwf, amountUsd: p.amountUsd, currency: p.currency, phoneMasked: p.phoneMasked, transactionId: p.financialTransactionId, grant: g.grant, balanceNote: g.balanceNote });
+  const item = receiptItem(p);
+  const email = renderPaidReceipt(p, c.name, g);
   const deliveryKey = `receipt-email:${p.id}`;
   const delivered = await db.appSetting.findUnique({ where: { key: deliveryKey } });
   if (!delivered && !p.emailedAt && c.email && await sendMail(c.email, email)) {

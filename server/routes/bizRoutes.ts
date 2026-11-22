@@ -74,6 +74,12 @@ export function createBizRouter(): Router {
   const svc = () => bizService();
 
   /* ------------------------------------------------------------ public */
+  r.get('/public/:slug/badge', run(async (req, res) => {
+    const verified = await svc().publicBadge(req.params.slug);
+    res.setHeader('Cache-Control', 'no-store');
+    if (verified === null) return res.status(404).end();
+    res.json({ verified });
+  }));
   r.get('/public/:slug', run(async (req, res) => {
     const b = await svc().publicBySlug(req.params.slug, { count: true });
     if (!b) return res.status(404).json({ error: 'This page is not available.' });
