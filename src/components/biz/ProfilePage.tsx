@@ -109,7 +109,7 @@ export default function ProfilePage({ business: b, mediaSrc, preview = false }: 
   return (
     <div className={`${preview ? 'min-h-[100dvh]' : 'h-[100dvh] overflow-y-auto lg:overflow-clip'} bg-[#F6F4EF] font-sans text-[#0E1722]`} style={{ ['--acc' as string]: theme.accent }}>
       <div className={`mx-auto max-w-3xl pb-28 sm:pb-10 lg:grid lg:max-w-6xl lg:grid-cols-[340px_minmax(0,1fr)] lg:items-start lg:gap-5 lg:px-4 ${preview ? '' : 'lg:h-full lg:grid-rows-[minmax(0,1fr)] lg:pb-0'}`}>
-        <header className="bg-white sm:mt-4 sm:overflow-hidden sm:rounded-3xl sm:shadow-sm">
+        <header tabIndex={preview ? undefined : 0} className={`bg-white sm:mt-4 sm:overflow-hidden sm:rounded-3xl sm:shadow-sm ${preview ? '' : 'lg:max-h-[calc(100dvh-2rem)] lg:overflow-y-auto lg:overscroll-contain'}`}>
           <div className="relative h-32 w-full overflow-hidden sm:h-52 lg:h-28 lg:[@media(max-height:720px)]:h-16" style={{ background: `linear-gradient(135deg, ${theme.accent}, #0E1722)` }}>
             {b.cover && <img src={mediaSrc(b.cover.id)} alt="" className="h-full w-full object-cover" />}
             <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/30 to-transparent" />
