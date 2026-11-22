@@ -196,6 +196,13 @@ Object.assign(SRW, {
 });
 
 Object.assign(SRW, {
+  'Card layout': 'Imiterere y’ikarita',
+  'These settings only affect what customers see on the card.': 'Ibi bihindura gusa ibyo abakiriya babona ku ikarita.',
+  'Visible columns': 'Inkingi zigaragara',
+  'Date row to hide': 'Itariki ushaka guhisha',
+  'Hide date row': 'Hisha itariki',
+  'Hidden dates': 'Amatariki ahishwe',
+  'Restore': 'Ongera werekane',
   'Who ticks the card': 'Ni nde ushyiraho ikimenyetso ku ikarita',
   'The business': 'Ubucuruzi',
   'The customer': 'Umukiliya',
@@ -207,6 +214,8 @@ Object.assign(SRW, {
 Object.assign(SRW, {
   'Check-in code': 'Kode yo kwemeza',
   'New code in': 'Kode nshya mu',
+  'Customer or cashier scans': 'Umukiriya cyangwa umukozi wo kuri kashi arasikana',
+  'Customers scan the business code. The cashier can also scan a customer card.': 'Abakiriya basikana kode y’ubucuruzi. Umukozi wo kuri kashi na we ashobora gusikana ikarita y’umukiriya.',
   'The customer scans': 'Umukiliya arasikana',
   'You show a code that changes every minute. They scan it with their phone and it is ticked at once.': 'Werekana kode ihinduka buri munota. Barayisikana na telefoni yabo igahita ishyirwaho ikimenyetso.',
   'Show this where your {members} can see it. They scan it with their phone camera (or type the digits) and their {pass} is ticked. It changes every minute, so a photo of it does not work later.': 'Yishyire aho {members} bawe bayibona. Barayisikana na kamera ya telefoni (cyangwa bakandika imibare) maze {pass} yabo igashyirwaho ikimenyetso. Ihinduka buri munota, bityo ifoto yayo ntikora nyuma.',

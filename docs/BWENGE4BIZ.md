@@ -160,9 +160,10 @@ bus pass, a month of tutoring sessions, a car-wash subscription.
    times it is available (the owner may *Allow anyway*). A repeat check-in for the same meal shows the next serving date within the card’s valid period. A mistaken scan can be undone for 20 minutes.
 4b. **Who ticks the card is the owner's choice** (per program, in the plan form or by the assistant with `check_in`). **The business** (default): scan or type the
    customer's code as above. **The customer scans**: the owner opens *Programs → Today*, which then shows a **check-in code**: a QR code and six digits that change every
-   minute (put a phone or tablet at the door or till). The customer scans it with their phone camera, which opens the business page with the code in the address; after the
-   passcode (or straight away if they are signed in) their card is ticked with the right item, chosen by the serving times (Lunch at noon, Dinner in the evening). A
-   customer without a camera types the six digits on their card. Same rules as a staff scan (paid, open day, serving times, one of each item a day, total cap; no override).
+   minute (put a phone or tablet at the door or till). Customers can tap **Scan QR code** on the card, use their phone camera, or enter the six digits.
+   For restaurant cards, customers confirm check-in with the same passcode they set when joining. The cashier can still scan the customer's card.
+   Bwenge uses the current Kigali time to choose the meal. The default windows are Breakfast 06:00–10:00, Lunch 11:00–15:00, and Dinner
+   (or Supper) 17:00–22:00. The owner can set different hours. Both scan methods apply the paid period, open days and one check-in per item per day.
    A wrong tick can be taken back for one minute; staff can undo longer from *Today*, where the customer's own ticks are marked.
 5b. **Closing a program**: *Close signups* only stops new members (existing cards keep working until they end). **End program** ends the whole program for everyone today, after a confirmation:
    sign-ups close, nobody can be ticked any more (scan, code or customer scan are all refused with "This program has ended"), unpaid cards are cancelled, and paid cards end as of yesterday so they show
@@ -180,6 +181,10 @@ starting on the 1st ends on the 30th); days it is not available neither allow a 
 then a grid with the dates down the side (15 days to a block, a switch between blocks) and **one column per item** (Morning, Midday, Evening; or just
 Lunch and Supper; up to four), a green tick in every box that was used, closed days hatched, today highlighted. Under it: uses left, valid until, the QR code
 (only once paid; tap to enlarge) and the short code.
+
+Under **Programs → Plans → Edit → Card layout**, the owner can hide or restore item columns and specific date rows for cards on that plan.
+These settings affect the card display only. Check-ins, eligible items, payments and reports use the original plan rules and records.
+The Business Agent can make the same edits through `biz_program` with `card_layout` and the plan ID.
 
 **Privacy and safety**: the public page shows only the plans (name, price, days, items), never members and never the join code. Passcodes are stored only
 as salted hashes, a session is a long random token kept as a hash and sent in a header (never in an address), the QR secret is stored encrypted, and the

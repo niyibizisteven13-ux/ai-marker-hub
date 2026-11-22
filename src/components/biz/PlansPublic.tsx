@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, CheckCircle2, Clock, Loader2, LogOut, MessageCircle, Ticket, UtensilsCrossed, X, KeyRound } from 'lucide-react';
-import { publicApi } from '../../biz/api';
+import { Camera, Check, CheckCircle2, Clock, Loader2, LogOut, MessageCircle, Ticket, UtensilsCrossed, X, KeyRound } from 'lucide-react';
+import { BizApiError, publicApi } from '../../biz/api';
+import { useScanner } from './useScanner';
 import { THEMES, CATEGORIES, rwf, type PublicBusiness } from '../../biz/types';
 import type { CardInfo, MeInfo } from '../../biz/types';
 import { useTx } from '../../biz/i18n';
@@ -122,9 +123,9 @@ export function JoinFlow({ b, lang, program, onClose, onDone }: { b: PublicBusin
 }
 
 /* ---- coming back: phone number and passcode ---- */
-export function SignIn({ b, lang, onClose, onDone }: { b: PublicBusiness; lang: Lang; onClose: () => void; onDone: () => void }) {
+export function SignIn({ b, lang, onClose, onDone }: { b: PublicBusiness; lang: Lang; onClose: () => void; onDone: (passcode: string) => void }) {
   const { tx, t } = useWords(b, lang); const theme = THEMES[b.theme] ?? THEMES.gold; const [known, setKnown] = useState(() => loadUser(b.slug)); const [f, setF] = useState({ who: '', pin: '', remember: true }); const [busy, setBusy] = useState(false); const [err, setErr] = useState('');
-  const go = async (e: React.FormEvent) => { e.preventDefault(); setBusy(true); setErr(''); try { const who = (known || f.who).trim(); const byName = /[a-z]/i.test(who); const r = await publicApi.login(b.slug, byName ? { username: who, passcode: f.pin, remember: f.remember } : { phone: who, passcode: f.pin, remember: f.remember }); saveSession(b.slug, r.session, r.expiresAt, f.remember); saveUser(b.slug, r.username); onDone(); } catch (x) { setErr(x instanceof Error ? x.message : tx('Something went wrong. Please try again.')); } finally { setBusy(false); } };
+  const go = async (e: React.FormEvent) => { e.preventDefault(); setBusy(true); setErr(''); try { const who = (known || f.who).trim(); const byName = /[a-z]/i.test(who); const r = await publicApi.login(b.slug, byName ? { username: who, passcode: f.pin, remember: f.remember } : { phone: who, passcode: f.pin, remember: f.remember }); saveSession(b.slug, r.session, r.expiresAt, f.remember); saveUser(b.slug, r.username); onDone(f.pin); } catch (x) { setErr(x instanceof Error ? x.message : tx('Something went wrong. Please try again.')); } finally { setBusy(false); } };
   return (
     <Sheet label={t("Sign in to your {pass}")} onClose={onClose}>
       <div className="flex items-start justify-between gap-3"><h2 className="font-display text-xl font-semibold">{t("Sign in to your {pass}")}</h2><button type="button" onClick={onClose} aria-label={tx("Close")} className="rounded-full p-2 hover:bg-[#F2F4F7]"><X size={18} /></button></div>
@@ -146,9 +147,13 @@ export function SignIn({ b, lang, onClose, onDone }: { b: PublicBusiness; lang: 
 const BLOCK = 15;
 function PaperCard({ b, card, w }: { b: PublicBusiness; card: CardInfo; w: ReturnType<typeof wordsOf> }) {
   const tx = useTx(); const theme = THEMES[b.theme] ?? THEMES.gold; const cat = CATEGORIES.find((c) => c.id === b.category)?.label ?? '';
-  const cal = card.calendar; const blocks = Math.max(1, Math.ceil(cal.length / BLOCK)); const todayIdx = cal.findIndex((d) => d.date === card.today.date);
-  const [blk, setBlk] = useState(() => (todayIdx >= 0 ? Math.floor(todayIdx / BLOCK) : card.today.date > (cal[cal.length - 1]?.date ?? '') ? blocks - 1 : 0));
-  const rows = cal.slice(blk * BLOCK, blk * BLOCK + BLOCK); const items = card.program.items;
+  const layout = card.program.cardLayout;
+  const cal = card.calendar.filter((day) => !layout?.hiddenDates.includes(day.date));
+  const blocks = Math.max(1, Math.ceil(cal.length / BLOCK)); const todayIdx = cal.findIndex((d) => d.date >= card.today.date);
+  const [blk, setBlk] = useState(() => (todayIdx >= 0 ? Math.floor(todayIdx / BLOCK) : blocks - 1));
+  const block = Math.min(blk, blocks - 1);
+  const rows = cal.slice(block * BLOCK, block * BLOCK + BLOCK);
+  const items = card.program.items.filter((item) => !layout?.hiddenItems.includes(item));
   const ink = '#14213D'; const paper = `color-mix(in srgb, ${theme.accent} 16%, #FFFFFF)`; const line = `color-mix(in srgb, ${ink} 35%, ${paper})`;
   const m = card.member; const local = (x: string) => (x.startsWith('250') ? `0${x.slice(3)}` : x); const phones = [b.contact.phone, b.contact.whatsapp].filter((x): x is string => !!x).map(local).filter((x, i, a) => a.indexOf(x) === i);
   const stamp = m.paid ? { text: tx('PAID'), color: '#2848C8' } : { text: tx('NOT PAID'), color: '#B91C1C' };
@@ -172,6 +177,7 @@ function PaperCard({ b, card, w }: { b: PublicBusiness; card: CardInfo; w: Retur
         <table className="w-full table-fixed border-collapse text-center text-sm" aria-label={tx('Dates and uses')}>
           <thead><tr style={{ background: `color-mix(in srgb, ${ink} 8%, ${paper})` }}><th className="w-16 border-b border-r px-1 py-1.5 text-xs font-extrabold" style={{ borderColor: ink }}>{tx('Date')}</th>{items.map((it) => <th key={it} title={it} className="border-b border-r px-1 py-1.5 text-xs font-extrabold last:border-r-0" style={{ borderColor: ink }}>{short(it)}</th>)}</tr></thead>
           <tbody>
+            {rows.length === 0 && <tr><td colSpan={items.length + 1} className="p-3">{tx('No dates shown')}</td></tr>}
             {rows.map((d) => { const isToday = d.date === card.today.date; return (
               <tr key={d.date} style={isToday ? { background: `color-mix(in srgb, ${theme.accent} 28%, ${paper})` } : undefined}>
                 <th scope="row" className="border-b border-r px-1 py-1 text-left text-xs font-bold" style={{ borderColor: line }}><span className="text-base tabular-nums">{dayNum(d.date)}</span> <span className="font-semibold opacity-70">{tx(DAY[d.dow])}</span>{isToday && <span className="sr-only"> {tx('today')}</span>}</th>
@@ -182,26 +188,100 @@ function PaperCard({ b, card, w }: { b: PublicBusiness; card: CardInfo; w: Retur
           </tbody>
         </table>
       </div>
-      {blocks > 1 && <div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label={tx('Show days')}>{Array.from({ length: blocks }, (_, i) => <button key={i} type="button" aria-pressed={blk === i} onClick={() => setBlk(i)} className="min-h-9 rounded-lg border px-2.5 text-xs font-semibold" style={blk === i ? { background: ink, color: '#fff', borderColor: ink } : { borderColor: line }}>{tx('Days')} {i * BLOCK + 1}–{Math.min(cal.length, (i + 1) * BLOCK)}</button>)}</div>}
+      {blocks > 1 && <div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label={tx('Show days')}>{Array.from({ length: blocks }, (_, i) => <button key={i} type="button" aria-pressed={block === i} onClick={() => setBlk(i)} className="min-h-9 rounded-lg border px-2.5 text-xs font-semibold" style={block === i ? { background: ink, color: '#fff', borderColor: ink } : { borderColor: line }}>{layout?.hiddenDates.length ? `${shortDate(cal[i * BLOCK].date)} – ${shortDate(cal[Math.min(cal.length, (i + 1) * BLOCK) - 1].date)}` : `${tx('Days')} ${i * BLOCK + 1}–${Math.min(cal.length, (i + 1) * BLOCK)}`}</button>)}</div>}
       <div className="mt-3 grid grid-cols-2 gap-2 text-left"><div className="rounded-xl border p-2.5" style={{ borderColor: line }}><p className="text-xs opacity-70">{fill('{Uses} left', w)}</p><p className="font-display text-xl font-semibold tabular-nums">{m.usesLeft}</p></div><div className="rounded-xl border p-2.5" style={{ borderColor: line }}><p className="text-xs opacity-70">{tx('Valid until')}</p><p className="font-display text-xl font-semibold">{shortDate(m.endDate)}</p></div></div>
     </div>
   );
 }
 
+function scanVenueCode(raw: string, slug: string): string | null {
+  const text = raw.trim();
+  if (/^\d{6}$/.test(text)) return text;
+  try {
+    const url = new URL(text);
+    const isBwenge = url.protocol === 'https:' && /^(www\.)?bwenge\.(space|biz)$/.test(url.hostname);
+    if (url.origin !== window.location.origin && !isBwenge) return null;
+    const code = url.searchParams.get('tick');
+    return url.pathname.replace(/\/$/, '') === `/b/${encodeURIComponent(slug)}` && code && /^\d{6}$/.test(code) ? code : null;
+  } catch {
+    return null;
+  }
+}
+
 /* ---- the customer's dashboard ---- */
-export function Dashboard({ b, lang, onClose, onSignedOut, scanCode }: { b: PublicBusiness; lang: Lang; onClose: () => void; onSignedOut: () => void; scanCode?: string }) {
+export function Dashboard({ b, lang, onClose, onSignedOut, scanCode, takeScanPasscode }: { b: PublicBusiness; lang: Lang; onClose: () => void; onSignedOut: () => void; scanCode?: string; takeScanPasscode?: () => string }) {
   const { tx, t, w } = useWords(b, lang); const theme = THEMES[b.theme] ?? THEMES.gold; const slug = b.slug;
   const [me, setMe] = useState<MeInfo | null>(null); const [card, setCard] = useState<CardInfo | null>(null); const [sel, setSel] = useState<string | undefined>(); const [err, setErr] = useState('');
   const [phone, setPhone] = useState(''); const [ref, setRef] = useState(''); const [busy, setBusy] = useState(false); const [big, setBig] = useState(false); const [pinOpen, setPinOpen] = useState(false); const [pins, setPins] = useState({ cur: '', next: '' }); const [pinMsg, setPinMsg] = useState('');
   const waiting = useRef(false); const session = () => loadSession(slug);
   const [typed, setTyped] = useState(''); const [flash, setFlash] = useState('');
+  const [camera, setCamera] = useState(false);
+  const [confirmationCode, setConfirmationCode] = useState('');
+  const [scanPasscode, setScanPasscode] = useState('');
+  const [checkinError, setCheckinError] = useState('');
+  const checkingIn = useRef(false);
   const fail = useCallback((e: unknown) => { const m = e instanceof Error ? e.message : tx('Something went wrong. Please try again.'); if (/sign in again/i.test(m)) { clearSession(slug); onSignedOut(); return; } setErr(m); }, [slug, onSignedOut, tx]);
   const load = useCallback(async () => { const s = session(); if (!s) { onSignedOut(); return; } try { const [m, c] = await Promise.all([publicApi.me(slug, s), publicApi.card(slug, s, sel)]); setMe(m); setCard(c); setErr(''); waiting.current = !!c.payment?.promptSent; if (!sel) setSel(c.cardId); } catch (e) { fail(e); } }, [slug, sel, fail, onSignedOut]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { void load(); const i = window.setInterval(() => void load(), waiting.current ? 4000 : 15_000); return () => window.clearInterval(i); }, [load, card?.payment?.promptSent]);
   const act = async (fn: (s: string, id: string) => Promise<unknown>) => { const s = session(); if (!s || !card) return; setBusy(true); setErr(''); try { await fn(s, card.cardId); await load(); } catch (e) { fail(e); } finally { setBusy(false); } };
-  const doTick = async (code: string) => { const s = session(); if (!s) return; setBusy(true); setErr(''); setFlash(''); try { const r = await publicApi.tick(slug, s, code, card?.cardId); setTyped(''); setFlash(`${r.item} ${tx('ticked')}`); setSel(r.cardId); await load(); } catch (e) { fail(e); } finally { setBusy(false); } };
-  // The business's QR code opens this page with the code in the address: tick straight away, once, then tidy the address.
-  const auto = useRef(false); useEffect(() => { if (!scanCode || auto.current || !card) return; auto.current = true; void doTick(scanCode).finally(() => { try { const u = new URL(window.location.href); u.searchParams.delete('tick'); window.history.replaceState({}, '', u.pathname + u.search); } catch { /* optional */ } }); }, [scanCode, card]); // eslint-disable-line react-hooks/exhaustive-deps
+  async function doTick(code: string, passcode?: string) {
+    const token = session();
+    if (!token || checkingIn.current) return;
+    checkingIn.current = true;
+    setBusy(true);
+    setCheckinError('');
+    setFlash('');
+    try {
+      const result = await publicApi.tick(slug, token, code, passcode);
+      setConfirmationCode('');
+      setTyped('');
+      setSel(result.cardId);
+      setFlash(`${result.item} ${tx('ticked')}`);
+      if (result.cardId === card?.cardId) await load();
+    } catch (error) {
+      if (error instanceof BizApiError && error.code === 'SESSION') {
+        fail(error);
+      } else {
+        if (!(error instanceof BizApiError) || !['BAD_LOGIN', 'PASSCODE_REQUIRED'].includes(error.code ?? '')) setConfirmationCode('');
+        setCheckinError(error instanceof Error ? error.message : tx('Something went wrong. Please try again.'));
+      }
+    } finally {
+      setScanPasscode('');
+      setBusy(false);
+      checkingIn.current = false;
+    }
+  }
+
+  function prepareCheckin(code: string, passcode?: string) {
+    setCamera(false);
+    setCheckinError('');
+    setFlash('');
+    if (b.category === 'restaurant' || card?.tick?.requiresPasscode) {
+      setConfirmationCode(code);
+      if (passcode) void doTick(code, passcode);
+    } else {
+      void doTick(code);
+    }
+  }
+
+  const scanner = useScanner(camera && card?.member.state === 'active' && !!card.tick, (raw) => {
+    const code = scanVenueCode(raw, slug);
+    if (code) prepareCheckin(code);
+    else setCheckinError(tx("Scan the check-in QR shown at this business."));
+  }, tx);
+
+  // A link opened by the phone camera uses the same confirmation as an in-app scan.
+  const auto = useRef(false);
+  useEffect(() => {
+    if (!scanCode || auto.current || !card) return;
+    auto.current = true;
+    prepareCheckin(scanCode, takeScanPasscode?.());
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('tick');
+      window.history.replaceState({}, '', url.pathname + url.search);
+    } catch { /* optional */ }
+  }, [scanCode, card]); // eslint-disable-line react-hooks/exhaustive-deps
   const m = card?.member; const usedUp = !!card && m?.state === 'active' && !!card.program.totalUses && m.usesLeft === 0;
   const tone = !m ? '#5B6470' : usedUp ? '#B91C1C' : m.state === 'active' ? '#15803D' : m.state === 'pending' || m.state === 'not_started' ? '#B45309' : '#B91C1C';
   const label = !m ? '' : usedUp ? t('ALL {USES} TAKEN') : ({ active: tx('ACTIVE'), pending: tx('WAITING FOR PAYMENT'), not_started: tx('STARTS SOON'), expired: tx('PLAN ENDED'), paused: tx('PAUSED'), cancelled: tx('CANCELLED') } as Record<string, string>)[m.state];
@@ -216,24 +296,51 @@ export function Dashboard({ b, lang, onClose, onSignedOut, scanCode }: { b: Publ
           <input className={`${field} font-mono tracking-[0.4em]`} type="password" inputMode="numeric" placeholder={tx('Current passcode')} value={pins.cur} onChange={(e) => setPins({ ...pins, cur: e.target.value.replace(/\D/g, '').slice(0, 6) })} />
           <input className={`${field} font-mono tracking-[0.4em]`} type="password" inputMode="numeric" placeholder={tx('New passcode')} value={pins.next} onChange={(e) => setPins({ ...pins, next: e.target.value.replace(/\D/g, '').slice(0, 6) })} />
           <button type="submit" className="min-h-11 w-full rounded-xl border-2 border-[#0E1722] text-sm font-semibold">{tx('Save')}</button>{pinMsg && <p role="status" className="text-sm text-[#3A4350]">{pinMsg}</p>}</form>}
-        {me && me.cards.length > 1 && <div className="mb-3 flex gap-2 overflow-x-auto" role="tablist">{me.cards.map((c) => <button key={c.id} role="tab" aria-selected={card?.cardId === c.id} type="button" onClick={() => { setSel(c.id); setCard(null); }} className={`shrink-0 rounded-xl px-3 py-2 text-sm font-semibold ${card?.cardId === c.id ? 'bg-[#0E1722] text-white' : 'bg-white'}`}>{c.programTitle}</button>)}</div>}
+        {me && me.cards.length > 1 && <div className="mb-3 flex gap-2 overflow-x-auto" role="tablist">{me.cards.map((c) => <button key={c.id} role="tab" aria-selected={card?.cardId === c.id} type="button" onClick={() => { setCamera(false); setConfirmationCode(''); setScanPasscode(''); setCheckinError(''); setSel(c.id); setCard(null); }} className={`shrink-0 rounded-xl px-3 py-2 text-sm font-semibold ${card?.cardId === c.id ? 'bg-[#0E1722] text-white' : 'bg-white'}`}>{c.programTitle}</button>)}</div>}
         {!card && !err && <div className="grid place-items-center py-24"><Loader2 className="animate-spin" aria-label={tx('Loading')} /></div>}
         {err && <p role="alert" className="mb-3 rounded-2xl bg-rose-50 p-4 text-sm text-rose-700">{err}</p>}
         {flash && <p role="status" className="mb-3 flex items-center gap-2 rounded-2xl bg-emerald-50 p-4 text-base font-semibold text-emerald-800"><CheckCircle2 size={20} aria-hidden="true" />{flash}</p>}
         {card && m && (
           <div className="space-y-3">
             <div className="rounded-full px-4 py-2 text-center text-sm font-bold tracking-wide text-white" style={{ background: tone }}>{label}</div>
-            {m.state === 'active' && card.tick && (
-              <div className="rounded-2xl bg-white p-4" aria-live="polite">
-                <p className="font-display text-lg font-semibold">{tx('Scan the business\'s code')}</p>
-                <p className="mb-3 text-sm text-[#5B6470]">{tx('Point your phone camera at the code shown at the business. Your card is ticked at once. No camera? Type the 6 digits.')}</p>
-                <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (/^\d{6}$/.test(typed)) void doTick(typed); }}>
-                  <input className={`${field} !mt-0 font-mono text-2xl tracking-[0.3em]`} value={typed} onChange={(e) => setTyped(e.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" maxLength={6} placeholder="••••••" aria-label={tx('Code shown at the business')} />
-                  <button type="submit" disabled={busy || typed.length !== 6} style={{ background: theme.accent, color: theme.on }} className="min-h-12 shrink-0 rounded-xl px-5 text-base font-semibold disabled:opacity-50">{busy ? <Loader2 className="mx-auto animate-spin" size={18} /> : tx('Tick')}</button></form>
-                <div className="mt-3 flex flex-wrap gap-2">{card.tick.items.map((x) => { const done = card.today.used.find((u) => u.item === x.item); return <span key={x.item} className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-semibold ${done ? 'bg-emerald-50 text-emerald-800' : 'bg-[#F2F4F7] text-[#5B6470]'}`}>{done && <CheckCircle2 size={14} aria-hidden="true" />}{x.item}{done ? ` ${clock(done.at)}` : ''}</span>; })}</div>
-                {card.tick.undo && <p role="status" className="mt-3 flex items-center justify-between gap-2 rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-900"><span>{card.tick.undo.item} {tx('ticked')}. {tx('Wrong tap?')}</span><button type="button" disabled={busy} onClick={() => void act((s, id) => publicApi.untick(slug, s, id, card.tick!.undo!.useId))} className="min-h-9 px-2 font-semibold underline">{tx('Undo')}</button></p>}
-              </div>)}
-            <PaperCard b={b} card={card} w={w} />
+            {((m.state === 'active' && card.tick) || confirmationCode || checkinError) && (
+              <div className="space-y-3 rounded-2xl bg-white p-4">
+                <p className="font-display text-lg font-semibold">{tx("Scan the business's code")}</p>
+                {confirmationCode ? (
+                  <form className="space-y-2" onSubmit={(event) => { event.preventDefault(); if (/^\d{4,6}$/.test(scanPasscode)) void doTick(confirmationCode, scanPasscode); }}>
+                    <label className="block text-sm font-medium">{tx("Enter your passcode to confirm check-in")}
+                      <input className={`${field} font-mono text-xl tracking-[0.3em]`} type="password" autoComplete="current-password" inputMode="numeric" minLength={4} maxLength={6} required autoFocus value={scanPasscode} onChange={(event) => setScanPasscode(event.target.value.replace(/\D/g, ''))} />
+                    </label>
+                    <div className="flex gap-2">
+                      <button type="submit" disabled={busy || scanPasscode.length < 4} style={{ background: theme.accent, color: theme.on }} className="min-h-12 flex-1 rounded-xl px-4 font-semibold disabled:opacity-50">{tx("Confirm check-in")}</button>
+                      <button type="button" disabled={busy} className="min-h-12 rounded-xl border px-4 font-semibold" onClick={() => { setConfirmationCode(''); setScanPasscode(''); setCheckinError(''); }}>{tx("Cancel")}</button>
+                    </div>
+                  </form>
+                ) : m.state === 'active' && card.tick && (
+                  <>
+                    {camera ? (
+                      <div className="relative overflow-hidden rounded-xl bg-black">
+                        <video ref={scanner.video} muted playsInline className="aspect-square w-full object-cover" aria-label={tx("Camera")} />
+                        <button type="button" className="absolute right-2 top-2 rounded-full bg-black/70 p-2 text-white" onClick={() => setCamera(false)} aria-label={tx("Close the camera")}><X size={18} /></button>
+                        {!scanner.ready && !scanner.error && <Loader2 className="absolute left-1/2 top-1/2 animate-spin text-white" aria-label={tx("Loading")} />}
+                      </div>
+                    ) : (
+                      <button type="button" disabled={busy} style={{ background: theme.accent, color: theme.on }} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl px-4 font-semibold disabled:opacity-50" onClick={() => { setCheckinError(''); setCamera(true); }}><Camera size={19} aria-hidden="true" />{tx("Scan QR code")}</button>
+                    )}
+                    {camera && scanner.error && <p role="alert" className="text-sm text-rose-700">{scanner.error}</p>}
+                    <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); if (/^\d{6}$/.test(typed)) prepareCheckin(typed); }}>
+                      <input className={`${field} !mt-0 font-mono text-xl tracking-[0.3em]`} value={typed} onChange={(event) => setTyped(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" maxLength={6} placeholder={tx("6-digit code")} aria-label={tx('Code shown at the business')} />
+                      <button type="submit" disabled={busy || typed.length !== 6} className="min-h-12 shrink-0 rounded-xl border px-4 font-semibold disabled:opacity-50">{tx('Use code')}</button>
+                    </form>
+                  </>
+                )}
+                {checkinError && <p role="alert" className="text-sm text-rose-700">{checkinError}</p>}
+                {card.program.windows?.length ? <p className="text-xs text-[#5B6470]">{tx("Serving hours (Kigali)")} · {card.program.windows.map((window) => `${window.item} ${window.from}–${window.to}`).join(' · ')}</p> : null}
+                {card.tick && <div className="flex flex-wrap gap-2">{card.tick.items.map((x) => { const done = card.today.used.find((u) => u.item === x.item); return <span key={x.item} className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-semibold ${done ? 'bg-emerald-50 text-emerald-800' : 'bg-[#F2F4F7] text-[#5B6470]'}`}>{done && <CheckCircle2 size={14} aria-hidden="true" />}{x.item}{done ? ` ${clock(done.at)}` : ''}</span>; })}</div>}
+                {card.tick?.undo && <p role="status" className="flex items-center justify-between gap-2 rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-900"><span>{card.tick.undo.item} {tx('ticked')}. {tx('Wrong tap?')}</span><button type="button" disabled={busy} onClick={() => void act((s, id) => publicApi.untick(slug, s, id, card.tick!.undo!.useId))} className="min-h-9 px-2 font-semibold underline">{tx('Undo')}</button></p>}
+              </div>
+            )}
+            <PaperCard key={card.cardId} b={b} card={card} w={w} />
             {(m.state === 'active' || m.state === 'not_started') && card.qr && (
               <div className="rounded-2xl bg-white p-4 text-center">
                 <button type="button" onClick={() => setBig(true)} aria-label={tx('Tap to enlarge')} className="mx-auto block"><Qr text={card.qr} size={168} /></button>

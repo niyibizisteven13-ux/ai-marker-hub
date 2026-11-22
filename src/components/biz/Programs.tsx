@@ -1,9 +1,10 @@
+import { useScanner } from './useScanner';
 import { getStudioLang, tx } from '../../biz/studioI18n';
 import { RW_WORDS, fill, wordsOf } from '../../../server/services/biz/programWords';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, Camera, KeyRound, Check, CheckCircle2, Copy, Loader2, MessageCircle, Pause, Pencil, Play, Plus, ScanLine, Share2, Trash2, Undo2, Users, UtensilsCrossed, X, XCircle } from 'lucide-react';
 import { ownerApi } from '../../biz/api';
-import type { DayId, EndProgramResult, MemberInfo, ProgramInfo, ProgramSummary, RedeemResult, TodayInfo } from '../../biz/types';
+import type { CardLayout, DayId, EndProgramResult, MemberInfo, ProgramInfo, ProgramSummary, RedeemResult, TodayInfo } from '../../biz/types';
 import { rwf, type Business } from '../../biz/types';
 import { btn, btnGhost, btnPrimary, card, input, msg, Title } from './ui';
 
@@ -41,40 +42,6 @@ export function QrImage({ text, size = 176 }: { text: string; size?: number }) {
   const [src, setSrc] = useState('');
   useEffect(() => { let on = true; void import('qrcode').then(async (m: any) => { const url = await (m.default ?? m).toDataURL(text, { margin: 1, width: size * 2, errorCorrectionLevel: 'M' }); if (on) setSrc(url); }).catch(() => undefined); return () => { on = false; }; }, [text, size]);
   return src ? <img src={src} width={size} height={size} alt={tx("QR code")} className="rounded-lg bg-white p-1.5" /> : <div style={{ width: size, height: size }} className="animate-pulse rounded-lg bg-[var(--app-panel-hover)]" />;
-}
-
-/* ------------------------------------------------------------------ camera: read a pass QR code */
-function useScanner(active: boolean, onCode: (text: string) => void) {
-  const video = useRef<HTMLVideoElement>(null); const [error, setError] = useState(''); const [ready, setReady] = useState(false);
-  const cb = useRef(onCode); cb.current = onCode;
-  useEffect(() => {
-    if (!active) return; let stop = false; let stream: MediaStream | null = null; let timer = 0; let last = ''; let lastAt = 0;
-    (async () => {
-      try {
-        if (!navigator.mediaDevices?.getUserMedia) throw new Error(tx('This browser cannot open the camera. Type the code instead.'));
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
-        if (stop) { stream.getTracks().forEach((t) => t.stop()); return; }
-        const v = video.current!; v.srcObject = stream; v.setAttribute('playsinline', 'true'); await v.play(); setReady(true);
-        const Detector = (window as any).BarcodeDetector; const detector = Detector ? new Detector({ formats: ['qr_code'] }) : null;
-        const jsQR = detector ? null : (await import('jsqr')).default; const canvas = document.createElement('canvas'); const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-        const tick = async () => {
-          if (stop) return;
-          try {
-            let text = '';
-            if (v.readyState >= 2 && v.videoWidth) {
-              if (detector) { const found = await detector.detect(v); text = found[0]?.rawValue ?? ''; }
-              else { const w = 480, h = Math.round((v.videoHeight / v.videoWidth) * w); canvas.width = w; canvas.height = h; ctx.drawImage(v, 0, 0, w, h); text = jsQR!(ctx.getImageData(0, 0, w, h).data, w, h)?.data ?? ''; }
-            }
-            if (text && (text !== last || Date.now() - lastAt > 4000)) { last = text; lastAt = Date.now(); cb.current(text); }
-          } catch { /* a frame that cannot be read is skipped */ }
-          timer = window.setTimeout(tick, 220);
-        };
-        void tick();
-      } catch (e) { setError(e instanceof Error && e.name !== 'NotAllowedError' ? e.message : tx('Allow the camera to scan passes, or type the code instead.')); }
-    })();
-    return () => { stop = true; window.clearTimeout(timer); stream?.getTracks().forEach((t) => t.stop()); setReady(false); };
-  }, [active]);
-  return { video, error, ready };
 }
 
 /* ------------------------------------------------------------------ the three screens */
@@ -133,7 +100,7 @@ function TodayTab({ b, hasPlans, selfPrograms, onChange, goPlans }: { b: Busines
     if (busy) return; setBusy(true);
     try { const r = await ownerApi.redeem(b.id, body); setResult({ ...r, token: body.token }); signal(r.ok); setCode(''); void loadToday(); onChange(); } catch (e) { setErr(msg(e)); } finally { setBusy(false); }
   }, [b.id, busy, loadToday, onChange]);
-  const scanner = useScanner(camera && !result, (text) => { void redeem({ token: text }); });
+  const scanner = useScanner(camera && !result, (text) => { void redeem({ token: text }); }, tx);
   if (!hasPlans) return <div className={card}><p className="text-sm">{t("Make your first {program} to get started.")}</p><button type="button" className={`${btnPrimary} mt-3`} onClick={goPlans}><Plus size={16} />{t("Create a {program}")}</button></div>;
   const m = result?.member;
   return (
@@ -237,13 +204,36 @@ function MembersTab({ b, programs, summary, onChange }: { b: Business; programs:
 const blank = (): Partial<ProgramInfo> => ({ title: '', priceRwf: 30000, days: 30, items: ['Visit'], openDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], active: true });
 function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInfo[]; onChange: () => void }) {
   const { w, t } = useWords(b);
+  const [initialLayout, setInitialLayout] = useState<CardLayout | undefined>();
+  const [hiddenDate, setHiddenDate] = useState('');
   const [edit, setEdit] = useState<Partial<ProgramInfo> | null>(programs.length ? null : blank()); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false); const [copied, setCopied] = useState(''); const [ended, setEnded] = useState<EndProgramResult | null>(null);
   const endIt = async (p: ProgramInfo) => {
     const n = (p.counts?.active ?? 0) + (p.counts?.pending ?? 0);
     if (!confirm(`${t("End {program}")} "${p.title}"?\n\n${t("Sign-ups close, nobody can be ticked any more, unpaid cards are cancelled and paid cards end today.")} ${n ? `(${n})` : ''}\n${tx("You keep the money and the history: refunds are yours to give. This cannot be undone.")}`)) return;
     setBusy(true); setErr(''); try { setEnded(await ownerApi.endProgram(b.id, p.id)); onChange(); } catch (e) { setErr(msg(e)); } finally { setBusy(false); }
   };
-  const save = async () => { if (!edit) return; setBusy(true); setErr(''); try { await ownerApi.saveProgram(b.id, edit as any); setEdit(null); onChange(); } catch (e) { setErr(msg(e)); } finally { setBusy(false); } };
+  const emptyLayout: CardLayout = { hiddenItems: [], hiddenDates: [] };
+  const layout = edit?.cardLayout ?? emptyLayout;
+  const save = async () => {
+    if (!edit) return;
+    const previous = initialLayout ?? emptyLayout;
+    const visibleProgramItems = edit.items ?? [];
+    const removed = (before: string[], after: string[]) => before.filter((item) => !after.includes(item));
+    const cardLayoutChange = {
+      hideItems: removed(layout.hiddenItems, previous.hiddenItems).filter((item) => visibleProgramItems.includes(item)),
+      showItems: removed(previous.hiddenItems, layout.hiddenItems).filter((item) => visibleProgramItems.includes(item)),
+      hideDates: removed(layout.hiddenDates, previous.hiddenDates),
+      showDates: removed(previous.hiddenDates, layout.hiddenDates),
+    };
+    setBusy(true);
+    setErr('');
+    try {
+      await ownerApi.saveProgram(b.id, { ...edit, cardLayoutChange });
+      setEdit(null);
+      setHiddenDate('');
+      onChange();
+    } catch (e) { setErr(msg(e)); } finally { setBusy(false); }
+  };
   const copy = async (text: string, id: string) => { try { await navigator.clipboard.writeText(text); setCopied(id); setTimeout(() => setCopied(''), 1600); } catch { /* the link is shown anyway */ } };
   const set = (patch: Partial<ProgramInfo>) => setEdit((e) => ({ ...(e ?? {}), ...patch }));
   return (
@@ -269,7 +259,7 @@ function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInf
                 <p className="text-sm text-[var(--app-muted)]">{rwf(p.priceRwf)} · {p.days} {tx('days')}{p.totalUses ? ` · ${p.totalUses} ${w.uses}` : ''} · {p.items.join(', ')} · {p.openDays.map((d) => tx(DAY_LABEL[d])).join(' ')}</p>
                 <p className="mt-1 text-xs text-[var(--app-muted)]">{p.counts?.active ?? 0} {tx('active')} · {p.counts?.pending ?? 0} {tx('waiting for payment')}</p>
                 {p.joinCode ? <p className="mt-1 text-sm">{tx('Join code')}: <b className="font-mono tracking-[0.3em]">{p.joinCode}</b> <span className="text-xs text-[var(--app-muted)]">{t('Give this code to the {members} you accept. It is not on the public page.')}</span></p> : <p className="mt-1 text-xs text-[var(--app-muted)]">{tx('Anyone with the link can join. Set a join code to accept only the people you choose.')}</p>}</div>
-              <div className="flex gap-1.5"><button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => setEdit(p)}><Pencil size={13} />{tx("Edit")}</button>
+              <div className="flex gap-1.5"><button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => { setInitialLayout(p.cardLayout); setHiddenDate(''); setEdit(p); }}><Pencil size={13} />{tx("Edit")}</button>
                 <button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={async () => { try { await ownerApi.saveProgram(b.id, { ...p, active: !p.active }); onChange(); } catch (e) { setErr(msg(e)); } }}>{p.active ? tx('Close signups') : tx('Open signups')}</button>
                 {!p.endedAt && <button type="button" disabled={busy} className={`${btnGhost} !min-h-9 !px-3 text-xs text-rose-700`} onClick={() => void endIt(p)}>{t("End {program}")}</button>}
                 <button type="button" className="px-2 text-rose-600" aria-label={t("Delete {program}")} onClick={async () => { if (!confirm(`${tx('Delete')} "${p.title}"?`)) return; try { await ownerApi.deleteProgram(b.id, p.id); onChange(); } catch (e) { setErr(msg(e)); } }}><Trash2 size={15} /></button></div>
@@ -284,7 +274,7 @@ function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInf
           </div>);
       })}
       {err && !edit && <p role="alert" className="text-sm text-rose-600">{err}</p>}
-      {!edit && <button type="button" className={btnPrimary} onClick={() => setEdit(blank())}><Plus size={16} />{t("New {program}")}</button>}
+      {!edit && <button type="button" className={btnPrimary} onClick={() => { setInitialLayout(undefined); setHiddenDate(''); setEdit(blank()); }}><Plus size={16} />{t("New {program}")}</button>}
       {edit && (
         <form className={`${card} space-y-3`} onSubmit={(e) => { e.preventDefault(); void save(); }}>
           <Title>{edit.id ? t("Edit {program}") : t("New {program}")}</Title>
@@ -294,6 +284,27 @@ function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInf
             <label className="block text-sm font-medium">{tx("Lasts (days)")}<input className={`${input} mt-1`} inputMode="numeric" value={edit.days ?? ''} onChange={(e) => set({ days: Number(e.target.value.replace(/\D/g, '')) })} required /></label>
           </div>
           <label className="block text-sm font-medium">{tx("What they get each day (separate with commas, for example Lunch or Entry)")}<input className={`${input} mt-1`} value={(edit.items ?? []).join(', ')} onChange={(e) => set({ items: e.target.value.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 4) })} placeholder="Lunch" /></label>
+          <fieldset className="space-y-3 rounded-xl border border-[var(--app-line)] p-3">
+            <legend className="px-1 text-sm font-medium">{tx("Card layout")}</legend>
+            <p className="text-xs text-[var(--app-muted)]">{tx("These settings only affect what customers see on the card.")}</p>
+            <div>
+              <p className="text-sm font-medium">{tx("Visible columns")}</p>
+              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-2">
+                {(edit.items ?? []).map((item) => {
+                  const visible = !layout.hiddenItems.includes(item);
+                  const lastVisible = (edit.items ?? []).filter((name) => !layout.hiddenItems.includes(name)).length === 1;
+                  return <label key={item} className="inline-flex items-center gap-2 py-1 text-sm"><input type="checkbox" checked={visible} disabled={visible && lastVisible} onChange={() => set({ cardLayout: { ...layout, hiddenItems: visible ? [...layout.hiddenItems, item] : layout.hiddenItems.filter((name) => name !== item) } })} />{item}</label>;
+                })}
+              </div>
+            </div>
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="text-sm font-medium">{tx("Date row to hide")}<input type="date" className={`${input} mt-1`} value={hiddenDate} onChange={(event) => setHiddenDate(event.target.value)} /></label>
+              <button type="button" className={btnGhost} disabled={!hiddenDate || layout.hiddenDates.includes(hiddenDate)} onClick={() => { set({ cardLayout: { ...layout, hiddenDates: [...layout.hiddenDates, hiddenDate].sort() } }); setHiddenDate(''); }}>{tx("Hide date row")}</button>
+            </div>
+            {layout.hiddenDates.length > 0 && <ul className="flex flex-wrap gap-2" aria-label={tx("Hidden dates")}>{layout.hiddenDates.map((date) => (
+              <li key={date}><button type="button" className={`${btnGhost} !min-h-9 text-xs`} onClick={() => set({ cardLayout: { ...layout, hiddenDates: layout.hiddenDates.filter((day) => day !== date) } })}>{tx("Restore")} {date}</button></li>
+            ))}</ul>}
+          </fieldset>
           <fieldset><legend className="text-sm font-medium">{tx("Days it is available")}</legend><div className="mt-1.5 flex flex-wrap gap-1.5">{ALL_DAYS.map((d) => { const on = (edit.openDays ?? []).includes(d); return <button key={d} type="button" aria-pressed={on} onClick={() => set({ openDays: on ? (edit.openDays ?? []).filter((x) => x !== d) : [...(edit.openDays ?? []), d] })} className={`min-h-10 rounded-xl px-3 text-sm font-semibold ${on ? 'bg-[var(--brand)] text-[var(--brand-on)]' : 'border border-[var(--app-line)] text-[var(--app-muted)]'}`}>{tx(DAY_LABEL[d])}</button>; })}</div></fieldset>
           <details><summary className="cursor-pointer text-sm font-medium">{tx("Times it is available (optional)")}</summary>
             <div className="mt-2 space-y-2">{(edit.items ?? []).map((item) => { const w = (edit.windows ?? []).find((x) => x.item === item); const upd = (from: string, to: string) => set({ windows: [...(edit.windows ?? []).filter((x) => x.item !== item), ...(from && to ? [{ item, from, to }] : [])] });
@@ -308,7 +319,7 @@ function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInf
             <span className="mt-1 block text-xs font-normal text-[var(--app-muted)]">{t("4 digits. People must write it to join, so only the {members} you give it to can join.")}</span></div>
           <div className="block text-sm font-medium">{tx("Who ticks the card")}
             <div className="mt-1 grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label={tx("Who ticks the card")}>
-              {([['staff', tx('The business'), tx('You scan the QR code or type the code.')], ['self', tx('The customer scans'), tx('You show a code that changes every minute. They scan it with their phone and it is ticked at once.')]] as const).map(([v, label, hint]) => (
+              {([['staff', tx('The business'), tx('You scan the QR code or type the code.')], ['self', tx('Customer or cashier scans'), tx('Customers scan the business code. The cashier can also scan a customer card.')]] as const).map(([v, label, hint]) => (
                 <button key={v} type="button" role="radio" aria-checked={(edit.checkIn ?? 'staff') === v} onClick={() => set({ checkIn: v })} className={`rounded-xl border-2 p-3 text-left ${(edit.checkIn ?? 'staff') === v ? 'border-[var(--app-accent,#0E1722)] bg-[var(--app-soft,#F2F4F7)]' : 'border-[var(--app-line,#D9DEE5)]'}`}><b className="block text-sm">{label}</b><span className="block text-xs font-normal text-[var(--app-muted)]">{hint}</span></button>))}</div>
             {edit.checkIn === 'self' && <p className="mt-1 text-xs font-normal text-[var(--app-muted)]">{t("Same rules as a staff scan: paid, open day, serving times, one of each each day. Show the check-in code on the Today screen. A customer can take back a wrong tick for one minute, and you see on the Today list who ticked it themselves.")}</p>}</div>
           <label className="block text-sm font-medium">{tx("Note for customers (optional)")}<textarea className={`${input} mt-1`} rows={2} maxLength={300} value={edit.terms ?? ''} onChange={(e) => set({ terms: e.target.value })} placeholder={tx("One use a day. Show your pass each time.")} /></label>

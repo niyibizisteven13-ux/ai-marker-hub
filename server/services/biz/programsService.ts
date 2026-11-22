@@ -6,7 +6,7 @@ import type { LedgerEntry } from './ledger.js';
 import type { ProgramDay } from './report.js';
 import {
   LOCK_MINUTES, MAX_MEMBERS, MAX_PIN_FAILS, MAX_PROGRAMS, REMEMBER_DAYS, SESSION_HOURS, addDays, canServe, cardCalendar, cleanJoin, cleanProgram, cleanProgramText, hashPasscode, hashSession, newJoinCode, cleanUsername, validUsername, suggestUsernames, newSalt, sameCode, validPasscode, cleanStart, dayOfWeek, endDateFor, hashToken, kigaliDate, newCode, newToken, normalizeCode,
-  oneOfMethod, planState, remaining, tokenFromPayload, usesLeft, type DenyCode, type Use, type Member, type PlanState, type Program,
+  oneOfMethod, planState, remaining, restaurantMealAt, tokenFromPayload, usesLeft, withRestaurantMealHours, type DenyCode, type Use, type Member, type PlanState, type Program,
 } from './programs.js';
 
 /**
@@ -54,6 +54,7 @@ export function createPrograms(h: Helpers) {
   const { kv } = h;
   const k = { programs: (b: string) => `biz-programs:${b}`, members: (b: string) => `biz-members:${b}`, pass: (hash: string) => `biz-pass:${hash}`, uses: (b: string, m: string) => `biz-uses:${b}:${m}`, served: (b: string, d: string) => `biz-served:${b}:${d}`, days: (b: string) => `biz-served-days:${b}`, people: (b: string) => `biz-people:${b}`, sess: (hash: string) => `biz-sess:${hash}`, sessions: (b: string) => `biz-sessions:${b}` };
   const programsOf = async (bizId: string) => (await kv.get<{ items: Program[] }>(k.programs(bizId)))?.items ?? [];
+  const servingHours = (b: Business, p: Program) => b.category === 'restaurant' ? withRestaurantMealHours(p) : p;
   const membersOf = async (bizId: string) => (await kv.get<{ items: Member[] }>(k.members(bizId)))?.items ?? [];
   const putMembers = (bizId: string, items: Member[]) => kv.put(k.members(bizId), { items });
   const servedOn = async (bizId: string, date: string) => (await kv.get<{ items: Use[] }>(k.served(bizId, date)))?.items ?? [];
@@ -144,7 +145,7 @@ export function createPrograms(h: Helpers) {
       const b = await h.mine(ownerId, id); const today = kigaliDate(h.now()); const members = await membersOf(b.id);
       return (await programsOf(b.id)).map((p) => {
         const mine = members.filter((m) => m.programId === p.id);
-        return { ...p, counts: { active: mine.filter((m) => planState(m, today) === 'active').length, pending: mine.filter((m) => planState(m, today) === 'pending').length, total: mine.filter((m) => m.status !== 'cancelled').length } };
+        return { ...servingHours(b, p), counts: { active: mine.filter((m) => planState(m, today) === 'active').length, pending: mine.filter((m) => planState(m, today) === 'pending').length, total: mine.filter((m) => m.status !== 'cancelled').length } };
       });
     },
     /** The owner's own words for this feature, and the questions and permissions around it. */
@@ -162,7 +163,7 @@ export function createPrograms(h: Helpers) {
         if (!prev && list.length >= MAX_PROGRAMS) throw new ProgramError(`You can have up to ${MAX_PROGRAMS} plans.`, 409, 'LIMIT');
         const p = cleanProgram(input, prev?.id ?? randomUUID(), h.iso(), prev); if ('error' in p) throw new ProgramError(p.error);
         await kv.put(k.programs(b.id), { items: prev ? list.map((x) => (x.id === p.id ? p : x)) : [...list, p] });
-        return p;
+        return servingHours(b, p);
       });
     },
     async deleteProgram(ownerId: string, id: string, programId: string): Promise<void> {
@@ -237,7 +238,10 @@ export function createPrograms(h: Helpers) {
         const m = await findMember(b.id, input); if (!m) return { ok: false as const, code: 'unknown' as const, message: 'This pass was not found. Check the code, or ask the customer to open their pass link.' };
         const p = (await programsOf(b.id)).find((x) => x.id === m.programId); if (!p) return { ok: false as const, code: 'unknown' as const, message: 'This plan no longer exists.' };
         const t = h.now(); const date = kigaliDate(t); const served = await servedOn(b.id, date); const used = usedOf(served, m.id);
-        const r = canServe({ member: m, program: p, used, now: t, item: input.item === undefined || input.item === '' ? undefined : String(input.item), force: input.force === true && b.programText?.allowOverride !== false });
+        const program = servingHours(b, p);
+        const force = input.force === true && b.programText?.allowOverride !== false;
+        const item = input.item ? String(input.item) : b.category === 'restaurant' && !force ? restaurantMealAt(program, t) : undefined;
+        const r = canServe({ member: m, program, used, now: t, item, force });
         if (!r.ok) return { ...r, member: view(m, p, date, used) };
         const use = await record(b.id, m, date, t, r.item, served, tokenFromPayload(input.token) || typeof input.token === 'string' ? 'scan' : 'code');
         return { ok: true as const, item: r.item, useId: use.id, member: view(m, p, date, [...used, use]) };
@@ -317,7 +321,7 @@ export function createPrograms(h: Helpers) {
     /* ---------------------------------------------------------------- public */
     async publicPrograms(b: Business): Promise<PublicProgram[]> {
       const members = await membersOf(b.id);
-      return (await programsOf(b.id)).filter((p) => p.active).map((p) => ({
+      return (await programsOf(b.id)).filter((p) => p.active).map((p) => servingHours(b, p)).map((p) => ({
         checkIn: p.checkIn === 'self' ? 'self' : 'staff', needsCode: !!p.joinCode, id: p.id, title: p.title, ...(p.description ? { description: p.description } : {}), priceRwf: p.priceRwf, days: p.days, ...(p.totalUses ? { totalUses: p.totalUses } : {}), items: p.items, openDays: p.openDays, ...(p.windows ? { windows: p.windows } : {}), ...(p.terms ? { terms: p.terms } : {}),
         full: !!p.maxMembers && members.filter((m) => m.programId === p.id && m.status !== 'cancelled' && planState(m, kigaliDate(h.now())) !== 'expired').length >= p.maxMembers,
       }));
@@ -407,7 +411,8 @@ export function createPrograms(h: Helpers) {
       return withLock(`mem|${b.id}`, async () => {
         const list = await membersOf(b.id); const mine = list.filter((x) => x.phone === me.phone && x.status !== 'cancelled');
         const m = cardId ? mine.find((x) => x.id === cardId) : mine.length === 1 ? mine[0] : mine.sort((x, y) => y.createdAt.localeCompare(x.createdAt))[0];
-        const p = m && (await programsOf(b.id)).find((x) => x.id === m.programId); if (!m || !p) throw new ProgramError('This card was not found.', 404, 'NOT_FOUND');
+        const saved = m && (await programsOf(b.id)).find((x) => x.id === m.programId); if (!m || !saved) throw new ProgramError('This card was not found.', 404, 'NOT_FOUND');
+        const p = servingHours(b, saved);
         // A payment prompt that was approved on the phone: settle it now (the customer's screen asks about it while waiting).
         let prompt = false;
         if (!m.paid && m.payRef) {
@@ -421,10 +426,10 @@ export function createPrograms(h: Helpers) {
         return {
           cardId: m.id,
           business: { name: b.name, slug: b.slug, theme: b.theme },
-          program: { title: p.title, checkIn: p.checkIn === 'self' ? 'self' : 'staff', ...(p.totalUses ? { totalUses: p.totalUses } : {}), items: p.items, openDays: p.openDays, ...(p.windows ? { windows: p.windows } : {}), ...(p.terms ? { terms: p.terms } : {}), priceRwf: p.priceRwf, days: p.days },
+          program: { title: p.title, ...(p.cardLayout ? { cardLayout: p.cardLayout } : {}), checkIn: p.checkIn === 'self' ? 'self' : 'staff', ...(p.totalUses ? { totalUses: p.totalUses } : {}), items: p.items, openDays: p.openDays, ...(p.windows ? { windows: p.windows } : {}), ...(p.terms ? { terms: p.terms } : {}), priceRwf: p.priceRwf, days: p.days },
           member: { name: m.name, phone: m.phone, ...(m.idNumber ? { idNumber: m.idNumber } : {}), code: m.code, state: st, startDate: m.startDate, endDate: m.endDate, daysLeft: r.calendarDays, servingDaysLeft: Math.max(0, r.servingDays - (ateToday >= p.items.length ? 1 : 0)), usesLeft: usesLeft(m, p, r.uses, ateToday), usedTotal: m.used ?? 0, paid: m.paid, paidAt: m.confirmedAt ?? null },
           qr,
-          tick: p.checkIn === 'self' ? { needsCode: true as const, ...tickOptions(m, p, own, t) } : null,
+          tick: p.checkIn === 'self' ? { needsCode: true as const, requiresPasscode: b.category === 'restaurant', ...tickOptions(m, p, own, t) } : null,
           today: { date, openToday: p.openDays.includes(dayOfWeek(date)), used: own.filter((x) => x.date === date).map((x) => ({ item: x.item, at: x.at })) },
           calendar: cardCalendar(m, p, own.map((x) => ({ date: x.date, item: x.item })).slice(-1500)),
           history: [],
@@ -435,10 +440,10 @@ export function createPrograms(h: Helpers) {
         };
       });
     },
-    /** The customer scans the business's rotating code (only when the owner chose self check-in): same rules as a staff scan, no override, ticked at once. */
-    async selfUse(slug: string, session: string, input: { cardId?: unknown; code?: unknown; item?: unknown }, visitor: string) {
+    /** The customer scans the business's rotating code (only when the owner chose self check-in): restaurant check-ins also confirm the customer's passcode. */
+    async selfUse(slug: string, session: string, input: { cardId?: unknown; code?: unknown; item?: unknown; passcode?: unknown }, visitor: string) {
       const b = await h.publicLive(slug); if (!b) throw new ProgramError('This page is not available.', 404, 'NOT_FOUND'); const me = await sessionOf(b.id, session);
-      if (h.tooMany(`tick|${visitor}`, 30, h.now())) throw new ProgramError('Too many tries. Please wait a little.', 429, 'RATE');
+      if (h.tooMany(`tick|${b.id}|${me.phone}|${visitor}`, 30, h.now())) throw new ProgramError('Too many tries. Please wait a little.', 429, 'RATE');
       return withLock(`mem|${b.id}`, async () => {
         const progs = await programsOf(b.id); const cardId = clean(input.cardId, 60);
         const mine = (await membersOf(b.id)).filter((x) => x.phone === me.phone && x.status !== 'cancelled' && (!cardId || x.id === cardId));
@@ -447,11 +452,21 @@ export function createPrograms(h: Helpers) {
         const selfCards = cards.filter((x) => x.p.checkIn === 'self'); if (!selfCards.length) throw new ProgramError('At this business the staff ticks your card. Show your QR code.', 403, 'STAFF_ONLY');
         const t = h.now();
         // The customer proves they are at the business by the code it shows: it changes every minute and cannot be guessed.
-        if (h.tooMany(`tickcode|${visitor}`, 15, t)) throw new ProgramError('Too many wrong codes. Please wait a little.', 429, 'RATE');
-        const hit = selfCards.find((x) => venueCodeOk(b.id, x.p.id, input.code, t)); if (!hit) throw new ProgramError('That code is not right, or it has changed. Scan the business\'s code again.', 403, 'BAD_CODE');
-        const { m, p } = hit; const date = kigaliDate(t); const served = await servedOn(b.id, date); const used = usedOf(served, m.id);
-        const item = clean(input.item, 24) || undefined;
-        const r = canServe({ member: m, program: p, used, now: t, item });
+        if (h.tooMany(`tickcode|${b.id}|${me.phone}|${visitor}`, 15, t)) throw new ProgramError('Too many wrong codes. Please wait a little.', 429, 'RATE');
+        const hit = selfCards.reverse().find((x) => venueCodeOk(b.id, x.p.id, input.code, t)); if (!hit) throw new ProgramError('That code is not right, or it has changed. Scan the business\'s code again.', 403, 'BAD_CODE');
+        const restaurant = b.category === 'restaurant';
+        if (restaurant) {
+          if (!validPasscode(input.passcode)) throw new ProgramError('Enter your 4 to 6 digit passcode to check in.', 400, 'PASSCODE_REQUIRED');
+          const people = await peopleOf(b.id);
+          const person = people.find((entry) => entry.phone === me.phone);
+          if (!person) throw new ProgramError('Please sign in again.', 401, 'SESSION');
+          await checkPasscode(b.id, people, person, input.passcode);
+        }
+        const { m, p } = hit;
+        const program = servingHours(b, p);
+        const date = kigaliDate(t); const served = await servedOn(b.id, date); const used = usedOf(served, m.id);
+        const item = restaurant ? restaurantMealAt(program, t) : clean(input.item, 24) || undefined;
+        const r = canServe({ member: m, program, used, now: t, item });
         if (r.ok !== true) { const d = r as Exclude<typeof r, { ok: true }>; throw new ProgramError(d.message, 409, d.code === 'already' ? 'ALREADY' : 'DENIED'); }
         const use = await record(b.id, m, date, t, r.item, served, 'self');
         return { ok: true as const, item: r.item, useId: use.id, cardId: m.id };

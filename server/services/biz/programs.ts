@@ -50,6 +50,7 @@ export function cleanProgramText(input: any, prev: ProgramText = {}): ProgramTex
 export type MemberStatus = 'pending' | 'active' | 'paused' | 'cancelled';
 
 export interface ItemWindow { item: string; from: string; to: string }
+export interface CardLayout { hiddenItems: string[]; hiddenDates: string[] }
 export interface Program {
   id: string; title: string; description?: string;
   /** What a customer pays once, in RWF. */
@@ -62,6 +63,8 @@ export interface Program {
   openDays: Day[];
   /** Optional serving times. Without them a item can be served at any time. */
   windows?: ItemWindow[];
+  /** Display preferences for cards issued from this plan. */
+  cardLayout?: CardLayout;
   /** A short rule shown to the customer ("Show your pass each time; one use a day"). */
   terms?: string;
   maxMembers?: number;
@@ -112,6 +115,33 @@ export const isDate = (v: unknown): v is string => typeof v === 'string' && /^\d
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const mins = (hhmm: string) => { const [h, m] = hhmm.split(':').map(Number); return h * 60 + m; };
 
+const MEAL_HOURS: Partial<Record<string, Pick<ItemWindow, 'from' | 'to'>>> = {
+  breakfast: { from: '06:00', to: '10:00' },
+  lunch: { from: '11:00', to: '15:00' },
+  dinner: { from: '17:00', to: '22:00' },
+  supper: { from: '17:00', to: '22:00' },
+};
+
+export function withRestaurantMealHours(program: Program): Program {
+  const windows = [...(program.windows ?? [])];
+  for (const item of program.items) {
+    const name = item.trim().toLowerCase();
+    const hours = Object.hasOwn(MEAL_HOURS, name) ? MEAL_HOURS[name] : undefined;
+    if (hours && !windows.some((window) => window.item === item)) windows.push({ item, ...hours });
+  }
+  return windows.length ? { ...program, windows } : program;
+}
+
+/** During overlapping custom hours, use the meal whose serving window started most recently. */
+export function restaurantMealAt(program: Program, now: number): string | undefined {
+  const minute = kigaliMinutes(now);
+  const openMeals = (program.windows ?? []).filter(({ item, from, to }) =>
+    Object.hasOwn(MEAL_HOURS, item.trim().toLowerCase()) && minute >= mins(from) && minute < mins(to),
+  );
+  openMeals.sort((a, b) => b.from.localeCompare(a.from));
+  return openMeals[0]?.item;
+}
+
 /** The last day a plan can be used: start + days − 1 (a 30-day plan starting on the 1st ends on the 30th), plus any days the owner added. */
 export const endDateFor = (start: string, days: number, extra = 0) => addDays(start, Math.max(1, days) - 1 + Math.max(0, extra));
 
@@ -145,7 +175,42 @@ export function cleanProgram(input: any, id: string, now: string, prev?: Program
   if (code && /^\d{4}$/.test(code)) p.joinCode = code;
   if (prev?.endedAt && input?.active !== true) { p.endedAt = prev.endedAt; p.active = false; }   // an ended program stays ended until the owner opens sign-ups again
   const ci = input?.checkIn === undefined ? prev?.checkIn : input.checkIn; if (ci === 'self') p.checkIn = 'self';
+  const layout = cleanCardLayout(input?.cardLayoutChange, prev?.cardLayout, items);
+  if ('error' in layout) return layout;
+  if (layout.hiddenItems.length || layout.hiddenDates.length) p.cardLayout = layout;
   return p;
+}
+
+function cleanCardLayout(input: unknown, previous: CardLayout | undefined, items: string[]): CardLayout | { error: string } {
+  if (input !== undefined && (!input || typeof input !== 'object' || Array.isArray(input))) return { error: 'Choose which card columns or dates to show or hide.' };
+  const change = (input ?? {}) as Record<string, unknown>;
+  const hiddenItems = new Set(previous?.hiddenItems.filter((item) => items.includes(item)));
+  const hiddenDates = new Set(previous?.hiddenDates);
+
+  for (const key of ['hideItems', 'showItems', 'hideDates', 'showDates'] as const) {
+    const values = change[key];
+    if (values === undefined) continue;
+    if (!Array.isArray(values) || values.length > MAX_PROGRAM_DAYS) return { error: 'Send the card columns or dates as a list.' };
+    for (const value of values) {
+      if (key === 'hideItems' || key === 'showItems') {
+        const label = clean(value, 24);
+        const item = items.find((name) => name === label) ?? items.find((name) => name.toLowerCase() === label.toLowerCase());
+        if (item === undefined) return { error: 'Select a column from the items in this program.' };
+        if (key === 'hideItems') hiddenItems.add(item);
+        else hiddenItems.delete(item);
+      } else {
+        if (!isDate(value) || addDays(value, 0) !== value) return { error: 'Choose a valid date for the card row (YYYY-MM-DD).' };
+        if (key === 'hideDates') hiddenDates.add(value);
+        else hiddenDates.delete(value);
+      }
+    }
+  }
+  if (hiddenItems.size >= items.length) {
+    if (Array.isArray(change.hideItems) && change.hideItems.length) return { error: 'Keep at least one item column visible on the card.' };
+    hiddenItems.delete(items[0]);
+  }
+  if (hiddenDates.size > MAX_PROGRAM_DAYS) return { error: `Hide at most ${MAX_PROGRAM_DAYS} dates on a card.` };
+  return { hiddenItems: items.filter((item) => hiddenItems.has(item)), hiddenDates: [...hiddenDates].sort() };
 }
 
 /* ---------------------------------------------------------------- short user names */
