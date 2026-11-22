@@ -13,19 +13,21 @@ const day = (d: Date | string) => new Date(d).toLocaleDateString('en-GB', { day:
 
 export interface Email { subject: string; html: string; text: string }
 
-function layout(o: { preheader: string; title: string; intro: string; body: string; cta?: { label: string; url: string }; footnote?: string }): string {
+function layout(o: { preheader: string; title: string; label?: string; intro: string; body: string; cta?: { label: string; url: string }; footnote?: string }): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(o.title)}</title></head>
 <body style="margin:0;padding:0;background:#F4F2EE;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1F1E1D">
 <div style="display:none;max-height:0;overflow:hidden;opacity:0">${esc(o.preheader)}</div>
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#F4F2EE;padding:32px 12px"><tr><td align="center">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:580px">
-<tr><td style="padding:0 4px 18px"><span style="display:inline-block;width:28px;height:28px;border-radius:8px;background:#0B1420;color:#F6B94A;font-weight:800;text-align:center;line-height:28px;font-size:16px;vertical-align:middle">B</span>
-<span style="font-size:17px;font-weight:700;letter-spacing:-0.2px;vertical-align:middle;margin-left:8px">Bwenge AI</span></td></tr>
-<tr><td style="background:#FFFFFF;border:1px solid #E7E3DC;border-radius:18px;padding:32px 28px">
+<tr><td bgcolor="#0E1722" style="padding:20px 24px;border-radius:16px 16px 0 0;color:#FFFFFF">
+<span style="font-size:19px;font-weight:700">Bwenge AI</span>
+<span style="font-size:13px;color:#F4C46A"> &nbsp;·&nbsp; Account &amp; billing</span></td></tr>
+<tr><td bgcolor="#FFFFFF" style="border:1px solid #E7E3DC;border-top:0;border-radius:0 0 16px 16px;padding:28px 24px">
+${o.label ? `<p style="margin:0 0 8px;font-size:12px;font-weight:700;letter-spacing:0.6px;color:#526071">${esc(o.label)}</p>` : ''}
 <h1 style="margin:0 0 10px;font-size:22px;line-height:1.3;color:#1F1E1D">${esc(o.title)}</h1>
 <p style="margin:0 0 22px;font-size:15px;line-height:1.6;color:#4A4842">${o.intro}</p>
 ${o.body}
-${o.cta ? `<table role="presentation" cellspacing="0" cellpadding="0" style="margin:26px 0 4px"><tr><td style="border-radius:12px;background:#D97757"><a href="${esc(o.cta.url)}" style="display:inline-block;padding:13px 22px;font-size:15px;font-weight:600;color:#FFFFFF;text-decoration:none">${esc(o.cta.label)}</a></td></tr></table>` : ''}
+${o.cta ? `<table role="presentation" cellspacing="0" cellpadding="0" style="margin:26px 0 4px"><tr><td style="border-radius:12px;background:#934126"><a href="${esc(o.cta.url)}" style="display:inline-block;padding:13px 22px;font-size:15px;font-weight:600;color:#FFFFFF;text-decoration:none">${esc(o.cta.label)}</a></td></tr></table>` : ''}
 ${o.footnote ? `<p style="margin:22px 0 0;font-size:12.5px;line-height:1.6;color:#8A867D">${o.footnote}</p>` : ''}
 </td></tr>
 <tr><td style="padding:18px 6px;text-align:center;font-size:12px;line-height:1.6;color:#8A867D">Bwenge AI · Education, research &amp; data companion<br><a href="${appUrl()}" style="color:#8A867D">${appUrl().replace(/^https?:\/\//, '')}</a> · Questions? Reply to this email.</td></tr>
@@ -34,7 +36,7 @@ ${o.footnote ? `<p style="margin:22px 0 0;font-size:12.5px;line-height:1.6;color
 
 function rows(items: Array<[string, string]>) {
   return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #E7E3DC;border-radius:12px;border-collapse:separate;overflow:hidden">${items.map(([k, v], i) =>
-    `<tr><td style="padding:11px 14px;font-size:13px;color:#8A867D;${i ? 'border-top:1px solid #EFEBE4;' : ''}width:45%">${esc(k)}</td><td style="padding:11px 14px;font-size:14px;color:#1F1E1D;font-weight:600;text-align:right;${i ? 'border-top:1px solid #EFEBE4;' : ''}">${v}</td></tr>`).join('')}</table>`;
+    `<tr><td style="padding:11px 14px;font-size:13px;color:#526071;${i ? 'border-top:1px solid #EFEBE4;' : ''}width:38%;vertical-align:top">${esc(k)}</td><td style="padding:11px 14px;font-size:14px;color:#1F1E1D;font-weight:600;text-align:right;overflow-wrap:anywhere;${i ? 'border-top:1px solid #EFEBE4;' : ''}">${v}</td></tr>`).join('')}</table>`;
 }
 
 const text = (lines: Array<string | false | undefined>) => lines.filter(Boolean).join('\n');
@@ -51,8 +53,9 @@ export function receiptEmail(d: ReceiptData): Email {
     subject,
     html: layout({
       preheader: `Payment received: ${d.item}, ${amount}.`,
+      label: 'Payment receipt',
       title: 'Payment received. Thank you!',
-      intro: `Hi ${esc(d.name || 'there')}, your Mobile Money payment was successful. ${esc(d.grant)}`,
+      intro: `Hi ${esc(d.name || 'there')}, we received your Mobile Money payment for ${esc(d.item)}.${d.grant ? ` ${esc(d.grant)}` : ''}`,
       body: rows([
         ['Receipt number', esc(d.receiptNumber)],
         ['Date', esc(day(d.paidAt))],
@@ -60,7 +63,7 @@ export function receiptEmail(d: ReceiptData): Email {
         ['Amount paid', `${amount} <span style="color:#8A867D;font-weight:400">(≈ ${usd(d.amountUsd)})</span>`],
         ['Payment method', `MTN Mobile Money · ${esc(d.phoneMasked)}`],
         ...(d.transactionId ? [['MoMo transaction ID', esc(d.transactionId)] as [string, string]] : []),
-        ['Status', '<span style="color:#1B8A5A">Paid</span>'],
+        ['Status', '<span style="color:#176649">Paid</span>'],
       ]),
       cta: { label: 'Open Bwenge', url: appUrl() },
       footnote: `${d.balanceNote ? `${esc(d.balanceNote)} ` : ''}Keep this email as your receipt. You can also find it in Settings → Billing.`,
@@ -75,9 +78,9 @@ export function badgeGrantedEmail(name: string): Email {
   return {
     subject,
     html: layout({
-      preheader: subject, title: subject,
+      preheader: subject, title: subject, label: 'Verification confirmed',
       intro: `Hi ${esc(name || 'there')}, a Bwenge administrator granted you the Verified badge.`,
-      body: `<p>${message}</p>`,
+      body: rows([['Badge status', '<span style="color:#176649">Active</span>'], ['Where it appears', 'Public Bwenge profile and business pages']]),
       cta: { label: 'Open Bwenge', url: appUrl() },
     }),
     text: text([subject, `Hi ${name || 'there'}, ${message}`, appUrl()]),
@@ -105,6 +108,7 @@ export function planGrantedEmail({ name, plan, endDate }: { name: string; plan: 
     html: layout({
       preheader: subject,
       title: subject,
+      label: 'Plan access confirmed',
       intro: `Hi ${esc(name || 'there')}, a Bwenge administrator granted you access to ${esc(plan.name)}. ${access}`,
       body: rows(items.map(([label, value]) => [label, esc(value)])),
       cta: { label: 'Open Bwenge', url: appUrl() },
@@ -136,7 +140,7 @@ export function renewalReminderEmail(d: { name: string; plan: string; endDate: D
     subject: `Your ${d.plan} plan ends ${when}`,
     html: layout({
       preheader: `Renew for ${rwf(d.priceRwf)} with Mobile Money to keep your ${d.plan} features.`,
-      title: `Your ${esc(d.plan)} plan ends ${when}`,
+      title: `Your ${d.plan} plan ends ${when}`,
       intro: `Hi ${esc(d.name || 'there')}, your ${esc(d.plan)} access ends on <b>${esc(day(d.endDate))}</b>. Renew now to keep your daily credits and memory across all chats.`,
       body: rows([['Plan', esc(d.plan)], ['Renewal', `${rwf(d.priceRwf)} <span style="color:#8A867D;font-weight:400">(≈ ${usd(d.priceUsd)}) / month</span>`], ['Ends on', esc(day(d.endDate))]]),
       cta: { label: `Renew for ${rwf(d.priceRwf)}`, url: `${appUrl()}/upgrade?renew=1` },
