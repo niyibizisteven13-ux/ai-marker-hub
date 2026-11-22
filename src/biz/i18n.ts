@@ -206,6 +206,18 @@ Object.assign(RW, { 'Our prices': 'Ibiciro byacu' });
 Object.assign(RW, {
   'Scan the business\'s code': 'Sikana kode y’ubucuruzi',
   'Point your phone camera at the code shown at the business. Your card is ticked at once. No camera? Type the 6 digits.': 'Werekeza kamera ya telefoni yawe kuri kode iri ku bucuruzi. Ikarita yawe ihita ishyirwaho ikimenyetso. Nta kamera? Andika imibare 6.',
+  'No dates shown': 'Nta matariki agaragara',
+  'Checked in': 'Byemejwe',
+  'Scan QR code': 'Sikana kode ya QR',
+  'Use code': 'Koresha kode',
+  '6-digit code': 'Kode y’imibare 6',
+  'Enter your passcode to confirm check-in': 'Andika kode yawe y’ibanga kugira ngo wemeze',
+  'Confirm check-in': 'Emeza ko uhageze',
+  'Serving hours (Kigali)': 'Amasaha yo gutanga amafunguro (Kigali)',
+  'Scan the check-in QR shown at this business.': 'Sikana kode ya QR yerekanwe kuri ubu bucuruzi.',
+  'Allow the camera to scan passes, or type the code instead.': 'Emerera kamera gusikana ikarita, cyangwa wandike kode.',
+  'Camera': 'Kamera',
+  'Close the camera': 'Funga kamera',
   'Code shown at the business': 'Kode iri ku bucuruzi',
 });
 Object.assign(RW, { 'Verified': 'Yemejwe' });
