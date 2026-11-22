@@ -223,16 +223,38 @@ export function canServe(o: { member: Member; program: Program; used: Array<{ it
   if (program.totalUses && (member.used ?? 0) >= program.totalUses) return { ok: false, code: 'no_uses_left', message: `All ${program.totalUses} uses of this program are already taken.` };
   if (!program.openDays.includes(dayOfWeek(today))) return { ok: false, code: 'closed_day', message: 'Not available today.' };
   const done = new Set(o.used.map((e) => e.item));
-  const open = program.items.filter((m) => !done.has(m));
-  if (!open.length) { const last = o.used[o.used.length - 1]; return { ok: false, code: 'already', message: program.items.length === 1 ? `Already used today at ${hhmm(last?.at)}.` : 'All of today\'s uses are already taken.', ...(last ? { item: last.item, at: last.at } : {}) }; }
-  if (o.item !== undefined) {
-    if (!program.items.includes(o.item)) return { ok: false, code: 'no_item', message: 'That item is not part of this program.' };
-    if (done.has(o.item)) { const e = o.used.find((x) => x.item === o.item)!; return { ok: false, code: 'already', message: `${o.item} was already used today at ${hhmm(e.at)}.`, item: o.item, at: e.at }; }
+  const open = program.items.filter((item) => !done.has(item));
+  if (o.item !== undefined && !program.items.includes(o.item)) return { ok: false, code: 'no_item', message: 'That item is not part of this program.' };
+
+  function alreadyUsed(message: string, use?: { item: string; at: string }): ServeResult {
+    const details = use ? { item: use.item, at: use.at } : {};
+    // The schedule repeats weekly. The next open day still has to fall within the paid period.
+    for (let offset = 1; offset <= 7; offset++) {
+      const date = addDays(today, offset);
+      if (date > member.endDate) break;
+      if (!program.openDays.includes(dayOfWeek(date))) continue;
+      const next = new Date(`${date}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+      return { ok: false, code: 'already', message: `${message} Next check-in: ${next}.`, ...details };
+    }
+    return { ok: false, code: 'already', message: `${message} There are no more serving days left on this card.`, ...details };
   }
+
+  const requestedUse = o.used.find((use) => use.item === o.item);
+  if (requestedUse) return alreadyUsed(`${requestedUse.item} was already used today at ${hhmm(requestedUse.at)}.`, requestedUse);
+  if (!open.length) {
+    const last = o.used[o.used.length - 1];
+    return alreadyUsed(program.items.length === 1 ? `Already used today at ${hhmm(last?.at)}.` : "All of today's uses are already taken.", last);
+  }
+
   const minute = kigaliMinutes(now);
   const inWindow = (m: string) => { const w = program.windows?.find((x) => x.item === m); return !w || (minute >= mins(w.from) && minute < mins(w.to)); };
   const pick = o.item ?? open.find(inWindow) ?? (o.force ? open[0] : undefined);
-  if (!pick) { const w = program.windows?.find((x) => x.item === open[0]); return { ok: false, code: 'outside_window', message: `${open[0]} is available ${w ? `${w.from}–${w.to}` : 'at set times'}.`, item: open[0] }; }
+  if (!pick) {
+    const currentUse = o.used.find((use) => program.items.includes(use.item) && inWindow(use.item));
+    if (currentUse) return alreadyUsed(`${currentUse.item} was already used today at ${hhmm(currentUse.at)}.`, currentUse);
+    const w = program.windows?.find((x) => x.item === open[0]);
+    return { ok: false, code: 'outside_window', message: `${open[0]} is available ${w ? `${w.from}–${w.to}` : 'at set times'}.`, item: open[0] };
+  }
   if (!inWindow(pick) && !o.force) { const w = program.windows!.find((x) => x.item === pick)!; return { ok: false, code: 'outside_window', message: `${pick} is available ${w.from}–${w.to}.`, item: pick }; }
   return { ok: true, item: pick };
 }

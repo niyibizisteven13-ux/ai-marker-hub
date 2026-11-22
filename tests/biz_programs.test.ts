@@ -61,6 +61,15 @@ test('who may be served now: one lunch a day, never unpaid/expired/paused/cancel
   assert.deepEqual(ok({}), { ok: true, item: 'Lunch' });
   for (const [m, code] of [[{ paid: false, status: 'pending' }, 'pending'], [{ startDate: '2026-11-30', endDate: '2026-12-29' }, 'not_started'], [{ endDate: '2026-11-16' }, 'expired'], [{ status: 'paused' }, 'paused'], [{ status: 'cancelled' }, 'cancelled']] as const) assert.equal((ok({ member: member(m as any) }) as any).code, code);
   const again = ok({ used: [{ item: 'Lunch', at: new Date(T0 - 600_000).toISOString() }] }) as any; assert.equal(again.code, 'already'); assert.match(again.message, /Already used today at 11:50/);
+  const saturday = '2026-11-21T10:00:00Z';
+  const usedOnSaturday = [{ item: 'Lunch', at: saturday }];
+  const next = ok({ now: Date.parse(saturday), used: usedOnSaturday });
+  assert(next.ok === false);
+  assert.equal(next.code, 'already');
+  assert.match(next.message, /Next check-in: 23 Nov/, 'skips the closed Sunday');
+  const last = ok({ now: Date.parse(saturday), used: usedOnSaturday, member: member({ endDate: '2026-11-22' }) });
+  assert(last.ok === false);
+  assert.match(last.message, /no more serving days left/, 'does not offer a day past the paid period');
   assert.equal((ok({ now: Date.parse('2026-11-22T10:00:00Z') }) as any).code, 'closed_day', 'Sunday');
   const timed = program({ windows: [{ item: 'Lunch', from: '12:30', to: '15:00' }] });
   assert.equal((ok({ program: timed }) as any).code, 'outside_window'); assert.match((ok({ program: timed }) as any).message, /12:30–15:00/);
@@ -413,7 +422,11 @@ test('customer scan: off by default; when the owner sets it the customer scans t
   assert.equal(((await passView(svc, biz.slug, j.session)) as any).today.used.length, 0);
   const r: any = await svc.selfUse(biz.slug, j.session, { code: c0.code }, 'e'); assert.equal(r.ok, true); assert.equal(r.item, 'Lunch', 'at noon the scan ticks lunch without being told which'); card = await passView(svc, biz.slug, j.session);
   assert.deepEqual(card.today.used.map((x: any) => x.item), ['Lunch']); assert.equal(card.tick.undo.useId, r.useId); assert.equal(card.member.usesLeft, 2);
-  await assert.rejects(svc.selfUse(biz.slug, j.session, { code: c0.code }, 'e'), (e: any) => /outside|18:00/.test(e.message), 'a second scan at lunch time cannot also take dinner');
+  await assert.rejects(svc.selfUse(biz.slug, j.session, { code: c0.code }, 'e'), (e: any) => e.code === 'ALREADY' && /Next check-in: 18 Nov/.test(e.message), 'a second scan at lunch time gives the next lunch date');
+  const duplicate = await svc.redeem('o', biz.id, { code: j.code });
+  assert.equal(duplicate.ok, false, 'the cashier cannot redeem a lunch the customer already redeemed');
+  assert.match(duplicate.message ?? '', /Next check-in: 18 Nov/);
+  assert.deepEqual((await passView(svc, biz.slug, j.session)).today.used.map((use: { item: string }) => use.item), ['Lunch'], 'neither repeat scan consumes dinner or tomorrow’s lunch');
   assert.equal((await svc.today('o', biz.id)).served[0].by, 'self', 'the owner sees which ticks the customer made themselves');
   at(T0 + 7 * 3_600_000); const d: any = await svc.selfUse(biz.slug, j.session, { code: await codeOf(svc, biz.id, prog.id) }, 'e'); assert.equal(d.item, 'Dinner');
   at(T0 + 86_400_000 + 3_600_000); await svc.selfUse(biz.slug, j.session, { code: await codeOf(svc, biz.id, prog.id) }, 'e'); at(T0 + 2 * 86_400_000 + 3_600_000);

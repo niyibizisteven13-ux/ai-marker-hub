@@ -157,7 +157,7 @@ bus pass, a month of tutoring sessions, a car-wash subscription.
    holds the money.
 4. **Each time they come** (Programs → *Today*): the owner taps *Scan a pass* (camera) or types the code. The screen says **Allowed: Lunch** in green,
    or why not in red: not paid, not started, ended, paused, not available today, already used today at 12:41, all uses taken, or outside the
-   times it is available (the owner may *Allow anyway*; nothing else can be overridden). A mistaken scan can be undone for 20 minutes.
+   times it is available (the owner may *Allow anyway*). A repeat check-in for the same meal shows the next serving date within the card’s valid period. A mistaken scan can be undone for 20 minutes.
 4b. **Who ticks the card is the owner's choice** (per program, in the plan form or by the assistant with `check_in`). **The business** (default): scan or type the
    customer's code as above. **The customer scans**: the owner opens *Programs → Today*, which then shows a **check-in code**: a QR code and six digits that change every
    minute (put a phone or tablet at the door or till). The customer scans it with their phone camera, which opens the business page with the code in the address; after the
@@ -178,7 +178,7 @@ starting on the 1st ends on the 30th); days it is not available neither allow a 
 
 **The card** looks like the paper one a restaurant hands out: the business name and phone numbers, the person's name and period, a stamp (PAID or NOT PAID),
 then a grid with the dates down the side (15 days to a block, a switch between blocks) and **one column per item** (Morning, Midday, Evening; or just
-Lunch and Supper; up to four), a cross in every box that was used, closed days hatched, today highlighted. Under it: uses left, valid until, the QR code
+Lunch and Supper; up to four), a green tick in every box that was used, closed days hatched, today highlighted. Under it: uses left, valid until, the QR code
 (only once paid; tap to enlarge) and the short code.
 
 **Privacy and safety**: the public page shows only the plans (name, price, days, items), never members and never the join code. Passcodes are stored only

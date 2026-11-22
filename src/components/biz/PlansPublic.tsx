@@ -9,7 +9,7 @@ import type { Lang } from '../../biz/types';
 
 /**
  * Programs on the public page. A customer scans the business's QR code, joins once (name, phone, the owner's 4-digit join code, then a passcode of their
- * own), and from then on signs in with phone number and passcode to see their card: dates down the side, one column per item, a cross for every use,
+ * own), and from then on signs in with phone number and passcode to see their card: dates down the side, one column per item, a check mark for every use,
  * and the QR code the business scans. No app and no link to guard: the passcode is the key.
  */
 type Program = NonNullable<PublicBusiness['programs']>[number];
@@ -152,7 +152,7 @@ function PaperCard({ b, card, w }: { b: PublicBusiness; card: CardInfo; w: Retur
   const ink = '#14213D'; const paper = `color-mix(in srgb, ${theme.accent} 16%, #FFFFFF)`; const line = `color-mix(in srgb, ${ink} 35%, ${paper})`;
   const m = card.member; const local = (x: string) => (x.startsWith('250') ? `0${x.slice(3)}` : x); const phones = [b.contact.phone, b.contact.whatsapp].filter((x): x is string => !!x).map(local).filter((x, i, a) => a.indexOf(x) === i);
   const stamp = m.paid ? { text: tx('PAID'), color: '#2848C8' } : { text: tx('NOT PAID'), color: '#B91C1C' };
-  const short = (s: string) => (s.length > 8 ? `${s.slice(0, 7)}…` : s);
+  const short = (s: string) => (s.length > 10 ? `${s.slice(0, 9)}…` : s);
   return (
     <div className="relative overflow-hidden rounded-2xl border p-4 shadow-sm" style={{ background: paper, borderColor: line, color: ink }}>
       <span aria-hidden="true" className="absolute left-1/2 top-2 h-3 w-3 -translate-x-1/2 rounded-full border" style={{ background: '#F5F7FA', borderColor: line }} />
@@ -177,7 +177,7 @@ function PaperCard({ b, card, w }: { b: PublicBusiness; card: CardInfo; w: Retur
                 <th scope="row" className="border-b border-r px-1 py-1 text-left text-xs font-bold" style={{ borderColor: line }}><span className="text-base tabular-nums">{dayNum(d.date)}</span> <span className="font-semibold opacity-70">{tx(DAY[d.dow])}</span>{isToday && <span className="sr-only"> {tx('today')}</span>}</th>
                 {items.map((it) => { const used = d.used.includes(it); const at = card.today.date === d.date ? card.today.used.find((u) => u.item === it)?.at : undefined;
                   return <td key={it} title={used ? `${it}${at ? ` ${clock(at)}` : ''}` : undefined} className="h-9 border-b border-r p-0 text-lg last:border-r-0" style={{ borderColor: line, ...(!d.open ? { background: `repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in srgb, ${ink} 14%, transparent) 4px 5px)` } : {}) }}>
-                    {used ? <span aria-label={`${it} ✓`} className="font-bold italic" style={{ color: '#2848C8', fontFamily: 'cursive' }}>✗</span> : !d.open ? <span className="text-xs opacity-50" aria-label={tx('Closed')}>—</span> : null}</td>; })}
+                    {used ? <Check size={20} strokeWidth={3} role="img" aria-label={`${it}: ${tx("Checked in")}`} className="mx-auto text-emerald-700" /> : !d.open ? <span className="text-xs opacity-50" aria-label={tx('Closed')}>—</span> : null}</td>; })}
               </tr>); })}
           </tbody>
         </table>
