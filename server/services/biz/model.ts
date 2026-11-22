@@ -33,7 +33,13 @@ export type Day = (typeof DAYS)[number];
 
 export interface Hours { day: Day; open: string; close: string; closed?: boolean }
 export interface Product { id: string; name: string; price: number | null; unit?: string; description?: string; /** A link to this product or service (https): the page shows an Open button to it instead of the order button. */ url?: string; mediaId?: string; available: boolean; hidden?: boolean; /** Private: units in stock and the level that raises a low-stock alert. Never in publicView. */ stock?: number; lowAt?: number }
-export type MediaKind = 'image' | 'video';
+export type MediaKind = 'image' | 'video' | 'document';
+export const PROFILE_DOCUMENT_MIMES = {
+  pdf: 'application/pdf',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+} as const;
 /** What the server learned about an uploaded video and what it made from it (see videoPipeline.ts). `processing`: being turned into a smooth 720p file, a 360p file for slow connections and a poster picture; `ready`: done (or kept as uploaded when `raw`); `failed`: kept as uploaded. */
 export interface VideoInfo { state: 'processing' | 'ready' | 'failed'; /** The picture as a viewer sees it (after rotation). */ w?: number; h?: number; duration?: number; lq?: boolean; poster?: boolean; /** Changes whenever the files change, so browsers may keep the old ones for a year. */ rev?: number; /** Played as uploaded: this server could not process it. */ raw?: boolean }
 export type PublicVideo = Pick<VideoInfo, 'state' | 'w' | 'h' | 'duration' | 'lq' | 'poster' | 'rev' | 'raw'>;
@@ -230,9 +236,9 @@ export function applyProfileData(b: Business, patch: any): { error?: string } {
 }
 
 /* ---------------------------------------------------------------- the public boundary */
-export interface PublicMedia { id: string; kind: MediaKind; caption?: string; video?: PublicVideo }
+export interface PublicMedia { id: string; kind: MediaKind; document?: { name: string; mime: string; size: number }; caption?: string; video?: PublicVideo }
 /** The public face of one file: its kind, caption and, for a video, what a player needs (size of the picture, whether a light version and a poster exist). */
-export const publicMedia = (m: Media): PublicMedia => ({ id: m.id, kind: m.kind, ...(m.caption ? { caption: m.caption } : {}), ...(m.kind === 'video' && m.video ? { video: { state: m.video.state, ...(m.video.w ? { w: m.video.w, h: m.video.h } : {}), ...(m.video.duration ? { duration: m.video.duration } : {}), ...(m.video.lq ? { lq: true } : {}), ...(m.video.poster ? { poster: true } : {}), ...(m.video.rev ? { rev: m.video.rev } : {}), ...(m.video.raw ? { raw: true } : {}) } } : {}) });
+export const publicMedia = (m: Media): PublicMedia => ({ id: m.id, kind: m.kind, ...(m.kind === 'document' ? { document: { name: m.name, mime: m.mime, size: m.size } } : {}), ...(m.caption ? { caption: m.caption } : {}), ...(m.kind === 'video' && m.video ? { video: { state: m.video.state, ...(m.video.w ? { w: m.video.w, h: m.video.h } : {}), ...(m.video.duration ? { duration: m.video.duration } : {}), ...(m.video.lq ? { lq: true } : {}), ...(m.video.poster ? { poster: true } : {}), ...(m.video.rev ? { rev: m.video.rev } : {}), ...(m.video.raw ? { raw: true } : {}) } } : {}) });
 export interface PublicBusiness {
   slug: string; name: string; category: Category; tagline: string; about: string; theme: Theme;
   logo?: PublicMedia; cover?: PublicMedia;
@@ -263,14 +269,14 @@ export const isLive = (b: Business) => b.published && !b.suspended;
 
 /** The ONLY description of a business that public routes may return. Built field by field (never by copying the business). */
 export function publicView(b: Business): PublicBusiness {
-  const shown = new Map(b.media.filter((m) => m.visible).map((m) => [m.id, m]));
+  const shown = new Map(b.media.filter((m) => m.visible && m.kind !== 'document').map((m) => [m.id, m]));
   const pm = (id?: string): PublicMedia | undefined => { const m = id ? shown.get(id) : undefined; return m ? publicMedia(m) : undefined; };
   const contact: PublicBusiness['contact'] = {};
   for (const k of ['whatsapp', 'phone', 'email', 'address', 'mapUrl', 'website', 'instagram', 'facebook'] as const) if (b[k]) contact[k] = b[k];
   const out: PublicBusiness = {
     slug: b.slug, name: b.name, category: b.category, tagline: b.tagline, about: b.about, theme: b.theme, contact, hours: b.hours.map((h) => ({ ...h })),
     products: b.products.filter((p) => !p.hidden).map((p) => ({ id: p.id, name: p.name, price: p.price, ...(p.unit ? { unit: p.unit } : {}), ...(p.description ? { description: p.description } : {}), ...(p.url ? { url: p.url } : {}), ...(pm(p.mediaId) ? { media: pm(p.mediaId) } : {}), available: p.available })),
-    gallery: b.media.filter((m) => m.visible && m.gallery !== false && m.id !== b.logoId && m.id !== b.coverId).map((m) => pm(m.id)!),
+    gallery: b.media.filter((m) => shown.has(m.id) && m.gallery !== false && m.id !== b.logoId && m.id !== b.coverId).map((m) => pm(m.id)!),
     updatedAt: b.updatedAt,
   };
   if (b.programText && Object.keys(b.programText).length) out.programText = { ...b.programText };

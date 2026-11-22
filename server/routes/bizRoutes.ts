@@ -49,8 +49,9 @@ function validSignature(bizId: string, mediaId: string, exp: unknown, sig: unkno
  * Streams a stored file the way a video player needs it: byte ranges, a validator so a repeat visit costs nothing (304), a year of caching when the address carries the
  * file's revision (`?r=`), and the file closed the moment the viewer goes away (a player seeks and abandons many downloads).
  */
-type Served = { mime: string; size: number; etag?: string; open: (range?: { start: number; end: number }) => Promise<{ stream: NodeJS.ReadableStream }> };
+type Served = { mime: string; size: number; etag?: string; attachmentName?: string; open: (range?: { start: number; end: number }) => Promise<{ stream: NodeJS.ReadableStream }> };
 async function send(req: Request, res: Response, f: Served, cache: string) {
+  if (f.attachmentName) res.attachment(f.attachmentName);
   res.setHeader('Content-Type', f.mime); res.setHeader('Accept-Ranges', 'bytes'); res.setHeader('Cache-Control', cache);
   res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox"); res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   if (f.etag) { res.setHeader('ETag', f.etag); if (String(req.headers['if-none-match'] ?? '') === f.etag && !req.headers.range) { res.status(304); return res.end(); } }
@@ -81,7 +82,7 @@ export function createBizRouter(): Router {
   // Photos, videos, the light version of a video (?q=lq) and its poster picture (/poster). A viewer's player asks for many pieces of one video, so these have their own generous limit.
   r.get('/public/:slug/media/:mid', bizMediaLimiter, run(async (req, res) => {
     const f = await svc().mediaFor(req.params.slug, req.params.mid, req.query.q === 'lq' ? 'lq' : undefined); if (!f) return res.status(404).end();
-    await send(req, res, f, mediaCache(req, f.mime.startsWith('video/') ? 'video' : 'image'));
+    await send(req, res, f, f.attachmentName ? 'no-store' : mediaCache(req, f.mime.startsWith('video/') ? 'video' : 'image'));
   }));
   r.get('/public/:slug/media/:mid/poster', bizMediaLimiter, run(async (req, res) => {
     const f = await svc().mediaFor(req.params.slug, req.params.mid, 'poster'); if (!f) return res.status(404).end();
@@ -183,7 +184,7 @@ export function createBizRouter(): Router {
     next();
   }), run(async (req, res) => {
     const file = (req as any).file as { originalname: string; buffer: Buffer } | undefined; if (!file) return res.status(400).json({ error: 'Choose a photo or a video first.' });
-    res.status(201).json({ media: await svc().addMedia(me(req), req.params.id, { name: file.originalname, data: file.buffer, caption: req.body?.caption, scope: req.body?.scope }) });
+    res.status(201).json({ media: await svc().addMedia(me(req), req.params.id, { name: typeof req.body?.originalName === 'string' ? req.body.originalName : file.originalname, data: file.buffer, caption: req.body?.caption, scope: req.body?.scope }) });
   }));
   r.patch('/:id/media/:mid', run(async (req, res) => res.json({ media: await svc().updateMedia(me(req), req.params.id, req.params.mid, req.body ?? {}) })));
   r.delete('/:id/media/:mid', run(async (req, res) => { await svc().removeMedia(me(req), req.params.id, req.params.mid); res.status(204).end(); }));

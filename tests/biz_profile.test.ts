@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
+import JSZip from 'jszip';
 import { renderToString } from 'react-dom/server';
 import { bizTools } from '../server/services/ai/tools/bizTools.js';
 import { createBizService, resetBizLimitsForTests, type Kv } from '../server/services/biz/service.js';
@@ -127,4 +128,36 @@ test('applyProfileData on its own: limits keep a profile small and safe', () => 
   applyProfileData(b, { skills: Array.from({ length: 50 }, (_, i) => `skill ${i}`), timeline: Array.from({ length: 80 }, (_, i) => ({ title: `Item ${i}`, kind: 'project' })), links: Array.from({ length: 30 }, (_, i) => ({ label: `L${i}`, url: `https://x${i}.rw` })) });
   assert.equal(b.profile!.skills.length, 30); assert.equal(b.profile!.timeline.length, 60); assert.equal(b.profile!.links.length, 12); assert.equal(new Set(b.profile!.timeline.map((t) => t.id)).size, 60, 'every item has its own id');
   assert.deepEqual(applyProfileData(b, null), {}); assert.match(applyProfileData(b, { links: [{ label: 'x', url: 'ftp://x' }] }).error ?? '', /https/);
+});
+
+test('profile documents retain original bytes and are served only once the post is public', async () => {
+  const { svc } = make();
+  const profile = await svc.create('owner', { name: 'Elie', category: 'profile', slug: 'elie-file' });
+  await svc.update('owner', profile.id, { about: 'My work' });
+  await svc.setPublished('owner', profile.id, true);
+  const files = [{ name: 'Certificat été.pdf', data: Buffer.from('%PDF-1.7\nexample\n%%EOF') }];
+  for (const [ext, path] of [['docx', 'word/document.xml'], ['xlsx', 'xl/workbook.xml'], ['pptx', 'ppt/presentation.xml']]) {
+    const zip = new JSZip();
+    zip.file('[Content_Types].xml', '<Types/>');
+    zip.file(path, '<example/>');
+    files.push({ name: `file.${ext}`, data: await zip.generateAsync({ type: 'nodebuffer' }) });
+  }
+  for (const file of files) {
+    const stored = await svc.addMedia('owner', profile.id, { ...file, scope: 'feed' });
+    assert.equal(await svc.mediaFor(profile.slug, stored.id), null);
+    const post = await svc.addPost('owner', profile.id, { mediaIds: [stored.id] });
+    const [publicPost] = await svc.publicPosts(profile.slug, { postId: post.id });
+    assert.deepEqual(publicPost.media[0].document, { name: file.name, mime: stored.mime, size: file.data.length });
+    const served = await svc.mediaFor(profile.slug, stored.id);
+    assert.equal(served?.attachmentName, file.name);
+    const { stream } = await served!.open();
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+    assert.deepEqual(Buffer.concat(chunks), file.data);
+    await svc.removePost('owner', profile.id, post.id);
+    assert.equal(await svc.mediaFor(profile.slug, stored.id), null);
+  }
+  assert.equal((await svc.publicBySlug(profile.slug))?.gallery.length, 0);
+  await assert.rejects(svc.addMedia('owner', profile.id, { name: 'wrong.docx', data: files[2].data, scope: 'feed' }), { status: 415 });
+  await assert.rejects(svc.addMedia('owner', profile.id, { ...files[0], scope: 'timeline' }), { status: 415 });
 });

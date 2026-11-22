@@ -2,7 +2,8 @@ import { mkdir, rm, stat, writeFile } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import type { Readable } from 'node:stream';
-import { MAX_IMAGE_BYTES, MAX_VIDEO_BYTES, type MediaKind } from './model.js';
+import JSZip from 'jszip';
+import { PROFILE_DOCUMENT_MIMES, MAX_IMAGE_BYTES, MAX_VIDEO_BYTES, type MediaKind } from './model.js';
 
 /**
  * Photos and short videos of a business page. The kind of a file is decided by its first bytes, never by its name or the type the browser
@@ -25,7 +26,25 @@ export function sniff(b: Buffer): Sniffed | null {
   return null;
 }
 
-export const maxBytesFor = (kind: MediaKind) => (kind === 'image' ? MAX_IMAGE_BYTES : MAX_VIDEO_BYTES);
+export const maxBytesFor = (kind: MediaKind) => kind === 'video' ? MAX_VIDEO_BYTES : MAX_IMAGE_BYTES;
+
+// Inspect Office package entries without expanding their contents. Documents are delivered as attachments.
+const officeParts = { docx: 'word/document.xml', xlsx: 'xl/workbook.xml', pptx: 'ppt/presentation.xml' } as const;
+export async function sniffDocument(data: Buffer, name: string): Promise<Sniffed | null> {
+  const ext = name.split('.').pop()?.toLowerCase();
+  if (ext === 'pdf' && /^%PDF-\d\.\d/.test(data.subarray(0, 8).toString('ascii'))) {
+    return { kind: 'document', mime: PROFILE_DOCUMENT_MIMES.pdf, ext };
+  }
+  if ((ext !== 'docx' && ext !== 'xlsx' && ext !== 'pptx') || data.length < 4 || data.readUInt32LE(0) !== 0x04034b50) return null;
+  try {
+    const zip = await JSZip.loadAsync(data);
+    if (!zip.file('[Content_Types].xml') || !zip.file(officeParts[ext]) ||
+      Object.keys(zip.files).some((name) => /(?:^|\/)vbaProject\.bin$/i.test(name))) return null;
+    return { kind: 'document', mime: PROFILE_DOCUMENT_MIMES[ext], ext };
+  } catch {
+    return null;
+  }
+}
 
 export class MediaError extends Error { constructor(message: string, public status = 400) { super(message); } }
 
