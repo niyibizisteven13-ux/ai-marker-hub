@@ -17,7 +17,7 @@ interface Overview {
 }
 interface Effective { fxUsdRwf: number; goPacks: Array<{ id: string; rwf: number; credits: number }>; plans: Record<PlanId, { name: string; sold: boolean; priceUsd: number | null; priceRwf: number | null; limits: Limits }> }
 interface AdminPayment { receiptEmail?: { status: 'sent' | 'pending' | 'unavailable'; email: string | null; sentAt: string | null }; provider: string; emailedAt: string | null; id: string; createdAt: string; paidAt: string | null; purpose: string; months: number; credits: number; amountRwf: number; currency: string; phoneMasked: string; status: string; reason: string | null; receiptNumber: string | null; user: { email?: string; name?: string } }
-interface AdminUser { id: string; email: string; name: string; plan: PlanId; subscription: { planType: string; status: string; endDate: string | null } | null; wallet: number; usedToday: number; dailyLimit: number; telegram: boolean; payCode?: string }
+interface AdminUser { verified: boolean; id: string; email: string; name: string; plan: PlanId; subscription: { planType: string; status: string; endDate: string | null } | null; wallet: number; usedToday: number; dailyLimit: number; telegram: boolean; payCode?: string }
 
 const card = 'rounded-2xl border border-[#263052] bg-[#0E1426] p-5';
 const input = 'w-full rounded-lg border border-[#2A3760] bg-[#0A1020] px-2.5 py-1.5 text-sm text-white outline-none focus:border-[#3FA7E0]';
@@ -58,7 +58,20 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
 
   const run = async (fn: () => Promise<unknown>, ok: string) => {
     setBusy(true);
-    try { const result: any = await fn(); const receipt = result?.payment?.receiptEmail; notify(receipt ? receipt.status === 'sent' ? `Purchase active. Receipt sent${receipt.email ? ` to ${receipt.email}` : ''}.` : receipt.status === 'pending' ? `Purchase active. Receipt to ${receipt.email} is pending; delivery will retry.` : 'Purchase active. Receipt email unavailable: this account has no login email.' : ok); await Promise.all([loadOverview(), loadPayments(), loadUsers()]); } catch (e) { notify((e as Error).message, true); } finally { setBusy(false); }
+    try { const result: any = await fn(); const receipt = result?.payment?.receiptEmail; const grant = result?.grantEmail;
+      if (grant) {
+        const detail = grant.status === 'sent' ? `Plan details emailed to ${grant.email}.` : grant.status === 'failed' ? `Email delivery failed for ${grant.email}.` : 'This account has no login email.';
+        notify(`${ok}. ${detail}`, grant.status === 'failed');
+      } else notify(receipt ? receipt.status === 'sent' ? `Purchase active. Receipt sent${receipt.email ? ` to ${receipt.email}` : ''}.` : receipt.status === 'pending' ? `Purchase active. Receipt to ${receipt.email} is pending; delivery will retry.` : 'Purchase active. Receipt email unavailable: this account has no login email.' : ok); await Promise.all([loadOverview(), loadPayments(), loadUsers()]); } catch (e) { notify((e as Error).message, true); } finally { setBusy(false); }
+  };
+
+  const changeBadge = (u: AdminUser) => {
+    const active = !u.verified;
+    if (!window.confirm(`${active ? 'Grant the Verified badge to' : 'Revoke the Verified badge from'} ${u.email}?`)) return;
+    void run(() => api(`/api/admin/billing/users/${u.id}/badge`, {
+      method: 'POST',
+      body: JSON.stringify({ active }),
+    }), active ? `Verified badge granted to ${u.email}` : `Verified badge revoked for ${u.email}`);
   };
 
   const recordPurchase = (u: AdminUser) => {
@@ -202,7 +215,7 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
             <tbody>
               {users.map((u) => (
                 <tr key={u.id} className="border-t border-[#1E2848] text-[#C9D3F0]">
-                  <td className="px-2 py-2"><div className="font-medium text-white">{u.name}</div><div className="text-[#8A97C2]">{u.email}</div>{u.payCode && <div className="mt-0.5 font-mono text-[10px] text-amber-300">{u.payCode}</div>}</td>
+                  <td className="px-2 py-2"><div className="font-medium text-white">{u.name}{u.verified && <span className="ml-1.5 inline-flex items-center gap-1 text-sky-300"><ShieldCheck size={13} aria-hidden="true" />Verified</span>}</div><div className="text-[#8A97C2]">{u.email}</div>{u.payCode && <div className="mt-0.5 font-mono text-[10px] text-amber-300">{u.payCode}</div>}</td>
                   <td className="px-2"><span className="rounded-md bg-[#1A2240] px-1.5 py-0.5 font-bold">{u.plan}</span></td>
                   <td className="px-2">{u.subscription?.endDate && u.subscription.status === 'ACTIVE' ? new Date(u.subscription.endDate).toLocaleDateString() : '—'}</td>
                   <td className="px-2 tabular-nums">{u.wallet.toLocaleString('en-US')}</td>
@@ -211,8 +224,9 @@ export default function BillingAdmin({ notify }: { notify: (msg: string, error?:
                   <td className="px-2">
                     <div className="flex flex-wrap gap-1">
                       <button className={`${btn} bg-emerald-500/15 text-emerald-300`} disabled={busy} onClick={() => recordPurchase(u)}>Record MoMo purchase & receipt</button>
+                      <button className={`${btn} bg-sky-500/15 text-sky-300`} disabled={busy} onClick={() => changeBadge(u)}>{u.verified ? 'Revoke badge' : 'Grant badge'}</button>
                       {(['STARTER', 'PRO', 'PLUS', 'INSTITUTION'] as const).map((id) => (
-                        <button key={id} className={`${btn} ${id === 'INSTITUTION' ? 'bg-indigo-500/15 text-indigo-300' : 'bg-amber-500/15 text-amber-300'}`} disabled={busy} onClick={() => { const d = window.prompt(`Grant ${eff?.plans[id].name ?? id} for how many days?`, '30'); if (d) void run(() => api(`/api/admin/billing/users/${u.id}/plan`, { method: 'POST', body: JSON.stringify({ plan: id, days: Number(d) }) }), `${eff?.plans[id].name ?? id} granted to ${u.email}`); }}>{id === 'INSTITUTION' ? 'Inst.' : id === 'PRO' ? 'Pro' : id === 'PLUS' ? 'Plus' : 'Starter'}</button>
+                        <button key={id} className={`${btn} ${id === 'INSTITUTION' ? 'bg-indigo-500/15 text-indigo-300' : 'bg-amber-500/15 text-amber-300'}`} disabled={busy} onClick={() => { const d = window.prompt(`Grant ${eff?.plans[id].name ?? id} to ${u.email} for how many days? The recipient will be emailed their plan details.`, '30'); if (d) void run(() => api(`/api/admin/billing/users/${u.id}/plan`, { method: 'POST', body: JSON.stringify({ plan: id, days: Number(d) }) }), `${eff?.plans[id].name ?? id} granted to ${u.email}`); }}>{id === 'INSTITUTION' ? 'Inst.' : id === 'PRO' ? 'Pro' : id === 'PLUS' ? 'Plus' : 'Starter'}</button>
                       ))}
                       <button className={`${btn} bg-[#1A2240] text-[#C9D3F0]`} disabled={busy || u.plan === 'FREE' || u.plan === 'GO'} onClick={() => { if (window.confirm(`Move ${u.email} to Free now?`)) void run(() => api(`/api/admin/billing/users/${u.id}/plan`, { method: 'POST', body: JSON.stringify({ plan: 'FREE' }) }), `${u.email} moved to Free`); }}>Free</button>
                       <button className={`${btn} bg-sky-500/15 text-sky-300`} disabled={busy} onClick={() => {

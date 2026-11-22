@@ -1,3 +1,6 @@
+import { hasBadge, setBadge } from '../services/billing/badge.js';
+import { planGrantedEmail } from '../services/billing/emails.js';
+import { EmailService } from '../services/EmailService.js';
 import { approveManualPayment, MANUAL_PAYMENT, startManualPayment } from '../services/billing/manual.js';
 import { BillingError, notifyReceipt, receiptDelivery } from '../services/billing/payments.js';
 import { randomUUID } from 'node:crypto';
@@ -47,7 +50,7 @@ router.post('/users/:id/badge', async (req, res) => {
   try {
     const { active } = z.object({ active: z.boolean() }).strict().parse(req.body);
     if (!(await db.user.findUnique({ where: { id: req.params.id } }))) return res.status(404).json({ error: 'User not found.' });
-    const { setBadge } = await import('../services/billing/badge.js'); await setBadge(req.params.id, active, adminId(req));
+    await setBadge(req.params.id, active, adminId(req));
     logger.info('[admin billing] verified badge changed', { admin: adminId(req), userId: req.params.id, active }); res.json({ success: true, active });
   } catch (e) { fail(res, e); }
 });
@@ -243,8 +246,8 @@ router.get('/users', async (req, res) => {
     const byCode = looksLikePayRef(q) ? normalizePayRef(q) : null;
     const list = all.filter((u: any) => !String(u.email).endsWith('@users.invalid') && (byCode ? payRef(u.id) === byCode : !q || `${u.email} ${u.name}`.toLowerCase().includes(q))).slice(0, 25);
     const out = await Promise.all(list.map(async (u: any) => {
-      const [plan, sub, wallet, used, tg] = await Promise.all([planFor(u.id), db.subscription.findUnique({ where: { userId: u.id } }).catch(() => null), walletBalance(u.id), usedTotals(u.id), db.telegramSession.findFirst({ where: { userId: u.id } }).catch(() => null)]);
-      return { ...u, payCode: payRef(u.id), plan: plan.id, subscription: sub ? { planType: sub.planType, status: sub.status, endDate: sub.endDate } : null, wallet, usedToday: used.used.day, dailyLimit: plan.limits.daily, telegram: Boolean(tg) };
+      const [plan, sub, wallet, used, tg, verified] = await Promise.all([planFor(u.id), db.subscription.findUnique({ where: { userId: u.id } }).catch(() => null), walletBalance(u.id), usedTotals(u.id), db.telegramSession.findFirst({ where: { userId: u.id } }).catch(() => null), hasBadge(u.id)]);
+      return { ...u, payCode: payRef(u.id), plan: plan.id, subscription: sub ? { planType: sub.planType, status: sub.status, endDate: sub.endDate } : null, wallet, usedToday: used.used.day, dailyLimit: plan.limits.daily, telegram: Boolean(tg), verified };
     }));
     res.json({ success: true, users: out });
   } catch (e) { fail(res, e); }
@@ -255,20 +258,38 @@ router.post('/users/:id/plan', async (req, res) => {
   try {
     const body = z.object({ plan: z.enum(['FREE', 'STARTER', 'PRO', 'PLUS', 'INSTITUTION']), days: z.number().int().min(1).max(3660).optional() }).strict().parse(req.body ?? {});
     const userId = req.params.id;
-    if (!(await db.user.findUnique({ where: { id: userId } }))) return res.status(404).json({ error: 'User not found.' });
-    const sub = await db.subscription.findUnique({ where: { userId } });
+    const user = await db.user.findUnique({ where: { id: userId }, select: { email: true, name: true } });
+    if (!user) return res.status(404).json({ error: 'User not found.' });
     const now = new Date();
+    let endDate: Date | null = null;
     if (body.plan === 'FREE') {
-      if (sub) await db.subscription.update({ where: { userId }, data: { status: 'CANCELED', endDate: now } });
+      await db.subscription.updateMany({ where: { userId }, data: { status: 'CANCELED', endDate: now } });
     } else {
       const planType = subscriptionTypeFor(body.plan);
-      const endDate = new Date(now.getTime() + (body.days ?? 30) * 86_400_000);
-      if (sub) await db.subscription.update({ where: { userId }, data: { planType, status: 'ACTIVE', startDate: now, endDate } });
-      else await db.subscription.create({ data: { id: randomUUID(), userId, planType, status: 'ACTIVE', startDate: now, endDate, createdAt: now, updatedAt: now } });
+      endDate = new Date(now.getTime() + (body.days ?? 30) * 86_400_000);
+      const grant = { planType, status: 'ACTIVE', startDate: now, endDate };
+      await db.subscription.upsert({
+        where: { userId },
+        update: grant,
+        create: { id: randomUUID(), userId, ...grant, createdAt: now, updatedAt: now },
+      });
     }
     logger.info('[admin billing] plan changed', { admin: adminId(req), userId, plan: body.plan, days: body.days });
     void import('../services/platformContext.js').then((m) => m.invalidatePlatformContext(userId)).catch(() => undefined);
-    res.json({ success: true, plan: (await planFor(userId)).id });
+    const plan = await planFor(userId);
+    if (!endDate) return res.json({ success: true, plan: plan.id });
+    const email = user.email && !String(user.email).toLowerCase().endsWith('@users.invalid') ? String(user.email) : null;
+    let status: 'sent' | 'failed' | 'unavailable' = 'unavailable';
+    if (email) {
+      try {
+        const result = await EmailService.getInstance().sendEmail({ to: email, ...planGrantedEmail({ name: user.name, plan, endDate }) });
+        status = result.success ? 'sent' : 'failed';
+      } catch {
+        status = 'failed';
+      }
+      if (status === 'failed') logger.warn('[admin billing] plan grant email failed', { userId, plan: plan.id });
+    }
+    res.json({ success: true, plan: plan.id, grantEmail: { status, email } });
   } catch (e) { fail(res, e); }
 });
 
