@@ -110,7 +110,10 @@ test('the profile page: name, headline, videos first, a journey newest first, sk
       timeline: [{ id: 'a', kind: 'education', title: 'BSc IT', org: 'UR', from: '2022-09', to: 'present' }, { id: 'b', kind: 'event', title: 'Attended Youth Connekt', from: '2024-10' }, { id: 'c', kind: 'award', title: 'Best project', from: '2023', to: '2023' }] } };
   const html = renderToString(React.createElement(ProfilePage, { business: b, mediaSrc: (id: string) => `/m/${id}`, preview: true }));
   for (const s of ['Aline Uwase', 'IT student · mobile apps', 'University of Rwanda', 'Internships', 'Watch me', 'About me', 'Skills', 'React', 'My journey', 'Attended Youth Connekt', 'LinkedIn', 'View CV', 'Get in touch', '/p/aline', 'Bwenge4profile']) assert.ok(html.includes(s), s);
-  assert.ok(html.indexOf('Watch me') < html.indexOf('About me') && html.indexOf('About me') < html.indexOf('My journey'), 'videos first, then about, then the journey');
+  const [sidebar, main] = html.split('<main');
+  assert.match(sidebar, /Read full bio/);
+  assert.match(sidebar, /<dialog[^>]+aria-label="About me"/);
+  assert.ok(main.indexOf('Watch me') < main.indexOf('About me') && main.indexOf('About me') < main.indexOf('My journey'), 'mobile shows videos, about, then the journey');
   assert.ok(html.indexOf('BSc IT') < html.indexOf('Attended Youth Connekt') && html.indexOf('Attended Youth Connekt') < html.indexOf('Best project'), 'newest first: present, then 2024, then 2023');
   assert.deepEqual(sortTimeline([{ to: '2020' }, { from: '2025' }, { to: 'present', from: '2019' }]).map((x) => JSON.stringify(x)), ['{"to":"present","from":"2019"}', '{"from":"2025"}', '{"to":"2020"}']);
   assert.equal(rangeText({ from: '2022-09', to: 'present' }), 'Sep 2022 – Present'); assert.equal(rangeText({ from: '2023', to: '2023' }), '2023'); assert.equal(rangeText({}), '');
