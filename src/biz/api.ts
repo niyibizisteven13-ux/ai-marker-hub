@@ -115,7 +115,7 @@ export const ownerApi = {
     x.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
     x.onload = () => { if (x.status >= 200 && x.status < 300) { try { return resolve(JSON.parse(x.responseText).media); } catch { return resolve({ id: '' }); } } let msg = 'The upload did not work. Please try again.'; try { msg = JSON.parse(x.responseText)?.error || msg; } catch { /* keep */ } reject(new BizApiError(msg, x.status)); };
     x.onerror = () => reject(new BizApiError('The connection dropped. Check your network and try again.', 0));
-    const f = new FormData(); f.append('file', file, name); if (scope) f.append('scope', scope); x.send(f);
+    const f = new FormData(); f.append('file', file, name); f.append('originalName', name); if (scope) f.append('scope', scope); x.send(f);
   }),
 };
 

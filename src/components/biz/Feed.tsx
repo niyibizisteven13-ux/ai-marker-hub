@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { VideoPlayer, frameFor } from './VideoPlayer';
-import { Bookmark, ChevronLeft, ChevronRight, Heart, Loader2, MessageCircle, Pin, Send, ShoppingBag } from 'lucide-react';
+import { Bookmark, Download, FileText, ChevronLeft, ChevronRight, Heart, Loader2, MessageCircle, Pin, Send, ShoppingBag } from 'lucide-react';
 import { publicApi } from '../../biz/api';
 import { rwf, type PublicBusiness, type PublicPost } from '../../biz/types';
 import { useTx } from '../../biz/i18n';
@@ -42,11 +42,37 @@ export function Carousel({ items, src, onOpen, onDoubleTap, fitMedia = false }: 
   );
 }
 
+const PdfPreview = lazy(() => import('../PdfViewer').then(({ PdfViewer }) => ({ default: PdfViewer })));
+
+function DocumentAttachment({ document, url }: {
+  document: NonNullable<PublicPost['media'][number]['document']>;
+  url: string;
+}) {
+  const [preview, setPreview] = useState(false);
+  return (
+    <li className="rounded-xl border border-[#E7EAEE] p-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <FileText size={20} aria-hidden="true" />
+        <span className="min-w-0 flex-1 break-words text-sm font-medium">{document.name}<span className="block text-xs font-normal text-[#667085]">{Math.max(1, Math.round(document.size / 1024)).toLocaleString()} KB</span></span>
+        {document.mime === 'application/pdf' && <button type="button" aria-expanded={preview} onClick={() => setPreview(!preview)} className="text-sm underline">{preview ? 'Hide preview' : 'Preview PDF'}</button>}
+        <a href={url} download={document.name} className="inline-flex items-center gap-1.5 text-sm underline"><Download size={16} />Download original</a>
+      </div>
+      {preview && <div className="mt-3 rounded-lg bg-stone-900 p-2">
+        <Suspense fallback={<p role="status" className="text-sm text-white">Loading PDF…</p>}>
+          <PdfPreview url={url} name={document.name} />
+        </Suspense>
+      </div>}
+    </li>
+  );
+}
+
 function PostCard({ b, p, mediaSrc, preview, onOrder, onOpen, onShare }: { b: PublicBusiness; p: PublicPost; mediaSrc: (id: string) => string; preview: boolean; onOrder: (productId: string) => void; onOpen: (items: PublicPost['media'], i: number) => void; onShare: (p: PublicPost) => void }) {
   const tx = useTx();
   const [liked, setLiked] = useState(p.liked); const [likes, setLikes] = useState(p.likes); const [burst, setBurst] = useState(false); const [open, setOpen] = useState(false); const [more, setMore] = useState(false);
   const [comments, setComments] = useState<Array<{ id: string; name: string; text: string; at: string; owner?: boolean }> | null>(null); const [count, setCount] = useState(p.comments);
   const [name, setName] = useState(remembered); const [text, setText] = useState(''); const [hp, setHp] = useState(''); const [busy, setBusy] = useState(false); const [err, setErr] = useState(''); const input = useRef<HTMLInputElement>(null);
+  const visualMedia = p.media.filter((m) => m.kind !== 'document');
+  const documents = p.media.filter((m) => m.kind === 'document');
   const product = p.productId ? b.products.find((x) => x.id === p.productId) : undefined;
   const love = async (force?: boolean) => {
     if (force && liked) { setBurst(true); window.setTimeout(() => setBurst(false), 700); return; }
@@ -71,9 +97,10 @@ function PostCard({ b, p, mediaSrc, preview, onOrder, onOpen, onShare }: { b: Pu
         {p.pinned && <span className="inline-flex items-center gap-1 text-xs text-[#667085]"><Pin size={13} />{tx("Pinned")}</span>}
       </div>
       <div className="relative">
-        <Carousel fitMedia={b.category === 'profile'} items={p.media} src={mediaSrc} onOpen={(k) => onOpen(p.media, k)} onDoubleTap={() => void love(true)} />
+        <Carousel fitMedia={b.category === 'profile'} items={visualMedia} src={mediaSrc} onOpen={(k) => onOpen(visualMedia, k)} onDoubleTap={() => void love(true)} />
         {burst && <Heart aria-hidden="true" className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 fill-white text-white drop-shadow-lg" size={96} style={{ animation: 'bzpop 0.7s ease-out forwards' }} />}
       </div>
+      {documents.length > 0 && <ul className="space-y-2 px-3 pb-2">{documents.map((m) => m.document && <DocumentAttachment key={m.id} document={m.document} url={mediaSrc(m.id)} />)}</ul>}
       <div className="flex items-center gap-1 px-2 pt-2">
         <button type="button" aria-label={liked ? 'Remove love' : 'Love'} aria-pressed={liked} onClick={() => void love()} className="flex h-10 w-10 items-center justify-center rounded-full hover:bg-[#F6F7F9]"><Heart size={25} className={liked ? 'fill-[#E11D48] text-[#E11D48]' : 'text-[#0E1722]'} /></button>
         <button type="button" aria-label={tx("Comments")} onClick={toggle} className="flex h-10 w-10 items-center justify-center rounded-full hover:bg-[#F6F7F9]"><MessageCircle size={24} /></button>

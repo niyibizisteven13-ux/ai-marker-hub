@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { MediaError, maxBytesFor, sniff, type MediaStore } from './media.js';
+import { MediaError, maxBytesFor, sniff, sniffDocument, type MediaStore } from './media.js';
 import { MAX_RECORDS, MAX_SECTIONS, MAX_TRACKERS, cleanSection, cleanTracker, cleanValues, template as featureTemplate, type Section, type Tracker, type TrackerRecord } from './features.js';
 import { cleanAgent, cleanWorkflow, MAX_WORKFLOWS, type AgentSettings, type Workflow } from './agent.js';
 import { FIELDS, PROVIDERS, cleanSecrets, keyFrom, open as openSecret, seal, type Provider, type SecretsDoc } from './secrets.js';
@@ -10,7 +10,7 @@ import { buildDayReport, reportText } from './report.js';
 import { RW_WORDS, wordsOf } from './programWords.js';
 import {
   CATEGORIES, applyProfile, applyProfileData, PROFILE_MAX_VIDEO_MB, clean, cleanEmail, cleanPhone, cleanProduct, isLive, limitsFor, newBusiness, oneOf, publicView, slugFrom, validSlug,
-  type Business, type Category, type DayStats, type Enquiry, type PublicBusiness, type Product, type Post, type PublicPost, type PostComment, type Lang, LANGS, type Translation, type PublicSection, MAX_POST_MEDIA, MAX_POST_TEXT, MAX_POSTS, MAX_COMMENTS, MAX_VIDEO_BYTES, MAX_VIDEO_MB, MAX_IMAGE_BYTES, publicMedia, type VideoInfo, type Media,
+  type Business, type Category, type DayStats, type Enquiry, type PublicBusiness, type Product, type Post, type PublicPost, type PostComment, type Lang, LANGS, type Translation, type PublicSection, MAX_POST_MEDIA, MAX_POST_TEXT, MAX_POSTS, MAX_COMMENTS, MAX_VIDEO_BYTES, MAX_VIDEO_MB, MAX_IMAGE_BYTES, publicMedia, type VideoInfo, type Media, PROFILE_DOCUMENT_MIMES,
 } from './model.js';
 
 /**
@@ -54,7 +54,7 @@ export function createBizService(deps: Deps) {
   const secretKey = () => deps.secretKey ?? keyFrom(process.env.BIZ_SECRETS_KEY || process.env.JWT_SECRET || 'bwenge-dev');
 
   const load = async (id: string): Promise<Business | null> => kv.get<Business>(`biz:${id}`);
-  type Served = { mime: string; size: number; etag: string; video?: Media['video']; open: (range?: { start: number; end: number }) => Promise<{ stream: NodeJS.ReadableStream }> } | null;
+  type Served = { mime: string; size: number; etag: string; attachmentName?: string; video?: Media['video']; open: (range?: { start: number; end: number }) => Promise<{ stream: NodeJS.ReadableStream }> } | null;
   const mediaCache = new Map<string, { until: number; file: Served }>();
   /** The stored file for a photo or video, or one of its other versions: 'lq' (the light video) or 'poster' (a picture of the video). The size comes from the store, so a processed file is always described correctly. */
   async function fileOf(bizId: string, m: Media, variant?: string): Promise<Served> {
@@ -63,7 +63,7 @@ export function createBizService(deps: Deps) {
     else if (variant === 'poster' && m.kind === 'video' && m.video?.poster) { id = `${m.id}-poster`; ext = 'jpg'; mime = 'image/jpeg'; }
     else if (variant) return null;
     const size = (await media.size(bizId, id, ext)) ?? (id === m.id ? m.size : null); if (size === null) return null;
-    return { mime, size, etag: `W/\"${id}-${m.video?.rev ?? 0}-${size}\"`, ...(m.video ? { video: m.video } : {}), open: (range) => media.open(bizId, id, ext, range) };
+    return { mime, size, ...(m.kind === 'document' ? { attachmentName: m.name } : {}), etag: `W/\"${id}-${m.video?.rev ?? 0}-${size}\"`, ...(m.video ? { video: m.video } : {}), open: (range) => media.open(bizId, id, ext, range) };
   }
   const save = async (b: Business) => { b.updatedAt = iso(); mediaCache.clear(); await kv.put(`biz:${b.id}`, b); };
   /** The owner's own business, or a plain "not found" (never says whether someone else's exists). */
@@ -242,7 +242,13 @@ export function createBizService(deps: Deps) {
     },
     async addMedia(ownerId: string, id: string, file: { name: string; data: Buffer; caption?: string; scope?: unknown; gallery?: boolean }): Promise<Business['media'][number]> {
       const b = await mine(ownerId, id); const lim = await limits(ownerId, b.category); const paid = await deps.isPaid(ownerId);
-      const kind = sniff(file.data); if (!kind) throw new BizError('Use a JPEG, PNG, WebP or GIF photo, or an MP4 or WebM video.', 415, 'TYPE');
+      const documents = b.category === 'profile' && file.scope === 'feed';
+      const documentName = documents && /\.(pdf|docx|xlsx|pptx)$/i.test(file.name);
+      if (documentName && file.data.length > MAX_IMAGE_BYTES) throw new BizError('A document can be up to 6 MB.', 413, 'TOO_LARGE');
+      const kind = documentName ? await sniffDocument(file.data, file.name) : sniff(file.data);
+      if (!kind) throw new BizError(documents
+        ? 'Choose a JPEG, PNG, WebP, GIF, MP4, WebM, PDF, DOCX, XLSX or PPTX file.'
+        : 'Use a JPEG, PNG, WebP or GIF photo, or an MP4 or WebM video.', 415, 'TYPE');
       if (file.data.length > maxBytesFor(kind.kind)) throw new BizError(kind.kind === 'image' ? 'A photo can be up to 6 MB.' : `A video can be up to ${MAX_VIDEO_MB} MB (about a minute at 1080p). Record a shorter clip or a lower quality.`, 413, 'TOO_LARGE');
       if (kind.kind === 'video' && !paid) {
         if (b.category !== 'profile') throw new BizError('Videos are for paid plans. Photos are free. Choose a plan to add videos.', 402, 'VIDEO_PAID');
@@ -250,12 +256,14 @@ export function createBizService(deps: Deps) {
         if (b.media.filter((m) => m.kind === 'video').length >= lim.videos) throw new BizError(`The free profile keeps ${lim.videos} videos. Remove one, or choose a plan for more.`, 402, 'LIMIT');
       }
       const feedUpload = file.scope === 'feed';
-      if (feedUpload) { if (b.media.filter((m) => m.scope === 'feed').length >= lim.feed) throw new BizError(`That is the most feed photos and videos your plan keeps (${lim.feed}). Delete old posts to make room.`, 402, 'LIMIT'); }
+      if (feedUpload) { if (b.media.filter((m) => m.scope === 'feed').length >= lim.feed) throw new BizError(`That is the most feed attachments your plan keeps (${lim.feed}). Delete old posts to make room.`, 402, 'LIMIT'); }
       const count = b.media.filter((m) => m.kind === kind.kind && m.scope !== 'feed').length;
       if (!feedUpload && count >= (kind.kind === 'image' ? lim.images : lim.videos)) throw new BizError(`Your plan has room for ${kind.kind === 'image' ? lim.images + ' photos' : lim.videos + ' videos'}. Remove one or upgrade.`, 402, 'LIMIT');
       const used = b.media.reduce((a, m) => a + m.size, 0);
-      if (used + file.data.length > lim.totalMediaMb * 1048576) throw new BizError(`That would pass your ${lim.totalMediaMb} MB of photos and videos. Remove some or upgrade.`, 402, 'LIMIT');
-      const m: Business['media'][number] = { id: randomUUID(), kind: kind.kind, mime: kind.mime, size: file.data.length, name: clean(file.name, 80) || `${kind.kind}.${kind.ext}`, ...(clean(file.caption, 120) ? { caption: clean(file.caption, 120) } : {}), createdAt: iso(), visible: true };
+      if (used + file.data.length > lim.totalMediaMb * 1048576) throw new BizError(`That would pass your ${lim.totalMediaMb} MB of media. Remove some or upgrade.`, 402, 'LIMIT');
+      const m: Business['media'][number] = { id: randomUUID(), kind: kind.kind, mime: kind.mime, size: file.data.length, name: kind.kind === 'document'
+        ? `${clean(file.name.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, ''), 160).replace(/[\u0000-\u001f\u007f\uD800-\uDFFF]/gu, '') || 'document'}.${kind.ext}`
+        : clean(file.name, 80) || `${kind.kind}.${kind.ext}`, ...(clean(file.caption, 120) ? { caption: clean(file.caption, 120) } : {}), createdAt: iso(), visible: true };
       await media.put(b.id, m.id, kind.ext, file.data);
       if (file.scope === 'feed') { m.visible = false; m.scope = 'feed'; }
       if ((file.gallery === false || file.scope === 'timeline') && file.scope !== 'feed') m.gallery = false;
@@ -268,7 +276,7 @@ export function createBizService(deps: Deps) {
     async updateMedia(ownerId: string, id: string, mediaId: string, patch: { caption?: unknown; visible?: unknown }) {
       const b = await mine(ownerId, id); const m = b.media.find((x) => x.id === mediaId); if (!m) throw new BizError('That photo or video was not found.', 404);
       if (patch.caption !== undefined) { const c = clean(patch.caption, 120); if (c) m.caption = c; else delete m.caption; }
-      if (patch.visible !== undefined) { m.visible = patch.visible !== false; if (!m.visible) { if (b.coverId === m.id) delete b.coverId; if (b.logoId === m.id) delete b.logoId; } }
+      if (patch.visible !== undefined && m.kind !== 'document') { m.visible = patch.visible !== false; if (!m.visible) { if (b.coverId === m.id) delete b.coverId; if (b.logoId === m.id) delete b.logoId; } }
       await save(b); return m;
     },
     async removeMedia(ownerId: string, id: string, mediaId: string): Promise<void> {
@@ -368,7 +376,7 @@ export function createBizService(deps: Deps) {
     async addPost(ownerId: string, id: string, input: { text?: unknown; mediaIds?: unknown; productId?: unknown }): Promise<Post> {
       const b = await mine(ownerId, id); const text = clean(input.text, MAX_POST_TEXT);
       const ids = [...new Set((Array.isArray(input.mediaIds) ? input.mediaIds : []).map(String))].filter((m) => b.media.some((x) => x.id === m)).slice(0, MAX_POST_MEDIA);
-      if (!text && !ids.length) throw new BizError('Write something or add a photo.');
+      if (!text && !ids.length) throw new BizError('Write something or add an attachment.');
       const doc = (await kv.get<{ items: Post[] }>(`biz-posts:${b.id}`)) ?? { items: [] }; const post: Post = { id: randomUUID(), at: iso(), text, mediaIds: ids };
       if (typeof input.productId === 'string' && b.products.some((p) => p.id === input.productId)) post.productId = input.productId;
       doc.items.unshift(post); const drop = doc.items.slice(MAX_POSTS); doc.items = doc.items.slice(0, MAX_POSTS); await kv.put(`biz-posts:${b.id}`, doc);
@@ -617,7 +625,7 @@ export function createBizService(deps: Deps) {
       // A video asks for many pieces, one request each: remember who may see what for a few seconds instead of reading the page every time.
       const ck = `${slug}|${mediaId}|${variant ?? ''}`; const hit = mediaCache.get(ck); if (hit && hit.until > now()) return hit.file;
       const b = await publicLive(slug); const m = b?.media.find((x) => x.id === mediaId); if (!b || !m) return null;
-      if (!m.visible && !((await kv.get<{ items: Post[] }>(`biz-posts:${b.id}`))?.items ?? []).some((p) => p.mediaIds.includes(m.id))) return null;
+      if ((m.kind === 'document' || !m.visible) && !((await kv.get<{ items: Post[] }>(`biz-posts:${b.id}`))?.items ?? []).some((p) => p.mediaIds.includes(m.id))) return null;
       const file = await fileOf(b.id, m, variant); mediaCache.set(ck, { until: now() + 15_000, file }); if (mediaCache.size > 2000) mediaCache.clear(); return file;
       return fileOf(b.id, m, variant);
     },
@@ -693,6 +701,7 @@ export function createBizService(deps: Deps) {
     },
   };
 }
-const sniffExt = (mime: string) => ({ 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif', 'video/mp4': 'mp4', 'video/webm': 'webm' } as Record<string, string>)[mime] ?? 'bin';
+const documentExtensions = Object.fromEntries(Object.entries(PROFILE_DOCUMENT_MIMES).map(([ext, mime]) => [mime, ext]));
+const sniffExt = (mime: string) => documentExtensions[mime] ?? ({ 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif', 'video/mp4': 'mp4', 'video/webm': 'webm' } as Record<string, string>)[mime] ?? 'bin';
 export type BizService = ReturnType<typeof createBizService>;
 export { MediaError };
