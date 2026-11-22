@@ -9,8 +9,9 @@ const store = new Map<string, string>();
 (globalThis as any).window = { dispatchEvent: () => true };
 
 test('MySEB and Ventures are not in the sidebar until the person adds them; the choice is remembered', () => {
-  assert.deepEqual(readPins(), { myseb: false, ventures: false }); setPin('myseb', true); assert.deepEqual(readPins(), { myseb: true, ventures: false }); setPin('ventures', true); setPin('myseb', false); assert.deepEqual(readPins(), { myseb: false, ventures: true });
-  store.set('bwenge-sidebar-pins', 'not json'); assert.deepEqual(readPins(), { myseb: false, ventures: false }, 'a damaged value never breaks the sidebar');
+  assert.deepEqual(readPins(), { myseb: false, ventures: false, profile: false }); setPin('myseb', true); assert.deepEqual(readPins(), { myseb: true, ventures: false, profile: false }); setPin('ventures', true); setPin('myseb', false); assert.deepEqual(readPins(), { myseb: false, ventures: true, profile: false });
+  setPin('profile', true); assert.deepEqual(readPins(), { myseb: false, ventures: true, profile: true });
+  store.set('bwenge-sidebar-pins', 'not json'); assert.deepEqual(readPins(), { myseb: false, ventures: false, profile: false }, 'a damaged value never breaks the sidebar');
 });
 test('the sidebar opens on Chat; Agents is remembered', () => { assert.equal(readMode(), 'chat'); saveMode('agents'); assert.equal(readMode(), 'agents'); store.set('bwenge-sidebar-mode', 'junk'); assert.equal(readMode(), 'chat'); });
 test('the public link: bwenge.space/p/<name> for a profile, /b/<name> for everything else', () => { assert.equal(publicPath({ slug: 'aline', category: 'profile' }), '/p/aline'); assert.equal(publicPath({ slug: 'grace', category: 'restaurant' }), '/b/grace'); assert.equal(publicPath({ slug: 'kv', category: 'creator' }), '/b/kv'); });

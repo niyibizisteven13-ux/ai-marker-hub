@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Send, CheckCircle2, Link2, Unlink, Loader2, RefreshCw, ExternalLink, ShieldCheck, Store, ArrowUpRight } from 'lucide-react';
+import { Send, CheckCircle2, Link2, Unlink, Loader2, RefreshCw, ExternalLink, ShieldCheck, Store, UserRound, ArrowUpRight } from 'lucide-react';
 import { setPin, usePins, type Pin } from '../../utils/sidebarPrefs';
 import { authFetch } from '../../utils/authFetch';
 import BizConnection from './BizConnection';
@@ -11,7 +11,8 @@ function SidebarShortcuts() {
   const pins = usePins();
   const rows: Array<{ id: Pin; icon: typeof Store; name: string; text: string; href: string }> = [
     { id: 'myseb', icon: ShieldCheck, name: 'MySEB', text: 'Secure exams and live rooms for lecturers. MySEB is its own app: open it, or install it on your phone or computer.', href: '/ms' },
-    { id: 'ventures', icon: Store, name: 'Ventures (Bwenge4biz)', text: 'Your business or creator pages. They are always under Agents; add a shortcut to the main list too.', href: '/biz' },
+    { id: 'ventures', icon: Store, name: 'Bwenge4Biz', text: 'Manage business and creator pages, products, orders, and sales.', href: '/biz' },
+    { id: 'profile', icon: UserRound, name: 'Bwenge4Profile', text: 'Manage your personal portfolio, biography, CV, and public updates.', href: '/profile' },
   ];
   return (
     <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)]">
