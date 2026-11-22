@@ -112,3 +112,15 @@ test('the player renders each state: preparing placeholder, a portrait frame wit
   const old = renderToString(React.createElement(VideoPlayer, { media: { id: 'c', kind: 'video' }, src })); assert.match(old, /data-frame="landscape"/); assert.match(old, /<video[^>]*src="\/api\/biz\/public\/x\/media\/c"/);
   const fill = renderToString(React.createElement(VideoPlayer, { media: { id: 'd', kind: 'video', video: { state: 'ready', w: 1000, h: 1000 } }, src, fill: true })); assert.match(fill, /absolute inset-0/); assert.doesNotMatch(fill, /aspect-ratio/, 'inside a post the post sets the shape');
 });
+
+test('profile videos keep their native aspect and fit inside the player', () => {
+  for (const [w, h] of [[1920, 1080], [1080, 1920], [1080, 1080], [2560, 800]]) {
+    const html = renderToString(React.createElement(VideoPlayer, {
+      media: { id: 'profile-video', kind: 'video', video: { state: 'ready', w, h } },
+      src: () => '/m/profile-video',
+      naturalAspect: true,
+    }));
+    assert.ok(html.includes(`aspect-ratio:${w / h};`));
+    assert.match(html, /<video[^>]*object-contain/);
+  }
+});
