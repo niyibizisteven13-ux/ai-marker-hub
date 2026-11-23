@@ -3,6 +3,8 @@
 import './server/services/billing/aiKillSwitch.js';
 import 'dotenv/config';
 import express from 'express';
+import { execFile } from 'node:child_process';
+import { litronEnrollLimiter } from './production/rateLimiter.js';
 import { createServer } from 'node:http';
 import path from 'path';
 import crypto from 'crypto';
@@ -358,6 +360,7 @@ app.use((req: express.Request, _res: express.Response, next: express.NextFunctio
 // Public form responses do not need the large payload budget used for AI image
 // attachments. Apply a smaller parser limit before the general JSON parser so
 // oversized anonymous requests are rejected before consuming tens of MB.
+app.use('/api/litron/peers', express.json({ limit: '1kb' }));
 app.use('/api/forms/:id/submit', express.json({ limit: '256kb' }));
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: false, limit: '25mb', parameterLimit: 1000 }));
@@ -427,6 +430,23 @@ app.get('/api/platform/status', platformStatus);
 // no request-volume protection beyond whatever requireAuth incidentally
 // provides.
 app.use('/api', generalLimiter);
+app.post('/api/litron/peers', litronEnrollLimiter, (req, res) => {
+  const key = req.body?.publicKey;
+  if (typeof key !== 'string' || !/^[A-Za-z0-9+/]{43}=$/.test(key)) {
+    res.status(400).json({ error: 'Invalid device public key' });
+    return;
+  }
+  execFile('/usr/bin/sudo', ['-n', '--', '/usr/local/sbin/litron-enroll', key],
+    { timeout: 10000, maxBuffer: 4096 }, (error, stdout) => {
+      if (!error) {
+        try {
+          res.json(JSON.parse(stdout));
+          return;
+        } catch { /* Gateway returned an incomplete response. */ }
+      }
+      res.status(503).json({ error: 'Litron gateway unavailable' });
+    });
+});
 
 app.use('/api/biz', bizRoutes);                   // bwenge4biz: business pages (public routes first, then the owner's)
 app.use('/api/app', appRoutes);                   // download counter and the app version (for the "new version" notice)

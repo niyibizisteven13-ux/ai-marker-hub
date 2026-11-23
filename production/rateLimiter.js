@@ -25,6 +25,8 @@ const otpLimit = (name, limit, keyGenerator) => rateLimit({
   message: { error: { code: 'rate_limited', retryAfter: 900 } },
 });
 
+export const litronEnrollLimiter = otpLimit('litron-enroll', 20);
+
 /**
  * The signed-in user behind a request (their access token, checked), so limits count per person. A whole school
  * often reaches the site from one network address; counting by address alone locks every teacher out at once.
