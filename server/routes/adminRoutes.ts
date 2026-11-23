@@ -19,6 +19,7 @@ import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
 import { z } from 'zod';
+import { formatBroadcast, isBroadcastLink } from '../../shared/bwengeBroadcast.js';
 import { getEmailSender } from '../email/EmailSender.js';
 import { notifyAdminsOfFeedbackUpdate } from '../realtime.js';
 
@@ -2927,14 +2928,42 @@ router.post('/feedback/:id/dataset-example', async (req, res) => {
   }
 });
 
-router.post('/communication/broadcast', async (req, res) => {
-  const parsed = z.object({
-    subject: z.string().trim().min(1).max(180).regex(/^[^\r\n]+$/, 'Subject cannot contain line breaks.'),
-    text: z.string().trim().min(1).max(10_000),
-  }).safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ success: false, error: 'Enter an email subject and message (up to 10,000 characters).' });
+const broadcastDraftSchema = z.object({
+  subject: z.string().trim().min(1).max(180).regex(/^[^\r\n]+$/),
+  text: z.string().trim().min(1).max(10_000),
+  linkLabel: z.string().trim().max(80).optional(),
+  linkUrl: z.string().trim().max(2048).optional(),
+  expectedRecipients: z.number().int().positive().optional(),
+}).refine(({ linkLabel, linkUrl }) => !linkLabel && !linkUrl || Boolean(linkLabel && linkUrl && isBroadcastLink(linkUrl)));
+
+router.get('/communication/audience', async (_req, res) => {
+  try {
+    const count = await prisma.user.count({ where: { disabledAt: null } });
+    res.json({ success: true, data: { count } });
+  } catch {
+    res.status(500).json({ success: false, error: 'Could not count enabled accounts.' });
   }
+});
+
+router.post('/communication/test', async (req, res) => {
+  const parsed = broadcastDraftSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ success: false, error: 'Enter a subject and message, and complete both button fields if using a link.' });
+
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.user!.userId }, select: { email: true } });
+    if (!user?.email) return res.status(404).json({ success: false, error: 'Your admin account has no email address.' });
+    const message = formatBroadcast(parsed.data);
+    await getEmailSender().send({ ...message, subject: `[Test] ${message.subject}`, to: user.email });
+    return res.json({ success: true, data: { recipient: user.email } });
+  } catch (error) {
+    logger.warn('Admin broadcast test email failed', { errorType: (error as Error)?.name });
+    return res.status(502).json({ success: false, error: 'Could not send the test email. Check the configured email provider.' });
+  }
+});
+
+router.post('/communication/broadcast', async (req, res) => {
+  const parsed = broadcastDraftSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ success: false, error: 'Enter a subject and message, and complete both button fields if using a link.' });
 
   try {
     const recipients = await prisma.user.findMany({
@@ -2942,11 +2971,11 @@ router.post('/communication/broadcast', async (req, res) => {
       select: { email: true },
       orderBy: { email: 'asc' },
     });
+    if (parsed.data.expectedRecipients !== undefined && parsed.data.expectedRecipients !== recipients.length) {
+      return res.status(409).json({ success: false, error: 'The enabled account count changed. Review the updated audience and confirm again.' });
+    }
     const emailSender = getEmailSender();
-    const htmlEntities: Record<string, string> = {
-      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-    };
-    const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => htmlEntities[character] || character);
+    const message = formatBroadcast(parsed.data);
     let delivered = 0;
     let failed = 0;
 
@@ -2954,9 +2983,7 @@ router.post('/communication/broadcast', async (req, res) => {
       const batch = recipients.slice(index, index + 10);
       const results = await Promise.allSettled(batch.map(({ email }) => emailSender.send({
         to: email,
-        subject: parsed.data.subject,
-        text: parsed.data.text,
-        html: `<div style="font-family:sans-serif;white-space:pre-wrap">${escapeHtml(parsed.data.text)}</div>`,
+        ...message,
       })));
       for (const result of results) {
         if (result.status === 'fulfilled') delivered += 1;
