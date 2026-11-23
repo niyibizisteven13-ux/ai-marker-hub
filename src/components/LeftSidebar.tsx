@@ -2,6 +2,7 @@
 import {
   X,
   Store,
+  UserRound,
   Settings,
   Trash2,
   MessageSquare,
@@ -176,7 +177,8 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
       ...(user ? [{ label: 'Results', icon: BarChart3, onClick: goTo('/exams'), active: /^\/exams/.test(path) }] : []),
       // MySEB and Ventures are not here unless the person added them in Settings → Connections.
       ...(user && pins.myseb ? [{ label: 'MySEB', icon: ShieldCheck, onClick: goTo('/ms'), active: /^\/(lecturer|ms)/.test(path) }] : []),
-      ...(user && pins.ventures && onOpenBiz ? [{ label: 'Ventures', icon: Store, onClick: onOpenBiz }] : []),
+      ...(user && pins.profile ? [{ label: 'Bwenge4Profile', icon: UserRound, onClick: goTo('/profile'), active: /^\/profile\/?$/.test(path) }] : []),
+      ...(user && pins.ventures && onOpenBiz ? [{ label: 'Bwenge4Biz', icon: Store, onClick: onOpenBiz }] : []),
     ] },
     { title: 'Files', items: [
       ...(user && onOpenLibrary ? [{ label: 'My files', icon: FolderOpen, onClick: onOpenLibrary }] : []),
