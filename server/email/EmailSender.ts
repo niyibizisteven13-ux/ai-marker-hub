@@ -1,3 +1,4 @@
+import type { BroadcastSender } from '../../shared/bwengeBroadcast.js';
 import * as nodemailer from 'nodemailer';
 import { renderBwengeCode, renderBwengeEmail } from './BwengeEmailLayout.js';
 import { hasResendConfiguration, sendResendEmail, usesResend } from './ResendEmailSender.js';
@@ -64,11 +65,13 @@ export function validateEmailSenderConfiguration(): void {
   }
 }
 
-export function getEmailSender(): EmailSender {
+export function getEmailSender(sender?: BroadcastSender): EmailSender {
   if (usesResend()) {
     if (!hasResendConfiguration()) throw new Error('Resend email delivery requires RESEND_API_KEY');
-    return { async send(options) { await sendResendEmail(options); } };
+    return { async send(options) { await sendResendEmail(options, sender); } };
   }
+
+  if (sender && sender !== 'notifications') throw new Error('This sender requires Resend');
 
   if (process.env.NODE_ENV === 'production') {
     if (!hasSmtpConfiguration()) {

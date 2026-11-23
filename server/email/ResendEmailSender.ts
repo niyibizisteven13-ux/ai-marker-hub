@@ -1,4 +1,5 @@
 import { renderBwengeEmail } from './BwengeEmailLayout.js';
+import type { BroadcastSender } from '../../shared/bwengeBroadcast.js';
 import type { SendEmailOptions } from './EmailSender.js';
 
 type ResendEmailOptions = Omit<SendEmailOptions, 'text'> & { text?: string };
@@ -12,13 +13,20 @@ export function hasResendConfiguration(): boolean {
   return Boolean(process.env.RESEND_API_KEY?.trim());
 }
 
-export async function sendResendEmail(options: ResendEmailOptions, category?: 'billing'): Promise<string> {
+export function getResendFrom(sender: BroadcastSender = 'notifications'): string {
+  const addresses: Record<BroadcastSender, string> = {
+    notifications: process.env.RESEND_FROM?.trim() || 'Bwenge <notifications@bwenge.space>',
+    billing: process.env.RESEND_BILLING_FROM?.trim() || 'Bwenge Billing <billing@bwenge.space>',
+    support: 'Bwenge Support <support@bwenge.space>',
+    hello: 'Bwenge <hello@bwenge.space>',
+    partners: 'Bwenge Partnerships <partners@bwenge.space>',
+  };
+  return addresses[sender];
+}
+
+export async function sendResendEmail(options: ResendEmailOptions, category?: BroadcastSender): Promise<string> {
   const apiKey = process.env.RESEND_API_KEY?.trim();
   if (!apiKey) throw new Error('Resend email delivery requires RESEND_API_KEY');
-
-  const from = category === 'billing'
-    ? process.env.RESEND_BILLING_FROM?.trim() || 'Bwenge Billing <billing@bwenge.space>'
-    : process.env.RESEND_FROM?.trim() || 'Bwenge <notifications@bwenge.space>';
 
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -29,7 +37,7 @@ export async function sendResendEmail(options: ResendEmailOptions, category?: 'b
     body: JSON.stringify({
       ...options,
       html: renderBwengeEmail(options.html),
-      from,
+      from: getResendFrom(category),
       ...(process.env.RESEND_REPLY_TO?.trim() ? { reply_to: process.env.RESEND_REPLY_TO.trim() } : {}),
     }),
     signal: AbortSignal.timeout(10_000),
