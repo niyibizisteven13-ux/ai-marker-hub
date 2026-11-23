@@ -64,3 +64,10 @@ jobs:
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
           ssh -i ~/.ssh/litron_deploy -p "$SSH_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes \
             "$SSH_USER@$HOST" sudo -n bash -s -- "${peer_args[@]}" < scripts/provision-litron-gateway.sh
+          # Install only the enrollment helper under sudo. The web process runs as the deploy user.
+          [[ "$SSH_USER" =~ ^[a-z_][a-z0-9_-]*$ && "$HOST" =~ ^[a-zA-Z0-9.-]+$ ]]
+          remote=(ssh -i ~/.ssh/litron_deploy -p "$SSH_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes "$SSH_USER@$HOST")
+          "${remote[@]}" 'sudo -n install -m 0755 -o root -g root /dev/stdin /usr/local/sbin/litron-enroll' < scripts/litron-enroll.py
+          printf '%s\n' "$HOST" | "${remote[@]}" 'sudo -n install -m 0600 /dev/stdin /etc/wireguard/litron-endpoint'
+          printf '%s ALL=(root) NOPASSWD: /usr/local/sbin/litron-enroll\n' "$SSH_USER" |
+            "${remote[@]}" 'set -e; tmp=$(mktemp); trap '\''rm -f "$tmp"'\'' EXIT; cat > "$tmp"; sudo -n visudo -cf "$tmp"; sudo -n install -m 0440 "$tmp" /etc/sudoers.d/litron-enroll'

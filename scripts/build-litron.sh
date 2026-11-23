@@ -8,7 +8,7 @@ trap 'rm -rf -- "$source_dir"' EXIT
 git -C "$source_dir" init --quiet
 git -C "$source_dir" fetch --quiet --depth=1 \
   https://github.com/niyibizisteven13-ux/litron-vpn-app.git \
-  198d737853d97e0145b88cce33fb22a9c0976034
+  c36d59f04f2fb590e7a6c72f9522e6ff75fe17f2
 git -C "$source_dir" checkout --quiet --detach FETCH_HEAD
 
 # Host the web app without distributing the native tunnel's client credentials.
