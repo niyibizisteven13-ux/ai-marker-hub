@@ -22,6 +22,7 @@ PORT=$(app_port)
 say "Building on the primary ($(sudo -u "$APP_USER" git log --oneline -1))"
 sudo -u "$APP_USER" npm ci --silent
 sudo -u "$APP_USER" npm run --silent build
+sudo -u "$APP_USER" bash scripts/build-litron.sh
 sudo -u "$APP_USER" npx prisma migrate deploy
 systemctl restart "$SERVICE"
 wait_healthy 127.0.0.1 "$PORT" || die "The primary is not healthy after the update: journalctl -u $SERVICE -n 80"
