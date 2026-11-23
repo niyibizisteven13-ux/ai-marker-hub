@@ -35,10 +35,10 @@ export class EmailService {
     return this.transport;
   }
 
-  public async sendEmail({ to, subject, html, text }: { to: string; subject: string; html: string; text?: string }): Promise<{ success: boolean; messageId?: string; skipped?: boolean; error?: string }> {
+  public async sendEmail({ to, subject, html, text }: { to: string; subject: string; html: string; text?: string }, category?: 'billing'): Promise<{ success: boolean; messageId?: string; skipped?: boolean; error?: string }> {
     try {
       if (!EmailService.testTransport && usesResend()) {
-        const messageId = await sendResendEmail({ to, subject, html, text });
+        const messageId = await sendResendEmail({ to, subject, html, text }, category);
         logger.info('[EmailService] Resend accepted email.', { messageId });
         return { success: true, messageId };
       }

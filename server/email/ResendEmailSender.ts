@@ -12,9 +12,13 @@ export function hasResendConfiguration(): boolean {
   return Boolean(process.env.RESEND_API_KEY?.trim());
 }
 
-export async function sendResendEmail(options: ResendEmailOptions): Promise<string> {
+export async function sendResendEmail(options: ResendEmailOptions, category?: 'billing'): Promise<string> {
   const apiKey = process.env.RESEND_API_KEY?.trim();
   if (!apiKey) throw new Error('Resend email delivery requires RESEND_API_KEY');
+
+  const from = category === 'billing'
+    ? process.env.RESEND_BILLING_FROM?.trim() || 'Bwenge Billing <billing@bwenge.space>'
+    : process.env.RESEND_FROM?.trim() || 'Bwenge <notifications@bwenge.space>';
 
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -25,7 +29,7 @@ export async function sendResendEmail(options: ResendEmailOptions): Promise<stri
     body: JSON.stringify({
       ...options,
       html: renderBwengeEmail(options.html),
-      from: process.env.RESEND_FROM?.trim() || 'Bwenge <notifications@bwenge.space>',
+      from,
       ...(process.env.RESEND_REPLY_TO?.trim() ? { reply_to: process.env.RESEND_REPLY_TO.trim() } : {}),
     }),
     signal: AbortSignal.timeout(10_000),

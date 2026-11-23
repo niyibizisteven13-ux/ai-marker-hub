@@ -29,7 +29,7 @@ const fail = (res: Response, e: any) => (e instanceof z.ZodError ? res.status(40
 async function deliverGrant(user: { email: string | null; name: string }, message: Email) {
   const email = user.email && !user.email.toLowerCase().endsWith('@users.invalid') ? user.email : null;
   if (!email) return { status: 'unavailable', email } as const;
-  const result = await EmailService.getInstance().sendEmail({ to: email, ...message }).catch(() => null);
+  const result = await EmailService.getInstance().sendEmail({ to: email, ...message }, 'billing').catch(() => null);
   return { status: result?.success ? 'sent' : 'failed', email };
 }
 
