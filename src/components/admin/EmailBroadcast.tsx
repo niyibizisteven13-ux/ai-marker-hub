@@ -4,7 +4,7 @@ import { adminApi } from '../../api/admin';
 import { formatBroadcast, isBroadcastLink, type BroadcastDraft, type BroadcastSender } from '../../../shared/bwengeBroadcast';
 import { renderBwengeEmail } from '../../../server/email/BwengeEmailLayout';
 
-const emptyDraft = { subject: '', text: '', linkLabel: '', linkUrl: '', htmlSource: '' };
+const emptyDraft = { subject: '', text: '', linkLabel: '', linkUrl: '', htmlSource: '', videoUrl: '' };
 const field = 'w-full rounded-lg border border-[#334155] bg-[#101a2c] px-3 py-2.5 text-sm text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#4CE5D6]';
 const panel = 'min-w-0 rounded-2xl border border-[#263052] bg-[#131c31] p-5';
 
@@ -37,7 +37,8 @@ export default function EmailBroadcast() {
 
   const hasLink = Boolean(draft.linkLabel.trim() || draft.linkUrl.trim());
   const linkValid = !hasLink || Boolean(draft.linkLabel.trim() && isBroadcastLink(draft.linkUrl.trim()));
-  const ready = Boolean(selectedFrom && draft.subject.trim() && draft.text.trim() && linkValid);
+  const videoValid = !draft.videoUrl.trim() || isBroadcastLink(draft.videoUrl.trim());
+  const ready = Boolean(selectedFrom && draft.subject.trim() && draft.text.trim() && linkValid && videoValid);
   const recipients = [...new Set(recipientText.trim().toLowerCase().split(/[\s,;]+/).filter(Boolean))];
   const validRecipients = recipients.length <= 25 && recipients.every((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email));
   const targetCount = allAccounts ? audience : validRecipients ? recipients.length : 0;
@@ -161,6 +162,12 @@ export default function EmailBroadcast() {
                 <input className={field} value={draft.linkUrl} onChange={(e) => edit('linkUrl', e.target.value)} maxLength={2048} placeholder="https://www.bwenge.space" />
               </label>
             </div>
+            <label className="block space-y-1.5 text-sm text-slate-200">
+              <span>Inline video URL (optional)</span>
+              <input className={field} value={draft.videoUrl} onChange={(e) => edit('videoUrl', e.target.value)} maxLength={2048} placeholder="https://media.example.com/demo.mp4" />
+              <span className="block text-xs text-slate-400">Use a direct, publicly accessible MP4 link. The email also includes a Watch video link.</span>
+            </label>
+            {!videoValid && <p className="text-sm text-amber-300">Enter a valid HTTPS video URL.</p>}
             {!linkValid && <p className="text-sm text-amber-300">Enter button text and a valid HTTPS link.</p>}
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={() => void send('test')} disabled={!ready || Boolean(pending)} className="inline-flex items-center gap-2 rounded-lg border border-slate-500 px-3 py-2 text-sm text-white disabled:opacity-50">
