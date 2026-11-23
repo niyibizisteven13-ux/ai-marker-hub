@@ -3,9 +3,10 @@ import type { ReactNode } from 'react';
 import {
   Activity, ArrowLeft, BarChart3, BookOpen, Boxes, CheckCircle2, ChevronDown, ChevronRight, Cpu, Database,
   FileText, FlaskConical, GraduationCap, Info, KeyRound, LayoutDashboard, Mail, Menu, MessageSquare, Play, Plus,
-  RefreshCw, ScrollText, Search, Send, Settings, Sparkles, Trash2, Upload, Users, X, ShieldCheck, FolderTree, Download, PencilLine,
+  RefreshCw, ScrollText, Search, Settings, Sparkles, Trash2, Upload, Users, X, ShieldCheck, FolderTree, Download, PencilLine,
 } from 'lucide-react';
 import KnowledgeExplorer from '../components/knowledge/KnowledgeExplorer';
+import EmailBroadcast from '../components/admin/EmailBroadcast';
 import BillingAdmin from '../components/admin/BillingAdmin';
 import PlatformControls from '../components/admin/PlatformControls';
 import MySebAdmin from '../components/admin/MySebAdmin';
@@ -261,9 +262,6 @@ export default function AdminPage({ onBack, initialTab = 'overview' }: { onBack:
   const [feedbackCorrections, setFeedbackCorrections] = useState<Record<string, string>>({});
   const [userSearch, setUserSearch] = useState('');
   const [userDetailId, setUserDetailId] = useState<string | null>(null);
-  const [broadcastSubject, setBroadcastSubject] = useState('');
-  const [broadcastText, setBroadcastText] = useState('');
-  const [broadcasting, setBroadcasting] = useState(false);
   const currentAdminId = useStore((state) => state.user?.id);
   const [datasetAdapterJobs, setDatasetAdapterJobs] = useState<any[]>([]);
   const [retrievalSet, setRetrievalSet] = useState<any>(null);
@@ -2884,49 +2882,8 @@ export default function AdminPage({ onBack, initialTab = 'overview' }: { onBack:
 
               {/* ── EMAIL COMMUNICATION TAB ── */}
               {tab === 'communication' && (
-                <Section title="Email Communication" hint="Write and send an announcement to every enabled account. Emails are delivered individually, not as a shared recipient list.">
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <Stat label="Enabled recipients" value={users.filter((user) => !user.disabledAt).length} detail="Disabled accounts are excluded" />
-                    <Stat label="Delivery" value="Email" detail="Uses the configured server email provider" />
-                  </div>
-                  <form
-                    className={`${card} max-w-3xl space-y-5 p-5 sm:p-7`}
-                    onSubmit={async (event) => {
-                      event.preventDefault();
-                      const recipientCount = users.filter((user) => !user.disabledAt).length;
-                      if (!broadcastSubject.trim() || !broadcastText.trim()) {
-                        notify('Enter both an email subject and message.', true);
-                        return;
-                      }
-                      if (!window.confirm(`Send this email to ${recipientCount} enabled user accounts?`)) return;
-                      setBroadcasting(true);
-                      try {
-                        const result = await adminApi.broadcastEmail({ subject: broadcastSubject, text: broadcastText });
-                        notify(`Broadcast finished: ${result.data.delivered} delivered, ${result.data.failed} failed.`, result.data.failed > 0);
-                        if (result.data.failed === 0) {
-                          setBroadcastSubject('');
-                          setBroadcastText('');
-                        }
-                      } catch (err: any) {
-                        notify(err.message, true);
-                      } finally {
-                        setBroadcasting(false);
-                      }
-                    }}
-                  >
-                    <Field label="Subject">
-                      <input className={input} value={broadcastSubject} onChange={(event) => setBroadcastSubject(event.target.value)} maxLength={180} required placeholder="A clear subject for your announcement" />
-                    </Field>
-                    <Field label="Message">
-                      <textarea className={input} value={broadcastText} onChange={(event) => setBroadcastText(event.target.value)} rows={10} maxLength={10_000} required placeholder="Write your message to users..." />
-                    </Field>
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <span className="text-xs text-[#9AA6C9]">{broadcastText.length.toLocaleString()} / 10,000 characters</span>
-                      <button className={btnPrimary} type="submit" disabled={broadcasting || users.filter((user) => !user.disabledAt).length === 0}>
-                        <Send size={15} /> {broadcasting ? 'Sending emails…' : `Send to ${users.filter((user) => !user.disabledAt).length} users`}
-                      </button>
-                    </div>
-                  </form>
+                <Section title="Email Communication">
+                  <EmailBroadcast />
                 </Section>
               )}
 
