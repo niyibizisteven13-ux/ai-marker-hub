@@ -1,6 +1,10 @@
 import { escapeEmailHtml } from '../server/email/BwengeEmailLayout.js';
 
+export const broadcastSenderIds = ['notifications', 'billing', 'support', 'hello', 'partners'] as const;
+export type BroadcastSender = typeof broadcastSenderIds[number];
+
 export interface BroadcastDraft {
+  sender?: BroadcastSender;
   subject: string;
   text: string;
   linkLabel?: string;
