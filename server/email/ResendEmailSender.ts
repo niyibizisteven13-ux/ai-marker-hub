@@ -1,3 +1,4 @@
+import { renderBwengeEmail } from './BwengeEmailLayout.js';
 import type { SendEmailOptions } from './EmailSender.js';
 
 type ResendEmailOptions = Omit<SendEmailOptions, 'text'> & { text?: string };
@@ -23,6 +24,7 @@ export async function sendResendEmail(options: ResendEmailOptions): Promise<stri
     },
     body: JSON.stringify({
       ...options,
+      html: renderBwengeEmail(options.html),
       from: process.env.RESEND_FROM?.trim() || 'Bwenge <notifications@bwenge.space>',
       ...(process.env.RESEND_REPLY_TO?.trim() ? { reply_to: process.env.RESEND_REPLY_TO.trim() } : {}),
     }),
