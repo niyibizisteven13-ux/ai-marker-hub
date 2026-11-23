@@ -37,9 +37,26 @@ jobs:
           PEER_NUMBER: ${{ inputs.peer_number }}
         shell: bash
         run: |
+          missing=()
+          [[ -n "${HOST//[[:space:]]/}" ]] || missing+=(DEPLOY_HOST)
+          [[ -n "${SSH_USER//[[:space:]]/}" ]] || missing+=(DEPLOY_USER)
+          [[ -n "${SSH_KEY//[[:space:]]/}" ]] || missing+=(DEPLOY_SSH_KEY)
+          [[ -n "${KNOWN_HOSTS//[[:space:]]/}" ]] || missing+=(DEPLOY_KNOWN_HOSTS)
+          if (( ${#missing[@]} )); then
+            echo "::error::Missing GitHub Actions secrets: ${missing[*]}. Add them under Settings > Environments > production."
+            exit 1
+          fi
+          if [[ ! "$SSH_PORT" =~ ^[0-9]{1,5}$ ]] || (( 10#$SSH_PORT < 1 || 10#$SSH_PORT > 65535 )); then
+            echo "::error::DEPLOY_PORT must be a number from 1 to 65535."
+            exit 1
+          fi
+
           peer_args=()
           if [[ -n "$PEER_KEY" || -n "$PEER_NUMBER" ]]; then
-            [[ "$PEER_KEY" =~ ^[A-Za-z0-9+/]{43}=$ && "$PEER_NUMBER" =~ ^[0-9]{1,3}$ ]]
+            if [[ ! "$PEER_KEY" =~ ^[A-Za-z0-9+/]{43}=$ || ! "$PEER_NUMBER" =~ ^[0-9]{1,3}$ ]] || (( 10#$PEER_NUMBER < 2 || 10#$PEER_NUMBER > 254 )); then
+              echo "::error::Provide both a WireGuard public key and a client number from 2 to 254."
+              exit 1
+            fi
             peer_args=("$PEER_KEY" "$PEER_NUMBER")
           fi
           install -m 700 -d ~/.ssh
