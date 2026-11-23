@@ -16,6 +16,7 @@ ssh $VPS_USER@$VPS_HOST << 'EOF'
   npm ci
   echo "Building application..."
   npm run build
+  bash scripts/build-litron.sh || exit 1
   echo "Applying database migrations..."
   npx prisma migrate deploy
   echo "Reloading PM2 process..."
