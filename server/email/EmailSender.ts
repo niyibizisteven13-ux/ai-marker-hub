@@ -1,1 +1,134 @@
-aW1wb3J0ICogYXMgbm9kZW1haWxlciBmcm9tICdub2RlbWFpbGVyJzsKaW1wb3J0IHsgaGFzUmVzZW5kQ29uZmlndXJhdGlvbiwgc2VuZFJlc2VuZEVtYWlsLCB1c2VzUmVzZW5kIH0gZnJvbSAnLi9SZXNlbmRFbWFpbFNlbmRlci5qcyc7CgpleHBvcnQgaW50ZXJmYWNlIFNlbmRFbWFpbE9wdGlvbnMgewogIHRvOiBzdHJpbmc7CiAgc3ViamVjdDogc3RyaW5nOwogIHRleHQ6IHN0cmluZzsKICBodG1sOiBzdHJpbmc7Cn0KCmV4cG9ydCBpbnRlcmZhY2UgRW1haWxTZW5kZXIgewogIHNlbmQob3B0aW9uczogU2VuZEVtYWlsT3B0aW9ucyk6IFByb21pc2U8dm9pZD47Cn0KCmV4cG9ydCBjbGFzcyBDb25zb2xlRW1haWxTZW5kZXIgaW1wbGVtZW50cyBFbWFpbFNlbmRlciB7CiAgYXN5bmMgc2VuZChvcHRpb25zOiBTZW5kRW1haWxPcHRpb25zKTogUHJvbWlzZTx2b2lkPiB7CiAgICBpZiAocHJvY2Vzcy5lbnYuTk9ERV9FTlYgPT09ICdwcm9kdWN0aW9uJykgewogICAgICB0aHJvdyBuZXcgRXJyb3IoJ0NvbnNvbGUgZW1haWwgZGVsaXZlcnkgaXMgZGlzYWJsZWQgaW4gcHJvZHVjdGlvbicpOwogICAgfQogICAgY29uc29sZS5sb2coYFtFTUFJTCBDT05TT0xFIFNFTkRFUl0gVG86ICR7b3B0aW9ucy50b30gfCBTdWJqZWN0OiAke29wdGlvbnMuc3ViamVjdH1gKTsKICAgIGNvbnNvbGUubG9nKGBbQk9EWV06XG4ke29wdGlvbnMudGV4dH1gKTsKICB9Cn0KCmV4cG9ydCBjbGFzcyBTbXRwRW1haWxTZW5kZXIgaW1wbGVtZW50cyBFbWFpbFNlbmRlciB7CiAgcHJpdmF0ZSB0cmFuc3BvcnRlcjogbm9kZW1haWxlci5UcmFuc3BvcnRlcjsKCiAgY29uc3RydWN0b3IoKSB7CiAgICB0aGlzLnRyYW5zcG9ydGVyID0gbm9kZW1haWxlci5jcmVhdGVUcmFuc3BvcnQocHJvY2Vzcy5lbnYuRU1BSUxfU01UUF9VUkwgfHwgewogICAgICBob3N0OiBwcm9jZXNzLmVudi5TTVRQX0hPU1QsCiAgICAgIHBvcnQ6IE51bWJlcihwcm9jZXNzLmVudi5TTVRQX1BPUlQgfHwgNTg3KSwKICAgICAgYXV0aDogewogICAgICAgIHVzZXI6IHByb2Nlc3MuZW52LlNNVFBfVVNFUiwKICAgICAgICBwYXNzOiBwcm9jZXNzLmVudi5TTVRQX1BBU1MsCiAgICAgIH0sCiAgICB9KTsKICB9CgogIGFzeW5jIHNlbmQob3B0aW9uczogU2VuZEVtYWlsT3B0aW9ucyk6IFByb21pc2U8dm9pZD4gewogICAgY29uc3QgZnJvbSA9IHByb2Nlc3MuZW52LkVNQUlMX0ZST00gfHwgJ0J3ZW5nZSA8bG9naW5AYndlbmdlLmFpPic7CiAgICBhd2FpdCB0aGlzLnRyYW5zcG9ydGVyLnNlbmRNYWlsKHsKICAgICAgZnJvbSwKICAgICAgdG86IG9wdGlvbnMudG8sCiAgICAgIHN1YmplY3Q6IG9wdGlvbnMuc3ViamVjdCwKICAgICAgdGV4dDogb3B0aW9ucy50ZXh0LAogICAgICBodG1sOiBvcHRpb25zLmh0bWwsCiAgICB9KTsKICB9Cn0KCmV4cG9ydCBmdW5jdGlvbiBoYXNTbXRwQ29uZmlndXJhdGlvbigpOiBib29sZWFuIHsKICByZXR1cm4gQm9vbGVhbihwcm9jZXNzLmVudi5FTUFJTF9TTVRQX1VSTCB8fCAocHJvY2Vzcy5lbnYuU01UUF9IT1NUICYmIHByb2Nlc3MuZW52LlNNVFBfVVNFUiAmJiBwcm9jZXNzLmVudi5TTVRQX1BBU1MpKTsKfQoKZXhwb3J0IGZ1bmN0aW9uIHZhbGlkYXRlRW1haWxTZW5kZXJDb25maWd1cmF0aW9uKCk6IHZvaWQgewogIGlmIChwcm9jZXNzLmVudi5OT0RFX0VOViAhPT0gJ3Byb2R1Y3Rpb24nKSByZXR1cm47CiAgaWYgKHVzZXNSZXNlbmQoKSkgewogICAgaWYgKCFoYXNSZXNlbmRDb25maWd1cmF0aW9uKCkpIHsKICAgICAgY29uc29sZS5lcnJvcignRW1haWwgZGVsaXZlcnkgaXMgdW5hdmFpbGFibGU6IFJlc2VuZCByZXF1aXJlcyBSRVNFTkRfQVBJX0tFWS4nKTsKICAgIH0KICB9IGVsc2UgaWYgKCFoYXNTbXRwQ29uZmlndXJhdGlvbigpKSB7CiAgICBjb25zb2xlLmVycm9yKCdFbWFpbCBkZWxpdmVyeSBpcyB1bmF2YWlsYWJsZTogcHJvZHVjdGlvbiByZXF1aXJlcyBFTUFJTF9TTVRQX1VSTCBvciBTTVRQX0hPU1QsIFNNVFBfVVNFUiwgYW5kIFNNVFBfUEFTUy4gT1RQIHNlbmRpbmcgaXMgZGlzYWJsZWQgdW50aWwgY29uZmlndXJlZC4nKTsKICB9Cn0KCmV4cG9ydCBmdW5jdGlvbiBnZXRFbWFpbFNlbmRlcigpOiBFbWFpbFNlbmRlciB7CiAgaWYgKHVzZXNSZXNlbmQoKSkgewogICAgaWYgKCFoYXNSZXNlbmRDb25maWd1cmF0aW9uKCkpIHRocm93IG5ldyBFcnJvcignUmVzZW5kIGVtYWlsIGRlbGl2ZXJ5IHJlcXVpcmVzIFJFU0VORF9BUElfS0VZJyk7CiAgICByZXR1cm4geyBhc3luYyBzZW5kKG9wdGlvbnMpIHsgYXdhaXQgc2VuZFJlc2VuZEVtYWlsKG9wdGlvbnMpOyB9IH07CiAgfQoKICBpZiAocHJvY2Vzcy5lbnYuTk9ERV9FTlYgPT09ICdwcm9kdWN0aW9uJykgewogICAgaWYgKCFoYXNTbXRwQ29uZmlndXJhdGlvbigpKSB7CiAgICAgIHRocm93IG5ldyBFcnJvcignUHJvZHVjdGlvbiBlbWFpbCBkZWxpdmVyeSByZXF1aXJlcyBTTVRQX0hPU1QsIFNNVFBfVVNFUiwgYW5kIFNNVFBfUEFTUycpOwogICAgfQogICAgcmV0dXJuIG5ldyBTbXRwRW1haWxTZW5kZXIoKTsKICB9CgogIGNvbnN0IHByb3ZpZGVyID0gcHJvY2Vzcy5lbnYuRU1BSUxfUFJPVklERVIgfHwgKHByb2Nlc3MuZW52LkVNQUlMX1NNVFBfVVJMIHx8IHByb2Nlc3MuZW52LlNNVFBfSE9TVCB8fCBwcm9jZXNzLmVudi5TTVRQX1VTRVIgPyAnc210cCcgOiAnY29uc29sZScpOwogIGlmIChwcm92aWRlciA9PT0gJ3NtdHAnIHx8IHByb3ZpZGVyID09PSAnc2VuZGdyaWQnKSB7CiAgICB0cnkgewogICAgICByZXR1cm4gbmV3IFNtdHBFbWFpbFNlbmRlcigpOwogICAgfSBjYXRjaCAoZXJyKSB7CiAgICAgIGNvbnNvbGUud2FybignRmFpbGVkIHRvIGluaXRpYWxpemUgU01UUCBlbWFpbCBzZW5kZXIsIGZhbGxpbmcgYmFjayB0byBkZXZlbG9wbWVudCBjb25zb2xlOicsIGVycik7CiAgICAgIHJldHVybiBuZXcgQ29uc29sZUVtYWlsU2VuZGVyKCk7CiAgICB9CiAgfQogIHJldHVybiBuZXcgQ29uc29sZUVtYWlsU2VuZGVyKCk7Cn0KCmV4cG9ydCBmdW5jdGlvbiBnZXRWZXJpZmljYXRpb25FbWFpbENvbnRlbnQoY29kZTogc3RyaW5nLCBsb2NhbGU6IHN0cmluZyA9ICdlbicpIHsKICBjb25zdCBsb2MgPSAobG9jYWxlIHx8ICdlbicpLnRvTG93ZXJDYXNlKCk7CiAgaWYgKGxvYy5zdGFydHNXaXRoKCdydycpKSB7CiAgICByZXR1cm4gewogICAgICBzdWJqZWN0OiBgJHtjb2RlfSBuaSBrb2RlIHlhd2UgeWEgQndlbmdlYCwKICAgICAgdGV4dDogYCR7Y29kZX0gbmkga29kZSB5YXdlIHlvIGt3aW5qaXJhIG11cmkgQndlbmdlLiBJcmFuZ2lyYSBtdSBtaW5vdGEgMTAuIE5pYmEgdXRhYmlzYWJ5ZSwgaXJlbmdhZ2l6ZSB1YnV0dW13YS5gLAogICAgICBodG1sOiBgCiAgICAgICAgPGRpdiBzdHlsZT0iZm9udC1mYW1pbHk6IHNhbnMtc2VyaWY7IG1heC13aWR0aDogNjAwcHg7IG1hcmdpbjogMCBhdXRvOyBwYWRkaW5nOiAyMHB4OyBiYWNrZ3JvdW5kOiAjMTAxMTE0OyBjb2xvcjogI0ZBRjlGNTsgYm9yZGVyLXJhZGl1czogMTJweDsiPgogICAgICAgICAgPGgyIHN0eWxlPSJjb2xvcjogI0Q5Nzc1NzsiPkJ3ZW5nZTwvaDI+CiAgICAgICAgICA8cD5Lb2RlIHlhd2UgeW8ga3dpbmppcmE6PC9wPgogICAgICAgICAgPGRpdiBzdHlsZT0iZm9udC1zaXplOiAzMnB4OyBmb250LXdlaWdodDogYm9sZDsgbGV0dGVyLXNwYWNpbmc6IDZweDsgY29sb3I6ICNEOTc3NTc7IG1hcmdpbjogMjBweCAwOyI+JHtjb2RlfTwvZGl2PgogICAgICAgICAgPHAgc3R5bGU9ImZvbnQtc2l6ZTogMTJweDsgY29sb3I6ICM4ODg7Ij5JcmFuZ2lyYSBtdSBtaW5vdGEgMTAuIE5pYmEgdXRhYmlzYWJ5ZSwgaXJlbmdhZ2l6ZS48L3A+CiAgICAgICAgPC9kaXY+CiAgICAgIGAsCiAgICB9OwogIH0KICBpZiAobG9jLnN0YXJ0c1dpdGgoJ2ZyJykpIHsKICAgIHJldHVybiB7CiAgICAgIHN1YmplY3Q6IGAke2NvZGV9IGVzdCB2b3RyZSBjb2RlIEJ3ZW5nZWAsCiAgICAgIHRleHQ6IGAke2NvZGV9IGVzdCB2b3RyZSBjb2RlIGRlIGNvbm5leGlvbiBCd2VuZ2UuIElsIGV4cGlyZSBkYW5zIDEwIG1pbnV0ZXMuIFNpIHZvdXMgbidhdmV6IHBhcyBkZW1hbmTDqSBjZSBjb2RlLCBpZ25vcmV6IGNldCBlLW1haWwuYCwKICAgICAgaHRtbDogYAogICAgICAgIDxkaXYgc3R5bGU9ImZvbnQtZmFtaWx5OiBzYW5zLXNlcmlmOyBtYXgtd2lkdGg6IDYwMHB4OyBtYXJnaW46IDAgYXV0bzsgcGFkZGluZzogMjBweDsgYmFja2dyb3VuZDogIzEwMTExNDsgY29sb3I6ICNGQUY5RjU7IGJvcmRlci1yYWRpdXM6IDEycHg7Ij4KICAgICAgICAgIDxoMiBzdHlsZT0iY29sb3I6ICNEOTc3NTc7Ij5Cd2VuZ2U8L2gyPgogICAgICAgICAgPHA+Vm90cmUgY29kZSBkZSB2w6lyaWZpY2F0aW9uIDo8L3A+CiAgICAgICAgICA8ZGl2IHN0eWxlPSJmb250LXNpemU6IDMycHg7IGZvbnQtd2VpZ2h0OiBib2xkOyBsZXR0ZXItc3BhY2luZzogNnB4OyBjb2xvcjogI0Q5Nzc1NzsgbWFyZ2luOiAyMHB4IDA7Ij4ke2NvZGV9PC9kaXY+CiAgICAgICAgICA8cCBzdHlsZT0iZm9udC1zaXplOiAxMnB4OyBjb2xvcjogIzg4ODsiPklsIGV4cGlyZSBkYW5zIDEwIG1pbnV0ZXMuIFNpIHZvdXMgbidhdmV6IHBhcyBkZW1hbmTDqSBjZSBjb2RlLCBpZ25vcmV6IGNldCBlLW1haWwuPC9wPgogICAgICAgIDwvZGl2PgogICAgICBgLAogICAgfTsKICB9CiAgLy8gRGVmYXVsdCBFTgogIHJldHVybiB7CiAgICBzdWJqZWN0OiBgJHtjb2RlfSBpcyB5b3VyIEJ3ZW5nZSBjb2RlYCwKICAgIHRleHQ6IGAke2NvZGV9IGlzIHlvdXIgQndlbmdlIGxvZ2luIHZlcmlmaWNhdGlvbiBjb2RlLiBJdCBleHBpcmVzIGluIDEwIG1pbnV0ZXMuIElmIHlvdSBkaWRuJ3QgYXNrIGZvciB0aGlzLCBpZ25vcmUgdGhpcyBlbWFpbC5gLAogICAgaHRtbDogYAogICAgICA8ZGl2IHN0eWxlPSJmb250LWZhbWlseTogc2Fucy1zZXJpZjsgbWF4LXdpZHRoOiA2MDBweDsgbWFyZ2luOiAwIGF1dG87IHBhZGRpbmc6IDIwcHg7IGJhY2tncm91bmQ6ICMxMDExMTQ7IGNvbG9yOiAjRkFGOUY1OyBib3JkZXItcmFkaXVzOiAxMnB4OyI+CiAgICAgICAgPGgyIHN0eWxlPSJjb2xvcjogI0Q5Nzc1NzsiPkJ3ZW5nZTwvaDI+CiAgICAgICAgPHA+WW91ciBvbmUtdGltZSBsb2dpbiB2ZXJpZmljYXRpb24gY29kZSBpczo8L3A+CiAgICAgICAgPGRpdiBzdHlsZT0iZm9udC1zaXplOiAzMnB4OyBmb250LXdlaWdodDogYm9sZDsgbGV0dGVyLXNwYWNpbmc6IDZweDsgY29sb3I6ICNEOTc3NTc7IG1hcmdpbjogMjBweCAwOyI+JHtjb2RlfTwvZGl2PgogICAgICAgIDxwIHN0eWxlPSJmb250LXNpemU6IDEycHg7IGNvbG9yOiAjODg4OyI+SXQgZXhwaXJlcyBpbiAxMCBtaW51dGVzLiBJZiB5b3UgZGlkbid0IGFzayBmb3IgdGhpcywgaWdub3JlIHRoaXMgZW1haWwuPC9wPgogICAgICA8L2Rpdj4KICAgIGAsCiAgfTsKfQo=
+import * as nodemailer from 'nodemailer';
+import { hasResendConfiguration, sendResendEmail, usesResend } from './ResendEmailSender.js';
+
+export interface SendEmailOptions {
+  to: string;
+  subject: string;
+  text: string;
+  html: string;
+}
+
+export interface EmailSender {
+  send(options: SendEmailOptions): Promise<void>;
+}
+
+export class ConsoleEmailSender implements EmailSender {
+  async send(options: SendEmailOptions): Promise<void> {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('Console email delivery is disabled in production');
+    }
+    console.log(`[EMAIL CONSOLE SENDER] To: ${options.to} | Subject: ${options.subject}`);
+    console.log(`[BODY]:\n${options.text}`);
+  }
+}
+
+export class SmtpEmailSender implements EmailSender {
+  private transporter: nodemailer.Transporter;
+
+  constructor() {
+    this.transporter = nodemailer.createTransport(process.env.EMAIL_SMTP_URL || {
+      host: process.env.SMTP_HOST,
+      port: Number(process.env.SMTP_PORT || 587),
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+    });
+  }
+
+  async send(options: SendEmailOptions): Promise<void> {
+    const from = process.env.EMAIL_FROM || 'Bwenge <login@bwenge.ai>';
+    await this.transporter.sendMail({
+      from,
+      to: options.to,
+      subject: options.subject,
+      text: options.text,
+      html: options.html,
+    });
+  }
+}
+
+export function hasSmtpConfiguration(): boolean {
+  return Boolean(process.env.EMAIL_SMTP_URL || (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS));
+}
+
+export function validateEmailSenderConfiguration(): void {
+  if (process.env.NODE_ENV !== 'production') return;
+  if (usesResend()) {
+    if (!hasResendConfiguration()) {
+      console.error('Email delivery is unavailable: Resend requires RESEND_API_KEY.');
+    }
+  } else if (!hasSmtpConfiguration()) {
+    console.error('Email delivery is unavailable: production requires EMAIL_SMTP_URL or SMTP_HOST, SMTP_USER, and SMTP_PASS. OTP sending is disabled until configured.');
+  }
+}
+
+export function getEmailSender(): EmailSender {
+  if (usesResend()) {
+    if (!hasResendConfiguration()) throw new Error('Resend email delivery requires RESEND_API_KEY');
+    return { async send(options) { await sendResendEmail(options); } };
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    if (!hasSmtpConfiguration()) {
+      throw new Error('Production email delivery requires SMTP_HOST, SMTP_USER, and SMTP_PASS');
+    }
+    return new SmtpEmailSender();
+  }
+
+  const provider = process.env.EMAIL_PROVIDER || (process.env.EMAIL_SMTP_URL || process.env.SMTP_HOST || process.env.SMTP_USER ? 'smtp' : 'console');
+  if (provider === 'smtp' || provider === 'sendgrid') {
+    try {
+      return new SmtpEmailSender();
+    } catch (err) {
+      console.warn('Failed to initialize SMTP email sender, falling back to development console:', err);
+      return new ConsoleEmailSender();
+    }
+  }
+  return new ConsoleEmailSender();
+}
+
+export function getVerificationEmailContent(code: string, locale: string = 'en') {
+  const loc = (locale || 'en').toLowerCase();
+  if (loc.startsWith('rw')) {
+    return {
+      subject: `${code} ni kode yawe ya Bwenge`,
+      text: `${code} ni kode yawe yo kwinjira muri Bwenge. Irangira mu minota 10. Niba utabisabye, irengagize ubutumwa.`,
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #101114; color: #FAF9F5; border-radius: 12px;">
+          <h2 style="color: #D97757;">Bwenge</h2>
+          <p>Kode yawe yo kwinjira:</p>
+          <div style="font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #D97757; margin: 20px 0;">${code}</div>
+          <p style="font-size: 12px; color: #888;">Irangira mu minota 10. Niba utabisabye, irengagize.</p>
+        </div>
+      `,
+    };
+  }
+  if (loc.startsWith('fr')) {
+    return {
+      subject: `${code} est votre code Bwenge`,
+      text: `${code} est votre code de connexion Bwenge. Il expire dans 10 minutes. Si vous n'avez pas demandé ce code, ignorez cet e-mail.`,
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #101114; color: #FAF9F5; border-radius: 12px;">
+          <h2 style="color: #D97757;">Bwenge</h2>
+          <p>Votre code de vérification :</p>
+          <div style="font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #D97757; margin: 20px 0;">${code}</div>
+          <p style="font-size: 12px; color: #888;">Il expire dans 10 minutes. Si vous n'avez pas demandé ce code, ignorez cet e-mail.</p>
+        </div>
+      `,
+    };
+  }
+  // Default EN
+  return {
+    subject: `${code} is your Bwenge code`,
+    text: `${code} is your Bwenge login verification code. It expires in 10 minutes. If you didn't ask for this, ignore this email.`,
+    html: `
+      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #101114; color: #FAF9F5; border-radius: 12px;">
+        <h2 style="color: #D97757;">Bwenge</h2>
+        <p>Your one-time login verification code is:</p>
+        <div style="font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #D97757; margin: 20px 0;">${code}</div>
+        <p style="font-size: 12px; color: #888;">It expires in 10 minutes. If you didn't ask for this, ignore this email.</p>
+      </div>
+    `,
+  };
+}
