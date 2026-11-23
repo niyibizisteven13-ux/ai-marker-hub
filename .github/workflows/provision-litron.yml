@@ -1,0 +1,49 @@
+name: Provision Litron WireGuard
+
+on:
+  workflow_dispatch:
+    inputs:
+      peer_public_key:
+        description: Optional WireGuard public key for an Android device
+        required: false
+        type: string
+      peer_number:
+        description: Optional unused client number from 2 to 254
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  gateway:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure gateway on the Bwenge VPS
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          SSH_USER: ${{ secrets.DEPLOY_USER }}
+          SSH_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          PEER_KEY: ${{ inputs.peer_public_key }}
+          PEER_NUMBER: ${{ inputs.peer_number }}
+        shell: bash
+        run: |
+          peer_args=()
+          if [[ -n "$PEER_KEY" || -n "$PEER_NUMBER" ]]; then
+            [[ "$PEER_KEY" =~ ^[A-Za-z0-9+/]{43}=$ && "$PEER_NUMBER" =~ ^[0-9]{1,3}$ ]]
+            peer_args=("$PEER_KEY" "$PEER_NUMBER")
+          fi
+          install -m 700 -d ~/.ssh
+          (umask 077; printf '%s\n' "$SSH_KEY" > ~/.ssh/litron_deploy)
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/litron_deploy -p "$SSH_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$HOST" sudo -n bash -s -- "${peer_args[@]}" < scripts/provision-litron-gateway.sh
