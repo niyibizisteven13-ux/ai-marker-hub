@@ -1,3 +1,4 @@
+import sanitizeHtml from 'sanitize-html';
 import { Router } from 'express';
 import { fileURLToPath } from 'url';
 import { prisma } from '../db.js';
@@ -21,6 +22,7 @@ import crypto from 'crypto';
 import { z } from 'zod';
 import { broadcastSenderIds, formatBroadcast, isBroadcastLink } from '../../shared/bwengeBroadcast.js';
 import { getResendFrom, usesResend } from '../email/ResendEmailSender.js';
+import { renderBwengeEmail } from '../email/BwengeEmailLayout.js';
 import { getEmailSender } from '../email/EmailSender.js';
 import { notifyAdminsOfFeedbackUpdate } from '../realtime.js';
 
@@ -2936,7 +2938,25 @@ const broadcastDraftSchema = z.object({
   linkLabel: z.string().trim().max(80).optional(),
   linkUrl: z.string().trim().max(2048).optional(),
   expectedRecipients: z.number().int().positive().optional(),
+  htmlSource: z.string().trim().max(20_000).optional(),
+  recipients: z.array(z.string().trim().email().max(254)).min(1).max(25).optional(),
 }).refine(({ linkLabel, linkUrl }) => !linkLabel && !linkUrl || Boolean(linkLabel && linkUrl && isBroadcastLink(linkUrl)));
+
+function formatAdminBroadcast(draft: z.infer<typeof broadcastDraftSchema>) {
+  const body = draft.htmlSource && sanitizeHtml(draft.htmlSource, {
+    allowedTags: ['p', 'br', 'strong', 'em', 'b', 'i', 'u', 'h2', 'h3', 'ul', 'ol', 'li', 'blockquote', 'a', 'pre', 'code'],
+    allowedAttributes: { a: ['href'] },
+    allowedSchemes: ['https', 'mailto'],
+    allowProtocolRelative: false,
+  }).trim();
+  return formatBroadcast(draft, body || undefined);
+}
+
+router.post('/communication/preview', (req, res) => {
+  const parsed = broadcastDraftSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ success: false, error: 'Complete the subject, plain-text message, and button fields before previewing.' });
+  return res.json({ success: true, data: { html: renderBwengeEmail(formatAdminBroadcast(parsed.data).html) } });
+});
 
 router.get('/communication/audience', async (_req, res) => {
   try {
@@ -2957,7 +2977,7 @@ router.post('/communication/test', async (req, res) => {
   try {
     const user = await prisma.user.findUnique({ where: { id: req.user!.userId }, select: { email: true } });
     if (!user?.email) return res.status(404).json({ success: false, error: 'Your admin account has no email address.' });
-    const message = formatBroadcast(parsed.data);
+    const message = formatAdminBroadcast(parsed.data);
     await getEmailSender(parsed.data.sender).send({ ...message, subject: `[Test] ${message.subject}`, to: user.email });
     return res.json({ success: true, data: { recipient: user.email } });
   } catch (error) {
@@ -2971,7 +2991,10 @@ router.post('/communication/broadcast', async (req, res) => {
   if (!parsed.success) return res.status(400).json({ success: false, error: 'Enter a subject and message, and complete both button fields if using a link.' });
 
   try {
-    const recipients = await prisma.user.findMany({
+    const manual = parsed.data.recipients;
+    const recipients = manual
+      ? [...new Set(manual.map((email) => email.toLowerCase()))].map((email) => ({ email }))
+      : await prisma.user.findMany({
       where: { disabledAt: null },
       select: { email: true },
       orderBy: { email: 'asc' },
@@ -2980,7 +3003,7 @@ router.post('/communication/broadcast', async (req, res) => {
       return res.status(409).json({ success: false, error: 'The enabled account count changed. Review the updated audience and confirm again.' });
     }
     const emailSender = getEmailSender(parsed.data.sender);
-    const message = formatBroadcast(parsed.data);
+    const message = formatAdminBroadcast(parsed.data);
     let delivered = 0;
     let failed = 0;
 
