@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Mail, Send } from 'lucide-react';
 import { adminApi } from '../../api/admin';
 import { formatBroadcast, isBroadcastLink, type BroadcastSender } from '../../../shared/bwengeBroadcast';
@@ -21,6 +21,12 @@ export default function EmailBroadcast() {
   const [htmlPreview, setHtmlPreview] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState(false);
   const [review, setReview] = useState(false);
+  const confirmationRef = useRef<HTMLDivElement>(null);
+  const sendButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (review) confirmationRef.current?.focus();
+  }, [review]);
   const [status, setStatus] = useState<{ message: string; error?: boolean } | null>(null);
 
   useEffect(() => {
@@ -240,18 +246,18 @@ export default function EmailBroadcast() {
               <button type="button" onClick={() => void send('test')} disabled={!ready || Boolean(pending)} className="inline-flex items-center gap-2 rounded-lg border border-slate-500 px-3 py-2 text-sm text-white disabled:opacity-50">
                 <Mail size={16} /> {pending === 'test' ? 'Sending test…' : 'Send test to me'}
               </button>
-              <button type="submit" disabled={!ready || !targetCount || Boolean(pending)} className="rounded-lg bg-[#F6B94A] px-3 py-2 text-sm font-semibold text-[#0B1420] disabled:opacity-50">
-                Review broadcast
+              <button ref={sendButtonRef} type="submit" disabled={!ready || !targetCount || Boolean(pending)} className="inline-flex items-center gap-2 rounded-lg bg-[#F6B94A] px-3 py-2 text-sm font-semibold text-[#0B1420] disabled:opacity-50">
+                <Send size={16} /> Send email
               </button>
             </div>
           </fieldset>
         </form>
-        {review && <div className="mt-4 space-y-3 rounded-lg border border-[#F6B94A] p-3 text-sm text-white">
+        {review && <div ref={confirmationRef} tabIndex={-1} role="group" aria-label="Confirm email recipients" className="mt-4 space-y-3 rounded-lg border border-[#F6B94A] p-3 text-sm text-white">
           <p>Send “{draft.subject.trim()}” to {targetCount?.toLocaleString()} {allAccounts ? 'enabled accounts' : 'selected recipients'}?</p>
           <p>From {selectedFrom}</p>
           {!allAccounts && <p className="break-words">To {recipients.join(', ')}</p>}
           <div className="flex flex-wrap gap-3">
-            <button type="button" disabled={Boolean(pending)} onClick={() => setReview(false)} className="px-2 py-1.5">Cancel</button>
+            <button type="button" disabled={Boolean(pending)} onClick={() => { setReview(false); sendButtonRef.current?.focus(); }} className="px-2 py-1.5">Cancel</button>
             <button type="button" disabled={Boolean(pending)} onClick={() => void send('send')} className="inline-flex items-center gap-2 rounded-lg bg-[#F6B94A] px-3 py-1.5 font-semibold text-[#0B1420] disabled:opacity-50">
               <Send size={15} /> {pending === 'send' ? 'Sending…' : 'Confirm and send'}
             </button>
