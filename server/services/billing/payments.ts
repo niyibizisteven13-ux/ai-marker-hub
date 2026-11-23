@@ -163,7 +163,7 @@ async function contact(userId: string) {
   return { name: user?.name?.split(' ')[0] ?? '', email, chatId: telegram?.chatId ?? null };
 }
 
-const sendMail = async (to: string | null, e: Email) => (to ? (await EmailService.getInstance().sendEmail({ to, ...e })).success : false);
+const sendMail = async (to: string | null, e: Email) => (to ? (await EmailService.getInstance().sendEmail({ to, ...e }, 'billing')).success : false);
 async function sendTelegram(chatId: string | null, html: string, button?: { text: string; url: string }) {
   if (!chatId) return false;
   const { telegramApi } = await import('../telegram/api.js');
