@@ -101,6 +101,7 @@ import agentRoutes from './server/routes/agentRoutes.ts';
 import paymentRoutes from './server/routes/paymentRoutes.ts';
 import formRoutes from './server/routes/formRoutes.ts';
 import studioRoutes from './server/routes/studioRoutes.ts';
+import { broadcastVideoPath, serveBroadcastVideo } from './server/email/BroadcastVideo.js';
 import adminRoutes from './server/routes/adminRoutes.ts';
 import ollamaRoutes from './server/routes/ollamaRoutes.ts';
 import passkeyRoutes from './server/routes/passkeyRoutes.ts';
@@ -448,6 +449,7 @@ app.post('/api/litron/peers', litronEnrollLimiter, (req, res) => {
     });
 });
 
+app.get(`${broadcastVideoPath}/:name`, serveBroadcastVideo);
 app.use('/api/biz', bizRoutes);                   // bwenge4biz: business pages (public routes first, then the owner's)
 app.use('/api/app', appRoutes);                   // download counter and the app version (for the "new version" notice)
 app.use('/api/auth/passkey', passkeyRoutes);

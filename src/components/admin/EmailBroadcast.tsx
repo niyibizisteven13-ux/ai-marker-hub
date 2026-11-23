@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Mail, Send } from 'lucide-react';
 import { adminApi } from '../../api/admin';
-import { formatBroadcast, isBroadcastLink, type BroadcastDraft, type BroadcastSender } from '../../../shared/bwengeBroadcast';
+import { formatBroadcast, isBroadcastLink, type BroadcastSender } from '../../../shared/bwengeBroadcast';
 import { renderBwengeEmail } from '../../../server/email/BwengeEmailLayout';
 
 const emptyDraft = { subject: '', text: '', linkLabel: '', linkUrl: '', htmlSource: '', videoUrl: '' };
@@ -14,11 +14,12 @@ export default function EmailBroadcast() {
   const [senders, setSenders] = useState<Array<{ id: BroadcastSender; from: string }>>([]);
   const selectedFrom = senders.find(({ id }) => id === sender)?.from;
   const [audience, setAudience] = useState<number | null>(null);
-  const [pending, setPending] = useState<'test' | 'send' | 'preview' | null>(null);
+  const [pending, setPending] = useState<'test' | 'send' | 'upload' | null>(null);
   const [recipientText, setRecipientText] = useState('');
   const [allAccounts, setAllAccounts] = useState(false);
   const [htmlMode, setHtmlMode] = useState(false);
   const [htmlPreview, setHtmlPreview] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState(false);
   const [review, setReview] = useState(false);
   const [status, setStatus] = useState<{ message: string; error?: boolean } | null>(null);
 
@@ -38,7 +39,7 @@ export default function EmailBroadcast() {
   const hasLink = Boolean(draft.linkLabel.trim() || draft.linkUrl.trim());
   const linkValid = !hasLink || Boolean(draft.linkLabel.trim() && isBroadcastLink(draft.linkUrl.trim()));
   const videoValid = !draft.videoUrl.trim() || isBroadcastLink(draft.videoUrl.trim());
-  const ready = Boolean(selectedFrom && draft.subject.trim() && draft.text.trim() && linkValid && videoValid);
+  const ready = Boolean(selectedFrom && draft.subject.trim() && (draft.text.trim() || (htmlMode && draft.htmlSource.trim())) && linkValid && videoValid);
   const recipients = [...new Set(recipientText.trim().toLowerCase().split(/[\s,;]+/).filter(Boolean))];
   const validRecipients = recipients.length <= 25 && recipients.every((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email));
   const targetCount = allAccounts ? audience : validRecipients ? recipients.length : 0;
@@ -55,16 +56,68 @@ export default function EmailBroadcast() {
     setReview(false);
   }
 
-  async function send(mode: 'test' | 'send' | 'preview') {
+  useEffect(() => {
+    setHtmlPreview(null);
+    setPreviewError(false);
+    if (!htmlMode || !draft.htmlSource.trim()) return;
+
+    let active = true;
+    const timer = window.setTimeout(() => {
+      adminApi.previewBroadcast({
+        ...draft,
+        subject: draft.subject.trim() || 'Your subject',
+        linkLabel: linkValid ? draft.linkLabel : '',
+        linkUrl: linkValid ? draft.linkUrl : '',
+        videoUrl: videoValid ? draft.videoUrl : '',
+      }).then(({ data }) => {
+        if (active) setHtmlPreview(data.html);
+      }).catch(() => {
+        if (active) setPreviewError(true);
+      });
+    }, 300);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [draft, htmlMode, linkValid, videoValid]);
+
+  async function importHtml(file: File) {
+    try {
+      const source = await file.text();
+      if (!source.trim() || source.trim().length > 20_000) {
+        throw new Error('Choose an HTML file with between 1 and 20,000 characters.');
+      }
+      setHtmlMode(true);
+      edit('htmlSource', source.trim());
+      setStatus(null);
+    } catch (error) {
+      setStatus({ message: error instanceof Error ? error.message : 'Could not read the HTML file.', error: true });
+    }
+  }
+
+  async function uploadVideo(file: File) {
+    if (file.size > 100 * 1024 * 1024 || !/\.mp4$/i.test(file.name)) {
+      setStatus({ message: 'Choose an MP4 video up to 100 MB.', error: true });
+      return;
+    }
+    setPending('upload');
+    setReview(false);
+    setStatus(null);
+    try {
+      edit('videoUrl', await adminApi.uploadBroadcastVideo(file));
+      setStatus({ message: 'Video uploaded and added to the email.' });
+    } catch (error) {
+      setStatus({ message: error instanceof Error ? error.message : 'Could not upload the video.', error: true });
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function send(mode: 'test' | 'send') {
     if (pending || !ready || (mode === 'send' && (!targetCount || !review))) return;
     setPending(mode);
     setStatus(null);
     try {
-      if (mode === 'preview') {
-        const { data } = await adminApi.previewBroadcast(payload);
-        setHtmlPreview(data.html);
-        return;
-      }
       if (mode === 'test') {
         const { data } = await adminApi.sendBroadcastTest(payload);
         setStatus({ message: `Test accepted for ${data.recipient}. Check your inbox for the message.` });
@@ -132,8 +185,8 @@ export default function EmailBroadcast() {
               <input className={field} value={draft.subject} onChange={(e) => edit('subject', e.target.value)} maxLength={180} required />
             </label>
             <label className="block space-y-1.5 text-sm text-slate-200">
-              <span>{htmlMode ? 'Plain-text version' : 'Message'}</span>
-              <textarea className={field} value={draft.text} onChange={(e) => edit('text', e.target.value)} rows={8} maxLength={10_000} required />
+              <span>{htmlMode ? 'Plain-text version (optional with HTML)' : 'Message'}</span>
+              <textarea className={field} value={draft.text} onChange={(e) => edit('text', e.target.value)} rows={8} maxLength={10_000} required={!htmlMode || !draft.htmlSource.trim()} />
             </label>
             <label className="flex items-center gap-2 text-sm text-slate-200">
               <input type="checkbox" checked={htmlMode} onChange={(event) => {
@@ -148,9 +201,14 @@ export default function EmailBroadcast() {
                 <span>HTML message</span>
                 <textarea className={`${field} font-mono`} value={draft.htmlSource} rows={7} maxLength={20_000} onChange={(event) => edit('htmlSource', event.target.value)} placeholder="<p>Dear Professor,</p>" />
               </label>
-              <button type="button" disabled={!ready || Boolean(pending)} onClick={() => void send('preview')} className="rounded-lg border border-slate-500 px-3 py-2 text-sm text-white disabled:opacity-50">
-                {pending === 'preview' ? 'Rendering…' : 'Refresh HTML preview'}
-              </button>
+              <label className="block space-y-1.5 text-sm text-slate-200">
+                <span>Import HTML file</span>
+                <input type="file" accept=".html,.htm,text/html" className={field} onChange={(event) => {
+                  const file = event.currentTarget.files?.[0];
+                  event.currentTarget.value = '';
+                  if (file) void importHtml(file);
+                }} />
+              </label>
             </div>}
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="block space-y-1.5 text-sm text-slate-200">
@@ -166,6 +224,15 @@ export default function EmailBroadcast() {
               <span>Inline video URL (optional)</span>
               <input className={field} value={draft.videoUrl} onChange={(e) => edit('videoUrl', e.target.value)} maxLength={2048} placeholder="https://media.example.com/demo.mp4" />
               <span className="block text-xs text-slate-400">Use a direct, publicly accessible MP4 link. The email also includes a Watch video link.</span>
+            </label>
+            <label className="block space-y-1.5 text-sm text-slate-200">
+              <span>{pending === 'upload' ? 'Uploading video…' : 'Upload MP4 video (up to 100 MB)'}</span>
+              <input type="file" accept=".mp4,video/mp4" className={field} onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                event.currentTarget.value = '';
+                if (file) void uploadVideo(file);
+              }} />
+              <span className="block text-xs text-slate-400">Bwenge hosts your upload and fills in the video URL automatically.</span>
             </label>
             {!videoValid && <p className="text-sm text-amber-300">Enter a valid HTTPS video URL.</p>}
             {!linkValid && <p className="text-sm text-amber-300">Enter button text and a valid HTTPS link.</p>}
@@ -194,9 +261,13 @@ export default function EmailBroadcast() {
       </section>
       <section className={panel} aria-label="Email preview">
         <h3 className="mb-3 text-base font-semibold text-white">Email preview</h3>
-        {htmlMode && !htmlPreview && <p className="mb-3 text-sm text-slate-300">Refresh the preview to see the formatted HTML.</p>}
+        {htmlMode && draft.htmlSource.trim() && !htmlPreview && (
+          <p role="status" className="mb-3 text-sm text-slate-300">
+            {previewError ? 'Could not render the HTML preview. Edit the draft to try again.' : 'Rendering HTML preview…'}
+          </p>
+        )}
         {selectedFrom && <p className="mb-3 break-words text-sm text-slate-300">From {selectedFrom}</p>}
-        <iframe title="Branded broadcast preview" sandbox="" srcDoc={htmlMode && htmlPreview ? htmlPreview : renderBwengeEmail(message.html)} className="h-[480px] w-full rounded-xl border border-[#263052] bg-[#0B1420]" />
+        <iframe title="Branded broadcast preview" sandbox="" allow="autoplay" srcDoc={htmlMode && htmlPreview ? htmlPreview : renderBwengeEmail(message.html)} className="h-[480px] w-full rounded-xl border border-[#263052] bg-[#0B1420]" />
       </section>
     </div>
   );
