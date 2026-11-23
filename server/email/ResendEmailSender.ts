@@ -1,1 +1,42 @@
-aW1wb3J0IHR5cGUgeyBTZW5kRW1haWxPcHRpb25zIH0gZnJvbSAnLi9FbWFpbFNlbmRlci5qcyc7Cgp0eXBlIFJlc2VuZEVtYWlsT3B0aW9ucyA9IE9taXQ8U2VuZEVtYWlsT3B0aW9ucywgJ3RleHQnPiAmIHsgdGV4dD86IHN0cmluZyB9OwoKZXhwb3J0IGZ1bmN0aW9uIHVzZXNSZXNlbmQoKTogYm9vbGVhbiB7CiAgY29uc3QgcHJvdmlkZXIgPSBwcm9jZXNzLmVudi5FTUFJTF9QUk9WSURFUjsKICByZXR1cm4gcHJvdmlkZXIgPyBwcm92aWRlciA9PT0gJ3Jlc2VuZCcgOiBCb29sZWFuKHByb2Nlc3MuZW52LlJFU0VORF9BUElfS0VZPy50cmltKCkpOwp9CgpleHBvcnQgZnVuY3Rpb24gaGFzUmVzZW5kQ29uZmlndXJhdGlvbigpOiBib29sZWFuIHsKICByZXR1cm4gQm9vbGVhbihwcm9jZXNzLmVudi5SRVNFTkRfQVBJX0tFWT8udHJpbSgpKTsKfQoKZXhwb3J0IGFzeW5jIGZ1bmN0aW9uIHNlbmRSZXNlbmRFbWFpbChvcHRpb25zOiBSZXNlbmRFbWFpbE9wdGlvbnMpOiBQcm9taXNlPHN0cmluZz4gewogIGNvbnN0IGFwaUtleSA9IHByb2Nlc3MuZW52LlJFU0VORF9BUElfS0VZPy50cmltKCk7CiAgaWYgKCFhcGlLZXkpIHRocm93IG5ldyBFcnJvcignUmVzZW5kIGVtYWlsIGRlbGl2ZXJ5IHJlcXVpcmVzIFJFU0VORF9BUElfS0VZJyk7CgogIGNvbnN0IHJlc3BvbnNlID0gYXdhaXQgZmV0Y2goJ2h0dHBzOi8vYXBpLnJlc2VuZC5jb20vZW1haWxzJywgewogICAgbWV0aG9kOiAnUE9TVCcsCiAgICBoZWFkZXJzOiB7CiAgICAgIEF1dGhvcml6YXRpb246IGBCZWFyZXIgJHthcGlLZXl9YCwKICAgICAgJ0NvbnRlbnQtVHlwZSc6ICdhcHBsaWNhdGlvbi9qc29uJywKICAgIH0sCiAgICBib2R5OiBKU09OLnN0cmluZ2lmeSh7CiAgICAgIC4uLm9wdGlvbnMsCiAgICAgIGZyb206IHByb2Nlc3MuZW52LlJFU0VORF9GUk9NPy50cmltKCkgfHwgJ0J3ZW5nZSA8bm90aWZpY2F0aW9uc0Bid2VuZ2Uuc3BhY2U+JywKICAgICAgLi4uKHByb2Nlc3MuZW52LlJFU0VORF9SRVBMWV9UTz8udHJpbSgpID8geyByZXBseV90bzogcHJvY2Vzcy5lbnYuUkVTRU5EX1JFUExZX1RPLnRyaW0oKSB9IDoge30pLAogICAgfSksCiAgICBzaWduYWw6IEFib3J0U2lnbmFsLnRpbWVvdXQoMTBfMDAwKSwKICB9KTsKCiAgaWYgKCFyZXNwb25zZS5vaykgewogICAgYXdhaXQgcmVzcG9uc2UuYm9keT8uY2FuY2VsKCkuY2F0Y2goKCkgPT4ge30pOwogICAgdGhyb3cgbmV3IEVycm9yKGBSZXNlbmQgcmVqZWN0ZWQgZW1haWwgZGVsaXZlcnkgKEhUVFAgJHtyZXNwb25zZS5zdGF0dXN9KWApOwogIH0KCiAgY29uc3QgcmVzdWx0ID0gYXdhaXQgcmVzcG9uc2UuanNvbigpIGFzIHsgaWQ/OiBzdHJpbmcgfTsKICBpZiAodHlwZW9mIHJlc3VsdD8uaWQgIT09ICdzdHJpbmcnIHx8ICFyZXN1bHQuaWQpIHsKICAgIHRocm93IG5ldyBFcnJvcignUmVzZW5kIHJldHVybmVkIG5vIGVtYWlsIElEJyk7CiAgfQogIHJldHVybiByZXN1bHQuaWQ7Cn0K
+import type { SendEmailOptions } from './EmailSender.js';
+
+type ResendEmailOptions = Omit<SendEmailOptions, 'text'> & { text?: string };
+
+export function usesResend(): boolean {
+  const provider = process.env.EMAIL_PROVIDER;
+  return provider ? provider === 'resend' : Boolean(process.env.RESEND_API_KEY?.trim());
+}
+
+export function hasResendConfiguration(): boolean {
+  return Boolean(process.env.RESEND_API_KEY?.trim());
+}
+
+export async function sendResendEmail(options: ResendEmailOptions): Promise<string> {
+  const apiKey = process.env.RESEND_API_KEY?.trim();
+  if (!apiKey) throw new Error('Resend email delivery requires RESEND_API_KEY');
+
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      ...options,
+      from: process.env.RESEND_FROM?.trim() || 'Bwenge <notifications@bwenge.space>',
+      ...(process.env.RESEND_REPLY_TO?.trim() ? { reply_to: process.env.RESEND_REPLY_TO.trim() } : {}),
+    }),
+    signal: AbortSignal.timeout(10_000),
+  });
+
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => {});
+    throw new Error(`Resend rejected email delivery (HTTP ${response.status})`);
+  }
+
+  const result = await response.json() as { id?: string };
+  if (typeof result?.id !== 'string' || !result.id) {
+    throw new Error('Resend returned no email ID');
+  }
+  return result.id;
+}
