@@ -1,4 +1,4 @@
-import type { BroadcastDraft } from '../../shared/bwengeBroadcast';
+import type { BroadcastDraft, BroadcastSender } from '../../shared/bwengeBroadcast';
 import { authFetch } from '../utils/authFetch';
 
 export interface AdminQualitySummary {
@@ -205,7 +205,7 @@ export const adminApi = {
   addFeedbackDatasetExample: (id: string, payload: { datasetId: string; correctedAnswer: string }) =>
     readJson(`/api/admin/feedback/${id}/dataset-example`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
   getBroadcastAudience: () =>
-    readJson<{ success: true; data: { count: number } }>('/api/admin/communication/audience'),
+    readJson<{ success: true; data: { count: number; senders: Array<{ id: BroadcastSender; from: string }> } }>('/api/admin/communication/audience'),
   sendBroadcastTest: (payload: BroadcastDraft) =>
     readJson<{ success: true; data: { recipient: string } }>('/api/admin/communication/test', {
       method: 'POST',
