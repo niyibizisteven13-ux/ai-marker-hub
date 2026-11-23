@@ -19,7 +19,8 @@ import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
 import { z } from 'zod';
-import { formatBroadcast, isBroadcastLink } from '../../shared/bwengeBroadcast.js';
+import { broadcastSenderIds, formatBroadcast, isBroadcastLink } from '../../shared/bwengeBroadcast.js';
+import { getResendFrom, usesResend } from '../email/ResendEmailSender.js';
 import { getEmailSender } from '../email/EmailSender.js';
 import { notifyAdminsOfFeedbackUpdate } from '../realtime.js';
 
@@ -2929,6 +2930,7 @@ router.post('/feedback/:id/dataset-example', async (req, res) => {
 });
 
 const broadcastDraftSchema = z.object({
+  sender: z.enum(broadcastSenderIds).optional(),
   subject: z.string().trim().min(1).max(180).regex(/^[^\r\n]+$/),
   text: z.string().trim().min(1).max(10_000),
   linkLabel: z.string().trim().max(80).optional(),
@@ -2939,7 +2941,10 @@ const broadcastDraftSchema = z.object({
 router.get('/communication/audience', async (_req, res) => {
   try {
     const count = await prisma.user.count({ where: { disabledAt: null } });
-    res.json({ success: true, data: { count } });
+    const senders = usesResend()
+      ? broadcastSenderIds.map((id) => ({ id, from: getResendFrom(id) }))
+      : [{ id: 'notifications', from: process.env.EMAIL_FROM || 'Bwenge <login@bwenge.ai>' }];
+    res.json({ success: true, data: { count, senders } });
   } catch {
     res.status(500).json({ success: false, error: 'Could not count enabled accounts.' });
   }
@@ -2953,7 +2958,7 @@ router.post('/communication/test', async (req, res) => {
     const user = await prisma.user.findUnique({ where: { id: req.user!.userId }, select: { email: true } });
     if (!user?.email) return res.status(404).json({ success: false, error: 'Your admin account has no email address.' });
     const message = formatBroadcast(parsed.data);
-    await getEmailSender().send({ ...message, subject: `[Test] ${message.subject}`, to: user.email });
+    await getEmailSender(parsed.data.sender).send({ ...message, subject: `[Test] ${message.subject}`, to: user.email });
     return res.json({ success: true, data: { recipient: user.email } });
   } catch (error) {
     logger.warn('Admin broadcast test email failed', { errorType: (error as Error)?.name });
@@ -2974,7 +2979,7 @@ router.post('/communication/broadcast', async (req, res) => {
     if (parsed.data.expectedRecipients !== undefined && parsed.data.expectedRecipients !== recipients.length) {
       return res.status(409).json({ success: false, error: 'The enabled account count changed. Review the updated audience and confirm again.' });
     }
-    const emailSender = getEmailSender();
+    const emailSender = getEmailSender(parsed.data.sender);
     const message = formatBroadcast(parsed.data);
     let delivered = 0;
     let failed = 0;
@@ -2992,7 +2997,7 @@ router.post('/communication/broadcast', async (req, res) => {
     }
 
     if (failed > 0) logger.error('Admin email broadcast partially failed', { targeted: recipients.length, delivered, failed });
-    await writeAuditLog(req.user?.userId, 'BROADCAST_EMAIL', 'communication', null, { targeted: recipients.length, delivered, failed });
+    await writeAuditLog(req.user?.userId, 'BROADCAST_EMAIL', 'communication', null, { targeted: recipients.length, delivered, failed, sender: parsed.data.sender ?? 'notifications' });
     res.json({ success: true, data: { targeted: recipients.length, delivered, failed } });
   } catch (error: any) {
     logger.error('Admin email broadcast failed', { message: error.message });
