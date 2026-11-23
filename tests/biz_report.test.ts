@@ -49,7 +49,7 @@ test('the service report puts the ledger and the programs together: who was serv
   const chantal = ms.find((x) => x.name === 'Chantal')!;
   await svc.claimCard(biz.slug, (await svc.login(biz.slug, { phone: '0788400003', passcode: '4821' }, 'c') as any).session, chantal.id, {}, 'c');
   await svc.redeem('o', biz.id, { memberId: ms.find((x) => x.name === 'Eric')!.id });
-  const code = (await svc.checkinCode('o', biz.id, prog.id)).code; await svc.selfUse(biz.slug, a.session, { code }, 'a');
+  const code = (await svc.checkinCode('o', biz.id, prog.id)).code; await svc.selfUse(biz.slug, a.session, { code, passcode: '4821' }, 'a');
   const { report, text } = await svc.dayReport('o', biz.id); const p = report.programs!;
   assert.equal(p.served, 2); assert.equal(p.people, 2); assert.equal(p.bySelf, 1); assert.deepEqual(p.byItem, [{ item: 'Lunch', count: 2 }]);
   assert.deepEqual(p.notYet, [{ name: 'Dina' }], 'Dina has a paid plan today and did not come; Aline and Eric did'); assert.equal(p.expected, 3); assert.equal(p.newMembers, 4); assert.equal(p.collectedRwf, 120_000); assert.deepEqual(p.waiting.map((x) => x.name), ['Chantal']);

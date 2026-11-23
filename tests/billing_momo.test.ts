@@ -351,7 +351,9 @@ test('platform context: the AI knows the plan, credits left, real links, and whe
   const p = await platformContext(pro, 'web');
   assert.match(p, /Pro plan, active until/);
   assert.match(p, /do not suggest upgrading/);
-  assert.equal(await platformContext(null, 'web'), '');
+  const guest = await platformContext(null, 'web');
+  assert.match(guest, /Bwenge product guide/);
+  assert.doesNotMatch(guest, /Pro plan, active until/);
 });
 
 test('marking access follows the plan and GO credits: no "free result used, pay per result" lock', async () => {
