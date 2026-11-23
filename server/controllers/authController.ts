@@ -277,12 +277,12 @@ export async function emailStart(req: Request, res: Response) {
         text: emailContent.text,
         html: emailContent.html,
       });
-    } catch (smtpErr: any) {
+    } catch (deliveryError: any) {
       if (process.env.NODE_ENV === 'production') {
         console.error('OTP email delivery failed in production.');
-        throw smtpErr;
+        throw deliveryError;
       }
-      console.warn('SMTP email send failed, falling back to development console:', smtpErr?.message || smtpErr);
+      console.warn('Email send failed, falling back to development console:', deliveryError?.message || deliveryError);
       await new ConsoleEmailSender().send({
         to: normalized,
         subject: emailContent.subject,

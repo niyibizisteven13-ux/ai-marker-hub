@@ -68,7 +68,9 @@ EMAIL_FROM="Bwenge <login@bwenge.ai>"
 EMAIL_SMTP_URL=
 ```
 
-In production, configure either `EMAIL_SMTP_URL` or `SMTP_HOST`, `SMTP_USER`, and `SMTP_PASS`. The administrator email broadcast uses this same configured sender and targets enabled accounts only.
+For Resend, verify `bwenge.space` in the Resend dashboard using the exact DNS records shown there. Set `EMAIL_PROVIDER=resend` and `RESEND_API_KEY` in the production server environment. Use a sending-only key scoped to the verified domain. The default sender is `Bwenge <notifications@bwenge.space>`. Set `RESEND_FROM` to override it and set `RESEND_REPLY_TO` if replies should go to an existing monitored mailbox. Restart the application after updating its environment.
+
+The Resend configuration covers login codes, existing billing and agenda notifications, and the administrator email broadcast to enabled accounts. For SMTP deployments, continue using `EMAIL_SMTP_URL` or `SMTP_HOST`, `SMTP_USER`, and `SMTP_PASS` for login codes. Other platform notifications use the individual SMTP settings.
 
 ---
 

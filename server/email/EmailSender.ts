@@ -1,4 +1,6 @@
 import * as nodemailer from 'nodemailer';
+import { renderBwengeCode, renderBwengeEmail } from './BwengeEmailLayout.js';
+import { hasResendConfiguration, sendResendEmail, usesResend } from './ResendEmailSender.js';
 
 export interface SendEmailOptions {
   to: string;
@@ -42,7 +44,7 @@ export class SmtpEmailSender implements EmailSender {
       to: options.to,
       subject: options.subject,
       text: options.text,
-      html: options.html,
+      html: renderBwengeEmail(options.html),
     });
   }
 }
@@ -52,12 +54,22 @@ export function hasSmtpConfiguration(): boolean {
 }
 
 export function validateEmailSenderConfiguration(): void {
-  if (process.env.NODE_ENV === 'production' && !hasSmtpConfiguration()) {
+  if (process.env.NODE_ENV !== 'production') return;
+  if (usesResend()) {
+    if (!hasResendConfiguration()) {
+      console.error('Email delivery is unavailable: Resend requires RESEND_API_KEY.');
+    }
+  } else if (!hasSmtpConfiguration()) {
     console.error('Email delivery is unavailable: production requires EMAIL_SMTP_URL or SMTP_HOST, SMTP_USER, and SMTP_PASS. OTP sending is disabled until configured.');
   }
 }
 
 export function getEmailSender(): EmailSender {
+  if (usesResend()) {
+    if (!hasResendConfiguration()) throw new Error('Resend email delivery requires RESEND_API_KEY');
+    return { async send(options) { await sendResendEmail(options); } };
+  }
+
   if (process.env.NODE_ENV === 'production') {
     if (!hasSmtpConfiguration()) {
       throw new Error('Production email delivery requires SMTP_HOST, SMTP_USER, and SMTP_PASS');
@@ -66,7 +78,7 @@ export function getEmailSender(): EmailSender {
   }
 
   const provider = process.env.EMAIL_PROVIDER || (process.env.EMAIL_SMTP_URL || process.env.SMTP_HOST || process.env.SMTP_USER ? 'smtp' : 'console');
-  if (provider === 'smtp' || provider === 'resend' || provider === 'sendgrid') {
+  if (provider === 'smtp' || provider === 'sendgrid') {
     try {
       return new SmtpEmailSender();
     } catch (err) {
@@ -84,12 +96,9 @@ export function getVerificationEmailContent(code: string, locale: string = 'en')
       subject: `${code} ni kode yawe ya Bwenge`,
       text: `${code} ni kode yawe yo kwinjira muri Bwenge. Irangira mu minota 10. Niba utabisabye, irengagize ubutumwa.`,
       html: `
-        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #101114; color: #FAF9F5; border-radius: 12px;">
-          <h2 style="color: #D97757;">Bwenge</h2>
           <p>Kode yawe yo kwinjira:</p>
-          <div style="font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #D97757; margin: 20px 0;">${code}</div>
-          <p style="font-size: 12px; color: #888;">Irangira mu minota 10. Niba utabisabye, irengagize.</p>
-        </div>
+          ${renderBwengeCode(code)}
+          <p>Irangira mu minota 10. Niba utabisabye, irengagize.</p>
       `,
     };
   }
@@ -98,12 +107,9 @@ export function getVerificationEmailContent(code: string, locale: string = 'en')
       subject: `${code} est votre code Bwenge`,
       text: `${code} est votre code de connexion Bwenge. Il expire dans 10 minutes. Si vous n'avez pas demandé ce code, ignorez cet e-mail.`,
       html: `
-        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #101114; color: #FAF9F5; border-radius: 12px;">
-          <h2 style="color: #D97757;">Bwenge</h2>
           <p>Votre code de vérification :</p>
-          <div style="font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #D97757; margin: 20px 0;">${code}</div>
-          <p style="font-size: 12px; color: #888;">Il expire dans 10 minutes. Si vous n'avez pas demandé ce code, ignorez cet e-mail.</p>
-        </div>
+          ${renderBwengeCode(code)}
+          <p>Il expire dans 10 minutes. Si vous n'avez pas demandé ce code, ignorez cet e-mail.</p>
       `,
     };
   }
@@ -112,12 +118,9 @@ export function getVerificationEmailContent(code: string, locale: string = 'en')
     subject: `${code} is your Bwenge code`,
     text: `${code} is your Bwenge login verification code. It expires in 10 minutes. If you didn't ask for this, ignore this email.`,
     html: `
-      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #101114; color: #FAF9F5; border-radius: 12px;">
-        <h2 style="color: #D97757;">Bwenge</h2>
         <p>Your one-time login verification code is:</p>
-        <div style="font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #D97757; margin: 20px 0;">${code}</div>
-        <p style="font-size: 12px; color: #888;">It expires in 10 minutes. If you didn't ask for this, ignore this email.</p>
-      </div>
+        ${renderBwengeCode(code)}
+        <p>It expires in 10 minutes. If you didn't ask for this, ignore this email.</p>
     `,
   };
 }
