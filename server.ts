@@ -2904,6 +2904,7 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
+    app.use('/litron-vpn', express.static(path.join(distPath, 'litron-vpn'), { fallthrough: false }));
     // MySEB as its own app: /ms (and the root of a myseb.<domain> host) is the same site with MySEB's own name, icon, colour and manifest in the head.
     const mysebShell = async (req: express.Request, res: express.Response) => {
       try {

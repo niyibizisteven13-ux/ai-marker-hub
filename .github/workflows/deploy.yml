@@ -60,6 +60,7 @@ jobs:
           npm ci
           npx prisma migrate deploy
           npm run build
+          bash scripts/build-litron.sh
           pm2 startOrReload ecosystem.config.js --update-env
           pm2 save
           REMOTE
