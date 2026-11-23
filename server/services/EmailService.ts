@@ -1,1 +1,188 @@
-aW1wb3J0IG5vZGVtYWlsZXIsIHsgdHlwZSBUcmFuc3BvcnRlciB9IGZyb20gJ25vZGVtYWlsZXInOwppbXBvcnQgeyBzZW5kUmVzZW5kRW1haWwsIHVzZXNSZXNlbmQgfSBmcm9tICcuLi9lbWFpbC9SZXNlbmRFbWFpbFNlbmRlci5qcyc7CmltcG9ydCBsb2dnZXIgZnJvbSAnLi4vdXRpbHMvbG9nZ2VyLmpzJzsKCmV4cG9ydCBjbGFzcyBFbWFpbFNlcnZpY2UgewogIHByaXZhdGUgc3RhdGljIGluc3RhbmNlOiBFbWFpbFNlcnZpY2U7CgogIHByaXZhdGUgY29uc3RydWN0b3IoKSB7fQoKICBwdWJsaWMgc3RhdGljIGdldEluc3RhbmNlKCk6IEVtYWlsU2VydmljZSB7CiAgICBpZiAoIUVtYWlsU2VydmljZS5pbnN0YW5jZSkgewogICAgICBFbWFpbFNlcnZpY2UuaW5zdGFuY2UgPSBuZXcgRW1haWxTZXJ2aWNlKCk7CiAgICB9CiAgICByZXR1cm4gRW1haWxTZXJ2aWNlLmluc3RhbmNlOwogIH0KCiAgcHJpdmF0ZSB0cmFuc3BvcnQ6IFRyYW5zcG9ydGVyIHwgbnVsbCA9IG51bGw7CiAgcHJpdmF0ZSBzdGF0aWMgdGVzdFRyYW5zcG9ydDogVHJhbnNwb3J0ZXIgfCBudWxsID0gbnVsbDsKCiAgLyoqIFRlc3RzIGNhcHR1cmUgbWFpbCB3aXRoIGEgbm9kZW1haWxlciBzdHJlYW0vanNvbiB0cmFuc3BvcnQgaW5zdGVhZCBvZiBTTVRQLiAqLwogIHB1YmxpYyBzdGF0aWMgc2V0VGVzdFRyYW5zcG9ydCh0OiBUcmFuc3BvcnRlciB8IG51bGwpIHsgRW1haWxTZXJ2aWNlLnRlc3RUcmFuc3BvcnQgPSB0OyB9CgogIHByaXZhdGUgZ2V0VHJhbnNwb3J0KCk6IFRyYW5zcG9ydGVyIHwgbnVsbCB7CiAgICBpZiAoRW1haWxTZXJ2aWNlLnRlc3RUcmFuc3BvcnQpIHJldHVybiBFbWFpbFNlcnZpY2UudGVzdFRyYW5zcG9ydDsKICAgIGlmICh0aGlzLnRyYW5zcG9ydCkgcmV0dXJuIHRoaXMudHJhbnNwb3J0OwogICAgY29uc3QgaG9zdCA9IHByb2Nlc3MuZW52LlNNVFBfSE9TVDsKICAgIGlmICghaG9zdCB8fCAhcHJvY2Vzcy5lbnYuU01UUF9VU0VSIHx8ICFwcm9jZXNzLmVudi5TTVRQX1BBU1MpIHJldHVybiBudWxsOwogICAgY29uc3QgcG9ydCA9IE51bWJlcihwcm9jZXNzLmVudi5TTVRQX1BPUlQpIHx8IDU4NzsKICAgIHRoaXMudHJhbnNwb3J0ID0gbm9kZW1haWxlci5jcmVhdGVUcmFuc3BvcnQoewogICAgICBob3N0LCBwb3J0LCBzZWN1cmU6IHByb2Nlc3MuZW52LlNNVFBfU0VDVVJFID8gcHJvY2Vzcy5lbnYuU01UUF9TRUNVUkUgPT09ICd0cnVlJyA6IHBvcnQgPT09IDQ2NSwKICAgICAgYXV0aDogeyB1c2VyOiBwcm9jZXNzLmVudi5TTVRQX1VTRVIsIHBhc3M6IHByb2Nlc3MuZW52LlNNVFBfUEFTUyB9LAogICAgICBwb29sOiB0cnVlLCBtYXhDb25uZWN0aW9uczogMywgY29ubmVjdGlvblRpbWVvdXQ6IDIwXzAwMCwgZ3JlZXRpbmdUaW1lb3V0OiAxNV8wMDAsIHNvY2tldFRpbWVvdXQ6IDMwXzAwMCwKICAgIH0pOwogICAgcmV0dXJuIHRoaXMudHJhbnNwb3J0OwogIH0KCiAgcHVibGljIGFzeW5jIHNlbmRFbWFpbCh7IHRvLCBzdWJqZWN0LCBodG1sLCB0ZXh0IH06IHsgdG86IHN0cmluZzsgc3ViamVjdDogc3RyaW5nOyBodG1sOiBzdHJpbmc7IHRleHQ/OiBzdHJpbmcgfSk6IFByb21pc2U8eyBzdWNjZXNzOiBib29sZWFuOyBtZXNzYWdlSWQ/OiBzdHJpbmc7IHNraXBwZWQ/OiBib29sZWFuOyBlcnJvcj86IHN0cmluZyB9PiB7CiAgICB0cnkgewogICAgICBpZiAoIUVtYWlsU2VydmljZS50ZXN0VHJhbnNwb3J0ICYmIHVzZXNSZXNlbmQoKSkgewogICAgICAgIGNvbnN0IG1lc3NhZ2VJZCA9IGF3YWl0IHNlbmRSZXNlbmRFbWFpbCh7IHRvLCBzdWJqZWN0LCBodG1sLCB0ZXh0IH0pOwogICAgICAgIGxvZ2dlci5pbmZvKCdbRW1haWxTZXJ2aWNlXSBSZXNlbmQgYWNjZXB0ZWQgZW1haWwuJywgeyBtZXNzYWdlSWQgfSk7CiAgICAgICAgcmV0dXJuIHsgc3VjY2VzczogdHJ1ZSwgbWVzc2FnZUlkIH07CiAgICAgIH0KCiAgICAgIGNvbnN0IHRyYW5zcG9ydCA9IHRoaXMuZ2V0VHJhbnNwb3J0KCk7CiAgICAgIGlmICghdHJhbnNwb3J0KSB7CiAgICAgICAgbG9nZ2VyLndhcm4oJ1tFbWFpbFNlcnZpY2VdIFNNVFAgaXMgbm90IGNvbmZpZ3VyZWQ7IGVtYWlsIG5vdCBzZW50LicpOwogICAgICAgIHJldHVybiB7IHN1Y2Nlc3M6IGZhbHNlLCBza2lwcGVkOiB0cnVlIH07CiAgICAgIH0KCiAgICAgIGNvbnN0IGluZm8gPSBhd2FpdCB0cmFuc3BvcnQuc2VuZE1haWwoewogICAgICAgIGZyb206IHByb2Nlc3MuZW52LlNNVFBfRlJPTSB8fCAnQndlbmdlIEFJIDxub3JlcGx5QGJ3ZW5nZS5zcGFjZT4nLAogICAgICAgIHRvLCBzdWJqZWN0LCBodG1sLAogICAgICAgIHRleHQ6IHRleHQgPz8gaHRtbC5yZXBsYWNlKC88c3R5bGVbXHNcU10qPzxcL3N0eWxlPi9naSwgJycpLnJlcGxhY2UoLzxiclxzKlwvPz4oPyFcbikvZ2ksICdcbicpLnJlcGxhY2UoLzxcLyhwfGRpdnx0cnxoWzEtNl18bGkpPi9naSwgJ1xuJykucmVwbGFjZSgvPFtePl0rPi9nLCAnJykucmVwbGFjZSgvJm5ic3A7L2csICcgJykucmVwbGFjZSgvJmFtcDsvZywgJyYnKS5yZXBsYWNlKC9cbnszLH0vZywgJ1xuXG4nKS50cmltKCksCiAgICAgICAgLi4uKHByb2Nlc3MuZW52LlNNVFBfUkVQTFlfVE8gPyB7IHJlcGx5VG86IHByb2Nlc3MuZW52LlNNVFBfUkVQTFlfVE8gfSA6IHt9KSwKICAgICAgfSk7CiAgICAgIGxvZ2dlci5pbmZvKCdbRW1haWxTZXJ2aWNlXSBFbWFpbCBzZW50LicsIHsgbWVzc2FnZUlkOiBpbmZvLm1lc3NhZ2VJZCB9KTsKICAgICAgcmV0dXJuIHsgc3VjY2VzczogdHJ1ZSwgbWVzc2FnZUlkOiBpbmZvLm1lc3NhZ2VJZCB9OwogICAgfSBjYXRjaCAoZXJyKSB7CiAgICAgIGxvZ2dlci5lcnJvcignW0VtYWlsU2VydmljZV0gRW1haWwgZmFpbGVkLicsIHsgZXJyb3JUeXBlOiAoZXJyIGFzIEVycm9yKT8ubmFtZSB9KTsKICAgICAgcmV0dXJuIHsgc3VjY2VzczogZmFsc2UsIGVycm9yOiAoZXJyIGFzIEVycm9yKT8ubWVzc2FnZSB9OwogICAgfQogIH0KCiAgcHVibGljIGFzeW5jIHNlbmRPdHBFbWFpbCh0bzogc3RyaW5nLCBvdHBDb2RlOiBzdHJpbmcpIHsKICAgIGNvbnN0IHN1YmplY3QgPSAnWW91ciBCd2VuZ2UgQUkgVmVyaWZpY2F0aW9uIENvZGUnOwogICAgY29uc3QgaHRtbCA9IGAKICAgICAgPCFET0NUWVBFIGh0bWw+CiAgICAgIDxodG1sPgogICAgICA8aGVhZD4KICAgICAgICA8bWV0YSBjaGFyc2V0PSJ1dGYtOCI+CiAgICAgICAgPHRpdGxlPlZlcmlmaWNhdGlvbiBDb2RlPC90aXRsZT4KICAgICAgPC9oZWFkPgogICAgICA8Ym9keSBzdHlsZT0ibWFyZ2luOiAwOyBwYWRkaW5nOiAwOyBiYWNrZ3JvdW5kLWNvbG9yOiAjMTAxMTE0OyBmb250LWZhbWlseTogLWFwcGxlLXN5c3RlbSwgQmxpbmtNYWNTeXN0ZW1Gb250LCAnU2Vnb2UgVUknLCBSb2JvdG8sIEhlbHZldGljYSwgQXJpYWwsIHNhbnMtc2VyaWY7IGNvbG9yOiAjRkFGOUY1OyI+CiAgICAgICAgPHRhYmxlIHJvbGU9InByZXNlbnRhdGlvbiIgd2lkdGg9IjEwMCUiIGNlbGxzcGFjaW5nPSIwIiBjZWxscGFkZGluZz0iMCIgc3R5bGU9ImJhY2tncm91bmQtY29sb3I6ICMxMDExMTQ7IHBhZGRpbmc6IDQwcHggMDsiPgogICAgICAgICAgPHRyPgogICAgICAgICAgICA8dGQgYWxpZ249ImNlbnRlciI+CiAgICAgICAgICAgICAgPHRhYmxlIHJvbGU9InByZXNlbnRhdGlvbiIgd2lkdGg9IjEwMCUiIG1heC13aWR0aD0iNjAwcHgiIGNlbGxzcGFjaW5nPSIwIiBjZWxscGFkZGluZz0iMCIgc3R5bGU9Im1heC13aWR0aDogNjAwcHg7IGJhY2tncm91bmQ6ICMxYzFjMjA7IGJvcmRlcjogMXB4IHNvbGlkIHJnYmEoMjU1LDI1NSwyNTUsMC4wOCk7IGJvcmRlci1yYWRpdXM6IDI0cHg7IHBhZGRpbmc6IDQwcHg7IGJveC1zaGFkb3c6IDAgMjBweCA0MHB4IHJnYmEoMCwwLDAsMC40KTsiPgogICAgICAgICAgICAgICAgPHRyPgogICAgICAgICAgICAgICAgICA8dGQ+CiAgICAgICAgICAgICAgICAgICAgPGRpdiBzdHlsZT0iZGlzcGxheTogZmxleDsgYWxpZ24taXRlbXM6IGNlbnRlcjsgbWFyZ2luLWJvdHRvbTogMjRweDsiPgogICAgICAgICAgICAgICAgICAgICAgPHNwYW4gc3R5bGU9ImZvbnQtc2l6ZTogMjRweDsgY29sb3I6ICNEOTc3NTc7IG1hcmdpbi1yaWdodDogOHB4OyI+4pymPC9zcGFuPgogICAgICAgICAgICAgICAgICAgICAgPHNwYW4gc3R5bGU9ImZvbnQtc2l6ZTogMjBweDsgZm9udC13ZWlnaHQ6IDcwMDsgbGV0dGVyLXNwYWNpbmc6IC0wLjVweDsgY29sb3I6ICNGQUY5RjU7Ij5Cd2VuZ2UgQUkgU3R1ZGlvPC9zcGFuPgogICAgICAgICAgICAgICAgICAgIDwvZGl2PgogICAgICAgICAgICAgICAgICAgIDxoMSBzdHlsZT0iZm9udC1zaXplOiAyNHB4OyBmb250LXdlaWdodDogNjAwOyBjb2xvcjogI0ZBRjlGNTsgbWFyZ2luLXRvcDogMDsgbWFyZ2luLWJvdHRvbTogMTJweDsiPlNpZ24gaW4gdG8gQndlbmdlPC9oMT4KICAgICAgICAgICAgICAgICAgICA8cCBzdHlsZT0iZm9udC1zaXplOiAxNHB4OyBsaW5lLWhlaWdodDogMjRweDsgY29sb3I6ICNBMEEwQUE7IG1hcmdpbi1ib3R0b206IDI0cHg7Ij5Zb3UgcmVxdWVzdGVkIGEgb25lLXRpbWUgdmVyaWZpY2F0aW9uIGNvZGUgdG8gc2lnbiBpbiB0byB5b3VyIHdvcmtzcGFjZSBhdCA8YSBocmVmPSJodHRwczovL3d3dy5id2VuZ2Uuc3BhY2UiIHN0eWxlPSJjb2xvcjogI0Q5Nzc1NzsgdGV4dC1kZWNvcmF0aW9uOiBub25lOyI+d3d3LmJ3ZW5nZS5zcGFjZTwvYT4uPC9wPgogICAgICAgICAgICAgICAgICAgIDxkaXYgc3R5bGU9ImJhY2tncm91bmQ6ICMyNjI2MmE7IGJvcmRlcjogMXB4IHNvbGlkIHJnYmEoMjE3LDExOSw4NywwLjMpOyBib3JkZXItcmFkaXVzOiAxNnB4OyBwYWRkaW5nOiAyNHB4OyB0ZXh0LWFsaWduOiBjZW50ZXI7IG1hcmdpbi1ib3R0b206IDI0cHg7Ij4KICAgICAgICAgICAgICAgICAgICAgIDxkaXYgc3R5bGU9ImZvbnQtc2l6ZTogMzhweDsgZm9udC13ZWlnaHQ6IDgwMDsgbGV0dGVyLXNwYWNpbmc6IDhweDsgY29sb3I6ICNEOTc3NTc7Ij4ke290cENvZGV9PC9kaXY+CiAgICAgICAgICAgICAgICAgICAgPC9kaXY+CiAgICAgICAgICAgICAgICAgICAgPHAgc3R5bGU9ImZvbnQtc2l6ZTogMTNweDsgY29sb3I6ICM3MTcxN0E7IG1hcmdpbi1ib3R0b206IDA7Ij5UaGlzIGNvZGUgd2lsbCBleHBpcmUgaW4gNSBtaW51dGVzLiBJZiB5b3UgZGlkIG5vdCByZXF1ZXN0IHRoaXMsIHlvdSBjYW4gc2FmZWx5IGlnbm9yZSB0aGlzIGVtYWlsLjwvcD4KICAgICAgICAgICAgICAgICAgPC90ZD4KICAgICAgICAgICAgICAgIDwvdHI+CiAgICAgICAgICAgICAgPC90YWJsZT4KICAgICAgICAgICAgICA8ZGl2IHN0eWxlPSJ0ZXh0LWFsaWduOiBjZW50ZXI7IG1hcmdpbi10b3A6IDI0cHg7IGZvbnQtc2l6ZTogMTJweDsgY29sb3I6ICM1MjUyNUI7Ij4KICAgICAgICAgICAgICAgIMKpIDIwMjYgQndlbmdlIEFJIFN0dWRpbyDCtyA8YSBocmVmPSJodHRwczovL3d3dy5id2VuZ2Uuc3BhY2UiIHN0eWxlPSJjb2xvcjogIzcxNzE3QTsgdGV4dC1kZWNvcmF0aW9uOiB1bmRlcmxpbmU7Ij53d3cuYndlbmdlLnNwYWNlPC9hPgogICAgICAgICAgICAgIDwvZGl2PgogICAgICAgICAgICA8L3RkPgogICAgICAgICAgPC90cj4KICAgICAgICA8L3RhYmxlPgogICAgICA8L2JvZHk+CiAgICAgIDwvaHRtbD4KICAgIGA7CiAgICByZXR1cm4gdGhpcy5zZW5kRW1haWwoeyB0bywgc3ViamVjdCwgaHRtbCB9KTsKICB9CgogIHB1YmxpYyBhc3luYyBzZW5kUGFzc3dvcmRSZXNldEVtYWlsKHRvOiBzdHJpbmcsIHJlc2V0VG9rZW46IHN0cmluZykgewogICAgY29uc3QgcmVzZXRVcmwgPSBgaHR0cHM6Ly93d3cuYndlbmdlLnNwYWNlL3Jlc2V0LXBhc3N3b3JkP3Rva2VuPSR7cmVzZXRUb2tlbn1gOwogICAgY29uc3Qgc3ViamVjdCA9ICdSZXNldCB5b3VyIEJ3ZW5nZSBBSSBwYXNzd29yZCc7CiAgICBjb25zdCBodG1sID0gYAogICAgICA8IURPQ1RZUEUgaHRtbD4KICAgICAgPGh0bWw+CiAgICAgIDxoZWFkPgogICAgICAgIDxtZXRhIGNoYXJzZXQ9InV0Zi04Ij4KICAgICAgICA8dGl0bGU+UGFzc3dvcmQgUmVzZXQ8L3RpdGxlPgogICAgICA8L2hlYWQ+CiAgICAgIDxib2R5IHN0eWxlPSJtYXJnaW46IDA7IHBhZGRpbmc6IDA7IGJhY2tncm91bmQtY29sb3I6ICMxMDExMTQ7IGZvbnQtZmFtaWx5OiAtYXBwbGUtc3lzdGVtLCBCbGlua01hY1N5c3RlbUZvbnQsICdTZWdvZSBVSScsIFJvYm90bywgSGVsdmV0aWNhLCBBcmlhbCwgc2Fucy1zZXJpZjsgY29sb3I6ICNGQUY5RjU7Ij4KICAgICAgICA8dGFibGUgcm9sZT0icHJlc2VudGF0aW9uIiB3aWR0aD0iMTAwJSIgY2VsbHNwYWNpbmc9IjAiIGNlbGxwYWRkaW5nPSIwIiBzdHlsZT0iYmFja2dyb3VuZC1jb2xvcjogIzEwMTExNDsgcGFkZGluZzogNDBweCAwOyI+CiAgICAgICAgICA8dHI+CiAgICAgICAgICAgIDx0ZCBhbGlnbj0iY2VudGVyIj4KICAgICAgICAgICAgICA8dGFibGUgcm9sZT0icHJlc2VudGF0aW9uIiB3aWR0aD0iMTAwJSIgbWF4LXdpZHRoPSI2MDBweCIgY2VsbHNwYWNpbmc9IjAiIGNlbGxwYWRkaW5nPSIwIiBzdHlsZT0ibWF4LXdpZHRoOiA2MDBweDsgYmFja2dyb3VuZDogIzFjMWMyMDsgYm9yZGVyOiAxcHggc29saWQgcmdiYSgyNTUsMjU1LDI1NSwwLjA4KTsgYm9yZGVyLXJhZGl1czogMjRweDsgcGFkZGluZzogNDBweDsgYm94LXNoYWRvdzogMCAyMHB4IDQwcHggcmdiYSgwLDAsMCwwLjQpOyI+CiAgICAgICAgICAgICAgICA8dHI+CiAgICAgICAgICAgICAgICAgIDx0ZD4KICAgICAgICAgICAgICAgICAgICA8ZGl2IHN0eWxlPSJtYXJnaW4tYm90dG9tOiAyNHB4OyI+CiAgICAgICAgICAgICAgICAgICAgICA8c3BhbiBzdHlsZT0iZm9udC1zaXplOiAyNHB4OyBjb2xvcjogI0Q5Nzc1NzsgbWFyZ2luLXJpZ2h0OiA4cHg7Ij7inKY8L3NwYW4+CiAgICAgICAgICAgICAgICAgICAgICA8c3BhbiBzdHlsZT0iZm9udC1zaXplOiAyMHB4OyBmb250LXdlaWdodDogNzAwOyBsZXR0ZXItc3BhY2luZzogLTAuNXB4OyBjb2xvcjogI0ZBRjlGNTsiPkJ3ZW5nZSBBSSBTdHVkaW88L3NwYW4+CiAgICAgICAgICAgICAgICAgICAgPC9kaXY+CiAgICAgICAgICAgICAgICAgICAgPGgxIHN0eWxlPSJmb250LXNpemU6IDI0cHg7IGZvbnQtd2VpZ2h0OiA2MDA7IGNvbG9yOiAjRkFGOUY1OyBtYXJnaW4tdG9wOiAwOyBtYXJnaW4tYm90dG9tOiAxMnB4OyI+UmVzZXQgeW91ciBwYXNzd29yZDwvaDE+CiAgICAgICAgICAgICAgICAgICAgPHAgc3R5bGU9ImZvbnQtc2l6ZTogMTRweDsgbGluZS1oZWlnaHQ6IDI0cHg7IGNvbG9yOiAjQTBBMEFBOyBtYXJnaW4tYm90dG9tOiAyNHB4OyI+V2UgcmVjZWl2ZWQgYSByZXF1ZXN0IHRvIHJlc2V0IHRoZSBwYXNzd29yZCBmb3IgeW91ciBhY2NvdW50IGFzc29jaWF0ZWQgd2l0aCA8c3Ryb25nPiR7dG99PC9zdHJvbmc+LjwvcD4KICAgICAgICAgICAgICAgICAgICA8ZGl2IHN0eWxlPSJ0ZXh0LWFsaWduOiBjZW50ZXI7IG1hcmdpbi1ib3R0b206IDI0cHg7Ij4KICAgICAgICAgICAgICAgICAgICAgIDxhIGhyZWY9IiR7cmVzZXRVcmx9IiBzdHlsZT0iZGlzcGxheTogaW5saW5lLWJsb2NrOyBiYWNrZ3JvdW5kOiAjRDk3NzU3OyBjb2xvcjogd2hpdGU7IHBhZGRpbmc6IDE0cHggMjhweDsgdGV4dC1kZWNvcmF0aW9uOiBub25lOyBib3JkZXItcmFkaXVzOiAxNHB4OyBmb250LXdlaWdodDogNzAwOyBmb250LXNpemU6IDE0cHg7IGJveC1zaGFkb3c6IDAgMTBweCAyMHB4IHJnYmEoMjE3LDExOSw4NywwLjMpOyI+UmVzZXQgUGFzc3dvcmQ8L2E+CiAgICAgICAgICAgICAgICAgICAgPC9kaXY+CiAgICAgICAgICAgICAgICAgICAgPHAgc3R5bGU9ImZvbnQtc2l6ZTogMTNweDsgY29sb3I6ICM3MTcxN0E7IG1hcmdpbi1ib3R0b206IDA7Ij5JZiB5b3UgZGlkbid0IHJlcXVlc3QgdGhpcywgeW91IGNhbiBzYWZlbHkgaWdub3JlIHRoaXMgZW1haWwuPC9wPgogICAgICAgICAgICAgICAgICA8L3RkPgogICAgICAgICAgICAgICAgPC90cj4KICAgICAgICAgICAgICA8L3RhYmxlPgogICAgICAgICAgICAgIDxkaXYgc3R5bGU9InRleHQtYWxpZ246IGNlbnRlcjsgbWFyZ2luLXRvcDogMjRweDsgZm9udC1zaXplOiAxMnB4OyBjb2xvcjogIzUyNTI1QjsiPgogICAgICAgICAgICAgICAgwqkgMjAyNiBCd2VuZ2UgQUkgU3R1ZGlvIMK3IDxhIGhyZWY9Imh0dHBzOi8vd3d3LmJ3ZW5nZS5zcGFjZSIgc3R5bGU9ImNvbG9yOiAjNzE3MTdBOyB0ZXh0LWRlY29yYXRpb246IHVuZGVybGluZTsiPnd3dy5id2VuZ2Uuc3BhY2U8L2E+CiAgICAgICAgICAgICAgPC9kaXY+CiAgICAgICAgICAgIDwvdGQ+CiAgICAgICAgICA8L3RyPgogICAgICAgIDwvdGFibGU+CiAgICAgIDwvYm9keT4KICAgICAgPC9odG1sPgogICAgYDsKICAgIHJldHVybiB0aGlzLnNlbmRFbWFpbCh7IHRvLCBzdWJqZWN0LCBodG1sIH0pOwogIH0KCiAgcHVibGljIGFzeW5jIHNlbmRXZWxjb21lRW1haWwodG86IHN0cmluZywgbmFtZTogc3RyaW5nKSB7CiAgICBjb25zdCBzdWJqZWN0ID0gJ1dlbGNvbWUgdG8gQndlbmdlIEFJIFN0dWRpbyc7CiAgICBjb25zdCBodG1sID0gYAogICAgICA8IURPQ1RZUEUgaHRtbD4KICAgICAgPGh0bWw+CiAgICAgIDxoZWFkPgogICAgICAgIDxtZXRhIGNoYXJzZXQ9InV0Zi04Ij4KICAgICAgICA8dGl0bGU+V2VsY29tZSB0byBCd2VuZ2U8L3RpdGxlPgogICAgICA8L2hlYWQ+CiAgICAgIDxib2R5IHN0eWxlPSJtYXJnaW46IDA7IHBhZGRpbmc6IDA7IGJhY2tncm91bmQtY29sb3I6ICMxMDExMTQ7IGZvbnQtZmFtaWx5OiAtYXBwbGUtc3lzdGVtLCBCbGlua01hY1N5c3RlbUZvbnQsICdTZWdvZSBVSScsIFJvYm90bywgSGVsdmV0aWNhLCBBcmlhbCwgc2Fucy1zZXJpZjsgY29sb3I6ICNGQUY5RjU7Ij4KICAgICAgICA8dGFibGUgcm9sZT0icHJlc2VudGF0aW9uIiB3aWR0aD0iMTAwJSIgY2VsbHNwYWNpbmc9IjAiIGNlbGxwYWRkaW5nPSIwIiBzdHlsZT0iYmFja2dyb3VuZC1jb2xvcjogIzEwMTExNDsgcGFkZGluZzogNDBweCAwOyI+CiAgICAgICAgICA8dHI+CiAgICAgICAgICAgIDx0ZCBhbGlnbj0iY2VudGVyIj4KICAgICAgICAgICAgICA8dGFibGUgcm9sZT0icHJlc2VudGF0aW9uIiB3aWR0aD0iMTAwJSIgbWF4LXdpZHRoPSI2MDBweCIgY2VsbHNwYWNpbmc9IjAiIGNlbGxwYWRkaW5nPSIwIiBzdHlsZT0ibWF4LXdpZHRoOiA2MDBweDsgYmFja2dyb3VuZDogIzFjMWMyMDsgYm9yZGVyOiAxcHggc29saWQgcmdiYSgyNTUsMjU1LDI1NSwwLjA4KTsgYm9yZGVyLXJhZGl1czogMjRweDsgcGFkZGluZzogNDBweDsgYm94LXNoYWRvdzogMCAyMHB4IDQwcHggcmdiYSgwLDAsMCwwLjQpOyI+CiAgICAgICAgICAgICAgICA8dHI+CiAgICAgICAgICAgICAgICAgIDx0ZD4KICAgICAgICAgICAgICAgICAgICA8ZGl2IHN0eWxlPSJtYXJnaW4tYm90dG9tOiAyNHB4OyI+CiAgICAgICAgICAgICAgICAgICAgICA8c3BhbiBzdHlsZT0iZm9udC1zaXplOiAyNHB4OyBjb2xvcjogI0Q5Nzc1NzsgbWFyZ2luLXJpZ2h0OiA4cHg7Ij7inKY8L3NwYW4+CiAgICAgICAgICAgICAgICAgICAgICA8c3BhbiBzdHlsZT0iZm9udC1zaXplOiAyMHB4OyBmb250LXdlaWdodDogNzAwOyBsZXR0ZXItc3BhY2luZzogLTAuNXB4OyBjb2xvcjogI0ZBRjlGNTsiPkJ3ZW5nZSBBSSBTdHVkaW88L3NwYW4+CiAgICAgICAgICAgICAgICAgICAgPC9kaXY+CiAgICAgICAgICAgICAgICAgICAgPGgxIHN0eWxlPSJmb250LXNpemU6IDI0cHg7IGZvbnQtd2VpZ2h0OiA2MDA7IGNvbG9yOiAjRkFGOUY1OyBtYXJnaW4tdG9wOiAwOyBtYXJnaW4tYm90dG9tOiAxMnB4OyI+V2VsY29tZSwgJHtuYW1lfSE8L2gxPgogICAgICAgICAgICAgICAgICAgIDxwIHN0eWxlPSJmb250LXNpemU6IDE0cHg7IGxpbmUtaGVpZ2h0OiAyNHB4OyBjb2xvcjogI0EwQTBBQTsgbWFyZ2luLWJvdHRvbTogMjRweDsiPllvdXIgd29ya3NwYWNlIGFjY291bnQgaXMgcmVhZHkgYXQgPGEgaHJlZj0iaHR0cHM6Ly93d3cuYndlbmdlLnNwYWNlIiBzdHlsZT0iY29sb3I6ICNEOTc3NTc7IHRleHQtZGVjb3JhdGlvbjogbm9uZTsiPnd3dy5id2VuZ2Uuc3BhY2U8L2E+LjwvcD4KICAgICAgICAgICAgICAgICAgICA8cCBzdHlsZT0iZm9udC1zaXplOiAxNHB4OyBsaW5lLWhlaWdodDogMjRweDsgY29sb3I6ICNBMEEwQUE7IG1hcmdpbi1ib3R0b206IDI0cHg7Ij5TdGFydCBncmFkaW5nIHN0dWRlbnQgc3VibWlzc2lvbnMsIHNjYW5uaW5nIHBhcGVycyB3aXRoIEFJLCBhbmQgYnVpbGRpbmcgaW50ZWxsaWdlbnQgd29ya2Zsb3dzIHRvZGF5LjwvcD4KICAgICAgICAgICAgICAgICAgICA8ZGl2IHN0eWxlPSJ0ZXh0LWFsaWduOiBjZW50ZXI7IG1hcmdpbi1ib3R0b206IDI0cHg7Ij4KICAgICAgICAgICAgICAgICAgICAgIDxhIGhyZWY9Imh0dHBzOi8vd3d3LmJ3ZW5nZS5zcGFjZSIgc3R5bGU9ImRpc3BsYXk6IGlubGluZS1ibG9jazsgYmFja2dyb3VuZDogI0Q5Nzc1NzsgY29sb3I6IHdoaXRlOyBwYWRkaW5nOiAxNHB4IDI4cHg7IHRleHQtZGVjb3JhdGlvbjogbm9uZTsgYm9yZGVyLXJhZGl1czogMTRweDsgZm9udC13ZWlnaHQ6IDcwMDsgZm9udC1zaXplOiAxNHB4OyBib3gtc2hhZG93OiAwIDEwcHggMjBweCByZ2JhKDIxNywxMTksODcsMC4zKTsiPk9wZW4gU3R1ZGlvIFdvcmtzcGFjZTwvYT4KICAgICAgICAgICAgICAgICAgICA8L2Rpdj4KICAgICAgICAgICAgICAgICAgPC90ZD4KICAgICAgICAgICAgICAgIDwvdHI+CiAgICAgICAgICAgICAgPC90YWJsZT4KICAgICAgICAgICAgICA8ZGl2IHN0eWxlPSJ0ZXh0LWFsaWduOiBjZW50ZXI7IG1hcmdpbi10b3A6IDI0cHg7IGZvbnQtc2l6ZTogMTJweDsgY29sb3I6ICM1MjUyNUI7Ij4KICAgICAgICAgICAgICAgIMKpIDIwMjYgQndlbmdlIEFJIFN0dWRpbyDCtyA8YSBocmVmPSJodHRwczovL3d3dy5id2VuZ2Uuc3BhY2UiIHN0eWxlPSJjb2xvcjogIzcxNzE3QTsgdGV4dC1kZWNvcmF0aW9uOiB1bmRlcmxpbmU7Ij53d3cuYndlbmdlLnNwYWNlPC9hPgogICAgICAgICAgICAgIDwvZGl2PgogICAgICAgICAgICA8L3RkPgogICAgICAgICAgPC90cj4KICAgICAgICA8L3RhYmxlPgogICAgICA8L2JvZHk+CiAgICAgIDwvaHRtbD4KICAgIGA7CiAgICByZXR1cm4gdGhpcy5zZW5kRW1haWwoeyB0bywgc3ViamVjdCwgaHRtbCB9KTsKICB9Cn0K
+import nodemailer, { type Transporter } from 'nodemailer';
+import { sendResendEmail, usesResend } from '../email/ResendEmailSender.js';
+import logger from '../utils/logger.js';
+
+export class EmailService {
+  private static instance: EmailService;
+
+  private constructor() {}
+
+  public static getInstance(): EmailService {
+    if (!EmailService.instance) {
+      EmailService.instance = new EmailService();
+    }
+    return EmailService.instance;
+  }
+
+  private transport: Transporter | null = null;
+  private static testTransport: Transporter | null = null;
+
+  /** Tests capture mail with a nodemailer stream/json transport instead of SMTP. */
+  public static setTestTransport(t: Transporter | null) { EmailService.testTransport = t; }
+
+  private getTransport(): Transporter | null {
+    if (EmailService.testTransport) return EmailService.testTransport;
+    if (this.transport) return this.transport;
+    const host = process.env.SMTP_HOST;
+    if (!host || !process.env.SMTP_USER || !process.env.SMTP_PASS) return null;
+    const port = Number(process.env.SMTP_PORT) || 587;
+    this.transport = nodemailer.createTransport({
+      host, port, secure: process.env.SMTP_SECURE ? process.env.SMTP_SECURE === 'true' : port === 465,
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+      pool: true, maxConnections: 3, connectionTimeout: 20_000, greetingTimeout: 15_000, socketTimeout: 30_000,
+    });
+    return this.transport;
+  }
+
+  public async sendEmail({ to, subject, html, text }: { to: string; subject: string; html: string; text?: string }): Promise<{ success: boolean; messageId?: string; skipped?: boolean; error?: string }> {
+    try {
+      if (!EmailService.testTransport && usesResend()) {
+        const messageId = await sendResendEmail({ to, subject, html, text });
+        logger.info('[EmailService] Resend accepted email.', { messageId });
+        return { success: true, messageId };
+      }
+
+      const transport = this.getTransport();
+      if (!transport) {
+        logger.warn('[EmailService] SMTP is not configured; email not sent.');
+        return { success: false, skipped: true };
+      }
+
+      const info = await transport.sendMail({
+        from: process.env.SMTP_FROM || 'Bwenge AI <noreply@bwenge.space>',
+        to, subject, html,
+        text: text ?? html.replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<br\s*\/?>(?!\n)/gi, '\n').replace(/<\/(p|div|tr|h[1-6]|li)>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\n{3,}/g, '\n\n').trim(),
+        ...(process.env.SMTP_REPLY_TO ? { replyTo: process.env.SMTP_REPLY_TO } : {}),
+      });
+      logger.info('[EmailService] Email sent.', { messageId: info.messageId });
+      return { success: true, messageId: info.messageId };
+    } catch (err) {
+      logger.error('[EmailService] Email failed.', { errorType: (err as Error)?.name });
+      return { success: false, error: (err as Error)?.message };
+    }
+  }
+
+  public async sendOtpEmail(to: string, otpCode: string) {
+    const subject = 'Your Bwenge AI Verification Code';
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <title>Verification Code</title>
+      </head>
+      <body style="margin: 0; padding: 0; background-color: #101114; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #FAF9F5;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #101114; padding: 40px 0;">
+          <tr>
+            <td align="center">
+              <table role="presentation" width="100%" max-width="600px" cellspacing="0" cellpadding="0" style="max-width: 600px; background: #1c1c20; border: 1px solid rgba(255,255,255,0.08); border-radius: 24px; padding: 40px; box-shadow: 0 20px 40px rgba(0,0,0,0.4);">
+                <tr>
+                  <td>
+                    <div style="display: flex; align-items: center; margin-bottom: 24px;">
+                      <span style="font-size: 24px; color: #D97757; margin-right: 8px;">✦</span>
+                      <span style="font-size: 20px; font-weight: 700; letter-spacing: -0.5px; color: #FAF9F5;">Bwenge AI Studio</span>
+                    </div>
+                    <h1 style="font-size: 24px; font-weight: 600; color: #FAF9F5; margin-top: 0; margin-bottom: 12px;">Sign in to Bwenge</h1>
+                    <p style="font-size: 14px; line-height: 24px; color: #A0A0AA; margin-bottom: 24px;">You requested a one-time verification code to sign in to your workspace at <a href="https://www.bwenge.space" style="color: #D97757; text-decoration: none;">www.bwenge.space</a>.</p>
+                    <div style="background: #26262a; border: 1px solid rgba(217,119,87,0.3); border-radius: 16px; padding: 24px; text-align: center; margin-bottom: 24px;">
+                      <div style="font-size: 38px; font-weight: 800; letter-spacing: 8px; color: #D97757;">${otpCode}</div>
+                    </div>
+                    <p style="font-size: 13px; color: #71717A; margin-bottom: 0;">This code will expire in 5 minutes. If you did not request this, you can safely ignore this email.</p>
+                  </td>
+                </tr>
+              </table>
+              <div style="text-align: center; margin-top: 24px; font-size: 12px; color: #52525B;">
+                © 2026 Bwenge AI Studio · <a href="https://www.bwenge.space" style="color: #71717A; text-decoration: underline;">www.bwenge.space</a>
+              </div>
+            </td>
+          </tr>
+        </table>
+      </body>
+      </html>
+    `;
+    return this.sendEmail({ to, subject, html });
+  }
+
+  public async sendPasswordResetEmail(to: string, resetToken: string) {
+    const resetUrl = `https://www.bwenge.space/reset-password?token=${resetToken}`;
+    const subject = 'Reset your Bwenge AI password';
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <title>Password Reset</title>
+      </head>
+      <body style="margin: 0; padding: 0; background-color: #101114; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #FAF9F5;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #101114; padding: 40px 0;">
+          <tr>
+            <td align="center">
+              <table role="presentation" width="100%" max-width="600px" cellspacing="0" cellpadding="0" style="max-width: 600px; background: #1c1c20; border: 1px solid rgba(255,255,255,0.08); border-radius: 24px; padding: 40px; box-shadow: 0 20px 40px rgba(0,0,0,0.4);">
+                <tr>
+                  <td>
+                    <div style="margin-bottom: 24px;">
+                      <span style="font-size: 24px; color: #D97757; margin-right: 8px;">✦</span>
+                      <span style="font-size: 20px; font-weight: 700; letter-spacing: -0.5px; color: #FAF9F5;">Bwenge AI Studio</span>
+                    </div>
+                    <h1 style="font-size: 24px; font-weight: 600; color: #FAF9F5; margin-top: 0; margin-bottom: 12px;">Reset your password</h1>
+                    <p style="font-size: 14px; line-height: 24px; color: #A0A0AA; margin-bottom: 24px;">We received a request to reset the password for your account associated with <strong>${to}</strong>.</p>
+                    <div style="text-align: center; margin-bottom: 24px;">
+                      <a href="${resetUrl}" style="display: inline-block; background: #D97757; color: white; padding: 14px 28px; text-decoration: none; border-radius: 14px; font-weight: 700; font-size: 14px; box-shadow: 0 10px 20px rgba(217,119,87,0.3);">Reset Password</a>
+                    </div>
+                    <p style="font-size: 13px; color: #71717A; margin-bottom: 0;">If you didn't request this, you can safely ignore this email.</p>
+                  </td>
+                </tr>
+              </table>
+              <div style="text-align: center; margin-top: 24px; font-size: 12px; color: #52525B;">
+                © 2026 Bwenge AI Studio · <a href="https://www.bwenge.space" style="color: #71717A; text-decoration: underline;">www.bwenge.space</a>
+              </div>
+            </td>
+          </tr>
+        </table>
+      </body>
+      </html>
+    `;
+    return this.sendEmail({ to, subject, html });
+  }
+
+  public async sendWelcomeEmail(to: string, name: string) {
+    const subject = 'Welcome to Bwenge AI Studio';
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <title>Welcome to Bwenge</title>
+      </head>
+      <body style="margin: 0; padding: 0; background-color: #101114; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #FAF9F5;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #101114; padding: 40px 0;">
+          <tr>
+            <td align="center">
+              <table role="presentation" width="100%" max-width="600px" cellspacing="0" cellpadding="0" style="max-width: 600px; background: #1c1c20; border: 1px solid rgba(255,255,255,0.08); border-radius: 24px; padding: 40px; box-shadow: 0 20px 40px rgba(0,0,0,0.4);">
+                <tr>
+                  <td>
+                    <div style="margin-bottom: 24px;">
+                      <span style="font-size: 24px; color: #D97757; margin-right: 8px;">✦</span>
+                      <span style="font-size: 20px; font-weight: 700; letter-spacing: -0.5px; color: #FAF9F5;">Bwenge AI Studio</span>
+                    </div>
+                    <h1 style="font-size: 24px; font-weight: 600; color: #FAF9F5; margin-top: 0; margin-bottom: 12px;">Welcome, ${name}!</h1>
+                    <p style="font-size: 14px; line-height: 24px; color: #A0A0AA; margin-bottom: 24px;">Your workspace account is ready at <a href="https://www.bwenge.space" style="color: #D97757; text-decoration: none;">www.bwenge.space</a>.</p>
+                    <p style="font-size: 14px; line-height: 24px; color: #A0A0AA; margin-bottom: 24px;">Start grading student submissions, scanning papers with AI, and building intelligent workflows today.</p>
+                    <div style="text-align: center; margin-bottom: 24px;">
+                      <a href="https://www.bwenge.space" style="display: inline-block; background: #D97757; color: white; padding: 14px 28px; text-decoration: none; border-radius: 14px; font-weight: 700; font-size: 14px; box-shadow: 0 10px 20px rgba(217,119,87,0.3);">Open Studio Workspace</a>
+                    </div>
+                  </td>
+                </tr>
+              </table>
+              <div style="text-align: center; margin-top: 24px; font-size: 12px; color: #52525B;">
+                © 2026 Bwenge AI Studio · <a href="https://www.bwenge.space" style="color: #71717A; text-decoration: underline;">www.bwenge.space</a>
+              </div>
+            </td>
+          </tr>
+        </table>
+      </body>
+      </html>
+    `;
+    return this.sendEmail({ to, subject, html });
+  }
+}
