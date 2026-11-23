@@ -1,1 +1,94 @@
-IyBCd2VuZ2UgQXV0aGVudGljYXRpb24gJiBTZWN1cml0eSBHdWlkZQoKVGhpcyBkb2N1bWVudCBvdXRsaW5lcyB0aGUgYXJjaGl0ZWN0dXJlLCBzZXR1cCwgdGhyZWF0IG1vZGVsLCBhbmQgcnVuYm9vayBmb3IgQndlbmdlIGF1dGhlbnRpY2F0aW9uICgiQ29udGludWUgd2l0aCBHb29nbGUiIGFuZCBwYXNzd29yZGxlc3MgZW1haWwgY29kZSkuCgotLS0KCiMjIDEuIEZsb3cgRGlhZ3JhbXMKCiMjIyAxLjEgQ29udGludWUgd2l0aCBHb29nbGUgKFNlcnZlci1TaWRlIFJlZGlyZWN0IEZsb3cgd2l0aCBQS0NFKQpgYGAKQnJvd3NlciAgICAgICAgICAgICAgICAgICAgICAgICBPdXIgQVBJICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIEdvb2dsZQogIHwgY2xpY2sgIkNvbnRpbnVlIHdpdGggR29vZ2xlIiAgfCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgfAogIHwtLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0+fCBHRVQgL2FwaS9hdXRoL2dvb2dsZS9zdGFydD9uZXh0PS9jaGF0ICAgfAogIHwgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgfCBjcmVhdGUgc3RhdGUgKyBub25jZSArIFBLQ0UgdmVyaWZpZXI7ICAgfAogIHwgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgfCBzdG9yZSBpbiBhIHNob3J0LWxpdmVkIHNpZ25lZCBjb29raWUgICAgfAogIHw8LS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tfCAzMDIgdG8gYWNjb3VudHMuZ29vZ2xlLmNvbSAoc2NvcGU9b3BlbmlkIGVtYWlsIHByb2ZpbGUsCiAgfCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICB8ICAgcHJvbXB0PXNlbGVjdF9hY2NvdW50LCBjb2RlX2NoYWxsZW5nZT1TMjU2LCBzdGF0ZSwgbm9uY2UpCiAgfC0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tPnwgdXNlciBwaWNrcyBhY2NvdW50LCBjb25zZW50cwogIHw8LS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS18IDMwMiAvYXBpL2F1dGgvZ29vZ2xlL2NhbGxiYWNrP2NvZGUmc3RhdGUKICB8LS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tPnwgdmVyaWZ5IHN0YXRlICsgY29va2llOyBleGNoYW5nZSBjb2RlICAgICB8CiAgfCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICB8ICh3aXRoIGNvZGVfdmVyaWZpZXIgKyBjbGllbnQgc2VjcmV0KTsgICAgfAogIHwgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgfCB2ZXJpZnkgSUQgdG9rZW4gKHNpZ25hdHVyZSB2aWEgR29vZ2xlICAgIHwKICB8ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIHwgSldLUywgaXNzLCBhdWQsIGV4cCwgbm9uY2UsIGVtYWlsX3ZlcmlmaWVkKQogIHwgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgfCBmaW5kL2xpbmsvY3JlYXRlIHVzZXI7IGNyZWF0ZSBzZXNzaW9uICAgIHwKICB8PC0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLXwgMzAyIHRvIHNhbml0aXplZCBgbmV4dGAgKG9yIFBPU1RfTE9HSU5fUk9VVEUpLCBTZXQtQ29va2llIHNlc3Npb24KYGBgCgojIyMgMS4yIENvbnRpbnVlIHdpdGggRW1haWwgKFBhc3N3b3JkbGVzcyA2LURpZ2l0IENvZGUpCmBgYAoxLiBQZXJzb24gdGFwcyAiQ29udGludWUgd2l0aCBlbWFpbCIsIHR5cGVzIHRoZWlyIGVtYWlsLCB0YXBzICJTZW5kIGNvZGUiLgoyLiBQT1NUIC9hcGkvYXV0aC9lbWFpbC9zdGFydCB7IGVtYWlsLCBsb2NhbGUgfSAtPiBBTFdBWVMgMjAyIHsgb2s6IHRydWUsIHJldHJ5QWZ0ZXI6IDMwIH0KMy4gV2UgZW1haWwgYSA2LWRpZ2l0IGNvZGUgKHZhbGlkIDEwIG1pbnV0ZXMsIEhNQUMtU0hBMjU2IGhhc2hlZCkuCjQuIFBlcnNvbiB0eXBlcyB0aGUgY29kZSAoYXV0by1zdWJtaXQgYXQgNiBkaWdpdHMpLgo1LiBQT1NUIC9hcGkvYXV0aC9lbWFpbC92ZXJpZnkgeyBlbWFpbCwgY29kZSB9ICAgLT4gMjAwIHsgYWNjZXNzVG9rZW4sIHVzZXIsIGlzTmV3VXNlciB9ICsgSHR0cE9ubHkgcmVmcmVzaCBjb29raWUKNi4gVGhlIHNob3J0LWxpdmVkIGFjY2VzcyB0b2tlbiBzdGF5cyBpbiBtZW1vcnk7IG9uIHBhZ2UgcmVsb2FkLCB0aGUgYnJvd3NlciBzZW5kcyB0aGUgcmVmcmVzaCBjb29raWUgdG8gL2FwaS9hdXRoL3JlZnJlc2guCmBgYAoKLS0tCgojIyAyLiBHb29nbGUgQ2xvdWQgQ29uc29sZSBTZXR1cAoKMS4gR28gdG8gKipHb29nbGUgQ2xvdWQgQ29uc29sZSoqID4gKipBUElzICYgU2VydmljZXMqKiA+ICoqT0F1dGggY29uc2VudCBzY3JlZW4qKi4KMi4gQ29uZmlndXJlIGFwcCBuYW1lIChgQndlbmdlYCksIHN1cHBvcnQgZW1haWwsIHByaXZhY3kgcG9saWN5IFVSTCwgYXV0aG9yaXplZCBkb21haW5zLgozLiBTY29wZXM6IGBvcGVuaWRgLCBgZW1haWxgLCBgcHJvZmlsZWAgKG5vbi1zZW5zaXRpdmUpLiBQdWJsaXNoIGFwcCB0byAqKlByb2R1Y3Rpb24qKi4KNC4gR28gdG8gKipDcmVkZW50aWFscyoqID4gKipDcmVhdGUgQ3JlZGVudGlhbHMqKiA+ICoqT0F1dGggY2xpZW50IElEKiogPiAqKldlYiBhcHBsaWNhdGlvbioqLgo1LiBBdXRob3JpemVkIEphdmFTY3JpcHQgb3JpZ2luczogeW91ciBmcm9udGVuZCBvcmlnaW5zLgo2LiBBdXRob3JpemVkIHJlZGlyZWN0IFVSSXM6IGAke0FQUF9CQVNFX1VSTH0vYXBpL2F1dGgvZ29vZ2xlL2NhbGxiYWNrYC4KNy4gUHV0IGBHT09HTEVfQ0xJRU5UX0lEYCBhbmQgYEdPT0dMRV9DTElFTlRfU0VDUkVUYCBpbiBzZXJ2ZXIgZW52aXJvbm1lbnQgdmFyaWFibGVzLgoKLS0tCgojIyAzLiBFbnZpcm9ubWVudCBWYXJpYWJsZXMgKGAuZW52LmV4YW1wbGVgKQoKYGBgZW52CkFQUF9OQU1FPUJ3ZW5nZQpBUFBfQkFTRV9VUkw9aHR0cDovL2xvY2FsaG9zdDozMDAwClBPU1RfTE9HSU5fUk9VVEU9L2NoYXQKU0VTU0lPTl9TRUNSRVQ9PDMyKyByYW5kb20gYnl0ZXMgSE1BQyBwZXBwZXI+ClNFU1NJT05fSURMRV9EQVlTPTMwClNFU1NJT05fQUJTT0xVVEVfREFZUz05MAoKR09PR0xFX0NMSUVOVF9JRD0KR09PR0xFX0NMSUVOVF9TRUNSRVQ9CkdPT0dMRV9SRURJUkVDVF9VUkk9JHtBUFBfQkFTRV9VUkx9L2FwaS9hdXRoL2dvb2dsZS9jYWxsYmFjawoKRU1BSUxfUFJPVklERVI9Y29uc29sZSAjIGNvbnNvbGUgfCBzbXRwIHwgcmVzZW5kCkVNQUlMX0ZST009IkJ3ZW5nZSA8bG9naW5AYndlbmdlLmFpPiIKRU1BSUxfU01UUF9VUkw9CmBgYAoKRm9yIFJlc2VuZCwgdmVyaWZ5IGBid2VuZ2Uuc3BhY2VgIGluIHRoZSBSZXNlbmQgZGFzaGJvYXJkIHVzaW5nIHRoZSBleGFjdCBETlMgcmVjb3JkcyBzaG93biB0aGVyZS4gU2V0IGBFTUFJTF9QUk9WSURFUj1yZXNlbmRgIGFuZCBgUkVTRU5EX0FQSV9LRVlgIGluIHRoZSBwcm9kdWN0aW9uIHNlcnZlciBlbnZpcm9ubWVudC4gVXNlIGEgc2VuZGluZy1vbmx5IGtleSBzY29wZWQgdG8gdGhlIHZlcmlmaWVkIGRvbWFpbi4gVGhlIGRlZmF1bHQgc2VuZGVyIGlzIGBCd2VuZ2UgPG5vdGlmaWNhdGlvbnNAYndlbmdlLnNwYWNlPmAuIFNldCBgUkVTRU5EX0ZST01gIHRvIG92ZXJyaWRlIGl0IGFuZCBzZXQgYFJFU0VORF9SRVBMWV9UT2AgaWYgcmVwbGllcyBzaG91bGQgZ28gdG8gYW4gZXhpc3RpbmcgbW9uaXRvcmVkIG1haWxib3guIFJlc3RhcnQgdGhlIGFwcGxpY2F0aW9uIGFmdGVyIHVwZGF0aW5nIGl0cyBlbnZpcm9ubWVudC4KClRoZSBSZXNlbmQgY29uZmlndXJhdGlvbiBjb3ZlcnMgbG9naW4gY29kZXMsIGV4aXN0aW5nIGJpbGxpbmcgYW5kIGFnZW5kYSBub3RpZmljYXRpb25zLCBhbmQgdGhlIGFkbWluaXN0cmF0b3IgZW1haWwgYnJvYWRjYXN0IHRvIGVuYWJsZWQgYWNjb3VudHMuIEZvciBTTVRQIGRlcGxveW1lbnRzLCBjb250aW51ZSB1c2luZyBgRU1BSUxfU01UUF9VUkxgIG9yIGBTTVRQX0hPU1RgLCBgU01UUF9VU0VSYCwgYW5kIGBTTVRQX1BBU1NgIGZvciBsb2dpbiBjb2Rlcy4gT3RoZXIgcGxhdGZvcm0gbm90aWZpY2F0aW9ucyB1c2UgdGhlIGluZGl2aWR1YWwgU01UUCBzZXR0aW5ncy4KCi0tLQoKIyMgNC4gVGhyZWF0IE1vZGVsICYgU2VjdXJpdHkgQ29udHJvbHMKCnwgVGhyZWF0IHwgUHJldmVudGlvbiBDb250cm9sIHwKfC0tLXwtLS18CnwgKipDU1JGKiogfCBgU2FtZVNpdGU9TGF4YCBjb29raWVzLCBPcmlnaW4gY2hlY2tzLCBkb3VibGUtc3VibWl0IHRva2Vucy4gfAp8ICoqQ29kZSBJbnRlcmNlcHRpb24gLyBSZXBsYXkqKiB8IFNpbmdsZS11c2UgZW1haWwgY29kZXMgaGFzaGVkIHdpdGggSE1BQy1TSEEyNTYsIDEwLW1pbnV0ZSBleHBpcnksIG1heCA1IGF0dGVtcHRzLiB8CnwgKipUb2tlbiBUaGVmdCoqIHwgT0F1dGggcHJvdmlkZXIgdG9rZW5zIHN0YXkgc2VydmVyLXNpZGU7IGFwcGxpY2F0aW9uIGFjY2VzcyB0b2tlbnMgc3RheSBpbiBtZW1vcnkgYW5kIHJlZnJlc2ggdG9rZW5zIHVzZSBIdHRwT25seSBjb29raWVzLiB8CnwgKipJbi1BcHAgQnJvd3NlciBBdHRhY2tzKiogfCBVc2VyLWFnZW50IGRldGVjdGlvbiBvbiBHb29nbGUgc3RhcnQgcmV0dXJucyBgeyBibG9ja2VkOiAnaW5fYXBwX2Jyb3dzZXInIH1gIHByb21wdGluZyBicm93c2VyIG9wZW4uIHwKfCAqKk9wZW4gUmVkaXJlY3RzKiogfCBgc2FuaXRpemVOZXh0KG5leHQpYCBlbnN1cmVzIG9ubHkgcmVsYXRpdmUgaW50ZXJuYWwgcGF0aHMgdW5kZXIgMjAwIGNoYXJhY3RlcnMgYXJlIGFsbG93ZWQuIHwKfCAqKkFjY291bnQgRW51bWVyYXRpb24qKiB8IFVuaWZvcm0gMjAyIHJlc3BvbnNlcyBhbmQgY29uc2lzdGVudCB0aW1pbmcgb24gZW1haWwgc3RhcnQgcmVnYXJkbGVzcyBvZiBhY2NvdW50IGV4aXN0ZW5jZS4gfAoKLS0tCgojIyA1LiBSdW5ib29rCgotICoqUm90YXRlIGBTRVNTSU9OX1NFQ1JFVGAqKjogVXBkYXRlIHRoZSBlbnZpcm9ubWVudCB2YXJpYWJsZSBhbmQgcmVzdGFydCB0aGUgc2VydmVyLiBUaGlzIGludmFsaWRhdGVzIGV4aXN0aW5nIEhNQUMgY29kZSBoYXNoZXMgKHdoaWxlIHJlZnJlc2ggc2Vzc2lvbnMgcmVtYWluIHZhbGlkIHVudGlsIGV4cGlyeSkuCi0gKipSZXZva2UgQWxsIFNlc3Npb25zKio6IFJ1biBTUUwgYFVQREFURSByZWZyZXNoX3Nlc3Npb25zIFNFVCByZXZva2VkX2F0ID0gbm93KCkgV0hFUkUgcmV2b2tlZF9hdCBJUyBOVUxMO2AuCi0gKipHb29nbGUgT3V0YWdlKio6IERpcmVjdCB1c2VycyB0byB1c2UgIkNvbnRpbnVlIHdpdGggZW1haWwiIChwYXNzd29yZGxlc3MgNi1kaWdpdCBjb2RlKSBhcyBhbiBpbmRlcGVuZGVudCBmYWxsYmFjayBhdXRoZW50aWNhdGlvbiBtZXRob2QuCg==
+# Bwenge Authentication & Security Guide
+
+This document outlines the architecture, setup, threat model, and runbook for Bwenge authentication ("Continue with Google" and passwordless email code).
+
+---
+
+## 1. Flow Diagrams
+
+### 1.1 Continue with Google (Server-Side Redirect Flow with PKCE)
+```
+Browser                         Our API                                  Google
+  | click "Continue with Google"  |                                         |
+  |------------------------------>| GET /api/auth/google/start?next=/chat   |
+  |                               | create state + nonce + PKCE verifier;   |
+  |                               | store in a short-lived signed cookie    |
+  |<------------------------------| 302 to accounts.google.com (scope=openid email profile,
+  |                               |   prompt=select_account, code_challenge=S256, state, nonce)
+  |-------------------------------------------------------------------------->| user picks account, consents
+  |<--------------------------------------------------------------------------| 302 /api/auth/google/callback?code&state
+  |------------------------------>| verify state + cookie; exchange code     |
+  |                               | (with code_verifier + client secret);    |
+  |                               | verify ID token (signature via Google    |
+  |                               | JWKS, iss, aud, exp, nonce, email_verified)
+  |                               | find/link/create user; create session    |
+  |<------------------------------| 302 to sanitized `next` (or POST_LOGIN_ROUTE), Set-Cookie session
+```
+
+### 1.2 Continue with Email (Passwordless 6-Digit Code)
+```
+1. Person taps "Continue with email", types their email, taps "Send code".
+2. POST /api/auth/email/start { email, locale } -> ALWAYS 202 { ok: true, retryAfter: 30 }
+3. We email a 6-digit code (valid 10 minutes, HMAC-SHA256 hashed).
+4. Person types the code (auto-submit at 6 digits).
+5. POST /api/auth/email/verify { email, code }   -> 200 { accessToken, user, isNewUser } + HttpOnly refresh cookie
+6. The short-lived access token stays in memory; on page reload, the browser sends the refresh cookie to /api/auth/refresh.
+```
+
+---
+
+## 2. Google Cloud Console Setup
+
+1. Go to **Google Cloud Console** > **APIs & Services** > **OAuth consent screen**.
+2. Configure app name (`Bwenge`), support email, privacy policy URL, authorized domains.
+3. Scopes: `openid`, `email`, `profile` (non-sensitive). Publish app to **Production**.
+4. Go to **Credentials** > **Create Credentials** > **OAuth client ID** > **Web application**.
+5. Authorized JavaScript origins: your frontend origins.
+6. Authorized redirect URIs: `${APP_BASE_URL}/api/auth/google/callback`.
+7. Put `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in server environment variables.
+
+---
+
+## 3. Environment Variables (`.env.example`)
+
+```env
+APP_NAME=Bwenge
+APP_BASE_URL=http://localhost:3000
+POST_LOGIN_ROUTE=/chat
+SESSION_SECRET=<32+ random bytes HMAC pepper>
+SESSION_IDLE_DAYS=30
+SESSION_ABSOLUTE_DAYS=90
+
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GOOGLE_REDIRECT_URI=${APP_BASE_URL}/api/auth/google/callback
+
+EMAIL_PROVIDER=console # console | smtp | resend
+EMAIL_FROM="Bwenge <login@bwenge.ai>"
+EMAIL_SMTP_URL=
+```
+
+For Resend, verify `bwenge.space` in the Resend dashboard using the exact DNS records shown there. Set `EMAIL_PROVIDER=resend` and `RESEND_API_KEY` in the production server environment. Use a sending-only key scoped to the verified domain. The default sender is `Bwenge <notifications@bwenge.space>`. Set `RESEND_FROM` to override it and set `RESEND_REPLY_TO` if replies should go to an existing monitored mailbox. Restart the application after updating its environment.
+
+The Resend configuration covers login codes, existing billing and agenda notifications, and the administrator email broadcast to enabled accounts. For SMTP deployments, continue using `EMAIL_SMTP_URL` or `SMTP_HOST`, `SMTP_USER`, and `SMTP_PASS` for login codes. Other platform notifications use the individual SMTP settings.
+
+---
+
+## 4. Threat Model & Security Controls
+
+| Threat | Prevention Control |
+|---|---|
+| **CSRF** | `SameSite=Lax` cookies, Origin checks, double-submit tokens. |
+| **Code Interception / Replay** | Single-use email codes hashed with HMAC-SHA256, 10-minute expiry, max 5 attempts. |
+| **Token Theft** | OAuth provider tokens stay server-side; application access tokens stay in memory and refresh tokens use HttpOnly cookies. |
+| **In-App Browser Attacks** | User-agent detection on Google start returns `{ blocked: 'in_app_browser' }` prompting browser open. |
+| **Open Redirects** | `sanitizeNext(next)` ensures only relative internal paths under 200 characters are allowed. |
+| **Account Enumeration** | Uniform 202 responses and consistent timing on email start regardless of account existence. |
+
+---
+
+## 5. Runbook
+
+- **Rotate `SESSION_SECRET`**: Update the environment variable and restart the server. This invalidates existing HMAC code hashes (while refresh sessions remain valid until expiry).
+- **Revoke All Sessions**: Run SQL `UPDATE refresh_sessions SET revoked_at = now() WHERE revoked_at IS NULL;`.
+- **Google Outage**: Direct users to use "Continue with email" (passwordless 6-digit code) as an independent fallback authentication method.
