@@ -2939,6 +2939,7 @@ const broadcastDraftSchema = z.object({
   linkUrl: z.string().trim().max(2048).optional(),
   expectedRecipients: z.number().int().positive().optional(),
   htmlSource: z.string().trim().max(20_000).optional(),
+  videoUrl: z.string().trim().max(2048).refine((value) => !value || isBroadcastLink(value)).optional(),
   recipients: z.array(z.string().trim().email().max(254)).min(1).max(25).optional(),
 }).refine(({ linkLabel, linkUrl }) => !linkLabel && !linkUrl || Boolean(linkLabel && linkUrl && isBroadcastLink(linkUrl)));
 
@@ -2954,7 +2955,7 @@ function formatAdminBroadcast(draft: z.infer<typeof broadcastDraftSchema>) {
 
 router.post('/communication/preview', (req, res) => {
   const parsed = broadcastDraftSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ success: false, error: 'Complete the subject, plain-text message, and button fields before previewing.' });
+  if (!parsed.success) return res.status(400).json({ success: false, error: 'Complete the subject and plain-text message, and provide valid HTTPS links for any button or video.' });
   return res.json({ success: true, data: { html: renderBwengeEmail(formatAdminBroadcast(parsed.data).html) } });
 });
 
@@ -2972,7 +2973,7 @@ router.get('/communication/audience', async (_req, res) => {
 
 router.post('/communication/test', async (req, res) => {
   const parsed = broadcastDraftSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ success: false, error: 'Enter a subject and message, and complete both button fields if using a link.' });
+  if (!parsed.success) return res.status(400).json({ success: false, error: 'Enter a subject and message, and provide valid HTTPS links for any button or video.' });
 
   try {
     const user = await prisma.user.findUnique({ where: { id: req.user!.userId }, select: { email: true } });
@@ -2988,7 +2989,7 @@ router.post('/communication/test', async (req, res) => {
 
 router.post('/communication/broadcast', async (req, res) => {
   const parsed = broadcastDraftSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ success: false, error: 'Enter a subject and message, and complete both button fields if using a link.' });
+  if (!parsed.success) return res.status(400).json({ success: false, error: 'Enter a subject and message, and provide valid HTTPS links for any button or video.' });
 
   try {
     const manual = parsed.data.recipients;
