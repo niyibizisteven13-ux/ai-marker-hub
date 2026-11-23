@@ -33,7 +33,7 @@ export function formatBroadcast(draft: BroadcastDraft, sanitizedBody?: string) {
   const video = videoUrl && isBroadcastLink(videoUrl) ? {
     text: `Watch video: ${videoUrl}`,
     html: `<div style="margin:20px 0;">
-        <video controls preload="none" width="520" style="display:block;width:100%;max-width:520px;height:auto;">
+        <video autoplay muted loop playsinline controls preload="metadata" width="520" style="display:block;width:100%;max-width:520px;height:auto;">
           <source src="${escapeEmailHtml(videoUrl)}" type="video/mp4">
         </video>
         <p style="margin:12px 0 0;"><a href="${escapeEmailHtml(videoUrl)}" style="color:#4CE5D6;font-weight:bold;">Watch video</a></p>
