@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Mail, Send } from 'lucide-react';
 import { adminApi } from '../../api/admin';
-import { formatBroadcast, isBroadcastLink, type BroadcastDraft } from '../../../shared/bwengeBroadcast';
+import { formatBroadcast, isBroadcastLink, type BroadcastDraft, type BroadcastSender } from '../../../shared/bwengeBroadcast';
 import { renderBwengeEmail } from '../../../server/email/BwengeEmailLayout';
 
 const emptyDraft = { subject: '', text: '', linkLabel: '', linkUrl: '' };
@@ -10,6 +10,9 @@ const panel = 'min-w-0 rounded-2xl border border-[#263052] bg-[#131c31] p-5';
 
 export default function EmailBroadcast() {
   const [draft, setDraft] = useState(emptyDraft);
+  const [sender, setSender] = useState<BroadcastSender>('notifications');
+  const [senders, setSenders] = useState<Array<{ id: BroadcastSender; from: string }>>([]);
+  const selectedFrom = senders.find(({ id }) => id === sender)?.from;
   const [audience, setAudience] = useState<number | null>(null);
   const [pending, setPending] = useState<'test' | 'send' | null>(null);
   const [review, setReview] = useState(false);
@@ -18,7 +21,10 @@ export default function EmailBroadcast() {
   useEffect(() => {
     let active = true;
     adminApi.getBroadcastAudience().then(({ data }) => {
-      if (active) setAudience(data.count);
+      if (active) {
+        setAudience(data.count);
+        setSenders(data.senders);
+      }
     }).catch(() => {
       if (active) setStatus({ message: 'Could not load the audience. Reload this tab to try again.', error: true });
     });
@@ -27,7 +33,7 @@ export default function EmailBroadcast() {
 
   const hasLink = Boolean(draft.linkLabel.trim() || draft.linkUrl.trim());
   const linkValid = !hasLink || Boolean(draft.linkLabel.trim() && isBroadcastLink(draft.linkUrl.trim()));
-  const ready = Boolean(draft.subject.trim() && draft.text.trim() && linkValid);
+  const ready = Boolean(selectedFrom && draft.subject.trim() && draft.text.trim() && linkValid);
   const message = formatBroadcast({
     ...draft,
     subject: draft.subject || 'Your subject',
@@ -45,11 +51,11 @@ export default function EmailBroadcast() {
     setStatus(null);
     try {
       if (mode === 'test') {
-        const { data } = await adminApi.sendBroadcastTest(draft);
+        const { data } = await adminApi.sendBroadcastTest({ ...draft, sender });
         setStatus({ message: `Test accepted for ${data.recipient}. Check your inbox for the message.` });
         return;
       }
-      const { data } = await adminApi.broadcastEmail({ ...draft, expectedRecipients: audience! });
+      const { data } = await adminApi.broadcastEmail({ ...draft, sender, expectedRecipients: audience! });
       setStatus({
         message: `Broadcast complete. ${data.delivered.toLocaleString()} accepted for sending, ${data.failed.toLocaleString()} failed out of ${data.targeted.toLocaleString()}.`,
         error: data.failed > 0,
@@ -75,6 +81,16 @@ export default function EmailBroadcast() {
         </div>
         <form onSubmit={(event) => { event.preventDefault(); if (ready && audience) setReview(true); }}>
           <fieldset disabled={Boolean(pending)} className="space-y-4">
+            <label className="block space-y-1.5 text-sm text-slate-200">
+              <span>From</span>
+              <select className={field} value={sender} disabled={!senders.length} onChange={(event) => {
+                setSender(event.target.value as BroadcastSender);
+                setReview(false);
+              }}>
+                {!senders.length && <option value="notifications">Sender unavailable</option>}
+                {senders.map(({ id, from }) => <option key={id} value={id}>{from}</option>)}
+              </select>
+            </label>
             <label className="block space-y-1.5 text-sm text-slate-200">
               <span>Subject</span>
               <input className={field} value={draft.subject} onChange={(e) => edit('subject', e.target.value)} maxLength={180} required />
@@ -106,6 +122,7 @@ export default function EmailBroadcast() {
         </form>
         {review && <div className="mt-4 space-y-3 rounded-lg border border-[#F6B94A] p-3 text-sm text-white">
           <p>Send “{draft.subject.trim()}” to {audience?.toLocaleString()} enabled accounts?</p>
+          <p>From {selectedFrom}</p>
           <div className="flex flex-wrap gap-3">
             <button type="button" disabled={Boolean(pending)} onClick={() => setReview(false)} className="px-2 py-1.5">Cancel</button>
             <button type="button" disabled={Boolean(pending)} onClick={() => void send('send')} className="inline-flex items-center gap-2 rounded-lg bg-[#F6B94A] px-3 py-1.5 font-semibold text-[#0B1420] disabled:opacity-50">
@@ -117,6 +134,7 @@ export default function EmailBroadcast() {
       </section>
       <section className={panel} aria-label="Email preview">
         <h3 className="mb-3 text-base font-semibold text-white">Email preview</h3>
+        {selectedFrom && <p className="mb-3 break-words text-sm text-slate-300">From {selectedFrom}</p>}
         <iframe title="Branded broadcast preview" sandbox="" srcDoc={renderBwengeEmail(message.html)} className="h-[480px] w-full rounded-xl border border-[#263052] bg-[#0B1420]" />
       </section>
     </div>
