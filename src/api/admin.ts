@@ -206,6 +206,12 @@ export const adminApi = {
     readJson(`/api/admin/feedback/${id}/dataset-example`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
   getBroadcastAudience: () =>
     readJson<{ success: true; data: { count: number; senders: Array<{ id: BroadcastSender; from: string }> } }>('/api/admin/communication/audience'),
+  previewBroadcast: (payload: BroadcastDraft) =>
+    readJson<{ success: true; data: { html: string } }>('/api/admin/communication/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }),
   sendBroadcastTest: (payload: BroadcastDraft) =>
     readJson<{ success: true; data: { recipient: string } }>('/api/admin/communication/test', {
       method: 'POST',
