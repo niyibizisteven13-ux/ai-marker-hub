@@ -206,6 +206,18 @@ export const adminApi = {
     readJson(`/api/admin/feedback/${id}/dataset-example`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }),
   getBroadcastAudience: () =>
     readJson<{ success: true; data: { count: number; senders: Array<{ id: BroadcastSender; from: string }> } }>('/api/admin/communication/audience'),
+  uploadBroadcastVideo: async (file: File) => {
+    const body = new FormData();
+    body.append('video', file);
+    const response = await authFetch('/api/admin/communication/video', { method: 'POST', body });
+    const result = await response.json().catch(() => null);
+    if (!response.ok || !result?.data?.url) {
+      throw new Error(result?.error || (response.status === 413
+        ? 'The server rejected the video size.'
+        : `Video upload failed (${response.status}).`));
+    }
+    return result.data.url as string;
+  },
   previewBroadcast: (payload: BroadcastDraft) =>
     readJson<{ success: true; data: { html: string } }>('/api/admin/communication/preview', {
       method: 'POST',

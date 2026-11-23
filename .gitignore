@@ -49,6 +49,7 @@ exports/*.xlsx
 # Generated files (charts, workbooks, marked PDFs): runtime data
 data/generated/
 data/biz-media/
+data/broadcast-videos/
 
 # Generated NISR index (rebuild with: npm run nisr:index)
 data/nisr/index/
