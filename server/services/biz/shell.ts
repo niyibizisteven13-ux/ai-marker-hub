@@ -12,7 +12,7 @@ export const THEME_COLOR: Record<string, string> = { gold: '#E9A23B', teal: '#0F
 export function renderShell(html: string, b: PublicBusiness, origin: string): string {
   const base = origin.replace(/\/$/, ''); const isProfile = b.category === 'profile'; const isFounderProfile = isProfile && b.slug.toLowerCase() === 'niyibizisteven'; const url = `${base}/${isProfile ? 'p' : 'b'}/${encodeURIComponent(b.slug)}`;
   const title = isFounderProfile ? `${b.name} · Founder of Bwenge.space · Bwenge4Profile` : isProfile ? `${b.name}${b.profile?.headline ? ` · ${b.profile.headline}` : ''} · Bwenge4profile` : `${b.name} · ${CATEGORY_WORD[b.category] ?? 'Business'} on Bwenge`;
-  const desc = (isFounderProfile ? 'Niyibizi Steven founded Bwenge.space while studying Economics at the University of Rwanda's Huye campus and Data Science elsewhere. His AI use in a Google Forms test led him to build MySEB for fairer exams.' : isProfile ? (b.profile?.headline || b.tagline || b.about || `${b.name} on Bwenge4profile`) : (b.tagline || b.about || `${b.name} on Bwenge4biz`)).replace(/\s+/g, ' ').slice(0, 200);
+  const desc = (isFounderProfile ? 'Niyibizi Steven founded Bwenge.space while studying Economics at the University of Rwanda in Huye and Data Science elsewhere. He used AI in a Google Forms test, saw it was unfair, and developed MySEB.' : isProfile ? (b.profile?.headline || b.tagline || b.about || `${b.name} on Bwenge4profile`) : (b.tagline || b.about || `${b.name} on Bwenge4biz`)).replace(/\s+/g, ' ').slice(0, 200);
   const img = [b.cover, b.logo].find((m) => m && m.kind === 'image');
   const image = img ? `${base}/api/biz/public/${encodeURIComponent(b.slug)}/media/${encodeURIComponent(img.id)}` : `${base}/icons-512.png`;
   const tags = [
