@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Send, CheckCircle2, Link2, Unlink, Loader2, RefreshCw, ExternalLink, ShieldCheck, Store, UserRound, ArrowUpRight } from 'lucide-react';
+import { Send, CheckCircle2, Link2, Unlink, Loader2, RefreshCw, ExternalLink, ShieldCheck, Store, UserRound, ArrowUpRight, BookOpen } from 'lucide-react';
 import { setPin, usePins, type Pin } from '../../utils/sidebarPrefs';
 import { authFetch } from '../../utils/authFetch';
 import BizConnection from './BizConnection';
@@ -27,6 +27,25 @@ function SidebarShortcuts() {
         </li>); })}</ul>
     </div>
   );
+}
+
+function ResearchConnection() {
+  const [connected,setConnected]=useState<boolean|null>(null);
+  useEffect(()=>{
+    let active=true;
+    const refresh=async()=>{try{const r=await authFetch('/api/research/studio/access');if(!r.ok)throw Error('Access unavailable');const d=await r.json();if(active)setConnected(d.connected===true);}catch{if(active)setConnected(null);}};
+    void refresh();
+    const timer=window.setInterval(refresh,15000);
+    window.addEventListener('focus',refresh);
+    return()=>{active=false;window.clearInterval(timer);window.removeEventListener('focus',refresh);};
+  },[]);
+  if(connected!==true)return null;
+  return <section className="flex flex-wrap items-center gap-4 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-6">
+    <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--teal)]/15 text-[var(--teal)]"><BookOpen size={24}/></span>
+    <div className="min-w-0 flex-1"><h3 className="font-semibold text-[var(--text)]">Bwenge4Research</h3><p className="text-xs text-[var(--muted)]">Your invitation-only scholarly publishing membership. Access is managed by Bwenge administrators.</p></div>
+    <span className="inline-flex items-center gap-1 text-xs text-[var(--teal)]"><CheckCircle2 size={14}/> Connected</span>
+    <a href="/research?studio=1" className="inline-flex items-center gap-1 rounded-xl border border-[var(--line)] px-4 py-2 text-xs font-medium text-[var(--text)]">Open Research Studio <ArrowUpRight size={14}/></a>
+  </section>;
 }
 
 export default function ConnectionsSection() {
@@ -193,6 +212,7 @@ export default function ConnectionsSection() {
       </div>
 
       <BizConnection />
+      <ResearchConnection />
 
       {message && (
         <div role="status" className={`rounded-xl p-3 text-xs flex items-center gap-2 ${message.error ? 'bg-[var(--danger)]/10 text-[var(--danger)]' : 'bg-[var(--teal)]/10 text-[var(--teal)]'}`}>
