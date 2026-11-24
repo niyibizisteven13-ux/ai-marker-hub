@@ -123,6 +123,7 @@ import { platformGate, platformStatus } from './server/services/platform/gate.js
 import { startMySebSync } from './server/services/mySebAdmin.js';
 import { startBillingJobs } from './server/services/billing/payments.js';
 import feedbackRoutes from './server/routes/feedbackRoutes.ts';
+import { researchPublic, researchStudio, researchAdmin } from './server/routes/researchRoutes.js';
 import chatSseRoutes from './server/routes/chatSseRoutes.js';
 import { getTelegramWebhookBaseUrl, TelegramBotService } from './server/services/TelegramBotService.ts';
 import { buildPromptForIntent, buildSmallTalkPrompt } from './server/services/prompts/promptRouter.ts';
@@ -503,6 +504,9 @@ app.use('/api/admin/myseb-access', requireAuth, requireRole('ADMIN'), mySebAcces
 app.use('/api/admin/myseb', requireAuth, requireRole('ADMIN'), adminMySebRoutes);
 app.use('/api/myseb-access', requireAuth, mySebAccessRoutes);
 app.use('/api/myseb-dashboard', requireAuth, mySebDashboardRoutes);
+app.use('/api/research/public', researchPublic);
+app.use('/api/research/studio', requireAuth, researchStudio);
+app.use('/api/admin/research', requireAuth, requireRole('ADMIN'), researchAdmin);
 app.use('/api/admin', requireAuth, requireRole('ADMIN'), adminRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/ollama', requireAuth, ollamaRoutes);
