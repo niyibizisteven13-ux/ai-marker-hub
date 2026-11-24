@@ -25,7 +25,7 @@ export default function MySebWelcome({ onSignIn, onSignUp }: { onSignIn: () => v
   const standalone = typeof window !== 'undefined' && (window.matchMedia?.('(display-mode: standalone)').matches || (window.navigator as any).standalone);
   const btn = 'inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-6 text-[15px] font-semibold transition';
   return (
-    <div className="min-h-[100dvh] bg-[#0A1424] font-sans text-white antialiased">
+    <div className="relative h-[100dvh] w-full overflow-y-auto overscroll-contain bg-[#0A1424] font-sans text-white antialiased">
       <div className="pointer-events-none absolute inset-x-0 top-0 h-[520px] bg-[radial-gradient(60%_60%_at_50%_0%,rgba(76,229,214,0.18),transparent)]" />
       <header className="relative mx-auto flex max-w-5xl items-center justify-between px-5 py-5">
         <div className="flex items-center gap-3"><img src={logoUrl} alt="" className="h-10 w-10 rounded-xl" /><span className="font-display text-xl font-semibold tracking-tight">MySEB</span></div>
