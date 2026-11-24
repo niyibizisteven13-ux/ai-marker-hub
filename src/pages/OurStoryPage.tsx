@@ -34,8 +34,11 @@ export default function OurStoryPage() {
               <p><a href="/ms" className="font-semibold text-teal-300 underline underline-offset-4">MySEB</a> gives lecturers and other assessment organizers tools to run controlled online sessions, monitor activity in a live room, and review what happened during an assessment.</p>
             </section>
             <section aria-labelledby="business">
-              <h2 id="business">Giving small businesses a place to work and be found</h2>
-              <p>As Bwenge grew, Steven saw how small businesses had to coordinate daily records, staff responsibilities and customer-facing information across different places. <strong className="text-white">Bwenge4Biz</strong> brings together tools for business operations, team access and a public page where customers can see what the business offers.</p>
+              <h2 id="business">Building a business while pursuing an education</h2>
+              <p>Steven believed university students should not have to wait until graduation to start a side hustle or build a business. He asked how a student could keep track of a business while attending lectures somewhere else.</p>
+              <p>At an entrepreneurship workshop in Kigali, Steven recalls hearing findings attributed to the University of Rwanda research department suggesting that around 90% of student startups fail within their first year. The original study has not been independently verified. Even some funded businesses struggled, and Steven identified inadequate record-keeping and limited operational oversight as challenges worth addressing.</p>
+              <p>That experience inspired <strong className="text-white">Bwenge4Biz</strong>: an AI-powered workspace where entrepreneurs can track sales, expenses, stock and operations, collaborate with employees and understand their business by chatting with AI, even when they are away. A public business page helps customers discover what the business offers.</p>
+              <p>The goal is to help students and other entrepreneurs build sustainable businesses without having to sacrifice their education or be physically present every day.</p>
             </section>
             <section aria-labelledby="profile" className="rounded-2xl border border-teal-300/20 bg-teal-300/[0.06] p-5 sm:p-7">
               <h2 id="profile">Bwenge4Profile</h2>
