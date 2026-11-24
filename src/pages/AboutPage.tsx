@@ -161,12 +161,7 @@ export default function AboutPage() {
             </article>
           </div>
 
-          <div className="mt-8 max-w-3xl rounded-2xl border border-teal-200/20 bg-teal-200/[0.06] p-6">
-            <h3 className="text-lg font-semibold">A continuing interest in career guidance</h3>
-            <p className="mt-3 text-sm leading-6 text-slate-300">
-              Steven is still learning and believes career guidance should be practical: helping people understand their strengths, weigh choices and learn from one another. He sees peer coaches as an important part of that work and wants Bwenge to keep growing around real needs that students and professionals share.
-            </p>
-          </div>
+
         </section>
 
         <section className="mt-16 rounded-2xl border border-teal-200/20 bg-teal-200/[0.07] p-7 sm:p-10">
