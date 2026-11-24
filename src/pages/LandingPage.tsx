@@ -90,6 +90,7 @@ export default function LandingPage({ onLoginSuccess }: { onLoginSuccess: (user?
             <a href="/about" onClick={(e) => { e.preventDefault(); window.location.href = '/about'; }}>
               {t('about')}
             </a>
+            <a href="/our-story">{t('ourStory')}</a>
             <a href="mailto:support@bwenge.space?subject=Support%20Ticket%20-%20Bwenge%20AI%20Studio" onClick={(e) => { e.preventDefault(); window.location.href = 'mailto:support@bwenge.space?subject=Support%20Ticket%20-%20Bwenge%20AI%20Studio'; }}>
               {t('help')}
             </a>
