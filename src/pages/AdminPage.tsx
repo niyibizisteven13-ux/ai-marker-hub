@@ -14,6 +14,7 @@ import ContentAdmin from '../components/admin/ContentAdmin';
 import JobsAdmin from '../components/admin/JobsAdmin';
 import SecurityAdmin from '../components/admin/SecurityAdmin';
 import AuditAdmin from '../components/admin/AuditAdmin';
+import ResearchAdmin from '../components/admin/ResearchAdmin';
 import MySebSalesAdmin from '../components/admin/MySebSalesAdmin';
 import UserDetail from '../components/admin/UserDetail';
 import { adminApi, type AdminQualitySummary } from '../api/admin';
@@ -24,7 +25,7 @@ import { API_BASE_URL, getAccessToken, refreshAccessToken } from '../utils/authF
 type Env = 'draft' | 'testing' | 'production';
 type TabId = 'overview' | 'finetune' | 'datasets' | 'models' | 'knowledge' | 'documents' | 'playground'
   | 'review' | 'verified' | 'retrieval' | 'prompts' | 'providers' | 'analytics' | 'quality' | 'users' | 'logs' | 'settings'
-  | 'feedback' | 'communication' | 'billing' | 'mysebAdmin' | 'mysebSales' | 'content' | 'jobs' | 'security';
+  | 'feedback' | 'communication' | 'billing' | 'mysebAdmin' | 'mysebSales' | 'research' | 'content' | 'jobs' | 'security';
 
 const DATASET_FILE_ACCEPT = '.pdf,.docx,.txt,.md,.csv,.json,.xlsx,.xls,.png,.jpg,.jpeg,.webp,.gif,.js,.ts,.tsx,.jsx,.py,.java,.kt,.cpp,.c,.h,.cs,.rs,.go,.sql,.html,.css,.yaml,.yml,.sh';
 
@@ -84,6 +85,7 @@ const NAV_CATEGORIES: NavCategory[] = [
     items: [
       { id: 'settings', label: 'Platform controls', icon: <Settings size={16} /> },
       { id: 'mysebAdmin', label: 'MySEB (exams)', icon: <ShieldCheck size={16} /> },
+      { id: 'research', label: 'Bwenge4Research', icon: <BookOpen size={16} /> },
       { id: 'mysebSales', label: 'MySEB sales', icon: <Mail size={16} /> },
       { id: 'content', label: 'Content & organisations', icon: <FolderTree size={16} /> },
       { id: 'jobs', label: 'Jobs & Telegram', icon: <Cpu size={16} /> },
@@ -2992,6 +2994,7 @@ export default function AdminPage({ onBack, initialTab = 'overview' }: { onBack:
                 </div>
               )}
               {tab === 'mysebAdmin' && <MySebAdmin notify={notify} />}
+              {tab === 'research' && <ResearchAdmin />}
               {tab === 'mysebSales' && <MySebSalesAdmin notify={notify} />}
               {tab === 'content' && <ContentAdmin notify={notify} />}
               {tab === 'jobs' && <JobsAdmin notify={notify} />}
