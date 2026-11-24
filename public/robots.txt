@@ -1,0 +1,13 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /admin/
+Disallow: /settings
+Disallow: /upgrade
+Disallow: /assignments
+Disallow: /tasks
+Disallow: /mark
+Disallow: /transcript
+Disallow: /ms/
+
+Sitemap: https://www.bwenge.space/sitemap.xml

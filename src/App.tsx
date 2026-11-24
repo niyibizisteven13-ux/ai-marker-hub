@@ -71,6 +71,7 @@ const FormStudioPage = lazyPage(() => import('./pages/FormStudioPage'));
 const ModelPage = lazyPage(() => import('./pages/ModelPage'));
 const LearnPage = lazyPage(() => import('./pages/LearnPage'));
 const TermsPage = lazyPage(() => import('./pages/TermsPage'));
+const AboutPage = lazyPage(() => import('./pages/AboutPage'));
 const GetAppPage = lazyPage(() => import('./pages/GetAppPage'));
 const BizPublicPage = lazyPage(() => import('./pages/BizPublicPage'));
 const BizStudioPage = lazyPage(() => import('./pages/BizStudioPage'));
@@ -1451,6 +1452,8 @@ export default function App() {
   if (window.location.pathname === '/privacy') {
     return <PrivacyPage />;
   }
+
+  if (/^\/about\/?$/.test(window.location.pathname)) return <AboutPage />;
 
   if (authStatus === 'loading') {
     return (
