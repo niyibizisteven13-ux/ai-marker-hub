@@ -1432,7 +1432,7 @@ export default function App() {
     if (authenticatedUser) return <Suspense fallback={null}><MySebDashboardPage standalone onBack={() => { window.location.href = '/'; }} onSignOut={() => void handleLogout()} /></Suspense>;
     return (
       <Suspense fallback={null}>
-        <MySebWelcome onSignIn={() => { setIsSignUpMode(false); setLoginModalOpen(true); }} onSignUp={() => { setIsSignUpMode(true); setLoginModalOpen(true); }} />
+        <MySebWelcome onLoginSuccess={(u) => { setAuthenticatedUser(u); setAuthStatus('authenticated'); }} onSignUp={() => { setIsSignUpMode(true); setLoginModalOpen(true); }} />
         {loginModalOpen && <LoginModal isOpen={loginModalOpen} onClose={() => { setLoginModalOpen(false); setIsSignUpMode(false); }} defaultIsSignUp={isSignUpMode} onLoginSuccess={(u) => { setAuthenticatedUser(u); setAuthStatus('authenticated'); setLoginModalOpen(false); setIsSignUpMode(false); }} />}
       </Suspense>
     );
