@@ -9,6 +9,7 @@ export type AuthFlowStep = 'start' | 'email' | 'code' | 'name' | 'success' | 'mf
 export function AuthFlow({
   t,
   locale = 'en',
+  destination,
   onLoginSuccess,
   onCreateAccount,
   onTerms,
@@ -16,6 +17,7 @@ export function AuthFlow({
 }: {
   t: (key: string, params?: Record<string, string | number>) => string;
   locale?: string;
+  destination?: string;
   onLoginSuccess: (user: User) => void;
   onCreateAccount?: () => void;
   onTerms: () => void;
@@ -85,7 +87,7 @@ export function AuthFlow({
     }
     const params = new URLSearchParams(window.location.search);
     const next = params.get('next');
-    authService.loginWithGoogle(next || undefined);
+    authService.loginWithGoogle(destination ?? (next || undefined));
   };
 
   const handleEmailStartSubmit = async (e: React.FormEvent) => {
@@ -161,14 +163,14 @@ export function AuthFlow({
   const finishSuccess = (user: User) => {
     setStep('success');
     const params = new URLSearchParams(window.location.search);
-    const next = sanitizeNext(params.get('next'));
+    const next = sanitizeNext(destination ?? params.get('next'));
     onLoginSuccess(user);
     window.location.href = next;
   };
 
   return (
     <div className="auth" aria-busy={loading}>
-      {step === 'mfa' && <MfaStep onDone={(next) => { window.location.href = sanitizeNext(next); }} />}
+      {step === 'mfa' && <MfaStep onDone={(next) => { window.location.href = sanitizeNext(destination ?? next); }} />}
       {step === 'start' && (
         <>
           <button type="button" className="pill" onClick={handleGoogleClick} disabled={loading} style={{ minHeight: '48px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
