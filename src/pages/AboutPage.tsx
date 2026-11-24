@@ -119,6 +119,56 @@ export default function AboutPage() {
           </div>
         </section>
 
+        <section className="mt-16 border-t border-white/10 pt-12" aria-labelledby="founder-heading">
+          <div className="max-w-3xl">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-teal-300">The story behind Bwenge</p>
+            <h2 id="founder-heading" className="mt-3 text-3xl font-bold">Built from problems Steven experienced and observed</h2>
+            <p className="mt-4 leading-7 text-slate-300">
+              Niyibizi Steven founded Bwenge.space while studying Economics at the University of Rwanda in Huye and pursuing Data Science concurrently at another university. He began with a practical question: could AI help lecturers mark papers more quickly?
+            </p>
+          </div>
+
+          <div className="mt-8 grid gap-5 lg:grid-cols-2">
+            <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
+              <h3 className="text-lg font-semibold text-teal-200">From handwritten marking to faster feedback</h3>
+              <p className="mt-3 text-sm leading-6 text-slate-300">
+                Early experiments showed that AI could help with handwritten scripts, but processing large volumes could use many tokens and make API costs too high to sustain. Steven looked for another way to reduce marking delays. Online tasks and assessments that return marks promptly became an important alternative, while teacher review remains central to marking decisions.
+              </p>
+            </article>
+
+            <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
+              <h3 className="text-lg font-semibold text-teal-200">A Google Forms experience that raised questions</h3>
+              <p className="mt-3 text-sm leading-6 text-slate-300">
+                During an employment exercise delivered through Google Forms, Steven submitted answers but received no marks or feedback. He also admits that he opened another browser tab and searched for answers with AI while completing it. The experience felt frustrating and exposed two gaps: applicants could use outside help, while the form gave them no clear result. It pushed him to think about assessment integrity and timely feedback together.
+              </p>
+            </article>
+
+            <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
+              <h3 className="text-lg font-semibold text-teal-200">Making small businesses easier to find</h3>
+              <p className="mt-3 text-sm leading-6 text-slate-300">
+                Steven saw that many businesses need an online presence and practical ways to track their work, but building a custom website from scratch can be a barrier. Bwenge4Biz is intended to help businesses present themselves online and use connected digital tools without starting every time from a blank website.
+              </p>
+            </article>
+
+            <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
+              <h3 className="text-lg font-semibold text-teal-200">Giving students a place to introduce themselves</h3>
+              <p className="mt-3 text-sm leading-6 text-slate-300">
+                When students are asked in class to explain who they are and what they can do, they may not have a page that brings their skills, projects and goals together. That need inspired Bwenge4Profile: a shareable space where students and professionals can present themselves in their own words.
+              </p>
+              <a href="https://bwenge.space/p/niyibizisteven" className="mt-4 inline-flex text-sm font-semibold text-teal-200 underline decoration-teal-200/40 underline-offset-4 hover:text-white">
+                View Steven’s Bwenge4Profile
+              </a>
+            </article>
+          </div>
+
+          <div className="mt-8 max-w-3xl rounded-2xl border border-teal-200/20 bg-teal-200/[0.06] p-6">
+            <h3 className="text-lg font-semibold">A continuing interest in career guidance</h3>
+            <p className="mt-3 text-sm leading-6 text-slate-300">
+              Steven is still learning and believes career guidance should be practical: helping people understand their strengths, weigh choices and learn from one another. He sees peer coaches as an important part of that work and wants Bwenge to keep growing around real needs that students and professionals share.
+            </p>
+          </div>
+        </section>
+
         <section className="mt-16 rounded-2xl border border-teal-200/20 bg-teal-200/[0.07] p-7 sm:p-10">
           <h2 className="text-2xl font-bold">Explore Bwenge.space</h2>
           <p className="mt-3 max-w-2xl leading-7 text-slate-300">Start with the tool that solves your task, then bring more of your learning, data and work into one connected platform.</p>
