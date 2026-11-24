@@ -10,9 +10,9 @@ export const CATEGORY_WORD: Record<string, string> = { shop: 'Shop', restaurant:
 export const THEME_COLOR: Record<string, string> = { gold: '#E9A23B', teal: '#0F9D8F', green: '#1E9E5A', blue: '#2F6FED', rose: '#DB4F8E', violet: '#7C5CF0', ink: '#0E1722' };
 
 export function renderShell(html: string, b: PublicBusiness, origin: string): string {
-  const base = origin.replace(/\/$/, ''); const isProfile = b.category === 'profile'; const url = `${base}/${isProfile ? 'p' : 'b'}/${encodeURIComponent(b.slug)}`;
-  const title = isProfile ? `${b.name}${b.profile?.headline ? ` · ${b.profile.headline}` : ''} · Bwenge4profile` : `${b.name} · ${CATEGORY_WORD[b.category] ?? 'Business'} on Bwenge`;
-  const desc = (isProfile ? (b.profile?.headline || b.tagline || b.about || `${b.name} on Bwenge4profile`) : (b.tagline || b.about || `${b.name} on Bwenge4biz`)).replace(/\s+/g, ' ').slice(0, 200);
+  const base = origin.replace(/\/$/, ''); const isProfile = b.category === 'profile'; const isFounderProfile = isProfile && b.slug.toLowerCase() === 'niyibizisteven'; const url = `${base}/${isProfile ? 'p' : 'b'}/${encodeURIComponent(b.slug)}`;
+  const title = isFounderProfile ? `${b.name} · Founder of Bwenge.space · Bwenge4Profile` : isProfile ? `${b.name}${b.profile?.headline ? ` · ${b.profile.headline}` : ''} · Bwenge4profile` : `${b.name} · ${CATEGORY_WORD[b.category] ?? 'Business'} on Bwenge`;
+  const desc = (isFounderProfile ? 'Niyibizi Steven, Bwenge.space founder, studies Economics at the University of Rwanda in Huye and Data Science elsewhere. After using AI in a Google Forms test, he recognised the fairness problem behind MySEB.' : isProfile ? (b.profile?.headline || b.tagline || b.about || `${b.name} on Bwenge4profile`) : (b.tagline || b.about || `${b.name} on Bwenge4biz`)).replace(/\s+/g, ' ').slice(0, 200);
   const img = [b.cover, b.logo].find((m) => m && m.kind === 'image');
   const image = img ? `${base}/api/biz/public/${encodeURIComponent(b.slug)}/media/${encodeURIComponent(img.id)}` : `${base}/icons-512.png`;
   const tags = [
