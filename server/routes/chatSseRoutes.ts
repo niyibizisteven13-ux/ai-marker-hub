@@ -1,3 +1,4 @@
+import { BWENGE_PLATFORM_KNOWLEDGE } from '../services/prompts/bwengePlatformKnowledge.js';
 import { Router, Request, Response } from 'express';
 import Anthropic from "@anthropic-ai/sdk";
 import type { StreamEvent } from "../../src/components/ActivityLine";
@@ -12,6 +13,7 @@ const SHOW_THINKING = process.env.SHOW_THINKING !== "0";
 
 const SYSTEM = [
   "You are Bwenge, a helpful assistant.",
+  BWENGE_PLATFORM_KNOWLEDGE,
   "Every tool call must include a `status`: one short present-tense line (max 8 words) saying what you are doing for this user,",
   "written in the same language the user is writing in. Be specific, e.g. the student's name or the topic being searched.",
 ].join(" ");
