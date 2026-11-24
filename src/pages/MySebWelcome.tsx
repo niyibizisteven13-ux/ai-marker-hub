@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Download, Eye, GraduationCap, Lock, Radio, ShieldCheck, Smartphone, Sparkles } from 'lucide-react';
+import { AuthFlow } from '../components/AuthFlow';
+import { useLang } from '../i18n/useLang';
+import type { User } from '../auth/authService';
 import logoUrl from '../assets/myseb-logo.svg';
 
 /**
@@ -13,7 +16,8 @@ const FEATURES: Array<[typeof Lock, string, string]> = [
   [Eye, 'Proof you can trust', 'A timeline of what happened for each student, so you decide fairly.'],
 ];
 
-export default function MySebWelcome({ onSignIn, onSignUp }: { onSignIn: () => void; onSignUp: () => void }) {
+export default function MySebWelcome({ onLoginSuccess, onSignUp }: { onLoginSuccess: (user: User) => void; onSignUp: () => void }) {
+  const { t, lang } = useLang();
   const [install, setInstall] = useState<any>(null); const [ios, setIos] = useState(false); const [installed, setInstalled] = useState(false);
   useEffect(() => {
     const h = (e: Event) => { e.preventDefault(); setInstall(e); }; window.addEventListener('beforeinstallprompt', h);
@@ -29,20 +33,32 @@ export default function MySebWelcome({ onSignIn, onSignUp }: { onSignIn: () => v
       <div className="pointer-events-none absolute inset-x-0 top-0 h-[520px] bg-[radial-gradient(60%_60%_at_50%_0%,rgba(76,229,214,0.18),transparent)]" />
       <header className="relative mx-auto flex max-w-5xl items-center justify-between px-5 py-5">
         <div className="flex items-center gap-3"><img src={logoUrl} alt="" className="h-10 w-10 rounded-xl" /><span className="font-display text-xl font-semibold tracking-tight">MySEB</span></div>
-        <button type="button" onClick={onSignIn} className="rounded-xl border border-white/15 px-4 py-2 text-sm font-semibold hover:bg-white/10">Sign in</button>
+        <a href="#myseb-sign-in" className="rounded-xl border border-white/15 px-4 py-2 text-sm font-semibold hover:bg-white/10">Sign in</a>
       </header>
 
       <main className="relative mx-auto max-w-5xl px-5 pb-16 pt-8 sm:pt-14">
-        <div className="max-w-2xl">
-          <p className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-[#4CE5D6]"><ShieldCheck size={14} aria-hidden="true" />Secure exams for lecturers</p>
-          <h1 className="mt-5 font-display text-[40px] font-semibold leading-[1.05] tracking-tight sm:text-6xl">Give a fair exam,<br />from your phone.</h1>
-          <p className="mt-5 text-[17px] leading-relaxed text-white/70">Lock students into the test, watch the live room, and get marks and a clear record of what happened. No setup, no equipment.</p>
-          <div className="mt-8 flex flex-wrap gap-3">
-            <button type="button" onClick={onSignUp} className={`${btn} bg-[#4CE5D6] text-[#0A1424] hover:opacity-90`}>Create your account</button>
-            <button type="button" onClick={onSignIn} className={`${btn} border border-white/20 hover:bg-white/10`}>Sign in</button>
-            {install && !installed && !standalone && <button type="button" onClick={() => void doInstall()} className={`${btn} border border-white/20 hover:bg-white/10`}><Download size={17} aria-hidden="true" />Install the app</button>}
+        <div className="grid items-start gap-8 md:grid-cols-[minmax(0,1fr)_280px] lg:grid-cols-[minmax(0,1fr)_320px]">
+          <section id="myseb-sign-in" tabIndex={-1} aria-label="MySEB sign-in options" className="scroll-mt-5 rounded-2xl border border-white/10 bg-[#101E30] p-5 [--accent:#13766E] [--accent-text:#4CE5D6] [--border:#405269] [--field:#17283D] [--muted:#BECCDA] [--text:#fff] [--btn-bg:#fff] [--btn-text:#0A1424] [--btn-hover:#E3EAF1] [--btn-border:transparent] md:col-start-2 md:row-start-1">
+            <AuthFlow
+              t={t}
+              locale={lang}
+              destination="/ms"
+              onLoginSuccess={onLoginSuccess}
+              onTerms={() => { window.location.href = '/terms'; }}
+              onPrivacy={() => { window.location.href = '/privacy'; }}
+            />
+          </section>
+          <div className="max-w-2xl md:col-start-1 md:row-start-1">
+              <p className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-[#4CE5D6]"><ShieldCheck size={14} aria-hidden="true" />Assessment platform</p>
+              <h1 className="mt-5 font-display text-[40px] font-semibold leading-[1.05] tracking-tight sm:text-6xl">Manage assessments with MySEB</h1>
+              <p className="mt-5 text-[17px] leading-relaxed text-white/70">Create online assessments, monitor live sessions, and review results from one dashboard.</p>
+              <div className="mt-8 flex flex-wrap gap-3">
+                <button type="button" onClick={onSignUp} className={`${btn} bg-[#4CE5D6] text-[#0A1424] hover:opacity-90`}>Create your account</button>
+                <a href="#myseb-sign-in" className={`${btn} border border-white/20 hover:bg-white/10`}>Sign in</a>
+                {install && !installed && !standalone && <button type="button" onClick={() => void doInstall()} className={`${btn} border border-white/20 hover:bg-white/10`}><Download size={17} aria-hidden="true" />Install the app</button>}
+              </div>
+              {ios && !installed && !standalone && <p className="mt-4 flex items-center gap-2 text-sm text-white/60"><Smartphone size={15} aria-hidden="true" />On iPhone: tap Share, then “Add to Home Screen” to install MySEB.</p>}
           </div>
-          {ios && !installed && !standalone && <p className="mt-4 flex items-center gap-2 text-sm text-white/60"><Smartphone size={15} aria-hidden="true" />On iPhone: tap Share, then “Add to Home Screen” to install MySEB.</p>}
         </div>
 
         <ul className="mt-14 grid gap-3 sm:grid-cols-2">
