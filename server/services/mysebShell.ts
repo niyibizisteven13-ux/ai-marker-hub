@@ -7,12 +7,12 @@ export const MYSEB_COLOR = '#0A1424';
 export const isMySebHost = (host: string) => /^myseb\./i.test(host);
 
 export function renderMySebShell(html: string, origin: string): string {
-  const base = origin.replace(/\/$/, ''); const title = 'MySEB: secure exams for lecturers';
-  const desc = 'Run secure exams from your phone or computer: lock students into the test, watch the live room and get the results.';
+  const base = origin.replace(/\/$/, ''); const title = 'MySEB Secure Exam Browser | Live Rooms for Lecturers';
+  const desc = 'MySEB helps lecturers run secure online tests, view live student status, track exits, review session timelines and results, and create tests with Bwenge AI. Device controls vary.';
   const tags = [
     `<meta name="description" content="${esc(desc)}" />`, `<link rel="canonical" href="${esc(`${base}/ms`)}" />`,
     `<meta property="og:type" content="website" />`, `<meta property="og:site_name" content="MySEB" />`, `<meta property="og:title" content="${esc(title)}" />`, `<meta property="og:description" content="${esc(desc)}" />`,
-    `<meta property="og:url" content="${esc(`${base}/ms`)}" />`, `<meta property="og:image" content="${esc(`${base}/myseb/icon-512.png`)}" />`, `<meta name="twitter:card" content="summary" />`,
+    `<meta property="og:url" content="${esc(`${base}/ms`)}" />`, `<meta property="og:image" content="${esc(`${base}/myseb/icon-512.png`)}" />`, `<meta name="twitter:card" content="summary" />`, `<meta name="twitter:title" content="${esc(title)}" />`, `<meta name="twitter:description" content="${esc(desc)}" />`,
     `<link rel="manifest" href="/myseb.webmanifest" />`, `<meta name="theme-color" content="${MYSEB_COLOR}" />`, `<meta name="apple-mobile-web-app-capable" content="yes" />`, `<meta name="apple-mobile-web-app-title" content="MySEB" />`,
     `<link rel="icon" type="image/svg+xml" href="/myseb/icon.svg" />`, `<link rel="apple-touch-icon" href="/myseb/icon-192.png" />`,
   ].join('\n    ');
