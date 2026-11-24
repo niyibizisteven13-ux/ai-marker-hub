@@ -33,7 +33,7 @@ const offerings = [
   },
   {
     title: 'MySEB secure assessments',
-    text: 'Support institution-led online assessments with a dedicated secure exam browser and live assessment workflows.',
+    text: 'Secure online tests and tasks with a student exam app, live rooms for lecturers, device-aware controls, activity timelines and assistant-supported assessment workflows.',
   },
   {
     title: 'Developer and institution integrations',
@@ -108,6 +108,45 @@ export default function AboutPage() {
           </div>
         </section>
 
+        <section className="mt-16 border-t border-white/10 pt-12" aria-labelledby="myseb-heading">
+          <div className="max-w-3xl">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-teal-300">Secure assessment tools</p>
+            <h2 id="myseb-heading" className="mt-3 text-3xl font-bold">MySEB: a secure exam browser and live exam rooms</h2>
+            <p className="mt-4 leading-7 text-slate-300">
+              MySEB helps lecturers and institutions set up online tests and tasks, invite students with an exam link or code, monitor a live room and review results. It was shaped by the challenge of keeping online assessments fair while still giving students and lecturers useful feedback.
+            </p>
+          </div>
+          <div className="mt-8 grid gap-4 sm:grid-cols-2">
+            <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
+              <h3 className="text-lg font-semibold text-teal-200">Secure test sessions</h3>
+              <p className="mt-3 text-sm leading-6 text-slate-300">
+                Students open a protected test in the MySEB app and enter the code from their lecturer. Leaving the test is recorded and can pause the session so the lecturer can decide when to let the student continue.
+              </p>
+            </article>
+            <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
+              <h3 className="text-lg font-semibold text-teal-200">Live rooms and lecturer controls</h3>
+              <p className="mt-3 text-sm leading-6 text-slate-300">
+                Lecturers can see who is working, paused, has left or has finished. They can open a student's record, communicate with the room, pause a session or add time, then review the event timeline and results.
+              </p>
+            </article>
+            <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
+              <h3 className="text-lg font-semibold text-teal-200">Assistant-supported test workflows</h3>
+              <p className="mt-3 text-sm leading-6 text-slate-300">
+                Bwenge can help create a test from notes, prepare a secure exam link and code, answer questions about a live room and summarise results. Lecturers remain responsible for assessment decisions and can review or change marks.
+              </p>
+            </article>
+            <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
+              <h3 className="text-lg font-semibold text-teal-200">Device-aware exam options</h3>
+              <p className="mt-3 text-sm leading-6 text-slate-300">
+                MySEB apps are available for Android, Windows, Mac and Linux. On Android, the app can pin the device to the exam and block screenshots and screen recording. The Windows and Mac apps run the exam full-screen, with stronger lockdown available on Windows. iPhone and iPad users may use a browser only when the lecturer allows it; that option reports leaving the page but cannot lock the device. Controls differ by device, and no browser-only option can fully lock a device.
+              </p>
+            </article>
+          </div>
+          <p className="mt-5 max-w-3xl text-sm leading-6 text-slate-400">
+            MySEB is designed to support assessment integrity, not to promise that technology can prevent every form of cheating. Lecturers choose the allowed device and browser options and review the available records when making decisions.
+          </p>
+        </section>
+
         <section className="mt-16 grid gap-8 border-t border-white/10 pt-10 md:grid-cols-2">
           <div>
             <h2 className="text-2xl font-bold">For learners and educators</h2>
@@ -139,7 +178,7 @@ export default function AboutPage() {
             <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
               <h3 className="text-lg font-semibold text-teal-200">A Google Forms experience that raised questions</h3>
               <p className="mt-3 text-sm leading-6 text-slate-300">
-                During an employment exercise delivered through Google Forms, Steven submitted answers but received no marks or feedback. He also admits that he opened another browser tab and searched for answers with AI while completing it. The experience felt frustrating and exposed two gaps: applicants could use outside help, while the form gave them no clear result. It pushed him to think about assessment integrity and timely feedback together.
+                During an employment exercise delivered through Google Forms, Steven opened another browser tab and used AI to help answer questions. He later recognised that this was unfair to the assessment and did not feel morally right. He was also frustrated that applicants received no marks or feedback. The experience made him ask how online tests could support fairer conditions and give lecturers a clearer view of what happened. That question helped shape MySEB.
               </p>
             </article>
 
