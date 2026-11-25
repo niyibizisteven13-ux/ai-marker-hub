@@ -39,7 +39,14 @@ export const publicApi = {
 };
 
 export interface Mine { prefs?: { studioLang?: 'en' | 'rw' }; locked?: boolean; paid?: boolean; verified?: boolean; badge?: { priceRwf: number; url: string }; upgradeUrl?: string; upgrade?: { plan: string; name: string; priceRwf: number | null; priceNote: string; url: string }; businesses: Business[]; limits: { businesses: number; products: number; images: number; videos: number; totalMediaMb: number }; plan: string }
+export const stampImageUrl = (businessId: string, image: string) =>
+  getApiUrl(`/api/biz/stamp-images/${encodeURIComponent(businessId)}/${encodeURIComponent(image)}`);
+
 export const ownerApi = {
+  uploadStamp: async (businessId: string, file: File) => read<{ id: string }>(await authFetch(
+    `/api/biz/${encodeURIComponent(businessId)}/stamp-images`,
+    { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file },
+  )),
   mine: async () => read<Mine>(await authFetch('/api/biz/mine')),
   create: async (body: { name: string; category?: string; slug?: string }) => read<{ business: Business }>(await authFetch('/api/biz', json('POST', body))),
   update: async (id: string, patch: Record<string, unknown>) => read<{ business: Business }>(await authFetch(`/api/biz/${id}`, json('PATCH', patch))),
@@ -72,6 +79,7 @@ export const ownerApi = {
   endProgram: async (id: string, pid: string) => read<import('./types').EndProgramResult>(await authFetch(`/api/biz/${id}/programs/${pid}/end`, json('POST', {}))),
   deleteProgram: async (id: string, pid: string) => { const r = await authFetch(`/api/biz/${id}/programs/${pid}`, json('DELETE')); if (!r.ok) await read(r); },
   programText: async (id: string, body: Record<string, unknown>) => (await read<{ text: Record<string, unknown> }>(await authFetch(`/api/biz/${id}/program-text`, json('PUT', body)))).text,
+  memberCard: async (id: string, memberId: string) => read<CardInfo>(await authFetch(`/api/biz/${id}/members/${memberId}/card`)),
   members: async (id: string, q: { program?: string; state?: string; q?: string } = {}) => (await read<{ members: MemberInfo[] }>(await authFetch(`/api/biz/${id}/members?${new URLSearchParams(Object.entries(q).filter(([, v]) => v) as [string, string][])}`))).members,
   resetPasscode: async (id: string, mid: string) => (await read<{ passcode: string }>(await authFetch(`/api/biz/${id}/members/${mid}/reset-passcode`, json('POST')))).passcode,
   confirmMember: async (id: string, mid: string, method: 'cash' | 'momo') => (await read<{ member: MemberInfo }>(await authFetch(`/api/biz/${id}/members/${mid}/confirm`, json('POST', { method })))).member,

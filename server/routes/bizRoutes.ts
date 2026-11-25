@@ -6,6 +6,7 @@ import { visitorKey } from '../services/appFeedback.js';
 import { bizService } from '../services/biz/runtime.js';
 import { BizError } from '../services/biz/service.js';
 import { ProgramError } from '../services/biz/programsService.js';
+import { readStampImage, storeStampImage } from '../services/biz/stampImages.js';
 import { MediaError } from '../services/biz/media.js';
 import { FREE_LIMITS, MAX_IMAGE_BYTES, MAX_VIDEO_BYTES, MAX_VIDEO_MB, PAID_LIMITS, openNow } from '../services/biz/model.js';
 import { planFor } from '../services/billing/plans.js';
@@ -140,7 +141,16 @@ export function createBizRouter(): Router {
   }));
 
   /* ------------------------------------------------------------ owner */
+  r.get('/stamp-images/:bizId/:image', bizMediaLimiter, run(async (req, res) => {
+    const image = await readStampImage(req.params.bizId, req.params.image);
+    if (!image) return res.status(404).end();
+    await send(req, res, image, 'private, max-age=31536000, immutable');
+  }));
   r.use(requireAuth);
+  r.post('/:id/stamp-images', run(async (req, res) => {
+    const business = await svc().get(me(req), req.params.id);
+    res.status(201).json({ id: await storeStampImage(business.id, req) });
+  }));
   r.get('/mine', run(async (req, res) => {
     const plan = await planFor(me(req)).catch(() => null); const paid = !!plan && plan.id !== 'FREE'; const { bizAllowed } = await import('../services/biz/runtime.js');
     if (!(await bizAllowed(me(req)))) {
@@ -164,6 +174,10 @@ export function createBizRouter(): Router {
   r.get('/:id/program-text', run(async (req, res) => res.json({ text: await svc().programText(me(req), req.params.id) })));
   r.put('/:id/program-text', run(async (req, res) => res.json({ text: await svc().setProgramText(me(req), req.params.id, req.body ?? {}) })));
   r.get('/:id/members', run(async (req, res) => res.json({ members: await svc().members(me(req), req.params.id, { programId: typeof req.query.program === 'string' ? req.query.program : undefined, state: typeof req.query.state === 'string' ? req.query.state : undefined, q: typeof req.query.q === 'string' ? req.query.q : undefined }) })));
+  r.get('/:id/members/:mid/card', run(async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(await svc().memberCard(me(req), req.params.id, req.params.mid));
+  }));
   r.post('/:id/members/:mid/reset-passcode', run(async (req, res) => res.json(await svc().resetPasscode(me(req), req.params.id, req.params.mid))));
   r.post('/:id/members/:mid/confirm', run(async (req, res) => res.json({ member: await svc().confirmPayment(me(req), req.params.id, req.params.mid, req.body ?? {}) })));
   r.patch('/:id/members/:mid', run(async (req, res) => res.json({ member: await svc().setMember(me(req), req.params.id, req.params.mid, req.body ?? {}) })));

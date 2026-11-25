@@ -1,11 +1,12 @@
-import { restaurantCard, cardPaper, dailyMealPaper } from '../../../server/services/biz/mealCard';
+import { PaperCard } from './PlansPublic';
+import { mealColor, mealColorKey, mealInk, restaurantCard, cardPaper, dailyMealPaper } from '../../../server/services/biz/mealCard';
 import { useScanner } from './useScanner';
 import { getStudioLang, tx } from '../../biz/studioI18n';
 import { RW_WORDS, fill, wordsOf } from '../../../server/services/biz/programWords';
 import { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, Camera, KeyRound, Check, CheckCircle2, Copy, Loader2, MessageCircle, Pause, Pencil, Play, Plus, ScanLine, Share2, Trash2, Undo2, Users, UtensilsCrossed, X, XCircle } from 'lucide-react';
-import { ownerApi } from '../../biz/api';
-import type { CardLayout, DayId, EndProgramResult, MemberInfo, ProgramInfo, ProgramSummary, RedeemResult, TodayInfo } from '../../biz/types';
+import { ownerApi, stampImageUrl } from '../../biz/api';
+import type { CardInfo, CardLayout, DayId, EndProgramResult, MemberInfo, ProgramInfo, ProgramSummary, RedeemResult, TodayInfo } from '../../biz/types';
 import { rwf, type Business } from '../../biz/types';
 import { btn, btnGhost, btnPrimary, card, input, msg, Title } from './ui';
 
@@ -95,7 +96,7 @@ function TodayTab({ b, hasPlans, selfPrograms, onChange, goPlans }: { b: Busines
   const { w, t } = useWords(b);
   const [camera, setCamera] = useState(false); const [code, setCode] = useState(''); const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<(RedeemResult & { token?: string }) | null>(null); const [today, setToday] = useState<TodayInfo | null>(null); const [err, setErr] = useState('');
-  const loadToday = useCallback(async () => { try { setToday(await ownerApi.today(b.id)); } catch (e) { setErr(msg(e)); } }, [b.id]);
+  const loadToday = useCallback(async () => { try { setToday(await ownerApi.today(b.id)); setErr(''); } catch (e) { setToday(null); setErr(msg(e)); } }, [b.id]);
   useEffect(() => { void loadToday(); const t = window.setInterval(() => void loadToday(), 20_000); return () => window.clearInterval(t); }, [loadToday]);
   const redeem = useCallback(async (body: { token?: string; code?: string; memberId?: string; force?: boolean; item?: string }) => {
     if (busy) return; setBusy(true);
@@ -106,6 +107,13 @@ function TodayTab({ b, hasPlans, selfPrograms, onChange, goPlans }: { b: Busines
   const m = result?.member;
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      {!!today?.mealColors?.length && <section className={`${card} space-y-2 lg:col-span-2`}>
+        <Title>{tx("Current meal colors")} · {today.date}</Title>
+        {today.mealColors.map(({ programId, title, current }) => <div key={programId} className="rounded-xl border p-3 font-semibold" style={current ? { background: current.color, color: mealInk(current.color) } : undefined}>
+          {title} · {current ? `${current.item} · ${current.color.toUpperCase()}` : tx("Outside serving hours")}
+        </div>)}
+        <p className="text-sm">{tx("Before serving, match the customer's name, card code and meal in today's check-ins.")}</p>
+      </section>}
       {selfPrograms.length > 0 && <CheckinCode b={b} programs={selfPrograms} />}
       <section className={`${card} space-y-3`} aria-label={t("Scan a {pass}")}>
         <Title>{t("Check a {pass}")}</Title>
@@ -149,7 +157,7 @@ function TodayTab({ b, hasPlans, selfPrograms, onChange, goPlans }: { b: Busines
             <p className="text-sm"><b className="text-2xl tabular-nums">{today.servedCount}</b> {tx("checked in")} · <b className="tabular-nums">{today.notYet.length}</b> {t("have a {program} today and have not come yet")}</p>
             {!today.open && <p className="rounded-xl bg-[var(--app-bg)] p-3 text-sm text-[var(--app-muted)]">{t("Your {programs} are not available today.")}</p>}
             {today.served.length > 0 && <ul className="max-h-64 divide-y divide-[var(--app-line)] overflow-auto text-sm">{today.served.map((s) => (
-              <li key={s.useId} className="flex items-center justify-between gap-2 py-2"><span className="min-w-0"><b>{s.name}</b> <span className="text-[var(--app-muted)]">· {s.item} · {hhmm(s.at)}{s.by === 'self' ? ` · ${tx('ticked by the customer')}` : ''}</span></span>
+              <li key={s.useId} className="flex items-center justify-between gap-2 py-2"><span className="min-w-0"><b>{s.name}</b> · {s.code} <span className="text-[var(--app-muted)]">· {s.item} · {hhmm(s.at)}{s.by === 'self' ? ` · ${tx('ticked by the customer')}` : ''}</span></span>
                 {s.canUndo && <button type="button" className="text-xs text-rose-600 underline" onClick={async () => { try { await ownerApi.undoUse(b.id, s.useId); void loadToday(); onChange(); } catch (e) { setErr(msg(e)); } }}>{tx("Undo")}</button>}</li>))}</ul>}
             {today.notYet.length > 0 && <details className="text-sm"><summary className="cursor-pointer font-medium">{tx("Not yet today")} ({today.notYet.length})</summary>
               <ul className="mt-2 max-h-56 divide-y divide-[var(--app-line)] overflow-auto">{today.notYet.map((n) => <li key={n.memberId} className="flex items-center justify-between gap-2 py-1.5"><span>{n.name}</span><span className="font-mono text-xs text-[var(--app-muted)]">{n.code}</span></li>)}</ul></details>}
@@ -160,9 +168,76 @@ function TodayTab({ b, hasPlans, selfPrograms, onChange, goPlans }: { b: Busines
   );
 }
 
+function StampPicker({ businessId, image, onChange, onBusy }: {
+  businessId: string; image?: string; onChange: (image: string) => void; onBusy: (busy: boolean) => void;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
+  return <div className="space-y-2">
+    <label className="block text-sm font-medium">{tx("Upload your stamp image")}
+      <input type="file" accept="image/png,image/webp,.png,.webp" disabled={uploading} className={input} onChange={async event => {
+        const file = event.target.files?.[0];
+        event.target.value = '';
+        if (!file) return;
+        setUploading(true); onBusy(true); setError('');
+        try { const result = await ownerApi.uploadStamp(businessId, file); onChange(result.id); }
+        catch (e) { setError(msg(e)); }
+        finally { setUploading(false); onBusy(false); }
+      }} />
+    </label>
+    <p className="text-xs">{tx("Choose a PNG or WebP with a transparent background.")}</p>
+    {uploading && <p role="status">{tx("Uploading stamp…")}</p>}
+    {error && <p role="alert">{error}</p>}
+    {image && <div className="flex items-center gap-2"><img alt={tx("Stamp preview")} src={stampImageUrl(businessId, image)} className="h-14 w-24 object-contain" />
+      <button type="button" disabled={uploading} className={btnGhost} onClick={() => onChange('')}>{tx("Remove stamp")}</button></div>}
+  </div>;
+}
+
+function MemberReport({ b, memberId, program, onChange }: { b: Business; memberId: string; program?: ProgramInfo; onChange: () => void }) {
+  const { w } = useWords(b);
+  const [detail, setDetail] = useState<CardInfo>();
+  const [error, setError] = useState('');
+  const [stamp, setStamp] = useState(program?.stampImage ?? '');
+  const [uploadingStamp, setUploadingStamp] = useState(false);
+  const [savedStamp, setSavedStamp] = useState(program?.stampImage ?? '');
+  useEffect(() => {
+    let active = true;
+    ownerApi.memberCard(b.id, memberId).then(value => { if (active) setDetail(value); })
+      .catch(e => { if (active) setError(msg(e)); });
+    return () => { active = false; };
+  }, [b.id, memberId, program]);
+  if (!detail) return <p role="status">{error || tx("Loading")}</p>;
+  const { member, history = [] } = detail;
+  const counts = new Map<string, number>();
+  for (const entry of history) counts.set(entry.item, (counts.get(entry.item) ?? 0) + 1);
+  const totals = [...counts].map(([item, n]) => `${item}: ${n}`).join(' · ');
+  const link = new URL('/b/' + encodeURIComponent(b.slug), window.location.origin);
+  link.searchParams.set('memberCard', memberId);
+  const message = [b.name + ' · ' + detail.program.title, member.name, member.startDate + ' – ' + member.endDate,
+    tx('Checked in') + ': ' + history.length, totals, tx('Open your card and report with your passcode'), link.href].filter(Boolean).join('\n');
+  return <section className="mt-4 space-y-3 border-t pt-4">
+    <PaperCard b={{ ...b, contact: { phone: b.phone, whatsapp: b.whatsapp } }} card={detail} w={w} />
+    <h3 className="font-semibold">{tx("Individual report")}</h3>
+    <p>{tx("Checked in")}: {history.length} · {member.paid ? tx("Paid") : tx("Waiting for payment")}</p>
+    {totals && <p>{totals}</p>}
+    <details><summary>{tx("Check-in history")}</summary>
+      <ul className="max-h-56 overflow-auto text-sm">{history.slice().reverse().map(u => <li key={u.at + u.item}>{u.date} · {hhmm(u.at)} · {u.item}</li>)}</ul>
+    </details>
+    {program && <form className="flex flex-wrap items-end gap-2" onSubmit={async event => {
+      event.preventDefault();
+      try { await ownerApi.saveProgram(b.id, { id: program.id, stampImage: stamp }); setSavedStamp(stamp); setError(''); onChange(); }
+      catch (e) { setError(msg(e)); }
+    }}><StampPicker businessId={b.id} image={stamp} onChange={setStamp} onBusy={setUploadingStamp} />
+      <button disabled={uploadingStamp || savedStamp === stamp} className={btnGhost}>{tx("Save stamp")}</button></form>}
+    {error && <p role="alert">{error}</p>}
+    <a href={waLink(member.phone, message)} target="_blank" rel="noopener noreferrer" className={btnPrimary}><MessageCircle size={15}/>{tx("Share report and card on WhatsApp")}</a>
+  </section>;
+}
+
 /* ---------- Members ---------- */
 function MembersTab({ b, programs, summary, onChange }: { b: Business; programs: ProgramInfo[]; summary: ProgramSummary; onChange: () => void }) {
   const { w, t } = useWords(b);
+  const [openMember, setOpenMember] = useState('');
   const [list, setList] = useState<MemberInfo[] | null>(null); const [q, setQ] = useState(''); const [state, setState] = useState(''); const [program, setProgram] = useState(''); const [err, setErr] = useState(''); const [busy, setBusy] = useState('');
   const load = useCallback(async () => { try { setList(await ownerApi.members(b.id, { q, state, program })); setErr(''); } catch (e) { setErr(msg(e)); } }, [b.id, q, state, program]);
   useEffect(() => { const t = window.setTimeout(() => void load(), q ? 250 : 0); return () => window.clearTimeout(t); }, [load, q]);
@@ -185,6 +260,7 @@ function MembersTab({ b, programs, summary, onChange }: { b: Business; programs:
                 <p className="text-xs text-[var(--app-muted)]">{m.programTitle} · +{m.phone} · <span className="font-mono">{m.code}</span>{m.idNumber ? ` · ${m.idNumber}` : ''}</p>
                 <p className="mt-1 text-xs text-[var(--app-muted)]">{shortDate(m.startDate)} → {shortDate(m.endDate)}{m.state === 'active' ? ` · ${m.usesLeft} ${t("{uses} left")}` : ''}{m.claimed ? ` · ${tx('says paid')}${m.claimed.ref ? ` (${m.claimed.ref})` : ''}` : ''}</p></div>
               <div className="flex flex-wrap gap-1.5">
+                <button type="button" aria-expanded={openMember === m.id} className={btnGhost} onClick={() => setOpenMember(openMember === m.id ? '' : m.id)}>{tx("Card and report")}</button>
                 {!m.paid && m.state !== 'cancelled' && <><button type="button" disabled={busy === m.id} className={`${btnPrimary} !min-h-9 !px-3 text-xs`} onClick={() => void act(m.id, () => ownerApi.confirmMember(b.id, m.id, 'momo'))}><Check size={14} />{tx("Confirm payment")} (MoMo)</button>
                   <button type="button" disabled={busy === m.id} className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => void act(m.id, () => ownerApi.confirmMember(b.id, m.id, 'cash'))}>{tx("Paid in cash")}</button></>}
                 {m.paid && m.state !== 'cancelled' && (m.state === 'paused' ? <button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => void act(m.id, () => ownerApi.setMember(b.id, m.id, { action: 'resume' }))}><Play size={13} />{tx("Resume")}</button>
@@ -195,6 +271,7 @@ function MembersTab({ b, programs, summary, onChange }: { b: Business; programs:
                 {m.state !== 'cancelled' && <button type="button" className="px-2 text-xs text-rose-600 underline" onClick={() => { if (confirm(`${t("Cancel the {program} of")} ${m.name}?`)) void act(m.id, () => ownerApi.setMember(b.id, m.id, { action: 'cancel' })); }}>{tx("Cancel")}</button>}
               </div>
             </div>
+            {openMember === m.id && <MemberReport key={m.id} b={b} memberId={m.id} program={programs.find(p => p.id === m.programId)} onChange={onChange} />}
           </li>))}</ul>
       )}
     </div>
@@ -209,6 +286,7 @@ function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInf
     timeZone: 'Africa/Kigali', year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(new Date()));
   const restaurant = b.category === 'restaurant';
+  const [uploadingStamp, setUploadingStamp] = useState(false);
   const [itemText, setItemText] = useState<string>();
   const [sample, setSample] = useState('');
   const [initialLayout, setInitialLayout] = useState<CardLayout | undefined>();
@@ -226,10 +304,15 @@ function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInf
     setBusy(true); setErr(''); try { setEnded(await ownerApi.endProgram(b.id, p.id)); onChange(); } catch (e) { setErr(msg(e)); } finally { setBusy(false); }
   };
   const emptyLayout: CardLayout = { hiddenItems: [], hiddenDates: [] };
-  const shuffle = restaurant && !!edit?.shuffleCardColor;
+  const weekly = restaurant && !!edit?.mealColors;
+  const shuffle = restaurant && !weekly && !!edit?.shuffleCardColor;
+  const scheduledItems = (edit?.items ?? []).filter(item => /^(breakfast|lunch|dinner|supper)$/i.test(item));
+  const previewDay = ALL_DAYS[(new Date(previewDate + 'T12:00:00Z').getUTCDay() + 6) % 7];
+  const sampleColor = weekly && sample && scheduledItems.includes(sample) && edit?.openDays?.includes(previewDay)
+    ? mealColor(edit.mealColors!, previewDay, sample) : undefined;
   const layout = edit?.cardLayout ?? emptyLayout;
   const save = async () => {
-    if (!edit) return;
+    if (!edit || uploadingStamp) return;
     const previous = initialLayout ?? emptyLayout;
     const visibleProgramItems = edit.items ?? [];
     const removed = (before: string[], after: string[]) => before.filter((item) => !after.includes(item));
@@ -273,7 +356,7 @@ function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInf
                 <p className="text-sm text-[var(--app-muted)]">{rwf(p.priceRwf)} · {p.days} {tx('days')}{p.totalUses ? ` · ${p.totalUses} ${w.uses}` : ''} · {p.items.join(', ')} · {p.openDays.map((d) => tx(DAY_LABEL[d])).join(' ')}</p>
                 <p className="mt-1 text-xs text-[var(--app-muted)]">{p.counts?.active ?? 0} {tx('active')} · {p.counts?.pending ?? 0} {tx('waiting for payment')}</p>
                 {p.joinCode ? <p className="mt-1 text-sm">{tx('Join code')}: <b className="font-mono tracking-[0.3em]">{p.joinCode}</b> <span className="text-xs text-[var(--app-muted)]">{t('Give this code to the {members} you accept. It is not on the public page.')}</span></p> : <p className="mt-1 text-xs text-[var(--app-muted)]">{tx('Anyone with the link can join. Set a join code to accept only the people you choose.')}</p>}</div>
-              <div className="flex gap-1.5"><button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => openEditor(p)}><Pencil size={13} />{tx("Program settings")}</button>
+              <div className="flex gap-1.5"><button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} disabled={uploadingStamp} onClick={() => openEditor(p)}><Pencil size={13} />{tx("Program settings")}</button>
                 <button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={async () => { try { await ownerApi.saveProgram(b.id, { ...p, active: !p.active }); onChange(); } catch (e) { setErr(msg(e)); } }}>{p.active ? tx('Close signups') : tx('Open signups')}</button>
                 {!p.endedAt && <button type="button" disabled={busy} className={`${btnGhost} !min-h-9 !px-3 text-xs text-rose-700`} onClick={() => void endIt(p)}>{t("End {program}")}</button>}
                 <button type="button" className="px-2 text-rose-600" aria-label={t("Delete {program}")} onClick={async () => { if (!confirm(`${tx('Delete')} "${p.title}"?`)) return; try { await ownerApi.deleteProgram(b.id, p.id); onChange(); } catch (e) { setErr(msg(e)); } }}><Trash2 size={15} /></button></div>
@@ -327,25 +410,35 @@ function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInf
             {layout.hiddenDates.length > 0 && <ul className="flex flex-wrap gap-2" aria-label={tx("Hidden dates")}>{layout.hiddenDates.map((date) => (
               <li key={date}><button type="button" className={`${btnGhost} !min-h-9 text-xs`} onClick={() => set({ cardLayout: { ...layout, hiddenDates: layout.hiddenDates.filter((day) => day !== date) } })}>{tx("Restore")} {date}</button></li>
             ))}</ul>}
-            {restaurant && <label className="flex items-center gap-2 text-sm font-medium">
+            <StampPicker businessId={b.id} image={edit.stampImage} onChange={stampImage => set({ stampImage })} onBusy={setUploadingStamp} />
+            {restaurant && <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={weekly} onChange={e => set({ mealColors: e.target.checked ? {} : null })} />{tx("Use weekly meal colors")}</label>}
+            {weekly && <div className="overflow-x-auto">
+              <p className="text-sm">{tx("Choose the whole-card color for each confirmed meal. Serving times use Kigali time.")}</p>
+              {!scheduledItems.length && <p>{tx("Add Breakfast, Lunch or Dinner to the daily items.")}</p>}
+              <table className="text-center text-sm"><thead><tr><th>{tx("Day")}</th>{scheduledItems.map(item => <th key={item}>{item}</th>)}</tr></thead>
+              <tbody>{ALL_DAYS.filter(day => edit.openDays?.includes(day)).map(day => <tr key={day}><th>{tx(DAY_LABEL[day])}</th>
+                {scheduledItems.map(item => <td key={item}><input type="color" aria-label={DAY_LABEL[day] + ' ' + item} value={mealColor(edit.mealColors!, day, item)} onChange={e => set({ mealColors: { ...edit.mealColors, [mealColorKey(day, item)]: e.target.value } })} /></td>)}
+              </tr>)}</tbody></table>
+            </div>}
+            {restaurant && !weekly && <label className="flex items-center gap-2 text-sm font-medium">
               <input type="checkbox" checked={shuffle} onChange={(event) => set({ shuffleCardColor: event.target.checked })} />
               {tx("Shuffle card color daily")}
             </label>}
-            <div className="flex flex-wrap gap-4">
+            {!weekly && <div className="flex flex-wrap gap-4">
               <label>{shuffle ? tx("Daily color tint") : tx("Card background")} <input type="color" value={edit.cardColor ?? '#ffffff'} onChange={(e) => set({ cardColor: e.target.value })} /></label>
               {!shuffle && <label>{tx("After check-in")} <input type="color" value={edit.arrivalColor ?? '#86efac'} onChange={(e) => set({ arrivalColor: e.target.value })} /></label>}
-            </div>
-            {shuffle && <label className="block text-sm">{tx("Preview date (Kigali)")}
+            </div>}
+            {(weekly || shuffle) && <label className="block text-sm">{tx("Preview date (Kigali)")}
               <input type="date" className={input} value={previewDate} onChange={(event) => { if (event.target.value) setPreviewDate(event.target.value); }} />
             </label>}
             <label className="block text-sm">{tx("Preview card")} <select value={sample} onChange={(e) => setSample(e.target.value)} className={input}>
               <option value="">{tx("Before check-in")}</option>
               {edit.items?.map((item) => <option key={item} value={item}>{tx("After check-in")} · {item}</option>)}
             </select></label>
-            <div className="rounded-xl p-4 text-[#14213D]" style={{ background: shuffle ? dailyMealPaper(previewDate, edit.cardColor) : cardPaper(sample ? edit.arrivalColor ?? '#86efac' : edit.cardColor ?? '#ffffff') }}>
+            <div className="rounded-xl p-4 text-[#14213D]" style={{ color: sampleColor ? mealInk(sampleColor) : undefined, background: weekly ? sampleColor ?? '#ffffff' : shuffle ? dailyMealPaper(previewDate, edit.cardColor) : cardPaper(sample ? edit.arrivalColor ?? '#86efac' : edit.cardColor ?? '#ffffff') }}>
               <strong>{edit.title || b.name}</strong>
               <table className="mt-2 w-full text-center text-sm"><thead><tr><th>{tx("Date")}</th>{edit.items?.filter(item => !layout.hiddenItems.includes(item)).map(item => <th key={item}>{item}</th>)}</tr></thead>
-                <tbody><tr><th>{shuffle ? previewDate : tx("Today")}</th>{edit.items?.filter(item => !layout.hiddenItems.includes(item)).map(item => <td className="border p-1" key={item}>{sample === item ? '✓' : ' '}</td>)}</tr></tbody></table>
+                <tbody><tr><th>{weekly || shuffle ? previewDate : tx("Today")}</th>{edit.items?.filter(item => !layout.hiddenItems.includes(item)).map(item => <td className="relative h-9 border p-1" key={item}>{sample === item && edit.stampImage && <img alt={tx("Business stamp")} src={stampImageUrl(b.id, edit.stampImage)} className="pointer-events-none absolute inset-0 h-full w-full object-contain" />}<span className="relative">{sample === item ? '✓' : ' '}</span></td>)}</tr></tbody></table>
             </div>
           </fieldset>
           <fieldset><legend className="text-sm font-medium">{tx("Days it is available")}</legend><div className="mt-1.5 flex flex-wrap gap-1.5">{ALL_DAYS.map((d) => { const on = (edit.openDays ?? []).includes(d); return <button key={d} type="button" aria-pressed={on} onClick={() => set({ openDays: on ? (edit.openDays ?? []).filter((x) => x !== d) : [...(edit.openDays ?? []), d] })} className={`min-h-10 rounded-xl px-3 text-sm font-semibold ${on ? 'bg-[var(--brand)] text-[var(--brand-on)]' : 'border border-[var(--app-line)] text-[var(--app-muted)]'}`}>{tx(DAY_LABEL[d])}</button>; })}</div></fieldset>
@@ -368,7 +461,7 @@ function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInf
             {edit.checkIn === 'self' && !edit.linkCheckIn && <p className="mt-1 text-xs font-normal text-[var(--app-muted)]">{t("Same rules as a staff scan: paid, open day, serving times, one of each each day. Show the check-in code on the Today screen. A customer can take back a wrong tick for one minute, and you see on the Today list who ticked it themselves.")}</p>}</div>
           <label className="block text-sm font-medium">{tx("Note for customers (optional)")}<textarea className={`${input} mt-1`} rows={2} maxLength={300} value={edit.terms ?? ''} onChange={(e) => set({ terms: e.target.value })} placeholder={tx("One use a day. Show your pass each time.")} /></label>
           {err && <p role="alert" className="text-sm text-rose-600"><AlertTriangle size={14} className="mr-1 inline" />{err}</p>}
-          <div className="flex gap-2"><button type="submit" disabled={busy} className={btnPrimary}>{busy ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}{t("Save {program}")}</button>{programs.length > 0 && <button type="button" className={btnGhost} onClick={() => { setEdit(null); setErr(''); }}>{tx("Cancel")}</button>}</div>
+          <div className="flex gap-2"><button type="submit" disabled={busy || uploadingStamp} className={btnPrimary}>{busy ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}{t("Save {program}")}</button>{programs.length > 0 && <button type="button" className={btnGhost} disabled={uploadingStamp} onClick={() => { setEdit(null); setErr(''); }}>{tx("Cancel")}</button>}</div>
         </form>
       )}
     </div>

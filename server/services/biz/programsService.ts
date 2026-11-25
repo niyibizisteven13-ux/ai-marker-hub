@@ -1,4 +1,4 @@
-import { restaurantCard } from './mealCard.js';
+import { restaurantCard, mealColor } from './mealCard.js';
 import { createHmac, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import { clean, cleanPhone } from './model.js';
 import { open as openSecret, seal } from './secrets.js';
@@ -56,6 +56,12 @@ export function createPrograms(h: Helpers) {
   const k = { programs: (b: string) => `biz-programs:${b}`, members: (b: string) => `biz-members:${b}`, pass: (hash: string) => `biz-pass:${hash}`, uses: (b: string, m: string) => `biz-uses:${b}:${m}`, served: (b: string, d: string) => `biz-served:${b}:${d}`, days: (b: string) => `biz-served-days:${b}`, people: (b: string) => `biz-people:${b}`, sess: (hash: string) => `biz-sess:${hash}`, sessions: (b: string) => `biz-sessions:${b}` };
   const programsOf = async (bizId: string) => (await kv.get<{ items: Program[] }>(k.programs(bizId)))?.items ?? [];
   const servingHours = (b: Business, p: Program) => b.category === 'restaurant' ? withRestaurantMealHours(p) : p;
+  function currentMealColor(b: Business, p: Program, time: number) {
+    if (b.category !== 'restaurant' || !p.mealColors || p.endedAt) return null;
+    const day = dayOfWeek(kigaliDate(time));
+    const item = restaurantMealAt(servingHours(b, p), time);
+    return item && p.openDays.includes(day) ? { item, color: mealColor(p.mealColors, day, item) } : null;
+  }
   const membersOf = async (bizId: string) => (await kv.get<{ items: Member[] }>(k.members(bizId)))?.items ?? [];
   const putMembers = (bizId: string, items: Member[]) => kv.put(k.members(bizId), { items });
   const servedOn = async (bizId: string, date: string) => (await kv.get<{ items: Use[] }>(k.served(bizId, date)))?.items ?? [];
@@ -88,8 +94,8 @@ export function createPrograms(h: Helpers) {
     return { phone: s.phone };
   }
   /** Writes one tick: today's list, the member's own list, the day index and the running count. Call inside the member lock, after canServe agreed. */
-  async function record(bizId: string, m: Member, date: string, t: number, item: string, served: Use[], by: Use['by']): Promise<Use> {
-    const use: Use = { id: randomUUID(), memberId: m.id, date, item, at: new Date(t).toISOString(), by };
+  async function record(bizId: string, m: Member, date: string, t: number, item: string, served: Use[], by: Use['by'], stampImage?: string): Promise<Use> {
+    const use: Use = { id: randomUUID(), memberId: m.id, date, item, at: new Date(t).toISOString(), by, ...(stampImage ? { stampImage } : {}) };
     await kv.put(k.served(bizId, date), { items: [...served, use] });
     const idx = (await kv.get<{ dates: string[] }>(k.days(bizId)))?.dates ?? []; if (!idx.includes(date)) await kv.put(k.days(bizId), { dates: [...idx, date].slice(-400) });
     const own = (await kv.get<{ items: Use[] }>(k.uses(bizId, m.id)))?.items ?? []; await kv.put(k.uses(bizId, m.id), { items: [...own, use].slice(-1500) });
@@ -119,6 +125,29 @@ export function createPrograms(h: Helpers) {
       id: m.id, programId: m.programId, programTitle: p?.title ?? '(removed plan)', name: m.name, phone: m.phone, ...(m.idNumber ? { idNumber: m.idNumber } : {}), code: m.code, state: planState(m, today),
       startDate: m.startDate, endDate: m.endDate, paid: m.paid, paidRwf: m.paidRwf, ...(m.payMethod ? { payMethod: m.payMethod } : {}), ...(m.claimed ? { claimed: m.claimed } : {}), ...(m.note ? { note: m.note } : {}),
       servingDaysLeft: Math.max(0, r.servingDays - (p && used.length >= p.items.length ? 1 : 0)), usesLeft: p ? usesLeft(m, p, r.uses, used.length) : 0, ...(p?.totalUses ? { totalUses: p.totalUses, usedTotal: m.used ?? 0 } : {}), usedToday: used.map((e) => e.item), createdAt: m.createdAt,
+    };
+  }
+
+  async function describeCard(b: Business, m: Member, p: Program, prompt: boolean, owner: boolean) {
+    const t = h.now(); const date = kigaliDate(t); const own = ((await kv.get<{ items: Use[] }>(k.uses(b.id, m.id)))?.items ?? []).filter((x) => !x.undone);
+    const r = remaining(m, p, date); const st = planState(m, date); const ateToday = own.filter((x) => x.date === date).length;
+    let qr: string | null = null; if (!owner && m.paid && (st === 'active' || st === 'not_started') && m.passSealed) { try { qr = `BWPASS:${openSecret(m.passSealed, h.secretKey())}`; } catch { qr = null; } }
+    const current = currentMealColor(b, p, t);
+    return {
+      cardId: m.id, programId: p.id, renewable: p.active && !p.endedAt && st === 'expired',
+      business: { id: b.id, name: b.name, slug: b.slug, theme: b.theme },
+      program: { title: p.title, shuffleCardColor: p.shuffleCardColor, cardColor: p.cardColor, arrivalColor: p.arrivalColor, ...(p.cardLayout ? { cardLayout: p.cardLayout } : {}), checkIn: p.checkIn === 'self' ? 'self' : 'staff', ...(p.totalUses ? { totalUses: p.totalUses } : {}), items: p.items, openDays: p.openDays, ...(p.windows ? { windows: p.windows } : {}), ...(p.terms ? { terms: p.terms } : {}), priceRwf: p.priceRwf, days: p.days },
+      member: { name: m.name, phone: m.phone, ...(m.idNumber ? { idNumber: m.idNumber } : {}), code: m.code, state: st, startDate: m.startDate, endDate: m.endDate, daysLeft: r.calendarDays, servingDaysLeft: Math.max(0, r.servingDays - (ateToday >= p.items.length ? 1 : 0)), usesLeft: usesLeft(m, p, r.uses, ateToday), usedTotal: m.used ?? 0, paid: m.paid, paidAt: m.confirmedAt ?? null },
+      qr,
+      tick: p.checkIn === 'self' ? { needsCode: !(b.category === 'restaurant' && p.linkCheckIn), requiresPasscode: b.category === 'restaurant', ...tickOptions(m, p, own, t) } : null,
+      today: { date, weekly: b.category === 'restaurant' && !!p.mealColors,
+        checkedMeal: st === 'active' && current && own.some(u => u.date === date && u.item === current.item) ? current : null, openToday: p.openDays.includes(dayOfWeek(date)), used: own.filter((x) => x.date === date).map((x) => ({ item: x.item, at: x.at })) },
+      calendar: cardCalendar(m, p, own.map((x) => ({ date: x.date, item: x.item })).slice(-1500)),
+      history: own.map(({ date, item, at, stampImage }) => ({ date, item, at, stampImage })),
+      payment: owner || m.paid ? null : {
+        amount: p.priceRwf, momoCode: b.showPay ? b.momoCode ?? null : null, momoName: b.showPay ? b.momoName ?? null : null, online: await h.payReady(b), promptSent: prompt, claimed: m.claimed ?? null,
+        whatsapp: b.whatsapp ?? null,
+      },
     };
   }
 
@@ -245,7 +274,7 @@ export function createPrograms(h: Helpers) {
         const item = input.item ? String(input.item) : b.category === 'restaurant' && !force ? restaurantMealAt(program, t) : undefined;
         const r = canServe({ member: m, program, used, now: t, item, force });
         if (!r.ok) return { ...r, member: view(m, p, date, used) };
-        const use = await record(b.id, m, date, t, r.item, served, tokenFromPayload(input.token) || typeof input.token === 'string' ? 'scan' : 'code');
+        const use = await record(b.id, m, date, t, r.item, served, tokenFromPayload(input.token) || typeof input.token === 'string' ? 'scan' : 'code', p.stampImage);
         return { ok: true as const, item: r.item, useId: use.id, member: view(m, p, date, [...used, use]) };
       });
     },
@@ -273,7 +302,9 @@ export function createPrograms(h: Helpers) {
       const expected = members.filter((m) => planState(m, date) === 'active' && open(progs.find((p) => p.id === m.programId)));
       const notYet = expected.filter((m) => { const p = progs.find((x) => x.id === m.programId)!; return served.filter((s) => s.memberId === m.id).length < p.items.length; });
       return {
-        date, open: progs.some((p) => open(p)),
+        date, mealColors: progs.filter(p => b.category === 'restaurant' && p.mealColors && !p.endedAt)
+          .map(p => ({ programId: p.id, title: p.title, current: currentMealColor(b, p, t) })),
+        open: progs.some((p) => open(p)),
         servedCount: served.length, expected: expected.length,
         served: served.slice().reverse().slice(0, 200).map((s) => ({ useId: s.id, memberId: s.memberId, name: byId.get(s.memberId)?.name ?? '', code: byId.get(s.memberId)?.code ?? '', item: s.item, at: s.at, by: s.by, canUndo: t - Date.parse(s.at) <= 20 * 60_000 })),
         notYet: notYet.slice(0, 300).map((m) => ({ memberId: m.id, name: m.name, phone: m.phone, code: m.code })),
@@ -408,6 +439,15 @@ export function createPrograms(h: Helpers) {
       return { name: mine[0]?.name ?? '', phone: me.phone, username: who?.username ?? '', cards: mine.map((m) => { const v = view(m, progs.find((p) => p.id === m.programId), today, usedOf(served, m.id)); return { id: v.id, programId: m.programId, programTitle: v.programTitle, state: v.state, startDate: v.startDate, endDate: v.endDate, usesLeft: v.usesLeft, paid: v.paid }; }) };
     },
     /** One card, in full: who it is for, the dates and what was used each day (the grid), the QR code, and how to pay while it is unpaid. */
+    async memberCard(ownerId: string, id: string, memberId: string) {
+      const b = await h.mine(ownerId, id);
+      return withLock(`mem|${b.id}`, async () => {
+        const m = (await membersOf(b.id)).find(member => member.id === memberId);
+        const p = m && (await programsOf(b.id)).find(program => program.id === m.programId);
+        if (!m || !p) throw new ProgramError('Card not found.', 404, 'NOT_FOUND');
+        return describeCard(b, m, servingHours(b, p), false, true);
+      });
+    },
     async card(slug: string, session: string, cardId?: string) {
       const b = await h.publicLive(slug); if (!b) throw new ProgramError('This page is not available.', 404, 'NOT_FOUND'); const me = await sessionOf(b.id, session);
       return withLock(`mem|${b.id}`, async () => {
@@ -422,24 +462,7 @@ export function createPrograms(h: Helpers) {
           if (e?.pay?.state === 'success') { await activate(b, p, m, 'momo_prompt', e.id); await putMembers(b.id, list); h.alert(b, { title: `Plan paid · ${b.name}`, text: `${m.name} paid ${p.priceRwf.toLocaleString('en-US')} RWF for "${p.title}".` }); }
           else if (e?.pay?.state === 'failed') { delete m.payRef; await putMembers(b.id, list); } else prompt = true;
         }
-        const t = h.now(); const date = kigaliDate(t); const own = ((await kv.get<{ items: Use[] }>(k.uses(b.id, m.id)))?.items ?? []).filter((x) => !x.undone);
-        const r = remaining(m, p, date); const st = planState(m, date); const ateToday = own.filter((x) => x.date === date).length;
-        let qr: string | null = null; if (m.paid && (st === 'active' || st === 'not_started') && m.passSealed) { try { qr = `BWPASS:${openSecret(m.passSealed, h.secretKey())}`; } catch { qr = null; } }
-        return {
-          cardId: m.id,
-          business: { name: b.name, slug: b.slug, theme: b.theme },
-          program: { title: p.title, shuffleCardColor: p.shuffleCardColor, cardColor: p.cardColor, arrivalColor: p.arrivalColor, ...(p.cardLayout ? { cardLayout: p.cardLayout } : {}), checkIn: p.checkIn === 'self' ? 'self' : 'staff', ...(p.totalUses ? { totalUses: p.totalUses } : {}), items: p.items, openDays: p.openDays, ...(p.windows ? { windows: p.windows } : {}), ...(p.terms ? { terms: p.terms } : {}), priceRwf: p.priceRwf, days: p.days },
-          member: { name: m.name, phone: m.phone, ...(m.idNumber ? { idNumber: m.idNumber } : {}), code: m.code, state: st, startDate: m.startDate, endDate: m.endDate, daysLeft: r.calendarDays, servingDaysLeft: Math.max(0, r.servingDays - (ateToday >= p.items.length ? 1 : 0)), usesLeft: usesLeft(m, p, r.uses, ateToday), usedTotal: m.used ?? 0, paid: m.paid, paidAt: m.confirmedAt ?? null },
-          qr,
-          tick: p.checkIn === 'self' ? { needsCode: !(b.category === 'restaurant' && p.linkCheckIn), requiresPasscode: b.category === 'restaurant', ...tickOptions(m, p, own, t) } : null,
-          today: { date, openToday: p.openDays.includes(dayOfWeek(date)), used: own.filter((x) => x.date === date).map((x) => ({ item: x.item, at: x.at })) },
-          calendar: cardCalendar(m, p, own.map((x) => ({ date: x.date, item: x.item })).slice(-1500)),
-          history: [],
-          payment: m.paid ? null : {
-            amount: p.priceRwf, momoCode: b.showPay ? b.momoCode ?? null : null, momoName: b.showPay ? b.momoName ?? null : null, online: await h.payReady(b), promptSent: prompt, claimed: m.claimed ?? null,
-            whatsapp: b.whatsapp ?? null,
-          },
-        };
+        return describeCard(b, m, p, prompt, false);
       });
     },
     /** The customer scans the business's rotating code (only when the owner chose self check-in): restaurant check-ins also confirm the customer's passcode. */
@@ -471,7 +494,7 @@ export function createPrograms(h: Helpers) {
         const item = restaurant ? restaurantMealAt(program, t) : clean(input.item, 24) || undefined;
         const r = canServe({ member: m, program, used, now: t, item });
         if (r.ok !== true) { const d = r as Exclude<typeof r, { ok: true }>; throw new ProgramError(d.message, 409, d.code === 'already' ? 'ALREADY' : 'DENIED'); }
-        const use = await record(b.id, m, date, t, r.item, served, 'self');
+        const use = await record(b.id, m, date, t, r.item, served, 'self', p.stampImage);
         return { ok: true as const, item: r.item, useId: use.id, cardId: m.id };
       });
     },

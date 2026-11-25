@@ -1,7 +1,7 @@
-import { cardPaper, dailyMealPaper } from '../../../server/services/biz/mealCard';
+import { mealInk, cardPaper, dailyMealPaper } from '../../../server/services/biz/mealCard';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Camera, Check, CheckCircle2, Clock, Loader2, LogOut, MessageCircle, Ticket, UtensilsCrossed, X, KeyRound } from 'lucide-react';
-import { BizApiError, publicApi } from '../../biz/api';
+import { BizApiError, publicApi, stampImageUrl } from '../../biz/api';
 import { useScanner } from './useScanner';
 import { THEMES, CATEGORIES, rwf, type PublicBusiness } from '../../biz/types';
 import type { CardInfo, MeInfo } from '../../biz/types';
@@ -74,12 +74,12 @@ export function PlansSection({ b, lang, preview, onJoin, onOpen }: { b: PublicBu
 const useWordsUses = (b: PublicBusiness, lang: Lang) => wordsOf(b.programText, lang === 'rw' ? RW_WORDS : undefined).uses;
 
 /* ---- first visit: details, then the customer's own passcode ---- */
-export function JoinFlow({ b, lang, program, onClose, onDone }: { b: PublicBusiness; lang: Lang; program: Program; onClose: () => void; onDone: () => void }) {
+export function JoinFlow({ b, lang, program, onClose, onDone, renewing = false }: { renewing?: boolean; b: PublicBusiness; lang: Lang; program: Program; onClose: () => void; onDone: () => void }) {
   const { tx, t, w } = useWords(b, lang); const theme = THEMES[b.theme] ?? THEMES.gold;
-  const [entry, setEntry] = useState<'choice' | 'signin' | 'join'>('choice');
+  const [entry, setEntry] = useState<'choice' | 'signin' | 'join'>(renewing && !program.full ? 'join' : 'choice');
   const [step, setStep] = useState<1 | 2>(1); const [names, setNames] = useState<string[]>([]); const [f, setF] = useState({ username: '', name: '', phone: '', idNumber: '', joinCode: '', startDate: '', website: '', pin: '', pin2: '', remember: true }); const [busy, setBusy] = useState(false); const [err, setErr] = useState('');
   const days = Array.from({ length: 8 }, (_, i) => new Date(Date.now() + 2 * 3600_000 + i * 86_400_000).toISOString().slice(0, 10));
-  const next = (e: React.FormEvent) => { e.preventDefault(); setErr(''); if (f.name.trim().length < 2) return setErr(tx('Please write your name.')); if (f.phone.replace(/\D/g, '').length < 9) return setErr(tx('Please write a phone number we can reach.')); if (program.needsCode && !/^\d{4}$/.test(f.joinCode.replace(/\D/g, ''))) return setErr(tx('Write the 4-digit join code the business gave you.')); setStep(2); void publicApi.usernames(b.slug, f.name).then((s) => { setNames(s); setF((p) => (p.username ? p : { ...p, username: s[0] ?? '' })); }).catch(() => undefined); };
+  const next = (e: React.FormEvent) => { e.preventDefault(); setErr(''); if (f.name.trim().length < 2) return setErr(tx('Please write your name.')); if (f.phone.replace(/\D/g, '').length < 9) return setErr(tx('Please write a phone number we can reach.')); if (program.needsCode && !/^\d{4}$/.test(f.joinCode.replace(/\D/g, ''))) return setErr(tx('Write the 4-digit join code the business gave you.')); setStep(2); if (renewing) return; void publicApi.usernames(b.slug, f.name).then((s) => { setNames(s); setF((p) => (p.username ? p : { ...p, username: s[0] ?? '' })); }).catch(() => undefined); };
   const submit = async (e: React.FormEvent) => {
     e.preventDefault(); setErr('');
     if (f.username && !/^[a-z0-9]{3,12}$/.test(f.username)) return setErr(tx('A user name is 3 to 12 letters or numbers, with no spaces.'));
@@ -113,13 +113,13 @@ export function JoinFlow({ b, lang, program, onClose, onDone }: { b: PublicBusin
         </form>
       ) : (
         <form onSubmit={submit} className="space-y-3">
-          <div className="block text-sm font-medium">{tx("Your user name")}
+          {!renewing && <div className="block text-sm font-medium">{tx("Your user name")}
             <input className={`${field} font-semibold`} value={f.username} onChange={(e) => setF({ ...f, username: e.target.value.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 12) })} maxLength={12} autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="username" aria-label={tx("Your user name")} />
             {names.length > 0 && <div className="mt-1.5 flex flex-wrap gap-1.5" role="group" aria-label={tx("Suggestions")}>{names.map((n) => <button key={n} type="button" aria-pressed={f.username === n} onClick={() => setF({ ...f, username: n })} className={`min-h-9 rounded-full border px-3 text-sm font-semibold ${f.username === n ? 'border-[#0E1722] bg-[#0E1722] text-white' : 'border-[#D9DEE5] bg-white'}`}>{n}</button>)}</div>}
-            <span className="mt-1 block text-xs font-normal text-[#5B6470]">{tx("Short, so it is easy to type. This phone will remember it.")}</span></div>
+            <span className="mt-1 block text-xs font-normal text-[#5B6470]">{tx("Short, so it is easy to type. This phone will remember it.")}</span></div>}
           <p className="rounded-xl bg-[#F2F4F7] p-3 text-sm text-[#3A4350]">{t("You will use this passcode every time you open your {pass}. Do not share it.")}</p>
-          <label className="block text-sm font-medium">{tx("Passcode")} <span className="font-normal text-[#5B6470]">({tx("4 to 6 digits")})</span><input className={`${field} font-mono text-xl tracking-[0.4em]`} type="password" value={f.pin} onChange={(e) => setF({ ...f, pin: e.target.value.replace(/\D/g, '').slice(0, 6) })} inputMode="numeric" autoComplete="new-password" required autoFocus /></label>
-          <label className="block text-sm font-medium">{tx("Confirm passcode")}<input className={`${field} font-mono text-xl tracking-[0.4em]`} type="password" value={f.pin2} onChange={(e) => setF({ ...f, pin2: e.target.value.replace(/\D/g, '').slice(0, 6) })} inputMode="numeric" autoComplete="new-password" required /></label>
+          <label className="block text-sm font-medium">{renewing ? tx("Your existing passcode") : tx("Passcode")} <span className="font-normal text-[#5B6470]">({tx("4 to 6 digits")})</span><input className={`${field} font-mono text-xl tracking-[0.4em]`} type="password" value={f.pin} onChange={(e) => setF({ ...f, pin: e.target.value.replace(/\D/g, '').slice(0, 6) })} inputMode="numeric" autoComplete="new-password" required autoFocus /></label>
+          <label className="block text-sm font-medium">{renewing ? tx("Confirm existing passcode") : tx("Confirm passcode")}<input className={`${field} font-mono text-xl tracking-[0.4em]`} type="password" value={f.pin2} onChange={(e) => setF({ ...f, pin2: e.target.value.replace(/\D/g, '').slice(0, 6) })} inputMode="numeric" autoComplete="new-password" required /></label>
           <label className="flex items-start gap-3 text-sm"><input type="checkbox" className="mt-0.5 h-5 w-5" checked={f.remember} onChange={(e) => setF({ ...f, remember: e.target.checked })} />{tx("Keep me signed in on this phone for 30 days")}</label>
           {err && <p role="alert" className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">{err}</p>}
           <div className="flex gap-2"><button type="button" onClick={() => { setStep(1); setErr(''); }} className="min-h-12 rounded-xl border border-[#D9DEE5] px-4 text-base font-semibold">{tx("Back")}</button>
@@ -154,7 +154,7 @@ export function SignIn({ b, lang, onClose, onDone }: { b: PublicBusiness; lang: 
 
 /* ---- the card, laid out like the paper one ---- */
 const BLOCK = 15;
-function PaperCard({ b, card, w }: { b: PublicBusiness; card: CardInfo; w: ReturnType<typeof wordsOf> }) {
+export function PaperCard({ b, card, w }: { b: Pick<PublicBusiness, 'category' | 'theme' | 'name' | 'contact'>; card: CardInfo; w: ReturnType<typeof wordsOf> }) {
   const tx = useTx(); const theme = THEMES[b.theme] ?? THEMES.gold; const cat = CATEGORIES.find((c) => c.id === b.category)?.label ?? '';
   const layout = card.program.cardLayout;
   const cal = card.calendar.filter((day) => !layout?.hiddenDates.includes(day.date));
@@ -164,8 +164,11 @@ function PaperCard({ b, card, w }: { b: PublicBusiness; card: CardInfo; w: Retur
   const rows = cal.slice(block * BLOCK, block * BLOCK + BLOCK);
   const items = card.program.items.filter((item) => !layout?.hiddenItems.includes(item));
   const shuffle = b.category === 'restaurant' && card.program.shuffleCardColor;
-  const ink = '#14213D'; const paper = shuffle ? dailyMealPaper(card.today.date, card.program.cardColor) : card.today.used.length ? cardPaper(card.program.arrivalColor ?? '#86efac') : card.program.cardColor ? cardPaper(card.program.cardColor) : `color-mix(in srgb, ${theme.accent} 16%, #FFFFFF)`; const line = `color-mix(in srgb, ${ink} 35%, ${paper})`;
+  const checkedColor = card.today.checkedMeal?.color;
+  const ink = checkedColor ? mealInk(checkedColor) : '#14213D';
+  const paper = card.today.weekly ? checkedColor ?? '#ffffff' : shuffle ? dailyMealPaper(card.today.date, card.program.cardColor) : card.today.used.length ? cardPaper(card.program.arrivalColor ?? '#86efac') : card.program.cardColor ? cardPaper(card.program.cardColor) : `color-mix(in srgb, ${theme.accent} 16%, #FFFFFF)`; const line = `color-mix(in srgb, ${ink} 35%, ${paper})`;
   const m = card.member; const local = (x: string) => (x.startsWith('250') ? `0${x.slice(3)}` : x); const phones = [b.contact.phone, b.contact.whatsapp].filter((x): x is string => !!x).map(local).filter((x, i, a) => a.indexOf(x) === i);
+  const stamps = new Map(card.history?.filter(u => u.stampImage).map(u => [u.date + '/' + u.item, u.stampImage]));
   const stamp = m.paid ? { text: tx('PAID'), color: '#2848C8' } : { text: tx('NOT PAID'), color: '#B91C1C' };
   const short = (s: string) => (s.length > 10 ? `${s.slice(0, 9)}…` : s);
   return (
@@ -189,11 +192,13 @@ function PaperCard({ b, card, w }: { b: PublicBusiness; card: CardInfo; w: Retur
           <tbody>
             {rows.length === 0 && <tr><td colSpan={items.length + 1} className="p-3">{tx('No dates shown')}</td></tr>}
             {rows.map((d) => { const isToday = d.date === card.today.date; return (
-              <tr key={d.date} style={isToday && !shuffle ? { background: `color-mix(in srgb, ${theme.accent} 28%, ${paper})` } : undefined}>
+              <tr key={d.date} style={isToday && !shuffle && !card.today.weekly ? { background: `color-mix(in srgb, ${theme.accent} 28%, ${paper})` } : undefined}>
                 <th scope="row" className="border-b border-r px-1 py-1 text-left text-xs font-bold" style={{ borderColor: line }}><span className="text-base tabular-nums">{dayNum(d.date)}</span> <span className="font-semibold opacity-70">{tx(DAY[d.dow])}</span>{isToday && <span className="sr-only"> {tx('today')}</span>}</th>
                 {items.map((it) => { const used = d.used.includes(it); const at = card.today.date === d.date ? card.today.used.find((u) => u.item === it)?.at : undefined;
-                  return <td key={it} title={used ? `${it}${at ? ` ${clock(at)}` : ''}` : undefined} className="h-9 border-b border-r p-0 text-lg last:border-r-0" style={{ borderColor: line, ...(!d.open ? { background: `repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in srgb, ${ink} 14%, transparent) 4px 5px)` } : {}) }}>
-                    {used ? <Check size={20} strokeWidth={3} role="img" aria-label={`${it}: ${tx("Checked in")}`} className="mx-auto text-emerald-700" /> : !d.open ? <span className="text-xs opacity-50" aria-label={tx('Closed')}>—</span> : null}</td>; })}
+                  const cellStamp = used && stamps.get(d.date + '/' + it);
+                  return <td key={it} title={used ? `${it}${at ? ` ${clock(at)}` : ''}` : undefined} className="relative h-9 overflow-hidden border-b border-r p-0 text-lg last:border-r-0" style={{ borderColor: line, ...(!d.open ? { background: `repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in srgb, ${ink} 14%, transparent) 4px 5px)` } : {}) }}>
+                    {cellStamp && card.business.id && <img alt={tx("Business stamp")} src={stampImageUrl(card.business.id, cellStamp)} className="pointer-events-none absolute inset-0 h-full w-full object-contain" />}
+                    {used ? <Check size={20} strokeWidth={3} role="img" aria-label={`${it}: ${tx("Checked in")}`} className="relative mx-auto" style={{ color: checkedColor ? ink : '#047857' }} /> : !d.open ? <span className="text-xs opacity-50" aria-label={tx('Closed')}>—</span> : null}</td>; })}
               </tr>); })}
           </tbody>
         </table>
@@ -219,9 +224,9 @@ function scanVenueCode(raw: string, slug: string): string | null {
 }
 
 /* ---- the customer's dashboard ---- */
-export function Dashboard({ b, lang, onClose, onSignedOut, programId, scanCode, takeScanPasscode }: { b: PublicBusiness; lang: Lang; onClose: () => void; onSignedOut: () => void; programId?: string; scanCode?: string; takeScanPasscode?: () => string }) {
+export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCard, scanCode, takeScanPasscode }: { b: PublicBusiness; lang: Lang; onClose: () => void; onSignedOut: () => void; programId?: string; initialCard?: string; scanCode?: string; takeScanPasscode?: () => string }) {
   const { tx, t, w } = useWords(b, lang); const theme = THEMES[b.theme] ?? THEMES.gold; const slug = b.slug;
-  const [me, setMe] = useState<MeInfo | null>(null); const [card, setCard] = useState<CardInfo | null>(null); const [sel, setSel] = useState<string | undefined>(); const [err, setErr] = useState('');
+  const [me, setMe] = useState<MeInfo | null>(null); const [card, setCard] = useState<CardInfo | null>(null); const [sel, setSel] = useState<string | undefined>(initialCard); const [err, setErr] = useState('');
   const [phone, setPhone] = useState(''); const [ref, setRef] = useState(''); const [busy, setBusy] = useState(false); const [big, setBig] = useState(false); const [pinOpen, setPinOpen] = useState(false); const [pins, setPins] = useState({ cur: '', next: '' }); const [pinMsg, setPinMsg] = useState('');
   const waiting = useRef(false); const session = () => loadSession(slug);
   const [typed, setTyped] = useState(''); const [flash, setFlash] = useState('');
@@ -231,7 +236,7 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, scanCode, 
   const [checkinError, setCheckinError] = useState('');
   const checkingIn = useRef(false);
   const fail = useCallback((e: unknown) => { const m = e instanceof Error ? e.message : tx('Something went wrong. Please try again.'); if (/sign in again/i.test(m)) { clearSession(slug); onSignedOut(); return; } setErr(m); }, [slug, onSignedOut, tx]);
-  const load = useCallback(async () => { const s = session(); if (!s) { onSignedOut(); return; } try { const m = await publicApi.me(slug, s); const id = sel ?? m.cards.find((entry) => entry.programId === programId)?.id; if (programId && !id) throw new Error(tx('You have no card for this program. Open the program link and choose Join as a new member.')); const c = await publicApi.card(slug, s, id); setMe(m); setCard(c); setErr(''); waiting.current = !!c.payment?.promptSent; if (!sel) setSel(c.cardId); } catch (e) { fail(e); } }, [slug, sel, programId, fail, onSignedOut]); // eslint-disable-line react-hooks/exhaustive-deps
+  const load = useCallback(async () => { const s = session(); if (!s) { onSignedOut(); return; } try { const m = await publicApi.me(slug, s); const id = sel ?? m.cards.find((entry) => entry.programId === programId)?.id; if (programId && !id) throw new Error(tx('You have no card for this program. Open the program link and choose Join as a new member.')); const c = await publicApi.card(slug, s, id); setMe(m); setCard(c); setErr(''); waiting.current = !!c.payment?.promptSent; if (!sel) setSel(c.cardId); } catch (e) { setCard(null); fail(e); } }, [slug, sel, programId, fail, onSignedOut]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { void load(); const i = window.setInterval(() => void load(), waiting.current ? 4000 : 15_000); return () => window.clearInterval(i); }, [load, card?.payment?.promptSent]);
   const act = async (fn: (s: string, id: string) => Promise<unknown>) => { const s = session(); if (!s || !card) return; setBusy(true); setErr(''); try { await fn(s, card.cardId); await load(); } catch (e) { fail(e); } finally { setBusy(false); } };
   async function doTick(code: string, passcode?: string) {
@@ -350,6 +355,11 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, scanCode, 
                 {card.tick?.undo && <p role="status" className="flex items-center justify-between gap-2 rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-900"><span>{card.tick.undo.item} {tx('ticked')}. {tx('Wrong tap?')}</span><button type="button" disabled={busy} onClick={() => void act((s, id) => publicApi.untick(slug, s, id, card.tick!.undo!.useId))} className="min-h-9 px-2 font-semibold underline">{tx('Undo')}</button></p>}
               </div>
             )}
+            {card.today.weekly && <p className="rounded-xl bg-white px-3 py-2 text-sm">{card.today.checkedMeal ? `${card.today.checkedMeal.item} · ${tx('Checked in')} · ${card.today.date}` : tx('The meal color appears after a confirmed check-in during serving hours.')}</p>}
+            {card.renewable && <a className="block rounded-xl border bg-white p-3 text-center font-semibold" href={`/b/${encodeURIComponent(slug)}?renew=${encodeURIComponent(card.programId!)}`}>{tx("Register for a new card")}</a>}
+            {!!card.history?.length && <details className="rounded-xl bg-white p-3 text-sm"><summary>{tx("Individual report")} · {card.history.length} {tx("check-ins")}</summary>
+              <ul className="max-h-52 overflow-auto">{card.history.slice().reverse().map(u => <li key={u.at + u.item}>{u.date} · {clock(u.at)} · {u.item}</li>)}</ul>
+            </details>}
             <PaperCard key={card.cardId} b={b} card={card} w={w} />
             {(m.state === 'active' || m.state === 'not_started') && card.qr && (
               <div className="rounded-2xl bg-white p-4 text-center">
