@@ -556,3 +556,40 @@ test('card-link check-in uses the selected paid card, personal passcode and Kiga
   await svc.saveProgram('o', biz.id, { id: program.id, linkCheckIn: false });
   await assert.rejects(tick('4821'), { code: 'BAD_CODE' });
 });
+
+test('weekly meal colors, stamped individual reports, and a separate renewed card', async () => {
+  const { svc, biz, prog, at } = await setup({
+    days: 1, items: ['Lunch', 'Dinner'], checkIn: 'self', linkCheckIn: true,
+    mealColors: { 'tue-lunch': '#eecc88', 'tue-dinner': '#224488' }, stampImage: '00000000-0000-4000-8000-000000000001.png',
+  });
+  const join = () => joinP(svc, biz.slug, prog.id, { name: 'Test Member', phone: '0788000001', remember: true }, 'weekly');
+  const first = await join();
+  await svc.confirmPayment('o', biz.id, first.cardId, { method: 'cash' });
+  const ownerCard = () => svc.memberCard('o', biz.id, first.cardId);
+  const customerCard = () => svc.card(biz.slug, first.session, first.cardId);
+  const tick = () => svc.selfUse(biz.slug, first.session, { cardId: first.cardId, passcode: '4821' }, 'weekly');
+  assert.deepEqual((await svc.today('o', biz.id)).mealColors[0].current, { item: 'Lunch', color: '#eecc88' });
+  assert.equal((await customerCard()).today.checkedMeal, null);
+  const used = await tick();
+  assert.deepEqual((await customerCard()).today.checkedMeal, { item: 'Lunch', color: '#eecc88' });
+  assert.equal((await ownerCard()).history[0].stampImage, '00000000-0000-4000-8000-000000000001.png');
+  await assert.rejects(svc.memberCard('other-owner', biz.id, first.cardId));
+  assert.equal((await ownerCard()).qr, null);
+  await svc.selfUndo(biz.slug, first.session, first.cardId, used.useId);
+  assert.deepEqual((await ownerCard()).history, []);
+  assert.equal((await customerCard()).today.checkedMeal, null);
+  await tick();
+  at(Date.parse('2026-11-17T15:00:00Z'));
+  assert.equal((await customerCard()).today.checkedMeal, null);
+  assert.equal((await svc.today('o', biz.id)).mealColors[0].current?.color, '#224488');
+  await svc.saveProgram('o', biz.id, { id: prog.id, stampImage: '00000000-0000-4000-8000-000000000002.webp' });
+  await tick();
+  assert.deepEqual((await ownerCard()).history.map(u => u.stampImage), ['00000000-0000-4000-8000-000000000001.png', '00000000-0000-4000-8000-000000000002.webp']);
+  at(Date.parse('2026-11-18T10:00:00Z'));
+  assert.equal((await customerCard()).renewable, true);
+  const next = await join();
+  assert.notEqual(next.cardId, first.cardId);
+  assert.equal((await svc.memberCard('o', biz.id, next.cardId)).member.paid, false);
+  assert.equal((await ownerCard()).history.length, 2);
+  assert.equal((await svc.memberCard('o', biz.id, next.cardId)).history.length, 0);
+});

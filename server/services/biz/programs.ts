@@ -1,4 +1,5 @@
 import { randomBytes, createHash, scrypt, timingSafeEqual } from 'node:crypto';
+import { isStampImage } from './stampImages.js';
 import type { Sealed } from './secrets.js';
 import { DAYS, clean, cleanPhone, oneOf, type Day } from './model.js';
 
@@ -65,6 +66,8 @@ export interface Program {
   windows?: ItemWindow[];
   /** Display preferences for cards issued from this plan. */
   cardLayout?: CardLayout;
+  mealColors?: Record<string, string> | null;
+  stampImage?: string;
   shuffleCardColor?: boolean;
   cardColor?: string;
   arrivalColor?: string;
@@ -107,7 +110,7 @@ export interface Member {
   note?: string;
   createdAt: string;
 }
-export interface Use { id: string; memberId: string; date: string; item: string; at: string; by: 'scan' | 'code' | 'self'; undone?: boolean }
+export interface Use { id: string; memberId: string; date: string; item: string; at: string; by: 'scan' | 'code' | 'self'; undone?: boolean; stampImage?: string }
 
 /* ---------------------------------------------------------------- dates (Kigali, UTC+2) */
 const KIGALI_MS = 2 * 3600_000;
@@ -180,6 +183,21 @@ export function cleanProgram(input: any, id: string, now: string, prev?: Program
   if (prev?.endedAt && input?.active !== true) { p.endedAt = prev.endedAt; p.active = false; }   // an ended program stays ended until the owner opens sign-ups again
   const ci = input?.checkIn === undefined ? prev?.checkIn : input.checkIn; if (ci === 'self') p.checkIn = 'self';
   if (ci === 'self' && (input?.linkCheckIn ?? prev?.linkCheckIn) === true) p.linkCheckIn = true;
+  const colors = input?.mealColors === undefined ? prev?.mealColors : input.mealColors;
+  if (colors != null) {
+    if (typeof colors !== 'object' || Array.isArray(colors)) return { error: 'Choose colors from the weekly meal schedule.' };
+    p.mealColors = {};
+    for (const [key, color] of Object.entries(colors)) {
+      if (!/^(mon|tue|wed|thu|fri|sat|sun)-(breakfast|lunch|dinner|supper)$/.test(key) ||
+          typeof color !== 'string' || !/^#[a-f0-9]{6}$/i.test(color)) return { error: 'Choose a valid weekday, meal and color.' };
+      p.mealColors[key] = color;
+    }
+  }
+  const stamp = input?.stampImage === undefined ? prev?.stampImage : input.stampImage;
+  if (stamp) {
+    if (!isStampImage(stamp)) return { error: 'Choose an uploaded stamp image.' };
+    p.stampImage = stamp;
+  }
   if ((input?.shuffleCardColor ?? prev?.shuffleCardColor) === true) p.shuffleCardColor = true;
   for (const key of ['cardColor', 'arrivalColor'] as const) {
     const value = input?.[key] ?? prev?.[key];
