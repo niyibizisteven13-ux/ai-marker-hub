@@ -40,6 +40,20 @@ function mealChanged(id: string) {
   versions.set(id, randomUUID());
   updates.emit(id);
 }
+async function waitForMealChange(id: string, after?: string, signal?: AbortSignal) {
+  if (!after || after !== (versions.get(id) ?? 'initial') || signal?.aborted) return;
+  await new Promise<void>(resolve => {
+    const finish = () => {
+      clearTimeout(timer);
+      updates.off(id, finish);
+      signal?.removeEventListener('abort', finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, 20_000);
+    updates.once(id, finish);
+    signal?.addEventListener('abort', finish, { once: true });
+  });
+}
 const locks = new Map<string, Promise<unknown>>();
 async function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
   const prev = locks.get(key) ?? Promise.resolve();
@@ -109,6 +123,7 @@ export function createPrograms(h: Helpers) {
     const own = (await kv.get<{ items: Use[] }>(k.uses(bizId, m.id)))?.items ?? []; await kv.put(k.uses(bizId, m.id), { items: [...own, ...uses].slice(-1500) });
     const all = await membersOf(bizId); const mm = all.find((x) => x.id === m.id); if (mm) { mm.used = (mm.used ?? 0) + quantity; m.used = mm.used; await putMembers(bizId, all); }
     mealChanged(bizId);
+    mealChanged(`card:${bizId}:${m.id}`);
     return uses[0];
   }
   /** The 6-digit check-in code a business shows for one program in a given minute: an HMAC of the program and the minute, with a key only the server has. */
@@ -332,6 +347,7 @@ export function createPrograms(h: Helpers) {
           const own = (await kv.get<{ items: Use[] }>(k.uses(b.id, m.memberId)))?.items ?? []; const x = own.find((y) => y.id === useId); if (x) { x.undone = true; await kv.put(k.uses(b.id, m.memberId), { items: own }); }
           const all = await membersOf(b.id); const mm = all.find((y) => y.id === m.memberId); if (mm) { mm.used = Math.max(0, (mm.used ?? 0) - 1); await putMembers(b.id, all); }
           mealChanged(b.id);
+          mealChanged(`card:${b.id}:${m.memberId}`);
           return { ok: true as const };
         }
         throw new ProgramError('That use was not found.', 404, 'NOT_FOUND');
@@ -340,19 +356,7 @@ export function createPrograms(h: Helpers) {
     /** Today at a glance: who has been served, who has a plan today and has not come yet. */
     async today(ownerId: string, id: string, after?: string, signal?: AbortSignal) {
       const b = await h.mine(ownerId, id);
-      if (after && after === (versions.get(id) ?? 'initial') && !signal?.aborted) {
-        await new Promise<void>(resolve => {
-          const finish = () => {
-            clearTimeout(timer);
-            updates.off(id, finish);
-            signal?.removeEventListener('abort', finish);
-            resolve();
-          };
-          const timer = setTimeout(finish, 20_000);
-          updates.once(id, finish);
-          signal?.addEventListener('abort', finish, { once: true });
-        });
-      }
+      await waitForMealChange(id, after, signal);
       const version = versions.get(id) ?? 'initial';
       const t = h.now(); const date = kigaliDate(t); const progs = await programsOf(b.id); const members = await membersOf(b.id); const served = (await servedOn(b.id, date)).filter((x) => !x.undone);
       const byId = new Map(members.map((m) => [m.id, m]));
@@ -506,8 +510,13 @@ export function createPrograms(h: Helpers) {
         return describeCard(b, m, servingHours(b, p), false, true);
       });
     },
-    async card(slug: string, session: string, cardId?: string) {
+    async card(slug: string, session: string, cardId?: string, after?: string, signal?: AbortSignal) {
       const b = await h.publicLive(slug); if (!b) throw new ProgramError('This page is not available.', 404, 'NOT_FOUND'); const me = await sessionOf(b.id, session);
+      if (cardId && after) {
+        const owned = (await membersOf(b.id)).some(m => m.id === cardId && m.phone === me.phone && m.status !== 'cancelled');
+        if (!owned) throw new ProgramError('This card was not found.', 404, 'NOT_FOUND');
+        await waitForMealChange(`card:${b.id}:${cardId}`, after, signal);
+      }
       return withLock(`mem|${b.id}`, async () => {
         const list = await membersOf(b.id); const mine = list.filter((x) => x.phone === me.phone && x.status !== 'cancelled');
         const m = cardId ? mine.find((x) => x.id === cardId) : mine.length === 1 ? mine[0] : mine.sort((x, y) => y.createdAt.localeCompare(x.createdAt))[0];
@@ -520,7 +529,7 @@ export function createPrograms(h: Helpers) {
           if (e?.pay?.state === 'success') { await activate(b, p, m, 'momo_prompt', e.id); await putMembers(b.id, list); h.alert(b, { title: `Plan paid · ${b.name}`, text: `${m.name} paid ${p.priceRwf.toLocaleString('en-US')} RWF for "${p.title}".` }); }
           else if (e?.pay?.state === 'failed') { delete m.payRef; await putMembers(b.id, list); } else prompt = true;
         }
-        return describeCard(b, m, p, prompt, false);
+        return { ...await describeCard(b, m, p, prompt, false), version: versions.get(`card:${b.id}:${m.id}`) ?? 'initial' };
       });
     },
     /** The customer scans the business's rotating code (only when the owner chose self check-in): restaurant check-ins also confirm the customer's passcode. */

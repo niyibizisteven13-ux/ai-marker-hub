@@ -81,6 +81,7 @@ export interface TodayInfo {
 export interface CardDay { date: string; dow: DayId; open: boolean; used: string[] }
 /** One card, as the signed-in customer sees it: who it is for, the dates and what was used each day (the grid), and the QR code once it is paid. */
 export interface CardInfo {
+  version?: string;
   programId?: string; renewable?: boolean;
   history?: Array<{ id?: string; guest?: boolean; date: string; item: string; at: string; stampImage?: string }>;
   cardId: string;

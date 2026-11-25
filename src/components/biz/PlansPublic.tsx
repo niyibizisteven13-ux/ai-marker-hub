@@ -269,6 +269,26 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
   const fail = useCallback((e: unknown) => { const m = e instanceof Error ? e.message : tx('Something went wrong. Please try again.'); if (/sign in again/i.test(m)) { clearSession(slug); onSignedOut(); return; } setErr(m); }, [slug, onSignedOut, tx]);
   const load = useCallback(async () => { const s = session(); if (!s) { onSignedOut(); return; } try { const m = await publicApi.me(slug, s); const id = sel ?? m.cards.find((entry) => entry.programId === programId)?.id; if (programId && !id) throw new Error(tx('You have no card for this program. Open the program link and choose Join as a new member.')); const c = await publicApi.card(slug, s, id); setMe(m); setCard(c); setErr(''); waiting.current = !!c.payment?.promptSent; if (!sel) setSel(c.cardId); } catch (e) { setCard(null); fail(e); } }, [slug, sel, programId, fail, onSignedOut]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { void load(); const i = window.setInterval(() => void load(), waiting.current ? 4000 : 15_000); return () => window.clearInterval(i); }, [load, card?.payment?.promptSent]);
+  useEffect(() => {
+    const id = card?.cardId;
+    const version = card?.version;
+    const token = session();
+    if (b.category !== 'restaurant' || !id || !version || !token || card?.member.state !== 'active') return;
+    const controller = new AbortController();
+    let timer = 0;
+    async function watch() {
+      try {
+        const next = await publicApi.card(slug, token!, id, version, controller.signal);
+        if (controller.signal.aborted) return;
+        setCard(next);
+        if (next.version === version) timer = window.setTimeout(watch, 0);
+      } catch {
+        if (!controller.signal.aborted) timer = window.setTimeout(watch, 3000);
+      }
+    }
+    void watch();
+    return () => { controller.abort(); window.clearTimeout(timer); };
+  }, [slug, b.category, card?.cardId, card?.member.state, card?.version]);
   const act = async (fn: (s: string, id: string) => Promise<unknown>) => { const s = session(); if (!s || !card) return; setBusy(true); setErr(''); try { await fn(s, card.cardId); await load(); } catch (e) { fail(e); } finally { setBusy(false); } };
   async function doTick(code: string, passcode?: string) {
     const token = session();

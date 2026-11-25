@@ -126,7 +126,9 @@ export function createBizRouter(): Router {
   r.get('/public/:slug/username', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await svc().suggestUsernames(req.params.slug, req.query.name, who(req))); }));
   r.post('/public/:slug/logout', run(async (req, res) => res.json(await svc().logout(req.params.slug, sess(req)))));
   r.get('/public/:slug/me', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Robots-Tag', 'noindex'); res.json(await svc().me(req.params.slug, sess(req))); }));
-  r.get('/public/:slug/me/card', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Robots-Tag', 'noindex'); res.json(await svc().card(req.params.slug, sess(req), typeof req.query.card === 'string' ? req.query.card : undefined)); }));
+  r.get('/public/:slug/me/card', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Robots-Tag', 'noindex'); const abort = new AbortController(); res.once('close', () => abort.abort());
+    const data = await svc().card(req.params.slug, sess(req), typeof req.query.card === 'string' ? req.query.card : undefined, typeof req.query.after === 'string' ? req.query.after : undefined, abort.signal);
+    if (!res.destroyed) res.json(data); }));
   r.post('/public/:slug/me/pay', run(async (req, res) => res.json(await svc().payCard(req.params.slug, sess(req), String(req.body?.cardId ?? ''), req.body ?? {}, who(req)))));
   r.post('/public/:slug/me/claim', run(async (req, res) => res.json(await svc().claimCard(req.params.slug, sess(req), String(req.body?.cardId ?? ''), req.body ?? {}, who(req)))));
   r.post('/public/:slug/me/tick', run(async (req, res) => res.json(await svc().selfUse(req.params.slug, sess(req), req.body ?? {}, who(req)))));

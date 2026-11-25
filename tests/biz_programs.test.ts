@@ -660,3 +660,26 @@ test('group check-in counts plates once and the serving receipt expires at five 
   assert.equal((await card()).today.receipt, undefined);
   assert.equal((await card()).history.length, 3);
 });
+
+test('owner can record from a card code or saved QR and wake the open client card', async () => {
+  const { svc, biz, prog } = await setup();
+  const member = await joinP(svc, biz.slug, prog.id, { name: 'Client', phone: '0788112093' }, 'counter');
+  await svc.confirmPayment('o', biz.id, member.cardId, { method: 'cash' });
+  const open = () => svc.card(biz.slug, member.session, member.cardId);
+  const original = await open();
+  assert.ok(original.qr);
+  for (const input of [{ code: member.code.toLowerCase() }, { token: original.qr }]) {
+    const before = await open();
+    const watching = svc.card(biz.slug, member.session, member.cardId, before.version);
+    await assert.rejects(svc.redeem('other-owner', biz.id, input));
+    const result = await svc.redeem('o', biz.id, input);
+    assert.ok(result.ok && result.useId);
+    const refreshed = await watching;
+    assert.notEqual(refreshed.version, before.version);
+    assert.equal(refreshed.today.receipt?.count, 1);
+    assert.equal(refreshed.member.usedTotal, 1);
+    assert.equal((await svc.redeem('o', biz.id, input)).ok, false);
+    await svc.undoUse('o', biz.id, result.useId);
+    assert.equal((await open()).member.usedTotal, 0);
+  }
+});

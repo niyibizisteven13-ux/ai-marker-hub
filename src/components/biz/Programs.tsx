@@ -102,6 +102,7 @@ function CheckinCode({ b, programs, revisions }: { b: Business; programs: Progra
 
 function TodayTab({ b, hasPlans, selfPrograms, onChange, goPlans }: { b: Business; hasPlans: boolean; selfPrograms: ProgramInfo[]; onChange: () => void; goPlans: () => void }) {
   const { w, t } = useWords(b);
+  const [recordMeal, setRecordMeal] = useState(false);
   const [camera, setCamera] = useState(false); const [code, setCode] = useState(''); const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<(RedeemResult & { token?: string }) | null>(null); const [today, setToday] = useState<TodayInfo | null>(null); const [err, setErr] = useState('');
   const loadToday = useCallback(async () => { try { setToday(await ownerApi.today(b.id)); setErr(''); } catch (e) { setToday(null); setErr(msg(e)); } }, [b.id]);
@@ -128,8 +129,8 @@ function TodayTab({ b, hasPlans, selfPrograms, onChange, goPlans }: { b: Busines
   }, [b.id]);
   const redeem = useCallback(async (body: { token?: string; code?: string; memberId?: string; force?: boolean; item?: string }) => {
     if (busy) return; setBusy(true);
-    try { const r = b.category === 'restaurant' ? await ownerApi.verifyMeal(b.id, body) : await ownerApi.redeem(b.id, body); setResult({ ...r, token: body.token }); signal(r.ok); setCode(''); void loadToday(); onChange(); } catch (e) { setErr(msg(e)); } finally { setBusy(false); }
-  }, [b.id, b.category, busy, loadToday, onChange]);
+    try { const r = b.category === 'restaurant' && !recordMeal ? await ownerApi.verifyMeal(b.id, body) : await ownerApi.redeem(b.id, body); setResult({ ...r, token: body.token }); signal(r.ok); setCode(''); void loadToday(); onChange(); } catch (e) { setErr(msg(e)); } finally { setBusy(false); }
+  }, [b.id, b.category, recordMeal, busy, loadToday, onChange]);
   const scanner = useScanner(camera && !result, (text) => { void redeem({ token: text }); }, tx);
   if (!hasPlans) return <div className={card}><p className="text-sm">{t("Make your first {program} to get started.")}</p><button type="button" className={`${btnPrimary} mt-3`} onClick={goPlans}><Plus size={16} />{t("Create a {program}")}</button></div>;
   const m = result?.member;
@@ -145,11 +146,17 @@ function TodayTab({ b, hasPlans, selfPrograms, onChange, goPlans }: { b: Busines
       {selfPrograms.length > 0 && <CheckinCode b={b} programs={selfPrograms} revisions={today?.codeRevisions} />}
       <section className={`${card} space-y-3`} aria-label={t("Scan a {pass}")}>
         <Title>{t("Check a {pass}")}</Title>
+        {b.category === 'restaurant' && <div className="flex flex-wrap gap-2">
+          {[false, true].map(write => <button key={String(write)} disabled={busy} type="button" aria-pressed={recordMeal === write} className={recordMeal === write ? btnPrimary : btnGhost} onClick={() => { setRecordMeal(write); setCamera(false); setResult(null); setCode(''); }}>
+            {write ? tx("Record a meal") : tx("Verify receipt")}
+          </button>)}
+        </div>}
+        {b.category === 'restaurant' && recordMeal && <p className="text-sm">{tx("Scan the client’s card QR, including a screenshot, or enter their card code to record one meal.")}</p>}
         {result ? (
           <div role="status" aria-live="polite" className={`rounded-2xl p-5 text-center ${result.ok ? 'bg-emerald-500/15' : 'bg-rose-500/12'}`}>
             {result.ok ? <CheckCircle2 size={44} className="mx-auto text-emerald-600" aria-hidden="true" /> : <XCircle size={44} className="mx-auto text-rose-600" aria-hidden="true" />}
             <p className="mt-2 font-display text-2xl font-semibold">{m?.name ?? t("Unknown {pass}")}</p>
-            <p className={`mt-1 text-base font-semibold ${result.ok ? 'text-emerald-700' : 'text-rose-700'}`}>{result.ok && b.category !== 'restaurant' ? `${w.action}: ${result.item}` : result.message}</p>
+            <p className={`mt-1 text-base font-semibold ${result.ok ? 'text-emerald-700' : 'text-rose-700'}`}>{result.ok && (recordMeal || b.category !== 'restaurant') ? `${w.action}: ${result.item}` : result.message}</p>
             {m && <p className="mt-1 text-sm text-[var(--app-muted)]">{m.programTitle} · {m.usesLeft} {t("{uses} left")} · {tx('until')} {shortDate(m.endDate)}</p>}
             <div className="mt-4 flex flex-wrap justify-center gap-2">
               {result.ok && result.useId && <button type="button" className={btnGhost} onClick={async () => { try { await ownerApi.undoUse(b.id, result.useId!); setResult(null); void loadToday(); onChange(); } catch (e) { setErr(msg(e)); } }}><Undo2 size={15} />{tx("Undo")}</button>}
@@ -169,8 +176,8 @@ function TodayTab({ b, hasPlans, selfPrograms, onChange, goPlans }: { b: Busines
             ) : <button type="button" className={`${btnPrimary} w-full !min-h-14 text-base`} onClick={() => setCamera(true)}><Camera size={20} />{t("Scan a {pass}")}</button>}
             {scanner.error && <p role="alert" className="text-sm text-amber-700">{scanner.error}</p>}
             <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (code.trim()) void redeem({ code }); }}>
-              <input className={`${input} font-mono uppercase tracking-wider`} value={code} onChange={(e) => setCode(e.target.value)} placeholder="ABCD-2345" inputMode="text" autoCapitalize="characters" autoComplete="off" aria-label={t("{Pass} code")} />
-              <button type="submit" disabled={busy || !code.trim()} className={btnPrimary}>{busy ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}{tx("Check")}</button>
+              <input className={`${input} font-mono uppercase tracking-wider`} value={code} onChange={(e) => setCode(e.target.value)} placeholder="NYN5-2VGX" inputMode="text" autoCapitalize="characters" autoComplete="off" aria-label={t("{Pass} code")} />
+              <button type="submit" disabled={busy || !code.trim()} className={btnPrimary}>{busy ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}{recordMeal ? tx("Record a meal") : tx("Check")}</button>
             </form>
             <p className="text-xs text-[var(--app-muted)]">{tx("No camera? Type the code shown under the customer's QR code.")}</p>
           </>
