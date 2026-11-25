@@ -1,3 +1,4 @@
+import { restaurantCard } from './mealCard.js';
 import { createHmac, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import { clean, cleanPhone } from './model.js';
 import { open as openSecret, seal } from './secrets.js';
@@ -161,7 +162,8 @@ export function createPrograms(h: Helpers) {
         const list = await programsOf(b.id); const prev = input?.id ? list.find((p) => p.id === String(input.id)) : undefined;
         if (input?.id && !prev) throw new ProgramError('That plan was not found.', 404, 'NOT_FOUND');
         if (!prev && list.length >= MAX_PROGRAMS) throw new ProgramError(`You can have up to ${MAX_PROGRAMS} plans.`, 409, 'LIMIT');
-        const p = cleanProgram(input, prev?.id ?? randomUUID(), h.iso(), prev); if ('error' in p) throw new ProgramError(p.error);
+        const defaults = !prev && b.category === 'restaurant' && input?.items === undefined ? restaurantCard : {};
+        const p = cleanProgram({ ...defaults, ...input }, prev?.id ?? randomUUID(), h.iso(), prev); if ('error' in p) throw new ProgramError(p.error);
         await kv.put(k.programs(b.id), { items: prev ? list.map((x) => (x.id === p.id ? p : x)) : [...list, p] });
         return servingHours(b, p);
       });
@@ -403,7 +405,7 @@ export function createPrograms(h: Helpers) {
       const today = kigaliDate(h.now()); const progs = await programsOf(b.id); const served = await servedOn(b.id, today);
       const mine = (await membersOf(b.id)).filter((m) => m.phone === me.phone && m.status !== 'cancelled').sort((x, y) => y.createdAt.localeCompare(x.createdAt));
       const who = (await peopleOf(b.id)).find((x) => x.phone === me.phone);
-      return { name: mine[0]?.name ?? '', phone: me.phone, username: who?.username ?? '', cards: mine.map((m) => { const v = view(m, progs.find((p) => p.id === m.programId), today, usedOf(served, m.id)); return { id: v.id, programTitle: v.programTitle, state: v.state, startDate: v.startDate, endDate: v.endDate, usesLeft: v.usesLeft, paid: v.paid }; }) };
+      return { name: mine[0]?.name ?? '', phone: me.phone, username: who?.username ?? '', cards: mine.map((m) => { const v = view(m, progs.find((p) => p.id === m.programId), today, usedOf(served, m.id)); return { id: v.id, programId: m.programId, programTitle: v.programTitle, state: v.state, startDate: v.startDate, endDate: v.endDate, usesLeft: v.usesLeft, paid: v.paid }; }) };
     },
     /** One card, in full: who it is for, the dates and what was used each day (the grid), the QR code, and how to pay while it is unpaid. */
     async card(slug: string, session: string, cardId?: string) {
@@ -426,10 +428,10 @@ export function createPrograms(h: Helpers) {
         return {
           cardId: m.id,
           business: { name: b.name, slug: b.slug, theme: b.theme },
-          program: { title: p.title, ...(p.cardLayout ? { cardLayout: p.cardLayout } : {}), checkIn: p.checkIn === 'self' ? 'self' : 'staff', ...(p.totalUses ? { totalUses: p.totalUses } : {}), items: p.items, openDays: p.openDays, ...(p.windows ? { windows: p.windows } : {}), ...(p.terms ? { terms: p.terms } : {}), priceRwf: p.priceRwf, days: p.days },
+          program: { title: p.title, cardColor: p.cardColor, arrivalColor: p.arrivalColor, ...(p.cardLayout ? { cardLayout: p.cardLayout } : {}), checkIn: p.checkIn === 'self' ? 'self' : 'staff', ...(p.totalUses ? { totalUses: p.totalUses } : {}), items: p.items, openDays: p.openDays, ...(p.windows ? { windows: p.windows } : {}), ...(p.terms ? { terms: p.terms } : {}), priceRwf: p.priceRwf, days: p.days },
           member: { name: m.name, phone: m.phone, ...(m.idNumber ? { idNumber: m.idNumber } : {}), code: m.code, state: st, startDate: m.startDate, endDate: m.endDate, daysLeft: r.calendarDays, servingDaysLeft: Math.max(0, r.servingDays - (ateToday >= p.items.length ? 1 : 0)), usesLeft: usesLeft(m, p, r.uses, ateToday), usedTotal: m.used ?? 0, paid: m.paid, paidAt: m.confirmedAt ?? null },
           qr,
-          tick: p.checkIn === 'self' ? { needsCode: true as const, requiresPasscode: b.category === 'restaurant', ...tickOptions(m, p, own, t) } : null,
+          tick: p.checkIn === 'self' ? { needsCode: !(b.category === 'restaurant' && p.linkCheckIn), requiresPasscode: b.category === 'restaurant', ...tickOptions(m, p, own, t) } : null,
           today: { date, openToday: p.openDays.includes(dayOfWeek(date)), used: own.filter((x) => x.date === date).map((x) => ({ item: x.item, at: x.at })) },
           calendar: cardCalendar(m, p, own.map((x) => ({ date: x.date, item: x.item })).slice(-1500)),
           history: [],
@@ -453,7 +455,8 @@ export function createPrograms(h: Helpers) {
         const t = h.now();
         // The customer proves they are at the business by the code it shows: it changes every minute and cannot be guessed.
         if (h.tooMany(`tickcode|${b.id}|${me.phone}|${visitor}`, 15, t)) throw new ProgramError('Too many wrong codes. Please wait a little.', 429, 'RATE');
-        const hit = selfCards.reverse().find((x) => venueCodeOk(b.id, x.p.id, input.code, t)); if (!hit) throw new ProgramError('That code is not right, or it has changed. Scan the business\'s code again.', 403, 'BAD_CODE');
+        const direct = !input.code && !!cardId && b.category === 'restaurant';
+        const hit = direct ? selfCards.find((x) => x.p.linkCheckIn) : selfCards.reverse().find((x) => venueCodeOk(b.id, x.p.id, input.code, t)); if (!hit) throw new ProgramError('That code is not right, or it has changed. Scan the business\'s code again.', 403, 'BAD_CODE');
         const restaurant = b.category === 'restaurant';
         if (restaurant) {
           if (!validPasscode(input.passcode)) throw new ProgramError('Enter your 4 to 6 digit passcode to check in.', 400, 'PASSCODE_REQUIRED');
@@ -524,3 +527,4 @@ export function createPrograms(h: Helpers) {
 }
 export type Programs = ReturnType<typeof createPrograms>;
 export type { DenyCode, PublicBusiness };
+

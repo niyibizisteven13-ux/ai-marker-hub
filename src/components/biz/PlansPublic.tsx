@@ -1,3 +1,4 @@
+import { cardPaper } from '../../../server/services/biz/mealCard';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Camera, Check, CheckCircle2, Clock, Loader2, LogOut, MessageCircle, Ticket, UtensilsCrossed, X, KeyRound } from 'lucide-react';
 import { BizApiError, publicApi } from '../../biz/api';
@@ -64,7 +65,7 @@ export function PlansSection({ b, lang, preview, onJoin, onOpen }: { b: PublicBu
             {p.windows?.length ? <p className="mt-1 text-xs text-[#5B6470]">{p.windows.map((w) => `${w.item} ${w.from}–${w.to}`).join(' · ')}</p> : null}
             {p.description && <p className="mt-2 text-sm text-[#3A4350]">{p.description}</p>}
             {p.terms && <p className="mt-2 text-xs text-[#5B6470]">{p.terms}</p>}
-            <button type="button" disabled={preview || p.full} onClick={() => onJoin(p)} style={{ background: theme.accent, color: theme.on }} className="mt-4 min-h-12 rounded-xl px-4 text-base font-semibold disabled:opacity-50">{p.full ? t('This {program} is full') : preview ? tx('Preview') : t('Join this {program}')}</button>
+            <button type="button" disabled={preview} onClick={() => onJoin(p)} style={{ background: theme.accent, color: theme.on }} className="mt-4 min-h-12 rounded-xl px-4 text-base font-semibold disabled:opacity-50">{p.full ? t('Open my {pass}') : preview ? tx('Preview') : t('Join this {program}')}</button>
           </article>))}
       </div>
     </section>
@@ -75,6 +76,7 @@ const useWordsUses = (b: PublicBusiness, lang: Lang) => wordsOf(b.programText, l
 /* ---- first visit: details, then the customer's own passcode ---- */
 export function JoinFlow({ b, lang, program, onClose, onDone }: { b: PublicBusiness; lang: Lang; program: Program; onClose: () => void; onDone: () => void }) {
   const { tx, t, w } = useWords(b, lang); const theme = THEMES[b.theme] ?? THEMES.gold;
+  const [entry, setEntry] = useState<'choice' | 'signin' | 'join'>('choice');
   const [step, setStep] = useState<1 | 2>(1); const [names, setNames] = useState<string[]>([]); const [f, setF] = useState({ username: '', name: '', phone: '', idNumber: '', joinCode: '', startDate: '', website: '', pin: '', pin2: '', remember: true }); const [busy, setBusy] = useState(false); const [err, setErr] = useState('');
   const days = Array.from({ length: 8 }, (_, i) => new Date(Date.now() + 2 * 3600_000 + i * 86_400_000).toISOString().slice(0, 10));
   const next = (e: React.FormEvent) => { e.preventDefault(); setErr(''); if (f.name.trim().length < 2) return setErr(tx('Please write your name.')); if (f.phone.replace(/\D/g, '').length < 9) return setErr(tx('Please write a phone number we can reach.')); if (program.needsCode && !/^\d{4}$/.test(f.joinCode.replace(/\D/g, ''))) return setErr(tx('Write the 4-digit join code the business gave you.')); setStep(2); void publicApi.usernames(b.slug, f.name).then((s) => { setNames(s); setF((p) => (p.username ? p : { ...p, username: s[0] ?? '' })); }).catch(() => undefined); };
@@ -86,6 +88,13 @@ export function JoinFlow({ b, lang, program, onClose, onDone }: { b: PublicBusin
     try { const r = await publicApi.join(b.slug, program.id, { name: f.name, phone: f.phone, username: f.username || undefined, passcode: f.pin, joinCode: program.needsCode ? f.joinCode : undefined, idNumber: f.idNumber || undefined, startDate: f.startDate || undefined, remember: f.remember, website: f.website }); saveSession(b.slug, r.session, r.expiresAt, f.remember); saveUser(b.slug, r.username); onDone(); }
     catch (x) { const m = x instanceof Error ? x.message : tx('Something went wrong. Please try again.'); setErr(m); if (/join code/i.test(m)) setStep(1); } finally { setBusy(false); }
   };
+  if (entry === 'signin') return <SignIn b={b} lang={lang} onClose={() => setEntry('choice')} onDone={onDone} />;
+  if (entry === 'choice') return <Sheet label={program.title} onClose={onClose}>
+    <h2 className="font-display text-xl font-semibold">{program.title}</h2>
+    <button className="min-h-12 w-full rounded-xl px-4 font-semibold" style={{ background: theme.accent, color: theme.on }} onClick={() => setEntry('signin')}>{tx("Enter passcode to open my card")}</button>
+    <button disabled={program.full} className="min-h-12 w-full rounded-xl border px-4 font-semibold disabled:opacity-50" onClick={() => setEntry('join')}>{program.full ? t('This {program} is full') : tx("Join as a new member")}</button>
+    <button className="min-h-10 w-full" onClick={onClose}>{tx("Close")}</button>
+  </Sheet>;
   return (
     <Sheet label={t("Join this {program}")} onClose={onClose}>
       <div className="flex items-start justify-between gap-3"><div><h2 className="font-display text-xl font-semibold">{program.title}</h2><p className="text-sm text-[#5B6470]">{rwf(program.priceRwf)} · {program.days} {tx("days")}</p></div>
@@ -154,7 +163,7 @@ function PaperCard({ b, card, w }: { b: PublicBusiness; card: CardInfo; w: Retur
   const block = Math.min(blk, blocks - 1);
   const rows = cal.slice(block * BLOCK, block * BLOCK + BLOCK);
   const items = card.program.items.filter((item) => !layout?.hiddenItems.includes(item));
-  const ink = '#14213D'; const paper = `color-mix(in srgb, ${theme.accent} 16%, #FFFFFF)`; const line = `color-mix(in srgb, ${ink} 35%, ${paper})`;
+  const ink = '#14213D'; const paper = card.today.used.length ? cardPaper(card.program.arrivalColor ?? '#86efac') : card.program.cardColor ? cardPaper(card.program.cardColor) : `color-mix(in srgb, ${theme.accent} 16%, #FFFFFF)`; const line = `color-mix(in srgb, ${ink} 35%, ${paper})`;
   const m = card.member; const local = (x: string) => (x.startsWith('250') ? `0${x.slice(3)}` : x); const phones = [b.contact.phone, b.contact.whatsapp].filter((x): x is string => !!x).map(local).filter((x, i, a) => a.indexOf(x) === i);
   const stamp = m.paid ? { text: tx('PAID'), color: '#2848C8' } : { text: tx('NOT PAID'), color: '#B91C1C' };
   const short = (s: string) => (s.length > 10 ? `${s.slice(0, 9)}…` : s);
@@ -209,7 +218,7 @@ function scanVenueCode(raw: string, slug: string): string | null {
 }
 
 /* ---- the customer's dashboard ---- */
-export function Dashboard({ b, lang, onClose, onSignedOut, scanCode, takeScanPasscode }: { b: PublicBusiness; lang: Lang; onClose: () => void; onSignedOut: () => void; scanCode?: string; takeScanPasscode?: () => string }) {
+export function Dashboard({ b, lang, onClose, onSignedOut, programId, scanCode, takeScanPasscode }: { b: PublicBusiness; lang: Lang; onClose: () => void; onSignedOut: () => void; programId?: string; scanCode?: string; takeScanPasscode?: () => string }) {
   const { tx, t, w } = useWords(b, lang); const theme = THEMES[b.theme] ?? THEMES.gold; const slug = b.slug;
   const [me, setMe] = useState<MeInfo | null>(null); const [card, setCard] = useState<CardInfo | null>(null); const [sel, setSel] = useState<string | undefined>(); const [err, setErr] = useState('');
   const [phone, setPhone] = useState(''); const [ref, setRef] = useState(''); const [busy, setBusy] = useState(false); const [big, setBig] = useState(false); const [pinOpen, setPinOpen] = useState(false); const [pins, setPins] = useState({ cur: '', next: '' }); const [pinMsg, setPinMsg] = useState('');
@@ -221,7 +230,7 @@ export function Dashboard({ b, lang, onClose, onSignedOut, scanCode, takeScanPas
   const [checkinError, setCheckinError] = useState('');
   const checkingIn = useRef(false);
   const fail = useCallback((e: unknown) => { const m = e instanceof Error ? e.message : tx('Something went wrong. Please try again.'); if (/sign in again/i.test(m)) { clearSession(slug); onSignedOut(); return; } setErr(m); }, [slug, onSignedOut, tx]);
-  const load = useCallback(async () => { const s = session(); if (!s) { onSignedOut(); return; } try { const [m, c] = await Promise.all([publicApi.me(slug, s), publicApi.card(slug, s, sel)]); setMe(m); setCard(c); setErr(''); waiting.current = !!c.payment?.promptSent; if (!sel) setSel(c.cardId); } catch (e) { fail(e); } }, [slug, sel, fail, onSignedOut]); // eslint-disable-line react-hooks/exhaustive-deps
+  const load = useCallback(async () => { const s = session(); if (!s) { onSignedOut(); return; } try { const m = await publicApi.me(slug, s); const id = sel ?? m.cards.find((entry) => entry.programId === programId)?.id; if (programId && !id) throw new Error(tx('You have no card for this program. Open the program link and choose Join as a new member.')); const c = await publicApi.card(slug, s, id); setMe(m); setCard(c); setErr(''); waiting.current = !!c.payment?.promptSent; if (!sel) setSel(c.cardId); } catch (e) { fail(e); } }, [slug, sel, programId, fail, onSignedOut]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { void load(); const i = window.setInterval(() => void load(), waiting.current ? 4000 : 15_000); return () => window.clearInterval(i); }, [load, card?.payment?.promptSent]);
   const act = async (fn: (s: string, id: string) => Promise<unknown>) => { const s = session(); if (!s || !card) return; setBusy(true); setErr(''); try { await fn(s, card.cardId); await load(); } catch (e) { fail(e); } finally { setBusy(false); } };
   async function doTick(code: string, passcode?: string) {
@@ -232,7 +241,7 @@ export function Dashboard({ b, lang, onClose, onSignedOut, scanCode, takeScanPas
     setCheckinError('');
     setFlash('');
     try {
-      const result = await publicApi.tick(slug, token, code, passcode);
+      const result = await publicApi.tick(slug, token, code === 'direct' ? '' : code, passcode, code === 'direct' ? card?.cardId : undefined);
       setConfirmationCode('');
       setTyped('');
       setSel(result.cardId);
@@ -305,7 +314,7 @@ export function Dashboard({ b, lang, onClose, onSignedOut, scanCode, takeScanPas
             <div className="rounded-full px-4 py-2 text-center text-sm font-bold tracking-wide text-white" style={{ background: tone }}>{label}</div>
             {((m.state === 'active' && card.tick) || confirmationCode || checkinError) && (
               <div className="space-y-3 rounded-2xl bg-white p-4">
-                <p className="font-display text-lg font-semibold">{tx("Scan the business's code")}</p>
+                <p className="font-display text-lg font-semibold">{card.tick?.needsCode === false ? tx("Meal check-in") : tx("Scan the business's code")}</p>
                 {confirmationCode ? (
                   <form className="space-y-2" onSubmit={(event) => { event.preventDefault(); if (/^\d{4,6}$/.test(scanPasscode)) void doTick(confirmationCode, scanPasscode); }}>
                     <label className="block text-sm font-medium">{tx("Enter your passcode to confirm check-in")}
@@ -318,7 +327,7 @@ export function Dashboard({ b, lang, onClose, onSignedOut, scanCode, takeScanPas
                   </form>
                 ) : m.state === 'active' && card.tick && (
                   <>
-                    {camera ? (
+                    {card.tick.needsCode === false ? <button type="button" className="min-h-12 w-full rounded-xl border px-4 font-semibold" disabled={busy || !card.tick.items.some((item) => item.allowed)} onClick={() => prepareCheckin('direct')}>{tx("Check in for the current meal")}</button> : <>{camera ? (
                       <div className="relative overflow-hidden rounded-xl bg-black">
                         <video ref={scanner.video} muted playsInline className="aspect-square w-full object-cover" aria-label={tx("Camera")} />
                         <button type="button" className="absolute right-2 top-2 rounded-full bg-black/70 p-2 text-white" onClick={() => setCamera(false)} aria-label={tx("Close the camera")}><X size={18} /></button>
@@ -331,7 +340,7 @@ export function Dashboard({ b, lang, onClose, onSignedOut, scanCode, takeScanPas
                     <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); if (/^\d{6}$/.test(typed)) prepareCheckin(typed); }}>
                       <input className={`${field} !mt-0 font-mono text-xl tracking-[0.3em]`} value={typed} onChange={(event) => setTyped(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" maxLength={6} placeholder={tx("6-digit code")} aria-label={tx('Code shown at the business')} />
                       <button type="submit" disabled={busy || typed.length !== 6} className="min-h-12 shrink-0 rounded-xl border px-4 font-semibold disabled:opacity-50">{tx('Use code')}</button>
-                    </form>
+                    </form></>}
                   </>
                 )}
                 {checkinError && <p role="alert" className="text-sm text-rose-700">{checkinError}</p>}
@@ -383,3 +392,4 @@ function Qr({ text, size }: { text: string; size: number }) {
   return src ? <img src={src} width={size} height={size} alt="" className="mx-auto rounded-2xl" /> : <div style={{ width: size, height: size }} className="mx-auto animate-pulse rounded-2xl bg-[#F2F4F7]" />;
 }
 const Ticking = () => { const [t, setT] = useState(() => new Date()); useEffect(() => { const i = window.setInterval(() => setT(new Date()), 1000); return () => window.clearInterval(i); }, []); return <span className="font-mono tabular-nums">{t.toLocaleTimeString('en-GB', { timeZone: 'Africa/Kigali' })}</span>; };
+
