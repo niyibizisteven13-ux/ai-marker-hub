@@ -209,10 +209,17 @@ function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInf
     timeZone: 'Africa/Kigali', year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(new Date()));
   const restaurant = b.category === 'restaurant';
+  const [itemText, setItemText] = useState<string>();
   const [sample, setSample] = useState('');
   const [initialLayout, setInitialLayout] = useState<CardLayout | undefined>();
   const [hiddenDate, setHiddenDate] = useState('');
   const [edit, setEdit] = useState<Partial<ProgramInfo> | null>(programs.length ? null : blank(b.category === 'restaurant')); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false); const [copied, setCopied] = useState(''); const [ended, setEnded] = useState<EndProgramResult | null>(null);
+  function openEditor(program: Partial<ProgramInfo>) {
+    setInitialLayout(program.cardLayout);
+    setHiddenDate('');
+    setItemText(undefined);
+    setEdit(program);
+  }
   const endIt = async (p: ProgramInfo) => {
     const n = (p.counts?.active ?? 0) + (p.counts?.pending ?? 0);
     if (!confirm(`${t("End {program}")} "${p.title}"?\n\n${t("Sign-ups close, nobody can be ticked any more, unpaid cards are cancelled and paid cards end today.")} ${n ? `(${n})` : ''}\n${tx("You keep the money and the history: refunds are yours to give. This cannot be undone.")}`)) return;
@@ -266,7 +273,7 @@ function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInf
                 <p className="text-sm text-[var(--app-muted)]">{rwf(p.priceRwf)} · {p.days} {tx('days')}{p.totalUses ? ` · ${p.totalUses} ${w.uses}` : ''} · {p.items.join(', ')} · {p.openDays.map((d) => tx(DAY_LABEL[d])).join(' ')}</p>
                 <p className="mt-1 text-xs text-[var(--app-muted)]">{p.counts?.active ?? 0} {tx('active')} · {p.counts?.pending ?? 0} {tx('waiting for payment')}</p>
                 {p.joinCode ? <p className="mt-1 text-sm">{tx('Join code')}: <b className="font-mono tracking-[0.3em]">{p.joinCode}</b> <span className="text-xs text-[var(--app-muted)]">{t('Give this code to the {members} you accept. It is not on the public page.')}</span></p> : <p className="mt-1 text-xs text-[var(--app-muted)]">{tx('Anyone with the link can join. Set a join code to accept only the people you choose.')}</p>}</div>
-              <div className="flex gap-1.5"><button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => { setInitialLayout(p.cardLayout); setHiddenDate(''); setEdit(p); }}><Pencil size={13} />{tx("Program settings")}</button>
+              <div className="flex gap-1.5"><button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => openEditor(p)}><Pencil size={13} />{tx("Program settings")}</button>
                 <button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={async () => { try { await ownerApi.saveProgram(b.id, { ...p, active: !p.active }); onChange(); } catch (e) { setErr(msg(e)); } }}>{p.active ? tx('Close signups') : tx('Open signups')}</button>
                 {!p.endedAt && <button type="button" disabled={busy} className={`${btnGhost} !min-h-9 !px-3 text-xs text-rose-700`} onClick={() => void endIt(p)}>{t("End {program}")}</button>}
                 <button type="button" className="px-2 text-rose-600" aria-label={t("Delete {program}")} onClick={async () => { if (!confirm(`${tx('Delete')} "${p.title}"?`)) return; try { await ownerApi.deleteProgram(b.id, p.id); onChange(); } catch (e) { setErr(msg(e)); } }}><Trash2 size={15} /></button></div>
@@ -281,7 +288,7 @@ function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInf
           </div>);
       })}
       {err && !edit && <p role="alert" className="text-sm text-rose-600">{err}</p>}
-      {!edit && <button type="button" className={btnPrimary} onClick={() => { setInitialLayout(undefined); setHiddenDate(''); setEdit(blank(b.category === 'restaurant')); }}><Plus size={16} />{t("New {program}")}</button>}
+      {!edit && <button type="button" className={btnPrimary} onClick={() => openEditor(blank(restaurant))}><Plus size={16} />{t("New {program}")}</button>}
       {edit && (
         <form className={`${card} space-y-3`} onSubmit={(e) => { e.preventDefault(); void save(); }}>
           <Title>{edit.id ? t("Edit {program}") : t("New {program}")}</Title>
@@ -290,8 +297,16 @@ function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInf
             <label className="block text-sm font-medium">{tx("Price (RWF), paid once")}<input className={`${input} mt-1`} inputMode="numeric" value={edit.priceRwf ?? ''} onChange={(e) => set({ priceRwf: Number(e.target.value.replace(/\D/g, '')) })} required /></label>
             <label className="block text-sm font-medium">{tx("Lasts (days)")}<input className={`${input} mt-1`} inputMode="numeric" value={edit.days ?? ''} onChange={(e) => set({ days: Number(e.target.value.replace(/\D/g, '')) })} required /></label>
           </div>
-          {b.category === 'restaurant' && <button type="button" className={btnGhost} onClick={() => set({ ...restaurantCard, cardLayout: { ...layout, hiddenItems: [] } })}>{tx("Use three-meal restaurant card")}</button>}
-          <label className="block text-sm font-medium">{tx("What they get each day (separate with commas, for example Lunch or Entry)")}<input className={`${input} mt-1`} value={(edit.items ?? []).join(', ')} onChange={(e) => set({ items: e.target.value.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 4) })} placeholder="Lunch" /></label>
+          {b.category === 'restaurant' && <button type="button" className={btnGhost} onClick={() => {
+            setItemText(undefined);
+            set({ ...restaurantCard, cardLayout: { ...layout, hiddenItems: [] } });
+          }}>{tx("Use three-meal restaurant card")}</button>}
+          <label className="block text-sm font-medium">{tx("What they get each day (separate with commas, for example Lunch or Entry)")}<input className={`${input} mt-1`} value={itemText ?? (edit.items ?? []).join(', ')} onChange={(event) => {
+            const text = event.target.value;
+            setItemText(text);
+            const items = text.split(',').map((item) => item.trim()).filter(Boolean);
+            set({ items: [...new Set(items)].slice(0, 4) });
+          }} placeholder="Lunch" /></label>
           <fieldset className="space-y-3 rounded-xl border border-[var(--app-line)] p-3">
             <legend className="px-1 text-sm font-medium">{tx("Card layout")}</legend>
             <p className="text-xs text-[var(--app-muted)]">{tx("These settings only affect what customers see on the card.")}</p>
