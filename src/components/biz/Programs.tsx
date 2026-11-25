@@ -76,32 +76,61 @@ export function ProgramsView({ b, onChange }: { b: Business; onChange: () => voi
 
 /* ---------- Today: scan a pass, or type a code ---------- */
 /** The code the business shows for customers who tick their own card by scanning: a QR code and 6 digits that change every minute. */
-function CheckinCode({ b, programs }: { b: Business; programs: ProgramInfo[] }) {
+function CheckinCode({ b, programs, revisions }: { b: Business; programs: ProgramInfo[]; revisions?: Record<string, string> }) {
   const { t } = useWords(b); const [pid, setPid] = useState(programs[0]?.id ?? ''); const [c, setC] = useState<{ code: string; expiresInSec: number } | null>(null); const [err, setErr] = useState(''); const [left, setLeft] = useState(0);
-  useEffect(() => { let on = true; let timer = 0; const run = async () => { try { const r = await ownerApi.checkinCode(b.id, pid); if (!on) return; setC(r); setLeft(r.expiresInSec); setErr(''); timer = window.setTimeout(run, Math.max(3, r.expiresInSec) * 1000); } catch (e) { if (on) { setErr(msg(e)); timer = window.setTimeout(run, 15_000); } } }; void run(); return () => { on = false; window.clearTimeout(timer); }; }, [b.id, pid]);
+  const revision = revisions?.[pid] ?? '';
+  const [rotating, setRotating] = useState(false);
+  useEffect(() => { let on = true; let timer = 0; const run = async () => { setC(null); try { const r = await ownerApi.checkinCode(b.id, pid); if (!on) return; setC(r); setLeft(r.expiresInSec); setErr(''); timer = window.setTimeout(run, Math.max(1, r.expiresInSec) * 1000); } catch (e) { if (on) { setErr(msg(e)); timer = window.setTimeout(run, 15_000); } } }; void run(); return () => { on = false; window.clearTimeout(timer); }; }, [b.id, pid, revision]);
   useEffect(() => { const i = window.setInterval(() => setLeft((v) => Math.max(0, v - 1)), 1000); return () => window.clearInterval(i); }, []);
-  const url = c ? `${window.location.origin}/b/${b.slug}?tick=${c.code}` : '';
+  const url = c ? `${window.location.origin}/b/${b.slug}?plan=${encodeURIComponent(pid)}&tick=${c.code}` : '';
   return (
     <section className={`${card} space-y-3 text-center lg:col-span-2`} aria-label={tx("Check-in code")}>
       <Title>{tx("Check-in code")}</Title>
-      <p className="text-sm text-[var(--app-muted)]">{t("Show this where your {members} can see it. They scan it with their phone camera (or type the digits) and their {pass} is ticked. It changes every minute, so a photo of it does not work later.")}</p>
+      <p className="text-sm text-[var(--app-muted)]">{t("Show this where your {members} can see it. They scan it with their phone camera (or type the digits) to start check-in. It changes every minute, so a photo of it does not work later.")}</p>
       {programs.length > 1 && <div className="flex flex-wrap justify-center gap-2" role="tablist">{programs.map((p) => <button key={p.id} type="button" role="tab" aria-selected={pid === p.id} onClick={() => { setPid(p.id); setC(null); }} className={`${pid === p.id ? btnPrimary : btnGhost} !min-h-9 !px-3 text-sm`}>{p.title}</button>)}</div>}
+      {b.category === 'restaurant' && <button type="button" className={btnGhost} disabled={rotating} onClick={async () => {
+        setRotating(true);
+        try { await ownerApi.rotateMealCode(b.id, pid); }
+        catch (e) { setErr(msg(e)); }
+        finally { setRotating(false); }
+      }}>{tx("Change code now")}</button>}
       {err && <p role="alert" className="text-sm text-rose-600"><AlertTriangle size={14} className="mr-1 inline" />{err}</p>}
-      {c ? <div className="mx-auto w-fit"><QrImage text={url} size={220} /><p className="mt-2 font-mono text-4xl font-semibold tracking-[0.25em]" aria-live="off">{c.code.slice(0, 3)} {c.code.slice(3)}</p><p className="text-xs text-[var(--app-muted)]">{tx("New code in")} {left}s</p></div> : !err && <Loader2 className="mx-auto animate-spin" aria-label={tx("Loading")} />}
+      {c ? <div className="mx-auto w-fit"><QrImage key={url} text={url} size={220} /><p className="mt-2 font-mono text-4xl font-semibold tracking-[0.25em]" aria-live="off">{c.code.slice(0, 3)} {c.code.slice(3)}</p><p className="text-xs text-[var(--app-muted)]">{tx("New code in")} {left}s</p></div> : !err && <Loader2 className="mx-auto animate-spin" aria-label={tx("Loading")} />}
     </section>
   );
 }
 
 function TodayTab({ b, hasPlans, selfPrograms, onChange, goPlans }: { b: Business; hasPlans: boolean; selfPrograms: ProgramInfo[]; onChange: () => void; goPlans: () => void }) {
   const { w, t } = useWords(b);
+  const [recordMeal, setRecordMeal] = useState(false);
   const [camera, setCamera] = useState(false); const [code, setCode] = useState(''); const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<(RedeemResult & { token?: string }) | null>(null); const [today, setToday] = useState<TodayInfo | null>(null); const [err, setErr] = useState('');
   const loadToday = useCallback(async () => { try { setToday(await ownerApi.today(b.id)); setErr(''); } catch (e) { setToday(null); setErr(msg(e)); } }, [b.id]);
-  useEffect(() => { void loadToday(); const t = window.setInterval(() => void loadToday(), 20_000); return () => window.clearInterval(t); }, [loadToday]);
+  useEffect(() => {
+    const controller = new AbortController();
+    let version: string | undefined;
+    let timer = 0;
+    async function watch() {
+      try {
+        const next = await ownerApi.today(b.id, version, controller.signal);
+        if (controller.signal.aborted) return;
+        setToday(next);
+        setErr('');
+        version = next.version;
+        timer = window.setTimeout(watch, version ? 0 : 20_000);
+      } catch (e) {
+        if (controller.signal.aborted) return;
+        setErr(msg(e));
+        timer = window.setTimeout(watch, 3000);
+      }
+    }
+    void watch();
+    return () => { controller.abort(); window.clearTimeout(timer); };
+  }, [b.id]);
   const redeem = useCallback(async (body: { token?: string; code?: string; memberId?: string; force?: boolean; item?: string }) => {
     if (busy) return; setBusy(true);
-    try { const r = await ownerApi.redeem(b.id, body); setResult({ ...r, token: body.token }); signal(r.ok); setCode(''); void loadToday(); onChange(); } catch (e) { setErr(msg(e)); } finally { setBusy(false); }
-  }, [b.id, busy, loadToday, onChange]);
+    try { const r = b.category === 'restaurant' && !recordMeal ? await ownerApi.verifyMeal(b.id, body) : await ownerApi.redeem(b.id, body); setResult({ ...r, token: body.token }); signal(r.ok); setCode(''); void loadToday(); onChange(); } catch (e) { setErr(msg(e)); } finally { setBusy(false); }
+  }, [b.id, b.category, recordMeal, busy, loadToday, onChange]);
   const scanner = useScanner(camera && !result, (text) => { void redeem({ token: text }); }, tx);
   if (!hasPlans) return <div className={card}><p className="text-sm">{t("Make your first {program} to get started.")}</p><button type="button" className={`${btnPrimary} mt-3`} onClick={goPlans}><Plus size={16} />{t("Create a {program}")}</button></div>;
   const m = result?.member;
@@ -114,14 +143,20 @@ function TodayTab({ b, hasPlans, selfPrograms, onChange, goPlans }: { b: Busines
         </div>)}
         <p className="text-sm">{tx("Before serving, match the customer's name, card code and meal in today's check-ins.")}</p>
       </section>}
-      {selfPrograms.length > 0 && <CheckinCode b={b} programs={selfPrograms} />}
+      {selfPrograms.length > 0 && <CheckinCode b={b} programs={selfPrograms} revisions={today?.codeRevisions} />}
       <section className={`${card} space-y-3`} aria-label={t("Scan a {pass}")}>
         <Title>{t("Check a {pass}")}</Title>
+        {b.category === 'restaurant' && <div className="flex flex-wrap gap-2">
+          {[false, true].map(write => <button key={String(write)} disabled={busy} type="button" aria-pressed={recordMeal === write} className={recordMeal === write ? btnPrimary : btnGhost} onClick={() => { setRecordMeal(write); setCamera(false); setResult(null); setCode(''); }}>
+            {write ? tx("Record a meal") : tx("Verify receipt")}
+          </button>)}
+        </div>}
+        {b.category === 'restaurant' && recordMeal && <p className="text-sm">{tx("Scan the client’s card QR, including a screenshot, or enter their card code to record one meal.")}</p>}
         {result ? (
           <div role="status" aria-live="polite" className={`rounded-2xl p-5 text-center ${result.ok ? 'bg-emerald-500/15' : 'bg-rose-500/12'}`}>
             {result.ok ? <CheckCircle2 size={44} className="mx-auto text-emerald-600" aria-hidden="true" /> : <XCircle size={44} className="mx-auto text-rose-600" aria-hidden="true" />}
             <p className="mt-2 font-display text-2xl font-semibold">{m?.name ?? t("Unknown {pass}")}</p>
-            <p className={`mt-1 text-base font-semibold ${result.ok ? 'text-emerald-700' : 'text-rose-700'}`}>{result.ok ? `${w.action}: ${result.item}` : result.message}</p>
+            <p className={`mt-1 text-base font-semibold ${result.ok ? 'text-emerald-700' : 'text-rose-700'}`}>{result.ok && (recordMeal || b.category !== 'restaurant') ? `${w.action}: ${result.item}` : result.message}</p>
             {m && <p className="mt-1 text-sm text-[var(--app-muted)]">{m.programTitle} · {m.usesLeft} {t("{uses} left")} · {tx('until')} {shortDate(m.endDate)}</p>}
             <div className="mt-4 flex flex-wrap justify-center gap-2">
               {result.ok && result.useId && <button type="button" className={btnGhost} onClick={async () => { try { await ownerApi.undoUse(b.id, result.useId!); setResult(null); void loadToday(); onChange(); } catch (e) { setErr(msg(e)); } }}><Undo2 size={15} />{tx("Undo")}</button>}
@@ -141,8 +176,8 @@ function TodayTab({ b, hasPlans, selfPrograms, onChange, goPlans }: { b: Busines
             ) : <button type="button" className={`${btnPrimary} w-full !min-h-14 text-base`} onClick={() => setCamera(true)}><Camera size={20} />{t("Scan a {pass}")}</button>}
             {scanner.error && <p role="alert" className="text-sm text-amber-700">{scanner.error}</p>}
             <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (code.trim()) void redeem({ code }); }}>
-              <input className={`${input} font-mono uppercase tracking-wider`} value={code} onChange={(e) => setCode(e.target.value)} placeholder="ABCD-2345" inputMode="text" autoCapitalize="characters" autoComplete="off" aria-label={t("{Pass} code")} />
-              <button type="submit" disabled={busy || !code.trim()} className={btnPrimary}>{busy ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}{tx("Check")}</button>
+              <input className={`${input} font-mono uppercase tracking-wider`} value={code} onChange={(e) => setCode(e.target.value)} placeholder="NYN5-2VGX" inputMode="text" autoCapitalize="characters" autoComplete="off" aria-label={t("{Pass} code")} />
+              <button type="submit" disabled={busy || !code.trim()} className={btnPrimary}>{busy ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}{recordMeal ? tx("Record a meal") : tx("Check")}</button>
             </form>
             <p className="text-xs text-[var(--app-muted)]">{tx("No camera? Type the code shown under the customer's QR code.")}</p>
           </>
@@ -157,7 +192,7 @@ function TodayTab({ b, hasPlans, selfPrograms, onChange, goPlans }: { b: Busines
             <p className="text-sm"><b className="text-2xl tabular-nums">{today.servedCount}</b> {tx("checked in")} · <b className="tabular-nums">{today.notYet.length}</b> {t("have a {program} today and have not come yet")}</p>
             {!today.open && <p className="rounded-xl bg-[var(--app-bg)] p-3 text-sm text-[var(--app-muted)]">{t("Your {programs} are not available today.")}</p>}
             {today.served.length > 0 && <ul className="max-h-64 divide-y divide-[var(--app-line)] overflow-auto text-sm">{today.served.map((s) => (
-              <li key={s.useId} className="flex items-center justify-between gap-2 py-2"><span className="min-w-0"><b>{s.name}</b> · {s.code} <span className="text-[var(--app-muted)]">· {s.item} · {hhmm(s.at)}{s.by === 'self' ? ` · ${tx('ticked by the customer')}` : ''}</span></span>
+              <li key={s.useId} className="flex items-center justify-between gap-2 py-2"><span className="min-w-0"><b>{s.name}</b> · {s.code}{b.category === 'restaurant' && <span className="ml-1 font-mono">#{s.useId.slice(0, 8).toUpperCase()}</span>} <span className="text-[var(--app-muted)]">· {s.item}{s.guest && ` · ${tx("Guest")}`} · {hhmm(s.at)}{s.by === 'self' ? ` · ${tx('ticked by the customer')}` : ''}</span></span>
                 {s.canUndo && <button type="button" className="text-xs text-rose-600 underline" onClick={async () => { try { await ownerApi.undoUse(b.id, s.useId); void loadToday(); onChange(); } catch (e) { setErr(msg(e)); } }}>{tx("Undo")}</button>}</li>))}</ul>}
             {today.notYet.length > 0 && <details className="text-sm"><summary className="cursor-pointer font-medium">{tx("Not yet today")} ({today.notYet.length})</summary>
               <ul className="mt-2 max-h-56 divide-y divide-[var(--app-line)] overflow-auto">{today.notYet.map((n) => <li key={n.memberId} className="flex items-center justify-between gap-2 py-1.5"><span>{n.name}</span><span className="font-mono text-xs text-[var(--app-muted)]">{n.code}</span></li>)}</ul></details>}
@@ -221,7 +256,7 @@ function MemberReport({ b, memberId, program, onChange }: { b: Business; memberI
     <p>{tx("Checked in")}: {history.length} · {member.paid ? tx("Paid") : tx("Waiting for payment")}</p>
     {totals && <p>{totals}</p>}
     <details><summary>{tx("Check-in history")}</summary>
-      <ul className="max-h-56 overflow-auto text-sm">{history.slice().reverse().map(u => <li key={u.at + u.item}>{u.date} · {hhmm(u.at)} · {u.item}</li>)}</ul>
+      <ul className="max-h-56 overflow-auto text-sm">{history.slice().reverse().map(u => <li key={u.id ?? u.at + u.item}>{u.date} · {hhmm(u.at)} · {u.item}{u.guest && ` · ${tx('Guest')}`}</li>)}</ul>
     </details>
     {program && <form className="flex flex-wrap items-end gap-2" onSubmit={async event => {
       event.preventDefault();
@@ -448,18 +483,17 @@ function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInf
               return <div key={item} className="flex items-center gap-2 text-sm"><span className="w-24 truncate">{item}</span><input type="time" className={`${input} !w-32`} value={w?.from ?? ''} onChange={(e) => upd(e.target.value, w?.to ?? '')} aria-label={`${item} ${tx('from')}`} />–<input type="time" className={`${input} !w-32`} value={w?.to ?? ''} onChange={(e) => upd(w?.from ?? '', e.target.value)} aria-label={`${item} ${tx('to')}`} /></div>; })}</div>
             <p className="mt-1 text-xs text-[var(--app-muted)]">{tx("Outside these times the scan says so, and you can still allow it.")}</p></details>
           <label className="block text-sm font-medium">{t("Maximum {members} (optional)")}<input className={`${input} mt-1 !w-40`} inputMode="numeric" value={edit.maxMembers ?? ''} onChange={(e) => set({ maxMembers: e.target.value ? Number(e.target.value.replace(/\D/g, '')) : undefined })} /></label>
-          <label className="block text-sm font-medium">{t("Total {uses} (optional)")}<input className={`${input} mt-1 !w-40`} inputMode="numeric" value={edit.totalUses ?? ''} onChange={(e) => set({ totalUses: e.target.value ? Number(e.target.value.replace(/\D/g, '')) : undefined })} placeholder={tx("No limit")} /><span className="mt-1 block text-xs font-normal text-[var(--app-muted)]">{t("For example 10 visits or 4 haircuts. Leave empty for one {use} of each item per day.")}</span></label>
+          <label className="block text-sm font-medium">{t("Total {uses} (optional)")}<input className={`${input} mt-1 !w-40`} inputMode="numeric" value={edit.totalUses ?? ''} onChange={(e) => set({ totalUses: e.target.value ? Number(e.target.value.replace(/\D/g, '')) : undefined })} placeholder={tx("No limit")} /><span className="mt-1 block text-xs font-normal text-[var(--app-muted)]">{restaurant && edit.checkIn === 'self' ? tx("Each serving for the member or a guest uses one credit. Leave empty for unlimited guest servings during meal hours.") : t("For example 10 visits or 4 haircuts. Leave empty for one {use} of each item per day.")}</span></label>
           <div className="block text-sm font-medium">{tx("Join code (optional)")}
             <div className="mt-1 flex flex-wrap items-center gap-2"><input className={`${input} !w-32 font-mono tracking-[0.4em]`} inputMode="numeric" maxLength={4} value={edit.joinCode ?? ''} onChange={(e) => set({ joinCode: e.target.value.replace(/\D/g, '').slice(0, 4) })} placeholder="1234" aria-label={tx("Join code (optional)")} />
               <button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => set({ joinCode: String(Math.floor(1000 + Math.random() * 9000)) })}>{tx("Make a code")}</button>
               {edit.joinCode && <button type="button" className="text-xs text-[var(--app-muted)] underline" onClick={() => set({ joinCode: '' })}>{tx("No code")}</button>}</div>
             <span className="mt-1 block text-xs font-normal text-[var(--app-muted)]">{t("4 digits. People must write it to join, so only the {members} you give it to can join.")}</span></div>
-          <div className="block text-sm font-medium">{tx("Who ticks the card")}
+          {restaurant ? <p className="rounded-xl border p-3 text-sm">{tx("Clients scan the venue QR or enter the six-digit code, choose how many meals they need, and confirm with their passcode. Only the owner can undo meal ticks.")}</p> : <div className="block text-sm font-medium">{tx("Who ticks the card")}
             <div className="mt-1 grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label={tx("Who ticks the card")}>
               {([['staff', tx('The business'), tx('You scan the QR code or type the code.')], ['self', tx('Customer or cashier'), tx('Customers can check in themselves. Cashiers can also scan a customer card.')]] as const).map(([v, label, hint]) => (
                 <button key={v} type="button" role="radio" aria-checked={(edit.checkIn ?? 'staff') === v} onClick={() => set({ checkIn: v })} className={`rounded-xl border-2 p-3 text-left ${(edit.checkIn ?? 'staff') === v ? 'border-[var(--app-accent,#0E1722)] bg-[var(--app-soft,#F2F4F7)]' : 'border-[var(--app-line,#D9DEE5)]'}`}><b className="block text-sm">{label}</b><span className="block text-xs font-normal text-[var(--app-muted)]">{hint}</span></button>))}</div>
-            {b.category === 'restaurant' && edit.checkIn === 'self' && <label className="mt-2 flex items-center gap-2"><input type="checkbox" checked={!!edit.linkCheckIn} onChange={(e) => set({ linkCheckIn: e.target.checked })} />{tx("Allow check-in from the card link with a personal passcode")}</label>}
-            {edit.checkIn === 'self' && !edit.linkCheckIn && <p className="mt-1 text-xs font-normal text-[var(--app-muted)]">{t("Same rules as a staff scan: paid, open day, serving times, one of each each day. Show the check-in code on the Today screen. A customer can take back a wrong tick for one minute, and you see on the Today list who ticked it themselves.")}</p>}</div>
+            {!restaurant && edit.checkIn === 'self' && !edit.linkCheckIn && <p className="mt-1 text-xs font-normal text-[var(--app-muted)]">{t("Same rules as a staff scan: paid, open day, serving times, one of each each day. Show the check-in code on the Today screen. A customer can take back a wrong tick for one minute, and you see on the Today list who ticked it themselves.")}</p>}</div>}
           <label className="block text-sm font-medium">{tx("Note for customers (optional)")}<textarea className={`${input} mt-1`} rows={2} maxLength={300} value={edit.terms ?? ''} onChange={(e) => set({ terms: e.target.value })} placeholder={tx("One use a day. Show your pass each time.")} /></label>
           {err && <p role="alert" className="text-sm text-rose-600"><AlertTriangle size={14} className="mr-1 inline" />{err}</p>}
           <div className="flex gap-2"><button type="submit" disabled={busy || uploadingStamp} className={btnPrimary}>{busy ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}{t("Save {program}")}</button>{programs.length > 0 && <button type="button" className={btnGhost} disabled={uploadingStamp} onClick={() => { setEdit(null); setErr(''); }}>{tx("Cancel")}</button>}</div>

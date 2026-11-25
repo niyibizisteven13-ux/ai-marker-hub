@@ -71,24 +71,27 @@ export interface ProgramSummary {
 export interface RedeemResult { ok: boolean; code?: string; message?: string; item?: string; useId?: string; member?: MemberInfo }
 type CurrentMeal = { item: string; color: string };
 export interface TodayInfo {
+  version?: string;
+  codeRevisions?: Record<string, string>;
   mealColors?: Array<{ programId: string; title: string; current: CurrentMeal | null }>;
   date: string; open: boolean; servedCount: number; expected: number;
-  served: Array<{ useId: string; memberId: string; name: string; code: string; item: string; at: string; by?: 'scan' | 'code' | 'self'; canUndo: boolean }>;
+  served: Array<{ guest?: boolean; useId: string; memberId: string; name: string; code: string; item: string; at: string; by?: 'scan' | 'code' | 'self'; canUndo: boolean }>;
   notYet: Array<{ memberId: string; name: string; phone: string; code: string }>;
 }
 export interface CardDay { date: string; dow: DayId; open: boolean; used: string[] }
 /** One card, as the signed-in customer sees it: who it is for, the dates and what was used each day (the grid), and the QR code once it is paid. */
 export interface CardInfo {
+  version?: string;
   programId?: string; renewable?: boolean;
-  history?: Array<{ date: string; item: string; at: string; stampImage?: string }>;
+  history?: Array<{ id?: string; guest?: boolean; date: string; item: string; at: string; stampImage?: string }>;
   cardId: string;
   business: { id?: string; name: string; slug: string; theme: string };
   program: { title: string; cardLayout?: CardLayout; mealColors?: Record<string, string> | null; stampImage?: string; shuffleCardColor?: boolean; cardColor?: string; arrivalColor?: string; linkCheckIn?: boolean; checkIn?: 'staff' | 'self'; totalUses?: number; items: string[]; openDays: DayId[]; windows?: ItemWindow[]; terms?: string; priceRwf: number; days: number };
   member: { name: string; phone: string; idNumber?: string; code: string; state: PlanState; startDate: string; endDate: string; daysLeft: number; servingDaysLeft: number; usesLeft: number; usedTotal: number; paid: boolean; paidAt: string | null };
   qr: string | null;
   /** Only when the owner set self check-in: what the customer can tap now, and the tick they can still take back. */
-  tick: null | { needsCode: boolean; requiresPasscode?: boolean; items: Array<{ item: string; allowed: boolean; reason?: string; message?: string }>; undo: { useId: string; item: string } | null };
-  today: { date: string; weekly?: boolean; checkedMeal?: CurrentMeal | null; openToday: boolean; used: Array<{ item: string; at: string }> };
+  tick: null | { guestMeal?: string; needsCode: boolean; requiresPasscode?: boolean; items: Array<{ item: string; allowed: boolean; reason?: string; message?: string }>; undo: { useId: string; item: string } | null };
+  today: { date: string; serverTime?: number; receipt?: { item: string; count: number; at: string; reference: string }; weekly?: boolean; checkedMeal?: CurrentMeal | null; openToday: boolean; used: Array<{ item: string; at: string }> };
   calendar: CardDay[];
   payment: null | { amount: number; momoCode: string | null; momoName: string | null; online: boolean; promptSent: boolean; claimed: { at: string; ref?: string } | null; whatsapp: string | null };
 }

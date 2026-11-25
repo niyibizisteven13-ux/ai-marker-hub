@@ -212,6 +212,8 @@ Object.assign(RW, {
   'Use code': 'Koresha kode',
   '6-digit code': 'Kode y’imibare 6',
   'Enter your passcode to confirm check-in': 'Andika kode yawe y’ibanga kugira ngo wemeze',
+  'How many meals?': 'Urashaka amafunguro angahe?',
+  'Recorded at least five minutes ago': 'Hashize nibura iminota itanu byanditswe',
   'Confirm check-in': 'Emeza ko uhageze',
   'Serving hours (Kigali)': 'Amasaha yo gutanga amafunguro (Kigali)',
   'Scan the check-in QR shown at this business.': 'Sikana kode ya QR yerekanwe kuri ubu bucuruzi.',

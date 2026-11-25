@@ -72,6 +72,7 @@ export interface Program {
   cardColor?: string;
   arrivalColor?: string;
   linkCheckIn?: boolean;
+  codeRevision?: string;
   /** A short rule shown to the customer ("Show your pass each time; one use a day"). */
   terms?: string;
   maxMembers?: number;
@@ -110,7 +111,7 @@ export interface Member {
   note?: string;
   createdAt: string;
 }
-export interface Use { id: string; memberId: string; date: string; item: string; at: string; by: 'scan' | 'code' | 'self'; undone?: boolean; stampImage?: string }
+export interface Use { id: string; memberId: string; date: string; item: string; at: string; by: 'scan' | 'code' | 'self'; undone?: boolean; guestRequest?: string; batchId?: string; stampImage?: string }
 
 /* ---------------------------------------------------------------- dates (Kigali, UTC+2) */
 const KIGALI_MS = 2 * 3600_000;
@@ -172,6 +173,7 @@ export function cleanProgram(input: any, id: string, now: string, prev?: Program
   const p: Program = { id, title, priceRwf: price, days, items, openDays, active: input?.active === undefined ? prev?.active ?? true : input.active !== false, createdAt: prev?.createdAt ?? now };
   const description = clean(input?.description ?? prev?.description, 300); if (description) p.description = description;
   const terms = clean(input?.terms ?? prev?.terms, 300); if (terms) p.terms = terms;
+  if (prev?.codeRevision) p.codeRevision = prev.codeRevision;
   if (windows) p.windows = windows;
   const max = input?.maxMembers === undefined ? prev?.maxMembers : input.maxMembers === null || input.maxMembers === '' ? undefined : Math.round(Number(input.maxMembers));
   if (max !== undefined && Number.isFinite(max) && max >= 1 && max <= MAX_MEMBERS) p.maxMembers = max;
