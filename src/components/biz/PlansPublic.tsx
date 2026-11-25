@@ -329,6 +329,13 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
         {card && m && (
           <div className="space-y-3">
             <div className="rounded-full px-4 py-2 text-center text-sm font-bold tracking-wide text-white" style={{ background: tone }}>{label}</div>
+            {card.today.receipt && <section aria-label={tx("Meal confirmation")} className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950">
+              <p className="flex items-center gap-2 font-semibold"><CheckCircle2 size={20} />{tx("Meal confirmed")}</p>
+              <p className="mt-1 text-2xl font-bold">{card.today.receipt.item} × {card.today.receipt.count}</p>
+              <p>{m.name} · {card.today.date} · {clock(card.today.receipt.at)}</p>
+              <p className="font-mono">#{card.today.receipt.reference}</p>
+              <p className="text-sm">{tx("Show this confirmation to the waiter.")}</p>
+            </section>}
             {((m.state === 'active' && card.tick) || confirmationCode || checkinError) && (
               <div className="space-y-3 rounded-2xl bg-white p-4">
                 <p className="font-display text-lg font-semibold">{card.tick?.needsCode === false ? tx("Meal check-in") : tx("Scan the business's code")}</p>

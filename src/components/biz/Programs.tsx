@@ -100,8 +100,8 @@ function TodayTab({ b, hasPlans, selfPrograms, onChange, goPlans }: { b: Busines
   useEffect(() => { void loadToday(); const t = window.setInterval(() => void loadToday(), 20_000); return () => window.clearInterval(t); }, [loadToday]);
   const redeem = useCallback(async (body: { token?: string; code?: string; memberId?: string; force?: boolean; item?: string }) => {
     if (busy) return; setBusy(true);
-    try { const r = await ownerApi.redeem(b.id, body); setResult({ ...r, token: body.token }); signal(r.ok); setCode(''); void loadToday(); onChange(); } catch (e) { setErr(msg(e)); } finally { setBusy(false); }
-  }, [b.id, busy, loadToday, onChange]);
+    try { const r = b.category === 'restaurant' ? await ownerApi.verifyMeal(b.id, body) : await ownerApi.redeem(b.id, body); setResult({ ...r, token: body.token }); signal(r.ok); setCode(''); void loadToday(); onChange(); } catch (e) { setErr(msg(e)); } finally { setBusy(false); }
+  }, [b.id, b.category, busy, loadToday, onChange]);
   const scanner = useScanner(camera && !result, (text) => { void redeem({ token: text }); }, tx);
   if (!hasPlans) return <div className={card}><p className="text-sm">{t("Make your first {program} to get started.")}</p><button type="button" className={`${btnPrimary} mt-3`} onClick={goPlans}><Plus size={16} />{t("Create a {program}")}</button></div>;
   const m = result?.member;
@@ -114,14 +114,14 @@ function TodayTab({ b, hasPlans, selfPrograms, onChange, goPlans }: { b: Busines
         </div>)}
         <p className="text-sm">{tx("Before serving, match the customer's name, card code and meal in today's check-ins.")}</p>
       </section>}
-      {selfPrograms.length > 0 && <CheckinCode b={b} programs={selfPrograms} />}
+      {b.category !== 'restaurant' && selfPrograms.length > 0 && <CheckinCode b={b} programs={selfPrograms} />}
       <section className={`${card} space-y-3`} aria-label={t("Scan a {pass}")}>
         <Title>{t("Check a {pass}")}</Title>
         {result ? (
           <div role="status" aria-live="polite" className={`rounded-2xl p-5 text-center ${result.ok ? 'bg-emerald-500/15' : 'bg-rose-500/12'}`}>
             {result.ok ? <CheckCircle2 size={44} className="mx-auto text-emerald-600" aria-hidden="true" /> : <XCircle size={44} className="mx-auto text-rose-600" aria-hidden="true" />}
             <p className="mt-2 font-display text-2xl font-semibold">{m?.name ?? t("Unknown {pass}")}</p>
-            <p className={`mt-1 text-base font-semibold ${result.ok ? 'text-emerald-700' : 'text-rose-700'}`}>{result.ok ? `${w.action}: ${result.item}` : result.message}</p>
+            <p className={`mt-1 text-base font-semibold ${result.ok ? 'text-emerald-700' : 'text-rose-700'}`}>{result.ok && b.category !== 'restaurant' ? `${w.action}: ${result.item}` : result.message}</p>
             {m && <p className="mt-1 text-sm text-[var(--app-muted)]">{m.programTitle} · {m.usesLeft} {t("{uses} left")} · {tx('until')} {shortDate(m.endDate)}</p>}
             <div className="mt-4 flex flex-wrap justify-center gap-2">
               {result.ok && result.useId && <button type="button" className={btnGhost} onClick={async () => { try { await ownerApi.undoUse(b.id, result.useId!); setResult(null); void loadToday(); onChange(); } catch (e) { setErr(msg(e)); } }}><Undo2 size={15} />{tx("Undo")}</button>}
@@ -157,7 +157,7 @@ function TodayTab({ b, hasPlans, selfPrograms, onChange, goPlans }: { b: Busines
             <p className="text-sm"><b className="text-2xl tabular-nums">{today.servedCount}</b> {tx("checked in")} · <b className="tabular-nums">{today.notYet.length}</b> {t("have a {program} today and have not come yet")}</p>
             {!today.open && <p className="rounded-xl bg-[var(--app-bg)] p-3 text-sm text-[var(--app-muted)]">{t("Your {programs} are not available today.")}</p>}
             {today.served.length > 0 && <ul className="max-h-64 divide-y divide-[var(--app-line)] overflow-auto text-sm">{today.served.map((s) => (
-              <li key={s.useId} className="flex items-center justify-between gap-2 py-2"><span className="min-w-0"><b>{s.name}</b> · {s.code} <span className="text-[var(--app-muted)]">· {s.item}{s.guest && ` · ${tx("Guest")}`} · {hhmm(s.at)}{s.by === 'self' ? ` · ${tx('ticked by the customer')}` : ''}</span></span>
+              <li key={s.useId} className="flex items-center justify-between gap-2 py-2"><span className="min-w-0"><b>{s.name}</b> · {s.code}{b.category === 'restaurant' && <span className="ml-1 font-mono">#{s.useId.slice(0, 8).toUpperCase()}</span>} <span className="text-[var(--app-muted)]">· {s.item}{s.guest && ` · ${tx("Guest")}`} · {hhmm(s.at)}{s.by === 'self' ? ` · ${tx('ticked by the customer')}` : ''}</span></span>
                 {s.canUndo && <button type="button" className="text-xs text-rose-600 underline" onClick={async () => { try { await ownerApi.undoUse(b.id, s.useId); void loadToday(); onChange(); } catch (e) { setErr(msg(e)); } }}>{tx("Undo")}</button>}</li>))}</ul>}
             {today.notYet.length > 0 && <details className="text-sm"><summary className="cursor-pointer font-medium">{tx("Not yet today")} ({today.notYet.length})</summary>
               <ul className="mt-2 max-h-56 divide-y divide-[var(--app-line)] overflow-auto">{today.notYet.map((n) => <li key={n.memberId} className="flex items-center justify-between gap-2 py-1.5"><span>{n.name}</span><span className="font-mono text-xs text-[var(--app-muted)]">{n.code}</span></li>)}</ul></details>}
@@ -454,12 +454,11 @@ function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInf
               <button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => set({ joinCode: String(Math.floor(1000 + Math.random() * 9000)) })}>{tx("Make a code")}</button>
               {edit.joinCode && <button type="button" className="text-xs text-[var(--app-muted)] underline" onClick={() => set({ joinCode: '' })}>{tx("No code")}</button>}</div>
             <span className="mt-1 block text-xs font-normal text-[var(--app-muted)]">{t("4 digits. People must write it to join, so only the {members} you give it to can join.")}</span></div>
-          <div className="block text-sm font-medium">{tx("Who ticks the card")}
+          {restaurant ? <p className="rounded-xl border p-3 text-sm">{tx("Clients tick their meals and guest servings with their passcode, then show the confirmation at the counter. Scanning is optional. Only the owner can undo meal ticks.")}</p> : <div className="block text-sm font-medium">{tx("Who ticks the card")}
             <div className="mt-1 grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label={tx("Who ticks the card")}>
               {([['staff', tx('The business'), tx('You scan the QR code or type the code.')], ['self', tx('Customer or cashier'), tx('Customers can check in themselves. Cashiers can also scan a customer card.')]] as const).map(([v, label, hint]) => (
                 <button key={v} type="button" role="radio" aria-checked={(edit.checkIn ?? 'staff') === v} onClick={() => set({ checkIn: v })} className={`rounded-xl border-2 p-3 text-left ${(edit.checkIn ?? 'staff') === v ? 'border-[var(--app-accent,#0E1722)] bg-[var(--app-soft,#F2F4F7)]' : 'border-[var(--app-line,#D9DEE5)]'}`}><b className="block text-sm">{label}</b><span className="block text-xs font-normal text-[var(--app-muted)]">{hint}</span></button>))}</div>
-            {b.category === 'restaurant' && edit.checkIn === 'self' && <label className="mt-2 flex items-center gap-2"><input type="checkbox" checked={!!edit.linkCheckIn} onChange={(e) => set({ linkCheckIn: e.target.checked })} />{tx("Allow check-in from the card link with a personal passcode")}</label>}
-            {!restaurant && edit.checkIn === 'self' && !edit.linkCheckIn && <p className="mt-1 text-xs font-normal text-[var(--app-muted)]">{t("Same rules as a staff scan: paid, open day, serving times, one of each each day. Show the check-in code on the Today screen. A customer can take back a wrong tick for one minute, and you see on the Today list who ticked it themselves.")}</p>}</div>
+            {!restaurant && edit.checkIn === 'self' && !edit.linkCheckIn && <p className="mt-1 text-xs font-normal text-[var(--app-muted)]">{t("Same rules as a staff scan: paid, open day, serving times, one of each each day. Show the check-in code on the Today screen. A customer can take back a wrong tick for one minute, and you see on the Today list who ticked it themselves.")}</p>}</div>}
           <label className="block text-sm font-medium">{tx("Note for customers (optional)")}<textarea className={`${input} mt-1`} rows={2} maxLength={300} value={edit.terms ?? ''} onChange={(e) => set({ terms: e.target.value })} placeholder={tx("One use a day. Show your pass each time.")} /></label>
           {err && <p role="alert" className="text-sm text-rose-600"><AlertTriangle size={14} className="mr-1 inline" />{err}</p>}
           <div className="flex gap-2"><button type="submit" disabled={busy || uploadingStamp} className={btnPrimary}>{busy ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}{t("Save {program}")}</button>{programs.length > 0 && <button type="button" className={btnGhost} disabled={uploadingStamp} onClick={() => { setEdit(null); setErr(''); }}>{tx("Cancel")}</button>}</div>

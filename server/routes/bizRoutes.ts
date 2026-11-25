@@ -183,6 +183,10 @@ export function createBizRouter(): Router {
   r.patch('/:id/members/:mid', run(async (req, res) => res.json({ member: await svc().setMember(me(req), req.params.id, req.params.mid, req.body ?? {}) })));
   r.post('/:id/programs/:pid/end', run(async (req, res) => res.json(await svc().endProgram(me(req), req.params.id, req.params.pid))));
   r.get('/:id/programs/:pid/checkin-code', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await svc().checkinCode(me(req), req.params.id, req.params.pid)); }));
+  r.post('/:id/uses/verify', run(async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(await svc().verifyMeal(me(req), req.params.id, req.body ?? {}));
+  }));
   r.post('/:id/uses/redeem', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await svc().redeem(me(req), req.params.id, req.body ?? {})); }));
   r.post('/:id/uses/:useId/undo', run(async (req, res) => res.json(await svc().undoUse(me(req), req.params.id, req.params.useId))));
   r.get('/:id/uses/today', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await svc().today(me(req), req.params.id)); }));

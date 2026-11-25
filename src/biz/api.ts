@@ -84,6 +84,7 @@ export const ownerApi = {
   resetPasscode: async (id: string, mid: string) => (await read<{ passcode: string }>(await authFetch(`/api/biz/${id}/members/${mid}/reset-passcode`, json('POST')))).passcode,
   confirmMember: async (id: string, mid: string, method: 'cash' | 'momo') => (await read<{ member: MemberInfo }>(await authFetch(`/api/biz/${id}/members/${mid}/confirm`, json('POST', { method })))).member,
   setMember: async (id: string, mid: string, body: { action: 'pause' | 'resume' | 'cancel' | 'extend' | 'note'; days?: number; note?: string }) => (await read<{ member: MemberInfo }>(await authFetch(`/api/biz/${id}/members/${mid}`, json('PATCH', body)))).member,
+  verifyMeal: async (id: string, body: { token?: string; code?: string }) => read<RedeemResult>(await authFetch(`/api/biz/${id}/uses/verify`, json('POST', body))),
   redeem: async (id: string, body: { token?: string; code?: string; memberId?: string; item?: string; force?: boolean }) => read<RedeemResult>(await authFetch(`/api/biz/${id}/uses/redeem`, json('POST', body))),
   undoUse: async (id: string, useId: string) => read<{ ok: boolean }>(await authFetch(`/api/biz/${id}/uses/${useId}/undo`, json('POST'))),
   checkinCode: async (id: string, programId: string) => read<{ code: string; expiresInSec: number; program: string }>(await authFetch(`/api/biz/${id}/programs/${encodeURIComponent(programId)}/checkin-code`)),

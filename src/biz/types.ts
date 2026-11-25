@@ -88,7 +88,7 @@ export interface CardInfo {
   qr: string | null;
   /** Only when the owner set self check-in: what the customer can tap now, and the tick they can still take back. */
   tick: null | { guestMeal?: string; needsCode: boolean; requiresPasscode?: boolean; items: Array<{ item: string; allowed: boolean; reason?: string; message?: string }>; undo: { useId: string; item: string } | null };
-  today: { date: string; weekly?: boolean; checkedMeal?: CurrentMeal | null; openToday: boolean; used: Array<{ item: string; at: string }> };
+  today: { date: string; receipt?: { item: string; count: number; at: string; reference: string }; weekly?: boolean; checkedMeal?: CurrentMeal | null; openToday: boolean; used: Array<{ item: string; at: string }> };
   calendar: CardDay[];
   payment: null | { amount: number; momoCode: string | null; momoName: string | null; online: boolean; promptSent: boolean; claimed: { at: string; ref?: string } | null; whatsapp: string | null };
 }
