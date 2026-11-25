@@ -1,4 +1,4 @@
-import { PaperCard } from './PlansPublic';
+import { CardWatermark, PaperCard } from './PlansPublic';
 import { mealColor, mealColorKey, mealInk, restaurantCard, cardPaper, dailyMealPaper } from '../../../server/services/biz/mealCard';
 import { useScanner } from './useScanner';
 import { getStudioLang, tx } from '../../biz/studioI18n';
@@ -435,10 +435,11 @@ function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInf
               <option value="">{tx("Before check-in")}</option>
               {edit.items?.map((item) => <option key={item} value={item}>{tx("After check-in")} · {item}</option>)}
             </select></label>
-            <div className="rounded-xl p-4 text-[#14213D]" style={{ color: sampleColor ? mealInk(sampleColor) : undefined, background: weekly ? sampleColor ?? '#ffffff' : shuffle ? dailyMealPaper(previewDate, edit.cardColor) : cardPaper(sample ? edit.arrivalColor ?? '#86efac' : edit.cardColor ?? '#ffffff') }}>
+            <div className="relative isolate overflow-hidden rounded-xl p-4 text-[#14213D]" style={{ color: sampleColor ? mealInk(sampleColor) : undefined, background: weekly ? sampleColor ?? '#ffffff' : shuffle ? dailyMealPaper(previewDate, edit.cardColor) : cardPaper(sample ? edit.arrivalColor ?? '#86efac' : edit.cardColor ?? '#ffffff') }}>
+              <CardWatermark businessId={b.id} image={edit.stampImage} />
               <strong>{edit.title || b.name}</strong>
               <table className="mt-2 w-full text-center text-sm"><thead><tr><th>{tx("Date")}</th>{edit.items?.filter(item => !layout.hiddenItems.includes(item)).map(item => <th key={item}>{item}</th>)}</tr></thead>
-                <tbody><tr><th>{weekly || shuffle ? previewDate : tx("Today")}</th>{edit.items?.filter(item => !layout.hiddenItems.includes(item)).map(item => <td className="relative h-9 border p-1" key={item}>{sample === item && edit.stampImage && <img alt={tx("Business stamp")} src={stampImageUrl(b.id, edit.stampImage)} className="pointer-events-none absolute inset-0 h-full w-full object-contain" />}<span className="relative">{sample === item ? '✓' : ' '}</span></td>)}</tr></tbody></table>
+                <tbody><tr><th>{weekly || shuffle ? previewDate : tx("Today")}</th>{edit.items?.filter(item => !layout.hiddenItems.includes(item)).map(item => <td className="relative h-9 border p-1" key={item}><span className="relative">{sample === item ? '✓' : ' '}</span></td>)}</tr></tbody></table>
             </div>
           </fieldset>
           <fieldset><legend className="text-sm font-medium">{tx("Days it is available")}</legend><div className="mt-1.5 flex flex-wrap gap-1.5">{ALL_DAYS.map((d) => { const on = (edit.openDays ?? []).includes(d); return <button key={d} type="button" aria-pressed={on} onClick={() => set({ openDays: on ? (edit.openDays ?? []).filter((x) => x !== d) : [...(edit.openDays ?? []), d] })} className={`min-h-10 rounded-xl px-3 text-sm font-semibold ${on ? 'bg-[var(--brand)] text-[var(--brand-on)]' : 'border border-[var(--app-line)] text-[var(--app-muted)]'}`}>{tx(DAY_LABEL[d])}</button>; })}</div></fieldset>

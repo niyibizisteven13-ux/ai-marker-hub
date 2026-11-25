@@ -154,6 +154,12 @@ export function SignIn({ b, lang, onClose, onDone }: { b: PublicBusiness; lang: 
 
 /* ---- the card, laid out like the paper one ---- */
 const BLOCK = 15;
+export function CardWatermark({ businessId, image }: { businessId?: string; image?: string }) {
+  if (!businessId || !image) return null;
+  return <img alt="" aria-hidden="true" draggable={false} src={stampImageUrl(businessId, image)}
+    className="pointer-events-none absolute inset-0 -z-10 m-auto h-[82%] w-[82%] select-none object-contain opacity-20" />;
+}
+
 export function PaperCard({ b, card, w }: { b: Pick<PublicBusiness, 'category' | 'theme' | 'name' | 'contact'>; card: CardInfo; w: ReturnType<typeof wordsOf> }) {
   const tx = useTx(); const theme = THEMES[b.theme] ?? THEMES.gold; const cat = CATEGORIES.find((c) => c.id === b.category)?.label ?? '';
   const layout = card.program.cardLayout;
@@ -168,11 +174,11 @@ export function PaperCard({ b, card, w }: { b: Pick<PublicBusiness, 'category' |
   const ink = checkedColor ? mealInk(checkedColor) : '#14213D';
   const paper = card.today.weekly ? checkedColor ?? '#ffffff' : shuffle ? dailyMealPaper(card.today.date, card.program.cardColor) : card.today.used.length ? cardPaper(card.program.arrivalColor ?? '#86efac') : card.program.cardColor ? cardPaper(card.program.cardColor) : `color-mix(in srgb, ${theme.accent} 16%, #FFFFFF)`; const line = `color-mix(in srgb, ${ink} 35%, ${paper})`;
   const m = card.member; const local = (x: string) => (x.startsWith('250') ? `0${x.slice(3)}` : x); const phones = [b.contact.phone, b.contact.whatsapp].filter((x): x is string => !!x).map(local).filter((x, i, a) => a.indexOf(x) === i);
-  const stamps = new Map(card.history?.filter(u => u.stampImage).map(u => [u.date + '/' + u.item, u.stampImage]));
   const stamp = m.paid ? { text: tx('PAID'), color: '#2848C8' } : { text: tx('NOT PAID'), color: '#B91C1C' };
   const short = (s: string) => (s.length > 10 ? `${s.slice(0, 9)}…` : s);
   return (
-    <div className="relative overflow-hidden rounded-2xl border p-4 shadow-sm" style={{ background: paper, borderColor: line, color: ink }}>
+    <div className="relative isolate overflow-hidden rounded-2xl border p-4 shadow-sm" style={{ background: paper, borderColor: line, color: ink }}>
+      <CardWatermark businessId={card.business.id} image={card.program.stampImage} />
       <span aria-hidden="true" className="absolute left-1/2 top-2 h-3 w-3 -translate-x-1/2 rounded-full border" style={{ background: '#F5F7FA', borderColor: line }} />
       <div className="mt-3 text-center">
         {cat && <p className="text-[11px] font-bold uppercase tracking-[0.25em]" style={{ color: `color-mix(in srgb, ${ink} 70%, ${paper})` }}>{cat}</p>}
@@ -188,16 +194,14 @@ export function PaperCard({ b, card, w }: { b: Pick<PublicBusiness, 'category' |
       </div>
       <div className="mt-4 overflow-hidden rounded-lg border" style={{ borderColor: ink }}>
         <table className="w-full table-fixed border-collapse text-center text-sm" aria-label={tx('Dates and uses')}>
-          <thead><tr style={{ background: `color-mix(in srgb, ${ink} 8%, ${paper})` }}><th className="w-16 border-b border-r px-1 py-1.5 text-xs font-extrabold" style={{ borderColor: ink }}>{tx('Date')}</th>{items.map((it) => <th key={it} title={it} className="border-b border-r px-1 py-1.5 text-xs font-extrabold last:border-r-0" style={{ borderColor: ink }}>{short(it)}</th>)}</tr></thead>
+          <thead><tr style={{ background: `color-mix(in srgb, ${ink} 8%, transparent)` }}><th className="w-16 border-b border-r px-1 py-1.5 text-xs font-extrabold" style={{ borderColor: ink }}>{tx('Date')}</th>{items.map((it) => <th key={it} title={it} className="border-b border-r px-1 py-1.5 text-xs font-extrabold last:border-r-0" style={{ borderColor: ink }}>{short(it)}</th>)}</tr></thead>
           <tbody>
             {rows.length === 0 && <tr><td colSpan={items.length + 1} className="p-3">{tx('No dates shown')}</td></tr>}
             {rows.map((d) => { const isToday = d.date === card.today.date; return (
-              <tr key={d.date} style={isToday && !shuffle && !card.today.weekly ? { background: `color-mix(in srgb, ${theme.accent} 28%, ${paper})` } : undefined}>
+              <tr key={d.date} style={isToday && !shuffle && !card.today.weekly ? { background: `color-mix(in srgb, ${theme.accent} 28%, transparent)` } : undefined}>
                 <th scope="row" className="border-b border-r px-1 py-1 text-left text-xs font-bold" style={{ borderColor: line }}><span className="text-base tabular-nums">{dayNum(d.date)}</span> <span className="font-semibold opacity-70">{tx(DAY[d.dow])}</span>{isToday && <span className="sr-only"> {tx('today')}</span>}</th>
                 {items.map((it) => { const used = d.used.includes(it); const at = card.today.date === d.date ? card.today.used.find((u) => u.item === it)?.at : undefined;
-                  const cellStamp = used && stamps.get(d.date + '/' + it);
                   return <td key={it} title={used ? `${it}${at ? ` ${clock(at)}` : ''}` : undefined} className="relative h-9 overflow-hidden border-b border-r p-0 text-lg last:border-r-0" style={{ borderColor: line, ...(!d.open ? { background: `repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in srgb, ${ink} 14%, transparent) 4px 5px)` } : {}) }}>
-                    {cellStamp && card.business.id && <img alt={tx("Business stamp")} src={stampImageUrl(card.business.id, cellStamp)} className="pointer-events-none absolute inset-0 h-full w-full object-contain" />}
                     {used ? <Check size={20} strokeWidth={3} role="img" aria-label={`${it}: ${tx("Checked in")}`} className="relative mx-auto" style={{ color: checkedColor ? ink : '#047857' }} /> : !d.open ? <span className="text-xs opacity-50" aria-label={tx('Closed')}>—</span> : null}</td>; })}
               </tr>); })}
           </tbody>
