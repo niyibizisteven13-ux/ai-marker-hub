@@ -71,6 +71,8 @@ export interface ProgramSummary {
 export interface RedeemResult { ok: boolean; code?: string; message?: string; item?: string; useId?: string; member?: MemberInfo }
 type CurrentMeal = { item: string; color: string };
 export interface TodayInfo {
+  version?: string;
+  codeRevisions?: Record<string, string>;
   mealColors?: Array<{ programId: string; title: string; current: CurrentMeal | null }>;
   date: string; open: boolean; servedCount: number; expected: number;
   served: Array<{ guest?: boolean; useId: string; memberId: string; name: string; code: string; item: string; at: string; by?: 'scan' | 'code' | 'self'; canUndo: boolean }>;
@@ -88,7 +90,7 @@ export interface CardInfo {
   qr: string | null;
   /** Only when the owner set self check-in: what the customer can tap now, and the tick they can still take back. */
   tick: null | { guestMeal?: string; needsCode: boolean; requiresPasscode?: boolean; items: Array<{ item: string; allowed: boolean; reason?: string; message?: string }>; undo: { useId: string; item: string } | null };
-  today: { date: string; receipt?: { item: string; count: number; at: string; reference: string }; weekly?: boolean; checkedMeal?: CurrentMeal | null; openToday: boolean; used: Array<{ item: string; at: string }> };
+  today: { date: string; serverTime?: number; receipt?: { item: string; count: number; at: string; reference: string }; weekly?: boolean; checkedMeal?: CurrentMeal | null; openToday: boolean; used: Array<{ item: string; at: string }> };
   calendar: CardDay[];
   payment: null | { amount: number; momoCode: string | null; momoName: string | null; online: boolean; promptSent: boolean; claimed: { at: string; ref?: string } | null; whatsapp: string | null };
 }

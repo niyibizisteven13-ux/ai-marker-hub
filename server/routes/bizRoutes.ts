@@ -182,6 +182,7 @@ export function createBizRouter(): Router {
   r.post('/:id/members/:mid/confirm', run(async (req, res) => res.json({ member: await svc().confirmPayment(me(req), req.params.id, req.params.mid, req.body ?? {}) })));
   r.patch('/:id/members/:mid', run(async (req, res) => res.json({ member: await svc().setMember(me(req), req.params.id, req.params.mid, req.body ?? {}) })));
   r.post('/:id/programs/:pid/end', run(async (req, res) => res.json(await svc().endProgram(me(req), req.params.id, req.params.pid))));
+  r.post('/:id/programs/:pid/checkin-code/rotate', run(async (req, res) => res.json(await svc().rotateMealCode(me(req), req.params.id, req.params.pid))));
   r.get('/:id/programs/:pid/checkin-code', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await svc().checkinCode(me(req), req.params.id, req.params.pid)); }));
   r.post('/:id/uses/verify', run(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
@@ -189,7 +190,9 @@ export function createBizRouter(): Router {
   }));
   r.post('/:id/uses/redeem', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await svc().redeem(me(req), req.params.id, req.body ?? {})); }));
   r.post('/:id/uses/:useId/undo', run(async (req, res) => res.json(await svc().undoUse(me(req), req.params.id, req.params.useId))));
-  r.get('/:id/uses/today', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await svc().today(me(req), req.params.id)); }));
+  r.get('/:id/uses/today', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); const abort = new AbortController(); res.once('close', () => abort.abort());
+    const today = await svc().today(me(req), req.params.id, typeof req.query.after === 'string' ? req.query.after : undefined, abort.signal);
+    if (!res.destroyed) res.json(today); }));
 
   r.post('/:id/products', run(async (req, res) => res.status(201).json({ product: await svc().addProduct(me(req), req.params.id, req.body ?? {}) })));
   r.patch('/:id/products/:pid', run(async (req, res) => res.json({ product: await svc().updateProduct(me(req), req.params.id, req.params.pid, req.body ?? {}) })));

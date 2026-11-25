@@ -38,9 +38,10 @@ export const REPORT_REASONS = ['scam', 'illegal', 'offensive', 'copied', 'other'
 const vhash = (visitor: string) => createHash('sha256').update(`biz-like|${visitor}`).digest('hex').slice(0, 14);
 const attempts = new Map<string, number[]>(); const lastCount = new Map<string, number>();
 export const resetBizLimitsForTests = () => { attempts.clear(); lastCount.clear(); };
-function tooMany(key: string, max: number, now: number, windowMs = 3_600_000) {
+function tooMany(key: string, max: number, now: number, windowMs = 3_600_000, record = true) {
   const recent = (attempts.get(key) ?? []).filter((t) => now - t < windowMs);
   if (recent.length >= max) { attempts.set(key, recent); return true; }
+  if (!record) return false;
   attempts.set(key, [...recent, now]); if (attempts.size > 8000) attempts.clear(); return false;
 }
 

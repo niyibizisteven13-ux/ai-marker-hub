@@ -1,6 +1,6 @@
 import { mealInk, cardPaper, dailyMealPaper } from '../../../server/services/biz/mealCard';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Camera, Check, CheckCircle2, Clock, Loader2, LogOut, MessageCircle, Ticket, UtensilsCrossed, X, KeyRound } from 'lucide-react';
+import { Camera, Check, CheckCheck, CheckCircle2, Clock, Loader2, LogOut, MessageCircle, Ticket, UtensilsCrossed, X, KeyRound } from 'lucide-react';
 import { BizApiError, publicApi, stampImageUrl } from '../../biz/api';
 import { useScanner } from './useScanner';
 import { THEMES, CATEGORIES, rwf, type PublicBusiness } from '../../biz/types';
@@ -160,6 +160,27 @@ export function CardWatermark({ businessId, image }: { businessId?: string; imag
     className="pointer-events-none absolute inset-0 -z-10 m-auto h-[82%] w-[82%] select-none object-contain opacity-20" />;
 }
 
+function useMealClock(serverTime?: number, history?: CardInfo['history']) {
+  const [now, setNow] = useState(serverTime ?? Date.now());
+  useEffect(() => {
+    const start = performance.now();
+    const initial = serverTime ?? Date.now();
+    const deadlines = (history ?? []).map(u => Date.parse(u.at) + 300_000);
+    let timer = 0;
+    function refresh() {
+      window.clearTimeout(timer);
+      const time = initial + performance.now() - start;
+      setNow(time);
+      const future = deadlines.filter(deadline => deadline > time);
+      if (future.length) timer = window.setTimeout(refresh, Math.ceil(Math.min(...future) - time));
+    }
+    refresh();
+    document.addEventListener('visibilitychange', refresh);
+    return () => { window.clearTimeout(timer); document.removeEventListener('visibilitychange', refresh); };
+  }, [serverTime, history]);
+  return now;
+}
+
 export function PaperCard({ b, card, w }: { b: Pick<PublicBusiness, 'category' | 'theme' | 'name' | 'contact'>; card: CardInfo; w: ReturnType<typeof wordsOf> }) {
   const tx = useTx(); const theme = THEMES[b.theme] ?? THEMES.gold; const cat = CATEGORIES.find((c) => c.id === b.category)?.label ?? '';
   const layout = card.program.cardLayout;
@@ -175,6 +196,7 @@ export function PaperCard({ b, card, w }: { b: Pick<PublicBusiness, 'category' |
   const paper = card.today.weekly ? checkedColor ?? '#ffffff' : shuffle ? dailyMealPaper(card.today.date, card.program.cardColor) : card.today.used.length ? cardPaper(card.program.arrivalColor ?? '#86efac') : card.program.cardColor ? cardPaper(card.program.cardColor) : `color-mix(in srgb, ${theme.accent} 16%, #FFFFFF)`; const line = `color-mix(in srgb, ${ink} 35%, ${paper})`;
   const m = card.member; const local = (x: string) => (x.startsWith('250') ? `0${x.slice(3)}` : x); const phones = [b.contact.phone, b.contact.whatsapp].filter((x): x is string => !!x).map(local).filter((x, i, a) => a.indexOf(x) === i);
   const guestCard = b.category === 'restaurant' && card.program.checkIn === 'self';
+  const now = useMealClock(card.today.serverTime, card.history);
   const balance = guestCard && card.program.totalUses ? Math.max(0, card.program.totalUses - m.usedTotal) : m.usesLeft;
   const stamp = m.paid ? { text: tx('PAID'), color: '#2848C8' } : { text: tx('NOT PAID'), color: '#B91C1C' };
   const short = (s: string) => (s.length > 10 ? `${s.slice(0, 9)}…` : s);
@@ -202,9 +224,9 @@ export function PaperCard({ b, card, w }: { b: Pick<PublicBusiness, 'category' |
             {rows.map((d) => { const isToday = d.date === card.today.date; return (
               <tr key={d.date} style={isToday && !shuffle && !card.today.weekly ? { background: `color-mix(in srgb, ${theme.accent} 28%, transparent)` } : undefined}>
                 <th scope="row" className="border-b border-r px-1 py-1 text-left text-xs font-bold" style={{ borderColor: line }}><span className="text-base tabular-nums">{dayNum(d.date)}</span> <span className="font-semibold opacity-70">{tx(DAY[d.dow])}</span>{isToday && <span className="sr-only"> {tx('today')}</span>}</th>
-                {items.map((it) => { const count = d.used.filter(item => item === it).length; const used = count > 0; const at = card.today.date === d.date ? card.today.used.find((u) => u.item === it)?.at : undefined;
+                {items.map((it) => { const count = d.used.filter(item => item === it).length; const used = count > 0; const at = card.history?.filter(u => u.date === d.date && u.item === it).at(-1)?.at; const aged = guestCard && !!at && now >= Date.parse(at) + 300_000; const Mark = aged ? CheckCheck : Check;
                   return <td key={it} title={used ? `${it}${at ? ` ${clock(at)}` : ''}` : undefined} className="relative h-9 overflow-hidden border-b border-r p-0 text-lg last:border-r-0" style={{ borderColor: line, ...(!d.open ? { background: `repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in srgb, ${ink} 14%, transparent) 4px 5px)` } : {}) }}>
-                    {used ? <span className="inline-flex items-center gap-1"><Check size={20} strokeWidth={3} role="img" aria-label={`${it}: ${tx("Checked in")}`} className="relative mx-auto" style={{ color: checkedColor ? ink : '#047857' }} />{count > 1 && <b className="text-sm">×{count}</b>}</span> : !d.open ? <span className="text-xs opacity-50" aria-label={tx('Closed')}>—</span> : null}</td>; })}
+                    {used ? <span className="inline-flex items-center gap-1"><Mark size={20} strokeWidth={2.2} role="img" aria-label={`${it}: ${aged ? tx("Recorded at least five minutes ago") : tx("Checked in")}`} className="relative mx-auto" style={{ color: guestCard ? ink : '#047857' }} />{count > 1 && <b className="text-sm">×{count}</b>}</span> : !d.open ? <span className="text-xs opacity-50" aria-label={tx('Closed')}>—</span> : null}</td>; })}
               </tr>); })}
           </tbody>
         </table>
@@ -240,7 +262,9 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
   const [confirmationCode, setConfirmationCode] = useState('');
   const [scanPasscode, setScanPasscode] = useState('');
   const [checkinError, setCheckinError] = useState('');
-  const [guest, setGuest] = useState<{ guestRequest: string; mealDate: string; item: string }>();
+  const [quantity, setQuantity] = useState('1');
+  const [batchId, setBatchId] = useState('');
+  const receiptClock = useMealClock(card?.today.serverTime, card?.history);
   const checkingIn = useRef(false);
   const fail = useCallback((e: unknown) => { const m = e instanceof Error ? e.message : tx('Something went wrong. Please try again.'); if (/sign in again/i.test(m)) { clearSession(slug); onSignedOut(); return; } setErr(m); }, [slug, onSignedOut, tx]);
   const load = useCallback(async () => { const s = session(); if (!s) { onSignedOut(); return; } try { const m = await publicApi.me(slug, s); const id = sel ?? m.cards.find((entry) => entry.programId === programId)?.id; if (programId && !id) throw new Error(tx('You have no card for this program. Open the program link and choose Join as a new member.')); const c = await publicApi.card(slug, s, id); setMe(m); setCard(c); setErr(''); waiting.current = !!c.payment?.promptSent; if (!sel) setSel(c.cardId); } catch (e) { setCard(null); fail(e); } }, [slug, sel, programId, fail, onSignedOut]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -254,21 +278,18 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
     setCheckinError('');
     setFlash('');
     try {
-      const extra = code === 'guest' ? guest : undefined;
-      if (code === 'guest' && !extra) return;
-      const venue = extra ? (card?.tick?.needsCode ? typed : '') : code === 'direct' ? '' : code;
-      const result = await publicApi.tick(slug, token, venue, passcode, extra || code === 'direct' ? card?.cardId : undefined, extra);
-      setGuest(undefined);
+      const batch = b.category === 'restaurant' ? { batchId, quantity: Number(quantity) } : undefined;
+      const result = await publicApi.tick(slug, token, code, passcode, undefined, batch);
       setConfirmationCode('');
       setTyped('');
       setSel(result.cardId);
-      setFlash(`${result.item} ${tx('ticked')}`);
+      setFlash(batch ? `${result.item} × ${batch.quantity} · ${tx('ticked')}` : `${result.item} ${tx('ticked')}`);
       if (result.cardId === card?.cardId) await load();
     } catch (error) {
       if (error instanceof BizApiError && error.code === 'SESSION') {
         fail(error);
       } else {
-        if (code !== 'guest' && (!(error instanceof BizApiError) || !['BAD_LOGIN', 'PASSCODE_REQUIRED'].includes(error.code ?? ''))) setConfirmationCode('');
+        if (error instanceof BizApiError && error.code === 'BAD_CODE') setConfirmationCode('');
         setCheckinError(error instanceof Error ? error.message : tx('Something went wrong. Please try again.'));
       }
     } finally {
@@ -284,7 +305,9 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
     setFlash('');
     if (b.category === 'restaurant' || card?.tick?.requiresPasscode) {
       setConfirmationCode(code);
-      if (passcode) void doTick(code, passcode);
+      setScanPasscode(passcode ?? '');
+      setQuantity('1');
+      setBatchId(crypto.randomUUID());
     } else {
       void doTick(code);
     }
@@ -329,7 +352,7 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
         {card && m && (
           <div className="space-y-3">
             <div className="rounded-full px-4 py-2 text-center text-sm font-bold tracking-wide text-white" style={{ background: tone }}>{label}</div>
-            {card.today.receipt && <section aria-label={tx("Meal confirmation")} className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950">
+            {card.today.receipt && receiptClock < Date.parse(card.today.receipt.at) + 300_000 && <section aria-label={tx("Meal confirmation")} className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950">
               <p className="flex items-center gap-2 font-semibold"><CheckCircle2 size={20} />{tx("Meal confirmed")}</p>
               <p className="mt-1 text-2xl font-bold">{card.today.receipt.item} × {card.today.receipt.count}</p>
               <p>{m.name} · {card.today.date} · {clock(card.today.receipt.at)}</p>
@@ -341,10 +364,12 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
                 <p className="font-display text-lg font-semibold">{card.tick?.needsCode === false ? tx("Meal check-in") : tx("Scan the business's code")}</p>
                 {confirmationCode ? (
                   <form className="space-y-2" onSubmit={(event) => { event.preventDefault(); if (/^\d{4,6}$/.test(scanPasscode)) void doTick(confirmationCode, scanPasscode); }}>
-                    {confirmationCode === 'guest' && <p className="font-semibold">{tx("One additional serving")} · {guest?.item}</p>}
-                    {confirmationCode === 'guest' && card.tick?.needsCode && <label className="block text-sm">{tx("Code shown at the business")}<input required pattern="[0-9]{6}" inputMode="numeric" maxLength={6} className={field} value={typed} onChange={e => setTyped(e.target.value.replace(/\D/g, ''))} /></label>}
+                    <label className="block text-sm font-semibold">{tx("How many meals?")}
+                      <input type="number" inputMode="numeric" required min={1} max={100} step={1} className={field} value={quantity} onChange={e => setQuantity(e.target.value)} autoFocus />
+                    </label>
+                    <div className="flex gap-2">{[1, 2].map(n => <button key={n} type="button" className="rounded-xl border px-4 py-2" aria-pressed={quantity === String(n)} onClick={() => setQuantity(String(n))}>{n}</button>)}</div>
                     <label className="block text-sm font-medium">{tx("Enter your passcode to confirm check-in")}
-                      <input className={`${field} font-mono text-xl tracking-[0.3em]`} type="password" autoComplete="current-password" inputMode="numeric" minLength={4} maxLength={6} required autoFocus value={scanPasscode} onChange={(event) => setScanPasscode(event.target.value.replace(/\D/g, ''))} />
+                      <input className={`${field} font-mono text-xl tracking-[0.3em]`} type="password" autoComplete="current-password" inputMode="numeric" minLength={4} maxLength={6} required value={scanPasscode} onChange={(event) => setScanPasscode(event.target.value.replace(/\D/g, ''))} />
                     </label>
                     <div className="flex gap-2">
                       <button type="submit" disabled={busy || scanPasscode.length < 4} style={{ background: theme.accent, color: theme.on }} className="min-h-12 flex-1 rounded-xl px-4 font-semibold disabled:opacity-50">{tx("Confirm check-in")}</button>
@@ -353,11 +378,7 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
                   </form>
                 ) : m.state === 'active' && card.tick && (
                   <>
-                    {card.tick.guestMeal && <button type="button" disabled={busy} className="min-h-12 w-full rounded-xl px-4 font-semibold" style={{ background: theme.accent, color: theme.on }} onClick={() => {
-                      setGuest({ guestRequest: crypto.randomUUID(), item: card.tick!.guestMeal!, mealDate: card.today.date });
-                      setScanPasscode(''); setTyped(''); setCheckinError(''); setConfirmationCode('guest'); setCamera(false);
-                    }}>{tx("Add one guest serving")} · {card.tick.guestMeal}</button>}
-                    {card.tick.needsCode === false ? <button type="button" className="min-h-12 w-full rounded-xl border px-4 font-semibold" disabled={busy || !card.tick.items.some((item) => item.allowed)} onClick={() => prepareCheckin('direct')}>{tx("Check in for the current meal")}</button> : <>{camera ? (
+                    {camera ? (
                       <div className="relative overflow-hidden rounded-xl bg-black">
                         <video ref={scanner.video} muted playsInline className="aspect-square w-full object-cover" aria-label={tx("Camera")} />
                         <button type="button" className="absolute right-2 top-2 rounded-full bg-black/70 p-2 text-white" onClick={() => setCamera(false)} aria-label={tx("Close the camera")}><X size={18} /></button>
@@ -370,7 +391,7 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
                     <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); if (/^\d{6}$/.test(typed)) prepareCheckin(typed); }}>
                       <input className={`${field} !mt-0 font-mono text-xl tracking-[0.3em]`} value={typed} onChange={(event) => setTyped(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" maxLength={6} placeholder={tx("6-digit code")} aria-label={tx('Code shown at the business')} />
                       <button type="submit" disabled={busy || typed.length !== 6} className="min-h-12 shrink-0 rounded-xl border px-4 font-semibold disabled:opacity-50">{tx('Use code')}</button>
-                    </form></>}
+                    </form>
                   </>
                 )}
                 {checkinError && <p role="alert" className="text-sm text-rose-700">{checkinError}</p>}

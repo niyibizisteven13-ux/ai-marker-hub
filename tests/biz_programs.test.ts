@@ -195,9 +195,9 @@ test('the assistant can make a program, give the share link, and report how the 
   assert.match((await tools.biz_program.execute({}, c)).text, /No plans yet/);
   const made = await tools.biz_program.execute({ title: 'Lunch plan', price_rwf: 40000, days: 30, items: ['Lunch'], open_days: ['mon', 'tue', 'wed', 'thu', 'fri'] }, c);
   assert.match(made.text, /40,000 RWF for 30 days/); assert.match(made.text, /\/b\/campus-canteen\?plan=/); assert.match(made.text, /not published yet/);
-  assert.match(made.text, /clients tick their own meal/);
+  assert.match(made.text, /clients scan or enter the venue code/);
   const id = /id ([\w-]+)\)?/.exec((await tools.biz_program.execute({}, c)).text)![1]; const self = await tools.biz_program.execute({ id, check_in: 'self' }, c);
-  assert.match(self.text, /scanning is optional/); assert.match((await tools.biz_program.execute({}, c)).text, /customers tick their own card/); assert.match((await tools.biz_program.execute({ id, check_in: 'staff' }, c)).text, /clients tick their own meal/);
+  assert.match(self.text, /confirm with their passcode/); assert.match((await tools.biz_program.execute({}, c)).text, /customers tick their own card/); assert.match((await tools.biz_program.execute({ id, check_in: 'staff' }, c)).text, /clients scan or enter the venue code/);
   const bad = await tools.biz_program.execute({ title: 'x', price_rwf: 5 }, c); assert.ok(bad.isError || /price must be between/.test(bad.text), bad.text);
   const list = await tools.biz_program.execute({}, c); assert.match(list.text, /Lunch plan \(id /); assert.match(list.text, /0 active, 0 waiting for payment/);
   const status = await tools.biz_plan_status.execute({}, c); assert.match(status.text, /Members: 0 active/); assert.match(status.text, /Nobody is ending within 3 days/);
@@ -464,7 +464,7 @@ test('restaurant check-in requires the customer passcode and ticks the meal for 
   assert.deepEqual(card.calendar.find((day) => day.date === '2026-11-17')?.used, ['Breakfast', 'Lunch', 'Dinner']);
 });
 
-test('restaurant cards support both passcode check-in and optional venue scans', async () => {
+test('restaurant cards require a venue code and personal passcode', async () => {
   const { svc, biz, prog, at } = await setup({ title: 'Two meals', items: ['Lunch', 'Dinner'], windows: [{ item: 'Lunch', from: '11:00', to: '15:00' }, { item: 'Dinner', from: '18:00', to: '21:00' }], totalUses: 3 });
   assert.equal(prog.checkIn, 'self');
   const j = await joinP(svc, biz.slug, prog.id, { name: 'Eve', phone: '0788300004', remember: true }, 'e'); const id = await cardIdOf(svc, biz.slug, j.session);
@@ -472,7 +472,7 @@ test('restaurant cards support both passcode check-in and optional venue scans',
   await assert.rejects(svc.checkinCode('intruder', biz.id, prog.id), (e: any) => e.status === 404);
   await assert.rejects(selfScan(svc, biz.slug, j.session, { code: c0.code }, 'e'), (e: any) => e.status === 409, 'not while unpaid');
   await svc.confirmPayment('o', biz.id, (await svc.members('o', biz.id))[0].id, { method: 'cash' });
-  let card: any = await passView(svc, biz.slug, j.session); assert.equal(card.tick.needsCode, false); assert.deepEqual(card.tick.items.map((x: any) => [x.item, x.allowed]), [['Lunch', true], ['Dinner', false]]);
+  let card: any = await passView(svc, biz.slug, j.session); assert.equal(card.tick.needsCode, true); assert.deepEqual(card.tick.items.map((x: any) => [x.item, x.allowed]), [['Lunch', true], ['Dinner', false]]);
   await assert.rejects(selfScan(svc, biz.slug, j.session, { cardId: id, code: c0.code === '000000' ? '111111' : '000000' }, 'e'), (e: any) => e.code === 'BAD_CODE', 'a wrong code ticks nothing');
   assert.equal(((await passView(svc, biz.slug, j.session)) as any).today.used.length, 0);
   const r: any = await selfScan(svc, biz.slug, j.session, { code: c0.code }, 'e'); assert.equal(r.ok, true); assert.equal(r.item, 'Lunch', 'at noon the scan ticks lunch without being told which'); card = await passView(svc, biz.slug, j.session);
@@ -504,7 +504,8 @@ test('only the restaurant owner can undo a tick and the confirmation then disapp
   const { svc, biz, prog } = await setup();
   const member = await joinP(svc, biz.slug, prog.id, { name: 'Ann', phone: '0788300005' }, 'a');
   await svc.confirmPayment('o', biz.id, member.cardId, { method: 'cash' });
-  const use = await svc.selfUse(biz.slug, member.session, { cardId: member.cardId, passcode: '4821' }, 'a');
+  await assert.rejects(svc.selfUse(biz.slug, member.session, { cardId: member.cardId, passcode: '4821' }, 'a'), { code: 'BAD_CODE' });
+  const use = await svc.selfUse(biz.slug, member.session, { code: await codeOf(svc, biz.id, prog.id), cardId: member.cardId, passcode: '4821' }, 'a');
   assert.equal((await svc.card(biz.slug, member.session)).today.receipt?.reference, use.useId.slice(0, 8).toUpperCase());
   const checked = await svc.verifyMeal('o', biz.id, { code: member.code });
   assert.equal(checked.ok, true);
@@ -541,20 +542,20 @@ test('card-link check-in uses the selected paid card, personal passcode and Kiga
   const program = await svc.saveProgram('o', biz.id, { title: 'Daily meals', days: 30, priceRwf: 30000, cardColor: '#ffffff', arrivalColor: '#86efac' });
   assert.deepEqual(program.items, ['Breakfast', 'Lunch', 'Dinner']);
   const customer = await joinP(svc, biz.slug, program.id, { name: 'Aline', phone: '0788300009' }, 'link');
-  const tick = (passcode: string) => svc.selfUse(biz.slug, customer.session, { cardId: customer.cardId, passcode, item: 'Dinner' }, 'link');
+  const tick = async (passcode: string) => svc.selfUse(biz.slug, customer.session, { code: await codeOf(svc, biz.id, program.id), cardId: customer.cardId, passcode, item: 'Dinner' }, 'link');
   await assert.rejects(tick('4821'), { code: 'DENIED' });
   await svc.confirmPayment('o', biz.id, customer.cardId, { method: 'cash' });
   await assert.rejects(tick('1111'), { code: 'BAD_LOGIN' });
   assert.equal((await tick('4821')).item, 'Lunch');
   await assert.rejects(tick('4821'), { code: 'ALREADY' });
   const card = await svc.card(biz.slug, customer.session, customer.cardId);
-  assert.equal(card.tick?.needsCode, false);
+  assert.equal(card.tick?.needsCode, true);
   assert.equal(card.program.arrivalColor, '#86efac');
   assert.deepEqual(card.today.used.map(use => use.item), ['Lunch']);
   at(Date.parse('2026-11-17T14:00:00Z'));
   await assert.rejects(tick('4821'), { code: 'DENIED' });
   await svc.saveProgram('o', biz.id, { id: program.id, linkCheckIn: false });
-  assert.equal((await svc.card(biz.slug, customer.session)).tick?.needsCode, false);
+  assert.equal((await svc.card(biz.slug, customer.session)).tick?.needsCode, true);
 });
 
 test('weekly meal colors, stamped individual reports, and a separate renewed card', async () => {
@@ -567,7 +568,7 @@ test('weekly meal colors, stamped individual reports, and a separate renewed car
   await svc.confirmPayment('o', biz.id, first.cardId, { method: 'cash' });
   const ownerCard = () => svc.memberCard('o', biz.id, first.cardId);
   const customerCard = () => svc.card(biz.slug, first.session, first.cardId);
-  const tick = () => svc.selfUse(biz.slug, first.session, { cardId: first.cardId, passcode: '4821' }, 'weekly');
+  const tick = async () => svc.selfUse(biz.slug, first.session, { code: await codeOf(svc, biz.id, prog.id), cardId: first.cardId, passcode: '4821' }, 'weekly');
   assert.deepEqual((await svc.today('o', biz.id)).mealColors[0].current, { item: 'Lunch', color: '#eecc88' });
   assert.equal((await customerCard()).today.checkedMeal, null);
   const used = await tick();
@@ -597,7 +598,7 @@ test('weekly meal colors, stamped individual reports, and a separate renewed car
 test('restaurant guest servings count individually, respect the cap and replay safely', async () => {
   const { svc, biz, prog } = await setup({ items: ['Lunch', 'Dinner'], checkIn: 'self', linkCheckIn: true, totalUses: 3 });
   const customer = await joinP(svc, biz.slug, prog.id, { name: 'Guest host', phone: '0788000031' }, 'guest');
-  const args = { passcode: '4821', cardId: customer.cardId };
+  const args = { code: await codeOf(svc, biz.id, prog.id), passcode: '4821', cardId: customer.cardId };
   const tick = (guestRequest?: string) => svc.selfUse(biz.slug, customer.session, {
     ...args, guestRequest, item: 'Lunch', mealDate: '2026-11-17',
   }, 'guest');
@@ -623,14 +624,39 @@ test('restaurant guest servings count individually, respect the cap and replay s
 test('an uncapped link card accepts a group during lunch and stops when lunch ends', async () => {
   const { svc, biz, prog, at } = await setup({ items: ['Lunch'], checkIn: 'self', linkCheckIn: true });
   const host = await joinP(svc, biz.slug, prog.id, { name: 'Group host', phone: '0788000032' }, 'group');
-  const args = { cardId: host.cardId, passcode: '4821' };
+  const args = { code: await codeOf(svc, biz.id, prog.id), cardId: host.cardId, passcode: '4821' };
   await svc.confirmPayment('o', biz.id, host.cardId, { method: 'cash' });
   await svc.selfUse(biz.slug, host.session, args, 'group');
-  const extra = (i: number) => svc.selfUse(biz.slug, host.session, {
-    ...args, item: 'Lunch', mealDate: '2026-11-17', guestRequest: '00000000-0000-4000-8000-' + String(i).padStart(12, '0'),
+  const extra = async (i: number) => svc.selfUse(biz.slug, host.session, {
+    ...args, code: await codeOf(svc, biz.id, prog.id), item: 'Lunch', mealDate: '2026-11-17', guestRequest: '00000000-0000-4000-8000-' + String(i).padStart(12, '0'),
   }, 'group');
   for (let i = 1; i <= 20; i++) await extra(i);
   assert.equal((await svc.today('o', biz.id)).servedCount, 21);
   at(Date.parse('2026-11-17T14:00:00Z'));
   await assert.rejects(extra(21), { code: 'DENIED' });
+});
+
+test('group check-in counts plates once and the serving receipt expires at five minutes', async () => {
+  const { svc, biz, prog, at } = await setup({ totalUses: 4 });
+  const member = await joinP(svc, biz.slug, prog.id, { name: 'Host', phone: '0788000021' }, 'batch');
+  await svc.confirmPayment('o', biz.id, member.cardId, { method: 'cash' });
+  const input = { code: await codeOf(svc, biz.id, prog.id), passcode: '4821', quantity: 3, batchId: '00000000-0000-4000-8000-000000000010' };
+  const tick = () => svc.selfUse(biz.slug, member.session, input, 'batch');
+  await assert.rejects(svc.rotateMealCode('other', biz.id, prog.id));
+  await svc.rotateMealCode('o', biz.id, prog.id);
+  await assert.rejects(tick(), { code: 'BAD_CODE' });
+  input.code = await codeOf(svc, biz.id, prog.id);
+  const before = await svc.today('o', biz.id);
+  const watching = svc.today('o', biz.id, before.version);
+  await Promise.all([tick(), tick()]);
+  assert.equal((await watching).servedCount, 3);
+  const card = () => svc.card(biz.slug, member.session);
+  assert.equal((await card()).today.receipt?.count, 3);
+  assert.equal((await card()).history.filter(u => u.guest).length, 2);
+  input.batchId = '00000000-0000-4000-8000-000000000011';
+  await assert.rejects(tick(), { code: 'DENIED' });
+  assert.equal((await card()).member.usedTotal, 3);
+  at(T0 + 300_000);
+  assert.equal((await card()).today.receipt, undefined);
+  assert.equal((await card()).history.length, 3);
 });

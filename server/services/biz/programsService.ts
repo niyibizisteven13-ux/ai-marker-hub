@@ -1,5 +1,6 @@
 import { restaurantCard, mealColor } from './mealCard.js';
 import { createHmac, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { clean, cleanPhone } from './model.js';
 import { open as openSecret, seal } from './secrets.js';
 import type { Business, PublicBusiness } from './model.js';
@@ -27,12 +28,18 @@ export interface Helpers {
   save: (b: Business) => Promise<void>;
   publicLive: (slug: string) => Promise<Business | null>;
   alert: (b: Business, n: { title: string; text: string }) => void;
-  tooMany: (key: string, max: number, now: number, windowMs?: number) => boolean;
+  tooMany: (key: string, max: number, now: number, windowMs?: number, record?: boolean) => boolean;
   payReady: (b: Business) => Promise<boolean>;
   startPayment: (b: Business, o: { phone: string; amount: number; item: string; customer?: string; src: LedgerEntry['src']; note?: string }) => Promise<LedgerEntry>;
   settle: (b: Business, entryId: string) => Promise<LedgerEntry | null>;
 }
 
+const updates = new EventEmitter();
+const versions = new Map<string, string>();
+function mealChanged(id: string) {
+  versions.set(id, randomUUID());
+  updates.emit(id);
+}
 const locks = new Map<string, Promise<unknown>>();
 async function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
   const prev = locks.get(key) ?? Promise.resolve();
@@ -94,13 +101,15 @@ export function createPrograms(h: Helpers) {
     return { phone: s.phone };
   }
   /** Writes one tick: today's list, the member's own list, the day index and the running count. Call inside the member lock, after canServe agreed. */
-  async function record(bizId: string, m: Member, date: string, t: number, item: string, served: Use[], by: Use['by'], stampImage?: string, guestRequest?: string): Promise<Use> {
-    const use: Use = { id: randomUUID(), memberId: m.id, date, item, at: new Date(t).toISOString(), by, ...(guestRequest ? { guestRequest } : {}), ...(stampImage ? { stampImage } : {}) };
-    await kv.put(k.served(bizId, date), { items: [...served, use] });
+  async function record(bizId: string, m: Member, date: string, t: number, item: string, served: Use[], by: Use['by'], stampImage?: string, guestRequest?: string, quantity = 1, batchId?: string): Promise<Use> {
+    const repeatMeal = served.some(u => u.memberId === m.id && u.item === item && !u.undone);
+    const uses = Array.from({ length: quantity }, (_, index): Use => ({ id: randomUUID(), memberId: m.id, date, item, at: new Date(t).toISOString(), by, ...(batchId ? { batchId } : {}), ...(guestRequest || (batchId && (index > 0 || repeatMeal)) ? { guestRequest: guestRequest ?? batchId } : {}), ...(stampImage ? { stampImage } : {}) }));
+    await kv.put(k.served(bizId, date), { items: [...served, ...uses] });
     const idx = (await kv.get<{ dates: string[] }>(k.days(bizId)))?.dates ?? []; if (!idx.includes(date)) await kv.put(k.days(bizId), { dates: [...idx, date].slice(-400) });
-    const own = (await kv.get<{ items: Use[] }>(k.uses(bizId, m.id)))?.items ?? []; await kv.put(k.uses(bizId, m.id), { items: [...own, use].slice(-1500) });
-    const all = await membersOf(bizId); const mm = all.find((x) => x.id === m.id); if (mm) { mm.used = (mm.used ?? 0) + 1; m.used = mm.used; await putMembers(bizId, all); }
-    return use;
+    const own = (await kv.get<{ items: Use[] }>(k.uses(bizId, m.id)))?.items ?? []; await kv.put(k.uses(bizId, m.id), { items: [...own, ...uses].slice(-1500) });
+    const all = await membersOf(bizId); const mm = all.find((x) => x.id === m.id); if (mm) { mm.used = (mm.used ?? 0) + quantity; m.used = mm.used; await putMembers(bizId, all); }
+    mealChanged(bizId);
+    return uses[0];
   }
   /** The 6-digit check-in code a business shows for one program in a given minute: an HMAC of the program and the minute, with a key only the server has. */
   const venueCode = (bizId: string, programId: string, win: number) => String(createHmac('sha256', h.secretKey()).update(`checkin|${bizId}|${programId}|${win}`).digest().readUInt32BE(0) % 1_000_000).padStart(6, '0');
@@ -146,8 +155,8 @@ export function createPrograms(h: Helpers) {
       program: { title: p.title, stampImage: p.stampImage, shuffleCardColor: p.shuffleCardColor, cardColor: p.cardColor, arrivalColor: p.arrivalColor, ...(p.cardLayout ? { cardLayout: p.cardLayout } : {}), checkIn: p.checkIn === 'self' ? 'self' : 'staff', ...(p.totalUses ? { totalUses: p.totalUses } : {}), items: p.items, openDays: p.openDays, ...(p.windows ? { windows: p.windows } : {}), ...(p.terms ? { terms: p.terms } : {}), priceRwf: p.priceRwf, days: p.days },
       member: { name: m.name, phone: m.phone, ...(m.idNumber ? { idNumber: m.idNumber } : {}), code: m.code, state: st, startDate: m.startDate, endDate: m.endDate, daysLeft: r.calendarDays, servingDaysLeft: Math.max(0, r.servingDays - (ateToday >= p.items.length ? 1 : 0)), usesLeft: usesLeft(m, p, r.uses, ateToday), usedTotal: m.used ?? 0, paid: m.paid, paidAt: m.confirmedAt ?? null },
       qr,
-      tick: p.checkIn === 'self' ? { guestMeal, needsCode: !(b.category === 'restaurant' && p.linkCheckIn), requiresPasscode: b.category === 'restaurant', ...tickOptions(m, p, own, t), ...(b.category === 'restaurant' ? { undo: null } : {}) } : null,
-      today: { date, receipt: latest ? { item: latest.item, count: currentServings.length, at: latest.at, reference: latest.id.slice(0, 8).toUpperCase() } : undefined, weekly: b.category === 'restaurant' && !!p.mealColors,
+      tick: p.checkIn === 'self' ? { guestMeal, needsCode: true, requiresPasscode: b.category === 'restaurant', ...tickOptions(m, p, own, t), ...(b.category === 'restaurant' ? { undo: null } : {}) } : null,
+      today: { date, serverTime: t, receipt: latest && t - Date.parse(latest.at) < 300_000 ? { item: latest.item, count: latest.batchId ? currentServings.filter(u => u.batchId === latest.batchId).length : 1, at: latest.at, reference: latest.id.slice(0, 8).toUpperCase() } : undefined, weekly: b.category === 'restaurant' && !!p.mealColors,
         checkedMeal: st === 'active' && current && own.some(u => u.date === date && u.item === current.item) ? current : null, openToday: p.openDays.includes(dayOfWeek(date)), used: own.filter((x) => x.date === date).map((x) => ({ item: x.item, at: x.at })) },
       calendar: cardCalendar(m, p, own.map((x) => ({ date: x.date, item: x.item })).slice(-1500)),
       history: own.map(({ id, date, item, at, stampImage, guestRequest }) => ({ id, date, item, at, stampImage, guest: !!guestRequest })),
@@ -265,10 +274,22 @@ export function createPrograms(h: Helpers) {
     },
     /** Scan (token) or type (code) a pass: the system says whether this person may be served now, and records the item. */
     /** The code the business shows right now for a program that customers tick by scanning (it changes every minute). */
+    async rotateMealCode(ownerId: string, id: string, programId: string) {
+      const b = await h.mine(ownerId, id);
+      return withLock(`prog|${id}`, async () => {
+        const list = await programsOf(id);
+        const program = list.find(p => p.id === programId);
+        if (!program || b.category !== 'restaurant') throw new ProgramError('Meal program not found.', 404);
+        program.codeRevision = randomUUID();
+        await kv.put(k.programs(id), { items: list });
+        mealChanged(id);
+        return { ok: true };
+      });
+    },
     async checkinCode(ownerId: string, id: string, programId: string): Promise<{ code: string; expiresInSec: number; program: string }> {
       const b = await h.mine(ownerId, id); const p = (await programsOf(b.id)).find((x) => x.id === programId); if (!p) throw new ProgramError('That program was not found.', 404, 'NOT_FOUND');
       if (b.category !== 'restaurant' && p.checkIn !== 'self') throw new ProgramError('This program is ticked by your staff. Turn on "The customer scans" in the program to use a check-in code.', 409, 'STAFF_ONLY');
-      const t = h.now(); const win = Math.floor(t / CODE_WINDOW_MS); return { code: venueCode(b.id, p.id, win), expiresInSec: Math.max(1, Math.ceil(((win + 1) * CODE_WINDOW_MS - t) / 1000)), program: p.title };
+      const t = h.now(); const win = Math.floor(t / CODE_WINDOW_MS); return { code: venueCode(b.id, p.id + (p.codeRevision ?? ''), win), expiresInSec: Math.max(1, Math.ceil(((win + 1) * CODE_WINDOW_MS - t) / 1000)), program: p.title };
     },
     async verifyMeal(ownerId: string, id: string, input: { token?: unknown; code?: unknown }) {
       const b = await h.mine(ownerId, id);
@@ -306,23 +327,40 @@ export function createPrograms(h: Helpers) {
         for (const d of days) {
           const served = await servedOn(b.id, d); const m = served.find((x) => x.id === useId); if (!m) continue;
           if (h.now() - Date.parse(m.at) > 20 * 60_000) throw new ProgramError('A use can only be undone within 20 minutes.', 409, 'TOO_LATE');
+          if (m.undone) return { ok: true as const };
           m.undone = true; await kv.put(k.served(b.id, d), { items: served });
           const own = (await kv.get<{ items: Use[] }>(k.uses(b.id, m.memberId)))?.items ?? []; const x = own.find((y) => y.id === useId); if (x) { x.undone = true; await kv.put(k.uses(b.id, m.memberId), { items: own }); }
           const all = await membersOf(b.id); const mm = all.find((y) => y.id === m.memberId); if (mm) { mm.used = Math.max(0, (mm.used ?? 0) - 1); await putMembers(b.id, all); }
+          mealChanged(b.id);
           return { ok: true as const };
         }
         throw new ProgramError('That use was not found.', 404, 'NOT_FOUND');
       });
     },
     /** Today at a glance: who has been served, who has a plan today and has not come yet. */
-    async today(ownerId: string, id: string) {
-      const b = await h.mine(ownerId, id); const t = h.now(); const date = kigaliDate(t); const progs = await programsOf(b.id); const members = await membersOf(b.id); const served = (await servedOn(b.id, date)).filter((x) => !x.undone);
+    async today(ownerId: string, id: string, after?: string, signal?: AbortSignal) {
+      const b = await h.mine(ownerId, id);
+      if (after && after === (versions.get(id) ?? 'initial') && !signal?.aborted) {
+        await new Promise<void>(resolve => {
+          const finish = () => {
+            clearTimeout(timer);
+            updates.off(id, finish);
+            signal?.removeEventListener('abort', finish);
+            resolve();
+          };
+          const timer = setTimeout(finish, 20_000);
+          updates.once(id, finish);
+          signal?.addEventListener('abort', finish, { once: true });
+        });
+      }
+      const version = versions.get(id) ?? 'initial';
+      const t = h.now(); const date = kigaliDate(t); const progs = await programsOf(b.id); const members = await membersOf(b.id); const served = (await servedOn(b.id, date)).filter((x) => !x.undone);
       const byId = new Map(members.map((m) => [m.id, m]));
       const open = (p?: Program) => !!p && p.openDays.includes(dayOfWeek(date));
       const expected = members.filter((m) => planState(m, date) === 'active' && open(progs.find((p) => p.id === m.programId)));
       const notYet = expected.filter((m) => { const p = progs.find((x) => x.id === m.programId)!; return new Set(served.filter(s => s.memberId === m.id).map(s => s.item)).size < p.items.length; });
       return {
-        date, mealColors: progs.filter(p => b.category === 'restaurant' && p.mealColors && !p.endedAt)
+        version, date, codeRevisions: Object.fromEntries(progs.map(p => [p.id, p.codeRevision ?? ''])), mealColors: progs.filter(p => b.category === 'restaurant' && p.mealColors && !p.endedAt)
           .map(p => ({ programId: p.id, title: p.title, current: currentMealColor(b, p, t) })),
         open: progs.some((p) => open(p)),
         servedCount: served.length, expected: expected.length,
@@ -486,13 +524,18 @@ export function createPrograms(h: Helpers) {
       });
     },
     /** The customer scans the business's rotating code (only when the owner chose self check-in): restaurant check-ins also confirm the customer's passcode. */
-    async selfUse(slug: string, session: string, input: { cardId?: unknown; code?: unknown; item?: unknown; passcode?: unknown; guestRequest?: unknown; mealDate?: unknown }, visitor: string) {
+    async selfUse(slug: string, session: string, input: { cardId?: unknown; code?: unknown; item?: unknown; passcode?: unknown; batchId?: unknown; quantity?: unknown; guestRequest?: unknown; mealDate?: unknown }, visitor: string) {
       const b = await h.publicLive(slug); if (!b) throw new ProgramError('This page is not available.', 404, 'NOT_FOUND'); const me = await sessionOf(b.id, session);
       const guestRequest = input.guestRequest;
+      const quantity = input.quantity === undefined ? 1 : Number(input.quantity);
+      const batchId = input.batchId;
+      if ((input.quantity !== undefined || batchId !== undefined) && (b.category !== 'restaurant' || typeof batchId !== 'string' || !/^[0-9a-f-]{36}$/i.test(batchId) || guestRequest !== undefined || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 100)) {
+        throw new ProgramError('Choose between 1 and 100 meals per confirmation.', 400);
+      }
       if (guestRequest !== undefined && (typeof guestRequest !== 'string' || !/^[0-9a-f-]{36}$/i.test(guestRequest))) {
         throw new ProgramError('Invalid serving confirmation.', 400);
       }
-      if (!guestRequest && h.tooMany(`tick|${b.id}|${me.phone}|${visitor}`, 30, h.now())) throw new ProgramError('Too many tries. Please wait a little.', 429, 'RATE');
+      if (!batchId && !guestRequest && h.tooMany(`tick|${b.id}|${me.phone}|${visitor}`, 30, h.now())) throw new ProgramError('Too many tries. Please wait a little.', 429, 'RATE');
       return withLock(`mem|${b.id}`, async () => {
         const progs = await programsOf(b.id); const cardId = clean(input.cardId, 60);
         const mine = (await membersOf(b.id)).filter((x) => x.phone === me.phone && x.status !== 'cancelled' && (!cardId || x.id === cardId));
@@ -501,9 +544,8 @@ export function createPrograms(h: Helpers) {
         const selfCards = cards.filter((x) => b.category === 'restaurant' || x.p.checkIn === 'self'); if (!selfCards.length) throw new ProgramError('At this business the staff ticks your card. Show your QR code.', 403, 'STAFF_ONLY');
         const t = h.now();
         // The customer proves they are at the business by the code it shows: it changes every minute and cannot be guessed.
-        const direct = !input.code && !!cardId && b.category === 'restaurant';
-        if ((!guestRequest || !direct) && h.tooMany(`tickcode|${b.id}|${me.phone}|${visitor}`, 15, t)) throw new ProgramError('Too many wrong codes. Please wait a little.', 429, 'RATE');
-        const hit = direct ? selfCards[0] : selfCards.reverse().find((x) => venueCodeOk(b.id, x.p.id, input.code, t));
+        const hit = selfCards.reverse().find(x => venueCodeOk(b.id, x.p.id + (x.p.codeRevision ?? ''), input.code, t));
+        if (h.tooMany(`tickcode|${b.id}|${me.phone}|${visitor}`, 15, t, 3_600_000, !hit)) throw new ProgramError('Too many wrong codes. Please wait a little.', 429, 'RATE');
         if (!hit) throw new ProgramError('That code is not right, or it has changed. Scan the business\'s code again.', 403, 'BAD_CODE');
         const restaurant = b.category === 'restaurant';
         if (restaurant) {
@@ -517,6 +559,11 @@ export function createPrograms(h: Helpers) {
         const program = servingHours(b, p);
         const date = kigaliDate(t); const served = await servedOn(b.id, date); const used = usedOf(served, m.id);
         const item = restaurant ? restaurantMealAt(program, t) : clean(input.item, 24) || undefined;
+        if (typeof batchId === 'string') {
+          const prior = served.find(u => u.memberId === m.id && u.batchId === batchId);
+          if (prior) return { ok: true as const, item: prior.item, useId: prior.id, cardId: m.id };
+          if (!item || (p.totalUses && (m.used ?? 0) + quantity > p.totalUses)) throw new ProgramError('This quantity is unavailable for the current meal.', 409, 'DENIED');
+        }
         if (typeof guestRequest === 'string') {
           if (!restaurant || !cardId || input.mealDate !== date) throw new ProgramError('Reopen your card to confirm the current meal.', 409);
           const prior = served.find(u => u.memberId === m.id && u.guestRequest === guestRequest);
@@ -525,9 +572,9 @@ export function createPrograms(h: Helpers) {
             throw new ProgramError('Refresh the card and confirm the current serving.', 409, 'DENIED');
           }
         }
-        const r = canServe({ member: m, program, used: guestRequest ? [] : used, now: t, item });
+        const r = canServe({ member: m, program, used: guestRequest || batchId ? [] : used, now: t, item });
         if (r.ok !== true) { const d = r as Exclude<typeof r, { ok: true }>; throw new ProgramError(d.message, 409, d.code === 'already' ? 'ALREADY' : 'DENIED'); }
-        const use = await record(b.id, m, date, t, r.item, served, 'self', p.stampImage, typeof guestRequest === 'string' ? guestRequest : undefined);
+        const use = await record(b.id, m, date, t, r.item, served, 'self', p.stampImage, typeof guestRequest === 'string' ? guestRequest : undefined, quantity, typeof batchId === 'string' ? batchId : undefined);
         return { ok: true as const, item: r.item, useId: use.id, cardId: m.id };
       });
     },
