@@ -593,3 +593,44 @@ test('weekly meal colors, stamped individual reports, and a separate renewed car
   assert.equal((await ownerCard()).history.length, 2);
   assert.equal((await svc.memberCard('o', biz.id, next.cardId)).history.length, 0);
 });
+
+test('restaurant guest servings count individually, respect the cap and replay safely', async () => {
+  const { svc, biz, prog } = await setup({ items: ['Lunch', 'Dinner'], checkIn: 'self', linkCheckIn: true, totalUses: 3 });
+  const customer = await joinP(svc, biz.slug, prog.id, { name: 'Guest host', phone: '0788000031' }, 'guest');
+  const args = { passcode: '4821', cardId: customer.cardId };
+  const tick = (guestRequest?: string) => svc.selfUse(biz.slug, customer.session, {
+    ...args, guestRequest, item: 'Lunch', mealDate: '2026-11-17',
+  }, 'guest');
+  const key = (i: number) => '00000000-0000-4000-8000-' + String(i).padStart(12, '0');
+  await svc.confirmPayment('o', biz.id, customer.cardId, { method: 'cash' });
+  await assert.rejects(tick(key(1)));
+  await tick();
+  const [one, replay] = await Promise.all([tick(key(1)), tick(key(1))]);
+  assert.equal(one.useId, replay.useId);
+  const two = await tick(key(2));
+  await assert.rejects(tick(key(3)), { code: 'DENIED' });
+  const card = await svc.memberCard('o', biz.id, customer.cardId);
+  assert.equal(card.member.usedTotal, 3);
+  assert.deepEqual(card.calendar.find(day => day.date === card.today.date)?.used, ['Lunch','Lunch','Lunch']);
+  assert.equal(card.history.filter(u => u.guest).length, 2);
+  assert.equal((await svc.today('o', biz.id)).notYet.length, 1);
+  await svc.selfUndo(biz.slug, customer.session, customer.cardId, two.useId);
+  await assert.rejects(tick(key(2)));
+  assert.equal((await svc.card(biz.slug, customer.session, customer.cardId)).tick?.guestMeal, 'Lunch');
+  await tick(key(3));
+});
+
+test('an uncapped link card accepts a group during lunch and stops when lunch ends', async () => {
+  const { svc, biz, prog, at } = await setup({ items: ['Lunch'], checkIn: 'self', linkCheckIn: true });
+  const host = await joinP(svc, biz.slug, prog.id, { name: 'Group host', phone: '0788000032' }, 'group');
+  const args = { cardId: host.cardId, passcode: '4821' };
+  await svc.confirmPayment('o', biz.id, host.cardId, { method: 'cash' });
+  await svc.selfUse(biz.slug, host.session, args, 'group');
+  const extra = (i: number) => svc.selfUse(biz.slug, host.session, {
+    ...args, item: 'Lunch', mealDate: '2026-11-17', guestRequest: '00000000-0000-4000-8000-' + String(i).padStart(12, '0'),
+  }, 'group');
+  for (let i = 1; i <= 20; i++) await extra(i);
+  assert.equal((await svc.today('o', biz.id)).servedCount, 21);
+  at(Date.parse('2026-11-17T14:00:00Z'));
+  await assert.rejects(extra(21), { code: 'DENIED' });
+});

@@ -94,8 +94,8 @@ export function createPrograms(h: Helpers) {
     return { phone: s.phone };
   }
   /** Writes one tick: today's list, the member's own list, the day index and the running count. Call inside the member lock, after canServe agreed. */
-  async function record(bizId: string, m: Member, date: string, t: number, item: string, served: Use[], by: Use['by'], stampImage?: string): Promise<Use> {
-    const use: Use = { id: randomUUID(), memberId: m.id, date, item, at: new Date(t).toISOString(), by, ...(stampImage ? { stampImage } : {}) };
+  async function record(bizId: string, m: Member, date: string, t: number, item: string, served: Use[], by: Use['by'], stampImage?: string, guestRequest?: string): Promise<Use> {
+    const use: Use = { id: randomUUID(), memberId: m.id, date, item, at: new Date(t).toISOString(), by, ...(guestRequest ? { guestRequest } : {}), ...(stampImage ? { stampImage } : {}) };
     await kv.put(k.served(bizId, date), { items: [...served, use] });
     const idx = (await kv.get<{ dates: string[] }>(k.days(bizId)))?.dates ?? []; if (!idx.includes(date)) await kv.put(k.days(bizId), { dates: [...idx, date].slice(-400) });
     const own = (await kv.get<{ items: Use[] }>(k.uses(bizId, m.id)))?.items ?? []; await kv.put(k.uses(bizId, m.id), { items: [...own, use].slice(-1500) });
@@ -111,7 +111,7 @@ export function createPrograms(h: Helpers) {
   };
   /** What the customer may tap on their own card right now (only for programs the owner set to self check-in): each item, whether it can be ticked, and why not. */
   function tickOptions(m: Member, p: Program, own: Use[], t: number) {
-    const date = kigaliDate(t); const todays = own.filter((x) => x.date === date && !x.undone); const lastSelf = todays.filter((x) => x.by === 'self').sort((a, c) => c.at.localeCompare(a.at))[0];
+    const date = kigaliDate(t); const todays = own.filter((x) => x.date === date && !x.undone); const lastSelf = todays.filter((x) => x.by === 'self').at(-1);
     return {
       items: p.items.map((item) => { const r = canServe({ member: m, program: p, used: todays, now: t, item }); if (r.ok === true) return { item, allowed: true as const }; const d = r as Exclude<typeof r, { ok: true }>; return { item, allowed: false as const, reason: d.code, message: d.message }; }),
       undo: lastSelf && t - Date.parse(lastSelf.at) <= SELF_UNDO_MS ? { useId: lastSelf.id, item: lastSelf.item } : null,
@@ -120,18 +120,22 @@ export function createPrograms(h: Helpers) {
   const usedOf = (list: Use[], memberId: string) => list.filter((m) => m.memberId === memberId && !m.undone).sort((a, b) => a.at.localeCompare(b.at));
 
   function view(m: Member, p: Program | undefined, today: string, used: Use[] = []): MemberView {
+    const distinctItems = new Set(used.map(use => use.item)).size;
     const r = p ? remaining(m, p, today) : { servingDays: 0, uses: 0 };
     return {
       id: m.id, programId: m.programId, programTitle: p?.title ?? '(removed plan)', name: m.name, phone: m.phone, ...(m.idNumber ? { idNumber: m.idNumber } : {}), code: m.code, state: planState(m, today),
       startDate: m.startDate, endDate: m.endDate, paid: m.paid, paidRwf: m.paidRwf, ...(m.payMethod ? { payMethod: m.payMethod } : {}), ...(m.claimed ? { claimed: m.claimed } : {}), ...(m.note ? { note: m.note } : {}),
-      servingDaysLeft: Math.max(0, r.servingDays - (p && used.length >= p.items.length ? 1 : 0)), usesLeft: p ? usesLeft(m, p, r.uses, used.length) : 0, ...(p?.totalUses ? { totalUses: p.totalUses, usedTotal: m.used ?? 0 } : {}), usedToday: used.map((e) => e.item), createdAt: m.createdAt,
+      servingDaysLeft: Math.max(0, r.servingDays - (p && distinctItems >= p.items.length ? 1 : 0)), usesLeft: p ? usesLeft(m, p, r.uses, distinctItems) : 0, ...(p?.totalUses ? { totalUses: p.totalUses, usedTotal: m.used ?? 0 } : {}), usedToday: used.map((e) => e.item), createdAt: m.createdAt,
     };
   }
 
   async function describeCard(b: Business, m: Member, p: Program, prompt: boolean, owner: boolean) {
     const t = h.now(); const date = kigaliDate(t); const own = ((await kv.get<{ items: Use[] }>(k.uses(b.id, m.id)))?.items ?? []).filter((x) => !x.undone);
-    const r = remaining(m, p, date); const st = planState(m, date); const ateToday = own.filter((x) => x.date === date).length;
+    const r = remaining(m, p, date); const st = planState(m, date); const ateToday = new Set(own.filter((x) => x.date === date).map(x => x.item)).size;
     let qr: string | null = null; if (!owner && m.paid && (st === 'active' || st === 'not_started') && m.passSealed) { try { qr = `BWPASS:${openSecret(m.passSealed, h.secretKey())}`; } catch { qr = null; } }
+    const servingMeal = b.category === 'restaurant' ? restaurantMealAt(p, t) : undefined;
+    const guestMeal = servingMeal && own.some(u => u.date === date && u.item === servingMeal) &&
+      canServe({ member: m, program: p, used: [], now: t, item: servingMeal }).ok ? servingMeal : undefined;
     const current = currentMealColor(b, p, t);
     return {
       cardId: m.id, programId: p.id, renewable: p.active && !p.endedAt && st === 'expired',
@@ -139,11 +143,11 @@ export function createPrograms(h: Helpers) {
       program: { title: p.title, stampImage: p.stampImage, shuffleCardColor: p.shuffleCardColor, cardColor: p.cardColor, arrivalColor: p.arrivalColor, ...(p.cardLayout ? { cardLayout: p.cardLayout } : {}), checkIn: p.checkIn === 'self' ? 'self' : 'staff', ...(p.totalUses ? { totalUses: p.totalUses } : {}), items: p.items, openDays: p.openDays, ...(p.windows ? { windows: p.windows } : {}), ...(p.terms ? { terms: p.terms } : {}), priceRwf: p.priceRwf, days: p.days },
       member: { name: m.name, phone: m.phone, ...(m.idNumber ? { idNumber: m.idNumber } : {}), code: m.code, state: st, startDate: m.startDate, endDate: m.endDate, daysLeft: r.calendarDays, servingDaysLeft: Math.max(0, r.servingDays - (ateToday >= p.items.length ? 1 : 0)), usesLeft: usesLeft(m, p, r.uses, ateToday), usedTotal: m.used ?? 0, paid: m.paid, paidAt: m.confirmedAt ?? null },
       qr,
-      tick: p.checkIn === 'self' ? { needsCode: !(b.category === 'restaurant' && p.linkCheckIn), requiresPasscode: b.category === 'restaurant', ...tickOptions(m, p, own, t) } : null,
+      tick: p.checkIn === 'self' ? { guestMeal, needsCode: !(b.category === 'restaurant' && p.linkCheckIn), requiresPasscode: b.category === 'restaurant', ...tickOptions(m, p, own, t) } : null,
       today: { date, weekly: b.category === 'restaurant' && !!p.mealColors,
         checkedMeal: st === 'active' && current && own.some(u => u.date === date && u.item === current.item) ? current : null, openToday: p.openDays.includes(dayOfWeek(date)), used: own.filter((x) => x.date === date).map((x) => ({ item: x.item, at: x.at })) },
       calendar: cardCalendar(m, p, own.map((x) => ({ date: x.date, item: x.item })).slice(-1500)),
-      history: own.map(({ date, item, at, stampImage }) => ({ date, item, at, stampImage })),
+      history: own.map(({ id, date, item, at, stampImage, guestRequest }) => ({ id, date, item, at, stampImage, guest: !!guestRequest })),
       payment: owner || m.paid ? null : {
         amount: p.priceRwf, momoCode: b.showPay ? b.momoCode ?? null : null, momoName: b.showPay ? b.momoName ?? null : null, online: await h.payReady(b), promptSent: prompt, claimed: m.claimed ?? null,
         whatsapp: b.whatsapp ?? null,
@@ -300,13 +304,13 @@ export function createPrograms(h: Helpers) {
       const byId = new Map(members.map((m) => [m.id, m]));
       const open = (p?: Program) => !!p && p.openDays.includes(dayOfWeek(date));
       const expected = members.filter((m) => planState(m, date) === 'active' && open(progs.find((p) => p.id === m.programId)));
-      const notYet = expected.filter((m) => { const p = progs.find((x) => x.id === m.programId)!; return served.filter((s) => s.memberId === m.id).length < p.items.length; });
+      const notYet = expected.filter((m) => { const p = progs.find((x) => x.id === m.programId)!; return new Set(served.filter(s => s.memberId === m.id).map(s => s.item)).size < p.items.length; });
       return {
         date, mealColors: progs.filter(p => b.category === 'restaurant' && p.mealColors && !p.endedAt)
           .map(p => ({ programId: p.id, title: p.title, current: currentMealColor(b, p, t) })),
         open: progs.some((p) => open(p)),
         servedCount: served.length, expected: expected.length,
-        served: served.slice().reverse().slice(0, 200).map((s) => ({ useId: s.id, memberId: s.memberId, name: byId.get(s.memberId)?.name ?? '', code: byId.get(s.memberId)?.code ?? '', item: s.item, at: s.at, by: s.by, canUndo: t - Date.parse(s.at) <= 20 * 60_000 })),
+        served: served.slice().reverse().slice(0, 200).map((s) => ({ useId: s.id, memberId: s.memberId, name: byId.get(s.memberId)?.name ?? '', code: byId.get(s.memberId)?.code ?? '', guest: !!s.guestRequest, item: s.item, at: s.at, by: s.by, canUndo: t - Date.parse(s.at) <= 20 * 60_000 })),
         notYet: notYet.slice(0, 300).map((m) => ({ memberId: m.id, name: m.name, phone: m.phone, code: m.code })),
       };
     },
@@ -466,9 +470,13 @@ export function createPrograms(h: Helpers) {
       });
     },
     /** The customer scans the business's rotating code (only when the owner chose self check-in): restaurant check-ins also confirm the customer's passcode. */
-    async selfUse(slug: string, session: string, input: { cardId?: unknown; code?: unknown; item?: unknown; passcode?: unknown }, visitor: string) {
+    async selfUse(slug: string, session: string, input: { cardId?: unknown; code?: unknown; item?: unknown; passcode?: unknown; guestRequest?: unknown; mealDate?: unknown }, visitor: string) {
       const b = await h.publicLive(slug); if (!b) throw new ProgramError('This page is not available.', 404, 'NOT_FOUND'); const me = await sessionOf(b.id, session);
-      if (h.tooMany(`tick|${b.id}|${me.phone}|${visitor}`, 30, h.now())) throw new ProgramError('Too many tries. Please wait a little.', 429, 'RATE');
+      const guestRequest = input.guestRequest;
+      if (guestRequest !== undefined && (typeof guestRequest !== 'string' || !/^[0-9a-f-]{36}$/i.test(guestRequest))) {
+        throw new ProgramError('Invalid serving confirmation.', 400);
+      }
+      if (!guestRequest && h.tooMany(`tick|${b.id}|${me.phone}|${visitor}`, 30, h.now())) throw new ProgramError('Too many tries. Please wait a little.', 429, 'RATE');
       return withLock(`mem|${b.id}`, async () => {
         const progs = await programsOf(b.id); const cardId = clean(input.cardId, 60);
         const mine = (await membersOf(b.id)).filter((x) => x.phone === me.phone && x.status !== 'cancelled' && (!cardId || x.id === cardId));
@@ -477,9 +485,10 @@ export function createPrograms(h: Helpers) {
         const selfCards = cards.filter((x) => x.p.checkIn === 'self'); if (!selfCards.length) throw new ProgramError('At this business the staff ticks your card. Show your QR code.', 403, 'STAFF_ONLY');
         const t = h.now();
         // The customer proves they are at the business by the code it shows: it changes every minute and cannot be guessed.
-        if (h.tooMany(`tickcode|${b.id}|${me.phone}|${visitor}`, 15, t)) throw new ProgramError('Too many wrong codes. Please wait a little.', 429, 'RATE');
         const direct = !input.code && !!cardId && b.category === 'restaurant';
-        const hit = direct ? selfCards.find((x) => x.p.linkCheckIn) : selfCards.reverse().find((x) => venueCodeOk(b.id, x.p.id, input.code, t)); if (!hit) throw new ProgramError('That code is not right, or it has changed. Scan the business\'s code again.', 403, 'BAD_CODE');
+        if ((!guestRequest || !direct) && h.tooMany(`tickcode|${b.id}|${me.phone}|${visitor}`, 15, t)) throw new ProgramError('Too many wrong codes. Please wait a little.', 429, 'RATE');
+        const hit = direct ? selfCards.find((x) => x.p.linkCheckIn) : selfCards.reverse().find((x) => venueCodeOk(b.id, x.p.id, input.code, t));
+        if (!hit) throw new ProgramError('That code is not right, or it has changed. Scan the business\'s code again.', 403, 'BAD_CODE');
         const restaurant = b.category === 'restaurant';
         if (restaurant) {
           if (!validPasscode(input.passcode)) throw new ProgramError('Enter your 4 to 6 digit passcode to check in.', 400, 'PASSCODE_REQUIRED');
@@ -492,9 +501,17 @@ export function createPrograms(h: Helpers) {
         const program = servingHours(b, p);
         const date = kigaliDate(t); const served = await servedOn(b.id, date); const used = usedOf(served, m.id);
         const item = restaurant ? restaurantMealAt(program, t) : clean(input.item, 24) || undefined;
-        const r = canServe({ member: m, program, used, now: t, item });
+        if (typeof guestRequest === 'string') {
+          if (!restaurant || !cardId || input.mealDate !== date) throw new ProgramError('Reopen your card to confirm the current meal.', 409);
+          const prior = served.find(u => u.memberId === m.id && u.guestRequest === guestRequest);
+          if (prior && !prior.undone) return { ok: true as const, item: prior.item, useId: prior.id, cardId: m.id };
+          if (prior || !item || input.item !== item || !used.some(u => u.item === item)) {
+            throw new ProgramError('Refresh the card and confirm the current serving.', 409, 'DENIED');
+          }
+        }
+        const r = canServe({ member: m, program, used: guestRequest ? [] : used, now: t, item });
         if (r.ok !== true) { const d = r as Exclude<typeof r, { ok: true }>; throw new ProgramError(d.message, 409, d.code === 'already' ? 'ALREADY' : 'DENIED'); }
-        const use = await record(b.id, m, date, t, r.item, served, 'self', p.stampImage);
+        const use = await record(b.id, m, date, t, r.item, served, 'self', p.stampImage, typeof guestRequest === 'string' ? guestRequest : undefined);
         return { ok: true as const, item: r.item, useId: use.id, cardId: m.id };
       });
     },

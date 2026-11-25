@@ -174,6 +174,8 @@ export function PaperCard({ b, card, w }: { b: Pick<PublicBusiness, 'category' |
   const ink = checkedColor ? mealInk(checkedColor) : '#14213D';
   const paper = card.today.weekly ? checkedColor ?? '#ffffff' : shuffle ? dailyMealPaper(card.today.date, card.program.cardColor) : card.today.used.length ? cardPaper(card.program.arrivalColor ?? '#86efac') : card.program.cardColor ? cardPaper(card.program.cardColor) : `color-mix(in srgb, ${theme.accent} 16%, #FFFFFF)`; const line = `color-mix(in srgb, ${ink} 35%, ${paper})`;
   const m = card.member; const local = (x: string) => (x.startsWith('250') ? `0${x.slice(3)}` : x); const phones = [b.contact.phone, b.contact.whatsapp].filter((x): x is string => !!x).map(local).filter((x, i, a) => a.indexOf(x) === i);
+  const guestCard = b.category === 'restaurant' && card.program.checkIn === 'self';
+  const balance = guestCard && card.program.totalUses ? Math.max(0, card.program.totalUses - m.usedTotal) : m.usesLeft;
   const stamp = m.paid ? { text: tx('PAID'), color: '#2848C8' } : { text: tx('NOT PAID'), color: '#B91C1C' };
   const short = (s: string) => (s.length > 10 ? `${s.slice(0, 9)}…` : s);
   return (
@@ -200,15 +202,15 @@ export function PaperCard({ b, card, w }: { b: Pick<PublicBusiness, 'category' |
             {rows.map((d) => { const isToday = d.date === card.today.date; return (
               <tr key={d.date} style={isToday && !shuffle && !card.today.weekly ? { background: `color-mix(in srgb, ${theme.accent} 28%, transparent)` } : undefined}>
                 <th scope="row" className="border-b border-r px-1 py-1 text-left text-xs font-bold" style={{ borderColor: line }}><span className="text-base tabular-nums">{dayNum(d.date)}</span> <span className="font-semibold opacity-70">{tx(DAY[d.dow])}</span>{isToday && <span className="sr-only"> {tx('today')}</span>}</th>
-                {items.map((it) => { const used = d.used.includes(it); const at = card.today.date === d.date ? card.today.used.find((u) => u.item === it)?.at : undefined;
+                {items.map((it) => { const count = d.used.filter(item => item === it).length; const used = count > 0; const at = card.today.date === d.date ? card.today.used.find((u) => u.item === it)?.at : undefined;
                   return <td key={it} title={used ? `${it}${at ? ` ${clock(at)}` : ''}` : undefined} className="relative h-9 overflow-hidden border-b border-r p-0 text-lg last:border-r-0" style={{ borderColor: line, ...(!d.open ? { background: `repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in srgb, ${ink} 14%, transparent) 4px 5px)` } : {}) }}>
-                    {used ? <Check size={20} strokeWidth={3} role="img" aria-label={`${it}: ${tx("Checked in")}`} className="relative mx-auto" style={{ color: checkedColor ? ink : '#047857' }} /> : !d.open ? <span className="text-xs opacity-50" aria-label={tx('Closed')}>—</span> : null}</td>; })}
+                    {used ? <span className="inline-flex items-center gap-1"><Check size={20} strokeWidth={3} role="img" aria-label={`${it}: ${tx("Checked in")}`} className="relative mx-auto" style={{ color: checkedColor ? ink : '#047857' }} />{count > 1 && <b className="text-sm">×{count}</b>}</span> : !d.open ? <span className="text-xs opacity-50" aria-label={tx('Closed')}>—</span> : null}</td>; })}
               </tr>); })}
           </tbody>
         </table>
       </div>
       {blocks > 1 && <div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label={tx('Show days')}>{Array.from({ length: blocks }, (_, i) => <button key={i} type="button" aria-pressed={block === i} onClick={() => setBlk(i)} className="min-h-9 rounded-lg border px-2.5 text-xs font-semibold" style={block === i ? { background: ink, color: '#fff', borderColor: ink } : { borderColor: line }}>{layout?.hiddenDates.length ? `${shortDate(cal[i * BLOCK].date)} – ${shortDate(cal[Math.min(cal.length, (i + 1) * BLOCK) - 1].date)}` : `${tx('Days')} ${i * BLOCK + 1}–${Math.min(cal.length, (i + 1) * BLOCK)}`}</button>)}</div>}
-      <div className="mt-3 grid grid-cols-2 gap-2 text-left"><div className="rounded-xl border p-2.5" style={{ borderColor: line }}><p className="text-xs opacity-70">{fill('{Uses} left', w)}</p><p className="font-display text-xl font-semibold tabular-nums">{m.usesLeft}</p></div><div className="rounded-xl border p-2.5" style={{ borderColor: line }}><p className="text-xs opacity-70">{tx('Valid until')}</p><p className="font-display text-xl font-semibold">{shortDate(m.endDate)}</p></div></div>
+      <div className="mt-3 grid grid-cols-2 gap-2 text-left"><div className="rounded-xl border p-2.5" style={{ borderColor: line }}><p className="text-xs opacity-70">{guestCard && !card.program.totalUses ? tx('Servings recorded') : fill('{Uses} left', w)}</p><p className="font-display text-xl font-semibold tabular-nums">{guestCard && !card.program.totalUses ? m.usedTotal : balance}</p></div><div className="rounded-xl border p-2.5" style={{ borderColor: line }}><p className="text-xs opacity-70">{tx('Valid until')}</p><p className="font-display text-xl font-semibold">{shortDate(m.endDate)}</p></div></div>
     </div>
   );
 }
@@ -238,6 +240,7 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
   const [confirmationCode, setConfirmationCode] = useState('');
   const [scanPasscode, setScanPasscode] = useState('');
   const [checkinError, setCheckinError] = useState('');
+  const [guest, setGuest] = useState<{ guestRequest: string; mealDate: string; item: string }>();
   const checkingIn = useRef(false);
   const fail = useCallback((e: unknown) => { const m = e instanceof Error ? e.message : tx('Something went wrong. Please try again.'); if (/sign in again/i.test(m)) { clearSession(slug); onSignedOut(); return; } setErr(m); }, [slug, onSignedOut, tx]);
   const load = useCallback(async () => { const s = session(); if (!s) { onSignedOut(); return; } try { const m = await publicApi.me(slug, s); const id = sel ?? m.cards.find((entry) => entry.programId === programId)?.id; if (programId && !id) throw new Error(tx('You have no card for this program. Open the program link and choose Join as a new member.')); const c = await publicApi.card(slug, s, id); setMe(m); setCard(c); setErr(''); waiting.current = !!c.payment?.promptSent; if (!sel) setSel(c.cardId); } catch (e) { setCard(null); fail(e); } }, [slug, sel, programId, fail, onSignedOut]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -251,7 +254,11 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
     setCheckinError('');
     setFlash('');
     try {
-      const result = await publicApi.tick(slug, token, code === 'direct' ? '' : code, passcode, code === 'direct' ? card?.cardId : undefined);
+      const extra = code === 'guest' ? guest : undefined;
+      if (code === 'guest' && !extra) return;
+      const venue = extra ? (card?.tick?.needsCode ? typed : '') : code === 'direct' ? '' : code;
+      const result = await publicApi.tick(slug, token, venue, passcode, extra || code === 'direct' ? card?.cardId : undefined, extra);
+      setGuest(undefined);
       setConfirmationCode('');
       setTyped('');
       setSel(result.cardId);
@@ -261,7 +268,7 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
       if (error instanceof BizApiError && error.code === 'SESSION') {
         fail(error);
       } else {
-        if (!(error instanceof BizApiError) || !['BAD_LOGIN', 'PASSCODE_REQUIRED'].includes(error.code ?? '')) setConfirmationCode('');
+        if (code !== 'guest' && (!(error instanceof BizApiError) || !['BAD_LOGIN', 'PASSCODE_REQUIRED'].includes(error.code ?? ''))) setConfirmationCode('');
         setCheckinError(error instanceof Error ? error.message : tx('Something went wrong. Please try again.'));
       }
     } finally {
@@ -301,7 +308,7 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
       window.history.replaceState({}, '', url.pathname + url.search);
     } catch { /* optional */ }
   }, [scanCode, card]); // eslint-disable-line react-hooks/exhaustive-deps
-  const m = card?.member; const usedUp = !!card && m?.state === 'active' && !!card.program.totalUses && m.usesLeft === 0;
+  const m = card?.member; const usedUp = !!card && m?.state === 'active' && !!card.program.totalUses && m.usedTotal >= card.program.totalUses;
   const tone = !m ? '#5B6470' : usedUp ? '#B91C1C' : m.state === 'active' ? '#15803D' : m.state === 'pending' || m.state === 'not_started' ? '#B45309' : '#B91C1C';
   const label = !m ? '' : usedUp ? t('ALL {USES} TAKEN') : ({ active: tx('ACTIVE'), pending: tx('WAITING FOR PAYMENT'), not_started: tx('STARTS SOON'), expired: tx('PLAN ENDED'), paused: tx('PAUSED'), cancelled: tx('CANCELLED') } as Record<string, string>)[m.state];
   return (
@@ -327,6 +334,8 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
                 <p className="font-display text-lg font-semibold">{card.tick?.needsCode === false ? tx("Meal check-in") : tx("Scan the business's code")}</p>
                 {confirmationCode ? (
                   <form className="space-y-2" onSubmit={(event) => { event.preventDefault(); if (/^\d{4,6}$/.test(scanPasscode)) void doTick(confirmationCode, scanPasscode); }}>
+                    {confirmationCode === 'guest' && <p className="font-semibold">{tx("One additional serving")} · {guest?.item}</p>}
+                    {confirmationCode === 'guest' && card.tick?.needsCode && <label className="block text-sm">{tx("Code shown at the business")}<input required pattern="[0-9]{6}" inputMode="numeric" maxLength={6} className={field} value={typed} onChange={e => setTyped(e.target.value.replace(/\D/g, ''))} /></label>}
                     <label className="block text-sm font-medium">{tx("Enter your passcode to confirm check-in")}
                       <input className={`${field} font-mono text-xl tracking-[0.3em]`} type="password" autoComplete="current-password" inputMode="numeric" minLength={4} maxLength={6} required autoFocus value={scanPasscode} onChange={(event) => setScanPasscode(event.target.value.replace(/\D/g, ''))} />
                     </label>
@@ -337,6 +346,10 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
                   </form>
                 ) : m.state === 'active' && card.tick && (
                   <>
+                    {card.tick.guestMeal && <button type="button" disabled={busy} className="min-h-12 w-full rounded-xl px-4 font-semibold" style={{ background: theme.accent, color: theme.on }} onClick={() => {
+                      setGuest({ guestRequest: crypto.randomUUID(), item: card.tick!.guestMeal!, mealDate: card.today.date });
+                      setScanPasscode(''); setTyped(''); setCheckinError(''); setConfirmationCode('guest'); setCamera(false);
+                    }}>{tx("Add one guest serving")} · {card.tick.guestMeal}</button>}
                     {card.tick.needsCode === false ? <button type="button" className="min-h-12 w-full rounded-xl border px-4 font-semibold" disabled={busy || !card.tick.items.some((item) => item.allowed)} onClick={() => prepareCheckin('direct')}>{tx("Check in for the current meal")}</button> : <>{camera ? (
                       <div className="relative overflow-hidden rounded-xl bg-black">
                         <video ref={scanner.video} muted playsInline className="aspect-square w-full object-cover" aria-label={tx("Camera")} />
@@ -362,7 +375,7 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
             {card.today.weekly && <p className="rounded-xl bg-white px-3 py-2 text-sm">{card.today.checkedMeal ? `${card.today.checkedMeal.item} · ${tx('Checked in')} · ${card.today.date}` : tx('The meal color appears after a confirmed check-in during serving hours.')}</p>}
             {card.renewable && <a className="block rounded-xl border bg-white p-3 text-center font-semibold" href={`/b/${encodeURIComponent(slug)}?renew=${encodeURIComponent(card.programId!)}`}>{tx("Register for a new card")}</a>}
             {!!card.history?.length && <details className="rounded-xl bg-white p-3 text-sm"><summary>{tx("Individual report")} · {card.history.length} {tx("check-ins")}</summary>
-              <ul className="max-h-52 overflow-auto">{card.history.slice().reverse().map(u => <li key={u.at + u.item}>{u.date} · {clock(u.at)} · {u.item}</li>)}</ul>
+              <ul className="max-h-52 overflow-auto">{card.history.slice().reverse().map(u => <li key={u.id ?? u.at + u.item}>{u.date} · {clock(u.at)} · {u.item}{u.guest && ` · ${tx('Guest')}`}</li>)}</ul>
             </details>}
             <PaperCard key={card.cardId} b={b} card={card} w={w} />
             {(m.state === 'active' || m.state === 'not_started') && card.qr && (
