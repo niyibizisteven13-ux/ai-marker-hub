@@ -16,3 +16,10 @@ export const restaurantCard = {
 export function cardPaper(color: string) {
   return `color-mix(in srgb, ${color} 45%, white)`;
 }
+// The server supplies the Kigali calendar date. The golden angle spaces successive
+// hues apart while keeping the same paper on every device throughout that date.
+export function dailyMealPaper(date: string, tint = '#ffffff') {
+  const day = Math.floor(Date.parse(date + 'T00:00:00Z') / 86_400_000);
+  const hue = ((day * 137.508) % 360 + 360) % 360;
+  return `color-mix(in srgb, hsl(${hue.toFixed(2)} 78% 81%) 90%, ${tint})`;
+}

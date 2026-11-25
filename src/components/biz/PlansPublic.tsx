@@ -1,4 +1,4 @@
-import { cardPaper } from '../../../server/services/biz/mealCard';
+import { cardPaper, dailyMealPaper } from '../../../server/services/biz/mealCard';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Camera, Check, CheckCircle2, Clock, Loader2, LogOut, MessageCircle, Ticket, UtensilsCrossed, X, KeyRound } from 'lucide-react';
 import { BizApiError, publicApi } from '../../biz/api';
@@ -163,7 +163,8 @@ function PaperCard({ b, card, w }: { b: PublicBusiness; card: CardInfo; w: Retur
   const block = Math.min(blk, blocks - 1);
   const rows = cal.slice(block * BLOCK, block * BLOCK + BLOCK);
   const items = card.program.items.filter((item) => !layout?.hiddenItems.includes(item));
-  const ink = '#14213D'; const paper = card.today.used.length ? cardPaper(card.program.arrivalColor ?? '#86efac') : card.program.cardColor ? cardPaper(card.program.cardColor) : `color-mix(in srgb, ${theme.accent} 16%, #FFFFFF)`; const line = `color-mix(in srgb, ${ink} 35%, ${paper})`;
+  const shuffle = b.category === 'restaurant' && card.program.shuffleCardColor;
+  const ink = '#14213D'; const paper = shuffle ? dailyMealPaper(card.today.date, card.program.cardColor) : card.today.used.length ? cardPaper(card.program.arrivalColor ?? '#86efac') : card.program.cardColor ? cardPaper(card.program.cardColor) : `color-mix(in srgb, ${theme.accent} 16%, #FFFFFF)`; const line = `color-mix(in srgb, ${ink} 35%, ${paper})`;
   const m = card.member; const local = (x: string) => (x.startsWith('250') ? `0${x.slice(3)}` : x); const phones = [b.contact.phone, b.contact.whatsapp].filter((x): x is string => !!x).map(local).filter((x, i, a) => a.indexOf(x) === i);
   const stamp = m.paid ? { text: tx('PAID'), color: '#2848C8' } : { text: tx('NOT PAID'), color: '#B91C1C' };
   const short = (s: string) => (s.length > 10 ? `${s.slice(0, 9)}…` : s);
@@ -188,7 +189,7 @@ function PaperCard({ b, card, w }: { b: PublicBusiness; card: CardInfo; w: Retur
           <tbody>
             {rows.length === 0 && <tr><td colSpan={items.length + 1} className="p-3">{tx('No dates shown')}</td></tr>}
             {rows.map((d) => { const isToday = d.date === card.today.date; return (
-              <tr key={d.date} style={isToday ? { background: `color-mix(in srgb, ${theme.accent} 28%, ${paper})` } : undefined}>
+              <tr key={d.date} style={isToday && !shuffle ? { background: `color-mix(in srgb, ${theme.accent} 28%, ${paper})` } : undefined}>
                 <th scope="row" className="border-b border-r px-1 py-1 text-left text-xs font-bold" style={{ borderColor: line }}><span className="text-base tabular-nums">{dayNum(d.date)}</span> <span className="font-semibold opacity-70">{tx(DAY[d.dow])}</span>{isToday && <span className="sr-only"> {tx('today')}</span>}</th>
                 {items.map((it) => { const used = d.used.includes(it); const at = card.today.date === d.date ? card.today.used.find((u) => u.item === it)?.at : undefined;
                   return <td key={it} title={used ? `${it}${at ? ` ${clock(at)}` : ''}` : undefined} className="h-9 border-b border-r p-0 text-lg last:border-r-0" style={{ borderColor: line, ...(!d.open ? { background: `repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in srgb, ${ink} 14%, transparent) 4px 5px)` } : {}) }}>

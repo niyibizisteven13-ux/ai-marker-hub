@@ -1,4 +1,4 @@
-import { restaurantCard, cardPaper } from '../../../server/services/biz/mealCard';
+import { restaurantCard, cardPaper, dailyMealPaper } from '../../../server/services/biz/mealCard';
 import { useScanner } from './useScanner';
 import { getStudioLang, tx } from '../../biz/studioI18n';
 import { RW_WORDS, fill, wordsOf } from '../../../server/services/biz/programWords';
@@ -205,6 +205,10 @@ function MembersTab({ b, programs, summary, onChange }: { b: Business; programs:
 const blank = (restaurant: boolean): Partial<ProgramInfo> => ({ title: '', priceRwf: 30000, days: 30, items: ['Visit'], ...(restaurant ? restaurantCard : {}), openDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], active: true });
 function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInfo[]; onChange: () => void }) {
   const { w, t } = useWords(b);
+  const [previewDate, setPreviewDate] = useState(() => new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Kigali', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date()));
+  const restaurant = b.category === 'restaurant';
   const [sample, setSample] = useState('');
   const [initialLayout, setInitialLayout] = useState<CardLayout | undefined>();
   const [hiddenDate, setHiddenDate] = useState('');
@@ -215,6 +219,7 @@ function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInf
     setBusy(true); setErr(''); try { setEnded(await ownerApi.endProgram(b.id, p.id)); onChange(); } catch (e) { setErr(msg(e)); } finally { setBusy(false); }
   };
   const emptyLayout: CardLayout = { hiddenItems: [], hiddenDates: [] };
+  const shuffle = restaurant && !!edit?.shuffleCardColor;
   const layout = edit?.cardLayout ?? emptyLayout;
   const save = async () => {
     if (!edit) return;
@@ -307,18 +312,25 @@ function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInf
             {layout.hiddenDates.length > 0 && <ul className="flex flex-wrap gap-2" aria-label={tx("Hidden dates")}>{layout.hiddenDates.map((date) => (
               <li key={date}><button type="button" className={`${btnGhost} !min-h-9 text-xs`} onClick={() => set({ cardLayout: { ...layout, hiddenDates: layout.hiddenDates.filter((day) => day !== date) } })}>{tx("Restore")} {date}</button></li>
             ))}</ul>}
+            {restaurant && <label className="flex items-center gap-2 text-sm font-medium">
+              <input type="checkbox" checked={shuffle} onChange={(event) => set({ shuffleCardColor: event.target.checked })} />
+              {tx("Shuffle card color daily")}
+            </label>}
             <div className="flex flex-wrap gap-4">
-              <label>{tx("Card background")} <input type="color" value={edit.cardColor ?? '#ffffff'} onChange={(e) => set({ cardColor: e.target.value })} /></label>
-              <label>{tx("After check-in")} <input type="color" value={edit.arrivalColor ?? '#86efac'} onChange={(e) => set({ arrivalColor: e.target.value })} /></label>
+              <label>{shuffle ? tx("Daily color tint") : tx("Card background")} <input type="color" value={edit.cardColor ?? '#ffffff'} onChange={(e) => set({ cardColor: e.target.value })} /></label>
+              {!shuffle && <label>{tx("After check-in")} <input type="color" value={edit.arrivalColor ?? '#86efac'} onChange={(e) => set({ arrivalColor: e.target.value })} /></label>}
             </div>
+            {shuffle && <label className="block text-sm">{tx("Preview date (Kigali)")}
+              <input type="date" className={input} value={previewDate} onChange={(event) => { if (event.target.value) setPreviewDate(event.target.value); }} />
+            </label>}
             <label className="block text-sm">{tx("Preview card")} <select value={sample} onChange={(e) => setSample(e.target.value)} className={input}>
               <option value="">{tx("Before check-in")}</option>
               {edit.items?.map((item) => <option key={item} value={item}>{tx("After check-in")} · {item}</option>)}
             </select></label>
-            <div className="rounded-xl p-4 text-[#14213D]" style={{ background: cardPaper(sample ? edit.arrivalColor ?? '#86efac' : edit.cardColor ?? '#ffffff') }}>
+            <div className="rounded-xl p-4 text-[#14213D]" style={{ background: shuffle ? dailyMealPaper(previewDate, edit.cardColor) : cardPaper(sample ? edit.arrivalColor ?? '#86efac' : edit.cardColor ?? '#ffffff') }}>
               <strong>{edit.title || b.name}</strong>
               <table className="mt-2 w-full text-center text-sm"><thead><tr><th>{tx("Date")}</th>{edit.items?.filter(item => !layout.hiddenItems.includes(item)).map(item => <th key={item}>{item}</th>)}</tr></thead>
-                <tbody><tr><th>{tx("Today")}</th>{edit.items?.filter(item => !layout.hiddenItems.includes(item)).map(item => <td className="border p-1" key={item}>{sample === item ? '✓' : ' '}</td>)}</tr></tbody></table>
+                <tbody><tr><th>{shuffle ? previewDate : tx("Today")}</th>{edit.items?.filter(item => !layout.hiddenItems.includes(item)).map(item => <td className="border p-1" key={item}>{sample === item ? '✓' : ' '}</td>)}</tr></tbody></table>
             </div>
           </fieldset>
           <fieldset><legend className="text-sm font-medium">{tx("Days it is available")}</legend><div className="mt-1.5 flex flex-wrap gap-1.5">{ALL_DAYS.map((d) => { const on = (edit.openDays ?? []).includes(d); return <button key={d} type="button" aria-pressed={on} onClick={() => set({ openDays: on ? (edit.openDays ?? []).filter((x) => x !== d) : [...(edit.openDays ?? []), d] })} className={`min-h-10 rounded-xl px-3 text-sm font-semibold ${on ? 'bg-[var(--brand)] text-[var(--brand-on)]' : 'border border-[var(--app-line)] text-[var(--app-muted)]'}`}>{tx(DAY_LABEL[d])}</button>; })}</div></fieldset>

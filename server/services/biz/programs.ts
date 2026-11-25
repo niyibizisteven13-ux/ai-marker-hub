@@ -65,6 +65,7 @@ export interface Program {
   windows?: ItemWindow[];
   /** Display preferences for cards issued from this plan. */
   cardLayout?: CardLayout;
+  shuffleCardColor?: boolean;
   cardColor?: string;
   arrivalColor?: string;
   linkCheckIn?: boolean;
@@ -179,6 +180,7 @@ export function cleanProgram(input: any, id: string, now: string, prev?: Program
   if (prev?.endedAt && input?.active !== true) { p.endedAt = prev.endedAt; p.active = false; }   // an ended program stays ended until the owner opens sign-ups again
   const ci = input?.checkIn === undefined ? prev?.checkIn : input.checkIn; if (ci === 'self') p.checkIn = 'self';
   if (ci === 'self' && (input?.linkCheckIn ?? prev?.linkCheckIn) === true) p.linkCheckIn = true;
+  if ((input?.shuffleCardColor ?? prev?.shuffleCardColor) === true) p.shuffleCardColor = true;
   for (const key of ['cardColor', 'arrivalColor'] as const) {
     const value = input?.[key] ?? prev?.[key];
     if (value && !/^#[a-f0-9]{6}$/i.test(value)) return { error: 'Choose a valid card color.' };
