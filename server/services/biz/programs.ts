@@ -65,6 +65,9 @@ export interface Program {
   windows?: ItemWindow[];
   /** Display preferences for cards issued from this plan. */
   cardLayout?: CardLayout;
+  cardColor?: string;
+  arrivalColor?: string;
+  linkCheckIn?: boolean;
   /** A short rule shown to the customer ("Show your pass each time; one use a day"). */
   terms?: string;
   maxMembers?: number;
@@ -175,6 +178,12 @@ export function cleanProgram(input: any, id: string, now: string, prev?: Program
   if (code && /^\d{4}$/.test(code)) p.joinCode = code;
   if (prev?.endedAt && input?.active !== true) { p.endedAt = prev.endedAt; p.active = false; }   // an ended program stays ended until the owner opens sign-ups again
   const ci = input?.checkIn === undefined ? prev?.checkIn : input.checkIn; if (ci === 'self') p.checkIn = 'self';
+  if (ci === 'self' && (input?.linkCheckIn ?? prev?.linkCheckIn) === true) p.linkCheckIn = true;
+  for (const key of ['cardColor', 'arrivalColor'] as const) {
+    const value = input?.[key] ?? prev?.[key];
+    if (value && !/^#[a-f0-9]{6}$/i.test(value)) return { error: 'Choose a valid card color.' };
+    if (value) p[key] = value;
+  }
   const layout = cleanCardLayout(input?.cardLayoutChange, prev?.cardLayout, items);
   if ('error' in layout) return layout;
   if (layout.hiddenItems.length || layout.hiddenDates.length) p.cardLayout = layout;
@@ -345,3 +354,4 @@ export function cardCalendar(m: Pick<Member, 'startDate' | 'endDate'>, p: Pick<P
   for (let d = m.startDate; d <= m.endDate && out.length < cap; d = addDays(d, 1)) out.push({ date: d, dow: dayOfWeek(d), open: p.openDays.includes(dayOfWeek(d)), used: by.get(d) ?? [] });
   return out;
 }
+

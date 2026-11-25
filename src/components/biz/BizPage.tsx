@@ -166,9 +166,10 @@ function BizPageInner({ business: b, base, lang, setLang, openNow, mediaSrc, pre
   const theme = THEMES[b.theme] ?? THEMES.gold; const preset = presetFor(b.category);
   const [box, setBox] = useState<number | null>(null); const [report, setReport] = useState(false); const [toast, setToast] = useState(''); const [cart, setCart] = useState<Cart>({}); const [checkout, setCheckout] = useState<null | 'order' | 'pay'>(null);
   const [rawPosts, setPosts] = useState<PublicPost[]>([]); const posts = useMemo(() => localizePosts(rawPosts, base, lang), [rawPosts, base, lang]); const [postBox, setPostBox] = useState<{ items: PublicMedia[]; i: number } | null>(null); const [qr, setQr] = useState(''); const [installEvt, setInstallEvt] = useState<any>(null); const toastTimer = useRef<number | undefined>(undefined);
+  const [programId, setProgramId] = useState<string>();
   const [joining, setJoining] = useState<NonNullable<PublicBusiness['programs']>[number] | null>(null); const [cardView, setCardView] = useState<null | 'signin' | 'dashboard'>(null); const [scanCode, setScanCode] = useState('');
   const scanPasscode = useRef('');
-  const openCard = () => setCardView(loadSession(b.slug) ? 'dashboard' : 'signin');
+  const openCard = () => { setProgramId(undefined); setCardView(loadSession(b.slug) ? 'dashboard' : 'signin'); };
   const say = (t: string) => { setToast(t); window.clearTimeout(toastTimer.current); toastTimer.current = window.setTimeout(() => setToast(''), 2200); };
   const track = (k: 'whatsapp' | 'call' | 'share') => { if (!preview) publicApi.track(b.slug, k); };
   const todayKey = useMemo(() => new Date().toLocaleDateString('en-US', { weekday: 'short', timeZone: 'Africa/Kigali' }).toLowerCase().slice(0, 3), []);
@@ -187,7 +188,7 @@ function BizPageInner({ business: b, base, lang, setLang, openNow, mediaSrc, pre
   useEffect(() => {
     if (preview) return; const q = new URLSearchParams(window.location.search); const card = q.get('pass') || q.get('card'); const plan = q.get('plan');
     const tick = (q.get('tick') ?? '').replace(/\D/g, '').slice(0, 6); if (tick.length === 6) { setScanCode(tick); setCardView(loadSession(b.slug) ? 'dashboard' : 'signin'); return; }
-    if (card) setCardView(loadSession(b.slug) ? 'dashboard' : 'signin'); else if (plan) { const p = b.programs?.find((x) => x.id === plan); if (p && !p.full) setJoining(p); }
+    if (card) setCardView(loadSession(b.slug) ? 'dashboard' : 'signin'); else if (plan) { const p = b.programs?.find((x) => x.id === plan); if (p) setJoining(p); else { setProgramId(plan); setCardView('signin'); } }
   }, [preview, b.programs]);
   useEffect(() => { if (!preview && window.location.hash === '#pay' && b.payOnline) setCheckout('pay'); }, [preview, b.payOnline]);
   useEffect(() => { let alive = true; void publicApi.posts(b.slug, new URLSearchParams(window.location.search).get('post') ?? undefined).then((p) => { if (alive) setPosts(p); }).catch(() => undefined); return () => { alive = false; }; }, [b.slug, b.updatedAt]);
@@ -333,9 +334,9 @@ function BizPageInner({ business: b, base, lang, setLang, openNow, mediaSrc, pre
 
       {/* cart bar */}
       {count > 0 && !checkout && <div className="fixed inset-x-0 bottom-0 z-40 p-3 sm:p-4"><button type="button" onClick={() => setCheckout('order')} className="mx-auto flex min-h-14 w-full max-w-xl items-center justify-between gap-3 rounded-2xl bg-[#0E1722] px-5 text-white shadow-2xl"><span className="inline-flex items-center gap-2.5 text-[15px] font-semibold"><span className="flex h-7 min-w-7 items-center justify-center rounded-full bg-[var(--acc)] px-1.5 text-sm text-[var(--on)]">{count}</span>{tx("View your order")}</span><b>{lines.every((l) => l.p.price !== null) ? `${total.toLocaleString('en-US')} RWF` : ''}</b></button></div>}
-      {joining && <JoinFlow b={b} lang={lang} program={joining} onClose={() => setJoining(null)} onDone={() => { setJoining(null); setCardView('dashboard'); try { window.history.replaceState({}, '', window.location.pathname); } catch { /* optional */ } }} />}
+      {joining && <JoinFlow b={b} lang={lang} program={joining} onClose={() => setJoining(null)} onDone={() => { setProgramId(joining.id); setJoining(null); setCardView('dashboard'); try { window.history.replaceState({}, '', window.location.pathname); } catch { /* optional */ } }} />}
       {cardView === 'signin' && <SignIn b={b} lang={lang} onClose={() => setCardView(null)} onDone={(passcode) => { if (scanCode && b.category === 'restaurant') scanPasscode.current = passcode; setCardView('dashboard'); }} />}
-      {cardView === 'dashboard' && <Dashboard b={b} lang={lang} scanCode={scanCode || undefined} takeScanPasscode={() => { const passcode = scanPasscode.current; scanPasscode.current = ''; return passcode; }} onClose={() => { setScanCode(''); scanPasscode.current = ''; setCardView(null); try { window.history.replaceState({}, '', window.location.pathname); } catch { /* optional */ } }} onSignedOut={() => setCardView('signin')} />}
+      {cardView === 'dashboard' && <Dashboard programId={programId} b={b} lang={lang} scanCode={scanCode || undefined} takeScanPasscode={() => { const passcode = scanPasscode.current; scanPasscode.current = ''; return passcode; }} onClose={() => { setScanCode(''); scanPasscode.current = ''; setCardView(null); try { window.history.replaceState({}, '', window.location.pathname); } catch { /* optional */ } }} onSignedOut={() => setCardView('signin')} />}
       {checkout && <Checkout b={b} cart={cart} setCart={setCart} preview={preview} startPay={checkout === 'pay'} waLink={waBase} onClose={() => setCheckout(null)} />}
       {postBox && <Lightbox items={postBox.items} index={postBox.i} src={mediaSrc} onClose={() => setPostBox(null)} onIndex={(i) => setPostBox({ ...postBox, i })} />}
       {box !== null && media.length > 0 && <Lightbox items={media} index={box} src={mediaSrc} onClose={() => setBox(null)} onIndex={setBox} />}
@@ -351,3 +352,4 @@ export default function BizPage(props: { business: PublicBusiness; openNow: bool
   if (b.category === 'profile') return <TxContext.Provider value={tx}><ProfilePage business={b} mediaSrc={props.mediaSrc} preview={props.preview} /></TxContext.Provider>;
   return <TxContext.Provider value={tx}><BizPageInner {...props} business={b} base={base} lang={lang} setLang={change} /></TxContext.Provider>;
 }
+

@@ -535,3 +535,24 @@ test('ending a program: sign-ups close, nobody can be ticked, unpaid cards are c
   const ask = await tools.biz_program.execute({ business: biz.id, id: other.id, end: true }, ctx); assert.match(ask.text, /final.*confirm/i); assert.equal((await svc.programs('o', biz.id)).find((p) => p.id === other.id)!.endedAt, undefined, 'asking is not ending');
   const done = await tools.biz_program.execute({ business: biz.id, id: other.id, end: true, confirm: true }, ctx); assert.match(done.text, /Ended "Weekend pass"/); assert.match(done.text, /Cleo/); assert.ok((await svc.programs('o', biz.id)).find((p) => p.id === other.id)!.endedAt);
 });
+
+test('card-link check-in uses the selected paid card, personal passcode and Kigali meal', async () => {
+  const { svc, biz, at } = await setup();
+  const program = await svc.saveProgram('o', biz.id, { title: 'Daily meals', days: 30, priceRwf: 30000, cardColor: '#ffffff', arrivalColor: '#86efac' });
+  assert.deepEqual(program.items, ['Breakfast', 'Lunch', 'Dinner']);
+  const customer = await joinP(svc, biz.slug, program.id, { name: 'Aline', phone: '0788300009' }, 'link');
+  const tick = (passcode: string) => svc.selfUse(biz.slug, customer.session, { cardId: customer.cardId, passcode, item: 'Dinner' }, 'link');
+  await assert.rejects(tick('4821'), { code: 'DENIED' });
+  await svc.confirmPayment('o', biz.id, customer.cardId, { method: 'cash' });
+  await assert.rejects(tick('1111'), { code: 'BAD_LOGIN' });
+  assert.equal((await tick('4821')).item, 'Lunch');
+  await assert.rejects(tick('4821'), { code: 'ALREADY' });
+  const card = await svc.card(biz.slug, customer.session, customer.cardId);
+  assert.equal(card.tick?.needsCode, false);
+  assert.equal(card.program.arrivalColor, '#86efac');
+  assert.deepEqual(card.today.used.map(use => use.item), ['Lunch']);
+  at(Date.parse('2026-11-17T14:00:00Z'));
+  await assert.rejects(tick('4821'), { code: 'DENIED' });
+  await svc.saveProgram('o', biz.id, { id: program.id, linkCheckIn: false });
+  await assert.rejects(tick('4821'), { code: 'BAD_CODE' });
+});
