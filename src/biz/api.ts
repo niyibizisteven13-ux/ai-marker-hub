@@ -44,6 +44,7 @@ export const stampImageUrl = (businessId: string, image: string) =>
   getApiUrl(`/api/biz/stamp-images/${encodeURIComponent(businessId)}/${encodeURIComponent(image)}`);
 
 export const ownerApi = {
+  androidBuildStatus: async (id: string, signal?: AbortSignal) => read<{ enabled: boolean }>(await authFetch(`/api/biz/${encodeURIComponent(id)}/customer-app/android-build`, { signal })),
   buildAndroidApp: async (id: string) => read<{ queued: true }>(await authFetch(`/api/biz/${encodeURIComponent(id)}/customer-app/android-build`, json('POST', {}))),
   uploadStamp: async (businessId: string, file: File) => read<{ id: string }>(await authFetch(
     `/api/biz/${encodeURIComponent(businessId)}/stamp-images`,
