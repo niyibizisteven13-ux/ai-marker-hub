@@ -19,13 +19,14 @@ import {
  *   biz:<id> the business · biz-slug:<slug> -> id · biz-owner:<userId> -> ids · biz-enq:<id> messages · biz-stats:<id> counts
  *   biz-reports reports against pages · biz-index every id (for the administrator)
  */
-export interface Kv { get<T>(key: string): Promise<T | null>; put(key: string, value: unknown): Promise<void>; del(key: string): Promise<void> }
+export interface Kv { get<T>(key: string): Promise<T | null>; put(key: string, value: unknown): Promise<void>; del(key: string): Promise<void>; renameBusiness?(business: Business, previousSlug: string): Promise<void> }
 export class BizError extends Error { constructor(message: string, public status = 400, public code = 'BIZ') { super(message); } }
 export interface Deps { /** Who may use the owner side (the business dashboard is a paid feature). Absent: everyone. The public page never needs it. */ allowed?: (ownerId: string) => Promise<boolean>; kv: Kv; media: MediaStore; isPaid: (ownerId: string) => Promise<boolean>; /** Whether the owner bought the verified badge (a one-time payment). Absent: nobody is verified. */ isVerified?: (ownerId: string) => Promise<boolean>; /** Called after a video is stored, to make it play smoothly in the background (see videoPipeline.ts). Absent: videos are kept as uploaded. */ onVideo?: (job: { biz: string; id: string; ext: string }) => void; now?: () => number; secretKey?: Buffer; fetchImpl?: Fetch;
   /** Tells the owner something at once (Telegram, email or the chat outbox). `plan` becomes a Do it / Cancel plan the owner approves. */
   notify?: (ownerId: string, n: BizNotice) => Promise<void>;
   /** Keeps the business agent's scheduled digests in line with its settings. */
-  syncAgenda?: (b: Business) => Promise<void> }
+  syncAgenda?: (b: Business) => Promise<void>;
+  refreshPublicSitemap?: () => Promise<void> }
 export interface BizNotice { title: string; text: string; plan?: { title: string; steps: Array<{ tool: string; input: Record<string, unknown>; label: string }> } }
 export interface Report { id: string; at: string; slug: string; reason: string; detail: string }
 
@@ -151,8 +152,12 @@ export function createBizService(deps: Deps) {
     if (st === 'success') alert(b, { title: `Paid · ${b.name}`, text: `${e.amount.toLocaleString('en-US')} RWF received by ${e.pay.provider === 'mtn' ? 'MTN MoMo' : 'Airtel Money'}${e.customer ? ` from ${e.customer}` : ''} (${e.item ?? 'payment'}).` });
     return e;
   }
-  async function publicLive(slug: string): Promise<Business | null> {
-    const id = await slugOwner(String(slug).toLowerCase()); if (!id) return null; const b = await load(id); return b && isLive(b) ? b : null;
+  async function publicLive(slug: string, allowPreviousSlug = false): Promise<Business | null> {
+    const key = String(slug).toLowerCase();
+    const id = await slugOwner(key);
+    if (!id) return null;
+    const b = await load(id);
+    return b && isLive(b) && (b.slug === key || allowPreviousSlug && b.previousSlugs?.includes(key)) ? b : null;
   }
 
   const programs = createPrograms({ kv, now, iso, secretKey, mine, save, publicLive, alert, tooMany, payReady, startPayment, settle });
@@ -185,10 +190,13 @@ export function createBizService(deps: Deps) {
 
     async update(ownerId: string, id: string, patch: Record<string, unknown>): Promise<Business> {
       const b = await mine(ownerId, id);
+      const previousSlug = b.slug;
       if (patch.slug !== undefined && String(patch.slug).toLowerCase() !== b.slug) {
         const v = validSlug(patch.slug); if (v.ok === false) throw new BizError(v.error);
-        if (await slugOwner(v.slug)) throw new BizError('That page name is taken. Try another.', 409, 'SLUG_TAKEN');
-        await kv.del(`biz-slug:${b.slug}`); await kv.put(`biz-slug:${v.slug}`, { id: b.id }); b.slug = v.slug;
+        const owner = await slugOwner(v.slug);
+        if (owner && owner !== b.id) throw new BizError('That page name is taken. Try another.', 409, 'SLUG_TAKEN');
+        b.previousSlugs = [...new Set([...(b.previousSlugs ?? []), previousSlug])].filter(slug => slug !== v.slug);
+        b.slug = v.slug;
       }
       if (patch.category !== undefined && (String(patch.category) === 'profile') !== (b.category === 'profile') && oneOf(CATEGORIES, patch.category, b.category) !== b.category) throw new BizError('A profile and a business are different pages. Create a new one instead of changing this one.');
       applyProfile(b, patch);
@@ -199,14 +207,24 @@ export function createBizService(deps: Deps) {
         const name = clean(patch.appName, 40);
         if (name) b.appName = name; else delete b.appName;
       }
-      await save(b); return b;
+      if (previousSlug !== b.slug) {
+        b.updatedAt = iso();
+        if (kv.renameBusiness) await kv.renameBusiness(b, previousSlug);
+        else {
+          await kv.put(`biz-slug:${b.slug}`, { id: b.id });
+          await save(b);
+        }
+        mediaCache.clear();
+      } else await save(b);
+      if (isLive(b)) await deps.refreshPublicSitemap?.();
+      return b;
     },
 
     async setPublished(ownerId: string, id: string, on: boolean): Promise<Business> {
       const b = await mine(ownerId, id);
       if (on && b.suspended) throw new BizError('This page was hidden by Bwenge. Contact support.', 403, 'SUSPENDED');
       if (on && !b.about && !b.tagline && !b.products.length && !b.media.length && !b.profile?.timeline.length && !b.profile?.headline) throw new BizError(b.category === 'profile' ? 'Add a short line about you, something you have done, or a photo or video first, so visitors see something.' : 'Add a short description, a product or a photo first, so visitors see something.', 400, 'EMPTY');
-      b.published = !!on; await save(b); return b;
+      b.published = !!on; await save(b); await deps.refreshPublicSitemap?.(); return b;
     },
 
     async remove(ownerId: string, id: string): Promise<void> {
@@ -214,9 +232,10 @@ export function createBizService(deps: Deps) {
       await deps.syncAgenda?.({ ...b, agent: undefined }).catch(() => undefined);
       await media.removeAll(b.id).catch(() => undefined);
       await programs.dropAll(b).catch(() => undefined);
-      await Promise.all([kv.del(`biz:${b.id}`), kv.del(`biz-slug:${b.slug}`), kv.del(`biz-enq:${b.id}`), kv.del(`biz-stats:${b.id}`), kv.del(`biz-ledger:${b.id}`), kv.del(`biz-secrets:${b.id}`), kv.del(`biz-posts:${b.id}`), kv.del(`biz-likes:${b.id}`), kv.del(`biz-workflows:${b.id}`), kv.del(`biz-recurring:${b.id}`), kv.del(`biz-trackers:${b.id}`), kv.del(`biz-records:${b.id}`), kv.del(`biz-budgets:${b.id}`), kv.del(`biz-comments:${b.id}`)]);
+      await Promise.all([kv.del(`biz:${b.id}`), ...[b.slug, ...(b.previousSlugs ?? [])].map(slug => kv.del(`biz-slug:${slug}`)), kv.del(`biz-enq:${b.id}`), kv.del(`biz-stats:${b.id}`), kv.del(`biz-ledger:${b.id}`), kv.del(`biz-secrets:${b.id}`), kv.del(`biz-posts:${b.id}`), kv.del(`biz-likes:${b.id}`), kv.del(`biz-workflows:${b.id}`), kv.del(`biz-recurring:${b.id}`), kv.del(`biz-trackers:${b.id}`), kv.del(`biz-records:${b.id}`), kv.del(`biz-budgets:${b.id}`), kv.del(`biz-comments:${b.id}`)]);
       const ids = (await kv.get<{ ids: string[] }>(`biz-owner:${ownerId}`))?.ids ?? []; await kv.put(`biz-owner:${ownerId}`, { ids: ids.filter((x) => x !== b.id) });
       const all = (await kv.get<{ ids: string[] }>('biz-index'))?.ids ?? []; await kv.put('biz-index', { ids: all.filter((x) => x !== b.id) });
+      await deps.refreshPublicSitemap?.();
     },
 
     /* products */
@@ -604,8 +623,8 @@ export function createBizService(deps: Deps) {
       if (!b) return null;
       return deps.isVerified ? deps.isVerified(b.ownerId) : false;
     },
-    async publicBySlug(slug: string, opts: { count?: boolean } = {}): Promise<PublicBusiness | null> {
-      const b = await publicLive(slug); if (!b) return null; if (opts.count) await bump(b.id, 'views').catch(() => undefined); return withPay(b, publicView(b));
+    async publicBySlug(slug: string, opts: { count?: boolean; allowPreviousSlug?: boolean } = {}): Promise<PublicBusiness | null> {
+      const b = await publicLive(slug, opts.allowPreviousSlug); if (!b) return null; if (opts.count) await bump(b.id, 'views').catch(() => undefined); return withPay(b, publicView(b));
     },
     async track(slug: string, kind: 'whatsapp' | 'call' | 'share', visitor: string): Promise<boolean> {
       const b = await publicLive(slug); if (!b) return false; const k = `${visitor}|${b.id}|${kind}`; const t = now();
@@ -707,7 +726,7 @@ export function createBizService(deps: Deps) {
     async adminSuspend(slug: string, reason: string | null): Promise<void> {
       mediaCache.clear();
       const id = await slugOwner(String(slug).toLowerCase()); const b = id ? await load(id) : null; if (!b) throw new BizError('Page not found.', 404);
-      if (reason) b.suspended = { at: iso(), reason: clean(reason, 200) || 'Hidden by Bwenge' }; else delete b.suspended; await save(b);
+      if (reason) b.suspended = { at: iso(), reason: clean(reason, 200) || 'Hidden by Bwenge' }; else delete b.suspended; await save(b); await deps.refreshPublicSitemap?.();
     },
   };
 }

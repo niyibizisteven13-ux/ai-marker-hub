@@ -11,17 +11,33 @@ export const CATEGORY_WORD: Record<string, string> = { shop: 'Shop', restaurant:
 export const THEME_COLOR: Record<string, string> = { gold: '#E9A23B', teal: '#0F9D8F', green: '#1E9E5A', blue: '#2F6FED', rose: '#DB4F8E', violet: '#7C5CF0', ink: '#0E1722' };
 
 export function renderShell(html: string, b: PublicBusiness, origin: string): string {
-  const base = origin.replace(/\/$/, ''); const isProfile = b.category === 'profile';; const url = `${base}/${isProfile ? 'p' : 'b'}/${encodeURIComponent(b.slug)}`;
+  const base = origin.replace(/\/$/, ''); const isProfile = b.category === 'profile'; const url = `${base}/${isProfile ? 'p' : 'b'}/${encodeURIComponent(b.slug)}`;
   const profile = isProfile ? profileSearch(b) : null;
-  const title = profile?.title ?? `${b.name} · ${CATEGORY_WORD[b.category] ?? 'Business'} on Bwenge`;
-  const desc = profile?.description ?? (b.tagline || b.about || `${b.name} on Bwenge4Biz`).replace(/\s+/g, ' ').slice(0, 200);
+  const name = profile?.name ?? b.name;
+  const category = CATEGORY_WORD[b.category] ?? 'Business';
+  const address = b.contact.address?.trim();
+  const title = profile?.title ?? `${name} · ${category} | Bwenge4Biz`;
+  const desc = profile?.description ?? [b.tagline || b.about || `${name} on Bwenge4Biz`, address]
+    .filter(Boolean).join(' · ').replace(/\s+/g, ' ').slice(0, 200);
+  const weekdays = { mon: 'Monday', tue: 'Tuesday', wed: 'Wednesday', thu: 'Thursday', fri: 'Friday', sat: 'Saturday', sun: 'Sunday' };
+  const hours = b.hours.filter(hour => !hour.closed);
   const img = (isProfile ? [b.logo, b.cover] : [b.cover, b.logo]).find((m) => m && m.kind === 'image');
   const image = img ? `${base}/api/biz/public/${encodeURIComponent(b.slug)}/media/${encodeURIComponent(img.id)}` : `${base}/icons-512.png`;
-  const entity = { name: b.name, url, ...(img ? { image } : {}),
+  const entity = { name, url, ...(img ? { image } : {}),
     ...(b.about ? { description: b.about } : {}) };
   const data = isProfile
     ? { '@context': 'https://schema.org', '@type': 'ProfilePage', url, mainEntity: { '@type': 'Person', ...entity, alternateName: b.slug, description: desc } }
-    : { '@context': 'https://schema.org', '@type': b.category === 'restaurant' ? 'Restaurant' : 'Organization', ...entity };
+    : {
+        '@context': 'https://schema.org',
+        '@type': b.category === 'restaurant' ? 'Restaurant' : address ? 'LocalBusiness' : 'Organization',
+        ...entity,
+        ...(address ? { address: { '@type': 'PostalAddress', streetAddress: address } } : {}),
+        ...(hours.length && (address || b.category === 'restaurant') ? {
+          openingHoursSpecification: hours.map(({ day, open, close }) => ({
+            '@type': 'OpeningHoursSpecification', dayOfWeek: `https://schema.org/${weekdays[day]}`, opens: open, closes: close,
+          })),
+        } : {}),
+      };
   const structured = JSON.stringify(data).replace(/</g, '\\u003c');
   const tags = [
     `<title>${esc(title)}</title>`, `<meta name="description" content="${esc(desc)}" />`, `<link rel="canonical" href="${esc(url)}" />`,
@@ -41,6 +57,12 @@ export function renderShell(html: string, b: PublicBusiness, origin: string): st
   const headline = profile?.headline ?? b.tagline;
   const tagline = headline ? `<p>${esc(headline)}</p>` : '';
   const details = profile?.details.length ? `<p>${esc(profile.details.join(' · '))}</p>` : '';
-  const preview = `<main><h1>${esc(b.name)}</h1>${tagline}${about}${details}</main>`;
+  const location = !isProfile && address ? `<address>${esc(address)}</address>` : '';
+  const schedule = !isProfile && b.hours.length
+    ? `<section><h2>Opening hours</h2><ul>${b.hours.map(hour =>
+      `<li>${weekdays[hour.day]}: ${hour.closed ? 'Closed' : `${esc(hour.open)}–${esc(hour.close)}`}</li>`).join('')}</ul></section>`
+    : '';
+  const businessCategory = isProfile ? '' : `<p>${esc(category)}</p>`;
+  const preview = `<main><h1>${esc(name)}</h1>${tagline}${about}${details}${businessCategory}${location}${schedule}</main>`;
   return shell.replace('<div id="root"></div>', () => `<div id="root">${preview}</div>`);
 }

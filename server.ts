@@ -558,7 +558,7 @@ app.get('/sitemap.xml', async (_req, res) => {
   try {
     const { publicSitemap } = await import('./server/services/searchDiscovery.js');
     const sitemap = await publicSitemap();
-    res.type('application/xml').setHeader('Cache-Control', 'public, max-age=60');
+    res.type('application/xml').setHeader('Cache-Control', 'public, no-cache');
     res.send(sitemap);
   } catch {
     res.setHeader('Cache-Control', 'no-store');
@@ -2965,10 +2965,10 @@ async function startServer() {
           <form method="get"><label>Search names, businesses and publications <input name="q" maxlength="100" value="${esc(search)}"></label> <button>Search</button></form>
           ${links ? `<ul>${links}</ul>` : '<p>No matching public pages.</p>'}${nextPage}</main>`;
         const html = await fs.readFile(path.join(distPath, 'index.html'), 'utf8');
-        if (search || after) res.setHeader('X-Robots-Tag', 'noindex, follow');
+        if (search) res.setHeader('X-Robots-Tag', 'noindex, follow');
         res.type('html').setHeader('Cache-Control', 'no-cache');
         // This directory is a server-rendered page, including for browsers with JavaScript disabled.
-        res.send(renderSearchPage(html, { ...publicPages['/discover'], path: '/discover' }, body)
+        res.send(renderSearchPage(html, { ...publicPages['/discover'], path: after && !search ? '/discover?' + new URLSearchParams({ after }).toString() : '/discover' }, body)
           .replace(/<script\b[^>]*type="module"[^>]*><\/script>/gi, ''));
       } catch (error) { next(error); }
     });
@@ -3018,7 +3018,15 @@ async function startServer() {
       try {
         const html = await fs.readFile(path.join(distPath, 'index.html'), 'utf8');
         const { bizService } = await import('./server/services/biz/runtime.js'); const { renderShell } = await import('./server/services/biz/shell.js');
-        const b = await bizService().publicBySlug(String(req.params.slug));
+        const b = await bizService().publicBySlug(String(req.params.slug), { allowPreviousSlug: true });
+        if (b) {
+          const canonical = `/${b.category === 'profile' ? 'p' : 'b'}/${encodeURIComponent(b.slug)}`;
+          if (req.path !== canonical) {
+            const query = req.originalUrl.slice(req.path.length);
+            res.setHeader('Cache-Control', 'no-cache');
+            return res.redirect(308, canonical + query);
+          }
+        }
         res.status(b ? 200 : 404).type('html').setHeader('Cache-Control', 'no-cache');
         if (!b || ['pass', 'tick', 'card', 'memberCard', 'plan', 'renew', 'source'].some(key => req.query[key] !== undefined)) {
           res.setHeader('X-Robots-Tag', 'noindex, nofollow');

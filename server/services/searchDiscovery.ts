@@ -63,9 +63,16 @@ export function renderSitemap(businesses: SitemapRow[], papers: ResearchSitemapR
   return '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' + urls.join('\n') + '\n</urlset>\n';
 }
 
+const sitemapCacheKey = 'search:public-sitemap:v1';
+
+export async function refreshPublicSitemap() {
+  const { invalidate } = await import('./cache/redis.js');
+  await invalidate(sitemapCacheKey);
+}
+
 export async function publicSitemap() {
   const { cached } = await import('./cache/redis.js');
-  return cached('search:public-sitemap:v1', 60_000, async () => {
+  return cached(sitemapCacheKey, 60_000, async () => {
     const { prisma } = await import('../db.js');
     const [businesses, papers] = await Promise.all([
       prisma.$queryRaw<SitemapRow[]>`
@@ -106,7 +113,12 @@ export async function publicDirectory(search: string, after: string) {
         AND value->>'slug' ~ '^[a-z0-9][a-z0-9-]{0,63}$')
       OR key ~ '^research-published:[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$'
     )
-    AND strpos(lower(concat_ws(' ', value->>'name', value->>'slug', value->>'title', value->>'authors')), lower(${search}::text)) > 0
+    AND NOT EXISTS (
+      SELECT 1 FROM regexp_split_to_table(lower(${search}::text), '[[:space:]]+') AS term(word)
+      WHERE strpos(lower(concat_ws(' ', value->>'name', value->>'slug', value->>'title', value->>'authors',
+        value->>'category', value->>'tagline', value->>'address', value->'profile'->>'location',
+        value->'profile'->>'headline', value->>'discipline', value->>'keywords')), term.word) = 0
+    )
     ORDER BY key LIMIT 51`;
   const visible = rows.slice(0, 50);
   return {

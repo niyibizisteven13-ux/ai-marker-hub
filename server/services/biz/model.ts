@@ -64,6 +64,7 @@ export interface ProfileData { headline?: string; school?: string; field?: strin
 export const PROFILE_MAX = { timeline: 60, links: 12, skills: 30, featured: 6 };
 export interface Business {
   id: string; ownerId: string; slug: string; name: string; category: Category; tagline: string; about: string; theme: Theme;
+  previousSlugs?: string[];
   logoId?: string; coverId?: string;
   appName?: string; appIconId?: string;
   /** Where the business is on the map (public when set). */
