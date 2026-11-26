@@ -17,7 +17,14 @@ ORIGIN = "https://bwenge.space"
 
 
 def fetch(path, limit):
-    with urllib.request.urlopen(ORIGIN + path, timeout=20) as response:
+    # The server-side publisher reads public branding through the local app.
+    if os.environ.get("BIZ_APK_USE_LOCAL_API") == "1":
+        request = urllib.request.Request(
+            "http://127.0.0.1:5000" + path, headers={"Host": "bwenge.space"}
+        )
+    else:
+        request = urllib.request.Request(ORIGIN + path)
+    with urllib.request.urlopen(request, timeout=20) as response:
         data = response.read(limit + 1)
     if len(data) > limit:
         raise ValueError("Business asset exceeds the build size limit")
