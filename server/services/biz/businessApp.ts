@@ -2,8 +2,8 @@ import { stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 export async function findBusinessApk(slug: string): Promise<string | null> {
-  const directory = process.env.BWENGE_BIZ_APK_DIR;
-  if (!directory || !/^[a-z0-9][a-z0-9-]*$/.test(slug)) return null;
+  const directory = process.env.BWENGE_BIZ_APK_DIR || resolve('.bwenge-business-apks');
+  if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(slug)) return null;
   const filename = resolve(directory, slug + '.apk');
   const file = await stat(filename).catch(() => null);
   return file?.isFile() && file.size > 0 ? filename : null;

@@ -1,5 +1,5 @@
 import sharp from 'sharp';
-import { findBusinessApk } from '../services/biz/businessApp.js';
+import { findBusinessApk, requestBusinessApk } from '../services/biz/businessApp.js';
 import { Router, type Request, type Response } from 'express';
 import multer from 'multer';
 import { requireAuth } from '../../production/auth.js';
@@ -132,7 +132,7 @@ export function createBizRouter(): Router {
     res.send(png);
   }));
   r.get('/public/:slug/android.apk', run(async (req, res) => {
-    const b = process.env.BWENGE_BIZ_APK_DIR ? await svc().publicBySlug(req.params.slug) : null;
+    const b = await svc().publicBySlug(req.params.slug);
     if (!b) return res.status(404).end();
     const filename = await findBusinessApk(b.slug);
     if (!filename) return res.status(404).end();
@@ -202,6 +202,14 @@ export function createBizRouter(): Router {
   }));
   r.put('/prefs', run(async (req, res) => res.json({ prefs: await svc().setPrefs(me(req), req.body ?? {}) })));
   r.post('/', run(async (req, res) => res.status(201).json({ business: await svc().create(me(req), req.body ?? {}) })));
+  r.post('/:id/customer-app/android-build', run(async (req, res) => {
+    const b = await svc().get(me(req), req.params.id);
+    if (b.category === 'profile' || !b.published || b.suspended) return res.status(409).json({ error: 'Publish the business page before building its app.' });
+    const status = await requestBusinessApk(b.slug);
+    if (status === 'unconfigured') return res.status(503).json({ error: 'Android build service is not configured yet.' });
+    if (status === 'failed') return res.status(502).json({ error: 'Could not queue the Android build. Try again.' });
+    return res.status(202).json({ queued: true });
+  }));
   r.get('/:id', run(async (req, res) => res.json({ business: await svc().get(me(req), req.params.id) })));
   r.patch('/:id', run(async (req, res) => res.json({ business: await svc().update(me(req), req.params.id, req.body ?? {}) })));
   r.delete('/:id', run(async (req, res) => { await svc().remove(me(req), req.params.id); res.status(204).end(); }));

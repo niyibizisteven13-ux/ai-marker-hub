@@ -12,6 +12,10 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: bwenge-biz-apk-${{ inputs.business_slug }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -37,3 +41,34 @@ jobs:
           name: bwenge4biz-${{ inputs.business_slug }}
           path: apk/*.apk
           if-no-files-found: error
+      - name: Publish signed APK
+        env:
+          BUSINESS_SLUG: ${{ inputs.business_slug }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER_NAME: ${{ secrets.DEPLOY_USER }}
+          PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+          APP_PATH: ${{ secrets.DEPLOY_PATH }}
+          APK_DIR: ${{ vars.BWENGE_BIZ_APK_DIR }}
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          [[ "$BUSINESS_SLUG" =~ ^[a-z0-9][a-z0-9-]{0,63}$ ]]
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          directory="${APK_DIR:-$APP_PATH/.bwenge-business-apks}"
+          [[ "$directory" = /* ]]
+          publish_script='set -eu
+          mkdir -p -- "$1"
+          temporary=$(mktemp "$1/.apk.XXXXXX")
+          trap "rm -f -- \"\$temporary\"" EXIT
+          cat > "$temporary"
+          test -s "$temporary"
+          chmod 644 "$temporary"
+          mv -f -- "$temporary" "$1/$2.apk"'
+          printf -v remote 'bash -c %q bash %q %q' "$publish_script" "$directory" "$BUSINESS_SLUG"
+          ssh -i ~/.ssh/id_deploy -p "$PORT" -o StrictHostKeyChecking=yes "$USER_NAME@$HOST" "$remote" < "apk/$BUSINESS_SLUG.apk"
+          curl --fail --silent --show-error --retry 3 --max-time 30 \
+            "https://bwenge.space/api/biz/public/$BUSINESS_SLUG/android.apk" -o "$RUNNER_TEMP/published-biz.apk"
+          cmp "apk/$BUSINESS_SLUG.apk" "$RUNNER_TEMP/published-biz.apk"

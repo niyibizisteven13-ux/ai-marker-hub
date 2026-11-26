@@ -243,6 +243,7 @@ function SettingsTab({ b, urls, onChange, onDeleted }: { b: Business; urls: Reco
           <button type="button" className={btnPrimary} disabled={!!busy || appName.trim() === (b.appName ?? '')} onClick={() => void run('app-name', () => ownerApi.update(b.id, { appName }), 'App name saved.')}>{tx("Save app name")}</button>
           {b.appIconId && <button type="button" className={btnGhost} disabled={!!busy} onClick={() => void run('app-icon', () => ownerApi.update(b.id, { appIconId: '' }), 'App now uses the business logo.')}>{tx("Use business logo")}</button>}
           {b.published && !b.suspended && <a className={btnGhost} href={`${bizUrl(b.slug)}?source=app`} target="_blank" rel="noreferrer">{tx("Open customer app")}</a>}
+          {b.published && !b.suspended && b.category !== 'profile' && <button type="button" className={btnPrimary} disabled={!!busy} onClick={() => void run('build-app', () => ownerApi.buildAndroidApp(b.id), 'Android build queued. The business page will offer the APK once it is published.')}>{tx("Build Android APK")}</button>}
         </div>
       </div>
       <div className={card}><Title kind="private" hint="For you: suppliers, ideas, reminders. Never shown on your page.">{tx("Private notes")}</Title>
