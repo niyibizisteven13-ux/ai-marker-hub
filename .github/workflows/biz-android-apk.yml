@@ -22,6 +22,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - uses: android-actions/setup-android@v3
       - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
       - name: Build signed business APK
         env:
@@ -31,6 +32,9 @@ jobs:
           BIZ_APK_KEY_PASSWORD: ${{ secrets.BIZ_APK_KEY_PASSWORD }}
         run: |
           [[ "$BUSINESS_SLUG" =~ ^[a-z0-9][a-z0-9-]{0,63}$ ]]
+          : "${BIZ_APK_KEYSTORE_BASE64:?Missing BIZ_APK_KEYSTORE_BASE64}"
+          : "${BIZ_APK_KEY_ALIAS:?Missing BIZ_APK_KEY_ALIAS}"
+          : "${BIZ_APK_KEY_PASSWORD:?Missing BIZ_APK_KEY_PASSWORD}"
           umask 077
           export BIZ_APK_KEYSTORE="$RUNNER_TEMP/biz-app-signing.jks"
           trap 'rm -f "$BIZ_APK_KEYSTORE"' EXIT
