@@ -1,4 +1,5 @@
 name: Bwenge4Biz Android launcher
+run-name: 'Bwenge4Biz APK · ${{ inputs.business_slug }}'
 on:
   workflow_dispatch:
     inputs:

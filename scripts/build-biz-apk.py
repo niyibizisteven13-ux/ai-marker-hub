@@ -60,7 +60,7 @@ def main():
         drawable.mkdir(parents=True)
         (drawable / "business_icon.png").write_bytes(icon)
         manifest = build / "AndroidManifest.xml"
-        name = escape(business["name"], {'"': "&quot;", "'": "&apos;"})
+        name = escape(business.get("appName") or business["name"], {'"': "&quot;", "'": "&apos;"})
         manifest.write_text(f"""<manifest xmlns:android="http://schemas.android.com/apk/res/android"
             package="{app_id}" android:versionCode="{args.version_code}" android:versionName="1.{args.version_code}">
           <uses-sdk android:minSdkVersion="23" android:targetSdkVersion="35" />

@@ -193,8 +193,12 @@ export function createBizService(deps: Deps) {
       if (patch.category !== undefined && (String(patch.category) === 'profile') !== (b.category === 'profile') && oneOf(CATEGORIES, patch.category, b.category) !== b.category) throw new BizError('A profile and a business are different pages. Create a new one instead of changing this one.');
       applyProfile(b, patch);
       if (patch.profile !== undefined) { if (b.category !== 'profile') throw new BizError('Only a profile page has these details.'); const r = applyProfileData(b, patch.profile); if (r.error) throw new BizError(r.error); }
-      const pick = (k: 'logoId' | 'coverId') => { if (patch[k] === undefined) return; const m = b.media.find((x) => x.id === patch[k]); if (patch[k] && !(m && m.kind === 'image')) throw new BizError('Choose one of your photos.'); if (patch[k]) b[k] = m!.id; else delete b[k]; };
-      pick('logoId'); pick('coverId');
+      const pick = (k: 'logoId' | 'coverId' | 'appIconId') => { if (patch[k] === undefined) return; const m = b.media.find((x) => x.id === patch[k]); if (patch[k] && !(m && m.kind === 'image' && (k !== 'appIconId' || m.visible && !m.scope))) throw new BizError('Choose one of your photos.'); if (patch[k]) b[k] = m!.id; else delete b[k]; };
+      pick('logoId'); pick('coverId'); pick('appIconId');
+      if (patch.appName !== undefined) {
+        const name = clean(patch.appName, 40);
+        if (name) b.appName = name; else delete b.appName;
+      }
       await save(b); return b;
     },
 
@@ -277,7 +281,7 @@ export function createBizService(deps: Deps) {
     async updateMedia(ownerId: string, id: string, mediaId: string, patch: { caption?: unknown; visible?: unknown }) {
       const b = await mine(ownerId, id); const m = b.media.find((x) => x.id === mediaId); if (!m) throw new BizError('That photo or video was not found.', 404);
       if (patch.caption !== undefined) { const c = clean(patch.caption, 120); if (c) m.caption = c; else delete m.caption; }
-      if (patch.visible !== undefined && m.kind !== 'document') { m.visible = patch.visible !== false; if (!m.visible) { if (b.coverId === m.id) delete b.coverId; if (b.logoId === m.id) delete b.logoId; } }
+      if (patch.visible !== undefined && m.kind !== 'document') { m.visible = patch.visible !== false; if (!m.visible) { if (b.coverId === m.id) delete b.coverId; if (b.logoId === m.id) delete b.logoId; if (b.appIconId === m.id) delete b.appIconId; } }
       await save(b); return m;
     },
     async removeMedia(ownerId: string, id: string, mediaId: string): Promise<void> {
@@ -285,7 +289,7 @@ export function createBizService(deps: Deps) {
       await media.remove(b.id, m.id, sniffExt(m.mime)).catch(() => undefined);
       if (m.kind === 'video') { await media.remove(b.id, `${m.id}-lq`, 'mp4').catch(() => undefined); await media.remove(b.id, `${m.id}-poster`, 'jpg').catch(() => undefined); }
       mediaCache.clear();
-      b.media = b.media.filter((x) => x.id !== mediaId); if (b.coverId === mediaId) delete b.coverId; if (b.logoId === mediaId) delete b.logoId;
+      b.media = b.media.filter((x) => x.id !== mediaId); if (b.coverId === mediaId) delete b.coverId; if (b.logoId === mediaId) delete b.logoId; if (b.appIconId === mediaId) delete b.appIconId;
       for (const p of b.products) if (p.mediaId === mediaId) delete p.mediaId; await save(b);
     },
 
