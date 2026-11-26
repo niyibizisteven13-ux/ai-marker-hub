@@ -37,6 +37,8 @@ jobs:
           KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
         run: |
+          : "${KEY:?Missing DEPLOY_SSH_KEY}"
+          : "${KNOWN_HOSTS:?Missing DEPLOY_KNOWN_HOSTS}"
           install -m 700 -d ~/.ssh
           printf '%s\n' "$KEY" > ~/.ssh/id_deploy && chmod 600 ~/.ssh/id_deploy
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
@@ -49,6 +51,9 @@ jobs:
           APP_PATH: ${{ secrets.DEPLOY_PATH }}
           REF: ${{ inputs.ref }}
         run: |
+          : "${HOST:?Missing DEPLOY_HOST}"
+          : "${USER_NAME:?Missing DEPLOY_USER}"
+          : "${APP_PATH:?Missing DEPLOY_PATH}"
           # The ref is passed as an argument, never spliced into the script.
           ssh -i ~/.ssh/id_deploy -p "$PORT" -o StrictHostKeyChecking=yes "$USER_NAME@$HOST" \
             bash -s -- "$APP_PATH" "$REF" <<'REMOTE'
