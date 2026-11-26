@@ -28,18 +28,50 @@ function useWords(b: PublicBusiness, lang: Lang) { const tx = useTx(); const w =
 
 /* ---- the sign-in on this phone: kept for the session, or for 30 days when the customer asks ---- */
 const KEY = (slug: string) => `bz-sess:${slug}`;
+const OFFLINE_KEY = (slug: string) => `bz-card-offline:${slug}`;
+const OFFLINE_MAX_AGE = 24 * 60 * 60 * 1000;
+type OfflineCard = { savedAt: number; card: CardInfo; me: MeInfo };
+
+function rememberOfflineCard(slug: string, card: CardInfo, me: MeInfo) {
+  try {
+    // Only keep a snapshot on a device where the customer chose to stay signed in.
+    if (!localStorage.getItem(KEY(slug))) return;
+    const { qr, payment, tick, ...view } = card;
+    const { receipt, ...today } = view.today;
+    const {
+      code, phone, idNumber, ...member
+    } = view.member;
+    localStorage.setItem(OFFLINE_KEY(slug), JSON.stringify({
+      savedAt: Date.now(),
+      card: { ...view, today, member: { ...member, code: '', phone: '' } },
+      me: { name: me.name, phone: '', cards: me.cards },
+    }));
+  } catch { /* The live card works if device storage is unavailable. */ }
+}
+
+function readOfflineCard(slug: string, cardId?: string, programId?: string): OfflineCard | null {
+  try {
+    if (!loadSession(slug)) return null;
+    const saved = JSON.parse(localStorage.getItem(OFFLINE_KEY(slug)) ?? 'null') as OfflineCard | null;
+    if (!saved || Date.now() - saved.savedAt >= OFFLINE_MAX_AGE) return null;
+    if ((cardId && saved.card.cardId !== cardId) || (programId && saved.card.programId !== programId)) return null;
+    if (saved.card.today.serverTime !== undefined) saved.card.today.serverTime += Math.max(0, Date.now() - saved.savedAt);
+    return saved;
+  } catch { return null; }
+}
+
 export function loadSession(slug: string): string | null {
   try { const raw = sessionStorage.getItem(KEY(slug)) ?? localStorage.getItem(KEY(slug)); if (!raw) return null; const s = JSON.parse(raw) as { token: string; exp: number }; if (s.exp < Date.now()) { clearSession(slug); return null; } return s.token; } catch { return null; }
 }
 export function saveSession(slug: string, token: string, expiresAt: string, remember: boolean) {
-  const v = JSON.stringify({ token, exp: Date.parse(expiresAt) }); try { (remember ? localStorage : sessionStorage).setItem(KEY(slug), v); (remember ? sessionStorage : localStorage).removeItem(KEY(slug)); } catch { /* optional */ }
+  const v = JSON.stringify({ token, exp: Date.parse(expiresAt) }); try { localStorage.removeItem(OFFLINE_KEY(slug)); localStorage.removeItem(KEY(slug)); sessionStorage.removeItem(KEY(slug)); (remember ? localStorage : sessionStorage).setItem(KEY(slug), v); (remember ? sessionStorage : localStorage).removeItem(KEY(slug)); } catch { /* optional */ }
 }
 /** The user name is remembered on this phone, so a returning customer only types the passcode. It is not a secret on its own. */
 const UKEY = (slug: string) => `bz-user:${slug}`;
 export const loadUser = (slug: string): string => { try { return localStorage.getItem(UKEY(slug)) ?? ''; } catch { return ''; } };
 export const saveUser = (slug: string, u: string) => { try { if (u) localStorage.setItem(UKEY(slug), u); } catch { /* optional */ } };
 export const forgetUser = (slug: string) => { try { localStorage.removeItem(UKEY(slug)); } catch { /* optional */ } };
-export function clearSession(slug: string) { try { sessionStorage.removeItem(KEY(slug)); localStorage.removeItem(KEY(slug)); } catch { /* optional */ } }
+export function clearSession(slug: string) { try { sessionStorage.removeItem(KEY(slug)); localStorage.removeItem(KEY(slug)); localStorage.removeItem(OFFLINE_KEY(slug)); } catch { /* optional */ } }
 
 const fieldBase = 'mt-1 w-full rounded-xl border border-[#D9DEE5] bg-white px-3.5 text-base outline-none focus:border-[#0E1722]';
 const field = `${fieldBase} min-h-12`;
@@ -286,6 +318,8 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
   const { tx, t, w } = useWords(b, lang); const theme = THEMES[b.theme] ?? THEMES.gold; const slug = b.slug;
   const [me, setMe] = useState<MeInfo | null>(null); const [card, setCard] = useState<CardInfo | null>(null); const [sel, setSel] = useState<string | undefined>(initialCard); const [err, setErr] = useState('');
   const [phone, setPhone] = useState(''); const [ref, setRef] = useState(''); const [busy, setBusy] = useState(false); const [big, setBig] = useState(false); const [pinOpen, setPinOpen] = useState(false); const [pins, setPins] = useState({ cur: '', next: '' }); const [pinMsg, setPinMsg] = useState('');
+  const [offline, setOffline] = useState(() => !navigator.onLine);
+  const [syncedAt, setSyncedAt] = useState<number>();
   const [tab, setTab] = useState<'today' | 'card' | 'manage'>('today');
   const [manualCode, setManualCode] = useState(false);
   const [newCardDays, setNewCardDays] = useState<number>(); const [addingCard, setAddingCard] = useState(false);
@@ -302,20 +336,68 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
   const receiptClock = useMealClock(card?.today.serverTime, card?.history);
   const checkingIn = useRef(false);
   const fail = useCallback((e: unknown) => { const m = e instanceof Error ? e.message : tx('Something went wrong. Please try again.'); if (/sign in again/i.test(m)) { clearSession(slug); onSignedOut(); return; } setErr(m); }, [slug, onSignedOut, tx]);
-  const load = useCallback(async () => { const s = session(); if (!s) { onSignedOut(); return; } try { const m = await publicApi.me(slug, s); const id = sel ?? m.cards.find((entry) => entry.programId === programId)?.id; if (programId && !id) throw new Error(tx('You have no card for this program. Open the program link and choose Join as a new member.')); const c = await publicApi.card(slug, s, id); setMe(m); setCard(c); setErr(''); waiting.current = !!c.payment?.promptSent; if (!sel) setSel(c.cardId); } catch (e) { setCard(null); fail(e); } }, [slug, sel, programId, fail, onSignedOut]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { void load(); const i = window.setInterval(() => void load(), waiting.current ? 4000 : 15_000); return () => window.clearInterval(i); }, [load, card?.payment?.promptSent]);
+  const load = useCallback(async () => {
+    const s = session();
+    if (!s) { onSignedOut(); return; }
+    try {
+      const m = await publicApi.me(slug, s);
+      const id = sel ?? m.cards.find(entry => entry.programId === programId)?.id;
+      if (programId && !id) throw new Error(tx('You have no card for this program. Open the program link and choose Join as a new member.'));
+      const c = await publicApi.card(slug, s, id);
+      if (session() !== s) return;
+      setMe(m);
+      setCard(c);
+      setErr('');
+      setOffline(false);
+      setSyncedAt(Date.now());
+      waiting.current = !!c.payment?.promptSent;
+      if (!sel) setSel(c.cardId);
+      if (b.category === 'restaurant') rememberOfflineCard(slug, c, m);
+    } catch (e) {
+      if (session() !== s) return;
+      if (b.category === 'restaurant' && (!navigator.onLine || e instanceof TypeError)) {
+        const saved = readOfflineCard(slug, sel, programId);
+        setOffline(true);
+        setCard(current => current ?? saved?.card ?? null);
+        if (saved) { setMe(current => current ?? saved.me); setSyncedAt(saved.savedAt); }
+        setErr('');
+        return;
+      }
+      setCard(null);
+      fail(e);
+    }
+  }, [slug, sel, programId, fail, onSignedOut, b.category, tx]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    void load();
+    const interval = window.setInterval(() => { if (navigator.onLine) void load(); }, waiting.current ? 4000 : 15_000);
+    const reconnect = () => { void load(); };
+    const disconnect = () => { if (b.category === 'restaurant') { setOffline(true); setCamera(false); setScanPasscode(''); } };
+    const visible = () => { if (navigator.onLine && document.visibilityState === 'visible') reconnect(); };
+    window.addEventListener('online', reconnect);
+    window.addEventListener('offline', disconnect);
+    document.addEventListener('visibilitychange', visible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('online', reconnect);
+      window.removeEventListener('offline', disconnect);
+      document.removeEventListener('visibilitychange', visible);
+    };
+  }, [load, card?.payment?.promptSent, b.category]);
   useEffect(() => {
     const id = card?.cardId;
     const version = card?.version;
     const token = session();
-    if (b.category !== 'restaurant' || !id || !version || !token || card?.member.state !== 'active') return;
+    if (offline || b.category !== 'restaurant' || !id || !version || !token || card?.member.state !== 'active') return;
     const controller = new AbortController();
     let timer = 0;
     async function watch() {
       try {
         const next = await publicApi.card(slug, token!, id, version, controller.signal);
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || session() !== token) return;
         setCard(next);
+        if (me) rememberOfflineCard(slug, next, me);
+        setSyncedAt(Date.now());
         if (next.version === version) timer = window.setTimeout(watch, 0);
       } catch {
         if (!controller.signal.aborted) timer = window.setTimeout(watch, 3000);
@@ -323,11 +405,11 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
     }
     void watch();
     return () => { controller.abort(); window.clearTimeout(timer); };
-  }, [slug, b.category, card?.cardId, card?.member.state, card?.version]);
-  const act = async (fn: (s: string, id: string) => Promise<unknown>) => { const s = session(); if (!s || !card) return; setBusy(true); setErr(''); try { await fn(s, card.cardId); await load(); } catch (e) { fail(e); } finally { setBusy(false); } };
+  }, [slug, b.category, card?.cardId, card?.member.state, card?.version, offline, me]);
+  const act = async (fn: (s: string, id: string) => Promise<unknown>) => { const s = session(); if (offline || !s || !card) return; setBusy(true); setErr(''); try { await fn(s, card.cardId); await load(); } catch (e) { fail(e); } finally { setBusy(false); } };
   const addCard = async () => {
     const s = session(); const days = newCardDays ?? card?.program.tariffs[0]?.days;
-    if (!s || !card?.programId || days === undefined) return;
+    if (offline || !s || !card?.programId || days === undefined) return;
     setAddingCard(true); setErr('');
     try {
       const { cardId } = await publicApi.addCard(slug, s, card.programId, days);
@@ -339,7 +421,7 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
   };
   async function doTick(code: string, passcode?: string, currentCode = false) {
     const token = session();
-    if (!token || checkingIn.current) return;
+    if (offline || !token || checkingIn.current) return;
     checkingIn.current = true;
     setBusy(true);
     setCheckinError('');
@@ -357,6 +439,11 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
       if (error instanceof BizApiError && error.code === 'SESSION') {
         fail(error);
       } else {
+        if (error instanceof TypeError && b.category === 'restaurant') {
+          setOffline(true);
+          setCheckinError(tx('Reconnect to verify your check-in. If it is missing, re-enter your passcode to retry.'));
+          return;
+        }
         if (error instanceof BizApiError && error.code === 'BAD_CODE') setConfirmationCode('');
         setCheckinError(error instanceof Error ? error.message : tx('Something went wrong. Please try again.'));
       }
@@ -392,7 +479,7 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
   // A link opened by the phone camera uses the same confirmation as an in-app scan.
   const auto = useRef(false);
   useEffect(() => {
-    if (!scanCode || auto.current || !card) return;
+    if (offline || !scanCode || auto.current || !card) return;
     auto.current = true;
     prepareCheckin(scanCode, takeScanPasscode?.());
     try {
@@ -400,13 +487,13 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
       url.searchParams.delete('tick');
       window.history.replaceState({}, '', url.pathname + url.search);
     } catch { /* optional */ }
-  }, [scanCode, card]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [scanCode, card, offline]); // eslint-disable-line react-hooks/exhaustive-deps
   const restaurant = b.category === 'restaurant';
   const m = card?.member; const usedUp = !!card && m?.state === 'active' && !!card.program.totalUses && m.usedTotal >= card.program.totalUses;
   const tone = !m ? '#5B6470' : usedUp ? '#B91C1C' : m.state === 'active' ? '#15803D' : m.state === 'pending' || m.state === 'not_started' ? '#B45309' : '#B91C1C';
   const label = !m ? '' : usedUp ? t('ALL {USES} TAKEN') : ({ active: tx('ACTIVE'), pending: tx('WAITING FOR PAYMENT'), not_started: tx('STARTS SOON'), expired: tx('PLAN ENDED'), paused: tx('PAUSED'), cancelled: tx('CANCELLED') } as Record<string, string>)[m.state];
   const showCheckin = (m?.state === 'active' && card?.tick) || confirmationCode || checkinError;
-  const purchasePanel = card && m && card.canAddCards && (m.state === 'active' || m.state === 'expired') && card.program.tariffs.length > 0 && (
+  const purchasePanel = !offline && card && m && card.canAddCards && (m.state === 'active' || m.state === 'expired') && card.program.tariffs.length > 0 && (
     <section className={`grid gap-2 rounded-2xl bg-white ${restaurant ? "p-3 min-[400px]:grid-cols-[minmax(0,1fr)_auto] md:grid-cols-1" : "p-4"}`}>
       {(!restaurant || m.state === 'expired') && <p className="col-span-full font-semibold">{m.state === 'expired' ? tx('Renew this card') : tx('Add another card')}</p>}
       <label className="block min-w-0 text-sm">{tx('Choose a duration and price')}
@@ -428,14 +515,18 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
         </nav>}
         <div className="mb-3 flex items-center justify-between gap-2"><div className="min-w-0"><p className="truncate font-display text-lg font-semibold">{b.name}{b.verified && <VerifiedBadge size={18} className="ml-1" />}</p>{me && <p className="truncate text-sm text-[#5B6470]">{tx('Hello')}, {me.name}</p>}</div>
           <div className="flex items-center gap-1"><button type="button" onClick={() => setPinOpen((v) => !v)} aria-label={tx('Change passcode')} title={tx('Change passcode')} className="rounded-full p-2 hover:bg-white"><KeyRound size={18} /></button>
-            <button type="button" onClick={async () => { const s = session(); if (s) await publicApi.logout(slug, s); clearSession(slug); onSignedOut(); }} aria-label={tx('Sign out')} title={tx('Sign out')} className="rounded-full p-2 hover:bg-white"><LogOut size={18} /></button>
+            <button type="button" onClick={async () => { const s = session(); try { if (s && !offline) await publicApi.logout(slug, s); } finally { clearSession(slug); onSignedOut(); } }} aria-label={tx('Sign out')} title={tx('Sign out')} className="rounded-full p-2 hover:bg-white"><LogOut size={18} /></button>
             <button type="button" onClick={onClose} aria-label={tx('Close')} className="rounded-full p-2 hover:bg-white"><X size={20} /></button></div></div>
-        {pinOpen && <form className="mb-3 space-y-2 rounded-2xl bg-white p-4" onSubmit={async (e) => { e.preventDefault(); setPinMsg(''); const s = session(); if (!s) return; try { await publicApi.changePasscode(slug, s, pins.cur, pins.next); setPinMsg(tx('Passcode changed.')); setPins({ cur: '', next: '' }); } catch (x) { setPinMsg(x instanceof Error ? x.message : ''); } }}>
+        {pinOpen && !offline && <form className="mb-3 space-y-2 rounded-2xl bg-white p-4" onSubmit={async (e) => { e.preventDefault(); setPinMsg(''); const s = session(); if (!s) return; try { await publicApi.changePasscode(slug, s, pins.cur, pins.next); setPinMsg(tx('Passcode changed.')); setPins({ cur: '', next: '' }); } catch (x) { setPinMsg(x instanceof Error ? x.message : ''); } }}>
           <input className={`${field} font-mono tracking-[0.4em]`} type="password" inputMode="numeric" placeholder={tx('Current passcode')} value={pins.cur} onChange={(e) => setPins({ ...pins, cur: e.target.value.replace(/\D/g, '').slice(0, 6) })} />
           <input className={`${field} font-mono tracking-[0.4em]`} type="password" inputMode="numeric" placeholder={tx('New passcode')} value={pins.next} onChange={(e) => setPins({ ...pins, next: e.target.value.replace(/\D/g, '').slice(0, 6) })} />
           <button type="submit" className="min-h-11 w-full rounded-xl border-2 border-[#0E1722] text-sm font-semibold">{tx('Save')}</button>{pinMsg && <p role="status" className="text-sm text-[#3A4350]">{pinMsg}</p>}</form>}
-        {me && me.cards.length > 1 && <div className="mb-3 flex gap-2 overflow-x-auto" role="tablist">{me.cards.map((c) => <button key={c.id} role="tab" aria-selected={card?.cardId === c.id} type="button" onClick={() => { setCamera(false); setConfirmationCode(''); setScanPasscode(''); setCheckinError(''); setSel(c.id); setCard(null); }} className={`flex shrink-0 flex-col items-start rounded-xl px-3 py-2 text-left ${card?.cardId === c.id ? 'bg-[#0E1722] text-white' : 'bg-white'}`}><span className="text-sm font-semibold">{c.programTitle}</span><span className="text-xs opacity-75">{tx(c.state)} · {shortDate(c.endDate)}</span></button>)}</div>}
-        {!card && !err && <div className="grid place-items-center py-24"><Loader2 className="animate-spin" aria-label={tx('Loading')} /></div>}
+        {me && me.cards.length > 1 && <div className="mb-3 flex gap-2 overflow-x-auto" role="tablist">{me.cards.map((c) => <button key={c.id} role="tab" aria-selected={card?.cardId === c.id} disabled={offline} type="button" onClick={() => { setCamera(false); setConfirmationCode(''); setScanPasscode(''); setCheckinError(''); setSel(c.id); setCard(null); }} className={`flex shrink-0 flex-col items-start rounded-xl px-3 py-2 text-left ${card?.cardId === c.id ? 'bg-[#0E1722] text-white' : 'bg-white'}`}><span className="text-sm font-semibold">{c.programTitle}</span><span className="text-xs opacity-75">{tx(c.state)} · {shortDate(c.endDate)}</span></button>)}</div>}
+        {offline && <p role="status" className="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-950">
+          {card ? tx('Offline · Showing your last synced meal card.') : tx('Offline · Open your meal card online once to save it on this phone.')}
+          {syncedAt && <span className="block text-xs">{tx('Last synced')} · {new Date(syncedAt).toLocaleString('en-GB', { timeZone: 'Africa/Kigali' })}</span>}
+        </p>}
+        {!card && !err && !offline && <div className="grid place-items-center py-24"><Loader2 className="animate-spin" aria-label={tx('Loading')} /></div>}
         {err && <p role="alert" className="mb-3 rounded-2xl bg-rose-50 p-4 text-sm text-rose-700">{err}</p>}
         {flash && <p role="status" className="mb-3 flex items-center gap-2 rounded-2xl bg-emerald-50 p-4 text-base font-semibold text-emerald-800"><CheckCircle2 size={20} aria-hidden="true" />{flash}</p>}
         {card && m && (
@@ -459,7 +550,7 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
             {!restaurant && purchasePanel}
             {restaurant && tab === 'manage' && purchasePanel && <div className="md:hidden">{purchasePanel}</div>}
             <div className={restaurant && tab !== 'today' ? 'hidden space-y-3 md:block' : 'space-y-3'}>
-            {card.today.receipt && receiptClock < tickDeadline(card.today.receipt) && <section aria-label={tx("Meal confirmation")} className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950">
+            {!offline && card.today.receipt && receiptClock < tickDeadline(card.today.receipt) && <section aria-label={tx("Meal confirmation")} className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950">
               <p className="flex items-center gap-2 font-semibold"><CheckCircle2 size={20} />{tx("Meal confirmed")}</p>
               <p className="mt-1 text-2xl font-bold">{card.today.receipt.item} × {card.today.receipt.count}</p>
               <p>{m.name} · {card.today.date} · {clock(card.today.receipt.at)}</p>
@@ -467,7 +558,7 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
               <p className="text-sm">{tx("Show this confirmation to the waiter.")}</p>
             </section>}
             <div className={restaurant && showCheckin && purchasePanel ? "grid items-start gap-3 md:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]" : "contents"}>
-              {showCheckin && (
+              {showCheckin && !offline && (
                 <div className={`rounded-2xl bg-white ${restaurant ? "space-y-2 p-3" : "space-y-3 p-4"}`}>
                   <p className={`font-display font-semibold ${restaurant ? "text-base" : "text-lg"}`}>{card.tick?.needsCode === false ? tx("Meal check-in") : tx("Scan the business's code")}</p>
                   {confirmationCode ? (
@@ -528,7 +619,7 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
             </div>
             <div className={restaurant && tab !== 'card' ? 'hidden space-y-3 md:block' : 'space-y-3'}>
             <PaperCard key={card.cardId} b={b} card={card} w={w} animateMealTicks={restaurant} />
-            {(m.state === 'active' || m.state === 'not_started') && card.qr && (
+            {!offline && (m.state === 'active' || m.state === 'not_started') && card.qr && (
               <div className="rounded-2xl bg-white p-4 text-center">
                 <button type="button" onClick={() => setBig(true)} aria-label={tx('Tap to enlarge')} className="mx-auto block"><Qr text={card.qr} size={168} /></button>
                 <p className="mt-1 font-mono text-lg font-semibold tracking-widest">{m.code}</p>
@@ -539,7 +630,7 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
               </div>)}
             </div>
             <div className={restaurant && tab !== 'manage' && m.state !== 'pending' ? 'hidden space-y-3 md:block' : 'space-y-3'}>
-            {m.state === 'pending' && card.payment && (
+            {!offline && m.state === 'pending' && card.payment && (
               <div className="space-y-3 rounded-2xl bg-white p-4 text-left">
                 <p className="text-center font-display text-3xl font-semibold tabular-nums">{rwf(card.payment.amount)}</p>
                 <p className="text-center text-sm text-[#5B6470]">{m.purchaseDays} {tx('days')} · {tx('Starts after payment is confirmed')}</p>

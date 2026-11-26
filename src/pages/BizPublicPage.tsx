@@ -9,8 +9,11 @@ export default function BizPublicPage({ slug }: { slug: string }) {
   const [state, setState] = useState<{ business: PublicBusiness; openNow: boolean | null } | 'loading' | 'missing' | 'error'>('loading');
   useEffect(() => {
     let alive = true;
-    publicApi.page(slug).then((p) => { if (alive) { setState(p); const isProfile = p.business.category === 'profile'; document.title = isProfile ? p.business.name + (p.business.slug.toLowerCase() === 'niyibizisteven' ? ' · Founder of Bwenge.space' : p.business.profile?.headline ? ' · ' + p.business.profile.headline : '') + ' · Bwenge4Profile' : p.business.name + ' · Bwenge'; } }).catch((e) => { if (alive) setState(e instanceof BizApiError && e.status === 404 ? 'missing' : 'error'); });
-    return () => { alive = false; };
+    const load = () => publicApi.page(slug).then((p) => { if (alive) { setState(p); const isProfile = p.business.category === 'profile'; document.title = isProfile ? p.business.name + (p.business.slug.toLowerCase() === 'niyibizisteven' ? ' · Founder of Bwenge.space' : p.business.profile?.headline ? ' · ' + p.business.profile.headline : '') + ' · Bwenge4Profile' : p.business.name + ' · Bwenge'; } }).catch((e) => { if (alive) setState(e instanceof BizApiError && e.status === 404 ? 'missing' : 'error'); });
+    void load();
+    const reconnect = () => { void load(); };
+    window.addEventListener('online', reconnect);
+    return () => { alive = false; window.removeEventListener('online', reconnect); };
   }, [slug]);
   useEffect(() => {
     let alive = true;
@@ -38,6 +41,18 @@ export default function BizPublicPage({ slug }: { slug: string }) {
       document.removeEventListener('visibilitychange', refreshBadge);
     };
   }, [slug]);
+  useEffect(() => {
+    if (typeof state === 'string' || !('serviceWorker' in navigator)) return;
+    let alive = true;
+    void navigator.serviceWorker.ready.then(registration => {
+      if (!alive || !navigator.onLine) return;
+      const assets = performance.getEntriesByType('resource').map(entry => new URL(entry.name))
+        .filter(url => url.origin === location.origin && url.pathname.startsWith('/assets/')).map(url => url.pathname);
+      registration.active?.postMessage({ type: 'WARM_BIZ_OFFLINE', assets: [...new Set(assets)] });
+    });
+    return () => { alive = false; };
+  }, [state]);
+
   // The business's own installable app: while its page is open, the browser sees this business's manifest, colour and name.
   useEffect(() => {
     if (typeof state === 'string') return; const b = state.business; const prev: Array<[Element, string]> = [];
