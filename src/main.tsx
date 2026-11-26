@@ -21,5 +21,15 @@ createRoot(document.getElementById('root')!).render(
   </StrictMode>,
 );
 
-// Makes Bwenge installable (Install button on Android, Windows, Mac and Linux). The worker caches nothing; see public/sw.js.
-if (import.meta.env.PROD && 'serviceWorker' in navigator) window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').catch(() => undefined); });
+// Save the public shell and resources already loaded on a first visit.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    void navigator.serviceWorker.register('/sw.js').then(async () => {
+      if (!['/', '/research', '/get-app'].includes(location.pathname)) return;
+      const worker = (await navigator.serviceWorker.ready).active;
+      const assets = performance.getEntriesByType('resource').map(entry => new URL(entry.name))
+        .filter(url => url.origin === location.origin && url.pathname.startsWith('/assets/')).map(url => url.pathname);
+      worker?.postMessage({ type: 'WARM_PUBLIC_OFFLINE', assets: [...new Set(assets)] });
+    }).catch(() => undefined);
+  }, { once: true });
+}

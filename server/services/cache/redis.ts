@@ -27,31 +27,77 @@ export function getRedis(): Redis | null {
 export const redisReady = () => getRedis()?.status === 'ready';
 
 // ── Cache ──────────────────────────────────────────────────────────────────
-const local = new Map<string, { at: number; ttl: number; value: unknown }>();
+const LOCAL_CACHE_LIMIT = 512;
+const local = new Map<string, { expires: number; value: unknown }>();
+const pending = new Map<string, Promise<unknown>>();
+const invalidating = new Map<string, Promise<void>>();
 
-/** Returns the cached value, or computes it once and shares it with every server for `ttlMs`. */
+/** Shares concurrent misses within this process and successful fills across Redis clients. */
 export async function cached<T>(key: string, ttlMs: number, compute: () => Promise<T>): Promise<T> {
-  const r = getRedis();
-  if (r && redisReady()) {
-    try {
-      const hit = await r.get(`cache:${key}`);
-      if (hit !== null) return JSON.parse(hit) as T;
-      const value = await compute();
-      await r.set(`cache:${key}`, JSON.stringify(value), 'PX', ttlMs).catch(() => undefined);
-      return value;
-    } catch { /* fall through to the local cache */ }
+  await invalidating.get(key);
+  const active = pending.get(key);
+  if (active) return active as Promise<T>;
+
+  const redis = getRedis();
+  const redisKey = `cache:${key}`;
+  async function fill(): Promise<T> {
+    let shared = false;
+    if (redis?.status === 'ready') {
+      try {
+        const hit = await redis.get(redisKey);
+        if (hit !== null) return JSON.parse(hit) as T;
+        shared = true;
+      } catch { /* Redis errors leave the local cache available. */ }
+    }
+    if (!shared) {
+      const entry = local.get(key);
+      if (entry) {
+        local.delete(key);
+        if (entry.expires > Date.now()) {
+          local.set(key, entry);
+          return entry.value as T;
+        }
+      }
+    }
+    // An application error belongs to the caller. It must never retry through the fallback.
+    const value = await compute();
+    if (pending.get(key) !== request) return value;
+
+    if (ttlMs > 0) {
+      local.delete(key);
+      local.set(key, { expires: Date.now() + ttlMs, value });
+      if (local.size > LOCAL_CACHE_LIMIT) local.delete(local.keys().next().value!);
+      if (shared && redis) {
+        try {
+          const serialized = JSON.stringify(value);
+          if (serialized !== undefined) await redis.set(redisKey, serialized, 'PX', ttlMs);
+        } catch { /* A Redis write or serialization error should not fail the request. */ }
+      }
+    }
+    return value;
   }
-  const l = local.get(key);
-  if (l && Date.now() - l.at < l.ttl) return l.value as T;
-  const value = await compute();
-  local.set(key, { at: Date.now(), ttl: ttlMs, value });
-  return value;
+
+  const request = Promise.resolve().then(fill);
+  pending.set(key, request);
+  try {
+    return await request;
+  } finally {
+    if (pending.get(key) === request) pending.delete(key);
+  }
 }
 
 export async function invalidate(key: string): Promise<void> {
+  pending.delete(key);
   local.delete(key);
-  const r = getRedis();
-  if (r && redisReady()) await r.del(`cache:${key}`).catch(() => undefined);
+  const redis = getRedis();
+  if (redis?.status !== 'ready') return;
+  const deletion = redis.del(`cache:${key}`).then(() => undefined, () => undefined);
+  invalidating.set(key, deletion);
+  try {
+    await deletion;
+  } finally {
+    if (invalidating.get(key) === deletion) invalidating.delete(key);
+  }
 }
 
 // ── Messages between servers ─────────────────────────────────────────────

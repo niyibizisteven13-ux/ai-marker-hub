@@ -2940,7 +2940,13 @@ async function startServer() {
     };
     app.get('/', (req, res, next) => (/^myseb\./i.test(req.hostname) ? void mysebShell(req, res) : next()));
     app.get(['/ms', '/ms/'], (req, res) => void mysebShell(req, res));
-    app.use(express.static(distPath));
+    app.use(express.static(distPath, {
+      setHeaders(res, file) {
+        if (path.dirname(file) === path.join(distPath, 'assets') && /-[a-z0-9_-]{8,}\.(js|css|woff2)$/i.test(path.basename(file))) {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        }
+      },
+    }));
     app.get(['/forms/:id', '/apply/:id'], (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
     // A business page: the same app, with the business's own name, tagline and cover photo in the head so a link shared on WhatsApp looks right.
     app.get(['/b/:slug', '/p/:slug'], async (req, res) => {
