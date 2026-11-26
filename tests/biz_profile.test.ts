@@ -87,7 +87,7 @@ test('the audience numbers behind the creator and profile home: views and taps b
 test('link previews for a profile use the /p/ link and the person’s headline', () => {
   const b = newBusiness('1', 'o', 'Aline Uwase', 'aline', 'profile', 'now'); b.profile = { headline: 'IT student <script>', skills: [], timeline: [], links: [], featured: [] }; b.about = 'About me';
   const html = renderShell('<html><head><title>x</title></head><body></body></html>', publicView(b), 'https://www.bwenge.space');
-  assert.match(html, /<link rel="canonical" href="https:\/\/www\.bwenge\.space\/p\/aline"/); assert.match(html, /<title>Aline Uwase · IT student &lt;script&gt; · Bwenge4profile<\/title>/); assert.match(html, /og:type" content="profile"/); assert.ok(!html.includes('<script>'));
+  assert.match(html, /<link rel="canonical" href="https:\/\/www\.bwenge\.space\/p\/aline"/); assert.match(html, /<title>Aline Uwase · IT student &lt;script&gt; · Bwenge4Profile<\/title>/); assert.match(html, /og:type" content="profile"/); assert.ok(!html.includes('<script>'));
   const biz = renderShell('<html><head><title>x</title></head></html>', publicView(newBusiness('2', 'o', 'Cafe', 'cafe', 'restaurant', 'now')), 'https://www.bwenge.space'); assert.match(biz, /\/b\/cafe/);
 });
 
