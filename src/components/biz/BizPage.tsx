@@ -166,6 +166,7 @@ function BizPageInner({ business: b, base, lang, setLang, openNow, mediaSrc, pre
   const theme = THEMES[b.theme] ?? THEMES.gold; const preset = presetFor(b.category);
   const [box, setBox] = useState<number | null>(null); const [report, setReport] = useState(false); const [toast, setToast] = useState(''); const [cart, setCart] = useState<Cart>({}); const [checkout, setCheckout] = useState<null | 'order' | 'pay'>(null);
   const [rawPosts, setPosts] = useState<PublicPost[]>([]); const posts = useMemo(() => localizePosts(rawPosts, base, lang), [rawPosts, base, lang]); const [postBox, setPostBox] = useState<{ items: PublicMedia[]; i: number } | null>(null); const [qr, setQr] = useState(''); const [installEvt, setInstallEvt] = useState<any>(null); const toastTimer = useRef<number | undefined>(undefined);
+  const installHelp = useRef<HTMLDialogElement>(null);
   const apkUrl = `/api/biz/public/${encodeURIComponent(b.slug)}/android.apk`;
   const [initialCard, setInitialCard] = useState<string>();
   const [renewing, setRenewing] = useState(false);
@@ -234,6 +235,9 @@ function BizPageInner({ business: b, base, lang, setLang, openNow, mediaSrc, pre
               <div className="hidden gap-2 sm:flex"><button type="button" onClick={() => void share()} aria-label={tx("Share")} className="flex h-11 w-11 items-center justify-center rounded-xl bg-white text-[#0E1722] shadow hover:bg-[#F6F7F9]"><Share2 size={18} /></button>
                 {b.payOnline && <button type="button" onClick={() => setCheckout('pay')} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-[var(--acc)] px-4 text-sm font-semibold text-[var(--on)] shadow hover:opacity-90"><Smartphone size={17} />{tx("Pay now")}</button>}</div>
             </div>
+          {!preview && (b.androidApkAvailable
+            ? <a href={apkUrl} className="absolute left-3 top-3 z-10 inline-flex min-h-11 items-center gap-2 rounded-xl bg-white px-3 text-sm font-semibold text-[#0E1722] shadow hover:bg-[#F6F7F9]"><Download size={16} aria-hidden="true" />{tx("Download app")}</a>
+            : <button type="button" onClick={() => { if (installEvt) void install(); else installHelp.current?.showModal(); }} className="absolute left-3 top-3 z-10 inline-flex min-h-11 items-center gap-2 rounded-xl bg-white px-3 text-sm font-semibold text-[#0E1722] shadow hover:bg-[#F6F7F9]"><Download size={16} aria-hidden="true" />{tx("Download app")}</button>)}
           <div className="absolute right-3 top-3 z-10 inline-flex rounded-full bg-black/45 p-0.5 text-xs font-semibold text-white backdrop-blur" role="group" aria-label="Language">{(['en', 'rw'] as const).map((l) => <button key={l} type="button" aria-pressed={lang === l} onClick={() => setLang(l)} className={`rounded-full px-3 py-1.5 ${lang === l ? 'bg-white text-[#0E1722]' : ''}`}>{l.toUpperCase()}</button>)}</div>
           </header>
 
@@ -331,8 +335,7 @@ function BizPageInner({ business: b, base, lang, setLang, openNow, mediaSrc, pre
               <div className={`${panel} text-center`}><h3 className="font-display text-lg font-semibold">{tx("Scan to open on your phone")}</h3>{qr ? <img src={qr} alt={`QR code for ${url}`} className="mx-auto mt-3 h-40 w-40 rounded-2xl border border-[#E7EAEE] p-1.5" /> : <div className="mx-auto mt-3 flex h-40 w-40 items-center justify-center rounded-2xl bg-[#F0F2F5] text-[#98A2B3]"><QrCode size={40} /></div>}
                 <p className="mt-2 break-all font-mono text-xs text-[#667085]">{url.replace(/^https?:\/\//, '')}</p>
                 <div className="mt-3 flex flex-wrap justify-center gap-2">{qr && <a href={qr} download={`${b.slug}-qr.png`} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-[#D5DBE3] px-3 text-sm font-semibold hover:bg-[#F6F7F9]"><Download size={15} />{tx("Save QR")}</a>}
-                  {!preview && b.androidApkAvailable && <a href={apkUrl} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-[#D5DBE3] px-3 text-sm font-semibold"><Download size={15} />{tx("Download Android APK")}</a>}
-                  {installEvt ? <button type="button" onClick={() => void install()} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-[var(--acc)] px-3 text-sm font-semibold text-[var(--on)]"><Smartphone size={15} />{tx("Install app")}</button> : <p className="w-full text-xs text-[#667085]">On iPhone, open Safari and choose Share → Add to Home Screen to install {b.name}.</p>}</div></div>
+                </div></div>
             </aside>
           </div>
 
@@ -343,6 +346,15 @@ function BizPageInner({ business: b, base, lang, setLang, openNow, mediaSrc, pre
       {/* cart bar */}
       {count > 0 && !checkout && <div className="fixed inset-x-0 bottom-0 z-40 p-3 sm:p-4"><button type="button" onClick={() => setCheckout('order')} className="mx-auto flex min-h-14 w-full max-w-xl items-center justify-between gap-3 rounded-2xl bg-[#0E1722] px-5 text-white shadow-2xl"><span className="inline-flex items-center gap-2.5 text-[15px] font-semibold"><span className="flex h-7 min-w-7 items-center justify-center rounded-full bg-[var(--acc)] px-1.5 text-sm text-[var(--on)]">{count}</span>{tx("View your order")}</span><b>{lines.every((l) => l.p.price !== null) ? `${total.toLocaleString('en-US')} RWF` : ''}</b></button></div>}
       {joining && <JoinFlow renewing={renewing} b={b} lang={lang} program={joining} onClose={() => setJoining(null)} onDone={() => { setInitialCard(undefined); setRenewing(false); setProgramId(joining.id); setJoining(null); setCardView('dashboard'); try { window.history.replaceState({}, '', window.location.pathname); } catch { /* optional */ } }} />}
+      {!preview && <dialog ref={installHelp} aria-labelledby="biz-install-title" className="m-auto w-[calc(100%-2rem)] max-w-sm rounded-2xl bg-white p-5 text-[#0E1722] shadow-xl backdrop:bg-black/55">
+        <div className="flex items-center justify-between gap-3">
+          <h2 id="biz-install-title" className="font-display text-xl font-semibold">{tx("Install app")}</h2>
+          <form method="dialog"><button type="submit" className="grid h-11 w-11 place-items-center rounded-xl hover:bg-slate-100" aria-label={tx("Close")}><X size={18} aria-hidden="true" /></button></form>
+        </div>
+        <p className="mb-3 text-sm font-semibold">{b.name}</p>
+        <p className="text-sm text-[#475467]">{tx("Android: Open in Chrome, then choose Install app or Add to Home screen from the browser menu.")}</p>
+        <p className="mt-3 text-sm text-[#475467]">{tx("iPhone: Open in Safari, tap Share, and choose Add to Home Screen.")}</p>
+      </dialog>}
       {cardView === 'signin' && <SignIn b={b} lang={lang} app={appEntry} onClose={() => { if (appEntry) window.history.replaceState({}, '', window.location.pathname); setCardView(null); }} onDone={(passcode) => { if (scanCode && b.category === 'restaurant') scanPasscode.current = passcode; setCardView('dashboard'); }} />}
       {cardView === 'dashboard' && <Dashboard initialCard={initialCard} programId={programId} b={b} lang={lang} scanCode={scanCode || undefined} takeScanPasscode={() => { const passcode = scanPasscode.current; scanPasscode.current = ''; return passcode; }} onClose={() => { setScanCode(''); scanPasscode.current = ''; setCardView(null); try { window.history.replaceState({}, '', window.location.pathname); } catch { /* optional */ } }} onSignedOut={() => setCardView('signin')} />}
       {checkout && <Checkout b={b} cart={cart} setCart={setCart} preview={preview} startPay={checkout === 'pay'} waLink={waBase} onClose={() => setCheckout(null)} />}
