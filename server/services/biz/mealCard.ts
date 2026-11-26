@@ -1,3 +1,5 @@
+export const MEAL_TICK_WINDOW_MS = 120_000;
+
 export const restaurantWindows = [
   { item: 'Breakfast', from: '06:00', to: '10:00' },
   { item: 'Lunch', from: '11:00', to: '15:00' },

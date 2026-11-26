@@ -612,7 +612,7 @@ test('restaurant guest servings count individually, respect the cap and replay s
   await assert.rejects(tick(key(3)), { code: 'DENIED' });
   const card = await svc.memberCard('o', biz.id, customer.cardId);
   assert.equal(card.member.usedTotal, 3);
-  assert.deepEqual(card.calendar.find(day => day.date === card.today.date)?.used, ['Lunch','Lunch','Lunch']);
+  assert.deepEqual(card.calendar.filter(day => day.used.length).map(day => day.used), [['Lunch'], ['Lunch'], ['Lunch']]);
   assert.equal(card.history.filter(u => u.guest).length, 2);
   assert.equal((await svc.today('o', biz.id)).notYet.length, 1);
   await svc.undoUse('o', biz.id, two.useId);
@@ -636,11 +636,11 @@ test('an uncapped link card accepts a group during lunch and stops when lunch en
   await assert.rejects(extra(21), { code: 'DENIED' });
 });
 
-test('group check-in counts plates once and the serving receipt expires at five minutes', async () => {
-  const { svc, biz, prog, at } = await setup({ totalUses: 4 });
+test('group check-in counts plates once and the serving receipt expires at two minutes', async () => {
+  const { svc, biz, prog, at } = await setup({ totalUses: 6 });
   const member = await joinP(svc, biz.slug, prog.id, { name: 'Host', phone: '0788000021' }, 'batch');
   await svc.confirmPayment('o', biz.id, member.cardId, { method: 'cash' });
-  const input = { code: await codeOf(svc, biz.id, prog.id), passcode: '4821', quantity: 3, batchId: '00000000-0000-4000-8000-000000000010' };
+  const input = { code: await codeOf(svc, biz.id, prog.id), passcode: '4821', quantity: 5, batchId: '00000000-0000-4000-8000-000000000010' };
   const tick = () => svc.selfUse(biz.slug, member.session, input, 'batch');
   await assert.rejects(svc.rotateMealCode('other', biz.id, prog.id));
   await svc.rotateMealCode('o', biz.id, prog.id);
@@ -649,16 +649,21 @@ test('group check-in counts plates once and the serving receipt expires at five 
   const before = await svc.today('o', biz.id);
   const watching = svc.today('o', biz.id, before.version);
   await Promise.all([tick(), tick()]);
-  assert.equal((await watching).servedCount, 3);
+  assert.equal((await watching).servedCount, 5);
   const card = () => svc.card(biz.slug, member.session);
-  assert.equal((await card()).today.receipt?.count, 3);
-  assert.equal((await card()).history.filter(u => u.guest).length, 2);
+  assert.equal((await card()).today.receipt?.count, 5);
+  assert.equal((await card()).history.filter(u => u.guest).length, 4);
   input.batchId = '00000000-0000-4000-8000-000000000011';
   await assert.rejects(tick(), { code: 'DENIED' });
-  assert.equal((await card()).member.usedTotal, 3);
-  at(T0 + 300_000);
+  assert.equal((await card()).member.usedTotal, 5);
+  const filled = (await card()).calendar.filter(day => day.used.length);
+  assert.deepEqual(filled.map(day => day.used), Array.from({ length: 5 }, () => ['Lunch']));
+  assert.equal(new Set((await card()).history.map(use => use.at)).size, 1);
+  at(T0 + 119_999);
+  assert.equal((await card()).today.receipt?.count, 5);
+  at(T0 + 120_000);
   assert.equal((await card()).today.receipt, undefined);
-  assert.equal((await card()).history.length, 3);
+  assert.equal((await card()).history.length, 5);
 });
 
 test('owner can record from a card code or saved QR and wake the open client card', async () => {

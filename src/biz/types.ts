@@ -83,7 +83,7 @@ export interface CardDay { date: string; dow: DayId; open: boolean; used: string
 export interface CardInfo {
   version?: string;
   programId?: string; renewable?: boolean;
-  history?: Array<{ id?: string; guest?: boolean; date: string; item: string; at: string; stampImage?: string }>;
+  history?: Array<{ id?: string; guest?: boolean; cellDate?: string; date: string; item: string; at: string; stampImage?: string }>;
   cardId: string;
   business: { id?: string; name: string; slug: string; theme: string };
   program: { title: string; cardLayout?: CardLayout; mealColors?: Record<string, string> | null; stampImage?: string; shuffleCardColor?: boolean; cardColor?: string; arrivalColor?: string; linkCheckIn?: boolean; checkIn?: 'staff' | 'self'; totalUses?: number; items: string[]; openDays: DayId[]; windows?: ItemWindow[]; terms?: string; priceRwf: number; days: number };

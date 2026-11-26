@@ -1,4 +1,4 @@
-import { restaurantCard, mealColor } from './mealCard.js';
+import { MEAL_TICK_WINDOW_MS, restaurantCard, mealColor } from './mealCard.js';
 import { createHmac, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { clean, cleanPhone } from './model.js';
@@ -115,12 +115,21 @@ export function createPrograms(h: Helpers) {
     return { phone: s.phone };
   }
   /** Writes one tick: today's list, the member's own list, the day index and the running count. Call inside the member lock, after canServe agreed. */
-  async function record(bizId: string, m: Member, date: string, t: number, item: string, served: Use[], by: Use['by'], stampImage?: string, guestRequest?: string, quantity = 1, batchId?: string): Promise<Use> {
+  async function record(bizId: string, m: Member, date: string, t: number, item: string, served: Use[], by: Use['by'], stampImage?: string, guestRequest?: string, quantity = 1, batchId?: string, mealProgram?: Program): Promise<Use> {
+    const own = (await kv.get<{ items: Use[] }>(k.uses(bizId, m.id)))?.items ?? [];
+    const cellDates: string[] = [];
+    if (mealProgram) {
+      const occupied = new Set(own.filter(use => !use.undone && use.item === item).map(use => use.cellDate ?? use.date));
+      for (let day = date; day <= m.endDate && cellDates.length < quantity; day = addDays(day, 1)) {
+        if (mealProgram.openDays.includes(dayOfWeek(day)) && !occupied.has(day)) cellDates.push(day);
+      }
+      if (cellDates.length < quantity) throw new ProgramError(`This card has only ${cellDates.length} available ${item} cells left.`, 409, 'DENIED');
+    }
     const repeatMeal = served.some(u => u.memberId === m.id && u.item === item && !u.undone);
-    const uses = Array.from({ length: quantity }, (_, index): Use => ({ id: randomUUID(), memberId: m.id, date, item, at: new Date(t).toISOString(), by, ...(batchId ? { batchId } : {}), ...(guestRequest || (batchId && (index > 0 || repeatMeal)) ? { guestRequest: guestRequest ?? batchId } : {}), ...(stampImage ? { stampImage } : {}) }));
+    const uses = Array.from({ length: quantity }, (_, index): Use => ({ id: randomUUID(), memberId: m.id, date, ...(mealProgram ? { cellDate: cellDates[index] } : {}), item, at: new Date(t).toISOString(), by, ...(batchId ? { batchId } : {}), ...(guestRequest || (batchId && (index > 0 || repeatMeal)) ? { guestRequest: guestRequest ?? batchId } : {}), ...(stampImage ? { stampImage } : {}) }));
     await kv.put(k.served(bizId, date), { items: [...served, ...uses] });
     const idx = (await kv.get<{ dates: string[] }>(k.days(bizId)))?.dates ?? []; if (!idx.includes(date)) await kv.put(k.days(bizId), { dates: [...idx, date].slice(-400) });
-    const own = (await kv.get<{ items: Use[] }>(k.uses(bizId, m.id)))?.items ?? []; await kv.put(k.uses(bizId, m.id), { items: [...own, ...uses].slice(-1500) });
+    await kv.put(k.uses(bizId, m.id), { items: [...own, ...uses].slice(-1500) });
     const all = await membersOf(bizId); const mm = all.find((x) => x.id === m.id); if (mm) { mm.used = (mm.used ?? 0) + quantity; m.used = mm.used; await putMembers(bizId, all); }
     mealChanged(bizId);
     mealChanged(`card:${bizId}:${m.id}`);
@@ -171,10 +180,10 @@ export function createPrograms(h: Helpers) {
       member: { name: m.name, phone: m.phone, ...(m.idNumber ? { idNumber: m.idNumber } : {}), code: m.code, state: st, startDate: m.startDate, endDate: m.endDate, daysLeft: r.calendarDays, servingDaysLeft: Math.max(0, r.servingDays - (ateToday >= p.items.length ? 1 : 0)), usesLeft: usesLeft(m, p, r.uses, ateToday), usedTotal: m.used ?? 0, paid: m.paid, paidAt: m.confirmedAt ?? null },
       qr,
       tick: p.checkIn === 'self' ? { guestMeal, needsCode: true, requiresPasscode: b.category === 'restaurant', ...tickOptions(m, p, own, t), ...(b.category === 'restaurant' ? { undo: null } : {}) } : null,
-      today: { date, serverTime: t, receipt: latest && t - Date.parse(latest.at) < 300_000 ? { item: latest.item, count: latest.batchId ? currentServings.filter(u => u.batchId === latest.batchId).length : 1, at: latest.at, reference: latest.id.slice(0, 8).toUpperCase() } : undefined, weekly: b.category === 'restaurant' && !!p.mealColors,
+      today: { date, serverTime: t, receipt: latest && t - Date.parse(latest.at) < MEAL_TICK_WINDOW_MS ? { item: latest.item, count: latest.batchId ? currentServings.filter(u => u.batchId === latest.batchId).length : 1, at: latest.at, reference: latest.id.slice(0, 8).toUpperCase() } : undefined, weekly: b.category === 'restaurant' && !!p.mealColors,
         checkedMeal: st === 'active' && current && own.some(u => u.date === date && u.item === current.item) ? current : null, openToday: p.openDays.includes(dayOfWeek(date)), used: own.filter((x) => x.date === date).map((x) => ({ item: x.item, at: x.at })) },
-      calendar: cardCalendar(m, p, own.map((x) => ({ date: x.date, item: x.item })).slice(-1500)),
-      history: own.map(({ id, date, item, at, stampImage, guestRequest }) => ({ id, date, item, at, stampImage, guest: !!guestRequest })),
+      calendar: cardCalendar(m, p, own.map((x) => ({ date: x.cellDate ?? x.date, item: x.item })).slice(-1500)),
+      history: own.map(({ id, date, cellDate, item, at, stampImage, guestRequest }) => ({ id, date, cellDate, item, at, stampImage, guest: !!guestRequest })),
       payment: owner || m.paid ? null : {
         amount: p.priceRwf, momoCode: b.showPay ? b.momoCode ?? null : null, momoName: b.showPay ? b.momoName ?? null : null, online: await h.payReady(b), promptSent: prompt, claimed: m.claimed ?? null,
         whatsapp: b.whatsapp ?? null,
@@ -330,7 +339,7 @@ export function createPrograms(h: Helpers) {
         const item = input.item ? String(input.item) : b.category === 'restaurant' && !force ? restaurantMealAt(program, t) : undefined;
         const r = canServe({ member: m, program, used, now: t, item, force });
         if (!r.ok) return { ...r, member: view(m, p, date, used) };
-        const use = await record(b.id, m, date, t, r.item, served, tokenFromPayload(input.token) || typeof input.token === 'string' ? 'scan' : 'code', p.stampImage);
+        const use = await record(b.id, m, date, t, r.item, served, tokenFromPayload(input.token) || typeof input.token === 'string' ? 'scan' : 'code', p.stampImage, undefined, 1, undefined, b.category === 'restaurant' ? program : undefined);
         return { ok: true as const, item: r.item, useId: use.id, member: view(m, p, date, [...used, use]) };
       });
     },
@@ -583,7 +592,7 @@ export function createPrograms(h: Helpers) {
         }
         const r = canServe({ member: m, program, used: guestRequest || batchId ? [] : used, now: t, item });
         if (r.ok !== true) { const d = r as Exclude<typeof r, { ok: true }>; throw new ProgramError(d.message, 409, d.code === 'already' ? 'ALREADY' : 'DENIED'); }
-        const use = await record(b.id, m, date, t, r.item, served, 'self', p.stampImage, typeof guestRequest === 'string' ? guestRequest : undefined, quantity, typeof batchId === 'string' ? batchId : undefined);
+        const use = await record(b.id, m, date, t, r.item, served, 'self', p.stampImage, typeof guestRequest === 'string' ? guestRequest : undefined, quantity, typeof batchId === 'string' ? batchId : undefined, restaurant ? program : undefined);
         return { ok: true as const, item: r.item, useId: use.id, cardId: m.id };
       });
     },

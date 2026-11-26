@@ -111,7 +111,7 @@ export interface Member {
   note?: string;
   createdAt: string;
 }
-export interface Use { id: string; memberId: string; date: string; item: string; at: string; by: 'scan' | 'code' | 'self'; undone?: boolean; guestRequest?: string; batchId?: string; stampImage?: string }
+export interface Use { cellDate?: string; id: string; memberId: string; date: string; item: string; at: string; by: 'scan' | 'code' | 'self'; undone?: boolean; guestRequest?: string; batchId?: string; stampImage?: string }
 
 /* ---------------------------------------------------------------- dates (Kigali, UTC+2) */
 const KIGALI_MS = 2 * 3600_000;

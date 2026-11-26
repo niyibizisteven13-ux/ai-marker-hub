@@ -1,4 +1,4 @@
-import { mealInk, cardPaper, dailyMealPaper } from '../../../server/services/biz/mealCard';
+import { MEAL_TICK_WINDOW_MS, mealInk, cardPaper, dailyMealPaper } from '../../../server/services/biz/mealCard';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Camera, Check, CheckCheck, CheckCircle2, Clock, Loader2, LogOut, MessageCircle, Ticket, UtensilsCrossed, X, KeyRound } from 'lucide-react';
 import { BizApiError, publicApi, stampImageUrl } from '../../biz/api';
@@ -165,7 +165,7 @@ function useMealClock(serverTime?: number, history?: CardInfo['history']) {
   useEffect(() => {
     const start = performance.now();
     const initial = serverTime ?? Date.now();
-    const deadlines = (history ?? []).map(u => Date.parse(u.at) + 300_000);
+    const deadlines = (history ?? []).map(u => Date.parse(u.at) + MEAL_TICK_WINDOW_MS);
     let timer = 0;
     function refresh() {
       window.clearTimeout(timer);
@@ -224,9 +224,9 @@ export function PaperCard({ b, card, w }: { b: Pick<PublicBusiness, 'category' |
             {rows.map((d) => { const isToday = d.date === card.today.date; return (
               <tr key={d.date} style={isToday && !shuffle && !card.today.weekly ? { background: `color-mix(in srgb, ${theme.accent} 28%, transparent)` } : undefined}>
                 <th scope="row" className="border-b border-r px-1 py-1 text-left text-xs font-bold" style={{ borderColor: line }}><span className="text-base tabular-nums">{dayNum(d.date)}</span> <span className="font-semibold opacity-70">{tx(DAY[d.dow])}</span>{isToday && <span className="sr-only"> {tx('today')}</span>}</th>
-                {items.map((it) => { const count = d.used.filter(item => item === it).length; const used = count > 0; const at = card.history?.filter(u => u.date === d.date && u.item === it).at(-1)?.at; const aged = guestCard && !!at && now >= Date.parse(at) + 300_000; const Mark = aged ? CheckCheck : Check;
+                {items.map((it) => { const count = d.used.filter(item => item === it).length; const used = count > 0; const at = card.history?.filter(u => (u.cellDate ?? u.date) === d.date && u.item === it).at(-1)?.at; const aged = guestCard && !!at && now >= Date.parse(at) + MEAL_TICK_WINDOW_MS; const Mark = aged ? CheckCheck : Check;
                   return <td key={it} title={used ? `${it}${at ? ` ${clock(at)}` : ''}` : undefined} className="relative h-9 overflow-hidden border-b border-r p-0 text-lg last:border-r-0" style={{ borderColor: line, ...(!d.open ? { background: `repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in srgb, ${ink} 14%, transparent) 4px 5px)` } : {}) }}>
-                    {used ? <span className="inline-flex items-center gap-1"><Mark size={20} strokeWidth={2.2} role="img" aria-label={`${it}: ${aged ? tx("Recorded at least five minutes ago") : tx("Checked in")}`} className="relative mx-auto" style={{ color: guestCard ? ink : '#047857' }} />{count > 1 && <b className="text-sm">×{count}</b>}</span> : !d.open ? <span className="text-xs opacity-50" aria-label={tx('Closed')}>—</span> : null}</td>; })}
+                    {used ? <span className="inline-flex items-center gap-1"><Mark size={20} strokeWidth={2.2} role="img" aria-label={`${it}: ${aged ? tx("Recorded at least two minutes ago") : tx("Checked in")}`} className="relative mx-auto" style={{ color: guestCard ? ink : '#047857' }} />{count > 1 && <b className="text-sm">×{count}</b>}</span> : !d.open ? <span className="text-xs opacity-50" aria-label={tx('Closed')}>—</span> : null}</td>; })}
               </tr>); })}
           </tbody>
         </table>
@@ -372,7 +372,7 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
         {card && m && (
           <div className="space-y-3">
             <div className="rounded-full px-4 py-2 text-center text-sm font-bold tracking-wide text-white" style={{ background: tone }}>{label}</div>
-            {card.today.receipt && receiptClock < Date.parse(card.today.receipt.at) + 300_000 && <section aria-label={tx("Meal confirmation")} className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950">
+            {card.today.receipt && receiptClock < Date.parse(card.today.receipt.at) + MEAL_TICK_WINDOW_MS && <section aria-label={tx("Meal confirmation")} className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950">
               <p className="flex items-center gap-2 font-semibold"><CheckCircle2 size={20} />{tx("Meal confirmed")}</p>
               <p className="mt-1 text-2xl font-bold">{card.today.receipt.item} × {card.today.receipt.count}</p>
               <p>{m.name} · {card.today.date} · {clock(card.today.receipt.at)}</p>
@@ -384,10 +384,11 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
                 <p className="font-display text-lg font-semibold">{card.tick?.needsCode === false ? tx("Meal check-in") : tx("Scan the business's code")}</p>
                 {confirmationCode ? (
                   <form className="space-y-2" onSubmit={(event) => { event.preventDefault(); if (/^\d{4,6}$/.test(scanPasscode)) void doTick(confirmationCode, scanPasscode); }}>
-                    <label className="block text-sm font-semibold">{tx("How many meals?")}
+                    <label className="block text-sm font-semibold">{tx("How many meal cells do you want to tick?")}
                       <input type="number" inputMode="numeric" required min={1} max={100} step={1} className={field} value={quantity} onChange={e => setQuantity(e.target.value)} autoFocus />
                     </label>
-                    <div className="flex gap-2">{[1, 2].map(n => <button key={n} type="button" className="rounded-xl border px-4 py-2" aria-pressed={quantity === String(n)} onClick={() => setQuantity(String(n))}>{n}</button>)}</div>
+                    <p className="text-sm">{tx("Each tick uses one available day for this meal, starting today.")}</p>
+                    <div className="flex gap-2">{[1, 2, 5].map(n => <button key={n} type="button" className="rounded-xl border px-4 py-2" aria-pressed={quantity === String(n)} onClick={() => setQuantity(String(n))}>{n}</button>)}</div>
                     <label className="block text-sm font-medium">{tx("Enter your passcode to confirm check-in")}
                       <input className={`${field} font-mono text-xl tracking-[0.3em]`} type="password" autoComplete="current-password" inputMode="numeric" minLength={4} maxLength={6} required value={scanPasscode} onChange={(event) => setScanPasscode(event.target.value.replace(/\D/g, ''))} />
                     </label>
