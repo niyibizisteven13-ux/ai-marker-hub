@@ -200,12 +200,14 @@ export function CardWatermark({ businessId, image }: { businessId?: string; imag
     className="pointer-events-none absolute inset-0 -z-10 m-auto h-[82%] w-[82%] select-none object-contain opacity-20" />;
 }
 
-function useMealClock(serverTime?: number, history?: CardInfo['history']) {
+function useMealClock(serverTime?: number, history?: CardInfo['history'], today?: CardInfo['today']) {
   const [now, setNow] = useState(serverTime ?? Date.now());
   useEffect(() => {
     const start = performance.now();
     const initial = serverTime ?? Date.now();
-    const deadlines = (history ?? []).map(tickDeadline);
+    const uses = today?.used.filter(use => !history?.some(record => record.at === use.at && record.item === use.item)) ?? [];
+    const deadlines = [...(history ?? []), ...uses].map(tickDeadline);
+    if (today?.receipt) deadlines.push(tickDeadline(today.receipt));
     let timer = 0;
     function refresh() {
       window.clearTimeout(timer);
@@ -217,27 +219,45 @@ function useMealClock(serverTime?: number, history?: CardInfo['history']) {
     refresh();
     document.addEventListener('visibilitychange', refresh);
     return () => { window.clearTimeout(timer); document.removeEventListener('visibilitychange', refresh); };
-  }, [serverTime, history]);
+  }, [serverTime, history, today]);
   return now;
 }
 
 const mealTickStyle = <style>{`
-        @media (prefers-reduced-motion: no-preference) {
-          .biz-meal-tick-path {
-            stroke-dasharray: 1;
-            animation: bizMealTickDraw 1.2s ease-out both;
-          }
-        }
-        @keyframes bizMealTickDraw {
-          from { stroke-dashoffset: 1; }
-          to { stroke-dashoffset: 0; }
-        }
-      `}</style>;
-function PendingMealTick({ label, color }: { label: string; color?: string }) {
-  return <svg width={22} height={22} viewBox="0 0 52 52" fill="none" stroke="currentColor" role="img" aria-label={label} className="shrink-0" style={{ color }}>
-                        <circle cx="26" cy="26" r="23" strokeWidth="3" />
-                        <path className="biz-meal-tick-path" pathLength={1} d="M14.1 27.2l7.1 7.2 16.7-16.8" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>;
+  .biz-meal-tick-ring {
+    stroke-dasharray: 1;
+    stroke-dashoffset: var(--meal-tick-offset);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .biz-meal-tick-ring { animation: bizMealTickProgress linear both; }
+  }
+  @keyframes bizMealTickProgress {
+    from { stroke-dashoffset: 1; }
+    to { stroke-dashoffset: 0; }
+  }
+`}</style>;
+
+function PendingMealTick({ label, record, now, color }: {
+  label: string;
+  record: { at: string; doubleTickAt?: number };
+  now: number;
+  color?: string;
+}) {
+  const start = Date.parse(record.at);
+  const duration = Math.max(1, tickDeadline(record) - start);
+  const elapsed = Math.min(duration, Math.max(0, now - start));
+  return (
+    <svg width={22} height={22} viewBox="0 0 52 52" fill="none" stroke="currentColor" role="img" aria-label={label} className="shrink-0" style={{ color }}>
+      <circle cx="26" cy="26" r="23" strokeWidth="3" opacity=".22" />
+      <circle className="biz-meal-tick-ring" cx="26" cy="26" r="23" pathLength={1} transform="rotate(-90 26 26)"
+        strokeWidth="3" style={{
+          '--meal-tick-offset': 1 - elapsed / duration,
+          animationDuration: `${duration}ms`,
+          animationDelay: `-${elapsed}ms`,
+        } as React.CSSProperties} />
+      <path d="M14.1 27.2l7.1 7.2 16.7-16.8" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
 }
 
 export function PaperCard({ b, card, w, animateMealTicks = false }: { b: Pick<PublicBusiness, 'category' | 'theme' | 'name' | 'contact' | 'verified'>; card: CardInfo; w: ReturnType<typeof wordsOf>; animateMealTicks?: boolean }) {
@@ -287,7 +307,7 @@ export function PaperCard({ b, card, w, animateMealTicks = false }: { b: Pick<Pu
                 {items.map((it) => { const count = d.used.filter(item => item === it).length; const used = count > 0; const latest = card.history?.filter(u => (u.cellDate ?? u.date) === d.date && u.item === it).at(-1); const at = latest?.at; const aged = (guestCard || animateMealTicks) && latest && now >= tickDeadline(latest); const Mark = aged ? CheckCheck : Check;
                   return <td key={it} title={used ? `${it}${at ? ` ${clock(at)}` : ''}` : undefined} className="relative h-9 overflow-hidden border-b border-r p-0 text-lg last:border-r-0" style={{ borderColor: line, ...(!d.open ? { background: `repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in srgb, ${ink} 14%, transparent) 4px 5px)` } : {}) }}>
                     {used ? <span className="inline-flex items-center gap-1">{animateMealTicks && latest && !aged ? (
-                      <PendingMealTick key={latest.id ?? latest.at} label={`${it}: ${tx("Checked in")}`} color={ink} />
+                      <PendingMealTick key={latest.id ?? latest.at} record={latest} now={now} label={`${it}: ${tx("Checked in")}`} color={ink} />
                     ) : <Mark size={animateMealTicks ? 22 : 20} strokeWidth={2.2} role="img" aria-label={`${it}: ${aged ? tx("Check-in timer elapsed") : tx("Checked in")}`} className="relative mx-auto" style={{ color: guestCard ? ink : '#047857' }} />}{count > 1 && <b className="text-sm">×{count}</b>}</span> : !d.open ? <span className="text-xs opacity-50" aria-label={tx('Closed')}>—</span> : null}</td>; })}
               </tr>); })}
           </tbody>
@@ -333,7 +353,7 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
   const [mealBox, setMealBox] = useState('');
   const [quantity, setQuantity] = useState('1');
   const [batchId, setBatchId] = useState('');
-  const receiptClock = useMealClock(card?.today.serverTime, card?.history);
+  const receiptClock = useMealClock(card?.today.serverTime, card?.history, card?.today);
   const checkingIn = useRef(false);
   const fail = useCallback((e: unknown) => { const m = e instanceof Error ? e.message : tx('Something went wrong. Please try again.'); if (/sign in again/i.test(m)) { clearSession(slug); onSignedOut(); return; } setErr(m); }, [slug, onSignedOut, tx]);
   const load = useCallback(async () => {
@@ -542,7 +562,7 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
                   const aged = use && receiptClock >= tickDeadline(record ?? use);
                   return <div key={item} className={`flex min-w-0 items-center justify-between gap-1 rounded-xl px-2.5 py-2 ${use ? 'bg-emerald-50 text-emerald-900' : 'bg-slate-50 text-slate-700'}`}>
                     <span className="min-w-0 break-words text-sm font-semibold">{item}<span className="block text-xs font-normal">{use ? clock(use.at) : tx('Not used yet today')}</span></span>
-                    {use && (aged ? <CheckCheck size={22} className="shrink-0" role="img" aria-label={tx('Check-in timer elapsed')} /> : <PendingMealTick key={use.at} label={tx('Checked in')} />)}
+                    {use && (aged ? <CheckCheck size={22} className="shrink-0" role="img" aria-label={tx('Check-in timer elapsed')} /> : <PendingMealTick key={use.at} record={record ?? use} now={receiptClock} label={tx('Checked in')} />)}
                   </div>;
                 })}
               </div>

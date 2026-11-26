@@ -1,0 +1,12 @@
+[Unit]
+Description=Publish missing signed Bwenge4Biz APKs
+After=nexus.service postgresql.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/usr/local/lib/bwenge-biz-apk
+EnvironmentFile=-/etc/default/bwenge-biz-apk-publisher
+ExecStart=/bin/bash /usr/local/lib/bwenge-biz-apk/publish-missing.sh
+Nice=10
+PrivateTmp=true
+TimeoutStartSec=1h
