@@ -122,6 +122,7 @@ export function createBizRouter(): Router {
   r.post('/public/:slug/plans/:pid/join', run(async (req, res) => res.status(201).json(await svc().joinProgram(req.params.slug, req.params.pid, req.body ?? {}, who(req)))));
   // The customer's own account: sign in with phone and passcode; the session travels in a header (never in the address).
   const sess = (req: Request) => String(req.get('x-pass-session') ?? '');
+  r.post('/public/:slug/plans/:pid/add-card', run(async (req, res) => res.status(201).json(await svc().addCard(req.params.slug, sess(req), req.params.pid, req.body?.days, who(req)))));
   r.post('/public/:slug/login', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await svc().login(req.params.slug, req.body ?? {}, who(req))); }));
   r.get('/public/:slug/username', run(async (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json(await svc().suggestUsernames(req.params.slug, req.query.name, who(req))); }));
   r.post('/public/:slug/logout', run(async (req, res) => res.json(await svc().logout(req.params.slug, sess(req)))));

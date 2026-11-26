@@ -1,6 +1,7 @@
 import { isFlexibleMeal, tickDeadline, mealInk, cardPaper, dailyMealPaper } from '../../../server/services/biz/mealCard';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Camera, Check, CheckCheck, CheckCircle2, Clock, Loader2, LogOut, MessageCircle, Ticket, UtensilsCrossed, X, KeyRound } from 'lucide-react';
+import { VerifiedBadge } from '../VerifiedBadge';
 import { BizApiError, publicApi, stampImageUrl } from '../../biz/api';
 import { useScanner } from './useScanner';
 import { THEMES, CATEGORIES, rwf, type PublicBusiness } from '../../biz/types';
@@ -62,6 +63,7 @@ export function PlansSection({ b, lang, preview, onJoin, onOpen }: { b: PublicBu
             <h3 className="font-display text-lg font-semibold">{p.title}</h3>
             <p className="mt-1 font-display text-2xl font-semibold tabular-nums">{rwf(p.priceRwf)}</p>
             <p className="text-sm text-[#5B6470]">{p.days} {tx("days")}{p.totalUses ? ` · ${p.totalUses} ${useWordsUses(b, lang)}` : ''} · {p.items.join(' + ')} · {daysText(p.openDays, tx)}</p>
+            {(p.tariffs?.length ?? 0) > 1 && <p className="mt-1 text-xs text-[#5B6470]">{p.tariffs.map(x => `${x.days} ${tx('days')} · ${rwf(x.priceRwf)}`).join('  /  ')}</p>}
             {p.windows?.length ? <p className="mt-1 text-xs text-[#5B6470]">{p.windows.map((w) => `${w.item} ${w.from}–${w.to}`).join(' · ')}</p> : null}
             {p.description && <p className="mt-2 text-sm text-[#3A4350]">{p.description}</p>}
             {p.terms && <p className="mt-2 text-xs text-[#5B6470]">{p.terms}</p>}
@@ -76,16 +78,18 @@ const useWordsUses = (b: PublicBusiness, lang: Lang) => wordsOf(b.programText, l
 /* ---- first visit: details, then the customer's own passcode ---- */
 export function JoinFlow({ b, lang, program, onClose, onDone, renewing = false }: { renewing?: boolean; b: PublicBusiness; lang: Lang; program: Program; onClose: () => void; onDone: () => void }) {
   const { tx, t, w } = useWords(b, lang); const theme = THEMES[b.theme] ?? THEMES.gold;
+  const tariffs = program.tariffs?.length ? program.tariffs : [{ days: program.days, priceRwf: program.priceRwf }];
+  const [tariffDays, setTariffDays] = useState(tariffs[0].days);
+  const tariff = tariffs.find(x => x.days === tariffDays) ?? tariffs[0];
   const [entry, setEntry] = useState<'choice' | 'signin' | 'join'>(renewing && !program.full ? 'join' : 'choice');
-  const [step, setStep] = useState<1 | 2>(1); const [names, setNames] = useState<string[]>([]); const [f, setF] = useState({ username: '', name: '', phone: '', idNumber: '', joinCode: '', startDate: '', website: '', pin: '', pin2: '', remember: true }); const [busy, setBusy] = useState(false); const [err, setErr] = useState('');
-  const days = Array.from({ length: 8 }, (_, i) => new Date(Date.now() + 2 * 3600_000 + i * 86_400_000).toISOString().slice(0, 10));
+  const [step, setStep] = useState<1 | 2>(1); const [names, setNames] = useState<string[]>([]); const [f, setF] = useState({ username: '', name: '', phone: '', idNumber: '', joinCode: '', website: '', pin: '', pin2: '', remember: true }); const [busy, setBusy] = useState(false); const [err, setErr] = useState('');
   const next = (e: React.FormEvent) => { e.preventDefault(); setErr(''); if (f.name.trim().length < 2) return setErr(tx('Please write your name.')); if (f.phone.replace(/\D/g, '').length < 9) return setErr(tx('Please write a phone number we can reach.')); if (program.needsCode && !/^\d{4}$/.test(f.joinCode.replace(/\D/g, ''))) return setErr(tx('Write the 4-digit join code the business gave you.')); setStep(2); if (renewing) return; void publicApi.usernames(b.slug, f.name).then((s) => { setNames(s); setF((p) => (p.username ? p : { ...p, username: s[0] ?? '' })); }).catch(() => undefined); };
   const submit = async (e: React.FormEvent) => {
     e.preventDefault(); setErr('');
     if (f.username && !/^[a-z0-9]{3,12}$/.test(f.username)) return setErr(tx('A user name is 3 to 12 letters or numbers, with no spaces.'));
     if (!/^\d{4,6}$/.test(f.pin)) return setErr(tx('Choose a passcode of 4 to 6 digits.')); if (f.pin !== f.pin2) return setErr(tx('The two passcodes do not match.'));
     setBusy(true);
-    try { const r = await publicApi.join(b.slug, program.id, { name: f.name, phone: f.phone, username: f.username || undefined, passcode: f.pin, joinCode: program.needsCode ? f.joinCode : undefined, idNumber: f.idNumber || undefined, startDate: f.startDate || undefined, remember: f.remember, website: f.website }); saveSession(b.slug, r.session, r.expiresAt, f.remember); saveUser(b.slug, r.username); onDone(); }
+    try { const r = await publicApi.join(b.slug, program.id, { name: f.name, phone: f.phone, username: f.username || undefined, passcode: f.pin, joinCode: program.needsCode ? f.joinCode : undefined, idNumber: f.idNumber || undefined, remember: f.remember, website: f.website, tariffDays: tariff.days }); saveSession(b.slug, r.session, r.expiresAt, f.remember); saveUser(b.slug, r.username); onDone(); }
     catch (x) { const m = x instanceof Error ? x.message : tx('Something went wrong. Please try again.'); setErr(m); if (/join code/i.test(m)) setStep(1); } finally { setBusy(false); }
   };
   if (entry === 'signin') return <SignIn b={b} lang={lang} onClose={() => setEntry('choice')} onDone={onDone} />;
@@ -97,16 +101,16 @@ export function JoinFlow({ b, lang, program, onClose, onDone, renewing = false }
   </Sheet>;
   return (
     <Sheet label={t("Join this {program}")} onClose={onClose}>
-      <div className="flex items-start justify-between gap-3"><div><h2 className="font-display text-xl font-semibold">{program.title}</h2><p className="text-sm text-[#5B6470]">{rwf(program.priceRwf)} · {program.days} {tx("days")}</p></div>
+      <div className="flex items-start justify-between gap-3"><div><h2 className="font-display text-xl font-semibold">{program.title}</h2><p className="text-sm text-[#5B6470]">{rwf(tariff.priceRwf)} · {tariff.days} {tx("days")}</p></div>
         <button type="button" onClick={onClose} aria-label={tx("Close")} className="rounded-full p-2 hover:bg-[#F2F4F7]"><X size={18} /></button></div>
       <p className="text-xs font-semibold uppercase tracking-wide text-[#5B6470]">{tx("Step")} {step} / 2 · {step === 1 ? tx('Your details') : tx('Your user name and passcode')}</p>
       {step === 1 ? (
         <form onSubmit={next} className="space-y-3">
+          {tariffs.length > 1 && <label className="block text-sm font-medium">{tx("Choose your card option")}<select className={field} value={tariffDays} onChange={(e) => setTariffDays(Number(e.target.value))}>{tariffs.map(option => <option key={option.days} value={option.days}>{option.days} {tx("days")} · {rwf(option.priceRwf)}</option>)}</select></label>}
           <label className="block text-sm font-medium">{tx("Your name")}<input className={field} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required maxLength={60} autoComplete="name" /></label>
           <label className="block text-sm font-medium">{tx("Phone number")}<input className={field} value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} required inputMode="tel" autoComplete="tel" placeholder="0788 123 456" /></label>
           {program.needsCode && <label className="block text-sm font-medium">{tx("Join code")}<input className={`${field} font-mono text-xl tracking-[0.5em]`} value={f.joinCode} onChange={(e) => setF({ ...f, joinCode: e.target.value.replace(/\D/g, '').slice(0, 4) })} inputMode="numeric" maxLength={4} placeholder="••••" required /><span className="mt-1 block text-xs font-normal text-[#5B6470]">{tx("4 digits, given to you by the business.")}</span></label>}
           {w.askId && <label className="block text-sm font-medium">{w.idLabel} ({tx("optional")})<input className={field} value={f.idNumber} onChange={(e) => setF({ ...f, idNumber: e.target.value })} maxLength={30} /></label>}
-          <label className="block text-sm font-medium">{tx("Start on")}<select className={field} value={f.startDate} onChange={(e) => setF({ ...f, startDate: e.target.value })}><option value="">{tx("Today")}</option>{days.slice(1).map((d) => <option key={d} value={d}>{shortDate(d)}</option>)}</select></label>
           <input value={f.website} onChange={(e) => setF({ ...f, website: e.target.value })} tabIndex={-1} autoComplete="off" aria-hidden="true" className="absolute -left-[9999px] h-0 w-0 opacity-0" />
           {err && <p role="alert" className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">{err}</p>}
           <button type="submit" style={{ background: theme.accent, color: theme.on }} className="min-h-12 w-full rounded-xl text-base font-semibold">{tx("Next")}</button>
@@ -181,7 +185,7 @@ function useMealClock(serverTime?: number, history?: CardInfo['history']) {
   return now;
 }
 
-export function PaperCard({ b, card, w }: { b: Pick<PublicBusiness, 'category' | 'theme' | 'name' | 'contact'>; card: CardInfo; w: ReturnType<typeof wordsOf> }) {
+export function PaperCard({ b, card, w }: { b: Pick<PublicBusiness, 'category' | 'theme' | 'name' | 'contact' | 'verified'>; card: CardInfo; w: ReturnType<typeof wordsOf> }) {
   const tx = useTx(); const theme = THEMES[b.theme] ?? THEMES.gold; const cat = CATEGORIES.find((c) => c.id === b.category)?.label ?? '';
   const layout = card.program.cardLayout;
   const cal = card.calendar.filter((day) => !layout?.hiddenDates.includes(day.date));
@@ -206,7 +210,7 @@ export function PaperCard({ b, card, w }: { b: Pick<PublicBusiness, 'category' |
       <span aria-hidden="true" className="absolute left-1/2 top-2 h-3 w-3 -translate-x-1/2 rounded-full border" style={{ background: '#F5F7FA', borderColor: line }} />
       <div className="mt-3 text-center">
         {cat && <p className="text-[11px] font-bold uppercase tracking-[0.25em]" style={{ color: `color-mix(in srgb, ${ink} 70%, ${paper})` }}>{cat}</p>}
-        <p className="font-display text-3xl font-semibold uppercase leading-tight tracking-wide">{b.name}</p>
+        <p className="font-display text-3xl font-semibold uppercase leading-tight tracking-wide">{b.name}{b.verified && <VerifiedBadge size={18} className="ml-1" />}</p>
         {phones.length > 0 && <p className="mt-1 text-sm font-semibold">Tel: {phones.join(' / ')}</p>}
       </div>
       <div className="relative mt-4 space-y-2 text-[15px]">
@@ -256,6 +260,7 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
   const { tx, t, w } = useWords(b, lang); const theme = THEMES[b.theme] ?? THEMES.gold; const slug = b.slug;
   const [me, setMe] = useState<MeInfo | null>(null); const [card, setCard] = useState<CardInfo | null>(null); const [sel, setSel] = useState<string | undefined>(initialCard); const [err, setErr] = useState('');
   const [phone, setPhone] = useState(''); const [ref, setRef] = useState(''); const [busy, setBusy] = useState(false); const [big, setBig] = useState(false); const [pinOpen, setPinOpen] = useState(false); const [pins, setPins] = useState({ cur: '', next: '' }); const [pinMsg, setPinMsg] = useState('');
+  const [newCardDays, setNewCardDays] = useState<number>(); const [addingCard, setAddingCard] = useState(false);
   const waiting = useRef(false); const session = () => loadSession(slug);
   const [typed, setTyped] = useState(''); const [flash, setFlash] = useState('');
   const [camera, setCamera] = useState(false);
@@ -292,6 +297,17 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
     return () => { controller.abort(); window.clearTimeout(timer); };
   }, [slug, b.category, card?.cardId, card?.member.state, card?.version]);
   const act = async (fn: (s: string, id: string) => Promise<unknown>) => { const s = session(); if (!s || !card) return; setBusy(true); setErr(''); try { await fn(s, card.cardId); await load(); } catch (e) { fail(e); } finally { setBusy(false); } };
+  const addCard = async () => {
+    const s = session(); if (!s || !card?.programId || newCardDays === undefined) return;
+    setAddingCard(true); setErr('');
+    try {
+      const { cardId } = await publicApi.addCard(slug, s, card.programId, newCardDays);
+      setSel(cardId); setNewCardDays(undefined);
+      const [nextMe, nextCard] = await Promise.all([publicApi.me(slug, s), publicApi.card(slug, s, cardId)]);
+      setMe(nextMe); setCard(nextCard); setFlash(tx('Card added. Complete payment to activate it.'));
+    } catch (e) { fail(e); }
+    finally { setAddingCard(false); }
+  };
   async function doTick(code: string, passcode?: string, currentCode = false) {
     const token = session();
     if (!token || checkingIn.current) return;
@@ -362,7 +378,7 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
   return (
     <div role="dialog" aria-modal="true" aria-label={t("My {pass}")} className="fixed inset-0 z-[320] overflow-auto bg-[#F5F7FA]">
       <div className="mx-auto max-w-md px-4 pb-10 pt-4">
-        <div className="mb-3 flex items-center justify-between gap-2"><div className="min-w-0"><p className="truncate font-display text-lg font-semibold">{b.name}</p>{me && <p className="truncate text-sm text-[#5B6470]">{tx('Hello')}, {me.name}</p>}</div>
+        <div className="mb-3 flex items-center justify-between gap-2"><div className="min-w-0"><p className="truncate font-display text-lg font-semibold">{b.name}{b.verified && <VerifiedBadge size={18} className="ml-1" />}</p>{me && <p className="truncate text-sm text-[#5B6470]">{tx('Hello')}, {me.name}</p>}</div>
           <div className="flex items-center gap-1"><button type="button" onClick={() => setPinOpen((v) => !v)} aria-label={tx('Change passcode')} title={tx('Change passcode')} className="rounded-full p-2 hover:bg-white"><KeyRound size={18} /></button>
             <button type="button" onClick={async () => { const s = session(); if (s) await publicApi.logout(slug, s); clearSession(slug); onSignedOut(); }} aria-label={tx('Sign out')} title={tx('Sign out')} className="rounded-full p-2 hover:bg-white"><LogOut size={18} /></button>
             <button type="button" onClick={onClose} aria-label={tx('Close')} className="rounded-full p-2 hover:bg-white"><X size={20} /></button></div></div>
@@ -370,13 +386,27 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
           <input className={`${field} font-mono tracking-[0.4em]`} type="password" inputMode="numeric" placeholder={tx('Current passcode')} value={pins.cur} onChange={(e) => setPins({ ...pins, cur: e.target.value.replace(/\D/g, '').slice(0, 6) })} />
           <input className={`${field} font-mono tracking-[0.4em]`} type="password" inputMode="numeric" placeholder={tx('New passcode')} value={pins.next} onChange={(e) => setPins({ ...pins, next: e.target.value.replace(/\D/g, '').slice(0, 6) })} />
           <button type="submit" className="min-h-11 w-full rounded-xl border-2 border-[#0E1722] text-sm font-semibold">{tx('Save')}</button>{pinMsg && <p role="status" className="text-sm text-[#3A4350]">{pinMsg}</p>}</form>}
-        {me && me.cards.length > 1 && <div className="mb-3 flex gap-2 overflow-x-auto" role="tablist">{me.cards.map((c) => <button key={c.id} role="tab" aria-selected={card?.cardId === c.id} type="button" onClick={() => { setCamera(false); setConfirmationCode(''); setScanPasscode(''); setCheckinError(''); setSel(c.id); setCard(null); }} className={`shrink-0 rounded-xl px-3 py-2 text-sm font-semibold ${card?.cardId === c.id ? 'bg-[#0E1722] text-white' : 'bg-white'}`}>{c.programTitle}</button>)}</div>}
+        {me && me.cards.length > 1 && <div className="mb-3 flex gap-2 overflow-x-auto" role="tablist">{me.cards.map((c) => <button key={c.id} role="tab" aria-selected={card?.cardId === c.id} type="button" onClick={() => { setCamera(false); setConfirmationCode(''); setScanPasscode(''); setCheckinError(''); setSel(c.id); setCard(null); }} className={`flex shrink-0 flex-col items-start rounded-xl px-3 py-2 text-left ${card?.cardId === c.id ? 'bg-[#0E1722] text-white' : 'bg-white'}`}><span className="text-sm font-semibold">{c.programTitle}</span><span className="text-xs opacity-75">{tx(c.state)} · {shortDate(c.endDate)}</span></button>)}</div>}
         {!card && !err && <div className="grid place-items-center py-24"><Loader2 className="animate-spin" aria-label={tx('Loading')} /></div>}
         {err && <p role="alert" className="mb-3 rounded-2xl bg-rose-50 p-4 text-sm text-rose-700">{err}</p>}
         {flash && <p role="status" className="mb-3 flex items-center gap-2 rounded-2xl bg-emerald-50 p-4 text-base font-semibold text-emerald-800"><CheckCircle2 size={20} aria-hidden="true" />{flash}</p>}
         {card && m && (
           <div className="space-y-3">
             <div className="rounded-full px-4 py-2 text-center text-sm font-bold tracking-wide text-white" style={{ background: tone }}>{label}</div>
+            {card.canAddCards && (m.state === 'active' || m.state === 'expired') && card.program.tariffs.length > 0 && (
+              <section className="space-y-2 rounded-2xl bg-white p-4">
+                <p className="font-semibold">{m.state === 'expired' ? tx('Renew this card') : tx('Add another card')}</p>
+                <label className="block text-sm">{tx('Choose a duration and price')}
+                  <select className={field} value={newCardDays ?? card.program.tariffs[0].days} onChange={(e) => setNewCardDays(Number(e.target.value))}>
+                    {card.program.tariffs.map(option => <option key={option.days} value={option.days}>{option.days} {tx('days')} · {rwf(option.priceRwf)}</option>)}
+                  </select>
+                </label>
+                <button type="button" disabled={addingCard || busy} onClick={() => void addCard()} style={{ background: theme.accent, color: theme.on }} className="min-h-11 w-full rounded-xl px-4 font-semibold disabled:opacity-50">
+                  {addingCard ? <Loader2 className="mx-auto animate-spin" size={18} /> : m.state === 'expired' ? tx('Request renewal') : tx('Add another card')}
+                </button>
+                <p className="text-xs text-[#5B6470]">{tx('The card starts after the business confirms your payment.')}</p>
+              </section>
+            )}
             {card.today.receipt && receiptClock < tickDeadline(card.today.receipt) && <section aria-label={tx("Meal confirmation")} className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950">
               <p className="flex items-center gap-2 font-semibold"><CheckCircle2 size={20} />{tx("Meal confirmed")}</p>
               <p className="mt-1 text-2xl font-bold">{card.today.receipt.item} × {card.today.receipt.count}</p>
@@ -437,7 +467,6 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
               </div>
             )}
             {card.today.weekly && <p className="rounded-xl bg-white px-3 py-2 text-sm">{card.today.checkedMeal ? `${card.today.checkedMeal.item} · ${tx('Checked in')} · ${card.today.date}` : tx('The meal color appears after a confirmed check-in during serving hours.')}</p>}
-            {card.renewable && <a className="block rounded-xl border bg-white p-3 text-center font-semibold" href={`/b/${encodeURIComponent(slug)}?renew=${encodeURIComponent(card.programId!)}`}>{tx("Register for a new card")}</a>}
             {!!card.history?.length && <details className="rounded-xl bg-white p-3 text-sm"><summary>{tx("Individual report")} · {card.history.length} {tx("check-ins")}</summary>
               <ul className="max-h-52 overflow-auto">{card.history.slice().reverse().map(u => <li key={u.id ?? u.at + u.item}>{u.date} · {clock(u.at)} · {u.item}{u.guest && ` · ${tx('Guest')}`}</li>)}</ul>
             </details>}
@@ -454,6 +483,7 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
             {m.state === 'pending' && card.payment && (
               <div className="space-y-3 rounded-2xl bg-white p-4 text-left">
                 <p className="text-center font-display text-3xl font-semibold tabular-nums">{rwf(card.payment.amount)}</p>
+                <p className="text-center text-sm text-[#5B6470]">{m.purchaseDays} {tx('days')} · {tx('Starts after payment is confirmed')}</p>
                 {b.products.filter((x) => x.price != null).length > 0 && (
                   <details className="rounded-xl bg-[#F2F4F7] px-3 py-2 text-sm"><summary className="min-h-9 cursor-pointer py-1.5 font-semibold">{tx('Our prices')}</summary>
                     <ul className="divide-y divide-[#D9DEE5]">{b.products.filter((x) => x.price != null).slice(0, 40).map((x) => <li key={x.id} className="flex items-baseline justify-between gap-3 py-1.5"><span className={x.available ? '' : 'text-[#5B6470] line-through'}>{x.name}{x.unit ? <span className="text-[#5B6470]"> / {x.unit}</span> : null}</span><b className="shrink-0 tabular-nums">{rwf(x.price as number)}</b></li>)}</ul></details>)}

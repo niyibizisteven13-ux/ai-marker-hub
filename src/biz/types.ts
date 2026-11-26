@@ -51,18 +51,19 @@ export interface SectionInfo { id: string; type: 'text' | 'faq' | 'list' | 'link
 /* ---- Programs (a plan sold once and used with a pass): see server/services/biz/programs.ts */
 export type DayId = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
 export interface ItemWindow { item: string; from: string; to: string }
+export interface ProgramTariff { days: number; priceRwf: number }
 export interface CardLayout { hiddenItems: string[]; hiddenDates: string[] }
 export interface CardLayoutChange { hideItems: string[]; showItems: string[]; hideDates: string[]; showDates: string[] }
 export interface ProgramInfo {
   tickMinutes?: number;
-  id: string; title: string; description?: string; priceRwf: number; days: number; items: string[]; openDays: DayId[]; windows?: ItemWindow[]; terms?: string; maxMembers?: number; totalUses?: number; joinCode?: string; checkIn?: 'staff' | 'self'; endedAt?: string; active: boolean;
+  id: string; title: string; description?: string; priceRwf: number; days: number; tariffs?: ProgramTariff[]; items: string[]; openDays: DayId[]; windows?: ItemWindow[]; terms?: string; maxMembers?: number; totalUses?: number; joinCode?: string; checkIn?: 'staff' | 'self'; endedAt?: string; active: boolean;
   cardLayout?: CardLayout; mealColors?: Record<string, string> | null; stampImage?: string; shuffleCardColor?: boolean; cardColor?: string; arrivalColor?: string; linkCheckIn?: boolean;
   counts?: { active: number; pending: number; total: number };
 }
 export type PlanState = 'pending' | 'not_started' | 'active' | 'expired' | 'paused' | 'cancelled';
 export interface MemberInfo {
   id: string; programId: string; programTitle: string; name: string; phone: string; idNumber?: string; code: string; state: PlanState; startDate: string; endDate: string;
-  paid: boolean; paidRwf: number; payMethod?: 'momo_prompt' | 'momo_manual' | 'cash'; claimed?: { at: string; ref?: string }; note?: string;
+  paid: boolean; paidRwf: number; purchaseDays: number; amountDue: number; payMethod?: 'momo_prompt' | 'momo_manual' | 'cash'; claimed?: { at: string; ref?: string }; note?: string;
   servingDaysLeft: number; usesLeft: number; totalUses?: number; usedTotal?: number; usedToday: string[]; createdAt: string;
 }
 export interface ProgramSummary {
@@ -83,12 +84,12 @@ export interface CardDay { date: string; dow: DayId; open: boolean; used: string
 /** One card, as the signed-in customer sees it: who it is for, the dates and what was used each day (the grid), and the QR code once it is paid. */
 export interface CardInfo {
   version?: string;
-  programId?: string; renewable?: boolean;
+  programId?: string; renewable?: boolean; canAddCards?: boolean;
   history?: Array<{ id?: string; guest?: boolean; cellDate?: string; doubleTickAt?: number; date: string; item: string; at: string; stampImage?: string }>;
   cardId: string;
   business: { id?: string; name: string; slug: string; theme: string };
-  program: { title: string; cardLayout?: CardLayout; mealColors?: Record<string, string> | null; stampImage?: string; shuffleCardColor?: boolean; cardColor?: string; arrivalColor?: string; linkCheckIn?: boolean; checkIn?: 'staff' | 'self'; totalUses?: number; items: string[]; openDays: DayId[]; windows?: ItemWindow[]; terms?: string; priceRwf: number; days: number };
-  member: { name: string; phone: string; idNumber?: string; code: string; state: PlanState; startDate: string; endDate: string; daysLeft: number; servingDaysLeft: number; usesLeft: number; usedTotal: number; paid: boolean; paidAt: string | null };
+  program: { title: string; cardLayout?: CardLayout; mealColors?: Record<string, string> | null; stampImage?: string; shuffleCardColor?: boolean; cardColor?: string; arrivalColor?: string; linkCheckIn?: boolean; checkIn?: 'staff' | 'self'; totalUses?: number; items: string[]; openDays: DayId[]; windows?: ItemWindow[]; terms?: string; priceRwf: number; days: number; tariffs: ProgramTariff[] };
+  member: { name: string; phone: string; idNumber?: string; code: string; state: PlanState; startDate: string; endDate: string; purchaseDays: number; daysLeft: number; servingDaysLeft: number; usesLeft: number; usedTotal: number; paid: boolean; paidAt: string | null };
   qr: string | null;
   /** Only when the owner set self check-in: what the customer can tap now, and the tick they can still take back. */
   tick: null | { guestMeal?: string; needsCode: boolean; requiresPasscode?: boolean; items: Array<{ item: string; allowed: boolean; reason?: string; message?: string }>; undo: { useId: string; item: string } | null };

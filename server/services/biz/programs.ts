@@ -51,6 +51,7 @@ export function cleanProgramText(input: any, prev: ProgramText = {}): ProgramTex
 export type MemberStatus = 'pending' | 'active' | 'paused' | 'cancelled';
 
 export interface ItemWindow { item: string; from: string; to: string }
+export interface ProgramTariff { days: number; priceRwf: number }
 export interface CardLayout { hiddenItems: string[]; hiddenDates: string[] }
 export interface Program {
   id: string; title: string; description?: string;
@@ -58,6 +59,8 @@ export interface Program {
   priceRwf: number;
   /** How many calendar days the plan lasts from its start day (30 = a month). */
   days: number;
+  /** Owner-priced duration options offered for new cards and renewals. */
+  tariffs?: ProgramTariff[];
   /** What a member gets each day, in order (for example ["Lunch"], ["Entry"], ["Haircut"] or ["Breakfast", "Lunch"]). One of each per person per day. */
   items: string[];
   /** Days of the week it is available. A day it is closed neither allows a use nor counts as a missed one. */
@@ -99,6 +102,8 @@ export interface Member {
   status: MemberStatus;
   startDate: string; endDate: string;
   paidRwf: number; paid: boolean;
+  /** The selected duration and price are snapshotted for this card, independent of later program edits. */
+  purchaseDays?: number; purchasePriceRwf?: number;
   payMethod?: 'momo_prompt' | 'momo_manual' | 'cash';
   /** The online payment (a ledger entry id) while a prompt is waiting. */
   payRef?: string;
@@ -157,10 +162,34 @@ export const endDateFor = (start: string, days: number, extra = 0) => addDays(st
 /* ---------------------------------------------------------------- cleaning */
 export function cleanProgram(input: any, id: string, now: string, prev?: Program): Program | { error: string } {
   const title = clean(input?.title ?? prev?.title, 60); if (!title) return { error: 'A program needs a name, for example "Monthly pass".' };
-  const price = Math.round(Number(String(input?.priceRwf ?? prev?.priceRwf ?? '').replace(/[,\s]/g, '')));
+  const rawTariffs = input?.tariffs === undefined ? prev?.tariffs : input.tariffs;
+  const firstTariff = Array.isArray(rawTariffs) ? rawTariffs[0] : undefined;
+  const price = Math.round(Number(String(input?.priceRwf ?? firstTariff?.priceRwf ?? prev?.priceRwf ?? '').replace(/[,\s]/g, '')));
   if (!Number.isFinite(price) || price < 100 || price > 5_000_000) return { error: 'The price must be between 100 and 5,000,000 RWF.' };
-  const days = Math.round(Number(input?.days ?? prev?.days ?? 30));
+  const days = Math.round(Number(input?.days ?? firstTariff?.days ?? prev?.days ?? 30));
   if (!Number.isFinite(days) || days < 1 || days > MAX_PROGRAM_DAYS) return { error: `The plan must last between 1 and ${MAX_PROGRAM_DAYS} days.` };
+  let tariffs: ProgramTariff[] | undefined;
+  if (rawTariffs !== undefined) {
+    if (!Array.isArray(rawTariffs) || rawTariffs.length < 1 || rawTariffs.length > 16) return { error: 'Add between 1 and 16 duration and price options.' };
+    const seenDays = new Set<number>();
+    tariffs = [];
+    for (const raw of rawTariffs) {
+      const tariffDays = Math.round(Number(raw?.days));
+      const tariffPrice = Math.round(Number(String(raw?.priceRwf ?? '').replace(/[,\s]/g, '')));
+      if (!Number.isFinite(tariffDays) || tariffDays < 1 || tariffDays > MAX_PROGRAM_DAYS) return { error: `Each option must last between 1 and ${MAX_PROGRAM_DAYS} days.` };
+      if (!Number.isFinite(tariffPrice) || tariffPrice < 100 || tariffPrice > 5_000_000) return { error: 'Each option price must be between 100 and 5,000,000 RWF.' };
+      if (seenDays.has(tariffDays)) return { error: 'Each duration can only appear once.' };
+      seenDays.add(tariffDays);
+      tariffs.push({ days: tariffDays, priceRwf: tariffPrice });
+    }
+  }
+  if (input?.tariffs === undefined && tariffs?.length && (input?.priceRwf !== undefined || input?.days !== undefined)) {
+    tariffs[0] = {
+      days: input?.days === undefined ? tariffs[0].days : days,
+      priceRwf: input?.priceRwf === undefined ? tariffs[0].priceRwf : price,
+    };
+  }
+  if (tariffs && new Set(tariffs.map(option => option.days)).size !== tariffs.length) return { error: 'Each duration can only appear once.' };
   const rawItems: unknown[] = Array.isArray(input?.items) ? input.items : prev?.items ?? ['Visit'];
   const items = [...new Set(rawItems.map((m) => clean(m, 24)).filter(Boolean))].slice(0, 4); if (!items.length) return { error: 'Add at least one item, for example "Lunch" or "Entry".' };
   const rawDays: unknown[] = Array.isArray(input?.openDays) ? input.openDays : prev?.openDays ?? ['mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
@@ -171,7 +200,7 @@ export function cleanProgram(input: any, id: string, now: string, prev?: Program
     windows = w.map((x: any) => ({ item: clean(x?.item, 24), from: String(x?.from ?? ''), to: String(x?.to ?? '') })).filter((x) => items.includes(x.item) && HHMM.test(x.from) && HHMM.test(x.to) && mins(x.to) > mins(x.from));
     if (!windows.length) windows = undefined;
   }
-  const p: Program = { id, title, priceRwf: price, days, items, openDays, active: input?.active === undefined ? prev?.active ?? true : input.active !== false, createdAt: prev?.createdAt ?? now };
+  const p: Program = { id, title, priceRwf: tariffs?.[0]?.priceRwf ?? price, days: tariffs?.[0]?.days ?? days, ...(tariffs ? { tariffs } : {}), items, openDays, active: input?.active === undefined ? prev?.active ?? true : input.active !== false, createdAt: prev?.createdAt ?? now };
   const description = clean(input?.description ?? prev?.description, 300); if (description) p.description = description;
   const terms = clean(input?.terms ?? prev?.terms, 300); if (terms) p.terms = terms;
   if (prev?.codeRevision) p.codeRevision = prev.codeRevision;

@@ -7,8 +7,8 @@ import type { Business, PublicBusiness } from './model.js';
 import type { LedgerEntry } from './ledger.js';
 import type { ProgramDay } from './report.js';
 import {
-  LOCK_MINUTES, MAX_MEMBERS, MAX_PIN_FAILS, MAX_PROGRAMS, REMEMBER_DAYS, SESSION_HOURS, addDays, canServe, cardCalendar, cleanJoin, cleanProgram, cleanProgramText, hashPasscode, hashSession, newJoinCode, cleanUsername, validUsername, suggestUsernames, newSalt, sameCode, validPasscode, cleanStart, dayOfWeek, endDateFor, hashToken, kigaliDate, kigaliMinutes, newCode, newToken, normalizeCode,
-  oneOfMethod, planState, remaining, restaurantMealAt, tokenFromPayload, usesLeft, withRestaurantMealHours, type DenyCode, type Use, type Member, type PlanState, type Program,
+  LOCK_MINUTES, MAX_MEMBERS, MAX_PIN_FAILS, MAX_PROGRAMS, REMEMBER_DAYS, SESSION_HOURS, addDays, canServe, cardCalendar, cleanJoin, cleanProgram, cleanProgramText, hashPasscode, hashSession, newJoinCode, cleanUsername, validUsername, suggestUsernames, newSalt, sameCode, validPasscode, dayOfWeek, endDateFor, hashToken, kigaliDate, kigaliMinutes, newCode, newToken, normalizeCode,
+  oneOfMethod, planState, remaining, restaurantMealAt, tokenFromPayload, usesLeft, withRestaurantMealHours, type DenyCode, type Use, type Member, type PlanState, type Program, type ProgramTariff,
 } from './programs.js';
 
 /**
@@ -65,6 +65,7 @@ async function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
 export interface MemberView {
   id: string; programId: string; programTitle: string; name: string; phone: string; idNumber?: string; code: string; state: PlanState;
   startDate: string; endDate: string; paid: boolean; paidRwf: number; payMethod?: Member['payMethod']; claimed?: Member['claimed']; note?: string;
+  purchaseDays: number; amountDue: number;
   servingDaysLeft: number; usesLeft: number; totalUses?: number; usedTotal?: number; usedToday: string[]; createdAt: string;
 }
 export interface PublicProgram { checkIn: 'staff' | 'self'; needsCode: boolean; id: string; title: string; description?: string; priceRwf: number; days: number; items: string[]; openDays: Program['openDays']; windows?: Program['windows']; terms?: string; full: boolean }
@@ -73,6 +74,13 @@ const SELF_UNDO_MS = 60_000;
 /** Non-restaurant codes and breakfast codes rotate every minute. */
 const CODE_WINDOW_MS = 60_000;
 const KIGALI_OFFSET_MS = 2 * 60 * 60_000;
+const tariffsOf = (p: Program): ProgramTariff[] => p.tariffs?.length ? p.tariffs : [{ days: p.days, priceRwf: p.priceRwf }];
+function selectedTariff(p: Program, days: unknown): ProgramTariff {
+  const wanted = days === undefined ? p.days : Number(days);
+  const tariff = tariffsOf(p).find(x => x.days === wanted);
+  if (!tariff) throw new ProgramError('Choose one of the duration options offered by this program.', 400, 'BAD_TARIFF');
+  return tariff;
+}
 const RESTAURANT_CODE_WINDOWS = [
   { meal: 'Breakfast', from: 6 * 60, to: 10 * 60, rotates: true },
   { meal: 'Lunch', from: 11 * 60, to: 14 * 60, rotates: false },
@@ -197,6 +205,7 @@ export function createPrograms(h: Helpers) {
     return {
       id: m.id, programId: m.programId, programTitle: p?.title ?? '(removed plan)', name: m.name, phone: m.phone, ...(m.idNumber ? { idNumber: m.idNumber } : {}), code: m.code, state: planState(m, today),
       startDate: m.startDate, endDate: m.endDate, paid: m.paid, paidRwf: m.paidRwf, ...(m.payMethod ? { payMethod: m.payMethod } : {}), ...(m.claimed ? { claimed: m.claimed } : {}), ...(m.note ? { note: m.note } : {}),
+      purchaseDays: m.purchaseDays ?? p?.days ?? 0, amountDue: m.purchasePriceRwf ?? p?.priceRwf ?? 0,
       servingDaysLeft: Math.max(0, r.servingDays - (p && distinctItems >= p.items.length ? 1 : 0)), usesLeft: p ? usesLeft(m, p, r.uses, distinctItems) : 0, ...(p?.totalUses ? { totalUses: p.totalUses, usedTotal: m.used ?? 0 } : {}), usedToday: used.map((e) => e.item), createdAt: m.createdAt,
     };
   }
@@ -213,10 +222,10 @@ export function createPrograms(h: Helpers) {
     const latest = currentServings.at(-1);
     const current = currentMealColor(b, p, t);
     return {
-      cardId: m.id, programId: p.id, renewable: p.active && !p.endedAt && st === 'expired',
+      cardId: m.id, programId: p.id, renewable: p.active && !p.endedAt && st === 'expired', canAddCards: p.active && !p.endedAt,
       business: { id: b.id, name: b.name, slug: b.slug, theme: b.theme },
-      program: { title: p.title, stampImage: p.stampImage, shuffleCardColor: p.shuffleCardColor, cardColor: p.cardColor, arrivalColor: p.arrivalColor, ...(p.cardLayout ? { cardLayout: p.cardLayout } : {}), checkIn: p.checkIn === 'self' ? 'self' : 'staff', ...(p.totalUses ? { totalUses: p.totalUses } : {}), items: p.items, openDays: p.openDays, ...(p.windows ? { windows: p.windows } : {}), ...(p.terms ? { terms: p.terms } : {}), priceRwf: p.priceRwf, days: p.days },
-      member: { name: m.name, phone: m.phone, ...(m.idNumber ? { idNumber: m.idNumber } : {}), code: m.code, state: st, startDate: m.startDate, endDate: m.endDate, daysLeft: r.calendarDays, servingDaysLeft: Math.max(0, r.servingDays - (ateToday >= p.items.length ? 1 : 0)), usesLeft: usesLeft(m, p, r.uses, ateToday), usedTotal: m.used ?? 0, paid: m.paid, paidAt: m.confirmedAt ?? null },
+      program: { title: p.title, stampImage: p.stampImage, shuffleCardColor: p.shuffleCardColor, cardColor: p.cardColor, arrivalColor: p.arrivalColor, ...(p.cardLayout ? { cardLayout: p.cardLayout } : {}), checkIn: p.checkIn === 'self' ? 'self' : 'staff', ...(p.totalUses ? { totalUses: p.totalUses } : {}), items: p.items, openDays: p.openDays, ...(p.windows ? { windows: p.windows } : {}), ...(p.terms ? { terms: p.terms } : {}), priceRwf: p.priceRwf, days: p.days, tariffs: tariffsOf(p) },
+      member: { name: m.name, phone: m.phone, ...(m.idNumber ? { idNumber: m.idNumber } : {}), code: m.code, state: st, startDate: m.startDate, endDate: m.endDate, purchaseDays: m.purchaseDays ?? p.days, daysLeft: r.calendarDays, servingDaysLeft: Math.max(0, r.servingDays - (ateToday >= p.items.length ? 1 : 0)), usesLeft: usesLeft(m, p, r.uses, ateToday), usedTotal: m.used ?? 0, paid: m.paid, paidAt: m.confirmedAt ?? null },
       qr,
       tick: p.checkIn === 'self' ? { guestMeal, needsCode: true, requiresPasscode: b.category === 'restaurant', ...tickOptions(m, p, own, t), ...(b.category === 'restaurant' ? { undo: null } : {}) } : null,
       today: { date, serverTime: t, receipt: latest && t < tickDeadline(latest) ? { doubleTickAt: tickDeadline(latest), item: latest.item, count: latest.batchId ? currentServings.filter(u => u.batchId === latest.batchId).length : 1, at: latest.at, reference: latest.id.slice(0, 8).toUpperCase() } : undefined, weekly: b.category === 'restaurant' && !!p.mealColors,
@@ -224,17 +233,21 @@ export function createPrograms(h: Helpers) {
       calendar: cardCalendar(m, p, own.map((x) => ({ date: x.cellDate ?? x.date, item: x.item })).slice(-1500)),
       history: own.map(({ id, date, cellDate, doubleTickAt, item, at, stampImage, guestRequest }) => ({ id, date, cellDate, doubleTickAt, item, at, stampImage, guest: !!guestRequest })),
       payment: owner || m.paid ? null : {
-        amount: p.priceRwf, momoCode: b.showPay ? b.momoCode ?? null : null, momoName: b.showPay ? b.momoName ?? null : null, online: await h.payReady(b), promptSent: prompt, claimed: m.claimed ?? null,
+        amount: m.purchasePriceRwf ?? p.priceRwf, momoCode: b.showPay ? b.momoCode ?? null : null, momoName: b.showPay ? b.momoName ?? null : null, online: await h.payReady(b), promptSent: prompt, claimed: m.claimed ?? null,
         whatsapp: b.whatsapp ?? null,
       },
     };
   }
 
-  /** A confirmed payment: the plan starts counting and the money is written in the notebook (unless the online payment already did). */
+  /** A confirmed payment starts the selected duration on that day and writes the money in the notebook. */
   async function activate(b: Business, p: Program, m: Member, method: NonNullable<Member['payMethod']>, entryId?: string) {
-    m.paid = true; m.paidRwf = p.priceRwf; m.status = 'active'; m.payMethod = method; m.confirmedAt = h.iso(); delete m.claimed; delete m.payRef;
+    const priceRwf = m.purchasePriceRwf ?? p.priceRwf;
+    const days = m.purchaseDays ?? p.days;
+    m.startDate = kigaliDate(h.now());
+    m.endDate = endDateFor(m.startDate, days, m.extraDays);
+    m.paid = true; m.paidRwf = priceRwf; m.status = 'active'; m.payMethod = method; m.confirmedAt = h.iso(); delete m.claimed; delete m.payRef;
     if (!entryId) {
-      const e: LedgerEntry = { id: randomUUID(), type: 'sale', amount: p.priceRwf, at: h.iso(), status: 'completed', src: 'studio', item: `Program: ${p.title}`.slice(0, 80), customer: m.name, method: method === 'cash' ? 'cash' : 'momo', note: `Plan member ${m.code}` };
+      const e: LedgerEntry = { id: randomUUID(), type: 'sale', amount: priceRwf, at: h.iso(), status: 'completed', src: 'studio', item: `Program: ${p.title}`.slice(0, 80), customer: m.name, method: method === 'cash' ? 'cash' : 'momo', note: `Plan member ${m.code}` };
       const doc = (await kv.get<{ items: LedgerEntry[] }>(`biz-ledger:${b.id}`)) ?? { items: [] }; doc.items.unshift(e); await kv.put(`biz-ledger:${b.id}`, { items: doc.items.slice(0, 5000) });
     }
   }
@@ -254,7 +267,7 @@ export function createPrograms(h: Helpers) {
       const b = await h.mine(ownerId, id); const today = kigaliDate(h.now()); const members = await membersOf(b.id);
       return (await programsOf(b.id)).map((p) => {
         const mine = members.filter((m) => m.programId === p.id);
-        return { ...servingHours(b, p), counts: { active: mine.filter((m) => planState(m, today) === 'active').length, pending: mine.filter((m) => planState(m, today) === 'pending').length, total: mine.filter((m) => m.status !== 'cancelled').length } };
+        return { ...servingHours(b, p), tariffs: tariffsOf(p), counts: { active: mine.filter((m) => planState(m, today) === 'active').length, pending: mine.filter((m) => planState(m, today) === 'pending').length, total: mine.filter((m) => m.status !== 'cancelled').length } };
       });
     },
     /** The owner's own words for this feature, and the questions and permissions around it. */
@@ -480,7 +493,7 @@ export function createPrograms(h: Helpers) {
     async publicPrograms(b: Business): Promise<PublicProgram[]> {
       const members = await membersOf(b.id);
       return (await programsOf(b.id)).filter((p) => p.active).map((p) => servingHours(b, p)).map((p) => ({
-        checkIn: p.checkIn === 'self' ? 'self' : 'staff', needsCode: !!p.joinCode, id: p.id, title: p.title, ...(p.description ? { description: p.description } : {}), priceRwf: p.priceRwf, days: p.days, ...(p.totalUses ? { totalUses: p.totalUses } : {}), items: p.items, openDays: p.openDays, ...(p.windows ? { windows: p.windows } : {}), ...(p.terms ? { terms: p.terms } : {}),
+        checkIn: p.checkIn === 'self' ? 'self' : 'staff', needsCode: !!p.joinCode, id: p.id, title: p.title, ...(p.description ? { description: p.description } : {}), priceRwf: p.priceRwf, days: p.days, tariffs: tariffsOf(p), ...(p.totalUses ? { totalUses: p.totalUses } : {}), items: p.items, openDays: p.openDays, ...(p.windows ? { windows: p.windows } : {}), ...(p.terms ? { terms: p.terms } : {}),
         full: !!p.maxMembers && members.filter((m) => m.programId === p.id && m.status !== 'cancelled' && planState(m, kigaliDate(h.now())) !== 'expired').length >= p.maxMembers,
       }));
     },
@@ -491,7 +504,7 @@ export function createPrograms(h: Helpers) {
       const people = await peopleOf(b.id); return { suggestions: suggestUsernames(name, new Set(people.map((x) => x.username).filter((x): x is string => !!x))) };
     },
     /** A customer joins from the shared link: name, phone, the owner's 4-digit join code (when the owner set one) and a passcode of their own. They are signed in at once. */
-    async joinProgram(slug: string, programId: string, input: { name?: unknown; phone?: unknown; username?: unknown; idNumber?: unknown; startDate?: unknown; joinCode?: unknown; passcode?: unknown; remember?: unknown; website?: unknown }, visitor: string): Promise<{ session: string; expiresAt: string; cardId: string; code: string; username: string }> {
+    async joinProgram(slug: string, programId: string, input: { name?: unknown; phone?: unknown; username?: unknown; idNumber?: unknown; startDate?: unknown; joinCode?: unknown; passcode?: unknown; remember?: unknown; website?: unknown; tariffDays?: unknown }, visitor: string): Promise<{ session: string; expiresAt: string; cardId: string; code: string; username: string }> {
       if (clean(input.website, 40)) throw new ProgramError('Not accepted.');
       const b = await h.publicLive(slug); if (!b) throw new ProgramError('This page is not available.', 404, 'NOT_FOUND');
       if (h.tooMany(`join|${visitor}`, 10, h.now())) throw new ProgramError('Too many tries. Please wait a little and try again.', 429, 'RATE');
@@ -499,6 +512,7 @@ export function createPrograms(h: Helpers) {
       if (!validPasscode(input.passcode)) throw new ProgramError('Choose a passcode of 4 to 6 digits. You will use it every time you open your card.');
       return withLock(`mem|${b.id}`, async () => {
         const p = (await programsOf(b.id)).find((x) => x.id === programId && x.active); if (!p) throw new ProgramError('This plan is not open.', 404, 'NOT_FOUND');
+        const tariff = selectedTariff(p, input.tariffDays);
         // The owner's join code: nobody joins without it, and guessing is slowed down.
         if (p.joinCode) {
           if (h.tooMany(`jc|${p.id}|${visitor}`, 8, h.now())) throw new ProgramError('Too many wrong codes. Please wait a while, or ask the business for the code again.', 429, 'RATE');
@@ -521,13 +535,43 @@ export function createPrograms(h: Helpers) {
           const salt = newSalt(); people.push({ phone: who.phone, username, salt, hash: await hashPasscode(String(input.passcode), salt), fails: 0, createdAt: h.iso() }); await putPeople(b.id, people);
         }
         const secret = newToken(); let code = newCode(); while (list.some((m) => m.code === code)) code = newCode();
-        const start = cleanStart(input.startDate, today);
-        const m: Member = { id: randomUUID(), programId: p.id, name: who.name, phone: who.phone, ...(who.idNumber ? { idNumber: who.idNumber } : {}), code, passHash: hashToken(secret), passSealed: seal(secret, h.secretKey()), status: 'pending', startDate: start, endDate: endDateFor(start, p.days), paidRwf: 0, paid: false, createdAt: h.iso() };
+        const start = today;
+        const m: Member = { id: randomUUID(), programId: p.id, name: who.name, phone: who.phone, ...(who.idNumber ? { idNumber: who.idNumber } : {}), code, passHash: hashToken(secret), passSealed: seal(secret, h.secretKey()), status: 'pending', startDate: start, endDate: endDateFor(start, tariff.days), purchaseDays: tariff.days, purchasePriceRwf: tariff.priceRwf, paidRwf: 0, paid: false, createdAt: h.iso() };
         await putMembers(b.id, [...list, m]); await kv.put(k.pass(m.passHash), { bizId: b.id, memberId: m.id });
-        h.alert(b, { title: `New plan member · ${b.name}`, text: `${m.name} joined "${p.title}" (${p.priceRwf.toLocaleString('en-US')} RWF). Waiting for payment.` });
+        h.alert(b, { title: `New plan member · ${b.name}`, text: `${m.name} joined "${p.title}" (${tariff.priceRwf.toLocaleString('en-US')} RWF for ${tariff.days} days). Waiting for payment.` });
         const s = await newSession(b.id, who.phone, input.remember === true);
         const mine = (await peopleOf(b.id)).find((x) => x.phone === who.phone);
         return { session: s.token, expiresAt: s.expiresAt, cardId: m.id, code, username: mine?.username ?? '' };
+      });
+    },
+    /** A signed-in customer may request another separately tracked card using one of this program's current tariffs. */
+    async addCard(slug: string, session: string, programId: string, days: unknown, visitor: string): Promise<{ cardId: string }> {
+      const b = await h.publicLive(slug); if (!b) throw new ProgramError('This page is not available.', 404, 'NOT_FOUND');
+      const me = await sessionOf(b.id, session);
+      if (h.tooMany(`add-card|${b.id}|${me.phone}|${visitor}`, 5, h.now(), 3_600_000)) throw new ProgramError('Too many card requests. Please wait a little.', 429, 'RATE');
+      return withLock(`mem|${b.id}`, async () => {
+        const p = (await programsOf(b.id)).find(x => x.id === programId && x.active && !x.endedAt);
+        if (!p) throw new ProgramError('This program is not open for new cards.', 409, 'CLOSED');
+        const tariff = selectedTariff(p, days);
+        const list = await membersOf(b.id);
+        const today = kigaliDate(h.now());
+        const live = list.filter(m => m.programId === p.id && m.status !== 'cancelled' && planState(m, today) !== 'expired');
+        if (p.maxMembers && live.length >= p.maxMembers) throw new ProgramError('This program is full.', 409, 'FULL');
+        if (list.length >= MAX_MEMBERS) throw new ProgramError('This business cannot take more members right now.', 409, 'LIMIT');
+        const existing = list.find(m => m.programId === p.id && m.phone === me.phone && m.status !== 'cancelled');
+        if (!existing) throw new ProgramError('Open a card before adding another one.', 403, 'NO_CARD');
+        const secret = newToken();
+        let code = newCode(); while (list.some(m => m.code === code)) code = newCode();
+        const member: Member = {
+          id: randomUUID(), programId: p.id, name: existing.name, phone: me.phone, ...(existing.idNumber ? { idNumber: existing.idNumber } : {}),
+          code, passHash: hashToken(secret), passSealed: seal(secret, h.secretKey()), status: 'pending',
+          startDate: today, endDate: endDateFor(today, tariff.days), purchaseDays: tariff.days, purchasePriceRwf: tariff.priceRwf,
+          paidRwf: 0, paid: false, createdAt: h.iso(),
+        };
+        await putMembers(b.id, [...list, member]);
+        await kv.put(k.pass(member.passHash), { bizId: b.id, memberId: member.id });
+        h.alert(b, { title: `New plan member · ${b.name}`, text: `${member.name} requested another "${p.title}" card (${tariff.priceRwf.toLocaleString('en-US')} RWF for ${tariff.days} days). Waiting for payment.` });
+        return { cardId: member.id };
       });
     },
     /** Signing in again: phone number and the passcode the customer chose. Wrong tries are counted and lock the phone number for a while. */
@@ -589,7 +633,7 @@ export function createPrograms(h: Helpers) {
         let prompt = false;
         if (!m.paid && m.payRef) {
           const e = await h.settle(b, m.payRef);
-          if (e?.pay?.state === 'success') { await activate(b, p, m, 'momo_prompt', e.id); await putMembers(b.id, list); h.alert(b, { title: `Plan paid · ${b.name}`, text: `${m.name} paid ${p.priceRwf.toLocaleString('en-US')} RWF for "${p.title}".` }); }
+          if (e?.pay?.state === 'success') { await activate(b, p, m, 'momo_prompt', e.id); await putMembers(b.id, list); h.alert(b, { title: `Plan paid · ${b.name}`, text: `${m.name} paid ${(m.purchasePriceRwf ?? p.priceRwf).toLocaleString('en-US')} RWF for "${p.title}".` }); }
           else if (e?.pay?.state === 'failed') { delete m.payRef; await putMembers(b.id, list); } else prompt = true;
         }
         return { ...await describeCard(b, m, p, prompt, false), version: versions.get(`card:${b.id}:${m.id}`) ?? 'initial' };
@@ -686,7 +730,7 @@ export function createPrograms(h: Helpers) {
         const list = await membersOf(b.id); const m = list.find((x) => x.id === cardId && x.phone === me.phone); const p = m && (await programsOf(b.id)).find((x) => x.id === m.programId); if (!m || !p) throw new ProgramError('This card was not found.', 404, 'NOT_FOUND');
         if (m.paid) throw new ProgramError('This plan is already paid.', 409, 'PAID');
         if (!(await h.payReady(b))) throw new ProgramError('This business does not take online payments. Pay with MoMo or cash and tap "I have paid".', 409, 'NO_PAY');
-        const e = await h.startPayment(b, { phone: String(input.phone ?? m.phone), amount: p.priceRwf, item: `Program: ${p.title}`, customer: m.name, src: 'page' });
+        const e = await h.startPayment(b, { phone: String(input.phone ?? m.phone), amount: m.purchasePriceRwf ?? p.priceRwf, item: `Program: ${p.title}`, customer: m.name, src: 'page' });
         m.payRef = e.id; await putMembers(b.id, list); return { ok: true as const };
       });
     },
@@ -698,7 +742,7 @@ export function createPrograms(h: Helpers) {
         const list = await membersOf(b.id); const m = list.find((x) => x.id === cardId && x.phone === me.phone); const p = m && (await programsOf(b.id)).find((x) => x.id === m.programId); if (!m || !p) throw new ProgramError('This card was not found.', 404, 'NOT_FOUND');
         if (m.paid) throw new ProgramError('This plan is already paid.', 409, 'PAID');
         const r = clean(input.ref, 40); m.claimed = { at: h.iso(), ...(r ? { ref: r } : {}) }; await putMembers(b.id, list);
-        h.alert(b, { title: `Says paid · ${b.name}`, text: `${m.name} says they paid ${p.priceRwf.toLocaleString('en-US')} RWF for "${p.title}"${r ? ` (ref ${r})` : ''}. Check your MoMo and confirm.` });
+        h.alert(b, { title: `Says paid · ${b.name}`, text: `${m.name} says they paid ${(m.purchasePriceRwf ?? p.priceRwf).toLocaleString('en-US')} RWF for "${p.title}"${r ? ` (ref ${r})` : ''}. Check your MoMo and confirm.` });
         return { ok: true as const };
       });
     },

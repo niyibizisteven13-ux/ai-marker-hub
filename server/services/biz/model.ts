@@ -255,7 +255,7 @@ export interface PublicBusiness {
   /** The owner bought the verified badge (a one-time payment): shown as a check mark next to the name. */
   verified?: true;
   /** Programs customers can join (a monthly pass, ten visits, a month of lunches…): see programs.ts. */
-  programs?: Array<{ checkIn: 'staff' | 'self'; id: string; title: string; description?: string; priceRwf: number; days: number; totalUses?: number; items: string[]; openDays: Day[]; windows?: Array<{ item: string; from: string; to: string }>; terms?: string; full: boolean; needsCode: boolean }>;
+  programs?: Array<{ checkIn: 'staff' | 'self'; id: string; title: string; description?: string; priceRwf: number; days: number; tariffs: Array<{ days: number; priceRwf: number }>; totalUses?: number; items: string[]; openDays: Day[]; windows?: Array<{ item: string; from: string; to: string }>; terms?: string; full: boolean; needsCode: boolean }>;
   products: Array<{ id: string; name: string; price: number | null; url?: string; unit?: string; description?: string; media?: PublicMedia; available: boolean }>;
   gallery: PublicMedia[];
   /** Only for a profile (Bwenge4profile). */

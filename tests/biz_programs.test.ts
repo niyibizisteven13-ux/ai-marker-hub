@@ -156,6 +156,38 @@ test('joining: one plan per phone, a full plan closes, a closed plan is gone, sp
   await assert.rejects(joinP(s2, b2.slug, p2.id, { name: 'N11', phone: '0788299999' }, 'same'), (e: any) => e.status === 429);
 });
 
+test('owner-priced durations are validated, snapshotted per card, and begin only when payment is confirmed', async () => {
+  const { svc, biz, prog, at } = await setup({ tariffs: [{ days: 5, priceRwf: 6000 }, { days: 10, priceRwf: 11000 }] });
+  assert.deepEqual(prog.tariffs, [{ days: 5, priceRwf: 6000 }, { days: 10, priceRwf: 11000 }]);
+  assert.ok('error' in (cleanProgram({ ...LUNCH, tariffs: [{ days: 5, priceRwf: 0 }] }, 'x', 'n') as any));
+  assert.ok('error' in (cleanProgram({ ...LUNCH, tariffs: [{ days: 5, priceRwf: 100 }, { days: 5, priceRwf: 200 }] }, 'x', 'n') as any));
+  const optionsOnly = cleanProgram({ title: 'Options', tariffs: [{ days: 5, priceRwf: 6000 }], items: ['Lunch'], openDays: ['mon'] }, 'x', 'n') as Program;
+  assert.deepEqual(optionsOnly.tariffs, [{ days: 5, priceRwf: 6000 }], 'the tariff list supplies the base values when provided alone');
+
+  const joined = await joinP(svc, biz.slug, prog.id, { name: 'Dee', phone: '0788444555', tariffDays: 5, remember: true }, 'v');
+  let card: any = await svc.card(biz.slug, joined.token, joined.cardId);
+  assert.equal(card.payment.amount, 6000);
+  assert.equal(card.member.purchaseDays, 5);
+  assert.equal((await svc.members('o', biz.id))[0].amountDue, 6000);
+  at(T0 + 86_400_000);
+  let paid = await svc.confirmPayment('o', biz.id, joined.cardId, { method: 'cash' });
+  assert.equal(paid.startDate, '2026-11-18');
+  assert.equal(paid.endDate, '2026-11-22');
+  assert.equal(paid.paidRwf, 6000);
+
+  const extra = await svc.addCard(biz.slug, joined.token, prog.id, 10, 'v-add');
+  card = await svc.card(biz.slug, joined.token, extra.cardId);
+  assert.equal(card.payment.amount, 11000);
+  paid = await svc.confirmPayment('o', biz.id, extra.cardId, { method: 'momo' });
+  assert.equal(paid.startDate, '2026-11-18');
+  assert.equal(paid.endDate, '2026-11-27');
+  assert.equal(paid.paidRwf, 11000);
+  const otherProgram = await svc.saveProgram('o', biz.id, { ...LUNCH, title: 'Dinner plan', tariffs: [{ days: 10, priceRwf: 9000 }] });
+  await assert.rejects(svc.addCard(biz.slug, joined.token, otherProgram.id, 10, 'v-other-program'), (e: any) => e.code === 'NO_CARD');
+  await assert.rejects(svc.addCard(biz.slug, 'invalid-session-token-000000000000', prog.id, 10, 'v'), (e: any) => e.code === 'SESSION');
+  await assert.rejects(svc.addCard(biz.slug, joined.token, prog.id, 7, 'v'), (e: any) => e.code === 'BAD_TARIFF');
+});
+
 test('privacy: a pass belongs to its holder, another business cannot read it, strangers cannot use the owner side, and an unpublished page has no plans', async () => {
   const { svc, biz, prog, kv } = await setup(); const j = await joinP(svc, biz.slug, prog.id, { name: 'Dee', phone: '0788444555' }, 'v');
   const other = await svc.create('o2', { name: 'Other Cafe' }); await svc.update('o2', other.id, { about: 'x' }); await svc.setPublished('o2', other.id, true);

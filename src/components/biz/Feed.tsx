@@ -4,6 +4,7 @@ import { Bookmark, Download, FileText, ChevronLeft, ChevronRight, Heart, Loader2
 import { publicApi } from '../../biz/api';
 import { rwf, type PublicBusiness, type PublicPost } from '../../biz/types';
 import { useTx } from '../../biz/i18n';
+import { VerifiedBadge } from '../VerifiedBadge';
 
 /**
  * The public feed, laid out like Instagram: a header with the business, the photos or videos you swipe through (double-tap to love), then love,
@@ -93,7 +94,7 @@ function PostCard({ b, p, mediaSrc, preview, onOrder, onOpen, onShare }: { b: Pu
     <li id={`post-${p.id}`} className="scroll-mt-20 overflow-hidden bg-white sm:rounded-2xl sm:border sm:border-[#E7EAEE] sm:shadow-sm">
       <div className="flex items-center gap-3 px-3 py-2.5 sm:px-3.5 sm:py-3">
         <span className="rounded-full bg-gradient-to-tr from-[var(--acc)] to-[#DB4F8E] p-[2.5px]"><span className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-[var(--acc)] text-xs font-bold text-[var(--on)]">{b.logo ? <img src={mediaSrc(b.logo.id)} alt="" className="h-full w-full object-cover" /> : initials(b.name)}</span></span>
-        <div className="min-w-0 flex-1 leading-tight"><p className="truncate text-sm font-semibold">{b.name}</p>{product && <p className="truncate text-xs text-[#667085]">{product.name}</p>}</div>
+        <div className="min-w-0 flex-1 leading-tight"><p className="truncate text-sm font-semibold">{b.name}{b.verified && <VerifiedBadge size={15} className="ml-1" />}</p>{product && <p className="truncate text-xs text-[#667085]">{product.name}</p>}</div>
         {p.pinned && <span className="inline-flex items-center gap-1 text-xs text-[#667085]"><Pin size={13} />{tx("Pinned")}</span>}
       </div>
       <div className="relative">
@@ -111,7 +112,7 @@ function PostCard({ b, p, mediaSrc, preview, onOrder, onOpen, onShare }: { b: Pu
       </div>
       <div className="px-3 pb-3.5 sm:px-3.5">
         {likes > 0 && <p className="text-sm font-semibold">{likes.toLocaleString('en-US')} {tx(likes === 1 ? 'love' : 'loves')}</p>}
-        {p.text && <p className="mt-1 whitespace-pre-wrap text-[15px] leading-snug"><b className="mr-1.5">{b.name}</b>{long ? <>{p.text.slice(0, 140)}… <button type="button" onClick={() => setMore(true)} className="text-[#667085]">{tx("more")}</button></> : p.text}</p>}
+        {p.text && <p className="mt-1 whitespace-pre-wrap text-[15px] leading-snug"><b className="mr-1.5">{b.name}{b.verified && <VerifiedBadge size={15} className="ml-1" />}</b>{long ? <>{p.text.slice(0, 140)}… <button type="button" onClick={() => setMore(true)} className="text-[#667085]">{tx("more")}</button></> : p.text}</p>}
         {count > 0 && !open && <button type="button" onClick={toggle} className="mt-1.5 text-sm text-[#667085]">{tx('View all')} {count} {tx(count === 1 ? 'comment' : 'comments')}</button>}
         {open && (
           <div className="mt-2.5 space-y-2">

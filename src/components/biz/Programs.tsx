@@ -308,7 +308,7 @@ function MembersTab({ b, programs, summary, onChange }: { b: Business; programs:
           <li key={m.id} className={`${card} !p-4`}>
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div className="min-w-0"><p className="font-semibold">{m.name} <StateTag s={m.state} /></p>
-                <p className="text-xs text-[var(--app-muted)]">{m.programTitle} · +{m.phone} · <span className="font-mono">{m.code}</span>{m.idNumber ? ` · ${m.idNumber}` : ''}</p>
+                <p className="text-xs text-[var(--app-muted)]">{m.programTitle} · {m.purchaseDays} {tx('days')} · {rwf(m.amountDue)} · +{m.phone} · <span className="font-mono">{m.code}</span>{m.idNumber ? ` · ${m.idNumber}` : ''}</p>
                 <p className="mt-1 text-xs text-[var(--app-muted)]">{shortDate(m.startDate)} → {shortDate(m.endDate)}{m.state === 'active' ? ` · ${m.usesLeft} ${t("{uses} left")}` : ''}{m.claimed ? ` · ${tx('says paid')}${m.claimed.ref ? ` (${m.claimed.ref})` : ''}` : ''}</p></div>
               <div className="flex flex-wrap gap-1.5">
                 <button type="button" aria-expanded={openMember === m.id} className={btnGhost} onClick={() => setOpenMember(openMember === m.id ? '' : m.id)}>{tx("Card and report")}</button>
@@ -330,7 +330,7 @@ function MembersTab({ b, programs, summary, onChange }: { b: Business; programs:
 }
 
 /* ---------- Plans: make one, share its link ---------- */
-const blank = (restaurant: boolean): Partial<ProgramInfo> => ({ title: '', priceRwf: 30000, days: 30, items: ['Visit'], ...(restaurant ? restaurantCard : {}), openDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], active: true });
+const blank = (restaurant: boolean): Partial<ProgramInfo> => ({ title: '', priceRwf: 30000, days: 30, tariffs: [{ days: 30, priceRwf: 30000 }], items: ['Visit'], ...(restaurant ? restaurantCard : {}), openDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], active: true });
 function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInfo[]; onChange: () => void }) {
   const { w, t } = useWords(b);
   const [previewDate, setPreviewDate] = useState(() => new Intl.DateTimeFormat('en-CA', {
@@ -384,6 +384,16 @@ function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInf
   };
   const copy = async (text: string, id: string) => { try { await navigator.clipboard.writeText(text); setCopied(id); setTimeout(() => setCopied(''), 1600); } catch { /* the link is shown anyway */ } };
   const set = (patch: Partial<ProgramInfo>) => setEdit((e) => ({ ...(e ?? {}), ...patch }));
+  const tariffOptions = edit ? (edit.tariffs?.length ? edit.tariffs : [{ days: edit.days ?? 30, priceRwf: edit.priceRwf ?? 30000 }]) : [];
+  const setTariffs = (tariffs: NonNullable<ProgramInfo['tariffs']>) => set({
+    tariffs,
+    ...(tariffs[0] ? { days: tariffs[0].days, priceRwf: tariffs[0].priceRwf } : {}),
+  });
+  const addTariff = (days: number) => {
+    if (tariffOptions.length >= 16 || tariffOptions.some(option => option.days === days)) return;
+    setTariffs([...tariffOptions, { days, priceRwf: 0 }]);
+  };
+  const nextCustomDays = Math.min(366, Math.max(0, ...tariffOptions.map(option => Number.isFinite(option.days) ? option.days : 0)) + 1);
   return (
     <>
     {ended && (
@@ -399,12 +409,12 @@ function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInf
     <div className="space-y-4">
       {!b.published && <p className="rounded-xl bg-amber-500/15 px-3 py-2.5 text-sm text-amber-900">{tx("Publish your page first (Public page → Publish), so customers can open the link.")}</p>}
       {programs.map((p) => {
-        const link = planLink(b.slug, p.id); const share = `${t("Join our {program}")} "${p.title}" ${tx('at')} ${b.name}: ${rwf(p.priceRwf)} ${tx('for')} ${p.days} ${tx('days')}. ${link}`;
+        const link = planLink(b.slug, p.id); const options = p.tariffs?.length ? p.tariffs : [{ days: p.days, priceRwf: p.priceRwf }]; const share = `${t("Join our {program}")} "${p.title}" ${tx('at')} ${b.name}: ${options.map(option => `${rwf(option.priceRwf)} ${tx('for')} ${option.days} ${tx('days')}`).join(', ')}. ${link}`;
         return (
           <div key={p.id} className={`${card} space-y-3`}>
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div><p className="font-display text-lg font-semibold">{p.title} {p.endedAt ? <span className="ml-1 rounded-full bg-rose-500/15 px-2 py-0.5 align-middle text-[11px] font-medium text-rose-700">{tx("Ended")} {shortDate(p.endedAt.slice(0, 10))}</span> : !p.active && <span className="ml-1 rounded-full bg-[var(--app-panel-hover)] px-2 py-0.5 align-middle text-[11px] font-medium text-[var(--app-muted)]">{t("Closed to new {members}")}</span>}</p>
-                <p className="text-sm text-[var(--app-muted)]">{rwf(p.priceRwf)} · {p.days} {tx('days')}{p.totalUses ? ` · ${p.totalUses} ${w.uses}` : ''} · {p.items.join(', ')} · {p.openDays.map((d) => tx(DAY_LABEL[d])).join(' ')}</p>
+                <p className="text-sm text-[var(--app-muted)]">{options.map(option => `${option.days} ${tx('days')} · ${rwf(option.priceRwf)}`).join(' / ')}{p.totalUses ? ` · ${p.totalUses} ${w.uses}` : ''} · {p.items.join(', ')} · {p.openDays.map((d) => tx(DAY_LABEL[d])).join(' ')}</p>
                 <p className="mt-1 text-xs text-[var(--app-muted)]">{p.counts?.active ?? 0} {tx('active')} · {p.counts?.pending ?? 0} {tx('waiting for payment')}</p>
                 {p.joinCode ? <p className="mt-1 text-sm">{tx('Join code')}: <b className="font-mono tracking-[0.3em]">{p.joinCode}</b> <span className="text-xs text-[var(--app-muted)]">{t('Give this code to the {members} you accept. It is not on the public page.')}</span></p> : <p className="mt-1 text-xs text-[var(--app-muted)]">{tx('Anyone with the link can join. Set a join code to accept only the people you choose.')}</p>}</div>
               <div className="flex gap-1.5"><button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} disabled={uploadingStamp} onClick={() => openEditor(p)}><Pencil size={13} />{tx("Program settings")}</button>
@@ -427,10 +437,20 @@ function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInf
         <form className={`${card} space-y-3`} onSubmit={(e) => { e.preventDefault(); void save(); }}>
           <Title>{edit.id ? t("Edit {program}") : t("New {program}")}</Title>
           <label className="block text-sm font-medium">{t("{Program} name")}<input className={`${input} mt-1`} value={edit.title ?? ''} onChange={(e) => set({ title: e.target.value })} placeholder={tx("Monthly pass")} required maxLength={60} /></label>
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block text-sm font-medium">{tx("Price (RWF), paid once")}<input className={`${input} mt-1`} inputMode="numeric" value={edit.priceRwf ?? ''} onChange={(e) => set({ priceRwf: Number(e.target.value.replace(/\D/g, '')) })} required /></label>
-            <label className="block text-sm font-medium">{tx("Lasts (days)")}<input className={`${input} mt-1`} inputMode="numeric" value={edit.days ?? ''} onChange={(e) => set({ days: Number(e.target.value.replace(/\D/g, '')) })} required /></label>
-          </div>
+          <fieldset className="space-y-2 rounded-xl border border-[var(--app-line)] p-3">
+            <legend className="px-1 text-sm font-medium">{tx("Card duration and price options")}</legend>
+            <p className="text-xs text-[var(--app-muted)]">{tx("Set the price for each duration. Customers choose one when buying or renewing a card.")}</p>
+            {tariffOptions.map((option, index) => <div key={`${index}-${option.days}`} className="flex flex-wrap items-end gap-2">
+              <label className="min-w-24 flex-1 text-sm">{tx("Days")}<input className={`${input} mt-1`} type="number" min={1} max={366} step={1} required value={Number.isNaN(option.days) ? '' : option.days} onChange={e => setTariffs(tariffOptions.map((item, i) => i === index ? { ...item, days: Number(e.target.value) } : item))} /></label>
+              <label className="min-w-32 flex-1 text-sm">{tx("Price (RWF)")}<input className={`${input} mt-1`} type="number" min={100} max={5000000} step={1} required value={option.priceRwf || ''} onChange={e => setTariffs(tariffOptions.map((item, i) => i === index ? { ...item, priceRwf: Number(e.target.value) } : item))} /></label>
+              {tariffOptions.length > 1 && <button type="button" className={`${btnGhost} !min-h-10 !px-3 text-rose-700`} aria-label={tx("Remove option")} onClick={() => setTariffs(tariffOptions.filter((_, i) => i !== index))}><Trash2 size={15} /></button>}
+            </div>)}
+            <div className="flex flex-wrap items-center gap-2">
+              {[5, 10, 15, 30].filter(days => !tariffOptions.some(option => option.days === days)).map(days =>
+                <button key={days} type="button" disabled={tariffOptions.length >= 16} className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => addTariff(days)}><Plus size={13} />{tx("Add {days}-day option").replace('{days}', String(days))}</button>)}
+              <button type="button" disabled={tariffOptions.length >= 16 || nextCustomDays > 366} className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => addTariff(nextCustomDays)}><Plus size={13} />{tx("Custom duration")}</button>
+            </div>
+          </fieldset>
           {b.category === 'restaurant' && <button type="button" className={btnGhost} onClick={() => {
             setItemText(undefined);
             set({ ...restaurantCard, cardLayout: { ...layout, hiddenItems: [] } });
