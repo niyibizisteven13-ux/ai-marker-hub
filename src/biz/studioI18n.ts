@@ -11,6 +11,8 @@ export const initialStudioLang = (): StudioLang => { try { const s = localStorag
 export const saveStudioLang = (l: StudioLang) => { try { localStorage.setItem('bz-studio-lang', l); } catch { /* optional */ } };
 
 export const SRW: Record<string, string> = {
+  'Meal box to use': 'Akazu k’ifunguro ukoresha',
+  'Minutes before a single check becomes a double check': 'Iminota itambuka mbere y’uko ikimenyetso kimwe gihinduka bibiri',
   'Record a meal': 'Andika ifunguro',
   'Verify receipt': 'Genzura icyemezo',
   'Scan the client’s card QR, including a screenshot, or enter their card code to record one meal.': 'Sikana QR iri ku ikarita y’umukiriya cyangwa ku ifoto yayo, cyangwa wandike kode y’ikarita kugira ngo wandike ifunguro rimwe.',

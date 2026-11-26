@@ -54,6 +54,7 @@ export interface ItemWindow { item: string; from: string; to: string }
 export interface CardLayout { hiddenItems: string[]; hiddenDates: string[] }
 export interface CardLayoutChange { hideItems: string[]; showItems: string[]; hideDates: string[]; showDates: string[] }
 export interface ProgramInfo {
+  tickMinutes?: number;
   id: string; title: string; description?: string; priceRwf: number; days: number; items: string[]; openDays: DayId[]; windows?: ItemWindow[]; terms?: string; maxMembers?: number; totalUses?: number; joinCode?: string; checkIn?: 'staff' | 'self'; endedAt?: string; active: boolean;
   cardLayout?: CardLayout; mealColors?: Record<string, string> | null; stampImage?: string; shuffleCardColor?: boolean; cardColor?: string; arrivalColor?: string; linkCheckIn?: boolean;
   counts?: { active: number; pending: number; total: number };
@@ -83,7 +84,7 @@ export interface CardDay { date: string; dow: DayId; open: boolean; used: string
 export interface CardInfo {
   version?: string;
   programId?: string; renewable?: boolean;
-  history?: Array<{ id?: string; guest?: boolean; cellDate?: string; date: string; item: string; at: string; stampImage?: string }>;
+  history?: Array<{ id?: string; guest?: boolean; cellDate?: string; doubleTickAt?: number; date: string; item: string; at: string; stampImage?: string }>;
   cardId: string;
   business: { id?: string; name: string; slug: string; theme: string };
   program: { title: string; cardLayout?: CardLayout; mealColors?: Record<string, string> | null; stampImage?: string; shuffleCardColor?: boolean; cardColor?: string; arrivalColor?: string; linkCheckIn?: boolean; checkIn?: 'staff' | 'self'; totalUses?: number; items: string[]; openDays: DayId[]; windows?: ItemWindow[]; terms?: string; priceRwf: number; days: number };
@@ -91,7 +92,7 @@ export interface CardInfo {
   qr: string | null;
   /** Only when the owner set self check-in: what the customer can tap now, and the tick they can still take back. */
   tick: null | { guestMeal?: string; needsCode: boolean; requiresPasscode?: boolean; items: Array<{ item: string; allowed: boolean; reason?: string; message?: string }>; undo: { useId: string; item: string } | null };
-  today: { date: string; serverTime?: number; receipt?: { item: string; count: number; at: string; reference: string }; weekly?: boolean; checkedMeal?: CurrentMeal | null; openToday: boolean; used: Array<{ item: string; at: string }> };
+  today: { date: string; serverTime?: number; receipt?: { doubleTickAt?: number; item: string; count: number; at: string; reference: string }; weekly?: boolean; checkedMeal?: CurrentMeal | null; openToday: boolean; used: Array<{ item: string; at: string }> };
   calendar: CardDay[];
   payment: null | { amount: number; momoCode: string | null; momoName: string | null; online: boolean; promptSent: boolean; claimed: { at: string; ref?: string } | null; whatsapp: string | null };
 }

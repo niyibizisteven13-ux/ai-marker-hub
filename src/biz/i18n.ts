@@ -7,6 +7,7 @@ import type { Lang, PublicBusiness, PublicPost } from './types';
  * posts) come from the translation its owner or agent saved (`translations.rw`). The Kinyarwanda here should be read by a native speaker.
  */
 export const RW: Record<string, string> = {
+  'Meal box to use': 'Akazu k’ifunguro ukoresha',
   // sections and tabs
   'Overview': 'Ahabanza', 'Menu': 'Menu', 'Products': 'Ibicuruzwa', 'Services': 'Serivisi', 'Produce': 'Umusaruro', 'Courses': 'Amasomo', 'Collection': 'Ibyo dukora', 'Products and services': 'Ibicuruzwa na serivisi',
   'Updates': 'Amakuru mashya', 'Gallery': 'Amafoto', 'About': 'Ibitwerekeye', 'Contact': 'Twandikire', 'Page sections': 'Ibice by’urupapuro', 'Quick actions': 'Ibyihutirwa',
@@ -214,7 +215,7 @@ Object.assign(RW, {
   'Enter your passcode to confirm check-in': 'Andika kode yawe y’ibanga kugira ngo wemeze',
   'Each tick uses one available day for this meal, starting today.': 'Buri kimenyetso gikoresha umunsi umwe usigaye w’iri funguro, uhereye uyu munsi.',
   'How many meal cells do you want to tick?': 'Urashaka gushyira ikimenyetso mu dusanduku tungahe tw’amafunguro?',
-  'Recorded at least two minutes ago': 'Hashize nibura iminota ibiri byanditswe',
+  'Check-in timer elapsed': 'Igihe cyagenwe cyo kwemeza ifunguro cyarangiye',
   'Confirm check-in': 'Emeza ko uhageze',
   'Serving hours (Kigali)': 'Amasaha yo gutanga amafunguro (Kigali)',
   'Scan the check-in QR shown at this business.': 'Sikana kode ya QR yerekanwe kuri ubu bucuruzi.',
