@@ -246,7 +246,7 @@ function BizPageInner({ business: b, base, lang, setLang, openNow, mediaSrc, pre
             </div>
             <div className="relative">
             <div className="relative h-60 w-full overflow-hidden bg-[var(--acc)] sm:h-80">
-              {b.cover ? <img src={mediaSrc(b.cover.id)} alt="" className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.25),transparent_55%)] font-display text-8xl font-bold text-[var(--on)] opacity-30">{initials(b.name)}</div>}
+              {b.cover ? <img src={mediaSrc(b.cover.id)} alt="" fetchPriority="high" decoding="async" className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.25),transparent_55%)] font-display text-8xl font-bold text-[var(--on)] opacity-30">{initials(b.name)}</div>}
               <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/75 via-black/25 to-black/10" />
             </div>
             <div className="absolute inset-x-0 bottom-0 flex items-end gap-4 p-4 sm:gap-5 sm:p-7">

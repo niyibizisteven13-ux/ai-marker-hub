@@ -39,3 +39,13 @@ test('research paper preview replaces site metadata and keeps a crawlable abstra
   assert.match(html, /<div id="root"><article>/);
   assert.doesNotMatch(html, /Explore Rwanda’s data/);
 });
+
+test('a public profile exposes a name, handle, headline and bio for name searches', () => {
+  const profile = publicView(newBusiness('id', 'owner', 'Niyibizi Steven', 'niyibizisteven', 'profile', updated.toISOString()));
+  profile.about = 'Works on digital tools for education and research.';
+  const html = renderShell(base, profile, SITE_ORIGIN);
+  assert.match(html, /<title>Niyibizi Steven · Founder of Bwenge.space · Bwenge4Profile<\/title>/);
+  assert.match(html, /<meta name="description" content="Niyibizi Steven · Founder of Bwenge.space · Works on digital tools/);
+  assert.match(html, /"alternateName":"niyibizisteven"/);
+  assert.match(html, /<h1>Niyibizi Steven<\/h1><p>Founder of Bwenge.space<\/p>/);
+});

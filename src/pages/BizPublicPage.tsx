@@ -1,3 +1,4 @@
+import { profileSearch } from '../../server/services/biz/profileSearch';
 import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import BizPage from '../components/biz/BizPage';
@@ -9,7 +10,7 @@ export default function BizPublicPage({ slug }: { slug: string }) {
   const [state, setState] = useState<{ business: PublicBusiness; openNow: boolean | null } | 'loading' | 'missing' | 'error'>('loading');
   useEffect(() => {
     let alive = true;
-    const load = () => publicApi.page(slug).then((p) => { if (alive) { setState(p); const isProfile = p.business.category === 'profile'; document.title = isProfile ? p.business.name + (p.business.slug.toLowerCase() === 'niyibizisteven' ? ' · Founder of Bwenge.space' : p.business.profile?.headline ? ' · ' + p.business.profile.headline : '') + ' · Bwenge4Profile' : p.business.name + ' · Bwenge'; } }).catch((e) => { if (alive) setState(e instanceof BizApiError && e.status === 404 ? 'missing' : 'error'); });
+    const load = () => publicApi.page(slug).then((p) => { if (alive) { setState(p); const isProfile = p.business.category === 'profile'; document.title = isProfile ? profileSearch(p.business).title : p.business.name + ' · Bwenge'; } }).catch((e) => { if (alive) setState(e instanceof BizApiError && e.status === 404 ? 'missing' : 'error'); });
     void load();
     const reconnect = () => { void load(); };
     window.addEventListener('online', reconnect);
