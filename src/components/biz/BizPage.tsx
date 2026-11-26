@@ -166,17 +166,7 @@ function BizPageInner({ business: b, base, lang, setLang, openNow, mediaSrc, pre
   const theme = THEMES[b.theme] ?? THEMES.gold; const preset = presetFor(b.category);
   const [box, setBox] = useState<number | null>(null); const [report, setReport] = useState(false); const [toast, setToast] = useState(''); const [cart, setCart] = useState<Cart>({}); const [checkout, setCheckout] = useState<null | 'order' | 'pay'>(null);
   const [rawPosts, setPosts] = useState<PublicPost[]>([]); const posts = useMemo(() => localizePosts(rawPosts, base, lang), [rawPosts, base, lang]); const [postBox, setPostBox] = useState<{ items: PublicMedia[]; i: number } | null>(null); const [qr, setQr] = useState(''); const [installEvt, setInstallEvt] = useState<any>(null); const toastTimer = useRef<number | undefined>(undefined);
-  const [apkAvailable, setApkAvailable] = useState(false);
   const apkUrl = `/api/biz/public/${encodeURIComponent(b.slug)}/android.apk`;
-  useEffect(() => {
-    if (preview) return;
-    const request = new AbortController();
-    setApkAvailable(false);
-    void fetch(apkUrl, { method: 'HEAD', signal: request.signal })
-      .then(response => setApkAvailable(response.ok && response.headers.get('content-type')?.includes('application/vnd.android.package-archive') === true))
-      .catch(() => undefined);
-    return () => request.abort();
-  }, [apkUrl, preview]);
   const [initialCard, setInitialCard] = useState<string>();
   const [renewing, setRenewing] = useState(false);
   const [programId, setProgramId] = useState<string>();
@@ -341,7 +331,7 @@ function BizPageInner({ business: b, base, lang, setLang, openNow, mediaSrc, pre
               <div className={`${panel} text-center`}><h3 className="font-display text-lg font-semibold">{tx("Scan to open on your phone")}</h3>{qr ? <img src={qr} alt={`QR code for ${url}`} className="mx-auto mt-3 h-40 w-40 rounded-2xl border border-[#E7EAEE] p-1.5" /> : <div className="mx-auto mt-3 flex h-40 w-40 items-center justify-center rounded-2xl bg-[#F0F2F5] text-[#98A2B3]"><QrCode size={40} /></div>}
                 <p className="mt-2 break-all font-mono text-xs text-[#667085]">{url.replace(/^https?:\/\//, '')}</p>
                 <div className="mt-3 flex flex-wrap justify-center gap-2">{qr && <a href={qr} download={`${b.slug}-qr.png`} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-[#D5DBE3] px-3 text-sm font-semibold hover:bg-[#F6F7F9]"><Download size={15} />{tx("Save QR")}</a>}
-                  {apkAvailable && <a href={apkUrl} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-[#D5DBE3] px-3 text-sm font-semibold"><Download size={15} />{tx("Download Android APK")}</a>}
+                  {!preview && b.androidApkAvailable && <a href={apkUrl} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-[#D5DBE3] px-3 text-sm font-semibold"><Download size={15} />{tx("Download Android APK")}</a>}
                   {installEvt ? <button type="button" onClick={() => void install()} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-[var(--acc)] px-3 text-sm font-semibold text-[var(--on)]"><Smartphone size={15} />{tx("Install app")}</button> : <p className="w-full text-xs text-[#667085]">On iPhone, open Safari and choose Share → Add to Home Screen to install {b.name}.</p>}</div></div>
             </aside>
           </div>

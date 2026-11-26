@@ -79,6 +79,14 @@ async function send(req: Request, res: Response, f: Served, cache: string) {
 /** A year, because the address names the revision of the file; otherwise an hour (and a day for plain photos). */
 const mediaCache = (req: Request, kind: 'video' | 'image') => (/^\d{1,15}$/.test(String(req.query.r ?? '')) ? 'public, max-age=31536000, immutable' : kind === 'video' ? 'public, max-age=3600' : 'public, max-age=86400');
 
+async function findBusinessApk(slug: string): Promise<string | null> {
+  const directory = process.env.BWENGE_BIZ_APK_DIR;
+  if (!directory || !/^[a-z0-9][a-z0-9-]*$/.test(slug)) return null;
+  const filename = resolve(directory, slug + '.apk');
+  const file = await stat(filename).catch(() => null);
+  return file?.isFile() && file.size > 0 ? filename : null;
+}
+
 export function createBizRouter(): Router {
   const r = Router();
   const svc = () => bizService();
@@ -93,7 +101,7 @@ export function createBizRouter(): Router {
   r.get('/public/:slug', run(async (req, res) => {
     const b = await svc().publicBySlug(req.params.slug, { count: true });
     if (!b) return res.status(404).json({ error: 'This page is not available.' });
-    res.setHeader('Cache-Control', 'no-cache'); res.json({ business: b, openNow: openNow(b.hours) });
+    res.setHeader('Cache-Control', 'no-cache'); res.json({ business: { ...b, androidApkAvailable: Boolean(await findBusinessApk(b.slug)) }, openNow: openNow(b.hours) });
   }));
   // Photos, videos, the light version of a video (?q=lq) and its poster picture (/poster). A viewer's player asks for many pieces of one video, so these have their own generous limit.
   r.get('/public/:slug/media/:mid', bizMediaLimiter, run(async (req, res) => {
@@ -131,12 +139,10 @@ export function createBizRouter(): Router {
     res.send(png);
   }));
   r.get('/public/:slug/android.apk', run(async (req, res) => {
-    const directory = process.env.BWENGE_BIZ_APK_DIR;
-    const b = directory ? await svc().publicBySlug(req.params.slug) : null;
-    if (!directory || !b || !/^[a-z0-9][a-z0-9-]*$/.test(b.slug)) return res.status(404).end();
-    const filename = resolve(directory, b.slug + '.apk');
-    const file = await stat(filename).catch(() => null);
-    if (!file?.isFile()) return res.status(404).end();
+    const b = process.env.BWENGE_BIZ_APK_DIR ? await svc().publicBySlug(req.params.slug) : null;
+    if (!b) return res.status(404).end();
+    const filename = await findBusinessApk(b.slug);
+    if (!filename) return res.status(404).end();
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.type('application/vnd.android.package-archive');
     res.download(filename, b.slug + '.apk');
