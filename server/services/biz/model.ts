@@ -242,6 +242,7 @@ export const publicMedia = (m: Media): PublicMedia => ({ id: m.id, kind: m.kind,
 export interface PublicBusiness {
   slug: string; name: string; category: Category; tagline: string; about: string; theme: Theme;
   logo?: PublicMedia; cover?: PublicMedia;
+  androidApkAvailable?: boolean;
   contact: { whatsapp?: string; phone?: string; email?: string; address?: string; mapUrl?: string; website?: string; instagram?: string; facebook?: string };
   hours: Hours[];
   pay?: { momoCode: string; momoName?: string };
